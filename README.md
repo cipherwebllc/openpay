@@ -236,6 +236,11 @@ npm install -D \
    - `mainnet`: Polygon (MATIC) / Base (ETH)
    - `testnet`: Polygon Amoy (MATIC) / Base Sepolia (ETH)
 4. **Sponsorship Policy** を作成し、その `policyId` を `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` に設定 (チェーン横断で 1 つの policyId を使い回せます)
+5. **濫用対策ルール** を Policy に必ず設定 (これがないと、誰かが任意の `/pay` URL を生成して運営の sponsorship 残高を消費できる):
+   - `to address allowlist`: トークンコントラクトアドレスのみ許可 (JPYC: `0xE7C3...3c29`、USDC Base: `0x8335...2913`、USDC Base Sepolia: `0x036C...CF7e`、JPYC Polygon Amoy: 自分のテストデプロイ)
+   - `function selector allowlist`: `transfer(address,uint256)` (`0xa9059cbb`) のみ
+   - `data parameter constraint`: 受取人パラメータの 1 つが必ず `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` であること (= 運営手数料 transfer を含む UserOp のみ sponsor)
+   - クライアント側でも `useBatchPayment` が `feeAmount > 0` を assertion して defense in depth
 
 ### 4. 開発サーバー
 

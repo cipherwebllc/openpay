@@ -131,7 +131,7 @@ describe('useBatchPayment', () => {
     expect((d.args as readonly [string, bigint])[1]).toBe(100_000n);
   });
 
-  it('feeAmount = 0 の場合は店主送金のみの 1 call (外税で fee=0 の極小ケース)', async () => {
+  it('feeAmount = 0 → 必ずエラー (sponsorship 濫用防止のため fee 必須)', async () => {
     mountReady();
     const { result } = renderHook(() => useBatchPayment(), {
       wrapper: makeWrapper(),
@@ -145,8 +145,9 @@ describe('useBatchPayment', () => {
       feeAmount: 0n,
     });
 
-    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
-    expect(sendUserOperation.mock.calls[0][0].calls).toHaveLength(1);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/手数料|MIN_FEE/);
+    expect(sendUserOperation).not.toHaveBeenCalled();
   });
 
   it('両方 0 → エラーで sendUserOperation は呼ばれない', async () => {
@@ -164,7 +165,7 @@ describe('useBatchPayment', () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/0|送金額/);
+    expect(result.current.error?.message).toMatch(/手数料|MIN_FEE/);
     expect(sendUserOperation).not.toHaveBeenCalled();
   });
 

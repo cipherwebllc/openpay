@@ -2,6 +2,11 @@
 
 // 店主送金 + 運営手数料の 2 件の ERC20 transfer を 1 つの UserOp に
 // バッチ化することで、片方だけ成功する中間状態を排除する。
+//
+// Sponsorship 濫用対策: feeReceiver への transfer を「必ず含む」UserOp
+// だけが Pimlico Sponsorship Policy の validation を通る前提で組む。
+// クライアント側でも feeAmount > 0 を assertion し、defense in depth とする
+// (誰かがフォーク版で fee を 0 にして無料 sponsor を狙うのを防ぐ)。
 import { useMutation } from '@tanstack/react-query';
 import {
   encodeFunctionData,
@@ -36,6 +41,14 @@ export function useBatchPayment() {
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
       }
+      // Sponsorship 濫用対策: gasless モードでは fee transfer が必須。
+      // (calcBreakdown が常に MIN_FEE 以上を返すので通常は到達しないが、
+      //  呼出元の bug や直接利用に対する一線目の防御。)
+      if (params.feeAmount <= 0n) {
+        throw new Error(
+          'gasless モードでは運営手数料 (>= MIN_FEE) を含める必要があります',
+        );
+      }
       const { smartAccountClient, pimlicoClient } = clients;
 
       const calls: Array<{ to: Address; data: Hex }> = [];
@@ -51,20 +64,14 @@ export function useBatchPayment() {
         });
       }
 
-      if (params.feeAmount > 0n) {
-        calls.push({
-          to: params.tokenAddress,
-          data: encodeFunctionData({
-            abi: erc20Abi,
-            functionName: 'transfer',
-            args: [params.feeReceiver, params.feeAmount],
-          }),
-        });
-      }
-
-      if (calls.length === 0) {
-        throw new Error('送金額が 0 のため UserOperation を組成できません');
-      }
+      calls.push({
+        to: params.tokenAddress,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'transfer',
+          args: [params.feeReceiver, params.feeAmount],
+        }),
+      });
 
       const userOpHash = await smartAccountClient.sendUserOperation({ calls });
 
