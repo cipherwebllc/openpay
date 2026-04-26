@@ -14,7 +14,7 @@ export function LocaleSwitcher() {
     if (next === current) return;
     // /ja/foo/bar → /en/foo/bar に置き換え。先頭の /<locale> セグメントを差替。
     const segments = pathname.split('/');
-    if (segments.length >= 2 && (LOCALES as readonly string[]).includes(segments[1] ?? '')) {
+    if (segments.length >= 2 && (LOCALES as readonly string[]).includes(segments[1])) {
       segments[1] = next;
       router.replace(segments.join('/'));
     } else {

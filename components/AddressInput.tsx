@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useTranslations } from 'next-intl';
+import type { Address } from 'viem';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
 
@@ -21,7 +22,7 @@ export function AddressInput({
 }: {
   value: string;
   onChange: (v: string) => void;
-  onResolved?: (address: `0x${string}` | null) => void;
+  onResolved?: (address: Address | null) => void;
   placeholder?: string;
 }) {
   const t = useTranslations('AddressInput');

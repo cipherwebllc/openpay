@@ -100,7 +100,7 @@ export function TipForm({ params }: { params: TipParams }) {
       amount: amountStr,
       token: params.token,
     });
-    // B2: webhook が指定されていれば成功 payload を 1 度だけ POST。
+    // webhook が指定されていれば成功 payload を 1 度だけ POST。
     // 失敗しても tip 自体は成立しているため、log だけ残し、UI には出さない。
     if (params.webhook) {
       const payload = {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isLikelyName } from '@/lib/resolveAddress';
+import { isLikelyName } from '@/lib/nameDetection';
 
 // resolveAddress の network ロジックは viem の getEnsAddress に委譲して
 // いるため、ここでは isLikelyName と "0x 直接入力" の即時 return path

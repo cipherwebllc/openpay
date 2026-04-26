@@ -33,11 +33,6 @@ export type ResolvedAddress = {
   name: string | null;
 };
 
-// isLikelyName は AddressInput の同期判定で使うため lib/nameDetection.ts に
-// 切り出している (このファイルを引き込むと viem ENS が初回バンドルに乗る)。
-// ここでは re-export でテストの便宜のみ提供。
-export { isLikelyName } from './nameDetection';
-
 export async function resolveAddress(
   input: string,
 ): Promise<ResolvedAddress | null> {

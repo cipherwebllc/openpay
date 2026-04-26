@@ -80,7 +80,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     [isDirect, amountWei, params.fee, params.token],
   );
 
-  // C1: split が指定されていれば、breakdown.merchantReceives を分配する。
+  // split が指定されていれば、breakdown.merchantReceives を分配する。
   // direct mode では split は無視 (シンプルな単一 transfer に限定)。
   const splitBreakdown = useMemo(() => {
     if (isDirect || !params.split || params.split.length === 0) return null;

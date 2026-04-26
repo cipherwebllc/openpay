@@ -22,7 +22,7 @@ export type BatchPaymentParams = {
   merchantAmount: bigint;
   feeReceiver: Address;
   feeAmount: bigint;
-  // C1: 主受取人 (merchant) に加えて、追加の受取人 N 人へ同一トークンを transfer。
+  // 主受取人 (merchant) に加えて、追加の受取人 N 人へ同一トークンを transfer。
   // calcSplitBreakdown が計算した primary 以外の entries を渡す想定。
   // 各 amount > 0 を assertion (split で 0 になる極小ケースは UI 側で弾く前提)。
   extraRecipients?: ReadonlyArray<{ to: Address; amount: bigint }>;
