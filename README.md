@@ -18,6 +18,33 @@ ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
 | 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
 
+## 現金 / PayPay との比較
+
+| 項目 | 💴 現金 | 📱 PayPay¹ | ⚡ OpenPay |
+| --- | --- | --- | --- |
+| **導入審査** | 不要 | 必要 (店舗登録 + KYC) | **不要** (ウォレットアドレス入力のみ) |
+| **初期コスト** | レジ・釣銭準備 | 端末 / QR スタンド申込 | **0 円** (印刷 QR で可) |
+| **店舗受取手数料** | 0% | 1.60〜1.98%¹ | **1.0%** / **0%** (直接送金モード) |
+| **入金タイミング** | 即時 (店舗内) | 翌日〜月次¹ | **即時** (オンチェーン確定 数秒〜数十秒) |
+| **釣銭** | 必要 (両替コスト・誤算リスク) | 不要 | **不要** |
+| **記帳** | 手動 / レジ閉め | 管理画面 | **オンチェーンで自動 + 改竄不可** |
+| **海外顧客** | 両替が必要 | 国内中心 | **グローバル** (USDC は世界共通通貨) |
+| **紛失 / 盗難** | 物理リスクあり | 限定的 | **秘密鍵管理のみ** |
+| **顧客のガス代** | ─ | ─ | **0 円** (運営肩代わり) |
+| **ベンダーロック** | ─ | あり (PayPay 内に閉じる) | **なし** (OSS / セルフホスト可) |
+| **コード透明性** | ─ | クローズド | **MIT / 全ソース公開** |
+
+¹ PayPay の手数料・入金サイクルは加盟店プラン (PayPay マイストア plus 等) と申込条件で変動するため代表値を記載。
+
+### 現金より便利な理由 (店舗オーナー視点)
+
+- **釣銭計算が消える**: 1 円単位で正確な金額が瞬時に確定し、両替・釣銭準備の負担ゼロ
+- **レジ閉め作業が要らない**: 売上はオンチェーンに時系列で残るため、その日のうちに集計する手作業が不要
+- **24 時間 365 日**: 無人レジ・自販機・夜間営業でも、店主が現場にいる必要なし
+- **物理リスクが消える**: 偽札・盗難・紛失・水濡れ・摩耗、すべて関係なし
+- **複数店舗の合算が即時**: 同一ウォレットアドレスを共有すれば全店売上が自動で集計される
+- **海外旅行客にもそのまま**: USDC を選べば為替・両替手数料なしで世界中の顧客から受け取り可能
+
 ## 対応ネットワークと選定理由
 
 | トークン | チェーン | ガス通貨 | 採否 | 理由 |
@@ -329,6 +356,33 @@ git push origin main      # Vercel が自動で再デプロイ
 2. `.env.local` (or Vercel env) に `NEXT_PUBLIC_SENTRY_DSN=...` を設定
 3. (任意) `SENTRY_AUTH_TOKEN` を設定するとビルド時に source maps がアップロードされ、stack trace が symbolicate される
 
+## クレジット / 謝辞
+
+本プロジェクトは下記のオープンソース・サービスの上に成り立っています。
+
+### 中核ランタイム / SDK
+- [**Pimlico**](https://www.pimlico.io/) — ERC-4337 Bundler / Sponsorship Paymaster (本 MVP のガスレス決済を可能にしている中核サービス)
+- [**permissionless.js**](https://docs.pimlico.io/permissionless) — ERC-4337 / ERC-7702 Smart Account SDK
+- [**viem**](https://viem.sh/) — TypeScript ファーストの Ethereum クライアント
+- [**wagmi**](https://wagmi.sh/) — React ウォレット連携フック
+- [**Next.js**](https://nextjs.org/) (App Router) / [**React**](https://react.dev/)
+- [**Tailwind CSS**](https://tailwindcss.com/)
+- [**TanStack Query**](https://tanstack.com/query) — 非同期状態管理
+- [**Sentry**](https://sentry.io/) — エラートラッキング / 監視
+- [**Reown WalletConnect**](https://reown.com/) / [**Coinbase Wallet**](https://www.coinbase.com/wallet) / [**MetaMask**](https://metamask.io/) — ウォレット接続
+
+### ステーブルコイン発行体
+- [**JPYC 株式会社**](https://jpyc.jp/) — 日本円ステーブルコイン JPYC
+- [**Circle**](https://www.circle.com/) — 米ドルステーブルコイン USDC
+
+### 仕様策定 / 標準化
+- [**EIP-4337**](https://eips.ethereum.org/EIPS/eip-4337) (Account Abstraction) / [**EIP-7702**](https://eips.ethereum.org/EIPS/eip-7702) (Set EOA Code) の策定者および eth-infinitism / Ethereum Magicians コミュニティ
+
+### 開発ツール
+- 本コードのプロトタイピングに [**Claude Code**](https://claude.com/claude-code) を活用
+
 ## ライセンス
 
-MIT
+MIT — 商用・改変・再配布いずれも自由。詳細は LICENSE ファイル参照。
+
+Made with ☕ by [cipherwebllc](https://github.com/cipherwebllc) — お問い合わせ・PR は GitHub Issues / PR でお気軽に。
