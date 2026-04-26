@@ -416,7 +416,7 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
     setBalance(20_000_000n);
     render(<PaymentForm />);
     expect(screen.getByText(/ガス代お客様負担/)).toBeInTheDocument();
-    expect(screen.getByText(/MATIC|ETH/)).toBeInTheDocument();
+    expect(screen.getByText(/POL|ETH/)).toBeInTheDocument();
   });
 
   it('明細から運営手数料行が消え、merchant=customer=amount で表示', () => {

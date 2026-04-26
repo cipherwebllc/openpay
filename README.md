@@ -234,8 +234,8 @@ npm install -D \
 1. [https://dashboard.pimlico.io](https://dashboard.pimlico.io) でアカウント作成し API Key を発行
 2. **本番運用時は必ず "Origin (ドメイン) 制限" を有効化**してください。`NEXT_PUBLIC_PIMLICO_API_KEY` はクライアントバンドルに含まれるため、Origin 制限なしでは API Key が悪用される可能性があります
 3. 以下のチェーン用に Sponsorship 残高をデポジット:
-   - `mainnet`: Polygon (MATIC) / Base (ETH)
-   - `testnet`: Polygon Amoy (MATIC) / Base Sepolia (ETH)
+   - `mainnet`: Polygon (POL) / Base (ETH)
+   - `testnet`: Polygon Amoy (POL) / Base Sepolia (ETH)
 4. **Sponsorship Policy** を作成し、その `policyId` を `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` に設定 (チェーン横断で 1 つの policyId を使い回せます)
 5. **濫用対策ルール** を Policy に必ず設定 (これがないと、誰かが任意の `/pay` URL を生成して運営の sponsorship 残高を消費できる):
    - `to address allowlist`: トークンコントラクトアドレスのみ許可 (JPYC: `0xE7C3...3c29`、USDC Base: `0x8335...2913`、USDC Base Sepolia: `0x036C...CF7e`、JPYC Polygon Amoy: 自分のテストデプロイ)
@@ -406,7 +406,7 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 | 10 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定 | プレースホルダ (`0x...dEaD`) のまま投入しない |
 | 11 | testnet で実 e2e (QR スキャン → 送金 → receipt) | Polygon Amoy / Base Sepolia で 1 件以上の成功確認 |
 | 12 | Sentry DSN 設定 | `NEXT_PUBLIC_SENTRY_DSN` 設定で自動有効化。SDK は導入済 |
-| 13 | Pimlico 残高アラート | ダッシュボードで MATIC / ETH デポジットの残量しきい値通知を設定 |
+| 13 | Pimlico 残高アラート | ダッシュボードで POL / ETH デポジットの残量しきい値通知を設定 |
 
 ## ロールバック
 

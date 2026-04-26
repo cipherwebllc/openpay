@@ -226,7 +226,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
             {t('directWarningBody', {
               nativeToken:
                 requiredChain.id === 137 || requiredChain.id === 80002
-                  ? 'MATIC'
+                  ? 'POL'
                   : 'ETH',
             })}
           </p>

@@ -2,7 +2,7 @@
 
 // 直接送金 (mode=direct) フロー: 顧客の EOA から ERC20 transfer を 1 件だけ実行する。
 // Smart Account / Pimlico / Sponsorship Paymaster は経由しないので、顧客は
-// 自前のネイティブガス (MATIC / ETH) を必要とする。
+// 自前のネイティブガス (POL / ETH) を必要とする。
 
 import { useState } from 'react';
 import { erc20Abi, type Address, type Hex } from 'viem';
