@@ -6,14 +6,9 @@ import type { Address } from 'viem';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
 
-// 受取アドレス入力。0x アドレスまたは .eth / .base.eth を受け付け、
-// 名前解決の結果を resolved に返す (親が settings.receiver の確定値として
-// 保存できる)。0x がそのまま入力されたら即時 resolved を呼ぶ。
-//
-// "resolved" の責任分担:
-// - 入力中の文字列 (input) は親が state として保持
-// - 解決結果 (resolved address) は名前から解決した時のみ親へ通知
-// - parent はどちらを保存するか自由 (現状は input を保存し、submit 時に再解決)
+// 0x / .eth / .base.eth を受け付ける。名前解決成功時のみ onResolved に
+// checksum 化された Address を通知。入力値の永続化は親の責任 (生入力を
+// 保存し submit 時に再解決する設計)。
 export function AddressInput({
   value,
   onChange,

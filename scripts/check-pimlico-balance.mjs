@@ -1,26 +1,8 @@
 #!/usr/bin/env node
-/**
- * Pimlico Sponsorship Paymaster の残高を on-chain で監視する。
- *
- * EntryPoint v0.7 の `balanceOf(address)` で各チェーンの Pimlico
- * Verifying Paymaster コントラクトに残っている deposit (gas budget) を読む。
- * しきい値 (native token 単位) を下回っているチェーンがあれば、
- * Slack / Discord 互換 webhook (text フィールド受け取り型) に通知する。
- *
- * 環境変数:
- *   POLYGON_RPC_URL          Polygon mainnet RPC (任意、未設定なら public RPC)
- *   BASE_RPC_URL             Base mainnet RPC (同上)
- *   PIMLICO_PAYMASTER_POLYGON  Polygon の VerifyingPaymaster contract
- *   PIMLICO_PAYMASTER_BASE     Base の VerifyingPaymaster contract
- *   ALERT_WEBHOOK_URL        Slack/Discord/PagerDuty 互換 webhook (POST {text})
- *   ALERT_THRESHOLD_POL      POL しきい値 (デフォルト 5 POL)
- *   ALERT_THRESHOLD_ETH      ETH しきい値 (デフォルト 0.01 ETH)
- *
- * 使い方:
- *   node scripts/check-pimlico-balance.mjs
- *
- * GitHub Actions の cron で 6 時間ごとに動かす想定 (.github/workflows/pimlico-balance.yml)。
- */
+// Pimlico Sponsorship Paymaster の残高監視。EntryPoint v0.7 の balanceOf
+// で各チェーンの paymaster deposit を読み、しきい値以下なら Slack/Discord
+// 互換 webhook (POST {text}) に通知する。GitHub Actions cron で 6h 毎実行。
+// 必須/任意 env は main() の requireEnv() / fallback で自己文書化されている。
 
 import { createPublicClient, http, formatEther, parseEther, getAddress } from 'viem';
 import { base, polygon } from 'viem/chains';

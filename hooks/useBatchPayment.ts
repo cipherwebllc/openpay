@@ -45,9 +45,8 @@ export function useBatchPayment() {
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
       }
-      // Sponsorship 濫用対策: gasless モードでは fee transfer が必須。
-      // (calcBreakdown が常に MIN_FEE 以上を返すので通常は到達しないが、
-      //  呼出元の bug や直接利用に対する一線目の防御。)
+      // Sponsorship 濫用対策: 呼出元の bug や直接利用に対する一線目の防御
+      // (calcBreakdown は常に >= MIN_FEE を返すので通常パスでは到達しない)
       if (params.feeAmount <= 0n) {
         throw new Error(
           'gasless モードでは feeAmount > 0 が必須です (sponsorship 濫用防御)',
