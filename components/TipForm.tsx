@@ -90,16 +90,59 @@ export function TipForm({ params }: { params: TipParams }) {
   }, [saError]);
 
   useEffect(() => {
-    if (gasless.data && gasless.data.success) {
-      logger.info('tip.success', {
-        userOpHash: gasless.data.userOpHash,
-        txHash: gasless.data.txHash,
+    if (!gasless.data || !gasless.data.success) return;
+    logger.info('tip.success', {
+      userOpHash: gasless.data.userOpHash,
+      txHash: gasless.data.txHash,
+      creator: params.to,
+      amount: amountStr,
+      token: params.token,
+    });
+    // B2: webhook が指定されていれば成功 payload を 1 度だけ POST。
+    // 失敗しても tip 自体は成立しているため、log だけ残し、UI には出さない。
+    if (params.webhook) {
+      const payload = {
+        type: 'openpay.tip.success',
         creator: params.to,
-        amount: amountStr,
+        from: address,
         token: params.token,
-      });
+        amount: amountStr,
+        merchantAmount: breakdown.merchantReceives.toString(),
+        feeAmount: breakdown.feeAmount.toString(),
+        customerPays: breakdown.customerPays.toString(),
+        message: params.message,
+        txHash: gasless.data.txHash,
+        userOpHash: gasless.data.userOpHash,
+        blockNumber: gasless.data.blockNumber.toString(),
+        chainId: token.chainId,
+        ts: Date.now(),
+      };
+      fetch(params.webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        // mode: 'cors' のまま。CORS が許可されていない webhook 先 (Discord
+        // 等) は失敗するが、tip 自体には影響なし。クリエイターは独自バック
+        // エンドや CORS 許可済 endpoint を指す想定。
+        mode: 'cors',
+        keepalive: true,
+      }).catch((err) =>
+        logger.warn('tip.webhook.failed', { error: err, url: params.webhook }),
+      );
     }
-  }, [gasless.data, params.to, params.token, amountStr]);
+  }, [
+    gasless.data,
+    params.to,
+    params.token,
+    params.message,
+    params.webhook,
+    amountStr,
+    address,
+    breakdown.merchantReceives,
+    breakdown.feeAmount,
+    breakdown.customerPays,
+    token.chainId,
+  ]);
 
   function selectPreset(preset: string) {
     setSelectedPreset(preset);
@@ -280,7 +323,20 @@ export function TipForm({ params }: { params: TipParams }) {
       {gasless.data && gasless.data.success && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
           <p className="font-semibold">チップを送信しました</p>
-          <dl className="mt-2 space-y-1">
+          {params.thanks && (
+            <p className="mt-2 whitespace-pre-wrap text-sm">{params.thanks}</p>
+          )}
+          {params.thanksUrl && (
+            <a
+              href={params.thanksUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-2 inline-block rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+            >
+              リンクを開く →
+            </a>
+          )}
+          <dl className="mt-3 space-y-1">
             <ResultRow label="UserOp" value={gasless.data.userOpHash} />
             <ResultRow label="Tx" value={gasless.data.txHash} />
             <ResultRow label="ブロック" value={gasless.data.blockNumber.toString()} />

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useTipSettings } from '@/hooks/useTipSettings';
 
-const KEY = 'openpay:tip-settings:v1';
+const KEY = 'openpay:tip-settings:v2';
 
 describe('useTipSettings', () => {
   beforeEach(() => {
@@ -19,6 +19,9 @@ describe('useTipSettings', () => {
       message: '',
       color: '#2563eb',
       presets: '',
+      thanks: '',
+      thanksUrl: '',
+      webhook: '',
     });
   });
 
@@ -29,7 +32,7 @@ describe('useTipSettings', () => {
     expect(result.current.settings.token).toBe('jpyc');
   });
 
-  it('保存値からハイドレート', async () => {
+  it('保存値からハイドレート (旧スキーマでも欠損は default 補完)', async () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
@@ -50,6 +53,9 @@ describe('useTipSettings', () => {
       message: 'hi',
       color: '#ff00ff',
       presets: '1,5',
+      thanks: '',
+      thanksUrl: '',
+      webhook: '',
     });
   });
 
@@ -83,7 +89,7 @@ describe('useTipSettings', () => {
     expect(result.current.settings.token).toBe('jpyc');
   });
 
-  it('setSettings → localStorage 書込', async () => {
+  it('setSettings → localStorage 書込 (thanks/thanksUrl/webhook 含む)', async () => {
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
 
@@ -95,6 +101,9 @@ describe('useTipSettings', () => {
         message: 'thx',
         color: '#112233',
         presets: '2,4,8',
+        thanks: 'ありがとう',
+        thanksUrl: 'https://example.com',
+        webhook: 'https://example.com/hook',
       });
     });
 
@@ -109,6 +118,9 @@ describe('useTipSettings', () => {
         message: 'thx',
         color: '#112233',
         presets: '2,4,8',
+        thanks: 'ありがとう',
+        thanksUrl: 'https://example.com',
+        webhook: 'https://example.com/hook',
       });
     });
   });

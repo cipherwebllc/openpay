@@ -61,6 +61,9 @@ export function TipEmbedGenerator() {
       message: settings.message || undefined,
       color: colorValid ? settings.color : undefined,
       presets: presetsParsed.length > 0 ? presetsParsed : undefined,
+      thanks: settings.thanks || undefined,
+      thanksUrl: settings.thanksUrl || undefined,
+      webhook: settings.webhook || undefined,
     };
     return buildTipUrl(origin, params);
   }, [
@@ -73,6 +76,9 @@ export function TipEmbedGenerator() {
     settings.color,
     colorValid,
     presetsParsed,
+    settings.thanks,
+    settings.thanksUrl,
+    settings.webhook,
   ]);
 
   const handleResolved = useCallback((addr: Address | null) => {
@@ -220,6 +226,52 @@ export function TipEmbedGenerator() {
               使用される値: {presetsParsed.join(', ')} {TOKENS[settings.token].displaySymbol}
             </p>
           )}
+        </Field>
+
+        <Field label="送信成功後のサンキューメッセージ (任意)">
+          <textarea
+            value={settings.thanks}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, thanks: e.target.value }))
+            }
+            placeholder="例: ありがとう！限定 Discord に招待します ↓"
+            maxLength={200}
+            rows={2}
+            className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            {settings.thanks.length} / 200
+          </p>
+        </Field>
+
+        <Field label="送信成功後のリンク URL (任意)">
+          <input
+            type="text"
+            value={settings.thanksUrl}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, thanksUrl: e.target.value }))
+            }
+            placeholder="https://discord.gg/... または https://patreon.com/..."
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            送信成功画面で「リンクを開く」ボタンとして表示。http(s) 以外は無視されます
+          </p>
+        </Field>
+
+        <Field label="送信成功時の webhook URL (任意)">
+          <input
+            type="text"
+            value={settings.webhook}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, webhook: e.target.value }))
+            }
+            placeholder="https://discord.com/api/webhooks/... など"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            設定すると、tip 受信時に {`{ txHash, amount, token, from, message }`} を JSON で POST します。Discord/Slack/独自バックエンド連携用。CORS 許可が必要
+          </p>
         </Field>
       </div>
 

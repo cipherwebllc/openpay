@@ -312,3 +312,92 @@ describe('TipForm — 送信', () => {
     expect(screen.getByText(/AA21 fail/)).toBeInTheDocument();
   });
 });
+
+describe('TipForm — thanks / webhook (B2 + B3)', () => {
+  it('成功 + thanks あり → メッセージ表示', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(
+      <TipForm
+        params={{
+          ...USDC_PARAMS,
+          thanks: 'ありがとう！Discord 招待リンクをどうぞ',
+        }}
+      />,
+    );
+    expect(
+      screen.getByText('ありがとう！Discord 招待リンクをどうぞ'),
+    ).toBeInTheDocument();
+  });
+
+  it('成功 + thanksUrl あり → リンクボタン表示', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(
+      <TipForm
+        params={{
+          ...USDC_PARAMS,
+          thanksUrl: 'https://discord.gg/abc',
+        }}
+      />,
+    );
+    const link = screen.getByRole('link', { name: /リンクを開く/ });
+    expect(link).toHaveAttribute('href', 'https://discord.gg/abc');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener');
+  });
+
+  it('成功 + webhook あり → fetch が POST される', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok', { status: 200 }));
+
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(
+      <TipForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://example.com/hook',
+        }}
+      />,
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://example.com/hook',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.type).toBe('openpay.tip.success');
+    expect(body.creator.toLowerCase()).toBe(CREATOR.toLowerCase());
+    expect(body.token).toBe('usdc');
+    expect(body.txHash).toBe(`0x${'b'.repeat(64)}`);
+    fetchSpy.mockRestore();
+  });
+
+  it('成功 + webhook なし → fetch は呼ばれない', () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok', { status: 200 }));
+
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(<TipForm params={USDC_PARAMS} />);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+});

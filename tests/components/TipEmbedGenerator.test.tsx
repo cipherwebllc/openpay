@@ -198,7 +198,7 @@ describe('TipEmbedGenerator — 永続化', () => {
     await user.type(screen.getByPlaceholderText('例: 山田太郎'), 'Alice');
 
     await waitFor(() => {
-      const raw = window.localStorage.getItem('openpay:tip-settings:v1');
+      const raw = window.localStorage.getItem('openpay:tip-settings:v2');
       expect(raw).not.toBeNull();
       const parsed = JSON.parse(raw!);
       expect(parsed.receiver).toBe(VALID);

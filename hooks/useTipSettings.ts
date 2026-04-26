@@ -11,9 +11,12 @@ export type TipSettings = {
   message: string;
   color: string;
   presets: string;
+  thanks: string;
+  thanksUrl: string;
+  webhook: string;
 };
 
-const STORAGE_KEY = 'openpay:tip-settings:v1';
+const STORAGE_KEY = 'openpay:tip-settings:v2';
 
 const DEFAULT_SETTINGS: TipSettings = {
   receiver: '',
@@ -22,6 +25,9 @@ const DEFAULT_SETTINGS: TipSettings = {
   message: '',
   color: '#2563eb',
   presets: '',
+  thanks: '',
+  thanksUrl: '',
+  webhook: '',
 };
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
@@ -48,6 +54,18 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
       typeof loaded.presets === 'string'
         ? loaded.presets
         : DEFAULT_SETTINGS.presets,
+    thanks:
+      typeof loaded.thanks === 'string'
+        ? loaded.thanks
+        : DEFAULT_SETTINGS.thanks,
+    thanksUrl:
+      typeof loaded.thanksUrl === 'string'
+        ? loaded.thanksUrl
+        : DEFAULT_SETTINGS.thanksUrl,
+    webhook:
+      typeof loaded.webhook === 'string'
+        ? loaded.webhook
+        : DEFAULT_SETTINGS.webhook,
   };
 }
 

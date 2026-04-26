@@ -462,3 +462,91 @@ describe('DEFAULT_TIP_PRESETS', () => {
     expect(DEFAULT_TIP_PRESETS.usdc).toEqual(['1', '5', '10']);
   });
 });
+
+describe('TipParams: thanks / thanksUrl / webhook', () => {
+  function search(query: string) {
+    return new URLSearchParams(query);
+  }
+
+  it('thanks をビルドして parse できる', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      thanks: 'ありがとう！Discord 招待: ↓',
+    });
+    expect(path).toContain('thanks=');
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.thanks).toBe('ありがとう！Discord 招待: ↓');
+  });
+
+  it('thanks が長すぎたら 200 文字で切詰', () => {
+    const long = 'あ'.repeat(300);
+    const path = buildTipPath({ to: VALID_TO, token: 'jpyc', thanks: long });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.thanks!.length).toBe(200);
+  });
+
+  it('thanksUrl は http/https のみ受理 (https 通過)', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      thanksUrl: 'https://discord.gg/abc',
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.thanksUrl).toBe('https://discord.gg/abc');
+  });
+
+  it('thanksUrl は javascript: スキームを拒否', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      thanksUrl: 'javascript:alert(1)',
+    });
+    expect(path).not.toContain('thanksUrl=');
+  });
+
+  it('thanksUrl は不正 URL を拒否', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      thanksUrl: 'not-a-url',
+    });
+    expect(path).not.toContain('thanksUrl=');
+  });
+
+  it('webhook も URL バリデーション同様', () => {
+    const okPath = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      webhook: 'https://example.com/hook',
+    });
+    expect(okPath).toContain('webhook=');
+
+    const badPath = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      webhook: 'ftp://nope/',
+    });
+    expect(badPath).not.toContain('webhook=');
+  });
+
+  it('parser 側でも http(s) 以外は除外', () => {
+    const r = parseTipParams(
+      VALID_TO,
+      search(
+        'token=jpyc&thanksUrl=javascript%3Aalert(1)&webhook=ftp%3A%2F%2Ffoo',
+      ),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.thanksUrl).toBeUndefined();
+      expect(r.params.webhook).toBeUndefined();
+    }
+  });
+});
