@@ -426,7 +426,7 @@ git push origin main      # Vercel が自動で再デプロイ
 | `lib/logger.ts` の構造化 JSON | Sentry SDK が `console.error` を自動インターセプト | ✅ DSN 設定で自動 |
 | React レンダリングエラー | `app/global-error.tsx` で `Sentry.captureException` | ✅ 実装済 |
 | UserOperation 失敗率 | Pimlico ダッシュボード標準機能 | アプリ側実装不要 |
-| Sponsorship 残高 | Pimlico ダッシュボードのアラート | 本番投入前にしきい値通知設定必須 |
+| Sponsorship 残高 | (a) Pimlico ダッシュボード or (b) `scripts/check-pimlico-balance.mjs` を `.github/workflows/pimlico-balance.yml` で 6h 毎に実行 (multi-chain 対応 / 任意 webhook 通知) | ✅ コード同梱、secrets を設定すれば動作 |
 | アプリ可用性 | Vercel Analytics / UptimeRobot | 未統合 — `/` と `/pay` の HTTP 200 監視を別途設定 |
 | RPC レート制限 | Alchemy / Infura ダッシュボード | 公開 RPC では本番運用しないこと |
 
@@ -434,6 +434,22 @@ git push origin main      # Vercel が自動で再デプロイ
 1. [Sentry](https://sentry.io) でプロジェクト作成 → DSN を取得
 2. `.env.local` (or Vercel env) に `NEXT_PUBLIC_SENTRY_DSN=...` を設定
 3. (任意) `SENTRY_AUTH_TOKEN` を設定するとビルド時に source maps がアップロードされ、stack trace が symbolicate される
+4. Replay (ユーザ操作録画) は `instrumentation-client.ts` で既に enable 済 (DSN 設定で自動)。通常 10% / エラー時 100% sample、テキスト / 入力は全 mask
+
+### Pimlico 残高アラート設定手順
+GitHub リポジトリ Secrets / Variables に下記をセット:
+
+| 種別 | 名前 | 値 |
+|---|---|---|
+| Secret | `PIMLICO_PAYMASTER_POLYGON` | Polygon 上の Pimlico Verifying Paymaster コントラクトアドレス |
+| Secret | `PIMLICO_PAYMASTER_BASE` | Base 上の同上 |
+| Secret | `POLYGON_RPC_URL` | (任意) 公開 RPC が混雑する場合に Alchemy / Infura URL |
+| Secret | `BASE_RPC_URL` | 同上 |
+| Secret | `ALERT_WEBHOOK_URL` | Slack/Discord 互換 webhook (`{ text }` POST 受け取り) |
+| Variable | `ALERT_THRESHOLD_POL` | (任意) POL 単位のしきい値、デフォルト 5 |
+| Variable | `ALERT_THRESHOLD_ETH` | (任意) ETH 単位のしきい値、デフォルト 0.01 |
+
+`.github/workflows/pimlico-balance.yml` が 6 時間ごとに `scripts/check-pimlico-balance.mjs` を実行。残高がしきい値を下回ったら webhook に通知し、ジョブ自体も失敗させる (=GitHub の Actions 失敗通知も飛ぶ)。
 
 ## クレジット / 謝辞
 
