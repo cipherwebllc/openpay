@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
 // AddressInput の useResolveAddress (react-query で外 RPC) はテストでは

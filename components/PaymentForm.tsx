@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { erc20Abi, formatUnits, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
@@ -27,11 +28,12 @@ function shortAddr(a: string): string {
 export function PaymentForm() {
   const search = useSearchParams();
   const parsed = useMemo(() => parsePayParams(search), [search]);
+  const t = useTranslations('PaymentForm');
 
   if (!parsed.ok) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
-        <h2 className="font-semibold">決済 URL が不正です</h2>
+        <h2 className="font-semibold">{t('urlInvalidTitle')}</h2>
         <p className="mt-2 text-sm">{parsed.error}</p>
       </div>
     );
@@ -41,6 +43,7 @@ export function PaymentForm() {
 }
 
 function PaymentDetails({ params }: { params: PayParams }) {
+  const t = useTranslations('PaymentForm');
   const isDirect = params.mode === 'direct';
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
@@ -187,11 +190,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
     <div className="space-y-6">
       <header className="rounded-2xl bg-gradient-to-br from-brand to-brand-dark p-6 text-white">
         <p className="text-sm uppercase tracking-wider opacity-80">
-          OpenPay 決済
+          {t('title')}
         </p>
         <p className="mt-1 text-xs opacity-70">{requiredChain.name}</p>
         <div className="mt-4">
-          <p className="text-xs opacity-80">支払金額</p>
+          <p className="text-xs opacity-80">{t('amountHeader')}</p>
           {isFixed ? (
             <p className="mt-1 text-3xl font-bold">
               {fixedAmount} {token.displaySymbol}
@@ -209,7 +212,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 className="w-full rounded-lg bg-white/15 px-3 py-2 text-2xl font-bold text-white placeholder:text-white/50 focus:bg-white/20 focus:outline-none"
               />
               <p className="mt-1 text-xs opacity-70">
-                金額を入力してください ({token.displaySymbol})
+                {t('amountInputHint', { symbol: token.displaySymbol })}
               </p>
             </div>
           )}
@@ -218,34 +221,40 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
       {isDirect && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">⚠ ガス代お客様負担</p>
+          <p className="font-semibold">{t('directWarningTitle')}</p>
           <p className="mt-1 text-xs">
-            このQRは直接送金モードです。お客様のウォレットに{' '}
-            {requiredChain.id === 137 || requiredChain.id === 80002
-              ? 'MATIC'
-              : 'ETH'}{' '}
-            (ネイティブトークン) のガス代残高が必要です。手数料 0% で店主が満額を受け取ります。
+            {t('directWarningBody', {
+              nativeToken:
+                requiredChain.id === 137 || requiredChain.id === 80002
+                  ? 'MATIC'
+                  : 'ETH',
+            })}
           </p>
         </div>
       )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-slate-700">明細</h2>
+        <h2 className="text-sm font-semibold text-slate-700">
+          {t('breakdownTitle')}
+        </h2>
         <dl className="mt-3 space-y-2 text-sm">
           {splitBreakdown ? (
             splitBreakdown.recipients.map((r, i) => (
               <Row
                 key={r.to}
-                label={`${i === 0 ? '主受取人' : '受取人'} (${r.percent}%) ${shortAddr(r.to)}`}
+                label={t(
+                  i === 0 ? 'primaryRecipientRow' : 'splitRecipientRow',
+                  { percent: r.percent, addr: shortAddr(r.to) },
+                )}
                 value={fmt(r.amount)}
               />
             ))
           ) : (
-            <Row label="店主への送金" value={fmt(breakdown.merchantReceives)} />
+            <Row label={t('merchantRow')} value={fmt(breakdown.merchantReceives)} />
           )}
           {!isDirect && (
             <Row
-              label="運営手数料 (1.0%)"
+              label={t('feeRow')}
               value={fmt(
                 splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
               )}
@@ -255,10 +264,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
           <Row
             label={
               isDirect
-                ? '顧客支払額'
+                ? t('customerDirect')
                 : params.fee === 'include'
-                  ? '顧客支払額 (内税)'
-                  : '顧客支払額 (外税)'
+                  ? t('customerInclude')
+                  : t('customerExclude')
             }
             value={fmt(
               splitBreakdown
@@ -270,15 +279,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </dl>
         <p className="mt-4 text-xs text-slate-500">
           {isDirect
-            ? '直接 ERC20 transfer を 1 件送信します。Smart Account / Pimlico Paymaster は経由しません。'
+            ? t('directBatchHint')
             : splitBreakdown
-              ? `ガス代は運営が肩代わり (Pimlico Sponsorship Paymaster)。${splitBreakdown.recipients.length} 件の transfer を 1 つの UserOperation でバッチ送信します。`
-              : 'ガス代は運営が肩代わり (Pimlico Sponsorship Paymaster)。お客様はネイティブトークン (MATIC / ETH) を保有する必要はありません。'}
+              ? t('splitBatchHint', {
+                  count: splitBreakdown.recipients.length,
+                })
+              : t('gaslessBatchHint')}
         </p>
       </section>
 
       <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-slate-700">ウォレット</h2>
+        <h2 className="text-sm font-semibold text-slate-700">
+          {t('walletSection')}
+        </h2>
         <ConnectButton />
 
         {isConnected && wrongChain && (
@@ -289,22 +302,23 @@ function PaymentDetails({ params }: { params: PayParams }) {
             className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
           >
             {isSwitching
-              ? 'チェーン切替中…'
-              : `${requiredChain.name} へ切り替え`}
+              ? t('switchingChain')
+              : t('switchChain', { chainName: requiredChain.name })}
           </button>
         )}
 
         {isConnected && !wrongChain && balanceQuery.data !== undefined && (
           <div className="text-xs text-slate-500">
-            現在残高:{' '}
+            {t('balanceLabel')}{' '}
             <span className="font-mono">{fmt(balanceQuery.data)}</span>
           </div>
         )}
 
         {insufficientBalance && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-            残高が不足しています。送金には {fmt(breakdown.customerPays)}{' '}
-            が必要です。
+            {t('insufficientBalance', {
+              amount: fmt(breakdown.customerPays),
+            })}
           </p>
         )}
       </section>
@@ -316,40 +330,42 @@ function PaymentDetails({ params }: { params: PayParams }) {
         className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
       >
         {flowPending
-          ? '送信中…'
+          ? t('btnSending')
           : !isConnected
-            ? 'ウォレットを接続してください'
+            ? t('btnConnect')
             : wrongChain
-              ? 'ネットワークを切替えてください'
+              ? t('btnSwitchChain')
               : !isDirect && !saData
-                ? 'Smart Account 初期化中…'
+                ? t('btnSaInit')
                 : breakdown.customerPays === 0n
-                  ? '金額を入力してください'
-                  : `${fmt(breakdown.customerPays)} を支払う`}
+                  ? t('btnEnterAmount')
+                  : t('btnPay', { amount: fmt(breakdown.customerPays) })}
       </button>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p className="font-semibold">エラー</p>
+          <p className="font-semibold">{t('errorTitle')}</p>
           <p className="mt-1 break-words">{error}</p>
         </div>
       )}
 
       {!isDirect && gasless.data && gasless.data.success && (
         <ResultPanel
+          title={t('successTitle')}
           rows={[
-            ['UserOp Hash', gasless.data.userOpHash],
-            ['Tx Hash', gasless.data.txHash],
-            ['ブロック', gasless.data.blockNumber.toString()],
+            [t('successUserOp'), gasless.data.userOpHash],
+            [t('successTx'), gasless.data.txHash],
+            [t('successBlock'), gasless.data.blockNumber.toString()],
           ]}
         />
       )}
 
       {isDirect && direct.data && (
         <ResultPanel
+          title={t('successTitle')}
           rows={[
-            ['Tx Hash', direct.data.txHash],
-            ['ブロック', direct.data.blockNumber.toString()],
+            [t('successTx'), direct.data.txHash],
+            [t('successBlock'), direct.data.blockNumber.toString()],
           ]}
         />
       )}
@@ -357,10 +373,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
 }
 
-function ResultPanel({ rows }: { rows: Array<[string, string]> }) {
+function ResultPanel({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<[string, string]>;
+}) {
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-      <p className="font-semibold">決済が完了しました</p>
+      <p className="font-semibold">{title}</p>
       <dl className="mt-2 space-y-1 text-xs">
         {rows.map(([label, value]) => (
           <div key={label} className="flex justify-between gap-2">

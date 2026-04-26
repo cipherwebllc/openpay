@@ -2,10 +2,12 @@
 
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { PaymentForm } from '@/components/PaymentForm';
 import { env } from '@/lib/env';
 
 export default function PayPage() {
+  const t = useTranslations('PaymentForm');
   return (
     <main className="mx-auto min-h-screen w-full max-w-md px-4 py-8 sm:py-10">
       <header className="mb-6 flex items-center justify-between text-xs text-slate-500">
@@ -20,7 +22,7 @@ export default function PayPage() {
       <Suspense
         fallback={
           <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
-            決済情報を読み込み中…
+            {t('loading')}
           </div>
         }
       >

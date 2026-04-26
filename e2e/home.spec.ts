@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('home / (QR generator + Tip widget tab)', () => {
   test('default タブは決済 QR、QrGenerator が表示される', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/ja');
     await expect(
       page.getByRole('heading', { name: 'OpenPay' }).first(),
     ).toBeVisible();
@@ -16,7 +16,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('Tip widget タブに切り替えると TipEmbedGenerator が表示', async ({
     page,
   }) => {
-    await page.goto('/');
+    await page.goto('/ja');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     await expect(
       page.getByRole('heading', { name: /Tip widget 埋め込みコードを生成/ }),
@@ -30,22 +30,33 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('受取アドレス入力 → URL と iframe スニペットが生成される', async ({
     page,
   }) => {
-    await page.goto('/');
+    await page.goto('/ja');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill(
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    // URL は header.origin + /tip/0x... を含む文字列
+    // URL は origin + /ja/tip/0x... を含む (locale prefix)
     await expect(
       page
         .locator('div')
         .filter({
-          hasText: /\/tip\/0x52d4901142e2B5680027da5EB47C86CB02a3cA81\?token=jpyc/,
+          hasText:
+            /\/ja\/tip\/0x52d4901142e2B5680027da5EB47C86CB02a3cA81\?token=jpyc/,
         })
         .first(),
     ).toBeVisible();
     // iframe スニペットには <iframe + width="380" が出る
     await expect(page.getByText(/width="380"/)).toBeVisible();
+  });
+
+  test('英語ロケール (/en) でも UI が描画される', async ({ page }) => {
+    await page.goto('/en');
+    await expect(
+      page.getByRole('button', { name: 'Payment QR (merchant)' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Tip widget (creator)' }),
+    ).toBeVisible();
   });
 });

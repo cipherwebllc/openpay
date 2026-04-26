@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
 // AddressInput の useResolveAddress (react-query 経由で外 RPC を叩く) は
@@ -57,11 +58,12 @@ describe('QrGenerator', () => {
         const toggle = screen.getByRole('button', { name: /詳細設定/ });
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
       });
-      // サマリにトークン名・短縮アドレス・税表記が出る
+      // サマリにトークン名・短縮アドレス・税表記が出る (i18n 後は言語非依存
+      // のラベル: incl. / excl. / 0%)
       const toggle = screen.getByRole('button', { name: /詳細設定/ });
       expect(within(toggle).getByText(/JPYC/)).toBeInTheDocument();
       expect(within(toggle).getByText(/0x8335/)).toBeInTheDocument();
-      expect(within(toggle).getByText(/外税/)).toBeInTheDocument();
+      expect(within(toggle).getByText(/excl\./)).toBeInTheDocument();
     });
 
     it('LocalStorage に無効アドレス: アコーディオン展開のままで修正を促す', async () => {
@@ -220,7 +222,7 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('directTransfer=true でアコーディオン閉時のサマリに 直送 と出る', async () => {
+    it('directTransfer=true でアコーディオン閉時のサマリに 0% と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v1',
         JSON.stringify({
@@ -238,7 +240,8 @@ describe('QrGenerator', () => {
       await waitFor(() =>
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
-      expect(within(toggle).getByText(/直送/)).toBeInTheDocument();
+      // i18n 後は言語非依存の "0%" 表記
+      expect(within(toggle).getByText(/0%/)).toBeInTheDocument();
     });
   });
 

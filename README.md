@@ -3,9 +3,10 @@
 小規模店舗・クリエイター・フリーランスが**ウォレットアドレス1つだけ**で導入できる、オープンソースのガスレス決済 / Tip widget ジェネレーター。  
 ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base)** で決済できます。
 
-- `/` — 店舗向け QR ジェネレーター + クリエイター向け Tip widget 埋め込みコード生成 (タブ切替)
-- `/pay?to=...&token=...&fee=...&amount=...` — QR をスキャンした顧客の決済画面
-- `/tip/[address]?token=...&name=...&message=...&color=...&preset=...` — クリエイター向けチップ送金画面 (iframe 埋め込み対応)
+- `/{locale}` — 店舗向け QR ジェネレーター + クリエイター向け Tip widget 埋め込みコード生成 (タブ切替)
+- `/{locale}/pay?to=...&token=...&fee=...&amount=...&split=0xB:30,0xC:20` — QR をスキャンした顧客の決済画面 (`split=` で複数受取人へ % 分配可能)
+- `/{locale}/tip/[address]?token=...&name=...&message=...&color=...&preset=...&thanks=...&thanksUrl=...&webhook=...` — クリエイター向けチップ送金画面 (iframe 埋め込み対応 / 成功後の thanks メッセージ + リンク + webhook 通知)
+- `{locale}` は `ja` (デフォルト) または `en`。middleware が Accept-Language で自動検出
 
 **Repo**: https://github.com/cipherwebllc/openpay  
 **License**: MIT
@@ -249,6 +250,14 @@ npm run dev
 ```
 
 [http://localhost:3000](http://localhost:3000) を開いてください。
+
+## 言語サポート
+
+UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middleware 検出で `/ja/...` / `/en/...` に自動 routing。ヘッダー右上の言語スイッチャーで切替可能。
+
+- 文字列リソース: `messages/ja.json` / `messages/en.json`
+- 新しい locale 追加: `i18n.ts` の `LOCALES` に追加 + `messages/{locale}.json` を作成
+- ロケール非依存ルート (`/manifest.webmanifest`, `/icon.svg` 等) は middleware の matcher で除外済み
 
 ## 使い方
 

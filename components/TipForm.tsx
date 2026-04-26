@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { erc20Abi, formatUnits, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
@@ -18,6 +19,7 @@ const DEFAULT_THEME_COLOR = '#2563eb';
 const AMOUNT_PATTERN = /^\d+(\.\d+)?$/;
 
 export function TipForm({ params }: { params: TipParams }) {
+  const t = useTranslations('TipForm');
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
   const presets =
@@ -171,18 +173,13 @@ export function TipForm({ params }: { params: TipParams }) {
         style={{ backgroundColor: themeColor }}
       >
         <p className="text-xs uppercase tracking-wider opacity-80">
-          OpenPay Tip
+          {t('header')}
         </p>
-        {creatorName && (
-          <p className="mt-2 text-xl font-bold leading-tight">
-            {creatorName} さんへチップを送る
-          </p>
-        )}
-        {!creatorName && (
-          <p className="mt-2 text-xl font-bold leading-tight">
-            クリエイターへチップを送る
-          </p>
-        )}
+        <p className="mt-2 text-xl font-bold leading-tight">
+          {creatorName
+            ? t('headerNamed', { name: creatorName })
+            : t('headerGeneric')}
+        </p>
         {creatorMessage && (
           <p className="mt-2 whitespace-pre-wrap text-sm opacity-90">
             {creatorMessage}
@@ -195,7 +192,7 @@ export function TipForm({ params }: { params: TipParams }) {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          金額を選択
+          {t('amountTitle')}
         </p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           {presets.map((p) => {
@@ -220,7 +217,7 @@ export function TipForm({ params }: { params: TipParams }) {
         <div className="mt-3">
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              またはカスタム金額
+              {t('amountCustom')}
             </span>
             <input
               type="text"
@@ -232,7 +229,9 @@ export function TipForm({ params }: { params: TipParams }) {
                 setCustomAmount(e.target.value.replace(/[^\d.]/g, ''));
               }}
               placeholder={
-                params.token === 'jpyc' ? '例: 2500' : '例: 7.50'
+                params.token === 'jpyc'
+                  ? t('amountCustomPlaceholderJpyc')
+                  : t('amountCustomPlaceholderUsdc')
               }
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none"
               style={{ borderColor: customSelected ? themeColor : undefined }}
@@ -243,27 +242,26 @@ export function TipForm({ params }: { params: TipParams }) {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          明細
+          {t('breakdownTitle')}
         </p>
         <dl className="mt-2 space-y-1.5">
-          <Row label="クリエイター受取" value={fmt(breakdown.merchantReceives)} />
-          <Row label="運営手数料 (1.0%)" value={fmt(breakdown.feeAmount)} />
+          <Row label={t('creatorRow')} value={fmt(breakdown.merchantReceives)} />
+          <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
           <div className="my-1 border-t border-slate-200" />
           <Row
-            label="あなたの支払額"
+            label={t('customerRow')}
             value={fmt(breakdown.customerPays)}
             strong
           />
         </dl>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          ガス代は OpenPay が肩代わりします (Pimlico Sponsorship Paymaster 経由)。
-          ネイティブトークン (MATIC / ETH) の保有は不要です。
+          {t('gaslessHint')}
         </p>
       </section>
 
       <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          ウォレット
+          {t('walletSection')}
         </p>
         <ConnectButton />
 
@@ -275,20 +273,23 @@ export function TipForm({ params }: { params: TipParams }) {
             className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
           >
             {isSwitching
-              ? 'チェーン切替中…'
-              : `${requiredChain.name} へ切り替え`}
+              ? t('switchingChain')
+              : t('switchChain', { chainName: requiredChain.name })}
           </button>
         )}
 
         {isConnected && !wrongChain && balanceQuery.data !== undefined && (
           <p className="text-xs text-slate-500">
-            残高: <span className="font-mono">{fmt(balanceQuery.data)}</span>
+            {t('balanceLabel')}{' '}
+            <span className="font-mono">{fmt(balanceQuery.data)}</span>
           </p>
         )}
 
         {insufficientBalance && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-            残高が不足しています ({fmt(breakdown.customerPays)} 必要)
+            {t('insufficientBalance', {
+              amount: fmt(breakdown.customerPays),
+            })}
           </p>
         )}
       </section>
@@ -301,28 +302,28 @@ export function TipForm({ params }: { params: TipParams }) {
         style={{ backgroundColor: themeColor }}
       >
         {gasless.isPending
-          ? '送信中…'
+          ? t('btnSending')
           : !isConnected
-            ? 'ウォレットを接続してください'
+            ? t('btnConnect')
             : wrongChain
-              ? 'ネットワークを切替えてください'
+              ? t('btnSwitchChain')
               : !saData
-                ? 'Smart Account 初期化中…'
+                ? t('btnSaInit')
                 : breakdown.customerPays === 0n
-                  ? '金額を選択してください'
-                  : `${fmt(breakdown.customerPays)} を送る`}
+                  ? t('btnSelectAmount')
+                  : t('btnSend', { amount: fmt(breakdown.customerPays) })}
       </button>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-          <p className="font-semibold">エラー</p>
+          <p className="font-semibold">{t('errorTitle')}</p>
           <p className="mt-1 break-words">{error}</p>
         </div>
       )}
 
       {gasless.data && gasless.data.success && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-          <p className="font-semibold">チップを送信しました</p>
+          <p className="font-semibold">{t('successTitle')}</p>
           {params.thanks && (
             <p className="mt-2 whitespace-pre-wrap text-sm">{params.thanks}</p>
           )}
@@ -333,19 +334,25 @@ export function TipForm({ params }: { params: TipParams }) {
               rel="noreferrer noopener"
               className="mt-2 inline-block rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
             >
-              リンクを開く →
+              {t('openLink')}
             </a>
           )}
           <dl className="mt-3 space-y-1">
-            <ResultRow label="UserOp" value={gasless.data.userOpHash} />
-            <ResultRow label="Tx" value={gasless.data.txHash} />
-            <ResultRow label="ブロック" value={gasless.data.blockNumber.toString()} />
+            <ResultRow
+              label={t('successUserOp')}
+              value={gasless.data.userOpHash}
+            />
+            <ResultRow label={t('successTx')} value={gasless.data.txHash} />
+            <ResultRow
+              label={t('successBlock')}
+              value={gasless.data.blockNumber.toString()}
+            />
           </dl>
         </div>
       )}
 
       <p className="pt-2 text-center text-[10px] text-slate-400">
-        powered by{' '}
+        {t('poweredBy')}{' '}
         <a
           href="https://github.com/cipherwebllc/openpay"
           target="_blank"

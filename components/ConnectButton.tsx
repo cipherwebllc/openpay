@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 
 function shorten(address: string): string {
@@ -10,6 +11,7 @@ export function ConnectButton() {
   const { address, isConnected, chain } = useAccount();
   const { connectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
+  const t = useTranslations('ConnectButton');
 
   if (isConnected && address) {
     return (
@@ -24,7 +26,7 @@ export function ConnectButton() {
           onClick={() => disconnect()}
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          切断
+          {t('disconnect')}
         </button>
       </div>
     );
@@ -46,7 +48,9 @@ export function ConnectButton() {
         ))}
       </div>
       {error && (
-        <p className="text-sm text-red-600">接続エラー: {error.message}</p>
+        <p className="text-sm text-red-600">
+          {t('connectError', { message: error.message })}
+        </p>
       )}
     </div>
   );

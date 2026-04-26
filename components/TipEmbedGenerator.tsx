@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { isAddress, getAddress, type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
@@ -25,6 +26,8 @@ export function TipEmbedGenerator() {
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState<CopyKey | null>(null);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
+  const t = useTranslations('TipEmbedGenerator');
+  const tHeader = useTranslations('TipForm');
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -104,10 +107,13 @@ export function TipEmbedGenerator() {
     setTimeout(() => setCopied(null), 1500);
   }
 
+  const defaultPresetsList = DEFAULT_TIP_PRESETS[settings.token].join(', ');
+  const defaultPresetsCsv = DEFAULT_TIP_PRESETS[settings.token].join(',');
+
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="space-y-4">
-        <Field label="クリエイターウォレットアドレス">
+        <Field label={t('receiverLabel')}>
           <AddressInput
             value={settings.receiver}
             onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
@@ -116,22 +122,20 @@ export function TipEmbedGenerator() {
           {settings.receiver &&
             !effectiveReceiver &&
             !isLikelyName(settings.receiver) && (
-              <p className="mt-1 text-xs text-red-600">
-                アドレス形式が正しくありません
-              </p>
+              <p className="mt-1 text-xs text-red-600">{t('addressInvalid')}</p>
             )}
         </Field>
 
-        <Field label="通貨 / 受取チェーン">
+        <Field label={t('tokenLabel')}>
           <div className="grid grid-cols-2 gap-2">
-            {(['jpyc', 'usdc'] as TokenSymbol[]).map((t) => {
-              const info = TOKENS[t];
-              const active = settings.token === t;
+            {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
+              const info = TOKENS[tok];
+              const active = settings.token === tok;
               return (
                 <button
-                  key={t}
+                  key={tok}
                   type="button"
-                  onClick={() => setSettings((s) => ({ ...s, token: t }))}
+                  onClick={() => setSettings((s) => ({ ...s, token: tok }))}
                   className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
                     active
                       ? 'border-brand bg-brand/5 text-brand-dark'
@@ -140,7 +144,7 @@ export function TipEmbedGenerator() {
                 >
                   <div className="font-semibold">{info.displaySymbol}</div>
                   <div className="text-xs text-slate-500">
-                    {t === 'usdc' ? 'Base' : 'Polygon'}
+                    {tok === 'usdc' ? 'Base' : 'Polygon'}
                   </div>
                 </button>
               );
@@ -148,36 +152,36 @@ export function TipEmbedGenerator() {
           </div>
         </Field>
 
-        <Field label="表示名 (任意)">
+        <Field label={t('nameLabel')}>
           <input
             type="text"
             value={settings.name}
             onChange={(e) =>
               setSettings((s) => ({ ...s, name: e.target.value }))
             }
-            placeholder="例: 山田太郎"
+            placeholder={t('namePlaceholder')}
             maxLength={60}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
           />
         </Field>
 
-        <Field label="メッセージ (任意)">
+        <Field label={t('messageLabel')}>
           <textarea
             value={settings.message}
             onChange={(e) =>
               setSettings((s) => ({ ...s, message: e.target.value }))
             }
-            placeholder="例: 応援ありがとうございます！"
+            placeholder={t('messagePlaceholder')}
             maxLength={200}
             rows={2}
             className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
           />
           <p className="mt-1 text-xs text-slate-400">
-            {settings.message.length} / 200
+            {t('messageCounter', { count: settings.message.length })}
           </p>
         </Field>
 
-        <Field label="テーマカラー">
+        <Field label={t('colorLabel')}>
           <div className="flex items-center gap-3">
             <input
               type="color"
@@ -198,14 +202,12 @@ export function TipEmbedGenerator() {
             />
           </div>
           {settings.color && !colorValid && (
-            <p className="mt-1 text-xs text-red-600">
-              色は #rrggbb 形式で指定してください
-            </p>
+            <p className="mt-1 text-xs text-red-600">{t('colorInvalid')}</p>
           )}
         </Field>
 
         <Field
-          label={`金額プリセット (任意, カンマ区切り — 既定: ${DEFAULT_TIP_PRESETS[settings.token].join(', ')})`}
+          label={t('presetsLabel', { defaults: defaultPresetsList })}
         >
           <input
             type="text"
@@ -213,82 +215,85 @@ export function TipEmbedGenerator() {
             onChange={(e) =>
               setSettings((s) => ({ ...s, presets: e.target.value }))
             }
-            placeholder={`例: ${DEFAULT_TIP_PRESETS[settings.token].join(',')}`}
+            placeholder={t('presetsPlaceholder', { defaults: defaultPresetsCsv })}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
           />
           {settings.presets && presetsParsed.length === 0 && (
-            <p className="mt-1 text-xs text-amber-600">
-              有効な金額がありません — 既定値が使用されます
-            </p>
+            <p className="mt-1 text-xs text-amber-600">{t('presetsInvalid')}</p>
           )}
           {presetsParsed.length > 0 && (
             <p className="mt-1 text-xs text-slate-500">
-              使用される値: {presetsParsed.join(', ')} {TOKENS[settings.token].displaySymbol}
+              {t('presetsActive', {
+                values: presetsParsed.join(', '),
+                symbol: TOKENS[settings.token].displaySymbol,
+              })}
             </p>
           )}
         </Field>
 
-        <Field label="送信成功後のサンキューメッセージ (任意)">
+        <Field label={t('thanksLabel')}>
           <textarea
             value={settings.thanks}
             onChange={(e) =>
               setSettings((s) => ({ ...s, thanks: e.target.value }))
             }
-            placeholder="例: ありがとう！限定 Discord に招待します ↓"
+            placeholder={t('thanksPlaceholder')}
             maxLength={200}
             rows={2}
             className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
           />
           <p className="mt-1 text-xs text-slate-400">
-            {settings.thanks.length} / 200
+            {t('messageCounter', { count: settings.thanks.length })}
           </p>
         </Field>
 
-        <Field label="送信成功後のリンク URL (任意)">
+        <Field label={t('thanksUrlLabel')}>
           <input
             type="text"
             value={settings.thanksUrl}
             onChange={(e) =>
               setSettings((s) => ({ ...s, thanksUrl: e.target.value }))
             }
-            placeholder="https://discord.gg/... または https://patreon.com/..."
+            placeholder={t('thanksUrlPlaceholder')}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
           />
-          <p className="mt-1 text-xs text-slate-500">
-            送信成功画面で「リンクを開く」ボタンとして表示。http(s) 以外は無視されます
-          </p>
+          <p className="mt-1 text-xs text-slate-500">{t('thanksUrlHint')}</p>
         </Field>
 
-        <Field label="送信成功時の webhook URL (任意)">
+        <Field label={t('webhookLabel')}>
           <input
             type="text"
             value={settings.webhook}
             onChange={(e) =>
               setSettings((s) => ({ ...s, webhook: e.target.value }))
             }
-            placeholder="https://discord.com/api/webhooks/... など"
+            placeholder={t('webhookPlaceholder')}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
           />
           <p className="mt-1 text-xs text-slate-500">
-            設定すると、tip 受信時に {`{ txHash, amount, token, from, message }`} を JSON で POST します。Discord/Slack/独自バックエンド連携用。CORS 許可が必要
+            {t('webhookHint', {
+              payload: '{ txHash, amount, token, from, message }',
+            })}
           </p>
         </Field>
       </div>
 
       <div className="space-y-4">
         <div>
-          <h3 className="text-sm font-semibold text-slate-700">プレビュー</h3>
+          <h3 className="text-sm font-semibold text-slate-700">
+            {t('previewTitle')}
+          </h3>
           <div
             className="mt-2 rounded-2xl p-4 text-white shadow-sm"
             style={{ backgroundColor: colorValid ? settings.color : '#2563eb' }}
           >
             <p className="text-xs uppercase tracking-wider opacity-80">
-              OpenPay Tip
+              {tHeader('header')}
             </p>
             <p className="mt-2 text-lg font-bold">
               {settings.name
-                ? `${settings.name} さんへチップを送る`
-                : 'クリエイターへチップを送る'}
+                ? tHeader('headerNamed', { name: settings.name })
+                : tHeader('headerGeneric')}
             </p>
             {settings.message && (
               <p className="mt-2 whitespace-pre-wrap text-sm opacity-90">
@@ -311,7 +316,7 @@ export function TipEmbedGenerator() {
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Tip URL
+              {t('tipUrlTitle')}
             </h3>
             <button
               type="button"
@@ -319,14 +324,12 @@ export function TipEmbedGenerator() {
               disabled={!tipUrl}
               className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {copied === 'url' ? 'コピー済み' : 'コピー'}
+              {copied === 'url' ? t('copied') : t('copy')}
             </button>
           </div>
           <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
             {tipUrl || (
-              <span className="text-slate-400">
-                受取アドレスを入力すると URL が生成されます
-              </span>
+              <span className="text-slate-400">{t('urlPlaceholder')}</span>
             )}
           </div>
           {tipUrl && (
@@ -336,7 +339,7 @@ export function TipEmbedGenerator() {
               rel="noreferrer"
               className="mt-2 inline-block text-xs text-brand hover:underline"
             >
-              新しいタブで開く →
+              {t('openInNewTab')}
             </a>
           )}
         </div>
@@ -344,7 +347,7 @@ export function TipEmbedGenerator() {
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              iframe 埋め込みコード
+              {t('iframeTitle')}
             </h3>
             <button
               type="button"
@@ -352,21 +355,19 @@ export function TipEmbedGenerator() {
               disabled={!iframeSnippet}
               className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {copied === 'iframe' ? 'コピー済み' : 'コピー'}
+              {copied === 'iframe' ? t('copied') : t('copy')}
             </button>
           </div>
           <pre className="overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">
             <code>
               {iframeSnippet || (
                 <span className="text-slate-500">
-                  受取アドレスを入力するとスニペットが生成されます
+                  {t('snippetPlaceholder')}
                 </span>
               )}
             </code>
           </pre>
-          <p className="mt-2 text-xs text-slate-500">
-            ブログ・ポートフォリオサイト・GitHub README (raw HTML が許可されている場合) などにそのまま貼り付けられます。
-          </p>
+          <p className="mt-2 text-xs text-slate-500">{t('embedHint')}</p>
         </div>
       </div>
     </div>

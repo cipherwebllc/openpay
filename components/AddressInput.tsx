@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
 
@@ -16,17 +17,16 @@ export function AddressInput({
   value,
   onChange,
   onResolved,
-  placeholder = '0x... または vitalik.eth / name.base.eth',
+  placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
   onResolved?: (address: `0x${string}` | null) => void;
   placeholder?: string;
 }) {
+  const t = useTranslations('AddressInput');
   const trimmed = value.trim();
   const looksLikeName = isLikelyName(trimmed);
-  // 0x アドレスは isAddress でローカル検証されるので RPC を叩かない。
-  // 名前 (.eth / .base.eth) のときだけ enabled。
   const query = useResolveAddress(looksLikeName ? trimmed : '');
 
   useEffect(() => {
@@ -44,14 +44,14 @@ export function AddressInput({
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value.trim())}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('placeholder')}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
       />
       {looksLikeName && query.isFetching && (
-        <p className="mt-1 text-xs text-slate-500">名前を解決しています…</p>
+        <p className="mt-1 text-xs text-slate-500">{t('resolving')}</p>
       )}
       {looksLikeName && query.error && (
         <p className="mt-1 text-xs text-red-600">{query.error.message}</p>

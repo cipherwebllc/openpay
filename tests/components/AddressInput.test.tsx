@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithIntl as render } from '../_helpers/i18n';
 
 vi.mock('@/hooks/useResolveAddress', () => ({
   useResolveAddress: vi.fn(() => ({

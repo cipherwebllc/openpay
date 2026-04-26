@@ -1,4 +1,7 @@
 import { withSentryConfig } from '@sentry/nextjs';
+import createNextIntlPlugin from 'next-intl/plugin';
+
+const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -6,10 +9,11 @@ const nextConfig = {
   // /tip/[address] は iframe 埋め込みを想定するため、X-Frame-Options を出さず、
   // CSP frame-ancestors で全 origin 許可する。アクションは MetaMask 等のウォレット
   // ポップアップ内で行われるため、iframe 内でのクリックジャッキングは成立しない。
+  // /ja/tip/* と /en/tip/* の両方に適用。
   async headers() {
     return [
       {
-        source: '/tip/:path*',
+        source: '/:locale(ja|en)/tip/:path*',
         headers: [
           { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
         ],
@@ -38,7 +42,7 @@ const nextConfig = {
 
 // Sentry: source map upload は SENTRY_AUTH_TOKEN がある時のみ有効。
 // 未設定でも他の機能 (instrumentation の自動取込み等) は動作する。
-export default withSentryConfig(nextConfig, {
+export default withSentryConfig(withNextIntl(nextConfig), {
   silent: !process.env.CI,
   // Prisma など使わないため OpenTelemetry の動的 require 警告を抑制
   disableLogger: true,
