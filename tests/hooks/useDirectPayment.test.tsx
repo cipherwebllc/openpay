@@ -11,6 +11,7 @@ vi.mock('wagmi', () => ({
 }));
 import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
+import { mockHook } from '../_helpers/wagmiMock';
 
 const TOKEN: Address = getAddress(
   '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
@@ -28,13 +29,13 @@ function mockWrite(opts: {
   error?: Error | null;
 }) {
   writeContract = vi.fn();
-  vi.mocked(useWriteContract).mockReturnValue({
+  mockHook(useWriteContract, {
     writeContract,
     data: opts.data,
     isPending: opts.isPending ?? false,
     isSuccess: opts.isSuccess ?? false,
     error: opts.error ?? null,
-  } as never);
+  } as Partial<ReturnType<typeof useWriteContract>>);
 }
 
 function mockReceipt(opts: {
@@ -44,13 +45,13 @@ function mockReceipt(opts: {
   error?: Error | null;
   isLoading?: boolean;
 }) {
-  vi.mocked(useWaitForTransactionReceipt).mockReturnValue({
+  mockHook(useWaitForTransactionReceipt, {
     data: opts.data,
     isSuccess: opts.isSuccess ?? false,
     isError: opts.isError ?? false,
     error: opts.error ?? null,
     isLoading: opts.isLoading ?? false,
-  } as never);
+  } as Partial<ReturnType<typeof useWaitForTransactionReceipt>>);
 }
 
 beforeEach(() => {

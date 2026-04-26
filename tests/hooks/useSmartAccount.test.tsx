@@ -15,6 +15,7 @@ vi.mock('wagmi', () => ({
   usePublicClient: vi.fn(),
 }));
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
+import { mockHook } from '../_helpers/wagmiMock';
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -36,12 +37,11 @@ describe('useSmartAccount (smoke / boundary)', () => {
   });
 
   it('未接続: クエリは無効、queryFn は呼ばれない', () => {
-    vi.mocked(useAccount).mockReturnValue({
-      address: undefined,
-      chainId: undefined,
-    } as never);
-    vi.mocked(useWalletClient).mockReturnValue({ data: undefined } as never);
-    vi.mocked(usePublicClient).mockReturnValue(undefined as never);
+    mockHook(useAccount, { address: undefined, chainId: undefined });
+    mockHook(useWalletClient, { data: undefined });
+    vi.mocked(usePublicClient).mockReturnValue(
+      undefined as ReturnType<typeof usePublicClient>,
+    );
 
     const { result } = renderHook(() => useSmartAccount(), {
       wrapper: makeWrapper(),
@@ -51,14 +51,12 @@ describe('useSmartAccount (smoke / boundary)', () => {
   });
 
   it('対応外 chainId (ethereum mainnet=1): 無効化', () => {
-    vi.mocked(useAccount).mockReturnValue({
+    mockHook(useAccount, {
       address: '0x1111111111111111111111111111111111111111',
       chainId: 1,
-    } as never);
-    vi.mocked(useWalletClient).mockReturnValue({
-      data: { chain: { id: 1 } },
-    } as never);
-    vi.mocked(usePublicClient).mockReturnValue({} as never);
+    });
+    mockHook(useWalletClient, { data: { chain: { id: 1 } } });
+    mockHook(usePublicClient, {});
 
     const { result } = renderHook(() => useSmartAccount(), {
       wrapper: makeWrapper(),
@@ -68,12 +66,12 @@ describe('useSmartAccount (smoke / boundary)', () => {
   });
 
   it('walletClient だけ欠けている: 無効化', () => {
-    vi.mocked(useAccount).mockReturnValue({
+    mockHook(useAccount, {
       address: '0x1111111111111111111111111111111111111111',
       chainId: polygonAmoy.id,
-    } as never);
-    vi.mocked(useWalletClient).mockReturnValue({ data: undefined } as never);
-    vi.mocked(usePublicClient).mockReturnValue({} as never);
+    });
+    mockHook(useWalletClient, { data: undefined });
+    mockHook(usePublicClient, {});
 
     const { result } = renderHook(() => useSmartAccount(), {
       wrapper: makeWrapper(),
@@ -82,14 +80,14 @@ describe('useSmartAccount (smoke / boundary)', () => {
   });
 
   it('publicClient だけ欠けている: 無効化', () => {
-    vi.mocked(useAccount).mockReturnValue({
+    mockHook(useAccount, {
       address: '0x1111111111111111111111111111111111111111',
       chainId: polygonAmoy.id,
-    } as never);
-    vi.mocked(useWalletClient).mockReturnValue({
-      data: { chain: polygonAmoy },
-    } as never);
-    vi.mocked(usePublicClient).mockReturnValue(undefined as never);
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    vi.mocked(usePublicClient).mockReturnValue(
+      undefined as ReturnType<typeof usePublicClient>,
+    );
 
     const { result } = renderHook(() => useSmartAccount(), {
       wrapper: makeWrapper(),

@@ -24,40 +24,39 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { TipForm } from '@/components/TipForm';
 import type { TipParams } from '@/lib/url';
+import { mockHook } from '../_helpers/wagmiMock';
 
 const CREATOR: Address = '0x2222222222222222222222222222222222222222';
 const FAN: Address = '0x9999999999999999999999999999999999999999';
 
 function setAccount(opts: { connected: boolean; chainId?: number }) {
-  vi.mocked(useAccount).mockReturnValue({
+  mockHook(useAccount, {
     address: opts.connected ? FAN : undefined,
     isConnected: opts.connected,
     chainId: opts.connected ? opts.chainId : undefined,
-  } as never);
+  });
 }
 
 function setBalance(value: bigint | undefined) {
-  vi.mocked(useReadContract).mockReturnValue({
+  mockHook(useReadContract, {
     data: value,
     isLoading: false,
     error: null,
-  } as never);
+  });
 }
 
 function setSmartAccount(ready: boolean, error?: Error) {
-  vi.mocked(useSmartAccount).mockReturnValue({
-    data: ready
-      ? { smartAccountClient: {} as never, pimlicoClient: {} as never }
-      : undefined,
+  mockHook(useSmartAccount, {
+    data: ready ? { smartAccountClient: {}, pimlicoClient: {} } : undefined,
     isLoading: !ready && !error,
     error: error ?? null,
-  } as never);
+  } as Partial<ReturnType<typeof useSmartAccount>>);
 }
 
 let mutate: ReturnType<typeof vi.fn>;
 function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
   mutate = vi.fn();
-  vi.mocked(useBatchPayment).mockReturnValue({
+  mockHook(useBatchPayment, {
     mutate,
     isPending: state === 'pending',
     isSuccess: state === 'success',
@@ -72,14 +71,14 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
           }
         : undefined,
     error: state === 'error' ? new Error('AA21 fail') : null,
-  } as never);
+  } as Partial<ReturnType<typeof useBatchPayment>>);
 }
 
 function setSwitchChain() {
-  vi.mocked(useSwitchChain).mockReturnValue({
+  mockHook(useSwitchChain, {
     switchChain: vi.fn(),
     isPending: false,
-  } as never);
+  });
 }
 
 beforeEach(() => {

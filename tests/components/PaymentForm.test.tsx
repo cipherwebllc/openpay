@@ -25,19 +25,20 @@ vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useDirectPayment', () => ({ useDirectPayment: vi.fn() }));
 
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, type ReadonlyURLSearchParams } from 'next/navigation';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
 import { PaymentForm } from '@/components/PaymentForm';
+import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
 const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
 
 function setURL(query: string) {
   vi.mocked(useSearchParams).mockReturnValue(
-    new URLSearchParams(query) as never,
+    new URLSearchParams(query) as unknown as ReadonlyURLSearchParams,
   );
 }
 
@@ -45,7 +46,7 @@ function setAccount(opts: {
   connected: boolean;
   chainId?: number;
 }) {
-  vi.mocked(useAccount).mockReturnValue({
+  mockHook(useAccount, {
     address: opts.connected ? CUSTOMER : undefined,
     isConnected: opts.connected,
     chainId: opts.connected ? opts.chainId : undefined,
@@ -54,32 +55,32 @@ function setAccount(opts: {
         ? baseSepolia
         : polygonAmoy
       : undefined,
-  } as never);
+  });
 }
 
 function setBalance(value: bigint | undefined) {
-  vi.mocked(useReadContract).mockReturnValue({
+  mockHook(useReadContract, {
     data: value,
     isLoading: false,
     error: null,
-  } as never);
+  });
 }
 
 function setSmartAccount(ready: boolean, error?: Error) {
-  vi.mocked(useSmartAccount).mockReturnValue({
+  mockHook(useSmartAccount, {
     data: ready
-      ? { smartAccountClient: {} as never, pimlicoClient: {} as never }
+      ? { smartAccountClient: {}, pimlicoClient: {} }
       : undefined,
     isLoading: !ready && !error,
     error: error ?? null,
-  } as never);
+  } as Partial<ReturnType<typeof useSmartAccount>>);
 }
 
 let mutate: ReturnType<typeof vi.fn>;
 let directMutate: ReturnType<typeof vi.fn>;
 function setPayment(state: 'idle' | 'pending' | 'success' | 'error') {
   mutate = vi.fn();
-  vi.mocked(useBatchPayment).mockReturnValue({
+  mockHook(useBatchPayment, {
     mutate,
     isPending: state === 'pending',
     isSuccess: state === 'success',
@@ -95,12 +96,12 @@ function setPayment(state: 'idle' | 'pending' | 'success' | 'error') {
         : undefined,
     error:
       state === 'error' ? new Error('AA21 didn\'t pay prefund') : null,
-  } as never);
+  } as Partial<ReturnType<typeof useBatchPayment>>);
 }
 
 function setDirectPayment(state: 'idle' | 'pending' | 'success' | 'error') {
   directMutate = vi.fn();
-  vi.mocked(useDirectPayment).mockReturnValue({
+  mockHook(useDirectPayment, {
     mutate: directMutate,
     isPending: state === 'pending',
     isSuccess: state === 'success',
@@ -113,14 +114,14 @@ function setDirectPayment(state: 'idle' | 'pending' | 'success' | 'error') {
           }
         : undefined,
     error: state === 'error' ? new Error('user rejected request') : null,
-  } as never);
+  } as Partial<ReturnType<typeof useDirectPayment>>);
 }
 
 function setSwitchChain() {
-  vi.mocked(useSwitchChain).mockReturnValue({
+  mockHook(useSwitchChain, {
     switchChain: vi.fn(),
     isPending: false,
-  } as never);
+  });
 }
 
 beforeEach(() => {
@@ -426,11 +427,11 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
     setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10&mode=direct`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
-    vi.mocked(useSmartAccount).mockReturnValue({
+    mockHook(useSmartAccount, {
       data: undefined,
       isLoading: false,
       error: new Error('SA init noise'),
-    } as never);
+    } as Partial<ReturnType<typeof useSmartAccount>>);
     render(<PaymentForm />);
     expect(screen.queryByText(/SA init noise/)).toBeNull();
   });

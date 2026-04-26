@@ -9,7 +9,9 @@ vi.mock('wagmi', () => ({
 }));
 
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
+import type { ConnectErrorType } from '@wagmi/core';
 import { ConnectButton } from '@/components/ConnectButton';
+import { mockHook } from '../_helpers/wagmiMock';
 
 const ADDR = '0x1234567890aBcdef1234567890ABCDEF12345678';
 
@@ -21,11 +23,8 @@ describe('ConnectButton (disconnected)', () => {
   it('connectors を全件レンダリング、クリックで connect が呼ばれる', async () => {
     const user = userEvent.setup();
     const connect = vi.fn();
-    vi.mocked(useAccount).mockReturnValue({
-      isConnected: false,
-      address: undefined,
-    } as never);
-    vi.mocked(useConnect).mockReturnValue({
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
       connectors: [
         { uid: '1', name: 'MetaMask' },
         { uid: '2', name: 'Coinbase Wallet' },
@@ -34,8 +33,8 @@ describe('ConnectButton (disconnected)', () => {
       connect,
       isPending: false,
       error: null,
-    } as never);
-    vi.mocked(useDisconnect).mockReturnValue({ disconnect: vi.fn() } as never);
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
     expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
@@ -52,34 +51,30 @@ describe('ConnectButton (disconnected)', () => {
   });
 
   it('isPending 中は全ボタン disabled', () => {
-    vi.mocked(useAccount).mockReturnValue({
-      isConnected: false,
-      address: undefined,
-    } as never);
-    vi.mocked(useConnect).mockReturnValue({
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
       connectors: [{ uid: '1', name: 'MetaMask' }],
       connect: vi.fn(),
       isPending: true,
       error: null,
-    } as never);
-    vi.mocked(useDisconnect).mockReturnValue({ disconnect: vi.fn() } as never);
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
     expect(screen.getByRole('button', { name: 'MetaMask' })).toBeDisabled();
   });
 
   it('error 状態 → エラーメッセージ表示', () => {
-    vi.mocked(useAccount).mockReturnValue({
-      isConnected: false,
-      address: undefined,
-    } as never);
-    vi.mocked(useConnect).mockReturnValue({
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
       connectors: [],
       connect: vi.fn(),
       isPending: false,
-      error: new Error('User rejected'),
-    } as never);
-    vi.mocked(useDisconnect).mockReturnValue({ disconnect: vi.fn() } as never);
+      // wagmi の ConnectErrorType は narrow union (literal name 等) で
+      // 標準 Error と shape が一致しないため、テスト用に最小要素のみ与える
+      error: { name: 'Error', message: 'User rejected' } as ConnectErrorType,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
     expect(screen.getByText(/User rejected/)).toBeInTheDocument();
@@ -90,21 +85,20 @@ describe('ConnectButton (connected)', () => {
   it('短縮アドレス + chain 名 + 切断ボタン', async () => {
     const user = userEvent.setup();
     const disconnect = vi.fn();
-    vi.mocked(useAccount).mockReturnValue({
+    mockHook(useAccount, {
       isConnected: true,
       address: ADDR,
       chain: { name: 'Base Sepolia' },
-    } as never);
-    vi.mocked(useConnect).mockReturnValue({
+    });
+    mockHook(useConnect, {
       connectors: [],
       connect: vi.fn(),
       isPending: false,
       error: null,
-    } as never);
-    vi.mocked(useDisconnect).mockReturnValue({ disconnect } as never);
+    });
+    mockHook(useDisconnect, { disconnect });
 
     render(<ConnectButton />);
-    // 0x1234…5678 のように省略表示
     expect(screen.getByText(/0x1234…5678/)).toBeInTheDocument();
     expect(screen.getByText(/Base Sepolia/)).toBeInTheDocument();
 
