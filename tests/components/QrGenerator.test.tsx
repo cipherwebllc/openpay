@@ -43,7 +43,7 @@ describe('QrGenerator', () => {
 
     it('LocalStorage に有効アドレス: アコーディオンは閉じてサマリ表示', async () => {
       window.localStorage.setItem(
-        'openpay:qr-settings:v1',
+        'openpay:qr-settings:v2',
         JSON.stringify({
           receiver: VALID,
           token: 'jpyc',
@@ -68,7 +68,7 @@ describe('QrGenerator', () => {
 
     it('LocalStorage に無効アドレス: アコーディオン展開のままで修正を促す', async () => {
       window.localStorage.setItem(
-        'openpay:qr-settings:v1',
+        'openpay:qr-settings:v2',
         JSON.stringify({
           receiver: 'not-an-address',
           token: 'usdc',
@@ -152,7 +152,7 @@ describe('QrGenerator', () => {
     it('クリックで開閉が切り替わる', async () => {
       const user = userEvent.setup();
       window.localStorage.setItem(
-        'openpay:qr-settings:v1',
+        'openpay:qr-settings:v2',
         JSON.stringify({
           receiver: VALID,
           token: 'usdc',
@@ -215,7 +215,7 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
 
       await waitFor(() => {
-        const raw = window.localStorage.getItem('openpay:qr-settings:v1');
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(raw).not.toBeNull();
         const parsed = JSON.parse(raw!);
         expect(parsed.directTransfer).toBe(true);
@@ -224,7 +224,7 @@ describe('QrGenerator', () => {
 
     it('directTransfer=true でアコーディオン閉時のサマリに 0% と出る', async () => {
       window.localStorage.setItem(
-        'openpay:qr-settings:v1',
+        'openpay:qr-settings:v2',
         JSON.stringify({
           receiver: VALID,
           token: 'usdc',

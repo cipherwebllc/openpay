@@ -6,14 +6,71 @@ import { useTranslations } from 'next-intl';
 import { isAddress, getAddress, type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
-import { useQrSettings } from '@/hooks/useQrSettings';
-import { buildPayUrl, type PayParams, type PayMode } from '@/lib/url';
+import { useQrSettings, type SplitDraft } from '@/hooks/useQrSettings';
+import {
+  buildPayUrl,
+  SPLIT_MAX_ENTRIES,
+  type PayParams,
+  type PayMode,
+  type SplitEntry,
+} from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import type { FeeMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 
 type Mode = 'amount' | 'static';
+
+// Drafts → 検証済 SplitEntry[] へ変換。1 件でも不正があれば null を返す
+// (URL に部分的に組み込むのは混乱を招くため "all-or-nothing")。
+// 主 to との重複・split 内の重複・% 合計 100 以上もここで弾く。
+function parseSplitDrafts(
+  drafts: ReadonlyArray<SplitDraft>,
+  primary: Address | null,
+): { entries: SplitEntry[] | null; sum: number; error: 'addr' | 'pct' | 'sum' | 'dup' | null } {
+  const entries: SplitEntry[] = [];
+  const seen = new Set<string>();
+  let sum = 0;
+  let firstError: 'addr' | 'pct' | 'sum' | 'dup' | null = null;
+  for (const d of drafts) {
+    const a = d.address.trim();
+    const p = d.percent.trim();
+    if (a.length === 0 && p.length === 0) continue;
+    if (!isAddress(a)) {
+      if (!firstError) firstError = 'addr';
+      continue;
+    }
+    if (!/^\d+$/.test(p)) {
+      if (!firstError) firstError = 'pct';
+      continue;
+    }
+    const percent = Number(p);
+    if (percent < 1 || percent > 99) {
+      if (!firstError) firstError = 'pct';
+      continue;
+    }
+    const checksum = getAddress(a);
+    const lower = checksum.toLowerCase();
+    if (primary && lower === primary.toLowerCase()) {
+      if (!firstError) firstError = 'dup';
+      continue;
+    }
+    if (seen.has(lower)) {
+      if (!firstError) firstError = 'dup';
+      continue;
+    }
+    seen.add(lower);
+    sum += percent;
+    entries.push({ to: checksum, percent });
+  }
+  if (sum >= 100) {
+    return { entries: null, sum, error: 'sum' };
+  }
+  if (firstError) {
+    return { entries: null, sum, error: firstError };
+  }
+  return { entries, sum, error: null };
+}
 
 function shortAddr(a: string): string {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
@@ -55,6 +112,20 @@ export function QrGenerator() {
     (mode === 'amount' && /^\d+(\.\d+)?$/.test(amount) && Number(amount) > 0);
   const payMode: PayMode = settings.directTransfer ? 'direct' : 'gasless';
 
+  // direct mode では split は無視する (PaymentForm 側でも無視するので URL に
+  // 含めると混乱)。それ以外では parseSplitDrafts で検証して、有効な entries
+  // のみ URL に含める。
+  const splitParsed = useMemo(
+    () => parseSplitDrafts(settings.splits, effectiveReceiver),
+    [settings.splits, effectiveReceiver],
+  );
+  const splitsForUrl =
+    !settings.directTransfer &&
+    splitParsed.entries &&
+    splitParsed.entries.length > 0
+      ? splitParsed.entries
+      : undefined;
+
   const payUrl = useMemo(() => {
     if (!hydrated || !effectiveReceiver || !origin || !amountValid) return '';
     const params: PayParams = {
@@ -63,6 +134,7 @@ export function QrGenerator() {
       fee: settings.fee,
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
+      split: splitsForUrl,
     };
     return buildPayUrl(origin, params);
   }, [
@@ -75,7 +147,24 @@ export function QrGenerator() {
     mode,
     amount,
     payMode,
+    splitsForUrl,
   ]);
+
+  function setSplits(next: SplitDraft[]) {
+    setSettings((s) => ({ ...s, splits: next }));
+  }
+  function addSplit() {
+    if (settings.splits.length >= SPLIT_MAX_ENTRIES) return;
+    setSplits([...settings.splits, { address: '', percent: '' }]);
+  }
+  function removeSplit(idx: number) {
+    setSplits(settings.splits.filter((_, i) => i !== idx));
+  }
+  function updateSplit(idx: number, patch: Partial<SplitDraft>) {
+    setSplits(
+      settings.splits.map((s, i) => (i === idx ? { ...s, ...patch } : s)),
+    );
+  }
 
   const handleResolved = useCallback((addr: Address | null) => {
     setResolvedReceiver(addr);
@@ -227,6 +316,80 @@ export function QrGenerator() {
                   );
                 })}
               </div>
+            </Field>
+          )}
+
+          {!settings.directTransfer && (
+            <Field
+              label={t('splitLabel', {
+                primaryPercent: 100 - splitParsed.sum,
+              })}
+            >
+              <p className="mb-2 text-xs text-slate-500">
+                {t('splitDescription', { max: SPLIT_MAX_ENTRIES })}
+              </p>
+              <div className="space-y-2">
+                {settings.splits.map((s, i) => (
+                  <div key={i} className="flex flex-wrap items-start gap-2">
+                    <input
+                      type="text"
+                      value={s.address}
+                      onChange={(e) =>
+                        updateSplit(i, { address: e.target.value.trim() })
+                      }
+                      placeholder="0x..."
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                    />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={s.percent}
+                      onChange={(e) =>
+                        updateSplit(i, {
+                          percent: e.target.value.replace(/[^\d]/g, ''),
+                        })
+                      }
+                      placeholder="%"
+                      className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+                      maxLength={2}
+                      aria-label={t('splitPercentLabel')}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSplit(i)}
+                      aria-label={t('splitRemove')}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {settings.splits.length < SPLIT_MAX_ENTRIES && (
+                <button
+                  type="button"
+                  onClick={addSplit}
+                  className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
+                >
+                  {t('splitAdd')}
+                </button>
+              )}
+              {splitParsed.error && (
+                <p className="mt-2 text-xs text-red-600">
+                  {t(`splitError.${splitParsed.error}`)}
+                </p>
+              )}
+              {splitsForUrl && splitsForUrl.length > 0 && (
+                <p className="mt-2 text-xs text-emerald-700">
+                  {t('splitSummary', {
+                    count: splitsForUrl.length,
+                    primaryPercent: 100 - splitParsed.sum,
+                  })}
+                </p>
+              )}
             </Field>
           )}
 
