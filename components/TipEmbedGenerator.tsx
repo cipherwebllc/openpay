@@ -6,7 +6,7 @@ import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
-import { isLikelyName } from '@/lib/resolveAddress';
+import { isLikelyName } from '@/lib/nameDetection';
 import {
   buildTipUrl,
   DEFAULT_TIP_PRESETS,

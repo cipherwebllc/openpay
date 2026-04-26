@@ -10,7 +10,7 @@ import { buildPayUrl, type PayParams, type PayMode } from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import type { FeeMode } from '@/lib/fee';
 import { env } from '@/lib/env';
-import { isLikelyName } from '@/lib/resolveAddress';
+import { isLikelyName } from '@/lib/nameDetection';
 
 type Mode = 'amount' | 'static';
 

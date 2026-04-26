@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
-import { isLikelyName } from '@/lib/resolveAddress';
+import { isLikelyName } from '@/lib/nameDetection';
 
 // 受取アドレス入力。0x アドレスまたは .eth / .base.eth を受け付け、
 // 名前解決の結果を resolved に返す (親が settings.receiver の確定値として

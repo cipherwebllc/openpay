@@ -1,15 +1,20 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { resolveAddress, type ResolvedAddress } from '@/lib/resolveAddress';
+import type { ResolvedAddress } from '@/lib/resolveAddress';
 
-// 入力が空 / 不変なら fetch しない。staleTime を 5 分とり、同じ名前を
-// 連続で解決しないように。retry はオフ (UX として "resolved or not" を
-// 即座に伝えたい)。
+// resolveAddress は viem の ENS / Universal Resolver コードを引き込むため
+// ~25KB ある。dynamic import で別チャンクに切り出し、初回ペイロードから外す。
+// (実行されるのはユーザが名前 / 0x を実際に入力した瞬間。)
+async function resolveAddressLazy(input: string) {
+  const mod = await import('@/lib/resolveAddress');
+  return mod.resolveAddress(input);
+}
+
 export function useResolveAddress(input: string) {
   return useQuery<ResolvedAddress | null, Error>({
     queryKey: ['resolveAddress', input.trim().toLowerCase()],
-    queryFn: () => resolveAddress(input),
+    queryFn: () => resolveAddressLazy(input),
     enabled: input.trim().length > 0,
     staleTime: 5 * 60_000,
     retry: false,
