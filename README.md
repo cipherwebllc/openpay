@@ -1,7 +1,11 @@
 # OpenPay
 
-小規模店舗が**ウォレットアドレス1つだけ**で導入できる、オープンソースのガスレス決済 QR ジェネレーター & 決済アプリ。  
+小規模店舗・クリエイター・フリーランスが**ウォレットアドレス1つだけ**で導入できる、オープンソースのガスレス決済 / Tip widget ジェネレーター。  
 ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base)** で決済できます。
+
+- `/` — 店舗向け QR ジェネレーター + クリエイター向け Tip widget 埋め込みコード生成 (タブ切替)
+- `/pay?to=...&token=...&fee=...&amount=...` — QR をスキャンした顧客の決済画面
+- `/tip/[address]?token=...&name=...&message=...&color=...&preset=...` — クリエイター向けチップ送金画面 (iframe 埋め込み対応)
 
 **Repo**: https://github.com/cipherwebllc/openpay  
 **License**: MIT
@@ -17,6 +21,7 @@ ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組
 | 登録審査不要 | 店主は自分のウォレットアドレスを入力するだけで QR を発行 |
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
 | 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
+| Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可 |
 
 ## 現金 / クレカ / PayPay との比較
 
@@ -72,6 +77,22 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 
 商品点数が多い場合は 1 商品ずつ `/` で QR を生成する運用を想定。需要が増えれば CSV → 一括 QR 生成 (PDF / ZIP) を追加予定。
 
+### 3. クリエイターの Tip widget 埋め込み (β)
+
+イラストレーター・配信者・OSS maintainer 等が、ブログ・ポートフォリオ・配信ページ・GitHub README に **iframe 1 行貼付** でチップ送金 UI を組み込めます。pixivFANBOX / BOOST / Twitter tip 等は手数料 10〜15% + 月次入金 + 海外決済不可ですが、OpenPay は **手数料 1% / 即時着金 / 海外 OK / JPYC + USDC 両対応**。
+
+- 設定: `/` の「Tip widget」タブで受取アドレス・通貨・表示名・メッセージ・テーマカラー・preset 金額を入力 → URL と iframe スニペットを生成
+- 埋め込み:
+  ```html
+  <iframe
+    src="https://your-openpay.example.com/tip/0x...?token=jpyc&name=山田太郎&color=%231e3a8a"
+    width="380" height="640" style="border:0;max-width:100%"
+    title="OpenPay Tip" loading="lazy"
+  ></iframe>
+  ```
+- ファンは MetaMask v12+ などで接続し、preset (JPYC: 100/500/1000、USDC: 1/5/10) かカスタム金額を選んで送信。ガス代不要 (運営肩代わり)
+- iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
+
 ## 対応ネットワークと選定理由
 
 | トークン | チェーン | ガス通貨 | 採否 | 理由 |
@@ -123,29 +144,42 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 openpay/
 ├── app/
 │   ├── layout.tsx
-│   ├── providers.tsx          # WagmiProvider + ReactQuery
+│   ├── providers.tsx                # WagmiProvider + ReactQuery
 │   ├── globals.css
-│   ├── page.tsx               # / (店主向け QR 生成)
-│   └── pay/page.tsx           # /pay (顧客向け決済)
+│   ├── page.tsx                     # / (店主向け QR + Tip widget タブ)
+│   ├── pay/page.tsx                 # /pay (顧客向け決済)
+│   └── tip/[address]/page.tsx       # /tip/[address] (クリエイター Tip 受取)
 ├── components/
 │   ├── ConnectButton.tsx
+│   ├── Field.tsx                    # 共有: ラベル付き入力ラッパー
+│   ├── Row.tsx                      # 共有: 明細用 dt/dd 行
 │   ├── QrGenerator.tsx
-│   └── PaymentForm.tsx
+│   ├── PaymentForm.tsx
+│   ├── TipForm.tsx                  # /tip/[address] のメイン UI
+│   └── TipEmbedGenerator.tsx        # /` の Tip widget タブ
 ├── hooks/
-│   ├── useQrSettings.ts       # LocalStorage 永続化
-│   ├── useSmartAccount.ts     # ERC-7702 + Pimlico
-│   └── useBatchPayment.ts     # バッチ UserOperation
+│   ├── useQrSettings.ts             # LocalStorage: QR 生成設定
+│   ├── useTipSettings.ts            # LocalStorage: Tip widget 生成設定
+│   ├── useSmartAccount.ts           # ERC-7702 + Pimlico
+│   ├── useBatchPayment.ts           # バッチ UserOperation
+│   └── useDirectPayment.ts          # 直接送金モード (mode=direct)
 ├── lib/
-│   ├── env.ts                 # 環境変数の単一参照点
-│   ├── chains.ts              # mainnet/testnet 切替
-│   ├── tokens.ts              # JPYC / USDC 定義
-│   ├── fee.ts                 # 1% / MIN_FEE 計算
-│   ├── url.ts                 # /pay URL ビルド/パース
-│   ├── storage.ts             # LocalStorage helpers
-│   ├── wagmi.ts               # wagmi config + 3 connectors
-│   └── pimlico.ts             # Pimlico bundler/paymaster client
+│   ├── env.ts                       # 環境変数の単一参照点
+│   ├── chains.ts                    # mainnet/testnet 切替
+│   ├── tokens.ts                    # JPYC / USDC 定義
+│   ├── fee.ts                       # 1% / MIN_FEE 計算
+│   ├── url.ts                       # /pay /tip URL ビルド/パース
+│   ├── storage.ts                   # LocalStorage helpers
+│   ├── logger.ts                    # 構造化 JSON ログ
+│   ├── wagmi.ts                     # wagmi config + 3 connectors
+│   └── pimlico.ts                   # Pimlico bundler/paymaster client
+├── tests/
+│   ├── _helpers/wagmiMock.ts        # mockHook<F>: 部分モック用 typed helper
+│   ├── components/                  # RTL コンポーネントテスト
+│   ├── hooks/                       # フックの境界テスト
+│   └── lib/                         # 純関数テスト
 ├── package.json
-├── next.config.mjs
+├── next.config.mjs                  # /tip/* に CSP frame-ancestors を付与
 ├── tailwind.config.ts
 └── .env.local.example
 ```
@@ -230,6 +264,16 @@ npm run dev
 5. 「○○ を支払う」ボタンで送金完了
 6. UserOp Hash・Tx Hash・ブロック番号を表示
 
+### クリエイター側 (Tip widget 設置)
+
+1. `/` を開いて「Tip widget (クリエイター)」タブに切替
+2. 受取アドレス・通貨 (JPYC / USDC)・表示名・メッセージ・テーマカラー・preset 金額を入力
+3. プレビューを確認 → URL or iframe スニペットをコピー
+4. ブログ・ポートフォリオ・配信ページの HTML に貼り付け
+5. ファンが iframe 内のボタンをクリック → ウォレット接続 → preset/カスタム額で送信
+
+Tip widget の手数料は **外税 1%** 固定。クリエイターは preset 額をそのまま受け取り、ファンが 1% を上乗せして支払います (MIN_FEE 適用は通常決済と同じ)。
+
 ## 手数料の計算
 
 - 運営手数料 = `amount × 1.0%` （ただし下限あり）
@@ -300,16 +344,19 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 | 層 | 対象 | テスト方針 |
 | --- | --- | --- |
 | `lib/fee.ts` | 1% / MIN_FEE / 内税・外税 / 境界 (1% == MIN, amount < MIN) / amount=0 / 大数 | 純粋関数 — 実コードのみ |
-| `lib/url.ts` | build / parse / checksum 正規化 / 不正 URL 各種 / roundtrip | 純粋関数 — 実コードのみ |
+| `lib/url.ts` | /pay と /tip 両方の build / parse / sanitize (制御文字除去 / 長さ切詰 / preset 検証) / roundtrip | 純粋関数 — 実コードのみ |
 | `lib/tokens.ts` | decimals / chainId / env override / フォールバック | 実コード |
 | `lib/storage.ts` | LocalStorage roundtrip / 破損 JSON / null | jsdom 上で実コード |
 | `lib/chains.ts` | mainnet/testnet 切替 / chainForToken / isSupportedChainId | 実コード |
 | `lib/env.ts` | 不正 NETWORK_ENV で throw / 各 fallback | `vi.resetModules()` で動的 import |
 | `lib/pimlico.ts` | URL 生成 / paymasterContext / client 生成 | 実コード |
-| `hooks/useQrSettings` | LocalStorage hydrate / 破損データ復旧 / persist | RTL `renderHook` |
+| `hooks/useQrSettings` `useTipSettings` | LocalStorage hydrate / 破損データ復旧 / persist | RTL `renderHook` |
 | `hooks/useBatchPayment` | 2-call バッチ / 0-amount スキップ / encode された transfer の中身 (`decodeFunctionData` で復号して検証) / エラー伝播 | `useSmartAccount` を境界モック、本ロジックは実行 |
+| `hooks/useDirectPayment` | writeContract 引数 / receipt 状態遷移 / エラー伝播 | wagmi を境界モック |
 | `components/QrGenerator` | 入力 → state → QR(SVG) 生成 / mode 切替 / clipboard / 永続化 | RTL + jsdom |
-| `components/PaymentForm` | URL parse 各種エラー / 内税・外税の breakdown 計算結果 / 接続状態の遷移 / mutate 引数の妥当性 | wagmi/Smart Account を境界モック |
+| `components/PaymentForm` | URL parse 各種エラー / 内税・外税の breakdown / 接続状態の遷移 / mutate 引数の妥当性 / direct mode | wagmi/Smart Account を境界モック |
+| `components/TipForm` | preset 切替 / カスタム入力 / 外税 breakdown / submit 引数 / wallet 状態 | wagmi/Smart Account を境界モック |
+| `components/TipEmbedGenerator` | 入力 → URL/iframe スニペット生成 / preset 検証 / カラー検証 / clipboard / 永続化 | RTL + jsdom |
 | `components/ConnectButton` | connector 列挙 / クリックで connect / 切断 / pending / error | wagmi を境界モック |
 
 ### モック方針
@@ -317,6 +364,7 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 - **テスト対象コードはモックしない**。`lib/*` と `hooks/*` の対象ロジックは常に実行されます。
 - **境界モックのみ**: 外部ネットワーク (Pimlico API) / EIP-7702 ウォレット / wagmi connectors を返す位置のみモック。
 - ABI エンコード/デコードは viem 本物を使用 (`encodeFunctionData` の結果を `decodeFunctionData` で復号して、関数名と引数を実データ検証)。
+- wagmi / hook の部分モックは `tests/_helpers/wagmiMock.ts` の `mockHook<F>` で集約。`DeepPartial<ReturnType<F>>` を受け取り、key の typo を型エラーで検出しつつ、深い nested structure (Chain / Connector 等) は省略可能。
 
 ### 統合テスト (e2e)
 
