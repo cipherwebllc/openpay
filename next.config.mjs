@@ -3,6 +3,19 @@ import { withSentryConfig } from '@sentry/nextjs';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // /tip/[address] は iframe 埋め込みを想定するため、X-Frame-Options を出さず、
+  // CSP frame-ancestors で全 origin 許可する。アクションは MetaMask 等のウォレット
+  // ポップアップ内で行われるため、iframe 内でのクリックジャッキングは成立しない。
+  async headers() {
+    return [
+      {
+        source: '/tip/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+        ],
+      },
+    ];
+  },
   webpack: (config) => {
     // wagmi / viem / walletconnect の依存が一部 Node-only モジュールを参照するため、
     // クライアントバンドルでは無効化する
