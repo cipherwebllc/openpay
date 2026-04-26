@@ -770,3 +770,127 @@ describe('parseSplitDrafts (QrGenerator UI 用 draft validator)', () => {
     expect(r.error).toBe('addr');
   });
 });
+
+describe('TipParams: Unicode + 制御文字 / URL エンコーディングのエッジケース', () => {
+  function search(query: string) {
+    return new URLSearchParams(query);
+  }
+
+  it('絵文字を含む名前は保持される (4-byte UTF-16 代理ペア)', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      name: '🎨アーティスト🎨',
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.name).toBe('🎨アーティスト🎨');
+  });
+
+  it('改行・タブ・C0 制御文字は除去 (URL クエリへの注入防止)', () => {
+    const dirty = 'Alice\n\r\t\x00\x07\x1f\x7f';
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      name: dirty,
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    expect(sp.get('name')).toBe('Alice');
+  });
+
+  it('CJK 全角空白は通常文字として保持される', () => {
+    const r = parseTipParams(
+      VALID_TO,
+      search('token=jpyc&name=' + encodeURIComponent('A　B')),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.name).toBe('A　B');
+  });
+
+  it('preset の前後空白は trim、ゼロ埋め "001" は許容', () => {
+    const r = parseTipParams(
+      VALID_TO,
+      search('token=jpyc&preset=' + encodeURIComponent(' 001 , 002 ')),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.presets).toEqual(['001', '002']);
+  });
+
+  it('webhook URL がポート + パス + クエリ込みでも保持', () => {
+    const url = 'https://hooks.example.com:8443/webhooks/tip?id=42';
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      webhook: url,
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // URL クラス経由で末尾に / が付与されない場合あり (toString の仕様)
+      expect(r.params.webhook).toContain('hooks.example.com:8443');
+      expect(r.params.webhook).toContain('id=42');
+    }
+  });
+
+  it('color のチェックサムは緩く: #ABC は 3-digit なので拒否 (#rrggbb のみ受理)', () => {
+    const r = parseTipParams(
+      VALID_TO,
+      search('token=jpyc&color=' + encodeURIComponent('#ABC')),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.color).toBeUndefined();
+  });
+});
+
+describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
+  function search(query: string) {
+    return new URLSearchParams(query);
+  }
+
+  it('build → parse roundtrip ですべての params が一致 (split 含む)', () => {
+    const A: `0x${string}` = '0x1111111111111111111111111111111111111111';
+    const B: `0x${string}` = '0x2222222222222222222222222222222222222222';
+    const built = buildPayPath({
+      to: A,
+      token: 'usdc',
+      fee: 'exclude',
+      amount: '12.345678',
+      mode: 'gasless',
+      split: [{ to: B, percent: 25 }],
+    });
+    const sp = new URLSearchParams(built.split('?')[1]);
+    const r = parsePayParams(sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.to).toBe(A);
+      expect(r.params.token).toBe('usdc');
+      expect(r.params.fee).toBe('exclude');
+      expect(r.params.amount).toBe('12.345678');
+      expect(r.params.mode).toBe('gasless');
+      expect(r.params.split).toEqual([{ to: B, percent: 25 }]);
+    }
+  });
+
+  it('split が空配列なら build で URL に出さない (parse で undefined)', () => {
+    const A: `0x${string}` = '0x1111111111111111111111111111111111111111';
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      fee: 'include',
+      mode: 'gasless',
+      split: [],
+    });
+    expect(path).not.toContain('split=');
+  });
+
+  it('amount の小数点表記は保持 (parseUnits 側で wei 化される想定)', () => {
+    const A: `0x${string}` = '0x1111111111111111111111111111111111111111';
+    const r = parsePayParams(
+      search(`to=${A}&token=jpyc&fee=include&amount=0.000001`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.amount).toBe('0.000001');
+  });
+});

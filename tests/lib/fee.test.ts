@@ -290,4 +290,71 @@ describe('calcSplitBreakdown (C1)', () => {
     expect(r.recipients[0].amount).toBe(0n);
     expect(r.recipients[1].amount).toBe(0n);
   });
+
+  it('split が 1 件 1% (極端): primary 99% で残余取得、% 合計が 100', () => {
+    const r = calcSplitBreakdown(
+      10_000_000n,
+      'exclude',
+      'usdc',
+      A,
+      [{ to: B, percent: 1 }],
+    );
+    // amount=10 USDC, exclude → distributable = 10 USDC, customer pays 10.1
+    // B = 10 USDC * 1% = 100_000 (0.1 USDC)
+    // primary = 10 - 0.1 = 9.9 USDC
+    expect(r.recipients[0].percent).toBe(99);
+    expect(r.recipients[0].amount).toBe(9_900_000n);
+    expect(r.recipients[1].percent).toBe(1);
+    expect(r.recipients[1].amount).toBe(100_000n);
+  });
+
+  it('split 3 件 (上限): すべての受取人に正しく配分、合計が distributable と一致', () => {
+    const C2 = '0x4444444444444444444444444444444444444444' as Address;
+    const r = calcSplitBreakdown(
+      100_000_000n,
+      'include',
+      'usdc',
+      A,
+      [
+        { to: B, percent: 10 },
+        { to: C, percent: 20 },
+        { to: C2, percent: 30 },
+      ],
+    );
+    expect(r.recipients).toHaveLength(4);
+    expect(r.recipients[0].percent).toBe(40); // 100 - 10 - 20 - 30
+    const sum = r.recipients.reduce((s, x) => s + x.amount, 0n);
+    expect(sum).toBe(99_000_000n); // distributable = 100 - 1 fee
+  });
+
+  it('巨大 amount (10^36) でも overflow せず比率配分が正しい', () => {
+    // bigint なので native の 64-bit overflow は無いが、回帰検出のため境界
+    const huge = 10n ** 36n;
+    const r = calcSplitBreakdown(huge, 'exclude', 'usdc', A, [
+      { to: B, percent: 50 },
+    ]);
+    // amount * 1% = 10^34. fee は 10^34 (USDC MIN 0.1 = 1e5 << 1e34)
+    // distributable = huge (exclude → merchant 受取 = amount)
+    // primary = huge / 2、B = huge / 2
+    expect(r.recipients[0].amount + r.recipients[1].amount).toBe(huge);
+    expect(r.recipients[1].amount).toBe(huge / 2n);
+  });
+
+  it('% 合計が 99 (主が 1%): distributable のほぼ全部が split に流れる', () => {
+    const C2 = '0x4444444444444444444444444444444444444444' as Address;
+    const r = calcSplitBreakdown(
+      100_000_000n,
+      'exclude',
+      'usdc',
+      A,
+      [
+        { to: B, percent: 33 },
+        { to: C, percent: 33 },
+        { to: C2, percent: 33 },
+      ],
+    );
+    expect(r.recipients[0].percent).toBe(1);
+    // primary 1% でも 0 にはならず、端数集約で >= 1 USDC * 1%
+    expect(r.recipients[0].amount).toBeGreaterThan(0n);
+  });
 });
