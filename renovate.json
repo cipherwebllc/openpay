@@ -1,0 +1,77 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    ":maintainLockFilesWeekly",
+    "schedule:weekends"
+  ],
+  "timezone": "Asia/Tokyo",
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "ignoreDeps": [],
+  "packageRules": [
+    {
+      "description": "wagmi/viem/permissionless はメジャー追従が頻繁。PR を分けて慎重に",
+      "matchPackageNames": ["wagmi", "viem", "permissionless", "@wagmi/core"],
+      "rangeStrategy": "bump",
+      "groupName": "wagmi-stack"
+    },
+    {
+      "description": "Next.js / React は組で更新",
+      "matchPackageNames": ["next", "react", "react-dom", "@types/react", "@types/react-dom", "eslint-config-next"],
+      "groupName": "next-react-stack"
+    },
+    {
+      "description": "Sentry は副作用が大きいので個別 PR",
+      "matchPackageNames": ["@sentry/nextjs"]
+    },
+    {
+      "description": "Tailwind / PostCSS / autoprefixer は組で更新",
+      "matchPackageNames": ["tailwindcss", "postcss", "autoprefixer"],
+      "groupName": "tailwind-stack"
+    },
+    {
+      "description": "Vitest / testing-library は組で更新",
+      "matchPackageNames": [
+        "vitest",
+        "@vitest/ui",
+        "@vitejs/plugin-react",
+        "@testing-library/react",
+        "@testing-library/dom",
+        "@testing-library/jest-dom",
+        "@testing-library/user-event",
+        "jsdom"
+      ],
+      "groupName": "test-stack"
+    },
+    {
+      "description": "TypeScript / @types/node はマイナー以下を automerge",
+      "matchPackageNames": ["typescript", "@types/node"],
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "ESLint 関連は automerge minor 以下",
+      "matchPackageNames": ["eslint"],
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "GitHub Actions は最新追従",
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch"]
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": false
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["before 6am on monday"]
+  }
+}

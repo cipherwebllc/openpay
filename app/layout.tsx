@@ -3,9 +3,18 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'OpenPay — Gasless QR Payment',
+  title: 'OpenPay — Gasless QR Payment & Tip Widget',
   description:
-    '小規模店舗向け、ガス代ゼロ (ERC-4337 + Pimlico) で JPYC / USDC を受け取れる オープンソース決済 QR ジェネレーター。',
+    'ガス代ゼロ (ERC-4337 + Pimlico) で JPYC / USDC を受け取れるオープンソース QR & Tip widget ジェネレーター。',
+  icons: {
+    icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
+    apple: [{ url: '/icon.svg', type: 'image/svg+xml' }],
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'OpenPay',
+    statusBarStyle: 'default',
+  },
 };
 
 export const viewport: Viewport = {
