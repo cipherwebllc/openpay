@@ -609,6 +609,32 @@ GitHub リポジトリ Secrets / Variables に下記をセット:
 
 `.github/workflows/pimlico-balance.yml` が 6 時間ごとに `scripts/check-pimlico-balance.mjs` を実行。残高がしきい値を下回ったら webhook に通知し、ジョブ自体も失敗させる (=GitHub の Actions 失敗通知も飛ぶ)。
 
+## ロードマップ (v0 out-of-scope、v1 候補)
+
+下記 2 機能は v0 (現バージョン) では明示的に **out of scope**。実装着手は需要シグナルが見えてから判断する。perpetual TODO 化 (永遠の "やる予定") を避けるため、ここに固定:
+
+### B4: サポーターウォール (creator 向け)
+
+**ねらい**: Tip widget の下部に「最近のサポーター (短縮アドレス + 金額)」を opt-in で表示し、社会的証明 + 競争心理で支援を増やす。
+
+**未実装の理由**:
+- Polygon / Base の過去 transfer を全件 RPC スキャンするのは重い (1 受取人あたり数千ブロック分の getLogs)
+- Etherscan / Basescan の event API + LRU キャッシュ層が現実解だが、API key 管理 + 30 日 retention 設計が必要
+- creator 側に opt-in / opt-out の管理画面が必要 (現状 OpenPay は管理画面ゼロ、URL 1 本で運用)
+
+**着手判断**: 5 件以上のクリエイターから「サポーターを表示したい」要望が出たら設計開始。それまでは v0 のまま。
+
+### B5: AI Agent 向け JPYC x402 facilitator
+
+**ねらい**: Coinbase x402 仕様 (HTTP 402 + USDC 自動決済) を JPYC で提供。AI agent / API provider が JPYC で従量課金できる空白地帯を狙う。
+
+**未実装の理由**:
+- 5〜10 日工数の独立 feature (新規 endpoint / facilitator service / OpenPay 既存基盤との接続)
+- x402 自体の market demand が薄い ([CoinDesk 2026/03 レポート](https://www.coindesk.com/markets/2026/03/11/coinbase-backed-ai-payments-protocol-wants-to-fix-micropayment-but-demand-is-just-not-there-yet) — 1 日 $28K のみ、大半が test トランザクション)
+- 競合は Coinbase 公式 facilitator (USDC のみ)、JPYC 対応は本リポジトリが先発できる立場
+
+**着手判断**: 日本語圏で「AI agent から JPYC 課金したい」具体ユースケースが 1 件でも出てきたら着手。current state では speculative すぎる。
+
 ## クレジット / 謝辞
 
 本プロジェクトは下記のオープンソース・サービスの上に成り立っています。

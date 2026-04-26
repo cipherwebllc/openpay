@@ -18,11 +18,34 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Secrets が 1 つでも欠けていたら scheduled run は graceful skip。
+      # workflow_dispatch (手動実行) では明示的に動かしたい意図とみなして実行する。
+      # cron トリガで毎回 fail メールを発生させるのを防ぐ。
+      - name: Verify secrets configured
+        id: secrets
+        env:
+          PIMLICO_PAYMASTER_POLYGON: ${{ secrets.PIMLICO_PAYMASTER_POLYGON }}
+          PIMLICO_PAYMASTER_BASE: ${{ secrets.PIMLICO_PAYMASTER_BASE }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          if [ -z "$PIMLICO_PAYMASTER_POLYGON" ] || [ -z "$PIMLICO_PAYMASTER_BASE" ] || [ -z "$ALERT_WEBHOOK_URL" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::error::Secrets が未設定です (PIMLICO_PAYMASTER_POLYGON / PIMLICO_PAYMASTER_BASE / ALERT_WEBHOOK_URL)。README 'Pimlico 残高アラート設定手順' を参照"
+              exit 1
+            fi
+            echo "::warning::Secrets 未設定のため scheduled run を skip (本番投入前の通常状態)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install (production deps only)
+        if: steps.secrets.outputs.skip != 'true'
         # viem だけあれば動く。devDependencies (vitest 等) は不要。
         run: npm ci --omit=dev
 
       - name: Check Pimlico balance
+        if: steps.secrets.outputs.skip != 'true'
         env:
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
