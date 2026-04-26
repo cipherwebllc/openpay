@@ -307,6 +307,29 @@ Tip widget の手数料は **外税 1%** 固定。クリエイターは preset �
 npm run build && npm run start
 ```
 
+### Vercel 環境変数のセキュリティ分類
+
+[2026-04 の Vercel セキュリティインシデント](https://vercel.com/kb/bulletin/vercel-april-2026-security-incident) を踏まえ、各 env を以下に従って Dashboard で登録:
+
+| env var | Vercel での分類 | 理由 |
+|---|---|---|
+| `NEXT_PUBLIC_*` (全て) | **Plain (non-sensitive)** | ビルド時にクライアントバンドルへインライン展開される設計上、元々公開情報。Sensitive にしても保護にならない |
+| `SENTRY_AUTH_TOKEN` | **Sensitive (暗号化)** ✓ 必須 | source map upload 権限を持つ。漏洩すると Sentry プロジェクトの source map 改竄リスク。今回のインシデントで Sensitive 化されていない env vars が漏洩対象になったため、本 token は必ず Sensitive で保管 |
+
+### Vercel 運用ハードニング (mainnet 切替前に全て実施)
+
+| 項目 | 実施場所 | 理由 |
+|---|---|---|
+| アカウントの **MFA 有効化** | Vercel Dashboard → Account Settings → Authentication | 今回の事象は employee の Google アカウント乗っ取りが起点。顧客アカウントの MFA は基本対策 |
+| **Spending Cap を $0 に固定** | Vercel Dashboard → Settings → Billing | 限度超過で **デプロイ停止** (請求発生せず)。検証段階は特に重要 |
+| **Audit Log 確認** | Vercel Dashboard → Settings → Activity | 不審な Deployment / Settings 変更が無いか定期確認 |
+| **Pimlico API Key の Origin 制限** | Pimlico Dashboard | `*.vercel.app` の preview ドメイン群 + production ドメインに限定 |
+| **Pimlico Sponsorship Policy ルール** | Pimlico Dashboard | README "Pimlico ダッシュボード設定" 5 項参照 (fee_receiver への transfer 必須化) |
+| **Sentry DSN 設定** | Vercel env (Plain) | Replay (10% / エラー時 100%) + 例外取得が自動有効化 |
+| **`SENTRY_AUTH_TOKEN` を Sensitive で登録** | Vercel env (Sensitive) ✓ | 上記表参照 |
+| **GitHub Secrets の見直し** | GitHub repo → Settings → Secrets | Pimlico 残高 cron / Lighthouse / Playwright 用の secrets は GitHub 側にあり、Vercel インシデントの影響を受けない (= 移行不要) |
+| **testnet で先に e2e** | Polygon Amoy / Base Sepolia | NETWORK_ENV=testnet で実 wallet を繋いで `/ja/pay` `/ja/tip` の送金成功を確認してから mainnet に切替 |
+
 ## 本番投入前に必ず検証すべきポイント (未検証 / LARP リスク)
 
 本リポジトリは MVP プロトタイプであり、以下の事項は **コード生成時点で実環境検証ができていない**。本番環境にデプロイする前に必ず確認してください。
@@ -407,6 +430,7 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 | 11 | testnet で実 e2e (QR スキャン → 送金 → receipt) | Polygon Amoy / Base Sepolia で 1 件以上の成功確認 |
 | 12 | Sentry DSN 設定 | `NEXT_PUBLIC_SENTRY_DSN` 設定で自動有効化。SDK は導入済 |
 | 13 | Pimlico 残高アラート | ダッシュボードで POL / ETH デポジットの残量しきい値通知を設定 |
+| 14 | Vercel ハードニング | 「Vercel デプロイ」セクションのハードニング表 全項 (MFA / Spending Cap / `SENTRY_AUTH_TOKEN` を Sensitive 化 / Origin 制限) |
 
 ## ロールバック
 

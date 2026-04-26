@@ -42,6 +42,10 @@ const nextConfig = {
 
 // Sentry: source map upload は SENTRY_AUTH_TOKEN がある時のみ有効。
 // 未設定でも他の機能 (instrumentation の自動取込み等) は動作する。
+// SENTRY_AUTH_TOKEN は build-time 専用 secret。Vercel Dashboard では必ず
+// "Sensitive Environment Variables" として登録すること (NEXT_PUBLIC_* 系
+// と異なり client bundle には含まれない / 漏洩すると source map upload
+// 権限を取られる)。詳細は README "Vercel デプロイ" セクション参照。
 export default withSentryConfig(withNextIntl(nextConfig), {
   silent: !process.env.CI,
   // Prisma など使わないため OpenTelemetry の動的 require 警告を抑制
