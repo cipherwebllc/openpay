@@ -235,10 +235,10 @@ npm run build && npm run start
 
 ### 2. JPYC mainnet コントラクトアドレス
 
-`lib/tokens.ts` の `JPYC_POLYGON_DEFAULT = '0x431D5dfF03120AFA4bDf332c61A6e1766eF37BDB'` は本コード生成時点で再検証されていない。  
-JPYC は v1 / v2 / PLUS と複数バージョンが存在し、過去に移行されている。**誤ったアドレスでメインネットを稼働させると顧客資金が失われる。**
+`lib/tokens.ts` の既定値は **JPYC v3 (Polygon): `0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`** です (プロジェクト所有者により確認済)。  
+JPYC は将来的に新バージョンへの移行や別チェーン拡張が起こる可能性があるため、本番投入前に [JPYC 公式](https://jpyc.jp/) で**最新のコントラクトアドレスを再確認**してください。不一致がある場合は `NEXT_PUBLIC_JPYC_MAINNET_ADDRESS` で上書き可能です。
 
-必ず [JPYC 公式](https://jpyc.jp/) で最新の Polygon コントラクトアドレスを確認し、不一致があれば `NEXT_PUBLIC_JPYC_MAINNET_ADDRESS` で上書きしてください。
+> ⚠️ **誤ったアドレスを mainnet で稼働させると顧客資金が失われます。** デプロイ前に必ず公式ソースとの突合を実施してください。
 
 ### 3. ERC-7702 の実フロー
 
@@ -257,7 +257,7 @@ policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject す�
 ## 既知の制約 / 注意
 
 - **ERC-7702 対応ウォレット**: 顧客の EOA は EIP-7702 (`signAuthorization`) 対応ウォレットが必要です。MetaMask v12 系以降の安定版が対応しています。Coinbase Wallet / 一部の WalletConnect ウォレットは未対応の可能性があります
-- **JPYC コントラクトアドレス**: `lib/tokens.ts` に JPYC v2 (`0x431D5...37BDB`) を埋めていますが、JPYC は将来的に新しいバージョンへ移行する可能性があるため、本番投入前に [JPYC 公式](https://jpyc.jp/) でアドレスを確認してください
+- **JPYC コントラクトアドレス**: `lib/tokens.ts` の既定値は JPYC v3 (`0xE7C3...3c29`、所有者確認済)。将来の移行に備えて本番投入前に [JPYC 公式](https://jpyc.jp/) で最新アドレスを再確認し、必要なら `NEXT_PUBLIC_JPYC_MAINNET_ADDRESS` で上書きしてください
 - **testnet の JPYC**: Polygon Amoy には公式の JPYC が存在しないため、テスト時は `NEXT_PUBLIC_JPYC_TESTNET_ADDRESS` で独自にデプロイした ERC20 を指定してください
 - **API Key の露出**: `NEXT_PUBLIC_*` はクライアントへ展開されるため、本番では必ず Pimlico ダッシュボード側で Origin 制限を設定してください
 - **Sponsorship Policy のレート制御**: スポンサー残高が枯渇すると UserOperation が失敗します。Pimlico ダッシュボードで残高アラートを設定することを推奨します
@@ -314,7 +314,7 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 | 4 | `package-lock.json` をコミット | `npm ci` が成功すること |
 | 5 | `npm audit --audit-level=high --omit=dev` がクリーン | CI で必須 |
 | 6 | permissionless API 名健全性 | `tests/hooks/useSmartAccount.test.tsx` の import smoke check |
-| 7 | JPYC mainnet アドレス確認 | [JPYC 公式](https://jpyc.jp/) で再検証、必要なら `NEXT_PUBLIC_JPYC_MAINNET_ADDRESS` で上書き |
+| 7 | JPYC mainnet アドレス確認 | 既定値は JPYC v3 (`0xE7C3...3c29`、確認済)。デプロイ直前に [JPYC 公式](https://jpyc.jp/) で再突合 |
 | 8 | Pimlico Sponsorship Policy 設定 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` 必須、ガス残高デポジット済み |
 | 9 | Pimlico API Key の Origin 制限 | Pimlico ダッシュボードで本番ドメインに限定 |
 | 10 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定 | プレースホルダ (`0x...dEaD`) のまま投入しない |
