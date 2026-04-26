@@ -1,0 +1,5 @@
+# lint changed files (next lint --file)
+npx --no-install lint-staged
+
+# typecheck the whole project (cheap with incremental build cache)
+npm run typecheck
