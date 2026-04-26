@@ -1,6 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+// AddressInput の useResolveAddress (react-query 経由で外 RPC を叩く) は
+// テストでは fetch を発生させないために hook 単位でモック。0x アドレスの
+// 直接入力は AddressInput 内で local 検証されるため、hook は呼ばれない。
+vi.mock('@/hooks/useResolveAddress', () => ({
+  useResolveAddress: vi.fn(() => ({
+    data: null,
+    isFetching: false,
+    error: null,
+  })),
+}));
+
 import { QrGenerator } from '@/components/QrGenerator';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';

@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { isAddress, getAddress } from 'viem';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isAddress, getAddress, type Address } from 'viem';
+import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import { isLikelyName } from '@/lib/resolveAddress';
 import {
   buildTipUrl,
   DEFAULT_TIP_PRESETS,
@@ -22,6 +24,7 @@ export function TipEmbedGenerator() {
   const { settings, setSettings, hydrated } = useTipSettings();
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState<CopyKey | null>(null);
+  const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -29,7 +32,12 @@ export function TipEmbedGenerator() {
     }
   }, []);
 
-  const receiverValid = isAddress(settings.receiver);
+  const effectiveReceiver: Address | null = useMemo(() => {
+    if (isAddress(settings.receiver)) return getAddress(settings.receiver);
+    if (resolvedReceiver) return resolvedReceiver;
+    return null;
+  }, [settings.receiver, resolvedReceiver]);
+
   const colorValid = COLOR_PATTERN.test(settings.color);
   const presetsParsed = useMemo(() => {
     return settings.presets
@@ -45,9 +53,9 @@ export function TipEmbedGenerator() {
       : DEFAULT_TIP_PRESETS[settings.token];
 
   const tipUrl = useMemo(() => {
-    if (!hydrated || !receiverValid || !origin) return '';
+    if (!hydrated || !effectiveReceiver || !origin) return '';
     const params: TipParams = {
-      to: getAddress(settings.receiver),
+      to: effectiveReceiver,
       token: settings.token,
       name: settings.name || undefined,
       message: settings.message || undefined,
@@ -57,9 +65,8 @@ export function TipEmbedGenerator() {
     return buildTipUrl(origin, params);
   }, [
     hydrated,
-    receiverValid,
+    effectiveReceiver,
     origin,
-    settings.receiver,
     settings.token,
     settings.name,
     settings.message,
@@ -67,6 +74,10 @@ export function TipEmbedGenerator() {
     colorValid,
     presetsParsed,
   ]);
+
+  const handleResolved = useCallback((addr: Address | null) => {
+    setResolvedReceiver(addr);
+  }, []);
 
   const iframeSnippet = useMemo(() => {
     if (!tipUrl) return '';
@@ -91,20 +102,18 @@ export function TipEmbedGenerator() {
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="space-y-4">
         <Field label="クリエイターウォレットアドレス">
-          <input
-            type="text"
+          <AddressInput
             value={settings.receiver}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, receiver: e.target.value.trim() }))
-            }
-            placeholder="0x..."
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+            onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
+            onResolved={handleResolved}
           />
-          {settings.receiver && !receiverValid && (
-            <p className="mt-1 text-xs text-red-600">
-              アドレス形式が正しくありません
-            </p>
-          )}
+          {settings.receiver &&
+            !effectiveReceiver &&
+            !isLikelyName(settings.receiver) && (
+              <p className="mt-1 text-xs text-red-600">
+                アドレス形式が正しくありません
+              </p>
+            )}
         </Field>
 
         <Field label="通貨 / 受取チェーン">

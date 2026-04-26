@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { isAddress, getAddress } from 'viem';
+import { isAddress, getAddress, type Address } from 'viem';
+import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import { buildPayUrl, type PayParams, type PayMode } from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import type { FeeMode } from '@/lib/fee';
 import { env } from '@/lib/env';
+import { isLikelyName } from '@/lib/resolveAddress';
 
 type Mode = 'amount' | 'static';
 
@@ -24,6 +26,7 @@ export function QrGenerator() {
   const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
   const [accordionOpen, setAccordionOpen] = useState(true);
   const [accordionInitialized, setAccordionInitialized] = useState(false);
+  const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -31,24 +34,32 @@ export function QrGenerator() {
     }
   }, []);
 
+  // settings.receiver が 0x 形式なら effectiveReceiver はそれ。
+  // .eth / .base.eth なら resolvedReceiver (AddressInput が解決して通知)。
+  const effectiveReceiver: Address | null = useMemo(() => {
+    if (isAddress(settings.receiver)) return getAddress(settings.receiver);
+    if (resolvedReceiver) return resolvedReceiver;
+    return null;
+  }, [settings.receiver, resolvedReceiver]);
+
   // hydrate 後に 1 度だけ accordion 既定状態を決定する。
   // 受取先が有効なら閉じ (誤変更防止)、無効/未入力なら開く (修正促進)。
   useEffect(() => {
     if (!hydrated || accordionInitialized) return;
-    setAccordionOpen(!isAddress(settings.receiver));
+    setAccordionOpen(effectiveReceiver === null);
     setAccordionInitialized(true);
-  }, [hydrated, settings.receiver, accordionInitialized]);
+  }, [hydrated, effectiveReceiver, accordionInitialized]);
 
-  const receiverValid = isAddress(settings.receiver);
+  const receiverValid = effectiveReceiver !== null;
   const amountValid =
     mode === 'static' ||
     (mode === 'amount' && /^\d+(\.\d+)?$/.test(amount) && Number(amount) > 0);
   const payMode: PayMode = settings.directTransfer ? 'direct' : 'gasless';
 
   const payUrl = useMemo(() => {
-    if (!hydrated || !receiverValid || !origin || !amountValid) return '';
+    if (!hydrated || !effectiveReceiver || !origin || !amountValid) return '';
     const params: PayParams = {
-      to: getAddress(settings.receiver),
+      to: effectiveReceiver,
       token: settings.token,
       fee: settings.fee,
       amount: mode === 'amount' ? amount : undefined,
@@ -57,16 +68,19 @@ export function QrGenerator() {
     return buildPayUrl(origin, params);
   }, [
     hydrated,
-    receiverValid,
+    effectiveReceiver,
     origin,
     amountValid,
-    settings.receiver,
     settings.token,
     settings.fee,
     mode,
     amount,
     payMode,
   ]);
+
+  const handleResolved = useCallback((addr: Address | null) => {
+    setResolvedReceiver(addr);
+  }, []);
 
   const tokenInfo = TOKENS[settings.token];
 
@@ -162,20 +176,18 @@ export function QrGenerator() {
           </Field>
 
           <Field label="受取先ウォレットアドレス">
-            <input
-              type="text"
+            <AddressInput
               value={settings.receiver}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, receiver: e.target.value.trim() }))
-              }
-              placeholder="0x..."
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+              onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
+              onResolved={handleResolved}
             />
-            {settings.receiver && !receiverValid && (
-              <p className="mt-1 text-xs text-red-600">
-                アドレス形式が正しくありません
-              </p>
-            )}
+            {settings.receiver &&
+              !receiverValid &&
+              !isLikelyName(settings.receiver) && (
+                <p className="mt-1 text-xs text-red-600">
+                  アドレス形式が正しくありません
+                </p>
+              )}
           </Field>
 
           {settings.directTransfer ? (

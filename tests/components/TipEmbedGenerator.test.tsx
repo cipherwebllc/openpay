@@ -1,6 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+// AddressInput の useResolveAddress (react-query で外 RPC) はテストでは
+// 通信を発生させないため hook 単位でモック。0x 直接入力は AddressInput 内で
+// local 検証されるため、hook は呼ばれない。
+vi.mock('@/hooks/useResolveAddress', () => ({
+  useResolveAddress: vi.fn(() => ({
+    data: null,
+    isFetching: false,
+    error: null,
+  })),
+}));
+
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
