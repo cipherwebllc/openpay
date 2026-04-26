@@ -50,7 +50,7 @@ export function useBatchPayment() {
       //  呼出元の bug や直接利用に対する一線目の防御。)
       if (params.feeAmount <= 0n) {
         throw new Error(
-          'gasless モードでは運営手数料 (>= MIN_FEE) を含める必要があります',
+          'gasless モードでは feeAmount > 0 が必須です (sponsorship 濫用防御)',
         );
       }
       const { smartAccountClient, pimlicoClient } = clients;

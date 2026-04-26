@@ -119,18 +119,33 @@ export function TipForm({ params }: { params: TipParams }) {
         chainId: token.chainId,
         ts: Date.now(),
       };
+      // CORS が許可されていない webhook 先 (Discord 等) は失敗するが、tip
+      // 自体には影響なし。クリエイターは独自バックエンドや CORS 許可済
+      // endpoint を指す想定。
+      // 失敗は logger.warn → Sentry へ流す (DSN 設定時)。さらに HTTP
+      // ステータスが non-2xx でも reject されないため、status を明示確認。
       fetch(params.webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        // mode: 'cors' のまま。CORS が許可されていない webhook 先 (Discord
-        // 等) は失敗するが、tip 自体には影響なし。クリエイターは独自バック
-        // エンドや CORS 許可済 endpoint を指す想定。
         mode: 'cors',
         keepalive: true,
-      }).catch((err) =>
-        logger.warn('tip.webhook.failed', { error: err, url: params.webhook }),
-      );
+      })
+        .then((res) => {
+          if (!res.ok) {
+            logger.warn('tip.webhook.non_ok', {
+              status: res.status,
+              statusText: res.statusText,
+              url: params.webhook,
+            });
+          }
+        })
+        .catch((err) =>
+          logger.warn('tip.webhook.failed', {
+            error: err,
+            url: params.webhook,
+          }),
+        );
     }
   }, [
     gasless.data,

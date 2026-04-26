@@ -60,9 +60,8 @@ async function getBalance(chain, rpcUrl, paymasterAddress) {
   return balance;
 }
 
-async function notify(text) {
-  const webhook = requireEnv('ALERT_WEBHOOK_URL');
-  const res = await fetch(webhook, {
+async function notify(webhookUrl, text) {
+  const res = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, content: text }),
@@ -75,8 +74,12 @@ async function notify(text) {
 }
 
 async function main() {
+  // 全 required env を script 先頭で検証 (fail-fast)。
+  // 残高が breach した時に webhook URL が無いと alert が黙って失敗する
+  // 設計を防ぐため、breach 検出ロジックの前に必ず resolve する。
   const polygonPaymaster = requireEnv('PIMLICO_PAYMASTER_POLYGON');
   const basePaymaster = requireEnv('PIMLICO_PAYMASTER_BASE');
+  const webhookUrl = requireEnv('ALERT_WEBHOOK_URL');
   const polygonRpc = process.env.POLYGON_RPC_URL ?? 'https://polygon-rpc.com';
   const baseRpc = process.env.BASE_RPC_URL ?? 'https://mainnet.base.org';
   const polThreshold = parseEther(process.env.ALERT_THRESHOLD_POL ?? '5');
@@ -110,7 +113,7 @@ async function main() {
 
   if (alerts.length > 0) {
     const message = ['🚨 OpenPay Pimlico 残高アラート', ...alerts, '', ...lines].join('\n');
-    await notify(message);
+    await notify(webhookUrl, message);
     console.error('アラート送信済み');
     process.exit(1);
   }

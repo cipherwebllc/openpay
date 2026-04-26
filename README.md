@@ -357,6 +357,27 @@ JPYC は将来的に新バージョンへの移行や別チェーン拡張が起
 
 policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject するか) は Pimlico ダッシュボードのアカウント設定に依存する。**本番投入前に必ず policyId を明示設定** してください。
 
+### 5. Basenames (.base.eth) の Universal Resolver
+
+`lib/resolveAddress.ts` は Basenames を `0xeEeEeEee14D718C2B47D9923Deab1335E144EeEe` (CREATE2 deterministic な ENS Universal Resolver アドレス) で解決する設計だが、**Base mainnet 上で実際に該当アドレスがデプロイ済かは未検証**。
+
+- ENS (.eth) は viem 同梱の mainnet config で動作実証済 (publicnode.com 経由)
+- Basenames は test も外部 RPC を叩かず、real path 未実行
+- 本番投入前に testnet で `name.base.eth` を入力して解決成功するか確認すること
+- 失敗する場合は Coinbase 公式の Basenames Universal Resolver アドレスを `BASE_UNIVERSAL_RESOLVER` 定数として `lib/resolveAddress.ts` に設定し直す
+
+### 6. CI workflows の初回実行
+
+以下の workflows は設定済だが、**GitHub Secrets / Variables の設定なしには green にならない**。本番投入前に各 secrets を設定 + workflow の手動実行 (workflow_dispatch) で 1 度 green を確認:
+
+- `.github/workflows/lighthouse.yml`: Performance / Accessibility 閾値の通過
+- `.github/workflows/e2e.yml`: Playwright (chromium + mobile-safari) でルート遷移
+- `.github/workflows/pimlico-balance.yml`: 残高クエリ + webhook 通知 (要 `ALERT_WEBHOOK_URL` etc)
+
+### 7. Tip widget の webhook 配信
+
+`components/TipForm.tsx` の `params.webhook` は tip 送信成功時に POST されるが、**fetch().catch() で silent に握り潰される設計**。理由は「tip 自体は成立しているので UI でエラーを出すと混乱する」。代わりに `logger.warn('tip.webhook.failed', ...)` で記録され、Sentry DSN が設定されていれば自動的に warn として上がる。クリエイター側 webhook の信頼性は **Sentry 経由でのみ観測可能**。
+
 ---
 
 ## 既知の制約 / 注意
@@ -431,6 +452,9 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 | 12 | Sentry DSN 設定 | `NEXT_PUBLIC_SENTRY_DSN` 設定で自動有効化。SDK は導入済 |
 | 13 | Pimlico 残高アラート | ダッシュボードで POL / ETH デポジットの残量しきい値通知を設定 |
 | 14 | Vercel ハードニング | 「Vercel デプロイ」セクションのハードニング表 全項 (MFA / Spending Cap / `SENTRY_AUTH_TOKEN` を Sensitive 化 / Origin 制限) |
+| 15 | CI workflows 全 green | Lighthouse / Playwright e2e / Pimlico 残高 cron の各 workflow を **手動 (workflow_dispatch) で 1 度実行して green 確認**。Secrets 未設定時は失敗する |
+| 16 | Basenames 解決の手動確認 | testnet で `name.base.eth` 形式を入力し、resolved 表示が出るかブラウザで確認 (CREATE2 deterministic な Universal Resolver アドレスの実装在の検証) |
+| 17 | Tip widget webhook の到達確認 | Discord/独自 endpoint に dummy tip を 1 度投げ、JSON payload が届くか確認 (失敗は silent、Sentry 経由のみ観測可能) |
 
 ## ロールバック
 

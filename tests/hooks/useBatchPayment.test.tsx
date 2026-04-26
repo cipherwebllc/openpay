@@ -146,7 +146,7 @@ describe('useBatchPayment', () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/手数料|MIN_FEE/);
+    expect(result.current.error?.message).toMatch(/feeAmount|sponsorship/);
     expect(sendUserOperation).not.toHaveBeenCalled();
   });
 
@@ -165,7 +165,7 @@ describe('useBatchPayment', () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/手数料|MIN_FEE/);
+    expect(result.current.error?.message).toMatch(/feeAmount|sponsorship/);
     expect(sendUserOperation).not.toHaveBeenCalled();
   });
 
