@@ -97,11 +97,6 @@ describe('useSmartAccount (smoke / boundary)', () => {
     expect(result.current.fetchStatus).toBe('idle');
   });
 
-  // 注: queryFn が実際に走るシナリオ (=4 条件揃う) は
-  //  - permissionless.toSimple7702SmartAccount が実 publicClient で chain 情報を
-  //    取得しに行く
-  //  - createSmartAccountClient が viem chain object を要求する
-  //  これらをユニットレベルでモックしきると "実コードを試していない" のと
-  //  ほぼ等価になるため、本テストでは boundary までで止める。
-  //  実 queryFn の検証は e2e (README 参照) で行う。
+  // queryFn 本体 (to7702SimpleSmartAccount → createSmartAccountClient) を
+  // モックしきると実コード検証にならない。実走行は e2e (README 参照) で行う。
 });

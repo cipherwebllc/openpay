@@ -2,8 +2,6 @@
 // Pimlico API Key は本番では Pimlico ダッシュボードの Origin 制限が必須。
 import { getAddress, isAddress, type Address } from 'viem';
 
-export type NetworkEnv = 'mainnet' | 'testnet';
-
 const PLACEHOLDER_FEE_RECEIVER: Address =
   '0x000000000000000000000000000000000000dEaD';
 

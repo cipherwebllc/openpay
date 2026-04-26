@@ -255,8 +255,7 @@ npm run build && npm run start
 
 ### 1. permissionless.js の API 名
 
-`hooks/useSmartAccount.ts` は `permissionless@^0.2.30` から **`to7702SimpleSmartAccount`** を import している (確認済 ✓)。  
-過去の MVP コミットでは `toSimple7702SmartAccount` (誤) を使用していたが、実 API は `to7702SimpleSmartAccount` (正) であることを `npm install` 後の実検証で確認済み。permissionless 側でリネーム/移動がある場合は再確認してください。
+`hooks/useSmartAccount.ts` は `permissionless@^0.2.30` から **`to7702SimpleSmartAccount`** を import している (`tests/hooks/useSmartAccount.test.tsx` で import 解決を smoke check 済)。permissionless 側でリネーム/移動が起きた時はこの import が壊れて CI が即落ちる。
 
 ### 2. JPYC mainnet コントラクトアドレス
 
@@ -267,7 +266,7 @@ JPYC は将来的に新バージョンへの移行や別チェーン拡張が起
 
 ### 3. ERC-7702 の実フロー
 
-`useSmartAccount` の queryFn (toSimple7702SmartAccount → createSmartAccountClient) は **どの自動テストでも実行されていない**。理由:
+`useSmartAccount` の queryFn (`to7702SimpleSmartAccount` → `createSmartAccountClient`) は **どの自動テストでも実行されていない**。理由:
 - 完全モックすると "実コードを試していない" のと等価になる
 - 実コードを動かすには Pimlico API key + funded sponsorship policy + ERC-7702 対応ウォレットの実署名が必要
 
