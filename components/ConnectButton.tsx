@@ -2,10 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
-
-function shorten(address: string): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
+import { shortAddress } from '@/lib/format';
 
 export function ConnectButton() {
   const { address, isConnected, chain } = useAccount();
@@ -18,7 +15,7 @@ export function ConnectButton() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">
           <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-          <span>{shorten(address)}</span>
+          <span>{shortAddress(address)}</span>
           {chain && <span className="text-slate-400">/ {chain.name}</span>}
         </div>
         <button

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { Address } from 'viem';
 import {
   buildPayPath,
   buildPayUrl,
@@ -6,6 +7,7 @@ import {
   buildTipPath,
   buildTipUrl,
   parseTipParams,
+  parseSplitDrafts,
   DEFAULT_TIP_PRESETS,
 } from '@/lib/url';
 
@@ -647,5 +649,124 @@ describe('TipParams: thanks / thanksUrl / webhook', () => {
       expect(r.params.thanksUrl).toBeUndefined();
       expect(r.params.webhook).toBeUndefined();
     }
+  });
+});
+
+describe('parseSplitDrafts (QrGenerator UI 用 draft validator)', () => {
+  const A: Address = '0x1111111111111111111111111111111111111111';
+  const B: Address = '0x2222222222222222222222222222222222222222';
+  const C: Address = '0x3333333333333333333333333333333333333333';
+
+  it('空配列 → entries=[], sum=0, error=null', () => {
+    expect(parseSplitDrafts([], A)).toEqual({ entries: [], sum: 0, error: null });
+  });
+
+  it('全 draft が valid → entries に SplitEntry[] / sum 集計', () => {
+    const r = parseSplitDrafts(
+      [
+        { address: B, percent: '30' },
+        { address: C, percent: '20' },
+      ],
+      A,
+    );
+    expect(r.error).toBe(null);
+    expect(r.sum).toBe(50);
+    expect(r.entries).toEqual([
+      { to: B, percent: 30 },
+      { to: C, percent: 20 },
+    ]);
+  });
+
+  it('空欄ペア (address/percent 両方 "") は無視', () => {
+    const r = parseSplitDrafts(
+      [
+        { address: B, percent: '30' },
+        { address: '', percent: '' },
+        { address: C, percent: '20' },
+      ],
+      A,
+    );
+    expect(r.error).toBe(null);
+    expect(r.entries).toHaveLength(2);
+  });
+
+  it('不正アドレス → error=addr (entries=null)', () => {
+    const r = parseSplitDrafts([{ address: 'nope', percent: '30' }], A);
+    expect(r.error).toBe('addr');
+    expect(r.entries).toBeNull();
+  });
+
+  it('% が非整数/範囲外 → error=pct', () => {
+    expect(
+      parseSplitDrafts([{ address: B, percent: '30.5' }], A).error,
+    ).toBe('pct');
+    expect(
+      parseSplitDrafts([{ address: B, percent: '0' }], A).error,
+    ).toBe('pct');
+    expect(
+      parseSplitDrafts([{ address: B, percent: '100' }], A).error,
+    ).toBe('pct');
+  });
+
+  it('合計 % >= 100 → error=sum', () => {
+    const r = parseSplitDrafts(
+      [
+        { address: B, percent: '60' },
+        { address: C, percent: '40' },
+      ],
+      A,
+    );
+    expect(r.error).toBe('sum');
+  });
+
+  it('主 to との重複 → error=dup', () => {
+    expect(
+      parseSplitDrafts([{ address: A, percent: '30' }], A).error,
+    ).toBe('dup');
+  });
+
+  it('split 内重複 → error=dup', () => {
+    const r = parseSplitDrafts(
+      [
+        { address: B, percent: '30' },
+        { address: B, percent: '20' },
+      ],
+      A,
+    );
+    expect(r.error).toBe('dup');
+  });
+
+  it('primary=null でも主 to 重複チェックはスキップ (split 内重複は依然検出)', () => {
+    const r = parseSplitDrafts(
+      [
+        { address: A, percent: '30' },
+        { address: A, percent: '20' },
+      ],
+      null,
+    );
+    expect(r.error).toBe('dup');
+  });
+
+  it('小文字大文字混じりでも重複検出 (toLowerCase で比較)', () => {
+    const Blower = B.toLowerCase() as Address;
+    const r = parseSplitDrafts(
+      [
+        { address: B, percent: '30' },
+        { address: Blower, percent: '20' },
+      ],
+      A,
+    );
+    expect(r.error).toBe('dup');
+  });
+
+  it('複数エラーがある場合は最初に出会ったものを返す', () => {
+    const r = parseSplitDrafts(
+      [
+        { address: 'bad', percent: '30' },
+        { address: B, percent: 'xyz' },
+      ],
+      A,
+    );
+    expect(r.error).toBe('addr');
   });
 });

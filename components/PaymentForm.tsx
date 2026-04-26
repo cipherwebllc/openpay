@@ -20,10 +20,7 @@ import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { getToken } from '@/lib/tokens';
 import { parsePayParams, type PayParams } from '@/lib/url';
-
-function shortAddr(a: string): string {
-  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
-}
+import { shortAddress } from '@/lib/format';
 
 export function PaymentForm() {
   const search = useSearchParams();
@@ -244,7 +241,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 key={r.to}
                 label={t(
                   i === 0 ? 'primaryRecipientRow' : 'splitRecipientRow',
-                  { percent: r.percent, addr: shortAddr(r.to) },
+                  { percent: r.percent, addr: shortAddress(r.to) },
                 )}
                 value={fmt(r.amount)}
               />

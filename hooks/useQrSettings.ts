@@ -4,10 +4,7 @@ import { useEffect, useState } from 'react';
 import { safeGet, safeSet } from '@/lib/storage';
 import type { FeeMode } from '@/lib/fee';
 import type { TokenSymbol } from '@/lib/tokens';
-
-// Split entry as stored in settings: address は 0x または ENS (未解決でも保持)、
-// percent は 1〜99 の整数を文字列で持つ (空入力中の状態を許容するため)。
-export type SplitDraft = { address: string; percent: string };
+import type { SplitDraft } from '@/lib/url';
 
 export type QrSettings = {
   receiver: string;

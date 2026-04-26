@@ -6,75 +6,22 @@ import { useTranslations } from 'next-intl';
 import { isAddress, getAddress, type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
-import { useQrSettings, type SplitDraft } from '@/hooks/useQrSettings';
+import { useQrSettings } from '@/hooks/useQrSettings';
 import {
   buildPayUrl,
+  parseSplitDrafts,
   SPLIT_MAX_ENTRIES,
   type PayParams,
   type PayMode,
-  type SplitEntry,
+  type SplitDraft,
 } from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import type { FeeMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
+import { shortAddress } from '@/lib/format';
 
 type Mode = 'amount' | 'static';
-
-// Drafts → 検証済 SplitEntry[] へ変換。1 件でも不正があれば null を返す
-// (URL に部分的に組み込むのは混乱を招くため "all-or-nothing")。
-// 主 to との重複・split 内の重複・% 合計 100 以上もここで弾く。
-function parseSplitDrafts(
-  drafts: ReadonlyArray<SplitDraft>,
-  primary: Address | null,
-): { entries: SplitEntry[] | null; sum: number; error: 'addr' | 'pct' | 'sum' | 'dup' | null } {
-  const entries: SplitEntry[] = [];
-  const seen = new Set<string>();
-  let sum = 0;
-  let firstError: 'addr' | 'pct' | 'sum' | 'dup' | null = null;
-  for (const d of drafts) {
-    const a = d.address.trim();
-    const p = d.percent.trim();
-    if (a.length === 0 && p.length === 0) continue;
-    if (!isAddress(a)) {
-      if (!firstError) firstError = 'addr';
-      continue;
-    }
-    if (!/^\d+$/.test(p)) {
-      if (!firstError) firstError = 'pct';
-      continue;
-    }
-    const percent = Number(p);
-    if (percent < 1 || percent > 99) {
-      if (!firstError) firstError = 'pct';
-      continue;
-    }
-    const checksum = getAddress(a);
-    const lower = checksum.toLowerCase();
-    if (primary && lower === primary.toLowerCase()) {
-      if (!firstError) firstError = 'dup';
-      continue;
-    }
-    if (seen.has(lower)) {
-      if (!firstError) firstError = 'dup';
-      continue;
-    }
-    seen.add(lower);
-    sum += percent;
-    entries.push({ to: checksum, percent });
-  }
-  if (sum >= 100) {
-    return { entries: null, sum, error: 'sum' };
-  }
-  if (firstError) {
-    return { entries: null, sum, error: firstError };
-  }
-  return { entries, sum, error: null };
-}
-
-function shortAddr(a: string): string {
-  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
-}
 
 export function QrGenerator() {
   const { settings, setSettings, hydrated } = useQrSettings();
@@ -519,7 +466,7 @@ function SettingsSummary({
   direct: boolean;
 }) {
   const tokenLabel = TOKENS[token].displaySymbol;
-  const recvLabel = isAddress(receiver) ? shortAddr(receiver) : '—';
+  const recvLabel = isAddress(receiver) ? shortAddress(receiver) : '—';
   const feeLabel = direct ? '0%' : fee === 'include' ? 'incl.' : 'excl.';
   return (
     <span className="font-mono">
