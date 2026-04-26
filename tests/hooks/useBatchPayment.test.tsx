@@ -1,0 +1,232 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  decodeFunctionData,
+  erc20Abi,
+  getAddress,
+  type Address,
+  type Hex,
+} from 'viem';
+import type { ReactNode } from 'react';
+import { useBatchPayment } from '@/hooks/useBatchPayment';
+
+// 外部依存である useSmartAccount を境界モック。テスト対象 (useBatchPayment)
+// の実コードは実行され、calls 配列の組み立てや encodeFunctionData の動作が
+// 実際にチェックされる。
+vi.mock('@/hooks/useSmartAccount', () => ({
+  useSmartAccount: vi.fn(),
+}));
+import { useSmartAccount } from '@/hooks/useSmartAccount';
+
+const TOKEN: Address = getAddress(
+  '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+);
+const MERCHANT: Address = getAddress(
+  '0x1111111111111111111111111111111111111111',
+);
+const FEE_RECV: Address = getAddress(
+  '0x2222222222222222222222222222222222222222',
+);
+
+function makeWrapper() {
+  const qc = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+  });
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  };
+}
+
+let sendUserOperation: ReturnType<typeof vi.fn>;
+let waitForUserOperationReceipt: ReturnType<typeof vi.fn>;
+
+function mountReady() {
+  sendUserOperation = vi
+    .fn()
+    .mockResolvedValue(`0x${'a'.repeat(64)}` as Hex);
+  waitForUserOperationReceipt = vi.fn().mockResolvedValue({
+    success: true,
+    receipt: {
+      transactionHash: `0x${'b'.repeat(64)}` as Hex,
+      blockNumber: 12345n,
+    },
+  });
+  vi.mocked(useSmartAccount).mockReturnValue({
+    data: {
+      smartAccountClient: { sendUserOperation },
+      pimlicoClient: { waitForUserOperationReceipt },
+    },
+    isLoading: false,
+    error: null,
+  } as unknown as ReturnType<typeof useSmartAccount>);
+}
+
+describe('useBatchPayment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('店主送金 + 手数料を 1 つの UserOp の calls[2] にバッチ化', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 99_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 1_000_000n,
+    });
+
+    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+
+    const arg = sendUserOperation.mock.calls[0][0];
+    expect(arg.calls).toHaveLength(2);
+    expect(arg.calls[0].to.toLowerCase()).toBe(TOKEN.toLowerCase());
+    expect(arg.calls[1].to.toLowerCase()).toBe(TOKEN.toLowerCase());
+
+    // 1 件目: 店主への transfer
+    const d1 = decodeFunctionData({ abi: erc20Abi, data: arg.calls[0].data });
+    expect(d1.functionName).toBe('transfer');
+    expect((d1.args as readonly unknown[])[0]).toBeTypeOf('string');
+    expect(
+      ((d1.args as readonly [string, bigint])[0] as string).toLowerCase(),
+    ).toBe(MERCHANT.toLowerCase());
+    expect((d1.args as readonly [string, bigint])[1]).toBe(99_000_000n);
+
+    // 2 件目: 運営への手数料 transfer
+    const d2 = decodeFunctionData({ abi: erc20Abi, data: arg.calls[1].data });
+    expect(d2.functionName).toBe('transfer');
+    expect(
+      ((d2.args as readonly [string, bigint])[0] as string).toLowerCase(),
+    ).toBe(FEE_RECV.toLowerCase());
+    expect((d2.args as readonly [string, bigint])[1]).toBe(1_000_000n);
+
+    await waitFor(() =>
+      expect(waitForUserOperationReceipt).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it('merchantAmount = 0 の場合は手数料のみの 1 call', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 0n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 100_000n,
+    });
+
+    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+    const arg = sendUserOperation.mock.calls[0][0];
+    expect(arg.calls).toHaveLength(1);
+    const d = decodeFunctionData({ abi: erc20Abi, data: arg.calls[0].data });
+    expect((d.args as readonly [string, bigint])[1]).toBe(100_000n);
+  });
+
+  it('feeAmount = 0 の場合は店主送金のみの 1 call (外税で fee=0 の極小ケース)', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 50_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 0n,
+    });
+
+    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+    expect(sendUserOperation.mock.calls[0][0].calls).toHaveLength(1);
+  });
+
+  it('両方 0 → エラーで sendUserOperation は呼ばれない', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 0n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 0n,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/0|送金額/);
+    expect(sendUserOperation).not.toHaveBeenCalled();
+  });
+
+  it('Smart Account 未準備 → エラー', async () => {
+    vi.mocked(useSmartAccount).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    } as unknown as ReturnType<typeof useSmartAccount>);
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 1n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 1n,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/Smart Account/);
+  });
+
+  it('成功時に userOpHash と txHash を返却', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 99_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 1_000_000n,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data!.success).toBe(true);
+    expect(result.current.data!.userOpHash).toMatch(/^0x[a-f]{64}$/i);
+    expect(result.current.data!.txHash).toMatch(/^0x[a-f]{64}$/i);
+    expect(result.current.data!.blockNumber).toBe(12345n);
+  });
+
+  it('sendUserOperation が reject → mutation エラーに伝播', async () => {
+    mountReady();
+    sendUserOperation.mockRejectedValueOnce(new Error('AA21 didn\'t pay prefund'));
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 99_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 1_000_000n,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toContain('prefund');
+  });
+});

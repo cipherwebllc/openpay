@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # package-lock.json コミット必須。`npm ci` は lockfile が無いと失敗するため
+      # CI 段階で lockfile の存在も担保される。
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:run
+      - name: Build (production)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_NETWORK_ENV: testnet
+          NEXT_PUBLIC_PIMLICO_API_KEY: ci_dummy_key
+          NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: '0x000000000000000000000000000000000000dEaD'
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # high 以上の脆弱性で fail。production 依存のみを対象。
+      - run: npm audit --audit-level=high --omit=dev
