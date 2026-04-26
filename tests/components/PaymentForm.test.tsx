@@ -359,6 +359,55 @@ describe('PaymentForm — 送信フロー', () => {
   });
 });
 
+describe('PaymentForm — split (C1)', () => {
+  const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const C = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+  it('split あり → 受取人ごとの行 + バッチ説明文', () => {
+    setURL(
+      `to=${MERCHANT}&token=usdc&fee=include&amount=100&split=${B}:30,${C}:20`,
+    );
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    render(<PaymentForm />);
+
+    expect(screen.getByText(/主受取人 \(50%\)/)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/受取人 \(\d+%\)/).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/3 件の transfer/)).toBeInTheDocument();
+  });
+
+  it('split あり → mutate の extraRecipients が正しい (内税 100 USDC)', async () => {
+    const user = userEvent.setup();
+    setURL(
+      `to=${MERCHANT}&token=usdc&fee=include&amount=100&split=${B}:30,${C}:20`,
+    );
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    await user.click(
+      screen.getByRole('button', { name: /100 USDC を支払う/ }),
+    );
+
+    expect(mutate).toHaveBeenCalledOnce();
+    const call = mutate.mock.calls[0][0];
+    // primary (MERCHANT) gets remainder (50%) of distributable 99 USDC = 49.5
+    expect(call.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
+    expect(call.merchantAmount).toBe(49_500_000n);
+    expect(call.feeAmount).toBe(1_000_000n);
+    expect(call.extraRecipients).toHaveLength(2);
+    expect(call.extraRecipients[0].to.toLowerCase()).toBe(B.toLowerCase());
+    expect(call.extraRecipients[0].amount).toBe(29_700_000n);
+    expect(call.extraRecipients[1].to.toLowerCase()).toBe(C.toLowerCase());
+    expect(call.extraRecipients[1].amount).toBe(19_800_000n);
+  });
+});
+
 describe('PaymentForm — 直接送金モード (mode=direct)', () => {
   it('警告バッジ「ガス代お客様負担」が表示される', () => {
     setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10&mode=direct`);

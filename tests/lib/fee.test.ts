@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import type { Address } from 'viem';
 import {
   calcBreakdown,
   calcDirectBreakdown,
   calcFee,
+  calcSplitBreakdown,
   MIN_FEE,
 } from '@/lib/fee';
 
@@ -168,5 +170,124 @@ describe('calcDirectBreakdown (mode=direct)', () => {
     const r = calcDirectBreakdown(big);
     expect(r.customerPays).toBe(big);
     expect(r.feeAmount).toBe(0n);
+  });
+});
+
+describe('calcSplitBreakdown (C1)', () => {
+  const A: Address = '0x1111111111111111111111111111111111111111';
+  const B: Address = '0x2222222222222222222222222222222222222222';
+  const C: Address = '0x3333333333333333333333333333333333333333';
+
+  it('USDC 100, 内税, split B:30 / C:20 → primary 50% (49.5 USDC)', () => {
+    // amount=100 USDC = 100_000_000, fee = 1% = 1_000_000
+    // distributable = 99_000_000
+    // B = 99_000_000 * 30/100 = 29_700_000
+    // C = 99_000_000 * 20/100 = 19_800_000
+    // primary (A) = 99_000_000 - 29_700_000 - 19_800_000 = 49_500_000
+    const r = calcSplitBreakdown(
+      100_000_000n,
+      'include',
+      'usdc',
+      A,
+      [
+        { to: B, percent: 30 },
+        { to: C, percent: 20 },
+      ],
+    );
+    expect(r.feeAmount).toBe(1_000_000n);
+    expect(r.customerPays).toBe(100_000_000n);
+    expect(r.recipients).toHaveLength(3);
+    expect(r.recipients[0]).toEqual({ to: A, percent: 50, amount: 49_500_000n });
+    expect(r.recipients[1]).toEqual({ to: B, percent: 30, amount: 29_700_000n });
+    expect(r.recipients[2]).toEqual({ to: C, percent: 20, amount: 19_800_000n });
+  });
+
+  it('USDC 100, 外税, split B:50 → A 50, B 50, customer pays 101', () => {
+    // amount=100 USDC, fee = 1, customer pays 101, distributable to merchants = 100
+    const r = calcSplitBreakdown(
+      100_000_000n,
+      'exclude',
+      'usdc',
+      A,
+      [{ to: B, percent: 50 }],
+    );
+    expect(r.feeAmount).toBe(1_000_000n);
+    expect(r.customerPays).toBe(101_000_000n);
+    expect(r.recipients).toEqual([
+      { to: A, percent: 50, amount: 50_000_000n },
+      { to: B, percent: 50, amount: 50_000_000n },
+    ]);
+  });
+
+  it('端数は primary に集約 (USDC 1, 内税, split B:33 → primary 67% で残り全部)', () => {
+    // amount=1 USDC = 1_000_000, fee = MIN 100_000
+    // distributable = 900_000
+    // B = 900_000 * 33/100 = 297_000
+    // primary = 900_000 - 297_000 = 603_000 (= 67% + 端数 0、ここでは整数で割れる)
+    const r = calcSplitBreakdown(
+      1_000_000n,
+      'include',
+      'usdc',
+      A,
+      [{ to: B, percent: 33 }],
+    );
+    expect(r.feeAmount).toBe(100_000n);
+    expect(r.recipients[0].amount + r.recipients[1].amount).toBe(900_000n);
+    expect(r.recipients[1].amount).toBe(297_000n);
+    expect(r.recipients[0].amount).toBe(603_000n);
+  });
+
+  it('割り切れない端数も primary に集約', () => {
+    // amount=10 USDC = 10_000_000, fee = MIN 100_000
+    // distributable = 9_900_000
+    // split B:7, C:11 → primary 82%
+    // B = 9_900_000 * 7/100 = 693_000
+    // C = 9_900_000 * 11/100 = 1_089_000
+    // primary = 9_900_000 - 693_000 - 1_089_000 = 8_118_000
+    const r = calcSplitBreakdown(
+      10_000_000n,
+      'include',
+      'usdc',
+      A,
+      [
+        { to: B, percent: 7 },
+        { to: C, percent: 11 },
+      ],
+    );
+    const sum = r.recipients.reduce((acc, x) => acc + x.amount, 0n);
+    expect(sum).toBe(9_900_000n);
+    expect(r.recipients[0]).toEqual({ to: A, percent: 82, amount: 8_118_000n });
+    expect(r.recipients[1]).toEqual({ to: B, percent: 7, amount: 693_000n });
+    expect(r.recipients[2]).toEqual({ to: C, percent: 11, amount: 1_089_000n });
+  });
+
+  it('JPYC でも同じく動く', () => {
+    // amount=1000 JPYC = 1000 * 10^18, fee = 1% = 10 * 10^18 (== MIN_FEE 15 はもっと多い)
+    // 1% = 10 JPYC, MIN = 15 JPYC → fee = 15 JPYC
+    // distributable = 1000 - 15 = 985 JPYC
+    const ONE = 10n ** 18n;
+    const r = calcSplitBreakdown(
+      1000n * ONE,
+      'include',
+      'jpyc',
+      A,
+      [{ to: B, percent: 50 }],
+    );
+    expect(r.feeAmount).toBe(15n * ONE);
+    expect(r.customerPays).toBe(1000n * ONE);
+    // distributable = 985 JPYC、半分ずつ
+    // B = 985 * 50/100 = 492 (整数除算)、A は残り 493
+    expect(r.recipients[1].amount).toBe(492n * ONE + ONE / 2n); // 492.5 JPYC
+    expect(r.recipients[0].amount + r.recipients[1].amount).toBe(985n * ONE);
+  });
+
+  it('amount = 0: customer も recipients も 0', () => {
+    const r = calcSplitBreakdown(0n, 'include', 'usdc', A, [
+      { to: B, percent: 50 },
+    ]);
+    expect(r.customerPays).toBe(0n);
+    expect(r.feeAmount).toBe(0n);
+    expect(r.recipients[0].amount).toBe(0n);
+    expect(r.recipients[1].amount).toBe(0n);
   });
 });

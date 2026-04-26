@@ -212,6 +212,70 @@ describe('useBatchPayment', () => {
     expect(result.current.data!.blockNumber).toBe(12345n);
   });
 
+  it('extraRecipients (split) が指定されると calls に追加される', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    const B: Address = getAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const C: Address = getAddress('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 50_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 1_000_000n,
+      extraRecipients: [
+        { to: B, amount: 30_000_000n },
+        { to: C, amount: 19_000_000n },
+      ],
+    });
+
+    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+    const arg = sendUserOperation.mock.calls[0][0];
+    // primary + 2 extras + fee = 4 calls
+    expect(arg.calls).toHaveLength(4);
+    // 2nd call: B
+    const dB = decodeFunctionData({ abi: erc20Abi, data: arg.calls[1].data });
+    expect((dB.args as readonly [string, bigint])[0].toLowerCase()).toBe(
+      B.toLowerCase(),
+    );
+    expect((dB.args as readonly [string, bigint])[1]).toBe(30_000_000n);
+    // 3rd call: C
+    const dC = decodeFunctionData({ abi: erc20Abi, data: arg.calls[2].data });
+    expect((dC.args as readonly [string, bigint])[0].toLowerCase()).toBe(
+      C.toLowerCase(),
+    );
+    // 4th call: fee
+    const dF = decodeFunctionData({ abi: erc20Abi, data: arg.calls[3].data });
+    expect((dF.args as readonly [string, bigint])[0].toLowerCase()).toBe(
+      FEE_RECV.toLowerCase(),
+    );
+  });
+
+  it('extraRecipients に amount=0 が混ざる → エラー', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(), {
+      wrapper: makeWrapper(),
+    });
+
+    const B: Address = getAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 50_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: 1_000_000n,
+      extraRecipients: [{ to: B, amount: 0n }],
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/split/);
+    expect(sendUserOperation).not.toHaveBeenCalled();
+  });
+
   it('sendUserOperation が reject → mutation エラーに伝播', async () => {
     mountReady();
     sendUserOperation.mockRejectedValueOnce(new Error('AA21 didn\'t pay prefund'));

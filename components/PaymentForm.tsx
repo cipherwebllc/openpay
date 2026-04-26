@@ -9,12 +9,20 @@ import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
-import { calcBreakdown, calcDirectBreakdown } from '@/lib/fee';
+import {
+  calcBreakdown,
+  calcDirectBreakdown,
+  calcSplitBreakdown,
+} from '@/lib/fee';
 import { chainForToken } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { getToken } from '@/lib/tokens';
 import { parsePayParams, type PayParams } from '@/lib/url';
+
+function shortAddr(a: string): string {
+  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+}
 
 export function PaymentForm() {
   const search = useSearchParams();
@@ -68,6 +76,26 @@ function PaymentDetails({ params }: { params: PayParams }) {
         : calcBreakdown(amountWei, params.fee, params.token),
     [isDirect, amountWei, params.fee, params.token],
   );
+
+  // C1: split が指定されていれば、breakdown.merchantReceives を分配する。
+  // direct mode では split は無視 (シンプルな単一 transfer に限定)。
+  const splitBreakdown = useMemo(() => {
+    if (isDirect || !params.split || params.split.length === 0) return null;
+    return calcSplitBreakdown(
+      amountWei,
+      params.fee,
+      params.token,
+      params.to,
+      params.split,
+    );
+  }, [
+    isDirect,
+    amountWei,
+    params.fee,
+    params.token,
+    params.to,
+    params.split,
+  ]);
 
   const balanceQuery = useReadContract({
     address: token.address,
@@ -133,6 +161,17 @@ function PaymentDetails({ params }: { params: PayParams }) {
         amount: breakdown.customerPays,
         chainId: token.chainId,
       });
+    } else if (splitBreakdown) {
+      // recipients[0] は primary (params.to)、それ以降が split entries
+      const [primary, ...extras] = splitBreakdown.recipients;
+      gasless.mutate({
+        tokenAddress: token.address,
+        merchant: primary.to,
+        merchantAmount: primary.amount,
+        feeReceiver: env.feeReceiver,
+        feeAmount: splitBreakdown.feeAmount,
+        extraRecipients: extras.map((e) => ({ to: e.to, amount: e.amount })),
+      });
     } else {
       gasless.mutate({
         tokenAddress: token.address,
@@ -193,9 +232,24 @@ function PaymentDetails({ params }: { params: PayParams }) {
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-slate-700">明細</h2>
         <dl className="mt-3 space-y-2 text-sm">
-          <Row label="店主への送金" value={fmt(breakdown.merchantReceives)} />
+          {splitBreakdown ? (
+            splitBreakdown.recipients.map((r, i) => (
+              <Row
+                key={r.to}
+                label={`${i === 0 ? '主受取人' : '受取人'} (${r.percent}%) ${shortAddr(r.to)}`}
+                value={fmt(r.amount)}
+              />
+            ))
+          ) : (
+            <Row label="店主への送金" value={fmt(breakdown.merchantReceives)} />
+          )}
           {!isDirect && (
-            <Row label="運営手数料 (1.0%)" value={fmt(breakdown.feeAmount)} />
+            <Row
+              label="運営手数料 (1.0%)"
+              value={fmt(
+                splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
+              )}
+            />
           )}
           <div className="my-2 border-t border-slate-200" />
           <Row
@@ -206,14 +260,20 @@ function PaymentDetails({ params }: { params: PayParams }) {
                   ? '顧客支払額 (内税)'
                   : '顧客支払額 (外税)'
             }
-            value={fmt(breakdown.customerPays)}
+            value={fmt(
+              splitBreakdown
+                ? splitBreakdown.customerPays
+                : breakdown.customerPays,
+            )}
             strong
           />
         </dl>
         <p className="mt-4 text-xs text-slate-500">
           {isDirect
             ? '直接 ERC20 transfer を 1 件送信します。Smart Account / Pimlico Paymaster は経由しません。'
-            : 'ガス代は運営が肩代わり (Pimlico Sponsorship Paymaster)。お客様はネイティブトークン (MATIC / ETH) を保有する必要はありません。'}
+            : splitBreakdown
+              ? `ガス代は運営が肩代わり (Pimlico Sponsorship Paymaster)。${splitBreakdown.recipients.length} 件の transfer を 1 つの UserOperation でバッチ送信します。`
+              : 'ガス代は運営が肩代わり (Pimlico Sponsorship Paymaster)。お客様はネイティブトークン (MATIC / ETH) を保有する必要はありません。'}
         </p>
       </section>
 

@@ -463,6 +463,105 @@ describe('DEFAULT_TIP_PRESETS', () => {
   });
 });
 
+describe('PayParams: split (multi-recipient C1)', () => {
+  const A: `0x${string}` = '0x1111111111111111111111111111111111111111';
+  const B: `0x${string}` = '0x2222222222222222222222222222222222222222';
+  const C: `0x${string}` = '0x3333333333333333333333333333333333333333';
+
+  function search(query: string) {
+    return new URLSearchParams(query);
+  }
+
+  it('split を含む URL を build → parse', () => {
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      fee: 'include',
+      amount: '100',
+      mode: 'gasless',
+      split: [
+        { to: B, percent: 30 },
+        { to: C, percent: 20 },
+      ],
+    });
+    expect(path).toContain('split=');
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parsePayParams(sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.split).toEqual([
+        { to: B, percent: 30 },
+        { to: C, percent: 20 },
+      ]);
+    }
+  });
+
+  it('split sum >= 100 → エラー', () => {
+    const r = parsePayParams(
+      search(`to=${A}&token=usdc&fee=include&split=${B}:60,${C}:40`),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('split entry が 4 件以上 → エラー (上限 3)', () => {
+    const D: `0x${string}` = '0x4444444444444444444444444444444444444444';
+    const E: `0x${string}` = '0x5555555555555555555555555555555555555555';
+    const r = parsePayParams(
+      search(
+        `to=${A}&token=usdc&fee=include&split=${B}:10,${C}:10,${D}:10,${E}:10`,
+      ),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('split percent が 0 / 負 / 非整数 → エラー', () => {
+    expect(
+      parsePayParams(
+        search(`to=${A}&token=usdc&fee=include&split=${B}:0`),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parsePayParams(
+        search(`to=${A}&token=usdc&fee=include&split=${B}:50.5`),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parsePayParams(
+        search(`to=${A}&token=usdc&fee=include&split=${B}:-10`),
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('split の宛先重複 → エラー', () => {
+    const r = parsePayParams(
+      search(`to=${A}&token=usdc&fee=include&split=${B}:10,${B}:20`),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('split に主 to と同じアドレス → エラー', () => {
+    const r = parsePayParams(
+      search(`to=${A}&token=usdc&fee=include&split=${A}:10`),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('split が不正な 0x → エラー', () => {
+    const r = parsePayParams(
+      search(`to=${A}&token=usdc&fee=include&split=0xnope:10`),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('split を持たない URL は従来通り通る (split は undefined)', () => {
+    const r = parsePayParams(
+      search(`to=${A}&token=usdc&fee=include&amount=10`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.split).toBeUndefined();
+  });
+});
+
 describe('TipParams: thanks / thanksUrl / webhook', () => {
   function search(query: string) {
     return new URLSearchParams(query);
