@@ -185,6 +185,23 @@ openpay/
 └── .env.local.example
 ```
 
+## 前提条件 (本番運用に必要な外部アカウント / 設定)
+
+ローカル開発だけなら **Pimlico API Key の準備のみ** で動きます。本番デプロイには下記すべてが必要です。
+
+| サービス | 必要な理由 | コスト | 設定箇所 |
+|---|---|---|---|
+| **Pimlico** ([dashboard.pimlico.io](https://dashboard.pimlico.io)) | ガスレス送金の bundler + sponsorship paymaster | 従量課金 (ガス補助分) | `NEXT_PUBLIC_PIMLICO_API_KEY` + Sponsorship Policy ID |
+| **WalletConnect / Reown** ([cloud.reown.com](https://cloud.reown.com)) | WalletConnect ウォレット接続 (任意、未設定時は除外される) | 無料枠あり | `NEXT_PUBLIC_WC_PROJECT_ID` |
+| **Sentry** ([sentry.io](https://sentry.io)) | エラー追跡 + Replay (10% / エラー時 100%) | 無料枠あり | `NEXT_PUBLIC_SENTRY_DSN` (Plain) + `SENTRY_AUTH_TOKEN` (Sensitive) |
+| **Vercel** ([vercel.com](https://vercel.com)) | Next.js デプロイ + middleware (i18n routing) | Hobby 無料 | プロジェクトインポート + env 投入 |
+| **Ethereum mainnet RPC** (任意推奨) | ENS (.eth) / Basenames (.base.eth) 解決 — 既定の publicnode.com に SLA なし | Alchemy / Infura 無料枠あり | `NEXT_PUBLIC_MAINNET_RPC_URL` (CCIP-Read 必須) |
+| **GitHub Secrets** | Pimlico balance cron / Lighthouse / Playwright workflow 用 | 無料 | repo Settings → Secrets (詳細は「監視 / アラート」節) |
+| **Webhook (Slack/Discord/PagerDuty)** | Pimlico 残高アラート通知先 | 無料 | `ALERT_WEBHOOK_URL` (GitHub Secrets) |
+| **EIP-7702 対応ウォレット** (顧客側) | gasless 送金は ERC-7702 が必須 | 無料 | MetaMask v12 系以降の安定版 |
+
+**Coinbase Wallet / 一部の WalletConnect ウォレットは ERC-7702 未対応** の可能性があります。本番投入前に testnet (Polygon Amoy / Base Sepolia) で実 wallet と接続して 1 件送金成功を確認してください。
+
 ## セットアップ
 
 ### 1. クローン + 依存パッケージのインストール
@@ -357,7 +374,19 @@ JPYC は将来的に新バージョンへの移行や別チェーン拡張が起
 
 policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject するか) は Pimlico ダッシュボードのアカウント設定に依存する。**本番投入前に必ず policyId を明示設定** してください。
 
-### 5. Basenames (.base.eth) の Universal Resolver
+### 5. split の rounding edge case (UX 上の注意)
+
+`?split=...` で分配 % 合計が高くなると、**主受取人 (`to`) の取り分が極小** になります:
+
+| 入力 | 主受取 % | 100 USDC 時の主受取額 |
+|---|---|---|
+| `split=B:33,C:33,D:33` | 1% | **1.00 USDC** |
+| `split=B:99` | 1% | **1.00 USDC** |
+| `split=B:50,C:30` | 20% | 20.00 USDC |
+
+整数除算の端数は主受取人に集約されるため 0 になることはないが、UI 側で `parseSplitDrafts` が合計 100% 以上を reject する。**操作ミスで意図せず大半を split に流してしまう設計リスクがあるため、QrGenerator の split 入力欄は「主受取 = 残り N%」のラベル表示で常に primary share を可視化済み**。
+
+### 6. Basenames (.base.eth) の Universal Resolver
 
 `lib/resolveAddress.ts` は Basenames を `0xeEeEeEee14D718C2B47D9923Deab1335E144EeEe` (CREATE2 deterministic な ENS Universal Resolver アドレス) で解決する設計だが、**Base mainnet 上で実際に該当アドレスがデプロイ済かは未検証**。
 
@@ -366,7 +395,7 @@ policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject す�
 - 本番投入前に testnet で `name.base.eth` を入力して解決成功するか確認すること
 - 失敗する場合は Coinbase 公式の Basenames Universal Resolver アドレスを `BASE_UNIVERSAL_RESOLVER` 定数として `lib/resolveAddress.ts` に設定し直す
 
-### 6. CI workflows の初回実行
+### 7. CI workflows の初回実行
 
 以下の workflows は設定済だが、**GitHub Secrets / Variables の設定なしには green にならない**。本番投入前に各 secrets を設定 + workflow の手動実行 (workflow_dispatch) で 1 度 green を確認:
 
@@ -374,7 +403,7 @@ policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject す�
 - `.github/workflows/e2e.yml`: Playwright (chromium + mobile-safari) でルート遷移
 - `.github/workflows/pimlico-balance.yml`: 残高クエリ + webhook 通知 (要 `ALERT_WEBHOOK_URL` etc)
 
-### 7. Tip widget の webhook 配信
+### 8. Tip widget の webhook 配信
 
 `components/TipForm.tsx` の `params.webhook` は tip 送信成功時に POST されるが、**fetch().catch() で silent に握り潰される設計**。理由は「tip 自体は成立しているので UI でエラーを出すと混乱する」。代わりに `logger.warn('tip.webhook.failed', ...)` で記録され、Sentry DSN が設定されていれば自動的に warn として上がる。クリエイター側 webhook の信頼性は **Sentry 経由でのみ観測可能**。
 
@@ -499,12 +528,14 @@ npm audit --audit-level=high --omit=dev
 # 期待: "found 0 vulnerabilities" もしくは high/critical を含まない
 
 # 5. Bundle First Load 予算内 (回帰検出)
-npm run build | grep "First Load"
-# 期待 (回帰なし):
-#   /[locale]              ≤ 280 kB
-#   /[locale]/pay          ≤ 380 kB  (wagmi+viem+Sentry が支配的)
-#   /[locale]/tip/[address] ≤ 380 kB
-#   First Load JS shared by all ≤ 230 kB
+npm run build 2>&1 | node scripts/check-bundle-budget.mjs
+# 期待 (回帰なし、exit 0):
+#   [OK] /[locale]              X kB / 予算 320 kB
+#   [OK] /[locale]/pay          X kB / 予算 420 kB
+#   [OK] /[locale]/tip/[address] X kB / 予算 420 kB
+#   [OK] __shared__             X kB / 予算 250 kB
+#   OK: 全ルートが予算内
+# 予算超過時は exit 1 (CI でも自動 fail)
 
 # 6. git ワーキングツリーがクリーン
 git status --short

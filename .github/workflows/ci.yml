@@ -22,12 +22,16 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:run
-      - name: Build (production)
-        run: npm run build
+      - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet
           NEXT_PUBLIC_PIMLICO_API_KEY: ci_dummy_key
           NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: '0x000000000000000000000000000000000000dEaD'
+        run: |
+          # build ログを保存して、後で bundle 予算チェックに食わせる
+          npm run build 2>&1 | tee build.log
+          # Route 別 First Load JS の予算超過を fail させる
+          node scripts/check-bundle-budget.mjs < build.log
 
   audit:
     runs-on: ubuntu-latest

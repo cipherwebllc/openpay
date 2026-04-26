@@ -357,4 +357,46 @@ describe('calcSplitBreakdown (C1)', () => {
     // primary 1% でも 0 にはならず、端数集約で >= 1 USDC * 1%
     expect(r.recipients[0].amount).toBeGreaterThan(0n);
   });
+
+  it('正確な数値: % 33+33+33 で primary 1% は 100 USDC のうち 1 USDC + 端数', () => {
+    // README に書いた "rounding edge case" の正確な数字を pin する
+    // amount=100 USDC = 100_000_000 (USDC 6 decimals)
+    // exclude → distributable = 100 USDC, fee = 1 USDC
+    // B = 100 * 33 / 100 = 33 USDC = 33_000_000
+    // C = 同上 = 33_000_000
+    // C2 = 同上 = 33_000_000
+    // primary = 100 - 33 - 33 - 33 = 1 USDC = 1_000_000 (rounding 端数なし)
+    const C2 = '0x4444444444444444444444444444444444444444' as Address;
+    const r = calcSplitBreakdown(
+      100_000_000n,
+      'exclude',
+      'usdc',
+      A,
+      [
+        { to: B, percent: 33 },
+        { to: C, percent: 33 },
+        { to: C2, percent: 33 },
+      ],
+    );
+    expect(r.recipients[0].amount).toBe(1_000_000n); // primary = 1.0 USDC
+    expect(r.recipients[1].amount).toBe(33_000_000n);
+    expect(r.recipients[2].amount).toBe(33_000_000n);
+    expect(r.recipients[3].amount).toBe(33_000_000n);
+    // 顧客は 100 + 1 fee = 101 USDC を支払う
+    expect(r.customerPays).toBe(101_000_000n);
+  });
+
+  it('worst-case rounding: 100 wei amount + 99% split で primary は 1 wei', () => {
+    // 最小単位での丸めの挙動。"主受取人が極小額になる" UX 上の注意点を pin
+    // amount=100 wei (USDC 0.0001 wei!), exclude, fee = MIN 0.1 USDC = 100_000
+    // distributable = 100 wei
+    // split: B=99% → 100 * 99 / 100 = 99 wei
+    // primary = 100 - 99 = 1 wei
+    const r = calcSplitBreakdown(100n, 'exclude', 'usdc', A, [
+      { to: B, percent: 99 },
+    ]);
+    expect(r.recipients[0].amount).toBe(1n); // primary = 1 wei (極小)
+    expect(r.recipients[1].amount).toBe(99n);
+    expect(r.recipients[0].percent).toBe(1);
+  });
 });
