@@ -1,0 +1,37 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "http://localhost:3000/",
+        "http://localhost:3000/pay?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=usdc&fee=include&amount=10",
+        "http://localhost:3000/tip/0x52d4901142e2B5680027da5EB47C86CB02a3cA81?token=jpyc&name=Demo&color=%231e3a8a"
+      ],
+      "startServerCommand": "npm run start",
+      "startServerReadyPattern": "Ready",
+      "numberOfRuns": 2,
+      "settings": {
+        "preset": "desktop",
+        "skipAudits": [
+          "uses-http2",
+          "csp-xss"
+        ]
+      }
+    },
+    "assert": {
+      "preset": "lighthouse:no-pwa",
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.7 }],
+        "categories:accessibility": ["error", { "minScore": 0.9 }],
+        "categories:best-practices": ["warn", { "minScore": 0.85 }],
+        "categories:seo": ["warn", { "minScore": 0.9 }],
+        "uses-text-compression": "warn",
+        "uses-rel-preconnect": "off",
+        "render-blocking-resources": "warn",
+        "unused-javascript": ["warn", { "maxLength": 5 }]
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}
