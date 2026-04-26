@@ -7,12 +7,21 @@ import {
 } from 'viem';
 import { base, mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
+import { env } from './env';
 
 // ENS (.eth) は Ethereum mainnet の Universal Resolver で解決。
 // viem の mainnet chain 定義に ensUniversalResolver が組込み済 (0xeEeE…eEee)。
+//
+// CCIP-Read (off-chain resolution、ERC-3668) 対応 RPC が必須:
+// 多くの ENS 名前は L2 (Linea, Optimism 等) や off-chain resolver に
+// migrate しており、resolveWithGateways で "Internal error" が出る場合は
+// RPC が CCIP-Read 非対応 (cloudflare-eth.com は非対応で有名)。
+//
+// 既定: ethereum-rpc.publicnode.com (CCIP-Read 対応)
+// 上書き: NEXT_PUBLIC_MAINNET_RPC_URL (Alchemy / Infura 等の有料 RPC 推奨)
 const ensClient = createPublicClient({
   chain: mainnet,
-  transport: http('https://cloudflare-eth.com'),
+  transport: http(env.rpc.mainnet ?? 'https://ethereum-rpc.publicnode.com'),
 });
 
 // Basenames (.base.eth) は Base mainnet の Universal Resolver で解決。
@@ -21,7 +30,9 @@ const BASE_UNIVERSAL_RESOLVER: Address =
   '0xeEeEeEee14D718C2B47D9923Deab1335E144EeEe';
 const basenamesClient = createPublicClient({
   chain: base,
-  transport: http('https://mainnet.base.org'),
+  transport: http(
+    env.rpc.baseMainnet ?? env.rpc.base ?? 'https://mainnet.base.org',
+  ),
 });
 
 const ENS_PATTERN = /\.eth$/i;

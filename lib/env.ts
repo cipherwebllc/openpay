@@ -46,6 +46,12 @@ export const env = {
     base: read('NEXT_PUBLIC_BASE_RPC_URL'),
     polygonAmoy: read('NEXT_PUBLIC_POLYGON_AMOY_RPC_URL'),
     baseSepolia: read('NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL'),
+    // ENS / Basenames 解決用 (NETWORK_ENV に依存せず常に mainnet を使う)。
+    // CCIP-Read (off-chain resolution) を要する .eth 名前があるため、
+    // CCIP-Read 互換の RPC を既定にする (cloudflare-eth.com は非対応で
+    // resolveWithGateways が "Internal error" になる)。
+    mainnet: read('NEXT_PUBLIC_MAINNET_RPC_URL'),
+    baseMainnet: read('NEXT_PUBLIC_BASE_MAINNET_RPC_URL'),
   },
   // mainnet の既定アドレスは lib/tokens.ts。コントラクト移行時はこの env で差替え。
   mainnetTokenOverrides: {
