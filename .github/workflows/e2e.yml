@@ -1,0 +1,46 @@
+name: e2e (Playwright)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_NETWORK_ENV: testnet
+      NEXT_PUBLIC_PIMLICO_API_KEY: dummy_for_build
+      NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID: sp_dummy
+      NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: '0x000000000000000000000000000000000000dEaD'
+      NEXT_PUBLIC_JPYC_TESTNET_ADDRESS: '0x0000000000000000000000000000000000000abc'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Build
+        run: npm run build
+
+      - name: Run e2e
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

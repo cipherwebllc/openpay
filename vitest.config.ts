@@ -17,6 +17,7 @@ export default defineConfig({
     globals: false,
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.{ts,tsx}'],
+    exclude: ['node_modules', 'e2e/**', '.next/**'],
     // 環境変数はモジュール評価より前にセットされる必要があるため、
     // setupFiles ではなくここで定義する。
     env: {
