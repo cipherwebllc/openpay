@@ -388,6 +388,24 @@ policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject す�
 - **API Key の露出**: `NEXT_PUBLIC_*` はクライアントへ展開されるため、本番では必ず Pimlico ダッシュボード側で Origin 制限を設定してください
 - **Sponsorship Policy のレート制御**: スポンサー残高が枯渇すると UserOperation が失敗します。Pimlico ダッシュボードで残高アラートを設定することを推奨します
 
+### 既知の transitive 脆弱性 (`npm audit` moderate)
+
+`npm audit --omit=dev` は production で 12 件の moderate を報告するが、**いずれも transitive 依存 (wagmi → @wagmi/connectors → MetaMask SDK / Coinbase CDP-SDK 経由) で、本リポジトリの利用パターンでは実害なし**:
+
+| Advisory | Severity | 経路 | 本リポの実害 |
+|---|---|---|---|
+| `axios <=1.14.0` SSRF / Cloud Metadata Exfiltration | moderate | wagmi → @coinbase/cdp-sdk | **なし** — クライアント (ブラウザ) 環境で SSRF / metadata endpoint アクセス不可 |
+| `postcss <8.5.10` XSS via Unescaped `</style>` | moderate | next 内部 | **なし** — build 時に処理する CSS は自プロジェクト由来、ユーザ入力を CSS に通さない |
+| `uuid <14.0.0` v3/v5/v6 buf bounds check 欠落 | moderate | wagmi → MetaMask SDK | **なし** — 自コードで uuid を直接呼ばない、MetaMask は `buf` 引数を渡さない |
+
+**修正手段**: `npm audit fix --force` は wagmi v3 / Next.js v9 へのダウングレードを伴うため非現実的。upstream (wagmi / @coinbase/cdp-sdk) の修正リリース待ち。Renovate が weekly でチェックするので解消され次第 PR が来る。
+
+進行確認 (本番投入前):
+```bash
+npm audit --omit=dev --audit-level=high  # high 以上ゼロを確認
+npm audit --omit=dev | grep -E "^[0-9]+ "  # moderate 件数推移
+```
+
 ## テスト
 
 [Vitest](https://vitest.dev) + [@testing-library/react](https://testing-library.com/) でユニット / コンポーネントテストを実装しています。
@@ -455,6 +473,58 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 | 15 | CI workflows 全 green | Lighthouse / Playwright e2e / Pimlico 残高 cron の各 workflow を **手動 (workflow_dispatch) で 1 度実行して green 確認**。Secrets 未設定時は失敗する |
 | 16 | Basenames 解決の手動確認 | testnet で `name.base.eth` 形式を入力し、resolved 表示が出るかブラウザで確認 (CREATE2 deterministic な Universal Resolver アドレスの実装在の検証) |
 | 17 | Tip widget webhook の到達確認 | Discord/独自 endpoint に dummy tip を 1 度投げ、JSON payload が届くか確認 (失敗は silent、Sentry 経由のみ観測可能) |
+
+### Go/No-Go 判断: 証拠ベース確認 (本番投入直前に手元で実行)
+
+下記のコマンドを順に走らせ、すべての出力が期待ラインと一致した時のみ Go。
+
+```bash
+# 1. 全テスト実行 (real code paths)
+npm run test:run
+# 期待: "Tests N passed (N)" / 失敗ゼロ
+
+# 2. typecheck
+npm run typecheck
+# 期待: 標準出力に何も出ず exit 0 (tsc --noEmit が静かに pass)
+
+# 3. 本番ビルド
+NEXT_PUBLIC_NETWORK_ENV=testnet \
+  NEXT_PUBLIC_PIMLICO_API_KEY=dummy \
+  NEXT_PUBLIC_FEE_RECEIVER_ADDRESS=0x000000000000000000000000000000000000dEaD \
+  npm run build
+# 期待: "✓ Compiled successfully" + Route table が表示
+
+# 4. Production 依存の脆弱性 (high 以上はゼロ)
+npm audit --audit-level=high --omit=dev
+# 期待: "found 0 vulnerabilities" もしくは high/critical を含まない
+
+# 5. Bundle First Load 予算内 (回帰検出)
+npm run build | grep "First Load"
+# 期待 (回帰なし):
+#   /[locale]              ≤ 280 kB
+#   /[locale]/pay          ≤ 380 kB  (wagmi+viem+Sentry が支配的)
+#   /[locale]/tip/[address] ≤ 380 kB
+#   First Load JS shared by all ≤ 230 kB
+
+# 6. git ワーキングツリーがクリーン
+git status --short
+# 期待: 出力ゼロ (uncommitted な変更なし)
+
+# 7. main ブランチが origin と同期
+git status -b --short | head -1
+# 期待: "## main...origin/main" のみ (ahead/behind 表示なし)
+```
+
+### Bundle 予算の根拠
+
+| ルート | First Load | 主要因 | 許容根拠 |
+|---|---|---|---|
+| `/[locale]` | 278 kB | React + Next.js + i18n + wagmi config + Sentry Replay | 4G で TTI 約 2 秒、許容 |
+| `/[locale]/pay` | 372 kB | + viem + wagmi connectors (Coinbase Wallet SDK) + permissionless | 顧客 wallet 接続用途、初回のみで以降 PWA キャッシュされる |
+| `/[locale]/tip/[address]` | 369 kB | 同上 (TipForm が wagmi を使用するため) | 同上、iframe 埋め込み時は初回のみ |
+| `/_not-found` | 223 kB | shared chunks のみ | エラー画面、最小 |
+
+これ以上の削減には wagmi connector lazy load (Coinbase SDK の dynamic import) が必要。現状は wagmi v2 の構造制約で困難。Renovate が wagmi v3+ への追従 PR を出した時点で再評価。
 
 ## ロールバック
 

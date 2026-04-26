@@ -37,5 +37,22 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      # high 以上の脆弱性で fail。production 依存のみを対象。
+      # high 以上の脆弱性は CI を fail。production 依存のみ。
       - run: npm audit --audit-level=high --omit=dev
+
+      # moderate は warning として可視化 (fail させない)。既知 transitive
+      # 12 件は README で開示済 (wagmi/Next.js 経由、本リポジトリでは実害なし)。
+      # 件数の推移を log に出して回帰検出する。
+      - name: Audit moderate (warning)
+        run: |
+          set +e
+          out=$(npm audit --audit-level=moderate --omit=dev 2>&1)
+          status=$?
+          echo "$out" | tail -5
+          count=$(echo "$out" | grep -oE '[0-9]+ moderate' | grep -oE '^[0-9]+' | head -1)
+          echo "moderate vulnerabilities: ${count:-0}"
+          # 既知の 12 件を超えたら notice (annotation) を出す
+          if [ "${count:-0}" -gt 12 ]; then
+            echo "::warning::moderate 件数が 12 件 (既知) を超えました: ${count}件"
+          fi
+          exit 0
