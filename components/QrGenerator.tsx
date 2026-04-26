@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { isAddress, getAddress } from 'viem';
+import { Field } from './Field';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import { buildPayUrl, type PayParams, type PayMode } from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
@@ -360,19 +361,3 @@ function AdvancedSection({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="block">
-      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}

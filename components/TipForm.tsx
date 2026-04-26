@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { erc20Abi, formatUnits, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { calcBreakdown } from '@/lib/fee';
@@ -298,27 +299,6 @@ export function TipForm({ params }: { params: TipParams }) {
           OpenPay
         </a>
       </p>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  strong,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-}) {
-  return (
-    <div className="flex justify-between gap-2">
-      <dt className={strong ? 'text-slate-700' : 'text-slate-500'}>{label}</dt>
-      <dd
-        className={`text-right font-mono ${strong ? 'font-semibold text-slate-900' : 'text-slate-700'}`}
-      >
-        {value}
-      </dd>
     </div>
   );
 }
