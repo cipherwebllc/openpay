@@ -1,0 +1,339 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { isAddress, getAddress } from 'viem';
+import { useTipSettings } from '@/hooks/useTipSettings';
+import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import {
+  buildTipUrl,
+  DEFAULT_TIP_PRESETS,
+  type TipParams,
+} from '@/lib/url';
+
+const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
+const IFRAME_WIDTH = 380;
+const IFRAME_HEIGHT = 640;
+
+type CopyKey = 'url' | 'iframe';
+
+export function TipEmbedGenerator() {
+  const { settings, setSettings, hydrated } = useTipSettings();
+  const [origin, setOrigin] = useState('');
+  const [copied, setCopied] = useState<CopyKey | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
+  }, []);
+
+  const receiverValid = isAddress(settings.receiver);
+  const colorValid = COLOR_PATTERN.test(settings.color);
+  const presetsParsed = useMemo(() => {
+    return settings.presets
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && DECIMAL_PATTERN.test(s) && Number(s) > 0)
+      .slice(0, 6);
+  }, [settings.presets]);
+
+  const previewPresets =
+    presetsParsed.length > 0
+      ? presetsParsed
+      : DEFAULT_TIP_PRESETS[settings.token];
+
+  const tipUrl = useMemo(() => {
+    if (!hydrated || !receiverValid || !origin) return '';
+    const params: TipParams = {
+      to: getAddress(settings.receiver),
+      token: settings.token,
+      name: settings.name || undefined,
+      message: settings.message || undefined,
+      color: colorValid ? settings.color : undefined,
+      presets: presetsParsed.length > 0 ? presetsParsed : undefined,
+    };
+    return buildTipUrl(origin, params);
+  }, [
+    hydrated,
+    receiverValid,
+    origin,
+    settings.receiver,
+    settings.token,
+    settings.name,
+    settings.message,
+    settings.color,
+    colorValid,
+    presetsParsed,
+  ]);
+
+  const iframeSnippet = useMemo(() => {
+    if (!tipUrl) return '';
+    return `<iframe
+  src="${escapeAttr(tipUrl)}"
+  width="${IFRAME_WIDTH}"
+  height="${IFRAME_HEIGHT}"
+  style="border:0;max-width:100%"
+  title="OpenPay Tip"
+  loading="lazy"
+></iframe>`;
+  }, [tipUrl]);
+
+  async function copy(value: string, key: CopyKey) {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 1500);
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-4">
+        <Field label="クリエイターウォレットアドレス">
+          <input
+            type="text"
+            value={settings.receiver}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, receiver: e.target.value.trim() }))
+            }
+            placeholder="0x..."
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+          />
+          {settings.receiver && !receiverValid && (
+            <p className="mt-1 text-xs text-red-600">
+              アドレス形式が正しくありません
+            </p>
+          )}
+        </Field>
+
+        <Field label="通貨 / 受取チェーン">
+          <div className="grid grid-cols-2 gap-2">
+            {(['jpyc', 'usdc'] as TokenSymbol[]).map((t) => {
+              const info = TOKENS[t];
+              const active = settings.token === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSettings((s) => ({ ...s, token: t }))}
+                  className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+                    active
+                      ? 'border-brand bg-brand/5 text-brand-dark'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="font-semibold">{info.displaySymbol}</div>
+                  <div className="text-xs text-slate-500">
+                    {t === 'usdc' ? 'Base' : 'Polygon'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+
+        <Field label="表示名 (任意)">
+          <input
+            type="text"
+            value={settings.name}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, name: e.target.value }))
+            }
+            placeholder="例: 山田太郎"
+            maxLength={60}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          />
+        </Field>
+
+        <Field label="メッセージ (任意)">
+          <textarea
+            value={settings.message}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, message: e.target.value }))
+            }
+            placeholder="例: 応援ありがとうございます！"
+            maxLength={200}
+            rows={2}
+            className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            {settings.message.length} / 200
+          </p>
+        </Field>
+
+        <Field label="テーマカラー">
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={colorValid ? settings.color : '#2563eb'}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, color: e.target.value }))
+              }
+              className="h-10 w-14 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+            />
+            <input
+              type="text"
+              value={settings.color}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, color: e.target.value }))
+              }
+              placeholder="#2563eb"
+              className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+            />
+          </div>
+          {settings.color && !colorValid && (
+            <p className="mt-1 text-xs text-red-600">
+              色は #rrggbb 形式で指定してください
+            </p>
+          )}
+        </Field>
+
+        <Field
+          label={`金額プリセット (任意, カンマ区切り — 既定: ${DEFAULT_TIP_PRESETS[settings.token].join(', ')})`}
+        >
+          <input
+            type="text"
+            value={settings.presets}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, presets: e.target.value }))
+            }
+            placeholder={`例: ${DEFAULT_TIP_PRESETS[settings.token].join(',')}`}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+          />
+          {settings.presets && presetsParsed.length === 0 && (
+            <p className="mt-1 text-xs text-amber-600">
+              有効な金額がありません — 既定値が使用されます
+            </p>
+          )}
+          {presetsParsed.length > 0 && (
+            <p className="mt-1 text-xs text-slate-500">
+              使用される値: {presetsParsed.join(', ')} {TOKENS[settings.token].displaySymbol}
+            </p>
+          )}
+        </Field>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">プレビュー</h3>
+          <div
+            className="mt-2 rounded-2xl p-4 text-white shadow-sm"
+            style={{ backgroundColor: colorValid ? settings.color : '#2563eb' }}
+          >
+            <p className="text-xs uppercase tracking-wider opacity-80">
+              OpenPay Tip
+            </p>
+            <p className="mt-2 text-lg font-bold">
+              {settings.name
+                ? `${settings.name} さんへチップを送る`
+                : 'クリエイターへチップを送る'}
+            </p>
+            {settings.message && (
+              <p className="mt-2 whitespace-pre-wrap text-sm opacity-90">
+                {settings.message}
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {previewPresets.map((p) => (
+                <span
+                  key={p}
+                  className="rounded-md bg-white/20 px-2 py-1 text-xs font-mono"
+                >
+                  {p} {TOKENS[settings.token].displaySymbol}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Tip URL
+            </h3>
+            <button
+              type="button"
+              onClick={() => copy(tipUrl, 'url')}
+              disabled={!tipUrl}
+              className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {copied === 'url' ? 'コピー済み' : 'コピー'}
+            </button>
+          </div>
+          <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
+            {tipUrl || (
+              <span className="text-slate-400">
+                受取アドレスを入力すると URL が生成されます
+              </span>
+            )}
+          </div>
+          {tipUrl && (
+            <a
+              href={tipUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-block text-xs text-brand hover:underline"
+            >
+              新しいタブで開く →
+            </a>
+          )}
+        </div>
+
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              iframe 埋め込みコード
+            </h3>
+            <button
+              type="button"
+              onClick={() => copy(iframeSnippet, 'iframe')}
+              disabled={!iframeSnippet}
+              className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {copied === 'iframe' ? 'コピー済み' : 'コピー'}
+            </button>
+          </div>
+          <pre className="overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">
+            <code>
+              {iframeSnippet || (
+                <span className="text-slate-500">
+                  受取アドレスを入力するとスニペットが生成されます
+                </span>
+              )}
+            </code>
+          </pre>
+          <p className="mt-2 text-xs text-slate-500">
+            ブログ・ポートフォリオサイト・GitHub README (raw HTML が許可されている場合) などにそのまま貼り付けられます。
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="block">
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function escapeAttr(value: string): string {
+  // iframe src 属性に埋め込むため、ダブルクォートと < > & を実体参照化。
+  // URLSearchParams の出力は既に URL エンコード済みなので、追加の HTML エスケープのみ必要。
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
