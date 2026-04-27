@@ -522,15 +522,15 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 
 ### カバレッジ実績 (2026-04-27 時点)
 
-| 指標 | カバレッジ | 件数 |
-|---|---|---|
-| Statements | 95.51% | 958 / 1003 |
-| Branches | 94.27% | 346 / 367 |
-| Functions | 96.87% | 62 / 64 |
-| Lines | 95.51% | 958 / 1003 |
-| Test count | — | 418 件 (29 ファイル) |
+| 指標 | カバレッジ |
+|---|---|
+| Statements | 95.92% |
+| Branches | 94.89% |
+| Functions | 89.25% |
+| Lines | 95.92% |
+| Test count | 433 件 (29 ファイル) |
 
-未カバー部分は主に `useSmartAccount.queryFn` の deep error path (catch 周り) と `useGasQuoteUsdc` の 1 hop 内エラー。CI には min threshold を強制する設定は無いため、PR レビュー時に `--coverage` で目視確認する運用。
+未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
 ### カバー範囲
 
