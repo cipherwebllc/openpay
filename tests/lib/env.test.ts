@@ -98,3 +98,57 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.pimlicoSponsorshipPolicyId).toBeUndefined();
   });
 });
+
+describe('mainnet 投入時の silent failure ガード', () => {
+  it('mainnet + FEE_RECEIVER 未設定 → throw (fee 永久消失防止)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    delete process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS;
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_FEE_RECEIVER_ADDRESS/,
+    );
+  });
+
+  it('mainnet + FEE_RECEIVER=dEaD placeholder → throw (フォールバック値での deploy を防止)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0x000000000000000000000000000000000000dead';
+    await expect(import('@/lib/env')).rejects.toThrow(/0x\.\.\.dEaD/);
+  });
+
+  it('mainnet + PIMLICO_API_KEY 未設定 → throw (決済 runtime error 防止)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    delete process.env.NEXT_PUBLIC_PIMLICO_API_KEY;
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_PIMLICO_API_KEY/,
+    );
+  });
+
+  it('mainnet + 全必須 env 設定済 → 正常 import', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    const mod = await import('@/lib/env');
+    expect(mod.isMainnet).toBe(true);
+  });
+
+  it('testnet では FEE_RECEIVER 未設定でも throw しない (開発体験優先)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'testnet';
+    delete process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS;
+    delete process.env.NEXT_PUBLIC_PIMLICO_API_KEY;
+    const mod = await import('@/lib/env');
+    expect(mod.env.feeReceiver.toLowerCase()).toBe(
+      '0x000000000000000000000000000000000000dead',
+    );
+    expect(mod.env.pimlicoApiKey).toBe('');
+  });
+});

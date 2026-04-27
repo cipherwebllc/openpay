@@ -18,6 +18,27 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.{ts,tsx}'],
     exclude: ['node_modules', 'e2e/**', '.next/**'],
+    coverage: {
+      provider: 'v8',
+      include: ['hooks/**', 'lib/**', 'components/**'],
+      // 構造化ログや middleware など runtime に直接動かない / e2e で見る系は除外
+      exclude: [
+        'instrumentation*.ts',
+        'app/global-error.tsx',
+        '**/*.d.ts',
+        '**/*.config.*',
+      ],
+      // 現状値 (2026-04-27, components+hooks+lib): statements 95.89 /
+      // branches 94.87 / functions 89.25 / lines 95.89。functions が低めなのは
+      // QrGenerator / TipEmbedGenerator の inner handler が未テストなため。
+      // 現状値 - 1% を下限にして回帰のみ検出 (新規コードに無理なテスト追加を強要しない)。
+      thresholds: {
+        statements: 95,
+        branches: 93,
+        functions: 88,
+        lines: 95,
+      },
+    },
     // 環境変数はモジュール評価より前にセットされる必要があるため、
     // setupFiles ではなくここで定義する。
     env: {

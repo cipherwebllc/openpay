@@ -492,6 +492,27 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.queryByText(/ネットワーク手数料/)).toBeNull();
   });
 
+  it('USDC ERC20 mode + 接続済 → 「ガス代承認の状況を確認」リンクが表示される', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<TipForm params={USDC_PARAMS} />);
+    const link = screen.getByRole('link', { name: /ガス代承認の状況を確認/ });
+    expect(link).toHaveAttribute(
+      'href',
+      `https://basescan.org/tokenapprovalchecker?search=${FAN}`,
+    );
+  });
+
+  it('JPYC sponsorship mode では approval リンクは表示されない', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/ガス代承認の状況を確認/)).toBeNull();
+  });
+
   it('mutate には gas を含めない (creator + fee のみ)', async () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });

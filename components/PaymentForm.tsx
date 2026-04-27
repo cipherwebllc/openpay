@@ -312,6 +312,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 ? t('gaslessBatchHintUsdc')
                 : t('gaslessBatchHintJpyc')}
         </p>
+        {isErc20Paymaster && address && (
+          <p className="mt-2 text-xs">
+            <a
+              href={`https://basescan.org/tokenapprovalchecker?search=${address}`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-slate-500 underline hover:text-slate-700"
+            >
+              {t('approvalCheckLink')} ↗
+            </a>
+          </p>
+        )}
       </section>
 
       <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">

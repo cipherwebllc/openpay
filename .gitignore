@@ -27,3 +27,6 @@ playwright/.cache/
 
 # Lighthouse CI
 .lighthouseci/
+
+# vitest coverage report
+coverage/

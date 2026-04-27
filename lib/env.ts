@@ -122,3 +122,26 @@ export const env = {
 } as const;
 
 export const isMainnet = env.networkEnv === 'mainnet';
+
+// mainnet 投入時の silent failure 防止:
+//   - FEE_RECEIVER 未設定 → fee が 0x...dEaD に永久消失する (検出不能)
+//   - PIMLICO_API_KEY 未設定 → 決済 click 時に runtime error
+// 本リポジトリは frontend dApp で、両者は build 時に NEXT_PUBLIC_* として
+// バンドルへ展開されるため、ここで throw すれば deploy 自体を fail させられる。
+// testnet では fallback を許容して開発を阻害しない。
+if (isMainnet) {
+  if (
+    env.feeReceiver.toLowerCase() === PLACEHOLDER_FEE_RECEIVER.toLowerCase()
+  ) {
+    throw new Error(
+      'NEXT_PUBLIC_FEE_RECEIVER_ADDRESS が未設定です (mainnet 必須)。' +
+        'fee が 0x...dEaD に永久消失するため deploy を中止します。',
+    );
+  }
+  if (!env.pimlicoApiKey) {
+    throw new Error(
+      'NEXT_PUBLIC_PIMLICO_API_KEY が未設定です (mainnet 必須)。' +
+        '決済時に runtime error になるため deploy を中止します。',
+    );
+  }
+}

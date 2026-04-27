@@ -719,6 +719,40 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.queryByText(/gas_congested/)).toBeNull();
   });
 
+  it('USDC ERC20 mode + 接続済 → 「ガス代承認の状況を確認」リンクが BaseScan の approvals 画面を指す', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<PaymentForm />);
+
+    const link = screen.getByRole('link', { name: /ガス代承認の状況を確認/ });
+    expect(link).toHaveAttribute(
+      'href',
+      `https://basescan.org/tokenapprovalchecker?search=${CUSTOMER}`,
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener');
+  });
+
+  it('JPYC sponsorship mode では approval リンクは表示されない (paymaster approve が無いため)', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&fee=include&amount=1000`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/ガス代承認の状況を確認/)).toBeNull();
+  });
+
+  it('未接続では approval リンクは表示されない (アドレス不明)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10`);
+    setAccount({ connected: false });
+    setGasQuote('ready');
+    render(<PaymentForm />);
+    expect(screen.queryByText(/ガス代承認の状況を確認/)).toBeNull();
+  });
+
   it('split + ERC20 mode: gas を含めた customer total と extraRecipients が両立', async () => {
     const user = userEvent.setup();
     const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';

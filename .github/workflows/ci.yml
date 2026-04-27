@@ -21,7 +21,9 @@ jobs:
       # CI 段階で lockfile の存在も担保される。
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run test:run
+      # coverage つきで実行 (vitest.config.ts の thresholds を下回ると fail)。
+      # 既存の test:run と等価で集合は変わらず、coverage 計測の overhead のみ。
+      - run: npm run test:coverage
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet
