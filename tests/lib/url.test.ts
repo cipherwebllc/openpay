@@ -19,6 +19,7 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'usdc',
+      gas: 'customer',
       amount: '10.5',
       mode: 'gasless',
     });
@@ -32,6 +33,7 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
+      gas: 'customer',
       mode: 'gasless',
     });
     expect(path).toBe(`/pay?to=${VALID_TO}&token=jpyc`);
@@ -42,6 +44,7 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'usdc',
+      gas: 'customer',
       amount: '',
       mode: 'gasless',
     });
@@ -52,6 +55,7 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
+      gas: 'customer',
       amount: '1000',
       mode: 'direct',
     });
@@ -64,6 +68,7 @@ describe('buildPayUrl', () => {
     const url = buildPayUrl('https://openpay.example.com', {
       to: VALID_TO,
       token: 'usdc',
+      gas: 'customer',
       amount: '5',
       mode: 'gasless',
     });
@@ -188,6 +193,7 @@ describe('parsePayParams', () => {
     const built = buildPayPath({
       to: VALID_TO,
       token: 'usdc',
+      gas: 'customer',
       amount: '12.34',
       mode: 'gasless',
     });
@@ -206,6 +212,7 @@ describe('parsePayParams', () => {
     const built = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
+      gas: 'customer',
       amount: '1000',
       mode: 'direct',
     });
@@ -469,6 +476,7 @@ describe('PayParams: split (multi-recipient C1)', () => {
     const path = buildPayPath({
       to: A,
       token: 'usdc',
+      gas: 'customer',
       amount: '100',
       mode: 'gasless',
       split: [
@@ -845,6 +853,7 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
     const built = buildPayPath({
       to: A,
       token: 'usdc',
+      gas: 'customer',
       amount: '12.345678',
       mode: 'gasless',
       split: [{ to: B, percent: 25 }],
@@ -866,6 +875,7 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
     const path = buildPayPath({
       to: A,
       token: 'usdc',
+      gas: 'customer',
       mode: 'gasless',
       split: [],
     });

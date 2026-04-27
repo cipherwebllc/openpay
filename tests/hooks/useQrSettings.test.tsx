@@ -15,6 +15,7 @@ describe('useQrSettings', () => {
     expect(result.current.settings).toEqual({
       receiver: '',
       token: 'usdc',
+      gasMode: 'customer',
       directTransfer: false,
       splits: [],
     });
@@ -111,6 +112,7 @@ describe('useQrSettings', () => {
       result.current.setSettings({
         receiver: '0xdef',
         token: 'jpyc',
+        gasMode: 'merchant',
         directTransfer: true,
         splits: [{ address: '0xb1', percent: '40' }],
       });
@@ -121,10 +123,31 @@ describe('useQrSettings', () => {
       expect(raw).not.toBeNull();
       const parsed = JSON.parse(raw!);
       expect(parsed.token).toBe('jpyc');
+      expect(parsed.gasMode).toBe('merchant');
       expect(parsed.receiver).toBe('0xdef');
       expect(parsed.directTransfer).toBe(true);
       expect(parsed.splits).toEqual([{ address: '0xb1', percent: '40' }]);
     });
+  });
+
+  it('gasMode が不正値 → exclude (default) で復元', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', gasMode: 'free', receiver: '0xa' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.gasMode).toBe('customer');
+  });
+
+  it('gasMode=merchant を保存できる', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', gasMode: 'merchant', receiver: '0xa' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.gasMode).toBe('merchant');
   });
 
   it('hydrate 完了前は localStorage に書込まない (上書き防止)', async () => {

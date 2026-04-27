@@ -53,18 +53,19 @@ export function TipForm({ params }: { params: TipParams }) {
     return parseUnits(amountStr, token.decimals);
   }, [amountStr, token.decimals]);
 
-  // tip: 受取人 (= クリエイター) は preset 額をそのまま受け取り、tipper が
-  // 運営手数料 (1% or MIN_FEE) と gas 見積を上乗せして支払う。
+  // tip: 運営手数料は preset から控除 (creator 受取 = preset - fee)、ファンが gas を上乗せ支払い。
+  // Tip widget は gas=customer 固定 (preset セマンティクス維持: creator は preset - fee を受け取り、
+  // ファンは preset + gas を支払う)。
+  const gasAmount = gasQuote.data?.gasAmount;
   const breakdown = useMemo(
-    () => calcBreakdown(amountWei, params.token),
-    [amountWei, params.token],
+    () => calcBreakdown(amountWei, params.token, 'customer', gasAmount ?? 0n),
+    [amountWei, params.token, gasAmount],
   );
 
-  // gas 見積:
-  //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。表示加算のみ。
-  //   Sponsorship (JPYC): Pimlico が立替、運営は徴収 JPYC で精算。fee transfer に内包。
-  const gasAmount = gasQuote.data?.gasAmount;
-  const totalCustomerOutflow = breakdown.customerPays + (gasAmount ?? 0n);
+  // gas 軸:
+  //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
+  //   Sponsorship (JPYC): Pimlico が立替、運営は徴収 JPYC で精算 (fee transfer に内包)。
+  const totalCustomerOutflow = breakdown.customerPays;
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
   const fmt = (wei: bigint) =>

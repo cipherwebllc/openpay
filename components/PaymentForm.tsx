@@ -79,12 +79,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const fmt = (wei: bigint) =>
     `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
 
+  const isMerchantGas = !isDirect && params.gas === 'merchant';
+
+  // gas 見積 (両 paymaster mode で表示・計算に使用):
+  //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
+  //   Sponsorship (JPYC): Pimlico が POL gas を立替、運営は徴収した JPYC で別途精算。
+  const gasAmount = !isDirect ? gasQuote.data?.gasAmount : undefined;
+
   const breakdown = useMemo(
     () =>
       isDirect
         ? calcDirectBreakdown(amountWei)
-        : calcBreakdown(amountWei, params.token),
-    [isDirect, amountWei, params.token],
+        : calcBreakdown(amountWei, params.token, params.gas, gasAmount ?? 0n),
+    [isDirect, amountWei, params.token, params.gas, gasAmount],
   );
 
   // direct mode では split は無視 (シンプルな単一 transfer に限定)。
@@ -95,21 +102,39 @@ function PaymentDetails({ params }: { params: PayParams }) {
       params.token,
       params.to,
       params.split,
+      params.gas,
+      gasAmount ?? 0n,
     );
-  }, [isDirect, amountWei, params.token, params.to, params.split]);
+  }, [
+    isDirect,
+    amountWei,
+    params.token,
+    params.to,
+    params.split,
+    params.gas,
+    gasAmount,
+  ]);
 
-  // gas 見積:
-  //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
-  //     表示と残高判定でだけ customer outflow に加算 (on-chain transfer は変えない)。
-  //   Sponsorship (JPYC): Pimlico が POL gas を立替。運営は徴収した JPYC で精算する。
-  //     fee transfer に gas 相当を内包させ、feeReceiver に追加で受け取る。
-  const gasAmount = !isDirect ? gasQuote.data?.gasAmount : undefined;
-  const totalCustomerOutflow =
-    (splitBreakdown ? splitBreakdown.customerPays : breakdown.customerPays) +
-    (gasAmount ?? 0n);
+  // 顧客支払額: calcBreakdown が gasMode を考慮済 (customer なら +gas、merchant なら amount のまま)
+  const totalCustomerOutflow = splitBreakdown
+    ? splitBreakdown.customerPays
+    : breakdown.customerPays;
+
   // Sponsorship 時は fee transfer に gas を含める。ERC20 Paymaster 時は fee のみ
   // (gas は paymaster が顧客から自動徴収するため二重徴収を避ける)。
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
+
+  // 運営の赤字防止: merchant が 0 になるケースは送信を block。
+  //   customer mode: amount < fee → merchant = 0
+  //   merchant mode: amount < fee + gas → merchant = 0
+  //   merchant mode の判定には gasQuote の load 完了が必要。
+  const merchantUnderflow =
+    !isDirect &&
+    amountWei > 0n &&
+    (isMerchantGas ? gasQuote.data !== undefined : true) &&
+    breakdown.merchantReceives === 0n;
+  const minimumAmountWei =
+    breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
 
   const balanceQuery = useReadContract({
     address: token.address,
@@ -135,7 +160,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !flowPending &&
-    gasQuoteReady;
+    gasQuoteReady &&
+    !merchantUnderflow;
 
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
   // 差し替え (direct モードは paymaster を経由しないため対象外)。
@@ -146,7 +172,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
     ? t('errorGasCongested')
     : (flowError?.message ??
       (isDirect ? undefined : saError?.message) ??
-      (gasQuote.error ? t('errorGasQuote') : null));
+      (gasQuote.error ? t('errorGasQuote') : null) ??
+      (merchantUnderflow
+        ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
+        : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
@@ -274,7 +303,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
               />
             ))
           ) : (
-            <Row label={t('merchantRow')} value={fmt(breakdown.merchantReceives)} />
+            <Row
+              label={isDirect ? t('merchantRow') : t('merchantRowAfterFee')}
+              value={fmt(breakdown.merchantReceives)}
+            />
           )}
           {!isDirect && (
             <Row
@@ -286,7 +318,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           )}
           {!isDirect && (
             <Row
-              label={t('gasRow')}
+              label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
               value={
                 gasAmount !== undefined
                   ? t('gasRowValue', { amount: fmt(gasAmount) })
@@ -296,11 +328,22 @@ function PaymentDetails({ params }: { params: PayParams }) {
           )}
           <div className="my-2 border-t border-slate-200" />
           <Row
-            label={isDirect ? t('customerDirect') : t('customerTotal')}
+            label={
+              isDirect
+                ? t('customerDirect')
+                : isMerchantGas
+                  ? t('customerMerchantGas')
+                  : t('customerCustomerGas')
+            }
             value={fmt(totalCustomerOutflow)}
             strong
           />
         </dl>
+        {isMerchantGas && (
+          <p className="mt-3 text-xs text-emerald-700">
+            {t('merchantGasHint')}
+          </p>
+        )}
         <p className="mt-4 text-xs text-slate-500">
           {isDirect
             ? t('directBatchHint')

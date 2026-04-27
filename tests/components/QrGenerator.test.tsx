@@ -54,8 +54,8 @@ describe('QrGenerator', () => {
       const toggle = screen.getByRole('button', { name: /詳細設定/ });
       expect(within(toggle).getByText(/JPYC/)).toBeInTheDocument();
       expect(within(toggle).getByText(/0x8335/)).toBeInTheDocument();
-      // 料率は固定 1%
-      expect(within(toggle).getByText(/1%/)).toBeInTheDocument();
+      // gasMode default = customer → "gas:cust" 表記
+      expect(within(toggle).getByText(/gas:cust/)).toBeInTheDocument();
     });
 
     it('LocalStorage に無効アドレス: アコーディオン展開のままで修正を促す', async () => {
@@ -117,6 +117,68 @@ describe('QrGenerator', () => {
       const input = screen.getByPlaceholderText('10.00') as HTMLInputElement;
       await user.type(input, '10ab.5');
       expect(input.value).toBe('10.5');
+    });
+
+    it('gas トグル: 切替で URL に gas=merchant が付く / 外れる', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('10.00'), '5');
+
+      // 既定は customer → URL に gas= は付かない
+      await waitFor(() => {
+        expect(
+          screen.queryByText((t) => t.includes('gas=')),
+        ).toBeNull();
+      });
+
+      // 店主 gas 負担ボタン → URL に gas=merchant が出る
+      await user.click(screen.getByRole('button', { name: /店主が gas 負担/ }));
+      await waitFor(() => {
+        expect(
+          screen.getByText((t) => t.includes('gas=merchant')),
+        ).toBeInTheDocument();
+      });
+
+      // 顧客 gas 負担に戻す → gas= が消える
+      await user.click(screen.getByRole('button', { name: /顧客が gas 負担/ }));
+      await waitFor(() => {
+        expect(
+          screen.queryByText((t) => t.includes('gas=')),
+        ).toBeNull();
+      });
+    });
+
+    it('店主 gas 負担モード: localStorage に gasMode=merchant が保存される', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() =>
+        screen.getByRole('button', { name: /店主が gas 負担/ }),
+      );
+      await user.click(screen.getByRole('button', { name: /店主が gas 負担/ }));
+
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(raw).not.toBeNull();
+        expect(JSON.parse(raw!).gasMode).toBe('merchant');
+      });
+    });
+
+    it('直接送金 ON で gas トグル UI が消える', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByRole('checkbox', { name: /直接送金/ }));
+      // 切替前は表示
+      expect(
+        screen.getByRole('button', { name: /顧客が gas 負担/ }),
+      ).toBeInTheDocument();
+      // 直接送金 ON
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      // トグル消失
+      expect(
+        screen.queryByRole('button', { name: /顧客が gas 負担/ }),
+      ).toBeNull();
     });
 
     it('JPYC タブへ切替で chainId 表記が変わる', async () => {

@@ -217,21 +217,23 @@ describe('PaymentForm — 金額の表示モード', () => {
   });
 });
 
-describe('PaymentForm — 手数料明細', () => {
-  it('USDC 100: 1.0% → merchant=100 / fee=1.0 / customer=101', () => {
+describe('PaymentForm — 手数料明細 (default = gas=customer)', () => {
+  it('USDC 100, gas=0 → merchant=99 / fee=1.0 / customer=100', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setGasQuote('ready', 0n);
     render(<PaymentForm />);
-    // header=100 + 明細merchant=100 → 2件, customer=101 はユニーク
+    // header=100 + customer total=100 → 2件, merchant=99 / fee=1 はユニーク
     expect(screen.getAllByText('100 USDC').length).toBe(2);
+    expect(screen.getByText('99 USDC')).toBeInTheDocument();
     expect(screen.getByText('1 USDC')).toBeInTheDocument();
-    expect(screen.getByText('101 USDC')).toBeInTheDocument();
   });
 
-  it('USDC 5: 1.0% < MIN (0.05) → MIN 適用、customer=5.05', () => {
+  it('USDC 5, gas=0: 1.0% < MIN (0.05) → fee=0.05, merchant=4.95, customer=5', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=5`);
+    setGasQuote('ready', 0n);
     render(<PaymentForm />);
     expect(screen.getByText('0.05 USDC')).toBeInTheDocument();
-    expect(screen.getByText('5.05 USDC')).toBeInTheDocument();
+    expect(screen.getByText('4.95 USDC')).toBeInTheDocument();
   });
 });
 
@@ -269,7 +271,7 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     setGasQuote('ready', 0n); // sponsorship では quote 0 でも ready
     render(<PaymentForm />);
     const btn = screen.getByRole('button', {
-      name: /10\.1 USDC を支払う/,
+      name: /10 USDC を支払う/,
     });
     expect(btn).not.toBeDisabled();
   });
@@ -283,7 +285,7 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     render(<PaymentForm />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /10\.1 USDC を支払う/ }),
+      screen.getByRole('button', { name: /10 USDC を支払う/ }),
     ).toBeDisabled();
   });
 
@@ -310,13 +312,14 @@ describe('PaymentForm — 送信フロー', () => {
     setGasQuote('ready', 0n);
     render(<PaymentForm />);
 
-    await user.click(screen.getByRole('button', { name: /101 USDC を支払う/ }));
+    await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
     expect(call.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
-    expect(call.merchantAmount).toBe(100_000_000n);
-    expect(call.feeAmount).toBe(1_000_000n); // 1.0 USDC fee
+    // 新モデル default (gas=customer): merchant = 100 - 1 = 99
+    expect(call.merchantAmount).toBe(99_000_000n);
+    expect(call.feeAmount).toBe(1_000_000n);
     expect(call.feeReceiver.toLowerCase()).toBe(
       '0xdead000000000000000000000000000000001234',
     );
@@ -336,11 +339,12 @@ describe('PaymentForm — 送信フロー', () => {
     render(<PaymentForm />);
 
     await user.type(screen.getByPlaceholderText('10.00'), '50');
-    await user.click(screen.getByRole('button', { name: /50\.5 USDC を支払う/ }));
+    await user.click(screen.getByRole('button', { name: /50 USDC を支払う/ }));
 
     const call = mutate.mock.calls[0][0];
-    expect(call.merchantAmount).toBe(50_000_000n);
-    expect(call.feeAmount).toBe(500_000n); // 50 * 1.0% = 0.5 USDC
+    // 新モデル: merchant = 50 - 0.5 = 49.5
+    expect(call.merchantAmount).toBe(49_500_000n);
+    expect(call.feeAmount).toBe(500_000n);
   });
 
   it('送信中 → ボタンが「送信中…」かつ disabled', () => {
@@ -426,20 +430,22 @@ describe('PaymentForm — split (C1)', () => {
     render(<PaymentForm />);
 
     await user.click(
-      screen.getByRole('button', { name: /101 USDC を支払う/ }),
+      screen.getByRole('button', { name: /100 USDC を支払う/ }),
     );
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
-    // distributable = 100 USDC (exclude semantics), primary (MERCHANT) 50% = 50 USDC
+    // 新モデル default: distributable = amount - fee = 99 USDC, primary (MERCHANT) 50% = 49.5
     expect(call.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
-    expect(call.merchantAmount).toBe(50_000_000n);
-    expect(call.feeAmount).toBe(1_000_000n); // 1.0 USDC fee
+    expect(call.merchantAmount).toBe(49_500_000n);
+    expect(call.feeAmount).toBe(1_000_000n);
     expect(call.extraRecipients).toHaveLength(2);
     expect(call.extraRecipients[0].to.toLowerCase()).toBe(B.toLowerCase());
-    expect(call.extraRecipients[0].amount).toBe(30_000_000n);
+    // B = 99 * 30% = 29.7
+    expect(call.extraRecipients[0].amount).toBe(29_700_000n);
     expect(call.extraRecipients[1].to.toLowerCase()).toBe(C.toLowerCase());
-    expect(call.extraRecipients[1].amount).toBe(20_000_000n);
+    // C = 99 * 20% = 19.8
+    expect(call.extraRecipients[1].amount).toBe(19_800_000n);
   });
 });
 
@@ -565,21 +571,21 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
       ),
     ).toBe(true);
     expect(screen.getByText(/最大 0\.5 USDC/)).toBeInTheDocument();
-    // 顧客支払額 = 100 (merchant) + 1.0 (fee) + 0.5 (gas) = 101.5 USDC
-    expect(screen.getByText('101.5 USDC')).toBeInTheDocument();
+    // 新モデル default: customer = amount + gas = 100 + 0.5 = 100.5 (運営手数料は merchant 控除で隠れる)
+    expect(screen.getByText('100.5 USDC')).toBeInTheDocument();
   });
 
   it('gas を含めた残高チェック: gas 込みで足りなければ「残高不足」', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=100`);
     setAccount({ connected: true, chainId: baseSepolia.id });
-    // 残高 101 USDC、必要 101.5 USDC (100 + 1.0 fee + 0.5 gas) → 不足
-    setBalance(101_000_000n);
+    // 残高 100 USDC、必要 100.5 USDC (= 100 + gas 0.5) → 不足
+    setBalance(100_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 500_000n);
     render(<PaymentForm />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /101\.5 USDC を支払う/ }),
+      screen.getByRole('button', { name: /100\.5 USDC を支払う/ }),
     ).toBeDisabled();
   });
 
@@ -620,13 +626,14 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     render(<PaymentForm />);
 
     await user.click(
-      screen.getByRole('button', { name: /101\.5 USDC を支払う/ }),
+      screen.getByRole('button', { name: /100\.5 USDC を支払う/ }),
     );
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
-    expect(call.merchantAmount).toBe(100_000_000n);
-    expect(call.feeAmount).toBe(1_000_000n); // ERC20 paymaster: gas は含まない
+    // 新モデル: merchant = amount - fee = 99 USDC (運営手数料を merchant 控除)
+    expect(call.merchantAmount).toBe(99_000_000n);
+    expect(call.feeAmount).toBe(1_000_000n); // ERC20 paymaster: gas は paymaster 経由
     expect(call.extraRecipients).toBeUndefined();
   });
 
@@ -653,21 +660,21 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
   it('境界: 残高 = 必要額 ちょうど → 支払い可能 (insufficient ではない)', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=100`);
     setAccount({ connected: true, chainId: baseSepolia.id });
-    // 必要 101.5 USDC ぴったり
-    setBalance(101_500_000n);
+    // 新モデル: customer = 100 + 0.5 = 100.5 USDC ぴったり
+    setBalance(100_500_000n);
     setSmartAccount(true);
     setGasQuote('ready', 500_000n);
     render(<PaymentForm />);
     expect(screen.queryByText(/残高が不足/)).toBeNull();
     expect(
-      screen.getByRole('button', { name: /101\.5 USDC を支払う/ }),
+      screen.getByRole('button', { name: /100\.5 USDC を支払う/ }),
     ).not.toBeDisabled();
   });
 
   it('境界: 残高 = 必要額 - 1 wei → insufficient', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=100`);
     setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(101_500_000n - 1n);
+    setBalance(100_500_000n - 1n);
     setSmartAccount(true);
     setGasQuote('ready', 500_000n);
     render(<PaymentForm />);
@@ -762,18 +769,145 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
 
     // 100 + 1.0 (fee) + 0.5 (gas) = 101.5 USDC
     expect(
-      screen.getByRole('button', { name: /101\.5 USDC を支払う/ }),
+      screen.getByRole('button', { name: /100\.5 USDC を支払う/ }),
     ).not.toBeDisabled();
 
     await user.click(
-      screen.getByRole('button', { name: /101\.5 USDC を支払う/ }),
+      screen.getByRole('button', { name: /100\.5 USDC を支払う/ }),
     );
     const call = mutate.mock.calls[0][0];
-    // primary (MERCHANT) は 70%、B は 30% を 100 USDC から取る
-    expect(call.merchantAmount).toBe(70_000_000n);
+    // 新モデル: distributable = amount - fee = 99 USDC, primary 70% = 69.3, B 30% = 29.7
+    expect(call.merchantAmount).toBe(69_300_000n);
     expect(call.extraRecipients[0].to.toLowerCase()).toBe(B.toLowerCase());
-    expect(call.extraRecipients[0].amount).toBe(30_000_000n);
-    // gas は extraRecipients に含めない
+    expect(call.extraRecipients[0].amount).toBe(29_700_000n);
     expect(call.extraRecipients).toHaveLength(1);
+  });
+});
+
+describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () => {
+  it('表示: customer pays exactly amount, merchant 控除済表示 (sponsorship gas=0)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n); // sponsorship: gas 0
+    render(<PaymentForm />);
+
+    // 顧客支払額 = 100 (amount のまま)
+    const dts = Array.from(document.querySelectorAll('dl dt')) as HTMLElement[];
+    const customerDt = dts.find((d) =>
+      /顧客支払額/.test(d.textContent ?? ''),
+    )!;
+    expect(customerDt.parentElement).toHaveTextContent('100 USDC');
+
+    // 店主受取 = 99 (amount - fee 1.0 - gas 0)
+    expect(screen.getByText('99 USDC')).toBeInTheDocument();
+  });
+
+  it('表示: gas 込みで merchant 控除 (sponsorship JPYC, gas=2 JPYC)', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&gas=merchant&amount=1000`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    setGasQuote('ready', 2n * 10n ** 18n);
+    render(<PaymentForm />);
+
+    // customer pays 1000 (内税)
+    const dts = Array.from(document.querySelectorAll('dl dt')) as HTMLElement[];
+    const customerDt = dts.find((d) =>
+      /顧客支払額/.test(d.textContent ?? ''),
+    )!;
+    expect(customerDt.parentElement).toHaveTextContent('1000 JPYC');
+
+    // 店主受取 = 1000 - 10 (fee) - 2 (gas) = 988
+    expect(screen.getByText('988 JPYC')).toBeInTheDocument();
+  });
+
+  it('内税の hint テキストが表示される (店主負担)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=100`);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    expect(screen.getByText(/店主が gas を負担/)).toBeInTheDocument();
+  });
+
+  it('submit: sponsorship JPYC で fee_transfer = fee + gas (運営は両方徴収)', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=jpyc&gas=merchant&amount=1000`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    setGasQuote('ready', 2n * 10n ** 18n);
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    await user.click(screen.getByRole('button', { name: /1000 JPYC を支払う/ }));
+
+    const call = mutate.mock.calls[0][0];
+    // merchant = 1000 - 10 - 2 = 988
+    expect(call.merchantAmount).toBe(988n * 10n ** 18n);
+    // sponsorship: feeAmount = fee (10) + gas (2) = 12 JPYC
+    expect(call.feeAmount).toBe(12n * 10n ** 18n);
+    // 合計 = 988 + 12 = 1000 (顧客 outflow と一致)
+  });
+
+  it('境界 underflow: amount < fee + gas → エラー表示 + 送信 disabled', () => {
+    setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=0.3`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n); // gas 0.5 USDC
+    render(<PaymentForm />);
+
+    // amount=0.3 USDC, fee=0.05 (MIN), gas=0.5 → 0.3 - 0.55 < 0 → underflow
+    expect(screen.getByText(/店主受取が 0 になります/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /0\.3 USDC を支払う/ }),
+    ).toBeDisabled();
+  });
+
+  it('境界 ちょうど: amount == fee + gas → merchant=0 だが送信可能 (運営が満額)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=0.55`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n);
+    render(<PaymentForm />);
+    // amount=0.55, fee=0.05, gas=0.5 → merchant=0、underflow とみなす
+    expect(screen.getByText(/店主受取が 0 になります/)).toBeInTheDocument();
+  });
+
+  it('default (gas 省略 = customer mode) の挙動: customer = amount + gas', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    // 新モデル default: customer = amount + gas = 100 + 0 = 100 (運営手数料は merchant 控除で隠れる)
+    expect(
+      screen.getByRole('button', { name: /100 USDC を支払う/ }),
+    ).not.toBeDisabled();
+  });
+
+  it('split + 内税: distributable = amount - fee - gas が % で按分', async () => {
+    const user = userEvent.setup();
+    const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    setURL(
+      `to=${MERCHANT}&token=usdc&gas=merchant&amount=100&split=${B}:50`,
+    );
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n); // gas 0.5
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+    const call = mutate.mock.calls[0][0];
+    // distributable = 100 - 1.0 - 0.5 = 98.5, primary 50% = 49.25, B 50% = 49.25
+    expect(call.merchantAmount).toBe(49_250_000n);
+    expect(call.extraRecipients[0].amount).toBe(49_250_000n);
+    // sponsorship: feeAmount = fee + gas = 1.0 + 0.5 = 1.5
+    expect(call.feeAmount).toBe(1_500_000n);
   });
 });

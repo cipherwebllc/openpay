@@ -1,13 +1,16 @@
 // /pay クエリ仕様:
 //   to     (必須, 0x) — 主受取人
 //   token  ("jpyc" | "usdc")
+//   gas    ("customer" | "merchant", 省略時 customer) ※ merchant の場合のみ URL に出力
 //   amount (任意, 人間可読 — 据え置き QR では省略)
 //   mode   ("gasless" | "direct", 省略時 gasless) ※ direct のときのみ URL に出力
 //   split  (任意, "0xB:30,0xC:20" 形式) — 追加受取人と分配 %。to が残余 % を取得
 //
-// 注: 旧 `fee` パラメタ (include/exclude) は内税モード廃止に伴い削除。古い QR では
-// 値が含まれる可能性があるが parser は無視する (URL は破壊しない、ただし新規 QR
-// には付与しない)。
+// 運営手数料は常に店主負担 (顧客には不可視)。`gas` パラメタはネットワーク手数料の負担者:
+//   gas=customer (default): 顧客がネットワーク手数料を上乗せ支払い (画面に明示表示)
+//   gas=merchant:           店主がネットワーク手数料も吸収、顧客は請求金額のみ支払う
+//
+// 旧 `fee=include`/`fee=exclude` パラメタは廃止 (parser は silently ignore)。
 //
 // /tip/[address] クエリ仕様:
 //   token   ("jpyc" | "usdc")        必須
@@ -15,8 +18,11 @@
 //   message (任意, 説明文 200 文字まで切詰)
 //   color   (任意, "#rrggbb" 形式)
 //   preset  (任意, "100,500,1000" カンマ区切り decimal、最大 6 件)
+//
+// Tip widget は gas=customer 固定 (preset セマンティクス: クリエイターが preset 額から運営手数料控除後を受け取る、ファンが gas を上乗せ支払い)。
 import { getAddress, isAddress } from 'viem';
 import type { Address } from 'viem';
+import type { GasMode } from './fee';
 import { isValidTokenSymbol, type TokenSymbol } from './tokens';
 
 export type PayMode = 'gasless' | 'direct';
@@ -32,6 +38,7 @@ export const SPLIT_MAX_ENTRIES = 3;
 export type PayParams = {
   to: Address;
   token: TokenSymbol;
+  gas: GasMode;
   amount?: string;
   mode: PayMode;
   split?: SplitEntry[];
@@ -136,6 +143,10 @@ export function buildPayPath(params: PayParams): string {
   const sp = new URLSearchParams();
   sp.set('to', params.to);
   sp.set('token', params.token);
+  // customer (default) は URL に出さない。merchant のみ明示。
+  if (params.gas === 'merchant') {
+    sp.set('gas', 'merchant');
+  }
   if (params.amount && params.amount.length > 0) {
     sp.set('amount', params.amount);
   }
@@ -163,10 +174,10 @@ type SearchParamsLike = { get(name: string): string | null };
 export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams {
   const to = searchParams.get('to');
   const token = searchParams.get('token');
+  const gasRaw = searchParams.get('gas');
   const amount = searchParams.get('amount');
   const mode = searchParams.get('mode');
   const split = searchParams.get('split');
-  // 旧 `fee` パラメタは silently ignore (古い QR の互換維持、新規 QR には載せない)
 
   if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
   if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
@@ -176,6 +187,8 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   if (mode !== null && mode !== 'gasless' && mode !== 'direct') {
     return { ok: false, error: 'mode は gasless または direct を指定してください' };
   }
+  // gas は merchant のみ明示認識、それ以外 (customer / 不明値 / 未指定 / 旧 fee=) は customer 扱い。
+  const gas: GasMode = gasRaw === 'merchant' ? 'merchant' : 'customer';
   let parsedSplit: SplitEntry[] | undefined = undefined;
   if (split !== null && split.length > 0) {
     const r = parseSplitParam(split);
@@ -202,6 +215,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     params: {
       to: getAddress(to),
       token,
+      gas,
       amount: amount && amount.length > 0 ? amount : undefined,
       mode: mode === 'direct' ? 'direct' : 'gasless',
       split: parsedSplit,
@@ -249,8 +263,8 @@ function sanitizeUrl(raw: string): string | undefined {
 }
 
 function sanitizeText(value: string, max: number): string | undefined {
-  // 制御文字 (タブ含む) を排除し、長さ上限で切り詰める。空文字は省略扱い。
-  const cleaned = value.replace(/[ -]/g, '').trim();
+  // C0 制御文字 (タブ含む) と DEL を排除し、長さ上限で切り詰める。空文字は省略扱い。
+  const cleaned = value.replace(/[\x00-\x1f\x7f]/g, '').trim();
   if (cleaned.length === 0) return undefined;
   return cleaned.length > max ? cleaned.slice(0, max) : cleaned;
 }

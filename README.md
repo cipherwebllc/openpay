@@ -328,27 +328,42 @@ Tip widget はクリエイターが preset 額をそのまま受け取り、フ�
 
 ## 手数料の計算
 
-両 token とも以下の単一モデル (内税モードは廃止):
+**運営手数料は常に店主負担** (SaaS / カード決済の販売手数料的な固定コスト、顧客には不可視)。
+QR 発行時に店主が **ネットワーク手数料の負担者** を選択:
 
-- **顧客支払額 = 請求金額 + 運営手数料 + ネットワーク手数料 (見積)**
-- 運営手数料 = `max(amount × FEE_BPS[token], MIN_FEE[token])`
-- ネットワーク手数料 = paymaster 経路ごとに別軸で見積し、表示・徴収
+### `gas=customer` モード (default)
+顧客がネットワーク手数料を上乗せ支払い。**店主の取り分は gas spike に左右されず安定**。
+
+| 項目 | 計算 |
+|---|---|
+| 顧客支払額 | `amount + gasQuote` |
+| 店主受取 | `amount - fee` |
+| 運営取分 | `fee` (固定。sponsorship 時は + gas 相当 を Pimlico への POL 精算に充当) |
+
+### `gas=merchant` モード
+店主がネットワーク手数料も吸収。**顧客は表示金額のみ支払う** (内税的 UX)。
+
+| 項目 | 計算 |
+|---|---|
+| 顧客支払額 | `amount` |
+| 店主受取 | `max(0, amount - fee - gasQuote)` |
+| 運営取分 | `fee` (固定。sponsorship 時は + gas 相当) |
+
+`amount < fee + gasQuote` (gas=merchant) または `amount < fee` (gas=customer) で店主受取が 0 になるため、PaymentForm で送信を block して運営の赤字 + on-chain 失敗を未然防止。Tip widget は preset セマンティクス維持のため `gas=customer` 固定 (creator 受取 = preset - fee、ファン支払 = preset + gas)。
 
 ### 料率 (`lib/fee.ts`)
 | token | 料率 | MIN_FEE | 備考 |
 |---|---|---|---|
-| JPYC (Polygon) | 1.0% | 5 JPYC | 純マージン (gas は別建て徴収) |
-| USDC (Base) | 1.0% | 0.05 USDC | 純マージン (gas は別建て徴収) |
-
-旧モデル (gas 内包の gross 料率) と異なり、料率は純マージン。gas 変動リスクは運営に被らせず、見積として顧客に透明に提示する。
+| JPYC (Polygon) | 1.0% | 5 JPYC | 純マージン (両 mode 共通) |
+| USDC (Base) | 1.0% | 0.05 USDC | 純マージン (両 mode 共通) |
 
 ### ネットワーク手数料の徴収経路
 | paymaster | gas を払う主体 | 経路 | 運営の精算 |
 |---|---|---|---|
 | ERC20 Paymaster (USDC) | 顧客の USDC | paymaster が postOp で実 gas 分を顧客 USDC から自動徴収 | なし (paymaster が ETH gas 立替・自己精算) |
-| Sponsorship (JPYC) | 顧客の JPYC | fee transfer に gas 相当 (POL 建て見積 × `NEXT_PUBLIC_POL_JPYC_RATE`) を内包し feeReceiver へ | 運営は徴収した JPYC で Pimlico への POL gas を別途精算 (off-chain) |
+| Sponsorship (JPYC) | (gas=customer 時) 顧客の JPYC、(gas=merchant 時) 店主が merchant 控除で吸収 | fee transfer に gas 相当 (POL 建て見積 × `NEXT_PUBLIC_POL_JPYC_RATE`) を内包し feeReceiver へ | 運営は徴収した JPYC で Pimlico への POL gas を別途精算 (off-chain) |
 
-旧 `fee=include`/`fee=exclude` URL パラメタは廃止 (parser は silently ignore して古い QR を破壊しない)。
+旧 `fee=include`/`fee=exclude` URL パラメタは廃止 (parser は silently ignore して古い QR を破壊しない)。新規 QR は `gas=merchant` を明示 (default = customer は URL に出さない)。
 
 ### Gas price ceiling (混雑時の安全弁)
 

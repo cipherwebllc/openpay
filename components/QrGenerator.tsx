@@ -17,6 +17,7 @@ import {
   type SplitDraft,
 } from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import type { GasMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { shortAddress } from '@/lib/format';
@@ -78,6 +79,7 @@ export function QrGenerator() {
     const params: PayParams = {
       to: effectiveReceiver,
       token: settings.token,
+      gas: settings.gasMode,
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
       split: splitsForUrl,
@@ -89,6 +91,7 @@ export function QrGenerator() {
     origin,
     amountValid,
     settings.token,
+    settings.gasMode,
     mode,
     amount,
     payMode,
@@ -178,6 +181,7 @@ export function QrGenerator() {
             <SettingsSummary
               token={settings.token}
               receiver={settings.receiver}
+              gasMode={settings.gasMode}
               direct={settings.directTransfer}
             />
           }
@@ -226,10 +230,43 @@ export function QrGenerator() {
               )}
           </Field>
 
-          {settings.directTransfer && (
+          {settings.directTransfer ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
               {t('directHint')}
             </div>
+          ) : (
+            <Field label={t('gasLabel')}>
+              <div className="grid grid-cols-2 gap-2">
+                {(['customer', 'merchant'] as GasMode[]).map((g) => {
+                  const active = settings.gasMode === g;
+                  return (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() =>
+                        setSettings((s) => ({ ...s, gasMode: g }))
+                      }
+                      className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                        active
+                          ? 'border-brand bg-brand/5 text-brand-dark'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="font-semibold">
+                        {g === 'customer'
+                          ? t('gasCustomerTitle')
+                          : t('gasMerchantTitle')}
+                      </div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {g === 'customer'
+                          ? t('gasCustomerDesc')
+                          : t('gasMerchantDesc')}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
           )}
 
           {!settings.directTransfer && (
@@ -429,18 +466,21 @@ function SettingsAccordion({
 function SettingsSummary({
   token,
   receiver,
+  gasMode,
   direct,
 }: {
   token: TokenSymbol;
   receiver: string;
+  gasMode: GasMode;
   direct: boolean;
 }) {
   const tokenLabel = TOKENS[token].displaySymbol;
   const recvLabel = isAddress(receiver) ? shortAddress(receiver) : '—';
-  const feeLabel = direct ? '0%' : '1%';
+  // direct: 運営手数料 0% / customer: 顧客が gas / merchant: 店主が gas
+  const tail = direct ? '0%' : gasMode === 'customer' ? 'gas:cust' : 'gas:merch';
   return (
     <span className="font-mono">
-      {tokenLabel} · {recvLabel} · {feeLabel}
+      {tokenLabel} · {recvLabel} · {tail}
     </span>
   );
 }

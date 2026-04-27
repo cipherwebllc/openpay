@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { safeGet, safeSet } from '@/lib/storage';
+import type { GasMode } from '@/lib/fee';
 import type { TokenSymbol } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
 
 export type QrSettings = {
   receiver: string;
   token: TokenSymbol;
+  // ネットワーク手数料 (gas) の負担者: customer (顧客上乗せ) / merchant (店主吸収)。
+  // 運営手数料は両モードとも常に店主負担。既定 customer (gas spike を店主が被らない安全側)。
+  gasMode: GasMode;
   // 上級者向け: 顧客がガス代を負担する直接送金モード。
   // false (gasless+1%手数料) を既定にする。
   directTransfer: boolean;
@@ -20,6 +24,7 @@ const STORAGE_KEY = 'openpay:qr-settings:v2';
 const DEFAULT_SETTINGS: QrSettings = {
   receiver: '',
   token: 'usdc',
+  gasMode: 'customer',
   directTransfer: false,
   splits: [],
 };
@@ -47,6 +52,10 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
       loaded.token === 'jpyc' || loaded.token === 'usdc'
         ? loaded.token
         : DEFAULT_SETTINGS.token,
+    gasMode:
+      loaded.gasMode === 'customer' || loaded.gasMode === 'merchant'
+        ? loaded.gasMode
+        : DEFAULT_SETTINGS.gasMode,
     directTransfer:
       typeof loaded.directTransfer === 'boolean'
         ? loaded.directTransfer
