@@ -35,7 +35,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 | --- | --- | --- | --- | --- |
 | **導入審査** | 不要 | 必要 (加盟店契約 + 審査) | 必要 (店舗登録 + KYC) | **不要** (ウォレットアドレス入力のみ) |
 | **初期コスト** | レジ・釣銭準備 | 端末 + 月額利用料² | 端末 / QR スタンド申込 | **0 円** (印刷 QR で可) |
-| **店舗受取手数料** | 0% | 約 3.25〜3.75%² (一部 5%超) | 1.60〜1.98%¹ | **1.0% (JPYC) / 1.2% (USDC)** / **0%** (直接送金モード) |
+| **店舗受取手数料** | 0% | 約 3.25〜3.75%² (一部 5%超) | 1.60〜1.98%¹ | **1.0% + ネットワーク手数料 (見積)** / **0%** (直接送金モード) |
 | **入金タイミング** | 即時 (店舗内) | 翌営業日〜月 1〜2 回² | 翌日〜月次¹ | **即時** (オンチェーン確定 数秒〜数十秒) |
 | **チャージバック** | なし | あり (店舗負担リスク) | 一部あり | **なし** (オンチェーン確定で取消不可) |
 | **釣銭** | 必要 (両替コスト・誤算リスク) | 不要 | 不要 | **不要** |
@@ -64,7 +64,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 
 ### 1. フリーランス・クリエイターの国際報酬受取
 
-日本のイラストレーター / エンジニア / 翻訳者が海外クライアントから報酬を受け取る際、Wise や PayPal は **手数料 3〜5% + 着金 3〜7 営業日 + 書類処理** が要ります。OpenPay の請求 URL を発行してクライアントへ送れば、USDC で **即時着金 (オンチェーン確定 数十秒) / 手数料 1.2% / 書類ゼロ** で受け取れます。
+日本のイラストレーター / エンジニア / 翻訳者が海外クライアントから報酬を受け取る際、Wise や PayPal は **手数料 3〜5% + 着金 3〜7 営業日 + 書類処理** が要ります。OpenPay の請求 URL を発行してクライアントへ送れば、USDC で **即時着金 (オンチェーン確定 数十秒) / 手数料 1.0% + ガス見積 / 書類ゼロ** で受け取れます。
 
 - 発行手順: `/` で USDC を選び、自分のウォレットアドレスを入力 → 金額指定 → URL or QR を発行 → クライアントへ送付 (メール / Slack / Notion 等で 1 行貼り付けるだけ)
 - クライアント側に必要なのは EIP-7702 対応 EOA (MetaMask v12+) のみ。USDC のガス代は USDC 建てで自動徴収されるため ETH の保有は不要
@@ -85,7 +85,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 
 ### 3. クリエイターの Tip widget 埋め込み (β)
 
-イラストレーター・配信者・OSS maintainer 等が、ブログ・ポートフォリオ・配信ページ・GitHub README に **iframe 1 行貼付** でチップ送金 UI を組み込めます。pixivFANBOX / BOOST / Twitter tip 等は手数料 10〜15% + 月次入金 + 海外決済不可ですが、OpenPay は **手数料 1.0% (JPYC) / 1.2% (USDC) / 即時着金 / 海外 OK / JPYC + USDC 両対応**。
+イラストレーター・配信者・OSS maintainer 等が、ブログ・ポートフォリオ・配信ページ・GitHub README に **iframe 1 行貼付** でチップ送金 UI を組み込めます。pixivFANBOX / BOOST / Twitter tip 等は手数料 10〜15% + 月次入金 + 海外決済不可ですが、OpenPay は **手数料 1.0% + ネットワーク手数料 (見積) / 即時着金 / 海外 OK / JPYC + USDC 両対応**。
 
 - 設定: `/` の「Tip widget」タブで受取アドレス・通貨・表示名・メッセージ・テーマカラー・preset 金額を入力 → URL と iframe スニペットを生成
 - 埋め込み:
@@ -105,7 +105,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 | --- | --- | --- | --- | --- |
 | JPYC v3 | **Polygon** | POL | ✅ 採用 | JPYC v3 (`0xE7C3…3c29`) が Polygon 上で発行され、DEX/ブリッジ/オンランプの流動性が集中。日本国内の JPYC ユーザの主要居住地 |
 | USDC (native) | **Base** | ETH | ✅ 採用 | Circle 公式 native USDC。Coinbase ウォレット経由のオンランプが容易、低ガス、Base 系 dApp との互換性 |
-| JPYC | Ethereum | ETH | ❌ 不採用 | ガス代が決済額に対して高すぎる (15 JPYC ≒ 15 円の手数料に対しガスが数百円〜) |
+| JPYC | Ethereum | ETH | ❌ 不採用 | ガス代が決済額に対して高すぎる (5 JPYC の運営手数料 + 数百円 gas) |
 | JPYC | Avalanche | AVAX | ❌ 不採用 (一旦様子見) | Avalanche 上の JPYC は **DEX ペアの流動性がほぼゼロ**。手数料を AVAX に変換するルートがクロスチェーンになり、ガス調達が常に赤字。日本のリテールユーザの利用が限定的 |
 
 ### 運用上の含意 (JPYC / Polygon)
@@ -115,7 +115,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 3. 運営は定期的に **JPYC → POL** に swap して Pimlico 残高を補充する必要がある
    - JPYC/POL の DEX ペアは流動性が薄いため、実務的には **JPYC → USDC → POL** の 2-hop swap (QuickSwap / Uniswap v3 on Polygon) が現実的
    - 自動化案: OpenZeppelin Defender Sentinel / cron + viem による定期 swap
-4. JPYC 1.0% / 15 JPYC の料率は、本番ガス価格 + DEX スリッページ + Pimlico の sponsorship 上乗せを実測してチューニングしてください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され赤字を防ぐ仕様 (詳細は「Gas price ceiling」節)
+4. JPYC 1.0% / 5 JPYC の料率は純マージンとして設定 (gas は別建て徴収)。`NEXT_PUBLIC_POL_JPYC_RATE` で POL→JPYC 換算レートを実勢に合わせて月次で見直してください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され、運営の POL 立替不足を防ぐ仕様 (詳細は「Gas price ceiling」節)
 
 ### 運用上の含意 (USDC / Base)
 
@@ -302,7 +302,7 @@ UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middlew
 ### 店主側 (QR 発行)
 
 1. `/` を開く
-2. 通貨 (USDC / JPYC)・受取アドレス・手数料モード (内税 / 外税) を入力 (LocalStorage に保存)
+2. 通貨 (USDC / JPYC)・受取アドレスを入力 (LocalStorage に保存)
 3. **金額指定 QR**: 請求金額を入力 → 一回限りの QR が生成
 4. **据え置き QR**: 金額入力なしで生成 → 顧客が金額入力する据え置き QR
 5. QR を印刷 / 表示。または URL コピーで送付
@@ -324,25 +324,37 @@ UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middlew
 4. ブログ・ポートフォリオ・配信ページの HTML に貼り付け
 5. ファンが iframe 内のボタンをクリック → ウォレット接続 → preset/カスタム額で送信
 
-Tip widget の手数料は **外税** 固定 (JPYC 1.0% / USDC 1.2%)。クリエイターは preset 額をそのまま受け取り、ファンが手数料を上乗せして支払います (MIN_FEE 適用は通常決済と同じ)。
+Tip widget はクリエイターが preset 額をそのまま受け取り、ファンが運営手数料 + ネットワーク手数料 (見積) を上乗せして支払います (内訳・MIN_FEE は通常決済と同じ)。
 
 ## 手数料の計算
 
-- 運営手数料 = `max(amount × FEE_BPS[token], MIN_FEE[token])`
-- 料率と下限 (チェーン別、`lib/fee.ts`):
-  - **JPYC (Polygon): 1.0% / 最低 15 JPYC** — Polygon は平常 1〜3 JPY のガス代でフロアが十分黒字
-  - **USDC (Base): 1.2% / 最低 0.2 USDC** — ETH gas spike 時の L1 calldata 高騰でも赤字を出さないため厚め
+両 token とも以下の単一モデル (内税モードは廃止):
 
-| モード | 顧客支払額 | 店主受取額 | 運営受取額 |
-| --- | --- | --- | --- |
-| 内税 (`fee=include`) | `amount` | `amount - fee` | `fee` |
-| 外税 (`fee=exclude`) | `amount + fee` | `amount` | `fee` |
+- **顧客支払額 = 請求金額 + 運営手数料 + ネットワーク手数料 (見積)**
+- 運営手数料 = `max(amount × FEE_BPS[token], MIN_FEE[token])`
+- ネットワーク手数料 = paymaster 経路ごとに別軸で見積し、表示・徴収
+
+### 料率 (`lib/fee.ts`)
+| token | 料率 | MIN_FEE | 備考 |
+|---|---|---|---|
+| JPYC (Polygon) | 1.0% | 5 JPYC | 純マージン (gas は別建て徴収) |
+| USDC (Base) | 1.0% | 0.05 USDC | 純マージン (gas は別建て徴収) |
+
+旧モデル (gas 内包の gross 料率) と異なり、料率は純マージン。gas 変動リスクは運営に被らせず、見積として顧客に透明に提示する。
+
+### ネットワーク手数料の徴収経路
+| paymaster | gas を払う主体 | 経路 | 運営の精算 |
+|---|---|---|---|
+| ERC20 Paymaster (USDC) | 顧客の USDC | paymaster が postOp で実 gas 分を顧客 USDC から自動徴収 | なし (paymaster が ETH gas 立替・自己精算) |
+| Sponsorship (JPYC) | 顧客の JPYC | fee transfer に gas 相当 (POL 建て見積 × `NEXT_PUBLIC_POL_JPYC_RATE`) を内包し feeReceiver へ | 運営は徴収した JPYC で Pimlico への POL gas を別途精算 (off-chain) |
+
+旧 `fee=include`/`fee=exclude` URL パラメタは廃止 (parser は silently ignore して古い QR を破壊しない)。
 
 ### Gas price ceiling (混雑時の安全弁)
 
 `lib/gasCeiling.ts` で UserOp 送信前の `maxFeePerGas` をチェーン別に上限判定し、超過していれば `GasCongestedError` を投げてユーザに「ネットワーク混雑」エラーを返します。**両 paymaster mode で適用** (`useBatchPayment.ts`):
 
-- **Sponsorship mode (JPYC)**: 運営の赤字回避。フロア手数料 (15 JPYC) では極端な gas spike を吸収できないため、送信前に弾く方が損失より安全。
+- **Sponsorship mode (JPYC)**: 運営の POL 立替コスト上限保護。極端な spike 時は徴収した JPYC では POL gas を補填しきれない可能性があるため送信前に弾く。
 - **ERC20 Paymaster mode (USDC)**: 顧客の USDC 出費の上限保護。Base 1 gwei (既定 ceiling) で gas は約 1.6 USDC、これを超える spike は USDC 換算で高額になるため送信前に弾く。
 
 | チェーン | 既定上限 | env 上書き |
@@ -428,7 +440,7 @@ USDC は Base mainnet で **ERC20 Paymaster mode** を採用し、顧客が USDC
 **deploy 直後 (最初の 1 件)**
 
 5. `NETWORK_ENV=mainnet` で deploy
-6. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&fee=exclude&amount=1.0` を実行 (1 USDC + fee 0.2 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
+6. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&amount=1.0` を実行 (1 USDC + 運営手数料 0.05 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
 7. 確認項目:
    - 「ネットワーク手数料 (見積)」行に `最大 X.XX USDC` が表示されること
    - approve トランザクション (paymaster コントラクト宛) が UserOp の calls 先頭に含まれること (BaseScan で内部 tx を確認)
@@ -536,7 +548,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 
 | 層 | 対象 | テスト方針 |
 | --- | --- | --- |
-| `lib/fee.ts` | チェーン別料率 (JPYC 1.0% / USDC 1.2%) / MIN_FEE / 内税・外税 / 境界 (proportional == MIN, amount < MIN) / amount=0 / 大数 | 純粋関数 — 実コードのみ |
+| `lib/fee.ts` | 料率 1.0% / MIN_FEE (5 JPYC / 0.05 USDC) / 境界 (proportional == MIN, amount < MIN) / amount=0 / 大数 | 純粋関数 — 実コードのみ |
 | `lib/gasCeiling.ts` | チェーン別 gas 上限 (mainnet/testnet) / 上限境界 / GasCongestedError / env 上書き | 純粋関数 — 実コードのみ |
 | `lib/url.ts` | /pay と /tip 両方の build / parse / sanitize (制御文字除去 / 長さ切詰 / preset 検証) / roundtrip | 純粋関数 — 実コードのみ |
 | `lib/tokens.ts` | decimals / chainId / env override / フォールバック | 実コード |
@@ -548,8 +560,8 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | `hooks/useBatchPayment` | 2-call バッチ / 0-amount スキップ / encode された transfer の中身 (`decodeFunctionData` で復号して検証) / エラー伝播 | `useSmartAccount` を境界モック、本ロジックは実行 |
 | `hooks/useDirectPayment` | writeContract 引数 / receipt 状態遷移 / エラー伝播 | wagmi を境界モック |
 | `components/QrGenerator` | 入力 → state → QR(SVG) 生成 / mode 切替 / clipboard / 永続化 | RTL + jsdom |
-| `components/PaymentForm` | URL parse 各種エラー / 内税・外税の breakdown / 接続状態の遷移 / mutate 引数の妥当性 / direct mode | wagmi/Smart Account を境界モック |
-| `components/TipForm` | preset 切替 / カスタム入力 / 外税 breakdown / submit 引数 / wallet 状態 | wagmi/Smart Account を境界モック |
+| `components/PaymentForm` | URL parse 各種エラー / breakdown (運営手数料 + gas 見積 別建て) / 接続状態の遷移 / mutate 引数の妥当性 / direct mode | wagmi/Smart Account を境界モック |
+| `components/TipForm` | preset 切替 / カスタム入力 / breakdown / submit 引数 / wallet 状態 | wagmi/Smart Account を境界モック |
 | `components/TipEmbedGenerator` | 入力 → URL/iframe スニペット生成 / preset 検証 / カラー検証 / clipboard / 永続化 | RTL + jsdom |
 | `components/ConnectButton` | connector 列挙 / クリックで connect / 切断 / pending / error | wagmi を境界モック |
 
