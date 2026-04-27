@@ -19,12 +19,11 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'usdc',
-      fee: 'include',
       amount: '10.5',
       mode: 'gasless',
     });
     expect(path).toBe(
-      `/pay?to=${VALID_TO}&token=usdc&fee=include&amount=10.5`,
+      `/pay?to=${VALID_TO}&token=usdc&amount=10.5`,
     );
     expect(path).not.toContain('mode=');
   });
@@ -33,10 +32,9 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
-      fee: 'exclude',
       mode: 'gasless',
     });
-    expect(path).toBe(`/pay?to=${VALID_TO}&token=jpyc&fee=exclude`);
+    expect(path).toBe(`/pay?to=${VALID_TO}&token=jpyc`);
     expect(path).not.toContain('amount');
   });
 
@@ -44,7 +42,6 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'usdc',
-      fee: 'include',
       amount: '',
       mode: 'gasless',
     });
@@ -55,7 +52,6 @@ describe('buildPayPath', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
-      fee: 'include',
       amount: '1000',
       mode: 'direct',
     });
@@ -68,12 +64,11 @@ describe('buildPayUrl', () => {
     const url = buildPayUrl('https://openpay.example.com', {
       to: VALID_TO,
       token: 'usdc',
-      fee: 'include',
       amount: '5',
       mode: 'gasless',
     });
     expect(url).toBe(
-      `https://openpay.example.com/pay?to=${VALID_TO}&token=usdc&fee=include&amount=5`,
+      `https://openpay.example.com/pay?to=${VALID_TO}&token=usdc&amount=5`,
     );
   });
 });
@@ -86,13 +81,12 @@ describe('parsePayParams', () => {
   it('全パラメータが揃う場合に成功 (mode 省略 → gasless)', () => {
     const r = parsePayParams(
       search(
-        `to=${VALID_TO}&token=usdc&fee=include&amount=10`,
+        `to=${VALID_TO}&token=usdc&amount=10`,
       ),
     );
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.params.token).toBe('usdc');
-      expect(r.params.fee).toBe('include');
       expect(r.params.amount).toBe('10');
       expect(r.params.mode).toBe('gasless');
     }
@@ -100,7 +94,7 @@ describe('parsePayParams', () => {
 
   it('mode=direct を読み取る', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&fee=include&mode=direct`),
+      search(`to=${VALID_TO}&token=usdc&mode=direct`),
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.mode).toBe('direct');
@@ -108,7 +102,7 @@ describe('parsePayParams', () => {
 
   it('mode=gasless を明示しても受け入れる', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&fee=include&mode=gasless`),
+      search(`to=${VALID_TO}&token=usdc&mode=gasless`),
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.mode).toBe('gasless');
@@ -116,54 +110,54 @@ describe('parsePayParams', () => {
 
   it('mode が unsupported → エラー', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&fee=include&mode=meta`),
+      search(`to=${VALID_TO}&token=usdc&mode=meta`),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('mode');
   });
 
   it('to が無い → エラー', () => {
-    const r = parsePayParams(search('token=usdc&fee=include'));
+    const r = parsePayParams(search('token=usdc'));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('to');
   });
 
   it('to がアドレス形式でない → エラー', () => {
     const r = parsePayParams(
-      search('to=0xnotanaddress&token=usdc&fee=include'),
+      search('to=0xnotanaddress&token=usdc'),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('不正');
   });
 
   it('token が無い → エラー', () => {
-    const r = parsePayParams(search(`to=${VALID_TO}&fee=include`));
+    const r = parsePayParams(search(`to=${VALID_TO}`));
     expect(r.ok).toBe(false);
   });
 
   it('token が unsupported → エラー', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=eth&fee=include`),
+      search(`to=${VALID_TO}&token=eth`),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('jpyc');
   });
 
-  it('fee が無い / 不正 → エラー', () => {
-    expect(
-      parsePayParams(search(`to=${VALID_TO}&token=usdc`)).ok,
-    ).toBe(false);
-    expect(
-      parsePayParams(
-        search(`to=${VALID_TO}&token=usdc&fee=foo`),
-      ).ok,
-    ).toBe(false);
+  it('旧 fee パラメタ (include/exclude/任意値) は silently ignore (古い QR の互換)', () => {
+    // 旧 QR では `fee=include` 等が含まれる。新モデルでは exclude 一本固定なので
+    // パラメタ自体を捨て、parse は成功させる (URL を破壊しない)。
+    for (const fee of ['include', 'exclude', 'foo', '']) {
+      const r = parsePayParams(
+        search(`to=${VALID_TO}&token=usdc&fee=${fee}`),
+      );
+      expect(r.ok).toBe(true);
+    }
   });
 
   it('小文字アドレスは checksum 正規化されて、元の checksum 文字列と一致する', () => {
     const lower = VALID_TO.toLowerCase() as `0x${string}`;
     const r = parsePayParams(
-      search(`to=${lower}&token=jpyc&fee=exclude`),
+      search(`to=${lower}&token=jpyc`),
     );
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -175,7 +169,7 @@ describe('parsePayParams', () => {
 
   it('amount=空文字列 は undefined として扱う', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&fee=include&amount=`),
+      search(`to=${VALID_TO}&token=usdc&amount=`),
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.amount).toBeUndefined();
@@ -184,7 +178,7 @@ describe('parsePayParams', () => {
   it('未知パラメータは無視', () => {
     const r = parsePayParams(
       search(
-        `to=${VALID_TO}&token=usdc&fee=include&xss=<script>`,
+        `to=${VALID_TO}&token=usdc&xss=<script>`,
       ),
     );
     expect(r.ok).toBe(true);
@@ -194,7 +188,6 @@ describe('parsePayParams', () => {
     const built = buildPayPath({
       to: VALID_TO,
       token: 'usdc',
-      fee: 'include',
       amount: '12.34',
       mode: 'gasless',
     });
@@ -204,7 +197,6 @@ describe('parsePayParams', () => {
     if (r.ok) {
       expect(r.params.to).toBe(VALID_TO);
       expect(r.params.token).toBe('usdc');
-      expect(r.params.fee).toBe('include');
       expect(r.params.amount).toBe('12.34');
       expect(r.params.mode).toBe('gasless');
     }
@@ -214,7 +206,6 @@ describe('parsePayParams', () => {
     const built = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
-      fee: 'include',
       amount: '1000',
       mode: 'direct',
     });
@@ -478,7 +469,6 @@ describe('PayParams: split (multi-recipient C1)', () => {
     const path = buildPayPath({
       to: A,
       token: 'usdc',
-      fee: 'include',
       amount: '100',
       mode: 'gasless',
       split: [
@@ -500,7 +490,7 @@ describe('PayParams: split (multi-recipient C1)', () => {
 
   it('split sum >= 100 → エラー', () => {
     const r = parsePayParams(
-      search(`to=${A}&token=usdc&fee=include&split=${B}:60,${C}:40`),
+      search(`to=${A}&token=usdc&split=${B}:60,${C}:40`),
     );
     expect(r.ok).toBe(false);
   });
@@ -510,7 +500,7 @@ describe('PayParams: split (multi-recipient C1)', () => {
     const E: `0x${string}` = '0x5555555555555555555555555555555555555555';
     const r = parsePayParams(
       search(
-        `to=${A}&token=usdc&fee=include&split=${B}:10,${C}:10,${D}:10,${E}:10`,
+        `to=${A}&token=usdc&split=${B}:10,${C}:10,${D}:10,${E}:10`,
       ),
     );
     expect(r.ok).toBe(false);
@@ -519,45 +509,45 @@ describe('PayParams: split (multi-recipient C1)', () => {
   it('split percent が 0 / 負 / 非整数 → エラー', () => {
     expect(
       parsePayParams(
-        search(`to=${A}&token=usdc&fee=include&split=${B}:0`),
+        search(`to=${A}&token=usdc&split=${B}:0`),
       ).ok,
     ).toBe(false);
     expect(
       parsePayParams(
-        search(`to=${A}&token=usdc&fee=include&split=${B}:50.5`),
+        search(`to=${A}&token=usdc&split=${B}:50.5`),
       ).ok,
     ).toBe(false);
     expect(
       parsePayParams(
-        search(`to=${A}&token=usdc&fee=include&split=${B}:-10`),
+        search(`to=${A}&token=usdc&split=${B}:-10`),
       ).ok,
     ).toBe(false);
   });
 
   it('split の宛先重複 → エラー', () => {
     const r = parsePayParams(
-      search(`to=${A}&token=usdc&fee=include&split=${B}:10,${B}:20`),
+      search(`to=${A}&token=usdc&split=${B}:10,${B}:20`),
     );
     expect(r.ok).toBe(false);
   });
 
   it('split に主 to と同じアドレス → エラー', () => {
     const r = parsePayParams(
-      search(`to=${A}&token=usdc&fee=include&split=${A}:10`),
+      search(`to=${A}&token=usdc&split=${A}:10`),
     );
     expect(r.ok).toBe(false);
   });
 
   it('split が不正な 0x → エラー', () => {
     const r = parsePayParams(
-      search(`to=${A}&token=usdc&fee=include&split=0xnope:10`),
+      search(`to=${A}&token=usdc&split=0xnope:10`),
     );
     expect(r.ok).toBe(false);
   });
 
   it('split を持たない URL は従来通り通る (split は undefined)', () => {
     const r = parsePayParams(
-      search(`to=${A}&token=usdc&fee=include&amount=10`),
+      search(`to=${A}&token=usdc&amount=10`),
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.split).toBeUndefined();
@@ -855,7 +845,6 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
     const built = buildPayPath({
       to: A,
       token: 'usdc',
-      fee: 'exclude',
       amount: '12.345678',
       mode: 'gasless',
       split: [{ to: B, percent: 25 }],
@@ -866,7 +855,6 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
     if (r.ok) {
       expect(r.params.to).toBe(A);
       expect(r.params.token).toBe('usdc');
-      expect(r.params.fee).toBe('exclude');
       expect(r.params.amount).toBe('12.345678');
       expect(r.params.mode).toBe('gasless');
       expect(r.params.split).toEqual([{ to: B, percent: 25 }]);
@@ -878,7 +866,6 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
     const path = buildPayPath({
       to: A,
       token: 'usdc',
-      fee: 'include',
       mode: 'gasless',
       split: [],
     });
@@ -888,7 +875,7 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
   it('amount の小数点表記は保持 (parseUnits 側で wei 化される想定)', () => {
     const A: `0x${string}` = '0x1111111111111111111111111111111111111111';
     const r = parsePayParams(
-      search(`to=${A}&token=jpyc&fee=include&amount=0.000001`),
+      search(`to=${A}&token=jpyc&amount=0.000001`),
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.amount).toBe('0.000001');

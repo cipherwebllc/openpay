@@ -1,24 +1,23 @@
-// fee = max(amount * FEE_BPS[token], MIN_FEE[token])
-//   JPYC (Polygon): 1.0% / 15 JPYC  — Polygon ガスは平常時 1〜3 JPY なのでフロア 15 で十分黒字
-//   USDC (Base):    1.2% / 0.2 USDC — Base L1 calldata の高騰時にもフロアで赤字を出さないため厚め
+// 運営手数料 = max(amount * FEE_BPS[token], MIN_FEE[token])
+//   JPYC (Polygon): 1.0% / 5 JPYC  — 純マージン (POL gas は別途 useGasQuoteJpyc で徴収)
+//   USDC (Base):    1.0% / 0.05 USDC — 純マージン (gas は ERC20 Paymaster 経由で顧客負担)
 //
-//   include (内税): customer = amount,       merchant = amount - fee, op = fee
-//   exclude (外税): customer = amount + fee, merchant = amount,       op = fee
+// fee model: customer = amount + fee + gasQuote (税抜き表示一本)
+//   merchant = amount, op = fee。gas は別軸で UI/見積し、submit 時に
+//   sponsorship では fee transfer に内包、erc20 では paymaster が顧客から直接徴収。
 import type { Address } from 'viem';
 import type { TokenSymbol } from './tokens';
-
-export type FeeMode = 'include' | 'exclude';
 
 const BPS_DENOM = 10_000n;
 
 export const FEE_BPS: Record<TokenSymbol, bigint> = {
   jpyc: 100n, // 1.0%
-  usdc: 120n, // 1.2%
+  usdc: 100n, // 1.0%
 };
 
 export const MIN_FEE: Record<TokenSymbol, bigint> = {
-  jpyc: 15n * 10n ** 18n, // 15 JPYC (18 decimals)
-  usdc: 200_000n,         // 0.2 USDC (6 decimals)
+  jpyc: 5n * 10n ** 18n, // 5 JPYC (18 decimals)
+  usdc: 50_000n,         // 0.05 USDC (6 decimals)
 };
 
 export function calcFee(amount: bigint, token: TokenSymbol): bigint {
@@ -28,8 +27,7 @@ export function calcFee(amount: bigint, token: TokenSymbol): bigint {
   return proportional > min ? proportional : min;
 }
 
-// fee.ts は決済額 / 運営手数料の計算に責任を持つ。
-// ERC20 Paymaster の gas 見積は別軸 (useGasQuoteUsdc) としてフォーム側で扱う。
+// 運営手数料の単純計算。gas はこの軸の責務外 (useGasQuote* 系で別管理)。
 export type Breakdown = {
   customerPays: bigint;
   merchantReceives: bigint;
@@ -38,20 +36,9 @@ export type Breakdown = {
 
 export function calcBreakdown(
   amount: bigint,
-  mode: FeeMode,
   token: TokenSymbol,
 ): Breakdown {
   const fee = calcFee(amount, token);
-
-  if (mode === 'include') {
-    // amount < fee なら merchant がマイナスになり得るので 0 でガード
-    return {
-      customerPays: amount,
-      merchantReceives: amount > fee ? amount - fee : 0n,
-      feeAmount: amount > fee ? fee : amount,
-    };
-  }
-
   return {
     customerPays: amount + fee,
     merchantReceives: amount,
@@ -81,12 +68,11 @@ export type SplitBreakdown = {
 
 export function calcSplitBreakdown(
   amount: bigint,
-  mode: FeeMode,
   token: TokenSymbol,
   primary: Address,
   splits: ReadonlyArray<{ to: Address; percent: number }>,
 ): SplitBreakdown {
-  const base = calcBreakdown(amount, mode, token);
+  const base = calcBreakdown(amount, token);
   const totalForRecipients = base.merchantReceives;
 
   // primary の % は残余

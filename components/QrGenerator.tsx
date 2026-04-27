@@ -17,7 +17,6 @@ import {
   type SplitDraft,
 } from '@/lib/url';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
-import type { FeeMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { shortAddress } from '@/lib/format';
@@ -79,7 +78,6 @@ export function QrGenerator() {
     const params: PayParams = {
       to: effectiveReceiver,
       token: settings.token,
-      fee: settings.fee,
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
       split: splitsForUrl,
@@ -91,7 +89,6 @@ export function QrGenerator() {
     origin,
     amountValid,
     settings.token,
-    settings.fee,
     mode,
     amount,
     payMode,
@@ -181,7 +178,6 @@ export function QrGenerator() {
             <SettingsSummary
               token={settings.token}
               receiver={settings.receiver}
-              fee={settings.fee}
               direct={settings.directTransfer}
             />
           }
@@ -230,41 +226,10 @@ export function QrGenerator() {
               )}
           </Field>
 
-          {settings.directTransfer ? (
+          {settings.directTransfer && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
               {t('directHint')}
             </div>
-          ) : (
-            <Field label={t('feeLabel')}>
-              <div className="grid grid-cols-2 gap-2">
-                {(['include', 'exclude'] as FeeMode[]).map((f) => {
-                  const active = settings.fee === f;
-                  return (
-                    <button
-                      key={f}
-                      type="button"
-                      onClick={() => setSettings((s) => ({ ...s, fee: f }))}
-                      className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
-                        active
-                          ? 'border-brand bg-brand/5 text-brand-dark'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="font-semibold">
-                        {f === 'include'
-                          ? t('feeIncludeTitle')
-                          : t('feeExcludeTitle')}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {f === 'include'
-                          ? t('feeIncludeDesc')
-                          : t('feeExcludeDesc')}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </Field>
           )}
 
           {!settings.directTransfer && (
@@ -464,17 +429,15 @@ function SettingsAccordion({
 function SettingsSummary({
   token,
   receiver,
-  fee,
   direct,
 }: {
   token: TokenSymbol;
   receiver: string;
-  fee: FeeMode;
   direct: boolean;
 }) {
   const tokenLabel = TOKENS[token].displaySymbol;
   const recvLabel = isAddress(receiver) ? shortAddress(receiver) : '—';
-  const feeLabel = direct ? '0%' : fee === 'include' ? 'incl.' : 'excl.';
+  const feeLabel = direct ? '0%' : '1%';
   return (
     <span className="font-mono">
       {tokenLabel} · {recvLabel} · {feeLabel}

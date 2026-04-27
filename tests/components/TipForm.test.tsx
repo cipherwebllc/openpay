@@ -20,6 +20,7 @@ vi.mock('wagmi', () => ({
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
+vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 vi.mock('@/lib/pimlico', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
@@ -33,6 +34,7 @@ import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
+import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { TipForm } from '@/components/TipForm';
 import type { TipParams } from '@/lib/url';
@@ -94,12 +96,15 @@ function setSwitchChain() {
 }
 
 function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?: bigint) {
-  mockHook(useGasQuoteUsdc, {
+  // gas 見積は paymaster mode に応じて 1 つだけ使われる。両方同じ state で mock しておく。
+  const mockState = {
     data: state === 'ready' ? { gasAmount: amount ?? 100_000n } : undefined,
     isLoading: state === 'pending',
     isError: state === 'error',
     error: state === 'error' ? new Error('quote failed') : null,
-  } as Partial<ReturnType<typeof useGasQuoteUsdc>>);
+  };
+  mockHook(useGasQuoteUsdc, mockState as Partial<ReturnType<typeof useGasQuoteUsdc>>);
+  mockHook(useGasQuoteJpyc, mockState as Partial<ReturnType<typeof useGasQuoteJpyc>>);
 }
 
 beforeEach(() => {
@@ -162,28 +167,39 @@ describe('TipForm — レンダリング', () => {
 // 明細行は dt/dd ペア (label + value) 構造。同じ金額が preset ボタンにも出るので、
 // dt の親 div にスコープして dd の中身を検証する。
 function expectBreakdownRow(label: string | RegExp, value: string) {
-  const dt = screen.getByText(label);
+  // 明細行の dt は <dl> の直下。ヒント段落 (<p>) と区別するため selector で絞る。
+  const dts = Array.from(document.querySelectorAll('dl dt')) as HTMLElement[];
+  const dt = dts.find((el) =>
+    typeof label === 'string'
+      ? el.textContent === label
+      : label.test(el.textContent ?? ''),
+  );
+  if (!dt) throw new Error(`Breakdown row not found: ${label}`);
   const row = dt.parentElement!;
   expect(within(row).getByText(value)).toBeInTheDocument();
 }
 
-describe('TipForm — 金額選択', () => {
+describe('TipForm — 金額選択 (sponsorship gas=0 で計算)', () => {
+  beforeEach(() => {
+    setGasQuote('ready', 0n); // gas 表示を 0 にして基本計算を確認
+  });
+
   it('既定で最初の preset が選択され、明細に反映 (JPYC 100)', () => {
     render(<TipForm params={JPYC_PARAMS} />);
-    // 100 JPYC tip / 外税 / MIN_FEE 15 → fan pays 115, creator gets 100, fee 15
+    // 100 JPYC tip / MIN_FEE 5 → fan pays 105, creator gets 100, fee 5, gas 0
     expectBreakdownRow('クリエイター受取', '100 JPYC');
-    expectBreakdownRow(/運営手数料/, '15 JPYC');
-    expectBreakdownRow('あなたの支払額', '115 JPYC');
+    expectBreakdownRow(/運営手数料/, '5 JPYC');
+    expectBreakdownRow('あなたの支払額', '105 JPYC');
   });
 
   it('別 preset をクリック → 明細が切替', async () => {
     const user = userEvent.setup();
     render(<TipForm params={JPYC_PARAMS} />);
     await user.click(screen.getByRole('button', { name: '1000 JPYC' }));
-    // 1000 JPYC tip / 外税 / 1% = 10, MIN 15 → fee = 15, fan pays 1015
+    // 1000 JPYC tip / 1% = 10 > MIN 5 → fee 10, fan pays 1010
     expectBreakdownRow('クリエイター受取', '1000 JPYC');
-    expectBreakdownRow(/運営手数料/, '15 JPYC');
-    expectBreakdownRow('あなたの支払額', '1015 JPYC');
+    expectBreakdownRow(/運営手数料/, '10 JPYC');
+    expectBreakdownRow('あなたの支払額', '1010 JPYC');
   });
 
   it('カスタム入力 → preset が deselect され、明細に反映 (USDC 50)', async () => {
@@ -191,10 +207,10 @@ describe('TipForm — 金額選択', () => {
     render(<TipForm params={USDC_PARAMS} />);
     const customInput = screen.getByPlaceholderText('例: 7.50');
     await user.type(customInput, '50');
-    // 50 USDC / 外税 / 1.2% = 0.6 USDC > MIN 0.2 → fee 0.6, fan pays 50.6
+    // 50 USDC / 1% = 0.5 USDC > MIN 0.05 → fee 0.5, fan pays 50.5
     expectBreakdownRow('クリエイター受取', '50 USDC');
-    expectBreakdownRow(/運営手数料/, '0.6 USDC');
-    expectBreakdownRow('あなたの支払額', '50.6 USDC');
+    expectBreakdownRow(/運営手数料/, '0.5 USDC');
+    expectBreakdownRow('あなたの支払額', '50.5 USDC');
   });
 
   it('カスタム入力後に preset へ戻すと反映', async () => {
@@ -202,10 +218,10 @@ describe('TipForm — 金額選択', () => {
     render(<TipForm params={USDC_PARAMS} />);
     await user.type(screen.getByPlaceholderText('例: 7.50'), '50');
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
-    // 5 USDC / 外税 / 1.2% = 0.06 < MIN 0.2 → fee 0.2, fan pays 5.2
+    // 5 USDC / 1% = 0.05 == MIN → fee 0.05, fan pays 5.05
     expectBreakdownRow('クリエイター受取', '5 USDC');
-    expectBreakdownRow(/運営手数料/, '0.2 USDC');
-    expectBreakdownRow('あなたの支払額', '5.2 USDC');
+    expectBreakdownRow(/運営手数料/, '0.05 USDC');
+    expectBreakdownRow('あなたの支払額', '5.05 USDC');
   });
 });
 
@@ -236,21 +252,23 @@ describe('TipForm — 接続状態', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n); // 20 USDC
     setSmartAccount(true);
+    setGasQuote('ready', 0n);
     render(<TipForm params={USDC_PARAMS} />);
-    // 既定 preset = 1 USDC, 1.2% = 0.012 < MIN 0.2 → fee 0.2, customer pays 1.2 USDC
+    // 既定 preset = 1 USDC, 1% = 0.01 < MIN 0.05 → fee 0.05, customer pays 1.05 USDC
     expect(
-      screen.getByRole('button', { name: /1.2 USDC を送る/ }),
+      screen.getByRole('button', { name: /1\.05 USDC を送る/ }),
     ).not.toBeDisabled();
   });
 
   it('残高不足 → 警告 + 送信 disabled', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(500_000n); // 0.5 USDC < 1.2 needed
+    setBalance(500_000n); // 0.5 USDC < 1.05 needed
     setSmartAccount(true);
+    setGasQuote('ready', 0n);
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /1.2 USDC を送る/ }),
+      screen.getByRole('button', { name: /1\.05 USDC を送る/ }),
     ).toBeDisabled();
   });
 
@@ -266,22 +284,23 @@ describe('TipForm — 接続状態', () => {
 });
 
 describe('TipForm — 送信', () => {
-  it('クリックで mutate に正しい引数が渡る (preset 5 USDC)', async () => {
+  it('クリックで mutate に正しい引数が渡る (preset 5 USDC, sponsorship gas=0)', async () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(true);
+    setGasQuote('ready', 0n);
     render(<TipForm params={USDC_PARAMS} />);
 
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
-    await user.click(screen.getByRole('button', { name: /5.2 USDC を送る/ }));
+    await user.click(screen.getByRole('button', { name: /5\.05 USDC を送る/ }));
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
     expect(call.merchant.toLowerCase()).toBe(CREATOR.toLowerCase());
-    // 外税: creator gets full preset (5 USDC), 1.2%=0.06 < MIN → fee = 0.2 USDC
+    // creator gets full preset (5 USDC), 1%=0.05 == MIN → fee = 0.05 USDC, sponsorship gas=0
     expect(call.merchantAmount).toBe(5_000_000n);
-    expect(call.feeAmount).toBe(200_000n);
+    expect(call.feeAmount).toBe(50_000n); // sponsorship: fee + gas (0) = 0.05 USDC
     expect(call.feeReceiver.toLowerCase()).toBe(
       '0xdead000000000000000000000000000000001234',
     );
@@ -295,14 +314,15 @@ describe('TipForm — 送信', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
+    setGasQuote('ready', 0n);
     render(<TipForm params={USDC_PARAMS} />);
 
     await user.type(screen.getByPlaceholderText('例: 7.50'), '50');
-    await user.click(screen.getByRole('button', { name: /50.6 USDC を送る/ }));
+    await user.click(screen.getByRole('button', { name: /50\.5 USDC を送る/ }));
 
     const call = mutate.mock.calls[0][0];
     expect(call.merchantAmount).toBe(50_000_000n);
-    expect(call.feeAmount).toBe(600_000n); // 1.2% of 50 USDC
+    expect(call.feeAmount).toBe(500_000n); // 1% of 50 USDC = 0.5
   });
 
   it('送信中 → 「送信中…」 disabled', () => {
@@ -446,30 +466,30 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expectBreakdownRow(/ネットワーク手数料/, '見積取得中…');
   });
 
-  it('gas 見積あり: 明細に gas 行 + customer に加算 (preset 5 USDC)', () => {
+  it('gas 見積あり: 明細に gas 行 + customer に加算 (preset 1 USDC)', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 300_000n); // 0.3 USDC
     render(<TipForm params={USDC_PARAMS} />);
 
-    // 既定 preset 1 USDC: creator=1, fee=0.2, gas=0.3, customer = 1.5
+    // 既定 preset 1 USDC: creator=1, fee=0.05 (MIN), gas=0.3, customer = 1.35
     expectBreakdownRow('クリエイター受取', '1 USDC');
-    expectBreakdownRow(/運営手数料/, '0.2 USDC');
+    expectBreakdownRow(/運営手数料/, '0.05 USDC');
     expectBreakdownRow(/ネットワーク手数料/, '最大 0.3 USDC');
-    expectBreakdownRow('あなたの支払額', '1.5 USDC');
+    expectBreakdownRow('あなたの支払額', '1.35 USDC');
   });
 
   it('gas 込みで残高不足: 警告 + ボタン disabled', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
-    // 1.4 USDC: preset 1 USDC + fee 0.2 + gas 0.3 = 1.5 > 1.4
-    setBalance(1_400_000n);
+    // 1.3 USDC: preset 1 USDC + fee 0.05 + gas 0.3 = 1.35 > 1.3
+    setBalance(1_300_000n);
     setSmartAccount(true);
     setGasQuote('ready', 300_000n);
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /1.5 USDC を送る/ }),
+      screen.getByRole('button', { name: /1\.35 USDC を送る/ }),
     ).toBeDisabled();
   });
 
@@ -480,16 +500,21 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('ready');
     render(<TipForm params={USDC_PARAMS} />);
     expect(
-      screen.getByText(/USDC でお支払いいただきます/),
+      screen.getByText(/ネットワーク手数料は USDC で支払います/),
     ).toBeInTheDocument();
   });
 
-  it('JPYC params (sponsorship) は ERC20 mock 下でも gas 行が出ない', () => {
+  it('JPYC sponsorship mode でも gas 行が表示される (新モデル: 全 token で gas 別建て)', () => {
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(2000n * 10n ** 18n);
     setSmartAccount(true);
+    setGasQuote('ready', 5n * 10n ** 17n); // 0.5 JPYC
     render(<TipForm params={JPYC_PARAMS} />);
-    expect(screen.queryByText(/ネットワーク手数料/)).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll('dl dt')).some((el) =>
+        /ネットワーク手数料/.test(el.textContent ?? ''),
+      ),
+    ).toBe(true);
   });
 
   it('USDC ERC20 mode + 接続済 → 「ガス代承認の状況を確認」リンクが表示される', () => {
@@ -513,7 +538,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.queryByText(/ガス代承認の状況を確認/)).toBeNull();
   });
 
-  it('mutate には gas を含めない (creator + fee のみ)', async () => {
+  it('USDC ERC20 mode の mutate には gas を含めない (paymaster が顧客から直接徴収)', async () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -523,13 +548,12 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
 
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
     await user.click(
-      screen.getByRole('button', { name: /5.5 USDC を送る/ }),
+      screen.getByRole('button', { name: /5\.35 USDC を送る/ }),
     );
 
     const call = mutate.mock.calls[0][0];
     expect(call.merchantAmount).toBe(5_000_000n);
-    expect(call.feeAmount).toBe(200_000n);
-    // gas は paymaster が postOp で引くため、明示的な extraRecipients には含めない
+    expect(call.feeAmount).toBe(50_000n); // ERC20: gas は含めない
     expect(call.extraRecipients).toBeUndefined();
   });
 
@@ -551,20 +575,20 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
 
   it('境界: 残高 = 必要額 ちょうど → 送信可能', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
-    // preset 1 USDC: 1 + 0.2 (fee) + 0.3 (gas) = 1.5 USDC
-    setBalance(1_500_000n);
+    // preset 1 USDC: 1 + 0.05 (fee) + 0.3 (gas) = 1.35 USDC
+    setBalance(1_350_000n);
     setSmartAccount(true);
     setGasQuote('ready', 300_000n);
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.queryByText(/残高が不足/)).toBeNull();
     expect(
-      screen.getByRole('button', { name: /1.5 USDC を送る/ }),
+      screen.getByRole('button', { name: /1\.35 USDC を送る/ }),
     ).not.toBeDisabled();
   });
 
   it('境界: 残高 = 必要額 - 1 → 不足', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(1_500_000n - 1n);
+    setBalance(1_350_000n - 1n);
     setSmartAccount(true);
     setGasQuote('ready', 300_000n);
     render(<TipForm params={USDC_PARAMS} />);
@@ -594,10 +618,10 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     const body = JSON.parse(
       (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
     );
-    // 既定 preset 1 USDC: customerPays = 1 + 0.2 = 1.2 USDC (gas は paymaster 軸なので含めない)
-    expect(body.customerPays).toBe('1200000');
+    // 既定 preset 1 USDC: customerPays = 1 + 0.05 = 1.05 USDC (gas は paymaster 軸で別、含めない)
+    expect(body.customerPays).toBe('1050000');
     expect(body.merchantAmount).toBe('1000000');
-    expect(body.feeAmount).toBe('200000');
+    expect(body.feeAmount).toBe('50000');
     fetchSpy.mockRestore();
   });
 });

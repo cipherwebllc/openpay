@@ -119,6 +119,13 @@ export const env = {
     'NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS',
     process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS,
   ),
+  // useGasQuoteJpyc が POL gas を JPYC へ換算する固定レート (1 POL = N JPYC、整数)。
+  // JPYC = JPY 1:1、POL は 60 JPY 前後 (2026 想定)。安全側に 60 を既定とする。
+  // 月次手動更新を想定し、外部 API 依存を持たない設計。
+  polJpycRate: parsePositiveInt(
+    'NEXT_PUBLIC_POL_JPYC_RATE',
+    process.env.NEXT_PUBLIC_POL_JPYC_RATE,
+  ),
 } as const;
 
 export const isMainnet = env.networkEnv === 'mainnet';

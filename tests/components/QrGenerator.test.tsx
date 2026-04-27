@@ -24,7 +24,7 @@ describe('QrGenerator', () => {
   });
 
   describe('初期レンダリング', () => {
-    it('LocalStorage 空: アコーディオンは開いていて、USDC/内税が active', async () => {
+    it('LocalStorage 空: アコーディオンは開いていて、USDC が active', async () => {
       render(<QrGenerator />);
       await waitFor(() => {
         expect(
@@ -35,10 +35,6 @@ describe('QrGenerator', () => {
       const jpycBtn = screen.getByRole('button', { name: /JPYC/ });
       expect(usdcBtn.className).toMatch(/border-brand/);
       expect(jpycBtn.className).not.toMatch(/border-brand/);
-      // 内税が active
-      expect(
-        screen.getByRole('button', { name: /内税/ }).className,
-      ).toMatch(/border-brand/);
     });
 
     it('LocalStorage に有効アドレス: アコーディオンは閉じてサマリ表示', async () => {
@@ -47,23 +43,19 @@ describe('QrGenerator', () => {
         JSON.stringify({
           receiver: VALID,
           token: 'jpyc',
-          fee: 'exclude',
           directTransfer: false,
         }),
       );
       render(<QrGenerator />);
-      // accordion 中身 (token select 等) は不可視
       await waitFor(() => {
-        // 詳細設定ボタンの aria-expanded=false
         const toggle = screen.getByRole('button', { name: /詳細設定/ });
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
       });
-      // サマリにトークン名・短縮アドレス・税表記が出る (i18n 後は言語非依存
-      // のラベル: incl. / excl. / 0%)
       const toggle = screen.getByRole('button', { name: /詳細設定/ });
       expect(within(toggle).getByText(/JPYC/)).toBeInTheDocument();
       expect(within(toggle).getByText(/0x8335/)).toBeInTheDocument();
-      expect(within(toggle).getByText(/excl\./)).toBeInTheDocument();
+      // 料率は固定 1%
+      expect(within(toggle).getByText(/1%/)).toBeInTheDocument();
     });
 
     it('LocalStorage に無効アドレス: アコーディオン展開のままで修正を促す', async () => {
@@ -72,7 +64,6 @@ describe('QrGenerator', () => {
         JSON.stringify({
           receiver: 'not-an-address',
           token: 'usdc',
-          fee: 'include',
           directTransfer: false,
         }),
       );
@@ -128,16 +119,6 @@ describe('QrGenerator', () => {
       expect(input.value).toBe('10.5');
     });
 
-    it('内税 ↔ 外税', async () => {
-      const user = userEvent.setup();
-      render(<QrGenerator />);
-      await waitFor(() => screen.getByRole('button', { name: /内税/ }));
-      await user.click(screen.getByRole('button', { name: /外税/ }));
-      expect(
-        screen.getByRole('button', { name: /外税/ }).className,
-      ).toMatch(/border-brand/);
-    });
-
     it('JPYC タブへ切替で chainId 表記が変わる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
@@ -156,7 +137,6 @@ describe('QrGenerator', () => {
         JSON.stringify({
           receiver: VALID,
           token: 'usdc',
-          fee: 'include',
           directTransfer: false,
         }),
       );
@@ -175,7 +155,7 @@ describe('QrGenerator', () => {
   });
 
   describe('直接送金 (上級者) トグル', () => {
-    it('チェックすると URL に mode=direct が出る + 手数料モード UI が消える', async () => {
+    it('チェックすると URL に mode=direct が出る + 説明バッジが表示される', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -194,12 +174,9 @@ describe('QrGenerator', () => {
         ).toBeInTheDocument();
       });
 
-      // 手数料モードボタンは消え、説明バッジが表示される
+      // direct モードの説明バッジが表示される
       expect(
-        screen.queryByRole('button', { name: /内税/ }),
-      ).toBeNull();
-      expect(
-        screen.getByText(/直接送金モード: 手数料 0%/),
+        screen.getByText(/直接送金モード: 運営手数料 0%/),
       ).toBeInTheDocument();
 
       // 「運営手数料の徴収先」エリアは消える
@@ -228,7 +205,6 @@ describe('QrGenerator', () => {
         JSON.stringify({
           receiver: VALID,
           token: 'usdc',
-          fee: 'include',
           directTransfer: true,
         }),
       );

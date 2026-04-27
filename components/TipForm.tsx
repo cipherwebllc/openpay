@@ -8,6 +8,7 @@ import { ConnectButton } from './ConnectButton';
 import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
+import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { calcBreakdown } from '@/lib/fee';
 import { chainForToken } from '@/lib/chains';
@@ -24,7 +25,9 @@ export function TipForm({ params }: { params: TipParams }) {
   const t = useTranslations('TipForm');
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
-  const isErc20Paymaster = resolvePaymasterMode(params.token) === 'erc20';
+  const paymasterMode = resolvePaymasterMode(params.token);
+  const isErc20Paymaster = paymasterMode === 'erc20';
+  const isSponsorship = paymasterMode === 'sponsorship';
   const presets =
     params.presets && params.presets.length > 0
       ? params.presets
@@ -37,7 +40,9 @@ export function TipForm({ params }: { params: TipParams }) {
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { data: saData, error: saError } = useSmartAccount(params.token, true);
   const gasless = useBatchPayment(params.token);
-  const gasQuote = useGasQuoteUsdc(params.token, isErc20Paymaster);
+  const gasQuoteUsdc = useGasQuoteUsdc(params.token, isErc20Paymaster);
+  const gasQuoteJpyc = useGasQuoteJpyc(params.token, isSponsorship);
+  const gasQuote = isErc20Paymaster ? gasQuoteUsdc : gasQuoteJpyc;
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     presets[0] ?? null,
@@ -51,16 +56,19 @@ export function TipForm({ params }: { params: TipParams }) {
     return parseUnits(amountStr, token.decimals);
   }, [amountStr, token.decimals]);
 
-  // tip は外税固定: 受取人 (= クリエイター) は preset 額をそのまま受け取り、
-  // tipper が 1% (or MIN_FEE) を上乗せして支払う。
+  // tip: 受取人 (= クリエイター) は preset 額をそのまま受け取り、tipper が
+  // 運営手数料 (1% or MIN_FEE) と gas 見積を上乗せして支払う。
   const breakdown = useMemo(
-    () => calcBreakdown(amountWei, 'exclude', params.token),
+    () => calcBreakdown(amountWei, params.token),
     [amountWei, params.token],
   );
 
-  // gas は ERC20 Paymaster の postOp で別途引かれる分。表示と残高判定で加算する。
-  const gasAmount = isErc20Paymaster ? gasQuote.data?.gasAmount : undefined;
+  // gas 見積:
+  //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。表示加算のみ。
+  //   Sponsorship (JPYC): Pimlico が立替、運営は徴収 JPYC で精算。fee transfer に内包。
+  const gasAmount = gasQuote.data?.gasAmount;
   const totalCustomerOutflow = breakdown.customerPays + (gasAmount ?? 0n);
+  const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
   const fmt = (wei: bigint) =>
     `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
@@ -80,7 +88,7 @@ export function TipForm({ params }: { params: TipParams }) {
     balanceQuery.data < totalCustomerOutflow;
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
-  const gasQuoteReady = !isErc20Paymaster || gasQuote.data !== undefined;
+  const gasQuoteReady = gasQuote.data !== undefined;
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -197,7 +205,7 @@ export function TipForm({ params }: { params: TipParams }) {
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
       feeReceiver: env.feeReceiver,
-      feeAmount: breakdown.feeAmount,
+      feeAmount: breakdown.feeAmount + gasReimbursement,
     });
   }
 
@@ -282,16 +290,14 @@ export function TipForm({ params }: { params: TipParams }) {
         <dl className="mt-2 space-y-1.5">
           <Row label={t('creatorRow')} value={fmt(breakdown.merchantReceives)} />
           <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
-          {isErc20Paymaster && (
-            <Row
-              label={t('gasRow')}
-              value={
-                gasAmount !== undefined
-                  ? t('gasRowValue', { amount: fmt(gasAmount) })
-                  : t('gasRowPending')
-              }
-            />
-          )}
+          <Row
+            label={t('gasRow')}
+            value={
+              gasAmount !== undefined
+                ? t('gasRowValue', { amount: fmt(gasAmount) })
+                : t('gasRowPending')
+            }
+          />
           <div className="my-1 border-t border-slate-200" />
           <Row
             label={t('customerRow')}
@@ -366,7 +372,7 @@ export function TipForm({ params }: { params: TipParams }) {
               ? t('btnSwitchChain')
               : !saData
                 ? t('btnSaInit')
-                : isErc20Paymaster && !gasQuoteReady
+                : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
                   : breakdown.customerPays === 0n
                     ? t('btnSelectAmount')

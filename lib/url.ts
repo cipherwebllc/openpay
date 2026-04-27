@@ -1,10 +1,13 @@
 // /pay クエリ仕様:
 //   to     (必須, 0x) — 主受取人
 //   token  ("jpyc" | "usdc")
-//   fee    ("include" | "exclude")           ※ mode=direct では無視
 //   amount (任意, 人間可読 — 据え置き QR では省略)
 //   mode   ("gasless" | "direct", 省略時 gasless) ※ direct のときのみ URL に出力
 //   split  (任意, "0xB:30,0xC:20" 形式) — 追加受取人と分配 %。to が残余 % を取得
+//
+// 注: 旧 `fee` パラメタ (include/exclude) は内税モード廃止に伴い削除。古い QR では
+// 値が含まれる可能性があるが parser は無視する (URL は破壊しない、ただし新規 QR
+// には付与しない)。
 //
 // /tip/[address] クエリ仕様:
 //   token   ("jpyc" | "usdc")        必須
@@ -14,7 +17,6 @@
 //   preset  (任意, "100,500,1000" カンマ区切り decimal、最大 6 件)
 import { getAddress, isAddress } from 'viem';
 import type { Address } from 'viem';
-import type { FeeMode } from './fee';
 import { isValidTokenSymbol, type TokenSymbol } from './tokens';
 
 export type PayMode = 'gasless' | 'direct';
@@ -30,7 +32,6 @@ export const SPLIT_MAX_ENTRIES = 3;
 export type PayParams = {
   to: Address;
   token: TokenSymbol;
-  fee: FeeMode;
   amount?: string;
   mode: PayMode;
   split?: SplitEntry[];
@@ -135,7 +136,6 @@ export function buildPayPath(params: PayParams): string {
   const sp = new URLSearchParams();
   sp.set('to', params.to);
   sp.set('token', params.token);
-  sp.set('fee', params.fee);
   if (params.amount && params.amount.length > 0) {
     sp.set('amount', params.amount);
   }
@@ -163,18 +163,15 @@ type SearchParamsLike = { get(name: string): string | null };
 export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams {
   const to = searchParams.get('to');
   const token = searchParams.get('token');
-  const fee = searchParams.get('fee');
   const amount = searchParams.get('amount');
   const mode = searchParams.get('mode');
   const split = searchParams.get('split');
+  // 旧 `fee` パラメタは silently ignore (古い QR の互換維持、新規 QR には載せない)
 
   if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
   if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
   if (!token || !isValidTokenSymbol(token)) {
     return { ok: false, error: 'token は jpyc または usdc を指定してください' };
-  }
-  if (fee !== 'include' && fee !== 'exclude') {
-    return { ok: false, error: 'fee は include または exclude を指定してください' };
   }
   if (mode !== null && mode !== 'gasless' && mode !== 'direct') {
     return { ok: false, error: 'mode は gasless または direct を指定してください' };
@@ -205,7 +202,6 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     params: {
       to: getAddress(to),
       token,
-      fee,
       amount: amount && amount.length > 0 ? amount : undefined,
       mode: mode === 'direct' ? 'direct' : 'gasless',
       split: parsedSplit,

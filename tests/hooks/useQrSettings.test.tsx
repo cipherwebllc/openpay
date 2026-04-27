@@ -15,7 +15,6 @@ describe('useQrSettings', () => {
     expect(result.current.settings).toEqual({
       receiver: '',
       token: 'usdc',
-      fee: 'include',
       directTransfer: false,
       splits: [],
     });
@@ -27,13 +26,11 @@ describe('useQrSettings', () => {
       JSON.stringify({
         receiver: '0xabc',
         token: 'jpyc',
-        fee: 'exclude',
       }),
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.token).toBe('jpyc');
-    expect(result.current.settings.fee).toBe('exclude');
     expect(result.current.settings.receiver).toBe('0xabc');
     expect(result.current.settings.directTransfer).toBe(false);
     expect(result.current.settings.splits).toEqual([]);
@@ -45,7 +42,6 @@ describe('useQrSettings', () => {
       JSON.stringify({
         receiver: '0xabc',
         token: 'usdc',
-        fee: 'include',
         directTransfer: true,
       }),
     );
@@ -60,7 +56,6 @@ describe('useQrSettings', () => {
       JSON.stringify({
         receiver: '0xabc',
         token: 'usdc',
-        fee: 'include',
         directTransfer: false,
         splits: [
           { address: '0xb1', percent: '30' },
@@ -100,24 +95,12 @@ describe('useQrSettings', () => {
   it('部分的に不正な値 → default で埋める (token 不正)', async () => {
     window.localStorage.setItem(
       KEY,
-      JSON.stringify({ token: 'btc', fee: 'exclude', receiver: '0xa' }),
+      JSON.stringify({ token: 'btc', receiver: '0xa' }),
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.token).toBe('usdc');
-    expect(result.current.settings.fee).toBe('exclude');
     expect(result.current.settings.receiver).toBe('0xa');
-  });
-
-  it('部分的に不正な値 → default で埋める (fee 不正)', async () => {
-    window.localStorage.setItem(
-      KEY,
-      JSON.stringify({ token: 'jpyc', fee: 'tax-free', receiver: '' }),
-    );
-    const { result } = renderHook(() => useQrSettings());
-    await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.token).toBe('jpyc');
-    expect(result.current.settings.fee).toBe('include');
   });
 
   it('setSettings で splits を含めて更新 → localStorage 書込', async () => {
@@ -128,7 +111,6 @@ describe('useQrSettings', () => {
       result.current.setSettings({
         receiver: '0xdef',
         token: 'jpyc',
-        fee: 'exclude',
         directTransfer: true,
         splits: [{ address: '0xb1', percent: '40' }],
       });
@@ -139,7 +121,6 @@ describe('useQrSettings', () => {
       expect(raw).not.toBeNull();
       const parsed = JSON.parse(raw!);
       expect(parsed.token).toBe('jpyc');
-      expect(parsed.fee).toBe('exclude');
       expect(parsed.receiver).toBe('0xdef');
       expect(parsed.directTransfer).toBe(true);
       expect(parsed.splits).toEqual([{ address: '0xb1', percent: '40' }]);

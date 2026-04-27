@@ -10,6 +10,7 @@ import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
+import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import {
   calcBreakdown,
@@ -47,8 +48,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const isDirect = params.mode === 'direct';
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
-  const isErc20Paymaster =
-    !isDirect && resolvePaymasterMode(params.token) === 'erc20';
+  const paymasterMode = resolvePaymasterMode(params.token);
+  const isErc20Paymaster = !isDirect && paymasterMode === 'erc20';
+  const isSponsorship = !isDirect && paymasterMode === 'sponsorship';
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
@@ -62,7 +64,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 両方のフックを常に call し、isDirect で送信先を分岐 (条件付きフックは禁止)。
   const gasless = useBatchPayment(params.token);
   const direct = useDirectPayment();
-  const gasQuote = useGasQuoteUsdc(params.token, isErc20Paymaster);
+  // gas 見積は paymaster mode に応じて 1 つだけ active になる (もう片方は enabled=false で no-op)
+  const gasQuoteUsdc = useGasQuoteUsdc(params.token, isErc20Paymaster);
+  const gasQuoteJpyc = useGasQuoteJpyc(params.token, isSponsorship);
+  const gasQuote = isErc20Paymaster ? gasQuoteUsdc : gasQuoteJpyc;
 
   const fixedAmount = params.amount ?? '';
   const isFixed = fixedAmount.length > 0;
@@ -82,8 +87,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     () =>
       isDirect
         ? calcDirectBreakdown(amountWei)
-        : calcBreakdown(amountWei, params.fee, params.token),
-    [isDirect, amountWei, params.fee, params.token],
+        : calcBreakdown(amountWei, params.token),
+    [isDirect, amountWei, params.token],
   );
 
   // direct mode では split は無視 (シンプルな単一 transfer に限定)。
@@ -91,19 +96,24 @@ function PaymentDetails({ params }: { params: PayParams }) {
     if (isDirect || !params.split || params.split.length === 0) return null;
     return calcSplitBreakdown(
       amountWei,
-      params.fee,
       params.token,
       params.to,
       params.split,
     );
-  }, [isDirect, amountWei, params.fee, params.token, params.to, params.split]);
+  }, [isDirect, amountWei, params.token, params.to, params.split]);
 
-  // gas は ERC20 Paymaster の postOp で別途引かれる分。calcBreakdown の意味論
-  // (customerPays = チェーン上で動く資金) を保ち、表示と残高判定でだけ加算する。
-  const gasAmount = isErc20Paymaster ? gasQuote.data?.gasAmount : undefined;
+  // gas 見積:
+  //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
+  //     表示と残高判定でだけ customer outflow に加算 (on-chain transfer は変えない)。
+  //   Sponsorship (JPYC): Pimlico が POL gas を立替。運営は徴収した JPYC で精算する。
+  //     fee transfer に gas 相当を内包させ、feeReceiver に追加で受け取る。
+  const gasAmount = !isDirect ? gasQuote.data?.gasAmount : undefined;
   const totalCustomerOutflow =
     (splitBreakdown ? splitBreakdown.customerPays : breakdown.customerPays) +
     (gasAmount ?? 0n);
+  // Sponsorship 時は fee transfer に gas を含める。ERC20 Paymaster 時は fee のみ
+  // (gas は paymaster が顧客から自動徴収するため二重徴収を避ける)。
+  const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
   const balanceQuery = useReadContract({
     address: token.address,
@@ -121,7 +131,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
   const flowPending = isDirect ? direct.isPending : gasless.isPending;
-  const gasQuoteReady = !isErc20Paymaster || gasQuote.data !== undefined;
+  const gasQuoteReady = isDirect || gasQuote.data !== undefined;
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -190,7 +200,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         merchant: primary.to,
         merchantAmount: primary.amount,
         feeReceiver: env.feeReceiver,
-        feeAmount: splitBreakdown.feeAmount,
+        feeAmount: splitBreakdown.feeAmount + gasReimbursement,
         extraRecipients: extras.map((e) => ({ to: e.to, amount: e.amount })),
       });
     } else {
@@ -199,7 +209,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         merchant: params.to,
         merchantAmount: breakdown.merchantReceives,
         feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount,
+        feeAmount: breakdown.feeAmount + gasReimbursement,
       });
     }
   }
@@ -278,7 +288,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
               )}
             />
           )}
-          {isErc20Paymaster && (
+          {!isDirect && (
             <Row
               label={t('gasRow')}
               value={
@@ -290,13 +300,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           )}
           <div className="my-2 border-t border-slate-200" />
           <Row
-            label={
-              isDirect
-                ? t('customerDirect')
-                : params.fee === 'include'
-                  ? t('customerInclude')
-                  : t('customerExclude')
-            }
+            label={isDirect ? t('customerDirect') : t('customerTotal')}
             value={fmt(totalCustomerOutflow)}
             strong
           />
@@ -375,7 +379,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
               ? t('btnSwitchChain')
               : !isDirect && !saData
                 ? t('btnSaInit')
-                : isErc20Paymaster && !gasQuoteReady
+                : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
                   : breakdown.customerPays === 0n
                     ? t('btnEnterAmount')

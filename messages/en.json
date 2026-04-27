@@ -8,7 +8,7 @@
     },
     "tipPanel": {
       "heading": "Generate Tip widget embed code",
-      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1.0–1.2% fee (chain-dependent), gas covered by OpenPay."
+      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1.0% fee + network fee (estimate)."
     },
     "footer": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
     "linkPay": "/pay (customer)"
@@ -23,12 +23,7 @@
     "tokenChainHint": "{chainName} (chain id: {chainId})",
     "receiverLabel": "Receiver wallet address",
     "addressInvalid": "Invalid address format",
-    "directHint": "Direct transfer mode: 0% fee (tax-include/exclude is ignored)",
-    "feeLabel": "Fee bearer",
-    "feeIncludeTitle": "Tax-include (merchant pays fee)",
-    "feeExcludeTitle": "Tax-exclude (customer pays fee)",
-    "feeIncludeDesc": "Fee deducted from billed amount, merchant receives the rest",
-    "feeExcludeDesc": "Fee added on top of billed amount, customer pays the total",
+    "directHint": "Direct transfer mode: 0% operator fee. Customer pays gas in the native token.",
     "advancedExtra": "Extras",
     "directOption": "Direct transfer (advanced)",
     "directOptionDesc": "Customer pays gas (POL / ETH) themselves; the operator fee is skipped and a plain ERC20 transfer is sent.",
@@ -52,8 +47,8 @@
     "qrPlaceholderNoAmount": "Enter an amount",
     "qrPlaceholderGenerating": "Generating QR…",
     "feeReceiverHeading": "Operator fee receiver",
-    "feeReceiverHintJpyc": "(Polygon JPYC: 1.0% / min 15 JPYC)",
-    "feeReceiverHintUsdc": "(Base USDC: 1.2% / min 0.2 USDC)"
+    "feeReceiverHintJpyc": "(Polygon JPYC: 1.0% / min 5 JPYC + network fee)",
+    "feeReceiverHintUsdc": "(Base USDC: 1.0% / min 0.05 USDC + network fee)"
   },
   "PaymentForm": {
     "title": "OpenPay Payment",
@@ -69,12 +64,11 @@
     "gasRow": "Network fee (estimate)",
     "gasRowValue": "up to {amount}",
     "gasRowPending": "Fetching estimate…",
-    "customerInclude": "You pay (tax-include)",
-    "customerExclude": "You pay (tax-exclude)",
+    "customerTotal": "You pay (total)",
     "customerDirect": "You pay",
     "directBatchHint": "Sends a single ERC20 transfer directly. Smart Account / Pimlico Paymaster is not used.",
-    "gaslessBatchHintJpyc": "Gas is covered by the operator (Pimlico Sponsorship Paymaster). You don't need to hold native tokens (POL).",
-    "gaslessBatchHintUsdc": "You pay gas in USDC (Pimlico ERC20 Paymaster). No need to hold native tokens (ETH). The figure shown is an upper-bound estimate; you only pay actual usage and any surplus is not charged.",
+    "gaslessBatchHintJpyc": "Network fee is collected in JPYC (operator settles POL gas with Pimlico off-chain). You don't need to hold native tokens (POL).",
+    "gaslessBatchHintUsdc": "You pay the network fee in USDC (via Pimlico ERC20 Paymaster). No need to hold native tokens (ETH). The figure shown is an upper-bound estimate; surplus is not charged.",
     "approvalCheckLink": "Review gas approvals",
     "splitBatchHint": "Gas is covered by the operator (Pimlico Sponsorship Paymaster). {count} transfers are batched in a single UserOperation.",
     "walletSection": "Wallet",
@@ -114,8 +108,8 @@
     "gasRowValue": "up to {amount}",
     "gasRowPending": "Fetching estimate…",
     "customerRow": "You pay",
-    "gaslessHintJpyc": "Gas is covered by OpenPay (via Pimlico Sponsorship Paymaster). You don't need to hold native tokens (POL).",
-    "gaslessHintUsdc": "You pay gas in USDC (Pimlico ERC20 Paymaster). No need to hold native tokens (ETH). The figure shown is an upper-bound estimate; you only pay actual usage and any surplus is not charged.",
+    "gaslessHintJpyc": "You pay the network fee in JPYC (operator settles POL gas with Pimlico off-chain). No need to hold native tokens (POL).",
+    "gaslessHintUsdc": "You pay the network fee in USDC (via Pimlico ERC20 Paymaster). No need to hold native tokens (ETH). The figure shown is an upper-bound estimate; surplus is not charged.",
     "approvalCheckLink": "Review gas approvals",
     "walletSection": "Wallet",
     "switchChain": "Switch to {chainName}",
