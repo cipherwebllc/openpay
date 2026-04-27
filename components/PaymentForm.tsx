@@ -10,8 +10,7 @@ import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
-import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
-import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
+import { useGasQuote } from '@/hooks/useGasQuote';
 import {
   calcBreakdown,
   calcDirectBreakdown,
@@ -64,10 +63,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 両方のフックを常に call し、isDirect で送信先を分岐 (条件付きフックは禁止)。
   const gasless = useBatchPayment(params.token);
   const direct = useDirectPayment();
-  // gas 見積は paymaster mode に応じて 1 つだけ active になる (もう片方は enabled=false で no-op)
-  const gasQuoteUsdc = useGasQuoteUsdc(params.token, isErc20Paymaster);
-  const gasQuoteJpyc = useGasQuoteJpyc(params.token, isSponsorship);
-  const gasQuote = isErc20Paymaster ? gasQuoteUsdc : gasQuoteJpyc;
+  const gasQuote = useGasQuote(params.token, !isDirect);
 
   const fixedAmount = params.amount ?? '';
   const isFixed = fixedAmount.length > 0;

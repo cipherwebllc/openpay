@@ -1,6 +1,6 @@
-// 運営手数料 = max(amount * FEE_BPS[token], MIN_FEE[token])
-//   JPYC (Polygon): 1.0% / 5 JPYC  — 純マージン (POL gas は別途 useGasQuoteJpyc で徴収)
-//   USDC (Base):    1.0% / 0.05 USDC — 純マージン (gas は ERC20 Paymaster 経由で顧客負担)
+// 運営手数料 = max(amount * FEE_BPS, MIN_FEE[token])
+//   両 token 共通で 1.0% の純マージン。MIN_FEE は token decimals に応じて分岐。
+//   JPYC: 5 JPYC (18 decimals) / USDC: 0.05 USDC (6 decimals)
 //
 // fee model: customer = amount + fee + gasQuote (税抜き表示一本)
 //   merchant = amount, op = fee。gas は別軸で UI/見積し、submit 時に
@@ -10,10 +10,7 @@ import type { TokenSymbol } from './tokens';
 
 const BPS_DENOM = 10_000n;
 
-export const FEE_BPS: Record<TokenSymbol, bigint> = {
-  jpyc: 100n, // 1.0%
-  usdc: 100n, // 1.0%
-};
+export const FEE_BPS = 100n; // 1.0% (両 token 共通)
 
 export const MIN_FEE: Record<TokenSymbol, bigint> = {
   jpyc: 5n * 10n ** 18n, // 5 JPYC (18 decimals)
@@ -22,7 +19,7 @@ export const MIN_FEE: Record<TokenSymbol, bigint> = {
 
 export function calcFee(amount: bigint, token: TokenSymbol): bigint {
   if (amount <= 0n) return 0n;
-  const proportional = (amount * FEE_BPS[token]) / BPS_DENOM;
+  const proportional = (amount * FEE_BPS) / BPS_DENOM;
   const min = MIN_FEE[token];
   return proportional > min ? proportional : min;
 }

@@ -8,8 +8,7 @@ import { ConnectButton } from './ConnectButton';
 import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
-import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
-import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
+import { useGasQuote } from '@/hooks/useGasQuote';
 import { calcBreakdown } from '@/lib/fee';
 import { chainForToken } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -40,9 +39,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { data: saData, error: saError } = useSmartAccount(params.token, true);
   const gasless = useBatchPayment(params.token);
-  const gasQuoteUsdc = useGasQuoteUsdc(params.token, isErc20Paymaster);
-  const gasQuoteJpyc = useGasQuoteJpyc(params.token, isSponsorship);
-  const gasQuote = isErc20Paymaster ? gasQuoteUsdc : gasQuoteJpyc;
+  const gasQuote = useGasQuote(params.token);
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     presets[0] ?? null,
