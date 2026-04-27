@@ -14,7 +14,9 @@ import {
   type Address,
   type Hex,
 } from 'viem';
+import { useAccount } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
+import { assertGasCeiling } from '@/lib/gasCeiling';
 
 export type BatchPaymentParams = {
   tokenAddress: Address;
@@ -37,6 +39,7 @@ export type BatchPaymentResult = {
 
 export function useBatchPayment() {
   const { data: clients } = useSmartAccount();
+  const { chainId } = useAccount();
 
   return useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
     mutationFn: async (params) => {
@@ -53,6 +56,14 @@ export function useBatchPayment() {
         );
       }
       const { smartAccountClient, pimlicoClient } = clients;
+
+      // 赤字回避ガード: gas 価格がチェーン別上限を超えていれば送信前に弾く。
+      // フロア手数料 (15 JPYC / 0.2 USDC) では極端な spike を吸収できないため、
+      // ユーザに「ネットワーク混雑」エラーを返して再試行を促す方が損失より安全。
+      if (chainId !== undefined) {
+        const gasPrice = await pimlicoClient.getUserOperationGasPrice();
+        assertGasCeiling(chainId, gasPrice.fast.maxFeePerGas);
+      }
 
       const calls: Array<{ to: Address; data: Hex }> = [];
 

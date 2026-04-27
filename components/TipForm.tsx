@@ -11,6 +11,7 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { calcBreakdown } from '@/lib/fee';
 import { chainForToken } from '@/lib/chains';
 import { env } from '@/lib/env';
+import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
 import { getToken } from '@/lib/tokens';
 import { DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
@@ -80,8 +81,11 @@ export function TipForm({ params }: { params: TipParams }) {
     !insufficientBalance &&
     !gasless.isPending;
 
-  const error =
-    gasless.error?.message ?? (saError ? saError.message : null);
+  // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
+  // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
+  const error = isGasCongestedError(gasless.error)
+    ? t('errorGasCongested')
+    : (gasless.error?.message ?? (saError ? saError.message : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });

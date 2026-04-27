@@ -17,6 +17,7 @@ import {
 } from '@/lib/fee';
 import { chainForToken } from '@/lib/chains';
 import { env } from '@/lib/env';
+import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
 import { getToken } from '@/lib/tokens';
 import { parsePayParams, type PayParams } from '@/lib/url';
@@ -121,9 +122,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
     !insufficientBalance &&
     !flowPending;
 
-  const error =
-    (isDirect ? direct.error?.message : gasless.error?.message) ??
-    (!isDirect && saError ? saError.message : null);
+  // gas congested は gasless モード固有の早期 abort。i18n された案内文に
+  // 差し替え (direct モードは paymaster を経由しないため対象外)。
+  const flowError = isDirect ? direct.error : gasless.error;
+  const error = isGasCongestedError(flowError)
+    ? t('errorGasCongested')
+    : (flowError?.message ?? (!isDirect && saError ? saError.message : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });

@@ -25,6 +25,20 @@ function readAddress(name: string, fallback?: Address): Address | undefined {
   return getAddress(raw);
 }
 
+/** 正の整数として妥当か検証し、Number で返す。不正値は undefined + warn。 */
+function readPositiveInt(name: string): number | undefined {
+  const raw = read(name);
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    console.warn(
+      `[OpenPay] ${name} is not a positive integer ("${raw}"); falling back.`,
+    );
+    return undefined;
+  }
+  return n;
+}
+
 const networkEnvRaw = read('NEXT_PUBLIC_NETWORK_ENV') ?? 'testnet';
 if (networkEnvRaw !== 'mainnet' && networkEnvRaw !== 'testnet') {
   throw new Error(
@@ -61,6 +75,13 @@ export const env = {
   testnetTokenOverrides: {
     jpyc: readAddress('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS'),
     usdc: readAddress('NEXT_PUBLIC_USDC_TESTNET_ADDRESS'),
+  },
+  // チェーン別 gas price 上限の上書き (gwei、整数)。lib/gasCeiling.ts が
+  // 既定値とマージして使う。本番運用で Sentry の "gas_congested" 件数を見て
+  // 再デプロイなしで再調整できるようにするための knob。
+  gasCeilingGwei: {
+    polygon: readPositiveInt('NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI'),
+    base: readPositiveInt('NEXT_PUBLIC_GAS_CEILING_BASE_GWEI'),
   },
 } as const;
 

@@ -178,29 +178,29 @@ describe('PaymentForm — 金額の表示モード', () => {
 });
 
 describe('PaymentForm — 手数料明細', () => {
-  it('内税 (USDC, 100): merchant=99 / fee=1 / customer=100', () => {
+  it('内税 (USDC, 100): 1.2% → merchant=98.8 / fee=1.2 / customer=100', () => {
     setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=100`);
     render(<PaymentForm />);
-    // merchant=99 はユニーク, fee=1 はユニーク, customer=100 はヘッダと共通 → 2件
-    expect(screen.getByText('99 USDC')).toBeInTheDocument();
-    expect(screen.getByText('1 USDC')).toBeInTheDocument();
+    // merchant=98.8 はユニーク, fee=1.2 はユニーク, customer=100 はヘッダと共通 → 2件
+    expect(screen.getByText('98.8 USDC')).toBeInTheDocument();
+    expect(screen.getByText('1.2 USDC')).toBeInTheDocument();
     expect(screen.getAllByText('100 USDC').length).toBe(2);
   });
 
-  it('外税 (USDC, 100): merchant=100 / fee=1 / customer=101', () => {
+  it('外税 (USDC, 100): 1.2% → merchant=100 / fee=1.2 / customer=101.2', () => {
     setURL(`to=${MERCHANT}&token=usdc&fee=exclude&amount=100`);
     render(<PaymentForm />);
-    // header=100 + 明細merchant=100 → 2件, customer=101 はユニーク
+    // header=100 + 明細merchant=100 → 2件, customer=101.2 はユニーク
     expect(screen.getAllByText('100 USDC').length).toBe(2);
-    expect(screen.getByText('1 USDC')).toBeInTheDocument();
-    expect(screen.getByText('101 USDC')).toBeInTheDocument();
+    expect(screen.getByText('1.2 USDC')).toBeInTheDocument();
+    expect(screen.getByText('101.2 USDC')).toBeInTheDocument();
   });
 
-  it('内税 (USDC, 5): 1% < MIN なので fee=0.1, merchant=4.9', () => {
+  it('内税 (USDC, 5): 1.2% < MIN なので fee=0.2, merchant=4.8', () => {
     setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=5`);
     render(<PaymentForm />);
-    expect(screen.getByText('4.9 USDC')).toBeInTheDocument();
-    expect(screen.getByText('0.1 USDC')).toBeInTheDocument();
+    expect(screen.getByText('4.8 USDC')).toBeInTheDocument();
+    expect(screen.getByText('0.2 USDC')).toBeInTheDocument();
   });
 });
 
@@ -281,8 +281,8 @@ describe('PaymentForm — 送信フロー', () => {
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
     expect(call.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
-    expect(call.merchantAmount).toBe(99_000_000n); // 100 - 1 USDC
-    expect(call.feeAmount).toBe(1_000_000n);
+    expect(call.merchantAmount).toBe(98_800_000n); // 100 - 1.2 USDC
+    expect(call.feeAmount).toBe(1_200_000n);
     // FEE_RECEIVER は env 経由
     expect(call.feeReceiver.toLowerCase()).toBe(
       '0xdead000000000000000000000000000000001234',
@@ -302,10 +302,10 @@ describe('PaymentForm — 送信フロー', () => {
     setPayment('idle');
     render(<PaymentForm />);
 
-    await user.click(screen.getByRole('button', { name: /101 USDC を支払う/ }));
+    await user.click(screen.getByRole('button', { name: /101.2 USDC を支払う/ }));
     const call = mutate.mock.calls[0][0];
     expect(call.merchantAmount).toBe(100_000_000n);
-    expect(call.feeAmount).toBe(1_000_000n);
+    expect(call.feeAmount).toBe(1_200_000n);
   });
 
   it('据え置き QR (amount 無し) で顧客が金額入力 → mutate に反映', async () => {
@@ -321,8 +321,8 @@ describe('PaymentForm — 送信フロー', () => {
     await user.click(screen.getByRole('button', { name: /50 USDC を支払う/ }));
 
     const call = mutate.mock.calls[0][0];
-    expect(call.merchantAmount).toBe(49_500_000n); // 50 - 0.5 USDC (1%)
-    expect(call.feeAmount).toBe(500_000n);
+    expect(call.merchantAmount).toBe(49_400_000n); // 50 - 0.6 USDC (1.2%)
+    expect(call.feeAmount).toBe(600_000n);
   });
 
   it('送信中 → ボタンが「送信中…」かつ disabled', () => {
@@ -397,15 +397,15 @@ describe('PaymentForm — split (C1)', () => {
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
-    // primary (MERCHANT) gets remainder (50%) of distributable 99 USDC = 49.5
+    // primary (MERCHANT) gets remainder (50%) of distributable 98.8 USDC = 49.4
     expect(call.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
-    expect(call.merchantAmount).toBe(49_500_000n);
-    expect(call.feeAmount).toBe(1_000_000n);
+    expect(call.merchantAmount).toBe(49_400_000n);
+    expect(call.feeAmount).toBe(1_200_000n);
     expect(call.extraRecipients).toHaveLength(2);
     expect(call.extraRecipients[0].to.toLowerCase()).toBe(B.toLowerCase());
-    expect(call.extraRecipients[0].amount).toBe(29_700_000n);
+    expect(call.extraRecipients[0].amount).toBe(29_640_000n);
     expect(call.extraRecipients[1].to.toLowerCase()).toBe(C.toLowerCase());
-    expect(call.extraRecipients[1].amount).toBe(19_800_000n);
+    expect(call.extraRecipients[1].amount).toBe(19_760_000n);
   });
 });
 
