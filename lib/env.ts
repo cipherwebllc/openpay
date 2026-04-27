@@ -112,6 +112,13 @@ export const env = {
       process.env.NEXT_PUBLIC_GAS_CEILING_BASE_GWEI,
     ),
   },
+  // useGasQuoteUsdc が USDC 建て gas 見積に使う UserOp gas 単位の上限値 (整数)。
+  // 既定 500_000 は実機計測前の rough な worst-case 想定値。本番計測後にこの
+  // env で再デプロイなしで再調整できる。
+  gasQuoteOverheadUnits: parsePositiveInt(
+    'NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS',
+    process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS,
+  ),
 } as const;
 
 export const isMainnet = env.networkEnv === 'mainnet';

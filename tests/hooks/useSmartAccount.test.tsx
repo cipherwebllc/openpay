@@ -1,19 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { polygonAmoy, baseSepolia } from 'viem/chains';
 
 // 重要: この import が壊れていれば (permissionless の
 // `to7702SimpleSmartAccount` が消える等)、このテストファイル自体の
 // ロード時点で例外を投げて失敗するため、CI で即検出される。
 import { useSmartAccount } from '@/hooks/useSmartAccount';
-import { polygonAmoy } from 'viem/chains';
+import {
+  prepareUserOperationForErc20Paymaster,
+} from 'permissionless/experimental/pimlico';
 
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(),
   useWalletClient: vi.fn(),
   usePublicClient: vi.fn(),
 }));
+
+// queryFn 本体を実走行させるため、permissionless 側の重い処理 (Smart Account
+// 構築 / Pimlico bundler への http 通信) を mock する。テスト対象である
+// useSmartAccount のロジック (paymaster mode 分岐 / config 組み立て) は
+// 実コードを実行する。
+const stubAccount = { address: '0xS', entryPoint: { address: '0xEP', version: '0.7' } };
+const to7702SimpleSmartAccount = vi.fn(async (_args: unknown) => stubAccount);
+vi.mock('permissionless/accounts', () => ({
+  to7702SimpleSmartAccount: (args: unknown) => to7702SimpleSmartAccount(args),
+}));
+
+// createSmartAccountClient の引数を inspection したいので、引数を保存する
+// pass-through な mock として定義する。
+let lastSAConfig: unknown = undefined;
+const createSmartAccountClient = vi.fn((cfg) => {
+  lastSAConfig = cfg;
+  return { _stub: 'smartAccountClient' };
+});
+vi.mock('permissionless', () => ({
+  createSmartAccountClient: (cfg: unknown) => createSmartAccountClient(cfg),
+}));
+
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { mockHook } from '../_helpers/wagmiMock';
 
@@ -28,6 +53,7 @@ function makeWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  lastSAConfig = undefined;
 });
 
 describe('useSmartAccount (smoke / boundary)', () => {
@@ -48,6 +74,8 @@ describe('useSmartAccount (smoke / boundary)', () => {
     });
     expect(result.current.data).toBeUndefined();
     expect(result.current.fetchStatus).toBe('idle');
+    expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
+    expect(createSmartAccountClient).not.toHaveBeenCalled();
   });
 
   it('対応外 chainId (ethereum mainnet=1): 無効化', () => {
@@ -108,7 +136,146 @@ describe('useSmartAccount (smoke / boundary)', () => {
     });
     expect(result.current.fetchStatus).toBe('idle');
   });
+});
 
-  // queryFn 本体 (to7702SimpleSmartAccount → createSmartAccountClient) を
-  // モックしきると実コード検証にならない。実走行は e2e (README 参照) で行う。
+describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () => {
+  // permissionless の experimental API が import 解決時にクラッシュしないこと自体が
+  // ERC20 Paymaster 機能の前提条件。型チェックでは検出できない runtime の健全性。
+  it('prepareUserOperationForErc20Paymaster は import 解決後に関数を返す', () => {
+    expect(prepareUserOperationForErc20Paymaster).toBeTypeOf('function');
+    const stubPimlicoClient = {} as unknown as Parameters<
+      typeof prepareUserOperationForErc20Paymaster
+    >[0];
+    const inner = prepareUserOperationForErc20Paymaster(stubPimlicoClient);
+    expect(inner).toBeTypeOf('function');
+  });
+
+  it('JPYC (sponsorship): createSmartAccountClient に sponsorship context が渡り prepareUserOperation hook は undefined', async () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, {});
+
+    const { result } = renderHook(() => useSmartAccount('jpyc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    expect(to7702SimpleSmartAccount).toHaveBeenCalledOnce();
+    expect(createSmartAccountClient).toHaveBeenCalledOnce();
+
+    const cfg = lastSAConfig as {
+      paymasterContext: unknown;
+      paymaster: unknown;
+      userOperation: { prepareUserOperation: unknown };
+    };
+    expect(cfg.paymasterContext).toEqual({ sponsorshipPolicyId: 'sp_test' });
+    // sponsorship では permissionless の prepareUserOperation 拡張は使わない (default)
+    expect(cfg.userOperation.prepareUserOperation).toBeUndefined();
+
+    // 戻り値構造の検証
+    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+    expect(result.current.data!.smartAccountClient).toBeDefined();
+    expect(result.current.data!.pimlicoClient).toBeDefined();
+  });
+
+  it('USDC (testnet → sponsorship フォールバック): JPYC と同じく sponsorship 経路', async () => {
+    // vitest は NEXT_PUBLIC_NETWORK_ENV=testnet で動くので USDC でも sponsorship に倒れる
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: baseSepolia.id,
+    });
+    mockHook(useWalletClient, { data: { chain: baseSepolia } });
+    mockHook(usePublicClient, {});
+
+    const { result } = renderHook(() => useSmartAccount('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    const cfg = lastSAConfig as {
+      paymasterContext: unknown;
+      userOperation: { prepareUserOperation: unknown };
+    };
+    expect(cfg.paymasterContext).toEqual({ sponsorshipPolicyId: 'sp_test' });
+    expect(cfg.userOperation.prepareUserOperation).toBeUndefined();
+    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+  });
+
+  it('queryKey が token を含む → 異なる token は異なるクエリとして共存', async () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, {});
+
+    const { result: jpyc } = renderHook(() => useSmartAccount('jpyc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(jpyc.current.data).toBeDefined());
+
+    const callsAfterJpyc = createSmartAccountClient.mock.calls.length;
+    expect(callsAfterJpyc).toBe(1);
+
+    // 同じ wrapper で usdc を mount すると別 queryKey なので新規 fetch
+    const { result: usdc } = renderHook(() => useSmartAccount('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(usdc.current.data).toBeDefined());
+    expect(createSmartAccountClient.mock.calls.length).toBeGreaterThan(
+      callsAfterJpyc,
+    );
+  });
+});
+
+describe('useSmartAccount (queryFn 実走行: ERC20 mode @ mainnet)', () => {
+  // mainnet 切替えのため process.env を一時的に書き換え + モジュール再読込
+  it('USDC mainnet: ERC20 paymaster context (token) + prepareUserOperation hook が設定される', async () => {
+    const ORIGINAL_ENV = { ...process.env };
+    try {
+      vi.resetModules();
+      process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+      process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+
+      // 再 import で env が再評価される。permissionless 側 mock は vi.mock の
+      // hoisting で維持される。
+      const { useSmartAccount: hookFresh } = await import(
+        '@/hooks/useSmartAccount'
+      );
+      const { base: baseChain } = await import('viem/chains');
+
+      mockHook(useAccount, {
+        address: '0x1111111111111111111111111111111111111111',
+        chainId: baseChain.id,
+      });
+      mockHook(useWalletClient, { data: { chain: baseChain } });
+      mockHook(usePublicClient, {});
+
+      const { result } = renderHook(() => hookFresh('usdc'), {
+        wrapper: makeWrapper(),
+      });
+      await waitFor(() => expect(result.current.data).toBeDefined());
+
+      const cfg = lastSAConfig as {
+        paymasterContext: unknown;
+        userOperation: { prepareUserOperation: unknown };
+      };
+      // ERC20 mode の context は { token: <USDC アドレス> }
+      expect(cfg.paymasterContext).toMatchObject({
+        token: expect.stringMatching(/^0x[a-fA-F0-9]{40}$/),
+      });
+      expect((cfg.paymasterContext as { token: string }).token.toLowerCase()).toBe(
+        '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      );
+      // prepareUserOperation hook が関数として注入されている
+      expect(cfg.userOperation.prepareUserOperation).toBeTypeOf('function');
+      expect(result.current.data!.paymasterMode).toBe('erc20');
+    } finally {
+      process.env = { ...ORIGINAL_ENV };
+      vi.resetModules();
+    }
+  });
 });

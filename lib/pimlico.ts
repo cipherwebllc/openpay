@@ -6,8 +6,8 @@
 //   - USDC (Base):    ERC20 Paymaster
 //       顧客が USDC でガスを支払う (Base ETH 立替えの赤字リスク回避)
 //
-// testnet (Base Sepolia) では Pimlico の ERC20 Paymaster が未対応のため、
-// USDC でも Sponsorship にフォールバックする。
+// testnet (Base Sepolia) では USDC でも sponsorship に倒す運用判断。
+// 動作確認時に testnet ETH + USDC の両方を用意する手間を省くため。
 import { http } from 'viem';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { entryPoint07Address } from 'viem/account-abstraction';
@@ -33,8 +33,8 @@ export function createPimlico(chainId: number) {
 /** token と現在のネットワーク (mainnet/testnet) から paymaster mode を決定 */
 export function resolvePaymasterMode(token: TokenSymbol): PaymasterMode {
   const declared = TOKENS[token].paymasterMode;
-  // ERC20 Paymaster は Pimlico の対応上 mainnet 限定。
-  // testnet では sponsorship にフォールバックして開発者が動作確認できるようにする。
+  // testnet では erc20 → sponsorship に倒す。動作確認時に testnet 用の
+  // ETH + USDC の両方を用意せずに済ませる運用判断。
   if (declared === 'erc20' && !isMainnet) return 'sponsorship';
   return declared;
 }

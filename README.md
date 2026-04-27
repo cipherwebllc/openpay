@@ -4,7 +4,8 @@
 ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base)** で決済できます。
 
 - **JPYC (Polygon)**: 運営が POL ガスを肩代わり (Sponsorship Paymaster)
-- **USDC (Base)**: 顧客が USDC のままガスを支払い (ERC20 Paymaster)。運営の ETH 立替えなし
+- **USDC (Base mainnet)**: 顧客が USDC のままガスを支払い (ERC20 Paymaster)。運営の ETH 立替えなし
+- **testnet (Base Sepolia / Polygon Amoy)**: USDC も sponsorship を使用 (顧客の testnet 用 ETH 入手の手間を省くための運用判断)
 
 - `/{locale}` — 店舗向け QR ジェネレーター + クリエイター向け Tip widget 埋め込みコード生成 (タブ切替)
 - `/{locale}/pay?to=...&token=...&fee=...&amount=...&split=0xB:30,0xC:20` — QR をスキャンした顧客の決済画面 (`split=` で複数受取人へ % 分配可能)
@@ -121,7 +122,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 1. ガス代は **顧客が USDC のままで支払う**ため、運営は ETH を立替えない (Sponsorship Paymaster と異なり残高補充の運用が要らない)
 2. 内部実装は Pimlico の **ERC20 Paymaster** + permissionless `prepareUserOperationForErc20Paymaster` を使用。UserOp の calls 先頭に paymaster コントラクトへの USDC `approve` が自動注入される (既に十分な allowance がある場合はスキップ)
 3. 顧客が UI で見る支払額は `決済額 + 運営手数料 + ガス代見積 (USDC 建て)`。ガス代は worst-case 見積で表示し、実費が下回れば超過分は引き落とされない
-4. testnet (Base Sepolia) では Pimlico の ERC20 Paymaster が未対応のため、**自動的に Sponsorship Paymaster にフォールバック**する (`lib/pimlico.ts:resolvePaymasterMode`)。テスト環境でも顧客は ETH 不要
+4. testnet (Base Sepolia) では USDC でも **自動的に Sponsorship Paymaster にフォールバック**する (`lib/pimlico.ts:resolvePaymasterMode`)。これは顧客が testnet 用 USDC + ETH を両方用意せずに動作確認できるようにする運用判断 (Pimlico 側の対応状況とは独立した本リポジトリの仕様)
 
 ### 将来の拡張余地
 
@@ -262,6 +263,7 @@ npm install -D \
 | `NEXT_PUBLIC_*_TESTNET_ADDRESS` | × | testnet で独自に発行した ERC20 を指定する場合に上書き |
 | `NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI` | × | Polygon mainnet の `maxFeePerGas` 上限 (gwei、整数)。既定 200。Sentry の `gas_congested` 件数を見て調整 |
 | `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` | × | Base mainnet の `maxFeePerGas` 上限 (gwei、整数)。既定 1。L2 のみで判定 (L1 calldata は別軸監視) |
+| `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` | × | USDC ERC20 Paymaster の「最大ガス代」見積に使う UserOp gas 単位 (整数)。既定 500_000 は実機計測前の rough な値、本番計測後に調整 |
 
 ### 3. Pimlico ダッシュボード設定
 
@@ -336,11 +338,12 @@ Tip widget の手数料は **外税** 固定 (JPYC 1.0% / USDC 1.2%)。クリエ
 | 内税 (`fee=include`) | `amount` | `amount - fee` | `fee` |
 | 外税 (`fee=exclude`) | `amount + fee` | `amount` | `fee` |
 
-### Gas price ceiling (赤字回避ガード)
+### Gas price ceiling (混雑時の安全弁)
 
-`lib/gasCeiling.ts` で UserOp 送信前の `maxFeePerGas` をチェーン別に上限判定し、超過していれば `GasCongestedError` を投げてユーザに「ネットワーク混雑」エラーを返します。フロア手数料 (15 JPYC) では極端な gas spike を吸収できないため、送信前に弾く方が損失より安全という判断。
+`lib/gasCeiling.ts` で UserOp 送信前の `maxFeePerGas` をチェーン別に上限判定し、超過していれば `GasCongestedError` を投げてユーザに「ネットワーク混雑」エラーを返します。**両 paymaster mode で適用** (`useBatchPayment.ts`):
 
-**適用対象は Sponsorship Paymaster mode のみ** (= JPYC、および testnet にフォールバックされた USDC)。USDC mainnet の ERC20 Paymaster mode では顧客自身が gas を支払うので運営の赤字保護は不要 — チェック自体をスキップする (`useBatchPayment.ts`)。
+- **Sponsorship mode (JPYC)**: 運営の赤字回避。フロア手数料 (15 JPYC) では極端な gas spike を吸収できないため、送信前に弾く方が損失より安全。
+- **ERC20 Paymaster mode (USDC)**: 顧客の USDC 出費の上限保護。Base 1 gwei (既定 ceiling) で gas は約 1.6 USDC、これを超える spike は USDC 換算で高額になるため送信前に弾く。
 
 | チェーン | 既定上限 | env 上書き |
 | --- | --- | --- |

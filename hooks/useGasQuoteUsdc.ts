@@ -6,18 +6,22 @@
 //   maxCostInToken = (userOperationMaxGas + postOpGas) * maxFeePerGas
 //                    * exchangeRate / 1e18
 //
-// gas 単位は worst-case 上限値で固定 (実費はこれ以下、UI に「最大 X USDC」と表示)。
+// gas 単位は実機計測前の rough な worst-case 想定値で固定 (実費はこれ以下、
+// UI に「最大 X USDC」と表示)。本番計測後に NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS
+// で再デプロイなしで再調整できる。
 // sponsorship に解決される場合 (JPYC / testnet) は enabled=false で no-op。
 
 import { useQuery } from '@tanstack/react-query';
 import { chainForToken } from '@/lib/chains';
+import { env } from '@/lib/env';
 import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 
-// 概算: callGas(150k) + verification(70k) + preVerification(80k)
-//     + paymasterVerification(30k) + paymasterPostOp(70k) + buffer(100k) ≒ 500k
-// 実際の prepareUserOperation 値 (250k〜350k) に 30〜50% のバッファを乗せた防御値。
-const ESTIMATED_USEROP_GAS_UNITS = 500_000n;
+// rough な worst-case 想定。実機計測前なので具体的な内訳の根拠はない。
+// 実費が下回れば paymaster 側で超過分は引かれない。値が小さすぎて approve
+// allowance が不足すると userOp が postOp で revert するため、本番計測後に
+// NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS で安全側に再調整すること。
+const DEFAULT_USEROP_GAS_UNITS = 500_000n;
 
 export type GasQuoteUsdc = {
   /** 見積 gas 量 (USDC 建て、token decimals 適用済) */
@@ -60,7 +64,11 @@ export function useGasQuoteUsdc(token: TokenSymbol, enabled: boolean = true) {
       }
       const { exchangeRate, postOpGas } = quotes[0];
       const maxFeePerGas = gasPrice.fast.maxFeePerGas;
-      const totalGas = ESTIMATED_USEROP_GAS_UNITS + postOpGas;
+      const overhead =
+        env.gasQuoteOverheadUnits !== undefined
+          ? BigInt(env.gasQuoteOverheadUnits)
+          : DEFAULT_USEROP_GAS_UNITS;
+      const totalGas = overhead + postOpGas;
       // exchangeRate は 1e18 スケールの token / native 比
       const gasAmount = (totalGas * maxFeePerGas * exchangeRate) / 10n ** 18n;
       return { gasAmount, exchangeRate, maxFeePerGas };

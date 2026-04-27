@@ -368,8 +368,29 @@ describe('useBatchPayment', () => {
       expect(sendUserOperation).not.toHaveBeenCalled();
     });
 
-    it('erc20 mode → 上限超過でも skip して送信進行 (顧客が gas を払うので運営保護不要)', async () => {
-      // sponsorship mode なら fail する 1500 gwei でも、erc20 mode では send 進む
+    it('erc20 mode + 上限以下 → 通常通り送信 (顧客の USDC 出費保護のため check は実行)', async () => {
+      mountReady({
+        maxFeePerGas: 50n * GWEI,
+        chainId: baseSepolia.id,
+        paymasterMode: 'erc20',
+      });
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1_000_000n,
+      });
+
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+      expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
+    });
+
+    it('erc20 mode + 上限超過 → GasCongestedError (顧客が高額 USDC を払う事故を防ぐ)', async () => {
       mountReady({
         maxFeePerGas: 1500n * GWEI,
         chainId: baseSepolia.id,
@@ -387,9 +408,9 @@ describe('useBatchPayment', () => {
         feeAmount: 1_000_000n,
       });
 
-      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
-      // erc20 mode では gas price 取得自体スキップ
-      expect(getUserOperationGasPrice).not.toHaveBeenCalled();
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error).toBeInstanceOf(GasCongestedError);
+      expect(sendUserOperation).not.toHaveBeenCalled();
     });
 
     it('chainId が undefined (ウォレット未接続相当) → ガード skip して送信進行', async () => {

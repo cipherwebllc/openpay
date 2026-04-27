@@ -277,6 +277,49 @@ describe('useGasQuoteUsdc', () => {
     expect(result.current.data!.gasAmount).toBe(500_000n * 10n ** 24n);
   });
 
+  it('NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS で gas 単位を override できる', async () => {
+    const ORIGINAL_ENV = { ...process.env };
+    try {
+      vi.resetModules();
+      process.env.NEXT_PUBLIC_NETWORK_ENV = 'testnet';
+      process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+      process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS = '300000'; // 既定 500_000 から下げる
+
+      // env を再評価するため hook を再 import
+      const { useGasQuoteUsdc: hookFresh } = await import(
+        '@/hooks/useGasQuoteUsdc'
+      );
+      // mock は保持される
+      vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+      getTokenQuotes.mockResolvedValue([
+        {
+          paymaster: '0xpaymaster',
+          token: '0xusdc',
+          postOpGas: 0n,
+          exchangeRate: 10n ** 18n,
+          exchangeRateNativeToUsd: 3000n * 10n ** 6n,
+        },
+      ]);
+      getUserOperationGasPrice.mockResolvedValue({
+        slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+        standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+        fast: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n },
+      });
+
+      const { result } = renderHook(() => hookFresh('usdc'), {
+        wrapper: makeWrapper(),
+      });
+      await waitFor(() => expect(result.current.data).toBeDefined());
+
+      // override 値 (300_000) が使われ、500_000 ではないこと
+      // gasAmount = (300_000 + 0) * 2 * 1e18 / 1e18 = 600_000
+      expect(result.current.data!.gasAmount).toBe(600_000n);
+    } finally {
+      process.env = { ...ORIGINAL_ENV };
+      vi.resetModules();
+    }
+  });
+
   it('queryKey は token chainId / address ベース → 同じ token で再 mount してもキャッシュ共有', async () => {
     vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
     getTokenQuotes.mockResolvedValue([

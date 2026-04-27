@@ -3,12 +3,15 @@
 // 店主送金 + 運営手数料の N 件 ERC20 transfer を 1 UserOp にバッチ化し、
 // 片方だけ成功する中間状態を排除する。
 //
-// feeAmount > 0 を必須化: sponsorship mode では Pimlico Policy の濫用防御
-// (フォーク版で fee を 0 にして無料 sponsor を狙うのを防ぐ)、erc20 mode では
-// 運営収益の確保のため。defense in depth として両 mode で assertion する。
+// feeAmount > 0 を必須化:
+//   - sponsorship mode: Pimlico Policy の濫用防御 (フォーク版で fee=0 改竄を防止)
+//   - erc20 mode: 運営収益の確保
+// defense in depth として両 mode で assertion する。
 //
-// gas ceiling は sponsorship mode のみ適用 — erc20 mode は顧客が gas を払うので
-// 運営保護の意味なし (顧客残高は UI 側で検証する)。
+// gas ceiling は **両 mode で適用**:
+//   - sponsorship mode: 運営の赤字回避 (フロア手数料が gas spike を吸収できない)
+//   - erc20 mode: 顧客の USDC 出費上限の保護 (Base 1 gwei = 約 1.6 USDC、
+//     spike 時の高額決済を防ぐ)
 import { useMutation } from '@tanstack/react-query';
 import {
   encodeFunctionData,
@@ -58,11 +61,11 @@ export function useBatchPayment(token: TokenSymbol) {
           'feeAmount > 0 が必須です (運営収益確保 / sponsorship 濫用防御)',
         );
       }
-      const { smartAccountClient, pimlicoClient, paymasterMode } = clients;
+      const { smartAccountClient, pimlicoClient } = clients;
 
-      // sponsorship mode のみ赤字回避ガードを適用 (フロア手数料では極端な
-      // gas spike を吸収できない)。erc20 mode は顧客が gas を払う。
-      if (paymasterMode === 'sponsorship' && chainId !== undefined) {
+      // gas ceiling は両 mode で適用。sponsorship では運営赤字回避、erc20 では
+      // 顧客の USDC 出費上限の保護として機能する (どちらも UX 上の安全弁)。
+      if (chainId !== undefined) {
         const gasPrice = await pimlicoClient.getUserOperationGasPrice();
         assertGasCeiling(chainId, gasPrice.fast.maxFeePerGas);
       }
