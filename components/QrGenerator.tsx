@@ -9,6 +9,7 @@ import { Field } from './Field';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import {
   buildPayUrl,
+  DECIMAL_PATTERN,
   parseSplitDrafts,
   SPLIT_MAX_ENTRIES,
   type PayParams,
@@ -56,7 +57,7 @@ export function QrGenerator() {
   const receiverValid = effectiveReceiver !== null;
   const amountValid =
     mode === 'static' ||
-    (mode === 'amount' && /^\d+(\.\d+)?$/.test(amount) && Number(amount) > 0);
+    (mode === 'amount' && DECIMAL_PATTERN.test(amount) && Number(amount) > 0);
   const payMode: PayMode = settings.directTransfer ? 'direct' : 'gasless';
 
   // direct mode では split は無視する (PaymentForm 側でも無視するので URL に

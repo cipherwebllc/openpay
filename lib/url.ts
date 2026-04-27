@@ -236,8 +236,8 @@ const TIP_NAME_MAX = 60;
 const TIP_MESSAGE_MAX = 200;
 const TIP_THANKS_MAX = 200;
 const TIP_PRESET_MAX = 6;
-const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
-const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
+export const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+export const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
 // http/https のみ許可。URL.canParse を使うので try/catch 不要。
 // localhost / 127.0.0.1 は webhook テスト用途で許可するが、本番では
 // クリエイターが制御していない URL を貼ると意図しない POST 先になり得る点に注意。

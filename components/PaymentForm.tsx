@@ -22,7 +22,7 @@ import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { getToken } from '@/lib/tokens';
-import { parsePayParams, type PayParams } from '@/lib/url';
+import { DECIMAL_PATTERN, parsePayParams, type PayParams } from '@/lib/url';
 import { shortAddress } from '@/lib/format';
 
 export function PaymentForm() {
@@ -70,7 +70,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const amountStr = isFixed ? fixedAmount : inputAmount;
 
   const amountWei = useMemo(() => {
-    if (!amountStr || !/^\d+(\.\d+)?$/.test(amountStr)) return 0n;
+    if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
     return parseUnits(amountStr, token.decimals);
   }, [amountStr, token.decimals]);
 

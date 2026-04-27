@@ -16,10 +16,9 @@ import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { getToken } from '@/lib/tokens';
-import { DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
+import { DECIMAL_PATTERN, DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
-const AMOUNT_PATTERN = /^\d+(\.\d+)?$/;
 
 export function TipForm({ params }: { params: TipParams }) {
   const t = useTranslations('TipForm');
@@ -48,7 +47,7 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
   const amountWei = useMemo(() => {
-    if (!amountStr || !AMOUNT_PATTERN.test(amountStr)) return 0n;
+    if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
     return parseUnits(amountStr, token.decimals);
   }, [amountStr, token.decimals]);
 

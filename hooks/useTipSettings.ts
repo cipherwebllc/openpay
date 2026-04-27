@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { safeGet, safeSet } from '@/lib/storage';
 import type { TokenSymbol } from '@/lib/tokens';
+import { COLOR_PATTERN } from '@/lib/url';
 
 export type TipSettings = {
   receiver: string;
@@ -47,7 +48,7 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
         ? loaded.message
         : DEFAULT_SETTINGS.message,
     color:
-      typeof loaded.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(loaded.color)
+      typeof loaded.color === 'string' && COLOR_PATTERN.test(loaded.color)
         ? loaded.color.toLowerCase()
         : DEFAULT_SETTINGS.color,
     presets:

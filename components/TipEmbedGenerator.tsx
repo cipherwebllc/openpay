@@ -10,12 +10,12 @@ import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import { isLikelyName } from '@/lib/nameDetection';
 import {
   buildTipUrl,
+  COLOR_PATTERN,
+  DECIMAL_PATTERN,
   DEFAULT_TIP_PRESETS,
   type TipParams,
 } from '@/lib/url';
 
-const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
-const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 
