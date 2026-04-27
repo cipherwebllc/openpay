@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { erc20Abi, formatUnits, parseUnits } from 'viem';
+import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { Row } from './Row';
@@ -17,6 +17,7 @@ import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { getToken } from '@/lib/tokens';
 import { DECIMAL_PATTERN, DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
+import { formatTokenAmount } from '@/lib/format';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 
@@ -53,9 +54,8 @@ export function TipForm({ params }: { params: TipParams }) {
     return parseUnits(amountStr, token.decimals);
   }, [amountStr, token.decimals]);
 
-  // tip: 運営手数料は preset から控除 (creator 受取 = preset - fee)、ファンが gas を上乗せ支払い。
-  // Tip widget は gas=customer 固定 (preset セマンティクス維持: creator は preset - fee を受け取り、
-  // ファンは preset + gas を支払う)。
+  // Tip widget は gas=customer 固定 (preset セマンティクス維持):
+  // creator は preset - fee を受け取り、ファンは preset + gas を支払う。
   const gasAmount = gasQuote.data?.gasAmount;
   const breakdown = useMemo(
     () => calcBreakdown(amountWei, params.token, 'customer', gasAmount ?? 0n),
@@ -68,8 +68,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const totalCustomerOutflow = breakdown.customerPays;
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
-  const fmt = (wei: bigint) =>
-    `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
+  const fmt = (wei: bigint) => formatTokenAmount(wei, token);
 
   const balanceQuery = useReadContract({
     address: token.address,

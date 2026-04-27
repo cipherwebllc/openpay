@@ -8,7 +8,7 @@
 //
 // testnet (Base Sepolia) では USDC でも sponsorship に倒す運用判断。
 // 動作確認時に testnet ETH + USDC の両方を用意する手間を省くため。
-import { http } from 'viem';
+import { http, type Address } from 'viem';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { entryPoint07Address } from 'viem/account-abstraction';
 import { env, isMainnet } from './env';
@@ -44,7 +44,7 @@ export function pimlicoPaymasterContext(
   token: TokenSymbol,
 ):
   | { sponsorshipPolicyId: string }
-  | { token: `0x${string}` }
+  | { token: Address }
   | undefined {
   if (resolvePaymasterMode(token) === 'erc20') {
     return { token: TOKENS[token].address };

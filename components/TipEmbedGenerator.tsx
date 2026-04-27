@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { isAddress, getAddress, type Address } from 'viem';
+import { type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import { isLikelyName } from '@/lib/nameDetection';
+import { pickEffectiveAddress } from '@/lib/format';
 import {
   buildTipUrl,
   COLOR_PATTERN,
@@ -35,11 +36,10 @@ export function TipEmbedGenerator() {
     }
   }, []);
 
-  const effectiveReceiver: Address | null = useMemo(() => {
-    if (isAddress(settings.receiver)) return getAddress(settings.receiver);
-    if (resolvedReceiver) return resolvedReceiver;
-    return null;
-  }, [settings.receiver, resolvedReceiver]);
+  const effectiveReceiver = useMemo(
+    () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
+    [settings.receiver, resolvedReceiver],
+  );
 
   const colorValid = COLOR_PATTERN.test(settings.color);
   const presetsParsed = useMemo(() => {

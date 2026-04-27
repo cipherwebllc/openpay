@@ -342,7 +342,7 @@ describe('PaymentForm — 送信フロー', () => {
     await user.click(screen.getByRole('button', { name: /50 USDC を支払う/ }));
 
     const call = mutate.mock.calls[0][0];
-    // 新モデル: merchant = 50 - 0.5 = 49.5
+    // merchant = 50 - 0.5 = 49.5
     expect(call.merchantAmount).toBe(49_500_000n);
     expect(call.feeAmount).toBe(500_000n);
   });
@@ -435,7 +435,7 @@ describe('PaymentForm — split (C1)', () => {
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
-    // 新モデル default: distributable = amount - fee = 99 USDC, primary (MERCHANT) 50% = 49.5
+    // distributable = amount - fee = 99 USDC, primary (MERCHANT) 50% = 49.5
     expect(call.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
     expect(call.merchantAmount).toBe(49_500_000n);
     expect(call.feeAmount).toBe(1_000_000n);
@@ -571,7 +571,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
       ),
     ).toBe(true);
     expect(screen.getByText(/最大 0\.5 USDC/)).toBeInTheDocument();
-    // 新モデル default: customer = amount + gas = 100 + 0.5 = 100.5 (運営手数料は merchant 控除で隠れる)
+    // customer = amount + gas = 100 + 0.5 = 100.5 (運営手数料は merchant 控除で隠れる)
     expect(screen.getByText('100.5 USDC')).toBeInTheDocument();
   });
 
@@ -589,7 +589,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     ).toBeDisabled();
   });
 
-  it('JPYC sponsorship mode でも gas 行が表示される (新モデル: 全 token で gas 別建て)', () => {
+  it('JPYC sponsorship mode でも gas 行が表示される', () => {
     setURL(`to=${MERCHANT}&token=jpyc&amount=1000`);
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(2000n * 10n ** 18n);
@@ -631,7 +631,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
-    // 新モデル: merchant = amount - fee = 99 USDC (運営手数料を merchant 控除)
+    // merchant = amount - fee = 99 USDC (運営手数料を merchant 控除)
     expect(call.merchantAmount).toBe(99_000_000n);
     expect(call.feeAmount).toBe(1_000_000n); // ERC20 paymaster: gas は paymaster 経由
     expect(call.extraRecipients).toBeUndefined();
@@ -660,7 +660,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
   it('境界: 残高 = 必要額 ちょうど → 支払い可能 (insufficient ではない)', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=100`);
     setAccount({ connected: true, chainId: baseSepolia.id });
-    // 新モデル: customer = 100 + 0.5 = 100.5 USDC ぴったり
+    // customer = 100 + 0.5 = 100.5 USDC ぴったり
     setBalance(100_500_000n);
     setSmartAccount(true);
     setGasQuote('ready', 500_000n);
@@ -702,8 +702,6 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
   });
 
   it('ERC20 mode で GasCongestedError → 生メッセージではなく i18n 案内が表示される', async () => {
-    // LARP-4 修正で gas ceiling を ERC20 mode でも適用するようにしたが、UI 側の
-    // isGasCongestedError 判定が ERC20 経路でも i18n 案内に切替わるかを検証する。
     const { GasCongestedError } = await import('@/lib/gasCeiling');
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
@@ -776,7 +774,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
       screen.getByRole('button', { name: /100\.5 USDC を支払う/ }),
     );
     const call = mutate.mock.calls[0][0];
-    // 新モデル: distributable = amount - fee = 99 USDC, primary 70% = 69.3, B 30% = 29.7
+    // distributable = amount - fee = 99 USDC, primary 70% = 69.3, B 30% = 29.7
     expect(call.merchantAmount).toBe(69_300_000n);
     expect(call.extraRecipients[0].to.toLowerCase()).toBe(B.toLowerCase());
     expect(call.extraRecipients[0].amount).toBe(29_700_000n);
@@ -883,7 +881,7 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     setSmartAccount(true);
     setGasQuote('ready', 0n);
     render(<PaymentForm />);
-    // 新モデル default: customer = amount + gas = 100 + 0 = 100 (運営手数料は merchant 控除で隠れる)
+    // customer = amount + gas = 100 + 0 = 100 (運営手数料は merchant 控除で隠れる)
     expect(
       screen.getByRole('button', { name: /100 USDC を支払う/ }),
     ).not.toBeDisabled();

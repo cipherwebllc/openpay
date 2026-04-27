@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { erc20Abi, formatUnits, parseUnits } from 'viem';
+import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { Row } from './Row';
@@ -23,7 +23,7 @@ import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { getToken } from '@/lib/tokens';
 import { DECIMAL_PATTERN, parsePayParams, type PayParams } from '@/lib/url';
-import { shortAddress } from '@/lib/format';
+import { formatTokenAmount, shortAddress } from '@/lib/format';
 
 export function PaymentForm() {
   const search = useSearchParams();
@@ -75,9 +75,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     return parseUnits(amountStr, token.decimals);
   }, [amountStr, token.decimals]);
 
-  // token の decimals と displaySymbol を毎回書くのを避ける。
-  const fmt = (wei: bigint) =>
-    `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
+  const fmt = (wei: bigint) => formatTokenAmount(wei, token);
 
   const isMerchantGas = !isDirect && params.gas === 'merchant';
 

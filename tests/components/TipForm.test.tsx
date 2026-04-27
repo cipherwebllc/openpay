@@ -254,7 +254,7 @@ describe('TipForm — 接続状態', () => {
     setSmartAccount(true);
     setGasQuote('ready', 0n);
     render(<TipForm params={USDC_PARAMS} />);
-    // 既定 preset 1 USDC, gas=0 → fan pays 1 USDC (新モデル: customer は amount + gas のみ)
+    // 既定 preset 1 USDC, gas=0 → fan pays 1 USDC
     expect(
       screen.getByRole('button', { name: /1 USDC を送る/ }),
     ).not.toBeDisabled();
@@ -298,7 +298,7 @@ describe('TipForm — 送信', () => {
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
     expect(call.merchant.toLowerCase()).toBe(CREATOR.toLowerCase());
-    // 新モデル: creator = preset - fee = 5 - 0.05 = 4.95、fee 0.05 (MIN)、gas 0
+    // creator = preset - fee = 5 - 0.05 = 4.95、fee 0.05 (MIN)、gas 0
     expect(call.merchantAmount).toBe(4_950_000n);
     expect(call.feeAmount).toBe(50_000n);
     expect(call.feeReceiver.toLowerCase()).toBe(
@@ -321,7 +321,7 @@ describe('TipForm — 送信', () => {
     await user.click(screen.getByRole('button', { name: /50 USDC を送る/ }));
 
     const call = mutate.mock.calls[0][0];
-    // 新モデル: creator = 50 - 0.5 = 49.5
+    // creator = 50 - 0.5 = 49.5
     expect(call.merchantAmount).toBe(49_500_000n);
     expect(call.feeAmount).toBe(500_000n);
   });
@@ -474,7 +474,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('ready', 300_000n); // 0.3 USDC
     render(<TipForm params={USDC_PARAMS} />);
 
-    // 新モデル: preset 1 USDC, fee=0.05, creator=0.95, gas=0.3, customer = 1.3 (= preset + gas)
+    // preset 1 USDC, fee=0.05, creator=0.95, gas=0.3, customer = 1.3 (= preset + gas)
     expectBreakdownRow('クリエイター受取', '0.95 USDC');
     expectBreakdownRow(/運営手数料/, '0.05 USDC');
     expectBreakdownRow(/ネットワーク手数料/, '最大 0.3 USDC');
@@ -505,7 +505,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     ).toBeInTheDocument();
   });
 
-  it('JPYC sponsorship mode でも gas 行が表示される (新モデル: 全 token で gas 別建て)', () => {
+  it('JPYC sponsorship mode でも gas 行が表示される', () => {
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(2000n * 10n ** 18n);
     setSmartAccount(true);
@@ -553,7 +553,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     );
 
     const call = mutate.mock.calls[0][0];
-    // 新モデル: creator = 5 - 0.05 = 4.95、fee 0.05、ERC20 なので feeAmount に gas 含めない
+    // creator = 5 - 0.05 = 4.95、fee 0.05、ERC20 なので feeAmount に gas 含めない
     expect(call.merchantAmount).toBe(4_950_000n);
     expect(call.feeAmount).toBe(50_000n);
     expect(call.extraRecipients).toBeUndefined();
@@ -577,7 +577,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
 
   it('境界: 残高 = 必要額 ちょうど → 送信可能', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
-    // 新モデル: customer = preset + gas = 1 + 0.3 = 1.3
+    // customer = preset + gas = 1 + 0.3 = 1.3
     setBalance(1_300_000n);
     setSmartAccount(true);
     setGasQuote('ready', 300_000n);
@@ -620,7 +620,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     const body = JSON.parse(
       (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
     );
-    // 新モデル: preset 1 USDC, gas 0.3 → customerPays = 1 + 0.3 = 1.3, merchant = 0.95, fee = 0.05
+    // preset 1 USDC, gas 0.3 → customerPays = 1.3, merchant = 0.95, fee = 0.05
     expect(body.customerPays).toBe('1300000');
     expect(body.merchantAmount).toBe('950000');
     expect(body.feeAmount).toBe('50000');

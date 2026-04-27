@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
-import { isAddress, getAddress, type Address } from 'viem';
+import { isAddress, type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useQrSettings } from '@/hooks/useQrSettings';
@@ -20,7 +20,7 @@ import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 import type { GasMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
-import { shortAddress } from '@/lib/format';
+import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 
 type Mode = 'amount' | 'static';
 
@@ -42,11 +42,10 @@ export function QrGenerator() {
     }
   }, []);
 
-  const effectiveReceiver: Address | null = useMemo(() => {
-    if (isAddress(settings.receiver)) return getAddress(settings.receiver);
-    if (resolvedReceiver) return resolvedReceiver;
-    return null;
-  }, [settings.receiver, resolvedReceiver]);
+  const effectiveReceiver = useMemo(
+    () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
+    [settings.receiver, resolvedReceiver],
+  );
 
   useEffect(() => {
     if (!hydrated || accordionInitialized) return;
