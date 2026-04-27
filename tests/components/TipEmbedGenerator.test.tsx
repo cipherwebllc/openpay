@@ -39,9 +39,9 @@ describe('TipEmbedGenerator — 初期表示', () => {
   it('既定 token (jpyc) のプリセットがプレビューに表示', async () => {
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
-    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('300 JPYC')).toBeInTheDocument();
     expect(screen.getByText('1000 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('3000 JPYC')).toBeInTheDocument();
   });
 });
 
@@ -97,10 +97,10 @@ describe('TipEmbedGenerator — URL / snippet 生成', () => {
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
     await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-    const presetInput = screen.getByPlaceholderText(/100,500,1000/);
-    await user.type(presetInput, '300,1500,5000');
+    const presetInput = screen.getByPlaceholderText(/300,1000,3000/);
+    await user.type(presetInput, '500,1500,5000');
 
-    await waitFor(() => expectInUrl(/preset=300%2C1500%2C5000/));
+    await waitFor(() => expectInUrl(/preset=500%2C1500%2C5000/));
   });
 
   it('プリセットに不正値 → 警告 + 既定値が使われる', async () => {
@@ -108,7 +108,7 @@ describe('TipEmbedGenerator — URL / snippet 生成', () => {
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
-    const presetInput = screen.getByPlaceholderText(/100,500,1000/);
+    const presetInput = screen.getByPlaceholderText(/300,1000,3000/);
     await user.type(presetInput, 'abc,xyz');
 
     await waitFor(() => {

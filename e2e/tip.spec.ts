@@ -7,11 +7,11 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await page.goto(`/ja/tip/${TO}?token=jpyc`);
     await expect(page.getByText('OpenPay Tip')).toBeVisible();
     // 既定 preset
-    await expect(page.getByRole('button', { name: '100 JPYC' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '500 JPYC' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
-    // 既定で先頭 preset (100) が選択 → 顧客支払 115 (MIN_FEE 15 上乗せ)
-    await expect(page.getByText('115 JPYC を送る')).toBeVisible();
+    await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
+    // 既定で先頭 preset (300) が選択 → 顧客支払 315 (MIN_FEE 15 上乗せ)
+    await expect(page.getByText('315 JPYC を送る')).toBeVisible();
   });
 
   test('全パラメータ付き URL → カスタム表示反映', async ({ page }) => {
@@ -24,11 +24,11 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '800 JPYC' })).toBeVisible();
   });
 
-  test('USDC + 既定 preset (1/5/10)', async ({ page }) => {
+  test('USDC + 既定 preset (5/20/50)', async ({ page }) => {
     await page.goto(`/ja/tip/${TO}?token=usdc`);
-    await expect(page.getByRole('button', { name: '1 USDC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '10 USDC' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '20 USDC' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '50 USDC' })).toBeVisible();
   });
 
   test('不正 URL (token なし) → エラー表示', async ({ page }) => {
@@ -40,6 +40,6 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await page.goto(`/en/tip/${TO}?token=jpyc`);
     await expect(page.getByText('OpenPay Tip')).toBeVisible();
     await expect(page.getByText(/Send a tip to the creator/)).toBeVisible();
-    await expect(page.getByText(/Send 115 JPYC/)).toBeVisible();
+    await expect(page.getByText(/Send 315 JPYC/)).toBeVisible();
   });
 });

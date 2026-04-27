@@ -457,11 +457,11 @@ describe('parseTipParams', () => {
 });
 
 describe('DEFAULT_TIP_PRESETS', () => {
-  it('JPYC は 100 / 500 / 1000', () => {
-    expect(DEFAULT_TIP_PRESETS.jpyc).toEqual(['100', '500', '1000']);
+  it('JPYC は 300 / 1000 / 3000 (最小 preset の実効手数料率が 5% 以下)', () => {
+    expect(DEFAULT_TIP_PRESETS.jpyc).toEqual(['300', '1000', '3000']);
   });
-  it('USDC は 1 / 5 / 10', () => {
-    expect(DEFAULT_TIP_PRESETS.usdc).toEqual(['1', '5', '10']);
+  it('USDC は 5 / 20 / 50 (最小 preset の実効手数料率が 5% 以下)', () => {
+    expect(DEFAULT_TIP_PRESETS.usdc).toEqual(['5', '20', '50']);
   });
 });
 

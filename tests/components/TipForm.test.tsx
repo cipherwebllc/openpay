@@ -124,9 +124,9 @@ describe('TipForm — レンダリング', () => {
 
   it('preset 未指定 → DEFAULT_TIP_PRESETS が使われる (USDC)', () => {
     render(<TipForm params={{ to: CREATOR, token: 'usdc' }} />);
-    expect(screen.getByRole('button', { name: '1 USDC' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '5 USDC' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '10 USDC' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '20 USDC' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '50 USDC' })).toBeInTheDocument();
   });
 
   it('color パラメータがヘッダの背景色に適用される', () => {

@@ -17,7 +17,7 @@ ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組
 | --- | --- |
 | ガスレス | Pimlico Sponsorship (Verifying) Paymaster で運営がガス代を肩代わり |
 | EOA をそのまま使用 | ERC-7702 によって、顧客の MetaMask 等の **既存 EOA 残高** で決済 (事前送金不要) |
-| バッチ送金 | 「店主への送金」と「運営手数料 (1%)」を 1 つの UserOperation にまとめて送信 |
+| バッチ送金 | 「店主への送金」と「運営手数料」を 1 つの UserOperation にまとめて送信 |
 | 2チェーン対応 | JPYC (Polygon) / USDC (Base) を切替可能 |
 | 登録審査不要 | 店主は自分のウォレットアドレスを入力するだけで QR を発行 |
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
@@ -30,7 +30,7 @@ ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組
 | --- | --- | --- | --- | --- |
 | **導入審査** | 不要 | 必要 (加盟店契約 + 審査) | 必要 (店舗登録 + KYC) | **不要** (ウォレットアドレス入力のみ) |
 | **初期コスト** | レジ・釣銭準備 | 端末 + 月額利用料² | 端末 / QR スタンド申込 | **0 円** (印刷 QR で可) |
-| **店舗受取手数料** | 0% | 約 3.25〜3.75%² (一部 5%超) | 1.60〜1.98%¹ | **1.0%** / **0%** (直接送金モード) |
+| **店舗受取手数料** | 0% | 約 3.25〜3.75%² (一部 5%超) | 1.60〜1.98%¹ | **1.0% (JPYC) / 1.2% (USDC)** / **0%** (直接送金モード) |
 | **入金タイミング** | 即時 (店舗内) | 翌営業日〜月 1〜2 回² | 翌日〜月次¹ | **即時** (オンチェーン確定 数秒〜数十秒) |
 | **チャージバック** | なし | あり (店舗負担リスク) | 一部あり | **なし** (オンチェーン確定で取消不可) |
 | **釣銭** | 必要 (両替コスト・誤算リスク) | 不要 | 不要 | **不要** |
@@ -59,7 +59,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 
 ### 1. フリーランス・クリエイターの国際報酬受取
 
-日本のイラストレーター / エンジニア / 翻訳者が海外クライアントから報酬を受け取る際、Wise や PayPal は **手数料 3〜5% + 着金 3〜7 営業日 + 書類処理** が要ります。OpenPay の請求 URL を発行してクライアントへ送れば、USDC で **即時着金 (オンチェーン確定 数十秒) / 手数料 1% / 書類ゼロ** で受け取れます。
+日本のイラストレーター / エンジニア / 翻訳者が海外クライアントから報酬を受け取る際、Wise や PayPal は **手数料 3〜5% + 着金 3〜7 営業日 + 書類処理** が要ります。OpenPay の請求 URL を発行してクライアントへ送れば、USDC で **即時着金 (オンチェーン確定 数十秒) / 手数料 1.2% / 書類ゼロ** で受け取れます。
 
 - 発行手順: `/` で USDC を選び、自分のウォレットアドレスを入力 → 金額指定 → URL or QR を発行 → クライアントへ送付 (メール / Slack / Notion 等で 1 行貼り付けるだけ)
 - クライアント側に必要なのは EIP-7702 対応 EOA (MetaMask v12+) のみ。**ガス代も不要** (運営肩代わり)
@@ -80,7 +80,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 
 ### 3. クリエイターの Tip widget 埋め込み (β)
 
-イラストレーター・配信者・OSS maintainer 等が、ブログ・ポートフォリオ・配信ページ・GitHub README に **iframe 1 行貼付** でチップ送金 UI を組み込めます。pixivFANBOX / BOOST / Twitter tip 等は手数料 10〜15% + 月次入金 + 海外決済不可ですが、OpenPay は **手数料 1% / 即時着金 / 海外 OK / JPYC + USDC 両対応**。
+イラストレーター・配信者・OSS maintainer 等が、ブログ・ポートフォリオ・配信ページ・GitHub README に **iframe 1 行貼付** でチップ送金 UI を組み込めます。pixivFANBOX / BOOST / Twitter tip 等は手数料 10〜15% + 月次入金 + 海外決済不可ですが、OpenPay は **手数料 1.0% (JPYC) / 1.2% (USDC) / 即時着金 / 海外 OK / JPYC + USDC 両対応**。
 
 - 設定: `/` の「Tip widget」タブで受取アドレス・通貨・表示名・メッセージ・テーマカラー・preset 金額を入力 → URL と iframe スニペットを生成
 - 埋め込み:
@@ -91,7 +91,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
     title="OpenPay Tip" loading="lazy"
   ></iframe>
   ```
-- ファンは MetaMask v12+ などで接続し、preset (JPYC: 100/500/1000、USDC: 1/5/10) かカスタム金額を選んで送信。ガス代不要 (運営肩代わり)
+- ファンは MetaMask v12+ などで接続し、preset (JPYC: 300/1000/3000、USDC: 5/20/50) かカスタム金額を選んで送信。ガス代不要 (運営肩代わり)
 - iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
 
 ## 対応ネットワークと選定理由
@@ -101,16 +101,16 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 | JPYC v3 | **Polygon** | POL | ✅ 採用 | JPYC v3 (`0xE7C3…3c29`) が Polygon 上で発行され、DEX/ブリッジ/オンランプの流動性が集中。日本国内の JPYC ユーザの主要居住地 |
 | USDC (native) | **Base** | ETH | ✅ 採用 | Circle 公式 native USDC。Coinbase ウォレット経由のオンランプが容易、低ガス、Base 系 dApp との互換性 |
 | JPYC | Ethereum | ETH | ❌ 不採用 | ガス代が決済額に対して高すぎる (15 JPYC ≒ 15 円の手数料に対しガスが数百円〜) |
-| JPYC | Avalanche | AVAX | ❌ 不採用 (一旦様子見) | Avalanche 上の JPYC は **DEX ペアの流動性がほぼゼロ**。1% 手数料を AVAX に変換するルートがクロスチェーンになり、ガス調達が常に赤字。日本のリテールユーザの利用が限定的 |
+| JPYC | Avalanche | AVAX | ❌ 不採用 (一旦様子見) | Avalanche 上の JPYC は **DEX ペアの流動性がほぼゼロ**。手数料を AVAX に変換するルートがクロスチェーンになり、ガス調達が常に赤字。日本のリテールユーザの利用が限定的 |
 
 ### 運用上の含意 (JPYC / Polygon)
 
 1. 顧客の決済ごとに Pimlico Sponsorship Paymaster は **POL を消費**する
-2. 運営は手数料 1% を **JPYC** で受け取る
+2. 運営は手数料 1.0% (JPYC) を **JPYC** で受け取る
 3. 運営は定期的に **JPYC → POL** に swap して Pimlico 残高を補充する必要がある
    - JPYC/POL の DEX ペアは流動性が薄いため、実務的には **JPYC → USDC → POL** の 2-hop swap (QuickSwap / Uniswap v3 on Polygon) が現実的
    - 自動化案: OpenZeppelin Defender Sentinel / cron + viem による定期 swap
-4. 1% / 最低 15 JPYC の料率は、本番ガス価格 + DEX スリッページ + Pimlico の sponsorship 上乗せを実測してチューニングしてください (条件次第で赤字)
+4. JPYC 1.0% / 15 JPYC、USDC 1.2% / 0.2 USDC の料率は、本番ガス価格 + DEX スリッページ + Pimlico の sponsorship 上乗せを実測してチューニングしてください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され赤字を防ぐ仕様 (詳細は「Gas price ceiling」節)
 
 ### 将来の拡張余地
 
@@ -168,7 +168,8 @@ openpay/
 │   ├── env.ts                       # 環境変数の単一参照点
 │   ├── chains.ts                    # mainnet/testnet 切替
 │   ├── tokens.ts                    # JPYC / USDC 定義
-│   ├── fee.ts                       # 1% / MIN_FEE 計算
+│   ├── fee.ts                       # チェーン別料率 / MIN_FEE 計算
+│   ├── gasCeiling.ts                # チェーン別 gas 上限 / GasCongestedError
 │   ├── url.ts                       # /pay /tip URL ビルド/パース
 │   ├── storage.ts                   # LocalStorage helpers
 │   ├── logger.ts                    # 構造化 JSON ログ
@@ -241,10 +242,12 @@ npm install -D \
 | `NEXT_PUBLIC_NETWORK_ENV` | ◯ | `mainnet` または `testnet` |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | ◯ | [Pimlico Dashboard](https://dashboard.pimlico.io) で発行した API Key |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | ◯ (推奨) | Pimlico の Sponsorship Policy ID (例: `sp_xxxx`) |
-| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | ◯ | 1% 手数料の受取アドレス |
+| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | ◯ | 運営手数料の受取アドレス |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | △ | [Reown Cloud](https://cloud.reown.com) で発行した WalletConnect Project ID。未設定時は WalletConnect 連携が無効化される |
 | `NEXT_PUBLIC_*_RPC_URL` | × | 公開 RPC が混雑する場合に Alchemy/Infura 等の URL を指定 |
 | `NEXT_PUBLIC_*_TESTNET_ADDRESS` | × | testnet で独自に発行した ERC20 を指定する場合に上書き |
+| `NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI` | × | Polygon mainnet の `maxFeePerGas` 上限 (gwei、整数)。既定 200。Sentry の `gas_congested` 件数を見て調整 |
+| `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` | × | Base mainnet の `maxFeePerGas` 上限 (gwei、整数)。既定 1。L2 のみで判定 (L1 calldata は別軸監視) |
 
 ### 3. Pimlico ダッシュボード設定
 
@@ -258,7 +261,8 @@ npm install -D \
    - `to address allowlist`: トークンコントラクトアドレスのみ許可 (JPYC: `0xE7C3...3c29`、USDC Base: `0x8335...2913`、USDC Base Sepolia: `0x036C...CF7e`、JPYC Polygon Amoy: 自分のテストデプロイ)
    - `function selector allowlist`: `transfer(address,uint256)` (`0xa9059cbb`) のみ
    - `data parameter constraint`: 受取人パラメータの 1 つが必ず `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` であること (= 運営手数料 transfer を含む UserOp のみ sponsor)
-   - クライアント側でも `useBatchPayment` が `feeAmount > 0` を assertion して defense in depth
+   - **gas price 上限**: `lib/gasCeiling.ts` と同等以上の値 (Polygon 200 gwei / Base 1 gwei) を Policy に設定。クライアント側ガードはユーザ向け早期エラー、Policy 側は改竄不可な最終防衛線として機能 (二重ガード)
+   - クライアント側でも `useBatchPayment` が `feeAmount > 0` と `assertGasCeiling` を assertion して defense in depth
 
 ### 4. 開発サーバー
 
@@ -303,17 +307,33 @@ UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middlew
 4. ブログ・ポートフォリオ・配信ページの HTML に貼り付け
 5. ファンが iframe 内のボタンをクリック → ウォレット接続 → preset/カスタム額で送信
 
-Tip widget の手数料は **外税 1%** 固定。クリエイターは preset 額をそのまま受け取り、ファンが 1% を上乗せして支払います (MIN_FEE 適用は通常決済と同じ)。
+Tip widget の手数料は **外税** 固定 (JPYC 1.0% / USDC 1.2%)。クリエイターは preset 額をそのまま受け取り、ファンが手数料を上乗せして支払います (MIN_FEE 適用は通常決済と同じ)。
 
 ## 手数料の計算
 
-- 運営手数料 = `amount × 1.0%` （ただし下限あり）
-- 下限: JPYC = 15 JPYC / USDC = 0.1 USDC
+- 運営手数料 = `max(amount × FEE_BPS[token], MIN_FEE[token])`
+- 料率と下限 (チェーン別、`lib/fee.ts`):
+  - **JPYC (Polygon): 1.0% / 最低 15 JPYC** — Polygon は平常 1〜3 JPY のガス代でフロアが十分黒字
+  - **USDC (Base): 1.2% / 最低 0.2 USDC** — ETH gas spike 時の L1 calldata 高騰でも赤字を出さないため厚め
 
 | モード | 顧客支払額 | 店主受取額 | 運営受取額 |
 | --- | --- | --- | --- |
 | 内税 (`fee=include`) | `amount` | `amount - fee` | `fee` |
 | 外税 (`fee=exclude`) | `amount + fee` | `amount` | `fee` |
+
+### Gas price ceiling (赤字回避ガード)
+
+`lib/gasCeiling.ts` で UserOp 送信前の `maxFeePerGas` をチェーン別に上限判定し、超過していれば `GasCongestedError` を投げてユーザに「ネットワーク混雑」エラーを返します。フロア手数料 (15 JPYC / 0.2 USDC) では極端な gas spike を吸収できないため、送信前に弾く方が損失より安全という判断。
+
+| チェーン | 既定上限 | env 上書き |
+| --- | --- | --- |
+| Polygon (137) | 200 gwei | `NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI` |
+| Base (8453) | 1 gwei (L2) | `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` |
+| Polygon Amoy / Base Sepolia | 1000 gwei (緩) | (testnet 固定) |
+
+運用フェーズでは Sentry の `gas_congested` イベントを監視して再デプロイなしで上限値を調整できる設計。Pimlico Sponsorship Policy 側にも同等以上の上限を設定すること (二重ガード)。
+
+> ⚠️ Base の上限は L2 `maxFeePerGas` のみで判定するため、Ethereum mainnet の L1 spike (200+ gwei) で押し上げられる L1 calldata 費は捕らえられません。L1 監視は今後の拡張ポイント。
 
 ## Vercel デプロイ
 
@@ -448,7 +468,8 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 
 | 層 | 対象 | テスト方針 |
 | --- | --- | --- |
-| `lib/fee.ts` | 1% / MIN_FEE / 内税・外税 / 境界 (1% == MIN, amount < MIN) / amount=0 / 大数 | 純粋関数 — 実コードのみ |
+| `lib/fee.ts` | チェーン別料率 (JPYC 1.0% / USDC 1.2%) / MIN_FEE / 内税・外税 / 境界 (proportional == MIN, amount < MIN) / amount=0 / 大数 | 純粋関数 — 実コードのみ |
+| `lib/gasCeiling.ts` | チェーン別 gas 上限 (mainnet/testnet) / 上限境界 / GasCongestedError / env 上書き | 純粋関数 — 実コードのみ |
 | `lib/url.ts` | /pay と /tip 両方の build / parse / sanitize (制御文字除去 / 長さ切詰 / preset 検証) / roundtrip | 純粋関数 — 実コードのみ |
 | `lib/tokens.ts` | decimals / chainId / env override / フォールバック | 実コード |
 | `lib/storage.ts` | LocalStorage roundtrip / 破損 JSON / null | jsdom 上で実コード |
