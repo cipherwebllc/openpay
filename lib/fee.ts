@@ -28,15 +28,12 @@ export function calcFee(amount: bigint, token: TokenSymbol): bigint {
   return proportional > min ? proportional : min;
 }
 
-// gasAmount は ERC20 Paymaster mode (USDC mainnet) のときだけ非 undefined。
-// fee.ts は決済額・運営手数料の計算に責任を負い、gas 見積はフォーム側で
-// useGasQuoteUsdc から取得して付加する設計。breakdown の表示と balance check
-// では `customerPays + (gasAmount ?? 0n)` を最終支払額として扱う。
+// fee.ts は決済額 / 運営手数料の計算に責任を持つ。
+// ERC20 Paymaster の gas 見積は別軸 (useGasQuoteUsdc) としてフォーム側で扱う。
 export type Breakdown = {
   customerPays: bigint;
   merchantReceives: bigint;
   feeAmount: bigint;
-  gasAmount?: bigint;
 };
 
 export function calcBreakdown(
@@ -78,7 +75,6 @@ export type SplitBreakdownEntry = { to: Address; amount: bigint; percent: number
 export type SplitBreakdown = {
   customerPays: bigint;
   feeAmount: bigint;
-  gasAmount?: bigint;
   // 配列の index 0 が primary (to)、以降が split entries の順
   recipients: SplitBreakdownEntry[];
 };

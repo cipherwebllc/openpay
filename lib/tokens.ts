@@ -4,9 +4,9 @@ import { env, isMainnet } from './env';
 
 export type TokenSymbol = 'jpyc' | 'usdc';
 
-// 'sponsorship' = Pimlico Sponsorship (Verifying) Paymaster で運営がガスを肩代わり
-// 'erc20'       = Pimlico ERC20 Paymaster で顧客がトークンでガスを支払う
-//                 (mainnet 限定。testnet では実装側で sponsorship にフォールバックする)
+// Paymaster モード。挙動の詳細は lib/pimlico.ts の冒頭コメント参照。
+//   sponsorship = 運営がネイティブガスを肩代わり (Sponsorship Paymaster)
+//   erc20       = 顧客がトークンでガスを支払う (ERC20 Paymaster、mainnet 限定)
 export type PaymasterMode = 'sponsorship' | 'erc20';
 
 export type TokenInfo = {
@@ -43,8 +43,6 @@ export const TOKENS: Record<TokenSymbol, TokenInfo> = {
       ? (env.mainnetTokenOverrides.jpyc ?? JPYC_POLYGON_DEFAULT)
       : (env.testnetTokenOverrides.jpyc ?? ZERO),
     chainId: isMainnet ? polygon.id : polygonAmoy.id,
-    // JPYC は Pimlico ERC20 Paymaster の対応外なので運営がガスを肩代わり。
-    // Polygon の POL ガスは平常 1〜3 JPY と廉価なので 15 JPYC フロアで黒字。
     paymasterMode: 'sponsorship',
   },
   usdc: {
@@ -56,9 +54,6 @@ export const TOKENS: Record<TokenSymbol, TokenInfo> = {
       ? (env.mainnetTokenOverrides.usdc ?? USDC_BASE_DEFAULT)
       : (env.testnetTokenOverrides.usdc ?? USDC_BASE_SEPOLIA_DEFAULT),
     chainId: isMainnet ? base.id : baseSepolia.id,
-    // USDC は Pimlico ERC20 Paymaster で顧客が USDC のままガスを支払う。
-    // Base の ETH ガスを運営が立替えると赤字化リスクが高いため。
-    // testnet (Base Sepolia) では sponsorship にフォールバックする (lib/pimlico.ts)。
     paymasterMode: 'erc20',
   },
 };

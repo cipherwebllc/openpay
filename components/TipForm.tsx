@@ -25,8 +25,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const t = useTranslations('TipForm');
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
-  const paymasterMode = resolvePaymasterMode(params.token);
-  const isErc20Paymaster = paymasterMode === 'erc20';
+  const isErc20Paymaster = resolvePaymasterMode(params.token) === 'erc20';
   const presets =
     params.presets && params.presets.length > 0
       ? params.presets
@@ -55,20 +54,14 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // tip は外税固定: 受取人 (= クリエイター) は preset 額をそのまま受け取り、
   // tipper が 1% (or MIN_FEE) を上乗せして支払う。
-  const baseBreakdown = useMemo(
+  const breakdown = useMemo(
     () => calcBreakdown(amountWei, 'exclude', params.token),
     [amountWei, params.token],
   );
 
-  // ERC20 Paymaster mode (USDC mainnet) のときだけ gas を上乗せ表示する。
+  // gas は ERC20 Paymaster の postOp で別途引かれる分。表示と残高判定で加算する。
   const gasAmount = isErc20Paymaster ? gasQuote.data?.gasAmount : undefined;
-  const breakdown = useMemo(
-    () => ({ ...baseBreakdown, gasAmount }),
-    [baseBreakdown, gasAmount],
-  );
-
-  const totalCustomerOutflow =
-    breakdown.customerPays + (gasAmount ?? 0n);
+  const totalCustomerOutflow = breakdown.customerPays + (gasAmount ?? 0n);
 
   const fmt = (wei: bigint) =>
     `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;

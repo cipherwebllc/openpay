@@ -47,8 +47,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const isDirect = params.mode === 'direct';
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
-  const paymasterMode = resolvePaymasterMode(params.token);
-  const isErc20Paymaster = !isDirect && paymasterMode === 'erc20';
+  const isErc20Paymaster =
+    !isDirect && resolvePaymasterMode(params.token) === 'erc20';
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
@@ -81,7 +81,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const fmt = (wei: bigint) =>
     `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
 
-  const baseBreakdown = useMemo(
+  const breakdown = useMemo(
     () =>
       isDirect
         ? calcDirectBreakdown(amountWei)
@@ -89,38 +89,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
     [isDirect, amountWei, params.fee, params.token],
   );
 
-  // ERC20 Paymaster mode では gas を顧客負担分に加算 (sponsorship では undefined)。
-  // gasAmount は customerPays には含めず、外側で合算する (calcBreakdown の意味論を
-  // 保つため: customerPays = チェーン上で動く資金、gasAmount = paymaster へ別途流れる分)。
-  const gasAmount = isErc20Paymaster ? gasQuote.data?.gasAmount : undefined;
-  const breakdown = useMemo(
-    () => ({ ...baseBreakdown, gasAmount }),
-    [baseBreakdown, gasAmount],
-  );
-
-  // split が指定されていれば、breakdown.merchantReceives を分配する。
   // direct mode では split は無視 (シンプルな単一 transfer に限定)。
   const splitBreakdown = useMemo(() => {
     if (isDirect || !params.split || params.split.length === 0) return null;
-    const base = calcSplitBreakdown(
+    return calcSplitBreakdown(
       amountWei,
       params.fee,
       params.token,
       params.to,
       params.split,
     );
-    return { ...base, gasAmount };
-  }, [
-    isDirect,
-    amountWei,
-    params.fee,
-    params.token,
-    params.to,
-    params.split,
-    gasAmount,
-  ]);
+  }, [isDirect, amountWei, params.fee, params.token, params.to, params.split]);
 
-  // 顧客が実際に手放す総額 = customerPays + (gasAmount ?? 0)。表示と残高判定の両方で使う。
+  // gas は ERC20 Paymaster の postOp で別途引かれる分。calcBreakdown の意味論
+  // (customerPays = チェーン上で動く資金) を保ち、表示と残高判定でだけ加算する。
+  const gasAmount = isErc20Paymaster ? gasQuote.data?.gasAmount : undefined;
   const totalCustomerOutflow =
     (splitBreakdown ? splitBreakdown.customerPays : breakdown.customerPays) +
     (gasAmount ?? 0n);
