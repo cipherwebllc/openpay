@@ -125,4 +125,190 @@ describe('useGasQuoteUsdc', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toMatch(/token quote/);
   });
+
+  it('Pimlico の getTokenQuotes が reject → そのエラーが伝播', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    getTokenQuotes.mockRejectedValue(new Error('UpstreamProviderError: 503'));
+    getUserOperationGasPrice.mockResolvedValue({
+      slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+      standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+      fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+    });
+
+    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toContain('503');
+  });
+
+  it('getUserOperationGasPrice が reject → エラー (どちらか片方の失敗で全体失敗)', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    getTokenQuotes.mockResolvedValue([
+      {
+        paymaster: '0xpaymaster',
+        token: '0xusdc',
+        postOpGas: 30_000n,
+        exchangeRate: 10n ** 18n,
+        exchangeRateNativeToUsd: 3000n * 10n ** 6n,
+      },
+    ]);
+    getUserOperationGasPrice.mockRejectedValue(new Error('rpc timeout'));
+
+    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toContain('rpc timeout');
+  });
+
+  it('現実的な Pimlico 値 (ETH=$3000, Base 0.01 gwei) → 約 1.5 セント (≒ 0.015 USDC)', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    // Base 平常時: 0.01 gwei = 1e7 wei/gas
+    // 1 ETH = 3000 USDC → exchangeRate (USDC base / native wei × 1e18 scale) = 3e9
+    //   formula: token = wei * exchangeRate / 1e18
+    //   1 ETH = 1e18 wei → 1e18 * 3e9 / 1e18 = 3e9 USDC base = 3000 USDC ✓
+    getTokenQuotes.mockResolvedValue([
+      {
+        paymaster: '0xpaymaster',
+        token: '0xusdc',
+        postOpGas: 30_000n,
+        exchangeRate: 3_000_000_000n, // 3e9
+        exchangeRateNativeToUsd: 3000n * 10n ** 6n,
+      },
+    ]);
+    getUserOperationGasPrice.mockResolvedValue({
+      slow: { maxFeePerGas: 5_000_000n, maxPriorityFeePerGas: 1n },
+      standard: { maxFeePerGas: 8_000_000n, maxPriorityFeePerGas: 1n },
+      fast: { maxFeePerGas: 10_000_000n, maxPriorityFeePerGas: 1n }, // 0.01 gwei
+    });
+
+    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    // totalGas = 530_000
+    // nativeCost = 530_000 * 1e7 = 5.3e12 wei
+    // gasAmount = 5.3e12 * 3e9 / 1e18 = 5.3e12 * 3 / 1e9 = 15_900 (USDC base = 0.0159 USDC)
+    expect(result.current.data!.gasAmount).toBe(15_900n);
+    // 0.0159 USDC は 1 セント台 — Base 平常時の妥当な額
+    expect(Number(result.current.data!.gasAmount) / 1e6).toBeLessThan(0.05);
+  });
+
+  it('Base ETH spike (1 gwei) → 数 USDC レンジに上振れ', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    getTokenQuotes.mockResolvedValue([
+      {
+        paymaster: '0xpaymaster',
+        token: '0xusdc',
+        postOpGas: 30_000n,
+        exchangeRate: 3_000_000_000n,
+        exchangeRateNativeToUsd: 3000n * 10n ** 6n,
+      },
+    ]);
+    getUserOperationGasPrice.mockResolvedValue({
+      slow: { maxFeePerGas: 5n * 10n ** 8n, maxPriorityFeePerGas: 1n },
+      standard: { maxFeePerGas: 10n ** 9n, maxPriorityFeePerGas: 1n },
+      fast: { maxFeePerGas: 10n ** 9n, maxPriorityFeePerGas: 1n }, // 1 gwei (spike)
+    });
+
+    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    // totalGas = 530_000
+    // nativeCost = 530_000 * 1e9 = 5.3e14 wei
+    // gasAmount = 5.3e14 * 3e9 / 1e18 = 1_590_000 (USDC base = 1.59 USDC)
+    expect(result.current.data!.gasAmount).toBe(1_590_000n);
+  });
+
+  it('境界: maxFeePerGas=0 → gasAmount=0 (degenerate だがクラッシュしない)', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    getTokenQuotes.mockResolvedValue([
+      {
+        paymaster: '0xpaymaster',
+        token: '0xusdc',
+        postOpGas: 30_000n,
+        exchangeRate: 3_000_000_000n,
+        exchangeRateNativeToUsd: 3000n * 10n ** 6n,
+      },
+    ]);
+    getUserOperationGasPrice.mockResolvedValue({
+      slow: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
+      standard: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
+      fast: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
+    });
+
+    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data!.gasAmount).toBe(0n);
+  });
+
+  it('境界: 巨大な exchangeRate × 巨大な maxFeePerGas でも bigint で精度損失なし', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    // 仮想的な極端値: Number だと overflow するが bigint なら OK
+    const huge_rate = 10n ** 30n;
+    const huge_gas = 10n ** 12n;
+    getTokenQuotes.mockResolvedValue([
+      {
+        paymaster: '0xpaymaster',
+        token: '0xusdc',
+        postOpGas: 0n,
+        exchangeRate: huge_rate,
+        exchangeRateNativeToUsd: 1n,
+      },
+    ]);
+    getUserOperationGasPrice.mockResolvedValue({
+      slow: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
+      standard: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
+      fast: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
+    });
+
+    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    // 500_000 * 1e12 * 1e30 / 1e18 = 5e5 * 1e12 * 1e12 = 5e29
+    expect(result.current.data!.gasAmount).toBe(500_000n * 10n ** 24n);
+  });
+
+  it('queryKey は token chainId / address ベース → 同じ token で再 mount してもキャッシュ共有', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
+    getTokenQuotes.mockResolvedValue([
+      {
+        paymaster: '0xpaymaster',
+        token: '0xusdc',
+        postOpGas: 30_000n,
+        exchangeRate: 10n ** 18n,
+        exchangeRateNativeToUsd: 3000n * 10n ** 6n,
+      },
+    ]);
+    getUserOperationGasPrice.mockResolvedValue({
+      slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+      standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+      fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+    });
+
+    // 同一 QueryClient で 2 回 mount → 2 回目はキャッシュから即座に返る
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+
+    const first = renderHook(() => useGasQuoteUsdc('usdc'), { wrapper });
+    await waitFor(() => expect(first.result.current.data).toBeDefined());
+    expect(getTokenQuotes).toHaveBeenCalledTimes(1);
+
+    // 2 つ目の subscriber: 同じ key なので新規 fetch しない
+    const second = renderHook(() => useGasQuoteUsdc('usdc'), { wrapper });
+    expect(second.result.current.data).toBeDefined();
+    expect(getTokenQuotes).toHaveBeenCalledTimes(1);
+  });
 });

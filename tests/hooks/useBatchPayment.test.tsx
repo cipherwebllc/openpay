@@ -8,7 +8,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { baseSepolia } from 'viem/chains';
+import { base, baseSepolia, polygon } from 'viem/chains';
 import type { ReactNode } from 'react';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { GasCongestedError } from '@/lib/gasCeiling';
@@ -433,6 +433,226 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.error?.message).toMatch(/feeAmount|sponsorship/);
       expect(getUserOperationGasPrice).not.toHaveBeenCalled();
+    });
+
+    it('Polygon mainnet (chainId=137) sponsorship: 200 gwei 以下 OK / 超過 reject', async () => {
+      // 既定 ceiling は Polygon mainnet 200 gwei
+      mountReady({ maxFeePerGas: 199n * GWEI, chainId: polygon.id });
+      const { result: ok } = renderHook(() => useBatchPayment('jpyc'), {
+        wrapper: makeWrapper(),
+      });
+      ok.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+
+      // reset for the over-ceiling case
+      vi.clearAllMocks();
+      mountReady({ maxFeePerGas: 250n * GWEI, chainId: polygon.id });
+      const { result: ng } = renderHook(() => useBatchPayment('jpyc'), {
+        wrapper: makeWrapper(),
+      });
+      ng.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(ng.current.isError).toBe(true));
+      expect(ng.current.error).toBeInstanceOf(GasCongestedError);
+    });
+
+    it('Base mainnet (chainId=8453) sponsorship: 1 gwei 以下 OK / 超過 reject', async () => {
+      // 既定 ceiling は Base mainnet 1 gwei (非常に厳しい)
+      mountReady({ maxFeePerGas: 9n * 10n ** 8n, chainId: base.id }); // 0.9 gwei
+      const { result: ok } = renderHook(() => useBatchPayment('jpyc'), {
+        wrapper: makeWrapper(),
+      });
+      ok.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+
+      vi.clearAllMocks();
+      mountReady({ maxFeePerGas: 2n * GWEI, chainId: base.id }); // 2 gwei = 超過
+      const { result: ng } = renderHook(() => useBatchPayment('jpyc'), {
+        wrapper: makeWrapper(),
+      });
+      ng.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(ng.current.isError).toBe(true));
+      expect(ng.current.error).toBeInstanceOf(GasCongestedError);
+    });
+  });
+
+  describe('UserOp の receipt 処理', () => {
+    it('success=false の receipt → 例外を投げず result.data.success=false で返す', async () => {
+      // UserOp は bundler に含まれたが、execution が revert したケース
+      mountReady();
+      waitForUserOperationReceipt.mockResolvedValueOnce({
+        success: false,
+        receipt: {
+          transactionHash: `0x${'f'.repeat(64)}` as Hex,
+          blockNumber: 999n,
+        },
+      });
+
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      // mutation 自体は成功 (resolve した)、ただし success フラグは false
+      expect(result.current.data!.success).toBe(false);
+      expect(result.current.data!.txHash).toBe(`0x${'f'.repeat(64)}`);
+      expect(result.current.data!.blockNumber).toBe(999n);
+    });
+
+    it('waitForUserOperationReceipt が reject → mutation エラー (sendUserOperation 後の失敗)', async () => {
+      mountReady();
+      waitForUserOperationReceipt.mockRejectedValueOnce(
+        new Error('UserOperationReceiptTimeoutError'),
+      );
+
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1_000_000n,
+      });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      // sendUserOperation は呼ばれた (実 broadcast 済)、wait で失敗
+      expect(sendUserOperation).toHaveBeenCalledOnce();
+      expect(result.current.error?.message).toContain('Timeout');
+    });
+  });
+
+  describe('calls の構築 (データ整合性)', () => {
+    it('複数 extraRecipients の順序保存 + bigint amount 整合性', async () => {
+      mountReady();
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+
+      const recipients: Address[] = [
+        getAddress('0x1000000000000000000000000000000000000001'),
+        getAddress('0x2000000000000000000000000000000000000002'),
+        getAddress('0x3000000000000000000000000000000000000003'),
+      ];
+      const amounts = [11_111n, 22_222n, 33_333n];
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 100_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1_000n,
+        extraRecipients: recipients.map((to, i) => ({ to, amount: amounts[i] })),
+      });
+
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+      const arg = sendUserOperation.mock.calls[0][0];
+      // 1 (merchant) + 3 (extras) + 1 (fee) = 5 calls
+      expect(arg.calls).toHaveLength(5);
+
+      // 順序: merchant → extras (順) → fee
+      const decoded = arg.calls.map((c: { data: Hex }) =>
+        decodeFunctionData({ abi: erc20Abi, data: c.data }),
+      );
+      const recvs = decoded.map(
+        (d: { args: readonly [string, bigint] }) => d.args[0].toLowerCase(),
+      );
+      const amts = decoded.map(
+        (d: { args: readonly [string, bigint] }) => d.args[1],
+      );
+
+      expect(recvs[0]).toBe(MERCHANT.toLowerCase());
+      expect(recvs[1]).toBe(recipients[0].toLowerCase());
+      expect(recvs[2]).toBe(recipients[1].toLowerCase());
+      expect(recvs[3]).toBe(recipients[2].toLowerCase());
+      expect(recvs[4]).toBe(FEE_RECV.toLowerCase());
+
+      expect(amts[0]).toBe(100_000n);
+      expect(amts[1]).toBe(11_111n);
+      expect(amts[2]).toBe(22_222n);
+      expect(amts[3]).toBe(33_333n);
+      expect(amts[4]).toBe(1_000n);
+
+      // 全て同一の token contract に向く
+      const tos = arg.calls.map((c: { to: Address }) => c.to.toLowerCase());
+      expect(new Set(tos).size).toBe(1);
+      expect(tos[0]).toBe(TOKEN.toLowerCase());
+    });
+
+    it('巨大な amount (uint256 上限近く) でも bigint で精度欠落なし', async () => {
+      mountReady();
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+
+      const huge = 2n ** 200n; // uint256 範囲内、Number では絶対表現不可
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: huge,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+      const arg = sendUserOperation.mock.calls[0][0];
+      const merchantCall = decodeFunctionData({
+        abi: erc20Abi,
+        data: arg.calls[0].data,
+      });
+      expect((merchantCall.args as readonly [string, bigint])[1]).toBe(huge);
+    });
+
+    it('merchantAmount > 0 + extraRecipients 空 (split なし、通常パス)', async () => {
+      mountReady();
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 50_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 500n,
+        extraRecipients: [],
+      });
+
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+      const arg = sendUserOperation.mock.calls[0][0];
+      // 1 (merchant) + 0 (empty extras) + 1 (fee) = 2 calls
+      expect(arg.calls).toHaveLength(2);
     });
   });
 });

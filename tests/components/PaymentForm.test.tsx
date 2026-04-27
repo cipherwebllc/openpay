@@ -629,4 +629,90 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(call.feeAmount).toBe(1_200_000n);
     expect(call.extraRecipients).toBeUndefined();
   });
+
+  it('gasQuote.error → エラーメッセージ表示 + ボタン disabled', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('error');
+    render(<PaymentForm />);
+
+    expect(screen.getByText(/エラー/)).toBeInTheDocument();
+    expect(screen.getByText(/quote failed/)).toBeInTheDocument();
+    // gas quote が ready していないので button は loading 表示で disabled
+    expect(
+      screen.getByRole('button', { name: /ガス代見積取得中/ }),
+    ).toBeDisabled();
+  });
+
+  it('境界: 残高 = 必要額 ちょうど → 支払い可能 (insufficient ではない)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=exclude&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    // 必要 101.7 USDC ぴったり
+    setBalance(101_700_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/残高が不足/)).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /101.7 USDC を支払う/ }),
+    ).not.toBeDisabled();
+  });
+
+  it('境界: 残高 = 必要額 - 1 wei → insufficient', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=exclude&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(101_700_000n - 1n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n);
+    render(<PaymentForm />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+  });
+
+  it('direct mode + USDC params: 即時 ERC20 transfer なので gas 行が出ず gasQuote は呼ばれない', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10&mode=direct`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    // direct mode では erc20 mode mock 下でも gas を考慮しない
+    setGasQuote('disabled');
+    render(<PaymentForm />);
+
+    // 「ネットワーク手数料」行は出ない (direct = paymaster 不使用)
+    expect(screen.queryByText(/ネットワーク手数料/)).toBeNull();
+    // direct 警告は出る
+    expect(screen.getByText(/ガス代お客様負担/)).toBeInTheDocument();
+    // useGasQuoteUsdc は enabled=false で呼ばれる (no fetch)
+    expect(useGasQuoteUsdc).toHaveBeenCalledWith('usdc', false);
+  });
+
+  it('split + ERC20 mode: gas を含めた customer total と extraRecipients が両立', async () => {
+    const user = userEvent.setup();
+    const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    setURL(
+      `to=${MERCHANT}&token=usdc&fee=exclude&amount=100&split=${B}:30`,
+    );
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n); // 0.5 USDC
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    // 100 + 1.2 (fee) + 0.5 (gas) = 101.7 USDC
+    expect(
+      screen.getByRole('button', { name: /101.7 USDC を支払う/ }),
+    ).not.toBeDisabled();
+
+    await user.click(
+      screen.getByRole('button', { name: /101.7 USDC を支払う/ }),
+    );
+    const call = mutate.mock.calls[0][0];
+    // primary (MERCHANT) は 70%、B は 30% を 100 USDC から取る
+    expect(call.merchantAmount).toBe(70_000_000n);
+    expect(call.extraRecipients[0].to.toLowerCase()).toBe(B.toLowerCase());
+    expect(call.extraRecipients[0].amount).toBe(30_000_000n);
+    // gas は extraRecipients に含めない
+    expect(call.extraRecipients).toHaveLength(1);
+  });
 });

@@ -73,6 +73,31 @@ describe('pimlicoPaymasterContext', () => {
     );
   });
 
+  it('USDC mainnet で env override を指定するとそのアドレスが context.token に反映', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    // viem の getAddress は mixed-case で checksum 一致を要求するため、
+    // テストでは lowercase 形式を渡す (lib/env.ts 内で getAddress により
+    // checksum 化されてから lib/tokens.ts に伝播する)。
+    const override = '0xcafe000000000000000000000000000000000999';
+    process.env.NEXT_PUBLIC_USDC_MAINNET_ADDRESS = override;
+    const mod = await import('@/lib/pimlico');
+    const ctx = mod.pimlicoPaymasterContext('usdc');
+    expect((ctx as { token: string }).token.toLowerCase()).toBe(override);
+  });
+
+  it('USDC mainnet で SPONSORSHIP_POLICY_ID が設定されていても erc20 mode は token のみ返す', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_should_be_ignored';
+    const mod = await import('@/lib/pimlico');
+    const ctx = mod.pimlicoPaymasterContext('usdc');
+    expect(ctx).toHaveProperty('token');
+    expect(ctx).not.toHaveProperty('sponsorshipPolicyId');
+  });
+
   it('SPONSORSHIP_POLICY_ID 未設定時の sponsorship は undefined', async () => {
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID;

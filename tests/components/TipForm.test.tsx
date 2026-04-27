@@ -518,4 +518,69 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     // gas は paymaster が postOp で引くため、明示的な extraRecipients には含めない
     expect(call.extraRecipients).toBeUndefined();
   });
+
+  it('gasQuote.error → エラー表示 + ボタン disabled', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('error');
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/エラー/)).toBeInTheDocument();
+    expect(screen.getByText(/quote failed/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /ガス代見積取得中/ }),
+    ).toBeDisabled();
+  });
+
+  it('境界: 残高 = 必要額 ちょうど → 送信可能', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    // preset 1 USDC: 1 + 0.2 (fee) + 0.3 (gas) = 1.5 USDC
+    setBalance(1_500_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 300_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.queryByText(/残高が不足/)).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /1.5 USDC を送る/ }),
+    ).not.toBeDisabled();
+  });
+
+  it('境界: 残高 = 必要額 - 1 → 不足', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(1_500_000n - 1n);
+    setSmartAccount(true);
+    setGasQuote('ready', 300_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+  });
+
+  it('webhook payload: ERC20 mode でも customerPays は merchantAmount + feeAmount のみ (gas 含めない)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok', { status: 200 }));
+
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 300_000n);
+    setBatchPayment('success');
+
+    render(
+      <TipForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://example.com/hook',
+        }}
+      />,
+    );
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    // 既定 preset 1 USDC: customerPays = 1 + 0.2 = 1.2 USDC (gas は paymaster 軸なので含めない)
+    expect(body.customerPays).toBe('1200000');
+    expect(body.merchantAmount).toBe('1000000');
+    expect(body.feeAmount).toBe('200000');
+    fetchSpy.mockRestore();
+  });
 });

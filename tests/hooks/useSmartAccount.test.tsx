@@ -95,6 +95,20 @@ describe('useSmartAccount (smoke / boundary)', () => {
     expect(result.current.fetchStatus).toBe('idle');
   });
 
+  it('enabled=false → wallet 接続済でも無効化される', () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, {});
+
+    const { result } = renderHook(() => useSmartAccount('jpyc', false), {
+      wrapper: makeWrapper(),
+    });
+    expect(result.current.fetchStatus).toBe('idle');
+  });
+
   // queryFn 本体 (to7702SimpleSmartAccount → createSmartAccountClient) を
   // モックしきると実コード検証にならない。実走行は e2e (README 参照) で行う。
 });
