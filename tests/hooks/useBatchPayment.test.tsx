@@ -12,6 +12,7 @@ import { baseSepolia } from 'viem/chains';
 import type { ReactNode } from 'react';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { GasCongestedError } from '@/lib/gasCeiling';
+import type { PaymasterMode, TokenSymbol } from '@/lib/tokens';
 
 // 外部依存である useSmartAccount を境界モック。テスト対象 (useBatchPayment)
 // の実コードは実行され、calls 配列の組み立てや encodeFunctionData の動作が
@@ -50,10 +51,15 @@ let sendUserOperation: ReturnType<typeof vi.fn>;
 let waitForUserOperationReceipt: ReturnType<typeof vi.fn>;
 let getUserOperationGasPrice: ReturnType<typeof vi.fn>;
 
-function mountReady(opts?: { maxFeePerGas?: bigint; chainId?: number }) {
+function mountReady(opts?: {
+  maxFeePerGas?: bigint;
+  chainId?: number;
+  paymasterMode?: PaymasterMode;
+}) {
   // testnet (Base Sepolia, 既定 ceiling 1000 gwei) を使い、観測値はその下を既定。
   const maxFeePerGas = opts?.maxFeePerGas ?? 50n * GWEI;
   const chainId = opts?.chainId ?? baseSepolia.id;
+  const paymasterMode: PaymasterMode = opts?.paymasterMode ?? 'sponsorship';
 
   sendUserOperation = vi
     .fn()
@@ -75,6 +81,7 @@ function mountReady(opts?: { maxFeePerGas?: bigint; chainId?: number }) {
     data: {
       smartAccountClient: { sendUserOperation },
       pimlicoClient: { waitForUserOperationReceipt, getUserOperationGasPrice },
+      paymasterMode,
     },
     isLoading: false,
     error: null,
@@ -92,7 +99,7 @@ describe('useBatchPayment', () => {
 
   it('店主送金 + 手数料を 1 つの UserOp の calls[2] にバッチ化', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -135,7 +142,7 @@ describe('useBatchPayment', () => {
 
   it('merchantAmount = 0 の場合は手数料のみの 1 call', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -154,9 +161,9 @@ describe('useBatchPayment', () => {
     expect((d.args as readonly [string, bigint])[1]).toBe(100_000n);
   });
 
-  it('feeAmount = 0 → 必ずエラー (sponsorship 濫用防止のため fee 必須)', async () => {
+  it('feeAmount = 0 → 必ずエラー (運営収益 + sponsorship 濫用防止のため fee 必須)', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -175,7 +182,7 @@ describe('useBatchPayment', () => {
 
   it('両方 0 → エラーで sendUserOperation は呼ばれない', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -201,7 +208,7 @@ describe('useBatchPayment', () => {
     vi.mocked(useAccount).mockReturnValue({
       chainId: baseSepolia.id,
     } as unknown as ReturnType<typeof useAccount>);
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -219,7 +226,7 @@ describe('useBatchPayment', () => {
 
   it('成功時に userOpHash と txHash を返却', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -240,7 +247,7 @@ describe('useBatchPayment', () => {
 
   it('extraRecipients (split) が指定されると calls に追加される', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -283,7 +290,7 @@ describe('useBatchPayment', () => {
 
   it('extraRecipients に amount=0 が混ざる → エラー', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -305,7 +312,7 @@ describe('useBatchPayment', () => {
   it('sendUserOperation が reject → mutation エラーに伝播', async () => {
     mountReady();
     sendUserOperation.mockRejectedValueOnce(new Error('AA21 didn\'t pay prefund'));
-    const { result } = renderHook(() => useBatchPayment(), {
+    const { result } = renderHook(() => useBatchPayment('usdc'), {
       wrapper: makeWrapper(),
     });
 
@@ -322,10 +329,10 @@ describe('useBatchPayment', () => {
   });
 
   describe('gas price ceiling (赤字回避ガード)', () => {
-    it('上限以下 → 通常通り送信される', async () => {
+    it('sponsorship mode + 上限以下 → 通常通り送信される', async () => {
       // testnet (Base Sepolia) ceiling = 1000 gwei、観測 50 gwei は安全圏
       mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
-      const { result } = renderHook(() => useBatchPayment(), {
+      const { result } = renderHook(() => useBatchPayment('jpyc'), {
         wrapper: makeWrapper(),
       });
 
@@ -341,10 +348,10 @@ describe('useBatchPayment', () => {
       expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
     });
 
-    it('上限超過 → GasCongestedError、sendUserOperation は呼ばれない', async () => {
+    it('sponsorship mode + 上限超過 → GasCongestedError、sendUserOperation は呼ばれない', async () => {
       // testnet ceiling 1000 gwei を上回る 1500 gwei を返す
       mountReady({ maxFeePerGas: 1500n * GWEI, chainId: baseSepolia.id });
-      const { result } = renderHook(() => useBatchPayment(), {
+      const { result } = renderHook(() => useBatchPayment('jpyc'), {
         wrapper: makeWrapper(),
       });
 
@@ -361,6 +368,30 @@ describe('useBatchPayment', () => {
       expect(sendUserOperation).not.toHaveBeenCalled();
     });
 
+    it('erc20 mode → 上限超過でも skip して送信進行 (顧客が gas を払うので運営保護不要)', async () => {
+      // sponsorship mode なら fail する 1500 gwei でも、erc20 mode では send 進む
+      mountReady({
+        maxFeePerGas: 1500n * GWEI,
+        chainId: baseSepolia.id,
+        paymasterMode: 'erc20',
+      });
+      const { result } = renderHook(() => useBatchPayment('usdc'), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1_000_000n,
+      });
+
+      await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+      // erc20 mode では gas price 取得自体スキップ
+      expect(getUserOperationGasPrice).not.toHaveBeenCalled();
+    });
+
     it('chainId が undefined (ウォレット未接続相当) → ガード skip して送信進行', async () => {
       // chainId なし: ガード判定をスキップ。本来は呼出側 (UI) が gating する
       // が、defense-in-depth で hook 内部もクラッシュしない振る舞いを保証。
@@ -368,7 +399,7 @@ describe('useBatchPayment', () => {
       vi.mocked(useAccount).mockReturnValue({
         chainId: undefined,
       } as unknown as ReturnType<typeof useAccount>);
-      const { result } = renderHook(() => useBatchPayment(), {
+      const { result } = renderHook(() => useBatchPayment('jpyc'), {
         wrapper: makeWrapper(),
       });
 
@@ -385,9 +416,9 @@ describe('useBatchPayment', () => {
     });
 
     it('feeAmount=0 ガードは gas price チェックより先に発火', async () => {
-      // sponsorship 防御 (feeAmount=0) のエラーパス: gas price 取得は不要なはず
+      // 運営収益確保 (feeAmount=0) のエラーパス: gas price 取得は不要なはず
       mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
-      const { result } = renderHook(() => useBatchPayment(), {
+      const { result } = renderHook(() => useBatchPayment('jpyc'), {
         wrapper: makeWrapper(),
       });
 

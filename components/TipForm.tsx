@@ -8,11 +8,13 @@ import { ConnectButton } from './ConnectButton';
 import { Row } from './Row';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
+import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { calcBreakdown } from '@/lib/fee';
 import { chainForToken } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
+import { resolvePaymasterMode } from '@/lib/pimlico';
 import { getToken } from '@/lib/tokens';
 import { DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
 
@@ -23,6 +25,8 @@ export function TipForm({ params }: { params: TipParams }) {
   const t = useTranslations('TipForm');
   const token = getToken(params.token);
   const requiredChain = chainForToken(params.token);
+  const paymasterMode = resolvePaymasterMode(params.token);
+  const isErc20Paymaster = paymasterMode === 'erc20';
   const presets =
     params.presets && params.presets.length > 0
       ? params.presets
@@ -33,8 +37,9 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
-  const { data: saData, error: saError } = useSmartAccount(true);
-  const gasless = useBatchPayment();
+  const { data: saData, error: saError } = useSmartAccount(params.token, true);
+  const gasless = useBatchPayment(params.token);
+  const gasQuote = useGasQuoteUsdc(params.token, isErc20Paymaster);
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     presets[0] ?? null,
@@ -50,10 +55,20 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // tip は外税固定: 受取人 (= クリエイター) は preset 額をそのまま受け取り、
   // tipper が 1% (or MIN_FEE) を上乗せして支払う。
-  const breakdown = useMemo(
+  const baseBreakdown = useMemo(
     () => calcBreakdown(amountWei, 'exclude', params.token),
     [amountWei, params.token],
   );
+
+  // ERC20 Paymaster mode (USDC mainnet) のときだけ gas を上乗せ表示する。
+  const gasAmount = isErc20Paymaster ? gasQuote.data?.gasAmount : undefined;
+  const breakdown = useMemo(
+    () => ({ ...baseBreakdown, gasAmount }),
+    [baseBreakdown, gasAmount],
+  );
+
+  const totalCustomerOutflow =
+    breakdown.customerPays + (gasAmount ?? 0n);
 
   const fmt = (wei: bigint) =>
     `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
@@ -69,23 +84,29 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const insufficientBalance =
     balanceQuery.data !== undefined &&
-    breakdown.customerPays > 0n &&
-    balanceQuery.data < breakdown.customerPays;
+    totalCustomerOutflow > 0n &&
+    balanceQuery.data < totalCustomerOutflow;
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
+  const gasQuoteReady = !isErc20Paymaster || gasQuote.data !== undefined;
   const canSubmit =
     isConnected &&
     !wrongChain &&
     !!saData &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
-    !gasless.isPending;
+    !gasless.isPending &&
+    gasQuoteReady;
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
+  const gasQuoteError =
+    isErc20Paymaster && gasQuote.error ? gasQuote.error.message : null;
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
-    : (gasless.error?.message ?? (saError ? saError.message : null));
+    : (gasless.error?.message ??
+      (saError ? saError.message : null) ??
+      gasQuoteError);
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });
@@ -94,6 +115,12 @@ export function TipForm({ params }: { params: TipParams }) {
   useEffect(() => {
     if (saError) logger.error('tip.smart-account.init-failed', { error: saError });
   }, [saError]);
+
+  useEffect(() => {
+    if (gasQuote.error) {
+      logger.error('tip.gas-quote.failed', { error: gasQuote.error });
+    }
+  }, [gasQuote.error]);
 
   useEffect(() => {
     if (!gasless.data || !gasless.data.success) return;
@@ -266,15 +293,25 @@ export function TipForm({ params }: { params: TipParams }) {
         <dl className="mt-2 space-y-1.5">
           <Row label={t('creatorRow')} value={fmt(breakdown.merchantReceives)} />
           <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
+          {isErc20Paymaster && (
+            <Row
+              label={t('gasRow')}
+              value={
+                gasAmount !== undefined
+                  ? t('gasRowValue', { amount: fmt(gasAmount) })
+                  : t('gasRowPending')
+              }
+            />
+          )}
           <div className="my-1 border-t border-slate-200" />
           <Row
             label={t('customerRow')}
-            value={fmt(breakdown.customerPays)}
+            value={fmt(totalCustomerOutflow)}
             strong
           />
         </dl>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {t('gaslessHint')}
+          {isErc20Paymaster ? t('gaslessHintUsdc') : t('gaslessHintJpyc')}
         </p>
       </section>
 
@@ -307,7 +344,7 @@ export function TipForm({ params }: { params: TipParams }) {
         {insufficientBalance && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
             {t('insufficientBalance', {
-              amount: fmt(breakdown.customerPays),
+              amount: fmt(totalCustomerOutflow),
             })}
           </p>
         )}
@@ -328,9 +365,11 @@ export function TipForm({ params }: { params: TipParams }) {
               ? t('btnSwitchChain')
               : !saData
                 ? t('btnSaInit')
-                : breakdown.customerPays === 0n
-                  ? t('btnSelectAmount')
-                  : t('btnSend', { amount: fmt(breakdown.customerPays) })}
+                : isErc20Paymaster && !gasQuoteReady
+                  ? t('btnGasQuoteLoading')
+                  : breakdown.customerPays === 0n
+                    ? t('btnSelectAmount')
+                    : t('btnSend', { amount: fmt(totalCustomerOutflow) })}
       </button>
 
       {error && (

@@ -1,9 +1,18 @@
 // Pimlico bundler/paymaster URL は同一エンドポイント。EntryPoint v0.7 を使用。
-// 本 MVP は Sponsorship (Verifying) Paymaster で運営がガスを肩代わりする (README 参照)。
+//
+// 2 種類の Paymaster を token に応じて使い分ける:
+//   - JPYC (Polygon): Sponsorship (Verifying) Paymaster
+//       運営が POL ガスを肩代わり (15 JPYC フロアで黒字)
+//   - USDC (Base):    ERC20 Paymaster
+//       顧客が USDC でガスを支払う (Base ETH 立替えの赤字リスク回避)
+//
+// testnet (Base Sepolia) では Pimlico の ERC20 Paymaster が未対応のため、
+// USDC でも Sponsorship にフォールバックする。
 import { http } from 'viem';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { entryPoint07Address } from 'viem/account-abstraction';
-import { env } from './env';
+import { env, isMainnet } from './env';
+import { TOKENS, type PaymasterMode, type TokenSymbol } from './tokens';
 
 export function pimlicoUrl(chainId: number): string {
   if (!env.pimlicoApiKey) {
@@ -21,9 +30,30 @@ export function createPimlico(chainId: number) {
   });
 }
 
-export function pimlicoPaymasterContext():
+/** token と現在のネットワーク (mainnet/testnet) から paymaster mode を決定 */
+export function resolvePaymasterMode(token: TokenSymbol): PaymasterMode {
+  const declared = TOKENS[token].paymasterMode;
+  // ERC20 Paymaster は Pimlico の対応上 mainnet 限定。
+  // testnet では sponsorship にフォールバックして開発者が動作確認できるようにする。
+  if (declared === 'erc20' && !isMainnet) return 'sponsorship';
+  return declared;
+}
+
+/**
+ * paymaster mode に応じた paymasterContext を返す。
+ *   sponsorship → { sponsorshipPolicyId } (env で policy id が指定されているとき)
+ *   erc20       → { token: <ERC20 トークンアドレス> }
+ */
+export function pimlicoPaymasterContext(
+  token: TokenSymbol,
+):
   | { sponsorshipPolicyId: string }
+  | { token: `0x${string}` }
   | undefined {
+  const mode = resolvePaymasterMode(token);
+  if (mode === 'erc20') {
+    return { token: TOKENS[token].address };
+  }
   return env.pimlicoSponsorshipPolicyId
     ? { sponsorshipPolicyId: env.pimlicoSponsorshipPolicyId }
     : undefined;

@@ -43,7 +43,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       undefined as ReturnType<typeof usePublicClient>,
     );
 
-    const { result } = renderHook(() => useSmartAccount(), {
+    const { result } = renderHook(() => useSmartAccount('jpyc'), {
       wrapper: makeWrapper(),
     });
     expect(result.current.data).toBeUndefined();
@@ -58,7 +58,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
     mockHook(useWalletClient, { data: { chain: { id: 1 } } });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount(), {
+    const { result } = renderHook(() => useSmartAccount('jpyc'), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -73,7 +73,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
     mockHook(useWalletClient, { data: undefined });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount(), {
+    const { result } = renderHook(() => useSmartAccount('jpyc'), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -89,7 +89,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       undefined as ReturnType<typeof usePublicClient>,
     );
 
-    const { result } = renderHook(() => useSmartAccount(), {
+    const { result } = renderHook(() => useSmartAccount('jpyc'), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');

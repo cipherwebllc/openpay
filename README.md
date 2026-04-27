@@ -1,7 +1,10 @@
 # OpenPay
 
 小規模店舗・クリエイター・フリーランスが**ウォレットアドレス1つだけ**で導入できる、オープンソースのガスレス決済 / Tip widget ジェネレーター。  
-ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base)** で決済できます。
+ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base)** で決済できます。
+
+- **JPYC (Polygon)**: 運営が POL ガスを肩代わり (Sponsorship Paymaster)
+- **USDC (Base)**: 顧客が USDC のままガスを支払い (ERC20 Paymaster)。運営の ETH 立替えなし
 
 - `/{locale}` — 店舗向け QR ジェネレーター + クリエイター向け Tip widget 埋め込みコード生成 (タブ切替)
 - `/{locale}/pay?to=...&token=...&fee=...&amount=...&split=0xB:30,0xC:20` — QR をスキャンした顧客の決済画面 (`split=` で複数受取人へ % 分配可能)
@@ -15,7 +18,8 @@ ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組
 
 | 項目 | 内容 |
 | --- | --- |
-| ガスレス | Pimlico Sponsorship (Verifying) Paymaster で運営がガス代を肩代わり |
+| ガスレス (JPYC) | Pimlico Sponsorship (Verifying) Paymaster で運営が POL を肩代わり |
+| ガスレス (USDC) | Pimlico ERC20 Paymaster で顧客が USDC のままガスを支払う (ETH 不要) |
 | EOA をそのまま使用 | ERC-7702 によって、顧客の MetaMask 等の **既存 EOA 残高** で決済 (事前送金不要) |
 | バッチ送金 | 「店主への送金」と「運営手数料」を 1 つの UserOperation にまとめて送信 |
 | 2チェーン対応 | JPYC (Polygon) / USDC (Base) を切替可能 |
@@ -37,7 +41,7 @@ ERC-4337 (Account Abstraction) + Pimlico Sponsorship Paymaster + ERC-7702 を組
 | **記帳** | 手動 / レジ閉め | カード会社管理画面 | 管理画面 | **オンチェーンで自動 + 改竄不可** |
 | **海外顧客** | 両替が必要 | 国際ブランドで対応 (DCC 手数料あり) | 国内中心 | **グローバル** (USDC は世界共通通貨) |
 | **紛失 / 盗難** | 物理リスクあり | 物理 (但し補償あり) | 限定的 | **秘密鍵管理のみ** |
-| **顧客のガス代** | ─ | ─ | ─ | **0 円** (運営肩代わり) |
+| **顧客のガス代** | ─ | ─ | ─ | **JPYC: 0 円 (運営肩代わり) / USDC: USDC 建てで自動徴収 (ETH 不要)** |
 | **ベンダーロック** | ─ | あり (カード会社契約) | あり (PayPay 内に閉じる) | **なし** (OSS / セルフホスト可) |
 | **コード透明性** | ─ | クローズド | クローズド | **MIT / 全ソース公開** |
 
@@ -62,7 +66,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 日本のイラストレーター / エンジニア / 翻訳者が海外クライアントから報酬を受け取る際、Wise や PayPal は **手数料 3〜5% + 着金 3〜7 営業日 + 書類処理** が要ります。OpenPay の請求 URL を発行してクライアントへ送れば、USDC で **即時着金 (オンチェーン確定 数十秒) / 手数料 1.2% / 書類ゼロ** で受け取れます。
 
 - 発行手順: `/` で USDC を選び、自分のウォレットアドレスを入力 → 金額指定 → URL or QR を発行 → クライアントへ送付 (メール / Slack / Notion 等で 1 行貼り付けるだけ)
-- クライアント側に必要なのは EIP-7702 対応 EOA (MetaMask v12+) のみ。**ガス代も不要** (運営肩代わり)
+- クライアント側に必要なのは EIP-7702 対応 EOA (MetaMask v12+) のみ。USDC のガス代は USDC 建てで自動徴収されるため ETH の保有は不要
 - 着金履歴はそのままオンチェーンに残るため、事業所得の証憑として税務対応にも使える
 - 国別規制: 受取人 (= 日本のフリーランス) 側は事業所得として確定申告すれば足りる。送付側 (海外クライアント) の規制は管轄国に依存
 
@@ -91,7 +95,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
     title="OpenPay Tip" loading="lazy"
   ></iframe>
   ```
-- ファンは MetaMask v12+ などで接続し、preset (JPYC: 300/1000/3000、USDC: 5/20/50) かカスタム金額を選んで送信。ガス代不要 (運営肩代わり)
+- ファンは MetaMask v12+ などで接続し、preset (JPYC: 300/1000/3000、USDC: 5/20/50) かカスタム金額を選んで送信。JPYC は運営がガスを肩代わり、USDC はファンの USDC 残高から自動徴収 (ネイティブトークン不要)
 - iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
 
 ## 対応ネットワークと選定理由
@@ -110,7 +114,14 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 3. 運営は定期的に **JPYC → POL** に swap して Pimlico 残高を補充する必要がある
    - JPYC/POL の DEX ペアは流動性が薄いため、実務的には **JPYC → USDC → POL** の 2-hop swap (QuickSwap / Uniswap v3 on Polygon) が現実的
    - 自動化案: OpenZeppelin Defender Sentinel / cron + viem による定期 swap
-4. JPYC 1.0% / 15 JPYC、USDC 1.2% / 0.2 USDC の料率は、本番ガス価格 + DEX スリッページ + Pimlico の sponsorship 上乗せを実測してチューニングしてください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され赤字を防ぐ仕様 (詳細は「Gas price ceiling」節)
+4. JPYC 1.0% / 15 JPYC の料率は、本番ガス価格 + DEX スリッページ + Pimlico の sponsorship 上乗せを実測してチューニングしてください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され赤字を防ぐ仕様 (詳細は「Gas price ceiling」節)
+
+### 運用上の含意 (USDC / Base)
+
+1. ガス代は **顧客が USDC のままで支払う**ため、運営は ETH を立替えない (Sponsorship Paymaster と異なり残高補充の運用が要らない)
+2. 内部実装は Pimlico の **ERC20 Paymaster** + permissionless `prepareUserOperationForErc20Paymaster` を使用。UserOp の calls 先頭に paymaster コントラクトへの USDC `approve` が自動注入される (既に十分な allowance がある場合はスキップ)
+3. 顧客が UI で見る支払額は `決済額 + 運営手数料 + ガス代見積 (USDC 建て)`。ガス代は worst-case 見積で表示し、実費が下回れば超過分は引き落とされない
+4. testnet (Base Sepolia) では Pimlico の ERC20 Paymaster が未対応のため、**自動的に Sponsorship Paymaster にフォールバック**する (`lib/pimlico.ts:resolvePaymasterMode`)。テスト環境でも顧客は ETH 不要
 
 ### 将来の拡張余地
 
@@ -133,8 +144,11 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 │       2. ウォレット接続 (wagmi)                          │
 │       3. 必要チェーンへ自動切替                          │
 │       4. ERC-7702: EOA を Smart Account 化              │
-│       5. Pimlico Sponsorship Paymaster でガス補助        │
+│       5. token に応じて Paymaster を選択                │
+│          - JPYC: Sponsorship (運営が POL を肩代わり)    │
+│          - USDC: ERC20 Paymaster (顧客が USDC で支払い) │
 │       6. ERC20.transfer × 2 (店主 / 運営) を batch       │
+│          (USDC は paymaster への approve も先頭に注入)  │
 │       7. UserOperation 送信 → receipt 表示              │
 └────────────────────────────────────────────────────────┘
 ```
@@ -192,7 +206,7 @@ openpay/
 
 | サービス | 必要な理由 | コスト | 設定箇所 |
 |---|---|---|---|
-| **Pimlico** ([dashboard.pimlico.io](https://dashboard.pimlico.io)) | ガスレス送金の bundler + sponsorship paymaster | 従量課金 (ガス補助分) | `NEXT_PUBLIC_PIMLICO_API_KEY` + Sponsorship Policy ID |
+| **Pimlico** ([dashboard.pimlico.io](https://dashboard.pimlico.io)) | ガスレス送金の bundler + paymaster (JPYC=Sponsorship / USDC=ERC20) | 従量課金 (Sponsorship 分のみ) | `NEXT_PUBLIC_PIMLICO_API_KEY` + Sponsorship Policy ID |
 | **WalletConnect / Reown** ([cloud.reown.com](https://cloud.reown.com)) | WalletConnect ウォレット接続 (任意、未設定時は除外される) | 無料枠あり | `NEXT_PUBLIC_WC_PROJECT_ID` |
 | **Sentry** ([sentry.io](https://sentry.io)) | エラー追跡 + Replay (10% / エラー時 100%) | 無料枠あり | `NEXT_PUBLIC_SENTRY_DSN` (Plain) + `SENTRY_AUTH_TOKEN` (Sensitive) |
 | **Vercel** ([vercel.com](https://vercel.com)) | Next.js デプロイ + middleware (i18n routing) | Hobby 無料 | プロジェクトインポート + env 投入 |
@@ -241,7 +255,7 @@ npm install -D \
 | --- | --- | --- |
 | `NEXT_PUBLIC_NETWORK_ENV` | ◯ | `mainnet` または `testnet` |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | ◯ | [Pimlico Dashboard](https://dashboard.pimlico.io) で発行した API Key |
-| `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | ◯ (推奨) | Pimlico の Sponsorship Policy ID (例: `sp_xxxx`) |
+| `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | ◯ (JPYC 用 / USDC は不要) | Pimlico の Sponsorship Policy ID (例: `sp_xxxx`)。USDC は ERC20 Paymaster なので未指定でも動く |
 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | ◯ | 運営手数料の受取アドレス |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | △ | [Reown Cloud](https://cloud.reown.com) で発行した WalletConnect Project ID。未設定時は WalletConnect 連携が無効化される |
 | `NEXT_PUBLIC_*_RPC_URL` | × | 公開 RPC が混雑する場合に Alchemy/Infura 等の URL を指定 |
@@ -253,16 +267,17 @@ npm install -D \
 
 1. [https://dashboard.pimlico.io](https://dashboard.pimlico.io) でアカウント作成し API Key を発行
 2. **本番運用時は必ず "Origin (ドメイン) 制限" を有効化**してください。`NEXT_PUBLIC_PIMLICO_API_KEY` はクライアントバンドルに含まれるため、Origin 制限なしでは API Key が悪用される可能性があります
-3. 以下のチェーン用に Sponsorship 残高をデポジット:
-   - `mainnet`: Polygon (POL) / Base (ETH)
-   - `testnet`: Polygon Amoy (POL) / Base Sepolia (ETH)
-4. **Sponsorship Policy** を作成し、その `policyId` を `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` に設定 (チェーン横断で 1 つの policyId を使い回せます)
-5. **濫用対策ルール** を Policy に必ず設定 (これがないと、誰かが任意の `/pay` URL を生成して運営の sponsorship 残高を消費できる):
-   - `to address allowlist`: トークンコントラクトアドレスのみ許可 (JPYC: `0xE7C3...3c29`、USDC Base: `0x8335...2913`、USDC Base Sepolia: `0x036C...CF7e`、JPYC Polygon Amoy: 自分のテストデプロイ)
+3. **Sponsorship 残高をデポジット (JPYC 用)**:
+   - `mainnet`: Polygon (POL)
+   - `testnet`: Polygon Amoy (POL) / Base Sepolia (ETH) ※ testnet では USDC も sponsorship にフォールバックするため Base Sepolia ETH も必要
+   - **Base mainnet (USDC) は ERC20 Paymaster 経由で顧客が払うため Sponsorship 残高デポジットは不要**
+4. **Sponsorship Policy** を作成し、その `policyId` を `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` に設定 (JPYC で適用される。USDC mainnet 用には別途設定不要)
+5. **濫用対策ルール** を Policy に必ず設定 (これがないと、誰かが任意の `/pay` URL を生成して運営の sponsorship 残高を消費できる)。**JPYC (Polygon) のみが対象** (USDC は ERC20 Paymaster なので濫用余地なし — 顧客が払う):
+   - `to address allowlist`: JPYC コントラクト (mainnet: `0xE7C3...3c29` / Polygon Amoy: 自分のテストデプロイ)
    - `function selector allowlist`: `transfer(address,uint256)` (`0xa9059cbb`) のみ
    - `data parameter constraint`: 受取人パラメータの 1 つが必ず `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` であること (= 運営手数料 transfer を含む UserOp のみ sponsor)
-   - **gas price 上限**: `lib/gasCeiling.ts` と同等以上の値 (Polygon 200 gwei / Base 1 gwei) を Policy に設定。クライアント側ガードはユーザ向け早期エラー、Policy 側は改竄不可な最終防衛線として機能 (二重ガード)
-   - クライアント側でも `useBatchPayment` が `feeAmount > 0` と `assertGasCeiling` を assertion して defense in depth
+   - **gas price 上限**: `lib/gasCeiling.ts` の Polygon 値 (200 gwei) と同等以上を Policy に設定。クライアント側ガードはユーザ向け早期エラー、Policy 側は改竄不可な最終防衛線として機能 (二重ガード)
+   - クライアント側でも sponsorship mode のとき `useBatchPayment` が `feeAmount > 0` と `assertGasCeiling` を assertion して defense in depth (ERC20 mode では顧客が支払うため gas ceiling は不要)
 
 ### 4. 開発サーバー
 
@@ -323,12 +338,14 @@ Tip widget の手数料は **外税** 固定 (JPYC 1.0% / USDC 1.2%)。クリエ
 
 ### Gas price ceiling (赤字回避ガード)
 
-`lib/gasCeiling.ts` で UserOp 送信前の `maxFeePerGas` をチェーン別に上限判定し、超過していれば `GasCongestedError` を投げてユーザに「ネットワーク混雑」エラーを返します。フロア手数料 (15 JPYC / 0.2 USDC) では極端な gas spike を吸収できないため、送信前に弾く方が損失より安全という判断。
+`lib/gasCeiling.ts` で UserOp 送信前の `maxFeePerGas` をチェーン別に上限判定し、超過していれば `GasCongestedError` を投げてユーザに「ネットワーク混雑」エラーを返します。フロア手数料 (15 JPYC) では極端な gas spike を吸収できないため、送信前に弾く方が損失より安全という判断。
+
+**適用対象は Sponsorship Paymaster mode のみ** (= JPYC、および testnet にフォールバックされた USDC)。USDC mainnet の ERC20 Paymaster mode では顧客自身が gas を支払うので運営の赤字保護は不要 — チェック自体をスキップする (`useBatchPayment.ts`)。
 
 | チェーン | 既定上限 | env 上書き |
 | --- | --- | --- |
 | Polygon (137) | 200 gwei | `NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI` |
-| Base (8453) | 1 gwei (L2) | `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` |
+| Base (8453) | 1 gwei (L2) | `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` (testnet fallback 用) |
 | Polygon Amoy / Base Sepolia | 1000 gwei (緩) | (testnet 固定) |
 
 運用フェーズでは Sentry の `gas_congested` イベントを監視して再デプロイなしで上限値を調整できる設計。Pimlico Sponsorship Policy 側にも同等以上の上限を設定すること (二重ガード)。

@@ -19,10 +19,21 @@ vi.mock('wagmi', () => ({
 }));
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
+vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
+vi.mock('@/lib/pimlico', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
+  return {
+    ...actual,
+    resolvePaymasterMode: vi.fn(actual.resolvePaymasterMode),
+  };
+});
 
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
+import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
+import { resolvePaymasterMode } from '@/lib/pimlico';
 import { TipForm } from '@/components/TipForm';
 import type { TipParams } from '@/lib/url';
 import { mockHook } from '../_helpers/wagmiMock';
@@ -82,13 +93,32 @@ function setSwitchChain() {
   });
 }
 
+function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?: bigint) {
+  mockHook(useGasQuoteUsdc, {
+    data:
+      state === 'ready'
+        ? {
+            gasAmount: amount ?? 100_000n,
+            exchangeRate: 1n,
+            maxFeePerGas: 1n,
+          }
+        : undefined,
+    isLoading: state === 'pending',
+    isError: state === 'error',
+    error: state === 'error' ? new Error('quote failed') : null,
+  } as Partial<ReturnType<typeof useGasQuoteUsdc>>);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setSwitchChain();
   setBalance(undefined);
   setSmartAccount(false);
   setBatchPayment('idle');
+  setGasQuote('disabled');
   setAccount({ connected: false });
+  // 既定: testnet 環境 → 全 token sponsorship。erc20 を test したい block で override
+  vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
 });
 
 const JPYC_PARAMS: TipParams = {
@@ -400,5 +430,92 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+});
+
+describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
+  beforeEach(() => {
+    vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
+      token === 'usdc' ? 'erc20' : 'sponsorship',
+    );
+  });
+
+  it('gas 見積取得前 → ボタン無効、明細の gas 行が「見積取得中…」', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('pending');
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByRole('button', { name: /ガス代見積取得中/ }),
+    ).toBeDisabled();
+    // 「見積取得中…」はボタン文言とも被るので、gas 行の dt にスコープして確認
+    expectBreakdownRow(/ネットワーク手数料/, '見積取得中…');
+  });
+
+  it('gas 見積あり: 明細に gas 行 + customer に加算 (preset 5 USDC)', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 300_000n); // 0.3 USDC
+    render(<TipForm params={USDC_PARAMS} />);
+
+    // 既定 preset 1 USDC: creator=1, fee=0.2, gas=0.3, customer = 1.5
+    expectBreakdownRow('クリエイター受取', '1 USDC');
+    expectBreakdownRow(/運営手数料/, '0.2 USDC');
+    expectBreakdownRow(/ネットワーク手数料/, '最大 0.3 USDC');
+    expectBreakdownRow('あなたの支払額', '1.5 USDC');
+  });
+
+  it('gas 込みで残高不足: 警告 + ボタン disabled', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    // 1.4 USDC: preset 1 USDC + fee 0.2 + gas 0.3 = 1.5 > 1.4
+    setBalance(1_400_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 300_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /1.5 USDC を送る/ }),
+    ).toBeDisabled();
+  });
+
+  it('USDC 用の gaslessHint が表示される', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByText(/USDC でお支払いいただきます/),
+    ).toBeInTheDocument();
+  });
+
+  it('JPYC params (sponsorship) は ERC20 mock 下でも gas 行が出ない', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/ネットワーク手数料/)).toBeNull();
+  });
+
+  it('mutate には gas を含めない (creator + fee のみ)', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 300_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    await user.click(screen.getByRole('button', { name: '5 USDC' }));
+    await user.click(
+      screen.getByRole('button', { name: /5.5 USDC を送る/ }),
+    );
+
+    const call = mutate.mock.calls[0][0];
+    expect(call.merchantAmount).toBe(5_000_000n);
+    expect(call.feeAmount).toBe(200_000n);
+    // gas は paymaster が postOp で引くため、明示的な extraRecipients には含めない
+    expect(call.extraRecipients).toBeUndefined();
   });
 });

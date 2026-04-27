@@ -25,12 +25,25 @@ vi.mock('wagmi', () => ({
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useDirectPayment', () => ({ useDirectPayment: vi.fn() }));
+vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
+// resolvePaymasterMode は env 依存なので、testnet/mainnet を切替えられるよう
+// テスト個別に注入する。
+vi.mock('@/lib/pimlico', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
+  return {
+    ...actual,
+    resolvePaymasterMode: vi.fn(actual.resolvePaymasterMode),
+  };
+});
 
 import { useSearchParams, type ReadonlyURLSearchParams } from 'next/navigation';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
+import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
+import { resolvePaymasterMode } from '@/lib/pimlico';
 import { PaymentForm } from '@/components/PaymentForm';
 import { mockHook } from '../_helpers/wagmiMock';
 
@@ -125,6 +138,25 @@ function setSwitchChain() {
   });
 }
 
+// useGasQuoteUsdc は ERC20 paymaster mode のみ動く。テストの大半は testnet 環境で
+// USDC が sponsorship にフォールバックされるので enabled=false → data=undefined に
+// なる。下記の状態を既定にし、ERC20 mode テストだけ data を持たせる。
+function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?: bigint) {
+  mockHook(useGasQuoteUsdc, {
+    data:
+      state === 'ready'
+        ? {
+            gasAmount: amount ?? 100_000n, // 0.1 USDC
+            exchangeRate: 1n,
+            maxFeePerGas: 1n,
+          }
+        : undefined,
+    isLoading: state === 'pending',
+    isError: state === 'error',
+    error: state === 'error' ? new Error('quote failed') : null,
+  } as Partial<ReturnType<typeof useGasQuoteUsdc>>);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setSwitchChain();
@@ -132,7 +164,13 @@ beforeEach(() => {
   setSmartAccount(false);
   setPayment('idle');
   setDirectPayment('idle');
+  setGasQuote('disabled');
   setAccount({ connected: false });
+  // 既定は testnet 環境の挙動 (USDC/JPYC とも sponsorship)。ERC20 mode を
+  // 検証する describe ブロックでだけ override する。
+  vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
+    token === 'jpyc' ? 'sponsorship' : 'sponsorship',
+  );
 });
 
 describe('PaymentForm — URL parse', () => {
@@ -494,5 +532,101 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
     render(<PaymentForm />);
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/user rejected/)).toBeInTheDocument();
+  });
+});
+
+describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
+  beforeEach(() => {
+    // mainnet 相当: USDC は erc20 mode、JPYC は sponsorship
+    vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
+      token === 'usdc' ? 'erc20' : 'sponsorship',
+    );
+  });
+
+  it('gas 見積取得前: ボタンが「ガス代見積取得中…」で disabled', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('pending');
+    render(<PaymentForm />);
+    expect(
+      screen.getByRole('button', { name: /ガス代見積取得中/ }),
+    ).toBeDisabled();
+  });
+
+  it('gas 見積あり: 明細に「ネットワーク手数料 (見積)」行が出て、上限値が customer に加算される', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=exclude&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n); // 0.5 USDC
+    render(<PaymentForm />);
+
+    expect(screen.getByText(/ネットワーク手数料/)).toBeInTheDocument();
+    // gas 行の値: "最大 0.5 USDC"
+    expect(screen.getByText(/最大 0\.5 USDC/)).toBeInTheDocument();
+    // 顧客支払額 = 100 (merchant) + 1.2 (fee) + 0.5 (gas) = 101.7 USDC
+    expect(screen.getByText('101.7 USDC')).toBeInTheDocument();
+  });
+
+  it('gas を含めた残高チェック: gas 込みで足りなければ「残高不足」', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=exclude&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    // 残高 101 USDC、必要 101.7 USDC (100 + 1.2 fee + 0.5 gas) → 不足
+    setBalance(101_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n);
+    render(<PaymentForm />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /101.7 USDC を支払う/ }),
+    ).toBeDisabled();
+  });
+
+  it('JPYC + erc20 mock 設定下でも JPYC 側は sponsorship 経路で gas 行が出ない', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&fee=include&amount=1000`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    setGasQuote('disabled');
+    render(<PaymentForm />);
+    expect(screen.queryByText(/ネットワーク手数料/)).toBeNull();
+  });
+
+  it('gaslessBatchHintUsdc が表示される (USDC paymaster の説明文)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<PaymentForm />);
+    expect(
+      screen.getByText(/USDC でお支払いいただきます/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/POL を保有する必要はありません/)).toBeNull();
+  });
+
+  it('mutate には gas を含めない (merchant + fee のみ — gas は paymaster 経由で別途引き落とされる)', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&fee=exclude&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 500_000n);
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    await user.click(
+      screen.getByRole('button', { name: /101.7 USDC を支払う/ }),
+    );
+
+    expect(mutate).toHaveBeenCalledOnce();
+    const call = mutate.mock.calls[0][0];
+    // mutate には fee と merchant のみ。gas は paymaster が postOp で引くので
+    // 明示的な transfer は組まない。
+    expect(call.merchantAmount).toBe(100_000_000n);
+    expect(call.feeAmount).toBe(1_200_000n);
+    expect(call.extraRecipients).toBeUndefined();
   });
 });
