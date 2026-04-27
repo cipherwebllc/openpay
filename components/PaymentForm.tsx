@@ -62,9 +62,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 両方のフックを常に call し、isDirect で送信先を分岐 (条件付きフックは禁止)。
   const gasless = useBatchPayment(params.token);
   const direct = useDirectPayment();
-
-  // ERC20 Paymaster mode (USDC mainnet) のときだけ gas 見積をフェッチ。
-  // sponsorship / testnet / direct mode では enabled=false で no-op。
   const gasQuote = useGasQuoteUsdc(params.token, isErc20Paymaster);
 
   const fixedAmount = params.amount ?? '';
@@ -137,13 +134,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
   // 差し替え (direct モードは paymaster を経由しないため対象外)。
   const flowError = isDirect ? direct.error : gasless.error;
-  const gasQuoteError =
-    isErc20Paymaster && gasQuote.error ? gasQuote.error.message : null;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowError?.message ??
-      (!isDirect && saError ? saError.message : null) ??
-      gasQuoteError);
+      (isDirect ? undefined : saError?.message) ??
+      gasQuote.error?.message ??
+      null);
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
@@ -158,9 +154,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   }, [saError]);
 
   useEffect(() => {
-    if (gasQuote.error) {
-      logger.error('payment.gas-quote.failed', { error: gasQuote.error });
-    }
+    if (gasQuote.error) logger.error('payment.gas-quote.failed', { error: gasQuote.error });
   }, [gasQuote.error]);
 
   useEffect(() => {

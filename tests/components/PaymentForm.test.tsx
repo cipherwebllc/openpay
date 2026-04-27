@@ -143,14 +143,7 @@ function setSwitchChain() {
 // なる。下記の状態を既定にし、ERC20 mode テストだけ data を持たせる。
 function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?: bigint) {
   mockHook(useGasQuoteUsdc, {
-    data:
-      state === 'ready'
-        ? {
-            gasAmount: amount ?? 100_000n, // 0.1 USDC
-            exchangeRate: 1n,
-            maxFeePerGas: 1n,
-          }
-        : undefined,
+    data: state === 'ready' ? { gasAmount: amount ?? 100_000n } : undefined,
     isLoading: state === 'pending',
     isError: state === 'error',
     error: state === 'error' ? new Error('quote failed') : null,

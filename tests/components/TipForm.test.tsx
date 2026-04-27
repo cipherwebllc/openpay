@@ -95,14 +95,7 @@ function setSwitchChain() {
 
 function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?: bigint) {
   mockHook(useGasQuoteUsdc, {
-    data:
-      state === 'ready'
-        ? {
-            gasAmount: amount ?? 100_000n,
-            exchangeRate: 1n,
-            maxFeePerGas: 1n,
-          }
-        : undefined,
+    data: state === 'ready' ? { gasAmount: amount ?? 100_000n } : undefined,
     isLoading: state === 'pending',
     isError: state === 'error',
     error: state === 'error' ? new Error('quote failed') : null,

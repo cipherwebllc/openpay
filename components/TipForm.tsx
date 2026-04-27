@@ -93,13 +93,12 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
-  const gasQuoteError =
-    isErc20Paymaster && gasQuote.error ? gasQuote.error.message : null;
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
     : (gasless.error?.message ??
-      (saError ? saError.message : null) ??
-      gasQuoteError);
+      saError?.message ??
+      gasQuote.error?.message ??
+      null);
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });
@@ -110,9 +109,7 @@ export function TipForm({ params }: { params: TipParams }) {
   }, [saError]);
 
   useEffect(() => {
-    if (gasQuote.error) {
-      logger.error('tip.gas-quote.failed', { error: gasQuote.error });
-    }
+    if (gasQuote.error) logger.error('tip.gas-quote.failed', { error: gasQuote.error });
   }, [gasQuote.error]);
 
   useEffect(() => {

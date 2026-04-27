@@ -39,19 +39,14 @@ export function resolvePaymasterMode(token: TokenSymbol): PaymasterMode {
   return declared;
 }
 
-/**
- * paymaster mode に応じた paymasterContext を返す。
- *   sponsorship → { sponsorshipPolicyId } (env で policy id が指定されているとき)
- *   erc20       → { token: <ERC20 トークンアドレス> }
- */
+/** sponsorship のとき env で policy id が無ければ undefined (sponsor なし扱い) */
 export function pimlicoPaymasterContext(
   token: TokenSymbol,
 ):
   | { sponsorshipPolicyId: string }
   | { token: `0x${string}` }
   | undefined {
-  const mode = resolvePaymasterMode(token);
-  if (mode === 'erc20') {
+  if (resolvePaymasterMode(token) === 'erc20') {
     return { token: TOKENS[token].address };
   }
   return env.pimlicoSponsorshipPolicyId

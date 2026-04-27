@@ -105,8 +105,6 @@ describe('useGasQuoteUsdc', () => {
     //       nativeCost = 530_000 * 2 = 1_060_000 wei
     //       gasAmount = 1_060_000 * 1e18 / 1e18 = 1_060_000 (token base units)
     expect(result.current.data!.gasAmount).toBe(1_060_000n);
-    expect(result.current.data!.maxFeePerGas).toBe(2n);
-    expect(result.current.data!.exchangeRate).toBe(10n ** 18n);
   });
 
   it('Pimlico が空 quotes を返したらエラー', async () => {

@@ -17,26 +17,15 @@ import { env } from '@/lib/env';
 import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
 import { TOKENS, type TokenSymbol } from '@/lib/tokens';
 
-// rough な worst-case 想定。実機計測前なので具体的な内訳の根拠はない。
-// 実費が下回れば paymaster 側で超過分は引かれない。値が小さすぎて approve
-// allowance が不足すると userOp が postOp で revert するため、本番計測後に
-// NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS で安全側に再調整すること。
+// 値が小さすぎて approve allowance が不足すると userOp が postOp で revert する
+// ため、本番計測後に NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS で安全側に再調整する。
 const DEFAULT_USEROP_GAS_UNITS = 500_000n;
-
-export type GasQuoteUsdc = {
-  /** 見積 gas 量 (USDC 建て、token decimals 適用済) */
-  gasAmount: bigint;
-  /** Pimlico の USDC ↔ native exchangeRate (debug 用) */
-  exchangeRate: bigint;
-  /** 計算に使った fast maxFeePerGas (wei) */
-  maxFeePerGas: bigint;
-};
 
 export function useGasQuoteUsdc(token: TokenSymbol, enabled: boolean = true) {
   const tokenInfo = TOKENS[token];
   const isActive = enabled && resolvePaymasterMode(token) === 'erc20';
 
-  return useQuery<GasQuoteUsdc>({
+  return useQuery({
     enabled: isActive,
     queryKey: [
       'openpay',
@@ -63,15 +52,15 @@ export function useGasQuoteUsdc(token: TokenSymbol, enabled: boolean = true) {
         );
       }
       const { exchangeRate, postOpGas } = quotes[0];
-      const maxFeePerGas = gasPrice.fast.maxFeePerGas;
       const overhead =
         env.gasQuoteOverheadUnits !== undefined
           ? BigInt(env.gasQuoteOverheadUnits)
           : DEFAULT_USEROP_GAS_UNITS;
       const totalGas = overhead + postOpGas;
       // exchangeRate は 1e18 スケールの token / native 比
-      const gasAmount = (totalGas * maxFeePerGas * exchangeRate) / 10n ** 18n;
-      return { gasAmount, exchangeRate, maxFeePerGas };
+      const gasAmount =
+        (totalGas * gasPrice.fast.maxFeePerGas * exchangeRate) / 10n ** 18n;
+      return { gasAmount };
     },
   });
 }
