@@ -1,4 +1,7 @@
-// fee = max(amount * 1%, MIN_FEE) — JPYC: 15 JPYC, USDC: 0.1 USDC
+// fee = max(amount * FEE_BPS[token], MIN_FEE[token])
+//   JPYC (Polygon): 1.0% / 15 JPYC  — Polygon ガスは平常時 1〜3 JPY なのでフロア 15 で十分黒字
+//   USDC (Base):    1.2% / 0.2 USDC — Base L1 calldata の高騰時にもフロアで赤字を出さないため厚め
+//
 //   include (内税): customer = amount,       merchant = amount - fee, op = fee
 //   exclude (外税): customer = amount + fee, merchant = amount,       op = fee
 import type { Address } from 'viem';
@@ -6,19 +9,23 @@ import type { TokenSymbol } from './tokens';
 
 export type FeeMode = 'include' | 'exclude';
 
-const FEE_BPS = 100n; // 1.0%
 const BPS_DENOM = 10_000n;
+
+export const FEE_BPS: Record<TokenSymbol, bigint> = {
+  jpyc: 100n, // 1.0%
+  usdc: 120n, // 1.2%
+};
 
 export const MIN_FEE: Record<TokenSymbol, bigint> = {
   jpyc: 15n * 10n ** 18n, // 15 JPYC (18 decimals)
-  usdc: 100_000n,         // 0.1 USDC (6 decimals)
+  usdc: 200_000n,         // 0.2 USDC (6 decimals)
 };
 
 export function calcFee(amount: bigint, token: TokenSymbol): bigint {
   if (amount <= 0n) return 0n;
-  const onePercent = (amount * FEE_BPS) / BPS_DENOM;
+  const proportional = (amount * FEE_BPS[token]) / BPS_DENOM;
   const min = MIN_FEE[token];
-  return onePercent > min ? onePercent : min;
+  return proportional > min ? proportional : min;
 }
 
 export type Breakdown = {

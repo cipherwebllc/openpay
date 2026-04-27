@@ -168,10 +168,10 @@ describe('TipForm — 金額選択', () => {
     render(<TipForm params={USDC_PARAMS} />);
     const customInput = screen.getByPlaceholderText('例: 7.50');
     await user.type(customInput, '50');
-    // 50 USDC / 外税 / 1% = 0.5 USDC > MIN 0.1 → fee 0.5, fan pays 50.5
+    // 50 USDC / 外税 / 1.2% = 0.6 USDC > MIN 0.2 → fee 0.6, fan pays 50.6
     expectBreakdownRow('クリエイター受取', '50 USDC');
-    expectBreakdownRow(/運営手数料/, '0.5 USDC');
-    expectBreakdownRow('あなたの支払額', '50.5 USDC');
+    expectBreakdownRow(/運営手数料/, '0.6 USDC');
+    expectBreakdownRow('あなたの支払額', '50.6 USDC');
   });
 
   it('カスタム入力後に preset へ戻すと反映', async () => {
@@ -179,10 +179,10 @@ describe('TipForm — 金額選択', () => {
     render(<TipForm params={USDC_PARAMS} />);
     await user.type(screen.getByPlaceholderText('例: 7.50'), '50');
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
-    // 5 USDC / 外税 / 1% = 0.05 < MIN 0.1 → fee 0.1, fan pays 5.1
+    // 5 USDC / 外税 / 1.2% = 0.06 < MIN 0.2 → fee 0.2, fan pays 5.2
     expectBreakdownRow('クリエイター受取', '5 USDC');
-    expectBreakdownRow(/運営手数料/, '0.1 USDC');
-    expectBreakdownRow('あなたの支払額', '5.1 USDC');
+    expectBreakdownRow(/運営手数料/, '0.2 USDC');
+    expectBreakdownRow('あなたの支払額', '5.2 USDC');
   });
 });
 
@@ -214,20 +214,20 @@ describe('TipForm — 接続状態', () => {
     setBalance(20_000_000n); // 20 USDC
     setSmartAccount(true);
     render(<TipForm params={USDC_PARAMS} />);
-    // 既定 preset = 1 USDC, customer pays 1.1 USDC (fee 0.1)
+    // 既定 preset = 1 USDC, 1.2% = 0.012 < MIN 0.2 → fee 0.2, customer pays 1.2 USDC
     expect(
-      screen.getByRole('button', { name: /1.1 USDC を送る/ }),
+      screen.getByRole('button', { name: /1.2 USDC を送る/ }),
     ).not.toBeDisabled();
   });
 
   it('残高不足 → 警告 + 送信 disabled', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(500_000n); // 0.5 USDC < 1.1 needed
+    setBalance(500_000n); // 0.5 USDC < 1.2 needed
     setSmartAccount(true);
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /1.1 USDC を送る/ }),
+      screen.getByRole('button', { name: /1.2 USDC を送る/ }),
     ).toBeDisabled();
   });
 
@@ -251,14 +251,14 @@ describe('TipForm — 送信', () => {
     render(<TipForm params={USDC_PARAMS} />);
 
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
-    await user.click(screen.getByRole('button', { name: /5.1 USDC を送る/ }));
+    await user.click(screen.getByRole('button', { name: /5.2 USDC を送る/ }));
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
     expect(call.merchant.toLowerCase()).toBe(CREATOR.toLowerCase());
-    // 外税: creator gets full preset (5 USDC), fee = MIN 0.1 USDC
+    // 外税: creator gets full preset (5 USDC), 1.2%=0.06 < MIN → fee = 0.2 USDC
     expect(call.merchantAmount).toBe(5_000_000n);
-    expect(call.feeAmount).toBe(100_000n);
+    expect(call.feeAmount).toBe(200_000n);
     expect(call.feeReceiver.toLowerCase()).toBe(
       '0xdead000000000000000000000000000000001234',
     );
@@ -275,11 +275,11 @@ describe('TipForm — 送信', () => {
     render(<TipForm params={USDC_PARAMS} />);
 
     await user.type(screen.getByPlaceholderText('例: 7.50'), '50');
-    await user.click(screen.getByRole('button', { name: /50.5 USDC を送る/ }));
+    await user.click(screen.getByRole('button', { name: /50.6 USDC を送る/ }));
 
     const call = mutate.mock.calls[0][0];
     expect(call.merchantAmount).toBe(50_000_000n);
-    expect(call.feeAmount).toBe(500_000n); // 1% of 50 USDC
+    expect(call.feeAmount).toBe(600_000n); // 1.2% of 50 USDC
   });
 
   it('送信中 → 「送信中…」 disabled', () => {

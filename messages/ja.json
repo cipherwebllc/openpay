@@ -8,7 +8,7 @@
     },
     "tipPanel": {
       "heading": "Tip widget 埋め込みコードを生成",
-      "subheading": "ブログ・ポートフォリオ・配信ページに貼り付けてチップを受け取ります。手数料 1%、ガス代は OpenPay が負担。"
+      "subheading": "ブログ・ポートフォリオ・配信ページに貼り付けてチップを受け取ります。手数料 1.0〜1.2% (チェーンによって異なる)、ガス代は OpenPay が負担。"
     },
     "footer": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
     "linkPay": "/pay (顧客向け)"
@@ -31,7 +31,7 @@
     "feeExcludeDesc": "請求額に手数料を上乗せして顧客請求",
     "advancedExtra": "おまけ機能",
     "directOption": "直接送金 (上級者向け)",
-    "directOptionDesc": "顧客が自分でガス代 (POL / ETH) を支払う代わりに、運営手数料 1% を取らない純粋な ERC20 transfer になります。",
+    "directOptionDesc": "顧客が自分でガス代 (POL / ETH) を支払う代わりに、運営手数料を取らない純粋な ERC20 transfer になります。",
     "splitLabel": "複数受取人 split (主受取人 = 残り {primaryPercent}%)",
     "splitDescription": "最大 {max} 人の追加受取人へ % で分配 (主受取人が残余を取得)。1 つの UserOperation でバッチ送金。",
     "splitPercentLabel": "%",
@@ -52,7 +52,7 @@
     "qrPlaceholderNoAmount": "金額を入力してください",
     "qrPlaceholderGenerating": "QR を生成中…",
     "feeReceiverHeading": "運営手数料の徴収先",
-    "feeReceiverHint": "(1.0% / 最低 15 JPYC または 0.1 USDC)"
+    "feeReceiverHint": "(Polygon JPYC: 1.0% / 最低 15 JPYC、Base USDC: 1.2% / 最低 0.2 USDC)"
   },
   "PaymentForm": {
     "title": "OpenPay 決済",
@@ -64,7 +64,7 @@
     "merchantRow": "店主への送金",
     "primaryRecipientRow": "主受取人 ({percent}%) {addr}",
     "splitRecipientRow": "受取人 ({percent}%) {addr}",
-    "feeRow": "運営手数料 (1.0%)",
+    "feeRow": "運営手数料",
     "customerInclude": "顧客支払額 (内税)",
     "customerExclude": "顧客支払額 (外税)",
     "customerDirect": "顧客支払額",
@@ -100,7 +100,7 @@
     "amountCustomPlaceholderUsdc": "例: 7.50",
     "breakdownTitle": "明細",
     "creatorRow": "クリエイター受取",
-    "feeRow": "運営手数料 (1.0%)",
+    "feeRow": "運営手数料",
     "customerRow": "あなたの支払額",
     "gaslessHint": "ガス代は OpenPay が肩代わりします (Pimlico Sponsorship Paymaster 経由)。ネイティブトークン (POL / ETH) の保有は不要です。",
     "walletSection": "ウォレット",

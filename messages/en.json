@@ -8,7 +8,7 @@
     },
     "tipPanel": {
       "heading": "Generate Tip widget embed code",
-      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1% fee, gas covered by OpenPay."
+      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1.0–1.2% fee (chain-dependent), gas covered by OpenPay."
     },
     "footer": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
     "linkPay": "/pay (customer)"
@@ -31,7 +31,7 @@
     "feeExcludeDesc": "Fee added on top of billed amount, customer pays the total",
     "advancedExtra": "Extras",
     "directOption": "Direct transfer (advanced)",
-    "directOptionDesc": "Customer pays gas (POL / ETH) themselves; the 1% operator fee is skipped and a plain ERC20 transfer is sent.",
+    "directOptionDesc": "Customer pays gas (POL / ETH) themselves; the operator fee is skipped and a plain ERC20 transfer is sent.",
     "splitLabel": "Multi-recipient split (primary keeps {primaryPercent}%)",
     "splitDescription": "Distribute up to {max} additional recipients by %; primary keeps the remainder. Sent as a single batched UserOperation.",
     "splitPercentLabel": "%",
@@ -52,7 +52,7 @@
     "qrPlaceholderNoAmount": "Enter an amount",
     "qrPlaceholderGenerating": "Generating QR…",
     "feeReceiverHeading": "Operator fee receiver",
-    "feeReceiverHint": "(1.0% / minimum 15 JPYC or 0.1 USDC)"
+    "feeReceiverHint": "(Polygon JPYC: 1.0% / min 15 JPYC, Base USDC: 1.2% / min 0.2 USDC)"
   },
   "PaymentForm": {
     "title": "OpenPay Payment",
@@ -64,7 +64,7 @@
     "merchantRow": "To merchant",
     "primaryRecipientRow": "Primary ({percent}%) {addr}",
     "splitRecipientRow": "Recipient ({percent}%) {addr}",
-    "feeRow": "Operator fee (1.0%)",
+    "feeRow": "Operator fee",
     "customerInclude": "You pay (tax-include)",
     "customerExclude": "You pay (tax-exclude)",
     "customerDirect": "You pay",
@@ -100,7 +100,7 @@
     "amountCustomPlaceholderUsdc": "e.g. 7.50",
     "breakdownTitle": "Breakdown",
     "creatorRow": "Creator receives",
-    "feeRow": "Operator fee (1.0%)",
+    "feeRow": "Operator fee",
     "customerRow": "You pay",
     "gaslessHint": "Gas is covered by OpenPay (via Pimlico Sponsorship Paymaster). You don't need to hold native tokens (POL / ETH).",
     "walletSection": "Wallet",
