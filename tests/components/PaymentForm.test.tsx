@@ -92,7 +92,7 @@ function setSmartAccount(ready: boolean, error?: Error) {
 
 let mutate: ReturnType<typeof vi.fn>;
 let directMutate: ReturnType<typeof vi.fn>;
-function setPayment(state: 'idle' | 'pending' | 'success' | 'error') {
+function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error) {
   mutate = vi.fn();
   mockHook(useBatchPayment, {
     mutate,
@@ -109,7 +109,9 @@ function setPayment(state: 'idle' | 'pending' | 'success' | 'error') {
           }
         : undefined,
     error:
-      state === 'error' ? new Error('AA21 didn\'t pay prefund') : null,
+      state === 'error'
+        ? (err ?? new Error('AA21 didn\'t pay prefund'))
+        : null,
   } as Partial<ReturnType<typeof useBatchPayment>>);
 }
 
@@ -379,6 +381,21 @@ describe('PaymentForm — 送信フロー', () => {
     expect(screen.getByText('42')).toBeInTheDocument();
   });
 
+  it('GasCongestedError → 生メッセージではなく i18n 案内 (sponsorship)', async () => {
+    const { GasCongestedError } = await import('@/lib/gasCeiling');
+    setURL(`to=${MERCHANT}&token=jpyc&fee=include&amount=1000`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    setPayment('error', new GasCongestedError(polygonAmoy.id, 1000n, 1500n));
+    render(<PaymentForm />);
+
+    expect(
+      screen.getByText(/ネットワークが混雑しています/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/gas_congested/)).toBeNull();
+  });
+
   it('送信失敗 → エラーメッセージ表示', () => {
     setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
@@ -632,7 +649,11 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     render(<PaymentForm />);
 
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
-    expect(screen.getByText(/quote failed/)).toBeInTheDocument();
+    // 生 RPC メッセージではなく i18n 化された friendly エラーが出る
+    expect(screen.queryByText(/quote failed/)).toBeNull();
+    expect(
+      screen.getByText(/ガス代見積の取得に失敗しました/),
+    ).toBeInTheDocument();
     // gas quote が ready していないので button は loading 表示で disabled
     expect(
       screen.getByRole('button', { name: /ガス代見積取得中/ }),
@@ -677,6 +698,25 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.getByText(/ガス代お客様負担/)).toBeInTheDocument();
     // useGasQuoteUsdc は enabled=false で呼ばれる (no fetch)
     expect(useGasQuoteUsdc).toHaveBeenCalledWith('usdc', false);
+  });
+
+  it('ERC20 mode で GasCongestedError → 生メッセージではなく i18n 案内が表示される', async () => {
+    // LARP-4 修正で gas ceiling を ERC20 mode でも適用するようにしたが、UI 側の
+    // isGasCongestedError 判定が ERC20 経路でも i18n 案内に切替わるかを検証する。
+    const { GasCongestedError } = await import('@/lib/gasCeiling');
+    setURL(`to=${MERCHANT}&token=usdc&fee=include&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    setPayment('error', new GasCongestedError(baseSepolia.id, 1n, 5n));
+    render(<PaymentForm />);
+
+    expect(
+      screen.getByText(/ネットワークが混雑しています/),
+    ).toBeInTheDocument();
+    // 生 message ("gas_congested: chainId=84532...") は出さない
+    expect(screen.queryByText(/gas_congested/)).toBeNull();
   });
 
   it('split + ERC20 mode: gas を含めた customer total と extraRecipients が両立', async () => {

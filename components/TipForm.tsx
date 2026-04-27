@@ -93,12 +93,12 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
+  // gasQuote の失敗も同様に i18n 化 (詳細は logger 経由で Sentry へ)。
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
     : (gasless.error?.message ??
       saError?.message ??
-      gasQuote.error?.message ??
-      null);
+      (gasQuote.error ? t('errorGasQuote') : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });

@@ -519,7 +519,10 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('error');
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
-    expect(screen.getByText(/quote failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/quote failed/)).toBeNull();
+    expect(
+      screen.getByText(/ガス代見積の取得に失敗しました/),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /ガス代見積取得中/ }),
     ).toBeDisabled();

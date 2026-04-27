@@ -133,13 +133,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
   // 差し替え (direct モードは paymaster を経由しないため対象外)。
+  // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
+  // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
   const flowError = isDirect ? direct.error : gasless.error;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowError?.message ??
       (isDirect ? undefined : saError?.message) ??
-      gasQuote.error?.message ??
-      null);
+      (gasQuote.error ? t('errorGasQuote') : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });

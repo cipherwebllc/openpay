@@ -414,6 +414,41 @@ JPYC は将来的に新バージョンへの移行や別チェーン拡張が起
 
 policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject するか) は Pimlico ダッシュボードのアカウント設定に依存する。**本番投入前に必ず policyId を明示設定** してください。
 
+### 4-1. USDC mainnet (ERC20 Paymaster) 投入 runbook
+
+USDC は Base mainnet で **ERC20 Paymaster mode** を採用し、顧客が USDC で gas を支払う。本リポジトリのテストは型 + mock 検証までで、Pimlico mainnet RPC との実通信は **未実走行**。投入時は以下を **手順通り** 実施すること:
+
+**事前 (deploy 前)**
+
+1. Pimlico Dashboard で Base mainnet の API key に Origin 制限 (本番ドメイン) を設定
+2. Pimlico Dashboard の **Token Paymaster** セクションで Base mainnet + USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` が有効化されているか確認 (Pimlico 側で paymaster 起動が必要な場合あり)
+3. `lib/gasCeiling.ts` の Base 1 gwei ceiling が現在の Base 平常 gas (典型 0.001-0.01 gwei) より十分高いか確認 — `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` で調整可
+4. `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` 未設定なら 500_000 が使われる。Pimlico の dashboard 等で実 UserOp 計測ができれば事前に値を埋めておく
+
+**deploy 直後 (最初の 1 件)**
+
+5. `NETWORK_ENV=mainnet` で deploy
+6. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&fee=exclude&amount=1.0` を実行 (1 USDC + fee 0.2 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
+7. 確認項目:
+   - 「ネットワーク手数料 (見積)」行に `最大 X.XX USDC` が表示されること
+   - approve トランザクション (paymaster コントラクト宛) が UserOp の calls 先頭に含まれること (BaseScan で内部 tx を確認)
+   - 顧客の USDC 残高が `merchant + fee + 実 gas` だけ減っていること (見積より実費が低ければ余剰は引かれない)
+   - 運営の Base ETH は **使われていない** (= ETH 立替えゼロが達成されている)
+
+**最初の 24h 監視 (Sentry イベントで)**
+
+| イベント名 | 期待値 | 異常 → アクション |
+|---|---|---|
+| `payment.gas-quote.failed` | 0 件/h | Pimlico mainnet `pimlico_getTokenQuotes` の 5xx → Pimlico サポート連絡 |
+| `payment.failed` (ERC20 mode) | < 1% of attempts | 急増 → `DEFAULT_USEROP_GAS_UNITS` 不足の可能性、`NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS=700000` 等で増やす |
+| `gas_congested` | spike 時のみ | 平常時に頻発するなら `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` を 2 gwei に緩和 |
+
+**即 rollback トリガー**
+
+- `payment.failed` が **5%/h** を超え、エラーメッセージに `paymaster validation failed` / `AA34` / `AA37` (paymaster 関連) が含まれる場合 → Vercel で旧 deploy へ rollback
+- 顧客から「USDC が引かれたが merchant が受け取っていない」という報告 (atomic batch なので理論上発生しないが万一)
+- `pimlico_getTokenQuotes` が 30 分以上連続で 5xx を返す
+
 ### 5. split の rounding edge case (UX 上の注意)
 
 `?split=...` で分配 % 合計が高くなると、**主受取人 (`to`) の取り分が極小** になります:
@@ -482,7 +517,20 @@ npm audit --omit=dev | grep -E "^[0-9]+ "  # moderate 件数推移
 ```bash
 npm run test         # ウォッチモード
 npm run test:run     # 1 回だけ実行 (CI 用)
+npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 ```
+
+### カバレッジ実績 (2026-04-27 時点)
+
+| 指標 | カバレッジ | 件数 |
+|---|---|---|
+| Statements | 95.51% | 958 / 1003 |
+| Branches | 94.27% | 346 / 367 |
+| Functions | 96.87% | 62 / 64 |
+| Lines | 95.51% | 958 / 1003 |
+| Test count | — | 418 件 (29 ファイル) |
+
+未カバー部分は主に `useSmartAccount.queryFn` の deep error path (catch 周り) と `useGasQuoteUsdc` の 1 hop 内エラー。CI には min threshold を強制する設定は無いため、PR レビュー時に `--coverage` で目視確認する運用。
 
 ### カバー範囲
 
@@ -616,6 +664,16 @@ git push origin main      # Vercel が自動で再デプロイ
 ### LocalStorage に残るデータ
 店主の QR 設定 (`openpay:qr-settings:v1`) はキー名にバージョン (`v1`) を含むため、
 スキーマ変更時はキーをインクリメントすればロールバック後も旧クライアントが破損しない。
+
+### ERC20 Paymaster の approve allowance (USDC mainnet 限定)
+
+USDC mainnet では `prepareUserOperationForErc20Paymaster` が UserOp 先頭に **paymaster コントラクト宛の USDC `approve`** を自動注入する。これは onchain state なのでフロントエンド rollback では消えない:
+
+- **同一 paymaster に rollback** → 既存 allowance がそのまま再利用される (害なし、むしろ approve 1 件分の gas が節約)
+- **Pimlico が paymaster コントラクトをアップグレード (アドレス変更)** → 旧 allowance は新 paymaster からは使えず deadlock しないが、ユーザの wallet には未使用 allowance が残る。残存攻撃面ではあるが、Pimlico の paymaster は標準的に minimal trust (transferFrom のみ呼び出す) 設計
+- **ユーザに revoke を促したい場合**: Etherscan/BaseScan の token approval 画面 (例: `https://basescan.org/tokenapprovalchecker?search=<user_addr>`) を案内 — フロント側に revoke ボタンは未実装 (v1 candidate)
+
+paymaster コントラクトアドレスは `pimlico_getTokenQuotes` の `paymaster` フィールドで取得される動的値。`hooks/useGasQuoteUsdc.ts` 経由で確認可能だが、**Pimlico 側のアップグレード履歴を独自に追跡する仕組みは無い**。Pimlico の releases / status page を運用フェーズで watch する必要がある。
 
 ## 監視 / アラート
 
