@@ -404,7 +404,13 @@ export function QrGenerator() {
               {t('feeReceiverHeading')}
             </p>
             <p className="mt-1 break-all font-mono">{env.feeReceiver}</p>
-            <p className="mt-2 text-slate-500">{t('feeReceiverHint')}</p>
+            <p className="mt-2 text-slate-500">
+              {t(
+                settings.token === 'jpyc'
+                  ? 'feeReceiverHintJpyc'
+                  : 'feeReceiverHintUsdc',
+              )}
+            </p>
           </div>
         )}
       </section>
