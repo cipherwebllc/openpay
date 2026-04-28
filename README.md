@@ -1,6 +1,10 @@
 # OpenPay
 
-小規模店舗・クリエイター・フリーランスが**ウォレットアドレス1つだけ**で導入できる、オープンソースのガスレス決済 / Tip widget ジェネレーター。  
+<div align="center">
+  <img src="overview.png" alt="OpenPay" width="100%" />
+</div>
+
+小規模店舗・クリエイター・フリーランスが**ウォレットアドレス1つだけ**で導入できる、オープンソースのガスレス決済 / Tip widget ジェネレーター。
 ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base)** で決済できます。
 
 - **JPYC (Polygon)**: 運営が POL ガスを肩代わり (Sponsorship Paymaster)
