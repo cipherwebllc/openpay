@@ -44,9 +44,7 @@ export function CheckoutLinkGenerator() {
   const t = useTranslations('CheckoutLinkGenerator');
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setOrigin(window.location.origin);
-    }
+    setOrigin(window.location.origin);
   }, []);
 
   const effectiveReceiver = useMemo(

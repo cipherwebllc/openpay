@@ -3,12 +3,11 @@
 // items は draft 状態 (空欄含む文字列ペア) で保存し、URL 生成時に parseCheckoutItemDrafts
 // で CheckoutItem[] へ昇格させる (all-or-nothing、parseSplitDrafts と同型)。
 
-import { useEffect, useState } from 'react';
-import { safeGet, safeSet } from '@/lib/storage';
 import type { ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
 import type { TokenSymbol } from '@/lib/tokens';
 import { CHECKOUT_MAX_ITEMS, type CheckoutItemDraft } from '@/lib/url';
+import { useLocalStorageSettings } from './useLocalStorageSettings';
 import { normalizeChainForToken } from './useQrSettings';
 
 export type CheckoutSettings = {
@@ -91,19 +90,9 @@ function sanitize(loaded: Partial<CheckoutSettings>): CheckoutSettings {
 }
 
 export function useCheckoutSettings() {
-  const [settings, setSettings] = useState<CheckoutSettings>(DEFAULT_SETTINGS);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    const loaded = safeGet<Partial<CheckoutSettings>>(STORAGE_KEY, {});
-    setSettings(sanitize(loaded));
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    safeSet(STORAGE_KEY, settings);
-  }, [settings, hydrated]);
-
-  return { settings, setSettings, hydrated };
+  return useLocalStorageSettings<CheckoutSettings>(
+    STORAGE_KEY,
+    DEFAULT_SETTINGS,
+    sanitize,
+  );
 }

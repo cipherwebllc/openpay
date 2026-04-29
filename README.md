@@ -761,7 +761,7 @@ git push origin main      # Vercel が自動で再デプロイ
 ```
 
 ### LocalStorage に残るデータ
-店主の QR 設定 (`openpay:qr-settings:v1`) はキー名にバージョン (`v1`) を含むため、
+店主の QR / Tip / Checkout 設定 (`openpay:qr-settings:v2`, `openpay:tip-settings:v2`, `openpay:checkout-settings:v1`) はキー名にバージョン suffix を含むため、
 スキーマ変更時はキーをインクリメントすればロールバック後も旧クライアントが破損しない。
 
 ### ⚠️ multi-chain URL 後の rollback は silent fund misdirection の risk あり

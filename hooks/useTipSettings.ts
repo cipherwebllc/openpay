@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { safeGet, safeSet } from '@/lib/storage';
 import type { ChainSlug } from '@/lib/chains';
 import type { TokenSymbol } from '@/lib/tokens';
 import { COLOR_PATTERN } from '@/lib/url';
+import { useLocalStorageSettings } from './useLocalStorageSettings';
 import { normalizeChainForToken } from './useQrSettings';
 
 export type TipSettings = {
@@ -78,19 +77,5 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
 }
 
 export function useTipSettings() {
-  const [settings, setSettings] = useState<TipSettings>(DEFAULT_SETTINGS);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    const loaded = safeGet<Partial<TipSettings>>(STORAGE_KEY, {});
-    setSettings(sanitize(loaded));
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    safeSet(STORAGE_KEY, settings);
-  }, [settings, hydrated]);
-
-  return { settings, setSettings, hydrated };
+  return useLocalStorageSettings<TipSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize);
 }

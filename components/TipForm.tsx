@@ -5,8 +5,8 @@ import { useTranslations } from 'next-intl';
 import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
-import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
+import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -466,25 +466,3 @@ export function TipForm({ params }: { params: TipParams }) {
   );
 }
 
-function ResultRow({
-  label,
-  value,
-  copyable,
-}: {
-  label: string;
-  value: string;
-  copyable?: boolean;
-}) {
-  return (
-    <div className="flex justify-between gap-2">
-      <dt className="opacity-70">{label}</dt>
-      <dd className="min-w-0 flex-1 text-right">
-        {copyable ? (
-          <CopyableField value={value} label={label} />
-        ) : (
-          <span className="break-all font-mono">{value}</span>
-        )}
-      </dd>
-    </div>
-  );
-}

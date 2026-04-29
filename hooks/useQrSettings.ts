@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { safeGet, safeSet } from '@/lib/storage';
 import { isValidChainSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
 import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
+import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 export type QrSettings = {
   receiver: string;
@@ -82,19 +81,5 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
 }
 
 export function useQrSettings() {
-  const [settings, setSettings] = useState<QrSettings>(DEFAULT_SETTINGS);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    const loaded = safeGet<Partial<QrSettings>>(STORAGE_KEY, {});
-    setSettings(sanitize(loaded));
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    safeSet(STORAGE_KEY, settings);
-  }, [settings, hydrated]);
-
-  return { settings, setSettings, hydrated };
+  return useLocalStorageSettings<QrSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize);
 }

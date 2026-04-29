@@ -21,7 +21,6 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(
       page.getByRole('heading', { name: /Tip widget 埋め込みコードを生成/ }),
     ).toBeVisible();
-    // 受取アドレス入力 (placeholder は AddressInput の汎用化により変更)
     await expect(
       page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/),
     ).toBeVisible();

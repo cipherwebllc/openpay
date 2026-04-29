@@ -45,9 +45,7 @@ export function QrGenerator() {
   const t = useTranslations('QrGenerator');
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setOrigin(window.location.origin);
-    }
+    setOrigin(window.location.origin);
   }, []);
 
   const effectiveReceiver = useMemo(

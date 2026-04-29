@@ -516,7 +516,6 @@ describe('CheckoutForm — 成功時の挙動', () => {
         }}
       />,
     );
-    // さらに別の gasAmount で再 render
     setGasQuote('ready', 300_000n);
     rerender(
       <CheckoutForm
