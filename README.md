@@ -511,14 +511,15 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 1. Pimlico Dashboard で Base mainnet の API key に Origin 制限 (本番ドメイン) を設定
 2. Pimlico Dashboard の **Token Paymaster** セクションで Base mainnet + USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` が有効化されているか確認 (Pimlico 側で paymaster 起動が必要な場合あり)
-3. `lib/gasCeiling.ts` の Base 1 gwei ceiling が現在の Base 平常 gas (典型 0.001-0.01 gwei) より十分高いか確認 — `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` で調整可
-4. `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` 未設定なら 500_000 が使われる。Pimlico の dashboard 等で実 UserOp 計測ができれば事前に値を埋めておく
+3. **Pimlico プランの rate limit を Dashboard で確認**: 想定同時アクティブ checkout セッション数 × `useGasQuote*` の refetch 頻度 (現状 30s 間隔 → 1 user/120 calls/h) が当該プランの **per-API-key requests/sec** 上限を超えないこと。超える可能性がある場合は `lib/useGasQuoteUsdc.ts` / `useGasQuoteJpyc.ts` の `refetchInterval` を引き上げるか上位プランへ
+4. `lib/gasCeiling.ts` の Base 1 gwei ceiling が現在の Base 平常 gas (典型 0.001-0.01 gwei) より十分高いか確認 — `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` で調整可
+5. `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` 未設定なら 500_000 が使われる。Pimlico の dashboard 等で実 UserOp 計測ができれば事前に値を埋めておく
 
 **deploy 直後 (最初の 1 件)**
 
-5. `NETWORK_ENV=mainnet` で deploy
-6. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&amount=1.0` を実行 (1 USDC + 運営手数料 0.05 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
-7. 確認項目:
+6. `NETWORK_ENV=mainnet` で deploy
+7. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&amount=1.0` を実行 (1 USDC + 運営手数料 0.05 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
+8. 確認項目:
    - 「ネットワーク手数料 (見積)」行に `最大 X.XX USDC` が表示されること
    - approve トランザクション (paymaster コントラクト宛) が UserOp の calls 先頭に含まれること (BaseScan で内部 tx を確認)
    - 顧客の USDC 残高が `merchant + fee + 実 gas` だけ減っていること (見積より実費が低ければ余剰は引かれない)

@@ -419,6 +419,73 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
+  it('[regression] 異なる userOpHash (新規送金) では webhook が再発火する (ref が永久 lock しない)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+
+    // 1 回目の決済成功 (userOpHash = aaaa...)
+    const firstHash = `0x${'a'.repeat(64)}`;
+    mockHook(useBatchPayment, {
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+      isError: false,
+      data: {
+        userOpHash: firstHash,
+        txHash: `0x${'b'.repeat(64)}`,
+        blockNumber: 99n,
+        success: true,
+      },
+      error: null,
+    } as Partial<ReturnType<typeof useBatchPayment>>);
+
+    const { rerender } = render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const firstPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(firstPayload.userOpHash).toBe(firstHash);
+
+    // 2 回目の決済成功 (userOpHash = cccc... に変化、同じ component 内で再 mutate)
+    const secondHash = `0x${'c'.repeat(64)}`;
+    mockHook(useBatchPayment, {
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+      isError: false,
+      data: {
+        userOpHash: secondHash,
+        txHash: `0x${'d'.repeat(64)}`,
+        blockNumber: 100n,
+        success: true,
+      },
+      error: null,
+    } as Partial<ReturnType<typeof useBatchPayment>>);
+    rerender(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+
+    // 新しい userOpHash で webhook が再発火する (ref が永久 lock していない)
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const secondPayload = JSON.parse(fetchSpy.mock.calls[1][1].body);
+    expect(secondPayload.userOpHash).toBe(secondHash);
+    vi.unstubAllGlobals();
+  });
+
   it('[regression] 同一 userOpHash で再 render が起きても webhook は 1 回しか POST されない (gasQuote refetch 耐性)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);

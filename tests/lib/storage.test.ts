@@ -103,6 +103,28 @@ describe('safeGet / safeSet', () => {
     expect(safeGet('b', null)).toEqual({ v: 2 });
   });
 
+  it('SSR (typeof window === "undefined"): safeGet は fallback を返し、safeSet は no-op', () => {
+    const originalWindow = globalThis.window;
+    // window 全体を undefined 化して SSR 環境を再現。
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      expect(safeGet('any-key', { ssr: 'fallback' })).toEqual({ ssr: 'fallback' });
+      // safeSet は no-op (例外も値の変化も無し)
+      expect(() => safeSet('any-key', { ignored: true })).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+    // window 復元後は通常通り書き込み可能
+    safeSet('after-ssr', { restored: true });
+    expect(safeGet('after-ssr', null)).toEqual({ restored: true });
+  });
+
   it('safeGet が getItem の throw でも fallback (Safari private mode 等)', () => {
     let observedThrow = false;
     withFailingStorage(
