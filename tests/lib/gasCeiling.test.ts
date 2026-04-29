@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { base, baseSepolia, polygon, polygonAmoy } from 'viem/chains';
 import {
+  arbitrum,
+  arbitrumSepolia,
+  optimism,
+  optimismSepolia,
+} from 'viem/chains';
+import {
   assertGasCeiling,
   GasCongestedError,
   gasCeilingGweiForChain,
@@ -131,6 +137,31 @@ describe('env override (gasCeilingGwei)', () => {
     const mod = await import('@/lib/gasCeiling');
     expect(mod.gasCeilingGweiForChain(base.id)).toBe(5n);
     expect(mod.gasCeilingGweiForChain(baseSepolia.id)).toBe(1000n);
+  });
+
+  it('NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI を読み込んで mainnet 値を上書き', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI = '7';
+    const mod = await import('@/lib/gasCeiling');
+    expect(mod.gasCeilingGweiForChain(arbitrum.id)).toBe(7n);
+    expect(mod.gasCeilingGweiForChain(arbitrumSepolia.id)).toBe(1000n);
+  });
+
+  it('NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI を読み込んで mainnet 値を上書き', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI = '3';
+    const mod = await import('@/lib/gasCeiling');
+    expect(mod.gasCeilingGweiForChain(optimism.id)).toBe(3n);
+    expect(mod.gasCeilingGweiForChain(optimismSepolia.id)).toBe(1000n);
+  });
+
+  it('Arbitrum / Optimism mainnet の既定値は 1 gwei (env 未指定時)', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI;
+    delete process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI;
+    const mod = await import('@/lib/gasCeiling');
+    expect(mod.gasCeilingGweiForChain(arbitrum.id)).toBe(1n);
+    expect(mod.gasCeilingGweiForChain(optimism.id)).toBe(1n);
   });
 
   it('不正値 (負数 / 非整数 / 非数) は warn して既定値にフォールバック', async () => {

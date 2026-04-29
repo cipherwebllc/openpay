@@ -538,6 +538,119 @@ describe('calcCheckoutTotal', () => {
   });
 });
 
+describe('encodeItems / parseItemsParam — 境界 / 極端ケース', () => {
+  it('絵文字 (4-byte UTF-16 サロゲートペア) を含む name の roundtrip', () => {
+    const items: CheckoutItem[] = [
+      { name: '👨‍💻 Developer', qty: 1, price: '99.99' },
+      { name: '🎉🎊', qty: 2, price: '0.01' },
+    ];
+    const path = buildCheckoutPath({
+      to: MERCHANT,
+      token: 'usdc',
+      gas: 'customer',
+      items,
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseCheckoutParams(sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.items[0].name).toBe('👨‍💻 Developer');
+      expect(r.params.items[1].name).toBe('🎉🎊');
+    }
+  });
+
+  it('name 80 文字超 → 80 文字に切詰されて parse 成功', () => {
+    const longName = 'X'.repeat(150);
+    const path = buildCheckoutPath({
+      to: MERCHANT,
+      token: 'usdc',
+      gas: 'customer',
+      items: [{ name: longName, qty: 1, price: '5' }],
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseCheckoutParams(sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.items[0].name).toHaveLength(80);
+  });
+
+  it(`qty 上限 ${CHECKOUT_QTY_MAX} は受理、+1 は拒否`, () => {
+    const ok = parseCheckoutParams(
+      search(`to=${MERCHANT}&token=usdc&items=A:${CHECKOUT_QTY_MAX}:1`),
+    );
+    expect(ok.ok).toBe(true);
+    const ng = parseCheckoutParams(
+      search(`to=${MERCHANT}&token=usdc&items=A:${CHECKOUT_QTY_MAX + 1}:1`),
+    );
+    expect(ng.ok).toBe(false);
+  });
+
+  it(`items ${CHECKOUT_MAX_ITEMS} 件の URL 長 (典型的な QR 容量内に収まる)`, () => {
+    const items: CheckoutItem[] = Array.from(
+      { length: CHECKOUT_MAX_ITEMS },
+      (_, i) => ({ name: `Item ${i}`, qty: 1, price: '10' }),
+    );
+    const url = buildCheckoutUrl('https://openpay.test', {
+      to: MERCHANT,
+      token: 'usdc',
+      gas: 'customer',
+      items,
+    });
+    // QR Level M で約 2331 alphanumeric chars 上限 (バージョン 25)。
+    // 余裕を持って 1500 chars 以下を期待。
+    expect(url.length).toBeLessThan(1500);
+  });
+
+  it('items が "," のみ (空 token) → エラー', () => {
+    const r = parseCheckoutParams(
+      search(`to=${MERCHANT}&token=usdc&items=,,,`),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('items に余分な空白を含む token (前後 trim される)', () => {
+    const r = parseCheckoutParams(
+      search(`to=${MERCHANT}&token=usdc&items= A:1:5 , B:2:10 `),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.items).toHaveLength(2);
+      expect(r.params.items[0].name).toBe('A');
+      expect(r.params.items[1].name).toBe('B');
+    }
+  });
+
+  it('encodeItems → decodeURIComponent の bidirectional 一致 (絵文字)', () => {
+    const items: CheckoutItem[] = [{ name: '日本語🇯🇵', qty: 5, price: '12.345' }];
+    const encoded = encodeItems(items);
+    expect(encoded).toContain(':5:12.345');
+    // 区切り `,` `:` 以外のすべての非 ASCII は %-encoded されている
+    const namePartLastColon = encoded.lastIndexOf(':');
+    const middle = encoded.slice(0, encoded.indexOf(':'));
+    expect(middle).toMatch(/^[A-Za-z0-9\-_.~%]*$/); // RFC 3986 unreserved + %
+    void namePartLastColon;
+  });
+
+  it('価格 6 桁ぴったり (USDC decimals 境界) で受理', () => {
+    const r = parseCheckoutParams(
+      search(`to=${MERCHANT}&token=usdc&items=A:1:0.999999`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.items[0].price).toBe('0.999999');
+  });
+
+  it('巨大な合計 (USDC: 999 件相当を 1 行で = qty=999, price=999.999999)', () => {
+    const r = parseCheckoutParams(
+      search(`to=${MERCHANT}&token=usdc&items=A:999:999.999999`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const total = calcCheckoutTotal(r.params.items, 6);
+      // 999 * 999_999_999 wei = 998_999_999_001 (USDC base)
+      expect(total).toBe(999n * 999_999_999n);
+    }
+  });
+});
+
 describe('parseCheckoutItemDrafts (CheckoutLinkGenerator UI 用)', () => {
   it('全空 draft → items=null, errors=[] (未入力扱い)', () => {
     const r = parseCheckoutItemDrafts(

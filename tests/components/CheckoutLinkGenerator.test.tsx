@@ -226,6 +226,60 @@ describe('CheckoutLinkGenerator', () => {
     expect(screen.getAllByPlaceholderText('商品名')).toHaveLength(1);
   });
 
+  it('複数行: 中間の 1 行を削除 → 残りの行は維持', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        receiver: VALID,
+        token: 'usdc',
+        chain: 'base',
+        items: [
+          { name: 'A', qty: '1', price: '5' },
+          { name: 'B', qty: '2', price: '10' },
+          { name: 'C', qty: '3', price: '15' },
+        ],
+      }),
+    );
+    render(<CheckoutLinkGenerator />);
+    await waitFor(() => screen.getByDisplayValue('B'));
+    // 2 番目 (B) の削除ボタンをクリック
+    const removeBtns = screen.getAllByRole('button', { name: '削除' });
+    expect(removeBtns).toHaveLength(3);
+    await user.click(removeBtns[1]);
+    // A と C は残る、B は消える
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('B')).toBeNull();
+    });
+    expect(screen.getByDisplayValue('A')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('C')).toBeInTheDocument();
+  });
+
+  it('全行削除: 最終行 → 空 row 補充 (settings.items を 空配列にしない)', async () => {
+    const user = userEvent.setup();
+    // 1 行だけの状態から削除 → 空 row が 1 行補充される
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        receiver: VALID,
+        token: 'usdc',
+        chain: 'base',
+        items: [{ name: 'OnlyOne', qty: '1', price: '1' }],
+      }),
+    );
+    render(<CheckoutLinkGenerator />);
+    await waitFor(() => screen.getByDisplayValue('OnlyOne'));
+    await user.click(screen.getByRole('button', { name: '削除' }));
+    // 補充された空 row があり、placeholder が出る
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('OnlyOne')).toBeNull();
+    });
+    expect(screen.getAllByPlaceholderText('商品名')).toHaveLength(1);
+    // 入力 value は空
+    const nameInput = screen.getByPlaceholderText('商品名') as HTMLInputElement;
+    expect(nameInput.value).toBe('');
+  });
+
   it('+ 商品を追加 を最大回数まで叩くと、ボタンが消える (10 件上限)', async () => {
     const user = userEvent.setup();
     render(<CheckoutLinkGenerator />);

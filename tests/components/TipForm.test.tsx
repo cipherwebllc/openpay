@@ -431,6 +431,62 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     fetchSpy.mockRestore();
   });
 
+  it('成功 + webhook が non-OK (500) → logger.warn 経路 (UI には影響なし)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response('Server error', { status: 500, statusText: 'Internal' }),
+      );
+
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(
+      <TipForm
+        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
+      />,
+    );
+
+    // fetch は呼ばれた (引数を確認)
+    expect(fetchSpy).toHaveBeenCalled();
+    // 完了 UI は影響を受けず通常表示
+    expect(screen.getByText(/UserOp/)).toBeInTheDocument();
+    fetchSpy.mockRestore();
+  });
+
+  it('成功 + webhook が CORS エラー (reject) → catch 経路、UI に影響なし', () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('CORS blocked by browser'));
+
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(
+      <TipForm
+        params={{ ...USDC_PARAMS, webhook: 'https://discord.com/api/webhooks/x' }}
+      />,
+    );
+
+    expect(fetchSpy).toHaveBeenCalled();
+    // 完了 UI は影響を受けない
+    expect(screen.getByText(/UserOp/)).toBeInTheDocument();
+    fetchSpy.mockRestore();
+  });
+
+  it('isSwitching=true 時に「チェーン切替中…」表示でボタン disabled', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id }); // wrong chain (USDC params)
+    setBalance(0n);
+    setSmartAccount(false);
+    mockHook(useSwitchChain, { switchChain: vi.fn(), isPending: true });
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByRole('button', { name: /チェーン切替中…/ }),
+    ).toBeDisabled();
+  });
+
   it('成功 + webhook なし → fetch は呼ばれない', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')

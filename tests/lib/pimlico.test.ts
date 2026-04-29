@@ -144,4 +144,24 @@ describe('createPimlico', () => {
     expect(client).toBeDefined();
     expect(typeof client.request).toBe('function');
   });
+
+  it('NEXT_PUBLIC_PIMLICO_API_KEY 未設定 → pimlicoUrl 呼出で throw', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_PIMLICO_API_KEY;
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'testnet';
+    const mod = await import('@/lib/pimlico');
+    expect(() => mod.pimlicoUrl(8453)).toThrow(
+      /NEXT_PUBLIC_PIMLICO_API_KEY/,
+    );
+  });
+
+  it('NEXT_PUBLIC_PIMLICO_API_KEY 未設定 → createPimlico も同様に throw (transport 構築時)', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_PIMLICO_API_KEY;
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'testnet';
+    const mod = await import('@/lib/pimlico');
+    expect(() => mod.createPimlico(8453)).toThrow(
+      /NEXT_PUBLIC_PIMLICO_API_KEY/,
+    );
+  });
 });

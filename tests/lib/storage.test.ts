@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { safeGet, safeSet } from '@/lib/storage';
 
 describe('safeGet / safeSet', () => {
@@ -38,5 +38,84 @@ describe('safeGet / safeSet', () => {
     safeSet('k', 'v1');
     safeSet('k', 'v2');
     expect(safeGet('k', '')).toBe('v2');
+  });
+
+  // jsdom の Storage 実装は WebIDL Proxy でラップされており、setItem を
+  // 個別に上書きしても内部 [[Set]] が動作する。代わりに window.localStorage
+  // 全体を fake オブジェクトで一時差替え、safeSet の catch path を発火させる。
+  function withFailingStorage(
+    overrides: Partial<Storage>,
+    fn: () => void,
+  ) {
+    const original = window.localStorage;
+    const fake: Storage = {
+      length: 0,
+      clear: () => {},
+      getItem: () => null,
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => {},
+      ...overrides,
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: fake,
+    });
+    try {
+      fn();
+    } finally {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        value: original,
+      });
+    }
+  }
+
+  it('safeSet が throw する状況 (Safari ITP / quota exceeded) でも例外漏れなし', () => {
+    let observedThrow = false;
+    withFailingStorage(
+      {
+        setItem: () => {
+          observedThrow = true;
+          throw new DOMException('quota exceeded', 'QuotaExceededError');
+        },
+      },
+      () => {
+        expect(() => safeSet('full', { large: 'payload' })).not.toThrow();
+      },
+    );
+    expect(observedThrow).toBe(true);
+  });
+
+  it('safeSet が throw した後でも別 key の書込は成功する (storage 復元後)', () => {
+    withFailingStorage(
+      {
+        setItem: () => {
+          throw new Error('transient');
+        },
+      },
+      () => {
+        safeSet('a', { v: 1 }); // throw 経路 (storage は fake)
+      },
+    );
+    // 元の localStorage に戻った後の通常経路
+    safeSet('b', { v: 2 });
+    expect(safeGet('b', null)).toEqual({ v: 2 });
+  });
+
+  it('safeGet が getItem の throw でも fallback (Safari private mode 等)', () => {
+    let observedThrow = false;
+    withFailingStorage(
+      {
+        getItem: () => {
+          observedThrow = true;
+          throw new Error('SecurityError');
+        },
+      },
+      () => {
+        expect(safeGet('any', { fallback: 'ok' })).toEqual({ fallback: 'ok' });
+      },
+    );
+    expect(observedThrow).toBe(true);
   });
 });

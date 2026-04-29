@@ -1,7 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
 import { wagmiConfig } from '@/lib/wagmi';
 import { supportedChains } from '@/lib/chains';
+
+const ORIGINAL_ENV = { ...process.env };
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+  vi.resetModules();
+});
 
 // 実 wagmiConfig を読み込み、connector / chain / transport の組立てが
 // 環境変数 (vitest.config.ts で testnet + WC projectId 未設定) に対して
@@ -44,5 +50,30 @@ describe('wagmiConfig', () => {
     // wagmiConfig 自体が import できれば型が解決している証拠 (compile-time)
     expect(wagmiConfig).toBeDefined();
     expect(typeof wagmiConfig.chains).toBe('object');
+  });
+
+  it('NEXT_PUBLIC_WC_PROJECT_ID 設定時は WalletConnect connector が追加される', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_WC_PROJECT_ID = 'wc_proj_test_id';
+    const mod = await import('@/lib/wagmi');
+    const names = mod.wagmiConfig.connectors.map((c) => c.name);
+    // walletConnect connector の name は通常 "WalletConnect"
+    expect(
+      names.some((n) => /walletconnect/i.test(n)),
+    ).toBe(true);
+    // 順序: injected → coinbaseWallet → walletConnect (3 つ)
+    expect(mod.wagmiConfig.connectors.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('NEXT_PUBLIC_WC_PROJECT_ID 設定時の connector 数は 3 (未設定時は 2)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_WC_PROJECT_ID = 'wc_proj_test_id';
+    const withWc = await import('@/lib/wagmi');
+    expect(withWc.wagmiConfig.connectors).toHaveLength(3);
+
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_WC_PROJECT_ID;
+    const withoutWc = await import('@/lib/wagmi');
+    expect(withoutWc.wagmiConfig.connectors).toHaveLength(2);
   });
 });

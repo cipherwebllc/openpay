@@ -523,6 +523,144 @@ describe('useBatchPayment', () => {
     });
   });
 
+  describe('並行性 / re-mutation の挙動 (race condition)', () => {
+    it('1 回目 fail → 2 回目で recover (state がリセットされ成功する)', async () => {
+      mountReady();
+      // 1 回目は sendUserOperation が reject
+      sendUserOperation.mockRejectedValueOnce(new Error('AA21 prefund'));
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+
+      // 2 回目は成功
+      sendUserOperation.mockResolvedValueOnce(`0x${'a'.repeat(64)}` as Hex);
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.error).toBeNull();
+    });
+
+    it('gas ceiling 取得中に 2 回連続 mutate → 両方で getUserOperationGasPrice が呼ばれる (独立した実行)', async () => {
+      // gasPrice fetch を deferred にして、2 つの mutate を interleave させる
+      const gates: Array<() => void> = [];
+      getUserOperationGasPrice = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            gates.push(() =>
+              resolve({
+                slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+                standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+                fast: { maxFeePerGas: 50n * GWEI, maxPriorityFeePerGas: 1n },
+              }),
+            );
+          }),
+      );
+      sendUserOperation = vi
+        .fn()
+        .mockResolvedValue(`0x${'a'.repeat(64)}` as Hex);
+      waitForUserOperationReceipt = vi.fn().mockResolvedValue({
+        success: true,
+        receipt: {
+          transactionHash: `0x${'b'.repeat(64)}` as Hex,
+          blockNumber: 1n,
+        },
+      });
+      vi.mocked(useSmartAccount).mockReturnValue({
+        data: {
+          smartAccountClient: { sendUserOperation },
+          pimlicoClient: { waitForUserOperationReceipt, getUserOperationGasPrice },
+          paymasterMode: 'sponsorship' as const,
+        },
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useSmartAccount>);
+      vi.mocked(useAccount).mockReturnValue({
+        chainId: baseSepolia.id,
+      } as unknown as ReturnType<typeof useAccount>);
+
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+
+      // 連続 mutate (両方とも gas price fetch 中で deferred)
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 2n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 2n,
+      });
+
+      await waitFor(() => expect(getUserOperationGasPrice).toHaveBeenCalledTimes(2));
+      // 両 gate を解放 → 両 mutation 完走
+      gates[0]?.();
+      gates[1]?.();
+      await waitFor(() =>
+        expect(sendUserOperation).toHaveBeenCalledTimes(2),
+      );
+      // useMutation は最新の結果のみ保持。data があれば成功した mutation。
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    });
+
+    it('SA 未準備状態で連続 mutate → 全て同じエラーで rejected', async () => {
+      vi.mocked(useSmartAccount).mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        error: null,
+      } as unknown as ReturnType<typeof useSmartAccount>);
+      vi.mocked(useAccount).mockReturnValue({
+        chainId: baseSepolia.id,
+      } as unknown as ReturnType<typeof useAccount>);
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      const err1 = result.current.error?.message;
+      expect(err1).toMatch(/Smart Account/);
+
+      // 2 回目も同じエラー (clients 不在は useSmartAccount mock で固定)
+      result.current.reset?.();
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error?.message).toMatch(/Smart Account/);
+    });
+  });
+
   describe('UserOp の receipt 処理', () => {
     it('success=false の receipt → 例外を投げず result.data.success=false で返す', async () => {
       // UserOp は bundler に含まれたが、execution が revert したケース

@@ -650,6 +650,67 @@ describe('TipParams: thanks / thanksUrl / webhook', () => {
   });
 });
 
+describe('parseTipParams: chain パラメタ (Phase 1 multi-chain)', () => {
+  function search(query: string) {
+    return new URLSearchParams(query);
+  }
+
+  it('chain 省略 → token の default (usdc=base, jpyc=polygon)', () => {
+    const u = parseTipParams(VALID_TO, search('token=usdc'));
+    expect(u.ok).toBe(true);
+    if (u.ok) expect(u.params.chain).toBe('base');
+    const j = parseTipParams(VALID_TO, search('token=jpyc'));
+    expect(j.ok).toBe(true);
+    if (j.ok) expect(j.params.chain).toBe('polygon');
+  });
+
+  it('chain=optimism + token=usdc → OK (deployment あり)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&chain=optimism'));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.chain).toBe('optimism');
+  });
+
+  it('chain=avalanche → エラー (slug invalid)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&chain=avalanche'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('chain');
+  });
+
+  it('chain="" (空文字) → default に倒す', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&chain='));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.chain).toBe('base');
+  });
+
+  it('chain=arbitrum + token=jpyc → エラー (deployment 不在)', () => {
+    const r = parseTipParams(VALID_TO, search('token=jpyc&chain=arbitrum'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('jpyc');
+  });
+
+  it('roundtrip: build (chain=optimism) → parse', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'usdc',
+      chain: 'optimism',
+      name: 'Carol',
+    });
+    expect(path).toContain('chain=optimism');
+    const sp = new URLSearchParams(path.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.chain).toBe('optimism');
+      expect(r.params.name).toBe('Carol');
+    }
+  });
+
+  it('build: default chain (usdc=base) は URL に出さない', () => {
+    const path = buildTipPath({ to: VALID_TO, token: 'usdc', chain: 'base' });
+    expect(path).not.toContain('chain=');
+  });
+});
+
 describe('parseSplitDrafts (QrGenerator UI 用 draft validator)', () => {
   const A: Address = '0x1111111111111111111111111111111111111111';
   const B: Address = '0x2222222222222222222222222222222222222222';

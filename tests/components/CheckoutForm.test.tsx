@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -480,6 +480,123 @@ describe('CheckoutForm — 成功時の挙動', () => {
       />,
     );
     expect(screen.getByText(/alice@example.com/)).toBeInTheDocument();
+  });
+});
+
+describe('CheckoutForm — チェーン切替 状態 + isSwitching', () => {
+  it('isSwitching=true の間は「チェーン切替中…」表示でボタン disabled', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(0n);
+    setSmartAccount(false);
+    mockHook(useSwitchChain, {
+      switchChain: vi.fn(),
+      isPending: true,
+    });
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    const btn = screen.getByRole('button', { name: /チェーン切替中…/ });
+    expect(btn).toBeDisabled();
+  });
+
+  it('switch ボタン click で switchChain({ chainId: requiredChain.id }) が呼ばれる', async () => {
+    const user = userEvent.setup();
+    const switchChain = vi.fn();
+    mockHook(useSwitchChain, { switchChain, isPending: false });
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(0n);
+    setSmartAccount(false);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    await user.click(screen.getByRole('button', { name: /へ切り替え/ }));
+    expect(switchChain).toHaveBeenCalledWith({ chainId: baseSepolia.id });
+  });
+});
+
+describe('CheckoutForm — 自動 redirect カウントダウン (fake timers)', () => {
+  let assignSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+  });
+
+  it('成功 → 3 秒タイマーで countdown → 0 で window.location.assign 発火', async () => {
+    vi.useFakeTimers();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+    // 成功 panel が出ている (success_url 指定あり → カウントダウン start)
+    expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+    expect(screen.getByText(/3 秒後に確認ページへ移動します/)).toBeInTheDocument();
+
+    // タイマーを 1 秒ずつ刻んで進める。各 tick で setRedirectIn が状態更新 →
+    // 再 render → 次の setTimeout がスケジュールされる連鎖を実行する。
+    // 一括で 4 秒進めると React の state 更新と timer の interleaving が
+    // バンドラ依存になるため、明示的に 1 秒刻みで act + 進める。
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+
+    expect(assignSpy).toHaveBeenCalledOnce();
+    const url = new URL(assignSpy.mock.calls[0][0]);
+    expect(url.searchParams.get('tx_hash')).toBe(`0x${'b'.repeat(64)}`);
+    vi.useRealTimers();
+  });
+
+  it('success_url 未指定時はカウントダウン state が走らない (タイマーが空回りしない)', async () => {
+    vi.useFakeTimers();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm params={{ ...USDC_PARAMS, successUrl: undefined }} />,
+    );
+    // カウントダウンメッセージは出ない
+    expect(screen.queryByText(/秒後に確認ページへ移動します/)).toBeNull();
+    // タイマー進めても assign は呼ばれない
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(assignSpy).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('成功前 (gasless.data なし) はカウントダウン未起動', async () => {
+    vi.useFakeTimers();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('idle'); // 未送信
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+    expect(screen.queryByText(/秒後に確認ページへ移動します/)).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(assignSpy).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });
 
