@@ -457,6 +457,19 @@ npm run build && npm run start
 
 本リポジトリは MVP プロトタイプであり、以下の事項は **コード生成時点で実環境検証ができていない**。本番環境にデプロイする前に必ず確認してください。
 
+### 0. テストの mock 比率 (透明化)
+
+本リポジトリの自動テスト (636 件) における mock 利用方針:
+
+| 層 | mock 使用 | 実コード走行範囲 |
+|---|---|---|
+| `tests/lib/*` (14 ファイル) | **0 件 — mock 一切なし** | 全 lib モジュールを実 import で評価 (env / chains / fee / gasCeiling / pimlico / storage / tokens / url / wagmi 等)。`vi.resetModules()` で env の差替えも実 module 再評価 |
+| `tests/hooks/*` (6 ファイル中 5 が mock 利用) | wagmi / @tanstack/react-query / permissionless の境界のみ mock | 対象 hook (useBatchPayment / useSmartAccount / useGasQuote* / useQrSettings 等) のロジックは実コード走行。Smart Account 構築の **完全 mock 解除版は無い** (実 wallet + funded sponsorship + ERC-7702 署名が必要なため → §4-1 runbook 参照) |
+| `tests/components/*` (9 ファイル中 9 が mock 利用) | wagmi (useAccount / useReadContract 等) と各 hook の境界 mock | コンポーネント描画・分岐ロジック・event handler は実走行。`fake timers + act` で 3 秒 redirect カウントダウンの状態遷移を実観測 |
+| `e2e/*` (3 spec) | Playwright で実ブラウザ + dev server 走行 | URL parse / UI 描画は実環境、send は wallet 接続必須なので CI で skip |
+
+実 import 走行率が高い: lib 100%、hook の query/mutation ロジック 100%、コンポーネントの描画/分岐 100%。**mock されているのは外部 SDK の境界 (wallet 接続・実 RPC) のみ**で、本リポジトリのテスト対象自身ではない。
+
 ### 1. permissionless.js の API 名
 
 `hooks/useSmartAccount.ts` は `permissionless@^0.2.30` から **`to7702SimpleSmartAccount`** を import している (`tests/hooks/useSmartAccount.test.tsx` で import 解決を smoke check 済)。permissionless 側でリネーム/移動が起きた時はこの import が壊れて CI が即落ちる。
@@ -834,6 +847,18 @@ GitHub リポジトリ Secrets / Variables に下記をセット:
 
 ### 開発ツール
 - 本コードのプロトタイピングに [**Claude Code**](https://claude.com/claude-code) を活用
+
+## セキュリティ — `npm audit` の moderate findings 評価
+
+`npm audit --omit=dev` で **12 件の moderate severity** が報告される (2026-04 時点)。すべて transitive 依存 (`@metamask/sdk → @wagmi/connectors → @gemini-wallet/core` 経由) であり、`npm audit fix --force` は Next.js 15→9.3.3 / wagmi メジャーバージョン downgrade を要求するため **破壊的修正は不可**。各 finding の本 dApp における exposure 評価:
+
+| CVE / GHSA | パッケージ | exposure 評価 |
+|---|---|---|
+| GHSA-3p68-rc4w-qgx5 / GHSA-fvcv-3m26-pcqx | axios (SSRF / Cloud Metadata Exfiltration via Header Injection) | 攻撃には axios で **任意 URL に request** を投げるサーバ環境が必要。本 dApp は client-side only で、axios は `@metamask/sdk-communication-layer` の MetaMask Mobile relay 通信で内部使用されるのみ。ユーザ入力が axios の URL に直接 flow しない。**本番 exposure: 軽微** |
+| GHSA-qx2v-qp2m-jg93 | postcss (XSS via `</style>`) | postcss は **build-time のみ** 使用。production runtime には含まれない。**本番 exposure: なし** |
+| GHSA-w5hq-g745-h8pq | uuid v3/v5/v6 buffer bounds | 内部 ID 生成のみで使用。ユーザ入力が buffer 引数に flow しない。**本番 exposure: なし** |
+
+**追跡方針**: `@wagmi/connectors` のメジャー更新で transitive が解消する見込み。月次 `npm audit` で再評価し、各 finding が exploit 可能になった場合は即時パッチ適用 (force update を含めて検討)。
 
 ## ライセンス
 
