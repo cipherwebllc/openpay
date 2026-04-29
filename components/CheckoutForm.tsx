@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { erc20Abi } from 'viem';
+import { erc20Abi, formatUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { Row } from './Row';
@@ -152,7 +152,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         token: params.token,
         chain: chainSlug,
         chainId: deployment.chainId,
-        amount: priceTotal(params.items),
+        amount: formatUnits(totalWei, deployment.decimals),
         items: params.items,
         merchantAmount: breakdown.merchantReceives.toString(),
         feeAmount: breakdown.feeAmount.toString(),
@@ -209,6 +209,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     breakdown.feeAmount,
     breakdown.customerPays,
     deployment.chainId,
+    deployment.decimals,
+    totalWei,
   ]);
 
   useEffect(() => {
@@ -474,30 +476,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       </p>
     </div>
   );
-}
-
-// items の合計 amount を decimal 文字列で計算する (webhook payload 用)。
-// bigint × decimals → decimal へ戻すと小数演算誤差が出やすいので、price を
-// 単純合算する小数算術ではなく、calcCheckoutTotal で wei にしてから
-// formatUnits 相当で文字列化する。今回は items の price 文字列ベースで
-// 合計の "X.YZ" 表示用の合算を行う簡易関数として実装。
-function priceTotal(
-  items: ReadonlyArray<{ qty: number; price: string }>,
-): string {
-  // すべて bigint で計算するため、最大の precision (18) に揃えてから合算 → 文字列化。
-  const SCALE = 18;
-  let totalScaled = 0n;
-  for (const it of items) {
-    const [intPart, frac = ''] = it.price.split('.');
-    const padded = (frac + '0'.repeat(SCALE)).slice(0, SCALE);
-    const scaled = BigInt(intPart + padded);
-    totalScaled += scaled * BigInt(it.qty);
-  }
-  // 文字列化 (整数 + 小数)
-  const s = totalScaled.toString().padStart(SCALE + 1, '0');
-  const intPart = s.slice(0, s.length - SCALE).replace(/^0+(?=\d)/, '');
-  const fracPart = s.slice(s.length - SCALE).replace(/0+$/, '');
-  return fracPart.length > 0 ? `${intPart}.${fracPart}` : intPart;
 }
 
 function ResultRow({ label, value }: { label: string; value: string }) {

@@ -14,7 +14,7 @@ import { useCheckoutSettings } from '@/hooks/useCheckoutSettings';
 import { chainForSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
 import { isLikelyName } from '@/lib/nameDetection';
-import { pickEffectiveAddress } from '@/lib/format';
+import { formatTokenAmount, pickEffectiveAddress } from '@/lib/format';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -29,9 +29,15 @@ import {
   type CheckoutItemDraft,
   type CheckoutParams,
 } from '@/lib/url';
-import { formatTokenAmount } from '@/lib/format';
 
 const USDC_CHAINS: ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
+
+// draft validation の reason → i18n key マップ (parseCheckoutItemDrafts の reason と同型)
+const ITEM_ERROR_KEY = {
+  empty: 'itemErrorEmpty',
+  qty: 'itemErrorQty',
+  price: 'itemErrorPrice',
+} as const;
 
 export function CheckoutLinkGenerator() {
   const { settings, setSettings, hydrated } = useCheckoutSettings();
@@ -273,7 +279,7 @@ export function CheckoutLinkGenerator() {
                     <p className="text-xs text-red-600">
                       {t('itemError', {
                         index: i + 1,
-                        reason: t(`itemError${capitalize(errForRow.reason)}`),
+                        reason: t(ITEM_ERROR_KEY[errForRow.reason]),
                       })}
                     </p>
                   )}
@@ -461,8 +467,4 @@ export function CheckoutLinkGenerator() {
       </section>
     </div>
   );
-}
-
-function capitalize<T extends string>(s: T): Capitalize<T> {
-  return (s.charAt(0).toUpperCase() + s.slice(1)) as Capitalize<T>;
 }

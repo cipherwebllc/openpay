@@ -509,6 +509,29 @@ export function encodeItems(items: ReadonlyArray<CheckoutItem>): string {
   return items.map(encodeItem).join(',');
 }
 
+// qty / price フィールドの共通検証 (URL parser と draft parser の両方で使う)。
+// reason は draft parser がエラー対象 row の UI 表示用に区別する単位。
+type ItemFieldsValidation =
+  | { ok: true; qty: number }
+  | { ok: false; reason: 'qty' | 'price' };
+
+function validateItemFields(
+  qtyStr: string,
+  priceStr: string,
+  decimals: number,
+): ItemFieldsValidation {
+  if (!/^\d+$/.test(qtyStr)) return { ok: false, reason: 'qty' };
+  const qty = Number(qtyStr);
+  if (qty < 1 || qty > CHECKOUT_QTY_MAX) return { ok: false, reason: 'qty' };
+  if (!DECIMAL_PATTERN.test(priceStr)) return { ok: false, reason: 'price' };
+  const dotIdx = priceStr.indexOf('.');
+  const fracDigits = dotIdx === -1 ? 0 : priceStr.length - dotIdx - 1;
+  if (fracDigits > decimals) return { ok: false, reason: 'price' };
+  // 0 / 0.0 / 00.000 等は無効 (実質ゼロ価格は意味なし)
+  if (/^0+(\.0+)?$/.test(priceStr)) return { ok: false, reason: 'price' };
+  return { ok: true, qty };
+}
+
 // 不正値があれば全体を捨てる (all-or-nothing)。decimals は token によって異なる
 // ため呼出側から渡す。decodeURIComponent は malformed %XX で throw するため、
 // その場合は null を返してエラーパスへ。
@@ -532,17 +555,9 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
     if (name.length === 0) return null;
     const trimmedName =
       name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
-    if (!/^\d+$/.test(qtyStr)) return null;
-    const qty = Number(qtyStr);
-    if (qty < 1 || qty > CHECKOUT_QTY_MAX) return null;
-    if (!DECIMAL_PATTERN.test(priceStr)) return null;
-    // 0 / 0.0 は無効 (実質ゼロ価格は意味なし)
-    const dotIdx = priceStr.indexOf('.');
-    const fracDigits = dotIdx === -1 ? 0 : priceStr.length - dotIdx - 1;
-    if (fracDigits > decimals) return null;
-    // 全てゼロ ("0", "0.0", "00.000" 等) を弾く
-    if (/^0+(\.0+)?$/.test(priceStr)) return null;
-    items.push({ name: trimmedName, qty, price: priceStr });
+    const v = validateItemFields(qtyStr, priceStr, decimals);
+    if (!v.ok) return null;
+    items.push({ name: trimmedName, qty: v.qty, price: priceStr });
   }
   return items;
 }
@@ -693,61 +708,32 @@ export function parseCheckoutItemDrafts(
 ): CheckoutItemDraftsParseResult {
   const items: CheckoutItem[] = [];
   const errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }> = [];
-  let allValid = true;
 
   drafts.forEach((d, i) => {
-    const rawName = d.name.replace(/[\x00-\x1f\x7f]/g, '').trim();
-    const rawQty = d.qty.trim();
-    const rawPrice = d.price.trim();
-    // 全フィールドが空欄の draft は「未入力 row」として無視する (UI 上「商品を追加」して
+    const name = d.name.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    const qtyStr = d.qty.trim();
+    const priceStr = d.price.trim();
+    // 全フィールドが空欄の draft は「未入力 row」として無視 (UI 上「商品を追加」して
     // 空のまま残す UX を許容)。1 つでも入力があれば validate 対象。
-    if (rawName.length === 0 && rawQty.length === 0 && rawPrice.length === 0) {
-      return;
-    }
-    if (rawName.length === 0 || rawQty.length === 0 || rawPrice.length === 0) {
+    if (name.length === 0 && qtyStr.length === 0 && priceStr.length === 0) return;
+    if (name.length === 0 || qtyStr.length === 0 || priceStr.length === 0) {
       errors.push({ index: i, reason: 'empty' });
-      allValid = false;
       return;
     }
-    if (!/^\d+$/.test(rawQty)) {
-      errors.push({ index: i, reason: 'qty' });
-      allValid = false;
-      return;
-    }
-    const qty = Number(rawQty);
-    if (qty < 1 || qty > CHECKOUT_QTY_MAX) {
-      errors.push({ index: i, reason: 'qty' });
-      allValid = false;
-      return;
-    }
-    if (!DECIMAL_PATTERN.test(rawPrice)) {
-      errors.push({ index: i, reason: 'price' });
-      allValid = false;
-      return;
-    }
-    const dotIdx = rawPrice.indexOf('.');
-    const fracDigits = dotIdx === -1 ? 0 : rawPrice.length - dotIdx - 1;
-    if (fracDigits > decimals) {
-      errors.push({ index: i, reason: 'price' });
-      allValid = false;
-      return;
-    }
-    if (/^0+(\.0+)?$/.test(rawPrice)) {
-      errors.push({ index: i, reason: 'price' });
-      allValid = false;
+    const v = validateItemFields(qtyStr, priceStr, decimals);
+    if (!v.ok) {
+      errors.push({ index: i, reason: v.reason });
       return;
     }
     const trimmedName =
-      rawName.length > CHECKOUT_NAME_MAX
-        ? rawName.slice(0, CHECKOUT_NAME_MAX)
-        : rawName;
-    items.push({ name: trimmedName, qty, price: rawPrice });
+      name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
+    items.push({ name: trimmedName, qty: v.qty, price: priceStr });
   });
 
-  // items 件数の上限 (URL spec と整合)
-  if (items.length > CHECKOUT_MAX_ITEMS) allValid = false;
-
-  return { items: allValid && items.length > 0 ? items : null, errors };
+  return {
+    items: errors.length === 0 && items.length > 0 ? items : null,
+    errors,
+  };
 }
 
 // items 合計を bigint で計算 (token decimals を反映)。fee 計算は既存の calcBreakdown
