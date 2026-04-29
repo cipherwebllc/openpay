@@ -1,17 +1,15 @@
 'use client';
 
-// CheckoutLinkGenerator の draft 入力 (商品リスト + metadata) を LocalStorage に永続化。
-// useQrSettings / useTipSettings と同型のパターン。
-//
-// items は draft 状態 (空欄含む文字列ペア) で保存し、URL 生成時に parse して
-// CheckoutItem[] へ昇格させる (parseSplitDrafts と同じ all-or-nothing 設計)。
+// items は draft 状態 (空欄含む文字列ペア) で保存し、URL 生成時に parseCheckoutItemDrafts
+// で CheckoutItem[] へ昇格させる (all-or-nothing、parseSplitDrafts と同型)。
 
 import { useEffect, useState } from 'react';
 import { safeGet, safeSet } from '@/lib/storage';
-import { isValidChainSlug, type ChainSlug } from '@/lib/chains';
+import type { ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
-import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
-import type { CheckoutItemDraft } from '@/lib/url';
+import type { TokenSymbol } from '@/lib/tokens';
+import { CHECKOUT_MAX_ITEMS, type CheckoutItemDraft } from '@/lib/url';
+import { normalizeChainForToken } from './useQrSettings';
 
 export type CheckoutSettings = {
   receiver: string;
@@ -43,12 +41,6 @@ const DEFAULT_SETTINGS: CheckoutSettings = {
   webhook: '',
 };
 
-function normalizeChain(token: TokenSymbol, raw: string | undefined): ChainSlug {
-  if (token === 'jpyc') return 'polygon';
-  if (raw && isValidChainSlug(raw)) return raw;
-  return DEFAULT_CHAIN_FOR_SYMBOL[token];
-}
-
 function sanitizeItems(loaded: unknown): CheckoutItemDraft[] {
   if (!Array.isArray(loaded)) return DEFAULT_SETTINGS.items;
   const items = loaded
@@ -60,7 +52,7 @@ function sanitizeItems(loaded: unknown): CheckoutItemDraft[] {
         typeof (e as CheckoutItemDraft).qty === 'string' &&
         typeof (e as CheckoutItemDraft).price === 'string',
     )
-    .slice(0, 10);
+    .slice(0, CHECKOUT_MAX_ITEMS);
   return items.length > 0 ? items : DEFAULT_SETTINGS.items;
 }
 
@@ -83,7 +75,7 @@ function sanitize(loaded: Partial<CheckoutSettings>): CheckoutSettings {
   return {
     receiver: sanitizeOptionalString(loaded.receiver, DEFAULT_SETTINGS.receiver),
     token,
-    chain: normalizeChain(token, loaded.chain),
+    chain: normalizeChainForToken(token, loaded.chain),
     gasMode:
       loaded.gasMode === 'customer' || loaded.gasMode === 'merchant'
         ? loaded.gasMode

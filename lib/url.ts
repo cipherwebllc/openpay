@@ -498,8 +498,6 @@ const CHECKOUT_NAME_MAX = 80;
 const CHECKOUT_ORDER_ID_MAX = 64;
 const CHECKOUT_DESCRIPTION_MAX = 200;
 const CHECKOUT_EMAIL_MAX = 240;
-// price の decimal 部分の最大桁数 (token decimals を超えると parseUnits が throw)
-// JPYC は 18、USDC は 6。token に依存して parseItemsParam が判定する。
 
 function encodeItem(it: CheckoutItem): string {
   return `${encodeURIComponent(it.name)}:${it.qty}:${it.price}`;
@@ -694,11 +692,10 @@ export type CheckoutItemDraft = {
   price: string;
 };
 
+// all-or-nothing (parseSplitDrafts と同型): 1 件でも error なら items=null、
+// 個別 row のエラーは errors[] で返して UI に「商品 #N: 〜」と出す。
 export type CheckoutItemDraftsParseResult = {
-  // 全 draft が valid な時のみ items が入る (URL に組み込まれる)。
-  // 1 件でも error があれば null (all-or-nothing、parseSplitDrafts と同型)。
   items: CheckoutItem[] | null;
-  // index 0 始まりで全 draft 分のエラー詳細を返す。UI で「商品 #N: 〜」を出すのに使う。
   errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }>;
 };
 

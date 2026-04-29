@@ -1,16 +1,11 @@
 'use client';
 
-// JPYC Sponsorship mode 用の gas 見積 (JPYC 建て) を取得するフック。
+// JPYC Sponsorship Paymaster の gas 見積 (JPYC 建て) を取得するフック。
 //
-// Pimlico Sponsorship では Pimlico が POL でガスを立替え、運営は別途精算する。
-// 顧客から徴収する JPYC は (estimated POL gas) × (POL/JPYC rate) で換算し、
-// fee transfer に内包して feeReceiver に渡す。
-//
-// gas 単位は実機計測前の rough な worst-case 想定値で固定 (実費はこれ以下)。
-// POL/JPYC rate は外部 API 依存を持たず NEXT_PUBLIC_POL_JPYC_RATE で運用更新する。
-// 既定 60 は POL ≈ 60 JPY 想定 (2026 時点の安全側)。
-//
-// JPYC は Polygon 単一 deployment なので、deployment.chainId は常に Polygon。
+// Pimlico が POL でガスを立替え、運営は別途精算する。顧客から徴収する JPYC は
+// (estimated POL gas) × (POL/JPYC rate) で換算し fee transfer に内包する。
+// rate は外部 API 依存を持たず NEXT_PUBLIC_POL_JPYC_RATE で運用更新 (既定 60、
+// POL ≈ 60 JPY 想定 / 2026)。POL 急騰時は値を上げて運営の赤字を回避。
 
 import { useQuery } from '@tanstack/react-query';
 import { polygon, polygonAmoy } from 'viem/chains';

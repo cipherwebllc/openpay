@@ -127,9 +127,7 @@ export function QrGenerator() {
     setResolvedReceiver(addr);
   }, []);
 
-  // 表示用 deployment は (token, chain) 組合せから決定。chain が token と
-  // 不整合 (jpyc + 非 polygon) になるケースは useQrSettings の sanitize で
-  // 防いでいる。
+  // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
 
   async function copyUrl() {

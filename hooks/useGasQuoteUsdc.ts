@@ -1,20 +1,14 @@
 'use client';
 
-// USDC ERC20 Paymaster mode 用の gas 見積 (USDC 建て) を取得するフック。
+// USDC ERC20 Paymaster の gas 見積 (USDC 建て) を取得するフック。
 //
 // 計算式は permissionless の prepareUserOperationForErc20Paymaster と同一:
 //   maxCostInToken = (userOperationMaxGas + postOpGas) * maxFeePerGas
 //                    * exchangeRate / 1e18
 //
-// gas 単位は実機計測前の rough な worst-case 想定値で固定 (実費はこれ以下、
-// UI に「最大 X USDC」と表示)。本番計測後に NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS
-// で再デプロイなしで再調整できる。
+// gas 単位は実機計測前の worst-case 想定値で固定 (UI に「最大 X USDC」と表示)。
+// 本番計測後に NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS で再調整可能。
 // sponsorship に解決される場合 (JPYC / testnet) は enabled=false で no-op。
-//
-// マルチチェーン: deployment.chainId に応じて Pimlico bundler を切り替え、
-// per-chain の token quote (各チェーンの USDC/native exchange rate と postOpGas)
-// を取得する。Pimlico Paymaster はチェーンごとに ETH/POL レートが異なるため、
-// chain ごとの quote が必須。
 
 import { useQuery } from '@tanstack/react-query';
 import { Chain } from 'viem';

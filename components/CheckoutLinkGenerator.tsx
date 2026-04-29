@@ -1,9 +1,5 @@
 'use client';
 
-// Stripe Checkout 相当の決済 URL を発行するマーチャント向け UI。
-// QrGenerator (送金 QR) + TipEmbedGenerator (iframe 埋込) の中間: line items を
-// 編集して /checkout?... URL を組み立てる。LocalStorage に draft を保存。
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';

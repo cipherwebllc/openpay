@@ -82,10 +82,8 @@ export const env = {
     mainnet: nonEmpty(process.env.NEXT_PUBLIC_MAINNET_RPC_URL),
     baseMainnet: nonEmpty(process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL),
   },
-  // mainnet の既定アドレスは lib/tokens.ts。コントラクト移行時はこの env で差替え。
-  // JPYC は Polygon 単一なので chain 軸の上書きは持たない。
-  // USDC は対応 4 chain それぞれで上書き可能 (個別の Circle native USDC アドレス変更や
-  // テスト用カスタム ERC20 への切替に対応)。
+  // 既定アドレスは lib/tokens.ts。コントラクト移行時はここで差替え。
+  // JPYC は Polygon 単一、USDC は対応 4 chain それぞれで上書き可能。
   mainnetTokenOverrides: {
     jpyc: parseAddress(
       'NEXT_PUBLIC_JPYC_MAINNET_ADDRESS',

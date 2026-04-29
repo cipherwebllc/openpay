@@ -1,14 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  arbitrumChain,
-  baseChain,
   blockExplorerUrl,
   chainForSlug,
   customRpcUrlForChain,
   isSupportedChainId,
   isValidChainSlug,
-  optimismChain,
-  polygonChain,
   slugForChain,
   supportedChains,
 } from '@/lib/chains';
@@ -25,20 +21,11 @@ import {
 
 // vitest.config.ts で NETWORK_ENV='testnet' なので testnet 側を期待
 describe('chains (testnet env)', () => {
-  it('polygonChain は Polygon Amoy', () => {
-    expect(polygonChain.id).toBe(polygonAmoy.id);
-  });
-
-  it('baseChain は Base Sepolia', () => {
-    expect(baseChain.id).toBe(baseSepolia.id);
-  });
-
-  it('arbitrumChain は Arbitrum Sepolia', () => {
-    expect(arbitrumChain.id).toBe(arbitrumSepolia.id);
-  });
-
-  it('optimismChain は Optimism Sepolia', () => {
-    expect(optimismChain.id).toBe(optimismSepolia.id);
+  it('chainForSlug が testnet env で sepolia 系チェーンを返す (4 slug 全て)', () => {
+    expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
+    expect(chainForSlug('base').id).toBe(baseSepolia.id);
+    expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
+    expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
   });
 
   it('supportedChains は 4 本 (Base / Arbitrum / Optimism / Polygon)', () => {
@@ -110,10 +97,10 @@ describe('isSupportedChainId', () => {
 
 describe('customRpcUrlForChain', () => {
   it('env 未設定なら undefined (対応 4 chain × mainnet/testnet すべて)', () => {
-    expect(customRpcUrlForChain(polygonChain.id)).toBeUndefined();
-    expect(customRpcUrlForChain(baseChain.id)).toBeUndefined();
-    expect(customRpcUrlForChain(arbitrumChain.id)).toBeUndefined();
-    expect(customRpcUrlForChain(optimismChain.id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('polygon').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('base').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('arbitrum').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('optimism').id)).toBeUndefined();
     expect(customRpcUrlForChain(arbitrum.id)).toBeUndefined();
     expect(customRpcUrlForChain(optimism.id)).toBeUndefined();
   });

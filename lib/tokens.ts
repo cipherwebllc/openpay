@@ -19,9 +19,8 @@ export type TokenSymbol = 'jpyc' | 'usdc';
 //   erc20       = 顧客がトークンでガスを支払う (ERC20 Paymaster、mainnet 限定)
 export type PaymasterMode = 'sponsorship' | 'erc20';
 
-// 単一 (symbol, chainId) ペアでの ERC20 デプロイメント情報。
-// "TokenInfo" 単一マッピング時代と異なり、同じ symbol でも複数 chain に存在し得る
-// (例: USDC は Base / Arbitrum / Optimism / Polygon)。
+// 単一 (symbol, chainId) ペアの ERC20 デプロイメント情報。同じ symbol でも複数
+// chain に存在し得る (例: USDC は Base / Arbitrum / Optimism / Polygon)。
 export type TokenDeployment = {
   symbol: TokenSymbol;
   displaySymbol: string;
@@ -31,10 +30,6 @@ export type TokenDeployment = {
   chainId: number;
   paymasterMode: PaymasterMode;
 };
-
-// 旧 API 互換: フォーマッタなど一部のユーティリティが TokenInfo 型名を参照していたため
-// 別名としてエクスポート (新規コードは TokenDeployment を使用)。
-export type TokenInfo = TokenDeployment;
 
 // ⚠️ 重要: 以下のアドレスは本番投入前に必ず公式ソースで再確認してください。
 //   - JPYC は v1 / v2 / PLUS など複数バージョンが存在し、移行されることがある。

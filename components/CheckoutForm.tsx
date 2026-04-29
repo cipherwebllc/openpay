@@ -1,16 +1,8 @@
 'use client';
 
-// Stripe Checkout 相当の itemized 決済画面。
-//
-// /pay (汎用送金) と /tip (固定 widget) の中間に位置する: line items 表示 +
-// 注文 metadata + success_url redirect + webhook (Tip と互換シェイプ)。
-// 既存 useSmartAccount / useBatchPayment / useGasQuote をそのまま流用。
-//
-// 重要 (セキュリティ):
-//   webhook payload 自体はクライアントから POST されるため、改ざん耐性は
-//   Stripe の whsec_ 署名と異なり弱い。マーチャントは webhook 受信後、
-//   tx_hash を on-chain で再検証してから注文を確定する責務を負う。同様に
-//   success_url の query を信用してはならず、必ず on-chain verification する。
+// セキュリティ: webhook payload と success_url の query は顧客側で改ざん可能
+// (Stripe の whsec_ 署名相当の保証はない)。マーチャントは tx_hash を必ず
+// on-chain で再検証してから注文を確定する責務を負う。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -116,13 +108,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
         : null));
 
-  // 成功時の redirect スケジューラ (3 秒後 success_url へ移動、skip ボタンで即時)。
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
 
-  // 成功時 webhook + redirect は userOpHash ごとに 1 回限り。
-  // gasQuote の refetchInterval (30s) で breakdown が再計算 → effect dep が変化
-  // → effect 再実行 → webhook 二重発火 / redirect カウントダウン再起動を防ぐ。
-  // userOpHash は成功した UserOp 固有 ID なので、新規送金時は別値になり再発火する。
+  // userOpHash ごとに 1 回限りの通知。gasQuote の refetchInterval (30s) で
+  // breakdown が再計算 → effect 再実行 → webhook 二重発火 / redirect 再起動
+  // を防ぐ gate。新規送金 (userOpHash が変わる) では再発火する。
   const notifiedUserOpHashRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -139,7 +129,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   useEffect(() => {
     if (!gasless.data || !gasless.data.success) return;
-    // 同一 userOpHash で再 render された場合は通知済としてスキップ (重複防御)
     if (notifiedUserOpHashRef.current === gasless.data.userOpHash) return;
     notifiedUserOpHashRef.current = gasless.data.userOpHash;
     logger.info('checkout.success', {
@@ -151,8 +140,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       chain: chainSlug,
     });
 
-    // webhook (Tip と互換シェイプ + checkout 固有フィールド)。
-    // 失敗しても決済自体は成立しているので、log だけ残し UI には出さない。
+    // webhook 失敗 (CORS 等) は logger.warn のみ。決済自体は成立しているため UI には出さない。
     if (params.webhook) {
       const payload = {
         type: 'openpay.checkout.success',
@@ -198,7 +186,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         );
     }
 
-    // success_url 自動 redirect (3 秒)。skip ボタンで即時可能。
     if (params.successUrl) {
       setRedirectIn(SUCCESS_REDIRECT_DELAY_MS / 1000);
     }
@@ -243,7 +230,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     u.searchParams.set('chain', chainSlug);
     u.searchParams.set('token', params.token);
     setRedirectIn(null);
-    // 外部 URL のため Next.js の router ではなく window.location.assign を使う。
+    // Next.js の router は同一オリジンのみ。success_url は外部 URL なので window.location.assign。
     window.location.assign(u.toString());
   }
 
@@ -264,7 +251,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
-  // 完了後の状態 (success panel 表示)。
   const completed = gasless.data && gasless.data.success;
 
   return (

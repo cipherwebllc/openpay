@@ -1,5 +1,5 @@
 import { formatUnits, getAddress, isAddress, type Address } from 'viem';
-import type { TokenInfo } from './tokens';
+import type { TokenDeployment } from './tokens';
 
 // 0x... アドレスを "0x123…abcd" の形式に短縮。
 // 12 文字以下の入力は変換せずそのまま返す (ENS 名前など短い文字列の保護)。
@@ -8,7 +8,7 @@ export function shortAddress(addr: string): string {
 }
 
 // wei 単位の bigint を "X.XX SYMBOL" にフォーマット。
-export function formatTokenAmount(wei: bigint, token: TokenInfo): string {
+export function formatTokenAmount(wei: bigint, token: TokenDeployment): string {
   return `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;
 }
 

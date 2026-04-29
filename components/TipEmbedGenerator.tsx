@@ -129,7 +129,6 @@ export function TipEmbedGenerator() {
     setSettings((s) => ({ ...s, chain: slug }));
   }
 
-  // 表示用 deployment は (token, chain) 組合せから決定。
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const defaultPresetsList = DEFAULT_TIP_PRESETS[settings.token].join(', ');
   const defaultPresetsCsv = DEFAULT_TIP_PRESETS[settings.token].join(',');

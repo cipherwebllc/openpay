@@ -118,10 +118,8 @@ export function TipForm({ params }: { params: TipParams }) {
     if (gasQuote.error) logger.error('tip.gas-quote.failed', { error: gasQuote.error });
   }, [gasQuote.error]);
 
-  // 成功時 webhook は userOpHash ごとに 1 回限り。
-  // gasQuote の refetchInterval (30s) で breakdown が再計算 → effect dep が変化
-  // → effect 再実行 → webhook 二重発火を防ぐ。userOpHash は成功した UserOp
-  // 固有 ID なので、新規送金時は別値になり再発火する。
+  // userOpHash ごとに 1 回限りの webhook 発火。gasQuote の refetchInterval (30s)
+  // で breakdown が再計算 → effect 再実行 → 二重発火を防ぐ gate。
   const notifiedUserOpHashRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -135,8 +133,8 @@ export function TipForm({ params }: { params: TipParams }) {
       amount: amountStr,
       token: params.token,
     });
-    // webhook が指定されていれば成功 payload を 1 度だけ POST。
-    // 失敗しても tip 自体は成立しているため、log だけ残し、UI には出さない。
+    // webhook 失敗 (CORS / non-2xx) は logger.warn のみ。tip は成立しているため UI には出さない。
+    // fetch の Promise は HTTP non-2xx でも resolve するため res.ok を明示確認。
     if (params.webhook) {
       const payload = {
         type: 'openpay.tip.success',
@@ -155,11 +153,6 @@ export function TipForm({ params }: { params: TipParams }) {
         chainId: deployment.chainId,
         ts: Date.now(),
       };
-      // CORS が許可されていない webhook 先 (Discord 等) は失敗するが、tip
-      // 自体には影響なし。クリエイターは独自バックエンドや CORS 許可済
-      // endpoint を指す想定。
-      // 失敗は logger.warn → Sentry へ流す (DSN 設定時)。さらに HTTP
-      // ステータスが non-2xx でも reject されないため、status を明示確認。
       fetch(params.webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
