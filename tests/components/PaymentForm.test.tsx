@@ -362,10 +362,12 @@ describe('PaymentForm — 送信フロー', () => {
     setSmartAccount(true);
     setPayment('success');
     render(<PaymentForm />);
-    expect(screen.getByText(/決済が完了しました/)).toBeInTheDocument();
-    expect(screen.getByText(`0x${'a'.repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText(`0x${'b'.repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText('42')).toBeInTheDocument();
+    // 成功時は SuccessOverlay (大型 PayPay 風) + 既存 inline ResultPanel が
+    // 両方 DOM に存在するため、特定の値が複数箇所に現れる。
+    expect(screen.getAllByText(/決済が完了しました|決済完了/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`0x${'a'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('42').length).toBeGreaterThan(0);
   });
 
   it('GasCongestedError → 生メッセージではなく i18n 案内 (sponsorship)', async () => {
@@ -505,9 +507,9 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
     setBalance(20_000_000n);
     setDirectPayment('success');
     render(<PaymentForm />);
-    expect(screen.getByText(/決済が完了しました/)).toBeInTheDocument();
-    expect(screen.getByText(`0x${'c'.repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText('77')).toBeInTheDocument();
+    expect(screen.getAllByText(/決済が完了しました|決済完了/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('77').length).toBeGreaterThan(0);
     expect(screen.queryByText('UserOp Hash')).toBeNull();
   });
 
@@ -609,7 +611,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('ready');
     render(<PaymentForm />);
     expect(
-      screen.getByText(/ネットワーク手数料は USDC で頂戴します/),
+      screen.getByText(/最大表示。実費はこれ以下に収まります \(USDC でお支払い\)/),
     ).toBeInTheDocument();
   });
 

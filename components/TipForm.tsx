@@ -5,7 +5,10 @@ import { useTranslations } from 'next-intl';
 import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { CopyableField } from './CopyableField';
+import { InfoTooltip } from './InfoTooltip';
 import { Row } from './Row';
+import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
@@ -49,6 +52,8 @@ export function TipForm({ params }: { params: TipParams }) {
   );
   const [customAmount, setCustomAmount] = useState('');
   const customSelected = selectedPreset === null;
+  // PayPay 風 大型成功 overlay (dismiss するまで全画面)
+  const [overlayDismissed, setOverlayDismissed] = useState(false);
 
   const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
   const amountWei = useMemo(() => {
@@ -300,6 +305,11 @@ export function TipForm({ params }: { params: TipParams }) {
           <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
           <Row
             label={t('gasRow')}
+            labelExtra={
+              <InfoTooltip
+                text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
+              />
+            }
             value={
               gasAmount !== undefined
                 ? t('gasRowValue', { amount: fmt(gasAmount) })
@@ -414,14 +424,31 @@ export function TipForm({ params }: { params: TipParams }) {
             <ResultRow
               label={t('successUserOp')}
               value={gasless.data.userOpHash}
+              copyable
             />
-            <ResultRow label={t('successTx')} value={gasless.data.txHash} />
+            <ResultRow
+              label={t('successTx')}
+              value={gasless.data.txHash}
+              copyable
+            />
             <ResultRow
               label={t('successBlock')}
               value={gasless.data.blockNumber.toString()}
             />
           </dl>
         </div>
+      )}
+
+      {/* PayPay 風 大型成功 overlay。dismiss 後は上記の従来 panel (thanks 含む) を表示。 */}
+      {!overlayDismissed && gasless.data && gasless.data.success && (
+        <SuccessOverlay
+          amountDisplay={fmt(totalCustomerOutflow)}
+          txHash={gasless.data.txHash}
+          userOpHash={gasless.data.userOpHash}
+          blockNumber={gasless.data.blockNumber}
+          explorerBase={explorerBase}
+          onDismiss={() => setOverlayDismissed(true)}
+        />
       )}
 
       <p className="pt-2 text-center text-[10px] text-slate-400">
@@ -439,11 +466,25 @@ export function TipForm({ params }: { params: TipParams }) {
   );
 }
 
-function ResultRow({ label, value }: { label: string; value: string }) {
+function ResultRow({
+  label,
+  value,
+  copyable,
+}: {
+  label: string;
+  value: string;
+  copyable?: boolean;
+}) {
   return (
     <div className="flex justify-between gap-2">
       <dt className="opacity-70">{label}</dt>
-      <dd className="break-all font-mono">{value}</dd>
+      <dd className="min-w-0 flex-1 text-right">
+        {copyable ? (
+          <CopyableField value={value} label={label} />
+        ) : (
+          <span className="break-all font-mono">{value}</span>
+        )}
+      </dd>
     </div>
   );
 }

@@ -341,10 +341,13 @@ describe('TipForm — 送信', () => {
     setSmartAccount(true);
     setBatchPayment('success');
     render(<TipForm params={USDC_PARAMS} />);
-    expect(screen.getByText(/チップを送信しました/)).toBeInTheDocument();
-    expect(screen.getByText(`0x${'a'.repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText(`0x${'b'.repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText('99')).toBeInTheDocument();
+    // SuccessOverlay (PayPay 風) + 既存 inline panel が両方 DOM に存在
+    expect(
+      screen.getAllByText(/チップを送信しました|決済完了/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(`0x${'a'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('99').length).toBeGreaterThan(0);
   });
 
   it('失敗 → エラー表示', () => {
@@ -488,7 +491,7 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     // fetch は呼ばれた (引数を確認)
     expect(fetchSpy).toHaveBeenCalled();
     // 完了 UI は影響を受けず通常表示
-    expect(screen.getByText(/UserOp/)).toBeInTheDocument();
+    expect(screen.getAllByText(/UserOp/).length).toBeGreaterThan(0);
     fetchSpy.mockRestore();
   });
 
@@ -509,7 +512,7 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
 
     expect(fetchSpy).toHaveBeenCalled();
     // 完了 UI は影響を受けない
-    expect(screen.getByText(/UserOp/)).toBeInTheDocument();
+    expect(screen.getAllByText(/UserOp/).length).toBeGreaterThan(0);
     fetchSpy.mockRestore();
   });
 
@@ -594,7 +597,7 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('ready');
     render(<TipForm params={USDC_PARAMS} />);
     expect(
-      screen.getByText(/ネットワーク手数料は USDC で支払います/),
+      screen.getByText(/最大表示。実費はこれ以下に収まります/),
     ).toBeInTheDocument();
   });
 

@@ -10,7 +10,10 @@ import { useTranslations } from 'next-intl';
 import { erc20Abi, formatUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { CopyableField } from './CopyableField';
+import { InfoTooltip } from './InfoTooltip';
 import { Row } from './Row';
+import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
@@ -109,6 +112,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         : null));
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
+  // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。
+  const [overlayDismissed, setOverlayDismissed] = useState(false);
 
   // userOpHash ごとに 1 回限りの通知。gasQuote の refetchInterval (30s) で
   // breakdown が再計算 → effect 再実行 → webhook 二重発火 / redirect 再起動
@@ -304,6 +309,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             />
             <Row
               label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
+              labelExtra={
+                <InfoTooltip
+                  text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
+                />
+              }
               value={
                 gasAmount !== undefined
                   ? t('gasRowValue', { amount: fmt(gasAmount) })
@@ -420,8 +430,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           <p className="font-semibold">{t('successTitle')}</p>
           <p className="mt-1 text-xs">{t('successBody')}</p>
           <dl className="mt-3 space-y-1 text-xs">
-            <ResultRow label={t('successUserOp')} value={gasless.data.userOpHash} />
-            <ResultRow label={t('successTx')} value={gasless.data.txHash} />
+            <ResultRow
+              label={t('successUserOp')}
+              value={gasless.data.userOpHash}
+              copyable
+            />
+            <ResultRow
+              label={t('successTx')}
+              value={gasless.data.txHash}
+              copyable
+            />
             <ResultRow
               label={t('successBlock')}
               value={gasless.data.blockNumber.toString()}
@@ -469,15 +487,42 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           OpenPay
         </a>
       </p>
+
+      {/* PayPay 風 大型成功 overlay。dismiss 後は inline panel + redirect countdown を表示。
+          success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。 */}
+      {!overlayDismissed && completed && gasless.data && (
+        <SuccessOverlay
+          amountDisplay={fmt(totalCustomerOutflow)}
+          txHash={gasless.data.txHash}
+          userOpHash={gasless.data.userOpHash}
+          blockNumber={gasless.data.blockNumber}
+          explorerBase={explorerBase}
+          onDismiss={() => setOverlayDismissed(true)}
+        />
+      )}
     </div>
   );
 }
 
-function ResultRow({ label, value }: { label: string; value: string }) {
+function ResultRow({
+  label,
+  value,
+  copyable,
+}: {
+  label: string;
+  value: string;
+  copyable?: boolean;
+}) {
   return (
     <div className="flex justify-between gap-2">
       <dt className="opacity-70">{label}</dt>
-      <dd className="break-all font-mono">{value}</dd>
+      <dd className="min-w-0 flex-1 text-right">
+        {copyable ? (
+          <CopyableField value={value} label={label} />
+        ) : (
+          <span className="break-all font-mono">{value}</span>
+        )}
+      </dd>
     </div>
   );
 }

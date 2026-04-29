@@ -6,7 +6,10 @@ import { useTranslations } from 'next-intl';
 import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { CopyableField } from './CopyableField';
+import { InfoTooltip } from './InfoTooltip';
 import { Row } from './Row';
+import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -71,6 +74,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const isFixed = fixedAmount.length > 0;
   const [inputAmount, setInputAmount] = useState('');
   const amountStr = isFixed ? fixedAmount : inputAmount;
+  // 成功時の大型 overlay (PayPay 風) を 1 度ユーザが閉じたら以降は inline panel のみ
+  const [overlayDismissed, setOverlayDismissed] = useState(false);
 
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
@@ -327,6 +332,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
           {!isDirect && (
             <Row
               label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
+              labelExtra={
+                <InfoTooltip
+                  text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
+                />
+              }
               value={
                 gasAmount !== undefined
                   ? t('gasRowValue', { amount: fmt(gasAmount) })
@@ -444,9 +454,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <ResultPanel
           title={t('successTitle')}
           rows={[
-            [t('successUserOp'), gasless.data.userOpHash],
-            [t('successTx'), gasless.data.txHash],
-            [t('successBlock'), gasless.data.blockNumber.toString()],
+            { label: t('successUserOp'), value: gasless.data.userOpHash, copyable: true },
+            { label: t('successTx'), value: gasless.data.txHash, copyable: true },
+            { label: t('successBlock'), value: gasless.data.blockNumber.toString() },
           ]}
         />
       )}
@@ -455,9 +465,30 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <ResultPanel
           title={t('successTitle')}
           rows={[
-            [t('successTx'), direct.data.txHash],
-            [t('successBlock'), direct.data.blockNumber.toString()],
+            { label: t('successTx'), value: direct.data.txHash, copyable: true },
+            { label: t('successBlock'), value: direct.data.blockNumber.toString() },
           ]}
+        />
+      )}
+
+      {/* PayPay 風 大型成功 overlay。dismiss するまで全画面で「決済完了」+ 金額 + 時刻表示。 */}
+      {!overlayDismissed && !isDirect && gasless.data && gasless.data.success && (
+        <SuccessOverlay
+          amountDisplay={fmt(totalCustomerOutflow)}
+          txHash={gasless.data.txHash}
+          userOpHash={gasless.data.userOpHash}
+          blockNumber={gasless.data.blockNumber}
+          explorerBase={explorerBase}
+          onDismiss={() => setOverlayDismissed(true)}
+        />
+      )}
+      {!overlayDismissed && isDirect && direct.data && (
+        <SuccessOverlay
+          amountDisplay={fmt(totalCustomerOutflow)}
+          txHash={direct.data.txHash}
+          blockNumber={direct.data.blockNumber}
+          explorerBase={explorerBase}
+          onDismiss={() => setOverlayDismissed(true)}
         />
       )}
     </div>
@@ -469,16 +500,23 @@ function ResultPanel({
   rows,
 }: {
   title: string;
-  rows: Array<[string, string]>;
+  // copyable=true の row はクリックで clipboard コピー可能 (tx hash 等の長い文字列向け)
+  rows: Array<{ label: string; value: string; copyable?: boolean }>;
 }) {
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
       <p className="font-semibold">{title}</p>
       <dl className="mt-2 space-y-1 text-xs">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex justify-between gap-2">
-            <dt className="opacity-70">{label}</dt>
-            <dd className="break-all font-mono">{value}</dd>
+        {rows.map((r) => (
+          <div key={r.label} className="flex justify-between gap-2">
+            <dt className="opacity-70">{r.label}</dt>
+            <dd className="min-w-0 flex-1 text-right">
+              {r.copyable ? (
+                <CopyableField value={r.value} label={r.label} />
+              ) : (
+                <span className="break-all font-mono">{r.value}</span>
+              )}
+            </dd>
           </div>
         ))}
       </dl>
