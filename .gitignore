@@ -30,3 +30,4 @@ playwright/.cache/
 
 # vitest coverage report
 coverage/
+.env*.local
