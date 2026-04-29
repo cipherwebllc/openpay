@@ -419,6 +419,99 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
+  it('[regression] 同一 userOpHash で再 render が起きても webhook は 1 回しか POST されない (gasQuote refetch 耐性)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    // 初回 gasAmount = 100_000n
+    setGasQuote('ready', 100_000n);
+    const { rerender } = render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // gasQuote の refetchInterval を模擬: gasAmount を 200_000n に変えて再 render。
+    // breakdown が変わるが webhook は再発火してはならない (同一 userOpHash)。
+    setGasQuote('ready', 200_000n);
+    rerender(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    // さらに別の gasAmount で再 render
+    setGasQuote('ready', 300_000n);
+    rerender(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+
+    // breakdown が 2 回変わっても webhook fetch は最初の 1 回のみ
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('[regression] 同一 userOpHash で再 render が起きても redirect カウントダウンは再起動しない', async () => {
+    vi.useFakeTimers();
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    const { rerender } = render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+    expect(screen.getByText(/3 秒後に確認ページへ移動します/)).toBeInTheDocument();
+    // 1 秒進める → 2 秒 (act + 1 tick)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    // gasQuote refetch を模擬し再 render — 同一 userOpHash なのでカウントダウンは継続のはず
+    setGasQuote('ready', 200_000n);
+    rerender(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+
+    // 残り 2 秒進めて assign 発火を観測 (もしカウントダウンが 3 にリセットされていたら +1 秒不足で発火しない)
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+    expect(assignSpy).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it('webhook 失敗 (CORS 等) → UI には影響しない (logger.warn のみ)', async () => {
     const fetchSpy = vi
       .fn()

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
@@ -118,8 +118,16 @@ export function TipForm({ params }: { params: TipParams }) {
     if (gasQuote.error) logger.error('tip.gas-quote.failed', { error: gasQuote.error });
   }, [gasQuote.error]);
 
+  // 成功時 webhook は userOpHash ごとに 1 回限り。
+  // gasQuote の refetchInterval (30s) で breakdown が再計算 → effect dep が変化
+  // → effect 再実行 → webhook 二重発火を防ぐ。userOpHash は成功した UserOp
+  // 固有 ID なので、新規送金時は別値になり再発火する。
+  const notifiedUserOpHashRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!gasless.data || !gasless.data.success) return;
+    if (notifiedUserOpHashRef.current === gasless.data.userOpHash) return;
+    notifiedUserOpHashRef.current = gasless.data.userOpHash;
     logger.info('tip.success', {
       userOpHash: gasless.data.userOpHash,
       txHash: gasless.data.txHash,

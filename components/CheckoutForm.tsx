@@ -12,7 +12,7 @@
 //   tx_hash を on-chain で再検証してから注文を確定する責務を負う。同様に
 //   success_url の query を信用してはならず、必ず on-chain verification する。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { erc20Abi, formatUnits } from 'viem';
@@ -119,6 +119,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 成功時の redirect スケジューラ (3 秒後 success_url へ移動、skip ボタンで即時)。
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
 
+  // 成功時 webhook + redirect は userOpHash ごとに 1 回限り。
+  // gasQuote の refetchInterval (30s) で breakdown が再計算 → effect dep が変化
+  // → effect 再実行 → webhook 二重発火 / redirect カウントダウン再起動を防ぐ。
+  // userOpHash は成功した UserOp 固有 ID なので、新規送金時は別値になり再発火する。
+  const notifiedUserOpHashRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (gasless.error) logger.error('checkout.failed', { error: gasless.error });
   }, [gasless.error]);
@@ -133,6 +139,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   useEffect(() => {
     if (!gasless.data || !gasless.data.success) return;
+    // 同一 userOpHash で再 render された場合は通知済としてスキップ (重複防御)
+    if (notifiedUserOpHashRef.current === gasless.data.userOpHash) return;
+    notifiedUserOpHashRef.current = gasless.data.userOpHash;
     logger.info('checkout.success', {
       userOpHash: gasless.data.userOpHash,
       txHash: gasless.data.txHash,

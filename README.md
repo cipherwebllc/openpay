@@ -32,7 +32,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 | 登録審査不要 | 店主は自分のウォレットアドレスを入力するだけで QR を発行 |
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
 | 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
-| Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可 |
+| Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可。webhook は同一 userOpHash につき 1 回限りの POST (gasQuote refetch 耐性、`useRef` gate で実装) |
 | Checkout (β)   | Stripe Checkout 相当の itemized 決済 URL を発行。line items + 注文 ID + 成功時 redirect + webhook (Tip と互換シェイプ)。e コマースの注文ごとに URL を発行する用途を想定 |
 
 ## 現金 / クレカ / PayPay との比較
@@ -482,7 +482,17 @@ policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject す�
 
 ### 4-1. USDC mainnet (ERC20 Paymaster) 投入 runbook
 
-USDC は Base mainnet で **ERC20 Paymaster mode** を採用し、顧客が USDC で gas を支払う。本リポジトリのテストは型 + mock 検証までで、Pimlico mainnet RPC との実通信は **未実走行**。投入時は以下を **手順通り** 実施すること:
+USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster mode** を採用し、顧客が USDC で gas を支払う。
+
+> ⚠️ **未検証範囲 (LARP リスク)**:
+>
+> - `scripts/verify-pimlico-usdc.mjs` で **Pimlico の `getTokenQuotes` が 4 chain × mainnet/testnet の全 8 deployment で valid な quote を返すこと** は確認済み (Universal Paymaster `0x7777777777...e66834C` が有効)
+> - **しかし**、Smart Account → bundler → 実 execution → ERC20 Paymaster の `postOp` で実際に USDC が顧客から徴収される **全段の動作** は本リポジトリ内では検証していない (実 wallet + funded USDC + ERC-7702 署名が必要)
+> - 既存の Base mainnet 運用の延長で Arbitrum / Optimism / Polygon mainnet を一気に有効化する設計だが、**段階展開を推奨**: Base で実績確認 → Arbitrum (testnet 検証) → Optimism → Polygon の順
+> - ERC-7702 (EIP-7702) は Pectra (2025-05) 以降の各 L2 に順次展開された。本番投入前に対象 chain の hard fork 状況を再確認
+> - bridged USDC.e は **非対応**。`NEXT_PUBLIC_USDC_<chain>_<env>_ADDRESS` には必ず Circle 公式 native USDC を指定
+
+投入時は以下を **手順通り** 実施すること:
 
 **事前 (deploy 前)**
 

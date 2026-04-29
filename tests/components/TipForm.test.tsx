@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -428,6 +428,43 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     expect(body.creator.toLowerCase()).toBe(CREATOR.toLowerCase());
     expect(body.token).toBe('usdc');
     expect(body.txHash).toBe(`0x${'b'.repeat(64)}`);
+    fetchSpy.mockRestore();
+  });
+
+  it('[regression] 同一 userOpHash で再 render が起きても webhook は 1 回 (gasQuote refetch 耐性)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok', { status: 200 }));
+
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    // 初回 gasAmount = 100_000n
+    setGasQuote('ready', 100_000n);
+    const { rerender } = render(
+      <TipForm
+        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // gasQuote refetchInterval (30s) で gasAmount が変わったケースをシミュレート
+    setGasQuote('ready', 200_000n);
+    rerender(
+      <TipForm
+        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
+      />,
+    );
+    setGasQuote('ready', 300_000n);
+    rerender(
+      <TipForm
+        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
+      />,
+    );
+
+    // 同一 userOpHash の間は webhook は再発火しない
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     fetchSpy.mockRestore();
   });
 
