@@ -21,13 +21,24 @@ describe('CheckoutLinkGenerator', () => {
     window.localStorage.clear();
   });
 
-  it('初期レンダリング: USDC + chain Base が active、chain selector 表示', async () => {
+  it('初期レンダリング: JPYC が default、chain selector は非表示 (Polygon 固定)', async () => {
     render(<CheckoutLinkGenerator />);
-    await waitFor(() => {
-      // chain field の label "受取チェーン" が出ていれば USDC selected
-      expect(screen.getByText('受取チェーン')).toBeInTheDocument();
-    });
-    // chain selector のチェーン id (testnet env では Arbitrum Sepolia=421614) が出る
+    await waitFor(() => screen.getByRole('button', { name: /JPYC/ }));
+    const jpycBtn = screen.getByRole('button', { name: /JPYC/ });
+    const usdcBtn = screen.getByRole('button', { name: /USDC/ });
+    expect(jpycBtn.className).toMatch(/border-brand/);
+    expect(usdcBtn.className).not.toMatch(/border-brand/);
+    // jpyc default なので chain selector field は表示されない
+    expect(screen.queryByText('受取チェーン')).toBeNull();
+  });
+
+  it('USDC を選択すると chain selector が表示される', async () => {
+    const user = userEvent.setup();
+    render(<CheckoutLinkGenerator />);
+    await waitFor(() => screen.getByRole('button', { name: /USDC/ }));
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
+    expect(screen.getByText('受取チェーン')).toBeInTheDocument();
+    // testnet env では Arbitrum Sepolia=421614 が chain id として出る
     expect(screen.getByText(/id: 421614/)).toBeInTheDocument();
     expect(screen.getByText(/id: 11155420/)).toBeInTheDocument(); // OP Sepolia
   });
@@ -120,14 +131,15 @@ describe('CheckoutLinkGenerator', () => {
     ).toBeInTheDocument();
   });
 
-  it('JPYC 選択時は chain selector を非表示 (Polygon 固定)', async () => {
+  it('USDC → JPYC 切替で chain selector が消える (Polygon 固定)', async () => {
     const user = userEvent.setup();
     render(<CheckoutLinkGenerator />);
-    await waitFor(() => screen.getByRole('button', { name: /JPYC/ }));
-    // 初期: USDC 選択中 → chain field 表示
+    await waitFor(() => screen.getByRole('button', { name: /USDC/ }));
+    // USDC を選択 → chain field 表示
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
     expect(screen.getByText('受取チェーン')).toBeInTheDocument();
+    // JPYC に切替 → 受取チェーン Field が DOM から消える
     await user.click(screen.getByRole('button', { name: /JPYC/ }));
-    // JPYC 選択後: 受取チェーン Field 自体が DOM から消える
     expect(screen.queryByText('受取チェーン')).toBeNull();
   });
 

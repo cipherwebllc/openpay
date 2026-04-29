@@ -166,7 +166,7 @@ export function CheckoutLinkGenerator() {
 
         <Field label={t('tokenLabel')}>
           <div className="grid grid-cols-2 gap-2">
-            {(['usdc', 'jpyc'] as TokenSymbol[]).map((tok) => {
+            {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
               const info = defaultDeploymentForSymbol(tok);
               const active = settings.token === tok;
               return (

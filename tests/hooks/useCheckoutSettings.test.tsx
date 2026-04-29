@@ -9,13 +9,13 @@ describe('useCheckoutSettings', () => {
     window.localStorage.clear();
   });
 
-  it('未保存時は defaults (token=usdc, chain=base, items 1 行)', async () => {
+  it('未保存時は defaults (token=jpyc, chain=polygon, items 1 行 — JPYC をメインに)', async () => {
     const { result } = renderHook(() => useCheckoutSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '',
-      token: 'usdc',
-      chain: 'base',
+      token: 'jpyc',
+      chain: 'polygon',
       gasMode: 'customer',
       items: [{ name: '', qty: '', price: '' }],
       orderId: '',
@@ -31,7 +31,7 @@ describe('useCheckoutSettings', () => {
     window.localStorage.setItem(KEY, '{not-json');
     const { result } = renderHook(() => useCheckoutSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.token).toBe('usdc');
+    expect(result.current.settings.token).toBe('jpyc');
   });
 
   it('保存値からハイドレート (旧スキーマ風で欠損は default 補完)', async () => {

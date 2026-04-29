@@ -26,8 +26,8 @@ const STORAGE_KEY = 'openpay:qr-settings:v2';
 
 const DEFAULT_SETTINGS: QrSettings = {
   receiver: '',
-  token: 'usdc',
-  chain: 'base',
+  token: 'jpyc',
+  chain: 'polygon',
   gasMode: 'customer',
   directTransfer: false,
   splits: [],

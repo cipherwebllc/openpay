@@ -24,17 +24,17 @@ describe('QrGenerator', () => {
   });
 
   describe('初期レンダリング', () => {
-    it('LocalStorage 空: アコーディオンは開いていて、USDC が active', async () => {
+    it('LocalStorage 空: アコーディオンは開いていて、JPYC が active (default)', async () => {
       render(<QrGenerator />);
       await waitFor(() => {
         expect(
-          screen.getByRole('button', { name: /USDC/ }),
+          screen.getByRole('button', { name: /JPYC/ }),
         ).toBeInTheDocument();
       });
       const usdcBtn = screen.getByRole('button', { name: /USDC/ });
       const jpycBtn = screen.getByRole('button', { name: /JPYC/ });
-      expect(usdcBtn.className).toMatch(/border-brand/);
-      expect(jpycBtn.className).not.toMatch(/border-brand/);
+      expect(jpycBtn.className).toMatch(/border-brand/);
+      expect(usdcBtn.className).not.toMatch(/border-brand/);
     });
 
     it('LocalStorage に有効アドレス: アコーディオンは閉じてサマリ表示', async () => {
@@ -82,7 +82,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('10.00'), '12.5');
+      await user.type(screen.getByPlaceholderText('1000'), '12.5');
 
       await waitFor(() => {
         expect(container.querySelector('svg')).not.toBeNull();
@@ -113,8 +113,8 @@ describe('QrGenerator', () => {
     it('数値以外は除去される (10ab.5 → 10.5)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('10.00'));
-      const input = screen.getByPlaceholderText('10.00') as HTMLInputElement;
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+      const input = screen.getByPlaceholderText('1000') as HTMLInputElement;
       await user.type(input, '10ab.5');
       expect(input.value).toBe('10.5');
     });
@@ -124,7 +124,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      await user.type(screen.getByPlaceholderText('1000'), '5');
 
       // 既定は customer → URL に gas= は付かない
       await waitFor(() => {
@@ -222,7 +222,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      await user.type(screen.getByPlaceholderText('1000'), '5');
 
       const directCheckbox = screen.getByRole('checkbox', {
         name: /直接送金/,
@@ -295,7 +295,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      await user.type(screen.getByPlaceholderText('1000'), '5');
 
       const copyBtn = await screen.findByRole('button', {
         name: /URLをコピー/,

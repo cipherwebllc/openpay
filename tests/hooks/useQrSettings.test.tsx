@@ -9,13 +9,13 @@ describe('useQrSettings', () => {
     window.localStorage.clear();
   });
 
-  it('未保存時は defaults (token=usdc, chain=base)', async () => {
+  it('未保存時は defaults (token=jpyc, chain=polygon — JPYC をメインに)', async () => {
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '',
-      token: 'usdc',
-      chain: 'base',
+      token: 'jpyc',
+      chain: 'polygon',
       gasMode: 'customer',
       directTransfer: false,
       splits: [],
@@ -121,7 +121,7 @@ describe('useQrSettings', () => {
     window.localStorage.setItem(KEY, '{not-json');
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.token).toBe('usdc');
+    expect(result.current.settings.token).toBe('jpyc');
     expect(result.current.settings.splits).toEqual([]);
   });
 
@@ -132,7 +132,7 @@ describe('useQrSettings', () => {
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.token).toBe('usdc');
+    expect(result.current.settings.token).toBe('jpyc');
     expect(result.current.settings.receiver).toBe('0xa');
   });
 

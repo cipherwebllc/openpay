@@ -146,7 +146,7 @@ e コマースサイトや注文書の発行で使う、商品リスト + 注文
 | USDC (native) | **Polygon PoS** | POL | ✅ 採用 | Circle 公式 native USDC (`0x3c49…3359`)。JPYC ユーザと同じ Polygon 上で USDC を選択可能 |
 | JPYC | Ethereum | ETH | ❌ 不採用 | ガス代が決済額に対して高すぎる (5 JPYC の運営手数料 + 数百円 gas) |
 | JPYC | Avalanche | AVAX | ❌ 不採用 (一旦様子見) | Avalanche 上の JPYC は **DEX ペアの流動性がほぼゼロ**。手数料を AVAX に変換するルートがクロスチェーンになり、ガス調達が常に赤字。日本のリテールユーザの利用が限定的 |
-| JPYC | Base / Arbitrum / Optimism | (各 L2 ETH) | ❌ 未対応 | Sponsorship Paymaster の運営立替コストが線形に増えるため、現状は Polygon 単一で運用 (実需要が出たら見直し) |
+| JPYC | Base / Arbitrum / Optimism | ─ | ❌ 発行なし | JPYC v3 はこれらのチェーン上に **発行されていない**。JPYC 公式が他チェーンへ展開した場合のみ追加検討 |
 | USDC (bridged) | 各 chain (USDC.e) | (各 chain ガス) | ❌ 不採用 | bridged 版は Pimlico ERC20 Paymaster の対応が不安定。OpenPay は **native USDC のみ** 対応 |
 
 ### 運用上の含意 (JPYC / Polygon)
@@ -171,7 +171,7 @@ e コマースサイトや注文書の発行で使う、商品リスト + 注文
 ### 将来の拡張余地
 
 - Ethereum mainnet / Unichain / Linea / Celo / Scroll 等の追加は `lib/tokens.ts` (USDC deployment 追記) と `lib/chains.ts` (slug 追加) の 2 箇所への追記で完結。**実需要が確認できてから追加**する方針
-- JPYC の Base / Arbitrum 等への拡大は Sponsorship Paymaster の運営立替コストとの兼合いで再評価 (現在は Polygon 単一で運用)
+- JPYC の Base / Arbitrum 等への拡大は **JPYC 公式の他チェーン発行待ち**。現状 JPYC v3 は Polygon 上のみで発行されているため OpenPay も Polygon 単一で運用
 
 ## アーキテクチャ
 

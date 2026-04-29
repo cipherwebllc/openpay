@@ -29,8 +29,8 @@ const STORAGE_KEY = 'openpay:checkout-settings:v1';
 
 const DEFAULT_SETTINGS: CheckoutSettings = {
   receiver: '',
-  token: 'usdc',
-  chain: 'base',
+  token: 'jpyc',
+  chain: 'polygon',
   gasMode: 'customer',
   items: [{ name: '', qty: '', price: '' }],
   orderId: '',
