@@ -24,7 +24,7 @@
 //   preset  (任意, "100,500,1000" カンマ区切り decimal、最大 6 件)
 //
 // Tip widget は gas=customer 固定 (preset セマンティクス: クリエイターが preset 額から運営手数料控除後を受け取る、ファンが gas を上乗せ支払い)。
-import { getAddress, isAddress } from 'viem';
+import { getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import {
   isValidChainSlug,
@@ -33,6 +33,7 @@ import {
 import type { GasMode } from './fee';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
+  defaultDeploymentForSymbol,
   deploymentsForSymbol,
   isValidTokenSymbol,
   type TokenSymbol,
@@ -444,6 +445,322 @@ export function parseTipParams(
       webhook: webhook ? sanitizeUrl(webhook) : undefined,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// /checkout helpers (Stripe Checkout 相当の line items + 注文 metadata)
+// ---------------------------------------------------------------------------
+//
+// /checkout クエリ仕様:
+//   to              (必須, 0x) — 受取マーチャント
+//   token           ("jpyc" | "usdc")
+//   chain           (任意, ChainSlug、省略時は token の default)
+//   items           (必須, "encName:qty:price,..." 形式) — 1〜10 件
+//   order_id        (任意, マーチャントの注文 ID、64 文字まで)
+//   description     (任意, 説明文 200 文字まで)
+//   customer_email  (任意, 240 文字まで、prefill 用 — クライアントは送信しない)
+//   gas             ("customer" | "merchant", 省略時 customer)
+//   success_url     (任意, http(s) — 決済成功後 redirect 先)
+//   cancel_url      (任意, http(s) — 「中止して戻る」リンク)
+//   webhook         (任意, http(s) — 成功時 POST 先)
+//
+// items の encoding: name は encodeURIComponent で URI-encode してから ":" qty
+// ":" price で結合し、複数 items は "," で連結。decode 側は "," → ":" の順に
+// split して decodeURIComponent + sanitizeText する。これにより name に ":" や
+// "," を含めても 衝突しない。
+//
+// webhook payload は Tip と互換シェイプ (type 識別子だけ "openpay.checkout.success")。
+// マーチャントは 1 つの handler で Tip / Checkout 両対応可能。
+
+export type CheckoutItem = {
+  name: string;
+  qty: number;       // 1〜999 の整数
+  price: string;     // 人間可読 decimal (例: "25.00")。token decimals 内に収まる
+};
+
+export type CheckoutParams = {
+  to: Address;
+  token: TokenSymbol;
+  chain?: ChainSlug;
+  gas: GasMode;
+  items: CheckoutItem[];
+  orderId?: string;
+  description?: string;
+  customerEmail?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  webhook?: string;
+};
+
+export const CHECKOUT_MAX_ITEMS = 10;
+export const CHECKOUT_QTY_MAX = 999;
+const CHECKOUT_NAME_MAX = 80;
+const CHECKOUT_ORDER_ID_MAX = 64;
+const CHECKOUT_DESCRIPTION_MAX = 200;
+const CHECKOUT_EMAIL_MAX = 240;
+// price の decimal 部分の最大桁数 (token decimals を超えると parseUnits が throw)
+// JPYC は 18、USDC は 6。token に依存して parseItemsParam が判定する。
+
+function encodeItem(it: CheckoutItem): string {
+  return `${encodeURIComponent(it.name)}:${it.qty}:${it.price}`;
+}
+
+export function encodeItems(items: ReadonlyArray<CheckoutItem>): string {
+  return items.map(encodeItem).join(',');
+}
+
+// 不正値があれば全体を捨てる (all-or-nothing)。decimals は token によって異なる
+// ため呼出側から渡す。decodeURIComponent は malformed %XX で throw するため、
+// その場合は null を返してエラーパスへ。
+function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
+  const tokens = raw.split(',').map((t) => t.trim()).filter((t) => t.length > 0);
+  if (tokens.length === 0 || tokens.length > CHECKOUT_MAX_ITEMS) return null;
+  const items: CheckoutItem[] = [];
+  for (const t of tokens) {
+    const parts = t.split(':');
+    if (parts.length !== 3) return null;
+    const [encodedName, qtyStr, priceStr] = parts;
+    if (encodedName.length === 0) return null;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(encodedName);
+    } catch {
+      return null;
+    }
+    // C0 制御文字 (タブ含む) と DEL を排除し、長さ上限で切詰。空文字は invalid。
+    const name = decoded.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    if (name.length === 0) return null;
+    const trimmedName =
+      name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
+    if (!/^\d+$/.test(qtyStr)) return null;
+    const qty = Number(qtyStr);
+    if (qty < 1 || qty > CHECKOUT_QTY_MAX) return null;
+    if (!DECIMAL_PATTERN.test(priceStr)) return null;
+    // 0 / 0.0 は無効 (実質ゼロ価格は意味なし)
+    const dotIdx = priceStr.indexOf('.');
+    const fracDigits = dotIdx === -1 ? 0 : priceStr.length - dotIdx - 1;
+    if (fracDigits > decimals) return null;
+    // 全てゼロ ("0", "0.0", "00.000" 等) を弾く
+    if (/^0+(\.0+)?$/.test(priceStr)) return null;
+    items.push({ name: trimmedName, qty, price: priceStr });
+  }
+  return items;
+}
+
+export function buildCheckoutPath(params: CheckoutParams): string {
+  const sp = new URLSearchParams();
+  sp.set('to', params.to);
+  sp.set('token', params.token);
+  if (params.chain && params.chain !== DEFAULT_CHAIN_FOR_SYMBOL[params.token]) {
+    sp.set('chain', params.chain);
+  }
+  sp.set('items', encodeItems(params.items));
+  if (params.gas === 'merchant') {
+    sp.set('gas', 'merchant');
+  }
+  if (params.orderId) {
+    const v = sanitizeText(params.orderId, CHECKOUT_ORDER_ID_MAX);
+    if (v) sp.set('order_id', v);
+  }
+  if (params.description) {
+    const v = sanitizeText(params.description, CHECKOUT_DESCRIPTION_MAX);
+    if (v) sp.set('description', v);
+  }
+  if (params.customerEmail) {
+    const v = sanitizeText(params.customerEmail, CHECKOUT_EMAIL_MAX);
+    if (v) sp.set('customer_email', v);
+  }
+  if (params.successUrl) {
+    const v = sanitizeUrl(params.successUrl);
+    if (v) sp.set('success_url', v);
+  }
+  if (params.cancelUrl) {
+    const v = sanitizeUrl(params.cancelUrl);
+    if (v) sp.set('cancel_url', v);
+  }
+  if (params.webhook) {
+    const v = sanitizeUrl(params.webhook);
+    if (v) sp.set('webhook', v);
+  }
+  return `/checkout?${sp.toString()}`;
+}
+
+export function buildCheckoutUrl(origin: string, params: CheckoutParams): string {
+  return `${origin}${buildCheckoutPath(params)}`;
+}
+
+export type ParsedCheckoutParams =
+  | { ok: true; params: CheckoutParams }
+  | { ok: false; error: string };
+
+export function parseCheckoutParams(
+  searchParams: SearchParamsLike,
+): ParsedCheckoutParams {
+  const to = searchParams.get('to');
+  const token = searchParams.get('token');
+  const chainRaw = searchParams.get('chain');
+  const itemsRaw = searchParams.get('items');
+  const gasRaw = searchParams.get('gas');
+  const orderId = searchParams.get('order_id');
+  const description = searchParams.get('description');
+  const customerEmail = searchParams.get('customer_email');
+  const successUrl = searchParams.get('success_url');
+  const cancelUrl = searchParams.get('cancel_url');
+  const webhook = searchParams.get('webhook');
+
+  if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
+  if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
+  if (!token || !isValidTokenSymbol(token)) {
+    return { ok: false, error: 'token は jpyc または usdc を指定してください' };
+  }
+
+  let chainSlug: ChainSlug;
+  if (chainRaw === null || chainRaw.length === 0) {
+    chainSlug = DEFAULT_CHAIN_FOR_SYMBOL[token];
+  } else if (isValidChainSlug(chainRaw)) {
+    chainSlug = chainRaw;
+  } else {
+    return {
+      ok: false,
+      error:
+        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+    };
+  }
+  if (!hasDeployment(token, chainSlug)) {
+    return {
+      ok: false,
+      error: `${token} は ${chainSlug} に対応していません`,
+    };
+  }
+
+  if (!itemsRaw || itemsRaw.length === 0) {
+    return { ok: false, error: 'items を指定してください (最低 1 件)' };
+  }
+  // decimals は token に依存。defaultDeployment で取得 (USDC は全 chain 6 / JPYC は 18 で chain 不変)
+  const decimals = defaultDeploymentForSymbol(token).decimals;
+  const items = parseItemsParam(itemsRaw, decimals);
+  if (items === null) {
+    return {
+      ok: false,
+      error:
+        'items は "name:qty:price,..." 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください',
+    };
+  }
+
+  const gas: GasMode = gasRaw === 'merchant' ? 'merchant' : 'customer';
+
+  return {
+    ok: true,
+    params: {
+      to: getAddress(to),
+      token,
+      chain: chainSlug,
+      gas,
+      items,
+      orderId: orderId ? sanitizeText(orderId, CHECKOUT_ORDER_ID_MAX) : undefined,
+      description: description
+        ? sanitizeText(description, CHECKOUT_DESCRIPTION_MAX)
+        : undefined,
+      customerEmail: customerEmail
+        ? sanitizeText(customerEmail, CHECKOUT_EMAIL_MAX)
+        : undefined,
+      successUrl: successUrl ? sanitizeUrl(successUrl) : undefined,
+      cancelUrl: cancelUrl ? sanitizeUrl(cancelUrl) : undefined,
+      webhook: webhook ? sanitizeUrl(webhook) : undefined,
+    },
+  };
+}
+
+// CheckoutLinkGenerator UI 用の draft 入力 (空欄を許容、qty/price は文字列)。
+// CheckoutItem は parse 済の確定型。
+export type CheckoutItemDraft = {
+  name: string;
+  qty: string;
+  price: string;
+};
+
+export type CheckoutItemDraftsParseResult = {
+  // 全 draft が valid な時のみ items が入る (URL に組み込まれる)。
+  // 1 件でも error があれば null (all-or-nothing、parseSplitDrafts と同型)。
+  items: CheckoutItem[] | null;
+  // index 0 始まりで全 draft 分のエラー詳細を返す。UI で「商品 #N: 〜」を出すのに使う。
+  errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }>;
+};
+
+export function parseCheckoutItemDrafts(
+  drafts: ReadonlyArray<CheckoutItemDraft>,
+  decimals: number,
+): CheckoutItemDraftsParseResult {
+  const items: CheckoutItem[] = [];
+  const errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }> = [];
+  let allValid = true;
+
+  drafts.forEach((d, i) => {
+    const rawName = d.name.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    const rawQty = d.qty.trim();
+    const rawPrice = d.price.trim();
+    // 全フィールドが空欄の draft は「未入力 row」として無視する (UI 上「商品を追加」して
+    // 空のまま残す UX を許容)。1 つでも入力があれば validate 対象。
+    if (rawName.length === 0 && rawQty.length === 0 && rawPrice.length === 0) {
+      return;
+    }
+    if (rawName.length === 0 || rawQty.length === 0 || rawPrice.length === 0) {
+      errors.push({ index: i, reason: 'empty' });
+      allValid = false;
+      return;
+    }
+    if (!/^\d+$/.test(rawQty)) {
+      errors.push({ index: i, reason: 'qty' });
+      allValid = false;
+      return;
+    }
+    const qty = Number(rawQty);
+    if (qty < 1 || qty > CHECKOUT_QTY_MAX) {
+      errors.push({ index: i, reason: 'qty' });
+      allValid = false;
+      return;
+    }
+    if (!DECIMAL_PATTERN.test(rawPrice)) {
+      errors.push({ index: i, reason: 'price' });
+      allValid = false;
+      return;
+    }
+    const dotIdx = rawPrice.indexOf('.');
+    const fracDigits = dotIdx === -1 ? 0 : rawPrice.length - dotIdx - 1;
+    if (fracDigits > decimals) {
+      errors.push({ index: i, reason: 'price' });
+      allValid = false;
+      return;
+    }
+    if (/^0+(\.0+)?$/.test(rawPrice)) {
+      errors.push({ index: i, reason: 'price' });
+      allValid = false;
+      return;
+    }
+    const trimmedName =
+      rawName.length > CHECKOUT_NAME_MAX
+        ? rawName.slice(0, CHECKOUT_NAME_MAX)
+        : rawName;
+    items.push({ name: trimmedName, qty, price: rawPrice });
+  });
+
+  // items 件数の上限 (URL spec と整合)
+  if (items.length > CHECKOUT_MAX_ITEMS) allValid = false;
+
+  return { items: allValid && items.length > 0 ? items : null, errors };
+}
+
+// items 合計を bigint で計算 (token decimals を反映)。fee 計算は既存の calcBreakdown
+// にこの bigint を渡せば良いので、checkout 専用の breakdown 関数は不要。
+export function calcCheckoutTotal(
+  items: ReadonlyArray<CheckoutItem>,
+  decimals: number,
+): bigint {
+  let total = 0n;
+  for (const it of items) {
+    total += parseUnits(it.price, decimals) * BigInt(it.qty);
+  }
+  return total;
 }
 
 // 通貨ごとの既定 preset (URL に preset 指定がない時に使う)。

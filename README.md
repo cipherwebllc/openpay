@@ -11,8 +11,9 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **USDC (Base / Arbitrum One / Optimism / Polygon mainnet)**: 顧客が USDC のままガスを支払い (Pimlico ERC20 Paymaster)。運営のネイティブガス立替えなし
 - **testnet (Base Sepolia / Arbitrum Sepolia / Optimism Sepolia / Polygon Amoy)**: USDC も sponsorship を使用 (顧客の testnet 用 ETH 入手の手間を省くための運用判断)
 
-- `/{locale}` — 店舗向け QR ジェネレーター + クリエイター向け Tip widget 埋め込みコード生成 (タブ切替)
+- `/{locale}` — 店舗向け QR / Checkout / Tip widget の 3 タブを 1 画面に集約
 - `/{locale}/pay?to=...&token=...&chain=...&amount=...&split=0xB:30,0xC:20` — QR をスキャンした顧客の決済画面 (`chain=` で USDC のチェーンを選択、`split=` で複数受取人へ % 分配可能)
+- `/{locale}/checkout?to=...&token=...&chain=...&items=name:qty:price,...&order_id=...&success_url=...&webhook=...` — Stripe Checkout 相当の itemized 決済画面 (line items 表示 + 注文 ID + 成功時 redirect + webhook)
 - `/{locale}/tip/[address]?token=...&chain=...&name=...&message=...&color=...&preset=...&thanks=...&thanksUrl=...&webhook=...` — クリエイター向けチップ送金画面 (iframe 埋め込み対応 / 成功後の thanks メッセージ + リンク + webhook 通知)
 - `{locale}` は `ja` (デフォルト) または `en`。middleware が Accept-Language で自動検出
 
@@ -32,6 +33,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
 | 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
 | Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可 |
+| Checkout (β)   | Stripe Checkout 相当の itemized 決済 URL を発行。line items + 注文 ID + 成功時 redirect + webhook (Tip と互換シェイプ)。e コマースの注文ごとに URL を発行する用途を想定 |
 
 ## 現金 / クレカ / PayPay との比較
 
@@ -102,6 +104,27 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
   ```
 - ファンは MetaMask v12+ などで接続し、preset (JPYC: 300/1000/3000、USDC: 5/20/50) かカスタム金額を選んで送信。JPYC は運営がガスを肩代わり、USDC はファンの USDC 残高から自動徴収 (ネイティブトークン不要)
 - iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
+
+### 4. Checkout (β) — Stripe Checkout 相当の itemized 決済 URL
+
+e コマースサイトや注文書の発行で使う、商品リスト + 注文 metadata を埋め込んだ決済 URL を生成します。Stripe Checkout が手数料 2.9% + 30¢ なのに対し、OpenPay は **1.0% + ネットワーク手数料 (見積)** で、ガスレス (4337 + Pimlico ERC20 Paymaster)・即時着金・USDC 4 chain / JPYC Polygon 対応です。
+
+- 発行: `/` の「Checkout」タブで受取アドレス・商品リスト (name × qty × price、最大 10 件)・注文 ID・success_url / cancel_url / webhook を入力 → `/checkout?...` URL + QR を生成
+- 顧客 UX:
+  - URL を開くと line items 一覧 + 合計 + ガス見積が表示される
+  - 「支払う」を押すと **既存の `/pay` と同じ ERC-7702 + Pimlico ガスレスバッチ送金** で merchant 受取 + 運営手数料を 1 UserOp で実行
+  - 成功後に `success_url` 指定なら 3 秒で自動 redirect (skip ボタン併設)、`tx_hash` / `user_op_hash` / `order_id` が query に付与される
+- webhook: 成功時に **Tip と互換シェイプ** の JSON を POST (`type: "openpay.checkout.success"` + `items`, `orderId`, `merchantAmount` 等)。マーチャントは Tip と同じ handler に分岐 1 行追加で両対応可能
+- **重要 (セキュリティ)**: webhook payload と success_url の query は顧客側で改ざん可能 (Stripe の `whsec_` 署名相当の保証なし)。**マーチャントは webhook 受信後に必ず `tx_hash` をオンチェーンで再検証**してから注文を確定してください
+- 制約: line items 最大 10 件 / name 80 文字 / qty 1〜999 / price は token decimals 以内。bridged USDC.e は不可 (native USDC のみ)
+
+```
+/checkout?to=0x...&token=usdc&chain=arbitrum
+        &items=Tシャツ:1:25,マグ:2:15
+        &order_id=ord-12345
+        &success_url=https://shop.example.com/thanks
+        &webhook=https://shop.example.com/openpay-webhook
+```
 
 ## 対応ネットワークと選定理由
 

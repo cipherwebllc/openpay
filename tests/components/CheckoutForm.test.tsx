@@ -1,0 +1,527 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
+import { renderWithIntl as render } from '../_helpers/i18n';
+import userEvent from '@testing-library/user-event';
+import { baseSepolia, polygonAmoy } from 'viem/chains';
+import type { Address } from 'viem';
+
+vi.mock('wagmi', () => ({
+  useAccount: vi.fn(),
+  useReadContract: vi.fn(),
+  useSwitchChain: vi.fn(),
+  useConnect: vi.fn(() => ({
+    connectors: [],
+    connect: vi.fn(),
+    isPending: false,
+    error: null,
+  })),
+  useDisconnect: vi.fn(() => ({ disconnect: vi.fn() })),
+}));
+vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
+vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
+vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
+vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn() })),
+}));
+vi.mock('@/lib/pimlico', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
+  return {
+    ...actual,
+    resolvePaymasterMode: vi.fn(actual.resolvePaymasterMode),
+  };
+});
+
+import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { useSmartAccount } from '@/hooks/useSmartAccount';
+import { useBatchPayment } from '@/hooks/useBatchPayment';
+import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
+import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
+import { resolvePaymasterMode } from '@/lib/pimlico';
+import { CheckoutForm } from '@/components/CheckoutForm';
+import type { CheckoutParams } from '@/lib/url';
+import { mockHook } from '../_helpers/wagmiMock';
+
+const MERCHANT: Address = '0x2222222222222222222222222222222222222222';
+const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
+
+function setAccount(opts: { connected: boolean; chainId?: number }) {
+  mockHook(useAccount, {
+    address: opts.connected ? CUSTOMER : undefined,
+    isConnected: opts.connected,
+    chainId: opts.connected ? opts.chainId : undefined,
+  });
+}
+
+function setBalance(value: bigint | undefined) {
+  mockHook(useReadContract, {
+    data: value,
+    isLoading: false,
+    error: null,
+  });
+}
+
+function setSmartAccount(ready: boolean, error?: Error) {
+  mockHook(useSmartAccount, {
+    data: ready ? { smartAccountClient: {}, pimlicoClient: {} } : undefined,
+    isLoading: !ready && !error,
+    error: error ?? null,
+  } as Partial<ReturnType<typeof useSmartAccount>>);
+}
+
+let mutate: ReturnType<typeof vi.fn>;
+function setBatchPayment(
+  state: 'idle' | 'pending' | 'success' | 'error',
+  errMsg?: string,
+) {
+  mutate = vi.fn();
+  mockHook(useBatchPayment, {
+    mutate,
+    isPending: state === 'pending',
+    isSuccess: state === 'success',
+    isError: state === 'error',
+    data:
+      state === 'success'
+        ? {
+            userOpHash: `0x${'a'.repeat(64)}`,
+            txHash: `0x${'b'.repeat(64)}`,
+            blockNumber: 99n,
+            success: true,
+          }
+        : undefined,
+    error: state === 'error' ? new Error(errMsg ?? 'AA21 fail') : null,
+  } as Partial<ReturnType<typeof useBatchPayment>>);
+}
+
+function setSwitchChain() {
+  mockHook(useSwitchChain, {
+    switchChain: vi.fn(),
+    isPending: false,
+  });
+}
+
+function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?: bigint) {
+  const mockState = {
+    data: state === 'ready' ? { gasAmount: amount ?? 100_000n } : undefined,
+    isLoading: state === 'pending',
+    isError: state === 'error',
+    error: state === 'error' ? new Error('quote failed') : null,
+  };
+  mockHook(useGasQuoteUsdc, mockState as Partial<ReturnType<typeof useGasQuoteUsdc>>);
+  mockHook(useGasQuoteJpyc, mockState as Partial<ReturnType<typeof useGasQuoteJpyc>>);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  setSwitchChain();
+  setBalance(undefined);
+  setSmartAccount(false);
+  setBatchPayment('idle');
+  setGasQuote('disabled');
+  setAccount({ connected: false });
+  vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
+});
+
+const USDC_PARAMS: CheckoutParams = {
+  to: MERCHANT,
+  token: 'usdc',
+  chain: 'base',
+  gas: 'customer',
+  items: [
+    { name: 'Tシャツ', qty: 1, price: '25.00' },
+    { name: 'マグ', qty: 2, price: '15.00' },
+  ],
+  orderId: 'ord-42',
+  description: 'Summer sale',
+};
+
+const JPYC_PARAMS: CheckoutParams = {
+  to: MERCHANT,
+  token: 'jpyc',
+  chain: 'polygon',
+  gas: 'customer',
+  items: [{ name: 'チケット', qty: 1, price: '3000' }],
+};
+
+describe('CheckoutForm — レンダリング', () => {
+  it('order_id / description / items / 合計が表示される', () => {
+    setAccount({ connected: false });
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/注文 #ord-42/)).toBeInTheDocument();
+    expect(screen.getByText('Summer sale')).toBeInTheDocument();
+    expect(screen.getByText('Tシャツ')).toBeInTheDocument();
+    expect(screen.getByText('マグ')).toBeInTheDocument();
+    // line totals: T 25 USDC, マグ 30 USDC, subtotal 55 USDC が画面のどこかに存在する
+    // (subtotal もボタン文言にも出るため複数 match の可能性あり、getAllByText で確認)
+    expect(screen.getByText('25 USDC')).toBeInTheDocument();
+    expect(screen.getByText('30 USDC')).toBeInTheDocument();
+    expect(screen.getAllByText(/55 USDC/).length).toBeGreaterThan(0);
+  });
+
+  it('order_id 未指定時は generic タイトル', () => {
+    const { container } = render(
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, orderId: undefined, description: undefined }}
+      />,
+    );
+    expect(container.textContent).toContain('OpenPay Checkout');
+  });
+
+  it('JPYC params: chain Polygon と通貨表示', () => {
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/Polygon/)).toBeInTheDocument();
+    // JPYC は header と price 行で複数 match。少なくとも 1 つあれば OK。
+    expect(screen.getAllByText(/JPYC/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('CheckoutForm — 接続フロー', () => {
+  it('未接続: 「ウォレットを接続」ボタン', () => {
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByRole('button', { name: /ウォレットを接続/ }),
+    ).toBeDisabled();
+  });
+
+  it('wrong chain: switch ボタン表示', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(0n);
+    setSmartAccount(false);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.getByRole('button', { name: /へ切り替え/ })).toBeInTheDocument();
+  });
+
+  it('SA 初期化中: ボタン disabled で初期化中文言', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(false);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByRole('button', { name: /Smart Account 初期化中/ }),
+    ).toBeDisabled();
+  });
+
+  it('gas quote pending: ボタン disabled で見積中', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('pending');
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByRole('button', { name: /ガス代見積取得中/ }),
+    ).toBeDisabled();
+  });
+
+  it('準備完了: 支払いボタン enabled で合計が表示される', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n); // 0.1 USDC
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    // 55 + 0.1 = 55.1 USDC
+    expect(
+      screen.getByRole('button', { name: /55\.1 USDC を支払う/ }),
+    ).toBeEnabled();
+  });
+
+  it('残高不足: ボタン disabled + 警告', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(10_000_000n); // 10 USDC < 55 USDC
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /55\.1 USDC を支払う/ }),
+    ).toBeDisabled();
+  });
+});
+
+describe('CheckoutForm — 送信', () => {
+  it('支払いボタン → useBatchPayment.mutate に正しい breakdown', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+
+    await user.click(
+      screen.getByRole('button', { name: /55\.1 USDC を支払う/ }),
+    );
+
+    expect(mutate).toHaveBeenCalledOnce();
+    const call = mutate.mock.calls[0][0];
+    // total 55 USDC, fee 1% = 0.55 USDC, sponsorship なので feeAmount += gas (0.1)
+    // merchantAmount = 55 - 0.55 = 54.45 USDC = 54_450_000
+    expect(call.merchantAmount).toBe(54_450_000n);
+    // testnet 環境では sponsorship に倒れるので feeAmount = 0.55 + 0.1 = 0.65 USDC
+    expect(call.feeAmount).toBe(550_000n + 100_000n);
+  });
+
+  it('ERC20 mode (USDC mainnet 相当): feeAmount に gas を含めない', async () => {
+    vi.mocked(resolvePaymasterMode).mockImplementation((dep) =>
+      dep.symbol === 'usdc' ? 'erc20' : 'sponsorship',
+    );
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+
+    await user.click(
+      screen.getByRole('button', { name: /55\.1 USDC を支払う/ }),
+    );
+
+    const call = mutate.mock.calls[0][0];
+    expect(call.merchantAmount).toBe(54_450_000n);
+    // erc20 paymaster: feeAmount は fee のみ (gas は paymaster が直接顧客から徴収)
+    expect(call.feeAmount).toBe(550_000n);
+  });
+
+  it('gas=merchant: customer は subtotal だけ払い、gas は merchant から控除', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm params={{ ...USDC_PARAMS, gas: 'merchant' }} />,
+    );
+    // customer = subtotal = 55 USDC (gas は乗らない)
+    expect(
+      screen.getByRole('button', { name: /^55 USDC を支払う$/ }),
+    ).toBeEnabled();
+  });
+
+  it('合計 < fee の merchant underflow → 送信 block + エラー文言', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(1_000_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    // フロア手数料 0.05 USDC > 合計 0.04 USDC で merchant=0 になる
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          items: [{ name: 'Cheap', qty: 1, price: '0.04' }],
+        }}
+      />,
+    );
+    expect(screen.getByText(/手数料を引くと店主受取が 0/)).toBeInTheDocument();
+  });
+});
+
+describe('CheckoutForm — 成功時の挙動', () => {
+  it('成功 panel に txHash / userOpHash / orderId 表示', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+    expect(screen.getByText(`0x${'a'.repeat(64)}`)).toBeInTheDocument();
+    expect(screen.getByText(`0x${'b'.repeat(64)}`)).toBeInTheDocument();
+    // orderId
+    expect(screen.getByText('ord-42')).toBeInTheDocument();
+  });
+
+  it('success_url 指定時: 「今すぐ確認ページへ」ボタンが表示される', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, successUrl: 'https://shop.example.com/thanks' }}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: /今すぐ確認ページへ/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('success_url 未指定時: ホームに戻るボタン', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={{ ...USDC_PARAMS, successUrl: undefined }} />);
+    expect(
+      screen.getByRole('button', { name: /OpenPay ホームへ戻る/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('success_url 指定 + 「今すぐ」クリック → window.location.assign に query 付き URL', async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, successUrl: 'https://shop.example.com/thanks' }}
+      />,
+    );
+    await user.click(
+      screen.getByRole('button', { name: /今すぐ確認ページへ/ }),
+    );
+    expect(assignSpy).toHaveBeenCalledOnce();
+    const url = new URL(assignSpy.mock.calls[0][0]);
+    expect(url.origin + url.pathname).toBe(
+      'https://shop.example.com/thanks',
+    );
+    expect(url.searchParams.get('tx_hash')).toBe(`0x${'b'.repeat(64)}`);
+    expect(url.searchParams.get('user_op_hash')).toBe(`0x${'a'.repeat(64)}`);
+    expect(url.searchParams.get('order_id')).toBe('ord-42');
+    expect(url.searchParams.get('chain')).toBe('base');
+    expect(url.searchParams.get('token')).toBe('usdc');
+  });
+
+  it('webhook 指定 → POST が発火 (Tip と互換シェイプ + items)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [url, opts] = fetchSpy.mock.calls[0];
+    expect(url).toBe('https://shop.example.com/hook');
+    expect(opts.method).toBe('POST');
+    const payload = JSON.parse(opts.body);
+    expect(payload.type).toBe('openpay.checkout.success');
+    expect(payload.merchant).toBe(MERCHANT);
+    expect(payload.token).toBe('usdc');
+    expect(payload.chain).toBe('base');
+    expect(payload.items).toEqual(USDC_PARAMS.items);
+    expect(payload.orderId).toBe('ord-42');
+    expect(payload.txHash).toBe(`0x${'b'.repeat(64)}`);
+    vi.unstubAllGlobals();
+  });
+
+  it('webhook 失敗 (CORS 等) → UI には影響しない (logger.warn のみ)', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValue(new Error('CORS blocked'));
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    // 成功 UI は影響を受けない
+    expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('cancel_url 指定 → 「中止して戻る」リンクを描画', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          cancelUrl: 'https://shop.example.com/cart',
+        }}
+      />,
+    );
+    const link = screen.getByRole('link', { name: /注文を中止して戻る/ });
+    expect(link).toHaveAttribute('href', 'https://shop.example.com/cart');
+  });
+
+  it('cancel_url なし → リンクは描画しない', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={{ ...USDC_PARAMS, cancelUrl: undefined }} />);
+    expect(screen.queryByText(/注文を中止して戻る/)).toBeNull();
+  });
+
+  it('customer_email 指定 → ヒント表示', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, customerEmail: 'alice@example.com' }}
+      />,
+    );
+    expect(screen.getByText(/alice@example.com/)).toBeInTheDocument();
+  });
+});
+
+describe('CheckoutForm — エラー表示', () => {
+  it('GasCongestedError → i18n された案内文', async () => {
+    const { GasCongestedError } = await import('@/lib/gasCeiling');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    mockHook(useBatchPayment, {
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: false,
+      isError: true,
+      data: undefined,
+      error: new GasCongestedError(baseSepolia.id, 1n, 5n),
+    } as Partial<ReturnType<typeof useBatchPayment>>);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/ネットワークが混雑/)).toBeInTheDocument();
+    expect(screen.queryByText(/gas_congested/)).toBeNull();
+  });
+
+  it('gasQuote.error → friendly メッセージ + ボタン disabled', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('error');
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(
+      screen.getByText(/ガス代見積の取得に失敗しました/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /ガス代見積取得中/ }),
+    ).toBeDisabled();
+  });
+
+  it('useSmartAccount.error → メッセージそのまま (技術詳細だが UI 上にも出す)', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(false, new Error('SA init failed'));
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.getByText('SA init failed')).toBeInTheDocument();
+  });
+});
