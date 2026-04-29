@@ -27,7 +27,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 651 件 (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 97.46 / 95.49 / 90.27 / 97.46
+- **テスト** — 674 件 / 38 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 97.61 / 95.52 / 88.94 / 97.61
 
 ## 特徴
 
@@ -358,7 +358,9 @@ UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middlew
 ### 顧客側 (決済)
 
 1. QR をスキャン → `/pay?to=...&token=...&fee=...&amount=...` が開く
-2. ウォレット接続 (MetaMask / Coinbase Wallet / WalletConnect)
+2. ウォレット接続
+   - **PC**: ブラウザ拡張は EIP-6963 で自動列挙 (MetaMask / Rabby / Phantom / Backpack 等が独立ボタン化) + Coinbase Wallet + WalletConnect
+   - **スマホ**: 拡張機能が無いため独立ボタンは Coinbase Wallet のみ。MetaMask / Rabby / Ronin / Phantom / Backpack 等は **`WalletConnect` ボタン → モーダルから選択** (deep-link or QR)
 3. 必要なら自動でネットワーク切替を促す
 4. (据え置き QR の場合は) 金額を入力
 5. 「○○ を支払う」ボタンで送金完了
@@ -619,15 +621,15 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 ```
 
-### カバレッジ実績 (2026-04-27 時点)
+### カバレッジ実績 (2026-04-29 時点)
 
 | 指標 | カバレッジ |
 |---|---|
-| Statements | 95.92% |
-| Branches | 94.89% |
-| Functions | 89.25% |
-| Lines | 95.92% |
-| Test count | 433 件 (29 ファイル) |
+| Statements | 97.61% |
+| Branches | 95.52% |
+| Functions | 88.94% |
+| Lines | 97.61% |
+| Test count | 674 件 (38 ファイル) |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 

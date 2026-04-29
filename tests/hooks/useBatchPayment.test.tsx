@@ -28,6 +28,7 @@ vi.mock('wagmi', () => ({
 }));
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useAccount } from 'wagmi';
+import { mockHook } from '../_helpers/wagmiMock';
 
 const TOKEN: Address = getAddress(
   '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
@@ -80,7 +81,7 @@ function mountReady(opts?: {
     fast: { maxFeePerGas, maxPriorityFeePerGas: 1n },
   });
 
-  vi.mocked(useSmartAccount).mockReturnValue({
+  mockHook(useSmartAccount, {
     data: {
       smartAccountClient: { sendUserOperation },
       pimlicoClient: { waitForUserOperationReceipt, getUserOperationGasPrice },
@@ -88,11 +89,8 @@ function mountReady(opts?: {
     },
     isLoading: false,
     error: null,
-  } as unknown as ReturnType<typeof useSmartAccount>);
-
-  vi.mocked(useAccount).mockReturnValue({
-    chainId,
-  } as unknown as ReturnType<typeof useAccount>);
+  });
+  mockHook(useAccount, { chainId });
 }
 
 describe('useBatchPayment', () => {
@@ -203,14 +201,12 @@ describe('useBatchPayment', () => {
   });
 
   it('Smart Account 未準備 → エラー', async () => {
-    vi.mocked(useSmartAccount).mockReturnValue({
+    mockHook(useSmartAccount, {
       data: undefined,
       isLoading: true,
       error: null,
-    } as unknown as ReturnType<typeof useSmartAccount>);
-    vi.mocked(useAccount).mockReturnValue({
-      chainId: baseSepolia.id,
-    } as unknown as ReturnType<typeof useAccount>);
+    });
+    mockHook(useAccount, { chainId: baseSepolia.id });
     const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
@@ -420,9 +416,7 @@ describe('useBatchPayment', () => {
       // chainId なし: ガード判定をスキップ。本来は呼出側 (UI) が gating する
       // が、defense-in-depth で hook 内部もクラッシュしない振る舞いを保証。
       mountReady({ maxFeePerGas: 1500n * GWEI });
-      vi.mocked(useAccount).mockReturnValue({
-        chainId: undefined,
-      } as unknown as ReturnType<typeof useAccount>);
+      mockHook(useAccount, { chainId: undefined });
       const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
@@ -579,7 +573,7 @@ describe('useBatchPayment', () => {
           blockNumber: 1n,
         },
       });
-      vi.mocked(useSmartAccount).mockReturnValue({
+      mockHook(useSmartAccount, {
         data: {
           smartAccountClient: { sendUserOperation },
           pimlicoClient: { waitForUserOperationReceipt, getUserOperationGasPrice },
@@ -587,10 +581,8 @@ describe('useBatchPayment', () => {
         },
         isLoading: false,
         error: null,
-      } as unknown as ReturnType<typeof useSmartAccount>);
-      vi.mocked(useAccount).mockReturnValue({
-        chainId: baseSepolia.id,
-      } as unknown as ReturnType<typeof useAccount>);
+      });
+      mockHook(useAccount, { chainId: baseSepolia.id });
 
       const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
@@ -624,14 +616,12 @@ describe('useBatchPayment', () => {
     });
 
     it('SA 未準備状態で連続 mutate → 全て同じエラーで rejected', async () => {
-      vi.mocked(useSmartAccount).mockReturnValue({
+      mockHook(useSmartAccount, {
         data: undefined,
         isLoading: true,
         error: null,
-      } as unknown as ReturnType<typeof useSmartAccount>);
-      vi.mocked(useAccount).mockReturnValue({
-        chainId: baseSepolia.id,
-      } as unknown as ReturnType<typeof useAccount>);
+      });
+      mockHook(useAccount, { chainId: baseSepolia.id });
       const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
