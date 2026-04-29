@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { erc20Abi, parseUnits } from 'viem';
@@ -156,6 +156,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
     balanceQuery.data < totalCustomerOutflow;
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
+
+  // URL 指定の chain と wallet が乖離していたら初回 1 回だけ自動切替を試みる。
+  // 拒否や手動で別 chain に戻した場合に popup ループしないよう requiredChain.id 単位で gate。
+  const autoSwitchedTo = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      wrongChain &&
+      !isSwitching &&
+      autoSwitchedTo.current !== requiredChain.id
+    ) {
+      autoSwitchedTo.current = requiredChain.id;
+      switchChain({ chainId: requiredChain.id });
+    }
+  }, [wrongChain, isSwitching, switchChain, requiredChain.id]);
+
   const flowPending = isDirect ? direct.isPending : gasless.isPending;
   const gasQuoteReady = isDirect || gasQuote.data !== undefined;
   const canSubmit =

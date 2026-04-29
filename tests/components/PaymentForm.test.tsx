@@ -261,6 +261,34 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     ).toBeDisabled();
   });
 
+  it('接続済 + 違うチェーン → 初回 mount で switchChain を 1 回自動呼出 (再 render しても再呼出しない)', () => {
+    // JPYC URL (Polygon 必須) を Base 接続中に開く想定
+    setURL(`to=${MERCHANT}&token=jpyc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(0n);
+    const switchChain = vi.fn();
+    mockHook(useSwitchChain, { switchChain, isPending: false });
+
+    const { rerender } = render(<PaymentForm />);
+    expect(switchChain).toHaveBeenCalledTimes(1);
+    expect(switchChain).toHaveBeenCalledWith({ chainId: polygonAmoy.id });
+
+    // 再 render しても同じ requiredChain.id では再呼出しない (popup ループ防止)
+    rerender(<PaymentForm />);
+    expect(switchChain).toHaveBeenCalledTimes(1);
+  });
+
+  it('接続済 + 正しいチェーン → switchChain は呼ばれない (auto-switch 不要)', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=10`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(0n);
+    const switchChain = vi.fn();
+    mockHook(useSwitchChain, { switchChain, isPending: false });
+
+    render(<PaymentForm />);
+    expect(switchChain).not.toHaveBeenCalled();
+  });
+
   it('接続済 + 正しいチェーン + Smart Account ready + 残高あり → 支払いボタンが活性', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
