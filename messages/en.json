@@ -19,8 +19,10 @@
     "modeStatic": "Open amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
     "advancedSettings": "Advanced",
-    "tokenLabel": "Token / receiving chain",
+    "tokenLabel": "Token",
     "tokenChainHint": "{chainName} (chain id: {chainId})",
+    "tokenChainHintMulti": "{count} chains supported (Base / Arbitrum / Optimism / Polygon)",
+    "chainLabel": "Receiving chain",
     "receiverLabel": "Receiver wallet address",
     "addressInvalid": "Invalid address format",
     "directHint": "Direct transfer mode: 0% operator fee. Customer pays gas in the native token.",
@@ -52,8 +54,8 @@
     "qrPlaceholderNoAmount": "Enter an amount",
     "qrPlaceholderGenerating": "Generating QR…",
     "feeReceiverHeading": "Operator fee receiver",
-    "feeReceiverHintJpyc": "(Polygon JPYC: 1.0% / min 5 JPYC + network fee)",
-    "feeReceiverHintUsdc": "(Base USDC: 1.0% / min 0.05 USDC + network fee)"
+    "feeReceiverHintJpyc": "(JPYC: 1.0% / min 5 JPYC + network fee)",
+    "feeReceiverHintUsdc": "(USDC: 1.0% / min 0.05 USDC + network fee)"
   },
   "PaymentForm": {
     "title": "OpenPay Payment",
@@ -148,7 +150,9 @@
   "TipEmbedGenerator": {
     "receiverLabel": "Creator wallet address",
     "addressInvalid": "Invalid address format",
-    "tokenLabel": "Token / receiving chain",
+    "tokenLabel": "Token",
+    "tokenChainHintMulti": "{count} chains supported",
+    "chainLabel": "Receiving chain (USDC)",
     "nameLabel": "Display name (optional)",
     "namePlaceholder": "e.g. Alice",
     "messageLabel": "Message (optional)",

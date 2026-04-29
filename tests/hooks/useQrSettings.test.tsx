@@ -9,12 +9,13 @@ describe('useQrSettings', () => {
     window.localStorage.clear();
   });
 
-  it('未保存時は defaults', async () => {
+  it('未保存時は defaults (token=usdc, chain=base)', async () => {
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '',
       token: 'usdc',
+      chain: 'base',
       gasMode: 'customer',
       directTransfer: false,
       splits: [],
@@ -32,9 +33,40 @@ describe('useQrSettings', () => {
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.token).toBe('jpyc');
+    expect(result.current.settings.chain).toBe('polygon');
     expect(result.current.settings.receiver).toBe('0xabc');
     expect(result.current.settings.directTransfer).toBe(false);
     expect(result.current.settings.splits).toEqual([]);
+  });
+
+  it('jpyc + 不正 chain (arbitrum) → polygon に強制', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'arbitrum' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('polygon');
+  });
+
+  it('usdc + 不正 chain → default base に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'avalanche' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('base');
+  });
+
+  it('usdc + arbitrum (有効) → そのまま保存される', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'arbitrum' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('arbitrum');
   });
 
   it('directTransfer=true の保存値もハイドレート', async () => {
@@ -112,6 +144,7 @@ describe('useQrSettings', () => {
       result.current.setSettings({
         receiver: '0xdef',
         token: 'jpyc',
+        chain: 'polygon',
         gasMode: 'merchant',
         directTransfer: true,
         splits: [{ address: '0xb1', percent: '40' }],
@@ -123,6 +156,7 @@ describe('useQrSettings', () => {
       expect(raw).not.toBeNull();
       const parsed = JSON.parse(raw!);
       expect(parsed.token).toBe('jpyc');
+      expect(parsed.chain).toBe('polygon');
       expect(parsed.gasMode).toBe('merchant');
       expect(parsed.receiver).toBe('0xdef');
       expect(parsed.directTransfer).toBe(true);

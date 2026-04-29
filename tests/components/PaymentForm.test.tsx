@@ -168,9 +168,7 @@ beforeEach(() => {
   setAccount({ connected: false });
   // 既定は testnet 環境の挙動 (USDC/JPYC とも sponsorship)。ERC20 mode を
   // 検証する describe ブロックでだけ override する。
-  vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
-    token === 'jpyc' ? 'sponsorship' : 'sponsorship',
-  );
+  vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
 });
 
 describe('PaymentForm — URL parse', () => {
@@ -540,8 +538,8 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
 describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
   beforeEach(() => {
     // mainnet 相当: USDC は erc20 mode、JPYC は sponsorship
-    vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
-      token === 'usdc' ? 'erc20' : 'sponsorship',
+    vi.mocked(resolvePaymasterMode).mockImplementation((dep) =>
+      dep.symbol === 'usdc' ? 'erc20' : 'sponsorship',
     );
   });
 
@@ -697,8 +695,11 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     ).toBe(false);
     // direct 警告は出る
     expect(screen.getByText(/ガス代お客様負担/)).toBeInTheDocument();
-    // useGasQuoteUsdc は enabled=false で呼ばれる (no fetch)
-    expect(useGasQuoteUsdc).toHaveBeenCalledWith('usdc', false);
+    // useGasQuoteUsdc は enabled=false で呼ばれる (no fetch)。第 1 引数は USDC deployment。
+    expect(useGasQuoteUsdc).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'usdc' }),
+      false,
+    );
   });
 
   it('ERC20 mode で GasCongestedError → 生メッセージではなく i18n 案内が表示される', async () => {
@@ -729,7 +730,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     const link = screen.getByRole('link', { name: /ガス代承認の状況を確認/ });
     expect(link).toHaveAttribute(
       'href',
-      `https://basescan.org/tokenapprovalchecker?search=${CUSTOMER}`,
+      `https://sepolia.basescan.org/tokenapprovalchecker?search=${CUSTOMER}`,
     );
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');

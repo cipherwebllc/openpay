@@ -5,6 +5,7 @@ import {
   createPimlico,
   resolvePaymasterMode,
 } from '@/lib/pimlico';
+import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -28,44 +29,66 @@ describe('pimlicoUrl', () => {
 
 describe('resolvePaymasterMode', () => {
   it('JPYC は常に sponsorship', () => {
-    // testnet (vitest default) でも mainnet 切替時でも JPYC は sponsorship 固定
-    expect(resolvePaymasterMode('jpyc')).toBe('sponsorship');
+    const jpyc = defaultDeploymentForSymbol('jpyc');
+    expect(resolvePaymasterMode(jpyc)).toBe('sponsorship');
   });
 
   it('USDC は testnet では sponsorship にフォールバック', () => {
     // vitest 既定 env が NEXT_PUBLIC_NETWORK_ENV=testnet
-    expect(resolvePaymasterMode('usdc')).toBe('sponsorship');
+    const usdc = defaultDeploymentForSymbol('usdc');
+    expect(resolvePaymasterMode(usdc)).toBe('sponsorship');
   });
 
-  it('USDC は mainnet で erc20 mode になる', async () => {
+  it('USDC は mainnet で erc20 mode になる (Base default)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
-    const mod = await import('@/lib/pimlico');
-    expect(mod.resolvePaymasterMode('usdc')).toBe('erc20');
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    const tokens = await import('@/lib/tokens');
+    const pim = await import('@/lib/pimlico');
+    const usdc = tokens.defaultDeploymentForSymbol('usdc');
+    expect(pim.resolvePaymasterMode(usdc)).toBe('erc20');
+  });
+
+  it('USDC は mainnet で chain を切り替えても erc20 (Arbitrum)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    const tokens = await import('@/lib/tokens');
+    const pim = await import('@/lib/pimlico');
+    const arb = tokens.deploymentForSlug('usdc', 'arbitrum');
+    expect(pim.resolvePaymasterMode(arb)).toBe('erc20');
   });
 });
 
 describe('pimlicoPaymasterContext', () => {
   it('JPYC + SPONSORSHIP_POLICY_ID → sponsorship context', () => {
-    expect(pimlicoPaymasterContext('jpyc')).toEqual({
+    const jpyc = defaultDeploymentForSymbol('jpyc');
+    expect(pimlicoPaymasterContext(jpyc)).toEqual({
       sponsorshipPolicyId: 'sp_test',
     });
   });
 
-  it('USDC は testnet で sponsorship フォールバック', () => {
-    // vitest 既定 env では USDC も sponsorship に倒れる
-    expect(pimlicoPaymasterContext('usdc')).toEqual({
+  it('USDC は testnet で sponsorship フォールバック (sponsorshipPolicyId が返る)', () => {
+    const usdc = defaultDeploymentForSymbol('usdc');
+    expect(pimlicoPaymasterContext(usdc)).toEqual({
       sponsorshipPolicyId: 'sp_test',
     });
   });
 
-  it('USDC mainnet では token を含む erc20 context を返す', async () => {
+  it('USDC mainnet では token を含む erc20 context を返す (Base default)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
-    const mod = await import('@/lib/pimlico');
-    const ctx = mod.pimlicoPaymasterContext('usdc');
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    const tokens = await import('@/lib/tokens');
+    const pim = await import('@/lib/pimlico');
+    const usdc = tokens.defaultDeploymentForSymbol('usdc');
+    const ctx = pim.pimlicoPaymasterContext(usdc);
     expect(ctx).toHaveProperty('token');
     // mainnet 既定の Circle native USDC on Base
     expect((ctx as { token: string }).token.toLowerCase()).toBe(
@@ -73,17 +96,18 @@ describe('pimlicoPaymasterContext', () => {
     );
   });
 
-  it('USDC mainnet で env override を指定するとそのアドレスが context.token に反映', async () => {
+  it('USDC mainnet で per-chain env override (Arbitrum) が context.token に反映', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
-    // viem の getAddress は mixed-case で checksum 一致を要求するため、
-    // テストでは lowercase 形式を渡す (lib/env.ts 内で getAddress により
-    // checksum 化されてから lib/tokens.ts に伝播する)。
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
     const override = '0xcafe000000000000000000000000000000000999';
-    process.env.NEXT_PUBLIC_USDC_MAINNET_ADDRESS = override;
-    const mod = await import('@/lib/pimlico');
-    const ctx = mod.pimlicoPaymasterContext('usdc');
+    process.env.NEXT_PUBLIC_USDC_ARBITRUM_MAINNET_ADDRESS = override;
+    const tokens = await import('@/lib/tokens');
+    const pim = await import('@/lib/pimlico');
+    const arb = tokens.deploymentForSlug('usdc', 'arbitrum');
+    const ctx = pim.pimlicoPaymasterContext(arb);
     expect((ctx as { token: string }).token.toLowerCase()).toBe(override);
   });
 
@@ -91,9 +115,13 @@ describe('pimlicoPaymasterContext', () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
     process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_should_be_ignored';
-    const mod = await import('@/lib/pimlico');
-    const ctx = mod.pimlicoPaymasterContext('usdc');
+    const tokens = await import('@/lib/tokens');
+    const pim = await import('@/lib/pimlico');
+    const usdc = tokens.defaultDeploymentForSymbol('usdc');
+    const ctx = pim.pimlicoPaymasterContext(usdc);
     expect(ctx).toHaveProperty('token');
     expect(ctx).not.toHaveProperty('sponsorshipPolicyId');
   });
@@ -101,8 +129,10 @@ describe('pimlicoPaymasterContext', () => {
   it('SPONSORSHIP_POLICY_ID 未設定時の sponsorship は undefined', async () => {
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID;
-    const mod = await import('@/lib/pimlico');
-    expect(mod.pimlicoPaymasterContext('jpyc')).toBeUndefined();
+    const tokens = await import('@/lib/tokens');
+    const pim = await import('@/lib/pimlico');
+    const jpyc = tokens.defaultDeploymentForSymbol('jpyc');
+    expect(pim.pimlicoPaymasterContext(jpyc)).toBeUndefined();
   });
 });
 

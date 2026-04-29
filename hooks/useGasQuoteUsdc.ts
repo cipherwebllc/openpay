@@ -10,45 +10,57 @@
 // UI に「最大 X USDC」と表示)。本番計測後に NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS
 // で再デプロイなしで再調整できる。
 // sponsorship に解決される場合 (JPYC / testnet) は enabled=false で no-op。
+//
+// マルチチェーン: deployment.chainId に応じて Pimlico bundler を切り替え、
+// per-chain の token quote (各チェーンの USDC/native exchange rate と postOpGas)
+// を取得する。Pimlico Paymaster はチェーンごとに ETH/POL レートが異なるため、
+// chain ごとの quote が必須。
 
 import { useQuery } from '@tanstack/react-query';
-import { chainForToken } from '@/lib/chains';
+import { Chain } from 'viem';
 import { env } from '@/lib/env';
 import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
-import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import { supportedChains } from '@/lib/chains';
+import type { TokenDeployment } from '@/lib/tokens';
 
 // 値が小さすぎて approve allowance が不足すると userOp が postOp で revert する
 // ため、本番計測後に NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS で安全側に再調整する。
 const DEFAULT_USEROP_GAS_UNITS = 500_000n;
 
-export function useGasQuoteUsdc(token: TokenSymbol, enabled: boolean = true) {
-  const tokenInfo = TOKENS[token];
-  const isActive = enabled && resolvePaymasterMode(token) === 'erc20';
+export function useGasQuoteUsdc(
+  deployment: TokenDeployment,
+  enabled: boolean = true,
+) {
+  const isActive = enabled && resolvePaymasterMode(deployment) === 'erc20';
+  const chain: Chain | undefined = supportedChains.find(
+    (c) => c.id === deployment.chainId,
+  );
 
   return useQuery({
-    enabled: isActive,
+    enabled: isActive && !!chain,
     queryKey: [
       'openpay',
       'gas-quote-usdc',
-      tokenInfo.chainId,
-      tokenInfo.address,
+      deployment.chainId,
+      deployment.address,
     ],
     // gas 価格と為替で動くため short stale + 30 秒間隔で背景更新。
     staleTime: 30_000,
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      const pimlicoClient = createPimlico(tokenInfo.chainId);
+      if (!chain) throw new Error(`unsupported chain ${deployment.chainId}`);
+      const pimlicoClient = createPimlico(deployment.chainId);
       const [quotes, gasPrice] = await Promise.all([
         pimlicoClient.getTokenQuotes({
-          tokens: [tokenInfo.address],
-          chain: chainForToken(token),
+          tokens: [deployment.address],
+          chain,
         }),
         pimlicoClient.getUserOperationGasPrice(),
       ]);
       if (quotes.length === 0) {
         throw new Error(
-          `Pimlico が ${tokenInfo.displaySymbol} の token quote を返しませんでした (chainId=${tokenInfo.chainId})`,
+          `Pimlico が ${deployment.displaySymbol} の token quote を返しませんでした (chainId=${deployment.chainId})`,
         );
       }
       const { exchangeRate, postOpGas } = quotes[0];

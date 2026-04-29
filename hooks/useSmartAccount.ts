@@ -17,9 +17,12 @@ import {
   pimlicoUrl,
   resolvePaymasterMode,
 } from '@/lib/pimlico';
-import type { TokenSymbol } from '@/lib/tokens';
+import type { TokenDeployment } from '@/lib/tokens';
 
-export function useSmartAccount(token: TokenSymbol, enabled: boolean = true) {
+export function useSmartAccount(
+  deployment: TokenDeployment,
+  enabled: boolean = true,
+) {
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const { address, chainId } = useAccount();
@@ -30,8 +33,16 @@ export function useSmartAccount(token: TokenSymbol, enabled: boolean = true) {
       !!walletClient &&
       !!publicClient &&
       !!address &&
-      isSupportedChainId(chainId),
-    queryKey: ['openpay', 'smart-account', address, chainId, token],
+      isSupportedChainId(chainId) &&
+      chainId === deployment.chainId,
+    queryKey: [
+      'openpay',
+      'smart-account',
+      address,
+      chainId,
+      deployment.symbol,
+      deployment.chainId,
+    ],
     queryFn: async () => {
       // enabled で全条件を確認済みだが TS の narrowing のために再チェック
       if (!walletClient || !publicClient || !chainId) {
@@ -39,7 +50,7 @@ export function useSmartAccount(token: TokenSymbol, enabled: boolean = true) {
       }
 
       const pimlicoClient = createPimlico(chainId);
-      const paymasterMode = resolvePaymasterMode(token);
+      const paymasterMode = resolvePaymasterMode(deployment);
 
       const account = await to7702SimpleSmartAccount({
         client: publicClient,
@@ -51,7 +62,7 @@ export function useSmartAccount(token: TokenSymbol, enabled: boolean = true) {
         chain: walletClient.chain,
         bundlerTransport: http(pimlicoUrl(chainId)),
         paymaster: pimlicoClient,
-        paymasterContext: pimlicoPaymasterContext(token),
+        paymasterContext: pimlicoPaymasterContext(deployment),
         userOperation: {
           estimateFeesPerGas: async () =>
             (await pimlicoClient.getUserOperationGasPrice()).fast,

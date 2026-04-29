@@ -19,8 +19,10 @@
     "modeStatic": "据え置き",
     "staticHint": "据え置き QR では金額を顧客が入力します。",
     "advancedSettings": "詳細設定",
-    "tokenLabel": "通貨 / 受取チェーン",
+    "tokenLabel": "通貨",
     "tokenChainHint": "{chainName} chain (id: {chainId})",
+    "tokenChainHintMulti": "{count} chain 対応 (Base / Arbitrum / Optimism / Polygon)",
+    "chainLabel": "受取チェーン",
     "receiverLabel": "受取先ウォレットアドレス",
     "addressInvalid": "アドレス形式が正しくありません",
     "directHint": "直接送金モード: 運営手数料 0%、ネットワーク手数料は顧客がネイティブトークンで支払い",
@@ -52,8 +54,8 @@
     "qrPlaceholderNoAmount": "金額を入力してください",
     "qrPlaceholderGenerating": "QR を生成中…",
     "feeReceiverHeading": "運営手数料の徴収先",
-    "feeReceiverHintJpyc": "(Polygon JPYC: 1.0% / 最低 5 JPYC + ネットワーク手数料)",
-    "feeReceiverHintUsdc": "(Base USDC: 1.0% / 最低 0.05 USDC + ネットワーク手数料)"
+    "feeReceiverHintJpyc": "(JPYC: 1.0% / 最低 5 JPYC + ネットワーク手数料)",
+    "feeReceiverHintUsdc": "(USDC: 1.0% / 最低 0.05 USDC + ネットワーク手数料)"
   },
   "PaymentForm": {
     "title": "OpenPay 決済",
@@ -148,7 +150,9 @@
   "TipEmbedGenerator": {
     "receiverLabel": "クリエイターウォレットアドレス",
     "addressInvalid": "アドレス形式が正しくありません",
-    "tokenLabel": "通貨 / 受取チェーン",
+    "tokenLabel": "通貨",
+    "tokenChainHintMulti": "{count} chain 対応",
+    "chainLabel": "受取チェーン (USDC)",
     "nameLabel": "表示名 (任意)",
     "namePlaceholder": "例: 山田太郎",
     "messageLabel": "メッセージ (任意)",

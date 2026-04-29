@@ -9,38 +9,41 @@
 // gas 単位は実機計測前の rough な worst-case 想定値で固定 (実費はこれ以下)。
 // POL/JPYC rate は外部 API 依存を持たず NEXT_PUBLIC_POL_JPYC_RATE で運用更新する。
 // 既定 60 は POL ≈ 60 JPY 想定 (2026 時点の安全側)。
+//
+// JPYC は Polygon 単一 deployment なので、deployment.chainId は常に Polygon。
 
 import { useQuery } from '@tanstack/react-query';
 import { polygon, polygonAmoy } from 'viem/chains';
-import { env, isMainnet } from '@/lib/env';
+import { env } from '@/lib/env';
 import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
-import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import type { TokenDeployment } from '@/lib/tokens';
 
 const DEFAULT_USEROP_GAS_UNITS = 300_000n;
 const DEFAULT_POL_JPYC_RATE = 60n;
 
-export function useGasQuoteJpyc(token: TokenSymbol, enabled: boolean = true) {
-  const tokenInfo = TOKENS[token];
-  const isActive = enabled && resolvePaymasterMode(token) === 'sponsorship';
+export function useGasQuoteJpyc(
+  deployment: TokenDeployment,
+  enabled: boolean = true,
+) {
+  const isActive = enabled && resolvePaymasterMode(deployment) === 'sponsorship';
   // sponsorship かつ Polygon (mainnet/Amoy) でのみ意味を持つ。
   // testnet では gas 見積を 0 とし、フォーム側で gasAmount=0n として扱う。
-  const polygonChainId = isMainnet ? polygon.id : polygonAmoy.id;
   const isPolygon =
-    tokenInfo.chainId === polygon.id || tokenInfo.chainId === polygonAmoy.id;
+    deployment.chainId === polygon.id || deployment.chainId === polygonAmoy.id;
 
   return useQuery({
     enabled: isActive && isPolygon,
     queryKey: [
       'openpay',
       'gas-quote-jpyc',
-      polygonChainId,
+      deployment.chainId,
       env.polJpycRate ?? Number(DEFAULT_POL_JPYC_RATE),
     ],
     staleTime: 30_000,
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      const pimlicoClient = createPimlico(polygonChainId);
+      const pimlicoClient = createPimlico(deployment.chainId);
       const gasPrice = await pimlicoClient.getUserOperationGasPrice();
       const overhead =
         env.gasQuoteOverheadUnits !== undefined

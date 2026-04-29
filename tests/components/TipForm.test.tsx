@@ -449,8 +449,8 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
 
 describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
   beforeEach(() => {
-    vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
-      token === 'usdc' ? 'erc20' : 'sponsorship',
+    vi.mocked(resolvePaymasterMode).mockImplementation((dep) =>
+      dep.symbol === 'usdc' ? 'erc20' : 'sponsorship',
     );
   });
 
@@ -525,9 +525,10 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('ready');
     render(<TipForm params={USDC_PARAMS} />);
     const link = screen.getByRole('link', { name: /ガス代承認の状況を確認/ });
+    // testnet env では Base Sepolia の explorer (sepolia.basescan.org) を使う
     expect(link).toHaveAttribute(
       'href',
-      `https://basescan.org/tokenapprovalchecker?search=${FAN}`,
+      `https://sepolia.basescan.org/tokenapprovalchecker?search=${FAN}`,
     );
   });
 

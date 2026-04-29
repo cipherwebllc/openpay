@@ -84,6 +84,80 @@ describe('lib/env (module-load validation)', () => {
     );
   });
 
+  it('USDC mainnet の per-chain env override (4 chain) がパースされる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_USDC_BASE_MAINNET_ADDRESS =
+      '0xbabe0000000000000000000000000000000abcde';
+    process.env.NEXT_PUBLIC_USDC_ARBITRUM_MAINNET_ADDRESS =
+      '0xa1b1000000000000000000000000000000abcde0';
+    process.env.NEXT_PUBLIC_USDC_OPTIMISM_MAINNET_ADDRESS =
+      '0x0021000000000000000000000000000000abcde0';
+    process.env.NEXT_PUBLIC_USDC_POLYGON_MAINNET_ADDRESS =
+      '0xb01a000000000000000000000000000000abcde0';
+    const mod = await import('@/lib/env');
+    expect(mod.env.mainnetTokenOverrides.usdc.base?.toLowerCase()).toBe(
+      '0xbabe0000000000000000000000000000000abcde',
+    );
+    expect(mod.env.mainnetTokenOverrides.usdc.arbitrum?.toLowerCase()).toBe(
+      '0xa1b1000000000000000000000000000000abcde0',
+    );
+    expect(mod.env.mainnetTokenOverrides.usdc.optimism?.toLowerCase()).toBe(
+      '0x0021000000000000000000000000000000abcde0',
+    );
+    expect(mod.env.mainnetTokenOverrides.usdc.polygon?.toLowerCase()).toBe(
+      '0xb01a000000000000000000000000000000abcde0',
+    );
+  });
+
+  it('USDC testnet の per-chain env override がパースされる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_USDC_BASE_SEPOLIA_ADDRESS =
+      '0xbabe0000000000000000000000000000000abcde';
+    process.env.NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA_ADDRESS =
+      '0xa1b1000000000000000000000000000000abcde0';
+    process.env.NEXT_PUBLIC_USDC_OPTIMISM_SEPOLIA_ADDRESS =
+      '0x0021000000000000000000000000000000abcde0';
+    process.env.NEXT_PUBLIC_USDC_POLYGON_AMOY_ADDRESS =
+      '0xb01a000000000000000000000000000000abcde0';
+    const mod = await import('@/lib/env');
+    expect(mod.env.testnetTokenOverrides.usdc.base?.toLowerCase()).toBe(
+      '0xbabe0000000000000000000000000000000abcde',
+    );
+    expect(mod.env.testnetTokenOverrides.usdc.arbitrum?.toLowerCase()).toBe(
+      '0xa1b1000000000000000000000000000000abcde0',
+    );
+    expect(mod.env.testnetTokenOverrides.usdc.optimism?.toLowerCase()).toBe(
+      '0x0021000000000000000000000000000000abcde0',
+    );
+    expect(mod.env.testnetTokenOverrides.usdc.polygon?.toLowerCase()).toBe(
+      '0xb01a000000000000000000000000000000abcde0',
+    );
+  });
+
+  it('Arbitrum / Optimism RPC URL env が読み込まれる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL = 'https://rpc.example/arb';
+    process.env.NEXT_PUBLIC_OPTIMISM_RPC_URL = 'https://rpc.example/op';
+    process.env.NEXT_PUBLIC_ARBITRUM_SEPOLIA_RPC_URL =
+      'https://rpc.example/arbs';
+    process.env.NEXT_PUBLIC_OPTIMISM_SEPOLIA_RPC_URL =
+      'https://rpc.example/ops';
+    const mod = await import('@/lib/env');
+    expect(mod.env.rpc.arbitrum).toBe('https://rpc.example/arb');
+    expect(mod.env.rpc.optimism).toBe('https://rpc.example/op');
+    expect(mod.env.rpc.arbitrumSepolia).toBe('https://rpc.example/arbs');
+    expect(mod.env.rpc.optimismSepolia).toBe('https://rpc.example/ops');
+  });
+
+  it('Arbitrum / Optimism gas ceiling env が整数としてパースされる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI = '5';
+    process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI = '3';
+    const mod = await import('@/lib/env');
+    expect(mod.env.gasCeilingGwei.arbitrum).toBe(5);
+    expect(mod.env.gasCeilingGwei.optimism).toBe(3);
+  });
+
   it('PIMLICO_API_KEY 未設定なら空文字 (実際の利用時に throw)', async () => {
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_PIMLICO_API_KEY;

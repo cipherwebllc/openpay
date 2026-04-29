@@ -6,7 +6,13 @@ import { type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
-import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import {
+  DEFAULT_CHAIN_FOR_SYMBOL,
+  defaultDeploymentForSymbol,
+  deploymentForSlug,
+  type TokenSymbol,
+} from '@/lib/tokens';
+import { chainForSlug, type ChainSlug } from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress } from '@/lib/format';
 import {
@@ -19,6 +25,8 @@ import {
 
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
+
+const USDC_CHAINS: ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
 
 type CopyKey = 'url' | 'iframe';
 
@@ -60,6 +68,7 @@ export function TipEmbedGenerator() {
     const params: TipParams = {
       to: effectiveReceiver,
       token: settings.token,
+      chain: settings.chain,
       name: settings.name || undefined,
       message: settings.message || undefined,
       color: colorValid ? settings.color : undefined,
@@ -74,6 +83,7 @@ export function TipEmbedGenerator() {
     effectiveReceiver,
     origin,
     settings.token,
+    settings.chain,
     settings.name,
     settings.message,
     settings.color,
@@ -107,6 +117,20 @@ export function TipEmbedGenerator() {
     setTimeout(() => setCopied(null), 1500);
   }
 
+  function selectToken(tok: TokenSymbol) {
+    setSettings((s) => ({
+      ...s,
+      token: tok,
+      chain: DEFAULT_CHAIN_FOR_SYMBOL[tok],
+    }));
+  }
+
+  function selectChain(slug: ChainSlug) {
+    setSettings((s) => ({ ...s, chain: slug }));
+  }
+
+  // 表示用 deployment は (token, chain) 組合せから決定。
+  const deployment = deploymentForSlug(settings.token, settings.chain);
   const defaultPresetsList = DEFAULT_TIP_PRESETS[settings.token].join(', ');
   const defaultPresetsCsv = DEFAULT_TIP_PRESETS[settings.token].join(',');
 
@@ -129,13 +153,13 @@ export function TipEmbedGenerator() {
         <Field label={t('tokenLabel')}>
           <div className="grid grid-cols-2 gap-2">
             {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
-              const info = TOKENS[tok];
+              const info = defaultDeploymentForSymbol(tok);
               const active = settings.token === tok;
               return (
                 <button
                   key={tok}
                   type="button"
-                  onClick={() => setSettings((s) => ({ ...s, token: tok }))}
+                  onClick={() => selectToken(tok)}
                   className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
                     active
                       ? 'border-brand bg-brand/5 text-brand-dark'
@@ -144,13 +168,41 @@ export function TipEmbedGenerator() {
                 >
                   <div className="font-semibold">{info.displaySymbol}</div>
                   <div className="text-xs text-slate-500">
-                    {tok === 'usdc' ? 'Base' : 'Polygon'}
+                    {tok === 'usdc'
+                      ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
+                      : 'Polygon'}
                   </div>
                 </button>
               );
             })}
           </div>
         </Field>
+
+        {settings.token === 'usdc' && (
+          <Field label={t('chainLabel')}>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {USDC_CHAINS.map((slug) => {
+                const c = chainForSlug(slug);
+                const active = settings.chain === slug;
+                return (
+                  <button
+                    key={slug}
+                    type="button"
+                    onClick={() => selectChain(slug)}
+                    className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                      active
+                        ? 'border-brand bg-brand/5 text-brand-dark'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="font-semibold">{c.name}</div>
+                    <div className="text-[10px] text-slate-500">id: {c.id}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        )}
 
         <Field label={t('nameLabel')}>
           <input
@@ -225,7 +277,7 @@ export function TipEmbedGenerator() {
             <p className="mt-1 text-xs text-slate-500">
               {t('presetsActive', {
                 values: presetsParsed.join(', '),
-                symbol: TOKENS[settings.token].displaySymbol,
+                symbol: deployment.displaySymbol,
               })}
             </p>
           )}
@@ -306,7 +358,7 @@ export function TipEmbedGenerator() {
                   key={p}
                   className="rounded-md bg-white/20 px-2 py-1 text-xs font-mono"
                 >
-                  {p} {TOKENS[settings.token].displaySymbol}
+                  {p} {deployment.displaySymbol}
                 </span>
               ))}
             </div>

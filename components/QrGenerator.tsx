@@ -16,13 +16,21 @@ import {
   type PayMode,
   type SplitDraft,
 } from '@/lib/url';
-import { TOKENS, type TokenSymbol } from '@/lib/tokens';
+import {
+  DEFAULT_CHAIN_FOR_SYMBOL,
+  defaultDeploymentForSymbol,
+  deploymentForSlug,
+  type TokenSymbol,
+} from '@/lib/tokens';
+import { chainForSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 
 type Mode = 'amount' | 'static';
+
+const USDC_CHAINS: ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
 
 export function QrGenerator() {
   const { settings, setSettings, hydrated } = useQrSettings();
@@ -78,6 +86,7 @@ export function QrGenerator() {
     const params: PayParams = {
       to: effectiveReceiver,
       token: settings.token,
+      chain: settings.chain,
       gas: settings.gasMode,
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
@@ -90,6 +99,7 @@ export function QrGenerator() {
     origin,
     amountValid,
     settings.token,
+    settings.chain,
     settings.gasMode,
     mode,
     amount,
@@ -117,7 +127,10 @@ export function QrGenerator() {
     setResolvedReceiver(addr);
   }, []);
 
-  const tokenInfo = TOKENS[settings.token];
+  // 表示用 deployment は (token, chain) 組合せから決定。chain が token と
+  // 不整合 (jpyc + 非 polygon) になるケースは useQrSettings の sanitize で
+  // 防いでいる。
+  const deployment = deploymentForSlug(settings.token, settings.chain);
 
   async function copyUrl() {
     if (!payUrl) return;
@@ -126,10 +139,25 @@ export function QrGenerator() {
     setTimeout(() => setCopyState('idle'), 1500);
   }
 
+  function selectToken(tok: TokenSymbol) {
+    // token を切り替えると chain も既定 (USDC→base, JPYC→polygon) にリセット。
+    // jpyc は polygon 固定なので、互換性のため reset 必須。usdc は default に
+    // 戻すことで、ユーザの直前の chain 選択 (例: arbitrum) を意図せず引き継がない。
+    setSettings((s) => ({
+      ...s,
+      token: tok,
+      chain: DEFAULT_CHAIN_FOR_SYMBOL[tok],
+    }));
+  }
+
+  function selectChain(slug: ChainSlug) {
+    setSettings((s) => ({ ...s, chain: slug }));
+  }
+
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <section className="space-y-5">
-        <Field label={t('amountLabel', { symbol: tokenInfo.displaySymbol })}>
+        <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
           <div className="flex flex-col gap-2">
             <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
               {(
@@ -179,6 +207,7 @@ export function QrGenerator() {
           summary={
             <SettingsSummary
               token={settings.token}
+              chain={settings.chain}
               receiver={settings.receiver}
               gasMode={settings.gasMode}
               direct={settings.directTransfer}
@@ -188,13 +217,13 @@ export function QrGenerator() {
           <Field label={t('tokenLabel')}>
             <div className="grid grid-cols-2 gap-2">
               {(['usdc', 'jpyc'] as TokenSymbol[]).map((tok) => {
-                const info = TOKENS[tok];
+                const info = defaultDeploymentForSymbol(tok);
                 const active = settings.token === tok;
                 return (
                   <button
                     key={tok}
                     type="button"
-                    onClick={() => setSettings((s) => ({ ...s, token: tok }))}
+                    onClick={() => selectToken(tok)}
                     className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
                       active
                         ? 'border-brand bg-brand/5 text-brand-dark'
@@ -203,16 +232,46 @@ export function QrGenerator() {
                   >
                     <div className="font-semibold">{info.displaySymbol}</div>
                     <div className="text-xs text-slate-500">
-                      {t('tokenChainHint', {
-                        chainName: tok === 'usdc' ? 'Base' : 'Polygon',
-                        chainId: info.chainId,
-                      })}
+                      {tok === 'usdc'
+                        ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
+                        : t('tokenChainHint', {
+                            chainName: 'Polygon',
+                            chainId: info.chainId,
+                          })}
                     </div>
                   </button>
                 );
               })}
             </div>
           </Field>
+
+          {settings.token === 'usdc' && (
+            <Field label={t('chainLabel')}>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {USDC_CHAINS.map((slug) => {
+                  const c = chainForSlug(slug);
+                  const active = settings.chain === slug;
+                  return (
+                    <button
+                      key={slug}
+                      type="button"
+                      onClick={() => selectChain(slug)}
+                      className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+                        active
+                          ? 'border-brand bg-brand/5 text-brand-dark'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="font-semibold">{c.name}</div>
+                      <div className="text-xs text-slate-500">
+                        chain id: {c.id}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+          )}
 
           <Field label={t('receiverLabel')}>
             <AddressInput
@@ -464,22 +523,25 @@ function SettingsAccordion({
 
 function SettingsSummary({
   token,
+  chain,
   receiver,
   gasMode,
   direct,
 }: {
   token: TokenSymbol;
+  chain: ChainSlug;
   receiver: string;
   gasMode: GasMode;
   direct: boolean;
 }) {
-  const tokenLabel = TOKENS[token].displaySymbol;
+  const tokenLabel = defaultDeploymentForSymbol(token).displaySymbol;
+  const chainLabel = chainForSlug(chain).name;
   const recvLabel = isAddress(receiver) ? shortAddress(receiver) : '—';
   // direct: 運営手数料 0% / customer: 顧客が gas / merchant: 店主が gas
   const tail = direct ? '0%' : gasMode === 'customer' ? 'gas:cust' : 'gas:merch';
   return (
     <span className="font-mono">
-      {tokenLabel} · {recvLabel} · {tail}
+      {tokenLabel} · {chainLabel} · {recvLabel} · {tail}
     </span>
   );
 }

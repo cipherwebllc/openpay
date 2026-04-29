@@ -1,19 +1,32 @@
 // チェーン別の maxFeePerGas 上限 (gwei)。これを超える gas 価格で UserOp を
-// 送ると、フロア手数料 (15 JPYC / 0.2 USDC ≒ 30 JPY) では赤字になる可能性が
+// 送ると、フロア手数料 (5 JPYC / 0.05 USDC) では赤字になる可能性が
 // 高いため、送信前に弾いてユーザに「ネットワーク混雑、後で再試行」を返す。
 //
 // 推定根拠 (200,000 gas / 1 UserOp 想定):
 //   - Polygon 200 gwei: 0.04 POL ≒ 6 JPY (POL=$0.40, USD/JPY=150)、フロア
-//     15 JPYC = 15 JPY との差 +9 JPY を担保。年数回起きる 300+ gwei spike を
-//     除外しつつ、平常時の混雑 (100〜200 gwei) は通す。
+//     5 JPYC = 5 JPY との差を担保。年数回起きる 300+ gwei spike を除外しつつ、
+//     平常時の混雑 (100〜200 gwei) は通す。
 //   - Base 1 gwei: L2 だけで判定。L1 calldata 費は L2 maxFeePerGas には乗ら
 //     ないため、L1 spike (Ethereum mainnet 200+ gwei) は別軸で監視が必要。
 //     ここでは L2 側のスパイクを捕らえる近似ガードとして 1 gwei を採用。
+//   - Arbitrum 1 gwei: 平常時 0.01〜0.1 gwei、spike 時でも 1 gwei 超は稀。
+//     Base と同水準で設定。
+//   - Optimism 1 gwei: 平常時 0.001 gwei 程度 (極めて低)、spike 時に 0.05〜
+//     0.5 gwei 程度。安全弁として Base と同 1 gwei。
 //
 // Pimlico paymaster の sponsorship policy 側でも同等以上の上限を設定するこ
 // とを推奨 (二重ガード: client-side は UX 用の早期エラー、server-side は
 // クライアント改竄不可の最終防衛線)。
-import { base, baseSepolia, polygon, polygonAmoy } from 'viem/chains';
+import {
+  arbitrum,
+  arbitrumSepolia,
+  base,
+  baseSepolia,
+  optimism,
+  optimismSepolia,
+  polygon,
+  polygonAmoy,
+} from 'viem/chains';
 import { env } from './env';
 
 const GWEI = 10n ** 9n;
@@ -23,6 +36,10 @@ const DEFAULT_CEILING_GWEI: Record<number, bigint> = {
   [polygonAmoy.id]: 1000n, // testnet は開発体験を優先して緩く
   [base.id]: 1n,
   [baseSepolia.id]: 1000n,
+  [arbitrum.id]: 1n,
+  [arbitrumSepolia.id]: 1000n,
+  [optimism.id]: 1n,
+  [optimismSepolia.id]: 1000n,
 };
 
 function buildCeilingTable(): Record<number, bigint> {
@@ -34,6 +51,12 @@ function buildCeilingTable(): Record<number, bigint> {
   }
   if (env.gasCeilingGwei.base !== undefined) {
     table[base.id] = BigInt(env.gasCeilingGwei.base);
+  }
+  if (env.gasCeilingGwei.arbitrum !== undefined) {
+    table[arbitrum.id] = BigInt(env.gasCeilingGwei.arbitrum);
+  }
+  if (env.gasCeilingGwei.optimism !== undefined) {
+    table[optimism.id] = BigInt(env.gasCeilingGwei.optimism);
   }
   return table;
 }

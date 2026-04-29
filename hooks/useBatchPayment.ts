@@ -22,7 +22,7 @@ import {
 import { useAccount } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
 import { assertGasCeiling } from '@/lib/gasCeiling';
-import type { TokenSymbol } from '@/lib/tokens';
+import type { TokenDeployment } from '@/lib/tokens';
 
 export type BatchPaymentParams = {
   tokenAddress: Address;
@@ -43,8 +43,8 @@ export type BatchPaymentResult = {
   success: boolean;
 };
 
-export function useBatchPayment(token: TokenSymbol) {
-  const { data: clients } = useSmartAccount(token);
+export function useBatchPayment(deployment: TokenDeployment) {
+  const { data: clients } = useSmartAccount(deployment);
   const { chainId } = useAccount();
 
   return useMutation<BatchPaymentResult, Error, BatchPaymentParams>({

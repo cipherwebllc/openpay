@@ -18,6 +18,10 @@ vi.mock('@/lib/pimlico', async () => {
 
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { defaultDeploymentForSymbol } from '@/lib/tokens';
+
+const usdcDep = defaultDeploymentForSymbol('usdc');
+const jpycDep = defaultDeploymentForSymbol('jpyc');
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -44,7 +48,7 @@ describe('useGasQuoteJpyc', () => {
       fast: { maxFeePerGas: 50n * 10n ** 9n },
     });
 
-    const { result } = renderHook(() => useGasQuoteJpyc('jpyc'), {
+    const { result } = renderHook(() => useGasQuoteJpyc(jpycDep), {
       wrapper: makeWrapper(),
     });
 
@@ -56,12 +60,12 @@ describe('useGasQuoteJpyc', () => {
 
   it('USDC token (= ERC20 paymaster mode): enabled=false で fetch されない', () => {
     vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
-    renderHook(() => useGasQuoteJpyc('usdc'), { wrapper: makeWrapper() });
+    renderHook(() => useGasQuoteJpyc(usdcDep), { wrapper: makeWrapper() });
     expect(getUserOperationGasPrice).not.toHaveBeenCalled();
   });
 
   it('enabled=false で明示的に呼出を抑止できる', () => {
-    renderHook(() => useGasQuoteJpyc('jpyc', false), {
+    renderHook(() => useGasQuoteJpyc(jpycDep, false), {
       wrapper: makeWrapper(),
     });
     expect(getUserOperationGasPrice).not.toHaveBeenCalled();
@@ -70,7 +74,7 @@ describe('useGasQuoteJpyc', () => {
   it('Pimlico エラーは伝播 (UI 側で friendly メッセージに変換)', async () => {
     getUserOperationGasPrice.mockRejectedValue(new Error('rpc 503'));
 
-    const { result } = renderHook(() => useGasQuoteJpyc('jpyc'), {
+    const { result } = renderHook(() => useGasQuoteJpyc(jpycDep), {
       wrapper: makeWrapper(),
     });
 

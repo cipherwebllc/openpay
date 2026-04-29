@@ -1,6 +1,9 @@
 // /pay クエリ仕様:
 //   to     (必須, 0x) — 主受取人
 //   token  ("jpyc" | "usdc")
+//   chain  ("base" | "arbitrum" | "optimism" | "polygon", 任意)
+//          省略時: usdc → base, jpyc → polygon (DEFAULT_CHAIN_FOR_SYMBOL)
+//          (token, chain) ペアに deployment が存在しない組合せは parse エラー
 //   gas    ("customer" | "merchant", 省略時 customer) ※ merchant の場合のみ URL に出力
 //   amount (任意, 人間可読 — 据え置き QR では省略)
 //   mode   ("gasless" | "direct", 省略時 gasless) ※ direct のときのみ URL に出力
@@ -14,6 +17,7 @@
 //
 // /tip/[address] クエリ仕様:
 //   token   ("jpyc" | "usdc")        必須
+//   chain   ChainSlug (任意、規則は /pay と同じ)
 //   name    (任意, 表示名 60 文字まで切詰)
 //   message (任意, 説明文 200 文字まで切詰)
 //   color   (任意, "#rrggbb" 形式)
@@ -22,8 +26,17 @@
 // Tip widget は gas=customer 固定 (preset セマンティクス: クリエイターが preset 額から運営手数料控除後を受け取る、ファンが gas を上乗せ支払い)。
 import { getAddress, isAddress } from 'viem';
 import type { Address } from 'viem';
+import {
+  isValidChainSlug,
+  type ChainSlug,
+} from './chains';
 import type { GasMode } from './fee';
-import { isValidTokenSymbol, type TokenSymbol } from './tokens';
+import {
+  DEFAULT_CHAIN_FOR_SYMBOL,
+  deploymentsForSymbol,
+  isValidTokenSymbol,
+  type TokenSymbol,
+} from './tokens';
 
 export type PayMode = 'gasless' | 'direct';
 
@@ -38,6 +51,9 @@ export const SPLIT_MAX_ENTRIES = 3;
 export type PayParams = {
   to: Address;
   token: TokenSymbol;
+  // chain slug。省略時は build/parse 双方で token の default が使われる
+  // (usdc → base, jpyc → polygon)。parsePayParams の戻り値では常に値が入る。
+  chain?: ChainSlug;
   gas: GasMode;
   amount?: string;
   mode: PayMode;
@@ -139,10 +155,27 @@ function parseSplitParam(raw: string): SplitEntry[] | null {
   return entries;
 }
 
+// (symbol, slug) ペアに deployment が存在するかをチェック。
+// 例: (jpyc, arbitrum) は deployment が無いので false。
+function hasDeployment(symbol: TokenSymbol, slug: ChainSlug): boolean {
+  return deploymentsForSymbol(symbol).some((d) => {
+    // slug → chainId は env 依存だが、deploymentsForSymbol の出力 chainId を
+    // chains 経由で逆引きすると依存が増えるため、ここではシンボル + slug の
+    // 関係 (jpyc=polygon のみ、usdc=全 chain) をホワイトリストとして表現。
+    if (symbol === 'jpyc') return slug === 'polygon';
+    return ['base', 'arbitrum', 'optimism', 'polygon'].includes(slug);
+  });
+}
+
 export function buildPayPath(params: PayParams): string {
   const sp = new URLSearchParams();
   sp.set('to', params.to);
   sp.set('token', params.token);
+  // chain は default と異なる時のみ出力 (旧 QR 互換)。
+  // 未指定 (undefined) は default 扱いで、URL には出さない。
+  if (params.chain && params.chain !== DEFAULT_CHAIN_FOR_SYMBOL[params.token]) {
+    sp.set('chain', params.chain);
+  }
   // customer (default) は URL に出さない。merchant のみ明示。
   if (params.gas === 'merchant') {
     sp.set('gas', 'merchant');
@@ -174,6 +207,7 @@ type SearchParamsLike = { get(name: string): string | null };
 export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams {
   const to = searchParams.get('to');
   const token = searchParams.get('token');
+  const chainRaw = searchParams.get('chain');
   const gasRaw = searchParams.get('gas');
   const amount = searchParams.get('amount');
   const mode = searchParams.get('mode');
@@ -187,6 +221,28 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   if (mode !== null && mode !== 'gasless' && mode !== 'direct') {
     return { ok: false, error: 'mode は gasless または direct を指定してください' };
   }
+
+  // chain 解決: 明示があれば使う、無ければ token の default。
+  let chainSlug: ChainSlug;
+  if (chainRaw === null || chainRaw.length === 0) {
+    chainSlug = DEFAULT_CHAIN_FOR_SYMBOL[token];
+  } else if (isValidChainSlug(chainRaw)) {
+    chainSlug = chainRaw;
+  } else {
+    return {
+      ok: false,
+      error:
+        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+    };
+  }
+  // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
+  if (!hasDeployment(token, chainSlug)) {
+    return {
+      ok: false,
+      error: `${token} は ${chainSlug} に対応していません`,
+    };
+  }
+
   // gas は merchant のみ明示認識、それ以外 (customer / 不明値 / 未指定 / 旧 fee=) は customer 扱い。
   const gas: GasMode = gasRaw === 'merchant' ? 'merchant' : 'customer';
   let parsedSplit: SplitEntry[] | undefined = undefined;
@@ -215,6 +271,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     params: {
       to: getAddress(to),
       token,
+      chain: chainSlug,
       gas,
       amount: amount && amount.length > 0 ? amount : undefined,
       mode: mode === 'direct' ? 'direct' : 'gasless',
@@ -230,6 +287,8 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
 export type TipParams = {
   to: Address;
   token: TokenSymbol;
+  // chain slug (PayParams と同じ規則)。省略時は token の default。
+  chain?: ChainSlug;
   name?: string;
   message?: string;
   color?: string;
@@ -282,6 +341,9 @@ function sanitizePresets(raw: string): string[] | undefined {
 export function buildTipPath(params: TipParams): string {
   const sp = new URLSearchParams();
   sp.set('token', params.token);
+  if (params.chain && params.chain !== DEFAULT_CHAIN_FOR_SYMBOL[params.token]) {
+    sp.set('chain', params.chain);
+  }
   if (params.name) {
     const v = sanitizeText(params.name, TIP_NAME_MAX);
     if (v) sp.set('name', v);
@@ -336,6 +398,25 @@ export function parseTipParams(
   if (!token || !isValidTokenSymbol(token)) {
     return { ok: false, error: 'token は jpyc または usdc を指定してください' };
   }
+  const chainRaw = searchParams.get('chain');
+  let chainSlug: ChainSlug;
+  if (chainRaw === null || chainRaw.length === 0) {
+    chainSlug = DEFAULT_CHAIN_FOR_SYMBOL[token];
+  } else if (isValidChainSlug(chainRaw)) {
+    chainSlug = chainRaw;
+  } else {
+    return {
+      ok: false,
+      error:
+        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+    };
+  }
+  if (!hasDeployment(token, chainSlug)) {
+    return {
+      ok: false,
+      error: `${token} は ${chainSlug} に対応していません`,
+    };
+  }
 
   const name = searchParams.get('name');
   const message = searchParams.get('message');
@@ -353,6 +434,7 @@ export function parseTipParams(
     params: {
       to: getAddress(addressParam),
       token,
+      chain: chainSlug,
       name: name ? sanitizeText(name, TIP_NAME_MAX) : undefined,
       message: message ? sanitizeText(message, TIP_MESSAGE_MAX) : undefined,
       color: sanitizedColor,
@@ -367,12 +449,12 @@ export function parseTipParams(
 // 通貨ごとの既定 preset (URL に preset 指定がない時に使う)。
 //
 // 設計基準: 最小 preset の実効手数料率が 5% 以下になる金額帯を選ぶ。
-// 旧値 (JPYC 100 / USDC 1) はフロア手数料 (15 JPYC / 0.2 USDC) に対し
-// 実効 15% / 20% となり、ユーザに「割高」シグナルを与えてしまっていた。
+// 旧値 (JPYC 100 / USDC 1) はフロア手数料 (5 JPYC / 0.05 USDC) に対し
+// 実効 5% / 5% となり、ユーザに「割高」シグナルを与えてしまっていた。
 //
-//   JPYC 300:  15 JPYC fee →  5.0%   USDC 5:  0.2 USDC fee → 4.0%
-//   JPYC 1000: 15 JPYC fee →  1.5%   USDC 20: 0.24 USDC fee → 1.2%
-//   JPYC 3000: 30 JPYC fee →  1.0%   USDC 50: 0.6 USDC fee → 1.2%
+//   JPYC 300:  5 JPYC fee →  1.7%   USDC 5:  0.05 USDC fee → 1.0%
+//   JPYC 1000: 10 JPYC fee →  1.0%  USDC 20: 0.2 USDC fee → 1.0%
+//   JPYC 3000: 30 JPYC fee →  1.0%  USDC 50: 0.5 USDC fee → 1.0%
 //
 // クリエイターは TipEmbedGenerator で任意の preset を上書き可能、ファンも
 // custom amount で 100 JPYC / 1 USDC のようなカジュアル tip を引き続き送れる。

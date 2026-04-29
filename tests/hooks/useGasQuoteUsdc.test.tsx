@@ -23,6 +23,10 @@ vi.mock('@/lib/pimlico', async () => {
 
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { defaultDeploymentForSymbol } from '@/lib/tokens';
+
+const usdcDep = defaultDeploymentForSymbol('usdc');
+const jpycDep = defaultDeploymentForSymbol('jpyc');
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -45,7 +49,7 @@ afterEach(() => {
 
 describe('useGasQuoteUsdc', () => {
   it('sponsorship mode (= testnet 相当): enabled=false で fetch されない', () => {
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -54,7 +58,7 @@ describe('useGasQuoteUsdc', () => {
 
   it('enabled=false が呼出側から渡されると ERC20 mode でも fetch されない', () => {
     vi.mocked(resolvePaymasterMode).mockImplementation(() => 'erc20');
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc', false), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep, false), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -62,11 +66,11 @@ describe('useGasQuoteUsdc', () => {
   });
 
   it('JPYC は erc20 mode に解決されないので fetch されない', () => {
-    vi.mocked(resolvePaymasterMode).mockImplementation((token) =>
+    vi.mocked(resolvePaymasterMode).mockImplementation((dep) =>
       // 仮に resolve が壊れても JPYC は ERC20 mode にならない方針
-      token === 'usdc' ? 'erc20' : 'sponsorship',
+      dep.symbol === 'usdc' ? 'erc20' : 'sponsorship',
     );
-    const { result } = renderHook(() => useGasQuoteUsdc('jpyc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(jpycDep), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -95,7 +99,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }, // 2 wei/gas (テスト用に簡素化)
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -116,7 +120,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -133,7 +137,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
@@ -153,7 +157,7 @@ describe('useGasQuoteUsdc', () => {
     ]);
     getUserOperationGasPrice.mockRejectedValue(new Error('rpc timeout'));
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
@@ -181,7 +185,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: 10_000_000n, maxPriorityFeePerGas: 1n }, // 0.01 gwei
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
@@ -211,7 +215,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: 10n ** 9n, maxPriorityFeePerGas: 1n }, // 1 gwei (spike)
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
@@ -239,7 +243,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
@@ -266,7 +270,7 @@ describe('useGasQuoteUsdc', () => {
       fast: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
     });
 
-    const { result } = renderHook(() => useGasQuoteUsdc('usdc'), {
+    const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
@@ -304,7 +308,10 @@ describe('useGasQuoteUsdc', () => {
         fast: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n },
       });
 
-      const { result } = renderHook(() => hookFresh('usdc'), {
+      // env を再評価したため deployment も再生成 (tokens.ts も再 import)
+      const tokens = await import('@/lib/tokens');
+      const usdcDepFresh = tokens.defaultDeploymentForSymbol('usdc');
+      const { result } = renderHook(() => hookFresh(usdcDepFresh), {
         wrapper: makeWrapper(),
       });
       await waitFor(() => expect(result.current.data).toBeDefined());
@@ -343,12 +350,12 @@ describe('useGasQuoteUsdc', () => {
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
 
-    const first = renderHook(() => useGasQuoteUsdc('usdc'), { wrapper });
+    const first = renderHook(() => useGasQuoteUsdc(usdcDep), { wrapper });
     await waitFor(() => expect(first.result.current.data).toBeDefined());
     expect(getTokenQuotes).toHaveBeenCalledTimes(1);
 
     // 2 つ目の subscriber: 同じ key なので新規 fetch しない
-    const second = renderHook(() => useGasQuoteUsdc('usdc'), { wrapper });
+    const second = renderHook(() => useGasQuoteUsdc(usdcDep), { wrapper });
     expect(second.result.current.data).toBeDefined();
     expect(getTokenQuotes).toHaveBeenCalledTimes(1);
   });

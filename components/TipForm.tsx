@@ -10,12 +10,12 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { calcBreakdown } from '@/lib/fee';
-import { chainForToken } from '@/lib/chains';
+import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
-import { getToken } from '@/lib/tokens';
+import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import { DECIMAL_PATTERN, DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
 import { formatTokenAmount } from '@/lib/format';
 
@@ -23,9 +23,11 @@ const DEFAULT_THEME_COLOR = '#2563eb';
 
 export function TipForm({ params }: { params: TipParams }) {
   const t = useTranslations('TipForm');
-  const token = getToken(params.token);
-  const requiredChain = chainForToken(params.token);
-  const paymasterMode = resolvePaymasterMode(params.token);
+  // parseTipParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
+  const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
+  const deployment = deploymentForSlug(params.token, chainSlug);
+  const requiredChain = chainForSlug(chainSlug);
+  const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = paymasterMode === 'erc20';
   const isSponsorship = paymasterMode === 'sponsorship';
   const presets =
@@ -38,9 +40,9 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
-  const { data: saData, error: saError } = useSmartAccount(params.token, true);
-  const gasless = useBatchPayment(params.token);
-  const gasQuote = useGasQuote(params.token);
+  const { data: saData, error: saError } = useSmartAccount(deployment, true);
+  const gasless = useBatchPayment(deployment);
+  const gasQuote = useGasQuote(deployment);
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     presets[0] ?? null,
@@ -51,8 +53,8 @@ export function TipForm({ params }: { params: TipParams }) {
   const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
-    return parseUnits(amountStr, token.decimals);
-  }, [amountStr, token.decimals]);
+    return parseUnits(amountStr, deployment.decimals);
+  }, [amountStr, deployment.decimals]);
 
   // Tip widget は gas=customer 固定 (preset セマンティクス維持):
   // creator は preset - fee を受け取り、ファンは preset + gas を支払う。
@@ -68,14 +70,14 @@ export function TipForm({ params }: { params: TipParams }) {
   const totalCustomerOutflow = breakdown.customerPays;
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
-  const fmt = (wei: bigint) => formatTokenAmount(wei, token);
+  const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   const balanceQuery = useReadContract({
-    address: token.address,
+    address: deployment.address,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
-    chainId: token.chainId,
+    chainId: deployment.chainId,
     query: { enabled: !!address && isConnected },
   });
 
@@ -133,6 +135,7 @@ export function TipForm({ params }: { params: TipParams }) {
         creator: params.to,
         from: address,
         token: params.token,
+        chain: chainSlug,
         amount: amountStr,
         merchantAmount: breakdown.merchantReceives.toString(),
         feeAmount: breakdown.feeAmount.toString(),
@@ -141,7 +144,7 @@ export function TipForm({ params }: { params: TipParams }) {
         txHash: gasless.data.txHash,
         userOpHash: gasless.data.userOpHash,
         blockNumber: gasless.data.blockNumber.toString(),
-        chainId: token.chainId,
+        chainId: deployment.chainId,
         ts: Date.now(),
       };
       // CORS が許可されていない webhook 先 (Discord 等) は失敗するが、tip
@@ -176,6 +179,7 @@ export function TipForm({ params }: { params: TipParams }) {
     gasless.data,
     params.to,
     params.token,
+    chainSlug,
     params.message,
     params.webhook,
     amountStr,
@@ -183,7 +187,7 @@ export function TipForm({ params }: { params: TipParams }) {
     breakdown.merchantReceives,
     breakdown.feeAmount,
     breakdown.customerPays,
-    token.chainId,
+    deployment.chainId,
   ]);
 
   function selectPreset(preset: string) {
@@ -198,13 +202,19 @@ export function TipForm({ params }: { params: TipParams }) {
   function onSubmit() {
     if (!canSubmit) return;
     gasless.mutate({
-      tokenAddress: token.address,
+      tokenAddress: deployment.address,
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
       feeReceiver: env.feeReceiver,
       feeAmount: breakdown.feeAmount + gasReimbursement,
     });
   }
+
+  const explorerBase = blockExplorerUrl(deployment.chainId);
+  const approvalCheckUrl =
+    isErc20Paymaster && address && explorerBase
+      ? `${explorerBase}/tokenapprovalchecker?search=${address}`
+      : undefined;
 
   return (
     <div className="space-y-4">
@@ -226,7 +236,7 @@ export function TipForm({ params }: { params: TipParams }) {
           </p>
         )}
         <p className="mt-3 text-xs opacity-70">
-          {requiredChain.name} · {token.displaySymbol}
+          {requiredChain.name} · {deployment.displaySymbol}
         </p>
       </header>
 
@@ -249,7 +259,7 @@ export function TipForm({ params }: { params: TipParams }) {
                 }`}
                 style={active ? { backgroundColor: themeColor } : undefined}
               >
-                {p} {token.displaySymbol}
+                {p} {deployment.displaySymbol}
               </button>
             );
           })}
@@ -305,10 +315,10 @@ export function TipForm({ params }: { params: TipParams }) {
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {isErc20Paymaster ? t('gaslessHintUsdc') : t('gaslessHintJpyc')}
         </p>
-        {isErc20Paymaster && address && (
+        {approvalCheckUrl && (
           <p className="mt-2 text-[11px]">
             <a
-              href={`https://basescan.org/tokenapprovalchecker?search=${address}`}
+              href={approvalCheckUrl}
               target="_blank"
               rel="noreferrer noopener"
               className="text-slate-500 underline hover:text-slate-700"

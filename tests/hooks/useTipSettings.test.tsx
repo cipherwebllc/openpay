@@ -9,12 +9,13 @@ describe('useTipSettings', () => {
     window.localStorage.clear();
   });
 
-  it('未保存時は defaults', async () => {
+  it('未保存時は defaults (token=jpyc, chain=polygon)', async () => {
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '',
       token: 'jpyc',
+      chain: 'polygon',
       name: '',
       message: '',
       color: '#2563eb',
@@ -49,6 +50,7 @@ describe('useTipSettings', () => {
     expect(result.current.settings).toEqual({
       receiver: '0xabc',
       token: 'usdc',
+      chain: 'base',
       name: 'Alice',
       message: 'hi',
       color: '#ff00ff',
@@ -97,6 +99,7 @@ describe('useTipSettings', () => {
       result.current.setSettings({
         receiver: '0xdef',
         token: 'usdc',
+        chain: 'optimism',
         name: 'Bob',
         message: 'thx',
         color: '#112233',
@@ -114,6 +117,7 @@ describe('useTipSettings', () => {
       expect(parsed).toEqual({
         receiver: '0xdef',
         token: 'usdc',
+        chain: 'optimism',
         name: 'Bob',
         message: 'thx',
         color: '#112233',
@@ -123,6 +127,26 @@ describe('useTipSettings', () => {
         webhook: 'https://example.com/hook',
       });
     });
+  });
+
+  it('jpyc + 不正 chain → polygon に強制', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'arbitrum' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('polygon');
+  });
+
+  it('usdc + 有効 chain (arbitrum) → そのまま保存', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'arbitrum' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('arbitrum');
   });
 
   it('hydrate 完了前に localStorage を上書きしない', () => {

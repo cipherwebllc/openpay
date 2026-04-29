@@ -69,8 +69,12 @@ export const env = {
   rpc: {
     polygon: nonEmpty(process.env.NEXT_PUBLIC_POLYGON_RPC_URL),
     base: nonEmpty(process.env.NEXT_PUBLIC_BASE_RPC_URL),
+    arbitrum: nonEmpty(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL),
+    optimism: nonEmpty(process.env.NEXT_PUBLIC_OPTIMISM_RPC_URL),
     polygonAmoy: nonEmpty(process.env.NEXT_PUBLIC_POLYGON_AMOY_RPC_URL),
     baseSepolia: nonEmpty(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL),
+    arbitrumSepolia: nonEmpty(process.env.NEXT_PUBLIC_ARBITRUM_SEPOLIA_RPC_URL),
+    optimismSepolia: nonEmpty(process.env.NEXT_PUBLIC_OPTIMISM_SEPOLIA_RPC_URL),
     // ENS / Basenames 解決用 (NETWORK_ENV に依存せず常に mainnet を使う)。
     // CCIP-Read (off-chain resolution) を要する .eth 名前があるため、
     // CCIP-Read 互換の RPC を既定にする (cloudflare-eth.com は非対応で
@@ -79,25 +83,56 @@ export const env = {
     baseMainnet: nonEmpty(process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL),
   },
   // mainnet の既定アドレスは lib/tokens.ts。コントラクト移行時はこの env で差替え。
+  // JPYC は Polygon 単一なので chain 軸の上書きは持たない。
+  // USDC は対応 4 chain それぞれで上書き可能 (個別の Circle native USDC アドレス変更や
+  // テスト用カスタム ERC20 への切替に対応)。
   mainnetTokenOverrides: {
     jpyc: parseAddress(
       'NEXT_PUBLIC_JPYC_MAINNET_ADDRESS',
       process.env.NEXT_PUBLIC_JPYC_MAINNET_ADDRESS,
     ),
-    usdc: parseAddress(
-      'NEXT_PUBLIC_USDC_MAINNET_ADDRESS',
-      process.env.NEXT_PUBLIC_USDC_MAINNET_ADDRESS,
-    ),
+    usdc: {
+      base: parseAddress(
+        'NEXT_PUBLIC_USDC_BASE_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_BASE_MAINNET_ADDRESS,
+      ),
+      arbitrum: parseAddress(
+        'NEXT_PUBLIC_USDC_ARBITRUM_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_ARBITRUM_MAINNET_ADDRESS,
+      ),
+      optimism: parseAddress(
+        'NEXT_PUBLIC_USDC_OPTIMISM_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_OPTIMISM_MAINNET_ADDRESS,
+      ),
+      polygon: parseAddress(
+        'NEXT_PUBLIC_USDC_POLYGON_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_POLYGON_MAINNET_ADDRESS,
+      ),
+    },
   },
   testnetTokenOverrides: {
     jpyc: parseAddress(
       'NEXT_PUBLIC_JPYC_TESTNET_ADDRESS',
       process.env.NEXT_PUBLIC_JPYC_TESTNET_ADDRESS,
     ),
-    usdc: parseAddress(
-      'NEXT_PUBLIC_USDC_TESTNET_ADDRESS',
-      process.env.NEXT_PUBLIC_USDC_TESTNET_ADDRESS,
-    ),
+    usdc: {
+      base: parseAddress(
+        'NEXT_PUBLIC_USDC_BASE_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_BASE_SEPOLIA_ADDRESS,
+      ),
+      arbitrum: parseAddress(
+        'NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA_ADDRESS,
+      ),
+      optimism: parseAddress(
+        'NEXT_PUBLIC_USDC_OPTIMISM_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_OPTIMISM_SEPOLIA_ADDRESS,
+      ),
+      polygon: parseAddress(
+        'NEXT_PUBLIC_USDC_POLYGON_AMOY_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_POLYGON_AMOY_ADDRESS,
+      ),
+    },
   },
   // チェーン別 gas price 上限の上書き (gwei、整数)。lib/gasCeiling.ts が
   // 既定値とマージして使う。本番運用で Sentry の "gas_congested" 件数を見て
@@ -110,6 +145,14 @@ export const env = {
     base: parsePositiveInt(
       'NEXT_PUBLIC_GAS_CEILING_BASE_GWEI',
       process.env.NEXT_PUBLIC_GAS_CEILING_BASE_GWEI,
+    ),
+    arbitrum: parsePositiveInt(
+      'NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI',
+      process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI,
+    ),
+    optimism: parsePositiveInt(
+      'NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI',
+      process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI,
     ),
   },
   // useGasQuoteUsdc が USDC 建て gas 見積に使う UserOp gas 単位の上限値 (整数)。

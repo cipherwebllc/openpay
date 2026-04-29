@@ -12,7 +12,10 @@ import { base, baseSepolia, polygon } from 'viem/chains';
 import type { ReactNode } from 'react';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { GasCongestedError } from '@/lib/gasCeiling';
-import type { PaymasterMode, TokenSymbol } from '@/lib/tokens';
+import { defaultDeploymentForSymbol, type PaymasterMode } from '@/lib/tokens';
+
+const usdcDep = defaultDeploymentForSymbol('usdc');
+const jpycDep = defaultDeploymentForSymbol('jpyc');
 
 // 外部依存である useSmartAccount を境界モック。テスト対象 (useBatchPayment)
 // の実コードは実行され、calls 配列の組み立てや encodeFunctionData の動作が
@@ -99,7 +102,7 @@ describe('useBatchPayment', () => {
 
   it('店主送金 + 手数料を 1 つの UserOp の calls[2] にバッチ化', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -142,7 +145,7 @@ describe('useBatchPayment', () => {
 
   it('merchantAmount = 0 の場合は手数料のみの 1 call', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -163,7 +166,7 @@ describe('useBatchPayment', () => {
 
   it('feeAmount = 0 → 必ずエラー (運営収益 + sponsorship 濫用防止のため fee 必須)', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -182,7 +185,7 @@ describe('useBatchPayment', () => {
 
   it('両方 0 → エラーで sendUserOperation は呼ばれない', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -208,7 +211,7 @@ describe('useBatchPayment', () => {
     vi.mocked(useAccount).mockReturnValue({
       chainId: baseSepolia.id,
     } as unknown as ReturnType<typeof useAccount>);
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -226,7 +229,7 @@ describe('useBatchPayment', () => {
 
   it('成功時に userOpHash と txHash を返却', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -247,7 +250,7 @@ describe('useBatchPayment', () => {
 
   it('extraRecipients (split) が指定されると calls に追加される', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -290,7 +293,7 @@ describe('useBatchPayment', () => {
 
   it('extraRecipients に amount=0 が混ざる → エラー', async () => {
     mountReady();
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -312,7 +315,7 @@ describe('useBatchPayment', () => {
   it('sendUserOperation が reject → mutation エラーに伝播', async () => {
     mountReady();
     sendUserOperation.mockRejectedValueOnce(new Error('AA21 didn\'t pay prefund'));
-    const { result } = renderHook(() => useBatchPayment('usdc'), {
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
     });
 
@@ -332,7 +335,7 @@ describe('useBatchPayment', () => {
     it('sponsorship mode + 上限以下 → 通常通り送信される', async () => {
       // testnet (Base Sepolia) ceiling = 1000 gwei、観測 50 gwei は安全圏
       mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
-      const { result } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
 
@@ -351,7 +354,7 @@ describe('useBatchPayment', () => {
     it('sponsorship mode + 上限超過 → GasCongestedError、sendUserOperation は呼ばれない', async () => {
       // testnet ceiling 1000 gwei を上回る 1500 gwei を返す
       mountReady({ maxFeePerGas: 1500n * GWEI, chainId: baseSepolia.id });
-      const { result } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
 
@@ -374,7 +377,7 @@ describe('useBatchPayment', () => {
         chainId: baseSepolia.id,
         paymasterMode: 'erc20',
       });
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
 
@@ -396,7 +399,7 @@ describe('useBatchPayment', () => {
         chainId: baseSepolia.id,
         paymasterMode: 'erc20',
       });
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
 
@@ -420,7 +423,7 @@ describe('useBatchPayment', () => {
       vi.mocked(useAccount).mockReturnValue({
         chainId: undefined,
       } as unknown as ReturnType<typeof useAccount>);
-      const { result } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
 
@@ -439,7 +442,7 @@ describe('useBatchPayment', () => {
     it('feeAmount=0 ガードは gas price チェックより先に発火', async () => {
       // 運営収益確保 (feeAmount=0) のエラーパス: gas price 取得は不要なはず
       mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
-      const { result } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
 
@@ -459,7 +462,7 @@ describe('useBatchPayment', () => {
     it('Polygon mainnet (chainId=137) sponsorship: 200 gwei 以下 OK / 超過 reject', async () => {
       // 既定 ceiling は Polygon mainnet 200 gwei
       mountReady({ maxFeePerGas: 199n * GWEI, chainId: polygon.id });
-      const { result: ok } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result: ok } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
       ok.current.mutate({
@@ -474,7 +477,7 @@ describe('useBatchPayment', () => {
       // reset for the over-ceiling case
       vi.clearAllMocks();
       mountReady({ maxFeePerGas: 250n * GWEI, chainId: polygon.id });
-      const { result: ng } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result: ng } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
       ng.current.mutate({
@@ -491,7 +494,7 @@ describe('useBatchPayment', () => {
     it('Base mainnet (chainId=8453) sponsorship: 1 gwei 以下 OK / 超過 reject', async () => {
       // 既定 ceiling は Base mainnet 1 gwei (非常に厳しい)
       mountReady({ maxFeePerGas: 9n * 10n ** 8n, chainId: base.id }); // 0.9 gwei
-      const { result: ok } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result: ok } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
       ok.current.mutate({
@@ -505,7 +508,7 @@ describe('useBatchPayment', () => {
 
       vi.clearAllMocks();
       mountReady({ maxFeePerGas: 2n * GWEI, chainId: base.id }); // 2 gwei = 超過
-      const { result: ng } = renderHook(() => useBatchPayment('jpyc'), {
+      const { result: ng } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
       ng.current.mutate({
@@ -532,7 +535,7 @@ describe('useBatchPayment', () => {
         },
       });
 
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
       result.current.mutate({
@@ -556,7 +559,7 @@ describe('useBatchPayment', () => {
         new Error('UserOperationReceiptTimeoutError'),
       );
 
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
       result.current.mutate({
@@ -577,7 +580,7 @@ describe('useBatchPayment', () => {
   describe('calls の構築 (データ整合性)', () => {
     it('複数 extraRecipients の順序保存 + bigint amount 整合性', async () => {
       mountReady();
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
 
@@ -633,7 +636,7 @@ describe('useBatchPayment', () => {
 
     it('巨大な amount (uint256 上限近く) でも bigint で精度欠落なし', async () => {
       mountReady();
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
 
@@ -657,7 +660,7 @@ describe('useBatchPayment', () => {
 
     it('merchantAmount > 0 + extraRecipients 空 (split なし、通常パス)', async () => {
       mountReady();
-      const { result } = renderHook(() => useBatchPayment('usdc'), {
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
 

@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { safeGet, safeSet } from '@/lib/storage';
+import type { ChainSlug } from '@/lib/chains';
 import type { TokenSymbol } from '@/lib/tokens';
 import { COLOR_PATTERN } from '@/lib/url';
+import { normalizeChainForToken } from './useQrSettings';
 
 export type TipSettings = {
   receiver: string;
   token: TokenSymbol;
+  // 送金チェーン (slug)。usdc は 4 chain 選択可、jpyc は polygon 固定。
+  chain: ChainSlug;
   name: string;
   message: string;
   color: string;
@@ -22,6 +26,7 @@ const STORAGE_KEY = 'openpay:tip-settings:v2';
 const DEFAULT_SETTINGS: TipSettings = {
   receiver: '',
   token: 'jpyc',
+  chain: 'polygon',
   name: '',
   message: '',
   color: '#2563eb',
@@ -32,15 +37,17 @@ const DEFAULT_SETTINGS: TipSettings = {
 };
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
+  const token: TokenSymbol =
+    loaded.token === 'jpyc' || loaded.token === 'usdc'
+      ? loaded.token
+      : DEFAULT_SETTINGS.token;
   return {
     receiver:
       typeof loaded.receiver === 'string'
         ? loaded.receiver
         : DEFAULT_SETTINGS.receiver,
-    token:
-      loaded.token === 'jpyc' || loaded.token === 'usdc'
-        ? loaded.token
-        : DEFAULT_SETTINGS.token,
+    token,
+    chain: normalizeChainForToken(token, loaded.chain),
     name:
       typeof loaded.name === 'string' ? loaded.name : DEFAULT_SETTINGS.name,
     message:

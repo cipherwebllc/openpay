@@ -41,6 +41,10 @@ vi.mock('permissionless', () => ({
 
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { mockHook } from '../_helpers/wagmiMock';
+import { defaultDeploymentForSymbol } from '@/lib/tokens';
+
+const usdcDep = defaultDeploymentForSymbol('usdc');
+const jpycDep = defaultDeploymentForSymbol('jpyc');
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -69,7 +73,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       undefined as ReturnType<typeof usePublicClient>,
     );
 
-    const { result } = renderHook(() => useSmartAccount('jpyc'), {
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
     });
     expect(result.current.data).toBeUndefined();
@@ -86,7 +90,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
     mockHook(useWalletClient, { data: { chain: { id: 1 } } });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount('jpyc'), {
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -101,7 +105,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
     mockHook(useWalletClient, { data: undefined });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount('jpyc'), {
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -117,7 +121,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       undefined as ReturnType<typeof usePublicClient>,
     );
 
-    const { result } = renderHook(() => useSmartAccount('jpyc'), {
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -131,7 +135,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount('jpyc', false), {
+    const { result } = renderHook(() => useSmartAccount(jpycDep, false), {
       wrapper: makeWrapper(),
     });
     expect(result.current.fetchStatus).toBe('idle');
@@ -158,7 +162,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount('jpyc'), {
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
@@ -190,7 +194,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     mockHook(useWalletClient, { data: { chain: baseSepolia } });
     mockHook(usePublicClient, {});
 
-    const { result } = renderHook(() => useSmartAccount('usdc'), {
+    const { result } = renderHook(() => useSmartAccount(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
@@ -205,6 +209,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
   });
 
   it('queryKey が token を含む → 異なる token は異なるクエリとして共存', async () => {
+    // jpyc (Polygon Amoy) でまず query を生成
     mockHook(useAccount, {
       address: '0x1111111111111111111111111111111111111111',
       chainId: polygonAmoy.id,
@@ -212,7 +217,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
     mockHook(usePublicClient, {});
 
-    const { result: jpyc } = renderHook(() => useSmartAccount('jpyc'), {
+    const { result: jpyc } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(jpyc.current.data).toBeDefined());
@@ -220,8 +225,14 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     const callsAfterJpyc = createSmartAccountClient.mock.calls.length;
     expect(callsAfterJpyc).toBe(1);
 
-    // 同じ wrapper で usdc を mount すると別 queryKey なので新規 fetch
-    const { result: usdc } = renderHook(() => useSmartAccount('usdc'), {
+    // wallet を Base Sepolia に切替えて usdc を mount → 別 queryKey で新規 fetch
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: baseSepolia.id,
+    });
+    mockHook(useWalletClient, { data: { chain: baseSepolia } });
+
+    const { result: usdc } = renderHook(() => useSmartAccount(usdcDep), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(usdc.current.data).toBeDefined());
@@ -246,6 +257,8 @@ describe('useSmartAccount (queryFn 実走行: ERC20 mode @ mainnet)', () => {
         '@/hooks/useSmartAccount'
       );
       const { base: baseChain } = await import('viem/chains');
+      const tokens = await import('@/lib/tokens');
+      const usdcDepFresh = tokens.defaultDeploymentForSymbol('usdc');
 
       mockHook(useAccount, {
         address: '0x1111111111111111111111111111111111111111',
@@ -254,7 +267,7 @@ describe('useSmartAccount (queryFn 実走行: ERC20 mode @ mainnet)', () => {
       mockHook(useWalletClient, { data: { chain: baseChain } });
       mockHook(usePublicClient, {});
 
-      const { result } = renderHook(() => hookFresh('usdc'), {
+      const { result } = renderHook(() => hookFresh(usdcDepFresh), {
         wrapper: makeWrapper(),
       });
       await waitFor(() => expect(result.current.data).toBeDefined());

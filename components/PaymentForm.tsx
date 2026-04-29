@@ -16,12 +16,12 @@ import {
   calcDirectBreakdown,
   calcSplitBreakdown,
 } from '@/lib/fee';
-import { chainForToken } from '@/lib/chains';
+import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
-import { getToken } from '@/lib/tokens';
+import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import { DECIMAL_PATTERN, parsePayParams, type PayParams } from '@/lib/url';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 
@@ -45,9 +45,11 @@ export function PaymentForm() {
 function PaymentDetails({ params }: { params: PayParams }) {
   const t = useTranslations('PaymentForm');
   const isDirect = params.mode === 'direct';
-  const token = getToken(params.token);
-  const requiredChain = chainForToken(params.token);
-  const paymasterMode = resolvePaymasterMode(params.token);
+  // parsePayParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
+  const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
+  const deployment = deploymentForSlug(params.token, chainSlug);
+  const requiredChain = chainForSlug(chainSlug);
+  const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = !isDirect && paymasterMode === 'erc20';
   const isSponsorship = !isDirect && paymasterMode === 'sponsorship';
 
@@ -56,14 +58,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   // Smart Account は gasless のみ必要 — direct では enabled=false で skip。
   const { data: saData, error: saError } = useSmartAccount(
-    params.token,
+    deployment,
     !isDirect,
   );
 
   // 両方のフックを常に call し、isDirect で送信先を分岐 (条件付きフックは禁止)。
-  const gasless = useBatchPayment(params.token);
+  const gasless = useBatchPayment(deployment);
   const direct = useDirectPayment();
-  const gasQuote = useGasQuote(params.token, !isDirect);
+  const gasQuote = useGasQuote(deployment, !isDirect);
 
   const fixedAmount = params.amount ?? '';
   const isFixed = fixedAmount.length > 0;
@@ -72,10 +74,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
-    return parseUnits(amountStr, token.decimals);
-  }, [amountStr, token.decimals]);
+    return parseUnits(amountStr, deployment.decimals);
+  }, [amountStr, deployment.decimals]);
 
-  const fmt = (wei: bigint) => formatTokenAmount(wei, token);
+  const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   const isMerchantGas = !isDirect && params.gas === 'merchant';
 
@@ -135,11 +137,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
     breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
 
   const balanceQuery = useReadContract({
-    address: token.address,
+    address: deployment.address,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
-    chainId: token.chainId,
+    chainId: deployment.chainId,
     query: { enabled: !!address && isConnected },
   });
 
@@ -210,16 +212,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
     if (!canSubmit) return;
     if (isDirect) {
       direct.mutate({
-        tokenAddress: token.address,
+        tokenAddress: deployment.address,
         merchant: params.to,
         amount: breakdown.customerPays,
-        chainId: token.chainId,
+        chainId: deployment.chainId,
       });
     } else if (splitBreakdown) {
       // recipients[0] は primary (params.to)、それ以降が split entries
       const [primary, ...extras] = splitBreakdown.recipients;
       gasless.mutate({
-        tokenAddress: token.address,
+        tokenAddress: deployment.address,
         merchant: primary.to,
         merchantAmount: primary.amount,
         feeReceiver: env.feeReceiver,
@@ -228,7 +230,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       });
     } else {
       gasless.mutate({
-        tokenAddress: token.address,
+        tokenAddress: deployment.address,
         merchant: params.to,
         merchantAmount: breakdown.merchantReceives,
         feeReceiver: env.feeReceiver,
@@ -236,6 +238,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
       });
     }
   }
+
+  // direct モードのときネイティブ ガスが何かを表示するため。
+  // JPYC は Polygon のみ (POL)、それ以外 (USDC) は対応 4 chain 全て ETH 系ガス。
+  const directNativeToken = params.token === 'jpyc' ? 'POL' : 'ETH';
+
+  // ERC20 Paymaster の Token Approval Checker リンク (chain 別 explorer)。
+  // Etherscan 系 (basescan / arbiscan / optimistic.etherscan / polygonscan) は
+  // /tokenapprovalchecker パスを共通で持つ。
+  const explorerBase = blockExplorerUrl(deployment.chainId);
+  const approvalCheckUrl =
+    isErc20Paymaster && address && explorerBase
+      ? `${explorerBase}/tokenapprovalchecker?search=${address}`
+      : undefined;
 
   return (
     <div className="space-y-6">
@@ -248,7 +263,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           <p className="text-xs opacity-80">{t('amountHeader')}</p>
           {isFixed ? (
             <p className="mt-1 text-3xl font-bold">
-              {fixedAmount} {token.displaySymbol}
+              {fixedAmount} {deployment.displaySymbol}
             </p>
           ) : (
             <div className="mt-2">
@@ -259,11 +274,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 onChange={(e) =>
                   setInputAmount(e.target.value.replace(/[^\d.]/g, ''))
                 }
-                placeholder={token.symbol === 'jpyc' ? '1000' : '10.00'}
+                placeholder={deployment.symbol === 'jpyc' ? '1000' : '10.00'}
                 className="w-full rounded-lg bg-white/15 px-3 py-2 text-2xl font-bold text-white placeholder:text-white/50 focus:bg-white/20 focus:outline-none"
               />
               <p className="mt-1 text-xs opacity-70">
-                {t('amountInputHint', { symbol: token.displaySymbol })}
+                {t('amountInputHint', { symbol: deployment.displaySymbol })}
               </p>
             </div>
           )}
@@ -274,12 +289,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{t('directWarningTitle')}</p>
           <p className="mt-1 text-xs">
-            {t('directWarningBody', {
-              nativeToken:
-                requiredChain.id === 137 || requiredChain.id === 80002
-                  ? 'POL'
-                  : 'ETH',
-            })}
+            {t('directWarningBody', { nativeToken: directNativeToken })}
           </p>
         </div>
       )}
@@ -353,10 +363,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 ? t('gaslessBatchHintUsdc')
                 : t('gaslessBatchHintJpyc')}
         </p>
-        {isErc20Paymaster && address && (
+        {approvalCheckUrl && (
           <p className="mt-2 text-xs">
             <a
-              href={`https://basescan.org/tokenapprovalchecker?search=${address}`}
+              href={approvalCheckUrl}
               target="_blank"
               rel="noreferrer noopener"
               className="text-slate-500 underline hover:text-slate-700"
