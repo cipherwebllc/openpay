@@ -1,6 +1,11 @@
-// 構造化 JSON ログを stdout/console に書き出す最小ロガー。
-// 本番では @sentry/nextjs が console.error / window.onerror をインター
-// セプトする想定 (DSN は NEXT_PUBLIC_SENTRY_DSN で外部化)。
+// 構造化 JSON ログを console に書き出すロガー。
+//
+// Sentry 連携: error / warn は Sentry.captureMessage で独立 event として送信。
+// Sentry の default integration は console を breadcrumb 化するのみで独立
+// event にはならないため、明示的に capture する必要がある。DSN 未設定時は
+// @sentry/nextjs の Sentry.* が安全な no-op になる (init を呼んでいないため)。
+
+import * as Sentry from '@sentry/nextjs';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 type Fields = Record<string, unknown>;
@@ -25,6 +30,28 @@ function replacer(_key: string, value: unknown): unknown {
   return value;
 }
 
+// Sentry へ "fingerprint" 用のグルーピングキーとして msg を渡す。
+// fields の中に Error が含まれていれば captureException で stack を保持。
+function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): void {
+  const errorField = fields
+    ? Object.values(fields).find((v) => v instanceof Error)
+    : undefined;
+  // Sentry の SeverityLevel は 'warning' だが logger 側は 'warn' を使うため変換
+  const sentryLevel: Sentry.SeverityLevel = level === 'warn' ? 'warning' : 'error';
+  if (errorField instanceof Error) {
+    Sentry.captureException(errorField, {
+      level: sentryLevel,
+      tags: { event: msg },
+      extra: fields,
+    });
+    return;
+  }
+  Sentry.captureMessage(msg, {
+    level: sentryLevel,
+    extra: fields,
+  });
+}
+
 function emit(level: Level, msg: string, fields?: Fields): void {
   if (ORDER[level] < ORDER[minLevel]) return;
   const entry = { ts: new Date().toISOString(), level, msg, ...fields };
@@ -35,6 +62,9 @@ function emit(level: Level, msg: string, fields?: Fields): void {
         ? console.warn
         : console.log;
   sink(JSON.stringify(entry, replacer));
+  if (level === 'error' || level === 'warn') {
+    reportToSentry(level, msg, fields);
+  }
 }
 
 export const logger = {

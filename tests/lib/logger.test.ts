@@ -1,11 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('@sentry/nextjs', () => ({
+  captureMessage: vi.fn(),
+  captureException: vi.fn(),
+}));
+
 import { logger } from '@/lib/logger';
+import * as Sentry from '@sentry/nextjs';
 
 let logSpy: ReturnType<typeof vi.spyOn>;
 let warnSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  vi.mocked(Sentry.captureMessage).mockClear();
+  vi.mocked(Sentry.captureException).mockClear();
   logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -78,5 +87,51 @@ describe('logger', () => {
     expect(j.b).toBe(1);
     expect(j.c).toBe(true);
     expect(j.d).toBeNull();
+  });
+
+  describe('Sentry 連携', () => {
+    it('logger.error → Sentry.captureMessage が呼ばれる (Error 無し)', () => {
+      logger.error('payment.failed', { code: 42 });
+      expect(Sentry.captureMessage).toHaveBeenCalledOnce();
+      const [msg, opts] = vi.mocked(Sentry.captureMessage).mock.calls[0];
+      expect(msg).toBe('payment.failed');
+      const o = opts as { level: string; extra: { code: number } };
+      expect(o.level).toBe('error');
+      expect(o.extra.code).toBe(42);
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+    });
+
+    it('logger.warn → Sentry.captureMessage に warning level で送信 (Sentry SeverityLevel に変換)', () => {
+      logger.warn('webhook.non_ok', { status: 500 });
+      const [msg, opts] = vi.mocked(Sentry.captureMessage).mock.calls[0];
+      expect(msg).toBe('webhook.non_ok');
+      expect((opts as { level: string }).level).toBe('warning');
+    });
+
+    it('logger.error に Error オブジェクトを含む → captureException で stack 保持', () => {
+      const e = new Error('AA21 prefund');
+      logger.error('payment.failed', { error: e });
+      expect(Sentry.captureException).toHaveBeenCalledOnce();
+      const [arg, opts] = vi.mocked(Sentry.captureException).mock.calls[0];
+      expect(arg).toBe(e);
+      const o = opts as { level: string; tags: { event: string } };
+      expect(o.level).toBe('error');
+      expect(o.tags.event).toBe('payment.failed');
+      expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    });
+
+    it('logger.info / logger.debug は Sentry に送信しない (event ノイズ防止)', () => {
+      logger.info('payment.success', { txHash: '0xabc' });
+      logger.debug('detail', {});
+      expect(Sentry.captureMessage).not.toHaveBeenCalled();
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+    });
+
+    it('複数フィールドのうち最初の Error を captureException に渡す', () => {
+      const e1 = new Error('first');
+      logger.error('event', { ctx: 'a', error: e1, other: 'b' });
+      const [arg] = vi.mocked(Sentry.captureException).mock.calls[0];
+      expect(arg).toBe(e1);
+    });
   });
 });

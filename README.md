@@ -754,6 +754,15 @@ git push origin main      # Vercel が自動で再デプロイ
 店主の QR 設定 (`openpay:qr-settings:v1`) はキー名にバージョン (`v1`) を含むため、
 スキーマ変更時はキーをインクリメントすればロールバック後も旧クライアントが破損しない。
 
+### ⚠️ multi-chain URL 後の rollback は silent fund misdirection の risk あり
+
+Phase 1 で **USDC を Base / Arbitrum / Optimism / Polygon の 4 chain に拡張**したため、生成 URL に `chain=arbitrum` 等が含まれるようになった。**この拡張版を本番投入し、`chain=arbitrum/optimism/polygon` の URL が出回った後で multi-chain 前のバージョンへ rollback すると、旧 parser は未知の `chain` パラメタを silent ignore して USDC=Base の旧 default で処理してしまう**。結果、顧客が **意図と異なるチェーン (Base) に送金** する事故が起こり得る。
+
+**安全な rollback 方針**:
+- Phase 1 multi-chain commit (`feat(usdc): マルチ EVM チェーン対応`) **以前への rollback は禁止**
+- どうしても切り戻す必要がある場合: (a) CDN / Vercel の rewrite で `/pay?...&chain=arbitrum*` を 410 Gone に返す、(b) マーチャントへ「該当 URL の無効化」を即時通知、の手順を経てから旧バージョンへ revert
+- 同じ問題は Checkout 機能 (`/checkout` ルート) にも該当 — `/checkout` 自体が新ルートのため、切り戻すとルート 404 になり silent ではないが、`/pay` の chain パラメタは silent
+
 ### ERC20 Paymaster の approve allowance (USDC mainnet 限定)
 
 USDC mainnet では `prepareUserOperationForErc20Paymaster` が UserOp 先頭に **paymaster コントラクト宛の USDC `approve`** を自動注入する。これは onchain state なのでフロントエンド rollback では消えない:
