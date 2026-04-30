@@ -203,7 +203,21 @@ export type ParsedPayParams =
   | { ok: false; error: string };
 
 /** URLSearchParams / Next の ReadonlyURLSearchParams どちらも構造的に受け取れる */
-type SearchParamsLike = { get(name: string): string | null };
+export type SearchParamsLike = { get(name: string): string | null };
+
+/** Next.js App Router の `searchParams` (Promise) 解決後の生形式。 */
+export type RouteSearch = Record<string, string | string[] | undefined>;
+
+/** Next.js の `Record<string, string | string[] | undefined>` を `SearchParamsLike` に橋渡し。 */
+export function searchParamsFromNext(raw: RouteSearch): SearchParamsLike {
+  return {
+    get(name: string): string | null {
+      const v = raw[name];
+      if (Array.isArray(v)) return v[0] ?? null;
+      return v ?? null;
+    },
+  };
+}
 
 export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams {
   const to = searchParams.get('to');

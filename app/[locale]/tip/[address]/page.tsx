@@ -4,7 +4,11 @@ import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { TipForm } from '@/components/TipForm';
-import { parseTipParams } from '@/lib/url';
+import {
+  parseTipParams,
+  searchParamsFromNext,
+  type RouteSearch,
+} from '@/lib/url';
 
 export const metadata: Metadata = {
   title: 'OpenPay Tip',
@@ -12,31 +16,19 @@ export const metadata: Metadata = {
     'OpenPay Tip widget — instant tipping in JPYC / USDC, gasless via ERC-4337.',
 };
 
-type RawSearch = Record<string, string | string[] | undefined>;
-
-function searchParamsAdapter(raw: RawSearch) {
-  return {
-    get(name: string): string | null {
-      const v = raw[name];
-      if (Array.isArray(v)) return v[0] ?? null;
-      return v ?? null;
-    },
-  };
-}
-
 export default async function TipPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string; address: string }>;
-  searchParams: Promise<RawSearch>;
+  searchParams: Promise<RouteSearch>;
 }) {
   const { locale, address } = await params;
   if (!hasLocale(LOCALES, locale)) notFound();
   setRequestLocale(locale);
 
   const raw = await searchParams;
-  const parsed = parseTipParams(address, searchParamsAdapter(raw));
+  const parsed = parseTipParams(address, searchParamsFromNext(raw));
   const t = await getTranslations('TipForm');
 
   return (

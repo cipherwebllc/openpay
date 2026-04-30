@@ -6,7 +6,11 @@ import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import { env } from '@/lib/env';
-import { parseCheckoutParams } from '@/lib/url';
+import {
+  parseCheckoutParams,
+  searchParamsFromNext,
+  type RouteSearch,
+} from '@/lib/url';
 
 export const metadata: Metadata = {
   title: 'OpenPay Checkout',
@@ -14,31 +18,19 @@ export const metadata: Metadata = {
     'OpenPay Checkout — itemized payment in JPYC / USDC, gasless via ERC-4337.',
 };
 
-type RawSearch = Record<string, string | string[] | undefined>;
-
-function searchParamsAdapter(raw: RawSearch) {
-  return {
-    get(name: string): string | null {
-      const v = raw[name];
-      if (Array.isArray(v)) return v[0] ?? null;
-      return v ?? null;
-    },
-  };
-}
-
 export default async function CheckoutPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<RawSearch>;
+  searchParams: Promise<RouteSearch>;
 }) {
   const { locale } = await params;
   if (!hasLocale(LOCALES, locale)) notFound();
   setRequestLocale(locale);
 
   const raw = await searchParams;
-  const parsed = parseCheckoutParams(searchParamsAdapter(raw));
+  const parsed = parseCheckoutParams(searchParamsFromNext(raw));
   const t = await getTranslations('CheckoutForm');
 
   return (
