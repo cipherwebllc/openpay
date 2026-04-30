@@ -7,6 +7,8 @@ import { isAddress, type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useQrSettings } from '@/hooks/useQrSettings';
+import { useOrigin } from '@/hooks/useOrigin';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
   buildPayUrl,
   DECIMAL_PATTERN,
@@ -22,7 +24,7 @@ import {
   deploymentForSlug,
   type TokenSymbol,
 } from '@/lib/tokens';
-import { chainForSlug, type ChainSlug } from '@/lib/chains';
+import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
@@ -30,23 +32,17 @@ import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 
 type Mode = 'amount' | 'static';
 
-const USDC_CHAINS: ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
-
 export function QrGenerator() {
   const { settings, setSettings, hydrated } = useQrSettings();
   const [mode, setMode] = useState<Mode>('amount');
   const [amount, setAmount] = useState('');
-  const [origin, setOrigin] = useState('');
-  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const origin = useOrigin();
+  const { copied, copy } = useCopyToClipboard();
   const [accordionOpen, setAccordionOpen] = useState(true);
   const [accordionInitialized, setAccordionInitialized] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   const t = useTranslations('QrGenerator');
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
 
   const effectiveReceiver = useMemo(
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
@@ -127,13 +123,6 @@ export function QrGenerator() {
 
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
-
-  async function copyUrl() {
-    if (!payUrl) return;
-    await navigator.clipboard.writeText(payUrl);
-    setCopyState('copied');
-    setTimeout(() => setCopyState('idle'), 1500);
-  }
 
   function selectToken(tok: TokenSymbol) {
     // token を切り替えると chain も既定 (USDC→base, JPYC→polygon) にリセット。
@@ -439,10 +428,10 @@ export function QrGenerator() {
               </div>
               <button
                 type="button"
-                onClick={copyUrl}
+                onClick={() => copy(payUrl)}
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               >
-                {copyState === 'copied' ? t('qrCopied') : t('qrCopy')}
+                {copied ? t('qrCopied') : t('qrCopy')}
               </button>
             </>
           ) : (

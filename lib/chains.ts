@@ -49,6 +49,9 @@ export const supportedChains = [
   SLUG_TO_CHAIN.polygon,
 ] as const satisfies readonly [Chain, Chain, Chain, Chain];
 
+/** USDC が deploy 済みのチェーン (UI ピッカーの並び順を兼ねる)。jpyc は polygon 固定なので別扱い。 */
+export const USDC_CHAINS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
+
 export function isValidChainSlug(value: string): value is ChainSlug {
   return (ALL_SLUGS as readonly string[]).includes(value);
 }

@@ -17,6 +17,7 @@ import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
+import { useAutoSwitchChain } from '@/hooks/useAutoSwitchChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -81,20 +82,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     balanceQuery.data < totalCustomerOutflow;
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
-
-  // URL 指定の chain と wallet が乖離していたら初回 1 回だけ自動切替を試みる。
-  // 拒否や手動で別 chain に戻した場合に popup ループしないよう requiredChain.id 単位で gate。
-  const autoSwitchedTo = useRef<number | null>(null);
-  useEffect(() => {
-    if (
-      wrongChain &&
-      !isSwitching &&
-      autoSwitchedTo.current !== requiredChain.id
-    ) {
-      autoSwitchedTo.current = requiredChain.id;
-      switchChain({ chainId: requiredChain.id });
-    }
-  }, [wrongChain, isSwitching, switchChain, requiredChain.id]);
+  useAutoSwitchChain(requiredChain.id, wrongChain);
 
   const gasQuoteReady = gasQuote.data !== undefined;
   // 運営の赤字防止: merchant が 0 になるケースは送信を block。

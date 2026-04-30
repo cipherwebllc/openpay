@@ -4,9 +4,9 @@ import type { ChainSlug } from '@/lib/chains';
 import type { TokenSymbol } from '@/lib/tokens';
 import { COLOR_PATTERN } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
-import { normalizeChainForToken } from './useQrSettings';
+import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
 
-export type TipSettings = {
+type TipSettings = {
   receiver: string;
   token: TokenSymbol;
   // 送金チェーン (slug)。usdc は 4 chain 選択可、jpyc は polygon 固定。
@@ -36,10 +36,7 @@ const DEFAULT_SETTINGS: TipSettings = {
 };
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
-  const token: TokenSymbol =
-    loaded.token === 'jpyc' || loaded.token === 'usdc'
-      ? loaded.token
-      : DEFAULT_SETTINGS.token;
+  const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   return {
     receiver:
       typeof loaded.receiver === 'string'

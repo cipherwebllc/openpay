@@ -1,18 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
+import { useOrigin } from '@/hooks/useOrigin';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
   type TokenSymbol,
 } from '@/lib/tokens';
-import { chainForSlug, type ChainSlug } from '@/lib/chains';
+import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress } from '@/lib/format';
 import {
@@ -26,21 +28,14 @@ import {
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 
-const USDC_CHAINS: ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
-
-type CopyKey = 'url' | 'iframe';
-
 export function TipEmbedGenerator() {
   const { settings, setSettings, hydrated } = useTipSettings();
-  const [origin, setOrigin] = useState('');
-  const [copied, setCopied] = useState<CopyKey | null>(null);
+  const origin = useOrigin();
+  const urlCopy = useCopyToClipboard();
+  const iframeCopy = useCopyToClipboard();
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   const t = useTranslations('TipEmbedGenerator');
   const tHeader = useTranslations('TipForm');
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
 
   const effectiveReceiver = useMemo(
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
@@ -108,12 +103,6 @@ export function TipEmbedGenerator() {
 ></iframe>`;
   }, [tipUrl]);
 
-  async function copy(value: string, key: CopyKey) {
-    if (!value) return;
-    await navigator.clipboard.writeText(value);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 1500);
-  }
 
   function selectToken(tok: TokenSymbol) {
     setSettings((s) => ({
@@ -369,11 +358,11 @@ export function TipEmbedGenerator() {
             </h3>
             <button
               type="button"
-              onClick={() => copy(tipUrl, 'url')}
+              onClick={() => urlCopy.copy(tipUrl)}
               disabled={!tipUrl}
               className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {copied === 'url' ? t('copied') : t('copy')}
+              {urlCopy.copied ? t('copied') : t('copy')}
             </button>
           </div>
           <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
@@ -400,11 +389,11 @@ export function TipEmbedGenerator() {
             </h3>
             <button
               type="button"
-              onClick={() => copy(iframeSnippet, 'iframe')}
+              onClick={() => iframeCopy.copy(iframeSnippet)}
               disabled={!iframeSnippet}
               className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {copied === 'iframe' ? t('copied') : t('copy')}
+              {iframeCopy.copied ? t('copied') : t('copy')}
             </button>
           </div>
           <pre className="overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">

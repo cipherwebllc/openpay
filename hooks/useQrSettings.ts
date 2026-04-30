@@ -6,7 +6,7 @@ import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
-export type QrSettings = {
+type QrSettings = {
   receiver: string;
   token: TokenSymbol;
   // 送金チェーン (slug)。usdc では 4 chain から選択可能、jpyc は polygon 固定。
@@ -56,11 +56,15 @@ export function normalizeChainForToken(
   return DEFAULT_CHAIN_FOR_SYMBOL[token];
 }
 
+export function sanitizeTokenSymbol(
+  value: unknown,
+  fallback: TokenSymbol,
+): TokenSymbol {
+  return value === 'jpyc' || value === 'usdc' ? value : fallback;
+}
+
 function sanitize(loaded: Partial<QrSettings>): QrSettings {
-  const token: TokenSymbol =
-    loaded.token === 'jpyc' || loaded.token === 'usdc'
-      ? loaded.token
-      : DEFAULT_SETTINGS.token;
+  const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   return {
     receiver:
       typeof loaded.receiver === 'string'

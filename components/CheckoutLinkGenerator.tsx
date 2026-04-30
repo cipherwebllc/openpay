@@ -1,13 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
 import { useCheckoutSettings } from '@/hooks/useCheckoutSettings';
-import { chainForSlug, type ChainSlug } from '@/lib/chains';
+import { useOrigin } from '@/hooks/useOrigin';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { GasMode } from '@/lib/fee';
 import { isLikelyName } from '@/lib/nameDetection';
 import { formatTokenAmount, pickEffectiveAddress } from '@/lib/format';
@@ -26,8 +28,6 @@ import {
   type CheckoutParams,
 } from '@/lib/url';
 
-const USDC_CHAINS: ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
-
 // draft validation の reason → i18n key マップ (parseCheckoutItemDrafts の reason と同型)
 const ITEM_ERROR_KEY = {
   empty: 'itemErrorEmpty',
@@ -37,15 +37,11 @@ const ITEM_ERROR_KEY = {
 
 export function CheckoutLinkGenerator() {
   const { settings, setSettings, hydrated } = useCheckoutSettings();
-  const [origin, setOrigin] = useState('');
-  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const origin = useOrigin();
+  const { copied, copy } = useCopyToClipboard();
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   const t = useTranslations('CheckoutLinkGenerator');
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
 
   const effectiveReceiver = useMemo(
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
@@ -139,12 +135,6 @@ export function CheckoutLinkGenerator() {
     });
   }
 
-  async function copyUrl() {
-    if (!checkoutUrl) return;
-    await navigator.clipboard.writeText(checkoutUrl);
-    setCopyState('copied');
-    setTimeout(() => setCopyState('idle'), 1500);
-  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -421,10 +411,10 @@ export function CheckoutLinkGenerator() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={copyUrl}
+                  onClick={() => copy(checkoutUrl)}
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 >
-                  {copyState === 'copied' ? t('copiedButton') : t('copyButton')}
+                  {copied ? t('copiedButton') : t('copyButton')}
                 </button>
                 <a
                   href={checkoutUrl}

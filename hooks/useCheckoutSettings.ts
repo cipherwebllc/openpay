@@ -8,9 +8,9 @@ import type { GasMode } from '@/lib/fee';
 import type { TokenSymbol } from '@/lib/tokens';
 import { CHECKOUT_MAX_ITEMS, type CheckoutItemDraft } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
-import { normalizeChainForToken } from './useQrSettings';
+import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
 
-export type CheckoutSettings = {
+type CheckoutSettings = {
   receiver: string;
   token: TokenSymbol;
   chain: ChainSlug;
@@ -67,10 +67,7 @@ function sanitizeOptionalString(
 }
 
 function sanitize(loaded: Partial<CheckoutSettings>): CheckoutSettings {
-  const token: TokenSymbol =
-    loaded.token === 'jpyc' || loaded.token === 'usdc'
-      ? loaded.token
-      : DEFAULT_SETTINGS.token;
+  const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   return {
     receiver: sanitizeOptionalString(loaded.receiver, DEFAULT_SETTINGS.receiver),
     token,
