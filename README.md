@@ -316,7 +316,7 @@ npm install -D \
 ### 3. Pimlico ダッシュボード設定
 
 1. [https://dashboard.pimlico.io](https://dashboard.pimlico.io) でアカウント作成し API Key を発行
-2. **本番運用時は必ず "Origin (ドメイン) 制限" を有効化**してください。`NEXT_PUBLIC_PIMLICO_API_KEY` はクライアントバンドルに含まれるため、Origin 制限なしでは API Key が悪用される可能性があります
+2. **本番運用時は必ず "Origin (ドメイン) 制限" を有効化**してください (本番ドメイン: `https://open-pay.jp`)。`NEXT_PUBLIC_PIMLICO_API_KEY` はクライアントバンドルに含まれるため、Origin 制限なしでは API Key が悪用される可能性があります
 3. **Sponsorship 残高をデポジット (JPYC 用)**:
    - `mainnet`: Polygon (POL)
    - `testnet`: Polygon Amoy (POL) / Base Sepolia (ETH) / Arbitrum Sepolia (ETH) / Optimism Sepolia (ETH) ※ testnet では USDC も sponsorship にフォールバックするため対応 4 chain 全ての L2 ETH が必要
@@ -457,7 +457,7 @@ npm run build && npm run start
 | アカウントの **MFA 有効化** | Vercel Dashboard → Account Settings → Authentication | 今回の事象は employee の Google アカウント乗っ取りが起点。顧客アカウントの MFA は基本対策 |
 | **Spending Cap を $0 に固定** | Vercel Dashboard → Settings → Billing | 限度超過で **デプロイ停止** (請求発生せず)。検証段階は特に重要 |
 | **Audit Log 確認** | Vercel Dashboard → Settings → Activity | 不審な Deployment / Settings 変更が無いか定期確認 |
-| **Pimlico API Key の Origin 制限** | Pimlico Dashboard | `*.vercel.app` の preview ドメイン群 + production ドメインに限定 |
+| **Pimlico API Key の Origin 制限** | Pimlico Dashboard | `https://open-pay.jp` (production) + `*.vercel.app` (preview ドメイン群) に限定 |
 | **Pimlico Sponsorship Policy ルール** | Pimlico Dashboard | README "Pimlico ダッシュボード設定" 5 項参照 (fee_receiver への transfer 必須化) |
 | **Sentry DSN 設定** | Vercel env (Plain) | Replay (10% / エラー時 100%) + 例外取得が自動有効化 |
 | **`SENTRY_AUTH_TOKEN` を Sensitive で登録** | Vercel env (Sensitive) ✓ | 上記表参照 |
@@ -520,7 +520,7 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 **事前 (deploy 前)**
 
-1. Pimlico Dashboard で Base mainnet の API key に Origin 制限 (本番ドメイン) を設定
+1. Pimlico Dashboard で Base mainnet の API key に Origin 制限 (`https://open-pay.jp`) を設定
 2. Pimlico Dashboard の **Token Paymaster** セクションで Base mainnet + USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` が有効化されているか確認 (Pimlico 側で paymaster 起動が必要な場合あり)
 3. **Pimlico プランの rate limit を Dashboard で確認**: 想定同時アクティブ checkout セッション数 × `useGasQuote*` の refetch 頻度 (現状 30s 間隔 → 1 user/120 calls/h) が当該プランの **per-API-key requests/sec** 上限を超えないこと。超える可能性がある場合は `lib/useGasQuoteUsdc.ts` / `useGasQuoteJpyc.ts` の `refetchInterval` を引き上げるか上位プランへ
 4. `lib/gasCeiling.ts` の Base 1 gwei ceiling が現在の Base 平常 gas (典型 0.001-0.01 gwei) より十分高いか確認 — `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` で調整可
@@ -683,7 +683,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | 6 | permissionless API 名健全性 | `tests/hooks/useSmartAccount.test.tsx` の import smoke check |
 | 7 | JPYC mainnet アドレス確認 | 既定値は JPYC v3 (`0xE7C3...3c29`、確認済)。デプロイ直前に [JPYC 公式](https://jpyc.jp/) で再突合 |
 | 8 | Pimlico Sponsorship Policy 設定 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` 必須、ガス残高デポジット済み |
-| 9 | Pimlico API Key の Origin 制限 | Pimlico ダッシュボードで本番ドメインに限定 |
+| 9 | Pimlico API Key の Origin 制限 | Pimlico ダッシュボードで `https://open-pay.jp` (+ preview 用 `*.vercel.app`) に限定 |
 | 10 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定 | プレースホルダ (`0x...dEaD`) のまま投入しない |
 | 11 | testnet で実 e2e (QR スキャン → 送金 → receipt) | Polygon Amoy / Base Sepolia で 1 件以上の成功確認 |
 | 12 | Sentry DSN 設定 | `NEXT_PUBLIC_SENTRY_DSN` 設定で自動有効化。SDK は導入済 |
