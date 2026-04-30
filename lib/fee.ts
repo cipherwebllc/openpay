@@ -24,7 +24,7 @@ export type GasMode = 'customer' | 'merchant';
 
 const BPS_DENOM = 10_000n;
 
-export const FEE_BPS = 100n; // 1.0% (両 token 共通)
+const FEE_BPS = 100n; // 1.0% (両 token 共通)
 
 export const MIN_FEE: Record<TokenSymbol, bigint> = {
   jpyc: 5n * 10n ** 18n, // 5 JPYC (18 decimals)
@@ -38,7 +38,7 @@ export function calcFee(amount: bigint, token: TokenSymbol): bigint {
   return proportional > min ? proportional : min;
 }
 
-export type Breakdown = {
+type Breakdown = {
   customerPays: bigint;
   merchantReceives: bigint;
   feeAmount: bigint;
@@ -76,8 +76,8 @@ export function calcDirectBreakdown(amount: bigint): Breakdown {
 // - calcBreakdown が返す merchantReceives 全体を、% 比で割り振る
 // - feeAmount は変わらず operator が受け取る
 // - gasMode=merchant では gasAmount が merchant 全体から引かれた後の額を分配
-export type SplitBreakdownEntry = { to: Address; amount: bigint; percent: number };
-export type SplitBreakdown = {
+type SplitBreakdownEntry = { to: Address; amount: bigint; percent: number };
+type SplitBreakdown = {
   customerPays: bigint;
   feeAmount: bigint;
   // 配列の index 0 が primary (to)、以降が split entries の順

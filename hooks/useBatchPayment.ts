@@ -24,7 +24,7 @@ import { useSmartAccount } from './useSmartAccount';
 import { assertGasCeiling } from '@/lib/gasCeiling';
 import type { TokenDeployment } from '@/lib/tokens';
 
-export type BatchPaymentParams = {
+type BatchPaymentParams = {
   tokenAddress: Address;
   merchant: Address;
   merchantAmount: bigint;
@@ -36,7 +36,7 @@ export type BatchPaymentParams = {
   extraRecipients?: ReadonlyArray<{ to: Address; amount: bigint }>;
 };
 
-export type BatchPaymentResult = {
+type BatchPaymentResult = {
   userOpHash: Hex;
   txHash: Hex;
   blockNumber: bigint;

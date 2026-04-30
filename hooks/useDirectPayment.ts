@@ -8,14 +8,14 @@ import { useState } from 'react';
 import { erc20Abi, type Address, type Hex } from 'viem';
 import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 
-export type DirectPaymentParams = {
+type DirectPaymentParams = {
   tokenAddress: Address;
   merchant: Address;
   amount: bigint;
   chainId: number;
 };
 
-export type DirectPaymentResult = {
+type DirectPaymentResult = {
   txHash: Hex;
   blockNumber: bigint;
 };
