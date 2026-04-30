@@ -27,7 +27,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 674 件 / 38 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 97.61 / 95.52 / 88.94 / 97.61
+- **テスト** — 676 件 / 38 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 97.61 / 95.52 / 88.94 / 97.61
 
 ## 特徴
 
@@ -470,7 +470,7 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (636 件) における mock 利用方針:
+本リポジトリの自動テスト (676 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
@@ -629,7 +629,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | Branches | 95.52% |
 | Functions | 88.94% |
 | Lines | 97.61% |
-| Test count | 674 件 (38 ファイル) |
+| Test count | 676 件 (38 ファイル) |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
