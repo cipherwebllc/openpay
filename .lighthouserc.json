@@ -2,9 +2,10 @@
   "ci": {
     "collect": {
       "url": [
-        "http://localhost:3000/",
-        "http://localhost:3000/pay?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=usdc&amount=10",
-        "http://localhost:3000/tip/0x52d4901142e2B5680027da5EB47C86CB02a3cA81?token=jpyc&name=Demo&color=%231e3a8a"
+        "http://localhost:3000/ja",
+        "http://localhost:3000/en",
+        "http://localhost:3000/ja/pay?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=usdc&amount=10",
+        "http://localhost:3000/ja/tip/0x52d4901142e2B5680027da5EB47C86CB02a3cA81?token=jpyc&name=Demo&color=%231e3a8a"
       ],
       "startServerCommand": "npm run start",
       "startServerReadyPattern": "Ready",
@@ -27,7 +28,9 @@
         "uses-text-compression": "warn",
         "uses-rel-preconnect": "off",
         "render-blocking-resources": "warn",
-        "unused-javascript": ["warn", { "maxLength": 5 }]
+        "unused-javascript": ["warn", { "maxLength": 5 }],
+        "redirects": "off",
+        "legacy-javascript": "warn"
       }
     },
     "upload": {

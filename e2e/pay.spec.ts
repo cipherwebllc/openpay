@@ -23,8 +23,10 @@ test.describe('/pay (URL parser smoke)', () => {
   });
 
   test('mode=direct → ガス代お客様負担の警告が出る', async ({ page }) => {
+    // 日本語アサーションのため locale を明示。/pay へ素で行くと middleware が
+    // Accept-Language (Playwright 既定 en-US) で /en/pay へ redirect する。
     await page.goto(
-      `/pay?to=${TO}&token=usdc&amount=10&mode=direct`,
+      `/ja/pay?to=${TO}&token=usdc&amount=10&mode=direct`,
     );
     await expect(page.getByText(/ガス代お客様負担/)).toBeVisible();
   });

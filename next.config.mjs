@@ -48,8 +48,13 @@ const nextConfig = {
 // 権限を取られる)。詳細は README "Vercel デプロイ" セクション参照。
 export default withSentryConfig(withNextIntl(nextConfig), {
   silent: !process.env.CI,
-  // Prisma など使わないため OpenTelemetry の動的 require 警告を抑制
-  disableLogger: true,
+  // Sentry SDK の debug logger 文をバンドルから tree shake で除去。
+  // 旧 `disableLogger` は v10 で deprecated、v11 で削除予定。
+  webpack: {
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
   // tunneling は本番で広告ブロック回避用に有効化推奨だが、MVP では無効
   tunnelRoute: undefined,
 });

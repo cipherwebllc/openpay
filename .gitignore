@@ -31,3 +31,8 @@ playwright/.cache/
 # vitest coverage report
 coverage/
 .env*.local
+.env.local.*
+
+# Claude Code (worktrees, local settings)
+.claude/
+

@@ -35,13 +35,15 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await addressInput.fill(
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    // URL は origin + /ja/tip/0x... を含む (locale prefix)
+    // 生成 URL は origin + /tip/0x...?token=jpyc。locale prefix は middleware
+    // が動的に付与するため埋め込み URL 自体には含まれない (iframe を貼った
+    // ページ訪問者の Accept-Language で /ja か /en に redirect される)。
     await expect(
       page
         .locator('div')
         .filter({
           hasText:
-            /\/ja\/tip\/0x52d4901142e2B5680027da5EB47C86CB02a3cA81\?token=jpyc/,
+            /\/tip\/0x52d4901142e2B5680027da5EB47C86CB02a3cA81\?token=jpyc/,
         })
         .first(),
     ).toBeVisible();
