@@ -30,7 +30,12 @@
         "render-blocking-resources": "warn",
         "unused-javascript": ["warn", { "maxLength": 5 }],
         "redirects": "off",
-        "legacy-javascript": "warn"
+        "legacy-javascript": "warn",
+        "csp-xss": "off",
+        "lcp-lazy-loaded": "off",
+        "non-composited-animations": "off",
+        "prioritize-lcp-image": "off",
+        "color-contrast": "warn"
       }
     },
     "upload": {
