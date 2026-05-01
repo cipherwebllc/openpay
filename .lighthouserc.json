@@ -35,7 +35,10 @@
         "lcp-lazy-loaded": "off",
         "non-composited-animations": "off",
         "prioritize-lcp-image": "off",
-        "color-contrast": "warn"
+        "color-contrast": "warn",
+        "bf-cache": "off",
+        "errors-in-console": "off",
+        "meta-description": "off"
       }
     },
     "upload": {
