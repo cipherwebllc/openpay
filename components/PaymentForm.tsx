@@ -8,6 +8,7 @@ import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
+import { OnrampCta } from './OnrampCta';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -417,11 +418,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
         )}
 
         {insufficientBalance && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-            {t('insufficientBalance', {
-              amount: fmt(totalCustomerOutflow),
-            })}
-          </p>
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p>
+              {t('insufficientBalance', {
+                amount: fmt(totalCustomerOutflow),
+              })}
+            </p>
+            <OnrampCta token={params.token} namespace="PaymentForm" />
+          </div>
         )}
       </section>
 

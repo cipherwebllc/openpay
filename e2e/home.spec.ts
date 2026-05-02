@@ -60,4 +60,42 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
       page.getByRole('button', { name: 'Tip widget (creator)' }),
     ).toBeVisible();
   });
+
+  test('ja: offramp セクションに JPYC 公式 / SBI VC トレード のリンクが正しい href で描画される', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const offrampHeading = page.getByRole('heading', {
+      name: '受け取った通貨を換金',
+    });
+    await expect(offrampHeading).toBeVisible();
+    const jpycLink = page.getByRole('link', { name: /JPYC 公式/ });
+    await expect(jpycLink).toHaveAttribute('href', 'https://jpyc.co.jp/');
+    await expect(jpycLink).toHaveAttribute('target', '_blank');
+    await expect(jpycLink).toHaveAttribute('rel', 'noopener noreferrer');
+    const sbiLink = page.getByRole('link', { name: /SBI VC トレード/ });
+    await expect(sbiLink).toHaveAttribute('href', 'https://www.sbivc.co.jp/');
+    // ja では Japan residents only / locale switch ヒントは出ない
+    await expect(page.getByText(/日本居住者のみ/)).toHaveCount(0);
+  });
+
+  test('en: offramp セクションは Coinbase + JPYC official、注記/ヒントが両方出る', async ({
+    page,
+  }) => {
+    await page.goto('/en');
+    await expect(
+      page.getByRole('heading', { name: 'Off-ramp received tokens' }),
+    ).toBeVisible();
+    const jpycLink = page.getByRole('link', { name: /JPYC official/ });
+    await expect(jpycLink).toHaveAttribute('href', 'https://jpyc.co.jp/');
+    await expect(page.getByText('(Japan residents only)')).toBeVisible();
+    const coinbaseLink = page.getByRole('link', { name: /Coinbase/ });
+    await expect(coinbaseLink).toHaveAttribute(
+      'href',
+      'https://www.coinbase.com/',
+    );
+    await expect(
+      page.getByText(/Japan residents: switch to Japanese for SBI VC Trade/),
+    ).toBeVisible();
+  });
 });

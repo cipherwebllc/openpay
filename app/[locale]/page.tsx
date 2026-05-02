@@ -2,18 +2,25 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { QrGenerator } from '@/components/QrGenerator';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
+import { DEFAULT_LOCALE, isLocale } from '@/i18n';
 import { env } from '@/lib/env';
+import { getExchangeLink } from '@/lib/links';
+import type { TokenSymbol } from '@/lib/tokens';
+
+const OFFRAMP_TOKENS: readonly TokenSymbol[] = ['jpyc', 'usdc'];
 
 type Tab = 'qr' | 'checkout' | 'tip';
 
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>('qr');
   const t = useTranslations('Home');
+  const localeRaw = useLocale();
+  const locale = isLocale(localeRaw) ? localeRaw : DEFAULT_LOCALE;
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:py-12">
@@ -87,6 +94,53 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      <section
+        aria-labelledby="offramp-heading"
+        className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+      >
+        <h2
+          id="offramp-heading"
+          className="text-base font-semibold text-slate-800"
+        >
+          {t('offramp.heading')}
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">{t('offramp.subheading')}</p>
+        <ul className="mt-3 space-y-2">
+          {OFFRAMP_TOKENS.map((token) => {
+            const link = getExchangeLink(token, locale);
+            return (
+              <li
+                key={token}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+              >
+                <span className="text-slate-700">
+                  {t('offramp.row', { token: token.toUpperCase() })}
+                </span>
+                <a
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-brand hover:underline"
+                >
+                  {link.label} ↗
+                </a>
+                {link.jaResidentsOnly && (
+                  <span className="text-xs text-slate-500">
+                    {t('offramp.jaResidentsOnlyNote')}
+                  </span>
+                )}
+                {link.blocksJapaneseResidents && (
+                  <span className="text-xs text-slate-500">
+                    {t('offramp.japaneseUserHint')}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-3 text-xs text-slate-400">{t('offramp.hint')}</p>
+      </section>
 
       <footer className="mt-8 text-center text-xs text-slate-400">
         {t('footer')}

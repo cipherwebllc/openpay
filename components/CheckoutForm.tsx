@@ -11,6 +11,7 @@ import { erc20Abi, formatUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { InfoTooltip } from './InfoTooltip';
+import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
@@ -378,9 +379,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           )}
 
           {insufficientBalance && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-              {t('insufficientBalance', { amount: fmt(totalCustomerOutflow) })}
-            </p>
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+              <p>
+                {t('insufficientBalance', {
+                  amount: fmt(totalCustomerOutflow),
+                })}
+              </p>
+              <OnrampCta token={params.token} namespace="CheckoutForm" />
+            </div>
           )}
 
           {params.customerEmail && (

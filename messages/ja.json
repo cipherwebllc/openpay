@@ -16,7 +16,15 @@
       "subheading": "ブログ・ポートフォリオ・配信ページに貼り付けてチップを受け取ります。手数料 1.0% + ネットワーク手数料 (見積)。"
     },
     "footer": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
-    "linkPay": "/pay (顧客向け)"
+    "linkPay": "/pay (顧客向け)",
+    "offramp": {
+      "heading": "受け取った通貨を換金",
+      "subheading": "受取済みの JPYC / USDC を JPY に換金する場合の取引所リンクです。",
+      "row": "{token} を換金",
+      "hint": "対応チェーン・条件は各取引所のサイトでご確認ください。",
+      "jaResidentsOnlyNote": "(日本居住者のみ)",
+      "japaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。"
+    }
   },
   "QrGenerator": {
     "amountLabel": "請求金額 ({symbol})",
@@ -94,6 +102,9 @@
     "switchingChain": "チェーン切替中…",
     "balanceLabel": "現在残高:",
     "insufficientBalance": "残高が不足しています。送金には {amount} が必要です。",
+    "onrampCta": "{label} で {token} を購入 ↗",
+    "onrampJaResidentsOnlyNote": "(日本居住者のみ)",
+    "onrampJapaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。",
     "btnConnect": "ウォレットを接続してください",
     "btnSwitchChain": "ネットワークを切替えてください",
     "btnSaInit": "Smart Account 初期化中…",
@@ -137,6 +148,9 @@
     "switchingChain": "チェーン切替中…",
     "balanceLabel": "残高:",
     "insufficientBalance": "残高が不足しています ({amount} 必要)",
+    "onrampCta": "{label} で {token} を購入 ↗",
+    "onrampJaResidentsOnlyNote": "(日本居住者のみ)",
+    "onrampJapaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。",
     "btnConnect": "ウォレットを接続してください",
     "btnSwitchChain": "ネットワークを切替えてください",
     "btnSaInit": "Smart Account 初期化中…",
@@ -215,6 +229,9 @@
     "switchingChain": "チェーン切替中…",
     "balanceLabel": "現在残高:",
     "insufficientBalance": "残高が不足しています。送金には {amount} が必要です。",
+    "onrampCta": "{label} で {token} を購入 ↗",
+    "onrampJaResidentsOnlyNote": "(日本居住者のみ)",
+    "onrampJapaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。",
     "emailHint": "注文確認メール送信先 (店主側のシステムで使用): {email}",
     "btnConnect": "ウォレットを接続してください",
     "btnSwitchChain": "ネットワークを切替えてください",

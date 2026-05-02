@@ -16,7 +16,15 @@
       "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1.0% fee + network fee (estimate)."
     },
     "footer": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
-    "linkPay": "/pay (customer)"
+    "linkPay": "/pay (customer)",
+    "offramp": {
+      "heading": "Off-ramp received tokens",
+      "subheading": "Exchanges to convert received JPYC / USDC into fiat.",
+      "row": "Off-ramp {token}",
+      "hint": "Check each exchange's site for supported chains and conditions.",
+      "jaResidentsOnlyNote": "(Japan residents only)",
+      "japaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade."
+    }
   },
   "QrGenerator": {
     "amountLabel": "Amount ({symbol})",
@@ -94,6 +102,9 @@
     "switchingChain": "Switching chain…",
     "balanceLabel": "Balance:",
     "insufficientBalance": "Insufficient balance. {amount} required.",
+    "onrampCta": "Buy {token} on {label} ↗",
+    "onrampJaResidentsOnlyNote": "(Japan residents only)",
+    "onrampJapaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
     "btnConnect": "Connect a wallet",
     "btnSwitchChain": "Switch the network",
     "btnSaInit": "Initializing Smart Account…",
@@ -137,6 +148,9 @@
     "switchingChain": "Switching chain…",
     "balanceLabel": "Balance:",
     "insufficientBalance": "Insufficient balance ({amount} required)",
+    "onrampCta": "Buy {token} on {label} ↗",
+    "onrampJaResidentsOnlyNote": "(Japan residents only)",
+    "onrampJapaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
     "btnConnect": "Connect a wallet",
     "btnSwitchChain": "Switch the network",
     "btnSaInit": "Initializing Smart Account…",
@@ -215,6 +229,9 @@
     "switchingChain": "Switching chain…",
     "balanceLabel": "Balance:",
     "insufficientBalance": "Insufficient balance. {amount} required.",
+    "onrampCta": "Buy {token} on {label} ↗",
+    "onrampJaResidentsOnlyNote": "(Japan residents only)",
+    "onrampJapaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
     "emailHint": "Confirmation email (used by the merchant): {email}",
     "btnConnect": "Connect a wallet",
     "btnSwitchChain": "Switch the network",
