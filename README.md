@@ -599,7 +599,7 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 ### 既知の transitive 脆弱性 (`npm audit` moderate)
 
-`npm audit --omit=dev` は production で 12 件の moderate を報告するが、**いずれも transitive 依存 (wagmi → @wagmi/connectors → MetaMask SDK / Coinbase CDP-SDK 経由) で、本リポジトリの利用パターンでは実害なし**:
+`npm audit --omit=dev` は production で **16 件 (2026-05-02 時点)** の moderate を報告するが、**いずれも transitive 依存 (wagmi → @wagmi/connectors → MetaMask SDK / Coinbase CDP-SDK 経由) で、本リポジトリの利用パターンでは実害なし**:
 
 | Advisory | Severity | 経路 | 本リポの実害 |
 |---|---|---|---|
