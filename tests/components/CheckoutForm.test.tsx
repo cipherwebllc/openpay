@@ -236,6 +236,33 @@ describe('CheckoutForm — 接続フロー', () => {
       screen.getByRole('button', { name: /55\.1 USDC を支払う/ }),
     ).toBeDisabled();
   });
+
+  it('残高不足 (USDC) → onramp link が SBI VC トレード で正しい security 属性', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(10_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    const onramp = screen.getByRole('link', {
+      name: /SBI VC トレード で USDC を購入/,
+    });
+    expect(onramp).toHaveAttribute('href', 'https://www.sbivc.co.jp/');
+    expect(onramp).toHaveAttribute('target', '_blank');
+    expect(onramp).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('残高不足 (JPYC) → onramp link が JPYC 公式 (token prop の wiring 確認)', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(0n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    const onramp = screen.getByRole('link', {
+      name: /JPYC 公式 で JPYC を購入/,
+    });
+    expect(onramp).toHaveAttribute('href', 'https://jpyc.co.jp/');
+  });
 });
 
 describe('CheckoutForm — 送信', () => {

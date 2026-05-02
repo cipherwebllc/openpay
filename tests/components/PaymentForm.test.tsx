@@ -315,6 +315,45 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     ).toBeDisabled();
   });
 
+  it('残高不足 (USDC) → onramp link が SBI VC トレード で正しい security 属性', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(1_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    const onramp = screen.getByRole('link', {
+      name: /SBI VC トレード で USDC を購入/,
+    });
+    expect(onramp).toHaveAttribute('href', 'https://www.sbivc.co.jp/');
+    expect(onramp).toHaveAttribute('target', '_blank');
+    expect(onramp).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('残高不足 (JPYC) → onramp link が JPYC 公式 になる (token prop の wiring 確認)', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=100`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(0n); // 0 JPYC、必要 100 JPYC
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    const onramp = screen.getByRole('link', {
+      name: /JPYC 公式 で JPYC を購入/,
+    });
+    expect(onramp).toHaveAttribute('href', 'https://jpyc.co.jp/');
+  });
+
+  it('残高十分 → onramp link は出ない (insufficientBalance branch のみで出る)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n); // 20 USDC > 10.1 USDC
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    expect(screen.queryByRole('link', { name: /で USDC を購入/ })).toBeNull();
+  });
+
   it('Smart Account 初期化中 → 「初期化中…」ラベル', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
