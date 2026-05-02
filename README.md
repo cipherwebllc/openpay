@@ -27,7 +27,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 676 件 / 38 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 97.61 / 95.52 / 88.94 / 97.61
+- **テスト** — 734 件 / 41 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 97.48 / 95.74 / 88.83 / 97.48。e2e 28 件 (chromium + mobile-safari)
 - **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
 - **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
 - **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
@@ -474,7 +474,7 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (676 件) における mock 利用方針:
+本リポジトリの自動テスト (734 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
@@ -625,15 +625,15 @@ npm run test:run     # 1 回だけ実行 (CI 用)
 npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 ```
 
-### カバレッジ実績 (2026-04-29 時点)
+### カバレッジ実績 (2026-05-02 時点)
 
 | 指標 | カバレッジ |
 |---|---|
-| Statements | 97.61% |
-| Branches | 95.52% |
-| Functions | 88.94% |
-| Lines | 97.61% |
-| Test count | 676 件 (38 ファイル) |
+| Statements | 97.48% |
+| Branches | 95.74% |
+| Functions | 88.83% |
+| Lines | 97.48% |
+| Test count | 734 件 (41 ファイル) + e2e 28 件 |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
