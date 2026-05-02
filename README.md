@@ -673,6 +673,8 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 2. Pimlico ダッシュボードに少額デポジット
 3. `npm run dev` して `/pay?...` で実際にスキャン → 送金
 
+**Playwright e2e (browser smoke) を local で走らせる場合**: `.env.local` に `NEXT_PUBLIC_NETWORK_ENV=mainnet` が入っていると、e2e テストの `'Base Sepolia'` 等 testnet chain name assert と矛盾する。`npm run e2e:local` は testnet 環境変数を front-load してから build + playwright を実行するので、local 開発機の `.env.local` 設定に影響されず安定する (CI は `.github/workflows/e2e.yml` で `NEXT_PUBLIC_NETWORK_ENV: testnet` を明示済)。
+
 ## 本番デプロイ前チェックリスト
 
 下記すべてを満たしてから本番に投入してください。CI (`.github/workflows/ci.yml`) で自動化される項目もあります。
