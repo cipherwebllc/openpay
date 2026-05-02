@@ -1,29 +1,16 @@
-// 取引所リンク (onramp / offramp 共通)。
-//   - 顧客 (残高不足時): その取引所で token を購入してから戻る導線。
-//   - 店主 (受取後)    : その取引所で受け取った token を JPY (または USD) に換金する導線。
-// onramp と offramp で URL は同一なので purpose 引数は持たない。文脈別の文言は
-// i18n で出し分ける (PaymentForm.onrampCta / Home.offrampHeading 等)。
-//
-// locale 軸:
-//   ja → 日本居住者向け取引所 (JPYC EX, SBI VC トレード)
-//   en → 国際向け取引所 (Coinbase)。Japanese resident は登録不可なので
-//        UI で "switch to Japanese for SBI VC Trade" のヒントを出す。
-//
-// URL 生存確認:
-//   2026-05-02 検証: jpyc.co.jp (HTTP 200), sbivc.co.jp (HTTP 200, "SBI VCトレード"
-//   と確認), coinbase.com (CLI からは 403 = bot 保護、実 browser ではアクセス可)。
-//   各取引所が URL を変更する可能性があるため、月次目視で再確認推奨。
+// 取引所リンク (onramp / offramp 共通)。en では JPYC は Japan residents only、
+// USDC は Coinbase (2023 日本撤退) のため、locale 軸で出し分ける。
+// URL 生存確認 2026-05-02: jpyc.co.jp / sbivc.co.jp = 200、coinbase.com は
+// bot 保護で CLI 不可・実 browser 可。月次目視推奨。
 import type { Locale } from '@/i18n';
 import type { TokenSymbol } from './tokens';
 
 export type ExchangeLink = {
   url: string;
   label: string;
-  // True for exchanges that only accept Japan residents (JPYC EX).
-  // UI may show "Japan residents only" inline note when locale=en.
+  // JPYC EX 等の日本居住者限定取引所
   jaResidentsOnly?: boolean;
-  // True for exchanges that block Japan residents (Coinbase post-2023 Japan exit).
-  // UI may suggest switching to ja locale to surface SBI VC Trade.
+  // Coinbase 等 (2023 日本撤退) のように日本居住者の登録を拒否する取引所
   blocksJapaneseResidents?: boolean;
 };
 

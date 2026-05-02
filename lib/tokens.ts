@@ -12,8 +12,7 @@ import {
 import { env, isMainnet } from './env';
 import { chainForSlug, type ChainSlug } from './chains';
 
-// 対応トークン一覧 (single source of truth)。型と runtime 列挙を 1 箇所で定義し、
-// 将来 token を追加した時に取りこぼしが発生しない構造にする。
+// 対応トークン一覧。type と runtime enumeration を兼ねる。
 export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
 export type TokenSymbol = (typeof TOKEN_SYMBOLS)[number];
 

@@ -6,10 +6,8 @@ import { LOCALES } from '@/i18n';
 import { Providers } from '../providers';
 import '../globals.css';
 
-// <Analytics /> の build-time 統合は確認済 (typecheck/build 通過) だが、
-// **実 pageview が Vercel ダッシュボードに記録されるかは未検証**。
-// 本番デプロイ後に Vercel Analytics ダッシュボードで初回イベント受信を
-// 目視確認すること (Vercel 側で Web Analytics が enabled である前提)。
+// 本番デプロイ後、Vercel ダッシュボード (Web Analytics) で初回 pageview の
+// 受信を目視確認すること。コード上の統合は build pass のみで未検証。
 
 export function generateStaticParams() {
   return LOCALES.map((locale) => ({ locale }));
