@@ -10,9 +10,7 @@ import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
 import type { Locale } from '@/i18n';
 import { env } from '@/lib/env';
 import { getExchangeLink } from '@/lib/links';
-import type { TokenSymbol } from '@/lib/tokens';
-
-const OFFRAMP_TOKENS: readonly TokenSymbol[] = ['jpyc', 'usdc'];
+import { TOKEN_SYMBOLS } from '@/lib/tokens';
 
 type Tab = 'qr' | 'checkout' | 'tip';
 
@@ -106,7 +104,7 @@ export default function HomePage() {
         </h2>
         <p className="mt-1 text-xs text-slate-500">{t('offramp.subheading')}</p>
         <ul className="mt-3 space-y-2">
-          {OFFRAMP_TOKENS.map((token) => {
+          {TOKEN_SYMBOLS.map((token) => {
             const link = getExchangeLink(token, locale);
             return (
               <li

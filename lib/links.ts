@@ -8,6 +8,11 @@
 //   ja → 日本居住者向け取引所 (JPYC EX, SBI VC トレード)
 //   en → 国際向け取引所 (Coinbase)。Japanese resident は登録不可なので
 //        UI で "switch to Japanese for SBI VC Trade" のヒントを出す。
+//
+// URL 生存確認:
+//   2026-05-02 検証: jpyc.co.jp (HTTP 200), sbivc.co.jp (HTTP 200, "SBI VCトレード"
+//   と確認), coinbase.com (CLI からは 403 = bot 保護、実 browser ではアクセス可)。
+//   各取引所が URL を変更する可能性があるため、月次目視で再確認推奨。
 import type { Locale } from '@/i18n';
 import type { TokenSymbol } from './tokens';
 

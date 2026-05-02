@@ -12,7 +12,10 @@ import {
 import { env, isMainnet } from './env';
 import { chainForSlug, type ChainSlug } from './chains';
 
-export type TokenSymbol = 'jpyc' | 'usdc';
+// 対応トークン一覧 (single source of truth)。型と runtime 列挙を 1 箇所で定義し、
+// 将来 token を追加した時に取りこぼしが発生しない構造にする。
+export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
+export type TokenSymbol = (typeof TOKEN_SYMBOLS)[number];
 
 // Paymaster モード。挙動の詳細は lib/pimlico.ts の冒頭コメント参照。
 //   sponsorship = 運営がネイティブガスを肩代わり (Sponsorship Paymaster)
@@ -174,5 +177,5 @@ export function defaultDeploymentForSymbol(symbol: TokenSymbol): TokenDeployment
 }
 
 export function isValidTokenSymbol(value: string): value is TokenSymbol {
-  return value === 'jpyc' || value === 'usdc';
+  return (TOKEN_SYMBOLS as readonly string[]).includes(value);
 }
