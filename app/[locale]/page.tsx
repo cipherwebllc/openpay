@@ -7,7 +7,7 @@ import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { QrGenerator } from '@/components/QrGenerator';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
-import { DEFAULT_LOCALE, isLocale } from '@/i18n';
+import type { Locale } from '@/i18n';
 import { env } from '@/lib/env';
 import { getExchangeLink } from '@/lib/links';
 import type { TokenSymbol } from '@/lib/tokens';
@@ -19,8 +19,7 @@ type Tab = 'qr' | 'checkout' | 'tip';
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>('qr');
   const t = useTranslations('Home');
-  const localeRaw = useLocale();
-  const locale = isLocale(localeRaw) ? localeRaw : DEFAULT_LOCALE;
+  const locale = useLocale() as Locale;
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:py-12">
@@ -53,7 +52,7 @@ export default function HomePage() {
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id as Tab)}
+            onClick={() => setTab(id)}
             className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${
               tab === id
                 ? 'bg-white text-brand-dark shadow-sm'
