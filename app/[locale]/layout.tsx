@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { NextIntlClientProvider, hasLocale } from 'next-intl';
 import { setRequestLocale } from 'next-intl/server';
+import { Analytics } from '@vercel/analytics/next';
 import { LOCALES } from '@/i18n';
 import { Providers } from '../providers';
 import '../globals.css';
@@ -27,6 +28,7 @@ export default async function LocaleLayout({
         <NextIntlClientProvider>
           <Providers>{children}</Providers>
         </NextIntlClientProvider>
+        <Analytics />
       </body>
     </html>
   );
