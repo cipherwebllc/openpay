@@ -605,7 +605,7 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 |---|---|---|---|
 | `axios <=1.14.0` SSRF / Cloud Metadata Exfiltration | moderate | wagmi → @coinbase/cdp-sdk | **なし** — クライアント (ブラウザ) 環境で SSRF / metadata endpoint アクセス不可 |
 | `postcss <8.5.10` XSS via Unescaped `</style>` | moderate | next 内部 | **なし** — build 時に処理する CSS は自プロジェクト由来、ユーザ入力を CSS に通さない |
-| `uuid <14.0.0` v3/v5/v6 buf bounds check 欠落 | moderate | wagmi → MetaMask SDK | **なし** — 自コードで uuid を直接呼ばない、MetaMask は `buf` 引数を渡さない |
+| `uuid <14.0.0` v3/v5/v6 buf bounds check 欠落 | moderate | wagmi → MetaMask SDK / @gemini-wallet/core (どちらも metamask/rpc-errors → metamask/utils → uuid) | **なし** — 自コードで uuid を直接呼ばない、MetaMask / Gemini wallet も `buf` 引数を渡さない |
 
 **修正手段**: `npm audit fix --force` は wagmi v3 / Next.js v9 へのダウングレードを伴うため非現実的。upstream (wagmi / @coinbase/cdp-sdk) の修正リリース待ち。Renovate が weekly でチェックするので解消され次第 PR が来る。
 
@@ -696,6 +696,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | 15 | CI workflows 全 green | Lighthouse / Playwright e2e / Pimlico 残高 cron の各 workflow を **手動 (workflow_dispatch) で 1 度実行して green 確認**。Secrets 未設定時は失敗する |
 | 16 | Basenames 解決の手動確認 | testnet で `name.base.eth` 形式を入力し、resolved 表示が出るかブラウザで確認 (CREATE2 deterministic な Universal Resolver アドレスの実装在の検証) |
 | 17 | Tip widget webhook の到達確認 | Discord/独自 endpoint に dummy tip を 1 度投げ、JSON payload が届くか確認 (失敗は silent、Sentry 経由のみ観測可能) |
+| 18 | Vercel Web Analytics の dashboard 側有効化 | `<Analytics />` (`app/[locale]/layout.tsx`) は SDK 側のみ。Vercel ダッシュボードの Web Analytics タブで本番プロジェクトの Analytics を **手動で ON にしないとイベントは記録されない**。デプロイ後、初回 pageview がダッシュボードに到達することを目視確認 |
 
 ### Go/No-Go 判断: 証拠ベース確認 (本番投入直前に手元で実行)
 
