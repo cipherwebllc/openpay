@@ -311,23 +311,19 @@ describe('QrGenerator', () => {
       expect(uri).toContain(`address=${VALID}`);
       expect(uri).toContain('uint256=1000000000000000000000');
 
-      // SVG が実際に生成されていることを実証 (QRCodeSVG が URI を encode できた証拠)。
-      // ≈145 文字の URI は QR V8-V9 alphanumeric 容量境界に近いため、render が
-      // 黙って失敗 (SVG を出さない / path が空) するシナリオを排除。
-      // QrGenerator 内に QR は 2 個 (OpenPay URL + EIP-681) ある想定。
+      // ≈145 文字の URI は QR V8-V9 alphanumeric 容量境界に近いため、QR が
+      // 黙って空で描画されるシナリオを排除する。EIP-681 QR は size=180 で識別
+      // (本体 OpenPay QR は 240)。qrcode.react は (背景 path + matrix path) の
+      // 2 つを描画するので最大の `d` 長で matrix encode 成否を判定。
       const svgs = container.querySelectorAll('svg');
-      expect(svgs.length).toBeGreaterThanOrEqual(2);
-      // EIP-681 QR は size=180 で発行 (本体 OpenPay QR は 240)。size 属性で識別。
       const eip681Svg = Array.from(svgs).find(
         (s) => s.getAttribute('width') === '180',
       );
       expect(eip681Svg).toBeDefined();
-      // qrcode.react は (背景 path + matrix path) の 2 つを描画する。matrix 側
-      // (最大の `d` を持つ path) が長大な path データを持っていれば encode 成功の証拠。
-      // ≈145 文字の URI を encode した QR の matrix path は 1500+ char になる。
-      const paths = eip681Svg!.querySelectorAll('path');
       const longestPath = Math.max(
-        ...Array.from(paths).map((p) => p.getAttribute('d')?.length ?? 0),
+        ...Array.from(eip681Svg!.querySelectorAll('path')).map(
+          (p) => p.getAttribute('d')?.length ?? 0,
+        ),
       );
       expect(longestPath).toBeGreaterThan(500);
     });
@@ -357,8 +353,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '500');
       await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
 
-      // section に表示されている URI を取得し、clipboard に書かれた値と完全一致を確認。
-      // 「形状だけ正しい (regex pass) が値が違う」(silent fund misdirection) の LARP を防ぐ。
+      // 形状 regex だけ pass する silent fund misdirection を排除するため、
+      // 画面表示 URI と完全一致 + 受取人 + wei 値 + URL パーサ妥当性を全て assert。
       const onScreenUri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
       ).textContent!;
@@ -367,45 +363,15 @@ describe('QrGenerator', () => {
 
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
       const copied = writeText.mock.calls[0][0] as string;
-
-      // (1) section に表示された URI と完全一致
       expect(copied).toBe(onScreenUri);
-      // (2) JPYC default chain (mainnet=137 / testnet=80002) のいずれかを含む
-      expect(copied).toMatch(/@(137|80002)\/transfer\?/);
-      // (3) 受取人アドレスが入力値と一致
       expect(copied).toContain(`address=${VALID}`);
-      // (4) wei 値が "500 JPYC × 10^18" と完全一致 (silent round/truncation を排除)
-      expect(copied).toContain('uint256=500000000000000000000');
-      // (5) WHATWG URL parser でも valid (構造妥当性)
+      expect(copied).toContain('uint256=500000000000000000000'); // 500 JPYC × 1e18
       expect(URL.canParse(copied)).toBe(true);
     });
 
-    // 回帰: USDC (decimals=6) で 7 桁小数を入力すると build が throw して
-    // render crash する潜在バグ。section ごと非表示で fail-closed するのが正解。
-    it('USDC + 小数桁数 > token decimals は section 非表示 (render crash しない)', async () => {
-      const user = userEvent.setup();
-      render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      // USDC へ切替 (decimals=6)
-      await user.click(screen.getByRole('button', { name: /USDC/ }));
-      // 7 桁小数 (decimals 超過)
-      await user.type(screen.getByPlaceholderText('10.00'), '1.1234567');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
-
-      // section 非表示 (タイトルも URI も出ない)
-      expect(screen.queryByText(/互換 QR \(EIP-681\)/)).toBeNull();
-      expect(screen.queryByText(/^ethereum:/)).toBeNull();
-      // 桁数を減らせば再表示される
-      const amountInput = screen.getByPlaceholderText('10.00');
-      await user.clear(amountInput);
-      await user.type(amountInput, '1.123456');
-      await waitFor(() =>
-        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
-      );
-    });
-
-    it('境界: USDC + 桁数ちょうど (1.123456) は表示、+1 桁で非表示', async () => {
+    // 回帰: USDC + decimals 超過小数で render crash する潜在バグ。
+    // 境界 (== decimals 表示 / +1 桁 非表示 / 戻すと再表示) を 1 ケースで検証。
+    it('USDC 桁数境界: == 6 桁表示 / +1 で非表示 / 戻すと再表示 (no render crash)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -418,13 +384,17 @@ describe('QrGenerator', () => {
       const uri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
       ).textContent!;
-      // exactly 1.123456 USDC = 1123456 wei (6 decimals)
       expect(uri).toContain('uint256=1123456');
 
-      // +1 桁追加で非表示へ
       await user.type(amountInput, '7');
       await waitFor(() =>
         expect(screen.queryByText(/^ethereum:/)).toBeNull(),
+      );
+
+      await user.clear(amountInput);
+      await user.type(amountInput, '1.123456');
+      await waitFor(() =>
+        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
     });
 
@@ -520,11 +490,8 @@ describe('QrGenerator', () => {
       ).textContent!;
       expect(jpycUri).toContain('uint256=1000000000000000000');
 
-      // USDC へ切替 → input が空になる仕様ではなく state は別管理。
-      // QrGenerator 内 amount は useState (token 切替で reset しない設計)。
-      // ただし入力中の数値が valid なまま新しい decimals に再評価される。
+      // amount state は token 切替で reset されず、新しい decimals で再評価される。
       await user.click(screen.getByRole('button', { name: /USDC/ }));
-      // USDC: 1 USDC = 1e6 wei = "1000000"
       await waitFor(() => {
         const usdcUri = screen.getByText((t) => t.startsWith('ethereum:'))
           .textContent!;

@@ -126,9 +126,7 @@ export function QrGenerator() {
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
 
-  // 互換 QR (EIP-681) — direct + amount 指定のときだけ併発行。
-  // splits は direct mode では UI 上も無視されるため、ここでチェック不要
-  // (splitsForUrl は !directTransfer のときのみ truthy になる構造)。
+  // 互換 QR (EIP-681) — direct + amount のときだけ併発行 (gasless / split は EIP-681 で表現不可)。
   const eip681Uri = useMemo(() => {
     if (
       !hydrated ||
@@ -139,10 +137,7 @@ export function QrGenerator() {
     ) {
       return '';
     }
-    // 小数桁数 > token decimals のときは builder が throw するため事前 guard。
-    // 例: USDC (decimals=6) + amount="1.1234567" を打つと OpenPay URL は通常通り
-    // 出るが、EIP-681 は wei を URI に焼くので silent round を避けたい。section
-    // ごと非表示 (ユーザは桁数を減らせば自然に再表示される)。
+    // 小数桁数 > decimals は builder が throw → render crash するため事前 guard。
     const dotIdx = amount.indexOf('.');
     if (dotIdx !== -1 && amount.length - dotIdx - 1 > deployment.decimals) {
       return '';
