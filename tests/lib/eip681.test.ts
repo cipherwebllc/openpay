@@ -207,7 +207,7 @@ describe('buildEip681TransferUri', () => {
       expect(uint256Idx).toBeGreaterThan(addressIdx);
     });
 
-    it('viem isAddress / URL.canParse の双方で正当 URI と認識される', async () => {
+    it('viem isAddress / WHATWG URL.canParse の双方で正当 URI と認識される', async () => {
       const { isAddress } = await import('viem');
       const uri = buildEip681TransferUri({
         tokenAddress: JPYC,
@@ -216,7 +216,11 @@ describe('buildEip681TransferUri', () => {
         amount: '10',
         decimals: 18,
       });
-      // 構造分解して各部の妥当性を実依存 (viem) で検証
+      // (a) WHATWG URL parser で ethereum: scheme が opaque URL として valid と認識
+      expect(URL.canParse(uri)).toBe(true);
+      const parsed = new URL(uri);
+      expect(parsed.protocol).toBe('ethereum:');
+      // (b) 構造分解して各部の妥当性を実依存 (viem) で検証
       const match = uri.match(
         /^ethereum:(0x[a-fA-F0-9]{40})@(\d+)\/transfer\?address=(0x[a-fA-F0-9]{40})&uint256=(\d+)$/,
       );

@@ -22,7 +22,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 
 ## 直近の主要追加 (v0.2 候補)
 
-- **EIP-681 互換 QR 併発行 (BYO wallet)** — 「直接送金 + 金額指定 + split 無し」のとき、QR ジェネレーター画面下部に標準準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。OpenPay の hosted checkout (gasless / split / 1% 手数料) を使わず、Hashport / MetaMask Mobile 等の任意の EIP-681 対応ウォレットでネイティブにスキャン → 直接送金できる。OpenPay は **wallet 製造をしない方針** (checkout 層に徹し、ウォレットは顧客が自由に選択) を明示
+- **EIP-681 互換 QR 併発行 (BYO wallet)** — 「直接送金 + 金額指定 + split 無し」のとき、QR ジェネレーター画面下部に [EIP-681](https://eips.ethereum.org/EIPS/eip-681) 準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。OpenPay の hosted checkout (gasless / split / 1% 手数料) を使わない、純粋な ERC20 transfer URI 形式。**仕様準拠のみ検証済 (regex / viem `isAddress` / `URL.canParse` で構造妥当性を確認)、各ウォレット (Hashport / MetaMask Mobile 等) での実機読取は別途検証が必要**。OpenPay は **wallet 製造をしない方針** (checkout 層に徹し、ウォレットは顧客が自由に選択) を明示
 - **Phase 1 multi-chain USDC** — Base 限定から Base / Arbitrum One / Optimism / Polygon の **4 chain 対応** へ拡張。`/pay?token=usdc&chain=arbitrum` のような chain slug を URL で指定可能 (省略時は base 既定で旧 QR と互換)。Pimlico の `getTokenQuotes` で 4 chain × mainnet/testnet の全 8 deployment が valid な quote を返すことは `scripts/verify-pimlico-usdc.mjs` で確認済 (Universal Paymaster `0x7777777777...e66834C`)
 - **Checkout (β)** — Stripe Checkout 相当の itemized 決済 URL を発行する新ルート `/checkout`。商品リスト (最大 10 件) + 注文 metadata + success_url redirect (3 秒自動) + webhook (Tip と互換シェイプ) を URL に埋め込む
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
@@ -46,7 +46,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 | 登録審査不要 | 店主は自分のウォレットアドレスを入力するだけで QR を発行 |
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
 | 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
-| EIP-681 互換 QR | 直接送金モード + 金額指定 + split 無しのとき、`ethereum:<token>@<chainId>/transfer?...` 形式の標準 URI を併発行。Hashport / MetaMask Mobile 等の任意の EIP-681 対応ウォレットでネイティブスキャン可能 (OpenPay の checkout を経由しない、純粋 ERC20 transfer) |
+| EIP-681 互換 QR | 直接送金モード + 金額指定 + split 無しのとき、`ethereum:<token>@<chainId>/transfer?...` 形式の URI を併発行 (OpenPay checkout を経由しない純粋 ERC20 transfer)。仕様準拠は自動検証済、実ウォレットでの読取は要 manual 検証 |
 | BYO wallet | OpenPay は checkout 層に徹し、ウォレット自体は製造しない。WalletConnect v2 / EIP-6963 / Coinbase Wallet 等を経由して顧客が任意のウォレットで支払える |
 | Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可。webhook は同一 userOpHash につき 1 回限りの POST (gasQuote refetch 耐性、`useRef` gate で実装) |
 | Checkout (β)   | Stripe Checkout 相当の itemized 決済 URL を発行。line items + 注文 ID + 成功時 redirect + webhook (Tip と互換シェイプ)。e コマースの注文ごとに URL を発行する用途を想定 |

@@ -126,17 +126,16 @@ export function QrGenerator() {
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
 
-  // 互換 QR (EIP-681) — direct + amount 指定 + split 無し のときだけ併発行。
-  // gasless / split は EIP-681 で表現できないため、その場合は section ごと非表示。
-  // Hashport / MetaMask Mobile 等のネイティブ ERC20 transfer 対応ウォレット用。
+  // 互換 QR (EIP-681) — direct + amount 指定のときだけ併発行。
+  // splits は direct mode では UI 上も無視されるため、ここでチェック不要
+  // (splitsForUrl は !directTransfer のときのみ truthy になる構造)。
   const eip681Uri = useMemo(() => {
     if (
       !hydrated ||
       !effectiveReceiver ||
       !settings.directTransfer ||
       mode !== 'amount' ||
-      !amountValid ||
-      splitsForUrl
+      !amountValid
     ) {
       return '';
     }
@@ -161,7 +160,6 @@ export function QrGenerator() {
     settings.directTransfer,
     mode,
     amountValid,
-    splitsForUrl,
     deployment.address,
     deployment.chainId,
     deployment.decimals,

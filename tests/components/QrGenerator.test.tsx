@@ -297,7 +297,7 @@ describe('QrGenerator', () => {
 
     it('direct ON + amount で EIP-681 URI が表示される (JPYC × decimals=18)', async () => {
       const user = userEvent.setup();
-      render(<QrGenerator />);
+      const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1000');
@@ -310,6 +310,26 @@ describe('QrGenerator', () => {
       expect(uri).toMatch(/@(137|80002)\/transfer\?/);
       expect(uri).toContain(`address=${VALID}`);
       expect(uri).toContain('uint256=1000000000000000000000');
+
+      // SVG が実際に生成されていることを実証 (QRCodeSVG が URI を encode できた証拠)。
+      // ≈145 文字の URI は QR V8-V9 alphanumeric 容量境界に近いため、render が
+      // 黙って失敗 (SVG を出さない / path が空) するシナリオを排除。
+      // QrGenerator 内に QR は 2 個 (OpenPay URL + EIP-681) ある想定。
+      const svgs = container.querySelectorAll('svg');
+      expect(svgs.length).toBeGreaterThanOrEqual(2);
+      // EIP-681 QR は size=180 で発行 (本体 OpenPay QR は 240)。size 属性で識別。
+      const eip681Svg = Array.from(svgs).find(
+        (s) => s.getAttribute('width') === '180',
+      );
+      expect(eip681Svg).toBeDefined();
+      // qrcode.react は (背景 path + matrix path) の 2 つを描画する。matrix 側
+      // (最大の `d` を持つ path) が長大な path データを持っていれば encode 成功の証拠。
+      // ≈145 文字の URI を encode した QR の matrix path は 1500+ char になる。
+      const paths = eip681Svg!.querySelectorAll('path');
+      const longestPath = Math.max(
+        ...Array.from(paths).map((p) => p.getAttribute('d')?.length ?? 0),
+      );
+      expect(longestPath).toBeGreaterThan(500);
     });
 
     it('direct ON + 据え置き (amount 無し) は section 非表示', async () => {
@@ -323,7 +343,7 @@ describe('QrGenerator', () => {
       expect(screen.queryByText(/互換 QR \(EIP-681\)/)).toBeNull();
     });
 
-    it('URI コピーボタンが clipboard へ ethereum: URI を書き込む', async () => {
+    it('URI コピーボタンが clipboard へ正確な値の ethereum: URI を書き込む', async () => {
       const user = userEvent.setup();
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, 'clipboard', {
@@ -337,14 +357,27 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '500');
       await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
 
-      await user.click(
-        await screen.findByRole('button', { name: /URI をコピー/ }),
-      );
+      // section に表示されている URI を取得し、clipboard に書かれた値と完全一致を確認。
+      // 「形状だけ正しい (regex pass) が値が違う」(silent fund misdirection) の LARP を防ぐ。
+      const onScreenUri = (
+        await screen.findByText((t) => t.startsWith('ethereum:'))
+      ).textContent!;
+
+      await user.click(screen.getByRole('button', { name: /URI をコピー/ }));
 
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
-      expect(writeText.mock.calls[0][0]).toMatch(
-        /^ethereum:0x[a-fA-F0-9]{40}@\d+\/transfer\?address=0x[a-fA-F0-9]{40}&uint256=\d+$/,
-      );
+      const copied = writeText.mock.calls[0][0] as string;
+
+      // (1) section に表示された URI と完全一致
+      expect(copied).toBe(onScreenUri);
+      // (2) JPYC default chain (mainnet=137 / testnet=80002) のいずれかを含む
+      expect(copied).toMatch(/@(137|80002)\/transfer\?/);
+      // (3) 受取人アドレスが入力値と一致
+      expect(copied).toContain(`address=${VALID}`);
+      // (4) wei 値が "500 JPYC × 10^18" と完全一致 (silent round/truncation を排除)
+      expect(copied).toContain('uint256=500000000000000000000');
+      // (5) WHATWG URL parser でも valid (構造妥当性)
+      expect(URL.canParse(copied)).toBe(true);
     });
 
     // 回帰: USDC (decimals=6) で 7 桁小数を入力すると build が throw して
