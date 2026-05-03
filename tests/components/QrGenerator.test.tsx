@@ -346,6 +346,185 @@ describe('QrGenerator', () => {
         /^ethereum:0x[a-fA-F0-9]{40}@\d+\/transfer\?address=0x[a-fA-F0-9]{40}&uint256=\d+$/,
       );
     });
+
+    // 回帰: USDC (decimals=6) で 7 桁小数を入力すると build が throw して
+    // render crash する潜在バグ。section ごと非表示で fail-closed するのが正解。
+    it('USDC + 小数桁数 > token decimals は section 非表示 (render crash しない)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // USDC へ切替 (decimals=6)
+      await user.click(screen.getByRole('button', { name: /USDC/ }));
+      // 7 桁小数 (decimals 超過)
+      await user.type(screen.getByPlaceholderText('10.00'), '1.1234567');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      // section 非表示 (タイトルも URI も出ない)
+      expect(screen.queryByText(/互換 QR \(EIP-681\)/)).toBeNull();
+      expect(screen.queryByText(/^ethereum:/)).toBeNull();
+      // 桁数を減らせば再表示される
+      const amountInput = screen.getByPlaceholderText('10.00');
+      await user.clear(amountInput);
+      await user.type(amountInput, '1.123456');
+      await waitFor(() =>
+        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
+      );
+    });
+
+    it('境界: USDC + 桁数ちょうど (1.123456) は表示、+1 桁で非表示', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('button', { name: /USDC/ }));
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      const amountInput = screen.getByPlaceholderText('10.00');
+      await user.type(amountInput, '1.123456');
+      const uri = (
+        await screen.findByText((t) => t.startsWith('ethereum:'))
+      ).textContent!;
+      // exactly 1.123456 USDC = 1123456 wei (6 decimals)
+      expect(uri).toContain('uint256=1123456');
+
+      // +1 桁追加で非表示へ
+      await user.type(amountInput, '7');
+      await waitFor(() =>
+        expect(screen.queryByText(/^ethereum:/)).toBeNull(),
+      );
+    });
+
+    it('状態遷移: direct ON → URI 表示 → direct OFF → URI 非表示', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '100');
+
+      const directCheckbox = screen.getByRole('checkbox', { name: /直接送金/ });
+      await user.click(directCheckbox);
+      await waitFor(() =>
+        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
+      );
+
+      await user.click(directCheckbox);
+      await waitFor(() =>
+        expect(screen.queryByText(/^ethereum:/)).toBeNull(),
+      );
+    });
+
+    it('direct ON は split state を無視 (splitsForUrl=undefined → EIP-681 表示)', async () => {
+      // direct mode は OpenPay URL でも split を無視するので、EIP-681 でも同じ挙動。
+      // 「split 入力済 → direct ON で URI 表示」が期待動作。
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '100');
+      await user.click(screen.getByRole('button', { name: /\+ 受取人を追加/ }));
+      const splitInputs = screen.getAllByPlaceholderText('0x...');
+      await user.type(
+        splitInputs[0],
+        '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+      );
+      await user.type(screen.getByPlaceholderText('%'), '30');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      await waitFor(() =>
+        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
+      );
+    });
+
+    it('gasless mode で split 入力中は EIP-681 非表示 (まず direct ON が必要)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '100');
+      // direct OFF のまま split 追加
+      await user.click(screen.getByRole('button', { name: /\+ 受取人を追加/ }));
+      const splitInputs = screen.getAllByPlaceholderText('0x...');
+      await user.type(
+        splitInputs[0],
+        '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+      );
+      await user.type(screen.getByPlaceholderText('%'), '30');
+
+      // direct OFF + split あり = eligibility 不満、section 非表示
+      expect(screen.queryByText(/^ethereum:/)).toBeNull();
+    });
+
+    it('状態遷移: amount を空に戻すと URI 非表示', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      const amountInput = screen.getByPlaceholderText('1000');
+      await user.type(amountInput, '100');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await waitFor(() =>
+        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
+      );
+
+      await user.clear(amountInput);
+      await waitFor(() =>
+        expect(screen.queryByText(/^ethereum:/)).toBeNull(),
+      );
+    });
+
+    it('JPYC → USDC 切替で URI の token / decimals / 単位が更新', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '1');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      // JPYC: 1 JPYC = 1e18 wei
+      const jpycUri = (
+        await screen.findByText((t) => t.startsWith('ethereum:'))
+      ).textContent!;
+      expect(jpycUri).toContain('uint256=1000000000000000000');
+
+      // USDC へ切替 → input が空になる仕様ではなく state は別管理。
+      // QrGenerator 内 amount は useState (token 切替で reset しない設計)。
+      // ただし入力中の数値が valid なまま新しい decimals に再評価される。
+      await user.click(screen.getByRole('button', { name: /USDC/ }));
+      // USDC: 1 USDC = 1e6 wei = "1000000"
+      await waitFor(() => {
+        const usdcUri = screen.getByText((t) => t.startsWith('ethereum:'))
+          .textContent!;
+        expect(usdcUri).toContain('uint256=1000000');
+        expect(usdcUri).not.toContain('uint256=1000000000000000000');
+      });
+    });
+
+    it('USDC chain 切替で URI の chainId が更新 (Base → Arbitrum)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('button', { name: /USDC/ }));
+      await user.type(screen.getByPlaceholderText('10.00'), '1');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      // 既定: Base
+      const baseUri = (
+        await screen.findByText((t) => t.startsWith('ethereum:'))
+      ).textContent!;
+      // mainnet=8453 / testnet (Base Sepolia)=84532
+      expect(baseUri).toMatch(/@(8453|84532)\/transfer/);
+
+      // Arbitrum へ切替
+      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      await waitFor(() => {
+        const arbUri = screen.getByText((t) => t.startsWith('ethereum:'))
+          .textContent!;
+        // mainnet=42161 / testnet (Arbitrum Sepolia)=421614
+        expect(arbUri).toMatch(/@(42161|421614)\/transfer/);
+      });
+    });
   });
 
   describe('URL コピー', () => {

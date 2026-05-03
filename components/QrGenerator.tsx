@@ -140,6 +140,14 @@ export function QrGenerator() {
     ) {
       return '';
     }
+    // 小数桁数 > token decimals のときは builder が throw するため事前 guard。
+    // 例: USDC (decimals=6) + amount="1.1234567" を打つと OpenPay URL は通常通り
+    // 出るが、EIP-681 は wei を URI に焼くので silent round を避けたい。section
+    // ごと非表示 (ユーザは桁数を減らせば自然に再表示される)。
+    const dotIdx = amount.indexOf('.');
+    if (dotIdx !== -1 && amount.length - dotIdx - 1 > deployment.decimals) {
+      return '';
+    }
     return buildEip681TransferUri({
       tokenAddress: deployment.address,
       chainId: deployment.chainId,
