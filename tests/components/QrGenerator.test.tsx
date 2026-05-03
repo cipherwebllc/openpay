@@ -283,6 +283,90 @@ describe('QrGenerator', () => {
     });
   });
 
+  describe('EIP-681 互換 QR セクション', () => {
+    it('既定 (gasless) では「使用条件」案内のみ表示、QR は出さない', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '5');
+
+      // タイトルは常時表示
+      expect(screen.getByText(/互換 QR \(EIP-681\)/)).toBeInTheDocument();
+      // direct でないので「使用条件」案内が出る
+      expect(
+        screen.getByText(/直接送金 \+ 金額指定 \+ split 無し/),
+      ).toBeInTheDocument();
+      // EIP-681 URI は表示されない
+      expect(screen.queryByText(/^ethereum:/)).toBeNull();
+    });
+
+    it('directTransfer ON + amount 入力で EIP-681 URI が表示される', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // JPYC 既定のまま
+      await user.type(screen.getByPlaceholderText('1000'), '1000');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText((t) => t.startsWith('ethereum:')),
+        ).toBeInTheDocument();
+      });
+      const uri = screen.getByText((t) =>
+        t.startsWith('ethereum:'),
+      ).textContent!;
+      // JPYC Polygon mainnet (env=mainnet) または Amoy (env=testnet) いずれかの chainId
+      expect(uri).toMatch(/@(137|80002)\/transfer\?/);
+      expect(uri).toContain(`address=${VALID}`);
+      // 1000 JPYC × 10^18
+      expect(uri).toContain('uint256=1000000000000000000000');
+    });
+
+    it('据え置きモード (amount 無し) では URI を出さない (条件を満たさない)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      // 据え置きへ
+      await user.click(screen.getByRole('button', { name: /据え置き/ }));
+
+      // URI は表示されない、案内のみ
+      expect(screen.queryByText(/^ethereum:/)).toBeNull();
+      expect(
+        screen.getByText(/直接送金 \+ 金額指定 \+ split 無し/),
+      ).toBeInTheDocument();
+    });
+
+    it('URI コピーボタンが clipboard を呼ぶ', async () => {
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      });
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      const copyBtn = await screen.findByRole('button', {
+        name: /URI をコピー/,
+      });
+      await user.click(copyBtn);
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+      const copied = writeText.mock.calls[0][0] as string;
+      expect(copied).toMatch(/^ethereum:/);
+      expect(copied).toContain('/transfer?');
+    });
+  });
+
   describe('URL コピー', () => {
     it('navigator.clipboard.writeText が呼ばれる', async () => {
       const user = userEvent.setup();

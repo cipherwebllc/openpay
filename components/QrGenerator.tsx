@@ -18,6 +18,7 @@ import {
   type PayMode,
   type SplitDraft,
 } from '@/lib/url';
+import { buildEip681TransferUri } from '@/lib/eip681';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -38,6 +39,7 @@ export function QrGenerator() {
   const [amount, setAmount] = useState('');
   const origin = useOrigin();
   const { copied, copy } = useCopyToClipboard();
+  const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
   const [accordionOpen, setAccordionOpen] = useState(true);
   const [accordionInitialized, setAccordionInitialized] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
@@ -123,6 +125,34 @@ export function QrGenerator() {
 
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
+
+  // 互換 QR (EIP-681) — direct + amount 指定 + split 無し のときに併発行する。
+  // gasless / split は EIP-681 で表現できないので、その場合は出さない (UI 側で
+  // 「使用条件」を案内)。Hashport / MetaMask Mobile 等のネイティブ ERC20 transfer
+  // 対応ウォレットがそのまま読み取れる形式。
+  const eip681Eligible =
+    settings.directTransfer &&
+    mode === 'amount' &&
+    amountValid &&
+    !splitsForUrl;
+  const eip681Uri = useMemo(() => {
+    if (!hydrated || !effectiveReceiver || !eip681Eligible) return '';
+    return buildEip681TransferUri({
+      tokenAddress: deployment.address,
+      chainId: deployment.chainId,
+      to: effectiveReceiver,
+      amount,
+      decimals: deployment.decimals,
+    });
+  }, [
+    hydrated,
+    effectiveReceiver,
+    eip681Eligible,
+    deployment.address,
+    deployment.chainId,
+    deployment.decimals,
+    amount,
+  ]);
 
   function selectToken(tok: TokenSymbol) {
     // token を切り替えると chain も既定 (USDC→base, JPYC→polygon) にリセット。
@@ -459,6 +489,32 @@ export function QrGenerator() {
             </p>
           </div>
         )}
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4">
+          <h3 className="text-sm font-semibold text-slate-800">
+            {t('eip681Title')}
+          </h3>
+          <p className="mt-1 text-xs text-slate-500">{t('eip681Description')}</p>
+          {eip681Uri ? (
+            <div className="mt-3 flex flex-col items-center gap-3">
+              <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
+              <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
+                {eip681Uri}
+              </div>
+              <button
+                type="button"
+                onClick={() => eip681Copy(eip681Uri)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+              >
+                {eip681Copied ? t('eip681Copied') : t('eip681Copy')}
+              </button>
+              <p className="text-[11px] text-slate-500">{t('eip681Hint')}</p>
+            </div>
+          ) : (
+            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+              {t('eip681NotAvailable')}
+            </p>
+          )}
+        </div>
       </section>
     </div>
   );
