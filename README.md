@@ -785,6 +785,10 @@ Phase 1 で **USDC を Base / Arbitrum / Optimism / Polygon の 4 chain に拡�
 - どうしても切り戻す必要がある場合: (a) CDN / Vercel の rewrite で `/pay?...&chain=arbitrum*` を 410 Gone に返す、(b) マーチャントへ「該当 URL の無効化」を即時通知、の手順を経てから旧バージョンへ revert
 - 同じ問題は Checkout 機能 (`/checkout` ルート) にも該当 — `/checkout` 自体が新ルートのため、切り戻すとルート 404 になり silent ではないが、`/pay` の chain パラメタは silent
 
+### EIP-681 互換 QR の rollback は安全 (silent fund misdirection リスク無し)
+
+EIP-681 互換 QR (`feat(qr): EIP-681 互換 QR セクションを QrGenerator に併発行で追加`) は、生成された URI が [EIP-681 仕様](https://eips.ethereum.org/EIPS/eip-681) 準拠の self-contained format (`ethereum:<token>@<chainId>/transfer?...`) のため、**OpenPay の UI を rollback しても既出 QR は他の EIP-681 対応ウォレットで引き続き正しく読み取れる**。multi-chain URL のような silent fund misdirection は構造的に発生しない (token / chainId / receiver / wei が URI 内に確定値として焼き込まれているため、parser の差異で別 chain に送金される経路が無い)。
+
 ### ERC20 Paymaster の approve allowance (USDC mainnet 限定)
 
 USDC mainnet では `prepareUserOperationForErc20Paymaster` が UserOp 先頭に **paymaster コントラクト宛の USDC `approve`** を自動注入する。これは onchain state なのでフロントエンド rollback では消えない:
