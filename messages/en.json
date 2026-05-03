@@ -70,11 +70,9 @@
     "feeReceiverHintJpyc": "(JPYC: 1.0% / min 5 JPYC + network fee)",
     "feeReceiverHintUsdc": "(USDC: 1.0% / min 0.05 USDC + network fee)",
     "eip681Title": "Wallet-native QR (EIP-681)",
-    "eip681Description": "A standards-compliant ERC20 transfer URI that any EIP-681 wallet (Hashport, MetaMask Mobile, etc.) can scan directly. Bypasses OpenPay's checkout (gasless / split / 1% fee).",
-    "eip681Hint": "Generated when direct transfer mode + fixed amount + no splits. The merchant receives the full amount.",
+    "eip681Description": "A standards-compliant ERC20 transfer URI that any EIP-681 wallet (Hashport, MetaMask Mobile, etc.) can scan directly. Bypasses OpenPay's checkout (gasless / split / 1% fee); the merchant receives the full amount.",
     "eip681Copy": "Copy URI",
-    "eip681Copied": "Copied",
-    "eip681NotAvailable": "EIP-681 wallet-native QR is shown when direct transfer + fixed amount + no splits are selected."
+    "eip681Copied": "Copied"
   },
   "PaymentForm": {
     "title": "OpenPay Payment",
