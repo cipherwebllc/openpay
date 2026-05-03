@@ -370,8 +370,9 @@ describe('QrGenerator', () => {
     });
 
     // 回帰: USDC + decimals 超過小数で render crash する潜在バグ。
-    // 境界 (== decimals 表示 / +1 桁 非表示 / 戻すと再表示) を 1 ケースで検証。
-    it('USDC 桁数境界: == 6 桁表示 / +1 で非表示 / 戻すと再表示 (no render crash)', async () => {
+    // sanitizeAmount で入力時に decimals に切り詰めるため、+1 桁打ち込みは入力値が
+    // truncate されて URI / section は維持される (silent 非表示にならない)。
+    it('USDC 桁数: 入力時に decimals=6 へ truncate、URI は常に表示される', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -379,23 +380,63 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('button', { name: /USDC/ }));
       await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
 
-      const amountInput = screen.getByPlaceholderText('10.00');
+      const amountInput = screen.getByPlaceholderText(
+        '10.00',
+      ) as HTMLInputElement;
       await user.type(amountInput, '1.123456');
       const uri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
       ).textContent!;
       expect(uri).toContain('uint256=1123456');
 
+      // 7 文字目の追加は truncate される (入力値は変化なし、URI も変化なし)
       await user.type(amountInput, '7');
-      await waitFor(() =>
-        expect(screen.queryByText(/^ethereum:/)).toBeNull(),
+      expect(amountInput.value).toBe('1.123456');
+      expect(screen.getByText(/^ethereum:/).textContent).toContain(
+        'uint256=1123456',
       );
+    });
 
-      await user.clear(amountInput);
-      await user.type(amountInput, '1.123456');
-      await waitFor(() =>
-        expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
-      );
+    it('paste で decimals 超過の長い小数を受けても truncate される', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('button', { name: /USDC/ }));
+      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+
+      const amountInput = screen.getByPlaceholderText(
+        '10.00',
+      ) as HTMLInputElement;
+      // paste は userEvent.paste で発火 (selection は input にフォーカス済の前提)
+      amountInput.focus();
+      await user.paste('1.1234567890');
+      // USDC decimals=6 に truncate
+      expect(amountInput.value).toBe('1.123456');
+      const uri = (
+        await screen.findByText((t) => t.startsWith('ethereum:'))
+      ).textContent!;
+      expect(uri).toContain('uint256=1123456');
+    });
+
+    it('JPYC で長い小数を打って USDC 切替 → 6 桁に自動 truncate', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // JPYC decimals=18 で長い小数を入力
+      const jpycInput = screen.getByPlaceholderText(
+        '1000',
+      ) as HTMLInputElement;
+      await user.type(jpycInput, '1.1234567890');
+      expect(jpycInput.value).toBe('1.1234567890');
+
+      // USDC へ切替 → amount が 6 桁に truncate されているはず
+      await user.click(screen.getByRole('button', { name: /USDC/ }));
+      const usdcInput = screen.getByPlaceholderText(
+        '10.00',
+      ) as HTMLInputElement;
+      expect(usdcInput.value).toBe('1.123456');
     });
 
     it('状態遷移: direct ON → URI 表示 → direct OFF → URI 非表示', async () => {

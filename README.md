@@ -22,13 +22,13 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 
 ## 直近の主要追加 (v0.2 候補)
 
-- **EIP-681 互換 QR 併発行 (BYO wallet)** — 直接送金 + 金額指定 のとき、[EIP-681](https://eips.ethereum.org/EIPS/eip-681) 準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。任意の対応ウォレットから純粋 ERC20 transfer で送金可能 (OpenPay checkout を経由しない)。仕様準拠は自動検証済 (regex / viem `isAddress` / `URL.canParse`)、実ウォレットでの読取は要 manual 検証。OpenPay は wallet 製造せず checkout 層に徹する方針を明示
+- **EIP-681 互換 QR 併発行 (BYO wallet)** — 直接送金 + 金額指定 のとき、[EIP-681](https://eips.ethereum.org/EIPS/eip-681) 準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。任意の対応ウォレットから純粋 ERC20 transfer で送金可能 (OpenPay checkout を経由しない)。仕様準拠は自動検証済 (regex / viem `isAddress` / `URL.canParse`)、実ウォレットでの読取検証手順は §「EIP-681 互換 QR の実ウォレット読取検証」を参照。OpenPay は wallet 製造せず checkout 層に徹する方針を明示
 - **Phase 1 multi-chain USDC** — Base 限定から Base / Arbitrum One / Optimism / Polygon の **4 chain 対応** へ拡張。`/pay?token=usdc&chain=arbitrum` のような chain slug を URL で指定可能 (省略時は base 既定で旧 QR と互換)。Pimlico の `getTokenQuotes` で 4 chain × mainnet/testnet の全 8 deployment が valid な quote を返すことは `scripts/verify-pimlico-usdc.mjs` で確認済 (Universal Paymaster `0x7777777777...e66834C`)
 - **Checkout (β)** — Stripe Checkout 相当の itemized 決済 URL を発行する新ルート `/checkout`。商品リスト (最大 10 件) + 注文 metadata + success_url redirect (3 秒自動) + webhook (Tip と互換シェイプ) を URL に埋め込む
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 757 件 / 42 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 98.77 / 96.06 / 90.99 / 98.77。e2e 28 件 (chromium + mobile-safari)
+- **テスト** — 759 件 / 42 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 98.77 / 96.07 / 91.03 / 98.77。e2e 28 件 (chromium + mobile-safari)
 - **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
 - **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
 - **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
@@ -46,7 +46,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 | 登録審査不要 | 店主は自分のウォレットアドレスを入力するだけで QR を発行 |
 | 据え置き QR / 金額指定 QR | 入店レジ用 (固定) と請求書用 (金額指定) 両対応 |
 | 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
-| EIP-681 互換 QR | 直接送金モード + 金額指定 + split 無しのとき、`ethereum:<token>@<chainId>/transfer?...` 形式の URI を併発行 (OpenPay checkout を経由しない純粋 ERC20 transfer)。仕様準拠は自動検証済、実ウォレットでの読取は要 manual 検証 |
+| EIP-681 互換 QR | 直接送金モード + 金額指定 + split 無しのとき、`ethereum:<token>@<chainId>/transfer?...` 形式の URI を併発行 (OpenPay checkout を経由しない純粋 ERC20 transfer)。仕様準拠は自動検証済、実ウォレット読取は §9 検証手順を参照 |
 | BYO wallet | OpenPay は checkout 層に徹し、ウォレット自体は製造しない。WalletConnect v2 / EIP-6963 / Coinbase Wallet 等を経由して顧客が任意のウォレットで支払える |
 | Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可。webhook は同一 userOpHash につき 1 回限りの POST (gasQuote refetch 耐性、`useRef` gate で実装) |
 | Checkout (β)   | Stripe Checkout 相当の itemized 決済 URL を発行。line items + 注文 ID + 成功時 redirect + webhook (Tip と互換シェイプ)。e コマースの注文ごとに URL を発行する用途を想定 |
@@ -477,7 +477,7 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (757 件) における mock 利用方針:
+本リポジトリの自動テスト (759 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
@@ -590,6 +590,25 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 `components/TipForm.tsx` の `params.webhook` は tip 送信成功時に POST されるが、**fetch().catch() で silent に握り潰される設計**。理由は「tip 自体は成立しているので UI でエラーを出すと混乱する」。代わりに `logger.warn('tip.webhook.failed', ...)` で記録され、Sentry DSN が設定されていれば自動的に warn として上がる。クリエイター側 webhook の信頼性は **Sentry 経由でのみ観測可能**。
 
+### 9. EIP-681 互換 QR の実ウォレット読取検証
+
+`lib/eip681.ts` の出力は EIP-681 仕様 (regex / `viem.isAddress` / `URL.canParse`) で構造妥当性を自動検証済だが、**各ウォレットアプリが実際に当該 URI をスキャンして transfer 画面を開けるか**は実機検証が必要。`/ja` の QR ジェネレーターで「直接送金」ON + JPYC + 受取アドレス + 100 を入力 → 画面下部「互換 QR (EIP-681)」セクションの SVG を以下のウォレットでスキャンし、結果を記録する。
+
+| ウォレット | platform | 期待動作 | 確認手順 |
+|---|---|---|---|
+| MetaMask Mobile | iOS / Android | scan 後、transfer 画面 (受取人 + 金額 prefill) | アプリ内 scan アイコン |
+| Rainbow | iOS / Android | 同上 | scan アイコン (画面右上) |
+| Trust Wallet | iOS / Android | 同上 (ERC-20 transfer screen) | アプリ内 scanner |
+| Coinbase Wallet | iOS / Android | 同上、または "Unsupported" 表示 (EIP-681 サポート状況に依存) | scan アイコン |
+| Hashport Wallet | Web (https://wallet.hashport.com) | 同上 (要 EIP-681 対応確認) | Web QR scan UI |
+
+**判定基準**:
+- ✅ pass: scan 後に Receiver / Amount / Token (JPYC) が prefill された送金画面が表示
+- ⚠ partial: scan は成功するが Token の選択は手動 (URI の `<token_address>` 部分が無視される)
+- ❌ fail: "QR cannot be read" / "Unsupported URI" / 何も起きない
+
+実機検証の結果は `docs/eip681-compat.md` に追記して、partial / fail のウォレットがあれば README §特徴 の互換 QR 行に "(○○ 未対応)" の注記を追加する。Polygon Amoy testnet でも同じ手順で検証可能 (`NETWORK_ENV=testnet` の `/ja` で chainId=80002 の URI が出る)。
+
 ---
 
 ## 既知の制約 / 注意
@@ -633,10 +652,10 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | 指標 | カバレッジ |
 |---|---|
 | Statements | 98.77% |
-| Branches | 96.06% |
-| Functions | 90.99% |
+| Branches | 96.07% |
+| Functions | 91.03% |
 | Lines | 98.77% |
-| Test count | 757 件 (42 ファイル) + e2e 28 件 |
+| Test count | 759 件 (42 ファイル) + e2e 28 件 |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 

@@ -33,6 +33,19 @@ import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 
 type Mode = 'amount' | 'static';
 
+// 数値以外を除去し、小数桁を token decimals に切り詰める。
+// 入力時と token 切替時の両方で適用することで「amount の小数桁数 > decimals」
+// 状態を構造的に発生させない (parseUnits の silent round / EIP-681 builder の
+// throw を上流で排除)。
+function sanitizeAmount(raw: string, decimals: number): string {
+  const cleaned = raw.replace(/[^\d.]/g, '');
+  const dotIdx = cleaned.indexOf('.');
+  if (dotIdx === -1) return cleaned;
+  const fracDigits = cleaned.length - dotIdx - 1;
+  if (fracDigits <= decimals) return cleaned;
+  return cleaned.slice(0, dotIdx + 1 + decimals);
+}
+
 export function QrGenerator() {
   const { settings, setSettings, hydrated } = useQrSettings();
   const [mode, setMode] = useState<Mode>('amount');
@@ -127,8 +140,8 @@ export function QrGenerator() {
   const deployment = deploymentForSlug(settings.token, settings.chain);
 
   // 互換 QR (EIP-681) — direct + amount のときだけ併発行 (gasless / split は EIP-681 で表現不可)。
-  // 既知 limitation: amount の小数桁数 > token decimals のとき section が silent 非表示
-  // になる (UX hint は需要シグナル待ち)。
+  // amount は sanitizeAmount で常に decimals 内に切り詰められているため、builder は
+  // throw しない。
   const eip681Uri = useMemo(() => {
     if (
       !hydrated ||
@@ -137,11 +150,6 @@ export function QrGenerator() {
       mode !== 'amount' ||
       !amountValid
     ) {
-      return '';
-    }
-    // 小数桁数 > decimals は builder が throw → render crash するため事前 guard。
-    const dotIdx = amount.indexOf('.');
-    if (dotIdx !== -1 && amount.length - dotIdx - 1 > deployment.decimals) {
       return '';
     }
     return buildEip681TransferUri({
@@ -172,6 +180,12 @@ export function QrGenerator() {
       token: tok,
       chain: DEFAULT_CHAIN_FOR_SYMBOL[tok],
     }));
+    // 旧 token (例 JPYC decimals=18) で打った長い小数を新 token (USDC decimals=6) の
+    // 範囲へ truncate。amount を超過状態のまま残すと EIP-681 section が disable 表示
+    // され UX が壊れるため、入力値を新 token に合わせる。
+    setAmount((current) =>
+      sanitizeAmount(current, defaultDeploymentForSymbol(tok).decimals),
+    );
   }
 
   function selectChain(slug: ChainSlug) {
@@ -210,7 +224,7 @@ export function QrGenerator() {
                 inputMode="decimal"
                 value={amount}
                 onChange={(e) =>
-                  setAmount(e.target.value.replace(/[^\d.]/g, ''))
+                  setAmount(sanitizeAmount(e.target.value, deployment.decimals))
                 }
                 placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-2xl font-bold focus:border-brand focus:outline-none"
