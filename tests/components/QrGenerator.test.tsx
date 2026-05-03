@@ -370,11 +370,8 @@ describe('QrGenerator', () => {
     });
 
     // 回帰: USDC + decimals 超過小数で render crash する潜在バグ。
-    // 境界 (== decimals 表示 / +1 桁 非表示 / 戻すと再表示) + Sentry 計測を 1 ケースで検証。
-    it('USDC 桁数境界: == 6 桁表示 / +1 で非表示 + logger.warn / 戻すと再表示', async () => {
-      const { logger } = await import('@/lib/logger');
-      const warnSpy = vi.spyOn(logger, 'warn');
-
+    // 境界 (== decimals 表示 / +1 桁 非表示 / 戻すと再表示) を 1 ケースで検証。
+    it('USDC 桁数境界: == 6 桁表示 / +1 で非表示 / 戻すと再表示 (no render crash)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -388,20 +385,10 @@ describe('QrGenerator', () => {
         await screen.findByText((t) => t.startsWith('ethereum:'))
       ).textContent!;
       expect(uri).toContain('uint256=1123456');
-      expect(warnSpy).not.toHaveBeenCalled();
 
       await user.type(amountInput, '7');
       await waitFor(() =>
         expect(screen.queryByText(/^ethereum:/)).toBeNull(),
-      );
-      // 監視メトリクス: decimals_overflow が token / 桁数情報付きで発火
-      expect(warnSpy).toHaveBeenCalledWith(
-        'eip681.decimals_overflow',
-        expect.objectContaining({
-          token: 'usdc',
-          decimals: 6,
-          fracDigits: 7,
-        }),
       );
 
       await user.clear(amountInput);
@@ -409,8 +396,6 @@ describe('QrGenerator', () => {
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
-
-      warnSpy.mockRestore();
     });
 
     it('状態遷移: direct ON → URI 表示 → direct OFF → URI 非表示', async () => {

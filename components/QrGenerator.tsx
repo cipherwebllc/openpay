@@ -19,7 +19,6 @@ import {
   type SplitDraft,
 } from '@/lib/url';
 import { buildEip681TransferUri } from '@/lib/eip681';
-import { logger } from '@/lib/logger';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -128,6 +127,8 @@ export function QrGenerator() {
   const deployment = deploymentForSlug(settings.token, settings.chain);
 
   // 互換 QR (EIP-681) — direct + amount のときだけ併発行 (gasless / split は EIP-681 で表現不可)。
+  // 既知 limitation: amount の小数桁数 > token decimals のとき section が silent 非表示
+  // になる (UX hint は需要シグナル待ち)。
   const eip681Uri = useMemo(() => {
     if (
       !hydrated ||
@@ -139,39 +140,21 @@ export function QrGenerator() {
       return '';
     }
     // 小数桁数 > decimals は builder が throw → render crash するため事前 guard。
-    // ヒット頻度を Sentry へ送り、UX 改善 (例: input に decimals 制限) の判断材料にする。
     const dotIdx = amount.indexOf('.');
     if (dotIdx !== -1 && amount.length - dotIdx - 1 > deployment.decimals) {
-      logger.warn('eip681.decimals_overflow', {
-        token: settings.token,
-        decimals: deployment.decimals,
-        fracDigits: amount.length - dotIdx - 1,
-      });
       return '';
     }
-    // defense-in-depth: 既知の throw 経路 (decimals overflow) は上で拾うが、
-    // 将来 viem 側の Address 検証等が変わって想定外 throw が出たら捕捉して報告。
-    try {
-      return buildEip681TransferUri({
-        tokenAddress: deployment.address,
-        chainId: deployment.chainId,
-        to: effectiveReceiver,
-        amount,
-        decimals: deployment.decimals,
-      });
-    } catch (err) {
-      logger.error('eip681.unexpected_build_failure', {
-        err,
-        token: settings.token,
-        chainId: deployment.chainId,
-      });
-      return '';
-    }
+    return buildEip681TransferUri({
+      tokenAddress: deployment.address,
+      chainId: deployment.chainId,
+      to: effectiveReceiver,
+      amount,
+      decimals: deployment.decimals,
+    });
   }, [
     hydrated,
     effectiveReceiver,
     settings.directTransfer,
-    settings.token,
     mode,
     amountValid,
     deployment.address,
