@@ -20,7 +20,7 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:py-12">
-      <header className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <header className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between print:hidden">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
             {t('title')}
@@ -38,7 +38,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <div className="mb-4 inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1">
+      <div className="mb-4 inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 print:hidden">
         {(
           [
             ['qr', t('tabs.qr')],
@@ -60,7 +60,7 @@ export default function HomePage() {
         ))}
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:rounded-none print:border-0 print:p-0 print:shadow-none">
         {tab === 'qr' ? (
           <QrGenerator />
         ) : (
@@ -80,7 +80,7 @@ export default function HomePage() {
 
       <section
         aria-labelledby="offramp-heading"
-        className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+        className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:hidden"
       >
         <h2
           id="offramp-heading"
@@ -125,7 +125,7 @@ export default function HomePage() {
         <p className="mt-3 text-xs text-slate-400">{t('offramp.hint')}</p>
       </section>
 
-      <footer className="mt-8 text-center text-xs text-slate-400">
+      <footer className="mt-8 text-center text-xs text-slate-400 print:hidden">
         {t('footer')}
       </footer>
     </main>

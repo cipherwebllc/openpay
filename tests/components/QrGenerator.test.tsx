@@ -165,6 +165,65 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
     });
 
+    it('クイック金額: token 切替で現 token decimals に truncate (JPYC→USDC で重複は dedup)', async () => {
+      // JPYC (18 decimals) で高精度クイック金額を保存した状態で USDC (6 decimals) に
+      // 切替えた場合、ボタン表示・クリック時の amount 反映ともに USDC の decimals に
+      // truncate される必要がある。truncate 後に重複した値は 1 つにマージ。
+      // receiver は意図的に未設定: accordion を開いた状態で token tab を露出する。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          token: 'jpyc',
+          chain: 'polygon',
+          receiver: '',
+          gasMode: 'customer',
+          directTransfer: false,
+          splits: [],
+          storeName: '',
+          posterNote: '',
+          quickAmounts: ['0.1234567890123', '0.1234567890124', '500'],
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      // JPYC 中: 高精度値 2 件 + 500 が見える
+      expect(
+        screen.getByRole('button', { name: /0\.1234567890123 JPYC/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /0\.1234567890124 JPYC/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /^500 JPYC/ }),
+      ).toBeInTheDocument();
+
+      // USDC token tab へ切替 (accordion 内、左カラムの token grid)
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+
+      // 高精度 2 件はどちらも 0.123456 (USDC 6 dec) に潰れて 1 ボタンに dedup
+      const truncated = screen.getAllByRole('button', {
+        name: /0\.123456 USDC/,
+      });
+      expect(truncated.length).toBe(1);
+      expect(
+        screen.getByRole('button', { name: /^500 USDC/ }),
+      ).toBeInTheDocument();
+      // 元の高精度 JPYC 表記ボタンは消えている
+      expect(
+        screen.queryByRole('button', { name: /0\.1234567890123/ }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: /0\.1234567890124/ }),
+      ).toBeNull();
+
+      // ボタン押下で truncate 後の値そのまま input に反映される (元の高精度値ではない)
+      await user.click(truncated[0]);
+      const input = screen.getByPlaceholderText('10.00') as HTMLInputElement;
+      expect(input.value).toBe('0.123456');
+    });
+
     it('gas トグル: 切替で URL に gas=merchant が付く / 外れる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
@@ -677,6 +736,73 @@ describe('QrGenerator', () => {
 
       await user.click(screen.getByRole('button', { name: /印刷/ }));
       expect(print).toHaveBeenCalledOnce();
+    });
+
+    it('日本語の店舗名がそのまま download ファイル名に保存される', async () => {
+      // fileSafe が ASCII 限定だと「神田珈琲」→ 'openpay' fallback に潰れて
+      // merchant が複数ポスターを区別できなくなるため、UTF-8 を許容する。
+      const user = userEvent.setup();
+      Object.defineProperty(URL, 'createObjectURL', {
+        value: vi.fn(() => 'blob:qr'),
+        configurable: true,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        value: vi.fn(),
+        configurable: true,
+      });
+      const captured: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+        function (this: HTMLAnchorElement) {
+          captured.push(this.download);
+        },
+      );
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '750');
+      await user.type(
+        screen.getByPlaceholderText(/OpenPay Coffee/),
+        '神田珈琲',
+      );
+
+      await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
+      expect(captured.length).toBe(1);
+      const filename = captured[0];
+      expect(filename).toMatch(/^神田珈琲-jpyc-polygon-750\.svg$/);
+    });
+
+    it('path separator や Windows 予約文字は - に置換される (filesystem 安全)', async () => {
+      const user = userEvent.setup();
+      Object.defineProperty(URL, 'createObjectURL', {
+        value: vi.fn(() => 'blob:qr'),
+        configurable: true,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        value: vi.fn(),
+        configurable: true,
+      });
+      const captured: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+        function (this: HTMLAnchorElement) {
+          captured.push(this.download);
+        },
+      );
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '5');
+      await user.type(
+        screen.getByPlaceholderText(/OpenPay Coffee/),
+        'a/b\\c:d*e?f"g<h>i|j',
+      );
+
+      await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
+      const filename = captured[0];
+      // 全ての禁止文字が - に置換され、連続する - は 1 つに collapse される
+      expect(filename).not.toMatch(/[\\/:*?"<>|]/);
+      expect(filename).toMatch(/^a-b-c-d-e-f-g-h-i-j-jpyc-polygon-5\.svg$/);
     });
   });
 });

@@ -46,11 +46,16 @@ function sanitizeAmount(raw: string, decimals: number): string {
   return cleaned.slice(0, dotIdx + 1 + decimals);
 }
 
+// 主要 OS (macOS APFS / Windows NTFS / Linux ext4) は UTF-8 ファイル名を許容する
+// ため日本語店舗名 (例「神田珈琲」) もそのまま残す。除去対象は path separator と
+// Windows 予約文字、制御文字、空白の正規化のみ。これを ASCII 限定の正規化に
+// すると日本語名が常に 'openpay' フォールバックに潰れて merchant が混乱する。
 function fileSafe(value: string): string {
   const normalized = value
     .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
   return normalized || 'openpay';
 }
@@ -277,13 +282,27 @@ export function QrGenerator() {
     });
   }
 
-  const activeQuickAmounts = settings.quickAmounts.filter(
-    (q) => DECIMAL_PATTERN.test(q) && Number(q) > 0,
-  );
+  // クイック金額は token 切替を跨いで永続するため、現在の token decimals に
+  // 合わせて truncate してから表示・適用する。truncate 後に重複した値は除外
+  // (例: JPYC で 0.1234567890123 と 0.1234567890124 を保存 → USDC では
+  // どちらも 0.123456 に潰れるので片方のみ残す)。
+  const activeQuickAmounts = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const q of settings.quickAmounts) {
+      if (!DECIMAL_PATTERN.test(q) || Number(q) <= 0) continue;
+      const truncated = sanitizeAmount(q, deployment.decimals);
+      if (!DECIMAL_PATTERN.test(truncated) || Number(truncated) <= 0) continue;
+      if (seen.has(truncated)) continue;
+      seen.add(truncated);
+      out.push(truncated);
+    }
+    return out;
+  }, [settings.quickAmounts, deployment.decimals]);
 
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      <section className="space-y-5">
+    <div className="grid gap-8 lg:grid-cols-2 print:block print:gap-0">
+      <section className="space-y-5 print:hidden">
         <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
           <div className="flex flex-col gap-2">
             <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
@@ -632,14 +651,14 @@ export function QrGenerator() {
         </SettingsAccordion>
       </section>
 
-      <section className="space-y-4">
-        <div>
+      <section className="space-y-4 print:space-y-0">
+        <div className="print:hidden">
           <h2 className="text-lg font-semibold text-slate-800">
             {t('qrTitle')}
           </h2>
           <p className="text-sm text-slate-500">{t('qrDescription')}</p>
         </div>
-        <div className="flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 print:hidden">
           {payUrl ? (
             <>
               <div ref={qrRef}>
@@ -724,7 +743,7 @@ export function QrGenerator() {
           </section>
         )}
         {!settings.directTransfer && (
-          <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600">
+          <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600 print:hidden">
             <p className="font-semibold text-slate-700">
               {t('feeReceiverHeading')}
             </p>
@@ -739,7 +758,7 @@ export function QrGenerator() {
           </div>
         )}
         {eip681Uri && (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4 print:hidden">
             <h3 className="self-start text-sm font-semibold text-slate-800">
               {t('eip681Title')}
             </h3>
