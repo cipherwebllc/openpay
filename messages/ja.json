@@ -209,7 +209,7 @@
     "thanksUrlHint": "送信成功画面で「リンクを開く」ボタンとして表示。http(s) 以外は無視されます",
     "webhookLabel": "送信成功時の webhook URL (任意)",
     "webhookPlaceholder": "https://discord.com/api/webhooks/... など",
-    "webhookHint": "設定すると、tip 受信時に {payload} を JSON で POST します。Discord/Slack/独自バックエンド連携用。CORS 許可が必要",
+    "webhookHint": "設定すると、tip 受信時に {payload} を JSON で POST します。通知用途のみ。特典配布・会員権限付与・注文確定に使う場合は txHash を必ずオンチェーンで再検証してください。CORS 許可が必要",
     "previewTitle": "プレビュー",
     "tipUrlTitle": "Tip URL",
     "iframeTitle": "iframe 埋め込みコード",

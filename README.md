@@ -123,6 +123,7 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
   ```
 - ファンは MetaMask v12+ などで接続し、preset (JPYC: 300/1000/3000、USDC: 5/20/50) かカスタム金額を選んで送信。JPYC は運営がガスを肩代わり、USDC はファンの USDC 残高から自動徴収 (ネイティブトークン不要)
 - iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
+- webhook は Discord / Slack / 独自バックエンドへの**通知用途**として扱ってください。限定コンテンツ配布、会員権限付与、注文確定など「権限や特典を発生させる処理」に使う場合は、webhook payload を信頼せず `txHash` / `userOpHash` を必ずオンチェーンで再検証してください。
 
 ### 4. Checkout (実験的 / 非推奨) — 直リンク互換のみ維持
 
@@ -592,6 +593,8 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 ### 8. Tip widget の webhook 配信
 
 `components/TipForm.tsx` の `params.webhook` は tip 送信成功時に POST されるが、**fetch().catch() で silent に握り潰される設計**。理由は「tip 自体は成立しているので UI でエラーを出すと混乱する」。代わりに `logger.warn('tip.webhook.failed', ...)` で記録され、Sentry DSN が設定されていれば自動的に warn として上がる。クリエイター側 webhook の信頼性は **Sentry 経由でのみ観測可能**。
+
+また、Tip webhook はブラウザから送信されるため、payload は顧客側で改ざん可能です。Discord / Slack 通知のような観測用途では許容できますが、限定Discord招待、デジタル特典配布、会員権限付与などの信頼境界には使わないでください。そのような用途では webhook 受信後に `txHash` / `userOpHash` をオンチェーンで再検証し、creator address・token・chain・amount が期待値と一致することを確認してから処理してください。
 
 ### 9. EIP-681 互換 QR の実ウォレット読取検証
 

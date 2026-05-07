@@ -209,7 +209,7 @@
     "thanksUrlHint": "Shown as an \"Open link\" button on the success screen. http(s) only.",
     "webhookLabel": "Webhook URL on tip received (optional)",
     "webhookPlaceholder": "e.g. https://discord.com/api/webhooks/...",
-    "webhookHint": "When set, posts {payload} as JSON on each successful tip. For Discord/Slack/your own backend. CORS must allow this origin.",
+    "webhookHint": "When set, posts {payload} as JSON on each successful tip. Notification only. If you use it for rewards, membership access, or order fulfillment, always verify txHash on-chain. CORS must allow this origin.",
     "previewTitle": "Preview",
     "tipUrlTitle": "Tip URL",
     "iframeTitle": "iframe embed code",
