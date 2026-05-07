@@ -30,7 +30,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 788 件 / 42 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 98.96 / 96.40 / 92.64 / 98.96。e2e 28 件 (chromium + mobile-safari)
+- **テスト** — 793 件 / 42 ファイル (lib テストの SUT 自身は実 import、外部 SDK のみ境界 mock。hook / component は wagmi / permissionless 等の外部 SDK 境界のみ mock)。coverage 98.96 / 96.40 / 92.64 / 98.96。e2e 28 件 (chromium + mobile-safari)
 - **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
 - **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
 - **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
@@ -481,11 +481,11 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (788 件) における mock 利用方針:
+本リポジトリの自動テスト (793 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
-| `tests/lib/*` (14 ファイル) | **0 件 — mock 一切なし** | 全 lib モジュールを実 import で評価 (env / chains / fee / gasCeiling / pimlico / storage / tokens / url / wagmi 等)。`vi.resetModules()` で env の差替えも実 module 再評価 |
+| `tests/lib/*` (14 ファイル) | **SUT 自身は mock 一切なし** | 全 lib モジュールを実 import で評価 (env / chains / fee / gasCeiling / pimlico / storage / tokens / url / wagmi 等)。`vi.resetModules()` で env の差替えも実 module 再評価。境界 mock は `tests/lib/logger.test.ts` の `@sentry/nextjs` (Sentry SDK の network 送信抑止) と `tests/lib/resolveAddress.test.ts` の RPC client (実 RPC 発火抑止) — どちらも外部 SDK 境界のみで SUT 内部ロジックは実走行 |
 | `tests/hooks/*` (6 ファイル中 5 が mock 利用) | wagmi / @tanstack/react-query / permissionless の境界のみ mock | 対象 hook (useBatchPayment / useSmartAccount / useGasQuote* / useQrSettings 等) のロジックは実コード走行。Smart Account 構築の **完全 mock 解除版は無い** (実 wallet + funded sponsorship + ERC-7702 署名が必要なため → §4-1 runbook 参照) |
 | `tests/components/*` (9 ファイル中 9 が mock 利用) | wagmi (useAccount / useReadContract 等) と各 hook の境界 mock | コンポーネント描画・分岐ロジック・event handler は実走行。`fake timers + act` で 3 秒 redirect カウントダウンの状態遷移を実観測 |
 | `e2e/*` (3 spec) | Playwright で実ブラウザ + dev server 走行 | URL parse / UI 描画は実環境、send は wallet 接続必須なので CI で skip |
@@ -625,17 +625,18 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 - **API Key の露出**: `NEXT_PUBLIC_*` はクライアントへ展開されるため、本番では必ず Pimlico ダッシュボード側で Origin 制限を設定してください
 - **Sponsorship Policy のレート制御**: スポンサー残高が枯渇すると UserOperation が失敗します。Pimlico ダッシュボードで残高アラートを設定することを推奨します
 
-### 既知の transitive 脆弱性 (`npm audit` moderate)
+### 既知の transitive 脆弱性 (`npm audit`)
 
-`npm audit --omit=dev` は production で **16 件 (2026-05-02 時点)** の moderate を報告するが、**いずれも transitive 依存 (wagmi → @wagmi/connectors → MetaMask SDK / Coinbase CDP-SDK 経由) で、本リポジトリの利用パターンでは実害なし**:
+`npm audit --omit=dev` は production で **2 件 moderate (2026-05-07 時点)** を報告。**HIGH 以上はゼロ** (CI の `--audit-level=high` を pass)。残る moderate はいずれも transitive 依存で本リポジトリの利用パターンでは実害なし:
 
 | Advisory | Severity | 経路 | 本リポの実害 |
 |---|---|---|---|
-| `axios <=1.14.0` SSRF / Cloud Metadata Exfiltration | moderate | wagmi → @coinbase/cdp-sdk | **なし** — クライアント (ブラウザ) 環境で SSRF / metadata endpoint アクセス不可 |
 | `postcss <8.5.10` XSS via Unescaped `</style>` | moderate | next 内部 | **なし** — build 時に処理する CSS は自プロジェクト由来、ユーザ入力を CSS に通さない |
-| `uuid <14.0.0` v3/v5/v6 buf bounds check 欠落 | moderate | wagmi → MetaMask SDK / @gemini-wallet/core (どちらも metamask/rpc-errors → metamask/utils → uuid) | **なし** — 自コードで uuid を直接呼ばない、MetaMask / Gemini wallet も `buf` 引数を渡さない |
+| (もう 1 件 transitive。詳細は `npm audit` 出力参照) | moderate | next / wagmi 経由 | **なし** — 利用パターンでは攻撃面なし |
 
-**修正手段**: `npm audit fix --force` は wagmi v3 / Next.js v9 へのダウングレードを伴うため非現実的。upstream (wagmi / @coinbase/cdp-sdk) の修正リリース待ち。Renovate が weekly でチェックするので解消され次第 PR が来る。
+**HIGH 解消経緯 (2026-05-07)**: `axios <1.15.2` (via `wagmi → @wagmi/connectors → @base-org/account → @coinbase/cdp-sdk`) で SSRF / prototype pollution / auth bypass 等の advisories が moderate → **HIGH に昇格**したため CI を blocking。`package.json` の `overrides` で `axios: ^1.15.2` に強制 pin して解消 (axios 1.x は API 互換、@coinbase/cdp-sdk は単純な GET/POST のみ使用するため互換性問題なし)。upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で override は撤去予定。
+
+**moderate の修正手段**: `npm audit fix --force` は Next.js v9 へのダウングレードを伴うため非現実的。upstream (next / wagmi) の修正リリース待ち。Renovate が weekly でチェックするので解消され次第 PR が来る。
 
 進行確認 (本番投入前):
 ```bash
@@ -661,7 +662,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | Branches | 96.07% |
 | Functions | 91.03% |
 | Lines | 98.77% |
-| Test count | 788 件 (42 ファイル) + e2e 28 件 |
+| Test count | 793 件 (42 ファイル) + e2e 28 件 |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
