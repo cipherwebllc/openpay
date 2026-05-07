@@ -149,6 +149,76 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.rpc.optimismSepolia).toBe('https://rpc.example/ops');
   });
 
+  it('parsePositiveInt: NaN / 負数 / 0 / 小数 を流すと undefined fallback + console.warn (各 env 名を含む)', async () => {
+    // FEE_RECEIVER と同じ invalid 入力ガードが gas ceiling / overhead / POL_JPYC_RATE
+    // にも効くことを実走行で確認。これが silent に通ると、本番で env を typo
+    // した運営が「設定したつもり」で fallback 値で稼働することになる。
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // 4 種の invalid pattern を 4 つの env に振り分け
+    process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS = 'abc'; // NaN
+    process.env.NEXT_PUBLIC_POL_JPYC_RATE = '-1'; // 負数
+    process.env.NEXT_PUBLIC_GAS_CEILING_BASE_GWEI = '0'; // 非正
+    process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI = '1.5'; // 非整数
+    // valid の対照群: optimism は通すべき
+    process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI = '7';
+
+    const mod = await import('@/lib/env');
+
+    // 4 件の invalid は全て fallback (undefined)
+    expect(mod.env.gasQuoteOverheadUnits).toBeUndefined();
+    expect(mod.env.polJpycRate).toBeUndefined();
+    expect(mod.env.gasCeilingGwei.base).toBeUndefined();
+    expect(mod.env.gasCeilingGwei.arbitrum).toBeUndefined();
+    // valid は通る
+    expect(mod.env.gasCeilingGwei.optimism).toBe(7);
+
+    // warn は invalid 4 件分 fire し、各 var 名がメッセージに含まれる
+    expect(warn).toHaveBeenCalledTimes(4);
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    expect(
+      messages.some((m) => m.includes('NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS')),
+    ).toBe(true);
+    expect(
+      messages.some((m) => m.includes('NEXT_PUBLIC_POL_JPYC_RATE')),
+    ).toBe(true);
+    expect(
+      messages.some((m) => m.includes('NEXT_PUBLIC_GAS_CEILING_BASE_GWEI')),
+    ).toBe(true);
+    expect(
+      messages.some((m) =>
+        m.includes('NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI'),
+      ),
+    ).toBe(true);
+
+    warn.mockRestore();
+  });
+
+  it('parsePositiveInt: 空文字 / 未設定 → undefined (warn なし)', async () => {
+    // 空文字は nonEmpty で undefined に倒れるため warn は出さない
+    // (ユーザは「未設定」を意図しているので警告ノイズを増やさない)。
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.NEXT_PUBLIC_POL_JPYC_RATE = '';
+    delete process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS;
+
+    const mod = await import('@/lib/env');
+
+    expect(mod.env.polJpycRate).toBeUndefined();
+    expect(mod.env.gasQuoteOverheadUnits).toBeUndefined();
+    // POL_JPYC_RATE / GAS_QUOTE_OVERHEAD_GAS 由来の warn は出ない
+    const polWarns = warn.mock.calls.filter((c) =>
+      String(c[0]).includes('NEXT_PUBLIC_POL_JPYC_RATE'),
+    );
+    const gasWarns = warn.mock.calls.filter((c) =>
+      String(c[0]).includes('NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS'),
+    );
+    expect(polWarns).toHaveLength(0);
+    expect(gasWarns).toHaveLength(0);
+
+    warn.mockRestore();
+  });
+
   it('Arbitrum / Optimism gas ceiling env が整数としてパースされる', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI = '5';

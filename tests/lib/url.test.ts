@@ -148,6 +148,42 @@ describe('parsePayParams', () => {
     if (!r.ok) expect(r.error).toContain('jpyc');
   });
 
+  it('chain が無効な slug (例 ethereum) → エラー (どの USDC chain か明示しろ)', () => {
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=ethereum`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('chain');
+  });
+
+  it('chain が文字化け (大文字 / 空白入り) → エラー', () => {
+    // isValidChainSlug は厳密一致なので "BASE" や "base " は通らない
+    const r1 = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=BASE`),
+    );
+    expect(r1.ok).toBe(false);
+    const r2 = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=base%20`),
+    );
+    expect(r2.ok).toBe(false);
+  });
+
+  it('jpyc + arbitrum / base / optimism (jpyc 未対応 chain) → エラー', () => {
+    // chain 自体は valid slug だが、jpyc は polygon のみ deployment あり。
+    // hasDeployment ガード (lib/url.ts:255) を踏むことで silent fund misdirection
+    // (jpyc を arbitrum に送って永久消失) を防いでいる。
+    for (const chain of ['arbitrum', 'base', 'optimism'] as const) {
+      const r = parsePayParams(
+        search(`to=${VALID_TO}&token=jpyc&chain=${chain}`),
+      );
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error).toContain('jpyc');
+        expect(r.error).toContain(chain);
+      }
+    }
+  });
+
   it('旧 fee パラメタ (include/exclude/任意値) は silently ignore (古い QR の互換)', () => {
     // 旧 QR では `fee=include` 等が含まれる。新モデルでは exclude 一本固定なので
     // パラメタ自体を捨て、parse は成功させる (URL を破壊しない)。

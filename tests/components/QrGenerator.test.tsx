@@ -387,7 +387,11 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
     });
 
-    it('受信者を 3 人追加した状態で + 受取人を追加 を押しても 4 人目は追加されない (上限ガード)', async () => {
+    it('受信者を 3 人追加すると + 受取人を追加 ボタン自体が非表示になる (UI 条件付きレンダ)', async () => {
+      // 注: addSplit 関数内の `if (settings.splits.length >= SPLIT_MAX_ENTRIES) return`
+      // ガードは UI から到達不能 (button が条件付きレンダで消えるため click 不能)。
+      // この test は **UI 条件付きレンダ** が機能していることを検証するもので、
+      // 関数内ガードのカバレッジには貢献しない (構造的に dead branch)。
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -399,10 +403,10 @@ describe('QrGenerator', () => {
       await user.click(addBtn);
 
       expect(screen.getAllByPlaceholderText('0x...').length).toBe(3);
-
-      // 4 人目を追加しようとする → SPLIT_MAX_ENTRIES=3 で early return
-      await user.click(addBtn);
-      expect(screen.getAllByPlaceholderText('0x...').length).toBe(3);
+      // SPLIT_MAX_ENTRIES (3) 到達で button が DOM から消える
+      expect(
+        screen.queryByRole('button', { name: /\+ 受取人を追加/ }),
+      ).toBeNull();
     });
 
     it('受信者 / 金額 valid + payUrl 空 → "生成中" プレースホルダ表示', async () => {

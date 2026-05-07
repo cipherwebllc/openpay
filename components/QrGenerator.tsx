@@ -180,6 +180,9 @@ export function QrGenerator() {
     setSettings((s) => ({ ...s, splits: next }));
   }
   function addSplit() {
+    // UI 上は + 追加ボタンが条件付きレンダで消えるため (line ~570) このガードは
+    // 通常 reachable でない。将来 button の条件を外したり別経路から呼ぶ場合の
+    // 二重防御として残す。
     if (settings.splits.length >= SPLIT_MAX_ENTRIES) return;
     setSplits([...settings.splits, { address: '', percent: '' }]);
   }
