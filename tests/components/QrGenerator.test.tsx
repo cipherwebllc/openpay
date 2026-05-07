@@ -28,11 +28,11 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => {
         expect(
-          screen.getByRole('button', { name: /JPYC/ }),
+          screen.getByRole('button', { name: /^JPYC\s+Polygon/ }),
         ).toBeInTheDocument();
       });
       const usdcBtn = screen.getByRole('button', { name: /USDC/ });
-      const jpycBtn = screen.getByRole('button', { name: /JPYC/ });
+      const jpycBtn = screen.getByRole('button', { name: /^JPYC\s+Polygon/ });
       expect(jpycBtn.className).toMatch(/border-brand/);
       expect(usdcBtn.className).not.toMatch(/border-brand/);
     });
@@ -119,6 +119,52 @@ describe('QrGenerator', () => {
       expect(input.value).toBe('10.5');
     });
 
+    it('クイック金額ボタンでレジ入力を即時反映する', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      await user.click(screen.getByRole('button', { name: /1500 JPYC/ }));
+
+      const input = screen.getByPlaceholderText('1000') as HTMLInputElement;
+      expect(input.value).toBe('1500');
+    });
+
+    it('店舗名とポスター補足文が印刷プレビューに反映される', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '750');
+
+      await user.type(
+        screen.getByPlaceholderText(/OpenPay Coffee/),
+        'Kanda Coffee',
+      );
+      await user.type(
+        screen.getByPlaceholderText(/完了画面をスタッフ/),
+        'Show success screen',
+      );
+
+      expect(screen.getByText('Kanda Coffee')).toBeInTheDocument();
+      expect(screen.getByText('Show success screen')).toBeInTheDocument();
+      expect(screen.getByText('750 JPYC')).toBeInTheDocument();
+    });
+
+    it('クイック金額を編集して追加ボタンに反映する', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+      await user.click(screen.getByRole('button', { name: /\+ 金額を追加/ }));
+      const inputs = screen.getAllByPlaceholderText(/例: 1000/);
+      await user.type(inputs[inputs.length - 1], '2500');
+
+      expect(
+        screen.getByRole('button', { name: /2500 JPYC/ }),
+      ).toBeInTheDocument();
+    });
+
     it('gas トグル: 切替で URL に gas=merchant が付く / 外れる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
@@ -184,8 +230,10 @@ describe('QrGenerator', () => {
     it('JPYC タブへ切替で chainId 表記が変わる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByRole('button', { name: /JPYC/ }));
-      await user.click(screen.getByRole('button', { name: /JPYC/ }));
+      await waitFor(() =>
+        screen.getByRole('button', { name: /^JPYC\s+Polygon/ }),
+      );
+      await user.click(screen.getByRole('button', { name: /^JPYC\s+Polygon/ }));
       // JPYC 用プレースホルダ '1000' に切替
       expect(screen.getByPlaceholderText('1000')).toBeInTheDocument();
     });
@@ -597,6 +645,38 @@ describe('QrGenerator', () => {
           screen.getByRole('button', { name: /コピー済み/ }),
         ).toBeInTheDocument(),
       );
+    });
+
+    it('保存ボタンと印刷ボタンが機能する', async () => {
+      const user = userEvent.setup();
+      const createObjectURL = vi.fn(() => 'blob:qr');
+      const revokeObjectURL = vi.fn();
+      Object.defineProperty(URL, 'createObjectURL', {
+        value: createObjectURL,
+        configurable: true,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        value: revokeObjectURL,
+        configurable: true,
+      });
+      const click = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(() => {});
+      const print = vi.fn();
+      Object.defineProperty(window, 'print', { value: print, configurable: true });
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '5');
+
+      await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      expect(click).toHaveBeenCalledOnce();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:qr');
+
+      await user.click(screen.getByRole('button', { name: /印刷/ }));
+      expect(print).toHaveBeenCalledOnce();
     });
   });
 });

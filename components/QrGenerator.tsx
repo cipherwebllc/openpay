@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { isAddress, type Address } from 'viem';
@@ -46,6 +46,57 @@ function sanitizeAmount(raw: string, decimals: number): string {
   return cleaned.slice(0, dotIdx + 1 + decimals);
 }
 
+function fileSafe(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'openpay';
+}
+
+function svgMarkupFrom(ref: React.RefObject<HTMLDivElement | null>): string {
+  const svg = ref.current?.querySelector('svg');
+  return svg ? new XMLSerializer().serializeToString(svg) : '';
+}
+
+function downloadTextFile(filename: string, text: string, type: string) {
+  if (!text) return;
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadSvg(filename: string, ref: React.RefObject<HTMLDivElement | null>) {
+  const svg = svgMarkupFrom(ref);
+  downloadTextFile(filename, svg, 'image/svg+xml;charset=utf-8');
+}
+
+function downloadPng(filename: string, ref: React.RefObject<HTMLDivElement | null>) {
+  const svg = svgMarkupFrom(ref);
+  if (!svg) return;
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    const size = Math.max(img.width, img.height);
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(img, 0, 0);
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = filename;
+    a.click();
+  };
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 export function QrGenerator() {
   const { settings, setSettings, hydrated } = useQrSettings();
   const [mode, setMode] = useState<Mode>('amount');
@@ -53,6 +104,7 @@ export function QrGenerator() {
   const origin = useOrigin();
   const { copied, copy } = useCopyToClipboard();
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
+  const qrRef = useRef<HTMLDivElement>(null);
   const [accordionOpen, setAccordionOpen] = useState(true);
   const [accordionInitialized, setAccordionInitialized] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
@@ -138,6 +190,16 @@ export function QrGenerator() {
 
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
+  const chain = chainForSlug(settings.chain);
+  const qrFilename = useMemo(() => {
+    const parts = [
+      fileSafe(settings.storeName),
+      settings.token,
+      settings.chain,
+      mode === 'amount' && amount ? amount.replace('.', '-') : 'open',
+    ];
+    return parts.join('-');
+  }, [settings.storeName, settings.token, settings.chain, mode, amount]);
 
   // 互換 QR (EIP-681) — direct + amount のときだけ併発行 (gasless / split は EIP-681 で表現不可)。
   // amount は sanitizeAmount で常に decimals 内に切り詰められているため、builder は
@@ -192,6 +254,33 @@ export function QrGenerator() {
     setSettings((s) => ({ ...s, chain: slug }));
   }
 
+  function updateQuickAmount(idx: number, value: string) {
+    setSettings((s) => ({
+      ...s,
+      quickAmounts: s.quickAmounts.map((q, i) =>
+        i === idx ? sanitizeAmount(value, deployment.decimals) : q,
+      ),
+    }));
+  }
+
+  function addQuickAmount() {
+    setSettings((s) => ({
+      ...s,
+      quickAmounts: [...s.quickAmounts, ''],
+    }));
+  }
+
+  function removeQuickAmount(idx: number) {
+    setSettings((s) => {
+      const next = s.quickAmounts.filter((_, i) => i !== idx);
+      return { ...s, quickAmounts: next.length > 0 ? next : [''] };
+    });
+  }
+
+  const activeQuickAmounts = settings.quickAmounts.filter(
+    (q) => DECIMAL_PATTERN.test(q) && Number(q) > 0,
+  );
+
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <section className="space-y-5">
@@ -219,17 +308,33 @@ export function QrGenerator() {
               ))}
             </div>
             {mode === 'amount' ? (
-              <input
-                type="text"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) =>
-                  setAmount(sanitizeAmount(e.target.value, deployment.decimals))
-                }
-                placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-2xl font-bold focus:border-brand focus:outline-none"
-                autoFocus
-              />
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) =>
+                    setAmount(sanitizeAmount(e.target.value, deployment.decimals))
+                  }
+                  placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
+                  autoFocus
+                />
+                {activeQuickAmounts.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {activeQuickAmounts.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => setAmount(q)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                      >
+                        {q} {deployment.displaySymbol}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
                 {t('staticHint')}
@@ -324,6 +429,32 @@ export function QrGenerator() {
                   {t('addressInvalid')}
                 </p>
               )}
+          </Field>
+
+          <Field label={t('storeNameLabel')}>
+            <input
+              type="text"
+              value={settings.storeName}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, storeName: e.target.value }))
+              }
+              placeholder={t('storeNamePlaceholder')}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              maxLength={48}
+            />
+          </Field>
+
+          <Field label={t('posterNoteLabel')}>
+            <input
+              type="text"
+              value={settings.posterNote}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, posterNote: e.target.value }))
+              }
+              placeholder={t('posterNotePlaceholder')}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              maxLength={96}
+            />
           </Field>
 
           {settings.directTransfer ? (
@@ -440,6 +571,42 @@ export function QrGenerator() {
           )}
 
           <AdvancedSection label={t('advancedExtra')}>
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-medium text-slate-700">
+                {t('quickAmountsLabel')}
+              </p>
+              <div className="space-y-2">
+                {settings.quickAmounts.map((q, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={q}
+                      onChange={(e) => updateQuickAmount(i, e.target.value)}
+                      placeholder={t('quickAmountPlaceholder')}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeQuickAmount(i)}
+                      aria-label={t('quickAmountRemove')}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {settings.quickAmounts.length < 8 && (
+                <button
+                  type="button"
+                  onClick={addQuickAmount}
+                  className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
+                >
+                  {t('quickAmountAdd')}
+                </button>
+              )}
+            </div>
             <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-600">
               <input
                 type="checkbox"
@@ -475,17 +642,42 @@ export function QrGenerator() {
         <div className="flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6">
           {payUrl ? (
             <>
-              <QRCodeSVG value={payUrl} size={240} includeMargin level="M" />
+              <div ref={qrRef}>
+                <QRCodeSVG value={payUrl} size={240} includeMargin level="M" />
+              </div>
               <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
                 {payUrl}
               </div>
-              <button
-                type="button"
-                onClick={() => copy(payUrl)}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-              >
-                {copied ? t('qrCopied') : t('qrCopy')}
-              </button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => copy(payUrl)}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                >
+                  {copied ? t('qrCopied') : t('qrCopy')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadSvg(`${qrFilename}.svg`, qrRef)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                >
+                  {t('downloadSvg')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadPng(`${qrFilename}.png`, qrRef)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                >
+                  {t('downloadPng')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                >
+                  {t('printPoster')}
+                </button>
+              </div>
             </>
           ) : (
             <div className="grid h-60 w-60 place-items-center rounded-lg bg-slate-50 text-center text-sm text-slate-400">
@@ -497,6 +689,40 @@ export function QrGenerator() {
             </div>
           )}
         </div>
+        {payUrl && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10">
+            <div className="mx-auto flex max-w-sm flex-col items-center text-center">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 print:text-base">
+                {t('posterEyebrow')}
+              </p>
+              <h3 className="mt-2 text-2xl font-bold text-slate-900 print:text-5xl">
+                {settings.storeName.trim() || t('posterDefaultStoreName')}
+              </h3>
+              <p className="mt-2 text-sm text-slate-500 print:text-xl">
+                {mode === 'amount'
+                  ? t('posterFixedAmount', {
+                      amount,
+                      symbol: deployment.displaySymbol,
+                    })
+                  : t('posterOpenAmount', {
+                      symbol: deployment.displaySymbol,
+                    })}
+              </p>
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-10 print:p-8">
+                <QRCodeSVG value={payUrl} size={260} includeMargin level="M" />
+              </div>
+              <p className="mt-4 text-sm font-medium text-slate-700 print:text-xl">
+                {settings.posterNote.trim() || t('posterDefaultNote')}
+              </p>
+              <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
+                {deployment.displaySymbol} · {chain.name}
+              </p>
+              <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">
+                {effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
+              </p>
+            </div>
+          </section>
+        )}
         {!settings.directTransfer && (
           <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600">
             <p className="font-semibold text-slate-700">
