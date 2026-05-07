@@ -1,15 +1,10 @@
 {
   "Home": {
     "title": "OpenPay",
-    "subtitle": "ウォレットアドレス 1 つで始める、ガスレス決済 QR / Tip widget ジェネレーター",
+    "subtitle": "ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR",
     "tabs": {
       "qr": "決済 QR (店舗)",
-      "checkout": "Checkout (商品決済)",
       "tip": "Tip widget (クリエイター)"
-    },
-    "checkoutPanel": {
-      "heading": "Checkout URL を生成 (Stripe Checkout 相当)",
-      "subheading": "商品リスト + 注文 ID + success_url + webhook を埋め込んだ決済リンクを発行します。手数料 1.0% + ネットワーク手数料 (見積)。"
     },
     "tipPanel": {
       "heading": "Tip widget 埋め込みコードを生成",

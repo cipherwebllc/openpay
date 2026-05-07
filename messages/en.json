@@ -1,15 +1,10 @@
 {
   "Home": {
     "title": "OpenPay",
-    "subtitle": "Wallet-only setup for gasless QR payments and creator tip widgets",
+    "subtitle": "Wallet-only setup for merchant gasless payment QR",
     "tabs": {
       "qr": "Payment QR (merchant)",
-      "checkout": "Checkout (cart)",
       "tip": "Tip widget (creator)"
-    },
-    "checkoutPanel": {
-      "heading": "Generate a Checkout URL (Stripe-Checkout style)",
-      "subheading": "Issue a payment link with line items, order ID, success_url, and webhook embedded. 1.0% fee + network fee (estimate)."
     },
     "tipPanel": {
       "heading": "Generate Tip widget embed code",

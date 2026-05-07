@@ -6,13 +6,12 @@ import { useLocale, useTranslations } from 'next-intl';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { QrGenerator } from '@/components/QrGenerator';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
-import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
 import type { Locale } from '@/i18n';
 import { env } from '@/lib/env';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS } from '@/lib/tokens';
 
-type Tab = 'qr' | 'checkout' | 'tip';
+type Tab = 'qr' | 'tip';
 
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>('qr');
@@ -43,7 +42,6 @@ export default function HomePage() {
         {(
           [
             ['qr', t('tabs.qr')],
-            ['checkout', t('tabs.checkout')],
             ['tip', t('tabs.tip')],
           ] as const
         ).map(([id, label]) => (
@@ -65,18 +63,6 @@ export default function HomePage() {
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         {tab === 'qr' ? (
           <QrGenerator />
-        ) : tab === 'checkout' ? (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">
-                {t('checkoutPanel.heading')}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {t('checkoutPanel.subheading')}
-              </p>
-            </div>
-            <CheckoutLinkGenerator />
-          </div>
         ) : (
           <div className="space-y-4">
             <div>
