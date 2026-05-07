@@ -22,6 +22,9 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 
 ## 直近の主要追加 (v0.2 候補)
 
+- **店舗向け QR 強化** — 店舗名・ポスター補足文・レジ用クイック金額 (最大 8 件) を端末ローカルに永続化、印刷用ポスター section を追加、SVG / PNG ダウンロードと `window.print()` による直接印刷に対応。`fileSafe` は UTF-8 を許容するので日本語店舗名 (神田珈琲 等) もファイル名にそのまま使える。クイック金額は token 切替時に現 token の decimals に truncate + dedup、印刷時は poster 以外を `print:hidden` で隠す
+- **axios HIGH 脆弱性を override で解消** — `@coinbase/cdp-sdk` (wagmi → @wagmi/connectors → @base-org/account 経由 transitive) が要求する古い axios で SSRF / prototype pollution / auth bypass 等 15 件の advisories が HIGH に昇格 → CI の `npm audit --audit-level=high` を blocking。`package.json` の overrides で `axios: ^1.15.2` を強制 pin (実解決 1.16.0)。module load / constructor / interceptor 互換は `tests/lib/axios-override.test.ts` の 5 件で自動担保
+- **production readiness 強化** — デプロイチェックリストに「コード自動化不可、deploy 時に人手必須」項目 (Sentry alert rule / Pimlico 残高 alert) を ⚠ マーク付きで追加。§本番投入前に必ず検証すべきポイント に Coinbase Wallet 実 network call 互換 (testnet 1 件送金成功) と Lighthouse / 負荷測定の未実施を honest に明記
 - **不具合 4 件修正** — (1) direct mode でも `useBatchPayment` 経由で Smart Account 初期化が走る問題を `enabled` 伝播で解消、(2) testnet USDC sponsorship fallback で非 Polygon chain が `gasQuoteReady=false` のまま送信不能になる問題を `useGasQuoteJpyc` の Polygon 外 0 返しで解消、(3) Tip preset の重複が React duplicate key 警告と URL 重複入力を起こす問題を `TipEmbedGenerator` / `lib/url.ts` 双方で dedup、(4) 回帰テスト 4 件を追加 (763 件 / 42 ファイル)
 - **店舗QR重視へ整理** — ホーム UI は店舗向け決済 QR と Tip widget のみに絞り、Checkout 生成タブは非表示化。Checkout ルートは直リンク互換のため残すが、DB なし・署名なし webhook の制約があるため実験的扱い
 - **EIP-681 互換 QR 併発行 (BYO wallet)** — 直接送金 + 金額指定 のとき、[EIP-681](https://eips.ethereum.org/EIPS/eip-681) 準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。任意の対応ウォレットから純粋 ERC20 transfer で送金可能 (OpenPay checkout を経由しない)。仕様準拠は自動検証済 (regex / viem `isAddress` / `URL.canParse`)、実ウォレットでの読取検証手順は §「EIP-681 互換 QR の実ウォレット読取検証」を参照。OpenPay は wallet 製造せず checkout 層に徹する方針を明示
