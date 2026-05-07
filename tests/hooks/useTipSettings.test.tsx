@@ -149,6 +149,58 @@ describe('useTipSettings', () => {
     expect(result.current.settings.chain).toBe('arbitrum');
   });
 
+  it('thanks / thanksUrl / webhook を string として保存 → そのまま hydrate', async () => {
+    // sanitize の string 分岐 (L62-63, L66-67, L70-71) を踏むため、localStorage に
+    // 直接 string を仕込んでから renderHook で load → sanitize 経由で復元される。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        thanks: '本日もありがとうございました',
+        thanksUrl: 'https://shop.example.com/thanks',
+        webhook: 'https://discord.com/api/webhooks/abc',
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.thanks).toBe(
+      '本日もありがとうございました',
+    );
+    expect(result.current.settings.thanksUrl).toBe(
+      'https://shop.example.com/thanks',
+    );
+    expect(result.current.settings.webhook).toBe(
+      'https://discord.com/api/webhooks/abc',
+    );
+  });
+
+  it('thanks / thanksUrl / webhook が非文字列 (number / null) → defaults に置換', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        thanks: 42,
+        thanksUrl: null,
+        webhook: { url: 'evil' },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.thanks).toBe('');
+    expect(result.current.settings.thanksUrl).toBe('');
+    expect(result.current.settings.webhook).toBe('');
+  });
+
+  it('presets が非文字列 (array) → default の空文字列に置換', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', presets: [100, 500] }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets).toBe('');
+  });
+
   it('hydrate 完了前に localStorage を上書きしない', () => {
     window.localStorage.setItem(
       KEY,

@@ -14,6 +14,14 @@ vi.mock('@/hooks/useResolveAddress', () => ({
   })),
 }));
 
+// useOrigin を関数経由でモックして、特定テストだけ空文字列に倒せるようにする
+// (qrPlaceholderGenerating の検証で payUrl 不在 + 受信者 / 金額 valid という
+//  本来は一瞬の遷移状態を再現するため)。
+const useOriginMock = vi.fn(() => 'https://test.local');
+vi.mock('@/hooks/useOrigin', () => ({
+  useOrigin: () => useOriginMock(),
+}));
+
 import { QrGenerator } from '@/components/QrGenerator';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -21,6 +29,7 @@ const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 describe('QrGenerator', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    useOriginMock.mockReturnValue('https://test.local');
   });
 
   describe('初期レンダリング', () => {
@@ -35,6 +44,27 @@ describe('QrGenerator', () => {
       const jpycBtn = screen.getByRole('button', { name: /^JPYC\s+Polygon/ });
       expect(jpycBtn.className).toMatch(/border-brand/);
       expect(usdcBtn.className).not.toMatch(/border-brand/);
+    });
+
+    it('LocalStorage に有効アドレス + gasMode=merchant: サマリに gas:merch が出る', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'usdc',
+          chain: 'base',
+          gasMode: 'merchant',
+          directTransfer: false,
+        }),
+      );
+      render(<QrGenerator />);
+      await waitFor(() => {
+        const toggle = screen.getByRole('button', { name: /詳細設定/ });
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      });
+      const toggle = screen.getByRole('button', { name: /詳細設定/ });
+      // direct=false / gasMode=merchant → tail = "gas:merch"
+      expect(within(toggle).getByText(/gas:merch/)).toBeInTheDocument();
     });
 
     it('LocalStorage に有効アドレス: アコーディオンは閉じてサマリ表示', async () => {
@@ -222,6 +252,173 @@ describe('QrGenerator', () => {
       await user.click(truncated[0]);
       const input = screen.getByPlaceholderText('10.00') as HTMLInputElement;
       expect(input.value).toBe('0.123456');
+    });
+
+    it('クイック金額の × 削除: 中間 index を削除しても他要素が詰まらない (off-by-one なし)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      // 既定 ['500','1000','1500','3000'] のうち 2 番目 (1000) を削除
+      const editInputs = screen.getAllByPlaceholderText(/例: 1000/);
+      expect(editInputs.length).toBe(4);
+      expect((editInputs[1] as HTMLInputElement).value).toBe('1000');
+
+      const removeBtns = screen.getAllByRole('button', { name: /^クイック金額/ });
+      expect(removeBtns.length).toBe(4);
+      await user.click(removeBtns[1]);
+
+      // 1000 だけ抜けて 500 / 1500 / 3000 の 3 件が正しい順序で残る
+      const after = screen.getAllByPlaceholderText(/例: 1000/);
+      expect(after.length).toBe(3);
+      expect((after[0] as HTMLInputElement).value).toBe('500');
+      expect((after[1] as HTMLInputElement).value).toBe('1500');
+      expect((after[2] as HTMLInputElement).value).toBe('3000');
+      // 表示側 (activeQuickAmounts) も同期: 1000 のクイックボタンは消える
+      expect(
+        screen.queryByRole('button', { name: /1000 JPYC/ }),
+      ).toBeNull();
+    });
+
+    it('クイック金額: 4 件全部削除しても空 input が 1 行残る (UI 不変条件)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      // 全 4 件を順に削除
+      for (let i = 0; i < 4; i++) {
+        const removeBtns = screen.getAllByRole('button', {
+          name: /^クイック金額/,
+        });
+        await user.click(removeBtns[0]);
+      }
+
+      // 空 input が 1 行残り、編集できる状態になっている
+      const remaining = screen.getAllByPlaceholderText(/例: 1000/);
+      expect(remaining.length).toBe(1);
+      expect((remaining[0] as HTMLInputElement).value).toBe('');
+      // クイックボタン (表示側) は何も表示されない
+      expect(screen.queryAllByRole('button', { name: /JPYC$/ }).length).toBe(0);
+    });
+
+    it('クイック金額の上限 (8 件) に到達すると + 追加ボタンが消える', async () => {
+      // 既定 4 件 + 4 回押下 → 8 件
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      const addBtn = screen.getByRole('button', { name: /\+ 金額を追加/ });
+      await user.click(addBtn);
+      await user.click(addBtn);
+      await user.click(addBtn);
+      await user.click(addBtn);
+
+      expect(screen.getAllByPlaceholderText(/例: 1000/).length).toBe(8);
+      expect(
+        screen.queryByRole('button', { name: /\+ 金額を追加/ }),
+      ).toBeNull();
+    });
+
+    it('受取人を split 中間 index で削除しても残りが正しい順序で残る (off-by-one なし)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+      // 受取人 3 人追加 → 0xA / 0xB / 0xC の順
+      const addSplit = screen.getByRole('button', { name: /\+ 受取人を追加/ });
+      await user.click(addSplit);
+      await user.click(addSplit);
+      await user.click(addSplit);
+
+      const splitInputs = screen.getAllByPlaceholderText('0x...');
+      expect(splitInputs.length).toBe(3);
+      await user.type(splitInputs[0], '0xA');
+      await user.type(splitInputs[1], '0xB');
+      await user.type(splitInputs[2], '0xC');
+
+      // 中間 (0xB) を削除
+      const removeBtns = screen.getAllByRole('button', { name: /^削除$/ });
+      expect(removeBtns.length).toBe(3);
+      await user.click(removeBtns[1]);
+
+      // 0xA / 0xC が残る (0xB だけ抜ける)
+      const after = screen.getAllByPlaceholderText('0x...');
+      expect(after.length).toBe(2);
+      expect((after[0] as HTMLInputElement).value).toBe('0xA');
+      expect((after[1] as HTMLInputElement).value).toBe('0xC');
+    });
+
+    it('クイック金額: token 切替後の truncate 結果が 0 になるエントリは除外', async () => {
+      // JPYC (18 dec) で 0.0000001 (7 fracs, valid) を保存 → USDC (6 dec) では
+      // sanitizeAmount で '0.000000' に潰れる (Number=0) → activeQuickAmounts は
+      // 0 値を弾く必要がある (Number(truncated) <= 0 分岐)。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          token: 'jpyc',
+          chain: 'polygon',
+          receiver: '',
+          gasMode: 'customer',
+          directTransfer: false,
+          splits: [],
+          storeName: '',
+          posterNote: '',
+          quickAmounts: ['0.0000001', '500'],
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      // JPYC では両方表示
+      expect(
+        screen.getByRole('button', { name: /0\.0000001 JPYC/ }),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+
+      // 0.0000001 は USDC で truncate→'0.000000' (=0) になり除外、500 のみ残る
+      expect(
+        screen.queryByRole('button', { name: /^0(\.0+)? USDC/ }),
+      ).toBeNull();
+      expect(
+        screen.getByRole('button', { name: /^500 USDC/ }),
+      ).toBeInTheDocument();
+    });
+
+    it('受信者を 3 人追加した状態で + 受取人を追加 を押しても 4 人目は追加されない (上限ガード)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+      const addBtn = screen.getByRole('button', { name: /\+ 受取人を追加/ });
+      await user.click(addBtn);
+      await user.click(addBtn);
+      await user.click(addBtn);
+
+      expect(screen.getAllByPlaceholderText('0x...').length).toBe(3);
+
+      // 4 人目を追加しようとする → SPLIT_MAX_ENTRIES=3 で early return
+      await user.click(addBtn);
+      expect(screen.getAllByPlaceholderText('0x...').length).toBe(3);
+    });
+
+    it('受信者 / 金額 valid + payUrl 空 → "生成中" プレースホルダ表示', async () => {
+      // useOrigin を空に倒すと payUrl 計算が短絡 → QR ではなく「生成中」が出る。
+      // hydrate 直後 / SSR 中継時の一瞬の遷移状態を再現。
+      useOriginMock.mockReturnValue('');
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '750');
+
+      // payUrl が出ない → placeholder が描画される。受信者 + 金額両方 valid の枝。
+      expect(screen.getByText(/生成中|generating/i)).toBeInTheDocument();
+      // QR (SVG) と SVG保存ボタンは出ていない
+      expect(screen.queryByRole('button', { name: /SVG保存/ })).toBeNull();
     });
 
     it('gas トグル: 切替で URL に gas=merchant が付く / 外れる', async () => {
@@ -770,6 +967,77 @@ describe('QrGenerator', () => {
       expect(captured.length).toBe(1);
       const filename = captured[0];
       expect(filename).toMatch(/^神田珈琲-jpyc-polygon-750\.svg$/);
+    });
+
+    it('PNG 保存: Image → canvas → toDataURL のパイプラインが実行され .png ファイル名で trigger', async () => {
+      // JSDOM は Image / canvas がスタブなので、最小の shim を入れて downloadPng の
+      // 全コードパス (img.onload → fillRect → drawImage → toDataURL → triggerDownload)
+      // を実走行させる。テスト対象 (downloadPng) はモックしない。
+      const user = userEvent.setup();
+      const fillRect = vi.fn();
+      const drawImage = vi.fn();
+      const toDataURL = vi.fn(() => 'data:image/png;base64,fakebytes');
+      const getContext = vi.fn(() => ({
+        fillStyle: '',
+        fillRect,
+        drawImage,
+      }));
+      Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+        value: getContext,
+        configurable: true,
+      });
+      Object.defineProperty(HTMLCanvasElement.prototype, 'toDataURL', {
+        value: toDataURL,
+        configurable: true,
+      });
+
+      // Image 自体を実走行: src setter で onload を 1 tick 後に発火させる。
+      class FakeImage {
+        width = 240;
+        height = 240;
+        onload: (() => void) | null = null;
+        _src = '';
+        get src() {
+          return this._src;
+        }
+        set src(v: string) {
+          this._src = v;
+          queueMicrotask(() => this.onload?.());
+        }
+      }
+      vi.stubGlobal('Image', FakeImage as unknown as typeof Image);
+
+      const captured: { href: string; filename: string }[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+        function (this: HTMLAnchorElement) {
+          captured.push({ href: this.href, filename: this.download });
+        },
+      );
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '750');
+
+      await user.click(await screen.findByRole('button', { name: /PNG保存/ }));
+      // queueMicrotask 経由で onload → triggerDownload
+      await waitFor(() => expect(captured.length).toBe(1));
+
+      // 入力データの検査
+      expect(getContext).toHaveBeenCalledWith('2d');
+      // 240×240 (Image の width/height をそのまま canvas.width に使う)
+      // fillRect は (0, 0, 240, 240) で白背景塗り
+      expect(fillRect).toHaveBeenCalledWith(0, 0, 240, 240);
+      // drawImage は src の Image オブジェクトを (0, 0) に貼付
+      expect(drawImage).toHaveBeenCalledTimes(1);
+      expect(toDataURL).toHaveBeenCalledWith('image/png');
+      // 出力 anchor: href = data:image/png;... / filename = openpay-jpyc-polygon-750.png
+      expect(captured[0].href).toContain('data:image/png');
+      expect(captured[0].filename).toMatch(
+        /^openpay-jpyc-polygon-750\.png$/,
+      );
+
+      vi.unstubAllGlobals();
     });
 
     it('path separator や Windows 予約文字は - に置換される (filesystem 安全)', async () => {

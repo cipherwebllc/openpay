@@ -220,6 +220,99 @@ describe('useQrSettings', () => {
     ]);
   });
 
+  it('quickAmounts に混在型 (number / null / object) → string のみ残す', async () => {
+    // localStorage は string でしか保存できないが、外部スクリプトに改変された
+    // ケースや schema 変更で型が崩れた場合に備えて、非 string entry は dropping。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        quickAmounts: [
+          500,
+          null,
+          { amount: '100' },
+          ['1000'],
+          '300',
+          undefined,
+          '600',
+        ],
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    // string entry のうち valid なものだけ ('300', '600')
+    expect(result.current.settings.quickAmounts).toEqual(['300', '600']);
+  });
+
+  it('quickAmounts が all-invalid → DEFAULT_SETTINGS.quickAmounts へ fallback', async () => {
+    // 注: '-1' は記号除去後 '1' になり valid 扱い (運営意図: 記号が紛れた誤入力を救済)。
+    // 「全 invalid」を成立させるには 0、空、文字のみ、数字 0 件のものを並べる。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        quickAmounts: ['', '0', 'abc', null, 'NaN', '0.0'],
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    // 1 件も valid が無い → defaults (500/1000/1500/3000) で復元
+    expect(result.current.settings.quickAmounts).toEqual([
+      '500',
+      '1000',
+      '1500',
+      '3000',
+    ]);
+  });
+
+  it('quickAmounts が QUICK_AMOUNT_MAX (8) を超えると 8 件で truncate', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        quickAmounts: [
+          '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
+        ],
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.quickAmounts).toEqual([
+      '1', '2', '3', '4', '5', '6', '7', '8',
+    ]);
+  });
+
+  it('storeName / posterNote: max 桁ちょうど (48 / 96) は切らずに保存', async () => {
+    // 境界条件: 上限ちょうど = 切られない、+1 = 切られる
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        storeName: 'A'.repeat(48),
+        posterNote: 'B'.repeat(96),
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.storeName).toBe('A'.repeat(48));
+    expect(result.current.settings.posterNote).toBe('B'.repeat(96));
+  });
+
+  it('storeName / posterNote が非文字列 (number / object) → 空文字列', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        storeName: 12345,
+        posterNote: { v: 'x' },
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.storeName).toBe('');
+    expect(result.current.settings.posterNote).toBe('');
+  });
+
   it('gasMode が不正値 → exclude (default) で復元', async () => {
     window.localStorage.setItem(
       KEY,
