@@ -30,7 +30,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 793 件 / 42 ファイル (lib テストの SUT 自身は実 import、外部 SDK のみ境界 mock。hook / component は wagmi / permissionless 等の外部 SDK 境界のみ mock)。coverage 98.96 / 96.40 / 92.64 / 98.96。e2e 28 件 (chromium + mobile-safari)
+- **テスト** — 798 件 / 43 ファイル (lib テストの SUT 自身は実 import、外部 SDK のみ境界 mock。hook / component は wagmi / permissionless 等の外部 SDK 境界のみ mock)。coverage 98.96 / 96.40 / 92.64 / 98.96。e2e 28 件 (chromium + mobile-safari)
 - **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
 - **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
 - **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
@@ -483,11 +483,11 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (793 件) における mock 利用方針:
+本リポジトリの自動テスト (798 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
-| `tests/lib/*` (14 ファイル) | **SUT 自身は mock 一切なし** | 全 lib モジュールを実 import で評価 (env / chains / fee / gasCeiling / pimlico / storage / tokens / url / wagmi 等)。`vi.resetModules()` で env の差替えも実 module 再評価。境界 mock は `tests/lib/logger.test.ts` の `@sentry/nextjs` (Sentry SDK の network 送信抑止) と `tests/lib/resolveAddress.test.ts` の RPC client (実 RPC 発火抑止) — どちらも外部 SDK 境界のみで SUT 内部ロジックは実走行 |
+| `tests/lib/*` (15 ファイル) | **SUT 自身は mock 一切なし** | 全 lib モジュールを実 import で評価 (env / chains / fee / gasCeiling / pimlico / storage / tokens / url / wagmi 等)。`vi.resetModules()` で env の差替えも実 module 再評価。境界 mock は `tests/lib/logger.test.ts` の `@sentry/nextjs` (Sentry SDK の network 送信抑止) と `tests/lib/resolveAddress.test.ts` の RPC client (実 RPC 発火抑止) — どちらも外部 SDK 境界のみで SUT 内部ロジックは実走行 |
 | `tests/hooks/*` (6 ファイル中 5 が mock 利用) | wagmi / @tanstack/react-query / permissionless の境界のみ mock | 対象 hook (useBatchPayment / useSmartAccount / useGasQuote* / useQrSettings 等) のロジックは実コード走行。Smart Account 構築の **完全 mock 解除版は無い** (実 wallet + funded sponsorship + ERC-7702 署名が必要なため → §4-1 runbook 参照) |
 | `tests/components/*` (9 ファイル中 9 が mock 利用) | wagmi (useAccount / useReadContract 等) と各 hook の境界 mock | コンポーネント描画・分岐ロジック・event handler は実走行。`fake timers + act` で 3 秒 redirect カウントダウンの状態遷移を実観測 |
 | `e2e/*` (3 spec) | Playwright で実ブラウザ + dev server 走行 | URL parse / UI 描画は実環境、send は wallet 接続必須なので CI で skip |
@@ -619,11 +619,20 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 ### 10. axios override (1.16.0) と Coinbase Wallet 互換性
 
-`package.json` の `overrides: { axios: ^1.15.2 }` で `@coinbase/cdp-sdk` (wagmi → @wagmi/connectors → @base-org/account 経由の transitive) が要求する古い axios を **1.16.0 に強制 pin** している (HIGH 脆弱性回避のため)。axios 1.x は API 互換だが、`@coinbase/cdp-sdk` は内部で sign / network call を行うため、Coinbase Wallet 接続フローで silent な不整合が起きる可能性は **e2e で未検証**。
+`package.json` の `overrides: { axios: ^1.15.2 }` で `@coinbase/cdp-sdk` (wagmi → @wagmi/connectors → @base-org/account 経由の transitive) が要求する古い axios を **1.16.0 に強制 pin** している (HIGH 脆弱性回避のため)。
 
-**確認手順** (mainnet 投入前):
-- Polygon Amoy / Base Sepolia の testnet 環境で Coinbase Wallet を接続 → `/ja/pay` で 1 件以上 USDC 送金成功させる
-- 失敗した場合: `package.json` の override を `^1.15.2` から具体的な動作確認済バージョン (例: `1.15.2`) に固定するか、Coinbase Wallet サポートを一時的に外す
+**自動 test で担保される範囲** (`tests/lib/axios-override.test.ts`):
+- axios が override 後に `>= 1.15.2` で resolve されること
+- `@coinbase/cdp-sdk` の module load (top-level `import axios from 'axios'` で throw しない)
+- `CdpClient` の constructor 走行 (内部で `axios.create({...})` を呼ぶ経路)
+- 公開 sub-client (`evm` / `solana` / `policies` / `endUser` / `webhooks`) が消えていないこと
+- `@base-org/account` の module load
+- `axios-retry` が axios 1.16 の interceptor API と互換 (cdp-sdk の retry path)
+
+**自動 test で担保されない範囲** (testnet で人手検証必須):
+- Coinbase Wallet 接続フロー全体 (passkey → Smart Wallet 生成 → signing → relayer 通信)
+- Polygon Amoy / Base Sepolia で Coinbase Wallet を接続 → `/ja/pay` で 1 件以上 USDC 送金成功させる
+- 失敗した場合: `package.json` の override を具体的な動作確認済バージョン (例: `1.15.2`) に固定するか、Coinbase Wallet サポートを一時的に外す
 
 upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で override は撤去予定。Renovate が weekly でチェック。
 
@@ -688,7 +697,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | Branches | 96.07% |
 | Functions | 91.03% |
 | Lines | 98.77% |
-| Test count | 793 件 (42 ファイル) + e2e 28 件 |
+| Test count | 798 件 (43 ファイル) + e2e 28 件 |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
