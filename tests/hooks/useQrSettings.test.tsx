@@ -19,6 +19,9 @@ describe('useQrSettings', () => {
       gasMode: 'customer',
       directTransfer: false,
       splits: [],
+      storeName: '',
+      posterNote: '',
+      quickAmounts: ['500', '1000', '1500', '3000'],
     });
   });
 
@@ -37,6 +40,14 @@ describe('useQrSettings', () => {
     expect(result.current.settings.receiver).toBe('0xabc');
     expect(result.current.settings.directTransfer).toBe(false);
     expect(result.current.settings.splits).toEqual([]);
+    expect(result.current.settings.storeName).toBe('');
+    expect(result.current.settings.posterNote).toBe('');
+    expect(result.current.settings.quickAmounts).toEqual([
+      '500',
+      '1000',
+      '1500',
+      '3000',
+    ]);
   });
 
   it('jpyc + 不正 chain (arbitrum) → polygon に強制', async () => {
@@ -148,6 +159,9 @@ describe('useQrSettings', () => {
         gasMode: 'merchant',
         directTransfer: true,
         splits: [{ address: '0xb1', percent: '40' }],
+        storeName: 'Coffee Stand',
+        posterNote: 'Scan to pay',
+        quickAmounts: ['300', '750', '1200'],
       });
     });
 
@@ -161,7 +175,49 @@ describe('useQrSettings', () => {
       expect(parsed.receiver).toBe('0xdef');
       expect(parsed.directTransfer).toBe(true);
       expect(parsed.splits).toEqual([{ address: '0xb1', percent: '40' }]);
+      expect(parsed.storeName).toBe('Coffee Stand');
+      expect(parsed.posterNote).toBe('Scan to pay');
+      expect(parsed.quickAmounts).toEqual(['300', '750', '1200']);
     });
+  });
+
+  it('店舗向け設定を sanitize する', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        storeName: `  ${'A'.repeat(60)}\u0000  `,
+        posterNote: `  ${'B'.repeat(120)}\u0007  `,
+        quickAmounts: [
+          '500',
+          'abc',
+          '500',
+          '0',
+          '1000.50',
+          '2000yen',
+          '3000',
+          '4000',
+          '5000',
+          '6000',
+          '7000',
+          '8000',
+          '9000',
+        ],
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.storeName).toBe('A'.repeat(48));
+    expect(result.current.settings.posterNote).toBe('B'.repeat(96));
+    expect(result.current.settings.quickAmounts).toEqual([
+      '500',
+      '1000.50',
+      '2000',
+      '3000',
+      '4000',
+      '5000',
+      '6000',
+      '7000',
+    ]);
   });
 
   it('gasMode が不正値 → exclude (default) で復元', async () => {

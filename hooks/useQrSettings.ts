@@ -19,6 +19,10 @@ type QrSettings = {
   directTransfer: boolean;
   // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人 (現行 UX)
   splits: SplitDraft[];
+  // 店舗向け表示。DB を持たず、端末ローカルのレジ/印刷設定として保存する。
+  storeName: string;
+  posterNote: string;
+  quickAmounts: string[];
 };
 
 const STORAGE_KEY = 'openpay:qr-settings:v2';
@@ -30,7 +34,36 @@ const DEFAULT_SETTINGS: QrSettings = {
   gasMode: 'customer',
   directTransfer: false,
   splits: [],
+  storeName: '',
+  posterNote: '',
+  quickAmounts: ['500', '1000', '1500', '3000'],
 };
+
+const STORE_NAME_MAX = 48;
+const POSTER_NOTE_MAX = 96;
+const QUICK_AMOUNT_MAX = 8;
+
+function sanitizeText(value: unknown, max: number): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max);
+}
+
+function sanitizeQuickAmounts(loaded: unknown): string[] {
+  if (!Array.isArray(loaded)) return DEFAULT_SETTINGS.quickAmounts;
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const entry of loaded) {
+    if (typeof entry !== 'string') continue;
+    const cleaned = entry.replace(/[^\d.]/g, '');
+    if (!/^\d+(\.\d+)?$/.test(cleaned)) continue;
+    if (Number(cleaned) <= 0) continue;
+    if (seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    values.push(cleaned);
+    if (values.length >= QUICK_AMOUNT_MAX) break;
+  }
+  return values.length > 0 ? values : DEFAULT_SETTINGS.quickAmounts;
+}
 
 function sanitizeSplits(loaded: unknown): SplitDraft[] {
   if (!Array.isArray(loaded)) return [];
@@ -81,6 +114,9 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
         ? loaded.directTransfer
         : DEFAULT_SETTINGS.directTransfer,
     splits: sanitizeSplits(loaded.splits),
+    storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
+    posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),
+    quickAmounts: sanitizeQuickAmounts(loaded.quickAmounts),
   };
 }
 
