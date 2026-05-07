@@ -218,7 +218,6 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText('1000'));
 
-      // JPYC 中: 高精度値 2 件 + 500 が見える
       expect(
         screen.getByRole('button', { name: /0\.1234567890123 JPYC/ }),
       ).toBeInTheDocument();
@@ -240,7 +239,6 @@ describe('QrGenerator', () => {
       expect(
         screen.getByRole('button', { name: /^500 USDC/ }),
       ).toBeInTheDocument();
-      // 元の高精度 JPYC 表記ボタンは消えている
       expect(
         screen.queryByRole('button', { name: /0\.1234567890123/ }),
       ).toBeNull();
@@ -388,10 +386,8 @@ describe('QrGenerator', () => {
     });
 
     it('受信者を 3 人追加すると + 受取人を追加 ボタン自体が非表示になる (UI 条件付きレンダ)', async () => {
-      // 注: addSplit 関数内の `if (settings.splits.length >= SPLIT_MAX_ENTRIES) return`
-      // ガードは UI から到達不能 (button が条件付きレンダで消えるため click 不能)。
-      // この test は **UI 条件付きレンダ** が機能していることを検証するもので、
-      // 関数内ガードのカバレッジには貢献しない (構造的に dead branch)。
+      // 関数内の `if (length >= MAX) return` ガードは button 条件付きレンダで unreachable。
+      // このテストは UI 条件レンダの機能のみ検証する。
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));

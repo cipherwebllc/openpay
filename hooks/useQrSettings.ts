@@ -17,7 +17,7 @@ type QrSettings = {
   // 上級者向け: 顧客がガス代を負担する直接送金モード。
   // false (gasless+1%手数料) を既定にする。
   directTransfer: boolean;
-  // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人 (現行 UX)
+  // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人
   splits: SplitDraft[];
   // 店舗向け表示。DB を持たず、端末ローカルのレジ/印刷設定として保存する。
   storeName: string;
