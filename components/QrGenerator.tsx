@@ -6,7 +6,12 @@ import { useTranslations } from 'next-intl';
 import { isAddress, type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
-import { useQrSettings } from '@/hooks/useQrSettings';
+import {
+  POSTER_NOTE_MAX,
+  QUICK_AMOUNT_MAX,
+  STORE_NAME_MAX,
+  useQrSettings,
+} from '@/hooks/useQrSettings';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
@@ -46,60 +51,58 @@ function sanitizeAmount(raw: string, decimals: number): string {
   return cleaned.slice(0, dotIdx + 1 + decimals);
 }
 
+const FILENAME_FALLBACK = 'openpay';
+
 // 主要 OS (macOS APFS / Windows NTFS / Linux ext4) は UTF-8 ファイル名を許容する
-// ため日本語店舗名 (例「神田珈琲」) もそのまま残す。除去対象は path separator と
-// Windows 予約文字、制御文字、空白の正規化のみ。これを ASCII 限定の正規化に
-// すると日本語名が常に 'openpay' フォールバックに潰れて merchant が混乱する。
+// ため日本語店舗名 (例「神田珈琲」) もそのまま残す。除去対象は path separator・
+// Windows 予約文字・制御文字・空白・ダッシュ連続のみ。これを ASCII 限定の
+// 正規化にすると日本語名が常に fallback に潰れて merchant が混乱する。
 function fileSafe(value: string): string {
   const normalized = value
-    .trim()
-    .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, '-')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
+    .replace(/[-\\/:*?"<>|\s\x00-\x1f\x7f]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return normalized || 'openpay';
+  return normalized || FILENAME_FALLBACK;
 }
 
-function svgMarkupFrom(ref: React.RefObject<HTMLDivElement | null>): string {
+function svgMarkup(ref: React.RefObject<HTMLDivElement | null>): string | null {
   const svg = ref.current?.querySelector('svg');
-  return svg ? new XMLSerializer().serializeToString(svg) : '';
+  return svg ? new XMLSerializer().serializeToString(svg) : null;
 }
 
-function downloadTextFile(filename: string, text: string, type: string) {
-  if (!text) return;
-  const url = URL.createObjectURL(new Blob([text], { type }));
+function triggerDownload(href: string, filename: string) {
   const a = document.createElement('a');
-  a.href = url;
+  a.href = href;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
 }
 
 function downloadSvg(filename: string, ref: React.RefObject<HTMLDivElement | null>) {
-  const svg = svgMarkupFrom(ref);
-  downloadTextFile(filename, svg, 'image/svg+xml;charset=utf-8');
+  const markup = svgMarkup(ref);
+  if (!markup) return;
+  const url = URL.createObjectURL(
+    new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }),
+  );
+  triggerDownload(url, filename);
+  URL.revokeObjectURL(url);
 }
 
 function downloadPng(filename: string, ref: React.RefObject<HTMLDivElement | null>) {
-  const svg = svgMarkupFrom(ref);
-  if (!svg) return;
+  const markup = svgMarkup(ref);
+  if (!markup) return;
   const img = new Image();
   img.onload = () => {
+    // QR は常に正方形 (qrcode.react 出力)、img.width = img.height
     const canvas = document.createElement('canvas');
-    const size = Math.max(img.width, img.height);
-    canvas.width = size;
-    canvas.height = size;
+    canvas.width = img.width;
+    canvas.height = img.width;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(0, 0, img.width, img.width);
     ctx.drawImage(img, 0, 0);
-    const a = document.createElement('a');
-    a.href = canvas.toDataURL('image/png');
-    a.download = filename;
-    a.click();
+    triggerDownload(canvas.toDataURL('image/png'), filename);
   };
-  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
 }
 
 export function QrGenerator() {
@@ -459,7 +462,7 @@ export function QrGenerator() {
               }
               placeholder={t('storeNamePlaceholder')}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              maxLength={48}
+              maxLength={STORE_NAME_MAX}
             />
           </Field>
 
@@ -472,7 +475,7 @@ export function QrGenerator() {
               }
               placeholder={t('posterNotePlaceholder')}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              maxLength={96}
+              maxLength={POSTER_NOTE_MAX}
             />
           </Field>
 
@@ -616,7 +619,7 @@ export function QrGenerator() {
                   </div>
                 ))}
               </div>
-              {settings.quickAmounts.length < 8 && (
+              {settings.quickAmounts.length < QUICK_AMOUNT_MAX && (
                 <button
                   type="button"
                   onClick={addQuickAmount}

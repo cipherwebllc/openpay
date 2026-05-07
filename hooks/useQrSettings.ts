@@ -39,9 +39,9 @@ const DEFAULT_SETTINGS: QrSettings = {
   quickAmounts: ['500', '1000', '1500', '3000'],
 };
 
-const STORE_NAME_MAX = 48;
-const POSTER_NOTE_MAX = 96;
-const QUICK_AMOUNT_MAX = 8;
+export const STORE_NAME_MAX = 48;
+export const POSTER_NOTE_MAX = 96;
+export const QUICK_AMOUNT_MAX = 8;
 
 function sanitizeText(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
