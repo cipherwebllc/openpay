@@ -64,6 +64,16 @@ describe('useGasQuoteJpyc', () => {
     expect(getUserOperationGasPrice).not.toHaveBeenCalled();
   });
 
+  it('testnet USDC sponsorship fallback: 非 Polygon では gasAmount=0 を返して送信可能にする', async () => {
+    const { result } = renderHook(() => useGasQuoteJpyc(usdcDep), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data?.gasAmount).toBe(0n);
+    expect(getUserOperationGasPrice).not.toHaveBeenCalled();
+  });
+
   it('enabled=false で明示的に呼出を抑止できる', () => {
     renderHook(() => useGasQuoteJpyc(jpycDep, false), {
       wrapper: makeWrapper(),

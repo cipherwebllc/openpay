@@ -68,7 +68,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
 
   // 両方のフックを常に call し、isDirect で送信先を分岐 (条件付きフックは禁止)。
-  const gasless = useBatchPayment(deployment);
+  const gasless = useBatchPayment(deployment, !isDirect);
   const direct = useDirectPayment();
   const gasQuote = useGasQuote(deployment, !isDirect);
 

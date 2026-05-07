@@ -345,10 +345,18 @@ function sanitizeText(value: string, max: number): string | undefined {
 
 function sanitizePresets(raw: string): string[] | undefined {
   // カンマ区切り。空白を許容、不正トークンは捨て、上限件数で切る。
+  const seen = new Set<string>();
   const tokens = raw
     .split(',')
     .map((t) => t.trim())
-    .filter((t) => t.length > 0 && DECIMAL_PATTERN.test(t) && Number(t) > 0);
+    .filter((t) => {
+      if (t.length === 0 || !DECIMAL_PATTERN.test(t) || Number(t) <= 0) {
+        return false;
+      }
+      if (seen.has(t)) return false;
+      seen.add(t);
+      return true;
+    });
   if (tokens.length === 0) return undefined;
   return tokens.slice(0, TIP_PRESET_MAX);
 }
@@ -371,8 +379,14 @@ export function buildTipPath(params: TipParams): string {
     sp.set('color', params.color.toLowerCase());
   }
   if (params.presets && params.presets.length > 0) {
+    const seen = new Set<string>();
     const valid = params.presets
-      .filter((p) => DECIMAL_PATTERN.test(p) && Number(p) > 0)
+      .filter((p) => {
+        if (!DECIMAL_PATTERN.test(p) || Number(p) <= 0) return false;
+        if (seen.has(p)) return false;
+        seen.add(p);
+        return true;
+      })
       .slice(0, TIP_PRESET_MAX);
     if (valid.length > 0) sp.set('preset', valid.join(','));
   }

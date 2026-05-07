@@ -279,6 +279,16 @@ describe('buildTipPath', () => {
     expect(sp.get('preset')).toBe('100,500,1000,2000,3000,4000');
   });
 
+  it('preset は重複を除去して URL に出力する', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      presets: ['500', '1500', '500', '1500', '3000'],
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    expect(sp.get('preset')).toBe('500,1500,3000');
+  });
+
   it('name / message が長すぎたら切詰める', () => {
     const longName = 'あ'.repeat(100);
     const longMessage = 'い'.repeat(300);
@@ -413,6 +423,17 @@ describe('parseTipParams', () => {
         '3000',
         '4000',
       ]);
+    }
+  });
+
+  it('preset の重複は parse 時にも除去する', () => {
+    const r = parseTipParams(
+      VALID_TO,
+      search('token=jpyc&preset=500,1500,500,1500,3000'),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.presets).toEqual(['500', '1500', '3000']);
     }
   });
 

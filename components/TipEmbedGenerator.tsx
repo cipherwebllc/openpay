@@ -44,10 +44,18 @@ export function TipEmbedGenerator() {
 
   const colorValid = COLOR_PATTERN.test(settings.color);
   const presetsParsed = useMemo(() => {
+    const seen = new Set<string>();
     return settings.presets
       .split(',')
       .map((s) => s.trim())
-      .filter((s) => s.length > 0 && DECIMAL_PATTERN.test(s) && Number(s) > 0)
+      .filter((s) => {
+        if (s.length === 0 || !DECIMAL_PATTERN.test(s) || Number(s) <= 0) {
+          return false;
+        }
+        if (seen.has(s)) return false;
+        seen.add(s);
+        return true;
+      })
       .slice(0, 6);
   }, [settings.presets]);
 

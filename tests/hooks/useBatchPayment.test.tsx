@@ -223,6 +223,21 @@ describe('useBatchPayment', () => {
     expect(result.current.error?.message).toMatch(/Smart Account/);
   });
 
+  it('enabled=false を useSmartAccount に伝播する', () => {
+    mockHook(useSmartAccount, {
+      data: undefined,
+      isLoading: false,
+      error: null,
+    });
+    mockHook(useAccount, { chainId: baseSepolia.id });
+
+    renderHook(() => useBatchPayment(usdcDep, false), {
+      wrapper: makeWrapper(),
+    });
+
+    expect(useSmartAccount).toHaveBeenCalledWith(usdcDep, false);
+  });
+
   it('成功時に userOpHash と txHash を返却', async () => {
     mountReady();
     const { result } = renderHook(() => useBatchPayment(usdcDep), {

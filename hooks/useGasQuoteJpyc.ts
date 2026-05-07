@@ -21,13 +21,14 @@ export function useGasQuoteJpyc(
   enabled: boolean = true,
 ) {
   const isActive = enabled && resolvePaymasterMode(deployment) === 'sponsorship';
-  // sponsorship かつ Polygon (mainnet/Amoy) でのみ意味を持つ。
-  // testnet では gas 見積を 0 とし、フォーム側で gasAmount=0n として扱う。
+  // JPYC は Polygon (mainnet/Amoy) でのみ意味を持つ。
+  // testnet USDC は sponsorship fallback だが Base/Arbitrum/Optimism では
+  // JPYC 建て精算が存在しないため gas 見積を 0 として扱う。
   const isPolygon =
     deployment.chainId === polygon.id || deployment.chainId === polygonAmoy.id;
 
   return useQuery({
-    enabled: isActive && isPolygon,
+    enabled: isActive,
     queryKey: [
       'openpay',
       'gas-quote-jpyc',
@@ -38,6 +39,7 @@ export function useGasQuoteJpyc(
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
     queryFn: async () => {
+      if (!isPolygon) return { gasAmount: 0n };
       const pimlicoClient = createPimlico(deployment.chainId);
       const gasPrice = await pimlicoClient.getUserOperationGasPrice();
       const overhead =

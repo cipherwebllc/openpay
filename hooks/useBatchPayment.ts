@@ -43,8 +43,11 @@ type BatchPaymentResult = {
   success: boolean;
 };
 
-export function useBatchPayment(deployment: TokenDeployment) {
-  const { data: clients } = useSmartAccount(deployment);
+export function useBatchPayment(
+  deployment: TokenDeployment,
+  enabled: boolean = true,
+) {
+  const { data: clients } = useSmartAccount(deployment, enabled);
   const { chainId } = useAccount();
 
   return useMutation<BatchPaymentResult, Error, BatchPaymentParams>({

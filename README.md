@@ -22,13 +22,14 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 
 ## 直近の主要追加 (v0.2 候補)
 
+- **不具合 4 件修正** — (1) direct mode でも `useBatchPayment` 経由で Smart Account 初期化が走る問題を `enabled` 伝播で解消、(2) testnet USDC sponsorship fallback で非 Polygon chain が `gasQuoteReady=false` のまま送信不能になる問題を `useGasQuoteJpyc` の Polygon 外 0 返しで解消、(3) Tip preset の重複が React duplicate key 警告と URL 重複入力を起こす問題を `TipEmbedGenerator` / `lib/url.ts` 双方で dedup、(4) 回帰テスト 4 件を追加 (763 件 / 42 ファイル)
 - **EIP-681 互換 QR 併発行 (BYO wallet)** — 直接送金 + 金額指定 のとき、[EIP-681](https://eips.ethereum.org/EIPS/eip-681) 準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。任意の対応ウォレットから純粋 ERC20 transfer で送金可能 (OpenPay checkout を経由しない)。仕様準拠は自動検証済 (regex / viem `isAddress` / `URL.canParse`)、実ウォレットでの読取検証手順は §「EIP-681 互換 QR の実ウォレット読取検証」を参照。OpenPay は wallet 製造せず checkout 層に徹する方針を明示
 - **Phase 1 multi-chain USDC** — Base 限定から Base / Arbitrum One / Optimism / Polygon の **4 chain 対応** へ拡張。`/pay?token=usdc&chain=arbitrum` のような chain slug を URL で指定可能 (省略時は base 既定で旧 QR と互換)。Pimlico の `getTokenQuotes` で 4 chain × mainnet/testnet の全 8 deployment が valid な quote を返すことは `scripts/verify-pimlico-usdc.mjs` で確認済 (Universal Paymaster `0x7777777777...e66834C`)
 - **Checkout (β)** — Stripe Checkout 相当の itemized 決済 URL を発行する新ルート `/checkout`。商品リスト (最大 10 件) + 注文 metadata + success_url redirect (3 秒自動) + webhook (Tip と互換シェイプ) を URL に埋め込む
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 759 件 / 42 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 98.77 / 96.07 / 91.03 / 98.77。e2e 28 件 (chromium + mobile-safari)
+- **テスト** — 763 件 / 42 ファイル (lib mock 0、hook/component は外部 SDK 境界のみ mock)。coverage 98.77 / 96.07 / 91.03 / 98.77。e2e 28 件 (chromium + mobile-safari)
 - **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
 - **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
 - **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
@@ -477,7 +478,7 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (759 件) における mock 利用方針:
+本リポジトリの自動テスト (763 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
@@ -655,7 +656,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | Branches | 96.07% |
 | Functions | 91.03% |
 | Lines | 98.77% |
-| Test count | 759 件 (42 ファイル) + e2e 28 件 |
+| Test count | 763 件 (42 ファイル) + e2e 28 件 |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
