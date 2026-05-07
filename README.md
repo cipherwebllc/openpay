@@ -471,7 +471,9 @@ npm run build && npm run start
 | **Pimlico API Key の Origin 制限** | Pimlico Dashboard | `https://open-pay.jp` (production) + `*.vercel.app` (preview ドメイン群) に限定 |
 | **Pimlico Sponsorship Policy ルール** | Pimlico Dashboard | README "Pimlico ダッシュボード設定" 5 項参照 (fee_receiver への transfer 必須化) |
 | **Sentry DSN 設定** | Vercel env (Plain) | Replay (10% / エラー時 100%) + 例外取得が自動有効化 |
+| **Sentry alert rule 作成** ⚠ コード自動化不可 | Sentry Dashboard → Alerts | 「`payment.failed` が 5%/h を超えたら Slack 通知」「`smart-account.init-failed` が 10 件/h を超えたら通知」など。README §即 rollback トリガー の閾値と整合させる。**この項目は code config では担保できないため deploy 時に人手で確認** |
 | **`SENTRY_AUTH_TOKEN` を Sensitive で登録** | Vercel env (Sensitive) ✓ | 上記表参照 |
+| **Pimlico 残高 alert 設定** ⚠ コード自動化不可 | Pimlico Dashboard → Alerts | sponsorship policy に紐づく POL / ETH デポジット残高の lower-threshold 通知 (例: 残量 < 1 日想定使用量で Slack)。残高枯渇は UserOp `AA31 paymaster deposit too low` で全送金 fail に直結 |
 | **GitHub Secrets の見直し** | GitHub repo → Settings → Secrets | Pimlico 残高 cron / Lighthouse / Playwright 用の secrets は GitHub 側にあり、Vercel インシデントの影響を受けない (= 移行不要) |
 | **testnet で先に e2e** | Polygon Amoy / Base Sepolia | NETWORK_ENV=testnet で実 wallet を繋いで `/ja/pay` `/ja/tip` の送金成功を確認してから mainnet に切替 |
 
@@ -615,6 +617,28 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 実機検証の結果は `docs/eip681-compat.md` に追記して、partial / fail のウォレットがあれば README §特徴 の互換 QR 行に "(○○ 未対応)" の注記を追加する。Polygon Amoy testnet でも同じ手順で検証可能 (`NETWORK_ENV=testnet` の `/ja` で chainId=80002 の URI が出る)。
 
+### 10. axios override (1.16.0) と Coinbase Wallet 互換性
+
+`package.json` の `overrides: { axios: ^1.15.2 }` で `@coinbase/cdp-sdk` (wagmi → @wagmi/connectors → @base-org/account 経由の transitive) が要求する古い axios を **1.16.0 に強制 pin** している (HIGH 脆弱性回避のため)。axios 1.x は API 互換だが、`@coinbase/cdp-sdk` は内部で sign / network call を行うため、Coinbase Wallet 接続フローで silent な不整合が起きる可能性は **e2e で未検証**。
+
+**確認手順** (mainnet 投入前):
+- Polygon Amoy / Base Sepolia の testnet 環境で Coinbase Wallet を接続 → `/ja/pay` で 1 件以上 USDC 送金成功させる
+- 失敗した場合: `package.json` の override を `^1.15.2` から具体的な動作確認済バージョン (例: `1.15.2`) に固定するか、Coinbase Wallet サポートを一時的に外す
+
+upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で override は撤去予定。Renovate が weekly でチェック。
+
+### 11. Performance / 負荷測定
+
+現状取得済みは **production build 出力の bundle サイズのみ** (`scripts/check-bundle-budget.mjs` で First Load JS の予算チェック)。以下は **未実施**:
+
+| 項目 | 状態 | 必要なケース |
+|---|---|---|
+| Lighthouse score (mobile) | 未取得 | mainnet 切替前に `lighthouse` CI で performance / a11y / SEO を計測。閾値は `.lighthouserc.json` で設定 |
+| 4G エミュレーション下の TTI / LCP | 未測定 | `/[locale]/pay` の First Load JS 381 kB は SPA としては重め。3G/4G で実測すべき |
+| 同時アクセス負荷 | 未実施 | 静的 SSG が中心なので Vercel CDN で吸収される想定だが、未検証 |
+
+これらは MVP として deploy 後に実測 → 必要なら `dynamic import` / chunk splitting で改善する。前回 production review で「✅」とした評価は **build 通過 + サイズ予算内 という意味の ✅** であり、実測パフォーマンスは別途検証が必要。
+
 ---
 
 ## 既知の制約 / 注意
@@ -629,10 +653,12 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 `npm audit --omit=dev` は production で **2 件 moderate (2026-05-07 時点)** を報告。**HIGH 以上はゼロ** (CI の `--audit-level=high` を pass)。残る moderate はいずれも transitive 依存で本リポジトリの利用パターンでは実害なし:
 
-| Advisory | Severity | 経路 | 本リポの実害 |
-|---|---|---|---|
-| `postcss <8.5.10` XSS via Unescaped `</style>` | moderate | next 内部 | **なし** — build 時に処理する CSS は自プロジェクト由来、ユーザ入力を CSS に通さない |
-| (もう 1 件 transitive。詳細は `npm audit` 出力参照) | moderate | next / wagmi 経由 | **なし** — 利用パターンでは攻撃面なし |
+**root cause は 1 件のみ** (`postcss` XSS)。`npm audit` は次のパッケージ単位で 2 件と報告するが、いずれも同じ advisory を別経路でカウントしているだけ:
+
+| Advisory | Severity | パッケージ | 経路 | 本リポの実害 |
+|---|---|---|---|---|
+| `postcss <8.5.10` XSS via Unescaped `</style>` (GHSA-qx2v-qp2m-jg93) | moderate | `postcss` | `next` 内部 | **なし** — build 時に処理する CSS は自プロジェクト由来、ユーザ入力を CSS に通さない |
+| 上記の伝播 | moderate | `next` (≤16.3.0-canary) | `via: ['postcss']` | **なし** — 同上 |
 
 **HIGH 解消経緯 (2026-05-07)**: `axios <1.15.2` (via `wagmi → @wagmi/connectors → @base-org/account → @coinbase/cdp-sdk`) で SSRF / prototype pollution / auth bypass 等の advisories が moderate → **HIGH に昇格**したため CI を blocking。`package.json` の `overrides` で `axios: ^1.15.2` に強制 pin して解消 (axios 1.x は API 互換、@coinbase/cdp-sdk は単純な GET/POST のみ使用するため互換性問題なし)。upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で override は撤去予定。
 
