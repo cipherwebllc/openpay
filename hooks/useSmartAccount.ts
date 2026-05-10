@@ -86,6 +86,7 @@ export function useSmartAccount(
         );
         return buildMav2SmartAccountClient({
           walletClient,
+          publicClient,
           chain: walletClient.chain,
           chainId,
           deployment,

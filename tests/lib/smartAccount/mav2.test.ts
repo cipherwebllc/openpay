@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Address, Hex } from 'viem';
+import { http, type Address, type Hex } from 'viem';
 import { polygon } from 'viem/chains';
 import { buildMav2SmartAccountClient } from '@/lib/smartAccount/mav2';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
@@ -85,6 +85,9 @@ const usdcErc20: TokenDeployment = {
 };
 
 const fakeWalletClient = { account: { address: '0x' } } as never;
+const fakePublicClient = {
+  transport: { url: 'https://polygon-rpc.example/test' },
+} as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,6 +99,7 @@ describe('buildMav2SmartAccountClient', () => {
 
     const bundle = await buildMav2SmartAccountClient({
       walletClient: fakeWalletClient,
+      publicClient: fakePublicClient,
       chain: polygon,
       chainId: polygon.id,
       deployment: jpycSponsorship,
@@ -128,6 +132,7 @@ describe('buildMav2SmartAccountClient', () => {
     await expect(
       buildMav2SmartAccountClient({
         walletClient: fakeWalletClient,
+        publicClient: fakePublicClient,
         chain: polygon,
         chainId: polygon.id,
         deployment: usdcErc20,
@@ -141,10 +146,33 @@ describe('buildMav2SmartAccountClient', () => {
     sendUserOperationMock.mockResolvedValue({ hash: '0x01' });
     await buildMav2SmartAccountClient({
       walletClient: fakeWalletClient,
+      publicClient: fakePublicClient,
       chain: polygon,
       chainId: polygon.id,
       deployment: jpycSponsorship,
     });
     expect(createAaClientMock).toHaveBeenCalledOnce();
+  });
+
+  it('account 用 transport は publicClient の chain RPC URL を使う (Pimlico bundler ではない)', async () => {
+    // R: Pimlico bundler URL を account transport に渡すと
+    // eth_getTransactionCount 等が "method does not exist" で reject される。
+    // chain RPC URL が createModularAccountV2 に渡る fence。
+    sendUserOperationMock.mockResolvedValue({ hash: '0x02' });
+    await buildMav2SmartAccountClient({
+      walletClient: fakeWalletClient,
+      publicClient: fakePublicClient,
+      chain: polygon,
+      chainId: polygon.id,
+      deployment: jpycSponsorship,
+    });
+    const mav2Args = createModularAccountV2Mock.mock.calls[0]?.[0] as {
+      transport: ReturnType<typeof http>;
+    };
+    // viem の http transport は factory。呼び出した結果の config.url を見る。
+    const config = mav2Args.transport({ chain: polygon }) as {
+      value?: { url?: string };
+    };
+    expect(config.value?.url).toBe('https://polygon-rpc.example/test');
   });
 });

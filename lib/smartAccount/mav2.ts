@@ -17,7 +17,14 @@
 //   (調査 task #22 / R1)。Polygon Amoy + HashPort 実機 smoke で確証取るまで
 //   feature flag (NEXT_PUBLIC_ENABLE_MAV2) で OFF が default。
 
-import { http, type Address, type Chain, type Hex, type Transport } from 'viem';
+import {
+  http,
+  type Address,
+  type Chain,
+  type Hex,
+  type PublicClient,
+  type Transport,
+} from 'viem';
 import {
   createSmartAccountClient as createAaSmartAccountClient,
   WalletClientSigner,
@@ -46,11 +53,12 @@ type Mav2SmartAccountClientFacade = {
 
 export async function buildMav2SmartAccountClient(args: {
   walletClient: ConnectedWalletClient;
+  publicClient: PublicClient;
   chain: Chain;
   chainId: number;
   deployment: TokenDeployment;
 }): Promise<SmartAccountBundle> {
-  const { walletClient, chain, chainId, deployment } = args;
+  const { walletClient, publicClient, chain, chainId, deployment } = args;
   const paymasterMode = resolvePaymasterMode(deployment);
 
   // phase 1: USDC ERC20 paymaster + MAv2 は未検証のため拒否する。
@@ -65,7 +73,14 @@ export async function buildMav2SmartAccountClient(args: {
 
   const pimlicoClient = createPimlico(chainId);
   const paymasterContext = pimlicoPaymasterContext(deployment);
-  const transport: Transport = http(pimlicoUrl(chainId));
+  // bundler / paymaster (Pimlico): ERC-4337 + ERC-7677 RPC のみ。
+  const bundlerTransport: Transport = http(pimlicoUrl(chainId));
+  // account の chain 読込 (eth_getCode / eth_getTransactionCount 等) 用。
+  // Pimlico bundler は標準 eth_* を expose しないので必ず chain RPC を使う。
+  const chainRpcUrl =
+    (publicClient.transport as { url?: string }).url ??
+    chain.rpcUrls.default.http[0];
+  const accountTransport: Transport = http(chainRpcUrl);
 
   // wagmi の WalletClient を aa-sdk の SmartAccountSigner に wrap。
   // signMessage / signTypedData / signAuthorization を提供する。
@@ -75,7 +90,7 @@ export async function buildMav2SmartAccountClient(args: {
   // mode: '7702' で createModularAccountV2 を構築すると account.address は
   // signer.getAddress() (= EOA) と等しくなる。
   const account = await createModularAccountV2({
-    transport,
+    transport: accountTransport,
     chain,
     signer,
     mode: '7702',
@@ -101,7 +116,7 @@ export async function buildMav2SmartAccountClient(args: {
 
   const aaClient = createAaSmartAccountClient({
     chain,
-    transport,
+    transport: bundlerTransport,
     account,
     feeEstimator,
     ...paymasterMiddleware,
