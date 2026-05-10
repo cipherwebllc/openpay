@@ -10,6 +10,7 @@ const sendUserOperationMock = vi.fn();
 const createModularAccountV2Mock = vi.fn();
 const erc7677MiddlewareMock = vi.fn();
 const createAaClientMock = vi.fn();
+const splitMock = vi.fn();
 
 vi.mock('@aa-sdk/core', () => ({
   createSmartAccountClient: (...args: unknown[]) => {
@@ -28,6 +29,12 @@ vi.mock('@aa-sdk/core', () => ({
       paymasterAndData: vi.fn(),
       dummyPaymasterAndData: vi.fn(),
     };
+  },
+  // split(...) は viem の Transport を返す。テストでは渡された設定だけ
+  // 観察したいので marker object で代替する。
+  split: (params: unknown) => {
+    splitMock(params);
+    return { __splitMarker: true } as unknown as ReturnType<typeof http>;
   },
 }));
 
@@ -174,5 +181,38 @@ describe('buildMav2SmartAccountClient', () => {
       value?: { url?: string };
     };
     expect(config.value?.url).toBe('https://polygon-rpc.example/test');
+  });
+
+  it('split transport: bundler/paymaster method は Pimlico、それ以外は chain RPC へ route', async () => {
+    // R: aa-sdk の SmartAccountClient は同一 transport で bundler ops と
+    // chain reads (eth_getCode 等) の両方を行う。Pimlico bundler URL だけを
+    // 渡すと chain reads が "method does not exist" で reject される。
+    // split overrides に必須の bundler/paymaster methods が乗っていることを fence。
+    sendUserOperationMock.mockResolvedValue({ hash: '0x03' });
+    await buildMav2SmartAccountClient({
+      walletClient: fakeWalletClient,
+      publicClient: fakePublicClient,
+      chain: polygon,
+      chainId: polygon.id,
+      deployment: jpycSponsorship,
+    });
+    expect(splitMock).toHaveBeenCalledOnce();
+    const splitArgs = splitMock.mock.calls[0]?.[0] as {
+      overrides: { methods: string[]; transport: unknown }[];
+      fallback: unknown;
+    };
+    const overrideMethods = splitArgs.overrides[0]?.methods ?? [];
+    // ERC-4337 / ERC-7677 / pimlico_ いずれも bundler endpoint へ。
+    expect(overrideMethods).toContain('eth_sendUserOperation');
+    expect(overrideMethods).toContain('eth_estimateUserOperationGas');
+    expect(overrideMethods).toContain('eth_supportedEntryPoints');
+    expect(overrideMethods).toContain('pm_getPaymasterStubData');
+    expect(overrideMethods).toContain('pm_getPaymasterData');
+    expect(overrideMethods).toContain('pimlico_getUserOperationGasPrice');
+    // 標準 eth_* (eth_getCode / eth_getTransactionCount 等) は overrides に
+    // 含めない。fallback (chain RPC) で処理されること。
+    expect(overrideMethods).not.toContain('eth_getCode');
+    expect(overrideMethods).not.toContain('eth_getTransactionCount');
+    expect(overrideMethods).not.toContain('eth_call');
   });
 });

@@ -29,6 +29,7 @@ import {
   createSmartAccountClient as createAaSmartAccountClient,
   WalletClientSigner,
   erc7677Middleware,
+  split,
   type ClientMiddlewareFn,
 } from '@aa-sdk/core';
 import { createModularAccountV2 } from '@account-kit/smart-contracts';
@@ -73,14 +74,42 @@ export async function buildMav2SmartAccountClient(args: {
 
   const pimlicoClient = createPimlico(chainId);
   const paymasterContext = pimlicoPaymasterContext(deployment);
-  // bundler / paymaster (Pimlico): ERC-4337 + ERC-7677 RPC のみ。
-  const bundlerTransport: Transport = http(pimlicoUrl(chainId));
-  // account の chain 読込 (eth_getCode / eth_getTransactionCount 等) 用。
-  // Pimlico bundler は標準 eth_* を expose しないので必ず chain RPC を使う。
+
+  // Pimlico bundler endpoint は ERC-4337 + ERC-7677 (pm_*) + pimlico_* のみで、
+  // 標準 eth_* (eth_getCode / eth_getTransactionCount / eth_call) は expose
+  // しない。aa-sdk の SmartAccountClient は同一 transport で bundler ops と
+  // chain reads の両方を行うため、bundler URL をそのまま渡すと chain reads が
+  // "method does not exist" で reject される (HashPort 実機 2026-05-10 観測)。
+  // → split transport で method 名で route 分け:
+  //   - bundler / paymaster methods → Pimlico
+  //   - その他 (eth_*) → chain RPC (publicClient と同じ endpoint)
+  const bundlerOnlyTransport: Transport = http(pimlicoUrl(chainId));
   const chainRpcUrl =
     (publicClient.transport as { url?: string }).url ??
     chain.rpcUrls.default.http[0];
-  const accountTransport: Transport = http(chainRpcUrl);
+  const chainTransport: Transport = http(chainRpcUrl);
+  const splitTransport: Transport = split({
+    overrides: [
+      {
+        methods: [
+          // ERC-4337 bundler RPC
+          'eth_sendUserOperation',
+          'eth_estimateUserOperationGas',
+          'eth_getUserOperationReceipt',
+          'eth_getUserOperationByHash',
+          'eth_supportedEntryPoints',
+          // Pimlico 拡張
+          'pimlico_getUserOperationGasPrice',
+          'pimlico_sendUserOperationNow',
+          // ERC-7677 paymaster (Pimlico は同 URL で expose)
+          'pm_getPaymasterStubData',
+          'pm_getPaymasterData',
+        ],
+        transport: bundlerOnlyTransport,
+      },
+    ],
+    fallback: chainTransport,
+  });
 
   // wagmi の WalletClient を aa-sdk の SmartAccountSigner に wrap。
   // signMessage / signTypedData / signAuthorization を提供する。
@@ -90,7 +119,7 @@ export async function buildMav2SmartAccountClient(args: {
   // mode: '7702' で createModularAccountV2 を構築すると account.address は
   // signer.getAddress() (= EOA) と等しくなる。
   const account = await createModularAccountV2({
-    transport: accountTransport,
+    transport: chainTransport,
     chain,
     signer,
     mode: '7702',
@@ -116,7 +145,7 @@ export async function buildMav2SmartAccountClient(args: {
 
   const aaClient = createAaSmartAccountClient({
     chain,
-    transport: bundlerTransport,
+    transport: splitTransport,
     account,
     feeEstimator,
     ...paymasterMiddleware,
