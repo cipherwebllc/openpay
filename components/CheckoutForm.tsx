@@ -23,6 +23,7 @@ import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
+import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -108,12 +109,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
-    : (gasless.error?.message ??
-      saError?.message ??
-      (gasQuote.error ? t('errorGasQuote') : null) ??
-      (merchantUnderflow
-        ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-        : null));
+    : isIncompatibleSmartAccountError(saError)
+      ? t(saError.i18nKey)
+      : (gasless.error?.message ??
+        saError?.message ??
+        (gasQuote.error ? t('errorGasQuote') : null) ??
+        (merchantUnderflow
+          ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
+          : null));
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
   // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。

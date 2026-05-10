@@ -21,6 +21,26 @@ const OFFRAMP_KEYS = [
   'japaneseUserHint',
 ] as const;
 
+describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)', () => {
+  // useSmartAccount の router が IncompatibleSmartAccountError を投げる時の
+  // i18n key 2 種。HashPort などの MAv2 委任 EOA 対策で導入。
+  const SA_KEYS = ['errorIncompatibleSmartAccount', 'errorMav2Disabled'] as const;
+  for (const ns of FORM_NAMESPACES) {
+    for (const key of SA_KEYS) {
+      it(`ja.${ns}.${key} は非空文字列`, () => {
+        const v = (ja[ns] as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+      it(`en.${ns}.${key} は非空文字列`, () => {
+        const v = (en[ns] as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+});
+
 describe('i18n: onramp keys (3 form 名前空間 × ja/en)', () => {
   for (const ns of FORM_NAMESPACES) {
     for (const key of ONRAMP_KEYS) {

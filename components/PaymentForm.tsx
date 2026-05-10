@@ -24,6 +24,7 @@ import {
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
+import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -179,12 +180,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const flowError = isDirect ? direct.error : gasless.error;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : (flowError?.message ??
-      (isDirect ? undefined : saError?.message) ??
-      (gasQuote.error ? t('errorGasQuote') : null) ??
-      (merchantUnderflow
-        ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-        : null));
+    : !isDirect && isIncompatibleSmartAccountError(saError)
+      ? t(saError.i18nKey)
+      : (flowError?.message ??
+        (isDirect ? undefined : saError?.message) ??
+        (gasQuote.error ? t('errorGasQuote') : null) ??
+        (merchantUnderflow
+          ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
+          : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });

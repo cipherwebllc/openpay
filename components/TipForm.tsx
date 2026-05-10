@@ -18,6 +18,7 @@ import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
+import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -111,9 +112,11 @@ export function TipForm({ params }: { params: TipParams }) {
   // gasQuote の失敗も同様に i18n 化 (詳細は logger 経由で Sentry へ)。
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
-    : (gasless.error?.message ??
-      saError?.message ??
-      (gasQuote.error ? t('errorGasQuote') : null));
+    : isIncompatibleSmartAccountError(saError)
+      ? t(saError.i18nKey)
+      : (gasless.error?.message ??
+        saError?.message ??
+        (gasQuote.error ? t('errorGasQuote') : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });
