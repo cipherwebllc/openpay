@@ -468,9 +468,9 @@ describe('useBatchPayment', () => {
       expect(getUserOperationGasPrice).not.toHaveBeenCalled();
     });
 
-    it('Polygon mainnet (chainId=137) sponsorship: 400 gwei 以下 OK / 超過 reject', async () => {
-      // 既定 ceiling は Polygon mainnet 400 gwei
-      mountReady({ maxFeePerGas: 399n * GWEI, chainId: polygon.id });
+    it('Polygon mainnet (chainId=137) sponsorship: 1000 gwei 以下 OK / 超過 reject', async () => {
+      // 既定 ceiling は Polygon mainnet 1000 gwei (2026-05 base fee 上昇に追従)
+      mountReady({ maxFeePerGas: 999n * GWEI, chainId: polygon.id });
       const { result: ok } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
@@ -485,7 +485,7 @@ describe('useBatchPayment', () => {
 
       // reset for the over-ceiling case
       vi.clearAllMocks();
-      mountReady({ maxFeePerGas: 450n * GWEI, chainId: polygon.id });
+      mountReady({ maxFeePerGas: 1100n * GWEI, chainId: polygon.id });
       const { result: ng } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });

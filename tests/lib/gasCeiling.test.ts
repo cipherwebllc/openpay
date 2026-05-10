@@ -22,8 +22,8 @@ afterEach(() => {
 });
 
 describe('gasCeilingGweiForChain (default values)', () => {
-  it('Polygon mainnet (137) は 400 gwei', () => {
-    expect(gasCeilingGweiForChain(polygon.id)).toBe(400n);
+  it('Polygon mainnet (137) は 1000 gwei (2026-05 base fee 上昇に追従)', () => {
+    expect(gasCeilingGweiForChain(polygon.id)).toBe(1000n);
   });
   it('Polygon Amoy testnet は緩い (1000 gwei)', () => {
     expect(gasCeilingGweiForChain(polygonAmoy.id)).toBe(1000n);
@@ -43,17 +43,17 @@ describe('gasCeilingGweiForChain (default values)', () => {
 describe('assertGasCeiling', () => {
   it('上限以下: 何もしない (return)', () => {
     expect(() =>
-      assertGasCeiling(polygon.id, 200n * GWEI),
+      assertGasCeiling(polygon.id, 600n * GWEI),
     ).not.toThrow();
     expect(() =>
-      assertGasCeiling(polygon.id, 400n * GWEI), // 境界 (==)
+      assertGasCeiling(polygon.id, 1000n * GWEI), // 境界 (==)
     ).not.toThrow();
     expect(() => assertGasCeiling(base.id, 10n * GWEI)).not.toThrow();
   });
 
   it('上限超過: GasCongestedError を投げる', () => {
     expect(() =>
-      assertGasCeiling(polygon.id, 401n * GWEI),
+      assertGasCeiling(polygon.id, 1001n * GWEI),
     ).toThrow(GasCongestedError);
     expect(() => assertGasCeiling(base.id, 11n * GWEI)).toThrow(
       GasCongestedError,
@@ -63,17 +63,17 @@ describe('assertGasCeiling', () => {
   it('error が ceiling / observed gwei を保持する', () => {
     let captured: GasCongestedError | undefined;
     try {
-      assertGasCeiling(polygon.id, 550n * GWEI);
+      assertGasCeiling(polygon.id, 1200n * GWEI);
     } catch (e) {
       captured = e as GasCongestedError;
     }
     expect(captured).toBeInstanceOf(GasCongestedError);
     expect(captured?.chainId).toBe(polygon.id);
-    expect(captured?.ceilingGwei).toBe(400n);
-    expect(captured?.observedGwei).toBe(550n);
+    expect(captured?.ceilingGwei).toBe(1000n);
+    expect(captured?.observedGwei).toBe(1200n);
     expect(captured?.message).toContain('gas_congested');
-    expect(captured?.message).toContain('400');
-    expect(captured?.message).toContain('550');
+    expect(captured?.message).toContain('1000');
+    expect(captured?.message).toContain('1200');
   });
 
   it('未登録チェーンは pass-through (any maxFeePerGas)', () => {
@@ -170,7 +170,7 @@ describe('env override (gasCeilingGwei)', () => {
     process.env.NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI = '-1';
     process.env.NEXT_PUBLIC_GAS_CEILING_BASE_GWEI = 'abc';
     const mod = await import('@/lib/gasCeiling');
-    expect(mod.gasCeilingGweiForChain(polygon.id)).toBe(400n);
+    expect(mod.gasCeilingGweiForChain(polygon.id)).toBe(1000n);
     expect(mod.gasCeilingGweiForChain(base.id)).toBe(10n);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();

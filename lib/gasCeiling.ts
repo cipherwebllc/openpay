@@ -6,12 +6,15 @@
 // L2 については「実 base fee」ではなく「Pimlico fast quote」を基準に置く点
 // に注意。
 //
-//   - Polygon 400 gwei (sponsorship mode の運営 P&L 防衛線):
-//     200,000 gas / UserOp / POL=60 JPY 想定で 0.08 POL ≒ 4.8 JPY、フロア
-//     5 JPYC = 5 JPY とほぼ同額の break-even。実 ERC-4337 batched UserOp は
-//     300〜500k gas が現実的なので、運用上は薄利だが Pimlico fast の平常時
-//     spike (200〜400 gwei) を通すための妥協ライン。
-//     500+ gwei 帯は本物の混雑なので block する。
+//   - Polygon 1000 gwei (sponsorship mode、UX 優先で運営 P&L は許容):
+//     2026-05 時点の Polygon mainnet 平常 base fee が 250 gwei 帯に上昇
+//     (DePIN/AI 需要増)。Pimlico fast tier はそこに priority fee を 150〜
+//     250 gwei 上乗せして 500〜700 gwei を quote する。400 gwei では実質
+//     常時 block されるため、現実に合わせて 1000 gwei に拡張。
+//     1 tx あたり最大 〜10 JPY (1000 gwei × 400k gas × POL=60 JPY) の運営
+//     赤字を許容する代わりに送金が通る状態を担保する。中期では floor fee
+//     を 5 → 10 JPYC に上げて P&L 黒字化する想定 (別 issue)。
+//     1500+ gwei 帯は異常な spike として block 維持。
 //   - Base 10 gwei (USDC erc20 paymaster mode、顧客負担):
 //     Pimlico fast の Base mainnet 平常時 quote が 1〜3 gwei、混雑時 5〜10
 //     gwei 程度。実質 ceiling は「異常な spike を弾く UX ガード」のみで、
@@ -44,7 +47,7 @@ import { env } from './env';
 const GWEI = 10n ** 9n;
 
 const DEFAULT_CEILING_GWEI: Record<number, bigint> = {
-  [polygon.id]: 400n,
+  [polygon.id]: 1000n,
   [polygonAmoy.id]: 1000n, // testnet は開発体験を優先して緩く
   [base.id]: 10n,
   [baseSepolia.id]: 1000n,
