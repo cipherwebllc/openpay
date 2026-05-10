@@ -1,22 +1,30 @@
 'use client';
 
-// ERC-7702 で EOA を Smart Account 化 (初回 UserOp で signAuthorization が出る)。
-// ERC20 mode のときは prepareUserOperationForErc20Paymaster が calls 先頭に
-// paymaster への approve を自動注入する (allowance 不足時のみ)。
+// EOA の 7702 delegation 状態を `eth_getCode` で検出し、適切な SmartAccount
+// client builder に分岐する router。
+//
+// - none / pimlico-simple-7702 → permissionless `to7702SimpleSmartAccount` 経路
+//   (旧来の挙動、振る舞い無変更)
+// - alchemy-mav2-7702 → `@account-kit/smart-contracts` 経由の MAv2 経路
+//   HashPort wallet 等が EOA を Alchemy MAv2 へ自動委任しているケース。
+//   Pimlico bundler / paymaster は両者で共有 (account 層だけ差替)。
+//   feature flag NEXT_PUBLIC_ENABLE_MAV2 が立っている時のみ有効。
+// - unknown / mav2 (flag off) → IncompatibleSmartAccountError throw、UI は
+//   i18n された案内を出す。
+//
+// useBatchPayment / useGasQuote* など下流 consumer は引き続き返り値を
+// `{ smartAccountClient, pimlicoClient, paymasterMode }` で受け取るので
+// 振る舞いは無変更。
 
 import { useQuery } from '@tanstack/react-query';
-import { http } from 'viem';
-import { createSmartAccountClient } from 'permissionless';
-import { to7702SimpleSmartAccount } from 'permissionless/accounts';
-import { prepareUserOperationForErc20Paymaster } from 'permissionless/experimental/pimlico';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { isSupportedChainId } from '@/lib/chains';
 import {
-  createPimlico,
-  pimlicoPaymasterContext,
-  pimlicoUrl,
-  resolvePaymasterMode,
-} from '@/lib/pimlico';
+  detectAccountKind,
+  IncompatibleSmartAccountError,
+} from '@/lib/accountDetection';
+import { buildSimpleSmartAccountClient } from '@/lib/smartAccount/simpleAccount';
+import { env } from '@/lib/env';
 import type { TokenDeployment } from '@/lib/tokens';
 
 export function useSmartAccount(
@@ -45,35 +53,51 @@ export function useSmartAccount(
     ],
     queryFn: async () => {
       // enabled で全条件を確認済みだが TS の narrowing のために再チェック
-      if (!walletClient || !publicClient || !chainId) {
+      if (!walletClient || !publicClient || !chainId || !address) {
         throw new Error('not ready');
       }
 
-      const pimlicoClient = createPimlico(chainId);
-      const paymasterMode = resolvePaymasterMode(deployment);
+      const detection = await detectAccountKind(publicClient, address);
 
-      const account = await to7702SimpleSmartAccount({
-        client: publicClient,
-        owner: walletClient,
+      if (
+        detection.kind === 'none' ||
+        detection.kind === 'pimlico-simple-7702'
+      ) {
+        return buildSimpleSmartAccountClient({
+          walletClient,
+          publicClient,
+          chainId,
+          deployment,
+        });
+      }
+
+      if (detection.kind === 'alchemy-mav2-7702') {
+        if (!env.enableMav2) {
+          throw new IncompatibleSmartAccountError({
+            delegateAddress: detection.delegateAddress,
+            i18nKey: 'errorMav2Disabled',
+          });
+        }
+        // MAv2 SDK (約 4 kB gzip) は HashPort ユーザのみで必要。
+        // dynamic import で /pay /tip /checkout の baseline bundle に
+        // 含めない (lazy load される)。
+        const { buildMav2SmartAccountClient } = await import(
+          '@/lib/smartAccount/mav2'
+        );
+        return buildMav2SmartAccountClient({
+          walletClient,
+          chain: walletClient.chain,
+          chainId,
+          deployment,
+        });
+      }
+
+      // unknown delegation: 既知の MAv2 / Pimlico SimpleAccount いずれでもない。
+      // 互換性が取れないので明示的に block して UI で案内する。
+      throw new IncompatibleSmartAccountError({
+        delegateAddress: detection.delegateAddress,
+        i18nKey: 'errorIncompatibleSmartAccount',
       });
-
-      const smartAccountClient = createSmartAccountClient({
-        account,
-        chain: walletClient.chain,
-        bundlerTransport: http(pimlicoUrl(chainId)),
-        paymaster: pimlicoClient,
-        paymasterContext: pimlicoPaymasterContext(deployment),
-        userOperation: {
-          estimateFeesPerGas: async () =>
-            (await pimlicoClient.getUserOperationGasPrice()).fast,
-          prepareUserOperation:
-            paymasterMode === 'erc20'
-              ? prepareUserOperationForErc20Paymaster(pimlicoClient)
-              : undefined,
-        },
-      });
-
-      return { smartAccountClient, pimlicoClient, paymasterMode };
     },
     refetchOnWindowFocus: false,
     staleTime: Infinity,

@@ -88,7 +88,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       chainId: 1,
     });
     mockHook(useWalletClient, { data: { chain: { id: 1 } } });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -103,7 +103,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: undefined });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -133,7 +133,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep, false), {
       wrapper: makeWrapper(),
@@ -160,7 +160,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -192,7 +192,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: baseSepolia.id,
     });
     mockHook(useWalletClient, { data: { chain: baseSepolia } });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(usdcDep), {
       wrapper: makeWrapper(),
@@ -215,7 +215,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result: jpyc } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -268,7 +268,7 @@ describe('useSmartAccount (queryFn の defense-in-depth throw)', () => {
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: undefined });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -288,7 +288,7 @@ describe('useSmartAccount (queryFn の defense-in-depth throw)', () => {
       chainId: polygonAmoy.id, // wallet on Polygon
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, {});
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
     const { result } = renderHook(() => useSmartAccount(usdcDep), {
       // usdcDep は Base Sepolia (84532)、wallet は Polygon Amoy (80002)
@@ -296,6 +296,85 @@ describe('useSmartAccount (queryFn の defense-in-depth throw)', () => {
     });
 
     expect(result.current.fetchStatus).toBe('idle');
+    expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSmartAccount (7702 delegation 分岐)', () => {
+  // detectAccountKind は実コードで動かす (eth_getCode mock に依存)。
+  // PIMLICO_SIMPLE7702 / ALCHEMY_MAV2 の固定アドレスを使って分岐を観察。
+  const PIMLICO_SIMPLE = '0xe6Cae83BdE06E4c305530e199D7217f42808555B'.toLowerCase();
+  const ALCHEMY_MAV2 = '0x69007702764179F14f51cdcE752f4F775d74E139'.toLowerCase();
+
+  it('Pimlico SimpleAccount に既に委任済 (pimlico-simple-7702): 既存 SimpleAccount 経路で動く (regression)', async () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, {
+      getCode: vi.fn().mockResolvedValue(`0xef0100${PIMLICO_SIMPLE.slice(2)}`),
+    });
+
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    expect(to7702SimpleSmartAccount).toHaveBeenCalledOnce();
+    expect(createSmartAccountClient).toHaveBeenCalledOnce();
+    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+  });
+
+  it('Alchemy MAv2 委任済 + feature flag OFF (default): IncompatibleSmartAccountError', async () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, {
+      getCode: vi.fn().mockResolvedValue(`0xef0100${ALCHEMY_MAV2.slice(2)}`),
+    });
+
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.error?.name).toBe('IncompatibleSmartAccountError');
+    expect((result.current.error as { i18nKey?: string })?.i18nKey).toBe(
+      'errorMav2Disabled',
+    );
+    // SimpleAccount builder は呼ばれない
+    expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
+  });
+
+  it('未知の 7702 delegate: IncompatibleSmartAccountError + delegateAddress 保持', async () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, {
+      getCode: vi
+        .fn()
+        .mockResolvedValue(
+          '0xef0100deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        ),
+    });
+
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.error?.name).toBe('IncompatibleSmartAccountError');
+    expect((result.current.error as { i18nKey?: string })?.i18nKey).toBe(
+      'errorIncompatibleSmartAccount',
+    );
+    expect(
+      (result.current.error as { delegateAddress?: string })?.delegateAddress?.toLowerCase(),
+    ).toBe('0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
     expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
   });
 });
@@ -323,7 +402,7 @@ describe('useSmartAccount (queryFn 実走行: ERC20 mode @ mainnet)', () => {
         chainId: baseChain.id,
       });
       mockHook(useWalletClient, { data: { chain: baseChain } });
-      mockHook(usePublicClient, {});
+      mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
 
       const { result } = renderHook(() => hookFresh(usdcDepFresh), {
         wrapper: makeWrapper(),

@@ -167,6 +167,13 @@ export const env = {
     'NEXT_PUBLIC_POL_JPYC_RATE',
     process.env.NEXT_PUBLIC_POL_JPYC_RATE,
   ),
+  // Alchemy Modular Account v2 (MAv2) 経路の有効化フラグ。
+  // HashPort wallet など EOA が MAv2 へ 7702 委任済のケースで動かす。
+  // Pimlico bundler が MAv2 sender を accept するか実機で確認するまでは
+  // 既定 OFF。'1' / 'true' で ON。
+  enableMav2:
+    process.env.NEXT_PUBLIC_ENABLE_MAV2 === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_MAV2 === 'true',
 } as const;
 
 export const isMainnet = env.networkEnv === 'mainnet';
