@@ -22,14 +22,14 @@ afterEach(() => {
 });
 
 describe('gasCeilingGweiForChain (default values)', () => {
-  it('Polygon mainnet (137) は 200 gwei', () => {
-    expect(gasCeilingGweiForChain(polygon.id)).toBe(200n);
+  it('Polygon mainnet (137) は 400 gwei', () => {
+    expect(gasCeilingGweiForChain(polygon.id)).toBe(400n);
   });
   it('Polygon Amoy testnet は緩い (1000 gwei)', () => {
     expect(gasCeilingGweiForChain(polygonAmoy.id)).toBe(1000n);
   });
-  it('Base mainnet (8453) は 1 gwei (L2 のみ)', () => {
-    expect(gasCeilingGweiForChain(base.id)).toBe(1n);
+  it('Base mainnet (8453) は 10 gwei (L2 のみ)', () => {
+    expect(gasCeilingGweiForChain(base.id)).toBe(10n);
   });
   it('Base Sepolia testnet は緩い (1000 gwei)', () => {
     expect(gasCeilingGweiForChain(baseSepolia.id)).toBe(1000n);
@@ -43,19 +43,19 @@ describe('gasCeilingGweiForChain (default values)', () => {
 describe('assertGasCeiling', () => {
   it('上限以下: 何もしない (return)', () => {
     expect(() =>
-      assertGasCeiling(polygon.id, 100n * GWEI),
+      assertGasCeiling(polygon.id, 200n * GWEI),
     ).not.toThrow();
     expect(() =>
-      assertGasCeiling(polygon.id, 200n * GWEI), // 境界 (==)
+      assertGasCeiling(polygon.id, 400n * GWEI), // 境界 (==)
     ).not.toThrow();
-    expect(() => assertGasCeiling(base.id, 1n * GWEI)).not.toThrow();
+    expect(() => assertGasCeiling(base.id, 10n * GWEI)).not.toThrow();
   });
 
   it('上限超過: GasCongestedError を投げる', () => {
     expect(() =>
-      assertGasCeiling(polygon.id, 201n * GWEI),
+      assertGasCeiling(polygon.id, 401n * GWEI),
     ).toThrow(GasCongestedError);
-    expect(() => assertGasCeiling(base.id, 2n * GWEI)).toThrow(
+    expect(() => assertGasCeiling(base.id, 11n * GWEI)).toThrow(
       GasCongestedError,
     );
   });
@@ -63,17 +63,17 @@ describe('assertGasCeiling', () => {
   it('error が ceiling / observed gwei を保持する', () => {
     let captured: GasCongestedError | undefined;
     try {
-      assertGasCeiling(polygon.id, 350n * GWEI);
+      assertGasCeiling(polygon.id, 550n * GWEI);
     } catch (e) {
       captured = e as GasCongestedError;
     }
     expect(captured).toBeInstanceOf(GasCongestedError);
     expect(captured?.chainId).toBe(polygon.id);
-    expect(captured?.ceilingGwei).toBe(200n);
-    expect(captured?.observedGwei).toBe(350n);
+    expect(captured?.ceilingGwei).toBe(400n);
+    expect(captured?.observedGwei).toBe(550n);
     expect(captured?.message).toContain('gas_congested');
-    expect(captured?.message).toContain('200');
-    expect(captured?.message).toContain('350');
+    expect(captured?.message).toContain('400');
+    expect(captured?.message).toContain('550');
   });
 
   it('未登録チェーンは pass-through (any maxFeePerGas)', () => {
@@ -82,13 +82,13 @@ describe('assertGasCeiling', () => {
     ).not.toThrow();
   });
 
-  it('Base mainnet は 1 gwei 境界が厳しい (L1 calldata は別軸)', () => {
-    // 0.5 gwei → ok, 1 gwei → ok (==), 1.5 gwei → throw
-    expect(() => assertGasCeiling(base.id, GWEI / 2n)).not.toThrow();
-    expect(() => assertGasCeiling(base.id, GWEI)).not.toThrow();
-    expect(() => assertGasCeiling(base.id, GWEI + GWEI / 2n)).toThrow(
-      GasCongestedError,
-    );
+  it('Base mainnet 10 gwei 境界 (L1 calldata は別軸)', () => {
+    // 9.5 gwei → ok, 10 gwei → ok (==), 10.5 gwei → throw
+    expect(() => assertGasCeiling(base.id, 9n * GWEI + GWEI / 2n)).not.toThrow();
+    expect(() => assertGasCeiling(base.id, 10n * GWEI)).not.toThrow();
+    expect(() =>
+      assertGasCeiling(base.id, 10n * GWEI + GWEI / 2n),
+    ).toThrow(GasCongestedError);
   });
 });
 
@@ -155,13 +155,13 @@ describe('env override (gasCeilingGwei)', () => {
     expect(mod.gasCeilingGweiForChain(optimismSepolia.id)).toBe(1000n);
   });
 
-  it('Arbitrum / Optimism mainnet の既定値は 1 gwei (env 未指定時)', async () => {
+  it('Arbitrum / Optimism mainnet の既定値は 5 gwei (env 未指定時)', async () => {
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI;
     delete process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI;
     const mod = await import('@/lib/gasCeiling');
-    expect(mod.gasCeilingGweiForChain(arbitrum.id)).toBe(1n);
-    expect(mod.gasCeilingGweiForChain(optimism.id)).toBe(1n);
+    expect(mod.gasCeilingGweiForChain(arbitrum.id)).toBe(5n);
+    expect(mod.gasCeilingGweiForChain(optimism.id)).toBe(5n);
   });
 
   it('不正値 (負数 / 非整数 / 非数) は warn して既定値にフォールバック', async () => {
@@ -170,8 +170,8 @@ describe('env override (gasCeilingGwei)', () => {
     process.env.NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI = '-1';
     process.env.NEXT_PUBLIC_GAS_CEILING_BASE_GWEI = 'abc';
     const mod = await import('@/lib/gasCeiling');
-    expect(mod.gasCeilingGweiForChain(polygon.id)).toBe(200n);
-    expect(mod.gasCeilingGweiForChain(base.id)).toBe(1n);
+    expect(mod.gasCeilingGweiForChain(polygon.id)).toBe(400n);
+    expect(mod.gasCeilingGweiForChain(base.id)).toBe(10n);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

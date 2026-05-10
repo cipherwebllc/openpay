@@ -2,17 +2,29 @@
 // 送ると、フロア手数料 (5 JPYC / 0.05 USDC) では赤字になる可能性が
 // 高いため、送信前に弾いてユーザに「ネットワーク混雑、後で再試行」を返す。
 //
-// 推定根拠 (200,000 gas / 1 UserOp 想定):
-//   - Polygon 200 gwei: 0.04 POL ≒ 6 JPY (POL=$0.40, USD/JPY=150)、フロア
-//     5 JPYC = 5 JPY との差を担保。年数回起きる 300+ gwei spike を除外しつつ、
-//     平常時の混雑 (100〜200 gwei) は通す。
-//   - Base 1 gwei: L2 だけで判定。L1 calldata 費は L2 maxFeePerGas には乗ら
-//     ないため、L1 spike (Ethereum mainnet 200+ gwei) は別軸で監視が必要。
-//     ここでは L2 側のスパイクを捕らえる近似ガードとして 1 gwei を採用。
-//   - Arbitrum 1 gwei: 平常時 0.01〜0.1 gwei、spike 時でも 1 gwei 超は稀。
-//     Base と同水準で設定。
-//   - Optimism 1 gwei: 平常時 0.001 gwei 程度 (極めて低)、spike 時に 0.05〜
-//     0.5 gwei 程度。安全弁として Base と同 1 gwei。
+// 値の根拠は Pimlico の `fast` tier 実測ベース (priority fee を含む quote)。
+// L2 については「実 base fee」ではなく「Pimlico fast quote」を基準に置く点
+// に注意。
+//
+//   - Polygon 400 gwei (sponsorship mode の運営 P&L 防衛線):
+//     200,000 gas / UserOp / POL=60 JPY 想定で 0.08 POL ≒ 4.8 JPY、フロア
+//     5 JPYC = 5 JPY とほぼ同額の break-even。実 ERC-4337 batched UserOp は
+//     300〜500k gas が現実的なので、運用上は薄利だが Pimlico fast の平常時
+//     spike (200〜400 gwei) を通すための妥協ライン。
+//     500+ gwei 帯は本物の混雑なので block する。
+//   - Base 10 gwei (USDC erc20 paymaster mode、顧客負担):
+//     Pimlico fast の Base mainnet 平常時 quote が 1〜3 gwei、混雑時 5〜10
+//     gwei 程度。実質 ceiling は「異常な spike を弾く UX ガード」のみで、
+//     erc20 paymaster なので運営 P&L とは無関係。L1 calldata 費は L2 max
+//     FeePerGas に乗らないため、L1 spike は別軸で監視必要。
+//   - Arbitrum 5 gwei: 平常時 0.01〜1 gwei、spike 時 1〜5 gwei。USDC erc20
+//     paymaster なので顧客負担、UX ガードとして妥当な水準。
+//   - Optimism 5 gwei: 平常時 0.001〜0.1 gwei、spike 時 0.5〜5 gwei。
+//     Arbitrum と同水準で設定。
+//
+// 環境別 override (NEXT_PUBLIC_GAS_CEILING_*_GWEI) で本番運用中に再デプロイ
+// なしで再調整できる。Sentry の "gas_congested" 件数を見て段階的にチューニ
+// ングする想定。
 //
 // Pimlico paymaster の sponsorship policy 側でも同等以上の上限を設定するこ
 // とを推奨 (二重ガード: client-side は UX 用の早期エラー、server-side は
@@ -32,13 +44,13 @@ import { env } from './env';
 const GWEI = 10n ** 9n;
 
 const DEFAULT_CEILING_GWEI: Record<number, bigint> = {
-  [polygon.id]: 200n,
+  [polygon.id]: 400n,
   [polygonAmoy.id]: 1000n, // testnet は開発体験を優先して緩く
-  [base.id]: 1n,
+  [base.id]: 10n,
   [baseSepolia.id]: 1000n,
-  [arbitrum.id]: 1n,
+  [arbitrum.id]: 5n,
   [arbitrumSepolia.id]: 1000n,
-  [optimism.id]: 1n,
+  [optimism.id]: 5n,
   [optimismSepolia.id]: 1000n,
 };
 

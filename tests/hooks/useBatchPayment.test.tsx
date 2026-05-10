@@ -468,9 +468,9 @@ describe('useBatchPayment', () => {
       expect(getUserOperationGasPrice).not.toHaveBeenCalled();
     });
 
-    it('Polygon mainnet (chainId=137) sponsorship: 200 gwei 以下 OK / 超過 reject', async () => {
-      // 既定 ceiling は Polygon mainnet 200 gwei
-      mountReady({ maxFeePerGas: 199n * GWEI, chainId: polygon.id });
+    it('Polygon mainnet (chainId=137) sponsorship: 400 gwei 以下 OK / 超過 reject', async () => {
+      // 既定 ceiling は Polygon mainnet 400 gwei
+      mountReady({ maxFeePerGas: 399n * GWEI, chainId: polygon.id });
       const { result: ok } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
@@ -485,7 +485,7 @@ describe('useBatchPayment', () => {
 
       // reset for the over-ceiling case
       vi.clearAllMocks();
-      mountReady({ maxFeePerGas: 250n * GWEI, chainId: polygon.id });
+      mountReady({ maxFeePerGas: 450n * GWEI, chainId: polygon.id });
       const { result: ng } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
@@ -500,9 +500,9 @@ describe('useBatchPayment', () => {
       expect(ng.current.error).toBeInstanceOf(GasCongestedError);
     });
 
-    it('Base mainnet (chainId=8453) sponsorship: 1 gwei 以下 OK / 超過 reject', async () => {
-      // 既定 ceiling は Base mainnet 1 gwei (非常に厳しい)
-      mountReady({ maxFeePerGas: 9n * 10n ** 8n, chainId: base.id }); // 0.9 gwei
+    it('Base mainnet (chainId=8453) sponsorship: 10 gwei 以下 OK / 超過 reject', async () => {
+      // 既定 ceiling は Base mainnet 10 gwei
+      mountReady({ maxFeePerGas: 9n * GWEI, chainId: base.id }); // 9 gwei
       const { result: ok } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
@@ -516,7 +516,7 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
 
       vi.clearAllMocks();
-      mountReady({ maxFeePerGas: 2n * GWEI, chainId: base.id }); // 2 gwei = 超過
+      mountReady({ maxFeePerGas: 15n * GWEI, chainId: base.id }); // 15 gwei = 超過
       const { result: ng } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
       });
