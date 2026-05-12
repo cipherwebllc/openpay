@@ -3,6 +3,8 @@ import { NextIntlClientProvider, hasLocale } from 'next-intl';
 import { setRequestLocale } from 'next-intl/server';
 import { Analytics } from '@vercel/analytics/next';
 import { LOCALES } from '@/i18n';
+import { AlphaNotice } from '@/components/AlphaNotice';
+import { SiteFooter } from '@/components/SiteFooter';
 import { Providers } from '../providers';
 import '../globals.css';
 
@@ -29,7 +31,9 @@ export default async function LocaleLayout({
     <html lang={locale}>
       <body>
         <NextIntlClientProvider>
+          <AlphaNotice />
           <Providers>{children}</Providers>
+          <SiteFooter />
         </NextIntlClientProvider>
         <Analytics />
       </body>

@@ -15,6 +15,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - `/{locale}/pay?to=...&token=...&chain=...&amount=...&split=0xB:30,0xC:20` — QR をスキャンした顧客の決済画面 (`chain=` で USDC のチェーンを選択、`split=` で複数受取人へ % 分配可能)
 - `/{locale}/tip/[address]?token=...&chain=...&name=...&message=...&color=...&preset=...&thanks=...&thanksUrl=...&webhook=...` — クリエイター向けチップ送金画面 (直リンク互換として維持)
 - `/{locale}/checkout?...` — **実験的 / 非推奨**。直リンク互換のためルートは残すが、ホーム UI からは非表示。DB なし・署名なし webhook のため EC 本番用途では必ずオンチェーン再検証が必要
+- `/{locale}/terms` `/{locale}/privacy` `/{locale}/disclaimer` — 利用規約・プライバシーポリシー・免責事項。全 page 共通の `SiteFooter` から到達可能。事業者情報は `lib/legal.ts` の `LEGAL_ENTITY` に集約 (単一 source of truth)
 - `{locale}` は `ja` (デフォルト) または `en`。middleware が Accept-Language で自動検出
 
 **Repo**: https://github.com/cipherwebllc/openpay  
@@ -22,6 +23,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 
 ## 直近の主要追加 (v0.2 候補)
 
+- **法的文書 (利用規約 / プライバシーポリシー / 免責事項) と Alpha バナーの整備** — `/{locale}/terms` `/{locale}/privacy` `/{locale}/disclaimer` の 3 page を新設、全 page 共通の `SiteFooter` から到達可能に。事業者情報 (商号・法人番号・登記住所・代表者・連絡先メール・施行日) は `lib/legal.ts` の `LEGAL_ENTITY` に集約 (env 注入に切替える場合もここの export だけ差替えで済む)。利用規約は 11 条 (適用 / 定義 / non-custodial 性質 / 利用環境 / 料金 / 取消不能 / 禁止事項 / 第三者サービス / 免責 (消費者契約法 8 条準拠) / 規約変更 (民法 548 条の 4 準拠) / 準拠法・東京地裁)、プライバシーは 7 章 (個情法 28 条 越境移転 / 33-35 条 開示等請求対応)、免責は 6 章。文面は **弁護士 review 前提の draft**。全 page 最上部に `AlphaNotice` (amber banner、`print:hidden` で QR ポスター印刷時非表示、`/disclaimer` link 付) を表示し alpha 版である旨と少額テスト推奨を明示。`Footer` / `Terms` / `Privacy` / `Disclaimer` / `AlphaNotice` の 5 namespace を ja/en 両 messages に追加 (~150 key)、テスト 17 件追加 (849 件 / 48 ファイル)。**特商法表記は未整備** (merchants 構成によっては別 PR で追加要)
 - **店舗向け QR 強化** — 店舗名・ポスター補足文・レジ用クイック金額 (最大 8 件) を端末ローカルに永続化、印刷用ポスター section を追加、SVG / PNG ダウンロードと `window.print()` による直接印刷に対応。`fileSafe` は UTF-8 を許容するので日本語店舗名 (神田珈琲 等) もファイル名にそのまま使える。クイック金額は token 切替時に現 token の decimals に truncate + dedup、印刷時は poster 以外を `print:hidden` で隠す
 - **axios HIGH 脆弱性を override で解消** — `@coinbase/cdp-sdk` (wagmi → @wagmi/connectors → @base-org/account 経由 transitive) が要求する古い axios で SSRF / prototype pollution / auth bypass 等 15 件の advisories が HIGH に昇格 → CI の `npm audit --audit-level=high` を blocking。`package.json` の overrides で `axios: ^1.15.2` を強制 pin (実解決 1.16.0)。module load / constructor / interceptor 互換は `tests/lib/axios-override.test.ts` の 5 件で自動担保
 - **production readiness 強化** — デプロイチェックリストに「コード自動化不可、deploy 時に人手必須」項目 (Sentry alert rule / Pimlico 残高 alert) を ⚠ マーク付きで追加。§本番投入前に必ず検証すべきポイント に Coinbase Wallet 実 network call 互換 (testnet 1 件送金成功) と Lighthouse / 負荷測定の未実施を honest に明記

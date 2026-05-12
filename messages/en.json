@@ -10,7 +10,6 @@
       "heading": "Generate Tip widget embed code",
       "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1.0% fee + network fee (estimate)."
     },
-    "footer": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
     "linkPay": "/pay (customer)",
     "offramp": {
       "heading": "Off-ramp received tokens",
@@ -358,5 +357,135 @@
     "label": "Language",
     "ja": "日本語",
     "en": "English"
+  },
+  "AlphaNotice": {
+    "label": "Service status",
+    "badge": "Alpha",
+    "body": "This service is in alpha. Please send small test amounts only. Blockchain transactions are irreversible.",
+    "moreLink": "Details"
+  },
+  "Footer": {
+    "poweredBy": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "copyright": "© {year} {company}",
+    "links": {
+      "terms": "Terms of Service",
+      "privacy": "Privacy Policy",
+      "disclaimer": "Disclaimer"
+    }
+  },
+  "Terms": {
+    "title": "Terms of Service",
+    "effectiveDate": "Effective: {date}",
+    "intro": "These Terms of Service (the \"Terms\") govern your use of the blockchain payment service \"{service}\" (the \"Service\") operated by {company} (the \"Company\"). By using the Service, you agree to be bound by these Terms.",
+    "article1": {
+      "title": "Article 1 (Application)",
+      "body": "These Terms apply to all relationships between users and the Company concerning the use of the Service. If the Company separately establishes individual rules on the Service, such individual rules form part of these Terms; in case of conflict, individual rules prevail."
+    },
+    "article2": {
+      "title": "Article 2 (Definitions)",
+      "body": "(1) \"Merchant\" means a business or individual who receives crypto payments through the Service. (2) \"Customer\" means a person who pays a Merchant through the Service. (3) \"Wallet\" means a self-custodial crypto wallet (EOA or smart contract account) controlled by the user. (4) \"Supported Token\" means a crypto asset supported by the Service (currently JPYC and USDC). (5) \"Network Fee\" means gas required to confirm a blockchain transaction."
+    },
+    "article3": {
+      "title": "Article 3 (Nature of the Service)",
+      "body": "The Service is a non-custodial tool that facilitates transfers of Supported Tokens between user wallets. The Company never holds user funds. All transfers are executed on-chain via the user's own signature. The Company does not issue or operate the Supported Tokens, the underlying blockchains, or the wallet applications used by users. The Service consists of generating EIP-681 payment URIs, QR codes, batching user operations under the ERC-4337 standard, and relaying gas sponsorship; the Company does not intermediate in the underlying user-to-user transaction itself."
+    },
+    "article4": {
+      "title": "Article 4 (Usage Environment)",
+      "body": "Users are responsible for preparing, at their own cost and risk, a compatible wallet, internet connection, token balance, and where applicable, gas to use the Service. Supported chains and tokens may be added, changed, or suspended at the Company's discretion without prior notice."
+    },
+    "article5": {
+      "title": "Article 5 (Fees)",
+      "body": "Merchants agree to pay the Company an operating fee of 1.0% of each transaction amount (minimum 5 JPYC for JPYC transactions, minimum 0.05 USDC for USDC transactions). The fee is automatically deducted at the time of on-chain settlement. Network fees (gas) are paid either by the Customer or the Merchant depending on the choice made by the Merchant at QR generation time, and this choice is reflected in transactions through that QR. The Company may change the fee schedule with notice posted on the Service."
+    },
+    "article6": {
+      "title": "Article 6 (Irreversibility of Transactions)",
+      "body": "On-chain transactions executed through the Service cannot be cancelled, refunded, or modified due to the technical nature of blockchain. Users must verify the destination address, amount, token, and chain before submitting. The Company is not liable for losses caused by mistransfers or incorrect inputs."
+    },
+    "article7": {
+      "title": "Article 7 (Prohibited Acts)",
+      "body": "Users must not: (1) violate laws or public order; (2) engage in money laundering, terrorism financing, fraud, or trade in drugs, weapons, or child sexual abuse material; (3) transact with persons or regions under international economic sanctions; (4) infringe the rights of the Company, other users, or third parties; (5) perform unauthorized access, excessive load, modification, or reverse engineering of the Service; (6) use the Service if affiliated with anti-social forces; or (7) engage in any other acts the Company deems inappropriate."
+    },
+    "article8": {
+      "title": "Article 8 (Third-Party Services)",
+      "body": "The Service depends on third-party providers including Pimlico Labs Inc., Alchemy Insights Inc., Vercel Inc., JPYC Inc., Circle Internet Financial, Inc., and various wallet application providers. The Company makes no warranty regarding availability, performance, security, pricing, or terms of these third-party services, and is not liable for losses arising from them."
+    },
+    "article9": {
+      "title": "Article 9 (Disclaimer of Warranties and Limitation of Liability)",
+      "body": "(1) The Service is provided \"as is\" without any warranty of merchantability, fitness for a particular purpose, uninterrupted availability, or freedom from errors or vulnerabilities. (2) The Company is not liable for any damages arising from use or inability to use the Service, except in cases of the Company's intentional misconduct or gross negligence. Where the user qualifies as a consumer under Japanese consumer protection law, the Company's liability cap shall be the total operating fees paid by such user in the six months preceding the relevant incident. (3) The Company is not liable for losses caused by blockchain network failures, reorganizations, forks, token price volatility, gas spikes, third-party service outages, or regulatory changes."
+    },
+    "article10": {
+      "title": "Article 10 (Amendment of Terms)",
+      "body": "Pursuant to Article 548-4 of the Japanese Civil Code (amendment of standard terms), the Company may amend these Terms when the amendment is beneficial to users in general, or when the amendment is reasonable considering the necessity, content, and circumstances of the change. Amendments take effect when the revised Terms and the effective date are posted on the Service. Continued use after the effective date constitutes acceptance of the amended Terms."
+    },
+    "article11": {
+      "title": "Article 11 (Governing Law and Jurisdiction)",
+      "body": "These Terms and all matters relating to the Service are governed by the laws of Japan. The Tokyo District Court shall have exclusive jurisdiction as the court of first instance for any disputes arising in connection with the Service."
+    },
+    "contact": "For inquiries regarding these Terms, please contact {email}.",
+    "legalNote": "The Japanese version of these Terms prevails. This English version is provided for reference only."
+  },
+  "Privacy": {
+    "title": "Privacy Policy",
+    "effectiveDate": "Effective: {date}",
+    "intro": "{company} (the \"Company\") establishes this Privacy Policy (the \"Policy\") regarding the handling of personal information in connection with the blockchain payment service \"{service}\" (the \"Service\"), in compliance with the Act on the Protection of Personal Information of Japan (the \"APPI\") and related laws.",
+    "section1": {
+      "title": "1. Information We Collect",
+      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us. We may use cookies or local storage, but currently do not assign cookie identifiers that directly identify individual users."
+    },
+    "section2": {
+      "title": "2. Purposes of Use",
+      "body": "We use collected information for: (1) providing, operating, maintaining, and improving the Service; (2) responding to user inquiries; (3) statistical analysis and Service improvement; (4) detecting and preventing fraud, abuse, and unauthorized access; (5) responding to legal obligations; (6) other purposes ancillary to the above."
+    },
+    "section3": {
+      "title": "3. Sharing with Third Parties and Service Providers",
+      "body": "We do not share personal information with third parties without user consent or where required by law. However, we engage the following service providers to operate the Service, all of which we supervise as required by the APPI: - Vercel Inc. (United States): hosting, CDN, analytics. - Pimlico Labs Inc. (United States): ERC-4337 bundler and paymaster service. - Alchemy Insights Inc. (United States): blockchain RPC. Because these providers are located in the United States, personal information may be transferred to a third party located in a foreign country (APPI Article 28). Information on the personal data protection regime in the United States is published by the Personal Information Protection Commission of Japan in its \"Survey on Foreign Personal Information Protection Regimes.\" We have data protection agreements in place with these providers and have implemented measures to protect users' rights and interests."
+    },
+    "section4": {
+      "title": "4. Retention Period",
+      "body": "We retain collected information only for the period necessary to fulfill the purposes of use. Server logs are deleted in sequence 90 days after collection. Inquiry records are deleted 3 years after the last correspondence. On-chain transaction records, by their nature, are permanently public outside our control, and we cannot delete them."
+    },
+    "section5": {
+      "title": "5. Requests for Disclosure, Correction, and Suspension of Use",
+      "body": "Users may request disclosure, correction, addition, deletion, suspension of use, erasure, or suspension of third-party provision of their personal information held by us, pursuant to APPI Articles 33 through 35. For request procedures and fees, please contact us at the address shown in Section 6. We may require identity verification before responding."
+    },
+    "section6": {
+      "title": "6. Contact",
+      "body": "For inquiries regarding this Policy or requests under APPI: Operator: {company}. Address: {address}. Personal Information Manager: {representative}. Email: {email}."
+    },
+    "section7": {
+      "title": "7. Amendments to this Policy",
+      "body": "We may amend this Policy in response to changes in law, changes to the Service, or other necessary reasons. Amended Policies take effect when posted on the Service."
+    },
+    "legalNote": "The Japanese version of this Policy prevails. This English version is provided for reference only."
+  },
+  "Disclaimer": {
+    "title": "Disclaimer",
+    "effectiveDate": "Effective: {date}",
+    "intro": "This Disclaimer sets out the risks of using the blockchain payment service \"{service}\" (the \"Service\") operated by {company} (the \"Company\") and the matters for which the Company assumes no responsibility. Please read this Disclaimer together with the Terms of Service before using the Service.",
+    "section1": {
+      "title": "1. As-Is Provision",
+      "body": "The Service is provided \"as is.\" The Company makes no express or implied warranty as to the accuracy, completeness, usefulness, fitness for a particular purpose, continuous availability, freedom from errors or vulnerabilities, or absence of malicious code in the Service."
+    },
+    "section2": {
+      "title": "2. Irreversibility of Blockchain Transactions",
+      "body": "Transactions executed through the Service (transfers, token exchanges, and other on-chain actions) cannot be cancelled, refunded, or modified due to the technical nature of blockchain. The Company is not liable for losses caused by user operational errors such as wrong destination addresses, wrong amounts, or wrong chains. Users must verify all details before submitting."
+    },
+    "section3": {
+      "title": "3. Third-Party Issued Tokens",
+      "body": "JPYC is issued and operated by JPYC Inc., USDC by Circle Internet Financial, Inc., and other supported tokens by their respective third-party issuers, all independent of the Company. The price, liquidity, availability, technical soundness, financial condition of the issuer, and regulatory compliance of each token are the responsibility of the respective issuer, not the Company."
+    },
+    "section4": {
+      "title": "4. Network Fee Volatility",
+      "body": "Network fees (gas) are required for on-chain transactions and vary significantly with network congestion, underlying asset prices, and other factors outside the Company's control. Gas estimates shown by the Service are best-effort estimates at the time of display and actual amounts may exceed them. The Company is not liable for losses arising from gas spikes or volatility."
+    },
+    "section5": {
+      "title": "5. Third-Party Service Outages",
+      "body": "The Service depends on third-party providers including Pimlico (ERC-4337 bundler/paymaster), Alchemy (RPC), Vercel (hosting), wallet applications, and the blockchain networks themselves. The Company is not liable when the Service becomes wholly or partially unavailable, or when users incur losses, due to outages, suspensions, specification changes, deprecation, or performance degradation of these third-party services."
+    },
+    "section6": {
+      "title": "6. Changes in Laws and Regulatory Risk",
+      "body": "Crypto and blockchain-related laws and regulations may change in Japan and other jurisdictions. The Company is not liable for losses arising when the Service becomes wholly or partially unavailable due to changes in law, regulatory guidance, or compliance measures. Users are responsible for complying with laws applicable to their place of residence and use, and for confirming that their transactions through the Service are not illegal."
+    },
+    "legalNote": "This Disclaimer applies together with the Terms of Service. In case of conflict, the Terms of Service prevail. The Japanese version of this Disclaimer prevails over this English reference version."
   }
 }

@@ -125,9 +125,6 @@ export default function HomePage() {
         <p className="mt-3 text-xs text-slate-400">{t('offramp.hint')}</p>
       </section>
 
-      <footer className="mt-8 text-center text-xs text-slate-400 print:hidden">
-        {t('footer')}
-      </footer>
     </main>
   );
 }
