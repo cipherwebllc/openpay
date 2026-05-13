@@ -2,6 +2,7 @@
 // 弁護士 review / 金融庁事前相談 / GMV 集計用。fire-and-forget で UI を阻害しない。
 
 import type { Address, Hex } from 'viem';
+import { logger } from './logger';
 
 export type PaymentResult = 'success' | 'reverted' | 'error';
 export type PaymentFlow = 'batch' | 'direct';
@@ -68,19 +69,28 @@ export function buildPaymentLogEvent(
   };
 }
 
-// fetch 失敗時、production console を汚さず alpha 監査者が DevTools で
-// 観測できるよう window CustomEvent を dispatch。test では既定で発火 ignore
-// だが、本機能の test では event を assertion して silent failure を verify する。
+// 二段構えで audit dropout を観測:
+//   (1) DevTools 用 CustomEvent — production console を汚さず開発者が観測
+//   (2) logger.warn (Sentry 経由) — production で aggregate 監視可能にする
+// 監視目的の機能で fetch 失敗を完全 silent にしないため、両経路を残す。
 export const PAYMENT_LOG_FAILURE_EVENT = 'openpay:payment-log-failure';
 
 function emitFailure(event: PaymentLogEvent, error: unknown): void {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  logger.warn('payment-log.client-post-failed', {
+    flow: event.flow,
+    result: event.result,
+    chainId: event.chainId,
+    txHash: event.txHash,
+    error: errorMessage,
+  });
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
     new CustomEvent(PAYMENT_LOG_FAILURE_EVENT, {
       detail: {
         ts: new Date().toISOString(),
         event,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       },
     }),
   );

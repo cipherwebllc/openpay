@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Address, Hex } from 'viem';
+
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+import { logger } from '@/lib/logger';
 import {
   buildPaymentLogEvent,
   logPaymentEvent,
@@ -216,7 +227,34 @@ describe('logPaymentEvent', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('fetch が throw した場合 window CustomEvent を dispatch (observability)', async () => {
+  it('fetch が throw した場合 Sentry 連携の logger.warn を呼ぶ (production 観測)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('Failed to fetch')),
+    );
+    await logPaymentEvent({
+      flow: 'batch',
+      result: 'error',
+      chainId: 137,
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: '100',
+      txHash: TX,
+      errorMessage: 'user rejected',
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'payment-log.client-post-failed',
+      expect.objectContaining({
+        flow: 'batch',
+        result: 'error',
+        chainId: 137,
+        txHash: TX,
+        error: 'Failed to fetch',
+      }),
+    );
+  });
+
+  it('fetch が throw した場合 window CustomEvent を dispatch (DevTools observability)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockRejectedValue(new Error('Failed to fetch')),
