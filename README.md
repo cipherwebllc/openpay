@@ -37,7 +37,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
 - **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
 - **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 798 件 / 43 ファイル (lib テストの SUT 自身は実 import、外部 SDK のみ境界 mock。hook / component は wagmi / permissionless 等の外部 SDK 境界のみ mock)。coverage 98.96 / 96.40 / 92.64 / 98.96。e2e 28 件 (chromium + mobile-safari)
+- **テスト** — 960 件 / 52 ファイル (lib テストの SUT 自身は実 import、外部 SDK のみ境界 mock。hook / component は wagmi / permissionless 等の外部 SDK 境界のみ mock。paymentLog → Sentry の橋渡しも実 logger 経由で integration 検証済)。coverage 98.81 / 96.19 / 92.57 / 98.81。e2e 28 件 (chromium + mobile-safari)
 - **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
 - **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
 - **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
@@ -490,7 +490,7 @@ npm run build && npm run start
 
 ### 0. テストの mock 比率 (透明化)
 
-本リポジトリの自動テスト (798 件) における mock 利用方針:
+本リポジトリの自動テスト (960 件) における mock 利用方針:
 
 | 層 | mock 使用 | 実コード走行範囲 |
 |---|---|---|
@@ -523,6 +523,28 @@ JPYC は将来的に新バージョンへの移行や別チェーン拡張が起
 ### 4. Pimlico Sponsorship Policy の挙動
 
 policyId が無い場合の Pimlico 既定挙動 (sponsor するか reject するか) は Pimlico ダッシュボードのアカウント設定に依存する。**本番投入前に必ず policyId を明示設定** してください。
+
+### 5. 依存 upgrade 後の `next build` 必須
+
+`npm run typecheck` / `npm run test:run` は SWC compile (tsc) と vitest を回すだけで、**Next.js の production build (`next build`) は走らない**。Next.js は middleware の bundle、route segment 設定、SSR/SSG の prerender などを build 時に解決するため、Next 本体や @sentry/nextjs / middleware 関連の dep を bump した場合は **必ずローカルで `npm run build` を完走させてから commit する**。
+
+```sh
+# 例: testnet 必須 env を埋めて build を回す
+NEXT_PUBLIC_NETWORK_ENV=testnet \
+NEXT_PUBLIC_PIMLICO_API_KEY=dummy \
+NEXT_PUBLIC_FEE_RECEIVER_ADDRESS=0x000000000000000000000000000000000000dEaD \
+  npm run build
+```
+
+CI (`.github/workflows/ci.yml`) でも `npm run build` を実行するため、push 時の safety net はあるが、これは「ローカル検証を省略してよい」という意味ではない。`next start` で middleware (next-intl の locale prefix) の挙動が壊れていないかも、可能なら deploy 前にローカルで 1 度 click test しておくのが望ましい。
+
+### 6. 残存 `postcss` MODERATE 脆弱性の判定根拠
+
+`npm audit` で残る `GHSA-qx2v-qp2m-jg93` (PostCSS XSS via Unescaped `</style>`) は **本リポジトリでは到達不能** と判定:
+
+- 本体は `^8.5.14` に上げ済 (修正版)。残る警告は **Next.js 内部の build-time postcss@8.4.31** (`node_modules/next/node_modules/postcss`) に対するもの
+- 当該 advisory は **postcss が user-input CSS をパースして再 stringify する** ケースで発火するが、OpenPay の CSS 入力は **すべて author-written** (Tailwind config + `app/globals.css`、ユーザー入力からの CSS 生成経路なし)
+- `npm audit fix --force` で next を 16.x に major bump できるが、breaking changes を含むため alpha では見送り。Next.js が自身の bundled postcss を上げた時点で自動解消する見込み
 
 ### 4-1. USDC mainnet (ERC20 Paymaster) 投入 runbook
 
@@ -704,7 +726,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 | Branches | 96.07% |
 | Functions | 91.03% |
 | Lines | 98.77% |
-| Test count | 798 件 (43 ファイル) + e2e 28 件 |
+| Test count | 960 件 (52 ファイル) + e2e 28 件 |
 
 未カバー部分は主に `QrGenerator` / `TipEmbedGenerator` の inner handler、`useSmartAccount.queryFn` の deep error path、`useGasQuoteUsdc` の 1 hop 内エラー。`vitest.config.ts` で min threshold (statements 95 / branches 93 / functions 88 / lines 95) を強制しており、回帰時は `npm run test:coverage` が失敗する。
 
