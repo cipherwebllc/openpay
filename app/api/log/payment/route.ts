@@ -44,8 +44,10 @@ function validHex(v: unknown): v is HexLike {
   return typeof v === 'string' && isHex(v) && v.length > 2;
 }
 
+// 許可 field のみ抽出して返す (許可リスト方式)。raw cast で未知 field が
+// 後段の spread 経由で KV に流入するのを防ぐ。
 function validate(raw: unknown): Payload | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
   if (r.flow !== 'batch' && r.flow !== 'direct') return null;
   if (r.result !== 'success' && r.result !== 'reverted' && r.result !== 'error') return null;
@@ -60,7 +62,23 @@ function validate(raw: unknown): Payload | null {
   if (r.txHash !== undefined && !validHex(r.txHash)) return null;
   if (r.blockNumber !== undefined && !isDecimalString(r.blockNumber)) return null;
   if (r.errorMessage !== undefined && typeof r.errorMessage !== 'string') return null;
-  return raw as Payload;
+
+  const clean: Payload = {
+    flow: r.flow,
+    result: r.result,
+    chainId: r.chainId,
+    tokenAddress: r.tokenAddress,
+    merchant: r.merchant,
+    merchantAmount: r.merchantAmount,
+  };
+  if (r.customer !== undefined) clean.customer = r.customer;
+  if (r.feeReceiver !== undefined) clean.feeReceiver = r.feeReceiver;
+  if (r.feeAmount !== undefined) clean.feeAmount = r.feeAmount;
+  if (r.userOpHash !== undefined) clean.userOpHash = r.userOpHash;
+  if (r.txHash !== undefined) clean.txHash = r.txHash;
+  if (r.blockNumber !== undefined) clean.blockNumber = r.blockNumber;
+  if (r.errorMessage !== undefined) clean.errorMessage = r.errorMessage;
+  return clean;
 }
 
 export async function POST(req: Request): Promise<NextResponse> {

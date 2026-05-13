@@ -3,6 +3,7 @@ import type { Address, Hex } from 'viem';
 import {
   buildPaymentLogEvent,
   logPaymentEvent,
+  PAYMENT_LOG_FAILURE_EVENT,
   type PaymentLogContext,
 } from '@/lib/paymentLog';
 
@@ -213,5 +214,78 @@ describe('logPaymentEvent', () => {
         merchantAmount: '100',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('fetch が throw した場合 window CustomEvent を dispatch (observability)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('Failed to fetch')),
+    );
+    const listener = vi.fn();
+    window.addEventListener(PAYMENT_LOG_FAILURE_EVENT, listener);
+    try {
+      const event = {
+        flow: 'batch' as const,
+        result: 'error' as const,
+        chainId: 137,
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: '100',
+        errorMessage: 'reverted by user',
+      };
+      await logPaymentEvent(event);
+      expect(listener).toHaveBeenCalledOnce();
+      const detail = listener.mock.calls[0][0].detail;
+      expect(detail.error).toBe('Failed to fetch');
+      expect(detail.event.errorMessage).toBe('reverted by user');
+      expect(detail.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      window.removeEventListener(PAYMENT_LOG_FAILURE_EVENT, listener);
+    }
+  });
+
+  it('fetch が非 2xx を返した場合も CustomEvent を dispatch (http_<status>)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(null, { status: 502 })),
+    );
+    const listener = vi.fn();
+    window.addEventListener(PAYMENT_LOG_FAILURE_EVENT, listener);
+    try {
+      await logPaymentEvent({
+        flow: 'direct',
+        result: 'success',
+        chainId: 137,
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: '100',
+      });
+      expect(listener).toHaveBeenCalledOnce();
+      expect(listener.mock.calls[0][0].detail.error).toBe('http_502');
+    } finally {
+      window.removeEventListener(PAYMENT_LOG_FAILURE_EVENT, listener);
+    }
+  });
+
+  it('fetch 成功時 (2xx) は failure event を dispatch しない', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    );
+    const listener = vi.fn();
+    window.addEventListener(PAYMENT_LOG_FAILURE_EVENT, listener);
+    try {
+      await logPaymentEvent({
+        flow: 'batch',
+        result: 'success',
+        chainId: 137,
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: '100',
+      });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(PAYMENT_LOG_FAILURE_EVENT, listener);
+    }
   });
 });

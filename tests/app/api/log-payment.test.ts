@@ -255,6 +255,58 @@ describe('POST /api/log/payment', () => {
     expect(res.status).toBe(400);
   });
 
+  it.each([
+    ['merchant', { merchant: '0xshort' }],
+    ['customer', { customer: '0xshort' }],
+    ['feeReceiver', { feeReceiver: '0xshort' }],
+    ['merchant 大文字 too long', { merchant: '0x' + 'A'.repeat(41) }],
+  ])('address field %s が invalid なら 400', async (_, override) => {
+    const res = await POST(req({ ...validBody, ...override }));
+    expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ['feeAmount', { feeAmount: '1.5' }],
+    ['feeAmount 負', { feeAmount: '-100' }],
+    ['blockNumber', { blockNumber: '0x1' }],
+    ['blockNumber 空文字', { blockNumber: '' }],
+  ])('decimal field %s が invalid なら 400', async (_, override) => {
+    const res = await POST(req({ ...validBody, ...override }));
+    expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ['txHash 短すぎ', { txHash: '0x' }],
+    ['txHash 非 hex 文字', { txHash: '0x' + 'g'.repeat(64) }],
+    ['userOpHash 非 hex', { userOpHash: 'not-hex' }],
+  ])('hex field %s が invalid なら 400', async (_, override) => {
+    const res = await POST(req({ ...validBody, ...override }));
+    expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ['result=pending', { result: 'pending' }],
+    ['result=null', { result: null }],
+    ['flow=invalid', { flow: 'invalid' }],
+    ['flow=undefined', { flow: undefined }],
+  ])('enum field %s が invalid なら 400', async (_, override) => {
+    const res = await POST(req({ ...validBody, ...override }));
+    expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ['flow 欠落', { flow: undefined }],
+    ['result 欠落', { result: undefined }],
+    ['chainId 欠落', { chainId: undefined }],
+    ['tokenAddress 欠落', { tokenAddress: undefined }],
+    ['merchant 欠落', { merchant: undefined }],
+    ['merchantAmount 欠落', { merchantAmount: undefined }],
+  ])('必須 field %s 欠落で 400', async (_, override) => {
+    const polluted = { ...validBody, ...override };
+    const res = await POST(req(polluted));
+    expect(res.status).toBe(400);
+  });
+
   it('body が null だと invalid_payload', async () => {
     const res = await POST(req(null));
     expect(res.status).toBe(400);
@@ -263,6 +315,35 @@ describe('POST /api/log/payment', () => {
   it('body が array だと invalid_payload', async () => {
     const res = await POST(req([validBody]));
     expect(res.status).toBe(400);
+  });
+
+  it('未知 field は KV log payload から除外される (allow-list)', async () => {
+    const polluted = {
+      ...validBody,
+      maliciousField: '<script>alert(1)</script>',
+      __proto__pollution: { x: 1 },
+      arbitrary: 'should not be stored',
+    };
+    await POST(req(polluted));
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.maliciousField).toBeUndefined();
+    expect(entry.arbitrary).toBeUndefined();
+    // server 側 field は当然含まれる
+    expect(entry.serverTs).toBeDefined();
+    expect(entry.ipPrefix).toBeDefined();
+    // 正規 field は維持
+    expect(entry.userOpHash).toBe(validBody.userOpHash);
+  });
+
+  it('Object.prototype 経由の汚染 field も流入しない', async () => {
+    const polluted = JSON.parse(JSON.stringify(validBody));
+    Object.defineProperty(polluted, 'hijack', {
+      value: 'pwned',
+      enumerable: true,
+    });
+    await POST(req(polluted));
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.hijack).toBeUndefined();
   });
 
   it('IPv4 を /24 で匿名化する', async () => {
@@ -368,28 +449,35 @@ describe('GET /api/log/payment/export', () => {
     expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, 99);
   });
 
-  it('kvLrange と kvLlen は Promise.all で並列発火 (順序を待たない)', async () => {
-    // 実時間で同時発火を確認するため、両者を delay
-    vi.mocked(kvLrange).mockImplementation(
-      () =>
-        new Promise((r) =>
-          setTimeout(() => r({ ok: true, value: [] }), 50),
-        ),
-    );
-    vi.mocked(kvLlen).mockImplementation(
-      () =>
-        new Promise((r) =>
-          setTimeout(() => r({ ok: true, value: 0 }), 50),
-        ),
-    );
-    const start = Date.now();
+  it('kvLrange と kvLlen は Promise.all で同時発火 (順序非依存)', async () => {
+    // 両 promise が解決前に「両方とも呼び出されている」ことを直接観測。
+    // 直列実装なら、最初の promise を resolve するまで 2 つ目は呼ばれない。
+    let rangeResolve!: (v: { ok: true; value: string[] }) => void;
+    let lenResolve!: (v: { ok: true; value: number }) => void;
+    const rangePromise = new Promise<{ ok: true; value: string[] }>((r) => {
+      rangeResolve = r;
+    });
+    const lenPromise = new Promise<{ ok: true; value: number }>((r) => {
+      lenResolve = r;
+    });
+    vi.mocked(kvLrange).mockReturnValue(rangePromise);
+    vi.mocked(kvLlen).mockReturnValue(lenPromise);
+
     const r = new Request('http://localhost/api/log/payment/export', {
       headers: { authorization: 'Bearer admin-secret' },
     });
-    await GET(r);
-    const elapsed = Date.now() - start;
-    // 直列なら 100ms 以上、並列なら 70ms 程度に収まる
-    expect(elapsed).toBeLessThan(95);
+    const responsePromise = GET(r);
+
+    // microtask flush を待ち、両 mock が同時に呼び出されたことを確認。
+    // GET が直列実装なら lenPromise はまだ呼ばれていないはず。
+    await new Promise<void>((r) => setImmediate(r));
+    expect(kvLrange).toHaveBeenCalled();
+    expect(kvLlen).toHaveBeenCalled();
+
+    rangeResolve({ ok: true, value: [] });
+    lenResolve({ ok: true, value: 0 });
+    const res = await responsePromise;
+    expect(res.status).toBe(200);
   });
 
   it('LRANGE が空配列でも 200 + entries=[] / total=0', async () => {

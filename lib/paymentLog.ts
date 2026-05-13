@@ -68,16 +68,44 @@ export function buildPaymentLogEvent(
   };
 }
 
+// fetch 失敗時、production console を汚さず alpha 監査者が DevTools で
+// 観測できるよう window CustomEvent を dispatch。test では既定で発火 ignore
+// だが、本機能の test では event を assertion して silent failure を verify する。
+export const PAYMENT_LOG_FAILURE_EVENT = 'openpay:payment-log-failure';
+
+function emitFailure(event: PaymentLogEvent, error: unknown): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent(PAYMENT_LOG_FAILURE_EVENT, {
+        detail: {
+          ts: new Date().toISOString(),
+          event,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      }),
+    );
+  } catch {
+    // CustomEvent 未対応など (古い browser) — degrade
+  }
+}
+
 export async function logPaymentEvent(event: PaymentLogEvent): Promise<void> {
   try {
-    await fetch('/api/log/payment', {
+    const res = await fetch('/api/log/payment', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(event),
       // tab close / navigation 直後でも POST 完了させる
       keepalive: true,
     });
-  } catch {
-    // network / CSP / test env で silently 失敗してよい (server log 側にも残る)
+    if (!res.ok) {
+      emitFailure(event, new Error(`http_${res.status}`));
+    }
+  } catch (e) {
+    // network / CSP / test env では throw する。silent に消すと audit が
+    // 欠落するため、CustomEvent で observability を残す (production console
+    // を noise しない設計)。
+    emitFailure(event, e);
   }
 }

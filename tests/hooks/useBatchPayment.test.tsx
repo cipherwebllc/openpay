@@ -822,4 +822,140 @@ describe('useBatchPayment', () => {
       expect(arg.calls).toHaveLength(2);
     });
   });
+
+  describe('payment log 発火 (behavioral)', () => {
+    const USEROP = `0x${'a'.repeat(64)}` as Hex;
+    const TX = `0x${'b'.repeat(64)}` as Hex;
+    const CUSTOMER = '0x9999999999999999999999999999999999999999' as Address;
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      vi.stubGlobal('fetch', fetchSpy);
+    });
+
+    it('success: log body に userOpHash / txHash / blockNumber / customer / fee が乗る', async () => {
+      mountReady({ chainId: polygon.id });
+      mockHook(useAccount, { chainId: polygon.id, address: CUSTOMER });
+
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1_000_000n,
+      });
+
+      await waitFor(() =>
+        expect(fetchSpy).toHaveBeenCalledWith('/api/log/payment', expect.anything()),
+      );
+      const init = fetchSpy.mock.calls[0][1];
+      expect(init.method).toBe('POST');
+      expect(init.keepalive).toBe(true);
+      const body = JSON.parse(init.body);
+      expect(body).toMatchObject({
+        flow: 'batch',
+        result: 'success',
+        chainId: polygon.id,
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: '99000000',
+        customer: CUSTOMER,
+        feeReceiver: FEE_RECV,
+        feeAmount: '1000000',
+        userOpHash: `0x${'a'.repeat(64)}`,
+        txHash: `0x${'b'.repeat(64)}`,
+        blockNumber: '12345',
+      });
+      expect(body.errorMessage).toBeUndefined();
+    });
+
+    it('receipt.success=false (revert): result=reverted で log', async () => {
+      mountReady();
+      // 既定 receipt は success:true なので、上書きして reverted を演出
+      waitForUserOperationReceipt.mockResolvedValueOnce({
+        success: false,
+        receipt: { transactionHash: TX, blockNumber: 99n },
+      });
+      mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER });
+
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 50n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 5n,
+      });
+
+      await waitFor(() =>
+        expect(fetchSpy).toHaveBeenCalledWith('/api/log/payment', expect.anything()),
+      );
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.result).toBe('reverted');
+      expect(body.userOpHash).toBe(USEROP);
+      expect(body.txHash).toBe(TX);
+      expect(body.blockNumber).toBe('99');
+    });
+
+    it('mutationFn 失敗 (sendUserOperation 例外): result=error + errorMessage で log', async () => {
+      mountReady();
+      sendUserOperation.mockRejectedValueOnce(new Error('user rejected request'));
+      mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER });
+
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+
+      await waitFor(() =>
+        expect(fetchSpy).toHaveBeenCalledWith('/api/log/payment', expect.anything()),
+      );
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.result).toBe('error');
+      expect(body.errorMessage).toBe('user rejected request');
+      // 失敗時は userOpHash / blockNumber は付かない (build 側 contract)
+      expect(body.userOpHash).toBeUndefined();
+      expect(body.blockNumber).toBeUndefined();
+      // 必須 ctx field は残る
+      expect(body.flow).toBe('batch');
+      expect(body.merchantAmount).toBe('1');
+      expect(body.feeAmount).toBe('1');
+      expect(body.customer).toBe(CUSTOMER);
+    });
+
+    it('customer 欠落 (wallet 未接続) でも log 発火、customer は undefined', async () => {
+      mountReady();
+      sendUserOperation.mockRejectedValueOnce(new Error('Smart Account 未初期化'));
+      mockHook(useAccount, { chainId: undefined, address: undefined });
+
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.customer).toBeUndefined();
+      // chainId は deployment.chainId にフォールバック
+      expect(body.chainId).toBe(usdcDep.chainId);
+    });
+  });
 });
