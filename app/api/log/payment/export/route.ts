@@ -1,10 +1,9 @@
-// 蓄積した payment log の export endpoint。
-// Authorization: Bearer <PAYMENT_LOG_ADMIN_TOKEN> を要求。
-// 既定で全件 (LRANGE 0 -1) を JSON 配列で返す。?from / ?to で範囲指定可能。
-// 6 ヶ月運用後の弁護士 review / GMV 集計用。
+// 蓄積した payment log の admin export。Bearer 認証必須。
+// 弁護士 review / 金融庁事前相談 / GMV 集計用。
 
 import { NextResponse } from 'next/server';
 import { kvLrange, kvLlen, isKvConfigured } from '@/lib/kv';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
@@ -18,12 +17,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
-  const auth = req.headers.get('authorization') ?? '';
-  // timing-safe ではないが、admin endpoint かつ token 形状の secret 想定で許容
-  if (auth !== `Bearer ${adminToken}`) {
+  if (req.headers.get('authorization') !== `Bearer ${adminToken}`) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
-
   if (!isKvConfigured()) {
     return NextResponse.json(
       { ok: false, error: 'kv_not_configured' },
@@ -35,15 +31,21 @@ export async function GET(req: Request): Promise<NextResponse> {
   const from = Number(url.searchParams.get('from') ?? 0);
   const to = Number(url.searchParams.get('to') ?? -1);
 
-  const range = await kvLrange(KV_KEY, from, to);
+  const [range, len] = await Promise.all([
+    kvLrange(KV_KEY, from, to),
+    kvLlen(KV_KEY),
+  ]);
+
   if (!range.ok) {
+    logger.warn('payment-log.export-read-failed', {
+      reason: range.reason,
+      status: range.status,
+    });
     return NextResponse.json(
-      { ok: false, error: 'kv_read_failed', reason: range.reason },
+      { ok: false, error: 'kv_read_failed' },
       { status: 502 },
     );
   }
-  const len = await kvLlen(KV_KEY);
-  const total = len.ok ? len.value : null;
 
   const entries = range.value.map((s) => {
     try {
@@ -53,5 +55,10 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
   });
 
-  return NextResponse.json({ ok: true, total, returned: entries.length, entries });
+  return NextResponse.json({
+    ok: true,
+    total: len.ok ? len.value : null,
+    returned: entries.length,
+    entries,
+  });
 }

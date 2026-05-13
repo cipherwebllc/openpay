@@ -7,6 +7,7 @@ vi.mock('@/lib/kv', () => ({
   kvLpush: vi.fn(),
   kvLrange: vi.fn(),
   kvLlen: vi.fn(),
+  kvLtrim: vi.fn(),
   isKvConfigured: vi.fn(),
 }));
 vi.mock('@/lib/logger', () => ({
@@ -20,7 +21,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { POST } from '@/app/api/log/payment/route';
 import { GET } from '@/app/api/log/payment/export/route';
-import { kvLpush, kvLrange, kvLlen, isKvConfigured } from '@/lib/kv';
+import { kvLpush, kvLrange, kvLlen, kvLtrim, isKvConfigured } from '@/lib/kv';
 
 const validBody = {
   flow: 'batch' as const,
@@ -48,6 +49,7 @@ function req(body: unknown): Request {
 describe('POST /api/log/payment', () => {
   beforeEach(() => {
     vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -148,6 +150,13 @@ describe('POST /api/log/payment', () => {
     });
     const res = await POST(req(validBody));
     expect(res.status).toBe(200);
+    // 書込失敗時は LTRIM を呼ばない (LPUSH 成功した entry のみ cap 対象)
+    expect(kvLtrim).not.toHaveBeenCalled();
+  });
+
+  it('LPUSH 成功時は LTRIM で list を 100K に cap', async () => {
+    await POST(req(validBody));
+    expect(kvLtrim).toHaveBeenCalledWith('openpay:payments:log', 0, 99999);
   });
 
   it('IPv4 を /24 で匿名化する', async () => {
@@ -251,5 +260,23 @@ describe('GET /api/log/payment/export', () => {
     );
     await GET(r);
     expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, 99);
+  });
+
+  it('kv_read_failed の response に internal reason を leak しない', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: false,
+      reason: 'http_error',
+      status: 500,
+      detail: 'sensitive upstream message',
+    });
+    const r = new Request('http://localhost/api/log/payment/export', {
+      headers: { authorization: 'Bearer admin-secret' },
+    });
+    const res = await GET(r);
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body).toEqual({ ok: false, error: 'kv_read_failed' });
+    expect(JSON.stringify(body)).not.toContain('sensitive');
+    expect(JSON.stringify(body)).not.toContain('http_error');
   });
 });

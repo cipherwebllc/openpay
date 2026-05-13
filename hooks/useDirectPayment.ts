@@ -1,8 +1,8 @@
 'use client';
 
-// 直接送金 (mode=direct) フロー: 顧客の EOA から ERC20 transfer を 1 件だけ実行する。
-// Smart Account / Pimlico / Sponsorship Paymaster は経由しないので、顧客は
-// 自前のネイティブガス (POL / ETH) を必要とする。
+// 直接送金 (mode=direct): 顧客 EOA から ERC20.transfer を 1 件のみ実行。
+// Smart Account / Pimlico / Sponsorship を経由しないため、顧客は自前で
+// native gas (POL / ETH) を払う必要がある。
 
 import { useEffect, useRef, useState } from 'react';
 import { erc20Abi, type Address, type Hex } from 'viem';
@@ -11,7 +11,7 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
-import { logPaymentEvent } from '@/lib/paymentLog';
+import { buildPaymentLogEvent, logPaymentEvent } from '@/lib/paymentLog';
 
 type DirectPaymentParams = {
   tokenAddress: Address;
@@ -25,13 +25,14 @@ type DirectPaymentResult = {
   blockNumber: bigint;
 };
 
+const ERROR_SENTINEL = '0xerror' as const;
+
 export function useDirectPayment() {
   const [chainId, setChainId] = useState<number | undefined>(undefined);
   const [externalError, setExternalError] = useState<Error | null>(null);
-  // log 用に最後に mutate された params を保持 (success / error 時に再構築)
   const lastParamsRef = useRef<DirectPaymentParams | null>(null);
-  // 1 mutate につき 1 度しか log を発火しないように guard
-  const loggedForTxRef = useRef<Hex | null>(null);
+  // 1 mutate につき log 発火を 1 度に絞る guard。
+  const loggedKeyRef = useRef<string | null>(null);
 
   const { address: customer } = useAccount();
   const write = useWriteContract();
@@ -47,7 +48,7 @@ export function useDirectPayment() {
       return;
     }
     lastParamsRef.current = params;
-    loggedForTxRef.current = null;
+    loggedKeyRef.current = null;
     setChainId(params.chainId);
     write.writeContract({
       chainId: params.chainId,
@@ -58,50 +59,49 @@ export function useDirectPayment() {
     });
   }
 
-  // 成功 / 失敗の終局状態に到達したら log を 1 度だけ発火する。
-  useEffect(() => {
-    const params = lastParamsRef.current;
-    if (!params) return;
-    if (receipt.isSuccess && receipt.data && write.data) {
-      if (loggedForTxRef.current === write.data) return;
-      loggedForTxRef.current = write.data;
-      void logPaymentEvent({
-        flow: 'direct',
-        result: receipt.data.status === 'success' ? 'success' : 'reverted',
-        chainId: params.chainId,
-        tokenAddress: params.tokenAddress,
-        merchant: params.merchant,
-        merchantAmount: params.amount.toString(),
-        customer,
-        txHash: write.data,
-        blockNumber: receipt.data.blockNumber.toString(),
-      });
-    }
-  }, [receipt.isSuccess, receipt.data, write.data, customer]);
-
+  // 終局状態 (receipt 確定 or 失敗) に達した時点で 1 度だけ log。
+  // success / error を 1 effect に統合して dep 変化での重複発火を抑える。
   useEffect(() => {
     const params = lastParamsRef.current;
     if (!params) return;
     const err = write.error ?? receipt.error;
-    if (!err) return;
-    // hash 取得前のエラーは guard key として synthetic 値を使う
-    const key = (write.data ?? ('0xerror' as Hex)) as Hex;
-    if (loggedForTxRef.current === key) return;
-    loggedForTxRef.current = key;
-    void logPaymentEvent({
-      flow: 'direct',
-      result: 'error',
+    const receiptReady = receipt.isSuccess && receipt.data && write.data;
+    if (!err && !receiptReady) return;
+
+    const key = (write.data ?? ERROR_SENTINEL) as string;
+    if (loggedKeyRef.current === key) return;
+    loggedKeyRef.current = key;
+
+    const ctx = {
+      flow: 'direct' as const,
       chainId: params.chainId,
       tokenAddress: params.tokenAddress,
       merchant: params.merchant,
-      merchantAmount: params.amount.toString(),
+      merchantAmount: params.amount,
       customer,
-      txHash: write.data ?? undefined,
-      errorMessage: err.message.slice(0, 500),
-    });
-  }, [write.error, receipt.error, write.data, customer]);
+    };
+    void logPaymentEvent(
+      err
+        ? buildPaymentLogEvent(ctx, {
+            result: 'error',
+            errorMessage: err.message,
+            txHash: write.data ?? undefined,
+          })
+        : buildPaymentLogEvent(ctx, {
+            result: receipt.data!.status === 'success' ? 'success' : 'reverted',
+            txHash: write.data!,
+            blockNumber: receipt.data!.blockNumber,
+          }),
+    );
+  }, [
+    receipt.isSuccess,
+    receipt.data,
+    receipt.error,
+    write.data,
+    write.error,
+    customer,
+  ]);
 
-  // tx 送信が submit され、receipt 待ちの状態を含めて pending とみなす。
   const isPending =
     write.isPending ||
     (write.isSuccess && !receipt.isSuccess && !receipt.isError);

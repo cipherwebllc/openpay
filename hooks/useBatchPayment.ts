@@ -22,7 +22,11 @@ import {
 import { useAccount } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
 import { assertGasCeiling } from '@/lib/gasCeiling';
-import { logPaymentEvent } from '@/lib/paymentLog';
+import {
+  buildPaymentLogEvent,
+  logPaymentEvent,
+  type PaymentLogContext,
+} from '@/lib/paymentLog';
 import type { TokenDeployment } from '@/lib/tokens';
 
 type BatchPaymentParams = {
@@ -111,34 +115,40 @@ export function useBatchPayment(
       };
     },
     onSuccess: (data, params) => {
-      void logPaymentEvent({
-        flow: 'batch',
-        result: data.success ? 'success' : 'reverted',
-        chainId: chainId ?? deployment.chainId,
-        tokenAddress: params.tokenAddress,
-        merchant: params.merchant,
-        merchantAmount: params.merchantAmount.toString(),
-        customer,
-        feeReceiver: params.feeReceiver,
-        feeAmount: params.feeAmount.toString(),
-        userOpHash: data.userOpHash,
-        txHash: data.txHash,
-        blockNumber: data.blockNumber.toString(),
-      });
+      void logPaymentEvent(
+        buildPaymentLogEvent(toCtx(params, customer, chainId, deployment), {
+          result: data.success ? 'success' : 'reverted',
+          userOpHash: data.userOpHash,
+          txHash: data.txHash,
+          blockNumber: data.blockNumber,
+        }),
+      );
     },
     onError: (error, params) => {
-      void logPaymentEvent({
-        flow: 'batch',
-        result: 'error',
-        chainId: chainId ?? deployment.chainId,
-        tokenAddress: params.tokenAddress,
-        merchant: params.merchant,
-        merchantAmount: params.merchantAmount.toString(),
-        customer,
-        feeReceiver: params.feeReceiver,
-        feeAmount: params.feeAmount.toString(),
-        errorMessage: error.message.slice(0, 500),
-      });
+      void logPaymentEvent(
+        buildPaymentLogEvent(toCtx(params, customer, chainId, deployment), {
+          result: 'error',
+          errorMessage: error.message,
+        }),
+      );
     },
   });
+}
+
+function toCtx(
+  params: BatchPaymentParams,
+  customer: Address | undefined,
+  chainId: number | undefined,
+  deployment: TokenDeployment,
+): PaymentLogContext {
+  return {
+    flow: 'batch',
+    chainId: chainId ?? deployment.chainId,
+    tokenAddress: params.tokenAddress,
+    merchant: params.merchant,
+    merchantAmount: params.merchantAmount,
+    customer,
+    feeReceiver: params.feeReceiver,
+    feeAmount: params.feeAmount,
+  };
 }

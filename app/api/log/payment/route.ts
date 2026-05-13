@@ -1,18 +1,17 @@
-// alpha 取引 log の受信 endpoint。
-// クライアント (useBatchPayment / useDirectPayment) が成功・失敗時に POST する。
-// 受信した payload に server timestamp を付与し、Upstash Redis (Vercel KV) の
-// list に LPUSH する。KV 未設定時は console.log のみで graceful degrade。
-//
-// 想定 retention: alpha 6 ヶ月運用後に弁護士・demand signal 集計に export する。
-// Export endpoint は /api/log/payment/export (Bearer 認証)。
+// alpha 取引 log 受信 endpoint。
+// graceful degrade: KV 未設定 / KV 障害でも 200 を返す (UI 影響回避)。
 
 import { NextResponse } from 'next/server';
-import { kvLpush } from '@/lib/kv';
+import { isAddress, isHex } from 'viem';
+import { kvLpush, kvLtrim } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
 const KV_KEY = 'openpay:payments:log';
+const MAX_BODY_BYTES = 8 * 1024;
+// alpha 6 ヶ月 + 余裕。古い entry は LPUSH 後の LTRIM で自動破棄。
+const LIST_CAP = 100_000;
 
 type AddressLike = `0x${string}`;
 type HexLike = `0x${string}`;
@@ -33,14 +32,16 @@ type Payload = {
   errorMessage?: string;
 };
 
-function isAddress(v: unknown): v is AddressLike {
-  return typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v);
-}
-function isHex(v: unknown): v is HexLike {
-  return typeof v === 'string' && /^0x[0-9a-fA-F]+$/.test(v);
-}
-function isDecimalString(v: unknown): boolean {
+function isDecimalString(v: unknown): v is string {
   return typeof v === 'string' && /^[0-9]+$/.test(v);
+}
+
+function validAddress(v: unknown): v is AddressLike {
+  return typeof v === 'string' && isAddress(v, { strict: false });
+}
+
+function validHex(v: unknown): v is HexLike {
+  return typeof v === 'string' && isHex(v) && v.length > 2;
 }
 
 function validate(raw: unknown): Payload | null {
@@ -49,20 +50,18 @@ function validate(raw: unknown): Payload | null {
   if (r.flow !== 'batch' && r.flow !== 'direct') return null;
   if (r.result !== 'success' && r.result !== 'reverted' && r.result !== 'error') return null;
   if (typeof r.chainId !== 'number' || !Number.isInteger(r.chainId) || r.chainId <= 0) return null;
-  if (!isAddress(r.tokenAddress)) return null;
-  if (!isAddress(r.merchant)) return null;
+  if (!validAddress(r.tokenAddress)) return null;
+  if (!validAddress(r.merchant)) return null;
   if (!isDecimalString(r.merchantAmount)) return null;
-  if (r.customer !== undefined && !isAddress(r.customer)) return null;
-  if (r.feeReceiver !== undefined && !isAddress(r.feeReceiver)) return null;
+  if (r.customer !== undefined && !validAddress(r.customer)) return null;
+  if (r.feeReceiver !== undefined && !validAddress(r.feeReceiver)) return null;
   if (r.feeAmount !== undefined && !isDecimalString(r.feeAmount)) return null;
-  if (r.userOpHash !== undefined && !isHex(r.userOpHash)) return null;
-  if (r.txHash !== undefined && !isHex(r.txHash)) return null;
+  if (r.userOpHash !== undefined && !validHex(r.userOpHash)) return null;
+  if (r.txHash !== undefined && !validHex(r.txHash)) return null;
   if (r.blockNumber !== undefined && !isDecimalString(r.blockNumber)) return null;
   if (r.errorMessage !== undefined && typeof r.errorMessage !== 'string') return null;
   return raw as Payload;
 }
-
-const MAX_BODY_BYTES = 8 * 1024; // 8 KB; payload は 1 KB 程度の想定
 
 export async function POST(req: Request): Promise<NextResponse> {
   const lenHeader = req.headers.get('content-length');
@@ -82,35 +81,34 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const entry = {
     serverTs: new Date().toISOString(),
-    // privacy: IP は Vercel が forwarder に詰める。短期トラブルシュートには有用
-    // だが、長期 retention は不要。短縮 (subnet) してから保存する。
+    // 短期トラブルシュート用に subnet 粒度 (IPv4 /24 / IPv6 /64) で保管。
     ipPrefix: anonymizeIp(
       req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
     ),
     userAgent: (req.headers.get('user-agent') ?? '').slice(0, 200),
     ...payload,
   };
-  const serialized = JSON.stringify(entry);
-
-  // Vercel runtime log への記録 (KV 未設定時も解析可能にする)
   logger.info('payment.event', entry);
 
-  const kv = await kvLpush(KV_KEY, serialized);
+  const kv = await kvLpush(KV_KEY, JSON.stringify(entry));
   if (!kv.ok && kv.reason !== 'unconfigured') {
     logger.warn('payment-log.kv-write-failed', { reason: kv.reason, status: kv.status });
+  } else if (kv.ok) {
+    // 古い entry を捨てて list size を有界化。失敗しても client には返さない。
+    const trim = await kvLtrim(KV_KEY, 0, LIST_CAP - 1);
+    if (!trim.ok && trim.reason !== 'unconfigured') {
+      logger.warn('payment-log.kv-trim-failed', { reason: trim.reason, status: trim.status });
+    }
   }
 
-  // 失敗を返すと client が retry / UI 影響する可能性があるため、KV 障害でも 200
   return NextResponse.json({ ok: true });
 }
 
 function anonymizeIp(ip: string): string {
   const first = ip.split(',')[0].trim();
   if (first.includes(':')) {
-    // IPv6: 上位 4 hextet のみ
     return first.split(':').slice(0, 4).join(':') + '::/64';
   }
-  // IPv4: /24 サブネット
   const parts = first.split('.');
   if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
   return '';

@@ -1,16 +1,15 @@
-// Upstash Redis REST API への薄い wrapper。@vercel/kv / @upstash/redis 等の
-// package 依存を避け、fetch のみで動かす (alpha 段階の依存最小化)。
-//
-// 期待する env (Vercel KV を有効化すると自動 inject される):
-//   KV_REST_API_URL    - https://xxxx.upstash.io
-//   KV_REST_API_TOKEN  - 書込権限付き token
-//
-// 未設定時は kvLpush / kvLrange は { ok: false, reason: 'unconfigured' } を返す。
-// 呼出側はそれを見て fallback (console log のみ) を選ぶ。
+// Upstash Redis REST への薄い fetch wrapper。env (KV_REST_API_URL /
+// KV_REST_API_TOKEN) 未設定時は ok:false / unconfigured を返し、呼出側で
+// 「server log のみ」に degrade させる前提。
 
-type KvResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: 'unconfigured' | 'http_error' | 'parse_error'; status?: number; detail?: string };
+type KvOk<T> = { ok: true; value: T };
+type KvErr = {
+  ok: false;
+  reason: 'unconfigured' | 'http_error' | 'parse_error';
+  status?: number;
+  detail?: string;
+};
+type KvResult<T> = KvOk<T> | KvErr;
 
 function endpoint(): { url: string; token: string } | null {
   const url = process.env.KV_REST_API_URL;
@@ -76,4 +75,13 @@ export function kvLrange(
 
 export function kvLlen(key: string): Promise<KvResult<number>> {
   return call<number>(['LLEN', key]);
+}
+
+// LPUSH 直後の cap 用: 0..stop で先頭側を残し古い entry を捨てる。
+export function kvLtrim(
+  key: string,
+  start: number,
+  stop: number,
+): Promise<KvResult<'OK'>> {
+  return call<'OK'>(['LTRIM', key, String(start), String(stop)]);
 }
