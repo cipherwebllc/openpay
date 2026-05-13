@@ -38,6 +38,13 @@ export function SiteFooter() {
         >
           {t('links.disclaimer')}
         </Link>
+        <Link
+          href="/tokutei"
+          className="hover:text-slate-700 hover:underline"
+          prefetch={false}
+        >
+          {t('links.tokutei')}
+        </Link>
       </nav>
       <p className="mt-3 text-slate-400">
         {t('copyright', {

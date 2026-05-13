@@ -22,6 +22,7 @@ import {
 import { useAccount } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
 import { assertGasCeiling } from '@/lib/gasCeiling';
+import { logPaymentEvent } from '@/lib/paymentLog';
 import type { TokenDeployment } from '@/lib/tokens';
 
 type BatchPaymentParams = {
@@ -48,7 +49,7 @@ export function useBatchPayment(
   enabled: boolean = true,
 ) {
   const { data: clients } = useSmartAccount(deployment, enabled);
-  const { chainId } = useAccount();
+  const { address: customer, chainId } = useAccount();
 
   return useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
     mutationFn: async (params) => {
@@ -108,6 +109,36 @@ export function useBatchPayment(
         blockNumber: receipt.receipt.blockNumber,
         success: receipt.success,
       };
+    },
+    onSuccess: (data, params) => {
+      void logPaymentEvent({
+        flow: 'batch',
+        result: data.success ? 'success' : 'reverted',
+        chainId: chainId ?? deployment.chainId,
+        tokenAddress: params.tokenAddress,
+        merchant: params.merchant,
+        merchantAmount: params.merchantAmount.toString(),
+        customer,
+        feeReceiver: params.feeReceiver,
+        feeAmount: params.feeAmount.toString(),
+        userOpHash: data.userOpHash,
+        txHash: data.txHash,
+        blockNumber: data.blockNumber.toString(),
+      });
+    },
+    onError: (error, params) => {
+      void logPaymentEvent({
+        flow: 'batch',
+        result: 'error',
+        chainId: chainId ?? deployment.chainId,
+        tokenAddress: params.tokenAddress,
+        merchant: params.merchant,
+        merchantAmount: params.merchantAmount.toString(),
+        customer,
+        feeReceiver: params.feeReceiver,
+        feeAmount: params.feeAmount.toString(),
+        errorMessage: error.message.slice(0, 500),
+      });
     },
   });
 }

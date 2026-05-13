@@ -370,7 +370,8 @@
     "links": {
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",
-      "disclaimer": "Disclaimer"
+      "disclaimer": "Disclaimer",
+      "tokutei": "Business Disclosure"
     }
   },
   "Terms": {
@@ -383,7 +384,7 @@
     },
     "article2": {
       "title": "Article 2 (Definitions)",
-      "body": "(1) \"Merchant\" means a business or individual who receives crypto payments through the Service. (2) \"Customer\" means a person who pays a Merchant through the Service. (3) \"Wallet\" means a self-custodial crypto wallet (EOA or smart contract account) controlled by the user. (4) \"Supported Token\" means a crypto asset supported by the Service (currently JPYC and USDC). (5) \"Network Fee\" means gas required to confirm a blockchain transaction."
+      "body": "(1) \"Merchant\" means a business or individual who receives Supported Token payments through the Service. (2) \"Customer\" means a person who pays a Merchant through the Service. (3) \"Wallet\" means a self-custodial crypto wallet (EOA or smart contract account) controlled by the user. (4) \"Supported Token\" means a digital asset supported by the Service, currently including JPYC, an electronic payment instrument issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act, and USDC, a stablecoin issued by Circle Internet Financial, Inc. (5) \"Network Fee\" means gas required to confirm a blockchain transaction."
     },
     "article3": {
       "title": "Article 3 (Nature of the Service)",
@@ -472,7 +473,7 @@
     },
     "section3": {
       "title": "3. Third-Party Issued Tokens",
-      "body": "JPYC is issued and operated by JPYC Inc., USDC by Circle Internet Financial, Inc., and other supported tokens by their respective third-party issuers, all independent of the Company. The price, liquidity, availability, technical soundness, financial condition of the issuer, and regulatory compliance of each token are the responsibility of the respective issuer, not the Company."
+      "body": "JPYC is an electronic payment instrument (a JPY-denominated stablecoin) issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act; USDC is a stablecoin issued by Circle Internet Financial, Inc. Each Supported Token is issued and operated by a third-party issuer independent of the Company. The price, liquidity, availability, technical soundness, financial condition of the issuer, and regulatory compliance of each token (including maintenance of issuer registration and performance of redemption obligations) are the responsibility of the respective issuer, not the Company."
     },
     "section4": {
       "title": "4. Network Fee Volatility",
@@ -487,5 +488,69 @@
       "body": "Crypto and blockchain-related laws and regulations may change in Japan and other jurisdictions. The Company is not liable for losses arising when the Service becomes wholly or partially unavailable due to changes in law, regulatory guidance, or compliance measures. Users are responsible for complying with laws applicable to their place of residence and use, and for confirming that their transactions through the Service are not illegal."
     },
     "legalNote": "This Disclaimer applies together with the Terms of Service. In case of conflict, the Terms of Service prevail. The Japanese version of this Disclaimer prevails over this English reference version."
+  },
+  "Tokutei": {
+    "title": "Business Disclosure (Specified Commercial Transaction Act of Japan)",
+    "effectiveDate": "Last updated: {date}",
+    "intro": "This page is provided pursuant to Article 11 of the Specified Commercial Transaction Act of Japan and its enforcement regulations, disclosing business information of {company} (the \"Company\") concerning the blockchain payment service \"{service}\" (the \"Service\").",
+    "rows": {
+      "seller": {
+        "label": "Seller",
+        "value": "{company} (Corporate Number: {corporateNumber})"
+      },
+      "manager": {
+        "label": "Operating Manager",
+        "value": "{representative}"
+      },
+      "address": {
+        "label": "Address",
+        "value": "{address}"
+      },
+      "phone": {
+        "label": "Phone Number",
+        "value": "Omitted on this page. Pursuant to Article 23, Paragraph 1, Item 2 of the Enforcement Regulations of the Specified Commercial Transaction Act, we will disclose our phone number without delay by email or other means upon request."
+      },
+      "email": {
+        "label": "Email",
+        "value": "{email}"
+      },
+      "url": {
+        "label": "Website URL",
+        "value": "{url}"
+      },
+      "serviceContent": {
+        "label": "Service Description",
+        "value": "Non-custodial blockchain payment facilitation service, including generation of EIP-681 payment URIs and QR codes, batched user operations under ERC-4337, Tip widget, and gas relay. The Service never holds user funds."
+      },
+      "supportedTokens": {
+        "label": "Supported Tokens",
+        "value": "JPYC (an electronic payment instrument issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act), USDC (a stablecoin issued by Circle Internet Financial, Inc.), and other digital assets the Company may add from time to time. Supported tokens and chains may be added, changed, or suspended at the Company's discretion without prior notice."
+      },
+      "price": {
+        "label": "Service Fee",
+        "value": "Merchants are charged an operating fee of 1.0% of each transaction amount, subject to a minimum of 5 JPYC for JPYC transactions and 0.05 USDC for USDC transactions. Customers (payers) do not bear the Company's operating fee."
+      },
+      "additionalFees": {
+        "label": "Additional Costs",
+        "value": "(1) Network fees (gas) required for blockchain transactions. Whether the Customer or the Merchant bears the gas cost is determined by the Merchant's choice at QR generation time and is reflected in transactions through that QR. Gas amounts vary with network congestion. (2) Wallet application fees, if any, are governed by the terms of the user's chosen wallet provider."
+      },
+      "serviceStartTiming": {
+        "label": "Service Provision Timing",
+        "value": "Service to a Merchant begins when the Merchant connects a wallet and generates a QR code. Payment between Customer and Merchant is completed when the Customer scans the QR, approves the transfer in their wallet, and the transaction is finalized on-chain."
+      },
+      "paymentTiming": {
+        "label": "Payment Timing and Method",
+        "value": "The operating fee is automatically deducted from the transaction amount at the time of each on-chain transfer. The Company does not issue separate invoices, hold funds in escrow, or operate a prepaid charge system."
+      },
+      "returnPolicy": {
+        "label": "Refunds and Cancellations",
+        "value": "Due to the technical nature of blockchain, finalized transactions (including the operating fee) cannot be cancelled, refunded, or modified. Users must verify destination address, amount, token, and chain before submitting. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope."
+      },
+      "environment": {
+        "label": "Required Environment",
+        "value": "A wallet (EOA or smart contract account) capable of transacting on the supported blockchain (currently Polygon mainnet), supported token balance, and where applicable, network fees in the native token (e.g., POL), except for transactions where the Company sponsors the gas."
+      }
+    },
+    "legalNote": "The Japanese version of this disclosure prevails. This English version is provided for reference only."
   }
 }

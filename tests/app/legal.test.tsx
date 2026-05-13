@@ -4,6 +4,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 import TermsPage from '@/app/[locale]/terms/page';
 import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
+import TokuteiPage from '@/app/[locale]/tokutei/page';
 import { LEGAL_ENTITY } from '@/lib/legal';
 
 describe('Legal pages', () => {
@@ -130,6 +131,52 @@ describe('Legal pages', () => {
         name: /^2\./,
       });
       expect(section2.textContent).toMatch(/不可逆性|取消/);
+    });
+  });
+
+  describe('Tokutei (特商法表記)', () => {
+    it('ja: h1 と必須 row (販売事業者 / 所在地 / 役務の対価 / 返品) が render される', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'ja' });
+      expect(
+        screen.getByRole('heading', { level: 1, name: '特定商取引法に基づく表記' }),
+      ).toBeInTheDocument();
+      // 主要 row label が出ている
+      expect(screen.getByText('販売事業者')).toBeInTheDocument();
+      expect(screen.getByText('所在地')).toBeInTheDocument();
+      expect(screen.getByText('電話番号')).toBeInTheDocument();
+      expect(screen.getByText('役務の対価 (運営手数料)')).toBeInTheDocument();
+      expect(screen.getByText('返品・キャンセル')).toBeInTheDocument();
+    });
+
+    it('事業者情報 (法人番号 / 所在地 / 代表者 / メール) が LEGAL_ENTITY から注入される', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'ja' });
+      const main = screen.getByRole('main');
+      expect(main.textContent).toContain(LEGAL_ENTITY.companyName);
+      expect(main.textContent).toContain(LEGAL_ENTITY.corporateNumber);
+      expect(main.textContent).toContain(LEGAL_ENTITY.headOffice);
+      expect(main.textContent).toContain(LEGAL_ENTITY.representative);
+      expect(main.textContent).toContain(LEGAL_ENTITY.contactEmail);
+      expect(main.textContent).toContain(LEGAL_ENTITY.siteUrl);
+    });
+
+    it('電話番号は施行規則 23 条 exception の文言で記載 (請求あり次第開示)', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'ja' });
+      const main = screen.getByRole('main');
+      expect(main.textContent).toMatch(/第 23 条/);
+      expect(main.textContent).toMatch(/遅滞なく/);
+    });
+
+    it('en: h1 が Business Disclosure、phone exception 文言は英訳', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'en' });
+      expect(
+        screen.getByRole('heading', {
+          level: 1,
+          name: /Business Disclosure/,
+        }),
+      ).toBeInTheDocument();
+      const main = screen.getByRole('main');
+      expect(main.textContent).toMatch(/Article 23/);
+      expect(main.textContent).toMatch(/without delay/);
     });
   });
 });

@@ -5,17 +5,19 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { LEGAL_ENTITY } from '@/lib/legal';
 
 describe('SiteFooter', () => {
-  it('ja: 3 legal link (利用規約/プライバシーポリシー/免責事項) を露出', () => {
+  it('ja: 4 legal link (利用規約/プライバシーポリシー/免責事項/特商法表記) を露出', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     const terms = screen.getByRole('link', { name: '利用規約' });
     const privacy = screen.getByRole('link', { name: 'プライバシーポリシー' });
     const disclaimer = screen.getByRole('link', { name: '免責事項' });
+    const tokutei = screen.getByRole('link', { name: '特商法表記' });
     expect(terms.getAttribute('href')).toBe('/terms');
     expect(privacy.getAttribute('href')).toBe('/privacy');
     expect(disclaimer.getAttribute('href')).toBe('/disclaimer');
+    expect(tokutei.getAttribute('href')).toBe('/tokutei');
   });
 
-  it('en: 同じ link を英訳 (Terms of Service / Privacy Policy / Disclaimer) で露出', () => {
+  it('en: 同じ link を英訳 (Terms of Service / Privacy Policy / Disclaimer / Business Disclosure) で露出', () => {
     renderWithIntl(<SiteFooter />, { locale: 'en' });
     expect(
       screen.getByRole('link', { name: 'Terms of Service' }),
@@ -24,6 +26,9 @@ describe('SiteFooter', () => {
       screen.getByRole('link', { name: 'Privacy Policy' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Disclaimer' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Business Disclosure' }),
+    ).toBeInTheDocument();
   });
 
   it('事業者名と copyright を表示する', () => {

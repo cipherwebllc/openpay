@@ -8,6 +8,7 @@ import { baseSepolia } from 'viem/chains';
 vi.mock('wagmi', () => ({
   useWriteContract: vi.fn(),
   useWaitForTransactionReceipt: vi.fn(),
+  useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
 }));
 import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { useDirectPayment } from '@/hooks/useDirectPayment';
