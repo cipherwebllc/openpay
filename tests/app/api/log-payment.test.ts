@@ -159,6 +159,112 @@ describe('POST /api/log/payment', () => {
     expect(kvLtrim).toHaveBeenCalledWith('openpay:payments:log', 0, 99999);
   });
 
+  it('LTRIM 失敗でも 200 を返す (UI 影響回避)', async () => {
+    vi.mocked(kvLtrim).mockResolvedValue({
+      ok: false,
+      reason: 'http_error',
+      status: 500,
+    });
+    const res = await POST(req(validBody));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('x-forwarded-for 欠落時は x-real-ip を fallback で読む', async () => {
+    const r = new Request('http://localhost/api/log/payment', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-real-ip': '198.51.100.42',
+      },
+      body: JSON.stringify(validBody),
+    });
+    await POST(r);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.ipPrefix).toBe('198.51.100.0/24');
+  });
+
+  it('IP header が完全に欠落していても空文字に degrade', async () => {
+    await POST(req(validBody));
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.ipPrefix).toBe('');
+  });
+
+  it('userAgent は 200 文字で truncate', async () => {
+    const longUa = 'A'.repeat(500);
+    const r = new Request('http://localhost/api/log/payment', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': longUa },
+      body: JSON.stringify(validBody),
+    });
+    await POST(r);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.userAgent).toHaveLength(200);
+    expect(entry.userAgent).toBe('A'.repeat(200));
+  });
+
+  it('result=reverted (on-chain revert) も受理', async () => {
+    const res = await POST(req({ ...validBody, result: 'reverted' }));
+    expect(res.status).toBe(200);
+    expect(JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]).result).toBe('reverted');
+  });
+
+  it('direct flow (feeReceiver / feeAmount 未指定) も受理', async () => {
+    const directPayload = {
+      flow: 'direct',
+      result: 'success',
+      chainId: 137,
+      tokenAddress: validBody.tokenAddress,
+      merchant: validBody.merchant,
+      merchantAmount: '500',
+      txHash: validBody.txHash,
+      blockNumber: '99',
+    };
+    const res = await POST(req(directPayload));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.flow).toBe('direct');
+    expect(entry.feeAmount).toBeUndefined();
+  });
+
+  it('mixed-case address (非 checksum) も accept (strict:false)', async () => {
+    // 全部小文字
+    const mixed = '0xe7c3d8c9a439fede00d2600032d5db0be71c3c29';
+    const res = await POST(req({ ...validBody, tokenAddress: mixed }));
+    expect(res.status).toBe(200);
+  });
+
+  it('addressっぽいが 41 桁だと invalid_payload', async () => {
+    const bad = '0x' + 'a'.repeat(41);
+    const res = await POST(req({ ...validBody, tokenAddress: bad }));
+    expect(res.status).toBe(400);
+  });
+
+  it('userOpHash が "0x" のみ (空 hex) だと invalid', async () => {
+    const res = await POST(req({ ...validBody, userOpHash: '0x' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('errorMessage が string 以外だと invalid', async () => {
+    const res = await POST(req({ ...validBody, errorMessage: 123 }));
+    expect(res.status).toBe(400);
+  });
+
+  it('chainId が小数だと invalid (Number.isInteger 検査)', async () => {
+    const res = await POST(req({ ...validBody, chainId: 1.5 }));
+    expect(res.status).toBe(400);
+  });
+
+  it('body が null だと invalid_payload', async () => {
+    const res = await POST(req(null));
+    expect(res.status).toBe(400);
+  });
+
+  it('body が array だと invalid_payload', async () => {
+    const res = await POST(req([validBody]));
+    expect(res.status).toBe(400);
+  });
+
   it('IPv4 を /24 で匿名化する', async () => {
     const r = new Request('http://localhost/api/log/payment', {
       method: 'POST',
@@ -260,6 +366,93 @@ describe('GET /api/log/payment/export', () => {
     );
     await GET(r);
     expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, 99);
+  });
+
+  it('kvLrange と kvLlen は Promise.all で並列発火 (順序を待たない)', async () => {
+    // 実時間で同時発火を確認するため、両者を delay
+    vi.mocked(kvLrange).mockImplementation(
+      () =>
+        new Promise((r) =>
+          setTimeout(() => r({ ok: true, value: [] }), 50),
+        ),
+    );
+    vi.mocked(kvLlen).mockImplementation(
+      () =>
+        new Promise((r) =>
+          setTimeout(() => r({ ok: true, value: 0 }), 50),
+        ),
+    );
+    const start = Date.now();
+    const r = new Request('http://localhost/api/log/payment/export', {
+      headers: { authorization: 'Bearer admin-secret' },
+    });
+    await GET(r);
+    const elapsed = Date.now() - start;
+    // 直列なら 100ms 以上、並列なら 70ms 程度に収まる
+    expect(elapsed).toBeLessThan(95);
+  });
+
+  it('LRANGE が空配列でも 200 + entries=[] / total=0', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 0 });
+    const r = new Request('http://localhost/api/log/payment/export', {
+      headers: { authorization: 'Bearer admin-secret' },
+    });
+    const res = await GET(r);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ok: true, total: 0, returned: 0, entries: [] });
+  });
+
+  it('LRANGE の entry に malformed JSON が混在しても _parseError として返す', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: ['{"valid":true}', 'not-json-at-all', '{"another":1}'],
+    });
+    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 3 });
+    const r = new Request('http://localhost/api/log/payment/export', {
+      headers: { authorization: 'Bearer admin-secret' },
+    });
+    const res = await GET(r);
+    const body = await res.json();
+    expect(body.entries).toHaveLength(3);
+    expect(body.entries[0]).toEqual({ valid: true });
+    expect(body.entries[1]).toEqual({ _parseError: true, raw: 'not-json-at-all' });
+    expect(body.entries[2]).toEqual({ another: 1 });
+  });
+
+  it('LLEN が失敗しても entries は返す (total=null)', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: ['{"a":1}'],
+    });
+    vi.mocked(kvLlen).mockResolvedValue({
+      ok: false,
+      reason: 'http_error',
+      status: 500,
+    });
+    const r = new Request('http://localhost/api/log/payment/export', {
+      headers: { authorization: 'Bearer admin-secret' },
+    });
+    const res = await GET(r);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.total).toBeNull();
+    expect(body.entries).toHaveLength(1);
+  });
+
+  it('?from / ?to 欠落時は from=0 to=-1 (全件)', async () => {
+    const r = new Request('http://localhost/api/log/payment/export', {
+      headers: { authorization: 'Bearer admin-secret' },
+    });
+    await GET(r);
+    expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, -1);
+  });
+
+  it('Authorization header 欠落は 401', async () => {
+    const r = new Request('http://localhost/api/log/payment/export');
+    const res = await GET(r);
+    expect(res.status).toBe(401);
   });
 
   it('kv_read_failed の response に internal reason を leak しない', async () => {

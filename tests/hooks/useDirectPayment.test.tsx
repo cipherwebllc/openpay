@@ -167,4 +167,184 @@ describe('useDirectPayment', () => {
     });
     expect(writeContract).toHaveBeenCalledOnce();
   });
+
+  describe('payment log effect (実コード経由で fetch を発火)', () => {
+    const TX = `0x${'c'.repeat(64)}` as Hex;
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fetchSpy = vi.fn().mockResolvedValue(
+        new Response(null, { status: 200 }),
+      );
+      vi.stubGlobal('fetch', fetchSpy);
+      vi.mocked(useAccount).mockReturnValue({
+        address: '0x9999999999999999999999999999999999999999',
+        isConnected: true,
+      } as unknown as ReturnType<typeof useAccount>);
+    });
+
+    function mountAndMutate() {
+      mockWrite({});
+      mockReceipt({});
+      const view = renderHook(() => useDirectPayment());
+      act(() => {
+        view.result.current.mutate({
+          tokenAddress: TOKEN,
+          merchant: MERCHANT,
+          amount: 500n,
+          chainId: baseSepolia.id,
+        });
+      });
+      return view;
+    }
+
+    it('receipt success → fetch が success payload で呼ばれる', async () => {
+      const view = mountAndMutate();
+      mockWrite({ isSuccess: true, data: TX });
+      mockReceipt({
+        isSuccess: true,
+        data: { blockNumber: 42n, status: 'success' } as unknown as {
+          blockNumber: bigint;
+        },
+      });
+      view.rerender();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const [url, init] = fetchSpy.mock.calls[0];
+      expect(url).toBe('/api/log/payment');
+      const body = JSON.parse(init.body);
+      expect(body).toMatchObject({
+        flow: 'direct',
+        result: 'success',
+        chainId: baseSepolia.id,
+        merchant: MERCHANT.toLowerCase(),
+        merchantAmount: '500',
+        txHash: TX,
+        blockNumber: '42',
+        customer: '0x9999999999999999999999999999999999999999',
+      });
+      expect(body.userOpHash).toBeUndefined();
+      expect(body.feeAmount).toBeUndefined();
+    });
+
+    it('receipt status=reverted → result=reverted で送信', async () => {
+      const view = mountAndMutate();
+      mockWrite({ isSuccess: true, data: TX });
+      mockReceipt({
+        isSuccess: true,
+        data: { blockNumber: 1n, status: 'reverted' } as unknown as {
+          blockNumber: bigint;
+        },
+      });
+      view.rerender();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.result).toBe('reverted');
+      expect(body.txHash).toBe(TX);
+    });
+
+    it('writeContract が reject → fetch が error payload (txHash なし) で呼ばれる', async () => {
+      const view = mountAndMutate();
+      mockWrite({ error: new Error('user rejected request') });
+      mockReceipt({});
+      view.rerender();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body).toMatchObject({
+        flow: 'direct',
+        result: 'error',
+        errorMessage: 'user rejected request',
+      });
+      expect(body.txHash).toBeUndefined();
+    });
+
+    it('write 後の receipt 段階で error → txHash を含む error payload', async () => {
+      const view = mountAndMutate();
+      mockWrite({ isSuccess: true, data: TX });
+      mockReceipt({ isError: true, error: new Error('reorg') });
+      view.rerender();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.result).toBe('error');
+      expect(body.errorMessage).toBe('reorg');
+      expect(body.txHash).toBe(TX);
+    });
+
+    it('rerender を繰り返しても同一 mutate に対して fetch は 1 度のみ (dedup)', async () => {
+      const view = mountAndMutate();
+      mockWrite({ isSuccess: true, data: TX });
+      mockReceipt({
+        isSuccess: true,
+        data: { blockNumber: 7n, status: 'success' } as unknown as {
+          blockNumber: bigint;
+        },
+      });
+      view.rerender();
+      view.rerender();
+      view.rerender();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      // dep が同一参照なら effect は再 fire しないが、念のため guard も検証
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('mutate せずに state が変化しても fetch は呼ばれない (lastParams guard)', async () => {
+      mockWrite({ isSuccess: true, data: TX });
+      mockReceipt({
+        isSuccess: true,
+        data: { blockNumber: 1n, status: 'success' } as unknown as {
+          blockNumber: bigint;
+        },
+      });
+      renderHook(() => useDirectPayment());
+      // 100ms 程度待っても fetch は発火しない
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('mutate 2 回目 (異なる tx) で新 fetch が発火 (loggedKey reset)', async () => {
+      const TX1 = `0x${'1'.repeat(64)}` as Hex;
+      const TX2 = `0x${'2'.repeat(64)}` as Hex;
+      const view = mountAndMutate();
+
+      // 1 回目: TX1 で success
+      mockWrite({ isSuccess: true, data: TX1 });
+      mockReceipt({
+        isSuccess: true,
+        data: { blockNumber: 1n, status: 'success' } as unknown as {
+          blockNumber: bigint;
+        },
+      });
+      view.rerender();
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+      // 2 回目 mutate
+      act(() => {
+        view.result.current.mutate({
+          tokenAddress: TOKEN,
+          merchant: MERCHANT,
+          amount: 1000n,
+          chainId: baseSepolia.id,
+        });
+      });
+      mockWrite({ isSuccess: true, data: TX2 });
+      mockReceipt({
+        isSuccess: true,
+        data: { blockNumber: 2n, status: 'success' } as unknown as {
+          blockNumber: bigint;
+        },
+      });
+      view.rerender();
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+
+      const body2 = JSON.parse(fetchSpy.mock.calls[1][1].body);
+      expect(body2.txHash).toBe(TX2);
+      expect(body2.merchantAmount).toBe('1000');
+    });
+  });
 });
+
+import { useAccount } from 'wagmi';

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { SiteFooter } from '@/components/SiteFooter';
@@ -43,5 +43,37 @@ describe('SiteFooter', () => {
     const footer = screen.getByRole('contentinfo');
     // tailwind class が含まれていれば OK (実 CSS は別途検証不要)
     expect(footer.className).toContain('print:hidden');
+  });
+
+  it('現在年 = copyrightStartYear なら単年表示', () => {
+    vi.spyOn(Date.prototype, 'getFullYear').mockReturnValue(
+      LEGAL_ENTITY.copyrightStartYear,
+    );
+    try {
+      renderWithIntl(<SiteFooter />, { locale: 'ja' });
+      const footer = screen.getByRole('contentinfo');
+      expect(footer.textContent).toContain(
+        String(LEGAL_ENTITY.copyrightStartYear),
+      );
+      expect(footer.textContent).not.toMatch(
+        new RegExp(`${LEGAL_ENTITY.copyrightStartYear}-\\d{4}`),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('現在年 > copyrightStartYear ならレンジ表示 (start-current)', () => {
+    const futureYear = LEGAL_ENTITY.copyrightStartYear + 3;
+    vi.spyOn(Date.prototype, 'getFullYear').mockReturnValue(futureYear);
+    try {
+      renderWithIntl(<SiteFooter />, { locale: 'ja' });
+      const footer = screen.getByRole('contentinfo');
+      expect(footer.textContent).toMatch(
+        new RegExp(`${LEGAL_ENTITY.copyrightStartYear}-${futureYear}`),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
