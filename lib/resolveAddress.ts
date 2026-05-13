@@ -5,38 +5,24 @@ import {
   isAddress,
   type Address,
 } from 'viem';
-import { base, mainnet } from 'viem/chains';
+import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { env } from './env';
 
-// ENS (.eth) は Ethereum mainnet の Universal Resolver で解決。
-// viem の mainnet chain 定義に ensUniversalResolver が組込み済 (0xeEeE…eEee)。
+// ENS (.eth) も Basenames (.base.eth) も Ethereum mainnet の ENS Universal
+// Resolver で解決する。Basenames は L2 (Base) の Registry / Resolver を
+// 直接叩く必要はなく、mainnet UR が CCIP-Read (ERC-3668) で Base 上の
+// resolver を呼び出して address を返す (`jesse.base.eth` 等で 2026-05-14 実証)。
 //
-// CCIP-Read (off-chain resolution、ERC-3668) 対応 RPC が必須:
-// 多くの ENS 名前は L2 (Linea, Optimism 等) や off-chain resolver に
-// migrate しており、resolveWithGateways で "Internal error" が出る場合は
-// RPC が CCIP-Read 非対応 (cloudflare-eth.com は非対応で有名)。
-//
-// 既定: ethereum-rpc.publicnode.com (CCIP-Read 対応)
-// 上書き: NEXT_PUBLIC_MAINNET_RPC_URL (Alchemy / Infura 等の有料 RPC 推奨)
+// CCIP-Read 対応 RPC が必須:
+// cloudflare-eth.com 等は非対応で "Internal error" を返す。既定は
+// publicnode (対応確認済)、上書きは NEXT_PUBLIC_MAINNET_RPC_URL。
 const ensClient = createPublicClient({
   chain: mainnet,
   transport: http(env.rpc.mainnet ?? 'https://ethereum-rpc.publicnode.com'),
 });
 
-// Basenames (.base.eth) は Base mainnet の Universal Resolver で解決。
-// 同じ deterministic CREATE2 アドレス (0xeEeE…eEee) が Base にもデプロイ済。
-const BASE_UNIVERSAL_RESOLVER: Address =
-  '0xeEeEeEee14D718C2B47D9923Deab1335E144EeEe';
-const basenamesClient = createPublicClient({
-  chain: base,
-  transport: http(
-    env.rpc.baseMainnet ?? env.rpc.base ?? 'https://mainnet.base.org',
-  ),
-});
-
-const ENS_PATTERN = /\.eth$/i;
-const BASENAMES_PATTERN = /\.base\.eth$/i;
+const NAME_PATTERN = /\.eth$/i;
 
 export type ResolvedAddress = {
   address: Address;
@@ -54,19 +40,7 @@ export async function resolveAddress(
     return { address: getAddress(trimmed), name: null };
   }
 
-  if (BASENAMES_PATTERN.test(trimmed)) {
-    const name = normalize(trimmed);
-    const address = await basenamesClient.getEnsAddress({
-      name,
-      universalResolverAddress: BASE_UNIVERSAL_RESOLVER,
-    });
-    if (!address) {
-      throw new Error(`${trimmed} は登録されていません`);
-    }
-    return { address: getAddress(address), name: trimmed };
-  }
-
-  if (ENS_PATTERN.test(trimmed)) {
+  if (NAME_PATTERN.test(trimmed)) {
     const name = normalize(trimmed);
     const address = await ensClient.getEnsAddress({ name });
     if (!address) {

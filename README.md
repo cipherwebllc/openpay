@@ -538,6 +538,17 @@ NEXT_PUBLIC_FEE_RECEIVER_ADDRESS=0x000000000000000000000000000000000000dEaD \
 
 CI (`.github/workflows/ci.yml`) でも `npm run build` を実行するため、push 時の safety net はあるが、これは「ローカル検証を省略してよい」という意味ではない。`next start` で middleware (next-intl の locale prefix) の挙動が壊れていないかも、可能なら deploy 前にローカルで 1 度 click test しておくのが望ましい。
 
+### 5.1. middleware / locale prefix の自動 e2e smoke
+
+`e2e/middleware-locale.spec.ts` (15 cases) で **production build (`next start`) に対する実 HTTP** で以下を検証する。Next 本体 / next-intl の patch upgrade 時に `npm run e2e` で回せば runtime regression を catch できる:
+
+- `/` の locale 自動 redirect (`/ja` または `/en` への 30x)
+- `/ja` / `/en` が 200 で UI を返す
+- 4 legal page × 2 locale = 8 ルートが 200 (静的生成)
+- 未知 locale (`/fr`) が 404
+- `/manifest.webmanifest` が middleware bypass で 200
+- `/api/log/payment` GET → 405、不正 body POST → 400 + `{ok:false, error:"invalid_payload"}`
+
 ### 6. 残存 `postcss` MODERATE 脆弱性の判定根拠
 
 `npm audit` で残る `GHSA-qx2v-qp2m-jg93` (PostCSS XSS via Unescaped `</style>`) は **本リポジトリでは到達不能** と判定:
@@ -604,14 +615,17 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 
 整数除算の端数は主受取人に集約されるため 0 になることはないが、UI 側で `parseSplitDrafts` が合計 100% 以上を reject する。**操作ミスで意図せず大半を split に流してしまう設計リスクがあるため、QrGenerator の split 入力欄は「主受取 = 残り N%」のラベル表示で常に primary share を可視化済み**。
 
-### 6. Basenames (.base.eth) の Universal Resolver
+### 6. Basenames (.base.eth) の Universal Resolver [解決済み — 2026-05-14]
 
-`lib/resolveAddress.ts` は Basenames を `0xeEeEeEee14D718C2B47D9923Deab1335E144EeEe` (CREATE2 deterministic な ENS Universal Resolver アドレス) で解決する設計だが、**Base mainnet 上で実際に該当アドレスがデプロイ済かは未検証**。
+旧設計 (`lib/resolveAddress.ts` で Base mainnet 上に Basenames 専用 Universal Resolver があると仮定) は **誤り** だった。Base mainnet の `0xeEeEeEee14D718C2B47D9923Deab1335E144EeEe` には実際には bytecode が存在せず、`.base.eth` 解決は silent fail する状態だった。
 
-- ENS (.eth) は viem 同梱の mainnet config で動作実証済 (publicnode.com 経由)
-- Basenames は test も外部 RPC を叩かず、real path 未実行
-- 本番投入前に testnet で `name.base.eth` を入力して解決成功するか確認すること
-- 失敗する場合は Coinbase 公式の Basenames Universal Resolver アドレスを `BASE_UNIVERSAL_RESOLVER` 定数として `lib/resolveAddress.ts` に設定し直す
+修正 (2026-05-14): **mainnet ENS Universal Resolver (`0xeeee…eeee`) が CCIP-Read (ERC-3668) 経由で `.base.eth` も解決する**ことを実証 (`jesse.base.eth` → `0x2211…D77DA9`)。Base 上の Resolver を直接叩く必要はなく、mainnet UR 経由で `.eth` / `.base.eth` を同一 client で resolve する設計に変更済。
+
+検証は `scripts/verify-ens-resolver.mjs` を実 RPC に対して走らせて確認可能 (CI に追加可)。検証項目:
+
+1. `mainnet.contracts.ensUniversalResolver.address` に bytecode 存在
+2. `vitalik.eth` が `0xd8dA…6045` に解決
+3. `jesse.base.eth` が `0x2211…D77DA9` に CCIP-Read 経由で解決
 
 ### 7. CI workflows の初回実行
 
