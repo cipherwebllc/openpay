@@ -68,7 +68,7 @@ export function useDirectPayment() {
     const receiptReady = receipt.isSuccess && receipt.data && write.data;
     if (!err && !receiptReady) return;
 
-    const key = (write.data ?? ERROR_SENTINEL) as string;
+    const key = write.data ?? ERROR_SENTINEL;
     if (loggedKeyRef.current === key) return;
     loggedKeyRef.current = key;
 
@@ -85,7 +85,7 @@ export function useDirectPayment() {
         ? buildPaymentLogEvent(ctx, {
             result: 'error',
             errorMessage: err.message,
-            txHash: write.data ?? undefined,
+            txHash: write.data,
           })
         : buildPaymentLogEvent(ctx, {
             result: receipt.data!.status === 'success' ? 'success' : 'reverted',

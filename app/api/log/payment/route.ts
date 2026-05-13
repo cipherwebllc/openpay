@@ -2,7 +2,7 @@
 // graceful degrade: KV 未設定 / KV 障害でも 200 を返す (UI 影響回避)。
 
 import { NextResponse } from 'next/server';
-import { isAddress, isHex } from 'viem';
+import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { kvLpush, kvLtrim } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 
@@ -13,21 +13,18 @@ const MAX_BODY_BYTES = 8 * 1024;
 // alpha 6 ヶ月 + 余裕。古い entry は LPUSH 後の LTRIM で自動破棄。
 const LIST_CAP = 100_000;
 
-type AddressLike = `0x${string}`;
-type HexLike = `0x${string}`;
-
 type Payload = {
   flow: 'batch' | 'direct';
   result: 'success' | 'reverted' | 'error';
   chainId: number;
-  tokenAddress: AddressLike;
-  merchant: AddressLike;
+  tokenAddress: Address;
+  merchant: Address;
   merchantAmount: string;
-  customer?: AddressLike;
-  feeReceiver?: AddressLike;
+  customer?: Address;
+  feeReceiver?: Address;
   feeAmount?: string;
-  userOpHash?: HexLike;
-  txHash?: HexLike;
+  userOpHash?: Hex;
+  txHash?: Hex;
   blockNumber?: string;
   errorMessage?: string;
 };
@@ -36,11 +33,11 @@ function isDecimalString(v: unknown): v is string {
   return typeof v === 'string' && /^[0-9]+$/.test(v);
 }
 
-function validAddress(v: unknown): v is AddressLike {
+function validAddress(v: unknown): v is Address {
   return typeof v === 'string' && isAddress(v, { strict: false });
 }
 
-function validHex(v: unknown): v is HexLike {
+function validHex(v: unknown): v is Hex {
   return typeof v === 'string' && isHex(v) && v.length > 2;
 }
 
@@ -113,8 +110,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     logger.warn('payment-log.kv-write-failed', { reason: kv.reason, status: kv.status });
   } else if (kv.ok) {
     // 古い entry を捨てて list size を有界化。失敗しても client には返さない。
+    // LPUSH 成功時点で env は確定設定なので unconfigured 分岐は到達不能。
     const trim = await kvLtrim(KV_KEY, 0, LIST_CAP - 1);
-    if (!trim.ok && trim.reason !== 'unconfigured') {
+    if (!trim.ok) {
       logger.warn('payment-log.kv-trim-failed', { reason: trim.reason, status: trim.status });
     }
   }

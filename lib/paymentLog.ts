@@ -75,19 +75,15 @@ export const PAYMENT_LOG_FAILURE_EVENT = 'openpay:payment-log-failure';
 
 function emitFailure(event: PaymentLogEvent, error: unknown): void {
   if (typeof window === 'undefined') return;
-  try {
-    window.dispatchEvent(
-      new CustomEvent(PAYMENT_LOG_FAILURE_EVENT, {
-        detail: {
-          ts: new Date().toISOString(),
-          event,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      }),
-    );
-  } catch {
-    // CustomEvent 未対応など (古い browser) — degrade
-  }
+  window.dispatchEvent(
+    new CustomEvent(PAYMENT_LOG_FAILURE_EVENT, {
+      detail: {
+        ts: new Date().toISOString(),
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }),
+  );
 }
 
 export async function logPaymentEvent(event: PaymentLogEvent): Promise<void> {
