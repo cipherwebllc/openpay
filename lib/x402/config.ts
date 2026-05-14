@@ -10,10 +10,14 @@
 import { getAddress, isAddress, type Address } from 'viem';
 import type { X402Network } from './types';
 
-// testnet で X402_PAY_TO_ADDRESS が未設定でも開発を阻害しないよう、burn 相当の
-// fallback を使う。mainnet では config 時点で throw されるためここには到達しない。
 const FALLBACK_TESTNET_PAY_TO: Address =
   '0x000000000000000000000000000000000000dEaD';
+
+// 空文字 env (X402_NETWORK="") を未設定と等価に扱う。env 経由で値を消したい
+// ユーザーが空文字に設定するケースに対応 (lib/env.ts の nonEmpty と同じ規約)。
+function nonEmpty(raw: string | undefined): string | undefined {
+  return raw && raw.length > 0 ? raw : undefined;
+}
 
 function parseNetwork(raw: string | undefined): X402Network {
   if (raw === 'base' || raw === 'base-sepolia') return raw;
@@ -38,7 +42,7 @@ function parseFacilitatorUrl(
   raw: string | undefined,
   isProd: boolean,
 ): string {
-  const url = raw ?? 'https://x402.org/facilitator';
+  const url = nonEmpty(raw) ?? 'https://x402.org/facilitator';
   if (isProd && !url.startsWith('https://')) {
     throw new Error(
       `X402_FACILITATOR_URL must use https:// in production (got: ${url})`,
@@ -57,8 +61,8 @@ if (isProd && testMode) {
   );
 }
 
-const network = parseNetwork(process.env.X402_NETWORK);
-const payTo = parsePayTo(process.env.X402_PAY_TO_ADDRESS, network);
+const network = parseNetwork(nonEmpty(process.env.X402_NETWORK));
+const payTo = parsePayTo(nonEmpty(process.env.X402_PAY_TO_ADDRESS), network);
 const facilitatorUrl = parseFacilitatorUrl(
   process.env.X402_FACILITATOR_URL,
   isProd,
@@ -68,9 +72,9 @@ export const x402Config = {
   network,
   payTo,
   facilitatorUrl,
-  defaultPrice: process.env.X402_PRICE ?? '$0.001',
+  defaultPrice: nonEmpty(process.env.X402_PRICE) ?? '$0.001',
   // X402_ASSET 未設定なら x402-next が network 既定 (USDC) を使う。
-  asset: process.env.X402_ASSET,
+  asset: nonEmpty(process.env.X402_ASSET),
   testMode,
 } as const;
 

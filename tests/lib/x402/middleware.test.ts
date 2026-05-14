@@ -190,4 +190,136 @@ describe('lib/x402/middleware.withX402Payment', () => {
     const body = await res.json();
     expect(body).toEqual({ pathname: '/api/paid/hello' });
   });
+
+  it('非 Error が throw された場合も safety 402 + String(err) で logger.warn', async () => {
+    vi.mocked(withX402).mockReturnValue(async () => {
+      // x402-next や Network 層が string / object を直接 throw するシナリオ
+      throw 'string-error-payload';
+    });
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
+    const res = await wrapped(makeReq());
+    expect(res.status).toBe(402);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'x402.middleware.error',
+      expect.objectContaining({
+        error: 'string-error-payload',
+        route: '/api/paid/hello',
+      }),
+    );
+  });
+
+  it('null が throw された場合も String(null) で記録、wrapper は 402 を返す', async () => {
+    vi.mocked(withX402).mockReturnValue(async () => {
+      throw null;
+    });
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
+    const res = await wrapped(makeReq());
+    expect(res.status).toBe(402);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'x402.middleware.error',
+      expect.objectContaining({ error: 'null' }),
+    );
+  });
+
+  it('並行 request: 同一 wrapper が独立に 402 を返し、互いに state を持たない', async () => {
+    vi.mocked(withX402).mockReturnValue(async (req) => {
+      // 各 request の pathname を含む 402 を返して干渉確認
+      return NextResponse.json(
+        {
+          x402Version: 1,
+          error: 'payment_required',
+          route: req.nextUrl.pathname,
+        },
+        { status: 402 },
+      );
+    });
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
+
+    const [r1, r2, r3] = await Promise.all([
+      wrapped(makeReq('/api/paid/a')),
+      wrapped(makeReq('/api/paid/b')),
+      wrapped(makeReq('/api/paid/c')),
+    ]);
+    const [b1, b2, b3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
+    expect(b1.route).toBe('/api/paid/a');
+    expect(b2.route).toBe('/api/paid/b');
+    expect(b3.route).toBe('/api/paid/c');
+  });
+
+  it('並行 throw: 全 request が独立に safety 402 を受ける + logger.warn が 3 回', async () => {
+    let counter = 0;
+    vi.mocked(withX402).mockReturnValue(async () => {
+      counter += 1;
+      throw new Error(`call-${counter}`);
+    });
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
+
+    const results = await Promise.all([
+      wrapped(makeReq()),
+      wrapped(makeReq()),
+      wrapped(makeReq()),
+    ]);
+    expect(results.every((r) => r.status === 402)).toBe(true);
+    expect(logger.warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('test mode + overrides: overrides は無視される (handler は素のまま)', async () => {
+    process.env.X402_TEST_MODE = 'true';
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    const handler = vi.fn(async () =>
+      NextResponse.json({ originalHandler: true }),
+    );
+    // overrides を渡しても test mode なら handler に変換は入らない
+    const wrapped = withX402Payment(handler, {
+      price: '$10',
+      description: 'ignored in test mode',
+    });
+    expect(withX402).not.toHaveBeenCalled();
+    const res = await wrapped(makeReq());
+    const body = await res.json();
+    expect(body).toEqual({ originalHandler: true });
+  });
+
+  it('overrides を渡さない場合は config default が full に適用される', async () => {
+    vi.mocked(withX402).mockReturnValue(
+      vi.fn(async () => NextResponse.json({})),
+    );
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    withX402Payment(vi.fn(async () => NextResponse.json({})));
+
+    const [, , routeConfig] = vi.mocked(withX402).mock.calls[0];
+    expect(routeConfig).toEqual({
+      price: '$0.001',
+      network: 'base-sepolia',
+      config: {
+        description: 'OpenPay paid API',
+        mimeType: 'application/json',
+        maxTimeoutSeconds: undefined,
+      },
+    });
+  });
+
+  it('throw 後の subsequent request も同じ wrapper で正常動作 (state leak なし)', async () => {
+    let throwOnce = true;
+    vi.mocked(withX402).mockReturnValue(async () => {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error('first-call-fails');
+      }
+      return NextResponse.json({ paid: true });
+    });
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
+
+    const r1 = await wrapped(makeReq());
+    expect(r1.status).toBe(402);
+    const r2 = await wrapped(makeReq());
+    expect(r2.status).toBe(200);
+    const b2 = await r2.json();
+    expect(b2).toEqual({ paid: true });
+  });
 });

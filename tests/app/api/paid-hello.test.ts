@@ -58,4 +58,48 @@ describe('GET /api/paid/hello', () => {
     const b2 = await res2.json();
     expect(b1.timestamp).not.toBe(b2.timestamp);
   });
+
+  it('Content-Type ヘッダが application/json', async () => {
+    const { NextRequest } = await import('next/server');
+    const { GET } = await import('@/app/api/paid/hello/route');
+    const res = await GET(new NextRequest('http://localhost/api/paid/hello'));
+    expect(res.headers.get('content-type')).toMatch(/application\/json/);
+  });
+
+  it('timestamp は new Date() で再 parse できる (有効な ISO 8601)', async () => {
+    const { NextRequest } = await import('next/server');
+    const { GET } = await import('@/app/api/paid/hello/route');
+    const beforeMs = Date.now() - 1000;
+    const res = await GET(new NextRequest('http://localhost/api/paid/hello'));
+    const afterMs = Date.now() + 1000;
+    const body = await res.json();
+    const parsed = new Date(body.timestamp);
+    expect(Number.isNaN(parsed.getTime())).toBe(false);
+    expect(parsed.getTime()).toBeGreaterThanOrEqual(beforeMs);
+    expect(parsed.getTime()).toBeLessThanOrEqual(afterMs);
+  });
+
+  it('並行 3 件 GET でも独立した timestamp が出る (handler が共有 state を持たない)', async () => {
+    const { NextRequest } = await import('next/server');
+    const { GET } = await import('@/app/api/paid/hello/route');
+    const reqs = [1, 2, 3].map(
+      () => new NextRequest('http://localhost/api/paid/hello'),
+    );
+    const ress = await Promise.all(reqs.map((r) => GET(r)));
+    const bodies = await Promise.all(ress.map((r) => r.json()));
+    for (const b of bodies) {
+      expect(b.message).toBe('Hello, paid AI agent.');
+      expect(b.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    }
+  });
+
+  it('test mode bypass 時、route module は X402_PAY_TO_ADDRESS / X402_NETWORK の妥当性に依存しない', async () => {
+    // testMode=true のため、PAY_TO が burn address でも起動・実行できる。
+    delete process.env.X402_PAY_TO_ADDRESS;
+    vi.resetModules();
+    const { NextRequest } = await import('next/server');
+    const { GET } = await import('@/app/api/paid/hello/route');
+    const res = await GET(new NextRequest('http://localhost/api/paid/hello'));
+    expect(res.status).toBe(200);
+  });
 });

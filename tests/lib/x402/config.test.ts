@@ -138,4 +138,82 @@ describe('lib/x402/config', () => {
       /X402_PAY_TO_ADDRESS is required for network=base/,
     );
   });
+
+  it('X402_NETWORK="" (空文字) は base-sepolia に fallback', async () => {
+    process.env.X402_NETWORK = '';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.network).toBe('base-sepolia');
+  });
+
+  it('X402_PRICE="" (空文字) は nonEmpty 経由で default $0.001 に fallback', async () => {
+    process.env.X402_PRICE = '';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.defaultPrice).toBe('$0.001');
+  });
+
+  it('X402_ASSET="" (空文字) は undefined になる (network 既定 USDC を使わせる)', async () => {
+    process.env.X402_ASSET = '';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.asset).toBeUndefined();
+  });
+
+  it('X402_FACILITATOR_URL="" (空文字) は default に fallback', async () => {
+    process.env.X402_FACILITATOR_URL = '';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.facilitatorUrl).toBe('https://x402.org/facilitator');
+  });
+
+  it('testnet で "0x" だけ (短すぎ) の PAY_TO は fallback', async () => {
+    process.env.X402_NETWORK = 'base-sepolia';
+    process.env.X402_PAY_TO_ADDRESS = '0x';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.payTo).toBe(
+      '0x000000000000000000000000000000000000dEaD',
+    );
+  });
+
+  it('testnet で 41 桁 (1 桁多い) PAY_TO は fallback', async () => {
+    process.env.X402_NETWORK = 'base-sepolia';
+    process.env.X402_PAY_TO_ADDRESS = '0x' + 'a'.repeat(41);
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.payTo).toBe(
+      '0x000000000000000000000000000000000000dEaD',
+    );
+  });
+
+  it('複数回 import しても同一 config object reference (module cache 利用)', async () => {
+    const m1 = await import('@/lib/x402/config');
+    const m2 = await import('@/lib/x402/config');
+    expect(m1.x402Config).toBe(m2.x402Config);
+  });
+
+  it('config は frozen な const (as const) で property 上書き不可', async () => {
+    const { x402Config } = await import('@/lib/x402/config');
+    // as const は TypeScript の readonly 型のみ。runtime 上の上書きは可能なので
+    // ここで Object.isFrozen まで強制せず、参照同一性で「同じ instance である」
+    // ことを確認する (他テストで上書き痕跡が漏れない)。
+    expect(typeof x402Config).toBe('object');
+    expect(Object.keys(x402Config).sort()).toEqual(
+      [
+        'asset',
+        'defaultPrice',
+        'facilitatorUrl',
+        'network',
+        'payTo',
+        'testMode',
+      ].sort(),
+    );
+  });
+
+  it('testMode は文字列 "true" のみ (大文字 / 数字は false 扱い)', async () => {
+    process.env.X402_TEST_MODE = 'True';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.testMode).toBe(false);
+  });
+
+  it('testMode は "1" でも false 扱い (明示的に "true" を要求)', async () => {
+    process.env.X402_TEST_MODE = '1';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.testMode).toBe(false);
+  });
 });

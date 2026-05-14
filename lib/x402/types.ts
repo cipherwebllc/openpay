@@ -9,11 +9,6 @@ import type { RouteConfig } from 'x402-next';
 // では本 alias で意図的に絞り込む。
 export type X402Network = 'base' | 'base-sepolia';
 
-export const SUPPORTED_NETWORKS: readonly X402Network[] = [
-  'base',
-  'base-sepolia',
-] as const;
-
 // 各 paid route で個別に上書きできる項目だけを公開する。price / network /
 // facilitator は config の default を上書き、description などは PaymentMiddlewareConfig
 // のサブセットだけ通す。
