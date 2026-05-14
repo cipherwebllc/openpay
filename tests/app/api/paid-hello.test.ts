@@ -14,6 +14,9 @@ const X402_KEYS = ['X402_NETWORK', 'X402_PAY_TO_ADDRESS', 'X402_TEST_MODE'] as c
 const ORIG: Record<string, string | undefined> = {};
 
 beforeEach(() => {
+  // config.ts は module-load 時に env を読んで const に焼き付けるため、
+  // env 変更を反映させるには毎回 module cache を捨てて再 import する必要がある。
+  vi.resetModules();
   for (const k of X402_KEYS) {
     ORIG[k] = process.env[k];
   }
