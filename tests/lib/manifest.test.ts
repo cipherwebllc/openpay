@@ -13,14 +13,15 @@ describe('app/manifest.ts (PWA manifest)', () => {
     expect(m.display).toBe('standalone');
   });
 
-  it('icons に SVG が 2 種 (any + maskable)', () => {
+  it('icons に PNG が 2 種 (any + maskable)', () => {
     expect(m.icons).toHaveLength(2);
     const purposes = m.icons!.map((i) => i.purpose);
     expect(purposes).toContain('any');
     expect(purposes).toContain('maskable');
     for (const icon of m.icons!) {
-      expect(icon.type).toBe('image/svg+xml');
-      expect(icon.src).toMatch(/^\/icon/);
+      expect(icon.type).toBe('image/png');
+      expect(icon.src).toMatch(/^\/icon-.*\.png$/);
+      expect(icon.sizes).toBe('512x512');
     }
   });
 

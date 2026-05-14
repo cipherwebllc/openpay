@@ -11,6 +11,6 @@ export default createMiddleware({
 });
 
 export const config = {
-  // _next, /api, /manifest.webmanifest, /icon.svg などの静的・特殊ルートは除外
+  // _next, /api, /manifest.webmanifest, /icon-512.png などの静的・特殊ルートは除外
   matcher: ['/((?!_next|api|.*\\..*).*)'],
 };

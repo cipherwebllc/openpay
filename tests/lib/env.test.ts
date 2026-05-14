@@ -274,25 +274,56 @@ describe('mainnet 投入時の silent failure ガード', () => {
     );
   });
 
-  it('mainnet + 全必須 env 設定済 → 正常 import', async () => {
+  it('mainnet + SPONSORSHIP_POLICY_ID 未設定 → throw (sponsorship 残高悪用防止)', async () => {
+    // policy 無し UserOp を Pimlico に送ると、ダッシュボード側 default policy が
+    // 全許可なら第三者が任意 /pay URL で運営 sponsorship 残高を消費可能。
+    // クライアント側 allowlist だけでは改竄可能なので、サーバ側 policy を必須化する。
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
     process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
       '0xcafe000000000000000000000000000000000999';
-    const mod = await import('@/lib/env');
-    expect(mod.isMainnet).toBe(true);
+    delete process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID;
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID/,
+    );
   });
 
-  it('testnet では FEE_RECEIVER 未設定でも throw しない (開発体験優先)', async () => {
+  it('mainnet + SPONSORSHIP_POLICY_ID 空文字 → throw (nonEmpty fallback で undefined 扱い)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = '';
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID/,
+    );
+  });
+
+  it('mainnet + 全必須 env 設定済 → 正常 import', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_prod_real';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    const mod = await import('@/lib/env');
+    expect(mod.isMainnet).toBe(true);
+    expect(mod.env.pimlicoSponsorshipPolicyId).toBe('sp_prod_real');
+  });
+
+  it('testnet では FEE_RECEIVER / SPONSORSHIP_POLICY_ID 未設定でも throw しない (開発体験優先)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'testnet';
     delete process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS;
     delete process.env.NEXT_PUBLIC_PIMLICO_API_KEY;
+    delete process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID;
     const mod = await import('@/lib/env');
     expect(mod.env.feeReceiver.toLowerCase()).toBe(
       '0x000000000000000000000000000000000000dead',
     );
     expect(mod.env.pimlicoApiKey).toBe('');
+    expect(mod.env.pimlicoSponsorshipPolicyId).toBeUndefined();
   });
 });

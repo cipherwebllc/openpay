@@ -4,51 +4,20 @@
   <img src="overview.png" alt="OpenPay" width="100%" />
 </div>
 
-小規模店舗・イベント出店者・フリーランスが**ウォレットアドレス1つだけ**で導入できる、オープンソースの店舗向けガスレス決済 QR ジェネレーター。
-ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ、顧客はネイティブトークン (POL / ETH) を保有することなく **JPYC (Polygon)** または **USDC (Base / Arbitrum / Optimism / Polygon)** で決済できます。
+**OpenPay は、JPYC・USDC を使ったガスレス QR 決済を、ウォレットアドレスだけで導入できる OSS 決済ツールです。**
+実店舗・イベント向けの QR 決済から、x402 による AI エージェント / API 課金まで対応します。
 
-- **JPYC (Polygon)**: 運営が POL ガスを肩代わり (Sponsorship Paymaster)
-- **USDC (Base / Arbitrum One / Optimism / Polygon mainnet)**: 顧客が USDC のままガスを支払い (Pimlico ERC20 Paymaster)。運営のネイティブガス立替えなし
-- **testnet (Base Sepolia / Arbitrum Sepolia / Optimism Sepolia / Polygon Amoy)**: USDC も sponsorship を使用 (顧客の testnet 用 ETH 入手の手間を省くための運用判断)
+- 🏪 **店舗向け QR 決済** — フリーランス / イベント物販 / クリエイター Tip widget。顧客はネイティブガス不要、店主は登録審査不要
+- 🤖 **AI agent / API 課金 (x402)** — HTTP 402 Payment Required + EIP-3009 で 1 リクエスト課金 (USDC / JPYC)
+- 🇯🇵 **JPYC 対応** — 改正資金決済法に基づく電子決済手段 (円建ステーブルコイン) を Polygon でガスレス決済
 
-- `/{locale}` — 店舗向け決済 QR を主画面として提供 (レジ用クイック金額 / 印刷ポスター / SVG・PNG 保存)
-- `/{locale}/pay?to=...&token=...&chain=...&amount=...&split=0xB:30,0xC:20` — QR をスキャンした顧客の決済画面 (`chain=` で USDC のチェーンを選択、`split=` で複数受取人へ % 分配可能)
-- `/{locale}/tip/[address]?token=...&chain=...&name=...&message=...&color=...&preset=...&thanks=...&thanksUrl=...&webhook=...` — クリエイター向けチップ送金画面 (直リンク互換として維持)
-- `/{locale}/checkout?...` — **実験的 / 非推奨**。直リンク互換のためルートは残すが、ホーム UI からは非表示。DB なし・署名なし webhook のため EC 本番用途では必ずオンチェーン再検証が必要
-- `/{locale}/terms` `/{locale}/privacy` `/{locale}/disclaimer` `/{locale}/tokutei` — 利用規約・プライバシーポリシー・免責事項・特商法表記。全 page 共通の `SiteFooter` から到達可能。事業者情報は `lib/legal.ts` の `LEGAL_ENTITY` に集約 (単一 source of truth)
-- `{locale}` は `ja` (デフォルト) または `en`。middleware が Accept-Language で自動検出
+**Site**: https://open-pay.jp ・ **Repo**: https://github.com/cipherwebllc/openpay ・ **License**: MIT
 
-**Repo**: https://github.com/cipherwebllc/openpay  
-**License**: MIT
+> Alpha 版です。少額からの試用を推奨します。法的位置付け / 制約は [免責事項](https://open-pay.jp/ja/disclaimer) / [利用規約](https://open-pay.jp/ja/terms) を参照してください。
 
-## 直近の主要追加 (v0.2 候補)
+技術スタック: Next.js 15 App Router + ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 + Coinbase x402-next。詳細なルート一覧は [§ ディレクトリ構成](#ディレクトリ構成) と [§ 使い方](#使い方) を参照してください。
 
-- **x402 Phase 2 完了 — JPYC on Polygon 対応** — JPYC v3 (`0xE7C3…3c29`) が EIP-3009 (transferWithAuthorization / authorizationState / cancelAuthorization / receiveWithAuthorization) を実装していることを **Polygon mainnet 実 RPC でバイトコード検証** (implementation `0xafAc17fc…07D2E`、20019 bytes)。`X402_NETWORK=polygon` / `polygon-amoy` で paid route が動作、`buildDefaultPrice` helper が network 別に Price 型を組み立てる (Base → Money string `$0.001` / Polygon → ERC20TokenAmount `{amount, asset:{address, decimals:18, eip712:{name:'JPY Coin', version:'1'}}}`)。EIP-712 domain version は OZ default "1" 仮定 (JPYC が DOMAIN_SEPARATOR を public 非公開のため、alpha 試用で実 signature 通過確認要)。tests 1009 → 1019 件 (+10、polygon 既定 JPYC asset / mainnet PAY_TO throw / parseUnits 変換 / "$" prefix strip 等)
-- **x402 LARP / 品質 / production-ready 監査の体系的修正** — 直前の x402 feature について 4 周の批判的監査で発見した実バグを全件解消: (1) **safety fallback 402 → 503**: x402-fetch が safety 402 を retry path に乗せ accepts 欠落で TypeError crash → HTTP 503 (Service Unavailable) に変更、`tests/lib/x402/facilitator-unavailable-client.test.ts` で実 x402-fetch 経由検証、(2) **e2e で 402 body の x402 spec 全 field を strict assert** (scheme/network/payTo/asset/maxAmountRequired/resource/mimeType)、playwright webServer.env で x402 設定を pin して deterministic 化、(3) **未知 field 流入防止**: validate() を allow-list 構築型に、(4) **空文字 env を nonEmpty で fallback**、(5) **edge case + concurrency + 非 Error throw**: 並行 3 request の独立性、throw 後の subsequent request 動作、`String(null)` 安全性等を 21 件追加。x402 関連は **lib coverage 100/100/100/100**、test 文書化された unvalidated baseline (alert 閾値) も README に明示
-- **Open Checkout for AI Agents (x402 protocol 課金ゲートウェイ)** — `/api/paid/*` を `withX402Payment` で 1 行 wrap するだけで、未払いリクエストに HTTP 402 + 支払い要件、`X-PAYMENT` header 付き再リクエストで verify → handler → settle の順で実コンテンツ返却、までを Coinbase 公式 `x402-next` package と公開 facilitator (`x402.org/facilitator`) 経由で実現。USDC / Base / Base Sepolia で動作確認、JPYC / Polygon 対応は Phase 2 で完了 (上記)。`X402_TEST_MODE=true` で dev/CI は payment bypass、production では起動 guard で流出阻止。demo `/api/paid/hello` + agent client (`examples/agent-client.ts`) + e2e smoke 付き、初期 25 件のテスト追加。詳細は §「Open Checkout for AI Agents」
-- **next.js HIGH 脆弱性修正 + paymentLog → Sentry 集計** — `next` 15.5.16 → 15.5.18 で App Router middleware / proxy bypass via segment-prefetch routes (GHSA-26hh-7cqf-hhc6) を patch fix (major bump なし)。あわせて `postcss` 8.4.49 → 8.5.14 で MODERATE XSS を解消、残る Next.js 内部 bundled postcss は build-time / user-controlled CSS 経路なしで到達不能と判定済 (README §6 明文化)。`logPaymentEvent` の fetch 失敗を **二段構え観測** に変更: (1) `window.dispatchEvent('openpay:payment-log-failure')` で DevTools 観測、(2) `logger.warn` → `Sentry.captureMessage` で production 集計。`@/lib/logger` を mock せず `@sentry/nextjs` のみ mock した integration test (`tests/lib/paymentLog.sentry-integration.test.ts`、3 case) で paymentLog → logger → Sentry の 1 経路実走を verify。npm audit: HIGH **ゼロ**
-- **Basenames Universal Resolver の hardcode 誤り修正** — `lib/resolveAddress.ts` が Base mainnet の `0xeEeE…eEee` を Basenames UR として hardcode していたが、実 RPC で `eth_getCode` を発火し **bytecode = 0 bytes** (= 未デプロイ) を確認。`.base.eth` は silent fail する状態だった。修正: mainnet ENS UR が CCIP-Read (ERC-3668) 経由で `.base.eth` も解決することを `jesse.base.eth` → `0x2211…D77DA9` で実証し、basenamesClient / `BASE_UNIVERSAL_RESOLVER` 定数を削除して mainnet client 単一に再構成。`scripts/verify-ens-resolver.mjs` を実 RPC smoke として永続化 (deploy gate に runnable)
-- **middleware locale prefix の e2e smoke 追加** — `e2e/middleware-locale.spec.ts` (15 case) で **production build (`next start`) に対する実 HTTP** で / の locale redirect、`/ja` / `/en` の 200、4 legal page × 2 locale = 8 ルートの 200、未知 locale (`/fr`) の 404、`/manifest.webmanifest` middleware bypass、`/api/log/payment` GET 405 / 不正 body POST 400 を smoke。vitest では検出不能な runtime middleware regression を Next 本体 / next-intl の patch upgrade 時に catch する
-- **コード品質 / LARP 監査の体系的修正** — (1) `validate()` を `as Payload` cast から **allow-list 構築型**に変更し未知 field の KV log 流入を sanitize、(2) timing 依存 (`Date.now() < 95ms`) の並列性 test を Promise instrumentation (microtask flush 後の called 検証) に書換、(3) validate の rejection path を `it.each` で 20 case 網羅、(4) `useBatchPayment` の log 発火を coverage で済ませず実 fetch body を behavioral 検証 (success / reverted / error / wallet 未接続 の 4 case)、(5) `LegalPageShell` / `LegalSection` 抽出で 4 legal page の重複構造を集約、(6) `lib/kv.ts` の `kvLtrim` で LIST_CAP=100K 件 cap、(7) viem 既存の `isAddress` / `isHex` を再利用し handrolled regex を削除、(8) AI 由来の dead defensive code (`dispatchEvent` 周りの try/catch、不可能 unconfigured 分岐、redundant cast) を削除。Tests 798 → 960 件 / 52 file、coverage 97.97 → 98.81、HIGH 脆弱性 ゼロ
-- **特商法表記ページ追加 + JPYC 法的分類記述の修正** — `/{locale}/tokutei` を新設、SiteFooter に 4 番目の link として追加。販売事業者 / 法人番号 / 運営統括責任者 / 所在地 / 役務の内容 / 対応トークン / 料金 / 対価以外の費用 / 提供時期 / 支払時期 / 返品 / 動作環境 の 14 row を `LEGAL_ENTITY` から注入する definition list 形式で表示。電話番号は **特定商取引法施行規則第 23 条第 1 項第 2 号** の exception (「請求あり次第遅滞なく開示」) で省略。あわせて Terms 第 2 条 (定義) と Disclaimer 第 3 章で JPYC を「**改正資金決済法に基づき資金移動業者として発行される電子決済手段 (円建てステーブルコイン)**」に再分類 (旧記述「暗号資産 / 第三者発行 token」は前払式 3 号時代の名残で不正確)
-- **alpha 取引 log の Vercel KV 永続化** — `useBatchPayment` / `useDirectPayment` から決済成否を `/api/log/payment` に POST、Upstash Redis (Vercel KV) の `openpay:payments:log` に LPUSH で蓄積。flow / result / chainId / token / merchant / customer / amounts / userOpHash / txHash / blockNumber / 匿名化済 IP prefix (IPv4 /24 or IPv6 /64) / userAgent を保存。`/api/log/payment/export` は `Authorization: Bearer $PAYMENT_LOG_ADMIN_TOKEN` で全件取出可能 (`?from` `?to` で range 指定)。**KV 未設定でも UI 完全動作** (Vercel runtime log のみに記録される graceful degrade)。弁護士 review / 金融庁事前相談 / GMV 集計用の事実関係資料として 6 ヶ月運用後に export 想定。`@vercel/kv` 等の package 依存を持たず `lib/kv.ts` の薄い fetch wrapper で Upstash REST API を叩く。テスト 23 件追加 (876 件 / 50 ファイル)
-- **法的文書 (利用規約 / プライバシーポリシー / 免責事項) と Alpha バナーの整備** — `/{locale}/terms` `/{locale}/privacy` `/{locale}/disclaimer` の 3 page を新設、全 page 共通の `SiteFooter` から到達可能に。事業者情報 (商号・法人番号・登記住所・代表者・連絡先メール・施行日) は `lib/legal.ts` の `LEGAL_ENTITY` に集約 (env 注入に切替える場合もここの export だけ差替えで済む)。利用規約は 11 条 (適用 / 定義 / non-custodial 性質 / 利用環境 / 料金 / 取消不能 / 禁止事項 / 第三者サービス / 免責 (消費者契約法 8 条準拠) / 規約変更 (民法 548 条の 4 準拠) / 準拠法・東京地裁)、プライバシーは 7 章 (個情法 28 条 越境移転 / 33-35 条 開示等請求対応)、免責は 6 章。文面は **弁護士 review 前提の draft**。全 page 最上部に `AlphaNotice` (amber banner、`print:hidden` で QR ポスター印刷時非表示、`/disclaimer` link 付) を表示し alpha 版である旨と少額テスト推奨を明示。`Footer` / `Terms` / `Privacy` / `Disclaimer` / `AlphaNotice` の 5 namespace を ja/en 両 messages に追加 (~150 key)、テスト 17 件追加
-- **店舗向け QR 強化** — 店舗名・ポスター補足文・レジ用クイック金額 (最大 8 件) を端末ローカルに永続化、印刷用ポスター section を追加、SVG / PNG ダウンロードと `window.print()` による直接印刷に対応。`fileSafe` は UTF-8 を許容するので日本語店舗名 (神田珈琲 等) もファイル名にそのまま使える。クイック金額は token 切替時に現 token の decimals に truncate + dedup、印刷時は poster 以外を `print:hidden` で隠す
-- **axios HIGH 脆弱性を override で解消** — `@coinbase/cdp-sdk` (wagmi → @wagmi/connectors → @base-org/account 経由 transitive) が要求する古い axios で SSRF / prototype pollution / auth bypass 等 15 件の advisories が HIGH に昇格 → CI の `npm audit --audit-level=high` を blocking。`package.json` の overrides で `axios: ^1.15.2` を強制 pin (実解決 1.16.0)。module load / constructor / interceptor 互換は `tests/lib/axios-override.test.ts` の 5 件で自動担保
-- **production readiness 強化** — デプロイチェックリストに「コード自動化不可、deploy 時に人手必須」項目 (Sentry alert rule / Pimlico 残高 alert) を ⚠ マーク付きで追加。§本番投入前に必ず検証すべきポイント に Coinbase Wallet 実 network call 互換 (testnet 1 件送金成功) と Lighthouse / 負荷測定の未実施を honest に明記
-- **不具合 4 件修正** — (1) direct mode でも `useBatchPayment` 経由で Smart Account 初期化が走る問題を `enabled` 伝播で解消、(2) testnet USDC sponsorship fallback で非 Polygon chain が `gasQuoteReady=false` のまま送信不能になる問題を `useGasQuoteJpyc` の Polygon 外 0 返しで解消、(3) Tip preset の重複が React duplicate key 警告と URL 重複入力を起こす問題を `TipEmbedGenerator` / `lib/url.ts` 双方で dedup、(4) 回帰テスト 4 件を追加 (763 件 / 42 ファイル)
-- **店舗QR重視へ整理** — ホーム UI は店舗向け決済 QR と Tip widget のみに絞り、Checkout 生成タブは非表示化。Checkout ルートは直リンク互換のため残すが、DB なし・署名なし webhook の制約があるため実験的扱い
-- **EIP-681 互換 QR 併発行 (BYO wallet)** — 直接送金 + 金額指定 のとき、[EIP-681](https://eips.ethereum.org/EIPS/eip-681) 準拠の `ethereum:<token>@<chainId>/transfer?address=...&uint256=...` URI を併発行。任意の対応ウォレットから純粋 ERC20 transfer で送金可能 (OpenPay checkout を経由しない)。仕様準拠は自動検証済 (regex / viem `isAddress` / `URL.canParse`)、実ウォレットでの読取検証手順は §「EIP-681 互換 QR の実ウォレット読取検証」を参照。OpenPay は wallet 製造せず checkout 層に徹する方針を明示
-- **Phase 1 multi-chain USDC** — Base 限定から Base / Arbitrum One / Optimism / Polygon の **4 chain 対応** へ拡張。`/pay?token=usdc&chain=arbitrum` のような chain slug を URL で指定可能 (省略時は base 既定で旧 QR と互換)。Pimlico の `getTokenQuotes` で 4 chain × mainnet/testnet の全 8 deployment が valid な quote を返すことは `scripts/verify-pimlico-usdc.mjs` で確認済 (Universal Paymaster `0x7777777777...e66834C`)
-- **Checkout (実験的 / 非推奨)** — Stripe Checkout 相当の itemized 決済 URL ルート `/checkout` は直リンク互換として維持。ただし URL とブラウザ発火 webhook に依存する設計のため、ホーム UI からは外し、EC 本番用途ではサーバー側オンチェーン再検証が必須
-- **Webhook 多重発火 fix** — `userOpHash` 単位で `useRef` gate し、gasQuote refetchInterval (30s) で breakdown が再計算されても 1 回限りの POST を保証
-- **Sentry 直接統合** — `lib/logger.ts` から `Sentry.captureMessage / captureException` を呼出。default integration の breadcrumb のみだった旧経路を独立 event 化
-- **rollback 制約の明文化** — multi-chain URL が出回った後の旧バージョン rollback は **silent fund misdirection** を起こすため、§ロールバック で禁止条件を明記
-- **テスト** — 960 件 / 52 ファイル (lib テストの SUT 自身は実 import、外部 SDK のみ境界 mock。hook / component は wagmi / permissionless 等の外部 SDK 境界のみ mock。paymentLog → Sentry の橋渡しも実 logger 経由で integration 検証済)。coverage 98.81 / 96.19 / 92.57 / 98.81。e2e 28 件 (chromium + mobile-safari)
-- **e2e 安定化** — Playwright 24 件 (chromium + mobile-safari) を全パスへ。wallet 接続を要する submit ボタン文言ではなく、未接続時に必ず描画される breakdown 行 + connect ボタン文言を assert する形に再設計
-- **ESLint v9 flat config 移行** — Next.js 16 で `next lint` が削除されるため、`eslint.config.mjs` (FlatCompat 経由 next/core-web-vitals) + `eslint .` 直接呼出しに前倒し移行。`.eslintrc.json` は撤去
-- **Sentry config 後継 API へ更新** — `disableLogger` (deprecated) → `webpack.treeshake.removeDebugLogging`。Sentry v11 の breaking change を回避
-- **Lighthouse CI 修正** — `localePrefix: 'always'` の i18n 設計と衝突していた `/` (→ `/ja` redirect) audit を撤去し、`/ja` `/en` `/ja/pay` `/ja/tip` の canonical 4 URL のみ計測する形に
+変更履歴: [CHANGELOG.md](./CHANGELOG.md)
 
 ## 特徴
 
@@ -97,7 +66,10 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 - **複数店舗の合算が即時**: 同一ウォレットアドレスを共有すれば全店売上が自動で集計される
 - **海外旅行客にもそのまま**: USDC を選べば為替・両替手数料なしで世界中の顧客から受け取り可能
 
-## 主なユースケース
+## 店舗向け QR 決済 — ユースケース
+
+> 本セクションは **店舗・イベント・クリエイター向けの人間操作シナリオ**です。
+> AI agent / API 側の per-request 課金は [§ AI agent / API 課金 (x402)](#ai-agent--api-課金-x402) を参照してください。
 
 OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless / self-hostable) は店舗 QR 以外の使い方でもそのまま動きます。**追加の登録・コード変更なし**で以下のシナリオに使えます。
 
@@ -139,7 +111,31 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 - iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
 - webhook は Discord / Slack / 独自バックエンドへの**通知用途**として扱ってください。限定コンテンツ配布、会員権限付与、注文確定など「権限や特典を発生させる処理」に使う場合は、webhook payload を信頼せず `txHash` / `userOpHash` を必ずオンチェーンで再検証してください。
 
-### 5. Open Checkout for AI Agents — x402 protocol 課金ゲートウェイ
+### 4. Checkout (実験的 / 非推奨) — 直リンク互換のみ維持
+
+Checkout ルートは過去に生成した直リンクとの互換性と検証用途のため残していますが、現在の OpenPay は **店舗向け決済 QR を主機能** とし、ホーム UI から Checkout 生成タブを非表示にしています。
+
+- 発行: UI からの新規発行は非表示。必要な場合のみ `/checkout?...` 形式の直リンクを手動または外部ツールで生成
+- 顧客 UX:
+  - URL を開くと line items 一覧 + 合計 + ガス見積が表示される
+  - 「支払う」を押すと **既存の `/pay` と同じ ERC-7702 + Pimlico ガスレスバッチ送金** で merchant 受取 + 運営手数料を 1 UserOp で実行
+  - 成功後に `success_url` 指定なら 3 秒で自動 redirect (skip ボタン併設)、`tx_hash` / `user_op_hash` / `order_id` が query に付与される
+- webhook: 成功時に **Tip と互換シェイプ** の JSON を POST (`type: "openpay.checkout.success"` + `items`, `orderId`, `merchantAmount` 等)。マーチャントは Tip と同じ handler に分岐 1 行追加で両対応可能
+- **重要 (セキュリティ)**: webhook payload と success_url の query は顧客側で改ざん可能 (Stripe の `whsec_` 署名相当の保証なし)。**マーチャントは webhook 受信後に必ず `tx_hash` をオンチェーンで再検証**してから注文を確定してください。これが不要な店舗対面決済では `/pay` QR の利用を推奨します
+- 制約: line items 最大 10 件 / name 80 文字 / qty 1〜999 / price は token decimals 以内。bridged USDC.e は不可 (native USDC のみ)
+
+```
+/checkout?to=0x...&token=usdc&chain=arbitrum
+        &items=Tシャツ:1:25,マグ:2:15
+        &order_id=ord-12345
+        &success_url=https://shop.example.com/thanks
+        &webhook=https://shop.example.com/openpay-webhook
+```
+
+## AI agent / API 課金 (x402)
+
+> 本セクションは **AI agent / API / MCP 向けの per-request 課金**です。
+> 店舗・人間操作向けの QR 決済は [§ 店舗向け QR 決済 — ユースケース](#店舗向け-qr-決済--ユースケース) を参照してください。
 
 **「Stripe Checkout の再発明」ではなく、AI agent / API / MCP が叩く有料エンドポイントに x402 で per-request 課金を付けるためのゲートウェイ**です。人間向け UI は介在しません。
 
@@ -169,7 +165,7 @@ export const dynamic = 'force-dynamic';
 
 price / network / facilitator は `.env.local` の `X402_*` で project default を設定、route 側で個別に override 可能。
 
-#### 動作確認 (ローカル)
+### 動作確認 (ローカル)
 
 ```sh
 # 1. 環境変数 (.env.local) を最低限セット
@@ -189,7 +185,7 @@ curl http://localhost:3000/api/paid/hello
 #   {"message":"Hello, paid AI agent.","timestamp":"2026-..."}
 ```
 
-#### AI agent client 経由で実支払い (Base Sepolia)
+### AI agent client 経由で実支払い (Base Sepolia)
 
 1. Base Sepolia の USDC と ETH (gas) を [Circle faucet](https://faucet.circle.com) で取得
 2. 上記 USDC を持つ EOA の private key を `AGENT_PRIVATE_KEY` env に設定
@@ -206,7 +202,7 @@ AGENT_PRIVATE_KEY=0x... PAID_URL=http://localhost:3000/api/paid/hello \
 # [agent] body: { message: "Hello, paid AI agent.", timestamp: "..." }
 ```
 
-#### 環境変数
+### 環境変数
 
 | 変数 | 既定 | 説明 |
 |---|---|---|
@@ -217,7 +213,7 @@ AGENT_PRIVATE_KEY=0x... PAID_URL=http://localhost:3000/api/paid/hello \
 | `X402_PRICE` | `$0.001` | 既定 price (route 側で override 可) |
 | `X402_TEST_MODE` | `false` | true で payment 検証 bypass (dev only)、`NODE_ENV=production` と同時設定で起動失敗 |
 
-#### セキュリティ注意点
+### セキュリティ注意点
 
 - **支払い検証前に handler は実行されない**: `withX402` が verify → handler → settle の順を保証。settle 失敗時は content を返さず 402 で応答
 - **例外時は 500 でなく 503 に倒す**: facilitator 不到達などで内部例外が出ても、`logger.warn('x402.middleware.error', ...)` で Sentry に集計しつつ HTTP 503 (Service Unavailable) を返す (`{x402Version, error: 'payment_facility_unavailable', message}` 形)。standard x402 client (x402-fetch / x402-axios) は 402 のみ retry に乗せるため、503 にすることで facilitator outage 時に無限 retry / TypeError crash を回避 (`tests/lib/x402/facilitator-unavailable-client.test.ts` で実機検証)
@@ -226,7 +222,7 @@ AGENT_PRIVATE_KEY=0x... PAID_URL=http://localhost:3000/api/paid/hello \
 - **AI agent の DDoS / rate limit**: 本実装範囲外。Vercel BotID または別途 rate limiter で対策が必要
 - **`AGENT_PRIVATE_KEY` の取扱い**: server-side / CLI 実行を想定。フロントエンド / repo にコミットしないこと
 
-#### JPYC on Polygon 対応 (Phase 2 完了 — 2026-05-14)
+### JPYC on Polygon 対応 (Phase 2 完了 — 2026-05-14)
 
 JPYC v3 (`0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`) が EIP-3009 (`transferWithAuthorization` / `authorizationState` / `cancelAuthorization` / `receiveWithAuthorization`) を実装していることを Polygon mainnet 実 RPC で確認済 (implementation `0xafAc17fc3936A29CA2d2787CEd3C5d1c52007D2E`)。同じアドレスで Polygon mainnet + Polygon Amoy 両対応。
 
@@ -249,33 +245,13 @@ X402_PRICE=0.5
 - JPYC 単位は `parseUnits(value, 18)` で atomic に変換。`$` prefix は strip して JPYC 単位として扱う
 - asset.eip712 は `{name: 'JPY Coin', version: '1'}` を仮定 (OpenZeppelin default、JPYC は `DOMAIN_SEPARATOR()` / `eip712Domain()` を public expose しないため bytecode から確定不能 — **実 signature 通過は alpha 試用時に Polygon Amoy で 1 件確認すること**)。version が "1" 以外だった場合は `lib/x402/types.ts` の `JPYC_V3_ASSET.eip712.version` を update
 
-#### 採用しない選択肢
+### 採用しない選択肢
 
 - 人間向け Stripe Checkout 風 UI (既存 `/checkout` がその役割)
 - サブスク / 注文履歴 / 会員管理 / カート
 - self-host facilitator (env override で対応可だが default は Coinbase 公開)
 - 独自 nonce DB (DB なし方針、on-chain で完結)
 
-### 4. Checkout (実験的 / 非推奨) — 直リンク互換のみ維持
-
-Checkout ルートは過去に生成した直リンクとの互換性と検証用途のため残していますが、現在の OpenPay は **店舗向け決済 QR を主機能** とし、ホーム UI から Checkout 生成タブを非表示にしています。
-
-- 発行: UI からの新規発行は非表示。必要な場合のみ `/checkout?...` 形式の直リンクを手動または外部ツールで生成
-- 顧客 UX:
-  - URL を開くと line items 一覧 + 合計 + ガス見積が表示される
-  - 「支払う」を押すと **既存の `/pay` と同じ ERC-7702 + Pimlico ガスレスバッチ送金** で merchant 受取 + 運営手数料を 1 UserOp で実行
-  - 成功後に `success_url` 指定なら 3 秒で自動 redirect (skip ボタン併設)、`tx_hash` / `user_op_hash` / `order_id` が query に付与される
-- webhook: 成功時に **Tip と互換シェイプ** の JSON を POST (`type: "openpay.checkout.success"` + `items`, `orderId`, `merchantAmount` 等)。マーチャントは Tip と同じ handler に分岐 1 行追加で両対応可能
-- **重要 (セキュリティ)**: webhook payload と success_url の query は顧客側で改ざん可能 (Stripe の `whsec_` 署名相当の保証なし)。**マーチャントは webhook 受信後に必ず `tx_hash` をオンチェーンで再検証**してから注文を確定してください。これが不要な店舗対面決済では `/pay` QR の利用を推奨します
-- 制約: line items 最大 10 件 / name 80 文字 / qty 1〜999 / price は token decimals 以内。bridged USDC.e は不可 (native USDC のみ)
-
-```
-/checkout?to=0x...&token=usdc&chain=arbitrum
-        &items=Tシャツ:1:25,マグ:2:15
-        &order_id=ord-12345
-        &success_url=https://shop.example.com/thanks
-        &webhook=https://shop.example.com/openpay-webhook
-```
 
 ## 対応ネットワークと選定理由
 
@@ -443,7 +419,7 @@ npm install -D \
 | --- | --- | --- |
 | `NEXT_PUBLIC_NETWORK_ENV` | ◯ | `mainnet` または `testnet` |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | ◯ | [Pimlico Dashboard](https://dashboard.pimlico.io) で発行した API Key |
-| `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | ◯ (JPYC 用 / USDC は不要) | Pimlico の Sponsorship Policy ID (例: `sp_xxxx`)。USDC は ERC20 Paymaster なので未指定でも動く |
+| `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | ◯ **mainnet 必須** | Pimlico の Sponsorship Policy ID (例: `sp_xxxx`)。**mainnet では未設定で build/start が fail** (`lib/env.ts` の起動 guard)。policy 無し UserOp が ダッシュボード側 default policy 経由で任意 transfer まで sponsor され、運営残高が悪用されるのを防ぐ目的。USDC mainnet は ERC20 Paymaster なので policy 不要だが、guard は env 単位なので JPYC 経路の有無に関わらず mainnet では必須 |
 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | ◯ | 運営手数料の受取アドレス |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | △ | [Reown Cloud](https://cloud.reown.com) で発行した WalletConnect Project ID。未設定時は WalletConnect 連携が無効化される |
 | `NEXT_PUBLIC_*_RPC_URL` | × | 公開 RPC が混雑する場合に Alchemy/Infura 等の URL を指定 (Base / Arbitrum / Optimism / Polygon 各 mainnet/sepolia) |
@@ -463,8 +439,9 @@ npm install -D \
    - `mainnet`: Polygon (POL)
    - `testnet`: Polygon Amoy (POL) / Base Sepolia (ETH) / Arbitrum Sepolia (ETH) / Optimism Sepolia (ETH) ※ testnet では USDC も sponsorship にフォールバックするため対応 4 chain 全ての L2 ETH が必要
    - **mainnet の USDC (Base / Arbitrum / Optimism / Polygon) は ERC20 Paymaster 経由で顧客が払うため Sponsorship 残高デポジットは不要**
-4. **Sponsorship Policy** を作成し、その `policyId` を `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` に設定 (JPYC で適用される。USDC mainnet 用には別途設定不要)
-5. **濫用対策ルール** を Policy に必ず設定 (これがないと、誰かが任意の `/pay` URL を生成して運営の sponsorship 残高を消費できる)。**JPYC (Polygon) のみが対象** (USDC は ERC20 Paymaster なので濫用余地なし — 顧客が払う):
+4. **Sponsorship Policy** を作成し、その `policyId` を `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` に設定 (JPYC で適用される。USDC mainnet 用には別途設定不要)。**mainnet では未設定で build/start が fail** する起動 guard を `lib/env.ts` に実装済 (policy 無し UserOp の sponsor 流出を防ぐ最終防衛線)
+5. **濫用対策ルール** を Policy に必ず設定 (これがないと、誰かが任意の `/pay` URL を生成して運営の sponsorship 残高を消費できる)。policyId を env に設定するだけでは policy の中身までは保証できないため、ダッシュボード側で次のルールを **必ず** 入れる:
+   - **JPYC (Polygon) のみが対象** (USDC は ERC20 Paymaster なので濫用余地なし — 顧客が払う):
    - `to address allowlist`: JPYC コントラクト (mainnet: `0xE7C3...3c29` / Polygon Amoy: 自分のテストデプロイ)
    - `function selector allowlist`: `transfer(address,uint256)` (`0xa9059cbb`) のみ
    - `data parameter constraint`: 受取人パラメータの 1 つが必ず `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` であること (= 運営手数料 transfer を含む UserOp のみ sponsor)
@@ -485,7 +462,7 @@ UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middlew
 
 - 文字列リソース: `messages/ja.json` / `messages/en.json`
 - 新しい locale 追加: `i18n.ts` の `LOCALES` に追加 + `messages/{locale}.json` を作成
-- ロケール非依存ルート (`/manifest.webmanifest`, `/icon.svg` 等) は middleware の matcher で除外済み
+- ロケール非依存ルート (`/manifest.webmanifest`, `/icon-512.png` 等) は middleware の matcher で除外済み
 
 ## 使い方
 
