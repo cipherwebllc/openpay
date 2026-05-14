@@ -78,22 +78,49 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     expect(body).toEqual({ ok: false, error: 'invalid_payload' });
   });
 
-  test('/api/paid/hello: x402 paid route は middleware bypass、test mode で 200 / production で 402', async ({
+  test('/api/paid/hello: 未払いで 402 + x402 spec 準拠の paymentRequirements を返す', async ({
     request,
   }) => {
+    // playwright.config.ts の webServer.env で X402_TEST_MODE=false /
+    // X402_NETWORK=base-sepolia / X402_PAY_TO_ADDRESS=0x52d4… を pin している
+    // ため、X-PAYMENT 欠落の GET は必ず 402 を返す deterministic 状態。
     const res = await request.get('/api/paid/hello');
-    // X402_TEST_MODE=true で build した場合は 200、未設定 (default false) で
-    // build した production deploy では 402 (未払い)。e2e は production build
-    // (next start) を起動するため、ローカル CI 環境で X402_TEST_MODE を
-    // どちらに設定しても module load + routing が壊れていなければ通る。
-    expect([200, 402]).toContain(res.status());
-    if (res.status() === 200) {
-      const body = await res.json();
-      expect(body).toMatchObject({ message: 'Hello, paid AI agent.' });
-    } else {
-      const body = await res.json();
-      // x402 spec: 402 body は accepts array を含む
-      expect(body).toHaveProperty('x402Version');
-    }
+    expect(res.status()).toBe(402);
+
+    const body = await res.json();
+    // x402 protocol: 402 body は { x402Version, error, accepts: [...] }
+    expect(body.x402Version).toBeGreaterThanOrEqual(1);
+    expect(typeof body.error).toBe('string');
+    expect(Array.isArray(body.accepts)).toBe(true);
+    expect(body.accepts.length).toBeGreaterThan(0);
+
+    // accepts[0] は config で pin した値が反映されているはず
+    const req0 = body.accepts[0];
+    expect(req0.scheme).toBe('exact');
+    expect(req0.network).toBe('base-sepolia');
+    expect(req0.payTo).toBe('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    // asset は base-sepolia native USDC contract (Circle 公式)
+    expect(req0.asset).toBe('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+    // maxAmountRequired は $0.001 = 1000 atomic unit (USDC 6 decimals)
+    expect(req0.maxAmountRequired).toBe('1000');
+    // resource は paid endpoint の URL を含む
+    expect(req0.resource).toMatch(/\/api\/paid\/hello$/);
+    expect(typeof req0.description).toBe('string');
+    expect(req0.mimeType).toBe('application/json');
+  });
+
+  test('/api/paid/hello: 無効な X-PAYMENT header でも 402 (content は漏らさない)', async ({
+    request,
+  }) => {
+    const res = await request.get('/api/paid/hello', {
+      headers: {
+        'x-payment': 'not-a-valid-base64-x402-payload',
+      },
+    });
+    expect(res.status()).toBe(402);
+    const body = await res.json();
+    // handler 内容 "Hello, paid AI agent." が body に絶対漏れないこと
+    expect(JSON.stringify(body)).not.toContain('Hello, paid AI agent');
+    expect(body.x402Version).toBeGreaterThanOrEqual(1);
   });
 });

@@ -16,10 +16,36 @@
 //   AGENT_PRIVATE_KEY は **絶対に** フロントエンドや repo にコミットしないこと。
 //   本ファイルは server-side / CLI 実行を想定。
 
-import { createWalletClient, http } from 'viem';
+import { createWalletClient, http, type WalletClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
 import { decodeXPaymentResponse, wrapFetchWithPayment } from 'x402-fetch';
+
+type PaidApiResult = {
+  status: number;
+  body: unknown;
+  paymentResponse: ReturnType<typeof decodeXPaymentResponse> | null;
+};
+
+// AI agent が paid API を 1 回叩く流れを 1 関数に集約。test 可能にするため
+// walletClient と fetch を引数で受ける。
+export async function callPaidApi(
+  url: string,
+  walletClient: WalletClient,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PaidApiResult> {
+  const paidFetch = wrapFetchWithPayment(
+    fetchImpl,
+    walletClient as unknown as Parameters<typeof wrapFetchWithPayment>[1],
+  );
+  const res = await paidFetch(url);
+  const xPaymentRespHeader = res.headers.get('x-payment-response');
+  const paymentResponse = xPaymentRespHeader
+    ? decodeXPaymentResponse(xPaymentRespHeader)
+    : null;
+  const body = (await res.json()) as unknown;
+  return { status: res.status, body, paymentResponse };
+}
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -43,31 +69,30 @@ async function main(): Promise<void> {
     transport: http(),
   });
 
-  // x402-fetch の signer 型は viem WalletClient の subset 期待。viem 側の型と
-  // 細部が異なるため unknown 経由で cast (実コードは互換)。
-  const paidFetch = wrapFetchWithPayment(
-    fetch,
-    walletClient as unknown as Parameters<typeof wrapFetchWithPayment>[1],
-  );
-
   console.log(`[agent] requesting ${url}`);
   console.log(`[agent] from address ${account.address} on ${chain.name}`);
   console.log('');
 
-  const res = await paidFetch(url);
-  console.log(`[agent] HTTP ${res.status} ${res.statusText}`);
-
-  const xPaymentRespHeader = res.headers.get('x-payment-response');
-  if (xPaymentRespHeader) {
-    const decoded = decodeXPaymentResponse(xPaymentRespHeader);
-    console.log('[agent] x-payment-response:', JSON.stringify(decoded, null, 2));
+  const result = await callPaidApi(url, walletClient);
+  console.log(`[agent] HTTP ${result.status}`);
+  if (result.paymentResponse) {
+    console.log(
+      '[agent] x-payment-response:',
+      JSON.stringify(result.paymentResponse, null, 2),
+    );
   }
-
-  const body = await res.json();
-  console.log('[agent] body:', JSON.stringify(body, null, 2));
+  console.log('[agent] body:', JSON.stringify(result.body, null, 2));
 }
 
-main().catch((err) => {
-  console.error('[agent] error:', err);
-  process.exit(1);
-});
+// 直接実行された時のみ main() を起動。import される時は副作用なし (test 可能)。
+const isDirectRun =
+  typeof require !== 'undefined'
+    ? require.main === module
+    : import.meta.url === `file://${process.argv[1]}`;
+
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error('[agent] error:', err);
+    process.exit(1);
+  });
+}

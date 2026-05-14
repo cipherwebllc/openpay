@@ -30,5 +30,13 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // x402 paid route の挙動を deterministic にするため env を pin する。
+    // local の X402_TEST_MODE が漏れると e2e が path を変えてしまうので明示的に
+    // false 側を選び、testnet fallback の payTo を渡しておく。
+    env: {
+      X402_TEST_MODE: 'false',
+      X402_NETWORK: 'base-sepolia',
+      X402_PAY_TO_ADDRESS: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    },
   },
 });
