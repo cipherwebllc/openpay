@@ -34,8 +34,8 @@ export const metadata: Metadata = {
     images: [
       {
         url: '/og-image.png',
-        width: 1536,
-        height: 1024,
+        width: 1200,
+        height: 630,
         alt: 'OpenPay — ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR',
       },
     ],
