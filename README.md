@@ -23,6 +23,7 @@ ERC-4337 (Account Abstraction) + Pimlico Paymaster + ERC-7702 を組み合わせ
 
 ## 直近の主要追加 (v0.2 候補)
 
+- **Open Checkout for AI Agents (x402 protocol 課金ゲートウェイ)** — `/api/paid/*` を `withX402Payment` で 1 行 wrap するだけで、未払いリクエストに HTTP 402 + 支払い要件、`X-PAYMENT` header 付き再リクエストで verify → handler → settle の順で実コンテンツ返却、までを Coinbase 公式 `x402-next` package と公開 facilitator (`x402.org/facilitator`) 経由で実現。USDC / Base / Base Sepolia で動作確認、JPYC は EIP-3009 対応確認後の Phase 2 で対応予定。`X402_TEST_MODE=true` で dev/CI は payment bypass、production では起動 guard で流出阻止。demo `/api/paid/hello` + agent client (`examples/agent-client.ts`) + e2e smoke 付き、テスト 25 件追加 (~985 件 / 53 file)。詳細は §「Open Checkout for AI Agents」
 - **next.js HIGH 脆弱性修正 + paymentLog → Sentry 集計** — `next` 15.5.16 → 15.5.18 で App Router middleware / proxy bypass via segment-prefetch routes (GHSA-26hh-7cqf-hhc6) を patch fix (major bump なし)。あわせて `postcss` 8.4.49 → 8.5.14 で MODERATE XSS を解消、残る Next.js 内部 bundled postcss は build-time / user-controlled CSS 経路なしで到達不能と判定済 (README §6 明文化)。`logPaymentEvent` の fetch 失敗を **二段構え観測** に変更: (1) `window.dispatchEvent('openpay:payment-log-failure')` で DevTools 観測、(2) `logger.warn` → `Sentry.captureMessage` で production 集計。`@/lib/logger` を mock せず `@sentry/nextjs` のみ mock した integration test (`tests/lib/paymentLog.sentry-integration.test.ts`、3 case) で paymentLog → logger → Sentry の 1 経路実走を verify。npm audit: HIGH **ゼロ**
 - **Basenames Universal Resolver の hardcode 誤り修正** — `lib/resolveAddress.ts` が Base mainnet の `0xeEeE…eEee` を Basenames UR として hardcode していたが、実 RPC で `eth_getCode` を発火し **bytecode = 0 bytes** (= 未デプロイ) を確認。`.base.eth` は silent fail する状態だった。修正: mainnet ENS UR が CCIP-Read (ERC-3668) 経由で `.base.eth` も解決することを `jesse.base.eth` → `0x2211…D77DA9` で実証し、basenamesClient / `BASE_UNIVERSAL_RESOLVER` 定数を削除して mainnet client 単一に再構成。`scripts/verify-ens-resolver.mjs` を実 RPC smoke として永続化 (deploy gate に runnable)
 - **middleware locale prefix の e2e smoke 追加** — `e2e/middleware-locale.spec.ts` (15 case) で **production build (`next start`) に対する実 HTTP** で / の locale redirect、`/ja` / `/en` の 200、4 legal page × 2 locale = 8 ルートの 200、未知 locale (`/fr`) の 404、`/manifest.webmanifest` middleware bypass、`/api/log/payment` GET 405 / 不正 body POST 400 を smoke。vitest では検出不能な runtime middleware regression を Next 本体 / next-intl の patch upgrade 時に catch する
@@ -135,6 +136,104 @@ OpenPay の構成要素 (programmable URL / multi-token / multi-chain / gasless 
 - ファンは MetaMask v12+ などで接続し、preset (JPYC: 300/1000/3000、USDC: 5/20/50) かカスタム金額を選んで送信。JPYC は運営がガスを肩代わり、USDC はファンの USDC 残高から自動徴収 (ネイティブトークン不要)
 - iframe 埋め込みは `Content-Security-Policy: frame-ancestors *` で全オリジン許可 (アクションは MetaMask ポップアップで起こるためクリックジャッキング不成立)
 - webhook は Discord / Slack / 独自バックエンドへの**通知用途**として扱ってください。限定コンテンツ配布、会員権限付与、注文確定など「権限や特典を発生させる処理」に使う場合は、webhook payload を信頼せず `txHash` / `userOpHash` を必ずオンチェーンで再検証してください。
+
+### 5. Open Checkout for AI Agents — x402 protocol 課金ゲートウェイ
+
+**「Stripe Checkout の再発明」ではなく、AI agent / API / MCP が叩く有料エンドポイントに x402 で per-request 課金を付けるためのゲートウェイ**です。人間向け UI は介在しません。
+
+仕組み:
+
+1. AI agent が `GET /api/paid/hello` を叩く
+2. 未払いなら server が **HTTP 402 Payment Required** + `accepts: [paymentRequirements]` を返す
+3. agent (x402-fetch / x402-axios 等) が requirements を見て USDC を EIP-712 sign し、`X-PAYMENT` header に base64 で詰めて再リクエスト
+4. server が **facilitator (`x402.org/facilitator` 等)** に verify / settle を依頼
+5. 検証成功 + on-chain 確定後にだけ実コンテンツを返す (`X-PAYMENT-RESPONSE` header 付き)
+
+開発者は `lib/x402/middleware.ts` の `withX402Payment` で route を 1 行 wrap するだけ:
+
+```typescript
+// app/api/paid/hello/route.ts
+import { NextResponse, type NextRequest } from 'next/server';
+import { withX402Payment } from '@/lib/x402/middleware';
+
+async function handler(_req: NextRequest) {
+  return NextResponse.json({ message: 'Hello, paid AI agent.', timestamp: new Date().toISOString() });
+}
+
+export const GET = withX402Payment(handler, { description: 'My paid API' });
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+```
+
+price / network / facilitator は `.env.local` の `X402_*` で project default を設定、route 側で個別に override 可能。
+
+#### 動作確認 (ローカル)
+
+```sh
+# 1. 環境変数 (.env.local) を最低限セット
+echo "X402_NETWORK=base-sepolia" >> .env.local
+echo "X402_PAY_TO_ADDRESS=0x...your-receiving-wallet..." >> .env.local
+
+# 2. dev server を起動 → 未払い 402 を確認
+npm run dev
+curl -i http://localhost:3000/api/paid/hello
+#   HTTP/1.1 402 Payment Required
+#   ...
+#   {"x402Version":1,"error":"...","accepts":[{ "scheme":"exact", "network":"base-sepolia", ... }]}
+
+# 3. test mode で payment 検証を bypass (dev only) → 200 を確認
+X402_TEST_MODE=true npm run dev
+curl http://localhost:3000/api/paid/hello
+#   {"message":"Hello, paid AI agent.","timestamp":"2026-..."}
+```
+
+#### AI agent client 経由で実支払い (Base Sepolia)
+
+1. Base Sepolia の USDC と ETH (gas) を [Circle faucet](https://faucet.circle.com) で取得
+2. 上記 USDC を持つ EOA の private key を `AGENT_PRIVATE_KEY` env に設定
+3. example client を起動:
+
+```sh
+AGENT_PRIVATE_KEY=0x... PAID_URL=http://localhost:3000/api/paid/hello \
+  npx tsx examples/agent-client.ts
+
+# [agent] requesting http://localhost:3000/api/paid/hello
+# [agent] from address 0x... on Base Sepolia
+# [agent] HTTP 200 OK
+# [agent] x-payment-response: { success: true, transaction: "0x...", ... }
+# [agent] body: { message: "Hello, paid AI agent.", timestamp: "..." }
+```
+
+#### 環境変数
+
+| 変数 | 既定 | 説明 |
+|---|---|---|
+| `X402_FACILITATOR_URL` | `https://x402.org/facilitator` | verify / settle を委譲する facilitator。production では https:// 必須 (起動 guard) |
+| `X402_NETWORK` | `base-sepolia` | `base` (mainnet) または `base-sepolia` (testnet) |
+| `X402_PAY_TO_ADDRESS` | (testnet は `0x…dEaD` fallback) | 受取アドレス。mainnet では起動時必須 |
+| `X402_ASSET` | (未設定 = network 既定 USDC) | カスタム asset アドレス (bridged USDC.e は非対応) |
+| `X402_PRICE` | `$0.001` | 既定 price (route 側で override 可) |
+| `X402_TEST_MODE` | `false` | true で payment 検証 bypass (dev only)、`NODE_ENV=production` と同時設定で起動失敗 |
+
+#### セキュリティ注意点
+
+- **支払い検証前に handler は実行されない**: `withX402` が verify → handler → settle の順を保証。settle 失敗時は content を返さず 402 で応答
+- **例外時は 500 でなく 402 に倒す**: facilitator 不到達などで内部例外が出ても、`logger.warn('x402.middleware.error', ...)` で Sentry に集計しつつ 402 を返す
+- **production で TEST_MODE = 起動失敗**: `lib/x402/config.ts` の起動時 throw で本番への流出を防止
+- **リプレイ攻撃の限界**: 防御は EIP-3009 nonce (token contract 側) + facilitator 依存。OpenPay は独自 nonce DB を持たない (DB 依存最小化方針)。完全防御は facilitator の実装に依存する
+- **AI agent の DDoS / rate limit**: 本実装範囲外。Vercel BotID または別途 rate limiter で対策が必要
+- **`AGENT_PRIVATE_KEY` の取扱い**: server-side / CLI 実行を想定。フロントエンド / repo にコミットしないこと
+
+#### JPYC 対応について (Phase 2)
+
+現状は USDC / Base / Base Sepolia のみサポート。**JPYC の x402 対応は EIP-3009 (`transferWithAuthorization`) を JPYC v3 が実装している必要があり、未検証**。対応確認次第、`X402_NETWORK=polygon` + `X402_ASSET=0xE7C3…3c29` で動かす想定。
+
+#### 採用しない選択肢
+
+- 人間向け Stripe Checkout 風 UI (既存 `/checkout` がその役割)
+- サブスク / 注文履歴 / 会員管理 / カート
+- self-host facilitator (env override で対応可だが default は Coinbase 公開)
+- 独自 nonce DB (DB なし方針、on-chain で完結)
 
 ### 4. Checkout (実験的 / 非推奨) — 直リンク互換のみ維持
 

@@ -77,4 +77,23 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     const body = await res.json();
     expect(body).toEqual({ ok: false, error: 'invalid_payload' });
   });
+
+  test('/api/paid/hello: x402 paid route は middleware bypass、test mode で 200 / production で 402', async ({
+    request,
+  }) => {
+    const res = await request.get('/api/paid/hello');
+    // X402_TEST_MODE=true で build した場合は 200、未設定 (default false) で
+    // build した production deploy では 402 (未払い)。e2e は production build
+    // (next start) を起動するため、ローカル CI 環境で X402_TEST_MODE を
+    // どちらに設定しても module load + routing が壊れていなければ通る。
+    expect([200, 402]).toContain(res.status());
+    if (res.status() === 200) {
+      const body = await res.json();
+      expect(body).toMatchObject({ message: 'Hello, paid AI agent.' });
+    } else {
+      const body = await res.json();
+      // x402 spec: 402 body は accepts array を含む
+      expect(body).toHaveProperty('x402Version');
+    }
+  });
 });
