@@ -1,17 +1,11 @@
-// AI agent 向け demo paid endpoint。x402 protocol で課金される最小例として
-// 「message + timestamp」を返すだけ。withX402Payment を 1 行で wrap する DX を
-// 示す reference 実装。
-//
-// 動作確認:
-//   curl -i http://localhost:3000/api/paid/hello
-//     → 402 Payment Required + accepts: [paymentRequirements]
-//   X402_TEST_MODE=true npm run dev で起動 → 200 + JSON body
+// x402 課金がかかる demo endpoint。動作確認は curl http://localhost:3000/api/paid/hello
+// で 402 (default) / `X402_TEST_MODE=true npm run dev` で 200。
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { withX402Payment } from '@/lib/x402/middleware';
 
 export const runtime = 'nodejs';
-// new Date() を返すため static 化を避ける
+// timestamp を含むため static prerender を無効化
 export const dynamic = 'force-dynamic';
 
 async function helloHandler(_request: NextRequest): Promise<NextResponse> {

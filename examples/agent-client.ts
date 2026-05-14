@@ -27,8 +27,7 @@ type PaidApiResult = {
   paymentResponse: ReturnType<typeof decodeXPaymentResponse> | null;
 };
 
-// AI agent が paid API を 1 回叩く流れを 1 関数に集約。test 可能にするため
-// walletClient と fetch を引数で受ける。
+// test 可能にするため walletClient と fetch を引数で受ける。
 export async function callPaidApi(
   url: string,
   walletClient: WalletClient,
