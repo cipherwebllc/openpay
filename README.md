@@ -581,7 +581,7 @@ npm run build && npm run start
 | **Pimlico API Key の Origin 制限** | Pimlico Dashboard | `https://open-pay.jp` (production) + `*.vercel.app` (preview ドメイン群) に限定 |
 | **Pimlico Sponsorship Policy ルール** | Pimlico Dashboard | README "Pimlico ダッシュボード設定" 5 項参照 (fee_receiver への transfer 必須化) |
 | **Sentry DSN 設定** | Vercel env (Plain) | Replay (10% / エラー時 100%) + 例外取得が自動有効化 |
-| **Sentry alert rule 作成** ⚠ コード自動化不可 | Sentry Dashboard → Alerts | 「`payment.failed` が 5%/h を超えたら Slack 通知」「`smart-account.init-failed` が 10 件/h を超えたら通知」など。README §即 rollback トリガー の閾値と整合させる。**この項目は code config では担保できないため deploy 時に人手で確認** |
+| **Sentry alert rule 作成** ⚠ コード自動化不可 | Sentry Dashboard → Alerts | 「`payment.failed` が 5%/h を超えたら Slack 通知」「`smart-account.init-failed` が 10 件/h を超えたら通知」「`x402.middleware.error` が 10 件/h を超えたら通知 (facilitator 不通の検出)」など。README §即 rollback トリガー の閾値と整合させる。**この項目は code config では担保できないため deploy 時に人手で確認** |
 | **`SENTRY_AUTH_TOKEN` を Sensitive で登録** | Vercel env (Sensitive) ✓ | 上記表参照 |
 | **Pimlico 残高 alert 設定** ⚠ コード自動化不可 | Pimlico Dashboard → Alerts | sponsorship policy に紐づく POL / ETH デポジット残高の lower-threshold 通知 (例: 残量 < 1 日想定使用量で Slack)。残高枯渇は UserOp `AA31 paymaster deposit too low` で全送金 fail に直結 |
 | **GitHub Secrets の見直し** | GitHub repo → Settings → Secrets | Pimlico 残高 cron / Lighthouse / Playwright 用の secrets は GitHub 側にあり、Vercel インシデントの影響を受けない (= 移行不要) |
@@ -705,6 +705,7 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 - `payment.failed` が **5%/h** を超え、エラーメッセージに `paymaster validation failed` / `AA34` / `AA37` (paymaster 関連) が含まれる場合 → Vercel で旧 deploy へ rollback
 - 顧客から「USDC が引かれたが merchant が受け取っていない」という報告 (atomic batch なので理論上発生しないが万一)
 - `pimlico_getTokenQuotes` が 30 分以上連続で 5xx を返す
+- `x402.middleware.error` が **10 件/h** を継続的に超える (facilitator 不通や x402-next の挙動異常)。x402 paid route のみ影響、§rollback の "x402 paid route は安全" に従い rollback 単独可
 
 ### 5. split の rounding edge case (UX 上の注意)
 
@@ -995,6 +996,18 @@ Phase 1 で **USDC を Base / Arbitrum / Optimism / Polygon の 4 chain に拡�
 ### EIP-681 互換 QR の rollback は安全 (silent fund misdirection リスク無し)
 
 EIP-681 互換 QR (`feat(qr): EIP-681 互換 QR セクションを QrGenerator に併発行で追加`) は、生成された URI が [EIP-681 仕様](https://eips.ethereum.org/EIPS/eip-681) 準拠の self-contained format (`ethereum:<token>@<chainId>/transfer?...`) のため、**OpenPay の UI を rollback しても既出 QR は他の EIP-681 対応ウォレットで引き続き正しく読み取れる**。multi-chain URL のような silent fund misdirection は構造的に発生しない (token / chainId / receiver / wei が URI 内に確定値として焼き込まれているため、parser の差異で別 chain に送金される経路が無い)。
+
+### x402 paid route (`/api/paid/*`) の rollback は安全
+
+x402 機能 (`feat(x402): add Open Checkout for AI Agents`) は **完全に additive**:
+
+- 既存 route / middleware を改変せず、新規 `/api/paid/*` のみ追加
+- 各 paid call は **stateless / one-shot** で永続データを残さない (EIP-3009 nonce は token contract が管理、OpenPay 側に DB なし)
+- rollback すると `/api/paid/*` が 404 になるだけ。既出の `/pay` QR や Tip widget URL には影響なし
+- 進行中の x402 取引はあり得ない (synchronous、決済成立後即 content delivery)
+- silent fund misdirection の構造的可能性なし (paid call は `payTo` env で固定、URL に焼き込まれていない)
+
+→ 任意のタイミングで rollback 可。
 
 ### ERC20 Paymaster の approve allowance (USDC mainnet 限定)
 
