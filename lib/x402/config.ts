@@ -4,11 +4,12 @@
 //
 // 起動時 guard:
 //   - NODE_ENV=production + X402_TEST_MODE=true → throw (本番で課金 bypass は禁止)
-//   - network=base (mainnet) + X402_PAY_TO_ADDRESS 欠落 → throw (burn address 防止)
+//   - mainnet (base / polygon) + X402_PAY_TO_ADDRESS 欠落 → throw (burn address 防止)
 //   - production + facilitator URL が https でない → throw
 
-import { getAddress, isAddress, type Address } from 'viem';
-import type { X402Network } from './types';
+import { getAddress, isAddress, parseUnits, type Address } from 'viem';
+import type { RouteConfig } from 'x402-next';
+import { JPYC_V3_ASSET, type X402Network } from './types';
 
 const FALLBACK_TESTNET_PAY_TO: Address =
   '0x000000000000000000000000000000000000dEaD';
@@ -20,8 +21,23 @@ function nonEmpty(raw: string | undefined): string | undefined {
 }
 
 function parseNetwork(raw: string | undefined): X402Network {
-  if (raw === 'base' || raw === 'base-sepolia') return raw;
+  if (
+    raw === 'base' ||
+    raw === 'base-sepolia' ||
+    raw === 'polygon' ||
+    raw === 'polygon-amoy'
+  ) {
+    return raw;
+  }
   return 'base-sepolia';
+}
+
+function isMainnet(n: X402Network): boolean {
+  return n === 'base' || n === 'polygon';
+}
+
+function isPolygonNetwork(n: X402Network): boolean {
+  return n === 'polygon' || n === 'polygon-amoy';
 }
 
 function parsePayTo(
@@ -29,9 +45,9 @@ function parsePayTo(
   network: X402Network,
 ): Address {
   if (raw && isAddress(raw)) return getAddress(raw);
-  if (network === 'base') {
+  if (isMainnet(network)) {
     throw new Error(
-      'X402_PAY_TO_ADDRESS is required for network=base (mainnet). ' +
+      `X402_PAY_TO_ADDRESS is required for mainnet (network=${network}). ` +
         'Without it, paid API revenues would be sent to the burn address.',
     );
   }
@@ -51,6 +67,27 @@ function parseFacilitatorUrl(
   return url;
 }
 
+// network ごとに既定 price を組み立てる。
+//   - base / base-sepolia: USDC、Money 文字列 ($0.001 等)。x402-next が自動で
+//     USDC atomic units (6 decimals) に変換する。
+//   - polygon / polygon-amoy: JPYC、ERC20TokenAmount object。X402_PRICE は
+//     JPYC 単位の human-readable decimal (例: "1" = 1 JPYC = 1 JPY)。
+//     `$` prefix は USD 表記なので polygon では strip して JPYC 単位として扱う。
+//     parseUnits(human, 18) で atomic に変換。
+function buildDefaultPrice(
+  network: X402Network,
+  raw: string | undefined,
+): RouteConfig['price'] {
+  if (isPolygonNetwork(network)) {
+    const human = nonEmpty(raw)?.replace(/^\$/, '') ?? '1';
+    return {
+      amount: parseUnits(human, JPYC_V3_ASSET.decimals).toString(),
+      asset: JPYC_V3_ASSET,
+    };
+  }
+  return nonEmpty(raw) ?? '$0.001';
+}
+
 const isProd = process.env.NODE_ENV === 'production';
 const testMode = process.env.X402_TEST_MODE === 'true';
 
@@ -67,13 +104,14 @@ const facilitatorUrl = parseFacilitatorUrl(
   process.env.X402_FACILITATOR_URL,
   isProd,
 );
+const defaultPrice = buildDefaultPrice(network, process.env.X402_PRICE);
 
 export const x402Config = {
   network,
   payTo,
   facilitatorUrl,
-  defaultPrice: nonEmpty(process.env.X402_PRICE) ?? '$0.001',
-  // X402_ASSET 未設定なら x402-next が network 既定 (USDC) を使う。
+  defaultPrice,
+  // X402_ASSET 未設定なら network 既定 (Base→USDC / Polygon→JPYC) を使う。
   asset: nonEmpty(process.env.X402_ASSET),
   testMode,
 } as const;

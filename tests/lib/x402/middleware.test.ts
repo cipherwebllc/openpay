@@ -303,6 +303,45 @@ describe('lib/x402/middleware.withX402Payment', () => {
     });
   });
 
+  it('Phase 2 polygon: withX402 に network=polygon-amoy と JPYC ERC20TokenAmount price を渡す', async () => {
+    process.env.X402_NETWORK = 'polygon-amoy';
+    vi.mocked(withX402).mockReturnValue(
+      vi.fn(async () => NextResponse.json({})),
+    );
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    withX402Payment(vi.fn(async () => NextResponse.json({})));
+
+    const [, , routeConfig] = vi.mocked(withX402).mock.calls[0];
+    const rc = routeConfig as {
+      price: { amount: string; asset: { address: string; eip712: { name: string; version: string } } };
+      network: string;
+    };
+    expect(rc.network).toBe('polygon-amoy');
+    expect(rc.price.amount).toBe('1000000000000000000');
+    expect(rc.price.asset.address).toBe(
+      '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+    );
+    expect(rc.price.asset.eip712).toEqual({
+      name: 'JPY Coin',
+      version: '1',
+    });
+  });
+
+  it('Phase 2 polygon mainnet: PAY_TO 設定で構築可能', async () => {
+    process.env.X402_NETWORK = 'polygon';
+    process.env.X402_PAY_TO_ADDRESS =
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    vi.mocked(withX402).mockReturnValue(
+      vi.fn(async () => NextResponse.json({})),
+    );
+    const { withX402Payment } = await import('@/lib/x402/middleware');
+    withX402Payment(vi.fn(async () => NextResponse.json({})));
+
+    const [, payTo, routeConfig] = vi.mocked(withX402).mock.calls[0];
+    expect(payTo).toBe('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    expect((routeConfig as { network: string }).network).toBe('polygon');
+  });
+
   it('throw 後の subsequent request も同じ wrapper で正常動作 (state leak なし)', async () => {
     let throwOnce = true;
     vi.mocked(withX402).mockReturnValue(async () => {

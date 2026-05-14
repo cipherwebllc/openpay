@@ -47,7 +47,7 @@ describe('lib/x402/config', () => {
   it('mainnet (base) で PAY_TO_ADDRESS 欠落だと throw', async () => {
     process.env.X402_NETWORK = 'base';
     await expect(import('@/lib/x402/config')).rejects.toThrow(
-      /X402_PAY_TO_ADDRESS is required for network=base/,
+      /X402_PAY_TO_ADDRESS is required for mainnet \(network=base\)/,
     );
   });
 
@@ -135,7 +135,7 @@ describe('lib/x402/config', () => {
     process.env.X402_NETWORK = 'base';
     process.env.X402_PAY_TO_ADDRESS = 'not-an-address';
     await expect(import('@/lib/x402/config')).rejects.toThrow(
-      /X402_PAY_TO_ADDRESS is required for network=base/,
+      /X402_PAY_TO_ADDRESS is required for mainnet \(network=base\)/,
     );
   });
 
@@ -215,5 +215,78 @@ describe('lib/x402/config', () => {
     process.env.X402_TEST_MODE = '1';
     const { x402Config } = await import('@/lib/x402/config');
     expect(x402Config.testMode).toBe(false);
+  });
+
+  describe('Phase 2: JPYC on Polygon', () => {
+    it('X402_NETWORK=polygon-amoy: testnet で動作、JPYC asset を default price に組込み', async () => {
+      process.env.X402_NETWORK = 'polygon-amoy';
+      const { x402Config } = await import('@/lib/x402/config');
+      expect(x402Config.network).toBe('polygon-amoy');
+      // price は ERC20TokenAmount object (Money 文字列ではない)
+      expect(typeof x402Config.defaultPrice).toBe('object');
+      const price = x402Config.defaultPrice as {
+        amount: string;
+        asset: { address: string; decimals: number; eip712: { name: string; version: string } };
+      };
+      expect(price.amount).toBe('1000000000000000000'); // default 1 JPYC = 1e18
+      expect(price.asset.address).toBe('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
+      expect(price.asset.decimals).toBe(18);
+      expect(price.asset.eip712).toEqual({ name: 'JPY Coin', version: '1' });
+    });
+
+    it('X402_NETWORK=polygon (mainnet): PAY_TO 必須で欠落 throw', async () => {
+      process.env.X402_NETWORK = 'polygon';
+      await expect(import('@/lib/x402/config')).rejects.toThrow(
+        /X402_PAY_TO_ADDRESS is required for mainnet \(network=polygon\)/,
+      );
+    });
+
+    it('X402_NETWORK=polygon + 有効 PAY_TO で構築可能', async () => {
+      process.env.X402_NETWORK = 'polygon';
+      process.env.X402_PAY_TO_ADDRESS =
+        '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
+      const { x402Config } = await import('@/lib/x402/config');
+      expect(x402Config.network).toBe('polygon');
+      expect(x402Config.payTo).toBe(
+        '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+      );
+    });
+
+    it('X402_PRICE で JPYC 単位の human decimal を atomic に変換 ("5" → 5 * 1e18)', async () => {
+      process.env.X402_NETWORK = 'polygon-amoy';
+      process.env.X402_PRICE = '5';
+      const { x402Config } = await import('@/lib/x402/config');
+      const price = x402Config.defaultPrice as { amount: string };
+      expect(price.amount).toBe('5000000000000000000');
+    });
+
+    it('X402_PRICE で 小数も精度欠落なく変換 ("1.5" → 1.5 * 1e18)', async () => {
+      process.env.X402_NETWORK = 'polygon-amoy';
+      process.env.X402_PRICE = '1.5';
+      const { x402Config } = await import('@/lib/x402/config');
+      const price = x402Config.defaultPrice as { amount: string };
+      expect(price.amount).toBe('1500000000000000000');
+    });
+
+    it('X402_PRICE で "$" prefix は polygon では strip して JPYC 単位として扱う', async () => {
+      process.env.X402_NETWORK = 'polygon-amoy';
+      process.env.X402_PRICE = '$10';
+      const { x402Config } = await import('@/lib/x402/config');
+      const price = x402Config.defaultPrice as { amount: string };
+      expect(price.amount).toBe('10000000000000000000');
+    });
+
+    it('X402_PRICE 空文字 / 未設定で polygon は 1 JPYC default', async () => {
+      process.env.X402_NETWORK = 'polygon-amoy';
+      const { x402Config } = await import('@/lib/x402/config');
+      const price = x402Config.defaultPrice as { amount: string };
+      expect(price.amount).toBe('1000000000000000000');
+    });
+
+    it('Base network では USDC の Money 文字列 price ($0.001) のまま', async () => {
+      process.env.X402_NETWORK = 'base-sepolia';
+      const { x402Config } = await import('@/lib/x402/config');
+      expect(x402Config.defaultPrice).toBe('$0.001');
+    });
   });
 });

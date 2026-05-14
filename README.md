@@ -224,9 +224,28 @@ AGENT_PRIVATE_KEY=0x... PAID_URL=http://localhost:3000/api/paid/hello \
 - **AI agent の DDoS / rate limit**: 本実装範囲外。Vercel BotID または別途 rate limiter で対策が必要
 - **`AGENT_PRIVATE_KEY` の取扱い**: server-side / CLI 実行を想定。フロントエンド / repo にコミットしないこと
 
-#### JPYC 対応について (Phase 2)
+#### JPYC on Polygon 対応 (Phase 2 完了 — 2026-05-14)
 
-現状は USDC / Base / Base Sepolia のみサポート。**JPYC の x402 対応は EIP-3009 (`transferWithAuthorization`) を JPYC v3 が実装している必要があり、未検証**。対応確認次第、`X402_NETWORK=polygon` + `X402_ASSET=0xE7C3…3c29` で動かす想定。
+JPYC v3 (`0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`) が EIP-3009 (`transferWithAuthorization` / `authorizationState` / `cancelAuthorization` / `receiveWithAuthorization`) を実装していることを Polygon mainnet 実 RPC で確認済 (implementation `0xafAc17fc3936A29CA2d2787CEd3C5d1c52007D2E`)。同じアドレスで Polygon mainnet + Polygon Amoy 両対応。
+
+設定例:
+
+```sh
+# Polygon Amoy (testnet) で 1 JPYC / call
+X402_NETWORK=polygon-amoy
+X402_PAY_TO_ADDRESS=  # 未設定なら burn address fallback
+X402_PRICE=1          # JPYC 単位の human decimal、1 = 1 JPYC = 1 JPY
+
+# Polygon mainnet で 0.5 JPYC / call
+X402_NETWORK=polygon
+X402_PAY_TO_ADDRESS=0x...  # mainnet では必須
+X402_PRICE=0.5
+```
+
+仕組み:
+- `lib/x402/config.ts` の `buildDefaultPrice` が `X402_NETWORK` を見て、polygon 系なら ERC20TokenAmount (`{amount, asset: {address, decimals, eip712}}`) を組み立て、x402-next に渡す
+- JPYC 単位は `parseUnits(value, 18)` で atomic に変換。`$` prefix は strip して JPYC 単位として扱う
+- asset.eip712 は `{name: 'JPY Coin', version: '1'}` を仮定 (OpenZeppelin default、JPYC は `DOMAIN_SEPARATOR()` / `eip712Domain()` を public expose しないため bytecode から確定不能 — **実 signature 通過は alpha 試用時に Polygon Amoy で 1 件確認すること**)。version が "1" 以外だった場合は `lib/x402/types.ts` の `JPYC_V3_ASSET.eip712.version` を update
 
 #### 採用しない選択肢
 

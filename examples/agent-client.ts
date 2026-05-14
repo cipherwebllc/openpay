@@ -16,9 +16,9 @@
 //   AGENT_PRIVATE_KEY は **絶対に** フロントエンドや repo にコミットしないこと。
 //   本ファイルは server-side / CLI 実行を想定。
 
-import { createWalletClient, http, type WalletClient } from 'viem';
+import { createWalletClient, http, type Chain, type WalletClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, polygon, polygonAmoy } from 'viem/chains';
 import { decodeXPaymentResponse, wrapFetchWithPayment } from 'x402-fetch';
 
 type PaidApiResult = {
@@ -55,11 +55,18 @@ function requireEnv(name: string): string {
   return v;
 }
 
+const CHAIN_BY_NETWORK: Record<string, Chain> = {
+  base,
+  'base-sepolia': baseSepolia,
+  polygon,
+  'polygon-amoy': polygonAmoy,
+};
+
 async function main(): Promise<void> {
   const pk = requireEnv('AGENT_PRIVATE_KEY') as `0x${string}`;
   const url = process.env.PAID_URL ?? 'http://localhost:3000/api/paid/hello';
   const networkEnv = process.env.X402_NETWORK ?? 'base-sepolia';
-  const chain = networkEnv === 'base' ? base : baseSepolia;
+  const chain = CHAIN_BY_NETWORK[networkEnv] ?? baseSepolia;
 
   const account = privateKeyToAccount(pk);
   const walletClient = createWalletClient({
