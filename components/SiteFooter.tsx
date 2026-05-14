@@ -53,6 +53,16 @@ export function SiteFooter() {
         })}
       </p>
       <p className="mt-1 text-slate-400">{t('poweredBy')}</p>
+      <p className="mt-1 text-slate-400">
+        <a
+          href="https://github.com/cipherwebllc/openpay"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-slate-700 hover:underline"
+        >
+          {t('sourceLink')}
+        </a>
+      </p>
     </footer>
   );
 }

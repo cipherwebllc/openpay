@@ -38,6 +38,24 @@ describe('SiteFooter', () => {
     expect(footer.textContent).toContain(LEGAL_ENTITY.companyName);
   });
 
+  it('GitHub source link が新規 tab で開く形 + noopener で表示される', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'ja' });
+    const link = screen.getByRole('link', { name: 'ソースコード (GitHub)' });
+    expect(link.getAttribute('href')).toBe(
+      'https://github.com/cipherwebllc/openpay',
+    );
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('en locale で source link が "Source on GitHub" として render', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'en' });
+    const link = screen.getByRole('link', { name: 'Source on GitHub' });
+    expect(link.getAttribute('href')).toBe(
+      'https://github.com/cipherwebllc/openpay',
+    );
+  });
+
   it('print:hidden が footer 要素に付与されている (QR ポスター印刷時非表示)', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     const footer = screen.getByRole('contentinfo');
