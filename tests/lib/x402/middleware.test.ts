@@ -143,7 +143,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
     expect(facilitator).toEqual({ url: 'https://facilitator.example.com' });
   });
 
-  it('wrapped が throw した場合は 402 + payment_facility_unavailable + logger.warn', async () => {
+  it('wrapped が throw した場合は 503 + payment_facility_unavailable + logger.warn (402 だと x402-fetch が crash する)', async () => {
     vi.mocked(withX402).mockReturnValue(async () => {
       throw new Error('facilitator unreachable');
     });
@@ -151,7 +151,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
     const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
     const res = await wrapped(makeReq('/api/paid/hello'));
 
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(503);
     const body = await res.json();
     expect(body).toMatchObject({
       x402Version: 1,
@@ -191,7 +191,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
     expect(body).toEqual({ pathname: '/api/paid/hello' });
   });
 
-  it('非 Error が throw された場合も safety 402 + String(err) で logger.warn', async () => {
+  it('非 Error が throw された場合も safety 503 + String(err) で logger.warn', async () => {
     vi.mocked(withX402).mockReturnValue(async () => {
       // x402-next や Network 層が string / object を直接 throw するシナリオ
       throw 'string-error-payload';
@@ -199,7 +199,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
     const { withX402Payment } = await import('@/lib/x402/middleware');
     const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
     const res = await wrapped(makeReq());
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(503);
     expect(logger.warn).toHaveBeenCalledWith(
       'x402.middleware.error',
       expect.objectContaining({
@@ -209,14 +209,14 @@ describe('lib/x402/middleware.withX402Payment', () => {
     );
   });
 
-  it('null が throw された場合も String(null) で記録、wrapper は 402 を返す', async () => {
+  it('null が throw された場合も String(null) で記録、wrapper は 503 を返す', async () => {
     vi.mocked(withX402).mockReturnValue(async () => {
       throw null;
     });
     const { withX402Payment } = await import('@/lib/x402/middleware');
     const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
     const res = await wrapped(makeReq());
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(503);
     expect(logger.warn).toHaveBeenCalledWith(
       'x402.middleware.error',
       expect.objectContaining({ error: 'null' }),
@@ -249,7 +249,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
     expect(b3.route).toBe('/api/paid/c');
   });
 
-  it('並行 throw: 全 request が独立に safety 402 を受ける + logger.warn が 3 回', async () => {
+  it('並行 throw: 全 request が独立に safety 503 を受ける + logger.warn が 3 回', async () => {
     let counter = 0;
     vi.mocked(withX402).mockReturnValue(async () => {
       counter += 1;
@@ -263,7 +263,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
       wrapped(makeReq()),
       wrapped(makeReq()),
     ]);
-    expect(results.every((r) => r.status === 402)).toBe(true);
+    expect(results.every((r) => r.status === 503)).toBe(true);
     expect(logger.warn).toHaveBeenCalledTimes(3);
   });
 
@@ -316,7 +316,7 @@ describe('lib/x402/middleware.withX402Payment', () => {
     const wrapped = withX402Payment(vi.fn(async () => NextResponse.json({})));
 
     const r1 = await wrapped(makeReq());
-    expect(r1.status).toBe(402);
+    expect(r1.status).toBe(503);
     const r2 = await wrapped(makeReq());
     expect(r2.status).toBe(200);
     const b2 = await r2.json();

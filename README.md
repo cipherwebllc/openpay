@@ -218,7 +218,7 @@ AGENT_PRIVATE_KEY=0x... PAID_URL=http://localhost:3000/api/paid/hello \
 #### セキュリティ注意点
 
 - **支払い検証前に handler は実行されない**: `withX402` が verify → handler → settle の順を保証。settle 失敗時は content を返さず 402 で応答
-- **例外時は 500 でなく 402 に倒す**: facilitator 不到達などで内部例外が出ても、`logger.warn('x402.middleware.error', ...)` で Sentry に集計しつつ 402 を返す
+- **例外時は 500 でなく 503 に倒す**: facilitator 不到達などで内部例外が出ても、`logger.warn('x402.middleware.error', ...)` で Sentry に集計しつつ HTTP 503 (Service Unavailable) を返す (`{x402Version, error: 'payment_facility_unavailable', message}` 形)。standard x402 client (x402-fetch / x402-axios) は 402 のみ retry に乗せるため、503 にすることで facilitator outage 時に無限 retry / TypeError crash を回避 (`tests/lib/x402/facilitator-unavailable-client.test.ts` で実機検証)
 - **production で TEST_MODE = 起動失敗**: `lib/x402/config.ts` の起動時 throw で本番への流出を防止
 - **リプレイ攻撃の限界**: 防御は EIP-3009 nonce (token contract 側) + facilitator 依存。OpenPay は独自 nonce DB を持たない (DB 依存最小化方針)。完全防御は facilitator の実装に依存する
 - **AI agent の DDoS / rate limit**: 本実装範囲外。Vercel BotID または別途 rate limiter で対策が必要
@@ -581,7 +581,7 @@ npm run build && npm run start
 | **Pimlico API Key の Origin 制限** | Pimlico Dashboard | `https://open-pay.jp` (production) + `*.vercel.app` (preview ドメイン群) に限定 |
 | **Pimlico Sponsorship Policy ルール** | Pimlico Dashboard | README "Pimlico ダッシュボード設定" 5 項参照 (fee_receiver への transfer 必須化) |
 | **Sentry DSN 設定** | Vercel env (Plain) | Replay (10% / エラー時 100%) + 例外取得が自動有効化 |
-| **Sentry alert rule 作成** ⚠ コード自動化不可 | Sentry Dashboard → Alerts | 「`payment.failed` が 5%/h を超えたら Slack 通知」「`smart-account.init-failed` が 10 件/h を超えたら通知」「`x402.middleware.error` が 10 件/h を超えたら通知 (facilitator 不通の検出)」など。README §即 rollback トリガー の閾値と整合させる。**この項目は code config では担保できないため deploy 時に人手で確認** |
+| **Sentry alert rule 作成** ⚠ コード自動化不可 | Sentry Dashboard → Alerts | 「`payment.failed` が 5%/h を超えたら Slack 通知」「`smart-account.init-failed` が 10 件/h を超えたら通知」「`x402.middleware.error` が 10 件/h を超えたら通知 (facilitator 不通の検出)」など。**示している件数は alpha 用の経験的初期値**、production traffic 観測後に baseline 比で re-calibration 必要。README §即 rollback トリガー の閾値と整合させる。**この項目は code config では担保できないため deploy 時に人手で確認** |
 | **`SENTRY_AUTH_TOKEN` を Sensitive で登録** | Vercel env (Sensitive) ✓ | 上記表参照 |
 | **Pimlico 残高 alert 設定** ⚠ コード自動化不可 | Pimlico Dashboard → Alerts | sponsorship policy に紐づく POL / ETH デポジット残高の lower-threshold 通知 (例: 残量 < 1 日想定使用量で Slack)。残高枯渇は UserOp `AA31 paymaster deposit too low` で全送金 fail に直結 |
 | **GitHub Secrets の見直し** | GitHub repo → Settings → Secrets | Pimlico 残高 cron / Lighthouse / Playwright 用の secrets は GitHub 側にあり、Vercel インシデントの影響を受けない (= 移行不要) |
@@ -1002,9 +1002,9 @@ EIP-681 互換 QR (`feat(qr): EIP-681 互換 QR セクションを QrGenerator �
 x402 機能 (`feat(x402): add Open Checkout for AI Agents`) は **完全に additive**:
 
 - 既存 route / middleware を改変せず、新規 `/api/paid/*` のみ追加
-- 各 paid call は **stateless / one-shot** で永続データを残さない (EIP-3009 nonce は token contract が管理、OpenPay 側に DB なし)
+- 各 paid call は **stateless / one-shot** で OpenPay 側に永続 order state を残さない (EIP-3009 nonce は token contract が管理、DB なし)。rollback してもサーバー側で蘇る in-progress 注文の概念が存在しない
 - rollback すると `/api/paid/*` が 404 になるだけ。既出の `/pay` QR や Tip widget URL には影響なし
-- 進行中の x402 取引はあり得ない (synchronous、決済成立後即 content delivery)
+- in-flight HTTP request (verify → handler → settle 進行中) は Vercel zero-downtime deploy で旧 deployment 上で完了するため、rollback 切替の瞬間に request が壊れることはない
 - silent fund misdirection の構造的可能性なし (paid call は `payTo` env で固定、URL に焼き込まれていない)
 
 → 任意のタイミングで rollback 可。

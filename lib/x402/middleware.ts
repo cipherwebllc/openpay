@@ -3,7 +3,12 @@
 //   - X402_TEST_MODE=true は payment 検証を bypass (config.ts の起動 guard で
 //     production への流出を阻止済)。
 //   - withX402 内部の throw (facilitator 不通など) は Next の default 500 でなく
-//     402 + logger.warn (Sentry) に倒す。content は絶対に渡さない。
+//     503 (Service Unavailable) + logger.warn (Sentry) に倒す。
+//     * 402 にしないのは、x402-fetch / x402-axios 等の standard client が
+//       402 を見ると accepts array を parse しようとし、内容無しで TypeError に
+//       なるため (tests/lib/x402/facilitator-unavailable-client.test.ts で実機検証)。
+//       503 なら client は retry path に乗らず caller に温情に戻す。
+//     * content は絶対に渡さない。
 
 import { withX402 } from 'x402-next';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -58,7 +63,7 @@ export function withX402Payment<T = unknown>(
           error: 'payment_facility_unavailable',
           message: 'Payment verification failed. Please retry later.',
         },
-        { status: 402 },
+        { status: 503 },
       );
     }
   };
