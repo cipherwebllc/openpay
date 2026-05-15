@@ -102,12 +102,12 @@ describe('Legal pages', () => {
   });
 
   describe('Disclaimer (免責事項)', () => {
-    it('ja: h1 と 6 section の title が render される', () => {
+    it('ja: h1 と 8 section の title が render される', () => {
       renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
       expect(
         screen.getByRole('heading', { level: 1, name: '免責事項' }),
       ).toBeInTheDocument();
-      for (let n = 1; n <= 6; n++) {
+      for (let n = 1; n <= 8; n++) {
         expect(
           screen.getByRole('heading', {
             level: 2,
@@ -144,7 +144,7 @@ describe('Legal pages', () => {
       expect(screen.getByText('販売事業者')).toBeInTheDocument();
       expect(screen.getByText('所在地')).toBeInTheDocument();
       expect(screen.getByText('電話番号')).toBeInTheDocument();
-      expect(screen.getByText('役務の対価 (運営手数料)')).toBeInTheDocument();
+      expect(screen.getByText('役務の対価 (OpenPay 利用手数料)')).toBeInTheDocument();
       expect(screen.getByText('返品・キャンセル')).toBeInTheDocument();
     });
 

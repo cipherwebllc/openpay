@@ -436,7 +436,7 @@ describe('QrGenerator', () => {
       });
 
       // 店主 gas 負担ボタン → URL に gas=merchant が出る
-      await user.click(screen.getByRole('button', { name: /店主が gas 負担/ }));
+      await user.click(screen.getByRole('button', { name: /店主が gas 相当額/ }));
       await waitFor(() => {
         expect(
           screen.getByText((t) => t.includes('gas=merchant')),
@@ -444,7 +444,7 @@ describe('QrGenerator', () => {
       });
 
       // 顧客 gas 負担に戻す → gas= が消える
-      await user.click(screen.getByRole('button', { name: /顧客が gas 負担/ }));
+      await user.click(screen.getByRole('button', { name: /顧客が gas 相当額/ }));
       await waitFor(() => {
         expect(
           screen.queryByText((t) => t.includes('gas=')),
@@ -456,9 +456,9 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() =>
-        screen.getByRole('button', { name: /店主が gas 負担/ }),
+        screen.getByRole('button', { name: /店主が gas 相当額/ }),
       );
-      await user.click(screen.getByRole('button', { name: /店主が gas 負担/ }));
+      await user.click(screen.getByRole('button', { name: /店主が gas 相当額/ }));
 
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
@@ -473,13 +473,13 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByRole('checkbox', { name: /直接送金/ }));
       // 切替前は表示
       expect(
-        screen.getByRole('button', { name: /顧客が gas 負担/ }),
+        screen.getByRole('button', { name: /顧客が gas 相当額/ }),
       ).toBeInTheDocument();
       // 直接送金 ON
       await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
       // トグル消失
       expect(
-        screen.queryByRole('button', { name: /顧客が gas 負担/ }),
+        screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
       ).toBeNull();
     });
 

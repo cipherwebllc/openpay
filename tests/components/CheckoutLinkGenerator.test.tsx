@@ -394,9 +394,9 @@ describe('CheckoutLinkGenerator', () => {
     const user = userEvent.setup();
     render(<CheckoutLinkGenerator />);
     await waitFor(() =>
-      screen.getByRole('button', { name: /顧客が gas 負担/ }),
+      screen.getByRole('button', { name: /顧客が gas 相当額/ }),
     );
-    const merchantBtn = screen.getByRole('button', { name: /店主が gas 負担/ });
+    const merchantBtn = screen.getByRole('button', { name: /店主が gas 相当額/ });
     await user.click(merchantBtn);
     expect(merchantBtn.className).toMatch(/border-brand/);
   });

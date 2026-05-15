@@ -25,6 +25,8 @@ export default function DisclaimerPage() {
       <LegalSection title={t('section4.title')} body={t('section4.body')} />
       <LegalSection title={t('section5.title')} body={t('section5.body')} />
       <LegalSection title={t('section6.title')} body={t('section6.body')} />
+      <LegalSection title={t('section7.title')} body={t('section7.body')} />
+      <LegalSection title={t('section8.title')} body={t('section8.body')} />
     </LegalPageShell>
   );
 }

@@ -9,7 +9,7 @@ describe('AlphaNotice', () => {
     const banner = screen.getByRole('status');
     expect(banner.textContent).toMatch(/Alpha/);
     expect(banner.textContent).toMatch(/アルファ版/);
-    expect(banner.textContent).toMatch(/取消不能/);
+    expect(banner.textContent).toMatch(/取消できません/);
     const link = screen.getByRole('link', { name: '詳細' });
     expect(link.getAttribute('href')).toBe('/disclaimer');
   });

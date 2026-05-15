@@ -37,11 +37,11 @@
     "posterNoteLabel": "Poster note (optional)",
     "posterNotePlaceholder": "e.g. Show the completed payment screen to staff",
     "directHint": "Direct transfer mode: 0% operator fee. Customer pays gas in the native token.",
-    "gasLabel": "Who pays the network fee",
-    "gasCustomerTitle": "Customer pays gas",
-    "gasMerchantTitle": "Merchant pays gas",
-    "gasCustomerDesc": "Network fee is added on top of the bill (your take is stable across gas spikes).",
-    "gasMerchantDesc": "You absorb the network fee. Customer pays only the displayed amount (gas variability is your risk).",
+    "gasLabel": "Gas-equivalent burden",
+    "gasCustomerTitle": "Customer adds gas equivalent",
+    "gasMerchantTitle": "Merchant absorbs gas equivalent",
+    "gasCustomerDesc": "The gas equivalent is added on top of the bill and paid by the customer (your take is stable across gas spikes; this is the gas-sponsorship portion of the OpenPay service fee).",
+    "gasMerchantDesc": "You absorb the gas equivalent. Customer pays only the displayed amount (gas variability is your risk).",
     "advancedExtra": "Extras",
     "quickAmountsLabel": "Register quick amounts",
     "quickAmountPlaceholder": "e.g. 1000",
@@ -303,11 +303,11 @@
     "descriptionPlaceholder": "Thanks for your order",
     "customerEmailLabel": "Customer email (optional, for prefill)",
     "customerEmailPlaceholder": "alice@example.com",
-    "gasLabel": "Who pays the network fee",
-    "gasCustomerTitle": "Customer pays gas",
-    "gasMerchantTitle": "Merchant pays gas",
-    "gasCustomerDesc": "Customer pays the network fee on top of the bill",
-    "gasMerchantDesc": "Merchant absorbs the network fee; customer pays only the displayed amount",
+    "gasLabel": "Gas-equivalent burden",
+    "gasCustomerTitle": "Customer adds gas equivalent",
+    "gasMerchantTitle": "Merchant absorbs gas equivalent",
+    "gasCustomerDesc": "Customer pays the gas equivalent on top of the bill",
+    "gasMerchantDesc": "Merchant absorbs the gas equivalent; customer pays only the displayed amount",
     "successUrlLabel": "Success redirect URL (optional)",
     "successUrlPlaceholder": "https://shop.example.com/thanks",
     "successUrlHint": "Redirected 3 seconds after success. tx_hash / order_id are appended as query.",
@@ -361,7 +361,7 @@
   "AlphaNotice": {
     "label": "Service status",
     "badge": "Alpha",
-    "body": "This service is in alpha. Please send small test amounts only. Blockchain transactions are irreversible.",
+    "body": "This service is in alpha. If you use it for real transactions, you must start with small test amounts. Blockchain transactions are, in principle, irreversible.",
     "moreLink": "Details"
   },
   "Footer": {
@@ -389,7 +389,7 @@
     },
     "article3": {
       "title": "Article 3 (Nature of the Service)",
-      "body": "The Service is a non-custodial tool that facilitates transfers of Supported Tokens between user wallets. The Company never holds user funds. All transfers are executed on-chain via the user's own signature. The Company does not issue or operate the Supported Tokens, the underlying blockchains, or the wallet applications used by users. The Service consists of generating EIP-681 payment URIs, QR codes, batching user operations under the ERC-4337 standard, and relaying gas sponsorship; the Company does not intermediate in the underlying user-to-user transaction itself."
+      "body": "The Service is a non-custodial tool that facilitates transfers of Supported Tokens between user wallets. The Company never holds user funds. All transfers are executed on-chain via the user's own signature. The Company does not issue or operate the Supported Tokens, the underlying blockchains, or the wallet applications used by users. The Service consists of generating EIP-681 payment URIs, QR codes, batching user operations under the ERC-4337 standard, and relaying gas sponsorship; the Company does not intermediate in the underlying user-to-user transaction itself. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable from Customer to Merchant. In a payment through the Service, the price of goods and similar amounts are transferred directly from the Customer's wallet to the Merchant's designated wallet. In addition, the OpenPay service fee determined by the Company may be transferred separately to a wallet designated by the Company, depending on the choice or configuration of the Customer or Merchant. The Company may sponsor the network fee (gas) for relevant transactions using ERC-4337 Paymaster or similar mechanisms. Such gas sponsorship is a feature of the Service and does not constitute custody or management of user assets by the Company."
     },
     "article4": {
       "title": "Article 4 (Usage Environment)",
@@ -397,7 +397,7 @@
     },
     "article5": {
       "title": "Article 5 (Fees)",
-      "body": "Merchants agree to pay the Company an operating fee of 1.0% of each transaction amount (minimum 5 JPYC for JPYC transactions, minimum 0.05 USDC for USDC transactions). The fee is automatically deducted at the time of on-chain settlement. Network fees (gas) are paid either by the Customer or the Merchant depending on the choice made by the Merchant at QR generation time, and this choice is reflected in transactions through that QR. The Company may change the fee schedule with notice posted on the Service."
+      "body": "(1) The Company charges its standard OpenPay service fee as consideration for the Service, which includes payment processing, QR code generation, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. (2) The OpenPay service fee is, in principle, 1.0% of each transaction amount, subject to a minimum of 5 JPYC for JPYC transactions and 0.05 USDC for USDC transactions. (3) The OpenPay service fee is not deducted by the Company from Merchant sales proceeds. Instead, it is sent on-chain directly from the user's wallet to a wallet designated by the Company. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable from Customer to Merchant. (4) Actual network fees (gas) vary with blockchain congestion, underlying asset prices, third-party infrastructure specifications, and other factors. The OpenPay service fee may include the cost of gas sponsorship and the assumption of such volatility risk. (5) The gas estimate and OpenPay service fee displayed by the Company are not intended as a pass-through of actual costs. The Company will not seek additional payment, refund, or settle any difference between the displayed amount and the actual gas incurred, unless the Company expressly states otherwise. (6) The Merchant may, at the time of QR code issuance, be able to elect whether the OpenPay service fee and the gas equivalent are borne by the Customer or by the Merchant. If the Customer is selected, the Customer pays the OpenPay service fee in addition to the price of goods. If the Merchant is selected, the Customer pays only the price of goods, and the Merchant bears the OpenPay service fee. (7) The fee schedule, minimum fees, supported tokens, supported chains, and the availability and conditions of gas sponsorship may be changed at the Company's discretion."
     },
     "article6": {
       "title": "Article 6 (Irreversibility of Transactions)",
@@ -432,11 +432,11 @@
     "intro": "{company} (the \"Company\") establishes this Privacy Policy (the \"Policy\") regarding the handling of personal information in connection with the blockchain payment service \"{service}\" (the \"Service\"), in compliance with the Act on the Protection of Personal Information of Japan (the \"APPI\") and related laws.",
     "section1": {
       "title": "1. Information We Collect",
-      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us. We may use cookies or local storage, but currently do not assign cookie identifiers that directly identify individual users."
+      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us; (5) on-chain transaction information generated or referenced through the Service (such as transaction hash, sender wallet address, recipient wallet address, supported token, supported chain, transfer amount, OpenPay service fee, and payment status). Some of this information is publicly recorded on the blockchain and may not be deletable or hideable by the Company. We may use cookies or local storage, but currently do not assign cookie identifiers that directly identify individual users."
     },
     "section2": {
       "title": "2. Purposes of Use",
-      "body": "We use collected information for: (1) providing, operating, maintaining, and improving the Service; (2) responding to user inquiries; (3) statistical analysis and Service improvement; (4) detecting and preventing fraud, abuse, and unauthorized access; (5) responding to legal obligations; (6) other purposes ancillary to the above."
+      "body": "We use collected information for: (1) providing, operating, maintaining, and improving the Service; (2) responding to user inquiries; (3) statistical analysis and Service improvement; (4) detecting and preventing fraud, abuse, and unauthorized access; (5) responding to legal obligations; (6) other purposes ancillary to the above; (7) confirming payment status, calculating the OpenPay service fee, executing gas sponsorship, detecting fraud, and handling inquiries and incident investigations."
     },
     "section3": {
       "title": "3. Sharing with Third Parties and Service Providers",
@@ -463,7 +463,7 @@
   "Disclaimer": {
     "title": "Disclaimer",
     "effectiveDate": "Effective: {date}",
-    "intro": "This Disclaimer sets out the risks of using the blockchain payment service \"{service}\" (the \"Service\") operated by {company} (the \"Company\") and the matters for which the Company assumes no responsibility. Please read this Disclaimer together with the Terms of Service before using the Service.",
+    "intro": "This Disclaimer sets out the risks of using the blockchain payment service \"{service}\" (the \"Service\") operated by {company} (the \"Company\") and the matters for which the Company assumes no responsibility. Please read this Disclaimer together with the Terms of Service before using the Service. OpenPay does not hold customer payments or merchant sales proceeds. The price of goods and similar amounts are transferred directly to the merchant's wallet, and only the OpenPay service fee is transferred separately to a wallet designated by the Company.",
     "section1": {
       "title": "1. As-Is Provision",
       "body": "The Service is provided \"as is.\" The Company makes no express or implied warranty as to the accuracy, completeness, usefulness, fitness for a particular purpose, continuous availability, freedom from errors or vulnerabilities, or absence of malicious code in the Service."
@@ -487,6 +487,14 @@
     "section6": {
       "title": "6. Changes in Laws and Regulatory Risk",
       "body": "Crypto and blockchain-related laws and regulations may change in Japan and other jurisdictions. The Company is not liable for losses arising when the Service becomes wholly or partially unavailable due to changes in law, regulatory guidance, or compliance measures. Users are responsible for complying with laws applicable to their place of residence and use, and for confirming that their transactions through the Service are not illegal."
+    },
+    "section7": {
+      "title": "7. OpenPay Service Fee and Gas Sponsorship",
+      "body": "The OpenPay service fee is consideration for use of the Service, including payment processing, QR code generation, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. The OpenPay service fee is not a pass-through of actual network fees (gas); the Company does not refund, charge additional amounts, or settle the difference between the displayed amount and the actual gas incurred. Once an OpenPay service fee transfer is finalized on-chain, it cannot, in principle, be cancelled, refunded, or modified."
+    },
+    "section8": {
+      "title": "8. Use during the Alpha Phase",
+      "body": "The Service is currently in alpha. Unexpected defects, display errors, transfer failures, wallet connection issues, specification changes to supported chains and tokens, third-party infrastructure outages, and similar events may occur. Before using the Service for real transactions, you must send small test amounts and confirm the destination wallet, amount, supported token, supported chain, displayed fees, and the payment-completion flow."
     },
     "legalNote": "This Disclaimer applies together with the Terms of Service. In case of conflict, the Terms of Service prevail. The Japanese version of this Disclaimer prevails over this English reference version."
   },
@@ -528,12 +536,12 @@
         "value": "JPYC (an electronic payment instrument issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act), USDC (a stablecoin issued by Circle Internet Financial, Inc.), and other digital assets the Company may add from time to time. Supported tokens and chains may be added, changed, or suspended at the Company's discretion without prior notice."
       },
       "price": {
-        "label": "Service Fee",
-        "value": "Merchants are charged an operating fee of 1.0% of each transaction amount, subject to a minimum of 5 JPYC for JPYC transactions and 0.05 USDC for USDC transactions. Customers (payers) do not bear the Company's operating fee."
+        "label": "Service Fee (OpenPay Service Fee)",
+        "value": "1.0% of each transaction amount is charged as the OpenPay service fee, subject to a minimum of 5 JPYC for JPYC transactions and 0.05 USDC for USDC transactions. The OpenPay service fee covers payment processing, QR code generation, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. Whether the OpenPay service fee is borne by the Merchant or by the Customer may depend on the configuration chosen by the Merchant at QR code generation time."
       },
       "additionalFees": {
         "label": "Additional Costs",
-        "value": "(1) Network fees (gas) required for blockchain transactions. Whether the Customer or the Merchant bears the gas cost is determined by the Merchant's choice at QR generation time and is reflected in transactions through that QR. Gas amounts vary with network congestion. (2) Wallet application fees, if any, are governed by the terms of the user's chosen wallet provider."
+        "value": "(1) Network fees (gas): fees required for confirming transactions on the blockchain. The Company may sponsor gas using ERC-4337 Paymaster or similar mechanisms, in which case the user may be able to pay in JPYC (for JPYC payments) or USDC (for USDC payments) without separately holding native tokens such as POL or ETH. (2) Wallet application fees: governed by the terms of the wallet application chosen by the user. (3) Communication costs: internet connection charges and communication costs required to use the Service are borne by the user."
       },
       "serviceStartTiming": {
         "label": "Service Provision Timing",
@@ -541,11 +549,11 @@
       },
       "paymentTiming": {
         "label": "Payment Timing and Method",
-        "value": "The operating fee is automatically deducted from the transaction amount at the time of each on-chain transfer. The Company does not issue separate invoices, hold funds in escrow, or operate a prepaid charge system."
+        "value": "The OpenPay service fee is transferred directly on-chain from the user's wallet to a wallet designated by the Company at the time each transaction is executed. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable to Merchants. The Company does not issue separate invoices, hold funds in escrow, operate a prepaid charge system, or settle merchant sales."
       },
       "returnPolicy": {
         "label": "Refunds and Cancellations",
-        "value": "Due to the technical nature of blockchain, finalized transactions (including the operating fee) cannot be cancelled, refunded, or modified. Users must verify destination address, amount, token, and chain before submitting. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope."
+        "value": "Due to the technical nature of blockchain, finalized transfers (including transfers of the price of goods and transfers of the OpenPay service fee) cannot, in principle, be cancelled, refunded, or modified. The OpenPay service fee is consideration for use of the Service, including payment processing, gas sponsorship, and mitigation of network-fee volatility risk, and is, in principle, non-refundable after payment is completed. The Company also does not settle any difference between the displayed amount and the actual gas incurred. Before submitting, users must verify the destination address, amount, supported token, supported chain, OpenPay service fee, and bearer configuration. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope."
       },
       "environment": {
         "label": "Required Environment",
