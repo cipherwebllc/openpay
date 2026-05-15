@@ -226,7 +226,7 @@ describe('PaymentForm — 手数料明細 (default = gas=customer)', () => {
     expect(screen.getByText('1 USDC')).toBeInTheDocument();
   });
 
-  it('USDC 5, gas=0: 1.0% < MIN (0.05) → fee=0.05, merchant=4.95, customer=5', () => {
+  it('USDC 5, gas=0: 1.0% プロポーショナル → fee=0.05, merchant=4.95, customer=5', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=5`);
     setGasQuote('ready', 0n);
     render(<PaymentForm />);
@@ -926,21 +926,21 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     setGasQuote('ready', 500_000n); // gas 0.5 USDC
     render(<PaymentForm />);
 
-    // amount=0.3 USDC, fee=0.05 (MIN), gas=0.5 → 0.3 - 0.55 < 0 → underflow
+    // amount=0.3 USDC, fee=0.003 (1% 純プロポーショナル), gas=0.5 → 0.3 - 0.503 < 0 → underflow
     expect(screen.getByText(/店主受取が 0 になります/)).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /0\.3 USDC を支払う/ }),
     ).toBeDisabled();
   });
 
-  it('境界 ちょうど: amount == fee + gas → merchant=0 だが送信可能 (運営が満額)', () => {
-    setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=0.55`);
+  it('境界 ちょうど: amount * 0.99 == gas → merchant=0、underflow とみなす', () => {
+    setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=0.1`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
-    setGasQuote('ready', 500_000n);
+    setGasQuote('ready', 99_000n);
     render(<PaymentForm />);
-    // amount=0.55, fee=0.05, gas=0.5 → merchant=0、underflow とみなす
+    // amount=0.1, fee=0.001 (1%), gas=0.099 → merchant = 0.1 - 0.001 - 0.099 = 0
     expect(screen.getByText(/店主受取が 0 になります/)).toBeInTheDocument();
   });
 

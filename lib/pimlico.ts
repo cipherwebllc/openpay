@@ -2,7 +2,7 @@
 //
 // 2 種類の Paymaster を deployment.paymasterMode に応じて使い分ける:
 //   - JPYC (Polygon): Sponsorship (Verifying) Paymaster
-//       運営が POL ガスを肩代わり (5 JPYC フロアで黒字)
+//       運営が POL ガスを肩代わり (gas 見積バッファで採算確保、MIN_FEE は撤廃)
 //   - USDC (Base / Arbitrum / Optimism / Polygon): ERC20 Paymaster
 //       顧客が USDC でガスを支払う (ネイティブ ETH/POL 立替えの赤字リスク回避)
 //

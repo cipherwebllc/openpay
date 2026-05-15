@@ -776,16 +776,15 @@ export function calcCheckoutTotal(
 
 // 通貨ごとの既定 preset (URL に preset 指定がない時に使う)。
 //
-// 設計基準: 最小 preset の実効手数料率が 5% 以下になる金額帯を選ぶ。
-// 旧値 (JPYC 100 / USDC 1) はフロア手数料 (5 JPYC / 0.05 USDC) に対し
-// 実効 5% / 5% となり、ユーザに「割高」シグナルを与えてしまっていた。
-//
-//   JPYC 300:  5 JPYC fee →  1.7%   USDC 5:  0.05 USDC fee → 1.0%
-//   JPYC 1000: 10 JPYC fee →  1.0%  USDC 20: 0.2 USDC fee → 1.0%
-//   JPYC 3000: 30 JPYC fee →  1.0%  USDC 50: 0.5 USDC fee → 1.0%
+// 設計基準: tip 文脈で違和感のない常用額レンジ (数百〜数千 JPYC / 数〜数十 USDC)。
+// MIN_FEE = 5 JPYC / 0.05 USDC のフロアが存在した時代 (〜2026-05-15) は、
+// 最小 preset で実効手数料率が 5% 程度になることを避ける目的で 300 JPYC / 5 USDC
+// 起点に設定していた。MIN_FEE 撤廃 (2026-05-16) 後はフロア要因の制約は消えたが、
+// preset 額自体は tip としての常用額レンジを変更する積極的な理由がないため据置。
 //
 // クリエイターは TipEmbedGenerator で任意の preset を上書き可能、ファンも
-// custom amount で 100 JPYC / 1 USDC のようなカジュアル tip を引き続き送れる。
+// custom amount で 100 JPYC / 1 USDC のようなカジュアル tip を引き続き送れる
+// (純 1.0% プロポーショナルのため、100 JPYC tip でも fee は 1 JPYC のみ)。
 export const DEFAULT_TIP_PRESETS: Record<TokenSymbol, string[]> = {
   jpyc: ['300', '1000', '3000'],
   usdc: ['5', '20', '50'],

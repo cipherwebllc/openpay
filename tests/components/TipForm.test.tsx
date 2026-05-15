@@ -186,9 +186,9 @@ describe('TipForm — 金額選択 (sponsorship gas=0 で計算)', () => {
 
   it('既定で最初の preset が選択され、明細に反映 (JPYC 100)', () => {
     render(<TipForm params={JPYC_PARAMS} />);
-    // 100 JPYC preset, MIN_FEE 5 → creator=95 (preset-fee), fee=5, gas=0, fan pays 100
-    expectBreakdownRow('クリエイター受取', '95 JPYC');
-    expectBreakdownRow(/運営手数料/, '5 JPYC');
+    // 100 JPYC preset, fee=1 (1% プロポーショナル), creator=99, gas=0, fan pays 100
+    expectBreakdownRow('クリエイター受取', '99 JPYC');
+    expectBreakdownRow(/運営手数料/, '1 JPYC');
     expectBreakdownRow('あなたの支払額', '100 JPYC');
   });
 
@@ -218,7 +218,7 @@ describe('TipForm — 金額選択 (sponsorship gas=0 で計算)', () => {
     render(<TipForm params={USDC_PARAMS} />);
     await user.type(screen.getByPlaceholderText('例: 7.50'), '50');
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
-    // 5 USDC preset, fee=0.05 (MIN) → creator=4.95, fan pays 5
+    // 5 USDC preset, fee=0.05 (1% × 5 = 0.05) → creator=4.95, fan pays 5
     expectBreakdownRow('クリエイター受取', '4.95 USDC');
     expectBreakdownRow(/運営手数料/, '0.05 USDC');
     expectBreakdownRow('あなたの支払額', '5 USDC');
@@ -597,9 +597,9 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('ready', 300_000n); // 0.3 USDC
     render(<TipForm params={USDC_PARAMS} />);
 
-    // preset 1 USDC, fee=0.05, creator=0.95, gas=0.3, customer = 1.3 (= preset + gas)
-    expectBreakdownRow('クリエイター受取', '0.95 USDC');
-    expectBreakdownRow(/運営手数料/, '0.05 USDC');
+    // preset 1 USDC, fee=0.01 (1% プロポーショナル), creator=0.99, gas=0.3, customer = 1.3 (= preset + gas)
+    expectBreakdownRow('クリエイター受取', '0.99 USDC');
+    expectBreakdownRow(/運営手数料/, '0.01 USDC');
     expectBreakdownRow(/ネットワーク手数料/, '最大 0.3 USDC');
     expectBreakdownRow('あなたの支払額', '1.3 USDC');
   });
@@ -744,10 +744,10 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     const body = JSON.parse(
       (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
     );
-    // preset 1 USDC, gas 0.3 → customerPays = 1.3, merchant = 0.95, fee = 0.05
+    // preset 1 USDC, gas 0.3 → customerPays = 1.3, merchant = 0.99, fee = 0.01 (1%)
     expect(body.customerPays).toBe('1300000');
-    expect(body.merchantAmount).toBe('950000');
-    expect(body.feeAmount).toBe('50000');
+    expect(body.merchantAmount).toBe('990000');
+    expect(body.feeAmount).toBe('10000');
     fetchSpy.mockRestore();
   });
 });

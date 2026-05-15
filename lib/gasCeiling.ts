@@ -1,6 +1,9 @@
 // チェーン別の maxFeePerGas 上限 (gwei)。これを超える gas 価格で UserOp を
-// 送ると、フロア手数料 (5 JPYC / 0.05 USDC) では赤字になる可能性が
-// 高いため、送信前に弾いてユーザに「ネットワーク混雑、後で再試行」を返す。
+// 送ると、運営手数料 (1.0% 純プロポーショナル) + gas 見積バッファでも赤字に
+// なる可能性が高いため、送信前に弾いてユーザに「ネットワーク混雑、後で再試行」
+// を返す。
+// (MIN_FEE = 5 JPYC / 0.05 USDC のフロアは 2026-05-16 に撤廃済、現在は gas
+// estimate のバッファ係数だけが運営損益のクッション。)
 //
 // 値の根拠は Pimlico の `fast` tier 実測ベース (priority fee を含む quote)。
 // L2 については「実 base fee」ではなく「Pimlico fast quote」を基準に置く点
@@ -12,8 +15,9 @@
 //     250 gwei 上乗せして 500〜700 gwei を quote する。400 gwei では実質
 //     常時 block されるため、現実に合わせて 1000 gwei に拡張。
 //     1 tx あたり最大 〜10 JPY (1000 gwei × 400k gas × POL=60 JPY) の運営
-//     赤字を許容する代わりに送金が通る状態を担保する。中期では floor fee
-//     を 5 → 10 JPYC に上げて P&L 黒字化する想定 (別 issue)。
+//     赤字を許容する代わりに送金が通る状態を担保する。MIN_FEE 廃止
+//     (2026-05-16) 後は gas estimate のバッファ (POL_JPYC_RATE × overhead 係
+//     数) を厚めに取ることでクッションを確保する設計に移行。
 //     1500+ gwei 帯は異常な spike として block 維持。
 //   - Base 10 gwei (USDC erc20 paymaster mode、顧客負担):
 //     Pimlico fast の Base mainnet 平常時 quote が 1〜3 gwei、混雑時 5〜10

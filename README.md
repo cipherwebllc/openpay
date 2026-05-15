@@ -262,7 +262,7 @@ X402_PRICE=0.5
 | USDC (native) | **Arbitrum One** | ETH | ✅ 採用 | Circle 公式 native USDC (`0xaf88…5831`)。L2 で最大規模の TVL、bridged USDC.e と区別される native 版 |
 | USDC (native) | **Optimism** | ETH | ✅ 採用 | Circle 公式 native USDC (`0x0b2C…Ff85`)。Superchain エコシステム中心の決済チェーン |
 | USDC (native) | **Polygon PoS** | POL | ✅ 採用 | Circle 公式 native USDC (`0x3c49…3359`)。JPYC ユーザと同じ Polygon 上で USDC を選択可能 |
-| JPYC | Ethereum | ETH | ❌ 不採用 | ガス代が決済額に対して高すぎる (5 JPYC の運営手数料 + 数百円 gas) |
+| JPYC | Ethereum | ETH | ❌ 不採用 | ガス代が決済額に対して高すぎる (1% 運営手数料 + 数百円 gas) |
 | JPYC | Avalanche | AVAX | ❌ 不採用 (一旦様子見) | Avalanche 上の JPYC は **DEX ペアの流動性がほぼゼロ**。手数料を AVAX に変換するルートがクロスチェーンになり、ガス調達が常に赤字。日本のリテールユーザの利用が限定的 |
 | JPYC | Base / Arbitrum / Optimism | ─ | ❌ 発行なし | JPYC v3 はこれらのチェーン上に **発行されていない**。JPYC 公式が他チェーンへ展開した場合のみ追加検討 |
 | USDC (bridged) | 各 chain (USDC.e) | (各 chain ガス) | ❌ 不採用 | bridged 版は Pimlico ERC20 Paymaster の対応が不安定。OpenPay は **native USDC のみ** 対応 |
@@ -274,7 +274,7 @@ X402_PRICE=0.5
 3. 運営は定期的に **JPYC → POL** に swap して Pimlico 残高を補充する必要がある
    - JPYC/POL の DEX ペアは流動性が薄いため、実務的には **JPYC → USDC → POL** の 2-hop swap (QuickSwap / Uniswap v3 on Polygon) が現実的
    - 自動化案: OpenZeppelin Defender Sentinel / cron + viem による定期 swap
-4. JPYC 1.0% / 5 JPYC の料率は純マージンとして設定 (gas は別建て徴収)。`NEXT_PUBLIC_POL_JPYC_RATE` で POL→JPYC 換算レートを実勢に合わせて月次で見直してください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され、運営の POL 立替不足を防ぐ仕様 (詳細は「Gas price ceiling」節)
+4. JPYC 1.0% の料率は純マージンとして設定 (gas は別建て徴収、MIN_FEE は 2026-05-16 に撤廃)。`NEXT_PUBLIC_POL_JPYC_RATE` で POL→JPYC 換算レートを実勢に合わせて月次で見直してください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され、運営の POL 立替不足を防ぐ仕様 (詳細は「Gas price ceiling」節)
 
 ### 運用上の含意 (USDC / 全 4 chain)
 
@@ -346,7 +346,7 @@ openpay/
 │   ├── env.ts                       # 環境変数の単一参照点
 │   ├── chains.ts                    # mainnet/testnet 切替
 │   ├── tokens.ts                    # JPYC / USDC 定義
-│   ├── fee.ts                       # チェーン別料率 / MIN_FEE 計算
+│   ├── fee.ts                       # 1.0% プロポーショナル運営手数料計算 (両 token 共通)
 │   ├── gasCeiling.ts                # チェーン別 gas 上限 / GasCongestedError
 │   ├── url.ts                       # /pay /tip URL ビルド/パース
 │   ├── storage.ts                   # LocalStorage helpers
@@ -493,7 +493,7 @@ UI は日本語 (default) と英語の 2 言語対応。`next-intl` v4 + middlew
 4. ブログ・ポートフォリオ・配信ページの HTML に貼り付け
 5. ファンが iframe 内のボタンをクリック → ウォレット接続 → preset/カスタム額で送信
 
-Tip widget はクリエイターが preset 額をそのまま受け取り、ファンが運営手数料 + ネットワーク手数料 (見積) を上乗せして支払います (内訳・MIN_FEE は通常決済と同じ)。
+Tip widget はクリエイターが preset 額をそのまま受け取り、ファンが運営手数料 + ネットワーク手数料 (見積) を上乗せして支払います (内訳は通常決済と同じ。料率 1.0% 純プロポーショナル、最低手数料なし)。
 
 ## 手数料の計算
 
@@ -523,10 +523,10 @@ QR 発行時に店主が **gas 相当額の負担者** を選択 (= OpenPay 利�
 `amount < fee + gasQuote` (gas=merchant) または `amount < fee` (gas=customer) で店主受取が 0 になるため、PaymentForm で送信を block して運営の赤字 + on-chain 失敗を未然防止。Tip widget は preset セマンティクス維持のため `gas=customer` 固定 (creator 受取 = preset - fee、ファン支払 = preset + gas)。
 
 ### 料率 (`lib/fee.ts`)
-| token | 料率 | MIN_FEE | 備考 |
+| token | 料率 | 最低手数料 | 備考 |
 |---|---|---|---|
-| JPYC (Polygon) | 1.0% | 5 JPYC | 純マージン (両 mode 共通) |
-| USDC (Base / Arbitrum / Optimism / Polygon) | 1.0% | 0.05 USDC | 純マージン (両 mode 共通) |
+| JPYC (Polygon) | 1.0% | なし | 純マージン (両 mode 共通)、MIN_FEE は 2026-05-16 に撤廃 |
+| USDC (Base / Arbitrum / Optimism / Polygon) | 1.0% | なし | 純マージン (両 mode 共通)、MIN_FEE は 2026-05-16 に撤廃 |
 
 ### ネットワーク手数料の徴収経路
 | paymaster | gas を払う主体 | 経路 | 運営の精算 |
@@ -685,7 +685,7 @@ USDC は Base / Arbitrum / Optimism / Polygon の 4 chain で **ERC20 Paymaster 
 **deploy 直後 (最初の 1 件)**
 
 6. `NETWORK_ENV=mainnet` で deploy
-7. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&amount=1.0` を実行 (1 USDC + 運営手数料 0.05 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
+7. **運営自身のウォレットで** `/pay?to=<運営テストアドレス>&token=usdc&amount=1.0` を実行 (1 USDC + 運営手数料 0.01 USDC + gas 見積 ≈ 0.05〜2 USDC、最小 USDC 残高 5 USDC 程度推奨)
 8. 確認項目:
    - 「ネットワーク手数料 (見積)」行に `最大 X.XX USDC` が表示されること
    - approve トランザクション (paymaster コントラクト宛) が UserOp の calls 先頭に含まれること (BaseScan で内部 tx を確認)
@@ -852,7 +852,7 @@ npm run test:run -- --coverage   # カバレッジ計測 (v8 reporter)
 
 | 層 | 対象 | テスト方針 |
 | --- | --- | --- |
-| `lib/fee.ts` | 料率 1.0% / MIN_FEE (5 JPYC / 0.05 USDC) / 境界 (proportional == MIN, amount < MIN) / amount=0 / 大数 | 純粋関数 — 実コードのみ |
+| `lib/fee.ts` | 料率 1.0% プロポーショナル (両 token 共通、MIN_FEE 撤廃済) / 境界 (1% 切捨て、amount=0、proportional==0) / 大数 | 純粋関数 — 実コードのみ |
 | `lib/gasCeiling.ts` | チェーン別 gas 上限 (mainnet/testnet) / 上限境界 / GasCongestedError / env 上書き | 純粋関数 — 実コードのみ |
 | `lib/url.ts` | /pay と /tip 両方の build / parse / sanitize (制御文字除去 / 長さ切詰 / preset 検証) / roundtrip | 純粋関数 — 実コードのみ |
 | `lib/tokens.ts` | decimals / chainId / env override / フォールバック | 実コード |

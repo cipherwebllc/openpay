@@ -62,8 +62,15 @@ export function useBatchPayment(
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
       }
-      // calcBreakdown は常に >= MIN_FEE を返すので通常パスでは到達しない。
-      // 呼出元の bug / フォーク版での fee=0 改竄に対する一線目の防御。
+      // MIN_FEE 廃止後 (2026-05-16) も `feeAmount > 0` は不変条件として温存。
+      // 通常パスでの到達:
+      //   - USDC erc20 paymaster: feeAmount = fee。amount × 1% が整数除算で 0
+      //     になる極小金額 (< 100 wei = 0.0001 USDC) のときのみ 0 になり得る。
+      //     UI 側で input min が桁数を制限しているため通常は到達しない。
+      //   - JPYC sponsorship: feeAmount = fee + gasInJpyc。gasInJpyc が常に > 0
+      //     なので fee=0 でも合計 > 0。実質ここで block される唯一のシナリオは
+      //     フォーク版での `gasInJpyc=0 && fee=0` 改竄や URL/state 改竄経路。
+      // 一線目の防御として温存 (sponsorship 濫用防御 / 運営収益確保)。
       if (params.feeAmount <= 0n) {
         throw new Error(
           'feeAmount > 0 が必須です (運営収益確保 / sponsorship 濫用防御)',

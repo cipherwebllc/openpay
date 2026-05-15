@@ -5,11 +5,10 @@ import {
   calcDirectBreakdown,
   calcFee,
   calcSplitBreakdown,
-  MIN_FEE,
 } from '@/lib/fee';
 
 describe('calcFee', () => {
-  describe('USDC (6 decimals, 1.0% / MIN_FEE = 50_000 = 0.05 USDC)', () => {
+  describe('USDC (6 decimals, 1.0% 純プロポーショナル)', () => {
     it('amount = 0 returns 0', () => {
       expect(calcFee(0n, 'usdc')).toBe(0n);
     });
@@ -18,22 +17,28 @@ describe('calcFee', () => {
       expect(calcFee(-1n, 'usdc')).toBe(0n);
     });
 
-    it('1.0% < MIN: returns MIN', () => {
-      expect(calcFee(1_000_000n, 'usdc')).toBe(50_000n);
+    it('1 USDC: fee = 0.01 USDC (= 1.0%)', () => {
+      expect(calcFee(1_000_000n, 'usdc')).toBe(10_000n);
     });
 
-    it('boundary where 1.0% == MIN: returns MIN', () => {
-      expect(calcFee(4_999_999n, 'usdc')).toBe(50_000n);
+    it('5 USDC: fee = 0.05 USDC (旧 MIN_FEE 境界、計算上一致)', () => {
       expect(calcFee(5_000_000n, 'usdc')).toBe(50_000n);
-      expect(calcFee(5_000_100n, 'usdc')).toBe(50_001n);
     });
 
-    it('1.0% > MIN: returns 1.0%', () => {
+    it('100 USDC: fee = 1.0 USDC', () => {
       expect(calcFee(100_000_000n, 'usdc')).toBe(1_000_000n);
     });
 
-    it('rounds 1.0% down (integer division)', () => {
+    it('rounds down (integer division)', () => {
+      // 100.0001 USDC -> 1.000001 USDC fee
       expect(calcFee(100_000_100n, 'usdc')).toBe(1_000_001n);
+    });
+
+    it('極小 amount で proportional が 0 になる境界 (< 100 wei)', () => {
+      // 99 wei USDC × 100 / 10000 = 0 (整数除算で消える)
+      expect(calcFee(99n, 'usdc')).toBe(0n);
+      // 100 wei = 0.0001 USDC × 1% = 1 wei
+      expect(calcFee(100n, 'usdc')).toBe(1n);
     });
 
     it('handles very large amounts without overflow', () => {
@@ -42,25 +47,29 @@ describe('calcFee', () => {
     });
   });
 
-  describe('JPYC (18 decimals, 1.0% / MIN_FEE = 5 JPYC)', () => {
+  describe('JPYC (18 decimals, 1.0% 純プロポーショナル)', () => {
     const ONE = 10n ** 18n;
 
-    it('1% < MIN: returns MIN', () => {
-      expect(calcFee(100n * ONE, 'jpyc')).toBe(5n * ONE);
+    it('50 JPYC: fee = 0.5 JPYC (旧 MIN_FEE=5 から大幅減)', () => {
+      expect(calcFee(50n * ONE, 'jpyc')).toBe((50n * ONE) / 100n);
     });
 
-    it('boundary 500 JPYC: 1% == MIN', () => {
+    it('100 JPYC: fee = 1 JPYC', () => {
+      expect(calcFee(100n * ONE, 'jpyc')).toBe(ONE);
+    });
+
+    it('500 JPYC: fee = 5 JPYC (旧 MIN_FEE 境界、計算上一致)', () => {
       expect(calcFee(500n * ONE, 'jpyc')).toBe(5n * ONE);
     });
 
-    it('10000 JPYC: 1% = 100 JPYC > MIN', () => {
+    it('10000 JPYC: fee = 100 JPYC', () => {
       expect(calcFee(10000n * ONE, 'jpyc')).toBe(100n * ONE);
     });
-  });
 
-  it('MIN_FEE table is exported correctly', () => {
-    expect(MIN_FEE.jpyc).toBe(5n * 10n ** 18n);
-    expect(MIN_FEE.usdc).toBe(50_000n);
+    it('極小 amount で proportional が 0 になる境界 (< 100 wei)', () => {
+      expect(calcFee(99n, 'jpyc')).toBe(0n);
+      expect(calcFee(100n, 'jpyc')).toBe(1n);
+    });
   });
 });
 
@@ -82,11 +91,11 @@ describe('calcBreakdown — gas=customer mode (default)', () => {
     expect(r.feeAmount).toBe(1_000_000n);
   });
 
-  it('USDC 1, gas=0: 1% < MIN → fee=0.05, merchant=0.95, customer=1', () => {
+  it('USDC 1, gas=0: fee=0.01, merchant=0.99, customer=1 (旧 MIN_FEE 撤廃の効果)', () => {
     const r = calcBreakdown(1_000_000n, 'usdc');
     expect(r.customerPays).toBe(1_000_000n);
-    expect(r.merchantReceives).toBe(950_000n);
-    expect(r.feeAmount).toBe(50_000n);
+    expect(r.merchantReceives).toBe(990_000n);
+    expect(r.feeAmount).toBe(10_000n);
   });
 
   it('amount = 0: all zero', () => {
@@ -104,18 +113,19 @@ describe('calcBreakdown — gas=customer mode (default)', () => {
     expect(r.feeAmount).toBe(10n * ONE);
   });
 
-  it('JPYC 100, gas=2: merchant=95, fee=5 (MIN), customer=102', () => {
+  it('JPYC 100, gas=2: merchant=99, fee=1, customer=102 (旧: fee=5 → 新: fee=1)', () => {
     const ONE = 10n ** 18n;
     const r = calcBreakdown(100n * ONE, 'jpyc', 'customer', 2n * ONE);
     expect(r.customerPays).toBe(102n * ONE);
-    expect(r.merchantReceives).toBe(95n * ONE);
-    expect(r.feeAmount).toBe(5n * ONE);
+    expect(r.merchantReceives).toBe(99n * ONE);
+    expect(r.feeAmount).toBe(ONE);
   });
 
-  it('underflow: amount < fee → merchant = 0 (フロア)', () => {
-    const r = calcBreakdown(30_000n, 'usdc');
-    expect(r.merchantReceives).toBe(0n);
-    expect(r.feeAmount).toBe(50_000n);
+  it('amount = 99 wei (proportional が 0): fee=0, merchant=amount (underflow なし)', () => {
+    const r = calcBreakdown(99n, 'usdc');
+    expect(r.feeAmount).toBe(0n);
+    expect(r.merchantReceives).toBe(99n);
+    expect(r.customerPays).toBe(99n);
   });
 });
 
@@ -135,19 +145,22 @@ describe('calcBreakdown — gas=merchant mode (店主吸収)', () => {
     expect(r.merchantReceives).toBe(99_000_000n);
   });
 
-  it('USDC 1, gas=0.5: customer=1, merchant=0.45 (1.0 - 0.05 - 0.5)', () => {
+  it('USDC 1, gas=0.5: customer=1, merchant=0.49 (1.0 - 0.01 fee - 0.5 gas)', () => {
     const r = calcBreakdown(1_000_000n, 'usdc', 'merchant', 500_000n);
-    expect(r.merchantReceives).toBe(450_000n);
+    expect(r.merchantReceives).toBe(490_000n);
   });
 
   it('境界: amount = fee + gas → merchant = 0', () => {
-    const r = calcBreakdown(550_000n, 'usdc', 'merchant', 500_000n);
+    // fee = 1% × amount、amount = X、gas = G として、X - X*0.01 - G = 0 ⇔ X*0.99 = G
+    // gas=500_000 wei に対して amount = 505_051 wei で merchant ≈ 0 (整数除算誤差含む)
+    // ただし 100_000 wei × 1% = 1000 wei、merchant = 100_000 - 1000 - 500_000 < 0 → 0
+    const r = calcBreakdown(100_000n, 'usdc', 'merchant', 500_000n);
     expect(r.merchantReceives).toBe(0n);
-    expect(r.customerPays).toBe(550_000n);
+    expect(r.customerPays).toBe(100_000n);
   });
 
-  it('underflow: amount < fee + gas → merchant = 0 (フロア)', () => {
-    const r = calcBreakdown(300_000n, 'usdc', 'merchant', 500_000n);
+  it('underflow: amount < gas → merchant = 0 (gas が dominant)', () => {
+    const r = calcBreakdown(100_000n, 'usdc', 'merchant', 500_000n);
     expect(r.merchantReceives).toBe(0n);
   });
 
@@ -232,6 +245,16 @@ describe('calcSplitBreakdown — gas=customer (default)', () => {
     expect(r.recipients[1].amount).toBe(495n * ONE);
   });
 
+  it('USDC 1, split B:50: distributable=0.99 (旧 MIN_FEE 撤廃で 0.95 → 0.99)', () => {
+    const r = calcSplitBreakdown(1_000_000n, 'usdc', A, [
+      { to: B, percent: 50 },
+    ]);
+    expect(r.feeAmount).toBe(10_000n);
+    expect(r.recipients[0].amount + r.recipients[1].amount).toBe(990_000n);
+    expect(r.recipients[0].amount).toBe(495_000n);
+    expect(r.recipients[1].amount).toBe(495_000n);
+  });
+
   it('amount = 0: customer も recipients も 0', () => {
     const r = calcSplitBreakdown(0n, 'usdc', A, [{ to: B, percent: 50 }]);
     expect(r.customerPays).toBe(0n);
@@ -273,9 +296,9 @@ describe('calcSplitBreakdown — gas=merchant', () => {
     expect(r.recipients[0].amount + r.recipients[1].amount).toBe(98_500_000n);
   });
 
-  it('underflow + split: 全 recipient が 0', () => {
+  it('underflow + split: 全 recipient が 0 (amount < gas)', () => {
     const r = calcSplitBreakdown(
-      300_000n,
+      100_000n,
       'usdc',
       A,
       [{ to: B, percent: 50 }],

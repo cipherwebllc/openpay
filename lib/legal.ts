@@ -16,10 +16,10 @@ export const LEGAL_ENTITY = {
   siteUrl: 'https://open-pay.jp',
 
   // 施行日 (各文書共通でサービス開始日に揃える)
-  termsEffectiveDate: '2026-05-12',
+  termsEffectiveDate: '2026-05-16',
   privacyEffectiveDate: '2026-05-12',
   disclaimerEffectiveDate: '2026-05-12',
-  tokuteiEffectiveDate: '2026-05-14',
+  tokuteiEffectiveDate: '2026-05-16',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,

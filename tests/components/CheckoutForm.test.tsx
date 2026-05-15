@@ -322,16 +322,19 @@ describe('CheckoutForm — 送信', () => {
     ).toBeEnabled();
   });
 
-  it('合計 < fee の merchant underflow → 送信 block + エラー文言', () => {
+  it('gas=merchant で amount < gas の merchant underflow → 送信 block + エラー文言', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(1_000_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
-    // フロア手数料 0.05 USDC > 合計 0.04 USDC で merchant=0 になる
+    // MIN_FEE 撤廃後は 1% プロポーショナル単独では underflow しない
+    // (fee = amount × 1% ≤ amount のため必ず merchant > 0)。
+    // gas=merchant モードで amount (0.04) < gas (0.1) のとき merchant = 0 になる。
     render(
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
+          gas: 'merchant',
           items: [{ name: 'Cheap', qty: 1, price: '0.04' }],
         }}
       />,
