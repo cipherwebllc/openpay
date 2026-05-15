@@ -806,15 +806,15 @@ upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で overri
 
 ### 11. Performance / 負荷測定
 
-現状取得済みは **production build 出力の bundle サイズのみ** (`scripts/check-bundle-budget.mjs` で First Load JS の予算チェック)。以下は **未実施**:
-
-| 項目 | 状態 | 必要なケース |
+| 項目 | 状態 | 詳細 |
 |---|---|---|
-| Lighthouse score (mobile) | 未取得 | mainnet 切替前に `lighthouse` CI で performance / a11y / SEO を計測。閾値は `.lighthouserc.json` で設定 |
-| 4G エミュレーション下の TTI / LCP | 未測定 | `/[locale]/pay` の First Load JS 381 kB は SPA としては重め。3G/4G で実測すべき |
-| 同時アクセス負荷 | 未実施 | 静的 SSG が中心なので Vercel CDN で吸収される想定だが、未検証 |
+| **First Load JS bundle 予算** | ✅ 計測 | `scripts/check-bundle-budget.mjs` で CI ブロッキング |
+| **Lighthouse score (desktop)** | ✅ CI で常時計測 | `.lighthouserc.json` + `.github/workflows/lighthouse.yml`。`/ja` `/en` `/ja/pay` `/ja/tip` の 4 URL、numberOfRuns=2、`temporary-public-storage` にアップロード。assertion: `categories:performance >=0.7 (warn)`, `categories:accessibility >=0.9 (error)`, `categories:best-practices >=0.85 (warn)`, `categories:seo >=0.9 (warn)`、加えて `render-blocking-resources` (maxLength=3) と `legacy-javascript` (maxLength=0) を items 軸で警告化 |
+| **Lighthouse score (mobile / 4G)** | ⚠ 未実施 | desktop preset のみ。`/[locale]/pay` の First Load JS 381 kB は 4G で重い可能性あり。mainnet 切替前に `lighthouse --preset=mobile --throttling-method=devtools` を手動 1 回走らせて baseline 化推奨 |
+| **同時アクセス負荷 (k6 / autocannon)** | ⚠ 未実施 | 静的 SSG + Vercel CDN で吸収される想定。alpha では unverified だが、page bundle が CDN edge から配信されるため初期負荷は問題になりにくい。mainnet GMV 連動で必要性が出たら k6 で `/api/log/payment` POST を中心に負荷試験 |
+| **production HTTP smoke (ad-hoc)** | ✅ 取得 | curl 計測で TTFB 170ms / total 187ms / 80 KB (2026-05-16 時点) — load test ではなく cold/warm 1 件の snapshot |
 
-これらは MVP として deploy 後に実測 → 必要なら `dynamic import` / chunk splitting で改善する。前回 production review で「✅」とした評価は **build 通過 + サイズ予算内 という意味の ✅** であり、実測パフォーマンスは別途検証が必要。
+⚠ 項目は **MVP 段階では deploy を block しない** 運用判断、ただし mainnet GMV の本格 push 前に baseline を確定させる。
 
 ---
 
@@ -825,6 +825,19 @@ upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で overri
 - **testnet の JPYC**: Polygon Amoy には公式の JPYC が存在しないため、テスト時は `NEXT_PUBLIC_JPYC_TESTNET_ADDRESS` で独自にデプロイした ERC20 を指定してください
 - **API Key の露出**: `NEXT_PUBLIC_*` はクライアントへ展開されるため、本番では必ず Pimlico ダッシュボード側で Origin 制限を設定してください
 - **Sponsorship Policy のレート制御**: スポンサー残高が枯渇すると UserOperation が失敗します。Pimlico ダッシュボードで残高アラートを設定することを推奨します
+
+### 手動 / 外部依存の未完項目チェックリスト (mainnet 本格利用前)
+
+コード自動化できない手動 / 実機 / 外部測定が必要な項目を、ステータスと共に集約。`☐` を `☑` に切り替える際は CHANGELOG にも反映してください。
+
+- ☐ **Coinbase Wallet ERC-7702 testnet 1 件送金成功確認** — Polygon Amoy or Base Sepolia で Coinbase Wallet ↔ `/pay?to=...&token=usdc&amount=1` の実送金 1 件。失敗時は §特徴 の対応 wallet 行に「Coinbase Wallet 未対応」と明記
+- ☐ **USDC mainnet ERC20 Paymaster `postOp` 実 wallet 検証** — Base mainnet で実 funded USDC + ERC-7702 対応ウォレットで `/pay?token=usdc&chain=base&amount=1` を完走、`postOp` での USDC gas 自動徴収を `txHash` の internal call から確認。詳細手順: § 4-1
+- ☐ **JPYC EIP-712 `version="1"` 仮定の signature 通過確認** — Polygon Amoy で JPYC v3 (`0xE7C3...3c29`) の x402 / `transferWithAuthorization` を 1 件 signature 検証 (現在 OpenZeppelin default 仮定を未検証で採用中)
+- ☐ **Sentry alert rule をダッシュボードで作成** — `payment.failed > 5%/h` (paymaster 関連エラー条件付き) / `smart-account.init-failed > 10/h` / `x402.middleware.error > 10/h` の 3 ルール (詳細・閾値は § Vercel 運用ハードニング / § 即 rollback トリガー)
+- ☐ **Pimlico balance alert (CI workflow + Slack)** — `.github/workflows/pimlico-balance.yml` は scheduled 動作するが Secrets 未設定だと graceful skip。Pimlico API Key + 残高閾値 + 通知先 webhook を GitHub repo secrets に投入
+- ☐ **Lighthouse mobile / 4G エミュレーション baseline** — § 11 Performance の通り、手動 1 回 mobile preset で計測して `/[locale]/pay` の 4G TTI / LCP を記録 (mainnet GMV 拡大前)
+- ☐ **同時アクセス負荷試験 (k6 / autocannon)** — § 11 Performance の通り、alpha では deferred。GMV 連動で必要性が出た時に `/api/log/payment` 中心に実施
+- ☐ **Vercel Spending Cap = $0 の維持確認** — § Vercel 運用ハードニング。設定変更通知が Vercel から来ていないことを月次で確認
 
 ### 既知の transitive 脆弱性 (`npm audit`)
 
