@@ -142,8 +142,8 @@ describe('Legal pages', () => {
       const body = section7Heading.nextElementSibling;
       expect(body?.textContent).toMatch(/OpenPay 利用手数料/);
       expect(body?.textContent).toMatch(/gas 肩代わり/);
-      expect(body?.textContent).toMatch(/差額.*精算|差額精算/);
-      expect(body?.textContent).toMatch(/取消・返金・修正|取消.*返金/);
+      expect(body?.textContent).toMatch(/差額精算/);
+      expect(body?.textContent).toMatch(/取消.*返金.*修正/);
     });
 
     it('section 8 (アルファ版) の本文に少額テスト送信の指示', () => {
@@ -154,7 +154,7 @@ describe('Legal pages', () => {
       });
       const body = section8Heading.nextElementSibling;
       expect(body?.textContent).toMatch(/アルファ版/);
-      expect(body?.textContent).toMatch(/少額.*テスト送信|テスト送信.*少額/);
+      expect(body?.textContent).toMatch(/少額.*テスト送信/);
     });
 
     it('intro に「お客様の支払い・店舗売上を預からない」ノンカストディ宣言が含まれる', () => {
@@ -253,12 +253,10 @@ describe('Legal pages', () => {
       const main = screen.getByRole('main');
       // ノンカストディ設計の明文化 — 「取引金額から自動的に控除」(預かり前提) でないこと
       expect(main.textContent).toMatch(/当社指定ウォレットへ直接送金/);
-      // 「受領・保管・管理 (の言葉) + 否定形 ものではありません」の連結を必須化。
-      // 単語の存在だけ assert すると、文意が反転した change が CI を素通りするため
-      // (例: 「〜を受領、保管、管理します」に書き換わっても旧 regex なら pass した)。
-      expect(main.textContent).toMatch(
-        /受領、?\s*保管、?\s*管理[^。]*ものではありません/,
-      );
+      // 「受領・保管・管理」と否定形「ものではありません」が同一文に並ぶことを要求。
+      // 単語の存在だけ見ると「受領、保管、管理します」のような affirmation 改変で
+      // CI が素通りするため、否定形までを regex に含めて意味反転を検出する。
+      expect(main.textContent).toMatch(/受領.*保管.*管理.*ものではありません/);
       expect(main.textContent).not.toMatch(/取引金額から自動的に控除/);
     });
 

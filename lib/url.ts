@@ -777,8 +777,7 @@ export function calcCheckoutTotal(
 // 通貨ごとの既定 preset (URL に preset 指定がない時に使う)。
 // tip 文脈で違和感のない常用額レンジを起点に置く。クリエイターは
 // TipEmbedGenerator で任意の preset を上書き可能、ファンも custom amount で
-// 100 JPYC / 1 USDC のようなカジュアル tip を送れる (1.0% プロポーショナル
-// のため、100 JPYC tip でも fee は 1 JPYC のみ)。
+// 100 JPYC / 1 USDC のようなカジュアル tip を送れる。
 export const DEFAULT_TIP_PRESETS: Record<TokenSymbol, string[]> = {
   jpyc: ['300', '1000', '3000'],
   usdc: ['5', '20', '50'],

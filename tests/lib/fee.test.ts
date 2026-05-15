@@ -311,13 +311,8 @@ describe('calcSplitBreakdown — gas=merchant', () => {
   });
 });
 
-// 不変条件 (invariant) を多数のサンプルで一斉検証。
-// プロパティベースではなく、決定的なサンプル集合で:
-//   - bigint の境界
-//   - 整数除算の端数
-//   - 両 token / 両 gasMode の対称性
-//   - 大数 (ETH-scale)
-// を網羅する。実 calcFee/calcBreakdown/calcSplitBreakdown を走らせて検証。
+// bigint の境界、整数除算の端数、両 token / 両 gasMode の対称性、大数 (ETH-scale)
+// を 16 サンプル × 各 invariant で網羅。
 describe('fee invariants (両 token・両 gasMode 横断)', () => {
   const A: Address = '0x1111111111111111111111111111111111111111';
   const B: Address = '0x2222222222222222222222222222222222222222';
