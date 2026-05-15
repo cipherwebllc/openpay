@@ -429,7 +429,7 @@ npm install -D \
 | `NEXT_PUBLIC_GAS_CEILING_BASE_GWEI` | × | Base mainnet の `maxFeePerGas` 上限 (gwei、整数)。既定 1。L2 のみで判定 (L1 calldata は別軸監視) |
 | `NEXT_PUBLIC_GAS_CEILING_ARBITRUM_GWEI` | × | Arbitrum One の `maxFeePerGas` 上限 (gwei、整数)。既定 1 |
 | `NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI` | × | Optimism の `maxFeePerGas` 上限 (gwei、整数)。既定 1 |
-| `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` | × | USDC ERC20 Paymaster の「最大ガス代」見積に使う UserOp gas 単位 (整数)。既定 500_000 は実機計測前の rough な値、本番計測後に調整 |
+| `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` | × | UserOp gas 単位 (整数)。USDC ERC20 Paymaster 経路は既定 `500_000` (`useGasQuoteUsdc` の DEFAULT)、JPYC Sponsorship 経路は既定 `200_000` (`useGasQuoteJpyc` の DEFAULT、typical UserOp ~200k 実測ベース)。env で override すると両 token に同値が適用される |
 
 ### 3. Pimlico ダッシュボード設定
 

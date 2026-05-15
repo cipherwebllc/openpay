@@ -13,7 +13,11 @@ import { env } from '@/lib/env';
 import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 
-const DEFAULT_USEROP_GAS_UNITS = 300_000n;
+// 実測 UserOp gas (Pimlico bundler 平均) は typical ~200k 前後 (ERC20 transfer
+// 2 件 + paymaster validate)。worst-case として 200k に圧縮、`NEXT_PUBLIC_GAS_
+// QUOTE_OVERHEAD_GAS` で再調整可能。300k だと小額 tip に対して overcollect
+// が大きすぎ UX 悪化したため見直し。
+const DEFAULT_USEROP_GAS_UNITS = 200_000n;
 const DEFAULT_POL_JPYC_RATE = 60n;
 
 export function useGasQuoteJpyc(
@@ -50,8 +54,12 @@ export function useGasQuoteJpyc(
         env.polJpycRate !== undefined
           ? BigInt(env.polJpycRate)
           : DEFAULT_POL_JPYC_RATE;
-      // POL も JPYC も 18 decimals なので gasPol (wei) × rate でそのまま JPYC (wei)
-      const gasPol = overhead * gasPrice.fast.maxFeePerGas;
+      // POL も JPYC も 18 decimals なので gasPol (wei) × rate でそのまま JPYC (wei)。
+      // `standard` tier で見積 (= 数 block 程度の確認時間で済む典型値)。
+      // `fast` だと 2026-05 Polygon の DePIN/AI 需要混雑で priority fee が高騰し、
+      // 小額決済で gas が請求金額を上回る UX 不良が発生する。submit 側 (simple
+      // Account / mav2 の feeEstimator) も同 tier に揃え、見積と実費を一致させる。
+      const gasPol = overhead * gasPrice.standard.maxFeePerGas;
       const gasAmount = gasPol * rate;
       return { gasAmount };
     },

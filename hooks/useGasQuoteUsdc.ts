@@ -63,9 +63,10 @@ export function useGasQuoteUsdc(
           ? BigInt(env.gasQuoteOverheadUnits)
           : DEFAULT_USEROP_GAS_UNITS;
       const totalGas = overhead + postOpGas;
-      // exchangeRate は 1e18 スケールの token / native 比
+      // exchangeRate は 1e18 スケールの token / native 比。
+      // `standard` tier に揃える (submit 側の simpleAccount/mav2 と一致)。
       const gasAmount =
-        (totalGas * gasPrice.fast.maxFeePerGas * exchangeRate) / 10n ** 18n;
+        (totalGas * gasPrice.standard.maxFeePerGas * exchangeRate) / 10n ** 18n;
       return { gasAmount };
     },
   });

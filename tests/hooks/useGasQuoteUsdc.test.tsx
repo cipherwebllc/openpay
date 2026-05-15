@@ -95,8 +95,7 @@ describe('useGasQuoteUsdc', () => {
     ]);
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-      standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }, // 2 wei/gas (テスト用に簡素化)
+      standard: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }, // 2 wei/gas (テスト用に簡素化)
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -117,7 +116,6 @@ describe('useGasQuoteUsdc', () => {
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
       standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -134,7 +132,6 @@ describe('useGasQuoteUsdc', () => {
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
       standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -181,8 +178,7 @@ describe('useGasQuoteUsdc', () => {
     ]);
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 5_000_000n, maxPriorityFeePerGas: 1n },
-      standard: { maxFeePerGas: 8_000_000n, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: 10_000_000n, maxPriorityFeePerGas: 1n }, // 0.01 gwei
+      standard: { maxFeePerGas: 10_000_000n, maxPriorityFeePerGas: 1n }, // 0.01 gwei
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -211,8 +207,7 @@ describe('useGasQuoteUsdc', () => {
     ]);
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 5n * 10n ** 8n, maxPriorityFeePerGas: 1n },
-      standard: { maxFeePerGas: 10n ** 9n, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: 10n ** 9n, maxPriorityFeePerGas: 1n }, // 1 gwei (spike)
+      standard: { maxFeePerGas: 10n ** 9n, maxPriorityFeePerGas: 1n }, // 1 gwei (spike)
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -240,7 +235,6 @@ describe('useGasQuoteUsdc', () => {
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
       standard: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
-      fast: { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n },
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -267,7 +261,6 @@ describe('useGasQuoteUsdc', () => {
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
       standard: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: huge_gas, maxPriorityFeePerGas: 1n },
     });
 
     const { result } = renderHook(() => useGasQuoteUsdc(usdcDep), {
@@ -304,8 +297,7 @@ describe('useGasQuoteUsdc', () => {
       ]);
       getUserOperationGasPrice.mockResolvedValue({
         slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-        standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-        fast: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n },
+        standard: { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n },
       });
 
       // env を再評価したため deployment も再生成 (tokens.ts も再 import)
@@ -339,7 +331,6 @@ describe('useGasQuoteUsdc', () => {
     getUserOperationGasPrice.mockResolvedValue({
       slow: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
       standard: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
-      fast: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
     });
 
     // 同一 QueryClient で 2 回 mount → 2 回目はキャッシュから即座に返る

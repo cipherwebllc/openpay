@@ -132,14 +132,15 @@ export async function buildMav2SmartAccountClient(args: {
     context: async () => paymasterContext as Record<string, unknown>,
   });
 
-  // fee: Pimlico の fast tier をそのまま使う (既存 SimpleAccount 経路と同設定)。
+  // fee: Pimlico の standard tier を使う (gas quote 側と同 tier に揃え、見積と
+  // 実費を一致させる)。fast は priority fee が過剰で小額決済の UX 悪化要因。
   // assertGasCeiling は呼び出し元 (useBatchPayment) で別途行う。
   const feeEstimator: ClientMiddlewareFn = async (struct) => {
     const gasPrice = await pimlicoClient.getUserOperationGasPrice();
     return {
       ...struct,
-      maxFeePerGas: gasPrice.fast.maxFeePerGas,
-      maxPriorityFeePerGas: gasPrice.fast.maxPriorityFeePerGas,
+      maxFeePerGas: gasPrice.standard.maxFeePerGas,
+      maxPriorityFeePerGas: gasPrice.standard.maxPriorityFeePerGas,
     };
   };
 

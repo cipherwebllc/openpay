@@ -53,7 +53,7 @@ vi.mock('@/lib/pimlico', async () => {
     pimlicoUrl: () => 'https://api.pimlico.io/v2/137/rpc?apikey=test',
     createPimlico: () => ({
       getUserOperationGasPrice: vi.fn().mockResolvedValue({
-        fast: { maxFeePerGas: 100n, maxPriorityFeePerGas: 50n },
+        standard: { maxFeePerGas: 100n, maxPriorityFeePerGas: 50n },
       }),
     }),
     // テスト環境は NEXT_PUBLIC_NETWORK_ENV=testnet なので resolvePaymasterMode

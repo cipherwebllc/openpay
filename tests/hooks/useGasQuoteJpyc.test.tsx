@@ -45,7 +45,7 @@ describe('useGasQuoteJpyc', () => {
   it('sponsorship + JPYC (Polygon): fetch して gasAmount を JPYC で返す', async () => {
     // Polygon gas: 50 gwei = 5e10 wei/unit
     getUserOperationGasPrice.mockResolvedValue({
-      fast: { maxFeePerGas: 50n * 10n ** 9n },
+      standard: { maxFeePerGas: 50n * 10n ** 9n },
     });
 
     const { result } = renderHook(() => useGasQuoteJpyc(jpycDep), {
@@ -53,8 +53,8 @@ describe('useGasQuoteJpyc', () => {
     });
 
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // overhead 300_000 × 50 gwei = 1.5e16 wei POL × 60 (default rate) = 9e17 wei JPYC ≈ 0.9 JPYC
-    const expected = (300_000n * 50n * 10n ** 9n) * 60n;
+    // overhead 200_000 × 50 gwei = 1e16 wei POL × 60 (default rate) = 6e17 wei JPYC ≈ 0.6 JPYC
+    const expected = (200_000n * 50n * 10n ** 9n) * 60n;
     expect(result.current.data?.gasAmount).toBe(expected);
   });
 

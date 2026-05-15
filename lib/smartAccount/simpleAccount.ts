@@ -52,8 +52,11 @@ export async function buildSimpleSmartAccountClient(args: {
     paymaster: pimlicoClient,
     paymasterContext: pimlicoPaymasterContext(deployment),
     userOperation: {
+      // standard tier で submit (gas quote 側 useGasQuote* も同 tier、見積と
+      // 実費を揃える)。fast は priority fee 過剰で小額決済の UX 悪化要因。
+      // assertGasCeiling は呼出元 (useBatchPayment) が fast tier で別途行う。
       estimateFeesPerGas: async () =>
-        (await pimlicoClient.getUserOperationGasPrice()).fast,
+        (await pimlicoClient.getUserOperationGasPrice()).standard,
       prepareUserOperation:
         paymasterMode === 'erc20'
           ? prepareUserOperationForErc20Paymaster(pimlicoClient)
