@@ -6,6 +6,7 @@ import {
   calcFee,
   calcSplitBreakdown,
 } from '@/lib/fee';
+import type { TokenSymbol } from '@/lib/tokens';
 
 describe('calcFee', () => {
   describe('USDC (6 decimals, 1.0% 純プロポーショナル)', () => {
@@ -307,5 +308,177 @@ describe('calcSplitBreakdown — gas=merchant', () => {
     );
     expect(r.recipients[0].amount).toBe(0n);
     expect(r.recipients[1].amount).toBe(0n);
+  });
+});
+
+// 不変条件 (invariant) を多数のサンプルで一斉検証。
+// プロパティベースではなく、決定的なサンプル集合で:
+//   - bigint の境界
+//   - 整数除算の端数
+//   - 両 token / 両 gasMode の対称性
+//   - 大数 (ETH-scale)
+// を網羅する。実 calcFee/calcBreakdown/calcSplitBreakdown を走らせて検証。
+describe('fee invariants (両 token・両 gasMode 横断)', () => {
+  const A: Address = '0x1111111111111111111111111111111111111111';
+  const B: Address = '0x2222222222222222222222222222222222222222';
+  const C: Address = '0x3333333333333333333333333333333333333333';
+
+  // 代表サンプル: USDC (6 decimals) と JPYC (18 decimals) の混在
+  const SAMPLES: Array<{
+    amount: bigint;
+    token: TokenSymbol;
+    gas: bigint;
+    label: string;
+  }> = [
+    { amount: 0n, token: 'usdc', gas: 0n, label: 'USDC zero' },
+    { amount: 1n, token: 'usdc', gas: 0n, label: 'USDC 1 wei (proportional=0)' },
+    { amount: 99n, token: 'usdc', gas: 0n, label: 'USDC 99 wei (proportional=0 境界)' },
+    { amount: 100n, token: 'usdc', gas: 0n, label: 'USDC 100 wei (proportional=1)' },
+    { amount: 100_000n, token: 'usdc', gas: 0n, label: 'USDC 0.1' },
+    { amount: 1_000_000n, token: 'usdc', gas: 0n, label: 'USDC 1' },
+    { amount: 5_000_000n, token: 'usdc', gas: 0n, label: 'USDC 5' },
+    { amount: 100_000_000n, token: 'usdc', gas: 0n, label: 'USDC 100' },
+    { amount: 100_000_000n, token: 'usdc', gas: 300_000n, label: 'USDC 100 + gas 0.3' },
+    { amount: 10_000_000_000n, token: 'usdc', gas: 0n, label: 'USDC 10000' },
+    { amount: 0n, token: 'jpyc', gas: 0n, label: 'JPYC zero' },
+    { amount: 1n, token: 'jpyc', gas: 0n, label: 'JPYC 1 wei' },
+    { amount: 50n * 10n ** 18n, token: 'jpyc', gas: 5n * 10n ** 17n, label: 'JPYC 50 + gas 0.5' },
+    { amount: 100n * 10n ** 18n, token: 'jpyc', gas: 2n * 10n ** 18n, label: 'JPYC 100 + gas 2' },
+    { amount: 500n * 10n ** 18n, token: 'jpyc', gas: 0n, label: 'JPYC 500 (1%==旧 MIN 境界)' },
+    { amount: 10000n * 10n ** 18n, token: 'jpyc', gas: 10n * 10n ** 18n, label: 'JPYC 10000 + gas 10' },
+  ];
+
+  describe('calcFee', () => {
+    it.each(SAMPLES)('$label: fee <= amount (fee は元本を超えない)', ({ amount, token }) => {
+      const fee = calcFee(amount, token);
+      expect(fee <= (amount > 0n ? amount : 0n)).toBe(true);
+    });
+
+    it.each(SAMPLES)('$label: fee >= 0 (負にならない)', ({ amount, token }) => {
+      expect(calcFee(amount, token)).toBeGreaterThanOrEqual(0n);
+    });
+
+    it.each(SAMPLES)('$label: token 不可知 (同 amount で usdc/jpyc が同値)', ({ amount }) => {
+      // 現状は両 token 同一料率 1.0%。token 引数は API 互換のため温存しているが、
+      // 実挙動は同じであることをロックする (将来 token 別レートに分岐する際は本 test が早期警告)。
+      expect(calcFee(amount, 'usdc')).toBe(calcFee(amount, 'jpyc'));
+    });
+
+    it('単調増加: a < b ⇒ calcFee(a) ≤ calcFee(b)', () => {
+      const xs = [0n, 1n, 99n, 100n, 1_000n, 1_000_000n, 100_000_000n, 10n ** 18n];
+      for (let i = 1; i < xs.length; i++) {
+        expect(calcFee(xs[i], 'usdc')).toBeGreaterThanOrEqual(calcFee(xs[i - 1], 'usdc'));
+      }
+    });
+  });
+
+  describe('calcBreakdown', () => {
+    it.each(SAMPLES)('$label / customer: customerPays === amount + gas', (s) => {
+      const r = calcBreakdown(s.amount, s.token, 'customer', s.gas);
+      const expected = (s.amount > 0n ? s.amount : 0n) + s.gas;
+      // amount = 0 のとき customerPays は 0 + gas? それとも 0?
+      // 実装は `gasMode === 'customer' ? amount + gas : amount`。amount = 0 のとき 0 + gas = gas
+      // ただし amount = 0 → 全 0 になる実装になっている。実装に合わせる。
+      if (s.amount <= 0n) {
+        expect(r.customerPays).toBe(0n);
+      } else {
+        expect(r.customerPays).toBe(expected);
+      }
+    });
+
+    it.each(SAMPLES)('$label / merchant: customerPays === amount (gas 上乗せなし)', (s) => {
+      const r = calcBreakdown(s.amount, s.token, 'merchant', s.gas);
+      expect(r.customerPays).toBe(s.amount > 0n ? s.amount : 0n);
+    });
+
+    it.each(SAMPLES)('$label / customer: merchantReceives = max(0, amount - fee)', (s) => {
+      const r = calcBreakdown(s.amount, s.token, 'customer', s.gas);
+      const fee = calcFee(s.amount, s.token);
+      const expected = s.amount > fee ? s.amount - fee : 0n;
+      expect(r.merchantReceives).toBe(expected);
+    });
+
+    it.each(SAMPLES)('$label / merchant: merchantReceives = max(0, amount - fee - gas)', (s) => {
+      const r = calcBreakdown(s.amount, s.token, 'merchant', s.gas);
+      const fee = calcFee(s.amount, s.token);
+      const deduction = fee + s.gas;
+      const expected = s.amount > deduction ? s.amount - deduction : 0n;
+      expect(r.merchantReceives).toBe(expected);
+    });
+
+    it.each(SAMPLES)('$label: feeAmount === calcFee(amount, token) (一貫した抽出)', (s) => {
+      const r = calcBreakdown(s.amount, s.token, 'customer', s.gas);
+      expect(r.feeAmount).toBe(calcFee(s.amount, s.token));
+    });
+
+    it.each(SAMPLES)('$label: gas=0 で gasMode customer/merchant の merchant 受取は一致', (s) => {
+      if (s.amount <= 0n) return;
+      const c = calcBreakdown(s.amount, s.token, 'customer', 0n);
+      const m = calcBreakdown(s.amount, s.token, 'merchant', 0n);
+      expect(c.merchantReceives).toBe(m.merchantReceives);
+    });
+  });
+
+  describe('calcSplitBreakdown', () => {
+    // amount を必ず 1% > 0 になるサイズ (>= 100 wei) に絞る
+    const NONZERO_SAMPLES = SAMPLES.filter((s) => s.amount >= 100n);
+
+    it.each(NONZERO_SAMPLES)('$label: 全 recipient amount の合計 === merchant 受取', (s) => {
+      const r = calcSplitBreakdown(
+        s.amount,
+        s.token,
+        A,
+        [
+          { to: B, percent: 30 },
+          { to: C, percent: 20 },
+        ],
+        'customer',
+        s.gas,
+      );
+      const base = calcBreakdown(s.amount, s.token, 'customer', s.gas);
+      const sum = r.recipients.reduce((acc, x) => acc + x.amount, 0n);
+      expect(sum).toBe(base.merchantReceives);
+    });
+
+    it.each(NONZERO_SAMPLES)('$label: feeAmount は calcBreakdown と一致', (s) => {
+      const r = calcSplitBreakdown(s.amount, s.token, A, [{ to: B, percent: 50 }]);
+      const base = calcBreakdown(s.amount, s.token);
+      expect(r.feeAmount).toBe(base.feeAmount);
+    });
+
+    it.each(NONZERO_SAMPLES)('$label: primary は残余を必ず引き受ける (端数集約)', (s) => {
+      // 33/33/33 のような整数除算の端数が出る split で primary が必ず非負
+      const r = calcSplitBreakdown(s.amount, s.token, A, [
+        { to: B, percent: 33 },
+        { to: C, percent: 33 },
+      ]);
+      expect(r.recipients[0].percent).toBe(34); // 100 - 33 - 33
+      expect(r.recipients[0].amount).toBeGreaterThanOrEqual(0n);
+    });
+
+    it.each(NONZERO_SAMPLES)('$label / merchant gas: 合計 === amount - fee - gas (underflow 時は 0)', (s) => {
+      if (s.amount === 0n) return;
+      const r = calcSplitBreakdown(
+        s.amount,
+        s.token,
+        A,
+        [{ to: B, percent: 50 }],
+        'merchant',
+        s.gas,
+      );
+      const base = calcBreakdown(s.amount, s.token, 'merchant', s.gas);
+      const sum = r.recipients.reduce((acc, x) => acc + x.amount, 0n);
+      expect(sum).toBe(base.merchantReceives);
+    });
+  });
+
+  describe('calcDirectBreakdown', () => {
+    it.each(SAMPLES)('$label: customer === merchant === amount, fee=0', (s) => {
+      const r = calcDirectBreakdown(s.amount);
+      const expected = s.amount > 0n ? s.amount : 0n;
+      expect(r.customerPays).toBe(expected);
+      expect(r.merchantReceives).toBe(expected);
+      expect(r.feeAmount).toBe(0n);
+    });
   });
 });
