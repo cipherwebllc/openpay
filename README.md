@@ -562,6 +562,27 @@ QR 発行時に店主が **gas 相当額の負担者** を選択 (= OpenPay 利�
 npm run build && npm run start
 ```
 
+### 運用ルール: 本番反映は手動 deploy (git push 自動化は無効)
+
+本リポジトリでは **git push to `main` で本番自動デプロイは行いません**。理由:
+
+- `chain=arbitrum/optimism/polygon` を含む既出 QR が出回った後の rollback で silent fund misdirection リスクがあるため、PR / commit と本番反映の間に人手の壁を置く設計 (詳細は § ロールバック)
+- 既存 QR の挙動を pin したまま preview で検証してから本番昇格する運用が安全
+
+**運用手順** (リリース時に都度実行):
+
+1. `git push origin main` — GitHub に反映、CI (`ci.yml` / `lighthouse.yml`) が green になることを確認
+2. ローカルで `.env.local` の md5 を控えておく (Vercel CLI が `.env.local` を上書きする既知挙動の対策)
+   ```bash
+   cp .env.local .env.local.predeploy-backup-$(date +%Y%m%d-%H%M%S)
+   md5 -q .env.local
+   ```
+3. `vercel --prod --yes` で本番昇格 (Vercel CLI を未 link 環境で実行する事故防止のため、事前に `vercel link` で project を紐付け済であること)
+4. deploy 完了後、`md5 -q .env.local` を再実行して **hash が変わっていないこと** を確認
+5. 主要 page を curl で smoke (例: `curl -fsS https://open-pay.jp/ja/disclaimer | grep "施行日:"` で施行日が想定どおりか)
+
+Vercel Dashboard 上の Git Integration による自動デプロイは **オフのまま**にしてください (誤って main push 直後に本番反映されると上記 rollback リスクを踏みます)。
+
 ### Vercel 環境変数のセキュリティ分類
 
 [2026-04 の Vercel セキュリティインシデント](https://vercel.com/kb/bulletin/vercel-april-2026-security-incident) を踏まえ、各 env を以下に従って Dashboard で登録:
