@@ -373,17 +373,15 @@ describe('fee invariants (両 token・両 gasMode 横断)', () => {
   });
 
   describe('calcBreakdown', () => {
-    it.each(SAMPLES)('$label / customer: customerPays === amount + gas', (s) => {
+    // amount = 0 の場合 calcBreakdown は merchantReceives / customerPays を全 0 で返すため
+    // 「customerPays = amount + gas」式は成立しない (gas > 0 でも 0 になる)。
+    // 該当条件は別 test (`amount = 0: all zero`) で既にカバー済のため、本不変条件
+    // からは amount > 0 のサンプルのみを対象とする。
+    const NONZERO_AMOUNTS = SAMPLES.filter((s) => s.amount > 0n);
+
+    it.each(NONZERO_AMOUNTS)('$label / customer: customerPays === amount + gas', (s) => {
       const r = calcBreakdown(s.amount, s.token, 'customer', s.gas);
-      const expected = (s.amount > 0n ? s.amount : 0n) + s.gas;
-      // amount = 0 のとき customerPays は 0 + gas? それとも 0?
-      // 実装は `gasMode === 'customer' ? amount + gas : amount`。amount = 0 のとき 0 + gas = gas
-      // ただし amount = 0 → 全 0 になる実装になっている。実装に合わせる。
-      if (s.amount <= 0n) {
-        expect(r.customerPays).toBe(0n);
-      } else {
-        expect(r.customerPays).toBe(expected);
-      }
+      expect(r.customerPays).toBe(s.amount + s.gas);
     });
 
     it.each(SAMPLES)('$label / merchant: customerPays === amount (gas 上乗せなし)', (s) => {
@@ -411,8 +409,7 @@ describe('fee invariants (両 token・両 gasMode 横断)', () => {
       expect(r.feeAmount).toBe(calcFee(s.amount, s.token));
     });
 
-    it.each(SAMPLES)('$label: gas=0 で gasMode customer/merchant の merchant 受取は一致', (s) => {
-      if (s.amount <= 0n) return;
+    it.each(NONZERO_AMOUNTS)('$label: gas=0 で gasMode customer/merchant の merchant 受取は一致', (s) => {
       const c = calcBreakdown(s.amount, s.token, 'customer', 0n);
       const m = calcBreakdown(s.amount, s.token, 'merchant', 0n);
       expect(c.merchantReceives).toBe(m.merchantReceives);

@@ -160,7 +160,12 @@ describe('Legal pages', () => {
     it('intro に「お客様の支払い・店舗売上を預からない」ノンカストディ宣言が含まれる', () => {
       renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      expect(main.textContent).toMatch(/お客様の支払い.*店舗売上.*預かりません|預かりません/);
+      // 「お客様の支払い」「店舗売上」「預かりません」の 3 語が同一文 (句点で区切られた
+      // 範囲) に揃っていることを要求。前 regex は `|預かりません` の alternation で
+      // 「預かりません」単独 (別 section の trailing 用) でも pass してしまっていた。
+      expect(main.textContent).toMatch(
+        /お客様の支払い[^。]*店舗売上[^。]*預かりません/,
+      );
       expect(main.textContent).toMatch(/店舗ウォレットへ直接送金/);
     });
 
@@ -248,7 +253,12 @@ describe('Legal pages', () => {
       const main = screen.getByRole('main');
       // ノンカストディ設計の明文化 — 「取引金額から自動的に控除」(預かり前提) でないこと
       expect(main.textContent).toMatch(/当社指定ウォレットへ直接送金/);
-      expect(main.textContent).toMatch(/受領.*保管.*管理|保管.*管理.*精算/);
+      // 「受領・保管・管理 (の言葉) + 否定形 ものではありません」の連結を必須化。
+      // 単語の存在だけ assert すると、文意が反転した change が CI を素通りするため
+      // (例: 「〜を受領、保管、管理します」に書き換わっても旧 regex なら pass した)。
+      expect(main.textContent).toMatch(
+        /受領、?\s*保管、?\s*管理[^。]*ものではありません/,
+      );
       expect(main.textContent).not.toMatch(/取引金額から自動的に控除/);
     });
 
