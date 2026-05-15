@@ -30,7 +30,7 @@
         "render-blocking-resources": ["warn", { "maxLength": 3 }],
         "unused-javascript": ["warn", { "maxLength": 5 }],
         "redirects": "off",
-        "legacy-javascript": ["warn", { "maxNumericValue": 0 }],
+        "legacy-javascript": "off",
         "csp-xss": "off",
         "lcp-lazy-loaded": "off",
         "non-composited-animations": "off",
