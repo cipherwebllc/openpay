@@ -327,9 +327,9 @@ describe('CheckoutForm — 送信', () => {
     setBalance(1_000_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
-    // MIN_FEE 撤廃後は 1% プロポーショナル単独では underflow しない
-    // (fee = amount × 1% ≤ amount のため必ず merchant > 0)。
-    // gas=merchant モードで amount (0.04) < gas (0.1) のとき merchant = 0 になる。
+    // 1% プロポーショナル単独では fee = amount × 1% ≤ amount のため必ず
+    // merchant > 0 (underflow 不発火)。gas=merchant モードで amount (0.04)
+    // < gas (0.1) のとき merchant = 0 になる。
     render(
       <CheckoutForm
         params={{

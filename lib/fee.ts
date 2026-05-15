@@ -1,9 +1,8 @@
-// 運営手数料 = amount * FEE_BPS / BPS_DENOM
-//   両 token 共通で 1.0% の純プロポーショナル。**最低手数料 (MIN_FEE) は廃止**
-//   (2026-05-16 改訂)。gas 肩代わり相当を OpenPay 利用手数料に bundle して
-//   徴収する設計に移行したため、フロアによる小額赤字防止は不要 (gas estimate
-//   buffer が運営損益のクッションとして機能する)。token 引数はシグネチャ
-//   互換のために残してある (callsite を変えずに済む)。
+// 運営手数料 = amount * FEE_BPS / BPS_DENOM (両 token 共通で 1.0% 純プロポー
+//   ショナル、最低手数料なし)。gas 肩代わり相当を OpenPay 利用手数料に bundle
+//   して徴収する設計のため、フロアによる小額赤字防止は不要 — gas estimate
+//   バッファが運営損益のクッションとして機能する。token 引数は将来の token
+//   別レート差替の余地としてシグネチャに保持。
 //
 // fee model: 運営手数料は **常に店主負担** (SaaS / カード決済の販売手数料的な固定コスト)。
 //   顧客には運営手数料を意識させず、見る金額は「請求金額 ± gas」のみ。
@@ -29,9 +28,6 @@ const BPS_DENOM = 10_000n;
 
 const FEE_BPS = 100n; // 1.0% (両 token 共通)
 
-// 運営手数料を計算する純粋関数。
-// token 引数は将来の token 別レート差替 / シグネチャ互換のために保持する
-// (現状の挙動は両 token 同一: amount * 1.0%、整数除算で切り捨て)。
 export function calcFee(amount: bigint, _token: TokenSymbol): bigint {
   if (amount <= 0n) return 0n;
   return (amount * FEE_BPS) / BPS_DENOM;

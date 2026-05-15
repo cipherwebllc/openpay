@@ -274,7 +274,7 @@ X402_PRICE=0.5
 3. 運営は定期的に **JPYC → POL** に swap して Pimlico 残高を補充する必要がある
    - JPYC/POL の DEX ペアは流動性が薄いため、実務的には **JPYC → USDC → POL** の 2-hop swap (QuickSwap / Uniswap v3 on Polygon) が現実的
    - 自動化案: OpenZeppelin Defender Sentinel / cron + viem による定期 swap
-4. JPYC 1.0% の料率は純マージンとして設定 (gas は別建て徴収、MIN_FEE は 2026-05-16 に撤廃)。`NEXT_PUBLIC_POL_JPYC_RATE` で POL→JPYC 換算レートを実勢に合わせて月次で見直してください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され、運営の POL 立替不足を防ぐ仕様 (詳細は「Gas price ceiling」節)
+4. JPYC 1.0% の料率は純マージンとして設定 (gas は別建て徴収、最低手数料なし)。`NEXT_PUBLIC_POL_JPYC_RATE` で POL→JPYC 換算レートを実勢に合わせて月次で見直してください。`lib/gasCeiling.ts` の上限を超える gas spike では UserOp が早期 abort され、運営の POL 立替不足を防ぐ仕様 (詳細は「Gas price ceiling」節)
 
 ### 運用上の含意 (USDC / 全 4 chain)
 
@@ -525,8 +525,8 @@ QR 発行時に店主が **gas 相当額の負担者** を選択 (= OpenPay 利�
 ### 料率 (`lib/fee.ts`)
 | token | 料率 | 最低手数料 | 備考 |
 |---|---|---|---|
-| JPYC (Polygon) | 1.0% | なし | 純マージン (両 mode 共通)、MIN_FEE は 2026-05-16 に撤廃 |
-| USDC (Base / Arbitrum / Optimism / Polygon) | 1.0% | なし | 純マージン (両 mode 共通)、MIN_FEE は 2026-05-16 に撤廃 |
+| JPYC (Polygon) | 1.0% | なし | 純マージン (両 mode 共通) |
+| USDC (Base / Arbitrum / Optimism / Polygon) | 1.0% | なし | 純マージン (両 mode 共通) |
 
 ### ネットワーク手数料の徴収経路
 | paymaster | gas を払う主体 | 経路 | 運営の精算 |

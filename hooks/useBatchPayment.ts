@@ -62,15 +62,10 @@ export function useBatchPayment(
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
       }
-      // MIN_FEE 廃止後 (2026-05-16) も `feeAmount > 0` は不変条件として温存。
-      // 通常パスでの到達:
-      //   - USDC erc20 paymaster: feeAmount = fee。amount × 1% が整数除算で 0
-      //     になる極小金額 (< 100 wei = 0.0001 USDC) のときのみ 0 になり得る。
-      //     UI 側で input min が桁数を制限しているため通常は到達しない。
-      //   - JPYC sponsorship: feeAmount = fee + gasInJpyc。gasInJpyc が常に > 0
-      //     なので fee=0 でも合計 > 0。実質ここで block される唯一のシナリオは
-      //     フォーク版での `gasInJpyc=0 && fee=0` 改竄や URL/state 改竄経路。
-      // 一線目の防御として温存 (sponsorship 濫用防御 / 運営収益確保)。
+      // `feeAmount > 0` は不変条件 (sponsorship 濫用 / 運営収益喪失の一線目
+      // 防御)。通常パスで到達するのは USDC erc20 で amount × 1% が整数除算で
+      // 0 に潰れる極小金額 (< 100 wei) のみ。フォーク / state 改竄経路でも
+      // 同 guard が発火する。
       if (params.feeAmount <= 0n) {
         throw new Error(
           'feeAmount > 0 が必須です (運営収益確保 / sponsorship 濫用防御)',

@@ -21,7 +21,7 @@ describe('calcFee', () => {
       expect(calcFee(1_000_000n, 'usdc')).toBe(10_000n);
     });
 
-    it('5 USDC: fee = 0.05 USDC (旧 MIN_FEE 境界、計算上一致)', () => {
+    it('5 USDC: fee = 0.05 USDC', () => {
       expect(calcFee(5_000_000n, 'usdc')).toBe(50_000n);
     });
 
@@ -50,7 +50,7 @@ describe('calcFee', () => {
   describe('JPYC (18 decimals, 1.0% 純プロポーショナル)', () => {
     const ONE = 10n ** 18n;
 
-    it('50 JPYC: fee = 0.5 JPYC (旧 MIN_FEE=5 から大幅減)', () => {
+    it('50 JPYC: fee = 0.5 JPYC', () => {
       expect(calcFee(50n * ONE, 'jpyc')).toBe((50n * ONE) / 100n);
     });
 
@@ -58,7 +58,7 @@ describe('calcFee', () => {
       expect(calcFee(100n * ONE, 'jpyc')).toBe(ONE);
     });
 
-    it('500 JPYC: fee = 5 JPYC (旧 MIN_FEE 境界、計算上一致)', () => {
+    it('500 JPYC: fee = 5 JPYC', () => {
       expect(calcFee(500n * ONE, 'jpyc')).toBe(5n * ONE);
     });
 
@@ -91,7 +91,7 @@ describe('calcBreakdown — gas=customer mode (default)', () => {
     expect(r.feeAmount).toBe(1_000_000n);
   });
 
-  it('USDC 1, gas=0: fee=0.01, merchant=0.99, customer=1 (旧 MIN_FEE 撤廃の効果)', () => {
+  it('USDC 1, gas=0: fee=0.01, merchant=0.99, customer=1', () => {
     const r = calcBreakdown(1_000_000n, 'usdc');
     expect(r.customerPays).toBe(1_000_000n);
     expect(r.merchantReceives).toBe(990_000n);
@@ -113,7 +113,7 @@ describe('calcBreakdown — gas=customer mode (default)', () => {
     expect(r.feeAmount).toBe(10n * ONE);
   });
 
-  it('JPYC 100, gas=2: merchant=99, fee=1, customer=102 (旧: fee=5 → 新: fee=1)', () => {
+  it('JPYC 100, gas=2: merchant=99, fee=1, customer=102', () => {
     const ONE = 10n ** 18n;
     const r = calcBreakdown(100n * ONE, 'jpyc', 'customer', 2n * ONE);
     expect(r.customerPays).toBe(102n * ONE);
@@ -245,7 +245,7 @@ describe('calcSplitBreakdown — gas=customer (default)', () => {
     expect(r.recipients[1].amount).toBe(495n * ONE);
   });
 
-  it('USDC 1, split B:50: distributable=0.99 (旧 MIN_FEE 撤廃で 0.95 → 0.99)', () => {
+  it('USDC 1, split B:50: distributable=0.99 (A と B が 0.495 ずつ)', () => {
     const r = calcSplitBreakdown(1_000_000n, 'usdc', A, [
       { to: B, percent: 50 },
     ]);
