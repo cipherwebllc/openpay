@@ -17,7 +17,7 @@ describe('useQrSettings', () => {
       token: 'jpyc',
       chain: 'polygon',
       gasMode: 'customer',
-      directTransfer: false,
+      payMode: 'gasless',
       splits: [],
       storeName: '',
       posterNote: '',
@@ -25,7 +25,7 @@ describe('useQrSettings', () => {
     });
   });
 
-  it('保存値からハイドレート (旧スキーマ: directTransfer/splits なし → default 補完)', async () => {
+  it('保存値からハイドレート (旧スキーマ: payMode/splits なし → default 補完)', async () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
@@ -38,7 +38,7 @@ describe('useQrSettings', () => {
     expect(result.current.settings.token).toBe('jpyc');
     expect(result.current.settings.chain).toBe('polygon');
     expect(result.current.settings.receiver).toBe('0xabc');
-    expect(result.current.settings.directTransfer).toBe(false);
+    expect(result.current.settings.payMode).toBe('gasless');
     expect(result.current.settings.splits).toEqual([]);
     expect(result.current.settings.storeName).toBe('');
     expect(result.current.settings.posterNote).toBe('');
@@ -80,7 +80,21 @@ describe('useQrSettings', () => {
     expect(result.current.settings.chain).toBe('arbitrum');
   });
 
-  it('directTransfer=true の保存値もハイドレート', async () => {
+  it('payMode=standard の保存値をハイドレート', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        receiver: '0xabc',
+        token: 'usdc',
+        payMode: 'standard',
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.payMode).toBe('standard');
+  });
+
+  it('legacy migration: directTransfer=true (旧 schema) は payMode=standard に変換される', async () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
@@ -91,7 +105,21 @@ describe('useQrSettings', () => {
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.directTransfer).toBe(true);
+    expect(result.current.settings.payMode).toBe('standard');
+  });
+
+  it('legacy migration: directTransfer=false (旧 schema) は payMode=gasless に変換される', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        receiver: '0xabc',
+        token: 'usdc',
+        directTransfer: false,
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.payMode).toBe('gasless');
   });
 
   it('splits 配列をハイドレート (最大 3 件まで)', async () => {
@@ -100,7 +128,7 @@ describe('useQrSettings', () => {
       JSON.stringify({
         receiver: '0xabc',
         token: 'usdc',
-        directTransfer: false,
+        payMode: 'gasless',
         splits: [
           { address: '0xb1', percent: '30' },
           { address: '0xb2', percent: '20' },
@@ -157,7 +185,7 @@ describe('useQrSettings', () => {
         token: 'jpyc',
         chain: 'polygon',
         gasMode: 'merchant',
-        directTransfer: true,
+        payMode: 'standard',
         splits: [{ address: '0xb1', percent: '40' }],
         storeName: 'Coffee Stand',
         posterNote: 'Scan to pay',
@@ -173,7 +201,7 @@ describe('useQrSettings', () => {
       expect(parsed.chain).toBe('polygon');
       expect(parsed.gasMode).toBe('merchant');
       expect(parsed.receiver).toBe('0xdef');
-      expect(parsed.directTransfer).toBe(true);
+      expect(parsed.payMode).toBe('standard');
       expect(parsed.splits).toEqual([{ address: '0xb1', percent: '40' }]);
       expect(parsed.storeName).toBe('Coffee Stand');
       expect(parsed.posterNote).toBe('Scan to pay');

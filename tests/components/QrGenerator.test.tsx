@@ -470,13 +470,13 @@ describe('QrGenerator', () => {
     it('直接送金 ON で gas トグル UI が消える', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByRole('checkbox', { name: /直接送金/ }));
+      await waitFor(() => screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
       // 切替前は表示
       expect(
         screen.getByRole('button', { name: /顧客が gas 相当額/ }),
       ).toBeInTheDocument();
       // 直接送金 ON
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
       // トグル消失
       expect(
         screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
@@ -520,58 +520,61 @@ describe('QrGenerator', () => {
     });
   });
 
-  describe('直接送金 (上級者) トグル', () => {
-    it('チェックすると URL に mode=direct が出る + 説明バッジが表示される', async () => {
+  describe('決済モード切替 (gasless / 通常決済（ガスあり）)', () => {
+    it('「通常決済（ガスあり）」を選択すると URL に mode=standard が出る + 説明バッジが表示される', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
 
-      const directCheckbox = screen.getByRole('checkbox', {
-        name: /直接送金/,
+      // mode radio (gasless / 通常決済) のうち standard 側を click
+      const standardBtn = screen.getByRole('button', {
+        name: /通常決済（ガスあり）/,
       });
-      await user.click(directCheckbox);
+      await user.click(standardBtn);
 
-      // URL に mode=direct が出る
+      // URL に mode=standard が出る
       await waitFor(() => {
         expect(
-          screen.getByText((t) => t.includes('mode=direct')),
+          screen.getByText((t) => t.includes('mode=standard')),
         ).toBeInTheDocument();
       });
 
-      // direct モードの説明バッジが表示される
+      // 通常決済モードの説明 (hint) が表示される
       expect(
-        screen.getByText(/直接送金モード: 運営手数料 0%/),
+        screen.getByText(/OpenPay 利用手数料は決済金額の 0\.5%/),
       ).toBeInTheDocument();
 
-      // 「運営手数料の徴収先」エリアは消える
-      expect(screen.queryByText(/運営手数料の徴収先/)).toBeNull();
+      // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
+      expect(screen.queryByRole('button', { name: /顧客が gas/ })).toBeNull();
     });
 
-    it('LocalStorage に永続化される', async () => {
+    it('payMode は LocalStorage に永続化される', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() =>
-        screen.getByRole('checkbox', { name: /直接送金/ }),
+        screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
       );
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(
+        screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
+      );
 
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(raw).not.toBeNull();
         const parsed = JSON.parse(raw!);
-        expect(parsed.directTransfer).toBe(true);
+        expect(parsed.payMode).toBe('standard');
       });
     });
 
-    it('directTransfer=true でアコーディオン閉時のサマリに 0% と出る', async () => {
+    it('payMode=standard でアコーディオン閉時のサマリに 0.5%/std と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
           receiver: VALID,
           token: 'usdc',
-          directTransfer: true,
+          payMode: 'standard',
         }),
       );
       render(<QrGenerator />);
@@ -582,8 +585,27 @@ describe('QrGenerator', () => {
       await waitFor(() =>
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
-      // i18n 後は言語非依存の "0%" 表記
-      expect(within(toggle).getByText(/0%/)).toBeInTheDocument();
+      expect(within(toggle).getByText(/0\.5%\/std/)).toBeInTheDocument();
+    });
+
+    it('payMode=gasless (default) でアコーディオン閉時のサマリに 1%/gas:cust と出る', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'usdc',
+          payMode: 'gasless',
+          gasMode: 'customer',
+        }),
+      );
+      render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', {
+        name: /詳細設定/,
+      });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      expect(within(toggle).getByText(/1%\/gas:cust/)).toBeInTheDocument();
     });
   });
 
@@ -605,7 +627,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1000');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       const uri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
@@ -637,7 +659,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
 
       expect(screen.queryByText(/互換 QR \(EIP-681\)/)).toBeNull();
@@ -655,7 +677,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '500');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       // 形状 regex だけ pass する silent fund misdirection を排除するため、
       // 画面表示 URI と完全一致 + 受取人 + wei 値 + URL パーサ妥当性を全て assert。
@@ -682,7 +704,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /USDC/ }));
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       const amountInput = screen.getByPlaceholderText(
         '10.00',
@@ -707,7 +729,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /USDC/ }));
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       const amountInput = screen.getByPlaceholderText(
         '10.00',
@@ -743,20 +765,22 @@ describe('QrGenerator', () => {
       expect(usdcInput.value).toBe('1.123456');
     });
 
-    it('状態遷移: direct ON → URI 表示 → direct OFF → URI 非表示', async () => {
+    it('状態遷移: 通常決済 ON → URI 表示 → ガスレス決済 へ戻すと URI 非表示', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '100');
 
-      const directCheckbox = screen.getByRole('checkbox', { name: /直接送金/ });
-      await user.click(directCheckbox);
+      await user.click(
+        screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
+      );
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
 
-      await user.click(directCheckbox);
+      // ガスレス決済に戻すと EIP-681 URI は非表示 (gasless では EIP-681 で表現不可)
+      await user.click(screen.getByRole('button', { name: /ガスレス決済/ }));
       await waitFor(() =>
         expect(screen.queryByText(/^ethereum:/)).toBeNull(),
       );
@@ -777,7 +801,7 @@ describe('QrGenerator', () => {
         '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
       );
       await user.type(screen.getByPlaceholderText('%'), '30');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
@@ -810,7 +834,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       const amountInput = screen.getByPlaceholderText('1000');
       await user.type(amountInput, '100');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
@@ -827,7 +851,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       // JPYC: 1 JPYC = 1e18 wei
       const jpycUri = (
@@ -852,7 +876,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /USDC/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
-      await user.click(screen.getByRole('checkbox', { name: /直接送金/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
       // 既定: Base
       const baseUri = (

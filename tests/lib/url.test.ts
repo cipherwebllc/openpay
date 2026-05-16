@@ -9,6 +9,7 @@ import {
   parseTipParams,
   parseSplitDrafts,
   DEFAULT_TIP_PRESETS,
+  searchParamsFromNext,
 } from '@/lib/url';
 
 // USDC (Base) のアドレスは checksum 既知のため、テストの roundtrip が安定する。
@@ -51,15 +52,27 @@ describe('buildPayPath', () => {
     expect(path).not.toContain('amount');
   });
 
-  it('mode=direct のときだけ URL に mode=direct を出す', () => {
+  it('mode=standard のときだけ URL に mode=standard を出す', () => {
     const path = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
       gas: 'customer',
       amount: '1000',
-      mode: 'direct',
+      mode: 'standard',
     });
-    expect(path).toContain('mode=direct');
+    expect(path).toContain('mode=standard');
+  });
+
+  it('mode=standard かつ gas=merchant のとき、gas= は URL に出さない (standard では gas が irrelevant)', () => {
+    const path = buildPayPath({
+      to: VALID_TO,
+      token: 'usdc',
+      gas: 'merchant',
+      amount: '100',
+      mode: 'standard',
+    });
+    expect(path).toContain('mode=standard');
+    expect(path).not.toContain('gas=');
   });
 });
 
@@ -97,12 +110,20 @@ describe('parsePayParams', () => {
     }
   });
 
-  it('mode=direct を読み取る', () => {
+  it('mode=standard を読み取る', () => {
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&mode=standard`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.mode).toBe('standard');
+  });
+
+  it('legacy alias: mode=direct → standard に正規化される (旧 QR 互換)', () => {
     const r = parsePayParams(
       search(`to=${VALID_TO}&token=usdc&mode=direct`),
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.params.mode).toBe('direct');
+    if (r.ok) expect(r.params.mode).toBe('standard');
   });
 
   it('mode=gasless を明示しても受け入れる', () => {
@@ -244,18 +265,18 @@ describe('parsePayParams', () => {
     }
   });
 
-  it('roundtrip: build → parse で同じ値 (direct)', () => {
+  it('roundtrip: build → parse で同じ値 (standard)', () => {
     const built = buildPayPath({
       to: VALID_TO,
       token: 'jpyc',
       gas: 'customer',
       amount: '1000',
-      mode: 'direct',
+      mode: 'standard',
     });
     const sp = new URLSearchParams(built.split('?')[1]);
     const r = parsePayParams(sp);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.params.mode).toBe('direct');
+    if (r.ok) expect(r.params.mode).toBe('standard');
   });
 });
 
@@ -1007,5 +1028,199 @@ describe('PayParams: 不正クエリ + roundtrip 完全性', () => {
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.amount).toBe('0.000001');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchParamsFromNext: Next.js route searchParams → SearchParamsLike 橋渡し
+// ---------------------------------------------------------------------------
+describe('searchParamsFromNext', () => {
+  const VALID_TO_LOC: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+
+  it('string value をそのまま返す', () => {
+    const sp = searchParamsFromNext({ token: 'usdc', to: VALID_TO_LOC });
+    expect(sp.get('token')).toBe('usdc');
+    expect(sp.get('to')).toBe(VALID_TO_LOC);
+  });
+
+  it('undefined → null を返す (省略 param)', () => {
+    const sp = searchParamsFromNext({ token: 'usdc' });
+    expect(sp.get('missing')).toBeNull();
+    expect(sp.get('to')).toBeNull();
+  });
+
+  it('Array (同一 param が複数指定された場合) → 先頭値を返す', () => {
+    // URL ?gas=customer&gas=merchant の Next.js 形式は { gas: ['customer', 'merchant'] }
+    const sp = searchParamsFromNext({
+      gas: ['customer', 'merchant'],
+      token: 'usdc',
+    });
+    expect(sp.get('gas')).toBe('customer');
+    expect(sp.get('token')).toBe('usdc');
+  });
+
+  it('Array が空のときは null を返す (safe default)', () => {
+    const sp = searchParamsFromNext({ gas: [] });
+    expect(sp.get('gas')).toBeNull();
+  });
+
+  it('parsePayParams と組合せて Array 値の URL も parse できる', () => {
+    // Next.js が array で渡してきても先頭値が使われる
+    const sp = searchParamsFromNext({
+      to: [VALID_TO_LOC, '0xnoise'],
+      token: 'usdc',
+      mode: ['standard', 'gasless'],
+    });
+    const r = parsePayParams(sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.to).toBe(VALID_TO_LOC);
+      expect(r.params.mode).toBe('standard');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PayMode + GasMode + mode roundtrip 全網羅 (mode と gas の組合せ依存)
+// ---------------------------------------------------------------------------
+describe('PayMode / GasMode 組合せ roundtrip + URL 形状', () => {
+  const A: Address = '0x1111111111111111111111111111111111111111';
+
+  it('mode=gasless + gas=customer (default): URL に mode / gas 共に出ない', () => {
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'gasless',
+    });
+    expect(path).not.toContain('mode=');
+    expect(path).not.toContain('gas=');
+  });
+
+  it('mode=gasless + gas=merchant: gas=merchant のみ出る (mode は default)', () => {
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      gas: 'merchant',
+      mode: 'gasless',
+    });
+    expect(path).not.toContain('mode=');
+    expect(path).toContain('gas=merchant');
+  });
+
+  it('mode=standard + gas=customer: mode=standard のみ出る (gas は standard では無効化)', () => {
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'standard',
+    });
+    expect(path).toContain('mode=standard');
+    expect(path).not.toContain('gas=');
+  });
+
+  it('mode=standard + gas=merchant: mode=standard のみ出る (gas は省略 — standard では irrelevant)', () => {
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      gas: 'merchant',
+      mode: 'standard',
+    });
+    expect(path).toContain('mode=standard');
+    expect(path).not.toContain('gas=');
+  });
+
+  it('roundtrip: build (mode=standard, gas=merchant) → parse で mode=standard, gas=customer (default)', () => {
+    // build 時に gas=merchant は出ないため parse 側では default customer に戻る
+    const path = buildPayPath({
+      to: A,
+      token: 'usdc',
+      gas: 'merchant',
+      mode: 'standard',
+    });
+    const r = parsePayParams(new URLSearchParams(path.split('?')[1]));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.mode).toBe('standard');
+      expect(r.params.gas).toBe('customer');
+    }
+  });
+
+  it('legacy alias の roundtrip 不可逆性: parse mode=direct → standard、build standard → URL に mode=standard', () => {
+    const r = parsePayParams(
+      new URLSearchParams(`to=${A}&token=usdc&mode=direct`),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.mode).toBe('standard');
+    // rebuild → mode=standard (mode=direct は復元しない、新名で書出)
+    const rebuilt = buildPayPath(r.params);
+    expect(rebuilt).toContain('mode=standard');
+    expect(rebuilt).not.toContain('mode=direct');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /checkout の mode 同期 (lib/url の mode 引数を CheckoutParams が共有)
+// ---------------------------------------------------------------------------
+describe('CheckoutParams mode 同期', () => {
+  const MERCHANT_LOC: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+
+  it('checkout build: mode 未指定で URL に mode は出ない (default gasless)', async () => {
+    const { buildCheckoutPath } = await import('@/lib/url');
+    const path = buildCheckoutPath({
+      to: MERCHANT_LOC,
+      token: 'usdc',
+      gas: 'customer',
+      items: [{ name: 'A', qty: 1, price: '10' }],
+    });
+    expect(path).not.toContain('mode=');
+  });
+
+  it('checkout build: mode=standard で URL に mode=standard が出る', async () => {
+    const { buildCheckoutPath } = await import('@/lib/url');
+    const path = buildCheckoutPath({
+      to: MERCHANT_LOC,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'standard',
+      items: [{ name: 'A', qty: 1, price: '10' }],
+    });
+    expect(path).toContain('mode=standard');
+  });
+
+  it('checkout parse: mode=direct は legacy alias で standard に正規化', async () => {
+    const { parseCheckoutParams } = await import('@/lib/url');
+    const r = parseCheckoutParams(
+      new URLSearchParams(
+        `to=${MERCHANT_LOC}&token=usdc&items=A:1:10&mode=direct`,
+      ),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.mode).toBe('standard');
+  });
+
+  it('checkout parse: 不明 mode は default gasless に倒す (UI を壊さない設計)', async () => {
+    const { parseCheckoutParams } = await import('@/lib/url');
+    const r = parseCheckoutParams(
+      new URLSearchParams(
+        `to=${MERCHANT_LOC}&token=usdc&items=A:1:10&mode=meta`,
+      ),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.mode).toBe('gasless');
+  });
+
+  it('checkout build: mode=standard + gas=merchant → URL に mode のみ (gas は出ない)', async () => {
+    const { buildCheckoutPath } = await import('@/lib/url');
+    const path = buildCheckoutPath({
+      to: MERCHANT_LOC,
+      token: 'usdc',
+      gas: 'merchant',
+      mode: 'standard',
+      items: [{ name: 'A', qty: 1, price: '10' }],
+    });
+    expect(path).toContain('mode=standard');
+    expect(path).not.toContain('gas=');
   });
 });

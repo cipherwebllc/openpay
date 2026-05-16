@@ -22,12 +22,49 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText(/決済 URL が不正/)).toBeVisible();
   });
 
-  test('mode=direct → ガス代お客様負担の警告が出る', async ({ page }) => {
+  test('mode=standard → 通常決済（ガスあり）バッジが表示される', async ({ page }) => {
     // 日本語アサーションのため locale を明示。/pay へ素で行くと middleware が
     // Accept-Language (Playwright 既定 en-US) で /en/pay へ redirect する。
     await page.goto(
+      `/ja/pay?to=${TO}&token=usdc&amount=10&mode=standard`,
+    );
+    // amber バナータイトル + breakdown hint で複数箇所
+    await expect(
+      page.getByText('通常決済（ガスあり）').first(),
+    ).toBeVisible();
+    // 「ネットワーク手数料: ウォレットで別途支払い」明細
+    await expect(page.getByText(/ウォレットで別途/)).toBeVisible();
+    // 0.5% fee: 10 USDC × 0.5% = 0.05 USDC
+    await expect(page.getByText('0.05 USDC')).toBeVisible();
+    // merchant 受取 = 9.95 USDC
+    await expect(page.getByText('9.95 USDC')).toBeVisible();
+  });
+
+  test('legacy alias: mode=direct (旧 URL) → mode=standard と同じ UI に正規化される', async ({
+    page,
+  }) => {
+    // 既発行 QR との互換性保証 (parser で direct → standard alias)
+    await page.goto(
       `/ja/pay?to=${TO}&token=usdc&amount=10&mode=direct`,
     );
-    await expect(page.getByText(/ガス代お客様負担/)).toBeVisible();
+    await expect(
+      page.getByText('通常決済（ガスあり）').first(),
+    ).toBeVisible();
+    // standard と同じ breakdown (0.05 USDC fee / 9.95 USDC merchant)
+    await expect(page.getByText('0.05 USDC')).toBeVisible();
+  });
+
+  test('mode=gasless (default) → 1.0% fee + ネットワーク手数料見積行が出る', async ({
+    page,
+  }) => {
+    await page.goto(`/ja/pay?to=${TO}&token=usdc&amount=10`);
+    // 通常決済バッジは出ない
+    await expect(page.getByText('通常決済（ガスあり）')).toHaveCount(0);
+    // ネットワーク手数料見積行は出る (gasQuote 未取得状態でも label は描画)
+    await expect(page.getByText(/ネットワーク手数料見積/).first()).toBeVisible();
+    // 1.0% fee: 10 USDC × 1% = 0.1 USDC
+    await expect(page.getByText('0.1 USDC')).toBeVisible();
+    // merchant = 9.9 USDC
+    await expect(page.getByText('9.9 USDC')).toBeVisible();
   });
 });

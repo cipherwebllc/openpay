@@ -16,8 +16,9 @@ export const LEGAL_ENTITY = {
   siteUrl: 'https://open-pay.jp',
 
   // 施行日 (各文書共通でサービス開始日に揃える)
+  // 2026-05-16 改定: 通常決済（ガスあり）モード追加に伴う料金体系・用語の整理。
   termsEffectiveDate: '2026-05-16',
-  privacyEffectiveDate: '2026-05-12',
+  privacyEffectiveDate: '2026-05-16',
   disclaimerEffectiveDate: '2026-05-16',
   tokuteiEffectiveDate: '2026-05-16',
 

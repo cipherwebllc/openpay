@@ -300,4 +300,301 @@ describe('Legal pages', () => {
       expect(body?.textContent).not.toMatch(/0\.05 USDC for USDC/);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 通常決済（ガスあり） / mode=standard 追加に伴う両モード並記 regression
+  // -------------------------------------------------------------------------
+  describe('regression: 通常決済（ガスあり）モード追加', () => {
+    it('ja Terms 第 5 条 (料金) に gasless 1.0% と standard 0.5% の両方が並記', () => {
+      renderWithIntl(<TermsPage />, { locale: 'ja' });
+      const article5 = screen.getByRole('heading', {
+        level: 2,
+        name: /第 5 条/,
+      });
+      const body = article5.nextElementSibling;
+      expect(body?.textContent).toMatch(/ガスレス決済/);
+      expect(body?.textContent).toMatch(/通常決済（ガスあり）/);
+      expect(body?.textContent).toMatch(/1\.0%/);
+      expect(body?.textContent).toMatch(/0\.5%/);
+      // OpenPay 利用手数料は両モード共通で常に店主負担と明記
+      expect(body?.textContent).toMatch(/常に店主が負担/);
+    });
+
+    it('ja Terms 第 2 条 (定義) で「ガスレス決済」「通常決済（ガスあり）」が定義語として導入される', () => {
+      renderWithIntl(<TermsPage />, { locale: 'ja' });
+      const article2 = screen.getByRole('heading', {
+        level: 2,
+        name: /第 2 条/,
+      });
+      const body = article2.nextElementSibling;
+      expect(body?.textContent).toMatch(/「ガスレス決済」/);
+      expect(body?.textContent).toMatch(/「通常決済（ガスあり）」/);
+    });
+
+    it('en Terms Article 5 で gasless 1.0% と standard 0.5% の両方を記載', () => {
+      renderWithIntl(<TermsPage />, { locale: 'en' });
+      const article5 = screen.getByRole('heading', {
+        level: 2,
+        name: /^Article 5 \(/,
+      });
+      const body = article5.nextElementSibling;
+      expect(body?.textContent).toMatch(/Gasless Payment/);
+      expect(body?.textContent).toMatch(/Standard Payment/);
+      expect(body?.textContent).toMatch(/1\.0%/);
+      expect(body?.textContent).toMatch(/0\.5%/);
+    });
+
+    it('ja Tokutei 役務の対価 に 1.0% と 0.5% の両モード記載 + 両モードで店主負担明記', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'ja' });
+      const main = screen.getByRole('main');
+      expect(main.textContent).toMatch(/1\.0%/);
+      expect(main.textContent).toMatch(/0\.5%/);
+      expect(main.textContent).toMatch(/ガスレス決済/);
+      expect(main.textContent).toMatch(/通常決済（ガスあり）/);
+      // OpenPay 利用手数料は両モード共通で常に店主負担
+      expect(main.textContent).toMatch(/両モード共通で常に店主が負担/);
+    });
+
+    it('ja Disclaimer 第 4 条 (ネットワーク手数料の変動) で両モードの取扱いが明記', () => {
+      renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
+      const section4 = screen.getByRole('heading', { level: 2, name: /^4\./ });
+      const body = section4.nextElementSibling;
+      // gasless mode 固有の gas 見積の話と、standard mode で wallet 側に委ねる話が両方
+      expect(body?.textContent).toMatch(/ガスレス決済モード/);
+      expect(body?.textContent).toMatch(/通常決済（ガスあり）モード/);
+    });
+
+    it('ja Disclaimer 第 7 条 で standard mode は OpenPay が gas に関与しない旨を明記', () => {
+      renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
+      const section7 = screen.getByRole('heading', { level: 2, name: /^7\./ });
+      const body = section7.nextElementSibling;
+      // 通常決済モードについて当社がネットワーク手数料に関与しないことを記載
+      expect(body?.textContent).toMatch(/通常決済（ガスあり）モード/);
+      expect(body?.textContent).toMatch(/ネットワーク手数料に一切関与せず/);
+    });
+
+    it('用語統一: Terms 全条文で「運営手数料」が消えている (= 「OpenPay 利用手数料」に統一)', () => {
+      renderWithIntl(<TermsPage />, { locale: 'ja' });
+      const main = screen.getByRole('main');
+      expect(main.textContent).not.toMatch(/運営手数料/);
+      // 「OpenPay 利用手数料」が複数回出ている
+      const matches = main.textContent?.match(/OpenPay 利用手数料/g);
+      expect(matches?.length ?? 0).toBeGreaterThanOrEqual(3);
+    });
+
+    it('用語統一: Disclaimer / Tokutei / Privacy で「運営手数料」が消えている', () => {
+      for (const Page of [DisclaimerPage, TokuteiPage, PrivacyPage]) {
+        const { unmount } = renderWithIntl(<Page />, { locale: 'ja' });
+        const main = screen.getByRole('main');
+        expect(main.textContent).not.toMatch(/運営手数料/);
+        unmount();
+      }
+    });
+
+    it('mode=direct (旧名) は legal 文書本文にも現れない (用語統一)', () => {
+      for (const Page of [TermsPage, DisclaimerPage, TokuteiPage]) {
+        const { unmount } = renderWithIntl(<Page />, { locale: 'ja' });
+        const main = screen.getByRole('main');
+        // 旧名 "mode=direct" や "直接送金" の言及がない (UI 文言からも撤去済)
+        expect(main.textContent).not.toMatch(/mode=direct/);
+        unmount();
+      }
+    });
+
+    it('effectiveDate: terms / disclaimer / tokutei / privacy 全て 2026-05-16', () => {
+      // 通常決済モード追加で 4 文書とも改定 → 同日 effectiveDate
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-05-16');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-05-16');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-05-16');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-05-16');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // i18n 完全性 — 全 mode 関連 key が ja / en 両方に存在
+  // -------------------------------------------------------------------------
+  describe('regression: i18n key 完全性 (両モード新規 key の存在検証)', () => {
+    // 空文字列 / 空白のみ / undefined のいずれも reject (空文字列 i18n が UI に
+     // 出ると label が消える silent regression を防ぐ)。
+    function expectNonEmptyString(value: unknown, key: string, locale: string) {
+      expect(value, `${locale}.${key}`).toBeTypeOf('string');
+      expect((value as string).trim().length, `${locale}.${key} は非空である必要`).toBeGreaterThan(0);
+    }
+
+    it('PaymentForm namespace に standard mode 用 key が全て存在 (ja/en、非空文字列)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      const requiredKeys = [
+        'standardModeTitle',
+        'standardModeBody',
+        'modeBadgeGasless',
+        'modeBadgeStandard',
+        'gasRowStandard',
+        'gasRowStandardValue',
+        'customerStandard',
+        'standardBatchHint',
+        'standardMerchantTxLabel',
+        'standardFeeTxLabel',
+        'standardFeeRetryTitle',
+        'standardFeeRetryBody',
+        'standardFeeRetryButton',
+        'btnStandardMerchantSending',
+        'btnStandardMerchantMining',
+        'btnStandardFeeSending',
+        'btnStandardFeeMining',
+      ];
+      for (const key of requiredKeys) {
+        expectNonEmptyString(
+          ja.PaymentForm[key as keyof typeof ja.PaymentForm],
+          key,
+          'ja.PaymentForm',
+        );
+        expectNonEmptyString(
+          en.PaymentForm[key as keyof typeof en.PaymentForm],
+          key,
+          'en.PaymentForm',
+        );
+      }
+    });
+
+    it('CheckoutForm namespace に standard mode 用 key が全て存在 (ja/en、非空文字列)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      const requiredKeys = [
+        'modeBadgeGasless',
+        'modeBadgeStandard',
+        'gasRowStandard',
+        'gasRowStandardValue',
+        'totalRowStandard',
+        'standardHint',
+        'standardMerchantTxLabel',
+        'standardFeeTxLabel',
+        'standardFeeRetryTitle',
+        'standardFeeRetryBody',
+        'standardFeeRetryButton',
+        'btnStandardMerchantSending',
+        'btnStandardMerchantMining',
+        'btnStandardFeeSending',
+        'btnStandardFeeMining',
+      ];
+      for (const key of requiredKeys) {
+        expectNonEmptyString(
+          ja.CheckoutForm[key as keyof typeof ja.CheckoutForm],
+          key,
+          'ja.CheckoutForm',
+        );
+        expectNonEmptyString(
+          en.CheckoutForm[key as keyof typeof en.CheckoutForm],
+          key,
+          'en.CheckoutForm',
+        );
+      }
+    });
+
+    it('QrGenerator / CheckoutLinkGenerator に payMode radio 用 key が全て存在 (ja/en、非空文字列)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      const radioKeys = [
+        'payModeLabel',
+        'payModeGaslessTitle',
+        'payModeGaslessDesc',
+        'payModeStandardTitle',
+        'payModeStandardDesc',
+      ];
+      for (const key of radioKeys) {
+        expectNonEmptyString(
+          ja.QrGenerator[key as keyof typeof ja.QrGenerator],
+          key,
+          'ja.QrGenerator',
+        );
+        expectNonEmptyString(
+          en.QrGenerator[key as keyof typeof en.QrGenerator],
+          key,
+          'en.QrGenerator',
+        );
+        expectNonEmptyString(
+          ja.CheckoutLinkGenerator[
+            key as keyof typeof ja.CheckoutLinkGenerator
+          ],
+          key,
+          'ja.CheckoutLinkGenerator',
+        );
+        expectNonEmptyString(
+          en.CheckoutLinkGenerator[
+            key as keyof typeof en.CheckoutLinkGenerator
+          ],
+          key,
+          'en.CheckoutLinkGenerator',
+        );
+      }
+      // QrGenerator 固有
+      expectNonEmptyString(ja.QrGenerator.standardHint, 'standardHint', 'ja.QrGenerator');
+      expectNonEmptyString(en.QrGenerator.standardHint, 'standardHint', 'en.QrGenerator');
+      expectNonEmptyString(
+        ja.QrGenerator.feeReceiverHintStandard,
+        'feeReceiverHintStandard',
+        'ja.QrGenerator',
+      );
+      expectNonEmptyString(
+        en.QrGenerator.feeReceiverHintStandard,
+        'feeReceiverHintStandard',
+        'en.QrGenerator',
+      );
+    });
+
+    it('payModeStandardDesc / standardModeBody は 0.5% 文言を含む (用語 regression)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.QrGenerator.payModeStandardDesc).toMatch(/0\.5%/);
+      expect(en.QrGenerator.payModeStandardDesc).toMatch(/0\.5%/);
+      expect(ja.PaymentForm.standardModeBody).toMatch(/0\.5%/);
+      expect(en.PaymentForm.standardModeBody).toMatch(/0\.5%/);
+    });
+
+    it('payModeGaslessDesc は 1.0% 文言を含む (用語 regression)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.QrGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
+      expect(en.QrGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
+      expect(ja.CheckoutLinkGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
+      expect(en.CheckoutLinkGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
+    });
+
+    it('旧 directHint / directOption / directOptionDesc が ja/en の QrGenerator から削除されている', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      // 削除済 key は存在しない (型 cast でアクセス可能性をチェック)
+      expect(
+        (ja.QrGenerator as Record<string, unknown>).directHint,
+      ).toBeUndefined();
+      expect(
+        (ja.QrGenerator as Record<string, unknown>).directOption,
+      ).toBeUndefined();
+      expect(
+        (en.QrGenerator as Record<string, unknown>).directHint,
+      ).toBeUndefined();
+      expect(
+        (en.QrGenerator as Record<string, unknown>).directOption,
+      ).toBeUndefined();
+    });
+
+    it('旧 directWarningTitle / directWarningBody / directBatchHint / customerDirect が PaymentForm から削除されている', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      const removed = [
+        'directWarningTitle',
+        'directWarningBody',
+        'directBatchHint',
+        'customerDirect',
+      ];
+      for (const key of removed) {
+        expect(
+          (ja.PaymentForm as Record<string, unknown>)[key],
+        ).toBeUndefined();
+        expect(
+          (en.PaymentForm as Record<string, unknown>)[key],
+        ).toBeUndefined();
+      }
+    });
+  });
 });

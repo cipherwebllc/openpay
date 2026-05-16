@@ -17,6 +17,7 @@ describe('useCheckoutSettings', () => {
       token: 'jpyc',
       chain: 'polygon',
       gasMode: 'customer',
+      payMode: 'gasless',
       items: [{ name: '', qty: '', price: '' }],
       orderId: '',
       description: '',

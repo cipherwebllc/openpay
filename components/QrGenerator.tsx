@@ -20,7 +20,6 @@ import {
   parseSplitDrafts,
   SPLIT_MAX_ENTRIES,
   type PayParams,
-  type PayMode,
   type SplitDraft,
 } from '@/lib/url';
 import { buildEip681TransferUri } from '@/lib/eip681';
@@ -31,7 +30,7 @@ import {
   type TokenSymbol,
 } from '@/lib/tokens';
 import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
-import type { GasMode } from '@/lib/fee';
+import type { GasMode, PayMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
@@ -134,9 +133,10 @@ export function QrGenerator() {
   const amountValid =
     mode === 'static' ||
     (mode === 'amount' && DECIMAL_PATTERN.test(amount) && Number(amount) > 0);
-  const payMode: PayMode = settings.directTransfer ? 'direct' : 'gasless';
+  const payMode: PayMode = settings.payMode;
+  const isStandard = payMode === 'standard';
 
-  // direct mode では split は無視する (PaymentForm 側でも無視するので URL に
+  // standard mode では split は無視する (PaymentForm 側でも無視するので URL に
   // 含めると混乱)。それ以外では parseSplitDrafts で検証して、有効な entries
   // のみ URL に含める。
   const splitParsed = useMemo(
@@ -144,9 +144,7 @@ export function QrGenerator() {
     [settings.splits, effectiveReceiver],
   );
   const splitsForUrl =
-    !settings.directTransfer &&
-    splitParsed.entries &&
-    splitParsed.entries.length > 0
+    !isStandard && splitParsed.entries && splitParsed.entries.length > 0
       ? splitParsed.entries
       : undefined;
 
@@ -210,14 +208,17 @@ export function QrGenerator() {
     return parts.join('-');
   }, [settings.storeName, settings.token, settings.chain, mode, amount]);
 
-  // 互換 QR (EIP-681) — direct + amount のときだけ併発行 (gasless / split は EIP-681 で表現不可)。
+  // 互換 QR (EIP-681) — standard + amount のときだけ併発行 (gasless / split は
+  // EIP-681 で表現不可)。standard でも OpenPay の決済 UI を経由する派生 QR とは
+  // 別建てで「純粋な ERC20 transfer」も同時提供する利便性のため (店舗の主動線は
+  // OpenPay decentpath、EIP-681 は MetaMask Mobile 等の直接 scan 用 fallback)。
   // amount は sanitizeAmount で常に decimals 内に切り詰められているため、builder は
   // throw しない。
   const eip681Uri = useMemo(() => {
     if (
       !hydrated ||
       !effectiveReceiver ||
-      !settings.directTransfer ||
+      !isStandard ||
       mode !== 'amount' ||
       !amountValid
     ) {
@@ -233,7 +234,7 @@ export function QrGenerator() {
   }, [
     hydrated,
     effectiveReceiver,
-    settings.directTransfer,
+    isStandard,
     mode,
     amountValid,
     deployment.address,
@@ -376,7 +377,7 @@ export function QrGenerator() {
               chain={settings.chain}
               receiver={settings.receiver}
               gasMode={settings.gasMode}
-              direct={settings.directTransfer}
+              payMode={settings.payMode}
             />
           }
         >
@@ -480,9 +481,42 @@ export function QrGenerator() {
             />
           </Field>
 
-          {settings.directTransfer ? (
+          <Field label={t('payModeLabel')}>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(['gasless', 'standard'] as PayMode[]).map((pm) => {
+                const active = settings.payMode === pm;
+                return (
+                  <button
+                    key={pm}
+                    type="button"
+                    onClick={() =>
+                      setSettings((s) => ({ ...s, payMode: pm }))
+                    }
+                    className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                      active
+                        ? 'border-brand bg-brand/5 text-brand-dark'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="font-semibold">
+                      {pm === 'gasless'
+                        ? t('payModeGaslessTitle')
+                        : t('payModeStandardTitle')}
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      {pm === 'gasless'
+                        ? t('payModeGaslessDesc')
+                        : t('payModeStandardDesc')}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
+          {isStandard ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
-              {t('directHint')}
+              {t('standardHint')}
             </div>
           ) : (
             <Field label={t('gasLabel')}>
@@ -519,7 +553,7 @@ export function QrGenerator() {
             </Field>
           )}
 
-          {!settings.directTransfer && (
+          {!isStandard && (
             <Field
               label={t('splitLabel', {
                 primaryPercent: 100 - splitParsed.sum,
@@ -630,27 +664,6 @@ export function QrGenerator() {
                 </button>
               )}
             </div>
-            <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-600">
-              <input
-                type="checkbox"
-                checked={settings.directTransfer}
-                onChange={(e) =>
-                  setSettings((s) => ({
-                    ...s,
-                    directTransfer: e.target.checked,
-                  }))
-                }
-                className="mt-0.5"
-              />
-              <span>
-                <span className="font-medium text-slate-700">
-                  {t('directOption')}
-                </span>
-                <span className="block text-slate-500">
-                  {t('directOptionDesc')}
-                </span>
-              </span>
-            </label>
           </AdvancedSection>
         </SettingsAccordion>
       </section>
@@ -746,21 +759,21 @@ export function QrGenerator() {
             </div>
           </section>
         )}
-        {!settings.directTransfer && (
-          <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600 print:hidden">
-            <p className="font-semibold text-slate-700">
-              {t('feeReceiverHeading')}
-            </p>
-            <p className="mt-1 break-all font-mono">{env.feeReceiver}</p>
-            <p className="mt-2 text-slate-500">
-              {t(
-                settings.token === 'jpyc'
-                  ? 'feeReceiverHintJpyc'
-                  : 'feeReceiverHintUsdc',
-              )}
-            </p>
-          </div>
-        )}
+        <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600 print:hidden">
+          <p className="font-semibold text-slate-700">
+            {t('feeReceiverHeading')}
+          </p>
+          <p className="mt-1 break-all font-mono">{env.feeReceiver}</p>
+          <p className="mt-2 text-slate-500">
+            {isStandard
+              ? t('feeReceiverHintStandard')
+              : t(
+                  settings.token === 'jpyc'
+                    ? 'feeReceiverHintJpyc'
+                    : 'feeReceiverHintUsdc',
+                )}
+          </p>
+        </div>
         {eip681Uri && (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4 print:hidden">
             <h3 className="self-start text-sm font-semibold text-slate-800">
@@ -834,19 +847,24 @@ function SettingsSummary({
   chain,
   receiver,
   gasMode,
-  direct,
+  payMode,
 }: {
   token: TokenSymbol;
   chain: ChainSlug;
   receiver: string;
   gasMode: GasMode;
-  direct: boolean;
+  payMode: PayMode;
 }) {
   const tokenLabel = defaultDeploymentForSymbol(token).displaySymbol;
   const chainLabel = chainForSlug(chain).name;
   const recvLabel = isAddress(receiver) ? shortAddress(receiver) : '—';
-  // direct: 運営手数料 0% / customer: 顧客が gas / merchant: 店主が gas
-  const tail = direct ? '0%' : gasMode === 'customer' ? 'gas:cust' : 'gas:merch';
+  // standard: 0.5% (gas は wallet 側) / gasless: 1.0% + gas 負担者
+  const tail =
+    payMode === 'standard'
+      ? '0.5%/std'
+      : gasMode === 'customer'
+        ? '1%/gas:cust'
+        : '1%/gas:merch';
   return (
     <span className="font-mono">
       {tokenLabel} · {chainLabel} · {recvLabel} · {tail}

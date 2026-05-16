@@ -1,7 +1,7 @@
 'use client';
 
 import { isValidChainSlug, type ChainSlug } from '@/lib/chains';
-import type { GasMode } from '@/lib/fee';
+import type { GasMode, PayMode } from '@/lib/fee';
 import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
@@ -12,12 +12,15 @@ type QrSettings = {
   // 送金チェーン (slug)。usdc では 4 chain から選択可能、jpyc は polygon 固定。
   chain: ChainSlug;
   // ネットワーク手数料 (gas) の負担者: customer (顧客上乗せ) / merchant (店主吸収)。
-  // 運営手数料は両モードとも常に店主負担。既定 customer (gas spike を店主が被らない安全側)。
+  // OpenPay 利用手数料は両モードとも常に店主負担。既定 customer (gas spike を店主が被らない安全側)。
+  // payMode='standard' のとき gasMode は無視される (OpenPay は gas に touch しないため)。
   gasMode: GasMode;
-  // 上級者向け: 顧客がガス代を負担する直接送金モード。
-  // false (gasless+1%手数料) を既定にする。
-  directTransfer: boolean;
-  // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人
+  // 決済モード:
+  //   gasless:  OpenPay が gas を肩代わり、OpenPay 利用手数料 1.0% (default)
+  //   standard: 顧客が wallet で自前 gas を支払、OpenPay 利用手数料 0.5%
+  payMode: PayMode;
+  // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人。
+  // standard mode では UI 側で split を無効化するが、設定としては保持可能 (mode 切替時に復元される)。
   splits: SplitDraft[];
   // 店舗向け表示。DB を持たず、端末ローカルのレジ/印刷設定として保存する。
   storeName: string;
@@ -32,7 +35,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   token: 'jpyc',
   chain: 'polygon',
   gasMode: 'customer',
-  directTransfer: false,
+  payMode: 'gasless',
   splits: [],
   storeName: '',
   posterNote: '',
@@ -96,6 +99,17 @@ export function sanitizeTokenSymbol(
   return value === 'jpyc' || value === 'usdc' ? value : fallback;
 }
 
+// localStorage には旧 schema (directTransfer: boolean) の値が残っている可能性が
+// あるため、payMode が未指定で directTransfer=true なら 'standard' に migrate。
+// それ以外は default 'gasless' に倒す。
+function resolvePayMode(loaded: Partial<QrSettings> & { directTransfer?: unknown }): PayMode {
+  if (loaded.payMode === 'gasless' || loaded.payMode === 'standard') {
+    return loaded.payMode;
+  }
+  if (loaded.directTransfer === true) return 'standard';
+  return DEFAULT_SETTINGS.payMode;
+}
+
 function sanitize(loaded: Partial<QrSettings>): QrSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   return {
@@ -109,10 +123,7 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
       loaded.gasMode === 'customer' || loaded.gasMode === 'merchant'
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
-    directTransfer:
-      typeof loaded.directTransfer === 'boolean'
-        ? loaded.directTransfer
-        : DEFAULT_SETTINGS.directTransfer,
+    payMode: resolvePayMode(loaded),
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),

@@ -8,7 +8,7 @@
     },
     "tipPanel": {
       "heading": "Generate Tip widget embed code",
-      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. 1.0% fee + network fee (estimate)."
+      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. OpenPay service fee 1.0% + estimated network fee (gasless payment)."
     },
     "linkPay": "/pay (customer)",
     "offramp": {
@@ -36,21 +36,24 @@
     "storeNamePlaceholder": "e.g. OpenPay Coffee",
     "posterNoteLabel": "Poster note (optional)",
     "posterNotePlaceholder": "e.g. Show the completed payment screen to staff",
-    "directHint": "Direct transfer mode: 0% operator fee. Customer pays gas in the native token.",
-    "gasLabel": "Gas-equivalent burden",
+    "payModeLabel": "Payment mode",
+    "payModeGaslessTitle": "Gasless payment",
+    "payModeGaslessDesc": "OpenPay covers gas. OpenPay service fee 1.0% + estimated network fee (merchant pays / customer pays selectable).",
+    "payModeStandardTitle": "Standard payment (with gas)",
+    "payModeStandardDesc": "Customer pays gas from their own wallet. OpenPay service fee 0.5% (no gas sponsorship).",
+    "standardHint": "Standard payment (with gas) mode: the customer pays gas (POL / ETH) from their own wallet. OpenPay does not sponsor gas. The OpenPay service fee is 0.5% of the transaction amount.",
+    "gasLabel": "Gas-equivalent burden (gasless mode only)",
     "gasCustomerTitle": "Customer adds gas equivalent",
     "gasMerchantTitle": "Merchant absorbs gas equivalent",
-    "gasCustomerDesc": "The gas equivalent is added on top of the bill and paid by the customer (your take is stable across gas spikes; this is the gas-sponsorship portion of the OpenPay service fee).",
-    "gasMerchantDesc": "You absorb the gas equivalent. Customer pays only the displayed amount (gas variability is your risk).",
+    "gasCustomerDesc": "The estimated network fee is added on top of the bill and paid by the customer (your take is stable across gas spikes; this is the gas-sponsorship portion of the OpenPay service fee).",
+    "gasMerchantDesc": "You absorb the estimated network fee; customer pays only the displayed amount (gas variability is your risk).",
     "advancedExtra": "Extras",
     "quickAmountsLabel": "Register quick amounts",
     "quickAmountPlaceholder": "e.g. 1000",
     "quickAmountAdd": "+ Add amount",
     "quickAmountRemove": "Remove quick amount",
-    "directOption": "Direct transfer (advanced)",
-    "directOptionDesc": "Customer pays gas (POL / ETH) themselves; the operator fee is skipped and a plain ERC20 transfer is sent.",
     "splitLabel": "Multi-recipient split (primary keeps {primaryPercent}%)",
-    "splitDescription": "Distribute up to {max} additional recipients by %; primary keeps the remainder. Sent as a single batched UserOperation.",
+    "splitDescription": "Distribute up to {max} additional recipients by %; primary keeps the remainder. Sent as a single batched UserOperation (gasless mode only).",
     "splitPercentLabel": "%",
     "splitAdd": "+ Add recipient",
     "splitRemove": "Remove",
@@ -76,9 +79,10 @@
     "qrPlaceholderNoAddress": "Enter receiver address (Advanced)",
     "qrPlaceholderNoAmount": "Enter an amount",
     "qrPlaceholderGenerating": "Generating QR…",
-    "feeReceiverHeading": "Operator fee receiver",
-    "feeReceiverHintJpyc": "(JPYC: 1.0% + network fee)",
-    "feeReceiverHintUsdc": "(USDC: 1.0% + network fee)",
+    "feeReceiverHeading": "OpenPay service fee receiver",
+    "feeReceiverHintJpyc": "(JPYC gasless: 1.0% + estimated network fee)",
+    "feeReceiverHintUsdc": "(USDC gasless: 1.0% + estimated network fee)",
+    "feeReceiverHintStandard": "(Standard payment: 0.5%. Customer pays network fee from their own wallet.)",
     "eip681Title": "Wallet-native QR (EIP-681)",
     "eip681Description": "A standards-compliant ERC20 transfer URI that any EIP-681 wallet (Hashport, MetaMask Mobile, etc.) can scan directly. Bypasses OpenPay's checkout (gasless / split / 1% fee); the merchant receives the full amount.",
     "eip681Copy": "Copy URI",
@@ -88,29 +92,33 @@
     "title": "OpenPay Payment",
     "amountHeader": "Amount due",
     "amountInputHint": "Enter amount ({symbol})",
-    "directWarningTitle": "⚠ Customer pays gas",
-    "directWarningBody": "This QR is in direct transfer mode. You need {nativeToken} (native gas token) in your wallet. The merchant receives the full amount with no operator fee.",
+    "standardModeTitle": "Standard payment (with gas)",
+    "standardModeBody": "This QR uses standard payment (with gas) mode. You need {nativeToken} (native gas token) in your wallet. OpenPay does not sponsor gas. The OpenPay service fee is 0.5% of the transaction amount. Payment is split into two transfers (1. merchant, 2. OpenPay service fee). Please approve both prompts in your wallet.",
+    "modeBadgeGasless": "Gasless payment",
+    "modeBadgeStandard": "Standard payment (with gas)",
     "breakdownTitle": "Breakdown",
     "merchantRow": "To merchant",
-    "merchantRowAfterFee": "Merchant receives (after fees)",
+    "merchantRowAfterFee": "Merchant receives (after OpenPay service fee)",
     "primaryRecipientRow": "Primary ({percent}%) {addr}",
     "splitRecipientRow": "Recipient ({percent}%) {addr}",
-    "feeRow": "Operator fee (merchant absorbs)",
-    "gasRow": "Network fee (estimate, you pay)",
-    "gasRowMerchant": "Network fee (estimate, merchant absorbs)",
+    "feeRow": "OpenPay service fee (merchant pays)",
+    "gasRow": "Estimated network fee (customer pays)",
+    "gasRowMerchant": "Estimated network fee (merchant pays)",
+    "gasRowStandard": "Network fee",
+    "gasRowStandardValue": "Paid separately from your wallet",
     "gasRowValue": "up to {amount}",
     "gasRowPending": "Fetching estimate…",
-    "customerCustomerGas": "You pay (bill + gas)",
+    "customerCustomerGas": "You pay (bill + estimated network fee)",
     "customerMerchantGas": "You pay",
-    "customerDirect": "You pay",
+    "customerStandard": "You pay (+ wallet-side {nativeToken} gas)",
     "merchantGasHint": "Merchant absorbs the network fee. You pay only the displayed amount.",
-    "directBatchHint": "Sends a single ERC20 transfer directly. Smart Account / Pimlico Paymaster is not used.",
+    "standardBatchHint": "Standard payment: approve two transfers in sequence (1. merchant, 2. OpenPay service fee). If you dismiss the wallet after approving the first, the merchant transfer is final and the second can be retried via the \"Retry service-fee transfer\" button. Smart Account / Pimlico Paymaster is not used.",
     "gaslessBatchHintJpyc": "Upper-bound estimate. Actual gas is at or below this amount (paid in JPYC).",
     "gaslessBatchHintUsdc": "Upper-bound estimate. Actual gas is at or below this amount (paid in USDC).",
     "gasInfoUsdc": "Pay the network fee in USDC via Pimlico ERC20 Paymaster — no need to hold native ETH. The figure shown is a worst-case estimate; any surplus over the actual cost is not charged.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers POL gas; you complete the payment in JPYC alone with no native (POL) holdings required.",
     "approvalCheckLink": "Review gas approvals",
-    "splitBatchHint": "Gas is covered by the operator (Pimlico Sponsorship Paymaster). {count} transfers are batched in a single UserOperation.",
+    "splitBatchHint": "Gas is covered by OpenPay (Pimlico Sponsorship Paymaster). {count} transfers are batched in a single UserOperation.",
     "walletSection": "Wallet",
     "switchChain": "Switch to {chainName}",
     "switchingChain": "Switching chain…",
@@ -126,10 +134,19 @@
     "btnEnterAmount": "Enter an amount",
     "btnPay": "Pay {amount}",
     "btnSending": "Sending…",
+    "btnStandardMerchantSending": "Approve the merchant transfer…",
+    "btnStandardMerchantMining": "Confirming merchant transfer…",
+    "btnStandardFeeSending": "Approve the service-fee transfer…",
+    "btnStandardFeeMining": "Confirming service-fee transfer…",
+    "standardMerchantTxLabel": "Merchant Tx Hash",
+    "standardFeeTxLabel": "Service Fee Tx Hash",
+    "standardFeeRetryTitle": "OpenPay service fee transfer failed",
+    "standardFeeRetryBody": "Your transfer to the merchant has been finalized. Please retry sending the OpenPay service fee.",
+    "standardFeeRetryButton": "Retry service-fee transfer",
     "errorTitle": "Error",
     "errorGasCongested": "The network is congested and gas prices are too high. Please try again later.",
     "errorGasQuote": "Failed to fetch the gas estimate. Check your network connection and try again.",
-    "errorMerchantUnderflow": "After deducting fees the merchant would receive 0. Minimum {min} required.",
+    "errorMerchantUnderflow": "After deducting the OpenPay service fee the merchant would receive 0. Minimum {min} required.",
     "errorIncompatibleSmartAccount": "Your wallet is delegated to a Smart Account implementation that OpenPay does not support yet. Please try a different wallet.",
     "errorMav2Disabled": "Payments from wallets backed by Alchemy Modular Account v2 (such as HashPort) are being rolled out gradually. Please try again later.",
     "successTitle": "Payment complete",
@@ -149,8 +166,8 @@
     "amountCustomPlaceholderUsdc": "e.g. 7.50",
     "breakdownTitle": "Breakdown",
     "creatorRow": "Creator receives",
-    "feeRow": "Operator fee",
-    "gasRow": "Network fee (estimate)",
+    "feeRow": "OpenPay service fee",
+    "gasRow": "Estimated network fee",
     "gasRowValue": "up to {amount}",
     "gasRowPending": "Fetching estimate…",
     "customerRow": "You pay",
@@ -228,17 +245,23 @@
     "checkoutTitle": "OpenPay Checkout",
     "orderHeading": "Order #{id}",
     "payToLabel": "To {addr}",
+    "modeBadgeGasless": "Gasless payment",
+    "modeBadgeStandard": "Standard payment (with gas)",
     "itemsTitle": "Items",
     "subtotalRow": "Subtotal",
-    "feeRow": "Operator fee",
-    "gasRow": "Network fee (estimate)",
-    "gasRowMerchant": "Network fee (estimate, merchant absorbs)",
+    "feeRow": "OpenPay service fee",
+    "gasRow": "Estimated network fee",
+    "gasRowMerchant": "Estimated network fee (merchant pays)",
+    "gasRowStandard": "Network fee",
+    "gasRowStandardValue": "Paid separately from your wallet",
     "gasRowValue": "up to {amount}",
     "gasRowPending": "Fetching estimate…",
     "totalRow": "You pay",
     "totalRowMerchantGas": "You pay",
+    "totalRowStandard": "You pay (+ wallet-side {nativeToken} gas)",
     "gaslessHintJpyc": "Upper-bound estimate. Actual gas is at or below this amount.",
     "gaslessHintUsdc": "Upper-bound estimate. Actual gas is at or below this amount.",
+    "standardHint": "Standard payment: approve two transfers in sequence (1. merchant, 2. OpenPay service fee). The network fee ({nativeToken}) is requested separately by your wallet. If you dismiss after the first approval, use the \"Retry service-fee transfer\" button to send the second.",
     "gasInfoUsdc": "Pay the network fee in USDC via Pimlico ERC20 Paymaster — no need to hold native ETH. The figure shown is a worst-case estimate; any surplus over the actual cost is not charged.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers POL gas; you complete the payment in JPYC alone with no native (POL) holdings required.",
     "approvalCheckLink": "Review gas approvals",
@@ -257,11 +280,20 @@
     "btnGasQuoteLoading": "Fetching gas estimate…",
     "btnPay": "Pay {amount}",
     "btnSending": "Sending…",
+    "btnStandardMerchantSending": "Approve the merchant transfer…",
+    "btnStandardMerchantMining": "Confirming merchant transfer…",
+    "btnStandardFeeSending": "Approve the service-fee transfer…",
+    "btnStandardFeeMining": "Confirming service-fee transfer…",
+    "standardMerchantTxLabel": "Merchant Tx Hash",
+    "standardFeeTxLabel": "Service Fee Tx Hash",
+    "standardFeeRetryTitle": "OpenPay service fee transfer failed",
+    "standardFeeRetryBody": "Your transfer to the merchant has been finalized. Please retry sending the OpenPay service fee.",
+    "standardFeeRetryButton": "Retry service-fee transfer",
     "cancelLink": "← Cancel and return",
     "errorTitle": "Error",
     "errorGasCongested": "The network is congested and gas prices are too high. Please try again later.",
     "errorGasQuote": "Failed to fetch the gas estimate. Check your network connection and try again.",
-    "errorMerchantUnderflow": "After deducting fees the merchant would receive 0. Minimum {min} required.",
+    "errorMerchantUnderflow": "After deducting the OpenPay service fee the merchant would receive 0. Minimum {min} required.",
     "errorIncompatibleSmartAccount": "Your wallet is delegated to a Smart Account implementation that OpenPay does not support yet. Please try a different wallet.",
     "errorMav2Disabled": "Payments from wallets backed by Alchemy Modular Account v2 (such as HashPort) are being rolled out gradually. Please try again later.",
     "successTitle": "Payment complete",
@@ -303,19 +335,24 @@
     "descriptionPlaceholder": "Thanks for your order",
     "customerEmailLabel": "Customer email (optional, for prefill)",
     "customerEmailPlaceholder": "alice@example.com",
-    "gasLabel": "Gas-equivalent burden",
+    "payModeLabel": "Payment mode",
+    "payModeGaslessTitle": "Gasless payment",
+    "payModeGaslessDesc": "OpenPay covers gas. OpenPay service fee 1.0% + estimated network fee (merchant pays / customer pays selectable).",
+    "payModeStandardTitle": "Standard payment (with gas)",
+    "payModeStandardDesc": "Customer pays gas from their own wallet. OpenPay service fee 0.5% (no gas sponsorship).",
+    "gasLabel": "Gas-equivalent burden (gasless mode only)",
     "gasCustomerTitle": "Customer adds gas equivalent",
     "gasMerchantTitle": "Merchant absorbs gas equivalent",
-    "gasCustomerDesc": "Customer pays the gas equivalent on top of the bill",
-    "gasMerchantDesc": "Merchant absorbs the gas equivalent; customer pays only the displayed amount",
+    "gasCustomerDesc": "Customer pays the estimated network fee on top of the bill",
+    "gasMerchantDesc": "Merchant absorbs the estimated network fee; customer pays only the displayed amount",
     "successUrlLabel": "Success redirect URL (optional)",
     "successUrlPlaceholder": "https://shop.example.com/thanks",
-    "successUrlHint": "Redirected 3 seconds after success. tx_hash / order_id are appended as query.",
+    "successUrlHint": "Redirected 3 seconds after success. tx_hash / order_id / mode are appended as query.",
     "cancelUrlLabel": "Cancel URL (optional)",
     "cancelUrlPlaceholder": "https://shop.example.com/cart",
     "webhookLabel": "Webhook URL (optional)",
     "webhookPlaceholder": "https://shop.example.com/openpay-webhook",
-    "webhookHint": "Posts JSON on success (Tip-compatible shape). CORS must allow this origin.",
+    "webhookHint": "Posts JSON on success (Tip-compatible shape; the mode field distinguishes gasless / standard). CORS must allow this origin.",
     "checkoutUrlTitle": "Checkout URL",
     "qrTitle": "QR code (optional)",
     "qrDescription": "Print for in-store / cashier use.",
@@ -385,23 +422,23 @@
     },
     "article2": {
       "title": "Article 2 (Definitions)",
-      "body": "(1) \"Merchant\" means a business or individual who receives Supported Token payments through the Service. (2) \"Customer\" means a person who pays a Merchant through the Service. (3) \"Wallet\" means a self-custodial crypto wallet (EOA or smart contract account) controlled by the user. (4) \"Supported Token\" means a digital asset supported by the Service, currently including JPYC, an electronic payment instrument issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act, and USDC, a stablecoin issued by Circle Internet Financial, Inc. (5) \"Network Fee\" means gas required to confirm a blockchain transaction."
+      "body": "(1) \"Merchant\" means a business or individual who receives Supported Token payments through the Service. (2) \"Customer\" means a person who pays a Merchant through the Service. (3) \"Wallet\" means a self-custodial crypto wallet (EOA or smart contract account) controlled by the user. (4) \"Supported Token\" means a digital asset supported by the Service, currently including JPYC, an electronic payment instrument issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act, and USDC, a stablecoin issued by Circle Internet Financial, Inc. (5) \"Network Fee\" means gas required to confirm a blockchain transaction. (6) \"Gasless Payment\" means a payment mode in which the Company sponsors the Network Fee using ERC-4337 Paymaster or similar mechanisms. (7) \"Standard Payment (with Gas)\" means a payment mode in which the Company does not sponsor the Network Fee and the Customer pays it from their own wallet."
     },
     "article3": {
       "title": "Article 3 (Nature of the Service)",
-      "body": "The Service is a non-custodial tool that facilitates transfers of Supported Tokens between user wallets. The Company never holds user funds. All transfers are executed on-chain via the user's own signature. The Company does not issue or operate the Supported Tokens, the underlying blockchains, or the wallet applications used by users. The Service consists of generating EIP-681 payment URIs, QR codes, batching user operations under the ERC-4337 standard, and relaying gas sponsorship; the Company does not intermediate in the underlying user-to-user transaction itself. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable from Customer to Merchant. In a payment through the Service, the price of goods and similar amounts are transferred directly from the Customer's wallet to the Merchant's designated wallet. In addition, the OpenPay service fee determined by the Company may be transferred separately to a wallet designated by the Company, depending on the choice or configuration of the Customer or Merchant. The Company may sponsor the network fee (gas) for relevant transactions using ERC-4337 Paymaster or similar mechanisms. Such gas sponsorship is a feature of the Service and does not constitute custody or management of user assets by the Company."
+      "body": "The Service is a non-custodial tool that facilitates transfers of Supported Tokens between user wallets. The Company never holds user funds. All transfers are executed on-chain via the user's own signature. The Company does not issue or operate the Supported Tokens, the underlying blockchains, or the wallet applications used by users. The Service consists of generating EIP-681 payment URIs, QR codes, batching user operations under the ERC-4337 standard, and relaying gas sponsorship; the Company does not intermediate in the underlying user-to-user transaction itself. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable from Customer to Merchant. In a payment through the Service, the price of goods and similar amounts are transferred directly from the Customer's wallet to the Merchant's designated wallet. In addition, the OpenPay service fee determined by the Company is transferred separately from the user's wallet to a wallet designated by the Company. For transactions made in Gasless Payment mode, the Company may sponsor the Network Fee (gas) using ERC-4337 Paymaster or similar mechanisms. For transactions made in Standard Payment (with Gas) mode, the Company does not sponsor the Network Fee; the Customer pays it from their own wallet. Such gas sponsorship is a feature of the Service and does not constitute custody or management of user assets by the Company."
     },
     "article4": {
       "title": "Article 4 (Usage Environment)",
-      "body": "Users are responsible for preparing, at their own cost and risk, a compatible wallet, internet connection, token balance, and where applicable, gas to use the Service. Supported chains and tokens may be added, changed, or suspended at the Company's discretion without prior notice."
+      "body": "Users are responsible for preparing, at their own cost and risk, a compatible wallet, internet connection, token balance, and (when using Standard Payment (with Gas) mode or any other path where the Company does not sponsor gas) gas in the native token. Supported chains and tokens may be added, changed, or suspended at the Company's discretion without prior notice."
     },
     "article5": {
       "title": "Article 5 (Fees)",
-      "body": "(1) The Company charges its standard OpenPay service fee as consideration for the Service, which includes payment processing, QR code generation, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. (2) The OpenPay service fee is 1.0% of each transaction amount. (3) The OpenPay service fee is not deducted by the Company from Merchant sales proceeds. Instead, it is sent on-chain directly from the user's wallet to a wallet designated by the Company. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable from Customer to Merchant. (4) Actual network fees (gas) vary with blockchain congestion, underlying asset prices, third-party infrastructure specifications, and other factors. The OpenPay service fee may include the cost of gas sponsorship and the assumption of such volatility risk. (5) The gas estimate and OpenPay service fee displayed by the Company are not intended as a pass-through of actual costs. The Company will not seek additional payment, refund, or settle any difference between the displayed amount and the actual gas incurred, unless the Company expressly states otherwise. (6) The Merchant may, at the time of QR code issuance, be able to elect whether the OpenPay service fee and the gas equivalent are borne by the Customer or by the Merchant. If the Customer is selected, the Customer pays the OpenPay service fee in addition to the price of goods. If the Merchant is selected, the Customer pays only the price of goods, and the Merchant bears the OpenPay service fee. (7) The fee schedule, fees, supported tokens, supported chains, and the availability and conditions of gas sponsorship may be changed at the Company's discretion."
+      "body": "(1) The Company charges its standard OpenPay service fee as consideration for the Service, including payment processing, merchant QR code generation, the checkout UI, supported wallet integration, and operation and maintenance of the Service. (2) In Gasless Payment mode, gas sponsorship and mitigation of network-fee volatility risk are additionally included in the consideration; the OpenPay service fee is 1.0% of each transaction amount. In addition, an estimated network fee is collected separately from the Customer or the Merchant according to the Merchant's configuration. (3) In Standard Payment (with Gas) mode, the Company does not sponsor the Network Fee. The OpenPay service fee is 0.5% of each transaction amount, and the Customer pays the Network Fee in the native token from their own wallet. (4) The OpenPay service fee is not deducted by the Company from Merchant sales proceeds. Instead, it is sent on-chain directly from the user's wallet to a wallet designated by the Company. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable from Customer to Merchant. (5) In Gasless Payment mode, the actual Network Fee (gas) varies with blockchain congestion, underlying asset prices, third-party infrastructure specifications, and other factors. The OpenPay service fee may include the cost of gas sponsorship and the assumption of such volatility risk. The gas estimate and OpenPay service fee displayed by the Company are not intended as a pass-through of actual costs. The Company will not seek additional payment, refund, or settle any difference between the displayed amount and the actual gas incurred, unless the Company expressly states otherwise. (6) In Gasless Payment mode, the Merchant may, at the time of QR code issuance, be able to elect whether the estimated network fee is borne by the Customer or by the Merchant. If the Customer is selected, the Customer pays the estimated network fee in addition to the price of goods. If the Merchant is selected, the Customer pays only the price of goods, and the Merchant bears the estimated network fee. The OpenPay service fee is always borne by the Merchant in both modes. (7) The fee schedule, fees, supported tokens, supported chains, payment modes, and the availability and conditions of gas sponsorship may be changed at the Company's discretion."
     },
     "article6": {
       "title": "Article 6 (Irreversibility of Transactions)",
-      "body": "On-chain transactions executed through the Service cannot be cancelled, refunded, or modified due to the technical nature of blockchain. Users must verify the destination address, amount, token, and chain before submitting. The Company is not liable for losses caused by mistransfers or incorrect inputs."
+      "body": "On-chain transactions executed through the Service cannot be cancelled, refunded, or modified due to the technical nature of blockchain. Users must verify the destination address, amount, token, chain, and payment mode before submitting. The Company is not liable for losses caused by mistransfers or incorrect inputs."
     },
     "article7": {
       "title": "Article 7 (Prohibited Acts)",
@@ -432,11 +469,11 @@
     "intro": "{company} (the \"Company\") establishes this Privacy Policy (the \"Policy\") regarding the handling of personal information in connection with the blockchain payment service \"{service}\" (the \"Service\"), in compliance with the Act on the Protection of Personal Information of Japan (the \"APPI\") and related laws.",
     "section1": {
       "title": "1. Information We Collect",
-      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us; (5) on-chain transaction information generated or referenced through the Service (such as transaction hash, sender wallet address, recipient wallet address, supported token, supported chain, transfer amount, OpenPay service fee, and payment status). Some of this information is publicly recorded on the blockchain and may not be deletable or hideable by the Company. We may use cookies or local storage, but currently do not assign cookie identifiers that directly identify individual users."
+      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us; (5) on-chain transaction information generated or referenced through the Service (such as transaction hash, sender wallet address, recipient wallet address, supported token, supported chain, transfer amount, OpenPay service fee, payment mode, and payment status). Some of this information is publicly recorded on the blockchain and may not be deletable or hideable by the Company. We may use cookies or local storage, but currently do not assign cookie identifiers that directly identify individual users."
     },
     "section2": {
       "title": "2. Purposes of Use",
-      "body": "We use collected information for: (1) providing, operating, maintaining, and improving the Service; (2) responding to user inquiries; (3) statistical analysis and Service improvement; (4) detecting and preventing fraud, abuse, and unauthorized access; (5) responding to legal obligations; (6) other purposes ancillary to the above; (7) confirming payment status, calculating the OpenPay service fee, executing gas sponsorship, detecting fraud, and handling inquiries and incident investigations."
+      "body": "We use collected information for: (1) providing, operating, maintaining, and improving the Service; (2) responding to user inquiries; (3) statistical analysis and Service improvement; (4) detecting and preventing fraud, abuse, and unauthorized access; (5) responding to legal obligations; (6) other purposes ancillary to the above; (7) confirming payment status, calculating the OpenPay service fee, executing gas sponsorship in Gasless Payment mode, detecting fraud, and handling inquiries and incident investigations."
     },
     "section3": {
       "title": "3. Sharing with Third Parties and Service Providers",
@@ -478,7 +515,7 @@
     },
     "section4": {
       "title": "4. Network Fee Volatility",
-      "body": "Network fees (gas) are required for on-chain transactions and vary significantly with network congestion, underlying asset prices, and other factors outside the Company's control. Gas estimates shown by the Service are best-effort estimates at the time of display and actual amounts may exceed them. The Company is not liable for losses arising from gas spikes or volatility."
+      "body": "Network fees (gas) are required for on-chain transactions and vary significantly with network congestion, underlying asset prices, and other factors outside the Company's control. In Gasless Payment mode, the gas estimates shown by the Service are best-effort estimates at the time of display and actual amounts may exceed them. In Standard Payment (with Gas) mode, the Customer pays the Network Fee from their own wallet according to the estimate displayed by the wallet application. The Company is not liable for losses arising from gas spikes or volatility."
     },
     "section5": {
       "title": "5. Third-Party Service Outages",
@@ -490,11 +527,11 @@
     },
     "section7": {
       "title": "7. OpenPay Service Fee and Gas Sponsorship",
-      "body": "The OpenPay service fee is consideration for use of the Service, including payment processing, QR code generation, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. The OpenPay service fee is not a pass-through of actual network fees (gas); the Company does not refund, charge additional amounts, or settle the difference between the displayed amount and the actual gas incurred. Once an OpenPay service fee transfer is finalized on-chain, it cannot, in principle, be cancelled, refunded, or modified."
+      "body": "The OpenPay service fee is consideration for use of the Service, including payment processing, merchant QR code generation, the checkout UI, supported wallet integration, and operation and maintenance of the Service. For transactions in Gasless Payment mode, gas sponsorship and mitigation of network-fee volatility risk are additionally included in the consideration. The OpenPay service fee is not a pass-through of actual network fees (gas); the Company does not refund, charge additional amounts, or settle the difference between the displayed amount and the actual gas incurred. Once an OpenPay service fee transfer is finalized on-chain, it cannot, in principle, be cancelled, refunded, or modified. In Standard Payment (with Gas) mode, the Company does not handle the Network Fee in any way; the Customer pays it from their own wallet."
     },
     "section8": {
       "title": "8. Use during the Alpha Phase",
-      "body": "The Service is currently in alpha. Unexpected defects, display errors, transfer failures, wallet connection issues, specification changes to supported chains and tokens, third-party infrastructure outages, and similar events may occur. Before using the Service for real transactions, you must send small test amounts and confirm the destination wallet, amount, supported token, supported chain, displayed fees, and the payment-completion flow."
+      "body": "The Service is currently in alpha. Unexpected defects, display errors, transfer failures, wallet connection issues, specification changes to supported chains and tokens, third-party infrastructure outages, and similar events may occur. Before using the Service for real transactions, you must send small test amounts and confirm the destination wallet, amount, supported token, supported chain, payment mode, displayed fees, and the payment-completion flow."
     },
     "legalNote": "This Disclaimer applies together with the Terms of Service. In case of conflict, the Terms of Service prevail. The Japanese version of this Disclaimer prevails over this English reference version."
   },
@@ -529,7 +566,7 @@
       },
       "serviceContent": {
         "label": "Service Description",
-        "value": "Non-custodial blockchain payment facilitation service, including generation of EIP-681 payment URIs and QR codes, batched user operations under ERC-4337, Tip widget, and gas relay. The Service never holds user funds."
+        "value": "Non-custodial blockchain payment facilitation service, including generation of EIP-681 payment URIs and QR codes, batched user operations under ERC-4337, Tip widget, and gas relay. The Service never holds user funds. The Service supports two payment modes: \"Gasless Payment\" and \"Standard Payment (with Gas)\"."
       },
       "supportedTokens": {
         "label": "Supported Tokens",
@@ -537,11 +574,11 @@
       },
       "price": {
         "label": "Service Fee (OpenPay Service Fee)",
-        "value": "1.0% of each transaction amount is charged as the OpenPay service fee. The OpenPay service fee covers payment processing, QR code generation, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. Whether the OpenPay service fee is borne by the Merchant or by the Customer may depend on the configuration chosen by the Merchant at QR code generation time."
+        "value": "The OpenPay service fee for the two payment modes is as follows. (1) Gasless Payment mode: 1.0% of each transaction amount is charged as the OpenPay service fee. The OpenPay service fee covers payment processing, merchant QR code generation, the checkout UI, supported wallet integration, gas sponsorship, mitigation of network-fee volatility risk, and operation and maintenance of the Service. (2) Standard Payment (with Gas) mode: 0.5% of each transaction amount is charged as the OpenPay service fee. The Company does not sponsor the Network Fee; the Customer pays it from their own wallet. The OpenPay service fee covers payment processing, merchant QR code generation, the checkout UI, supported wallet integration, and operation and maintenance of the Service. The OpenPay service fee is always borne by the Merchant in both modes. In Gasless Payment mode, the bearer of the additional estimated network fee may be configurable as either merchant pays or customer pays by the Merchant at QR code generation time."
       },
       "additionalFees": {
         "label": "Additional Costs",
-        "value": "(1) Network fees (gas): fees required for confirming transactions on the blockchain. The Company may sponsor gas using ERC-4337 Paymaster or similar mechanisms, in which case the user may be able to pay in JPYC (for JPYC payments) or USDC (for USDC payments) without separately holding native tokens such as POL or ETH. (2) Wallet application fees: governed by the terms of the wallet application chosen by the user. (3) Communication costs: internet connection charges and communication costs required to use the Service are borne by the user."
+        "value": "(1) Network fees (gas): fees required for confirming transactions on the blockchain. In Gasless Payment mode, the Company may sponsor gas using ERC-4337 Paymaster or similar mechanisms, in which case the user may be able to pay in JPYC (for JPYC payments) or USDC (for USDC payments) without separately holding native tokens such as POL or ETH. In Standard Payment (with Gas) mode, the Customer pays the Network Fee in the native token (POL, ETH, etc.) from their own wallet. (2) Wallet application fees: governed by the terms of the wallet application chosen by the user. (3) Communication costs: internet connection charges and communication costs required to use the Service are borne by the user."
       },
       "serviceStartTiming": {
         "label": "Service Provision Timing",
@@ -553,11 +590,11 @@
       },
       "returnPolicy": {
         "label": "Refunds and Cancellations",
-        "value": "Due to the technical nature of blockchain, finalized transfers (including transfers of the price of goods and transfers of the OpenPay service fee) cannot, in principle, be cancelled, refunded, or modified. The OpenPay service fee is consideration for use of the Service, including payment processing, gas sponsorship, and mitigation of network-fee volatility risk, and is, in principle, non-refundable after payment is completed. The Company also does not settle any difference between the displayed amount and the actual gas incurred. Before submitting, users must verify the destination address, amount, supported token, supported chain, OpenPay service fee, and bearer configuration. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope."
+        "value": "Due to the technical nature of blockchain, finalized transfers (including transfers of the price of goods and transfers of the OpenPay service fee) cannot, in principle, be cancelled, refunded, or modified. The OpenPay service fee is consideration for use of the Service, including payment processing, gas sponsorship in Gasless Payment mode, and mitigation of network-fee volatility risk, and is, in principle, non-refundable after payment is completed. The Company also does not settle any difference between the displayed amount and the actual gas incurred. Before submitting, users must verify the destination address, amount, supported token, supported chain, payment mode, OpenPay service fee, and bearer configuration. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope."
       },
       "environment": {
         "label": "Required Environment",
-        "value": "A wallet (EOA or smart contract account) capable of transacting on the supported blockchain (currently Polygon mainnet), supported token balance, and where applicable, network fees in the native token (e.g., POL), except for transactions where the Company sponsors the gas."
+        "value": "A wallet (EOA or smart contract account) capable of transacting on the supported blockchain (currently Polygon mainnet and others), supported token balance, and where applicable, network fees in the native token (e.g., POL), except for transactions in Gasless Payment mode where the Company sponsors the gas via Paymaster."
       }
     },
     "legalNote": "The Japanese version of this disclosure prevails. This English version is provided for reference only."

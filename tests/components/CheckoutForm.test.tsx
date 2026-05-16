@@ -19,6 +19,7 @@ vi.mock('wagmi', () => ({
 }));
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
+vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -36,6 +37,7 @@ vi.mock('@/lib/pimlico', async () => {
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
+import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
@@ -112,12 +114,92 @@ function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?:
   mockHook(useGasQuoteJpyc, mockState as Partial<ReturnType<typeof useGasQuoteJpyc>>);
 }
 
+let standardMutate: ReturnType<typeof vi.fn>;
+let standardRetryFee: ReturnType<typeof vi.fn>;
+function setStandardPaymentDefault() {
+  // CheckoutForm は useStandardPayment を必ず call する (条件付きフック禁止)。
+  // gasless 系テストは standard side が idle のままで動くため、共通 default を提供。
+  standardMutate = vi.fn();
+  standardRetryFee = vi.fn();
+  mockHook(useStandardPayment, {
+    mutate: standardMutate,
+    retryFee: standardRetryFee,
+    phase: 'idle',
+    isPending: false,
+    isSuccess: false,
+    isError: false,
+    isFeeError: false,
+    isMerchantError: false,
+    data: undefined,
+    error: null,
+    merchantTxHash: undefined,
+    feeTxHash: undefined,
+  } as Partial<ReturnType<typeof useStandardPayment>>);
+}
+
+// standard mode 用の state helper (PaymentForm の同名 helper と同じ shape)。
+function setStandardPayment(
+  state:
+    | 'idle'
+    | 'merchant-sending'
+    | 'merchant-mining'
+    | 'fee-sending'
+    | 'fee-mining'
+    | 'success'
+    | 'success-no-fee'
+    | 'merchant-error'
+    | 'fee-error',
+) {
+  standardMutate = vi.fn();
+  standardRetryFee = vi.fn();
+  const phase: ReturnType<typeof useStandardPayment>['phase'] =
+    state === 'success-no-fee' ? 'success' : state === 'idle' ? 'idle' : state;
+  const isPending =
+    state === 'merchant-sending' ||
+    state === 'merchant-mining' ||
+    state === 'fee-sending' ||
+    state === 'fee-mining';
+  mockHook(useStandardPayment, {
+    mutate: standardMutate,
+    retryFee: standardRetryFee,
+    phase,
+    isPending,
+    isSuccess: state === 'success' || state === 'success-no-fee',
+    isError: state === 'merchant-error' || state === 'fee-error',
+    isFeeError: state === 'fee-error',
+    isMerchantError: state === 'merchant-error',
+    data:
+      state === 'success'
+        ? {
+            merchantTxHash: `0x${'c'.repeat(64)}`,
+            feeTxHash: `0x${'d'.repeat(64)}`,
+            blockNumber: 123n,
+          }
+        : state === 'success-no-fee'
+          ? {
+              merchantTxHash: `0x${'c'.repeat(64)}`,
+              feeTxHash: undefined,
+              blockNumber: 123n,
+            }
+          : undefined,
+    error:
+      state === 'merchant-error'
+        ? new Error('user rejected request')
+        : state === 'fee-error'
+          ? new Error('fee tx reverted')
+          : null,
+    merchantTxHash: undefined,
+    feeTxHash: undefined,
+  } as Partial<ReturnType<typeof useStandardPayment>>);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setSwitchChain();
   setBalance(undefined);
   setSmartAccount(false);
   setBatchPayment('idle');
+  setStandardPaymentDefault();
   setGasQuote('disabled');
   setAccount({ connected: false });
   vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
@@ -829,5 +911,223 @@ describe('CheckoutForm — エラー表示', () => {
     setSmartAccount(false, new Error('SA init failed'));
     render(<CheckoutForm params={USDC_PARAMS} />);
     expect(screen.getByText('SA init failed')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 通常決済（ガスあり） / mode=standard の統合テスト
+// ---------------------------------------------------------------------------
+
+const STANDARD_USDC_PARAMS: CheckoutParams = {
+  ...USDC_PARAMS,
+  mode: 'standard',
+};
+
+describe('CheckoutForm — mode=standard 統合', () => {
+  it('明細: mode=standard では gas 見積行が「ウォレットで別途支払い」になり、SA 初期化は走らない', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+    expect(screen.getByText(/ウォレットで別途支払い/)).toBeInTheDocument();
+    // 「通常決済（ガスあり）」バッジ + standardHint で複数箇所
+    expect(
+      screen.getAllByText(/通常決済（ガスあり）/).length,
+    ).toBeGreaterThanOrEqual(1);
+    // useSmartAccount は enabled=false で呼ばれる
+    expect(useSmartAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'usdc' }),
+      false,
+    );
+  });
+
+  it('mode=standard で 「支払う」 クリック → standardMutate に正しい引数が渡る (0.5% fee)', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(false);
+    render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+    // USDC_PARAMS の items は subtotal 55 USDC (25 + 15*2)
+    await user.click(screen.getByRole('button', { name: /55 USDC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    const call = standardMutate.mock.calls[0][0];
+    // fee = 55 * 0.5% = 0.275 USDC
+    expect(call.feeAmount).toBe(275_000n);
+    // merchant = 55 - 0.275 = 54.725 USDC
+    expect(call.merchantAmount).toBe(54_725_000n);
+    expect(call.chainId).toBe(baseSepolia.id);
+  });
+
+  it('mode=standard 成功時の webhook payload に mode/merchantTxHash/feeTxHash が含まれる', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('success');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    render(
+      <CheckoutForm
+        params={{
+          ...STANDARD_USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe('https://shop.example.com/hook');
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.type).toBe('openpay.checkout.success');
+    expect(body.mode).toBe('standard');
+    expect(body.merchantTxHash).toBe(`0x${'c'.repeat(64)}`);
+    expect(body.feeTxHash).toBe(`0x${'d'.repeat(64)}`);
+    // gasless の userOpHash は出ない (mode=standard の payload では別 schema)
+    expect(body.userOpHash).toBeUndefined();
+    expect(body.txHash).toBeUndefined();
+    expect(body.merchantAmount).toBeDefined();
+    expect(body.feeAmount).toBeDefined();
+    fetchSpy.mockRestore();
+  });
+
+  it('mode=standard 成功時の webhook が同一 merchantTxHash で再 render しても 1 回しか発火しない (dedup)', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('success');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const { rerender } = render(
+      <CheckoutForm
+        params={{
+          ...STANDARD_USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    // 連続 rerender しても dedup されて発火されない
+    rerender(
+      <CheckoutForm
+        params={{
+          ...STANDARD_USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    rerender(
+      <CheckoutForm
+        params={{
+          ...STANDARD_USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />,
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('mode=standard 成功 + success_url → 「今すぐ確認ページへ」 click で query に tx_hash/fee_tx_hash/mode=standard 付与', async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi
+      .spyOn(window.location, 'assign')
+      .mockImplementation(() => {});
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('success');
+    render(
+      <CheckoutForm
+        params={{
+          ...STANDARD_USDC_PARAMS,
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /今すぐ確認ページへ/ }));
+    expect(assignSpy).toHaveBeenCalledOnce();
+    const url = new URL(assignSpy.mock.calls[0][0] as string);
+    expect(url.searchParams.get('tx_hash')).toBe(`0x${'c'.repeat(64)}`);
+    expect(url.searchParams.get('fee_tx_hash')).toBe(`0x${'d'.repeat(64)}`);
+    expect(url.searchParams.get('mode')).toBe('standard');
+    expect(url.searchParams.get('block')).toBe('123');
+    expect(url.searchParams.get('order_id')).toBe('ord-42');
+    // gasless の user_op_hash は付かない
+    expect(url.searchParams.get('user_op_hash')).toBeNull();
+    assignSpy.mockRestore();
+  });
+
+  it('mode=standard 成功 (fee=0): query に fee_tx_hash が含まれない', async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi
+      .spyOn(window.location, 'assign')
+      .mockImplementation(() => {});
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('success-no-fee');
+    render(
+      <CheckoutForm
+        params={{
+          ...STANDARD_USDC_PARAMS,
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /今すぐ確認ページへ/ }));
+    const url = new URL(assignSpy.mock.calls[0][0] as string);
+    expect(url.searchParams.get('tx_hash')).toBe(`0x${'c'.repeat(64)}`);
+    expect(url.searchParams.get('fee_tx_hash')).toBeNull();
+    assignSpy.mockRestore();
+  });
+
+  it('mode=standard fee-error: 「OpenPay 利用手数料の送信に失敗」+ retry ボタン → retryFee 発火', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('fee-error');
+    render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+    expect(
+      screen.getByText(/OpenPay 利用手数料の送信に失敗/),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: /手数料の送信を再試行/ }),
+    );
+    expect(standardRetryFee).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['merchant-sending' as const, /店舗送金を承認してください/],
+    ['merchant-mining' as const, /店舗送金を確定中/],
+    ['fee-sending' as const, /手数料の送金を承認してください/],
+    ['fee-mining' as const, /手数料の送金を確定中/],
+  ])('checkoutPhaseLabel: phase=%s でボタン label が %s', (phase, expected) => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment(phase);
+    render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+    expect(screen.getByRole('button', { name: expected })).toBeDisabled();
+  });
+
+  it('mode=standard success-no-fee: ResultPanel に fee Tx Hash 行が出ない', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('success-no-fee');
+    render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.queryByText(`0x${'d'.repeat(64)}`)).toBeNull();
+    expect(screen.queryByText('手数料 Tx Hash')).toBeNull();
+  });
+
+  it('mode=standard SuccessOverlay: merchant tx hash (truncate 形式) を txHash として描画', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('success');
+    render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+    expect(screen.getAllByText(/決済完了/).length).toBeGreaterThan(0);
+    // merchant tx の full hash が inline panel に 1 度出る
+    expect(
+      screen.getAllByText(`0x${'c'.repeat(64)}`).length,
+    ).toBeGreaterThanOrEqual(1);
+    // overlay の truncate (先頭 10 + … + 末尾 6) も検出
+    expect(
+      screen.getByText(/0xcccccccc…cccccc/),
+    ).toBeInTheDocument();
   });
 });

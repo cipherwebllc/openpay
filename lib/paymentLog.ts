@@ -5,7 +5,15 @@ import type { Address, Hex } from 'viem';
 import { logger } from './logger';
 
 export type PaymentResult = 'success' | 'reverted' | 'error';
-export type PaymentFlow = 'batch' | 'direct';
+// batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信)
+// direct:            旧 mode=direct (fee=0 単一 transfer)。廃止済みだが、過去 log の互換のため型は残置。
+// standard-merchant: 通常決済（ガスあり）の merchant への送金 tx (EOA writeContract)
+// standard-fee:      通常決済（ガスあり）の OpenPay 利用手数料徴収 tx (EOA writeContract)
+export type PaymentFlow =
+  | 'batch'
+  | 'direct'
+  | 'standard-merchant'
+  | 'standard-fee';
 
 export type PaymentLogEvent = {
   flow: PaymentFlow;

@@ -16,6 +16,7 @@ import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
+import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useAutoSwitchChain } from '@/hooks/useAutoSwitchChain';
@@ -42,32 +43,49 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const deployment = deploymentForSlug(params.token, chainSlug);
   const requiredChain = chainForSlug(chainSlug);
+  const isStandard = params.mode === 'standard';
   const paymasterMode = resolvePaymasterMode(deployment);
-  const isErc20Paymaster = paymasterMode === 'erc20';
-  const isSponsorship = paymasterMode === 'sponsorship';
-  const isMerchantGas = params.gas === 'merchant';
+  const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
+  const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
+  const isMerchantGas = !isStandard && params.gas === 'merchant';
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  const { data: saData, error: saError } = useSmartAccount(deployment, true);
-  const gasless = useBatchPayment(deployment);
-  const gasQuote = useGasQuote(deployment);
+  // Smart Account / Pimlico 経路は gasless のみ必要 — standard では skip。
+  const { data: saData, error: saError } = useSmartAccount(
+    deployment,
+    !isStandard,
+  );
+  const gasless = useBatchPayment(deployment, !isStandard);
+  const standard = useStandardPayment();
+  const gasQuote = useGasQuote(deployment, !isStandard);
 
   const totalWei = useMemo(
     () => calcCheckoutTotal(params.items, deployment.decimals),
     [params.items, deployment.decimals],
   );
 
-  const gasAmount = gasQuote.data?.gasAmount;
+  // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
+  const gasAmount = !isStandard ? gasQuote.data?.gasAmount : undefined;
   const breakdown = useMemo(
-    () => calcBreakdown(totalWei, params.token, params.gas, gasAmount ?? 0n),
-    [totalWei, params.token, params.gas, gasAmount],
+    () =>
+      calcBreakdown(
+        totalWei,
+        params.token,
+        params.mode,
+        params.gas,
+        gasAmount ?? 0n,
+      ),
+    [totalWei, params.token, params.mode, params.gas, gasAmount],
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
+
+  // standard mode で顧客が wallet で見ることになるネイティブガストークン (UI hint)。
+  const standardNativeToken = params.token === 'jpyc' ? 'POL' : 'ETH';
 
   const balanceQuery = useReadContract({
     address: deployment.address,
@@ -86,13 +104,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const wrongChain = isConnected && chainId !== requiredChain.id;
   useAutoSwitchChain(requiredChain.id, wrongChain);
 
-  const gasQuoteReady = gasQuote.data !== undefined;
+  const flowPending = isStandard ? standard.isPending : gasless.isPending;
+  const gasQuoteReady = isStandard || gasQuote.data !== undefined;
   // 運営の赤字防止: merchant が 0 になるケースは送信を block。
-  //   customer mode: total < fee → merchant = 0
-  //   merchant mode: total < fee + gas → merchant = 0
+  //   gasless / customer:  total < fee → merchant = 0
+  //   gasless / merchant:  total < fee + gas → merchant = 0
+  //   standard:            total < fee (0.5%) → merchant = 0
   const merchantUnderflow =
     totalWei > 0n &&
-    (isMerchantGas ? gasQuote.data !== undefined : true) &&
+    (isStandard || !isMerchantGas || gasQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
   const minimumAmountWei =
     breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
@@ -100,19 +120,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const canSubmit =
     isConnected &&
     !wrongChain &&
-    !!saData &&
+    (isStandard || !!saData) &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
-    !gasless.isPending &&
+    !flowPending &&
     gasQuoteReady &&
     !merchantUnderflow;
 
-  const error = isGasCongestedError(gasless.error)
+  const flowError = isStandard ? standard.error : gasless.error;
+  const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : isIncompatibleSmartAccountError(saError)
+    : !isStandard && isIncompatibleSmartAccountError(saError)
       ? t(saError.i18nKey)
-      : (gasless.error?.message ??
-        saError?.message ??
+      : (flowError?.message ??
+        (isStandard ? undefined : saError?.message) ??
         (gasQuote.error ? t('errorGasQuote') : null) ??
         (merchantUnderflow
           ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
@@ -122,14 +143,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。
   const [overlayDismissed, setOverlayDismissed] = useState(false);
 
-  // userOpHash ごとに 1 回限りの通知。gasQuote の refetchInterval (30s) で
-  // breakdown が再計算 → effect 再実行 → webhook 二重発火 / redirect 再起動
-  // を防ぐ gate。新規送金 (userOpHash が変わる) では再発火する。
-  const notifiedUserOpHashRef = useRef<string | null>(null);
+  // R: gasQuote refetch (30s) で breakdown が再計算 → notification effect が再実行
+  //    される。同一 tx hash の重複 webhook を防ぐため key 単位の dedup gate を使う。
+  const notifiedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (gasless.error) logger.error('checkout.failed', { error: gasless.error });
   }, [gasless.error]);
+
+  useEffect(() => {
+    if (standard.error)
+      logger.error('checkout.standard.failed', { error: standard.error });
+  }, [standard.error]);
 
   useEffect(() => {
     if (saError) logger.error('checkout.smart-account.init-failed', { error: saError });
@@ -139,13 +164,52 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     if (gasQuote.error) logger.error('checkout.gas-quote.failed', { error: gasQuote.error });
   }, [gasQuote.error]);
 
+  // mode 中立な決済結果ビュー: notification dedup key、webhook payload の hash field、
+  // success_url query の (snake_case) hash field を 1 箇所に集約。
+  const completion = useMemo(() => {
+    if (isStandard && standard.data) {
+      return {
+        key: standard.data.merchantTxHash,
+        mode: 'standard' as const,
+        blockNumber: standard.data.blockNumber,
+        hashFields: {
+          merchantTxHash: standard.data.merchantTxHash,
+          feeTxHash: standard.data.feeTxHash,
+        },
+        redirectQuery: {
+          tx_hash: standard.data.merchantTxHash,
+          ...(standard.data.feeTxHash
+            ? { fee_tx_hash: standard.data.feeTxHash }
+            : {}),
+        },
+      };
+    }
+    if (!isStandard && gasless.data?.success) {
+      return {
+        key: gasless.data.userOpHash,
+        mode: 'gasless' as const,
+        blockNumber: gasless.data.blockNumber,
+        hashFields: {
+          txHash: gasless.data.txHash,
+          userOpHash: gasless.data.userOpHash,
+        },
+        redirectQuery: {
+          tx_hash: gasless.data.txHash,
+          user_op_hash: gasless.data.userOpHash,
+        },
+      };
+    }
+    return null;
+  }, [isStandard, gasless.data, standard.data]);
+
   useEffect(() => {
-    if (!gasless.data || !gasless.data.success) return;
-    if (notifiedUserOpHashRef.current === gasless.data.userOpHash) return;
-    notifiedUserOpHashRef.current = gasless.data.userOpHash;
+    if (!completion) return;
+    if (notifiedKeyRef.current === completion.key) return;
+    notifiedKeyRef.current = completion.key;
+
     logger.info('checkout.success', {
-      userOpHash: gasless.data.userOpHash,
-      txHash: gasless.data.txHash,
+      mode: completion.mode,
+      ...completion.hashFields,
       merchant: params.to,
       orderId: params.orderId,
       token: params.token,
@@ -156,6 +220,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     if (params.webhook) {
       const payload = {
         type: 'openpay.checkout.success',
+        mode: completion.mode,
         merchant: params.to,
         from: address,
         token: params.token,
@@ -169,9 +234,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         orderId: params.orderId,
         description: params.description,
         customerEmail: params.customerEmail,
-        txHash: gasless.data.txHash,
-        userOpHash: gasless.data.userOpHash,
-        blockNumber: gasless.data.blockNumber.toString(),
+        ...completion.hashFields,
+        blockNumber: completion.blockNumber.toString(),
         ts: Date.now(),
       };
       fetch(params.webhook, {
@@ -202,7 +266,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       setRedirectIn(SUCCESS_REDIRECT_DELAY_MS / 1000);
     }
   }, [
-    gasless.data,
+    completion,
     params.to,
     params.token,
     chainSlug,
@@ -233,14 +297,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [redirectIn]);
 
   function doRedirect() {
-    if (!params.successUrl || !gasless.data) return;
+    if (!params.successUrl || !completion) return;
     const u = new URL(params.successUrl);
-    u.searchParams.set('tx_hash', gasless.data.txHash);
-    u.searchParams.set('user_op_hash', gasless.data.userOpHash);
-    u.searchParams.set('block', gasless.data.blockNumber.toString());
+    for (const [k, v] of Object.entries(completion.redirectQuery)) {
+      u.searchParams.set(k, v);
+    }
+    u.searchParams.set('block', completion.blockNumber.toString());
     if (params.orderId) u.searchParams.set('order_id', params.orderId);
     u.searchParams.set('chain', chainSlug);
     u.searchParams.set('token', params.token);
+    u.searchParams.set('mode', completion.mode);
     setRedirectIn(null);
     // Next.js の router は同一オリジンのみ。success_url は外部 URL なので window.location.assign。
     window.location.assign(u.toString());
@@ -248,13 +314,24 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
-    gasless.mutate({
-      tokenAddress: deployment.address,
-      merchant: params.to,
-      merchantAmount: breakdown.merchantReceives,
-      feeReceiver: env.feeReceiver,
-      feeAmount: breakdown.feeAmount + gasReimbursement,
-    });
+    if (isStandard) {
+      standard.mutate({
+        tokenAddress: deployment.address,
+        merchant: params.to,
+        merchantAmount: breakdown.merchantReceives,
+        feeReceiver: env.feeReceiver,
+        feeAmount: breakdown.feeAmount,
+        chainId: deployment.chainId,
+      });
+    } else {
+      gasless.mutate({
+        tokenAddress: deployment.address,
+        merchant: params.to,
+        merchantAmount: breakdown.merchantReceives,
+        feeReceiver: env.feeReceiver,
+        feeAmount: breakdown.feeAmount + gasReimbursement,
+      });
+    }
   }
 
   const explorerBase = blockExplorerUrl(deployment.chainId);
@@ -263,7 +340,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
-  const completed = gasless.data && gasless.data.success;
+  const completed = isStandard
+    ? !!standard.data
+    : !!(gasless.data && gasless.data.success);
 
   return (
     <div className="space-y-4">
@@ -281,7 +360,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         )}
         <p className="mt-3 text-xs text-slate-500">
           {t('payToLabel', { addr: shortAddress(params.to) })} ·{' '}
-          {requiredChain.name} · {deployment.displaySymbol}
+          {requiredChain.name} · {deployment.displaySymbol} ·{' '}
+          {isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
         </p>
       </header>
 
@@ -310,27 +390,32 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <div className="mt-3 border-t border-slate-200 pt-3">
           <dl className="space-y-1.5">
             <Row label={t('subtotalRow')} value={fmt(totalWei)} />
-            <Row
-              label={t('feeRow')}
-              value={fmt(breakdown.feeAmount)}
-            />
-            <Row
-              label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
-              labelExtra={
-                <InfoTooltip
-                  text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
-                />
-              }
-              value={
-                gasAmount !== undefined
-                  ? t('gasRowValue', { amount: fmt(gasAmount) })
-                  : t('gasRowPending')
-              }
-            />
+            <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
+            {isStandard ? (
+              <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
+            ) : (
+              <Row
+                label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
+                labelExtra={
+                  <InfoTooltip
+                    text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
+                  />
+                }
+                value={
+                  gasAmount !== undefined
+                    ? t('gasRowValue', { amount: fmt(gasAmount) })
+                    : t('gasRowPending')
+                }
+              />
+            )}
             <div className="my-1 border-t border-slate-200" />
             <Row
               label={
-                isMerchantGas ? t('totalRowMerchantGas') : t('totalRow')
+                isStandard
+                  ? t('totalRowStandard', { nativeToken: standardNativeToken })
+                  : isMerchantGas
+                    ? t('totalRowMerchantGas')
+                    : t('totalRow')
               }
               value={fmt(totalCustomerOutflow)}
               strong
@@ -338,7 +423,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           </dl>
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {isErc20Paymaster ? t('gaslessHintUsdc') : t('gaslessHintJpyc')}
+          {isStandard
+            ? t('standardHint', { nativeToken: standardNativeToken })
+            : isErc20Paymaster
+              ? t('gaslessHintUsdc')
+              : t('gaslessHintJpyc')}
         </p>
         {approvalCheckUrl && (
           <p className="mt-2 text-[11px]">
@@ -407,18 +496,35 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           disabled={!canSubmit}
           className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {gasless.isPending
-            ? t('btnSending')
+          {flowPending
+            ? isStandard
+              ? checkoutPhaseLabel(standard.phase, t)
+              : t('btnSending')
             : !isConnected
               ? t('btnConnect')
               : wrongChain
                 ? t('btnSwitchChain')
-                : !saData
+                : !isStandard && !saData
                   ? t('btnSaInit')
                   : !gasQuoteReady
                     ? t('btnGasQuoteLoading')
                     : t('btnPay', { amount: fmt(totalCustomerOutflow) })}
         </button>
+      )}
+
+      {/* standard モードで fee tx だけ失敗した場合の retry UI (merchant 確定済)。 */}
+      {!completed && isStandard && standard.isFeeError && (
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold">{t('standardFeeRetryTitle')}</p>
+          <p className="text-xs">{t('standardFeeRetryBody')}</p>
+          <button
+            type="button"
+            onClick={() => standard.retryFee()}
+            className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+          >
+            {t('standardFeeRetryButton')}
+          </button>
+        </div>
       )}
 
       {!completed && params.cancelUrl && (
@@ -437,25 +543,49 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </div>
       )}
 
-      {completed && gasless.data && (
+      {completed && (gasless.data || standard.data) && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <p className="font-semibold">{t('successTitle')}</p>
           <p className="mt-1 text-xs">{t('successBody')}</p>
           <dl className="mt-3 space-y-1 text-xs">
-            <ResultRow
-              label={t('successUserOp')}
-              value={gasless.data.userOpHash}
-              copyable
-            />
-            <ResultRow
-              label={t('successTx')}
-              value={gasless.data.txHash}
-              copyable
-            />
-            <ResultRow
-              label={t('successBlock')}
-              value={gasless.data.blockNumber.toString()}
-            />
+            {!isStandard && gasless.data && (
+              <>
+                <ResultRow
+                  label={t('successUserOp')}
+                  value={gasless.data.userOpHash}
+                  copyable
+                />
+                <ResultRow
+                  label={t('successTx')}
+                  value={gasless.data.txHash}
+                  copyable
+                />
+                <ResultRow
+                  label={t('successBlock')}
+                  value={gasless.data.blockNumber.toString()}
+                />
+              </>
+            )}
+            {isStandard && standard.data && (
+              <>
+                <ResultRow
+                  label={t('standardMerchantTxLabel')}
+                  value={standard.data.merchantTxHash}
+                  copyable
+                />
+                {standard.data.feeTxHash && (
+                  <ResultRow
+                    label={t('standardFeeTxLabel')}
+                    value={standard.data.feeTxHash}
+                    copyable
+                  />
+                )}
+                <ResultRow
+                  label={t('successBlock')}
+                  value={standard.data.blockNumber.toString()}
+                />
+              </>
+            )}
             {params.orderId && (
               <ResultRow label={t('orderIdLabel')} value={params.orderId} />
             )}
@@ -502,7 +632,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
       {/* PayPay 風 大型成功 overlay。dismiss 後は inline panel + redirect countdown を表示。
           success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。 */}
-      {!overlayDismissed && completed && gasless.data && (
+      {!overlayDismissed && completed && !isStandard && gasless.data && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
           txHash={gasless.data.txHash}
@@ -512,7 +642,34 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}
+      {!overlayDismissed && completed && isStandard && standard.data && (
+        <SuccessOverlay
+          amountDisplay={fmt(totalCustomerOutflow)}
+          txHash={standard.data.merchantTxHash}
+          blockNumber={standard.data.blockNumber}
+          explorerBase={explorerBase}
+          onDismiss={() => setOverlayDismissed(true)}
+        />
+      )}
     </div>
   );
+}
+
+function checkoutPhaseLabel(
+  phase: ReturnType<typeof useStandardPayment>['phase'],
+  t: ReturnType<typeof useTranslations<'CheckoutForm'>>,
+): string {
+  switch (phase) {
+    case 'merchant-sending':
+      return t('btnStandardMerchantSending');
+    case 'merchant-mining':
+      return t('btnStandardMerchantMining');
+    case 'fee-sending':
+      return t('btnStandardFeeSending');
+    case 'fee-mining':
+      return t('btnStandardFeeMining');
+    default:
+      return t('btnSending');
+  }
 }
 

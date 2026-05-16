@@ -23,19 +23,36 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| ガスレス (JPYC) | Pimlico Sponsorship (Verifying) Paymaster で運営が POL を肩代わり |
-| ガスレス (USDC) | Pimlico ERC20 Paymaster で顧客が USDC のままガスを支払う (ETH 不要) |
-| EOA をそのまま使用 | ERC-7702 によって、顧客の MetaMask 等の **既存 EOA 残高** で決済 (事前送金不要) |
-| バッチ送金 | 「店主への送金」と「運営手数料」を 1 つの UserOperation にまとめて送信 |
+| **決済モード (2 種)** | **ガスレス決済** (1.0% + ネットワーク手数料見積、OpenPay が gas 肩代わり) と **通常決済（ガスあり）** (0.5%、顧客が wallet で gas 自前負担) を URL `mode=gasless` / `mode=standard` で切替 |
+| ガスレス決済 (JPYC) | Pimlico Sponsorship (Verifying) Paymaster で運営が POL を肩代わり、顧客は JPYC のみで完結 |
+| ガスレス決済 (USDC) | Pimlico ERC20 Paymaster で顧客が USDC のままガスを支払う (ETH 不要) |
+| 通常決済（ガスあり） | OpenPay 利用手数料 0.5%、店舗送金 + 手数料徴収の 2 件 ERC20 transfer を顧客 wallet で直列実行 (Smart Account / Paymaster 不使用)。merchant 確定後の fee tx 失敗時は retry ボタンで再送可能 |
+| EOA をそのまま使用 | ガスレス決済では ERC-7702 で顧客の MetaMask 等の **既存 EOA 残高** で決済。通常決済では純粋 ERC20 transfer (事前送金不要) |
+| バッチ送金 | ガスレス決済では「店主への送金」と「OpenPay 利用手数料」を 1 つの UserOperation にまとめて送信 |
 | マルチチェーン | JPYC (Polygon) / USDC (Base / Arbitrum / Optimism / Polygon) を切替可能 |
 | 登録審査不要 | 店主は自分のウォレットアドレスを入力するだけで QR を発行 |
 | 据え置き QR / 金額指定 QR | 店頭掲示用の据え置き QR と、レジで金額を打つ金額指定 QR の両対応 |
 | 店舗印刷ツール | 店舗名・補足文つきの印刷用 QR ポスター、SVG / PNG 保存、レジ用クイック金額ボタン |
-| 直接送金 (上級者) | ガス代を顧客負担にすることで運営手数料 0% で送金できるオプションモード |
-| EIP-681 互換 QR | 直接送金モード + 金額指定 + split 無しのとき、`ethereum:<token>@<chainId>/transfer?...` 形式の URI を併発行 (OpenPay checkout を経由しない純粋 ERC20 transfer)。仕様準拠は自動検証済、実ウォレット読取は §9 検証手順を参照 |
+| EIP-681 互換 QR | 通常決済（ガスあり）モード + 金額指定 + split 無しのとき、`ethereum:<token>@<chainId>/transfer?...` 形式の URI を併発行 (OpenPay checkout を経由しない純粋 ERC20 transfer)。仕様準拠は自動検証済、実ウォレット読取は §9 検証手順を参照 |
 | BYO wallet | OpenPay は checkout 層に徹し、ウォレット自体は製造しない。WalletConnect v2 / EIP-6963 / Coinbase Wallet 等を経由して顧客が任意のウォレットで支払える |
-| Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可。webhook は同一 userOpHash につき 1 回限りの POST (gasQuote refetch 耐性、`useRef` gate で実装) |
-| Checkout (実験的 / 非推奨) | 直リンク互換のためルートは残すが、ホーム UI からは非表示。DB なし・署名なし webhook のため本番 EC 用途ではサーバー側検証が必須 |
+| Tip widget (β) | iframe 1 行貼付でブログ・配信ページ・GitHub README に埋め込めるチップ送金 UI。固定 preset + カスタム金額、テーマカラー設定可。Tip 文脈ではガスレス決済固定 (creator UX 維持)。webhook は同一 userOpHash につき 1 回限りの POST (gasQuote refetch 耐性、`useRef` gate で実装) |
+| Checkout (実験的 / 非推奨) | 直リンク互換のためルートは残すが、ホーム UI からは非表示。DB なし・署名なし webhook のため本番 EC 用途ではサーバー側検証が必須。両決済モードに対応 |
+
+### 決済モード詳細 (料金・gas 負担)
+
+OpenPay は 2 つの決済モードを公式にサポートします。店主は QR 発行時に payMode radio で選択 (`mode=gasless` が default)。
+
+| | **ガスレス決済 (`mode=gasless`)** | **通常決済（ガスあり） (`mode=standard`)** |
+| --- | --- | --- |
+| OpenPay 利用手数料 | **1.0%** (常に店主負担) | **0.5%** (常に店主負担) |
+| ネットワーク手数料 (gas) | OpenPay が肩代わり、見積額を顧客 / 店主のいずれかから徴収 (店主の `gas=` 設定で選択) | 顧客が自分のウォレットでネイティブトークン (POL / ETH) を支払い、OpenPay は touch しない |
+| 送金パス | Smart Account (ERC-4337 / ERC-7702) で UserOperation にまとめて送信 | 顧客 EOA から `ERC20.transfer` を 2 件直列 (1. 店舗、2. OpenPay 利用手数料) |
+| Wallet sign 回数 | 1 回 | 2 回 (店主送金 → 手数料、wallet UI で連続承認) |
+| OpenPay 利用手数料の対価 | 決済 UI / 店舗 QR / 決済処理 / **gas 肩代わり** / ネットワーク手数料変動リスクへの対応 / サービス運営 | 決済 UI / 店舗 QR / 決済処理 / サービス運営 (gas 肩代わりは含まない) |
+| Tip widget | ✓ (default) | ✗ (creator UX を保つためガスレス決済固定) |
+| EIP-681 互換 QR 併発行 | ✗ (gasless 経路は EIP-681 で表現不可) | ✓ (純粋な ERC20 transfer なので併発行可能) |
+
+**用語**: 旧「運営手数料」「最低 5 JPYC」「mode=direct (fee=0)」は本リリースで撤去。新用語は「**OpenPay 利用手数料**」「**ネットワーク手数料見積**」「**店主負担 / 顧客負担**」「**通常決済（ガスあり）**」「**ガスレス決済**」に統一。旧 URL `mode=direct` は legacy alias として parser で `mode=standard` に正規化されるため、既発行 QR は破壊されない (ただし運用上は新名で再発行を推奨)。
 
 ## 現金 / クレカ / PayPay との比較
 
@@ -806,6 +823,19 @@ upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で overri
 
 ### 11. Performance / 負荷測定
 
+**通常決済（ガスあり）モード追加に伴う bundle size delta** (2026-05-16 実測、`git worktree` で `769fafe` baseline と比較):
+
+| Route | Before | After (mode=standard 追加後) | Delta |
+|---|---|---|---|
+| `/[locale]/pay` | 5.25 kB / 385 kB | **6.08 kB** / **386 kB** | +0.83 kB / +1 kB |
+| `/[locale]/checkout` | 4.10 kB / 384 kB | **6.63 kB** / **386 kB** | +2.53 kB / +2 kB |
+| `/[locale]/tip/[address]` | 3.77 kB / 381 kB | 3.77 kB / 382 kB | 0 / +1 kB |
+| `/[locale]` (home) | 14.6 kB / 286 kB | 14.6 kB / 286 kB | 0 / 0 |
+| その他 (terms / tokutei / disclaimer / privacy) | 変化なし | 変化なし | 0 |
+| First Load JS shared by all | 223 kB | 223 kB | 0 |
+
+**checkout の +2.53 kB が最大** (CheckoutLinkGenerator の payMode radio + CheckoutForm の standard mode UI 分岐 + `completion` memo + `checkoutPhaseLabel` ヘルパ)。`/pay` と合わせて 386 kB の First Load JS は §「Bundle 予算の根拠」で設定した 420 kB 上限内 (`scripts/check-bundle-budget.mjs` で CI ブロッキング)。
+
 | 項目 | 状態 | 詳細 |
 |---|---|---|
 | **First Load JS bundle 予算** | ✅ 計測 | `scripts/check-bundle-budget.mjs` で CI ブロッキング |
@@ -833,11 +863,13 @@ upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で overri
 - ☐ **Coinbase Wallet ERC-7702 testnet 1 件送金成功確認** — Polygon Amoy or Base Sepolia で Coinbase Wallet ↔ `/pay?to=...&token=usdc&amount=1` の実送金 1 件。失敗時は §特徴 の対応 wallet 行に「Coinbase Wallet 未対応」と明記
 - ☐ **USDC mainnet ERC20 Paymaster `postOp` 実 wallet 検証** — Base mainnet で実 funded USDC + ERC-7702 対応ウォレットで `/pay?token=usdc&chain=base&amount=1` を完走、`postOp` での USDC gas 自動徴収を `txHash` の internal call から確認。詳細手順: § 4-1
 - ☐ **JPYC EIP-712 `version="1"` 仮定の signature 通過確認** — Polygon Amoy で JPYC v3 (`0xE7C3...3c29`) の x402 / `transferWithAuthorization` を 1 件 signature 検証 (現在 OpenZeppelin default 仮定を未検証で採用中)
-- ☐ **Sentry alert rule をダッシュボードで作成** — `payment.failed > 5%/h` (paymaster 関連エラー条件付き) / `smart-account.init-failed > 10/h` / `x402.middleware.error > 10/h` の 3 ルール (詳細・閾値は § Vercel 運用ハードニング / § 即 rollback トリガー)
+- ☐ **Sentry alert rule の自動セットアップ** — Sentry Dashboard 手動操作は不要。Personal Access Token (project:write + alerts:write scope) を発行後、以下を 1 度実行すれば 3 rule を冪等作成: `SENTRY_AUTH_TOKEN=... SENTRY_ORG_SLUG=... SENTRY_PROJECT_SLUG=... node scripts/setup-sentry-alerts.mjs`。同名 rule が既にあれば skip。しきい値変更は `scripts/setup-sentry-alerts.mjs` の `RULES.threshold` を編集後、Dashboard で旧 rule を削除して再実行。Slack 通知を追加するには Dashboard で各 rule の Actions に「Send a Slack notification」を追加 (本 script では `NotifyEventAction` で project default 通知設定に従う)
 - ☐ **Pimlico balance alert (CI workflow + Slack)** — `.github/workflows/pimlico-balance.yml` は scheduled 動作するが Secrets 未設定だと graceful skip。Pimlico API Key + 残高閾値 + 通知先 webhook を GitHub repo secrets に投入
 - ☐ **Lighthouse mobile / 4G エミュレーション baseline** — § 11 Performance の通り、手動 1 回 mobile preset で計測して `/[locale]/pay` の 4G TTI / LCP を記録 (mainnet GMV 拡大前)
 - ☐ **同時アクセス負荷試験 (k6 / autocannon)** — § 11 Performance の通り、alpha では deferred。GMV 連動で必要性が出た時に `/api/log/payment` 中心に実施
 - ☐ **Vercel Spending Cap = $0 の維持確認** — § Vercel 運用ハードニング。設定変更通知が Vercel から来ていないことを月次で確認
+- ☐ **mode=standard の testnet 実 wallet 検証** — Polygon Amoy / Base Sepolia で `/pay?to=...&token=usdc&amount=1&mode=standard` を実 wallet で完走。**特に MetaMask デスクトップ / MetaMask Mobile / WalletConnect / HashPort の 4 wallet で「2 連続 sign」が期待通り動くことを確認**。1 件目承認 → 2 件目自動 prompt → 両 tx 確定の経路は単体テストで mock 経由でしか検証していない (LARP リスク)。fee-error 時の retry button → 2 件目再送も実機で確認
+- ☐ **legacy alias `mode=direct` 料率変更 (0% → 0.5%) の store 通知** — 既発行 `?mode=direct` QR で運用していた store がある場合、料率変更が発生する旨を deploy 前にメール / Slack / お知らせで通知。新規発行は `mode=gasless` (1.0%) または `mode=standard` (0.5%) に統一を推奨
 
 ### 既知の transitive 脆弱性 (`npm audit`)
 
@@ -1018,6 +1050,8 @@ git push origin main      # Vercel が自動で再デプロイ
 店主の QR / Tip / Checkout 設定 (`openpay:qr-settings:v2`, `openpay:tip-settings:v2`, `openpay:checkout-settings:v1`) はキー名にバージョン suffix を含むため、
 スキーマ変更時はキーをインクリメントすればロールバック後も旧クライアントが破損しない。
 
+**注意 (mode=standard 追加に伴う silent regression リスク)**: `payMode: 'standard'` を保存した店主が rollback 後の旧コードを使うと、旧コードは `payMode` field を ignore して `directTransfer: false` (= gasless 既定) に倒れる。結果、store は standard 0.5% で発行したつもりの QR が **gasless 1.0% + ネットワーク手数料見積** で発行され続ける (silent な料率差異)。data 消失ではないが、rollback 後は **store に "QrGenerator 設定を再確認 + 必要なら LocalStorage clear" を通知すること**。
+
 ### ⚠️ multi-chain URL 後の rollback は silent fund misdirection の risk あり
 
 Phase 1 で **USDC を Base / Arbitrum / Optimism / Polygon の 4 chain に拡張**したため、生成 URL に `chain=arbitrum` 等が含まれるようになった。**この拡張版を本番投入し、`chain=arbitrum/optimism/polygon` の URL が出回った後で multi-chain 前のバージョンへ rollback すると、旧 parser は未知の `chain` パラメタを silent ignore して USDC=Base の旧 default で処理してしまう**。結果、顧客が **意図と異なるチェーン (Base) に送金** する事故が起こり得る。
@@ -1030,6 +1064,25 @@ Phase 1 で **USDC を Base / Arbitrum / Optimism / Polygon の 4 chain に拡�
 ### EIP-681 互換 QR の rollback は安全 (silent fund misdirection リスク無し)
 
 EIP-681 互換 QR (`feat(qr): EIP-681 互換 QR セクションを QrGenerator に併発行で追加`) は、生成された URI が [EIP-681 仕様](https://eips.ethereum.org/EIPS/eip-681) 準拠の self-contained format (`ethereum:<token>@<chainId>/transfer?...`) のため、**OpenPay の UI を rollback しても既出 QR は他の EIP-681 対応ウォレットで引き続き正しく読み取れる**。multi-chain URL のような silent fund misdirection は構造的に発生しない (token / chainId / receiver / wei が URI 内に確定値として焼き込まれているため、parser の差異で別 chain に送金される経路が無い)。
+
+### ⚠ legacy alias `mode=direct` の料率変更 (BREAKING)
+
+旧 `mode=direct` は **fee=0%** (Smart Account 不使用 + 純 ERC20 transfer + 運営手数料なし) だった。新モデルでは parser が `mode=direct` → `mode=standard` に正規化し、**料率が 0% → 0.5% に変更される**。
+
+- 既発行 `?mode=direct` QR を scan した顧客: 顧客が支払う amount は同じ、merchant 受取は **100% → 99.5%** に減少、差額 0.5% は OpenPay 利用手数料として OpenPay 指定 wallet に送金
+- silent fund misdirection ではない (merchant への送金は引き続き store wallet 宛、宛先誤りなし) が、merchant 受取額が減るため store 側に経済的影響あり
+- 対応: alpha 段階で `mode=direct` QR の流通量は最小限と判断して contractual change として受容。store は新規 `mode=gasless` (1.0% + gas 肩代わり) または `mode=standard` (0.5% + 顧客 wallet で gas) のいずれかで QR を再発行することを推奨
+- deploy 時に store 向けに 1 通知を出すこと (旧 0% 想定で運用していた case のため)
+
+### mode=standard (通常決済（ガスあり）) の rollback は安全
+
+通常決済（ガスあり）モード (`feat: 通常決済（ガスあり）モード追加 + 用語統一`) は構造的に rollback safe:
+
+- mode=standard QR が出回った後で mode=standard 対応前のバージョンへ rollback すると、旧 parser は `mode=standard` を unknown 値として **明示的エラー** (`/pay` は `mode は gasless または direct を指定してください` の URL invalid 画面) を出す。silent fund misdirection は構造的に起き得ない (旧 mode=gasless として処理されてしまう経路がない)
+- legacy alias `mode=direct` は旧 parser でも valid (旧仕様の fee=0 単一 transfer) として動く。顧客が払う額は減るが (1.0% → 0%)、店主受取は同じ amount、誤送金リスクなし
+- 法務文書 (Terms 第 5 条 / Tokutei 役務の対価 / Disclaimer 第 4・7 条) は両モード並記に書き換え済。**rollback すると過去 effectiveDate (2026-05-16 改定前) の文書に戻る**ため、改定後に発行した QR が指し示す料率と文書記載が不整合になる。法務 review 観点では rollback 後に「改定通知」を遡及的に行う必要あり
+
+→ コード上の rollback は任意のタイミングで可。法務文書の effectiveDate 整合は別途要対応。
 
 ### x402 paid route (`/api/paid/*`) の rollback は安全
 

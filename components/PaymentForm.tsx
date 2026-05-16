@@ -12,15 +12,11 @@ import { OnrampCta } from './OnrampCta';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
-import { useDirectPayment } from '@/hooks/useDirectPayment';
+import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useAutoSwitchChain } from '@/hooks/useAutoSwitchChain';
-import {
-  calcBreakdown,
-  calcDirectBreakdown,
-  calcSplitBreakdown,
-} from '@/lib/fee';
+import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
@@ -50,28 +46,28 @@ export function PaymentForm() {
 
 function PaymentDetails({ params }: { params: PayParams }) {
   const t = useTranslations('PaymentForm');
-  const isDirect = params.mode === 'direct';
+  const isStandard = params.mode === 'standard';
   // parsePayParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const deployment = deploymentForSlug(params.token, chainSlug);
   const requiredChain = chainForSlug(chainSlug);
   const paymasterMode = resolvePaymasterMode(deployment);
-  const isErc20Paymaster = !isDirect && paymasterMode === 'erc20';
-  const isSponsorship = !isDirect && paymasterMode === 'sponsorship';
+  const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
+  const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  // Smart Account は gasless のみ必要 — direct では enabled=false で skip。
+  // Smart Account は gasless のみ必要 — standard では enabled=false で skip。
   const { data: saData, error: saError } = useSmartAccount(
     deployment,
-    !isDirect,
+    !isStandard,
   );
 
-  // 両方のフックを常に call し、isDirect で送信先を分岐 (条件付きフックは禁止)。
-  const gasless = useBatchPayment(deployment, !isDirect);
-  const direct = useDirectPayment();
-  const gasQuote = useGasQuote(deployment, !isDirect);
+  // 両方のフックを常に call し、isStandard で送信先を分岐 (条件付きフックは禁止)。
+  const gasless = useBatchPayment(deployment, !isStandard);
+  const standard = useStandardPayment();
+  const gasQuote = useGasQuote(deployment, !isStandard);
 
   const fixedAmount = params.amount ?? '';
   const isFixed = fixedAmount.length > 0;
@@ -87,38 +83,45 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
-  const isMerchantGas = !isDirect && params.gas === 'merchant';
+  const isMerchantGas = !isStandard && params.gas === 'merchant';
 
-  // gas 見積 (両 paymaster mode で表示・計算に使用):
+  // gas 見積 (gasless mode のみ):
   //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
   //   Sponsorship (JPYC): Pimlico が POL gas を立替、運営は徴収した JPYC で別途精算。
-  const gasAmount = !isDirect ? gasQuote.data?.gasAmount : undefined;
+  //   standard mode: 顧客 wallet が gas を自前で算定・支払うため OpenPay 側で見積らない。
+  const gasAmount = !isStandard ? gasQuote.data?.gasAmount : undefined;
 
   const breakdown = useMemo(
     () =>
-      isDirect
-        ? calcDirectBreakdown(amountWei)
-        : calcBreakdown(amountWei, params.token, params.gas, gasAmount ?? 0n),
-    [isDirect, amountWei, params.token, params.gas, gasAmount],
+      calcBreakdown(
+        amountWei,
+        params.token,
+        params.mode,
+        params.gas,
+        gasAmount ?? 0n,
+      ),
+    [amountWei, params.token, params.mode, params.gas, gasAmount],
   );
 
-  // direct mode では split は無視 (シンプルな単一 transfer に限定)。
+  // standard mode では split は無視 (シンプルな EOA 直列 transfer に限定)。
   const splitBreakdown = useMemo(() => {
-    if (isDirect || !params.split || params.split.length === 0) return null;
+    if (isStandard || !params.split || params.split.length === 0) return null;
     return calcSplitBreakdown(
       amountWei,
       params.token,
       params.to,
       params.split,
+      params.mode,
       params.gas,
       gasAmount ?? 0n,
     );
   }, [
-    isDirect,
+    isStandard,
     amountWei,
     params.token,
     params.to,
     params.split,
+    params.mode,
     params.gas,
     gasAmount,
   ]);
@@ -133,13 +136,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
   // 運営の赤字防止: merchant が 0 になるケースは送信を block。
-  //   customer mode: amount < fee → merchant = 0
-  //   merchant mode: amount < fee + gas → merchant = 0
-  //   merchant mode の判定には gasQuote の load 完了が必要。
+  //   gasless / customer:  amount < fee → merchant = 0
+  //   gasless / merchant:  amount < fee + gas → merchant = 0 (gasQuote load 完了必須)
+  //   standard:            amount < fee (= 0.5%) → merchant = 0
   const merchantUnderflow =
-    !isDirect &&
     amountWei > 0n &&
-    (isMerchantGas ? gasQuote.data !== undefined : true) &&
+    (isStandard || !isMerchantGas || gasQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
   const minimumAmountWei =
     breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
@@ -161,12 +163,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const wrongChain = isConnected && chainId !== requiredChain.id;
   useAutoSwitchChain(requiredChain.id, wrongChain);
 
-  const flowPending = isDirect ? direct.isPending : gasless.isPending;
-  const gasQuoteReady = isDirect || gasQuote.data !== undefined;
+  const flowPending = isStandard ? standard.isPending : gasless.isPending;
+  const gasQuoteReady = isStandard || gasQuote.data !== undefined;
   const canSubmit =
     isConnected &&
     !wrongChain &&
-    (isDirect || !!saData) &&
+    (isStandard || !!saData) &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !flowPending &&
@@ -174,16 +176,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
     !merchantUnderflow;
 
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
-  // 差し替え (direct モードは paymaster を経由しないため対象外)。
+  // 差し替え (standard モードは paymaster を経由しないため対象外)。
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
-  const flowError = isDirect ? direct.error : gasless.error;
+  const flowError = isStandard ? standard.error : gasless.error;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : !isDirect && isIncompatibleSmartAccountError(saError)
+    : !isStandard && isIncompatibleSmartAccountError(saError)
       ? t(saError.i18nKey)
       : (flowError?.message ??
-        (isDirect ? undefined : saError?.message) ??
+        (isStandard ? undefined : saError?.message) ??
         (gasQuote.error ? t('errorGasQuote') : null) ??
         (merchantUnderflow
           ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
@@ -194,8 +196,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   }, [gasless.error]);
 
   useEffect(() => {
-    if (direct.error) logger.error('payment.direct.failed', { error: direct.error });
-  }, [direct.error]);
+    if (standard.error)
+      logger.error('payment.standard.failed', { error: standard.error });
+  }, [standard.error]);
 
   useEffect(() => {
     if (saError) logger.error('smart-account.init-failed', { error: saError });
@@ -215,18 +218,25 @@ function PaymentDetails({ params }: { params: PayParams }) {
   }, [gasless.data]);
 
   useEffect(() => {
-    if (direct.data) {
-      logger.info('payment.direct.success', { txHash: direct.data.txHash });
+    if (standard.data) {
+      logger.info('payment.standard.success', {
+        merchantTxHash: standard.data.merchantTxHash,
+        feeTxHash: standard.data.feeTxHash,
+      });
     }
-  }, [direct.data]);
+  }, [standard.data]);
 
   function onSubmit() {
     if (!canSubmit) return;
-    if (isDirect) {
-      direct.mutate({
+    if (isStandard) {
+      // standard mode: EOA から merchant transfer + fee transfer の 2 件直列。
+      // split は標準モードでは無効化されているため breakdown を直接使う。
+      standard.mutate({
         tokenAddress: deployment.address,
         merchant: params.to,
-        amount: breakdown.customerPays,
+        merchantAmount: breakdown.merchantReceives,
+        feeReceiver: env.feeReceiver,
+        feeAmount: breakdown.feeAmount,
         chainId: deployment.chainId,
       });
     } else if (splitBreakdown) {
@@ -251,9 +261,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
     }
   }
 
-  // direct モードのときネイティブ ガスが何かを表示するため。
+  // standard モードでウォレットが必要とするネイティブガストークンを UI に表示。
   // JPYC は Polygon のみ (POL)、それ以外 (USDC) は対応 4 chain 全て ETH 系ガス。
-  const directNativeToken = params.token === 'jpyc' ? 'POL' : 'ETH';
+  const standardNativeToken = params.token === 'jpyc' ? 'POL' : 'ETH';
 
   // ERC20 Paymaster の Token Approval Checker リンク (chain 別 explorer)。
   // Etherscan 系 (basescan / arbiscan / optimistic.etherscan / polygonscan) は
@@ -297,11 +307,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       </header>
 
-      {isDirect && (
+      {isStandard && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">{t('directWarningTitle')}</p>
+          <p className="font-semibold">{t('standardModeTitle')}</p>
           <p className="mt-1 text-xs">
-            {t('directWarningBody', { nativeToken: directNativeToken })}
+            {t('standardModeBody', { nativeToken: standardNativeToken })}
           </p>
         </div>
       )}
@@ -324,19 +334,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
             ))
           ) : (
             <Row
-              label={isDirect ? t('merchantRow') : t('merchantRowAfterFee')}
+              label={t('merchantRowAfterFee')}
               value={fmt(breakdown.merchantReceives)}
             />
           )}
-          {!isDirect && (
-            <Row
-              label={t('feeRow')}
-              value={fmt(
-                splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
-              )}
-            />
-          )}
-          {!isDirect && (
+          <Row
+            label={t('feeRow')}
+            value={fmt(
+              splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
+            )}
+          />
+          {isStandard ? (
+            <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
+          ) : (
             <Row
               label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
               labelExtra={
@@ -354,8 +364,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
           <div className="my-2 border-t border-slate-200" />
           <Row
             label={
-              isDirect
-                ? t('customerDirect')
+              isStandard
+                ? t('customerStandard', { nativeToken: standardNativeToken })
                 : isMerchantGas
                   ? t('customerMerchantGas')
                   : t('customerCustomerGas')
@@ -364,14 +374,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
             strong
           />
         </dl>
-        {isMerchantGas && (
+        {isMerchantGas && !isStandard && (
           <p className="mt-3 text-xs text-emerald-700">
             {t('merchantGasHint')}
           </p>
         )}
         <p className="mt-4 text-xs text-slate-500">
-          {isDirect
-            ? t('directBatchHint')
+          {isStandard
+            ? t('standardBatchHint')
             : splitBreakdown
               ? t('splitBatchHint', {
                   count: splitBreakdown.recipients.length,
@@ -439,12 +449,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
         className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
       >
         {flowPending
-          ? t('btnSending')
+          ? isStandard
+            ? phaseLabel(standard.phase, t)
+            : t('btnSending')
           : !isConnected
             ? t('btnConnect')
             : wrongChain
               ? t('btnSwitchChain')
-              : !isDirect && !saData
+              : !isStandard && !saData
                 ? t('btnSaInit')
                 : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
@@ -453,6 +465,22 @@ function PaymentDetails({ params }: { params: PayParams }) {
                     : t('btnPay', { amount: fmt(totalCustomerOutflow) })}
       </button>
 
+      {/* standard mode: merchant 確定 + fee 失敗のときに retry 用 button を表示。
+           merchant への送金は確定済なので顧客に明示的に "あと 1 件 (手数料)" の再送を依頼。 */}
+      {isStandard && standard.isFeeError && (
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold">{t('standardFeeRetryTitle')}</p>
+          <p className="text-xs">{t('standardFeeRetryBody')}</p>
+          <button
+            type="button"
+            onClick={() => standard.retryFee()}
+            className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+          >
+            {t('standardFeeRetryButton')}
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           <p className="font-semibold">{t('errorTitle')}</p>
@@ -460,7 +488,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {!isDirect && gasless.data && gasless.data.success && (
+      {!isStandard && gasless.data && gasless.data.success && (
         <ResultPanel
           title={t('successTitle')}
           rows={[
@@ -471,18 +499,31 @@ function PaymentDetails({ params }: { params: PayParams }) {
         />
       )}
 
-      {isDirect && direct.data && (
+      {isStandard && standard.data && (
         <ResultPanel
           title={t('successTitle')}
           rows={[
-            { label: t('successTx'), value: direct.data.txHash, copyable: true },
-            { label: t('successBlock'), value: direct.data.blockNumber.toString() },
+            {
+              label: t('standardMerchantTxLabel'),
+              value: standard.data.merchantTxHash,
+              copyable: true,
+            },
+            ...(standard.data.feeTxHash
+              ? [
+                  {
+                    label: t('standardFeeTxLabel'),
+                    value: standard.data.feeTxHash,
+                    copyable: true,
+                  },
+                ]
+              : []),
+            { label: t('successBlock'), value: standard.data.blockNumber.toString() },
           ]}
         />
       )}
 
       {/* PayPay 風 大型成功 overlay。dismiss するまで全画面で「決済完了」+ 金額 + 時刻表示。 */}
-      {!overlayDismissed && !isDirect && gasless.data && gasless.data.success && (
+      {!overlayDismissed && !isStandard && gasless.data && gasless.data.success && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
           txHash={gasless.data.txHash}
@@ -492,17 +533,36 @@ function PaymentDetails({ params }: { params: PayParams }) {
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}
-      {!overlayDismissed && isDirect && direct.data && (
+      {!overlayDismissed && isStandard && standard.data && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={direct.data.txHash}
-          blockNumber={direct.data.blockNumber}
+          txHash={standard.data.merchantTxHash}
+          blockNumber={standard.data.blockNumber}
           explorerBase={explorerBase}
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}
     </div>
   );
+}
+
+// standard mode の phase → 「送信中」ボタンラベルの翻訳。
+function phaseLabel(
+  phase: ReturnType<typeof useStandardPayment>['phase'],
+  t: ReturnType<typeof useTranslations<'PaymentForm'>>,
+): string {
+  switch (phase) {
+    case 'merchant-sending':
+      return t('btnStandardMerchantSending');
+    case 'merchant-mining':
+      return t('btnStandardMerchantMining');
+    case 'fee-sending':
+      return t('btnStandardFeeSending');
+    case 'fee-mining':
+      return t('btnStandardFeeMining');
+    default:
+      return t('btnSending');
+  }
 }
 
 function ResultPanel({

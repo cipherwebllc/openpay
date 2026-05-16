@@ -1,35 +1,44 @@
-// 運営手数料 = amount * FEE_BPS / BPS_DENOM (両 token 共通で 1.0% 純プロポー
-//   ショナル、最低手数料なし)。gas 肩代わり相当を OpenPay 利用手数料に bundle
-//   して徴収する設計のため、フロアによる小額赤字防止は不要 — gas estimate
-//   バッファが運営損益のクッションとして機能する。
+// OpenPay 利用手数料 = amount * FEE_BPS / BPS_DENOM (両 token 共通、最低手数料なし)。
+// 決済モードは 2 種類で、それぞれ料率と gas 取り扱いが異なる:
+//   - gasless:  OpenPay が gas を肩代わり、OpenPay 利用手数料 1.0% (= FEE_BPS_GASLESS)
+//               + 店主が gasMode で選択するネットワーク手数料見積 (顧客 / 店主負担)
+//   - standard: 顧客 wallet が自前で gas 負担、OpenPay 利用手数料 0.5% (= FEE_BPS_STANDARD)
+//               OpenPay は gas に touch しないため gasMode は irrelevant
 //
-// fee model: 運営手数料は **常に店主負担** (SaaS / カード決済の販売手数料的な固定コスト)。
-//   顧客には運営手数料を意識させず、見る金額は「請求金額 ± gas」のみ。
-//   ネットワーク手数料は店主が gasMode で選択:
-//     gas=customer: customer = amount + gas, merchant = amount - fee, op = fee + (sponsorship 時 gas)
-//     gas=merchant: customer = amount,        merchant = amount - fee - gas, op = fee + (sponsorship 時 gas)
+// OpenPay 利用手数料は両モードで常に店主負担 (顧客には不可視)。
 //
-// gas 軸:
-//   sponsorship (JPYC): 運営が POL gas を立替、運営は徴収した JPYC で別途精算 (off-chain)
-//     → fee transfer に gasReimbursement (= gasQuote) を内包
-//   erc20 paymaster (USDC): paymaster が顧客 USDC から actualGas を直接徴収
-//     → fee transfer は fee のみ。merchant 側で gasQuote を控除して帳尻 (gas=merchant 時)
+// gasless / gasMode の breakdown:
+//   gas=customer: customer = amount + gas, merchant = amount - fee
+//   gas=merchant: customer = amount,        merchant = amount - fee - gas
+// gas 内訳 (gasless のみ):
+//   sponsorship (JPYC): 運営が POL gas 立替、徴収 JPYC で別途精算 — fee transfer に gas を内包
+//   erc20 paymaster (USDC): paymaster が顧客 USDC から actualGas 直接徴収 — fee transfer は fee のみ
 //
-// 運営は両モードで fee + gas を確保 (赤字回避)。
-// amount < fee + (gas=merchant ? gasQuote : 0) で merchant が 0 になるケースは
-// PaymentForm 側で submit を block。
+// amount < fee + (gas=merchant ? gas : 0) で merchant が 0 になるケースは
+// PaymentForm 側で submit を block (運営の赤字回避)。
 import type { Address } from 'viem';
 import type { TokenSymbol } from './tokens';
 
 export type GasMode = 'customer' | 'merchant';
 
+// 決済モード (詳細は file header を参照)。lib/url.ts の PayParams.mode と同期。
+export type PayMode = 'gasless' | 'standard';
+
 const BPS_DENOM = 10_000n;
 
-const FEE_BPS = 100n; // 1.0% (両 token 共通)
+// gasless mode: 1.0% (gas 肩代わり + ネットワーク手数料変動リスクへの対応を含む対価)
+export const FEE_BPS_GASLESS = 100n;
+// standard mode: 0.5% (決済 UI / QR / 決済処理 / サービス運営のみ。gas 肩代わりなし)
+export const FEE_BPS_STANDARD = 50n;
 
-export function calcFee(amount: bigint, _token: TokenSymbol): bigint {
+export function calcFee(
+  amount: bigint,
+  _token: TokenSymbol,
+  mode: PayMode,
+): bigint {
   if (amount <= 0n) return 0n;
-  return (amount * FEE_BPS) / BPS_DENOM;
+  const bps = mode === 'standard' ? FEE_BPS_STANDARD : FEE_BPS_GASLESS;
+  return (amount * bps) / BPS_DENOM;
 }
 
 type Breakdown = {
@@ -38,16 +47,29 @@ type Breakdown = {
   feeAmount: bigint;
 };
 
-// gasAmount は表示・計算共通の見積額 (両モードで意味を持つ)。
-//   gasMode=customer: customer の支払額に上乗せ、merchant 控除には影響なし。
-//   gasMode=merchant: customer の支払額には乗らず、merchant 控除に含まれる。
+// gasAmount は表示・計算共通の見積額。
+//   gasless / gasMode=customer: customer の支払額に上乗せ、merchant 控除には影響なし。
+//   gasless / gasMode=merchant: customer の支払額には乗らず、merchant 控除に含まれる。
+//   standard: gasAmount は無視 (OpenPay 側で gas に touch しないため)。customer は
+//             amount のみを supply、ネットワーク手数料はウォレットが独自に算定して支払う。
 export function calcBreakdown(
   amount: bigint,
   token: TokenSymbol,
+  mode: PayMode = 'gasless',
   gasMode: GasMode = 'customer',
   gasAmount: bigint = 0n,
 ): Breakdown {
-  const fee = calcFee(amount, token);
+  const fee = calcFee(amount, token, mode);
+  if (mode === 'standard') {
+    // standard mode では gasAmount を OpenPay の breakdown に組み込まない。
+    // customer = amount (wallet が gas を別建てで請求)、merchant = amount - fee。
+    const a = amount > 0n ? amount : 0n;
+    return {
+      customerPays: a,
+      merchantReceives: a > fee ? a - fee : 0n,
+      feeAmount: fee,
+    };
+  }
   const merchantDeduction = fee + (gasMode === 'merchant' ? gasAmount : 0n);
   return {
     customerPays: gasMode === 'customer' ? amount + gasAmount : amount,
@@ -57,19 +79,13 @@ export function calcBreakdown(
   };
 }
 
-// 直接送金 (mode=direct): 顧客がガス代を負担し、運営手数料は徴収しない。
-// breakdown は customer = merchant = amount, fee = 0。
-export function calcDirectBreakdown(amount: bigint): Breakdown {
-  const a = amount > 0n ? amount : 0n;
-  return { customerPays: a, merchantReceives: a, feeAmount: 0n };
-}
-
 // 複数受取人 (split) の breakdown。
 // - primary は残余 % (100 - sum(split percents))
 // - 端数 (整数除算で発生) は primary に集約
 // - calcBreakdown が返す merchantReceives 全体を、% 比で割り振る
 // - feeAmount は変わらず operator が受け取る
-// - gasMode=merchant では gasAmount が merchant 全体から引かれた後の額を分配
+// - gasMode=merchant では gasAmount が merchant 全体から引かれた後の額を分配 (gasless 時のみ)
+// - standard mode では gasAmount は無視 (merchant 全体 = amount - fee)
 type SplitBreakdownEntry = { to: Address; amount: bigint; percent: number };
 type SplitBreakdown = {
   customerPays: bigint;
@@ -83,10 +99,11 @@ export function calcSplitBreakdown(
   token: TokenSymbol,
   primary: Address,
   splits: ReadonlyArray<{ to: Address; percent: number }>,
+  mode: PayMode = 'gasless',
   gasMode: GasMode = 'customer',
   gasAmount: bigint = 0n,
 ): SplitBreakdown {
-  const base = calcBreakdown(amount, token, gasMode, gasAmount);
+  const base = calcBreakdown(amount, token, mode, gasMode, gasAmount);
   const totalForRecipients = base.merchantReceives;
 
   // primary の % は残余

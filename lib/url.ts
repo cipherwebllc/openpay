@@ -6,12 +6,17 @@
 //          (token, chain) ペアに deployment が存在しない組合せは parse エラー
 //   gas    ("customer" | "merchant", 省略時 customer) ※ merchant の場合のみ URL に出力
 //   amount (任意, 人間可読 — 据え置き QR では省略)
-//   mode   ("gasless" | "direct", 省略時 gasless) ※ direct のときのみ URL に出力
+//   mode   ("gasless" | "standard", 省略時 gasless) ※ standard のときのみ URL に出力
+//          旧名 "direct" (mode=direct, fee=0) は廃止。"direct" を受けたら "standard"
+//          (fee=0.5%) に正規化する legacy alias を parser で提供。
 //   split  (任意, "0xB:30,0xC:20" 形式) — 追加受取人と分配 %。to が残余 % を取得
 //
-// 運営手数料は常に店主負担 (顧客には不可視)。`gas` パラメタはネットワーク手数料の負担者:
+// OpenPay 利用手数料は常に店主負担 (顧客には不可視)。`gas` パラメタはネットワーク手数料の負担者
+// (gasless モード固有):
 //   gas=customer (default): 顧客がネットワーク手数料を上乗せ支払い (画面に明示表示)
 //   gas=merchant:           店主がネットワーク手数料も吸収、顧客は請求金額のみ支払う
+//   mode=standard 時は OpenPay は gas に touch しないため gas パラメタは irrelevant
+//   (build/parse 共に出力しない / 無視する)。
 //
 // 旧 `fee=include`/`fee=exclude` パラメタは廃止 (parser は silently ignore)。
 //
@@ -30,7 +35,7 @@ import {
   isValidChainSlug,
   type ChainSlug,
 } from './chains';
-import type { GasMode } from './fee';
+import type { GasMode, PayMode } from './fee';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -39,7 +44,9 @@ import {
   type TokenSymbol,
 } from './tokens';
 
-export type PayMode = 'gasless' | 'direct';
+// PayMode は lib/fee.ts で定義 (fee 計算が depend するため fee.ts を SoT に)。
+// URL 利用者向けに re-export して既存 import path を維持する。
+export type { PayMode };
 
 export type SplitEntry = {
   to: Address;
@@ -178,15 +185,16 @@ export function buildPayPath(params: PayParams): string {
     sp.set('chain', params.chain);
   }
   // customer (default) は URL に出さない。merchant のみ明示。
-  if (params.gas === 'merchant') {
+  // standard mode では gas は irrelevant なので出力しない (出ても parser が無視する)。
+  if (params.gas === 'merchant' && params.mode !== 'standard') {
     sp.set('gas', 'merchant');
   }
   if (params.amount && params.amount.length > 0) {
     sp.set('amount', params.amount);
   }
   // gasless は既定値なので URL に出さず、旧 QR との互換性を保つ。
-  if (params.mode === 'direct') {
-    sp.set('mode', 'direct');
+  if (params.mode === 'standard') {
+    sp.set('mode', 'standard');
   }
   if (params.split && params.split.length > 0) {
     sp.set('split', buildSplitParam(params.split));
@@ -233,8 +241,18 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   if (!token || !isValidTokenSymbol(token)) {
     return { ok: false, error: 'token は jpyc または usdc を指定してください' };
   }
-  if (mode !== null && mode !== 'gasless' && mode !== 'direct') {
-    return { ok: false, error: 'mode は gasless または direct を指定してください' };
+  // mode=direct は旧名 (fee=0)。既発行 QR を破壊しないため legacy alias として受理し、
+  // 後段で standard (fee=0.5%) へ正規化する。
+  if (
+    mode !== null &&
+    mode !== 'gasless' &&
+    mode !== 'standard' &&
+    mode !== 'direct'
+  ) {
+    return {
+      ok: false,
+      error: 'mode は gasless または standard を指定してください',
+    };
   }
 
   // chain 解決: 明示があれば使う、無ければ token の default。
@@ -281,6 +299,9 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     parsedSplit = r;
   }
 
+  const normalizedMode: PayMode =
+    mode === 'standard' || mode === 'direct' ? 'standard' : 'gasless';
+
   return {
     ok: true,
     params: {
@@ -289,7 +310,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       chain: chainSlug,
       gas,
       amount: amount && amount.length > 0 ? amount : undefined,
-      mode: mode === 'direct' ? 'direct' : 'gasless',
+      mode: normalizedMode,
       split: parsedSplit,
     },
   };
@@ -488,6 +509,7 @@ export function parseTipParams(
 //   description     (任意, 説明文 200 文字まで)
 //   customer_email  (任意, 240 文字まで、prefill 用 — クライアントは送信しない)
 //   gas             ("customer" | "merchant", 省略時 customer)
+//   mode            ("gasless" | "standard", 省略時 gasless) ※ standard のときのみ URL に出力
 //   success_url     (任意, http(s) — 決済成功後 redirect 先)
 //   cancel_url      (任意, http(s) — 「中止して戻る」リンク)
 //   webhook         (任意, http(s) — 成功時 POST 先)
@@ -511,6 +533,9 @@ export type CheckoutParams = {
   token: TokenSymbol;
   chain?: ChainSlug;
   gas: GasMode;
+  // 決済モード (PayParams と同じ意味論)。standard では gas は無視される。
+  // build 時は省略可 (省略時 default gasless)。parse 結果では常に値が入る。
+  mode?: PayMode;
   items: CheckoutItem[];
   orderId?: string;
   description?: string;
@@ -596,8 +621,13 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     sp.set('chain', params.chain);
   }
   sp.set('items', encodeItems(params.items));
-  if (params.gas === 'merchant') {
+  // standard mode では gas は irrelevant なので出力しない (出ても parser が無視する)。
+  const effectiveMode: PayMode = params.mode ?? 'gasless';
+  if (params.gas === 'merchant' && effectiveMode !== 'standard') {
     sp.set('gas', 'merchant');
+  }
+  if (effectiveMode === 'standard') {
+    sp.set('mode', 'standard');
   }
   if (params.orderId) {
     const v = sanitizeText(params.orderId, CHECKOUT_ORDER_ID_MAX);
@@ -642,6 +672,7 @@ export function parseCheckoutParams(
   const chainRaw = searchParams.get('chain');
   const itemsRaw = searchParams.get('items');
   const gasRaw = searchParams.get('gas');
+  const modeRaw = searchParams.get('mode');
   const orderId = searchParams.get('order_id');
   const description = searchParams.get('description');
   const customerEmail = searchParams.get('customer_email');
@@ -689,6 +720,10 @@ export function parseCheckoutParams(
   }
 
   const gas: GasMode = gasRaw === 'merchant' ? 'merchant' : 'customer';
+  // mode は /pay と同じ legacy alias (direct → standard) を適用。それ以外の不明値は
+  // checkout では default の gasless に倒す (請求書文脈では UI を壊さない方が大事)。
+  const mode: PayMode =
+    modeRaw === 'standard' || modeRaw === 'direct' ? 'standard' : 'gasless';
 
   return {
     ok: true,
@@ -697,6 +732,7 @@ export function parseCheckoutParams(
       token,
       chain: chainSlug,
       gas,
+      mode,
       items,
       orderId: orderId ? sanitizeText(orderId, CHECKOUT_ORDER_ID_MAX) : undefined,
       description: description

@@ -4,7 +4,7 @@
 // で CheckoutItem[] へ昇格させる (all-or-nothing、parseSplitDrafts と同型)。
 
 import type { ChainSlug } from '@/lib/chains';
-import type { GasMode } from '@/lib/fee';
+import type { GasMode, PayMode } from '@/lib/fee';
 import type { TokenSymbol } from '@/lib/tokens';
 import { CHECKOUT_MAX_ITEMS, type CheckoutItemDraft } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
@@ -15,6 +15,8 @@ type CheckoutSettings = {
   token: TokenSymbol;
   chain: ChainSlug;
   gasMode: GasMode;
+  // 決済モード (QrSettings.payMode と同義)。standard 時は gasMode 無視。
+  payMode: PayMode;
   items: CheckoutItemDraft[];
   orderId: string;
   description: string;
@@ -31,6 +33,7 @@ const DEFAULT_SETTINGS: CheckoutSettings = {
   token: 'jpyc',
   chain: 'polygon',
   gasMode: 'customer',
+  payMode: 'gasless',
   items: [{ name: '', qty: '', price: '' }],
   orderId: '',
   description: '',
@@ -76,6 +79,10 @@ function sanitize(loaded: Partial<CheckoutSettings>): CheckoutSettings {
       loaded.gasMode === 'customer' || loaded.gasMode === 'merchant'
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
+    payMode:
+      loaded.payMode === 'gasless' || loaded.payMode === 'standard'
+        ? loaded.payMode
+        : DEFAULT_SETTINGS.payMode,
     items: sanitizeItems(loaded.items),
     orderId: sanitizeOptionalString(loaded.orderId, '', 64),
     description: sanitizeOptionalString(loaded.description, '', 200),

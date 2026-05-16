@@ -64,11 +64,14 @@ export function TipForm({ params }: { params: TipParams }) {
     return parseUnits(amountStr, deployment.decimals);
   }, [amountStr, deployment.decimals]);
 
-  // Tip widget は gas=customer 固定 (preset セマンティクス維持):
+  // Tip widget は gasless / gas=customer 固定 (preset セマンティクス維持):
   // creator は preset - fee を受け取り、ファンは preset + gas を支払う。
+  // standard mode (顧客 wallet で gas 自前負担) は creator-fan UX を崩すため
+  // tip 文脈では非対応。URL で mode=standard が来ても無視して gasless で動かす。
   const gasAmount = gasQuote.data?.gasAmount;
   const breakdown = useMemo(
-    () => calcBreakdown(amountWei, params.token, 'customer', gasAmount ?? 0n),
+    () =>
+      calcBreakdown(amountWei, params.token, 'gasless', 'customer', gasAmount ?? 0n),
     [amountWei, params.token, gasAmount],
   );
 

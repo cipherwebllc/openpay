@@ -24,7 +24,7 @@ vi.mock('wagmi', () => ({
 }));
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
-vi.mock('@/hooks/useDirectPayment', () => ({ useDirectPayment: vi.fn() }));
+vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 // resolvePaymasterMode は env 依存なので、testnet/mainnet を切替えられるよう
@@ -42,7 +42,7 @@ import { useSearchParams, type ReadonlyURLSearchParams } from 'next/navigation';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
-import { useDirectPayment } from '@/hooks/useDirectPayment';
+import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
@@ -93,7 +93,8 @@ function setSmartAccount(ready: boolean, error?: Error) {
 }
 
 let mutate: ReturnType<typeof vi.fn>;
-let directMutate: ReturnType<typeof vi.fn>;
+let standardMutate: ReturnType<typeof vi.fn>;
+let standardRetryFee: ReturnType<typeof vi.fn>;
 function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error) {
   mutate = vi.fn();
   mockHook(useBatchPayment, {
@@ -117,22 +118,63 @@ function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error
   } as Partial<ReturnType<typeof useBatchPayment>>);
 }
 
-function setDirectPayment(state: 'idle' | 'pending' | 'success' | 'error') {
-  directMutate = vi.fn();
-  mockHook(useDirectPayment, {
-    mutate: directMutate,
-    isPending: state === 'pending',
-    isSuccess: state === 'success',
-    isError: state === 'error',
+// useStandardPayment は phase + 2-tx data shape を持つ。state は phase に直接 1:1
+// 対応 (merchant-sending / merchant-mining / fee-sending / fee-mining / success /
+// merchant-error / fee-error / idle)。"success-no-fee" は feeAmount=0 の極小額決済
+// (feeTxHash=undefined になる) を表現する派生 state。
+function setStandardPayment(
+  state:
+    | 'idle'
+    | 'merchant-sending'
+    | 'merchant-mining'
+    | 'fee-sending'
+    | 'fee-mining'
+    | 'success'
+    | 'success-no-fee'
+    | 'merchant-error'
+    | 'fee-error',
+) {
+  standardMutate = vi.fn();
+  standardRetryFee = vi.fn();
+  const phase: ReturnType<typeof useStandardPayment>['phase'] =
+    state === 'success-no-fee' ? 'success' : state === 'idle' ? 'idle' : state;
+  const isPending =
+    state === 'merchant-sending' ||
+    state === 'merchant-mining' ||
+    state === 'fee-sending' ||
+    state === 'fee-mining';
+  mockHook(useStandardPayment, {
+    mutate: standardMutate,
+    retryFee: standardRetryFee,
+    phase,
+    isPending,
+    isSuccess: state === 'success' || state === 'success-no-fee',
+    isError: state === 'merchant-error' || state === 'fee-error',
+    isFeeError: state === 'fee-error',
+    isMerchantError: state === 'merchant-error',
     data:
       state === 'success'
         ? {
-            txHash: `0x${'c'.repeat(64)}`,
+            merchantTxHash: `0x${'c'.repeat(64)}`,
+            feeTxHash: `0x${'d'.repeat(64)}`,
             blockNumber: 77n,
           }
-        : undefined,
-    error: state === 'error' ? new Error('user rejected request') : null,
-  } as Partial<ReturnType<typeof useDirectPayment>>);
+        : state === 'success-no-fee'
+          ? {
+              merchantTxHash: `0x${'c'.repeat(64)}`,
+              feeTxHash: undefined,
+              blockNumber: 77n,
+            }
+          : undefined,
+    error:
+      state === 'merchant-error'
+        ? new Error('user rejected request')
+        : state === 'fee-error'
+          ? new Error('fee tx reverted')
+          : null,
+    merchantTxHash: undefined,
+    feeTxHash: undefined,
+  } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
 function setSwitchChain() {
@@ -163,7 +205,7 @@ beforeEach(() => {
   setBalance(undefined);
   setSmartAccount(false);
   setPayment('idle');
-  setDirectPayment('idle');
+  setStandardPayment('idle');
   setGasQuote('disabled');
   setAccount({ connected: false });
   // 既定は testnet 環境の挙動 (USDC/JPYC とも sponsorship)。ERC20 mode を
@@ -516,31 +558,53 @@ describe('PaymentForm — split (C1)', () => {
   });
 });
 
-describe('PaymentForm — 直接送金モード (mode=direct)', () => {
-  it('警告バッジ「ガス代お客様負担」が表示される', () => {
+describe('PaymentForm — 通常決済（ガスあり） / mode=standard', () => {
+  it('バッジ「通常決済（ガスあり）」が表示される', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    render(<PaymentForm />);
+    // 「通常決済（ガスあり）」はタイトルバッジ + breakdown hint に出るので複数
+    expect(
+      screen.getAllByText(/通常決済（ガスあり）/).length,
+    ).toBeGreaterThanOrEqual(1);
+    // ETH (USDC のネイティブガス) の案内が出る
+    expect(
+      screen.getAllByText((text) => /POL|ETH/.test(text)).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('legacy alias: mode=direct は standard に正規化されて同じ UI を表示', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     render(<PaymentForm />);
-    expect(screen.getByText(/ガス代お客様負担/)).toBeInTheDocument();
-    expect(screen.getByText(/POL|ETH/)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/通常決済（ガスあり）/).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
-  it('明細から運営手数料行が消え、merchant=customer=amount で表示', () => {
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+  it('明細: OpenPay 利用手数料は 0.5%、ネットワーク手数料はウォレットで別途、顧客支払額は amount のまま', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     render(<PaymentForm />);
-    // 運営手数料行は消える
-    expect(screen.queryByText(/運営手数料/)).toBeNull();
-    // ラベルは "顧客支払額" のみ (内税/外税 表記はつかない)
-    expect(screen.getByText('顧客支払額')).toBeInTheDocument();
-    // header + merchant + customer の 3 箇所に "10 USDC" が出る
-    expect(screen.getAllByText('10 USDC').length).toBe(3);
+    // OpenPay 利用手数料 ラベル (fee row) は明細に出る
+    expect(
+      screen.getAllByText(/OpenPay 利用手数料/).length,
+    ).toBeGreaterThanOrEqual(1);
+    // 0.05 USDC fee (= 10 * 0.5%)
+    expect(screen.getByText('0.05 USDC')).toBeInTheDocument();
+    // merchant 受取 = 9.95 USDC
+    expect(screen.getByText('9.95 USDC')).toBeInTheDocument();
+    // ネットワーク手数料はウォレットで別途
+    expect(screen.getByText(/ウォレットで別途/)).toBeInTheDocument();
+    // 顧客支払額 (header + breakdown total) で 10 USDC
+    expect(screen.getAllByText('10 USDC').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('Smart Account 待ち状態でもボタンは活性 (direct は SA 不要)', () => {
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+  it('Smart Account 待ち状態でもボタンは活性 (standard は SA 不要)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(false);
@@ -550,38 +614,44 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
     ).not.toBeDisabled();
   });
 
-  it('クリックで directMutate が amount 全額で呼ばれる (手数料なし)', async () => {
+  it('クリックで standardMutate が merchant + fee + chainId で呼ばれる (0.5% fee)', async () => {
     const user = userEvent.setup();
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     render(<PaymentForm />);
     await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
 
-    expect(directMutate).toHaveBeenCalledOnce();
-    const arg = directMutate.mock.calls[0][0];
-    expect(arg.amount).toBe(10_000_000n);
+    expect(standardMutate).toHaveBeenCalledOnce();
+    const arg = standardMutate.mock.calls[0][0];
+    // merchant = amount - fee = 10 - 0.05 = 9.95
+    expect(arg.merchantAmount).toBe(9_950_000n);
+    expect(arg.feeAmount).toBe(50_000n);
     expect(arg.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
     expect(arg.tokenAddress.toLowerCase()).toBe(
       '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
     );
     expect(arg.chainId).toBe(baseSepolia.id);
+    expect(arg.feeReceiver.toLowerCase()).toBe(
+      '0xdead000000000000000000000000000000001234',
+    );
   });
 
-  it('成功時: Tx Hash と ブロックのみ表示 (UserOp Hash は無い)', () => {
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+  it('成功時: merchant Tx + fee Tx + ブロック が表示される (UserOp Hash は無い)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
-    setDirectPayment('success');
+    setStandardPayment('success');
     render(<PaymentForm />);
     expect(screen.getAllByText(/決済が完了しました|決済完了/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`0x${'d'.repeat(64)}`).length).toBeGreaterThan(0);
     expect(screen.getAllByText('77').length).toBeGreaterThan(0);
     expect(screen.queryByText('UserOp Hash')).toBeNull();
   });
 
-  it('saError は direct モードでは UI に出ない', () => {
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+  it('saError は standard モードでは UI に出ない', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     mockHook(useSmartAccount, {
@@ -593,14 +663,82 @@ describe('PaymentForm — 直接送金モード (mode=direct)', () => {
     expect(screen.queryByText(/SA init noise/)).toBeNull();
   });
 
-  it('direct エラー → エラーメッセージ表示', () => {
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+  it('merchant-error → エラーメッセージ表示 (fee-error retry UI は出ない)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
-    setDirectPayment('error');
+    setStandardPayment('merchant-error');
     render(<PaymentForm />);
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/user rejected/)).toBeInTheDocument();
+    // 「手数料の送信を再試行」 button (= fee-error 状態専用 UI) は出ない。
+    // standardBatchHint 本文には同じフレーズが含まれるため role=button で限定する。
+    expect(
+      screen.queryByRole('button', { name: /手数料の送信を再試行/ }),
+    ).toBeNull();
+  });
+
+  it('fee-error → 「OpenPay 利用手数料の送信に失敗」+ retry ボタン (merchant は確定済)', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('fee-error');
+    render(<PaymentForm />);
+    expect(
+      screen.getByText(/OpenPay 利用手数料の送信に失敗/),
+    ).toBeInTheDocument();
+    const retryBtn = screen.getByRole('button', { name: /手数料の送信を再試行/ });
+    expect(retryBtn).not.toBeDisabled();
+    await user.click(retryBtn);
+    expect(standardRetryFee).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['merchant-sending' as const, /店舗送金を承認してください/],
+    ['merchant-mining' as const, /店舗送金を確定中/],
+    ['fee-sending' as const, /手数料の送金を承認してください/],
+    ['fee-mining' as const, /手数料の送金を確定中/],
+  ])('phaseLabel: phase=%s でボタン label が %s に切替', (phase, expected) => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment(phase);
+    render(<PaymentForm />);
+    expect(screen.getByRole('button', { name: expected })).toBeDisabled();
+  });
+
+  it('success-no-fee (fee=0 極小額): ResultPanel に merchant Tx + block のみ表示、fee Tx 行は出ない', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('success-no-fee');
+    render(<PaymentForm />);
+    // merchant tx hash は表示される
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    // fee tx hash は data に undefined のため一切現れない
+    expect(screen.queryByText(`0x${'d'.repeat(64)}`)).toBeNull();
+    // 「手数料 Tx Hash」label も出ない
+    expect(screen.queryByText('手数料 Tx Hash')).toBeNull();
+    // SuccessOverlay も出る (block 77 で確認)
+    expect(screen.getAllByText('77').length).toBeGreaterThan(0);
+  });
+
+  it('SuccessOverlay (standard): merchant tx hash の truncate (0xcccccccccc…cccccc) が overlay に出る', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('success');
+    render(<PaymentForm />);
+    // SuccessOverlay は「決済完了」を表示
+    expect(screen.getAllByText(/決済完了/).length).toBeGreaterThan(0);
+    // merchant tx hash の full は inline panel に 1 度出る
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThanOrEqual(1);
+    // overlay の truncate 表示 (先頭 10 + … + 末尾 6) も検出
+    const c = 'c'.repeat(54);
+    expect(
+      screen.getByText(new RegExp(`0xcccccccc…${c.slice(0, 6)}`)),
+    ).toBeInTheDocument();
   });
 });
 
@@ -748,22 +886,20 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
   });
 
-  it('direct mode + USDC params: 即時 ERC20 transfer なので gas 行が出ず gasQuote は呼ばれない', () => {
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=direct`);
+  it('standard mode + USDC params: ガス代見積は呼ばれない (paymaster 不使用)、ネットワーク手数料行は「ウォレットで別途」表示', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
-    // direct mode では erc20 mode mock 下でも gas を考慮しない
+    // standard mode では erc20 mode mock 下でも gas を考慮しない
     setGasQuote('disabled');
     render(<PaymentForm />);
 
-    // 「ネットワーク手数料」行は出ない (direct = paymaster 不使用)
+    // ネットワーク手数料行は「ウォレットで別途」表示で出る (見積額は出さない)
+    expect(screen.getByText(/ウォレットで別途/)).toBeInTheDocument();
+    // standard モードバッジは出る (タイトル + hint で複数箇所)
     expect(
-      Array.from(document.querySelectorAll('dl dt')).some((el) =>
-        /ネットワーク手数料/.test(el.textContent ?? ''),
-      ),
-    ).toBe(false);
-    // direct 警告は出る
-    expect(screen.getByText(/ガス代お客様負担/)).toBeInTheDocument();
+      screen.getAllByText(/通常決済（ガスあり）/).length,
+    ).toBeGreaterThanOrEqual(1);
     // useGasQuoteUsdc は enabled=false で呼ばれる (no fetch)。第 1 引数は USDC deployment。
     expect(useGasQuoteUsdc).toHaveBeenCalledWith(
       expect.objectContaining({ symbol: 'usdc' }),
@@ -895,7 +1031,10 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     setURL(`to=${MERCHANT}&token=usdc&gas=merchant&amount=100`);
     setGasQuote('ready', 0n);
     render(<PaymentForm />);
-    expect(screen.getByText(/店主が gas を負担/)).toBeInTheDocument();
+    // i18n updated: "店主がネットワーク手数料を負担"
+    expect(
+      screen.getByText(/店主が(?: gas|ネットワーク手数料)を負担/),
+    ).toBeInTheDocument();
   });
 
   it('submit: sponsorship JPYC で fee_transfer = fee + gas (運営は両方徴収)', async () => {

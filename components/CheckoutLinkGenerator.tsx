@@ -10,7 +10,7 @@ import { useCheckoutSettings } from '@/hooks/useCheckoutSettings';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
-import type { GasMode } from '@/lib/fee';
+import type { GasMode, PayMode } from '@/lib/fee';
 import { isLikelyName } from '@/lib/nameDetection';
 import { formatTokenAmount, pickEffectiveAddress } from '@/lib/format';
 import {
@@ -71,6 +71,7 @@ export function CheckoutLinkGenerator() {
       token: settings.token,
       chain: settings.chain,
       gas: settings.gasMode,
+      mode: settings.payMode,
       items: itemsParsed.items,
       orderId: settings.orderId.trim() || undefined,
       description: settings.description.trim() || undefined,
@@ -88,6 +89,7 @@ export function CheckoutLinkGenerator() {
     settings.token,
     settings.chain,
     settings.gasMode,
+    settings.payMode,
     settings.orderId,
     settings.description,
     settings.customerEmail,
@@ -287,15 +289,15 @@ export function CheckoutLinkGenerator() {
           )}
         </Field>
 
-        <Field label={t('gasLabel')}>
-          <div className="grid grid-cols-2 gap-2">
-            {(['customer', 'merchant'] as GasMode[]).map((g) => {
-              const active = settings.gasMode === g;
+        <Field label={t('payModeLabel')}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {(['gasless', 'standard'] as PayMode[]).map((pm) => {
+              const active = settings.payMode === pm;
               return (
                 <button
-                  key={g}
+                  key={pm}
                   type="button"
-                  onClick={() => setSettings((s) => ({ ...s, gasMode: g }))}
+                  onClick={() => setSettings((s) => ({ ...s, payMode: pm }))}
                   className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
                     active
                       ? 'border-brand bg-brand/5 text-brand-dark'
@@ -303,20 +305,53 @@ export function CheckoutLinkGenerator() {
                   }`}
                 >
                   <div className="font-semibold">
-                    {g === 'customer'
-                      ? t('gasCustomerTitle')
-                      : t('gasMerchantTitle')}
+                    {pm === 'gasless'
+                      ? t('payModeGaslessTitle')
+                      : t('payModeStandardTitle')}
                   </div>
                   <div className="mt-0.5 text-xs text-slate-500">
-                    {g === 'customer'
-                      ? t('gasCustomerDesc')
-                      : t('gasMerchantDesc')}
+                    {pm === 'gasless'
+                      ? t('payModeGaslessDesc')
+                      : t('payModeStandardDesc')}
                   </div>
                 </button>
               );
             })}
           </div>
         </Field>
+
+        {settings.payMode === 'gasless' && (
+          <Field label={t('gasLabel')}>
+            <div className="grid grid-cols-2 gap-2">
+              {(['customer', 'merchant'] as GasMode[]).map((g) => {
+                const active = settings.gasMode === g;
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setSettings((s) => ({ ...s, gasMode: g }))}
+                    className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                      active
+                        ? 'border-brand bg-brand/5 text-brand-dark'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="font-semibold">
+                      {g === 'customer'
+                        ? t('gasCustomerTitle')
+                        : t('gasMerchantTitle')}
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      {g === 'customer'
+                        ? t('gasCustomerDesc')
+                        : t('gasMerchantDesc')}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        )}
 
         <Field label={t('orderIdLabel')}>
           <input
