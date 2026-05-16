@@ -540,6 +540,32 @@ describe('Legal pages', () => {
         'feeReceiverHintStandard',
         'en.QrGenerator',
       );
+      // EIP-681 fee bypass 警告 (mode=standard 0.5% との不整合を可視化)
+      expectNonEmptyString(
+        ja.QrGenerator.eip681FeeBypassTitle,
+        'eip681FeeBypassTitle',
+        'ja.QrGenerator',
+      );
+      expectNonEmptyString(
+        en.QrGenerator.eip681FeeBypassTitle,
+        'eip681FeeBypassTitle',
+        'en.QrGenerator',
+      );
+      expectNonEmptyString(
+        ja.QrGenerator.eip681FeeBypassBody,
+        'eip681FeeBypassBody',
+        'ja.QrGenerator',
+      );
+      expectNonEmptyString(
+        en.QrGenerator.eip681FeeBypassBody,
+        'eip681FeeBypassBody',
+        'en.QrGenerator',
+      );
+      // 警告本体に料率 (0.5%) と「徴収されません」が含まれる (semantic regression guard)
+      expect(ja.QrGenerator.eip681FeeBypassTitle).toMatch(/0\.5%/);
+      expect(ja.QrGenerator.eip681FeeBypassTitle).toMatch(/徴収されません/);
+      expect(en.QrGenerator.eip681FeeBypassTitle).toMatch(/0\.5%/);
+      expect(en.QrGenerator.eip681FeeBypassTitle).toMatch(/does NOT collect/);
     });
 
     it('payModeStandardDesc / standardModeBody は 0.5% 文言を含む (用語 regression)', async () => {

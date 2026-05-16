@@ -534,10 +534,11 @@ describe('QrGenerator', () => {
       });
       await user.click(standardBtn);
 
-      // URL に mode=standard が出る
+      // URL に mode=standard が出る (font-mono の payUrl 表示 + 警告文等にも
+      // "mode=standard" 文字列が含まれるため、payUrl 限定で /pay?... 形式の URL を assert)
       await waitFor(() => {
         expect(
-          screen.getByText((t) => t.includes('mode=standard')),
+          screen.getByText((t) => /\/pay\?[^ ]*mode=standard/.test(t)),
         ).toBeInTheDocument();
       });
 
@@ -652,6 +653,28 @@ describe('QrGenerator', () => {
         ),
       );
       expect(longestPath).toBeGreaterThan(500);
+
+      // fee bypass 警告 banner が EIP-681 section と同時に表示される (store 向け透明化)
+      expect(
+        screen.getByText(/この QR では OpenPay 利用手数料.*徴収されません/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /両方を同時に掲示すると、顧客がどちらを scan するかで実質料率/,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('fee bypass 警告は EIP-681 section に紐付く (EIP-681 非表示時は警告も非表示)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // gasless モード (default) では EIP-681 が出ない → 警告も出ない
+      await user.type(screen.getByPlaceholderText('1000'), '1000');
+      expect(
+        screen.queryByText(/この QR では OpenPay 利用手数料.*徴収されません/),
+      ).toBeNull();
     });
 
     it('direct ON + 据え置き (amount 無し) は section 非表示', async () => {

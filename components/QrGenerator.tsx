@@ -782,6 +782,14 @@ export function QrGenerator() {
             <p className="self-start text-xs text-slate-500">
               {t('eip681Description')}
             </p>
+            {/* 店主向け fee bypass 警告: EIP-681 QR は OpenPay の checkout を経由しない
+                 純粋 ERC20 transfer のため OpenPay 利用手数料が徴収されない。隣の
+                 通常決済（ガスあり）QR (mode=standard) と並列に掲示すると顧客がどちらを
+                 scan するかで実質料率が 0.5% / 0% に変動する点を可視化する。 */}
+            <div className="w-full self-stretch rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+              <p className="font-semibold">{t('eip681FeeBypassTitle')}</p>
+              <p className="mt-0.5">{t('eip681FeeBypassBody')}</p>
+            </div>
             <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
             <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
               {eip681Uri}
