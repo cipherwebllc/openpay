@@ -589,13 +589,13 @@ npm run build && npm run start
 **運用手順** (リリース時に都度実行):
 
 1. `git push origin main` — GitHub に反映、CI (`ci.yml` / `lighthouse.yml`) が green になることを確認
-2. ローカルで `.env.local` の md5 を控えておく (Vercel CLI が `.env.local` を上書きする既知挙動の対策)
+2. `.env.local` を単一 backup ファイル (`.env.local.backup`) に保存 (Vercel CLI が `.env.local` を上書きする既知挙動の対策)
    ```bash
-   cp .env.local .env.local.predeploy-backup-$(date +%Y%m%d-%H%M%S)
-   md5 -q .env.local
+   ./scripts/predeploy-backup.sh
    ```
+   旧運用 (`.env.local.predeploy-backup-YYYYMMDD-HHMMSS` のタイムスタンプ付き backup を毎回作る) は backup ファイルが累積する問題があったため、単一 `.env.local.backup` を上書きする方針に変更 (md5 が前回と同一なら skip)。
 3. `vercel --prod --yes` で本番昇格 (Vercel CLI を未 link 環境で実行する事故防止のため、事前に `vercel link` で project を紐付け済であること)
-4. deploy 完了後、`md5 -q .env.local` を再実行して **hash が変わっていないこと** を確認
+4. deploy 完了後、`./scripts/predeploy-backup.sh --verify-after` で md5 整合性を自動確認 (異なる場合は exit code 2 + 復元手順を表示)
 5. 主要 page を curl で smoke (例: `curl -fsS https://open-pay.jp/ja/disclaimer | grep "施行日:"` で施行日が想定どおりか)
 
 Vercel Dashboard 上の Git Integration による自動デプロイは **オフのまま**にしてください (誤って main push 直後に本番反映されると上記 rollback リスクを踏みます)。

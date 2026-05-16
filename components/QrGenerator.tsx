@@ -775,33 +775,45 @@ export function QrGenerator() {
           </p>
         </div>
         {eip681Uri && (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4 print:hidden">
-            <h3 className="self-start text-sm font-semibold text-slate-800">
-              {t('eip681Title')}
-            </h3>
-            <p className="self-start text-xs text-slate-500">
-              {t('eip681Description')}
-            </p>
-            {/* 店主向け fee bypass 警告: EIP-681 QR は OpenPay の checkout を経由しない
-                 純粋 ERC20 transfer のため OpenPay 利用手数料が徴収されない。隣の
-                 通常決済（ガスあり）QR (mode=standard) と並列に掲示すると顧客がどちらを
-                 scan するかで実質料率が 0.5% / 0% に変動する点を可視化する。 */}
-            <div className="w-full self-stretch rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-              <p className="font-semibold">{t('eip681FeeBypassTitle')}</p>
-              <p className="mt-0.5">{t('eip681FeeBypassBody')}</p>
+          // EIP-681 互換 QR は default 閉 (上の OpenPay QR + poster QR で 2 つ
+          // 既に並ぶため視覚的ノイズを減らす)。Hashport / MetaMask Mobile 等の
+          // EIP-7702 非対応 wallet を救済する fallback として必要な人が summary
+          // クリックで開く動線。
+          <details className="rounded-2xl border border-dashed border-slate-300 bg-white print:hidden">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800 marker:hidden">
+              <span className="flex items-center gap-2">
+                <span>{t('eip681Title')}</span>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                  {t('eip681SummaryBadge')}
+                </span>
+              </span>
+              <span className="text-slate-400" aria-hidden>
+                ▼
+              </span>
+            </summary>
+            <div className="flex flex-col items-center gap-3 border-t border-dashed border-slate-200 px-4 py-4">
+              <p className="self-start text-xs text-slate-500">
+                {t('eip681Description')}
+              </p>
+              {/* 店主向け fee bypass 警告: EIP-681 QR は OpenPay の checkout を経由しない
+                   純粋 ERC20 transfer のため OpenPay 利用手数料が徴収されない。 */}
+              <div className="w-full self-stretch rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                <p className="font-semibold">{t('eip681FeeBypassTitle')}</p>
+                <p className="mt-0.5">{t('eip681FeeBypassBody')}</p>
+              </div>
+              <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
+              <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
+                {eip681Uri}
+              </div>
+              <button
+                type="button"
+                onClick={() => eip681Copy(eip681Uri)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+              >
+                {eip681Copied ? t('eip681Copied') : t('eip681Copy')}
+              </button>
             </div>
-            <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
-            <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
-              {eip681Uri}
-            </div>
-            <button
-              type="button"
-              onClick={() => eip681Copy(eip681Uri)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-            >
-              {eip681Copied ? t('eip681Copied') : t('eip681Copy')}
-            </button>
-          </div>
+          </details>
         )}
       </section>
     </div>

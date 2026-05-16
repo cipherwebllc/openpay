@@ -665,6 +665,37 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
     });
 
+    it('EIP-681 section は default で閉じている (details summary が初期状態 closed)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '1000');
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+
+      // details 要素が DOM に存在 + 初期 open=false
+      const summary = await screen.findByText(/互換 QR \(EIP-681\)/);
+      const detailsEl = summary.closest('details');
+      expect(detailsEl).not.toBeNull();
+      expect(detailsEl?.open).toBe(false);
+
+      // summary clickで open=true
+      summary.click();
+      expect(detailsEl?.open).toBe(true);
+    });
+
+    it('EIP-681 section の summary に「上級者向け」 badge が表示される', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '1000');
+      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+
+      // summary 内の badge (default 閉でも DOM には存在)
+      expect(screen.getByText('上級者向け')).toBeInTheDocument();
+    });
+
     it('fee bypass 警告は EIP-681 section に紐付く (EIP-681 非表示時は警告も非表示)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);

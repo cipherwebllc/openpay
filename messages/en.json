@@ -84,6 +84,7 @@
     "feeReceiverHintUsdc": "(USDC gasless: 1.0% + estimated network fee)",
     "feeReceiverHintStandard": "(Standard payment: 0.5%. Customer pays network fee from their own wallet.)",
     "eip681Title": "Wallet-native QR (EIP-681)",
+    "eip681SummaryBadge": "Advanced",
     "eip681Description": "A standards-compliant ERC20 transfer URI that any EIP-681 wallet (Hashport, MetaMask Mobile, etc.) can scan directly. Bypasses OpenPay's checkout (gasless / standard / split); the merchant receives the full amount.",
     "eip681FeeBypassTitle": "⚠ This QR does NOT collect the OpenPay service fee (0.5%)",
     "eip681FeeBypassBody": "The EIP-681 compatible QR is a pure single ERC20 transfer with no path to collect the service fee, unlike the adjacent \"Standard payment (with gas)\" QR (mode=standard, OpenPay service fee 0.5%). If both QRs are displayed side by side, the effective fee rate the merchant collects depends on which one the customer scans (0% vs 0.5%). Display this QR only when you want to support EIP-7702-incompatible wallets (Hashport, MetaMask Mobile) as a fallback.",
