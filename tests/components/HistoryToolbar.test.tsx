@@ -10,6 +10,7 @@ import type { HistoryEntry } from '@/lib/history';
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
+    schemaVersion: 1,
     id: 'id-' + Math.random(),
     ts: 1_700_000_000_000,
     flow: 'batch',

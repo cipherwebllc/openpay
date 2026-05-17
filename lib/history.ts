@@ -60,7 +60,27 @@ export type HistoryPayMode = 'gasless' | 'standard';
 
 export type HistoryGasMode = 'customer' | 'merchant';
 
+// schema version 管理:
+//
+// LocalStorage に書かれた entry が将来 schema 変更を生き残るための infrastructure。
+//
+// 設計:
+//   - すべての entry に schemaVersion field を必須 (新規 build は LATEST_SCHEMA_VERSION)。
+//   - 既存 LocalStorage entry (Phase 2 初期版で schemaVersion を持たない) は
+//     migrateToLatest で「unversioned = v1」と判定して v1 stamp して取込む。
+//   - 将来 v2 → v3 等の schema 変更時は MIGRATIONS[from] = (entry) => migrated_entry
+//     を 1 行追加するだけで chain migration が走る (migrateToLatest が低→高に repeatedly apply)。
+//   - LATEST_SCHEMA_VERSION より大きい version は user の browser が我々の build より
+//     新しい (= rollback 後の旧版が新版 entry を読む) ケース → 安全に drop。
+//   - 不明な intermediate version (e.g. v3 がいたら v2 migration が必要だが無い) も drop。
+//
+// 既存 user データ救済の証拠は tests/lib/history.test.ts:「unversioned legacy 読込」群を参照。
+
+export const LATEST_SCHEMA_VERSION = 1 as const;
+
 export type HistoryEntry = {
+  /** schema version. 新規 entry は常に LATEST_SCHEMA_VERSION を持つ。 */
+  schemaVersion: number;
   /** dedupe 用一意キー。tx hash があれば `${flow}-${hash}`、無ければ uuid。 */
   id: string;
   /** 取込時刻 (Date.now())。チェーン上 block time とは別物 (UI 表示用)。 */
@@ -99,12 +119,14 @@ export type HistoryEntry = {
   note: string;
 };
 
-// schema 検証: load 時に corrupt / 旧 schema entry を静かに脱落させる。
-// 必須 field の typeof / 列挙チェックのみ。bigint string や address 形式の
-// 厳密検証は表示時 (formatTokenAmount / Explorer) の責務に委譲する。
+// LATEST_SCHEMA_VERSION の entry に対する shape 検証。migration 後の最終 entry に
+// 適用する。bigint string や address 形式の厳密検証は表示時
+// (formatTokenAmount / Explorer) の責務に委譲する。
 function isValidEntry(value: unknown): value is HistoryEntry {
   if (value === null || typeof value !== 'object') return false;
   const e = value as Record<string, unknown>;
+  // schemaVersion は LATEST と一致必須 (migration 経路で stamp 済前提)。
+  if (e.schemaVersion !== LATEST_SCHEMA_VERSION) return false;
   if (typeof e.id !== 'string' || e.id.length === 0) return false;
   if (typeof e.ts !== 'number' || !Number.isFinite(e.ts)) return false;
   if (
@@ -137,6 +159,63 @@ function isValidEntry(value: unknown): value is HistoryEntry {
   return true;
 }
 
+/**
+ * `from` 版の entry を `from + 1` 版に変換する関数。null 返却 = 救済不能 → drop。
+ * 1 step migration のみ (chain は migrateToLatest が低→高に repeatedly apply する)。
+ */
+export type MigrationFn = (
+  entry: Record<string, unknown>,
+) => Record<string, unknown> | null;
+
+/**
+ * key = `from` version、value = `from → from+1` migration。
+ *
+ * **現状は空** (v1 単独運用、過去版なし)。将来 v2 を投入する時はここに
+ * `MIGRATIONS[1] = (entry) => ({ ...entry, schemaVersion: 2, ...new_fields })`
+ * を 1 行追加するだけで chain が走る。
+ *
+ * unversioned entry (Phase 2 初期の schemaVersion 不在データ) は
+ * `migrateToLatest` 内で「v1 として stamp」する固定処理で吸収し、
+ * MIGRATIONS には登録しない (v0 → v1 ではなく "stamp" 扱い)。
+ */
+export const MIGRATIONS: Record<number, MigrationFn> = {};
+
+/**
+ * 任意 version の生 entry を LATEST_SCHEMA_VERSION の HistoryEntry へ昇格させる。
+ * 救済不能なら null を返し、loadHistory が drop カウンタに入れる。
+ *
+ * 規則:
+ *   - 非 object / null → drop
+ *   - schemaVersion が number でない → unversioned 扱いで v1 stamp
+ *     (Phase 2 初期 LocalStorage データへの後方互換)
+ *   - LATEST より大きい → drop (rollback 後の旧 build が新 entry を読むケース、
+ *     未知の field 構造で UI 表示が壊れる可能性があるため安全に drop)
+ *   - LATEST より小さい → MIGRATIONS[v] → MIGRATIONS[v+1] → ... と repeatedly apply。
+ *     途中で migration 未登録 (gap) なら drop。各 step で null を返したら drop。
+ *   - 最後に isValidEntry で final shape を検証 → 通れば HistoryEntry。
+ */
+export function migrateToLatest(value: unknown): HistoryEntry | null {
+  if (value === null || typeof value !== 'object') return null;
+  let current = { ...(value as Record<string, unknown>) };
+  let version =
+    typeof current.schemaVersion === 'number' ? current.schemaVersion : 1;
+  if (typeof current.schemaVersion !== 'number') {
+    // unversioned legacy entry → v1 stamp (Phase 2 初期版データ救済)
+    current = { ...current, schemaVersion: 1 };
+  }
+  if (version > LATEST_SCHEMA_VERSION) return null;
+  while (version < LATEST_SCHEMA_VERSION) {
+    const migrator = MIGRATIONS[version];
+    if (!migrator) return null;
+    const next = migrator(current);
+    if (next === null || typeof next !== 'object') return null;
+    current = { ...next };
+    version += 1;
+    current.schemaVersion = version;
+  }
+  return isValidEntry(current) ? current : null;
+}
+
 export function loadHistory(): HistoryEntry[] {
   const raw = safeGet<unknown>(HISTORY_STORAGE_KEY, []);
   if (!Array.isArray(raw)) {
@@ -146,10 +225,11 @@ export function loadHistory(): HistoryEntry[] {
   const valid: HistoryEntry[] = [];
   let invalid = 0;
   for (const item of raw) {
-    if (isValidEntry(item)) {
-      valid.push(item);
-    } else {
+    const migrated = migrateToLatest(item);
+    if (migrated === null) {
       invalid += 1;
+    } else {
+      valid.push(migrated);
     }
   }
   if (invalid > 0) {
@@ -250,6 +330,7 @@ export function buildHistoryEntry(
       ? `${input.flow}-uo-${input.userOpHash}`
       : `${input.flow}-err-${Math.floor(ts / 1000)}-${(input.errorMessage ?? 'noerr').slice(0, 32)}`;
   return {
+    schemaVersion: LATEST_SCHEMA_VERSION,
     id,
     ts,
     flow: input.flow,

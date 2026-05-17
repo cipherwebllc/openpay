@@ -15,6 +15,7 @@ const POLYGON_AMOY_ID = 80002;
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
+    schemaVersion: 1,
     id: 'row-test',
     ts: new Date(2026, 4, 17, 9, 5, 3).getTime(),
     flow: 'batch',

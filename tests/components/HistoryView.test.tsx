@@ -11,6 +11,7 @@ import {
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
+    schemaVersion: 1,
     id: 'view-test-' + Math.random(),
     ts: 1_700_000_000_000,
     flow: 'batch',

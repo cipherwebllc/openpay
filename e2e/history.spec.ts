@@ -47,6 +47,7 @@ test.describe('/history (browser-level smoke)', () => {
     // storage event を dispatch (useHistory hook が拾って再 load する)。
     await page.evaluate(() => {
       const entry = {
+        schemaVersion: 1,
         id: 'e2e-seed',
         ts: Date.now(),
         flow: 'batch',

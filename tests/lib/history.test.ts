@@ -7,14 +7,19 @@ import {
   HISTORY_CHANGED_EVENT,
   HISTORY_MAX_ENTRIES,
   HISTORY_STORAGE_KEY,
+  LATEST_SCHEMA_VERSION,
   loadHistory,
+  migrateToLatest,
+  MIGRATIONS,
   removeHistoryEntry,
   type BuildHistoryBase,
   type HistoryEntry,
+  type MigrationFn,
 } from '@/lib/history';
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
+    schemaVersion: 1,
     id: 'test-id',
     ts: 1_700_000_000_000,
     flow: 'batch',
@@ -574,6 +579,179 @@ describe('history (LocalStorage)', () => {
       // 最後に append した seq-99 が先頭、最古 seq-0 が末尾
       expect(loaded[0].id).toBe('seq-99');
       expect(loaded[99].id).toBe('seq-0');
+    });
+  });
+
+  describe('schema migration framework', () => {
+    afterEach(() => {
+      // テストが MIGRATIONS を mutate するため毎回 reset
+      for (const k of Object.keys(MIGRATIONS)) {
+        delete (MIGRATIONS as Record<number, MigrationFn>)[Number(k)];
+      }
+    });
+
+    describe('buildHistoryEntry が常に LATEST_SCHEMA_VERSION を stamp', () => {
+      it('新規 entry は schemaVersion = LATEST_SCHEMA_VERSION (= 1)', () => {
+        const base: BuildHistoryBase = {
+          flow: 'batch',
+          status: 'success',
+          chainId: 137,
+          chainSlug: 'polygon',
+          asset: 'jpyc',
+          tokenAddress: '0xT',
+          payMode: 'gasless',
+          gasMode: 'customer',
+          merchant: '0xM',
+          merchantAmount: 1n,
+          customer: '0xC',
+          feeReceiver: '0xF',
+          feeAmount: 0n,
+          txHash: '0xTx',
+          userOpHash: '0xUO',
+          blockNumber: 1n,
+          errorMessage: null,
+          storeName: '',
+        };
+        expect(buildHistoryEntry(base).schemaVersion).toBe(LATEST_SCHEMA_VERSION);
+        expect(buildHistoryEntry(base).schemaVersion).toBe(1);
+      });
+    });
+
+    describe('migrateToLatest', () => {
+      it('schemaVersion = LATEST → そのまま valid なら通す', () => {
+        const e = entry({ id: 'a' });
+        const out = migrateToLatest(e);
+        expect(out).not.toBeNull();
+        expect(out?.id).toBe('a');
+        expect(out?.schemaVersion).toBe(1);
+      });
+
+      it('non-object 入力 → null', () => {
+        expect(migrateToLatest(null)).toBeNull();
+        expect(migrateToLatest(undefined)).toBeNull();
+        expect(migrateToLatest('string')).toBeNull();
+        expect(migrateToLatest(42)).toBeNull();
+      });
+
+      it('schemaVersion > LATEST → null (future build からの downgrade 防御)', () => {
+        const e = entry({ id: 'future' });
+        const future = { ...e, schemaVersion: LATEST_SCHEMA_VERSION + 1 };
+        expect(migrateToLatest(future)).toBeNull();
+      });
+
+      it('schemaVersion = LATEST + 99 → null', () => {
+        const e = entry({ id: 'far-future' });
+        const far = { ...e, schemaVersion: LATEST_SCHEMA_VERSION + 99 };
+        expect(migrateToLatest(far)).toBeNull();
+      });
+
+      it('schemaVersion 不在 (Phase 2 初期 legacy データ) → v1 stamp で読み込み', () => {
+        // schemaVersion を完全に欠落させた entry を直接構築
+        const e = entry({ id: 'legacy' });
+        const legacy: Record<string, unknown> = { ...e };
+        delete legacy.schemaVersion;
+        const out = migrateToLatest(legacy);
+        expect(out).not.toBeNull();
+        expect(out?.schemaVersion).toBe(1);
+        expect(out?.id).toBe('legacy');
+      });
+
+      it('schemaVersion が non-number (string / null / object) → v1 stamp で読み込み', () => {
+        const e = entry({ id: 'weird' });
+        const out1 = migrateToLatest({ ...e, schemaVersion: '1' });
+        const out2 = migrateToLatest({ ...e, schemaVersion: null });
+        const out3 = migrateToLatest({ ...e, schemaVersion: { v: 1 } });
+        expect(out1?.schemaVersion).toBe(1);
+        expect(out2?.schemaVersion).toBe(1);
+        expect(out3?.schemaVersion).toBe(1);
+      });
+
+      it('shape 不正 (id 欠落等) → migration 後 validation で null', () => {
+        const e = entry({ id: 'x' });
+        const broken = { ...e, id: 123 }; // id が number → isValidEntry で false
+        expect(migrateToLatest(broken)).toBeNull();
+      });
+
+      it('入力 entry は mutate されない (shallow copy で隔離)', () => {
+        const e = entry({ id: 'immut' });
+        const input = { ...e } as Record<string, unknown>;
+        delete input.schemaVersion;
+        migrateToLatest(input);
+        expect(input.schemaVersion).toBeUndefined();
+      });
+    });
+
+    describe('migration chain (将来 v2 を投入したときの挙動を fake migration で予証)', () => {
+      it('MIGRATIONS[from] を辿って repeatedly apply される', () => {
+        // この test だけ LATEST を超える "fake v3" を一時的に作る:
+        // LATEST_SCHEMA_VERSION = 1 を強制的に弄れないので、ここでは
+        // migrateToLatest の to が 1 固定で確認できる範囲のみ test。
+        // v_unknown → v1 chain (現状未登録) で drop されることを確認。
+        const e = entry({ id: 'no-chain' });
+        const v0 = { ...e, schemaVersion: 0 }; // 不在の version
+        // MIGRATIONS[0] = undefined → migration gap → null
+        expect(migrateToLatest(v0)).toBeNull();
+      });
+
+      it('MIGRATIONS[from] が登録されれば chain が走る', () => {
+        // v0 → v1 の fake migration を一時登録
+        const v0ToV1: MigrationFn = (entry) => ({
+          ...entry,
+          // v0 schema を v1 shape に変換 (ここでは恒等 + version bump)。
+          // 実際の v2 → v3 等もこの形 (新 field 追加 / 旧 field 削除等)。
+        });
+        (MIGRATIONS as Record<number, MigrationFn>)[0] = v0ToV1;
+
+        const e = entry({ id: 'from-v0' });
+        const v0 = { ...e, schemaVersion: 0 };
+        const out = migrateToLatest(v0);
+        expect(out).not.toBeNull();
+        expect(out?.id).toBe('from-v0');
+        expect(out?.schemaVersion).toBe(1);
+      });
+
+      it('chain 内 migration が null を返したら drop', () => {
+        (MIGRATIONS as Record<number, MigrationFn>)[0] = () => null;
+        const e = entry({ id: 'reject' });
+        const v0 = { ...e, schemaVersion: 0 };
+        expect(migrateToLatest(v0)).toBeNull();
+      });
+
+      it('chain 内 migration が non-object を返したら drop', () => {
+        (MIGRATIONS as Record<number, MigrationFn>)[0] = () =>
+          'not-an-object' as unknown as Record<string, unknown>;
+        const e = entry({ id: 'wrong-type' });
+        const v0 = { ...e, schemaVersion: 0 };
+        expect(migrateToLatest(v0)).toBeNull();
+      });
+    });
+
+    describe('loadHistory が migration を透過適用', () => {
+      it('LocalStorage に versionless legacy + 現行 v1 混在 → 全件取込', () => {
+        const e1 = entry({ id: 'v1' });
+        const e2: Record<string, unknown> = { ...entry({ id: 'legacy' }) };
+        delete e2.schemaVersion;
+        window.localStorage.setItem(
+          HISTORY_STORAGE_KEY,
+          JSON.stringify([e1, e2]),
+        );
+        const loaded = loadHistory();
+        expect(loaded).toHaveLength(2);
+        expect(loaded[0].schemaVersion).toBe(1);
+        expect(loaded[1].schemaVersion).toBe(1);
+      });
+
+      it('LocalStorage に future version 混在 → future のみ drop', () => {
+        const e1 = entry({ id: 'v1' });
+        const future = { ...entry({ id: 'v999' }), schemaVersion: 999 };
+        window.localStorage.setItem(
+          HISTORY_STORAGE_KEY,
+          JSON.stringify([e1, future]),
+        );
+        const loaded = loadHistory();
+        expect(loaded).toHaveLength(1);
+        expect(loaded[0].id).toBe('v1');
+      });
     });
   });
 

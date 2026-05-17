@@ -9,6 +9,7 @@ import type { HistoryEntry } from '@/lib/history';
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
+    schemaVersion: 1,
     id: 'test-id',
     ts: new Date(2026, 4, 17, 9, 5, 3).getTime(),
     flow: 'batch',
@@ -154,6 +155,7 @@ describe('toCsv', () => {
   it('1000 件 (HISTORY_MAX_ENTRIES boundary) でも 200ms 以内で出力できる', () => {
     function buildEntry(id: string): HistoryEntry {
       return {
+        schemaVersion: 1,
         id,
         ts: 1_700_000_000_000,
         flow: 'batch',
@@ -284,6 +286,7 @@ function parseCsv(input: string): string[][] {
 describe('CSV round-trip 整合性 (escape の逆 parse)', () => {
   function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     return {
+      schemaVersion: 1,
       id: 'rt',
       ts: new Date(2026, 4, 17, 9, 5, 3).getTime(),
       flow: 'batch',

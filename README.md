@@ -874,7 +874,7 @@ upstream (`@coinbase/cdp-sdk`) が axios constraint を緩めた段階で overri
 - ☐ **`/history` 実 browser performance baseline** — jsdom 上で 1000 件 render が ~1.7s、CSV 出力が ~10ms。実 Chrome / Safari / Firefox / mobile での数字は未計測 (実体は 10-50x 高速化想定だが推定値)。GMV 拡大時に Web Vitals を 1 件取って baseline を確定
 - ☐ **iOS Safari ITP / 私的モードでの `/history` 永続化検証** — `lib/storage.ts` の try/catch で書込失敗は silent fail するが、ITP の 7 日 storage 削除 / 私的モードでの quota=0 挙動を実機で確認していない。alpha 顧客の履歴消失タイミングを把握するため、iPhone 実機で (a) 通常モード 8 日後の persistence、(b) 私的モードでの初回 append 挙動を 1 度確認
 - ☐ **実 Excel での CSV 開封検証** — RFC-4180 round-trip + BOM presence は test で実証済だが、Microsoft Excel (Windows / Mac) / Google Sheets / Numbers での open 確認は未実施。日本語店舗名 / 改行入りメモ / 0.005 USDC 等の小数表記が会計ソフトで意図通り表示されるかを 1 度実機検証
-- ☐ **HistoryEntry schema v1 → v2 migration helper** — 将来 schema を変える時、`isValidEntry` の tolerant 検証で旧 entry は drop されるだけ (= user データ消失)。v2 投入時は `migrateV1ToV2(entry: unknown): HistoryEntry | null` helper を `lib/history.ts` に追加し、`loadHistory` 内で run することで既存ユーザのデータを失わない設計に拡張する。現状の v1 単独運用では skeleton も未実装
+- ☑ **HistoryEntry schema 拡張用 migration framework 実装済** (`lib/history.ts:MIGRATIONS` / `migrateToLatest`) — v2 を追加する時は `(1) HistoryEntry 型に新 field を足す → (2) LATEST_SCHEMA_VERSION = 2 に bump → (3) MIGRATIONS[1] = (entry) => ({...entry, schemaVersion: 2, /* 新 field 初期値 */})` の 3 ステップで chain migration が走る (低→高 repeatedly apply)。LATEST より大きい version は rollback 後の旧 build が新 entry を読むケースとして安全に drop。schemaVersion 不在 (Phase 2 初期 LocalStorage データ) は「unversioned = v1」と判定して v1 stamp で取込むため、既存 user データは無失で生き残る。framework 自体の挙動は `tests/lib/history.test.ts:「schema migration framework」` の 14 ケース (未来 version drop / unversioned legacy 救済 / chain 適用 / migration null 返し drop / 入力 immutability) で実証
 
 ### 既知の transitive 脆弱性 (`npm audit`)
 
