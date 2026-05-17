@@ -214,11 +214,32 @@ beforeEach(() => {
 });
 
 describe('PaymentForm — URL parse', () => {
-  it('to が無い URL → エラー表示', () => {
+  it('to が無い + 他 param あり → 赤エラー (URL 半壊なので merchant に通知)', () => {
     setURL('token=usdc');
     render(<PaymentForm />);
     expect(screen.getByText(/決済 URL が不正/)).toBeInTheDocument();
     expect(screen.getByText(/to/)).toBeInTheDocument();
+  });
+
+  it('bare /pay (query 完全空) → 赤エラーではなく friendly landing', () => {
+    setURL('');
+    render(<PaymentForm />);
+    // 赤エラーは出さない
+    expect(screen.queryByText(/決済 URL が不正/)).not.toBeInTheDocument();
+    // landing の見出しが出る
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'ここは「顧客向け」決済ページです',
+      }),
+    ).toBeInTheDocument();
+    // home / history 導線
+    expect(
+      screen.getByRole('link', { name: 'OpenPay (店舗向け) を開く' }),
+    ).toHaveAttribute('href', '/');
+    expect(
+      screen.getByRole('link', { name: 'このブラウザの履歴を見る' }),
+    ).toHaveAttribute('href', '/history');
   });
 
   it('token が不正 → エラー表示', () => {

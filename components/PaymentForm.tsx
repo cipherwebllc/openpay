@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { erc20Abi, parseUnits } from 'viem';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { PayEmptyLanding } from './PayEmptyLanding';
 import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
@@ -34,6 +35,9 @@ export function PaymentForm() {
   const t = useTranslations('PaymentForm');
 
   if (!parsed.ok) {
+    // bare /pay (query 一切なし) は誤訪問の可能性が高いので friendly landing を出す。
+    // それ以外 (URL が半壊) は QR 生成側のバグなので赤エラーで原因を merchant に表示。
+    if (parsed.errorKind === 'empty') return <PayEmptyLanding />;
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
         <h2 className="font-semibold">{t('urlInvalidTitle')}</h2>

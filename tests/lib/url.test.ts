@@ -142,10 +142,39 @@ describe('parsePayParams', () => {
     if (!r.ok) expect(r.error).toContain('mode');
   });
 
-  it('to が無い → エラー', () => {
+  it('to が無い + 他 param あり → invalid (URL 半壊)', () => {
     const r = parsePayParams(search('token=usdc'));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain('to');
+    if (!r.ok) {
+      expect(r.error).toContain('to');
+      expect(r.errorKind).toBe('invalid');
+    }
+  });
+
+  it('search 完全空 → errorKind=empty (bare /pay landing 用 signal)', () => {
+    const r = parsePayParams(search(''));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('empty');
+      expect(r.error).toContain('to');
+    }
+  });
+
+  it('search に unrelated key だけある → errorKind=empty (PAY_PARAM_KEYS 集合のみ判定)', () => {
+    // 無関係な query (utm_source 等) のみのときも landing 扱い
+    const r = parsePayParams(search('utm_source=ad'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('empty');
+    }
+  });
+
+  it('to が address 形式不正 → errorKind=invalid', () => {
+    const r = parsePayParams(search('to=0xnotanaddress&token=usdc'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+    }
   });
 
   it('to がアドレス形式でない → エラー', () => {

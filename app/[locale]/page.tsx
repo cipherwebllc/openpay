@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { QrGenerator } from '@/components/QrGenerator';
@@ -32,9 +31,6 @@ export default function HomePage() {
           <span className="rounded-full bg-slate-200 px-2 py-1 font-mono">
             {env.networkEnv}
           </span>
-          <Link href="/pay" className="text-brand hover:underline" prefetch={false}>
-            {t('linkPay')}
-          </Link>
         </div>
       </header>
 

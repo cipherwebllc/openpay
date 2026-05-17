@@ -10,7 +10,6 @@
       "heading": "Generate Tip widget embed code",
       "subheading": "Drop into your blog, portfolio, or stream page to receive tips. OpenPay service fee 1.0% + estimated network fee (gasless payment)."
     },
-    "linkPay": "/pay (customer)",
     "offramp": {
       "heading": "Off-ramp received tokens",
       "subheading": "Exchanges to convert received JPYC / USDC into fiat.",
@@ -158,7 +157,11 @@
     "successTx": "Tx Hash",
     "successBlock": "Block",
     "urlInvalidTitle": "Invalid payment URL",
-    "loading": "Loading payment details…"
+    "loading": "Loading payment details…",
+    "emptyLandingTitle": "This is the customer payment page",
+    "emptyLandingBody": "Scan a merchant's OpenPay QR or open a payment URL shared by a merchant to make a payment here. There is nothing to pay on this page alone.",
+    "emptyLandingToHome": "Open OpenPay (merchant)",
+    "emptyLandingToHistory": "View history on this browser"
   },
   "TipForm": {
     "header": "OpenPay Tip",

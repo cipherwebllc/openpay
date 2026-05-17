@@ -208,7 +208,11 @@ export function buildPayUrl(origin: string, params: PayParams): string {
 
 export type ParsedPayParams =
   | { ok: true; params: PayParams }
-  | { ok: false; error: string };
+  | { ok: false; errorKind: 'empty' | 'invalid'; error: string };
+
+// `/pay` URL に乗っている query key の集合。bare /pay (search 空) と
+// 「to は無いが他は付いている (URL 半壊)」を区別するために使う。
+const PAY_PARAM_KEYS = ['to', 'token', 'chain', 'gas', 'amount', 'mode', 'split'] as const;
 
 /** URLSearchParams / Next の ReadonlyURLSearchParams どちらも構造的に受け取れる */
 export type SearchParamsLike = { get(name: string): string | null };
@@ -236,10 +240,31 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const mode = searchParams.get('mode');
   const split = searchParams.get('split');
 
-  if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
-  if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
+  if (!to) {
+    // bare /pay (search 空) と「to なし + 他 param あり」を区別する。
+    // 前者は誤って /pay を直訪したユーザに friendly landing を出すための signal、
+    // 後者は QR 生成側の URL バグなので赤エラーを残す。
+    const hasAnyParam = PAY_PARAM_KEYS.some(
+      (k) => searchParams.get(k) !== null,
+    );
+    return {
+      ok: false,
+      errorKind: hasAnyParam ? 'invalid' : 'empty',
+      error: '宛先アドレス (to) が指定されていません',
+    };
+  }
+  if (!isAddress(to))
+    return {
+      ok: false,
+      errorKind: 'invalid',
+      error: '宛先アドレス (to) が不正です',
+    };
   if (!token || !isValidTokenSymbol(token)) {
-    return { ok: false, error: 'token は jpyc または usdc を指定してください' };
+    return {
+      ok: false,
+      errorKind: 'invalid',
+      error: 'token は jpyc または usdc を指定してください',
+    };
   }
   // mode=direct は旧名 (fee=0)。既発行 QR を破壊しないため legacy alias として受理し、
   // 後段で standard (fee=0.5%) へ正規化する。
@@ -251,6 +276,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   ) {
     return {
       ok: false,
+      errorKind: 'invalid',
       error: 'mode は gasless または standard を指定してください',
     };
   }
@@ -264,6 +290,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   } else {
     return {
       ok: false,
+      errorKind: 'invalid',
       error:
         'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
     };
@@ -272,6 +299,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   if (!hasDeployment(token, chainSlug)) {
     return {
       ok: false,
+      errorKind: 'invalid',
       error: `${token} は ${chainSlug} に対応していません`,
     };
   }
@@ -284,6 +312,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     if (r === null) {
       return {
         ok: false,
+        errorKind: 'invalid',
         error:
           'split は "0xB:30,0xC:20" 形式 (整数 %、合計 < 100、最大 3 件、宛先重複不可) で指定してください',
       };
@@ -293,6 +322,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     if (r.some((e) => e.to.toLowerCase() === primary)) {
       return {
         ok: false,
+        errorKind: 'invalid',
         error: 'split に主 to と同じアドレスを含めることはできません',
       };
     }
