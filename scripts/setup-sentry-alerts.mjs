@@ -58,6 +58,27 @@ export const RULES = [
     threshold: 10,
     interval: '1h',
   },
+  {
+    name: 'OpenPay: history.load.invalid-entries-dropped spike',
+    description:
+      'LocalStorage 履歴の schema 不一致 entry 脱落が 1 時間に 100 件超で通知。' +
+      '正常運用では 0 のはず。spike は schema 変更 / migration ミス / クライアント側' +
+      '改竄試行 / 別ドメイン (preview deploy) からの混入のいずれかのサイン。',
+    eventTag: 'history.load.invalid-entries-dropped',
+    threshold: 100,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: localStorage.set failed spike (quota / private-mode)',
+    description:
+      'LocalStorage 書込失敗 (QuotaExceededError / Safari ITP private mode) が ' +
+      '1 時間に 100 件超で通知。spike は (a) 1 entry が肥大化して FIFO が機能していない、' +
+      '(b) 同一 origin で他機能が大量に LocalStorage を消費、(c) iOS Safari の ITP で ' +
+      '7 日経過 origin が大量にリセットされた、いずれかのサイン。',
+    eventTag: 'localStorage.set failed',
+    threshold: 100,
+    interval: '1h',
+  },
 ];
 
 function requireEnv(name) {

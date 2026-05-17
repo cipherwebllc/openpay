@@ -11,12 +11,27 @@ import {
 } from '../../scripts/setup-sentry-alerts.mjs';
 
 describe('setup-sentry-alerts: RULES schema', () => {
-  it('3 つの rule 定義が存在 (payment.failed / smart-account.init-failed / x402.middleware.error)', () => {
-    expect(RULES).toHaveLength(3);
+  it('5 つの rule 定義が存在 (payment / smart-account / x402 / history.load 不一致 / localStorage.set 失敗)', () => {
+    expect(RULES).toHaveLength(5);
     const tags = RULES.map((r) => r.eventTag);
     expect(tags).toContain('payment.failed');
     expect(tags).toContain('smart-account.init-failed');
     expect(tags).toContain('x402.middleware.error');
+    expect(tags).toContain('history.load.invalid-entries-dropped');
+    expect(tags).toContain('localStorage.set failed');
+  });
+
+  it('history 系 rule は threshold 100/h (LocalStorage は per-user 由来で noise 多め)', () => {
+    const historyRule = RULES.find(
+      (r) => r.eventTag === 'history.load.invalid-entries-dropped',
+    );
+    const quotaRule = RULES.find(
+      (r) => r.eventTag === 'localStorage.set failed',
+    );
+    expect(historyRule?.threshold).toBe(100);
+    expect(historyRule?.interval).toBe('1h');
+    expect(quotaRule?.threshold).toBe(100);
+    expect(quotaRule?.interval).toBe('1h');
   });
 
   it('全 rule に name / description / threshold / interval が定義済', () => {
@@ -151,14 +166,13 @@ describe('setup-sentry-alerts: 冪等性 (fetch mock 経由の挙動検証)', ()
     const mod = await import('../../scripts/setup-sentry-alerts.mjs');
     await mod.main();
 
-    // GET 1 + POST 3
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
-    expect(createdCount).toBe(3);
-    // 各 POST の body が buildRulePayload で生成された schema と一致
+    // GET 1 + POST 5 (RULES.length)
+    expect(fetchSpy).toHaveBeenCalledTimes(1 + RULES.length);
+    expect(createdCount).toBe(RULES.length);
     const posts = fetchSpy.mock.calls.filter(
       ([, init]) => init?.method === 'POST',
     );
-    expect(posts).toHaveLength(3);
+    expect(posts).toHaveLength(RULES.length);
     for (const [, init] of posts) {
       expect(init?.body).toBeTypeOf('string');
       const body = JSON.parse(init!.body as string);
@@ -182,7 +196,7 @@ describe('setup-sentry-alerts: 冪等性 (fetch mock 経由の挙動検証)', ()
     await expect(mod.main()).rejects.toThrow(/Sentry API.*401/);
   });
 
-  it('既存 1 件 + 不足 2 件なら、不足分のみ POST', async () => {
+  it('既存 1 件 + 不足分のみ POST (冪等性検証)', async () => {
     process.env.SENTRY_AUTH_TOKEN = 'test_token';
     process.env.SENTRY_ORG_SLUG = 'test-org';
     process.env.SENTRY_PROJECT_SLUG = 'test-project';
@@ -199,7 +213,7 @@ describe('setup-sentry-alerts: 冪等性 (fetch mock 経由の挙動検証)', ()
     });
     const mod = await import('../../scripts/setup-sentry-alerts.mjs');
     await mod.main();
-    expect(postCount).toBe(2); // RULES[1] + RULES[2]
+    expect(postCount).toBe(RULES.length - 1); // 既存 1 件以外
   });
 
   it('SENTRY_AUTH_TOKEN 未設定で例外 (silent fail せず明示的に error)', async () => {
