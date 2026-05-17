@@ -1,0 +1,144 @@
+// HistoryEntry[] を CSV にエクスポートする。
+//
+// 仕様:
+// - RFC-4180 準拠: `,` / `"` / `\n` / `\r` を含む値は `"..."` で囲み、内部の
+//   `"` は `""` にエスケープ。改行コードは CRLF (LF だけだと Excel が 1 行扱い)。
+// - UTF-8 BOM (`﻿`) を先頭に付ける → Excel が UTF-8 として自動認識
+//   (BOM 無いと CP932 解釈で日本語が文字化けする)。
+// - CSV Injection 防御: 値が `=` `+` `-` `@` で始まる場合は先頭に single quote
+//   を入れて defang (OWASP 推奨)。store name の自由入力 + メモ欄が攻撃面。
+// - 列順は固定 (ja header)。会計ソフトへ貼り付けてもズレないよう先頭から固定。
+
+import { formatUnits } from 'viem';
+import type { HistoryEntry } from './history';
+import { formatHistoryTimestamp } from './history';
+
+export const CSV_BOM = '﻿';
+export const CSV_NEWLINE = '\r\n';
+
+const HEADER: readonly string[] = [
+  '日時',
+  'ステータス',
+  '種別',
+  '店舗名',
+  '通貨',
+  '金額(decimal)',
+  '金額(raw wei)',
+  'OpenPay利用手数料(decimal)',
+  'OpenPay利用手数料(raw wei)',
+  'ネットワーク',
+  'Chain ID',
+  '決済モード',
+  'ガス負担',
+  '店舗アドレス',
+  '顧客アドレス',
+  '手数料受取アドレス',
+  'TxHash',
+  'UserOpHash',
+  'ブロック',
+  'メモ',
+  'エラー',
+];
+
+const INJECTION_PREFIX = /^[=+\-@]/;
+
+function escapeCsvCell(value: string): string {
+  // Excel formula injection 防御: `=cmd|...` 等の formula evaluator 起動を抑止
+  // (single quote prefix で「文字列」として扱われる)。
+  const defanged = INJECTION_PREFIX.test(value) ? `'${value}` : value;
+  const needsQuoting = /[",\r\n]/.test(defanged);
+  if (!needsQuoting) return defanged;
+  return `"${defanged.replace(/"/g, '""')}"`;
+}
+
+// asset → decimals (jpyc=18, usdc=6)。HistoryEntry は decimals を保持しないが
+// asset は記録されているため、CSV 出力時に decode する。
+const ASSET_DECIMALS: Record<HistoryEntry['asset'], number> = {
+  jpyc: 18,
+  usdc: 6,
+};
+
+const ASSET_SYMBOL: Record<HistoryEntry['asset'], string> = {
+  jpyc: 'JPYC',
+  usdc: 'USDC',
+};
+
+function rawToDecimal(raw: string | null, asset: HistoryEntry['asset']): string {
+  if (raw === null) return '';
+  // 無効な文字列が来た場合は formatUnits が throw するため、digit 以外を含むと
+  // raw を空にする (loadHistory 側で schema 検証済なので通常通過しない経路)。
+  if (!/^\d+$/.test(raw)) return '';
+  return formatUnits(BigInt(raw), ASSET_DECIMALS[asset]);
+}
+
+function flowToKind(flow: HistoryEntry['flow']): string {
+  switch (flow) {
+    case 'batch':
+      return 'バッチ送金 (ガスレス)';
+    case 'direct':
+      return '単一送金 (旧 direct)';
+    case 'standard-merchant':
+      return '店舗送金 (通常決済)';
+    case 'standard-fee':
+      return '手数料 (通常決済)';
+  }
+}
+
+function statusToLabel(status: HistoryEntry['status']): string {
+  switch (status) {
+    case 'success':
+      return '成功';
+    case 'reverted':
+      return 'revert';
+    case 'error':
+      return 'エラー';
+  }
+}
+
+function gasModeLabel(gasMode: HistoryEntry['gasMode']): string {
+  if (gasMode === null) return '対象外 (通常決済)';
+  return gasMode === 'customer' ? '顧客負担' : '店主負担';
+}
+
+function payModeLabel(payMode: HistoryEntry['payMode']): string {
+  return payMode === 'gasless' ? 'ガスレス決済' : '通常決済 (ガスあり)';
+}
+
+function entryToRow(e: HistoryEntry): string[] {
+  return [
+    formatHistoryTimestamp(e.ts),
+    statusToLabel(e.status),
+    flowToKind(e.flow),
+    e.storeName,
+    ASSET_SYMBOL[e.asset],
+    rawToDecimal(e.merchantAmount, e.asset),
+    e.merchantAmount,
+    rawToDecimal(e.feeAmount, e.asset),
+    e.feeAmount ?? '',
+    e.chainSlug,
+    String(e.chainId),
+    payModeLabel(e.payMode),
+    gasModeLabel(e.gasMode),
+    e.merchant,
+    e.customer ?? '',
+    e.feeReceiver ?? '',
+    e.txHash ?? '',
+    e.userOpHash ?? '',
+    e.blockNumber ?? '',
+    e.note,
+    e.errorMessage ?? '',
+  ];
+}
+
+export function toCsv(entries: ReadonlyArray<HistoryEntry>): string {
+  const rows = [HEADER, ...entries.map(entryToRow)];
+  const body = rows
+    .map((row) => row.map(escapeCsvCell).join(','))
+    .join(CSV_NEWLINE);
+  return CSV_BOM + body + CSV_NEWLINE;
+}
+
+export function historyCsvFilename(now: Date = new Date()): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `openpay-history-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
+}

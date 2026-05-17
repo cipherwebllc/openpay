@@ -39,6 +39,7 @@ import type { GasMode, PayMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
+import { triggerDownload } from '@/lib/download';
 
 type Mode = 'amount' | 'static';
 
@@ -71,13 +72,6 @@ function fileSafe(value: string): string {
 function svgMarkup(ref: React.RefObject<HTMLDivElement | null>): string | null {
   const svg = ref.current?.querySelector('svg');
   return svg ? new XMLSerializer().serializeToString(svg) : null;
-}
-
-function triggerDownload(href: string, filename: string) {
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = filename;
-  a.click();
 }
 
 function downloadSvg(filename: string, ref: React.RefObject<HTMLDivElement | null>) {

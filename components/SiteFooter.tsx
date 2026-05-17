@@ -25,6 +25,13 @@ export function SiteFooter() {
         aria-label="Legal"
         className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2"
       >
+        <Link
+          href="/history"
+          className="hover:text-slate-700 hover:underline"
+          prefetch={false}
+        >
+          {t('links.history')}
+        </Link>
         <Link href="/terms" className="hover:text-slate-700 hover:underline" prefetch={false}>
           {t('links.terms')}
         </Link>

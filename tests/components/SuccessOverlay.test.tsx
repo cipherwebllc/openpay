@@ -150,7 +150,7 @@ describe('SuccessOverlay', () => {
     ).toBeInTheDocument();
   });
 
-  it('explorerBase なし → tx/address どちらのリンクも非表示', () => {
+  it('explorerBase なし → tx/address explorer リンクは非表示 (履歴 link は残る)', () => {
     render(
       <SuccessOverlay
         amountDisplay="100 USDC"
@@ -162,6 +162,25 @@ describe('SuccessOverlay', () => {
     );
     expect(screen.queryByRole('link', { name: /Explorer/ })).toBeNull();
     expect(screen.queryByRole('link', { name: /店舗ウォレット/ })).toBeNull();
+    // viewLocalHistoryLink は explorerBase に依らず常時表示
+    expect(
+      screen.getByRole('link', { name: /このブラウザの履歴を見る/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('viewLocalHistoryLink は常に表示され /history を指す', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        blockNumber={1n}
+        onDismiss={() => undefined}
+      />,
+    );
+    const link = screen.getByRole('link', {
+      name: /このブラウザの履歴を見る/,
+    });
+    expect(link).toHaveAttribute('href', '/history');
   });
 
   it('NonCustodialNotice (short) が常に描画される (ノンカストディ宣言)', () => {

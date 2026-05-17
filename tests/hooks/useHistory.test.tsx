@@ -1,0 +1,152 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useHistory } from '@/hooks/useHistory';
+import {
+  appendHistory,
+  clearHistory,
+  HISTORY_CHANGED_EVENT,
+  HISTORY_STORAGE_KEY,
+  removeHistoryEntry,
+  type HistoryEntry,
+} from '@/lib/history';
+
+function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
+  return {
+    id: 'test-id',
+    ts: 1_700_000_000_000,
+    flow: 'batch',
+    status: 'success',
+    chainId: 137,
+    chainSlug: 'polygon',
+    asset: 'jpyc',
+    tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+    payMode: 'gasless',
+    gasMode: 'customer',
+    merchant: '0xMerchant',
+    merchantAmount: '1000',
+    customer: '0xCustomer',
+    feeReceiver: '0xFee',
+    feeAmount: '10',
+    txHash: '0xTx',
+    userOpHash: '0xUserOp',
+    blockNumber: '12345',
+    errorMessage: null,
+    storeName: 'Test Store',
+    note: '',
+    ...overrides,
+  };
+}
+
+describe('useHistory', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('初期 LocalStorage 値を hydrate 後に load する', async () => {
+    window.localStorage.setItem(
+      HISTORY_STORAGE_KEY,
+      JSON.stringify([entry({ id: 'a' }), entry({ id: 'b' })]),
+    );
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.entries).toHaveLength(2);
+    expect(result.current.entries.map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('appendHistory → CustomEvent 経由で state が再 load される', async () => {
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.entries).toHaveLength(0);
+
+    act(() => {
+      appendHistory(entry({ id: 'new' }));
+    });
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+    expect(result.current.entries[0].id).toBe('new');
+  });
+
+  it('clearHistory → state も空になる', async () => {
+    appendHistory(entry({ id: 'x' }));
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+
+    act(() => {
+      clearHistory();
+    });
+    await waitFor(() => expect(result.current.entries).toHaveLength(0));
+  });
+
+  it('removeHistoryEntry → 該当 id が消える', async () => {
+    appendHistory(entry({ id: 'a' }));
+    appendHistory(entry({ id: 'b' }));
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+
+    act(() => {
+      removeHistoryEntry('a');
+    });
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+    expect(result.current.entries[0].id).toBe('b');
+  });
+
+  it('他タブからの storage event (HISTORY_STORAGE_KEY) で再 load する', async () => {
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+    // 別タブが LocalStorage を直接書き換えた状況を再現
+    window.localStorage.setItem(
+      HISTORY_STORAGE_KEY,
+      JSON.stringify([entry({ id: 'from-other-tab' })]),
+    );
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: HISTORY_STORAGE_KEY,
+          newValue: 'whatever',
+        }),
+      );
+    });
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+    expect(result.current.entries[0].id).toBe('from-other-tab');
+  });
+
+  it('別 key の storage event は無視する', async () => {
+    appendHistory(entry({ id: 'a' }));
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+
+    // 別アプリの key の write
+    window.localStorage.setItem('unrelated-key', 'x');
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: 'unrelated-key', newValue: 'x' }),
+      );
+    });
+    // state は変化しない
+    expect(result.current.entries).toHaveLength(1);
+  });
+
+  it('clear() による key=null storage event でも再 load する', async () => {
+    appendHistory(entry({ id: 'a' }));
+    const { result } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+
+    window.localStorage.removeItem(HISTORY_STORAGE_KEY);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    });
+    await waitFor(() => expect(result.current.entries).toHaveLength(0));
+  });
+
+  it('unmount で event listener が解除される (leak guard)', async () => {
+    const { result, unmount } = renderHook(() => useHistory());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+    unmount();
+
+    // unmount 後の CustomEvent は state を変更しない (= listener 解除済)
+    appendHistory(entry({ id: 'after-unmount' }));
+    // 直接 LocalStorage は更新されているが、unmount 後 result は更新されない
+    expect(result.current.entries).toHaveLength(0);
+  });
+});

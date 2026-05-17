@@ -26,6 +26,7 @@ import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
+import { appendHistory, buildHistoryEntry } from '@/lib/history';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -283,6 +284,220 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     deployment.chainId,
     deployment.decimals,
     totalWei,
+  ]);
+
+  // ローカル履歴 (Phase 2)。成功時は merchant tx を必ず append、standard 経路で
+  // fee tx もあれば 2 件目を append する。エラーは下の標準モード専用 useEffect
+  // (gasless は flowError も同様) で別 entry を追加する。
+  useEffect(() => {
+    if (!completion) return;
+    if (completion.mode === 'standard') {
+      appendHistory(
+        buildHistoryEntry({
+          flow: 'standard-merchant',
+          status: 'success',
+          chainId: deployment.chainId,
+          chainSlug,
+          asset: params.token,
+          tokenAddress: deployment.address,
+          payMode: 'standard',
+          gasMode: null,
+          merchant: params.to,
+          merchantAmount: breakdown.merchantReceives,
+          customer: address,
+          feeReceiver: env.feeReceiver,
+          feeAmount: breakdown.feeAmount,
+          txHash: completion.hashFields.merchantTxHash,
+          userOpHash: null,
+          blockNumber: completion.blockNumber,
+          errorMessage: null,
+          storeName: '',
+          note: params.description ?? params.orderId ?? '',
+        }),
+      );
+      if (completion.hashFields.feeTxHash) {
+        appendHistory(
+          buildHistoryEntry({
+            flow: 'standard-fee',
+            status: 'success',
+            chainId: deployment.chainId,
+            chainSlug,
+            asset: params.token,
+            tokenAddress: deployment.address,
+            payMode: 'standard',
+            gasMode: null,
+            merchant: env.feeReceiver,
+            merchantAmount: breakdown.feeAmount,
+            customer: address,
+            feeReceiver: env.feeReceiver,
+            feeAmount: breakdown.feeAmount,
+            txHash: completion.hashFields.feeTxHash,
+            userOpHash: null,
+            blockNumber: completion.blockNumber,
+            errorMessage: null,
+            storeName: '',
+            note: params.description ?? params.orderId ?? '',
+          }),
+        );
+      }
+    } else {
+      appendHistory(
+        buildHistoryEntry({
+          flow: 'batch',
+          status: 'success',
+          chainId: deployment.chainId,
+          chainSlug,
+          asset: params.token,
+          tokenAddress: deployment.address,
+          payMode: 'gasless',
+          gasMode: params.gas,
+          merchant: params.to,
+          merchantAmount: breakdown.merchantReceives,
+          customer: address,
+          feeReceiver: env.feeReceiver,
+          feeAmount: breakdown.feeAmount,
+          txHash: completion.hashFields.txHash,
+          userOpHash: completion.hashFields.userOpHash,
+          blockNumber: completion.blockNumber,
+          errorMessage: null,
+          storeName: '',
+          note: params.description ?? params.orderId ?? '',
+        }),
+      );
+    }
+  }, [
+    completion,
+    deployment.chainId,
+    deployment.address,
+    chainSlug,
+    params.token,
+    params.gas,
+    params.to,
+    params.description,
+    params.orderId,
+    breakdown.merchantReceives,
+    breakdown.feeAmount,
+    address,
+  ]);
+
+  useEffect(() => {
+    if (!gasless.error) return;
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'batch',
+        status: 'error',
+        chainId: deployment.chainId,
+        chainSlug,
+        asset: params.token,
+        tokenAddress: deployment.address,
+        payMode: 'gasless',
+        gasMode: params.gas,
+        merchant: params.to,
+        merchantAmount: breakdown.merchantReceives,
+        customer: address,
+        feeReceiver: env.feeReceiver,
+        feeAmount: breakdown.feeAmount,
+        txHash: null,
+        userOpHash: null,
+        blockNumber: null,
+        errorMessage: gasless.error.message.slice(0, 500),
+        storeName: '',
+        note: params.description ?? params.orderId ?? '',
+      }),
+    );
+  }, [
+    gasless.error,
+    deployment.chainId,
+    deployment.address,
+    chainSlug,
+    params.token,
+    params.gas,
+    params.to,
+    params.description,
+    params.orderId,
+    breakdown.merchantReceives,
+    breakdown.feeAmount,
+    address,
+  ]);
+
+  useEffect(() => {
+    if (standard.phase !== 'merchant-error') return;
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'standard-merchant',
+        status: 'error',
+        chainId: deployment.chainId,
+        chainSlug,
+        asset: params.token,
+        tokenAddress: deployment.address,
+        payMode: 'standard',
+        gasMode: null,
+        merchant: params.to,
+        merchantAmount: breakdown.merchantReceives,
+        customer: address,
+        feeReceiver: env.feeReceiver,
+        feeAmount: breakdown.feeAmount,
+        txHash: standard.merchantTxHash ?? null,
+        userOpHash: null,
+        blockNumber: null,
+        errorMessage: standard.error?.message.slice(0, 500) ?? 'merchant-error',
+        storeName: '',
+        note: params.description ?? params.orderId ?? '',
+      }),
+    );
+  }, [
+    standard.phase,
+    standard.merchantTxHash,
+    standard.error,
+    deployment.chainId,
+    deployment.address,
+    chainSlug,
+    params.token,
+    params.to,
+    params.description,
+    params.orderId,
+    breakdown.merchantReceives,
+    breakdown.feeAmount,
+    address,
+  ]);
+
+  useEffect(() => {
+    if (standard.phase !== 'fee-error') return;
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'standard-fee',
+        status: 'error',
+        chainId: deployment.chainId,
+        chainSlug,
+        asset: params.token,
+        tokenAddress: deployment.address,
+        payMode: 'standard',
+        gasMode: null,
+        merchant: env.feeReceiver,
+        merchantAmount: breakdown.feeAmount,
+        customer: address,
+        feeReceiver: env.feeReceiver,
+        feeAmount: breakdown.feeAmount,
+        txHash: standard.feeTxHash ?? null,
+        userOpHash: null,
+        blockNumber: null,
+        errorMessage: standard.error?.message.slice(0, 500) ?? 'fee-error',
+        storeName: '',
+        note: params.description ?? params.orderId ?? '',
+      }),
+    );
+  }, [
+    standard.phase,
+    standard.feeTxHash,
+    standard.error,
+    deployment.chainId,
+    deployment.address,
+    chainSlug,
+    params.token,
+    params.description,
+    params.orderId,
+    breakdown.feeAmount,
+    address,
   ]);
 
   useEffect(() => {

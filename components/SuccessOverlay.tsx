@@ -5,6 +5,7 @@
 // PayPay の「ペイペイ！」緑画面相当。
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
@@ -135,30 +136,35 @@ export function SuccessOverlay({
         </div>
       </dl>
 
-      {(explorerTxUrl || explorerAddressUrl) && (
-        <div className="flex flex-col items-center gap-1 text-sm">
-          {explorerTxUrl && (
-            <a
-              href={explorerTxUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="underline underline-offset-4 hover:opacity-80"
-            >
-              {t('explorerLink')}
-            </a>
-          )}
-          {explorerAddressUrl && (
-            <a
-              href={explorerAddressUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="underline underline-offset-4 hover:opacity-80"
-            >
-              {t('merchantAddressExplorerLink')}
-            </a>
-          )}
-        </div>
-      )}
+      <div className="flex flex-col items-center gap-1 text-sm">
+        {explorerTxUrl && (
+          <a
+            href={explorerTxUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-4 hover:opacity-80"
+          >
+            {t('explorerLink')}
+          </a>
+        )}
+        {explorerAddressUrl && (
+          <a
+            href={explorerAddressUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-4 hover:opacity-80"
+          >
+            {t('merchantAddressExplorerLink')}
+          </a>
+        )}
+        <Link
+          href="/history"
+          prefetch={false}
+          className="underline underline-offset-4 hover:opacity-80"
+        >
+          {t('viewLocalHistoryLink')}
+        </Link>
+      </div>
 
       {/* ノンカストディ宣言: 店主に「DB は持っていない、Explorer が source of truth」を毎回伝える */}
       <NonCustodialNotice
