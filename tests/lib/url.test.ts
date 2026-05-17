@@ -177,6 +177,53 @@ describe('parsePayParams', () => {
     }
   });
 
+  it('to= (空文字列) + token → errorKind=invalid (URL に "?to=" がある = 何か指定の意図)', () => {
+    const r = parsePayParams(search('to=&token=usdc'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('to');
+    }
+  });
+
+  it('to= (空) のみで他無し → errorKind=invalid (token も既に欠落だが to= 自体は 「PAY_PARAM_KEYS」 に該当する key)', () => {
+    const r = parsePayParams(search('to='));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      // searchParams.get('to') === '' (not null) なので PAY_PARAM_KEYS に該当
+      expect(r.errorKind).toBe('invalid');
+    }
+  });
+
+  it('zero address (0x000…) は isAddress=true で受理される (現挙動を固定化)', () => {
+    const zero = `0x${'0'.repeat(40)}`;
+    const r = parsePayParams(search(`to=${zero}&token=usdc&amount=10`));
+    // 受理されることが現在の挙動。意図的に拒否する場合は別途 validation 層を足す必要がある。
+    expect(r.ok).toBe(true);
+  });
+
+  it('chain が不正値 → errorKind=invalid + chain メッセージ', () => {
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=ethereum`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('chain');
+    }
+  });
+
+  it('jpyc + arbitrum (未対応 deployment) → errorKind=invalid', () => {
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=jpyc&chain=arbitrum`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('jpyc');
+    }
+  });
+
   it('to がアドレス形式でない → エラー', () => {
     const r = parsePayParams(
       search('to=0xnotanaddress&token=usdc'),

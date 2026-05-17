@@ -306,6 +306,108 @@ describe('history (LocalStorage)', () => {
     });
   });
 
+  describe('FIFO 境界 (HISTORY_MAX_ENTRIES = 1000 ちょうど)', () => {
+    it('999 件 + append 1 → 1000 件、最古は残る (1000 < MAX なので eviction なし)', () => {
+      const seed = Array.from({ length: 999 }, (_, i) =>
+        entry({ id: `s-${i}` }),
+      );
+      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(seed));
+      appendHistory(entry({ id: 'new' }));
+      const loaded = loadHistory();
+      expect(loaded).toHaveLength(1000);
+      // 最古 (seed-998 = index 998) も残る
+      expect(loaded.find((e) => e.id === 's-998')).toBeDefined();
+      expect(loaded[0].id).toBe('new');
+    });
+
+    it('1000 件 ちょうど + append 1 → 1000 件、最古 1 件 evict', () => {
+      const seed = Array.from({ length: 1000 }, (_, i) =>
+        entry({ id: `s-${i}` }),
+      );
+      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(seed));
+      appendHistory(entry({ id: 'new' }));
+      const loaded = loadHistory();
+      expect(loaded).toHaveLength(1000);
+      // 最古 (index 999 = tail) は evict
+      expect(loaded.find((e) => e.id === 's-999')).toBeUndefined();
+      // ひとつ前 (index 998) は残る
+      expect(loaded.find((e) => e.id === 's-998')).toBeDefined();
+    });
+
+    it('1500 件が既に入っている (壊れた状態) + append 1 → 1000 件に圧縮', () => {
+      // 直接 seed を仕込んだ MAX 超過状態を後から append が修復する想定
+      const seed = Array.from({ length: 1500 }, (_, i) =>
+        entry({ id: `s-${i}` }),
+      );
+      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(seed));
+      appendHistory(entry({ id: 'fix' }));
+      const loaded = loadHistory();
+      expect(loaded).toHaveLength(1000);
+      expect(loaded[0].id).toBe('fix');
+    });
+  });
+
+  describe('SSR / defensive', () => {
+    it('appendHistory: window 不在 (SSR) → no-op、throw しない', () => {
+      const realWindow = global.window;
+      // @ts-expect-error - SSR 環境シミュレーション
+      delete global.window;
+      expect(() =>
+        appendHistory(entry({ id: 'ssr' })),
+      ).not.toThrow();
+      global.window = realWindow;
+      // LocalStorage には何も入らない
+      expect(realWindow.localStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull();
+    });
+
+    it('loadHistory: window 不在 → [] を返す', () => {
+      const realWindow = global.window;
+      // @ts-expect-error - SSR 環境シミュレーション
+      delete global.window;
+      expect(loadHistory()).toEqual([]);
+      global.window = realWindow;
+    });
+
+    it('safeSet が throw (QuotaExceededError) → appendHistory は throw せず、既存値が保持される', () => {
+      const seed = [entry({ id: 'keep' })];
+      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(seed));
+      const setItemSpy = vi
+        .spyOn(window.localStorage.__proto__, 'setItem')
+        .mockImplementation(() => {
+          const err = new Error('QuotaExceededError');
+          err.name = 'QuotaExceededError';
+          throw err;
+        });
+      expect(() => appendHistory(entry({ id: 'too-big' }))).not.toThrow();
+      // 既存値が残る (削除されていない)
+      setItemSpy.mockRestore();
+      const loaded = loadHistory();
+      expect(loaded.some((e) => e.id === 'keep')).toBe(true);
+      // 新規 append は捨てられる
+      expect(loaded.some((e) => e.id === 'too-big')).toBe(false);
+    });
+  });
+
+  describe('並行 append (同期 race の境界)', () => {
+    it('同一 id を 100 回 append → 1 件しか残らない (dedupe O(N))', () => {
+      for (let i = 0; i < 100; i += 1) {
+        appendHistory(entry({ id: 'same-id' }));
+      }
+      expect(loadHistory()).toHaveLength(1);
+    });
+
+    it('100 件の異なる id を append → 全件保存、新しい順', () => {
+      for (let i = 0; i < 100; i += 1) {
+        appendHistory(entry({ id: `seq-${i}`, ts: 1_000_000_000_000 + i }));
+      }
+      const loaded = loadHistory();
+      expect(loaded).toHaveLength(100);
+      // 最後に append した seq-99 が先頭、最古 seq-0 が末尾
+      expect(loaded[0].id).toBe('seq-99');
+      expect(loaded[99].id).toBe('seq-0');
+    });
+  });
+
   describe('formatHistoryTimestamp', () => {
     // 環境依存 (system timezone) を避けるため、結果の形式のみ検証する。
     afterEach(() => {

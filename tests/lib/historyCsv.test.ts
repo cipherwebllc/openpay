@@ -186,6 +186,169 @@ describe('toCsv', () => {
   });
 });
 
+// RFC-4180 適合の最小 CSV parser。round-trip 整合性検証専用。
+// quoted field 内の "" → "、改行 / カンマは quote 内では literal。
+function parseCsv(input: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuote = false;
+  let i = 0;
+  while (i < input.length) {
+    const c = input[i];
+    if (inQuote) {
+      if (c === '"' && input[i + 1] === '"') {
+        cell += '"';
+        i += 2;
+        continue;
+      }
+      if (c === '"') {
+        inQuote = false;
+        i += 1;
+        continue;
+      }
+      cell += c;
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      inQuote = true;
+      i += 1;
+      continue;
+    }
+    if (c === ',') {
+      row.push(cell);
+      cell = '';
+      i += 1;
+      continue;
+    }
+    if (c === '\r' && input[i + 1] === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      i += 2;
+      continue;
+    }
+    cell += c;
+    i += 1;
+  }
+  // 末尾 cell / row のフラッシュ (trailing CRLF が無い場合)
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+describe('CSV round-trip 整合性 (escape の逆 parse)', () => {
+  function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
+    return {
+      id: 'rt',
+      ts: new Date(2026, 4, 17, 9, 5, 3).getTime(),
+      flow: 'batch',
+      status: 'success',
+      chainId: 137,
+      chainSlug: 'polygon',
+      asset: 'jpyc',
+      tokenAddress: '0xToken',
+      payMode: 'gasless',
+      gasMode: 'customer',
+      merchant: '0xMerchant',
+      merchantAmount: '1000000000000000000000',
+      customer: '0xCustomer',
+      feeReceiver: '0xFee',
+      feeAmount: '10000000000000000000',
+      txHash: '0xTx',
+      userOpHash: '0xUserOp',
+      blockNumber: '12345',
+      errorMessage: null,
+      storeName: '',
+      note: '',
+      ...overrides,
+    };
+  }
+
+  it('単純 entry: BOM 除去 + parse すると header + 1 行になる', () => {
+    const csv = toCsv([entry()]);
+    const stripped = csv.slice(CSV_BOM.length);
+    const rows = parseCsv(stripped);
+    // 末尾 CRLF 分の空 row も含む可能性。空でない rows だけ取る
+    const nonEmpty = rows.filter((r) => r.some((c) => c.length > 0));
+    expect(nonEmpty).toHaveLength(2); // header + 1 data row
+    // header 数 = data row 数
+    expect(nonEmpty[0].length).toBe(nonEmpty[1].length);
+  });
+
+  it('カンマ含む store name: 元の値に復元される', () => {
+    const csv = toCsv([entry({ storeName: 'お店,珈琲, 限定' })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    const data = rows[1];
+    // header の "店舗名" は index 3 (日時, ステータス, 種別, 店舗名, ...)
+    expect(data[3]).toBe('お店,珈琲, 限定');
+  });
+
+  it('ダブルクオート含む note: 元の値に復元される', () => {
+    const csv = toCsv([entry({ note: 'He said "Hi" today' })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    const data = rows[1];
+    // header の "メモ" は index 19
+    expect(data[19]).toBe('He said "Hi" today');
+  });
+
+  it('改行 (\\n) 含む note: 元の値に復元される', () => {
+    const csv = toCsv([entry({ note: 'line1\nline2\nline3' })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    expect(rows[1][19]).toBe('line1\nline2\nline3');
+  });
+
+  it('CRLF を含む note (Windows 改行): 元の値に復元される', () => {
+    const csv = toCsv([entry({ note: 'win\r\nstyle' })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    expect(rows[1][19]).toBe('win\r\nstyle');
+  });
+
+  it('CSV injection: storeName="=cmd|..." → defang prefix `\'` が CSV 上に残る', () => {
+    const csv = toCsv([entry({ storeName: '=HYPERLINK("evil")' })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    // round-trip では prefix " ' " は残る (Excel の formula evaluator 抑止が目的)
+    expect(rows[1][3]).toBe('\'=HYPERLINK("evil")');
+  });
+
+  it('複合: カンマ + クオート + 改行 + injection prefix を 1 つの値に混ぜる', () => {
+    const tricky = '=cmd, "quoted"\nline2';
+    const csv = toCsv([entry({ note: tricky })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    // injection prefix が defang される
+    expect(rows[1][19]).toBe(`'${tricky}`);
+  });
+
+  it('100 件で全 fields が正しく round-trip', () => {
+    const entries = Array.from({ length: 100 }, (_, i) =>
+      entry({
+        id: `i-${i}`,
+        storeName: `お店 #${i}, テスト`,
+        note: i % 2 === 0 ? `multi\nline ${i}` : '',
+        merchantAmount: String(BigInt(1000 + i) * 10n ** 18n),
+        feeAmount: String(BigInt(10 + i) * 10n ** 17n),
+      }),
+    );
+    const csv = toCsv(entries);
+    const rows = parseCsv(csv.slice(CSV_BOM.length));
+    const data = rows
+      .slice(1)
+      .filter((r) => r.some((c) => c.length > 0));
+    expect(data).toHaveLength(100);
+    // ランダム 3 件で値を sample 検証
+    [0, 50, 99].forEach((idx) => {
+      // index 3 = 店舗名、index 19 = メモ、index 6 = 金額 raw wei
+      expect(data[idx][3]).toBe(entries[idx].storeName);
+      expect(data[idx][19]).toBe(entries[idx].note);
+      expect(data[idx][6]).toBe(entries[idx].merchantAmount);
+    });
+  });
+});
+
 describe('historyCsvFilename', () => {
   afterEach(() => {
     vi.useRealTimers();

@@ -5,6 +5,7 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 import { HistoryView } from '@/components/HistoryView';
 import {
   appendHistory,
+  HISTORY_STORAGE_KEY,
   type HistoryEntry,
 } from '@/lib/history';
 
@@ -146,5 +147,124 @@ describe('HistoryView', () => {
     render(<HistoryView />);
     const back = await screen.findByRole('link', { name: '← OpenPay' });
     expect(back).toHaveAttribute('href', '/');
+  });
+
+  describe('Concurrency: 多重 append + cross-tab', () => {
+    it('同タブで連続 10 件 append → すべて反映される (CustomEvent batched でも欠落しない)', async () => {
+      render(<HistoryView />);
+      // mount 後の hydrate 待ち
+      await screen.findByText(/履歴はまだありません/);
+      for (let i = 0; i < 10; i += 1) {
+        appendHistory(entry({ id: `burst-${i}` }));
+      }
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(10\)/ }),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    it('他タブからの storage event + 自タブ append → 両方反映', async () => {
+      render(<HistoryView />);
+      await screen.findByText(/履歴はまだありません/);
+
+      // 「他タブが書いた」想定で LocalStorage 直接書込 + storage event 発火
+      const fromOther = entry({ id: 'other-tab', merchantAmount: '500000000000000000000' });
+      window.localStorage.setItem(
+        HISTORY_STORAGE_KEY,
+        JSON.stringify([fromOther]),
+      );
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: HISTORY_STORAGE_KEY,
+          newValue: 'whatever',
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(1\)/ }),
+        ).toBeInTheDocument(),
+      );
+
+      // この後、自タブで append → 2 件になる
+      appendHistory(entry({ id: 'self', merchantAmount: '700000000000000000000' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(2\)/ }),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    it('LocalStorage が他タブで全消去 → storage event で空表示に遷移', async () => {
+      appendHistory(entry({ id: 'a' }));
+      appendHistory(entry({ id: 'b' }));
+      render(<HistoryView />);
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(2\)/ }),
+        ).toBeInTheDocument(),
+      );
+
+      // 他タブが clear() 相当: removeItem + storage event (key=null)
+      window.localStorage.removeItem(HISTORY_STORAGE_KEY);
+      window.dispatchEvent(new StorageEvent('storage', { key: null }));
+      await waitFor(() =>
+        expect(screen.getByText(/履歴はまだありません/)).toBeInTheDocument(),
+      );
+    });
+
+    it('別オリジン key の storage event は無視 (他アプリの干渉に耐性)', async () => {
+      appendHistory(entry({ id: 'mine' }));
+      render(<HistoryView />);
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(1\)/ }),
+        ).toBeInTheDocument(),
+      );
+      // 自分の key 以外の storage event 多発 (CSS prefs / theme 等の他アプリ書込)
+      for (let i = 0; i < 50; i += 1) {
+        window.dispatchEvent(
+          new StorageEvent('storage', {
+            key: `other-app-key-${i}`,
+            newValue: 'x',
+          }),
+        );
+      }
+      // state は変わらない
+      expect(
+        screen.getByRole('button', { name: /全て \(1\)/ }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('大量 entries の表示性能 sanity', () => {
+    it('500 件の entry を持ち、filter 切替が成立する', async () => {
+      const user = userEvent.setup();
+      for (let i = 0; i < 500; i += 1) {
+        appendHistory(
+          entry({
+            id: `bulk-${i}`,
+            asset: i % 2 === 0 ? 'jpyc' : 'usdc',
+          }),
+        );
+      }
+      render(<HistoryView />);
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(500\)/ }),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        screen.getByRole('button', { name: /JPYC \(250\)/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /USDC \(250\)/ }),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /USDC \(250\)/ }));
+      // フィルタ後も page は壊れない (描画完了)
+      expect(
+        screen.getByRole('button', { name: /USDC \(250\)/ }),
+      ).toHaveAttribute('aria-pressed', 'true');
+    });
   });
 });
