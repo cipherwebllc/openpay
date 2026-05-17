@@ -205,6 +205,38 @@ describe('usePaymentHistory', () => {
     expect(loadHistory()).toHaveLength(1);
   });
 
+  it('standard merchant-error: error が null のとき errorMessage は null (phase 名 fallback ではない)', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: undefined,
+        phase: 'merchant-error',
+        merchantTxHash: '0xMTx',
+        feeTxHash: undefined,
+        error: null,
+      }),
+    );
+    const loaded = loadHistory();
+    expect(loaded[0].errorMessage).toBeNull();
+    // status と flow で「standard の merchant 段で失敗」は識別可能
+    expect(loaded[0].status).toBe('error');
+    expect(loaded[0].flow).toBe('standard-merchant');
+  });
+
+  it('standard fee-error: error が null のとき errorMessage は null', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: undefined,
+        phase: 'fee-error',
+        merchantTxHash: '0xMTx',
+        feeTxHash: '0xFTx',
+        error: null,
+      }),
+    );
+    const loaded = loadHistory();
+    expect(loaded[0].errorMessage).toBeNull();
+    expect(loaded[0].flow).toBe('standard-fee');
+  });
+
   it('LocalStorage に直接 entry が出る (key=openpay:history:v1)', () => {
     renderHook(() =>
       usePaymentHistory(

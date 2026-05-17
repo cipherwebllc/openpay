@@ -25,6 +25,13 @@ import { logger } from './logger';
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
 export const HISTORY_CHANGED_EVENT = 'openpay:history-changed';
 export const HISTORY_MAX_ENTRIES = 1000;
+// 自由入力 (CheckoutForm の params.description 経由) を 1000 文字で truncate。
+// 1000 件 × 1000 文字 ≒ 1 MB 上限 (UTF-8 換算で max ~3 MB)、LocalStorage 5 MB に
+// 収まる。悪意 URL からの肥大化攻撃を構造的に防止。
+export const HISTORY_NOTE_MAX_LENGTH = 1000;
+// errorMessage は usePaymentHistory 側で 500 文字 trunc 済だが、buildHistoryEntry
+// にも 2 番目の防壁として同 cap を入れる (将来の呼出元増加で防御が外れない設計)。
+export const HISTORY_ERROR_MESSAGE_MAX_LENGTH = 500;
 
 export type HistoryFlow =
   | 'batch'
@@ -80,7 +87,13 @@ export type HistoryEntry = {
   /** receipt の blockNumber を文字列化したもの (UI 表示 + Explorer リンク用)。 */
   blockNumber: string | null;
   errorMessage: string | null;
-  /** QR 設定の店舗名 (merchant が自分のブラウザで決済した場合のみ有意義)。 */
+  /**
+   * 店舗名。 **現状は常に空文字** (`''`)。
+   * - PaymentForm / CheckoutForm から append される時点で URL params に
+   *   店舗名 key が無いため、parent component から空文字で渡される。
+   * - 将来 `?name=` 等の URL 拡張で乗せる前提で field は予約してある。
+   * - CSV 列 / UI 表示は空欄になる。schema 互換性のため field は削除しない。
+   */
   storeName: string;
   /** 任意メモ (将来の inline edit 用、Phase 2 投入時は空)。 */
   note: string;
@@ -214,12 +227,18 @@ export type BuildHistoryBase = {
 
 /**
  * 一意 id の決定規則:
- *   - txHash あり → `${flow}-${txHash}` (同一 tx の二重 append を防ぐ)
- *   - userOpHash あり (tx 前段)  → `${flow}-uo-${userOpHash}`
- *   - hash なし (writeContract 同期 throw 等の極稀エラー) → `${flow}-err-${ts}`
+ *   - txHash あり    → `${flow}-${txHash}` (同一 tx の二重 append を防ぐ)
+ *   - userOpHash あり → `${flow}-uo-${userOpHash}`
+ *   - hash なし (writeContract 同期 throw / wallet rejected sign 等):
+ *      `${flow}-err-${seconds}-${errorMessage.slice(0,32)}`
+ *      - seconds 解像度なので Next.js dev の React StrictMode 二重発火
+ *        (microsecond 差) は同 id で dedupe される。
+ *      - 1 秒以上開けたユーザ retry は別 id (= 別 entry) として記録。
+ *      - errorMessage が同一でも秒が違えば別 entry。
+ *      - errorMessage 不在の極稀 case は 'noerr' を seed に使用。
  *
  * StrictMode 二重 effect / react-query onSuccess 再呼出のいずれでも
- * appendHistory 側で dedupe される。
+ * appendHistory 側 (id 一致) で dedupe される。
  */
 export function buildHistoryEntry(
   input: BuildHistoryBase & { ts?: number },
@@ -229,7 +248,7 @@ export function buildHistoryEntry(
     ? `${input.flow}-${input.txHash}`
     : input.userOpHash
       ? `${input.flow}-uo-${input.userOpHash}`
-      : `${input.flow}-err-${ts}`;
+      : `${input.flow}-err-${Math.floor(ts / 1000)}-${(input.errorMessage ?? 'noerr').slice(0, 32)}`;
   return {
     id,
     ts,
@@ -249,9 +268,12 @@ export function buildHistoryEntry(
     txHash: input.txHash,
     userOpHash: input.userOpHash,
     blockNumber: input.blockNumber === null ? null : input.blockNumber.toString(),
-    errorMessage: input.errorMessage,
+    errorMessage:
+      input.errorMessage === null
+        ? null
+        : input.errorMessage.slice(0, HISTORY_ERROR_MESSAGE_MAX_LENGTH),
     storeName: input.storeName,
-    note: input.note ?? '',
+    note: (input.note ?? '').slice(0, HISTORY_NOTE_MAX_LENGTH),
   };
 }
 

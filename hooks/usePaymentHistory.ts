@@ -27,6 +27,11 @@ export type AppendPaymentHistoryCtx = {
   customer: Address | undefined;
   feeReceiver: Address;
   feeAmount: bigint;
+  /**
+   * 店舗名 — 現状は常に '' を渡す前提。URL params に店舗名 key が無いため
+   * parent (PaymentForm / CheckoutForm) から流す source が無い。HistoryEntry の
+   * schema 互換性のため field は保持。
+   */
   storeName: string;
   note: string;
 };
@@ -117,7 +122,8 @@ export function usePaymentHistory(
         txHash: null,
         userOpHash: null,
         blockNumber: null,
-        errorMessage: gaslessError.message.slice(0, 500),
+        // truncate は buildHistoryEntry 内 HISTORY_ERROR_MESSAGE_MAX_LENGTH に集約。
+        errorMessage: gaslessError.message,
         storeName: ctx.storeName,
         note: ctx.note,
       }),
@@ -181,6 +187,11 @@ export function usePaymentHistory(
   // standard merchant-error: merchant 送金が失敗 (fee は未送信)。
   // wallet が tx 送信したが revert したケースは merchantTxHash あり、
   // wallet がそもそも sign 拒否したケースは merchantTxHash なし。
+  //
+  // errorMessage は実 Error.message のみを保存し、ない場合は null。
+  // 「失敗した phase」自体は HistoryEntry.flow ('standard-merchant') と
+  // .status ('error') で識別できるため、UI / CSV に phase 名を error 文と
+  // して埋め込む必要はない (むしろ店主にとって意味不明な文字列になる)。
   useEffect(() => {
     if (standardPhase !== 'merchant-error') return;
     appendHistory(
@@ -201,7 +212,7 @@ export function usePaymentHistory(
         txHash: standardMerchantTxHash ?? null,
         userOpHash: null,
         blockNumber: null,
-        errorMessage: standardError?.message.slice(0, 500) ?? 'merchant-error',
+        errorMessage: standardError?.message ?? null,
         storeName: ctx.storeName,
         note: ctx.note,
       }),
@@ -230,7 +241,7 @@ export function usePaymentHistory(
         txHash: standardFeeTxHash ?? null,
         userOpHash: null,
         blockNumber: null,
-        errorMessage: standardError?.message.slice(0, 500) ?? 'fee-error',
+        errorMessage: standardError?.message ?? null,
         storeName: ctx.storeName,
         note: ctx.note,
       }),

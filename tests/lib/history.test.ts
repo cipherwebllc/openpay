@@ -259,12 +259,78 @@ describe('history (LocalStorage)', () => {
       expect(e.id).toBe('batch-uo-0xUO');
     });
 
-    it('hash 全て無し → id="<flow>-err-<ts>"', () => {
+    it('hash 全て無し → id="<flow>-err-<seconds>-<msg seed>"', () => {
       const e = buildHistoryEntry({
-        ...base({ txHash: null, userOpHash: null }),
-        ts: 999,
+        ...base({
+          txHash: null,
+          userOpHash: null,
+          errorMessage: 'paymaster rejected',
+        }),
+        ts: 1_700_000_000_000, // 1_700_000_000 秒
       });
-      expect(e.id).toBe('batch-err-999');
+      expect(e.id).toBe('batch-err-1700000000-paymaster rejected');
+    });
+
+    it('error id: errorMessage null → "noerr" seed', () => {
+      const e = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: null }),
+        ts: 1_700_000_000_500,
+      });
+      expect(e.id).toBe('batch-err-1700000000-noerr');
+    });
+
+    it('error id: errorMessage は 32 文字に truncate', () => {
+      const e = buildHistoryEntry({
+        ...base({
+          txHash: null,
+          userOpHash: null,
+          errorMessage: 'X'.repeat(100),
+        }),
+        ts: 1_700_000_000_000,
+      });
+      // seed は 32 文字の X
+      expect(e.id).toBe(`batch-err-1700000000-${'X'.repeat(32)}`);
+    });
+
+    it('error id: 同秒内の二重 build (StrictMode 二重発火想定) は同一 id', () => {
+      const ts1 = 1_700_000_000_100;
+      const ts2 = 1_700_000_000_900; // 同秒内 (Math.floor で 1700000000)
+      const e1 = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: 'same' }),
+        ts: ts1,
+      });
+      const e2 = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: 'same' }),
+        ts: ts2,
+      });
+      expect(e1.id).toBe(e2.id);
+    });
+
+    it('error id: 秒またぎ (1.5 秒差) では別 id (= 別 retry として記録)', () => {
+      const ts1 = 1_700_000_000_500;
+      const ts2 = 1_700_000_002_000; // +1.5s
+      const e1 = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: 'same' }),
+        ts: ts1,
+      });
+      const e2 = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: 'same' }),
+        ts: ts2,
+      });
+      expect(e1.id).not.toBe(e2.id);
+    });
+
+    it('error id: 同秒内 + 異 errorMessage → 別 id', () => {
+      const ts = 1_700_000_000_000;
+      const e1 = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: 'A' }),
+        ts,
+      });
+      const e2 = buildHistoryEntry({
+        ...base({ txHash: null, userOpHash: null, errorMessage: 'B' }),
+        ts,
+      });
+      expect(e1.id).not.toBe(e2.id);
     });
 
     it('bigint fields → string 化される (JSON 互換)', () => {
@@ -303,6 +369,29 @@ describe('history (LocalStorage)', () => {
     it('note 指定時はそのまま保持 (CheckoutForm の orderId 等)', () => {
       const e = buildHistoryEntry({ ...base(), note: 'order-42 / 黒コーヒー' });
       expect(e.note).toBe('order-42 / 黒コーヒー');
+    });
+
+    it('note: 1000 文字 cap (URL params.description からの肥大化防止)', () => {
+      const e = buildHistoryEntry({ ...base(), note: 'X'.repeat(5000) });
+      expect(e.note.length).toBe(1000);
+      expect(e.note).toBe('X'.repeat(1000));
+    });
+
+    it('note: 1000 文字ジャストはそのまま保持', () => {
+      const e = buildHistoryEntry({ ...base(), note: 'A'.repeat(1000) });
+      expect(e.note.length).toBe(1000);
+    });
+
+    it('errorMessage: 500 文字 cap (buildHistoryEntry 内 2 段目の防壁)', () => {
+      const e = buildHistoryEntry({
+        ...base({ errorMessage: 'E'.repeat(2000) }),
+      });
+      expect(e.errorMessage?.length).toBe(500);
+    });
+
+    it('errorMessage null は null のまま', () => {
+      const e = buildHistoryEntry({ ...base({ errorMessage: null }) });
+      expect(e.errorMessage).toBeNull();
     });
   });
 
@@ -385,6 +474,86 @@ describe('history (LocalStorage)', () => {
       expect(loaded.some((e) => e.id === 'keep')).toBe(true);
       // 新規 append は捨てられる
       expect(loaded.some((e) => e.id === 'too-big')).toBe(false);
+    });
+  });
+
+  describe('StrictMode 二重発火 dedupe (error entry の dev mode 防御)', () => {
+    it('同 errorMessage を 2 回 appendHistory → 同秒なら 1 件に dedupe', () => {
+      const ts = 1_700_000_000_000;
+      const e = buildHistoryEntry({
+        flow: 'batch',
+        status: 'error',
+        chainId: 137,
+        chainSlug: 'polygon',
+        asset: 'jpyc',
+        tokenAddress: '0xT',
+        payMode: 'gasless',
+        gasMode: 'customer',
+        merchant: '0xM',
+        merchantAmount: 0n,
+        customer: '0xC',
+        feeReceiver: '0xF',
+        feeAmount: 0n,
+        txHash: null,
+        userOpHash: null,
+        blockNumber: null,
+        errorMessage: 'wallet rejected',
+        storeName: '',
+        ts,
+      });
+      appendHistory(e);
+      // 同 ts → 同 id を改めて build → dedupe で 1 件のまま
+      const eAgain = buildHistoryEntry({
+        flow: 'batch',
+        status: 'error',
+        chainId: 137,
+        chainSlug: 'polygon',
+        asset: 'jpyc',
+        tokenAddress: '0xT',
+        payMode: 'gasless',
+        gasMode: 'customer',
+        merchant: '0xM',
+        merchantAmount: 0n,
+        customer: '0xC',
+        feeReceiver: '0xF',
+        feeAmount: 0n,
+        txHash: null,
+        userOpHash: null,
+        blockNumber: null,
+        errorMessage: 'wallet rejected',
+        storeName: '',
+        ts: ts + 500, // 同秒内
+      });
+      appendHistory(eAgain);
+      expect(loadHistory()).toHaveLength(1);
+    });
+
+    it('1.5 秒 開けて再 appendHistory → 2 件 (ユーザ retry として記録)', () => {
+      const base = (ts: number, errorMessage: string) =>
+        buildHistoryEntry({
+          flow: 'batch',
+          status: 'error',
+          chainId: 137,
+          chainSlug: 'polygon',
+          asset: 'jpyc',
+          tokenAddress: '0xT',
+          payMode: 'gasless',
+          gasMode: 'customer',
+          merchant: '0xM',
+          merchantAmount: 0n,
+          customer: '0xC',
+          feeReceiver: '0xF',
+          feeAmount: 0n,
+          txHash: null,
+          userOpHash: null,
+          blockNumber: null,
+          errorMessage,
+          storeName: '',
+          ts,
+        });
+      appendHistory(base(1_700_000_000_000, 'same'));
+      appendHistory(base(1_700_000_001_500, 'same')); // +1.5s
+      expect(loadHistory()).toHaveLength(2);
     });
   });
 

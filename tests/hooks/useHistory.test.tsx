@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useHistory } from '@/hooks/useHistory';
 import {
@@ -138,15 +138,69 @@ describe('useHistory', () => {
     await waitFor(() => expect(result.current.entries).toHaveLength(0));
   });
 
-  it('unmount で event listener が解除される (leak guard)', async () => {
-    const { result, unmount } = renderHook(() => useHistory());
-    await waitFor(() => expect(result.current.hydrated).toBe(true));
+  describe('unmount で event listener cleanup (実証)', () => {
+    let addSpy: ReturnType<typeof vi.spyOn>;
+    let removeSpy: ReturnType<typeof vi.spyOn>;
 
-    unmount();
+    beforeEach(() => {
+      addSpy = vi.spyOn(window, 'addEventListener');
+      removeSpy = vi.spyOn(window, 'removeEventListener');
+    });
 
-    // unmount 後の CustomEvent は state を変更しない (= listener 解除済)
-    appendHistory(entry({ id: 'after-unmount' }));
-    // 直接 LocalStorage は更新されているが、unmount 後 result は更新されない
-    expect(result.current.entries).toHaveLength(0);
+    afterEach(() => {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    });
+
+    it('mount: storage + HISTORY_CHANGED_EVENT 2 つの listener が登録される', async () => {
+      const { result } = renderHook(() => useHistory());
+      await waitFor(() => expect(result.current.hydrated).toBe(true));
+      expect(addSpy).toHaveBeenCalledWith('storage', expect.any(Function));
+      expect(addSpy).toHaveBeenCalledWith(
+        HISTORY_CHANGED_EVENT,
+        expect.any(Function),
+      );
+    });
+
+    it('unmount: addEventListener で渡したのと同じ handler が removeEventListener に渡る', async () => {
+      const { result, unmount } = renderHook(() => useHistory());
+      await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+      // mount 時の handler 参照を addSpy から抜き出す
+      const storageAddCall = addSpy.mock.calls.find(
+        ([name]) => name === 'storage',
+      );
+      const customAddCall = addSpy.mock.calls.find(
+        ([name]) => name === HISTORY_CHANGED_EVENT,
+      );
+      expect(storageAddCall).toBeDefined();
+      expect(customAddCall).toBeDefined();
+      const storageHandler = storageAddCall![1];
+      const customHandler = customAddCall![1];
+
+      unmount();
+
+      // 同一 handler 参照で removeEventListener が呼ばれている
+      expect(removeSpy).toHaveBeenCalledWith('storage', storageHandler);
+      expect(removeSpy).toHaveBeenCalledWith(
+        HISTORY_CHANGED_EVENT,
+        customHandler,
+      );
+    });
+
+    it('unmount 後の appendHistory: listener が解除済なので setEntries は呼ばれない', async () => {
+      const { result, unmount } = renderHook(() => useHistory());
+      await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+      unmount();
+
+      // 別 hook を新規 mount しても干渉しないよう localStorage を直接書く
+      appendHistory(entry({ id: 'after-unmount' }));
+      // LocalStorage には実際入っている (副作用は走った)
+      const rawAfter = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+      expect(rawAfter).toContain('after-unmount');
+      // unmounted hook の result は変化しない
+      expect(result.current.entries).toHaveLength(0);
+    });
   });
 });
