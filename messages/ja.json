@@ -89,7 +89,8 @@
     "eip681FeeBypassTitle": "⚠ この QR では OpenPay 利用手数料 (0.5%) が徴収されません",
     "eip681FeeBypassBody": "EIP-681 互換 QR は純粋な ERC20 transfer 1 件のため、隣の「通常決済（ガスあり）」QR (mode=standard、OpenPay 利用手数料 0.5%) とは異なり手数料の徴収経路がありません。両方を同時に掲示すると、顧客がどちらを scan するかで実質料率が 0% / 0.5% に分岐します。Hashport / MetaMask Mobile 等の EIP-7702 非対応ウォレット向け fallback として残す場合のみ掲示することを推奨します。",
     "eip681Copy": "URI をコピー",
-    "eip681Copied": "コピー済み"
+    "eip681Copied": "コピー済み",
+    "merchantExplorerLink": "店舗ウォレットの履歴を {chainName} Explorer で見る ↗"
   },
   "PaymentForm": {
     "title": "OpenPay 決済",
@@ -381,9 +382,16 @@
     "txHashLabel": "Tx Hash",
     "userOpHashLabel": "UserOp Hash",
     "blockLabel": "ブロック",
-    "explorerLink": "Explorer で確認 ↗",
+    "explorerLink": "Tx を Explorer で確認 ↗",
+    "merchantAddressExplorerLink": "店舗ウォレットの履歴を見る ↗",
     "dismiss": "閉じる",
     "dismissHelp": "店主が確認したら閉じてください"
+  },
+  "NonCustodialNotice": {
+    "shortTitle": "履歴はブロックチェーン上にあります",
+    "shortBody": "OpenPay はノンカストディ設計。正確な入金状況は店舗ウォレットまたは Explorer でご確認ください。",
+    "fullTitle": "取引履歴について",
+    "fullBody": "OpenPay はノンカストディ設計のため、売上は店舗ウォレットへ直接送金されます。正確な入金状況は、店舗ウォレットまたはブロックチェーンエクスプローラーでご確認ください。この画面の履歴は、店舗側の確認を補助するための表示です。"
   },
   "ConnectButton": {
     "disconnect": "切断",

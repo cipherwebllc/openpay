@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  addressExplorerUrl,
   blockExplorerUrl,
   chainForSlug,
   customRpcUrlForChain,
@@ -7,6 +8,7 @@ import {
   isValidChainSlug,
   slugForChain,
   supportedChains,
+  txExplorerUrl,
 } from '@/lib/chains';
 import {
   arbitrum,
@@ -119,5 +121,59 @@ describe('blockExplorerUrl', () => {
 
   it('未対応 chain は undefined', () => {
     expect(blockExplorerUrl(999_999)).toBeUndefined();
+  });
+});
+
+describe('txExplorerUrl', () => {
+  it('対応 chain は <base>/tx/<hash> を返す', () => {
+    const base = blockExplorerUrl(baseSepolia.id)!;
+    const hash = `0x${'a'.repeat(64)}`;
+    expect(txExplorerUrl(baseSepolia.id, hash)).toBe(`${base}/tx/${hash}`);
+  });
+
+  it.each([
+    ['base', baseSepolia.id],
+    ['arbitrum', arbitrumSepolia.id],
+    ['optimism', optimismSepolia.id],
+    ['polygon', polygonAmoy.id],
+  ] as const)('4 chain (%s) すべてで tx URL が生成される', (_slug, chainId) => {
+    const url = txExplorerUrl(chainId, `0x${'b'.repeat(64)}`);
+    expect(url).toMatch(/^https?:\/\/[^/]+\/tx\/0xb+$/);
+  });
+
+  it('未対応 chain は undefined', () => {
+    expect(txExplorerUrl(999_999, `0x${'a'.repeat(64)}`)).toBeUndefined();
+  });
+
+  it('hash を escape せずそのまま連結する (Explorer 側で扱う想定)', () => {
+    // 不正 hash でも fn 自体は throw しない (UI 側の validation に委譲)
+    const url = txExplorerUrl(baseSepolia.id, 'not-a-hash');
+    expect(url?.endsWith('/tx/not-a-hash')).toBe(true);
+  });
+});
+
+describe('addressExplorerUrl', () => {
+  it('対応 chain は <base>/address/<addr> を返す', () => {
+    const base = blockExplorerUrl(baseSepolia.id)!;
+    const addr = `0x${'1'.repeat(40)}`;
+    expect(addressExplorerUrl(baseSepolia.id, addr)).toBe(
+      `${base}/address/${addr}`,
+    );
+  });
+
+  it.each([
+    ['base', baseSepolia.id],
+    ['arbitrum', arbitrumSepolia.id],
+    ['optimism', optimismSepolia.id],
+    ['polygon', polygonAmoy.id],
+  ] as const)('4 chain (%s) すべてで address URL が生成される', (_slug, chainId) => {
+    const url = addressExplorerUrl(chainId, `0x${'2'.repeat(40)}`);
+    expect(url).toMatch(/^https?:\/\/[^/]+\/address\/0x2+$/);
+  });
+
+  it('未対応 chain は undefined', () => {
+    expect(
+      addressExplorerUrl(999_999, `0x${'1'.repeat(40)}`),
+    ).toBeUndefined();
   });
 });

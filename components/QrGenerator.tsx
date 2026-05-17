@@ -29,7 +29,12 @@ import {
   deploymentForSlug,
   type TokenSymbol,
 } from '@/lib/tokens';
-import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
+import {
+  addressExplorerUrl,
+  chainForSlug,
+  USDC_CHAINS,
+  type ChainSlug,
+} from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
@@ -453,6 +458,19 @@ export function QrGenerator() {
                   {t('addressInvalid')}
                 </p>
               )}
+            {/* 受取先確定後に Explorer の /address/ ページへ link。店主に「DB ではなく
+                チェーン上が source of truth」を毎回視認させ、Phase 2 (ローカル履歴) 投入
+                後も Explorer が一次資料である運用を維持する。 */}
+            {effectiveReceiver && (
+              <a
+                href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
+              >
+                {t('merchantExplorerLink', { chainName: chain.name })}
+              </a>
+            )}
           </Field>
 
           <Field label={t('storeNameLabel')}>

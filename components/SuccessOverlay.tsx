@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CopyableField } from './CopyableField';
+import { NonCustodialNotice } from './NonCustodialNotice';
 
 function formatTimeHMS(d: Date): string {
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -19,6 +20,7 @@ export function SuccessOverlay({
   userOpHash,
   blockNumber,
   explorerBase,
+  merchantAddress,
   onDismiss,
 }: {
   amountDisplay: string;
@@ -26,6 +28,12 @@ export function SuccessOverlay({
   userOpHash?: string;
   blockNumber: bigint;
   explorerBase?: string;
+  /**
+   * 店舗ウォレットアドレス。指定時は Explorer の /address/ ページへの link を
+   * 追加で描画し「他に何件着金しているか」を顧客 / 店主が即座に検証できるようにする。
+   * 未指定なら link は出さない (既存呼出 site の段階的移行を許容)。
+   */
+  merchantAddress?: string;
   onDismiss: () => void;
 }) {
   const t = useTranslations('SuccessOverlay');
@@ -50,6 +58,10 @@ export function SuccessOverlay({
 
   const explorerTxUrl =
     explorerBase && txHash ? `${explorerBase}/tx/${txHash}` : undefined;
+  const explorerAddressUrl =
+    explorerBase && merchantAddress
+      ? `${explorerBase}/address/${merchantAddress}`
+      : undefined;
 
   return (
     <div
@@ -123,16 +135,36 @@ export function SuccessOverlay({
         </div>
       </dl>
 
-      {explorerTxUrl && (
-        <a
-          href={explorerTxUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-sm underline underline-offset-4 hover:opacity-80"
-        >
-          {t('explorerLink')}
-        </a>
+      {(explorerTxUrl || explorerAddressUrl) && (
+        <div className="flex flex-col items-center gap-1 text-sm">
+          {explorerTxUrl && (
+            <a
+              href={explorerTxUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline underline-offset-4 hover:opacity-80"
+            >
+              {t('explorerLink')}
+            </a>
+          )}
+          {explorerAddressUrl && (
+            <a
+              href={explorerAddressUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline underline-offset-4 hover:opacity-80"
+            >
+              {t('merchantAddressExplorerLink')}
+            </a>
+          )}
+        </div>
       )}
+
+      {/* ノンカストディ宣言: 店主に「DB は持っていない、Explorer が source of truth」を毎回伝える */}
+      <NonCustodialNotice
+        variant="short"
+        className="w-full max-w-md text-white"
+      />
 
       {/* 明示的 dismiss (店主の視認後、客が押す) */}
       <div className="flex flex-col items-center gap-2">

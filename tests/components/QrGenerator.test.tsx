@@ -520,6 +520,67 @@ describe('QrGenerator', () => {
     });
   });
 
+  describe('店舗ウォレット Explorer リンク (Phase 1)', () => {
+    it('receiver 有効 + JPYC (Polygon) のとき、PolygonScan の address ページへ link する', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      render(<QrGenerator />);
+      const user = userEvent.setup();
+      // アコーディオンを開いて Field 内の link を露出
+      const toggle = await screen.findByRole('button', { name: /詳細設定/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      await user.click(toggle);
+      const link = await screen.findByRole('link', {
+        name: /店舗ウォレットの履歴を.+Explorer で見る/,
+      });
+      // testnet env なので Polygon Amoy → amoy.polygonscan.com
+      expect(link).toHaveAttribute(
+        'href',
+        expect.stringMatching(
+          new RegExp(`^https?://[^/]+/address/${VALID}$`),
+        ),
+      );
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noreferrer noopener');
+    });
+
+    it('receiver 未入力 → link は描画しない', async () => {
+      render(<QrGenerator />);
+      const user = userEvent.setup();
+      const toggle = await screen.findByRole('button', { name: /詳細設定/ });
+      if (toggle.getAttribute('aria-expanded') === 'false') {
+        await user.click(toggle);
+      }
+      expect(
+        screen.queryByRole('link', { name: /店舗ウォレットの履歴を/ }),
+      ).toBeNull();
+    });
+
+    it('receiver 不正 (not-an-address) → link は描画しない', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: 'not-an-address',
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      render(<QrGenerator />);
+      await screen.findByText(/アドレス形式が正しくありません/);
+      expect(
+        screen.queryByRole('link', { name: /店舗ウォレットの履歴を/ }),
+      ).toBeNull();
+    });
+  });
+
   describe('決済モード切替 (gasless / 通常決済（ガスあり）)', () => {
     it('「通常決済（ガスあり）」を選択すると URL に mode=standard が出る + 説明バッジが表示される', async () => {
       const user = userEvent.setup();

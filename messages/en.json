@@ -89,7 +89,8 @@
     "eip681FeeBypassTitle": "⚠ This QR does NOT collect the OpenPay service fee (0.5%)",
     "eip681FeeBypassBody": "The EIP-681 compatible QR is a pure single ERC20 transfer with no path to collect the service fee, unlike the adjacent \"Standard payment (with gas)\" QR (mode=standard, OpenPay service fee 0.5%). If both QRs are displayed side by side, the effective fee rate the merchant collects depends on which one the customer scans (0% vs 0.5%). Display this QR only when you want to support EIP-7702-incompatible wallets (Hashport, MetaMask Mobile) as a fallback.",
     "eip681Copy": "Copy URI",
-    "eip681Copied": "Copied"
+    "eip681Copied": "Copied",
+    "merchantExplorerLink": "View merchant wallet activity on {chainName} Explorer ↗"
   },
   "PaymentForm": {
     "title": "OpenPay Payment",
@@ -381,9 +382,16 @@
     "txHashLabel": "Tx Hash",
     "userOpHashLabel": "UserOp Hash",
     "blockLabel": "Block",
-    "explorerLink": "Verify on explorer ↗",
+    "explorerLink": "View tx on explorer ↗",
+    "merchantAddressExplorerLink": "View merchant wallet activity ↗",
     "dismiss": "Close",
     "dismissHelp": "Close after the merchant has confirmed"
+  },
+  "NonCustodialNotice": {
+    "shortTitle": "Settlement lives on-chain",
+    "shortBody": "OpenPay is non-custodial. For authoritative settlement, check your wallet or a block explorer.",
+    "fullTitle": "About transaction history",
+    "fullBody": "OpenPay is non-custodial — funds are sent directly to your merchant wallet. For authoritative settlement, check your wallet or a block explorer. This page shows local-only entries to assist with verification."
   },
   "ConnectButton": {
     "disconnect": "Disconnect",

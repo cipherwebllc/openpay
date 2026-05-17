@@ -6,6 +6,7 @@ import { SuccessOverlay } from '@/components/SuccessOverlay';
 
 const TX_HASH = `0x${'a'.repeat(64)}`;
 const USER_OP_HASH = `0x${'b'.repeat(64)}`;
+const MERCHANT_ADDR = `0x${'c'.repeat(40)}`;
 
 describe('SuccessOverlay', () => {
   it('タイトル / 金額 / 完了時刻 / tx詳細 / dismiss ボタンが表示される', () => {
@@ -95,7 +96,7 @@ describe('SuccessOverlay', () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
-  it('explorerBase 指定時は Explorer リンクが描画される', () => {
+  it('explorerBase 指定時は Tx Explorer リンクが描画される', () => {
     render(
       <SuccessOverlay
         amountDisplay="100 USDC"
@@ -105,13 +106,65 @@ describe('SuccessOverlay', () => {
         onDismiss={() => undefined}
       />,
     );
-    const link = screen.getByRole('link', { name: /Explorer で確認/ });
+    const link = screen.getByRole('link', { name: /Tx を Explorer で確認/ });
     expect(link).toHaveAttribute('href', `https://basescan.org/tx/${TX_HASH}`);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');
   });
 
-  it('explorerBase なし → リンク非表示', () => {
+  it('explorerBase + merchantAddress 指定時は店舗アドレス Explorer リンクも描画される', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        blockNumber={1n}
+        explorerBase="https://basescan.org"
+        merchantAddress={MERCHANT_ADDR}
+        onDismiss={() => undefined}
+      />,
+    );
+    const link = screen.getByRole('link', {
+      name: /店舗ウォレットの履歴を見る/,
+    });
+    expect(link).toHaveAttribute(
+      'href',
+      `https://basescan.org/address/${MERCHANT_ADDR}`,
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener');
+  });
+
+  it('merchantAddress なし → address リンクは描画しない (tx リンクのみ)', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        blockNumber={1n}
+        explorerBase="https://basescan.org"
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(screen.queryByRole('link', { name: /店舗ウォレット/ })).toBeNull();
+    expect(
+      screen.getByRole('link', { name: /Tx を Explorer で確認/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('explorerBase なし → tx/address どちらのリンクも非表示', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        blockNumber={1n}
+        merchantAddress={MERCHANT_ADDR}
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(screen.queryByRole('link', { name: /Explorer/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /店舗ウォレット/ })).toBeNull();
+  });
+
+  it('NonCustodialNotice (short) が常に描画される (ノンカストディ宣言)', () => {
     render(
       <SuccessOverlay
         amountDisplay="100 USDC"
@@ -120,7 +173,12 @@ describe('SuccessOverlay', () => {
         onDismiss={() => undefined}
       />,
     );
-    expect(screen.queryByRole('link', { name: /Explorer/ })).toBeNull();
+    expect(
+      screen.getByText('履歴はブロックチェーン上にあります'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/正確な入金状況は店舗ウォレットまたは Explorer/),
+    ).toBeInTheDocument();
   });
 
   it('userOpHash なし → UserOp 行は描画しない', () => {

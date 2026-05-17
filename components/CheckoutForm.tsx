@@ -639,6 +639,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           userOpHash={gasless.data.userOpHash}
           blockNumber={gasless.data.blockNumber}
           explorerBase={explorerBase}
+          merchantAddress={params.to}
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}
@@ -648,6 +649,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           txHash={standard.data.merchantTxHash}
           blockNumber={standard.data.blockNumber}
           explorerBase={explorerBase}
+          merchantAddress={params.to}
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}

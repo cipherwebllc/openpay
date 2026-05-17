@@ -530,6 +530,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           userOpHash={gasless.data.userOpHash}
           blockNumber={gasless.data.blockNumber}
           explorerBase={explorerBase}
+          merchantAddress={params.to}
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}
@@ -539,6 +540,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           txHash={standard.data.merchantTxHash}
           blockNumber={standard.data.blockNumber}
           explorerBase={explorerBase}
+          merchantAddress={params.to}
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}

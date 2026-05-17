@@ -89,3 +89,18 @@ export function blockExplorerUrl(chainId: number): string | undefined {
   const chain = supportedChains.find((c) => c.id === chainId);
   return chain?.blockExplorers?.default.url;
 }
+
+// txHash / address はそれぞれ Explorer の /tx/ /address/ パスにマップする。
+// chain が未対応なら undefined を返し、呼出側で「Explorer リンクなし」状態にフォールバックする。
+export function txExplorerUrl(chainId: number, txHash: string): string | undefined {
+  const base = blockExplorerUrl(chainId);
+  return base ? `${base}/tx/${txHash}` : undefined;
+}
+
+export function addressExplorerUrl(
+  chainId: number,
+  address: string,
+): string | undefined {
+  const base = blockExplorerUrl(chainId);
+  return base ? `${base}/address/${address}` : undefined;
+}
