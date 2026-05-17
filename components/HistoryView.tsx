@@ -71,11 +71,7 @@ export function HistoryView() {
         ) : (
           <ul className="space-y-2">
             {filtered.map((e) => (
-              <HistoryRow
-                key={e.id}
-                entry={e}
-                onRemove={(id) => removeHistoryEntry(id)}
-              />
+              <HistoryRow key={e.id} entry={e} onRemove={removeHistoryEntry} />
             ))}
           </ul>
         )}

@@ -41,12 +41,10 @@ export function HistoryToolbar({
   }
 
   function handleClear() {
-    if (
-      typeof window !== 'undefined' &&
-      window.confirm(`${t('clearConfirmTitle')}\n\n${t('clearConfirmBody')}`)
-    ) {
-      clearHistory();
+    if (!window.confirm(`${t('clearConfirmTitle')}\n\n${t('clearConfirmBody')}`)) {
+      return;
     }
+    clearHistory();
   }
 
   return (

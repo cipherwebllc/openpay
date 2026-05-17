@@ -1,7 +1,6 @@
 'use client';
 
-// 履歴 1 行分の表示。viewport の幅で table cell / card layout を切り替える
-// (sm 以上で table、それ未満で card)。
+// 履歴 1 行分の card 表示。sm 以上で 2 カラム grid、未満で 1 カラム積み重ね。
 
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
@@ -57,9 +56,7 @@ export function HistoryRow({
   const merchantUrl = addressExplorerUrl(entry.chainId, entry.merchant);
 
   function handleRemove() {
-    if (typeof window !== 'undefined' && !window.confirm(t('removeRowConfirm'))) {
-      return;
-    }
+    if (!window.confirm(t('removeRowConfirm'))) return;
     onRemove(entry.id);
   }
 

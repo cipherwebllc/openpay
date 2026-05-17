@@ -32,7 +32,6 @@ export function SuccessOverlay({
   /**
    * 店舗ウォレットアドレス。指定時は Explorer の /address/ ページへの link を
    * 追加で描画し「他に何件着金しているか」を顧客 / 店主が即座に検証できるようにする。
-   * 未指定なら link は出さない (既存呼出 site の段階的移行を許容)。
    */
   merchantAddress?: string;
   onDismiss: () => void;

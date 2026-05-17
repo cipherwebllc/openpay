@@ -101,7 +101,7 @@ export function usePaymentHistory(
   }, [gaslessData, ctx]);
 
   // gasless: throw 系エラー (paymaster reject / RPC 障害 / 残高不足 等)。
-  // tx hash が無いので id は ts ベースで毎回ユニーク。
+  // tx hash が無い時の dedupe 規則は buildHistoryEntry の id 生成 (秒+msg seed) に依存。
   useEffect(() => {
     if (!gaslessError) return;
     appendHistory(
@@ -122,7 +122,6 @@ export function usePaymentHistory(
         txHash: null,
         userOpHash: null,
         blockNumber: null,
-        // truncate は buildHistoryEntry 内 HISTORY_ERROR_MESSAGE_MAX_LENGTH に集約。
         errorMessage: gaslessError.message,
         storeName: ctx.storeName,
         note: ctx.note,

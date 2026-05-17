@@ -29,8 +29,8 @@ export const HISTORY_MAX_ENTRIES = 1000;
 // 1000 件 × 1000 文字 ≒ 1 MB 上限 (UTF-8 換算で max ~3 MB)、LocalStorage 5 MB に
 // 収まる。悪意 URL からの肥大化攻撃を構造的に防止。
 export const HISTORY_NOTE_MAX_LENGTH = 1000;
-// errorMessage は usePaymentHistory 側で 500 文字 trunc 済だが、buildHistoryEntry
-// にも 2 番目の防壁として同 cap を入れる (将来の呼出元増加で防御が外れない設計)。
+// errorMessage は呼出元に依らず buildHistoryEntry で必ず cap される (Sentry / LocalStorage
+// 肥大化対策、 stack trace で巨大化する error.message を抑える)。
 export const HISTORY_ERROR_MESSAGE_MAX_LENGTH = 500;
 
 export type HistoryFlow =
@@ -161,9 +161,9 @@ export function loadHistory(): HistoryEntry[] {
   return valid;
 }
 
+// 自タブ向け CustomEvent。useHistory hook が拾って state を再 load する。
+// callers (appendHistory/remove/clear) が事前に typeof window で guard 済。
 function broadcastChange(): void {
-  if (typeof window === 'undefined') return;
-  // 自タブ向け CustomEvent。useHistory hook が拾って state を再 load する。
   window.dispatchEvent(new Event(HISTORY_CHANGED_EVENT));
 }
 
