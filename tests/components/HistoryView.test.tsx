@@ -238,6 +238,34 @@ describe('HistoryView', () => {
   });
 
   describe('大量 entries の表示性能 sanity', () => {
+    it('1000 件 (HISTORY_MAX_ENTRIES boundary) の entry でも render が成立する', async () => {
+      for (let i = 0; i < 1000; i += 1) {
+        appendHistory(
+          entry({
+            id: `max-${i}`,
+            asset: i % 2 === 0 ? 'jpyc' : 'usdc',
+          }),
+        );
+      }
+      const t0 = performance.now();
+      render(<HistoryView />);
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /全て \(1000\)/ }),
+        ).toBeInTheDocument(),
+      );
+      const dt = performance.now() - t0;
+      // jsdom render は本番 DOM より大幅に遅い (10-50x)。本番 chrome では <1s 想定。
+      // jsdom 上の 1000-row mount は 10s 以下を許容ライン (CI のばらつき吸収)。
+      expect(dt).toBeLessThan(10_000);
+      expect(
+        screen.getByRole('button', { name: /JPYC \(500\)/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /USDC \(500\)/ }),
+      ).toBeInTheDocument();
+    });
+
     it('500 件の entry を持ち、filter 切替が成立する', async () => {
       const user = userEvent.setup();
       for (let i = 0; i < 500; i += 1) {

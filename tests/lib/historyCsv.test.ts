@@ -151,6 +151,46 @@ describe('toCsv', () => {
     expect(csv).toContain(',revert,');
   });
 
+  it('1000 件 (HISTORY_MAX_ENTRIES boundary) でも 200ms 以内で出力できる', () => {
+    function buildEntry(id: string): HistoryEntry {
+      return {
+        id,
+        ts: 1_700_000_000_000,
+        flow: 'batch',
+        status: 'success',
+        chainId: 137,
+        chainSlug: 'polygon',
+        asset: 'jpyc',
+        tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        payMode: 'gasless',
+        gasMode: 'customer',
+        merchant: '0x1111111111111111111111111111111111111111',
+        merchantAmount: '500000000000000000000',
+        customer: '0x9999999999999999999999999999999999999999',
+        feeReceiver: '0x2222222222222222222222222222222222222222',
+        feeAmount: '5000000000000000000',
+        txHash: '0xaaaa',
+        userOpHash: '0xbbbb',
+        blockNumber: '1',
+        errorMessage: null,
+        storeName: 'お店, テスト',
+        note: 'a'.repeat(100),
+      };
+    }
+    const entries = Array.from({ length: 1000 }, (_, i) =>
+      buildEntry(`b-${i}`),
+    );
+    const t0 = performance.now();
+    const csv = toCsv(entries);
+    const dt = performance.now() - t0;
+    expect(dt).toBeLessThan(200);
+    // 1000 行 + header + trailing CRLF
+    const lines = csv.slice(CSV_BOM.length).split(CSV_NEWLINE);
+    expect(lines.length).toBe(1002);
+    // 1 entry ~ 500-800 bytes → 1000 件で 500KB-800KB (LocalStorage 5MB 上限の 16% 内)
+    expect(csv.length).toBeLessThan(1_000_000);
+  });
+
   it('100 件でも 1 ms 級で出る (パフォーマンス sanity)', () => {
     const entries = Array.from({ length: 100 }, (_, i) =>
       entry({ id: `i-${i}`, storeName: `Store ${i}` }),
