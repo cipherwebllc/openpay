@@ -6,53 +6,40 @@
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { addressExplorerUrl, txExplorerUrl } from '@/lib/chains';
-import { formatHistoryTimestamp, type HistoryEntry } from '@/lib/history';
+import {
+  formatHistoryTimestamp,
+  HISTORY_ASSET_DECIMALS,
+  HISTORY_ASSET_DISPLAY,
+  type HistoryEntry,
+} from '@/lib/history';
 import { shortAddress } from '@/lib/format';
-
-const ASSET_DECIMALS: Record<HistoryEntry['asset'], number> = {
-  jpyc: 18,
-  usdc: 6,
-};
-
-const ASSET_DISPLAY: Record<HistoryEntry['asset'], string> = {
-  jpyc: 'JPYC',
-  usdc: 'USDC',
-};
 
 function fmt(raw: string | null, asset: HistoryEntry['asset']): string {
   if (raw === null) return '—';
   if (!/^\d+$/.test(raw)) return raw;
-  return `${formatUnits(BigInt(raw), ASSET_DECIMALS[asset])} ${ASSET_DISPLAY[asset]}`;
+  return `${formatUnits(BigInt(raw), HISTORY_ASSET_DECIMALS[asset])} ${HISTORY_ASSET_DISPLAY[asset]}`;
 }
 
-function statusBadgeClass(status: HistoryEntry['status']): string {
-  if (status === 'success')
-    return 'bg-emerald-100 text-emerald-800 ring-emerald-200';
-  if (status === 'reverted')
-    return 'bg-amber-100 text-amber-800 ring-amber-200';
-  return 'bg-red-100 text-red-800 ring-red-200';
-}
+// status / flow → i18n key (History namespace) と badge class の lookup。
+// `as const satisfies Record<...>` で漏れがあれば compile error にする。
+const STATUS_BADGE_CLASS = {
+  success: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
+  reverted: 'bg-amber-100 text-amber-800 ring-amber-200',
+  error: 'bg-red-100 text-red-800 ring-red-200',
+} as const satisfies Record<HistoryEntry['status'], string>;
 
-function flowKindKey(flow: HistoryEntry['flow']): string {
-  switch (flow) {
-    case 'batch':
-      return 'kindBatch';
-    case 'direct':
-      return 'kindDirect';
-    case 'standard-merchant':
-      return 'kindStandardMerchant';
-    case 'standard-fee':
-      return 'kindStandardFee';
-  }
-}
+const STATUS_I18N_KEY = {
+  success: 'statusSuccess',
+  reverted: 'statusReverted',
+  error: 'statusError',
+} as const satisfies Record<HistoryEntry['status'], string>;
 
-function statusKey(status: HistoryEntry['status']): string {
-  return status === 'success'
-    ? 'statusSuccess'
-    : status === 'reverted'
-      ? 'statusReverted'
-      : 'statusError';
-}
+const FLOW_KIND_I18N_KEY = {
+  batch: 'kindBatch',
+  direct: 'kindDirect',
+  'standard-merchant': 'kindStandardMerchant',
+  'standard-fee': 'kindStandardFee',
+} as const satisfies Record<HistoryEntry['flow'], string>;
 
 export function HistoryRow({
   entry,
@@ -81,12 +68,12 @@ export function HistoryRow({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <span
-            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${statusBadgeClass(entry.status)}`}
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_BADGE_CLASS[entry.status]}`}
           >
-            {t(statusKey(entry.status))}
+            {t(STATUS_I18N_KEY[entry.status])}
           </span>
           <span className="text-[11px] text-slate-500">
-            {t(flowKindKey(entry.flow))}
+            {t(FLOW_KIND_I18N_KEY[entry.flow])}
           </span>
         </div>
         <time className="font-mono text-xs text-slate-500">

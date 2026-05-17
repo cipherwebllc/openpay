@@ -36,6 +36,19 @@ export type HistoryStatus = 'success' | 'reverted' | 'error';
 
 export type HistoryAsset = 'jpyc' | 'usdc';
 
+// HistoryEntry は decimals / display symbol を保持しないため (raw wei + asset slug
+// のみ)、UI / CSV 出力時に lookup する。lib/tokens.ts の TokenDeployment と同一
+// 値を維持する必要があり、 token を増やすときは両方を更新する。
+export const HISTORY_ASSET_DECIMALS: Record<HistoryAsset, number> = {
+  jpyc: 18,
+  usdc: 6,
+};
+
+export const HISTORY_ASSET_DISPLAY: Record<HistoryAsset, string> = {
+  jpyc: 'JPYC',
+  usdc: 'USDC',
+};
+
 export type HistoryPayMode = 'gasless' | 'standard';
 
 export type HistoryGasMode = 'customer' | 'merchant';

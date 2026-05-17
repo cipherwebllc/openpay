@@ -23,7 +23,7 @@ import { env } from '@/lib/env';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
-import { appendHistory, buildHistoryEntry } from '@/lib/history';
+import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import { DECIMAL_PATTERN, parsePayParams, type PayParams } from '@/lib/url';
@@ -231,221 +231,40 @@ function PaymentDetails({ params }: { params: PayParams }) {
     }
   }, [standard.data]);
 
-  // ローカル履歴 (Phase 2) への append。LocalStorage 側で id dedupe があるため
-  // StrictMode 二重発火・react-query 再 emit を素朴に許容する。
-  // 注: storeName は URL params に乗らない (customer URL は /pay?to=...&amount=... のみ)
-  // ため空文字列で記録される。merchant 自身が自分の QR を読み取ってテスト決済する場合
-  // でも storeName は QrSettings 側に閉じており、PaymentForm からは見えない (将来の URL
-  // 拡張で乗せる余地あり、Phase 2 では空のまま CSV/UI が空欄表示)。
-  useEffect(() => {
-    if (!gasless.data) return;
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'batch',
-        status: gasless.data.success ? 'success' : 'reverted',
-        chainId: deployment.chainId,
-        chainSlug,
-        asset: params.token,
-        tokenAddress: deployment.address,
-        payMode: 'gasless',
-        gasMode: params.gas,
-        merchant: params.to,
-        merchantAmount: breakdown.merchantReceives,
-        customer: address,
-        feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount,
-        txHash: gasless.data.txHash,
-        userOpHash: gasless.data.userOpHash,
-        blockNumber: gasless.data.blockNumber,
-        errorMessage: null,
-        storeName: '',
-      }),
-    );
-  }, [
-    gasless.data,
-    deployment.chainId,
-    deployment.address,
-    chainSlug,
-    params.token,
-    params.gas,
-    params.to,
-    breakdown.merchantReceives,
-    breakdown.feeAmount,
-    address,
-  ]);
-
-  useEffect(() => {
-    if (!gasless.error) return;
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'batch',
-        status: 'error',
-        chainId: deployment.chainId,
-        chainSlug,
-        asset: params.token,
-        tokenAddress: deployment.address,
-        payMode: 'gasless',
-        gasMode: params.gas,
-        merchant: params.to,
-        merchantAmount: breakdown.merchantReceives,
-        customer: address,
-        feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount,
-        txHash: null,
-        userOpHash: null,
-        blockNumber: null,
-        errorMessage: gasless.error.message.slice(0, 500),
-        storeName: '',
-      }),
-    );
-  }, [
-    gasless.error,
-    deployment.chainId,
-    deployment.address,
-    chainSlug,
-    params.token,
-    params.gas,
-    params.to,
-    breakdown.merchantReceives,
-    breakdown.feeAmount,
-    address,
-  ]);
-
-  // standard モード: success / merchant-error / fee-error の 3 transition で append。
-  // standard.data の merchantTxHash を id 種に使い、fee tx hash も同 entry の本文に含める。
-  useEffect(() => {
-    if (!standard.data) return;
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'standard-merchant',
-        status: 'success',
-        chainId: deployment.chainId,
-        chainSlug,
-        asset: params.token,
-        tokenAddress: deployment.address,
-        payMode: 'standard',
-        gasMode: null,
-        merchant: params.to,
-        merchantAmount: breakdown.merchantReceives,
-        customer: address,
-        feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount,
-        txHash: standard.data.merchantTxHash,
-        userOpHash: null,
-        blockNumber: standard.data.blockNumber,
-        errorMessage: null,
-        storeName: '',
-      }),
-    );
-    if (standard.data.feeTxHash) {
-      appendHistory(
-        buildHistoryEntry({
-          flow: 'standard-fee',
-          status: 'success',
-          chainId: deployment.chainId,
-          chainSlug,
-          asset: params.token,
-          tokenAddress: deployment.address,
-          payMode: 'standard',
-          gasMode: null,
-          merchant: env.feeReceiver,
-          merchantAmount: breakdown.feeAmount,
-          customer: address,
-          feeReceiver: env.feeReceiver,
-          feeAmount: breakdown.feeAmount,
-          txHash: standard.data.feeTxHash,
-          userOpHash: null,
-          blockNumber: standard.data.blockNumber,
-          errorMessage: null,
-          storeName: '',
-        }),
-      );
-    }
-  }, [
-    standard.data,
-    deployment.chainId,
-    deployment.address,
-    chainSlug,
-    params.token,
-    params.to,
-    breakdown.merchantReceives,
-    breakdown.feeAmount,
-    address,
-  ]);
-
-  useEffect(() => {
-    if (standard.phase !== 'merchant-error') return;
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'standard-merchant',
-        status: 'error',
-        chainId: deployment.chainId,
-        chainSlug,
-        asset: params.token,
-        tokenAddress: deployment.address,
-        payMode: 'standard',
-        gasMode: null,
-        merchant: params.to,
-        merchantAmount: breakdown.merchantReceives,
-        customer: address,
-        feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount,
-        txHash: standard.merchantTxHash ?? null,
-        userOpHash: null,
-        blockNumber: null,
-        errorMessage: standard.error?.message.slice(0, 500) ?? 'merchant-error',
-        storeName: '',
-      }),
-    );
-  }, [
-    standard.phase,
-    standard.merchantTxHash,
-    standard.error,
-    deployment.chainId,
-    deployment.address,
-    chainSlug,
-    params.token,
-    params.to,
-    breakdown.merchantReceives,
-    breakdown.feeAmount,
-    address,
-  ]);
-
-  useEffect(() => {
-    if (standard.phase !== 'fee-error') return;
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'standard-fee',
-        status: 'error',
-        chainId: deployment.chainId,
-        chainSlug,
-        asset: params.token,
-        tokenAddress: deployment.address,
-        payMode: 'standard',
-        gasMode: null,
-        merchant: env.feeReceiver,
-        merchantAmount: breakdown.feeAmount,
-        customer: address,
-        feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount,
-        txHash: standard.feeTxHash ?? null,
-        userOpHash: null,
-        blockNumber: null,
-        errorMessage: standard.error?.message.slice(0, 500) ?? 'fee-error',
-        storeName: '',
-      }),
-    );
-  }, [
-    standard.phase,
-    standard.feeTxHash,
-    standard.error,
-    deployment.chainId,
-    deployment.address,
-    chainSlug,
-    params.token,
-    breakdown.feeAmount,
-    address,
-  ]);
+  // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
+  // 注: storeName は URL params に乗らないため空文字列。merchant 自身が自分の QR
+  // で test 決済しても storeName は QrSettings 側に閉じており PaymentForm から
+  // 見えない (将来 URL 拡張で乗せる余地あり、現状は CSV/UI に空欄で表示)。
+  const historyCtx = useMemo(
+    () => ({
+      chainId: deployment.chainId,
+      chainSlug,
+      asset: params.token,
+      tokenAddress: deployment.address,
+      payMode: isStandard ? ('standard' as const) : ('gasless' as const),
+      gasMode: isStandard ? null : params.gas,
+      merchant: params.to,
+      merchantAmount: breakdown.merchantReceives,
+      customer: address,
+      feeReceiver: env.feeReceiver,
+      feeAmount: breakdown.feeAmount,
+      storeName: '',
+      note: '',
+    }),
+    [
+      deployment.chainId,
+      deployment.address,
+      chainSlug,
+      params.token,
+      params.gas,
+      params.to,
+      isStandard,
+      breakdown.merchantReceives,
+      breakdown.feeAmount,
+      address,
+    ],
+  );
+  usePaymentHistory(historyCtx, gasless, standard);
 
   function onSubmit() {
     if (!canSubmit) return;

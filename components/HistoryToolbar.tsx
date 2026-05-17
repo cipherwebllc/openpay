@@ -10,6 +10,17 @@ import { historyCsvFilename, toCsv } from '@/lib/historyCsv';
 
 export type HistoryFilter = 'all' | 'jpyc' | 'usdc';
 
+// filter option を 1 箇所に。新通貨追加時はここに 1 行足すだけで UI に反映される。
+const FILTER_OPTIONS: ReadonlyArray<{
+  key: HistoryFilter;
+  i18nKey: 'filterAll' | 'filterJpyc' | 'filterUsdc';
+  countKey: 'all' | 'jpyc' | 'usdc';
+}> = [
+  { key: 'all', i18nKey: 'filterAll', countKey: 'all' },
+  { key: 'jpyc', i18nKey: 'filterJpyc', countKey: 'jpyc' },
+  { key: 'usdc', i18nKey: 'filterUsdc', countKey: 'usdc' },
+];
+
 export function HistoryToolbar({
   entries,
   filter,
@@ -45,21 +56,14 @@ export function HistoryToolbar({
         aria-label={t('filterLabel')}
         className="flex flex-wrap gap-1"
       >
-        <FilterButton
-          active={filter === 'all'}
-          onClick={() => onFilterChange('all')}
-          label={t('filterAll', { count: counts.all })}
-        />
-        <FilterButton
-          active={filter === 'jpyc'}
-          onClick={() => onFilterChange('jpyc')}
-          label={t('filterJpyc', { count: counts.jpyc })}
-        />
-        <FilterButton
-          active={filter === 'usdc'}
-          onClick={() => onFilterChange('usdc')}
-          label={t('filterUsdc', { count: counts.usdc })}
-        />
+        {FILTER_OPTIONS.map((opt) => (
+          <FilterButton
+            key={opt.key}
+            active={filter === opt.key}
+            onClick={() => onFilterChange(opt.key)}
+            label={t(opt.i18nKey, { count: counts[opt.countKey] })}
+          />
+        ))}
       </div>
       <div className="flex gap-2">
         <button

@@ -11,7 +11,11 @@
 
 import { formatUnits } from 'viem';
 import type { HistoryEntry } from './history';
-import { formatHistoryTimestamp } from './history';
+import {
+  formatHistoryTimestamp,
+  HISTORY_ASSET_DECIMALS,
+  HISTORY_ASSET_DISPLAY,
+} from './history';
 
 export const CSV_BOM = '﻿';
 export const CSV_NEWLINE = '\r\n';
@@ -51,24 +55,12 @@ function escapeCsvCell(value: string): string {
   return `"${defanged.replace(/"/g, '""')}"`;
 }
 
-// asset → decimals (jpyc=18, usdc=6)。HistoryEntry は decimals を保持しないが
-// asset は記録されているため、CSV 出力時に decode する。
-const ASSET_DECIMALS: Record<HistoryEntry['asset'], number> = {
-  jpyc: 18,
-  usdc: 6,
-};
-
-const ASSET_SYMBOL: Record<HistoryEntry['asset'], string> = {
-  jpyc: 'JPYC',
-  usdc: 'USDC',
-};
-
 function rawToDecimal(raw: string | null, asset: HistoryEntry['asset']): string {
   if (raw === null) return '';
   // 無効な文字列が来た場合は formatUnits が throw するため、digit 以外を含むと
   // raw を空にする (loadHistory 側で schema 検証済なので通常通過しない経路)。
   if (!/^\d+$/.test(raw)) return '';
-  return formatUnits(BigInt(raw), ASSET_DECIMALS[asset]);
+  return formatUnits(BigInt(raw), HISTORY_ASSET_DECIMALS[asset]);
 }
 
 function flowToKind(flow: HistoryEntry['flow']): string {
@@ -110,7 +102,7 @@ function entryToRow(e: HistoryEntry): string[] {
     statusToLabel(e.status),
     flowToKind(e.flow),
     e.storeName,
-    ASSET_SYMBOL[e.asset],
+    HISTORY_ASSET_DISPLAY[e.asset],
     rawToDecimal(e.merchantAmount, e.asset),
     e.merchantAmount,
     rawToDecimal(e.feeAmount, e.asset),
