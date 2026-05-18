@@ -237,6 +237,144 @@ describe('usePaymentHistory', () => {
     expect(loaded[0].flow).toBe('standard-fee');
   });
 
+  // R: codex review #1 (P2) — fee-error 時に merchant 着金が履歴に残らない bug の regression。
+  //    useStandardPayment が phase==='success' でのみ data を expose する設計のため、
+  //    fee-error 時には独立した merchantTxHash + merchantBlockNumber 経由で
+  //    merchant success entry を補完 append する。
+  it('standard fee-error: merchantBlockNumber 付き → merchant 成功行 + fee 失敗行の 2 件', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: undefined,
+        phase: 'fee-error',
+        merchantTxHash: '0xMTxConfirmed',
+        merchantBlockNumber: 99n,
+        feeTxHash: '0xFTxFail',
+        error: new Error('fee tx reverted'),
+      }),
+    );
+    const loaded = loadHistory();
+    expect(loaded).toHaveLength(2);
+    const merchant = loaded.find((e) => e.flow === 'standard-merchant')!;
+    expect(merchant.status).toBe('success');
+    expect(merchant.txHash).toBe('0xMTxConfirmed');
+    expect(merchant.blockNumber).toBe('99');
+    expect(merchant.errorMessage).toBeNull();
+    const fee = loaded.find((e) => e.flow === 'standard-fee')!;
+    expect(fee.status).toBe('error');
+    expect(fee.txHash).toBe('0xFTxFail');
+    expect(fee.errorMessage).toBe('fee tx reverted');
+  });
+
+  it('standard fee-error: merchantBlockNumber 不在 (sign 直後拒否等) → fee 失敗行のみ', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: undefined,
+        phase: 'fee-error',
+        merchantTxHash: '0xMTxNoReceipt',
+        merchantBlockNumber: undefined,
+        feeTxHash: undefined,
+        error: new Error('fee write rejected'),
+      }),
+    );
+    const loaded = loadHistory();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].flow).toBe('standard-fee');
+  });
+
+  // R: codex review #2 (P2) — submit 時の amount が gas quote refetch / 変数 amount 編集で
+  //    drift する race の regression。snapshot を優先するパスを検証。
+  it('gasless: variables (submitted amounts) が ctx より優先される (amount drift 防御)', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n }, // 後から drift した live ctx
+        {
+          data: {
+            txHash: '0xTxDrift',
+            userOpHash: '0xUODrift',
+            blockNumber: 1n,
+            success: true,
+          },
+          error: null,
+          variables: { merchantAmount: 1000n, feeAmount: 10n }, // submit 時の固定値
+        },
+        NO_STANDARD,
+      ),
+    );
+    const [entry] = loadHistory();
+    expect(entry.merchantAmount).toBe('1000');
+    expect(entry.feeAmount).toBe('10');
+  });
+
+  it('gasless error: variables が ctx より優先される (error 行でも snapshot)', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
+        {
+          data: undefined,
+          error: new Error('paymaster rejected'),
+          variables: { merchantAmount: 500n, feeAmount: 5n },
+        },
+        NO_STANDARD,
+      ),
+    );
+    const [entry] = loadHistory();
+    expect(entry.merchantAmount).toBe('500');
+    expect(entry.feeAmount).toBe('5');
+  });
+
+  it('standard success: lastSubmittedParams が ctx より優先される (merchant + fee)', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
+        NO_GASLESS,
+        {
+          data: {
+            merchantTxHash: '0xMtxS',
+            feeTxHash: '0xFtxS',
+            blockNumber: 10n,
+          },
+          phase: 'success',
+          merchantTxHash: '0xMtxS',
+          feeTxHash: '0xFtxS',
+          error: null,
+          lastSubmittedParams: { merchantAmount: 2000n, feeAmount: 20n },
+        },
+      ),
+    );
+    const loaded = loadHistory();
+    expect(loaded).toHaveLength(2);
+    const merchant = loaded.find((e) => e.flow === 'standard-merchant')!;
+    const fee = loaded.find((e) => e.flow === 'standard-fee')!;
+    expect(merchant.merchantAmount).toBe('2000');
+    expect(merchant.feeAmount).toBe('20');
+    // standard-fee 行の merchantAmount は feeAmount を映す慣行 (会計 export の互換)
+    expect(fee.merchantAmount).toBe('20');
+    expect(fee.feeAmount).toBe('20');
+  });
+
+  it('standard fee-error: lastSubmittedParams が補完 merchant 行にも適用される', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
+        NO_GASLESS,
+        {
+          data: undefined,
+          phase: 'fee-error',
+          merchantTxHash: '0xMtxFE',
+          merchantBlockNumber: 50n,
+          feeTxHash: '0xFtxFE',
+          error: new Error('fee reverted'),
+          lastSubmittedParams: { merchantAmount: 3000n, feeAmount: 30n },
+        },
+      ),
+    );
+    const loaded = loadHistory();
+    expect(loaded).toHaveLength(2);
+    const merchant = loaded.find((e) => e.flow === 'standard-merchant')!;
+    expect(merchant.merchantAmount).toBe('3000');
+    expect(merchant.feeAmount).toBe('30');
+  });
+
   it('LocalStorage に直接 entry が出る (key=openpay:history:v1)', () => {
     renderHook(() =>
       usePaymentHistory(

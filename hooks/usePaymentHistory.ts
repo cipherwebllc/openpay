@@ -36,6 +36,14 @@ export type AppendPaymentHistoryCtx = {
   note: string;
 };
 
+// submit 時点で固定したい amount field のみを抜き出した snapshot。tx 完了前に
+// 親コンポーネントの state (gas quote refetch / variable amount 編集) が変動しても、
+// 履歴 entry には mutate() 呼出時の値を記録するために使う。
+type SubmittedAmounts = {
+  merchantAmount: bigint;
+  feeAmount: bigint;
+};
+
 type GaslessSnapshot = {
   data?: {
     txHash: Hex;
@@ -44,6 +52,9 @@ type GaslessSnapshot = {
     success: boolean;
   };
   error: Error | null;
+  // react-query useMutation の variables (= mutate() に渡された params)。
+  // 完了時 (data/error) effect で参照することで amount drift を避ける。
+  variables?: SubmittedAmounts;
 };
 
 type StandardSnapshot = {
@@ -56,6 +67,11 @@ type StandardSnapshot = {
   merchantTxHash?: Hex;
   feeTxHash?: Hex;
   error: Error | null;
+  // useStandardPayment.lastSubmittedParams を経由。submit 時点の amount snapshot。
+  lastSubmittedParams?: SubmittedAmounts | null;
+  // phase が 'success' 以外でも merchant receipt 単独で取得できる block number。
+  // fee-error 時の merchant 着金記録に使う。
+  merchantBlockNumber?: bigint;
 };
 
 export function usePaymentHistory(
@@ -65,11 +81,26 @@ export function usePaymentHistory(
 ): void {
   const gaslessData = gasless.data;
   const gaslessError = gasless.error;
+  const gaslessVariables = gasless.variables;
   const standardData = standard.data;
   const standardPhase = standard.phase;
   const standardMerchantTxHash = standard.merchantTxHash;
   const standardFeeTxHash = standard.feeTxHash;
   const standardError = standard.error;
+  const standardSubmittedParams = standard.lastSubmittedParams;
+  const standardMerchantBlockNumber = standard.merchantBlockNumber;
+
+  // R: gas quote 30s refetch / variable-amount /pay の編集で receipt 到達時に
+  //    ctx.merchantAmount / ctx.feeAmount が drift する race を回避するため、
+  //    submitted snapshot (mutation.variables / lastSubmittedParams) があれば
+  //    それを優先する。snapshot 不在時は ctx fallback (e.g. 旧 test 互換)。
+  const gaslessMerchantAmount =
+    gaslessVariables?.merchantAmount ?? ctx.merchantAmount;
+  const gaslessFeeAmount = gaslessVariables?.feeAmount ?? ctx.feeAmount;
+  const standardMerchantAmount =
+    standardSubmittedParams?.merchantAmount ?? ctx.merchantAmount;
+  const standardFeeAmount =
+    standardSubmittedParams?.feeAmount ?? ctx.feeAmount;
 
   // gasless 成功 (revert 含む)。data.success===false (チェーン上 revert) も
   // status='reverted' で記録 → 顧客が「失敗した tx」を Explorer で追跡可能。
@@ -86,10 +117,10 @@ export function usePaymentHistory(
         payMode: 'gasless',
         gasMode: ctx.gasMode,
         merchant: ctx.merchant,
-        merchantAmount: ctx.merchantAmount,
+        merchantAmount: gaslessMerchantAmount,
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
-        feeAmount: ctx.feeAmount,
+        feeAmount: gaslessFeeAmount,
         txHash: gaslessData.txHash,
         userOpHash: gaslessData.userOpHash,
         blockNumber: gaslessData.blockNumber,
@@ -98,7 +129,7 @@ export function usePaymentHistory(
         note: ctx.note,
       }),
     );
-  }, [gaslessData, ctx]);
+  }, [gaslessData, gaslessMerchantAmount, gaslessFeeAmount, ctx]);
 
   // gasless: throw 系エラー (paymaster reject / RPC 障害 / 残高不足 等)。
   // tx hash が無い時の dedupe 規則は buildHistoryEntry の id 生成 (秒+msg seed) に依存。
@@ -115,10 +146,10 @@ export function usePaymentHistory(
         payMode: 'gasless',
         gasMode: ctx.gasMode,
         merchant: ctx.merchant,
-        merchantAmount: ctx.merchantAmount,
+        merchantAmount: gaslessMerchantAmount,
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
-        feeAmount: ctx.feeAmount,
+        feeAmount: gaslessFeeAmount,
         txHash: null,
         userOpHash: null,
         blockNumber: null,
@@ -127,7 +158,7 @@ export function usePaymentHistory(
         note: ctx.note,
       }),
     );
-  }, [gaslessError, ctx]);
+  }, [gaslessError, gaslessMerchantAmount, gaslessFeeAmount, ctx]);
 
   // standard 成功: merchant tx は必ず append。fee tx は feeTxHash があれば
   // 2 件目として append (会計上 「店舗着金 X + 手数料 Y」を分離記録)。
@@ -144,10 +175,10 @@ export function usePaymentHistory(
         payMode: 'standard',
         gasMode: null,
         merchant: ctx.merchant,
-        merchantAmount: ctx.merchantAmount,
+        merchantAmount: standardMerchantAmount,
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
-        feeAmount: ctx.feeAmount,
+        feeAmount: standardFeeAmount,
         txHash: standardData.merchantTxHash,
         userOpHash: null,
         blockNumber: standardData.blockNumber,
@@ -168,10 +199,10 @@ export function usePaymentHistory(
           payMode: 'standard',
           gasMode: null,
           merchant: ctx.feeReceiver,
-          merchantAmount: ctx.feeAmount,
+          merchantAmount: standardFeeAmount,
           customer: ctx.customer,
           feeReceiver: ctx.feeReceiver,
-          feeAmount: ctx.feeAmount,
+          feeAmount: standardFeeAmount,
           txHash: standardData.feeTxHash,
           userOpHash: null,
           blockNumber: standardData.blockNumber,
@@ -181,7 +212,7 @@ export function usePaymentHistory(
         }),
       );
     }
-  }, [standardData, ctx]);
+  }, [standardData, standardMerchantAmount, standardFeeAmount, ctx]);
 
   // standard merchant-error: merchant 送金が失敗 (fee は未送信)。
   // wallet が tx 送信したが revert したケースは merchantTxHash あり、
@@ -204,10 +235,10 @@ export function usePaymentHistory(
         payMode: 'standard',
         gasMode: null,
         merchant: ctx.merchant,
-        merchantAmount: ctx.merchantAmount,
+        merchantAmount: standardMerchantAmount,
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
-        feeAmount: ctx.feeAmount,
+        feeAmount: standardFeeAmount,
         txHash: standardMerchantTxHash ?? null,
         userOpHash: null,
         blockNumber: null,
@@ -216,12 +247,51 @@ export function usePaymentHistory(
         note: ctx.note,
       }),
     );
-  }, [standardPhase, standardMerchantTxHash, standardError, ctx]);
+  }, [
+    standardPhase,
+    standardMerchantTxHash,
+    standardError,
+    standardMerchantAmount,
+    standardFeeAmount,
+    ctx,
+  ]);
 
   // standard fee-error: merchant 確定済 (着金 OK) + fee tx だけ失敗。
   // 会計上は「fee 未収」の状態として明示記録 (retry UI が出る)。
+  //
+  // R: useStandardPayment.data は phase==='success' でのみ undefined 以外を返す
+  //    設計のため、fee-error 時に通常の "standard success" effect は走らない。
+  //    結果として店主視点で「お金を受け取った」事実が履歴に残らない欠陥が出る。
+  //    ここで merchant receipt 単独 (merchantTxHash + merchantBlockNumber) が
+  //    揃っていれば merchant-success 行を 1 件補完で append し、その後 fee-error
+  //    行を append する。merchant 着金は確定済 = 会計上必ず計上すべき事象。
   useEffect(() => {
     if (standardPhase !== 'fee-error') return;
+    if (standardMerchantTxHash && standardMerchantBlockNumber !== undefined) {
+      appendHistory(
+        buildHistoryEntry({
+          flow: 'standard-merchant',
+          status: 'success',
+          chainId: ctx.chainId,
+          chainSlug: ctx.chainSlug,
+          asset: ctx.asset,
+          tokenAddress: ctx.tokenAddress,
+          payMode: 'standard',
+          gasMode: null,
+          merchant: ctx.merchant,
+          merchantAmount: standardMerchantAmount,
+          customer: ctx.customer,
+          feeReceiver: ctx.feeReceiver,
+          feeAmount: standardFeeAmount,
+          txHash: standardMerchantTxHash,
+          userOpHash: null,
+          blockNumber: standardMerchantBlockNumber,
+          errorMessage: null,
+          storeName: ctx.storeName,
+          note: ctx.note,
+        }),
+      );
+    }
     appendHistory(
       buildHistoryEntry({
         flow: 'standard-fee',
@@ -233,10 +303,10 @@ export function usePaymentHistory(
         payMode: 'standard',
         gasMode: null,
         merchant: ctx.feeReceiver,
-        merchantAmount: ctx.feeAmount,
+        merchantAmount: standardFeeAmount,
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
-        feeAmount: ctx.feeAmount,
+        feeAmount: standardFeeAmount,
         txHash: standardFeeTxHash ?? null,
         userOpHash: null,
         blockNumber: null,
@@ -245,5 +315,14 @@ export function usePaymentHistory(
         note: ctx.note,
       }),
     );
-  }, [standardPhase, standardFeeTxHash, standardError, ctx]);
+  }, [
+    standardPhase,
+    standardMerchantTxHash,
+    standardMerchantBlockNumber,
+    standardFeeTxHash,
+    standardError,
+    standardMerchantAmount,
+    standardFeeAmount,
+    ctx,
+  ]);
 }

@@ -323,6 +323,15 @@ describe('useStandardPayment', () => {
     expect(result.current.isMerchantError).toBe(false);
     // data はまだ undefined (fee tx 未確定なので)
     expect(result.current.data).toBeUndefined();
+    // R: codex review #1 (P2) regression — fee-error 時にも merchant 着金の証跡は揃う:
+    //    merchantBlockNumber (merchant receipt 単独) と lastSubmittedParams (mutate 引数 snapshot) を
+    //    usePaymentHistory が読み取って merchant 行を補完 append する経路の必須インプット。
+    expect(result.current.merchantTxHash).toBe(MERCHANT_TX);
+    expect(result.current.merchantBlockNumber).toBe(100n);
+    expect(result.current.lastSubmittedParams).toMatchObject({
+      merchantAmount: 9_950_000n,
+      feeAmount: 50_000n,
+    });
   });
 
   it('retryFee(): fee tx を再送信、merchant tx は再呼び出ししない', async () => {

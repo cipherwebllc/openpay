@@ -305,6 +305,17 @@ export function useStandardPayment() {
     isMerchantError: phase === 'merchant-error',
     merchantTxHash: merchantWrite.data,
     feeTxHash: feeWrite.data,
+    // R: fee-error 時にも merchant 着金記録を残せるよう、phase に依らず merchant
+    //    receipt 単独で公開する。usePaymentHistory が fee-error 検知時に
+    //    merchant success 行を独立して append するために参照する。
+    merchantBlockNumber:
+      merchantReceipt.isSuccess && merchantReceipt.data?.status === 'success'
+        ? merchantReceipt.data.blockNumber
+        : undefined,
+    // R: 履歴 entry に「submit 時点の merchantAmount/feeAmount」を残すための snapshot。
+    //    呼出元が live state から amount を渡すと gas quote 30s refetch や
+    //    variable-amount UI 編集で receipt 到達時に値が drift する。
+    lastSubmittedParams: lastParamsRef.current,
   };
 }
 

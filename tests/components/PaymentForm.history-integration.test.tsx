@@ -328,7 +328,10 @@ describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
     expect(entry.errorMessage).toBe('user rejected request');
   });
 
-  it('standard fee-error: 単独の standard-fee エラー entry (merchant 着金済を別途記録)', async () => {
+  // R: 修正前は fee-error 時に merchant success が落ちて会計の控えから漏れていた。
+  //    現在は useStandardPayment が merchantBlockNumber を独立 expose し、
+  //    usePaymentHistory が phase==='fee-error' 検知時に merchant 行も補完 append する。
+  it('standard fee-error: merchant 着金 + fee 失敗 の 2 entry が記録される', async () => {
     setURL(`to=${MERCHANT}&token=jpyc&amount=1000&mode=standard`);
     mockHook(useStandardPayment, {
       mutate: vi.fn(),
@@ -343,6 +346,41 @@ describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
       error: new Error('fee tx reverted'),
       merchantTxHash: STD_MERCHANT_TX,
       feeTxHash: STD_FEE_TX,
+      merchantBlockNumber: 77n,
+    });
+
+    render(withIntl(<PaymentForm />));
+
+    await waitFor(() => {
+      expect(loadHistory()).toHaveLength(2);
+    });
+    const loaded = loadHistory();
+    const merchant = loaded.find((e) => e.flow === 'standard-merchant')!;
+    expect(merchant.status).toBe('success');
+    expect(merchant.txHash).toBe(STD_MERCHANT_TX);
+    expect(merchant.blockNumber).toBe('77');
+    const fee = loaded.find((e) => e.flow === 'standard-fee')!;
+    expect(fee.status).toBe('error');
+    expect(fee.txHash).toBe(STD_FEE_TX);
+    expect(fee.errorMessage).toBe('fee tx reverted');
+  });
+
+  it('standard fee-error: merchantBlockNumber 未確定 (例: sign 直後の例外) → fee 失敗行のみ', async () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000&mode=standard`);
+    mockHook(useStandardPayment, {
+      mutate: vi.fn(),
+      retryFee: vi.fn(),
+      phase: 'fee-error',
+      isPending: false,
+      isSuccess: false,
+      isError: true,
+      isFeeError: true,
+      isMerchantError: false,
+      data: undefined,
+      error: new Error('fee write rejected'),
+      merchantTxHash: undefined,
+      feeTxHash: undefined,
+      merchantBlockNumber: undefined,
     });
 
     render(withIntl(<PaymentForm />));
@@ -350,10 +388,7 @@ describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
     await waitFor(() => {
       expect(loadHistory()).toHaveLength(1);
     });
-    const entry = loadHistory()[0];
-    expect(entry.flow).toBe('standard-fee');
-    expect(entry.status).toBe('error');
-    expect(entry.txHash).toBe(STD_FEE_TX);
+    expect(loadHistory()[0].flow).toBe('standard-fee');
   });
 
   it('LocalStorage 生 raw を覗いて schema 互換性を確認 (loadHistory ラウンドトリップ)', async () => {
