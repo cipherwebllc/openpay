@@ -123,4 +123,94 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     expect(JSON.stringify(body)).not.toContain('Hello, paid AI agent');
     expect(body.x402Version).toBeGreaterThanOrEqual(1);
   });
+
+  // -- LocaleSwitcher が決済 3 ルートで実際に locale を切替え、query を維持することを
+  //    本物の browser navigation で検証する。vitest では mock した router.replace の
+  //    引数しか見ないが、ここでは Next の middleware と CSR routing が両方走る。
+
+  test('/ja/pay?to=...&amount=10 → English ボタン → /en/pay (query 維持)', async ({
+    page,
+  }) => {
+    const to = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    await page.goto(`/ja/pay?to=${to}&token=usdc&amount=10`);
+
+    // 初期は日本語 UI (Connect 文言 ja)
+    await expect(
+      page.getByRole('button', { name: /ウォレットを接続してください/ }),
+    ).toBeVisible();
+
+    // LocaleSwitcher の English ボタンを押下
+    await page.getByRole('button', { name: 'English' }).click();
+
+    // URL が /en/pay に切替わり、query (to/token/amount) は丸ごと維持
+    await expect(page).toHaveURL(
+      new RegExp(`/en/pay\\?to=${to}&token=usdc&amount=10$`),
+    );
+    // 英語 UI: PaymentForm の Connect 文言が英語に (messages/en.json btnConnect)
+    await expect(
+      page.getByRole('button', { name: /Connect a wallet/i }),
+    ).toBeVisible();
+    // 金額 header は locale 非依存 (10 USDC) で表示継続 → query 反映確認
+    await expect(page.getByText('10 USDC').first()).toBeVisible();
+  });
+
+  test('/en/checkout?items=... → 日本語ボタン → /ja/checkout (items / order_id 維持)', async ({
+    page,
+  }) => {
+    const to = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    // items は ":" を %3A に encode した URL 形式 (lib/url.ts buildCheckoutPath 仕様)
+    const items = encodeURIComponent('Coffee') + ':2:5.00';
+    const url = `/en/checkout?to=${to}&token=usdc&items=${items}&order_id=ORDER-42`;
+    await page.goto(url);
+
+    await page.getByRole('button', { name: '日本語' }).click();
+
+    // URL は /ja/checkout に変わり、items / order_id 含む全 query を維持
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/ja/checkout\\?to=${to}&token=usdc&items=${items}&order_id=ORDER-42$`,
+      ),
+    );
+    // items の qty=2, price=5.00 → 合計 10 USDC が反映 (query 失われていない証拠)
+    await expect(page.getByText(/10(\.00)? USDC/).first()).toBeVisible();
+  });
+
+  test('/ja/tip/0x...?token=jpyc&name=... → English → /en/tip/...?... (name / preset 維持)', async ({
+    page,
+  }) => {
+    const to = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    const name = encodeURIComponent('山田太郎');
+    await page.goto(`/ja/tip/${to}?token=jpyc&name=${name}&preset=200,800`);
+
+    // 日本語 header: 「山田太郎 さんへチップを送る」
+    await expect(page.getByText(/山田太郎.+チップ/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'English' }).click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/en/tip/${to}\\?token=jpyc&name=${name}&preset=200,800$`),
+    );
+    // 英語 header: name は preserved
+    await expect(page.getByText(/山田太郎/)).toBeVisible();
+    // preset ボタン (200/800) は URL query から復元
+    await expect(page.getByRole('button', { name: '200 JPYC' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '800 JPYC' })).toBeVisible();
+  });
+
+  test('LocaleSwitcher 同一 locale クリックは URL 変化なし (no-op)', async ({
+    page,
+  }) => {
+    const to = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    await page.goto(`/ja/pay?to=${to}&token=usdc&amount=10`);
+    const before = page.url();
+
+    // 現在 locale (ja) の「日本語」ボタンを押下
+    await page.getByRole('button', { name: '日本語' }).click();
+
+    // navigation が起きない (URL 不変、PaymentForm そのまま)
+    await expect(page).toHaveURL(before);
+    await expect(
+      page.getByRole('button', { name: /ウォレットを接続してください/ }),
+    ).toBeVisible();
+  });
 });

@@ -207,3 +207,49 @@ describe('TipEmbedGenerator — 永続化', () => {
     });
   });
 });
+
+describe('TipEmbedGenerator — mobile overflow 構造 (regression)', () => {
+  // grid item の min-width: auto 既定が長い 0x アドレス / tip URL で track を
+  // 押し広げ、スマホ画面を突き抜けていたバグの再発防止。両カラムに min-w-0 が
+  // 付いていることを class assertion で固定する。
+  it('grid 親に lg:grid-cols-2 + 両子カラムが min-w-0 を持つ', async () => {
+    const { container } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    // grid 親: gap-6 と lg:grid-cols-2 を含む div
+    const grid = container.querySelector('div.grid');
+    expect(grid).not.toBeNull();
+    expect(grid?.className).toMatch(/\bgap-6\b/);
+    expect(grid?.className).toMatch(/\blg:grid-cols-2\b/);
+
+    // 直接の子 div (form / preview) が両方とも min-w-0 を持つ
+    const children = Array.from(grid!.children).filter(
+      (el) => el.tagName === 'DIV',
+    );
+    expect(children.length).toBeGreaterThanOrEqual(2);
+    for (const child of children) {
+      expect(child.className).toMatch(/\bmin-w-0\b/);
+    }
+  });
+
+  it('左カラム子は space-y-4 (form 並び) を維持', async () => {
+    const { container } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    const grid = container.querySelector('div.grid');
+    const leftCol = grid?.children[0] as HTMLElement;
+    expect(leftCol.className).toMatch(/\bspace-y-4\b/);
+    expect(leftCol.className).toMatch(/\bmin-w-0\b/);
+  });
+
+  it('右カラム子は preview / URL / snippet の 3 セクションを持つ', async () => {
+    const { container } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    const grid = container.querySelector('div.grid');
+    const rightCol = grid?.children[1] as HTMLElement;
+    expect(rightCol.className).toMatch(/\bmin-w-0\b/);
+    expect(rightCol.className).toMatch(/\bspace-y-4\b/);
+    // h3 が「プレビュー」「URL」「埋め込みコード」の 3 つ存在 (i18n ja の文言)
+    const headings = rightCol.querySelectorAll('h3');
+    expect(headings.length).toBe(3);
+  });
+});

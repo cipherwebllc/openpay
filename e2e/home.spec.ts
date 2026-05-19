@@ -79,6 +79,35 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(page.getByText(/日本居住者のみ/)).toHaveCount(0);
   });
 
+  test('mobile: Tip widget で長い 0x アドレス入力後も viewport 横 overflow が出ない', async ({
+    page,
+  }, testInfo) => {
+    // 報告された regression の実機検証:「ENS / 0x を入力すると下のアドレス + URL が
+    // スマホ画面を突き抜ける」。mobile-safari project (iPhone 14, 390px viewport)
+    // で document.documentElement.scrollWidth <= clientWidth を保証する。
+    // chromium (desktop 1280) では常に余裕があるため意味が薄いので skip。
+    test.skip(
+      testInfo.project.name !== 'mobile-safari',
+      '横 overflow は mobile viewport でのみ視覚的バグになるため mobile-safari でのみ実行',
+    );
+    await page.goto('/ja');
+    await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+    const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
+    await addressInput.fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+
+    // tip URL が描画されるまで待機 (生成完了の signal)
+    await expect(
+      page.getByText(/\/tip\/0x52d4901142e2B5680027da5EB47C86CB02a3cA81/).first(),
+    ).toBeVisible();
+
+    // 実機の viewport より document の scrollWidth が大きいと右にはみ出している
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test('en: offramp セクションは Coinbase + JPYC official、注記/ヒントが両方出る', async ({
     page,
   }) => {
