@@ -124,9 +124,7 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     expect(body.x402Version).toBeGreaterThanOrEqual(1);
   });
 
-  // -- LocaleSwitcher が決済 3 ルートで実際に locale を切替え、query を維持することを
-  //    本物の browser navigation で検証する。vitest では mock した router.replace の
-  //    引数しか見ないが、ここでは Next の middleware と CSR routing が両方走る。
+  // -- LocaleSwitcher: 実 Next routing + middleware で locale 切替 + query 維持を検証
 
   test('/ja/pay?to=...&amount=10 → English ボタン → /en/pay (query 維持)', async ({
     page,
