@@ -82,6 +82,23 @@ describe('AddressInput', () => {
     );
   });
 
+  it('解決成功時のアドレス <span> は break-all を直接持つ (mobile overflow regression)', () => {
+    // span 自体に break-all が無いと、iOS Safari で font-mono 切替時に親 <p> の
+    // word-break が継承されず 0x アドレスが viewport を突き抜けるバグの再発を防ぐ。
+    mockHook(useResolveAddress, {
+      data: {
+        address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        name: 'vitalik.eth',
+      },
+      isFetching: false,
+      error: null,
+    });
+    render(<AddressInput value="vitalik.eth" onChange={() => {}} />);
+    const span = screen.getByText('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+    expect(span.tagName).toBe('SPAN');
+    expect(span.className).toMatch(/\bbreak-all\b/);
+  });
+
   it('解決失敗 → エラー文言表示 + onResolved(null)', () => {
     const onResolved = vi.fn();
     mockHook(useResolveAddress, {

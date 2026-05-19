@@ -11,10 +11,20 @@ vi.mock('next/navigation', () => ({
   usePathname: () => pathname(),
 }));
 
+// LocaleSwitcher は click 時に `window.location.search` を読む (SSG 維持のため
+// useSearchParams を避けている)。jsdom の window.location は writable なので
+// `?foo=bar` を直接代入してテスト。
+function setSearch(value: string): void {
+  // jsdom: window.location.search は assignable な property
+  window.history.replaceState(null, '', `${window.location.pathname}${value}`);
+}
+
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // 既定は query 無し。query 付きの動作を確認するケースだけ setSearch で上書き。
+  setSearch('');
 });
 
 describe('LocaleSwitcher', () => {
@@ -69,6 +79,32 @@ describe('LocaleSwitcher', () => {
     renderWithIntl(<LocaleSwitcher />, { locale: 'ja' });
     await user.click(screen.getByRole('button', { name: /English/ }));
     expect(replace).toHaveBeenCalledWith('/en/pay');
+  });
+
+  it('search param が付いている path → query を維持して別 locale へ replace', async () => {
+    // /ja/pay?to=0xABC&token=jpyc で「English」を押すと /en/pay?to=0xABC&token=jpyc
+    // に飛ぶ。query が金額・宛先 (PayParams) を持つため落とすと別ページに飛ぶに等しい。
+    pathname.mockReturnValue('/ja/pay');
+    setSearch('?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=jpyc');
+    const user = userEvent.setup();
+    renderWithIntl(<LocaleSwitcher />, { locale: 'ja' });
+    await user.click(screen.getByRole('button', { name: /English/ }));
+    expect(replace).toHaveBeenCalledWith(
+      '/en/pay?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=jpyc',
+    );
+  });
+
+  it('checkout の長い query (items / order_id / webhook) も維持', async () => {
+    pathname.mockReturnValue('/en/checkout');
+    setSearch(
+      '?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=usdc&items=Coffee%3A1%3A5.00&order_id=ORDER-42',
+    );
+    const user = userEvent.setup();
+    renderWithIntl(<LocaleSwitcher />, { locale: 'en' });
+    await user.click(screen.getByRole('button', { name: /日本語/ }));
+    expect(replace).toHaveBeenCalledWith(
+      '/ja/checkout?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=usdc&items=Coffee%3A1%3A5.00&order_id=ORDER-42',
+    );
   });
 
   it('aria-label にラベル + locale 名が入る (a11y)', () => {

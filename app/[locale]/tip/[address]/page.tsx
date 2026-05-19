@@ -3,6 +3,7 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
+import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { TipForm } from '@/components/TipForm';
 import {
   parseTipParams,
@@ -33,6 +34,12 @@ export default async function TipPage({
 
   return (
     <main className="mx-auto w-full max-w-md px-3 py-4">
+      {/* R: Tip viewer はファンが偶発的に到達するため、Accept-Language で言語が
+              決まるだけだと「英語で広報したのに日本語表示」になる。明示切替を提供。
+              色付き header の上に小さく右寄せで置き、テーマカラーと衝突させない。 */}
+      <div className="mb-3 flex justify-end">
+        <LocaleSwitcher />
+      </div>
       {parsed.ok ? (
         <TipForm params={parsed.params} />
       ) : (

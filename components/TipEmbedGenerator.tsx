@@ -129,8 +129,11 @@ export function TipEmbedGenerator() {
   const defaultPresetsCsv = DEFAULT_TIP_PRESETS[settings.token].join(',');
 
   return (
+    // R: grid item の `min-width: auto` 既定は子の min-content。`<AddressInput>` の
+    //    解決後 0x アドレスや tip URL の long string が min-w を押し広げ、mobile で
+    //    track が viewport を超えて overflow する。`min-w-0` で shrink を許可する。
     <div className="grid gap-6 lg:grid-cols-2">
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <Field label={t('receiverLabel')}>
           <AddressInput
             value={settings.receiver}
@@ -324,7 +327,7 @@ export function TipEmbedGenerator() {
         </Field>
       </div>
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-slate-700">
             {t('previewTitle')}

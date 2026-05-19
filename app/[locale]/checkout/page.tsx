@@ -5,6 +5,7 @@ import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { CheckoutForm } from '@/components/CheckoutForm';
+import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { env } from '@/lib/env';
 import {
   parseCheckoutParams,
@@ -35,13 +36,16 @@ export default async function CheckoutPage({
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-md px-4 py-6 sm:py-8">
-      <header className="mb-4 flex items-center justify-between text-xs text-slate-500">
+      <header className="mb-4 flex items-center justify-between gap-2 text-xs text-slate-500">
         <Link href="/" className="hover:text-slate-700" prefetch={false}>
           ← OpenPay
         </Link>
-        <span className="rounded-full bg-slate-200 px-2 py-1 font-mono">
-          {env.networkEnv}
-        </span>
+        <div className="flex items-center gap-2">
+          <LocaleSwitcher />
+          <span className="rounded-full bg-slate-200 px-2 py-1 font-mono">
+            {env.networkEnv}
+          </span>
+        </div>
       </header>
 
       {parsed.ok ? (

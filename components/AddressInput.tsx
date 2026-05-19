@@ -53,9 +53,16 @@ export function AddressInput({
         <p className="mt-1 text-xs text-red-600">{query.error.message}</p>
       )}
       {looksLikeName && query.data?.name && (
-        <p className="mt-1 break-all text-xs text-emerald-700">
+        // R: 0x アドレス (40 hex) は単語境界を持たない長文字列で、親 <p> の
+        //    `break-all` だけでは iOS Safari が font-family 切替 (mono span)
+        //    時に word-break を継承しきれずスマホ画面を突き抜けることがある。
+        //    span に直接 `break-all` を付け、加えて `[overflow-wrap:anywhere]`
+        //    で modern 仕様にも従わせる (Tailwind に該当 utility が無いため arbitrary)。
+        <p className="mt-1 break-all text-xs text-emerald-700 [overflow-wrap:anywhere]">
           ✓ {query.data.name} →{' '}
-          <span className="font-mono">{query.data.address}</span>
+          <span className="break-all font-mono [overflow-wrap:anywhere]">
+            {query.data.address}
+          </span>
         </p>
       )}
     </div>
