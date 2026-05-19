@@ -47,6 +47,27 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByText(/Tip URL が不正/)).toBeVisible();
   });
 
+  test('iframe size (380×640) で LocaleSwitcher + content が overflow しない', async ({
+    page,
+  }) => {
+    // TipEmbedGenerator が生成する iframe は 380×640 で固定 (primary embed UX)。
+    // 新規追加の LocaleSwitcher が狭い枠で wrap / overflow を起こさないことを
+    // viewport で smoke する。
+    await page.setViewportSize({ width: 380, height: 640 });
+    await page.goto(`/ja/tip/${TO}?token=jpyc`);
+    // LocaleSwitcher が visible + clickable (aria-label = "言語: 日本語" 形式)
+    await expect(page.getByRole('button', { name: /日本語/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /English/ })).toBeVisible();
+    // 主要 UI も同時に visible (switcher が breakdown を押し下げて隠していない)
+    await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
+    // 横 overflow なし
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test('英語ロケール (/en/tip) でも動作', async ({ page }) => {
     await page.goto(`/en/tip/${TO}?token=jpyc`);
     // <title>OpenPay Tip</title> も match するため main 配下に scope する

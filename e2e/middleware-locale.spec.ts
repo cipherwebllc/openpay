@@ -154,7 +154,7 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
 
   test('/en/checkout?items=... → 日本語ボタン → /ja/checkout (items / order_id 維持)', async ({
     page,
-  }) => {
+  }, testInfo) => {
     const to = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
     // items は ":" を %3A に encode した URL 形式 (lib/url.ts buildCheckoutPath 仕様)
     const items = encodeURIComponent('Coffee') + ':2:5.00';
@@ -171,6 +171,14 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     );
     // items の qty=2, price=5.00 → 合計 10 USDC が反映 (query 失われていない証拠)
     await expect(page.getByText(/10(\.00)? USDC/).first()).toBeVisible();
+    // mobile viewport で header (back-link + LocaleSwitcher + env badge) が横 overflow しない
+    if (testInfo.project.name === 'mobile-safari') {
+      const overflow = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+    }
   });
 
   test('/ja/tip/0x...?token=jpyc&name=... → English → /en/tip/...?... (name / preset 維持)', async ({

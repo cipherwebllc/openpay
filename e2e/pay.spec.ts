@@ -54,6 +54,23 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText('0.05 USDC')).toBeVisible();
   });
 
+  test('mobile (iPhone 14 / 390px) header で switcher + env badge + back-link が overflow しない', async ({
+    page,
+  }, testInfo) => {
+    // /pay header は back-link + LocaleSwitcher + env badge を flex justify-between で並べる。
+    // 狭い viewport で wrap / overflow が起きないことを担保。
+    test.skip(testInfo.project.name !== 'mobile-safari', 'mobile viewport 専用');
+    await page.goto(`/ja/pay?to=${TO}&token=usdc&amount=10`);
+    await expect(page.getByRole('link', { name: /OpenPay/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /日本語/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /English/ })).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test('mode=gasless (default) → 1.0% fee + ネットワーク手数料見積行が出る', async ({
     page,
   }) => {
