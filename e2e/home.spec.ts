@@ -82,26 +82,56 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('mobile: Tip widget で ENS (vitalik.eth) 解決後の 0x display も overflow しない (実 bug シナリオ)', async ({
     page,
   }, testInfo) => {
-    // 報告された元の症状の実機再現: ENS 入力 → 解決後の 0x が viewport を突き抜ける。
-    // useResolveAddress は publicnode に eth_call、unreachable 環境は test.skip。
+    // ENS mainnet RPC (publicnode) への eth_call を deterministic mock で置換し、
+    // CI offline でも常に実行可能にする。実 viem コード (lib/resolveAddress.ts) +
+    // wagmi state + AddressInput 描画は本物が走り、network 層だけ canned response。
     test.skip(testInfo.project.name !== 'mobile-safari', 'mobile viewport 専用');
+
+    // Universal Resolver.resolve(name="vitalik.eth", data=addr(node)) の応答。
+    // ABI encoding (bytes result, address resolver):
+    //   offset(64) || resolver(0x231b0e..8e63) || bytes-length(32) || addr(vitalik)
+    // 実値は probe e2e で publicnode から一度キャプチャ済。
+    const vitalikEnsResponse =
+      '0x0000000000000000000000000000000000000000000000000000000000000040' +
+      '000000000000000000000000231b0ee14048e9dccd1d247744d114a4eb5e8e63' +
+      '0000000000000000000000000000000000000000000000000000000000000020' +
+      '000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045';
+
+    await page.route('**/*publicnode*/**', async (route) => {
+      const body = route.request().postData()
+        ? JSON.parse(route.request().postData()!)
+        : null;
+      if (body?.method === 'eth_call') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: vitalikEnsResponse,
+          }),
+        });
+        return;
+      }
+      // それ以外 (eth_chainId 等) は素通し。viem 2.x の getEnsAddress は eth_call 1 本のみ。
+      await route.continue();
+    });
+
     await page.goto('/ja');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
-    const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
-    await addressInput.fill('vitalik.eth');
+    await page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/).fill('vitalik.eth');
 
-    const resolved = await page
-      .getByText(/✓ vitalik\.eth/)
-      .waitFor({ state: 'visible', timeout: 10_000 })
-      .then(() => true)
-      .catch(() => false);
-    test.skip(!resolved, 'ENS RPC (publicnode) 到達不能');
+    await expect(page.getByText(/✓ vitalik\.eth/)).toBeVisible({ timeout: 5_000 });
 
     const addressSpan = page.getByText(/^0x[a-fA-F0-9]{40}$/).first();
     await expect(addressSpan).toBeVisible();
+    // 実 vitalik.eth address が描画されていることを assertion で固定 (mock 妥当性確認)
+    await expect(addressSpan).toHaveText(
+      '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+    );
 
-    // jsdom では Tailwind 生成 CSS が評価されないため class 名しか見られない。
     // 実 WebKit の computed style で word-break: break-all が効いていることを保証。
+    // jsdom では Tailwind 生成 CSS が評価されないため class 名しか見られない。
     const wordBreak = await addressSpan.evaluate(
       (el) => window.getComputedStyle(el).wordBreak,
     );
