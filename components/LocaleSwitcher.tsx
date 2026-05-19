@@ -12,24 +12,15 @@ export function LocaleSwitcher() {
 
   function switchTo(next: Locale) {
     if (next === current) return;
-    // /ja/foo/bar → /en/foo/bar に置き換え。先頭の /<locale> セグメントを差替。
-    // R: search param (例: /pay?to=0xABC&token=jpyc) を維持する。Next 標準の
-    //    usePathname は pathname のみ返し、router.replace に検索文字列を含めない
-    //    限り query が失われる。決済 (pay/checkout) では URL の query が金額・宛先
-    //    そのものなので、欠落させると別ページに飛ばすに等しい regression になる。
-    //    `useSearchParams` を使うと static page で Suspense boundary を要求され、
-    //    build が落ちる (CSR bailout)。click は必ず browser 上で起きるため、
-    //    `window.location.search` を click 時に読めば subscribe 不要で SSG も維持できる。
+    // 決済ページの query は金額・宛先そのもの (PayParams) なので、locale 切替で
+    // 落とすと別ページ送りに等しい regression。useSearchParams は SSG ページで
+    // CSR bailout を起こすため、click 時に window.location.search を直接読む。
     const segments = pathname.split('/');
-    let nextPath: string;
-    if (segments.length >= 2 && (LOCALES as readonly string[]).includes(segments[1])) {
-      segments[1] = next;
-      nextPath = segments.join('/');
-    } else {
-      nextPath = `/${next}${pathname}`;
-    }
-    const search = window.location.search;
-    router.replace(search ? `${nextPath}${search}` : nextPath);
+    const hasLocalePrefix = (LOCALES as readonly string[]).includes(segments[1] ?? '');
+    const nextPath = hasLocalePrefix
+      ? [segments[0], next, ...segments.slice(2)].join('/')
+      : `/${next}${pathname}`;
+    router.replace(`${nextPath}${window.location.search}`);
   }
 
   return (

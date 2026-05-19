@@ -11,11 +11,9 @@ vi.mock('next/navigation', () => ({
   usePathname: () => pathname(),
 }));
 
-// LocaleSwitcher は click 時に `window.location.search` を読む (SSG 維持のため
-// useSearchParams を避けている)。jsdom の window.location は writable なので
-// `?foo=bar` を直接代入してテスト。
+// LocaleSwitcher は click 時に window.location.search を読むため、history API
+// で URL を書き換えて jsdom に反映させる (search を直接代入すると read-only)。
 function setSearch(value: string): void {
-  // jsdom: window.location.search は assignable な property
   window.history.replaceState(null, '', `${window.location.pathname}${value}`);
 }
 
@@ -23,7 +21,6 @@ import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // 既定は query 無し。query 付きの動作を確認するケースだけ setSearch で上書き。
   setSearch('');
 });
 
@@ -82,8 +79,7 @@ describe('LocaleSwitcher', () => {
   });
 
   it('search param が付いている path → query を維持して別 locale へ replace', async () => {
-    // /ja/pay?to=0xABC&token=jpyc で「English」を押すと /en/pay?to=0xABC&token=jpyc
-    // に飛ぶ。query が金額・宛先 (PayParams) を持つため落とすと別ページに飛ぶに等しい。
+    // query は PayParams (金額・宛先) を表すので落とすと別ページ送りに等しい
     pathname.mockReturnValue('/ja/pay');
     setSearch('?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=jpyc');
     const user = userEvent.setup();

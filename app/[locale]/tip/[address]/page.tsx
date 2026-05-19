@@ -34,9 +34,7 @@ export default async function TipPage({
 
   return (
     <main className="mx-auto w-full max-w-md px-3 py-4">
-      {/* R: Tip viewer はファンが偶発的に到達するため、Accept-Language で言語が
-              決まるだけだと「英語で広報したのに日本語表示」になる。明示切替を提供。
-              色付き header の上に小さく右寄せで置き、テーマカラーと衝突させない。 */}
+      {/* fan は Accept-Language で言語が決まるため、明示切替を上部に出す */}
       <div className="mb-3 flex justify-end">
         <LocaleSwitcher />
       </div>
