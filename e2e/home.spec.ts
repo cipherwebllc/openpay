@@ -79,6 +79,55 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(page.getByText(/日本居住者のみ/)).toHaveCount(0);
   });
 
+  test('mobile: Tip widget で ENS (vitalik.eth) 解決後の 0x display も overflow しない (実 bug シナリオ)', async ({
+    page,
+  }, testInfo) => {
+    // 報告された元の症状そのもの:「ENS を入力すると下のアドレスが改行されずに
+    // 突き抜ける」を実機 viewport で再現検証。useResolveAddress は viem 経由で
+    // ethereum-rpc.publicnode.com に eth_call を投げる。publicnode が unreachable
+    // な環境では test.skip して全体を落とさない (CI offline 配慮)。
+    test.skip(
+      testInfo.project.name !== 'mobile-safari',
+      '横 overflow は mobile viewport でのみ視覚的バグになるため mobile-safari でのみ実行',
+    );
+    await page.goto('/ja');
+    await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+    const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
+    await addressInput.fill('vitalik.eth');
+
+    // 解決完了 (✓ プレフィックス + 0x address が同じ <p> に並ぶ) を待つ。
+    // 10s 以内に成功表示が出なければ RPC unreachable と判定して skip。
+    const resolvedLine = page.getByText(/✓ vitalik\.eth/);
+    const resolved = await resolvedLine
+      .waitFor({ state: 'visible', timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    test.skip(
+      !resolved,
+      'ENS mainnet RPC (publicnode) 到達不能でこのテストを skip',
+    );
+
+    // 解決済 address (0x で始まる 42 字) が同一 <p> 内に visible なことを保証
+    const addressSpan = page.getByText(/^0x[a-fA-F0-9]{40}$/).first();
+    await expect(addressSpan).toBeVisible();
+
+    // jsdom では Tailwind の生成 CSS が解釈されず class 名検証しかできない。
+    // 実 browser (mobile-safari engine) で getComputedStyle 経由で word-break
+    // が break-all として効いていることを assert。Tailwind config が壊れたり、
+    // CSS purge が誤動作した場合に検出する。
+    const wordBreak = await addressSpan.evaluate(
+      (el) => window.getComputedStyle(el).wordBreak,
+    );
+    expect(wordBreak).toBe('break-all');
+
+    // viewport 横 overflow チェック (元 bug の本丸)
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test('mobile: Tip widget で長い 0x アドレス入力後も viewport 横 overflow が出ない', async ({
     page,
   }, testInfo) => {
