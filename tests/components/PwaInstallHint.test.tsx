@@ -23,16 +23,17 @@ function setUserAgent(ua: string) {
   });
 }
 
-function setIOSDocumentTouch() {
-  // ipad UA detect 用に ontouchend を document に生やす。
-  Object.defineProperty(document, 'ontouchend', {
-    value: null,
+function setMaxTouchPoints(n: number) {
+  // iPad は navigator.maxTouchPoints=5、純 Mac は 0。jsdom default は undefined
+  // なので defineProperty で明示 set する (Object.assign は read-only で失敗)。
+  Object.defineProperty(window.navigator, 'maxTouchPoints', {
+    value: n,
     configurable: true,
   });
 }
 
-function unsetIOSDocumentTouch() {
-  delete (document as unknown as Record<string, unknown>).ontouchend;
+function unsetMaxTouchPoints() {
+  delete (window.navigator as unknown as Record<string, unknown>).maxTouchPoints;
 }
 
 function withIntl(node: ReactNode) {
@@ -44,7 +45,7 @@ function withIntl(node: ReactNode) {
 }
 
 beforeEach(() => {
-  unsetIOSDocumentTouch();
+  unsetMaxTouchPoints();
 });
 
 describe('PwaInstallHint', () => {
@@ -70,12 +71,12 @@ describe('PwaInstallHint', () => {
     expect(screen.getByText(/アイコンタップだけで/)).toBeInTheDocument();
   });
 
-  it('iPad (Macintosh UA + ontouchend) も iOS 扱い', async () => {
+  it('iPad (Macintosh UA + maxTouchPoints=5) も iOS 扱い', async () => {
     setupMatchMedia(false);
     setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
     );
-    setIOSDocumentTouch();
+    setMaxTouchPoints(5);
     const { PwaInstallHint } = await import('@/components/PwaInstallHint');
     render(withIntl(<PwaInstallHint />));
     expect(screen.getByText(/Safari の共有メニュー/)).toBeInTheDocument();
@@ -186,6 +187,111 @@ describe('PwaInstallHint', () => {
     const { PwaInstallHint } = await import('@/components/PwaInstallHint');
     const { container } = render(withIntl(<PwaInstallHint />));
     fireEvent.click(screen.getByRole('button', { name: 'ヒントを閉じる' }));
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('Macintosh UA + maxTouchPoints=0 (=デスクトップ Mac) → other', async () => {
+    // 純デスクトップ Mac は maxTouchPoints=0。iPadOS 13+ の Mac-like UA と区別する境界。
+    setupMatchMedia(false);
+    setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+    );
+    setMaxTouchPoints(0);
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    render(withIntl(<PwaInstallHint />));
+    expect(screen.getByText(/対応モバイル端末/)).toBeInTheDocument();
+    expect(screen.queryByText(/Safari の共有メニュー/)).toBeNull();
+  });
+
+  it('Macintosh UA + maxTouchPoints=1 (境界値、=タッチパッドの誤検出回避) → other', async () => {
+    // iPadOS は 5、Mac trackpad はそもそも maxTouchPoints を返さない (undefined) が
+    // 1 を返す edge ケースも実装が安全側に振れることを担保 (> 1 の strict 不等号)。
+    setupMatchMedia(false);
+    setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+    );
+    setMaxTouchPoints(1);
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    render(withIntl(<PwaInstallHint />));
+    expect(screen.getByText(/対応モバイル端末/)).toBeInTheDocument();
+  });
+
+  it('beforeinstallprompt が 2 度発火 → 後で来た event が現在の prompt として置換', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (Linux; Android 14)');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    render(withIntl(<PwaInstallHint />));
+
+    const prompt1 = vi.fn().mockResolvedValue(undefined);
+    const prompt2 = vi.fn().mockResolvedValue(undefined);
+    const e1 = Object.assign(new Event('beforeinstallprompt'), {
+      prompt: prompt1,
+      userChoice: Promise.resolve({ outcome: 'dismissed' as const }),
+      preventDefault: vi.fn(),
+    });
+    const e2 = Object.assign(new Event('beforeinstallprompt'), {
+      prompt: prompt2,
+      userChoice: Promise.resolve({ outcome: 'dismissed' as const }),
+      preventDefault: vi.fn(),
+    });
+    await act(async () => {
+      window.dispatchEvent(e1);
+    });
+    await act(async () => {
+      window.dispatchEvent(e2);
+    });
+    // クリック時には最新 (e2) の prompt が呼ばれる
+    const btn = await screen.findByRole('button', {
+      name: 'ホーム画面にインストール',
+    });
+    await act(async () => {
+      fireEvent.click(btn);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(prompt1).not.toHaveBeenCalled();
+    expect(prompt2).toHaveBeenCalledTimes(1);
+  });
+
+  it('iOS dismissed 状態の永続性: 一度 × を押すと再 render 後も hint は隠れたまま', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (iPhone)');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    const { container, rerender } = render(withIntl(<PwaInstallHint />));
+    expect(container.firstChild).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'ヒントを閉じる' }));
+    expect(container).toBeEmptyDOMElement();
+    // 再 render しても state は維持されている (component インスタンス継続)
+    rerender(withIntl(<PwaInstallHint />));
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('beforeinstallprompt 受領前に appinstalled が来ても hint を畳む', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (Linux; Android 14)');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    const { container } = render(withIntl(<PwaInstallHint />));
+    expect(container.firstChild).not.toBeNull();
+    // beforeinstallprompt 未受領のまま appinstalled だけ来た edge ケース
+    // (Chrome は通常 beforeinstallprompt → install → appinstalled の順だが、
+    // PWA 既インストール + 別経路 install の場合の preventive guard)
+    await act(async () => {
+      window.dispatchEvent(new Event('appinstalled'));
+    });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('standalone モード遷移中の race: dismissed と isStandalone が同時 true でも安全に null 返却', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (iPhone)');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    const { container } = render(withIntl(<PwaInstallHint />));
+    // 1: × でローカル dismiss
+    fireEvent.click(screen.getByRole('button', { name: 'ヒントを閉じる' }));
+    expect(container).toBeEmptyDOMElement();
+    // 2: その後 standalone matchMedia が true に転じても (PWA に install 完了)
+    // 既に null なので影響なし (= side-effect なし)
+    setupMatchMedia(true);
     expect(container).toBeEmptyDOMElement();
   });
 });

@@ -246,3 +246,170 @@ describe('useQrScanner', () => {
     await waitFor(() => expect(result.current.state.status).toBe('scanning'));
   });
 });
+
+describe('useQrScanner: lifecycle / 並行性 edge', () => {
+  it('stop → start で scanner が再生成される (再利用フロー)', async () => {
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(ctorCalls.length).toBe(1);
+    act(() => {
+      result.current.stop();
+    });
+    expect(stopMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(ctorCalls.length).toBe(2);
+    expect(result.current.state.status).toBe('scanning');
+  });
+
+  it('stop() を 2 回連続呼んでも idempotent (2 度目は scanner 不在で no-op)', async () => {
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    act(() => {
+      result.current.stop();
+      result.current.stop();
+    });
+    expect(stopMock).toHaveBeenCalledTimes(1);
+    expect(destroyMock).toHaveBeenCalledTimes(1);
+    expect(result.current.state.status).toBe('idle');
+  });
+
+  it('start 中 (await scanner.start() resolve 前) に並行 start 呼出 → 2 つ目は no-op', async () => {
+    // scanner.start は実 getUserMedia なので resolve が遅延する。その間に
+    // ユーザがダブルクリック等で start を再発火しても scanner instance が
+    // 2 つ作られない (camera stream の二重取得を構造的に防ぐ) ことを担保。
+    let resolveStart: (() => void) | undefined;
+    startMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((res) => {
+          resolveStart = res;
+        }),
+    );
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    // 1 つ目: scanner instance が ref に積まれた直後 (status: starting) で並行発火
+    let firstResolved = false;
+    const firstPromise = result.current.start().then(() => {
+      firstResolved = true;
+    });
+    // 2 つ目: instance が積まれているので no-op で即 resolve
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(ctorCalls.length).toBe(1);
+    expect(firstResolved).toBe(false);
+    // 1 つ目を解決して cleanup
+    await act(async () => {
+      resolveStart!();
+      await firstPromise;
+    });
+    expect(result.current.state.status).toBe('scanning');
+  });
+
+  it('非 DOMException かつ 非 Error の rejection (string) → error state でメッセージ化', async () => {
+    startMock.mockRejectedValueOnce('plain-string-error');
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error.message).toBe('plain-string-error');
+    }
+  });
+
+  it('DOMException で message 空 → error.name を message にフォールバック', async () => {
+    // WebKit の一部 build は NotReadableError 等で message が空のことがある。
+    // classifyMediaError は message が空なら name を採用するはず。
+    const ex = new DOMException('', 'NotReadableError');
+    startMock.mockRejectedValueOnce(ex);
+    const { result } = renderHook(() => useQrScanner(makeVideoRef(), () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error.message).toBe('NotReadableError');
+    }
+  });
+
+  it('decode 後 stopOnDecode=true で scanner 不在 → 2 度目の decode 呼出は何も起きない (instance 既 destroy)', async () => {
+    // qr-scanner は内部で次フレーム scan を回しているが、destroy 後の onDecode 流入は
+    // 起きない設計。理論上は 1 度しか呼ばれないが、もし testing 上重複させた時に
+    // crash しないことを check (defensive guard 確認、実装変更時の回帰検知)。
+    const onDecode = vi.fn();
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, onDecode));
+    await act(async () => {
+      await result.current.start();
+    });
+    const cb = ctorCalls[0].onDecode;
+    act(() => {
+      cb({ data: 'first' });
+    });
+    expect(onDecode).toHaveBeenCalledTimes(1);
+    expect(result.current.state.status).toBe('idle');
+    // 2 回目: scannerRef は null になっているので stop は呼ばれない、onDecodeRef は
+    // そのまま呼ばれる (理論上ここで data が漏れても上位 ScanShell が再 push しても
+    // 同 href なら冪等)。callbacks 自体は invoke される。
+    act(() => {
+      cb({ data: 'second' });
+    });
+    expect(onDecode).toHaveBeenCalledTimes(2);
+  });
+
+  it('SecurityError (permission の別 variant) → permission-denied', async () => {
+    startMock.mockRejectedValueOnce(
+      new DOMException('blocked by feature policy', 'SecurityError'),
+    );
+    const { result } = renderHook(() => useQrScanner(makeVideoRef(), () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('permission-denied');
+  });
+
+  it('OverconstrainedError (要件と camera 不一致) → no-camera', async () => {
+    startMock.mockRejectedValueOnce(
+      new DOMException('constraints', 'OverconstrainedError'),
+    );
+    const { result } = renderHook(() => useQrScanner(makeVideoRef(), () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('no-camera');
+  });
+
+  it('TypeError (DOMException ではない Error サブクラス) → error', async () => {
+    startMock.mockRejectedValueOnce(new TypeError('something wrong'));
+    const { result } = renderHook(() => useQrScanner(makeVideoRef(), () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error.message).toBe('something wrong');
+      expect(result.current.state.error).toBeInstanceOf(TypeError);
+    }
+  });
+
+  it('unmount 中に scanner が active でも cleanup が 1 回だけ走る (multi-unmount なし)', async () => {
+    const ref = makeVideoRef();
+    const { result, unmount } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    unmount();
+    // unmount 後 cleanup は 1 度のみ
+    expect(stopMock).toHaveBeenCalledTimes(1);
+    expect(destroyMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -45,7 +45,8 @@ function decomposePath(pathname: string): DecomposedPath | null {
 
   // 先頭が locale なら 1 segment 進める (path 上の locale は捨て、出力 href は
   // 呼出側の currentLocale を採用する確定形 path)。
-  const start = isLocale(segments[0] ?? '') ? 1 : 0;
+  // segments は trimmed.length>0 guard により必ず length>=1 (string 要素)。
+  const start = isLocale(segments[0]) ? 1 : 0;
   const head = segments[start];
   const rest = segments.length - start;
 

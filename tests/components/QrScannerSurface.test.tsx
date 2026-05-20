@@ -158,4 +158,141 @@ describe('QrScannerSurface', () => {
     ) as HTMLInputElement;
     expect(input.value).toBe('https://open-pay.jp/pay?to=0xCAFE');
   });
+
+  it('Paste: clipboard API 自体が無い環境 (HTTP 等) → 例外を throw せず no-op', async () => {
+    // Safari は HTTPS 以外で navigator.clipboard を expose しない。defensive guard が
+    // 実際に機能していることを確認 (空の input + 例外なし)。
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: undefined,
+      configurable: true,
+    });
+    renderWithIntl(<QrScannerSurface onScanned={() => {}} />);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'クリップボードから貼り付け' }),
+      );
+      await Promise.resolve();
+    });
+    const input = screen.getByLabelText(
+      'OpenPay の URL (https://open-pay.jp/pay?…)',
+    ) as HTMLInputElement;
+    expect(input.value).toBe('');
+  });
+
+  it('Paste: clipboard.readText が空文字 resolve → input 不変', async () => {
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { readText: vi.fn().mockResolvedValue('') },
+      configurable: true,
+    });
+    renderWithIntl(<QrScannerSurface onScanned={() => {}} />);
+    // 既存の値を input に入れて、paste が空を返したときに上書きしないことを確認
+    const input = screen.getByLabelText(
+      'OpenPay の URL (https://open-pay.jp/pay?…)',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'pre-existing' } });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'クリップボードから貼り付け' }),
+      );
+      await Promise.resolve();
+    });
+    expect(input.value).toBe('pre-existing');
+  });
+
+  it('Paste: clipboard.readText が reject (DOMException など) → 例外を握りつぶし input 不変', async () => {
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: {
+        readText: vi.fn().mockRejectedValue(
+          new DOMException('not focused', 'NotAllowedError'),
+        ),
+      },
+      configurable: true,
+    });
+    renderWithIntl(<QrScannerSurface onScanned={() => {}} />);
+    const input = screen.getByLabelText(
+      'OpenPay の URL (https://open-pay.jp/pay?…)',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'keep' } });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'クリップボードから貼り付け' }),
+      );
+      // microtask 2 周 (rejection → catch)
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(input.value).toBe('keep');
+  });
+
+  it('Enter キーで form submit → onScanned が呼ばれる (button click と等価)', async () => {
+    const onScanned = vi.fn();
+    renderWithIntl(<QrScannerSurface onScanned={onScanned} />);
+    const input = screen.getByLabelText(
+      'OpenPay の URL (https://open-pay.jp/pay?…)',
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { value: 'https://open-pay.jp/pay?to=0xAAA' },
+    });
+    // form 内の input で Enter → form submit
+    const form = input.closest('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    expect(onScanned).toHaveBeenCalledWith('https://open-pay.jp/pay?to=0xAAA');
+  });
+
+  it('Enter キー submit + input 空白のみ → onScanned は呼ばれない (trim 後 length 0 で early return)', async () => {
+    // button は disabled だが form submit は keyboard / programmatic で来得る。
+    // handleManualSubmit 内の guard が機能していることを確認。
+    const onScanned = vi.fn();
+    renderWithIntl(<QrScannerSurface onScanned={onScanned} />);
+    const input = screen.getByLabelText(
+      'OpenPay の URL (https://open-pay.jp/pay?…)',
+    ) as HTMLInputElement;
+    // disabled 状態を超えて submit するため form を直接 submit
+    fireEvent.change(input, { target: { value: '   ' } });
+    const form = input.closest('form');
+    fireEvent.submit(form!);
+    expect(onScanned).not.toHaveBeenCalled();
+  });
+
+  it('scanning 状態 → 「カメラを起動」ボタンが消え、video が aspect-square で表示', async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<QrScannerSurface onScanned={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'カメラを起動' }));
+    await waitFor(() => expect(ctorCalls.length).toBe(1));
+    // ボタンが消える
+    expect(
+      screen.queryByRole('button', { name: 'カメラを起動' }),
+    ).toBeNull();
+    // video が aspect-square class を持つ (scanning state の視覚マーカー)
+    const video = document.querySelector('video');
+    expect(video?.className).toContain('aspect-square');
+  });
+
+  it('starting 状態 → 「カメラを起動しています…」と「カメラを起動」が同時に出ない', async () => {
+    // scanner.start を遅延させて starting の transient state を観測
+    let resolveStart!: () => void;
+    startMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((r) => {
+          resolveStart = r;
+        }),
+    );
+    const user = userEvent.setup();
+    renderWithIntl(<QrScannerSurface onScanned={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'カメラを起動' }));
+    // starting 中
+    await waitFor(() =>
+      expect(
+        screen.getByText('カメラを起動しています…'),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'カメラを起動' }),
+    ).toBeNull();
+    // 終了させて副作用なし
+    await act(async () => {
+      resolveStart();
+    });
+  });
 });
