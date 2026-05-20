@@ -59,7 +59,25 @@ playwright mobile-safari emulation で再現しない iOS 固有 quirk がある
 iOS Safari は `font-family` 切替時に親の `word-break` 継承が不安定で、emulation
 (playwright WebKit) では再現しないことが LARP audit で確認済 (commit `74647fe` 参照)。
 
-### 3.4 LocaleSwitcher の手動回帰
+### 3.4 /scan (Pre-connect PWA, alpha) の実機 QA
+
+playwright で emulation 不能な carbon 部分:
+
+1. `https://open-pay.jp/ja/scan` を iPhone Safari で開く
+2. WalletConnect で wallet を接続 → 緑 dot + shortAddress 表示
+3. Safari 共有メニュー → 「ホーム画面に追加」 → home から PWA を再起動
+4. PWA 内で `/ja/scan` が `display-mode: standalone` で開く (install hint が消える)
+5. `Start camera` をタップ → camera permission 許可 → live preview が出る
+6. 別端末で店舗 QR を表示 → スキャン → `/ja/pay?...` へ即遷移 + wallet 接続継続
+7. (Android Chrome の場合) `beforeinstallprompt` → 「ホーム画面にインストール」が出る
+8. 外部 origin の QR (例: 任意のサイトの URL) を読んで「OpenPay 以外」banner が出ること
+
+計測:
+- `scan.deeplink` (kind=pay/tip/checkout) breadcrumb 件数 / 週 ≥ 10
+- `scan.camera_denied` 率 < 30%
+- `scan.external_qr` / `scan.eip681_rejected` / `scan.unrecognized_qr` の異常値監視
+
+### 3.5 LocaleSwitcher の手動回帰
 
 各ページで「日本語 / English」ボタンを切替えて URL + 表示変化を目視:
 
@@ -68,6 +86,7 @@ iOS Safari は `font-family` 切替時に親の `word-break` 継承が不安定�
 | `/ja/pay?to=0x...&amount=10` | English ボタン | `/en/pay?to=...&amount=10` query 維持、`Connect a wallet` 表示 |
 | `/en/checkout?items=Coffee:2:5.00` | 日本語 ボタン | `/ja/checkout?items=...` 維持、`合計 10 USDC` 表示 |
 | `/ja/tip/0x...?name=...` | English ボタン | `/en/tip/...?name=...` 維持、name 表示維持 |
+| `/ja/scan` | English ボタン | `/en/scan` 維持、`Scan to pay` 表示 |
 
 ## 4. Rollback
 

@@ -112,7 +112,30 @@ npm run e2e:local                      # build with stub env + run Playwright
 
 Tech: Next.js 15 App Router · TypeScript · viem / wagmi · ERC-4337 + Pimlico · next-intl (ja / en) · Tailwind · Vitest + Playwright.
 
-Available routes (locale-prefixed, `ja` / `en`): `/`, `/pay`, `/tip`, `/history`, `/checkout` (experimental), `/terms`, `/privacy`, `/disclaimer`, `/tokutei`, and `/api/paid/*` (x402).
+Available routes (locale-prefixed, `ja` / `en`): `/`, `/pay`, `/tip`, `/history`, `/scan` (experimental, pre-connect PWA), `/checkout` (experimental), `/terms`, `/privacy`, `/disclaimer`, `/tokutei`, and `/api/paid/*` (x402).
+
+## Pre-connect PWA / Scan mode (experimental — alpha)
+
+**Hypothesis** (Phase 1): if a customer connects a wallet ahead of time, the time spent at the register is reduced from ~15 s ("open wallet app → open camera → scan QR → approve connect → sign") to ~3 s ("tap PWA icon → scan QR → sign").
+
+To validate this:
+
+- Open `/scan` (e.g. <https://open-pay.jp/ja/scan>) and connect a wallet via WalletConnect / Coinbase Wallet / injected
+- "Add to Home Screen" (iOS Safari share menu, or Android Chrome `Install app`)
+- At the register: tap the PWA icon, scan the merchant QR with the in-browser camera (`qr-scanner`, no app switching), and the URL is validated + you land on `/pay` with your wallet still connected
+
+Security:
+
+- Only same-origin URLs to `/pay`, `/tip`, `/checkout` deep-link automatically; external origins show a confirmation banner with `target="_blank"` + `noopener noreferrer`.
+- `ethereum:` (EIP-681) URIs are rejected in Phase 1 (use a wallet such as MetaMask Mobile directly for those).
+- `javascript:` / `data:` / unknown payloads are surfaced as "unrecognized" with the raw text shown — they never trigger navigation.
+- Camera permission is requested only on the explicit "Start camera" gesture (no auto-prompt). The fallback "Paste URL" field works without camera permission on kiosk / keyboard-only devices.
+
+Limitations:
+
+- iOS Safari evicts `localStorage` after ~7 days of inactivity; the WalletConnect session may need re-approving after a long pause.
+- `display-mode: standalone` shortcuts in the manifest are honored by Android Chrome but ignored by iOS Safari.
+- This is **demand-gated experimental UX**. If usage signal does not validate the hypothesis within ~4 weeks, the `/scan` route and `qr-scanner` dependency are easy to roll back (single revert).
 
 ## Environment variables
 
