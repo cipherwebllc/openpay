@@ -54,11 +54,22 @@ Rule で個別に設定する:
 | Alert 名 | 条件 (filter) | 閾値 (発火) | 重大度 / 対処 |
 |---|---|---|---|
 | `scan.decode_error spike` | `event:"scan.decode_error"` | 10 events / 5 min | camera worker / video track が壊れた可能性 → /scan を一時的に hide 検討 |
-| `scan.before_hydrate spike` | `event:"scan.before_hydrate"` | 5 events / 10 min | hydrate race が常態化 → `useOrigin` の SSR-safe 実装の見直し |
 | `scan.external_qr` | `event:"scan.external_qr"` | 20 events / 1 hour | フィッシング QR の流通可能性 → 警告 UI 文言の強化 + Slack 通知 |
 | `scan.eip681_rejected` | `event:"scan.eip681_rejected"` | 5 events / 1 day | ethereum: URI の実需要 signal → Phase 2 検討入り |
 | `scan.unrecognized_qr` | `event:"scan.unrecognized_qr"` | 30 events / 1 hour | 未知 QR が連発 → 別決済 system QR の誤読 / URL 仕様変更の可能性 |
 | 全体 error level spike | `level:error` | 任意 (既存) | 既存 generic alert を継続 |
+
+注: `scan.before_hydrate` も logger には残してあるが、`useOrigin` の useEffect が
+mount 直後 synchronously に origin を set するのに対し、handleScanned は camera
+permission + decode を経て数百 ms 後にしか発火しない (race window 実質ゼロ)。
+そのため alert rule の閾値を設定しても永久に発火せず、運用 noise になる。
+発火した場合のみ「異常事象」として Issues 一覧で確認する運用とし、
+alert rule は設置しない。
+
+filter 構文の前提: `lib/logger.ts:35-58` の `reportToSentry` は `captureException` /
+`captureMessage` 双方に `tags: { event: msg }` を set する (logger.test.ts で
+保証)。よって Sentry の Alert Rule で `tags[event]:"scan.*"` または UI 上では
+`event:"…"` で filter 可能。
 
 ### 3.3 iOS Safari 実機 QA (emulation 不能パート)
 

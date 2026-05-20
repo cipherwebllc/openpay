@@ -90,6 +90,33 @@ describe('i18n: Home.offramp キー (ja/en parity)', () => {
   });
 });
 
+describe('i18n: Privacy policy が camera 利用を開示している (法的要件)', () => {
+  // /scan 機能で camera permission を要求する以上、Privacy Policy で取得情報と
+  // 利用目的を明示する必要がある (APPI / GDPR 一般原則)。disclosure が脱落
+  // すると regression するため fence。
+  it('ja.Privacy.section1 (取得する情報) に camera / カメラ言及がある', () => {
+    const body = ja.Privacy.section1.body;
+    expect(body).toMatch(/カメラ|camera/i);
+    expect(body).toMatch(/QR/);
+  });
+
+  it('ja.Privacy.section2 (利用目的) に「外部送信せず」「ブラウザ内のみ」の方針表明がある', () => {
+    const body = ja.Privacy.section2.body;
+    expect(body).toMatch(/ブラウザ内のみ|外部に送信せず/);
+  });
+
+  it('en.Privacy.section1 に camera / QR の言及がある', () => {
+    const body = en.Privacy.section1.body;
+    expect(body).toMatch(/camera/i);
+    expect(body).toMatch(/QR/);
+  });
+
+  it('en.Privacy.section2 に "never transmitted" / "within the user\'s browser" 方針表明がある', () => {
+    const body = en.Privacy.section2.body;
+    expect(body).toMatch(/never transmitted|within the user's browser/i);
+  });
+});
+
 describe('i18n: Scan keys (ja/en parity)', () => {
   // /scan ページ + PwaInstallHint + QrScannerSurface + ScanResultBanner で使う
   // i18n key 集合。片方の locale だけ抜けて runtime に t() が key を表示する

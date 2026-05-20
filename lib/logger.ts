@@ -46,8 +46,12 @@ function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): 
     });
     return;
   }
+  // event tag を captureMessage にも付ける: Sentry の Alert Rule で
+  // event:"scan.decode_error" のような filter を効かせるために必須
+  // (DEPLOY_CHECKLIST §3.2 の alert rule 仕様が依存する)。
   Sentry.captureMessage(msg, {
     level: sentryLevel,
+    tags: { event: msg },
     extra: fields,
   });
 }

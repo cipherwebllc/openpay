@@ -95,9 +95,16 @@ describe('logger', () => {
       expect(Sentry.captureMessage).toHaveBeenCalledOnce();
       const [msg, opts] = vi.mocked(Sentry.captureMessage).mock.calls[0];
       expect(msg).toBe('payment.failed');
-      const o = opts as { level: string; extra: { code: number } };
+      const o = opts as {
+        level: string;
+        tags: { event: string };
+        extra: { code: number };
+      };
       expect(o.level).toBe('error');
       expect(o.extra.code).toBe(42);
+      // captureMessage にも event tag を必ず set する (Sentry Alert Rule で
+      // event:"…" filter が効くため必須、DEPLOY_CHECKLIST §3.2 と同期)。
+      expect(o.tags.event).toBe('payment.failed');
       expect(Sentry.captureException).not.toHaveBeenCalled();
     });
 
@@ -105,7 +112,17 @@ describe('logger', () => {
       logger.warn('webhook.non_ok', { status: 500 });
       const [msg, opts] = vi.mocked(Sentry.captureMessage).mock.calls[0];
       expect(msg).toBe('webhook.non_ok');
-      expect((opts as { level: string }).level).toBe('warning');
+      const o = opts as { level: string; tags: { event: string } };
+      expect(o.level).toBe('warning');
+      // warn 経由でも event tag が同期して付くこと
+      expect(o.tags.event).toBe('webhook.non_ok');
+    });
+
+    it('scan.* イベント (Error 無し warn) でも event tag が付く — alert rule が match する前提', () => {
+      logger.warn('scan.external_qr', { host: 'attacker.example.com' });
+      const [, opts] = vi.mocked(Sentry.captureMessage).mock.calls[0];
+      const o = opts as { tags: { event: string } };
+      expect(o.tags.event).toBe('scan.external_qr');
     });
 
     it('logger.error に Error オブジェクトを含む → captureException で stack 保持', () => {
