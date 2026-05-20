@@ -13,6 +13,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import { logger } from '@/lib/logger';
+
+// QrScannerModule の type は dynamic import から推論。
+type QrScannerModule = typeof import('qr-scanner');
 
 export type ScannerStatus =
   | 'idle'
@@ -48,7 +52,7 @@ export type UseQrScannerResult = {
   stop(): void;
 };
 
-type QrScannerInstance = InstanceType<typeof import('qr-scanner')['default']>;
+type QrScannerInstance = InstanceType<QrScannerModule['default']>;
 
 function classifyMediaError(err: unknown): ScannerState {
   // getUserMedia は DOMException で標準名 (NotAllowedError, NotFoundError 等)
@@ -106,11 +110,28 @@ export function useQrScanner(
     }
     setState({ status: 'starting' });
 
-    const { default: QrScanner } = await import('qr-scanner');
-
-    if (preflightCheckCamera && !(await QrScanner.hasCamera())) {
-      setState({ status: 'no-camera' });
+    // dynamic import (chunk 解決) と hasCamera() の reject は無視すると state が
+    // 'starting' に張り付き UI が永久 spinner になる。Promise.catch で classify する。
+    let QrScanner: QrScannerModule['default'];
+    try {
+      ({ default: QrScanner } = await import('qr-scanner'));
+    } catch (err) {
+      setState(classifyMediaError(err));
       return;
+    }
+
+    if (preflightCheckCamera) {
+      let hasCam: boolean;
+      try {
+        hasCam = await QrScanner.hasCamera();
+      } catch (err) {
+        setState(classifyMediaError(err));
+        return;
+      }
+      if (!hasCam) {
+        setState({ status: 'no-camera' });
+        return;
+      }
     }
 
     const scanner = new QrScanner(
@@ -126,9 +147,15 @@ export function useQrScanner(
       },
       {
         preferredCamera: 'environment',
-        // "No QR code found" は frame ごとに発火する仕様。実エラーは scanner
-        // 内部で video イベントに繋がるためここで捕まえる必要はない。
-        onDecodeError: () => {},
+        // qr-scanner は frame ごとに onDecodeError を発火する。"No QR code found"
+        // は QR 不在の正常状態なので捨て、それ以外の本物のエラー (track ended /
+        // worker crash) は logger.warn で観測点を確保する。UI には出さない
+        // (毎フレーム noise になるため、視覚的劣化を避ける)。
+        onDecodeError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg === 'No QR code found') return;
+          logger.warn('scan.decode_error', { msg });
+        },
         highlightScanRegion: true,
         highlightCodeOutline: true,
         returnDetailedScanResult: true,
@@ -136,13 +163,12 @@ export function useQrScanner(
     );
 
     scannerRef.current = scanner;
-    // start() の reject は getUserMedia 失敗のみ。defensive ではなく実装要件で
-    // .catch() で classify (await の reject は unhandled rejection 化するため)。
+    // start() の reject は getUserMedia 失敗のみ。.then(_, err) で classify
+    // (await の reject は unhandled rejection 化するため)。
     await scanner.start().then(
       () => setState({ status: 'scanning' }),
       (err) => {
-        scanner.destroy();
-        scannerRef.current = null;
+        disposeScanner();
         setState(classifyMediaError(err));
       },
     );

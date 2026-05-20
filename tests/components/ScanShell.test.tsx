@@ -18,11 +18,13 @@ vi.mock('wagmi', () => ({
 }));
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 
-// useOrigin は外部 hook (内部 SoT は ScanShell でないため mock 可)。
-// テスト毎に origin を切替可能にして「pre-hydrate (空)」も再現する。
-let mockOrigin = 'https://test.local';
+// useOrigin は jsdom の window.location.origin (= https://test.local) を実 hook
+// で読む経路と意味的に等価な値を default で返す mock を提供。test ごとに値を
+// 切替えたい (pre-hydrate race の '' 再現) ため variable 経由 mock を採用 —
+// ESM namespace の vi.spyOn は read-only 制約で動かないため。
+let scanShellOrigin = 'https://test.local';
 vi.mock('@/hooks/useOrigin', () => ({
-  useOrigin: () => mockOrigin,
+  useOrigin: () => scanShellOrigin,
 }));
 
 // logger は ScanShell が breadcrumb 用に呼ぶ。実 logger は console + Sentry へ
@@ -88,7 +90,7 @@ beforeEach(() => {
   startMock.mockClear().mockResolvedValue(undefined);
   vi.mocked(logger.info).mockReset();
   vi.mocked(logger.warn).mockReset();
-  mockOrigin = ORIGIN;
+  scanShellOrigin = 'https://test.local';
   // matchMedia stub — PwaInstallHint が usePwaDisplayMode を呼ぶ
   window.matchMedia = vi.fn().mockReturnValue({
     matches: true, // standalone 扱いにして hint を隠す (テスト focus を ScanShell 本体に絞る)
@@ -239,15 +241,19 @@ describe('ScanShell: decode → 警告系 banner + logger.warn', () => {
 });
 
 describe('ScanShell: origin pre-hydrate (空) ガード', () => {
-  it('useOrigin が空文字 → handleScanned は早期 return、router.push / logger ともに無発火', async () => {
-    mockOrigin = '';
+  it('useOrigin が空文字 → 早期 return + logger.warn("scan.before_hydrate") 観測点を残す', async () => {
+    scanShellOrigin = '';
     mockConnected(true);
     renderWithIntl(<ScanShell />);
     await startCamera();
-    decode(`${ORIGIN}/pay?to=${ADDR}&token=usdc&amount=10`);
+    const raw = `${ORIGIN}/pay?to=${ADDR}&token=usdc&amount=10`;
+    decode(raw);
     expect(push).not.toHaveBeenCalled();
     expect(logger.info).not.toHaveBeenCalled();
-    expect(logger.warn).not.toHaveBeenCalled();
+    // silent drop でなく warn が出ること (Sentry breadcrumb 確保)
+    expect(logger.warn).toHaveBeenCalledWith('scan.before_hydrate', {
+      rawLength: raw.length,
+    });
   });
 });
 
@@ -323,8 +329,8 @@ describe('ScanShell: 手入力 fallback', () => {
     expect(logger.info).toHaveBeenCalledWith('scan.deeplink', { kind: 'pay' });
   });
 
-  it('手入力 fallback でも origin 空ならガード (router.push 無し)', async () => {
-    mockOrigin = '';
+  it('手入力 fallback でも origin 空ならガード (router.push 無し + warn 観測)', async () => {
+    scanShellOrigin = '';
     mockConnected(true);
     renderWithIntl(<ScanShell />);
     const input = screen.getByLabelText(

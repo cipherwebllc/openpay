@@ -34,9 +34,13 @@ export function ScanShell() {
 
   const handleScanned = useCallback(
     (raw: string) => {
-      // origin が決まる前 (SSR / hydrate 前) は raw を不明扱いで保持。
-      // useOrigin が hydrate 後に値を返すまでに decode が走ることは実質ない。
-      if (!origin) return;
+      // origin は useOrigin が useEffect で hydrate 後にセットする。実質ここに
+      // 到達することは稀だが、起こったときに silent drop されると「ボタン押した
+      // のに何も起きない」状態を作るので Sentry breadcrumb を残す。
+      if (!origin) {
+        logger.warn('scan.before_hydrate', { rawLength: raw.length });
+        return;
+      }
       const action = parseScannedUrl(raw, origin, locale);
       setLastResult(action);
 

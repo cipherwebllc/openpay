@@ -34,6 +34,18 @@ class MockQrScanner {
 
 vi.mock('qr-scanner', () => ({ default: MockQrScanner }));
 
+// logger は scanner が onDecodeError から呼ぶ (実エラーの観測点)。境界 mock で
+// 呼出を直接 assert する。
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+import { logger } from '@/lib/logger';
+
 import { useQrScanner } from '@/hooks/useQrScanner';
 
 function makeVideoRef(): RefObject<HTMLVideoElement | null> {
@@ -53,6 +65,7 @@ beforeEach(() => {
   hasCameraMock.mockReset();
   hasCameraMock.mockResolvedValue(true);
   startMock.mockResolvedValue(undefined);
+  vi.mocked(logger.warn).mockReset();
 });
 
 describe('useQrScanner', () => {
@@ -399,6 +412,81 @@ describe('useQrScanner: lifecycle / 並行性 edge', () => {
       expect(result.current.state.error.message).toBe('something wrong');
       expect(result.current.state.error).toBeInstanceOf(TypeError);
     }
+  });
+
+  it('hasCamera() が throw → error state (state 詰まり防止)', async () => {
+    // production で hasCamera が一部 chromium build で SecurityError を throw
+    // することがある。await の reject を握り潰さず error state に倒すこと。
+    hasCameraMock.mockRejectedValueOnce(
+      new DOMException('blocked by feature policy', 'SecurityError'),
+    );
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    // SecurityError → permission-denied (classifyMediaError 規約)
+    expect(result.current.state.status).toBe('permission-denied');
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it('hasCamera() が非 DOMException (Error) を throw → error state', async () => {
+    hasCameraMock.mockRejectedValueOnce(new TypeError('unknown internal'));
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error.message).toBe('unknown internal');
+    }
+  });
+
+  it('decode 中の onDecodeError: "No QR code found" は無視 (logger 不呼出)', async () => {
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    const onDecodeErrorFn = (ctorCalls[0].options as { onDecodeError: (e: unknown) => void })
+      .onDecodeError;
+    act(() => {
+      onDecodeErrorFn(new Error('No QR code found'));
+      onDecodeErrorFn('No QR code found'); // string variant も同じ扱い
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('decode 中の onDecodeError: 本物のエラーは logger.warn で観測 (state は scanning 維持)', async () => {
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    const onDecodeErrorFn = (ctorCalls[0].options as { onDecodeError: (e: unknown) => void })
+      .onDecodeError;
+    act(() => {
+      onDecodeErrorFn(new Error('Track ended unexpectedly'));
+    });
+    expect(logger.warn).toHaveBeenCalledWith('scan.decode_error', {
+      msg: 'Track ended unexpectedly',
+    });
+    // 視覚 UI には反映しない (毎フレーム noise 防止 = state 維持)
+    expect(result.current.state.status).toBe('scanning');
+  });
+
+  it('start 後の error path で disposeScanner ベースの統一 cleanup が走る', async () => {
+    // start() reject で stop() と destroy() が共に呼ばれる (disposeScanner 経由)。
+    startMock.mockRejectedValueOnce(new DOMException('boom', 'NotReadableError'));
+    const ref = makeVideoRef();
+    const { result } = renderHook(() => useQrScanner(ref, () => {}));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.state.status).toBe('error');
+    expect(stopMock).toHaveBeenCalledTimes(1);
+    expect(destroyMock).toHaveBeenCalledTimes(1);
   });
 
   it('unmount 中に scanner が active でも cleanup が 1 回だけ走る (multi-unmount なし)', async () => {

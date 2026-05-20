@@ -146,17 +146,16 @@ describe('QrScannerSurface', () => {
       configurable: true,
     });
     renderWithIntl(<QrScannerSurface onScanned={onScanned} />);
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole('button', { name: 'クリップボードから貼り付け' }),
-      );
-      // microtask 1 周分 (readText の resolve)
-      await Promise.resolve();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'クリップボードから貼り付け' }),
+    );
+    // microtask 数に依存せず、UI 側 (input value) の反映完了まで待つ
+    await waitFor(() => {
+      const inp = screen.getByLabelText(
+        'OpenPay の URL (https://open-pay.jp/pay?…)',
+      ) as HTMLInputElement;
+      expect(inp.value).toBe('https://open-pay.jp/pay?to=0xCAFE');
     });
-    const input = screen.getByLabelText(
-      'OpenPay の URL (https://open-pay.jp/pay?…)',
-    ) as HTMLInputElement;
-    expect(input.value).toBe('https://open-pay.jp/pay?to=0xCAFE');
   });
 
   it('Paste: clipboard API 自体が無い環境 (HTTP 等) → 例外を throw せず no-op', async () => {
