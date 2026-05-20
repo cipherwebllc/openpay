@@ -83,7 +83,7 @@ describe('parseScannedUrl: pay route', () => {
 });
 
 describe('parseScannedUrl: tip route', () => {
-  it('/tip/0x... → kind:tip + address (checksum 化)', () => {
+  it('/tip/0x... → kind:tip + params.to が checksum 化', () => {
     const r = parseScannedUrl(
       `${ORIGIN}/tip/${TO_LOWER}?token=jpyc`,
       ORIGIN,
@@ -91,7 +91,7 @@ describe('parseScannedUrl: tip route', () => {
     );
     expect(r.kind).toBe('tip');
     if (r.kind !== 'tip') throw new Error();
-    expect(r.address).toBe(TO);
+    expect(r.params.to).toBe(TO);
     expect(r.href).toBe(`/ja/tip/${TO}?token=jpyc`);
   });
 

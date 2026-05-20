@@ -31,11 +31,11 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
   );
 
   const [manualUrl, setManualUrl] = useState('');
-  const status = state.status;
+  const isScanning = state.status === 'scanning';
   const fallbackActive =
-    status === 'permission-denied' ||
-    status === 'no-camera' ||
-    status === 'error';
+    state.status === 'permission-denied' ||
+    state.status === 'no-camera' ||
+    state.status === 'error';
 
   function handleManualSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,34 +44,39 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
     onScanned(v);
   }
 
+  async function handlePaste() {
+    // Clipboard 読取は user gesture かつ HTTPS 必須。失敗時は input 空のまま
+    // (フォーカスを動かさず手入力に倒す)。
+    if (!navigator.clipboard?.readText) return;
+    const text = await navigator.clipboard.readText().catch(() => '');
+    if (text) setManualUrl(text.trim());
+  }
+
   return (
     <div className="space-y-3">
       <div
-        // video は status に関係なく常に mount する (useRef を start 時に
-        // 確実に参照できるようにする)。idle / fallback では非表示にして
-        // CSS で隠す (display:none だと iOS Safari で getUserMedia が失敗する
-        // 既知 quirk があるので visibility:hidden + size:0 で論理的に同等)。
         className={`relative overflow-hidden rounded-2xl border ${
-          status === 'scanning'
+          isScanning
             ? 'border-slate-300 bg-slate-900'
             : 'border-dashed border-slate-300 bg-slate-50'
         }`}
       >
+        {/* video は常に mount する。idle / fallback では h-0 で論理的に隠す
+            (display:none だと iOS Safari で getUserMedia が失敗する既知 quirk)。 */}
         <video
           ref={videoRef}
           className={`block w-full ${
-            status === 'scanning' ? 'aspect-square object-cover' : 'h-0'
+            isScanning ? 'aspect-square object-cover' : 'h-0'
           }`}
-          // autoplay / playsInline は iOS Safari で inline 再生を可能にする必須属性
           autoPlay
           playsInline
           muted
         />
-        {status !== 'scanning' && (
+        {!isScanning && (
           <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
             <CameraIcon />
             <p className="text-sm text-slate-600">{t('cameraIdleHint')}</p>
-            {status === 'idle' && (
+            {state.status === 'idle' && (
               <button
                 type="button"
                 onClick={() => {
@@ -82,26 +87,30 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
                 {t('startCameraButton')}
               </button>
             )}
-            {status === 'starting' && (
+            {state.status === 'starting' && (
               <p className="text-xs text-slate-500">{t('cameraStarting')}</p>
             )}
-            {status === 'permission-denied' && (
-              <div className="rounded-lg bg-amber-50 px-4 py-3 text-left text-xs text-amber-900">
-                <p className="font-semibold">{t('permissionDeniedTitle')}</p>
-                <p className="mt-1">{t('permissionDeniedBody')}</p>
-              </div>
+            {state.status === 'permission-denied' && (
+              <StatusBox
+                tone="amber"
+                title={t('permissionDeniedTitle')}
+                body={t('permissionDeniedBody')}
+              />
             )}
-            {status === 'no-camera' && (
-              <div className="rounded-lg bg-amber-50 px-4 py-3 text-left text-xs text-amber-900">
-                <p className="font-semibold">{t('noCameraTitle')}</p>
-                <p className="mt-1">{t('noCameraBody')}</p>
-              </div>
+            {state.status === 'no-camera' && (
+              <StatusBox
+                tone="amber"
+                title={t('noCameraTitle')}
+                body={t('noCameraBody')}
+              />
             )}
-            {status === 'error' && state.status === 'error' && (
-              <div className="rounded-lg bg-red-50 px-4 py-3 text-left text-xs text-red-800">
-                <p className="font-semibold">{t('genericErrorTitle')}</p>
-                <p className="mt-1 font-mono">{state.error.message}</p>
-              </div>
+            {state.status === 'error' && (
+              <StatusBox
+                tone="red"
+                title={t('genericErrorTitle')}
+                body={state.error.message}
+                bodyMono
+              />
             )}
           </div>
         )}
@@ -133,7 +142,6 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
             // type=text を使う (type=url は HTML5 form validation で非 URL を
             // 拒否し submit が無効化される、scanner の raw は非 URL も流れ得るため
             // parser 側で kind=unknown へ落として赤 banner を出す UX が走らなくなる)。
-            // 仮想キーボードは inputMode=url で URL レイアウトに固定。
             type="text"
             inputMode="url"
             value={manualUrl}
@@ -154,14 +162,8 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
             </button>
             <button
               type="button"
-              onClick={async () => {
-                // Clipboard 読取は user gesture かつ HTTPS 必須。
-                // 失敗時は input 空のまま (フォーカスを動かさず手入力に倒す)。
-                if (!navigator.clipboard?.readText) return;
-                const text = await navigator.clipboard
-                  .readText()
-                  .catch(() => '');
-                if (text) setManualUrl(text.trim());
+              onClick={() => {
+                void handlePaste();
               }}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
             >
@@ -170,6 +172,29 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
           </div>
         </form>
       </details>
+    </div>
+  );
+}
+
+function StatusBox({
+  tone,
+  title,
+  body,
+  bodyMono = false,
+}: {
+  tone: 'amber' | 'red';
+  title: string;
+  body: string;
+  bodyMono?: boolean;
+}) {
+  const classes =
+    tone === 'amber'
+      ? 'bg-amber-50 text-amber-900'
+      : 'bg-red-50 text-red-800';
+  return (
+    <div className={`rounded-lg px-4 py-3 text-left text-xs ${classes}`}>
+      <p className="font-semibold">{title}</p>
+      <p className={`mt-1 ${bodyMono ? 'font-mono' : ''}`}>{body}</p>
     </div>
   );
 }

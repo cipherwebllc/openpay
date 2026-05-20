@@ -28,7 +28,9 @@ function detectPlatform(): Platform {
   const ua = navigator.userAgent;
   // iPad はデスクトップ Safari 風 UA を返す (iPadOS 13+) — touch & MacIntel で別判定
   const isIpad =
-    /Macintosh/.test(ua) && typeof document !== 'undefined' && 'ontouchend' in document;
+    /Macintosh/.test(ua) &&
+    typeof document !== 'undefined' &&
+    'ontouchend' in document;
   if (/iPhone|iPod/.test(ua) || isIpad) return 'ios';
   if (/Android/i.test(ua)) return 'android';
   return 'other';
@@ -37,28 +39,25 @@ function detectPlatform(): Platform {
 export function PwaInstallHint() {
   const t = useTranslations('Scan');
   const { isStandalone } = usePwaDisplayMode();
-  const [platform, setPlatform] = useState<Platform>('other');
+  // SSR では 'other' に倒れ、hydrate 時に真の platform に再評価される (ユーザ
+  // にとって install 不可の "other" を一瞬出すのは無害 + click で flicker しない)。
+  const [platform] = useState<Platform>(detectPlatform);
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    setPlatform(detectPlatform());
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
     function onBeforeInstall(e: Event) {
       // Chrome の自動 prompt を抑制し、ユーザのボタン操作に紐付ける。
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     }
-    window.addEventListener('beforeinstallprompt', onBeforeInstall);
     function onInstalled() {
       // install 完了で hint を畳む (display-mode change の hook 経由でも畳まれるが、
       // PWA が manifest を再 fetch する前に local state を倒すための保険)。
       setDismissed(true);
     }
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstall);
