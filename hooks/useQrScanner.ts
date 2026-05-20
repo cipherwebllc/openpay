@@ -129,12 +129,21 @@ export function useQrScanner(
         preferredCamera: 'environment',
         // qr-scanner は frame ごとに onDecodeError を発火する。"No QR code found"
         // は QR 不在の正常状態なので捨て、それ以外の本物のエラー (track ended /
-        // worker crash) は logger.warn で観測点を確保する。UI には出さない
-        // (毎フレーム noise になるため、視覚的劣化を避ける)。
+        // worker crash) は logger.warn で観測点を確保する。UI には出さない。
+        //
+        // 注: qr-scanner v1.4.x は "No QR code found" を裸でも
+        // "Scanner error: No QR code found" の prefix 付きでも投げる
+        // (内部実装の error wrap 経路次第)。両方の format を filter する必要あり
+        // — e2e で実 module を走らせて初めて発覚した quirk。
         onDecodeError: (err) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (msg === 'No QR code found') return;
-          logger.warn('scan.decode_error', { msg });
+          const detail = err instanceof Error ? err.message : String(err);
+          if (
+            detail === 'No QR code found' ||
+            detail.endsWith(': No QR code found')
+          ) {
+            return;
+          }
+          logger.warn('scan.decode_error', { detail });
         },
         highlightScanRegion: true,
         highlightCodeOutline: true,

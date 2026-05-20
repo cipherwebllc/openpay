@@ -33,14 +33,17 @@ function detectPlatform(): Platform {
 export function PwaInstallHint() {
   const t = useTranslations('Scan');
   const { isStandalone } = usePwaDisplayMode();
-  // SSR では 'other' に倒れ、hydrate 時に真の platform に再評価される (ユーザ
-  // にとって install 不可の "other" を一瞬出すのは無害 + click で flicker しない)。
-  const [platform] = useState<Platform>(detectPlatform);
+  // SSR / 初回 client render では 'other' に倒し、useEffect で真の platform に
+  // 切替える。useState(detectPlatform) で lazy init すると SSR は 'other'、
+  // hydrate 時は実 UA から 'ios'/'android' を返してしまい React hydration error
+  // #418 (HTML mismatch) を発生させる本物バグだった (mobile-safari e2e で発覚)。
+  const [platform, setPlatform] = useState<Platform>('other');
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    setPlatform(detectPlatform());
     function onBeforeInstall(e: Event) {
       // Chrome の自動 prompt を抑制し、ユーザのボタン操作に紐付ける。
       e.preventDefault();

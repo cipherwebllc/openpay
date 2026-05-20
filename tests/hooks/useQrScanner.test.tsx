@@ -443,6 +443,10 @@ describe('useQrScanner: lifecycle / 並行性 edge', () => {
     act(() => {
       onDecodeErrorFn(new Error('No QR code found'));
       onDecodeErrorFn('No QR code found'); // string variant も同じ扱い
+      // qr-scanner v1.4.x は "Scanner error: " prefix 付きでも投げる (実 e2e で
+      // 発覚した quirk) — endsWith(': No QR code found') 経路を verify。
+      onDecodeErrorFn(new Error('Scanner error: No QR code found'));
+      onDecodeErrorFn('Scanner error: No QR code found');
     });
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -458,8 +462,11 @@ describe('useQrScanner: lifecycle / 並行性 edge', () => {
     act(() => {
       onDecodeErrorFn(new Error('Track ended unexpectedly'));
     });
+    // event 識別子 (1 引数目) は scan.decode_error、エラーメッセージは detail field に。
+    // field 名 msg を使うと logger.emit() の {...fields} 経由で外側 msg を上書き
+    // していた本物 bug の regression 防止 (lib/logger.ts の spread 順を変更済)。
     expect(logger.warn).toHaveBeenCalledWith('scan.decode_error', {
-      msg: 'Track ended unexpectedly',
+      detail: 'Track ended unexpectedly',
     });
     // 視覚 UI には反映しない (毎フレーム noise 防止 = state 維持)
     expect(result.current.state.status).toBe('scanning');

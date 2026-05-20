@@ -58,7 +58,11 @@ function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): 
 
 function emit(level: Level, msg: string, fields?: Fields): void {
   if (ORDER[level] < ORDER[minLevel]) return;
-  const entry = { ts: new Date().toISOString(), level, msg, ...fields };
+  // fields の spread を authoritative key (ts / level / msg) より「前」に置く —
+  // fields に偶発的に msg / level / ts が混入しても上書きされないようにする
+  // (logger.warn('scan.decode_error', { msg: errText }) でイベント名が消えていた
+  // 本物バグの再発防止、tests/lib/logger.test.ts で regression fence)。
+  const entry = { ...fields, ts: new Date().toISOString(), level, msg };
   const sink =
     level === 'error'
       ? console.error

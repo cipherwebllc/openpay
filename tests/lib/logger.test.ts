@@ -75,6 +75,23 @@ describe('logger', () => {
     expect((j.data as { block: string }).block).toBe('12345');
   });
 
+  it('fields に msg / level / ts が衝突しても event 識別子 (msg) が上書きされない (regression: 実 qr-scanner e2e で発覚した bug)', () => {
+    // 過去: logger.warn('scan.decode_error', { msg: 'Scanner error: …' }) で
+    // {...fields} の spread が msg を上書きし、Sentry / 集計で event 識別子が消えた
+    logger.warn('scan.decode_error', {
+      msg: 'this should be in a different field',
+      level: 'fake',
+      ts: 'fake-ts',
+      detail: 'real detail',
+    });
+    const j = lastJSON(warnSpy);
+    expect(j.msg).toBe('scan.decode_error');
+    expect(j.level).toBe('warn');
+    expect(typeof j.ts).toBe('string');
+    expect(j.ts).not.toBe('fake-ts');
+    expect(j.detail).toBe('real detail');
+  });
+
   it('複数フィールドの順序保持と型を確認', () => {
     logger.error('event', {
       a: 'x',
