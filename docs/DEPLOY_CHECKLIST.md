@@ -45,6 +45,21 @@ curl -s -o /dev/null -w '%{http_code}\n' https://open-pay.jp/api/paid/hello
 | Alert rule 存在 (error spike notification) | Sentry → Alerts | "Error frequency > threshold" rule active |
 | Deploy 後 5 分の新規 error 数 | Sentry → Issues | 0 件 (新規 error 出現なし) |
 
+#### Sentry Alert rule 仕様 (logger 経由のイベント名で発火条件を pin)
+
+logger.warn / logger.error は Sentry の `event:` tag に msg を載せる
+(`lib/logger.ts` の reportToSentry 経由)。以下を Sentry → Alerts → Create Alert
+Rule で個別に設定する:
+
+| Alert 名 | 条件 (filter) | 閾値 (発火) | 重大度 / 対処 |
+|---|---|---|---|
+| `scan.decode_error spike` | `event:"scan.decode_error"` | 10 events / 5 min | camera worker / video track が壊れた可能性 → /scan を一時的に hide 検討 |
+| `scan.before_hydrate spike` | `event:"scan.before_hydrate"` | 5 events / 10 min | hydrate race が常態化 → `useOrigin` の SSR-safe 実装の見直し |
+| `scan.external_qr` | `event:"scan.external_qr"` | 20 events / 1 hour | フィッシング QR の流通可能性 → 警告 UI 文言の強化 + Slack 通知 |
+| `scan.eip681_rejected` | `event:"scan.eip681_rejected"` | 5 events / 1 day | ethereum: URI の実需要 signal → Phase 2 検討入り |
+| `scan.unrecognized_qr` | `event:"scan.unrecognized_qr"` | 30 events / 1 hour | 未知 QR が連発 → 別決済 system QR の誤読 / URL 仕様変更の可能性 |
+| 全体 error level spike | `level:error` | 任意 (既存) | 既存 generic alert を継続 |
+
 ### 3.3 iOS Safari 実機 QA (emulation 不能パート)
 
 playwright mobile-safari emulation で再現しない iOS 固有 quirk があるため、
@@ -98,6 +113,9 @@ playwright で emulation 不能な carbon 部分:
 git revert --abort 2>/dev/null     # 中断状態あれば clean
 rm -rf .git/sequencer 2>/dev/null
 git revert --no-edit <bad-commit>..HEAD
+# rollback 検証 (production deploy 前に必ず local で):
+rm -rf .next                       # stale type cache を消す (revert 後の typecheck が誤判定する)
+npm run typecheck && npm run build # rollback 後の state が green か確認
 git push origin main
 # Vercel が auto deploy → 復旧
 ```
