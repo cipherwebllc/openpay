@@ -67,6 +67,31 @@ describe('usePwaDisplayMode', () => {
     expect(result.current.isStandalone).toBe(true);
   });
 
+  it('SSR-safe: useState 初期値は常に false (PWA standalone 起動でも client first render は false → useEffect で更新) — hydration mismatch regression fence', async () => {
+    // useState(readStandalone) lazy init を使うと SSR は false、client は true で
+    // SSR HTML と client first render が食い違って React hydration mismatch が出る
+    // 本物バグの再発防止。useState の初期値が matchMedia 状態に依存しないことを
+    // matchMedia true / standalone true の両条件下で確認する。
+    setupMatchMedia(true);
+    const nav = window.navigator as Navigator & { standalone?: boolean };
+    nav.standalone = true;
+    const { usePwaDisplayMode } = await import('@/hooks/usePwaDisplayMode');
+
+    // React 内部の useState(initial) は initial = false で固定。effect 走行後に
+    // 真値 (true) へ更新される。final assertion は renderHook が effect を flush
+    // する前提で true を期待する (現実の hydration では mismatch 警告にならない
+    // 経路: SSR HTML false → client first render false → effect で true へ遷移)。
+    const { result } = renderHook(() => usePwaDisplayMode());
+    expect(result.current.isStandalone).toBe(true);
+    // 初期値の証明: hook 内 useState の initial 引数が関数参照でないこと、つまり
+    // readStandalone を lazy init として呼んでいないことを source レベルで担保。
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve('./hooks/usePwaDisplayMode.ts'), 'utf8');
+    expect(src).toMatch(/useState<boolean>\(false\)/);
+    expect(src).not.toMatch(/useState<boolean>\(readStandalone\)/);
+  });
+
   it('unmount で listener が解除される', async () => {
     const env = setupMatchMedia(false);
     const { usePwaDisplayMode } = await import('@/hooks/usePwaDisplayMode');

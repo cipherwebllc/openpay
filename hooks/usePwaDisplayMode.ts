@@ -19,14 +19,20 @@ function readStandalone(): boolean {
 }
 
 export function usePwaDisplayMode(): { isStandalone: boolean } {
-  const [isStandalone, setIsStandalone] = useState<boolean>(readStandalone);
+  // SSR と client first hydration render の両方で false を返す stable な初期値。
+  // useState(readStandalone) の lazy init を使うと SSR は false (window 不在)、
+  // client hydration 時は matchMedia/navigator.standalone から true を返してしまい、
+  // SSR HTML には PwaInstallHint が描画されているのに client は即 null を返す
+  // React hydration mismatch を /scan の PWA standalone 起動 path で発生させていた
+  // (GPT-5.5 review で発覚)。実 PWA install 利用者の hint 表示制御が壊れる本物
+  // バグなので useEffect で hydrate 後に setIsStandalone する SSR-safe pattern に変更。
+  const [isStandalone, setIsStandalone] = useState<boolean>(false);
 
   useEffect(() => {
     const mql = window.matchMedia('(display-mode: standalone)');
     const handler = () => setIsStandalone(readStandalone());
     mql.addEventListener('change', handler);
-    // mount 後にも 1 度同期 (SSR/hydration 間で値が確定するレースを潰す)。
-    handler();
+    handler(); // hydrate 後に真の値へ更新 (上記初期値は SSR 一致のため意図的に false)
     return () => mql.removeEventListener('change', handler);
   }, []);
 
