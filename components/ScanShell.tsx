@@ -11,7 +11,7 @@
 // decode 成功 (kind: pay/tip/checkout) は即 router.push、success 後の戻る動線は
 // 通常 router.back に頼る (history 1 つ前が /scan)。
 
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
@@ -32,42 +32,36 @@ export function ScanShell() {
   const { address, isConnected, chain } = useAccount();
   const [lastResult, setLastResult] = useState<ScanAction | null>(null);
 
-  const handleScanned = useCallback(
-    (raw: string) => {
-      // origin は useOrigin が useEffect で hydrate 後にセットする。実質ここに
-      // 到達することは稀だが、起こったときに silent drop されると「ボタン押した
-      // のに何も起きない」状態を作るので Sentry breadcrumb を残す。
-      if (!origin) {
-        logger.warn('scan.before_hydrate', { rawLength: raw.length });
-        return;
-      }
-      const action = parseScannedUrl(raw, origin, locale);
-      setLastResult(action);
+  // useQrScanner が onDecode を ref で持つため useCallback は不要 (毎 render で
+  // 新規関数でも scanner は再生成されない)。
+  function handleScanned(raw: string): void {
+    if (!origin) {
+      // hydrate race の silent drop を Sentry breadcrumb で観測可能にする。
+      logger.warn('scan.before_hydrate', { rawLength: raw.length });
+      return;
+    }
+    const action = parseScannedUrl(raw, origin, locale);
+    setLastResult(action);
 
-      if (
-        action.kind === 'pay' ||
-        action.kind === 'tip' ||
-        action.kind === 'checkout'
-      ) {
-        // 観測指標: scan 経由の決済流入を Vercel Analytics で見るための breadcrumb。
-        // raw URL は送らず route 種別のみ (個人情報 / 受取アドレスは集約しない方針)。
+    switch (action.kind) {
+      case 'pay':
+      case 'tip':
+      case 'checkout':
+        // raw URL は送らず route 種別のみ (受取アドレス / 金額は集約しない方針)。
         logger.info('scan.deeplink', { kind: action.kind });
         router.push(action.href);
         return;
-      }
-      if (action.kind === 'external') {
+      case 'external':
         logger.warn('scan.external_qr', { host: action.host });
         return;
-      }
-      if (action.kind === 'eip681') {
+      case 'eip681':
         logger.warn('scan.eip681_rejected');
         return;
-      }
-      // unknown
-      logger.warn('scan.unrecognized_qr');
-    },
-    [origin, locale, router],
-  );
+      case 'unknown':
+        logger.warn('scan.unrecognized_qr');
+        return;
+    }
+  }
 
   return (
     <div className="space-y-5">

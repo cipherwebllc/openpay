@@ -1,25 +1,17 @@
 'use client';
 
-// /scan の中核 UI。<video> を canvas に流して qr-scanner が QR を decode する。
+// /scan の中核 UI。video → qr-scanner で decode → onScanned に raw 文字列を渡す。
 //
-// 状態:
-//   - idle: 「カメラを起動」ボタンを表示 (user gesture が必要なため自動 start 禁止)
-//   - starting: 「準備中…」スピナー
-//   - scanning: video preview + アウトラインハイライト (qr-scanner が描画)
-//   - permission-denied: 拒否時の手順 illustration + 「URL を貼り付け」fallback
-//   - no-camera: 「この端末にカメラがありません」+ URL 貼付 fallback
-//   - error: 一般 error message + URL 貼付 fallback
-//
-// URL 手入力 (fallback): camera が拒否 / 不在の場合でも /scan の deep-link
-// 機能 (parse → router.push) を完全に利用できるようにする。これにより
-// keyboard-only / kiosk 端末でも動作。
+// 各 state (idle / starting / scanning / permission-denied / no-camera / error)
+// で表示が変わるが、URL 手入力 fallback は camera 拒否/不在/エラーのいずれでも
+// 開かれ、keyboard-only / kiosk 端末からも /scan の deep-link 機能を完全に使える。
 
 import { useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useQrScanner, type DecodeResult } from '@/hooks/useQrScanner';
 
 export type QrScannerSurfaceProps = {
-  // decode 成功 / fallback の URL 手入力どちらでも呼ばれる統一 callback。
+  // decode 成功 / 手入力 fallback どちらでも呼ばれる統一 callback。
   onScanned: (raw: string) => void;
 };
 
@@ -200,7 +192,6 @@ function StatusBox({
 }
 
 function CameraIcon() {
-  // 内製 SVG — 外部 icon ライブラリへ依存しない (bundle 影響ゼロ)。
   return (
     <svg
       width="44"

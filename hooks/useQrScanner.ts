@@ -6,53 +6,37 @@
 //   - start() は user gesture (button click) からのみ呼ぶ。getUserMedia は
 //     gesture 由来でないと iOS Safari / Chrome で permission prompt すら出ない。
 //   - qr-scanner module 自体は動的 import で /scan ページのみに code-split。
-//   - decode 結果 (data: string) は呼出側に渡し、本フックは中身を解釈しない
-//     (URL 判定は lib/scan/parseScannedUrl.ts が SoT)。
-//   - 「No QR code found」は qr-scanner が onDecodeError に毎フレーム流すが、
-//     エラーではないので無視。実エラー (camera 切断, NotAllowed) のみ state へ。
+//   - URL 判定は lib/scan/parseScannedUrl.ts が SoT — 本フックは raw data のみ渡す。
+//   - 「No QR code found」は qr-scanner が onDecodeError に毎フレーム流す正常状態。
+//     実エラー (track ended / worker crash) のみ logger.warn で観測点を残す。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { logger } from '@/lib/logger';
 
-// QrScannerModule の type は dynamic import から推論。
 type QrScannerModule = typeof import('qr-scanner');
+type QrScannerInstance = InstanceType<QrScannerModule['default']>;
 
-export type ScannerStatus =
-  | 'idle'
-  | 'starting'
-  | 'scanning'
-  | 'permission-denied'
-  | 'no-camera'
-  | 'error';
-
-export type ScannerState =
-  | { status: Exclude<ScannerStatus, 'error'> }
+type ScannerState =
+  | { status: 'idle' | 'starting' | 'scanning' | 'permission-denied' | 'no-camera' }
   | { status: 'error'; error: Error };
 
-// qr-scanner v1.4.x の ScanResult shape (types 参照)。動的 import の利点を
-// 残すため type-only 依存にせず最小定義を再宣言。
+// qr-scanner v1.4.x ScanResult の最小型 (動的 import の利点を残すため再宣言)。
 export type DecodeResult = { data: string };
 
-export type UseQrScannerOptions = {
-  // 1 つの decode 後に自動で stop するか。OpenPay /scan UX は「読んだら即遷移」
-  // なので true 既定。連続読取が必要なときに false。
+type UseQrScannerOptions = {
+  // 1 decode 後に自動 stop。OpenPay /scan UX は「読んだら即遷移」なので true 既定。
   stopOnDecode?: boolean;
-  // hasCamera() を起動前に呼んで no-camera を device 列挙で先に判定する。
-  // default true。
+  // hasCamera() を起動前に呼んで no-camera を device 列挙で先に判定する。default true。
   preflightCheckCamera?: boolean;
 };
 
-export type UseQrScannerResult = {
+type UseQrScannerResult = {
   state: ScannerState;
-  // 起動 (user gesture から呼ぶこと)。失敗時も reject せず state で表現するため
-  // 呼出側に try/catch を強制しない。
+  // user gesture から呼ぶ。失敗時も reject せず state で表現 (呼出側 try/catch 不要)。
   start(): Promise<void>;
-  // 明示停止。unmount cleanup でも実行されるため UI から呼ぶ必要は通常ない。
   stop(): void;
 };
-
-type QrScannerInstance = InstanceType<QrScannerModule['default']>;
 
 function classifyMediaError(err: unknown): ScannerState {
   // getUserMedia は DOMException で標準名 (NotAllowedError, NotFoundError 等)
@@ -100,14 +84,10 @@ export function useQrScanner(
 
   const start = useCallback(async () => {
     if (scannerRef.current) return;
-    const video = videoRef.current;
-    if (!video) {
-      setState({
-        status: 'error',
-        error: new Error('video element is not mounted'),
-      });
-      return;
-    }
+    // videoRef は QrScannerSurface が JSX で attach し、button click で start を
+    // 呼ぶ時点で必ず attach されているため非 null 断言で OK。null guard は
+    // 不可能状況に対する defensive code になる。
+    const video = videoRef.current!;
     setState({ status: 'starting' });
 
     // dynamic import (chunk 解決) と hasCamera() の reject は無視すると state が

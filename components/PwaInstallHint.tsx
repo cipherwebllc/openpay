@@ -1,15 +1,8 @@
 'use client';
 
-// PWA install を促す hint バナー。
-//
-// 表示条件:
-//   - standalone モード (= 既に home screen から起動) のときは非表示
-//   - iOS Safari: 共有 → ホームに追加 の手順テキスト
-//   - Android Chrome 系: beforeinstallprompt event を受領済なら native prompt 呼出ボタン
-//   - その他 (PC など): 軽い hint のみ
-//
-// platform 判定は UserAgent ベース。UA は spoof 可能だが install 不可な環境で
-// ボタン押してもエラーにならないようにフォールバックは hint テキスト共通。
+// PWA install を促す hint バナー。standalone モードでは非表示。
+// iOS Safari: 手順テキスト / Android Chrome: beforeinstallprompt 経由で native
+// install ボタン / その他: 軽い hint のみ。UA spoof でもどの分岐も無害な fallback。
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';

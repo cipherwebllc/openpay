@@ -1,17 +1,12 @@
 // QR scanner で読み取った text を「実行可能な ScanAction」へ正規化する。
+// URL の安全性 + route 一致判定の SoT。
 //
-// 目的: scanner UI は decode できれば良いだけ、URL の安全性 / 既知 route との
-// 一致判定は本モジュールが SoT になる。
-//
-// 設計:
-//   - 同一 origin の /pay /tip /checkout は既存 parser (lib/url.ts) に通して
-//     params が valid なときだけ kind を返す。「URL 形は正しいが to/amount/items
-//     が壊れている」状態は unknown に落とし、後段で赤エラーになる UX を排除。
-//   - ethereum: (EIP-681) は Phase 1 では reject (kind: 'eip681') — Phase 2 で
-//     in-wallet 直接遷移 UX を検討。
-//   - 外部 origin の http(s) URL は kind: 'external' で UI 側に二段確認させる。
-//   - 上記いずれにも該当しない (URL でない / 内部 path だが route 未知) は
-//     kind: 'unknown' で文字列をそのまま提示。
+//   - 同 origin /pay /tip /checkout は既存 parser (lib/url.ts) に通し、params が
+//     valid なときだけ pay/tip/checkout を返す。「URL 形は正しいが to/amount が
+//     壊れている」状態は unknown に落として「後段で赤エラー」UX を排除。
+//   - ethereum: (EIP-681) は Phase 1 では reject (Phase 2 で in-wallet 遷移検討)。
+//   - 外部 origin の http(s) は external — UI 側に二段確認させる。
+//   - それ以外 (URL でない / 同 origin だが route 未知) は unknown で raw 提示。
 
 import { isAddress } from 'viem';
 import { isLocale, type Locale } from '@/i18n';
@@ -44,8 +39,7 @@ function decomposePath(pathname: string): DecomposedPath | null {
   const segments = trimmed.slice(1).split('/');
 
   // 先頭が locale なら 1 segment 進める (path 上の locale は捨て、出力 href は
-  // 呼出側の currentLocale を採用する確定形 path)。
-  // segments は trimmed.length>0 guard により必ず length>=1 (string 要素)。
+  // 呼出側 currentLocale で組み直す確定形)。
   const start = isLocale(segments[0]) ? 1 : 0;
   const head = segments[start];
   const rest = segments.length - start;
@@ -98,7 +92,7 @@ export function parseScannedUrl(
   const decomposed = decomposePath(url.pathname);
   if (!decomposed) return { kind: 'unknown', raw: text };
 
-  // URLSearchParams は .get(name) を持つため SearchParamsLike を構造的に満たす。
+  // URLSearchParams は SearchParamsLike (.get(name)) を構造的に満たす。
   const sp = url.searchParams;
 
   switch (decomposed.route) {

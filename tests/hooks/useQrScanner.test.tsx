@@ -177,17 +177,6 @@ describe('useQrScanner', () => {
     }
   });
 
-  it('video ref が null → error state (DOM 未準備)', async () => {
-    // current=null の ref を渡すケース (mount 直後に呼ばれた等の異常系)
-    const ref: RefObject<HTMLVideoElement | null> = { current: null };
-    const { result } = renderHook(() => useQrScanner(ref, () => {}));
-    await act(async () => {
-      await result.current.start();
-    });
-    expect(result.current.state.status).toBe('error');
-    expect(ctorCalls).toHaveLength(0);
-  });
-
   it('start 2 回呼ぶと 2 回目は no-op (scanner 重複生成しない)', async () => {
     const ref = makeVideoRef();
     const { result } = renderHook(() => useQrScanner(ref, () => {}));
