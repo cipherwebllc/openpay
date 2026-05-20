@@ -36,4 +36,13 @@ describe('app/manifest.ts (PWA manifest)', () => {
   it('categories で finance アプリとして分類', () => {
     expect(m.categories).toContain('finance');
   });
+
+  it('shortcuts に /ja/scan へのエントリ (Android Chrome long-press 用)', () => {
+    expect(m.shortcuts).toBeDefined();
+    const scan = m.shortcuts!.find((s) => s.url === '/ja/scan');
+    expect(scan).toBeDefined();
+    expect(scan!.name.length).toBeGreaterThan(0);
+    expect(scan!.icons).toBeDefined();
+    expect(scan!.icons![0].sizes).toBe('512x512');
+  });
 });

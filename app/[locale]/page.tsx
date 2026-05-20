@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { QrGenerator } from '@/components/QrGenerator';
@@ -15,6 +16,7 @@ type Tab = 'qr' | 'tip';
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>('qr');
   const t = useTranslations('Home');
+  const tScan = useTranslations('Scan');
   const locale = useLocale() as Locale;
 
   return (
@@ -33,6 +35,25 @@ export default function HomePage() {
           </span>
         </div>
       </header>
+
+      {/* Phase 1 experimental: 「事前接続して、レジで scan → sign」UX の入り口。
+          仮説検証期間中 (memory: feedback_demand_first.md)、demand-gated で
+          home からの 1 動線のみ提供する。需要 signal が出なければ rollback 容易。 */}
+      <Link
+        href={`/${locale}/scan`}
+        prefetch={false}
+        className="mb-4 block rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 transition hover:border-blue-300 hover:bg-blue-100 print:hidden"
+      >
+        <p className="text-sm font-semibold text-blue-900">
+          {tScan('homeCta.title')}
+        </p>
+        <p className="mt-1 text-xs text-blue-800">
+          {tScan('homeCta.body')}
+        </p>
+        <span className="mt-2 inline-block rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+          {tScan('homeCta.button')} →
+        </span>
+      </Link>
 
       <div className="mb-4 inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 print:hidden">
         {(

@@ -90,6 +90,83 @@ describe('i18n: Home.offramp キー (ja/en parity)', () => {
   });
 });
 
+describe('i18n: Scan keys (ja/en parity)', () => {
+  // /scan ページ + PwaInstallHint + QrScannerSurface + ScanResultBanner で使う
+  // i18n key 集合。片方の locale だけ抜けて runtime に t() が key を表示する
+  // regression を fence する。
+  const SCAN_KEYS = [
+    'pageTitle',
+    'pageSubtitle',
+    'connectionTitle',
+    'connectionPreHint',
+    'connectionReadyHint',
+    'scannerTitle',
+    'scannerDescription',
+    'cameraIdleHint',
+    'startCameraButton',
+    'cameraStarting',
+    'permissionDeniedTitle',
+    'permissionDeniedBody',
+    'noCameraTitle',
+    'noCameraBody',
+    'genericErrorTitle',
+    'manualUrlSummary',
+    'manualUrlLabel',
+    'manualUrlSubmit',
+    'manualUrlPaste',
+    'externalQrTitle',
+    'externalQrBody',
+    'externalQrOpen',
+    'eip681Title',
+    'eip681Body',
+    'unknownQrTitle',
+    'unknownQrBody',
+    'dismissResult',
+    'installHintTitle',
+    'installHintIosStep1',
+    'installHintIosStep2',
+    'installHintIosStep3',
+    'installHintAndroidPromptable',
+    'installHintAndroidManual',
+    'installHintAndroidButton',
+    'installHintOther',
+    'installHintDismiss',
+  ] as const;
+
+  for (const key of SCAN_KEYS) {
+    it(`ja.Scan.${key} は非空文字列`, () => {
+      const v = (ja.Scan as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.Scan.${key} は非空文字列`, () => {
+      const v = (en.Scan as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+
+  it('Scan.externalQrBody は {host} placeholder を持つ', () => {
+    expect(
+      (ja.Scan as unknown as Record<string, string>).externalQrBody,
+    ).toContain('{host}');
+    expect(
+      (en.Scan as unknown as Record<string, string>).externalQrBody,
+    ).toContain('{host}');
+  });
+
+  it('Scan.homeCta は title / body / button を ja/en 両方で持つ (空でない)', () => {
+    for (const cta of [
+      (ja.Scan as { homeCta: Record<string, string> }).homeCta,
+      (en.Scan as { homeCta: Record<string, string> }).homeCta,
+    ]) {
+      expect(cta.title.length).toBeGreaterThan(0);
+      expect(cta.body.length).toBeGreaterThan(0);
+      expect(cta.button.length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   it('全 form 名前空間で onramp キー集合が ja と en で一致', () => {
     for (const ns of FORM_NAMESPACES) {
