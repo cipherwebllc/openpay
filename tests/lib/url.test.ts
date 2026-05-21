@@ -240,12 +240,19 @@ describe('parsePayParams', () => {
     }
   });
 
-  it('jpyc + kaia: KAIROS_ADDRESS 未設定なら deployment 不在で reject (UI 非露出と整合)', () => {
-    // 既定 vitest env では NEXT_PUBLIC_JPYC_KAIROS_ADDRESS 未設定。
-    // hasDeployment は TOKEN_DEPLOYMENTS を真値とするため false → invalid。
-    const r = parsePayParams(
-      search(`to=${VALID_TO}&token=jpyc&chain=kaia`),
+  it('jpyc + kaia: KAIROS_ADDRESS 未設定なら deployment 不在で reject (UI 非露出と整合)', async () => {
+    // codex P2: static import だと ambient env (developer の .env.local 等) を
+    // 引いてしまい flip する。dynamic import + env を明示 clear して isolate する。
+    const previousKairos = process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
+    delete process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
+    vi.resetModules();
+    const mod = await import('@/lib/url');
+    const r = mod.parsePayParams(
+      new URLSearchParams(`to=${VALID_TO}&token=jpyc&chain=kaia`),
     );
+    if (previousKairos !== undefined) {
+      process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS = previousKairos;
+    }
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.errorKind).toBe('invalid');
@@ -261,19 +268,24 @@ describe('parsePayParams', () => {
     // いた → 生成された Kaia QR は parser に拒否され決済不能だった。
     // 修正後は TOKEN_DEPLOYMENTS の実 deployment を見るので env 設定済なら
     // 受理されることを fence。
-    vi.resetModules();
+    const previousKairos = process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
     process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
       '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
+    vi.resetModules();
     const mod = await import('@/lib/url');
     const r = mod.parsePayParams(
       new URLSearchParams(`to=${VALID_TO}&token=jpyc&chain=kaia`),
     );
+    if (previousKairos === undefined) {
+      delete process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
+    } else {
+      process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS = previousKairos;
+    }
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.params.token).toBe('jpyc');
       expect(r.params.chain).toBe('kaia');
     }
-    delete process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
   });
 
   it('to がアドレス形式でない → エラー', () => {
