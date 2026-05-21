@@ -56,6 +56,23 @@ describe('SiteFooter', () => {
     );
   });
 
+  it('X (旧 Twitter) 公式アカウントへのリンクが aria-label 付きで露出 (ja)', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'ja' });
+    const link = screen.getByRole('link', {
+      name: 'OpenPay の X (旧 Twitter)',
+    });
+    expect(link.getAttribute('href')).toBe('https://x.com/openpay_jp');
+    expect(link.getAttribute('target')).toBe('_blank');
+    // tabnabbing 防御 (window.opener 経由) — 既存 GitHub link と同方針
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('en locale で X link aria-label が "OpenPay on X" として render', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'en' });
+    const link = screen.getByRole('link', { name: 'OpenPay on X' });
+    expect(link.getAttribute('href')).toBe('https://x.com/openpay_jp');
+  });
+
   it('print:hidden が footer 要素に付与されている (QR ポスター印刷時非表示)', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     const footer = screen.getByRole('contentinfo');

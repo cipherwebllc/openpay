@@ -469,7 +469,8 @@
       "tokutei": "Business Disclosure",
       "history": "Transaction history"
     },
-    "sourceLink": "Source on GitHub"
+    "sourceLink": "Source on GitHub",
+    "xLink": "OpenPay on X"
   },
   "History": {
     "pageTitle": "Transaction history",
