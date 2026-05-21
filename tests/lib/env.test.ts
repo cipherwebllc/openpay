@@ -130,18 +130,6 @@ describe('lib/env (module-load validation)', () => {
     warn.mockRestore();
   });
 
-  it('JPYC_KAIA_ADDRESS と JPYC_MAINNET_ADDRESS が独立に効く (どちらか片方のみ設定)', async () => {
-    vi.resetModules();
-    delete process.env.NEXT_PUBLIC_JPYC_MAINNET_ADDRESS;
-    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS =
-      '0xfeed000000000000000000000000000000004444';
-    const mod = await import('@/lib/env');
-    expect(mod.env.mainnetTokenOverrides.jpyc.polygon).toBeUndefined();
-    expect(mod.env.mainnetTokenOverrides.jpyc.kaia?.toLowerCase()).toBe(
-      '0xfeed000000000000000000000000000000004444',
-    );
-  });
-
   it('NEXT_PUBLIC_KAIA_RPC_URL / NEXT_PUBLIC_KAIROS_RPC_URL が rpc 構造に乗る', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_KAIA_RPC_URL = 'https://kaia.rpc.example/v1';

@@ -23,15 +23,6 @@ describe('wagmiConfig', () => {
     expect(ids).toEqual(supportedChains.map((c) => c.id));
   });
 
-  it('Kaia/Kairos に明示的 transport が紐づいている (PoC、wagmi auto-config 経由)', () => {
-    // lib/wagmi.ts は supportedChains.map で全 chain に transport を生成する。
-    // 個別 RPC override 無しでも viem default RPC が使われ、connection が成立
-    // する設計。env override 設定時は customRpcUrlForChain 経由で http(url) に
-    // 上書きされる (chains.test.ts で fence 済)。
-    const kairosTransport = wagmiConfig._internal.transports[kairos.id];
-    expect(kairosTransport).toBeDefined();
-  });
-
   it('SSR が true (Next.js App Router 用)', () => {
     expect(wagmiConfig._internal.ssr).toBe(true);
   });

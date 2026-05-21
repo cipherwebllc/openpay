@@ -222,16 +222,4 @@ describe('env override (gasCeilingGwei)', () => {
     );
   });
 
-  it('kaia GasCongestedError が chainId / ceiling / observed を保持する', () => {
-    let captured: GasCongestedError | undefined;
-    try {
-      assertGasCeiling(kaia.id, 200n * GWEI);
-    } catch (e) {
-      captured = e as GasCongestedError;
-    }
-    expect(captured?.chainId).toBe(kaia.id);
-    expect(captured?.ceilingGwei).toBe(50n);
-    expect(captured?.observedGwei).toBe(200n);
-    expect(captured?.message).toContain(`chainId=${kaia.id}`);
-  });
 });

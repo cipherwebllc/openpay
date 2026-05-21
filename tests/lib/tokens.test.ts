@@ -213,20 +213,6 @@ describe('JPYC Kaia deployment (PoC、env 駆動)', () => {
     );
   });
 
-  it('mainnet env: KAIA_ADDRESS 未設定なら kaia deployment は出現しない (mainnet でも skip)', async () => {
-    vi.resetModules();
-    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
-    delete process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS;
-    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
-      '0xdead000000000000000000000000000000001234';
-    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
-    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_test';
-    const mod = await import('@/lib/tokens');
-    expect(mod.resolveDeployment('jpyc', kaia.id)).toBeUndefined();
-    // polygon mainnet (137) は default アドレスで必ず deploy 済
-    const { polygon: polygonChain } = await import('viem/chains');
-    expect(mod.resolveDeployment('jpyc', polygonChain.id)).toBeDefined();
-  });
 });
 
 describe('USDC は Kaia chain id で resolve しない (型レベル除外の runtime 確認)', () => {

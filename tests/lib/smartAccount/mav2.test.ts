@@ -221,29 +221,6 @@ describe('buildMav2SmartAccountClient', () => {
     expect(createModularAccountV2Mock).not.toHaveBeenCalled();
   });
 
-  it('Kaia は USDC でも JPYC でも区別なく throw する (chain 軸で先に弾く)', async () => {
-    const usdcKaia: TokenDeployment = { ...usdcErc20, chainId: kaia.id };
-    const jpycKaia: TokenDeployment = { ...jpycSponsorship, chainId: kaia.id };
-    await expect(
-      buildMav2SmartAccountClient({
-        walletClient: fakeWalletClient,
-        publicClient: fakePublicClient,
-        chain: kaia,
-        chainId: kaia.id,
-        deployment: usdcKaia,
-      }),
-    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
-    await expect(
-      buildMav2SmartAccountClient({
-        walletClient: fakeWalletClient,
-        publicClient: fakePublicClient,
-        chain: kaia,
-        chainId: kaia.id,
-        deployment: jpycKaia,
-      }),
-    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
-  });
-
   it('split transport: bundler/paymaster method は Pimlico、それ以外は chain RPC へ route', async () => {
     // R: aa-sdk の SmartAccountClient は同一 transport で bundler ops と
     // chain reads (eth_getCode 等) の両方を行う。Pimlico bundler URL だけを

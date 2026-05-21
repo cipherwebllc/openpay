@@ -47,20 +47,15 @@ export type TokenDeployment = {
 //   - 万一誤ったアドレスを使用すると顧客資金が失われる可能性があります。
 //   - 不一致が見つかった場合は per-chain env (NEXT_PUBLIC_USDC_<chain>_<env>_ADDRESS) で上書き可能。
 
-// JPYC v3 (改正資金決済法上の電子決済手段、memory:reference_jpyc_legal_status)。
-// memory:reference_jpyc_contract — Polygon mainnet/Amoy + Sepolia + Avalanche
-// Fuji で 0xE7C3…3c29 同一アドレス、EIP-2612 permit 対応 (実測 2026-04-30)。
-// Kaia mainnet 上の JPYC は別 contract address (2026-05-15 deploy)、env
-// override (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で受ける設計。permit 対応有無は
-// 本 PoC 時点で未検証 — 本投入前に Kaia mainnet bytecode で確認必須。
+// JPYC v3 (memory:reference_jpyc_contract — Polygon/Sepolia/Avalanche 同一
+// アドレス、EIP-2612 permit 対応)。Kaia 上は別 address、permit 対応は本投入前
+// に bytecode 確認。
 const JPYC_POLYGON_MAINNET: Address =
   '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 
-// JPYC Kaia mainnet (2026-05-15 公式 deploy)。実 contract address は PoC 時点で
-// 公式 source から取得していないため、env override (NEXT_PUBLIC_JPYC_KAIA_ADDRESS)
-// で渡される想定。未設定なら kaia deployment は skip (UI から非表示)。
-// TODO(本投入): JPYC 公式 docs / Kaia explorer で実 address を確認し、誤入力で
-// 顧客資金損失を防ぐため少額の test transfer で確認後に env へ投入する。
+// JPYC Kaia mainnet: 実 contract address は env override
+// (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で渡す。未設定なら kaia deployment skip。
+// 本投入時は誤 address で顧客資金損失を防ぐため少額 test transfer で確認後に投入。
 
 // USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet)
 const USDC_BASE_MAINNET: Address =

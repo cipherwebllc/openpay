@@ -45,13 +45,7 @@ const SLUG_TO_CHAIN: Record<ChainSlug, Chain> = isMainnet
   ? MAINNET_SLUG_TO_CHAIN
   : TESTNET_SLUG_TO_CHAIN;
 
-const ALL_SLUGS: readonly ChainSlug[] = [
-  'base',
-  'arbitrum',
-  'optimism',
-  'polygon',
-  'kaia',
-];
+const ALL_SLUGS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon', 'kaia'];
 
 // 順序は wagmi createConfig 用 + UI の表示順
 // (Base 既定 → Arbitrum → Optimism → Polygon → Kaia)。
