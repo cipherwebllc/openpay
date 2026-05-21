@@ -77,11 +77,19 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(sbiLink).toHaveAttribute('href', 'https://www.sbivc.co.jp/');
     // ja では Japan residents only / locale switch ヒントは出ない
     await expect(page.getByText(/日本居住者のみ/)).toHaveCount(0);
-    // JPYC / USDC 店主向け gas 迂回路 (MetaMask Swap) hint。USDC は Base / Arbitrum
-    // / Optimism / Polygon 対応のため title は POL/ETH 並記、body も多 chain 文言。
+    // JPYC / USDC 店主向け gas 迂回路 (MetaMask Swap) hint。UX 簡潔化で <details>
+    // 折り畳みに変更したため、summary (title) は visible、body は user が summary
+    // を click して展開後に visible になる。
+    const gasHintTitle = page.getByText(
+      /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,
+    );
+    await expect(gasHintTitle).toBeVisible();
+    // closed 状態では body は折り畳み内で hidden (新 UX 仕様)
     await expect(
-      page.getByText(/ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/),
-    ).toBeVisible();
+      page.getByText(/Base \/ Arbitrum \/ Optimism は ETH/),
+    ).toBeHidden();
+    // 展開 → body 露出
+    await gasHintTitle.click();
     await expect(
       page.getByText(/Base \/ Arbitrum \/ Optimism は ETH/),
     ).toBeVisible();
