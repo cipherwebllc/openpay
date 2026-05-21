@@ -236,29 +236,37 @@ NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
 - [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
 - [ ] env 投入後 Sentry の `gas_congested` 発生率 < 0.1%
 
-### 7.6 HashPort + Kaia 警告 UI (実装済)
+### 7.6 MAv2 + Kaia defensive 警告 UI (実装済)
 
 MAv2 経路は Pimlico Kaia 非対応で早期 throw され、`errorMav2KaiaPolygon`
-i18n message で「Polygon チェーン版の決済 QR をご利用ください」と案内する
-(commit に実装済、Payment/Tip/Checkout 3 form ×ja/en 全カバー)。
+i18n message で「Polygon / Base / Arbitrum / Optimism 等の他チェーン版を
+ご利用ください」と案内する (commit に実装済、Payment/Tip/Checkout 3 form
+× ja/en 全カバー)。
+
+**注意**: HashPort wallet は Kaia 非対応 (Ethereum/Polygon/Base/BNB/Avalanche/
+Arbitrum/Aptos のみ) のため、本ガードは現時点で実発火しない defensive 実装。
+将来 MAv2 系 wallet が Kaia 対応した場合に sponsorship 不能を fail-safe で
+案内する役割。
 
 - [x] `lib/smartAccount/mav2.ts` chainId 8217/1001 で `errorMav2KaiaPolygon` i18nKey throw
 - [x] i18n message を `messages/{ja,en}.json` の Payment/Tip/Checkout 3 namespace に追加
 - [x] `tests/lib/i18nKeys.test.ts` で 6 件全て存在を fence
-- [ ] **実機 QA**: HashPort wallet + Kaia chain QR で警告文が表示されるか目視確認
+- [ ] **将来 MAv2+Kaia wallet 出現時**: Sentry `smart_account.mav2_kaia_rejected`
+      の実発火を観測したら、当該 wallet で実機 QA + 文言再確認
 
 ### 7.7 監視 / alert 追加
 
 logger.warn による Sentry observability は既に code 側で実装済:
 
-- `smart_account.mav2_disabled` (HashPort × flag off)
-- `smart_account.unknown_delegation` (未知 delegate)
-- `smart_account.mav2_kaia_rejected` (MAv2 × Kaia chain) — Polygon フォールバック観測用
+- `smart_account.mav2_disabled` (MAv2 wallet × flag off、HashPort 等 Polygon 経路の運用シグナル)
+- `smart_account.unknown_delegation` (未知 delegate、新規 wallet 種別の流入観測)
+- `smart_account.mav2_kaia_rejected` (MAv2 × Kaia chain、新 MAv2 系 wallet が Kaia 対応した signal)
 - 既存 `gas_congested` event (chain 共通)
 
 Sentry dashboard 側で alert rule を追加 (code change なし、dashboard 操作のみ):
 
-- [ ] `event:"smart_account.mav2_kaia_rejected"` の発火頻度を週次 alert (HashPort × Kaia の需要シグナル)
+- [ ] `event:"smart_account.mav2_kaia_rejected"` の発火頻度を週次 alert
+      (MAv2 系の新 wallet が Kaia 対応した signal、現状 HashPort では発火しない)
 - [ ] `gas_congested` × `chainId:8217` filter (既存 polygon rule の複製)
 - [ ] Pimlico Kaia API balance を別 alert で監視
 - [ ] /api/log/payment に kaia chain 集計を追加 (gmv 把握)

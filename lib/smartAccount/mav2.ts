@@ -65,9 +65,11 @@ export async function buildMav2SmartAccountClient(args: {
   const paymasterMode = resolvePaymasterMode(deployment);
 
   // Pimlico Kaia は MAv2 非対応 (Simple Account / Safe / Thirdweb のみ)。
-  // Kaia/Kairos で MAv2 経路に来たら specific i18nKey で Polygon フォールバック
-  // を UI から案内 (memory:project_hashport_target — HashPort は Polygon 中心)。
-  // Sentry 観測: HashPort + Kaia の遭遇頻度を集計し対応優先度判断に使う。
+  // 2026-05 時点で MAv2 wallet で Kaia 対応のものは確認されていない (HashPort は
+  // Ethereum/Polygon/Base/BNB/Avalanche/Arbitrum/Aptos のみで Kaia 非対応)。
+  // 本ガードは defensive: 将来 MAv2 系 wallet が Kaia 対応した場合に sponsorship
+  // 不能を fail-safe で UI 案内 (errorMav2KaiaPolygon) に倒すため。Sentry 観測で
+  // smart_account.mav2_kaia_rejected が実発火し始めたら需要評価のトリガーになる。
   if (chainId === kaia.id || chainId === kairos.id) {
     logger.warn('smart_account.mav2_kaia_rejected', {
       chainId,

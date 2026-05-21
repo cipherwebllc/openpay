@@ -183,11 +183,12 @@ describe('buildMav2SmartAccountClient', () => {
     expect(config.value?.url).toBe('https://polygon-rpc.example/test');
   });
 
-  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError + Sentry 観測 log + Polygon 案内 i18nKey', async () => {
+  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError + Sentry 観測 log + 他 chain 案内 i18nKey', async () => {
     // Pimlico Kaia 対応 Smart Account は Safe / Simple Account / Thirdweb のみ。
-    // MAv2 経路で kaia 来訪 → 早期 throw、UI は errorMav2KaiaPolygon で Polygon
-    // フォールバックを具体的に案内する (memory:project_hashport_target — HashPort
-    // は Polygon 中心、Kaia 移行 shape ではない)。
+    // MAv2 wallet で Kaia 対応のものは 2026-05 時点で確認されていない (HashPort
+    // wallet は Kaia 非対応) が、defensive guard として将来の MAv2 + Kaia 遭遇
+    // に対し errorMav2KaiaPolygon で他 chain (Polygon/Base/Arbitrum/Optimism)
+    // フォールバックを案内する。
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const jpycKaia: TokenDeployment = {
       ...jpycSponsorship,
