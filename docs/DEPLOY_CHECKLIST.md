@@ -151,3 +151,91 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 | Sentry errors | (Sentry org dashboard) |
 | Vercel Analytics (pageviews) | Vercel Project → Analytics tab |
 | Pimlico balance | (Pimlico dashboard、低残のとき alert を別途設定) |
+
+## 7. Kaia chain 投入手順 (kaia-poc branch merge 前のチェックリスト)
+
+memory:project_kaia_evaluation の通り Kaia 対応は demand 顕在化まで `kaia-poc`
+branch で draft 保留。下記 6 項目を **全て** 完了してから main へ merge:
+
+### 7.1 contract address 確認 (顧客資金損失リスク)
+
+```bash
+# JPYC 公式 docs か Kaia explorer (kaiascan.io) で Kaia mainnet 上の
+# JPYC contract address を取得。少額 transfer で動作確認後に投入。
+NEXT_PUBLIC_JPYC_KAIA_ADDRESS=0x...  # ← 取得値
+```
+
+- [ ] JPYC 公式 / kaiascan.io で address 公表確認
+- [ ] Kairos testnet で少額 test transfer (ERC20 transfer 成功)
+- [ ] Vercel env に Sensitive ではなく通常で投入 (public information)
+
+### 7.2 EIP-2612 permit 対応の bytecode 検証
+
+```bash
+# JPYC v3 が Kaia 上で EIP-2612 permit を実装しているか実 RPC で検証。
+# 既存 Polygon/Sepolia/Avalanche v3 は確認済 (memory:reference_jpyc_contract)、
+# Kaia は別 deploy。OpenPay sponsorship 経路と x402 EIP-3009 が依存。
+cast call $NEXT_PUBLIC_JPYC_KAIA_ADDRESS "DOMAIN_SEPARATOR()" \
+  --rpc-url https://public-en.node.kaia.io
+```
+
+- [ ] DOMAIN_SEPARATOR()返り値が 0x ではない (permit 実装あり)
+- [ ] permit / nonces / version の signature 実装確認
+
+### 7.3 Kairos testnet smoke (実 transaction)
+
+```bash
+# Pimlico Kairos endpoint + SimpleAccount (7702) で実 UserOp を投げる
+NEXT_PUBLIC_NETWORK_ENV=testnet \
+NEXT_PUBLIC_JPYC_KAIROS_ADDRESS=0x... \
+NEXT_PUBLIC_KAIROS_RPC_URL=https://public-en-kairos.node.kaia.io \
+npm run dev
+# → /pay?to=...&token=jpyc&chain=kaia&amount=1 で sponsored gasless 経路を実機 submit
+```
+
+- [ ] Pimlico Kairos endpoint へ実 API key 接続 (eth_supportedEntryPoints OK)
+- [ ] UserOp submit → receipt 取得まで通る
+- [ ] sponsorship paymaster の policy id が Kairos でも適用される
+- [ ] Sentry に `gas_congested` 等の予期せぬ event 無し
+
+### 7.4 gas ceiling tune (実測値)
+
+```bash
+# Pimlico fast tier の Kaia mainnet quote を 1 週間サンプリングし、
+# 安全側 50 gwei 既定値 (lib/gasCeiling.ts) が妥当か確認。
+# spike 時の最大値 + α を ceiling に設定。
+NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
+```
+
+- [ ] 1 週間 sampling で 平常 P99 gas price 記録
+- [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
+- [ ] env 投入後 Sentry の `gas_congested` 発生率 < 0.1%
+
+### 7.5 HashPort + Kaia 警告 UI
+
+MAv2 経路は Pimlico Kaia 非対応で早期 throw されるが、UI で「Polygon に
+切替えてください」案内が無いと UX 不親切 (memory:project_hashport_target)。
+
+- [ ] `components/CheckoutForm.tsx` / `TipForm.tsx` / `PaymentForm.tsx` で
+      Kaia + MAv2 検出時に Polygon フォールバック案内を表示
+- [ ] i18n message 追加 (ja / en)
+
+### 7.6 監視 / alert 追加
+
+- [ ] Sentry alert rule 「Kaia gas_congested spike」を `chainId:8217` filter で
+      追加 (既存 polygon の rule を kaia 用に複製)
+- [ ] Pimlico Kaia API balance を別 alert で監視
+- [ ] /api/log/payment に kaia chain 集計を追加 (gmv 把握)
+
+### 7.7 Rollback path 確認
+
+env unset で完全 kill-switch (`lib/tokens.ts` の deployment skip で UI 非露出)。
+
+```bash
+# Kaia を即座に無効化したい場合
+vercel env rm NEXT_PUBLIC_JPYC_KAIA_ADDRESS production
+vercel --prod
+```
+
+- [ ] dry-run で env 削除 → Kaia chain selector が消えることを staging で確認
+- [ ] kaia-poc branch を main から revert する手順を README に明記
