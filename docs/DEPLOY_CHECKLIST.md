@@ -203,7 +203,14 @@ NEXT_PUBLIC_PIMLICO_API_KEY=<key> node scripts/verify-kaia-pimlico.mjs
 
 script で自動化できない部分: 実 Smart Account の EIP-7702 delegate + UserOp submit。
 
+**JPYC Faucet が Kairos 対応 (2026-05-18 公式発表)** で大幅に軽量化:
+- https://prtimes.jp/main/html/rd/p/000000316.000054018.html
+- Kairos 用 JPYC を無償取得可能 → funded EOA 準備が即時化
+
 ```bash
+# Step 1: Kairos 用 JPYC を JPYC Faucet から取得 (公式 URL は JPYC docs 参照)
+# Step 2: 同 EOA の Kairos KAIA gas を Kairos public faucet から取得
+# Step 3: OpenPay を Kairos 向けに起動
 NEXT_PUBLIC_NETWORK_ENV=testnet \
 NEXT_PUBLIC_JPYC_KAIROS_ADDRESS=0x... \
 NEXT_PUBLIC_KAIROS_RPC_URL=https://public-en-kairos.node.kaia.io \
@@ -211,6 +218,7 @@ npm run dev
 # → /pay?to=...&token=jpyc&chain=kaia&amount=1 で sponsored gasless 経路を実機 submit
 ```
 
+- [ ] JPYC Faucet (Kairos) から testnet JPYC 取得
 - [ ] UserOp submit → receipt 取得まで通る
 - [ ] sponsorship paymaster の policy id が Kairos でも適用される
 - [ ] Sentry に `gas_congested` 等の予期せぬ event 無し
