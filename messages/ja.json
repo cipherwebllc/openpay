@@ -18,10 +18,10 @@
       "jaResidentsOnlyNote": "(日本居住者のみ)",
       "japaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。",
       "gasHint": {
-        "title": "ガス代 (POL) が無くて取引所に送れないとき",
-        "body": "JPYC を取引所に送る際は Polygon のネットワーク手数料 (POL) が少額必要です。POL を保有していなくても、MetaMask の「スワップ」機能を使えば売上 JPYC のごく一部を POL に交換できます (MetaMask の gasless swap 機能による)。",
+        "title": "ガス代 (POL / ETH) が無くて取引所に送れないとき",
+        "body": "受け取った JPYC / USDC を取引所に送るには、各 chain のネットワーク手数料 (Polygon は POL、Base / Arbitrum / Optimism は ETH) が少額必要です。MetaMask の「スワップ」機能で売上の一部を各 chain のネイティブトークンに両替できます。Polygon は MetaMask の gasless swap 機能により POL を保有していなくても swap 可能ですが、Base / Arbitrum / Optimism では swap 開始に少額の ETH が別途必要です。",
         "linkLabel": "MetaMask Swap を開く",
-        "disclaimer": "※ MetaMask 機能の動作可否は MetaMask 提供であり、OpenPay は関与しません。Polygon の混雑状況や対応トークン経路により swap が成立しない場合があります。"
+        "disclaimer": "※ MetaMask 機能の動作可否・対応 chain は MetaMask 提供であり、OpenPay は関与しません。各 chain の混雑状況や対応トークン経路により swap が成立しない場合があります。"
       }
     }
   },
