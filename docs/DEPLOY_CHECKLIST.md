@@ -142,6 +142,10 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 - `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定済 (mainnet)
 - JPYC v3 contract `0xE7C3...3c29` が 4 chain (Polygon/Sepolia/Avalanche Fuji/Amoy) で alive
 - Sentry breadcrumb は wallet address を含み得るため `sendDefaultPii: false` を維持
+- **`npm audit --production` の vulnerabilities が production-blocking 数を超えていない**
+  - 2026-05 audit: 37 件 (15 low / 22 moderate)、主に `@reown/appkit-*` 系 (WalletConnect)
+  - mainnet deploy 前: `npm audit fix --review` で breaking change 影響を確認しつつ moderate を 0 に
+  - `npm audit fix --force` は walletconnect の major bump を巻き込むため別 PR で扱う
 
 ## 6. 監視ダッシュボード
 

@@ -43,6 +43,7 @@ import {
 } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
+import { logger } from '@/lib/logger';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 
 type ConnectedWalletClient = NonNullable<GetWalletClientReturnType>;
@@ -65,7 +66,12 @@ export async function buildMav2SmartAccountClient(args: {
 
   // Pimlico Kaia は MAv2 非対応 (Simple Account / Safe / Thirdweb のみ)。
   // Kaia/Kairos で MAv2 経路に来たら Polygon フォールバックを caller に任せる。
+  // Sentry 観測: HashPort + Kaia の遭遇頻度を集計し UI 警告の整備優先度判断に使う。
   if (chainId === kaia.id || chainId === kairos.id) {
+    logger.warn('smart_account.mav2_kaia_rejected', {
+      chainId,
+      symbol: deployment.symbol,
+    });
     throw new IncompatibleSmartAccountError({
       delegateAddress: null,
       i18nKey: 'errorIncompatibleSmartAccount',

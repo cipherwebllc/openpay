@@ -183,9 +183,11 @@ describe('buildMav2SmartAccountClient', () => {
     expect(config.value?.url).toBe('https://polygon-rpc.example/test');
   });
 
-  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError', async () => {
+  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError + Sentry 観測 log', async () => {
     // Pimlico Kaia 対応 Smart Account は Safe / Simple Account / Thirdweb のみ。
     // MAv2 経路で kaia 来訪 → 早期 throw、Polygon フォールバック UX を caller に任せる。
+    // logger.warn が呼ばれれば lib/logger.ts の reportToSentry で Sentry に届く。
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const jpycKaia: TokenDeployment = {
       ...jpycSponsorship,
       chainId: kaia.id,
@@ -202,6 +204,13 @@ describe('buildMav2SmartAccountClient', () => {
     // 早期 throw のため MAv2 構築すら走らない (USDC 拒否と同じ fence)
     expect(createModularAccountV2Mock).not.toHaveBeenCalled();
     expect(splitMock).not.toHaveBeenCalled();
+    // Sentry alert rule "smart_account.mav2_kaia_rejected" のための event tag
+    const warnArgs = consoleWarn.mock.calls.flat().map(String);
+    expect(
+      warnArgs.some((s) => s.includes('smart_account.mav2_kaia_rejected')),
+    ).toBe(true);
+    expect(warnArgs.some((s) => s.includes(`"chainId":${kaia.id}`))).toBe(true);
+    consoleWarn.mockRestore();
   });
 
   it('Kairos testnet (1001): Pimlico Kairos も MAv2 非対応のため早期 throw', async () => {
