@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { baseSepolia, polygonAmoy } from 'viem/chains';
+import { baseSepolia, kairos, polygonAmoy } from 'viem/chains';
 import { wagmiConfig } from '@/lib/wagmi';
 import { supportedChains } from '@/lib/chains';
 
@@ -15,11 +15,21 @@ afterEach(() => {
 // chains/env/wagmi の連動が壊れた時にここが落ちる。
 
 describe('wagmiConfig', () => {
-  it('testnet env では chains に Polygon Amoy + Base Sepolia が登録される', () => {
+  it('testnet env では chains に Polygon Amoy + Base Sepolia + Kairos が登録される', () => {
     const ids = wagmiConfig.chains.map((c) => c.id);
     expect(ids).toContain(polygonAmoy.id);
     expect(ids).toContain(baseSepolia.id);
+    expect(ids).toContain(kairos.id);
     expect(ids).toEqual(supportedChains.map((c) => c.id));
+  });
+
+  it('Kaia/Kairos に明示的 transport が紐づいている (PoC、wagmi auto-config 経由)', () => {
+    // lib/wagmi.ts は supportedChains.map で全 chain に transport を生成する。
+    // 個別 RPC override 無しでも viem default RPC が使われ、connection が成立
+    // する設計。env override 設定時は customRpcUrlForChain 経由で http(url) に
+    // 上書きされる (chains.test.ts で fence 済)。
+    const kairosTransport = wagmiConfig._internal.transports[kairos.id];
+    expect(kairosTransport).toBeDefined();
   });
 
   it('SSR が true (Next.js App Router 用)', () => {

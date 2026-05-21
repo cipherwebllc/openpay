@@ -47,8 +47,12 @@ export type TokenDeployment = {
 //   - 万一誤ったアドレスを使用すると顧客資金が失われる可能性があります。
 //   - 不一致が見つかった場合は per-chain env (NEXT_PUBLIC_USDC_<chain>_<env>_ADDRESS) で上書き可能。
 
-// JPYC v3 (memory:reference_jpyc_contract — Polygon mainnet/Amoy + Sepolia +
-// Avalanche Fuji 同一アドレス、EIP-2612 permit 対応 / 実測 2026-04-30)
+// JPYC v3 (改正資金決済法上の電子決済手段、memory:reference_jpyc_legal_status)。
+// memory:reference_jpyc_contract — Polygon mainnet/Amoy + Sepolia + Avalanche
+// Fuji で 0xE7C3…3c29 同一アドレス、EIP-2612 permit 対応 (実測 2026-04-30)。
+// Kaia mainnet 上の JPYC は別 contract address (2026-05-15 deploy)、env
+// override (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で受ける設計。permit 対応有無は
+// 本 PoC 時点で未検証 — 本投入前に Kaia mainnet bytecode で確認必須。
 const JPYC_POLYGON_MAINNET: Address =
   '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 

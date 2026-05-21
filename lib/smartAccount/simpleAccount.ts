@@ -4,6 +4,22 @@
 //
 // AccountKind が 'none' (空 EOA) または 'pimlico-simple-7702' (既に Pimlico
 // SimpleAccount に委任済) のときに使う。
+//
+// 対応 chain (EIP-7702 + Pimlico SimpleAccount 両方が必要):
+//   - Polygon mainnet (137) / Amoy (80002): EIP-7702 (Pectra-equivalent) +
+//     Pimlico bundler 対応済 (本コードベースの実運用 chain)
+//   - Base / Arbitrum / Optimism mainnet+sepolia: 同上 (USDC 用、Pimlico
+//     erc20 paymaster)
+//   - Kaia mainnet (8217) / Kairos testnet (1001): Kaia Prague hardfork で
+//     KIP-228 として EIP-7702 を公式実装済 (2026-03 Osaka hardfork が後続
+//     のため Prague は activated 済)。Pimlico も `kaia` / `kaia-kairos` slug
+//     で SimpleAccount を対応 chain list に明示掲載。memory:project_kaia_evaluation
+//     2026-05-22 評価ノート参照。
+//
+// to7702SimpleSmartAccount は chain 側の EIP-7702 サポートに依存する関数で、
+// 非対応 chain で呼ぶと EIP-7702 authorization が `eth_sendRawTransaction`
+// 時点で reject される。新規 chain 追加時は EIP-7702 hardfork activation を
+// 必ず確認すること。
 
 import { http, type PublicClient } from 'viem';
 import { createSmartAccountClient, type SmartAccountClient } from 'permissionless';
