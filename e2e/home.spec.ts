@@ -77,6 +77,17 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(sbiLink).toHaveAttribute('href', 'https://www.sbivc.co.jp/');
     // ja では Japan residents only / locale switch ヒントは出ない
     await expect(page.getByText(/日本居住者のみ/)).toHaveCount(0);
+    // JPYC-only 店主向け gas 迂回路 (MetaMask Swap) hint
+    await expect(
+      page.getByText(/ガス代 \(POL\) が無くて取引所に送れないとき/),
+    ).toBeVisible();
+    const mmSwapLink = page.getByRole('link', { name: /MetaMask Swap を開く/ });
+    await expect(mmSwapLink).toHaveAttribute(
+      'href',
+      'https://portfolio.metamask.io/swap',
+    );
+    await expect(mmSwapLink).toHaveAttribute('target', '_blank');
+    await expect(mmSwapLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   test('mobile: Tip widget で ENS (vitalik.eth) 解決後の 0x display も overflow しない (実 bug シナリオ)', async ({

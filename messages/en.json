@@ -16,7 +16,13 @@
       "row": "Off-ramp {token}",
       "hint": "Check each exchange's site for supported chains and conditions.",
       "jaResidentsOnlyNote": "(Japan residents only)",
-      "japaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade."
+      "japaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
+      "gasHint": {
+        "title": "When you have no gas (POL) to send tokens to an exchange",
+        "body": "Sending JPYC to an exchange requires a small amount of Polygon network fee (POL). Even with zero POL balance, MetaMask's Swap feature lets you exchange a few yen worth of your JPYC into POL (via MetaMask's gasless swap on Polygon).",
+        "linkLabel": "Open MetaMask Swap",
+        "disclaimer": "Note: Availability and success of MetaMask features depend on MetaMask itself; OpenPay is not involved. Polygon network congestion or unsupported token routes may cause the swap to fail."
+      }
     }
   },
   "QrGenerator": {

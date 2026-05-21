@@ -140,6 +140,26 @@ export default function HomePage() {
           })}
         </ul>
         <p className="mt-3 text-xs text-slate-400">{t('offramp.hint')}</p>
+
+        {/* JPYC-only / POL 残高ゼロの novice 店主向け迂回路 (memory:
+            project_jpyc_only_users.md)。顧客側は OpenPay の gasless で救済済だが、
+            受取後の cash-out 経路にも同じ詰みがあるので MetaMask Swap (gasless meta-tx)
+            を案内する。MetaMask 提供機能なので OpenPay は責任範囲外と disclaimer 明示。 */}
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          <p className="font-semibold">{t('offramp.gasHint.title')}</p>
+          <p className="mt-1 leading-relaxed">{t('offramp.gasHint.body')}</p>
+          <a
+            href="https://portfolio.metamask.io/swap"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-block font-medium text-amber-900 underline hover:text-amber-700"
+          >
+            {t('offramp.gasHint.linkLabel')} ↗
+          </a>
+          <p className="mt-2 text-[11px] text-amber-800">
+            {t('offramp.gasHint.disclaimer')}
+          </p>
+        </div>
       </section>
 
     </main>
