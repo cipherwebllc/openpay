@@ -1,11 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   addressExplorerUrl,
   blockExplorerUrl,
   chainForSlug,
   customRpcUrlForChain,
+  isJpycChainSlug,
   isSupportedChainId,
   isValidChainSlug,
+  JPYC_CHAINS,
   slugForChain,
   supportedChains,
   txExplorerUrl,
@@ -105,14 +107,62 @@ describe('isSupportedChainId', () => {
   });
 });
 
+describe('JPYC_CHAINS / isJpycChainSlug', () => {
+  it('JPYC_CHAINS は exactly [polygon, kaia] (順序保持)', () => {
+    // memory:project_kaia_evaluation — Polygon (既存) + Kaia (2026-05-15 公式 deploy)
+    expect(JPYC_CHAINS).toEqual(['polygon', 'kaia']);
+  });
+
+  it.each(['polygon', 'kaia'])('isJpycChainSlug("%s") → true', (s) => {
+    expect(isJpycChainSlug(s)).toBe(true);
+  });
+
+  it.each(['base', 'arbitrum', 'optimism', 'BASE', 'kairos', '', 'eth'])(
+    'isJpycChainSlug("%s") → false (USDC chain や 大文字 や testnet slug 含む)',
+    (s) => {
+      expect(isJpycChainSlug(s)).toBe(false);
+    },
+  );
+
+  it('type guard が型 narrow を効かせる (compile-time check)', () => {
+    const candidate: string = 'kaia';
+    if (isJpycChainSlug(candidate)) {
+      // narrow されているので 'polygon' | 'kaia' に代入可能
+      const narrowed: 'polygon' | 'kaia' = candidate;
+      expect(narrowed).toBe('kaia');
+    } else {
+      throw new Error('unreachable');
+    }
+  });
+});
+
 describe('customRpcUrlForChain', () => {
-  it('env 未設定なら undefined (対応 4 chain × mainnet/testnet すべて)', () => {
+  it('env 未設定なら undefined (対応 5 chain × mainnet/testnet すべて)', () => {
     expect(customRpcUrlForChain(chainForSlug('polygon').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('base').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('arbitrum').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('optimism').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('kaia').id)).toBeUndefined();
     expect(customRpcUrlForChain(arbitrum.id)).toBeUndefined();
     expect(customRpcUrlForChain(optimism.id)).toBeUndefined();
+  });
+
+  it('NEXT_PUBLIC_KAIA_RPC_URL が kaia mainnet (8217) に効く', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIA_RPC_URL = 'https://kaia-rpc.example/test';
+    const { customRpcUrlForChain: fn } = await import('@/lib/chains');
+    const { kaia: kaiaChain } = await import('viem/chains');
+    expect(fn(kaiaChain.id)).toBe('https://kaia-rpc.example/test');
+    delete process.env.NEXT_PUBLIC_KAIA_RPC_URL;
+  });
+
+  it('NEXT_PUBLIC_KAIROS_RPC_URL が kairos testnet (1001) に効く', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIROS_RPC_URL = 'https://kairos-rpc.example/test';
+    const { customRpcUrlForChain: fn } = await import('@/lib/chains');
+    const { kairos: kairosChain } = await import('viem/chains');
+    expect(fn(kairosChain.id)).toBe('https://kairos-rpc.example/test');
+    delete process.env.NEXT_PUBLIC_KAIROS_RPC_URL;
   });
 
   it('未知チェーン ID は undefined', () => {

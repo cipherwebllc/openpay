@@ -3,6 +3,8 @@ import { base, baseSepolia, polygon, polygonAmoy } from 'viem/chains';
 import {
   arbitrum,
   arbitrumSepolia,
+  kaia,
+  kairos,
   optimism,
   optimismSepolia,
 } from 'viem/chains';
@@ -33,6 +35,12 @@ describe('gasCeilingGweiForChain (default values)', () => {
   });
   it('Base Sepolia testnet は緩い (1000 gwei)', () => {
     expect(gasCeilingGweiForChain(baseSepolia.id)).toBe(1000n);
+  });
+  it('Kaia mainnet (8217) は 50 gwei (公式「1 円未満」/ Pimlico fast 実測前の安全側初期値)', () => {
+    expect(gasCeilingGweiForChain(kaia.id)).toBe(50n);
+  });
+  it('Kairos testnet (1001) は緩い (1000 gwei、testnet 既定方針)', () => {
+    expect(gasCeilingGweiForChain(kairos.id)).toBe(1000n);
   });
   it('未登録チェーンは undefined', () => {
     expect(gasCeilingGweiForChain(1)).toBeUndefined(); // Ethereum mainnet
@@ -184,5 +192,46 @@ describe('env override (gasCeilingGwei)', () => {
     expect(() => mod.assertGasCeiling(polygon.id, 51n * GWEI)).toThrow(
       mod.GasCongestedError,
     );
+  });
+
+  it('NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI を読み込んで kaia mainnet 値を上書き', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI = '100';
+    const mod = await import('@/lib/gasCeiling');
+    expect(mod.gasCeilingGweiForChain(kaia.id)).toBe(100n);
+    // kairos testnet は default 1000 のまま (mainnet 側のみ override)
+    expect(mod.gasCeilingGweiForChain(kairos.id)).toBe(1000n);
+  });
+
+  it('kaia override 後の assertGasCeiling が新しい上限で動く', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI = '30';
+    const mod = await import('@/lib/gasCeiling');
+    expect(() => mod.assertGasCeiling(kaia.id, 29n * GWEI)).not.toThrow();
+    expect(() => mod.assertGasCeiling(kaia.id, 30n * GWEI)).not.toThrow(); // 境界 ==
+    expect(() => mod.assertGasCeiling(kaia.id, 31n * GWEI)).toThrow(
+      mod.GasCongestedError,
+    );
+  });
+
+  it('assertGasCeiling kaia default 50 gwei 境界 (49 / 50 / 51)', () => {
+    expect(() => assertGasCeiling(kaia.id, 49n * GWEI)).not.toThrow();
+    expect(() => assertGasCeiling(kaia.id, 50n * GWEI)).not.toThrow();
+    expect(() => assertGasCeiling(kaia.id, 51n * GWEI)).toThrow(
+      GasCongestedError,
+    );
+  });
+
+  it('kaia GasCongestedError が chainId / ceiling / observed を保持する', () => {
+    let captured: GasCongestedError | undefined;
+    try {
+      assertGasCeiling(kaia.id, 200n * GWEI);
+    } catch (e) {
+      captured = e as GasCongestedError;
+    }
+    expect(captured?.chainId).toBe(kaia.id);
+    expect(captured?.ceilingGwei).toBe(50n);
+    expect(captured?.observedGwei).toBe(200n);
+    expect(captured?.message).toContain(`chainId=${kaia.id}`);
   });
 });

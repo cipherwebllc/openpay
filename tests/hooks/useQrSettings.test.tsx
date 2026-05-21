@@ -80,6 +80,49 @@ describe('useQrSettings', () => {
     expect(result.current.settings.chain).toBe('arbitrum');
   });
 
+  it('jpyc + kaia (PoC、2026-05) → そのまま保存される (JpycChainSlug で許容)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'kaia' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('kaia');
+    expect(result.current.settings.token).toBe('jpyc');
+  });
+
+  it('jpyc + 大文字 KAIA → polygon (kebab 正規化なし、型 guard で弾く)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'KAIA' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('polygon');
+  });
+
+  it('usdc + kaia (kaia には Circle native USDC なし) → base に fallback', async () => {
+    // memory:project_kaia_evaluation 通り、kaia は USDC 対象外 (UsdcChainSlug
+    // で型レベル除外)。runtime も同様に default に倒す。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'kaia' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('base');
+  });
+
+  it('jpyc + chain undefined → polygon (既定 fallback)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc' /* chain omitted */ }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('polygon');
+  });
+
   it('payMode=standard の保存値をハイドレート', async () => {
     window.localStorage.setItem(
       KEY,

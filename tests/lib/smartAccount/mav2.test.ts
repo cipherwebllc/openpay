@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { http, type Address, type Hex } from 'viem';
-import { polygon } from 'viem/chains';
+import { kaia, kairos, polygon } from 'viem/chains';
 import { buildMav2SmartAccountClient } from '@/lib/smartAccount/mav2';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { type TokenDeployment } from '@/lib/tokens';
@@ -181,6 +181,67 @@ describe('buildMav2SmartAccountClient', () => {
       value?: { url?: string };
     };
     expect(config.value?.url).toBe('https://polygon-rpc.example/test');
+  });
+
+  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError', async () => {
+    // Pimlico Kaia 対応 Smart Account は Safe / Simple Account / Thirdweb のみ。
+    // MAv2 経路で kaia 来訪 → 早期 throw、Polygon フォールバック UX を caller に任せる。
+    const jpycKaia: TokenDeployment = {
+      ...jpycSponsorship,
+      chainId: kaia.id,
+    };
+    await expect(
+      buildMav2SmartAccountClient({
+        walletClient: fakeWalletClient,
+        publicClient: fakePublicClient,
+        chain: kaia,
+        chainId: kaia.id,
+        deployment: jpycKaia,
+      }),
+    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
+    // 早期 throw のため MAv2 構築すら走らない (USDC 拒否と同じ fence)
+    expect(createModularAccountV2Mock).not.toHaveBeenCalled();
+    expect(splitMock).not.toHaveBeenCalled();
+  });
+
+  it('Kairos testnet (1001): Pimlico Kairos も MAv2 非対応のため早期 throw', async () => {
+    const jpycKairos: TokenDeployment = {
+      ...jpycSponsorship,
+      chainId: kairos.id,
+    };
+    await expect(
+      buildMav2SmartAccountClient({
+        walletClient: fakeWalletClient,
+        publicClient: fakePublicClient,
+        chain: kairos,
+        chainId: kairos.id,
+        deployment: jpycKairos,
+      }),
+    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
+    expect(createModularAccountV2Mock).not.toHaveBeenCalled();
+  });
+
+  it('Kaia は USDC でも JPYC でも区別なく throw する (chain 軸で先に弾く)', async () => {
+    const usdcKaia: TokenDeployment = { ...usdcErc20, chainId: kaia.id };
+    const jpycKaia: TokenDeployment = { ...jpycSponsorship, chainId: kaia.id };
+    await expect(
+      buildMav2SmartAccountClient({
+        walletClient: fakeWalletClient,
+        publicClient: fakePublicClient,
+        chain: kaia,
+        chainId: kaia.id,
+        deployment: usdcKaia,
+      }),
+    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
+    await expect(
+      buildMav2SmartAccountClient({
+        walletClient: fakeWalletClient,
+        publicClient: fakePublicClient,
+        chain: kaia,
+        chainId: kaia.id,
+        deployment: jpycKaia,
+      }),
+    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
   });
 
   it('split transport: bundler/paymaster method は Pimlico、それ以外は chain RPC へ route', async () => {
