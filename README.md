@@ -60,6 +60,10 @@ OpenPay does not hold merchant funds. Customer payments are sent **directly to t
 
 `NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy. Same chain slug, same QR shape.
 
+### Kaia network — under evaluation (not enabled)
+
+JPYC officially launched on the Kaia network (chainId 8217) in May 2026, with JPYC EX supporting Kaia deposits / redemptions. We are tracking inflow signals (Unifi / LINE NEXT light-user adoption) before enabling Kaia in OpenPay. A working proof-of-concept exists on a separate branch and can be flipped on quickly once demand materializes. If you want OpenPay to accept JPYC on Kaia, please open a GitHub issue — concrete requests count as demand signal.
+
 ## Non-custodial design
 
 - OpenPay **never holds** merchant funds.
