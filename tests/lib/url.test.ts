@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { Address } from 'viem';
 import {
   buildPayPath,
@@ -238,6 +238,42 @@ describe('parsePayParams', () => {
       expect(r.errorKind).toBe('invalid');
       expect(r.error).toContain('jpyc');
     }
+  });
+
+  it('jpyc + kaia: KAIROS_ADDRESS 未設定なら deployment 不在で reject (UI 非露出と整合)', () => {
+    // 既定 vitest env では NEXT_PUBLIC_JPYC_KAIROS_ADDRESS 未設定。
+    // hasDeployment は TOKEN_DEPLOYMENTS を真値とするため false → invalid。
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=jpyc&chain=kaia`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('jpyc');
+      expect(r.error).toContain('kaia');
+    }
+  });
+
+  it('jpyc + kaia: KAIROS_ADDRESS 設定済なら deployment 存在で受理される (codex P1 regression fence)', async () => {
+    // 直前の codex review で発覚した本物の bug:
+    // useQrSettings は jpyc+kaia を保存し buildPayPath は QR に乗せるのに、
+    // lib/url.ts の hasDeployment が hard-coded jpyc=polygon で reject して
+    // いた → 生成された Kaia QR は parser に拒否され決済不能だった。
+    // 修正後は TOKEN_DEPLOYMENTS の実 deployment を見るので env 設定済なら
+    // 受理されることを fence。
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
+      '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
+    const mod = await import('@/lib/url');
+    const r = mod.parsePayParams(
+      new URLSearchParams(`to=${VALID_TO}&token=jpyc&chain=kaia`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.token).toBe('jpyc');
+      expect(r.params.chain).toBe('kaia');
+    }
+    delete process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
   });
 
   it('to がアドレス形式でない → エラー', () => {
