@@ -12,7 +12,12 @@ import {
   polygonAmoy,
 } from 'viem/chains';
 import { env, isMainnet } from './env';
-import { chainForSlug, JPYC_CHAINS, type ChainSlug } from './chains';
+import {
+  chainForSlug,
+  JPYC_CHAINS,
+  type ChainSlug,
+  type JpycChainSlug,
+} from './chains';
 
 // 対応トークン一覧。type と runtime enumeration を兼ねる。
 export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
@@ -126,7 +131,7 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   paymasterMode: 'erc20',
 }));
 
-function jpycAddress(slug: 'polygon' | 'kaia'): Address | undefined {
+function jpycAddress(slug: JpycChainSlug): Address | undefined {
   if (isMainnet) {
     const overrides = env.mainnetTokenOverrides.jpyc;
     if (slug === 'polygon') return overrides.polygon ?? JPYC_POLYGON_MAINNET;
@@ -143,7 +148,7 @@ function jpycAddress(slug: 'polygon' | 'kaia'): Address | undefined {
 // の組合せ。Kaia は実 address 取得まで TOKEN_DEPLOYMENTS に出現しないので、
 // UI の chain selector からも自動的に消える (resolveDeployment が undefined)。
 const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.flatMap((slug) => {
-  const addr = jpycAddress(slug as 'polygon' | 'kaia');
+  const addr = jpycAddress(slug);
   if (!addr) return [];
   return [
     {

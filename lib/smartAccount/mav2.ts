@@ -33,6 +33,7 @@ import {
   type ClientMiddlewareFn,
 } from '@aa-sdk/core';
 import { createModularAccountV2 } from '@account-kit/smart-contracts';
+import { kaia, kairos } from 'viem/chains';
 import type { GetWalletClientReturnType } from '@wagmi/core';
 import {
   createPimlico,
@@ -67,7 +68,7 @@ export async function buildMav2SmartAccountClient(args: {
   // 早期 throw して Polygon フォールバックに倒す UX を caller 側に任せる。
   // HashPort wallet は Polygon 中心 (memory:project_hashport_target) なので
   // 実害は限定的。
-  if (chainId === 8217 || chainId === 1001) {
+  if (chainId === kaia.id || chainId === kairos.id) {
     throw new IncompatibleSmartAccountError({
       delegateAddress: null,
       i18nKey: 'errorIncompatibleSmartAccount',

@@ -1,6 +1,6 @@
 'use client';
 
-import { isValidChainSlug, type ChainSlug } from '@/lib/chains';
+import { isJpycChainSlug, isValidChainSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
@@ -90,8 +90,7 @@ export function normalizeChainForToken(
   chain: string | undefined,
 ): ChainSlug {
   if (token === 'jpyc') {
-    if (chain === 'polygon' || chain === 'kaia') return chain;
-    return 'polygon';
+    return chain && isJpycChainSlug(chain) ? chain : 'polygon';
   }
   // usdc: kaia には Circle native USDC が deploy されていないため除外
   if (chain && isValidChainSlug(chain) && chain !== 'kaia') return chain;

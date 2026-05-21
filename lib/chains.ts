@@ -71,7 +71,12 @@ export const USDC_CHAINS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism'
 /** JPYC が deploy 済みのチェーン。Polygon は 2024-、Kaia は 2026-05-15 公式 deploy。
  * Kaia 側の実 contract address は env override (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で
  * 設定するまで lib/tokens.ts が deployment を skip する設計。 */
-export const JPYC_CHAINS: readonly ChainSlug[] = ['polygon', 'kaia'];
+export type JpycChainSlug = 'polygon' | 'kaia';
+export const JPYC_CHAINS: readonly JpycChainSlug[] = ['polygon', 'kaia'];
+
+export function isJpycChainSlug(value: string): value is JpycChainSlug {
+  return (JPYC_CHAINS as readonly string[]).includes(value);
+}
 
 export function isValidChainSlug(value: string): value is ChainSlug {
   return (ALL_SLUGS as readonly string[]).includes(value);
