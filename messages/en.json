@@ -19,7 +19,7 @@
       "japaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
       "gasHint": {
         "title": "When you have no gas (POL / ETH) to send tokens to an exchange",
-        "body": "Sending received JPYC / USDC to an exchange requires a small amount of native gas on each chain (POL on Polygon, ETH on Base / Arbitrum / Optimism). MetaMask's Swap feature lets you exchange a small portion of your balance into the native gas token of each chain. On Polygon, MetaMask's gasless swap lets you swap even with zero POL balance; on Base / Arbitrum / Optimism, a small amount of ETH is required separately to initiate the swap.",
+        "body": "Sending received JPYC / USDC to an exchange requires a small amount of native gas on each chain (POL on Polygon, ETH on Base / Arbitrum / Optimism). With MetaMask's Swap (Gas Station) feature, you can swap on Polygon / Base / Arbitrum without holding any POL or ETH — the gas fee is paid out of your JPYC or USDC. On chains where Gas Station is not available (e.g. Optimism), a small amount of ETH is required separately to initiate the swap.",
         "linkLabel": "Open MetaMask Swap",
         "disclaimer": "Note: Availability, supported chains, and success of MetaMask features depend on MetaMask itself; OpenPay is not involved. Network congestion or unsupported token routes on any chain may cause the swap to fail."
       }
