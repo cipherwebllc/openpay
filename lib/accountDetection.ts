@@ -59,10 +59,16 @@ export async function detectAccountKind(
 
 export class IncompatibleSmartAccountError extends Error {
   readonly delegateAddress: Address | null;
-  readonly i18nKey: 'errorIncompatibleSmartAccount' | 'errorMav2Disabled';
+  readonly i18nKey:
+    | 'errorIncompatibleSmartAccount'
+    | 'errorMav2Disabled'
+    | 'errorMav2KaiaPolygon';
   constructor(args: {
     delegateAddress: Address | null;
-    i18nKey: 'errorIncompatibleSmartAccount' | 'errorMav2Disabled';
+    i18nKey:
+      | 'errorIncompatibleSmartAccount'
+      | 'errorMav2Disabled'
+      | 'errorMav2KaiaPolygon';
   }) {
     super(
       `incompatible_smart_account: delegate=${args.delegateAddress ?? 'none'} (${args.i18nKey})`,

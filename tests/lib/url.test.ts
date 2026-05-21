@@ -210,6 +210,22 @@ describe('parsePayParams', () => {
     if (!r.ok) {
       expect(r.errorKind).toBe('invalid');
       expect(r.error).toContain('chain');
+      // PoC で kaia を ChainSlug に追加したので error message は kaia を含む 5 候補列挙
+      expect(r.error).toContain('kaia');
+    }
+  });
+
+  it('chain=kaia + usdc → errorKind=invalid (kaia には native USDC 未 deploy)', () => {
+    // isValidChainSlug は kaia を accept するが、hasDeployment('usdc', 'kaia') は
+    // false (UsdcChainSlug = Exclude<ChainSlug, 'kaia'> の型レベル除外の runtime 確認)
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=kaia`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('usdc');
+      expect(r.error).toContain('kaia');
     }
   });
 

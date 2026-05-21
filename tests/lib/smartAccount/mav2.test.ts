@@ -183,24 +183,31 @@ describe('buildMav2SmartAccountClient', () => {
     expect(config.value?.url).toBe('https://polygon-rpc.example/test');
   });
 
-  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError + Sentry 観測 log', async () => {
+  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError + Sentry 観測 log + Polygon 案内 i18nKey', async () => {
     // Pimlico Kaia 対応 Smart Account は Safe / Simple Account / Thirdweb のみ。
-    // MAv2 経路で kaia 来訪 → 早期 throw、Polygon フォールバック UX を caller に任せる。
-    // logger.warn が呼ばれれば lib/logger.ts の reportToSentry で Sentry に届く。
+    // MAv2 経路で kaia 来訪 → 早期 throw、UI は errorMav2KaiaPolygon で Polygon
+    // フォールバックを具体的に案内する (memory:project_hashport_target — HashPort
+    // は Polygon 中心、Kaia 移行 shape ではない)。
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const jpycKaia: TokenDeployment = {
       ...jpycSponsorship,
       chainId: kaia.id,
     };
-    await expect(
-      buildMav2SmartAccountClient({
-        walletClient: fakeWalletClient,
-        publicClient: fakePublicClient,
-        chain: kaia,
-        chainId: kaia.id,
-        deployment: jpycKaia,
-      }),
-    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
+    let captured: IncompatibleSmartAccountError | undefined;
+    await buildMav2SmartAccountClient({
+      walletClient: fakeWalletClient,
+      publicClient: fakePublicClient,
+      chain: kaia,
+      chainId: kaia.id,
+      deployment: jpycKaia,
+    }).catch((e) => {
+      captured = e;
+    });
+    expect(captured).toBeInstanceOf(IncompatibleSmartAccountError);
+    // Polygon フォールバック専用の i18nKey に routing (generic errorIncompatible…
+    // ではなく specific errorMav2KaiaPolygon)
+    expect(captured?.i18nKey).toBe('errorMav2KaiaPolygon');
+    expect(captured?.delegateAddress).toBeNull();
     // 早期 throw のため MAv2 構築すら走らない (USDC 拒否と同じ fence)
     expect(createModularAccountV2Mock).not.toHaveBeenCalled();
     expect(splitMock).not.toHaveBeenCalled();

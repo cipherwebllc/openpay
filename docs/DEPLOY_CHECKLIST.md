@@ -161,35 +161,49 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 memory:project_kaia_evaluation の通り Kaia 対応は demand 顕在化まで `kaia-poc`
 branch で draft 保留。下記 6 項目を **全て** 完了してから main へ merge:
 
-### 7.1 contract address 確認 (顧客資金損失リスク)
+### 7.1 + 7.2 contract bytecode + EIP-2612 permit 検証 (自動 script)
+
+`scripts/verify-kaia-jpyc.mjs` で 14 項目を一括検証 (bytecode 存在 / ERC-20
+標準 7 関数 / name+symbol+decimals が JPYC v3 spec と一致 / EIP-2612 permit
+3 関数 / JPYC v3 cross-chain consistency)。
 
 ```bash
-# JPYC 公式 docs か Kaia explorer (kaiascan.io) で Kaia mainnet 上の
-# JPYC contract address を取得。少額 transfer で動作確認後に投入。
-NEXT_PUBLIC_JPYC_KAIA_ADDRESS=0x...  # ← 取得値
+# Kaia mainnet 上の JPYC contract 検証 (env.local の NEXT_PUBLIC_JPYC_KAIA_ADDRESS を使用)
+node scripts/verify-kaia-jpyc.mjs
+
+# Kairos testnet 側
+node scripts/verify-kaia-jpyc.mjs --testnet
+
+# 明示的に address / RPC を指定 (kaiascan.io から取得した address での先行確認)
+node scripts/verify-kaia-jpyc.mjs --address 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29 \
+  --rpc https://public-en.node.kaia.io
 ```
 
-- [ ] JPYC 公式 / kaiascan.io で address 公表確認
-- [ ] Kairos testnet で少額 test transfer (ERC20 transfer 成功)
-- [ ] Vercel env に Sensitive ではなく通常で投入 (public information)
+- [ ] `verify-kaia-jpyc.mjs` (mainnet) → 全 14 項目 pass で exit 0
+- [ ] `verify-kaia-jpyc.mjs --testnet` (Kairos) → 全 14 項目 pass で exit 0
+- [ ] DOMAIN_SEPARATOR() の値が JPYC 公式 docs (もしあれば) の値と一致
+- [ ] 既知の Polygon address との一致 (script 内で自動報告、確認は人手)
 
-### 7.2 EIP-2612 permit 対応の bytecode 検証
+**2026-05-22 既知の実測結果**: Kaia mainnet 上に address `0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29` で JPYC が deploy 済、ERC-20 + permit selector 全 OK、ただし `DOMAIN_SEPARATOR()` が revert する (要調査、permit 自体は selector exist で別 reason で revert)。本投入前に JPYC 発行体に確認推奨。
+
+### 7.3 Pimlico Kaia bundler capability 検証 (自動 script)
+
+`scripts/verify-kaia-pimlico.mjs` で 5 項目を Kaia mainnet + Kairos testnet 両方で検証 (endpoint 到達性 / supportedEntryPoints に v0.7 / chainId 一致 / 3 tier gas price / pimlico_getUserOperationStatus)。
 
 ```bash
-# JPYC v3 が Kaia 上で EIP-2612 permit を実装しているか実 RPC で検証。
-# 既存 Polygon/Sepolia/Avalanche v3 は確認済 (memory:reference_jpyc_contract)、
-# Kaia は別 deploy。OpenPay sponsorship 経路と x402 EIP-3009 が依存。
-cast call $NEXT_PUBLIC_JPYC_KAIA_ADDRESS "DOMAIN_SEPARATOR()" \
-  --rpc-url https://public-en.node.kaia.io
+NEXT_PUBLIC_PIMLICO_API_KEY=<key> node scripts/verify-kaia-pimlico.mjs
 ```
 
-- [ ] DOMAIN_SEPARATOR()返り値が 0x ではない (permit 実装あり)
-- [ ] permit / nonces / version の signature 実装確認
+- [ ] 全 5 × 2 = 10 項目 pass で exit 0
+- [ ] gas price standard tier ≪ `NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI` 設定値
 
-### 7.3 Kairos testnet smoke (実 transaction)
+**2026-05-22 既知の実測結果**: Kaia mainnet + Kairos testnet 共に EntryPoint v0.6/v0.7/v0.8 対応、standard 31.5 gwei (default ceiling 50 gwei 内、margin 60%)。
+
+### 7.4 Kairos testnet 実 UserOp smoke (手動、要 funded EOA)
+
+script で自動化できない部分: 実 Smart Account の EIP-7702 delegate + UserOp submit。
 
 ```bash
-# Pimlico Kairos endpoint + SimpleAccount (7702) で実 UserOp を投げる
 NEXT_PUBLIC_NETWORK_ENV=testnet \
 NEXT_PUBLIC_JPYC_KAIROS_ADDRESS=0x... \
 NEXT_PUBLIC_KAIROS_RPC_URL=https://public-en-kairos.node.kaia.io \
@@ -197,12 +211,11 @@ npm run dev
 # → /pay?to=...&token=jpyc&chain=kaia&amount=1 で sponsored gasless 経路を実機 submit
 ```
 
-- [ ] Pimlico Kairos endpoint へ実 API key 接続 (eth_supportedEntryPoints OK)
 - [ ] UserOp submit → receipt 取得まで通る
 - [ ] sponsorship paymaster の policy id が Kairos でも適用される
 - [ ] Sentry に `gas_congested` 等の予期せぬ event 無し
 
-### 7.4 gas ceiling tune (実測値)
+### 7.5 gas ceiling tune (実測値)
 
 ```bash
 # Pimlico fast tier の Kaia mainnet quote を 1 週間サンプリングし、
@@ -215,23 +228,34 @@ NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
 - [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
 - [ ] env 投入後 Sentry の `gas_congested` 発生率 < 0.1%
 
-### 7.5 HashPort + Kaia 警告 UI
+### 7.6 HashPort + Kaia 警告 UI (実装済)
 
-MAv2 経路は Pimlico Kaia 非対応で早期 throw されるが、UI で「Polygon に
-切替えてください」案内が無いと UX 不親切 (memory:project_hashport_target)。
+MAv2 経路は Pimlico Kaia 非対応で早期 throw され、`errorMav2KaiaPolygon`
+i18n message で「Polygon チェーン版の決済 QR をご利用ください」と案内する
+(commit に実装済、Payment/Tip/Checkout 3 form ×ja/en 全カバー)。
 
-- [ ] `components/CheckoutForm.tsx` / `TipForm.tsx` / `PaymentForm.tsx` で
-      Kaia + MAv2 検出時に Polygon フォールバック案内を表示
-- [ ] i18n message 追加 (ja / en)
+- [x] `lib/smartAccount/mav2.ts` chainId 8217/1001 で `errorMav2KaiaPolygon` i18nKey throw
+- [x] i18n message を `messages/{ja,en}.json` の Payment/Tip/Checkout 3 namespace に追加
+- [x] `tests/lib/i18nKeys.test.ts` で 6 件全て存在を fence
+- [ ] **実機 QA**: HashPort wallet + Kaia chain QR で警告文が表示されるか目視確認
 
-### 7.6 監視 / alert 追加
+### 7.7 監視 / alert 追加
 
-- [ ] Sentry alert rule 「Kaia gas_congested spike」を `chainId:8217` filter で
-      追加 (既存 polygon の rule を kaia 用に複製)
+logger.warn による Sentry observability は既に code 側で実装済:
+
+- `smart_account.mav2_disabled` (HashPort × flag off)
+- `smart_account.unknown_delegation` (未知 delegate)
+- `smart_account.mav2_kaia_rejected` (MAv2 × Kaia chain) — Polygon フォールバック観測用
+- 既存 `gas_congested` event (chain 共通)
+
+Sentry dashboard 側で alert rule を追加 (code change なし、dashboard 操作のみ):
+
+- [ ] `event:"smart_account.mav2_kaia_rejected"` の発火頻度を週次 alert (HashPort × Kaia の需要シグナル)
+- [ ] `gas_congested` × `chainId:8217` filter (既存 polygon rule の複製)
 - [ ] Pimlico Kaia API balance を別 alert で監視
 - [ ] /api/log/payment に kaia chain 集計を追加 (gmv 把握)
 
-### 7.7 Rollback path 確認
+### 7.8 Rollback path 確認
 
 env unset で完全 kill-switch (`lib/tokens.ts` の deployment skip で UI 非露出)。
 

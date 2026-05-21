@@ -292,7 +292,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       ok: false,
       errorKind: 'invalid',
       error:
-        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
     };
   }
   // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
@@ -488,7 +488,7 @@ export function parseTipParams(
     return {
       ok: false,
       error:
-        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
     };
   }
   if (!hasDeployment(token, chainSlug)) {
@@ -725,7 +725,7 @@ export function parseCheckoutParams(
     return {
       ok: false,
       error:
-        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
     };
   }
   if (!hasDeployment(token, chainSlug)) {
