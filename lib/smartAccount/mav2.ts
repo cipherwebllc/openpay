@@ -62,6 +62,18 @@ export async function buildMav2SmartAccountClient(args: {
   const { walletClient, publicClient, chain, chainId, deployment } = args;
   const paymasterMode = resolvePaymasterMode(deployment);
 
+  // Pimlico Kaia は MAv2 を対応 Smart Account list に含めていない (Safe 1.4.1 /
+  // Simple Account / Thirdweb 1.5.20 のみ)。Kaia/Kairos で MAv2 経路に来た場合は
+  // 早期 throw して Polygon フォールバックに倒す UX を caller 側に任せる。
+  // HashPort wallet は Polygon 中心 (memory:project_hashport_target) なので
+  // 実害は限定的。
+  if (chainId === 8217 || chainId === 1001) {
+    throw new IncompatibleSmartAccountError({
+      delegateAddress: null,
+      i18nKey: 'errorIncompatibleSmartAccount',
+    });
+  }
+
   // phase 1: USDC ERC20 paymaster + MAv2 は未検証のため拒否する。
   // sponsorship (JPYC) のみ通す。USDC + MAv2 の解放は smoke (plan Step 9 (f))
   // 完了後に別 commit で。

@@ -74,13 +74,23 @@ describe('lib/env (module-load validation)', () => {
     warn.mockRestore();
   });
 
-  it('JPYC_MAINNET_ADDRESS env override がパースされる', async () => {
+  it('JPYC_MAINNET_ADDRESS env override (polygon キー) がパースされる', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_JPYC_MAINNET_ADDRESS =
       '0xabcd000000000000000000000000000000009999';
     const mod = await import('@/lib/env');
-    expect(mod.env.mainnetTokenOverrides.jpyc?.toLowerCase()).toBe(
+    expect(mod.env.mainnetTokenOverrides.jpyc.polygon?.toLowerCase()).toBe(
       '0xabcd000000000000000000000000000000009999',
+    );
+  });
+
+  it('JPYC_KAIA_ADDRESS env override (kaia キー) がパースされる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS =
+      '0xbeef000000000000000000000000000000001111';
+    const mod = await import('@/lib/env');
+    expect(mod.env.mainnetTokenOverrides.jpyc.kaia?.toLowerCase()).toBe(
+      '0xbeef000000000000000000000000000000001111',
     );
   });
 
