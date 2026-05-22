@@ -285,21 +285,41 @@ describe('StepCard', () => {
       expect(screen.getByRole('button', { name: /受取先/ })).toBeInTheDocument();
     });
 
-    it('collapsible=true でも onToggle 未指定なら toggle button を描画せず、children を常に mount', () => {
+    it('collapsible=true でも onToggle 未指定なら非 collapsible に degrade (children mount + toggle 不在)', () => {
       // 防御的フォールバック: collapsible だけ true で onToggle 忘れた場合に
-      // section が壊れず通常表示で fall through する。
+      // user が永遠に section を開けない broken state を作らない。effectively
+      // 非 collapsible として扱い、heading は inline span / children は常時 mount。
       render(
         <StepCard step={2} icon={Store} title="受取先" collapsible open={false}>
           <div data-testid="body">content</div>
         </StepCard>,
       );
-      // button (toggle) は出ない
+      // toggle button は出ない (onToggle が無いので作りようがない)
       expect(screen.queryByRole('button', { name: /受取先/ })).toBeNull();
-      // children は mount される (showChildren = !collapsible || open、ただし
-      // onToggle 未指定で button 経路に入らない場合は inline heading + collapsed 維持)
-      // 注: 仕様上、open=false で children は依然 unmount。これは collapsible=true
-      // を渡した時点で「閉じる予定」とみなされるため。
-      expect(screen.queryByTestId('body')).toBeNull();
+      // 重要: children は mount される。これが LARP 修正 (旧: unmount で永遠
+      // に表示されない状態を test が「正常」と記録していた)。
+      expect(screen.getByTestId('body')).toBeInTheDocument();
+    });
+
+    it('collapsible=true + onToggle 未指定 + collapsedSummary 渡しても summary は出さない (非 collapsible degrade)', () => {
+      // collapsedSummary を渡されても、effectivelyCollapsible=false なので
+      // summary は表示しない (heading は title のみ + children 全展開で代替)。
+      const { container } = render(
+        <StepCard
+          step={2}
+          icon={Store}
+          title="受取先"
+          collapsible
+          open={false}
+          collapsedSummary={<span data-testid="sum">SUMMARY</span>}
+        >
+          <div data-testid="body">content</div>
+        </StepCard>,
+      );
+      expect(screen.queryByTestId('sum')).toBeNull();
+      expect(screen.getByTestId('body')).toBeInTheDocument();
+      // heading に summary class (truncate) を付けた要素も無い
+      expect(container.querySelector('#step-2-heading span.truncate')).toBeNull();
     });
   });
 

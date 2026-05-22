@@ -1838,12 +1838,5 @@ describe('QrGenerator', () => {
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
     });
 
-    it('Footer poweredBy soft文言 / technical labels が同時に DOM 上に存在', async () => {
-      // Site footer は QrGenerator の external だが、3-step refactor 同梱の
-      // poweredBy <details> 構造の persistence 確認 (展開しなくても tech label
-      // は DOM に存在し、a11y / SEO で indexable)。
-      // QrGenerator 単体テストの範囲外なので skip (SiteFooter.test.tsx でカバー)。
-      expect(true).toBe(true);
-    });
   });
 });

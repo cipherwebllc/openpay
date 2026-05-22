@@ -47,10 +47,15 @@ export function StepCard({
     variant === 'qr-prominent'
       ? 'border-brand/40 ring-1 ring-brand/15 shadow-sm'
       : 'border-slate-200';
-  // 中身を mount する条件: collapsible でないか、collapsible かつ open。
+  // collapsible mode は onToggle が必要。onToggle を渡さずに collapsible=true
+  // だけ立てると user が永遠に開けない broken state になるため、その場合は
+  // 非 collapsible として扱い children を常時 mount で fall-through する
+  // (defensive)。これによって caller のバグが silent UX 破綻にならない。
+  const effectivelyCollapsible = collapsible && Boolean(onToggle);
+  // 中身を mount する条件: 非 collapsible か、collapsible かつ open。
   // 閉じている間に Field 内の input / button を mount すると test の query が
   // 過剰一致するため、思い切って unmount で揃える (DOM 軽量化も兼ねる)。
-  const showChildren = !collapsible || open;
+  const showChildren = !effectivelyCollapsible || open;
   const headingId = `step-${step}-heading`;
 
   const innerHeading = (
@@ -66,7 +71,7 @@ export function StepCard({
       </span>
       <Icon className="h-4 w-4 flex-none text-brand" aria-hidden />
       <span>{title}</span>
-      {collapsible && !open && collapsedSummary && (
+      {effectivelyCollapsible && !open && collapsedSummary && (
         <span className="ml-2 truncate text-xs font-normal text-slate-500">
           {collapsedSummary}
         </span>
@@ -85,7 +90,7 @@ export function StepCard({
           内側に span(badge)/Icon/span(title) を入れた時に accessible name が
           冗長になる + ChevronDown が title に混ざるため分離する。 */}
       <h2 className="flex items-center print:hidden">
-        {collapsible && onToggle ? (
+        {effectivelyCollapsible ? (
           <button
             type="button"
             onClick={onToggle}
