@@ -47,19 +47,13 @@ export type TokenDeployment = {
 //   - 万一誤ったアドレスを使用すると顧客資金が失われる可能性があります。
 //   - 不一致が見つかった場合は per-chain env (NEXT_PUBLIC_USDC_<chain>_<env>_ADDRESS) で上書き可能。
 
-// JPYC v3 (memory:reference_jpyc_contract — Polygon/Sepolia/Avalanche 同一
-// アドレス、EIP-2612 permit 対応)。
-const JPYC_POLYGON_MAINNET: Address =
-  '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
-
-// JPYC Kaia mainnet (2026-05-15 公式 deploy、JPYC v3 cross-chain consistency で
-// Polygon と同一 address)。scripts/verify-kaia-jpyc.mjs で実機 verify 済 (ERC-20
-// + permit selector 全 OK、DOMAIN_SEPARATOR() のみ revert — permit を使わない
-// transferFrom 経路のため OpenPay には影響なし)。env override
-// (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で emergency 切替可能、未設定でも hard-code
-// default で動作するため Vercel env 設定漏れに対しても safe。
-const JPYC_KAIA_MAINNET: Address =
-  '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
+// JPYC v3 — Polygon mainnet/Amoy + Kaia mainnet/Kairos + Sepolia + Avalanche
+// 全てで同一 address (memory:reference_jpyc_contract)。EIP-2612 permit 対応
+// (Kaia の DOMAIN_SEPARATOR() のみ revert、scripts/verify-kaia-jpyc.mjs 実機
+// 確認済、permit 未使用の transferFrom 経路のため OpenPay には影響なし)。
+// 4 chain 全てで hard-code default + env override 可能、Vercel env 設定漏れ
+// でも UI が動作する safe-by-default 設計。
+const JPYC_V3_ADDRESS: Address = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 
 // USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet)
 const USDC_BASE_MAINNET: Address =
@@ -80,8 +74,6 @@ const USDC_OPTIMISM_SEPOLIA: Address =
   '0x5fd84259d66Cd46123540766Be93DFE6D43130D7';
 const USDC_POLYGON_AMOY: Address =
   '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582';
-
-const ZERO: Address = '0x0000000000000000000000000000000000000000';
 
 // chain 軸の env override は ChainSlug をキーに引く。
 // USDC は Circle native の 4 chain (base/arbitrum/optimism/polygon) のみで、
@@ -134,39 +126,28 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   paymasterMode: 'erc20',
 }));
 
-// hard-code default (JPYC v3 cross-chain consistency で polygon = kaia 同 address)
-// により、戻り値は常に Address (env 未設定でも fallback が効く)。Polygon testnet
-// の `ZERO` だけは「JPYC 未 deploy」を表す sentinel (deployment 段で skip される)。
+// JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia
+// mainnet/Kairos) 全てで同一 address を hard-code default として持つ。env
+// override は emergency address 変更用。戻り値は常に Address (型保証)。
 function jpycAddress(slug: JpycChainSlug): Address {
-  if (isMainnet) {
-    const overrides = env.mainnetTokenOverrides.jpyc;
-    if (slug === 'polygon') return overrides.polygon ?? JPYC_POLYGON_MAINNET;
-    return overrides.kaia ?? JPYC_KAIA_MAINNET;
-  }
-  const overrides = env.testnetTokenOverrides.jpyc;
-  if (slug === 'polygon') return overrides.polygon ?? ZERO;
-  // Kairos は memory: 2026-05-18 JPYC 公式が Kairos faucet 対応化、実 deploy 済。
-  return overrides.kaia ?? JPYC_KAIA_MAINNET;
+  const overrides = isMainnet
+    ? env.mainnetTokenOverrides.jpyc
+    : env.testnetTokenOverrides.jpyc;
+  return (slug === 'polygon' ? overrides.polygon : overrides.kaia) ?? JPYC_V3_ADDRESS;
 }
 
 // JPYC は Polygon (mainnet/Amoy) + Kaia (mainnet/Kairos) の 2 chain で常に
-// deploy 済 (JPYC v3 cross-chain consistency)。Polygon testnet (Amoy) のみ
-// `ZERO` sentinel で「未 deploy」を表現し、deployment を skip。
-const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.flatMap((slug) => {
-  const addr = jpycAddress(slug);
-  if (addr === ZERO) return [];
-  return [
-    {
-      symbol: 'jpyc' as const,
-      displaySymbol: 'JPYC',
-      name: 'JPY Coin',
-      decimals: 18,
-      address: addr,
-      chainId: chainIdFor(slug),
-      paymasterMode: 'sponsorship' as const,
-    },
-  ];
-});
+// deploy 済 (JPYC v3 cross-chain consistency)。hard-code default が必ず効く
+// ので deployment skip 経路は存在しない。
+const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.map((slug) => ({
+  symbol: 'jpyc' as const,
+  displaySymbol: 'JPYC',
+  name: 'JPY Coin',
+  decimals: 18,
+  address: jpycAddress(slug),
+  chainId: chainIdFor(slug),
+  paymasterMode: 'sponsorship' as const,
+}));
 
 // 全 deployment のフラット配列。順序は QR token セレクター・chain セレクターの
 // 表示順に揃える (USDC: Base 既定 → Arbitrum → Optimism → Polygon、JPYC:
