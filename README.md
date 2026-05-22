@@ -55,14 +55,14 @@ OpenPay does not hold merchant funds. Customer payments are sent **directly to t
 
 | Token | Chains |
 | --- | --- |
-| **JPYC** (v3, electronic payment instrument under Japan's revised Payment Services Act) | Polygon |
+| **JPYC** (v3, electronic payment instrument under Japan's revised Payment Services Act) | Polygon, Kaia |
 | **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon |
 
-`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy. Same chain slug, same QR shape.
+`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet. Same chain slug, same QR shape.
 
-### Kaia network — under evaluation (not enabled)
+### Kaia network — supported
 
-JPYC officially launched on the Kaia network (chainId 8217) in May 2026, with JPYC EX supporting Kaia deposits / redemptions, and JPYC has since extended JPYC Faucet to Kairos testnet (2026-05-18) — making developer iteration on Kaia free. We are tracking inflow signals (Unifi / LINE NEXT light-user adoption) before enabling Kaia in OpenPay. A code-level PoC (chain config / multi-chain JPYC scaffolding / unit tests / live-network verification scripts) lives on the `kaia-poc` branch — `scripts/verify-kaia-jpyc.mjs` and `scripts/verify-kaia-pimlico.mjs` already validate the JPYC v3 deployment on Kaia mainnet and Pimlico Kaia bundler capability, but **no live Kaia UserOp has been submitted yet**, so the final smoke + production cutover are gated to demand materialization. If you want OpenPay to accept JPYC on Kaia, please open a GitHub issue — concrete requests count as demand signal.
+JPYC officially launched on the Kaia network (chainId 8217) in May 2026, with JPYC EX supporting Kaia deposits / redemptions and JPYC Faucet covering Kairos testnet (2026-05-18). Combined with the LINE NEXT Unifi wallet adopting JPYC (2026-05-22) — bringing Web3-native JPYC payments to ~100M LINE users without installing a separate wallet app — OpenPay enables JPYC on Kaia as a merchant-selectable chain alongside Polygon. The JPYC v3 contract (`0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`) is the same address as Polygon (cross-chain consistency, verified via `scripts/verify-kaia-jpyc.mjs`), and gasless flows go through Pimlico Kaia bundler + sponsorship paymaster (`scripts/verify-kaia-pimlico.mjs` confirms capability). Merchants select JPYC + Kaia in Step 1 of the QR generator just like they would Polygon. MAv2-delegated wallets (e.g. HashPort) currently route to other chains via a defensive UI guard since Pimlico Kaia does not support MAv2 at this time.
 
 ## Non-custodial design
 
