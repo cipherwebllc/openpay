@@ -400,15 +400,27 @@ v0.8 対応、standard 31.5 gwei (default ceiling 50 gwei 内、margin 60%)。
 
 ### 9.3 Pimlico sponsorship policy (Kaia 用)
 
-`NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` が **Kaia mainnet (8217) を含むか**
-を Pimlico dashboard で確認。1 policy で複数 chain を許可する場合は既存値を
-Kaia 含めるよう Pimlico 側で update するだけで OK。Chain ごとに別 policy が
-必要な場合は新 env を追加 + `lib/pimlico.ts` で chainId に応じて切替 (本記載
-時点では env 単一で polygon 共用、必要に応じて拡張する設計)。
+`NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` の 1 つの env が全 chain で共用
+される設計 (`lib/pimlico.ts`)。Pimlico の sponsorship 機構は cross-chain で
+動作するため、chain ごとに別 policy / 別 env を持つ必要はない。
 
-- [ ] Pimlico dashboard で sponsorship policy が chainId 8217 (Kaia mainnet) と
-      1001 (Kairos testnet) を許可している
-- [ ] balance がゼロでない (gas 肩代わり原資)
+**2026-05-23 確認済 (Pimlico dashboard)**:
+- Sponsorship Policy: 「**All Chains**」トグル ON → Polygon (137) + Kaia
+  (8217) + Kairos (1001) + Base / Arbitrum / Optimism mainnet & testnet 全部
+  含めて 1 policy で受理
+- Billing: **Credit Balance (USD unified)** — sponsor された UserOp の native
+  gas cost を Pimlico が実時換算で USD 引き落とし、chain 別 deposit 不要
+- Pimlico Kaia capability (`scripts/verify-kaia-pimlico.mjs`): standard
+  31.5 gwei (実測)、1 tx ≈ $0.01、Polygon の 1/5 で sponsorship 経済性は良好
+
+確認 checklist (新規 Kaia 関連改修時に再走らせる):
+
+- [x] Pimlico dashboard で sponsorship policy が chainId 8217 (Kaia mainnet)
+      と 1001 (Kairos testnet) を許可している (All Chains ON で達成)
+- [x] Credit Balance > $0 (Polygon 動作実績で確認済)
+- [ ] (新規 chain 追加時のみ) Pimlico dashboard で当該 chain が Active に
+      なっていること、policy で chain が受理されること、balance が
+      sponsorship 想定量に対し十分であること
 
 ### 9.4 Kairos testnet 実 UserOp smoke (手動、要 funded EOA)
 
