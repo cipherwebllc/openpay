@@ -1869,5 +1869,55 @@ describe('QrGenerator', () => {
         within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
       ).toBeInTheDocument();
     });
+
+    // en locale で advancedSummary.* 3 key を実 render 経路で exercise。
+    // ja default のテストでは en 値のタイポ / 翻訳間違いを検知できないので、
+    // payMode × gasMode の 3 組合せを localStorage で固定して i18n 経路を実走。
+    it.each([
+      {
+        payMode: 'gasless',
+        gasMode: 'customer',
+        expected: /Fee 1\.0% \/ gas: customer pays/,
+      },
+      {
+        payMode: 'gasless',
+        gasMode: 'merchant',
+        expected: /Fee 1\.0% \/ gas: merchant pays/,
+      },
+      {
+        payMode: 'standard',
+        gasMode: 'customer',
+        expected: /Fee 0\.5% \(standard payment\)/,
+      },
+    ] as const)(
+      'en locale: payMode=$payMode gasMode=$gasMode → 英文サマリ "$expected"',
+      async ({ payMode, gasMode, expected }) => {
+        window.localStorage.setItem(
+          'openpay:qr-settings:v2',
+          JSON.stringify({
+            receiver: VALID,
+            token: 'usdc',
+            payMode,
+            gasMode,
+          }),
+        );
+        const user = userEvent.setup();
+        render(<QrGenerator />, { locale: 'en' });
+        // en では Step 2 toggle button name = "Recipient"
+        const step2Toggle = await screen.findByRole('button', {
+          name: /Recipient/,
+        });
+        if (step2Toggle.getAttribute('aria-expanded') !== 'true') {
+          await user.click(step2Toggle);
+        }
+        const advancedToggle = await screen.findByRole('button', {
+          name: /Advanced settings/,
+        });
+        await waitFor(() =>
+          expect(advancedToggle.getAttribute('aria-expanded')).toBe('false'),
+        );
+        expect(within(advancedToggle).getByText(expected)).toBeInTheDocument();
+      },
+    );
   });
 });
