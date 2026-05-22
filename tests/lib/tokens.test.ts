@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   defaultDeploymentForSymbol,
   deploymentForSlug,
@@ -11,14 +11,24 @@ import {
 import {
   arbitrumSepolia,
   baseSepolia,
+  kaia,
+  kairos,
   optimismSepolia,
   polygonAmoy,
 } from 'viem/chains';
 
+const ORIGINAL_ENV = { ...process.env };
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+  vi.resetModules();
+});
+
 // vitest.config.ts で NETWORK_ENV='testnet'。testnet (sepolia 系) deployment を期待。
 
 describe('TOKEN_DEPLOYMENTS', () => {
-  it('JPYC は Polygon 1 件のみ', () => {
+  it('JPYC は Polygon 1 件のみ (testnet env、Kaia env 未設定の既定状態)', () => {
+    // vitest.config.ts の env で NEXT_PUBLIC_JPYC_TESTNET_ADDRESS のみ設定済、
+    // KAIROS は未設定。kaia deployment は skip されて出現しない。
     const jpyc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'jpyc');
     expect(jpyc).toHaveLength(1);
     expect(jpyc[0].chainId).toBe(polygonAmoy.id);
@@ -136,5 +146,87 @@ describe('isValidTokenSymbol', () => {
 
   it.each(['eth', 'JPYC', '', 'btc', 'usdt'])('"%s" → false', (s) => {
     expect(isValidTokenSymbol(s)).toBe(false);
+  });
+});
+
+describe('JPYC Kaia deployment (PoC、env 駆動)', () => {
+  it('NEXT_PUBLIC_JPYC_KAIROS_ADDRESS 未設定 → kaia deployment は TOKEN_DEPLOYMENTS に出現しない', () => {
+    // 既定 vitest env では KAIROS_ADDRESS は未設定。
+    expect(resolveDeployment('jpyc', kairos.id)).toBeUndefined();
+    expect(resolveDeployment('jpyc', kaia.id)).toBeUndefined();
+    // deploymentsForSymbol('jpyc') は polygon の 1 件のみ
+    expect(deploymentsForSymbol('jpyc')).toHaveLength(1);
+  });
+
+  it('NEXT_PUBLIC_JPYC_KAIROS_ADDRESS 設定時 → kaia deployment が出現 (testnet=kairos)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
+      '0xc0de000000000000000000000000000000005555';
+    const mod = await import('@/lib/tokens');
+    const d = mod.resolveDeployment('jpyc', kairos.id);
+    expect(d).toBeDefined();
+    expect(d?.symbol).toBe('jpyc');
+    expect(d?.chainId).toBe(kairos.id);
+    expect(d?.decimals).toBe(18);
+    expect(d?.displaySymbol).toBe('JPYC');
+    expect(d?.paymasterMode).toBe('sponsorship');
+    expect(d?.address.toLowerCase()).toBe(
+      '0xc0de000000000000000000000000000000005555',
+    );
+    // polygon kaia 両方含めて 2 件
+    expect(mod.deploymentsForSymbol('jpyc')).toHaveLength(2);
+  });
+
+  it('deploymentForSlug("jpyc", "kaia") は env 未設定なら throw (deployment 不在)', () => {
+    expect(() => deploymentForSlug('jpyc', 'kaia')).toThrow(
+      /No deployment for jpyc on kaia/,
+    );
+  });
+
+  it('deploymentForSlug("jpyc", "kaia") は env 設定時に kairos deployment を返す', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
+      '0xc0de000000000000000000000000000000005555';
+    const mod = await import('@/lib/tokens');
+    const d = mod.deploymentForSlug('jpyc', 'kaia');
+    expect(d.chainId).toBe(kairos.id);
+    expect(d.address.toLowerCase()).toBe(
+      '0xc0de000000000000000000000000000000005555',
+    );
+  });
+
+  it('mainnet env: KAIA_ADDRESS 設定時に kaia (8217) deployment が出現', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS =
+      '0xfeed000000000000000000000000000000006666';
+    // mainnet では fee receiver / pimlico / sponsorship policy が必須なので埋める
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xdead000000000000000000000000000000001234';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_test';
+    const mod = await import('@/lib/tokens');
+    const d = mod.resolveDeployment('jpyc', kaia.id);
+    expect(d?.chainId).toBe(kaia.id);
+    expect(d?.address.toLowerCase()).toBe(
+      '0xfeed000000000000000000000000000000006666',
+    );
+  });
+
+});
+
+describe('USDC は Kaia chain id で resolve しない (型レベル除外の runtime 確認)', () => {
+  it('resolveDeployment("usdc", kairos.id) → undefined', () => {
+    expect(resolveDeployment('usdc', kairos.id)).toBeUndefined();
+  });
+
+  it('resolveDeployment("usdc", kaia.id) → undefined', () => {
+    expect(resolveDeployment('usdc', kaia.id)).toBeUndefined();
+  });
+
+  it('deploymentsForSymbol("usdc") に kaia chain id は含まれない', () => {
+    const chainIds = deploymentsForSymbol('usdc').map((d) => d.chainId);
+    expect(chainIds).not.toContain(kaia.id);
+    expect(chainIds).not.toContain(kairos.id);
   });
 });

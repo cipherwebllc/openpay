@@ -1,11 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   addressExplorerUrl,
   blockExplorerUrl,
   chainForSlug,
   customRpcUrlForChain,
+  isJpycChainSlug,
   isSupportedChainId,
   isValidChainSlug,
+  JPYC_CHAINS,
   slugForChain,
   supportedChains,
   txExplorerUrl,
@@ -15,6 +17,8 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  kaia,
+  kairos,
   optimism,
   optimismSepolia,
   polygon,
@@ -23,20 +27,22 @@ import {
 
 // vitest.config.ts で NETWORK_ENV='testnet' なので testnet 側を期待
 describe('chains (testnet env)', () => {
-  it('chainForSlug が testnet env で sepolia 系チェーンを返す (4 slug 全て)', () => {
+  it('chainForSlug が testnet env で sepolia/kairos 系チェーンを返す (5 slug 全て)', () => {
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
     expect(chainForSlug('base').id).toBe(baseSepolia.id);
     expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
     expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
+    expect(chainForSlug('kaia').id).toBe(kairos.id);
   });
 
-  it('supportedChains は 4 本 (Base / Arbitrum / Optimism / Polygon)', () => {
-    expect(supportedChains).toHaveLength(4);
+  it('supportedChains は 5 本 (Base / Arbitrum / Optimism / Polygon / Kaia)', () => {
+    expect(supportedChains).toHaveLength(5);
     const ids = supportedChains.map((c) => c.id);
     expect(ids).toContain(baseSepolia.id);
     expect(ids).toContain(arbitrumSepolia.id);
     expect(ids).toContain(optimismSepolia.id);
     expect(ids).toContain(polygonAmoy.id);
+    expect(ids).toContain(kairos.id);
   });
 
   it('mainnet チェーンは含まれない', () => {
@@ -45,25 +51,27 @@ describe('chains (testnet env)', () => {
     expect(ids).not.toContain(base.id);
     expect(ids).not.toContain(arbitrum.id);
     expect(ids).not.toContain(optimism.id);
+    expect(ids).not.toContain(kaia.id);
   });
 });
 
 describe('isValidChainSlug', () => {
-  it.each(['base', 'arbitrum', 'optimism', 'polygon'])('"%s" → true', (s) => {
+  it.each(['base', 'arbitrum', 'optimism', 'polygon', 'kaia'])('"%s" → true', (s) => {
     expect(isValidChainSlug(s)).toBe(true);
   });
 
-  it.each(['eth', 'BASE', '', 'avalanche', 'unknown'])('"%s" → false', (s) => {
+  it.each(['eth', 'BASE', '', 'avalanche', 'unknown', 'kairos'])('"%s" → false', (s) => {
     expect(isValidChainSlug(s)).toBe(false);
   });
 });
 
 describe('chainForSlug', () => {
-  it('testnet env では sepolia 系が返る', () => {
+  it('testnet env では sepolia/kairos 系が返る', () => {
     expect(chainForSlug('base').id).toBe(baseSepolia.id);
     expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
     expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
+    expect(chainForSlug('kaia').id).toBe(kairos.id);
   });
 });
 
@@ -73,12 +81,14 @@ describe('slugForChain', () => {
     expect(slugForChain(arbitrumSepolia.id)).toBe('arbitrum');
     expect(slugForChain(optimismSepolia.id)).toBe('optimism');
     expect(slugForChain(polygonAmoy.id)).toBe('polygon');
+    expect(slugForChain(kairos.id)).toBe('kaia');
   });
 
   it('未対応 chainId は undefined', () => {
     expect(slugForChain(1)).toBeUndefined();
     expect(slugForChain(0)).toBeUndefined();
     expect(slugForChain(polygon.id)).toBeUndefined(); // mainnet (testnet env)
+    expect(slugForChain(kaia.id)).toBeUndefined(); // mainnet
   });
 });
 
@@ -97,14 +107,52 @@ describe('isSupportedChainId', () => {
   });
 });
 
+describe('JPYC_CHAINS / isJpycChainSlug', () => {
+  it('JPYC_CHAINS は exactly [polygon, kaia] (順序保持)', () => {
+    // memory:project_kaia_evaluation — Polygon (既存) + Kaia (2026-05-15 公式 deploy)
+    expect(JPYC_CHAINS).toEqual(['polygon', 'kaia']);
+  });
+
+  it.each(['polygon', 'kaia'])('isJpycChainSlug("%s") → true', (s) => {
+    expect(isJpycChainSlug(s)).toBe(true);
+  });
+
+  it.each(['base', 'arbitrum', 'optimism', 'BASE', 'kairos', '', 'eth'])(
+    'isJpycChainSlug("%s") → false (USDC chain や 大文字 や testnet slug 含む)',
+    (s) => {
+      expect(isJpycChainSlug(s)).toBe(false);
+    },
+  );
+
+});
+
 describe('customRpcUrlForChain', () => {
-  it('env 未設定なら undefined (対応 4 chain × mainnet/testnet すべて)', () => {
+  it('env 未設定なら undefined (対応 5 chain × mainnet/testnet すべて)', () => {
     expect(customRpcUrlForChain(chainForSlug('polygon').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('base').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('arbitrum').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('optimism').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('kaia').id)).toBeUndefined();
     expect(customRpcUrlForChain(arbitrum.id)).toBeUndefined();
     expect(customRpcUrlForChain(optimism.id)).toBeUndefined();
+  });
+
+  it('NEXT_PUBLIC_KAIA_RPC_URL が kaia mainnet (8217) に効く', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIA_RPC_URL = 'https://kaia-rpc.example/test';
+    const { customRpcUrlForChain: fn } = await import('@/lib/chains');
+    const { kaia: kaiaChain } = await import('viem/chains');
+    expect(fn(kaiaChain.id)).toBe('https://kaia-rpc.example/test');
+    delete process.env.NEXT_PUBLIC_KAIA_RPC_URL;
+  });
+
+  it('NEXT_PUBLIC_KAIROS_RPC_URL が kairos testnet (1001) に効く', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIROS_RPC_URL = 'https://kairos-rpc.example/test';
+    const { customRpcUrlForChain: fn } = await import('@/lib/chains');
+    const { kairos: kairosChain } = await import('viem/chains');
+    expect(fn(kairosChain.id)).toBe('https://kairos-rpc.example/test');
+    delete process.env.NEXT_PUBLIC_KAIROS_RPC_URL;
   });
 
   it('未知チェーン ID は undefined', () => {

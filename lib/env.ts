@@ -75,6 +75,8 @@ export const env = {
     baseSepolia: nonEmpty(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL),
     arbitrumSepolia: nonEmpty(process.env.NEXT_PUBLIC_ARBITRUM_SEPOLIA_RPC_URL),
     optimismSepolia: nonEmpty(process.env.NEXT_PUBLIC_OPTIMISM_SEPOLIA_RPC_URL),
+    kaia: nonEmpty(process.env.NEXT_PUBLIC_KAIA_RPC_URL),
+    kairos: nonEmpty(process.env.NEXT_PUBLIC_KAIROS_RPC_URL),
     // ENS / Basenames 解決用 (NETWORK_ENV に依存せず常に mainnet を使う)。
     // CCIP-Read (off-chain resolution) を要する .eth 名前があるため、
     // CCIP-Read 互換の RPC を既定にする (cloudflare-eth.com は非対応で
@@ -83,12 +85,20 @@ export const env = {
     baseMainnet: nonEmpty(process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL),
   },
   // 既定アドレスは lib/tokens.ts。コントラクト移行時はここで差替え。
-  // JPYC は Polygon 単一、USDC は対応 4 chain それぞれで上書き可能。
+  // JPYC: Polygon (既存、env 名は後方互換維持) + Kaia (2026-05-15 公式 deploy、
+  // PoC branch では env で address を受ける)。USDC は対応 4 chain それぞれで
+  // 上書き可能 (kaia には native USDC 未 deploy、Circle 未対応のため対象外)。
   mainnetTokenOverrides: {
-    jpyc: parseAddress(
-      'NEXT_PUBLIC_JPYC_MAINNET_ADDRESS',
-      process.env.NEXT_PUBLIC_JPYC_MAINNET_ADDRESS,
-    ),
+    jpyc: {
+      polygon: parseAddress(
+        'NEXT_PUBLIC_JPYC_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_MAINNET_ADDRESS,
+      ),
+      kaia: parseAddress(
+        'NEXT_PUBLIC_JPYC_KAIA_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS,
+      ),
+    },
     usdc: {
       base: parseAddress(
         'NEXT_PUBLIC_USDC_BASE_MAINNET_ADDRESS',
@@ -109,10 +119,16 @@ export const env = {
     },
   },
   testnetTokenOverrides: {
-    jpyc: parseAddress(
-      'NEXT_PUBLIC_JPYC_TESTNET_ADDRESS',
-      process.env.NEXT_PUBLIC_JPYC_TESTNET_ADDRESS,
-    ),
+    jpyc: {
+      polygon: parseAddress(
+        'NEXT_PUBLIC_JPYC_TESTNET_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_TESTNET_ADDRESS,
+      ),
+      kaia: parseAddress(
+        'NEXT_PUBLIC_JPYC_KAIROS_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS,
+      ),
+    },
     usdc: {
       base: parseAddress(
         'NEXT_PUBLIC_USDC_BASE_SEPOLIA_ADDRESS',
@@ -151,6 +167,10 @@ export const env = {
     optimism: parsePositiveInt(
       'NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI',
       process.env.NEXT_PUBLIC_GAS_CEILING_OPTIMISM_GWEI,
+    ),
+    kaia: parsePositiveInt(
+      'NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI',
+      process.env.NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI,
     ),
   },
   // useGasQuoteUsdc が USDC 建て gas 見積に使う UserOp gas 単位の上限値 (整数)。

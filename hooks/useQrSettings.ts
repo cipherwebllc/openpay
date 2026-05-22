@@ -1,6 +1,6 @@
 'use client';
 
-import { isValidChainSlug, type ChainSlug } from '@/lib/chains';
+import { isJpycChainSlug, isValidChainSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
@@ -81,14 +81,19 @@ function sanitizeSplits(loaded: unknown): SplitDraft[] {
     .slice(0, 3);
 }
 
-// (token, chain) ペアの妥当性を保つ。jpyc は polygon 固定、usdc は 4 chain 許容。
+// (token, chain) ペアの妥当性を保つ。
+// - jpyc: polygon (既定) + kaia (PoC、2026-05 公式 deploy) を許容、それ以外は polygon
+// - usdc: 4 chain (base/arbitrum/optimism/polygon) を許容、kaia は対象外
 // 不正な組合せが入った場合は token の default chain に倒す。
 export function normalizeChainForToken(
   token: TokenSymbol,
   chain: string | undefined,
 ): ChainSlug {
-  if (token === 'jpyc') return 'polygon';
-  if (chain && isValidChainSlug(chain)) return chain;
+  if (token === 'jpyc') {
+    return chain && isJpycChainSlug(chain) ? chain : 'polygon';
+  }
+  // usdc: kaia には Circle native USDC が deploy されていないため除外
+  if (chain && isValidChainSlug(chain) && chain !== 'kaia') return chain;
   return DEFAULT_CHAIN_FOR_SYMBOL[token];
 }
 

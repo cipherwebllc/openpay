@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { http, type Address, type Hex } from 'viem';
-import { polygon } from 'viem/chains';
+import { kaia, kairos, polygon } from 'viem/chains';
 import { buildMav2SmartAccountClient } from '@/lib/smartAccount/mav2';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { type TokenDeployment } from '@/lib/tokens';
@@ -181,6 +181,61 @@ describe('buildMav2SmartAccountClient', () => {
       value?: { url?: string };
     };
     expect(config.value?.url).toBe('https://polygon-rpc.example/test');
+  });
+
+  it('Kaia mainnet (8217): Pimlico Kaia は MAv2 非対応のため IncompatibleSmartAccountError + Sentry 観測 log + 他 chain 案内 i18nKey', async () => {
+    // Pimlico Kaia 対応 Smart Account は Safe / Simple Account / Thirdweb のみ。
+    // MAv2 wallet で Kaia 対応のものは 2026-05 時点で確認されていない (HashPort
+    // wallet は Kaia 非対応) が、defensive guard として将来の MAv2 + Kaia 遭遇
+    // に対し errorMav2KaiaPolygon で他 chain (Polygon/Base/Arbitrum/Optimism)
+    // フォールバックを案内する。
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const jpycKaia: TokenDeployment = {
+      ...jpycSponsorship,
+      chainId: kaia.id,
+    };
+    let captured: IncompatibleSmartAccountError | undefined;
+    await buildMav2SmartAccountClient({
+      walletClient: fakeWalletClient,
+      publicClient: fakePublicClient,
+      chain: kaia,
+      chainId: kaia.id,
+      deployment: jpycKaia,
+    }).catch((e) => {
+      captured = e;
+    });
+    expect(captured).toBeInstanceOf(IncompatibleSmartAccountError);
+    // Polygon フォールバック専用の i18nKey に routing (generic errorIncompatible…
+    // ではなく specific errorMav2KaiaPolygon)
+    expect(captured?.i18nKey).toBe('errorMav2KaiaPolygon');
+    expect(captured?.delegateAddress).toBeNull();
+    // 早期 throw のため MAv2 構築すら走らない (USDC 拒否と同じ fence)
+    expect(createModularAccountV2Mock).not.toHaveBeenCalled();
+    expect(splitMock).not.toHaveBeenCalled();
+    // Sentry alert rule "smart_account.mav2_kaia_rejected" のための event tag
+    const warnArgs = consoleWarn.mock.calls.flat().map(String);
+    expect(
+      warnArgs.some((s) => s.includes('smart_account.mav2_kaia_rejected')),
+    ).toBe(true);
+    expect(warnArgs.some((s) => s.includes(`"chainId":${kaia.id}`))).toBe(true);
+    consoleWarn.mockRestore();
+  });
+
+  it('Kairos testnet (1001): Pimlico Kairos も MAv2 非対応のため早期 throw', async () => {
+    const jpycKairos: TokenDeployment = {
+      ...jpycSponsorship,
+      chainId: kairos.id,
+    };
+    await expect(
+      buildMav2SmartAccountClient({
+        walletClient: fakeWalletClient,
+        publicClient: fakePublicClient,
+        chain: kairos,
+        chainId: kairos.id,
+        deployment: jpycKairos,
+      }),
+    ).rejects.toBeInstanceOf(IncompatibleSmartAccountError);
+    expect(createModularAccountV2Mock).not.toHaveBeenCalled();
   });
 
   it('split transport: bundler/paymaster method は Pimlico、それ以外は chain RPC へ route', async () => {

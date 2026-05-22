@@ -25,6 +25,7 @@ import {
 } from '@/lib/accountDetection';
 import { buildSimpleSmartAccountClient } from '@/lib/smartAccount/simpleAccount';
 import { env } from '@/lib/env';
+import { logger } from '@/lib/logger';
 import type { TokenDeployment } from '@/lib/tokens';
 
 export function useSmartAccount(
@@ -73,6 +74,13 @@ export function useSmartAccount(
 
       if (detection.kind === 'alchemy-mav2-7702') {
         if (!env.enableMav2) {
+          // Sentry 観測: MAv2 wallet (HashPort 等) が来ているのに feature flag
+          // off の頻度。enable 判断のためのデマンド signal。
+          logger.warn('smart_account.mav2_disabled', {
+            delegateAddress: detection.delegateAddress,
+            chainId,
+            symbol: deployment.symbol,
+          });
           throw new IncompatibleSmartAccountError({
             delegateAddress: detection.delegateAddress,
             i18nKey: 'errorMav2Disabled',
@@ -94,7 +102,13 @@ export function useSmartAccount(
       }
 
       // unknown delegation: 既知の MAv2 / Pimlico SimpleAccount いずれでもない。
-      // 互換性が取れないので明示的に block して UI で案内する。
+      // 互換性が取れないので明示的に block して UI で案内する。Sentry 観測で
+      // 「未知の delegate address」を集計し、新規 wallet 種別の流入を検知。
+      logger.warn('smart_account.unknown_delegation', {
+        delegateAddress: detection.delegateAddress,
+        chainId,
+        symbol: deployment.symbol,
+      });
       throw new IncompatibleSmartAccountError({
         delegateAddress: detection.delegateAddress,
         i18nKey: 'errorIncompatibleSmartAccount',

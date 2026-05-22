@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { polygonAmoy, baseSepolia } from 'viem/chains';
+import { kaia, kairos, polygonAmoy, baseSepolia } from 'viem/chains';
+import type { Address } from 'viem';
 
 // 重要: この import が壊れていれば (permissionless の
 // `to7702SimpleSmartAccount` が消える等)、このテストファイル自体の
@@ -41,10 +42,24 @@ vi.mock('permissionless', () => ({
 
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { mockHook } from '../_helpers/wagmiMock';
-import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import { defaultDeploymentForSymbol, type TokenDeployment } from '@/lib/tokens';
 
 const usdcDep = defaultDeploymentForSymbol('usdc');
 const jpycDep = defaultDeploymentForSymbol('jpyc');
+
+// JPYC on Kairos (Kaia testnet)。env override が未設定なので
+// defaultDeploymentForSymbol では取れない。実 contract address が公表され
+// るまでの placeholder を inline で組み立てる (本 test の目的は chainId
+// 経路の routing 検証であり address の正当性ではない)。
+const jpycKairosDep: TokenDeployment = {
+  symbol: 'jpyc',
+  displaySymbol: 'JPYC',
+  name: 'JPY Coin',
+  decimals: 18,
+  address: '0xc0de000000000000000000000000000000005555' as Address,
+  chainId: kairos.id,
+  paymasterMode: 'sponsorship',
+};
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -183,6 +198,62 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     expect(result.current.data!.paymasterMode).toBe('sponsorship');
     expect(result.current.data!.smartAccountClient).toBeDefined();
     expect(result.current.data!.pimlicoClient).toBeDefined();
+  });
+
+  it('JPYC on Kaia/Kairos: SimpleAccount (7702) 経路へ routing、Pimlico Kairos URL が組み立てられる', async () => {
+    // memory:project_kaia_evaluation — Kaia Prague hardfork で KIP-228 として
+    // EIP-7702 実装済 + Pimlico Kaia bundler の Simple Account 対応リスト掲載。
+    // useSmartAccount から buildSimpleSmartAccountClient → to7702SimpleSmartAccount
+    // が呼ばれる連鎖を test する (mav2 経路に倒れないこと、Polygon と同型の
+    // sponsorship paymaster コンフィグが立つこと)。
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: kairos.id,
+    });
+    mockHook(useWalletClient, { data: { chain: kairos } });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+
+    const { result } = renderHook(() => useSmartAccount(jpycKairosDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    // SimpleAccount 経路 (mav2 ではない) — to7702SimpleSmartAccount が呼ばれる
+    expect(to7702SimpleSmartAccount).toHaveBeenCalledOnce();
+    expect(createSmartAccountClient).toHaveBeenCalledOnce();
+
+    // Kairos の deployment で sponsorship mode が確定 (testnet erc20 → sponsorship
+    // フォールバックを通らずに直接 sponsorship)
+    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+    const cfg = lastSAConfig as {
+      bundlerTransport: unknown;
+      paymasterContext: unknown;
+    };
+    expect(cfg.bundlerTransport).toBeDefined();
+    expect(cfg.paymasterContext).toEqual({ sponsorshipPolicyId: 'sp_test' });
+  });
+
+  it('Kaia mainnet (8217) は testnet env では supportedChains 外: クエリ無効化', () => {
+    // testnet env (vitest config) で supportedChains は kairos のみ (kaia は未含)。
+    // mainnet chainId が誤って差し込まれた場合は enabled=false で queryFn 不実行
+    // — 不正 chain 上の Smart Account 構築を未然に防ぐ fence。
+    const jpycKaiaDep: TokenDeployment = {
+      ...jpycKairosDep,
+      chainId: kaia.id,
+    };
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: kaia.id,
+    });
+    mockHook(useWalletClient, { data: { chain: kaia } });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+
+    const { result } = renderHook(() => useSmartAccount(jpycKaiaDep), {
+      wrapper: makeWrapper(),
+    });
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(result.current.data).toBeUndefined();
+    expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
   });
 
   it('USDC (testnet → sponsorship フォールバック): JPYC と同じく sponsorship 経路', async () => {

@@ -33,6 +33,7 @@ import {
   type ClientMiddlewareFn,
 } from '@aa-sdk/core';
 import { createModularAccountV2 } from '@account-kit/smart-contracts';
+import { kaia, kairos } from 'viem/chains';
 import type { GetWalletClientReturnType } from '@wagmi/core';
 import {
   createPimlico,
@@ -42,6 +43,7 @@ import {
 } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
+import { logger } from '@/lib/logger';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 
 type ConnectedWalletClient = NonNullable<GetWalletClientReturnType>;
@@ -61,6 +63,23 @@ export async function buildMav2SmartAccountClient(args: {
 }): Promise<SmartAccountBundle> {
   const { walletClient, publicClient, chain, chainId, deployment } = args;
   const paymasterMode = resolvePaymasterMode(deployment);
+
+  // Pimlico Kaia は MAv2 非対応 (Simple Account / Safe / Thirdweb のみ)。
+  // 2026-05 時点で MAv2 wallet で Kaia 対応のものは確認されていない (HashPort は
+  // Ethereum/Polygon/Base/BNB/Avalanche/Arbitrum/Aptos のみで Kaia 非対応)。
+  // 本ガードは defensive: 将来 MAv2 系 wallet が Kaia 対応した場合に sponsorship
+  // 不能を fail-safe で UI 案内 (errorMav2KaiaPolygon) に倒すため。Sentry 観測で
+  // smart_account.mav2_kaia_rejected が実発火し始めたら需要評価のトリガーになる。
+  if (chainId === kaia.id || chainId === kairos.id) {
+    logger.warn('smart_account.mav2_kaia_rejected', {
+      chainId,
+      symbol: deployment.symbol,
+    });
+    throw new IncompatibleSmartAccountError({
+      delegateAddress: null,
+      i18nKey: 'errorMav2KaiaPolygon',
+    });
+  }
 
   // phase 1: USDC ERC20 paymaster + MAv2 は未検証のため拒否する。
   // sponsorship (JPYC) のみ通す。USDC + MAv2 の解放は smoke (plan Step 9 (f))

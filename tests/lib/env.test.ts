@@ -74,14 +74,85 @@ describe('lib/env (module-load validation)', () => {
     warn.mockRestore();
   });
 
-  it('JPYC_MAINNET_ADDRESS env override がパースされる', async () => {
+  it('JPYC_MAINNET_ADDRESS env override (polygon キー) がパースされる', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_JPYC_MAINNET_ADDRESS =
       '0xabcd000000000000000000000000000000009999';
     const mod = await import('@/lib/env');
-    expect(mod.env.mainnetTokenOverrides.jpyc?.toLowerCase()).toBe(
+    expect(mod.env.mainnetTokenOverrides.jpyc.polygon?.toLowerCase()).toBe(
       '0xabcd000000000000000000000000000000009999',
     );
+  });
+
+  it('JPYC_KAIA_ADDRESS env override (kaia キー) がパースされる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS =
+      '0xbeef000000000000000000000000000000001111';
+    const mod = await import('@/lib/env');
+    expect(mod.env.mainnetTokenOverrides.jpyc.kaia?.toLowerCase()).toBe(
+      '0xbeef000000000000000000000000000000001111',
+    );
+  });
+
+  it('JPYC_TESTNET_ADDRESS env override (testnet polygon キー、後方互換)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_TESTNET_ADDRESS =
+      '0xcafe000000000000000000000000000000002222';
+    const mod = await import('@/lib/env');
+    expect(mod.env.testnetTokenOverrides.jpyc.polygon?.toLowerCase()).toBe(
+      '0xcafe000000000000000000000000000000002222',
+    );
+    // kaia は未設定なら undefined (deployment skip 条件)
+    expect(mod.env.testnetTokenOverrides.jpyc.kaia).toBeUndefined();
+  });
+
+  it('JPYC_KAIROS_ADDRESS env override (testnet kaia キー) がパースされる', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
+      '0xdada000000000000000000000000000000003333';
+    const mod = await import('@/lib/env');
+    expect(mod.env.testnetTokenOverrides.jpyc.kaia?.toLowerCase()).toBe(
+      '0xdada000000000000000000000000000000003333',
+    );
+  });
+
+  it('JPYC_KAIA_ADDRESS 不正値 (非 0x address) は warn して undefined', async () => {
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS = 'not-a-hex';
+    const mod = await import('@/lib/env');
+    expect(mod.env.mainnetTokenOverrides.jpyc.kaia).toBeUndefined();
+    expect(
+      warn.mock.calls.some((c) =>
+        String(c[0]).includes('NEXT_PUBLIC_JPYC_KAIA_ADDRESS'),
+      ),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('NEXT_PUBLIC_KAIA_RPC_URL / NEXT_PUBLIC_KAIROS_RPC_URL が rpc 構造に乗る', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIA_RPC_URL = 'https://kaia.rpc.example/v1';
+    process.env.NEXT_PUBLIC_KAIROS_RPC_URL = 'https://kairos.rpc.example/v1';
+    const mod = await import('@/lib/env');
+    expect(mod.env.rpc.kaia).toBe('https://kaia.rpc.example/v1');
+    expect(mod.env.rpc.kairos).toBe('https://kairos.rpc.example/v1');
+  });
+
+  it('NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI が gasCeilingGwei.kaia に乗る', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI = '75';
+    const mod = await import('@/lib/env');
+    expect(mod.env.gasCeilingGwei.kaia).toBe(75);
+  });
+
+  it('NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI 不正値 (非正整数) は undefined', async () => {
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI = '-50';
+    const mod = await import('@/lib/env');
+    expect(mod.env.gasCeilingGwei.kaia).toBeUndefined();
+    warn.mockRestore();
   });
 
   it('USDC mainnet の per-chain env override (4 chain) がパースされる', async () => {
