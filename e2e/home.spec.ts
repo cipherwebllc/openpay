@@ -102,6 +102,64 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(mmSwapLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
+  test('ja: offramp gasHint details の toggle が両方向で機能 (open → close → open)', async ({
+    page,
+  }) => {
+    // <details> の native toggle が両方向で動くこと、および ChevronIcon の回転
+    // class (group-open:rotate-90) が details[open] 属性と同期することを確認。
+    // 一方向 (open) の test は別 spec にあるが、close (再 click) で body が再 hide
+    // することは regression が出やすい (例: onClick で setState して preventDefault
+    // すると native toggle が壊れる)。
+    await page.goto('/ja');
+    const gasHintTitle = page.getByText(
+      /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,
+    );
+    const body = page.getByText(/Base \/ Arbitrum \/ Optimism は ETH/);
+    // details element 本体を `:has()` で同定 (Playwright CSS selector で評価)
+    const detailsEl = page.locator('details:has(summary:has-text("ガス代 (POL / ETH)"))');
+
+    // 初期: closed
+    await expect(body).toBeHidden();
+    await expect(detailsEl).not.toHaveAttribute('open', /.*/);
+
+    // 1 度 click → open、body 表示、open 属性付与
+    await gasHintTitle.click();
+    await expect(body).toBeVisible();
+    await expect(detailsEl).toHaveAttribute('open', '');
+
+    // 再 click → close、body 再 hidden、open 属性消失
+    await gasHintTitle.click();
+    await expect(body).toBeHidden();
+    await expect(detailsEl).not.toHaveAttribute('open', /.*/);
+
+    // 3 度目: 再度 open できる (native details が永続 disabled 化していない)
+    await gasHintTitle.click();
+    await expect(body).toBeVisible();
+  });
+
+  test('ja: offramp の TokenIcon が JPYC と USDC 両 row に SVG として描画される', async ({
+    page,
+  }) => {
+    // inline SVG icon (TokenIcon) は decorative なので aria-hidden で a11y tree
+    // から消えるが、DOM 上は token row 各々に <svg> として存在し、glyph (¥/$) を
+    // 持つ。SVG 描画失敗 (例: import 漏れ、render error) を検知する。
+    await page.goto('/ja');
+    const offrampSection = page.locator('section[aria-labelledby="offramp-heading"]');
+    // 各 row の text に対する SVG sibling を確認
+    const jpycRow = offrampSection
+      .locator('li')
+      .filter({ hasText: /JPYC を/ });
+    const usdcRow = offrampSection
+      .locator('li')
+      .filter({ hasText: /USDC を/ });
+    // SVG が row 内に少なくとも 1 つ存在 (TokenIcon)
+    await expect(jpycRow.locator('svg')).toHaveCount(1);
+    await expect(usdcRow.locator('svg')).toHaveCount(1);
+    // SVG の <text> に通貨記号が入っている
+    await expect(jpycRow.locator('svg text')).toHaveText('¥');
+    await expect(usdcRow.locator('svg text')).toHaveText('$');
+  });
+
   test('mobile: Tip widget で ENS (vitalik.eth) 解決後の 0x display も overflow しない (実 bug シナリオ)', async ({
     page,
   }, testInfo) => {

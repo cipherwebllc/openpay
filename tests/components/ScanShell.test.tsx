@@ -156,6 +156,38 @@ describe('ScanShell: 接続状態表示', () => {
     renderWithIntl(<ScanShell />, { locale: 'en' });
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
   });
+
+  it('isConnected:true で address:undefined (wagmi race) → 未接続 branch に fallback', () => {
+    // wagmi v2 では「isConnected=true だが address はまだ propagate していない」
+    // race window がある。ScanShell は `isConnected && address` で守って未接続
+    // 扱いにする (= preHint + ConnectButton)。Branch が badge / 切断 btn 側に
+    // 倒れて address undefined を render してしまう regression を検知する test。
+    mockHook(useAccount, { isConnected: true, address: undefined });
+    mockHook(useConnect, {
+      connectors: [{ uid: '1', name: 'MetaMask' }],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+    renderWithIntl(<ScanShell />);
+    // emerald badge / 切断 btn は描画されない
+    expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
+    expect(screen.queryByText(/接続済みです/)).toBeNull();
+    // 未接続 branch の preHint + ConnectButton が出る
+    expect(screen.getByText(/あらかじめウォレットを接続/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+  });
+
+  it('未接続 branch では切断 btn が DOM に居ない (regression guard)', () => {
+    // 未接続時に「切断」label を持つ btn が ConnectButton 経由でも漏れていない
+    // ことを明示。Branch を誤って常時 disconnect btn 出す実装に regress させたら
+    // ここが落ちる。
+    mockConnected(false);
+    renderWithIntl(<ScanShell />);
+    expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
+  });
 });
 
 describe('ScanShell: decode → router.push + logger.info', () => {
