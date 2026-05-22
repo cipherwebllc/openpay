@@ -181,9 +181,10 @@ export const env = {
     process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS,
   ),
   // useGasQuoteJpyc が native gas を JPYC へ換算する固定レート (1 native = N JPYC、整数)。
-  // JPYC = JPY 1:1。POL は 60 JPY 前後 / KAIA は 30 JPY 前後 (2026 想定、月次手動更新)。
-  // 外部 API 依存を持たない、設定漏れ時は useGasQuoteJpyc 内の NATIVE_JPYC_RATE
-  // (chain ごとの hard-code default) にフォールバック。
+  // JPYC = JPY 1:1。2026-05-23 実勢: POL ≈ ¥14.6 / KAIA ≈ ¥8.21、+37%/+22%
+  // over-collect 政策で hard-code default は POL=20 / KAIA=10。月次手動更新、
+  // 詳細は DEPLOY_CHECKLIST §9.5b。設定漏れ時は useGasQuoteJpyc 内の default
+  // にフォールバック (chain ごとに分岐)。
   polJpycRate: parsePositiveInt(
     'NEXT_PUBLIC_POL_JPYC_RATE',
     process.env.NEXT_PUBLIC_POL_JPYC_RATE,

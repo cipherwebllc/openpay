@@ -492,11 +492,17 @@ env 未設定時の default は両 chain とも over-collect 側に倒してい�
 = OpenPay 損失より安全寄り)。運営手数料 1.0% が gas 換算誤差の 100x 大きいため
 ズレは UX 上の数値表示問題に留まる。
 
-**rate 変更時の 4 箇所同期 update** (stale 化防止):
-1. `hooks/useGasQuoteJpyc.ts` の `DEFAULT_*_JPYC_RATE`
-2. `tests/hooks/useGasQuoteJpyc.test.tsx` の期待値
-3. `.env.local.example` のコメント
+**rate 変更時の 6 箇所同期 update** (stale 化防止、2026-05-23 audit で「4 箇所」
+claim が漏れ ありと判明、6 箇所に拡張):
+1. `hooks/useGasQuoteJpyc.ts` の `DEFAULT_*_JPYC_RATE` + 根拠 comment
+2. `tests/hooks/useGasQuoteJpyc.test.tsx` の期待値 (×N、test 名内の数値も)
+3. `.env.local.example` の env 説明コメント
 4. 本 §9.5b の表 + smoke 期待値
+5. `lib/env.ts` の `polJpycRate` / `kaiaJpycRate` docstring
+6. `lib/gasCeiling.ts` の Polygon ceiling 説明 ("1 tx あたり最大 〜N JPY" 計算式)
+
+`grep -rE "POL.*[0-9]+.*JPY|KAIA.*[0-9]+.*JPY|6[0-9]n|2[0-9]n.*JPY" lib hooks .env.local.example docs/DEPLOY_CHECKLIST.md tests`
+で漏れ検出可能 (rate 数値が hardcode された箇所を網羅 grep)。
 
 ### 9.6 MAv2 + Kaia defensive UI (実装済)
 

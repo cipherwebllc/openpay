@@ -12,10 +12,11 @@
 //     (DePIN/AI 需要増)。Pimlico fast tier はそこに priority fee を 150〜
 //     250 gwei 上乗せして 500〜700 gwei を quote する。400 gwei では実質
 //     常時 block されるため、現実に合わせて 1000 gwei に拡張。
-//     1 tx あたり最大 〜10 JPY (1000 gwei × 400k gas × POL=60 JPY) の運営
-//     赤字を許容する代わりに送金が通る状態を担保する。運営損益クッションは
-//     gas estimate のバッファ (POL_JPYC_RATE × overhead 係数) を厚めに取る
-//     ことで確保。1500+ gwei 帯は異常な spike として block 維持。
+//     1 tx あたり最大 〜8 JPY (1000 gwei × 400k gas × POL≈¥20、2026-05-23
+//     実勢 ¥14.6 + over-collect 政策 base) の運営赤字を許容する代わりに送金が
+//     通る状態を担保する。運営損益クッションは gas estimate のバッファ
+//     (POL_JPYC_RATE × overhead 係数) を厚めに取ることで確保。1500+ gwei 帯
+//     は異常な spike として block 維持。
 //   - Base 10 gwei (USDC erc20 paymaster mode、顧客負担):
 //     Pimlico fast の Base mainnet 平常時 quote が 1〜3 gwei、混雑時 5〜10
 //     gwei 程度。実質 ceiling は「異常な spike を弾く UX ガード」のみで、
