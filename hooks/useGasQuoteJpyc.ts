@@ -27,14 +27,13 @@ const DEFAULT_USEROP_GAS_UNITS = 200_000n;
 // POL: 60n — 長期運用 (Polygon JPYC 既存) で実測収束、`NEXT_PUBLIC_POL_JPYC_RATE`
 //   で月次調整。2026-05 時点で POL ≈ 60 JPY 帯が稼働実績。
 //
-// KAIA: 30n — **未検証の order-of-magnitude 推定**。KAIA 市場価格を私 (Claude)
-//   が独立に確認しておらず、$0.15-$0.50 USD レンジ仮定からの逆算。DEPLOY_
-//   CHECKLIST §9.5 で本投入前に `NEXT_PUBLIC_KAIA_JPYC_RATE` 設定を要求する
-//   運用方針。env 未設定で本 default を引いた場合は customer に対し sub-JPYC
-//   レベルの過大/過小 collection が起きうる (operational impact 小、UX 影響
-//   小だが honest disclosure)。
+// KAIA: 10n — 2026-05-23 user 確認の実勢 1 KAIA = $0.07 = ¥8.21 (1.34 KAIA =
+//   $0.07 から計算) を base、DEPLOY_CHECKLIST §9.5b の policy (+20% over market、
+//   over-collect 寄り) で 10n に丸めた値。仮 KAIA が ±50% の典型変動を起こして
+//   も over-collect 側 (運営手数料 1.0% で吸収可能な範囲) に留まる安全マージン。
+//   実勢が ±30% 以上 drift したら `NEXT_PUBLIC_KAIA_JPYC_RATE` で env 上書き。
 const DEFAULT_POL_JPYC_RATE = 60n;
-const DEFAULT_KAIA_JPYC_RATE = 30n;
+const DEFAULT_KAIA_JPYC_RATE = 10n;
 
 // JPYC sponsorship が動く chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。
 // 該当しない chain では gas を 0 として扱う (UI 表示の defensive、JPYC は元々

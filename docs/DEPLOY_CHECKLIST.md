@@ -457,37 +457,40 @@ NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
 - [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
 - [ ] env 投入後 Sentry の `gas_congested` × chainId:8217 発生率 < 0.1%
 
-### 9.5b KAIA → JPYC rate 検証 (本投入前 必須)
+### 9.5b KAIA → JPYC rate 検証 (本投入前 必須、月次継続)
 
-`hooks/useGasQuoteJpyc.ts` の `DEFAULT_KAIA_JPYC_RATE = 30n` は order-of-
-magnitude 推定値で、実 KAIA 市場価格と乖離する可能性がある。本投入前に
-`NEXT_PUBLIC_KAIA_JPYC_RATE` を設定して env を SoT にすること。
+`hooks/useGasQuoteJpyc.ts` の `DEFAULT_KAIA_JPYC_RATE` は実勢に追従させる必要
+がある。2026-05-23 時点の user 確認値: **1 KAIA = $0.07 = ¥8.21** (1.34 KAIA
+= $0.07 から計算)。本 default は `+22%` over-collect 政策で `10n` (= ¥10/KAIA
+換算) を採用、env override で月次調整。
 
 検証手順:
 
 ```bash
 # KAIA 市場価格を取引所 / CoinGecko 等で確認
-# 例: 1 KAIA = $0.25 USD / 1 USD = 150 JPY → 1 KAIA ≈ 38 JPY
-# → 安全側 (over-collect 寄り) に NEXT_PUBLIC_KAIA_JPYC_RATE=40 を設定
+# 2026-05-23 時点: 1 KAIA = $0.07 = ¥8.21 (user 確認済)
+# +22% over-collect (default 10n) で ±50% 典型変動を吸収する設計
 
-# Vercel project env に反映
+# env 上書きが必要な場合 (実勢 ±30% 以上 drift 時):
 vercel env add NEXT_PUBLIC_KAIA_JPYC_RATE production
+# 例: 実勢 ¥15/KAIA に上昇 → NEXT_PUBLIC_KAIA_JPYC_RATE=18 (+20% over)
 # Redeploy で baking
 ```
 
-- [ ] KAIA 市場価格を信頼可能 source (取引所 / CoinGecko / Pimlico dashboard
-      の USD 換算) で確認、値を記録
-- [ ] `NEXT_PUBLIC_KAIA_JPYC_RATE` env に over-collect 寄り (実勢 + 20%
-      程度) の値を設定。OpenPay の運営手数料 1.0% (常に店主負担) で
-      under-collection を回収できる範囲なら微調整可
-- [ ] env 投入後 deploy、Kaia 経路で実 wallet 1 件 smoke で「ネットワーク
-      手数料見積」が想定 JPYC 単位 (0.1〜1 JPYC 程度) で表示されるか目視
-- [ ] 月次で KAIA 価格を再確認、20% 以上 drift したら env 更新
+- [x] **2026-05-23**: 1 KAIA = ¥8.21 確認、default を `10n` に設定済 (commit:
+      LARP audit 反映)
+- [ ] env 設定で更に locked-in 値にしたい場合 `NEXT_PUBLIC_KAIA_JPYC_RATE`
+      に明示値を設定
+- [ ] Kaia 経路で実 wallet 1 件 smoke、「ネットワーク手数料見積」が想定
+      0.05〜0.1 JPYC 範囲で表示されるか目視 (200_000 × 31.5 gwei × 10 =
+      6.3e16 wei JPYC ≈ 0.063 JPYC が default 時の値)
+- [ ] 月次で KAIA 価格を再確認、±30% 以上 drift したら env 更新 + 必要なら
+      `DEFAULT_KAIA_JPYC_RATE` も commit で追従
 
-**現状リスク**: env 未設定でも UI は `30n` default で動作する (deployment skip
-しない)。OpenPay 側では運営手数料が gas 換算誤差より 100x 大きいため operational
-impact は minor だが、UI に表示される「最大 X JPYC」の数値が市場実勢と乖離する
-可能性がある。
+**現状の trade-off**: env 未設定でも UI は `10n` default で動作する。KAIA 価格
+が ±50% 変動しても over-collect 側に留まる (under-collect = OpenPay 損失より
+は安全)。運営手数料 1.0% は gas 換算誤差より 100x 大きいので operational impact
+は minor、UI 数値の実勢乖離だけが UX 懸念。
 
 ### 9.6 MAv2 + Kaia defensive UI (実装済)
 

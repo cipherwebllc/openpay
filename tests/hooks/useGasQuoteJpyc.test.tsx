@@ -108,16 +108,16 @@ describe('useGasQuoteJpyc', () => {
     });
 
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // overhead 200_000 × 31.5 gwei = 6.3e15 wei KAIA × 30 (KAIA→JPYC default rate)
-    // = 1.89e17 wei JPYC ≈ 0.189 JPYC
-    const expected = 200_000n * 315n * 10n ** 8n * 30n;
+    // overhead 200_000 × 31.5 gwei = 6.3e15 wei KAIA × 10 (KAIA→JPYC default rate、
+    // 2026-05-23 実勢 ¥8/KAIA + over-collect 政策で 10n) = 6.3e16 wei JPYC ≈ 0.063 JPYC
+    const expected = 200_000n * 315n * 10n ** 8n * 10n;
     expect(result.current.data?.gasAmount).toBe(expected);
     // 0n ではない (旧 bug の regression fence)
     expect(result.current.data?.gasAmount).not.toBe(0n);
     expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
   });
 
-  it('Kaia の rate は POL のと独立 (KAIA→JPYC 30 default、POL→JPYC 60 とは別)', async () => {
+  it('Kaia の rate は POL のと独立 (KAIA→JPYC 10 default、POL→JPYC 60 とは別)', async () => {
     getUserOperationGasPrice.mockResolvedValue({
       standard: { maxFeePerGas: 100n * 10n ** 9n }, // 100 gwei (両 chain で同じ value 仮定)
     });
@@ -137,10 +137,10 @@ describe('useGasQuoteJpyc', () => {
 
     const gasNative = 200_000n * 100n * 10n ** 9n;
     expect(polygonResult.current.data?.gasAmount).toBe(gasNative * 60n);
-    expect(kaiaResult.current.data?.gasAmount).toBe(gasNative * 30n);
-    // Polygon は Kaia の 2 倍 (60/30)
+    expect(kaiaResult.current.data?.gasAmount).toBe(gasNative * 10n);
+    // Polygon は Kaia の 6 倍 (60/10)
     expect(polygonResult.current.data!.gasAmount).toBe(
-      kaiaResult.current.data!.gasAmount * 2n,
+      kaiaResult.current.data!.gasAmount * 6n,
     );
   });
 
@@ -241,9 +241,9 @@ describe('useGasQuoteJpyc', () => {
 
     // 2 chain で 2 回 fetch (queryKey が chainId で分離されている保証)
     expect(callCount).toBe(2);
-    // 値が独立 (Polygon 60 / Kaia 30、同 gasPrice なので Polygon = 2 × Kaia)
+    // 値が独立 (Polygon 60 / Kaia 10、同 gasPrice なので Polygon = 6 × Kaia)
     expect(polR.current.data!.gasAmount).toBe(
-      kaiaR.current.data!.gasAmount * 2n,
+      kaiaR.current.data!.gasAmount * 6n,
     );
   });
 });
