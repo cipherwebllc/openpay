@@ -399,4 +399,79 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(techDetails).toHaveAttribute('open', '');
     await expect(footer.getByText(/ERC-4337/)).toBeVisible();
   });
+
+  // a11y: collapsible Step 2 のキーボード操作 + focus 維持。実 browser の native
+  // button semantics ([Enter] / [Space] 両対応) を保証 (jsdom では keyboard
+  // 経由の click 発火を要 manual dispatch、e2e でしか実 OS イベント無理)。
+  test('ja: Step 2 toggle は Enter / Space キーで開閉できる (a11y)', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const toggle = page.getByRole('button', { name: /^受取先/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // 受取先を入力 (これで初期 state は確定し、以降は手動 toggle のみ)
+    await page
+      .getByPlaceholder(/0x\.\.\./)
+      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    // focus → Enter で close
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // Space で open
+    await page.keyboard.press('Space');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // focus は toggle 上に保持 (キーボード操作のみで完結)
+    const isFocused = await toggle.evaluate((el) => el === document.activeElement);
+    expect(isFocused).toBe(true);
+  });
+
+  // ChevronDown の rotation は computed CSS で実測 (transition の race を吸収
+  // する toHaveCSS auto-retry 経由)。jsdom では style 計算が乏しいので e2e 必須。
+  test('ja: Step 2 toggle の ChevronDown は open/close で実 CSS transform が変わる', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const toggle = page.getByRole('button', { name: /^受取先/ });
+    // closed → chevron は未 rotate (matrix identity or none)
+    await page
+      .getByPlaceholder(/0x\.\.\./)
+      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const chevron = toggle.locator('svg.transition-transform');
+    // closed 状態: rotate-180 class が剥がれた状態の matrix
+    await expect(chevron).toHaveCSS(
+      'transform',
+      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
+    );
+    // open → 180° rotate → matrix(-1, 0, 0, -1, 0, 0) (cosθ=-1, sinθ≈0)
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(chevron).toHaveCSS(
+      'transform',
+      /matrix\(\s*-1,\s*[\d.eE+-]+,\s*[\d.eE+-]+,\s*-1,\s*0,\s*0\s*\)/,
+    );
+  });
+
+  // localStorage の persistence: 入力 → reload → 受取先 default 閉が再現される
+  // ことを実 browser で検証 (useQrSettings + useEffect の hydrate 経路全体)。
+  test('ja: 受取先入力 → reload → Step 2 が default 折り畳まれる (returning user)', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await page
+      .getByPlaceholder(/0x\.\.\./)
+      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    // 設定が localStorage に保存されるまで待機 (useQrSettings の debounce 後)
+    await page.waitForFunction(() => {
+      const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+      return raw !== null && JSON.parse(raw).receiver.length > 0;
+    });
+    // page reload
+    await page.reload();
+    // reload 後 Step 2 は default closed + summary に short address
+    const toggle = page.getByRole('button', { name: /^受取先/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle.getByText(/0x52d4…cA81/)).toBeVisible();
+  });
 });

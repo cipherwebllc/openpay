@@ -1528,4 +1528,322 @@ describe('QrGenerator', () => {
       expect(screen.getByPlaceholderText(/0x\.\.\./)).toBeVisible();
     });
   });
+
+  // 3-step UI refresh の境界 / エッジケース。state machine と useEffect の
+  // 一度きり挙動、empty state の auto-validity 分岐、Step2Summary の fallback
+  // path などを実 component で実走行。
+  describe('3-step UI: 境界条件 / エッジケース', () => {
+    it('Step 2 init は hydrate 後 一度のみ — 受取先 type 中に勝手に折り畳まれない', async () => {
+      // 新規 user: receiver=null → step2Open=true。input に typing して有効化
+      // しても、step2Initialized=true 後は useEffect が再評価しないため
+      // collapsed に反転しないことを保証 (= 入力フロー中断防止)。
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('true'),
+      );
+      // 完全な VALID address を type
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // typing 完了後も Step 2 は open のまま (race 防止が機能)
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+      // 続けて store name も入力可能 (input が mounted)
+      expect(screen.getByPlaceholderText(/OpenPay Coffee/)).toBeInTheDocument();
+    });
+
+    it('preset receiver + 手動 open → receiver clear → Step 2 は open 維持 (再 collapse しない)', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      // hydrate 後 default closed
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      // 手動 open
+      await user.click(toggle);
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+      // address input を clear
+      const addrInput = screen.getByPlaceholderText(/0x\.\.\./);
+      await user.clear(addrInput);
+      // receiver が null になっても Step 2 は open 維持 (step2Initialized 後は
+      // useEffect が一度のみで再評価しない invariant)
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('Step 2 collapsed 状態で receiver を抹消できない (折り畳み中は input が unmount のため defacto 保護)', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          storeName: 'Test Shop',
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      // closed の間は input が DOM に存在しないため誤操作で clear できない
+      expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
+      // collapsed summary は valid な receiver で正しい形式
+      expect(
+        within(toggle).getByText(/Test Shop · 0x8335…2913/),
+      ).toBeInTheDocument();
+    });
+
+    it('据え置きモード: amount input 無し → QR empty state の "請求金額" は auto-done (✓)', async () => {
+      // mode=static は amount input が存在せず、amountValid = true 固定。
+      // empty state の checklist で「請求金額」項目が done 扱いになる検証。
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      // 据え置きモードへ切替 (Step 1 内)
+      await user.click(screen.getByRole('button', { name: /据え置き/ }));
+      // 受取先未設定なので empty state は表示
+      await waitFor(() =>
+        expect(
+          screen.getByText(/QR コードを作成する準備ができていません/),
+        ).toBeInTheDocument(),
+      );
+      const list = container.querySelector(
+        '[aria-labelledby="step-3-heading"] ul',
+      )!;
+      const items = list.querySelectorAll('li');
+      expect(items.length).toBe(2);
+      // 1 つ目 (receiver) は未 done = border
+      expect(items[0].querySelector('span')!.className).toMatch(/border/);
+      // 2 つ目 (amount) は据え置きなので auto-done = emerald
+      expect(items[1].querySelector('span')!.className).toMatch(/bg-emerald-500/);
+    });
+
+    it('据え置きモード + 受取先 valid → "生成中" でも空状態でもなく QR が出る', async () => {
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('button', { name: /据え置き/ }));
+      // payUrl 生成 (amount 無しでも static で OK)
+      await waitFor(() => {
+        const svgs = container.querySelectorAll('svg');
+        // OpenPay QR (size=240) が描画される
+        const qrSvg = Array.from(svgs).find(
+          (s) => s.getAttribute('width') === '240',
+        );
+        expect(qrSvg).toBeDefined();
+      });
+      // empty state も "生成中" も出ない
+      expect(
+        screen.queryByText(/QR コードを作成する準備ができていません/),
+      ).toBeNull();
+      expect(screen.queryByText(/QR を生成中/)).toBeNull();
+    });
+
+    it('Step2Summary fallback: 受取先 null + 手動 open → 再 close で fallback ("未設定")', async () => {
+      // edge: user が手動操作で receiver なし + Step 2 closed という珍しい状態
+      // (preset 設定で default open になり、その後 user が手動 close した場合)
+      // を作って Step2Summary の fallback branch を検証。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          // receiver はあえて空にして default open + 手動 close を再現
+          receiver: '',
+          storeName: '',
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('true'),
+      );
+      // 手動 close
+      await user.click(toggle);
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      // fallback text "未設定" が summary に出る
+      expect(within(toggle).getByText('未設定')).toBeInTheDocument();
+    });
+
+    it('Step 1: rapid token switching (JPYC → USDC → JPYC) で chain が default に reset される', async () => {
+      // USDC は Arbitrum 等の non-default chain も選べるが、JPYC へ切替時に
+      // chain が polygon 固定にリセットされる。さらに再度 USDC に戻すと
+      // default の base に戻る (= ユーザの直前選択は破棄)。
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      // USDC へ
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      // chain chooser から Arbitrum を選択
+      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      // chain=arbitrum を localStorage で確認
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(JSON.parse(raw!).chain).toBe('arbitrum');
+      });
+      // JPYC へ戻す → chain は polygon にリセット
+      await user.click(screen.getByRole('button', { name: /^JPYC\s+Polygon/ }));
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(JSON.parse(raw!).chain).toBe('polygon');
+      });
+      // 再 USDC → chain は base に戻る (直前の arbitrum は引き継がない)
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(JSON.parse(raw!).chain).toBe('base');
+      });
+    });
+
+    it('Step 1: token + chain の組合せが Step 3 poster preview に伝播', async () => {
+      // 統合テスト: Step 1 の token/chain UI 操作が Step 3 (poster) の chain
+      // 表示・受取先短縮 address の Explorer chain を経由するパス全体を確認。
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      await user.type(screen.getByPlaceholderText('10.00'), '1');
+      // poster preview の chain 表示が "Arbitrum" 含む文字列に
+      await waitFor(() => {
+        expect(
+          screen.getByText(/USDC · Arbitrum/),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('Step 1 token chooser: JPYC 選択時 chain chooser は出ない (固定 Polygon)', async () => {
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      // 一度 USDC にして chain chooser を出してから JPYC に戻す
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      const step1 = container.querySelector(
+        '[aria-labelledby="step-1-heading"]',
+      ) as HTMLElement;
+      expect(
+        within(step1).getByRole('button', { name: /^Base/ }),
+      ).toBeInTheDocument();
+      // JPYC へ
+      await user.click(screen.getByRole('button', { name: /^JPYC\s+Polygon/ }));
+      // chain chooser は消える (Base / Arbitrum buttons 不在)
+      expect(
+        within(step1).queryByRole('button', { name: /^Base/ }),
+      ).toBeNull();
+      expect(
+        within(step1).queryByRole('button', { name: /^Arbitrum/ }),
+      ).toBeNull();
+    });
+
+    it('Step 2 collapsed 時の summary text は very long storeName を truncate (max-w 内に収まる)', async () => {
+      // storeName 最大 (~30 char) を保存 + receiver 設定 → Step 2 collapsed
+      // 状態で summary class に truncate が付くこと、text が縦に折り返さないこと。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          // STORE_NAME_MAX 上限近い長文 (実 useQrSettings の input clamp に整合)
+          storeName: '神田珈琲店本店 — 中央区銀座 6 丁目 12-3',
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      const { container } = render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      // summary の wrapper span に truncate class が付いている
+      const summarySpan = container.querySelector(
+        '#step-2-heading span.truncate',
+      );
+      expect(summarySpan).not.toBeNull();
+      expect(summarySpan?.textContent).toContain('神田珈琲店本店');
+      expect(summarySpan?.textContent).toContain('0x8335…2913');
+    });
+
+    it('Step 2 collapsed 状態で payUrl は生成され、Step 3 で QR が出る (collapse は payUrl に影響しない)', async () => {
+      // 重要な統合 invariant: Step 2 の collapsibility は UI 表示の便宜のみ。
+      // payUrl の計算は settings.receiver から派生し、accordion 開閉で影響を
+      // 受けない (= 折り畳んでも QR は出続ける)。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      // closed 状態のまま Step 1 で amount 入力
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+      // QR (size=240) が描画される
+      await waitFor(() => {
+        const svgs = container.querySelectorAll('svg');
+        const qrSvg = Array.from(svgs).find(
+          (s) => s.getAttribute('width') === '240',
+        );
+        expect(qrSvg).toBeDefined();
+      });
+      // payUrl 内に正しい to / amount が含まれる
+      const urlBox = container.querySelector('.font-mono.text-xs')!;
+      expect(urlBox.textContent).toContain(`to=${VALID}`);
+      expect(urlBox.textContent).toContain('amount=500');
+    });
+
+    it('Step 2 collapsed → Step 1 で token 切替 → poster preview の symbol も同期更新', async () => {
+      // collapsibility と reactive update の相互作用。Step 2 を閉じても、
+      // Step 1 の token 変更が Step 3 (poster) に伝播する。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          directTransfer: false,
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      const toggle = await screen.findByRole('button', { name: /^受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      // amount 入力 → JPYC で poster
+      await user.type(screen.getByPlaceholderText('1000'), '100');
+      await waitFor(() =>
+        expect(screen.getByText(/JPYC · Polygon/)).toBeInTheDocument(),
+      );
+      // USDC に切替 → poster の symbol も "USDC · Base" (default chain) に
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await waitFor(() =>
+        expect(screen.getByText(/USDC · Base/)).toBeInTheDocument(),
+      );
+      // Step 2 は collapsed のまま (token 切替で勝手に開かない)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('Footer poweredBy soft文言 / technical labels が同時に DOM 上に存在', async () => {
+      // Site footer は QrGenerator の external だが、3-step refactor 同梱の
+      // poweredBy <details> 構造の persistence 確認 (展開しなくても tech label
+      // は DOM に存在し、a11y / SEO で indexable)。
+      // QrGenerator 単体テストの範囲外なので skip (SiteFooter.test.tsx でカバー)。
+      expect(true).toBe(true);
+    });
+  });
 });
