@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { useAccount } from 'wagmi';
+import { useAccount, useDisconnect } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { PwaInstallHint } from './PwaInstallHint';
 import { QrScannerSurface } from './QrScannerSurface';
@@ -26,10 +26,14 @@ import { logger } from '@/lib/logger';
 
 export function ScanShell() {
   const t = useTranslations('Scan');
+  // ConnectButton namespace から `disconnect` キー (切断 / Disconnect) を流用。
+  // /scan で badge の隣に置く切断ボタン文言として、専用 i18n を作らずに既存資産を再利用。
+  const tConnect = useTranslations('ConnectButton');
   const router = useRouter();
   const locale = useLocale() as Locale;
   const origin = useOrigin();
   const { address, isConnected, chain } = useAccount();
+  const { disconnect } = useDisconnect();
   const [lastResult, setLastResult] = useState<ScanAction | null>(null);
 
   // useQrScanner が onDecode を ref で持つため useCallback は不要 (毎 render で
@@ -70,6 +74,11 @@ export function ScanShell() {
           {t('connectionTitle')}
         </h2>
         {isConnected && address ? (
+          // 「事前接続済み = レジで scan するだけ」の ready 状態を emerald で強調。
+          // ウォレットを切替えたい (= 別アカウント / 別 wallet で支払う) 場合の
+          // 切断 action を badge の隣に小さく提供する。確認 dialog は要らない —
+          // 切断後は同 section が未接続 branch に hydrate 切替わり、ConnectButton
+          // が再描画されるため再接続は 1 click。
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
@@ -78,6 +87,13 @@ export function ScanShell() {
                 <span className="text-emerald-600/70">/ {chain.name}</span>
               )}
             </span>
+            <button
+              type="button"
+              onClick={() => disconnect()}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            >
+              {tConnect('disconnect')}
+            </button>
             <span className="text-xs text-slate-500">
               {t('connectionReadyHint')}
             </span>

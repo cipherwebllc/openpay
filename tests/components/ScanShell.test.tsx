@@ -119,12 +119,14 @@ describe('ScanShell: 接続状態表示', () => {
     expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
   });
 
-  it('接続済み → shortAddress + chain 名 + ready hint を表示', () => {
+  it('接続済み → shortAddress + chain 名 + ready hint + 切断ボタンを表示', () => {
     mockConnected(true);
     renderWithIntl(<ScanShell />);
     expect(screen.getByText(/接続済みです/)).toBeInTheDocument();
     expect(screen.getByText(/Base Sepolia/)).toBeInTheDocument();
     expect(screen.getByText(/0x52d4…cA81/)).toBeInTheDocument();
+    // 切断ボタンが badge の隣に出ること (UX: 別 wallet に切替できる)
+    expect(screen.getByRole('button', { name: '切断' })).toBeInTheDocument();
   });
 
   it('接続済みで chain が undefined → chain 名は描画されず address のみ表示', () => {
@@ -134,6 +136,25 @@ describe('ScanShell: 接続状態表示', () => {
     expect(screen.getByText(/0x52d4…cA81/)).toBeInTheDocument();
     // "/ <chain>" の slash 区切りが描画されないこと
     expect(screen.queryByText(/\/ Base Sepolia/)).toBeNull();
+    // chain が立っていなくても切断ボタンは出る (再接続でやり直す動線確保)
+    expect(screen.getByRole('button', { name: '切断' })).toBeInTheDocument();
+  });
+
+  it('接続済み → 切断ボタン click で useDisconnect.disconnect() が呼ばれる', () => {
+    // mockConnected(true) は useDisconnect の disconnect を vi.fn() で設定するため、
+    // ここでは事前に取り出した disconnect spy を mockHook 経由で差し替えてから render。
+    const disconnectSpy = vi.fn();
+    mockConnected(true);
+    mockHook(useDisconnect, { disconnect: disconnectSpy });
+    renderWithIntl(<ScanShell />);
+    fireEvent.click(screen.getByRole('button', { name: '切断' }));
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('en locale: 接続済み → 切断ボタンの label が "Disconnect"', () => {
+    mockConnected(true);
+    renderWithIntl(<ScanShell />, { locale: 'en' });
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
   });
 });
 
