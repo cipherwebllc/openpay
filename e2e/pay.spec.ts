@@ -61,7 +61,10 @@ test.describe('/pay (URL parser smoke)', () => {
     // 狭い viewport で wrap / overflow が起きないことを担保。
     test.skip(testInfo.project.name !== 'mobile-safari', 'mobile viewport 専用');
     await page.goto(`/ja/pay?to=${TO}&token=usdc&amount=10`);
-    await expect(page.getByRole('link', { name: /OpenPay/ })).toBeVisible();
+    // back-link は exact match ("← OpenPay")。footer の X link
+    // (aria-label "OpenPay の X (旧 Twitter)") と strict mode 衝突する regex /OpenPay/
+    // を避ける (X link 追加 commit 9c21ef5 以降の regression)。
+    await expect(page.getByRole('link', { name: '← OpenPay' })).toBeVisible();
     await expect(page.getByRole('button', { name: /日本語/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /English/ })).toBeVisible();
     const overflow = await page.evaluate(() => ({
