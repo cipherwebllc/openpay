@@ -19,20 +19,16 @@ import type { TokenDeployment } from '@/lib/tokens';
 // が大きすぎ UX 悪化したため見直し。
 const DEFAULT_USEROP_GAS_UNITS = 200_000n;
 
-// chain native token (POL / KAIA) → JPYC 換算レート (1 native = N JPYC、整数)。
-// native も JPYC も 18 decimals なので gasNative (wei) × rate でそのまま
-// JPYC (wei) になる。平常市場価格を default、env で override 可能。
-// - POL ≈ 60 JPY (2026 想定): 1 POL = 60 JPYC
-// - KAIA ≈ 30 JPY (2026 想定、要 user 検証で env 調整): 1 KAIA = 30 JPYC
-const NATIVE_JPYC_RATE: Record<number, bigint> = {
-  [polygon.id]: 60n,
-  [polygonAmoy.id]: 60n,
-  [kaia.id]: 30n,
-  [kairos.id]: 30n,
-};
+// chain native token → JPYC 換算 default レート (1 native = N JPYC、整数)。
+// 平常市場価格、env で override 可能。POL/KAIA は両方 18 decimals なので
+// gasNative (wei) × rate でそのまま JPYC (wei、18 decimals) になる。
+// - POL ≈ 60 JPY (2026 想定)
+// - KAIA ≈ 30 JPY (2026 想定、要 user 検証で env 調整)
+const DEFAULT_POL_JPYC_RATE = 60n;
+const DEFAULT_KAIA_JPYC_RATE = 30n;
 
 // JPYC sponsorship が動く chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。
-// それ以外の chain では gas を 0 として扱う (UI 表示の defensive、JPYC は元々
+// 該当しない chain では gas を 0 として扱う (UI 表示の defensive、JPYC は元々
 // 4 chain にしか deploy されていないため通常は到達しない)。
 const JPYC_CHAIN_IDS = new Set<number>([
   polygon.id,
@@ -42,15 +38,11 @@ const JPYC_CHAIN_IDS = new Set<number>([
 ]);
 
 function resolveNativeJpycRate(chainId: number): bigint {
-  // chain 別 env override を優先。POL / KAIA で env key が異なるので分岐。
-  if (chainId === kaia.id || chainId === kairos.id) {
-    return env.kaiaJpycRate !== undefined
-      ? BigInt(env.kaiaJpycRate)
-      : (NATIVE_JPYC_RATE[chainId] ?? 30n);
-  }
-  return env.polJpycRate !== undefined
-    ? BigInt(env.polJpycRate)
-    : (NATIVE_JPYC_RATE[chainId] ?? 60n);
+  // KAIA 系 / POL 系 で env override key と default rate が変わる以外は同じ判定。
+  const isKaia = chainId === kaia.id || chainId === kairos.id;
+  const envRate = isKaia ? env.kaiaJpycRate : env.polJpycRate;
+  if (envRate !== undefined) return BigInt(envRate);
+  return isKaia ? DEFAULT_KAIA_JPYC_RATE : DEFAULT_POL_JPYC_RATE;
 }
 
 export function useGasQuoteJpyc(
