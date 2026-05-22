@@ -174,8 +174,7 @@ export default function HomePage() {
   );
 }
 
-// Offramp section 用 inline SVG icon 群 (viewBox 24×24、fill=currentColor で親色継承)。
-// 依存追加せず PwaInstallHint の X icon 等と同パターンで描画。装飾目的なので aria-hidden。
+// Offramp section 用 inline SVG (icon library 依存追加せず、装飾目的なので aria-hidden)。
 
 function SwapIcon() {
   // 上下矢印 (両替 / swap) — 受取通貨を JPY に換金する section heading 用

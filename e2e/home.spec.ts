@@ -105,17 +105,12 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: offramp gasHint details の toggle が両方向で機能 (open → close → open) + ChevronIcon 実 rotation', async ({
     page,
   }) => {
-    // <details> の native toggle が両方向で動くこと、および ChevronIcon の回転
-    // class (group-open:rotate-90) が details[open] 属性と同期して実 computed
-    // transform を変えることを確認。一方向 (open) の test は別 spec にあるが、
-    // close (再 click) で body が再 hide することは regression が出やすい (例:
-    // onClick で setState して preventDefault すると native toggle が壊れる)。
-    //
-    // ChevronIcon assertion 追加の理由 (LARP audit 2026-05-22): 既存 test は
-    // <details open> 属性 toggle のみ確認、chevron 自身の computed transform を
-    // 見ていなかった。Tailwind の group-open: variant が build で生成されない
-    // 場合 silently UX 劣化 (body は出るが chevron 回らない)。実 computed style を
-    // 読んで matrix が変化することを assert する。
+    // <details> の native toggle が両方向で動くこと + ChevronIcon の回転
+    // (group-open:rotate-90) が details[open] と同期して実 computed transform
+    // を変えることを確認。close (再 click) で body が再 hide する path は
+    // regression が出やすい (例: onClick で setState + preventDefault すると
+    // native toggle が壊れる)。chevron transform も assert することで Tailwind の
+    // group-open: variant が build で消えた場合の silent UX 劣化を検知。
     await page.goto('/ja');
     const gasHintTitle = page.getByText(
       /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,

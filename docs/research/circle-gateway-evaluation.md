@@ -273,8 +273,6 @@ source: https://www.npmjs.com/package/@circle-fin/unified-balance-kit
 
 `npm view @circle-fin/unified-balance-kit --json` で確認した結果、**`license` field 自体が package.json に存在しない**。npm 慣例 (https://docs.npmjs.com/cli/v10/configuring-npm/package-json#license) ではこれは「UNLICENSED」相当 = 全権利留保で、明示的「Proprietary」より厳密。商用利用 / 再配布の許諾範囲は **Circle に直接書面照会必須**。Tier C の hard prerequisite に位置付け済 (decision doc §2.1)。
 
-(LARP audit 2026-05-22: 初版 evaluation では「license: Proprietary」と書いていたが、これは sub-agent の hallucination で誤情報。実際は license field が存在しないため、より制限的な状態。修正済)
-
 ---
 
 ## 11. 競合技術との比較
