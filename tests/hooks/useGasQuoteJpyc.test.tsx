@@ -143,4 +143,107 @@ describe('useGasQuoteJpyc', () => {
       kaiaResult.current.data!.gasAmount * 2n,
     );
   });
+
+  it('NEXT_PUBLIC_KAIA_JPYC_RATE env override が Kaia path の hard-code default に優先する', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIA_JPYC_RATE = '45';
+    const { useGasQuoteJpyc: hookWithEnv } = await import(
+      '@/hooks/useGasQuoteJpyc'
+    );
+    const { deploymentForSlug: depResolver } = await import('@/lib/tokens');
+    const dep = depResolver('jpyc', 'kaia');
+
+    getUserOperationGasPrice.mockResolvedValue({
+      standard: { maxFeePerGas: 100n * 10n ** 9n },
+    });
+
+    const { result } = renderHook(() => hookWithEnv(dep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    // env override 45 が default 30 に勝つ。200k × 100 gwei × 45 = 9e17
+    const gasNative = 200_000n * 100n * 10n ** 9n;
+    expect(result.current.data?.gasAmount).toBe(gasNative * 45n);
+    delete process.env.NEXT_PUBLIC_KAIA_JPYC_RATE;
+  });
+
+  it('NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS env override が overhead default 200_000 に優先する', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS = '350000';
+    const { useGasQuoteJpyc: hookWithEnv } = await import(
+      '@/hooks/useGasQuoteJpyc'
+    );
+    const { defaultDeploymentForSymbol: defaultDep } = await import(
+      '@/lib/tokens'
+    );
+    const dep = defaultDep('jpyc');
+
+    getUserOperationGasPrice.mockResolvedValue({
+      standard: { maxFeePerGas: 50n * 10n ** 9n },
+    });
+
+    const { result } = renderHook(() => hookWithEnv(dep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    // overhead env override 350_000 × 50 gwei × POL default rate 60
+    expect(result.current.data?.gasAmount).toBe(
+      350_000n * 50n * 10n ** 9n * 60n,
+    );
+    delete process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS;
+  });
+
+  it('境界条件: Polygon spike 時の超大 gas price (500 gwei) でも bigint math が overflow しない', async () => {
+    // 2026 想定の最悪 Polygon spike (500 gwei、ceiling 上限近く) で gasAmount が
+    // 想定範囲内 (sub-JPYC 単位、tx あたり数 JPYC) に収まることを確認。
+    getUserOperationGasPrice.mockResolvedValue({
+      standard: { maxFeePerGas: 500n * 10n ** 9n }, // 500 gwei = 5e11 wei
+    });
+
+    const { result } = renderHook(() => useGasQuoteJpyc(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    // 200_000 × 500e9 × 60 = 6e18 wei JPYC = 6 JPYC (18 decimals)
+    const expected = 200_000n * 500n * 10n ** 9n * 60n;
+    expect(result.current.data?.gasAmount).toBe(expected);
+    // 6 JPYC = 6 × 10^18 wei (sub-JPYC 単位、想定範囲内)
+    expect(result.current.data?.gasAmount).toBeLessThan(10n ** 19n); // < 10 JPYC
+    expect(result.current.data?.gasAmount).toBeGreaterThan(10n ** 18n); // > 1 JPYC
+  });
+
+  it('queryKey に chain id が含まれる (chain 切替で fresh fetch、cross-chain 値漏洩なし)', async () => {
+    // Polygon と Kaia の 2 hooks を別 QueryClient で render → それぞれ独立に
+    // Pimlico fetch される (queryKey が chainId で分離されていることの検証)。
+    // 旧 isPolygon bug の regression fence の補完: 単に 0 にならない だけでなく
+    // 「正しい chain の gasPrice fetch を呼ぶ」 invariant を assert。
+    let callCount = 0;
+    getUserOperationGasPrice.mockImplementation(async () => {
+      callCount += 1;
+      return { standard: { maxFeePerGas: 100n * 10n ** 9n } };
+    });
+
+    // 同じ QueryClient で 2 hook を並列に走らせると、queryKey 分離されていなければ
+    // 1 つの fetch で済んでしまう。queryKey で chainId が違うことを保証するには
+    // 別 wrapper (= 別 QueryClient) で render すれば確実だが、ここでは 1 つの
+    // QueryClient で 2 hook を render し、callCount が 2 (chain ごとに別 fetch)
+    // になることを確認する。
+    const wrapper = makeWrapper();
+    const { result: polR } = renderHook(() => useGasQuoteJpyc(jpycDep), {
+      wrapper,
+    });
+    await waitFor(() => expect(polR.current.data).toBeDefined());
+
+    const { result: kaiaR } = renderHook(() => useGasQuoteJpyc(jpycKaiaDep), {
+      wrapper,
+    });
+    await waitFor(() => expect(kaiaR.current.data).toBeDefined());
+
+    // 2 chain で 2 回 fetch (queryKey が chainId で分離されている保証)
+    expect(callCount).toBe(2);
+    // 値が独立 (Polygon 60 / Kaia 30、同 gasPrice なので Polygon = 2 × Kaia)
+    expect(polR.current.data!.gasAmount).toBe(
+      kaiaR.current.data!.gasAmount * 2n,
+    );
+  });
 });
