@@ -32,6 +32,7 @@
 import { getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import {
+  chainForSlug,
   isValidChainSlug,
   type ChainSlug,
 } from './chains';
@@ -165,14 +166,16 @@ function parseSplitParam(raw: string): SplitEntry[] | null {
 
 // (symbol, slug) ペアに deployment が存在するかをチェック。
 // 例: (jpyc, arbitrum) は deployment が無いので false。
+//
+// 実装メモ: 旧版はシンボル ↔ slug のホワイトリスト ({jpyc:polygon} 等) で
+// 判定していたが、JPYC が Polygon + Kaia の多 chain になった際に同期し忘れ
+// て (codex review 2026-05 P1)、生成された URL が parser に reject される
+// 不整合が出た。本実装は TOKEN_DEPLOYMENTS の実 deployment と chainId 一致
+// で判定する単一情報源にする。env override 未設定で deployment skip 状態
+// なら自動的に false を返し、UI 非露出と URL 拒否が一致する。
 function hasDeployment(symbol: TokenSymbol, slug: ChainSlug): boolean {
-  return deploymentsForSymbol(symbol).some((d) => {
-    // slug → chainId は env 依存だが、deploymentsForSymbol の出力 chainId を
-    // chains 経由で逆引きすると依存が増えるため、ここではシンボル + slug の
-    // 関係 (jpyc=polygon のみ、usdc=全 chain) をホワイトリストとして表現。
-    if (symbol === 'jpyc') return slug === 'polygon';
-    return ['base', 'arbitrum', 'optimism', 'polygon'].includes(slug);
-  });
+  const chainId = chainForSlug(slug).id;
+  return deploymentsForSymbol(symbol).some((d) => d.chainId === chainId);
 }
 
 export function buildPayPath(params: PayParams): string {
@@ -292,7 +295,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       ok: false,
       errorKind: 'invalid',
       error:
-        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
     };
   }
   // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
@@ -488,7 +491,7 @@ export function parseTipParams(
     return {
       ok: false,
       error:
-        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
     };
   }
   if (!hasDeployment(token, chainSlug)) {
@@ -725,7 +728,7 @@ export function parseCheckoutParams(
     return {
       ok: false,
       error:
-        'chain は base / arbitrum / optimism / polygon のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
     };
   }
   if (!hasDeployment(token, chainSlug)) {

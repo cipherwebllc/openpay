@@ -4,6 +4,11 @@
 //
 // AccountKind が 'none' (空 EOA) または 'pimlico-simple-7702' (既に Pimlico
 // SimpleAccount に委任済) のときに使う。
+//
+// to7702SimpleSmartAccount は chain の EIP-7702 サポートを要求する。
+// supportedChains の全 chain は対応済 (Kaia は Prague hardfork + KIP-228 で
+// activated、memory:project_kaia_evaluation)。新規 chain 追加時は EIP-7702
+// activation を必ず確認すること。
 
 import { http, type PublicClient } from 'viem';
 import { createSmartAccountClient, type SmartAccountClient } from 'permissionless';

@@ -80,6 +80,27 @@ describe('useQrSettings', () => {
     expect(result.current.settings.chain).toBe('arbitrum');
   });
 
+  it('jpyc + kaia (PoC、2026-05) → そのまま保存される (JpycChainSlug で許容)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'kaia' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('kaia');
+    expect(result.current.settings.token).toBe('jpyc');
+  });
+
+  it('usdc + kaia (kaia には Circle native USDC なし) → base に fallback', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'kaia' }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('base');
+  });
+
   it('payMode=standard の保存値をハイドレート', async () => {
     window.localStorage.setItem(
       KEY,

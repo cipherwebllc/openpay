@@ -24,7 +24,13 @@ const OFFRAMP_KEYS = [
 describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)', () => {
   // useSmartAccount の router が IncompatibleSmartAccountError を投げる時の
   // i18n key 2 種。HashPort などの MAv2 委任 EOA 対策で導入。
-  const SA_KEYS = ['errorIncompatibleSmartAccount', 'errorMav2Disabled'] as const;
+  const SA_KEYS = [
+    'errorIncompatibleSmartAccount',
+    'errorMav2Disabled',
+    // Kaia + MAv2 (HashPort 等) 専用、Polygon フォールバック案内
+    // (memory:project_kaia_evaluation、mav2.ts の Kaia chainId 早期 throw 経路)
+    'errorMav2KaiaPolygon',
+  ] as const;
   for (const ns of FORM_NAMESPACES) {
     for (const key of SA_KEYS) {
       it(`ja.${ns}.${key} は非空文字列`, () => {

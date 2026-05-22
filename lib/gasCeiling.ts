@@ -38,6 +38,8 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  kaia,
+  kairos,
   optimism,
   optimismSepolia,
   polygon,
@@ -56,6 +58,12 @@ const DEFAULT_CEILING_GWEI: Record<number, bigint> = {
   [arbitrumSepolia.id]: 1000n,
   [optimism.id]: 5n,
   [optimismSepolia.id]: 1000n,
+  // Kaia (PoC、2026-05): 公式アナウンスで「1 tx 1 円未満」が目安。Pimlico fast
+  // tier の実測前のため、安全側で 50 gwei を初期値とする。実 utilization 後に
+  // NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI で再調整想定。Polygon 1000 gwei より圧倒
+  // 的に低い水準で運用できる見込み。
+  [kaia.id]: 50n,
+  [kairos.id]: 1000n, // testnet は緩く (Polygon Amoy と同方針)
 };
 
 function buildCeilingTable(): Record<number, bigint> {
@@ -73,6 +81,9 @@ function buildCeilingTable(): Record<number, bigint> {
   }
   if (env.gasCeilingGwei.optimism !== undefined) {
     table[optimism.id] = BigInt(env.gasCeilingGwei.optimism);
+  }
+  if (env.gasCeilingGwei.kaia !== undefined) {
+    table[kaia.id] = BigInt(env.gasCeilingGwei.kaia);
   }
   return table;
 }

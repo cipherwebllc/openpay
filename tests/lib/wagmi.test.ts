@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { baseSepolia, polygonAmoy } from 'viem/chains';
+import { baseSepolia, kairos, polygonAmoy } from 'viem/chains';
 import { wagmiConfig } from '@/lib/wagmi';
 import { supportedChains } from '@/lib/chains';
 
@@ -15,10 +15,11 @@ afterEach(() => {
 // chains/env/wagmi の連動が壊れた時にここが落ちる。
 
 describe('wagmiConfig', () => {
-  it('testnet env では chains に Polygon Amoy + Base Sepolia が登録される', () => {
+  it('testnet env では chains に Polygon Amoy + Base Sepolia + Kairos が登録される', () => {
     const ids = wagmiConfig.chains.map((c) => c.id);
     expect(ids).toContain(polygonAmoy.id);
     expect(ids).toContain(baseSepolia.id);
+    expect(ids).toContain(kairos.id);
     expect(ids).toEqual(supportedChains.map((c) => c.id));
   });
 

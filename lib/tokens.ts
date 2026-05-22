@@ -4,13 +4,20 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  kaia,
+  kairos,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
 } from 'viem/chains';
 import { env, isMainnet } from './env';
-import { chainForSlug, type ChainSlug } from './chains';
+import {
+  chainForSlug,
+  JPYC_CHAINS,
+  type ChainSlug,
+  type JpycChainSlug,
+} from './chains';
 
 // 対応トークン一覧。type と runtime enumeration を兼ねる。
 export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
@@ -40,9 +47,15 @@ export type TokenDeployment = {
 //   - 万一誤ったアドレスを使用すると顧客資金が失われる可能性があります。
 //   - 不一致が見つかった場合は per-chain env (NEXT_PUBLIC_USDC_<chain>_<env>_ADDRESS) で上書き可能。
 
-// JPYC (Polygon native) — JPYC v2 PLUS 想定
+// JPYC v3 (memory:reference_jpyc_contract — Polygon/Sepolia/Avalanche 同一
+// アドレス、EIP-2612 permit 対応)。Kaia 上は別 address、permit 対応は本投入前
+// に bytecode 確認。
 const JPYC_POLYGON_MAINNET: Address =
   '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
+
+// JPYC Kaia mainnet: 実 contract address は env override
+// (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で渡す。未設定なら kaia deployment skip。
+// 本投入時は誤 address で顧客資金損失を防ぐため少額 test transfer で確認後に投入。
 
 // USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet)
 const USDC_BASE_MAINNET: Address =
@@ -67,8 +80,11 @@ const USDC_POLYGON_AMOY: Address =
 const ZERO: Address = '0x0000000000000000000000000000000000000000';
 
 // chain 軸の env override は ChainSlug をキーに引く。
-// JPYC は単一 chain (Polygon) なので slug 軸は持たない。
-function usdcAddress(slug: ChainSlug): Address {
+// USDC は Circle native の 4 chain (base/arbitrum/optimism/polygon) のみで、
+// kaia には native USDC 未 deploy のため対象外 (UsdcChainSlug で型レベル除外)。
+type UsdcChainSlug = Exclude<ChainSlug, 'kaia'>;
+
+function usdcAddress(slug: UsdcChainSlug): Address {
   if (isMainnet) {
     const overrides = env.mainnetTokenOverrides.usdc;
     const o = overrides[slug];
@@ -92,15 +108,17 @@ function chainIdFor(slug: ChainSlug): number {
     if (slug === 'base') return base.id;
     if (slug === 'arbitrum') return arbitrum.id;
     if (slug === 'optimism') return optimism.id;
+    if (slug === 'kaia') return kaia.id;
     return polygon.id;
   }
   if (slug === 'base') return baseSepolia.id;
   if (slug === 'arbitrum') return arbitrumSepolia.id;
   if (slug === 'optimism') return optimismSepolia.id;
+  if (slug === 'kaia') return kairos.id;
   return polygonAmoy.id;
 }
 
-const USDC_SLUGS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
+const USDC_SLUGS: readonly UsdcChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
 
 const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   symbol: 'usdc',
@@ -112,23 +130,44 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   paymasterMode: 'erc20',
 }));
 
-const jpycDeployment: TokenDeployment = {
-  symbol: 'jpyc',
-  displaySymbol: 'JPYC',
-  name: 'JPY Coin',
-  decimals: 18,
-  address: isMainnet
-    ? (env.mainnetTokenOverrides.jpyc ?? JPYC_POLYGON_MAINNET)
-    : (env.testnetTokenOverrides.jpyc ?? ZERO),
-  chainId: chainIdFor('polygon'),
-  paymasterMode: 'sponsorship',
-};
+function jpycAddress(slug: JpycChainSlug): Address | undefined {
+  if (isMainnet) {
+    const overrides = env.mainnetTokenOverrides.jpyc;
+    if (slug === 'polygon') return overrides.polygon ?? JPYC_POLYGON_MAINNET;
+    // kaia は env override 必須 (本投入時に実 address 取得後に値投入)。
+    // address 未設定なら undefined を返し、呼出側で deployment skip。
+    return overrides.kaia;
+  }
+  const overrides = env.testnetTokenOverrides.jpyc;
+  if (slug === 'polygon') return overrides.polygon ?? ZERO;
+  return overrides.kaia;
+}
+
+// JPYC は Polygon (既存、必ず deploy 済) + Kaia (PoC、env address 未設定なら skip)
+// の組合せ。Kaia は実 address 取得まで TOKEN_DEPLOYMENTS に出現しないので、
+// UI の chain selector からも自動的に消える (resolveDeployment が undefined)。
+const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.flatMap((slug) => {
+  const addr = jpycAddress(slug);
+  if (!addr) return [];
+  return [
+    {
+      symbol: 'jpyc' as const,
+      displaySymbol: 'JPYC',
+      name: 'JPY Coin',
+      decimals: 18,
+      address: addr,
+      chainId: chainIdFor(slug),
+      paymasterMode: 'sponsorship' as const,
+    },
+  ];
+});
 
 // 全 deployment のフラット配列。順序は QR token セレクター・chain セレクターの
-// 表示順に揃える (USDC: Base 既定 → Arbitrum → Optimism → Polygon、JPYC: Polygon 単独)。
+// 表示順に揃える (USDC: Base 既定 → Arbitrum → Optimism → Polygon、JPYC: Polygon
+// 既定 → Kaia (PoC、env 設定時のみ))。
 export const TOKEN_DEPLOYMENTS: readonly TokenDeployment[] = [
   ...usdcDeployments,
-  jpycDeployment,
+  ...jpycDeployments,
 ];
 
 // 各 symbol の "default chain" — URL に chain パラメタが無い時に解決される deployment。
