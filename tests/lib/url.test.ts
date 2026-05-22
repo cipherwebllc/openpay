@@ -240,9 +240,9 @@ describe('parsePayParams', () => {
     }
   });
 
-  it('jpyc + kaia: KAIROS_ADDRESS 未設定なら deployment 不在で reject (UI 非露出と整合)', async () => {
-    // codex P2: static import だと ambient env (developer の .env.local 等) を
-    // 引いてしまい flip する。dynamic import + env を明示 clear して isolate する。
+  it('jpyc + kaia: env override 無しでも hard-code default で deployment 存在し受理される', async () => {
+    // 2026-05-23: hard-code default 採用後の挙動。env 未設定でも JPYC v3 cross-chain
+    // 同一 address が hard-code されているため、parser は受理する。
     const previousKairos = process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
     delete process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS;
     vi.resetModules();
@@ -253,11 +253,10 @@ describe('parsePayParams', () => {
     if (previousKairos !== undefined) {
       process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS = previousKairos;
     }
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.errorKind).toBe('invalid');
-      expect(r.error).toContain('jpyc');
-      expect(r.error).toContain('kaia');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.token).toBe('jpyc');
+      expect(r.params.chain).toBe('kaia');
     }
   });
 

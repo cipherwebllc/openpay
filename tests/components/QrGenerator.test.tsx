@@ -68,11 +68,11 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => {
         expect(
-          screen.getByRole('button', { name: /^JPYC\s+Polygon/ }),
+          screen.getByRole('button', { name: /^JPYC\s/ }),
         ).toBeInTheDocument();
       });
       const usdcBtn = screen.getByRole('button', { name: /^USDC/ });
-      const jpycBtn = screen.getByRole('button', { name: /^JPYC\s+Polygon/ });
+      const jpycBtn = screen.getByRole('button', { name: /^JPYC\s/ });
       expect(jpycBtn.className).toMatch(/border-brand/);
       expect(usdcBtn.className).not.toMatch(/border-brand/);
     });
@@ -539,9 +539,9 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() =>
-        screen.getByRole('button', { name: /^JPYC\s+Polygon/ }),
+        screen.getByRole('button', { name: /^JPYC\s/ }),
       );
-      await user.click(screen.getByRole('button', { name: /^JPYC\s+Polygon/ }));
+      await user.click(screen.getByRole('button', { name: /^JPYC\s/ }));
       // JPYC 用プレースホルダ '1000' に切替
       expect(screen.getByPlaceholderText('1000')).toBeInTheDocument();
     });
@@ -1421,25 +1421,34 @@ describe('QrGenerator', () => {
       expect(step1).not.toBeNull();
       // Step 1 領域内に JPYC / USDC ボタンが両方存在
       expect(
-        within(step1).getByRole('button', { name: /^JPYC\s+Polygon/ }),
+        within(step1).getByRole('button', { name: /^JPYC\s/ }),
       ).toBeInTheDocument();
       expect(
         within(step1).getByRole('button', { name: /^USDC/ }),
       ).toBeInTheDocument();
     });
 
-    it('Step 1 内に chain chooser (USDC 選択時のみ) が置かれている', async () => {
+    it('Step 1 内に chain chooser: USDC 4 chain + JPYC 2 chain (token 切替で内容変化)', async () => {
+      // 2026-05-23 JPYC が Kaia 対応で multi-chain 化したため、JPYC 選択時も
+      // chain chooser が出る (旧: JPYC は Polygon 固定で chain chooser 非表示)。
       const user = userEvent.setup();
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       const step1 = container.querySelector(
         '[aria-labelledby="step-1-heading"]',
       ) as HTMLElement;
-      // 既定 JPYC のときは chain chooser は出ない (固定: Polygon)
+      // 既定 JPYC のとき chain chooser に Polygon / Kaia 両方が出る
+      expect(
+        within(step1).getByRole('button', { name: /^Polygon/ }),
+      ).toBeInTheDocument();
+      expect(
+        within(step1).getByRole('button', { name: /^Kai/ }),
+      ).toBeInTheDocument();
+      // USDC chain (Base 等) は出ない
       expect(
         within(step1).queryByRole('button', { name: /^Base/ }),
       ).toBeNull();
-      // USDC に切替 → chain chooser が Step 1 内に出現
+      // USDC に切替 → chain chooser が USDC 4 chain に切替
       await user.click(within(step1).getByRole('button', { name: /^USDC/ }));
       await waitFor(() => {
         expect(
@@ -1450,6 +1459,10 @@ describe('QrGenerator', () => {
       expect(
         within(step1).getByRole('button', { name: /^Arbitrum/ }),
       ).toBeInTheDocument();
+      // Kaia は USDC では出ない (USDC は Kaia 未対応)
+      expect(
+        within(step1).queryByRole('button', { name: /^Kai/ }),
+      ).toBeNull();
     });
 
     it('Step 2 は collapsible (LocalStorage 空時は default open)', async () => {
@@ -1688,7 +1701,7 @@ describe('QrGenerator', () => {
         expect(JSON.parse(raw!).chain).toBe('arbitrum');
       });
       // JPYC へ戻す → chain は polygon にリセット
-      await user.click(screen.getByRole('button', { name: /^JPYC\s+Polygon/ }));
+      await user.click(screen.getByRole('button', { name: /^JPYC\s/ }));
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('polygon');
@@ -1717,11 +1730,77 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('Step 1 token chooser: JPYC 選択時 chain chooser は出ない (固定 Polygon)', async () => {
+    it('Step 1: JPYC + Kaia 選択 → URL に chain=kaia + token=jpyc + amount が含まれる', async () => {
+      // 2026-05-23 Kaia 対応の主要 invariant: JPYC chain chooser で Kaia を
+      // 選んだ時に生成 URL が chain=kaia を含むこと、payUrl pipeline が壊れない
+      // ことを実 component で確認。
       const user = userEvent.setup();
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      // 一度 USDC にして chain chooser を出してから JPYC に戻す
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // JPYC は default なので Kaia chain button を直接 click
+      await user.click(screen.getByRole('button', { name: /^Kai/ }));
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+      // payUrl 表示 box (Step 3 内 font-mono.text-xs.bg-slate-50)
+      await waitFor(() => {
+        const urlBox = container.querySelector(
+          '.font-mono.text-xs.bg-slate-50',
+        )!;
+        expect(urlBox.textContent).toContain(`to=${VALID}`);
+        expect(urlBox.textContent).toContain('chain=kaia');
+        expect(urlBox.textContent).toContain('token=jpyc');
+        expect(urlBox.textContent).toContain('amount=500');
+      });
+      // poster preview の chain 表示は "JPYC · Kairos Testnet" (testnet env)
+      // または "JPYC · Kaia" (mainnet env)、どちらも JPYC · Kai... で始まる
+      await waitFor(() => {
+        expect(screen.getByText(/JPYC · Kai/)).toBeInTheDocument();
+      });
+    });
+
+    it('Step 1: JPYC chain を Polygon→Kaia→Polygon と切替 → localStorage と URL が同期', async () => {
+      // chain selector の round-trip + localStorage 永続化を確認。
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '100');
+      // 既定は polygon
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(JSON.parse(raw!).chain).toBe('polygon');
+      });
+      // Kaia に切替
+      await user.click(screen.getByRole('button', { name: /^Kai/ }));
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(JSON.parse(raw!).chain).toBe('kaia');
+        const urlBox = container.querySelector(
+          '.font-mono.text-xs.bg-slate-50',
+        )!;
+        expect(urlBox.textContent).toContain('chain=kaia');
+      });
+      // Polygon に戻す
+      await user.click(screen.getByRole('button', { name: /^Polygon/ }));
+      await waitFor(() => {
+        const raw = window.localStorage.getItem('openpay:qr-settings:v2');
+        expect(JSON.parse(raw!).chain).toBe('polygon');
+        const urlBox = container.querySelector(
+          '.font-mono.text-xs.bg-slate-50',
+        )!;
+        // polygon は default なので chain= は URL に出ない (buildPayUrl の最適化)
+        expect(urlBox.textContent).not.toContain('chain=kaia');
+      });
+    });
+
+    it('Step 1 token chooser: USDC ↔ JPYC 切替で chain chooser の中身が入替 (USDC 4 chain / JPYC 2 chain)', async () => {
+      // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。USDC ↔ JPYC 切替で
+      // chain chooser はどちらの token でも出るが、表示される chain set が変わる
+      // (USDC: Base/Arb/Op/Polygon 4 chain、JPYC: Polygon/Kaia 2 chain)。
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      // 一度 USDC にして USDC chain chooser を露出
       await user.click(screen.getByRole('button', { name: /^USDC/ }));
       const step1 = container.querySelector(
         '[aria-labelledby="step-1-heading"]',
@@ -1729,15 +1808,26 @@ describe('QrGenerator', () => {
       expect(
         within(step1).getByRole('button', { name: /^Base/ }),
       ).toBeInTheDocument();
-      // JPYC へ
-      await user.click(screen.getByRole('button', { name: /^JPYC\s+Polygon/ }));
-      // chain chooser は消える (Base / Arbitrum buttons 不在)
+      // Kaia は USDC では出ない
+      expect(
+        within(step1).queryByRole('button', { name: /^Kai/ }),
+      ).toBeNull();
+      // JPYC へ戻す
+      await user.click(screen.getByRole('button', { name: /^JPYC\s/ }));
+      // USDC chain (Base / Arbitrum) は消える
       expect(
         within(step1).queryByRole('button', { name: /^Base/ }),
       ).toBeNull();
       expect(
         within(step1).queryByRole('button', { name: /^Arbitrum/ }),
       ).toBeNull();
+      // 代わりに JPYC chain chooser (Polygon / Kaia) が出る
+      expect(
+        within(step1).getByRole('button', { name: /^Polygon/ }),
+      ).toBeInTheDocument();
+      expect(
+        within(step1).getByRole('button', { name: /^Kai/ }),
+      ).toBeInTheDocument();
     });
 
     it('Step 2 collapsed 時の summary text は very long storeName を truncate (max-w 内に収まる)', async () => {

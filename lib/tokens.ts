@@ -48,14 +48,18 @@ export type TokenDeployment = {
 //   - 不一致が見つかった場合は per-chain env (NEXT_PUBLIC_USDC_<chain>_<env>_ADDRESS) で上書き可能。
 
 // JPYC v3 (memory:reference_jpyc_contract — Polygon/Sepolia/Avalanche 同一
-// アドレス、EIP-2612 permit 対応)。Kaia 上は別 address、permit 対応は本投入前
-// に bytecode 確認。
+// アドレス、EIP-2612 permit 対応)。
 const JPYC_POLYGON_MAINNET: Address =
   '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 
-// JPYC Kaia mainnet: 実 contract address は env override
-// (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で渡す。未設定なら kaia deployment skip。
-// 本投入時は誤 address で顧客資金損失を防ぐため少額 test transfer で確認後に投入。
+// JPYC Kaia mainnet (2026-05-15 公式 deploy、JPYC v3 cross-chain consistency で
+// Polygon と同一 address)。scripts/verify-kaia-jpyc.mjs で実機 verify 済 (ERC-20
+// + permit selector 全 OK、DOMAIN_SEPARATOR() のみ revert — permit を使わない
+// transferFrom 経路のため OpenPay には影響なし)。env override
+// (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で emergency 切替可能、未設定でも hard-code
+// default で動作するため Vercel env 設定漏れに対しても safe。
+const JPYC_KAIA_MAINNET: Address =
+  '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 
 // USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet)
 const USDC_BASE_MAINNET: Address =
@@ -134,13 +138,16 @@ function jpycAddress(slug: JpycChainSlug): Address | undefined {
   if (isMainnet) {
     const overrides = env.mainnetTokenOverrides.jpyc;
     if (slug === 'polygon') return overrides.polygon ?? JPYC_POLYGON_MAINNET;
-    // kaia は env override 必須 (本投入時に実 address 取得後に値投入)。
-    // address 未設定なら undefined を返し、呼出側で deployment skip。
-    return overrides.kaia;
+    // Kaia は JPYC v3 cross-chain 同一 address を hard-code default として持つ
+    // ことで Vercel env 設定漏れでも UI 動作を維持。env override は emergency
+    // address 変更用に残す。
+    return overrides.kaia ?? JPYC_KAIA_MAINNET;
   }
   const overrides = env.testnetTokenOverrides.jpyc;
   if (slug === 'polygon') return overrides.polygon ?? ZERO;
-  return overrides.kaia;
+  // Kairos も JPYC v3 cross-chain consistency で mainnet と同 address。
+  // memory: 2026-05-18 JPYC 公式が Kairos faucet 対応化。
+  return overrides.kaia ?? JPYC_KAIA_MAINNET;
 }
 
 // JPYC は Polygon (既存、必ず deploy 済) + Kaia (PoC、env address 未設定なら skip)
