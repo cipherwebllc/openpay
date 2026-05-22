@@ -203,6 +203,49 @@ curl http://localhost:3000/api/paid/hello   # → 200 + JSON
 
 Configure via `X402_*` env vars (see `.env.local.example`). On facilitator outage, OpenPay returns **HTTP 503** rather than 500 so standard x402 clients do not infinite-retry.
 
+## Pimlico 残高アラート設定手順
+
+OpenPay は Pimlico Sponsorship Paymaster の EntryPoint v0.7 deposit が枯渇すると JPYC sponsorship 経路が動かなくなる。GitHub Actions cron で 6h ごとに残高をチェックし、しきい値以下なら Slack/Discord 互換 webhook に通知する仕組みを `.github/workflows/pimlico-balance.yml` + `scripts/check-pimlico-balance.mjs` で提供する。
+
+**必須 secrets** (GitHub Settings → Secrets and variables → Actions → New repository secret):
+
+| Secret | 内容 |
+|---|---|
+| `PIMLICO_PAYMASTER_POLYGON` | Polygon mainnet 上の Pimlico paymaster address |
+| `PIMLICO_PAYMASTER_BASE` | Base mainnet 上の Pimlico paymaster address |
+| `ALERT_WEBHOOK_URL` | Slack incoming webhook or Discord webhook URL |
+
+**任意 secrets** (chain を opt-in):
+
+| Secret | 内容 | 未設定時の挙動 |
+|---|---|---|
+| `PIMLICO_PAYMASTER_KAIA` | Kaia mainnet 上の Pimlico paymaster address | Kaia の balance check を skip (Polygon/Base のみ実行) |
+| `POLYGON_RPC_URL` | Polygon mainnet RPC URL | `https://polygon-rpc.com` (公開) |
+| `BASE_RPC_URL` | Base mainnet RPC URL | `https://mainnet.base.org` (公開) |
+| `KAIA_RPC_URL` | Kaia mainnet RPC URL | `https://public-en.node.kaia.io` (公開) |
+
+**任意 variables** (Settings → Secrets and variables → Actions → Variables、しきい値の override):
+
+| Variable | 既定 | 用途 |
+|---|---|---|
+| `ALERT_THRESHOLD_POL` | `5` | Polygon paymaster 残高がこの値 (POL) 以下で alert |
+| `ALERT_THRESHOLD_ETH` | `0.01` | Base paymaster 残高がこの値 (ETH) 以下で alert |
+| `ALERT_THRESHOLD_KAIA` | `5` | Kaia paymaster 残高がこの値 (KAIA) 以下で alert |
+
+**動作**:
+
+- 6h ごと (cron `0 */6 * * *`) に自動実行
+- scheduled run で必須 secret 未設定なら graceful skip (本番投入前は workflow が fail メールを送らない)
+- `workflow_dispatch` (Actions タブから手動 trigger) では必須 secret 未設定は明示的に fail
+- alert 内容: 🚨 emoji + chain ごとの現在残高 + しきい値 + デポジット推奨メッセージ
+
+新 chain を追加するときの手順:
+
+1. `scripts/check-pimlico-balance.mjs` の `CHAIN_CONFIGS` array に entry を追加
+2. `.github/workflows/pimlico-balance.yml` の `env:` block に新 secret/var を追加
+3. 本 README 表に新 chain の secret/var 名を追記
+4. `tests/scripts/check-pimlico-balance.test.ts` に当該 chain の case を追加
+
 ## Security / limitations
 
 - Always verify recipient address, token, chain, and amount.

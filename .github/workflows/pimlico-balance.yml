@@ -32,6 +32,8 @@ jobs:
           PIMLICO_PAYMASTER_BASE: ${{ secrets.PIMLICO_PAYMASTER_BASE }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
         run: |
+          # Polygon/Base/Webhook は required (script の必須 env)。Kaia は optional —
+          # secret 未設定で kaia を skip、ある operator のみ check 対象に含める。
           if [ -z "$PIMLICO_PAYMASTER_POLYGON" ] || [ -z "$PIMLICO_PAYMASTER_BASE" ] || [ -z "$ALERT_WEBHOOK_URL" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               echo "::error::Secrets が未設定です (PIMLICO_PAYMASTER_POLYGON / PIMLICO_PAYMASTER_BASE / ALERT_WEBHOOK_URL)。README 'Pimlico 残高アラート設定手順' を参照"
@@ -53,9 +55,15 @@ jobs:
         env:
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          # Kaia は optional (CHAIN_CONFIGS で required=false)、KAIA_RPC_URL 未設定なら
+          # https://public-en.node.kaia.io へフォールバック。PIMLICO_PAYMASTER_KAIA が
+          # 未設定なら kaia 自体を skip。
+          KAIA_RPC_URL: ${{ secrets.KAIA_RPC_URL }}
           PIMLICO_PAYMASTER_POLYGON: ${{ secrets.PIMLICO_PAYMASTER_POLYGON }}
           PIMLICO_PAYMASTER_BASE: ${{ secrets.PIMLICO_PAYMASTER_BASE }}
+          PIMLICO_PAYMASTER_KAIA: ${{ secrets.PIMLICO_PAYMASTER_KAIA }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           ALERT_THRESHOLD_POL: ${{ vars.ALERT_THRESHOLD_POL }}
           ALERT_THRESHOLD_ETH: ${{ vars.ALERT_THRESHOLD_ETH }}
+          ALERT_THRESHOLD_KAIA: ${{ vars.ALERT_THRESHOLD_KAIA }}
         run: node scripts/check-pimlico-balance.mjs
