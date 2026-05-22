@@ -9,7 +9,7 @@ import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import type { Locale } from '@/i18n';
 import { env } from '@/lib/env';
 import { getExchangeLink } from '@/lib/links';
-import { TOKEN_SYMBOLS } from '@/lib/tokens';
+import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 
 type Tab = 'qr' | 'tip';
 
@@ -198,7 +198,7 @@ function SwapIcon() {
   );
 }
 
-function TokenIcon({ token }: { token: 'jpyc' | 'usdc' }) {
+function TokenIcon({ token }: { token: TokenSymbol }) {
   // 通貨記号入りの円形 token icon。JPYC=¥/円 (青)、USDC=$ (緑系)。
   // 文字を Tailwind の text-color で塗り分けると flex 内で sibling text と色が
   // 競合するため、SVG の fill だけで完結させる。
@@ -230,7 +230,7 @@ function TokenIcon({ token }: { token: 'jpyc' | 'usdc' }) {
 
 function GasPumpIcon() {
   // ガスポンプ icon。Heroicons "fuel" 風の独自描画 (側面タンク + ノズル)。
-  // amber section 内なので fill=currentColor で amber-900 継承。
+  // stroke=currentColor で amber-900 (親色) を継承、fill は none で線画のみ。
   return (
     <svg
       width="18"
@@ -252,8 +252,8 @@ function GasPumpIcon() {
 }
 
 function ChevronIcon() {
-  // details が open のとき 90° 回転して上向きに、close 時は右向き。CSS のみで実現
-  // (JS 不要)。group は親 <details>、:has(:open) や details[open] で角度切替。
+  // 親 <details class="group"> が open のとき Tailwind の `group-open:rotate-90`
+  // が details[open] .group-open\:rotate-90 経由で 90° 回転 (CSS のみ、JS 不要)。
   return (
     <svg
       width="14"

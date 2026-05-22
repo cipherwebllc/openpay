@@ -26,8 +26,7 @@ import { logger } from '@/lib/logger';
 
 export function ScanShell() {
   const t = useTranslations('Scan');
-  // ConnectButton namespace から `disconnect` キー (切断 / Disconnect) を流用。
-  // /scan で badge の隣に置く切断ボタン文言として、専用 i18n を作らずに既存資産を再利用。
+  // ConnectButton.disconnect (切断 / Disconnect) を流用 — 専用 Scan 側 key 不要。
   const tConnect = useTranslations('ConnectButton');
   const router = useRouter();
   const locale = useLocale() as Locale;
@@ -74,11 +73,8 @@ export function ScanShell() {
           {t('connectionTitle')}
         </h2>
         {isConnected && address ? (
-          // 「事前接続済み = レジで scan するだけ」の ready 状態を emerald で強調。
-          // ウォレットを切替えたい (= 別アカウント / 別 wallet で支払う) 場合の
-          // 切断 action を badge の隣に小さく提供する。確認 dialog は要らない —
-          // 切断後は同 section が未接続 branch に hydrate 切替わり、ConnectButton
-          // が再描画されるため再接続は 1 click。
+          // emerald badge = ready 状態の強調。隣に小さな切断 btn を置き、別 wallet
+          // への切替動線を確保する (切断→未接続 branch へ自動切替→ ConnectButton 再描画)。
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />

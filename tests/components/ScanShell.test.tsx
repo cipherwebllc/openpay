@@ -81,7 +81,11 @@ function mockConnected(
     isPending: false,
     error: null,
   });
-  mockHook(useDisconnect, { disconnect: vi.fn() });
+  // disconnect spy を return することで、呼び出し側 test が
+  // `const { disconnect } = mockConnected(true)` で受け取って assertion 可能。
+  const disconnect = vi.fn();
+  mockHook(useDisconnect, { disconnect });
+  return { disconnect };
 }
 
 beforeEach(() => {
@@ -141,14 +145,10 @@ describe('ScanShell: 接続状態表示', () => {
   });
 
   it('接続済み → 切断ボタン click で useDisconnect.disconnect() が呼ばれる', () => {
-    // mockConnected(true) は useDisconnect の disconnect を vi.fn() で設定するため、
-    // ここでは事前に取り出した disconnect spy を mockHook 経由で差し替えてから render。
-    const disconnectSpy = vi.fn();
-    mockConnected(true);
-    mockHook(useDisconnect, { disconnect: disconnectSpy });
+    const { disconnect } = mockConnected(true);
     renderWithIntl(<ScanShell />);
     fireEvent.click(screen.getByRole('button', { name: '切断' }));
-    expect(disconnectSpy).toHaveBeenCalledTimes(1);
+    expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
   it('en locale: 接続済み → 切断ボタンの label が "Disconnect"', () => {
