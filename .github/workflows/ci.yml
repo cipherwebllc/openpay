@@ -43,26 +43,11 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      # HIGH / CRITICAL の advisory gate。scripts/audit-gate.mjs は受容済
-      # advisory を allowlist で許容し、それ以外の HIGH+ で fail させる。
-      # 受容済の根拠は docs/DEPLOY_CHECKLIST.md §7、allowlist 本体は
+      # MODERATE / HIGH / CRITICAL の advisory gate。scripts/audit-gate.mjs は
+      # 受容済 advisory を allowlist で許容し、それ以外の MODERATE+ で fail
+      # させる。受容済の根拠は docs/DEPLOY_CHECKLIST.md §7、allowlist 本体は
       # scripts/audit-gate.mjs の ALLOWED_ADVISORIES。新規 advisory 出現時は
       # 監査 trail として両者を同時 update して PR レビューする運用。
+      # (旧: HIGH+ のみ gate、moderate は warning。2026-05-22 に moderate も
+      # gating へ昇格させ、新規 moderate を必ず人が評価する policy に変更)
       - run: node scripts/audit-gate.mjs
-
-      # moderate は warning として可視化 (fail させない)。既知 transitive
-      # 12 件は README で開示済 (wagmi/Next.js 経由、本リポジトリでは実害なし)。
-      # 件数の推移を log に出して回帰検出する。
-      - name: Audit moderate (warning)
-        run: |
-          set +e
-          out=$(npm audit --audit-level=moderate --omit=dev 2>&1)
-          status=$?
-          echo "$out" | tail -5
-          count=$(echo "$out" | grep -oE '[0-9]+ moderate' | grep -oE '^[0-9]+' | head -1)
-          echo "moderate vulnerabilities: ${count:-0}"
-          # 既知の 12 件を超えたら notice (annotation) を出す
-          if [ "${count:-0}" -gt 12 ]; then
-            echo "::warning::moderate 件数が 12 件 (既知) を超えました: ${count}件"
-          fi
-          exit 0

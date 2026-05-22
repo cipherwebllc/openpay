@@ -197,57 +197,136 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 将来変わる可能性は残存。Sentry に @account-kit / Alchemy 関連の異常 error が
 連続発生 (= SDK 内部挙動変化の signal) したら即 reassess。
 
-### 7.2 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
+### 7.2 MODERATE: `postcss` (GHSA-qx2v-qp2m-jg93)
+
+**Root advisory**: [GHSA-qx2v-qp2m-jg93](https://github.com/advisories/GHSA-qx2v-qp2m-jg93)
+— "PostCSS has XSS via Unescaped `</style>` in its CSS Stringify Output"
+
+**Propagation chain** (`npm ls postcss --omit=dev` で確認):
+```
+next@15.5.18 → postcss@8.4.31  ← affected (脆弱性 fix は postcss>=8.5.10)
+```
+
+**Exploit mechanism**: postcss の CSS stringify が `</style>` を escape せず、
+attacker-controlled CSS が runtime に出力されると HTML context へ抜けて XSS。
+
+**Reachability for OpenPay**:
+- postcss は Next.js の Tailwind / CSS build pipeline 内で**ビルド時にのみ**動作
+- CSS の入力は OpenPay 自身のソース (`app/*`, `components/*`, Tailwind config) のみ
+- ユーザ入力が postcss に流れる経路は無く、stringify 出力は静的 `_next/static/css`
+  に書き出され、ランタイムでブラウザは生成済 CSS を読み込むだけ
+- XSS の attacker-controlled input chain は構造的に存在しない
+
+**Reassess triggers**:
+- Next.js が postcss>=8.5.10 に bump → 即 `npm install`
+- runtime CSS-in-JS / ユーザ入力 CSS を受ける機能を OpenPay 側に追加
+- GHSA-qx2v-qp2m-jg93 に build-time exploit PoC 公開
+
+### 7.3 MODERATE: `uuid` (GHSA-w5hq-g745-h8pq)
+
+**Root advisory**: [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)
+— "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided"
+
+**Propagation chain**:
+```
+@metamask/utils → uuid@9.0.1     ← affected (脆弱性 fix は uuid>=11.1.1)
+jayson → uuid@8.3.2              ← affected
+(他 transitive 経路あり、root は同一)
+```
+
+**Exploit mechanism**: `uuid.v3(name, namespace, buf)` / v5 / v6 を `buf` 引数付き
+で呼んだ時に bounds check 漏れ、out-of-bounds 書き込み。
+
+**Reachability for OpenPay**:
+- OpenPay 直接の uuid 呼び出しは無し (`grep -r uuid app/ components/ lib/ hooks/` で空)
+- transitive (@metamask/utils 等) は内部で `uuid.v4()` (random、buf 引数なし) を使う
+- buf 引数を取る v3/v5/v6 経路は依存ツリー上で reachable でない
+
+**Reassess triggers**:
+- @metamask/utils が uuid>=11.1.1 に bump
+- OpenPay が uuid を direct dependency 化
+- GHSA-w5hq-g745-h8pq に v4 API を含む拡張 advisory 出現
+
+### 7.4 MODERATE: `ws` (GHSA-58qx-3vcg-4xpx)
+
+**Root advisory**: [GHSA-58qx-3vcg-4xpx](https://github.com/advisories/GHSA-58qx-3vcg-4xpx)
+— "ws: Uninitialized memory disclosure"
+
+**Propagation chain**:
+```
+viem@2.50.3 → ws@8.18.0  ← affected (脆弱性 fix は ws>=8.20.1)
+```
+
+**Exploit mechanism**: ws を **server** として permessage-deflate 拡張で動作させた
+時の特定 frame 処理で uninitialized memory が response に紛れて leak。
+
+**Reachability for OpenPay**:
+- OpenPay の ws は viem の RPC websocket **client** (Pimlico / Alchemy RPC 接続)
+  として動作
+- server mode は本 codebase で一切利用しない
+- client 側にはこの脆弱性は影響しない (CVE 範囲外)
+
+**Reassess triggers**:
+- viem が ws>=8.20.1 に bump
+- OpenPay が ws を server mode で利用する機能を追加 (= webhook server 等)
+- GHSA-58qx-3vcg-4xpx に client-side exploit PoC 公開
+
+### 7.5 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
-本 script は `npm audit --omit=dev --json` を parse し、HIGH/CRITICAL advisory を
-GHSA URL で同定、`ALLOWED_ADVISORIES` 辞書と照合して:
+本 script は `npm audit --omit=dev --json` を parse し、**MODERATE / HIGH /
+CRITICAL** advisory を GHSA URL で同定、`ALLOWED_ADVISORIES` 辞書と照合して:
 
 - accepted (allowlist 一致): log 表示のみ、CI pass
 - unaccepted (新規 advisory): 詳細 log + **exit 1** で CI fail
 - stale (allowlist にあるが現在検出されない): upstream fix の signal、log のみ
 
 allowlist 追加 / 削除は本 §7 の update と必ず同期させること (= 監査 trail を
-両ファイルの diff で残す)。現在 allowlist には GHSA-qjx8-664m-686j (js-cookie)
-1 件のみ。
+両ファイルの diff で残す)。現在 allowlist:
+| GHSA ID | Pkg | Sev | docRef |
+|---|---|---|---|
+| GHSA-qjx8-664m-686j | js-cookie | HIGH | §7.1 |
+| GHSA-qx2v-qp2m-jg93 | postcss | MODERATE | §7.2 |
+| GHSA-w5hq-g745-h8pq | uuid | MODERATE | §7.3 |
+| GHSA-58qx-3vcg-4xpx | ws | MODERATE | §7.4 |
+
+(2026-05-22 から moderate も gate 対象に昇格、warning-only count threshold は廃止)
 
 実行例:
 ```bash
 $ node scripts/audit-gate.mjs
-audit-gate: HIGH/CRITICAL advisories detected: 1 (accepted: 1, unaccepted: 0, stale-allowlist: 0)
+audit-gate: MODERATE+ advisories detected: 4 (accepted: 4, unaccepted: 0, stale-allowlist: 0)
 ...
 audit-gate: OK
 ```
 
-### 7.3 再評価手順
+### 7.6 再評価手順
 
 ```bash
-# HIGH advisory の count と root を抽出 (= 期待値: 1 root / js-cookie)
+# MODERATE+ advisory の root を全部列挙 (期待値: §7.1-7.4 の 4 件)
 npm audit --omit=dev --json | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 seen = set()
 for name, info in data.get('vulnerabilities', {}).items():
-    if info.get('severity') == 'high':
+    if info.get('severity') in ('moderate', 'high', 'critical'):
         for via in info.get('via', []):
-            if isinstance(via, dict) and via.get('severity') == 'high':
+            if isinstance(via, dict) and via.get('severity') in ('moderate', 'high', 'critical'):
                 u = via.get('url', '')
                 if u not in seen:
                     seen.add(u)
-                    print(f\"{via.get('name')}: {u}\")"
+                    print(f\"{via.get('severity'):>8}  {via.get('name'):20}  {u}\")"
 ```
 
-期待出力: `js-cookie: https://github.com/advisories/GHSA-qjx8-664m-686j` の 1 行のみ。
-**他の advisory が追加で出現したら deploy 前に本 §7 を update**。
+期待出力 (順不同):
+```
+    high  js-cookie             https://github.com/advisories/GHSA-qjx8-664m-686j
+moderate  postcss               https://github.com/advisories/GHSA-qx2v-qp2m-jg93
+moderate  uuid                  https://github.com/advisories/GHSA-w5hq-g745-h8pq
+moderate  ws                    https://github.com/advisories/GHSA-58qx-3vcg-4xpx
+```
 
-### 7.4 再評価 trigger (Action 起こす条件)
-
-| Trigger | Action |
-|---|---|
-| `@segment/analytics-next` が js-cookie@>=3.0.6 に更新 release | 即 `npm install`、CI green に戻る |
-| `@account-kit/smart-contracts` の major upgrade で chain 解消 | 即 npm install + smoke test |
-| Alchemy SDK 内部 analytics の opt-out flag 提供 | 即適用、依存連鎖断ち切り |
-| GHSA-qjx8-664m-686j に EXPLOITABLE PoC 公開 | 即 alternative SDK 評価 (= lib/smartAccount を viem + Pimlico 経路のみで再構築、@account-kit を完全 drop) |
+**他の advisory が追加で出現したら deploy 前に本 §7 を update + allowlist 同期**。
 
 ## 8. Sentry observability の前提条件
 
