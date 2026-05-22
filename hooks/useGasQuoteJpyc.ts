@@ -28,10 +28,8 @@ const DEFAULT_USEROP_GAS_UNITS = 200_000n;
 //   で月次調整。2026-05 時点で POL ≈ 60 JPY 帯が稼働実績。
 //
 // KAIA: 10n — 2026-05-23 user 確認の実勢 1 KAIA = $0.07 = ¥8.21 (1.34 KAIA =
-//   $0.07 から計算) を base、DEPLOY_CHECKLIST §9.5b の policy (+20% over market、
-//   over-collect 寄り) で 10n に丸めた値。仮 KAIA が ±50% の典型変動を起こして
-//   も over-collect 側 (運営手数料 1.0% で吸収可能な範囲) に留まる安全マージン。
-//   実勢が ±30% 以上 drift したら `NEXT_PUBLIC_KAIA_JPYC_RATE` で env 上書き。
+//   $0.07 から計算) を base、DEPLOY_CHECKLIST §9.5b の policy で +22%
+//   over-collect に丸めた値。drift 監視と env 更新手順は同 docs。
 const DEFAULT_POL_JPYC_RATE = 60n;
 const DEFAULT_KAIA_JPYC_RATE = 10n;
 
@@ -46,7 +44,6 @@ const JPYC_CHAIN_IDS = new Set<number>([
 ]);
 
 function resolveNativeJpycRate(chainId: number): bigint {
-  // KAIA 系 / POL 系 で env override key と default rate が変わる以外は同じ判定。
   const isKaia = chainId === kaia.id || chainId === kairos.id;
   const envRate = isKaia ? env.kaiaJpycRate : env.polJpycRate;
   if (envRate !== undefined) return BigInt(envRate);

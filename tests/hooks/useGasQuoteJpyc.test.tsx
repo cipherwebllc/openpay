@@ -108,12 +108,10 @@ describe('useGasQuoteJpyc', () => {
     });
 
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // overhead 200_000 × 31.5 gwei = 6.3e15 wei KAIA × 10 (KAIA→JPYC default rate、
-    // 2026-05-23 実勢 ¥8/KAIA + over-collect 政策で 10n) = 6.3e16 wei JPYC ≈ 0.063 JPYC
+    // overhead 200_000 × 31.5 gwei × 10 (KAIA default、2026-05-23 実勢 ¥8 + 政策)
+    // = 6.3e16 wei JPYC ≈ 0.063 JPYC。0n でない (旧 isPolygon bug の regression fence)。
     const expected = 200_000n * 315n * 10n ** 8n * 10n;
     expect(result.current.data?.gasAmount).toBe(expected);
-    // 0n ではない (旧 bug の regression fence)
-    expect(result.current.data?.gasAmount).not.toBe(0n);
     expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
   });
 
@@ -161,7 +159,7 @@ describe('useGasQuoteJpyc', () => {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // env override 45 が default 30 に勝つ。200k × 100 gwei × 45 = 9e17
+    // env override 45 が default 10 に勝つ。200k × 100 gwei × 45 = 9e17
     const gasNative = 200_000n * 100n * 10n ** 9n;
     expect(result.current.data?.gasAmount).toBe(gasNative * 45n);
     delete process.env.NEXT_PUBLIC_KAIA_JPYC_RATE;

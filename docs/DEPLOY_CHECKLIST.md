@@ -487,10 +487,9 @@ vercel env add NEXT_PUBLIC_KAIA_JPYC_RATE production
 - [ ] 月次で KAIA 価格を再確認、±30% 以上 drift したら env 更新 + 必要なら
       `DEFAULT_KAIA_JPYC_RATE` も commit で追従
 
-**現状の trade-off**: env 未設定でも UI は `10n` default で動作する。KAIA 価格
-が ±50% 変動しても over-collect 側に留まる (under-collect = OpenPay 損失より
-は安全)。運営手数料 1.0% は gas 換算誤差より 100x 大きいので operational impact
-は minor、UI 数値の実勢乖離だけが UX 懸念。
+env 未設定時は `10n` default が ±50% 変動を over-collect 側で吸収 (under-collect
+= OpenPay 損失より安全寄り)。運営手数料 1.0% が gas 換算誤差の 100x 大きいため
+ズレは UX 上の数値表示問題に留まる。
 
 ### 9.6 MAv2 + Kaia defensive UI (実装済)
 
