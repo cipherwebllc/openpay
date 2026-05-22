@@ -538,9 +538,14 @@ Sentry dashboard 側で alert rule を追加 (code change なし、dashboard 操
 
 - [ ] `event:"smart_account.mav2_kaia_rejected"` の発火頻度を週次 alert
 - [ ] `gas_congested` × `chainId:8217` filter (既存 polygon rule の複製)
-- [ ] Pimlico Kaia API balance を別 alert で監視 (`Pimlico balance alert`
-      workflow に Kaia 用 chainId を追加 — 別 PR)
-- [ ] /api/log/payment に kaia chain 集計を追加 (gmv 把握、別 PR)
+- [x] Pimlico Kaia API balance を別 alert で監視 — 2026-05-23 完了:
+      `scripts/check-pimlico-balance.mjs` に Kaia chain (optional) を追加、
+      operator が `PIMLICO_PAYMASTER_KAIA` secret を Vercel/GitHub に設定すると
+      6h cron で balance を Slack/Discord webhook に通知
+- [x] /api/log/payment に kaia chain 集計を追加 — 2026-05-23 完了:
+      `GET /api/log/payment/stats` を新設 (Bearer auth)、chain × token 別の
+      GMV / success / reverted / error 集計と chainId / since filter を提供。
+      raw export は既存 `/api/log/payment/export` のまま
 
 ### 9.8 Rollback path
 

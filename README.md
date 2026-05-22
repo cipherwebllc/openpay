@@ -161,7 +161,7 @@ Optional (operations / observability):
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry client DSN |
 | `SENTRY_AUTH_TOKEN` | **Sensitive.** Sentry source-map upload token — always set as Sensitive in Vercel |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel KV (Upstash Redis) for alpha payment log |
-| `PAYMENT_LOG_ADMIN_TOKEN` | Bearer token for `/api/log/payment/export` |
+| `PAYMENT_LOG_ADMIN_TOKEN` | Bearer token for `/api/log/payment/export` + `/api/log/payment/stats` |
 | `X402_*` | x402 paid-API config (see next section) |
 
 **Never commit `.env.local`.** Never commit private keys. `NEXT_PUBLIC_*` values are bundled into the client — treat them as public.
