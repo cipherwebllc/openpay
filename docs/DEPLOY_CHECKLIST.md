@@ -457,39 +457,46 @@ NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
 - [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
 - [ ] env 投入後 Sentry の `gas_congested` × chainId:8217 発生率 < 0.1%
 
-### 9.5b KAIA → JPYC rate 検証 (本投入前 必須、月次継続)
+### 9.5b native → JPYC rate 検証 (POL / KAIA、本投入前 必須、月次継続)
 
-`hooks/useGasQuoteJpyc.ts` の `DEFAULT_KAIA_JPYC_RATE` は実勢に追従させる必要
-がある。2026-05-23 時点の user 確認値: **1 KAIA = $0.07 = ¥8.21** (1.34 KAIA
-= $0.07 から計算)。本 default は `+22%` over-collect 政策で `10n` (= ¥10/KAIA
-換算) を採用、env override で月次調整。
+`hooks/useGasQuoteJpyc.ts` の `DEFAULT_POL_JPYC_RATE` / `DEFAULT_KAIA_JPYC_RATE`
+は両方とも実勢に追従させる必要がある。2026-05-23 user 確認値:
 
-検証手順:
+| native | 実勢 USD | 換算 (¥159/USD) | over-collect 政策 | default |
+|---|---|---|---|---|
+| POL | $0.092 | **¥14.6** | +37% (volatility buffer 厚め) | **20n** |
+| KAIA | $0.07 (1.34 KAIA = $0.07) | **¥8.21** | +22% | **10n** |
+
+env override で月次調整、未設定時は default フォールバック。
 
 ```bash
-# KAIA 市場価格を取引所 / CoinGecko 等で確認
-# 2026-05-23 時点: 1 KAIA = $0.07 = ¥8.21 (user 確認済)
-# +22% over-collect (default 10n) で ±50% 典型変動を吸収する設計
-
+# 市場価格を取引所 / CoinGecko 等で確認 (例: 2026-05-23 時点 上記表)
 # env 上書きが必要な場合 (実勢 ±30% 以上 drift 時):
+vercel env add NEXT_PUBLIC_POL_JPYC_RATE production
 vercel env add NEXT_PUBLIC_KAIA_JPYC_RATE production
-# 例: 実勢 ¥15/KAIA に上昇 → NEXT_PUBLIC_KAIA_JPYC_RATE=18 (+20% over)
+# 例: 実勢 ¥30/POL に上昇 → NEXT_PUBLIC_POL_JPYC_RATE=36 (+20% over)
 # Redeploy で baking
 ```
 
-- [x] **2026-05-23**: 1 KAIA = ¥8.21 確認、default を `10n` に設定済 (commit:
-      LARP audit 反映)
-- [ ] env 設定で更に locked-in 値にしたい場合 `NEXT_PUBLIC_KAIA_JPYC_RATE`
-      に明示値を設定
-- [ ] Kaia 経路で実 wallet 1 件 smoke、「ネットワーク手数料見積」が想定
-      0.05〜0.1 JPYC 範囲で表示されるか目視 (200_000 × 31.5 gwei × 10 =
-      6.3e16 wei JPYC ≈ 0.063 JPYC が default 時の値)
-- [ ] 月次で KAIA 価格を再確認、±30% 以上 drift したら env 更新 + 必要なら
-      `DEFAULT_KAIA_JPYC_RATE` も commit で追従
+- [x] **2026-05-23**: POL=¥14.6 / KAIA=¥8.21 確認、default をそれぞれ `20n` /
+      `10n` に設定済 (commit: LARP audit 反映)
+- [ ] env で更に locked-in したい場合 `NEXT_PUBLIC_*_JPYC_RATE` に明示値を設定
+- [ ] 両 chain 経路で実 wallet 1 件 smoke、「ネットワーク手数料見積」が想定
+      範囲で表示されるか目視:
+  - Polygon: 200_000 × 250 gwei × 20 = 1e18 wei JPYC ≈ **1.0 JPYC**
+  - Kaia: 200_000 × 31.5 gwei × 10 = 6.3e16 wei JPYC ≈ **0.063 JPYC**
+- [ ] 月次で両 native 価格を再確認、±30% 以上 drift したら env 更新 + 必要なら
+      `DEFAULT_*_JPYC_RATE` も commit で追従
 
-env 未設定時は `10n` default が ±50% 変動を over-collect 側で吸収 (under-collect
+env 未設定時の default は両 chain とも over-collect 側に倒している (under-collect
 = OpenPay 損失より安全寄り)。運営手数料 1.0% が gas 換算誤差の 100x 大きいため
 ズレは UX 上の数値表示問題に留まる。
+
+**rate 変更時の 4 箇所同期 update** (stale 化防止):
+1. `hooks/useGasQuoteJpyc.ts` の `DEFAULT_*_JPYC_RATE`
+2. `tests/hooks/useGasQuoteJpyc.test.tsx` の期待値
+3. `.env.local.example` のコメント
+4. 本 §9.5b の表 + smoke 期待値
 
 ### 9.6 MAv2 + Kaia defensive UI (実装済)
 

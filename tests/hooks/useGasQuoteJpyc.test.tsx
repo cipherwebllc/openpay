@@ -23,7 +23,7 @@ import { defaultDeploymentForSymbol, deploymentForSlug } from '@/lib/tokens';
 const usdcDep = defaultDeploymentForSymbol('usdc');
 const jpycDep = defaultDeploymentForSymbol('jpyc');
 // JPYC + Kaia (testnet env では Kairos) の deployment、Kaia 経路の gas 換算
-// (POL→JPYC 60 / KAIA→JPYC 30) regression 用。
+// (POL→JPYC 20 / KAIA→JPYC 10、両 default = 2026-05-23 実勢 + §9.5b 政策) regression 用。
 const jpycKaiaDep = deploymentForSlug('jpyc', 'kaia');
 
 function makeWrapper() {
@@ -56,8 +56,9 @@ describe('useGasQuoteJpyc', () => {
     });
 
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // overhead 200_000 × 50 gwei = 1e16 wei POL × 60 (default rate) = 6e17 wei JPYC ≈ 0.6 JPYC
-    const expected = (200_000n * 50n * 10n ** 9n) * 60n;
+    // overhead 200_000 × 50 gwei × 20 (POL default、2026-05-23 実勢 ¥14.6 + 政策)
+    // = 1e16 wei POL × 20 = 2e17 wei JPYC ≈ 0.2 JPYC
+    const expected = 200_000n * 50n * 10n ** 9n * 20n;
     expect(result.current.data?.gasAmount).toBe(expected);
   });
 
@@ -115,7 +116,7 @@ describe('useGasQuoteJpyc', () => {
     expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
   });
 
-  it('Kaia の rate は POL のと独立 (KAIA→JPYC 10 default、POL→JPYC 60 とは別)', async () => {
+  it('Kaia の rate は POL のと独立 (KAIA→JPYC 10 default、POL→JPYC 20 とは別)', async () => {
     getUserOperationGasPrice.mockResolvedValue({
       standard: { maxFeePerGas: 100n * 10n ** 9n }, // 100 gwei (両 chain で同じ value 仮定)
     });
@@ -134,11 +135,11 @@ describe('useGasQuoteJpyc', () => {
     await waitFor(() => expect(kaiaResult.current.data).toBeDefined());
 
     const gasNative = 200_000n * 100n * 10n ** 9n;
-    expect(polygonResult.current.data?.gasAmount).toBe(gasNative * 60n);
+    expect(polygonResult.current.data?.gasAmount).toBe(gasNative * 20n);
     expect(kaiaResult.current.data?.gasAmount).toBe(gasNative * 10n);
-    // Polygon は Kaia の 6 倍 (60/10)
+    // Polygon は Kaia の 2 倍 (20/10)
     expect(polygonResult.current.data!.gasAmount).toBe(
-      kaiaResult.current.data!.gasAmount * 6n,
+      kaiaResult.current.data!.gasAmount * 2n,
     );
   });
 
@@ -184,9 +185,9 @@ describe('useGasQuoteJpyc', () => {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // overhead env override 350_000 × 50 gwei × POL default rate 60
+    // overhead env override 350_000 × 50 gwei × POL default rate 20
     expect(result.current.data?.gasAmount).toBe(
-      350_000n * 50n * 10n ** 9n * 60n,
+      350_000n * 50n * 10n ** 9n * 20n,
     );
     delete process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS;
   });
@@ -203,7 +204,7 @@ describe('useGasQuoteJpyc', () => {
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
     // 200_000 × 500e9 × 60 = 6e18 wei JPYC = 6 JPYC (18 decimals)
-    const expected = 200_000n * 500n * 10n ** 9n * 60n;
+    const expected = 200_000n * 500n * 10n ** 9n * 20n;
     expect(result.current.data?.gasAmount).toBe(expected);
     // 6 JPYC = 6 × 10^18 wei (sub-JPYC 単位、想定範囲内)
     expect(result.current.data?.gasAmount).toBeLessThan(10n ** 19n); // < 10 JPYC
@@ -239,9 +240,9 @@ describe('useGasQuoteJpyc', () => {
 
     // 2 chain で 2 回 fetch (queryKey が chainId で分離されている保証)
     expect(callCount).toBe(2);
-    // 値が独立 (Polygon 60 / Kaia 10、同 gasPrice なので Polygon = 6 × Kaia)
+    // 値が独立 (Polygon 20 / Kaia 10、同 gasPrice なので Polygon = 2 × Kaia)
     expect(polR.current.data!.gasAmount).toBe(
-      kaiaR.current.data!.gasAmount * 6n,
+      kaiaR.current.data!.gasAmount * 2n,
     );
   });
 });
