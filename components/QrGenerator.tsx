@@ -364,12 +364,20 @@ export function QrGenerator() {
             </Field>
 
             {/* chain chooser: token=usdc は USDC_CHAINS (4 chain)、token=jpyc は
-                JPYC_CHAINS (polygon / kaia 2 chain)。両者で chain object の取得
-                経路は chainForSlug 共通、active 判定も settings.chain で同じ。 */}
-            {settings.token === 'usdc' && (
-              <Field label={t('chainLabel')}>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {USDC_CHAINS.map((slug) => {
+                JPYC_CHAINS (polygon + kaia の 2 chain)。両者で chain object の取得
+                経路 (chainForSlug) と active 判定 (settings.chain) は共通。grid 列
+                数だけ token に応じて切替 (USDC は mobile 2 列 / sm 4 列、JPYC は
+                常に 2 列で十分)。 */}
+            <Field label={t('chainLabel')}>
+              <div
+                className={
+                  settings.token === 'usdc'
+                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-4'
+                    : 'grid grid-cols-2 gap-2'
+                }
+              >
+                {(settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS).map(
+                  (slug) => {
                     const c = chainForSlug(slug);
                     const active = settings.chain === slug;
                     return (
@@ -389,38 +397,10 @@ export function QrGenerator() {
                         </div>
                       </button>
                     );
-                  })}
-                </div>
-              </Field>
-            )}
-
-            {settings.token === 'jpyc' && (
-              <Field label={t('chainLabel')}>
-                <div className="grid grid-cols-2 gap-2">
-                  {JPYC_CHAINS.map((slug) => {
-                    const c = chainForSlug(slug);
-                    const active = settings.chain === slug;
-                    return (
-                      <button
-                        key={slug}
-                        type="button"
-                        onClick={() => selectChain(slug)}
-                        className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
-                          active
-                            ? 'border-brand bg-brand/5 text-brand-dark'
-                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="font-semibold">{c.name}</div>
-                        <div className="text-xs text-slate-500">
-                          chain id: {c.id}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </Field>
-            )}
+                  },
+                )}
+              </div>
+            </Field>
 
             <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
               <div className="flex flex-col gap-2">

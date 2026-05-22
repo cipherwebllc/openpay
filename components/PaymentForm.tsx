@@ -304,9 +304,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // ネイティブガストークンの symbol を viem chain 経由で取得 (chain-aware)。
   // Polygon = POL / Kaia = KAIA / Base/Arbitrum/Optimism = ETH を自動 resolve。
   // standard モード説明 + gasInfoJpyc / gasInfoUsdc の tooltip {nativeToken}
-  // placeholder で使用する。
+  // placeholder の両方で使用する。
   const nativeToken = requiredChain.nativeCurrency.symbol;
-  const standardNativeToken = nativeToken;
 
   // ERC20 Paymaster の Token Approval Checker リンク (chain 別 explorer)。
   // Etherscan 系 (basescan / arbiscan / optimistic.etherscan / polygonscan) は
@@ -354,7 +353,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{t('standardModeTitle')}</p>
           <p className="mt-1 text-xs">
-            {t('standardModeBody', { nativeToken: standardNativeToken })}
+            {t('standardModeBody', { nativeToken })}
           </p>
         </div>
       )}
@@ -412,7 +411,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           <Row
             label={
               isStandard
-                ? t('customerStandard', { nativeToken: standardNativeToken })
+                ? t('customerStandard', { nativeToken })
                 : isMerchantGas
                   ? t('customerMerchantGas')
                   : t('customerCustomerGas')

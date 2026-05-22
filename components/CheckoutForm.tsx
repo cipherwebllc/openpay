@@ -89,7 +89,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // Polygon=POL / Kaia=KAIA / Base/Arbitrum/Optimism=ETH。standard mode の
   // 顧客向け wallet hint + gasInfoJpyc / gasInfoUsdc tooltip で使用。
   const nativeToken = requiredChain.nativeCurrency.symbol;
-  const standardNativeToken = nativeToken;
 
   const balanceQuery = useReadContract({
     address: deployment.address,
@@ -455,7 +454,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             <Row
               label={
                 isStandard
-                  ? t('totalRowStandard', { nativeToken: standardNativeToken })
+                  ? t('totalRowStandard', { nativeToken })
                   : isMerchantGas
                     ? t('totalRowMerchantGas')
                     : t('totalRow')
@@ -467,7 +466,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {isStandard
-            ? t('standardHint', { nativeToken: standardNativeToken })
+            ? t('standardHint', { nativeToken })
             : isErc20Paymaster
               ? t('gaslessHintUsdc')
               : t('gaslessHintJpyc')}

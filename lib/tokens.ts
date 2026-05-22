@@ -134,28 +134,27 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   paymasterMode: 'erc20',
 }));
 
-function jpycAddress(slug: JpycChainSlug): Address | undefined {
+// hard-code default (JPYC v3 cross-chain consistency で polygon = kaia 同 address)
+// により、戻り値は常に Address (env 未設定でも fallback が効く)。Polygon testnet
+// の `ZERO` だけは「JPYC 未 deploy」を表す sentinel (deployment 段で skip される)。
+function jpycAddress(slug: JpycChainSlug): Address {
   if (isMainnet) {
     const overrides = env.mainnetTokenOverrides.jpyc;
     if (slug === 'polygon') return overrides.polygon ?? JPYC_POLYGON_MAINNET;
-    // Kaia は JPYC v3 cross-chain 同一 address を hard-code default として持つ
-    // ことで Vercel env 設定漏れでも UI 動作を維持。env override は emergency
-    // address 変更用に残す。
     return overrides.kaia ?? JPYC_KAIA_MAINNET;
   }
   const overrides = env.testnetTokenOverrides.jpyc;
   if (slug === 'polygon') return overrides.polygon ?? ZERO;
-  // Kairos も JPYC v3 cross-chain consistency で mainnet と同 address。
-  // memory: 2026-05-18 JPYC 公式が Kairos faucet 対応化。
+  // Kairos は memory: 2026-05-18 JPYC 公式が Kairos faucet 対応化、実 deploy 済。
   return overrides.kaia ?? JPYC_KAIA_MAINNET;
 }
 
-// JPYC は Polygon (既存、必ず deploy 済) + Kaia (PoC、env address 未設定なら skip)
-// の組合せ。Kaia は実 address 取得まで TOKEN_DEPLOYMENTS に出現しないので、
-// UI の chain selector からも自動的に消える (resolveDeployment が undefined)。
+// JPYC は Polygon (mainnet/Amoy) + Kaia (mainnet/Kairos) の 2 chain で常に
+// deploy 済 (JPYC v3 cross-chain consistency)。Polygon testnet (Amoy) のみ
+// `ZERO` sentinel で「未 deploy」を表現し、deployment を skip。
 const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.flatMap((slug) => {
   const addr = jpycAddress(slug);
-  if (!addr) return [];
+  if (addr === ZERO) return [];
   return [
     {
       symbol: 'jpyc' as const,
@@ -170,8 +169,8 @@ const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.flatMap((slug) => {
 });
 
 // 全 deployment のフラット配列。順序は QR token セレクター・chain セレクターの
-// 表示順に揃える (USDC: Base 既定 → Arbitrum → Optimism → Polygon、JPYC: Polygon
-// 既定 → Kaia (PoC、env 設定時のみ))。
+// 表示順に揃える (USDC: Base 既定 → Arbitrum → Optimism → Polygon、JPYC:
+// Polygon 既定 → Kaia)。
 export const TOKEN_DEPLOYMENTS: readonly TokenDeployment[] = [
   ...usdcDeployments,
   ...jpycDeployments,
