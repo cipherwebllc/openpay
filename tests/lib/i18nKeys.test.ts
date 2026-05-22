@@ -200,6 +200,38 @@ describe('i18n: Scan keys (ja/en parity)', () => {
   });
 });
 
+describe('i18n: gasInfoJpyc / gasInfoUsdc は {nativeToken} placeholder を持つ (chain-aware)', () => {
+  // 旧: gasInfoJpyc に "POL ガス" を hardcode していて Kaia 選択時に Polygon の
+  // POL を表示してしまう bug があった (2026-05-23 production smoke で発覚)。
+  // 修正後は {nativeToken} placeholder + chain.nativeCurrency.symbol で
+  // Polygon=POL / Kaia=KAIA / Base/Arbitrum/Optimism=ETH を動的解決する。
+  // 旧 hardcode が混入したら CI が即 fail するよう fence。
+  for (const ns of FORM_NAMESPACES) {
+    for (const key of ['gasInfoJpyc', 'gasInfoUsdc'] as const) {
+      it(`ja.${ns}.${key} は {nativeToken} placeholder を持つ`, () => {
+        const v = (ja[ns] as Record<string, string>)[key];
+        expect(v).toContain('{nativeToken}');
+      });
+      it(`en.${ns}.${key} は {nativeToken} placeholder を持つ`, () => {
+        const v = (en[ns] as Record<string, string>)[key];
+        expect(v).toContain('{nativeToken}');
+      });
+      it(`ja.${ns}.${key} は旧 'POL' / 'ETH' を hardcode していない (regression fence)`, () => {
+        const v = (ja[ns] as Record<string, string>)[key];
+        // "POL ガス" / "POL を保有" / "(POL)" 等の hardcode をブロック。
+        // placeholder ({nativeToken}) は OK、リテラル "POL" の単独出現を弾く。
+        expect(v).not.toMatch(/\bPOL\b/);
+        expect(v).not.toMatch(/\bETH\b/);
+      });
+      it(`en.${ns}.${key} は旧 'POL' / 'ETH' を hardcode していない (regression fence)`, () => {
+        const v = (en[ns] as Record<string, string>)[key];
+        expect(v).not.toMatch(/\bPOL\b/);
+        expect(v).not.toMatch(/\bETH\b/);
+      });
+    }
+  }
+});
+
 describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   it('全 form 名前空間で onramp キー集合が ja と en で一致', () => {
     for (const ns of FORM_NAMESPACES) {

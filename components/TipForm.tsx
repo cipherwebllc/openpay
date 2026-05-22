@@ -36,6 +36,9 @@ export function TipForm({ params }: { params: TipParams }) {
   const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = paymasterMode === 'erc20';
   const isSponsorship = paymasterMode === 'sponsorship';
+  // ネイティブガストークン symbol (Polygon=POL / Kaia=KAIA / Base etc=ETH)。
+  // gasInfoJpyc / gasInfoUsdc tooltip の {nativeToken} で使用。
+  const nativeToken = requiredChain.nativeCurrency.symbol;
   const presets =
     params.presets && params.presets.length > 0
       ? params.presets
@@ -317,7 +320,11 @@ export function TipForm({ params }: { params: TipParams }) {
             label={t('gasRow')}
             labelExtra={
               <InfoTooltip
-                text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
+                text={
+                  isErc20Paymaster
+                    ? t('gasInfoUsdc', { nativeToken })
+                    : t('gasInfoJpyc', { nativeToken })
+                }
               />
             }
             value={

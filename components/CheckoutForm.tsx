@@ -85,8 +85,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
-  // standard mode で顧客が wallet で見ることになるネイティブガストークン (UI hint)。
-  const standardNativeToken = params.token === 'jpyc' ? 'POL' : 'ETH';
+  // ネイティブガストークン symbol を viem chain 経由で取得 (chain-aware)。
+  // Polygon=POL / Kaia=KAIA / Base/Arbitrum/Optimism=ETH。standard mode の
+  // 顧客向け wallet hint + gasInfoJpyc / gasInfoUsdc tooltip で使用。
+  const nativeToken = requiredChain.nativeCurrency.symbol;
+  const standardNativeToken = nativeToken;
 
   const balanceQuery = useReadContract({
     address: deployment.address,
@@ -434,7 +437,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
                 labelExtra={
                   <InfoTooltip
-                    text={isErc20Paymaster ? t('gasInfoUsdc') : t('gasInfoJpyc')}
+                    text={
+                      isErc20Paymaster
+                        ? t('gasInfoUsdc', { nativeToken })
+                        : t('gasInfoJpyc', { nativeToken })
+                    }
                   />
                 }
                 value={
