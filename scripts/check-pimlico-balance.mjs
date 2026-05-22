@@ -44,7 +44,7 @@ const ENTRY_POINT_ABI = [
 //   - POL 5    ≈ ¥100 (1000 sponsorship 程度の予備、POL は ¥20/native default rate)
 //   - ETH 0.01 ≈ ¥230 (L2 は cheap、~100k sponsorship 分)
 //   - KAIA 5   ≈ ¥40  (2026-05-23 実勢 ¥8.21/KAIA、~800 sponsorship 分)
-const CHAIN_CONFIGS = [
+export const CHAIN_CONFIGS = [
   {
     slug: 'polygon',
     chain: polygon,

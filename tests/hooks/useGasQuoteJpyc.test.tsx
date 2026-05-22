@@ -203,10 +203,11 @@ describe('useGasQuoteJpyc', () => {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.data).toBeDefined());
-    // 200_000 × 500e9 × 60 = 6e18 wei JPYC = 6 JPYC (18 decimals)
+    // 200_000 × 500e9 × 20 = 2e18 wei JPYC = 2 JPYC (18 decimals)
     const expected = 200_000n * 500n * 10n ** 9n * 20n;
     expect(result.current.data?.gasAmount).toBe(expected);
-    // 6 JPYC = 6 × 10^18 wei (sub-JPYC 単位、想定範囲内)
+    // 2 JPYC = 2 × 10^18 wei (低 JPYC 単位、500 gwei spike でも customer 負担
+    // が想定範囲内であることの fence)
     expect(result.current.data?.gasAmount).toBeLessThan(10n ** 19n); // < 10 JPYC
     expect(result.current.data?.gasAmount).toBeGreaterThan(10n ** 18n); // > 1 JPYC
   });

@@ -63,8 +63,10 @@ export const supportedChains = [
 export const USDC_CHAINS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
 
 /** JPYC が deploy 済みのチェーン。Polygon は 2024-、Kaia は 2026-05-15 公式 deploy。
- * Kaia 側の実 contract address は env override (NEXT_PUBLIC_JPYC_KAIA_ADDRESS) で
- * 設定するまで lib/tokens.ts が deployment を skip する設計。 */
+ * JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia
+ * mainnet/Kairos) 全てで同一 address `0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`
+ * が hard-code default として lib/tokens.ts に存在、env (NEXT_PUBLIC_JPYC_*_ADDRESS)
+ * で emergency 上書き可能。 */
 export type JpycChainSlug = 'polygon' | 'kaia';
 export const JPYC_CHAINS: readonly JpycChainSlug[] = ['polygon', 'kaia'];
 

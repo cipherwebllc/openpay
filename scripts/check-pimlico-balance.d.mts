@@ -16,8 +16,10 @@ export interface ChainConfig {
   required: boolean;
 }
 
+export const CHAIN_CONFIGS: readonly ChainConfig[];
+
 export interface BalanceCheckOptions {
-  configs?: ChainConfig[];
+  configs?: readonly ChainConfig[];
   webhookUrl: string;
   logger?: { log: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
 }

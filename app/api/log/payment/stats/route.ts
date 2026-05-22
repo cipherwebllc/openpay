@@ -1,6 +1,15 @@
 // 蓄積した payment log を chain 別に集計する admin endpoint。Bearer 認証必須。
 // GMV / count / token 別内訳を返し、Kaia 投入後の chain 別 throughput 把握、
-// 弁護士 review / 金融庁事前相談の月次集計、Pimlico 残高との突合に使用。
+// Pimlico 残高との突合などに使用。
+//
+// ⚠️ 重要なデータ信頼性 disclosure (Codex 2026-05-23 audit):
+// 集計元 `POST /api/log/payment` は認証なし + shape validation のみで、
+// クライアントが result/chainId/merchantAmount を自由に申告できる。本 endpoint
+// はその log を集計するため、出力は **「client-reported telemetry」** であり
+// on-chain の真実ではない。弁護士 review / 金融庁事前相談など外部 evidence と
+// しての利用には、`txHash` / `userOpHash` を chain RPC で再検証して transferFrom
+// receipt と突合する追加 verifier が必要。本 endpoint の response には
+// `meta.dataSource: 'client-reported, unverified'` を含めて呼出側に明示する。
 //
 // 集計は読み取り専用 (KV LRANGE のみ)、ストレージ追加なし。raw log は
 // /api/log/payment/export で取得、本 endpoint はその chain 別 reduce 版。
@@ -95,11 +104,21 @@ function parseWei(v: string | undefined): bigint {
   return BigInt(v);
 }
 
-function aggregate(entries: LogEntry[]): ChainAgg[] {
+function aggregate(entries: LogEntry[]): {
+  chains: ChainAgg[];
+  aggregatedCount: number;
+  invalidEntries: number;
+} {
   const byChain = new Map<number, ChainAgg>();
+  let aggregatedCount = 0;
+  let invalidEntries = 0;
 
   for (const e of entries) {
-    if (!isAggregable(e)) continue;
+    if (!isAggregable(e)) {
+      invalidEntries++;
+      continue;
+    }
+    aggregatedCount++;
     const chainId = e.chainId as number;
     const tokenAddress = (e.tokenAddress as string).toLowerCase();
     const result = e.result as 'success' | 'reverted' | 'error';
@@ -152,10 +171,11 @@ function aggregate(entries: LogEntry[]): ChainAgg[] {
   }
 
   // 集計順は successCount 降順、tie-breaker は chainId 昇順 (deterministic)
-  return Array.from(byChain.values()).sort((a, b) => {
+  const chains = Array.from(byChain.values()).sort((a, b) => {
     if (b.successCount !== a.successCount) return b.successCount - a.successCount;
     return a.chainId - b.chainId;
   });
+  return { chains, aggregatedCount, invalidEntries };
 }
 
 // 集計結果を JSON serializable に変換 (bigint → 10 進 string)。
@@ -205,15 +225,26 @@ export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
   const chainIdFilter = url.searchParams.get('chainId');
   const sinceFilter = url.searchParams.get('since');
-  // 巨大 list 全件 LRANGE は KV / 帯域負荷大きいので、admin がデフォルト
-  // ウィンドウ (新しい 5000 件) を context-aware に絞れる API にする。
+  // 巨大 list 全件 LRANGE は KV / 帯域負荷 + Function CPU/メモリ負荷が大きい
+  // ため、stats endpoint では window を hard cap (最大 5000 entry)。
+  // - to=-1 (KV 末尾までスキャン) を拒否
+  // - to - from > MAX_WINDOW を拒否
+  // 全期間 raw データが必要なら /api/log/payment/export を使う設計。
+  const MAX_WINDOW = 5_000;
   const from = Number(url.searchParams.get('from') ?? 0);
   const toRaw = url.searchParams.get('to');
-  const to = toRaw === null ? 4_999 : Number(toRaw);
+  const to = toRaw === null ? MAX_WINDOW - 1 : Number(toRaw);
 
-  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < -1) {
+  if (
+    !Number.isInteger(from) ||
+    !Number.isInteger(to) ||
+    from < 0 ||
+    to < 0 ||
+    to < from ||
+    to - from + 1 > MAX_WINDOW
+  ) {
     return NextResponse.json(
-      { ok: false, error: 'invalid_window' },
+      { ok: false, error: 'invalid_window', maxWindow: MAX_WINDOW },
       { status: 400 },
     );
   }
@@ -284,16 +315,31 @@ export async function GET(req: Request): Promise<NextResponse> {
     return true;
   });
 
-  const chains = aggregate(filtered);
+  const { chains, aggregatedCount, invalidEntries } = aggregate(filtered);
 
   return NextResponse.json({
     ok: true,
+    // データ信頼性 disclosure: 集計元の POST /api/log/payment は認証なしの
+    // shape-only validation 経路で、client-reported telemetry。on-chain と
+    // 突合した verified GMV ではない。詳細は本 route ファイルの top comment。
+    meta: {
+      dataSource: 'client-reported, unverified',
+      verifiedAgainstChain: false,
+      maxWindow: 5_000,
+    },
     total: len.ok ? len.value : null,
     windowFrom: from,
     windowTo: to,
     fetched: range.value.length,
     parseErrors,
-    considered: filtered.length,
+    // 旧 `considered` は filter 通過数を指していたが、aggregate 段で skip
+    // される entry を含んでいたため operational metric として誤解を招いた
+    // (Codex audit 2026-05-23)。filteredCount (filter 通過) と
+    // aggregatedCount (実際に byChain に反映) を分離、invalidEntries に
+    // 「filter は通ったが isAggregable 不可」 を計上。
+    filteredCount: filtered.length,
+    aggregatedCount,
+    invalidEntries,
     filter: {
       chainId: parsedChainIdFilter ?? null,
       since: sinceFilter,

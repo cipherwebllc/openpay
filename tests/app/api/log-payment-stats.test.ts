@@ -177,7 +177,7 @@ describe('stats: aggregate — chain / token / count / GMV', () => {
     expect(body.ok).toBe(true);
     expect(body.byChain).toEqual([]);
     expect(body.total).toBe(0);
-    expect(body.considered).toBe(0);
+    expect(body.filteredCount).toBe(0);
     expect(body.parseErrors).toBe(0);
   });
 
@@ -359,7 +359,7 @@ describe('stats: filter (chainId / since)', () => {
     expect(body.byChain).toHaveLength(1);
     expect(body.byChain[0].chainId).toBe(8217);
     expect(body.byChain[0].successCount).toBe(2);
-    expect(body.considered).toBe(2);
+    expect(body.filteredCount).toBe(2);
   });
 
   it('since filter で時間 cut-off 動作', async () => {
@@ -378,7 +378,7 @@ describe('stats: filter (chainId / since)', () => {
       }),
     );
     const body = await res.json();
-    expect(body.considered).toBe(2);
+    expect(body.filteredCount).toBe(2);
     expect(body.byChain[0].successCount).toBe(2);
   });
 
@@ -408,7 +408,7 @@ describe('stats: filter (chainId / since)', () => {
       }),
     );
     const body = await res.json();
-    expect(body.considered).toBe(1);
+    expect(body.filteredCount).toBe(1);
     expect(body.byChain[0].chainId).toBe(8217);
   });
 
@@ -435,7 +435,7 @@ describe('stats: filter (chainId / since)', () => {
       }),
     );
     const body = await res.json();
-    expect(body.considered).toBe(1);
+    expect(body.filteredCount).toBe(1);
   });
 });
 
@@ -452,7 +452,7 @@ describe('stats: 不正 / 部分破損 entry のハンドリング', () => {
     const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
     const body = await res.json();
     expect(body.parseErrors).toBe(1);
-    expect(body.considered).toBe(2);
+    expect(body.filteredCount).toBe(2);
     expect(body.fetched).toBe(3);
   });
 
@@ -503,11 +503,16 @@ describe('stats: 不正 / 部分破損 entry のハンドリング', () => {
     const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
     const body = await res.json();
     expect(body.byChain[0].successCount).toBe(1);
-    expect(body.considered).toBe(3); // filter は通る、aggregate で skip
+    // filter は通る (chainId/since OK)、aggregate で 2 件 skip (Codex audit
+    // で `considered` → `filteredCount` + `aggregatedCount` + `invalidEntries`
+    // に分離)
+    expect(body.filteredCount).toBe(3);
+    expect(body.aggregatedCount).toBe(1);
+    expect(body.invalidEntries).toBe(2);
   });
 });
 
-describe('stats: window pagination', () => {
+describe('stats: window pagination + cap', () => {
   it('from/to で kvLrange の引数が直接渡される', async () => {
     vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [] });
     await GET(makeReq({ auth: `Bearer ${TOKEN}`, from: '100', to: '200' }));
@@ -518,13 +523,49 @@ describe('stats: window pagination', () => {
     );
   });
 
-  it('to=-1 は KV 末尾まで読む', async () => {
-    vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [] });
-    await GET(makeReq({ auth: `Bearer ${TOKEN}`, from: '0', to: '-1' }));
-    expect(kvLrange).toHaveBeenCalledWith(
-      'openpay:payments:log',
-      0,
-      -1,
+  it('to=-1 (KV 末尾) は window cap で拒否 (Codex audit: DoS 回避)', async () => {
+    const res = await GET(
+      makeReq({ auth: `Bearer ${TOKEN}`, from: '0', to: '-1' }),
     );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid_window');
+    expect(kvLrange).not.toHaveBeenCalled();
+  });
+
+  it('window > 5000 entry は拒否 (Codex audit: DoS 回避)', async () => {
+    const res = await GET(
+      makeReq({ auth: `Bearer ${TOKEN}`, from: '0', to: '5000' }),
+    );
+    // to - from + 1 = 5001 > MAX_WINDOW 5000 → 400
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_window');
+    expect(body.maxWindow).toBe(5000);
+  });
+
+  it('window == 5000 entry (上限ぴったり) は通る', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [] });
+    const res = await GET(
+      makeReq({ auth: `Bearer ${TOKEN}`, from: '0', to: '4999' }),
+    );
+    expect(res.status).toBe(200);
+    expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, 4999);
+  });
+
+  it('to < from は拒否 (常識 guard)', async () => {
+    const res = await GET(
+      makeReq({ auth: `Bearer ${TOKEN}`, from: '100', to: '50' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('response meta は data source 不確実性を明示 (Codex audit)', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [] });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    expect(body.meta).toBeDefined();
+    expect(body.meta.dataSource).toBe('client-reported, unverified');
+    expect(body.meta.verifiedAgainstChain).toBe(false);
+    expect(body.meta.maxWindow).toBe(5000);
   });
 });

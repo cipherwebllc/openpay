@@ -310,6 +310,72 @@ describe('check-pimlico-balance: threshold breach + webhook 通知', () => {
   });
 });
 
+describe('check-pimlico-balance: production CHAIN_CONFIGS 検証 (Codex audit)', () => {
+  // Codex audit 2026-05-23: 旧 test は makeConfigs() で同 shape を手書きしており、
+  // production CHAIN_CONFIGS の env 名 / required / default がいつ drift しても
+  // test が通る状態だった。production array を直接 import して shape/値の
+  // fence を追加する。
+  it('production CHAIN_CONFIGS は 3 chain (polygon required / base required / kaia optional)', async () => {
+    const { CHAIN_CONFIGS } = await loadScript();
+    expect(CHAIN_CONFIGS).toHaveLength(3);
+    const polygon = CHAIN_CONFIGS.find((c) => c.slug === 'polygon');
+    const base = CHAIN_CONFIGS.find((c) => c.slug === 'base');
+    const kaia = CHAIN_CONFIGS.find((c) => c.slug === 'kaia');
+    expect(polygon).toBeDefined();
+    expect(base).toBeDefined();
+    expect(kaia).toBeDefined();
+    expect(polygon?.required).toBe(true);
+    expect(base?.required).toBe(true);
+    expect(kaia?.required).toBe(false); // Kaia は opt-in (新規 operator 保護)
+  });
+
+  it('production CHAIN_CONFIGS の env 名 / native symbol / threshold default を直接検証', async () => {
+    const { CHAIN_CONFIGS } = await loadScript();
+    const byslug = Object.fromEntries(CHAIN_CONFIGS.map((c) => [c.slug, c]));
+
+    expect(byslug.polygon.paymasterEnv).toBe('PIMLICO_PAYMASTER_POLYGON');
+    expect(byslug.polygon.rpcEnv).toBe('POLYGON_RPC_URL');
+    expect(byslug.polygon.thresholdEnv).toBe('ALERT_THRESHOLD_POL');
+    expect(byslug.polygon.thresholdDefault).toBe('5');
+    expect(byslug.polygon.nativeSymbol).toBe('POL');
+
+    expect(byslug.base.paymasterEnv).toBe('PIMLICO_PAYMASTER_BASE');
+    expect(byslug.base.rpcEnv).toBe('BASE_RPC_URL');
+    expect(byslug.base.thresholdEnv).toBe('ALERT_THRESHOLD_ETH');
+    expect(byslug.base.thresholdDefault).toBe('0.01');
+    expect(byslug.base.nativeSymbol).toBe('ETH');
+
+    expect(byslug.kaia.paymasterEnv).toBe('PIMLICO_PAYMASTER_KAIA');
+    expect(byslug.kaia.rpcEnv).toBe('KAIA_RPC_URL');
+    expect(byslug.kaia.thresholdEnv).toBe('ALERT_THRESHOLD_KAIA');
+    expect(byslug.kaia.thresholdDefault).toBe('5');
+    expect(byslug.kaia.nativeSymbol).toBe('KAIA');
+  });
+
+  it('production CHAIN_CONFIGS をそのまま runBalanceCheck に渡しても動く (configs default 経路)', async () => {
+    process.env.PIMLICO_PAYMASTER_POLYGON =
+      '0x000000000000000000000000000000000000B011';
+    process.env.PIMLICO_PAYMASTER_BASE =
+      '0x000000000000000000000000000000000000bA5e';
+    process.env.PIMLICO_PAYMASTER_KAIA =
+      '0x000000000000000000000000000000000000Ca1A';
+    readContractMock.mockResolvedValue(100n * 10n ** 18n); // 全 chain OK
+
+    const { runBalanceCheck } = await loadScript();
+    // configs を指定せずに default (production CHAIN_CONFIGS) を引かせる
+    const result = await runBalanceCheck({
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.breached).toBe(false);
+    expect(readContractMock).toHaveBeenCalledTimes(3);
+    expect(result.lines.join('\n')).toContain('Polygon');
+    expect(result.lines.join('\n')).toContain('Base');
+    expect(result.lines.join('\n')).toContain('Kaia');
+  });
+});
+
 describe('check-pimlico-balance: 並列 fetch + chain ごとの独立性', () => {
   it('複数 chain の readContract は並列実行 (Promise.all)', async () => {
     process.env.PIMLICO_PAYMASTER_POLYGON =
