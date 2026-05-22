@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { isAddress, type Address } from 'viem';
@@ -121,10 +121,14 @@ export function QrGenerator() {
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
   const qrRef = useRef<HTMLDivElement>(null);
   // 高度な設定 (payMode / gas / split / quickAmount editor) は default 閉じる。
-  // token / chain / receiver / storeName / posterNote は Step 2 で常時表示する
-  // 設計に変えたため、accordion を強制的に開く動機がなくなった (3-step UI
-  // refactor 2026-05-23)。
   const [accordionOpen, setAccordionOpen] = useState(false);
+  // Step 2 (受取先) の collapsible 状態。受取先は設定後ほぼ変更しないので、有効な
+  // address が localStorage に既にある returning user では default 折り畳む。
+  // 新規 user (receiver 未設定) には Step 2 を default open で出して入力を促す。
+  // useState の初期値は true (open) で SSR と一致させ、hydrate 後 useEffect で
+  // effectiveReceiver 由来の真値に切り替える (一度のみ、以降は user が制御)。
+  const [step2Open, setStep2Open] = useState(true);
+  const [step2Initialized, setStep2Initialized] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   const t = useTranslations('QrGenerator');
@@ -133,6 +137,15 @@ export function QrGenerator() {
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
     [settings.receiver, resolvedReceiver],
   );
+
+  // Step 2 の初期 open 状態を hydrate 後に一度だけ決定する。step2Initialized 後は
+  // ユーザの click 操作だけが state を変えるので、receiver を typed して有効化
+  // した瞬間に section が勝手に閉じることはない (= 入力フローを中断しない)。
+  useEffect(() => {
+    if (!hydrated || step2Initialized) return;
+    setStep2Open(effectiveReceiver === null);
+    setStep2Initialized(true);
+  }, [hydrated, effectiveReceiver, step2Initialized]);
 
   const receiverValid = effectiveReceiver !== null;
   const amountValid =
@@ -314,68 +327,10 @@ export function QrGenerator() {
     <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
       <div className="space-y-5 print:hidden">
         <StepCard step={1} icon={Coins} title={t('steps.amount')}>
-          <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
-            <div className="flex flex-col gap-2">
-              <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
-                {(
-                  [
-                    ['amount', t('modeAmount')],
-                    ['static', t('modeStatic')],
-                  ] as const
-                ).map(([m, label]) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m as Mode)}
-                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                      mode === m
-                        ? 'bg-white text-brand-dark shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {mode === 'amount' ? (
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={amount}
-                    onChange={(e) =>
-                      setAmount(sanitizeAmount(e.target.value, deployment.decimals))
-                    }
-                    placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
-                    autoFocus
-                  />
-                  {activeQuickAmounts.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      {activeQuickAmounts.map((q) => (
-                        <button
-                          key={q}
-                          type="button"
-                          onClick={() => setAmount(q)}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                        >
-                          {q} {deployment.displaySymbol}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
-                  {t('staticHint')}
-                </p>
-              )}
-            </div>
-          </Field>
-        </StepCard>
-
-        <StepCard step={2} icon={Store} title={t('steps.receiver')}>
           <div className="space-y-4">
+            {/* token + chain は顧客ごとに変更頻度が高い (JPYC か USDC か、USDC なら
+                どの chain か) ため Step 1 に置く。amount のシンボル表示も token に
+                依存するので、視覚的にも入力順は token → (chain) → amount が自然。 */}
             <Field label={t('tokenLabel')}>
               <div className="grid grid-cols-2 gap-2">
                 {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
@@ -435,6 +390,83 @@ export function QrGenerator() {
               </Field>
             )}
 
+            <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
+              <div className="flex flex-col gap-2">
+                <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
+                  {(
+                    [
+                      ['amount', t('modeAmount')],
+                      ['static', t('modeStatic')],
+                    ] as const
+                  ).map(([m, label]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMode(m as Mode)}
+                      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                        mode === m
+                          ? 'bg-white text-brand-dark shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {mode === 'amount' ? (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={amount}
+                      onChange={(e) =>
+                        setAmount(sanitizeAmount(e.target.value, deployment.decimals))
+                      }
+                      placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
+                      autoFocus
+                    />
+                    {activeQuickAmounts.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {activeQuickAmounts.map((q) => (
+                          <button
+                            key={q}
+                            type="button"
+                            onClick={() => setAmount(q)}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                          >
+                            {q} {deployment.displaySymbol}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                    {t('staticHint')}
+                  </p>
+                )}
+              </div>
+            </Field>
+          </div>
+        </StepCard>
+
+        <StepCard
+          step={2}
+          icon={Store}
+          title={t('steps.receiver')}
+          collapsible
+          open={step2Open}
+          onToggle={() => setStep2Open((o) => !o)}
+          collapsedSummary={
+            <Step2Summary
+              storeName={settings.storeName}
+              receiver={effectiveReceiver}
+              fallback={t('steps.receiverNotSet')}
+            />
+          }
+        >
+          <div className="space-y-4">
             <Field label={t('receiverLabel')}>
               <AddressInput
                 value={settings.receiver}
@@ -871,6 +903,25 @@ export function QrGenerator() {
       </div>
     </div>
   );
+}
+
+// Step 2 collapsed 時の summary。store name (任意) + short address を 1 行で示し、
+// 店主が「受取先は設定済みだが今は触らなくて良い」と一目で判断できるようにする。
+// receiver 未設定の場合は fallback ("受取先未設定") を出す (Step 2 default open で
+// あまり当たらないが、user が手動で閉じた + receiver clear した時の保険)。
+function Step2Summary({
+  storeName,
+  receiver,
+  fallback,
+}: {
+  storeName: string;
+  receiver: Address | null;
+  fallback: string;
+}) {
+  if (!receiver) return <span>{fallback}</span>;
+  const addr = shortAddress(receiver);
+  const name = storeName.trim();
+  return <span className="font-mono">{name ? `${name} · ${addr}` : addr}</span>;
 }
 
 // 必要な項目を checkmark 付きで明示する empty state。初見店主が「何を

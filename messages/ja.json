@@ -29,6 +29,7 @@
     "steps": {
       "amount": "金額",
       "receiver": "受取先",
+      "receiverNotSet": "未設定",
       "qr": "QR コード"
     },
     "amountLabel": "請求金額 ({symbol})",

@@ -29,6 +29,7 @@
     "steps": {
       "amount": "Amount",
       "receiver": "Recipient",
+      "receiverNotSet": "Not set",
       "qr": "QR code"
     },
     "amountLabel": "Amount ({symbol})",

@@ -308,7 +308,8 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     page,
   }) => {
     await page.goto('/ja');
-    // accordion はデフォルト閉。click で開く
+    // Step 2 が default open (受取先未設定) なので高度な設定 toggle が見える。
+    // accordion はデフォルト閉。click で開く。
     const toggle = page.getByRole('button', { name: /高度な設定/ });
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -319,6 +320,45 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
       name: /ガスレス決済.*おすすめ/,
     });
     await expect(gaslessBtn).toBeVisible();
+  });
+
+  test('ja: Step 1 に token/chain chooser が同居している (顧客ごと変更頻度高)', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
+    await expect(step1).toBeVisible();
+    // token (JPYC/USDC) ボタンが Step 1 内
+    await expect(
+      step1.getByRole('button', { name: /^JPYC\s+Polygon/ }),
+    ).toBeVisible();
+    await expect(step1.getByRole('button', { name: /^USDC/ })).toBeVisible();
+    // USDC click → chain chooser が Step 1 内に出現
+    await step1.getByRole('button', { name: /^USDC/ }).click();
+    await expect(step1.getByRole('button', { name: /^Base/ })).toBeVisible();
+    await expect(
+      step1.getByRole('button', { name: /^Arbitrum/ }),
+    ).toBeVisible();
+  });
+
+  test('ja: Step 2 は collapsible — 受取先入力後に手動で折り畳むと summary が出る', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const step2Toggle = page.getByRole('button', { name: /^受取先/ });
+    // 初期 (LocalStorage 空) は default open
+    await expect(step2Toggle).toHaveAttribute('aria-expanded', 'true');
+    // 受取先を入力して toggle を click すると collapsed + summary 表示
+    await page
+      .getByPlaceholder(/0x\.\.\./)
+      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await step2Toggle.click();
+    await expect(step2Toggle).toHaveAttribute('aria-expanded', 'false');
+    // collapsed summary に short address (0x52d4…cA81) が出る
+    await expect(step2Toggle.getByText(/0x52d4…cA81/)).toBeVisible();
+    // 再 click で再展開
+    await step2Toggle.click();
+    await expect(step2Toggle).toHaveAttribute('aria-expanded', 'true');
   });
 
   test('ja: QR 生成時の Print ボタンは brand color (primary CTA) + Printer アイコン', async ({
