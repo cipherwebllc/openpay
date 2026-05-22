@@ -6,6 +6,10 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch: {}
 
+env:
+  # GitHub Actions の Node.js 20 deprecation 対策 (詳細は ci.yml の同 env block 参照)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   check:
     runs-on: ubuntu-latest

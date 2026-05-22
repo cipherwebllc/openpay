@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+env:
+  # actions/checkout@v4 等の JS-based action 自体を Node.js 24 で実行させる。
+  # GitHub は 2026-06-02 から Node.js 20 を deprecate (動作はするが warning)、
+  # 2026-09-16 に完全停止。設定なしだと CI ログに deprecation warning が出続ける。
+  # この env は action runtime のみに作用し、setup-node@v4 で指定する node-version
+  # (我々の test runtime) には影響しない。
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   test:
     runs-on: ubuntu-latest
