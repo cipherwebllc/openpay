@@ -347,3 +347,161 @@ vercel env ls production | grep SENTRY
 DSN 設定状況を未確認のまま deploy すると **alert rule が永遠に発火しない silent
 failure** に陥る。`lib/logger.ts` のコメント (line 5-6) と一致する degrade 設計
 だが、deploy 前に必ず 1 度確認する。
+
+## 9. Kaia chain (JPYC × chainId 8217) 投入 SOP
+
+2026-05-23 demand 顕在化を受けて Kaia 対応を main に投入。本節は **新規 Kaia
+deploy 前** または **Kaia 関連変更 deploy 前** に確認する SOP。Polygon 経路と
+独立しているため、Kaia でトラブルが出ても Polygon 経路には影響しない。
+
+### 9.1 contract bytecode + EIP-2612 permit 検証 (deploy 前 自動 script)
+
+`scripts/verify-kaia-jpyc.mjs` で 14 項目を一括検証 (bytecode 存在 / ERC-20
+標準 7 関数 / name+symbol+decimals が JPYC v3 spec / EIP-2612 permit 3 関数 /
+JPYC v3 cross-chain consistency)。
+
+```bash
+# Kaia mainnet 上の JPYC contract 検証 (hard-code default address 0xE7C3…3c29)
+node scripts/verify-kaia-jpyc.mjs
+
+# Kairos testnet
+node scripts/verify-kaia-jpyc.mjs --testnet
+
+# 明示的に address / RPC を指定 (kaiascan.io から取得した address での先行確認)
+node scripts/verify-kaia-jpyc.mjs --address 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29 \
+  --rpc https://public-en.node.kaia.io
+```
+
+- [ ] `verify-kaia-jpyc.mjs` (mainnet) → 全 14 項目 pass で exit 0
+- [ ] `verify-kaia-jpyc.mjs --testnet` (Kairos) → 全 14 項目 pass で exit 0
+- [ ] DOMAIN_SEPARATOR() の値が JPYC 公式 docs (もしあれば) の値と一致
+- [ ] 既知の Polygon address との一致 (script 内で自動報告、確認は人手)
+
+**2026-05-22 実測**: Kaia mainnet `0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`、
+ERC-20 + permit selector 全 OK。`DOMAIN_SEPARATOR()` のみ revert を観測したが、
+OpenPay は **permit を使わず transferFrom 直接呼び** (既存 Polygon JPYC v3 と同
+経路) のため影響なし。permit 経路を使う上流統合を将来追加する場合は再評価。
+
+### 9.2 Pimlico Kaia bundler capability 検証 (自動 script)
+
+`scripts/verify-kaia-pimlico.mjs` で 5 項目を Kaia mainnet + Kairos testnet 両
+方で検証 (endpoint 到達性 / supportedEntryPoints v0.7 / chainId 一致 / 3 tier
+gas price / pimlico_getUserOperationStatus)。
+
+```bash
+NEXT_PUBLIC_PIMLICO_API_KEY=<key> node scripts/verify-kaia-pimlico.mjs
+```
+
+- [ ] 全 5 × 2 = 10 項目 pass で exit 0
+- [ ] gas price standard tier ≪ `NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI` 設定値
+
+**2026-05-22 実測**: Kaia mainnet + Kairos testnet 共に EntryPoint v0.6/v0.7/
+v0.8 対応、standard 31.5 gwei (default ceiling 50 gwei 内、margin 60%)。
+
+### 9.3 Pimlico sponsorship policy (Kaia 用)
+
+`NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` が **Kaia mainnet (8217) を含むか**
+を Pimlico dashboard で確認。1 policy で複数 chain を許可する場合は既存値を
+Kaia 含めるよう Pimlico 側で update するだけで OK。Chain ごとに別 policy が
+必要な場合は新 env を追加 + `lib/pimlico.ts` で chainId に応じて切替 (本記載
+時点では env 単一で polygon 共用、必要に応じて拡張する設計)。
+
+- [ ] Pimlico dashboard で sponsorship policy が chainId 8217 (Kaia mainnet) と
+      1001 (Kairos testnet) を許可している
+- [ ] balance がゼロでない (gas 肩代わり原資)
+
+### 9.4 Kairos testnet 実 UserOp smoke (手動、要 funded EOA)
+
+script で自動化できない部分: 実 Smart Account の EIP-7702 delegate + UserOp
+submit。**JPYC Faucet が Kairos 対応 (2026-05-18 公式)** で大幅に軽量化:
+
+- https://prtimes.jp/main/html/rd/p/000000316.000054018.html
+
+```bash
+# Step 1: Kairos 用 JPYC を JPYC Faucet から取得 (公式 URL は JPYC docs 参照)
+# Step 2: 同 EOA の Kairos KAIA gas を Kairos public faucet から取得
+# Step 3: OpenPay を Kairos 向けに起動 (hard-code default で動作、env override 不要)
+NEXT_PUBLIC_NETWORK_ENV=testnet \
+NEXT_PUBLIC_KAIROS_RPC_URL=https://public-en-kairos.node.kaia.io \
+npm run dev
+# → /pay?to=...&token=jpyc&chain=kaia&amount=1 で sponsored gasless 経路を実機 submit
+```
+
+- [ ] JPYC Faucet (Kairos) から testnet JPYC 取得
+- [ ] UserOp submit → receipt 取得まで通る
+- [ ] sponsorship paymaster の policy id が Kairos でも適用される
+- [ ] Sentry に `gas_congested` 等の予期せぬ event 無し
+
+### 9.5 gas ceiling tune (実測値、運用中の継続作業)
+
+```bash
+# Pimlico fast tier の Kaia mainnet quote を 1 週間サンプリングし、
+# 安全側 50 gwei 既定値 (lib/gasCeiling.ts) が妥当か確認。
+# spike 時の最大値 + α を ceiling に設定。
+NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
+```
+
+- [ ] 1 週間 sampling で 平常 P99 gas price 記録
+- [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
+- [ ] env 投入後 Sentry の `gas_congested` × chainId:8217 発生率 < 0.1%
+
+### 9.6 MAv2 + Kaia defensive UI (実装済)
+
+MAv2 経路は Pimlico Kaia 非対応で早期 throw され、`errorMav2KaiaPolygon` i18n
+message で「Polygon / Base / Arbitrum / Optimism 等の他チェーン版をご利用くだ
+さい」と案内する (commit `7ee8bc4`、Payment/Tip/Checkout 3 form × ja/en 全カ
+バー)。
+
+**注意**: HashPort wallet は Kaia 非対応 (Ethereum/Polygon/Base/BNB/Avalanche/
+Arbitrum/Aptos のみ) のため、本ガードは現時点で実発火しない defensive 実装。
+将来 MAv2 系 wallet (Alchemy Account Kit 採用の他 wallet 等) が Kaia 対応した
+場合に sponsorship 不能を fail-safe で案内する役割。
+
+- [x] `lib/smartAccount/mav2.ts` chainId 8217/1001 で `errorMav2KaiaPolygon`
+      i18nKey throw
+- [x] i18n message を `messages/{ja,en}.json` の Payment/Tip/Checkout 3
+      namespace に追加
+- [x] `tests/lib/i18nKeys.test.ts` で 6 件全て存在を fence
+- [ ] **将来 MAv2+Kaia wallet 出現時**: Sentry
+      `smart_account.mav2_kaia_rejected` の実発火を観測したら、当該 wallet で
+      実機 QA + 文言再確認
+
+### 9.7 監視 / alert 追加
+
+logger.warn による Sentry observability は既に code 側で実装済:
+
+- `smart_account.mav2_disabled` (MAv2 wallet × flag off、HashPort 等の運用シグナル)
+- `smart_account.unknown_delegation` (未知 delegate)
+- `smart_account.mav2_kaia_rejected` (MAv2 × Kaia chain、新 wallet が Kaia 対応した signal)
+- 既存 `gas_congested` event (chain 共通)
+
+Sentry dashboard 側で alert rule を追加 (code change なし、dashboard 操作のみ):
+
+- [ ] `event:"smart_account.mav2_kaia_rejected"` の発火頻度を週次 alert
+- [ ] `gas_congested` × `chainId:8217` filter (既存 polygon rule の複製)
+- [ ] Pimlico Kaia API balance を別 alert で監視 (`Pimlico balance alert`
+      workflow に Kaia 用 chainId を追加 — 別 PR)
+- [ ] /api/log/payment に kaia chain 集計を追加 (gmv 把握、別 PR)
+
+### 9.8 Rollback path
+
+hard-code default を採用しているため env 削除だけでは止まらない。代わりに:
+
+```bash
+# 緊急時の rollback path (any one of):
+
+# (a) 該当 commit を revert (一番 clean)
+git revert <feat-kaia-jpyc commit hash>
+git push origin main
+
+# (b) Vercel dashboard で前 deployment へ promote (最速、UI 1 click)
+# Vercel → Deployments → 前の successful build → "Promote to Production"
+
+# (c) hard-code を local で空 string に書換 → `lib/tokens.ts` で kaia
+#     deployment skip → UI から chain chooser button が消える
+#     (= partial rollback、git revert より局所的)
+```
+
+- [ ] revert / promote 経路の動作を staging で 1 度確認 (git revert は dry-run
+      推奨)
+- [ ] Vercel deployment 一覧で過去 successful build が delete されていないこと
