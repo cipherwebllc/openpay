@@ -26,11 +26,16 @@
     }
   },
   "QrGenerator": {
+    "steps": {
+      "amount": "金額",
+      "receiver": "受取先",
+      "qr": "QR コード"
+    },
     "amountLabel": "請求金額 ({symbol})",
     "modeAmount": "金額指定",
     "modeStatic": "据え置き",
     "staticHint": "据え置き QR では金額を顧客が入力します。",
-    "advancedSettings": "詳細設定",
+    "advancedSettings": "高度な設定",
     "tokenLabel": "通貨",
     "tokenChainHint": "{chainName} chain (id: {chainId})",
     "tokenChainHintMulti": "{count} chain 対応 (Base / Arbitrum / Optimism / Polygon)",
@@ -43,9 +48,10 @@
     "posterNotePlaceholder": "例: お支払い後、完了画面をスタッフにお見せください",
     "payModeLabel": "決済モード",
     "payModeGaslessTitle": "ガスレス決済",
-    "payModeGaslessDesc": "OpenPay がガスを肩代わり。OpenPay 利用手数料 1.0% + ネットワーク手数料見積 (顧客 / 店主の負担を選択可能)",
+    "payModeGaslessBadge": "おすすめ",
+    "payModeGaslessDesc": "お客様はガス代を用意せず、JPYC / USDC だけで支払えます (OpenPay 利用手数料 1.0% + ネットワーク手数料見積。負担者は顧客 / 店主から選択可能)",
     "payModeStandardTitle": "通常決済（ガスあり）",
-    "payModeStandardDesc": "顧客がウォレットで自分のガス代を支払う。OpenPay 利用手数料 0.5% (gas 肩代わりなし)",
+    "payModeStandardDesc": "Web3 に慣れたお客様向け。お客様自身がガス代 (POL / ETH) を支払います (OpenPay 利用手数料 0.5%)",
     "standardHint": "通常決済（ガスあり）モード: 顧客が自分のウォレットで gas (POL / ETH) を支払います。OpenPay は gas を肩代わりしません。OpenPay 利用手数料は決済金額の 0.5% です。",
     "gasLabel": "ネットワーク手数料の負担方法 (ガスレス決済時のみ)",
     "gasCustomerTitle": "顧客が gas 相当額を上乗せ",
@@ -57,8 +63,8 @@
     "quickAmountPlaceholder": "例: 1000",
     "quickAmountAdd": "+ 金額を追加",
     "quickAmountRemove": "クイック金額を削除",
-    "splitLabel": "複数受取人 split (主受取人 = 残り {primaryPercent}%)",
-    "splitDescription": "最大 {max} 人の追加受取人へ % で分配 (主受取人が残余を取得)。1 つの UserOperation でバッチ送金 (ガスレス決済のみ)。",
+    "splitLabel": "売上の自動分配 (主受取人 = 残り {primaryPercent}%)",
+    "splitDescription": "スタッフ・共同運営者・クリエイターへ最大 {max} 人まで自動で % 分配します (ガスレス決済のみ、1 回の決済で全員に同時送金)。",
     "splitPercentLabel": "%",
     "splitAdd": "+ 受取人を追加",
     "splitRemove": "削除",
@@ -81,9 +87,15 @@
     "posterFixedAmount": "{amount} {symbol}",
     "posterOpenAmount": "{symbol} で金額を入力",
     "posterDefaultNote": "QRを読み取り、ウォレットでお支払いください。",
-    "qrPlaceholderNoAddress": "受取先アドレスを入力してください (詳細設定)",
+    "qrPlaceholderNoAddress": "受取先アドレスを入力してください (Step 2)",
     "qrPlaceholderNoAmount": "金額を入力してください",
     "qrPlaceholderGenerating": "QR を生成中…",
+    "qrEmptyState": {
+      "title": "QR コードを作成する準備ができていません",
+      "needLabel": "必要な項目:",
+      "needAddress": "受取先ウォレットアドレス",
+      "needAmount": "請求金額"
+    },
     "feeReceiverHeading": "OpenPay 利用手数料の徴収先",
     "feeReceiverHintJpyc": "(JPYC ガスレス決済: 1.0% + ネットワーク手数料見積)",
     "feeReceiverHintUsdc": "(USDC ガスレス決済: 1.0% + ネットワーク手数料見積)",
@@ -466,7 +478,9 @@
     "moreLink": "詳細"
   },
   "Footer": {
-    "poweredBy": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "poweredBySoft": "Web3 ウォレット決済技術を利用しています",
+    "poweredByTech": "ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "poweredByExpand": "技術詳細",
     "copyright": "© {year} {company}",
     "links": {
       "terms": "利用規約",

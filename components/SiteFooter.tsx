@@ -59,7 +59,18 @@ export function SiteFooter() {
           company: LEGAL_ENTITY.companyName,
         })}
       </p>
-      <p className="mt-1 text-slate-400">{t('poweredBy')}</p>
+      {/* 一般店主には Web3 用語 (ERC-4337 等) は不要だが、開発者向け透明性は
+          残したいので <details> で折り畳む。summary は soft な日本語/英語、
+          展開時に技術ラベルを表示。review (2026-05-23) #15 対応。 */}
+      <details className="mt-1 inline-block text-slate-400 marker:hidden">
+        <summary className="cursor-pointer list-none hover:text-slate-700">
+          {t('poweredBySoft')}{' '}
+          <span className="text-[10px] underline-offset-2 hover:underline">
+            ({t('poweredByExpand')})
+          </span>
+        </summary>
+        <span className="ml-1 text-slate-400">{t('poweredByTech')}</span>
+      </details>
       <p className="mt-1 flex items-center justify-center gap-3 text-slate-400">
         <a
           href="https://github.com/cipherwebllc/openpay"

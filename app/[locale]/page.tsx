@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { QrGenerator } from '@/components/QrGenerator';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
@@ -77,10 +78,13 @@ export default function HomePage() {
         ))}
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:rounded-none print:border-0 print:p-0 print:shadow-none">
-        {tab === 'qr' ? (
-          <QrGenerator />
-        ) : (
+      {/* qr タブ: QrGenerator 内部で StepCard (border/bg/shadow を各 card が持つ)
+          を 3 つ並べるので、ここでは外側 wrapper を持たない。
+          tip タブ: TipEmbedGenerator は単一 form のため従来通り 1 つの outer card で包む。 */}
+      {tab === 'qr' ? (
+        <QrGenerator />
+      ) : (
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:rounded-none print:border-0 print:p-0 print:shadow-none">
           <div className="space-y-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-800">
@@ -92,8 +96,8 @@ export default function HomePage() {
             </div>
             <TipEmbedGenerator />
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <section
         aria-labelledby="offramp-heading"
@@ -103,7 +107,7 @@ export default function HomePage() {
           id="offramp-heading"
           className="flex items-center gap-2 text-base font-semibold text-slate-800"
         >
-          <SwapIcon />
+          <ArrowRightLeft className="h-5 w-5 text-brand" aria-hidden />
           {t('offramp.heading')}
         </h2>
         <p className="mt-1 text-[11px] text-slate-400">{t('offramp.subheading')}</p>
@@ -151,9 +155,12 @@ export default function HomePage() {
             chevron のみ、user が必要に応じて展開。e2e の title regex は summary 内に残存。 */}
         <details className="group mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 open:pb-4">
           <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold">
-            <GasPumpIcon />
+            <Fuel className="h-4 w-4" aria-hidden />
             <span className="flex-1">{t('offramp.gasHint.title')}</span>
-            <ChevronIcon />
+            <ChevronRight
+              className="h-3.5 w-3.5 transition-transform group-open:rotate-90"
+              aria-hidden
+            />
           </summary>
           <p className="mt-2 leading-relaxed">{t('offramp.gasHint.body')}</p>
           <a
@@ -174,33 +181,11 @@ export default function HomePage() {
   );
 }
 
-// Offramp section 用 inline SVG (icon library 依存追加せず、装飾目的なので aria-hidden)。
-
-function SwapIcon() {
-  // 上下矢印 (両替 / swap) — 受取通貨を JPY に換金する section heading 用
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-brand"
-      aria-hidden
-    >
-      <path d="M7 4v12m0 0l-3-3m3 3l3-3" />
-      <path d="M17 20V8m0 0l-3 3m3-3l3 3" />
-    </svg>
-  );
-}
-
+// 通貨記号入りの円形 token icon。JPYC=¥/円 (青)、USDC=$ (緑系)。
+// lucide には JPYC/USDC の token icon 相当がないため独自 SVG で残す。
+// 文字を Tailwind の text-color で塗り分けると flex 内で sibling text と色が
+// 競合するため、SVG の fill だけで完結させる。
 function TokenIcon({ token }: { token: TokenSymbol }) {
-  // 通貨記号入りの円形 token icon。JPYC=¥/円 (青)、USDC=$ (緑系)。
-  // 文字を Tailwind の text-color で塗り分けると flex 内で sibling text と色が
-  // 競合するため、SVG の fill だけで完結させる。
   const fg = token === 'jpyc' ? '#1e40af' : '#047857';
   const bg = token === 'jpyc' ? '#dbeafe' : '#d1fae5';
   const glyph = token === 'jpyc' ? '¥' : '$';
@@ -223,50 +208,6 @@ function TokenIcon({ token }: { token: TokenSymbol }) {
       >
         {glyph}
       </text>
-    </svg>
-  );
-}
-
-function GasPumpIcon() {
-  // ガスポンプ icon。Heroicons "fuel" 風の独自描画 (側面タンク + ノズル)。
-  // stroke=currentColor で amber-900 (親色) を継承、fill は none で線画のみ。
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="4" y="3" width="9" height="18" rx="1.5" />
-      <line x1="4" y1="9" x2="13" y2="9" />
-      <path d="M13 7h3a2 2 0 0 1 2 2v8a2 2 0 0 0 2 2" />
-      <path d="M16 4l2 2" />
-    </svg>
-  );
-}
-
-function ChevronIcon() {
-  // 親 <details class="group"> が open のとき Tailwind の `group-open:rotate-90`
-  // が details[open] .group-open\:rotate-90 経由で 90° 回転 (CSS のみ、JS 不要)。
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="transition-transform group-open:rotate-90"
-      aria-hidden
-    >
-      <polyline points="9 6 15 12 9 18" />
     </svg>
   );
 }

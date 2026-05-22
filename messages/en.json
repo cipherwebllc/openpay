@@ -26,11 +26,16 @@
     }
   },
   "QrGenerator": {
+    "steps": {
+      "amount": "Amount",
+      "receiver": "Recipient",
+      "qr": "QR code"
+    },
     "amountLabel": "Amount ({symbol})",
     "modeAmount": "Fixed amount",
     "modeStatic": "Open amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
-    "advancedSettings": "Advanced",
+    "advancedSettings": "Advanced settings",
     "tokenLabel": "Token",
     "tokenChainHint": "{chainName} (chain id: {chainId})",
     "tokenChainHintMulti": "{count} chains supported (Base / Arbitrum / Optimism / Polygon)",
@@ -43,9 +48,10 @@
     "posterNotePlaceholder": "e.g. Show the completed payment screen to staff",
     "payModeLabel": "Payment mode",
     "payModeGaslessTitle": "Gasless payment",
-    "payModeGaslessDesc": "OpenPay covers gas. OpenPay service fee 1.0% + estimated network fee (merchant pays / customer pays selectable).",
+    "payModeGaslessBadge": "Recommended",
+    "payModeGaslessDesc": "Customers can pay with JPYC / USDC alone — no need to hold gas tokens (OpenPay service fee 1.0% + estimated network fee; merchant or customer pays the gas portion).",
     "payModeStandardTitle": "Standard payment (with gas)",
-    "payModeStandardDesc": "Customer pays gas from their own wallet. OpenPay service fee 0.5% (no gas sponsorship).",
+    "payModeStandardDesc": "For Web3-savvy customers. The customer pays their own gas (POL / ETH) (OpenPay service fee 0.5%).",
     "standardHint": "Standard payment (with gas) mode: the customer pays gas (POL / ETH) from their own wallet. OpenPay does not sponsor gas. The OpenPay service fee is 0.5% of the transaction amount.",
     "gasLabel": "Gas-equivalent burden (gasless mode only)",
     "gasCustomerTitle": "Customer adds gas equivalent",
@@ -57,8 +63,8 @@
     "quickAmountPlaceholder": "e.g. 1000",
     "quickAmountAdd": "+ Add amount",
     "quickAmountRemove": "Remove quick amount",
-    "splitLabel": "Multi-recipient split (primary keeps {primaryPercent}%)",
-    "splitDescription": "Distribute up to {max} additional recipients by %; primary keeps the remainder. Sent as a single batched UserOperation (gasless mode only).",
+    "splitLabel": "Automatic revenue split (primary keeps {primaryPercent}%)",
+    "splitDescription": "Automatically distribute by % to up to {max} additional recipients (staff, partners, creators) — sent to everyone in a single payment (gasless mode only).",
     "splitPercentLabel": "%",
     "splitAdd": "+ Add recipient",
     "splitRemove": "Remove",
@@ -81,9 +87,15 @@
     "posterFixedAmount": "{amount} {symbol}",
     "posterOpenAmount": "Enter amount in {symbol}",
     "posterDefaultNote": "Scan the QR and pay from your wallet.",
-    "qrPlaceholderNoAddress": "Enter receiver address (Advanced)",
+    "qrPlaceholderNoAddress": "Enter receiver address (Step 2)",
     "qrPlaceholderNoAmount": "Enter an amount",
     "qrPlaceholderGenerating": "Generating QR…",
+    "qrEmptyState": {
+      "title": "Not ready to create the QR code yet",
+      "needLabel": "Required:",
+      "needAddress": "Receiver wallet address",
+      "needAmount": "Amount"
+    },
     "feeReceiverHeading": "OpenPay service fee receiver",
     "feeReceiverHintJpyc": "(JPYC gasless: 1.0% + estimated network fee)",
     "feeReceiverHintUsdc": "(USDC gasless: 1.0% + estimated network fee)",
@@ -466,7 +478,9 @@
     "moreLink": "Details"
   },
   "Footer": {
-    "poweredBy": "Powered by ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "poweredBySoft": "Powered by Web3 wallet payment technology",
+    "poweredByTech": "ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "poweredByExpand": "Technical details",
     "copyright": "© {year} {company}",
     "links": {
       "terms": "Terms of Service",

@@ -285,4 +285,78 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
       page.getByText(/Japan residents: switch to Japanese for SBI VC Trade/),
     ).toBeVisible();
   });
+
+  // 3-step UI refactor (2026-05-23): Step 1/2/3 が縦に並んで heading badge を
+  // 持つこと、Step 3 (QR) が brand border で prominent に描画されること、
+  // 「おすすめ」 badge が gasless option に付くことを e2e で実 browser 描画確認。
+  test('ja: Step 1/2/3 の heading badge と Step 3 prominent border が visible', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: '金額' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '受取先' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'QR コード' })).toBeVisible();
+    // Step 3 は qr-prominent variant の brand border + ring を持つ
+    const step3 = page.locator('section[aria-labelledby="step-3-heading"]');
+    await expect(step3).toBeVisible();
+    const className = await step3.getAttribute('class');
+    expect(className).toMatch(/border-brand\/40/);
+    expect(className).toMatch(/ring-1/);
+  });
+
+  test('ja: 高度な設定 を開くと gasless option に「おすすめ」 badge が出る', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    // accordion はデフォルト閉。click で開く
+    const toggle = page.getByRole('button', { name: /高度な設定/ });
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // gasless option button に「おすすめ」 badge
+    const gaslessBtn = page.getByRole('button', {
+      name: /ガスレス決済.*おすすめ/,
+    });
+    await expect(gaslessBtn).toBeVisible();
+  });
+
+  test('ja: QR 生成時の Print ボタンは brand color (primary CTA) + Printer アイコン', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    // 必要項目を入力 → Step 3 で QR + Print ボタンが現れる
+    await page
+      .getByPlaceholder(/0x\.\.\./)
+      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    // amount 入力 (JPYC plain で 750)
+    await page.getByPlaceholder('1000').fill('750');
+    const printBtn = page.getByRole('button', { name: /印刷/ });
+    await expect(printBtn).toBeVisible();
+    const className = await printBtn.getAttribute('class');
+    expect(className).toMatch(/bg-brand/);
+    expect(className).toMatch(/text-white/);
+    // Printer icon (lucide) が button 内に存在
+    await expect(printBtn.locator('svg')).toHaveCount(1);
+  });
+
+  test('ja: Footer poweredBy は soft 文言で表示、技術詳細は <details> 展開で出る', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const footer = page.locator('footer');
+    // soft 文言 (default visible)
+    await expect(
+      footer.getByText('Web3 ウォレット決済技術を利用しています'),
+    ).toBeVisible();
+    // 技術ラベルは default 折り畳まれていて DOM には存在するが <details> 内
+    const techDetails = footer.locator(
+      'details:has(summary:has-text("Web3 ウォレット決済技術"))',
+    );
+    await expect(techDetails).not.toHaveAttribute('open', /.*/);
+    // 展開
+    await techDetails.locator('summary').click();
+    await expect(techDetails).toHaveAttribute('open', '');
+    await expect(footer.getByText(/ERC-4337/)).toBeVisible();
+  });
 });

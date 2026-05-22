@@ -1,11 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { isAddress, type Address } from 'viem';
+import {
+  Coins,
+  Fuel,
+  Printer,
+  QrCode as QrCodeIcon,
+  Store,
+  Zap,
+} from 'lucide-react';
 import { AddressInput } from './AddressInput';
 import { Field } from './Field';
+import { StepCard } from './StepCard';
 import {
   POSTER_NOTE_MAX,
   QUICK_AMOUNT_MAX,
@@ -111,8 +120,11 @@ export function QrGenerator() {
   const { copied, copy } = useCopyToClipboard();
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
   const qrRef = useRef<HTMLDivElement>(null);
-  const [accordionOpen, setAccordionOpen] = useState(true);
-  const [accordionInitialized, setAccordionInitialized] = useState(false);
+  // 高度な設定 (payMode / gas / split / quickAmount editor) は default 閉じる。
+  // token / chain / receiver / storeName / posterNote は Step 2 で常時表示する
+  // 設計に変えたため、accordion を強制的に開く動機がなくなった (3-step UI
+  // refactor 2026-05-23)。
+  const [accordionOpen, setAccordionOpen] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   const t = useTranslations('QrGenerator');
@@ -121,12 +133,6 @@ export function QrGenerator() {
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
     [settings.receiver, resolvedReceiver],
   );
-
-  useEffect(() => {
-    if (!hydrated || accordionInitialized) return;
-    setAccordionOpen(effectiveReceiver === null);
-    setAccordionInitialized(true);
-  }, [hydrated, effectiveReceiver, accordionInitialized]);
 
   const receiverValid = effectiveReceiver !== null;
   const amountValid =
@@ -305,438 +311,473 @@ export function QrGenerator() {
   }, [settings.quickAmounts, deployment.decimals]);
 
   return (
-    <div className="grid gap-8 lg:grid-cols-2 print:block print:gap-0">
-      <section className="space-y-5 print:hidden">
-        <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
-          <div className="flex flex-col gap-2">
-            <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
-              {(
-                [
-                  ['amount', t('modeAmount')],
-                  ['static', t('modeStatic')],
-                ] as const
-              ).map(([m, label]) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m as Mode)}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                    mode === m
-                      ? 'bg-white text-brand-dark shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {mode === 'amount' ? (
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) =>
-                    setAmount(sanitizeAmount(e.target.value, deployment.decimals))
-                  }
-                  placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
-                  autoFocus
-                />
-                {activeQuickAmounts.length > 0 && (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {activeQuickAmounts.map((q) => (
-                      <button
-                        key={q}
-                        type="button"
-                        onClick={() => setAmount(q)}
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                      >
-                        {q} {deployment.displaySymbol}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
-                {t('staticHint')}
-              </p>
-            )}
-          </div>
-        </Field>
-
-        <SettingsAccordion
-          open={accordionOpen}
-          onToggle={() => setAccordionOpen((o) => !o)}
-          summaryLabel={t('advancedSettings')}
-          summary={
-            <SettingsSummary
-              token={settings.token}
-              chain={settings.chain}
-              receiver={settings.receiver}
-              gasMode={settings.gasMode}
-              payMode={settings.payMode}
-            />
-          }
-        >
-          <Field label={t('tokenLabel')}>
-            <div className="grid grid-cols-2 gap-2">
-              {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
-                const info = defaultDeploymentForSymbol(tok);
-                const active = settings.token === tok;
-                return (
+    <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
+      <div className="space-y-5 print:hidden">
+        <StepCard step={1} icon={Coins} title={t('steps.amount')}>
+          <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
+            <div className="flex flex-col gap-2">
+              <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
+                {(
+                  [
+                    ['amount', t('modeAmount')],
+                    ['static', t('modeStatic')],
+                  ] as const
+                ).map(([m, label]) => (
                   <button
-                    key={tok}
+                    key={m}
                     type="button"
-                    onClick={() => selectToken(tok)}
-                    className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
-                      active
-                        ? 'border-brand bg-brand/5 text-brand-dark'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    onClick={() => setMode(m as Mode)}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                      mode === m
+                        ? 'bg-white text-brand-dark shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    <div className="font-semibold">{info.displaySymbol}</div>
-                    <div className="text-xs text-slate-500">
-                      {tok === 'usdc'
-                        ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
-                        : t('tokenChainHint', {
-                            chainName: 'Polygon',
-                            chainId: info.chainId,
-                          })}
-                    </div>
+                    {label}
                   </button>
-                );
-              })}
-            </div>
-          </Field>
-
-          {settings.token === 'usdc' && (
-            <Field label={t('chainLabel')}>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {USDC_CHAINS.map((slug) => {
-                  const c = chainForSlug(slug);
-                  const active = settings.chain === slug;
-                  return (
-                    <button
-                      key={slug}
-                      type="button"
-                      onClick={() => selectChain(slug)}
-                      className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
-                        active
-                          ? 'border-brand bg-brand/5 text-brand-dark'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="font-semibold">{c.name}</div>
-                      <div className="text-xs text-slate-500">
-                        chain id: {c.id}
-                      </div>
-                    </button>
-                  );
-                })}
+                ))}
               </div>
-            </Field>
-          )}
-
-          <Field label={t('receiverLabel')}>
-            <AddressInput
-              value={settings.receiver}
-              onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
-              onResolved={handleResolved}
-            />
-            {settings.receiver &&
-              !receiverValid &&
-              !isLikelyName(settings.receiver) && (
-                <p className="mt-1 text-xs text-red-600">
-                  {t('addressInvalid')}
+              {mode === 'amount' ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) =>
+                      setAmount(sanitizeAmount(e.target.value, deployment.decimals))
+                    }
+                    placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
+                    autoFocus
+                  />
+                  {activeQuickAmounts.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {activeQuickAmounts.map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setAmount(q)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                        >
+                          {q} {deployment.displaySymbol}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                  {t('staticHint')}
                 </p>
               )}
-            {/* 受取先確定後に Explorer の /address/ ページへ link。店主に「DB ではなく
-                チェーン上が source of truth」を毎回視認させ、Phase 2 (ローカル履歴) 投入
-                後も Explorer が一次資料である運用を維持する。 */}
-            {effectiveReceiver && (
-              <a
-                href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
-              >
-                {t('merchantExplorerLink', { chainName: chain.name })}
-              </a>
-            )}
-          </Field>
-
-          <Field label={t('storeNameLabel')}>
-            <input
-              type="text"
-              value={settings.storeName}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, storeName: e.target.value }))
-              }
-              placeholder={t('storeNamePlaceholder')}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              maxLength={STORE_NAME_MAX}
-            />
-          </Field>
-
-          <Field label={t('posterNoteLabel')}>
-            <input
-              type="text"
-              value={settings.posterNote}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, posterNote: e.target.value }))
-              }
-              placeholder={t('posterNotePlaceholder')}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              maxLength={POSTER_NOTE_MAX}
-            />
-          </Field>
-
-          <Field label={t('payModeLabel')}>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {(['gasless', 'standard'] as PayMode[]).map((pm) => {
-                const active = settings.payMode === pm;
-                return (
-                  <button
-                    key={pm}
-                    type="button"
-                    onClick={() =>
-                      setSettings((s) => ({ ...s, payMode: pm }))
-                    }
-                    className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
-                      active
-                        ? 'border-brand bg-brand/5 text-brand-dark'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="font-semibold">
-                      {pm === 'gasless'
-                        ? t('payModeGaslessTitle')
-                        : t('payModeStandardTitle')}
-                    </div>
-                    <div className="mt-0.5 text-xs text-slate-500">
-                      {pm === 'gasless'
-                        ? t('payModeGaslessDesc')
-                        : t('payModeStandardDesc')}
-                    </div>
-                  </button>
-                );
-              })}
             </div>
           </Field>
+        </StepCard>
 
-          {isStandard ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
-              {t('standardHint')}
-            </div>
-          ) : (
-            <Field label={t('gasLabel')}>
+        <StepCard step={2} icon={Store} title={t('steps.receiver')}>
+          <div className="space-y-4">
+            <Field label={t('tokenLabel')}>
               <div className="grid grid-cols-2 gap-2">
-                {(['customer', 'merchant'] as GasMode[]).map((g) => {
-                  const active = settings.gasMode === g;
+                {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
+                  const info = defaultDeploymentForSymbol(tok);
+                  const active = settings.token === tok;
                   return (
                     <button
-                      key={g}
+                      key={tok}
                       type="button"
-                      onClick={() =>
-                        setSettings((s) => ({ ...s, gasMode: g }))
-                      }
+                      onClick={() => selectToken(tok)}
                       className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
                         active
                           ? 'border-brand bg-brand/5 text-brand-dark'
                           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                       }`}
                     >
-                      <div className="font-semibold">
-                        {g === 'customer'
-                          ? t('gasCustomerTitle')
-                          : t('gasMerchantTitle')}
-                      </div>
-                      <div className="mt-0.5 text-xs text-slate-500">
-                        {g === 'customer'
-                          ? t('gasCustomerDesc')
-                          : t('gasMerchantDesc')}
+                      <div className="font-semibold">{info.displaySymbol}</div>
+                      <div className="text-xs text-slate-500">
+                        {tok === 'usdc'
+                          ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
+                          : t('tokenChainHint', {
+                              chainName: 'Polygon',
+                              chainId: info.chainId,
+                            })}
                       </div>
                     </button>
                   );
                 })}
               </div>
             </Field>
-          )}
 
-          {!isStandard && (
-            <Field
-              label={t('splitLabel', {
-                primaryPercent: 100 - splitParsed.sum,
-              })}
-            >
-              <p className="mb-2 text-xs text-slate-500">
-                {t('splitDescription', { max: SPLIT_MAX_ENTRIES })}
-              </p>
-              <div className="space-y-2">
-                {settings.splits.map((s, i) => (
-                  <div key={i} className="flex flex-wrap items-start gap-2">
-                    <input
-                      type="text"
-                      value={s.address}
-                      onChange={(e) =>
-                        updateSplit(i, { address: e.target.value.trim() })
-                      }
-                      placeholder="0x..."
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                    />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={s.percent}
-                      onChange={(e) =>
-                        updateSplit(i, {
-                          percent: e.target.value.replace(/[^\d]/g, ''),
-                        })
-                      }
-                      placeholder="%"
-                      className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
-                      maxLength={2}
-                      aria-label={t('splitPercentLabel')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSplit(i)}
-                      aria-label={t('splitRemove')}
-                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-              {settings.splits.length < SPLIT_MAX_ENTRIES && (
-                <button
-                  type="button"
-                  onClick={addSplit}
-                  className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
-                >
-                  {t('splitAdd')}
-                </button>
-              )}
-              {splitParsed.error && (
-                <p className="mt-2 text-xs text-red-600">
-                  {t(`splitError.${splitParsed.error}`)}
-                </p>
-              )}
-              {splitsForUrl && splitsForUrl.length > 0 && (
-                <p className="mt-2 text-xs text-emerald-700">
-                  {t('splitSummary', {
-                    count: splitsForUrl.length,
-                    primaryPercent: 100 - splitParsed.sum,
+            {settings.token === 'usdc' && (
+              <Field label={t('chainLabel')}>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {USDC_CHAINS.map((slug) => {
+                    const c = chainForSlug(slug);
+                    const active = settings.chain === slug;
+                    return (
+                      <button
+                        key={slug}
+                        type="button"
+                        onClick={() => selectChain(slug)}
+                        className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+                          active
+                            ? 'border-brand bg-brand/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="font-semibold">{c.name}</div>
+                        <div className="text-xs text-slate-500">
+                          chain id: {c.id}
+                        </div>
+                      </button>
+                    );
                   })}
-                </p>
+                </div>
+              </Field>
+            )}
+
+            <Field label={t('receiverLabel')}>
+              <AddressInput
+                value={settings.receiver}
+                onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
+                onResolved={handleResolved}
+              />
+              {settings.receiver &&
+                !receiverValid &&
+                !isLikelyName(settings.receiver) && (
+                  <p className="mt-1 text-xs text-red-600">
+                    {t('addressInvalid')}
+                  </p>
+                )}
+              {/* 受取先確定後に Explorer の /address/ ページへ link。店主に「DB ではなく
+                  チェーン上が source of truth」を毎回視認させ、Phase 2 (ローカル履歴) 投入
+                  後も Explorer が一次資料である運用を維持する。 */}
+              {effectiveReceiver && (
+                <a
+                  href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
+                >
+                  {t('merchantExplorerLink', { chainName: chain.name })}
+                </a>
               )}
             </Field>
-          )}
 
-          <AdvancedSection label={t('advancedExtra')}>
-            <div className="mb-4">
-              <p className="mb-2 text-xs font-medium text-slate-700">
-                {t('quickAmountsLabel')}
-              </p>
-              <div className="space-y-2">
-                {settings.quickAmounts.map((q, i) => (
-                  <div key={i} className="flex gap-2">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={q}
-                      onChange={(e) => updateQuickAmount(i, e.target.value)}
-                      placeholder={t('quickAmountPlaceholder')}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                    />
+            <Field label={t('storeNameLabel')}>
+              <input
+                type="text"
+                value={settings.storeName}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, storeName: e.target.value }))
+                }
+                placeholder={t('storeNamePlaceholder')}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                maxLength={STORE_NAME_MAX}
+              />
+            </Field>
+
+            <Field label={t('posterNoteLabel')}>
+              <input
+                type="text"
+                value={settings.posterNote}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, posterNote: e.target.value }))
+                }
+                placeholder={t('posterNotePlaceholder')}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                maxLength={POSTER_NOTE_MAX}
+              />
+            </Field>
+
+            <SettingsAccordion
+              open={accordionOpen}
+              onToggle={() => setAccordionOpen((o) => !o)}
+              summaryLabel={t('advancedSettings')}
+              summary={
+                <SettingsSummary gasMode={settings.gasMode} payMode={payMode} />
+              }
+            >
+              <Field label={t('payModeLabel')}>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {(['gasless', 'standard'] as PayMode[]).map((pm) => {
+                    const active = settings.payMode === pm;
+                    const isGasless = pm === 'gasless';
+                    const ModeIcon = isGasless ? Zap : Fuel;
+                    const iconColor = isGasless ? 'text-emerald-600' : 'text-amber-600';
+                    return (
+                      <button
+                        key={pm}
+                        type="button"
+                        onClick={() =>
+                          setSettings((s) => ({ ...s, payMode: pm }))
+                        }
+                        className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                          active
+                            ? 'border-brand bg-brand/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 font-semibold">
+                          <ModeIcon
+                            className={`h-4 w-4 flex-none ${iconColor}`}
+                            aria-hidden
+                          />
+                          <span>
+                            {isGasless
+                              ? t('payModeGaslessTitle')
+                              : t('payModeStandardTitle')}
+                          </span>
+                          {isGasless && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                              {t('payModeGaslessBadge')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {isGasless
+                            ? t('payModeGaslessDesc')
+                            : t('payModeStandardDesc')}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {isStandard ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
+                  {t('standardHint')}
+                </div>
+              ) : (
+                <Field label={t('gasLabel')}>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['customer', 'merchant'] as GasMode[]).map((g) => {
+                      const active = settings.gasMode === g;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() =>
+                            setSettings((s) => ({ ...s, gasMode: g }))
+                          }
+                          className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                            active
+                              ? 'border-brand bg-brand/5 text-brand-dark'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="font-semibold">
+                            {g === 'customer'
+                              ? t('gasCustomerTitle')
+                              : t('gasMerchantTitle')}
+                          </div>
+                          <div className="mt-0.5 text-xs text-slate-500">
+                            {g === 'customer'
+                              ? t('gasCustomerDesc')
+                              : t('gasMerchantDesc')}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+              )}
+
+              {!isStandard && (
+                <Field
+                  label={t('splitLabel', {
+                    primaryPercent: 100 - splitParsed.sum,
+                  })}
+                >
+                  <p className="mb-2 text-xs text-slate-500">
+                    {t('splitDescription', { max: SPLIT_MAX_ENTRIES })}
+                  </p>
+                  <div className="space-y-2">
+                    {settings.splits.map((s, i) => (
+                      <div key={i} className="flex flex-wrap items-start gap-2">
+                        <input
+                          type="text"
+                          value={s.address}
+                          onChange={(e) =>
+                            updateSplit(i, { address: e.target.value.trim() })
+                          }
+                          placeholder="0x..."
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+                          spellCheck={false}
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                        />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={s.percent}
+                          onChange={(e) =>
+                            updateSplit(i, {
+                              percent: e.target.value.replace(/[^\d]/g, ''),
+                            })
+                          }
+                          placeholder="%"
+                          className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+                          maxLength={2}
+                          aria-label={t('splitPercentLabel')}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeSplit(i)}
+                          aria-label={t('splitRemove')}
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {settings.splits.length < SPLIT_MAX_ENTRIES && (
                     <button
                       type="button"
-                      onClick={() => removeQuickAmount(i)}
-                      aria-label={t('quickAmountRemove')}
-                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                      onClick={addSplit}
+                      className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
                     >
-                      ×
+                      {t('splitAdd')}
                     </button>
-                  </div>
-                ))}
-              </div>
-              {settings.quickAmounts.length < QUICK_AMOUNT_MAX && (
-                <button
-                  type="button"
-                  onClick={addQuickAmount}
-                  className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
-                >
-                  {t('quickAmountAdd')}
-                </button>
+                  )}
+                  {splitParsed.error && (
+                    <p className="mt-2 text-xs text-red-600">
+                      {t(`splitError.${splitParsed.error}`)}
+                    </p>
+                  )}
+                  {splitsForUrl && splitsForUrl.length > 0 && (
+                    <p className="mt-2 text-xs text-emerald-700">
+                      {t('splitSummary', {
+                        count: splitsForUrl.length,
+                        primaryPercent: 100 - splitParsed.sum,
+                      })}
+                    </p>
+                  )}
+                </Field>
               )}
-            </div>
-          </AdvancedSection>
-        </SettingsAccordion>
-      </section>
 
-      <section className="space-y-4 print:space-y-0">
-        <div className="print:hidden">
-          <h2 className="text-lg font-semibold text-slate-800">
-            {t('qrTitle')}
-          </h2>
-          <p className="text-sm text-slate-500">{t('qrDescription')}</p>
-        </div>
-        <div className="flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 print:hidden">
-          {payUrl ? (
-            <>
-              <div ref={qrRef}>
-                <QRCodeSVG value={payUrl} size={240} includeMargin level="M" />
-              </div>
-              <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
-                {payUrl}
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => copy(payUrl)}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                >
-                  {copied ? t('qrCopied') : t('qrCopy')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadSvg(`${qrFilename}.svg`, qrRef)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                >
-                  {t('downloadSvg')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadPng(`${qrFilename}.png`, qrRef)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                >
-                  {t('downloadPng')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                >
-                  {t('printPoster')}
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="grid h-60 w-60 place-items-center rounded-lg bg-slate-50 text-center text-sm text-slate-400">
-              {!receiverValid
-                ? t('qrPlaceholderNoAddress')
-                : !amountValid
-                  ? t('qrPlaceholderNoAmount')
-                  : t('qrPlaceholderGenerating')}
-            </div>
-          )}
-        </div>
+              <AdvancedSection label={t('advancedExtra')}>
+                <div className="mb-4">
+                  <p className="mb-2 text-xs font-medium text-slate-700">
+                    {t('quickAmountsLabel')}
+                  </p>
+                  <div className="space-y-2">
+                    {settings.quickAmounts.map((q, i) => (
+                      <div key={i} className="flex gap-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={q}
+                          onChange={(e) => updateQuickAmount(i, e.target.value)}
+                          placeholder={t('quickAmountPlaceholder')}
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeQuickAmount(i)}
+                          aria-label={t('quickAmountRemove')}
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {settings.quickAmounts.length < QUICK_AMOUNT_MAX && (
+                    <button
+                      type="button"
+                      onClick={addQuickAmount}
+                      className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
+                    >
+                      {t('quickAmountAdd')}
+                    </button>
+                  )}
+                </div>
+              </AdvancedSection>
+            </SettingsAccordion>
+          </div>
+        </StepCard>
+      </div>
+
+      <div className="space-y-4 print:space-y-0">
+        <StepCard
+          step={3}
+          icon={QrCodeIcon}
+          title={t('steps.qr')}
+          variant="qr-prominent"
+        >
+          <p className="-mt-2 mb-3 text-xs text-slate-500 print:hidden">
+            {t('qrDescription')}
+          </p>
+          <div className="flex flex-col items-center gap-4 print:hidden">
+            {payUrl ? (
+              <>
+                <div ref={qrRef}>
+                  <QRCodeSVG value={payUrl} size={240} includeMargin level="M" />
+                </div>
+                <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
+                  {payUrl}
+                </div>
+                {/* Print は店舗向けの primary CTA (review #2 + #8 への対応)。
+                    Copy / SVG / PNG は secondary 扱いで outline。 */}
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+                  >
+                    <Printer className="h-4 w-4" aria-hidden />
+                    {t('printPoster')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => copy(payUrl)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    {copied ? t('qrCopied') : t('qrCopy')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadSvg(`${qrFilename}.svg`, qrRef)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    {t('downloadSvg')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadPng(`${qrFilename}.png`, qrRef)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    {t('downloadPng')}
+                  </button>
+                </div>
+              </>
+            ) : receiverValid && amountValid ? (
+              // receiver + amount valid だが payUrl 未確定の遷移状態 (origin 空 = SSR / hydrate
+              // 直後の数フレーム間)。「生成中」を出すことで「checkbox 全部 ✓ なのに QR が出ない」
+              // 不整合の混乱を回避する。
+              <p className="rounded-lg bg-slate-50 px-4 py-6 text-sm text-slate-400">
+                {t('qrPlaceholderGenerating')}
+              </p>
+            ) : (
+              <QrEmptyState
+                title={t('qrEmptyState.title')}
+                needLabel={t('qrEmptyState.needLabel')}
+                items={[
+                  {
+                    label: t('qrEmptyState.needAddress'),
+                    done: receiverValid,
+                  },
+                  {
+                    label: t('qrEmptyState.needAmount'),
+                    done: amountValid,
+                  },
+                ]}
+              />
+            )}
+          </div>
+        </StepCard>
         {payUrl && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10">
             <div className="mx-auto flex max-w-sm flex-col items-center text-center">
@@ -827,7 +868,52 @@ export function QrGenerator() {
             </div>
           </details>
         )}
-      </section>
+      </div>
+    </div>
+  );
+}
+
+// 必要な項目を checkmark 付きで明示する empty state。初見店主が「何を
+// 入れれば QR が出るか」を一目で理解できるようにする (review #2 + #8)。
+function QrEmptyState({
+  title,
+  needLabel,
+  items,
+}: {
+  title: string;
+  needLabel: string;
+  items: { label: string; done: boolean }[];
+}) {
+  return (
+    <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-lg bg-slate-50 px-4 py-6 text-center">
+      <p className="text-sm font-medium text-slate-700">{title}</p>
+      <div className="w-full">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {needLabel}
+        </p>
+        <ul className="space-y-1.5 text-left">
+          {items.map((item) => (
+            <li
+              key={item.label}
+              className="flex items-center gap-2 text-sm"
+            >
+              <span
+                aria-hidden
+                className={`inline-flex h-4 w-4 flex-none items-center justify-center rounded-full text-[10px] font-bold ${
+                  item.done
+                    ? 'bg-emerald-500 text-white'
+                    : 'border border-slate-300 bg-white text-slate-400'
+                }`}
+              >
+                {item.done ? '✓' : ''}
+              </span>
+              <span className={item.done ? 'text-slate-500 line-through' : 'text-slate-700'}>
+                {item.label}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -875,33 +961,22 @@ function SettingsAccordion({
 }
 
 function SettingsSummary({
-  token,
-  chain,
-  receiver,
   gasMode,
   payMode,
 }: {
-  token: TokenSymbol;
-  chain: ChainSlug;
-  receiver: string;
   gasMode: GasMode;
   payMode: PayMode;
 }) {
-  const tokenLabel = defaultDeploymentForSymbol(token).displaySymbol;
-  const chainLabel = chainForSlug(chain).name;
-  const recvLabel = isAddress(receiver) ? shortAddress(receiver) : '—';
-  // standard: 0.5% (gas は wallet 側) / gasless: 1.0% + gas 負担者
+  // 高度な設定 accordion 内には payMode / gas / split / quickAmount editor のみ。
+  // summary では payMode と gasMode (gasless 時のみ意味あり) を mono で表示する。
+  // token / chain / receiver は Step 2 visible 領域に出ているため重複表示しない。
   const tail =
     payMode === 'standard'
       ? '0.5%/std'
       : gasMode === 'customer'
         ? '1%/gas:cust'
         : '1%/gas:merch';
-  return (
-    <span className="font-mono">
-      {tokenLabel} · {chainLabel} · {recvLabel} · {tail}
-    </span>
-  );
+  return <span className="font-mono">{tail}</span>;
 }
 
 function AdvancedSection({
