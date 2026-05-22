@@ -250,9 +250,9 @@ source: https://www.npmjs.com/package/@circle-fin/unified-balance-kit
 |---|---|
 | Name | `@circle-fin/unified-balance-kit` |
 | Latest version | 1.1.2 |
-| Published | 2026-05-19 頃 (= 3 days ago, **極めて活性**) |
+| Published | 2026-05-18T23:34Z (= 約 3 日前, **極めて活性**) |
 | Unpacked size | 1.8 MB |
-| License | **Proprietary** ★要確認 |
+| License | **package.json に license field なし** = npm 慣例で UNLICENSED 扱い (= 全権利留保、Proprietary より制限的) ★要 Circle 直接確認 |
 | TypeScript types | あり |
 
 ### 10.2 Dependencies
@@ -271,7 +271,9 @@ source: https://www.npmjs.com/package/@circle-fin/unified-balance-kit
 
 ### 10.4 License 注意点
 
-`license: "Proprietary"` (npm package.json 上)。商用利用に制限がある可能性。**Circle に直接 license terms を確認すべき** (Tier C 前提条件)。
+`npm view @circle-fin/unified-balance-kit --json` で確認した結果、**`license` field 自体が package.json に存在しない**。npm 慣例 (https://docs.npmjs.com/cli/v10/configuring-npm/package-json#license) ではこれは「UNLICENSED」相当 = 全権利留保で、明示的「Proprietary」より厳密。商用利用 / 再配布の許諾範囲は **Circle に直接書面照会必須**。Tier C の hard prerequisite に位置付け済 (decision doc §2.1)。
+
+(LARP audit 2026-05-22: 初版 evaluation では「license: Proprietary」と書いていたが、これは sub-agent の hallucination で誤情報。実際は license field が存在しないため、より制限的な状態。修正済)
 
 ---
 
@@ -387,7 +389,7 @@ Tier B research では確証取得できなかった item。Tier C (PoC) phase �
 2. **Deposit finality が L2 で 13-19 分** — "<500ms" marketing は誤読されやすい
 3. **EOA signature only** — HashPort 互換性は実機検証必須
 4. SDK が ethers v5 系 = viem stack と部分混在 (bundle bloat)
-5. **Proprietary license** = 商用化想定なら license terms 確認必須
+5. **License field 不在** (UNLICENSED 相当、Proprietary より制限的) = 商用化想定なら Circle 直接照会必須
 6. **Pre-deposit overhead** = OpenPay 本線非適合、demand-first 原則 (memory: `feedback_demand_first.md`) からも実験トラック限定を守るべき
 
 ### 本線投入の Gate

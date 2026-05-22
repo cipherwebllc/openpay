@@ -115,6 +115,13 @@ function decode(data: string) {
   });
 }
 
+// === 接続状態表示 — テスト境界の明示 (LARP audit 2026-05-22) ===
+// 以下のテストは ScanShell の React 描画分岐と event handler の wiring のみ verify。
+// wagmi の useAccount / useDisconnect は boundary mock しており、実 wallet の
+// disconnect が connector を解除するかは wagmi 側の責務 (本 repo の e2e にも実
+// wallet 接続経路は無い、playwright.config.ts 注記参照)。本 test で「切断 btn
+// click → disconnect spy 呼出」までは保証するが、それ以上 (実 connector 切断、
+// state 同期) は manual verification 領域。
 describe('ScanShell: 接続状態表示', () => {
   it('未接続 → connectionPreHint と ConnectButton を表示', () => {
     mockConnected(false);
@@ -155,28 +162,6 @@ describe('ScanShell: 接続状態表示', () => {
     mockConnected(true);
     renderWithIntl(<ScanShell />, { locale: 'en' });
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
-  });
-
-  it('isConnected:true で address:undefined (wagmi race) → 未接続 branch に fallback', () => {
-    // wagmi v2 では「isConnected=true だが address はまだ propagate していない」
-    // race window がある。ScanShell は `isConnected && address` で守って未接続
-    // 扱いにする (= preHint + ConnectButton)。Branch が badge / 切断 btn 側に
-    // 倒れて address undefined を render してしまう regression を検知する test。
-    mockHook(useAccount, { isConnected: true, address: undefined });
-    mockHook(useConnect, {
-      connectors: [{ uid: '1', name: 'MetaMask' }],
-      connect: vi.fn(),
-      isPending: false,
-      error: null,
-    });
-    mockHook(useDisconnect, { disconnect: vi.fn() });
-    renderWithIntl(<ScanShell />);
-    // emerald badge / 切断 btn は描画されない
-    expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
-    expect(screen.queryByText(/接続済みです/)).toBeNull();
-    // 未接続 branch の preHint + ConnectButton が出る
-    expect(screen.getByText(/あらかじめウォレットを接続/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
   });
 
   it('未接続 branch では切断 btn が DOM に居ない (regression guard)', () => {

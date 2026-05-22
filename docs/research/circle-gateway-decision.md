@@ -36,7 +36,7 @@
 
 - [ ] **既存 x402 plan (`/.claude/plans/iridescent-munching-tower.md`) が先に動いている**: Coinbase facilitator + USDC 経路で x402 alpha が本番に lit している状態を前提とし、Gateway はその上に payment source plugin として後付け
 - [ ] **HashPort wallet (Alchemy MAv2 + EIP-7702) で burnIntent EOA sign が通る** ことを testnet 実機検証で確認: これが No なら主要 target wallet (memory: `project_hashport_target.md`) で動かないので意味なし
-- [ ] **Circle SDK の Proprietary license で商用利用に支障無い** ことを Circle に直接確認: 商用 OK でなければ自前 viem 実装に切り替える判断が必要
+- [ ] **Circle SDK の license terms (`@circle-fin/unified-balance-kit` は npm package.json に license field 不在 = UNLICENSED 相当、Proprietary より制限的) で商用利用に支障無い** ことを Circle に直接書面確認: 商用 OK でなければ自前 viem + smart contract 直叩き実装に切替判断が必要
 
 ### 2.2 Soft preferences (満たさなくても進めるが望ましい)
 

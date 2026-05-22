@@ -102,39 +102,61 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(mmSwapLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: offramp gasHint details の toggle が両方向で機能 (open → close → open)', async ({
+  test('ja: offramp gasHint details の toggle が両方向で機能 (open → close → open) + ChevronIcon 実 rotation', async ({
     page,
   }) => {
     // <details> の native toggle が両方向で動くこと、および ChevronIcon の回転
-    // class (group-open:rotate-90) が details[open] 属性と同期することを確認。
-    // 一方向 (open) の test は別 spec にあるが、close (再 click) で body が再 hide
-    // することは regression が出やすい (例: onClick で setState して preventDefault
-    // すると native toggle が壊れる)。
+    // class (group-open:rotate-90) が details[open] 属性と同期して実 computed
+    // transform を変えることを確認。一方向 (open) の test は別 spec にあるが、
+    // close (再 click) で body が再 hide することは regression が出やすい (例:
+    // onClick で setState して preventDefault すると native toggle が壊れる)。
+    //
+    // ChevronIcon assertion 追加の理由 (LARP audit 2026-05-22): 既存 test は
+    // <details open> 属性 toggle のみ確認、chevron 自身の computed transform を
+    // 見ていなかった。Tailwind の group-open: variant が build で生成されない
+    // 場合 silently UX 劣化 (body は出るが chevron 回らない)。実 computed style を
+    // 読んで matrix が変化することを assert する。
     await page.goto('/ja');
     const gasHintTitle = page.getByText(
       /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,
     );
     const body = page.getByText(/Base \/ Arbitrum \/ Optimism は ETH/);
-    // details element 本体を `:has()` で同定 (Playwright CSS selector で評価)
     const detailsEl = page.locator('details:has(summary:has-text("ガス代 (POL / ETH)"))');
+    // ChevronIcon = summary 内で transition-transform クラスを持つ唯一の SVG。
+    // 同 summary 内の GasPumpIcon (width=18) と区別するため class で選択。
+    const chevron = detailsEl.locator('summary svg.transition-transform');
 
-    // 初期: closed
+    // 初期: closed。chevron は未回転 ("none" もしくは identity matrix)。
+    // toHaveCSS は auto-retry でtransform property の安定値を待つため、
+    // transition-transform (0.15s) の race を吸収する。
     await expect(body).toBeHidden();
     await expect(detailsEl).not.toHaveAttribute('open', /.*/);
+    await expect(chevron).toHaveCSS('transform', /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
 
-    // 1 度 click → open、body 表示、open 属性付与
+    // 1 度 click → open、body 表示、open 属性付与、chevron 90° 回転
+    // 90° 回転後の matrix: matrix(cos90, sin90, -sin90, cos90, 0, 0)
+    //   = matrix(0, 1, -1, 0, 0, 0) (CSS の rotate(90deg) 出力)
     await gasHintTitle.click();
     await expect(body).toBeVisible();
     await expect(detailsEl).toHaveAttribute('open', '');
+    await expect(chevron).toHaveCSS(
+      'transform',
+      /matrix\(\s*[\d.eE+-]+,\s*1,\s*-1,\s*[\d.eE+-]+,\s*0,\s*0\s*\)/,
+    );
 
-    // 再 click → close、body 再 hidden、open 属性消失
+    // 再 click → close、body 再 hidden、open 属性消失、chevron 未回転状態に戻る
     await gasHintTitle.click();
     await expect(body).toBeHidden();
     await expect(detailsEl).not.toHaveAttribute('open', /.*/);
+    await expect(chevron).toHaveCSS('transform', /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
 
     // 3 度目: 再度 open できる (native details が永続 disabled 化していない)
     await gasHintTitle.click();
     await expect(body).toBeVisible();
+    await expect(chevron).toHaveCSS(
+      'transform',
+      /matrix\(\s*[\d.eE+-]+,\s*1,\s*-1,\s*[\d.eE+-]+,\s*0,\s*0\s*\)/,
+    );
   });
 
   test('ja: offramp の TokenIcon が JPYC と USDC 両 row に SVG として描画される', async ({
