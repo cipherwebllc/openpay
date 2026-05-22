@@ -322,23 +322,47 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(gaslessBtn).toBeVisible();
   });
 
-  test('ja: Step 1 に token/chain chooser が同居している (顧客ごと変更頻度高)', async ({
+  test('ja: Step 1 に token/chain chooser が同居 (JPYC は Polygon/Kaia、USDC は 4 chain)', async ({
     page,
   }) => {
+    // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。
     await page.goto('/ja');
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
     await expect(step1).toBeVisible();
-    // token (JPYC/USDC) ボタンが Step 1 内
-    await expect(
-      step1.getByRole('button', { name: /^JPYC\s+Polygon/ }),
-    ).toBeVisible();
+    // token (JPYC/USDC) ボタンが Step 1 内、JPYC は multi-chain hint
+    await expect(step1.getByRole('button', { name: /^JPYC\s/ })).toBeVisible();
     await expect(step1.getByRole('button', { name: /^USDC/ })).toBeVisible();
-    // USDC click → chain chooser が Step 1 内に出現
+    // JPYC default → chain chooser に Polygon / Kaia 2 つ
+    await expect(step1.getByRole('button', { name: /^Polygon/ })).toBeVisible();
+    await expect(step1.getByRole('button', { name: /^Kai/ })).toBeVisible();
+    // USDC click → chain chooser が USDC 4 chain に切替
     await step1.getByRole('button', { name: /^USDC/ }).click();
     await expect(step1.getByRole('button', { name: /^Base/ })).toBeVisible();
     await expect(
       step1.getByRole('button', { name: /^Arbitrum/ }),
     ).toBeVisible();
+    // Kaia は USDC では消える (USDC は Kaia 未対応)
+    await expect(step1.getByRole('button', { name: /^Kai/ })).toHaveCount(0);
+  });
+
+  test('ja: JPYC + Kaia 選択 → URL に chain=kaia が含まれる', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
+    // JPYC は default、Kaia chain button を click
+    await step1.getByRole('button', { name: /^Kai/ }).click();
+    // 受取先 + amount を入力 (Step 2 で receiver、Step 1 で amount)
+    await page
+      .getByPlaceholder(/0x\.\.\./)
+      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await page.getByPlaceholder('1000').fill('500');
+    // QR URL 表示 box (Step 3 内 font-mono.text-xs.bg-slate-50)
+    const urlBox = page.locator('.font-mono.text-xs.bg-slate-50').first();
+    await expect(urlBox).toBeVisible();
+    await expect(urlBox).toContainText('chain=kaia');
+    await expect(urlBox).toContainText('token=jpyc');
+    await expect(urlBox).toContainText('amount=500');
   });
 
   test('ja: Step 2 は collapsible — 受取先入力後に手動で折り畳むと summary が出る', async ({

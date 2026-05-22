@@ -41,6 +41,7 @@ import {
 import {
   addressExplorerUrl,
   chainForSlug,
+  JPYC_CHAINS,
   USDC_CHAINS,
   type ChainSlug,
 } from '@/lib/chains';
@@ -349,12 +350,12 @@ export function QrGenerator() {
                     >
                       <div className="font-semibold">{info.displaySymbol}</div>
                       <div className="text-xs text-slate-500">
+                        {/* JPYC は polygon + kaia の 2 chain、USDC は 4 chain。
+                            chain list の表記は token ごとに別 key (短縮 chain 名で
+                            視覚的に明快な hardcoded list を維持)。 */}
                         {tok === 'usdc'
                           ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
-                          : t('tokenChainHint', {
-                              chainName: 'Polygon',
-                              chainId: info.chainId,
-                            })}
+                          : t('tokenChainHintJpyc', { count: JPYC_CHAINS.length })}
                       </div>
                     </button>
                   );
@@ -362,10 +363,41 @@ export function QrGenerator() {
               </div>
             </Field>
 
+            {/* chain chooser: token=usdc は USDC_CHAINS (4 chain)、token=jpyc は
+                JPYC_CHAINS (polygon / kaia 2 chain)。両者で chain object の取得
+                経路は chainForSlug 共通、active 判定も settings.chain で同じ。 */}
             {settings.token === 'usdc' && (
               <Field label={t('chainLabel')}>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {USDC_CHAINS.map((slug) => {
+                    const c = chainForSlug(slug);
+                    const active = settings.chain === slug;
+                    return (
+                      <button
+                        key={slug}
+                        type="button"
+                        onClick={() => selectChain(slug)}
+                        className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+                          active
+                            ? 'border-brand bg-brand/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="font-semibold">{c.name}</div>
+                        <div className="text-xs text-slate-500">
+                          chain id: {c.id}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+            )}
+
+            {settings.token === 'jpyc' && (
+              <Field label={t('chainLabel')}>
+                <div className="grid grid-cols-2 gap-2">
+                  {JPYC_CHAINS.map((slug) => {
                     const c = chainForSlug(slug);
                     const active = settings.chain === slug;
                     return (

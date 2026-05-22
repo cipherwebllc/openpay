@@ -45,6 +45,7 @@
     "tokenLabel": "通貨",
     "tokenChainHint": "{chainName} chain (id: {chainId})",
     "tokenChainHintMulti": "{count} chain 対応 (Base / Arbitrum / Optimism / Polygon)",
+    "tokenChainHintJpyc": "{count} chain 対応 (Polygon / Kaia)",
     "chainLabel": "受取チェーン",
     "receiverLabel": "受取先ウォレットアドレス",
     "addressInvalid": "アドレス形式が正しくありません",

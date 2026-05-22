@@ -26,15 +26,19 @@ afterEach(() => {
 // vitest.config.ts で NETWORK_ENV='testnet'。testnet (sepolia 系) deployment を期待。
 
 describe('TOKEN_DEPLOYMENTS', () => {
-  it('JPYC は Polygon 1 件のみ (testnet env、Kaia env 未設定の既定状態)', () => {
-    // vitest.config.ts の env で NEXT_PUBLIC_JPYC_TESTNET_ADDRESS のみ設定済、
-    // KAIROS は未設定。kaia deployment は skip されて出現しない。
+  it('JPYC は Polygon + Kaia の 2 件 (testnet env、hard-code default で常時 present)', () => {
+    // JPYC v3 cross-chain consistency で Kaia mainnet/testnet 同 address を
+    // hard-code。env override 無くても deployment は常に 2 件 (polygon + kaia)。
     const jpyc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'jpyc');
-    expect(jpyc).toHaveLength(1);
-    expect(jpyc[0].chainId).toBe(polygonAmoy.id);
-    expect(jpyc[0].decimals).toBe(18);
-    expect(jpyc[0].displaySymbol).toBe('JPYC');
-    expect(jpyc[0].paymasterMode).toBe('sponsorship');
+    expect(jpyc).toHaveLength(2);
+    const chainIds = jpyc.map((d) => d.chainId);
+    expect(chainIds).toContain(polygonAmoy.id);
+    expect(chainIds).toContain(kairos.id);
+    for (const d of jpyc) {
+      expect(d.decimals).toBe(18);
+      expect(d.displaySymbol).toBe('JPYC');
+      expect(d.paymasterMode).toBe('sponsorship');
+    }
   });
 
   it('USDC は 4 chain (Base / Arbitrum / Optimism / Polygon)', () => {
@@ -99,8 +103,10 @@ describe('resolveDeployment', () => {
 });
 
 describe('deploymentsForSymbol', () => {
-  it('jpyc は 1 件 / usdc は 4 件', () => {
-    expect(deploymentsForSymbol('jpyc')).toHaveLength(1);
+  it('jpyc は 2 件 (polygon + kaia) / usdc は 4 件', () => {
+    // 2026-05-23 Kaia 対応で JPYC は polygon + kaia の 2 deployment。
+    // USDC は kaia 未対応 (Circle native USDC 未 deploy) で 4 件のまま。
+    expect(deploymentsForSymbol('jpyc')).toHaveLength(2);
     expect(deploymentsForSymbol('usdc')).toHaveLength(4);
   });
 });
@@ -149,57 +155,53 @@ describe('isValidTokenSymbol', () => {
   });
 });
 
-describe('JPYC Kaia deployment (PoC、env 駆動)', () => {
-  it('NEXT_PUBLIC_JPYC_KAIROS_ADDRESS 未設定 → kaia deployment は TOKEN_DEPLOYMENTS に出現しない', () => {
-    // 既定 vitest env では KAIROS_ADDRESS は未設定。
-    expect(resolveDeployment('jpyc', kairos.id)).toBeUndefined();
+describe('JPYC Kaia deployment (hard-code default + env override)', () => {
+  it('env 未設定でも kaia deployment は TOKEN_DEPLOYMENTS に hard-code default で常時 present', () => {
+    // JPYC v3 cross-chain consistency で Kaia は mainnet/Polygon と同 address。
+    // env override 無くても deployment は出現する (Vercel env 設定漏れに対する
+    // safe-by-default、UI で Kaia chooser button が出続ける)。
+    const dKairos = resolveDeployment('jpyc', kairos.id);
+    expect(dKairos).toBeDefined();
+    expect(dKairos?.symbol).toBe('jpyc');
+    expect(dKairos?.chainId).toBe(kairos.id);
+    expect(dKairos?.decimals).toBe(18);
+    expect(dKairos?.displaySymbol).toBe('JPYC');
+    expect(dKairos?.paymasterMode).toBe('sponsorship');
+    // testnet env では kairos.id が解決される (kaia.id は解決しない)
     expect(resolveDeployment('jpyc', kaia.id)).toBeUndefined();
-    // deploymentsForSymbol('jpyc') は polygon の 1 件のみ
-    expect(deploymentsForSymbol('jpyc')).toHaveLength(1);
   });
 
-  it('NEXT_PUBLIC_JPYC_KAIROS_ADDRESS 設定時 → kaia deployment が出現 (testnet=kairos)', async () => {
+  it('hard-code default address = 0xE7C3…3c29 (JPYC v3 cross-chain consistency)', () => {
+    const d = resolveDeployment('jpyc', kairos.id);
+    expect(d?.address.toLowerCase()).toBe(
+      '0xe7c3d8c9a439fede00d2600032d5db0be71c3c29',
+    );
+  });
+
+  it('deploymentForSlug("jpyc", "kaia") は testnet で kairos を返す (hard-code 経由)', () => {
+    const d = deploymentForSlug('jpyc', 'kaia');
+    expect(d.chainId).toBe(kairos.id);
+    expect(d.address.toLowerCase()).toBe(
+      '0xe7c3d8c9a439fede00d2600032d5db0be71c3c29',
+    );
+  });
+
+  it('env override 設定時 → hard-code default を上書きする (emergency address 変更用)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
       '0xc0de000000000000000000000000000000005555';
     const mod = await import('@/lib/tokens');
     const d = mod.resolveDeployment('jpyc', kairos.id);
-    expect(d).toBeDefined();
-    expect(d?.symbol).toBe('jpyc');
-    expect(d?.chainId).toBe(kairos.id);
-    expect(d?.decimals).toBe(18);
-    expect(d?.displaySymbol).toBe('JPYC');
-    expect(d?.paymasterMode).toBe('sponsorship');
     expect(d?.address.toLowerCase()).toBe(
       '0xc0de000000000000000000000000000000005555',
     );
-    // polygon kaia 両方含めて 2 件
-    expect(mod.deploymentsForSymbol('jpyc')).toHaveLength(2);
   });
 
-  it('deploymentForSlug("jpyc", "kaia") は env 未設定なら throw (deployment 不在)', () => {
-    expect(() => deploymentForSlug('jpyc', 'kaia')).toThrow(
-      /No deployment for jpyc on kaia/,
-    );
-  });
-
-  it('deploymentForSlug("jpyc", "kaia") は env 設定時に kairos deployment を返す', async () => {
-    vi.resetModules();
-    process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS =
-      '0xc0de000000000000000000000000000000005555';
-    const mod = await import('@/lib/tokens');
-    const d = mod.deploymentForSlug('jpyc', 'kaia');
-    expect(d.chainId).toBe(kairos.id);
-    expect(d.address.toLowerCase()).toBe(
-      '0xc0de000000000000000000000000000000005555',
-    );
-  });
-
-  it('mainnet env: KAIA_ADDRESS 設定時に kaia (8217) deployment が出現', async () => {
+  it('mainnet env: kaia (8217) deployment が hard-code default で present', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
-    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS =
-      '0xfeed000000000000000000000000000000006666';
+    // env override 無し (delete) → hard-code が効くことを確認
+    delete process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS;
     // mainnet では fee receiver / pimlico / sponsorship policy が必須なので埋める
     process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
       '0xdead000000000000000000000000000000001234';
@@ -209,10 +211,25 @@ describe('JPYC Kaia deployment (PoC、env 駆動)', () => {
     const d = mod.resolveDeployment('jpyc', kaia.id);
     expect(d?.chainId).toBe(kaia.id);
     expect(d?.address.toLowerCase()).toBe(
-      '0xfeed000000000000000000000000000000006666',
+      '0xe7c3d8c9a439fede00d2600032d5db0be71c3c29',
     );
   });
 
+  it('mainnet env + KAIA_ADDRESS env override 設定時に hard-code を上書き', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS =
+      '0xfeed000000000000000000000000000000006666';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xdead000000000000000000000000000000001234';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_test';
+    const mod = await import('@/lib/tokens');
+    const d = mod.resolveDeployment('jpyc', kaia.id);
+    expect(d?.address.toLowerCase()).toBe(
+      '0xfeed000000000000000000000000000000006666',
+    );
+  });
 });
 
 describe('USDC は Kaia chain id で resolve しない (型レベル除外の runtime 確認)', () => {

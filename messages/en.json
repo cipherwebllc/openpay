@@ -45,6 +45,7 @@
     "tokenLabel": "Token",
     "tokenChainHint": "{chainName} (chain id: {chainId})",
     "tokenChainHintMulti": "{count} chains supported (Base / Arbitrum / Optimism / Polygon)",
+    "tokenChainHintJpyc": "{count} chains supported (Polygon / Kaia)",
     "chainLabel": "Receiving chain",
     "receiverLabel": "Receiver wallet address",
     "addressInvalid": "Invalid address format",
