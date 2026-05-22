@@ -18,10 +18,13 @@ vi.mock('@/lib/pimlico', async () => {
 
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
-import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import { defaultDeploymentForSymbol, deploymentForSlug } from '@/lib/tokens';
 
 const usdcDep = defaultDeploymentForSymbol('usdc');
 const jpycDep = defaultDeploymentForSymbol('jpyc');
+// JPYC + Kaia (testnet env では Kairos) の deployment、Kaia 経路の gas 換算
+// (POL→JPYC 60 / KAIA→JPYC 30) regression 用。
+const jpycKaiaDep = deploymentForSlug('jpyc', 'kaia');
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -90,5 +93,54 @@ describe('useGasQuoteJpyc', () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe('rpc 503');
+  });
+
+  // 2026-05-23 regression fix: 旧実装は `isPolygon` だけで判定し Kaia 選択時に
+  // 常に gasAmount=0 を返していた (production smoke で発覚)。
+  it('sponsorship + JPYC (Kaia): fetch して KAIA→JPYC 換算した gasAmount を返す', async () => {
+    // Pimlico Kaia の実測 standard gas (31.5 gwei) を再現
+    getUserOperationGasPrice.mockResolvedValue({
+      standard: { maxFeePerGas: 315n * 10n ** 8n }, // 31.5 gwei
+    });
+
+    const { result } = renderHook(() => useGasQuoteJpyc(jpycKaiaDep), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    // overhead 200_000 × 31.5 gwei = 6.3e15 wei KAIA × 30 (KAIA→JPYC default rate)
+    // = 1.89e17 wei JPYC ≈ 0.189 JPYC
+    const expected = 200_000n * 315n * 10n ** 8n * 30n;
+    expect(result.current.data?.gasAmount).toBe(expected);
+    // 0n ではない (旧 bug の regression fence)
+    expect(result.current.data?.gasAmount).not.toBe(0n);
+    expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
+  });
+
+  it('Kaia の rate は POL のと独立 (KAIA→JPYC 30 default、POL→JPYC 60 とは別)', async () => {
+    getUserOperationGasPrice.mockResolvedValue({
+      standard: { maxFeePerGas: 100n * 10n ** 9n }, // 100 gwei (両 chain で同じ value 仮定)
+    });
+
+    // Polygon
+    const { result: polygonResult } = renderHook(
+      () => useGasQuoteJpyc(jpycDep),
+      { wrapper: makeWrapper() },
+    );
+    await waitFor(() => expect(polygonResult.current.data).toBeDefined());
+    // Kaia
+    const { result: kaiaResult } = renderHook(
+      () => useGasQuoteJpyc(jpycKaiaDep),
+      { wrapper: makeWrapper() },
+    );
+    await waitFor(() => expect(kaiaResult.current.data).toBeDefined());
+
+    const gasNative = 200_000n * 100n * 10n ** 9n;
+    expect(polygonResult.current.data?.gasAmount).toBe(gasNative * 60n);
+    expect(kaiaResult.current.data?.gasAmount).toBe(gasNative * 30n);
+    // Polygon は Kaia の 2 倍 (60/30)
+    expect(polygonResult.current.data!.gasAmount).toBe(
+      kaiaResult.current.data!.gasAmount * 2n,
+    );
   });
 });

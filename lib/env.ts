@@ -180,12 +180,17 @@ export const env = {
     'NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS',
     process.env.NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS,
   ),
-  // useGasQuoteJpyc が POL gas を JPYC へ換算する固定レート (1 POL = N JPYC、整数)。
-  // JPYC = JPY 1:1、POL は 60 JPY 前後 (2026 想定)。安全側に 60 を既定とする。
-  // 月次手動更新を想定し、外部 API 依存を持たない設計。
+  // useGasQuoteJpyc が native gas を JPYC へ換算する固定レート (1 native = N JPYC、整数)。
+  // JPYC = JPY 1:1。POL は 60 JPY 前後 / KAIA は 30 JPY 前後 (2026 想定、月次手動更新)。
+  // 外部 API 依存を持たない、設定漏れ時は useGasQuoteJpyc 内の NATIVE_JPYC_RATE
+  // (chain ごとの hard-code default) にフォールバック。
   polJpycRate: parsePositiveInt(
     'NEXT_PUBLIC_POL_JPYC_RATE',
     process.env.NEXT_PUBLIC_POL_JPYC_RATE,
+  ),
+  kaiaJpycRate: parsePositiveInt(
+    'NEXT_PUBLIC_KAIA_JPYC_RATE',
+    process.env.NEXT_PUBLIC_KAIA_JPYC_RATE,
   ),
   // Alchemy Modular Account v2 (MAv2) 経路の有効化フラグ。
   // HashPort wallet など EOA が MAv2 へ 7702 委任済のケースで動かす。
