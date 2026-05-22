@@ -43,8 +43,12 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      # high 以上の脆弱性は CI を fail。production 依存のみ。
-      - run: npm audit --audit-level=high --omit=dev
+      # HIGH / CRITICAL の advisory gate。scripts/audit-gate.mjs は受容済
+      # advisory を allowlist で許容し、それ以外の HIGH+ で fail させる。
+      # 受容済の根拠は docs/DEPLOY_CHECKLIST.md §7、allowlist 本体は
+      # scripts/audit-gate.mjs の ALLOWED_ADVISORIES。新規 advisory 出現時は
+      # 監査 trail として両者を同時 update して PR レビューする運用。
+      - run: node scripts/audit-gate.mjs
 
       # moderate は warning として可視化 (fail させない)。既知 transitive
       # 12 件は README で開示済 (wagmi/Next.js 経由、本リポジトリでは実害なし)。

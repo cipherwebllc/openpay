@@ -197,22 +197,27 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 将来変わる可能性は残存。Sentry に @account-kit / Alchemy 関連の異常 error が
 連続発生 (= SDK 内部挙動変化の signal) したら即 reassess。
 
-### 7.2 CI gate の現状 (2026-05-22)
+### 7.2 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
-`.github/workflows/ci.yml:47` の `npm audit --audit-level=high --omit=dev` step
-は本 vulnerability が原因で **現在 fail している** (最近の commits で red ×)。
-production deploy は Vercel auto-deploy で動いており CI fail が deploy を block
-していない。
+`.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
+本 script は `npm audit --omit=dev --json` を parse し、HIGH/CRITICAL advisory を
+GHSA URL で同定、`ALLOWED_ADVISORIES` 辞書と照合して:
 
-**対処方針** (どれを採るかは user 判断):
-- (a) 本 §7 を「accepted risk」として CI step に許容コメントを追加し、HIGH 件数の
-  expected baseline (= 1 advisory / 5 package nodes) を超えた場合のみ fail させる
-- (b) `npm audit` step を warning に降格し fail させない (= 既存 moderate step と同形)
-- (c) Alchemy 側の patched release / SDK 代替化 (lib/smartAccount を viem + Pimlico
-  直接実装に書換) を待つ — 期限不明
+- accepted (allowlist 一致): log 表示のみ、CI pass
+- unaccepted (新規 advisory): 詳細 log + **exit 1** で CI fail
+- stale (allowlist にあるが現在検出されない): upstream fix の signal、log のみ
 
-**現状**: (a)/(b) いずれも実施せず CI red のまま運用。deploy 自体は通る (Vercel
-は CI 状態を gate しない設定) が、新規 HIGH が増えても CI alert で区別不能。
+allowlist 追加 / 削除は本 §7 の update と必ず同期させること (= 監査 trail を
+両ファイルの diff で残す)。現在 allowlist には GHSA-qjx8-664m-686j (js-cookie)
+1 件のみ。
+
+実行例:
+```bash
+$ node scripts/audit-gate.mjs
+audit-gate: HIGH/CRITICAL advisories detected: 1 (accepted: 1, unaccepted: 0, stale-allowlist: 0)
+...
+audit-gate: OK
+```
 
 ### 7.3 再評価手順
 

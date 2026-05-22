@@ -4,6 +4,14 @@ import * as Sentry from '@sentry/nextjs';
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
+if (!dsn && process.env.NODE_ENV === 'production') {
+  // production で DSN 未設定 = browser 側 Sentry が無効 (alert rule 不発火)。
+  // 設定漏れを開発者が devtools で気付けるよう production 限定で warn。
+  console.warn(
+    '[sentry] NEXT_PUBLIC_SENTRY_DSN not set in production — browser events will NOT be sent. Configure in Vercel project env vars (see docs/DEPLOY_CHECKLIST.md §8).',
+  );
+}
+
 // 0.0〜1.0 の浮動小数。範囲外/不正値はフォールバックを使う。
 function parseSampleRate(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
