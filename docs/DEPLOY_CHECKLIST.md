@@ -151,3 +151,53 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 | Sentry errors | (Sentry org dashboard) |
 | Vercel Analytics (pageviews) | Vercel Project → Analytics tab |
 | Pimlico balance | (Pimlico dashboard、低残のとき alert を別途設定) |
+
+## 7. Known Vulnerabilities (accepted risk)
+
+`npm audit` で検出される脆弱性のうち、**upstream fix が無く** OpenPay 側で
+直接対処不能 / 影響が限定的なものを accepted risk として明示。deploy 前に
+本項を確認し、新規追加・状況変化があれば update。
+
+### 7.1 HIGH severity: `@segment/analytics-next` 経由 (5 件)
+
+| Package | severity | path | fixAvailable |
+|---|---|---|---|
+| `@account-kit/smart-contracts` (direct) | high | → `@account-kit/infra` → `@account-kit/logging` → `@segment/analytics-next` | **false** |
+| `@account-kit/infra` (transitive) | high | 同上 | false |
+| `@account-kit/logging` (transitive) | high | → `@segment/analytics-next` | false |
+| `@segment/analytics-next` (transitive) | high | 直接の脆弱 module | (Segment 側 release 待ち) |
+
+**OpenPay code path の影響**:
+- `@account-kit/smart-contracts` は `lib/smartAccount/mav2.ts:35` で
+  `createModularAccountV2` を import。HashPort wallet (Alchemy MAv2 + 7702
+  delegate) 経路で実行される production code path
+- `@account-kit/logging` の `dist/types/plugins/contextAllowlist.d.ts` 等で
+  `@segment/analytics-next` を **type import**。実 runtime で plugin が
+  initialize される可能性あり = vulnerability path 到達可能
+
+**Reachability assessment** (= 実際の exploitability):
+- `@segment/analytics-next` plugins の役割は Alchemy SDK 内部 analytics の
+  context restriction (defensive enforcement)。攻撃者制御の analytics event を
+  注入する経路が OpenPay からは無い (= MAv2 wallet 構築は input が事前定義 EOA + chainId のみ)
+- 結論: **practical exploitability 低**、ただし HIGH severity rating は維持
+
+**Accepted risk の条件**:
+- @account-kit/* が patched version を release するまで継続
+- OpenPay 側で attack vector を増やす変更 (例: 任意の analytics event 注入経路追加) を行わない
+- Sentry に @account-kit-related の異常 error が連続発生したら **即 reassess**
+
+**再評価 trigger**:
+- `@account-kit/smart-contracts` の major upgrade
+- `@segment/analytics-next` の patched release
+- Alchemy が SDK 内 analytics を opt-out 可能にした場合 → 即適用
+- HIGH severity が EXPLOITABLE な PoC 公開時 → 即 alternative SDK 評価 (代替案: 直接 viem + Pimlico 経路のみで MAv2 を構築、@account-kit を完全削除)
+
+### 7.2 確認手順 (再評価時)
+
+```bash
+npm audit --omit=dev --json | jq '.vulnerabilities | to_entries[] | select(.value.severity == "high")'
+# 上記 5 件以外の HIGH が増えていないこと
+# fixAvailable が変化していないこと (= upstream の進捗 signal)
+```
+
+新規 HIGH が出た場合は本 section を update してから deploy。
