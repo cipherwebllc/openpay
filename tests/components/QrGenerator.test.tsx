@@ -77,7 +77,7 @@ describe('QrGenerator', () => {
       expect(usdcBtn.className).not.toMatch(/border-brand/);
     });
 
-    it('LocalStorage に有効アドレス + gasMode=merchant: サマリに gas:merch が出る', async () => {
+    it('LocalStorage に有効アドレス + gasMode=merchant: サマリに「ガス代：店主負担」が出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -98,8 +98,10 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
       });
       const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      // direct=false / gasMode=merchant → tail = "gas:merch"
-      expect(within(toggle).getByText(/gas:merch/)).toBeInTheDocument();
+      // direct=false / gasMode=merchant → 日本語サマリ "ガス代：店主負担"
+      expect(
+        within(toggle).getByText(/手数料 1\.0% \/ ガス代：店主負担/),
+      ).toBeInTheDocument();
     });
 
     it('LocalStorage に有効アドレス: アコーディオンは閉じて payMode サマリ表示', async () => {
@@ -122,8 +124,10 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
       });
       const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      // gasMode default = customer → "gas:cust" 表記
-      expect(within(toggle).getByText(/gas:cust/)).toBeInTheDocument();
+      // gasMode default = customer → 日本語サマリ "ガス代：お客様負担"
+      expect(
+        within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+      ).toBeInTheDocument();
     });
 
     it('LocalStorage に無効アドレス: receiver field (Step 2 visible) に validation エラー', async () => {
@@ -679,7 +683,7 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('payMode=standard でアコーディオン閉時のサマリに 0.5%/std と出る', async () => {
+    it('payMode=standard でアコーディオン閉時のサマリに「手数料 0.5%（通常決済）」と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -698,10 +702,12 @@ describe('QrGenerator', () => {
       await waitFor(() =>
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
-      expect(within(toggle).getByText(/0\.5%\/std/)).toBeInTheDocument();
+      expect(
+        within(toggle).getByText(/手数料 0\.5%（通常決済）/),
+      ).toBeInTheDocument();
     });
 
-    it('payMode=gasless (default) でアコーディオン閉時のサマリに 1%/gas:cust と出る', async () => {
+    it('payMode=gasless (default) でアコーディオン閉時のサマリに「手数料 1.0% / ガス代：お客様負担」と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -720,7 +726,9 @@ describe('QrGenerator', () => {
       await waitFor(() =>
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
-      expect(within(toggle).getByText(/1%\/gas:cust/)).toBeInTheDocument();
+      expect(
+        within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+      ).toBeInTheDocument();
     });
   });
 
@@ -1819,5 +1827,47 @@ describe('QrGenerator', () => {
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
     });
 
+    it('手数料徴収先アドレスは default では visible でない (長 0x... を初見ノイズから排除)', async () => {
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      // 「OpenPay 利用手数料の徴収先」 label が DOM に存在しない (closed accordion 内)
+      expect(screen.queryByText(/OpenPay 利用手数料の徴収先/)).toBeNull();
+    });
+
+    it('高度な設定 を開くと 手数料徴収先アドレス が表示される (透明性は維持)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openAdvanced(user);
+      expect(
+        await screen.findByText(/OpenPay 利用手数料の徴収先/),
+      ).toBeInTheDocument();
+      // env.feeReceiver の実値が表示される (test env では 0x...dEaD placeholder)
+      const feeAddressMatch = await screen.findByText(/^0x[a-fA-F0-9]{40}$/);
+      expect(feeAddressMatch.className).toMatch(/font-mono/);
+    });
+
+    it('Sub-summary に開発者向け内部値 (gas:cust / 0.5%/std) が漏れていない', async () => {
+      // 規制: 旧 mono サマリ (例 "1%/gas:cust") を 100% 撤去する。新サマリは
+      // 日本語/英語の自然文 ("ガス代：お客様負担") のみで構成される。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'usdc',
+          payMode: 'gasless',
+          gasMode: 'customer',
+        }),
+      );
+      const user = userEvent.setup();
+      const { container } = render(<QrGenerator />);
+      await openStep2(user);
+      const toggle = await screen.findByRole('button', { name: /高度な設定/ });
+      // closed 状態でも summary 全体に旧トークンが含まれない
+      expect(container.textContent).not.toMatch(/gas:cust|gas:merch|%\/std/);
+      // toggle 内に新文言が出る
+      expect(
+        within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+      ).toBeInTheDocument();
+    });
   });
 });

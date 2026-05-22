@@ -727,6 +727,24 @@ export function QrGenerator() {
                   )}
                 </div>
               </AdvancedSection>
+
+              {/* 手数料徴収先アドレス: 長い 0x... を常時露出すると一般 user に
+                  不安を与えるため、高度な設定 accordion 内 (default 閉) に移動。
+                  透明性 (誰が手数料を受け取るか可視) は維持しつつ初見ノイズを下げる。 */}
+              <AdvancedSection label={t('feeReceiverHeading')}>
+                <p className="break-all font-mono text-xs text-slate-700">
+                  {env.feeReceiver}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {isStandard
+                    ? t('feeReceiverHintStandard')
+                    : t(
+                        settings.token === 'jpyc'
+                          ? 'feeReceiverHintJpyc'
+                          : 'feeReceiverHintUsdc',
+                      )}
+                </p>
+              </AdvancedSection>
             </SettingsAccordion>
           </div>
         </StepCard>
@@ -844,21 +862,6 @@ export function QrGenerator() {
             </div>
           </section>
         )}
-        <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600 print:hidden">
-          <p className="font-semibold text-slate-700">
-            {t('feeReceiverHeading')}
-          </p>
-          <p className="mt-1 break-all font-mono">{env.feeReceiver}</p>
-          <p className="mt-2 text-slate-500">
-            {isStandard
-              ? t('feeReceiverHintStandard')
-              : t(
-                  settings.token === 'jpyc'
-                    ? 'feeReceiverHintJpyc'
-                    : 'feeReceiverHintUsdc',
-                )}
-          </p>
-        </div>
         {eip681Uri && (
           // EIP-681 互換 QR は default 閉 (上の OpenPay QR + poster QR で 2 つ
           // 既に並ぶため視覚的ノイズを減らす)。Hashport / MetaMask Mobile 等の
@@ -1018,16 +1021,18 @@ function SettingsSummary({
   gasMode: GasMode;
   payMode: PayMode;
 }) {
-  // 高度な設定 accordion 内には payMode / gas / split / quickAmount editor のみ。
-  // summary では payMode と gasMode (gasless 時のみ意味あり) を mono で表示する。
-  // token / chain は Step 1、receiver は Step 2 summary に出ているため重複表示しない。
-  const tail =
+  // 高度な設定 accordion 内には payMode / gas / split / quickAmount editor / 手数料
+  // 徴収先 のみ。summary では payMode (+ gasless 時のみ gas 負担者) を日本語/英語の
+  // 自然文で表示する。token / chain は Step 1、receiver は Step 2 summary に出るので
+  // ここでは重複させない。font-mono は外し、開発者向け内部値に見えないようにする。
+  const t = useTranslations('QrGenerator');
+  const label =
     payMode === 'standard'
-      ? '0.5%/std'
+      ? t('advancedSummary.standard')
       : gasMode === 'customer'
-        ? '1%/gas:cust'
-        : '1%/gas:merch';
-  return <span className="font-mono">{tail}</span>;
+        ? t('advancedSummary.gaslessCustomerGas')
+        : t('advancedSummary.gaslessMerchantGas');
+  return <span>{label}</span>;
 }
 
 function AdvancedSection({

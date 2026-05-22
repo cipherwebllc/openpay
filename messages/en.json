@@ -37,6 +37,11 @@
     "modeStatic": "Open amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
     "advancedSettings": "Advanced settings",
+    "advancedSummary": {
+      "standard": "Fee 0.5% (standard payment)",
+      "gaslessCustomerGas": "Fee 1.0% / gas: customer pays",
+      "gaslessMerchantGas": "Fee 1.0% / gas: merchant pays"
+    },
     "tokenLabel": "Token",
     "tokenChainHint": "{chainName} (chain id: {chainId})",
     "tokenChainHintMulti": "{count} chains supported (Base / Arbitrum / Optimism / Polygon)",

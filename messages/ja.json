@@ -37,6 +37,11 @@
     "modeStatic": "据え置き",
     "staticHint": "据え置き QR では金額を顧客が入力します。",
     "advancedSettings": "高度な設定",
+    "advancedSummary": {
+      "standard": "手数料 0.5%（通常決済）",
+      "gaslessCustomerGas": "手数料 1.0% / ガス代：お客様負担",
+      "gaslessMerchantGas": "手数料 1.0% / ガス代：店主負担"
+    },
     "tokenLabel": "通貨",
     "tokenChainHint": "{chainName} chain (id: {chainId})",
     "tokenChainHintMulti": "{count} chain 対応 (Base / Arbitrum / Optimism / Polygon)",
