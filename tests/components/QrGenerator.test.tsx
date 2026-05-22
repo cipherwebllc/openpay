@@ -1279,12 +1279,6 @@ describe('QrGenerator', () => {
     });
   });
 
-  // 3-step UI refactor (2026-05-23) 検証。
-  // - Step 1/2/3 の heading badge が各 card に存在
-  // - 「ガスレス決済」横に「おすすめ」 badge
-  // - QR empty state は不足項目を checklist で明示
-  // - softer copy (Web3 用語の和らげ) が反映
-  // - qr-prominent variant の brand border が Step 3 に付与
   describe('3-step UI refresh', () => {
     it('Step 1 / 2 / 3 の heading が見える (aria-labelledby = step-N-heading)', async () => {
       const { container } = render(<QrGenerator />);
@@ -1410,9 +1404,6 @@ describe('QrGenerator', () => {
       expect(printBtn.className).toMatch(/text-white/);
     });
 
-    // 2026-05-23 追補 (v2 review): token / chain は顧客ごとに変更する頻度が高い
-    // ため Step 1 (金額) 内に移動。Step 2 (受取先) は設定後変更頻度が低いので
-    // 折り畳み可能に。default 状態は effectiveReceiver の有無で決定。
     it('Step 1 内に token chooser (JPYC / USDC) が置かれている', async () => {
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -1529,9 +1520,6 @@ describe('QrGenerator', () => {
     });
   });
 
-  // 3-step UI refresh の境界 / エッジケース。state machine と useEffect の
-  // 一度きり挙動、empty state の auto-validity 分岐、Step2Summary の fallback
-  // path などを実 component で実走行。
   describe('3-step UI: 境界条件 / エッジケース', () => {
     it('Step 2 init は hydrate 後 一度のみ — 受取先 type 中に勝手に折り畳まれない', async () => {
       // 新規 user: receiver=null → step2Open=true。input に typing して有効化
@@ -1706,8 +1694,6 @@ describe('QrGenerator', () => {
     });
 
     it('Step 1: token + chain の組合せが Step 3 poster preview に伝播', async () => {
-      // 統合テスト: Step 1 の token/chain UI 操作が Step 3 (poster) の chain
-      // 表示・受取先短縮 address の Explorer chain を経由するパス全体を確認。
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -1774,9 +1760,6 @@ describe('QrGenerator', () => {
     });
 
     it('Step 2 collapsed 状態で payUrl は生成され、Step 3 で QR が出る (collapse は payUrl に影響しない)', async () => {
-      // 重要な統合 invariant: Step 2 の collapsibility は UI 表示の便宜のみ。
-      // payUrl の計算は settings.receiver から派生し、accordion 開閉で影響を
-      // 受けない (= 折り畳んでも QR は出続ける)。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -1808,8 +1791,6 @@ describe('QrGenerator', () => {
     });
 
     it('Step 2 collapsed → Step 1 で token 切替 → poster preview の symbol も同期更新', async () => {
-      // collapsibility と reactive update の相互作用。Step 2 を閉じても、
-      // Step 1 の token 変更が Step 3 (poster) に伝播する。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
