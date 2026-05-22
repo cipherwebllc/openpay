@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
-import { isAddress, type Address } from 'viem';
+import type { Address } from 'viem';
 import {
   Coins,
   Fuel,
@@ -1020,7 +1020,7 @@ function SettingsSummary({
 }) {
   // 高度な設定 accordion 内には payMode / gas / split / quickAmount editor のみ。
   // summary では payMode と gasMode (gasless 時のみ意味あり) を mono で表示する。
-  // token / chain / receiver は Step 2 visible 領域に出ているため重複表示しない。
+  // token / chain は Step 1、receiver は Step 2 summary に出ているため重複表示しない。
   const tail =
     payMode === 'standard'
       ? '0.5%/std'

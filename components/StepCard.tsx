@@ -66,7 +66,7 @@ export function StepCard({
       </span>
       <Icon className="h-4 w-4 flex-none text-brand" aria-hidden />
       <span>{title}</span>
-      {collapsible && !open && collapsedSummary !== undefined && (
+      {collapsible && !open && collapsedSummary && (
         <span className="ml-2 truncate text-xs font-normal text-slate-500">
           {collapsedSummary}
         </span>
@@ -84,7 +84,7 @@ export function StepCard({
           Authoring Practices "Disclosure" pattern)。h2 自体を button にすると
           内側に span(badge)/Icon/span(title) を入れた時に accessible name が
           冗長になる + ChevronDown が title に混ざるため分離する。 */}
-      <h2 className="mb-0 flex items-center print:hidden">
+      <h2 className="flex items-center print:hidden">
         {collapsible && onToggle ? (
           <button
             type="button"
