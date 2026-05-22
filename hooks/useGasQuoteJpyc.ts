@@ -20,10 +20,19 @@ import type { TokenDeployment } from '@/lib/tokens';
 const DEFAULT_USEROP_GAS_UNITS = 200_000n;
 
 // chain native token → JPYC 換算 default レート (1 native = N JPYC、整数)。
-// 平常市場価格、env で override 可能。POL/KAIA は両方 18 decimals なので
-// gasNative (wei) × rate でそのまま JPYC (wei、18 decimals) になる。
-// - POL ≈ 60 JPY (2026 想定)
-// - KAIA ≈ 30 JPY (2026 想定、要 user 検証で env 調整)
+// **env override が運用 SoT、本 default はサービス起動継続のための fallback**。
+// POL/KAIA は両方 18 decimals なので gasNative (wei) × rate でそのまま JPYC
+// (wei、18 decimals) になる。
+//
+// POL: 60n — 長期運用 (Polygon JPYC 既存) で実測収束、`NEXT_PUBLIC_POL_JPYC_RATE`
+//   で月次調整。2026-05 時点で POL ≈ 60 JPY 帯が稼働実績。
+//
+// KAIA: 30n — **未検証の order-of-magnitude 推定**。KAIA 市場価格を私 (Claude)
+//   が独立に確認しておらず、$0.15-$0.50 USD レンジ仮定からの逆算。DEPLOY_
+//   CHECKLIST §9.5 で本投入前に `NEXT_PUBLIC_KAIA_JPYC_RATE` 設定を要求する
+//   運用方針。env 未設定で本 default を引いた場合は customer に対し sub-JPYC
+//   レベルの過大/過小 collection が起きうる (operational impact 小、UX 影響
+//   小だが honest disclosure)。
 const DEFAULT_POL_JPYC_RATE = 60n;
 const DEFAULT_KAIA_JPYC_RATE = 30n;
 

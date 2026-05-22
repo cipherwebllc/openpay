@@ -457,6 +457,38 @@ NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
 - [ ] sponsorship 経済性確認 (1 tx ≪ 1 円目安)
 - [ ] env 投入後 Sentry の `gas_congested` × chainId:8217 発生率 < 0.1%
 
+### 9.5b KAIA → JPYC rate 検証 (本投入前 必須)
+
+`hooks/useGasQuoteJpyc.ts` の `DEFAULT_KAIA_JPYC_RATE = 30n` は order-of-
+magnitude 推定値で、実 KAIA 市場価格と乖離する可能性がある。本投入前に
+`NEXT_PUBLIC_KAIA_JPYC_RATE` を設定して env を SoT にすること。
+
+検証手順:
+
+```bash
+# KAIA 市場価格を取引所 / CoinGecko 等で確認
+# 例: 1 KAIA = $0.25 USD / 1 USD = 150 JPY → 1 KAIA ≈ 38 JPY
+# → 安全側 (over-collect 寄り) に NEXT_PUBLIC_KAIA_JPYC_RATE=40 を設定
+
+# Vercel project env に反映
+vercel env add NEXT_PUBLIC_KAIA_JPYC_RATE production
+# Redeploy で baking
+```
+
+- [ ] KAIA 市場価格を信頼可能 source (取引所 / CoinGecko / Pimlico dashboard
+      の USD 換算) で確認、値を記録
+- [ ] `NEXT_PUBLIC_KAIA_JPYC_RATE` env に over-collect 寄り (実勢 + 20%
+      程度) の値を設定。OpenPay の運営手数料 1.0% (常に店主負担) で
+      under-collection を回収できる範囲なら微調整可
+- [ ] env 投入後 deploy、Kaia 経路で実 wallet 1 件 smoke で「ネットワーク
+      手数料見積」が想定 JPYC 単位 (0.1〜1 JPYC 程度) で表示されるか目視
+- [ ] 月次で KAIA 価格を再確認、20% 以上 drift したら env 更新
+
+**現状リスク**: env 未設定でも UI は `30n` default で動作する (deployment skip
+しない)。OpenPay 側では運営手数料が gas 換算誤差より 100x 大きいため operational
+impact は minor だが、UI に表示される「最大 X JPYC」の数値が市場実勢と乖離する
+可能性がある。
+
 ### 9.6 MAv2 + Kaia defensive UI (実装済)
 
 MAv2 経路は Pimlico Kaia 非対応で早期 throw され、`errorMav2KaiaPolygon` i18n
