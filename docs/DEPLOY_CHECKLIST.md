@@ -154,50 +154,112 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 
 ## 7. Known Vulnerabilities (accepted risk)
 
-`npm audit` で検出される脆弱性のうち、**upstream fix が無く** OpenPay 側で
-直接対処不能 / 影響が限定的なものを accepted risk として明示。deploy 前に
+`npm audit --omit=dev` で検出される脆弱性のうち、**upstream fix が無く** OpenPay
+側で直接対処不能 / 影響が限定的なものを accepted risk として明示。deploy 前に
 本項を確認し、新規追加・状況変化があれば update。
 
-### 7.1 HIGH severity: `@segment/analytics-next` 経由 (5 件)
+### 7.1 HIGH severity 単一 root: `js-cookie` (GHSA-qjx8-664m-686j)
 
-| Package | severity | path | fixAvailable |
-|---|---|---|---|
-| `@account-kit/smart-contracts` (direct) | high | → `@account-kit/infra` → `@account-kit/logging` → `@segment/analytics-next` | **false** |
-| `@account-kit/infra` (transitive) | high | 同上 | false |
-| `@account-kit/logging` (transitive) | high | → `@segment/analytics-next` | false |
-| `@segment/analytics-next` (transitive) | high | 直接の脆弱 module | (Segment 側 release 待ち) |
+**Evidence-verified facts** (2026-05-22 時点、`npm audit --omit=dev --json` で確認済):
 
-**OpenPay code path の影響**:
-- `@account-kit/smart-contracts` は `lib/smartAccount/mav2.ts:35` で
-  `createModularAccountV2` を import。HashPort wallet (Alchemy MAv2 + 7702
-  delegate) 経路で実行される production code path
-- `@account-kit/logging` の `dist/types/plugins/contextAllowlist.d.ts` 等で
-  `@segment/analytics-next` を **type import**。実 runtime で plugin が
-  initialize される可能性あり = vulnerability path 到達可能
+- **Root advisory**: [GHSA-qjx8-664m-686j](https://github.com/advisories/GHSA-qjx8-664m-686j)
+  — "JavaScript Cookie: Per-instance prototype hijack in `assign()` enables cookie-attribute injection"
+- **Root package**: `js-cookie@3.0.1`、affected range `<= 3.0.5`
+- **Propagation chain** (`npm ls js-cookie` で確認):
+  ```
+  @account-kit/smart-contracts@4.88.2  ← lib/smartAccount/mav2.ts:35 で import
+    └─ @account-kit/infra@4.88.2
+      └─ @account-kit/logging@4.88.2
+        └─ @segment/analytics-next@1.74.0
+          └─ js-cookie@3.0.1                  ← 脆弱性の root
+  ```
+- npm audit は chain 上の 5 package すべてに HIGH severity を伝搬させて報告するが、
+  **underlying vulnerability は 1 件** (js-cookie)
+- `fixAvailable: false` (@segment/analytics-next が js-cookie@3.0.1 を peg しているため)
 
-**Reachability assessment** (= 実際の exploitability):
-- `@segment/analytics-next` plugins の役割は Alchemy SDK 内部 analytics の
-  context restriction (defensive enforcement)。攻撃者制御の analytics event を
-  注入する経路が OpenPay からは無い (= MAv2 wallet 構築は input が事前定義 EOA + chainId のみ)
-- 結論: **practical exploitability 低**、ただし HIGH severity rating は維持
+**Exploit mechanism** (advisory 記載):
+- `js-cookie` の `assign()` は per-instance prototype を共有する設計のため、
+  cookie attribute (Path, Domain, etc.) に攻撃者制御の値を注入できると、
+  以降の同一 instance の cookie write にその attribute が漏れる
+- 攻撃成立条件: **攻撃者が Segment Analytics の cookie write path に任意 value を流し込めること**
 
-**Accepted risk の条件**:
-- @account-kit/* が patched version を release するまで継続
-- OpenPay 側で attack vector を増やす変更 (例: 任意の analytics event 注入経路追加) を行わない
-- Sentry に @account-kit-related の異常 error が連続発生したら **即 reassess**
+**Reachability assessment for OpenPay** (= 推測ではなく code 上の constraints):
+- `@account-kit/smart-contracts` の `createModularAccountV2` は wallet 構築時に
+  EOA address + chainId + factory 設定を受け取るのみ (lib/smartAccount/mav2.ts)
+- Alchemy SDK が internal で Segment Analytics を init する場合、event payload は
+  Alchemy 側で wallet creation context (固定 schema) を組み立てる
+- OpenPay から **任意 string を Segment.track / identify に流し込む API は無い**
+  → 攻撃者が cookie attribute に injection するのに必要な input chain が存在しない
+- **ただし完全な非到達性は保証できず** — Alchemy SDK 内部実装が将来 user-controlled
+  field (例: wallet label) を analytics に渡し始めた場合、reachable に転じうる
 
-**再評価 trigger**:
-- `@account-kit/smart-contracts` の major upgrade
-- `@segment/analytics-next` の patched release
-- Alchemy が SDK 内 analytics を opt-out 可能にした場合 → 即適用
-- HIGH severity が EXPLOITABLE な PoC 公開時 → 即 alternative SDK 評価 (代替案: 直接 viem + Pimlico 経路のみで MAv2 を構築、@account-kit を完全削除)
+結論: **現時点の使用範囲で practical exploitability は低**いが、上記前提が
+将来変わる可能性は残存。Sentry に @account-kit / Alchemy 関連の異常 error が
+連続発生 (= SDK 内部挙動変化の signal) したら即 reassess。
 
-### 7.2 確認手順 (再評価時)
+### 7.2 CI gate の現状 (2026-05-22)
+
+`.github/workflows/ci.yml:47` の `npm audit --audit-level=high --omit=dev` step
+は本 vulnerability が原因で **現在 fail している** (最近の commits で red ×)。
+production deploy は Vercel auto-deploy で動いており CI fail が deploy を block
+していない。
+
+**対処方針** (どれを採るかは user 判断):
+- (a) 本 §7 を「accepted risk」として CI step に許容コメントを追加し、HIGH 件数の
+  expected baseline (= 1 advisory / 5 package nodes) を超えた場合のみ fail させる
+- (b) `npm audit` step を warning に降格し fail させない (= 既存 moderate step と同形)
+- (c) Alchemy 側の patched release / SDK 代替化 (lib/smartAccount を viem + Pimlico
+  直接実装に書換) を待つ — 期限不明
+
+**現状**: (a)/(b) いずれも実施せず CI red のまま運用。deploy 自体は通る (Vercel
+は CI 状態を gate しない設定) が、新規 HIGH が増えても CI alert で区別不能。
+
+### 7.3 再評価手順
 
 ```bash
-npm audit --omit=dev --json | jq '.vulnerabilities | to_entries[] | select(.value.severity == "high")'
-# 上記 5 件以外の HIGH が増えていないこと
-# fixAvailable が変化していないこと (= upstream の進捗 signal)
+# HIGH advisory の count と root を抽出 (= 期待値: 1 root / js-cookie)
+npm audit --omit=dev --json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+seen = set()
+for name, info in data.get('vulnerabilities', {}).items():
+    if info.get('severity') == 'high':
+        for via in info.get('via', []):
+            if isinstance(via, dict) and via.get('severity') == 'high':
+                u = via.get('url', '')
+                if u not in seen:
+                    seen.add(u)
+                    print(f\"{via.get('name')}: {u}\")"
 ```
 
-新規 HIGH が出た場合は本 section を update してから deploy。
+期待出力: `js-cookie: https://github.com/advisories/GHSA-qjx8-664m-686j` の 1 行のみ。
+**他の advisory が追加で出現したら deploy 前に本 §7 を update**。
+
+### 7.4 再評価 trigger (Action 起こす条件)
+
+| Trigger | Action |
+|---|---|
+| `@segment/analytics-next` が js-cookie@>=3.0.6 に更新 release | 即 `npm install`、CI green に戻る |
+| `@account-kit/smart-contracts` の major upgrade で chain 解消 | 即 npm install + smoke test |
+| Alchemy SDK 内部 analytics の opt-out flag 提供 | 即適用、依存連鎖断ち切り |
+| GHSA-qjx8-664m-686j に EXPLOITABLE PoC 公開 | 即 alternative SDK 評価 (= lib/smartAccount を viem + Pimlico 経路のみで再構築、@account-kit を完全 drop) |
+
+## 8. Sentry observability の前提条件
+
+DEPLOY_CHECKLIST §3.2 の Alert Rules はすべて Sentry が event を受信していることが
+前提。以下を **deploy 前に Vercel Project Settings で確認**:
+
+| 環境変数 | 役割 | 未設定時の挙動 |
+|---|---|---|
+| `NEXT_PUBLIC_SENTRY_DSN` | client + server 双方の Sentry init key | `instrumentation.ts:27` / `instrumentation-client.ts:7` で early return、`Sentry.*` が no-op に degrade。**console fallback のみで Sentry には 1 件も送られない** |
+| `SENTRY_AUTH_TOKEN` | source map upload | 未設定でも runtime は動く、ただし stack trace が minified |
+
+**確認手順**:
+```bash
+# Vercel CLI で production env を一覧 (要 vercel login)
+vercel env ls production | grep SENTRY
+```
+
+DSN 設定状況を未確認のまま deploy すると **alert rule が永遠に発火しない silent
+failure** に陥る。`lib/logger.ts` のコメント (line 5-6) と一致する degrade 設計
+だが、deploy 前に必ず 1 度確認する。
