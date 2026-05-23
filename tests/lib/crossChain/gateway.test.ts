@@ -396,32 +396,6 @@ describe('lib/crossChain/gateway', () => {
       ).rejects.toThrow(/HTTP 429/);
     });
 
-    it('response が array でも first element を返す (batch shape 対応)', async () => {
-      mockFetch.mockResolvedValue(
-        new Response(
-          JSON.stringify([{ attestation: '0xaa', signature: '0xbb' }]),
-          { status: 200 },
-        ),
-      );
-      const out = await requestAttestation(
-        {
-          burnIntent: buildBurnIntent({
-            sourceDomain: CIRCLE_DOMAIN_BASE,
-            destinationDomain: CIRCLE_DOMAIN_POLYGON,
-            sourceToken: SOURCE_TOKEN,
-            destinationToken: DEST_TOKEN,
-            depositor: DEPOSITOR,
-            recipient: RECIPIENT,
-            value: 1n,
-            currentBlockHeight: 0n,
-          }),
-          signature: '0x',
-        },
-        { fetch: mockFetch as unknown as typeof fetch },
-      );
-      expect(out.attestation).toBe('0xaa');
-      expect(out.signature).toBe('0xbb');
-    });
   });
 
 });

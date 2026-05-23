@@ -1,18 +1,9 @@
 'use client';
 
 // CrossChainHint — PaymentForm の augmentation panel。
-//
-// 機能:
-//   - buyer が target chain で balance 不足 (= direct path 不可) のとき、
-//     Gateway / CCTP V2 で別 chain から支払える代替経路を提示
-//   - 「Use this cross-chain path」button で実行 (sign + bridge + mint)
-//   - direct path 可能 / amount 0 / token != usdc / crossChain=false なら非表示
-//
-// 設計判断:
-//   - 既存の Pay button / breakdown は touch しない (augmentation のみ)
-//   - decision.path が 'direct' なら何も出さず透過 (UX 上余計な選択肢を増やさない)
-//   - decision.path が 'onramp' (balance なし) も非表示 (既存 OnrampCta が拾う)
-//   - useCrossChainPayment を内部で 1 度だけ呼び、execute まで担当
+// direct path 可能 / amount 0 / token != usdc / crossChain=false なら非表示
+// (= 既存 Pay button / OnrampCta に委譲)。gateway / cctp-v2 path 検出時のみ
+// 代替経路を提示する。
 
 import { useEffect } from 'react';
 import { formatUnits, type Address } from 'viem';
@@ -48,8 +39,7 @@ export interface CrossChainHintProps {
 
 export function CrossChainHint(props: CrossChainHintProps) {
   const t = useTranslations('CrossChainHint');
-  // hook は常に呼ぶ (条件付きフック禁止)、enabled=false でも react-query が
-  // skip するため API call は発火しない。
+  // hook は常に呼ぶ (条件付きフック禁止)、enabled=false で react-query が skip。
   const hook = useCrossChainPayment({
     targetChainId: props.targetChainId,
     requiredAtomic: props.requiredAtomic,
@@ -59,11 +49,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
   });
   const { decision, progress, isExecuting, result, error } = hook;
 
-  // Sentry observability: success / failure / balance query 失敗 を logger 経由で
-  // 集計 (production で cross-chain UX の信頼性監視 + Pimlico 残高との突合)。
-  // useEffect は早期 return 前に呼ぶ (React rules of hooks 準拠)。result/error
-  // が undefined のときは内部で if guard、Hint 自体が出ない条件でも logger は
-  // 触らないので副作用は発生しない。
+  // Sentry observability。useEffect は早期 return 前に呼ぶ必要があるため
+  // (React rules of hooks)、内部 if guard で空 trigger を抑止する。
   useEffect(() => {
     if (result) {
       logger.info('cross-chain.execute.success', {
@@ -136,17 +123,13 @@ export function CrossChainHint(props: CrossChainHintProps) {
     decision.path === 'gateway' ? 'gateway' : 'cctp-v2';
   const bridgeLabel = t(bridge === 'gateway' ? 'bridgeGateway' : 'bridgeCctp');
 
-  // closure に narrow 済 decision を capture (closure 内で再 narrow すると
-  // TS18048 で undefined 推論される)
-  const decisionForLog = decision;
+  // closure 内で再 narrow すると TS18048 で undefined 扱いになるため、
+  // narrow 済 decision を closure 外で capture する。
   const sourceChainIdForLog =
-    decisionForLog.path === 'cctp-v2'
-      ? decisionForLog.sourceChainId
-      : undefined;
+    decision.path === 'cctp-v2' ? decision.sourceChainId : undefined;
   async function onClick() {
-    // hook.execute は失敗時 throw するが error state にも記録されるため、
-    // ここで catch して unhandled rejection 警告を抑制 (UI は useEffect で
-    // hook.error を観測して error panel + Sentry log を出す)。
+    // hook.execute は失敗時 throw するが、error は state + useEffect Sentry log
+    // で観測済。ここで catch しないと unhandled rejection になる。
     let executeResult;
     try {
       executeResult = await hook.execute();
@@ -205,8 +188,10 @@ export function CrossChainHint(props: CrossChainHintProps) {
   );
 }
 
+// caller (CrossChainHint) は direct / onramp を早期 return で除外済のため、
+// ここでは gateway / cctp-v2 のみ扱う。
 function describePath(
-  decision: PathDecision,
+  decision: Extract<PathDecision, { path: 'gateway' | 'cctp-v2' }>,
   t: ReturnType<typeof useTranslations>,
 ): string {
   if (decision.path === 'gateway') {
@@ -215,14 +200,10 @@ function describePath(
       destDomain: decision.destinationDomain,
     });
   }
-  if (decision.path === 'cctp-v2') {
-    return t('describeCctp', {
-      sourceChainId: decision.sourceChainId,
-      destChainId: decision.targetChainId,
-    });
-  }
-  // direct / onramp はこの関数を呼ばない (caller でガード済み)
-  return '';
+  return t('describeCctp', {
+    sourceChainId: decision.sourceChainId,
+    destChainId: decision.targetChainId,
+  });
 }
 
 function formatProgress(

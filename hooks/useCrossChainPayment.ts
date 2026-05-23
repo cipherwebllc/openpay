@@ -1,16 +1,8 @@
 'use client';
 
-// useCrossChainPayment — PaymentForm から使う cross-chain orchestration hook。
-//
-// 責務:
-//   - 接続済 wallet account について 4 chain wallet USDC + Gateway unified
-//     balance を React Query で fetch (キャッシュ + manual invalidate)
-//   - target chain と required amount を input として PathDecision を計算
-//   - executeGateway / executeCctp は wagmi の wallet/public client を
-//     wire して lib/crossChain/execute.ts を呼ぶ
-//
-// React Query queryKey に NETWORK_ENV と account, target chain を含めて
-// 環境横断キャッシュ衝突を避ける。
+// useCrossChainPayment — wagmi を wire して balance fetch + decision +
+// execute を一括提供する hook。queryKey に networkEnv/account/target を含め
+// 環境横断 cache 衝突を防ぐ。
 
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -31,13 +23,10 @@ import { selectPath, type PathDecision } from '@/lib/crossChain/router';
 import { resolveDeployment } from '@/lib/tokens';
 
 export interface UseCrossChainPaymentArgs {
-  /** merchant 着金 chain (URL の chain から resolve) */
   targetChainId: number;
-  /** atomic amount (USDC 6 decimals)。0n だと decision は skip (UI 起動時の判断遅延回避) */
+  /** 0n のとき decision は skip (UI 起動時の判断遅延回避) */
   requiredAtomic: bigint;
-  /** merchant 受取人 address */
   recipient: Address;
-  /** balance refetch を auto disable する場合 (URL params 未確定時など) */
   enabled?: boolean;
 }
 
@@ -46,23 +35,16 @@ export type ExecuteResult =
   | ExecuteCctpTransferResult;
 
 export interface UseCrossChainPaymentReturn {
-  /** decision が undefined = balance 取得中 or 0 amount */
+  /** undefined = balance 取得中 or 0 amount */
   decision: PathDecision | undefined;
-  /** 直近 progress (UI 表示用) */
   progress: CrossChainProgress | undefined;
-  /** execute 中フラグ */
   isExecuting: boolean;
-  /** 直近 execute 結果 (success/failure 後に set) */
   result: ExecuteResult | undefined;
-  /** execute エラー */
   error: Error | undefined;
-  /** balance を再 fetch */
   refetchBalances: () => Promise<unknown>;
-  /** balance 取得中 */
   isFetchingBalances: boolean;
-  /** balance 取得エラー */
   balancesError: Error | null;
-  /** PathDecision に基づき適切な path を実行 (direct/onramp は execute 不可、null 返却) */
+  /** direct/onramp は何もせず null を返す (caller の既存 path に委譲) */
   execute: () => Promise<ExecuteResult | null>;
 }
 
@@ -81,8 +63,6 @@ export function useCrossChainPayment(
   const [result, setResult] = useState<ExecuteResult | undefined>();
   const [error, setError] = useState<Error | undefined>();
 
-  // balances を fetch。env.networkEnv を queryKey に含めて main/test 切替時に
-  // 別キャッシュ。account 変更 (disconnect → connect 他 wallet) でも refetch。
   const balancesQuery = useQuery({
     queryKey: [
       'crossChain.balances',
@@ -98,7 +78,6 @@ export function useCrossChainPayment(
     staleTime: 30_000,
   });
 
-  // decision は memo (balances 変化時に再計算)。amount=0 は skip。
   const decision = useMemo<PathDecision | undefined>(() => {
     if (!balancesQuery.data) return undefined;
     if (args.requiredAtomic <= 0n) return undefined;
@@ -136,10 +115,7 @@ export function useCrossChainPayment(
 
     let executeResult: ExecuteResult;
     if (decision.path === 'gateway') {
-      // source chain id を domain から resolve するため balance 側を再走査せず、
-      // execute.ts が source publicClient を要求する形にする。useCrossChainPayment
-      // の sourcePublicClient は walletClient.chain で自動決定されるため、ここで
-      // source chain id を取得する。
+      // Gateway path の source chain は buyer の現 wallet chain (walletClient.chain)。
       const sourceChainId = walletClient.chain?.id;
       if (sourceChainId === undefined) {
         throw new Error('walletClient.chain undefined');
@@ -218,8 +194,8 @@ export function useCrossChainPayment(
     isFetchingBalances: balancesQuery.isFetching,
     balancesError: balancesQuery.error as Error | null,
     execute: useCallback(async () => {
-      // execute 内部 throw を error state に取り込みつつ、caller には rethrow して
-      // UI でも catch できるようにする。setIsExecuting=false を保証するため必要。
+      // execute 内部 throw を error state に取り込んで rethrow (UI 側でも catch
+      // できるように、かつ setIsExecuting=false を保証するため)。
       try {
         return await execute();
       } catch (e) {
