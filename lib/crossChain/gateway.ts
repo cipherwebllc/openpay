@@ -45,10 +45,10 @@ import {
   type AttestationResponse,
   type BurnIntent,
   type CircleDomain,
+  type FetchLike,
   type SignedBurnIntentRequest,
   type TransferSpec,
 } from './types';
-import type { FetchLike } from './balance';
 
 // TransferSpec.version は Circle が将来 schema 変更する余地のための field、
 // 現状の Gateway は 1 を要求 (TransferSpec.sol の VERSION constant)。

@@ -46,6 +46,7 @@ import type {
   BalanceQuerySource,
   CircleDomain,
   CrossChainTarget,
+  FetchLike,
 } from './types';
 
 // 1 chain あたり on-chain balance query の結果。`status: 'error'` のときは
@@ -187,13 +188,6 @@ function chainResolveFromTargets(chainId: number): Chain {
       );
   }
 }
-
-// fetch DI のための signature。test は mock fetch を渡せる。production は
-// global fetch (Node 20+ / browser native)。
-export type FetchLike = (
-  input: string,
-  init?: RequestInit,
-) => Promise<Response>;
 
 /**
  * Circle attestation API `/v1/balances` を叩いて Gateway unified balance を

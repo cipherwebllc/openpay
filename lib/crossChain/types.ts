@@ -148,3 +148,11 @@ export interface CrossChainTarget {
   /** Circle 公式 domain ID は mainnet/testnet で同じだが chainId は異なるため両方持つ */
   isTestnet: boolean;
 }
+
+// fetch DI のための signature。test は mock fetch を渡せる。production は
+// global fetch (Node 20+ / browser native)。balance / gateway / cctp の全
+// module で共通利用するため types.ts に集約 (循環 import 回避)。
+export type FetchLike = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
