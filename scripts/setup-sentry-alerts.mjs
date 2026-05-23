@@ -18,12 +18,20 @@
 //   - logger.ts は warn/error 発火時に `tags: { event: <msg> }` を付ける設計
 //     (`lib/logger.ts:40`)。本 script の filter はこの tag を match する。
 //
-// しきい値は README §「即 rollback トリガー」「Vercel 運用ハードニング」に整合:
+// しきい値は alpha 初期値 (production traffic 観測前の guess):
 //   payment.failed              > 50 件/h (= alpha 想定 1000 tx/h の 5%)
 //   smart-account.init-failed   > 10 件/h
 //   x402.middleware.error       > 10 件/h
+//   history.load.*              > 100 件/h
+//   localStorage.set failed     > 100 件/h
+//   cross-chain.execute.failed  > 20 件/h
+//   cross-chain.balance-query.* > 100 件/h
 //
-// production traffic を観測したら re-calibration が必要 (alpha 初期値)。
+// re-calibration 手順 (production 1 週間後):
+//   1. Sentry で各 event の week-over-week 実 traffic 集計
+//   2. p95 × 2 を新 threshold として本 RULES 配列を更新
+//   3. Sentry Dashboard で旧 rule を delete
+//   4. 本 script を再実行 (idempotent、新 rule が registered される)
 
 const ALERT_ENV = process.env.SENTRY_ALERT_ENV || 'production';
 const API_BASE = process.env.SENTRY_API_BASE || 'https://sentry.io';

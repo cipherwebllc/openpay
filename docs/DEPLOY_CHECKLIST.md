@@ -638,9 +638,45 @@ Arbitrum = 5000 blocks (~21 分) を chain-aware で設定済。実機検証:
 
 ### §10.6 Sentry alert 設定
 
-- [ ] `cross-chain.execute.failed` event を Sentry rule 化 (alert 閾値設定)
-- [ ] `cross-chain.balance-query.failed` を warn level rule で監視
-- [ ] テスト event を 1 度発火させて alert 通知が来ることを確認
+**前提確認**:
+- [ ] Vercel production env で `SENTRY_DSN` (or `NEXT_PUBLIC_SENTRY_DSN`) が
+      設定済か確認。**未設定の場合 `lib/logger.ts` の Sentry.captureMessage は
+      silent no-op となり alert は飛ばない**。
+
+**alert rule 登録**:
+- [ ] `SENTRY_AUTH_TOKEN` + `SENTRY_ORG_SLUG` + `SENTRY_PROJECT_SLUG` を取得し
+      `node scripts/setup-sentry-alerts.mjs` を **1 度実行** (idempotent、
+      `cross-chain.execute.failed` + `cross-chain.balance-query.failed` の
+      2 rule + 既存 5 rule を Sentry org に登録/skip)
+- [ ] script output で 7 rule すべての `created` or `skip (既存)` を確認
+- [ ] Sentry Dashboard → Alerts でも 7 rule の存在を目視確認
+
+**threshold calibration** (alpha 初期値 = production 観測前の guess):
+- [ ] cross-chain.execute.failed = 20件/h、balance-query = 100件/h は推測値。
+      production 1 週間後に week-over-week で実 traffic baseline 算出 →
+      p95 × 2 で threshold を更新 → 旧 rule を Dashboard で delete してから
+      `scripts/setup-sentry-alerts.mjs` 再実行
+
+**動作確認**:
+- [ ] テスト event を 1 度発火させて alert 通知が来ることを目視確認
+
+### §10.6b Cross-chain kill switch — 真の "instant" 経路
+
+**重要 (audit で誤記訂正)**: `NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true` は
+Next.js 仕様で build-time env (client bundle へ inline)。Vercel env を flip
+すると auto rebuild がトリガーされ **~2-5 分後** に反映、**instant ではない**。
+
+**緊急時の優先順位**:
+1. **Vercel Instant Rollback** (Dashboard → Deployments → 前 successful build →
+   "Promote to Production"、rebuild 不要、~10 秒で CDN 反映、**全機能巻き戻し**)
+2. **`NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true`** (rebuild 2-5min、cross-chain
+   だけ targeted disable、他機能は最新版維持)
+
+**検証**:
+- [ ] staging で env=true 設定 → rebuild 完了後に `/pay?token=usdc&amount=10`
+      で CrossChainHint が表示されないことを確認
+- [ ] Vercel Instant Rollback 経路を 1 度試して所要時間 (~10s 目安) を計測、
+      運用 SOP として記録
 
 ### §10.7 Production opt-out 経路の確認
 

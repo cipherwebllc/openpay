@@ -511,3 +511,73 @@ describe('CrossChainHint: React Query queryKey isolation (LARP audit D2)', () =>
     unmount();
   });
 });
+
+describe('CrossChainHint: CROSS_CHAIN_DISABLED kill switch', () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED;
+  });
+
+  it('NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true で hint が null + fetch 発火しない', async () => {
+    // module-level const なので reset を強制
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = 'true';
+    vi.resetModules();
+    setAllChainsBalance(10_000_000n);
+    setupConnected();
+
+    const balancesFetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ balances: [{ domain: 7, balance: '99999' }] }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', balancesFetchSpy);
+
+    // 再 import (kill switch 反映)
+    const { CrossChainHint: HintReloaded } = await import(
+      '@/components/CrossChainHint'
+    );
+    const { container } = renderWithIntl(
+      withQueryClient(<HintReloaded {...baseProps} />),
+    );
+
+    // kill switch ON → 何も render しない + fetch も発火しない
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(container.firstChild).toBeNull();
+    expect(balancesFetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('kill switch ON で gateway path 検出済 conditions でも hint 出さない', async () => {
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = '1';
+    vi.resetModules();
+    setAllChainsBalance(0n); // wallet 全 0
+    setupConnected();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              balances: [{ domain: 7, balance: '10000000' }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const { CrossChainHint: HintReloaded } = await import(
+      '@/components/CrossChainHint'
+    );
+    const { container } = renderWithIntl(
+      withQueryClient(<HintReloaded {...baseProps} />),
+    );
+
+    // 通常なら gateway path 表示するが kill switch で抑止
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(container.firstChild).toBeNull();
+    expect(
+      screen.queryByText(/Circle Gateway 経由でも支払えます/),
+    ).not.toBeInTheDocument();
+  });
+});

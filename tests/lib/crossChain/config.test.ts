@@ -17,6 +17,7 @@ const CROSS_CHAIN_ENV_KEYS = [
   'NEXT_PUBLIC_NETWORK_ENV',
   'NEXT_PUBLIC_CIRCLE_GATEWAY_API_URL',
   'NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED',
+  'NEXT_PUBLIC_CROSS_CHAIN_DISABLED',
 ] as const;
 
 const ORIG_ENV: Record<string, string | undefined> = {};
@@ -216,5 +217,42 @@ describe('lib/crossChain/config', () => {
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
       expect(chainIds).toEqual([polygon.id, base.id, arbitrum.id, optimism.id]);
     });
+  });
+});
+
+describe('CROSS_CHAIN_DISABLED (incident kill switch)', () => {
+  it('default: false (production 通常運用で有効)', async () => {
+    const m = await import('@/lib/crossChain/config');
+    expect(m.CROSS_CHAIN_DISABLED).toBe(false);
+  });
+
+  it('"true" で true', async () => {
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = 'true';
+    const m = await import('@/lib/crossChain/config');
+    expect(m.CROSS_CHAIN_DISABLED).toBe(true);
+  });
+
+  it('"1" でも true (EXPERIMENTAL_CROSS_CHAIN_ENABLED と同 pattern)', async () => {
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = '1';
+    const m = await import('@/lib/crossChain/config');
+    expect(m.CROSS_CHAIN_DISABLED).toBe(true);
+  });
+
+  it('"True" (case sensitive) は false 扱い (明示文字列のみ accept)', async () => {
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = 'True';
+    const m = await import('@/lib/crossChain/config');
+    expect(m.CROSS_CHAIN_DISABLED).toBe(false);
+  });
+
+  it('"false" 文字列は false (=enabled)', async () => {
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = 'false';
+    const m = await import('@/lib/crossChain/config');
+    expect(m.CROSS_CHAIN_DISABLED).toBe(false);
+  });
+
+  it('空文字 "" は false (default)', async () => {
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = '';
+    const m = await import('@/lib/crossChain/config');
+    expect(m.CROSS_CHAIN_DISABLED).toBe(false);
   });
 });
