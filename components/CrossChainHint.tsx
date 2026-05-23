@@ -16,6 +16,7 @@ import {
 } from '@/lib/paymentLog';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathDecision } from '@/lib/crossChain/router';
+import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { blockExplorerUrl } from '@/lib/chains';
 import { shortAddress } from '@/lib/format';
 import { logger } from '@/lib/logger';
@@ -40,12 +41,16 @@ export interface CrossChainHintProps {
 export function CrossChainHint(props: CrossChainHintProps) {
   const t = useTranslations('CrossChainHint');
   // hook は常に呼ぶ (条件付きフック禁止)、enabled=false で react-query が skip。
+  // CROSS_CHAIN_DISABLED env が ON のときは incident response として hook 全停止。
   const hook = useCrossChainPayment({
     targetChainId: props.targetChainId,
     requiredAtomic: props.requiredAtomic,
     recipient: props.recipient,
     enabled:
-      props.token === 'usdc' && props.enabled && props.requiredAtomic > 0n,
+      !CROSS_CHAIN_DISABLED &&
+      props.token === 'usdc' &&
+      props.enabled &&
+      props.requiredAtomic > 0n,
   });
   const { decision, progress, isExecuting, result, error } = hook;
 
@@ -84,6 +89,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   }, [hook.balancesError, props.targetChainId]);
 
   if (
+    CROSS_CHAIN_DISABLED ||
     props.token !== 'usdc' ||
     !props.enabled ||
     props.requiredAtomic <= 0n

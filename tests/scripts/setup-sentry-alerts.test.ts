@@ -11,14 +11,16 @@ import {
 } from '../../scripts/setup-sentry-alerts.mjs';
 
 describe('setup-sentry-alerts: RULES schema', () => {
-  it('5 つの rule 定義が存在 (payment / smart-account / x402 / history.load 不一致 / localStorage.set 失敗)', () => {
-    expect(RULES).toHaveLength(5);
+  it('7 つの rule 定義が存在 (payment / smart-account / x402 / history.load / localStorage.set / cross-chain.execute / cross-chain.balance-query)', () => {
+    expect(RULES).toHaveLength(7);
     const tags = RULES.map((r) => r.eventTag);
     expect(tags).toContain('payment.failed');
     expect(tags).toContain('smart-account.init-failed');
     expect(tags).toContain('x402.middleware.error');
     expect(tags).toContain('history.load.invalid-entries-dropped');
     expect(tags).toContain('localStorage.set failed');
+    expect(tags).toContain('cross-chain.execute.failed');
+    expect(tags).toContain('cross-chain.balance-query.failed');
   });
 
   it('history 系 rule は threshold 100/h (LocalStorage は per-user 由来で noise 多め)', () => {
@@ -166,7 +168,7 @@ describe('setup-sentry-alerts: 冪等性 (fetch mock 経由の挙動検証)', ()
     const mod = await import('../../scripts/setup-sentry-alerts.mjs');
     await mod.main();
 
-    // GET 1 + POST 5 (RULES.length)
+    // GET 1 (list existing) + POST × RULES.length (1 per new rule)
     expect(fetchSpy).toHaveBeenCalledTimes(1 + RULES.length);
     expect(createdCount).toBe(RULES.length);
     const posts = fetchSpy.mock.calls.filter(

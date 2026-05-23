@@ -69,6 +69,14 @@ export const EXPERIMENTAL_CROSS_CHAIN_ENABLED: boolean =
   process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED === '1' ||
   process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED === 'true';
 
+// Incident kill switch: Circle attestation API mass failure / Sentry で
+// cross-chain.execute.failed の急増を観測した時、operator が Vercel env で
+// "true" / "1" を設定すると CrossChainHint が non-mount になる (redeploy 不要)。
+// merchant 個別 opt-out (URL crossChain=false) より優先される global guard。
+export const CROSS_CHAIN_DISABLED: boolean =
+  process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED === '1' ||
+  process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED === 'true';
+
 // chainId → Circle domain (CCTP/Gateway 共通、mainnet/testnet 同一 domain ID)。
 const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
   [polygon.id]: CIRCLE_DOMAIN_POLYGON,

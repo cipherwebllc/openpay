@@ -79,6 +79,27 @@ export const RULES = [
     threshold: 100,
     interval: '1h',
   },
+  {
+    name: 'OpenPay: cross-chain.execute.failed rate exceeded',
+    description:
+      'Circle Gateway / CCTP V2 execute 失敗が 1 時間に 20 件超で通知。' +
+      'Circle attestation API 障害 / HashPort sign 非互換 / 各 chain RPC 障害の ' +
+      'いずれかのサイン。incident 時は NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true で ' +
+      'CrossChainHint を全 buyer に対し即時 disable (Vercel env flip、redeploy 不要)。',
+    eventTag: 'cross-chain.execute.failed',
+    threshold: 20,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: cross-chain.balance-query.failed spike',
+    description:
+      'cross-chain balance fetch 失敗 (Circle /v1/balances API or 4 chain RPC) が ' +
+      '1 時間に 100 件超で通知。Hint 自体は出ないので UX 損なわないが、Circle host ' +
+      'down / 個別 chain RPC down の早期検知に使う。',
+    eventTag: 'cross-chain.balance-query.failed',
+    threshold: 100,
+    interval: '1h',
+  },
 ];
 
 function requireEnv(name) {
