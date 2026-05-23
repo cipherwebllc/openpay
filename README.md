@@ -62,6 +62,17 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 > **Ethereum L1 caveat:** USDC payments on Ethereum L1 always use **standard mode** (customer wallet pays ETH gas directly). Attempts to use `mode=gasless` with `chain=ethereum` are rejected at URL parse time. L1 gas is 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
 
+### Payment-page UX (cross-chain chain chooser)
+
+When a customer scans a USDC QR and has USDC on multiple chains, the payment page shows a **source-chain chooser** with the per-chain trade-offs side-by-side:
+
+- Chain name + the customer's USDC balance on that chain
+- Path badge: **Direct** (same chain as merchant, no service fee) · **Fast (Gateway)** (Circle Gateway, ~5s) · **Standard (CCTP V2)** (~30s)
+- Fee breakdown: USDC service fee + network gas token (e.g. `0.005 USDC + ガス代 (ETH)`) + ETA
+- Pre-selected default = the auto-picked best path (direct preferred, else gateway, else CCTP V2), but the customer can override
+
+The chooser is hidden when the customer has USDC on **only** the merchant's chain — in that case the regular Pay button handles it as a plain direct transfer. The chain abstraction layer is `lib/crossChain/*` (Circle Gateway + CCTP V2), see [`docs/DEPLOY_CHECKLIST.md §10`](./docs/DEPLOY_CHECKLIST.md) for the operator-verification status and [`docs/research/circle-12chain-addresses.md`](./docs/research/circle-12chain-addresses.md) for contract addresses + audit trail.
+
 ## Non-custodial design
 
 OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay service fees are sent **separately** to the fee receiver wallet. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
@@ -155,7 +166,7 @@ Gasless payments depend on a funded Pimlico Paymaster deposit. A GitHub Actions 
 - **Gasless depends on third-party infrastructure** (Pimlico, x402 facilitator). Outages can affect availability.
 - **Network-fee estimates may differ from actual gas costs.**
 - **Blockchain transactions are irreversible** — there is no chargeback.
-- **USDC balances are chain-specific** until chain-abstraction is your default UX. Optional Circle Gateway / CCTP V2 augmentation is available; see `docs/DEPLOY_CHECKLIST.md`.
+- **USDC balances are chain-specific.** The payment page chain chooser (Circle Gateway / CCTP V2) bridges them when the customer's source chain differs from the merchant's, but the chain abstraction itself has Circle as a dependency — outages on Circle's attestation API will disable cross-chain paths while same-chain direct transfers keep working. See `docs/DEPLOY_CHECKLIST.md §10` for the operator-verification status and kill-switch.
 - **No rate limiting / bot mitigation** — front paid endpoints with Vercel BotID or similar.
 - OpenPay is **not** a wallet, exchange, custodian, or redemption provider.
 
@@ -173,10 +184,10 @@ OpenPay is **not** a wallet, exchange, custodian, or redemption provider. Users 
 - More tested wallets + better wallet compatibility surface
 - Improved merchant receipt verification UX
 - Per-browser local payment history + CSV export
-- Smoother USDC chain selection UX
-- Further Circle Gateway / CCTP V2 chain-abstraction research
+- Per-chain native-gas → USDC/JPY approximate conversion in the chain chooser (currently shows gas units + token symbol only)
 - More x402 / agent payment examples
 - Demand-driven additional chains and tokens
+- Solana cross-chain (shelved 2026-05-24 pending Circle official confirmation that Solana is a supported **source** chain for the Forwarding Service — see [`docs/research/circle-forwarding-service.md`](./docs/research/circle-forwarding-service.md))
 
 ## License
 
