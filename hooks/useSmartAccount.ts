@@ -9,6 +9,10 @@
 //   HashPort wallet 等が EOA を Alchemy MAv2 へ自動委任しているケース。
 //   Pimlico bundler / paymaster は両者で共有 (account 層だけ差替)。
 //   feature flag NEXT_PUBLIC_ENABLE_MAV2 が立っている時のみ有効。
+// - metamask-7702 → `@metamask/delegation-toolkit` (toMetaMaskSmartAccount +
+//   Stateless7702) 経由。MetaMask Smart Account 新規 install ユーザ (2025 春〜
+//   自動委任) を救済。Pimlico bundler は first-class 対応 (EntryPoint v0.7)。
+//   Kaia は MetaMask 未 deploy のため builder 側で chain guard。
 // - unknown / mav2 (flag off) → IncompatibleSmartAccountError throw、UI は
 //   i18n された案内を出す。
 //
@@ -97,6 +101,27 @@ export function useSmartAccount(
           publicClient,
           chain: walletClient.chain,
           chainId,
+          deployment,
+        });
+      }
+
+      if (detection.kind === 'metamask-7702') {
+        // Sentry 観測: MetaMask SC ユーザの流入頻度 (将来の対応範囲判断 / 計測用)。
+        logger.info('smart_account.metamask_detected', {
+          delegateAddress: detection.delegateAddress,
+          chainId,
+          symbol: deployment.symbol,
+        });
+        // @metamask/delegation-toolkit は ~30 kB gzip。MetaMask Smart Account
+        // ユーザ向けにのみ必要なので dynamic import で lazy load。
+        const { buildMetaMaskSmartAccountClient } = await import(
+          '@/lib/smartAccount/metamask'
+        );
+        return buildMetaMaskSmartAccountClient({
+          walletClient,
+          publicClient,
+          chainId,
+          account: address,
           deployment,
         });
       }

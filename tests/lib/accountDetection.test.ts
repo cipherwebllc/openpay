@@ -6,6 +6,7 @@ import {
   isIncompatibleSmartAccountError,
   PIMLICO_SIMPLE7702_ADDRESS,
   ALCHEMY_MAV2_ADDRESS,
+  METAMASK_DELEGATOR_ADDRESS,
 } from '@/lib/accountDetection';
 
 const ADDR = '0x1138cDC8E85330C428562AA7849e252De63c089F' as const;
@@ -44,6 +45,16 @@ describe('detectAccountKind', () => {
     const r = await detectAccountKind(c, ADDR);
     expect(r.kind).toBe('alchemy-mav2-7702');
     expect(r.delegateAddress).toBe(ALCHEMY_MAV2_ADDRESS);
+  });
+
+  it('MetaMask Smart Account (EIP7702StatelessDeleGator): metamask-7702', async () => {
+    // MetaMask delegator は 23 mainnet 全てで同 address に CREATE2 deploy
+    // (salt "GATOR")、確認 2026-05-24。
+    const code = `0xef0100${METAMASK_DELEGATOR_ADDRESS.slice(2).toLowerCase()}`;
+    const c = mockPublicClient(code);
+    const r = await detectAccountKind(c, ADDR);
+    expect(r.kind).toBe('metamask-7702');
+    expect(r.delegateAddress).toBe(METAMASK_DELEGATOR_ADDRESS);
   });
 
   it('checksum 大文字混在の code でも一致する (case-insensitive)', async () => {
@@ -105,6 +116,15 @@ describe('IncompatibleSmartAccountError', () => {
     });
     expect(e.delegateAddress).toBeNull();
     expect(e.message).toContain('none');
+  });
+
+  it('errorMetaMaskKaia i18nKey でも構築可能 (Kaia + MetaMask SC ガード用)', () => {
+    const e = new IncompatibleSmartAccountError({
+      delegateAddress: METAMASK_DELEGATOR_ADDRESS,
+      i18nKey: 'errorMetaMaskKaia',
+    });
+    expect(e.i18nKey).toBe('errorMetaMaskKaia');
+    expect(e.delegateAddress).toBe(METAMASK_DELEGATOR_ADDRESS);
   });
 });
 

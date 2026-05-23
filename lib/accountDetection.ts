@@ -13,6 +13,17 @@ export const PIMLICO_SIMPLE7702_ADDRESS: Address = getAddress(
 export const ALCHEMY_MAV2_ADDRESS: Address = getAddress(
   '0x69007702764179F14f51cdcE752f4F775d74E139',
 );
+// MetaMask Smart Account (EIP7702StatelessDeleGatorImpl v1.3.0)。CREATE2 salt
+// "GATOR" で全 23 mainnet に同 address で deploy 済 (Ethereum / Polygon / BSC /
+// OP / Arb / Base / Linea / Unichain / Sonic / Sei 他)。Kaia (8217) には未 deploy
+// のため Kaia chain では到達しないはず — 万一 Kaia で検出した場合は metamask.ts
+// builder 側で chain guard で reject する。
+// 出典: https://github.com/MetaMask/delegation-framework/blob/main/documents/Deployments.md
+//       https://docs.pimlico.io/guides/how-to/accounts/use-metamask-account
+//       (確認 2026-05-24)
+export const METAMASK_DELEGATOR_ADDRESS: Address = getAddress(
+  '0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B',
+);
 
 const EIP7702_PREFIX = '0xef0100';
 
@@ -20,6 +31,7 @@ export type AccountKind =
   | 'none' // EOA pristine, code 空
   | 'pimlico-simple-7702' // 0xef0100 + Pimlico SimpleAccount
   | 'alchemy-mav2-7702' // 0xef0100 + Alchemy Modular Account v2
+  | 'metamask-7702' // 0xef0100 + MetaMask EIP7702StatelessDeleGatorImpl
   | 'unknown'; // 0xef0100 + 別 implementation、または non-7702 contract code
 
 /**
@@ -54,6 +66,9 @@ export async function detectAccountKind(
   if (target === ALCHEMY_MAV2_ADDRESS) {
     return { kind: 'alchemy-mav2-7702', delegateAddress: target };
   }
+  if (target === METAMASK_DELEGATOR_ADDRESS) {
+    return { kind: 'metamask-7702', delegateAddress: target };
+  }
   return { kind: 'unknown', delegateAddress: target };
 }
 
@@ -62,13 +77,15 @@ export class IncompatibleSmartAccountError extends Error {
   readonly i18nKey:
     | 'errorIncompatibleSmartAccount'
     | 'errorMav2Disabled'
-    | 'errorMav2KaiaPolygon';
+    | 'errorMav2KaiaPolygon'
+    | 'errorMetaMaskKaia';
   constructor(args: {
     delegateAddress: Address | null;
     i18nKey:
       | 'errorIncompatibleSmartAccount'
       | 'errorMav2Disabled'
-      | 'errorMav2KaiaPolygon';
+      | 'errorMav2KaiaPolygon'
+      | 'errorMetaMaskKaia';
   }) {
     super(
       `incompatible_smart_account: delegate=${args.delegateAddress ?? 'none'} (${args.i18nKey})`,
