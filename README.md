@@ -64,6 +64,29 @@ OpenPay does not hold merchant funds. Customer payments are sent **directly to t
 
 JPYC officially launched on the Kaia network (chainId 8217) in May 2026, with JPYC EX supporting Kaia deposits / redemptions and JPYC Faucet covering Kairos testnet (2026-05-18). Combined with the LINE NEXT Unifi wallet adopting JPYC (2026-05-22) — bringing Web3-native JPYC payments to ~100M LINE users without installing a separate wallet app — OpenPay enables JPYC on Kaia as a merchant-selectable chain alongside Polygon. The JPYC v3 contract (`0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`) is the same address as Polygon (cross-chain consistency, verified via `scripts/verify-kaia-jpyc.mjs`), and gasless flows go through Pimlico Kaia bundler + sponsorship paymaster (`scripts/verify-kaia-pimlico.mjs` confirms capability). Merchants select JPYC + Kaia in Step 1 of the QR generator just like they would Polygon. MAv2-delegated wallets (e.g. HashPort) currently route to other chains via a defensive UI guard since Pimlico Kaia does not support MAv2 at this time.
 
+### Cross-chain USDC receive (Circle Gateway + CCTP V2) — phase 2 投入済 (2026-05-24)
+
+Merchant が **受信 chain を 1 つ指定** すれば、Buyer は **任意の USDC 4 chain (Base / Arbitrum / Optimism / Polygon)** から支払い可能。OpenPay は buyer wallet 接続後に balance を 4 chain 並列 + Circle Gateway unified balance API で query し、最適 path を decision tree で自動選択:
+
+| Decision | 経路 | latency | 前提 |
+|---|---|---|---|
+| **direct** | 既存 ERC20 transfer (同一 chain) | 0 (current UX 維持) | buyer が target chain で十分残高 |
+| **gateway** | Circle Gateway burnIntent → attestation → mint | <500ms (deposit 済後) | buyer が事前 deposit 済 |
+| **cctp-v2** | CCTP V2 Fast Transfer (per-tx burn-mint) | 8-20s | buyer が他 chain で USDC 保有 |
+| **onramp** | 既存 `OnrampCta` | — | 残高なし fallback |
+
+Merchant は QR 生成画面の高度な設定で **「他チェーンからの支払を許可」toggle** (default ON) を operate 可能。OFF 時は URL に `crossChain=false` が付き、Buyer 側 PaymentForm が cross-chain hint を出さない (同一 chain 直接送金のみ accept)。
+
+**Buyer 側**: `/pay?to=...&token=usdc&amount=10&chain=base` で direct path 不可時に **CrossChainHint** が代替経路 (Gateway/CCTP V2) と「Pay with Circle Gateway」button を表示、click で sign + attest + mint まで自動。Merchant address は普通の EOA で着金する (非カストディアル維持)。
+
+**Experimental demo route** (operator 検証用): `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED=true` で `/[locale]/experimental/cross-chain-demo` が mount され、Gateway deposit + transfer を手動で 1 周検証できる。
+
+**Incident kill switch**: `NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true` で全 buyer に対し CrossChainHint を非表示化 (Circle attestation API 障害等で). **Next.js 仕様で `NEXT_PUBLIC_*` は build-time → Vercel auto rebuild ~2-5 min 待ち**。真の "instant disable" は Vercel Dashboard "Instant Rollback" (~10s) を first option として使う。詳細は [`docs/DEPLOY_CHECKLIST.md`](./docs/DEPLOY_CHECKLIST.md) §10.6b 参照。
+
+**aggregator (1inch / LI.FI 等で USDT/ETH → USDC swap)** は明示的に未対応。2025 改正資金決済法 (2026 施行) の「暗号資産サービス仲介業 (媒介)」登録対象になるリスク濃厚のため、本機能は USDC ↔ USDC の chain abstraction に限定 (memory `reference_jp_crypto_intermediary_regulation`)。
+
+詳細仕様 + operator 検証 checklist は [`docs/DEPLOY_CHECKLIST.md`](./docs/DEPLOY_CHECKLIST.md) §10、設計判断 + LARP audit 結果は `.claude/plans/cross-chain-usdc-receive.md` 参照。
+
 ## Non-custodial design
 
 - OpenPay **never holds** merchant funds.
@@ -163,6 +186,10 @@ Optional (operations / observability):
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel KV (Upstash Redis) for alpha payment log |
 | `PAYMENT_LOG_ADMIN_TOKEN` | Bearer token for `/api/log/payment/export` + `/api/log/payment/stats` |
 | `X402_*` | x402 paid-API config (see next section) |
+| `NEXT_PUBLIC_CIRCLE_GATEWAY_API_URL` / `NEXT_PUBLIC_CIRCLE_IRIS_API_URL` | Circle attestation API host override (default: NETWORK_ENV で mainnet/testnet 自動選択) |
+| `NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS` / `NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT` | Cross-chain fee cap (default 10 bps) / Gateway burnIntent block offset (default chain-aware: Polygon/Base/OP=600, Arbitrum=5000) |
+| `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED` | Experimental demo route mount control (default false) |
+| `NEXT_PUBLIC_CROSS_CHAIN_DISABLED` | Incident kill switch for cross-chain UI (default empty = enabled). ⚠ Next.js NEXT_PUBLIC_* は build-time inline、auto rebuild ~2-5 min 必要 (instant disable には Vercel Dashboard "Instant Rollback" を使う) |
 
 **Never commit `.env.local`.** Never commit private keys. `NEXT_PUBLIC_*` values are bundled into the client — treat them as public.
 
@@ -255,6 +282,8 @@ OpenPay は Pimlico Sponsorship Paymaster の EntryPoint v0.7 deposit が枯渇�
 - OpenPay is **not** a wallet, exchange, custodian, or redemption provider.
 - x402 replay protection relies on the EIP-3009 token-contract nonce + facilitator. No nonce DB is kept server-side.
 - Rate limiting / bot mitigation is **not** included — use Vercel BotID or a similar layer in front of paid endpoints.
+- **Cross-chain** (Gateway / CCTP V2) は Circle attestation API への信頼に依存。attestation 取得後 mint まで完了する保証は Circle 側の SLA 次第。失敗時の depositor 救済は Gateway: 7-day trustless withdrawal、CCTP V2: attestation 取得後 24h+ 任意時点で再 mint 可能。
+- **Supply chain risks**: 2026-05-24 時点で `npm audit --omit=dev` は **HIGH 0 / MOD 16 / LOW 13** (残 29 件は 2 root [`postcss@8.4.31` Next.js 内部 + `uuid <11.1.1` MetaMask/WalletConnect tree] からの transitive、実 exploit パスなし)。詳細は [`docs/SUPPLY_CHAIN_RISKS.md`](./docs/SUPPLY_CHAIN_RISKS.md)。
 
 ## Legal / disclaimer
 
