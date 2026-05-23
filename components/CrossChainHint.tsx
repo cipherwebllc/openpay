@@ -14,6 +14,7 @@
 //   - decision.path が 'onramp' (balance なし) も非表示 (既存 OnrampCta が拾う)
 //   - useCrossChainPayment を内部で 1 度だけ呼び、execute まで担当
 
+import { useEffect } from 'react';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
@@ -30,6 +31,7 @@ import type {
 import type { PathDecision } from '@/lib/crossChain/router';
 import { blockExplorerUrl } from '@/lib/chains';
 import { shortAddress } from '@/lib/format';
+import { logger } from '@/lib/logger';
 
 export interface CrossChainHintProps {
   /** PaymentForm の token (token !== 'usdc' なら hint を出さない) */
@@ -59,6 +61,44 @@ export function CrossChainHint(props: CrossChainHintProps) {
     enabled:
       props.token === 'usdc' && props.enabled && props.requiredAtomic > 0n,
   });
+  const { decision, progress, isExecuting, result, error } = hook;
+
+  // Sentry observability: success / failure / balance query 失敗 を logger 経由で
+  // 集計 (production で cross-chain UX の信頼性監視 + Pimlico 残高との突合)。
+  // useEffect は早期 return 前に呼ぶ (React rules of hooks 準拠)。result/error
+  // が undefined のときは内部で if guard、Hint 自体が出ない条件でも logger は
+  // 触らないので副作用は発生しない。
+  useEffect(() => {
+    if (result) {
+      logger.info('cross-chain.execute.success', {
+        bridge: result.path,
+        destChainId: result.destChainId,
+        mintTxHash: result.mintTxHash,
+        recipient: props.recipient,
+        valueAtomic: props.requiredAtomic.toString(),
+      });
+    }
+  }, [result, props.recipient, props.requiredAtomic]);
+
+  useEffect(() => {
+    if (error) {
+      logger.error('cross-chain.execute.failed', {
+        error,
+        targetChainId: props.targetChainId,
+        valueAtomic: props.requiredAtomic.toString(),
+        decisionPath: decision?.path,
+      });
+    }
+  }, [error, props.targetChainId, props.requiredAtomic, decision?.path]);
+
+  useEffect(() => {
+    if (hook.balancesError) {
+      logger.warn('cross-chain.balance-query.failed', {
+        error: hook.balancesError,
+        targetChainId: props.targetChainId,
+      });
+    }
+  }, [hook.balancesError, props.targetChainId]);
 
   if (
     props.token !== 'usdc' ||
@@ -67,8 +107,6 @@ export function CrossChainHint(props: CrossChainHintProps) {
   ) {
     return null;
   }
-
-  const { decision, progress, isExecuting, result, error } = hook;
 
   if (!decision) {
     if (hook.isFetchingBalances) {
