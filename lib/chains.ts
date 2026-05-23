@@ -225,6 +225,20 @@ export function isBuyerOnlyChainSlug(value: string): value is BuyerOnlyChainSlug
   return (ALL_BUYER_ONLY_SLUGS as readonly string[]).includes(value);
 }
 
+/** Any chainId (merchant or buyer-only) → human-readable chain name。
+ *  supportedChains に含まれる 8 chain は viem の Chain.name を返す。未対応
+ *  chainId は undefined (caller がフォールバック表示)。CrossChainSourceChooser
+ *  が source chain 名を表示する用途で使う。 */
+export function chainNameForId(chainId: number): string | undefined {
+  return supportedChains.find((c) => c.id === chainId)?.name;
+}
+
+/** chainId → native gas token symbol (例: ETH / POL / AVAX / KAIA)。
+ *  viem の `nativeCurrency.symbol` を返す。未対応 chainId は undefined。 */
+export function nativeSymbolForChainId(chainId: number): string | undefined {
+  return supportedChains.find((c) => c.id === chainId)?.nativeCurrency.symbol;
+}
+
 export function blockExplorerUrl(chainId: number): string | undefined {
   const chain = supportedChains.find((c) => c.id === chainId);
   return chain?.blockExplorers?.default.url;

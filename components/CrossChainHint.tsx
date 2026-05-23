@@ -2,10 +2,16 @@
 
 // CrossChainHint — PaymentForm の augmentation panel。
 // direct path 可能 / amount 0 / token != usdc / crossChain=false なら非表示
-// (= 既存 Pay button / OnrampCta に委譲)。gateway / cctp-v2 path 検出時のみ
-// 代替経路を提示する。
+// (= 既存 Pay button / OnrampCta に委譲)。cross-chain options が 1 件以上ある時に
+// CrossChainSourceChooser を表示、user 選択で executeOption を呼ぶ。
+//
+// phase 4b-1.7 リファクタ: 旧 UI は auto-decision 1 経路を提示するだけだったが、
+// buyer が複数 chain (Avalanche / Polygon / Base 等) に USDC を持つケースで
+// 「能動的 source 選択 + per-chain fee 内訳」を提供する。direct path は
+// chooser に含めるが、既存の direct 経路 (useBatchPayment / useStandardPayment)
+// に委譲するため execute は no-op (= 既存 Pay button が処理する)。
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
@@ -15,9 +21,10 @@ import {
   type PaymentBridge,
 } from '@/lib/paymentLog';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
-import type { PathDecision } from '@/lib/crossChain/router';
+import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { blockExplorerUrl } from '@/lib/chains';
+import { CrossChainSourceChooser } from './CrossChainSourceChooser';
 import { shortAddress } from '@/lib/format';
 import { logger } from '@/lib/logger';
 
@@ -52,7 +59,24 @@ export function CrossChainHint(props: CrossChainHintProps) {
       props.enabled &&
       props.requiredAtomic > 0n,
   });
-  const { decision, progress, isExecuting, result, error } = hook;
+  const { decision, pathOptions, progress, isExecuting, result, error } = hook;
+  // user 選択 state。default = options[0] (auto-best、enumerator は direct →
+  // gateway → cctp-v2 / balance 降順で sort 済)。options 変化に追従するため
+  // useEffect で再同期。
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (pathOptions.length === 0) {
+      setSelectedKey(null);
+      return;
+    }
+    // 現選択が options から消えた場合のみ再 default。既選択が残っていれば維持。
+    setSelectedKey((cur) => {
+      if (cur && pathOptions.some((o) => o.key === cur)) return cur;
+      return pathOptions[0].key;
+    });
+  }, [pathOptions]);
+  const selectedOption =
+    pathOptions.find((o) => o.key === selectedKey) ?? null;
 
   // Sentry observability。useEffect は早期 return 前に呼ぶ必要があるため
   // (React rules of hooks)、内部 if guard で空 trigger を抑止する。
@@ -97,19 +121,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
     return null;
   }
 
-  if (!decision) {
-    if (hook.isFetchingBalances) {
-      return (
-        <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
-          {t('balancesLoading')}
-        </p>
-      );
-    }
-    return null;
-  }
-
-  if (decision.path === 'direct' || decision.path === 'onramp') return null;
-
+  // 成功 panel は path 完了時のみ。
   if (result) {
     const explorer = blockExplorerUrl(result.destChainId);
     return (
@@ -125,24 +137,50 @@ export function CrossChainHint(props: CrossChainHintProps) {
     );
   }
 
-  const bridge: PaymentBridge =
-    decision.path === 'gateway' ? 'gateway' : 'cctp-v2';
-  const bridgeLabel = t(bridge === 'gateway' ? 'bridgeGateway' : 'bridgeCctp');
+  // balance fetch 中 (decision 未確定 = options も未) は loading hint。
+  if (!decision && hook.isFetchingBalances) {
+    return (
+      <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
+        {t('balancesLoading')}
+      </p>
+    );
+  }
 
-  // closure 内で再 narrow すると TS18048 で undefined 扱いになるため、
-  // narrow 済 decision を closure 外で capture する。
-  const sourceChainIdForLog =
-    decision.path === 'cctp-v2' ? decision.sourceChainId : undefined;
-  async function onClick() {
-    // hook.execute は失敗時 throw するが、error は state + useEffect Sentry log
-    // で観測済。ここで catch しないと unhandled rejection になる。
+  // options なし or decision が onramp のみ (= どの chain にも balance なし)
+  // は何も出さず OnrampCta (PaymentForm 側) に委譲。
+  if (pathOptions.length === 0) return null;
+  if (decision?.path === 'onramp') return null;
+
+  // direct のみで cross-chain option なし → 既存 Pay button に完全委譲、本 panel 非表示。
+  // (chooser 表示しても direct 1 件しか出ず情報価値ゼロ、UI スペース節約)
+  const hasCrossChain = pathOptions.some((o) => o.kind !== 'direct');
+  if (!hasCrossChain) return null;
+
+  async function onPay() {
+    if (!selectedOption) return;
+    // direct option は既存 Pay button に委譲 (UX 上 chooser からも実行できる
+    // 方が一貫性あるが、execute path が違う = useBatchPayment / useStandardPayment
+    // を経由する必要があるため、本 panel では NOTE 表示 + 親 Pay button に
+    // 誘導する。)
+    if (selectedOption.kind === 'direct') {
+      // user 操作で direct を選んだが、本 panel は cross-chain 実行 hook 限定。
+      // 親 PaymentForm の Pay button を案内する text は UI 上に常時表示しているので
+      // ここでは何もしない (= no-op、panel 残る)。
+      return;
+    }
     let executeResult;
     try {
-      executeResult = await hook.execute();
+      executeResult = await hook.executeOption(selectedOption);
     } catch {
       return;
     }
     if (executeResult) {
+      const bridge: PaymentBridge =
+        selectedOption.kind === 'gateway' ? 'gateway' : 'cctp-v2';
+      const sourceChainIdForLog =
+        selectedOption.kind === 'cctp-v2'
+          ? selectedOption.sourceChainId
+          : undefined;
       const evt = buildPaymentLogEvent(
         {
           flow: 'direct',
@@ -159,32 +197,35 @@ export function CrossChainHint(props: CrossChainHintProps) {
     }
   }
 
+  const isDirectSelected = selectedOption?.kind === 'direct';
+  const payButtonDisabled = isExecuting || !selectedOption || isDirectSelected;
+
   return (
-    <div className="space-y-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="font-semibold text-sky-900">
-          {t('alternativeAvailable', { bridge: bridgeLabel })}
+    <div className="space-y-3">
+      <CrossChainSourceChooser
+        options={pathOptions}
+        selectedKey={selectedKey}
+        onSelect={(o) => setSelectedKey(o.key)}
+        requiredAtomic={props.requiredAtomic}
+        displayDecimals={props.displayDecimals}
+      />
+      {isDirectSelected && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {t('directSelectedHint')}
         </p>
-        <span className="rounded-full bg-sky-100 px-2 py-0.5 font-mono text-[10px] uppercase text-sky-700">
-          {bridge}
-        </span>
-      </div>
-      <p className="text-xs text-sky-800">{describePath(decision, t)}</p>
-      <p className="text-xs text-sky-700">
-        {t('amount', {
-          value: formatUnits(props.requiredAtomic, props.displayDecimals),
-        })}
-      </p>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={isExecuting}
-        className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-      >
-        {isExecuting
-          ? `${t('inProgress')}${progress ? ` — ${formatProgress(progress, t)}` : ''}`
-          : t('payWithCrossChain', { bridge: bridgeLabel })}
-      </button>
+      )}
+      {!isDirectSelected && (
+        <button
+          type="button"
+          onClick={onPay}
+          disabled={payButtonDisabled}
+          className="w-full rounded-lg bg-sky-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+        >
+          {isExecuting
+            ? `${t('inProgress')}${progress ? ` — ${formatProgress(progress, t)}` : ''}`
+            : t('payWithSelected')}
+        </button>
+      )}
       {error && (
         <p className="text-xs text-red-700">
           {t('errorPrefix')}: {error.message}
@@ -192,24 +233,6 @@ export function CrossChainHint(props: CrossChainHintProps) {
       )}
     </div>
   );
-}
-
-// caller (CrossChainHint) は direct / onramp を早期 return で除外済のため、
-// ここでは gateway / cctp-v2 のみ扱う。
-function describePath(
-  decision: Extract<PathDecision, { path: 'gateway' | 'cctp-v2' }>,
-  t: ReturnType<typeof useTranslations>,
-): string {
-  if (decision.path === 'gateway') {
-    return t('describeGateway', {
-      sourceDomain: decision.sourceDomain,
-      destDomain: decision.destinationDomain,
-    });
-  }
-  return t('describeCctp', {
-    sourceChainId: decision.sourceChainId,
-    destChainId: decision.targetChainId,
-  });
 }
 
 function formatProgress(

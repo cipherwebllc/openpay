@@ -205,9 +205,16 @@ describe('CrossChainHint: 早期 return (enabled / token / amount guard)', () =>
 });
 
 describe('CrossChainHint: balance fetch + decision 表示', () => {
-  it('balance API + on-chain query 完了 + decision=direct → 何も表示しない', async () => {
-    // wallet が target chain で十分残高 → direct path
-    setAllChainsBalance(10_000_000n);
+  it('direct のみ可 (target 以外の chain は balance 0) → 何も表示しない', async () => {
+    // wallet が target chain (base) で十分残高、他 chain は 0 → direct option
+    // のみで cross-chain alternatives なし → chooser 非表示 (既存 Pay button が
+    // 処理する委譲、本 panel は出さない設計)。
+    setReadContractByChain({
+      [baseSepoliaId]: 10_000_000n,
+      [polygonAmoyId]: 0n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
     setupConnected();
     vi.stubGlobal(
       'fetch',
@@ -224,15 +231,40 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     const { container } = renderWithIntl(
       withQueryClient(<CrossChainHint {...baseProps} />),
     );
-    // balance fetch 完了 + direct 判定 → hint 出さない
+    // balance fetch 完了 + cross-chain alternative なし → hint 出さない
     await waitFor(() => {
-      // loading panel が消える (balance fetch 完了)
       expect(
         screen.queryByText(/他チェーン残高を確認中/),
       ).not.toBeInTheDocument();
     });
-    // direct path → 代替経路 hint も success panel も出ない
     expect(container.firstChild).toBeNull();
+  });
+
+  it('direct + cross-chain alternative あり → chooser 表示 (新 UX)', async () => {
+    // wallet が target chain (base) + 他 chain (polygon) で十分残高
+    // → direct と cctp-v2 の両 option が出る → chooser 表示で buyer に選ばせる
+    setReadContractByChain({
+      [baseSepoliaId]: 10_000_000n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    setupConnected();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+      ),
+    );
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    // chooser が出る
+    await waitFor(() => {
+      expect(screen.getByText(/支払元チェーンを選ぶ/)).toBeInTheDocument();
+    });
+    // direct badge + cctp-v2 badge 両方
+    expect(screen.getByText(/直接送金/)).toBeInTheDocument();
+    expect(screen.getByText(/通常 \(CCTP V2\)/)).toBeInTheDocument();
   });
 
   it('decision=onramp (全 chain + Gateway 0) → 何も表示しない', async () => {
@@ -256,9 +288,15 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('decision=gateway → 代替経路 hint + Gateway badge + Pay button', async () => {
-    // target=base で 0、Gateway に Polygon 残高あり
-    setAllChainsBalance(0n);
+  it('decision=gateway → CrossChainSourceChooser + Gateway 高速 badge + 統一 Pay button', async () => {
+    // target=base で 0、Gateway に Polygon 残高あり。wallet にも Polygon 10 USDC
+    // (Gateway option を出すための前提 = wallet balance + gateway pre-deposit 両方ある)。
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
     setupConnected();
     vi.stubGlobal(
       'fetch',
@@ -266,22 +304,23 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
         async () =>
           new Response(
             JSON.stringify({
-              balances: [{ domain: 7, balance: '10000000' }], // 10 USDC on Polygon
+              balances: [{ domain: 7, balance: '10000000' }], // 10 USDC on Polygon Gateway pre-deposit
             }),
             { status: 200 },
           ),
       ),
     );
     renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    // 新 UI: chooser title が出る、Polygon (mainnet 名 = "Polygon" / testnet 名 = "Polygon Amoy")
+    // の chooser button + "高速 (Gateway)" badge
     await waitFor(() => {
-      expect(
-        screen.getByText(/Circle Gateway 経由でも支払えます/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/支払元チェーンを選ぶ/)).toBeInTheDocument();
     });
-    expect(screen.getByText('gateway')).toBeInTheDocument();
-    expect(screen.getByText(/送金額: 5 USDC/)).toBeInTheDocument();
+    expect(screen.getByText(/高速 \(Gateway\)/)).toBeInTheDocument();
+    expect(screen.getByText(/必要額 5 USDC/)).toBeInTheDocument();
+    // 統一 Pay button (option kind に依らず常に同じ label)
     expect(
-      screen.getByRole('button', { name: /Circle Gateway で支払う/ }),
+      screen.getByRole('button', { name: /選択したチェーンで支払う/ }),
     ).toBeInTheDocument();
   });
 
@@ -302,14 +341,13 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
       ),
     );
     renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    // 新 UI: chooser に Polygon の "通常 (CCTP V2)" badge
     await waitFor(() => {
-      expect(
-        screen.getByText(/CCTP V2 Fast 経由でも支払えます/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/支払元チェーンを選ぶ/)).toBeInTheDocument();
     });
-    expect(screen.getByText('cctp-v2')).toBeInTheDocument();
+    expect(screen.getByText(/通常 \(CCTP V2\)/)).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /CCTP V2 Fast で支払う/ }),
+      screen.getByRole('button', { name: /選択したチェーンで支払う/ }),
     ).toBeInTheDocument();
   });
 });
@@ -347,7 +385,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
 
     const payBtn = await screen.findByRole('button', {
-      name: /Circle Gateway で支払う/,
+      name: /選択したチェーンで支払う/,
     });
     await user.click(payBtn);
 
@@ -396,7 +434,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
 
     renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
     const payBtn = await screen.findByRole('button', {
-      name: /Circle Gateway で支払う/,
+      name: /選択したチェーンで支払う/,
     });
     await user.click(payBtn);
 

@@ -440,11 +440,8 @@
     "balancesLoading": "他チェーン残高を確認中…",
     "bridgeGateway": "Circle Gateway",
     "bridgeCctp": "CCTP V2 Fast",
-    "alternativeAvailable": "{bridge} 経由でも支払えます",
-    "amount": "送金額: {value} USDC",
-    "describeGateway": "Gateway 経由で source domain {sourceDomain} → destination domain {destDomain} へ即時送金 (~500ms)。事前 deposit 済の残高から消費されます。",
-    "describeCctp": "CCTP V2 Fast 経由で chainId {sourceChainId} → chainId {destChainId} へ送金 (~10-30 秒)。USDC を burn して destination で mint します。",
-    "payWithCrossChain": "{bridge} で支払う",
+    "payWithSelected": "選択したチェーンで支払う",
+    "directSelectedHint": "受取チェーンと同じチェーンを選んだので、下の「支払う」ボタンから通常送金で決済してください。",
     "inProgress": "実行中",
     "progressSign": "署名待ち",
     "progressAttest": "Circle attestation 取得中",
@@ -457,6 +454,16 @@
     "successTitle": "{bridge} 経由で着金しました",
     "successDescription": "{amount} USDC を {recipient} (chainId {chainId}) に送金完了",
     "viewOnExplorer": "Explorer で確認"
+  },
+  "CrossChainSourceChooser": {
+    "title": "支払元チェーンを選ぶ",
+    "subtitle": "必要額 {required} USDC。残高がある全チェーンと、それぞれの手数料の概算を比較できます。",
+    "balance": "残高: {balance} USDC",
+    "feeBreakdownDirect": "手数料: ガス代のみ ({gasSymbol})",
+    "feeBreakdownCrossChain": "手数料: {fee} USDC + ガス代 ({gasSymbol}) · 約 {eta} 秒",
+    "pathBadgeDirect": "直接送金",
+    "pathBadgeGateway": "高速 (Gateway)",
+    "pathBadgeCctpV2": "通常 (CCTP V2)"
   },
   "LocaleSwitcher": {
     "label": "言語",

@@ -440,11 +440,8 @@
     "balancesLoading": "Checking other-chain balances…",
     "bridgeGateway": "Circle Gateway",
     "bridgeCctp": "CCTP V2 Fast",
-    "alternativeAvailable": "You can also pay via {bridge}",
-    "amount": "Amount: {value} USDC",
-    "describeGateway": "Send via Gateway from source domain {sourceDomain} to destination domain {destDomain} (~500ms). Consumed from your pre-deposited balance.",
-    "describeCctp": "Send via CCTP V2 Fast from chainId {sourceChainId} to chainId {destChainId} (~10-30s). Burns USDC on source, mints on destination.",
-    "payWithCrossChain": "Pay with {bridge}",
+    "payWithSelected": "Pay with selected chain",
+    "directSelectedHint": "You picked the same chain the merchant receives on. Use the regular Pay button below for a direct transfer.",
     "inProgress": "Executing",
     "progressSign": "Awaiting signature",
     "progressAttest": "Requesting Circle attestation",
@@ -457,6 +454,16 @@
     "successTitle": "Received via {bridge}",
     "successDescription": "Sent {amount} USDC to {recipient} on chainId {chainId}",
     "viewOnExplorer": "View on explorer"
+  },
+  "CrossChainSourceChooser": {
+    "title": "Choose payment source chain",
+    "subtitle": "Required: {required} USDC. Compare all chains where you have a balance plus their fees.",
+    "balance": "Balance: {balance} USDC",
+    "feeBreakdownDirect": "Fee: network gas only ({gasSymbol})",
+    "feeBreakdownCrossChain": "Fee: {fee} USDC + network gas ({gasSymbol}) · ~{eta}s",
+    "pathBadgeDirect": "Direct",
+    "pathBadgeGateway": "Fast (Gateway)",
+    "pathBadgeCctpV2": "Standard (CCTP V2)"
   },
   "LocaleSwitcher": {
     "label": "Language",
