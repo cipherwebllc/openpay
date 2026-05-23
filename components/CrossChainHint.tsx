@@ -144,7 +144,15 @@ export function CrossChainHint(props: CrossChainHintProps) {
       ? decisionForLog.sourceChainId
       : undefined;
   async function onClick() {
-    const executeResult = await hook.execute();
+    // hook.execute は失敗時 throw するが error state にも記録されるため、
+    // ここで catch して unhandled rejection 警告を抑制 (UI は useEffect で
+    // hook.error を観測して error panel + Sentry log を出す)。
+    let executeResult;
+    try {
+      executeResult = await hook.execute();
+    } catch {
+      return;
+    }
     if (executeResult) {
       const evt = buildPaymentLogEvent(
         {

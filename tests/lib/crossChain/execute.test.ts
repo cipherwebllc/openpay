@@ -404,3 +404,328 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
     expect(decoded.args[6]).toBe(2000);
   });
 });
+
+describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
+  it('Gateway: switchChainAsync fail (source switch) → sign/attest 到達せず throw', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+    const switchChain = vi.fn(async (_args: { chainId: number }) => {
+      throw new Error('user rejected chain switch');
+    });
+
+    await expect(
+      executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: switchChain,
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/user rejected chain switch/);
+    // sign / attest / mint 全 skip
+    expect(walletClient.signTypedData).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('Gateway: getBlockNumber fail (source RPC down) → sign 到達せず throw', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint'],
+    });
+    const sourcePublic = {
+      getBlockNumber: vi.fn(async () => {
+        throw new Error('rpc connection refused');
+      }),
+      waitForTransactionReceipt: vi.fn(),
+    };
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+
+    await expect(
+      executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/rpc connection refused/);
+    expect(walletClient.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('Gateway: signTypedData fail (user reject) → attestation API 呼ばれない', async () => {
+    const walletClient = {
+      chain: { id: 84532 },
+      signTypedData: vi.fn(async () => {
+        throw new Error('User denied message signature');
+      }),
+      sendTransaction: vi.fn(),
+      writeContract: vi.fn(),
+    };
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+
+    await expect(
+      executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/User denied message signature/);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('Gateway: mint sendTransaction fail (wallet reject) → result 返らず throw', async () => {
+    const walletClient = {
+      chain: { id: 80002 },
+      signTypedData: vi.fn(async () => '0xsig'),
+      sendTransaction: vi.fn(async () => {
+        throw new Error('Transaction rejected by user');
+      }),
+      writeContract: vi.fn(),
+    };
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/Transaction rejected by user/);
+    // attestation は取得済み (sign + fetch は呼ばれた)
+    expect(walletClient.signTypedData).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // wait は到達しない
+    expect(destPublic.waitForTransactionReceipt).not.toHaveBeenCalled();
+  });
+
+  it('Gateway: waitForTransactionReceipt fail (tx revert on chain) → throw', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint01'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = {
+      getBlockNumber: vi.fn(),
+      waitForTransactionReceipt: vi.fn(async () => {
+        throw new Error('Transaction reverted: insufficient gas');
+      }),
+    };
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/insufficient gas/);
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('CCTP: approve 成功 + burn 失敗 → poll/receive 到達せず (orphaned approve は許容)', async () => {
+    // approve は成功するが depositForBurn 直後の sendTransaction で reject。
+    // 既に source chain の USDC allowance は GatewayMinter に許可済 = orphaned。
+    // 本 plan §6 で「approve 残置は許容、buyer は次回 fresh approve で上書き」と documented。
+    const walletClient = {
+      chain: { id: 84532 },
+      signTypedData: vi.fn(),
+      sendTransaction: vi.fn(async () => {
+        throw new Error('burn tx rejected');
+      }),
+      writeContract: vi.fn(async () => '0xapprove01' as Hex),
+    };
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/burn tx rejected/);
+    // approve は呼ばれた (allowance は付与済 = orphaned)
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
+    // burn 失敗で poll / receive 到達せず
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('CCTP: iris attestation timeout → mint 到達せず throw', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove', '0xburn'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    // attestation が常に pending → polling timeout
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'pending_confirmations' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    let t = 0;
+    const nowMock = vi.fn(() => {
+      const cur = t;
+      t += 100_000;
+      return cur;
+    });
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: {
+          sleep: vi.fn(async (_ms: number) => undefined),
+          now: nowMock,
+          timeoutMs: 90_000,
+        },
+      }),
+    ).rejects.toThrow(/timeout/);
+    // approve + burn は完了、mint (sendTransaction 2 回目) は到達せず
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1); // burn のみ
+  });
+
+  it('CCTP: iris response messages array が empty → polling 継続して timeout', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xa', '0xb'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ messages: [] }), { status: 200 }),
+    );
+    let t = 0;
+    const nowMock = vi.fn(() => {
+      const cur = t;
+      t += 50_000;
+      return cur;
+    });
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: {
+          sleep: vi.fn(async (_ms: number) => undefined),
+          now: nowMock,
+          timeoutMs: 90_000,
+        },
+      }),
+    ).rejects.toThrow(/timeout/);
+  });
+});

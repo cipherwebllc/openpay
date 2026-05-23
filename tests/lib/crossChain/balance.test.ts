@@ -257,3 +257,142 @@ describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
     }
   });
 });
+
+describe('lib/crossChain/balance: edge cases + malformed responses', () => {
+  it('Gateway response に予期しない field が含まれても無視する', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          balances: [
+            { domain: 6, balance: '100', extra: 'ignored' },
+          ],
+          extraTopLevel: 'whatever',
+        }),
+        { status: 200 },
+      ),
+    );
+    const out = await readGatewayUnifiedBalance(ACCOUNT, undefined, {
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+    expect(out.status).toBe('ok');
+    if (out.status === 'ok') {
+      expect(out.total).toBe(100n);
+    }
+  });
+
+  it('Gateway response の balance が非数値 string → BigInt() で throw → status=error にならず例外', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          balances: [{ domain: 6, balance: 'not-a-number' }],
+        }),
+        { status: 200 },
+      ),
+    );
+    // BigInt('not-a-number') は SyntaxError throw する設計上の制約。
+    // Circle API が無効値を返すケースは contract 違反 (production では発生しないはず)
+    // のため、明示的 SyntaxError を上に投げる挙動を確認 (silent な 0 fallback ではない)。
+    await expect(
+      readGatewayUnifiedBalance(ACCOUNT, undefined, {
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/Cannot convert/);
+  });
+
+  it('Gateway response が空 array → status=ok, total=0n, perDomain.size=0', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+    );
+    const out = await readGatewayUnifiedBalance(ACCOUNT, undefined, {
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+    expect(out.status).toBe('ok');
+    if (out.status === 'ok') {
+      expect(out.total).toBe(0n);
+      expect(out.perDomain.size).toBe(0);
+    }
+  });
+
+  it('Gateway HTTP 4xx (401 unauth) → status=error, error にステータス含む', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response('Unauthorized', { status: 401 }),
+    );
+    const out = await readGatewayUnifiedBalance(ACCOUNT, undefined, {
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+    expect(out.status).toBe('error');
+    if (out.status === 'error') {
+      expect(out.error).toContain('HTTP 401');
+    }
+  });
+
+  it('concurrent: 同一 account に 4 並列 readMultiChainWalletBalances → 4 chain × 4 = 16 readContract', async () => {
+    for (const chain of [
+      baseSepolia,
+      polygonAmoy,
+      arbitrumSepolia,
+      optimismSepolia,
+    ]) {
+      readContractMocks.set(chain.id, vi.fn().mockResolvedValue(1n));
+    }
+    const results = await Promise.all([
+      readMultiChainWalletBalances(ACCOUNT),
+      readMultiChainWalletBalances(ACCOUNT),
+      readMultiChainWalletBalances(ACCOUNT),
+      readMultiChainWalletBalances(ACCOUNT),
+    ]);
+    expect(results).toHaveLength(4);
+    // 各 chain の mock は 4 回呼ばれる (キャッシュなし、毎回 createPublicClient)
+    for (const chain of [
+      baseSepolia,
+      polygonAmoy,
+      arbitrumSepolia,
+      optimismSepolia,
+    ]) {
+      expect(readContractMocks.get(chain.id)!.mock.calls.length).toBe(4);
+    }
+  });
+
+  it('巨大 uint256 max balance を BigInt 損失なく集計', async () => {
+    const uint256Max =
+      '115792089237316195423570985008687907853269984665640564039457584007913129639935';
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          balances: [
+            { domain: 6, balance: uint256Max },
+            { domain: 7, balance: '1' },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    // BigInt 加算: uint256Max + 1n は overflow しない (JS BigInt は無限精度)
+    const out = await readGatewayUnifiedBalance(ACCOUNT, undefined, {
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+    expect(out.status).toBe('ok');
+    if (out.status === 'ok') {
+      expect(out.total).toBe(BigInt(uint256Max) + 1n);
+    }
+  });
+
+  it('readAllCrossChainBalances: wallet 全成功 + gateway error の混在', async () => {
+    for (const chain of [
+      baseSepolia,
+      polygonAmoy,
+      arbitrumSepolia,
+      optimismSepolia,
+    ]) {
+      readContractMocks.set(chain.id, vi.fn().mockResolvedValue(42n));
+    }
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response('server boom', { status: 500 }),
+    );
+    const out = await readAllCrossChainBalances(ACCOUNT, {
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+    expect(out.wallet.every((w) => w.status === 'ok')).toBe(true);
+    expect(out.gateway.status).toBe('error');
+  });
+});

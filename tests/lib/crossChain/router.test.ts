@@ -275,3 +275,219 @@ describe('lib/crossChain/router.selectPath', () => {
   });
 });
 
+
+describe('lib/crossChain/router.selectPath: 境界条件 + データ不整合', () => {
+  it('boundary: target chain balance がぴったり requiredAtomic と等しい → direct', () => {
+    const required = 5_000_000n;
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, required), // exact
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map(),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: required,
+      balances,
+    });
+    expect(decision.path).toBe('direct');
+  });
+
+  it('boundary: target chain balance が requiredAtomic - 1 → direct 不可', () => {
+    const required = 5_000_000n;
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, required - 1n),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map(),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: required,
+      balances,
+    });
+    // direct 不可 + Gateway 0 + 他 chain 0 → onramp
+    expect(decision.path).toBe('onramp');
+  });
+
+  it('boundary: Gateway balance がぴったり requiredAtomic と等しい → gateway', () => {
+    const required = 5_000_000n;
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, 0n),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map([[CIRCLE_DOMAIN_POLYGON, required]]),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: required,
+      balances,
+    });
+    expect(decision.path).toBe('gateway');
+  });
+
+  it('boundary: cross-chain balance ちょうど required → cctp-v2', () => {
+    const required = 5_000_000n;
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, 0n),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, required),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map(),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: required,
+      balances,
+    });
+    expect(decision.path).toBe('cctp-v2');
+  });
+
+  it('edge: requiredAtomic = 0n → direct (常に sufficient)', () => {
+    // amount=0 は実 use case では起きないが、URL parse 後の amount未入力など
+    // で渡る可能性。決定論的に動くか確認 (throw しない、direct で返る)。
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, 0n),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map(),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: 0n,
+      balances,
+    });
+    // 0 >= 0 → direct
+    expect(decision.path).toBe('direct');
+  });
+
+  it('mixed: target chain error + 他 chain ok → cctp-v2 経路を選ぶ', () => {
+    const balances = makeBalances({
+      walletEntries: [
+        errorEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE), // dest が error
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 10_000_000n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map(),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: 5_000_000n,
+      balances,
+    });
+    // direct 判定: target が error → 不可、cctp 経路に進む
+    expect(decision.path).toBe('cctp-v2');
+  });
+
+  it('mixed: target chain error + Gateway ok → gateway 経路を選ぶ', () => {
+    const balances = makeBalances({
+      walletEntries: [
+        errorEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map([[CIRCLE_DOMAIN_POLYGON, 10_000_000n]]),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: 5_000_000n,
+      balances,
+    });
+    expect(decision.path).toBe('gateway');
+  });
+
+  it('edge: balance.wallet が target chain entry を含まない (データ不整合)', () => {
+    // CROSS_CHAIN_TARGETS から target が外れている場合 (例: phase 3 で 12 chain
+    // 拡張時に config 同期漏れ)、direct 判定が undefined になる → 他 path 検討。
+    const balances = makeBalances({
+      walletEntries: [
+        // base entry 欠落 (target=base)
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 10_000_000n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map(),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: 5_000_000n,
+      balances,
+    });
+    // direct skip (entry 不在) → CCTP 経路 (polygon 残高利用)
+    expect(decision.path).toBe('cctp-v2');
+  });
+
+  it('Gateway path: sourceDomain は destination 以外で最大 balance を厳密に選ぶ', () => {
+    // 4 chain 全部に Gateway balance あり + 3 chain は sufficient
+    // → destination 以外で最大の chain を選ぶ
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, 0n),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map([
+        [CIRCLE_DOMAIN_BASE, 1_000_000_000n], // dest と一致 → 除外
+        [CIRCLE_DOMAIN_POLYGON, 6_000_000n],
+        [CIRCLE_DOMAIN_ARBITRUM, 30_000_000n], // ★最大 cross-chain
+        [CIRCLE_DOMAIN_OPTIMISM, 9_000_000n],
+      ]),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: 5_000_000n,
+      balances,
+    });
+    expect(decision.path).toBe('gateway');
+    if (decision.path === 'gateway') {
+      expect(decision.sourceDomain).toBe(CIRCLE_DOMAIN_ARBITRUM);
+    }
+  });
+
+  it('Gateway path: 全 source が不足だが Gateway total >= required (合算可能)', () => {
+    // 単一 source では足りないが全合計 >= required の場合、
+    // selectPath は gateway を選び sourceDomain は best-effort (max balance) を返す
+    // (phase 1 では single source 想定、実 execute では再判定)
+    const balances = makeBalances({
+      walletEntries: [
+        walletEntry(baseSepolia.id, CIRCLE_DOMAIN_BASE, 0n),
+        walletEntry(polygonAmoy.id, CIRCLE_DOMAIN_POLYGON, 0n),
+        walletEntry(arbitrumSepolia.id, CIRCLE_DOMAIN_ARBITRUM, 0n),
+        walletEntry(optimismSepolia.id, CIRCLE_DOMAIN_OPTIMISM, 0n),
+      ],
+      gatewayPerDomain: new Map([
+        [CIRCLE_DOMAIN_POLYGON, 3_000_000n],
+        [CIRCLE_DOMAIN_ARBITRUM, 3_000_000n], // 合計 6M >= 5M required
+      ]),
+    });
+    const decision = selectPath({
+      targetChainId: baseSepolia.id,
+      requiredAtomic: 5_000_000n,
+      balances,
+    });
+    expect(decision.path).toBe('gateway');
+    if (decision.path === 'gateway') {
+      // 単一 source では満たせないため lexicographic max (Arbitrum or Polygon の同額)
+      expect([CIRCLE_DOMAIN_POLYGON, CIRCLE_DOMAIN_ARBITRUM]).toContain(
+        decision.sourceDomain,
+      );
+    }
+  });
+});

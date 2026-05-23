@@ -330,3 +330,169 @@ describe('lib/crossChain/cctp iris API', () => {
     });
   });
 });
+
+describe('lib/crossChain/cctp: edge cases + 境界条件', () => {
+  it('depositForBurn: value=0 でも encode 可能 (call site 側で gate)', () => {
+    const data = encodeDepositForBurnCalldata({
+      value: 0n,
+      destinationDomain: CIRCLE_DOMAIN_BASE,
+      recipient: RECIPIENT,
+      burnToken: TOKEN,
+    });
+    const decoded = decodeFunctionData({
+      abi: CCTP_V2_TOKEN_MESSENGER_ABI,
+      data,
+    });
+    expect(decoded.args[0]).toBe(0n);
+    // 0 * 10bps / 10000 = 0 → MIN 1000 が効く
+    expect(decoded.args[5]).toBe(1000n);
+  });
+
+  it('depositForBurn: uint256 max value でも encode 通る', () => {
+    const max = (1n << 256n) - 1n;
+    const data = encodeDepositForBurnCalldata({
+      value: max,
+      destinationDomain: CIRCLE_DOMAIN_BASE,
+      recipient: RECIPIENT,
+      burnToken: TOKEN,
+    });
+    const decoded = decodeFunctionData({
+      abi: CCTP_V2_TOKEN_MESSENGER_ABI,
+      data,
+    });
+    expect(decoded.args[0]).toBe(max);
+  });
+
+  it('encodeReceiveMessageCalldata: 空 bytes ("0x") を受け付ける', () => {
+    const data = encodeReceiveMessageCalldata('0x', '0x');
+    const decoded = decodeFunctionData({
+      abi: CCTP_V2_MESSAGE_TRANSMITTER_ABI,
+      data,
+    });
+    expect(decoded.args[0]).toBe('0x');
+    expect(decoded.args[1]).toBe('0x');
+  });
+
+  it('iris API: 巨大 message body (~10KB) でも JSON parse 通る', async () => {
+    const longMessage = ('0x' + 'ab'.repeat(5000)) as Hex;
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          messages: [
+            {
+              status: 'complete',
+              message: longMessage,
+              attestation: '0xsig',
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+      fetch: mockFetch as unknown as typeof fetch,
+      sleep: vi.fn(async (_ms: number) => undefined),
+      now: () => 0,
+    });
+    expect(result.message).toBe(longMessage);
+  });
+
+  it('iris API: multi-message response (multi-burn) では first complete を返す', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          messages: [
+            { status: 'pending_confirmations' },
+            { status: 'complete', message: '0xfirst', attestation: '0xsig1' },
+            { status: 'complete', message: '0xsecond', attestation: '0xsig2' },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+      fetch: mockFetch as unknown as typeof fetch,
+      sleep: vi.fn(async (_ms: number) => undefined),
+      now: () => 0,
+    });
+    expect(result.message).toBe('0xfirst');
+    expect(result.attestation).toBe('0xsig1');
+  });
+
+  it('iris API: HTTP 5xx error → throw (transient retry は caller 責務)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response('internal server error', { status: 500 }),
+    );
+    await expect(
+      fetchIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/HTTP 500/);
+  });
+
+  it('iris API: malformed JSON response → SyntaxError throw', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response('<html>blocked by waf</html>', { status: 200 }),
+    );
+    await expect(
+      fetchIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('iris polling: 初回 fetch 後すぐ complete → sleep 1 回も呼ばれない', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          messages: [{ status: 'complete', message: '0xa', attestation: '0xb' }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const sleepMock = vi.fn(async (_ms: number) => undefined);
+    await pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+      fetch: mockFetch as unknown as typeof fetch,
+      sleep: sleepMock,
+      now: () => 0,
+    });
+    expect(sleepMock).not.toHaveBeenCalled();
+  });
+
+  it('concurrent: 同一 tx hash 3 並列 polling → 各々独立に動く', async () => {
+    let i = 0;
+    const responses = [
+      JSON.stringify({
+        messages: [{ status: 'complete', message: '0x1', attestation: '0xa' }],
+      }),
+      JSON.stringify({
+        messages: [{ status: 'complete', message: '0x2', attestation: '0xb' }],
+      }),
+      JSON.stringify({
+        messages: [{ status: 'complete', message: '0x3', attestation: '0xc' }],
+      }),
+    ];
+    const mockFetch = vi.fn(async () => {
+      const body = responses[i++ % responses.length];
+      return new Response(body, { status: 200 });
+    });
+    const results = await Promise.all([
+      pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+        fetch: mockFetch as unknown as typeof fetch,
+        sleep: vi.fn(async (_ms: number) => undefined),
+        now: () => 0,
+      }),
+      pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+        fetch: mockFetch as unknown as typeof fetch,
+        sleep: vi.fn(async (_ms: number) => undefined),
+        now: () => 0,
+      }),
+      pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1' as Hex, {
+        fetch: mockFetch as unknown as typeof fetch,
+        sleep: vi.fn(async (_ms: number) => undefined),
+        now: () => 0,
+      }),
+    ]);
+    expect(results.map((r) => r.message)).toEqual(['0x1', '0x2', '0x3']);
+  });
+});

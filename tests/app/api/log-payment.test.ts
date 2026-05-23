@@ -561,3 +561,113 @@ describe('GET /api/log/payment/export', () => {
     expect(JSON.stringify(body)).not.toContain('http_error');
   });
 });
+
+describe('POST /api/log/payment: bridge field validation (phase 2)', () => {
+  beforeEach(() => {
+    vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("bridge='gateway' を受理 + KV に保存", async () => {
+    const res = await POST(req({ ...validBody, bridge: 'gateway' }));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.bridge).toBe('gateway');
+  });
+
+  it("bridge='cctp-v2' を受理 + KV に保存", async () => {
+    const res = await POST(req({ ...validBody, bridge: 'cctp-v2' }));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.bridge).toBe('cctp-v2');
+  });
+
+  it('bridge 未指定 (direct) は受理、KV entry に bridge が含まれない', async () => {
+    const res = await POST(req(validBody));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.bridge).toBeUndefined();
+  });
+
+  it("bridge='unknown-bridge' (allowlist 外) は 400", async () => {
+    const res = await POST(req({ ...validBody, bridge: 'unknown-bridge' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+    expect(kvLpush).not.toHaveBeenCalled();
+  });
+
+  it("bridge=null は 400 (string type 要求)", async () => {
+    const res = await POST(req({ ...validBody, bridge: null }));
+    expect(res.status).toBe(400);
+  });
+
+  it('bridge が配列で渡されると 400', async () => {
+    const res = await POST(req({ ...validBody, bridge: ['gateway'] }));
+    expect(res.status).toBe(400);
+  });
+
+  it('bridge が数値 (1) で渡されると 400', async () => {
+    const res = await POST(req({ ...validBody, bridge: 1 }));
+    expect(res.status).toBe(400);
+  });
+
+  it('bridge=gateway + sourceChainId=84532 (正常) を受理', async () => {
+    const res = await POST(
+      req({ ...validBody, bridge: 'gateway', sourceChainId: 84532 }),
+    );
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.sourceChainId).toBe(84532);
+  });
+
+  it('sourceChainId が負の整数 → 400', async () => {
+    const res = await POST(
+      req({ ...validBody, bridge: 'gateway', sourceChainId: -1 }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('sourceChainId = 0 → 400 (positive 要求)', async () => {
+    const res = await POST(
+      req({ ...validBody, bridge: 'gateway', sourceChainId: 0 }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('sourceChainId が string ("84532") → 400 (number 要求)', async () => {
+    const res = await POST(
+      req({ ...validBody, bridge: 'gateway', sourceChainId: '84532' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('sourceChainId が float (84532.5) → 400 (integer 要求)', async () => {
+    const res = await POST(
+      req({ ...validBody, bridge: 'gateway', sourceChainId: 84532.5 }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('cross-chain entry: 全 field 込みの roundtrip 検証', async () => {
+    const res = await POST(
+      req({
+        ...validBody,
+        bridge: 'cctp-v2',
+        sourceChainId: 137,
+        txHash: validBody.txHash,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry).toMatchObject({
+      bridge: 'cctp-v2',
+      sourceChainId: 137,
+      chainId: 137, // destination
+      flow: 'batch',
+      result: 'success',
+    });
+  });
+});
