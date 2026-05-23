@@ -678,6 +678,20 @@ Next.js 仕様で build-time env (client bundle へ inline)。Vercel env を fli
 - [ ] Vercel Instant Rollback 経路を 1 度試して所要時間 (~10s 目安) を計測、
       運用 SOP として記録
 
+### §10.6c Supply chain / npm audit
+
+詳細は [`docs/SUPPLY_CHAIN_RISKS.md`](./SUPPLY_CHAIN_RISKS.md) 参照。
+
+**2026-05-24 deploy 時点 baseline**:
+- 47 vulnerabilities → 29 (12 low / 30 mod / 5 high → 13 low / 16 mod / **0 high**)
+- HIGH 5 件全て解消 (js-cookie / ws / postcss-devDep override 経由)
+- 残 29 件は 2 root (postcss-in-Next、uuid-in-MetaMask/WalletConnect) からの transitive で、本 OpenPay の使用形態では実 exploit パスなし (詳細は SUPPLY_CHAIN_RISKS.md)
+
+**operator 四半期 task**:
+- [ ] `npm audit --omit=dev` 実行、新規 HIGH/CRITICAL が無いことを確認
+- [ ] `docs/SUPPLY_CHAIN_RISKS.md` の "Re-evaluate trigger" 各 upstream release を確認
+- [ ] Next.js (postcss 内部 bump) / Alchemy / MetaMask / WalletConnect / Solana が patch 版を release していれば `npm install` で自動解消されるか確認
+
 ### §10.7 Production opt-out 経路の確認
 
 - [ ] Vercel env で `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED=false` (本線 UI
