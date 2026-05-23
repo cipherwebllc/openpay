@@ -7,16 +7,19 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 import type { Address } from 'viem';
 import { isMainnet } from '../env';
 import {
   CIRCLE_DOMAIN_ARBITRUM,
   CIRCLE_DOMAIN_BASE,
+  CIRCLE_DOMAIN_ETHEREUM,
   CIRCLE_DOMAIN_OPTIMISM,
   CIRCLE_DOMAIN_POLYGON,
   type CircleDomain,
@@ -87,6 +90,8 @@ const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
   [arbitrumSepolia.id]: CIRCLE_DOMAIN_ARBITRUM,
   [optimism.id]: CIRCLE_DOMAIN_OPTIMISM,
   [optimismSepolia.id]: CIRCLE_DOMAIN_OPTIMISM,
+  [mainnet.id]: CIRCLE_DOMAIN_ETHEREUM,
+  [sepolia.id]: CIRCLE_DOMAIN_ETHEREUM,
 };
 
 // domain は mainnet/testnet 共通だが chainId は env により異なるため 2 table。
@@ -95,6 +100,7 @@ const DOMAIN_TO_CHAIN_ID_MAINNET: Record<CircleDomain, number> = {
   [CIRCLE_DOMAIN_BASE]: base.id,
   [CIRCLE_DOMAIN_ARBITRUM]: arbitrum.id,
   [CIRCLE_DOMAIN_OPTIMISM]: optimism.id,
+  [CIRCLE_DOMAIN_ETHEREUM]: mainnet.id,
 };
 
 const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
@@ -102,6 +108,7 @@ const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
   [CIRCLE_DOMAIN_BASE]: baseSepolia.id,
   [CIRCLE_DOMAIN_ARBITRUM]: arbitrumSepolia.id,
   [CIRCLE_DOMAIN_OPTIMISM]: optimismSepolia.id,
+  [CIRCLE_DOMAIN_ETHEREUM]: sepolia.id,
 };
 
 export function domainForChainId(chainId: number): CircleDomain | undefined {
@@ -116,6 +123,7 @@ export function chainIdForDomain(domain: CircleDomain): number {
 
 // chain 拡張 (Ethereum/Avalanche/Unichain 等の Gateway 12 chain 対応) は本
 // array + CHAIN_ID_TO_DOMAIN + DOMAIN_TO_CHAIN_ID_* の 3 箇所を同期更新する。
+// Ethereum L1 は phase 4a で追加 (SBI VC トレード等の merchant 受信 demand)。
 export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
   ? [
       { domain: CIRCLE_DOMAIN_POLYGON, chainId: polygon.id, isTestnet: false },
@@ -128,6 +136,11 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
       {
         domain: CIRCLE_DOMAIN_OPTIMISM,
         chainId: optimism.id,
+        isTestnet: false,
+      },
+      {
+        domain: CIRCLE_DOMAIN_ETHEREUM,
+        chainId: mainnet.id,
         isTestnet: false,
       },
     ]
@@ -146,6 +159,11 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
       {
         domain: CIRCLE_DOMAIN_OPTIMISM,
         chainId: optimismSepolia.id,
+        isTestnet: true,
+      },
+      {
+        domain: CIRCLE_DOMAIN_ETHEREUM,
+        chainId: sepolia.id,
         isTestnet: true,
       },
     ];

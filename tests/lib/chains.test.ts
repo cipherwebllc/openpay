@@ -19,30 +19,34 @@ import {
   baseSepolia,
   kaia,
   kairos,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 
 // vitest.config.ts で NETWORK_ENV='testnet' なので testnet 側を期待
 describe('chains (testnet env)', () => {
-  it('chainForSlug が testnet env で sepolia/kairos 系チェーンを返す (5 slug 全て)', () => {
+  it('chainForSlug が testnet env で sepolia/kairos 系チェーンを返す (6 slug 全て)', () => {
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
     expect(chainForSlug('base').id).toBe(baseSepolia.id);
     expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
     expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
     expect(chainForSlug('kaia').id).toBe(kairos.id);
+    expect(chainForSlug('ethereum').id).toBe(sepolia.id);
   });
 
-  it('supportedChains は 5 本 (Base / Arbitrum / Optimism / Polygon / Kaia)', () => {
-    expect(supportedChains).toHaveLength(5);
+  it('supportedChains は 6 本 (Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum)', () => {
+    expect(supportedChains).toHaveLength(6);
     const ids = supportedChains.map((c) => c.id);
     expect(ids).toContain(baseSepolia.id);
     expect(ids).toContain(arbitrumSepolia.id);
     expect(ids).toContain(optimismSepolia.id);
     expect(ids).toContain(polygonAmoy.id);
     expect(ids).toContain(kairos.id);
+    expect(ids).toContain(sepolia.id);
   });
 
   it('mainnet チェーンは含まれない', () => {
@@ -52,17 +56,24 @@ describe('chains (testnet env)', () => {
     expect(ids).not.toContain(arbitrum.id);
     expect(ids).not.toContain(optimism.id);
     expect(ids).not.toContain(kaia.id);
+    expect(ids).not.toContain(mainnet.id);
   });
 });
 
 describe('isValidChainSlug', () => {
-  it.each(['base', 'arbitrum', 'optimism', 'polygon', 'kaia'])('"%s" → true', (s) => {
-    expect(isValidChainSlug(s)).toBe(true);
-  });
+  it.each(['base', 'arbitrum', 'optimism', 'polygon', 'kaia', 'ethereum'])(
+    '"%s" → true',
+    (s) => {
+      expect(isValidChainSlug(s)).toBe(true);
+    },
+  );
 
-  it.each(['eth', 'BASE', '', 'avalanche', 'unknown', 'kairos'])('"%s" → false', (s) => {
-    expect(isValidChainSlug(s)).toBe(false);
-  });
+  it.each(['eth', 'BASE', '', 'avalanche', 'unknown', 'kairos', 'mainnet'])(
+    '"%s" → false',
+    (s) => {
+      expect(isValidChainSlug(s)).toBe(false);
+    },
+  );
 });
 
 describe('chainForSlug', () => {
@@ -72,6 +83,7 @@ describe('chainForSlug', () => {
     expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
     expect(chainForSlug('kaia').id).toBe(kairos.id);
+    expect(chainForSlug('ethereum').id).toBe(sepolia.id);
   });
 });
 
@@ -82,26 +94,29 @@ describe('slugForChain', () => {
     expect(slugForChain(optimismSepolia.id)).toBe('optimism');
     expect(slugForChain(polygonAmoy.id)).toBe('polygon');
     expect(slugForChain(kairos.id)).toBe('kaia');
+    expect(slugForChain(sepolia.id)).toBe('ethereum');
   });
 
   it('未対応 chainId は undefined', () => {
-    expect(slugForChain(1)).toBeUndefined();
     expect(slugForChain(0)).toBeUndefined();
     expect(slugForChain(polygon.id)).toBeUndefined(); // mainnet (testnet env)
     expect(slugForChain(kaia.id)).toBeUndefined(); // mainnet
+    expect(slugForChain(mainnet.id)).toBeUndefined(); // mainnet (Ethereum L1, testnet env)
   });
 });
 
 describe('isSupportedChainId', () => {
-  it('対応 4 chain は true', () => {
+  it('対応 5 chain は true (testnet env)', () => {
     expect(isSupportedChainId(baseSepolia.id)).toBe(true);
     expect(isSupportedChainId(arbitrumSepolia.id)).toBe(true);
     expect(isSupportedChainId(optimismSepolia.id)).toBe(true);
     expect(isSupportedChainId(polygonAmoy.id)).toBe(true);
+    expect(isSupportedChainId(kairos.id)).toBe(true);
+    expect(isSupportedChainId(sepolia.id)).toBe(true);
   });
 
   it('非対応 / undefined / 0 は false', () => {
-    expect(isSupportedChainId(1)).toBe(false); // ethereum mainnet
+    expect(isSupportedChainId(mainnet.id)).toBe(false); // ethereum mainnet (testnet env)
     expect(isSupportedChainId(undefined)).toBe(false);
     expect(isSupportedChainId(0)).toBe(false);
   });
@@ -127,14 +142,34 @@ describe('JPYC_CHAINS / isJpycChainSlug', () => {
 });
 
 describe('customRpcUrlForChain', () => {
-  it('env 未設定なら undefined (対応 5 chain × mainnet/testnet すべて)', () => {
+  it('env 未設定なら undefined (対応 6 chain × mainnet/testnet すべて)', () => {
     expect(customRpcUrlForChain(chainForSlug('polygon').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('base').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('arbitrum').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('optimism').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('kaia').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('ethereum').id)).toBeUndefined();
     expect(customRpcUrlForChain(arbitrum.id)).toBeUndefined();
     expect(customRpcUrlForChain(optimism.id)).toBeUndefined();
+    expect(customRpcUrlForChain(mainnet.id)).toBeUndefined();
+  });
+
+  it('NEXT_PUBLIC_ETHEREUM_RPC_URL が mainnet (1) に効く (env.rpc.ethereum)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL = 'https://eth-rpc.example/test';
+    const { customRpcUrlForChain: fn } = await import('@/lib/chains');
+    const { mainnet: mainnetChain } = await import('viem/chains');
+    expect(fn(mainnetChain.id)).toBe('https://eth-rpc.example/test');
+    delete process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL;
+  });
+
+  it('NEXT_PUBLIC_SEPOLIA_RPC_URL が sepolia (11155111) に効く', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL = 'https://sepolia-rpc.example/test';
+    const { customRpcUrlForChain: fn } = await import('@/lib/chains');
+    const { sepolia: sepoliaChain } = await import('viem/chains');
+    expect(fn(sepoliaChain.id)).toBe('https://sepolia-rpc.example/test');
+    delete process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL;
   });
 
   it('NEXT_PUBLIC_KAIA_RPC_URL が kaia mainnet (8217) に効く', async () => {
@@ -184,7 +219,8 @@ describe('txExplorerUrl', () => {
     ['arbitrum', arbitrumSepolia.id],
     ['optimism', optimismSepolia.id],
     ['polygon', polygonAmoy.id],
-  ] as const)('4 chain (%s) すべてで tx URL が生成される', (_slug, chainId) => {
+    ['ethereum', sepolia.id],
+  ] as const)('5 chain (%s) すべてで tx URL が生成される', (_slug, chainId) => {
     const url = txExplorerUrl(chainId, `0x${'b'.repeat(64)}`);
     expect(url).toMatch(/^https?:\/\/[^/]+\/tx\/0xb+$/);
   });
@@ -214,7 +250,8 @@ describe('addressExplorerUrl', () => {
     ['arbitrum', arbitrumSepolia.id],
     ['optimism', optimismSepolia.id],
     ['polygon', polygonAmoy.id],
-  ] as const)('4 chain (%s) すべてで address URL が生成される', (_slug, chainId) => {
+    ['ethereum', sepolia.id],
+  ] as const)('5 chain (%s) すべてで address URL が生成される', (_slug, chainId) => {
     const url = addressExplorerUrl(chainId, `0x${'2'.repeat(40)}`);
     expect(url).toMatch(/^https?:\/\/[^/]+\/address\/0x2+$/);
   });

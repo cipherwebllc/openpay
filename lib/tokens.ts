@@ -6,10 +6,12 @@ import {
   baseSepolia,
   kaia,
   kairos,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 import { env, isMainnet } from './env';
 import {
@@ -26,7 +28,11 @@ export type TokenSymbol = (typeof TOKEN_SYMBOLS)[number];
 // Paymaster モード。挙動の詳細は lib/pimlico.ts の冒頭コメント参照。
 //   sponsorship = 運営がネイティブガスを肩代わり (Sponsorship Paymaster)
 //   erc20       = 顧客がトークンでガスを支払う (ERC20 Paymaster、mainnet 限定)
-export type PaymasterMode = 'sponsorship' | 'erc20';
+//   unavailable = 該当 chain で Pimlico paymaster 未対応 (standard mode 必須、
+//                 gasless mode は URL parser で reject される)。
+//                 例: USDC on Ethereum L1 (Pimlico ERC20 paymaster 未 deploy、
+//                 cost 経済性のため Pimlico 側で対応予定なし)
+export type PaymasterMode = 'sponsorship' | 'erc20' | 'unavailable';
 
 // 単一 (symbol, chainId) ペアの ERC20 デプロイメント情報。同じ symbol でも複数
 // chain に存在し得る (例: USDC は Base / Arbitrum / Optimism / Polygon)。
@@ -55,7 +61,7 @@ export type TokenDeployment = {
 // でも UI が動作する safe-by-default 設計。
 const JPYC_V3_ADDRESS: Address = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 
-// USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet)
+// USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet) + Ethereum (phase 4a)
 const USDC_BASE_MAINNET: Address =
   '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const USDC_ARBITRUM_MAINNET: Address =
@@ -64,6 +70,8 @@ const USDC_OPTIMISM_MAINNET: Address =
   '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85';
 const USDC_POLYGON_MAINNET: Address =
   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+const USDC_ETHEREUM_MAINNET: Address =
+  '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 
 // USDC native (Circle faucet 対応) — testnet
 const USDC_BASE_SEPOLIA: Address =
@@ -74,9 +82,10 @@ const USDC_OPTIMISM_SEPOLIA: Address =
   '0x5fd84259d66Cd46123540766Be93DFE6D43130D7';
 const USDC_POLYGON_AMOY: Address =
   '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582';
+const USDC_SEPOLIA: Address = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
 
 // chain 軸の env override は ChainSlug をキーに引く。
-// USDC は Circle native の 4 chain (base/arbitrum/optimism/polygon) のみで、
+// USDC は Circle native の 5 chain (base/arbitrum/optimism/polygon/ethereum)、
 // kaia には native USDC 未 deploy のため対象外 (UsdcChainSlug で型レベル除外)。
 type UsdcChainSlug = Exclude<ChainSlug, 'kaia'>;
 
@@ -88,6 +97,7 @@ function usdcAddress(slug: UsdcChainSlug): Address {
     if (slug === 'base') return USDC_BASE_MAINNET;
     if (slug === 'arbitrum') return USDC_ARBITRUM_MAINNET;
     if (slug === 'optimism') return USDC_OPTIMISM_MAINNET;
+    if (slug === 'ethereum') return USDC_ETHEREUM_MAINNET;
     return USDC_POLYGON_MAINNET; // polygon
   }
   const overrides = env.testnetTokenOverrides.usdc;
@@ -96,6 +106,7 @@ function usdcAddress(slug: UsdcChainSlug): Address {
   if (slug === 'base') return USDC_BASE_SEPOLIA;
   if (slug === 'arbitrum') return USDC_ARBITRUM_SEPOLIA;
   if (slug === 'optimism') return USDC_OPTIMISM_SEPOLIA;
+  if (slug === 'ethereum') return USDC_SEPOLIA;
   return USDC_POLYGON_AMOY; // polygon
 }
 
@@ -105,16 +116,31 @@ function chainIdFor(slug: ChainSlug): number {
     if (slug === 'arbitrum') return arbitrum.id;
     if (slug === 'optimism') return optimism.id;
     if (slug === 'kaia') return kaia.id;
+    if (slug === 'ethereum') return mainnet.id;
     return polygon.id;
   }
   if (slug === 'base') return baseSepolia.id;
   if (slug === 'arbitrum') return arbitrumSepolia.id;
   if (slug === 'optimism') return optimismSepolia.id;
   if (slug === 'kaia') return kairos.id;
+  if (slug === 'ethereum') return sepolia.id;
   return polygonAmoy.id;
 }
 
-const USDC_SLUGS: readonly UsdcChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
+const USDC_SLUGS: readonly UsdcChainSlug[] = [
+  'base',
+  'arbitrum',
+  'optimism',
+  'polygon',
+  'ethereum',
+];
+
+// USDC on Ethereum L1 は Pimlico ERC20 paymaster 未対応のため 'unavailable'。
+// 他 4 chain は erc20 (顧客が USDC で gas 支払い)。詳細は
+// docs/research/circle-12chain-addresses.md。
+function usdcPaymasterModeFor(slug: UsdcChainSlug): PaymasterMode {
+  return slug === 'ethereum' ? 'unavailable' : 'erc20';
+}
 
 const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   symbol: 'usdc',
@@ -123,7 +149,7 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   decimals: 6,
   address: usdcAddress(slug),
   chainId: chainIdFor(slug),
-  paymasterMode: 'erc20',
+  paymasterMode: usdcPaymasterModeFor(slug),
 }));
 
 // JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia
@@ -203,4 +229,12 @@ export function defaultDeploymentForSymbol(symbol: TokenSymbol): TokenDeployment
 
 export function isValidTokenSymbol(value: string): value is TokenSymbol {
   return (TOKEN_SYMBOLS as readonly string[]).includes(value);
+}
+
+// 該当 deployment が gasless mode (Pimlico paymaster) を提供できるか。
+// false = standard mode 必須 (例: USDC on Ethereum L1)。URL parser はこれを
+// 元に `mode=gasless` 要求を invalid として reject、PaymentForm はこれを
+// 元に gasless/standard セレクターから gasless を除外する。
+export function isGaslessSupported(deployment: TokenDeployment): boolean {
+  return deployment.paymasterMode !== 'unavailable';
 }

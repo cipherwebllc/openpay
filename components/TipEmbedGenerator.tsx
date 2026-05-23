@@ -12,6 +12,7 @@ import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
+  isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
 import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
@@ -177,7 +178,12 @@ export function TipEmbedGenerator() {
         {settings.token === 'usdc' && (
           <Field label={t('chainLabel')}>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {USDC_CHAINS.map((slug) => {
+              {USDC_CHAINS.filter((slug) =>
+                isGaslessSupported(deploymentForSlug('usdc', slug)),
+              ).map((slug) => {
+                // Tip widget は gas=customer 固定 (常に gasless)。Ethereum L1 など
+                // gasless 非対応 chain は URL parser で reject されるため、ここで
+                // chain chooser から除外する (UI と URL parser の意味論を一致)。
                 const c = chainForSlug(slug);
                 const active = settings.chain === slug;
                 return (

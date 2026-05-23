@@ -1,4 +1,4 @@
-// Cross-chain buyer balance query — wallet ERC20 USDC (4 chain) + Gateway
+// Cross-chain buyer balance query — wallet ERC20 USDC (5 chain) + Gateway
 // unified balance (Circle API) を 1 callsite で取得。
 //
 // Promise.allSettled で 1 chain の RPC 失敗が他 chain に波及しないようにし、
@@ -11,10 +11,12 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 import { customRpcUrlForChain } from '../chains';
 import { resolveDeployment } from '../tokens';
@@ -135,6 +137,8 @@ const CHAIN_BY_ID = new Map<number, Chain>([
   [arbitrumSepolia.id, arbitrumSepolia],
   [optimism.id, optimism],
   [optimismSepolia.id, optimismSepolia],
+  [mainnet.id, mainnet],
+  [sepolia.id, sepolia],
 ]);
 
 function chainResolveFromTargets(chainId: number): Chain {
@@ -149,7 +153,7 @@ function chainResolveFromTargets(chainId: number): Chain {
 }
 
 // POST /v1/balances で domain ごとの Gateway unified balance を取得。
-// domains は省略時 CROSS_CHAIN_TARGETS 全件 (4 chain) を 1 リクエストで問合せ。
+// domains は省略時 CROSS_CHAIN_TARGETS 全件 (5 chain) を 1 リクエストで問合せ。
 export async function readGatewayUnifiedBalance(
   depositor: Address,
   domains: CircleDomain[] = CROSS_CHAIN_TARGETS.map((t) => t.domain),

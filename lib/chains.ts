@@ -15,15 +15,23 @@ import {
   baseSepolia,
   kaia,
   kairos,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 import type { Chain } from 'viem';
 import { env, isMainnet } from './env';
 
-export type ChainSlug = 'base' | 'arbitrum' | 'optimism' | 'polygon' | 'kaia';
+export type ChainSlug =
+  | 'base'
+  | 'arbitrum'
+  | 'optimism'
+  | 'polygon'
+  | 'kaia'
+  | 'ethereum';
 
 const MAINNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   base,
@@ -31,6 +39,7 @@ const MAINNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   optimism,
   polygon,
   kaia,
+  ethereum: mainnet,
 };
 
 const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
@@ -39,16 +48,26 @@ const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   optimism: optimismSepolia,
   polygon: polygonAmoy,
   kaia: kairos,
+  ethereum: sepolia,
 };
 
 const SLUG_TO_CHAIN: Record<ChainSlug, Chain> = isMainnet
   ? MAINNET_SLUG_TO_CHAIN
   : TESTNET_SLUG_TO_CHAIN;
 
-const ALL_SLUGS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon', 'kaia'];
+const ALL_SLUGS: readonly ChainSlug[] = [
+  'base',
+  'arbitrum',
+  'optimism',
+  'polygon',
+  'kaia',
+  'ethereum',
+];
 
 // 順序は wagmi createConfig 用 + UI の表示順
-// (Base 既定 → Arbitrum → Optimism → Polygon → Kaia)。
+// (Base 既定 → Arbitrum → Optimism → Polygon → Kaia → Ethereum)。
+// Ethereum L1 は最後 (L1 gas 高額、SBI VC トレード等の特定経路で merchant が
+// 受信するための追加 — phase 4a)。
 // wagmi の chains は non-empty tuple を要求するため明示要素で satisfies する。
 export const supportedChains = [
   SLUG_TO_CHAIN.base,
@@ -56,11 +75,19 @@ export const supportedChains = [
   SLUG_TO_CHAIN.optimism,
   SLUG_TO_CHAIN.polygon,
   SLUG_TO_CHAIN.kaia,
-] as const satisfies readonly [Chain, Chain, Chain, Chain, Chain];
+  SLUG_TO_CHAIN.ethereum,
+] as const satisfies readonly [Chain, Chain, Chain, Chain, Chain, Chain];
 
 /** USDC が deploy 済みのチェーン (UI ピッカーの並び順を兼ねる)。kaia には Circle
- * native USDC 未 deploy のため対象外。jpyc 側は JPYC_CHAINS で別管理。 */
-export const USDC_CHAINS: readonly ChainSlug[] = ['base', 'arbitrum', 'optimism', 'polygon'];
+ * native USDC 未 deploy のため対象外。jpyc 側は JPYC_CHAINS で別管理。
+ * Ethereum L1 は phase 4a で追加 (SBI VC トレード等の merchant 受信 demand)。 */
+export const USDC_CHAINS: readonly ChainSlug[] = [
+  'base',
+  'arbitrum',
+  'optimism',
+  'polygon',
+  'ethereum',
+];
 
 /** JPYC が deploy 済みのチェーン。Polygon は 2024-、Kaia は 2026-05-15 公式 deploy。
  * JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia
@@ -106,6 +133,8 @@ export function customRpcUrlForChain(chainId: number): string | undefined {
   if (chainId === optimismSepolia.id) return env.rpc.optimismSepolia;
   if (chainId === kaia.id) return env.rpc.kaia;
   if (chainId === kairos.id) return env.rpc.kairos;
+  if (chainId === mainnet.id) return env.rpc.ethereum;
+  if (chainId === sepolia.id) return env.rpc.sepolia;
   return undefined;
 }
 

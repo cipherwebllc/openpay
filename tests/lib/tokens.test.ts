@@ -13,8 +13,10 @@ import {
   baseSepolia,
   kaia,
   kairos,
+  mainnet,
   optimismSepolia,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -41,18 +43,27 @@ describe('TOKEN_DEPLOYMENTS', () => {
     }
   });
 
-  it('USDC は 4 chain (Base / Arbitrum / Optimism / Polygon)', () => {
+  it('USDC は 5 chain (Base / Arbitrum / Optimism / Polygon / Ethereum)', () => {
     const usdc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'usdc');
-    expect(usdc).toHaveLength(4);
+    expect(usdc).toHaveLength(5);
     const chainIds = usdc.map((d) => d.chainId);
     expect(chainIds).toContain(baseSepolia.id);
     expect(chainIds).toContain(arbitrumSepolia.id);
     expect(chainIds).toContain(optimismSepolia.id);
     expect(chainIds).toContain(polygonAmoy.id);
+    expect(chainIds).toContain(sepolia.id);
     for (const d of usdc) {
       expect(d.decimals).toBe(6);
       expect(d.displaySymbol).toBe('USDC');
-      expect(d.paymasterMode).toBe('erc20');
+    }
+    // Ethereum 以外は erc20 (Pimlico ERC20 paymaster で USDC で gas 支払い)、
+    // Ethereum L1 のみ paymasterMode='unavailable' (Pimlico 未対応、standard 必須)。
+    for (const d of usdc) {
+      if (d.chainId === sepolia.id) {
+        expect(d.paymasterMode).toBe('unavailable');
+      } else {
+        expect(d.paymasterMode).toBe('erc20');
+      }
     }
   });
 
@@ -103,11 +114,12 @@ describe('resolveDeployment', () => {
 });
 
 describe('deploymentsForSymbol', () => {
-  it('jpyc は 2 件 (polygon + kaia) / usdc は 4 件', () => {
+  it('jpyc は 2 件 (polygon + kaia) / usdc は 5 件', () => {
     // 2026-05-23 Kaia 対応で JPYC は polygon + kaia の 2 deployment。
-    // USDC は kaia 未対応 (Circle native USDC 未 deploy) で 4 件のまま。
+    // USDC は kaia 未対応 (Circle native USDC 未 deploy)、phase 4a で Ethereum L1
+    // 追加されて 5 件 (base / arbitrum / optimism / polygon / ethereum)。
     expect(deploymentsForSymbol('jpyc')).toHaveLength(2);
-    expect(deploymentsForSymbol('usdc')).toHaveLength(4);
+    expect(deploymentsForSymbol('usdc')).toHaveLength(5);
   });
 });
 
@@ -229,6 +241,63 @@ describe('JPYC Kaia deployment (hard-code default + env override)', () => {
     expect(d?.address.toLowerCase()).toBe(
       '0xfeed000000000000000000000000000000006666',
     );
+  });
+});
+
+describe('Ethereum L1 USDC deployment (phase 4a)', () => {
+  it('testnet env: Sepolia USDC (paymasterMode=unavailable)', () => {
+    const d = resolveDeployment('usdc', sepolia.id);
+    expect(d).toBeDefined();
+    expect(d?.symbol).toBe('usdc');
+    expect(d?.chainId).toBe(sepolia.id);
+    expect(d?.decimals).toBe(6);
+    expect(d?.paymasterMode).toBe('unavailable');
+    // Sepolia 公式 USDC (Circle quickstart)
+    expect(d?.address.toLowerCase()).toBe(
+      '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+    );
+  });
+
+  it('mainnet env: Ethereum L1 USDC (paymasterMode=unavailable)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xdead000000000000000000000000000000001234';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_test';
+    const mod = await import('@/lib/tokens');
+    const d = mod.resolveDeployment('usdc', mainnet.id);
+    expect(d?.chainId).toBe(mainnet.id);
+    expect(d?.paymasterMode).toBe('unavailable');
+    expect(d?.address.toLowerCase()).toBe(
+      '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    );
+  });
+
+  it('deploymentForSlug("usdc", "ethereum") は testnet で Sepolia を返す', () => {
+    const d = deploymentForSlug('usdc', 'ethereum');
+    expect(d.chainId).toBe(sepolia.id);
+    expect(d.paymasterMode).toBe('unavailable');
+  });
+});
+
+describe('isGaslessSupported', () => {
+  it('USDC on ethereum は false (Pimlico ERC20 paymaster 未対応)', async () => {
+    const mod = await import('@/lib/tokens');
+    const d = mod.deploymentForSlug('usdc', 'ethereum');
+    expect(mod.isGaslessSupported(d)).toBe(false);
+  });
+
+  it('USDC on base は true (Pimlico ERC20 paymaster 対応)', async () => {
+    const mod = await import('@/lib/tokens');
+    const d = mod.deploymentForSlug('usdc', 'base');
+    expect(mod.isGaslessSupported(d)).toBe(true);
+  });
+
+  it('JPYC on polygon は true (Pimlico sponsorship paymaster)', async () => {
+    const mod = await import('@/lib/tokens');
+    const d = mod.deploymentForSlug('jpyc', 'polygon');
+    expect(mod.isGaslessSupported(d)).toBe(true);
   });
 });
 

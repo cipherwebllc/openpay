@@ -55,15 +55,19 @@ let sendUserOperation: ReturnType<typeof vi.fn>;
 let waitForUserOperationReceipt: ReturnType<typeof vi.fn>;
 let getUserOperationGasPrice: ReturnType<typeof vi.fn>;
 
+// useBatchPayment は gasless 経路でのみ呼ばれるため、'unavailable' は到達不能。
+// テストの paymasterMode も SmartAccountBundle と同じ narrow union を使う。
+type GaslessPaymasterMode = Exclude<PaymasterMode, 'unavailable'>;
+
 function mountReady(opts?: {
   maxFeePerGas?: bigint;
   chainId?: number;
-  paymasterMode?: PaymasterMode;
+  paymasterMode?: GaslessPaymasterMode;
 }) {
   // testnet (Base Sepolia, 既定 ceiling 1000 gwei) を使い、観測値はその下を既定。
   const maxFeePerGas = opts?.maxFeePerGas ?? 50n * GWEI;
   const chainId = opts?.chainId ?? baseSepolia.id;
-  const paymasterMode: PaymasterMode = opts?.paymasterMode ?? 'sponsorship';
+  const paymasterMode: GaslessPaymasterMode = opts?.paymasterMode ?? 'sponsorship';
 
   sendUserOperation = vi
     .fn()

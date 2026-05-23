@@ -4,6 +4,7 @@ import {
   polygonAmoy,
   arbitrumSepolia,
   optimismSepolia,
+  sepolia,
 } from 'viem/chains';
 
 // viem boundary mock: createPublicClient を stub し、各 chain ごとに
@@ -42,19 +43,23 @@ beforeEach(() => {
   readContractMocks.clear();
 });
 
+const ALL_TESTNET_CHAINS = [
+  baseSepolia,
+  polygonAmoy,
+  arbitrumSepolia,
+  optimismSepolia,
+  sepolia,
+] as const;
+const TESTNET_CHAIN_COUNT = ALL_TESTNET_CHAINS.length;
+
 describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
-  it('4 chain 全部 success: 各 chain の balance を返す', async () => {
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+  it('5 chain 全部 success: 各 chain の balance を返す', async () => {
+    for (const chain of ALL_TESTNET_CHAINS) {
       const m = vi.fn().mockResolvedValue(BigInt(chain.id) * 1_000_000n);
       readContractMocks.set(chain.id, m);
     }
     const out = await readMultiChainWalletBalances(ACCOUNT);
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
     for (const entry of out) {
       expect(entry.status).toBe('ok');
       if (entry.status === 'ok') {
@@ -71,6 +76,7 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
     );
     readContractMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue(7n));
     readContractMocks.set(optimismSepolia.id, vi.fn().mockResolvedValue(9n));
+    readContractMocks.set(sepolia.id, vi.fn().mockResolvedValue(11n));
 
     const out = await readMultiChainWalletBalances(ACCOUNT);
     const polygonEntry = out.find(
@@ -82,45 +88,41 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
     }
     const baseEntry = out.find((e) => e.target.chainId === baseSepolia.id);
     expect(baseEntry?.status).toBe('ok');
+    const ethEntry = out.find((e) => e.target.chainId === sepolia.id);
+    expect(ethEntry?.status).toBe('ok');
   });
 
-  it('全 chain 失敗: 4 件すべて error 配列を返す (throw しない)', async () => {
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+  it('全 chain 失敗: 5 件すべて error 配列を返す (throw しない)', async () => {
+    for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(
         chain.id,
         vi.fn().mockRejectedValue(new Error('all down')),
       );
     }
     const out = await readMultiChainWalletBalances(ACCOUNT);
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
     expect(out.every((e) => e.status === 'error')).toBe(true);
   });
 
   it('chainResolver injection: テスト用 chain で resolver 上書き', async () => {
+    for (const chain of ALL_TESTNET_CHAINS) {
+      readContractMocks.set(chain.id, vi.fn().mockResolvedValue(0n));
+    }
     readContractMocks.set(baseSepolia.id, vi.fn().mockResolvedValue(42n));
-    readContractMocks.set(polygonAmoy.id, vi.fn().mockResolvedValue(0n));
-    readContractMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue(0n));
-    readContractMocks.set(optimismSepolia.id, vi.fn().mockResolvedValue(0n));
     // resolver を spy で wrap
     const resolverSpy = vi.fn((chainId: number) => {
-      const all = [baseSepolia, polygonAmoy, arbitrumSepolia, optimismSepolia];
-      const found = all.find((c) => c.id === chainId);
+      const found = ALL_TESTNET_CHAINS.find((c) => c.id === chainId);
       if (!found) throw new Error(`unknown ${chainId}`);
       return found;
     });
     await readMultiChainWalletBalances(ACCOUNT, resolverSpy);
-    // 4 chain それぞれ resolver が呼ばれる
-    expect(resolverSpy).toHaveBeenCalledTimes(4);
+    // 5 chain それぞれ resolver が呼ばれる
+    expect(resolverSpy).toHaveBeenCalledTimes(TESTNET_CHAIN_COUNT);
   });
 });
 
 describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
-  it('POST /v1/balances に sources を送る (default = 全 4 domain)', async () => {
+  it('POST /v1/balances に sources を送る (default = 全 5 domain)', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -139,7 +141,7 @@ describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
     expect(url).toContain('/v1/balances');
     const body = JSON.parse(init.body);
     expect(body.token).toBe('USDC');
-    expect(body.sources).toHaveLength(4);
+    expect(body.sources).toHaveLength(TESTNET_CHAIN_COUNT);
 
     expect(out.status).toBe('ok');
     if (out.status === 'ok') {
@@ -233,12 +235,7 @@ describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
 
 describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
   it('wallet + gateway を並列で取得', async () => {
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+    for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(100n));
     }
     const mockFetch = vi.fn().mockResolvedValue(
@@ -250,7 +247,7 @@ describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
     const out = await readAllCrossChainBalances(ACCOUNT, {
       fetch: mockFetch as unknown as typeof fetch,
     });
-    expect(out.wallet).toHaveLength(4);
+    expect(out.wallet).toHaveLength(TESTNET_CHAIN_COUNT);
     expect(out.gateway.status).toBe('ok');
     if (out.gateway.status === 'ok') {
       expect(out.gateway.total).toBe(777n);
@@ -326,13 +323,8 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
     }
   });
 
-  it('concurrent: 同一 account に 4 並列 readMultiChainWalletBalances → 4 chain × 4 = 16 readContract', async () => {
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+  it('concurrent: 同一 account に 4 並列 readMultiChainWalletBalances → 5 chain × 4 = 20 readContract', async () => {
+    for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(1n));
     }
     const results = await Promise.all([
@@ -343,12 +335,7 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
     ]);
     expect(results).toHaveLength(4);
     // 各 chain の mock は 4 回呼ばれる (キャッシュなし、毎回 createPublicClient)
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+    for (const chain of ALL_TESTNET_CHAINS) {
       expect(readContractMocks.get(chain.id)!.mock.calls.length).toBe(4);
     }
   });
@@ -378,12 +365,7 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
   });
 
   it('readAllCrossChainBalances: wallet 全成功 + gateway error の混在', async () => {
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+    for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(42n));
     }
     const mockFetch = vi.fn().mockResolvedValue(
@@ -417,10 +399,11 @@ describe('lib/crossChain/balance: chainResolver validation', () => {
     readContractMocks.set(polygonAmoy.id, vi.fn().mockResolvedValue(2n));
     readContractMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue(3n));
     readContractMocks.set(optimismSepolia.id, vi.fn().mockResolvedValue(4n));
+    readContractMocks.set(sepolia.id, vi.fn().mockResolvedValue(5n));
 
     const out = await readMultiChainWalletBalances(ACCOUNT, customResolver);
-    // 4 chain query が並列、3 chain は customResolver で throw → status='error'
-    expect(out).toHaveLength(4);
+    // 5 chain query が並列、4 chain は customResolver で throw → status='error'
+    expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
     const baseEntry = out.find((e) => e.target.chainId === baseSepolia.id);
     expect(baseEntry?.status).toBe('ok');
     const others = out.filter((e) => e.target.chainId !== baseSepolia.id);
@@ -430,22 +413,17 @@ describe('lib/crossChain/balance: chainResolver validation', () => {
     }
   });
 
-  it('default resolver: 全 4 chain が viem/chains にある (= CROSS_CHAIN_TARGETS と整合)', () => {
-    // production の chainResolveFromTargets は CROSS_CHAIN_TARGETS の 4 chain
+  it('default resolver: 全 5 chain が viem/chains にある (= CROSS_CHAIN_TARGETS と整合)', () => {
+    // production の chainResolveFromTargets は CROSS_CHAIN_TARGETS の 5 chain
     // 全てに対して Chain object を返せる必要がある。Map から逆引きできるか
     // 構造的に検証 (test 経由で resolver default を使う各 chain id を確認)。
-    for (const chain of [
-      baseSepolia,
-      polygonAmoy,
-      arbitrumSepolia,
-      optimismSepolia,
-    ]) {
+    for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(1n));
     }
-    // default resolver (chainResolveFromTargets) は 4 chain 全部 throw せず resolve
-    // → readMultiChainWalletBalances が 4 件全部 'ok' を返す
+    // default resolver (chainResolveFromTargets) は 5 chain 全部 throw せず resolve
+    // → readMultiChainWalletBalances が 5 件全部 'ok' を返す
     return readMultiChainWalletBalances(ACCOUNT).then((out) => {
-      expect(out).toHaveLength(4);
+      expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
       expect(out.every((e) => e.status === 'ok')).toBe(true);
     });
   });

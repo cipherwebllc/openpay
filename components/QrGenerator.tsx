@@ -36,6 +36,7 @@ import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
+  isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
 import {
@@ -285,7 +286,15 @@ export function QrGenerator() {
   }
 
   function selectChain(slug: ChainSlug) {
-    setSettings((s) => ({ ...s, chain: slug }));
+    // (token, chain) の deployment が gasless 非対応 (例: USDC on Ethereum L1) なら
+    // payMode を standard に強制 set。これがないと「gasless 選択中 → Ethereum 選択」
+    // 時に URL parser で reject される QR が生成されてしまう。
+    const dep = deploymentForSlug(settings.token, slug);
+    setSettings((s) => ({
+      ...s,
+      chain: slug,
+      payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
+    }));
   }
 
   function updateQuickAmount(idx: number, value: string) {
@@ -355,9 +364,9 @@ export function QrGenerator() {
                     >
                       <div className="font-semibold">{info.displaySymbol}</div>
                       <div className="text-xs text-slate-500">
-                        {/* JPYC は polygon + kaia の 2 chain、USDC は 4 chain。
-                            chain list の表記は token ごとに別 key (短縮 chain 名で
-                            視覚的に明快な hardcoded list を維持)。 */}
+                        {/* JPYC は polygon + kaia の 2 chain、USDC は 5 chain (phase
+                            4a で Ethereum L1 追加)。chain list の表記は token ごとに
+                            別 key (短縮 chain 名で視覚的に明快な hardcoded list を維持)。 */}
                         {tok === 'usdc'
                           ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
                           : t('tokenChainHintJpyc', { count: JPYC_CHAINS.length })}
@@ -368,16 +377,16 @@ export function QrGenerator() {
               </div>
             </Field>
 
-            {/* chain chooser: token=usdc は USDC_CHAINS (4 chain)、token=jpyc は
-                JPYC_CHAINS (polygon + kaia の 2 chain)。両者で chain object の取得
-                経路 (chainForSlug) と active 判定 (settings.chain) は共通。grid 列
-                数だけ token に応じて切替 (USDC は mobile 2 列 / sm 4 列、JPYC は
-                常に 2 列で十分)。 */}
+            {/* chain chooser: token=usdc は USDC_CHAINS (5 chain — phase 4a で
+                Ethereum L1 追加)、token=jpyc は JPYC_CHAINS (polygon + kaia の 2
+                chain)。両者で chain object の取得経路 (chainForSlug) と active 判定
+                (settings.chain) は共通。grid 列数だけ token に応じて切替 (USDC は
+                mobile 2 列 / sm 5 列、JPYC は常に 2 列で十分)。 */}
             <Field label={t('chainLabel')}>
               <div
                 className={
                   settings.token === 'usdc'
-                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-4'
+                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-5'
                     : 'grid grid-cols-2 gap-2'
                 }
               >
@@ -553,15 +562,24 @@ export function QrGenerator() {
                     const isGasless = pm === 'gasless';
                     const ModeIcon = isGasless ? Zap : Fuel;
                     const iconColor = isGasless ? 'text-emerald-600' : 'text-amber-600';
+                    // gasless 非対応 chain (例: USDC on Ethereum L1) では gasless
+                    // button を disable。click は selectChain 側で防御済だが、UI
+                    // 上でも明示的に grey-out して standard 強制を視覚化する。
+                    const disabled = isGasless && !isGaslessSupported(deployment);
                     return (
                       <button
                         key={pm}
                         type="button"
-                        onClick={() =>
-                          setSettings((s) => ({ ...s, payMode: pm }))
-                        }
+                        disabled={disabled}
+                        aria-disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          setSettings((s) => ({ ...s, payMode: pm }));
+                        }}
                         className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
-                          active
+                          disabled
+                            ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                            : active
                             ? 'border-brand bg-brand/5 text-brand-dark'
                             : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                         }`}
@@ -900,7 +918,7 @@ export function QrGenerator() {
                 {settings.posterNote.trim() || t('posterDefaultNote')}
               </p>
               {/* 受信 chain の表示。crossChain ON + USDC では、buyer 視点で「どの
-                  chain の USDC でも払える」ことを示す必要があるため対応 4 chain を
+                  chain の USDC でも払える」ことを示す必要があるため対応 5 chain を
                   全列挙する (poster はお客向け = 顧客が「自分の chain で払えるか」
                   確認するための情報)。crossChain OFF or JPYC では従来通り
                   単一 chain (target chain) を表示。 */}

@@ -43,7 +43,17 @@ export async function buildSimpleSmartAccountClient(args: {
 }): Promise<SmartAccountBundle> {
   const { walletClient, publicClient, chainId, deployment } = args;
   const pimlicoClient = createPimlico(chainId);
-  const paymasterMode = resolvePaymasterMode(deployment);
+  const rawMode = resolvePaymasterMode(deployment);
+  // 'unavailable' (USDC on Ethereum L1) は URL parser で gasless 経路から弾かれ
+  // ているため、ここに来るのは呼出側の bug。silent fallback すると security
+  // issue (sponsorship 残高悪用) を生むので確実に throw する。
+  if (rawMode === 'unavailable') {
+    throw new Error(
+      `buildSimpleSmartAccountClient: deployment ${deployment.symbol} on chain ${chainId} ` +
+        'は gasless mode 非対応 (paymasterMode=unavailable)。standard mode 経路を使うこと。',
+    );
+  }
+  const paymasterMode = rawMode;
 
   const account = await to7702SimpleSmartAccount({
     client: publicClient,

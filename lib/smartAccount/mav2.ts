@@ -62,7 +62,17 @@ export async function buildMav2SmartAccountClient(args: {
   deployment: TokenDeployment;
 }): Promise<SmartAccountBundle> {
   const { walletClient, publicClient, chain, chainId, deployment } = args;
-  const paymasterMode = resolvePaymasterMode(deployment);
+  const rawMode = resolvePaymasterMode(deployment);
+  // 'unavailable' (USDC on Ethereum L1) は URL parser で gasless 経路から弾かれ
+  // ているため、ここに来るのは呼出側の bug。silent fallback すると sponsorship
+  // 残高悪用に直結するので確実に throw。
+  if (rawMode === 'unavailable') {
+    throw new Error(
+      `buildMav2SmartAccountClient: deployment ${deployment.symbol} on chain ${chainId} ` +
+        'は gasless mode 非対応 (paymasterMode=unavailable)。standard mode 経路を使うこと。',
+    );
+  }
+  const paymasterMode = rawMode;
 
   // Pimlico Kaia は MAv2 非対応 (Simple Account / Safe / Thirdweb のみ)。
   // 2026-05 時点で MAv2 wallet で Kaia 対応のものは確認されていない (HashPort は

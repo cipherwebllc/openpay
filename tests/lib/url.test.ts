@@ -204,14 +204,50 @@ describe('parsePayParams', () => {
 
   it('chain が不正値 → errorKind=invalid + chain メッセージ', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&chain=ethereum`),
+      search(`to=${VALID_TO}&token=usdc&chain=avalanche`),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.errorKind).toBe('invalid');
       expect(r.error).toContain('chain');
-      // PoC で kaia を ChainSlug に追加したので error message は kaia を含む 5 候補列挙
+      // kaia + ethereum を含む 6 候補列挙
       expect(r.error).toContain('kaia');
+      expect(r.error).toContain('ethereum');
+    }
+  });
+
+  it('chain=ethereum + usdc + mode=standard → 受理 (Ethereum L1 USDC standard 経路)', () => {
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=ethereum&mode=standard`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.chain).toBe('ethereum');
+      expect(r.params.mode).toBe('standard');
+    }
+  });
+
+  it('chain=ethereum + usdc + mode=gasless → errorKind=invalid (Pimlico ERC20 paymaster 未対応)', () => {
+    // gasless は省略可 (default) なので mode を明示せず → default gasless で reject
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=ethereum`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('gasless');
+      expect(r.error).toContain('ethereum');
+    }
+  });
+
+  it('chain=ethereum + usdc + mode=gasless 明示 → errorKind=invalid', () => {
+    const r = parsePayParams(
+      search(`to=${VALID_TO}&token=usdc&chain=ethereum&mode=gasless`),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('invalid');
+      expect(r.error).toContain('standard');
     }
   });
 
@@ -308,9 +344,9 @@ describe('parsePayParams', () => {
     if (!r.ok) expect(r.error).toContain('jpyc');
   });
 
-  it('chain が無効な slug (例 ethereum) → エラー (どの USDC chain か明示しろ)', () => {
+  it('chain が無効な slug (例 avalanche) → エラー (どの USDC chain か明示しろ)', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&chain=ethereum`),
+      search(`to=${VALID_TO}&token=usdc&chain=avalanche`),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('chain');
@@ -903,6 +939,16 @@ describe('parseTipParams: chain パラメタ (Phase 1 multi-chain)', () => {
     const r = parseTipParams(VALID_TO, search('token=jpyc&chain=arbitrum'));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('jpyc');
+  });
+
+  it('chain=ethereum + token=usdc → エラー (tip widget は gasless 必須、Ethereum L1 は gasless 非対応)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&chain=ethereum'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toContain('usdc');
+      expect(r.error).toContain('ethereum');
+      expect(r.error).toContain('tip');
+    }
   });
 
   it('roundtrip: build (chain=optimism) → parse', () => {

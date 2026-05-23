@@ -155,7 +155,7 @@ describe('lib/env (module-load validation)', () => {
     warn.mockRestore();
   });
 
-  it('USDC mainnet の per-chain env override (4 chain) がパースされる', async () => {
+  it('USDC mainnet の per-chain env override (5 chain) がパースされる', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_USDC_BASE_MAINNET_ADDRESS =
       '0xbabe0000000000000000000000000000000abcde';
@@ -165,6 +165,8 @@ describe('lib/env (module-load validation)', () => {
       '0x0021000000000000000000000000000000abcde0';
     process.env.NEXT_PUBLIC_USDC_POLYGON_MAINNET_ADDRESS =
       '0xb01a000000000000000000000000000000abcde0';
+    process.env.NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS =
+      '0xe7e0000000000000000000000000000000abcde0';
     const mod = await import('@/lib/env');
     expect(mod.env.mainnetTokenOverrides.usdc.base?.toLowerCase()).toBe(
       '0xbabe0000000000000000000000000000000abcde',
@@ -178,9 +180,12 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.mainnetTokenOverrides.usdc.polygon?.toLowerCase()).toBe(
       '0xb01a000000000000000000000000000000abcde0',
     );
+    expect(mod.env.mainnetTokenOverrides.usdc.ethereum?.toLowerCase()).toBe(
+      '0xe7e0000000000000000000000000000000abcde0',
+    );
   });
 
-  it('USDC testnet の per-chain env override がパースされる', async () => {
+  it('USDC testnet の per-chain env override (5 chain) がパースされる', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_USDC_BASE_SEPOLIA_ADDRESS =
       '0xbabe0000000000000000000000000000000abcde';
@@ -190,6 +195,8 @@ describe('lib/env (module-load validation)', () => {
       '0x0021000000000000000000000000000000abcde0';
     process.env.NEXT_PUBLIC_USDC_POLYGON_AMOY_ADDRESS =
       '0xb01a000000000000000000000000000000abcde0';
+    process.env.NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS =
+      '0x5e90000000000000000000000000000000abcde0';
     const mod = await import('@/lib/env');
     expect(mod.env.testnetTokenOverrides.usdc.base?.toLowerCase()).toBe(
       '0xbabe0000000000000000000000000000000abcde',
@@ -203,6 +210,18 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.testnetTokenOverrides.usdc.polygon?.toLowerCase()).toBe(
       '0xb01a000000000000000000000000000000abcde0',
     );
+    expect(mod.env.testnetTokenOverrides.usdc.ethereum?.toLowerCase()).toBe(
+      '0x5e90000000000000000000000000000000abcde0',
+    );
+  });
+
+  it('NEXT_PUBLIC_ETHEREUM_RPC_URL / NEXT_PUBLIC_SEPOLIA_RPC_URL が env.rpc に乗る', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL = 'https://rpc.example/eth';
+    process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL = 'https://rpc.example/sep';
+    const mod = await import('@/lib/env');
+    expect(mod.env.rpc.ethereum).toBe('https://rpc.example/eth');
+    expect(mod.env.rpc.sepolia).toBe('https://rpc.example/sep');
   });
 
   it('Arbitrum / Optimism RPC URL env が読み込まれる', async () => {

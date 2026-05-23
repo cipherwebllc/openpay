@@ -4,10 +4,12 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 
 // crossChain/config は import 時に env を読んで constants を確定する設計のため、
@@ -147,7 +149,7 @@ describe('lib/crossChain/config', () => {
   });
 
   describe('domainForChainId / chainIdForDomain', () => {
-    it('Polygon mainnet → domain 7', async () => {
+    it('Polygon mainnet → domain 7 (5 chain mapping)', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
@@ -158,14 +160,16 @@ describe('lib/crossChain/config', () => {
       expect(m.domainForChainId(base.id)).toBe(6);
       expect(m.domainForChainId(arbitrum.id)).toBe(3);
       expect(m.domainForChainId(optimism.id)).toBe(2);
+      expect(m.domainForChainId(mainnet.id)).toBe(0);
     });
 
-    it('Polygon Amoy → domain 7 (testnet も同 domain)', async () => {
+    it('Polygon Amoy → domain 7 (testnet も同 domain、5 chain)', async () => {
       const m = await import('@/lib/crossChain/config');
       expect(m.domainForChainId(polygonAmoy.id)).toBe(7);
       expect(m.domainForChainId(baseSepolia.id)).toBe(6);
       expect(m.domainForChainId(arbitrumSepolia.id)).toBe(3);
       expect(m.domainForChainId(optimismSepolia.id)).toBe(2);
+      expect(m.domainForChainId(sepolia.id)).toBe(0);
     });
 
     it('未知 chainId は undefined', async () => {
@@ -177,6 +181,7 @@ describe('lib/crossChain/config', () => {
       const m = await import('@/lib/crossChain/config');
       expect(m.chainIdForDomain(7)).toBe(polygonAmoy.id);
       expect(m.chainIdForDomain(6)).toBe(baseSepolia.id);
+      expect(m.chainIdForDomain(0)).toBe(sepolia.id);
     });
 
     it('chainIdForDomain: mainnet env で mainnet chain id を返す', async () => {
@@ -190,32 +195,40 @@ describe('lib/crossChain/config', () => {
       expect(m.chainIdForDomain(6)).toBe(base.id);
       expect(m.chainIdForDomain(3)).toBe(arbitrum.id);
       expect(m.chainIdForDomain(2)).toBe(optimism.id);
+      expect(m.chainIdForDomain(0)).toBe(mainnet.id);
     });
   });
 
   describe('CROSS_CHAIN_TARGETS', () => {
-    it('testnet env: 4 entries with testnet chain ids', async () => {
+    it('testnet env: 5 entries with testnet chain ids', async () => {
       const m = await import('@/lib/crossChain/config');
-      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(4);
+      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(5);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => t.isTestnet)).toBe(true);
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
       expect(chainIds).toContain(polygonAmoy.id);
       expect(chainIds).toContain(baseSepolia.id);
       expect(chainIds).toContain(arbitrumSepolia.id);
       expect(chainIds).toContain(optimismSepolia.id);
+      expect(chainIds).toContain(sepolia.id);
     });
 
-    it('mainnet env: 4 entries with mainnet chain ids', async () => {
+    it('mainnet env: 5 entries with mainnet chain ids', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
       process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'dummy';
       process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'pol-1';
       const m = await import('@/lib/crossChain/config');
-      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(4);
+      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(5);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => !t.isTestnet)).toBe(true);
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
-      expect(chainIds).toEqual([polygon.id, base.id, arbitrum.id, optimism.id]);
+      expect(chainIds).toEqual([
+        polygon.id,
+        base.id,
+        arbitrum.id,
+        optimism.id,
+        mainnet.id,
+      ]);
     });
   });
 });

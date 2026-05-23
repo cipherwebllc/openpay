@@ -1428,9 +1428,10 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
     });
 
-    it('Step 1 内に chain chooser: USDC 4 chain + JPYC 2 chain (token 切替で内容変化)', async () => {
+    it('Step 1 内に chain chooser: USDC 5 chain + JPYC 2 chain (token 切替で内容変化)', async () => {
       // 2026-05-23 JPYC が Kaia 対応で multi-chain 化したため、JPYC 選択時も
       // chain chooser が出る (旧: JPYC は Polygon 固定で chain chooser 非表示)。
+      // phase 4a で USDC は Ethereum L1 追加 (4 → 5 chain)。
       const user = userEvent.setup();
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -1448,16 +1449,20 @@ describe('QrGenerator', () => {
       expect(
         within(step1).queryByRole('button', { name: /^Base/ }),
       ).toBeNull();
-      // USDC に切替 → chain chooser が USDC 4 chain に切替
+      // USDC に切替 → chain chooser が USDC 5 chain に切替
       await user.click(within(step1).getByRole('button', { name: /^USDC/ }));
       await waitFor(() => {
         expect(
           within(step1).getByRole('button', { name: /^Base/ }),
         ).toBeInTheDocument();
       });
-      // Arbitrum / Optimism / Polygon も Step 1 内に並ぶ
+      // Arbitrum / Optimism / Polygon / Ethereum (Sepolia in testnet) も Step 1 内に並ぶ
       expect(
         within(step1).getByRole('button', { name: /^Arbitrum/ }),
+      ).toBeInTheDocument();
+      // Ethereum L1 chain — testnet env では viem の sepolia.name = "Sepolia"
+      expect(
+        within(step1).getByRole('button', { name: /^(Sepolia|Ethereum)/ }),
       ).toBeInTheDocument();
       // Kaia は USDC では出ない (USDC は Kaia 未対応)
       expect(
@@ -1723,14 +1728,16 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // crossChain default=true (USDC は他 chain からも受信可能)、
-      // poster は対応 4 chain (Base / Arbitrum / Optimism / Polygon) を全列挙する
-      // (お客向け = どの chain で持っていれば払えるか明示)
+      // poster は対応 5 chain (Base / Arbitrum / Optimism / Polygon / Ethereum) を
+      // 全列挙する (お客向け = どの chain で持っていれば払えるか明示)。
       await waitFor(() => {
         const el = screen.getByText(/USDC ·/);
         expect(el.textContent).toMatch(/Base/);
         expect(el.textContent).toMatch(/Arbitrum/);
         expect(el.textContent).toMatch(/(Optimism|OP Mainnet|OP Sepolia)/);
         expect(el.textContent).toMatch(/Polygon/);
+        // Ethereum L1 — testnet env では "Sepolia"
+        expect(el.textContent).toMatch(/(Sepolia|Ethereum)/);
       });
     });
 
@@ -1835,10 +1842,10 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('Step 1 token chooser: USDC ↔ JPYC 切替で chain chooser の中身が入替 (USDC 4 chain / JPYC 2 chain)', async () => {
+    it('Step 1 token chooser: USDC ↔ JPYC 切替で chain chooser の中身が入替 (USDC 5 chain / JPYC 2 chain)', async () => {
       // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。USDC ↔ JPYC 切替で
       // chain chooser はどちらの token でも出るが、表示される chain set が変わる
-      // (USDC: Base/Arb/Op/Polygon 4 chain、JPYC: Polygon/Kaia 2 chain)。
+      // (USDC: Base/Arb/Op/Polygon/Ethereum 5 chain、JPYC: Polygon/Kaia 2 chain)。
       const user = userEvent.setup();
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));

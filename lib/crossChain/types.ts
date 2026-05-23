@@ -6,12 +6,15 @@ import type { Address, Hex } from 'viem';
 // Circle 公式の operator-issued domain ID (EVM chain id とは独立、
 // CCTP / Gateway 共通、mainnet/testnet 同一):
 //   ethereum=0 / avalanche=1 / optimism=2 / arbitrum=3 / base=6 / polygon=7
+//   (phase 4b で追加予定: unichain=10 / solana=5)
+export const CIRCLE_DOMAIN_ETHEREUM = 0 as const;
 export const CIRCLE_DOMAIN_OPTIMISM = 2 as const;
 export const CIRCLE_DOMAIN_ARBITRUM = 3 as const;
 export const CIRCLE_DOMAIN_BASE = 6 as const;
 export const CIRCLE_DOMAIN_POLYGON = 7 as const;
 
 export type CircleDomain =
+  | typeof CIRCLE_DOMAIN_ETHEREUM
   | typeof CIRCLE_DOMAIN_OPTIMISM
   | typeof CIRCLE_DOMAIN_ARBITRUM
   | typeof CIRCLE_DOMAIN_BASE

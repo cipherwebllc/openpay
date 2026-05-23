@@ -18,10 +18,12 @@ import {
   arbitrumSepolia,
   base,
   baseSepolia,
+  mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sepolia,
 } from 'viem/chains';
 import {
   CIRCLE_GATEWAY_API_BASE_URL,
@@ -65,6 +67,7 @@ const MIN_MAX_FEE_ATOMIC = 1000n;
 // になる block 数を table で持つ:
 //   Polygon/Base/Optimism (~2s/block):  600 blocks = 1200s
 //   Arbitrum One         (~0.25s/block): 5000 blocks = 1250s
+//   Ethereum L1          (~12s/block):  100 blocks = 1200s (phase 4a)
 const PER_CHAIN_BLOCK_OFFSET = new Map<number, bigint>([
   [polygon.id, 600n],
   [polygonAmoy.id, 600n],
@@ -74,6 +77,8 @@ const PER_CHAIN_BLOCK_OFFSET = new Map<number, bigint>([
   [optimismSepolia.id, 600n],
   [arbitrum.id, 5000n],
   [arbitrumSepolia.id, 5000n],
+  [mainnet.id, 100n],
+  [sepolia.id, 100n],
 ]);
 
 const FALLBACK_BLOCK_OFFSET = 600n;

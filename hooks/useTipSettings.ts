@@ -1,7 +1,7 @@
 'use client';
 
 import type { ChainSlug } from '@/lib/chains';
-import type { TokenSymbol } from '@/lib/tokens';
+import { deploymentForSlug, isGaslessSupported, type TokenSymbol } from '@/lib/tokens';
 import { COLOR_PATTERN } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
@@ -9,7 +9,8 @@ import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
 type TipSettings = {
   receiver: string;
   token: TokenSymbol;
-  // 送金チェーン (slug)。usdc は 4 chain 選択可、jpyc は polygon 固定。
+  // 送金チェーン (slug)。usdc は gasless 対応 chain 選択可 (Ethereum L1 は tip 不可)、
+  // jpyc は polygon 固定。
   chain: ChainSlug;
   name: string;
   message: string;
@@ -37,13 +38,20 @@ const DEFAULT_SETTINGS: TipSettings = {
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
+  // tip widget は gasless 必須。USDC + Ethereum L1 のような gasless 非対応 chain は
+  // sanitize 段階で token の default chain (usdc → base) にフォールバック。
+  // localStorage に旧 'ethereum' が残っていても安全に切り替わる。
+  const normalized = normalizeChainForToken(token, loaded.chain);
+  const chain = isGaslessSupported(deploymentForSlug(token, normalized))
+    ? normalized
+    : normalizeChainForToken(token, undefined);
   return {
     receiver:
       typeof loaded.receiver === 'string'
         ? loaded.receiver
         : DEFAULT_SETTINGS.receiver,
     token,
-    chain: normalizeChainForToken(token, loaded.chain),
+    chain,
     name:
       typeof loaded.name === 'string' ? loaded.name : DEFAULT_SETTINGS.name,
     message:

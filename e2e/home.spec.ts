@@ -322,10 +322,11 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await expect(gaslessBtn).toBeVisible();
   });
 
-  test('ja: Step 1 に token/chain chooser が同居 (JPYC は Polygon/Kaia、USDC は 4 chain)', async ({
+  test('ja: Step 1 に token/chain chooser が同居 (JPYC は Polygon/Kaia、USDC は 5 chain)', async ({
     page,
   }) => {
     // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。
+    // phase 4a で USDC は Ethereum L1 追加 (4 → 5 chain)。
     await page.goto('/ja');
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
     await expect(step1).toBeVisible();
@@ -335,11 +336,15 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     // JPYC default → chain chooser に Polygon / Kaia 2 つ
     await expect(step1.getByRole('button', { name: /^Polygon/ })).toBeVisible();
     await expect(step1.getByRole('button', { name: /^Kai/ })).toBeVisible();
-    // USDC click → chain chooser が USDC 4 chain に切替
+    // USDC click → chain chooser が USDC 5 chain に切替
     await step1.getByRole('button', { name: /^USDC/ }).click();
     await expect(step1.getByRole('button', { name: /^Base/ })).toBeVisible();
     await expect(
       step1.getByRole('button', { name: /^Arbitrum/ }),
+    ).toBeVisible();
+    // Ethereum L1 — testnet env では "Sepolia"
+    await expect(
+      step1.getByRole('button', { name: /^(Sepolia|Ethereum)/ }),
     ).toBeVisible();
     // Kaia は USDC では消える (USDC は Kaia 未対応)
     await expect(step1.getByRole('button', { name: /^Kai/ })).toHaveCount(0);

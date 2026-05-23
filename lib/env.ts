@@ -77,10 +77,17 @@ export const env = {
     optimismSepolia: nonEmpty(process.env.NEXT_PUBLIC_OPTIMISM_SEPOLIA_RPC_URL),
     kaia: nonEmpty(process.env.NEXT_PUBLIC_KAIA_RPC_URL),
     kairos: nonEmpty(process.env.NEXT_PUBLIC_KAIROS_RPC_URL),
+    // Ethereum L1 = USDC 決済 chain (phase 4a で追加、SBI VC トレード等の
+    // merchant 受信 demand 対応)。NEXT_PUBLIC_ETHEREUM_RPC_URL は public RPC が
+    // rate limit に弱いので production では Alchemy/Infura 等の override 推奨。
+    ethereum: nonEmpty(process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL),
+    sepolia: nonEmpty(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL),
     // ENS / Basenames 解決用 (NETWORK_ENV に依存せず常に mainnet を使う)。
     // CCIP-Read (off-chain resolution) を要する .eth 名前があるため、
     // CCIP-Read 互換の RPC を既定にする (cloudflare-eth.com は非対応で
     // resolveWithGateways が "Internal error" になる)。
+    // env 名 NEXT_PUBLIC_MAINNET_RPC_URL は ENS 解決用 (上記の ethereum とは
+    // 別 use case、URL 値は同じでも問題なし)。
     mainnet: nonEmpty(process.env.NEXT_PUBLIC_MAINNET_RPC_URL),
     baseMainnet: nonEmpty(process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL),
   },
@@ -116,6 +123,10 @@ export const env = {
         'NEXT_PUBLIC_USDC_POLYGON_MAINNET_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_POLYGON_MAINNET_ADDRESS,
       ),
+      ethereum: parseAddress(
+        'NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS,
+      ),
     },
   },
   testnetTokenOverrides: {
@@ -145,6 +156,10 @@ export const env = {
       polygon: parseAddress(
         'NEXT_PUBLIC_USDC_POLYGON_AMOY_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_POLYGON_AMOY_ADDRESS,
+      ),
+      ethereum: parseAddress(
+        'NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS,
       ),
     },
   },

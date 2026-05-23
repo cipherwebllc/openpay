@@ -17,6 +17,7 @@ import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
+  isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
 import {
@@ -111,7 +112,15 @@ export function CheckoutLinkGenerator() {
   }
 
   function selectChain(slug: ChainSlug) {
-    setSettings((s) => ({ ...s, chain: slug }));
+    // gasless 非対応 chain (例: USDC on Ethereum L1) 選択時は payMode を standard
+    // に強制 set。生成 checkout URL の mode=gasless+ethereum 組合せが URL parser
+    // で reject されるのを未然に防ぐ。
+    const dep = deploymentForSlug(settings.token, slug);
+    setSettings((s) => ({
+      ...s,
+      chain: slug,
+      payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
+    }));
   }
 
   function updateItem(idx: number, patch: Partial<CheckoutItemDraft>) {
@@ -293,13 +302,24 @@ export function CheckoutLinkGenerator() {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {(['gasless', 'standard'] as PayMode[]).map((pm) => {
               const active = settings.payMode === pm;
+              // gasless 非対応 chain (USDC on Ethereum L1) では gasless button を
+              // grey-out。selectChain で auto-switch されるが、UI 側でも明示。
+              const disabled =
+                pm === 'gasless' && !isGaslessSupported(deployment);
               return (
                 <button
                   key={pm}
                   type="button"
-                  onClick={() => setSettings((s) => ({ ...s, payMode: pm }))}
+                  disabled={disabled}
+                  aria-disabled={disabled}
+                  onClick={() => {
+                    if (disabled) return;
+                    setSettings((s) => ({ ...s, payMode: pm }));
+                  }}
                   className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
-                    active
+                    disabled
+                      ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                      : active
                       ? 'border-brand bg-brand/5 text-brand-dark'
                       : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                   }`}

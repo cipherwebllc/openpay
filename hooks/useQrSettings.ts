@@ -2,7 +2,12 @@
 
 import { isJpycChainSlug, isValidChainSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
-import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
+import {
+  DEFAULT_CHAIN_FOR_SYMBOL,
+  deploymentForSlug,
+  isGaslessSupported,
+  type TokenSymbol,
+} from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
@@ -123,18 +128,27 @@ function resolvePayMode(loaded: Partial<QrSettings> & { directTransfer?: unknown
 
 function sanitize(loaded: Partial<QrSettings>): QrSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
+  const chain = normalizeChainForToken(token, loaded.chain);
+  // (token, chain) が gasless 非対応 (例: USDC + Ethereum L1) なのに payMode=gasless
+  // が saved 状態として残っていたら payMode=standard に migrate。/pay URL parser
+  // が gasless+ethereum を reject するので、UI 側の見かけと実際の URL を一致させる。
+  const rawPayMode = resolvePayMode(loaded);
+  const payMode: PayMode =
+    rawPayMode === 'gasless' && !isGaslessSupported(deploymentForSlug(token, chain))
+      ? 'standard'
+      : rawPayMode;
   return {
     receiver:
       typeof loaded.receiver === 'string'
         ? loaded.receiver
         : DEFAULT_SETTINGS.receiver,
     token,
-    chain: normalizeChainForToken(token, loaded.chain),
+    chain,
     gasMode:
       loaded.gasMode === 'customer' || loaded.gasMode === 'merchant'
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
-    payMode: resolvePayMode(loaded),
+    payMode,
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),

@@ -5,7 +5,11 @@
 
 import type { ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
-import type { TokenSymbol } from '@/lib/tokens';
+import {
+  deploymentForSlug,
+  isGaslessSupported,
+  type TokenSymbol,
+} from '@/lib/tokens';
 import { CHECKOUT_MAX_ITEMS, type CheckoutItemDraft } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
@@ -71,18 +75,27 @@ function sanitizeOptionalString(
 
 function sanitize(loaded: Partial<CheckoutSettings>): CheckoutSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
+  const chain = normalizeChainForToken(token, loaded.chain);
+  // gasless 非対応 chain (例: USDC on Ethereum L1) + payMode=gasless が saved
+  // 状態として残っていたら standard に migrate。/checkout URL parser が同組合せを
+  // reject するため、UI と URL の意味論を一致させる。
+  const rawPayMode: PayMode =
+    loaded.payMode === 'gasless' || loaded.payMode === 'standard'
+      ? loaded.payMode
+      : DEFAULT_SETTINGS.payMode;
+  const payMode: PayMode =
+    rawPayMode === 'gasless' && !isGaslessSupported(deploymentForSlug(token, chain))
+      ? 'standard'
+      : rawPayMode;
   return {
     receiver: sanitizeOptionalString(loaded.receiver, DEFAULT_SETTINGS.receiver),
     token,
-    chain: normalizeChainForToken(token, loaded.chain),
+    chain,
     gasMode:
       loaded.gasMode === 'customer' || loaded.gasMode === 'merchant'
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
-    payMode:
-      loaded.payMode === 'gasless' || loaded.payMode === 'standard'
-        ? loaded.payMode
-        : DEFAULT_SETTINGS.payMode,
+    payMode,
     items: sanitizeItems(loaded.items),
     orderId: sanitizeOptionalString(loaded.orderId, '', 64),
     description: sanitizeOptionalString(loaded.description, '', 200),

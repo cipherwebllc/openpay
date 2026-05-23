@@ -40,7 +40,9 @@ import type { GasMode, PayMode } from './fee';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
+  deploymentForSlug,
   deploymentsForSymbol,
+  isGaslessSupported,
   isValidTokenSymbol,
   type TokenSymbol,
 } from './tokens';
@@ -316,7 +318,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       ok: false,
       errorKind: 'invalid',
       error:
-        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
     };
   }
   // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
@@ -355,6 +357,18 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
 
   const normalizedMode: PayMode =
     mode === 'standard' || mode === 'direct' ? 'standard' : 'gasless';
+
+  // (token, chain) が gasless mode を提供できない (Pimlico paymaster 未対応) なら
+  // gasless 要求を reject。例: USDC on Ethereum L1 は Pimlico ERC20 paymaster
+  // 未 deploy のため standard mode 必須。standard mode 要求は通す。
+  const deployment = deploymentForSlug(token, chainSlug);
+  if (normalizedMode === 'gasless' && !isGaslessSupported(deployment)) {
+    return {
+      ok: false,
+      errorKind: 'invalid',
+      error: `${token} on ${chainSlug} は gasless mode 非対応です (mode=standard を指定してください)`,
+    };
+  }
 
   // crossChain は明示的 "false" のみ false、それ以外 (未指定 / "true" / 不明値)
   // は default の true として扱う。本仕様により旧 QR は影響を受けず、phase 2
@@ -518,13 +532,21 @@ export function parseTipParams(
     return {
       ok: false,
       error:
-        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
     };
   }
   if (!hasDeployment(token, chainSlug)) {
     return {
       ok: false,
       error: `${token} は ${chainSlug} に対応していません`,
+    };
+  }
+  // Tip widget は gas=customer 固定 (常に gasless) なので、(token, chain) が
+  // gasless 非対応なら tip 自体が成立しない → reject。例: USDC on Ethereum L1。
+  if (!isGaslessSupported(deploymentForSlug(token, chainSlug))) {
+    return {
+      ok: false,
+      error: `${token} on ${chainSlug} は tip widget 非対応です (gasless mode 必須のため)`,
     };
   }
 
@@ -755,7 +777,7 @@ export function parseCheckoutParams(
     return {
       ok: false,
       error:
-        'chain は base / arbitrum / optimism / polygon / kaia のいずれかを指定してください',
+        'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
     };
   }
   if (!hasDeployment(token, chainSlug)) {
@@ -784,6 +806,15 @@ export function parseCheckoutParams(
   // checkout では default の gasless に倒す (請求書文脈では UI を壊さない方が大事)。
   const mode: PayMode =
     modeRaw === 'standard' || modeRaw === 'direct' ? 'standard' : 'gasless';
+
+  // (token, chain) が gasless mode を提供できない場合は gasless 要求を reject。
+  // /pay と同じく、standard mode 要求は通す。
+  if (mode === 'gasless' && !isGaslessSupported(deploymentForSlug(token, chainSlug))) {
+    return {
+      ok: false,
+      error: `${token} on ${chainSlug} は gasless mode 非対応です (mode=standard を指定してください)`,
+    };
+  }
 
   return {
     ok: true,
