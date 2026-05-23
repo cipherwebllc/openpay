@@ -63,10 +63,27 @@ type LogEntry = {
   tokenAddress?: string;
   merchantAmount?: string;
   feeAmount?: string;
+  // phase 2 cross-chain bridge fields。direct (= bridge 経由でない) 同一 chain
+  // 送金は両者とも undefined、Gateway / CCTP V2 経由なら値が入る。
+  bridge?: string;
+  sourceChainId?: number;
 };
 
 type TokenAgg = {
   tokenAddress: string;
+  successCount: number;
+  revertedCount: number;
+  errorCount: number;
+  totalMerchantWei: bigint;
+  totalFeeWei: bigint;
+};
+
+// "direct" = bridge 経由でない同一 chain transfer (entry.bridge undefined / 'none')。
+// "gateway" / "cctp-v2" = 各 bridge 経由。"unknown" = 文字列だが想定外値 (future-proof)。
+export type PaymentBridgeKey = 'direct' | 'gateway' | 'cctp-v2' | 'unknown';
+
+type BridgeAgg = {
+  bridge: PaymentBridgeKey;
   successCount: number;
   revertedCount: number;
   errorCount: number;
@@ -83,6 +100,7 @@ type ChainAgg = {
   totalMerchantWei: bigint;
   totalFeeWei: bigint;
   byToken: Map<string, TokenAgg>;
+  byBridge: Map<PaymentBridgeKey, BridgeAgg>;
 };
 
 // validation: KV から取り出した entry が集計対象として有効か。raw export は
@@ -104,12 +122,32 @@ function parseWei(v: string | undefined): bigint {
   return BigInt(v);
 }
 
+function normalizeBridge(raw: string | undefined): PaymentBridgeKey {
+  if (raw === undefined || raw === '' || raw === 'none') return 'direct';
+  if (raw === 'gateway') return 'gateway';
+  if (raw === 'cctp-v2') return 'cctp-v2';
+  return 'unknown';
+}
+
+function emptyBridgeAgg(bridge: PaymentBridgeKey): BridgeAgg {
+  return {
+    bridge,
+    successCount: 0,
+    revertedCount: 0,
+    errorCount: 0,
+    totalMerchantWei: 0n,
+    totalFeeWei: 0n,
+  };
+}
+
 function aggregate(entries: LogEntry[]): {
   chains: ChainAgg[];
   aggregatedCount: number;
   invalidEntries: number;
+  byBridge: BridgeAgg[];
 } {
   const byChain = new Map<number, ChainAgg>();
+  const globalByBridge = new Map<PaymentBridgeKey, BridgeAgg>();
   let aggregatedCount = 0;
   let invalidEntries = 0;
 
@@ -124,6 +162,7 @@ function aggregate(entries: LogEntry[]): {
     const result = e.result as 'success' | 'reverted' | 'error';
     const merchantWei = parseWei(e.merchantAmount);
     const feeWei = parseWei(e.feeAmount);
+    const bridgeKey = normalizeBridge(e.bridge);
 
     let chain = byChain.get(chainId);
     if (!chain) {
@@ -136,6 +175,7 @@ function aggregate(entries: LogEntry[]): {
         totalMerchantWei: 0n,
         totalFeeWei: 0n,
         byToken: new Map(),
+        byBridge: new Map(),
       };
       byChain.set(chainId, chain);
     }
@@ -153,20 +193,41 @@ function aggregate(entries: LogEntry[]): {
       chain.byToken.set(tokenAddress, token);
     }
 
+    let chainBridge = chain.byBridge.get(bridgeKey);
+    if (!chainBridge) {
+      chainBridge = emptyBridgeAgg(bridgeKey);
+      chain.byBridge.set(bridgeKey, chainBridge);
+    }
+    let globalBridge = globalByBridge.get(bridgeKey);
+    if (!globalBridge) {
+      globalBridge = emptyBridgeAgg(bridgeKey);
+      globalByBridge.set(bridgeKey, globalBridge);
+    }
+
     if (result === 'success') {
       chain.successCount++;
       token.successCount++;
+      chainBridge.successCount++;
+      globalBridge.successCount++;
       // GMV は success のみ計上 (reverted は資金移動なし、error は submit 失敗)
       chain.totalMerchantWei += merchantWei;
       chain.totalFeeWei += feeWei;
       token.totalMerchantWei += merchantWei;
       token.totalFeeWei += feeWei;
+      chainBridge.totalMerchantWei += merchantWei;
+      chainBridge.totalFeeWei += feeWei;
+      globalBridge.totalMerchantWei += merchantWei;
+      globalBridge.totalFeeWei += feeWei;
     } else if (result === 'reverted') {
       chain.revertedCount++;
       token.revertedCount++;
+      chainBridge.revertedCount++;
+      globalBridge.revertedCount++;
     } else {
       chain.errorCount++;
       token.errorCount++;
+      chainBridge.errorCount++;
+      globalBridge.errorCount++;
     }
   }
 
@@ -175,7 +236,31 @@ function aggregate(entries: LogEntry[]): {
     if (b.successCount !== a.successCount) return b.successCount - a.successCount;
     return a.chainId - b.chainId;
   });
-  return { chains, aggregatedCount, invalidEntries };
+
+  // bridge は固定順 ('direct' → 'gateway' → 'cctp-v2' → 'unknown')、
+  // direct は本線、cross-chain bridge は派生という UI 視認性に合わせる。
+  const bridgeOrder: PaymentBridgeKey[] = [
+    'direct',
+    'gateway',
+    'cctp-v2',
+    'unknown',
+  ];
+  const byBridge = bridgeOrder
+    .map((k) => globalByBridge.get(k))
+    .filter((b): b is BridgeAgg => b !== undefined);
+
+  return { chains, aggregatedCount, invalidEntries, byBridge };
+}
+
+function serializeBridges(bridges: BridgeAgg[]) {
+  return bridges.map((b) => ({
+    bridge: b.bridge,
+    successCount: b.successCount,
+    revertedCount: b.revertedCount,
+    errorCount: b.errorCount,
+    totalMerchantWei: b.totalMerchantWei.toString(),
+    totalFeeWei: b.totalFeeWei.toString(),
+  }));
 }
 
 // 集計結果を JSON serializable に変換 (bigint → 10 進 string)。
@@ -198,6 +283,12 @@ function serialize(chains: ChainAgg[]) {
         totalMerchantWei: t.totalMerchantWei.toString(),
         totalFeeWei: t.totalFeeWei.toString(),
       })),
+    // chain ごとの bridge breakdown。固定順 (direct → gateway → cctp-v2 → unknown)。
+    byBridge: serializeBridges(
+      (['direct', 'gateway', 'cctp-v2', 'unknown'] as const)
+        .map((k) => c.byBridge.get(k))
+        .filter((b): b is BridgeAgg => b !== undefined),
+    ),
   }));
 }
 
@@ -315,7 +406,8 @@ export async function GET(req: Request): Promise<NextResponse> {
     return true;
   });
 
-  const { chains, aggregatedCount, invalidEntries } = aggregate(filtered);
+  const { chains, aggregatedCount, invalidEntries, byBridge } =
+    aggregate(filtered);
 
   return NextResponse.json({
     ok: true,
@@ -345,5 +437,10 @@ export async function GET(req: Request): Promise<NextResponse> {
       since: sinceFilter,
     },
     byChain: serialize(chains),
+    // bridge 経路の cross-cut 集計 (phase 2 cross-chain receive integration)。
+    // bridge=direct = bridge 非使用 (= 既存単一 chain 送金) の集計、
+    // gateway / cctp-v2 = 各 bridge 経由の集計。新規 cross-chain UX が
+    // どれくらい使われているかを直接観測できる metric。
+    byBridge: serializeBridges(byBridge),
   });
 }

@@ -569,3 +569,119 @@ describe('stats: window pagination + cap', () => {
     expect(body.meta.maxWindow).toBe(5000);
   });
 });
+
+describe('stats: bridge 別集計 (phase 2 cross-chain receive)', () => {
+  it('bridge 未設定 entry は "direct" として集計', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [makeEntry({ chainId: 137 })],
+    });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    expect(body.byBridge).toEqual([
+      expect.objectContaining({
+        bridge: 'direct',
+        successCount: 1,
+        totalMerchantWei: '1000000000000000000',
+      }),
+    ]);
+  });
+
+  it('gateway / cctp-v2 / direct の混在を bridge 別に分離集計', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({ chainId: 137 }),
+        makeEntry({ chainId: 137, bridge: 'gateway' }),
+        makeEntry({ chainId: 137, bridge: 'gateway' }),
+        makeEntry({ chainId: 137, bridge: 'cctp-v2' }),
+      ],
+    });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const byBridge = body.byBridge as Array<{
+      bridge: string;
+      successCount: number;
+      totalMerchantWei: string;
+    }>;
+    const direct = byBridge.find((b) => b.bridge === 'direct');
+    const gateway = byBridge.find((b) => b.bridge === 'gateway');
+    const cctp = byBridge.find((b) => b.bridge === 'cctp-v2');
+    expect(direct?.successCount).toBe(1);
+    expect(gateway?.successCount).toBe(2);
+    expect(cctp?.successCount).toBe(1);
+    expect(gateway?.totalMerchantWei).toBe('2000000000000000000');
+  });
+
+  it('未知 bridge 値は "unknown" key に集約 (future-proof)', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [makeEntry({ bridge: 'future-bridge-v3' })],
+    });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const unknown = body.byBridge.find(
+      (b: { bridge: string }) => b.bridge === 'unknown',
+    );
+    expect(unknown?.successCount).toBe(1);
+  });
+
+  it('chain ごとに byBridge breakdown が出る', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({ chainId: 137 }),
+        makeEntry({ chainId: 137, bridge: 'gateway' }),
+        makeEntry({ chainId: 8453, bridge: 'cctp-v2' }),
+      ],
+    });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const polygon = body.byChain.find((c: { chainId: number }) => c.chainId === 137);
+    const base = body.byChain.find((c: { chainId: number }) => c.chainId === 8453);
+    expect(polygon.byBridge).toEqual([
+      expect.objectContaining({ bridge: 'direct', successCount: 1 }),
+      expect.objectContaining({ bridge: 'gateway', successCount: 1 }),
+    ]);
+    expect(base.byBridge).toEqual([
+      expect.objectContaining({ bridge: 'cctp-v2', successCount: 1 }),
+    ]);
+  });
+
+  it('bridge は固定順序 direct → gateway → cctp-v2 → unknown', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({ bridge: 'unknown' }),
+        makeEntry({ bridge: 'cctp-v2' }),
+        makeEntry({ bridge: 'gateway' }),
+        makeEntry(),
+      ],
+    });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const order = body.byBridge.map((b: { bridge: string }) => b.bridge);
+    expect(order).toEqual(['direct', 'gateway', 'cctp-v2', 'unknown']);
+  });
+
+  it('reverted / error は GMV に計上せず count のみ', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({ bridge: 'gateway' }),
+        makeEntry({ bridge: 'gateway', result: 'reverted' }),
+        makeEntry({ bridge: 'gateway', result: 'error' }),
+      ],
+    });
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const gateway = body.byBridge.find(
+      (b: { bridge: string }) => b.bridge === 'gateway',
+    );
+    expect(gateway.successCount).toBe(1);
+    expect(gateway.revertedCount).toBe(1);
+    expect(gateway.errorCount).toBe(1);
+    // success 1 件分のみ GMV 計上
+    expect(gateway.totalMerchantWei).toBe('1000000000000000000');
+  });
+});

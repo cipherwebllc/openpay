@@ -36,7 +36,7 @@
 
 - [ ] **既存 x402 plan (`/.claude/plans/iridescent-munching-tower.md`) が先に動いている**: Coinbase facilitator + USDC 経路で x402 alpha が本番に lit している状態を前提とし、Gateway はその上に payment source plugin として後付け
 - [ ] **HashPort wallet (Alchemy MAv2 + EIP-7702) で burnIntent EOA sign が通る** ことを testnet 実機検証で確認: これが No なら主要 target wallet (memory: `project_hashport_target.md`) で動かないので意味なし
-- [ ] **Circle SDK の license terms (`@circle-fin/unified-balance-kit` は npm package.json に license field 不在 = UNLICENSED 相当、Proprietary より制限的) で商用利用に支障無い** ことを Circle に直接書面確認: 商用 OK でなければ自前 viem + smart contract 直叩き実装に切替判断が必要
+- ~~Circle SDK の license terms (`@circle-fin/unified-balance-kit`) を Circle に書面確認~~ — **2026-05-23 cross-chain-receive plan で撤回**。phase 1 実装 (`lib/crossChain/`) は SDK を import せず `viem` + `fetch` で直接実装したため、SDK license 問題は依存しない。on-chain Solidity contracts は Apache-2.0 (github.com/circlefin/evm-gateway-contracts)、attestation API は公開 endpoint (Service Terms 準拠で OK)、ABI fragments は公開 contract source からの factual 派生 (著作権対象外)。SDK 採用に方針変更しない限り本 gate は適用外。
 
 ### 2.2 Soft preferences (満たさなくても進めるが望ましい)
 
