@@ -135,7 +135,11 @@ export const supportedChains = [
 
 /** USDC が deploy 済みのチェーン (UI ピッカーの並び順を兼ねる)。kaia には Circle
  * native USDC 未 deploy のため対象外。jpyc 側は JPYC_CHAINS で別管理。
- * Ethereum L1 は phase 4a で追加 (SBI VC トレード等の merchant 受信 demand)。 */
+ * Ethereum L1 は phase 4a で追加 (SBI VC トレード等の merchant 受信 demand)。
+ *
+ * **本配列は merchant 受信 chain (QR/Checkout chain chooser) 用**。buyer が支払元
+ * として使える chain は phase 4b-1 で Avalanche/Unichain を加えた 7 chain (cross-chain
+ * Gateway path) → `buyerUsdcChainNames()` を使用。 */
 export const USDC_CHAINS: readonly ChainSlug[] = [
   'base',
   'arbitrum',
@@ -143,6 +147,18 @@ export const USDC_CHAINS: readonly ChainSlug[] = [
   'polygon',
   'ethereum',
 ];
+
+/** Customer (buyer) が cross-chain Gateway 経由で USDC を支払える chain の
+ * 表示名一覧。merchant 受信 5 chain + buyer-only 2 chain (Avalanche / Unichain) =
+ * 7 chain。ポスター等 customer 向け表示で「自分の chain で払えるか」確認する
+ * 用途に使う。順序は merchant chooser と同じ + buyer-only を末尾に追加。 */
+export function buyerUsdcChainNames(): string[] {
+  const merchantNames = USDC_CHAINS.map((slug) => SLUG_TO_CHAIN[slug].name);
+  const buyerOnlyNames = ALL_BUYER_ONLY_SLUGS.map(
+    (slug) => BUYER_ONLY_SLUG_TO_CHAIN[slug].name,
+  );
+  return [...merchantNames, ...buyerOnlyNames];
+}
 
 /** JPYC が deploy 済みのチェーン。Polygon は 2024-、Kaia は 2026-05-15 公式 deploy。
  * JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia

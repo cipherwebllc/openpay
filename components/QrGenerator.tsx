@@ -41,6 +41,7 @@ import {
 } from '@/lib/tokens';
 import {
   addressExplorerUrl,
+  buyerUsdcChainNames,
   chainForSlug,
   JPYC_CHAINS,
   USDC_CHAINS,
@@ -918,16 +919,15 @@ export function QrGenerator() {
                 {settings.posterNote.trim() || t('posterDefaultNote')}
               </p>
               {/* 受信 chain の表示。crossChain ON + USDC では、buyer 視点で「どの
-                  chain の USDC でも払える」ことを示す必要があるため対応 5 chain を
-                  全列挙する (poster はお客向け = 顧客が「自分の chain で払えるか」
-                  確認するための情報)。crossChain OFF or JPYC では従来通り
-                  単一 chain (target chain) を表示。 */}
+                  chain の USDC でも払える」ことを示すため対応 7 chain (merchant 5
+                  + buyer-only Avalanche/Unichain) を全列挙する (poster はお客向け
+                  = 顧客が「自分の chain で払えるか」確認するための情報)。phase
+                  4b-1 で buyer source が 5 → 7 chain に拡張、表示も追従。
+                  crossChain OFF or JPYC では従来通り単一 chain (target chain) を表示。 */}
               <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
                 {deployment.displaySymbol} ·{' '}
                 {settings.token === 'usdc' && settings.crossChain
-                  ? USDC_CHAINS.map((slug) => chainForSlug(slug).name).join(
-                      ' / ',
-                    )
+                  ? buyerUsdcChainNames().join(' / ')
                   : chain.name}
               </p>
               <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">

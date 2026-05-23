@@ -49,14 +49,16 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 ## Supported tokens and chains
 
-| Token | Supported chains | Notes |
-|---|---|---|
-| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | Gasless via Pimlico Sponsorship Paymaster |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1** | Base/Arb/OP/Polygon: gasless via Pimlico ERC20 Paymaster. **Ethereum L1: standard mode only** (Pimlico does not deploy ERC20 Paymaster on mainnet) |
+| Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
+|---|---|---|---|
+| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via Pimlico Sponsorship Paymaster |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1** (5) | merchant 5 + **Avalanche C-Chain, Unichain** (7 total, via Circle Gateway) | Base/Arb/OP/Polygon: gasless via Pimlico ERC20 Paymaster. **Ethereum L1: standard mode only** (Pimlico does not deploy ERC20 Paymaster on mainnet). Avalanche / Unichain are buyer-source only (do not appear in merchant chain chooser) |
 
-`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia.
+`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia.
 
-> **USDC balances are chain-specific.** The same wallet address can receive USDC on all five chains, but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
+> **USDC balances are chain-specific.** The same wallet address can receive USDC on all five merchant chains, but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
+
+> **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC), customers can pay from any of **7 chains** — the 5 receiving chains plus Avalanche C-Chain and Unichain. The print poster lists all 7 so customers know up-front which wallet works. Circle Gateway forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path).
 
 > **Ethereum L1 caveat:** USDC payments on Ethereum L1 always use **standard mode** (customer wallet pays ETH gas directly). Attempts to use `mode=gasless` with `chain=ethereum` are rejected at URL parse time. L1 gas is 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
 
