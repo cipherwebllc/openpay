@@ -10,7 +10,6 @@ import {
   requestAttestation,
   GATEWAY_MINTER_ABI,
   GATEWAY_WALLET_ABI,
-  destinationChainIdForDomain,
 } from '@/lib/crossChain/gateway';
 import {
   GATEWAY_MINTER_ADDRESS,
@@ -396,10 +395,4 @@ describe('lib/crossChain/gateway', () => {
     });
   });
 
-  describe('destinationChainIdForDomain', () => {
-    it('domain → chainId mapping (testnet default)', () => {
-      expect(destinationChainIdForDomain(CIRCLE_DOMAIN_POLYGON)).toBe(80002);
-      expect(destinationChainIdForDomain(CIRCLE_DOMAIN_BASE)).toBe(84532);
-    });
-  });
 });

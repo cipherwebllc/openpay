@@ -167,39 +167,35 @@ function findWalletBalance(
 }
 
 /**
- * Gateway unified balance の中から「destination 以外で十分残高がある source domain」
- * を 1 つ選ぶ。
+ * Gateway unified balance の中から「source domain として最適」な domain を選ぶ。
  *
- * 選び方:
- *   - まず destination domain と同一の source (same-chain mint) を避ける
- *     (cross-chain UX 検証用なので別 chain を優先、Gateway は same-chain も
- *     対応するが本 plan の主目的は cross-chain abstraction)
- *   - 同一以外で `>= requiredAtomic` を満たす最大 balance を選ぶ
- *   - 同一以外で足りるものがなければ、最大 balance source を返す (Gateway 側
- *     で複数 source を組み合わせる場合の代表値、phase 1 では single source 想定)
- *   - それも無ければ destination 自体を選ぶ (last resort)
+ * 優先順位 (高 → 低):
+ *   1. destination 以外 + balance >= requiredAtomic
+ *   2. destination 以外 + balance > 0  (Gateway 側で複数 source 合成想定、
+ *      phase 1 は single source なので不足するが UI には best-effort で表示)
+ *   3. destination 自体 (last resort、Gateway は same-chain mint も対応)
+ *
+ * sort key は (destination 一致 → 後回し, balance 大 → 前) の lexicographic order。
  */
 function pickBestGatewaySource(
   gateway: GatewayUnifiedBalance & { status: 'ok' },
   requiredAtomic: bigint,
   destinationDomain: CircleDomain,
 ): CircleDomain {
-  // 候補 = destination 以外 で sufficient な domain
-  const others = Array.from(gateway.perDomain.entries())
-    .filter(([d, b]) => d !== destinationDomain && b >= requiredAtomic)
-    .sort(([, a], [, b]) => (b > a ? 1 : b < a ? -1 : 0));
-  if (others.length > 0) return others[0][0] as CircleDomain;
-
-  // others で sufficient な domain なし → destination 以外で max
-  const allOthers = Array.from(gateway.perDomain.entries())
-    .filter(([d]) => d !== destinationDomain)
-    .sort(([, a], [, b]) => (b > a ? 1 : b < a ? -1 : 0));
-  if (allOthers.length > 0 && allOthers[0][1] > 0n) {
-    return allOthers[0][0] as CircleDomain;
-  }
-
-  // 全 domain destination 以外で 0 → destination 自体 (same-chain mint)
-  return destinationDomain;
+  const ranked = Array.from(gateway.perDomain.entries())
+    .map(([d, balance]) => ({
+      domain: d as CircleDomain,
+      balance,
+      // tuple ソート: [isDestination, sufficient (大優先), balance (大優先)]
+      isDest: d === destinationDomain ? 1 : 0,
+      sufficient: balance >= requiredAtomic ? 1 : 0,
+    }))
+    .sort((a, b) => {
+      if (a.isDest !== b.isDest) return a.isDest - b.isDest;
+      if (a.sufficient !== b.sufficient) return b.sufficient - a.sufficient;
+      return b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0;
+    });
+  return ranked[0]?.domain ?? destinationDomain;
 }
 
 /**
@@ -227,24 +223,3 @@ function pickBestCrossChainWalletBalance(
   return eligible[0];
 }
 
-/**
- * 表示用ヘルパー — PathDecision を人間可読 1 行 string に整形。
- * UI の状態表示で「Base 残高で Polygon に支払い (~12 秒)」のような描画に使う。
- *
- * i18n は呼び出し側 (component) で行う前提。本関数は path / reason / 数値の
- * 構造化 string を返すだけで、翻訳は UI 層が責任を持つ。
- */
-export function describePath(decision: PathDecision): string {
-  switch (decision.path) {
-    case 'direct':
-      return `direct on chainId ${decision.targetChainId}`;
-    case 'gateway':
-      return `gateway (source domain ${decision.sourceDomain} → dest domain ${decision.destinationDomain})`;
-    case 'cctp-v2':
-      return `cctp-v2 (source chainId ${decision.sourceChainId} → dest chainId ${decision.targetChainId})`;
-    case 'onramp':
-      return decision.reason === 'no_balance_anywhere'
-        ? 'no balance — onramp required'
-        : `balance unavailable: ${decision.detail}`;
-  }
-}

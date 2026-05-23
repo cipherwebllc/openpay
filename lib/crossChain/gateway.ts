@@ -36,7 +36,6 @@ import {
   CIRCLE_GATEWAY_API_BASE_URL,
   GATEWAY_MINTER_ADDRESS,
   GATEWAY_WALLET_ADDRESS,
-  chainIdForDomain,
 } from './config';
 import {
   BURN_INTENT_TYPED_DATA,
@@ -312,13 +311,4 @@ export function encodeGatewayDepositCalldata(
     functionName: 'deposit',
     args: [getAddress(tokenAddress), value],
   });
-}
-
-/**
- * destination chain の chain id を Circle domain から導出する convenience
- * (mainnet/testnet env 込み)。PaymentForm 側で「mint tx を送る chain」を決める
- * のに使う。
- */
-export function destinationChainIdForDomain(domain: CircleDomain): number {
-  return chainIdForDomain(domain);
 }

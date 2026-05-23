@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { baseSepolia, polygonAmoy, arbitrumSepolia, optimismSepolia } from 'viem/chains';
-import { selectPath, describePath } from '@/lib/crossChain/router';
+import { selectPath } from '@/lib/crossChain/router';
 import type {
   MultiChainBalances,
   WalletUsdcBalance,
@@ -275,28 +275,3 @@ describe('lib/crossChain/router.selectPath', () => {
   });
 });
 
-describe('lib/crossChain/router.describePath', () => {
-  it('direct を string で説明', () => {
-    expect(
-      describePath({
-        path: 'direct',
-        reason: 'target_chain_balance_sufficient',
-        targetChainId: 84532,
-        availableAtomic: 10n,
-      }),
-    ).toContain('direct on chainId 84532');
-  });
-
-  it('gateway を string で説明 (domain 含む)', () => {
-    expect(
-      describePath({
-        path: 'gateway',
-        reason: 'gateway_unified_balance_sufficient',
-        targetChainId: 84532,
-        destinationDomain: CIRCLE_DOMAIN_BASE,
-        sourceDomain: CIRCLE_DOMAIN_POLYGON,
-        gatewayBalanceAtomic: 100n,
-      }),
-    ).toContain('gateway');
-  });
-});

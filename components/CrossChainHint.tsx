@@ -23,11 +23,7 @@ import {
   logPaymentEvent,
   type PaymentBridge,
 } from '@/lib/paymentLog';
-import type {
-  CrossChainProgress,
-  ExecuteCctpTransferResult,
-  ExecuteGatewayTransferResult,
-} from '@/lib/crossChain/execute';
+import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathDecision } from '@/lib/crossChain/router';
 import { blockExplorerUrl } from '@/lib/chains';
 import { shortAddress } from '@/lib/format';

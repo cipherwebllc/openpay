@@ -49,6 +49,7 @@ import {
   buildBurnIntent,
   encodeGatewayMintCalldata,
   getBurnIntentTypedData,
+  GATEWAY_WALLET_ABI,
   requestAttestation,
 } from '@/lib/crossChain/gateway';
 import type {
@@ -244,18 +245,7 @@ function DepositPanel({ account }: { account: Address }) {
     setStatus({ kind: 'pending', step: 'GatewayWallet.deposit()' });
     const depositHash = await walletClient.writeContract({
       address: GATEWAY_WALLET_ADDRESS,
-      abi: [
-        {
-          inputs: [
-            { name: 'token', type: 'address' },
-            { name: 'value', type: 'uint256' },
-          ],
-          name: 'deposit',
-          outputs: [],
-          stateMutability: 'nonpayable',
-          type: 'function',
-        },
-      ] as const,
+      abi: GATEWAY_WALLET_ABI,
       functionName: 'deposit',
       args: [dep.address, valueAtomic],
       chain: walletClient.chain,

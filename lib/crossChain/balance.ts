@@ -161,32 +161,29 @@ export async function readMultiChainWalletBalances(
   });
 }
 
-// CROSS_CHAIN_TARGETS から chainId → Chain を引く default resolver。viem/chains
-// の各 chain object を switch で返す (tree-shake friendly、test から差替可能)。
+// CROSS_CHAIN_TARGETS から chainId → Chain を引く default resolver。
+// Map で 1 度だけ初期化することで lookup を O(1)、chain 追加時の同期コストも
+// 低い (本 Map と CROSS_CHAIN_TARGETS の 2 箇所更新のみ)。test から差替可能。
+const CHAIN_BY_ID = new Map<number, Chain>([
+  [polygon.id, polygon],
+  [polygonAmoy.id, polygonAmoy],
+  [base.id, base],
+  [baseSepolia.id, baseSepolia],
+  [arbitrum.id, arbitrum],
+  [arbitrumSepolia.id, arbitrumSepolia],
+  [optimism.id, optimism],
+  [optimismSepolia.id, optimismSepolia],
+]);
+
 function chainResolveFromTargets(chainId: number): Chain {
-  switch (chainId) {
-    case polygon.id:
-      return polygon;
-    case polygonAmoy.id:
-      return polygonAmoy;
-    case base.id:
-      return base;
-    case baseSepolia.id:
-      return baseSepolia;
-    case arbitrum.id:
-      return arbitrum;
-    case arbitrumSepolia.id:
-      return arbitrumSepolia;
-    case optimism.id:
-      return optimism;
-    case optimismSepolia.id:
-      return optimismSepolia;
-    default:
-      throw new Error(
-        `chainResolveFromTargets: unknown chainId ${chainId} ` +
-          `(CROSS_CHAIN_TARGETS と viem/chains の同期確認が必要)`,
-      );
+  const c = CHAIN_BY_ID.get(chainId);
+  if (!c) {
+    throw new Error(
+      `chainResolveFromTargets: unknown chainId ${chainId} ` +
+        `(CROSS_CHAIN_TARGETS と viem/chains の同期確認が必要)`,
+    );
   }
+  return c;
 }
 
 /**
