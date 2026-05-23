@@ -20,7 +20,7 @@ function walletEntry(
 ): WalletUsdcBalance {
   return {
     status: 'ok',
-    target: { chainId, domain, isTestnet: true },
+    target: { chainId, domain, isTestnet: true, role: 'merchant-and-buyer' },
     tokenAddress: '0x0000000000000000000000000000000000000001',
     balance,
   };
@@ -29,7 +29,7 @@ function walletEntry(
 function errorEntry(chainId: number, domain: CircleDomain): WalletUsdcBalance {
   return {
     status: 'error',
-    target: { chainId, domain, isTestnet: true },
+    target: { chainId, domain, isTestnet: true, role: 'merchant-and-buyer' },
     tokenAddress: '0x0000000000000000000000000000000000000001',
     error: 'mock rpc error',
   };

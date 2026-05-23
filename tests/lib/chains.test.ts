@@ -15,6 +15,8 @@ import {
 import {
   arbitrum,
   arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
   base,
   baseSepolia,
   kaia,
@@ -25,6 +27,8 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  unichain,
+  unichainSepolia,
 } from 'viem/chains';
 
 // vitest.config.ts で NETWORK_ENV='testnet' なので testnet 側を期待
@@ -38,8 +42,8 @@ describe('chains (testnet env)', () => {
     expect(chainForSlug('ethereum').id).toBe(sepolia.id);
   });
 
-  it('supportedChains は 6 本 (Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum)', () => {
-    expect(supportedChains).toHaveLength(6);
+  it('supportedChains は 8 本 (merchant 6: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum + buyer-only 2: Avalanche / Unichain)', () => {
+    expect(supportedChains).toHaveLength(8);
     const ids = supportedChains.map((c) => c.id);
     expect(ids).toContain(baseSepolia.id);
     expect(ids).toContain(arbitrumSepolia.id);
@@ -47,6 +51,8 @@ describe('chains (testnet env)', () => {
     expect(ids).toContain(polygonAmoy.id);
     expect(ids).toContain(kairos.id);
     expect(ids).toContain(sepolia.id);
+    expect(ids).toContain(avalancheFuji.id);
+    expect(ids).toContain(unichainSepolia.id);
   });
 
   it('mainnet チェーンは含まれない', () => {
@@ -57,6 +63,8 @@ describe('chains (testnet env)', () => {
     expect(ids).not.toContain(optimism.id);
     expect(ids).not.toContain(kaia.id);
     expect(ids).not.toContain(mainnet.id);
+    expect(ids).not.toContain(avalanche.id);
+    expect(ids).not.toContain(unichain.id);
   });
 });
 

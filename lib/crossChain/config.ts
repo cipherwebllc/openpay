@@ -5,6 +5,8 @@
 import {
   arbitrum,
   arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
   base,
   baseSepolia,
   mainnet,
@@ -13,15 +15,19 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  unichain,
+  unichainSepolia,
 } from 'viem/chains';
 import type { Address } from 'viem';
 import { isMainnet } from '../env';
 import {
   CIRCLE_DOMAIN_ARBITRUM,
+  CIRCLE_DOMAIN_AVALANCHE,
   CIRCLE_DOMAIN_BASE,
   CIRCLE_DOMAIN_ETHEREUM,
   CIRCLE_DOMAIN_OPTIMISM,
   CIRCLE_DOMAIN_POLYGON,
+  CIRCLE_DOMAIN_UNICHAIN,
   type CircleDomain,
   type CrossChainTarget,
 } from './types';
@@ -92,6 +98,10 @@ const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
   [optimismSepolia.id]: CIRCLE_DOMAIN_OPTIMISM,
   [mainnet.id]: CIRCLE_DOMAIN_ETHEREUM,
   [sepolia.id]: CIRCLE_DOMAIN_ETHEREUM,
+  [avalanche.id]: CIRCLE_DOMAIN_AVALANCHE,
+  [avalancheFuji.id]: CIRCLE_DOMAIN_AVALANCHE,
+  [unichain.id]: CIRCLE_DOMAIN_UNICHAIN,
+  [unichainSepolia.id]: CIRCLE_DOMAIN_UNICHAIN,
 };
 
 // domain は mainnet/testnet 共通だが chainId は env により異なるため 2 table。
@@ -101,6 +111,8 @@ const DOMAIN_TO_CHAIN_ID_MAINNET: Record<CircleDomain, number> = {
   [CIRCLE_DOMAIN_ARBITRUM]: arbitrum.id,
   [CIRCLE_DOMAIN_OPTIMISM]: optimism.id,
   [CIRCLE_DOMAIN_ETHEREUM]: mainnet.id,
+  [CIRCLE_DOMAIN_AVALANCHE]: avalanche.id,
+  [CIRCLE_DOMAIN_UNICHAIN]: unichain.id,
 };
 
 const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
@@ -109,6 +121,8 @@ const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
   [CIRCLE_DOMAIN_ARBITRUM]: arbitrumSepolia.id,
   [CIRCLE_DOMAIN_OPTIMISM]: optimismSepolia.id,
   [CIRCLE_DOMAIN_ETHEREUM]: sepolia.id,
+  [CIRCLE_DOMAIN_AVALANCHE]: avalancheFuji.id,
+  [CIRCLE_DOMAIN_UNICHAIN]: unichainSepolia.id,
 };
 
 export function domainForChainId(chainId: number): CircleDomain | undefined {
@@ -124,24 +138,52 @@ export function chainIdForDomain(domain: CircleDomain): number {
 // chain 拡張 (Ethereum/Avalanche/Unichain 等の Gateway 12 chain 対応) は本
 // array + CHAIN_ID_TO_DOMAIN + DOMAIN_TO_CHAIN_ID_* の 3 箇所を同期更新する。
 // Ethereum L1 は phase 4a で追加 (SBI VC トレード等の merchant 受信 demand)。
+// Avalanche / Unichain は phase 4b-1 で buyer-only として追加 (USDC global
+// volume + 国内 CEX 引出先カバー)、merchant 受信 chain には露出しない
+// (USDC_CHAINS in lib/chains.ts は 5 のまま)。
 export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
   ? [
-      { domain: CIRCLE_DOMAIN_POLYGON, chainId: polygon.id, isTestnet: false },
-      { domain: CIRCLE_DOMAIN_BASE, chainId: base.id, isTestnet: false },
+      {
+        domain: CIRCLE_DOMAIN_POLYGON,
+        chainId: polygon.id,
+        isTestnet: false,
+        role: 'merchant-and-buyer',
+      },
+      {
+        domain: CIRCLE_DOMAIN_BASE,
+        chainId: base.id,
+        isTestnet: false,
+        role: 'merchant-and-buyer',
+      },
       {
         domain: CIRCLE_DOMAIN_ARBITRUM,
         chainId: arbitrum.id,
         isTestnet: false,
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_OPTIMISM,
         chainId: optimism.id,
         isTestnet: false,
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_ETHEREUM,
         chainId: mainnet.id,
         isTestnet: false,
+        role: 'merchant-and-buyer',
+      },
+      {
+        domain: CIRCLE_DOMAIN_AVALANCHE,
+        chainId: avalanche.id,
+        isTestnet: false,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_UNICHAIN,
+        chainId: unichain.id,
+        isTestnet: false,
+        role: 'buyer-only',
       },
     ]
   : [
@@ -149,21 +191,48 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
         domain: CIRCLE_DOMAIN_POLYGON,
         chainId: polygonAmoy.id,
         isTestnet: true,
+        role: 'merchant-and-buyer',
       },
-      { domain: CIRCLE_DOMAIN_BASE, chainId: baseSepolia.id, isTestnet: true },
+      {
+        domain: CIRCLE_DOMAIN_BASE,
+        chainId: baseSepolia.id,
+        isTestnet: true,
+        role: 'merchant-and-buyer',
+      },
       {
         domain: CIRCLE_DOMAIN_ARBITRUM,
         chainId: arbitrumSepolia.id,
         isTestnet: true,
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_OPTIMISM,
         chainId: optimismSepolia.id,
         isTestnet: true,
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_ETHEREUM,
         chainId: sepolia.id,
         isTestnet: true,
+        role: 'merchant-and-buyer',
+      },
+      {
+        domain: CIRCLE_DOMAIN_AVALANCHE,
+        chainId: avalancheFuji.id,
+        isTestnet: true,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_UNICHAIN,
+        chainId: unichainSepolia.id,
+        isTestnet: true,
+        role: 'buyer-only',
       },
     ];
+
+/** merchant 受信可能 chain のみ (USDC_CHAINS と 1:1)。新規追加 chain の
+ * role='buyer-only' を除外して 5 chain を返す。URL parser や merchant UI で
+ * 受信 chain として有効な集合を取りたい時に使う。 */
+export const MERCHANT_RECEIVE_TARGETS: readonly CrossChainTarget[] =
+  CROSS_CHAIN_TARGETS.filter((t) => t.role === 'merchant-and-buyer');

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   arbitrum,
   arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
   base,
   baseSepolia,
   mainnet,
@@ -10,6 +12,8 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  unichain,
+  unichainSepolia,
 } from 'viem/chains';
 
 // crossChain/config は import 時に env を読んで constants を確定する設計のため、
@@ -200,9 +204,9 @@ describe('lib/crossChain/config', () => {
   });
 
   describe('CROSS_CHAIN_TARGETS', () => {
-    it('testnet env: 5 entries with testnet chain ids', async () => {
+    it('testnet env: 7 entries (merchant 5 + buyer-only 2) with testnet chain ids', async () => {
       const m = await import('@/lib/crossChain/config');
-      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(5);
+      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(7);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => t.isTestnet)).toBe(true);
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
       expect(chainIds).toContain(polygonAmoy.id);
@@ -210,16 +214,18 @@ describe('lib/crossChain/config', () => {
       expect(chainIds).toContain(arbitrumSepolia.id);
       expect(chainIds).toContain(optimismSepolia.id);
       expect(chainIds).toContain(sepolia.id);
+      expect(chainIds).toContain(avalancheFuji.id);
+      expect(chainIds).toContain(unichainSepolia.id);
     });
 
-    it('mainnet env: 5 entries with mainnet chain ids', async () => {
+    it('mainnet env: 7 entries (merchant 5 + buyer-only 2) with mainnet chain ids', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
       process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'dummy';
       process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'pol-1';
       const m = await import('@/lib/crossChain/config');
-      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(5);
+      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(7);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => !t.isTestnet)).toBe(true);
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
       expect(chainIds).toEqual([
@@ -228,7 +234,43 @@ describe('lib/crossChain/config', () => {
         arbitrum.id,
         optimism.id,
         mainnet.id,
+        avalanche.id,
+        unichain.id,
       ]);
+    });
+
+    it('role field: merchant-and-buyer (5) と buyer-only (2) で分類できる', async () => {
+      const m = await import('@/lib/crossChain/config');
+      const merchant = m.CROSS_CHAIN_TARGETS.filter(
+        (t) => t.role === 'merchant-and-buyer',
+      );
+      const buyerOnly = m.CROSS_CHAIN_TARGETS.filter(
+        (t) => t.role === 'buyer-only',
+      );
+      expect(merchant).toHaveLength(5);
+      expect(buyerOnly).toHaveLength(2);
+      expect(m.MERCHANT_RECEIVE_TARGETS).toHaveLength(5);
+      // buyer-only chain は Avalanche + Unichain のみ
+      const buyerOnlyChainIds = buyerOnly.map((t) => t.chainId);
+      expect(buyerOnlyChainIds).toContain(avalancheFuji.id);
+      expect(buyerOnlyChainIds).toContain(unichainSepolia.id);
+    });
+
+    it('chainIdForDomain: phase 4b-1 で追加した domain (1 / 10) も解決できる', async () => {
+      const m = await import('@/lib/crossChain/config');
+      expect(m.chainIdForDomain(1)).toBe(avalancheFuji.id);
+      expect(m.chainIdForDomain(10)).toBe(unichainSepolia.id);
+    });
+
+    it('domainForChainId: Avalanche / Unichain mainnet も domain に解決', async () => {
+      process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+      process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+        '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
+      process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'dummy';
+      process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'pol-1';
+      const m = await import('@/lib/crossChain/config');
+      expect(m.domainForChainId(avalanche.id)).toBe(1);
+      expect(m.domainForChainId(unichain.id)).toBe(10);
     });
   });
 });

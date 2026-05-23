@@ -6,19 +6,24 @@ import type { Address, Hex } from 'viem';
 // Circle 公式の operator-issued domain ID (EVM chain id とは独立、
 // CCTP / Gateway 共通、mainnet/testnet 同一):
 //   ethereum=0 / avalanche=1 / optimism=2 / arbitrum=3 / base=6 / polygon=7
-//   (phase 4b で追加予定: unichain=10 / solana=5)
+//   unichain=10 (phase 4b-1 で追加、buyer-only)
+//   (phase 4b-2 で追加予定: solana=5)
 export const CIRCLE_DOMAIN_ETHEREUM = 0 as const;
+export const CIRCLE_DOMAIN_AVALANCHE = 1 as const;
 export const CIRCLE_DOMAIN_OPTIMISM = 2 as const;
 export const CIRCLE_DOMAIN_ARBITRUM = 3 as const;
 export const CIRCLE_DOMAIN_BASE = 6 as const;
 export const CIRCLE_DOMAIN_POLYGON = 7 as const;
+export const CIRCLE_DOMAIN_UNICHAIN = 10 as const;
 
 export type CircleDomain =
   | typeof CIRCLE_DOMAIN_ETHEREUM
+  | typeof CIRCLE_DOMAIN_AVALANCHE
   | typeof CIRCLE_DOMAIN_OPTIMISM
   | typeof CIRCLE_DOMAIN_ARBITRUM
   | typeof CIRCLE_DOMAIN_BASE
-  | typeof CIRCLE_DOMAIN_POLYGON;
+  | typeof CIRCLE_DOMAIN_POLYGON
+  | typeof CIRCLE_DOMAIN_UNICHAIN;
 
 // Solidity src/lib/TransferSpec.sol 1:1。salt はリプレイ防止のため毎回 random、
 // hookData は post-mint hook 不使用なので空 ("0x")。
@@ -112,11 +117,20 @@ export interface BalanceQueryResponse {
   balances: BalanceQueryResponseEntry[];
 }
 
+// role: phase 4b-1 で導入。一部 chain (Avalanche / Unichain) は buyer source として
+// USDC balance を見るのみで、merchant 受信 chain としては露出しない。
+//   'merchant-and-buyer' = QR/Checkout の chain chooser に出る + buyer balance 経路も対象
+//   'buyer-only'         = QR chooser には出ない + buyer balance / Gateway source の対象
+// merchant 受信は USDC_CHAINS (lib/chains.ts、5 chain) 経由で UI 側が決定、本 type の
+// role field は CrossChainTarget array filter で「buyer 用 source 候補」を取り出すのに使う。
+export type CrossChainRole = 'merchant-and-buyer' | 'buyer-only';
+
 // domain は mainnet/testnet 共通だが chainId は env により異なるため両方持つ。
 export interface CrossChainTarget {
   domain: CircleDomain;
   chainId: number;
   isTestnet: boolean;
+  role: CrossChainRole;
 }
 
 // 循環 import 回避のため balance / gateway / cctp 共通の fetch DI 型を集約。

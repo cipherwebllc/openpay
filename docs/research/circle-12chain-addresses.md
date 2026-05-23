@@ -42,15 +42,40 @@
 | Optimism | `0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85` | `0x5fd84259d66Cd46123540766Be93DFE6D43130D7` |
 | Polygon | `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` | `0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582` |
 
-## Phase 4b-1 で追加予定 (buyer-only、本 phase では未実装)
+## Phase 4b-1 で追加 (buyer-only、2026-05-24 投入準備完了)
 
 ### Avalanche C-Chain (domain 1)
-- mainnet USDC: `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` (https://developers.circle.com/stablecoins/usdc-contract-addresses)
-- testnet Fuji USDC: 要確認時に追記
+
+| 項目 | mainnet (chain id 43114) | testnet Fuji (chain id 43113) | 出典 |
+|---|---|---|---|
+| Native USDC | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` | `0x5425890298aed601595a70AB815c96711a31Bc65` | https://developers.circle.com/stablecoins/usdc-contract-addresses (確認 2026-05-24) |
+| Gateway Wallet / Minter | 既存 4 chain と同 deterministic address (`GATEWAY_WALLET_MAINNET/TESTNET` constants 再利用) | 同上 | Circle docs blog "Gateway available on Arbitrum, Avalanche, Base, Ethereum, OP, Polygon PoS, Unichain" (確認 2026-05-24) |
+| Pimlico ERC20 Paymaster (USDC) | **未対応** — phase 4b-1 は buyer-only chain で gasless 非対応で構わない設計 (buyer 側 source として balance を見るのみ、direct mint は EVM 自前 gas) | 同上 | https://docs.pimlico.io/infra/paymaster/erc20-paymaster |
 
 ### Unichain (domain 10)
-- mainnet USDC: 要確認時に追記
-- testnet Unichain Sepolia: 要確認時に追記
+
+| 項目 | mainnet (chain id 130) | testnet Unichain Sepolia (chain id 1301) | 出典 |
+|---|---|---|---|
+| Native USDC | `0x078D782b760474a361dDA0AF3839290b0EF57AD6` | `0x31d0220469e10c4E71834a79b1f276d740d3768F` | https://developers.circle.com/stablecoins/usdc-contract-addresses + https://www.circle.com/blog/now-available-usdc-on-unichain + https://docs.unichain.org/docs/technical-information/contract-addresses (確認 2026-05-24) |
+| Gateway Wallet / Minter | 既存 4 chain と同 deterministic address | 同上 | 同上 (Gateway quickstart unified-balance に Unichain mainnet + Unichain Sepolia 明示記載) |
+| Pimlico ERC20 Paymaster (USDC) | **未対応** | 同上 | https://docs.pimlico.io/infra/paymaster/erc20-paymaster |
+
+### Block time / maxBlockHeight buffer (phase 4b-1)
+
+| chain | block time | OpenPay の `defaultBlockHeightOffset` |
+|---|---|---|
+| Avalanche C-Chain | ~2s | **600 blocks** = 1200s ≈ 20 min |
+| Unichain | ~1s | **1200 blocks** = 1200s ≈ 20 min |
+| Avalanche Fuji | ~2s | 600 blocks |
+| Unichain Sepolia | ~1s | 1200 blocks |
+
+### CCTP V2 contract addresses
+
+Avalanche / Unichain で **CCTP V2 Fast Transfer 公式 deploy** は確認済 (Circle blog)、
+ただし phase 4b-1 では Gateway path のみ使用する想定 (CCTP V2 source として
+Avalanche/Unichain を採用する場合は実 contract address を別 commit で追加検証する)。
+phase 4b-1 の implementation は Gateway path に限定し、CCTP V2 経路は既存 4 chain
+(Base/Arb/OP/Polygon) で完結する設計。
 
 ## Phase 4b-2 で追加予定 (Solana)
 

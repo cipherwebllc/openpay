@@ -751,3 +751,46 @@ phase 4a-1 で USDC 受信 chain を 4 → 5 chain に拡張 (Ethereum L1 追加
       の direct path が完了することを確認
 - [ ] HashPort は MAv2 (7702 delegate) なので standard EOA send が AA に乗らず
       生 EOA send で動くか実機確認 (eth_sendTransaction 経路で動くはず)
+
+### §10.9 Phase 4b-1: Avalanche + Unichain buyer-only chain 追加 (2026-05-24 投入)
+
+phase 4b-1 で **buyer 側 USDC source chain** を 5 → 7 chain に拡張 (Avalanche
+C-Chain + Unichain)。merchant 受信 chain は引き続き 5 chain のまま (USDC_CHAINS
+は変更なし)、QR/Checkout chain chooser には出ない。
+
+**設計**:
+- `CrossChainTarget.role`: `'merchant-and-buyer'` (5 chain) / `'buyer-only'` (2 chain) で区別
+- `CROSS_CHAIN_TARGETS` (lib/crossChain/config.ts) は 7 entry、`MERCHANT_RECEIVE_TARGETS` は merchant 用 filter 結果 (5 entry)
+- buyer wallet が Avalanche / Unichain に繋がっている → CrossChainHint balance fetch で 7 chain 並列 query、Gateway source として最適 chain を選択
+- merchant URL `chain=avalanche` 等は URL parser が reject (isValidChainSlug が false)
+- Avalanche/Unichain USDC は `paymasterMode='unavailable'` (Pimlico 未対応 + buyer-only chain で gasless 不要)
+
+**operator 設定**:
+- [ ] Vercel env で `NEXT_PUBLIC_AVALANCHE_RPC_URL` / `NEXT_PUBLIC_UNICHAIN_RPC_URL`
+      を production-grade RPC (Alchemy / Ankr 等) に設定 (12 chain 並列 balance
+      fetch で public RPC 429 リスク)
+- [ ] testnet env では `NEXT_PUBLIC_AVALANCHE_FUJI_RPC_URL` / `NEXT_PUBLIC_UNICHAIN_SEPOLIA_RPC_URL` を同様に設定
+- [ ] `NEXT_PUBLIC_USDC_AVALANCHE_MAINNET_ADDRESS` / `NEXT_PUBLIC_USDC_UNICHAIN_MAINNET_ADDRESS`
+      は hard-code default のままで OK (Circle 公式アドレス変更時のみ env override)
+
+**testnet 検証**:
+- [ ] Avalanche Fuji faucet で USDC ゲット
+- [ ] `/pay?to=<self>&token=usdc&chain=base&amount=0.5` を Avalanche Fuji 接続済 wallet で開く
+- [ ] CrossChainHint が "Gateway 経由で domain 1 → domain 6" を提案
+      (現状 domain 番号表示、chain 名表示への置き換えは別 task)
+- [ ] Pay button click → 全 step (sign / attest / switch / mint) 完走、Base Sepolia 着金確認
+- [ ] Unichain Sepolia 経由でも同 flow を 1 度確認
+- [ ] **merchant chooser に Avalanche/Unichain が出ない** ことを QrGenerator UI で再確認
+      (USDC button 押下後の chain chooser が 5 ボタンのみ)
+- [ ] URL `/pay?token=usdc&chain=avalanche` を直接叩いて 400 (invalid chain) を確認
+
+**mainnet smoke** (testnet 全 OK 後):
+- [ ] Avalanche / Unichain mainnet で USDC を 1-2 USDC 保有 (CEX から少額引出)
+- [ ] 同 flow で Base mainnet に Gateway path で着金 1 周完了
+- [ ] paymentLog に bridge='gateway' + sourceChainId=43114 (or 130) で記録される
+
+**HashPort 互換性 (要確認)**:
+- HashPort wallet は Avalanche C-Chain 対応 (公式: Ethereum/Polygon/Base/BNB/
+  Avalanche/Arbitrum/Aptos)。Unichain は HashPort 非対応の可能性あり (要確認)。
+- [ ] HashPort wallet (Avalanche) で BurnIntent EIP-712 sign が完了するか確認
+- [ ] HashPort wallet (Unichain) は対応外の可能性 → 確認後に「対応外」記録 or 別 wallet 推奨を UX に反映

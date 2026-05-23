@@ -82,6 +82,16 @@ export const env = {
     // rate limit に弱いので production では Alchemy/Infura 等の override 推奨。
     ethereum: nonEmpty(process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL),
     sepolia: nonEmpty(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL),
+    // Avalanche / Unichain = buyer-only chain (phase 4b-1 追加、USDC global
+    // volume + 国内 CEX 引出先カバー)。merchant 受信 chain では露出しないが
+    // CrossChainHint balance fetch で 並列 query 対象。viem/chains の default
+    // RPC でも動くが、本番 production では同じく override 推奨。
+    avalanche: nonEmpty(process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL),
+    avalancheFuji: nonEmpty(process.env.NEXT_PUBLIC_AVALANCHE_FUJI_RPC_URL),
+    unichain: nonEmpty(process.env.NEXT_PUBLIC_UNICHAIN_RPC_URL),
+    unichainSepolia: nonEmpty(
+      process.env.NEXT_PUBLIC_UNICHAIN_SEPOLIA_RPC_URL,
+    ),
     // ENS / Basenames 解決用 (NETWORK_ENV に依存せず常に mainnet を使う)。
     // CCIP-Read (off-chain resolution) を要する .eth 名前があるため、
     // CCIP-Read 互換の RPC を既定にする (cloudflare-eth.com は非対応で
@@ -127,6 +137,15 @@ export const env = {
         'NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS,
       ),
+      // phase 4b-1: buyer-only chain (merchant UI に出ない、cross-chain source として balance 参照)
+      avalanche: parseAddress(
+        'NEXT_PUBLIC_USDC_AVALANCHE_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_AVALANCHE_MAINNET_ADDRESS,
+      ),
+      unichain: parseAddress(
+        'NEXT_PUBLIC_USDC_UNICHAIN_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_UNICHAIN_MAINNET_ADDRESS,
+      ),
     },
   },
   testnetTokenOverrides: {
@@ -160,6 +179,15 @@ export const env = {
       ethereum: parseAddress(
         'NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS,
+      ),
+      // phase 4b-1 testnet: Avalanche Fuji + Unichain Sepolia
+      avalanche: parseAddress(
+        'NEXT_PUBLIC_USDC_AVALANCHE_FUJI_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_AVALANCHE_FUJI_ADDRESS,
+      ),
+      unichain: parseAddress(
+        'NEXT_PUBLIC_USDC_UNICHAIN_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_UNICHAIN_SEPOLIA_ADDRESS,
       ),
     },
   },

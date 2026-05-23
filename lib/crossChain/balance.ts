@@ -1,5 +1,6 @@
-// Cross-chain buyer balance query — wallet ERC20 USDC (5 chain) + Gateway
-// unified balance (Circle API) を 1 callsite で取得。
+// Cross-chain buyer balance query — wallet ERC20 USDC (7 chain: 5 merchant +
+// 2 buyer-only Avalanche/Unichain) + Gateway unified balance (Circle API) を
+// 1 callsite で取得。
 //
 // Promise.allSettled で 1 chain の RPC 失敗が他 chain に波及しないようにし、
 // 失敗 chain は status:'error' entry として残す (UI 側で「unavailable」を出すため)。
@@ -9,6 +10,8 @@ import type { Chain } from 'viem';
 import {
   arbitrum,
   arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
   base,
   baseSepolia,
   mainnet,
@@ -17,6 +20,8 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  unichain,
+  unichainSepolia,
 } from 'viem/chains';
 import { customRpcUrlForChain } from '../chains';
 import { resolveDeployment } from '../tokens';
@@ -139,6 +144,11 @@ const CHAIN_BY_ID = new Map<number, Chain>([
   [optimismSepolia.id, optimismSepolia],
   [mainnet.id, mainnet],
   [sepolia.id, sepolia],
+  // phase 4b-1: buyer-only chain (merchant 受信 chain には出さないが balance fetch 対象)
+  [avalanche.id, avalanche],
+  [avalancheFuji.id, avalancheFuji],
+  [unichain.id, unichain],
+  [unichainSepolia.id, unichainSepolia],
 ]);
 
 function chainResolveFromTargets(chainId: number): Chain {

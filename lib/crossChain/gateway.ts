@@ -16,6 +16,8 @@ import {
 import {
   arbitrum,
   arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
   base,
   baseSepolia,
   mainnet,
@@ -24,6 +26,8 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  unichain,
+  unichainSepolia,
 } from 'viem/chains';
 import {
   CIRCLE_GATEWAY_API_BASE_URL,
@@ -68,6 +72,8 @@ const MIN_MAX_FEE_ATOMIC = 1000n;
 //   Polygon/Base/Optimism (~2s/block):  600 blocks = 1200s
 //   Arbitrum One         (~0.25s/block): 5000 blocks = 1250s
 //   Ethereum L1          (~12s/block):  100 blocks = 1200s (phase 4a)
+//   Avalanche C          (~2s/block):   600 blocks = 1200s (phase 4b-1 buyer-only)
+//   Unichain             (~1s/block):   1200 blocks = 1200s (phase 4b-1 buyer-only)
 const PER_CHAIN_BLOCK_OFFSET = new Map<number, bigint>([
   [polygon.id, 600n],
   [polygonAmoy.id, 600n],
@@ -79,6 +85,10 @@ const PER_CHAIN_BLOCK_OFFSET = new Map<number, bigint>([
   [arbitrumSepolia.id, 5000n],
   [mainnet.id, 100n],
   [sepolia.id, 100n],
+  [avalanche.id, 600n],
+  [avalancheFuji.id, 600n],
+  [unichain.id, 1200n],
+  [unichainSepolia.id, 1200n],
 ]);
 
 const FALLBACK_BLOCK_OFFSET = 600n;

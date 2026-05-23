@@ -2,6 +2,8 @@ import type { Address } from 'viem';
 import {
   arbitrum,
   arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
   base,
   baseSepolia,
   kaia,
@@ -12,11 +14,15 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  unichain,
+  unichainSepolia,
 } from 'viem/chains';
 import { env, isMainnet } from './env';
 import {
+  buyerOnlyChainForSlug,
   chainForSlug,
   JPYC_CHAINS,
+  type BuyerOnlyChainSlug,
   type ChainSlug,
   type JpycChainSlug,
 } from './chains';
@@ -72,6 +78,11 @@ const USDC_POLYGON_MAINNET: Address =
   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 const USDC_ETHEREUM_MAINNET: Address =
   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+// phase 4b-1: buyer-only chain USDC (merchant 受信 chain では使用しない)
+const USDC_AVALANCHE_MAINNET: Address =
+  '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E';
+const USDC_UNICHAIN_MAINNET: Address =
+  '0x078D782b760474a361dDA0AF3839290b0EF57AD6';
 
 // USDC native (Circle faucet 対応) — testnet
 const USDC_BASE_SEPOLIA: Address =
@@ -83,6 +94,11 @@ const USDC_OPTIMISM_SEPOLIA: Address =
 const USDC_POLYGON_AMOY: Address =
   '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582';
 const USDC_SEPOLIA: Address = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+// phase 4b-1 testnet
+const USDC_AVALANCHE_FUJI: Address =
+  '0x5425890298aed601595a70AB815c96711a31Bc65';
+const USDC_UNICHAIN_SEPOLIA: Address =
+  '0x31d0220469e10c4E71834a79b1f276d740d3768F';
 
 // chain 軸の env override は ChainSlug をキーに引く。
 // USDC は Circle native の 5 chain (base/arbitrum/optimism/polygon/ethereum)、
@@ -152,6 +168,44 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
   paymasterMode: usdcPaymasterModeFor(slug),
 }));
 
+// phase 4b-1: buyer-only USDC deployment (merchant 受信 chain には出さない)。
+// CrossChainHint の wallet balance fetch / Gateway source として CROSS_CHAIN_TARGETS
+// から enumerate される際に resolveDeployment が address を引けるよう、本配列を
+// TOKEN_DEPLOYMENTS に concat する。ChainSlug union には含めない (URL parser や
+// QR chooser には露出しない)。paymasterMode='unavailable' = Pimlico paymaster は
+// 該 chain に未 deploy + buyer-only chain では gasless 不要なため。
+const BUYER_ONLY_USDC_SLUGS: readonly BuyerOnlyChainSlug[] = [
+  'avalanche',
+  'unichain',
+];
+
+function buyerOnlyUsdcAddress(slug: BuyerOnlyChainSlug): Address {
+  if (isMainnet) {
+    const overrides = env.mainnetTokenOverrides.usdc;
+    const o = overrides[slug];
+    if (o) return o;
+    if (slug === 'avalanche') return USDC_AVALANCHE_MAINNET;
+    return USDC_UNICHAIN_MAINNET;
+  }
+  const overrides = env.testnetTokenOverrides.usdc;
+  const o = overrides[slug];
+  if (o) return o;
+  if (slug === 'avalanche') return USDC_AVALANCHE_FUJI;
+  return USDC_UNICHAIN_SEPOLIA;
+}
+
+const usdcBuyerOnlyDeployments: TokenDeployment[] = BUYER_ONLY_USDC_SLUGS.map(
+  (slug) => ({
+    symbol: 'usdc',
+    displaySymbol: 'USDC',
+    name: 'USD Coin',
+    decimals: 6,
+    address: buyerOnlyUsdcAddress(slug),
+    chainId: buyerOnlyChainForSlug(slug).id,
+    paymasterMode: 'unavailable' as PaymasterMode,
+  }),
+);
+
 // JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia
 // mainnet/Kairos) 全てで同一 address を hard-code default として持つ。env
 // override は emergency address 変更用。戻り値は常に Address (型保証)。
@@ -176,11 +230,14 @@ const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.map((slug) => ({
 }));
 
 // 全 deployment のフラット配列。順序は QR token セレクター・chain セレクターの
-// 表示順に揃える (USDC: Base 既定 → Arbitrum → Optimism → Polygon、JPYC:
-// Polygon 既定 → Kaia)。
+// 表示順に揃える (USDC merchant: Base 既定 → Arbitrum → Optimism → Polygon →
+// Ethereum、JPYC: Polygon 既定 → Kaia)。buyer-only USDC (Avalanche / Unichain)
+// は末尾に append、UI には出さないが resolveDeployment(chainId) で引ける状態を維持
+// (CrossChainHint balance fetch で必要)。
 export const TOKEN_DEPLOYMENTS: readonly TokenDeployment[] = [
   ...usdcDeployments,
   ...jpycDeployments,
+  ...usdcBuyerOnlyDeployments,
 ];
 
 // 各 symbol の "default chain" — URL に chain パラメタが無い時に解決される deployment。
