@@ -899,8 +899,18 @@ export function QrGenerator() {
               <p className="mt-4 text-sm font-medium text-slate-700 print:text-xl">
                 {settings.posterNote.trim() || t('posterDefaultNote')}
               </p>
+              {/* 受信 chain の表示。crossChain ON + USDC では、buyer 視点で「どの
+                  chain の USDC でも払える」ことを示す必要があるため対応 4 chain を
+                  全列挙する (poster はお客向け = 顧客が「自分の chain で払えるか」
+                  確認するための情報)。crossChain OFF or JPYC では従来通り
+                  単一 chain (target chain) を表示。 */}
               <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
-                {deployment.displaySymbol} · {chain.name}
+                {deployment.displaySymbol} ·{' '}
+                {settings.token === 'usdc' && settings.crossChain
+                  ? USDC_CHAINS.map((slug) => chainForSlug(slug).name).join(
+                      ' / ',
+                    )
+                  : chain.name}
               </p>
               <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">
                 {effectiveReceiver ? shortAddress(effectiveReceiver) : ''}

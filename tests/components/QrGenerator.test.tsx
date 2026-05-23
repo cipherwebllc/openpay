@@ -1714,7 +1714,7 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('Step 1: token + chain の組合せが Step 3 poster preview に伝播', async () => {
+    it('Step 1: token + chain の組合せが Step 3 poster preview に伝播 (USDC + crossChain ON default)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -1722,11 +1722,53 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('button', { name: /^USDC/ }));
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
-      // poster preview の chain 表示が "Arbitrum" 含む文字列に
+      // crossChain default=true (USDC は他 chain からも受信可能)、
+      // poster は対応 4 chain (Base / Arbitrum / Optimism / Polygon) を全列挙する
+      // (お客向け = どの chain で持っていれば払えるか明示)
       await waitFor(() => {
-        expect(
-          screen.getByText(/USDC · Arbitrum/),
-        ).toBeInTheDocument();
+        const el = screen.getByText(/USDC ·/);
+        expect(el.textContent).toMatch(/Base/);
+        expect(el.textContent).toMatch(/Arbitrum/);
+        expect(el.textContent).toMatch(/(Optimism|OP Mainnet|OP Sepolia)/);
+        expect(el.textContent).toMatch(/Polygon/);
+      });
+    });
+
+    it('crossChain OFF (USDC + opt-out toggle) → poster は単一 chain 表示', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      // 高度な設定 accordion を開く (cross-chain toggle が中にある)
+      await user.click(screen.getByRole('button', { name: /高度な設定|Advanced settings/ }));
+      // cross-chain toggle を OFF
+      const toggle = screen.getByRole('checkbox', {
+        name: /他チェーンからの支払を許可|Allow cross-chain payments/,
+      });
+      await user.click(toggle);
+      await user.type(screen.getByPlaceholderText('10.00'), '1');
+      // crossChain OFF → 単一 chain 名 (Arbitrum 系) のみ表示、他 chain 名は出ない
+      await waitFor(() => {
+        const el = screen.getByText(/USDC ·/);
+        expect(el.textContent).toMatch(/Arbitrum/);
+        expect(el.textContent).not.toMatch(/Base/);
+        expect(el.textContent).not.toMatch(/Polygon/);
+      });
+    });
+
+    it('JPYC は crossChain ON でも単一 chain 表示 (JPYC は Gateway/CCTP 非対応)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // JPYC は default、polygon chain も default
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+      await waitFor(() => {
+        const el = screen.getByText(/JPYC ·/);
+        // JPYC は 1 chain のみ ("·" の右側に / は出ない)
+        expect(el.textContent).not.toMatch(/\//);
       });
     });
 
