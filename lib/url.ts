@@ -67,6 +67,12 @@ export type PayParams = {
   amount?: string;
   mode: PayMode;
   split?: SplitEntry[];
+  // cross-chain 受信を許可するかの flag (Circle Gateway / CCTP V2 経由)。
+  // default true (店主側で許可、buyer 側が target chain 以外で USDC を持っている
+  // 時に PaymentForm が代替 path を提示する)。
+  // false 時のみ URL に `crossChain=false` として出力 (default の URL は不変、
+  // 旧 QR との互換性維持)。USDC のみ意味があり、JPYC では PaymentForm が無視する。
+  crossChain?: boolean;
 };
 
 function buildSplitParam(split: SplitEntry[]): string {
@@ -202,6 +208,11 @@ export function buildPayPath(params: PayParams): string {
   if (params.split && params.split.length > 0) {
     sp.set('split', buildSplitParam(params.split));
   }
+  // default (undefined または true) は URL に出さず旧 QR と完全互換。
+  // false (= 店主が cross-chain 拒否) を明示するときだけ出力。
+  if (params.crossChain === false) {
+    sp.set('crossChain', 'false');
+  }
   return `/pay?${sp.toString()}`;
 }
 
@@ -215,7 +226,16 @@ export type ParsedPayParams =
 
 // `/pay` URL に乗っている query key の集合。bare /pay (search 空) と
 // 「to は無いが他は付いている (URL 半壊)」を区別するために使う。
-const PAY_PARAM_KEYS = ['to', 'token', 'chain', 'gas', 'amount', 'mode', 'split'] as const;
+const PAY_PARAM_KEYS = [
+  'to',
+  'token',
+  'chain',
+  'gas',
+  'amount',
+  'mode',
+  'split',
+  'crossChain',
+] as const;
 
 /** URLSearchParams / Next の ReadonlyURLSearchParams どちらも構造的に受け取れる */
 export type SearchParamsLike = { get(name: string): string | null };
@@ -242,6 +262,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const amount = searchParams.get('amount');
   const mode = searchParams.get('mode');
   const split = searchParams.get('split');
+  const crossChainRaw = searchParams.get('crossChain');
 
   if (!to) {
     // bare /pay (search 空) と「to なし + 他 param あり」を区別する。
@@ -335,6 +356,11 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const normalizedMode: PayMode =
     mode === 'standard' || mode === 'direct' ? 'standard' : 'gasless';
 
+  // crossChain は明示的 "false" のみ false、それ以外 (未指定 / "true" / 不明値)
+  // は default の true として扱う。本仕様により旧 QR は影響を受けず、phase 2
+  // 投入後に店主が opt-out したいケースでのみ URL に出る。
+  const crossChain: boolean = crossChainRaw !== 'false';
+
   return {
     ok: true,
     params: {
@@ -345,6 +371,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       amount: amount && amount.length > 0 ? amount : undefined,
       mode: normalizedMode,
       split: parsedSplit,
+      crossChain,
     },
   };
 }

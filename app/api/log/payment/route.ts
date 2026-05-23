@@ -27,6 +27,10 @@ type Payload = {
   txHash?: Hex;
   blockNumber?: string;
   errorMessage?: string;
+  // cross-chain bridge 経由の決済を区別する optional fields (phase 2)。
+  // direct (同一 chain) では undefined、Gateway/CCTP V2 経由なら値が入る。
+  bridge?: 'gateway' | 'cctp-v2';
+  sourceChainId?: number;
 };
 
 function isDecimalString(v: unknown): v is string {
@@ -59,6 +63,19 @@ function validate(raw: unknown): Payload | null {
   if (r.txHash !== undefined && !validHex(r.txHash)) return null;
   if (r.blockNumber !== undefined && !isDecimalString(r.blockNumber)) return null;
   if (r.errorMessage !== undefined && typeof r.errorMessage !== 'string') return null;
+  if (
+    r.bridge !== undefined &&
+    r.bridge !== 'gateway' &&
+    r.bridge !== 'cctp-v2'
+  )
+    return null;
+  if (
+    r.sourceChainId !== undefined &&
+    (typeof r.sourceChainId !== 'number' ||
+      !Number.isInteger(r.sourceChainId) ||
+      r.sourceChainId <= 0)
+  )
+    return null;
 
   const clean: Payload = {
     flow: r.flow,
@@ -75,6 +92,8 @@ function validate(raw: unknown): Payload | null {
   if (r.txHash !== undefined) clean.txHash = r.txHash;
   if (r.blockNumber !== undefined) clean.blockNumber = r.blockNumber;
   if (r.errorMessage !== undefined) clean.errorMessage = r.errorMessage;
+  if (r.bridge !== undefined) clean.bridge = r.bridge;
+  if (r.sourceChainId !== undefined) clean.sourceChainId = r.sourceChainId;
   return clean;
 }
 

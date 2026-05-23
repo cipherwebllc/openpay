@@ -1363,3 +1363,100 @@ describe('CheckoutParams mode 同期', () => {
     expect(path).not.toContain('gas=');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PayParams: crossChain flag (phase 2 cross-chain receive)
+// ---------------------------------------------------------------------------
+describe('PayParams: crossChain (cross-chain receive)', () => {
+  const VALID_TO_CC: Address = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+
+  it('build: crossChain 未指定 / true は URL に出さない (default ON、旧 QR 互換)', async () => {
+    const { buildPayPath } = await import('@/lib/url');
+    const a = buildPayPath({
+      to: VALID_TO_CC,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'gasless',
+      amount: '5',
+    });
+    expect(a).not.toContain('crossChain');
+    const b = buildPayPath({
+      to: VALID_TO_CC,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'gasless',
+      amount: '5',
+      crossChain: true,
+    });
+    expect(b).not.toContain('crossChain');
+  });
+
+  it('build: crossChain=false で URL に crossChain=false が出る', async () => {
+    const { buildPayPath } = await import('@/lib/url');
+    const path = buildPayPath({
+      to: VALID_TO_CC,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'gasless',
+      amount: '5',
+      crossChain: false,
+    });
+    expect(path).toContain('crossChain=false');
+  });
+
+  it('parse: crossChain 未指定 → 既定 true', async () => {
+    const { parsePayParams } = await import('@/lib/url');
+    const r = parsePayParams(
+      new URLSearchParams(`to=${VALID_TO_CC}&token=usdc&amount=5`),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.crossChain).toBe(true);
+  });
+
+  it('parse: crossChain=false → false', async () => {
+    const { parsePayParams } = await import('@/lib/url');
+    const r = parsePayParams(
+      new URLSearchParams(
+        `to=${VALID_TO_CC}&token=usdc&amount=5&crossChain=false`,
+      ),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.crossChain).toBe(false);
+  });
+
+  it('parse: crossChain=true / 不明値 → true (default fallback)', async () => {
+    const { parsePayParams } = await import('@/lib/url');
+    const r1 = parsePayParams(
+      new URLSearchParams(`to=${VALID_TO_CC}&token=usdc&crossChain=true`),
+    );
+    const r2 = parsePayParams(
+      new URLSearchParams(`to=${VALID_TO_CC}&token=usdc&crossChain=meta`),
+    );
+    expect(r1.ok && r1.params.crossChain).toBe(true);
+    expect(r2.ok && r2.params.crossChain).toBe(true);
+  });
+
+  it('crossChain は invalid 判定で empty 扱いされない (空 QR 誤検知防止)', async () => {
+    const { parsePayParams } = await import('@/lib/url');
+    // to なし + crossChain だけ → invalid (errorKind: 'invalid', not 'empty')
+    const r = parsePayParams(new URLSearchParams('crossChain=false'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorKind).toBe('invalid');
+  });
+
+  it('roundtrip: build → parse で crossChain が保存される', async () => {
+    const { buildPayPath, parsePayParams } = await import('@/lib/url');
+    const path = buildPayPath({
+      to: VALID_TO_CC,
+      token: 'usdc',
+      gas: 'customer',
+      mode: 'gasless',
+      amount: '5',
+      crossChain: false,
+    });
+    const sp = new URLSearchParams(path.replace('/pay?', ''));
+    const r = parsePayParams(sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.crossChain).toBe(false);
+  });
+});

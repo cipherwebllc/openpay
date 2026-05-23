@@ -15,6 +15,11 @@ export type PaymentFlow =
   | 'standard-merchant'
   | 'standard-fee';
 
+// cross-chain bridge 経由で着金した場合の経路識別子。direct (= 既存単一 chain
+// transfer) は undefined。Gateway / CCTP V2 を実行した場合のみ string が入る。
+// stats endpoint で bridge 別 GMV 集計に使う ([[cross-chain-usdc-receive]] phase 3)。
+export type PaymentBridge = 'gateway' | 'cctp-v2';
+
 export type PaymentLogEvent = {
   flow: PaymentFlow;
   result: PaymentResult;
@@ -29,6 +34,12 @@ export type PaymentLogEvent = {
   txHash?: Hex;
   blockNumber?: string;
   errorMessage?: string;
+  // optional: cross-chain bridge 経由なら 'gateway' or 'cctp-v2'。
+  // direct (同一 chain) なら undefined (省略)。
+  bridge?: PaymentBridge;
+  // bridge 経由時の source chain ID (本 chainId は destination)。
+  // direct の場合は undefined。
+  sourceChainId?: number;
 };
 
 // 全 hook が共通で持つ「flow / chain / merchant / customer」を 1 度に詰める。
@@ -42,6 +53,9 @@ export type PaymentLogContext = {
   customer?: Address;
   feeReceiver?: Address;
   feeAmount?: bigint;
+  // cross-chain bridge 経由の場合のみ指定。direct (= 既存単一 chain) では undefined。
+  bridge?: PaymentBridge;
+  sourceChainId?: number;
 };
 
 export function buildPaymentLogEvent(
@@ -65,6 +79,8 @@ export function buildPaymentLogEvent(
     customer: ctx.customer,
     feeReceiver: ctx.feeReceiver,
     feeAmount: ctx.feeAmount?.toString(),
+    bridge: ctx.bridge,
+    sourceChainId: ctx.sourceChainId,
   };
   if (outcome.result === 'error') {
     return { ...base, errorMessage: outcome.errorMessage.slice(0, 500), txHash: outcome.txHash };
