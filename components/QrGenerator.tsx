@@ -177,6 +177,10 @@ export function QrGenerator() {
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
       split: splitsForUrl,
+      // crossChain は USDC のみ意味あり (JPYC は Gateway / CCTP V2 非対応)。
+      // settings に false を持っていても token=jpyc なら URL に出ても無害だが、
+      // 旧 QR との互換性を最大化するため token=usdc 時のみ出力する。
+      crossChain: settings.token === 'usdc' ? settings.crossChain : undefined,
     };
     return buildPayUrl(origin, params);
   }, [
@@ -187,6 +191,7 @@ export function QrGenerator() {
     settings.token,
     settings.chain,
     settings.gasMode,
+    settings.crossChain,
     mode,
     amount,
     payMode,
@@ -739,6 +744,35 @@ export function QrGenerator() {
                   )}
                 </div>
               </AdvancedSection>
+
+              {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では disable)。
+                  Default ON。Off にすると PaymentForm が代替経路 hint を出さない
+                  (店主が「同一 chain で受け取りたい」と明示する用途)。 */}
+              {settings.token === 'usdc' && (
+                <AdvancedSection label={t('crossChainHeading')}>
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={settings.crossChain}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          crossChain: e.target.checked,
+                        }))
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span className="text-xs">
+                      <span className="font-semibold text-slate-700">
+                        {t('crossChainToggleLabel')}
+                      </span>
+                      <span className="block text-slate-500">
+                        {t('crossChainToggleDescription')}
+                      </span>
+                    </span>
+                  </label>
+                </AdvancedSection>
+              )}
 
               {/* 手数料徴収先アドレス: 長い 0x... を常時露出すると一般 user に
                   不安を与えるため、高度な設定 accordion 内 (default 閉) に移動。

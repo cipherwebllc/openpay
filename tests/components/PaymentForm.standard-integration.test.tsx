@@ -100,6 +100,9 @@ vi.mock('@/hooks/useGasQuoteUsdc', () => ({
     error: null,
   }),
 }));
+vi.mock('@/components/CrossChainHint', () => ({
+  CrossChainHint: () => null,
+}));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({
   useGasQuoteJpyc: () => ({
     data: undefined,

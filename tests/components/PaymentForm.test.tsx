@@ -27,6 +27,12 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// CrossChainHint は wagmi の useWalletClient / usePublicClient + react-query
+// に依存するが、本 test file の責務は PaymentForm 本体ロジックのため、Hint は
+// 空 component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
+vi.mock('@/components/CrossChainHint', () => ({
+  CrossChainHint: () => null,
+}));
 // resolvePaymasterMode は env 依存なので、testnet/mainnet を切替えられるよう
 // テスト個別に注入する。
 vi.mock('@/lib/pimlico', async () => {

@@ -103,6 +103,9 @@
       "needAddress": "受取先ウォレットアドレス",
       "needAmount": "請求金額"
     },
+    "crossChainHeading": "Cross-chain 受信 (USDC のみ)",
+    "crossChainToggleLabel": "他チェーンからの支払を許可",
+    "crossChainToggleDescription": "顧客が指定 chain と異なる chain で USDC を持っていても、Circle Gateway / CCTP V2 経由で自動的に変換して受取れます。OFF にすると同一 chain 直接送金のみ受け付けます。",
     "feeReceiverHeading": "OpenPay 利用手数料の徴収先",
     "feeReceiverHintJpyc": "(JPYC ガスレス決済: 1.0% + ネットワーク手数料見積)",
     "feeReceiverHintUsdc": "(USDC ガスレス決済: 1.0% + ネットワーク手数料見積)",
@@ -432,6 +435,28 @@
   "AddressInput": {
     "placeholder": "0x... または vitalik.eth / name.base.eth",
     "resolving": "名前を解決しています…"
+  },
+  "CrossChainHint": {
+    "balancesLoading": "他チェーン残高を確認中…",
+    "bridgeGateway": "Circle Gateway",
+    "bridgeCctp": "CCTP V2 Fast",
+    "alternativeAvailable": "{bridge} 経由でも支払えます",
+    "amount": "送金額: {value} USDC",
+    "describeGateway": "Gateway 経由で source domain {sourceDomain} → destination domain {destDomain} へ即時送金 (~500ms)。事前 deposit 済の残高から消費されます。",
+    "describeCctp": "CCTP V2 Fast 経由で chainId {sourceChainId} → chainId {destChainId} へ送金 (~10-30 秒)。USDC を burn して destination で mint します。",
+    "payWithCrossChain": "{bridge} で支払う",
+    "inProgress": "実行中",
+    "progressSign": "署名待ち",
+    "progressAttest": "Circle attestation 取得中",
+    "progressSwitchChain": "chainId {chainId} に切替中",
+    "progressApprove": "USDC approve 中",
+    "progressSourceTxPending": "source 取引を待機中",
+    "progressPollAttestation": "attestation を polling 中",
+    "progressDestTxPending": "destination 取引を待機中",
+    "errorPrefix": "エラー",
+    "successTitle": "{bridge} 経由で着金しました",
+    "successDescription": "{amount} USDC を {recipient} (chainId {chainId}) に送金完了",
+    "viewOnExplorer": "Explorer で確認"
   },
   "LocaleSwitcher": {
     "label": "言語",

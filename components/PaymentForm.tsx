@@ -10,6 +10,7 @@ import { PayEmptyLanding } from './PayEmptyLanding';
 import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
+import { CrossChainHint } from './CrossChainHint';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -485,6 +486,22 @@ function PaymentDetails({ params }: { params: PayParams }) {
             </p>
             <OnrampCta token={params.token} namespace="PaymentForm" />
           </div>
+        )}
+
+        {/* Cross-chain hint: USDC かつ params.crossChain !== false の時のみ
+            mounting (hint 内部でも guard あり)。target chain で balance 不足
+            だが他 chain / Gateway に balance がある時、代替 path を提示する。
+            JPYC は Gateway / CCTP V2 非対応のため自動 skip。 */}
+        {params.token === 'usdc' && address && (
+          <CrossChainHint
+            token={params.token}
+            enabled={params.crossChain !== false}
+            targetChainId={requiredChain.id}
+            recipient={params.to}
+            requiredAtomic={totalCustomerOutflow}
+            displayDecimals={deployment.decimals}
+            tokenAddress={deployment.address}
+          />
         )}
       </section>
 

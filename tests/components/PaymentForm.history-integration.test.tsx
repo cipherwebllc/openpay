@@ -32,6 +32,9 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+vi.mock('@/components/CrossChainHint', () => ({
+  CrossChainHint: () => null,
+}));
 vi.mock('@/lib/pimlico', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');

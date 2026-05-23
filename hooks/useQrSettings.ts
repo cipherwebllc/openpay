@@ -26,6 +26,11 @@ type QrSettings = {
   storeName: string;
   posterNote: string;
   quickAmounts: string[];
+  // Cross-chain 受信 (Gateway / CCTP V2) を allow するかの店主側 opt-out。
+  // default true (顧客 wallet が target chain と異なっても自動 cross-chain で
+  // 受取れるよう PaymentForm が代替経路を提示)。false にすると URL に
+  // crossChain=false が付き、PaymentForm が hint を出さない。USDC のみ意味あり。
+  crossChain: boolean;
 };
 
 const STORAGE_KEY = 'openpay:qr-settings:v2';
@@ -40,6 +45,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   storeName: '',
   posterNote: '',
   quickAmounts: ['500', '1000', '1500', '3000'],
+  crossChain: true,
 };
 
 export const STORE_NAME_MAX = 48;
@@ -133,6 +139,11 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),
     quickAmounts: sanitizeQuickAmounts(loaded.quickAmounts),
+    // boolean を厳密 check。旧 schema (crossChain 未定義) は true に倒す (default ON)。
+    crossChain:
+      typeof loaded.crossChain === 'boolean'
+        ? loaded.crossChain
+        : DEFAULT_SETTINGS.crossChain,
   };
 }
 

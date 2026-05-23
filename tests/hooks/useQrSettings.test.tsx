@@ -22,6 +22,7 @@ describe('useQrSettings', () => {
       storeName: '',
       posterNote: '',
       quickAmounts: ['500', '1000', '1500', '3000'],
+      crossChain: true,
     });
   });
 
@@ -211,6 +212,7 @@ describe('useQrSettings', () => {
         storeName: 'Coffee Stand',
         posterNote: 'Scan to pay',
         quickAmounts: ['300', '750', '1200'],
+        crossChain: true,
       });
     });
 

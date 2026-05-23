@@ -103,6 +103,9 @@
       "needAddress": "Receiver wallet address",
       "needAmount": "Amount"
     },
+    "crossChainHeading": "Cross-chain receive (USDC only)",
+    "crossChainToggleLabel": "Allow cross-chain payments",
+    "crossChainToggleDescription": "Even if the customer holds USDC on a different chain, OpenPay can route the payment via Circle Gateway / CCTP V2 to your specified chain. Turn off to require a direct same-chain transfer only.",
     "feeReceiverHeading": "OpenPay service fee receiver",
     "feeReceiverHintJpyc": "(JPYC gasless: 1.0% + estimated network fee)",
     "feeReceiverHintUsdc": "(USDC gasless: 1.0% + estimated network fee)",
@@ -432,6 +435,28 @@
   "AddressInput": {
     "placeholder": "0x... or vitalik.eth / name.base.eth",
     "resolving": "Resolving name…"
+  },
+  "CrossChainHint": {
+    "balancesLoading": "Checking other-chain balances…",
+    "bridgeGateway": "Circle Gateway",
+    "bridgeCctp": "CCTP V2 Fast",
+    "alternativeAvailable": "You can also pay via {bridge}",
+    "amount": "Amount: {value} USDC",
+    "describeGateway": "Send via Gateway from source domain {sourceDomain} to destination domain {destDomain} (~500ms). Consumed from your pre-deposited balance.",
+    "describeCctp": "Send via CCTP V2 Fast from chainId {sourceChainId} to chainId {destChainId} (~10-30s). Burns USDC on source, mints on destination.",
+    "payWithCrossChain": "Pay with {bridge}",
+    "inProgress": "Executing",
+    "progressSign": "Awaiting signature",
+    "progressAttest": "Requesting Circle attestation",
+    "progressSwitchChain": "Switching to chainId {chainId}",
+    "progressApprove": "Approving USDC",
+    "progressSourceTxPending": "Waiting for source transaction",
+    "progressPollAttestation": "Polling attestation",
+    "progressDestTxPending": "Waiting for destination transaction",
+    "errorPrefix": "Error",
+    "successTitle": "Received via {bridge}",
+    "successDescription": "Sent {amount} USDC to {recipient} on chainId {chainId}",
+    "viewOnExplorer": "View on explorer"
   },
   "LocaleSwitcher": {
     "label": "Language",
