@@ -700,3 +700,54 @@ Next.js 仕様で build-time env (client bundle へ inline)。Vercel env を fli
       該当 QR scan 時に CrossChainHint が表示されないこと
 - [ ] 本線 UX の direct path (USDC 同一 chain 送金) が cross-chain 機能投入後
       も regression なく動くことを 1 度確認
+
+### §10.8 Phase 4a: Ethereum L1 USDC 受信 chain 追加 (2026-05-24 投入)
+
+phase 4a-1 で USDC 受信 chain を 4 → 5 chain に拡張 (Ethereum L1 追加)。SBI VC
+トレード等の merchant 出庫先が L1 限定のユースケース対応。
+
+**重要な制約**:
+- Ethereum L1 USDC は **standard mode 必須** (Pimlico ERC20 paymaster 未対応)。
+  QR/Checkout UI は chain=ethereum 選択時に payMode=standard に自動 force、
+  Tip widget は chain chooser から ethereum を filter out 済。
+- Ethereum L1 mainnet gas は他 chain より 1-3 桁高い ($1-5/tx 想定)。smoke は
+  **0.5-1 USDC** の小額で済ませ、本 smoke のために 不要な large value tx を
+  送らない (gas は L2 chain と比べてマージン消す方向に効く)。
+
+**operator 設定**:
+- [ ] Vercel env で `NEXT_PUBLIC_ETHEREUM_RPC_URL` を Alchemy / Infura 等の
+      production-grade RPC に設定 (public RPC は rate limit に弱い、cross-chain
+      の balance fetch で 12 chain 並列 query 時に 429 リスク)
+- [ ] testnet env では `NEXT_PUBLIC_SEPOLIA_RPC_URL` を同様に設定
+- [ ] `NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS` は hard-code default
+      (`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`) のままで OK、emergency
+      address 変更時のみ env override 設定 (Circle 公式アドレス変更は事前告知あり)
+
+**testnet 検証**:
+- [ ] `/pay?to=<self>&token=usdc&chain=ethereum&mode=standard&amount=0.1` で
+      QR 生成 → MetaMask (Sepolia) で 0.1 USDC 支払い → Sepolia 着金確認
+- [ ] gasless flag を URL で強制 (`mode=gasless` を直接付与) して reject
+      されることを確認 (parser が "gasless mode 非対応" error を返す)
+- [ ] QrGenerator UI で chain=Ethereum 選択時に payMode セレクターの gasless
+      button が grey-out + 自動 standard に切替わることを確認
+- [ ] cross-chain: Polygon Amoy USDC 残高あり buyer で
+      `/pay?...&chain=ethereum&mode=standard&amount=0.1` 開く →
+      CrossChainHint が "Gateway 経由で domain 7 → domain 0" を提案
+      (現状は domain 番号表示、chain 名表示への置き換えは後続 task)
+
+**mainnet smoke** (testnet 全 OK 後):
+- [ ] 自身の wallet で 0.5 USDC (Ethereum L1) を保有
+- [ ] `/pay?to=<self>&token=usdc&chain=ethereum&mode=standard&amount=0.5`
+- [ ] MetaMask / Rabby / Frame 等の EOA で支払い → Ethereum L1 着金 (gas は
+      ~$1-3 想定、blocknative 等で事前 confirm)
+- [ ] paymentLog に bridge=undefined (direct path) + chainId=1 で記録される
+
+**HashPort 互換性**:
+- HashPort wallet は Ethereum/Polygon/Base/BNB/Avalanche/Arbitrum/Aptos 対応
+  (memory: [[project_hashport_target]])。Ethereum L1 も対応 chain に含まれる
+  ため、phase 4a の direct path (standard mode の EOA transfer) は HashPort
+  でも動作するはずだが、L1 上の AA / gasless は未検証。
+- [ ] HashPort wallet (Ethereum L1) で `/pay?...&chain=ethereum&mode=standard`
+      の direct path が完了することを確認
+- [ ] HashPort は MAv2 (7702 delegate) なので standard EOA send が AA に乗らず
+      生 EOA send で動くか実機確認 (eth_sendTransaction 経路で動くはず)

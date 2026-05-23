@@ -49,14 +49,16 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 ## Supported tokens and chains
 
-| Token | Supported chains |
-|---|---|
-| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon |
+| Token | Supported chains | Notes |
+|---|---|---|
+| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | Gasless via Pimlico Sponsorship Paymaster |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1** | Base/Arb/OP/Polygon: gasless via Pimlico ERC20 Paymaster. **Ethereum L1: standard mode only** (Pimlico does not deploy ERC20 Paymaster on mainnet) |
 
-`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet.
+`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia.
 
-> **USDC balances are chain-specific.** The same wallet address can receive USDC on all four chains, but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
+> **USDC balances are chain-specific.** The same wallet address can receive USDC on all five chains, but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
+
+> **Ethereum L1 caveat:** USDC payments on Ethereum L1 always use **standard mode** (customer wallet pays ETH gas directly). Attempts to use `mode=gasless` with `chain=ethereum` are rejected at URL parse time. L1 gas is 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
 
 ## Non-custodial design
 
