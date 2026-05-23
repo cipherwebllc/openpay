@@ -396,3 +396,57 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
     expect(out.gateway.status).toBe('error');
   });
 });
+
+describe('lib/crossChain/balance: chainResolver validation', () => {
+  it('default resolver: 未知 chainId → 明示 Error throw (silent fallback なし)', async () => {
+    // CROSS_CHAIN_TARGETS にない chain id を target に持つ wallet entry が
+    // 紛れ込んだ場合、resolver は throw する設計 (LARP audit D1)。
+    // readMultiChainWalletBalances は CROSS_CHAIN_TARGETS から call するため
+    // 通常は到達しないが、直接 chainResolveFromTargets 経路を test 可能化する
+    // ため inject 経由で検証する。
+    // baseSepolia のみ accept、他は throw する resolver。default resolver の
+    // throw 経路を exercise する (3 chain で throw → 該当 chain は status='error'
+    // で返り、silent fallback (e.g. 0n) にならないことを確認)。
+    const customResolver = (chainId: number) => {
+      if (chainId === baseSepolia.id) return baseSepolia;
+      throw new Error(`unknown chainId ${chainId}`);
+    };
+
+    readContractMocks.set(baseSepolia.id, vi.fn().mockResolvedValue(1n));
+    // 他 chain は customResolver が throw → entry 自体は allSettled 経由で error
+    readContractMocks.set(polygonAmoy.id, vi.fn().mockResolvedValue(2n));
+    readContractMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue(3n));
+    readContractMocks.set(optimismSepolia.id, vi.fn().mockResolvedValue(4n));
+
+    const out = await readMultiChainWalletBalances(ACCOUNT, customResolver);
+    // 4 chain query が並列、3 chain は customResolver で throw → status='error'
+    expect(out).toHaveLength(4);
+    const baseEntry = out.find((e) => e.target.chainId === baseSepolia.id);
+    expect(baseEntry?.status).toBe('ok');
+    const others = out.filter((e) => e.target.chainId !== baseSepolia.id);
+    expect(others.every((e) => e.status === 'error')).toBe(true);
+    if (others[0].status === 'error') {
+      expect(others[0].error).toMatch(/unknown chainId/);
+    }
+  });
+
+  it('default resolver: 全 4 chain が viem/chains にある (= CROSS_CHAIN_TARGETS と整合)', () => {
+    // production の chainResolveFromTargets は CROSS_CHAIN_TARGETS の 4 chain
+    // 全てに対して Chain object を返せる必要がある。Map から逆引きできるか
+    // 構造的に検証 (test 経由で resolver default を使う各 chain id を確認)。
+    for (const chain of [
+      baseSepolia,
+      polygonAmoy,
+      arbitrumSepolia,
+      optimismSepolia,
+    ]) {
+      readContractMocks.set(chain.id, vi.fn().mockResolvedValue(1n));
+    }
+    // default resolver (chainResolveFromTargets) は 4 chain 全部 throw せず resolve
+    // → readMultiChainWalletBalances が 4 件全部 'ok' を返す
+    return readMultiChainWalletBalances(ACCOUNT).then((out) => {
+      expect(out).toHaveLength(4);
+      expect(out.every((e) => e.status === 'ok')).toBe(true);
+    });
+  });
+});

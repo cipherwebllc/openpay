@@ -569,3 +569,84 @@ git push origin main
 - [ ] revert / promote 経路の動作を staging で 1 度確認 (git revert は dry-run
       推奨)
 - [ ] Vercel deployment 一覧で過去 successful build が delete されていないこと
+
+
+## §10 Cross-chain USDC Receive (Phase 1-3 投入後の E2E 検証)
+
+[[cross-chain-usdc-receive]] phase 1-3 を本線投入 (2026-05-24)。spec / EIP-712
+typehash regression guard / unit + integration test は全 green だが、
+**Circle 実 attestation API + GatewayMinter / CCTP V2 contract への mint は
+production code path として一度も実走していない** (LARP audit B1 で明示)。
+operator は以下の order で testnet → mainnet 段階検証を実施する。
+
+### §10.1 Hard gate 1: HashPort wallet (Alchemy MAv2 + EIP-7702) compatibility
+
+OpenPay 主要ターゲット (memory: [[project_hashport_target]]) で動かなければ
+phase 2 本線 UX は事実上意味を成さない。
+
+- [ ] HashPort wallet を testnet (Polygon Amoy) で connect
+- [ ] `/[locale]/experimental/cross-chain-demo` で env=true で mount 確認
+      (Vercel `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED=true` を一時設定)
+- [ ] GatewayWallet.deposit (Polygon Amoy USDC を 1 USDC pre-deposit)
+- [ ] 13-19 分待って Gateway balance 反映確認
+- [ ] BurnIntent EIP-712 sign が wallet 上で完了する (HashPort UI で承認可能か)
+- [ ] sign を attestation API に POST → attestation 取得成功
+- [ ] dest (Base Sepolia) chain に switch + GatewayMinter.gatewayMint
+- [ ] dest で USDC が merchant address に着金確認 (block explorer 1 入金 tx)
+- [ ] **NG なら**: 別 wallet (MetaMask EOA) で同じ flow を試して挙動差分を log、
+      HashPort 個別の不具合か共通の不具合か切り分け
+
+### §10.2 Hard gate 2: 日本 IP から Circle attestation API access
+
+- [ ] 日本 IP (自宅 / data center)、JP region VPN 不使用で
+      `curl https://gateway-api-testnet.circle.com/v1/balances` を POST
+- [ ] 200 OK (or 4xx の business error) が返ること、403 や 500 等の geo block
+      indicator がないこと
+- [ ] mainnet `https://gateway-api.circle.com/v1/balances` も同様検証
+- [ ] iris `https://iris-api-sandbox.circle.com/v2/messages/6?...` も 200
+- [ ] **NG なら**: Vercel server-side proxy 経由 (server fetch) で回避するか
+      検討 (Vercel リージョンは us-east、Circle API 動作実績 region)
+
+### §10.3 Soft gate: 各 chain の block height offset 適切性 (LARP A1 fix の動作確認)
+
+`defaultBlockHeightOffset` で Polygon/Base/OP = 600 blocks (~20 分)、
+Arbitrum = 5000 blocks (~21 分) を chain-aware で設定済。実機検証:
+
+- [ ] Polygon Amoy source で attestation expire 起きない (典型 user flow ~2 分
+      で完了するため余裕は問題ない、念のため)
+- [ ] **Arbitrum Sepolia source** で attestation expire 起きないか確認 (
+      ~0.25s/block で 5000 blocks = ~21 分、user flow > expire になる典型は
+      ないはずだが LARP audit 起因の修正なので明示確認)
+- [ ] 緊急時の env override: `NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT=8000`
+      で全 chain に上書き設定可能であることを 1 度試して動作確認
+
+### §10.4 mainnet smoke (testnet 全 OK 後)
+
+- [ ] 自身の wallet で 1 USDC (mainnet) を Circle Gateway に deposit
+- [ ] OpenPay 本線 `/pay?to=<self>&token=usdc&chain=base&amount=1` で
+      Gateway path が CrossChainHint に表示される
+- [ ] Pay button click → 全 step (sign / attest / switch / mint) 完走
+- [ ] dest chain で 1 USDC 着金 + paymentLog で bridge='gateway' 記録確認
+      (admin endpoint /api/log/payment/stats?since=YYYY-MM-DD で確認)
+
+### §10.5 CCTP V2 Fast Transfer 実機検証
+
+- [ ] testnet (Arbitrum Sepolia 残高あり、target Base Sepolia) で CCTP V2 path
+      が CrossChainHint に表示される
+- [ ] Pay button click → approve + burn + iris poll + receiveMessage 完走
+- [ ] dest chain で USDC 着金 + bridge='cctp-v2' 記録
+
+### §10.6 Sentry alert 設定
+
+- [ ] `cross-chain.execute.failed` event を Sentry rule 化 (alert 閾値設定)
+- [ ] `cross-chain.balance-query.failed` を warn level rule で監視
+- [ ] テスト event を 1 度発火させて alert 通知が来ることを確認
+
+### §10.7 Production opt-out 経路の確認
+
+- [ ] Vercel env で `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED=false` (本線 UI
+      は別 flag) を再確認、experimental demo route は production で 404 になる
+- [ ] QrGenerator の crossChain toggle OFF で URL に `crossChain=false` が付き、
+      該当 QR scan 時に CrossChainHint が表示されないこと
+- [ ] 本線 UX の direct path (USDC 同一 chain 送金) が cross-chain 機能投入後
+      も regression なく動くことを 1 度確認

@@ -436,3 +436,78 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     expect(container.firstChild).toBeNull();
   });
 });
+
+describe('CrossChainHint: React Query queryKey isolation (LARP audit D2)', () => {
+  it('account 切替で fresh fetch → cache pollution なし', async () => {
+    // useCrossChainPayment の queryKey は [networkEnv, account, targetChainId]。
+    // account 変更で別 key になり、別 account の balance が漏れないことを検証。
+    setAllChainsBalance(0n);
+
+    const ACCOUNT_A: Address = '0xaaaa000000000000000000000000000000000000';
+    const ACCOUNT_B: Address = '0xbbbb000000000000000000000000000000000000';
+
+    // fetch を call 回数 + body 内 depositor で differentiate
+    const fetchCalls: Array<{ depositor: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(init?.body as string);
+        fetchCalls.push({ depositor: body.sources[0].depositor });
+        return new Response(
+          JSON.stringify({ balances: [] }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    // QueryClient は test scope で 1 つを共有 (本 plan の本番運用パターン:
+    // 1 アプリ instance = 1 QueryClient で、account 切替で同じ client を再利用)。
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    function Wrapper({ children }: { children: ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      );
+    }
+
+    // ACCOUNT_A で render
+    setupConnected({ account: ACCOUNT_A });
+    const { rerender, unmount } = renderWithIntl(
+      <Wrapper>
+        <CrossChainHint {...baseProps} />
+      </Wrapper>,
+    );
+    await waitFor(() => {
+      expect(fetchCalls.some((c) => c.depositor === ACCOUNT_A)).toBe(true);
+    });
+    expect(fetchCalls.every((c) => c.depositor !== ACCOUNT_B)).toBe(true);
+
+    // ACCOUNT_B に切替 (useAccount.mockReturnValue を更新 + re-render)
+    setupConnected({ account: ACCOUNT_B });
+    rerender(
+      <Wrapper>
+        <CrossChainHint {...baseProps} />
+      </Wrapper>,
+    );
+    // 別 account → React Query は queryKey 変化を検知して fresh fetch
+    await waitFor(() => {
+      expect(fetchCalls.some((c) => c.depositor === ACCOUNT_B)).toBe(true);
+    });
+
+    // ACCOUNT_A balance が ACCOUNT_B のキャッシュとして使われていないこと
+    // (= 各 account ごとに独立した queryKey)
+    const accountADepositorCalls = fetchCalls.filter(
+      (c) => c.depositor === ACCOUNT_A,
+    );
+    const accountBDepositorCalls = fetchCalls.filter(
+      (c) => c.depositor === ACCOUNT_B,
+    );
+    expect(accountADepositorCalls.length).toBeGreaterThan(0);
+    expect(accountBDepositorCalls.length).toBeGreaterThan(0);
+
+    unmount();
+  });
+});

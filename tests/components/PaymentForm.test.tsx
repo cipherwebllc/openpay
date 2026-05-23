@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -30,8 +30,15 @@ vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 // CrossChainHint は wagmi の useWalletClient / usePublicClient + react-query
 // に依存するが、本 test file の責務は PaymentForm 本体ロジックのため、Hint は
 // 空 component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
+// 但し、PaymentForm から Hint へ正しい props (token / enabled / requiredAtomic /
+// targetChainId / recipient / tokenAddress) が渡るかは本 test で
+// crossChainHintSpy 経由で props を capture して検証する (LARP audit C1)。
+const crossChainHintSpy = vi.fn();
 vi.mock('@/components/CrossChainHint', () => ({
-  CrossChainHint: () => null,
+  CrossChainHint: (props: Record<string, unknown>) => {
+    crossChainHintSpy(props);
+    return null;
+  },
 }));
 // resolvePaymasterMode は env 依存なので、testnet/mainnet を切替えられるよう
 // テスト個別に注入する。
@@ -1143,5 +1150,108 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     expect(call.extraRecipients[0].amount).toBe(49_250_000n);
     // sponsorship: feeAmount = fee + gas = 1.0 + 0.5 = 1.5
     expect(call.feeAmount).toBe(1_500_000n);
+  });
+});
+
+describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
+  beforeEach(() => {
+    crossChainHintSpy.mockClear();
+  });
+
+  it('USDC + amount 確定 + 接続済 → Hint が render され props が flow', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: 84532 });
+    mockHook(useSmartAccount, {
+      data: { smartAccountClient: {}, pimlicoClient: {} },
+    });
+    mockHook(useGasQuoteUsdc, { data: { gasAmount: 0n } });
+    mockHook(useGasQuoteJpyc, { data: { gasAmount: 0n } });
+    mockHook(useBatchPayment, { isPending: false, error: null });
+    mockHook(useStandardPayment, { isPending: false, error: null });
+    vi.mocked(useReadContract).mockReturnValue({
+      data: 1_000_000_000n, // 1000 USDC 残高
+    } as never);
+
+    render(<PaymentForm />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall?.[0] as Record<string, unknown>;
+    expect(props.token).toBe('usdc');
+    expect(props.enabled).toBe(true);
+    expect(props.targetChainId).toBe(84532); // Base Sepolia (testnet env)
+    expect(props.recipient).toBe(MERCHANT);
+    expect(props.displayDecimals).toBe(6);
+    // requiredAtomic は totalCustomerOutflow。OpenPay 手数料は常に店主負担
+    // (顧客不可視、memory project_fee_model) なので、customer outflow は
+    // amount + gas (gas=customer 時) = 100 + 0 = 100 USDC = 100_000_000n
+    expect(props.requiredAtomic).toBe(100_000_000n);
+    // tokenAddress は USDC Base Sepolia
+    expect(props.tokenAddress).toBe(
+      '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    );
+  });
+
+  it('JPYC では Hint render されない (token guard)', async () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000`);
+    setAccount({ connected: true, chainId: 80002 });
+    mockHook(useSmartAccount, {
+      data: { smartAccountClient: {}, pimlicoClient: {} },
+    });
+    mockHook(useGasQuoteJpyc, { data: { gasAmount: 0n } });
+    mockHook(useBatchPayment, { isPending: false, error: null });
+    mockHook(useStandardPayment, { isPending: false, error: null });
+    vi.mocked(useReadContract).mockReturnValue({
+      data: 100_000_000_000_000_000_000_000n, // 100K JPYC
+    } as never);
+
+    render(<PaymentForm />);
+
+    // PaymentForm の guard で {params.token === 'usdc' && address && ...} は false
+    // → CrossChainHint コンポーネント自体が mount されない
+    await waitFor(() => {
+      // payment button が render されたことを wait (PaymentForm 自体は描画完了)
+      expect(document.querySelectorAll('button').length).toBeGreaterThan(0);
+    });
+    expect(crossChainHintSpy).not.toHaveBeenCalled();
+  });
+
+  it('未接続 (address 無し) で USDC → Hint render されない (address guard)', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: false });
+    mockHook(useSmartAccount, { data: undefined });
+    mockHook(useGasQuoteUsdc, { data: { gasAmount: 0n } });
+    mockHook(useGasQuoteJpyc, { data: { gasAmount: 0n } });
+    mockHook(useBatchPayment, { isPending: false, error: null });
+    mockHook(useStandardPayment, { isPending: false, error: null });
+    vi.mocked(useReadContract).mockReturnValue({ data: undefined } as never);
+
+    render(<PaymentForm />);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('button').length).toBeGreaterThan(0);
+    });
+    expect(crossChainHintSpy).not.toHaveBeenCalled();
+  });
+
+  it('URL に crossChain=false → Hint の enabled=false で render', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&crossChain=false`);
+    setAccount({ connected: true, chainId: 84532 });
+    mockHook(useSmartAccount, {
+      data: { smartAccountClient: {}, pimlicoClient: {} },
+    });
+    mockHook(useGasQuoteUsdc, { data: { gasAmount: 0n } });
+    mockHook(useGasQuoteJpyc, { data: { gasAmount: 0n } });
+    mockHook(useBatchPayment, { isPending: false, error: null });
+    mockHook(useStandardPayment, { isPending: false, error: null });
+    vi.mocked(useReadContract).mockReturnValue({
+      data: 100_000_000n,
+    } as never);
+
+    render(<PaymentForm />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall?.[0] as Record<string, unknown>;
+    // store が opt-out した状態は enabled=false で hint へ伝播
+    expect(props.enabled).toBe(false);
   });
 });

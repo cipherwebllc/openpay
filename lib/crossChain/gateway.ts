@@ -33,9 +33,20 @@ import {
   type TypedDataDefinition,
 } from 'viem';
 import {
+  arbitrum,
+  arbitrumSepolia,
+  base,
+  baseSepolia,
+  optimism,
+  optimismSepolia,
+  polygon,
+  polygonAmoy,
+} from 'viem/chains';
+import {
   CIRCLE_GATEWAY_API_BASE_URL,
   GATEWAY_MINTER_ADDRESS,
   GATEWAY_WALLET_ADDRESS,
+  chainIdForDomain,
 } from './config';
 import {
   BURN_INTENT_TYPED_DATA,
@@ -57,17 +68,68 @@ const TRANSFER_SPEC_VERSION = 1;
 // なので、これは 20 倍までの fee を許容する safety margin。fee が想定外に
 // 高い場合は attestation API 側で reject される (operator が maxFee を超過した
 // fee を要求した場合)。caller は overrides.maxFee で上書き可能。
-const DEFAULT_MAX_FEE_BPS = 10n;
+// env NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS で再 deploy なし上書き可。
+const DEFAULT_MAX_FEE_BPS: bigint = (() => {
+  const raw = process.env.NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS;
+  if (!raw) return 10n;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0 || n > 10000) return 10n;
+  return BigInt(n);
+})();
 
 // 最低 maxFee (atomic USDC = 6 decimals)。1000 atomic = $0.001。微少額 transfer で
 // `value × 10 bps` が 0 や 1 atomic になって fee で reject されないようにする
 // 下限。caller は overrides.maxFee で上書き可能。
 const MIN_MAX_FEE_ATOMIC = 1000n;
 
-// 既定 maxBlockHeight buffer。source chain で attestation 取得 ～ mint まで
-// に有効な block 数。500 blocks = Polygon (~2s/block) で 1000 秒 ≈ 16 分、
-// Base (~2s/block) で同等。caller は overrides.maxBlockHeightOffset で上書き可。
-const DEFAULT_MAX_BLOCK_HEIGHT_OFFSET = 500n;
+// 既定 maxBlockHeight buffer (chain-aware)。
+//
+// ⚠ Arbitrum/OP の block time は ~0.25s で、固定値 500 blocks では ~125 秒 =
+//    user flow (sign 30s + attest 5s + switch 10s + mint sign 30s + mine 10s
+//    ≈ 1.5-2 min) より短く attestation expire リスクがある (2026-05-24 LARP
+//    audit で発覚)。chain ごとに「target window ~20 分」になる block 数を
+//    table で持つ。env NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT は
+//    全 chain 共通の override (緊急時の global tuning 用)。
+//
+// 計算根拠 (~20 分 buffer):
+//   Polygon (~2s/block):    600 blocks  = 1200s ≈ 20 min
+//   Base    (~2s/block):    600 blocks  = 1200s ≈ 20 min
+//   Optimism (~2s/block):   600 blocks  = 1200s ≈ 20 min
+//   Arbitrum One (~0.25s/block): 5000 blocks = 1250s ≈ 21 min
+//   (Sepolia chains は同 block time 想定)
+const PER_CHAIN_BLOCK_OFFSET = new Map<number, bigint>([
+  [polygon.id, 600n],
+  [polygonAmoy.id, 600n],
+  [base.id, 600n],
+  [baseSepolia.id, 600n],
+  [optimism.id, 600n],
+  [optimismSepolia.id, 600n],
+  [arbitrum.id, 5000n],
+  [arbitrumSepolia.id, 5000n],
+]);
+
+// fallback (PER_CHAIN_BLOCK_OFFSET 未掲載 chain or env override 時の base)。
+// 600 blocks は OpenPay 4 chain 中で Arbitrum 以外の妥当値。
+const FALLBACK_BLOCK_OFFSET = 600n;
+
+// env global override (運用中の Circle 仕様変更や chain 追加時の knob)。
+// 個別 chain の per-chain map より優先 (= 緊急 hot-fix の役割)。
+const ENV_BLOCK_OFFSET_OVERRIDE: bigint | undefined = (() => {
+  const raw = process.env.NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT;
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return undefined;
+  return BigInt(n);
+})();
+
+/**
+ * source chain id 別の maxBlockHeight buffer を返す。
+ * 優先順位: env override > per-chain map > fallback。
+ */
+export function defaultBlockHeightOffset(sourceChainId: number): bigint {
+  if (ENV_BLOCK_OFFSET_OVERRIDE !== undefined) return ENV_BLOCK_OFFSET_OVERRIDE;
+  return PER_CHAIN_BLOCK_OFFSET.get(sourceChainId) ?? FALLBACK_BLOCK_OFFSET;
+}
 
 // destinationCaller=0x0 → permissionless mint。buyer 自身が destination chain
 // で mint する想定なら 0 で OK。Relayer pattern で 3rd-party に mint を委譲
@@ -187,7 +249,13 @@ export interface BuildBurnIntentOverrides {
 export function buildBurnIntent(args: BuildBurnIntentArgs): BurnIntent {
   const ov = args.overrides ?? {};
   const maxFee = computeMaxFee(args.value, ov);
-  const offset = ov.maxBlockHeightOffset ?? DEFAULT_MAX_BLOCK_HEIGHT_OFFSET;
+  // chain-aware offset: Arbitrum は ~0.25s/block で 600 blocks では 2.5 分しか
+  // ないため、defaultBlockHeightOffset で 5000 blocks (~21 分) を返す。
+  // sourceDomain → 現 env (mainnet/testnet) の chainId → block time table
+  // で resolve (chainIdForDomain は env を見て返す)。
+  const sourceChainId = chainIdForDomain(args.sourceDomain);
+  const offset =
+    ov.maxBlockHeightOffset ?? defaultBlockHeightOffset(sourceChainId);
   const maxBlockHeight = args.currentBlockHeight + offset;
   const salt = ov.salt ?? randomSalt();
   const sourceSigner = ov.sourceSigner ?? args.depositor;

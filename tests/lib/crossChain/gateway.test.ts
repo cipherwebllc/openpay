@@ -113,9 +113,36 @@ describe('lib/crossChain/gateway', () => {
       expect(intent.spec.hookData).toBe('0x');
     });
 
-    it('maxBlockHeight = currentBlockHeight + default offset (500)', () => {
+    it('maxBlockHeight = currentBlockHeight + chain-aware default offset (Base: 600 blocks ≈ 20 min)', () => {
+      // baseArgs.sourceDomain = CIRCLE_DOMAIN_BASE = 6
+      // testnet env: chainIdForDomain(6) → baseSepolia.id → 600n (block ~2s)
       const intent = buildBurnIntent(baseArgs);
-      expect(intent.maxBlockHeight).toBe(1000n + 500n);
+      expect(intent.maxBlockHeight).toBe(1000n + 600n);
+    });
+
+    it('Arbitrum source: 5000 blocks (~21 分、~0.25s/block 対応)', () => {
+      const intent = buildBurnIntent({
+        ...baseArgs,
+        sourceDomain: 3 as never, // CIRCLE_DOMAIN_ARBITRUM
+      });
+      // 短い block time に対応するため per-chain map で 5000 blocks 確保
+      expect(intent.maxBlockHeight).toBe(1000n + 5000n);
+    });
+
+    it('Polygon source: 600 blocks (~20 分、~2s/block)', () => {
+      const intent = buildBurnIntent({
+        ...baseArgs,
+        sourceDomain: 7 as never, // CIRCLE_DOMAIN_POLYGON
+      });
+      expect(intent.maxBlockHeight).toBe(1000n + 600n);
+    });
+
+    it('Optimism source: 600 blocks (~20 分、~2s/block)', () => {
+      const intent = buildBurnIntent({
+        ...baseArgs,
+        sourceDomain: 2 as never, // CIRCLE_DOMAIN_OPTIMISM
+      });
+      expect(intent.maxBlockHeight).toBe(1000n + 600n);
     });
 
     it('overrides.maxBlockHeightOffset で offset 上書き', () => {
@@ -231,7 +258,8 @@ describe('lib/crossChain/gateway', () => {
       });
       const td = getBurnIntentTypedData(intent);
       expect(td.message).toMatchObject({
-        maxBlockHeight: 600n,
+        // currentBlock=100 + chain-aware offset (Base=600) = 700
+        maxBlockHeight: 700n,
         maxFee: 1000n,
         spec: intent.spec,
       });
@@ -307,7 +335,8 @@ describe('lib/crossChain/gateway', () => {
       expect(body[0].signature).toBe('0xdeadbeef');
       // BigInt はすべて string に落ちている
       expect(typeof body[0].burnIntent.maxBlockHeight).toBe('string');
-      expect(body[0].burnIntent.maxBlockHeight).toBe('600');
+      // currentBlockHeight=100 + chain-aware offset (Base=600) = 700
+      expect(body[0].burnIntent.maxBlockHeight).toBe('700');
       expect(body[0].burnIntent.spec.value).toBe('1000000');
 
       expect(out).toEqual(response);
