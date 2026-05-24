@@ -10,7 +10,7 @@ type TipSettings = {
   receiver: string;
   token: TokenSymbol;
   // 送金チェーン (slug)。usdc は gasless 対応 chain 選択可 (Ethereum L1 は tip 不可)、
-  // jpyc は polygon 固定。
+  // jpyc は polygon / kaia から選択可。
   chain: ChainSlug;
   name: string;
   message: string;
@@ -19,6 +19,10 @@ type TipSettings = {
   thanks: string;
   thanksUrl: string;
   webhook: string;
+  // creator が cross-chain (Circle Gateway / CCTP V2) で fan からの tip を受け取れる
+  // ようにするかの opt-out flag。default true (= 受け取る)。USDC のみ意味あり、
+  // JPYC では URL 出力時に無視される。false 時のみ URL に `crossChain=false` 出力。
+  crossChain: boolean;
 };
 
 const STORAGE_KEY = 'openpay:tip-settings:v2';
@@ -34,6 +38,7 @@ const DEFAULT_SETTINGS: TipSettings = {
   thanks: '',
   thanksUrl: '',
   webhook: '',
+  crossChain: true,
 };
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
@@ -78,6 +83,11 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
       typeof loaded.webhook === 'string'
         ? loaded.webhook
         : DEFAULT_SETTINGS.webhook,
+    // boolean を厳密 check。旧 schema (crossChain 未定義) は true に倒す (default ON)。
+    crossChain:
+      typeof loaded.crossChain === 'boolean'
+        ? loaded.crossChain
+        : DEFAULT_SETTINGS.crossChain,
   };
 }
 

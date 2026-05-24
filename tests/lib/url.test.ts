@@ -555,6 +555,50 @@ describe('buildTipPath', () => {
     expect(path).not.toContain('name=');
     expect(path).not.toContain('message=');
   });
+
+  it('crossChain: true (default) は URL に出さず旧 embed と互換', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'usdc',
+      crossChain: true,
+    });
+    expect(path).not.toContain('crossChain');
+  });
+
+  it('crossChain 省略 (undefined) も URL に出さない', () => {
+    const path = buildTipPath({ to: VALID_TO, token: 'usdc' });
+    expect(path).not.toContain('crossChain');
+  });
+
+  it('crossChain: false のみ URL に crossChain=false を出力', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'usdc',
+      crossChain: false,
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    expect(sp.get('crossChain')).toBe('false');
+  });
+
+  it('jpyc + kaia roundtrip: ?chain=kaia を出力', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      chain: 'kaia',
+    });
+    const sp = new URLSearchParams(path.split('?')[1]);
+    expect(sp.get('token')).toBe('jpyc');
+    expect(sp.get('chain')).toBe('kaia');
+  });
+
+  it('jpyc + polygon (default) は ?chain= を出さない', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      chain: 'polygon',
+    });
+    expect(path).not.toContain('chain=');
+  });
 });
 
 describe('buildTipUrl', () => {
@@ -703,6 +747,46 @@ describe('parseTipParams', () => {
       expect(r.params.message).toBe('Coffee, please');
       expect(r.params.color).toBe('#ff0080');
       expect(r.params.presets).toEqual(['1', '3', '7']);
+    }
+  });
+
+  it('crossChain 未指定 → default true', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc'));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.crossChain).toBe(true);
+    }
+  });
+
+  it('crossChain=false → false', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&crossChain=false'));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.crossChain).toBe(false);
+    }
+  });
+
+  it('crossChain=true / 不明値 → true (= default、明示 false 以外は全部 true)', () => {
+    const rTrue = parseTipParams(VALID_TO, search('token=usdc&crossChain=true'));
+    expect(rTrue.ok).toBe(true);
+    if (rTrue.ok) expect(rTrue.params.crossChain).toBe(true);
+    const rWeird = parseTipParams(VALID_TO, search('token=usdc&crossChain=maybe'));
+    expect(rWeird.ok).toBe(true);
+    if (rWeird.ok) expect(rWeird.params.crossChain).toBe(true);
+  });
+
+  it('jpyc + kaia roundtrip: build → parse で chain=kaia 維持', () => {
+    const built = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      chain: 'kaia',
+    });
+    const sp = new URLSearchParams(built.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.token).toBe('jpyc');
+      expect(r.params.chain).toBe('kaia');
     }
   });
 });

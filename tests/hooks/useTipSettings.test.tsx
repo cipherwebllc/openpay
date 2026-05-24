@@ -23,6 +23,7 @@ describe('useTipSettings', () => {
       thanks: '',
       thanksUrl: '',
       webhook: '',
+      crossChain: true,
     });
   });
 
@@ -58,6 +59,7 @@ describe('useTipSettings', () => {
       thanks: '',
       thanksUrl: '',
       webhook: '',
+      crossChain: true,
     });
   });
 
@@ -107,6 +109,7 @@ describe('useTipSettings', () => {
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
         webhook: 'https://example.com/hook',
+        crossChain: true,
       });
     });
 
@@ -125,6 +128,7 @@ describe('useTipSettings', () => {
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
         webhook: 'https://example.com/hook',
+        crossChain: true,
       });
     });
   });
@@ -209,5 +213,45 @@ describe('useTipSettings', () => {
     renderHook(() => useTipSettings());
     const initial = window.localStorage.getItem(KEY);
     expect(initial).toContain('0xkeep');
+  });
+
+  it('crossChain 未保存 → default true (旧 schema 救済)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'base' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.crossChain).toBe(true);
+  });
+
+  it('crossChain: false を明示保存 → false で復元', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'base', crossChain: false }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.crossChain).toBe(false);
+  });
+
+  it('crossChain が文字列など boolean 以外 → default true に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'base', crossChain: 'false' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.crossChain).toBe(true);
+  });
+
+  it('jpyc + kaia chain → そのまま保存 (Kaia tip 対応)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'kaia' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe('kaia');
   });
 });

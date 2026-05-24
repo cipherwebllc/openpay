@@ -420,6 +420,12 @@ export type TipParams = {
   thanksUrl?: string;
   // 送信成功時に POST する webhook URL
   webhook?: string;
+  // cross-chain 受信を許可するかの flag (Circle Gateway / CCTP V2 経由)。
+  // default true (creator 側で許可、fan が target chain 以外で USDC を持っている
+  // 時に TipForm が代替 path を提示する)。false 時のみ URL に `crossChain=false`
+  // として出力 (default URL は不変、既存 embed snippet との互換性維持)。
+  // USDC のみ意味があり、JPYC では TipForm が無視する。
+  crossChain?: boolean;
 };
 
 const TIP_NAME_MAX = 60;
@@ -508,6 +514,11 @@ export function buildTipPath(params: TipParams): string {
     const v = sanitizeUrl(params.webhook);
     if (v) sp.set('webhook', v);
   }
+  // PayParams と同型: default (undefined / true) は URL に出さず旧 embed と互換、
+  // false (= creator が cross-chain 拒否) を明示するときだけ出力。
+  if (params.crossChain === false) {
+    sp.set('crossChain', 'false');
+  }
   return `/tip/${params.to}?${sp.toString()}`;
 }
 
@@ -561,9 +572,14 @@ export function parseTipParams(
   const thanks = searchParams.get('thanks');
   const thanksUrl = searchParams.get('thanksUrl');
   const webhook = searchParams.get('webhook');
+  const crossChainRaw = searchParams.get('crossChain');
 
   const sanitizedColor =
     color && COLOR_PATTERN.test(color) ? color.toLowerCase() : undefined;
+
+  // PayParams と同仕様: 明示的 "false" のみ false、それ以外 (未指定 / "true" /
+  // 不明値) は default の true として扱う。既存 embed snippet は影響なし。
+  const crossChain: boolean = crossChainRaw !== 'false';
 
   return {
     ok: true,
@@ -578,6 +594,7 @@ export function parseTipParams(
       thanks: thanks ? sanitizeText(thanks, TIP_THANKS_MAX) : undefined,
       thanksUrl: thanksUrl ? sanitizeUrl(thanksUrl) : undefined,
       webhook: webhook ? sanitizeUrl(webhook) : undefined,
+      crossChain,
     },
   };
 }
