@@ -158,7 +158,14 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 側で直接対処不能 / 影響が限定的なものを accepted risk として明示。deploy 前に
 本項を確認し、新規追加・状況変化があれば update。
 
-### 7.1 HIGH severity 単一 root: `js-cookie` (GHSA-qjx8-664m-686j)
+### 7.1 ✅ RESOLVED: `js-cookie` (GHSA-qjx8-664m-686j)
+
+**2026-05-24 確認**: `npm audit` で no longer detected。`package.json` overrides で
+`js-cookie>=3.0.7` を強制 (詳細は `docs/SUPPLY_CHAIN_RISKS.md`)、上流 upstream の
+`@segment/analytics-next` が `js-cookie>=3.0.6` を採用したことで自然解消。
+`scripts/audit-gate.mjs` の allowlist からも削除済。以下は歴史的記録。
+
+
 
 **Evidence-verified facts** (2026-05-22 時点、`npm audit --omit=dev --json` で確認済):
 
@@ -247,7 +254,13 @@ jayson → uuid@8.3.2              ← affected
 - OpenPay が uuid を direct dependency 化
 - GHSA-w5hq-g745-h8pq に v4 API を含む拡張 advisory 出現
 
-### 7.4 MODERATE: `ws` (GHSA-58qx-3vcg-4xpx)
+### 7.4 ✅ RESOLVED: `ws` (GHSA-58qx-3vcg-4xpx)
+
+**2026-05-24 確認**: `npm audit` で no longer detected。`package.json` overrides で
+`ws>=8.21.0` を強制 (詳細は `docs/SUPPLY_CHAIN_RISKS.md`)、viem 側も後続版で
+ws を bump。`scripts/audit-gate.mjs` の allowlist からも削除済。以下は歴史的記録。
+
+
 
 **Root advisory**: [GHSA-58qx-3vcg-4xpx](https://github.com/advisories/GHSA-58qx-3vcg-4xpx)
 — "ws: Uninitialized memory disclosure"

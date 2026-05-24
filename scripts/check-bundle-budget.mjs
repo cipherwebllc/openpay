@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-// next build 出力の Route 表をパースし、各ルートの First Load JS が予算
-// 内に収まっているか確認する。超過を 1 件でも検出したら exit 1。
-// 標準入力から build ログを受け取る (例: `npm run build | node scripts/...`)。
+// next build 出力の Route 表をパースし、各ルートの First Load JS が予算内かを確認。
+// 超過を 1 件でも検出したら exit 1。
+//
+// 使い方:
+//   npm run build 2>&1 | node scripts/check-bundle-budget.mjs   # 既存 build ログを paste
+//   node scripts/check-bundle-budget.mjs --build               # 内部で npm run build を実行
 //
 // 予算は README "Bundle 予算の根拠" 表の数字 + 余裕 (15%) を上限とする。
 
 import { stdin } from 'node:process';
+import { spawnSync } from 'node:child_process';
 
 const BUDGETS_KB = {
   '/_not-found': 250,
@@ -21,6 +25,25 @@ async function readStdin() {
   let buf = '';
   for await (const chunk of stdin) buf += chunk;
   return buf;
+}
+
+function runBuild() {
+  const env = {
+    ...process.env,
+    NEXT_PUBLIC_NETWORK_ENV:
+      process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'testnet',
+    NEXT_PUBLIC_PIMLICO_API_KEY:
+      process.env.NEXT_PUBLIC_PIMLICO_API_KEY ?? 'dummy',
+    NEXT_PUBLIC_FEE_RECEIVER_ADDRESS:
+      process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS ??
+      '0x000000000000000000000000000000000000dEaD',
+  };
+  const r = spawnSync('npm', ['run', 'build'], {
+    env,
+    encoding: 'utf8',
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  return (r.stdout ?? '') + (r.stderr ?? '');
 }
 
 // "├ ● /[locale]                            14.8 kB         278 kB" のような行から
@@ -44,7 +67,7 @@ function parseSharedTotal(line) {
   return m ? Number(m[1]) : null;
 }
 
-const log = await readStdin();
+const log = process.argv.includes('--build') ? runBuild() : await readStdin();
 const lines = log.split('\n');
 
 const observed = {};
@@ -64,7 +87,9 @@ for (const line of lines) {
 
 if (Object.keys(observed).length === 0) {
   console.error(
-    'ERROR: build 出力から Route 表をパースできませんでした。stdin に `npm run build` の全出力を渡してください。',
+    'ERROR: build 出力から Route 表をパースできませんでした。\n' +
+      '  ・既存 build ログを使う場合: `npm run build 2>&1 | node scripts/check-bundle-budget.mjs`\n' +
+      '  ・script 内で build を実行する場合: `node scripts/check-bundle-budget.mjs --build`',
   );
   process.exit(2);
 }

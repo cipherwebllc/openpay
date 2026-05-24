@@ -25,21 +25,10 @@ import { spawnSync } from 'node:child_process';
 // 受容済 advisory リスト (GHSA ID → 受容理由 + docs ref)
 // ────────────────────────────────────────────────────────────────────
 const ALLOWED_ADVISORIES = {
-  'GHSA-qjx8-664m-686j': {
-    pkg: 'js-cookie',
-    summary: 'Per-instance prototype hijack in assign() (cookie-attribute injection)',
-    chain:
-      '@account-kit/smart-contracts → @account-kit/infra → @account-kit/logging → @segment/analytics-next → js-cookie@3.0.1',
-    reason:
-      'Alchemy SDK 内部の Segment Analytics 経路にのみ伝播。OpenPay 側から任意 string を Segment.* に流す API は無く、cookie attribute injection の input chain が成立しない。upstream (@segment/analytics-next) が js-cookie@<=3.0.5 を peg しているため fix unavailable。',
-    docRef: 'docs/DEPLOY_CHECKLIST.md §7.1',
-    reviewTriggers: [
-      '@account-kit/smart-contracts major upgrade',
-      '@segment/analytics-next で js-cookie>=3.0.6 採用',
-      'Alchemy SDK 内 analytics opt-out 機能の提供',
-      'GHSA-qjx8-664m-686j に EXPLOITABLE PoC 公開',
-    ],
-  },
+  // 解決済 advisory (upstream fix で no longer detected):
+  // - GHSA-qjx8-664m-686j (js-cookie) — @segment/analytics-next が js-cookie>=3.0.6 採用 (2026-05 頃)
+  // - GHSA-58qx-3vcg-4xpx (ws) — viem が ws>=8.20.1 に bump
+  // 過去の受容理由は git log scripts/audit-gate.mjs で参照可。
   'GHSA-qx2v-qp2m-jg93': {
     pkg: 'postcss',
     summary: 'PostCSS XSS via Unescaped </style> in CSS Stringify Output (postcss<8.5.10)',
@@ -65,19 +54,6 @@ const ALLOWED_ADVISORIES = {
       '@metamask/utils が uuid>=11.1.1 に bump',
       'OpenPay 自身が uuid を direct dependency 化',
       'GHSA-w5hq-g745-h8pq に v4 API も含む拡張 advisory 出現',
-    ],
-  },
-  'GHSA-58qx-3vcg-4xpx': {
-    pkg: 'ws',
-    summary: 'ws: Uninitialized memory disclosure in server-side frame handling (ws>=8.0.0 <8.20.1)',
-    chain: 'viem@2.50.3 → ws@8.18.0',
-    reason:
-      '脆弱なコードパスは ws を SERVER として permessage-deflate 拡張で動作させた時の特定 frame 処理。OpenPay 内の ws は viem の RPC websocket CLIENT (Pimlico / Alchemy RPC への接続) として動作し、server mode を一切使わない。client 側にはこの脆弱性は影響しない。',
-    docRef: 'docs/DEPLOY_CHECKLIST.md §7.4',
-    reviewTriggers: [
-      'viem が ws>=8.20.1 に bump',
-      'OpenPay 自身が ws を server mode で利用する機能を追加',
-      'GHSA-58qx-3vcg-4xpx に client-side exploit PoC 公開',
     ],
   },
 };
