@@ -68,6 +68,39 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   });
 
+  test('JPYC + Kaia chain: URL から chain name を解決し UI に表示', async ({
+    page,
+  }) => {
+    // ?chain=kaia を Tip URL に乗せて、TipForm が JPYC@Kaia deployment を
+    // 解決して header と preset を render することを確認。Pimlico/RPC への
+    // 接続は不要 (gas quote は未呼出で「見積取得中…」)。
+    await page.goto(`/ja/tip/${TO}?token=jpyc&chain=kaia`);
+    // header に Kaia (mainnet) または Kairos (testnet) chain 名が出る
+    await expect(
+      page.getByText(/Kaia|Kairos/).first(),
+    ).toBeVisible();
+    // 既定 preset が render される (Kaia 上でも DEFAULT_TIP_PRESETS.jpyc は不変)
+    await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
+  });
+
+  test('USDC + crossChain=false: hint 抑制でも UI は破綻しない (iframe 380×640)', async ({
+    page,
+  }) => {
+    // iframe 内 (狭い viewport) で USDC + crossChain=false を開いて、
+    // CrossChainHint が mount されないこと + 既存 UI が overflow しないことを smoke。
+    // 未接続なので token guard とは別に address guard でも hint は出ない。
+    await page.setViewportSize({ width: 380, height: 640 });
+    await page.goto(`/ja/tip/${TO}?token=usdc&crossChain=false`);
+    // 既定 USDC preset 表示で render 完了を確認
+    await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();
+    // 横 overflow なし (CrossChainHint 想定が無くてもレイアウト invariant)
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test('英語ロケール (/en/tip) でも動作', async ({ page }) => {
     await page.goto(`/en/tip/${TO}?token=jpyc`);
     // <title>OpenPay Tip</title> も match するため main 配下に scope する

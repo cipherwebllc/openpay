@@ -794,3 +794,52 @@ C-Chain + Unichain)。merchant 受信 chain は引き続き 5 chain のまま (U
   Avalanche/Arbitrum/Aptos)。Unichain は HashPort 非対応の可能性あり (要確認)。
 - [ ] HashPort wallet (Avalanche) で BurnIntent EIP-712 sign が完了するか確認
 - [ ] HashPort wallet (Unichain) は対応外の可能性 → 確認後に「対応外」記録 or 別 wallet 推奨を UX に反映
+
+### §10.10 Tip widget parity: JPYC × Kaia + USDC cross-chain (2026-05-24 投入)
+
+Payment page と同等の 2 機能を Tip widget (creator embed) に展開:
+
+- **G1**: JPYC × Kaia chain 選択 — TipEmbedGenerator の chain chooser が JPYC 時にも
+  表示され Polygon / Kaia から選べる。URL parser は cleanup commit `b5ce61e` で既に
+  Kaia accept 済 (resolveChainSlugParam 集約による副次効果)。
+- **G2**: USDC cross-chain 受信 — TipForm が CrossChainHint を mount し、fan が
+  他 chain (7 chain) の USDC を Circle Gateway / CCTP V2 経由で creator 指定 chain に
+  送れる。creator は TipEmbedGenerator の cross-chain toggle で opt-out 可 (default ON)。
+
+共通 hook / component (`useCrossChainPayment`, `CrossChainHint`, `CrossChainSourceChooser`)
+を Payment と完全再利用、Tip 専用の新規ファイル無し、後方互換完全保証。
+
+**設計**:
+- `TipParams.crossChain?: boolean` 追加、URL は false 時のみ `crossChain=false` を出力
+- `TipSettings.crossChain: boolean` 追加 (default true)、旧 schema 救済 sanitize あり
+- TipEmbedGenerator: `JPYC_CHAINS` を grid map (`isGaslessSupported` filter 経由)、
+  USDC 時のみ crossChain checkbox 表示
+- TipForm: `token === 'usdc' && address` で CrossChainHint mount、PaymentForm と同型 props
+
+**operator 検証** (deploy 後 staging で 8 ケース):
+
+JPYC Kaia 系 (4 ケース):
+- [ ] `/ja` home の Tip tab で token=JPYC 選択 → chain chooser に Polygon + Kaia 2 ボタン表示
+- [ ] Kaia click → 生成 URL に `&chain=kaia` 含まれる
+- [ ] 生成 URL を新タブで開く → TipForm header に "Kaia" 表示 (testnet では "Kairos Testnet")
+- [ ] (HashPort 非対応のため Pimlico 経由) Kaia 対応 wallet (例: Metamask Kaia 手動 add)
+      で接続 → switchChain → preset click → Pimlico sponsorship 経由で gasless 送信成功
+
+USDC cross-chain 系 (4 ケース):
+- [ ] Tip tab で token=USDC + chain=Base 選択 → cross-chain checkbox 表示 (default ON)
+- [ ] checkbox OFF にすると URL に `&crossChain=false` が乗る
+- [ ] cross-chain ON URL を新タブで開いて fan wallet を Avalanche 接続 →
+      CrossChainSourceChooser が Avalanche option を提示
+- [ ] 「選択したチェーンで支払う」click → Gateway burn → Base 着金 → SuccessPanel 表示
+
+**Sentry observability**:
+- 新規 event は無し (既存の `cross-chain.execute.*` / `cross-chain.balance-query.failed`
+  が Tip 経路からも発火するだけ)。surface 区別が必要になったら logger context に
+  `surface: 'tip' | 'pay'` を追加する余地あり (本 phase 範囲外)。
+
+**Rollback**:
+- 共通 component を再利用しているため Tip 単体での feature flag は無い。problem 時は
+  該当 commit (3 件: ee428ca / 9090b58 / b98097e) を git revert。CrossChainHint 自体は
+  PaymentForm でも live のため、それを破壊しない単一 commit revert は不可。Tip 側の
+  問題だけなら TipForm の `params.token === 'usdc' && address` ガードを一時的に
+  `false` に短絡する hotfix commit を当てる方が低リスク。

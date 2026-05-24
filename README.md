@@ -73,6 +73,15 @@ When a customer scans a USDC QR and has USDC on multiple chains, the payment pag
 
 The chooser is hidden when the customer has USDC on **only** the merchant's chain — in that case the regular Pay button handles it as a plain direct transfer. The chain abstraction layer is `lib/crossChain/*` (Circle Gateway + CCTP V2), see [`docs/DEPLOY_CHECKLIST.md §10`](./docs/DEPLOY_CHECKLIST.md) for the operator-verification status and [`docs/research/circle-12chain-addresses.md`](./docs/research/circle-12chain-addresses.md) for contract addresses + audit trail.
 
+### Tip widget (creator surface)
+
+Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio, or GitHub README via a single `<iframe>` snippet. Same chain reach as the payment page:
+
+- **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
+- **USDC** — receive on any of the 5 receiving chains (Base / Arbitrum / Optimism / Polygon / Ethereum L1). With **cross-chain receive** ON (default), fans paying from the other 2 buyer-only chains (Avalanche / Unichain) are routed via Circle Gateway / CCTP V2 to your selected chain. Toggle it off in the dashboard if you want same-chain transfers only.
+
+The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success.
+
 ## Non-custodial design
 
 OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay service fees are sent **separately** to the fee receiver wallet. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
