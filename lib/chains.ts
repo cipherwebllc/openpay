@@ -221,10 +221,6 @@ export function buyerOnlyChainForSlug(slug: BuyerOnlyChainSlug): Chain {
   return BUYER_ONLY_SLUG_TO_CHAIN[slug];
 }
 
-export function isBuyerOnlyChainSlug(value: string): value is BuyerOnlyChainSlug {
-  return (ALL_BUYER_ONLY_SLUGS as readonly string[]).includes(value);
-}
-
 /** Any chainId (merchant or buyer-only) → human-readable chain name。
  *  supportedChains に含まれる 8 chain は viem の Chain.name を返す。未対応
  *  chainId は undefined (caller がフォールバック表示)。CrossChainSourceChooser

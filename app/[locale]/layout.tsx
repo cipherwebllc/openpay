@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { NextIntlClientProvider, hasLocale } from 'next-intl';
 import { setRequestLocale } from 'next-intl/server';
 import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { LOCALES } from '@/i18n';
 import { AlphaNotice } from '@/components/AlphaNotice';
 import { SiteFooter } from '@/components/SiteFooter';
@@ -36,6 +37,7 @@ export default async function LocaleLayout({
           <SiteFooter />
         </NextIntlClientProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
