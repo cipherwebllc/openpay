@@ -20,13 +20,21 @@ function record(name, ok, detail) {
 // --- (1) Sentry DSN が prod bundle に含まれているか ---
 {
   const html = await (await fetch(`${BASE}/ja`)).text();
+  // chunk path 例: /_next/static/chunks/3284-abc.js / main-app-xxx.js /
+  // app/_path-xxx.js / instrumentation-client-xxx.js 等。filename に英数 + - + _
+  // + / を許容、最低 1 つの hex hash segment を含む .js を全 match。
   const chunks = [
-    ...new Set(html.match(/\/_next\/static\/chunks\/[a-z0-9]+-[a-f0-9]+\.js/g) ?? []),
+    ...new Set(html.match(/\/_next\/static\/chunks\/[a-zA-Z0-9_\-/]+\.js/g) ?? []),
   ];
+  // Sentry DSN 仕様: https://<publicKey>@o<orgId>.ingest[.<region>].sentry.io/<projectId>
+  // region segment (.us. / .eu. 等) は organization create 時から optional。
+  // publicKey は hex 32 char が典型だが Sentry の仕様上 alphanumeric を許容。
+  const DSN_RE =
+    /https:\/\/[a-zA-Z0-9]+@o\d+\.ingest(?:\.[a-z]+)?\.sentry\.io\/\d+/;
   let dsnFound = false;
-  for (const chunk of chunks.slice(0, 12)) {
+  for (const chunk of chunks.slice(0, 20)) {
     const js = await (await fetch(`${BASE}${chunk}`)).text();
-    if (/https:\/\/[a-f0-9]+@o\d+\.ingest\.[a-z]+\.sentry\.io\/\d+/.test(js)) {
+    if (DSN_RE.test(js)) {
       dsnFound = true;
       break;
     }
