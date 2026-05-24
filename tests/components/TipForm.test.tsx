@@ -830,4 +830,120 @@ describe('TipForm — CrossChainHint mount (USDC cross-chain 対応)', () => {
     const props = crossChainHintSpy.mock.calls[0]![0] as { enabled: boolean };
     expect(props.enabled).toBe(false);
   });
+
+  it('preset 切替で requiredAtomic prop が再計算される', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    // 初期 preset[0] = 1 USDC → requiredAtomic = 1.10 USDC (1_100_000 atomic)
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const initial = crossChainHintSpy.mock.lastCall![0] as {
+      requiredAtomic: bigint;
+    };
+    expect(initial.requiredAtomic).toBe(1_100_000n);
+
+    // preset[1] = 5 USDC をクリック → requiredAtomic = 5.10 USDC (5_100_000 atomic)
+    // gas 0.1 のみ顧客上乗せ (fee は merchant 控除側、customerPays には含まれない)
+    await user.click(screen.getByRole('button', { name: '5 USDC' }));
+    await waitFor(() => {
+      const latest = crossChainHintSpy.mock.lastCall![0] as {
+        requiredAtomic: bigint;
+      };
+      expect(latest.requiredAtomic).toBe(5_100_000n);
+    });
+  });
+
+  it('custom amount 入力 → requiredAtomic prop が入力値で再計算される', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+
+    // custom amount は onChange で setSelectedPreset(null) → 自動で custom mode に
+    // 切替。"例: 7.50" placeholder の input に 10 を入力。
+    const input = screen.getByPlaceholderText('例: 7.50');
+    await user.type(input, '10');
+    await waitFor(() => {
+      const latest = crossChainHintSpy.mock.lastCall![0] as {
+        requiredAtomic: bigint;
+      };
+      // 10 USDC + 0.10 gas (gas=customer mode) = 10.10 = 10_100_000 atomic
+      // (fee 1% は merchant 控除側で customerPays には乗らない、calcBreakdown 仕様)
+      expect(latest.requiredAtomic).toBe(10_100_000n);
+    });
+  });
+
+  it('カスタム選択 + 未入力 → requiredAtomic = gas のみ (amount=0 でも gas は載る仕様)', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    // input focus で selectCustom が selectedPreset=null に切替、amountWei=0n になる
+    const input = screen.getByPlaceholderText('例: 7.50');
+    await user.click(input);
+
+    await waitFor(() => {
+      const latest = crossChainHintSpy.mock.lastCall![0] as {
+        requiredAtomic: bigint;
+      };
+      // calcBreakdown 仕様: customerPays = amount + gasAmount = 0 + 100_000 = 100_000n
+      // (gas は条件無しで顧客上乗せ、submit ボタンは別経路で no-amount を弾く UX 想定)
+      expect(latest.requiredAtomic).toBe(100_000n);
+    });
+  });
+
+  it('USDC + Arbitrum chain → targetChainId が arbitrumSepolia (testnet env)', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <TipForm params={{ ...USDC_PARAMS, chain: 'arbitrum' }} />,
+    );
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall![0] as {
+      targetChainId: number;
+      tokenAddress: Address;
+    };
+    // testnet env なので arbitrumSepolia.id = 421614
+    expect(props.targetChainId).toBe(421614);
+    // tokenAddress は arbitrum USDC のもの (per-chain deployment)
+    expect(props.tokenAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+  });
+
+  it('複数 props 変動を 1 render で観測 (preset 切替 + crossChain default)', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 50_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    // 全 call の中で enabled は常に true (crossChain 未指定 → default true)
+    const allCalls = crossChainHintSpy.mock.calls.map(
+      (c) => c[0] as { enabled: boolean; targetChainId: number },
+    );
+    expect(allCalls.every((p) => p.enabled === true)).toBe(true);
+    expect(allCalls.every((p) => p.targetChainId === baseSepolia.id)).toBe(true);
+
+    // preset 切替後も same chain
+    await user.click(screen.getByRole('button', { name: '10 USDC' }));
+    await waitFor(() => {
+      const latest = crossChainHintSpy.mock.lastCall![0] as {
+        targetChainId: number;
+        enabled: boolean;
+      };
+      expect(latest.enabled).toBe(true);
+      expect(latest.targetChainId).toBe(baseSepolia.id);
+    });
+  });
 });

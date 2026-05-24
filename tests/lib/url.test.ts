@@ -789,6 +789,114 @@ describe('parseTipParams', () => {
       expect(r.params.chain).toBe('kaia');
     }
   });
+
+  // === crossChain 値の精密 boundary ===
+  it('crossChain=False (大文字混在) → true (case-sensitive、明示 false のみ false)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&crossChain=False'));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.crossChain).toBe(true);
+  });
+
+  it('crossChain=FALSE → true (大文字も case-sensitive)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&crossChain=FALSE'));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.crossChain).toBe(true);
+  });
+
+  it('crossChain= (空文字) → true (default 扱い)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&crossChain='));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.crossChain).toBe(true);
+  });
+
+  it('crossChain=0 / 1 / yes / no → 全て true (明示 false 文字列のみ false)', () => {
+    for (const v of ['0', '1', 'yes', 'no', 'off', 'on']) {
+      const r = parseTipParams(VALID_TO, search(`token=usdc&crossChain=${v}`));
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.params.crossChain).toBe(true);
+    }
+  });
+
+  it('crossChain=false でも JPYC token は param 解析に影響しない (parser は token agnostic)', () => {
+    const r = parseTipParams(
+      VALID_TO,
+      search('token=jpyc&chain=kaia&crossChain=false'),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.token).toBe('jpyc');
+      expect(r.params.chain).toBe('kaia');
+      // crossChain は parser では token に関係なく解釈、Form/Generator 側で
+      // JPYC のとき URL 出力をスキップする (= false でも壊れない)
+      expect(r.params.crossChain).toBe(false);
+    }
+  });
+
+  // === Tip 固有: gasless 必須なので非対応 chain は parse 時に reject ===
+  it('usdc + ethereum → reject (Tip widget は gasless 必須、L1 は非対応)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&chain=ethereum'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/gasless mode 必須|tip widget 非対応/);
+  });
+
+  it('jpyc + base → reject (JPYC 非 deploy chain、hasDeployment で false)', () => {
+    const r = parseTipParams(VALID_TO, search('token=jpyc&chain=base'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('対応していません');
+  });
+
+  it('jpyc + arbitrum / optimism / ethereum も同様に reject', () => {
+    for (const chain of ['arbitrum', 'optimism', 'ethereum']) {
+      const r = parseTipParams(VALID_TO, search(`token=jpyc&chain=${chain}`));
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  // === Full field roundtrip ===
+  it('全 field roundtrip: build (crossChain=false 含む) → parse で全 field 復元', () => {
+    const built = buildTipPath({
+      to: VALID_TO,
+      token: 'usdc',
+      chain: 'arbitrum',
+      name: 'Carol',
+      message: 'Tip me',
+      color: '#abc123',
+      presets: ['1', '5', '10'],
+      thanks: 'Thanks!',
+      thanksUrl: 'https://example.com/thanks',
+      webhook: 'https://example.com/hook',
+      crossChain: false,
+    });
+    expect(built).toContain('crossChain=false');
+    const sp = new URLSearchParams(built.split('?')[1]);
+    const r = parseTipParams(VALID_TO, sp);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params).toMatchObject({
+        token: 'usdc',
+        chain: 'arbitrum',
+        name: 'Carol',
+        message: 'Tip me',
+        color: '#abc123',
+        presets: ['1', '5', '10'],
+        thanks: 'Thanks!',
+        thanksUrl: 'https://example.com/thanks',
+        webhook: 'https://example.com/hook',
+        crossChain: false,
+      });
+    }
+  });
+
+  it('query param 順序非依存: crossChain=false が最後でも最初でも同じ', () => {
+    const first = parseTipParams(VALID_TO, search('crossChain=false&token=usdc'));
+    const last = parseTipParams(VALID_TO, search('token=usdc&crossChain=false'));
+    expect(first.ok).toBe(true);
+    expect(last.ok).toBe(true);
+    if (first.ok && last.ok) {
+      expect(first.params.crossChain).toBe(false);
+      expect(last.params.crossChain).toBe(false);
+    }
+  });
 });
 
 describe('DEFAULT_TIP_PRESETS', () => {

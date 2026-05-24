@@ -305,6 +305,109 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
   });
 });
 
+describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorage)', () => {
+  it('USDC → JPYC 切替で chain が default に戻り、chooser 内容も切替わる', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+    // USDC へ切替 → chain default は base
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
+    await waitFor(() => expectInUrl(/token=usdc/));
+    // USDC 時は base default なので chain= は出ない (default chain は省略規則)
+    {
+      const urlMatches = screen.getAllByText(/\/tip\/0x/);
+      const urlText = urlMatches[0]!.textContent ?? '';
+      expect(urlText).not.toContain('chain=');
+    }
+
+    // USDC chain chooser から arbitrum を選択
+    const ARB_ID = chainForSlug('arbitrum').id;
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(`id:\\s*${ARB_ID}\\b`) }),
+    );
+    await waitFor(() => expectInUrl(/chain=arbitrum/));
+
+    // JPYC に戻す → chain は polygon (jpyc default) に戻る、URL から chain 消失
+    await user.click(screen.getByRole('button', { name: /JPYC/ }));
+    await waitFor(() => expectInUrl(/token=jpyc/));
+    {
+      const urlMatches = screen.getAllByText(/\/tip\/0x/);
+      const urlText = urlMatches[0]!.textContent ?? '';
+      expect(urlText).not.toContain('chain=arbitrum');
+      expect(urlText).not.toContain('chain=polygon'); // default は省略
+    }
+  });
+
+  it('cross-chain toggle は localStorage に永続化、再 mount で復元', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
+
+    // OFF にする
+    const checkbox = screen.getByRole('checkbox', {
+      name: /他チェーンからの tip を許可/,
+    });
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    // localStorage に書込まれていることを確認
+    await waitFor(() => {
+      const raw = window.localStorage.getItem('openpay:tip-settings:v2');
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw!).crossChain).toBe(false);
+    });
+
+    // unmount → 再 mount で復元
+    unmount();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    const restored = screen.getByRole('checkbox', {
+      name: /他チェーンからの tip を許可/,
+    });
+    expect(restored).not.toBeChecked();
+  });
+
+  it('Kaia 選択 → localStorage に kaia 保存 → 再 mount で kaia 復元', async () => {
+    const user = userEvent.setup();
+    const KAIA_ID = chainForSlug('kaia').id;
+    const { unmount } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(`id:\\s*${KAIA_ID}\\b`) }),
+    );
+
+    await waitFor(() => {
+      const raw = window.localStorage.getItem('openpay:tip-settings:v2');
+      expect(JSON.parse(raw!).chain).toBe('kaia');
+    });
+
+    unmount();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    // 再 mount 時に URL が即時 kaia を反映
+    await waitFor(() => expectInUrl(/chain=kaia/));
+  });
+
+  it('chainLabel が token に追従して動的に切替 (USDC → JPYC)', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    // 初期 JPYC → "受取チェーン (JPYC)"
+    expect(screen.getByText(/受取チェーン \(JPYC\)/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
+    await waitFor(() =>
+      expect(screen.getByText(/受取チェーン \(USDC\)/)).toBeInTheDocument(),
+    );
+  });
+});
+
 describe('TipEmbedGenerator — mobile overflow (regression)', () => {
   // grid item の min-width: auto 既定が長い 0x / tip URL で track を押し広げ、
   // mobile で viewport を突き抜けていたバグの再発防止。
