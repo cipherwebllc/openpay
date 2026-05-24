@@ -15,7 +15,12 @@ import {
   isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
-import { chainForSlug, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
+import {
+  chainForSlug,
+  JPYC_CHAINS,
+  USDC_CHAINS,
+  type ChainSlug,
+} from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress } from '@/lib/format';
 import {
@@ -78,6 +83,10 @@ export function TipEmbedGenerator() {
       thanks: settings.thanks || undefined,
       thanksUrl: settings.thanksUrl || undefined,
       webhook: settings.webhook || undefined,
+      // crossChain は USDC でのみ意味がある。JPYC では URL 出力時に無視 (false 時の
+      // URL bloat 回避)。default true なので false 時のみ URL に乗る。
+      crossChain:
+        settings.token === 'usdc' ? settings.crossChain : undefined,
     };
     return buildTipUrl(origin, params);
   }, [
@@ -94,6 +103,7 @@ export function TipEmbedGenerator() {
     settings.thanks,
     settings.thanksUrl,
     settings.webhook,
+    settings.crossChain,
   ]);
 
   const handleResolved = useCallback((addr: Address | null) => {
@@ -167,7 +177,7 @@ export function TipEmbedGenerator() {
                   <div className="text-xs text-slate-500">
                     {tok === 'usdc'
                       ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
-                      : 'Polygon'}
+                      : t('tokenChainHintJpyc', { count: JPYC_CHAINS.length })}
                   </div>
                 </button>
               );
@@ -175,15 +185,29 @@ export function TipEmbedGenerator() {
           </div>
         </Field>
 
-        {settings.token === 'usdc' && (
-          <Field label={t('chainLabel')}>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {USDC_CHAINS.filter((slug) =>
-                isGaslessSupported(deploymentForSlug('usdc', slug)),
-              ).map((slug) => {
-                // Tip widget は gas=customer 固定 (常に gasless)。Ethereum L1 など
-                // gasless 非対応 chain は URL parser で reject されるため、ここで
+        <Field
+          label={
+            settings.token === 'usdc' ? t('chainLabelUsdc') : t('chainLabelJpyc')
+          }
+        >
+          {/* JPYC は 2 chain (Polygon / Kaia) なので 2 列固定、USDC は 5 chain で
+              mobile 2 列 / sm 4 列 (Ethereum L1 は gasless 非対応で除外され 4 件)。 */}
+          <div
+            className={
+              settings.token === 'usdc'
+                ? 'grid grid-cols-2 gap-2 sm:grid-cols-4'
+                : 'grid grid-cols-2 gap-2'
+            }
+          >
+            {(settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS)
+              .filter((slug) =>
+                // Tip widget は gas=customer 固定 (常に gasless)。USDC + Ethereum L1
+                // など gasless 非対応 chain は URL parser で reject されるため、ここで
                 // chain chooser から除外する (UI と URL parser の意味論を一致)。
+                // JPYC は Polygon / Kaia 両方 sponsorship 対応で除外なし。
+                isGaslessSupported(deploymentForSlug(settings.token, slug)),
+              )
+              .map((slug) => {
                 const c = chainForSlug(slug);
                 const active = settings.chain === slug;
                 return (
@@ -202,7 +226,32 @@ export function TipEmbedGenerator() {
                   </button>
                 );
               })}
-            </div>
+          </div>
+        </Field>
+
+        {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では非表示)。
+            Default ON。OFF にすると TipForm が代替経路 hint を出さず、creator が
+            指定した chain での同一 chain 送金のみ受け付ける (creator 都合の opt-out)。 */}
+        {settings.token === 'usdc' && (
+          <Field label={t('crossChainHeading')}>
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={settings.crossChain}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, crossChain: e.target.checked }))
+                }
+                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+              />
+              <span className="text-xs">
+                <span className="font-semibold text-slate-700">
+                  {t('crossChainToggleLabel')}
+                </span>
+                <span className="block text-slate-500">
+                  {t('crossChainToggleDescription')}
+                </span>
+              </span>
+            </label>
           </Field>
         )}
 

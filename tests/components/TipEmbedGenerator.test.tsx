@@ -15,10 +15,15 @@ vi.mock('@/hooks/useResolveAddress', () => ({
 }));
 
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
+import { chainForSlug } from '@/lib/chains';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 // vitest.config.ts の environmentOptions.jsdom.url で設定された origin
 const ORIGIN = 'https://test.local';
+// chain id は test env (NETWORK_ENV=testnet) で testnet 版になる:
+// polygon → 80002 (Amoy), kaia → 1001 (Kairos)。slug 経由で動的解決する。
+const POLYGON_ID = chainForSlug('polygon').id;
+const KAIA_ID = chainForSlug('kaia').id;
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -205,6 +210,98 @@ describe('TipEmbedGenerator — 永続化', () => {
       expect(parsed.receiver).toBe(VALID);
       expect(parsed.name).toBe('Alice');
     });
+  });
+});
+
+describe('TipEmbedGenerator — Kaia chain (JPYC)', () => {
+  // token=JPYC 選択時、"Polygon" は (a) token 説明 "2 chain 対応 (Polygon / Kaia)"
+  // と (b) chain chooser ボタンの両方に出る。chain chooser 専用に絞るため、
+  // accessible name が chain id を含むことで一意化する (id は slug → chainForSlug
+  // で動的解決、testnet env でも mainnet でも正しく動く)。
+  it('JPYC 選択時に chain chooser が表示される (Polygon / Kaia 2 ボタン)', async () => {
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    expect(
+      screen.getByRole('button', {
+        name: new RegExp(`id:\\s*${POLYGON_ID}\\b`),
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: new RegExp(`id:\\s*${KAIA_ID}\\b`),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('Kaia をクリック → URL に chain=kaia が乗る', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.click(
+      screen.getByRole('button', {
+        name: new RegExp(`id:\\s*${KAIA_ID}\\b`),
+      }),
+    );
+
+    await waitFor(() => expectInUrl(/chain=kaia/));
+  });
+
+  it('Polygon (default) は URL に chain= を出さない (旧 embed との互換)', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    // 初期は polygon → click 不要、URL 確認のみ
+    await waitFor(() => expectInUrl(/token=jpyc/));
+    // URL の query 文字列に chain= が無いこと (preset / name 等は出る可能性あり)
+    const urlMatches = screen.getAllByText(/\/tip\/0x/);
+    const urlText = urlMatches[0]!.textContent ?? '';
+    expect(urlText).not.toContain('chain=');
+  });
+});
+
+describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
+  it('USDC 選択時に cross-chain toggle が表示される (default ON)', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: /他チェーンからの tip を許可/,
+    });
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox).toBeChecked();
+  });
+
+  it('USDC + toggle OFF → URL に crossChain=false が乗る', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: /他チェーンからの tip を許可/,
+    });
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    await waitFor(() => expectInUrl(/crossChain=false/));
+  });
+
+  it('JPYC 選択時は cross-chain toggle 非表示 (USDC 専用機能)', async () => {
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    // 初期 token は jpyc。cross-chain checkbox は存在しない
+    expect(
+      screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
+    ).toBeNull();
   });
 });
 
