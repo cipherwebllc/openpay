@@ -78,7 +78,7 @@ The chooser is hidden when the customer has USDC on **only** the merchant's chai
 Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio, or GitHub README via a single `<iframe>` snippet. Same chain reach as the payment page:
 
 - **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
-- **USDC** — receive on any of the 5 receiving chains (Base / Arbitrum / Optimism / Polygon / Ethereum L1). With **cross-chain receive** ON (default), fans paying from the other 2 buyer-only chains (Avalanche / Unichain) are routed via Circle Gateway / CCTP V2 to your selected chain. Toggle it off in the dashboard if you want same-chain transfers only.
+- **USDC** — receive on any of **4 receiving chains** (Base / Arbitrum / Optimism / Polygon). Ethereum L1 is excluded because the Tip widget is gasless-only and Pimlico paymaster has no L1 support; fans who hold only L1 USDC can still tip you via **cross-chain receive** (default ON) — they pay on L1 and Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on Avalanche C-Chain and Unichain (the 2 buyer-only chains). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
 
 The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success.
 

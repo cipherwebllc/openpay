@@ -162,6 +162,15 @@ export function TipEmbedGenerator() {
             {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
               const info = defaultDeploymentForSymbol(tok);
               const active = settings.token === tok;
+              // Tip widget は gasless 固定なので、表示する chain 数は実際に creator が
+              // 受信できる (= gasless 対応) chain 数に絞る。USDC では Ethereum L1 が
+              // 除外されるため USDC_CHAINS.length (5) ではなく filter 後の件数 (4) を
+              // 出す (UI の chain chooser 件数と一致)。L1 USDC を持つ fan は
+              // CrossChainHint で他 chain creator に tip できる旨を hint text で補足。
+              const chainList = tok === 'usdc' ? USDC_CHAINS : JPYC_CHAINS;
+              const receivableCount = chainList.filter((slug) =>
+                isGaslessSupported(deploymentForSlug(tok, slug)),
+              ).length;
               return (
                 <button
                   key={tok}
@@ -176,8 +185,8 @@ export function TipEmbedGenerator() {
                   <div className="font-semibold">{info.displaySymbol}</div>
                   <div className="text-xs text-slate-500">
                     {tok === 'usdc'
-                      ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
-                      : t('tokenChainHintJpyc', { count: JPYC_CHAINS.length })}
+                      ? t('tokenChainHintMulti', { count: receivableCount })
+                      : t('tokenChainHintJpyc', { count: receivableCount })}
                   </div>
                 </button>
               );
