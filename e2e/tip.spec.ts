@@ -68,37 +68,88 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   });
 
-  test('JPYC + Kaia chain: URL から chain name を解決し UI に表示', async ({
+  test('JPYC + Kaia chain: URL から chain name + chain id + preset + 受信状態を解決', async ({
     page,
   }) => {
-    // ?chain=kaia を Tip URL に乗せて、TipForm が JPYC@Kaia deployment を
-    // 解決して header と preset を render することを確認。Pimlico/RPC への
-    // 接続は不要 (gas quote は未呼出で「見積取得中…」)。
+    // ?chain=kaia を Tip URL に乗せて、TipForm が JPYC@Kaia deployment を解決し、
+    // header / preset / breakdown / gas hint まで一貫して render することを確認。
+    // 単一 chain name だけでなく以下を全て assert することで「Kaia path が live」と
+    // 言える根拠を強化:
+    //   1. chain name 文字列 (Kaia or Kairos Testnet)
+    //   2. preset 3 個 (JPYC default)
+    //   3. breakdown 行 ("あなたの支払額" 等)
+    //   4. gas hint info link (Kaia の sponsorship 説明文)
+    //   5. submit button (未接続なので Connect 状態)
+    //   6. polygon default URL では出ないことの裏返し確認 (chain=kaia の URL のみ
+    //      header が Kaia/Kairos になる、default URL では Polygon)
     await page.goto(`/ja/tip/${TO}?token=jpyc&chain=kaia`);
-    // header に Kaia (mainnet) または Kairos (testnet) chain 名が出る
-    await expect(
-      page.getByText(/Kaia|Kairos/).first(),
-    ).toBeVisible();
-    // 既定 preset が render される (Kaia 上でも DEFAULT_TIP_PRESETS.jpyc は不変)
+    await expect(page.getByText(/Kaia|Kairos/).first()).toBeVisible();
     await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
+    await expect(page.getByText('あなたの支払額')).toBeVisible();
+    await expect(page.getByText('見積取得中…')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'ウォレットを接続してください' }),
+    ).toBeVisible();
+
+    // 裏返し: 同じ URL から chain=kaia を外す → Polygon (default) が出る
+    await page.goto(`/ja/tip/${TO}?token=jpyc`);
+    await expect(page.getByText(/Polygon/).first()).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(/Kairos|Kaia/);
   });
 
-  test('USDC + crossChain=false: hint 抑制でも UI は破綻しない (iframe 380×640)', async ({
+  test('JPYC + 非対応 chain (base/arbitrum/optimism/ethereum) → エラー表示', async ({
     page,
   }) => {
-    // iframe 内 (狭い viewport) で USDC + crossChain=false を開いて、
-    // CrossChainHint が mount されないこと + 既存 UI が overflow しないことを smoke。
-    // 未接続なので token guard とは別に address guard でも hint は出ない。
+    // URL parser の reject path 4 件を e2e で確認 (cleanup b5ce61e の
+    // resolveChainSlugParam + hasDeployment 経路が production で live)。
+    for (const chain of ['base', 'arbitrum', 'optimism', 'ethereum']) {
+      await page.goto(`/ja/tip/${TO}?token=jpyc&chain=${chain}`);
+      await expect(page.getByText(/Tip URL が不正/)).toBeVisible();
+    }
+  });
+
+  test('USDC + Ethereum L1 → reject (gasless 必須の Tip 仕様)', async ({
+    page,
+  }) => {
+    // L1 は Pimlico paymaster 未対応なので Tip では reject される。
+    // creator が誤って L1 URL を共有しても fan に明確なエラーが出る invariant。
+    await page.goto(`/ja/tip/${TO}?token=usdc&chain=ethereum`);
+    await expect(page.getByText(/Tip URL が不正/)).toBeVisible();
+  });
+
+  test('USDC + crossChain=false: CrossChainHint 非 mount + iframe 380×640 で破綻なし', async ({
+    page,
+  }) => {
+    // iframe 内 (狭い viewport) + crossChain=false 明示 で、CrossChainHint
+    // 関連の DOM 要素 (例: SourceChooser 専用 i18n 文字列) が一切現れない
+    // ことを negative assertion で確認。「mount されていない」を strict に検証。
     await page.setViewportSize({ width: 380, height: 640 });
     await page.goto(`/ja/tip/${TO}?token=usdc&crossChain=false`);
-    // 既定 USDC preset 表示で render 完了を確認
     await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();
-    // 横 overflow なし (CrossChainHint 想定が無くてもレイアウト invariant)
+    // CrossChainHint の i18n key (title / subtitle 等) が DOM に無いこと
+    await expect(page.locator('body')).not.toContainText('支払元チェーン');
+    await expect(page.locator('body')).not.toContainText('Gateway');
+    await expect(page.locator('body')).not.toContainText('CCTP');
+    // 横 overflow なし
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
+  test('USDC + crossChain=true (default): 未接続でも hint 関連の i18n 文字列は出ない', async ({
+    page,
+  }) => {
+    // crossChain default ON でも、wallet 未接続なら CrossChainHint は mount
+    // 条件を満たさない (`address` gate)。Hint UI が漏れ出ていないことを確認、
+    // creator が embed した時 fan が見る初期画面が壊れないこと invariant。
+    await page.goto(`/ja/tip/${TO}?token=usdc`);
+    await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('支払元チェーン');
+    await expect(page.locator('body')).not.toContainText('選択したチェーンで支払う');
   });
 
   test('英語ロケール (/en/tip) でも動作', async ({ page }) => {

@@ -315,7 +315,7 @@ describe('useTipSettings', () => {
     expect(result.current.settings).toEqual(persisted);
   });
 
-  it('setSettings → localStorage 書込 → 別 hook instance が復元 (cross-component sync の前提)', async () => {
+  it('setSettings → localStorage 書込 → 新 instance の hydration で復元 (remount 永続化)', async () => {
     const { result: writer } = renderHook(() => useTipSettings());
     await waitFor(() => expect(writer.current.hydrated).toBe(true));
     act(() => {

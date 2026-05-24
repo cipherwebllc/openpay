@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
-import { baseSepolia, polygonAmoy } from 'viem/chains';
+import { arbitrumSepolia, baseSepolia, polygonAmoy } from 'viem/chains';
 import type { Address } from 'viem';
 
 vi.mock('wagmi', () => ({
@@ -763,12 +763,15 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
   });
 });
 
-describe('TipForm — CrossChainHint mount (USDC cross-chain 対応)', () => {
+describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', () => {
   beforeEach(() => {
     crossChainHintSpy.mockClear();
   });
 
-  it('USDC + 接続済 → CrossChainHint が mount され正しい props を受け取る', async () => {
+  // 注: 本 describe では CrossChainHint を spy stub で置換、props 渡しのみ verify。
+  // 実 mount + balance fetch + SourceChooser render の統合確認は
+  // tests/components/TipForm-crosschain.integration.test.tsx (LARP L3 fix) で実施。
+  it('USDC + 接続済 → CrossChainHint module が render 呼出され正しい props を受け取る', async () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
@@ -795,7 +798,7 @@ describe('TipForm — CrossChainHint mount (USDC cross-chain 対応)', () => {
     expect(props.displayDecimals).toBe(6);
   });
 
-  it('JPYC + 接続済 → CrossChainHint は mount されない (USDC 専用機能)', async () => {
+  it('JPYC + 接続済 → CrossChainHint module は呼出されない (USDC 専用機能 = token guard)', async () => {
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
@@ -808,7 +811,7 @@ describe('TipForm — CrossChainHint mount (USDC cross-chain 対応)', () => {
     expect(crossChainHintSpy).not.toHaveBeenCalled();
   });
 
-  it('USDC + 未接続 → CrossChainHint は mount されない (address gate)', async () => {
+  it('USDC + 未接続 → CrossChainHint module は呼出されない (address gate)', async () => {
     setAccount({ connected: false });
     render(<TipForm params={USDC_PARAMS} />);
     // 接続ボタン表示で render 完了を確認 (未接続時の不変表示)
@@ -914,8 +917,9 @@ describe('TipForm — CrossChainHint mount (USDC cross-chain 対応)', () => {
       targetChainId: number;
       tokenAddress: Address;
     };
-    // testnet env なので arbitrumSepolia.id = 421614
-    expect(props.targetChainId).toBe(421614);
+    // testnet env なので arbitrum slug は arbitrumSepolia chain に解決される。
+    // magic number を避けるため viem chain const から id を引く。
+    expect(props.targetChainId).toBe(arbitrumSepolia.id);
     // tokenAddress は arbitrum USDC のもの (per-chain deployment)
     expect(props.tokenAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
   });
