@@ -53,6 +53,25 @@ export function resolvePaymasterMode(
   return deployment.paymasterMode;
 }
 
+/** resolvePaymasterMode が 'unavailable' を返したら throw、それ以外は narrowed
+ * mode を返す。3 つの smart-account builder (simpleAccount / mav2 / metamask) で
+ * 同一ガード block を反復していたのを集約。silent fallback すると sponsorship
+ * 残高悪用に直結するので確実に fail-loud。 */
+export function assertGaslessSupported(
+  deployment: TokenDeployment,
+  chainId: number,
+  callerName: string,
+): 'sponsorship' | 'erc20' {
+  const mode = resolvePaymasterMode(deployment);
+  if (mode === 'unavailable') {
+    throw new Error(
+      `${callerName}: deployment ${deployment.symbol} on chain ${chainId} ` +
+        'は gasless mode 非対応 (paymasterMode=unavailable)。standard mode 経路を使うこと。',
+    );
+  }
+  return mode;
+}
+
 /** sponsorship のとき env で policy id が無ければ undefined (sponsor なし扱い)。
  * 'unavailable' deployment が混入したら throw — URL parser が事前に弾いている
  * 前提で、ここに到達するのは PaymentForm/呼出側の bug。silent fallback で

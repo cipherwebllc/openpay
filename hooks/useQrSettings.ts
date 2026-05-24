@@ -2,6 +2,7 @@
 
 import { isJpycChainSlug, isValidChainSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
+import { stripControlChars } from '@/lib/sanitize';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   deploymentForSlug,
@@ -59,7 +60,7 @@ export const QUICK_AMOUNT_MAX = 8;
 
 function sanitizeText(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
-  return value.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max);
+  return stripControlChars(value).slice(0, max);
 }
 
 function sanitizeQuickAmounts(loaded: unknown): string[] {

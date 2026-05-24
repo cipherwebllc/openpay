@@ -37,6 +37,7 @@ import {
   type ChainSlug,
 } from './chains';
 import type { GasMode, PayMode } from './fee';
+import { stripControlChars } from './sanitize';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -256,6 +257,25 @@ export function searchParamsFromNext(raw: RouteSearch): SearchParamsLike {
   };
 }
 
+// chain query 解決: 明示があれば検証して採用、無ければ token の default。
+// pay/tip/checkout 全 parser で同一ロジックなので集約する。
+function resolveChainSlugParam(
+  chainRaw: string | null,
+  token: TokenSymbol,
+): { ok: true; slug: ChainSlug } | { ok: false; error: string } {
+  if (chainRaw === null || chainRaw.length === 0) {
+    return { ok: true, slug: DEFAULT_CHAIN_FOR_SYMBOL[token] };
+  }
+  if (isValidChainSlug(chainRaw)) {
+    return { ok: true, slug: chainRaw };
+  }
+  return {
+    ok: false,
+    error:
+      'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
+  };
+}
+
 export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams {
   const to = searchParams.get('to');
   const token = searchParams.get('token');
@@ -307,20 +327,11 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     };
   }
 
-  // chain 解決: 明示があれば使う、無ければ token の default。
-  let chainSlug: ChainSlug;
-  if (chainRaw === null || chainRaw.length === 0) {
-    chainSlug = DEFAULT_CHAIN_FOR_SYMBOL[token];
-  } else if (isValidChainSlug(chainRaw)) {
-    chainSlug = chainRaw;
-  } else {
-    return {
-      ok: false,
-      errorKind: 'invalid',
-      error:
-        'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
-    };
+  const chainResult = resolveChainSlugParam(chainRaw, token);
+  if (!chainResult.ok) {
+    return { ok: false, errorKind: 'invalid', error: chainResult.error };
   }
+  const chainSlug = chainResult.slug;
   // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
   if (!hasDeployment(token, chainSlug)) {
     return {
@@ -432,8 +443,8 @@ function sanitizeUrl(raw: string): string | undefined {
 }
 
 function sanitizeText(value: string, max: number): string | undefined {
-  // C0 制御文字 (タブ含む) と DEL を排除し、長さ上限で切り詰める。空文字は省略扱い。
-  const cleaned = value.replace(/[\x00-\x1f\x7f]/g, '').trim();
+  // 空文字は省略扱い、上限超は切詰。制御文字 strip は lib/sanitize.ts に集約。
+  const cleaned = stripControlChars(value);
   if (cleaned.length === 0) return undefined;
   return cleaned.length > max ? cleaned.slice(0, max) : cleaned;
 }
@@ -523,18 +534,11 @@ export function parseTipParams(
     return { ok: false, error: 'token は jpyc または usdc を指定してください' };
   }
   const chainRaw = searchParams.get('chain');
-  let chainSlug: ChainSlug;
-  if (chainRaw === null || chainRaw.length === 0) {
-    chainSlug = DEFAULT_CHAIN_FOR_SYMBOL[token];
-  } else if (isValidChainSlug(chainRaw)) {
-    chainSlug = chainRaw;
-  } else {
-    return {
-      ok: false,
-      error:
-        'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
-    };
+  const chainResult = resolveChainSlugParam(chainRaw, token);
+  if (!chainResult.ok) {
+    return { ok: false, error: chainResult.error };
   }
+  const chainSlug = chainResult.slug;
   if (!hasDeployment(token, chainSlug)) {
     return {
       ok: false,
@@ -683,8 +687,8 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
     } catch {
       return null;
     }
-    // C0 制御文字 (タブ含む) と DEL を排除し、長さ上限で切詰。空文字は invalid。
-    const name = decoded.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    // 空文字は invalid、上限超は切詰。
+    const name = stripControlChars(decoded);
     if (name.length === 0) return null;
     const trimmedName =
       name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
@@ -768,18 +772,11 @@ export function parseCheckoutParams(
     return { ok: false, error: 'token は jpyc または usdc を指定してください' };
   }
 
-  let chainSlug: ChainSlug;
-  if (chainRaw === null || chainRaw.length === 0) {
-    chainSlug = DEFAULT_CHAIN_FOR_SYMBOL[token];
-  } else if (isValidChainSlug(chainRaw)) {
-    chainSlug = chainRaw;
-  } else {
-    return {
-      ok: false,
-      error:
-        'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
-    };
+  const chainResult = resolveChainSlugParam(chainRaw, token);
+  if (!chainResult.ok) {
+    return { ok: false, error: chainResult.error };
   }
+  const chainSlug = chainResult.slug;
   if (!hasDeployment(token, chainSlug)) {
     return {
       ok: false,
@@ -862,7 +859,7 @@ export function parseCheckoutItemDrafts(
   const errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }> = [];
 
   drafts.forEach((d, i) => {
-    const name = d.name.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    const name = stripControlChars(d.name);
     const qtyStr = d.qty.trim();
     const priceStr = d.price.trim();
     // 全フィールドが空欄の draft は「未入力 row」として無視 (UI 上「商品を追加」して

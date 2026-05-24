@@ -61,6 +61,21 @@ vi.mock('@/lib/pimlico', async () => {
     // paymasterMode をそのまま尊重したいので素通しする stub を使う。
     resolvePaymasterMode: (deployment: TokenDeployment) =>
       deployment.paymasterMode,
+    // assertGaslessSupported は内部で resolvePaymasterMode を呼ぶが、actual
+    // module 内 import 解決のため上の mock が届かない。test では deployment の
+    // paymasterMode をそのまま使い、unavailable のみ throw する素通し stub に置換。
+    assertGaslessSupported: (
+      deployment: TokenDeployment,
+      chainId: number,
+      callerName: string,
+    ) => {
+      if (deployment.paymasterMode === 'unavailable') {
+        throw new Error(
+          `${callerName}: deployment ${deployment.symbol} on chain ${chainId} は gasless mode 非対応`,
+        );
+      }
+      return deployment.paymasterMode;
+    },
     pimlicoPaymasterContext: () => undefined,
   };
 });

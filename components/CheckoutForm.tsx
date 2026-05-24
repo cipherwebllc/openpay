@@ -7,8 +7,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { erc20Abi, formatUnits } from 'viem';
-import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { formatUnits } from 'viem';
+import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
@@ -19,7 +19,7 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
-import { useAutoSwitchChain } from '@/hooks/useAutoSwitchChain';
+import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -50,7 +50,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
   const isMerchantGas = !isStandard && params.gas === 'merchant';
 
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
   // Smart Account / Pimlico 経路は gasless のみ必要 — standard では skip。
@@ -90,22 +90,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 顧客向け wallet hint + gasInfoJpyc / gasInfoUsdc tooltip で使用。
   const nativeToken = requiredChain.nativeCurrency.symbol;
 
-  const balanceQuery = useReadContract({
-    address: deployment.address,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    chainId: deployment.chainId,
-    query: { enabled: !!address && isConnected },
-  });
-
-  const insufficientBalance =
-    balanceQuery.data !== undefined &&
-    totalCustomerOutflow > 0n &&
-    balanceQuery.data < totalCustomerOutflow;
-
-  const wrongChain = isConnected && chainId !== requiredChain.id;
-  useAutoSwitchChain(requiredChain.id, wrongChain);
+  const { balance, insufficientBalance, wrongChain } = useErc20BalanceAndChain(
+    deployment,
+    requiredChain,
+    totalCustomerOutflow,
+  );
 
   const flowPending = isStandard ? standard.isPending : gasless.isPending;
   const gasQuoteReady = isStandard || gasQuote.data !== undefined;
@@ -331,7 +320,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     }
     const id = setTimeout(() => setRedirectIn((v) => (v === null ? null : v - 1)), 1000);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- doRedirect は意図的に除外 (含めると毎 render でタイマーがリセットされる)
   }, [redirectIn]);
 
   function doRedirect() {
@@ -505,10 +494,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             </button>
           )}
 
-          {isConnected && !wrongChain && balanceQuery.data !== undefined && (
+          {isConnected && !wrongChain && balance !== undefined && (
             <p className="text-xs text-slate-500">
               {t('balanceLabel')}{' '}
-              <span className="font-mono">{fmt(balanceQuery.data)}</span>
+              <span className="font-mono">{fmt(balance)}</span>
             </p>
           )}
 

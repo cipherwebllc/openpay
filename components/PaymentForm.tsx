@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { erc20Abi, parseUnits } from 'viem';
-import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { parseUnits } from 'viem';
+import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { PayEmptyLanding } from './PayEmptyLanding';
 import { CopyableField } from './CopyableField';
@@ -17,7 +17,7 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
-import { useAutoSwitchChain } from '@/hooks/useAutoSwitchChain';
+import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -61,7 +61,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
 
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
   // Smart Account は gasless のみ必要 — standard では enabled=false で skip。
@@ -152,22 +152,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const minimumAmountWei =
     breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
 
-  const balanceQuery = useReadContract({
-    address: deployment.address,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    chainId: deployment.chainId,
-    query: { enabled: !!address && isConnected },
-  });
-
-  const insufficientBalance =
-    balanceQuery.data !== undefined &&
-    totalCustomerOutflow > 0n &&
-    balanceQuery.data < totalCustomerOutflow;
-
-  const wrongChain = isConnected && chainId !== requiredChain.id;
-  useAutoSwitchChain(requiredChain.id, wrongChain);
+  const { balance, insufficientBalance, wrongChain } = useErc20BalanceAndChain(
+    deployment,
+    requiredChain,
+    totalCustomerOutflow,
+  );
 
   const flowPending = isStandard ? standard.isPending : gasless.isPending;
   const gasQuoteReady = isStandard || gasQuote.data !== undefined;
@@ -470,10 +459,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
           </button>
         )}
 
-        {isConnected && !wrongChain && balanceQuery.data !== undefined && (
+        {isConnected && !wrongChain && balance !== undefined && (
           <div className="text-xs text-slate-500">
             {t('balanceLabel')}{' '}
-            <span className="font-mono">{fmt(balanceQuery.data)}</span>
+            <span className="font-mono">{fmt(balance)}</span>
           </div>
         )}
 

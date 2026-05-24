@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { erc20Abi, parseUnits } from 'viem';
-import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { parseUnits } from 'viem';
+import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
@@ -13,7 +13,7 @@ import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
-import { useAutoSwitchChain } from '@/hooks/useAutoSwitchChain';
+import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -47,7 +47,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const creatorName = params.name ?? '';
   const creatorMessage = params.message ?? '';
 
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { data: saData, error: saError } = useSmartAccount(deployment, true);
   const gasless = useBatchPayment(deployment);
@@ -86,22 +86,11 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
-  const balanceQuery = useReadContract({
-    address: deployment.address,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    chainId: deployment.chainId,
-    query: { enabled: !!address && isConnected },
-  });
-
-  const insufficientBalance =
-    balanceQuery.data !== undefined &&
-    totalCustomerOutflow > 0n &&
-    balanceQuery.data < totalCustomerOutflow;
-
-  const wrongChain = isConnected && chainId !== requiredChain.id;
-  useAutoSwitchChain(requiredChain.id, wrongChain);
+  const { balance, insufficientBalance, wrongChain } = useErc20BalanceAndChain(
+    deployment,
+    requiredChain,
+    totalCustomerOutflow,
+  );
 
   const gasQuoteReady = gasQuote.data !== undefined;
   const canSubmit =
@@ -376,10 +365,10 @@ export function TipForm({ params }: { params: TipParams }) {
           </button>
         )}
 
-        {isConnected && !wrongChain && balanceQuery.data !== undefined && (
+        {isConnected && !wrongChain && balance !== undefined && (
           <p className="text-xs text-slate-500">
             {t('balanceLabel')}{' '}
-            <span className="font-mono">{fmt(balanceQuery.data)}</span>
+            <span className="font-mono">{fmt(balance)}</span>
           </p>
         )}
 

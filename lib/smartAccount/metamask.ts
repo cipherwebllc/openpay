@@ -35,10 +35,10 @@ import {
 import { kaia, kairos } from 'viem/chains';
 import type { GetWalletClientReturnType } from '@wagmi/core';
 import {
+  assertGaslessSupported,
   createPimlico,
   pimlicoPaymasterContext,
   pimlicoUrl,
-  resolvePaymasterMode,
 } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
@@ -70,16 +70,11 @@ export async function buildMetaMaskSmartAccountClient(args: {
     });
   }
 
-  const rawMode = resolvePaymasterMode(deployment);
-  // 'unavailable' (USDC on Ethereum L1) は URL parser で gasless 経路から弾かれ
-  // ているため、ここに来るのは呼出側の bug。
-  if (rawMode === 'unavailable') {
-    throw new Error(
-      `buildMetaMaskSmartAccountClient: deployment ${deployment.symbol} on chain ${chainId} ` +
-        'は gasless mode 非対応 (paymasterMode=unavailable)。standard mode 経路を使うこと。',
-    );
-  }
-  const paymasterMode = rawMode;
+  const paymasterMode = assertGaslessSupported(
+    deployment,
+    chainId,
+    'buildMetaMaskSmartAccountClient',
+  );
 
   const pimlicoClient = createPimlico(chainId);
 
