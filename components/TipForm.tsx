@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { CrossChainHint } from './CrossChainHint';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
@@ -381,6 +382,23 @@ export function TipForm({ params }: { params: TipParams }) {
             </p>
             <OnrampCta token={params.token} namespace="TipForm" />
           </div>
+        )}
+
+        {/* Cross-chain hint: USDC かつ params.crossChain !== false の時のみ
+            mounting (hint 内部でも guard あり)。fan が dest chain で USDC 不足
+            だが他 chain / Gateway に balance がある時、Circle Gateway / CCTP V2
+            経由の代替 path を提示する。JPYC は Gateway 非対応のため自動 skip
+            (token guard で early return)。PaymentForm と同型実装。 */}
+        {params.token === 'usdc' && address && (
+          <CrossChainHint
+            token={params.token}
+            enabled={params.crossChain !== false}
+            targetChainId={requiredChain.id}
+            recipient={params.to}
+            requiredAtomic={totalCustomerOutflow}
+            displayDecimals={deployment.decimals}
+            tokenAddress={deployment.address}
+          />
         )}
       </section>
 

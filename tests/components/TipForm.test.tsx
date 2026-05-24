@@ -21,6 +21,17 @@ vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// CrossChainHint は wagmi の useWalletClient / usePublicClient + react-query
+// に依存するが、本 test file の責務は TipForm 本体ロジックのため、Hint は空
+// component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
+// TipForm から Hint へ渡される props は crossChainHintSpy で capture して検証。
+const crossChainHintSpy = vi.fn();
+vi.mock('@/components/CrossChainHint', () => ({
+  CrossChainHint: (props: Record<string, unknown>) => {
+    crossChainHintSpy(props);
+    return null;
+  },
+}));
 vi.mock('@/lib/pimlico', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
@@ -749,5 +760,74 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(body.merchantAmount).toBe('990000');
     expect(body.feeAmount).toBe('10000');
     fetchSpy.mockRestore();
+  });
+});
+
+describe('TipForm — CrossChainHint mount (USDC cross-chain 対応)', () => {
+  beforeEach(() => {
+    crossChainHintSpy.mockClear();
+  });
+
+  it('USDC + 接続済 → CrossChainHint が mount され正しい props を受け取る', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.calls[0]![0] as {
+      token: string;
+      enabled: boolean;
+      targetChainId: number;
+      recipient: Address;
+      requiredAtomic: bigint;
+      displayDecimals: number;
+      tokenAddress: Address;
+    };
+    expect(props.token).toBe('usdc');
+    // crossChain 未指定 → default true (parseTipParams で true 解釈)
+    expect(props.enabled).toBe(true);
+    expect(props.targetChainId).toBe(baseSepolia.id);
+    expect(props.recipient).toBe(CREATOR);
+    // preset[0]=1 USDC + fee 0.01 (1%) + gas 0.1 (gas=customer mode で顧客負担)
+    // = customerPays = 1.10 USDC = 1_100_000 atomic
+    expect(props.requiredAtomic).toBe(1_100_000n);
+    expect(props.displayDecimals).toBe(6);
+  });
+
+  it('JPYC + 接続済 → CrossChainHint は mount されない (USDC 専用機能)', async () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<TipForm params={JPYC_PARAMS} />);
+
+    // 描画完了を待つため presets ボタンの存在で待機
+    await waitFor(() => {
+      expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    });
+    expect(crossChainHintSpy).not.toHaveBeenCalled();
+  });
+
+  it('USDC + 未接続 → CrossChainHint は mount されない (address gate)', async () => {
+    setAccount({ connected: false });
+    render(<TipForm params={USDC_PARAMS} />);
+    // 接続ボタン表示で render 完了を確認 (未接続時の不変表示)
+    await waitFor(() => {
+      expect(
+        screen.getByText(/ウォレットを接続してください/),
+      ).toBeInTheDocument();
+    });
+    expect(crossChainHintSpy).not.toHaveBeenCalled();
+  });
+
+  it('USDC + crossChain=false → enabled prop が false', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<TipForm params={{ ...USDC_PARAMS, crossChain: false }} />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.calls[0]![0] as { enabled: boolean };
+    expect(props.enabled).toBe(false);
   });
 });
