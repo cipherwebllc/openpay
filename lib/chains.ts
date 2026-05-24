@@ -148,12 +148,25 @@ export const USDC_CHAINS: readonly ChainSlug[] = [
   'ethereum',
 ];
 
+// 2026-05-24: Ethereum は merchant 受信は維持するが buyer cross-chain source
+// からは一時除外 (lib/crossChain/config.ts CROSS_CHAIN_TARGETS で role='merchant-only')。
+// poster の「対応 chain」表示も backend 挙動と揃えるため同 slug を skip する。
+// 状況落ち着き次第、本除外と config.ts の role を同時に戻す。
+const BUYER_SOURCE_USDC_SLUGS: readonly ChainSlug[] = USDC_CHAINS.filter(
+  (slug) => slug !== 'ethereum',
+);
+
 /** Customer (buyer) が cross-chain Gateway 経由で USDC を支払える chain の
- * 表示名一覧。merchant 受信 5 chain + buyer-only 2 chain (Avalanche / Unichain) =
- * 7 chain。ポスター等 customer 向け表示で「自分の chain で払えるか」確認する
- * 用途に使う。順序は merchant chooser と同じ + buyer-only を末尾に追加。 */
+ * 表示名一覧。merchant 受信 4 chain (Ethereum 除く) + buyer-only 2 chain
+ * (Avalanche / Unichain) = 6 chain。ポスター等 customer 向け表示で「自分の
+ * chain で払えるか」確認する用途に使う。
+ * 2026-05-24 Ethereum は merchant-only (buyer source 不可) のため除外、表示と
+ * 実 backend 挙動 (BUYER_SOURCE_TARGETS) を sync させる。
+ * 順序は merchant chooser と同じ + buyer-only を末尾に追加。 */
 export function buyerUsdcChainNames(): string[] {
-  const merchantNames = USDC_CHAINS.map((slug) => SLUG_TO_CHAIN[slug].name);
+  const merchantNames = BUYER_SOURCE_USDC_SLUGS.map(
+    (slug) => SLUG_TO_CHAIN[slug].name,
+  );
   const buyerOnlyNames = ALL_BUYER_ONLY_SLUGS.map(
     (slug) => BUYER_ONLY_SLUG_TO_CHAIN[slug].name,
   );

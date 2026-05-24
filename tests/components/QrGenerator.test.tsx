@@ -1802,18 +1802,26 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // crossChain default=true (USDC は他 chain からも受信可能)、
-      // poster は対応 7 chain (merchant 5: Base / Arbitrum / Optimism / Polygon /
-      // Ethereum + buyer-only 2: Avalanche / Unichain) を全列挙する (お客向け =
-      // どの chain で持っていれば払えるか明示)。phase 4b-1 で buyer source が
-      // 5 → 7 chain に拡張、表示も buyerUsdcChainNames() で 7 chain 表示に追従。
+      // poster は対応 6 chain (merchant-and-buyer 4: Base / Arbitrum / Optimism /
+      // Polygon + buyer-only 2: Avalanche / Unichain) を全列挙する (お客向け =
+      // どの chain で持っていれば払えるか明示)。
+      // 2026-05-24 Ethereum L1 は merchant-only に変更 (address poisoning + RPC
+      // 不安定) → buyer cross-chain source から除外。poster 表示も backend 挙動
+      // (BUYER_SOURCE_TARGETS) と sync させて Ethereum を出さない。
       await waitFor(() => {
         const el = screen.getByText(/USDC ·/);
         expect(el.textContent).toMatch(/Base/);
         expect(el.textContent).toMatch(/Arbitrum/);
         expect(el.textContent).toMatch(/(Optimism|OP Mainnet|OP Sepolia)/);
         expect(el.textContent).toMatch(/Polygon/);
-        // Ethereum L1 — testnet env では "Sepolia"
-        expect(el.textContent).toMatch(/(Sepolia|Ethereum)/);
+        // Ethereum L1 は出ない (testnet では viem .name = "Sepolia" 単独、
+        // mainnet では "Ethereum")。"Base Sepolia" / "OP Sepolia" / "Unichain Sepolia"
+        // は別物なので chain 名 list を split で正確に切り出して検査する。
+        const usdcLine = el.textContent ?? '';
+        const chainsPart = usdcLine.split('·')[1] ?? '';
+        const chainTokens = chainsPart.split('/').map((s) => s.trim());
+        expect(chainTokens).not.toContain('Sepolia');
+        expect(chainTokens).not.toContain('Ethereum');
         // phase 4b-1 buyer-only chains — testnet env では "Avalanche Fuji" /
         // "Unichain Sepolia"
         expect(el.textContent).toMatch(/(Avalanche|Fuji)/);
