@@ -130,13 +130,22 @@ function resolveTargets(configs) {
         }
         return null;
       }
+      // GH Actions Variables 未設定時は env var が空文字列 '' になり、`??` では
+      // 非 nullish と判定されて default に倒れない (= parseEther('') が 0n、
+      // しきい値 0 で alert 機能停止)。空文字 / undefined / null 全部を default に
+      // 倒すため明示的に length check する。
+      const rpcRaw = process.env[c.rpcEnv];
+      const rpcUrl = rpcRaw && rpcRaw.length > 0 ? rpcRaw : c.rpcDefault;
+      const thresholdRaw = process.env[c.thresholdEnv];
+      const thresholdStr =
+        thresholdRaw && thresholdRaw.length > 0
+          ? thresholdRaw
+          : c.thresholdDefault;
       return {
         config: c,
         paymasterAddress: paymaster,
-        rpcUrl: process.env[c.rpcEnv] ?? c.rpcDefault,
-        threshold: parseEther(
-          process.env[c.thresholdEnv] ?? c.thresholdDefault,
-        ),
+        rpcUrl,
+        threshold: parseEther(thresholdStr),
       };
     })
     .filter((t) => t !== null);

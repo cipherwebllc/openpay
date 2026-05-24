@@ -111,13 +111,24 @@ for (const [name, path] of [
         ['run', 'view', String(runId), '--repo=cipherwebllc/openpay', '--log'],
         { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
       );
-      const isSkip = /Secrets 未設定/.test(log.stdout ?? '');
+      // log には shell script の SOURCE CODE 行も含まれるため、単純 grep だと
+      // skip 判定文字列が source code 中の echo 文 (`echo "::warning::Secrets 未設定..."`)
+      // にも match して false-positive 検出する。actual 実行された warning 行を
+      // 探すため `##[warning]Secrets 未設定` (GH Actions のレンダ済 warning 形式) を使う。
+      const isSkip = /##\[warning\]Secrets 未設定/.test(log.stdout ?? '');
+      // 同様に actual balance check が走った証拠は実行 output 行 (script の
+      // 出力文字列「Pimlico Sponsorship Paymaster 残高:」がある = 完走)。
+      const didActualCheck = /Pimlico Sponsorship Paymaster 残高:/.test(
+        log.stdout ?? '',
+      );
       record(
         `Pimlico balance cron actual check (最新 run #${runId})`,
-        !isSkip,
-        isSkip
-          ? 'graceful skip — PIMLICO_PAYMASTER_POLYGON / BASE / ALERT_WEBHOOK_URL 未設定。balance 監視ゼロ'
-          : '実 balance check 実行済',
+        didActualCheck,
+        didActualCheck
+          ? '実 balance check 実行済 (script output 検出)'
+          : isSkip
+            ? 'graceful skip — PIMLICO_PAYMASTER_POLYGON / BASE / ALERT_WEBHOOK_URL 未設定。balance 監視ゼロ'
+            : 'run は実行されたが balance output 不在 (workflow 変更直後の build 失敗 / script error の可能性)',
       );
     }
   }

@@ -428,4 +428,74 @@ describe('check-pimlico-balance: 並列 fetch + chain ごとの独立性', () =>
       }),
     ).rejects.toThrow(/base RPC timeout/);
   });
+
+  // 2026-05-24 GH Actions 実 run で発見: Variables 未設定時に env var が空文字列
+  // で渡され、旧実装 (?? fallback) が空文字を非 nullish と判定して default に
+  // 倒れず、parseEther('') = 0n でしきい値 0 = 監視機能停止していた regression。
+  it('ALERT_THRESHOLD_* env が空文字 → default fallback (parseEther("") = 0 を防ぐ)', async () => {
+    process.env.PIMLICO_PAYMASTER_POLYGON =
+      '0x000000000000000000000000000000000000B011';
+    process.env.PIMLICO_PAYMASTER_BASE =
+      '0x000000000000000000000000000000000000bA5e';
+    process.env.ALERT_THRESHOLD_POL = ''; // GH Actions Variables 未設定の実 shape
+    process.env.ALERT_THRESHOLD_ETH = '';
+    // balance を default 直下に置く: POL 4 (< default 5)、ETH 0.005 (< default 0.01)
+    // → 両 chain breach、empty string fallback が正しければ alert 発火
+    readContractMock.mockResolvedValueOnce(4n * 10n ** 18n);
+    readContractMock.mockResolvedValueOnce(5n * 10n ** 15n);
+
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck({
+      configs: makeConfigs(),
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.breached).toBe(true);
+    expect(result.lines.join('\n')).toMatch(/しきい値 5 POL/);
+    expect(result.lines.join('\n')).toMatch(/しきい値 0\.01 ETH/);
+  });
+
+  it('ALERT_THRESHOLD_* env が未定義 (delete) でも同じく default fallback', async () => {
+    process.env.PIMLICO_PAYMASTER_POLYGON =
+      '0x000000000000000000000000000000000000B011';
+    process.env.PIMLICO_PAYMASTER_BASE =
+      '0x000000000000000000000000000000000000bA5e';
+    // beforeEach で delete 済、ここでは何もしない (undefined パス確認)
+    readContractMock.mockResolvedValueOnce(10n * 10n ** 18n); // 10 POL > default 5
+    readContractMock.mockResolvedValueOnce(10n ** 17n); // 0.1 ETH > default 0.01
+
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck({
+      configs: makeConfigs(),
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.breached).toBe(false);
+    expect(result.lines.join('\n')).toMatch(/しきい値 5 POL/);
+    expect(result.lines.join('\n')).toMatch(/しきい値 0\.01 ETH/);
+  });
+
+  it('ALERT_THRESHOLD_* env が明示値 (= 設定済) なら default を上書き', async () => {
+    process.env.PIMLICO_PAYMASTER_POLYGON =
+      '0x000000000000000000000000000000000000B011';
+    process.env.PIMLICO_PAYMASTER_BASE =
+      '0x000000000000000000000000000000000000bA5e';
+    process.env.ALERT_THRESHOLD_POL = '10'; // default 5 を 10 に上書き
+    process.env.ALERT_THRESHOLD_ETH = '0.05'; // default 0.01 を 0.05 に上書き
+    readContractMock.mockResolvedValueOnce(8n * 10n ** 18n); // 8 POL < 10 → breach
+    readContractMock.mockResolvedValueOnce(10n ** 17n); // 0.1 ETH > 0.05 → OK
+
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck({
+      configs: makeConfigs(),
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.breached).toBe(true);
+    expect(result.lines.join('\n')).toMatch(/しきい値 10 POL/);
+    expect(result.lines.join('\n')).toMatch(/しきい値 0\.05 ETH/);
+  });
 });
