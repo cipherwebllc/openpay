@@ -68,13 +68,35 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => {
         expect(
-          screen.getByRole('button', { name: /^JPYC\s/ }),
+          screen.getByRole('button', { name: /^JPYC$/ }),
         ).toBeInTheDocument();
       });
       const usdcBtn = screen.getByRole('button', { name: /^USDC/ });
-      const jpycBtn = screen.getByRole('button', { name: /^JPYC\s/ });
+      const jpycBtn = screen.getByRole('button', { name: /^JPYC$/ });
       expect(jpycBtn.className).toMatch(/border-brand/);
       expect(usdcBtn.className).not.toMatch(/border-brand/);
+    });
+
+    it('Token chooser: 公式ロゴ SVG (public/tokens/{jpyc,usdc}.svg) が button 内に img として描画される', async () => {
+      // 2026-05-24: chain hint 文言を削除して logo + symbol の 2 要素構成に変更。
+      // logo は aria-hidden で a11y tree から除外、accessible name は span の
+      // displaySymbol だけになる (上の test で button name='JPYC'/'USDC' 検証済)。
+      // ここでは「ロゴ asset 経路 (public/tokens/...) が UI に出ているか」を
+      // src 属性で検査する (alt は空 / aria-hidden なので role=img では取れない)。
+      render(<QrGenerator />);
+      await waitFor(() =>
+        screen.getByRole('button', { name: /^JPYC$/ }),
+      );
+      const jpycBtn = screen.getByRole('button', { name: /^JPYC$/ });
+      const usdcBtn = screen.getByRole('button', { name: /^USDC/ });
+      const jpycImg = jpycBtn.querySelector('img');
+      const usdcImg = usdcBtn.querySelector('img');
+      expect(jpycImg).not.toBeNull();
+      expect(usdcImg).not.toBeNull();
+      // next/image は src を加工する (e.g. _next/image?url=%2Ftokens%2Fjpyc.svg)
+      // ため、URL 検査は素朴な substring match で十分。
+      expect(jpycImg?.getAttribute('src')).toMatch(/jpyc\.svg/);
+      expect(usdcImg?.getAttribute('src')).toMatch(/usdc\.svg/);
     });
 
     it('LocalStorage に有効アドレス + gasMode=merchant: サマリに「ガス代：店主負担」が出る', async () => {
@@ -341,8 +363,11 @@ describe('QrGenerator', () => {
       const remaining = screen.getAllByPlaceholderText(/例: 1000/);
       expect(remaining.length).toBe(1);
       expect((remaining[0] as HTMLInputElement).value).toBe('');
-      // クイックボタン (表示側) は何も表示されない
-      expect(screen.queryAllByRole('button', { name: /JPYC$/ }).length).toBe(0);
+      // クイックボタン (表示側) は何も表示されない (quick-amount は "<数値> JPYC"
+      // の形式、token chooser の bare "JPYC" ボタンは除外する正規表現で照合する)。
+      expect(
+        screen.queryAllByRole('button', { name: /\d+ JPYC$/ }).length,
+      ).toBe(0);
     });
 
     it('クイック金額の上限 (8 件) に到達すると + 追加ボタンが消える', async () => {
@@ -539,9 +564,9 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() =>
-        screen.getByRole('button', { name: /^JPYC\s/ }),
+        screen.getByRole('button', { name: /^JPYC$/ }),
       );
-      await user.click(screen.getByRole('button', { name: /^JPYC\s/ }));
+      await user.click(screen.getByRole('button', { name: /^JPYC$/ }));
       // JPYC 用プレースホルダ '1000' に切替
       expect(screen.getByPlaceholderText('1000')).toBeInTheDocument();
     });
@@ -1495,7 +1520,7 @@ describe('QrGenerator', () => {
       expect(step1).not.toBeNull();
       // Step 1 領域内に JPYC / USDC ボタンが両方存在
       expect(
-        within(step1).getByRole('button', { name: /^JPYC\s/ }),
+        within(step1).getByRole('button', { name: /^JPYC$/ }),
       ).toBeInTheDocument();
       expect(
         within(step1).getByRole('button', { name: /^USDC/ }),
@@ -1780,7 +1805,7 @@ describe('QrGenerator', () => {
         expect(JSON.parse(raw!).chain).toBe('arbitrum');
       });
       // JPYC へ戻す → chain は polygon にリセット
-      await user.click(screen.getByRole('button', { name: /^JPYC\s/ }));
+      await user.click(screen.getByRole('button', { name: /^JPYC$/ }));
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('polygon');
@@ -1950,7 +1975,7 @@ describe('QrGenerator', () => {
         within(step1).queryByRole('button', { name: /^Kai/ }),
       ).toBeNull();
       // JPYC へ戻す
-      await user.click(screen.getByRole('button', { name: /^JPYC\s/ }));
+      await user.click(screen.getByRole('button', { name: /^JPYC$/ }));
       // USDC chain (Base / Arbitrum) は消える
       expect(
         within(step1).queryByRole('button', { name: /^Base/ }),

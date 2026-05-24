@@ -1,6 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// `Image` という名前は downloadPng() 内の `new Image()` (window.Image / HTMLImageElement
+// constructor) と global scope で衝突するため、next/image は NextImage として別名輸入する。
+import NextImage from 'next/image';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import type { Address } from 'viem';
@@ -352,26 +355,30 @@ export function QrGenerator() {
                 {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
                   const info = defaultDeploymentForSymbol(tok);
                   const active = settings.token === tok;
+                  // chain 一覧 hint (例: "2 chain 対応 (Polygon / Kaia)") は下の
+                  // 受取 chain chooser で同情報が見えるので削除 (2026-05-24)。
+                  // 公式ロゴ (public/tokens/{jpyc,usdc}.svg) + symbol テキストの
+                  // 2 要素に絞って視覚密度を下げる。
                   return (
                     <button
                       key={tok}
                       type="button"
                       onClick={() => selectToken(tok)}
-                      className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                      className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-3 text-sm font-semibold transition ${
                         active
                           ? 'border-brand bg-brand/5 text-brand-dark'
                           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                       }`}
                     >
-                      <div className="font-semibold">{info.displaySymbol}</div>
-                      <div className="text-xs text-slate-500">
-                        {/* JPYC は polygon + kaia の 2 chain、USDC は 5 chain (phase
-                            4a で Ethereum L1 追加)。chain list の表記は token ごとに
-                            別 key (短縮 chain 名で視覚的に明快な hardcoded list を維持)。 */}
-                        {tok === 'usdc'
-                          ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
-                          : t('tokenChainHintJpyc', { count: JPYC_CHAINS.length })}
-                      </div>
+                      <NextImage
+                        src={`/tokens/${tok}.svg`}
+                        alt=""
+                        width={24}
+                        height={24}
+                        className="h-6 w-6 shrink-0"
+                        aria-hidden
+                      />
+                      <span>{info.displaySymbol}</span>
                     </button>
                   );
                 })}
