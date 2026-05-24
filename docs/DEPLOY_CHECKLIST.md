@@ -28,6 +28,12 @@ vercel --prod --yes
 ### 3.1 自動 smoke (production URL)
 
 ```bash
+# Tip widget の HTTP smoke (10 件)
+node scripts/smoke-tip-production.mjs
+
+# 本番 env が active か (Sentry DSN bundle / Pimlico cron 実 active / API alive)
+node scripts/verify-production-config.mjs
+
 # 200 OK + 期待 path
 curl -sI https://open-pay.jp/ja/pay?to=0x52d4901142e2B5680027da5EB47C86CB02a3cA81&token=usdc&amount=10 | head -1
 curl -sI https://open-pay.jp/en/checkout | head -1
@@ -36,6 +42,13 @@ curl -sI https://open-pay.jp/ja/tip/0x52d4901142e2B5680027da5EB47C86CB02a3cA81?t
 # x402 paid route は 402 を返すこと
 curl -s -o /dev/null -w '%{http_code}\n' https://open-pay.jp/api/paid/hello
 ```
+
+**`verify-production-config.mjs` が 2 件未満 ✗ の場合** — operator が下記を Vercel/GH
+secrets に設定済か再確認 (§11 参照):
+
+- ✗ Sentry DSN → Vercel project env `NEXT_PUBLIC_SENTRY_DSN` + `SENTRY_DSN` (server)
+- ✗ Pimlico balance cron skip → GitHub Actions secrets `PIMLICO_PAYMASTER_POLYGON`
+  / `PIMLICO_PAYMASTER_BASE` / `PIMLICO_PAYMASTER_KAIA` (optional) / `ALERT_WEBHOOK_URL`
 
 ### 3.2 Sentry dashboard 目視 (3 項目)
 
@@ -856,3 +869,59 @@ USDC cross-chain 系 (4 ケース):
   PaymentForm でも live のため、それを破壊しない単一 commit revert は不可。Tip 側の
   問題だけなら TipForm の `params.token === 'usdc' && address` ガードを一時的に
   `false` に短絡する hotfix commit を当てる方が低リスク。
+
+## §11 Operator env precondition (本番 active 条件)
+
+DEPLOY 前に operator が **Vercel project env** + **GitHub Actions secrets** に
+設定済かを確認すべき env。設定漏れは silent 失敗 (script は no-op、cron は
+graceful skip) で気付けないため、`verify-production-config.mjs` で必ず明示確認。
+
+### §11.1 Vercel project env (production scope)
+
+| Env var | 必須? | 未設定時の影響 |
+|---|---|---|
+| `NEXT_PUBLIC_SENTRY_DSN` | **必須** | browser 側 logger.warn/error が console のみ。本番 error 検知ゼロ (`smart_account.*`, `cross-chain.*`, `payment.*` 全 event 喪失) |
+| `SENTRY_DSN` | **必須** | server side (Route Handler) の error 検知ゼロ。/api/log/payment 等の障害が観測不能 |
+| `NEXT_PUBLIC_PIMLICO_API_KEY` | **必須** | gasless 決済全 fail (bundler 認証不能) |
+| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | **必須** | 手数料受領 address。未設定で build fail (lib/env.ts:guard) |
+| `NEXT_PUBLIC_NETWORK_ENV` | **必須** | `mainnet` 想定 (testnet は preview/dev のみ) |
+| `PIMLICO_SPONSORSHIP_POLICY_ID` | 推奨 | 未設定で sponsorship policy なし運用 (chain ごとの上限なし) |
+| `NEXT_PUBLIC_PAYMENT_LOG_TOKEN` | 任意 | 設定すれば /api/log/payment の auth 強化 |
+
+確認: Vercel dashboard → Project Settings → Environment Variables → Production scope
+を目視 + `node scripts/verify-production-config.mjs` で実行時 active を検証。
+
+### §11.2 GitHub Actions repository secrets (Pimlico balance cron 用)
+
+| Secret | 必須? | 未設定時の影響 |
+|---|---|---|
+| `PIMLICO_PAYMASTER_POLYGON` | **必須** | cron が `Secrets 未設定` で graceful skip、balance 監視ゼロ |
+| `PIMLICO_PAYMASTER_BASE` | **必須** | 同上 |
+| `ALERT_WEBHOOK_URL` | **必須** | Slack/Discord 通知先 URL、未設定で skip |
+| `PIMLICO_PAYMASTER_KAIA` | 任意 (Kaia 投入後は推奨) | 未設定で Kaia chain は monitor 対象外 |
+
+確認:
+```bash
+gh secret list --repo cipherwebllc/openpay | grep -E 'PIMLICO|ALERT_WEBHOOK'
+# 最新 cron run の log で actual balance check 実行を確認:
+gh run list --workflow=pimlico-balance.yml --repo=cipherwebllc/openpay --limit 1 --json databaseId \
+  | jq -r '.[0].databaseId' \
+  | xargs -I{} gh run view {} --repo=cipherwebllc/openpay --log \
+  | grep -E 'balance|skip'
+```
+
+### §11.3 Sentry alert rules (一度限り setup)
+
+```bash
+SENTRY_AUTH_TOKEN=... SENTRY_ORG_SLUG=... SENTRY_PROJECT_SLUG=... \
+  node scripts/setup-sentry-alerts.mjs
+```
+
+idempotent — 既に作成済 rule は skip、無ければ POST。実行履歴を私 (operator) が
+気付けるよう Sentry Dashboard → Alerts → Issue Alerts で目視確認。
+
+### §11.4 「verify-production-config.mjs」が 0 件 ✗ で deploy 認可
+
+DEPLOY § 3.1 の smoke 全 pass + `verify-production-config.mjs` が `✅ N/N active` を
+返すことが本番 deploy の go signal。1 件でも ✗ なら upstream env を設定するまで
+deploy 完了とみなさない。
