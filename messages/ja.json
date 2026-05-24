@@ -94,6 +94,8 @@
     "posterFixedAmount": "{amount} {symbol}",
     "posterOpenAmount": "{symbol} で金額を入力",
     "posterDefaultNote": "QRを読み取り、ウォレットでお支払いください。",
+    "posterPayModeGasless": "ガスレス決済",
+    "posterPayModeStandard": "通常決済（{nativeToken} ガス代を別途用意）",
     "qrPlaceholderNoAddress": "受取先アドレスを入力してください (Step 2)",
     "qrPlaceholderNoAmount": "金額を入力してください",
     "qrPlaceholderGenerating": "QR を生成中…",

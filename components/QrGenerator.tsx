@@ -912,6 +912,24 @@ export function QrGenerator() {
                       symbol: deployment.displaySymbol,
                     })}
               </p>
+              {/* 高度な設定を閉じたままだと creator は USDC+Ethereum 選択時に
+                  payMode が standard 強制された事実に気付けない。pay mode badge を
+                  poster に常時出すことで: (a) creator が screen preview で違和感に
+                  気付ける、(b) 印刷物を見た顧客が「自分で gas 必要か」事前判断可能。
+                  色: gasless=emerald (安心)、standard=amber (要 ETH/POL の注意喚起)。 */}
+              <p
+                className={`mt-3 inline-block rounded-full border px-3 py-1 text-xs font-semibold print:px-4 print:py-1.5 print:text-base ${
+                  payMode === 'gasless'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-amber-200 bg-amber-50 text-amber-700'
+                }`}
+              >
+                {payMode === 'gasless'
+                  ? t('posterPayModeGasless')
+                  : t('posterPayModeStandard', {
+                      nativeToken: chain.nativeCurrency.symbol,
+                    })}
+              </p>
               <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-10 print:p-8">
                 <QRCodeSVG value={payUrl} size={260} includeMargin level="M" />
               </div>

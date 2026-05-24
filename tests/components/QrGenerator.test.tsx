@@ -732,6 +732,80 @@ describe('QrGenerator', () => {
     });
   });
 
+  describe('Poster: pay mode badge (高度な設定を閉じた creator が気付ける可視化)', () => {
+    it('JPYC + Polygon (gasless 平常時): "ガスレス決済" badge が poster に出る', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          chain: 'polygon',
+          payMode: 'gasless',
+          gasMode: 'customer',
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openStep2(user);
+      await user.type(screen.getByPlaceholderText('1000'), '100');
+      await waitFor(() => {
+        expect(screen.getByText('ガスレス決済')).toBeInTheDocument();
+      });
+    });
+
+    it('USDC + Ethereum (= 強制 standard): "通常決済（ETH ガス代を別途用意）" badge', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'usdc',
+          chain: 'ethereum',
+          // selectChain が payMode='standard' に強制するが、localStorage 直接
+          // 注入の場合も sanitize で standard に倒れる (gasless 非対応 chain
+          // + payMode=gasless saved 状態の migrate path)。
+          payMode: 'gasless',
+          gasMode: 'customer',
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openStep2(user);
+      // USDC placeholder は '10.00' (decimals=6 想定の例値)
+      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      await waitFor(() => {
+        // {nativeToken} = ETH (Ethereum L1)、印刷物にも出る要注意警告
+        expect(
+          screen.getByText(/通常決済（ETH ガス代を別途用意）/),
+        ).toBeInTheDocument();
+      });
+      // gasless badge は出ない (誤って併発しないこと)
+      expect(screen.queryByText('ガスレス決済')).toBeNull();
+    });
+
+    it('USDC + Polygon (gasless 対応): "ガスレス決済" badge (色 emerald 系)', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'usdc',
+          chain: 'polygon',
+          payMode: 'gasless',
+          gasMode: 'customer',
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openStep2(user);
+      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      await waitFor(() => {
+        const badge = screen.getByText('ガスレス決済');
+        expect(badge).toBeInTheDocument();
+        // gasless = emerald 系 (creator/顧客の安心 visual cue)
+        expect(badge.className).toMatch(/emerald/);
+      });
+    });
+  });
+
   describe('EIP-681 互換 QR セクション', () => {
     it('既定 (gasless) では section ごと非表示', async () => {
       const user = userEvent.setup();

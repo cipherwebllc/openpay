@@ -94,6 +94,8 @@
     "posterFixedAmount": "{amount} {symbol}",
     "posterOpenAmount": "Enter amount in {symbol}",
     "posterDefaultNote": "Scan the QR and pay from your wallet.",
+    "posterPayModeGasless": "Gasless payment",
+    "posterPayModeStandard": "Standard payment (requires {nativeToken} for gas)",
     "qrPlaceholderNoAddress": "Enter receiver address (Step 2)",
     "qrPlaceholderNoAmount": "Enter an amount",
     "qrPlaceholderGenerating": "Generating QR…",
