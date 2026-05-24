@@ -49,7 +49,11 @@ export const CHAIN_CONFIGS = [
     slug: 'polygon',
     chain: polygon,
     rpcEnv: 'POLYGON_RPC_URL',
-    rpcDefault: 'https://polygon-rpc.com',
+    // 旧 default polygon-rpc.com は 2026-05 頃から "API key disabled" で
+    // public 利用不能化、認証 RPC のみに移行。代替で PublicNode 公式の
+    // polygon-bor-rpc.publicnode.com を使う (無認証 / 公開維持の commitment)。
+    // operator が Alchemy/Infura 等を持っていれば POLYGON_RPC_URL secret で override 推奨。
+    rpcDefault: 'https://polygon-bor-rpc.publicnode.com',
     paymasterEnv: 'PIMLICO_PAYMASTER_POLYGON',
     thresholdEnv: 'ALERT_THRESHOLD_POL',
     thresholdDefault: '5',
