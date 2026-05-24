@@ -34,6 +34,17 @@ import {
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 
+// Tip widget は gasless 固定なので、受信可能な chain は gasless 対応のものだけ。
+// USDC は Ethereum L1 (Pimlico paymaster 未対応) を除く 4 chain、JPYC は Polygon /
+// Kaia 2 chain。token chooser hint の count 表示と chain chooser の grid 描画で
+// 共用する。chain 集合は build 時に確定するため module-level で 1 度だけ計算する。
+const RECEIVABLE_USDC_CHAINS = USDC_CHAINS.filter((slug) =>
+  isGaslessSupported(deploymentForSlug('usdc', slug)),
+);
+const RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter((slug) =>
+  isGaslessSupported(deploymentForSlug('jpyc', slug)),
+);
+
 export function TipEmbedGenerator() {
   const { settings, setSettings, hydrated } = useTipSettings();
   const origin = useOrigin();
@@ -162,15 +173,8 @@ export function TipEmbedGenerator() {
             {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
               const info = defaultDeploymentForSymbol(tok);
               const active = settings.token === tok;
-              // Tip widget は gasless 固定なので、表示する chain 数は実際に creator が
-              // 受信できる (= gasless 対応) chain 数に絞る。USDC では Ethereum L1 が
-              // 除外されるため USDC_CHAINS.length (5) ではなく filter 後の件数 (4) を
-              // 出す (UI の chain chooser 件数と一致)。L1 USDC を持つ fan は
-              // CrossChainHint で他 chain creator に tip できる旨を hint text で補足。
-              const chainList = tok === 'usdc' ? USDC_CHAINS : JPYC_CHAINS;
-              const receivableCount = chainList.filter((slug) =>
-                isGaslessSupported(deploymentForSlug(tok, slug)),
-              ).length;
+              const chains =
+                tok === 'usdc' ? RECEIVABLE_USDC_CHAINS : RECEIVABLE_JPYC_CHAINS;
               return (
                 <button
                   key={tok}
@@ -185,8 +189,8 @@ export function TipEmbedGenerator() {
                   <div className="font-semibold">{info.displaySymbol}</div>
                   <div className="text-xs text-slate-500">
                     {tok === 'usdc'
-                      ? t('tokenChainHintMulti', { count: receivableCount })
-                      : t('tokenChainHintJpyc', { count: receivableCount })}
+                      ? t('tokenChainHintMulti', { count: chains.length })
+                      : t('tokenChainHintJpyc', { count: chains.length })}
                   </div>
                 </button>
               );
@@ -195,12 +199,9 @@ export function TipEmbedGenerator() {
         </Field>
 
         <Field
-          label={
-            settings.token === 'usdc' ? t('chainLabelUsdc') : t('chainLabelJpyc')
-          }
+          label={t('chainLabel', { symbol: deployment.displaySymbol })}
         >
-          {/* JPYC は 2 chain (Polygon / Kaia) なので 2 列固定、USDC は 5 chain で
-              mobile 2 列 / sm 4 列 (Ethereum L1 は gasless 非対応で除外され 4 件)。 */}
+          {/* USDC は最大 4 chain で sm 4 列、JPYC は 2 chain で 2 列固定。 */}
           <div
             className={
               settings.token === 'usdc'
@@ -208,33 +209,28 @@ export function TipEmbedGenerator() {
                 : 'grid grid-cols-2 gap-2'
             }
           >
-            {(settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS)
-              .filter((slug) =>
-                // Tip widget は gas=customer 固定 (常に gasless)。USDC + Ethereum L1
-                // など gasless 非対応 chain は URL parser で reject されるため、ここで
-                // chain chooser から除外する (UI と URL parser の意味論を一致)。
-                // JPYC は Polygon / Kaia 両方 sponsorship 対応で除外なし。
-                isGaslessSupported(deploymentForSlug(settings.token, slug)),
-              )
-              .map((slug) => {
-                const c = chainForSlug(slug);
-                const active = settings.chain === slug;
-                return (
-                  <button
-                    key={slug}
-                    type="button"
-                    onClick={() => selectChain(slug)}
-                    className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
-                      active
-                        ? 'border-brand bg-brand/5 text-brand-dark'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="font-semibold">{c.name}</div>
-                    <div className="text-[10px] text-slate-500">id: {c.id}</div>
-                  </button>
-                );
-              })}
+            {(settings.token === 'usdc'
+              ? RECEIVABLE_USDC_CHAINS
+              : RECEIVABLE_JPYC_CHAINS
+            ).map((slug) => {
+              const c = chainForSlug(slug);
+              const active = settings.chain === slug;
+              return (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => selectChain(slug)}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                    active
+                      ? 'border-brand bg-brand/5 text-brand-dark'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="font-semibold">{c.name}</div>
+                  <div className="text-[10px] text-slate-500">id: {c.id}</div>
+                </button>
+              );
+            })}
           </div>
         </Field>
 
