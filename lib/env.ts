@@ -243,6 +243,10 @@ export const env = {
   enableMav2:
     process.env.NEXT_PUBLIC_ENABLE_MAV2 === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_MAV2 === 'true',
+  // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
+  // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
+  // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
+  sentryDsn: nonEmpty(process.env.NEXT_PUBLIC_SENTRY_DSN),
 } as const;
 
 export const isMainnet = env.networkEnv === 'mainnet';
@@ -278,6 +282,16 @@ if (isMainnet) {
         'policy 無し UserOp は Pimlico ダッシュボード側 default policy 次第で' +
         '任意 transfer まで sponsor され、運営の sponsorship 残高が悪用される' +
         '可能性があるため deploy を中止します。',
+    );
+  }
+  if (!env.sentryDsn) {
+    throw new Error(
+      'NEXT_PUBLIC_SENTRY_DSN が未設定です (mainnet 必須)。' +
+        'browser 側 logger.warn/error が console のみで Sentry へ送られず、' +
+        'smart_account.* / cross-chain.* / payment.* / gas_congested 等の' +
+        'production event が完全に observability から喪失します。' +
+        'Sentry alert rule も無発火になるため deploy を中止します ' +
+        '(設定手順は docs/DEPLOY_CHECKLIST.md §11.1)。',
     );
   }
 }

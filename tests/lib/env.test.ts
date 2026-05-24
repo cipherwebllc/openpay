@@ -20,6 +20,13 @@ describe('lib/env (module-load validation)', () => {
   it('NETWORK_ENV=mainnet で isMainnet=true', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    // 必須 mainnet env を全 set (個別 throw 経路は別 test で cover)
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_test';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    process.env.NEXT_PUBLIC_SENTRY_DSN =
+      'https://abc@o1.ingest.sentry.io/2';
     const mod = await import('@/lib/env');
     expect(mod.env.networkEnv).toBe('mainnet');
     expect(mod.isMainnet).toBe(true);
@@ -391,16 +398,47 @@ describe('mainnet 投入時の silent failure ガード', () => {
     );
   });
 
-  it('mainnet + 全必須 env 設定済 → 正常 import', async () => {
+  it('mainnet + SENTRY_DSN 未設定 → throw (browser 観測ゼロ防止)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
     process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_prod_real';
     process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
       '0xcafe000000000000000000000000000000000999';
+    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_SENTRY_DSN/,
+    );
+  });
+
+  it('mainnet + SENTRY_DSN 空文字 → throw (nonEmpty fallback)', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_prod_real';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    process.env.NEXT_PUBLIC_SENTRY_DSN = '';
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_SENTRY_DSN/,
+    );
+  });
+
+  it('mainnet + 全必須 env 設定済 (SENTRY_DSN 含む) → 正常 import', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_prod_real';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xcafe000000000000000000000000000000000999';
+    process.env.NEXT_PUBLIC_SENTRY_DSN =
+      'https://abc123@o12345.ingest.us.sentry.io/67890';
     const mod = await import('@/lib/env');
     expect(mod.isMainnet).toBe(true);
     expect(mod.env.pimlicoSponsorshipPolicyId).toBe('sp_prod_real');
+    expect(mod.env.sentryDsn).toBe(
+      'https://abc123@o12345.ingest.us.sentry.io/67890',
+    );
   });
 
   it('testnet では FEE_RECEIVER / SPONSORSHIP_POLICY_ID 未設定でも throw しない (開発体験優先)', async () => {

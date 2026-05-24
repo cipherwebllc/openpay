@@ -49,6 +49,11 @@ export default defineConfig({
         '0xdead000000000000000000000000000000001234',
       NEXT_PUBLIC_JPYC_TESTNET_ADDRESS:
         '0x0000000000000000000000000000000000000abc',
+      // mainnet 切替 test が SENTRY_DSN 必須 guard (lib/env.ts:287) を超えるよう
+      // default を提供。tests/lib/env.test.ts の SENTRY_DSN 未設定検証は明示的
+      // `delete process.env.NEXT_PUBLIC_SENTRY_DSN` で上書きしている。
+      NEXT_PUBLIC_SENTRY_DSN:
+        'https://test_sentry@o12345.ingest.us.sentry.io/67890',
     },
   },
 });
