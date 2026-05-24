@@ -20,10 +20,15 @@
 // MVP では gas units + token symbol で表示。実機運用後に簡易換算 (env で
 // approximate rate を設定) を加える余地は残す。
 
+import NextImage from 'next/image';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import type { PathOption, PathKind } from '@/lib/crossChain/pathEnumerator';
-import { chainNameForId, nativeSymbolForChainId } from '@/lib/chains';
+import {
+  chainLogoPathForId,
+  chainNameForId,
+  nativeSymbolForChainId,
+} from '@/lib/chains';
 
 export interface CrossChainSourceChooserProps {
   /** enumeratePathOptions 結果。空 = balance なし、UI は出ない */
@@ -89,6 +94,9 @@ function OptionRow({
   const t = useTranslations('CrossChainSourceChooser');
   const chainName =
     chainNameForId(option.sourceChainId) ?? `chain ${option.sourceChainId}`;
+  // logo は supportedChains 全 8 chain で解決可 (merchant + buyer-only)。
+  // 万一未対応 chainId なら logo 描画を skip (caller が chain 名 fallback で表示)。
+  const logoPath = chainLogoPathForId(option.sourceChainId);
   const gasSymbol =
     nativeSymbolForChainId(option.gasOnChainId) ?? '';
   const balanceStr = formatUnits(option.sourceBalanceAtomic, displayDecimals);
@@ -97,7 +105,19 @@ function OptionRow({
   return (
     <div>
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold text-slate-900">{chainName}</span>
+        <span className="flex items-center gap-2 font-semibold text-slate-900">
+          {logoPath && (
+            <NextImage
+              src={logoPath}
+              alt=""
+              width={20}
+              height={20}
+              className="h-5 w-5 shrink-0"
+              aria-hidden
+            />
+          )}
+          <span>{chainName}</span>
+        </span>
         <PathBadge kind={option.kind} />
       </div>
       <div className="mt-0.5 text-xs text-slate-600">

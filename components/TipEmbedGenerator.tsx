@@ -209,7 +209,10 @@ export function TipEmbedGenerator() {
         <Field
           label={t('chainLabel', { symbol: deployment.displaySymbol })}
         >
-          {/* USDC は最大 4 chain で sm 4 列、JPYC は 2 chain で 2 列固定。 */}
+          {/* USDC は最大 4 chain で sm 4 列、JPYC は 2 chain で 2 列固定。
+              2026-05-24: 公式 logo (public/chains/{slug}.svg) を chain 名横に
+              配置し QR 側と一貫した design に揃える。logo は aria-hidden、
+              accessible name は viem Chain.name のみ。 */}
           <div
             className={
               settings.token === 'usdc'
@@ -228,14 +231,24 @@ export function TipEmbedGenerator() {
                   key={slug}
                   type="button"
                   onClick={() => selectChain(slug)}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${
                     active
                       ? 'border-brand bg-brand/5 text-brand-dark'
                       : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                   }`}
                 >
-                  <div className="font-semibold">{c.name}</div>
-                  <div className="text-[10px] text-slate-500">id: {c.id}</div>
+                  <NextImage
+                    src={`/chains/${slug}.svg`}
+                    alt=""
+                    width={20}
+                    height={20}
+                    className="h-5 w-5 shrink-0"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold">{c.name}</div>
+                    <div className="text-[10px] text-slate-500">id: {c.id}</div>
+                  </div>
                 </button>
               );
             })}

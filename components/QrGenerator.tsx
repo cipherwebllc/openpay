@@ -389,7 +389,10 @@ export function QrGenerator() {
                 Ethereum L1 追加)、token=jpyc は JPYC_CHAINS (polygon + kaia の 2
                 chain)。両者で chain object の取得経路 (chainForSlug) と active 判定
                 (settings.chain) は共通。grid 列数だけ token に応じて切替 (USDC は
-                mobile 2 列 / sm 5 列、JPYC は常に 2 列で十分)。 */}
+                mobile 2 列 / sm 5 列、JPYC は常に 2 列で十分)。
+                2026-05-24: 公式 logo (public/chains/{slug}.svg) を chain 名横に
+                並べ、視覚的識別性を上げる。logo は aria-hidden で a11y tree から除外、
+                accessible name は viem Chain.name (例: "Base Sepolia")。 */}
             <Field label={t('chainLabel')}>
               <div
                 className={
@@ -407,15 +410,25 @@ export function QrGenerator() {
                         key={slug}
                         type="button"
                         onClick={() => selectChain(slug)}
-                        className={`rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+                        className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition ${
                           active
                             ? 'border-brand bg-brand/5 text-brand-dark'
                             : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                         }`}
                       >
-                        <div className="font-semibold">{c.name}</div>
-                        <div className="text-xs text-slate-500">
-                          chain id: {c.id}
+                        <NextImage
+                          src={`/chains/${slug}.svg`}
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="h-5 w-5 shrink-0"
+                          aria-hidden
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold">{c.name}</div>
+                          <div className="text-xs text-slate-500">
+                            chain id: {c.id}
+                          </div>
                         </div>
                       </button>
                     );

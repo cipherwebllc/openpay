@@ -331,7 +331,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
     await expect(step1).toBeVisible();
     // token (JPYC/USDC) ボタンが Step 1 内、JPYC は multi-chain hint
-    await expect(step1.getByRole('button', { name: /^JPYC\s/ })).toBeVisible();
+    await expect(step1.getByRole('button', { name: /^JPYC$/ })).toBeVisible();
     await expect(step1.getByRole('button', { name: /^USDC/ })).toBeVisible();
     // JPYC default → chain chooser に Polygon / Kaia 2 つ
     await expect(step1.getByRole('button', { name: /^Polygon/ })).toBeVisible();

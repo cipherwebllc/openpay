@@ -77,6 +77,41 @@ describe('QrGenerator', () => {
       expect(usdcBtn.className).not.toMatch(/border-brand/);
     });
 
+    it('Chain chooser: 公式ロゴ SVG (public/chains/{slug}.svg) が各 chain button 内に img として描画される', async () => {
+      // 2026-05-24: chain button にも公式 logo を挿入 (token chooser と同 pattern)。
+      // logo は aria-hidden で a11y tree から除外、accessible name は viem の
+      // Chain.name のみ。ここでは img の src 属性に slug が含まれるかを検査する。
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByRole('button', { name: /^Polygon/ }));
+      // 既定 JPYC: chain chooser は Polygon + Kaia (testnet env では Kairos)
+      const polygonBtn = screen.getByRole('button', { name: /^Polygon/ });
+      const kaiaBtn = screen.getByRole('button', { name: /^Kai/ });
+      expect(polygonBtn.querySelector('img')?.getAttribute('src')).toMatch(
+        /polygon\.svg/,
+      );
+      expect(kaiaBtn.querySelector('img')?.getAttribute('src')).toMatch(
+        /kaia\.svg/,
+      );
+      // USDC に切替 → chain chooser に Base/Arbitrum/Optimism/Polygon/Ethereum logo
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await waitFor(() =>
+        screen.getByRole('button', { name: /^Base/ }),
+      );
+      expect(
+        screen
+          .getByRole('button', { name: /^Base/ })
+          .querySelector('img')
+          ?.getAttribute('src'),
+      ).toMatch(/base\.svg/);
+      expect(
+        screen
+          .getByRole('button', { name: /^Arbitrum/ })
+          .querySelector('img')
+          ?.getAttribute('src'),
+      ).toMatch(/arbitrum\.svg/);
+    });
+
     it('Token chooser: 公式ロゴ SVG (public/tokens/{jpyc,usdc}.svg) が button 内に img として描画される', async () => {
       // 2026-05-24: chain hint 文言を削除して logo + symbol の 2 要素構成に変更。
       // logo は aria-hidden で a11y tree から除外、accessible name は span の

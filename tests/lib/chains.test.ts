@@ -3,6 +3,7 @@ import {
   addressExplorerUrl,
   blockExplorerUrl,
   chainForSlug,
+  chainLogoPathForId,
   customRpcUrlForChain,
   isJpycChainSlug,
   isSupportedChainId,
@@ -268,5 +269,32 @@ describe('addressExplorerUrl', () => {
     expect(
       addressExplorerUrl(999_999, `0x${'1'.repeat(40)}`),
     ).toBeUndefined();
+  });
+});
+
+describe('chainLogoPathForId', () => {
+  // testnet env なので chainId は sepolia/amoy/fuji 系。slug は env 不変
+  // (= base / arbitrum / optimism / polygon / kaia / ethereum / avalanche / unichain)、
+  // logo file path も env 不変で /chains/{slug}.svg。
+  it.each([
+    ['base', baseSepolia.id],
+    ['arbitrum', arbitrumSepolia.id],
+    ['optimism', optimismSepolia.id],
+    ['polygon', polygonAmoy.id],
+    ['kaia', kairos.id],
+    ['ethereum', sepolia.id],
+    // buyer-only chain (phase 4b-1) も解決可能でないと CrossChainSourceChooser で
+    // logo が欠落する (= 既存 chainNameForId と同じ覆域でなければならない)。
+    ['avalanche', avalancheFuji.id],
+    ['unichain', unichainSepolia.id],
+  ] as const)(
+    'supportedChains の 8 chain (%s) すべてに /chains/<slug>.svg を返す',
+    (slug, chainId) => {
+      expect(chainLogoPathForId(chainId)).toBe(`/chains/${slug}.svg`);
+    },
+  );
+
+  it('未対応 chain は undefined (production guard、UI 側は logo skip)', () => {
+    expect(chainLogoPathForId(999_999)).toBeUndefined();
   });
 });

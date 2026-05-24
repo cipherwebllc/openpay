@@ -200,6 +200,20 @@ export function slugForChain(chainId: number): ChainSlug | undefined {
   return undefined;
 }
 
+/** chainId → public/chains/{slug}.svg path (merchant + buyer-only 両方解決)。
+ *  CrossChainSourceChooser のように buyer-only chain (Avalanche/Unichain) も
+ *  扱う UI で使う。supportedChains 外なら undefined。
+ *  slug は logo file name と 1:1 (= ChainSlug | BuyerOnlyChainSlug)。 */
+export function chainLogoPathForId(chainId: number): string | undefined {
+  for (const s of ALL_SLUGS) {
+    if (SLUG_TO_CHAIN[s].id === chainId) return `/chains/${s}.svg`;
+  }
+  for (const s of ALL_BUYER_ONLY_SLUGS) {
+    if (BUYER_ONLY_SLUG_TO_CHAIN[s].id === chainId) return `/chains/${s}.svg`;
+  }
+  return undefined;
+}
+
 export function isSupportedChainId(chainId: number | undefined): boolean {
   if (chainId === undefined) return false;
   return supportedChains.some((c) => c.id === chainId);
