@@ -5,10 +5,12 @@
 import {
   erc20Abi,
   type Address,
+  type Chain,
   type Hex,
   type PublicClient,
   type WalletClient,
 } from 'viem';
+import { chainObjectForId } from '../chains';
 import {
   CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
   CCTP_V2_TOKEN_MESSENGER_ADDRESS,
@@ -46,6 +48,25 @@ export type ProgressCallback = (p: CrossChainProgress) => void;
 // wagmi useSwitchChain.switchChainAsync の signature と互換。
 export type SwitchChainFn = (args: { chainId: number }) => Promise<unknown>;
 
+// chainId → viem Chain object 解決。supportedChains 外なら明示的に throw して
+// 「unknown chain で wallet に送ろうとして wallet が NETWORK_UNRECOGNIZED 系の
+// 不可解な error を返す」事態を防ぐ。caller (useCrossChainPayment) は
+// CROSS_CHAIN_TARGETS / pathEnumerator 経由で chainId を受け取るので
+// 実運用では throw に到達しない (= defensive)。
+function resolveChainOrThrow(
+  chainId: number,
+  role: 'source' | 'destination',
+): Chain {
+  const chain = chainObjectForId(chainId);
+  if (!chain) {
+    throw new Error(
+      `cross-chain execute: ${role} chainId ${chainId} is not in supportedChains ` +
+        `(lib/chains.ts に viem Chain を登録するか CROSS_CHAIN_TARGETS から外す)`,
+    );
+  }
+  return chain;
+}
+
 // ========== Gateway path ==========
 
 export interface ExecuteGatewayTransferArgs {
@@ -81,6 +102,11 @@ export async function executeGatewayTransfer(
   args: ExecuteGatewayTransferArgs,
 ): Promise<ExecuteGatewayTransferResult> {
   const onProgress = args.onProgress ?? (() => {});
+
+  // 明示的に Chain object を解決する。args.walletClient.chain は wagmi の
+  // useWalletClient closure を経由するため switchChainAsync 後に stale な
+  // reference のまま (viem が "current chain mismatch" を投げる根本原因)。
+  const destChain = resolveChainOrThrow(args.destChainId, 'destination');
 
   // sign は chainId 不要だが wallet UI に source chain を表示する UX のため switch する。
   onProgress({ kind: 'switch_chain', targetChainId: args.sourceChainId });
@@ -124,7 +150,7 @@ export async function executeGatewayTransfer(
   );
   const mintHash = await args.walletClient.sendTransaction({
     account: args.account,
-    chain: args.walletClient.chain,
+    chain: destChain,
     to: GATEWAY_MINTER_ADDRESS,
     data,
   });
@@ -182,6 +208,16 @@ export async function executeCctpTransfer(
 ): Promise<ExecuteCctpTransferResult> {
   const onProgress = args.onProgress ?? (() => {});
 
+  // 明示的に Chain object を解決する。args.walletClient.chain は wagmi の
+  // useWalletClient closure を経由するため switchChainAsync 後も stale な
+  // reference (= UI 起動時の dest chain) のまま、viem の writeContract /
+  // sendTransaction が「current chain mismatch」エラーを投げる根本原因。
+  // 2026-05-24 incident: Avalanche→OP 経路で approve が dest (OP) chain object で
+  // 呼ばれて wallet (Avalanche) と mismatch、payment 全 abort。chainObjectForId で
+  // sourceChainId/destChainId から都度解決し、stale closure を回避する。
+  const sourceChain = resolveChainOrThrow(args.sourceChainId, 'source');
+  const destChain = resolveChainOrThrow(args.destChainId, 'destination');
+
   onProgress({ kind: 'switch_chain', targetChainId: args.sourceChainId });
   await args.switchChainAsync({ chainId: args.sourceChainId });
 
@@ -191,7 +227,7 @@ export async function executeCctpTransfer(
     abi: erc20Abi,
     functionName: 'approve',
     args: [CCTP_V2_TOKEN_MESSENGER_ADDRESS, args.valueAtomic],
-    chain: args.walletClient.chain,
+    chain: sourceChain,
     account: args.account,
   });
   await args.sourcePublicClient.waitForTransactionReceipt({ hash: approveHash });
@@ -205,7 +241,7 @@ export async function executeCctpTransfer(
   });
   const burnHash = await args.walletClient.sendTransaction({
     account: args.account,
-    chain: args.walletClient.chain,
+    chain: sourceChain,
     to: CCTP_V2_TOKEN_MESSENGER_ADDRESS,
     data: burnData,
   });
@@ -234,7 +270,7 @@ export async function executeCctpTransfer(
   );
   const mintHash = await args.walletClient.sendTransaction({
     account: args.account,
-    chain: args.walletClient.chain,
+    chain: destChain,
     to: CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
     data: mintData,
   });

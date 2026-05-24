@@ -121,9 +121,15 @@ export interface BalanceQueryResponse {
 // USDC balance を見るのみで、merchant 受信 chain としては露出しない。
 //   'merchant-and-buyer' = QR/Checkout の chain chooser に出る + buyer balance 経路も対象
 //   'buyer-only'         = QR chooser には出ない + buyer balance / Gateway source の対象
+//   'merchant-only'      = QR chooser には出る + buyer balance / Gateway source 経路は skip
+//                          (2026-05-24 Ethereum mainnet: address poisoning incident 過去最高
+//                          + default RPC で USDC balance 取得が timeout する事象。
+//                          merchant 受信 (USDC_CHAINS 経由) は維持するが buyer の cross-chain
+//                          source としては当面外す。状況が落ち着いたら 'merchant-and-buyer'
+//                          に戻して再評価する)
 // merchant 受信は USDC_CHAINS (lib/chains.ts、5 chain) 経由で UI 側が決定、本 type の
 // role field は CrossChainTarget array filter で「buyer 用 source 候補」を取り出すのに使う。
-export type CrossChainRole = 'merchant-and-buyer' | 'buyer-only';
+export type CrossChainRole = 'merchant-and-buyer' | 'buyer-only' | 'merchant-only';
 
 // domain は mainnet/testnet 共通だが chainId は env により異なるため両方持つ。
 export interface CrossChainTarget {

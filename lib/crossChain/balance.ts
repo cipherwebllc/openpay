@@ -26,8 +26,8 @@ import {
 import { customRpcUrlForChain } from '../chains';
 import { resolveDeployment } from '../tokens';
 import {
+  BUYER_SOURCE_TARGETS,
   CIRCLE_GATEWAY_API_BASE_URL,
-  CROSS_CHAIN_TARGETS,
 } from './config';
 import type {
   BalanceQueryRequest,
@@ -81,14 +81,14 @@ function publicClientFor(chain: Chain) {
   });
 }
 
-// CROSS_CHAIN_TARGETS / TOKEN_DEPLOYMENTS の同期漏れを検出するための guard
+// BUYER_SOURCE_TARGETS / TOKEN_DEPLOYMENTS の同期漏れを検出するための guard
 // (両 const を更新せずに chain を追加すると silent に 0 balance を返してしまう)。
 function resolveUsdcAddress(chainId: number): Address {
   const dep = resolveDeployment('usdc', chainId);
   if (!dep) {
     throw new Error(
       `USDC deployment not found for chainId=${chainId} ` +
-        `(CROSS_CHAIN_TARGETS と TOKEN_DEPLOYMENTS が同期していません)`,
+        `(BUYER_SOURCE_TARGETS と TOKEN_DEPLOYMENTS が同期していません)`,
     );
   }
   return dep.address;
@@ -111,7 +111,7 @@ async function readWalletBalanceOne(
   return { status: 'ok', target, tokenAddress, balance };
 }
 
-// CROSS_CHAIN_TARGETS の全 chain で USDC.balanceOf を並列 query。1 chain の失敗は
+// BUYER_SOURCE_TARGETS の全 chain で USDC.balanceOf を並列 query。1 chain の失敗は
 // 該当 entry を status:'error' で返すのみで他 chain に波及しない (allSettled)。
 // chainResolver は test injection のため (production は default で十分)。
 export async function readMultiChainWalletBalances(
@@ -119,12 +119,12 @@ export async function readMultiChainWalletBalances(
   chainResolver: (chainId: number) => Chain = chainResolveFromTargets,
 ): Promise<WalletUsdcBalance[]> {
   const settled = await Promise.allSettled(
-    CROSS_CHAIN_TARGETS.map((t) =>
+    BUYER_SOURCE_TARGETS.map((t) =>
       readWalletBalanceOne(t, account, chainResolver),
     ),
   );
   return settled.map((r, idx) => {
-    const target = CROSS_CHAIN_TARGETS[idx];
+    const target = BUYER_SOURCE_TARGETS[idx];
     if (r.status === 'fulfilled') return r.value;
     const tokenAddress = resolveUsdcAddress(target.chainId);
     const error = r.reason instanceof Error ? r.reason.message : String(r.reason);
@@ -132,7 +132,7 @@ export async function readMultiChainWalletBalances(
   });
 }
 
-// chain 追加時は CROSS_CHAIN_TARGETS と本 Map の 2 箇所を更新する。
+// chain 追加時は BUYER_SOURCE_TARGETS と本 Map の 2 箇所を更新する。
 const CHAIN_BY_ID = new Map<number, Chain>([
   [polygon.id, polygon],
   [polygonAmoy.id, polygonAmoy],
@@ -156,17 +156,17 @@ function chainResolveFromTargets(chainId: number): Chain {
   if (!c) {
     throw new Error(
       `chainResolveFromTargets: unknown chainId ${chainId} ` +
-        `(CROSS_CHAIN_TARGETS と viem/chains の同期確認が必要)`,
+        `(BUYER_SOURCE_TARGETS と viem/chains の同期確認が必要)`,
     );
   }
   return c;
 }
 
 // POST /v1/balances で domain ごとの Gateway unified balance を取得。
-// domains は省略時 CROSS_CHAIN_TARGETS 全件 (5 chain) を 1 リクエストで問合せ。
+// domains は省略時 BUYER_SOURCE_TARGETS 全件 (5 chain) を 1 リクエストで問合せ。
 export async function readGatewayUnifiedBalance(
   depositor: Address,
-  domains: CircleDomain[] = CROSS_CHAIN_TARGETS.map((t) => t.domain),
+  domains: CircleDomain[] = BUYER_SOURCE_TARGETS.map((t) => t.domain),
   opts: { fetch?: FetchLike; baseUrl?: string } = {},
 ): Promise<GatewayUnifiedBalance> {
   const fetchImpl = opts.fetch ?? fetch;

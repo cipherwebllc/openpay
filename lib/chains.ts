@@ -229,6 +229,15 @@ export function chainNameForId(chainId: number): string | undefined {
   return supportedChains.find((c) => c.id === chainId)?.name;
 }
 
+/** chainId → viem Chain object (supportedChains を走査)。
+ *  walletClient.chain は switchChainAsync 呼出後も closure 内 stale な
+ *  reference を持ち続けるため (viem の writeContract / sendTransaction が
+ *  「current chain mismatch」を投げる原因)、cross-chain execute 等で
+ *  「明示的に target chain object を tx に渡す」用途で使う。 */
+export function chainObjectForId(chainId: number): Chain | undefined {
+  return supportedChains.find((c) => c.id === chainId);
+}
+
 /** chainId → native gas token symbol (例: ETH / POL / AVAX / KAIA)。
  *  viem の `nativeCurrency.symbol` を返す。未対応 chainId は undefined。 */
 export function nativeSymbolForChainId(chainId: number): string | undefined {

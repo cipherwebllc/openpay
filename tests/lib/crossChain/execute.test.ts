@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { decodeFunctionData, getAddress, type Address, type Hex } from 'viem';
+import { baseSepolia, polygonAmoy } from 'viem/chains';
 import { CCTP_V2_TOKEN_MESSENGER_ABI } from '@/lib/crossChain/cctp';
 import {
   executeCctpTransfer,
@@ -727,5 +728,157 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         },
       }),
     ).rejects.toThrow(/timeout/);
+  });
+});
+
+// 2026-05-24 regression — wagmi walletClient.chain は switchChainAsync 後でも
+// closure 内 stale reference のまま残り、viem writeContract/sendTransaction が
+// "current chain mismatch" エラーを投げる事象。execute.ts は明示的に
+// chainObjectForId(sourceChainId/destChainId) で Chain object を解決し、tx に
+// 渡すよう改修した。本テストは「walletClient.chain が dest を指している状態でも
+// source-chain tx は source Chain object で送信される」ことを担保する。
+describe('lib/crossChain/execute: chain resolution from chainId (stale walletClient.chain regression)', () => {
+  it('CCTP V2: walletClient.chain が dest を指していても approve / burn は source Chain object で発火', async () => {
+    // walletClient.chain は dest (polygonAmoy) を指す = switchChainAsync 直前の
+    // stale state (実環境で wagmi useWalletClient closure が陥る状態)。
+    let sendCallIdx = 0;
+    const walletClient = {
+      chain: polygonAmoy, // ← dest を指す (= stale)
+      signTypedData: vi.fn(),
+      sendTransaction: vi.fn(async (_args: Record<string, unknown>) => {
+        const hashes: Hex[] = ['0xburn', '0xreceive'];
+        return hashes[sendCallIdx++];
+      }),
+      writeContract: vi.fn(
+        async (_args: Record<string, unknown>) => '0xapprove' as Hex,
+      ),
+    };
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              { status: 'complete', message: '0xmsg', attestation: '0xatt' },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: baseSepolia.id, // ← source = base sepolia
+      destChainId: polygonAmoy.id,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1n,
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // approve は source chain object (baseSepolia) で送信される
+    const approveArg = walletClient.writeContract.mock.calls[0][0] as unknown as {
+      chain: { id: number };
+    };
+    expect(approveArg.chain.id).toBe(baseSepolia.id);
+
+    // burn も source chain object
+    const burnArg = walletClient.sendTransaction.mock.calls[0][0] as unknown as {
+      chain: { id: number };
+    };
+    expect(burnArg.chain.id).toBe(baseSepolia.id);
+
+    // receive (mint on dest) は dest chain object (polygonAmoy)
+    const receiveArg = walletClient.sendTransaction.mock.calls[1][0] as unknown as {
+      chain: { id: number };
+    };
+    expect(receiveArg.chain.id).toBe(polygonAmoy.id);
+  });
+
+  it('Gateway: walletClient.chain が source を指していても dest mint は dest Chain object で発火', async () => {
+    // walletClient.chain は source (baseSepolia) を指す = source switchChain 完了後の stale state。
+    const walletClient = {
+      chain: baseSepolia, // ← source を指す
+      signTypedData: vi.fn(async (_args: Record<string, unknown>) => '0xsig'),
+      sendTransaction: vi.fn(
+        async (_args: Record<string, unknown>) => '0xmint' as Hex,
+      ),
+      writeContract: vi.fn(),
+    };
+    const sourcePublic = makePublicClient({ blockNumber: 100n });
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+          { status: 200 },
+        ),
+    );
+
+    await executeGatewayTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: baseSepolia.id,
+      destChainId: polygonAmoy.id,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceToken: SOURCE_TOKEN,
+      destToken: DEST_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1n,
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+
+    // mint は dest chain object (polygonAmoy) で送信される
+    const mintArg = walletClient.sendTransaction.mock.calls[0][0] as unknown as {
+      chain: { id: number };
+    };
+    expect(mintArg.chain.id).toBe(polygonAmoy.id);
+  });
+
+  it('CCTP V2: supportedChains に無い chainId を渡すと defensive throw', async () => {
+    // 9999 は viem/chains に無い → chainObjectForId が undefined → execute.ts が throw。
+    // 通常は CROSS_CHAIN_TARGETS 経由でしか入らないので到達しないが、safety net として
+    // 「silent に wrong chain で tx 送信する」事故を防ぐ最後の壁。
+    const walletClient = {
+      chain: baseSepolia,
+      signTypedData: vi.fn(),
+      sendTransaction: vi.fn(),
+      writeContract: vi.fn(),
+    };
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async () => undefined),
+        account: ACCOUNT,
+        sourceChainId: 9999, // ← unknown
+        destChainId: polygonAmoy.id,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/source chainId 9999 is not in supportedChains/);
+    // approve まで到達しない (chain 解決の段階で throw)
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
   });
 });
