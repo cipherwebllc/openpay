@@ -11,7 +11,7 @@
 import { useEffect } from 'react';
 import type { Address, Hex } from 'viem';
 import { appendHistory, buildHistoryEntry } from '@/lib/history';
-import type { HistoryGasMode, HistoryPayMode } from '@/lib/history';
+import type { GasMode, PayMode } from '@/lib/fee';
 import type { ChainSlug } from '@/lib/chains';
 import type { TokenSymbol } from '@/lib/tokens';
 
@@ -20,8 +20,8 @@ export type AppendPaymentHistoryCtx = {
   chainSlug: ChainSlug;
   asset: TokenSymbol;
   tokenAddress: Address;
-  payMode: HistoryPayMode;
-  gasMode: HistoryGasMode | null;
+  payMode: PayMode;
+  gasMode: GasMode | null;
   merchant: Address;
   merchantAmount: bigint;
   customer: Address | undefined;

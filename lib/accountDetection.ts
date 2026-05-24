@@ -72,20 +72,18 @@ export async function detectAccountKind(
   return { kind: 'unknown', delegateAddress: target };
 }
 
+export type IncompatibleSmartAccountI18nKey =
+  | 'errorIncompatibleSmartAccount'
+  | 'errorMav2Disabled'
+  | 'errorMav2KaiaPolygon'
+  | 'errorMetaMaskKaia';
+
 export class IncompatibleSmartAccountError extends Error {
   readonly delegateAddress: Address | null;
-  readonly i18nKey:
-    | 'errorIncompatibleSmartAccount'
-    | 'errorMav2Disabled'
-    | 'errorMav2KaiaPolygon'
-    | 'errorMetaMaskKaia';
+  readonly i18nKey: IncompatibleSmartAccountI18nKey;
   constructor(args: {
     delegateAddress: Address | null;
-    i18nKey:
-      | 'errorIncompatibleSmartAccount'
-      | 'errorMav2Disabled'
-      | 'errorMav2KaiaPolygon'
-      | 'errorMetaMaskKaia';
+    i18nKey: IncompatibleSmartAccountI18nKey;
   }) {
     super(
       `incompatible_smart_account: delegate=${args.delegateAddress ?? 'none'} (${args.i18nKey})`,

@@ -21,6 +21,9 @@
 
 import { safeGet, safeSet } from './storage';
 import { logger } from './logger';
+import type { GasMode, PayMode } from './fee';
+import type { PaymentFlow, PaymentResult } from './paymentLog';
+import type { TokenSymbol } from './tokens';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
 export const HISTORY_CHANGED_EVENT = 'openpay:history-changed';
@@ -33,32 +36,18 @@ export const HISTORY_NOTE_MAX_LENGTH = 1000;
 // 肥大化対策、 stack trace で巨大化する error.message を抑える)。
 export const HISTORY_ERROR_MESSAGE_MAX_LENGTH = 500;
 
-export type HistoryFlow =
-  | 'batch'
-  | 'direct'
-  | 'standard-merchant'
-  | 'standard-fee';
-
-export type HistoryStatus = 'success' | 'reverted' | 'error';
-
-export type HistoryAsset = 'jpyc' | 'usdc';
-
 // HistoryEntry は decimals / display symbol を保持しないため (raw wei + asset slug
 // のみ)、UI / CSV 出力時に lookup する。lib/tokens.ts の TokenDeployment と同一
 // 値を維持する必要があり、 token を増やすときは両方を更新する。
-export const HISTORY_ASSET_DECIMALS: Record<HistoryAsset, number> = {
+export const HISTORY_ASSET_DECIMALS: Record<TokenSymbol, number> = {
   jpyc: 18,
   usdc: 6,
 };
 
-export const HISTORY_ASSET_DISPLAY: Record<HistoryAsset, string> = {
+export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
   jpyc: 'JPYC',
   usdc: 'USDC',
 };
-
-export type HistoryPayMode = 'gasless' | 'standard';
-
-export type HistoryGasMode = 'customer' | 'merchant';
 
 // schema version 管理:
 //
@@ -85,17 +74,17 @@ export type HistoryEntry = {
   id: string;
   /** 取込時刻 (Date.now())。チェーン上 block time とは別物 (UI 表示用)。 */
   ts: number;
-  flow: HistoryFlow;
-  status: HistoryStatus;
+  flow: PaymentFlow;
+  status: PaymentResult;
   chainId: number;
   /** "base" | "arbitrum" | "optimism" | "polygon"。URL 復元等で使う。 */
   chainSlug: string;
-  asset: HistoryAsset;
+  asset: TokenSymbol;
   tokenAddress: string;
   /** 「JPYC ガスレス決済 (customer 負担)」等の表示識別子に。 */
-  payMode: HistoryPayMode;
+  payMode: PayMode;
   /** standard モードでは概念がないため null。gasless のみ意味あり。 */
-  gasMode: HistoryGasMode | null;
+  gasMode: GasMode | null;
   merchant: string;
   /** bigint 文字列化 (raw wei)。decimal 化は表示時に formatTokenAmount。 */
   merchantAmount: string;
@@ -283,14 +272,14 @@ export function clearHistory(): void {
 //   - 同じ result から PaymentForm と CheckoutForm が異なる context を組み立てる余地を残す
 
 export type BuildHistoryBase = {
-  flow: HistoryFlow;
-  status: HistoryStatus;
+  flow: PaymentFlow;
+  status: PaymentResult;
   chainId: number;
   chainSlug: string;
-  asset: HistoryAsset;
+  asset: TokenSymbol;
   tokenAddress: string;
-  payMode: HistoryPayMode;
-  gasMode: HistoryGasMode | null;
+  payMode: PayMode;
+  gasMode: GasMode | null;
   merchant: string;
   merchantAmount: bigint;
   customer: string | null | undefined;
