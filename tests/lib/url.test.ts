@@ -790,7 +790,6 @@ describe('parseTipParams', () => {
     }
   });
 
-  // === crossChain 値の精密 boundary ===
   it('crossChain=False (大文字混在) → true (case-sensitive、明示 false のみ false)', () => {
     const r = parseTipParams(VALID_TO, search('token=usdc&crossChain=False'));
     expect(r.ok).toBe(true);
@@ -832,7 +831,6 @@ describe('parseTipParams', () => {
     }
   });
 
-  // === Tip 固有: gasless 必須なので非対応 chain は parse 時に reject ===
   it('usdc + ethereum → reject (Tip widget は gasless 必須、L1 は非対応)', () => {
     const r = parseTipParams(VALID_TO, search('token=usdc&chain=ethereum'));
     expect(r.ok).toBe(false);
@@ -852,7 +850,6 @@ describe('parseTipParams', () => {
     }
   });
 
-  // === Full field roundtrip ===
   it('全 field roundtrip: build (crossChain=false 含む) → parse で全 field 復元', () => {
     const built = buildTipPath({
       to: VALID_TO,

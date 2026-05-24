@@ -255,7 +255,6 @@ describe('useTipSettings', () => {
     expect(result.current.settings.chain).toBe('kaia');
   });
 
-  // === crossChain sanitize 境界 ===
   it.each([
     ['null', null],
     ['number 0', 0],
@@ -273,7 +272,6 @@ describe('useTipSettings', () => {
     expect(result.current.settings.crossChain).toBe(true);
   });
 
-  // === token + chain 整合性 (gasless 必須 fallback) ===
   it('usdc + ethereum (gasless 非対応) → token default (base) に fallback', async () => {
     window.localStorage.setItem(
       KEY,
@@ -294,7 +292,6 @@ describe('useTipSettings', () => {
     expect(result.current.settings.chain).toBe('polygon');
   });
 
-  // === 永続化 roundtrip (Kaia + crossChain=false の combo) ===
   it('jpyc + kaia + crossChain=false 保存 → 再 mount で完全復元', async () => {
     const persisted = {
       receiver: '0xabc',
