@@ -44,8 +44,8 @@ describe('chains (testnet env)', () => {
     expect(chainForSlug('avalanche').id).toBe(avalancheFuji.id);
   });
 
-  it('supportedChains は 8 本 (merchant 7: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum / Avalanche + buyer-only 1: Unichain)', () => {
-    expect(supportedChains).toHaveLength(8);
+  it('supportedChains は 12 本 (merchant 7: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum / Avalanche + buyer-only 5: Unichain / World Chain / Sonic / Sei / HyperEVM)', () => {
+    expect(supportedChains).toHaveLength(12);
     const ids = supportedChains.map((c) => c.id);
     expect(ids).toContain(baseSepolia.id);
     expect(ids).toContain(arbitrumSepolia.id);
@@ -55,6 +55,11 @@ describe('chains (testnet env)', () => {
     expect(ids).toContain(sepolia.id);
     expect(ids).toContain(avalancheFuji.id);
     expect(ids).toContain(unichainSepolia.id);
+    // phase 4b-3 buyer-only testnet
+    expect(ids).toContain(4801); // worldchainSepolia
+    expect(ids).toContain(57054); // sonicBlazeTestnet
+    expect(ids).toContain(1328); // seiTestnet
+    expect(ids).toContain(998); // hyperEvmTestnet (defineChain inline)
   });
 
   it('mainnet チェーンは含まれない', () => {

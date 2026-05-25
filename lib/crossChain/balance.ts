@@ -1,6 +1,6 @@
-// Cross-chain buyer balance query — wallet ERC20 USDC (7 chain: 5 merchant +
-// 2 buyer-only Avalanche/Unichain) + Gateway unified balance (Circle API) を
-// 1 callsite で取得。
+// Cross-chain buyer balance query — wallet ERC20 USDC (11 chain: 5 merchant +
+// 6 buyer-only Avalanche/Unichain/World Chain/Sonic/Sei/HyperEVM) + Gateway
+// unified balance (Circle API) を 1 callsite で取得。
 //
 // Promise.allSettled で 1 chain の RPC 失敗が他 chain に波及しないようにし、
 // 失敗 chain は status:'error' entry として残す (UI 側で「unavailable」を出すため)。
@@ -14,16 +14,23 @@ import {
   avalancheFuji,
   base,
   baseSepolia,
+  hyperEvm,
   mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sei,
+  seiTestnet,
   sepolia,
+  sonic,
+  sonicBlazeTestnet,
   unichain,
   unichainSepolia,
+  worldchain,
+  worldchainSepolia,
 } from 'viem/chains';
-import { customRpcUrlForChain } from '../chains';
+import { buyerOnlyChainForSlug, customRpcUrlForChain } from '../chains';
 import { resolveDeployment } from '../tokens';
 import {
   BUYER_SOURCE_TARGETS,
@@ -133,6 +140,8 @@ export async function readMultiChainWalletBalances(
 }
 
 // chain 追加時は BUYER_SOURCE_TARGETS と本 Map の 2 箇所を更新する。
+// HyperEVM testnet は viem/chains に未収録なので lib/chains.ts の inline 定義
+// (buyerOnlyChainForSlug 経由) から取り出す。
 const CHAIN_BY_ID = new Map<number, Chain>([
   [polygon.id, polygon],
   [polygonAmoy.id, polygonAmoy],
@@ -149,6 +158,23 @@ const CHAIN_BY_ID = new Map<number, Chain>([
   [avalancheFuji.id, avalancheFuji],
   [unichain.id, unichain],
   [unichainSepolia.id, unichainSepolia],
+  // phase 4b-3: World Chain / Sonic / Sei / HyperEVM (buyer-only)
+  [worldchain.id, worldchain],
+  [worldchainSepolia.id, worldchainSepolia],
+  [sonic.id, sonic],
+  [sonicBlazeTestnet.id, sonicBlazeTestnet],
+  [sei.id, sei],
+  [seiTestnet.id, seiTestnet],
+  [hyperEvm.id, hyperEvm],
+  // HyperEVM testnet (998) は viem/chains に未収録、lib/chains.ts の defineChain
+  // で inline 定義したものを buyerOnlyChainForSlug 経由で取り出す。
+  // 注: mainnet env では buyerOnlyChainForSlug('hyperevm') が hyperEvm (id=999)
+  // を返すので上の entry と key=999 で衝突するが Map は overwrite 許容 = no-op。
+  // testnet env では hyperEvmTestnet (id=998) を返し新規 entry を追加。
+  [
+    buyerOnlyChainForSlug('hyperevm').id,
+    buyerOnlyChainForSlug('hyperevm'),
+  ],
 ]);
 
 function chainResolveFromTargets(chainId: number): Chain {

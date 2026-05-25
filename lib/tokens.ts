@@ -84,6 +84,16 @@ const USDC_AVALANCHE_MAINNET: Address =
 // phase 4b-1: buyer-only chain USDC (merchant 受信 chain では使用しない)
 const USDC_UNICHAIN_MAINNET: Address =
   '0x078D782b760474a361dDA0AF3839290b0EF57AD6';
+// phase 4b-3: World Chain / Sonic / Sei / HyperEVM (buyer-only)
+// addresses sourced from Circle docs (developers.circle.com/stablecoins/usdc-contract-addresses)。
+const USDC_WORLDCHAIN_MAINNET: Address =
+  '0x79A02482A880bCe3F13E09da970dC34dB4cD24D1';
+const USDC_SONIC_MAINNET: Address =
+  '0x29219dd400f2Bf60E5a23d13be72b486d4038894';
+const USDC_SEI_MAINNET: Address =
+  '0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392';
+const USDC_HYPEREVM_MAINNET: Address =
+  '0xb88339CB7199b77E23DB6E890353E22632Ba630f';
 
 // USDC native (Circle faucet 対応) — testnet
 const USDC_BASE_SEPOLIA: Address =
@@ -100,6 +110,15 @@ const USDC_AVALANCHE_FUJI: Address =
 // phase 4b-1 testnet
 const USDC_UNICHAIN_SEPOLIA: Address =
   '0x31d0220469e10c4E71834a79b1f276d740d3768F';
+// phase 4b-3 testnet
+const USDC_WORLDCHAIN_SEPOLIA: Address =
+  '0x66145f38cBAC35Ca6F1Dfb4914dF98F1614aeA88';
+const USDC_SONIC_TESTNET: Address =
+  '0x0BA304580ee7c9a980CF72e55f5Ed2E9fd30Bc51';
+const USDC_SEI_TESTNET: Address =
+  '0x4fCF1784B31630811181f670Aea7A7bEF803eaED';
+const USDC_HYPEREVM_TESTNET: Address =
+  '0x2B3370eE501B4a559b57D449569354196457D8Ab';
 
 // chain 軸の env override は ChainSlug をキーに引く。
 // USDC は Circle native の 5 chain (base/arbitrum/optimism/polygon/ethereum)、
@@ -181,20 +200,35 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
 // TOKEN_DEPLOYMENTS に concat する。ChainSlug union には含めない (URL parser や
 // QR chooser には露出しない)。paymasterMode='unavailable' = Pimlico paymaster は
 // 該 chain に未 deploy + buyer-only chain では gasless 不要なため。
-// phase 4b-2: Avalanche を merchant 昇格、本配列からは外す (Unichain のみ残る)。
-const BUYER_ONLY_USDC_SLUGS: readonly BuyerOnlyChainSlug[] = ['unichain'];
+// phase 4b-2: Avalanche は merchant 昇格 (USDC_SLUGS 入り) のため本配列から外す。
+// phase 4b-3: World Chain / Sonic / Sei / HyperEVM を buyer-only 追加。
+const BUYER_ONLY_USDC_SLUGS: readonly BuyerOnlyChainSlug[] = [
+  'unichain',
+  'worldchain',
+  'sonic',
+  'sei',
+  'hyperevm',
+];
 
 function buyerOnlyUsdcAddress(slug: BuyerOnlyChainSlug): Address {
   if (isMainnet) {
     const overrides = env.mainnetTokenOverrides.usdc;
     const o = overrides[slug];
     if (o) return o;
-    return USDC_UNICHAIN_MAINNET;
+    if (slug === 'unichain') return USDC_UNICHAIN_MAINNET;
+    if (slug === 'worldchain') return USDC_WORLDCHAIN_MAINNET;
+    if (slug === 'sonic') return USDC_SONIC_MAINNET;
+    if (slug === 'sei') return USDC_SEI_MAINNET;
+    return USDC_HYPEREVM_MAINNET; // hyperevm
   }
   const overrides = env.testnetTokenOverrides.usdc;
   const o = overrides[slug];
   if (o) return o;
-  return USDC_UNICHAIN_SEPOLIA;
+  if (slug === 'unichain') return USDC_UNICHAIN_SEPOLIA;
+  if (slug === 'worldchain') return USDC_WORLDCHAIN_SEPOLIA;
+  if (slug === 'sonic') return USDC_SONIC_TESTNET;
+  if (slug === 'sei') return USDC_SEI_TESTNET;
+  return USDC_HYPEREVM_TESTNET; // hyperevm
 }
 
 const usdcBuyerOnlyDeployments: TokenDeployment[] = BUYER_ONLY_USDC_SLUGS.map(

@@ -18,6 +18,9 @@
 // phase 4b-2 (2026-05-26): Avalanche を merchant-and-buyer に昇格。Pimlico ERC-20
 // paymaster + Circle Gateway 両対応の chain で、USDC merchant 受信を許可。
 // Unichain は引き続き buyer-only (Pimlico ERC-20 paymaster 未対応)。
+// phase 4b-3 (2026-05-25): World Chain / Sonic / Sei / HyperEVM を同じく buyer-only
+// として追加 (Circle Gateway 公式 12 chain のうち未対応 4 chain を埋める)。
+// HyperEVM testnet は viem/chains に未収録のため defineChain で inline 定義する。
 import {
   arbitrum,
   arbitrumSepolia,
@@ -25,6 +28,7 @@ import {
   avalancheFuji,
   base,
   baseSepolia,
+  hyperEvm,
   kaia,
   kairos,
   mainnet,
@@ -32,12 +36,38 @@ import {
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sei,
+  seiTestnet,
   sepolia,
+  sonic,
+  sonicBlazeTestnet,
   unichain,
   unichainSepolia,
+  worldchain,
+  worldchainSepolia,
 } from 'viem/chains';
-import type { Chain } from 'viem';
+import { defineChain, type Chain } from 'viem';
 import { env, isMainnet } from './env';
+
+// HyperEVM testnet (chainId 998) は viem/chains に未収録のため inline 定義。
+// 出典: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm
+// Circle Gateway testnet 用に最低限 (id / name / nativeCurrency / rpcUrls /
+// blockExplorers) を満たせばよい。
+const hyperEvmTestnet = defineChain({
+  id: 998,
+  name: 'HyperEVM Testnet',
+  nativeCurrency: { name: 'HYPE', symbol: 'HYPE', decimals: 18 },
+  rpcUrls: {
+    default: { http: ['https://rpc.hyperliquid-testnet.xyz/evm'] },
+  },
+  blockExplorers: {
+    default: {
+      name: 'Hyperliquid Explorer',
+      url: 'https://app.hyperliquid-testnet.xyz/explorer',
+    },
+  },
+  testnet: true,
+});
 
 // merchant 受信 + buyer 支払の 両方 可能な chain slug。QrGenerator chain chooser や
 // /pay URL parser で受け取る "受取 chain" 用 union。
@@ -56,7 +86,15 @@ export type ChainSlug =
 // merchant chooser には出さないが lib/crossChain/balance.ts の readMultiChainWalletBalances
 // が CROSS_CHAIN_TARGETS から enumerate するため lib/chains.ts に Chain 解決経路を
 // 持たせる必要がある。phase 4b-2 で Avalanche は ChainSlug へ昇格、本 union からは外す。
-export type BuyerOnlyChainSlug = 'unichain';
+// phase 4b-3: World Chain / Sonic / Sei / HyperEVM を追加 (Circle Gateway 公式
+// 12 chain のうち未対応 4 chain)。merchant 受信 chain (USDC_CHAINS) は 6 のまま
+// (Avalanche merchant 化を含む)。
+export type BuyerOnlyChainSlug =
+  | 'unichain'
+  | 'worldchain'
+  | 'sonic'
+  | 'sei'
+  | 'hyperevm';
 
 const MAINNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   base,
@@ -80,10 +118,18 @@ const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
 
 const MAINNET_BUYER_ONLY_TO_CHAIN: Record<BuyerOnlyChainSlug, Chain> = {
   unichain,
+  worldchain,
+  sonic,
+  sei,
+  hyperevm: hyperEvm,
 };
 
 const TESTNET_BUYER_ONLY_TO_CHAIN: Record<BuyerOnlyChainSlug, Chain> = {
   unichain: unichainSepolia,
+  worldchain: worldchainSepolia,
+  sonic: sonicBlazeTestnet,
+  sei: seiTestnet,
+  hyperevm: hyperEvmTestnet,
 };
 
 const SLUG_TO_CHAIN: Record<ChainSlug, Chain> = isMainnet
@@ -104,7 +150,13 @@ const ALL_SLUGS: readonly ChainSlug[] = [
   'avalanche',
 ];
 
-const ALL_BUYER_ONLY_SLUGS: readonly BuyerOnlyChainSlug[] = ['unichain'];
+const ALL_BUYER_ONLY_SLUGS: readonly BuyerOnlyChainSlug[] = [
+  'unichain',
+  'worldchain',
+  'sonic',
+  'sei',
+  'hyperevm',
+];
 
 // 順序は wagmi createConfig 用 + UI の表示順
 // (merchant chooser: Base 既定 → Arbitrum → Optimism → Polygon → Kaia → Ethereum
@@ -125,7 +177,15 @@ export const supportedChains = [
   SLUG_TO_CHAIN.ethereum,
   SLUG_TO_CHAIN.avalanche,
   BUYER_ONLY_SLUG_TO_CHAIN.unichain,
+  BUYER_ONLY_SLUG_TO_CHAIN.worldchain,
+  BUYER_ONLY_SLUG_TO_CHAIN.sonic,
+  BUYER_ONLY_SLUG_TO_CHAIN.sei,
+  BUYER_ONLY_SLUG_TO_CHAIN.hyperevm,
 ] as const satisfies readonly [
+  Chain,
+  Chain,
+  Chain,
+  Chain,
   Chain,
   Chain,
   Chain,
@@ -203,16 +263,37 @@ export function slugForChain(chainId: number): ChainSlug | undefined {
   return undefined;
 }
 
+// public/chains/ に commit 済の logo が存在する slug の set。
+// phase 4b-3 で追加した buyer-only chain (worldchain / sonic / sei / hyperevm) は
+// 公式 brand SVG を sourcing 中のため未収録 (CrossChainSourceChooser は logo 無し
+// = chain 名のみで描画する、機能には影響しない)。logo 収録時に本 set に追加する。
+// TODO(phase 4b-3 follow-up): 4 chain の公式 logo SVG を public/chains/ に追加し、
+// 本 set からも除外を解除する。
+const SLUGS_WITH_LOGOS = new Set<string>([
+  'base',
+  'arbitrum',
+  'optimism',
+  'polygon',
+  'kaia',
+  'ethereum',
+  'avalanche',
+  'unichain',
+]);
+
 /** chainId → public/chains/{slug}.svg path (merchant + buyer-only 両方解決)。
  *  CrossChainSourceChooser のように buyer-only chain (Avalanche/Unichain) も
- *  扱う UI で使う。supportedChains 外なら undefined。
+ *  扱う UI で使う。supportedChains 外、または logo 未収録なら undefined。
  *  slug は logo file name と 1:1 (= ChainSlug | BuyerOnlyChainSlug)。 */
 export function chainLogoPathForId(chainId: number): string | undefined {
   for (const s of ALL_SLUGS) {
-    if (SLUG_TO_CHAIN[s].id === chainId) return `/chains/${s}.svg`;
+    if (SLUG_TO_CHAIN[s].id === chainId) {
+      return SLUGS_WITH_LOGOS.has(s) ? `/chains/${s}.svg` : undefined;
+    }
   }
   for (const s of ALL_BUYER_ONLY_SLUGS) {
-    if (BUYER_ONLY_SLUG_TO_CHAIN[s].id === chainId) return `/chains/${s}.svg`;
+    if (BUYER_ONLY_SLUG_TO_CHAIN[s].id === chainId) {
+      return SLUGS_WITH_LOGOS.has(s) ? `/chains/${s}.svg` : undefined;
+    }
   }
   return undefined;
 }
@@ -241,6 +322,15 @@ export function customRpcUrlForChain(chainId: number): string | undefined {
   if (chainId === avalancheFuji.id) return env.rpc.avalancheFuji;
   if (chainId === unichain.id) return env.rpc.unichain;
   if (chainId === unichainSepolia.id) return env.rpc.unichainSepolia;
+  // buyer-only chain (phase 4b-3)
+  if (chainId === worldchain.id) return env.rpc.worldchain;
+  if (chainId === worldchainSepolia.id) return env.rpc.worldchainSepolia;
+  if (chainId === sonic.id) return env.rpc.sonic;
+  if (chainId === sonicBlazeTestnet.id) return env.rpc.sonicTestnet;
+  if (chainId === sei.id) return env.rpc.sei;
+  if (chainId === seiTestnet.id) return env.rpc.seiTestnet;
+  if (chainId === hyperEvm.id) return env.rpc.hyperevm;
+  if (chainId === hyperEvmTestnet.id) return env.rpc.hyperevmTestnet;
   return undefined;
 }
 

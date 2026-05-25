@@ -77,6 +77,58 @@ Avalanche/Unichain を採用する場合は実 contract address を別 commit �
 phase 4b-1 の implementation は Gateway path に限定し、CCTP V2 経路は既存 4 chain
 (Base/Arb/OP/Polygon) で完結する設計。
 
+## Phase 4b-3 で追加 (buyer-only、2026-05-25 投入準備完了)
+
+Circle Gateway 公式 12 chain のうち phase 4b-1 までで未対応だった 4 chain を
+buyer-only として追加。merchant 受信 chain (USDC_CHAINS) は引き続き 5 のまま、
+buyer が「自分の chain の USDC」で支払える source の範囲を広げる目的。
+
+### Sonic (domain 13)
+
+- mainnet USDC: `0x29219dd400f2Bf60E5a23d13be72b486d4038894`
+- testnet (Sonic Blaze, chainId 57054) USDC: `0x0BA304580ee7c9a980CF72e55f5Ed2E9fd30Bc51`
+- Gateway domain: **13**
+- chainId: mainnet=146 / testnet (Blaze)=57054
+- Pimlico ERC20 Paymaster: **非対応** (merchant 受信 chain には出さない、gasless 不要)
+
+### World Chain (domain 14)
+
+- mainnet USDC: `0x79A02482A880bCe3F13E09da970dC34dB4cD24D1`
+- testnet (Sepolia, chainId 4801) USDC: `0x66145f38cBAC35Ca6F1Dfb4914dF98F1614aeA88`
+- Gateway domain: **14**
+- chainId: mainnet=480 / testnet=4801
+- Pimlico ERC20 Paymaster: **非対応**
+
+### Sei (domain 16)
+
+- mainnet USDC: `0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392`
+- testnet (chainId 1328) USDC: `0x4fCF1784B31630811181f670Aea7A7bEF803eaED`
+- Gateway domain: **16**
+- chainId: mainnet=1329 / testnet=1328
+- Pimlico ERC20 Paymaster: **非対応**
+
+### HyperEVM (domain 19)
+
+- mainnet USDC: `0xb88339CB7199b77E23DB6E890353E22632Ba630f`
+- testnet (chainId 998) USDC: `0x2B3370eE501B4a559b57D449569354196457D8Ab`
+- Gateway domain: **19**
+- chainId: mainnet=999 / testnet=998
+- Pimlico ERC20 Paymaster: **非対応**
+- 注: HyperEVM testnet (998) は viem/chains に未収録のため lib/chains.ts で
+  defineChain inline 定義 (rpcUrls.default.http=['https://rpc.hyperliquid-testnet.xyz/evm'])
+
+### 出典 (2026-05-25 確認)
+
+- USDC contract addresses: https://developers.circle.com/stablecoins/usdc-contract-addresses
+- Gateway domain ID 一覧: https://developers.circle.com/stablecoins/gateway-tech-ref
+- chainId: viem/chains v2 (worldchain=480/4801, sonic=146/57054, sei=1329/1328, hyperEvm=999)
+
+### TODO (phase 4b-3 follow-up)
+
+- 4 chain 公式 brand SVG logo を public/chains/ に追加
+  (現状 chainLogoPathForId は SLUGS_WITH_LOGOS gate で undefined を返し、
+  CrossChainSourceChooser は logo 無し = chain 名のみで描画する fallback で動作)
+
 ## Phase 4b-2 で追加予定 (Solana)
 
 - mainnet SPL USDC: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
