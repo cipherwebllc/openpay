@@ -1,11 +1,15 @@
-// Cross-chain buyer balance query — wallet ERC20 USDC (11 chain: 5 merchant +
-// 6 buyer-only Avalanche/Unichain/World Chain/Sonic/Sei/HyperEVM) + Gateway
-// unified balance (Circle API) を 1 callsite で取得。
+// Cross-chain buyer balance query — wallet ERC20 USDC (11 chain: 6 merchant-and-buyer
+// + 5 buyer-only Unichain/World Chain/Sonic/Sei/HyperEVM) + Gateway unified balance
+// (Circle API) を 1 callsite で取得。
 //
 // Promise.allSettled で 1 chain の RPC 失敗が他 chain に波及しないようにし、
 // 失敗 chain は status:'error' entry として残す (UI 側で「unavailable」を出すため)。
+//
+// 2026-05-26 (Phase A): 各 chain の readContract に 3 秒 timeout を追加
+// (Ethereum L1 公開 RPC の hang 問題対応)。Ethereum L1 (mainnet/sepolia) のみ
+// viem fallback transport で 3 endpoint chain。他 L2 chain は単一 http() のまま。
 
-import { createPublicClient, erc20Abi, http, type Address } from 'viem';
+import { createPublicClient, erc20Abi, fallback, http, type Address } from 'viem';
 import type { Chain } from 'viem';
 import {
   arbitrum,
@@ -80,13 +84,47 @@ export type GatewayUnifiedBalance =
       error: string;
     };
 
+// Ethereum L1 公開 RPC の信頼性問題 (USDC.balanceOf timeout) に対応するため、
+// mainnet/sepolia のみ viem fallback transport で 3 endpoint chain。
+// 他 L2 chain は公開 RPC が安定なので単一 http() のまま。
+// env override (NEXT_PUBLIC_ETHEREUM_RPC_URL) が設定されていればそれが primary、
+// public endpoint が backup として後段に並ぶ。
+const ETHEREUM_PUBLIC_FALLBACKS = [
+  'https://eth.llamarpc.com',
+  'https://ethereum-rpc.publicnode.com',
+  'https://rpc.ankr.com/eth',
+] as const;
+const SEPOLIA_PUBLIC_FALLBACKS = [
+  'https://ethereum-sepolia-rpc.publicnode.com',
+  'https://rpc.ankr.com/eth_sepolia',
+] as const;
+
 function publicClientFor(chain: Chain) {
-  const url = customRpcUrlForChain(chain.id);
+  const customUrl = customRpcUrlForChain(chain.id);
+
+  if (chain.id === mainnet.id || chain.id === sepolia.id) {
+    const fallbacks =
+      chain.id === mainnet.id
+        ? ETHEREUM_PUBLIC_FALLBACKS
+        : SEPOLIA_PUBLIC_FALLBACKS;
+    const endpoints = customUrl ? [customUrl, ...fallbacks] : [...fallbacks];
+    return createPublicClient({
+      chain,
+      transport: fallback(endpoints.map((u) => http(u))),
+    });
+  }
+
   return createPublicClient({
     chain,
-    transport: url ? http(url) : http(),
+    transport: customUrl ? http(customUrl) : http(),
   });
 }
+
+// 各 chain の USDC.balanceOf 呼び出しに対する worst-case bound。
+// 公開 RPC が hang した時 (Ethereum L1 で観測) 全 chain の balance fetch が
+// 巻き込まれて UI が固まるのを防ぐ。timeout 後は status='error' entry として
+// 残り、selectPath / pathEnumerator は該当 chain を 0 balance 扱いで routing する。
+const WALLET_BALANCE_TIMEOUT_MS = 3_000;
 
 // BUYER_SOURCE_TARGETS / TOKEN_DEPLOYMENTS の同期漏れを検出するための guard
 // (両 const を更新せずに chain を追加すると silent に 0 balance を返してしまう)。
@@ -109,12 +147,27 @@ async function readWalletBalanceOne(
   const chain = chainResolver(target.chainId);
   const client = publicClientFor(chain);
   const tokenAddress = resolveUsdcAddress(target.chainId);
-  const balance = (await client.readContract({
+
+  const balancePromise = client.readContract({
     address: tokenAddress,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: [account],
-  })) as bigint;
+  }) as Promise<bigint>;
+
+  // timeout 後に RPC が遅れて reject しても unhandled rejection にしない
+  // (console noise 抑制、実害なし)。
+  balancePromise.catch(() => {});
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () =>
+        reject(new Error(`rpc timeout (${WALLET_BALANCE_TIMEOUT_MS}ms)`)),
+      WALLET_BALANCE_TIMEOUT_MS,
+    ),
+  );
+
+  const balance = await Promise.race([balancePromise, timeoutPromise]);
   return { status: 'ok', target, tokenAddress, balance };
 }
 

@@ -475,3 +475,56 @@ describe('lib/crossChain/balance: chainResolver validation', () => {
     });
   });
 });
+
+// Phase A (2026-05-26): 1 chain の RPC hang が全 chain の UI 表示を巻き込む
+// 問題への対策。WALLET_BALANCE_TIMEOUT_MS=3000ms で各 chain の readContract を
+// bound する。timeout fired chain は status='error' になり、他 chain は妨げない。
+describe('lib/crossChain/balance: per-chain timeout (Phase A)', () => {
+  it('1 chain が永久 hang: 3 秒で timeout → status=error、他 chain は ok', async () => {
+    // 他 10 chain は通常 resolve
+    for (const chain of ALL_TESTNET_CHAINS) {
+      readContractMocks.set(chain.id, vi.fn().mockResolvedValue(100n));
+    }
+    // sepolia (Ethereum L1 testnet) のみ永久 hang
+    readContractMocks.set(
+      sepolia.id,
+      vi.fn(() => new Promise(() => {})),
+    );
+
+    const start = Date.now();
+    const out = await readMultiChainWalletBalances(ACCOUNT);
+    const elapsed = Date.now() - start;
+
+    // 3s timeout + 余裕。並列なので 1 chain hang でも 3.5s 程度で終わる想定
+    expect(elapsed).toBeLessThan(4_000);
+    expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
+
+    const ethEntry = out.find((e) => e.target.chainId === sepolia.id);
+    expect(ethEntry?.status).toBe('error');
+    if (ethEntry?.status === 'error') {
+      expect(ethEntry.error).toMatch(/rpc timeout/);
+    }
+    // 他 chain は ok のまま
+    const others = out.filter((e) => e.target.chainId !== sepolia.id);
+    expect(others.every((e) => e.status === 'ok')).toBe(true);
+  }, 6_000);
+
+  it('全 chain hang: 3 秒以内に 11 件すべて status=error の配列を返す', async () => {
+    for (const chain of ALL_TESTNET_CHAINS) {
+      readContractMocks.set(
+        chain.id,
+        vi.fn(() => new Promise(() => {})),
+      );
+    }
+    const start = Date.now();
+    const out = await readMultiChainWalletBalances(ACCOUNT);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(4_000);
+    expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
+    expect(out.every((e) => e.status === 'error')).toBe(true);
+    if (out[0].status === 'error') {
+      expect(out[0].error).toMatch(/rpc timeout/);
+    }
+  }, 6_000);
+});
