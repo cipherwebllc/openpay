@@ -64,7 +64,7 @@ describe('useQrSettings', () => {
   it('usdc + 不正 chain → default base に倒す', async () => {
     window.localStorage.setItem(
       KEY,
-      JSON.stringify({ token: 'usdc', chain: 'avalanche' }),
+      JSON.stringify({ token: 'usdc', chain: 'unknownchain' }),
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));

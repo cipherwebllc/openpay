@@ -204,7 +204,7 @@ describe('lib/crossChain/config', () => {
   });
 
   describe('CROSS_CHAIN_TARGETS', () => {
-    it('testnet env: 7 entries (merchant-and-buyer 4 + merchant-only 1 + buyer-only 2) with testnet chain ids', async () => {
+    it('testnet env: 7 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 1) with testnet chain ids', async () => {
       const m = await import('@/lib/crossChain/config');
       expect(m.CROSS_CHAIN_TARGETS).toHaveLength(7);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => t.isTestnet)).toBe(true);
@@ -218,7 +218,7 @@ describe('lib/crossChain/config', () => {
       expect(chainIds).toContain(unichainSepolia.id);
     });
 
-    it('mainnet env: 7 entries (merchant-and-buyer 4 + merchant-only 1 + buyer-only 2) with mainnet chain ids', async () => {
+    it('mainnet env: 7 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 1) with mainnet chain ids', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
@@ -239,7 +239,7 @@ describe('lib/crossChain/config', () => {
       ]);
     });
 
-    it('role field: merchant-and-buyer (4) + merchant-only (1) + buyer-only (2) で分類できる', async () => {
+    it('role field: merchant-and-buyer (5) + merchant-only (1) + buyer-only (1) で分類できる', async () => {
       const m = await import('@/lib/crossChain/config');
       const merchant = m.CROSS_CHAIN_TARGETS.filter(
         (t) => t.role === 'merchant-and-buyer',
@@ -250,21 +250,24 @@ describe('lib/crossChain/config', () => {
       const merchantOnly = m.CROSS_CHAIN_TARGETS.filter(
         (t) => t.role === 'merchant-only',
       );
-      expect(merchant).toHaveLength(4);
-      expect(buyerOnly).toHaveLength(2);
+      // phase 4b-2 で Avalanche が buyer-only → merchant-and-buyer に昇格
+      expect(merchant).toHaveLength(5);
+      expect(buyerOnly).toHaveLength(1);
       expect(merchantOnly).toHaveLength(1);
-      // MERCHANT_RECEIVE_TARGETS = merchant-and-buyer (4) + merchant-only (1) = 5
+      // MERCHANT_RECEIVE_TARGETS = merchant-and-buyer (5) + merchant-only (1) = 6
       // (USDC_CHAINS と 1:1、Ethereum は merchant 受信は残す設計)
-      expect(m.MERCHANT_RECEIVE_TARGETS).toHaveLength(5);
-      // BUYER_SOURCE_TARGETS = merchant-and-buyer (4) + buyer-only (2) = 6
+      expect(m.MERCHANT_RECEIVE_TARGETS).toHaveLength(6);
+      // BUYER_SOURCE_TARGETS = merchant-and-buyer (5) + buyer-only (1) = 6
       // (Ethereum は 2026-05-24 address poisoning 警戒 + RPC 不安定で除外)
       expect(m.BUYER_SOURCE_TARGETS).toHaveLength(6);
       // merchant-only chain は Ethereum (sepolia) のみ
       expect(merchantOnly[0].chainId).toBe(sepolia.id);
-      // buyer-only chain は Avalanche + Unichain のみ
+      // buyer-only chain は Unichain のみ
       const buyerOnlyChainIds = buyerOnly.map((t) => t.chainId);
-      expect(buyerOnlyChainIds).toContain(avalancheFuji.id);
       expect(buyerOnlyChainIds).toContain(unichainSepolia.id);
+      // Avalanche は merchant-and-buyer 側に移動
+      const merchantChainIds = merchant.map((t) => t.chainId);
+      expect(merchantChainIds).toContain(avalancheFuji.id);
     });
 
     it('chainIdForDomain: phase 4b-1 で追加した domain (1 / 10) も解決できる', async () => {

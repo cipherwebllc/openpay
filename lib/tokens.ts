@@ -68,6 +68,7 @@ export type TokenDeployment = {
 const JPYC_V3_ADDRESS: Address = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 
 // USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet) + Ethereum (phase 4a)
+//                          + Avalanche (phase 4b-2 merchant 昇格)
 const USDC_BASE_MAINNET: Address =
   '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const USDC_ARBITRUM_MAINNET: Address =
@@ -78,9 +79,9 @@ const USDC_POLYGON_MAINNET: Address =
   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 const USDC_ETHEREUM_MAINNET: Address =
   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-// phase 4b-1: buyer-only chain USDC (merchant 受信 chain では使用しない)
 const USDC_AVALANCHE_MAINNET: Address =
   '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E';
+// phase 4b-1: buyer-only chain USDC (merchant 受信 chain では使用しない)
 const USDC_UNICHAIN_MAINNET: Address =
   '0x078D782b760474a361dDA0AF3839290b0EF57AD6';
 
@@ -94,9 +95,9 @@ const USDC_OPTIMISM_SEPOLIA: Address =
 const USDC_POLYGON_AMOY: Address =
   '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582';
 const USDC_SEPOLIA: Address = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
-// phase 4b-1 testnet
 const USDC_AVALANCHE_FUJI: Address =
   '0x5425890298aed601595a70AB815c96711a31Bc65';
+// phase 4b-1 testnet
 const USDC_UNICHAIN_SEPOLIA: Address =
   '0x31d0220469e10c4E71834a79b1f276d740d3768F';
 
@@ -114,6 +115,7 @@ function usdcAddress(slug: UsdcChainSlug): Address {
     if (slug === 'arbitrum') return USDC_ARBITRUM_MAINNET;
     if (slug === 'optimism') return USDC_OPTIMISM_MAINNET;
     if (slug === 'ethereum') return USDC_ETHEREUM_MAINNET;
+    if (slug === 'avalanche') return USDC_AVALANCHE_MAINNET;
     return USDC_POLYGON_MAINNET; // polygon
   }
   const overrides = env.testnetTokenOverrides.usdc;
@@ -123,6 +125,7 @@ function usdcAddress(slug: UsdcChainSlug): Address {
   if (slug === 'arbitrum') return USDC_ARBITRUM_SEPOLIA;
   if (slug === 'optimism') return USDC_OPTIMISM_SEPOLIA;
   if (slug === 'ethereum') return USDC_SEPOLIA;
+  if (slug === 'avalanche') return USDC_AVALANCHE_FUJI;
   return USDC_POLYGON_AMOY; // polygon
 }
 
@@ -133,6 +136,7 @@ function chainIdFor(slug: ChainSlug): number {
     if (slug === 'optimism') return optimism.id;
     if (slug === 'kaia') return kaia.id;
     if (slug === 'ethereum') return mainnet.id;
+    if (slug === 'avalanche') return avalanche.id;
     return polygon.id;
   }
   if (slug === 'base') return baseSepolia.id;
@@ -140,6 +144,7 @@ function chainIdFor(slug: ChainSlug): number {
   if (slug === 'optimism') return optimismSepolia.id;
   if (slug === 'kaia') return kairos.id;
   if (slug === 'ethereum') return sepolia.id;
+  if (slug === 'avalanche') return avalancheFuji.id;
   return polygonAmoy.id;
 }
 
@@ -149,11 +154,13 @@ const USDC_SLUGS: readonly UsdcChainSlug[] = [
   'optimism',
   'polygon',
   'ethereum',
+  'avalanche',
 ];
 
 // USDC on Ethereum L1 は Pimlico ERC20 paymaster 未対応のため 'unavailable'。
-// 他 4 chain は erc20 (顧客が USDC で gas 支払い)。詳細は
-// docs/research/circle-12chain-addresses.md。
+// 他 chain は erc20 (顧客が USDC で gas 支払い)。Avalanche は phase 4b-2 で
+// merchant 昇格時に erc20 paymaster 対応を確認 (Pimlico mainnet ERC-20 paymaster
+// 対応 chain に含まれる)。
 function usdcPaymasterModeFor(slug: UsdcChainSlug): PaymasterMode {
   return slug === 'ethereum' ? 'unavailable' : 'erc20';
 }
@@ -174,23 +181,19 @@ const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({
 // TOKEN_DEPLOYMENTS に concat する。ChainSlug union には含めない (URL parser や
 // QR chooser には露出しない)。paymasterMode='unavailable' = Pimlico paymaster は
 // 該 chain に未 deploy + buyer-only chain では gasless 不要なため。
-const BUYER_ONLY_USDC_SLUGS: readonly BuyerOnlyChainSlug[] = [
-  'avalanche',
-  'unichain',
-];
+// phase 4b-2: Avalanche を merchant 昇格、本配列からは外す (Unichain のみ残る)。
+const BUYER_ONLY_USDC_SLUGS: readonly BuyerOnlyChainSlug[] = ['unichain'];
 
 function buyerOnlyUsdcAddress(slug: BuyerOnlyChainSlug): Address {
   if (isMainnet) {
     const overrides = env.mainnetTokenOverrides.usdc;
     const o = overrides[slug];
     if (o) return o;
-    if (slug === 'avalanche') return USDC_AVALANCHE_MAINNET;
     return USDC_UNICHAIN_MAINNET;
   }
   const overrides = env.testnetTokenOverrides.usdc;
   const o = overrides[slug];
   if (o) return o;
-  if (slug === 'avalanche') return USDC_AVALANCHE_FUJI;
   return USDC_UNICHAIN_SEPOLIA;
 }
 
@@ -231,7 +234,7 @@ const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.map((slug) => ({
 
 // 全 deployment のフラット配列。順序は QR token セレクター・chain セレクターの
 // 表示順に揃える (USDC merchant: Base 既定 → Arbitrum → Optimism → Polygon →
-// Ethereum、JPYC: Polygon 既定 → Kaia)。buyer-only USDC (Avalanche / Unichain)
+// Ethereum → Avalanche、JPYC: Polygon 既定 → Kaia)。buyer-only USDC (Unichain)
 // は末尾に append、UI には出さないが resolveDeployment(chainId) で引ける状態を維持
 // (CrossChainHint balance fetch で必要)。
 export const TOKEN_DEPLOYMENTS: readonly TokenDeployment[] = [

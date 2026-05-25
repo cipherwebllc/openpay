@@ -204,13 +204,13 @@ describe('parsePayParams', () => {
 
   it('chain が不正値 → errorKind=invalid + chain メッセージ', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&chain=avalanche`),
+      search(`to=${VALID_TO}&token=usdc&chain=unknownchain`),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.errorKind).toBe('invalid');
       expect(r.error).toContain('chain');
-      // kaia + ethereum を含む 6 候補列挙
+      // kaia + ethereum を含む候補列挙
       expect(r.error).toContain('kaia');
       expect(r.error).toContain('ethereum');
     }
@@ -344,9 +344,9 @@ describe('parsePayParams', () => {
     if (!r.ok) expect(r.error).toContain('jpyc');
   });
 
-  it('chain が無効な slug (例 avalanche) → エラー (どの USDC chain か明示しろ)', () => {
+  it('chain が無効な slug (例 unknownchain) → エラー (どの USDC chain か明示しろ)', () => {
     const r = parsePayParams(
-      search(`to=${VALID_TO}&token=usdc&chain=avalanche`),
+      search(`to=${VALID_TO}&token=usdc&chain=unknownchain`),
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('chain');
@@ -1112,8 +1112,8 @@ describe('parseTipParams: chain パラメタ (Phase 1 multi-chain)', () => {
     if (r.ok) expect(r.params.chain).toBe('optimism');
   });
 
-  it('chain=avalanche → エラー (slug invalid)', () => {
-    const r = parseTipParams(VALID_TO, search('token=usdc&chain=avalanche'));
+  it('chain=unknownchain → エラー (slug invalid)', () => {
+    const r = parseTipParams(VALID_TO, search('token=usdc&chain=unknownchain'));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('chain');
   });

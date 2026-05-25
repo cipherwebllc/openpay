@@ -181,7 +181,9 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
         domain: CIRCLE_DOMAIN_AVALANCHE,
         chainId: avalanche.id,
         isTestnet: false,
-        role: 'buyer-only',
+        // phase 4b-2: Avalanche を merchant 昇格。Pimlico ERC-20 paymaster +
+        // Circle Gateway 両対応 chain で USDC merchant 受信を許可。
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_UNICHAIN,
@@ -227,7 +229,8 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
         domain: CIRCLE_DOMAIN_AVALANCHE,
         chainId: avalancheFuji.id,
         isTestnet: true,
-        role: 'buyer-only',
+        // phase 4b-2: mainnet と同じく merchant 昇格。
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_UNICHAIN,

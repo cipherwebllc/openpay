@@ -76,10 +76,10 @@ describe('useCheckoutSettings', () => {
     expect(result.current.settings.chain).toBe('optimism');
   });
 
-  it('usdc + 不正 chain (avalanche) → default base に倒す', async () => {
+  it('usdc + 不正 chain (unknownchain) → default base に倒す', async () => {
     window.localStorage.setItem(
       KEY,
-      JSON.stringify({ token: 'usdc', chain: 'avalanche' }),
+      JSON.stringify({ token: 'usdc', chain: 'unknownchain' }),
     );
     const { result } = renderHook(() => useCheckoutSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));

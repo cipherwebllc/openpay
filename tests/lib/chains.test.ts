@@ -34,16 +34,17 @@ import {
 
 // vitest.config.ts で NETWORK_ENV='testnet' なので testnet 側を期待
 describe('chains (testnet env)', () => {
-  it('chainForSlug が testnet env で sepolia/kairos 系チェーンを返す (6 slug 全て)', () => {
+  it('chainForSlug が testnet env で sepolia/kairos/fuji 系チェーンを返す (7 slug 全て)', () => {
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
     expect(chainForSlug('base').id).toBe(baseSepolia.id);
     expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
     expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
     expect(chainForSlug('kaia').id).toBe(kairos.id);
     expect(chainForSlug('ethereum').id).toBe(sepolia.id);
+    expect(chainForSlug('avalanche').id).toBe(avalancheFuji.id);
   });
 
-  it('supportedChains は 8 本 (merchant 6: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum + buyer-only 2: Avalanche / Unichain)', () => {
+  it('supportedChains は 8 本 (merchant 7: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum / Avalanche + buyer-only 1: Unichain)', () => {
     expect(supportedChains).toHaveLength(8);
     const ids = supportedChains.map((c) => c.id);
     expect(ids).toContain(baseSepolia.id);
@@ -70,14 +71,19 @@ describe('chains (testnet env)', () => {
 });
 
 describe('isValidChainSlug', () => {
-  it.each(['base', 'arbitrum', 'optimism', 'polygon', 'kaia', 'ethereum'])(
-    '"%s" → true',
-    (s) => {
-      expect(isValidChainSlug(s)).toBe(true);
-    },
-  );
+  it.each([
+    'base',
+    'arbitrum',
+    'optimism',
+    'polygon',
+    'kaia',
+    'ethereum',
+    'avalanche',
+  ])('"%s" → true', (s) => {
+    expect(isValidChainSlug(s)).toBe(true);
+  });
 
-  it.each(['eth', 'BASE', '', 'avalanche', 'unknown', 'kairos', 'mainnet'])(
+  it.each(['eth', 'BASE', '', 'unichain', 'unknown', 'kairos', 'mainnet'])(
     '"%s" → false',
     (s) => {
       expect(isValidChainSlug(s)).toBe(false);
@@ -86,13 +92,14 @@ describe('isValidChainSlug', () => {
 });
 
 describe('chainForSlug', () => {
-  it('testnet env では sepolia/kairos 系が返る', () => {
+  it('testnet env では sepolia/kairos/fuji 系が返る', () => {
     expect(chainForSlug('base').id).toBe(baseSepolia.id);
     expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
     expect(chainForSlug('optimism').id).toBe(optimismSepolia.id);
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
     expect(chainForSlug('kaia').id).toBe(kairos.id);
     expect(chainForSlug('ethereum').id).toBe(sepolia.id);
+    expect(chainForSlug('avalanche').id).toBe(avalancheFuji.id);
   });
 });
 
@@ -104,6 +111,7 @@ describe('slugForChain', () => {
     expect(slugForChain(polygonAmoy.id)).toBe('polygon');
     expect(slugForChain(kairos.id)).toBe('kaia');
     expect(slugForChain(sepolia.id)).toBe('ethereum');
+    expect(slugForChain(avalancheFuji.id)).toBe('avalanche');
   });
 
   it('未対応 chainId は undefined', () => {
@@ -115,13 +123,14 @@ describe('slugForChain', () => {
 });
 
 describe('isSupportedChainId', () => {
-  it('対応 5 chain は true (testnet env)', () => {
+  it('対応 7 chain は true (testnet env)', () => {
     expect(isSupportedChainId(baseSepolia.id)).toBe(true);
     expect(isSupportedChainId(arbitrumSepolia.id)).toBe(true);
     expect(isSupportedChainId(optimismSepolia.id)).toBe(true);
     expect(isSupportedChainId(polygonAmoy.id)).toBe(true);
     expect(isSupportedChainId(kairos.id)).toBe(true);
     expect(isSupportedChainId(sepolia.id)).toBe(true);
+    expect(isSupportedChainId(avalancheFuji.id)).toBe(true);
   });
 
   it('非対応 / undefined / 0 は false', () => {
@@ -151,13 +160,14 @@ describe('JPYC_CHAINS / isJpycChainSlug', () => {
 });
 
 describe('customRpcUrlForChain', () => {
-  it('env 未設定なら undefined (対応 6 chain × mainnet/testnet すべて)', () => {
+  it('env 未設定なら undefined (対応 7 chain × mainnet/testnet すべて)', () => {
     expect(customRpcUrlForChain(chainForSlug('polygon').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('base').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('arbitrum').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('optimism').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('kaia').id)).toBeUndefined();
     expect(customRpcUrlForChain(chainForSlug('ethereum').id)).toBeUndefined();
+    expect(customRpcUrlForChain(chainForSlug('avalanche').id)).toBeUndefined();
     expect(customRpcUrlForChain(arbitrum.id)).toBeUndefined();
     expect(customRpcUrlForChain(optimism.id)).toBeUndefined();
     expect(customRpcUrlForChain(mainnet.id)).toBeUndefined();
@@ -283,9 +293,9 @@ describe('chainLogoPathForId', () => {
     ['polygon', polygonAmoy.id],
     ['kaia', kairos.id],
     ['ethereum', sepolia.id],
-    // buyer-only chain (phase 4b-1) も解決可能でないと CrossChainSourceChooser で
-    // logo が欠落する (= 既存 chainNameForId と同じ覆域でなければならない)。
     ['avalanche', avalancheFuji.id],
+    // buyer-only chain (Unichain) も解決可能でないと CrossChainSourceChooser で
+    // logo が欠落する (= 既存 chainNameForId と同じ覆域でなければならない)。
     ['unichain', unichainSepolia.id],
   ] as const)(
     'supportedChains の 8 chain (%s) すべてに /chains/<slug>.svg を返す',
