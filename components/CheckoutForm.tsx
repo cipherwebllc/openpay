@@ -71,16 +71,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
   const gasAmount = !isStandard ? gasQuote.data?.gasAmount : undefined;
+  const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
     () =>
       calcBreakdown(
         totalWei,
         params.token,
-        params.mode,
+        effectiveMode,
         params.gas,
         gasAmount ?? 0n,
       ),
-    [totalWei, params.token, params.mode, params.gas, gasAmount],
+    [totalWei, params.token, effectiveMode, params.gas, gasAmount],
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
