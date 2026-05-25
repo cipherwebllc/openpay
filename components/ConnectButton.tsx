@@ -15,11 +15,12 @@ function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
   const [visible, setVisible] = useState<Connector[]>([]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
+    const ctrl = new AbortController();
+    async function probe() {
       const accepted: Connector[] = [];
       const seen = new Set<string>();
       for (const c of raw) {
+        if (ctrl.signal.aborted) return;
         if (c.type === 'injected') {
           try {
             const p = await c.getProvider();
@@ -32,9 +33,10 @@ function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
         seen.add(c.name);
         accepted.push(c);
       }
-      if (!cancelled) setVisible(accepted);
-    })();
-    return () => { cancelled = true; };
+      if (!ctrl.signal.aborted) setVisible(accepted);
+    }
+    probe();
+    return () => ctrl.abort();
   }, [raw]);
 
   return visible;
