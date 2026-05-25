@@ -315,9 +315,9 @@ describe('parseCheckoutParams: chain パラメタ', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('chain=avalanche → エラー (slug invalid)', () => {
+  it('chain=unknownchain → エラー (slug invalid)', () => {
     const r = parseCheckoutParams(
-      search(`to=${MERCHANT}&token=usdc&chain=avalanche&items=A:1:5`),
+      search(`to=${MERCHANT}&token=usdc&chain=unknownchain&items=A:1:5`),
     );
     expect(r.ok).toBe(false);
   });

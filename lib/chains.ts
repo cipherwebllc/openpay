@@ -15,6 +15,9 @@
 // supportedChains に追加 (cross-chain Gateway source として buyer wallet が動作可能)。
 // merchant chain chooser (USDC_CHAINS) には出さない、URL の `chain=avalanche` は
 // isValidChainSlug が false を返し reject される。
+// phase 4b-2 (2026-05-26): Avalanche を merchant-and-buyer に昇格。Pimlico ERC-20
+// paymaster + Circle Gateway 両対応の chain で、USDC merchant 受信を許可。
+// Unichain は引き続き buyer-only (Pimlico ERC-20 paymaster 未対応)。
 import {
   arbitrum,
   arbitrumSepolia,
@@ -46,13 +49,14 @@ export type ChainSlug =
   | 'optimism'
   | 'polygon'
   | 'kaia'
-  | 'ethereum';
+  | 'ethereum'
+  | 'avalanche';
 
 // buyer 側 source として balance を見るだけの chain slug。phase 4b-1 で導入、
 // merchant chooser には出さないが lib/crossChain/balance.ts の readMultiChainWalletBalances
 // が CROSS_CHAIN_TARGETS から enumerate するため lib/chains.ts に Chain 解決経路を
-// 持たせる必要がある。
-export type BuyerOnlyChainSlug = 'avalanche' | 'unichain';
+// 持たせる必要がある。phase 4b-2 で Avalanche は ChainSlug へ昇格、本 union からは外す。
+export type BuyerOnlyChainSlug = 'unichain';
 
 const MAINNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   base,
@@ -61,6 +65,7 @@ const MAINNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   polygon,
   kaia,
   ethereum: mainnet,
+  avalanche,
 };
 
 const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
@@ -70,15 +75,14 @@ const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   polygon: polygonAmoy,
   kaia: kairos,
   ethereum: sepolia,
+  avalanche: avalancheFuji,
 };
 
 const MAINNET_BUYER_ONLY_TO_CHAIN: Record<BuyerOnlyChainSlug, Chain> = {
-  avalanche,
   unichain,
 };
 
 const TESTNET_BUYER_ONLY_TO_CHAIN: Record<BuyerOnlyChainSlug, Chain> = {
-  avalanche: avalancheFuji,
   unichain: unichainSepolia,
 };
 
@@ -97,19 +101,18 @@ const ALL_SLUGS: readonly ChainSlug[] = [
   'polygon',
   'kaia',
   'ethereum',
+  'avalanche',
 ];
 
-const ALL_BUYER_ONLY_SLUGS: readonly BuyerOnlyChainSlug[] = [
-  'avalanche',
-  'unichain',
-];
+const ALL_BUYER_ONLY_SLUGS: readonly BuyerOnlyChainSlug[] = ['unichain'];
 
 // 順序は wagmi createConfig 用 + UI の表示順
-// (merchant chooser: Base 既定 → Arbitrum → Optimism → Polygon → Kaia → Ethereum)。
-// Ethereum L1 は最後 (L1 gas 高額、SBI VC トレード等の特定経路で merchant が
-// 受信するための追加 — phase 4a)。
-// phase 4b-1: buyer-only chain (Avalanche / Unichain) も wagmi 接続候補に含める
-// (buyer wallet が Avalanche に繋がっている時に BurnIntent sign / switchChain 経路を
+// (merchant chooser: Base 既定 → Arbitrum → Optimism → Polygon → Kaia → Ethereum
+//   → Avalanche)。
+// Ethereum L1 は phase 4a 末尾追加 (L1 gas 高額、SBI VC トレード等の特定経路)。
+// Avalanche は phase 4b-2 で末尾追加 (Pimlico ERC-20 paymaster + Gateway 両対応)。
+// phase 4b-1: buyer-only chain (Unichain) も wagmi 接続候補に含める
+// (buyer wallet が Unichain に繋がっている時に BurnIntent sign / switchChain 経路を
 // 動作させるため)。merchant UI には USDC_CHAINS で除外しているので chain chooser
 // には出ない、wagmi 経由の操作対象としてのみ意味を持つ。
 // wagmi の chains は non-empty tuple を要求するため明示要素で satisfies する。
@@ -120,7 +123,7 @@ export const supportedChains = [
   SLUG_TO_CHAIN.polygon,
   SLUG_TO_CHAIN.kaia,
   SLUG_TO_CHAIN.ethereum,
-  BUYER_ONLY_SLUG_TO_CHAIN.avalanche,
+  SLUG_TO_CHAIN.avalanche,
   BUYER_ONLY_SLUG_TO_CHAIN.unichain,
 ] as const satisfies readonly [
   Chain,
@@ -146,6 +149,7 @@ export const USDC_CHAINS: readonly ChainSlug[] = [
   'optimism',
   'polygon',
   'ethereum',
+  'avalanche',
 ];
 
 // 2026-05-24: Ethereum は merchant 受信は維持するが buyer cross-chain source
@@ -157,9 +161,8 @@ const BUYER_SOURCE_USDC_SLUGS: readonly ChainSlug[] = USDC_CHAINS.filter(
 );
 
 /** Customer (buyer) が cross-chain Gateway 経由で USDC を支払える chain の
- * 表示名一覧。merchant 受信 4 chain (Ethereum 除く) + buyer-only 2 chain
- * (Avalanche / Unichain) = 6 chain。ポスター等 customer 向け表示で「自分の
- * chain で払えるか」確認する用途に使う。
+ * 表示名一覧。merchant 受信 (Ethereum 除く) + buyer-only chain。ポスター等
+ * customer 向け表示で「自分の chain で払えるか」確認する用途に使う。
  * 2026-05-24 Ethereum は merchant-only (buyer source 不可) のため除外、表示と
  * 実 backend 挙動 (BUYER_SOURCE_TARGETS) を sync させる。
  * 順序は merchant chooser と同じ + buyer-only を末尾に追加。 */

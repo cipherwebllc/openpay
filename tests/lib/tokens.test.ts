@@ -45,31 +45,28 @@ describe('TOKEN_DEPLOYMENTS', () => {
     }
   });
 
-  it('USDC は 7 chain (merchant 5 + buyer-only 2: Base / Arbitrum / Optimism / Polygon / Ethereum + Avalanche / Unichain)', () => {
+  it('USDC は 7 chain (merchant 6 + buyer-only 1: Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche + Unichain)', () => {
     const usdc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'usdc');
     expect(usdc).toHaveLength(7);
     const chainIds = usdc.map((d) => d.chainId);
-    // merchant chain (5)
+    // merchant chain (6, phase 4b-2 で Avalanche 昇格)
     expect(chainIds).toContain(baseSepolia.id);
     expect(chainIds).toContain(arbitrumSepolia.id);
     expect(chainIds).toContain(optimismSepolia.id);
     expect(chainIds).toContain(polygonAmoy.id);
     expect(chainIds).toContain(sepolia.id);
-    // buyer-only chain (2, phase 4b-1)
     expect(chainIds).toContain(avalancheFuji.id);
+    // buyer-only chain (1, Unichain)
     expect(chainIds).toContain(unichainSepolia.id);
     for (const d of usdc) {
       expect(d.decimals).toBe(6);
       expect(d.displaySymbol).toBe('USDC');
     }
-    // Ethereum / Avalanche / Unichain は paymasterMode='unavailable'
-    // (Pimlico 未対応 + buyer-only chain は gasless 不要)、他 4 chain は erc20。
+    // Ethereum / Unichain は paymasterMode='unavailable'
+    // (Pimlico 未対応 + buyer-only chain は gasless 不要)、他は erc20
+    // (Avalanche は phase 4b-2 で erc20 へ昇格)。
     for (const d of usdc) {
-      if (
-        d.chainId === sepolia.id ||
-        d.chainId === avalancheFuji.id ||
-        d.chainId === unichainSepolia.id
-      ) {
+      if (d.chainId === sepolia.id || d.chainId === unichainSepolia.id) {
         expect(d.paymasterMode).toBe('unavailable');
       } else {
         expect(d.paymasterMode).toBe('erc20');
@@ -124,10 +121,11 @@ describe('resolveDeployment', () => {
 });
 
 describe('deploymentsForSymbol', () => {
-  it('jpyc は 2 件 (polygon + kaia) / usdc は 7 件 (merchant 5 + buyer-only 2)', () => {
+  it('jpyc は 2 件 (polygon + kaia) / usdc は 7 件 (merchant 6 + buyer-only 1)', () => {
     // 2026-05-23 Kaia 対応で JPYC は polygon + kaia の 2 deployment。
     // USDC は kaia 未対応 (Circle native USDC 未 deploy)、phase 4a で Ethereum L1
-    // 追加 (merchant 5)、phase 4b-1 で Avalanche / Unichain buyer-only 2 を append。
+    // 追加、phase 4b-1 で Avalanche / Unichain buyer-only 追加、
+    // phase 4b-2 で Avalanche を merchant 昇格 (merchant 6 + buyer-only 1)。
     expect(deploymentsForSymbol('jpyc')).toHaveLength(2);
     expect(deploymentsForSymbol('usdc')).toHaveLength(7);
   });
