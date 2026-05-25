@@ -1,14 +1,35 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useTranslations } from 'next-intl';
+import type { Connector } from 'wagmi';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { shortAddress } from '@/lib/format';
 
+/**
+ * wagmi の multiInjectedProviderDiscovery (EIP-6963) と明示的 injected({ target })
+ * の両方を有効にすると、同一ウォレットが 2 つ列挙される場合がある。
+ * connector.name をキーに最初の出現を残し、後続の重複を除外する。
+ */
+function deduplicateConnectors(connectors: readonly Connector[]): Connector[] {
+  const seen = new Set<string>();
+  return connectors.filter((c) => {
+    if (seen.has(c.name)) return false;
+    seen.add(c.name);
+    return true;
+  });
+}
+
 export function ConnectButton() {
   const { address, isConnected, chain } = useAccount();
-  const { connectors, connect, isPending, error } = useConnect();
+  const { connectors: rawConnectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
   const t = useTranslations('ConnectButton');
+
+  const connectors = useMemo(
+    () => deduplicateConnectors(rawConnectors),
+    [rawConnectors],
+  );
 
   if (isConnected && address) {
     return (

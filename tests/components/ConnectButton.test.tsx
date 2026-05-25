@@ -82,6 +82,28 @@ describe('ConnectButton (disconnected)', () => {
   });
 });
 
+describe('ConnectButton (deduplication)', () => {
+  it('同じ name の connector が複数あっても 1 つだけ表示される', () => {
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [
+        { uid: '1', name: 'Rabby Wallet' },
+        { uid: '2', name: 'Rabby Wallet' },
+        { uid: '3', name: 'MetaMask' },
+      ],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    const rabbyButtons = screen.getAllByRole('button', { name: 'Rabby Wallet' });
+    expect(rabbyButtons).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+  });
+});
+
 describe('ConnectButton (connected)', () => {
   it('短縮アドレス + chain 名 + 切断ボタン', async () => {
     const user = userEvent.setup();

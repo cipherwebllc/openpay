@@ -12,6 +12,7 @@ const transports = Object.fromEntries(
 
 const connectors = [
   injected(),
+  injected({ target: 'rabby' }),
   coinbaseWallet({
     appName: 'OpenPay',
     preference: 'all',

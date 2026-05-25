@@ -123,7 +123,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : !isStandard && isIncompatibleSmartAccountError(saError)
-      ? t(saError.i18nKey)
+      ? t(saError.i18nKey, { address: saError.delegateAddress ?? 'unknown' })
       : (flowError?.message ??
         (isStandard ? undefined : saError?.message) ??
         (gasQuote.error ? t('errorGasQuote') : null) ??

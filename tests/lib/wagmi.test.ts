@@ -27,9 +27,10 @@ describe('wagmiConfig', () => {
     expect(wagmiConfig._internal.ssr).toBe(true);
   });
 
-  it('connectors に injected と coinbaseWallet が含まれる', () => {
+  it('connectors に injected (generic + Rabby) と coinbaseWallet が含まれる', () => {
     const names = wagmiConfig.connectors.map((c) => c.name);
-    // 順序は injected → coinbase。WalletConnect は projectId 未設定で除外
+    // 順序は injected (generic) → injected (Rabby) → coinbase。
+    // WalletConnect は projectId 未設定で除外
     expect(names[0]).toBe('Injected');
     expect(names).toContain('Coinbase Wallet');
   });
@@ -62,19 +63,19 @@ describe('wagmiConfig', () => {
     expect(
       names.some((n) => /walletconnect/i.test(n)),
     ).toBe(true);
-    // 順序: injected → coinbaseWallet → walletConnect (3 つ)
-    expect(mod.wagmiConfig.connectors.length).toBeGreaterThanOrEqual(3);
+    // 順序: injected (generic) → injected (Rabby) → coinbaseWallet → walletConnect (4 つ)
+    expect(mod.wagmiConfig.connectors.length).toBeGreaterThanOrEqual(4);
   });
 
   it('NEXT_PUBLIC_WC_PROJECT_ID 設定時の connector 数は 3 (未設定時は 2)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_WC_PROJECT_ID = 'wc_proj_test_id';
     const withWc = await import('@/lib/wagmi');
-    expect(withWc.wagmiConfig.connectors).toHaveLength(3);
+    expect(withWc.wagmiConfig.connectors).toHaveLength(4);
 
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_WC_PROJECT_ID;
     const withoutWc = await import('@/lib/wagmi');
-    expect(withoutWc.wagmiConfig.connectors).toHaveLength(2);
+    expect(withoutWc.wagmiConfig.connectors).toHaveLength(3);
   });
 });

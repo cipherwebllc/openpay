@@ -109,7 +109,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
     : isIncompatibleSmartAccountError(saError)
-      ? t(saError.i18nKey)
+      ? t(saError.i18nKey, { address: saError.delegateAddress ?? 'unknown' })
       : (gasless.error?.message ??
         saError?.message ??
         (gasQuote.error ? t('errorGasQuote') : null));
