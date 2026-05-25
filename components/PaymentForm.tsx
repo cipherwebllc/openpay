@@ -99,16 +99,17 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //   standard mode: 顧客 wallet が gas を自前で算定・支払うため OpenPay 側で見積らない。
   const gasAmount = !isStandard ? gasQuote.data?.gasAmount : undefined;
 
+  const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
     () =>
       calcBreakdown(
         amountWei,
         params.token,
-        params.mode,
+        effectiveMode,
         params.gas,
         gasAmount ?? 0n,
       ),
-    [amountWei, params.token, params.mode, params.gas, gasAmount],
+    [amountWei, params.token, effectiveMode, params.gas, gasAmount],
   );
 
   // standard mode では split は無視 (シンプルな EOA 直列 transfer に限定)。
