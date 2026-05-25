@@ -7,63 +7,46 @@ import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { shortAddress } from '@/lib/format';
 
 /**
- * wagmi の multiInjectedProviderDiscovery (EIP-6963) と明示的 injected({ target })
- * の両方を有効にすると、同一ウォレットが 2 つ列挙される場合がある。
- * connector.name をキーに最初の出現を残し、後続の重複を除外する。
+ * wagmi の connectors リストから表示用のサブセットを生成する。
+ * 1. injected コネクタのうち provider 不在のもの (モバイルでブラウザ拡張なし) を除外
+ * 2. 同名コネクタの重複を排除 (EIP-6963 auto-discovery + 明示 target の併用時)
  */
-function deduplicateConnectors(connectors: Connector[]): Connector[] {
-  const seen = new Set<string>();
-  return connectors.filter((c) => {
-    if (seen.has(c.name)) return false;
-    seen.add(c.name);
-    return true;
-  });
-}
-
-/**
- * injected コネクタのうち provider が存在しないもの (モバイル環境でブラウザ
- * 拡張が無い場合など) を非同期で除外する。WalletConnect / Coinbase Wallet 等の
- * non-injected コネクタは常に通す。
- */
-function useAvailableConnectors(rawConnectors: readonly Connector[]): Connector[] {
-  const [available, setAvailable] = useState<Connector[]>([]);
+function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
+  const [visible, setVisible] = useState<Connector[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    async function probe() {
-      const results: Connector[] = [];
-      for (const c of rawConnectors) {
-        if (c.type !== 'injected') {
-          results.push(c);
-          continue;
+    (async () => {
+      const accepted: Connector[] = [];
+      const seen = new Set<string>();
+      for (const c of raw) {
+        if (c.type === 'injected') {
+          try {
+            const p = await c.getProvider();
+            if (!p) continue;
+          } catch {
+            continue;
+          }
         }
-        try {
-          const provider = await c.getProvider();
-          if (provider) results.push(c);
-        } catch {
-          // provider が見つからない injected コネクタは除外
-        }
+        if (seen.has(c.name)) continue;
+        seen.add(c.name);
+        accepted.push(c);
       }
-      if (!cancelled) setAvailable(results);
-    }
-    probe();
+      if (!cancelled) setVisible(accepted);
+    })();
     return () => { cancelled = true; };
-  }, [rawConnectors]);
+  }, [raw]);
 
-  return available;
+  return visible;
 }
 
 export function ConnectButton() {
   const { address, isConnected, chain } = useAccount();
-  const { connectors: rawConnectors, connect, isPending, error } = useConnect();
+  const { connectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
   const t = useTranslations('ConnectButton');
 
-  const probed = useAvailableConnectors(rawConnectors);
-  const connectors = useMemo(
-    () => deduplicateConnectors(probed),
-    [probed],
-  );
+  const visible = useVisibleConnectors(connectors);
 
   if (isConnected && address) {
     return (
@@ -87,7 +70,7 @@ export function ConnectButton() {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
-        {connectors.map((c) => (
+        {visible.map((c) => (
           <button
             key={c.uid}
             type="button"
