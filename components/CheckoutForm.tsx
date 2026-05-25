@@ -14,6 +14,7 @@ import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
+import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -40,11 +41,12 @@ const SUCCESS_REDIRECT_DELAY_MS = 3000;
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
   const router = useRouter();
+  const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
 
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const deployment = deploymentForSlug(params.token, chainSlug);
   const requiredChain = chainForSlug(chainSlug);
-  const isStandard = params.mode === 'standard';
+  const isStandard = params.mode === 'standard' || modeOverride === 'standard';
   const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
@@ -120,16 +122,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     !merchantUnderflow;
 
   const flowError = isStandard ? standard.error : gasless.error;
+  const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : !isStandard && isIncompatibleSmartAccountError(saError)
-      ? t(saError.i18nKey, { address: saError.delegateAddress ?? 'unknown' })
-      : (flowError?.message ??
-        (isStandard ? undefined : saError?.message) ??
-        (gasQuote.error ? t('errorGasQuote') : null) ??
-        (merchantUnderflow
-          ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-          : null));
+    : (flowError?.message ??
+      (isStandard || saFallback ? undefined : saError?.message) ??
+      (gasQuote.error ? t('errorGasQuote') : null) ??
+      (merchantUnderflow
+        ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
+        : null));
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
   // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。
@@ -473,6 +474,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           </p>
         )}
       </section>
+
+      {saFallback && !modeOverride && (
+        <SmartAccountFallbackBanner
+          delegateAddress={saError.delegateAddress}
+          nativeToken={nativeToken}
+          canFallbackToStandard
+          onSwitchToStandard={() => setModeOverride('standard')}
+        />
+      )}
 
       {!completed && (
         <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">

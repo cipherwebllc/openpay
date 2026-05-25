@@ -12,6 +12,7 @@ import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { CrossChainHint } from './CrossChainHint';
 import { Row } from './Row';
+import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { SuccessOverlay } from './SuccessOverlay';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -52,7 +53,8 @@ export function PaymentForm() {
 
 function PaymentDetails({ params }: { params: PayParams }) {
   const t = useTranslations('PaymentForm');
-  const isStandard = params.mode === 'standard';
+  const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
+  const isStandard = params.mode === 'standard' || modeOverride === 'standard';
   // parsePayParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const deployment = deploymentForSlug(params.token, chainSlug);
@@ -175,16 +177,17 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
   const flowError = isStandard ? standard.error : gasless.error;
+  // IncompatibleSmartAccountError は SmartAccountFallbackBanner で表示するため
+  // error ternary からは除外する。
+  const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : !isStandard && isIncompatibleSmartAccountError(saError)
-      ? t(saError.i18nKey, { address: saError.delegateAddress ?? 'unknown' })
-      : (flowError?.message ??
-        (isStandard ? undefined : saError?.message) ??
-        (gasQuote.error ? t('errorGasQuote') : null) ??
-        (merchantUnderflow
-          ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-          : null));
+    : (flowError?.message ??
+      (isStandard || saFallback ? undefined : saError?.message) ??
+      (gasQuote.error ? t('errorGasQuote') : null) ??
+      (merchantUnderflow
+        ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
+        : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
@@ -346,6 +349,15 @@ function PaymentDetails({ params }: { params: PayParams }) {
             {t('standardModeBody', { nativeToken })}
           </p>
         </div>
+      )}
+
+      {saFallback && !modeOverride && (
+        <SmartAccountFallbackBanner
+          delegateAddress={saError.delegateAddress}
+          nativeToken={nativeToken}
+          canFallbackToStandard
+          onSwitchToStandard={() => setModeOverride('standard')}
+        />
       )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5">

@@ -777,5 +777,12 @@
       }
     },
     "legalNote": "本表記は日本語版を正本とします。英語版は参考訳であり、両者に齟齬がある場合は日本語版が優先します。"
+  },
+  "SmartAccountFallback": {
+    "bannerTitle": "未対応の Smart Account を検出",
+    "bannerBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。通常決済モードに切り替えると決済できます — ガス代は {nativeToken} で自己負担、手数料は 0.5% になります。",
+    "switchButton": "通常決済に切替 (ガス代自己負担)",
+    "tipOnlyTitle": "未対応の Smart Account を検出",
+    "tipOnlyBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。チップ送信にはガスレスモードが必要なため、このウォレットではチップを送れません。MetaMask の場合は「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。"
   }
 }
