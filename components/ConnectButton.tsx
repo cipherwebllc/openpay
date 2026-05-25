@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Connector } from 'wagmi';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
