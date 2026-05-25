@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Connector } from 'wagmi';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
@@ -11,7 +11,7 @@ import { shortAddress } from '@/lib/format';
  * の両方を有効にすると、同一ウォレットが 2 つ列挙される場合がある。
  * connector.name をキーに最初の出現を残し、後続の重複を除外する。
  */
-function deduplicateConnectors(connectors: readonly Connector[]): Connector[] {
+function deduplicateConnectors(connectors: Connector[]): Connector[] {
   const seen = new Set<string>();
   return connectors.filter((c) => {
     if (seen.has(c.name)) return false;
@@ -20,15 +20,49 @@ function deduplicateConnectors(connectors: readonly Connector[]): Connector[] {
   });
 }
 
+/**
+ * injected コネクタのうち provider が存在しないもの (モバイル環境でブラウザ
+ * 拡張が無い場合など) を非同期で除外する。WalletConnect / Coinbase Wallet 等の
+ * non-injected コネクタは常に通す。
+ */
+function useAvailableConnectors(rawConnectors: readonly Connector[]): Connector[] {
+  const [available, setAvailable] = useState<Connector[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function probe() {
+      const results: Connector[] = [];
+      for (const c of rawConnectors) {
+        if (c.type !== 'injected') {
+          results.push(c);
+          continue;
+        }
+        try {
+          const provider = await c.getProvider();
+          if (provider) results.push(c);
+        } catch {
+          // provider が見つからない injected コネクタは除外
+        }
+      }
+      if (!cancelled) setAvailable(results);
+    }
+    probe();
+    return () => { cancelled = true; };
+  }, [rawConnectors]);
+
+  return available;
+}
+
 export function ConnectButton() {
   const { address, isConnected, chain } = useAccount();
   const { connectors: rawConnectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
   const t = useTranslations('ConnectButton');
 
+  const probed = useAvailableConnectors(rawConnectors);
   const connectors = useMemo(
-    () => deduplicateConnectors(rawConnectors),
-    [rawConnectors],
+    () => deduplicateConnectors(probed),
+    [probed],
   );
 
   if (isConnected && address) {

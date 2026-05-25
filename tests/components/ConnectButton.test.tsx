@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
@@ -16,6 +16,21 @@ import { mockHook } from '../_helpers/wagmiMock';
 
 const ADDR = '0x1234567890aBcdef1234567890ABCDEF12345678';
 
+/** injected コネクタ mock (provider あり) */
+function injectedConnector(uid: string, name: string) {
+  return { uid, name, type: 'injected', getProvider: () => Promise.resolve({}) };
+}
+
+/** injected コネクタ mock (provider なし — モバイル等) */
+function injectedConnectorNoProvider(uid: string, name: string) {
+  return { uid, name, type: 'injected', getProvider: () => Promise.reject(new Error('not found')) };
+}
+
+/** non-injected コネクタ mock (WalletConnect, Coinbase 等) */
+function otherConnector(uid: string, name: string) {
+  return { uid, name, type: 'walletConnect', getProvider: () => Promise.resolve({}) };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -27,9 +42,9 @@ describe('ConnectButton (disconnected)', () => {
     mockHook(useAccount, { isConnected: false, address: undefined });
     mockHook(useConnect, {
       connectors: [
-        { uid: '1', name: 'MetaMask' },
-        { uid: '2', name: 'Coinbase Wallet' },
-        { uid: '3', name: 'WalletConnect' },
+        injectedConnector('1', 'MetaMask'),
+        otherConnector('2', 'Coinbase Wallet'),
+        otherConnector('3', 'WalletConnect'),
       ],
       connect,
       isPending: false,
@@ -38,7 +53,9 @@ describe('ConnectButton (disconnected)', () => {
     mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
-    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+    });
     expect(
       screen.getByRole('button', { name: 'Coinbase Wallet' }),
     ).toBeInTheDocument();
@@ -51,10 +68,10 @@ describe('ConnectButton (disconnected)', () => {
     expect(connect.mock.calls[0][0].connector.name).toBe('MetaMask');
   });
 
-  it('isPending 中は全ボタン disabled', () => {
+  it('isPending 中は全ボタン disabled', async () => {
     mockHook(useAccount, { isConnected: false, address: undefined });
     mockHook(useConnect, {
-      connectors: [{ uid: '1', name: 'MetaMask' }],
+      connectors: [injectedConnector('1', 'MetaMask')],
       connect: vi.fn(),
       isPending: true,
       error: null,
@@ -62,7 +79,9 @@ describe('ConnectButton (disconnected)', () => {
     mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
-    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'MetaMask' })).toBeDisabled();
+    });
   });
 
   it('error 状態 → エラーメッセージ表示', () => {
@@ -82,14 +101,14 @@ describe('ConnectButton (disconnected)', () => {
   });
 });
 
-describe('ConnectButton (deduplication)', () => {
-  it('同じ name の connector が複数あっても 1 つだけ表示される', () => {
+describe('ConnectButton (provider filtering)', () => {
+  it('provider が無い injected コネクタはモバイル等で非表示', async () => {
     mockHook(useAccount, { isConnected: false, address: undefined });
     mockHook(useConnect, {
       connectors: [
-        { uid: '1', name: 'Rabby Wallet' },
-        { uid: '2', name: 'Rabby Wallet' },
-        { uid: '3', name: 'MetaMask' },
+        injectedConnectorNoProvider('1', 'Injected'),
+        injectedConnectorNoProvider('2', 'Rabby Wallet'),
+        otherConnector('3', 'Coinbase Wallet'),
       ],
       connect: vi.fn(),
       isPending: false,
@@ -98,9 +117,35 @@ describe('ConnectButton (deduplication)', () => {
     mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Coinbase Wallet' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: 'Injected' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rabby Wallet' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConnectButton (deduplication)', () => {
+  it('同じ name の connector が複数あっても 1 つだけ表示される', async () => {
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [
+        injectedConnector('1', 'Rabby Wallet'),
+        injectedConnector('2', 'Rabby Wallet'),
+        injectedConnector('3', 'MetaMask'),
+      ],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+    });
     const rabbyButtons = screen.getAllByRole('button', { name: 'Rabby Wallet' });
     expect(rabbyButtons).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
   });
 });
 
