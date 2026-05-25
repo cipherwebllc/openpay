@@ -89,12 +89,27 @@ describe('ConnectButton (disconnected)', () => {
       connectors: [],
       connect: vi.fn(),
       isPending: false,
-      error: { name: 'Error', message: 'User rejected' } as ConnectErrorType,
+      error: { name: 'Error', message: 'Something went wrong' } as ConnectErrorType,
     });
     mockHook(useDisconnect, { disconnect: vi.fn() });
 
     render(<ConnectButton />);
-    expect(screen.getByText(/User rejected/)).toBeInTheDocument();
+    expect(screen.getByText(/Something went wrong/)).toBeInTheDocument();
+  });
+
+  it('User rejected / Connection request reset はエラー非表示', () => {
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [],
+      connect: vi.fn(),
+      isPending: false,
+      error: { name: 'Error', message: 'User rejected the request. Details: Connection request reset.' } as ConnectErrorType,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    expect(screen.queryByText(/User rejected/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connection request reset/)).not.toBeInTheDocument();
   });
 
   it('provider が無い injected コネクタはモバイル等で非表示', async () => {

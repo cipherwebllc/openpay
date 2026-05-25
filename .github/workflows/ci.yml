@@ -30,11 +30,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       # coverage つきで実行 (vitest.config.ts の thresholds を下回ると fail)。
-      # --pool=forks で各テストファイルを独立プロセスで実行し、
-      # v8 coverage collector の cumulative heap 消費を抑制する。
-      - run: npm run test:coverage -- --pool=forks
-        env:
-          NODE_OPTIONS: '--max-old-space-size=4096'
+      # v8 coverage collector の cumulative heap が OOM するため
+      # --pool forks --poolOptions.forks.singleFork で各ファイルごとに
+      # fork を立て直す (メモリリーク耐性)。
+      - run: npm run test:coverage -- --pool forks --poolOptions.forks.singleFork
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet

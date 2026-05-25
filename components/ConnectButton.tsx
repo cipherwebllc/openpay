@@ -40,6 +40,15 @@ function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
   return visible;
 }
 
+/**
+ * ユーザーがウォレット接続をキャンセルした (WalletConnect モーダルを閉じた等)
+ * 場合のエラーを判定。意図的なキャンセルなのでエラー表示しない。
+ */
+function isUserRejection(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return msg.includes('user rejected') || msg.includes('connection request reset');
+}
+
 export function ConnectButton() {
   const { address, isConnected, chain } = useAccount();
   const { connectors, connect, isPending, error } = useConnect();
@@ -82,7 +91,7 @@ export function ConnectButton() {
           </button>
         ))}
       </div>
-      {error && (
+      {error && !isUserRejection(error) && (
         <p className="text-sm text-red-600">
           {t('connectError', { message: error.message })}
         </p>
