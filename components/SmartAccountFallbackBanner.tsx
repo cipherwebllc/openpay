@@ -20,13 +20,17 @@ export function SmartAccountFallbackBanner({
   const t = useTranslations('SmartAccountFallback');
   const addr = delegateAddress ? shortAddress(delegateAddress) : 'unknown';
 
-  if (canFallbackToStandard) {
-    return (
-      <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-        <p className="font-semibold">{t('bannerTitle')}</p>
-        <p className="mt-1 text-xs">
-          {t('bannerBody', { address: addr, nativeToken })}
-        </p>
+  return (
+    <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+      <p className="font-semibold">
+        {t(canFallbackToStandard ? 'bannerTitle' : 'tipOnlyTitle')}
+      </p>
+      <p className="mt-1 text-xs">
+        {canFallbackToStandard
+          ? t('bannerBody', { address: addr, nativeToken })
+          : t('tipOnlyBody', { address: addr })}
+      </p>
+      {canFallbackToStandard && (
         <button
           type="button"
           onClick={onSwitchToStandard}
@@ -34,16 +38,7 @@ export function SmartAccountFallbackBanner({
         >
           {t('switchButton')}
         </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-      <p className="font-semibold">{t('tipOnlyTitle')}</p>
-      <p className="mt-1 text-xs">
-        {t('tipOnlyBody', { address: addr })}
-      </p>
+      )}
     </div>
   );
 }

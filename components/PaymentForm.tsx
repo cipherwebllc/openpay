@@ -351,7 +351,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {saFallback && !modeOverride && (
+      {saFallback && (
         <SmartAccountFallbackBanner
           delegateAddress={saError.delegateAddress}
           nativeToken={nativeToken}

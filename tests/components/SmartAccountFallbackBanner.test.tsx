@@ -60,4 +60,28 @@ describe('SmartAccountFallbackBanner', () => {
     );
     expect(screen.getByText(/unknown/)).toBeInTheDocument();
   });
+
+  it('nativeToken がバナー本文に含まれる', () => {
+    render(
+      <SmartAccountFallbackBanner
+        delegateAddress={DELEGATE}
+        nativeToken="POL"
+        canFallbackToStandard
+        onSwitchToStandard={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/POL/)).toBeInTheDocument();
+  });
+
+  it('tip banner では nativeToken は本文に含まれない', () => {
+    render(
+      <SmartAccountFallbackBanner
+        delegateAddress={DELEGATE}
+        nativeToken="KAIA"
+        canFallbackToStandard={false}
+      />,
+    );
+    // tipOnlyBody には nativeToken placeholder が無い
+    expect(screen.getByText(/チップを送れません/)).toBeInTheDocument();
+  });
 });

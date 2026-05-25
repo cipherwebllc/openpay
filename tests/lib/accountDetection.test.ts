@@ -83,6 +83,30 @@ describe('detectAccountKind', () => {
     expect(r.delegateAddress).toBeNull();
   });
 
+  it('空文字列 code: none', async () => {
+    const c = mockPublicClient('');
+    const r = await detectAccountKind(c, ADDR);
+    expect(r.kind).toBe('none');
+    expect(r.delegateAddress).toBeNull();
+  });
+
+  it('MetaMask delegator の checksum 大文字混在でも一致', async () => {
+    const code = `0xEF0100${METAMASK_DELEGATOR_ADDRESS.slice(2)}`;
+    const c = mockPublicClient(code);
+    const r = await detectAccountKind(c, ADDR);
+    expect(r.kind).toBe('metamask-7702');
+    expect(r.delegateAddress).toBe(METAMASK_DELEGATOR_ADDRESS);
+  });
+
+  it('Kaia 上の未知 delegate (0x470a...): unknown + address 保持', async () => {
+    const kaiaDelegate = '0x470a5773112931D5f35318BE1eD0B9Fdc916bf19';
+    const code = `0xef0100${kaiaDelegate.slice(2).toLowerCase()}`;
+    const c = mockPublicClient(code);
+    const r = await detectAccountKind(c, ADDR);
+    expect(r.kind).toBe('unknown');
+    expect(r.delegateAddress?.toLowerCase()).toBe(kaiaDelegate.toLowerCase());
+  });
+
   it('7702 prefix だが target が無効な hex: unknown', async () => {
     // 40 chars だが invalid (getAddress が throw する偽データ — ただし viem は length OK なら通すので別の判定)
     // ここでは 0xef0100 + 40 hex の通常ケース。getAddress は基本通るが、prefix なし non-eip-55 では通る。

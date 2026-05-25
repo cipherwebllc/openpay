@@ -67,7 +67,7 @@ describe('wagmiConfig', () => {
     expect(mod.wagmiConfig.connectors.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('NEXT_PUBLIC_WC_PROJECT_ID 設定時の connector 数は 3 (未設定時は 2)', async () => {
+  it('NEXT_PUBLIC_WC_PROJECT_ID 設定時の connector 数は 4 (未設定時は 3)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_WC_PROJECT_ID = 'wc_proj_test_id';
     const withWc = await import('@/lib/wagmi');

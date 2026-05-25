@@ -475,7 +475,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         )}
       </section>
 
-      {saFallback && !modeOverride && (
+      {saFallback && (
         <SmartAccountFallbackBanner
           delegateAddress={saError.delegateAddress}
           nativeToken={nativeToken}
