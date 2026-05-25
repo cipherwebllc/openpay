@@ -31,7 +31,11 @@ jobs:
       - run: npm run typecheck
       # coverage つきで実行 (vitest.config.ts の thresholds を下回ると fail)。
       # 既存の test:run と等価で集合は変わらず、coverage 計測の overhead のみ。
+      # NODE_OPTIONS: v8 coverage collector が大量のテストファイルで OOM する
+      # ことがある (PaymentForm 69 tests 等)。4 GB に拡張して安定化。
       - run: npm run test:coverage
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet
