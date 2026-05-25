@@ -203,11 +203,10 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
         domain: CIRCLE_DOMAIN_ETHEREUM,
         chainId: mainnet.id,
         isTestnet: false,
-        // 2026-05-24 Ethereum mainnet を buyer source から外す:
-        // (1) 公開 RPC で USDC.balanceOf が timeout、UI が「他チェーン残高を確認中…」で hang
-        // (2) Ethereum 上の address poisoning 攻撃が過去最高、buyer 保護のため一時保留
-        // merchant 受信 (USDC_CHAINS 経由) は維持。落ち着いたら 'merchant-and-buyer' に戻す。
-        role: 'merchant-only',
+        // 2026-05-26 Ethereum mainnet を buyer source に復帰 (実機検証で問題出れば再除外):
+        // (1) RPC timeout 問題は viem fallback transport / timeout+skip で後追い対応予定
+        // (2) address poisoning は OpenPay の URL-param 由来 address 設計で構造的に低リスク
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_AVALANCHE,
@@ -281,9 +280,9 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
         domain: CIRCLE_DOMAIN_ETHEREUM,
         chainId: sepolia.id,
         isTestnet: true,
-        // mainnet 側 Ethereum を merchant-only に倒したので testnet も合わせる
+        // mainnet 側 Ethereum を merchant-and-buyer に復帰したので testnet も合わせる
         // (UI / balance fetch / pathEnumerator の挙動を env 間で揃える)。
-        role: 'merchant-only',
+        role: 'merchant-and-buyer',
       },
       {
         domain: CIRCLE_DOMAIN_AVALANCHE,
@@ -326,9 +325,9 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
     ];
 
 /** merchant 受信可能 chain のみ (USDC_CHAINS と 1:1)。
- * role='buyer-only' / 'merchant-only' は merchant 受信フローには含めない設計だが、
- * 'merchant-only' は merchant 受信は可能 (USDC_CHAINS 経由) なので含める。
- * 結果: 'merchant-and-buyer' (4) + 'merchant-only' (1=Ethereum) = 5 chain。
+ * role='buyer-only' は merchant 受信フローに含めない設計。
+ * 'merchant-only' は merchant 受信は可能だが現状該当 chain なし (Ethereum 復帰済)。
+ * 結果: 'merchant-and-buyer' (6: Polygon/Base/Arbitrum/Optimism/Avalanche/Ethereum) = 6 chain。
  * URL parser や merchant UI で「受信 chain として有効な集合」を取りたい時に使う。 */
 export const MERCHANT_RECEIVE_TARGETS: readonly CrossChainTarget[] =
   CROSS_CHAIN_TARGETS.filter(
@@ -336,8 +335,8 @@ export const MERCHANT_RECEIVE_TARGETS: readonly CrossChainTarget[] =
   );
 
 /** buyer が cross-chain source として使える chain 集合。
- * role='merchant-only' (= Ethereum) を除外。
- * 結果: 'merchant-and-buyer' (4) + 'buyer-only' (2) = 6 chain。
+ * role='merchant-only' を除外 (現状該当なし、Ethereum 復帰済)。
+ * 結果: 'merchant-and-buyer' (6) + 'buyer-only' (5) = 11 chain。
  * balance.ts / pathEnumerator は本 const を起点に source 列挙する。 */
 export const BUYER_SOURCE_TARGETS: readonly CrossChainTarget[] =
   CROSS_CHAIN_TARGETS.filter((t) => t.role !== 'merchant-only');

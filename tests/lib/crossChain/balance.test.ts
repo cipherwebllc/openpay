@@ -48,15 +48,12 @@ beforeEach(() => {
   readContractMocks.clear();
 });
 
-// 2026-05-24: Ethereum (sepolia) は CROSS_CHAIN_TARGETS で role='merchant-only'
-// に変更され、buyer source 列挙 (BUYER_SOURCE_TARGETS) から除外された。
-// balance.ts (readMultiChainWalletBalances / readGatewayUnifiedBalance) は
-// BUYER_SOURCE_TARGETS を起点に動くので Ethereum/sepolia は probe されない。
+// 2026-05-26: Ethereum (sepolia) を CROSS_CHAIN_TARGETS で role='merchant-and-buyer'
+// に復帰。buyer source 列挙 (BUYER_SOURCE_TARGETS) にも含まれる。
 // 2026-05-25 (phase 4b-3): World Chain / Sonic / Sei / HyperEVM を buyer-only として追加。
-// → 期待 chain count = 10 (merchant-and-buyer 4 + buyer-only 6)
+// → 期待 chain count = 11 (merchant-and-buyer 6 + buyer-only 5)
 // HyperEVM testnet (998) は viem/chains に未収録のため defineChain inline (lib/chains.ts) で
 // 解決される。本テストでは createPublicClient mock 経由で chainId のみ参照するので OK。
-// HyperEVM testnet は viem/chains に未収録、id=998 を直接 chain-like object で渡す。
 const HYPEREVM_TESTNET_ID = 998;
 
 // HyperEVM testnet (998) は viem/chains に未収録なので、本テストの
@@ -78,6 +75,7 @@ const ALL_TESTNET_CHAINS: readonly { id: number }[] = [
   arbitrumSepolia,
   optimismSepolia,
   avalancheFuji,
+  sepolia, // Ethereum L1 testnet (2026-05-26 復帰)
   unichainSepolia,
   worldchainSepolia,
   sonicBlazeTestnet,
@@ -87,7 +85,7 @@ const ALL_TESTNET_CHAINS: readonly { id: number }[] = [
 const TESTNET_CHAIN_COUNT = ALL_TESTNET_CHAINS.length;
 
 describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
-  it('10 chain 全部 success (merchant-and-buyer 4 + buyer-only 6): 各 chain の balance を返す', async () => {
+  it('11 chain 全部 success (merchant-and-buyer 6 + buyer-only 5): 各 chain の balance を返す', async () => {
     for (const chain of ALL_TESTNET_CHAINS) {
       const m = vi.fn().mockResolvedValue(BigInt(chain.id) * 1_000_000n);
       readContractMocks.set(chain.id, m);
@@ -111,6 +109,8 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
     readContractMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue(7n));
     readContractMocks.set(optimismSepolia.id, vi.fn().mockResolvedValue(9n));
     readContractMocks.set(avalancheFuji.id, vi.fn().mockResolvedValue(13n));
+    // Ethereum L1 testnet (2026-05-26 復帰)
+    readContractMocks.set(sepolia.id, vi.fn().mockResolvedValue(11n));
     readContractMocks.set(unichainSepolia.id, vi.fn().mockResolvedValue(17n));
     // phase 4b-3 buyer-only testnet chain (resolver fallback で resolve される)
     readContractMocks.set(worldchainSepolia.id, vi.fn().mockResolvedValue(19n));
@@ -128,16 +128,16 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
     }
     const baseEntry = out.find((e) => e.target.chainId === baseSepolia.id);
     expect(baseEntry?.status).toBe('ok');
-    // Ethereum (sepolia) は BUYER_SOURCE_TARGETS から外れたので entry 自体が出ない
+    // Ethereum (sepolia) は merchant-and-buyer 復帰 (2026-05-26) で entry に含まれる
     const ethEntry = out.find((e) => e.target.chainId === sepolia.id);
-    expect(ethEntry).toBeUndefined();
+    expect(ethEntry?.status).toBe('ok');
     const avaxEntry = out.find((e) => e.target.chainId === avalancheFuji.id);
     expect(avaxEntry?.status).toBe('ok');
     const uniEntry = out.find((e) => e.target.chainId === unichainSepolia.id);
     expect(uniEntry?.status).toBe('ok');
   });
 
-  it('全 chain 失敗: 10 件すべて error 配列を返す (throw しない)', async () => {
+  it('全 chain 失敗: 11 件すべて error 配列を返す (throw しない)', async () => {
     for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(
         chain.id,
@@ -167,7 +167,7 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
 });
 
 describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
-  it('POST /v1/balances に sources を送る (default = 全 10 domain、Ethereum 除く)', async () => {
+  it('POST /v1/balances に sources を送る (default = 全 11 domain、Ethereum 含む)', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -368,7 +368,7 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
     }
   });
 
-  it('concurrent: 同一 account に 4 並列 readMultiChainWalletBalances → 10 chain × 4 = 40 readContract', async () => {
+  it('concurrent: 同一 account に 4 並列 readMultiChainWalletBalances → 11 chain × 4 = 44 readContract', async () => {
     for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(1n));
     }
@@ -445,10 +445,11 @@ describe('lib/crossChain/balance: chainResolver validation', () => {
     readContractMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue(3n));
     readContractMocks.set(optimismSepolia.id, vi.fn().mockResolvedValue(4n));
     readContractMocks.set(avalancheFuji.id, vi.fn().mockResolvedValue(6n));
+    readContractMocks.set(sepolia.id, vi.fn().mockResolvedValue(5n));
     readContractMocks.set(unichainSepolia.id, vi.fn().mockResolvedValue(7n));
 
     const out = await readMultiChainWalletBalances(ACCOUNT, customResolver);
-    // 10 chain query が並列、9 chain は customResolver で throw → status='error'
+    // 11 chain query が並列、10 chain は customResolver で throw → status='error'
     expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
     const baseEntry = out.find((e) => e.target.chainId === baseSepolia.id);
     expect(baseEntry?.status).toBe('ok');
@@ -459,15 +460,15 @@ describe('lib/crossChain/balance: chainResolver validation', () => {
     }
   });
 
-  it('default resolver: 全 10 chain が viem/chains にある (= BUYER_SOURCE_TARGETS と整合)', () => {
-    // production の chainResolveFromTargets は BUYER_SOURCE_TARGETS の 10 chain
-    // (merchant-and-buyer 4 + buyer-only 6、merchant-only=Ethereum は除く) 全てに
+  it('default resolver: 全 11 chain が viem/chains にある (= BUYER_SOURCE_TARGETS と整合)', () => {
+    // production の chainResolveFromTargets は BUYER_SOURCE_TARGETS の 11 chain
+    // (merchant-and-buyer 6 + buyer-only 5、Ethereum は merchant-and-buyer 復帰) 全てに
     // 対して Chain object を返せる必要がある。Map から逆引きできるか構造的に検証。
     for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(1n));
     }
-    // default resolver (chainResolveFromTargets) は 10 chain 全部 throw せず resolve
-    // → readMultiChainWalletBalances が 10 件全部 'ok' を返す
+    // default resolver (chainResolveFromTargets) は 11 chain 全部 throw せず resolve
+    // → readMultiChainWalletBalances が 11 件全部 'ok' を返す
     return readMultiChainWalletBalances(ACCOUNT).then((out) => {
       expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
       expect(out.every((e) => e.status === 'ok')).toBe(true);

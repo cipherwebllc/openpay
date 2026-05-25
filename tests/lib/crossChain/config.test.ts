@@ -204,7 +204,7 @@ describe('lib/crossChain/config', () => {
   });
 
   describe('CROSS_CHAIN_TARGETS', () => {
-    it('testnet env: 11 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 5) with testnet chain ids', async () => {
+    it('testnet env: 11 entries (merchant-and-buyer 6 + buyer-only 5) with testnet chain ids', async () => {
       const m = await import('@/lib/crossChain/config');
       expect(m.CROSS_CHAIN_TARGETS).toHaveLength(11);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => t.isTestnet)).toBe(true);
@@ -223,7 +223,7 @@ describe('lib/crossChain/config', () => {
       expect(chainIds).toContain(998); // HyperEVM testnet (inline-defined)
     });
 
-    it('mainnet env: 11 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 5) with mainnet chain ids', async () => {
+    it('mainnet env: 11 entries (merchant-and-buyer 6 + buyer-only 5) with mainnet chain ids', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
@@ -248,7 +248,7 @@ describe('lib/crossChain/config', () => {
       ]);
     });
 
-    it('role field: merchant-and-buyer (5) + merchant-only (1) + buyer-only (5) で分類できる', async () => {
+    it('role field: merchant-and-buyer (6) + buyer-only (5) で分類できる', async () => {
       const m = await import('@/lib/crossChain/config');
       const merchant = m.CROSS_CHAIN_TARGETS.filter(
         (t) => t.role === 'merchant-and-buyer',
@@ -259,20 +259,20 @@ describe('lib/crossChain/config', () => {
       const merchantOnly = m.CROSS_CHAIN_TARGETS.filter(
         (t) => t.role === 'merchant-only',
       );
-      // phase 4b-2 で Avalanche が buyer-only → merchant-and-buyer に昇格、
-      // phase 4b-3 で World Chain / Sonic / Sei / HyperEVM を buyer-only に追加
-      expect(merchant).toHaveLength(5);
+      // 2026-05-26: Ethereum mainnet を merchant-and-buyer に復帰
+      // (Pimlico ERC-20 paymaster でガス代高騰の運営負担リスクなし、実機検証で issue 出れば再除外)
+      expect(merchant).toHaveLength(6);
       expect(buyerOnly).toHaveLength(5);
-      expect(merchantOnly).toHaveLength(1);
-      // MERCHANT_RECEIVE_TARGETS = merchant-and-buyer (5) + merchant-only (1) = 6
-      // (USDC_CHAINS と 1:1、Ethereum は merchant 受信は残す設計)
+      expect(merchantOnly).toHaveLength(0);
+      // MERCHANT_RECEIVE_TARGETS = merchant-and-buyer (6) + merchant-only (0) = 6
+      // (USDC_CHAINS と 1:1)
       expect(m.MERCHANT_RECEIVE_TARGETS).toHaveLength(6);
-      // BUYER_SOURCE_TARGETS = merchant-and-buyer (5) + buyer-only (5) = 10
-      // (Ethereum は merchant-only で source からは除外、phase 4b-3 で
-      // World Chain / Sonic / Sei / HyperEVM を buyer-only に追加)
-      expect(m.BUYER_SOURCE_TARGETS).toHaveLength(10);
-      // merchant-only chain は Ethereum (sepolia) のみ
-      expect(merchantOnly[0].chainId).toBe(sepolia.id);
+      // BUYER_SOURCE_TARGETS = merchant-and-buyer (6) + buyer-only (5) = 11
+      // (Ethereum を含む全 chain が buyer source 可)
+      expect(m.BUYER_SOURCE_TARGETS).toHaveLength(11);
+      // Ethereum (sepolia) は merchant-and-buyer 側
+      const merchantChainIds = merchant.map((t) => t.chainId);
+      expect(merchantChainIds).toContain(sepolia.id);
       // buyer-only chain は Unichain / World Chain / Sonic / Sei / HyperEVM
       const buyerOnlyChainIds = buyerOnly.map((t) => t.chainId);
       expect(buyerOnlyChainIds).toContain(unichainSepolia.id);
@@ -281,7 +281,6 @@ describe('lib/crossChain/config', () => {
       expect(buyerOnlyChainIds).toContain(1328); // seiTestnet
       expect(buyerOnlyChainIds).toContain(998); // hyperEvmTestnet
       // Avalanche は merchant-and-buyer 側 (PR-A) に移動
-      const merchantChainIds = merchant.map((t) => t.chainId);
       expect(merchantChainIds).toContain(avalancheFuji.id);
     });
 
