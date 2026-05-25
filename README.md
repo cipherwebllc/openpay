@@ -188,6 +188,34 @@ OpenPay is **not** a wallet, exchange, custodian, or redemption provider. Users 
 - [Disclaimer / 免責事項](https://open-pay.jp/ja/disclaimer)
 - [特定商取引法に基づく表記](https://open-pay.jp/ja/tokutei)
 
+## Development workflow
+
+OpenPay の変更は以下の 3 段階で進める。各段階の承認が次段階の前提。
+
+### 1. 計画レビュー (plan review)
+
+1. Opus が `plan mode` で実装計画を提示
+2. `/gpt-plan-review` で GPT による独立 review を取得
+3. 指摘点を計画に反映 (`/Users/masia/.claude/plans/*.md` を更新)
+4. 再度 `/gpt-plan-review` を実行し、**approved** を得る
+
+### 2. 実装レビュー (code review)
+
+1. Opus が計画通りに実装
+2. 関連する Playwright e2e + `node scripts/run-tests.mjs` で動作確認
+3. `/gpt-review` で diff の独立 review を取得
+4. 指摘点を実装に反映
+5. 再度 `/gpt-review` を実行し、**approved** を得る
+
+### 3. デプロイ (deploy)
+
+1. `git commit` + `git push origin main`
+2. Vercel が auto-deploy (typecheck / lint / build / bundle budget は CI で gating)
+3. `docs/DEPLOY_CHECKLIST.md §3` の post-deploy smoke を実行
+
+> 例外: hotfix 等で計画 review を省略する場合は commit message にその旨を明記。
+> code review (`/gpt-review`) は省略しない。
+
 ## Roadmap
 
 - More tested wallets + better wallet compatibility surface
