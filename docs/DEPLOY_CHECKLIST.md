@@ -5,7 +5,7 @@ OpenPay 本番 deploy 時のチェックリスト。コード外で人手検証�
 ## 1. Pre-deploy
 
 ```bash
-cd /Users/masia02/openpay
+cd /Users/masia/Documents/GitHub/openpay
 git status                                  # working tree clean を確認
 git log --oneline origin/main..HEAD         # push 予定 commits を確認
 npm run typecheck && npm run lint && npm run test:run   # local 全 pass
