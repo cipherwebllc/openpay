@@ -62,11 +62,11 @@ describe('TOKEN_DEPLOYMENTS', () => {
       expect(d.decimals).toBe(6);
       expect(d.displaySymbol).toBe('USDC');
     }
-    // Ethereum / Unichain は paymasterMode='unavailable'
-    // (Pimlico 未対応 + buyer-only chain は gasless 不要)、他は erc20
-    // (Avalanche は phase 4b-2 で erc20 へ昇格)。
+    // buyer-only chain (Unichain 他) は paymasterMode='unavailable' (gasless 不要)、
+    // merchant 受信 chain 6 件 (Ethereum / Avalanche 含む) は全て erc20 で
+    // gasless 可能。
     for (const d of usdc) {
-      if (d.chainId === sepolia.id || d.chainId === unichainSepolia.id) {
+      if (d.chainId === unichainSepolia.id) {
         expect(d.paymasterMode).toBe('unavailable');
       } else {
         expect(d.paymasterMode).toBe('erc20');
@@ -253,20 +253,20 @@ describe('JPYC Kaia deployment (hard-code default + env override)', () => {
 });
 
 describe('Ethereum L1 USDC deployment (phase 4a)', () => {
-  it('testnet env: Sepolia USDC (paymasterMode=unavailable)', () => {
+  it('testnet env: Sepolia USDC (paymasterMode=erc20)', () => {
     const d = resolveDeployment('usdc', sepolia.id);
     expect(d).toBeDefined();
     expect(d?.symbol).toBe('usdc');
     expect(d?.chainId).toBe(sepolia.id);
     expect(d?.decimals).toBe(6);
-    expect(d?.paymasterMode).toBe('unavailable');
+    expect(d?.paymasterMode).toBe('erc20');
     // Sepolia 公式 USDC (Circle quickstart)
     expect(d?.address.toLowerCase()).toBe(
       '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
     );
   });
 
-  it('mainnet env: Ethereum L1 USDC (paymasterMode=unavailable)', async () => {
+  it('mainnet env: Ethereum L1 USDC (paymasterMode=erc20)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
@@ -276,7 +276,7 @@ describe('Ethereum L1 USDC deployment (phase 4a)', () => {
     const mod = await import('@/lib/tokens');
     const d = mod.resolveDeployment('usdc', mainnet.id);
     expect(d?.chainId).toBe(mainnet.id);
-    expect(d?.paymasterMode).toBe('unavailable');
+    expect(d?.paymasterMode).toBe('erc20');
     expect(d?.address.toLowerCase()).toBe(
       '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
     );
@@ -285,15 +285,15 @@ describe('Ethereum L1 USDC deployment (phase 4a)', () => {
   it('deploymentForSlug("usdc", "ethereum") は testnet で Sepolia を返す', () => {
     const d = deploymentForSlug('usdc', 'ethereum');
     expect(d.chainId).toBe(sepolia.id);
-    expect(d.paymasterMode).toBe('unavailable');
+    expect(d.paymasterMode).toBe('erc20');
   });
 });
 
 describe('isGaslessSupported', () => {
-  it('USDC on ethereum は false (Pimlico ERC20 paymaster 未対応)', async () => {
+  it('USDC on ethereum は true (Pimlico ERC20 paymaster 対応)', async () => {
     const mod = await import('@/lib/tokens');
     const d = mod.deploymentForSlug('usdc', 'ethereum');
-    expect(mod.isGaslessSupported(d)).toBe(false);
+    expect(mod.isGaslessSupported(d)).toBe(true);
   });
 
   it('USDC on base は true (Pimlico ERC20 paymaster 対応)', async () => {

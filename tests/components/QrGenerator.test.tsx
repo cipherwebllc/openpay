@@ -813,17 +813,16 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('USDC + Ethereum (= 強制 standard): "通常決済（ETH ガス代を別途用意）" badge', async () => {
+    it('USDC + Ethereum + payMode=standard: "通常決済（ETH ガス代を別途用意）" badge', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
           receiver: VALID,
           token: 'usdc',
           chain: 'ethereum',
-          // selectChain が payMode='standard' に強制するが、localStorage 直接
-          // 注入の場合も sanitize で standard に倒れる (gasless 非対応 chain
-          // + payMode=gasless saved 状態の migrate path)。
-          payMode: 'gasless',
+          // 2026-05 以降 Ethereum L1 も gasless 対応だが、merchant が明示的に
+          // standard を選んだケースを検証 (印刷物に出る ETH ガス代警告 badge)。
+          payMode: 'standard',
           gasMode: 'customer',
         }),
       );

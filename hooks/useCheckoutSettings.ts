@@ -76,7 +76,7 @@ function sanitizeOptionalString(
 function sanitize(loaded: Partial<CheckoutSettings>): CheckoutSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   const chain = normalizeChainForToken(token, loaded.chain);
-  // gasless 非対応 chain (例: USDC on Ethereum L1) + payMode=gasless が saved
+  // gasless 非対応 chain (paymasterMode=unavailable) + payMode=gasless が saved
   // 状態として残っていたら standard に migrate。/checkout URL parser が同組合せを
   // reject するため、UI と URL の意味論を一致させる。
   const rawPayMode: PayMode =

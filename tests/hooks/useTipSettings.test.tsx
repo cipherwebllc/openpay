@@ -272,14 +272,14 @@ describe('useTipSettings', () => {
     expect(result.current.settings.crossChain).toBe(true);
   });
 
-  it('usdc + ethereum (gasless 非対応) → token default (base) に fallback', async () => {
+  it('usdc + ethereum → そのまま保存される (2026-05 から L1 も gasless 対応)', async () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({ token: 'usdc', chain: 'ethereum' }),
     );
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.chain).toBe('base');
+    expect(result.current.settings.chain).toBe('ethereum');
   });
 
   it('jpyc + base (JPYC 非 deploy) → polygon に fallback', async () => {

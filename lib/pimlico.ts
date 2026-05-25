@@ -3,13 +3,13 @@
 // 3 種類の Paymaster mode を deployment.paymasterMode に応じて使い分ける:
 //   - JPYC (Polygon / Kaia): Sponsorship (Verifying) Paymaster
 //       運営が POL/KAIA ガスを肩代わり (gas 見積バッファで採算確保)
-//   - USDC (Base / Arbitrum / Optimism / Polygon): ERC20 Paymaster
+//   - USDC (全 chain): ERC20 Paymaster
 //       顧客が USDC でガスを支払う (ネイティブ ETH/POL 立替えの赤字リスク回避)
-//   - USDC (Ethereum L1): unavailable
-//       Pimlico ERC20 paymaster 未 deploy。standard mode (wallet 直接送信) 必須。
-//       URL parser が gasless+ethereum-USDC 組合せを reject するため、本 file の
-//       関数群が 'unavailable' を受けるのは misuse のみ → throw で fail-loud。
-//       sponsorship 自動 fallback は禁止 (運営の sponsorship 残高を 任意 transfer
+//       Ethereum L1 も 2026-05 から Pimlico v2 で ERC20 paymaster 対応。
+//   - unavailable: buyer-only chain (Avalanche / Unichain) の USDC entry に付く。
+//       これらは merchant 受信 chain には現れず、Gateway source としてのみ参照。
+//       本 file の関数群が 'unavailable' を受けるのは misuse のみ → throw で fail-loud。
+//       sponsorship 自動 fallback は禁止 (運営の sponsorship 残高を任意 transfer
 //       で吸われる security incident に直結するため)。
 //
 // testnet (Base Sepolia / Arbitrum Sepolia / Optimism Sepolia / Polygon Amoy) では
@@ -38,8 +38,8 @@ export function createPimlico(chainId: number) {
 }
 
 /** deployment と現在のネットワーク (mainnet/testnet) から paymaster mode を決定。
- * mainnet の Ethereum USDC は `unavailable` をそのまま返す。testnet の Ethereum
- * Sepolia USDC は他の testnet と同じく sponsorship に倒す (動作確認簡略化)。 */
+ * `unavailable` は buyer-only chain (mainnet) のみ。testnet では sponsorship に
+ * 倒して動作確認を簡略化 (testnet ネイティブガス + USDC の両方準備不要)。 */
 export function resolvePaymasterMode(
   deployment: TokenDeployment,
 ): PaymasterMode {

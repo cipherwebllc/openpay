@@ -9,7 +9,7 @@ import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
 type TipSettings = {
   receiver: string;
   token: TokenSymbol;
-  // 送金チェーン (slug)。usdc は gasless 対応 chain 選択可 (Ethereum L1 は tip 不可)、
+  // 送金チェーン (slug)。usdc は gasless 対応 chain 選択可、
   // jpyc は polygon / kaia から選択可。
   chain: ChainSlug;
   name: string;
@@ -43,9 +43,9 @@ const DEFAULT_SETTINGS: TipSettings = {
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
-  // tip widget は gasless 必須。USDC + Ethereum L1 のような gasless 非対応 chain は
-  // sanitize 段階で token の default chain (usdc → base) にフォールバック。
-  // localStorage に旧 'ethereum' が残っていても安全に切り替わる。
+  // tip widget は gasless 必須。gasless 非対応 chain (例: buyer-only chain の Unichain)
+  // が saved value に入っていても sanitize 段階で token の default chain (usdc → base)
+  // にフォールバック。
   const normalized = normalizeChainForToken(token, loaded.chain);
   const chain = isGaslessSupported(deploymentForSlug(token, normalized))
     ? normalized

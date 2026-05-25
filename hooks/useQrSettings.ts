@@ -130,9 +130,9 @@ function resolvePayMode(loaded: Partial<QrSettings> & { directTransfer?: unknown
 function sanitize(loaded: Partial<QrSettings>): QrSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   const chain = normalizeChainForToken(token, loaded.chain);
-  // (token, chain) が gasless 非対応 (例: USDC + Ethereum L1) なのに payMode=gasless
+  // (token, chain) が gasless 非対応 (paymasterMode=unavailable) なのに payMode=gasless
   // が saved 状態として残っていたら payMode=standard に migrate。/pay URL parser
-  // が gasless+ethereum を reject するので、UI 側の見かけと実際の URL を一致させる。
+  // が同組合せを reject するので、UI 側の見かけと実際の URL を一致させる。
   const rawPayMode = resolvePayMode(loaded);
   const payMode: PayMode =
     rawPayMode === 'gasless' && !isGaslessSupported(deploymentForSlug(token, chain))

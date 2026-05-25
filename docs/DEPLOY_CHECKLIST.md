@@ -733,9 +733,8 @@ phase 4a-1 で USDC 受信 chain を 4 → 5 chain に拡張 (Ethereum L1 追加
 トレード等の merchant 出庫先が L1 限定のユースケース対応。
 
 **重要な制約**:
-- Ethereum L1 USDC は **standard mode 必須** (Pimlico ERC20 paymaster 未対応)。
-  QR/Checkout UI は chain=ethereum 選択時に payMode=standard に自動 force、
-  Tip widget は chain chooser から ethereum を filter out 済。
+- Ethereum L1 USDC も Pimlico v2 ERC20 paymaster 対応 (2026-05 解禁)。gasless / standard
+  両 mode 利用可。
 - Ethereum L1 mainnet gas は他 chain より 1-3 桁高い ($1-5/tx 想定)。smoke は
   **0.5-1 USDC** の小額で済ませ、本 smoke のために 不要な large value tx を
   送らない (gas は L2 chain と比べてマージン消す方向に効く)。

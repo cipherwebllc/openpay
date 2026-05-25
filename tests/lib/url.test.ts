@@ -227,27 +227,27 @@ describe('parsePayParams', () => {
     }
   });
 
-  it('chain=ethereum + usdc + mode=gasless → errorKind=invalid (Pimlico ERC20 paymaster 未対応)', () => {
-    // gasless は省略可 (default) なので mode を明示せず → default gasless で reject
+  it('chain=ethereum + usdc + mode=gasless (default) → 受理 (Pimlico v2 ERC20 paymaster 対応)', () => {
+    // 2026-05: Pimlico v2 で Ethereum mainnet にも ERC20 paymaster が deploy された
+    // ため、ethereum + usdc + gasless が受理される。
     const r = parsePayParams(
       search(`to=${VALID_TO}&token=usdc&chain=ethereum`),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.errorKind).toBe('invalid');
-      expect(r.error).toContain('gasless');
-      expect(r.error).toContain('ethereum');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.chain).toBe('ethereum');
+      expect(r.params.mode).toBe('gasless');
     }
   });
 
-  it('chain=ethereum + usdc + mode=gasless 明示 → errorKind=invalid', () => {
+  it('chain=ethereum + usdc + mode=gasless 明示 → 受理', () => {
     const r = parsePayParams(
       search(`to=${VALID_TO}&token=usdc&chain=ethereum&mode=gasless`),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.errorKind).toBe('invalid');
-      expect(r.error).toContain('standard');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.chain).toBe('ethereum');
+      expect(r.params.mode).toBe('gasless');
     }
   });
 
@@ -831,10 +831,13 @@ describe('parseTipParams', () => {
     }
   });
 
-  it('usdc + ethereum → reject (Tip widget は gasless 必須、L1 は非対応)', () => {
+  it('usdc + ethereum → 受理 (2026-05 から L1 も Pimlico v2 で gasless 対応)', () => {
     const r = parseTipParams(VALID_TO, search('token=usdc&chain=ethereum'));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/gasless mode 必須|tip widget 非対応/);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.token).toBe('usdc');
+      expect(r.params.chain).toBe('ethereum');
+    }
   });
 
   it('jpyc + base → reject (JPYC 非 deploy chain、hasDeployment で false)', () => {
@@ -1130,13 +1133,12 @@ describe('parseTipParams: chain パラメタ (Phase 1 multi-chain)', () => {
     if (!r.ok) expect(r.error).toContain('jpyc');
   });
 
-  it('chain=ethereum + token=usdc → エラー (tip widget は gasless 必須、Ethereum L1 は gasless 非対応)', () => {
+  it('chain=ethereum + token=usdc → 受理 (2026-05 から L1 も Pimlico v2 で gasless 対応)', () => {
     const r = parseTipParams(VALID_TO, search('token=usdc&chain=ethereum'));
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.error).toContain('usdc');
-      expect(r.error).toContain('ethereum');
-      expect(r.error).toContain('tip');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.token).toBe('usdc');
+      expect(r.params.chain).toBe('ethereum');
     }
   });
 

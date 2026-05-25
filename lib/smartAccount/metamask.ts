@@ -11,7 +11,7 @@
 //   from permissionless にそのまま渡せる。SimpleAccount と同 dispatch shape。
 // - Stateless7702 mode: deploy 不要 (EOA は既に MetaMask delegator に委任済)、
 //   `address: <eoa>` を渡すと account.address === EOA で動作。
-// - 'unavailable' paymasterMode (Ethereum L1 USDC) は到達不可前提だが、
+// - 'unavailable' paymasterMode (buyer-only chain の USDC) は到達不可前提だが、
 //   simpleAccount.ts / mav2.ts と同じ fail-loud guard を入れる (sponsorship
 //   残高悪用の防御線)。
 //
