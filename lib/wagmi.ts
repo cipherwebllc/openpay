@@ -26,8 +26,6 @@ const connectors = [
           metadata: {
             name: 'OpenPay',
             description: 'Gasless QR payment for small merchants',
-            // WalletConnect metadata はクライアント専用。SSR 時は空文字で安全
-            // (wagmi ssr:true でも WC connector の初期化はブラウザのみ)。
             url: typeof window !== 'undefined' ? window.location.origin : '',
             icons: [],
           },

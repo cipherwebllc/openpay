@@ -6,11 +6,7 @@ import type { Connector } from 'wagmi';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { shortAddress } from '@/lib/format';
 
-/**
- * wagmi の connectors リストから表示用のサブセットを生成する。
- * 1. injected コネクタのうち provider 不在のもの (モバイルでブラウザ拡張なし) を除外
- * 2. 同名コネクタの重複を排除 (EIP-6963 auto-discovery + 明示 target の併用時)
- */
+// injected provider 不在 (モバイル) の除外 + 同名 connector の dedup
 function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
   const [visible, setVisible] = useState<Connector[]>([]);
 
@@ -42,10 +38,6 @@ function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
   return visible;
 }
 
-/**
- * ユーザーがウォレット接続をキャンセルした (WalletConnect モーダルを閉じた等)
- * 場合のエラーを判定。意図的なキャンセルなのでエラー表示しない。
- */
 function isUserRejection(err: Error): boolean {
   const msg = err.message.toLowerCase();
   return msg.includes('user rejected') || msg.includes('connection request reset');

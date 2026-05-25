@@ -177,8 +177,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
   const flowError = isStandard ? standard.error : gasless.error;
-  // IncompatibleSmartAccountError は SmartAccountFallbackBanner で表示するため
-  // error ternary からは除外する。
   const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
