@@ -134,6 +134,44 @@ describe('ConnectButton (disconnected)', () => {
     expect(screen.queryByRole('button', { name: 'Rabby Wallet' })).not.toBeInTheDocument();
   });
 
+  it('getProvider が null を resolve する injected コネクタも非表示', async () => {
+    const nullProvider = (uid: string, name: string) => ({
+      uid, name, type: 'injected',
+      getProvider: () => Promise.resolve(null),
+    });
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [
+        nullProvider('1', 'Injected'),
+        other('2', 'WalletConnect'),
+      ],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'WalletConnect' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: 'Injected' })).not.toBeInTheDocument();
+  });
+
+  it('connectors が空の場合はボタンなし', async () => {
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it('同名 connector の重複は排除される', async () => {
     mockHook(useAccount, { isConnected: false, address: undefined });
     mockHook(useConnect, {
@@ -180,5 +218,24 @@ describe('ConnectButton (connected)', () => {
 
     await user.click(screen.getByRole('button', { name: '切断' }));
     expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('chain が undefined でもクラッシュしない (chain 名は非表示)', () => {
+    mockHook(useAccount, {
+      isConnected: true,
+      address: ADDR,
+      chain: undefined,
+    });
+    mockHook(useConnect, {
+      connectors: [],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    expect(screen.getByText(/0x1234…5678/)).toBeInTheDocument();
+    expect(screen.queryByText(/\//)).not.toBeInTheDocument();
   });
 });
