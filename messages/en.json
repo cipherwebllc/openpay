@@ -777,5 +777,12 @@
       }
     },
     "legalNote": "The Japanese version of this disclosure prevails. This English version is provided for reference only."
+  },
+  "SmartAccountFallback": {
+    "bannerTitle": "Unsupported Smart Account detected",
+    "bannerBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). You can switch to standard mode — you will pay gas in {nativeToken} and the service fee is 0.5%.",
+    "switchButton": "Switch to standard mode (you pay gas)",
+    "tipOnlyTitle": "Unsupported Smart Account detected",
+    "tipOnlyBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). Tips require gasless mode, so this wallet cannot send tips at this time. If you are using MetaMask, toggle off \"Smart account\" in Account details. Or try a different wallet."
   }
 }

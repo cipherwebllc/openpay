@@ -6,6 +6,7 @@ import { parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { CrossChainHint } from './CrossChainHint';
+import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
@@ -106,13 +107,12 @@ export function TipForm({ params }: { params: TipParams }) {
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
   // gasQuote の失敗も同様に i18n 化 (詳細は logger 経由で Sentry へ)。
+  const saFallback = isIncompatibleSmartAccountError(saError);
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
-    : isIncompatibleSmartAccountError(saError)
-      ? t(saError.i18nKey, { address: saError.delegateAddress ?? 'unknown' })
-      : (gasless.error?.message ??
-        saError?.message ??
-        (gasQuote.error ? t('errorGasQuote') : null));
+    : (gasless.error?.message ??
+      (saFallback ? undefined : saError?.message) ??
+      (gasQuote.error ? t('errorGasQuote') : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });
@@ -346,6 +346,14 @@ export function TipForm({ params }: { params: TipParams }) {
           </p>
         )}
       </section>
+
+      {saFallback && (
+        <SmartAccountFallbackBanner
+          delegateAddress={saError.delegateAddress}
+          nativeToken={nativeToken}
+          canFallbackToStandard={false}
+        />
+      )}
 
       <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
