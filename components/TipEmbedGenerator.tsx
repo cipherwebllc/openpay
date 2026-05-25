@@ -7,6 +7,7 @@ import NextImage from 'next/image';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import { AddressInput } from './AddressInput';
+import { ChainChooser } from './ChainChooser';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -19,7 +20,6 @@ import {
   type TokenSymbol,
 } from '@/lib/tokens';
 import {
-  chainForSlug,
   JPYC_CHAINS,
   USDC_CHAINS,
   type ChainSlug,
@@ -209,50 +209,21 @@ export function TipEmbedGenerator() {
         <Field
           label={t('chainLabel', { symbol: deployment.displaySymbol })}
         >
-          {/* USDC は最大 4 chain で sm 4 列、JPYC は 2 chain で 2 列固定。
-              2026-05-24: 公式 logo (public/chains/{slug}.svg) を chain 名横に
-              配置し QR 側と一貫した design に揃える。logo は aria-hidden、
-              accessible name は viem Chain.name のみ。 */}
-          <div
-            className={
+          {/* USDC は RECEIVABLE_USDC_CHAINS (gasless 対応 chain のみ)、JPYC は RECEIVABLE_JPYC_CHAINS */}
+          <ChainChooser
+            slugs={
+              settings.token === 'usdc'
+                ? RECEIVABLE_USDC_CHAINS
+                : RECEIVABLE_JPYC_CHAINS
+            }
+            selected={settings.chain}
+            onSelect={selectChain}
+            gridClassName={
               settings.token === 'usdc'
                 ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
                 : 'grid grid-cols-2 gap-2'
             }
-          >
-            {(settings.token === 'usdc'
-              ? RECEIVABLE_USDC_CHAINS
-              : RECEIVABLE_JPYC_CHAINS
-            ).map((slug) => {
-              const c = chainForSlug(slug);
-              const active = settings.chain === slug;
-              return (
-                <button
-                  key={slug}
-                  type="button"
-                  onClick={() => selectChain(slug)}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${
-                    active
-                      ? 'border-brand bg-brand/5 text-brand-dark'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <NextImage
-                    src={`/chains/${slug}.svg`}
-                    alt=""
-                    width={20}
-                    height={20}
-                    className="h-5 w-5 shrink-0"
-                    aria-hidden
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold">{c.name}</div>
-                    <div className="text-[10px] text-slate-500">id: {c.id}</div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          />
         </Field>
 
         {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では非表示)。
