@@ -397,7 +397,7 @@ export function QrGenerator() {
               <div
                 className={
                   settings.token === 'usdc'
-                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-5'
+                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
                     : 'grid grid-cols-2 gap-2'
                 }
               >

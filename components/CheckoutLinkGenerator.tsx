@@ -195,7 +195,7 @@ export function CheckoutLinkGenerator() {
 
         {settings.token === 'usdc' && (
           <Field label={t('chainLabel')}>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {USDC_CHAINS.map((slug) => {
                 const c = chainForSlug(slug);
                 const active = settings.chain === slug;

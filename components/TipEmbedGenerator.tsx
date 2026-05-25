@@ -216,7 +216,7 @@ export function TipEmbedGenerator() {
           <div
             className={
               settings.token === 'usdc'
-                ? 'grid grid-cols-2 gap-2 sm:grid-cols-4'
+                ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
                 : 'grid grid-cols-2 gap-2'
             }
           >
