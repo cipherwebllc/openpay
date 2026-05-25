@@ -370,8 +370,9 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     mode === 'standard' || mode === 'direct' ? 'standard' : 'gasless';
 
   // (token, chain) が gasless mode を提供できない (Pimlico paymaster 未対応) なら
-  // gasless 要求を reject。例: USDC on Ethereum L1 は Pimlico ERC20 paymaster
-  // 未 deploy のため standard mode 必須。standard mode 要求は通す。
+  // gasless 要求を reject。standard mode 要求は通す。
+  // 2026-05 時点で全 USDC chain が ERC20 paymaster 対応のため、現状ここで弾かれる
+  // ケースは buyer-only chain のみ。
   const deployment = deploymentForSlug(token, chainSlug);
   if (normalizedMode === 'gasless' && !isGaslessSupported(deployment)) {
     return {
@@ -557,7 +558,7 @@ export function parseTipParams(
     };
   }
   // Tip widget は gas=customer 固定 (常に gasless) なので、(token, chain) が
-  // gasless 非対応なら tip 自体が成立しない → reject。例: USDC on Ethereum L1。
+  // gasless 非対応なら tip 自体が成立しない → reject。例: buyer-only chain の USDC。
   if (!isGaslessSupported(deploymentForSlug(token, chainSlug))) {
     return {
       ok: false,

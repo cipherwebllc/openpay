@@ -38,9 +38,9 @@ const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 
 // Tip widget は gasless 固定なので、受信可能な chain は gasless 対応のものだけ。
-// USDC は Ethereum L1 (Pimlico paymaster 未対応) を除く 4 chain、JPYC は Polygon /
-// Kaia 2 chain。token chooser hint の count 表示と chain chooser の grid 描画で
-// 共用する。chain 集合は build 時に確定するため module-level で 1 度だけ計算する。
+// USDC は全 mainnet chain (Ethereum L1 含む) で ERC20 paymaster 対応、JPYC は
+// Polygon / Kaia 2 chain。token chooser hint の count 表示と chain chooser の grid
+// 描画で共用する。chain 集合は build 時に確定するため module-level で 1 度だけ計算する。
 const RECEIVABLE_USDC_CHAINS = USDC_CHAINS.filter((slug) =>
   isGaslessSupported(deploymentForSlug('usdc', slug)),
 );

@@ -36,8 +36,8 @@ export type TokenSymbol = (typeof TOKEN_SYMBOLS)[number];
 //   erc20       = 顧客がトークンでガスを支払う (ERC20 Paymaster、mainnet 限定)
 //   unavailable = 該当 chain で Pimlico paymaster 未対応 (standard mode 必須、
 //                 gasless mode は URL parser で reject される)。
-//                 例: USDC on Ethereum L1 (Pimlico ERC20 paymaster 未 deploy、
-//                 cost 経済性のため Pimlico 側で対応予定なし)
+//                 例: buyer-only chain (Avalanche / Unichain) の USDC entry。
+//                 merchant 受信 chain には現れず、Gateway source のみで参照される。
 export type PaymasterMode = 'sponsorship' | 'erc20' | 'unavailable';
 
 // 単一 (symbol, chainId) ペアの ERC20 デプロイメント情報。同じ symbol でも複数
@@ -157,12 +157,12 @@ const USDC_SLUGS: readonly UsdcChainSlug[] = [
   'avalanche',
 ];
 
-// USDC on Ethereum L1 は Pimlico ERC20 paymaster 未対応のため 'unavailable'。
-// 他 chain は erc20 (顧客が USDC で gas 支払い)。Avalanche は phase 4b-2 で
-// merchant 昇格時に erc20 paymaster 対応を確認 (Pimlico mainnet ERC-20 paymaster
-// 対応 chain に含まれる)。
-function usdcPaymasterModeFor(slug: UsdcChainSlug): PaymasterMode {
-  return slug === 'ethereum' ? 'unavailable' : 'erc20';
+// USDC は全 chain で Pimlico ERC20 paymaster 対応 (顧客が USDC で gas 支払い)。
+// Ethereum L1 も Pimlico v2 で ERC20 paymaster が利用可能になったため 'erc20' に統一。
+// Avalanche も Pimlico mainnet ERC-20 paymaster 対応 chain に含まれる。
+// 詳細は docs/research/circle-12chain-addresses.md。
+function usdcPaymasterModeFor(_slug: UsdcChainSlug): PaymasterMode {
+  return 'erc20';
 }
 
 const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({

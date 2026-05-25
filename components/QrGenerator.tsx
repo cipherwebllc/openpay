@@ -290,8 +290,8 @@ export function QrGenerator() {
   }
 
   function selectChain(slug: ChainSlug) {
-    // (token, chain) の deployment が gasless 非対応 (例: USDC on Ethereum L1) なら
-    // payMode を standard に強制 set。これがないと「gasless 選択中 → Ethereum 選択」
+    // (token, chain) の deployment が gasless 非対応 (paymasterMode=unavailable) なら
+    // payMode を standard に強制 set。これがないと「gasless 選択中 → 非対応 chain 選択」
     // 時に URL parser で reject される QR が生成されてしまう。
     const dep = deploymentForSlug(settings.token, slug);
     setSettings((s) => ({
@@ -583,7 +583,7 @@ export function QrGenerator() {
                     const isGasless = pm === 'gasless';
                     const ModeIcon = isGasless ? Zap : Fuel;
                     const iconColor = isGasless ? 'text-emerald-600' : 'text-amber-600';
-                    // gasless 非対応 chain (例: USDC on Ethereum L1) では gasless
+                    // gasless 非対応 chain (paymasterMode=unavailable) では gasless
                     // button を disable。click は selectChain 側で防御済だが、UI
                     // 上でも明示的に grey-out して standard 強制を視覚化する。
                     const disabled = isGasless && !isGaslessSupported(deployment);

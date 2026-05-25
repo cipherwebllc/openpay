@@ -52,7 +52,7 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 | Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
 |---|---|---|---|
 | **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via Pimlico Sponsorship Paymaster |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1** (5) | merchant 5 + **Avalanche C-Chain, Unichain** (7 total, via Circle Gateway) | Base/Arb/OP/Polygon: gasless via Pimlico ERC20 Paymaster. **Ethereum L1: standard mode only** (Pimlico does not deploy ERC20 Paymaster on mainnet). Avalanche / Unichain are buyer-source only (do not appear in merchant chain chooser) |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1** (5) | merchant 5 + **Avalanche C-Chain, Unichain** (7 total, via Circle Gateway) | Gasless via Pimlico ERC20 Paymaster on all 5 merchant chains (Ethereum L1 included since 2026-05). Avalanche / Unichain are buyer-source only (do not appear in merchant chain chooser) |
 
 `NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia.
 
@@ -60,7 +60,7 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 > **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC), customers can pay from any of **7 chains** — the 5 receiving chains plus Avalanche C-Chain and Unichain. The print poster lists all 7 so customers know up-front which wallet works. Circle Gateway forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path).
 
-> **Ethereum L1 caveat:** USDC payments on Ethereum L1 always use **standard mode** (customer wallet pays ETH gas directly). Attempts to use `mode=gasless` with `chain=ethereum` are rejected at URL parse time. L1 gas is 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
+> **Ethereum L1 caveat:** USDC payments on Ethereum L1 support both gasless (Pimlico ERC20 Paymaster, customer pays gas in USDC) and standard modes. L1 gas is still 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
 
 ### Payment-page UX (cross-chain chain chooser)
 
@@ -78,7 +78,7 @@ The chooser is hidden when the customer has USDC on **only** the merchant's chai
 Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio, or GitHub README via a single `<iframe>` snippet. Same chain reach as the payment page:
 
 - **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
-- **USDC** — receive on any of **4 receiving chains** (Base / Arbitrum / Optimism / Polygon). Ethereum L1 is excluded because the Tip widget is gasless-only and Pimlico paymaster has no L1 support; fans who hold only L1 USDC can still tip you via **cross-chain receive** (default ON) — they pay on L1 and Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on Avalanche C-Chain and Unichain (the 2 buyer-only chains). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
+- **USDC** — receive on any of **5 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on Avalanche C-Chain and Unichain (the 2 buyer-only chains). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
 
 The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success.
 

@@ -112,9 +112,8 @@ export function CheckoutLinkGenerator() {
   }
 
   function selectChain(slug: ChainSlug) {
-    // gasless 非対応 chain (例: USDC on Ethereum L1) 選択時は payMode を standard
-    // に強制 set。生成 checkout URL の mode=gasless+ethereum 組合せが URL parser
-    // で reject されるのを未然に防ぐ。
+    // gasless 非対応 chain (paymasterMode=unavailable) 選択時は payMode を standard
+    // に強制 set。生成 checkout URL が URL parser で reject されるのを未然に防ぐ。
     const dep = deploymentForSlug(settings.token, slug);
     setSettings((s) => ({
       ...s,
@@ -302,8 +301,8 @@ export function CheckoutLinkGenerator() {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {(['gasless', 'standard'] as PayMode[]).map((pm) => {
               const active = settings.payMode === pm;
-              // gasless 非対応 chain (USDC on Ethereum L1) では gasless button を
-              // grey-out。selectChain で auto-switch されるが、UI 側でも明示。
+              // gasless 非対応 chain (paymasterMode=unavailable) では gasless button
+              // を grey-out。selectChain で auto-switch されるが、UI 側でも明示。
               const disabled =
                 pm === 'gasless' && !isGaslessSupported(deployment);
               return (
