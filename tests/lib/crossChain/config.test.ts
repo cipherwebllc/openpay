@@ -204,9 +204,9 @@ describe('lib/crossChain/config', () => {
   });
 
   describe('CROSS_CHAIN_TARGETS', () => {
-    it('testnet env: 7 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 1) with testnet chain ids', async () => {
+    it('testnet env: 11 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 5) with testnet chain ids', async () => {
       const m = await import('@/lib/crossChain/config');
-      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(7);
+      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(11);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => t.isTestnet)).toBe(true);
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
       expect(chainIds).toContain(polygonAmoy.id);
@@ -216,16 +216,21 @@ describe('lib/crossChain/config', () => {
       expect(chainIds).toContain(sepolia.id);
       expect(chainIds).toContain(avalancheFuji.id);
       expect(chainIds).toContain(unichainSepolia.id);
+      // phase 4b-3 buyer-only testnet
+      expect(chainIds).toContain(4801); // worldchainSepolia
+      expect(chainIds).toContain(57054); // sonicBlazeTestnet
+      expect(chainIds).toContain(1328); // seiTestnet
+      expect(chainIds).toContain(998); // HyperEVM testnet (inline-defined)
     });
 
-    it('mainnet env: 7 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 1) with mainnet chain ids', async () => {
+    it('mainnet env: 11 entries (merchant-and-buyer 5 + merchant-only 1 + buyer-only 5) with mainnet chain ids', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
       process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'dummy';
       process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'pol-1';
       const m = await import('@/lib/crossChain/config');
-      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(7);
+      expect(m.CROSS_CHAIN_TARGETS).toHaveLength(11);
       expect(m.CROSS_CHAIN_TARGETS.every((t) => !t.isTestnet)).toBe(true);
       const chainIds = m.CROSS_CHAIN_TARGETS.map((t) => t.chainId);
       expect(chainIds).toEqual([
@@ -236,10 +241,14 @@ describe('lib/crossChain/config', () => {
         mainnet.id,
         avalanche.id,
         unichain.id,
+        480, // worldchain
+        146, // sonic
+        1329, // sei
+        999, // hyperEvm
       ]);
     });
 
-    it('role field: merchant-and-buyer (5) + merchant-only (1) + buyer-only (1) で分類できる', async () => {
+    it('role field: merchant-and-buyer (5) + merchant-only (1) + buyer-only (5) で分類できる', async () => {
       const m = await import('@/lib/crossChain/config');
       const merchant = m.CROSS_CHAIN_TARGETS.filter(
         (t) => t.role === 'merchant-and-buyer',
@@ -250,33 +259,43 @@ describe('lib/crossChain/config', () => {
       const merchantOnly = m.CROSS_CHAIN_TARGETS.filter(
         (t) => t.role === 'merchant-only',
       );
-      // phase 4b-2 で Avalanche が buyer-only → merchant-and-buyer に昇格
+      // phase 4b-2 で Avalanche が buyer-only → merchant-and-buyer に昇格、
+      // phase 4b-3 で World Chain / Sonic / Sei / HyperEVM を buyer-only に追加
       expect(merchant).toHaveLength(5);
-      expect(buyerOnly).toHaveLength(1);
+      expect(buyerOnly).toHaveLength(5);
       expect(merchantOnly).toHaveLength(1);
       // MERCHANT_RECEIVE_TARGETS = merchant-and-buyer (5) + merchant-only (1) = 6
       // (USDC_CHAINS と 1:1、Ethereum は merchant 受信は残す設計)
       expect(m.MERCHANT_RECEIVE_TARGETS).toHaveLength(6);
-      // BUYER_SOURCE_TARGETS = merchant-and-buyer (5) + buyer-only (1) = 6
-      // (Ethereum は 2026-05-24 address poisoning 警戒 + RPC 不安定で除外)
-      expect(m.BUYER_SOURCE_TARGETS).toHaveLength(6);
+      // BUYER_SOURCE_TARGETS = merchant-and-buyer (5) + buyer-only (5) = 10
+      // (Ethereum は merchant-only で source からは除外、phase 4b-3 で
+      // World Chain / Sonic / Sei / HyperEVM を buyer-only に追加)
+      expect(m.BUYER_SOURCE_TARGETS).toHaveLength(10);
       // merchant-only chain は Ethereum (sepolia) のみ
       expect(merchantOnly[0].chainId).toBe(sepolia.id);
-      // buyer-only chain は Unichain のみ
+      // buyer-only chain は Unichain / World Chain / Sonic / Sei / HyperEVM
       const buyerOnlyChainIds = buyerOnly.map((t) => t.chainId);
       expect(buyerOnlyChainIds).toContain(unichainSepolia.id);
-      // Avalanche は merchant-and-buyer 側に移動
+      expect(buyerOnlyChainIds).toContain(4801); // worldchainSepolia
+      expect(buyerOnlyChainIds).toContain(57054); // sonicBlazeTestnet
+      expect(buyerOnlyChainIds).toContain(1328); // seiTestnet
+      expect(buyerOnlyChainIds).toContain(998); // hyperEvmTestnet
+      // Avalanche は merchant-and-buyer 側 (PR-A) に移動
       const merchantChainIds = merchant.map((t) => t.chainId);
       expect(merchantChainIds).toContain(avalancheFuji.id);
     });
 
-    it('chainIdForDomain: phase 4b-1 で追加した domain (1 / 10) も解決できる', async () => {
+    it('chainIdForDomain: phase 4b-1 / 4b-3 で追加した domain (1 / 10 / 13 / 14 / 16 / 19) も解決できる', async () => {
       const m = await import('@/lib/crossChain/config');
       expect(m.chainIdForDomain(1)).toBe(avalancheFuji.id);
       expect(m.chainIdForDomain(10)).toBe(unichainSepolia.id);
+      expect(m.chainIdForDomain(13)).toBe(57054); // Sonic testnet
+      expect(m.chainIdForDomain(14)).toBe(4801); // World Chain testnet
+      expect(m.chainIdForDomain(16)).toBe(1328); // Sei testnet
+      expect(m.chainIdForDomain(19)).toBe(998); // HyperEVM testnet
     });
 
-    it('domainForChainId: Avalanche / Unichain mainnet も domain に解決', async () => {
+    it('domainForChainId: Avalanche / Unichain / World Chain / Sonic / Sei / HyperEVM mainnet も domain に解決', async () => {
       process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
       process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
         '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
@@ -285,6 +304,10 @@ describe('lib/crossChain/config', () => {
       const m = await import('@/lib/crossChain/config');
       expect(m.domainForChainId(avalanche.id)).toBe(1);
       expect(m.domainForChainId(unichain.id)).toBe(10);
+      expect(m.domainForChainId(480)).toBe(14); // worldchain
+      expect(m.domainForChainId(146)).toBe(13); // sonic
+      expect(m.domainForChainId(1329)).toBe(16); // sei
+      expect(m.domainForChainId(999)).toBe(19); // hyperEvm
     });
   });
 });

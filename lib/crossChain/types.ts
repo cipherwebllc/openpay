@@ -7,6 +7,7 @@ import type { Address, Hex } from 'viem';
 // CCTP / Gateway 共通、mainnet/testnet 同一):
 //   ethereum=0 / avalanche=1 / optimism=2 / arbitrum=3 / base=6 / polygon=7
 //   unichain=10 (phase 4b-1 で追加、buyer-only)
+//   sonic=13 / worldchain=14 / sei=16 / hyperevm=19 (phase 4b-3 で追加、buyer-only)
 //   (phase 4b-2 で追加予定: solana=5)
 export const CIRCLE_DOMAIN_ETHEREUM = 0 as const;
 export const CIRCLE_DOMAIN_AVALANCHE = 1 as const;
@@ -15,6 +16,10 @@ export const CIRCLE_DOMAIN_ARBITRUM = 3 as const;
 export const CIRCLE_DOMAIN_BASE = 6 as const;
 export const CIRCLE_DOMAIN_POLYGON = 7 as const;
 export const CIRCLE_DOMAIN_UNICHAIN = 10 as const;
+export const CIRCLE_DOMAIN_SONIC = 13 as const;
+export const CIRCLE_DOMAIN_WORLDCHAIN = 14 as const;
+export const CIRCLE_DOMAIN_SEI = 16 as const;
+export const CIRCLE_DOMAIN_HYPEREVM = 19 as const;
 
 export type CircleDomain =
   | typeof CIRCLE_DOMAIN_ETHEREUM
@@ -23,7 +28,11 @@ export type CircleDomain =
   | typeof CIRCLE_DOMAIN_ARBITRUM
   | typeof CIRCLE_DOMAIN_BASE
   | typeof CIRCLE_DOMAIN_POLYGON
-  | typeof CIRCLE_DOMAIN_UNICHAIN;
+  | typeof CIRCLE_DOMAIN_UNICHAIN
+  | typeof CIRCLE_DOMAIN_SONIC
+  | typeof CIRCLE_DOMAIN_WORLDCHAIN
+  | typeof CIRCLE_DOMAIN_SEI
+  | typeof CIRCLE_DOMAIN_HYPEREVM;
 
 // Solidity src/lib/TransferSpec.sol 1:1。salt はリプレイ防止のため毎回 random、
 // hookData は post-mint hook 不使用なので空 ("0x")。

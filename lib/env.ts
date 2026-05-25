@@ -92,6 +92,21 @@ export const env = {
     unichainSepolia: nonEmpty(
       process.env.NEXT_PUBLIC_UNICHAIN_SEPOLIA_RPC_URL,
     ),
+    // phase 4b-3: World Chain / Sonic / Sei / HyperEVM (Circle Gateway buyer-only)。
+    // viem/chains の default RPC で動くが、production では override 推奨。
+    // HyperEVM testnet は viem/chains に未収録 (defineChain で inline 定義済)。
+    worldchain: nonEmpty(process.env.NEXT_PUBLIC_WORLDCHAIN_RPC_URL),
+    worldchainSepolia: nonEmpty(
+      process.env.NEXT_PUBLIC_WORLDCHAIN_SEPOLIA_RPC_URL,
+    ),
+    sonic: nonEmpty(process.env.NEXT_PUBLIC_SONIC_RPC_URL),
+    sonicTestnet: nonEmpty(process.env.NEXT_PUBLIC_SONIC_TESTNET_RPC_URL),
+    sei: nonEmpty(process.env.NEXT_PUBLIC_SEI_RPC_URL),
+    seiTestnet: nonEmpty(process.env.NEXT_PUBLIC_SEI_TESTNET_RPC_URL),
+    hyperevm: nonEmpty(process.env.NEXT_PUBLIC_HYPEREVM_RPC_URL),
+    hyperevmTestnet: nonEmpty(
+      process.env.NEXT_PUBLIC_HYPEREVM_TESTNET_RPC_URL,
+    ),
     // ENS / Basenames 解決用 (NETWORK_ENV に依存せず常に mainnet を使う)。
     // CCIP-Read (off-chain resolution) を要する .eth 名前があるため、
     // CCIP-Read 互換の RPC を既定にする (cloudflare-eth.com は非対応で
@@ -146,6 +161,23 @@ export const env = {
         'NEXT_PUBLIC_USDC_UNICHAIN_MAINNET_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_UNICHAIN_MAINNET_ADDRESS,
       ),
+      // phase 4b-3: World Chain / Sonic / Sei / HyperEVM (buyer-only)
+      worldchain: parseAddress(
+        'NEXT_PUBLIC_USDC_WORLDCHAIN_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_WORLDCHAIN_MAINNET_ADDRESS,
+      ),
+      sonic: parseAddress(
+        'NEXT_PUBLIC_USDC_SONIC_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_SONIC_MAINNET_ADDRESS,
+      ),
+      sei: parseAddress(
+        'NEXT_PUBLIC_USDC_SEI_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_SEI_MAINNET_ADDRESS,
+      ),
+      hyperevm: parseAddress(
+        'NEXT_PUBLIC_USDC_HYPEREVM_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_HYPEREVM_MAINNET_ADDRESS,
+      ),
     },
   },
   testnetTokenOverrides: {
@@ -188,6 +220,23 @@ export const env = {
       unichain: parseAddress(
         'NEXT_PUBLIC_USDC_UNICHAIN_SEPOLIA_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_UNICHAIN_SEPOLIA_ADDRESS,
+      ),
+      // phase 4b-3 testnet
+      worldchain: parseAddress(
+        'NEXT_PUBLIC_USDC_WORLDCHAIN_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_WORLDCHAIN_SEPOLIA_ADDRESS,
+      ),
+      sonic: parseAddress(
+        'NEXT_PUBLIC_USDC_SONIC_TESTNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_SONIC_TESTNET_ADDRESS,
+      ),
+      sei: parseAddress(
+        'NEXT_PUBLIC_USDC_SEI_TESTNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_SEI_TESTNET_ADDRESS,
+      ),
+      hyperevm: parseAddress(
+        'NEXT_PUBLIC_USDC_HYPEREVM_TESTNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_HYPEREVM_TESTNET_ADDRESS,
       ),
     },
   },

@@ -9,14 +9,21 @@ import {
   avalancheFuji,
   base,
   baseSepolia,
+  hyperEvm,
   mainnet,
   optimism,
   optimismSepolia,
   polygon,
   polygonAmoy,
+  sei,
+  seiTestnet,
   sepolia,
+  sonic,
+  sonicBlazeTestnet,
   unichain,
   unichainSepolia,
+  worldchain,
+  worldchainSepolia,
 } from 'viem/chains';
 import type { Address } from 'viem';
 import { isMainnet } from '../env';
@@ -25,12 +32,21 @@ import {
   CIRCLE_DOMAIN_AVALANCHE,
   CIRCLE_DOMAIN_BASE,
   CIRCLE_DOMAIN_ETHEREUM,
+  CIRCLE_DOMAIN_HYPEREVM,
   CIRCLE_DOMAIN_OPTIMISM,
   CIRCLE_DOMAIN_POLYGON,
+  CIRCLE_DOMAIN_SEI,
+  CIRCLE_DOMAIN_SONIC,
   CIRCLE_DOMAIN_UNICHAIN,
+  CIRCLE_DOMAIN_WORLDCHAIN,
   type CircleDomain,
   type CrossChainTarget,
 } from './types';
+
+// HyperEVM testnet (998) は viem/chains に未収録のため lib/chains.ts の
+// hyperEvmTestnet と整合する chainId 値を CHAIN_ID_TO_DOMAIN / DOMAIN_TO_CHAIN_ID で
+// 直接使う。lib/chains.ts に export を増やすと循環 import になるため数値 literal で。
+const HYPEREVM_TESTNET_CHAIN_ID = 998;
 
 // 全 EVM chain で同一 deterministic address (Circle docs 確認済)。
 export const GATEWAY_WALLET_MAINNET: Address =
@@ -102,6 +118,14 @@ const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
   [avalancheFuji.id]: CIRCLE_DOMAIN_AVALANCHE,
   [unichain.id]: CIRCLE_DOMAIN_UNICHAIN,
   [unichainSepolia.id]: CIRCLE_DOMAIN_UNICHAIN,
+  [worldchain.id]: CIRCLE_DOMAIN_WORLDCHAIN,
+  [worldchainSepolia.id]: CIRCLE_DOMAIN_WORLDCHAIN,
+  [sonic.id]: CIRCLE_DOMAIN_SONIC,
+  [sonicBlazeTestnet.id]: CIRCLE_DOMAIN_SONIC,
+  [sei.id]: CIRCLE_DOMAIN_SEI,
+  [seiTestnet.id]: CIRCLE_DOMAIN_SEI,
+  [hyperEvm.id]: CIRCLE_DOMAIN_HYPEREVM,
+  [HYPEREVM_TESTNET_CHAIN_ID]: CIRCLE_DOMAIN_HYPEREVM,
 };
 
 // domain は mainnet/testnet 共通だが chainId は env により異なるため 2 table。
@@ -113,6 +137,10 @@ const DOMAIN_TO_CHAIN_ID_MAINNET: Record<CircleDomain, number> = {
   [CIRCLE_DOMAIN_ETHEREUM]: mainnet.id,
   [CIRCLE_DOMAIN_AVALANCHE]: avalanche.id,
   [CIRCLE_DOMAIN_UNICHAIN]: unichain.id,
+  [CIRCLE_DOMAIN_WORLDCHAIN]: worldchain.id,
+  [CIRCLE_DOMAIN_SONIC]: sonic.id,
+  [CIRCLE_DOMAIN_SEI]: sei.id,
+  [CIRCLE_DOMAIN_HYPEREVM]: hyperEvm.id,
 };
 
 const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
@@ -123,6 +151,10 @@ const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
   [CIRCLE_DOMAIN_ETHEREUM]: sepolia.id,
   [CIRCLE_DOMAIN_AVALANCHE]: avalancheFuji.id,
   [CIRCLE_DOMAIN_UNICHAIN]: unichainSepolia.id,
+  [CIRCLE_DOMAIN_WORLDCHAIN]: worldchainSepolia.id,
+  [CIRCLE_DOMAIN_SONIC]: sonicBlazeTestnet.id,
+  [CIRCLE_DOMAIN_SEI]: seiTestnet.id,
+  [CIRCLE_DOMAIN_HYPEREVM]: HYPEREVM_TESTNET_CHAIN_ID,
 };
 
 export function domainForChainId(chainId: number): CircleDomain | undefined {
@@ -191,6 +223,34 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
         isTestnet: false,
         role: 'buyer-only',
       },
+      // phase 4b-3 (2026-05-25): Circle Gateway 公式 12 chain のうち未対応だった
+      // 4 chain を buyer-only として追加。merchant 受信 chain (USDC_CHAINS) は 5 のまま、
+      // buyer の cross-chain 支払い source として World Chain / Sonic / Sei / HyperEVM を
+      // 受け付ける。USDC address は Circle 公式 doc (developers.circle.com) で確認済。
+      {
+        domain: CIRCLE_DOMAIN_WORLDCHAIN,
+        chainId: worldchain.id,
+        isTestnet: false,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_SONIC,
+        chainId: sonic.id,
+        isTestnet: false,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_SEI,
+        chainId: sei.id,
+        isTestnet: false,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_HYPEREVM,
+        chainId: hyperEvm.id,
+        isTestnet: false,
+        role: 'buyer-only',
+      },
     ]
   : [
       {
@@ -235,6 +295,31 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
       {
         domain: CIRCLE_DOMAIN_UNICHAIN,
         chainId: unichainSepolia.id,
+        isTestnet: true,
+        role: 'buyer-only',
+      },
+      // phase 4b-3 testnet
+      {
+        domain: CIRCLE_DOMAIN_WORLDCHAIN,
+        chainId: worldchainSepolia.id,
+        isTestnet: true,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_SONIC,
+        chainId: sonicBlazeTestnet.id,
+        isTestnet: true,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_SEI,
+        chainId: seiTestnet.id,
+        isTestnet: true,
+        role: 'buyer-only',
+      },
+      {
+        domain: CIRCLE_DOMAIN_HYPEREVM,
+        chainId: HYPEREVM_TESTNET_CHAIN_ID,
         isTestnet: true,
         role: 'buyer-only',
       },
