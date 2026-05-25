@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import type { Connector } from 'wagmi';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { shortAddress } from '@/lib/format';
+import { logger } from '@/lib/logger';
 
 // injected provider 不在 (モバイル) の除外 + 同名 connector の dedup
 function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
@@ -21,7 +22,8 @@ function useVisibleConnectors(raw: readonly Connector[]): Connector[] {
           try {
             const p = await c.getProvider();
             if (!p) continue;
-          } catch {
+          } catch (err) {
+            logger.debug('connector.provider_unavailable', { name: c.name, err });
             continue;
           }
         }
