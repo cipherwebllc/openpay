@@ -1,26 +1,17 @@
-// NETWORK_ENV: mainnet → Base + Arbitrum + Optimism + Polygon + Kaia + Ethereum
-//                       + Avalanche + Unichain (buyer-only)
-//              testnet → 同 chain の sepolia/amoy/kairos/fuji 等
+// 対応チェーン (NETWORK_ENV で同一 slug が mainnet/testnet に切り替わる):
+//   USDC merchant 受信: Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche
+//   JPYC merchant 受信: Polygon / Kaia
+//   buyer-only (cross-chain source のみ): Unichain / World Chain / Sonic / Sei / HyperEVM
 //
-// チェーンは "slug" (`base`, `arbitrum`, `optimism`, `polygon`, `kaia`, `ethereum`)
-// で URL から参照する (merchant 受信 chain は ChainSlug union)。同一 slug が
-// NETWORK_ENV に応じて mainnet / testnet チェーンに切り替わる設計。
-// これにより `/pay?token=usdc&chain=arbitrum` のような URL は env 切替で自動的に
-// Arbitrum One / Arbitrum Sepolia を使い分けできる。
+// チェーンは "slug" (`base`, `arbitrum`, ...) で URL から参照し、同一 slug が
+// NETWORK_ENV に応じて mainnet / testnet チェーンへ切り替わる。これにより
+// `/pay?token=usdc&chain=arbitrum` は env 切替で Arbitrum One / Sepolia を自動選択する。
 //
-// Kaia (2026-05 PoC branch): JPYC 専用 chain。Pimlico Kaia bundler/paymaster は
-// SimpleAccount (7702) と互換、MAv2 は非対応 (mav2.ts で kaia 検出時 throw)。
-//
-// phase 4b-1 (2026-05-24): Avalanche / Unichain を buyer-only chain として
-// supportedChains に追加 (cross-chain Gateway source として buyer wallet が動作可能)。
-// merchant chain chooser (USDC_CHAINS) には出さない、URL の `chain=avalanche` は
-// isValidChainSlug が false を返し reject される。
-// phase 4b-2 (2026-05-26): Avalanche を merchant-and-buyer に昇格。Pimlico ERC-20
-// paymaster + Circle Gateway 両対応の chain で、USDC merchant 受信を許可。
-// Unichain は引き続き buyer-only (Pimlico ERC-20 paymaster 未対応)。
-// phase 4b-3 (2026-05-25): World Chain / Sonic / Sei / HyperEVM を同じく buyer-only
-// として追加 (Circle Gateway 公式 12 chain のうち未対応 4 chain を埋める)。
-// HyperEVM testnet は viem/chains に未収録のため defineChain で inline 定義する。
+// buyer-only chain は merchant chain chooser (USDC_CHAINS) に出さず、Circle Gateway の
+// cross-chain source としてのみ使う (Pimlico ERC-20 paymaster 未対応で merchant 受信不可)。
+// Kaia は JPYC 専用 — Pimlico Kaia は SimpleAccount(7702) のみ対応、MAv2 非対応
+// (mav2.ts で kaia 検出時 throw)。HyperEVM testnet は viem/chains 未収録のため
+// defineChain で inline 定義する。
 import {
   arbitrum,
   arbitrumSepolia,
@@ -213,11 +204,9 @@ export const USDC_CHAINS: readonly ChainSlug[] = [
 ];
 
 // merchant 受信 chain (USDC_CHAINS) は現在すべて buyer cross-chain source でもある
-// (lib/crossChain/config.ts CROSS_CHAIN_TARGETS で全 entry role='merchant-and-buyer')。
-// 2026-05-24 に Ethereum を一時 merchant-only にした際はここで Ethereum を除外して
-// poster 表示と backend 挙動を揃えていたが、2026-05-26 に config.ts の role を
-// merchant-and-buyer へ復帰したため除外も解除 (両者は必ず同期させる — 片方だけ戻すと
-// 「backend は払えると言うが poster には出ない」不整合になる)。
+// (config.ts CROSS_CHAIN_TARGETS で全 entry role='merchant-and-buyer')。
+// 重要: ここの集合と config.ts の role は必ず同期させる。片方だけ変えると
+// 「backend は払えると言うが poster には出ない」不整合になる。
 const BUYER_SOURCE_USDC_SLUGS: readonly ChainSlug[] = USDC_CHAINS;
 
 /** Customer (buyer) が cross-chain Gateway 経由で USDC を支払える chain の

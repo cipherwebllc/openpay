@@ -2,18 +2,16 @@
 // fail-fast (try/catch なし)、caller (useCrossChainPayment) が error state に
 // 倒す。ProgressCallback で各 step を UI に report。
 //
-// 2026-05-27 (案A′): OpenPay 利用料を cross-chain でも徴収するため、merchant 宛の
-// 本送金に加えて feeReceiver 宛にもう 1 本ブリッジする。いずれも「operator 宛 burn
-// をもう 1 本」出すことで fee を dest チェーン (= merchant のチェーン) に着金させ、
-// 通常決済と同じ「利用料は店チェーンに集約」会計に揃える。feeAmount=0 or feeReceiver
-// 未指定時は fee ブリッジを skip し従来と完全同一の挙動になる (後方互換)。
+// OpenPay 利用料 (案A′): merchant 宛の本送金に加えて feeReceiver 宛にもう 1 本
+// ブリッジし、fee を dest チェーン (= merchant のチェーン) に着金させて通常決済と同じ
+// 「利用料は店チェーンに集約」会計に揃える。feeAmount=0 or feeReceiver 未指定時は
+// fee ブリッジを skip し従来と完全同一の挙動になる (後方互換)。
 //
-// 2026-05-27 (resume): 途中失敗からの再開に対応。CCTP/Gateway の attestation は
-// 永久に有効 (一度 burn すれば後でいつでも mint 可能) なので、完了済みステップを
-// resume state で skip して「送り出しの二重実行 (= 二重支払い)」を防ぎつつ残りの
-// step だけ再実行する。onStep で各 step 完了を逐次 report し、caller (hook) が
-// localStorage 等へ永続化する。順序は merchant 先 → fee 後 (放棄時も merchant への
-// 入金が先に確定し顧客が不利にならない)。
+// 中断再開 (resume): CCTP/Gateway の attestation は永久に有効 (一度 burn すれば
+// 後でいつでも mint 可能) なので、完了済みステップを resume state で skip して
+// 「送り出しの二重実行 (= 二重支払い)」を防ぎつつ残りの step だけ再実行する。onStep で
+// 各 step 完了を逐次 report し、caller (hook) が localStorage 等へ永続化する。順序は
+// merchant 先 → fee 後 (放棄時も merchant への入金が先に確定し顧客が不利にならない)。
 
 import {
   erc20Abi,
