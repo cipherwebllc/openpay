@@ -254,6 +254,14 @@ function formatProgress(
       return t('progressPollAttestation');
     case 'dest_tx_pending':
       return t('progressDestTxPending');
+    case 'fee_sign':
+      return t('progressFeeSign');
+    case 'fee_attest':
+      return t('progressFeeAttest');
+    case 'fee_source_tx_pending':
+      return t('progressFeeSourceTxPending');
+    case 'fee_dest_tx_pending':
+      return t('progressFeeDestTxPending');
   }
 }
 

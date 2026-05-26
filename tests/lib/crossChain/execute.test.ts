@@ -882,3 +882,200 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
     expect(walletClient.writeContract).not.toHaveBeenCalled();
   });
 });
+
+// 2026-05-27 案A′: OpenPay 利用料を cross-chain でも徴収する。merchant 本送金に
+// 加えて feeReceiver 宛にもう 1 本ブリッジし、利用料を dest チェーンに着金させる。
+const FEE_RECEIVER = getAddress('0x00000000000000000000000000000000000fee01');
+
+describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () => {
+  it('Gateway: feeReceiver 宛に 2 本目の burn intent を出し、result に feeMintTxHash', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0xsig',
+      txHashes: ['0xmint_m', '0xmint_f'],
+    });
+    const sourcePublic = makePublicClient({ blockNumber: 100n });
+    const destPublic = makePublicClient();
+    let n = 0;
+    const mockFetch = vi.fn(async () => {
+      n++;
+      return new Response(
+        JSON.stringify({ attestation: `0xatt${n}`, signature: `0xattsig${n}` }),
+        { status: 200 },
+      );
+    });
+    const progress: CrossChainProgress[] = [];
+
+    const result = await executeGatewayTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceToken: SOURCE_TOKEN,
+      destToken: DEST_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 9_900_000n, // merchant (amount - fee)
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n, // 1% of 10 USDC
+      fetch: mockFetch as unknown as typeof fetch,
+      onProgress: (p) => progress.push(p),
+    });
+
+    // 2 sign + 2 attest + 2 mint
+    expect(walletClient.signTypedData).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+
+    // 1 本目 = merchant (value 9_900_000, recipient RECIPIENT)
+    const m = (
+      walletClient.signTypedData.mock.calls[0][0] as unknown as {
+        message: { spec: { value: bigint; destinationRecipient: Hex } };
+      }
+    ).message.spec;
+    expect(m.value).toBe(9_900_000n);
+    expect(m.destinationRecipient.toLowerCase()).toContain(
+      RECIPIENT.slice(2).toLowerCase(),
+    );
+    // 2 本目 = fee (value 100_000, recipient FEE_RECEIVER)
+    const f = (
+      walletClient.signTypedData.mock.calls[1][0] as unknown as {
+        message: { spec: { value: bigint; destinationRecipient: Hex } };
+      }
+    ).message.spec;
+    expect(f.value).toBe(100_000n);
+    expect(f.destinationRecipient.toLowerCase()).toContain(
+      FEE_RECEIVER.slice(2).toLowerCase(),
+    );
+
+    // mint は merchant → fee の順
+    expect(result.mintTxHash).toBe('0xmint_m');
+    expect(result.feeMintTxHash).toBe('0xmint_f');
+
+    // progress に fee step が含まれる
+    const kinds = progress.map((p) => p.kind);
+    expect(kinds).toContain('fee_sign');
+    expect(kinds).toContain('fee_attest');
+    expect(kinds).toContain('fee_dest_tx_pending');
+  });
+
+  it('CCTP: approve=total・feeReceiver 宛に 2 本目 burn、result に feeBurn/feeMint hash', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      // 呼び出し順: approve, burn_m, burn_f, mint_m, mint_f
+      txHashes: ['0xapprove', '0xburn_m', '0xburn_f', '0xmint_m', '0xmint_f'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 9_900_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // approve は merchant + fee 合算 (= 10 USDC)
+    const approveArg = walletClient.writeContract.mock.calls[0][0] as unknown as {
+      args: [Address, bigint];
+    };
+    expect(approveArg.args[1]).toBe(10_000_000n);
+
+    // burn 2 本 + mint 2 本 = sendTransaction 4 回
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(4);
+
+    // burn_m: amount 9_900_000, mintRecipient RECIPIENT
+    const burnM = decodeFunctionData({
+      abi: CCTP_V2_TOKEN_MESSENGER_ABI,
+      data: (
+        walletClient.sendTransaction.mock.calls[0][0] as unknown as { data: Hex }
+      ).data,
+    });
+    expect(burnM.args[0]).toBe(9_900_000n);
+    expect((burnM.args[2] as string).toLowerCase()).toContain(
+      RECIPIENT.slice(2).toLowerCase(),
+    );
+    // burn_f: amount 100_000, mintRecipient FEE_RECEIVER
+    const burnF = decodeFunctionData({
+      abi: CCTP_V2_TOKEN_MESSENGER_ABI,
+      data: (
+        walletClient.sendTransaction.mock.calls[1][0] as unknown as { data: Hex }
+      ).data,
+    });
+    expect(burnF.args[0]).toBe(100_000n);
+    expect((burnF.args[2] as string).toLowerCase()).toContain(
+      FEE_RECEIVER.slice(2).toLowerCase(),
+    );
+
+    // 2 burn の attestation polling → fetch 2 回
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    expect(result.approveTxHash).toBe('0xapprove');
+    expect(result.burnTxHash).toBe('0xburn_m');
+    expect(result.feeBurnTxHash).toBe('0xburn_f');
+    expect(result.mintTxHash).toBe('0xmint_m');
+    expect(result.feeMintTxHash).toBe('0xmint_f');
+  });
+
+  it('feeAmount=0 では fee ブリッジを skip (従来挙動)', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0xsig',
+      txHashes: ['0xmint'],
+    });
+    const sourcePublic = makePublicClient({ blockNumber: 100n });
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ attestation: '0x', signature: '0x' }), {
+          status: 200,
+        }),
+    );
+
+    const result = await executeGatewayTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceToken: SOURCE_TOKEN,
+      destToken: DEST_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 0n, // fee なし → skip
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+
+    expect(walletClient.signTypedData).toHaveBeenCalledTimes(1);
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(result.feeMintTxHash).toBeUndefined();
+  });
+});
