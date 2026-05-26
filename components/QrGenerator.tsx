@@ -919,10 +919,11 @@ export function QrGenerator() {
                 {settings.posterNote.trim() || t('posterDefaultNote')}
               </p>
               {/* 受信 chain の表示。crossChain ON + USDC では、buyer 視点で「どの
-                  chain の USDC でも払える」ことを示すため対応 7 chain (merchant 5
-                  + buyer-only Avalanche/Unichain) を全列挙する (poster はお客向け
-                  = 顧客が「自分の chain で払えるか」確認するための情報)。phase
-                  4b-1 で buyer source が 5 → 7 chain に拡張、表示も追従。
+                  chain の USDC でも払える」ことを示すため buyerUsdcChainNames() の
+                  全 chain (merchant 受信 6 incl. Ethereum + buyer-only 5) を列挙する
+                  (poster はお客向け = 顧客が「自分の chain で払えるか」確認する情報)。
+                  config.ts の merchant-and-buyer role と chains.ts の
+                  BUYER_SOURCE_USDC_SLUGS が sync している前提。
                   crossChain OFF or JPYC では従来通り単一 chain (target chain) を表示。 */}
               <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
                 {deployment.displaySymbol} ·{' '}
