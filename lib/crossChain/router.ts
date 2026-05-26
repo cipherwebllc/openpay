@@ -52,7 +52,10 @@ export type PathDecision =
 export interface SelectPathArgs {
   /** merchant 着金 chain (PayParams.chain → chainId) */
   targetChainId: number;
-  /** 必要額 (atomic USDC = 6 decimals)。amount + 想定 bridge fee 上限を含める */
+  /** 請求額 (invoice amount, atomic USDC = 6 decimals)。案A′ では顧客はこの額を
+   *  source USDC で burn し (merchant 宛 amount-fee + operator 宛 fee の 2 本)、
+   *  Circle ブリッジ手数料は各 burn の mint 額から差し引かれる (merchant/operator
+   *  が受取減で負担)。よって顧客が source に要する USDC は請求額そのもの。 */
   requiredAtomic: bigint;
   /** balance.ts readAllCrossChainBalances の戻り値 */
   balances: MultiChainBalances;

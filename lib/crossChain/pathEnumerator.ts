@@ -81,7 +81,8 @@ const ETA_CCTP_V2_SEC = 30;
 export interface EnumerateArgs {
   /** merchant 着金 chain id */
   targetChainId: number;
-  /** 必要 USDC 額 (atomic)。fee 上乗せ前。balance 充足判定にこの値を使う */
+  /** 請求額 (invoice amount, atomic)。案A′ では顧客はこの額を source USDC で burn
+   *  する (内訳: merchant 宛 amount-fee + operator 宛 fee)。balance 充足判定に使う。 */
   requiredAtomic: bigint;
   /** balance.ts readAllCrossChainBalances の戻り値 */
   balances: MultiChainBalances;
@@ -90,7 +91,8 @@ export interface EnumerateArgs {
 /** 全 viable source chain × path 組合せを返す。
  *  並び順: direct → gateway → cctp-v2、同 kind 内では balance 降順。
  *  balance 不足の chain (< requiredAtomic) は除外。
- *  fee 上乗せまでは厳密 check しない (UI で「your balance vs required + fee」表示) */
+ *  各 PathOption の serviceFeeAtomic は Circle ブリッジ手数料の見積で、cross-chain
+ *  path の比較用に表示する (merchant/operator が受取減で負担、顧客の支出は requiredAtomic)。 */
 export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   const { targetChainId, requiredAtomic, balances } = args;
   const options: PathOption[] = [];
