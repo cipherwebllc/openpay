@@ -86,6 +86,23 @@ function resolveChainOrThrow(
   return chain;
 }
 
+// tx receipt を待ち、status が 'success' でなければ throw する。
+// viem の waitForTransactionReceipt は tx が revert しても throw せず
+// status:'reverted' の receipt を返すだけなので、明示的に検証しないと revert を
+// 「成功」として扱い、未着金の決済を完了記録してしまう。
+async function waitForReceiptOrThrow(
+  client: PublicClient,
+  hash: Hex,
+  label: string,
+): Promise<void> {
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  if (receipt.status !== 'success') {
+    throw new Error(
+      `cross-chain execute: ${label} tx が revert しました (status=${receipt.status}, ${hash})`,
+    );
+  }
+}
+
 // ========== Gateway path ==========
 
 export interface GatewayResumeState {
@@ -258,13 +275,17 @@ export async function executeGatewayTransfer(
     if (needMerchantMint) {
       const mintHash = await mint(merchantAtt);
       onProgress({ kind: 'dest_tx_pending', hash: mintHash });
-      await args.destPublicClient.waitForTransactionReceipt({ hash: mintHash });
+      await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'gateway mint');
       persist({ mintTxHash: mintHash });
     }
     if (needFeeMint && state.feeAttestation) {
       const feeMintHash = await mint(state.feeAttestation);
       onProgress({ kind: 'fee_dest_tx_pending', hash: feeMintHash });
-      await args.destPublicClient.waitForTransactionReceipt({ hash: feeMintHash });
+      await waitForReceiptOrThrow(
+        args.destPublicClient,
+        feeMintHash,
+        'gateway fee mint',
+      );
       persist({ feeMintTxHash: feeMintHash });
     }
   }
@@ -388,7 +409,11 @@ export async function executeCctpTransfer(
       chain: sourceChain,
       account: args.account,
     });
-    await args.sourcePublicClient.waitForTransactionReceipt({ hash: approveHash });
+    await waitForReceiptOrThrow(
+      args.sourcePublicClient,
+      approveHash,
+      'cctp approve',
+    );
     persist({ approveTxHash: approveHash });
 
     // 1 件分の depositForBurn を実行する closure。
@@ -411,15 +436,17 @@ export async function executeCctpTransfer(
     if (needMerchantBurn) {
       const burnHash = await burn(args.recipient, args.valueAtomic);
       onProgress({ kind: 'source_tx_pending', hash: burnHash });
-      await args.sourcePublicClient.waitForTransactionReceipt({ hash: burnHash });
+      await waitForReceiptOrThrow(args.sourcePublicClient, burnHash, 'cctp burn');
       persist({ burnTxHash: burnHash });
     }
     if (needFeeBurn) {
       const feeBurnHash = await burn(feeReceiver, feeAmount);
       onProgress({ kind: 'fee_source_tx_pending', hash: feeBurnHash });
-      await args.sourcePublicClient.waitForTransactionReceipt({
-        hash: feeBurnHash,
-      });
+      await waitForReceiptOrThrow(
+        args.sourcePublicClient,
+        feeBurnHash,
+        'cctp fee burn',
+      );
       persist({ feeBurnTxHash: feeBurnHash });
     }
   }
@@ -486,7 +513,7 @@ export async function executeCctpTransfer(
         data: mintData,
       });
       onProgress({ kind: 'dest_tx_pending', hash: mintHash });
-      await args.destPublicClient.waitForTransactionReceipt({ hash: mintHash });
+      await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'cctp mint');
       persist({ mintTxHash: mintHash });
     }
     if (feeIris) {
@@ -501,7 +528,11 @@ export async function executeCctpTransfer(
         data: feeMintData,
       });
       onProgress({ kind: 'fee_dest_tx_pending', hash: feeMintHash });
-      await args.destPublicClient.waitForTransactionReceipt({ hash: feeMintHash });
+      await waitForReceiptOrThrow(
+        args.destPublicClient,
+        feeMintHash,
+        'cctp fee mint',
+      );
       persist({ feeMintTxHash: feeMintHash });
     }
   }

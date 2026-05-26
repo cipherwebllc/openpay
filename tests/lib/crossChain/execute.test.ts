@@ -1229,3 +1229,85 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     expect(result.feeMintTxHash).toBeUndefined();
   });
 });
+
+// 2026-05-27 (LARP fix): viem の waitForTransactionReceipt は tx が revert しても
+// throw せず status:'reverted' を返す。execute は status を検証して revert を
+// 「成功」として扱わない (未着金決済を完了記録する事故を防ぐ)。
+describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱いしない)', () => {
+  it('Gateway: mint が reverted → throw (成功記録しない)', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0xsig',
+      txHashes: ['0xmint'],
+    });
+    const sourcePublic = makePublicClient({ blockNumber: 100n });
+    const destPublic = {
+      getBlockNumber: vi.fn(),
+      waitForTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
+    };
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        fetch: mockFetch as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/revert/);
+  });
+
+  it('CCTP: burn が reverted → throw (mint へ進まない)', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove', '0xburn'],
+    });
+    // approve は success、burn で reverted を返す
+    let call = 0;
+    const sourcePublic = {
+      getBlockNumber: vi.fn(async () => 1000n),
+      waitForTransactionReceipt: vi.fn(async () => {
+        call += 1;
+        return { status: call === 1 ? 'success' : 'reverted' };
+      }),
+    };
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      }),
+    ).rejects.toThrow(/revert/);
+    // burn revert で attestation polling に進まない
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
