@@ -19,7 +19,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     await page.goto('/ja');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     await expect(
-      page.getByRole('heading', { name: /Tip widget 埋め込みコードを生成/ }),
+      page.getByRole('heading', { name: /応援を受け取る Tip widget を作成/ }),
     ).toBeVisible();
     await expect(
       page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/),
@@ -47,7 +47,8 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
         })
         .first(),
     ).toBeVisible();
-    // iframe スニペットには <iframe + width="380" が出る
+    // iframe スニペットは「サイトに埋め込む」タブを開くと出る (default は共有リンク)
+    await page.getByRole('tab', { name: 'サイトに埋め込む' }).click();
     await expect(page.getByText(/width="380"/)).toBeVisible();
   });
 

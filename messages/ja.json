@@ -7,8 +7,8 @@
       "tip": "Tip widget (クリエイター)"
     },
     "tipPanel": {
-      "heading": "Tip widget 埋め込みコードを生成",
-      "subheading": "ブログ・ポートフォリオ・配信ページに貼り付けてチップを受け取ります。OpenPay 利用手数料 1.0% + ネットワーク手数料見積 (ガスレス決済)。"
+      "heading": "応援を受け取る Tip widget を作成",
+      "subheading": "ブログ・ポートフォリオ・配信ページに貼るだけで、JPYC / USDC のチップを受け取れます。"
     },
     "offramp": {
       "heading": "受け取った通貨を換金",
@@ -247,7 +247,10 @@
     "poweredBy": "powered by"
   },
   "TipEmbedGenerator": {
-    "receiverLabel": "クリエイターウォレットアドレス",
+    "step1Title": "受取先",
+    "step2Title": "表示をカスタマイズ",
+    "step3Title": "公開する",
+    "receiverLabel": "受取ウォレットアドレス",
     "addressInvalid": "アドレス形式が正しくありません",
     "tokenLabel": "通貨",
     "tokenChainHintMulti": "{count} chain で受信 (L1 USDC ファンは cross-chain 経由)",
@@ -263,19 +266,24 @@
     "messageCounter": "{count} / 200",
     "colorLabel": "テーマカラー",
     "colorInvalid": "色は #rrggbb 形式で指定してください",
-    "presetsLabel": "金額プリセット (任意, カンマ区切り — 既定: {defaults})",
-    "presetsPlaceholder": "例: {defaults}",
-    "presetsInvalid": "有効な金額がありません — 既定値が使用されます",
-    "presetsActive": "使用される値: {values} {symbol}",
+    "presetsLabel": "チップ金額プリセット",
+    "presetsHint": "例: {defaults}",
+    "presetAmountPlaceholder": "例: 1000",
+    "presetAddButton": "+ 金額を追加",
+    "presetRemoveLabel": "プリセット {n} を削除",
     "thanksLabel": "送信成功後のサンキューメッセージ (任意)",
     "thanksPlaceholder": "例: ありがとう！限定 Discord に招待します ↓",
-    "thanksUrlLabel": "送信成功後のリンク URL (任意)",
+    "thanksUrlLabel": "チップ後に表示するリンク (任意)",
     "thanksUrlPlaceholder": "https://discord.gg/... または https://patreon.com/...",
     "thanksUrlHint": "送信成功画面で「リンクを開く」ボタンとして表示。http(s) 以外は無視されます",
-    "webhookLabel": "送信成功時の webhook URL (任意)",
+    "webhookLabel": "開発者向け：webhook 通知 URL (任意)",
     "webhookPlaceholder": "https://discord.com/api/webhooks/... など",
     "webhookHint": "設定すると、tip 受信時に {payload} を JSON で POST します。通知用途のみ。特典配布・会員権限付与・注文確定に使う場合は txHash を必ずオンチェーンで再検証してください。CORS 許可が必要",
     "previewTitle": "プレビュー",
+    "publishShareTab": "リンクで共有",
+    "publishEmbedTab": "サイトに埋め込む",
+    "devSettingsToggle": "開発者向け設定",
+    "feeNote": "OpenPay 利用手数料 1.0%（ガスレス決済）",
     "tipUrlTitle": "Tip URL",
     "iframeTitle": "iframe 埋め込みコード",
     "copy": "コピー",

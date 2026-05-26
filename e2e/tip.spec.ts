@@ -110,13 +110,16 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     }
   });
 
-  test('USDC + Ethereum L1 → reject (gasless 必須の Tip 仕様)', async ({
+  test('USDC + Ethereum L1 → 受理 (2026-05 L1 restore で ERC20 paymaster ガスレス対応)', async ({
     page,
   }) => {
-    // L1 は Pimlico paymaster 未対応なので Tip では reject される。
-    // creator が誤って L1 URL を共有しても fan に明確なエラーが出る invariant。
+    // 2026-05 に Ethereum L1 を merchant-and-buyer に復帰 (commit 8ecccaa)。USDC@L1 は
+    // Pimlico ERC-20 paymaster でガスレス対応になったため Tip でも受理される。
+    // (useTipSettings.test.tsx「usdc + ethereum → そのまま保存」と一致。旧 reject
+    // 前提の assertion は L1 restore 後に stale 化していたものを修正。)
     await page.goto(`/ja/tip/${TO}?token=usdc&chain=ethereum`);
-    await expect(page.getByText(/Tip URL が不正/)).toBeVisible();
+    await expect(page.getByText(/Tip URL が不正/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();
   });
 
   test('USDC + crossChain=false: CrossChainHint 非 mount + iframe 380×640 で破綻なし', async ({

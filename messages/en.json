@@ -7,8 +7,8 @@
       "tip": "Tip widget (creator)"
     },
     "tipPanel": {
-      "heading": "Generate Tip widget embed code",
-      "subheading": "Drop into your blog, portfolio, or stream page to receive tips. OpenPay service fee 1.0% + estimated network fee (gasless payment)."
+      "heading": "Create a Tip widget to receive support",
+      "subheading": "Add it to your blog, portfolio, or stream page to receive JPYC / USDC tips."
     },
     "offramp": {
       "heading": "Off-ramp received tokens",
@@ -247,7 +247,10 @@
     "poweredBy": "powered by"
   },
   "TipEmbedGenerator": {
-    "receiverLabel": "Creator wallet address",
+    "step1Title": "Recipient",
+    "step2Title": "Customize appearance",
+    "step3Title": "Publish",
+    "receiverLabel": "Receiving wallet address",
     "addressInvalid": "Invalid address format",
     "tokenLabel": "Token",
     "tokenChainHintMulti": "{count} chains for receiving (L1 USDC fans tip via cross-chain)",
@@ -263,19 +266,24 @@
     "messageCounter": "{count} / 200",
     "colorLabel": "Theme color",
     "colorInvalid": "Color must be in #rrggbb format",
-    "presetsLabel": "Amount presets (optional, comma-separated — defaults: {defaults})",
-    "presetsPlaceholder": "e.g. {defaults}",
-    "presetsInvalid": "No valid amounts — using defaults",
-    "presetsActive": "Using: {values} {symbol}",
+    "presetsLabel": "Tip amount presets",
+    "presetsHint": "e.g. {defaults}",
+    "presetAmountPlaceholder": "e.g. 1000",
+    "presetAddButton": "+ Add amount",
+    "presetRemoveLabel": "Remove preset {n}",
     "thanksLabel": "Thank-you message after success (optional)",
     "thanksPlaceholder": "e.g. Thanks! Discord invite below ↓",
-    "thanksUrlLabel": "Link URL after success (optional)",
+    "thanksUrlLabel": "Link shown after a tip (optional)",
     "thanksUrlPlaceholder": "https://discord.gg/... or https://patreon.com/...",
     "thanksUrlHint": "Shown as an \"Open link\" button on the success screen. http(s) only.",
-    "webhookLabel": "Webhook URL on tip received (optional)",
+    "webhookLabel": "Developer: webhook notification URL (optional)",
     "webhookPlaceholder": "e.g. https://discord.com/api/webhooks/...",
     "webhookHint": "When set, posts {payload} as JSON on each successful tip. Notification only. If you use it for rewards, membership access, or order fulfillment, always verify txHash on-chain. CORS must allow this origin.",
     "previewTitle": "Preview",
+    "publishShareTab": "Share link",
+    "publishEmbedTab": "Embed on site",
+    "devSettingsToggle": "Developer settings",
+    "feeNote": "OpenPay fee 1.0% (gasless)",
     "tipUrlTitle": "Tip URL",
     "iframeTitle": "iframe embed code",
     "copy": "Copy",

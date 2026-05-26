@@ -432,7 +432,9 @@ export type TipParams = {
 const TIP_NAME_MAX = 60;
 const TIP_MESSAGE_MAX = 200;
 const TIP_THANKS_MAX = 200;
-const TIP_PRESET_MAX = 6;
+// preset の最大件数。URL builder/parser と generator UI / settings hook の
+// 単一 source of truth (重複定義を避ける)。
+export const TIP_PRESET_MAX = 6;
 export const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 export const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
 // http/https のみ許可。URL.canParse を使うので try/catch 不要。

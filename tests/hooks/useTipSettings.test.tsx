@@ -19,7 +19,7 @@ describe('useTipSettings', () => {
       name: '',
       message: '',
       color: '#2563eb',
-      presets: '',
+      presets: { jpyc: ['300', '1000', '3000'], usdc: ['5', '20', '50'] },
       thanks: '',
       thanksUrl: '',
       webhook: '',
@@ -55,7 +55,8 @@ describe('useTipSettings', () => {
       name: 'Alice',
       message: 'hi',
       color: '#ff00ff',
-      presets: '1,5',
+      // 旧 CSV '1,5' は最後の token (usdc) のリストへ migrate、jpyc は既定。
+      presets: { jpyc: ['300', '1000', '3000'], usdc: ['1', '5'] },
       thanks: '',
       thanksUrl: '',
       webhook: '',
@@ -97,6 +98,7 @@ describe('useTipSettings', () => {
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
 
+    const presets = { jpyc: ['300', '1000', '3000'], usdc: ['2', '4', '8'] };
     act(() => {
       result.current.setSettings({
         receiver: '0xdef',
@@ -105,7 +107,7 @@ describe('useTipSettings', () => {
         name: 'Bob',
         message: 'thx',
         color: '#112233',
-        presets: '2,4,8',
+        presets,
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
         webhook: 'https://example.com/hook',
@@ -124,7 +126,7 @@ describe('useTipSettings', () => {
         name: 'Bob',
         message: 'thx',
         color: '#112233',
-        presets: '2,4,8',
+        presets,
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
         webhook: 'https://example.com/hook',
@@ -195,14 +197,84 @@ describe('useTipSettings', () => {
     expect(result.current.settings.webhook).toBe('');
   });
 
-  it('presets が非文字列 (array) → default の空文字列に置換', async () => {
+  it('presets が token 別 object でも CSV でもない形 (数値 array) → token 別既定', async () => {
+    // [100,500] は object 扱いだが o.jpyc/o.usdc 不在 → 両 token 既定に倒す。
     window.localStorage.setItem(
       KEY,
       JSON.stringify({ token: 'jpyc', presets: [100, 500] }),
     );
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.presets).toBe('');
+    expect(result.current.settings.presets).toEqual({
+      jpyc: ['300', '1000', '3000'],
+      usdc: ['5', '20', '50'],
+    });
+  });
+
+  it('旧 CSV + token=usdc → USDC へ migrate、JPYC は既定 (USDC カスタム値を失わない)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'usdc', chain: 'base', presets: '8,15' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets).toEqual({
+      jpyc: ['300', '1000', '3000'],
+      usdc: ['8', '15'],
+    });
+  });
+
+  it('旧 CSV は strict 検証 (2000yen / -5 / abc は補正せず除外、有効値のみ)', async () => {
+    // QR の lenient sanitizer なら 2000yen→2000・-5→5 になるが、Tip は strict。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', presets: '2000yen,-5,abc,,300,1000' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets.jpyc).toEqual(['300', '1000']);
+    expect(result.current.settings.presets.usdc).toEqual(['5', '20', '50']);
+  });
+
+  it('旧 CSV が空 → 両 token 既定に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', presets: '' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets).toEqual({
+      jpyc: ['300', '1000', '3000'],
+      usdc: ['5', '20', '50'],
+    });
+  });
+
+  it('新 object schema は token ごと独立に保持、片方空は既定に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        presets: { jpyc: ['100', '250'], usdc: [] },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets).toEqual({
+      jpyc: ['100', '250'],
+      usdc: ['5', '20', '50'],
+    });
+  });
+
+  it('presets は最大 6 件で truncate (旧 CSV)', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', presets: '1,2,3,4,5,6,7,8' }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets.jpyc).toEqual([
+      '1', '2', '3', '4', '5', '6',
+    ]);
   });
 
   it('hydrate 完了前に localStorage を上書きしない', () => {
@@ -300,7 +372,7 @@ describe('useTipSettings', () => {
       name: 'Test',
       message: 'msg',
       color: '#abcdef',
-      presets: '100,500',
+      presets: { jpyc: ['100', '500'], usdc: ['5', '20', '50'] },
       thanks: 'thx',
       thanksUrl: '',
       webhook: '',

@@ -84,18 +84,18 @@ export default function HomePage() {
       {tab === 'qr' ? (
         <QrGenerator />
       ) : (
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:rounded-none print:border-0 print:p-0 print:shadow-none">
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">
-                {t('tipPanel.heading')}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {t('tipPanel.subheading')}
-              </p>
-            </div>
-            <TipEmbedGenerator />
+        // tip タブは TipEmbedGenerator 内部が StepCard を並べるので、qr タブと同様に
+        // 外側 card で包まない (card-in-card 回避)。見出しは素の header として出す。
+        <div className="space-y-5">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800">
+              {t('tipPanel.heading')}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {t('tipPanel.subheading')}
+            </p>
           </div>
+          <TipEmbedGenerator />
         </div>
       )}
 
