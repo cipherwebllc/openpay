@@ -101,6 +101,41 @@ async function waitForReceiptOrThrow(
   }
 }
 
+// 既に broadcast 済の hash が on-chain で成功確定しているかを非 throw で確認する。
+// receipt が未取得 (未 mine / dropped) や revert の場合は false。
+async function txAlreadySucceeded(
+  client: PublicClient,
+  hash: Hex,
+): Promise<boolean> {
+  const receipt = await client
+    .getTransactionReceipt({ hash })
+    .catch(() => null);
+  return receipt?.status === 'success';
+}
+
+// dest チェーンの mint を「再開安全」に実行する。既に broadcast 済の hash があれば
+// on-chain 確定を検証し、成功済なら skip (再 mint は attestation 既消費で必ず
+// revert するため)。未確定なら (再)送信し、broadcast 直後に hash を永続化してから
+// receipt を待つ — receipt 待ち中に中断しても「landed したのに記録されず resume で
+// 必ず revert」する stuck を防ぐ。
+async function settleMint(args: {
+  client: PublicClient;
+  existingHash: Hex | undefined;
+  broadcast: () => Promise<Hex>;
+  onBroadcast: (hash: Hex) => void;
+  label: string;
+}): Promise<void> {
+  if (
+    args.existingHash &&
+    (await txAlreadySucceeded(args.client, args.existingHash))
+  ) {
+    return;
+  }
+  const hash = await args.broadcast();
+  args.onBroadcast(hash);
+  await waitForReceiptOrThrow(args.client, hash, args.label);
+}
+
 // ========== Gateway path ==========
 
 export interface GatewayResumeState {
@@ -253,39 +288,43 @@ export async function executeGatewayTransfer(
     );
   }
 
-  // 2. dest chain に switch して mint (merchant → fee の順)。
-  const needMerchantMint = !state.mintTxHash;
-  const needFeeMint = bridgeFee && !state.feeMintTxHash;
-  if (needMerchantMint || needFeeMint) {
-    onProgress({ kind: 'switch_chain', targetChainId: args.destChainId });
-    await args.switchChainAsync({ chainId: args.destChainId });
+  // 2. dest chain に switch して mint (merchant → fee の順)。settleMint が broadcast
+  //    済 hash の landed を検証し、成功済なら skip / 未確定なら (再)送信する。switch は
+  //    idempotent (同 chain は no-op)。
+  onProgress({ kind: 'switch_chain', targetChainId: args.destChainId });
+  await args.switchChainAsync({ chainId: args.destChainId });
 
-    const mint = async (att: { attestation: Hex; signature: Hex }): Promise<Hex> => {
-      const data = encodeGatewayMintCalldata(att.attestation, att.signature);
-      return args.walletClient.sendTransaction({
-        account: args.account,
-        chain: destChain,
-        to: GATEWAY_MINTER_ADDRESS,
-        data,
-      });
-    };
+  const mint = (att: { attestation: Hex; signature: Hex }): Promise<Hex> => {
+    const data = encodeGatewayMintCalldata(att.attestation, att.signature);
+    return args.walletClient.sendTransaction({
+      account: args.account,
+      chain: destChain,
+      to: GATEWAY_MINTER_ADDRESS,
+      data,
+    });
+  };
 
-    if (needMerchantMint) {
-      const mintHash = await mint(merchantAtt);
-      onProgress({ kind: 'dest_tx_pending', hash: mintHash });
-      await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'gateway mint');
-      persist({ mintTxHash: mintHash });
-    }
-    if (needFeeMint && state.feeAttestation) {
-      const feeMintHash = await mint(state.feeAttestation);
-      onProgress({ kind: 'fee_dest_tx_pending', hash: feeMintHash });
-      await waitForReceiptOrThrow(
-        args.destPublicClient,
-        feeMintHash,
-        'gateway fee mint',
-      );
-      persist({ feeMintTxHash: feeMintHash });
-    }
+  await settleMint({
+    client: args.destPublicClient,
+    existingHash: state.mintTxHash,
+    broadcast: () => mint(merchantAtt),
+    onBroadcast: (hash) => {
+      persist({ mintTxHash: hash });
+      onProgress({ kind: 'dest_tx_pending', hash });
+    },
+    label: 'gateway mint',
+  });
+  if (bridgeFee && state.feeAttestation) {
+    await settleMint({
+      client: args.destPublicClient,
+      existingHash: state.feeMintTxHash,
+      broadcast: () => mint(state.feeAttestation!),
+      onBroadcast: (hash) => {
+        persist({ feeMintTxHash: hash });
+        onProgress({ kind: 'fee_dest_tx_pending', hash });
+      },
+      label: 'gateway fee mint',
+    });
   }
 
   if (!state.mintTxHash) {
@@ -461,17 +500,27 @@ export async function executeCctpTransfer(
     );
   }
 
-  // 2. attestation を取得して dest で mint (まだ mint していない分だけ)。
-  const needMerchantMint = !state.mintTxHash;
-  const needFeeMint = bridgeFee && !state.feeMintTxHash;
+  // 2. attestation を取得して dest で mint。broadcast 済の mint hash があれば landed を
+  //    検証し、成功済なら skip (再 mint は message 既消費で revert)。未確定のもののみ
+  //    attestation を poll して (再)送信し、broadcast 直後に hash を永続化する
+  //    (receipt 待ち中の中断で「landed 済なのに resume で必ず revert」になる stuck 防止)。
+  const merchantMintLanded = state.mintTxHash
+    ? await txAlreadySucceeded(args.destPublicClient, state.mintTxHash)
+    : false;
+  const feeMintLanded = !bridgeFee
+    ? true
+    : state.feeMintTxHash
+      ? await txAlreadySucceeded(args.destPublicClient, state.feeMintTxHash)
+      : false;
+
   let attestationMessage: Hex | undefined;
   let attestationSignature: Hex | undefined;
 
-  if (needMerchantMint || needFeeMint) {
+  if (!merchantMintLanded || !feeMintLanded) {
     onProgress({ kind: 'poll_attestation' });
     // burn hash から attestation を再取得 (Iris は永続なので resume でも取得可能)。
     let merchantIris: { message: Hex; attestation: Hex } | undefined;
-    if (needMerchantMint) {
+    if (!merchantMintLanded) {
       const iris = await pollIrisAttestation(args.sourceDomain, burnHash, {
         fetch: args.fetch,
         baseUrl: args.irisBaseUrl,
@@ -485,7 +534,7 @@ export async function executeCctpTransfer(
       attestationSignature = merchantIris.attestation;
     }
     let feeIris: { message: Hex; attestation: Hex } | undefined;
-    if (needFeeMint && state.feeBurnTxHash) {
+    if (!feeMintLanded && state.feeBurnTxHash) {
       const iris = await pollIrisAttestation(
         args.sourceDomain,
         state.feeBurnTxHash,
@@ -515,9 +564,9 @@ export async function executeCctpTransfer(
         to: CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
         data: mintData,
       });
+      persist({ mintTxHash: mintHash });
       onProgress({ kind: 'dest_tx_pending', hash: mintHash });
       await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'cctp mint');
-      persist({ mintTxHash: mintHash });
     }
     if (feeIris) {
       const feeMintData = encodeReceiveMessageCalldata(
@@ -530,13 +579,13 @@ export async function executeCctpTransfer(
         to: CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
         data: feeMintData,
       });
+      persist({ feeMintTxHash: feeMintHash });
       onProgress({ kind: 'fee_dest_tx_pending', hash: feeMintHash });
       await waitForReceiptOrThrow(
         args.destPublicClient,
         feeMintHash,
         'cctp fee mint',
       );
-      persist({ feeMintTxHash: feeMintHash });
     }
   }
 

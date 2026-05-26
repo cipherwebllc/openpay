@@ -205,6 +205,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
           merchantAmount: bridgedAmount,
           feeReceiver: props.feeReceiver,
           feeAmount,
+          // 利用料は merchant mint とは別 tx で着金する。監査用に fee mint hash を
+          // 記録 (txHash は merchant mint なので、これが無いと fee 送金を辿れない)。
+          feeTxHash: executeResult.feeMintTxHash,
           bridge,
           sourceChainId: sourceChainIdForLog,
         },

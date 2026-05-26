@@ -55,6 +55,8 @@ function makePublicClient(opts: { blockNumber?: bigint } = {}) {
   return {
     getBlockNumber: vi.fn(async () => opts.blockNumber ?? 1000n),
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    // resume の landed 検証 (txAlreadySucceeded) 用。default は成功扱い。
+    getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
   };
 }
 
@@ -1357,5 +1359,111 @@ describe('lib/crossChain/execute: burn hash を receipt 待ち前に永続化 (�
     // burn の broadcast 直後に burnTxHash が永続化されている (receipt 失敗より前)。
     // → 再開時は再 burn せず保存済 hash の attestation を poll する。
     expect(steps.some((s) => s.burnTxHash === '0xburn')).toBe(true);
+  });
+});
+
+// 2026-05-27 (codex review 2nd round P2): mint hash も broadcast 直後に永続化し、
+// resume では保存済 hash を on-chain 検証 (landed なら skip / revert・未 mine なら再 mint)。
+// 「mint が landed したのに receipt 観測前に中断 → resume で同 attestation を再 mint →
+// 既消費で revert → stuck」を防ぐ。
+describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resume で landed 検証', () => {
+  it('CCTP: mint broadcast 後に receipt が失敗しても mintTxHash は onStep 済', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove', '0xburn', '0xmint'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = {
+      getBlockNumber: vi.fn(),
+      getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      waitForTransactionReceipt: vi.fn(async () => {
+        throw new Error('rpc lost during mint');
+      }),
+    };
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+    const steps: Array<Record<string, unknown>> = [];
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        onStep: (s) => steps.push({ ...s }),
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      }),
+    ).rejects.toThrow(/rpc lost during mint/);
+
+    expect(steps.some((s) => s.mintTxHash === '0xmint')).toBe(true);
+  });
+
+  it('CCTP resume: 永続済 mintTxHash が revert 済なら再 poll + 再 mint する', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_retry'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = {
+      getBlockNumber: vi.fn(),
+      // 前回 broadcast した mint は revert 済 → landed=false → 再 mint されるべき。
+      getTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
+      waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    };
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xb',
+        mintTxHash: '0xmint_old',
+      },
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // 前回 mint が revert 済なので attestation を再 poll し再 mint する。
+    expect(destPublic.getTransactionReceipt).toHaveBeenCalledWith({
+      hash: '0xmint_old',
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(result.mintTxHash).toBe('0xmint_retry');
   });
 });

@@ -25,6 +25,7 @@ type Payload = {
   feeAmount?: string;
   userOpHash?: Hex;
   txHash?: Hex;
+  feeTxHash?: Hex;
   blockNumber?: string;
   errorMessage?: string;
   // cross-chain bridge 経由の決済を区別する optional fields (phase 2)。
@@ -61,6 +62,7 @@ function validate(raw: unknown): Payload | null {
   if (r.feeAmount !== undefined && !isDecimalString(r.feeAmount)) return null;
   if (r.userOpHash !== undefined && !validHex(r.userOpHash)) return null;
   if (r.txHash !== undefined && !validHex(r.txHash)) return null;
+  if (r.feeTxHash !== undefined && !validHex(r.feeTxHash)) return null;
   if (r.blockNumber !== undefined && !isDecimalString(r.blockNumber)) return null;
   if (r.errorMessage !== undefined && typeof r.errorMessage !== 'string') return null;
   if (
@@ -90,6 +92,7 @@ function validate(raw: unknown): Payload | null {
   if (r.feeAmount !== undefined) clean.feeAmount = r.feeAmount;
   if (r.userOpHash !== undefined) clean.userOpHash = r.userOpHash;
   if (r.txHash !== undefined) clean.txHash = r.txHash;
+  if (r.feeTxHash !== undefined) clean.feeTxHash = r.feeTxHash;
   if (r.blockNumber !== undefined) clean.blockNumber = r.blockNumber;
   if (r.errorMessage !== undefined) clean.errorMessage = r.errorMessage;
   if (r.bridge !== undefined) clean.bridge = r.bridge;

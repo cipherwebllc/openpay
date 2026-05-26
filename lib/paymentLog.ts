@@ -33,6 +33,9 @@ export type PaymentLogEvent = {
   feeAmount?: string;
   userOpHash?: Hex;
   txHash?: Hex;
+  // cross-chain で利用料を merchant 送金とは別 tx で着金させた場合の fee mint tx hash。
+  // 同一 chain の batch/standard では fee は txHash と同 tx 内なので undefined。
+  feeTxHash?: Hex;
   blockNumber?: string;
   errorMessage?: string;
   // optional: cross-chain bridge 経由なら 'gateway' or 'cctp-v2'。
@@ -54,6 +57,8 @@ export type PaymentLogContext = {
   customer?: Address;
   feeReceiver?: Address;
   feeAmount?: bigint;
+  // cross-chain で利用料を別 tx で着金させた場合の fee mint tx hash (監査用)。
+  feeTxHash?: Hex;
   // cross-chain bridge 経由の場合のみ指定。direct (= 既存単一 chain) では undefined。
   bridge?: PaymentBridge;
   sourceChainId?: number;
@@ -80,6 +85,7 @@ export function buildPaymentLogEvent(
     customer: ctx.customer,
     feeReceiver: ctx.feeReceiver,
     feeAmount: ctx.feeAmount?.toString(),
+    feeTxHash: ctx.feeTxHash,
     bridge: ctx.bridge,
     sourceChainId: ctx.sourceChainId,
   };
