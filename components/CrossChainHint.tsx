@@ -22,6 +22,7 @@ import {
 } from '@/lib/paymentLog';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
+import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
@@ -187,13 +188,23 @@ export function CrossChainHint(props: CrossChainHintProps) {
         selectedOption.kind === 'cctp-v2'
           ? selectedOption.sourceChainId
           : undefined;
+      // cross-chain は請求額を merchant 宛 (bridgedAmount = amount - fee) と operator
+      // 宛 (feeAmount) に分割してブリッジしている (hook と同じ standard 0.5%)。ログも
+      // この内訳で記録しないと /api/log/payment/stats が merchant 額過大・fee=0 に歪む。
+      const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
+        props.requiredAtomic,
+        'usdc',
+        'standard',
+      );
       const evt = buildPaymentLogEvent(
         {
           flow: 'direct',
           chainId: props.targetChainId,
           tokenAddress: props.tokenAddress,
           merchant: props.recipient,
-          merchantAmount: props.requiredAtomic,
+          merchantAmount: bridgedAmount,
+          feeReceiver: props.feeReceiver,
+          feeAmount,
           bridge,
           sourceChainId: sourceChainIdForLog,
         },

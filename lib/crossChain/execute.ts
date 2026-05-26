@@ -431,21 +431,26 @@ export async function executeCctpTransfer(
       });
     };
 
+    // burn hash は broadcast 直後 (receipt 待ち前) に永続化する。receipt 待ちの間に
+    // tab を閉じる / RPC が落ちると resume state に burn hash が残らず、再開時に
+    // 再 burn してしまう = 二重支払いになるため。CCTP の depositForBurn は nonce
+    // 単位で独立 (idempotent でない) なので、ここが二重支払いの唯一の防御線。
+    // 再開時は保存済 hash の attestation を poll して mint へ進む。
     if (needMerchantBurn) {
       const burnHash = await burn(args.recipient, args.valueAtomic);
+      persist({ burnTxHash: burnHash });
       onProgress({ kind: 'source_tx_pending', hash: burnHash });
       await waitForReceiptOrThrow(args.sourcePublicClient, burnHash, 'cctp burn');
-      persist({ burnTxHash: burnHash });
     }
     if (needFeeBurn) {
       const feeBurnHash = await burn(feeReceiver, feeAmount);
+      persist({ feeBurnTxHash: feeBurnHash });
       onProgress({ kind: 'fee_source_tx_pending', hash: feeBurnHash });
       await waitForReceiptOrThrow(
         args.sourcePublicClient,
         feeBurnHash,
         'cctp fee burn',
       );
-      persist({ feeBurnTxHash: feeBurnHash });
     }
   }
 

@@ -454,12 +454,15 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     expect(screen.getByText(/5 USDC を/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Explorer で確認/ })).toBeInTheDocument();
 
-    // paymentLog 呼出確認 (bridge='gateway')
+    // paymentLog 呼出確認 (bridge='gateway')。
+    // cross-chain は請求額 5_000_000 を merchant 宛 bridgedAmount (= amount - 0.5%)
+    // と operator 宛 feeAmount に分割する。ログも内訳で記録する (stats 是正)。
     expect(logPostMock).toHaveBeenCalledTimes(1);
     const evt = logPostMock.mock.calls[0][0];
     expect(evt.bridge).toBe('gateway');
     expect(evt.result).toBe('success');
-    expect(evt.merchantAmount).toBe('5000000');
+    expect(evt.merchantAmount).toBe('4975000'); // 5_000_000 - 0.5% fee
+    expect(evt.feeAmount).toBe('25000'); // 0.5% of 5 USDC
     expect(evt.chainId).toBe(baseSepoliaId);
 
     // Sentry success log

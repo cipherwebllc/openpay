@@ -1311,3 +1311,51 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
+
+// 2026-05-27 (codex review P1): burn hash は broadcast 直後・receipt 待ち前に
+// 永続化される。receipt 待ち中の失敗 (tab close / RPC down) で burn hash が
+// 失われると、再開時に再 burn = 二重支払いになるため。
+describe('lib/crossChain/execute: burn hash を receipt 待ち前に永続化 (二重支払い防止)', () => {
+  it('CCTP: burn broadcast 後に receipt が失敗しても burnTxHash は onStep 済', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove', '0xburn'],
+    });
+    const sourcePublic = {
+      getBlockNumber: vi.fn(async () => 1000n),
+      // approve の receipt は成功、burn の receipt 待ちで RPC が落ちる想定。
+      waitForTransactionReceipt: vi.fn(
+        async ({ hash }: { hash: Hex }) => {
+          if (hash === '0xburn') throw new Error('rpc connection lost');
+          return { status: 'success' };
+        },
+      ),
+    };
+    const destPublic = makePublicClient();
+    const steps: Array<Record<string, unknown>> = [];
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        onStep: (s) => steps.push({ ...s }),
+        fetch: vi.fn() as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      }),
+    ).rejects.toThrow(/rpc connection lost/);
+
+    // burn の broadcast 直後に burnTxHash が永続化されている (receipt 失敗より前)。
+    // → 再開時は再 burn せず保存済 hash の attestation を poll する。
+    expect(steps.some((s) => s.burnTxHash === '0xburn')).toBe(true);
+  });
+});

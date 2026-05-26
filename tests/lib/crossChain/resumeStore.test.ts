@@ -100,4 +100,26 @@ describe('lib/crossChain/resumeStore', () => {
     expect(loadResumeState(baseKey)).toBeUndefined();
     spy.mockRestore();
   });
+
+  it('getItem が throw しても load=undefined / has=false (render/決済を巻き込まない)', () => {
+    const spy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('SecurityError');
+      });
+    expect(loadResumeState(baseKey)).toBeUndefined();
+    expect(hasResumeState(baseKey)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('removeItem が throw しても clear は throw しない (完了決済を error にしない)', () => {
+    saveResumeState(baseKey, { burnTxHash: '0xburn' });
+    const spy = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(() => {
+        throw new Error('SecurityError');
+      });
+    expect(() => clearResumeState(baseKey)).not.toThrow();
+    spy.mockRestore();
+  });
 });

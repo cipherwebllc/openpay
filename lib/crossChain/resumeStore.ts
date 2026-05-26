@@ -59,12 +59,13 @@ export function loadResumeState<T extends ResumeState>(
 ): T | undefined {
   const s = storage();
   if (!s) return undefined;
-  const raw = s.getItem(keyString(k));
-  if (!raw) return undefined;
   try {
+    const raw = s.getItem(keyString(k));
+    if (!raw) return undefined;
     return JSON.parse(raw) as T;
   } catch (error) {
-    // corrupt な entry は無視して新規実行扱い (決済開始を block しない)。
+    // getItem が throw する環境 / corrupt な entry は無視して新規実行扱いにする
+    // (決済開始を block しない)。
     logger.warn('cross-chain.resume.load-failed', { error });
     return undefined;
   }
@@ -86,11 +87,21 @@ export function saveResumeState(k: ResumeSessionKey, state: ResumeState): void {
 export function clearResumeState(k: ResumeSessionKey): void {
   const s = storage();
   if (!s) return;
-  s.removeItem(keyString(k));
+  try {
+    s.removeItem(keyString(k));
+  } catch (error) {
+    // removeItem が throw しても完了済みの決済を error にしない (best-effort)。
+    logger.warn('cross-chain.resume.clear-failed', { error });
+  }
 }
 
 export function hasResumeState(k: ResumeSessionKey): boolean {
   const s = storage();
   if (!s) return false;
-  return s.getItem(keyString(k)) !== null;
+  try {
+    return s.getItem(keyString(k)) !== null;
+  } catch {
+    // getItem が throw する環境では「resume なし」扱い (render を巻き込まない)。
+    return false;
+  }
 }
