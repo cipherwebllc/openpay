@@ -22,6 +22,7 @@ import {
 } from '@/lib/paymentLog';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
+import type { PayMode } from '@/lib/fee';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
@@ -37,8 +38,14 @@ export interface CrossChainHintProps {
   targetChainId: number;
   /** merchant 受取 address */
   recipient: Address;
-  /** customer が支払う atomic 額 (PaymentForm の totalCustomerOutflow と一致) */
+  /** 請求額 (invoice amount, atomic)。cross-chain では顧客はこの額を source USDC
+   *  で支出し、merchant 宛 (amount - fee) + operator 宛 (fee) の 2 本にブリッジする。
+   *  ネットワークガスは native (ETH/POL) 別途負担なので USDC 額には含めない。 */
   requiredAtomic: bigint;
+  /** 決済モード (OpenPay 利用料率 gasless 1.0% / standard 0.5% の算出に使う)。 */
+  payMode: PayMode;
+  /** OpenPay 利用料の送り先 (operator)。cross-chain でも利用料を徴収する (案A′)。 */
+  feeReceiver: Address;
   /** USDC decimals (= 6)。表示で formatUnits に使う */
   displayDecimals: number;
   /** USDC token address (paymentLog 用) */
@@ -53,6 +60,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
     targetChainId: props.targetChainId,
     requiredAtomic: props.requiredAtomic,
     recipient: props.recipient,
+    feeReceiver: props.feeReceiver,
+    payMode: props.payMode,
     enabled:
       !CROSS_CHAIN_DISABLED &&
       props.token === 'usdc' &&

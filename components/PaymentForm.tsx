@@ -498,7 +498,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
             enabled={params.crossChain !== false}
             targetChainId={requiredChain.id}
             recipient={params.to}
-            requiredAtomic={totalCustomerOutflow}
+            requiredAtomic={amountWei}
+            payMode={effectiveMode}
+            feeReceiver={env.feeReceiver}
             displayDecimals={deployment.decimals}
             tokenAddress={deployment.address}
           />

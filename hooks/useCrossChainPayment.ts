@@ -26,13 +26,21 @@ import {
 } from '@/lib/crossChain/pathEnumerator';
 import { domainForChainId } from '@/lib/crossChain/config';
 import type { CircleDomain } from '@/lib/crossChain/types';
+import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
+import type { PayMode } from '@/lib/fee';
 import { resolveDeployment } from '@/lib/tokens';
 
 export interface UseCrossChainPaymentArgs {
   targetChainId: number;
-  /** 0n のとき decision は skip (UI 起動時の判断遅延回避) */
+  /** 請求額 (invoice amount, atomic)。cross-chain では顧客はこの額を source USDC
+   *  で支出し、内訳は merchant 宛 (amount - fee) + operator 宛 (fee) の 2 本ブリッジ。
+   *  0n のとき decision は skip (UI 起動時の判断遅延回避)。 */
   requiredAtomic: bigint;
   recipient: Address;
+  /** OpenPay 利用料の送り先 (operator)。cross-chain でも利用料を徴収する (案A′)。 */
+  feeReceiver: Address;
+  /** 決済モード。OpenPay 利用料率 (gasless 1.0% / standard 0.5%) の算出に使う。 */
+  payMode: PayMode;
   enabled?: boolean;
 }
 
@@ -151,6 +159,15 @@ export function useCrossChainPayment(
         setProgress(p);
       };
 
+      // 請求額を merchant 本送金 (bridgedAmount) と OpenPay 利用料 (feeAmount) に
+      // 分割する。execute は valueAtomic を merchant へ、feeAmount を feeReceiver へ
+      // それぞれブリッジする (案A′)。
+      const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
+        args.requiredAtomic,
+        'usdc',
+        args.payMode,
+      );
+
       if (core.kind === 'gateway') {
         const gatewayArgs: ExecuteGatewayTransferArgs = {
           walletClient,
@@ -165,7 +182,9 @@ export function useCrossChainPayment(
           sourceToken: sourceDeployment.address,
           destToken: destDeployment.address,
           recipient: args.recipient,
-          valueAtomic: args.requiredAtomic,
+          valueAtomic: bridgedAmount,
+          feeReceiver: args.feeReceiver,
+          feeAmount,
           onProgress: reportProgress,
         };
         return executeGatewayTransfer(gatewayArgs);
@@ -183,7 +202,9 @@ export function useCrossChainPayment(
         sourceDomain: core.sourceDomain,
         sourceToken: sourceDeployment.address,
         recipient: args.recipient,
-        valueAtomic: args.requiredAtomic,
+        valueAtomic: bridgedAmount,
+        feeReceiver: args.feeReceiver,
+        feeAmount,
         onProgress: reportProgress,
       };
       return executeCctpTransfer(cctpArgs);
@@ -192,6 +213,8 @@ export function useCrossChainPayment(
       account,
       args.recipient,
       args.requiredAtomic,
+      args.feeReceiver,
+      args.payMode,
       args.targetChainId,
       destPublicClient,
       sourcePublicClient,
