@@ -123,15 +123,19 @@ function OptionRow({
       <div className="mt-0.5 text-xs text-slate-600">
         {t('balance', { balance: balanceStr })}
       </div>
-      <div className="mt-0.5 text-[11px] text-slate-500">
-        {option.kind === 'direct'
-          ? t('feeBreakdownDirect', { gasSymbol })
-          : t('feeBreakdownCrossChain', {
-              fee: feeStr,
-              gasSymbol,
-              eta: option.etaSeconds,
-            })}
-      </div>
+      {/* direct (同一チェーン) は bridge fee 0・追加情報不要なので fee 行を出さない
+          (バッジ「直接送金」+ 残高で十分)。実際の総額 (OpenPay 利用料 + gas) は
+          PaymentForm のメイン内訳に出る。cross-chain のみ「ブリッジ手数料 + gas +
+          ETA」を比較用に表示する。 */}
+      {option.kind !== 'direct' && (
+        <div className="mt-0.5 text-[11px] text-slate-500">
+          {t('feeBreakdownCrossChain', {
+            fee: feeStr,
+            gasSymbol,
+            eta: option.etaSeconds,
+          })}
+        </div>
+      )}
     </div>
   );
 }

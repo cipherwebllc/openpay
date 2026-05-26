@@ -468,8 +468,7 @@
     "title": "Choose payment source chain",
     "subtitle": "Required: {required} USDC. Compare all chains where you have a balance plus their fees.",
     "balance": "Balance: {balance} USDC",
-    "feeBreakdownDirect": "Fee: network gas only ({gasSymbol})",
-    "feeBreakdownCrossChain": "Fee: {fee} USDC + network gas ({gasSymbol}) · ~{eta}s",
+    "feeBreakdownCrossChain": "Bridge fee {fee} USDC + network gas ({gasSymbol}) · ~{eta}s",
     "pathBadgeDirect": "Direct",
     "pathBadgeGateway": "Fast (Gateway)",
     "pathBadgeCctpV2": "Standard (CCTP V2)"

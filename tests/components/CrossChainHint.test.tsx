@@ -265,6 +265,10 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     // direct badge + cctp-v2 badge 両方
     expect(screen.getByText(/直接送金/)).toBeInTheDocument();
     expect(screen.getByText(/通常 \(CCTP V2\)/)).toBeInTheDocument();
+    // cross-chain option のみ「ブリッジ手数料 + ガス代」を表示 (buyer が払う実費)。
+    // direct (同一チェーン) は bridge fee 0 のため fee 行を出さない →
+    // "ブリッジ手数料" は cctp-v2 option の 1 箇所だけに現れる。
+    expect(screen.getAllByText(/ブリッジ手数料/)).toHaveLength(1);
   });
 
   it('decision=onramp (全 chain + Gateway 0) → 何も表示しない', async () => {

@@ -468,8 +468,7 @@
     "title": "支払元チェーンを選ぶ",
     "subtitle": "必要額 {required} USDC。残高がある全チェーンと、それぞれの手数料の概算を比較できます。",
     "balance": "残高: {balance} USDC",
-    "feeBreakdownDirect": "手数料: ガス代のみ ({gasSymbol})",
-    "feeBreakdownCrossChain": "手数料: {fee} USDC + ガス代 ({gasSymbol}) · 約 {eta} 秒",
+    "feeBreakdownCrossChain": "ブリッジ手数料 {fee} USDC + ガス代 ({gasSymbol}) · 約 {eta} 秒",
     "pathBadgeDirect": "直接送金",
     "pathBadgeGateway": "高速 (Gateway)",
     "pathBadgeCctpV2": "通常 (CCTP V2)"
