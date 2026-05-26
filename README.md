@@ -52,13 +52,15 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 | Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
 |---|---|---|---|
 | **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via Pimlico Sponsorship Paymaster |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1** (5) | merchant 5 + **Avalanche C-Chain, Unichain** (7 total, via Circle Gateway) | Gasless via Pimlico ERC20 Paymaster on all 5 merchant chains (Ethereum L1 included since 2026-05). Avalanche / Unichain are buyer-source only (do not appear in merchant chain chooser) |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain** (6) | merchant 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on all 6 merchant chains. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments use the standard **0.5%** fee and require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
 
-`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia.
+`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia + World Chain Sepolia + Sonic Blaze Testnet + Sei Testnet + HyperEVM Testnet.
 
-> **USDC balances are chain-specific.** The same wallet address can receive USDC on all five merchant chains, but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
+> **USDC balances are chain-specific.** The same wallet address can receive USDC on all six merchant chains, but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
 
-> **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC), customers can pay from any of **7 chains** — the 5 receiving chains plus Avalanche C-Chain and Unichain. The print poster lists all 7 so customers know up-front which wallet works. Circle Gateway forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path).
+> **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC), customers can pay from any of **11 chains** — the 6 receiving chains plus Unichain, World Chain, Sonic, Sei, and HyperEVM. The print poster lists all 11 so customers know up-front which wallet works. Circle Gateway / CCTP V2 forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path).
+
+> **Cross-chain is "gas-on" for the buyer.** Same-chain payments are gasless (the buyer pays gas in USDC via the paymaster). A cross-chain payment bridges from the buyer's wallet via their own EOA, so the buyer needs the **source chain's native gas (ETH/POL etc.)** — it cannot be completed with USDC alone. Accordingly cross-chain payments are charged the standard **0.5%** OpenPay fee (not the 1.0% gasless rate), collected to the fee-receiver wallet on the merchant's chain.
 
 > **Ethereum L1 caveat:** USDC payments on Ethereum L1 support both gasless (Pimlico ERC20 Paymaster, customer pays gas in USDC) and standard modes. L1 gas is still 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
 
@@ -67,8 +69,9 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 When a customer scans a USDC QR and has USDC on multiple chains, the payment page shows a **source-chain chooser** with the per-chain trade-offs side-by-side:
 
 - Chain name + the customer's USDC balance on that chain
-- Path badge: **Direct** (same chain as merchant, no service fee) · **Fast (Gateway)** (Circle Gateway, ~5s) · **Standard (CCTP V2)** (~30s)
-- Fee breakdown: USDC service fee + network gas token (e.g. `0.005 USDC + ガス代 (ETH)`) + ETA
+- Path badge: **Direct** (same chain as merchant, no bridge fee) · **Fast (Gateway)** (Circle Gateway, ~5s) · **Standard (CCTP V2)** (~30s)
+- Fee breakdown (cross-chain paths only): Circle bridge fee + network gas token (e.g. `ブリッジ手数料 0.005 USDC + ガス代 (ETH)`) + ETA. The Direct (same-chain) option shows no extra fee line.
+- A note that cross-chain paths need the source chain's native gas (ETH/POL) — USDC alone is not enough
 - Pre-selected default = the auto-picked best path (direct preferred, else gateway, else CCTP V2), but the customer can override
 
 The chooser is hidden when the customer has USDC on **only** the merchant's chain — in that case the regular Pay button handles it as a plain direct transfer. The chain abstraction layer is `lib/crossChain/*` (Circle Gateway + CCTP V2), see [`docs/DEPLOY_CHECKLIST.md §10`](./docs/DEPLOY_CHECKLIST.md) for the operator-verification status and [`docs/research/circle-12chain-addresses.md`](./docs/research/circle-12chain-addresses.md) for contract addresses + audit trail.
@@ -78,7 +81,7 @@ The chooser is hidden when the customer has USDC on **only** the merchant's chai
 Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio, or GitHub README via a single `<iframe>` snippet. Same chain reach as the payment page:
 
 - **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
-- **USDC** — receive on any of **5 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on Avalanche C-Chain and Unichain (the 2 buyer-only chains). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
+- **USDC** — receive on any of **6 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1 / Avalanche C-Chain). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on the 5 buyer-only chains (Unichain, World Chain, Sonic, Sei, HyperEVM). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
 
 The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success.
 
