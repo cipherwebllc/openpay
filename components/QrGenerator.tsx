@@ -300,37 +300,52 @@ export function QrGenerator() {
     }));
   }
 
+  // クイック金額は token (JPYC=円 / USDC=ドル) ごとに独立。エディタ・適用とも
+  // 現在の token のサブリストだけを操作する。
+  const tokenQuickAmounts = settings.quickAmounts[settings.token];
+
   function updateQuickAmount(idx: number, value: string) {
     setSettings((s) => ({
       ...s,
-      quickAmounts: s.quickAmounts.map((q, i) =>
-        i === idx ? sanitizeAmount(value, deployment.decimals) : q,
-      ),
+      quickAmounts: {
+        ...s.quickAmounts,
+        [s.token]: s.quickAmounts[s.token].map((q, i) =>
+          i === idx ? sanitizeAmount(value, deployment.decimals) : q,
+        ),
+      },
     }));
   }
 
   function addQuickAmount() {
     setSettings((s) => ({
       ...s,
-      quickAmounts: [...s.quickAmounts, ''],
+      quickAmounts: {
+        ...s.quickAmounts,
+        [s.token]: [...s.quickAmounts[s.token], ''],
+      },
     }));
   }
 
   function removeQuickAmount(idx: number) {
     setSettings((s) => {
-      const next = s.quickAmounts.filter((_, i) => i !== idx);
-      return { ...s, quickAmounts: next.length > 0 ? next : [''] };
+      const next = s.quickAmounts[s.token].filter((_, i) => i !== idx);
+      return {
+        ...s,
+        quickAmounts: {
+          ...s.quickAmounts,
+          [s.token]: next.length > 0 ? next : [''],
+        },
+      };
     });
   }
 
-  // クイック金額は token 切替を跨いで永続するため、現在の token decimals に
-  // 合わせて truncate してから表示・適用する。truncate 後に重複した値は除外
-  // (例: JPYC で 0.1234567890123 と 0.1234567890124 を保存 → USDC では
+  // 現在の token decimals に合わせて truncate してから表示・適用する。truncate 後に
+  // 重複した値は除外 (例: 0.1234567890123 と 0.1234567890124 を保存 → USDC では
   // どちらも 0.123456 に潰れるので片方のみ残す)。
   const activeQuickAmounts = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const q of settings.quickAmounts) {
+    for (const q of tokenQuickAmounts) {
       if (!DECIMAL_PATTERN.test(q) || Number(q) <= 0) continue;
       const truncated = sanitizeAmount(q, deployment.decimals);
       if (!DECIMAL_PATTERN.test(truncated) || Number(truncated) <= 0) continue;
@@ -339,7 +354,7 @@ export function QrGenerator() {
       out.push(truncated);
     }
     return out;
-  }, [settings.quickAmounts, deployment.decimals]);
+  }, [tokenQuickAmounts, deployment.decimals]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
@@ -680,7 +695,7 @@ export function QrGenerator() {
                     {t('quickAmountsLabel')}
                   </p>
                   <div className="space-y-2">
-                    {settings.quickAmounts.map((q, i) => (
+                    {tokenQuickAmounts.map((q, i) => (
                       <div key={i} className="flex gap-2">
                         <input
                           type="text"
@@ -701,7 +716,7 @@ export function QrGenerator() {
                       </div>
                     ))}
                   </div>
-                  {settings.quickAmounts.length < QUICK_AMOUNT_MAX && (
+                  {tokenQuickAmounts.length < QUICK_AMOUNT_MAX && (
                     <button
                       type="button"
                       onClick={addQuickAmount}

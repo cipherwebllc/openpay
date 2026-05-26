@@ -296,41 +296,29 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
     });
 
-    it('クイック金額: token 切替で現 token decimals に truncate (JPYC→USDC で重複は dedup)', async () => {
-      // JPYC (18 decimals) で高精度クイック金額を保存した状態で USDC (6 decimals) に
-      // 切替えた場合、ボタン表示・クリック時の amount 反映ともに USDC の decimals に
-      // truncate される必要がある。truncate 後に重複した値は 1 つにマージ。
-      // receiver は意図的に未設定: accordion を開いた状態で token tab を露出する。
+    it('クイック金額: 現 token (USDC) の decimals に truncate (重複は dedup)', async () => {
+      // USDC (6 decimals) の保存リストに高精度値が入っていても、ボタン表示・
+      // クリック時の amount 反映ともに 6 桁に truncate される。truncate 後に
+      // 重複した値は 1 ボタンにマージ。token ごと独立保存なので USDC リストを直接 seed。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
-          token: 'jpyc',
+          token: 'usdc',
           chain: 'polygon',
           receiver: '',
           gasMode: 'customer',
-          directTransfer: false,
           splits: [],
           storeName: '',
           posterNote: '',
-          quickAmounts: ['0.1234567890123', '0.1234567890124', '500'],
+          quickAmounts: {
+            jpyc: ['500', '1000', '1500', '3000'],
+            usdc: ['0.1234567890123', '0.1234567890124', '500'],
+          },
         }),
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1000'));
-
-      expect(
-        screen.getByRole('button', { name: /0\.1234567890123 JPYC/ }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: /0\.1234567890124 JPYC/ }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: /^500 JPYC/ }),
-      ).toBeInTheDocument();
-
-      // USDC token tab へ切替 (accordion 内、左カラムの token grid)
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await waitFor(() => screen.getByPlaceholderText('10.00'));
 
       // 高精度 2 件はどちらも 0.123456 (USDC 6 dec) に潰れて 1 ボタンに dedup
       const truncated = screen.getAllByRole('button', {
@@ -351,6 +339,56 @@ describe('QrGenerator', () => {
       await user.click(truncated[0]);
       const input = screen.getByPlaceholderText('10.00') as HTMLInputElement;
       expect(input.value).toBe('0.123456');
+    });
+
+    it('クイック金額: JPYC と USDC は独立 (token 切替で別リストを表示・連動しない)', async () => {
+      // バグ修正の本丸: 以前は単一リストを共有し JPYC/USDC で同じ金額が出ていた。
+      // token ごと独立保存され、切替時はその token のリストだけが出る。
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          token: 'jpyc',
+          chain: 'polygon',
+          receiver: '',
+          gasMode: 'customer',
+          splits: [],
+          storeName: '',
+          posterNote: '',
+          quickAmounts: {
+            jpyc: ['200', '800'],
+            usdc: ['7', '30', '90'],
+          },
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+
+      // JPYC では JPYC リスト
+      expect(
+        screen.getByRole('button', { name: /^200 JPYC/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /^800 JPYC/ }),
+      ).toBeInTheDocument();
+
+      // USDC へ切替 → USDC リスト。JPYC の値は出ない (= 連動しない)。
+      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await waitFor(() => screen.getByPlaceholderText('10.00'));
+
+      expect(
+        screen.getByRole('button', { name: /^7 USDC/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /^30 USDC/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /^90 USDC/ }),
+      ).toBeInTheDocument();
+      // 数値付き JPYC クイックボタンは消える (bare な token tab 'JPYC' は除外)
+      expect(
+        screen.queryByRole('button', { name: /\d+ JPYC$/ }),
+      ).toBeNull();
     });
 
     it('クイック金額の × 削除: 中間 index を削除しても他要素が詰まらない (off-by-one なし)', async () => {
@@ -455,36 +493,30 @@ describe('QrGenerator', () => {
       expect((after[1] as HTMLInputElement).value).toBe('0xC');
     });
 
-    it('クイック金額: token 切替後の truncate 結果が 0 になるエントリは除外', async () => {
-      // JPYC (18 dec) で 0.0000001 (7 fracs, valid) を保存 → USDC (6 dec) では
-      // sanitizeAmount で '0.000000' に潰れる (Number=0) → activeQuickAmounts は
-      // 0 値を弾く必要がある (Number(truncated) <= 0 分岐)。
+    it('クイック金額: truncate 結果が 0 になるエントリは除外 (USDC)', async () => {
+      // USDC (6 dec) で 0.0000001 (7 fracs, valid) を保存 → sanitizeAmount で
+      // '0.000000' に潰れる (Number=0) → activeQuickAmounts は 0 値を弾く
+      // (Number(truncated) <= 0 分岐)。token ごと独立保存なので USDC を直接 seed。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
-          token: 'jpyc',
+          token: 'usdc',
           chain: 'polygon',
           receiver: '',
           gasMode: 'customer',
-          directTransfer: false,
           splits: [],
           storeName: '',
           posterNote: '',
-          quickAmounts: ['0.0000001', '500'],
+          quickAmounts: {
+            jpyc: ['500', '1000', '1500', '3000'],
+            usdc: ['0.0000001', '500'],
+          },
         }),
       );
-      const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1000'));
+      await waitFor(() => screen.getByPlaceholderText('10.00'));
 
-      // JPYC では両方表示
-      expect(
-        screen.getByRole('button', { name: /0\.0000001 JPYC/ }),
-      ).toBeInTheDocument();
-
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
-
-      // 0.0000001 は USDC で truncate→'0.000000' (=0) になり除外、500 のみ残る
+      // 0.0000001 は truncate→'0.000000' (=0) になり除外、500 のみ残る
       expect(
         screen.queryByRole('button', { name: /^0(\.0+)? USDC/ }),
       ).toBeNull();

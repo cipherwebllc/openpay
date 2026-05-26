@@ -31,7 +31,9 @@ type QrSettings = {
   // 店舗向け表示。DB を持たず、端末ローカルのレジ/印刷設定として保存する。
   storeName: string;
   posterNote: string;
-  quickAmounts: string[];
+  // レジ用クイック金額。token ごとに独立 (JPYC=円・USDC=ドルで桁が異なるため、
+  // 単一リストを共有すると JPYC の 1000 が USDC では $1000 になってしまう)。
+  quickAmounts: Record<TokenSymbol, string[]>;
   // Cross-chain 受信 (Gateway / CCTP V2) を allow するかの店主側 opt-out。
   // default true (顧客 wallet が target chain と異なっても自動 cross-chain で
   // 受取れるよう PaymentForm が代替経路を提示)。false にすると URL に
@@ -40,6 +42,25 @@ type QrSettings = {
 };
 
 const STORAGE_KEY = 'openpay:qr-settings:v2';
+
+// token 別のクイック金額既定値。JPYC は円・USDC はドルの小口想定。
+const DEFAULT_QUICK_AMOUNTS: Record<TokenSymbol, string[]> = {
+  jpyc: ['500', '1000', '1500', '3000'],
+  usdc: ['5', '10', '20', '50'],
+};
+
+// 旧 schema (token 跨ぎ共有) 時代の単一既定リスト。旧 hook は未カスタムの
+// returning user にもこの値を localStorage へ永続化していたため、「カスタムして
+// いない」を示す sentinel として扱う。これと一致する旧 array は activeToken へ
+// 移さず token 別既定へ倒す (USDC を最後に使っていた人へ ¥500→$500 を引き継がせない)。
+const LEGACY_SHARED_DEFAULT_QUICK_AMOUNTS = ['500', '1000', '1500', '3000'];
+
+function isLegacySharedDefault(list: string[]): boolean {
+  return (
+    list.length === LEGACY_SHARED_DEFAULT_QUICK_AMOUNTS.length &&
+    list.every((v, i) => v === LEGACY_SHARED_DEFAULT_QUICK_AMOUNTS[i])
+  );
+}
 
 const DEFAULT_SETTINGS: QrSettings = {
   receiver: '',
@@ -50,7 +71,10 @@ const DEFAULT_SETTINGS: QrSettings = {
   splits: [],
   storeName: '',
   posterNote: '',
-  quickAmounts: ['500', '1000', '1500', '3000'],
+  quickAmounts: {
+    jpyc: [...DEFAULT_QUICK_AMOUNTS.jpyc],
+    usdc: [...DEFAULT_QUICK_AMOUNTS.usdc],
+  },
   crossChain: true,
 };
 
@@ -63,8 +87,8 @@ function sanitizeText(value: unknown, max: number): string {
   return stripControlChars(value).slice(0, max);
 }
 
-function sanitizeQuickAmounts(loaded: unknown): string[] {
-  if (!Array.isArray(loaded)) return DEFAULT_SETTINGS.quickAmounts;
+function sanitizeAmountList(loaded: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(loaded)) return [...fallback];
   const seen = new Set<string>();
   const values: string[] = [];
   for (const entry of loaded) {
@@ -77,7 +101,44 @@ function sanitizeQuickAmounts(loaded: unknown): string[] {
     values.push(cleaned);
     if (values.length >= QUICK_AMOUNT_MAX) break;
   }
-  return values.length > 0 ? values : DEFAULT_SETTINGS.quickAmounts;
+  return values.length > 0 ? values : [...fallback];
+}
+
+// 旧 schema (単一 array、token 跨ぎで共有) からの migration を含む。
+// 旧 array は最後に使っていた token (activeToken) のリストとして移す — その値は
+// 当該 token の桁感で入力されているため (円 or ドル)。もう片方は既定に倒す。
+// activeToken を渡さないと、USDC を最後に使っていた店主のカスタム値が JPYC 側へ
+// 押し込まれ、USDC ボタンが既定にリセットされて永続化される regression になる。
+function sanitizeQuickAmounts(
+  loaded: unknown,
+  activeToken: TokenSymbol,
+): Record<TokenSymbol, string[]> {
+  if (Array.isArray(loaded)) {
+    const result: Record<TokenSymbol, string[]> = {
+      jpyc: [...DEFAULT_QUICK_AMOUNTS.jpyc],
+      usdc: [...DEFAULT_QUICK_AMOUNTS.usdc],
+    };
+    const migrated = sanitizeAmountList(
+      loaded,
+      DEFAULT_QUICK_AMOUNTS[activeToken],
+    );
+    // 未カスタム (旧共有既定そのまま) なら token 別既定のまま。カスタム値だけ移す。
+    if (!isLegacySharedDefault(migrated)) {
+      result[activeToken] = migrated;
+    }
+    return result;
+  }
+  if (loaded && typeof loaded === 'object') {
+    const o = loaded as Record<string, unknown>;
+    return {
+      jpyc: sanitizeAmountList(o.jpyc, DEFAULT_QUICK_AMOUNTS.jpyc),
+      usdc: sanitizeAmountList(o.usdc, DEFAULT_QUICK_AMOUNTS.usdc),
+    };
+  }
+  return {
+    jpyc: [...DEFAULT_QUICK_AMOUNTS.jpyc],
+    usdc: [...DEFAULT_QUICK_AMOUNTS.usdc],
+  };
 }
 
 function sanitizeSplits(loaded: unknown): SplitDraft[] {
@@ -153,7 +214,7 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),
-    quickAmounts: sanitizeQuickAmounts(loaded.quickAmounts),
+    quickAmounts: sanitizeQuickAmounts(loaded.quickAmounts, token),
     // boolean を厳密 check。旧 schema (crossChain 未定義) は true に倒す (default ON)。
     crossChain:
       typeof loaded.crossChain === 'boolean'

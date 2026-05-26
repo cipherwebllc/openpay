@@ -21,7 +21,10 @@ describe('useQrSettings', () => {
       splits: [],
       storeName: '',
       posterNote: '',
-      quickAmounts: ['500', '1000', '1500', '3000'],
+      quickAmounts: {
+        jpyc: ['500', '1000', '1500', '3000'],
+        usdc: ['5', '10', '20', '50'],
+      },
       crossChain: true,
     });
   });
@@ -43,12 +46,10 @@ describe('useQrSettings', () => {
     expect(result.current.settings.splits).toEqual([]);
     expect(result.current.settings.storeName).toBe('');
     expect(result.current.settings.posterNote).toBe('');
-    expect(result.current.settings.quickAmounts).toEqual([
-      '500',
-      '1000',
-      '1500',
-      '3000',
-    ]);
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['500', '1000', '1500', '3000'],
+      usdc: ['5', '10', '20', '50'],
+    });
   });
 
   it('jpyc + 不正 chain (arbitrum) → polygon に強制', async () => {
@@ -211,7 +212,10 @@ describe('useQrSettings', () => {
         splits: [{ address: '0xb1', percent: '40' }],
         storeName: 'Coffee Stand',
         posterNote: 'Scan to pay',
-        quickAmounts: ['300', '750', '1200'],
+        quickAmounts: {
+          jpyc: ['300', '750', '1200'],
+          usdc: ['5', '10', '20', '50'],
+        },
         crossChain: true,
       });
     });
@@ -228,7 +232,10 @@ describe('useQrSettings', () => {
       expect(parsed.splits).toEqual([{ address: '0xb1', percent: '40' }]);
       expect(parsed.storeName).toBe('Coffee Stand');
       expect(parsed.posterNote).toBe('Scan to pay');
-      expect(parsed.quickAmounts).toEqual(['300', '750', '1200']);
+      expect(parsed.quickAmounts).toEqual({
+        jpyc: ['300', '750', '1200'],
+        usdc: ['5', '10', '20', '50'],
+      });
     });
   });
 
@@ -259,16 +266,11 @@ describe('useQrSettings', () => {
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.storeName).toBe('A'.repeat(48));
     expect(result.current.settings.posterNote).toBe('B'.repeat(96));
-    expect(result.current.settings.quickAmounts).toEqual([
-      '500',
-      '1000.50',
-      '2000',
-      '3000',
-      '4000',
-      '5000',
-      '6000',
-      '7000',
-    ]);
+    // 旧 schema (単一 array) は JPYC 側へ migrate、USDC は既定。
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['500', '1000.50', '2000', '3000', '4000', '5000', '6000', '7000'],
+      usdc: ['5', '10', '20', '50'],
+    });
   });
 
   it('quickAmounts に混在型 (number / null / object) → string のみ残す', async () => {
@@ -291,8 +293,11 @@ describe('useQrSettings', () => {
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    // string entry のうち valid なものだけ ('300', '600')
-    expect(result.current.settings.quickAmounts).toEqual(['300', '600']);
+    // string entry のうち valid なものだけ ('300', '600') が JPYC 側へ migrate。
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['300', '600'],
+      usdc: ['5', '10', '20', '50'],
+    });
   });
 
   it('quickAmounts が all-invalid → DEFAULT_SETTINGS.quickAmounts へ fallback', async () => {
@@ -307,13 +312,47 @@ describe('useQrSettings', () => {
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    // 1 件も valid が無い → defaults (500/1000/1500/3000) で復元
-    expect(result.current.settings.quickAmounts).toEqual([
-      '500',
-      '1000',
-      '1500',
-      '3000',
-    ]);
+    // 1 件も valid が無い → JPYC は defaults (500/1000/1500/3000)、USDC も既定。
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['500', '1000', '1500', '3000'],
+      usdc: ['5', '10', '20', '50'],
+    });
+  });
+
+  it('旧 array + token=usdc → USDC 側へ migrate (JPYC は既定。USDC カスタム値を失わない)', async () => {
+    // regression 防止: 旧 schema を最後に USDC で使っていた店主のカスタム値が
+    // JPYC 側へ押し込まれ USDC が既定リセットされる事故を防ぐ (codex P2)。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'usdc',
+        quickAmounts: ['8', '15', '25'],
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['500', '1000', '1500', '3000'],
+      usdc: ['8', '15', '25'],
+    });
+  });
+
+  it('旧共有既定 + token=usdc → ¥既定を USDC へ引き継がず token 別既定へ倒す', async () => {
+    // 旧 hook は未カスタムの returning user にも ['500'..'3000'] を永続化していた。
+    // これを USDC カスタム値と誤認すると $500/$1000 の過大ボタンになる (codex P2)。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'usdc',
+        quickAmounts: ['500', '1000', '1500', '3000'],
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['500', '1000', '1500', '3000'],
+      usdc: ['5', '10', '20', '50'],
+    });
   });
 
   it('quickAmounts が QUICK_AMOUNT_MAX (8) を超えると 8 件で truncate', async () => {
@@ -328,9 +367,45 @@ describe('useQrSettings', () => {
     );
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings.quickAmounts).toEqual([
-      '1', '2', '3', '4', '5', '6', '7', '8',
-    ]);
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['1', '2', '3', '4', '5', '6', '7', '8'],
+      usdc: ['5', '10', '20', '50'],
+    });
+  });
+
+  it('新 schema (token 別 object) は JPYC / USDC を独立に保持する', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        quickAmounts: {
+          jpyc: ['100', '500'],
+          usdc: ['1', '3', '5'],
+        },
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['100', '500'],
+      usdc: ['1', '3', '5'],
+    });
+  });
+
+  it('object で片方 (usdc) 未設定 → そのトークンだけ既定に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        quickAmounts: { jpyc: ['200', '800'] },
+      }),
+    );
+    const { result } = renderHook(() => useQrSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.quickAmounts).toEqual({
+      jpyc: ['200', '800'],
+      usdc: ['5', '10', '20', '50'],
+    });
   });
 
   it('storeName / posterNote: max 桁ちょうど (48 / 96) は切らずに保存', async () => {
