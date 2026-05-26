@@ -13,11 +13,13 @@ import { readAllCrossChainBalances } from '@/lib/crossChain/balance';
 import {
   executeCctpTransfer,
   executeGatewayTransfer,
+  type CctpResumeState,
   type CrossChainProgress,
   type ExecuteCctpTransferArgs,
   type ExecuteCctpTransferResult,
   type ExecuteGatewayTransferArgs,
   type ExecuteGatewayTransferResult,
+  type GatewayResumeState,
 } from '@/lib/crossChain/execute';
 import { selectPath, type PathDecision } from '@/lib/crossChain/router';
 import {
@@ -27,6 +29,13 @@ import {
 import { domainForChainId } from '@/lib/crossChain/config';
 import type { CircleDomain } from '@/lib/crossChain/types';
 import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
+import {
+  clearResumeState,
+  loadResumeState,
+  saveResumeState,
+  type ResumeSessionKey,
+  type ResumeState,
+} from '@/lib/crossChain/resumeStore';
 import { resolveDeployment } from '@/lib/tokens';
 
 export interface UseCrossChainPaymentArgs {
@@ -168,6 +177,20 @@ export function useCrossChainPayment(
         'standard',
       );
 
+      // 中断再開: payment params で session key を作り、完了済みステップを
+      // localStorage から復元 (resume)、各ステップ完了で保存 (onStep)、全完了で
+      // 削除する。失敗時は保存済 state が残り、再 Pay で続きから再開できる。
+      const sessionKey: ResumeSessionKey = {
+        account,
+        kind: core.kind,
+        sourceChainId: core.sourceChainId,
+        destChainId: args.targetChainId,
+        recipient: args.recipient,
+        valueAtomic: bridgedAmount,
+        feeAtomic: feeAmount,
+      };
+      const onStep = (s: ResumeState) => saveResumeState(sessionKey, s);
+
       if (core.kind === 'gateway') {
         const gatewayArgs: ExecuteGatewayTransferArgs = {
           walletClient,
@@ -185,9 +208,13 @@ export function useCrossChainPayment(
           valueAtomic: bridgedAmount,
           feeReceiver: args.feeReceiver,
           feeAmount,
+          resume: loadResumeState<GatewayResumeState>(sessionKey),
+          onStep,
           onProgress: reportProgress,
         };
-        return executeGatewayTransfer(gatewayArgs);
+        const result = await executeGatewayTransfer(gatewayArgs);
+        clearResumeState(sessionKey);
+        return result;
       }
       // cctp-v2
       const cctpArgs: ExecuteCctpTransferArgs = {
@@ -205,9 +232,13 @@ export function useCrossChainPayment(
         valueAtomic: bridgedAmount,
         feeReceiver: args.feeReceiver,
         feeAmount,
+        resume: loadResumeState<CctpResumeState>(sessionKey),
+        onStep,
         onProgress: reportProgress,
       };
-      return executeCctpTransfer(cctpArgs);
+      const result = await executeCctpTransfer(cctpArgs);
+      clearResumeState(sessionKey);
+      return result;
     },
     [
       account,
