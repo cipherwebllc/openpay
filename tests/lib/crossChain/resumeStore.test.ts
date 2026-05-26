@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getAddress } from 'viem';
 import {
   loadResumeState,
@@ -79,5 +79,25 @@ describe('lib/crossChain/resumeStore', () => {
       feeBurnTxHash: '0xfeeburn',
       mintTxHash: '0xmint',
     });
+  });
+
+  it('setItem が throw しても save は throw しない (best-effort・決済を巻き込まない)', () => {
+    const spy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('QuotaExceededError');
+      });
+    expect(() =>
+      saveResumeState(baseKey, { burnTxHash: '0xburn' }),
+    ).not.toThrow();
+    spy.mockRestore();
+  });
+
+  it('corrupt JSON の entry は load で undefined (決済開始を block しない)', () => {
+    const spy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockReturnValue('{not valid json');
+    expect(loadResumeState(baseKey)).toBeUndefined();
+    spy.mockRestore();
   });
 });

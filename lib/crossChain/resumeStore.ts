@@ -9,6 +9,7 @@
 
 import type { Address } from 'viem';
 import type { CctpResumeState, GatewayResumeState } from './execute';
+import { logger } from '../logger';
 
 export type ResumeState = CctpResumeState | GatewayResumeState;
 
@@ -27,9 +28,15 @@ export interface ResumeSessionKey {
 const PREFIX = 'openpay.xchain.resume.';
 
 // SSR / localStorage 非対応環境では undefined を返し、保存系は no-op になる。
+// sandboxed iframe 等で window.localStorage アクセス自体が SecurityError を投げる
+// ケースも握り潰して undefined にする (永続化は best-effort)。
 function storage(): Storage | undefined {
-  if (typeof window === 'undefined') return undefined;
-  return window.localStorage;
+  try {
+    if (typeof window === 'undefined') return undefined;
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function keyString(k: ResumeSessionKey): string {
@@ -54,13 +61,26 @@ export function loadResumeState<T extends ResumeState>(
   if (!s) return undefined;
   const raw = s.getItem(keyString(k));
   if (!raw) return undefined;
-  return JSON.parse(raw) as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    // corrupt な entry は無視して新規実行扱い (決済開始を block しない)。
+    logger.warn('cross-chain.resume.load-failed', { error });
+    return undefined;
+  }
 }
 
 export function saveResumeState(k: ResumeSessionKey, state: ResumeState): void {
   const s = storage();
   if (!s) return;
-  s.setItem(keyString(k), JSON.stringify(state));
+  try {
+    s.setItem(keyString(k), JSON.stringify(state));
+  } catch (error) {
+    // quota 超過 / private mode 等で setItem が throw しても、進行中の決済を
+    // 巻き込まない (永続化は best-effort、resume が効かなくなるだけ)。決済本体は
+    // 続行させる。
+    logger.warn('cross-chain.resume.save-failed', { error });
+  }
 }
 
 export function clearResumeState(k: ResumeSessionKey): void {
