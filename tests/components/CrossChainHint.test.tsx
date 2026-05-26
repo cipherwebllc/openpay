@@ -85,6 +85,7 @@ import {
 import { renderWithIntl } from '../_helpers/i18n';
 import { CrossChainHint } from '@/components/CrossChainHint';
 import { logger } from '@/lib/logger';
+import { saveResumeState } from '@/lib/crossChain/resumeStore';
 
 const ACCOUNT: Address = '0x1234567890123456789012345678901234567890';
 const RECIPIENT: Address = '0x000000000000000000000000000000000000aBcd';
@@ -271,6 +272,51 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     // direct (同一チェーン) は bridge fee 0 のため fee 行を出さない →
     // "ブリッジ手数料" は cctp-v2 option の 1 箇所だけに現れる。
     expect(screen.getAllByText(/ブリッジ手数料/)).toHaveLength(1);
+  });
+
+  it('中断 state がある cross-chain option では「続きから」ヒント+ボタンを表示', async () => {
+    localStorage.clear();
+    // base(target) 0・polygon に wallet USDC → cctp-v2 option のみ (default 選択)。
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    setupConnected();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+      ),
+    );
+    // requiredAtomic=5_000_000 → standard 0.5% fee = 25_000、bridged = 4_975_000。
+    // cctp-v2 (polygon→base) の session key に一致する中断 state を seed する。
+    saveResumeState(
+      {
+        account: ACCOUNT,
+        kind: 'cctp-v2',
+        sourceChainId: polygonAmoyId,
+        destChainId: baseSepoliaId,
+        recipient: RECIPIENT,
+        valueAtomic: 4_975_000n,
+        feeAtomic: 25_000n,
+      },
+      { approveTxHash: '0xapprove', burnTxHash: '0xburn' },
+    );
+
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    await waitFor(() => {
+      expect(screen.getByText(/支払元チェーンを選ぶ/)).toBeInTheDocument();
+    });
+    // 「続きから」ヒント + ボタン文言
+    expect(
+      screen.getByText(/前回の決済が途中で止まっています/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /続きから支払う/ }),
+    ).toBeInTheDocument();
   });
 
   it('decision=onramp (全 chain + Gateway 0) → 何も表示しない', async () => {

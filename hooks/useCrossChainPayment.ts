@@ -31,6 +31,7 @@ import type { CircleDomain } from '@/lib/crossChain/types';
 import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import {
   clearResumeState,
+  hasResumeState,
   loadResumeState,
   saveResumeState,
   type ResumeSessionKey,
@@ -74,6 +75,8 @@ export interface UseCrossChainPaymentReturn {
    *  direct option は何もせず null (caller の既存 path に委譲)、cross-chain
    *  option (gateway / cctp-v2) のみ実行する。 */
   executeOption: (option: PathOption) => Promise<ExecuteResult | null>;
+  /** 指定 option に中断再開可能な保存 state があるか (再 Pay で続きから再開可)。 */
+  isOptionResumable: (option: PathOption) => boolean;
 }
 
 export function useCrossChainPayment(
@@ -351,6 +354,31 @@ export function useCrossChainPayment(
     [executeOption],
   );
 
+  // 指定 option (cross-chain) に保存済みの中断 state があるか。runCore と同じ
+  // session key で localStorage を確認する。UI が「続きから再開」を案内するため。
+  const isOptionResumable = useCallback(
+    (option: PathOption): boolean => {
+      if (!account || option.kind === 'direct' || args.requiredAtomic <= 0n) {
+        return false;
+      }
+      const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
+        args.requiredAtomic,
+        'usdc',
+        'standard',
+      );
+      return hasResumeState({
+        account,
+        kind: option.kind,
+        sourceChainId: option.sourceChainId,
+        destChainId: args.targetChainId,
+        recipient: args.recipient,
+        valueAtomic: bridgedAmount,
+        feeAtomic: feeAmount,
+      });
+    },
+    [account, args.requiredAtomic, args.targetChainId, args.recipient],
+  );
+
   return {
     decision,
     pathOptions,
@@ -363,5 +391,6 @@ export function useCrossChainPayment(
     balancesError: balancesQuery.error as Error | null,
     execute: safeExecute,
     executeOption: safeExecuteOption,
+    isOptionResumable,
   };
 }

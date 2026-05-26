@@ -450,6 +450,8 @@
     "bridgeGateway": "Circle Gateway",
     "bridgeCctp": "CCTP V2 Fast",
     "payWithSelected": "選択したチェーンで支払う",
+    "payResume": "続きから支払う",
+    "resumeHint": "前回の決済が途中で止まっています。「続きから支払う」を押すと、送金済みの分は再送せず残りだけ実行します。",
     "directSelectedHint": "受取チェーンと同じチェーンを選んだので、下の「支払う」ボタンから通常送金で決済してください。",
     "inProgress": "実行中",
     "progressSign": "署名待ち",

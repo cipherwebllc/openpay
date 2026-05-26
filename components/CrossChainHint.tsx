@@ -205,6 +205,12 @@ export function CrossChainHint(props: CrossChainHintProps) {
 
   const isDirectSelected = selectedOption?.kind === 'direct';
   const payButtonDisabled = isExecuting || !selectedOption || isDirectSelected;
+  // 中断再開: 選択中 option に保存済みの途中 state があれば、再 Pay で続きから
+  // 再開できる (送金済みは再送しない)。UI で明示して二重支払いの不安を消す。
+  const resumable =
+    !isDirectSelected &&
+    selectedOption !== null &&
+    hook.isOptionResumable(selectedOption);
 
   return (
     <div className="space-y-3">
@@ -220,6 +226,11 @@ export function CrossChainHint(props: CrossChainHintProps) {
           {t('directSelectedHint')}
         </p>
       )}
+      {resumable && !isExecuting && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {t('resumeHint')}
+        </p>
+      )}
       {!isDirectSelected && (
         <button
           type="button"
@@ -229,7 +240,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
         >
           {isExecuting
             ? `${t('inProgress')}${progress ? ` — ${formatProgress(progress, t)}` : ''}`
-            : t('payWithSelected')}
+            : resumable
+              ? t('payResume')
+              : t('payWithSelected')}
         </button>
       )}
       {error && (

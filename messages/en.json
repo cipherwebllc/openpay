@@ -450,6 +450,8 @@
     "bridgeGateway": "Circle Gateway",
     "bridgeCctp": "CCTP V2 Fast",
     "payWithSelected": "Pay with selected chain",
+    "payResume": "Resume payment",
+    "resumeHint": "A previous payment stopped midway. Tap \"Resume payment\" to finish the remaining steps — already-sent transfers are not re-sent.",
     "directSelectedHint": "You picked the same chain the merchant receives on. Use the regular Pay button below for a direct transfer.",
     "inProgress": "Executing",
     "progressSign": "Awaiting signature",
