@@ -1,20 +1,17 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-// `Image` は global の HTMLImageElement constructor と name 衝突する典型 pitfall
-// (QrGenerator.tsx で同じ衝突あり) なので、next/image は NextImage 別名で輸入する。
-import NextImage from 'next/image';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import { AddressInput } from './AddressInput';
 import { ChainChooser } from './ChainChooser';
+import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
-  defaultDeploymentForSymbol,
   deploymentForSlug,
   isGaslessSupported,
   type TokenSymbol,
@@ -172,38 +169,7 @@ export function TipEmbedGenerator() {
         </Field>
 
         <Field label={t('tokenLabel')}>
-          <div className="grid grid-cols-2 gap-2">
-            {(['jpyc', 'usdc'] as TokenSymbol[]).map((tok) => {
-              const info = defaultDeploymentForSymbol(tok);
-              const active = settings.token === tok;
-              // chain 一覧 hint (例: "2 chain で受信 (Polygon / Kaia)") は下の
-              // 受取 chain chooser で同情報が見えるので削除 (2026-05-24)。
-              // 公式ロゴ (public/tokens/{jpyc,usdc}.svg) + symbol テキストの
-              // 2 要素に絞って QR (店舗) と一貫した design に統一。
-              return (
-                <button
-                  key={tok}
-                  type="button"
-                  onClick={() => selectToken(tok)}
-                  className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition ${
-                    active
-                      ? 'border-brand bg-brand/5 text-brand-dark'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <NextImage
-                    src={`/tokens/${tok}.svg`}
-                    alt=""
-                    width={24}
-                    height={24}
-                    className="h-6 w-6 shrink-0"
-                    aria-hidden
-                  />
-                  <span>{info.displaySymbol}</span>
-                </button>
-              );
-            })}
-          </div>
+          <TokenChooser selected={settings.token} onSelect={selectToken} />
         </Field>
 
         <Field
