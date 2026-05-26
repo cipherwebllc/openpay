@@ -80,6 +80,13 @@ export function CrossChainSourceChooser(props: CrossChainSourceChooserProps) {
           );
         })}
       </ul>
+      {/* cross-chain (別チェーンから払う) 経路はブリッジ tx を顧客 EOA が実行する
+          ため、その chain の native ガス (ETH/POL 等) が別途必要 = ガスレス対象外。
+          USDC のみ保有の顧客が「払えるはず」と誤解しないよう明示する。direct
+          (同一チェーン) のみのときは出さない。 */}
+      {props.options.some((o) => o.kind !== 'direct') && (
+        <p className="text-[11px] text-amber-700">{t('crossChainGasNote')}</p>
+      )}
     </div>
   );
 }

@@ -475,6 +475,7 @@
     "subtitle": "Required: {required} USDC. Compare all chains where you have a balance plus their fees.",
     "balance": "Balance: {balance} USDC",
     "feeBreakdownCrossChain": "Bridge fee {fee} USDC + network gas ({gasSymbol}) · ~{eta}s",
+    "crossChainGasNote": "Note: paying from another chain needs that chain's native gas (e.g. ETH / POL) on top — it cannot be completed with USDC alone.",
     "pathBadgeDirect": "Direct",
     "pathBadgeGateway": "Fast (Gateway)",
     "pathBadgeCctpV2": "Standard (CCTP V2)"

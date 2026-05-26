@@ -272,6 +272,10 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     // direct (同一チェーン) は bridge fee 0 のため fee 行を出さない →
     // "ブリッジ手数料" は cctp-v2 option の 1 箇所だけに現れる。
     expect(screen.getAllByText(/ブリッジ手数料/)).toHaveLength(1);
+    // cross-chain option があるので「ガス代 (ETH/POL) が別途必要」の注意書きが出る。
+    expect(
+      screen.getByText(/別チェーンからの支払いは/),
+    ).toBeInTheDocument();
   });
 
   it('中断 state がある cross-chain option では「続きから」ヒント+ボタンを表示', async () => {
