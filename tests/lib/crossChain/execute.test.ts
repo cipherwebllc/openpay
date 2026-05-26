@@ -1041,6 +1041,156 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     expect(result.feeMintTxHash).toBe('0xmint_f');
   });
 
+  it('CCTP resume: burn 済なら approve/burn を skip し mint だけ実行', async () => {
+    // resume state: 両 burn 済・mint 未了 → approve/burn skip、mint 2 本だけ。
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_m', '0xmint_f'], // sendTransaction = mint のみ
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+    const steps: Array<Record<string, unknown>> = [];
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 9_900_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      resume: {
+        approveTxHash: '0xapprove_prev',
+        burnTxHash: '0xburn_m_prev',
+        feeBurnTxHash: '0xburn_f_prev',
+      },
+      onStep: (s) => steps.push({ ...s }),
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // approve / burn は再実行されない
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
+    // mint 2 本だけ
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+    // burn hash は resume の値を引き継ぐ
+    expect(result.burnTxHash).toBe('0xburn_m_prev');
+    expect(result.mintTxHash).toBe('0xmint_m');
+    expect(result.feeMintTxHash).toBe('0xmint_f');
+    // onStep に mint 完了が記録される
+    expect(steps.at(-1)?.mintTxHash).toBe('0xmint_m');
+    expect(steps.at(-1)?.feeMintTxHash).toBe('0xmint_f');
+  });
+
+  it('CCTP resume: merchant mint 済なら fee mint だけ実行', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_f'], // fee mint のみ
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 9_900_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      resume: {
+        approveTxHash: '0xapprove_prev',
+        burnTxHash: '0xburn_m_prev',
+        feeBurnTxHash: '0xburn_f_prev',
+        mintTxHash: '0xmint_m_prev',
+      },
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // merchant mint 済なので fee poll のみ (1 回)、fee mint のみ (1 回)
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(result.mintTxHash).toBe('0xmint_m_prev');
+    expect(result.feeMintTxHash).toBe('0xmint_f');
+    // merchant mint を再実行していないので attestation は再取得されない
+    expect(result.attestationMessage).toBeUndefined();
+  });
+
+  it('Gateway resume: attestation 済なら再 sign せず mint だけ実行', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0xshould_not_be_used',
+      txHashes: ['0xmint_m', '0xmint_f'],
+    });
+    const sourcePublic = makePublicClient({ blockNumber: 100n });
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn();
+
+    const result = await executeGatewayTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceToken: SOURCE_TOKEN,
+      destToken: DEST_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 9_900_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      resume: {
+        merchantAttestation: { attestation: '0xattM', signature: '0xsigM' },
+        feeAttestation: { attestation: '0xattF', signature: '0xsigF' },
+      },
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+
+    // 再 sign / attestation 取得はしない (二重 debit 防止)
+    expect(walletClient.signTypedData).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    // mint 2 本だけ
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+    expect(result.attestation).toBe('0xattM');
+    expect(result.mintTxHash).toBe('0xmint_m');
+    expect(result.feeMintTxHash).toBe('0xmint_f');
+  });
+
   it('feeAmount=0 では fee ブリッジを skip (従来挙動)', async () => {
     const walletClient = makeWalletClient({
       signature: '0xsig',
