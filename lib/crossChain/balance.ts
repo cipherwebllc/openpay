@@ -139,6 +139,31 @@ function resolveUsdcAddress(chainId: number): Address {
   return dep.address;
 }
 
+// Phase A diag (2026-05-26): 実機で「Ethereum L1 USDC が認識されない」原因を
+// 切り分けるための per-chain 診断ログ。ブラウザ Console に chain ごとの
+// 成否 / 経過 ms / error 種別を出す。読み筋:
+//   "ok in <ms>ms"          → balance fetch は成功 = 原因は下流 (selectPath/UI)
+//   "FAILED ... rpc timeout" → 3s 以内に公開 RPC が応答せず (遅延/レート制限)
+//   "FAILED ... HTTP/CORS"   → endpoint が CORS or HTTP error で弾いている
+// NODE_ENV='test' (vitest) では抑制。原因確定後はこの関数と呼び出しを削除してよい。
+function logBalanceDiag(
+  chain: Chain,
+  elapsedMs: number,
+  outcome: { ok: true; balance: bigint } | { ok: false; error: unknown },
+): void {
+  if (process.env.NODE_ENV === 'test') return;
+  const label = `[xchain-diag] ${chain.name} (${chain.id})`;
+  if (outcome.ok) {
+    console.warn(`${label}: ok in ${elapsedMs}ms balance=${outcome.balance}`);
+  } else {
+    const msg =
+      outcome.error instanceof Error
+        ? outcome.error.message
+        : String(outcome.error);
+    console.warn(`${label}: FAILED after ${elapsedMs}ms — ${msg}`);
+  }
+}
+
 async function readWalletBalanceOne(
   target: CrossChainTarget,
   account: Address,
@@ -167,8 +192,15 @@ async function readWalletBalanceOne(
     ),
   );
 
-  const balance = await Promise.race([balancePromise, timeoutPromise]);
-  return { status: 'ok', target, tokenAddress, balance };
+  const start = Date.now();
+  try {
+    const balance = await Promise.race([balancePromise, timeoutPromise]);
+    logBalanceDiag(chain, Date.now() - start, { ok: true, balance });
+    return { status: 'ok', target, tokenAddress, balance };
+  } catch (err) {
+    logBalanceDiag(chain, Date.now() - start, { ok: false, error: err });
+    throw err;
+  }
 }
 
 // BUYER_SOURCE_TARGETS の全 chain で USDC.balanceOf を並列 query。1 chain の失敗は
