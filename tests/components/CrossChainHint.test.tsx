@@ -165,7 +165,6 @@ const baseProps = {
   targetChainId: baseSepoliaId,
   recipient: RECIPIENT,
   requiredAtomic: 5_000_000n, // 5 USDC (invoice amount)
-  payMode: 'gasless' as const,
   feeReceiver:
     '0x00000000000000000000000000000000000fee01' as `0x${string}`,
   displayDecimals: 6,

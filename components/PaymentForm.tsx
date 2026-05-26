@@ -499,7 +499,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
             targetChainId={requiredChain.id}
             recipient={params.to}
             requiredAtomic={amountWei}
-            payMode={effectiveMode}
             feeReceiver={env.feeReceiver}
             displayDecimals={deployment.decimals}
             tokenAddress={deployment.address}

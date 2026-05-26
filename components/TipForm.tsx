@@ -404,7 +404,6 @@ export function TipForm({ params }: { params: TipParams }) {
             targetChainId={requiredChain.id}
             recipient={params.to}
             requiredAtomic={amountWei}
-            payMode="gasless"
             feeReceiver={env.feeReceiver}
             displayDecimals={deployment.decimals}
             tokenAddress={deployment.address}

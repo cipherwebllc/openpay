@@ -27,7 +27,6 @@ import {
 import { domainForChainId } from '@/lib/crossChain/config';
 import type { CircleDomain } from '@/lib/crossChain/types';
 import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
-import type { PayMode } from '@/lib/fee';
 import { resolveDeployment } from '@/lib/tokens';
 
 export interface UseCrossChainPaymentArgs {
@@ -39,8 +38,6 @@ export interface UseCrossChainPaymentArgs {
   recipient: Address;
   /** OpenPay 利用料の送り先 (operator)。cross-chain でも利用料を徴収する (案A′)。 */
   feeReceiver: Address;
-  /** 決済モード。OpenPay 利用料率 (gasless 1.0% / standard 0.5%) の算出に使う。 */
-  payMode: PayMode;
   enabled?: boolean;
 }
 
@@ -162,10 +159,13 @@ export function useCrossChainPayment(
       // 請求額を merchant 本送金 (bridgedAmount) と OpenPay 利用料 (feeAmount) に
       // 分割する。execute は valueAtomic を merchant へ、feeAmount を feeReceiver へ
       // それぞれブリッジする (案A′)。
+      // 利用料率は常に standard (0.5%)。cross-chain はブリッジ tx の native ガスを
+      // 顧客が自腹で払う = 通常決済 (ガスあり) モードと同じなので、ガス肩代わり込みの
+      // gasless レート (1.0%) ではなく standard レートを適用する。
       const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
         args.requiredAtomic,
         'usdc',
-        args.payMode,
+        'standard',
       );
 
       if (core.kind === 'gateway') {
@@ -214,7 +214,6 @@ export function useCrossChainPayment(
       args.recipient,
       args.requiredAtomic,
       args.feeReceiver,
-      args.payMode,
       args.targetChainId,
       destPublicClient,
       sourcePublicClient,

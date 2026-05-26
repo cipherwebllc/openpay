@@ -22,7 +22,6 @@ import {
 } from '@/lib/paymentLog';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
-import type { PayMode } from '@/lib/fee';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
@@ -42,9 +41,8 @@ export interface CrossChainHintProps {
    *  で支出し、merchant 宛 (amount - fee) + operator 宛 (fee) の 2 本にブリッジする。
    *  ネットワークガスは native (ETH/POL) 別途負担なので USDC 額には含めない。 */
   requiredAtomic: bigint;
-  /** 決済モード (OpenPay 利用料率 gasless 1.0% / standard 0.5% の算出に使う)。 */
-  payMode: PayMode;
-  /** OpenPay 利用料の送り先 (operator)。cross-chain でも利用料を徴収する (案A′)。 */
+  /** OpenPay 利用料の送り先 (operator)。cross-chain でも利用料を徴収する (案A′)。
+   *  料率は常に standard (0.5%) — cross-chain は顧客がガス自腹 = 通常決済モード。 */
   feeReceiver: Address;
   /** USDC decimals (= 6)。表示で formatUnits に使う */
   displayDecimals: number;
@@ -61,7 +59,6 @@ export function CrossChainHint(props: CrossChainHintProps) {
     requiredAtomic: props.requiredAtomic,
     recipient: props.recipient,
     feeReceiver: props.feeReceiver,
-    payMode: props.payMode,
     enabled:
       !CROSS_CHAIN_DISABLED &&
       props.token === 'usdc' &&
