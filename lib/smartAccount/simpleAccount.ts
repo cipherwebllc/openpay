@@ -33,7 +33,8 @@ export type SmartAccountBundle = {
 
 // wagmi の useWalletClient().data は WalletClient<..., ..., Account> (account 必須)。
 // viem の生 WalletClient だと account が optional なので、wagmi 由来の型を使う。
-type ConnectedWalletClient = NonNullable<GetWalletClientReturnType>;
+// 3 つの SmartAccount builder (simple / metamask / mav2) で共有する。
+export type ConnectedWalletClient = NonNullable<GetWalletClientReturnType>;
 
 export async function buildSimpleSmartAccountClient(args: {
   walletClient: ConnectedWalletClient;

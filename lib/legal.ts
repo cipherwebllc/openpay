@@ -25,5 +25,3 @@ export const LEGAL_ENTITY = {
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,
 } as const;
-
-export type LegalEntity = typeof LEGAL_ENTITY;

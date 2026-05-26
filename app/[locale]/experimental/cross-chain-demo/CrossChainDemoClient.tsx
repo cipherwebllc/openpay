@@ -39,7 +39,6 @@ import {
   GATEWAY_MINTER_ADDRESS,
   GATEWAY_WALLET_ADDRESS,
   chainIdForDomain,
-  domainForChainId,
 } from '@/lib/crossChain/config';
 import {
   readAllCrossChainBalances,
@@ -567,6 +566,3 @@ function TxStatusView({
     </div>
   );
 }
-
-// Re-export for completeness (caller can read domain→chainId mapping)
-export { chainIdForDomain, domainForChainId };

@@ -6,7 +6,8 @@ import { logger } from './logger';
 
 export type PaymentResult = 'success' | 'reverted' | 'error';
 // batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信)
-// direct:            旧 mode=direct (fee=0 単一 transfer)。廃止済みだが、過去 log の互換のため型は残置。
+// direct:            同一チェーン直接送金。cross-chain mint 成功ログで現役生成
+//                    される + 旧 mode=direct の過去 log も含む。
 // standard-merchant: 通常決済（ガスあり）の merchant への送金 tx (EOA writeContract)
 // standard-fee:      通常決済（ガスあり）の OpenPay 利用手数料徴収 tx (EOA writeContract)
 export type PaymentFlow =

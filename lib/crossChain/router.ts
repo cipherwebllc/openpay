@@ -13,8 +13,6 @@ import type {
 import { domainForChainId } from './config';
 import type { CircleDomain, CrossChainTarget } from './types';
 
-export type PaymentPath = 'direct' | 'gateway' | 'cctp-v2' | 'onramp';
-
 export type PathDecision =
   | {
       path: 'direct';
@@ -148,7 +146,7 @@ function pickBestGatewaySource(
 ): CircleDomain {
   const ranked = Array.from(gateway.perDomain.entries())
     .map(([d, balance]) => ({
-      domain: d as CircleDomain,
+      domain: d,
       balance,
       isDest: d === destinationDomain ? 1 : 0,
       sufficient: balance >= requiredAtomic ? 1 : 0,

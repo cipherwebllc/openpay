@@ -33,7 +33,6 @@ import {
   toMetaMaskSmartAccount,
 } from '@metamask/delegation-toolkit';
 import { kaia, kairos } from 'viem/chains';
-import type { GetWalletClientReturnType } from '@wagmi/core';
 import {
   assertGaslessSupported,
   createPimlico,
@@ -43,9 +42,10 @@ import {
 import type { TokenDeployment } from '@/lib/tokens';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
-import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
-
-type ConnectedWalletClient = NonNullable<GetWalletClientReturnType>;
+import type {
+  ConnectedWalletClient,
+  SmartAccountBundle,
+} from '@/lib/smartAccount/simpleAccount';
 
 export async function buildMetaMaskSmartAccountClient(args: {
   walletClient: ConnectedWalletClient;
