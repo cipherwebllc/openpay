@@ -6,10 +6,11 @@
 // 失敗 chain は status:'error' entry として残す (UI 側で「unavailable」を出すため)。
 //
 // 2026-05-26 (Phase A): 各 chain の readContract に 3 秒 timeout を追加
-// (Ethereum L1 公開 RPC の hang 問題対応)。Ethereum L1 (mainnet/sepolia) のみ
-// viem fallback transport で 3 endpoint chain。他 L2 chain は単一 http() のまま。
+// (Ethereum L1 公開 RPC の hang 問題対応)。transport は lib/chains.ts の
+// transportForChain に集約 — mainnet/sepolia は公開 fallback 列で viem default
+// (eth.merkle.io) 依存を回避し、wagmi.ts と同一の RPC ロジックを共有する。
 
-import { createPublicClient, erc20Abi, fallback, http, type Address } from 'viem';
+import { createPublicClient, erc20Abi, type Address } from 'viem';
 import type { Chain } from 'viem';
 import {
   arbitrum,
@@ -34,7 +35,7 @@ import {
   worldchain,
   worldchainSepolia,
 } from 'viem/chains';
-import { buyerOnlyChainForSlug, customRpcUrlForChain } from '../chains';
+import { buyerOnlyChainForSlug, transportForChain } from '../chains';
 import { resolveDeployment } from '../tokens';
 import {
   BUYER_SOURCE_TARGETS,
@@ -84,39 +85,13 @@ export type GatewayUnifiedBalance =
       error: string;
     };
 
-// Ethereum L1 公開 RPC の信頼性問題 (USDC.balanceOf timeout) に対応するため、
-// mainnet/sepolia のみ viem fallback transport で 3 endpoint chain。
-// 他 L2 chain は公開 RPC が安定なので単一 http() のまま。
-// env override (NEXT_PUBLIC_ETHEREUM_RPC_URL) が設定されていればそれが primary、
-// public endpoint が backup として後段に並ぶ。
-const ETHEREUM_PUBLIC_FALLBACKS = [
-  'https://eth.llamarpc.com',
-  'https://ethereum-rpc.publicnode.com',
-  'https://rpc.ankr.com/eth',
-] as const;
-const SEPOLIA_PUBLIC_FALLBACKS = [
-  'https://ethereum-sepolia-rpc.publicnode.com',
-  'https://rpc.ankr.com/eth_sepolia',
-] as const;
-
+// chain ごとの viem transport は lib/chains.ts の transportForChain に集約。
+// mainnet/sepolia は公開 fallback 列 (eth.merkle.io 依存を回避)、他 chain は
+// custom RPC or viem default。wagmi.ts と同一ロジックを共有する。
 function publicClientFor(chain: Chain) {
-  const customUrl = customRpcUrlForChain(chain.id);
-
-  if (chain.id === mainnet.id || chain.id === sepolia.id) {
-    const fallbacks =
-      chain.id === mainnet.id
-        ? ETHEREUM_PUBLIC_FALLBACKS
-        : SEPOLIA_PUBLIC_FALLBACKS;
-    const endpoints = customUrl ? [customUrl, ...fallbacks] : [...fallbacks];
-    return createPublicClient({
-      chain,
-      transport: fallback(endpoints.map((u) => http(u))),
-    });
-  }
-
   return createPublicClient({
     chain,
-    transport: customUrl ? http(customUrl) : http(),
+    transport: transportForChain(chain.id),
   });
 }
 

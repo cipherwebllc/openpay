@@ -46,7 +46,7 @@ import {
   worldchain,
   worldchainSepolia,
 } from 'viem/chains';
-import { defineChain, type Chain } from 'viem';
+import { defineChain, fallback, http, type Chain, type Transport } from 'viem';
 import { env, isMainnet } from './env';
 
 // HyperEVM testnet (chainId 998) は viem/chains に未収録のため inline 定義。
@@ -332,6 +332,39 @@ export function customRpcUrlForChain(chainId: number): string | undefined {
   if (chainId === hyperEvm.id) return env.rpc.hyperevm;
   if (chainId === hyperEvmTestnet.id) return env.rpc.hyperevmTestnet;
   return undefined;
+}
+
+// Ethereum L1 公開 RPC の信頼性問題に対応するための fallback endpoint。
+// viem の mainnet デフォルト RPC (eth.merkle.io) はブラウザから "Failed to fetch"
+// (CORS/接続拒否) になることがあるため、CORS 対応の公開 endpoint を複数並べる。
+// 他 L2 chain は公開 RPC が安定なので単一 http() のままでよい。
+const ETHEREUM_PUBLIC_FALLBACKS = [
+  'https://eth.llamarpc.com',
+  'https://ethereum-rpc.publicnode.com',
+  'https://rpc.ankr.com/eth',
+] as const;
+const SEPOLIA_PUBLIC_FALLBACKS = [
+  'https://ethereum-sepolia-rpc.publicnode.com',
+  'https://rpc.ankr.com/eth_sepolia',
+] as const;
+
+// chain に対する viem transport を組み立てる共有ヘルパ。wagmi.ts (wallet 接続)
+// と crossChain/balance.ts (残高 query) の両方から使い、mainnet/sepolia の RPC
+// 設定を 1 箇所に集約する。
+//   - mainnet/sepolia: 公開 fallback 列。NEXT_PUBLIC_{ETHEREUM,SEPOLIA}_RPC_URL
+//     が設定されていればそれを primary に前置 (専用 RPC 優先)。
+//   - その他 chain: custom RPC があればそれ、無ければ viem default (http())。
+export function transportForChain(chainId: number): Transport {
+  const customUrl = customRpcUrlForChain(chainId);
+  if (chainId === mainnet.id || chainId === sepolia.id) {
+    const fallbacks =
+      chainId === mainnet.id
+        ? ETHEREUM_PUBLIC_FALLBACKS
+        : SEPOLIA_PUBLIC_FALLBACKS;
+    const endpoints = customUrl ? [customUrl, ...fallbacks] : [...fallbacks];
+    return fallback(endpoints.map((u) => http(u)));
+  }
+  return customUrl ? http(customUrl) : http();
 }
 
 /** Buyer-only chain (phase 4b-1) を含めた Chain 解決。CROSS_CHAIN_TARGETS から

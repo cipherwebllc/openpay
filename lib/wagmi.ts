@@ -1,13 +1,12 @@
-import { http, createConfig } from 'wagmi';
+import { createConfig } from 'wagmi';
 import { coinbaseWallet, injected, walletConnect } from 'wagmi/connectors';
-import { customRpcUrlForChain, supportedChains } from './chains';
+import { supportedChains, transportForChain } from './chains';
 import { env } from './env';
 
+// transport は transportForChain に集約 (mainnet/sepolia は公開 fallback 列で
+// viem default の eth.merkle.io 依存を回避、他 chain は custom RPC or default)。
 const transports = Object.fromEntries(
-  supportedChains.map((c) => {
-    const url = customRpcUrlForChain(c.id);
-    return [c.id, url ? http(url) : http()];
-  }),
+  supportedChains.map((c) => [c.id, transportForChain(c.id)]),
 );
 
 const connectors = [
