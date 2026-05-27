@@ -123,8 +123,15 @@ const ALL_CHAIN_IDS = [
   unichainSepolia.id,
 ];
 
+// execute.ts の ensureWalletChain が switch 後に getChainId() を poll するため、
+// wallet を merchant 受取チェーン開始で模し、switchChainAsync が更新する state を読む。
+let mockWalletChainId: number = baseSepolia.id;
+
 function makeWalletClient() {
-  return { chain: { id: baseSepolia.id } };
+  return {
+    chain: { id: baseSepolia.id },
+    getChainId: vi.fn(async () => mockWalletChainId),
+  };
 }
 
 function makePublicClient() {
@@ -159,7 +166,9 @@ function setupConnected() {
   vi.mocked(usePublicClient).mockReturnValue(makePublicClient() as never);
   vi.mocked(useSwitchChain).mockReturnValue({
     switchChain: vi.fn(),
-    switchChainAsync: vi.fn(async () => undefined),
+    switchChainAsync: vi.fn(async ({ chainId }: { chainId: number }) => {
+      mockWalletChainId = chainId;
+    }),
     isPending: false,
   } as never);
   // useErc20BalanceAndChain が直接呼ぶ wagmi の useReadContract (チェーン上 USDC
@@ -210,6 +219,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   logPostMock.mockClear();
   readContractByChain.clear();
+  mockWalletChainId = baseSepolia.id;
   vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
 });
 

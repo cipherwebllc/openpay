@@ -184,6 +184,7 @@
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) での決済は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットでは決済できません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版 QR をご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません (MetaMask は Kaia への delegator を未 deploy)。MetaMask の場合は「アカウント詳細 → Smart account」をオフにして元の EOA に戻すか、別のウォレットでお試しください。Polygon / Base / Arbitrum / Optimism / Ethereum チェーンでは MetaMask Smart Account で gasless 決済可能です。",
+    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担・手数料 0.5%) で今すぐ支払えます。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
     "successTitle": "決済が完了しました",
     "successUserOp": "UserOp Hash",
     "successTx": "Tx Hash",
@@ -237,6 +238,7 @@
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) でのチップ送信は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットからチップを送れません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版 Tip リンクをご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません。MetaMask の「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
+    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。チップにはガスレスモードが必要です。MetaMask の「アカウント詳細 → Smart account」をオンにして再接続するか、ガスレス対応済みのウォレットでお試しください。",
     "successTitle": "チップを送信しました",
     "successUserOp": "UserOp",
     "successTx": "Tx",
@@ -349,6 +351,7 @@
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) での決済は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットでチェックアウトできません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版のチェックアウト URL をご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません。MetaMask の「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
+    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担・手数料 0.5%) で今すぐ支払えます。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
     "successTitle": "お支払いが完了しました",
     "successBody": "ご注文ありがとうございます。決済はオンチェーンで確定しました。",
     "successUserOp": "UserOp Hash",
@@ -481,7 +484,8 @@
     "subtitle": "必要額 {required} USDC。残高がある全チェーンと、それぞれの手数料の概算を比較できます。",
     "balance": "残高: {balance} USDC",
     "feeBreakdownCrossChain": "ブリッジ手数料 {fee} USDC + ガス代 ({gasSymbol}) · 約 {eta} 秒",
-    "crossChainGasNote": "※ 別チェーンからの支払いは、そのチェーンのガス代 (ETH / POL など) が別途必要です。USDC だけでは完了できません。",
+    "gasTagGasless": "ガスレス",
+    "gasTagGasRequired": "ガス代要",
     "pathBadgeDirect": "直接送金",
     "pathBadgeGateway": "高速 (Gateway)",
     "pathBadgeCctpV2": "通常 (CCTP V2)"
@@ -795,6 +799,9 @@
     "bannerBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。通常決済モードに切り替えると決済できます — ガス代は {nativeToken} で自己負担、手数料は 0.5% になります。",
     "switchButton": "通常決済に切替 (ガス代自己負担)",
     "tipOnlyTitle": "未対応の Smart Account を検出",
-    "tipOnlyBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。チップ送信にはガスレスモードが必要なため、このウォレットではチップを送れません。MetaMask の場合は「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。"
+    "tipOnlyBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。チップ送信にはガスレスモードが必要なため、このウォレットではチップを送れません。MetaMask の場合は「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
+    "pristineTitle": "このウォレットはまだガスレス決済の準備ができていません",
+    "pristineBannerBody": "このウォレットはまだガスレス決済の準備ができていません。通常決済モードに切り替えると今すぐ支払えます — ガス代は {nativeToken} で自己負担、手数料は 0.5% です。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
+    "pristineTipBody": "このウォレットはまだガスレス決済の準備ができていません。チップ送信にはガスレスモードが必要です。MetaMask の場合は「アカウント詳細 → Smart account」をオンにして再接続するか、ガスレス対応済みのウォレットでお試しください。"
   }
 }

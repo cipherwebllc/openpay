@@ -76,7 +76,10 @@ export type IncompatibleSmartAccountI18nKey =
   | 'errorIncompatibleSmartAccount'
   | 'errorMav2Disabled'
   | 'errorMav2KaiaPolygon'
-  | 'errorMetaMaskKaia';
+  | 'errorMetaMaskKaia'
+  // pristine EOA (未委任) は injected wallet で 7702 委任を初回ガスレス設定できない
+  // (viem signAuthorization が JSON-RPC account 非対応)。standard mode 案内に倒す。
+  | 'errorPristineNoBootstrap';
 
 export class IncompatibleSmartAccountError extends Error {
   readonly delegateAddress: Address | null;

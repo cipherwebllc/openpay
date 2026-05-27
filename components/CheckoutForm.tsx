@@ -480,6 +480,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <SmartAccountFallbackBanner
           delegateAddress={saError.delegateAddress}
           nativeToken={nativeToken}
+          reason={
+            saError.i18nKey === 'errorPristineNoBootstrap'
+              ? 'pristine'
+              : 'incompatible'
+          }
           canFallbackToStandard
           onSwitchToStandard={() => setModeOverride('standard')}
         />

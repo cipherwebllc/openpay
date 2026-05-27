@@ -41,6 +41,10 @@ export interface CrossChainSourceChooserProps {
   requiredAtomic: bigint;
   /** USDC decimals (常に 6) */
   displayDecimals: number;
+  /** 同一チェーンの直接送金がガスレスか。direct option に「ガスレス」、cross-chain
+   *  option に「ガス代要」のタグを出し分ける。standard モード等で false の場合は
+   *  direct も「ガス代要」になる。 */
+  directIsGasless: boolean;
 }
 
 export function CrossChainSourceChooser(props: CrossChainSourceChooserProps) {
@@ -74,19 +78,13 @@ export function CrossChainSourceChooser(props: CrossChainSourceChooserProps) {
                 <OptionRow
                   option={option}
                   displayDecimals={props.displayDecimals}
+                  directIsGasless={props.directIsGasless}
                 />
               </button>
             </li>
           );
         })}
       </ul>
-      {/* cross-chain (別チェーンから払う) 経路はブリッジ tx を顧客 EOA が実行する
-          ため、その chain の native ガス (ETH/POL 等) が別途必要 = ガスレス対象外。
-          USDC のみ保有の顧客が「払えるはず」と誤解しないよう明示する。direct
-          (同一チェーン) のみのときは出さない。 */}
-      {props.options.some((o) => o.kind !== 'direct') && (
-        <p className="text-[11px] text-amber-700">{t('crossChainGasNote')}</p>
-      )}
     </div>
   );
 }
@@ -94,9 +92,11 @@ export function CrossChainSourceChooser(props: CrossChainSourceChooserProps) {
 function OptionRow({
   option,
   displayDecimals,
+  directIsGasless,
 }: {
   option: PathOption;
   displayDecimals: number;
+  directIsGasless: boolean;
 }) {
   const t = useTranslations('CrossChainSourceChooser');
   const chainName =
@@ -125,7 +125,12 @@ function OptionRow({
           )}
           <span>{chainName}</span>
         </span>
-        <PathBadge kind={option.kind} />
+        <span className="flex shrink-0 items-center gap-1">
+          <PathBadge kind={option.kind} />
+          {/* cross-chain (Gateway/CCTP) はブリッジ tx を顧客 EOA が実行するため常に
+              ガス顧客負担。direct は paymaster が効くガスレスモードのみガスレス。 */}
+          <GasTag gasless={option.kind === 'direct' && directIsGasless} />
+        </span>
       </div>
       <div className="mt-0.5 text-xs text-slate-600">
         {t('balance', { balance: balanceStr })}
@@ -144,6 +149,21 @@ function OptionRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ガス負担を一目で示すタグ。gasless = 緑「✓ ガスレス」、それ以外 = 琥珀「⛽ ガス代要」。
+// PathBadge (経路種別) の隣に並べ、「どの経路がガス不要か」を比較できるようにする。
+function GasTag({ gasless }: { gasless: boolean }) {
+  const t = useTranslations('CrossChainSourceChooser');
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        gasless ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+      }`}
+    >
+      {gasless ? `✓ ${t('gasTagGasless')}` : `⛽ ${t('gasTagGasRequired')}`}
+    </span>
   );
 }
 

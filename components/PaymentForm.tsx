@@ -354,6 +354,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <SmartAccountFallbackBanner
           delegateAddress={saError.delegateAddress}
           nativeToken={nativeToken}
+          reason={
+            saError.i18nKey === 'errorPristineNoBootstrap'
+              ? 'pristine'
+              : 'incompatible'
+          }
           canFallbackToStandard
           onSwitchToStandard={() => setModeOverride('standard')}
         />
@@ -502,6 +507,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
             feeReceiver={env.feeReceiver}
             displayDecimals={deployment.decimals}
             tokenAddress={deployment.address}
+            // 直接送金がガスレスなのは「ガスレスモード かつ smart account が実際に
+            // 構築済 (saData あり)」時のみ。pristine/未対応の fallback、init 失敗、
+            // 取得中はいずれも gasless 不可なので chooser でも「ガス代要」と表示する。
+            directIsGasless={!isStandard && !!saData}
           />
         )}
       </section>

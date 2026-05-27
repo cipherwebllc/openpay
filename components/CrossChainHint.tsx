@@ -49,6 +49,11 @@ export interface CrossChainHintProps {
   displayDecimals: number;
   /** USDC token address (paymentLog 用) */
   tokenAddress: Address;
+  /** 同一チェーンの直接送金がガスレスか (= ガスレス決済モードで paymaster が効く)。
+   *  cross-chain (Gateway/CCTP) は常にガス顧客負担なので chooser で「直接送金=ガスレス /
+   *  cross-chain=ガス代要」を出し分けるために使う。standard モードや paymaster 無効時は
+   *  false (直接送金もガス顧客負担)。 */
+  directIsGasless: boolean;
 }
 
 export function CrossChainHint(props: CrossChainHintProps) {
@@ -234,6 +239,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
         onSelect={(o) => setSelectedKey(o.key)}
         requiredAtomic={props.requiredAtomic}
         displayDecimals={props.displayDecimals}
+        directIsGasless={props.directIsGasless}
       />
       {isDirectSelected && (
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">

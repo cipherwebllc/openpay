@@ -3,8 +3,12 @@
 // EOA の 7702 delegation 状態を `eth_getCode` で検出し、適切な SmartAccount
 // client builder に分岐する router。
 //
-// - none / pimlico-simple-7702 → permissionless `to7702SimpleSmartAccount` 経路
-//   (旧来の挙動、振る舞い無変更)
+// - pimlico-simple-7702 → permissionless `to7702SimpleSmartAccount` 経路 (既に委任済み
+//   なのでガスレスで動く)
+// - none (pristine 未委任) → injected wallet では初回 7702 委任を gasless に張れない
+//   (viem signAuthorization が JSON-RPC 非対応 → authorization がダミー署名のまま
+//   bundler に弾かれる) ため IncompatibleSmartAccountError(errorPristineNoBootstrap)
+//   を throw し、UI を standard mode 案内に倒す
 // - alchemy-mav2-7702 → `@account-kit/smart-contracts` 経由の MAv2 経路
 //   HashPort wallet 等が EOA を Alchemy MAv2 へ自動委任しているケース。
 //   Pimlico bundler / paymaster は両者で共有 (account 層だけ差替)。
@@ -26,6 +30,7 @@ import { isSupportedChainId } from '@/lib/chains';
 import {
   detectAccountKind,
   IncompatibleSmartAccountError,
+  isIncompatibleSmartAccountError,
 } from '@/lib/accountDetection';
 import { buildSimpleSmartAccountClient } from '@/lib/smartAccount/simpleAccount';
 import { env } from '@/lib/env';
@@ -64,15 +69,31 @@ export function useSmartAccount(
 
       const detection = await detectAccountKind(publicClient, address);
 
-      if (
-        detection.kind === 'none' ||
-        detection.kind === 'pimlico-simple-7702'
-      ) {
+      // 既に Pimlico SimpleAccount に委任済みの口は従来通りガスレスで動く。
+      if (detection.kind === 'pimlico-simple-7702') {
         return buildSimpleSmartAccountClient({
           walletClient,
           publicClient,
           chainId,
           deployment,
+        });
+      }
+
+      // pristine EOA (未委任): 初回のガスレス決済は 7702 委任を設定する署名済み
+      // authorization を要するが、viem の signAuthorization は injected (JSON-RPC)
+      // wallet を非対応のため、Simple7702 経路ではダミー署名のまま送られ bundler が
+      // "recovered signer ≠ sender" で必ず弾く。事前に fail-fast して UI を standard
+      // mode 案内に倒す (送信時の生 bundler エラーを避ける)。MetaMask 等でアカウントを
+      // Smart Account 化 (= 委任) すれば次回から 'metamask-7702' 等で gasless に動く。
+      if (detection.kind === 'none') {
+        // Sentry 観測: 初回ガスレス不可で standard に倒れた頻度 (需要/離脱の計測)。
+        logger.info('smart_account.pristine_no_bootstrap', {
+          chainId,
+          symbol: deployment.symbol,
+        });
+        throw new IncompatibleSmartAccountError({
+          delegateAddress: null,
+          i18nKey: 'errorPristineNoBootstrap',
         });
       }
 
@@ -139,6 +160,12 @@ export function useSmartAccount(
         i18nKey: 'errorIncompatibleSmartAccount',
       });
     },
+    // 互換性エラー (pristine / 未対応 delegate / Kaia 等) は決定論的なので retry しても
+    // 結果は変わらず、UI フォールバック (standard 案内バナー) が backoff 分だけ遅れ、
+    // telemetry も多重発火する。これらは即 fail-fast。RPC flake 等の transient error
+    // のみ React Query default と同じ 3 回まで retry する。
+    retry: (failureCount, error) =>
+      isIncompatibleSmartAccountError(error) ? false : failureCount < 3,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   });

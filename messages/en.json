@@ -184,6 +184,7 @@
     "errorMav2Disabled": "Payments from wallets backed by Alchemy Modular Account v2 (such as HashPort) are being rolled out gradually. Please try again later.",
     "errorMav2KaiaPolygon": "Payments on Kaia are not supported for wallets delegated to Alchemy Modular Account v2. Please use a Polygon / Base / Arbitrum / Optimism payment QR, or try a different wallet.",
     "errorMetaMaskKaia": "MetaMask Smart Account is not supported on Kaia yet (MetaMask has not deployed its delegator on Kaia). Toggle off \"Smart account\" in MetaMask Account details to revert to a plain EOA, or try a different wallet. MetaMask Smart Account works for gasless payments on Polygon / Base / Arbitrum / Optimism / Ethereum.",
+    "errorPristineNoBootstrap": "This wallet isn't set up for gasless payments yet. You can pay now in standard mode (you pay network gas; the service fee is 0.5%). If you use MetaMask, turn on \"Smart account\" in Account details to enable gasless next time.",
     "successTitle": "Payment complete",
     "successUserOp": "UserOp Hash",
     "successTx": "Tx Hash",
@@ -237,6 +238,7 @@
     "errorMav2Disabled": "Tip sending from wallets backed by Alchemy Modular Account v2 (such as HashPort) is being rolled out gradually. Please try again later.",
     "errorMav2KaiaPolygon": "Sending tips on Kaia is not supported for wallets delegated to Alchemy Modular Account v2. Please use a Polygon / Base / Arbitrum / Optimism Tip link, or try a different wallet.",
     "errorMetaMaskKaia": "MetaMask Smart Account is not supported on Kaia yet. Toggle off \"Smart account\" in MetaMask Account details, or try a different wallet.",
+    "errorPristineNoBootstrap": "This wallet isn't set up for gasless payments yet, and tips require gasless mode. If you use MetaMask, turn on \"Smart account\" in Account details and reconnect, or try a wallet that's already set up for gasless.",
     "successTitle": "Tip sent!",
     "successUserOp": "UserOp",
     "successTx": "Tx",
@@ -349,6 +351,7 @@
     "errorMav2Disabled": "Payments from wallets backed by Alchemy Modular Account v2 (such as HashPort) are being rolled out gradually. Please try again later.",
     "errorMav2KaiaPolygon": "Checkout on Kaia is not supported for wallets delegated to Alchemy Modular Account v2. Please use a Polygon / Base / Arbitrum / Optimism checkout URL, or try a different wallet.",
     "errorMetaMaskKaia": "MetaMask Smart Account is not supported on Kaia yet. Toggle off \"Smart account\" in MetaMask Account details, or try a different wallet.",
+    "errorPristineNoBootstrap": "This wallet isn't set up for gasless payments yet. You can pay now in standard mode (you pay network gas; the service fee is 0.5%). If you use MetaMask, turn on \"Smart account\" in Account details to enable gasless next time.",
     "successTitle": "Payment complete",
     "successBody": "Thanks for your purchase. The transaction is confirmed on-chain.",
     "successUserOp": "UserOp Hash",
@@ -481,7 +484,8 @@
     "subtitle": "Required: {required} USDC. Compare all chains where you have a balance plus their fees.",
     "balance": "Balance: {balance} USDC",
     "feeBreakdownCrossChain": "Bridge fee {fee} USDC + network gas ({gasSymbol}) · ~{eta}s",
-    "crossChainGasNote": "Note: paying from another chain needs that chain's native gas (e.g. ETH / POL) on top — it cannot be completed with USDC alone.",
+    "gasTagGasless": "Gasless",
+    "gasTagGasRequired": "Gas required",
     "pathBadgeDirect": "Direct",
     "pathBadgeGateway": "Fast (Gateway)",
     "pathBadgeCctpV2": "Standard (CCTP V2)"
@@ -795,6 +799,9 @@
     "bannerBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). You can switch to standard mode — you will pay gas in {nativeToken} and the service fee is 0.5%.",
     "switchButton": "Switch to standard mode (you pay gas)",
     "tipOnlyTitle": "Unsupported Smart Account detected",
-    "tipOnlyBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). Tips require gasless mode, so this wallet cannot send tips at this time. If you are using MetaMask, toggle off \"Smart account\" in Account details. Or try a different wallet."
+    "tipOnlyBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). Tips require gasless mode, so this wallet cannot send tips at this time. If you are using MetaMask, toggle off \"Smart account\" in Account details. Or try a different wallet.",
+    "pristineTitle": "Gasless not available for this wallet yet",
+    "pristineBannerBody": "This wallet isn't set up for gasless payments yet. Switch to standard mode to pay now — you'll pay gas in {nativeToken} and the service fee is 0.5%. If you use MetaMask, turn on \"Smart account\" in Account details to enable gasless next time.",
+    "pristineTipBody": "This wallet isn't set up for gasless payments yet, and tips require gasless mode. If you use MetaMask, turn on \"Smart account\" in Account details and reconnect, or try a wallet that's already set up for gasless."
   }
 }

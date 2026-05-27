@@ -95,6 +95,12 @@ const polygonAmoyId = 80002;
 const arbitrumSepoliaId = 421614;
 const optimismSepoliaId = 11155420;
 
+// execute.ts の ensureWalletChain は switchChainAsync 後に walletClient.getChainId()
+// が target に揃うまで poll する。実 wallet を模し、default switchChainAsync が更新する
+// chain state を getChainId が読む。wallet は merchant 受取チェーン (Base Sepolia) に
+// 接続している状態から開始 (実 UI と同じ)。beforeEach で reset。
+let mockWalletChainId = baseSepoliaId;
+
 function setupConnected(opts: {
   walletClient?: ReturnType<typeof makeWalletClient>;
   publicClient?: ReturnType<typeof makePublicClient>;
@@ -113,7 +119,11 @@ function setupConnected(opts: {
   } as never);
   vi.mocked(usePublicClient).mockReturnValue(publicClient as never);
   vi.mocked(useSwitchChain).mockReturnValue({
-    switchChainAsync: opts.switchChainAsync ?? vi.fn(async () => undefined),
+    switchChainAsync:
+      opts.switchChainAsync ??
+      vi.fn(async ({ chainId }: { chainId: number }) => {
+        mockWalletChainId = chainId;
+      }),
   } as never);
   return { walletClient, publicClient };
 }
@@ -127,6 +137,7 @@ function makeWalletClient() {
   ];
   return {
     chain: { id: baseSepoliaId },
+    getChainId: vi.fn(async () => mockWalletChainId),
     signTypedData: vi.fn(async () => '0xsignedburnintent'),
     sendTransaction: vi.fn(async () => txHashes[i++]),
     writeContract: vi.fn(async () => txHashes[i++]),
@@ -170,11 +181,13 @@ const baseProps = {
     '0x00000000000000000000000000000000000fee01' as `0x${string}`,
   displayDecimals: 6,
   tokenAddress: USDC_BASE_SEPOLIA,
+  directIsGasless: true,
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   logPostMock.mockClear();
+  mockWalletChainId = baseSepoliaId;
 });
 
 afterEach(() => {
@@ -272,10 +285,38 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     // direct (同一チェーン) は bridge fee 0 のため fee 行を出さない →
     // "ブリッジ手数料" は cctp-v2 option の 1 箇所だけに現れる。
     expect(screen.getAllByText(/ブリッジ手数料/)).toHaveLength(1);
-    // cross-chain option があるので「ガス代 (ETH/POL) が別途必要」の注意書きが出る。
-    expect(
-      screen.getByText(/別チェーンからの支払いは/),
-    ).toBeInTheDocument();
+    // option 別ガスタグ: directIsGasless=true なので direct=「ガスレス」、
+    // cross-chain (cctp-v2)=「ガス代要」が 1 つずつ出る。
+    expect(screen.getByText(/ガスレス/)).toBeInTheDocument();
+    expect(screen.getByText(/ガス代要/)).toBeInTheDocument();
+  });
+
+  it('directIsGasless=false (通常決済モード) → direct も「ガス代要」で「ガスレス」は出ない', async () => {
+    // base(target) + polygon の両残高 → direct + cctp-v2。standard モードでは
+    // direct も顧客ガス負担なので「ガスレス」タグは一切出ず、両 option が「ガス代要」。
+    setReadContractByChain({
+      [baseSepoliaId]: 10_000_000n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    setupConnected();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+      ),
+    );
+    renderWithIntl(
+      withQueryClient(<CrossChainHint {...baseProps} directIsGasless={false} />),
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/支払元チェーンを選ぶ/)).toBeInTheDocument();
+    });
+    // direct + cctp-v2 の 2 option とも「ガス代要」、「ガスレス」は無し。
+    expect(screen.getAllByText(/ガス代要/)).toHaveLength(2);
+    expect(screen.queryByText(/ガスレス/)).not.toBeInTheDocument();
   });
 
   it('中断 state がある cross-chain option では「続きから」ヒント+ボタンを表示', async () => {

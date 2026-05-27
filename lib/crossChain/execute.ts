@@ -65,6 +65,42 @@ export type ProgressCallback = (p: CrossChainProgress) => void;
 // wagmi useSwitchChain.switchChainAsync の signature と互換。
 export type SwitchChainFn = (args: { chainId: number }) => Promise<unknown>;
 
+// switchChainAsync は wallet (MetaMask 等) が wallet_switchEthereumChain を resolve
+// した時点で返るが、injected provider の eth_chainId が新 chain を報告するまでに
+// 僅かな lag があることがある。viem の writeContract / sendTransaction は送信前に
+// live eth_chainId を取得して current chain を assert するため、lag 中に tx を出すと
+// "current chain of the wallet does not match the target chain" で abort する
+// (testnet 実機: Base Sepolia 受取 → OP Sepolia 支払元の approve で再現)。
+// switch 後に live chainId が target に揃うまで bounded poll してから戻すことで
+// このレースを閉じる。既に target chain なら switch 自体を skip し不要な wallet
+// popup を避ける (chainId は live eth_chainId なので stale walletClient closure でも
+// 正しく判定できる)。
+const CHAIN_SWITCH_CONFIRM_ATTEMPTS = 20;
+const CHAIN_SWITCH_CONFIRM_INTERVAL_MS = 150;
+
+export async function ensureWalletChain(
+  walletClient: WalletClient,
+  switchChainAsync: SwitchChainFn,
+  targetChainId: number,
+): Promise<void> {
+  if ((await walletClient.getChainId()) === targetChainId) return;
+  await switchChainAsync({ chainId: targetChainId });
+  for (let attempt = 0; attempt < CHAIN_SWITCH_CONFIRM_ATTEMPTS; attempt += 1) {
+    if ((await walletClient.getChainId()) === targetChainId) return;
+    // 最終 attempt の後は sleep せず即 throw する (switch がこの sleep 中に landed
+    // しても再 check されず誤って abort するのを防ぐ — 最後の判定は常に getChainId)。
+    if (attempt < CHAIN_SWITCH_CONFIRM_ATTEMPTS - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, CHAIN_SWITCH_CONFIRM_INTERVAL_MS),
+      );
+    }
+  }
+  throw new Error(
+    `cross-chain execute: wallet chain を ${targetChainId} に切り替え後も ` +
+      `eth_chainId が一致しません (wallet が switch を完了していない可能性)`,
+  );
+}
+
 // chainId → viem Chain object 解決。supportedChains 外なら明示的に throw して
 // 「unknown chain で wallet に送ろうとして wallet が NETWORK_UNRECOGNIZED 系の
 // 不可解な error を返す」事態を防ぐ。caller (useCrossChainPayment) は
@@ -217,7 +253,11 @@ export async function executeGatewayTransfer(
   // 1. source chain 上で必要な burn intent を sign + attest する。
   if (needMerchantAtt || needFeeAtt) {
     onProgress({ kind: 'switch_chain', targetChainId: args.sourceChainId });
-    await args.switchChainAsync({ chainId: args.sourceChainId });
+    await ensureWalletChain(
+      args.walletClient,
+      args.switchChainAsync,
+      args.sourceChainId,
+    );
     const currentBlockHeight = await args.sourcePublicClient.getBlockNumber();
 
     // 1 件分の burn intent を sign + attest する closure。phase で progress の
@@ -292,7 +332,11 @@ export async function executeGatewayTransfer(
   //    済 hash の landed を検証し、成功済なら skip / 未確定なら (再)送信する。switch は
   //    idempotent (同 chain は no-op)。
   onProgress({ kind: 'switch_chain', targetChainId: args.destChainId });
-  await args.switchChainAsync({ chainId: args.destChainId });
+  await ensureWalletChain(
+    args.walletClient,
+    args.switchChainAsync,
+    args.destChainId,
+  );
 
   const mint = (att: { attestation: Hex; signature: Hex }): Promise<Hex> => {
     const data = encodeGatewayMintCalldata(att.attestation, att.signature);
@@ -433,7 +477,11 @@ export async function executeCctpTransfer(
   // 1. source chain 上で approve + burn (まだ burn していない分だけ)。
   if (needMerchantBurn || needFeeBurn) {
     onProgress({ kind: 'switch_chain', targetChainId: args.sourceChainId });
-    await args.switchChainAsync({ chainId: args.sourceChainId });
+    await ensureWalletChain(
+      args.walletClient,
+      args.switchChainAsync,
+      args.sourceChainId,
+    );
 
     // merchant + fee の両 burn を 1 回の approve でカバーする (再開時は残りの burn
     // 用に再 approve、allowance 上書きは無害)。
@@ -551,7 +599,11 @@ export async function executeCctpTransfer(
     }
 
     onProgress({ kind: 'switch_chain', targetChainId: args.destChainId });
-    await args.switchChainAsync({ chainId: args.destChainId });
+    await ensureWalletChain(
+      args.walletClient,
+      args.switchChainAsync,
+      args.destChainId,
+    );
 
     if (merchantIris) {
       const mintData = encodeReceiveMessageCalldata(

@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { decodeFunctionData, getAddress, type Address, type Hex } from 'viem';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
 import { CCTP_V2_TOKEN_MESSENGER_ABI } from '@/lib/crossChain/cctp';
 import {
+  ensureWalletChain,
   executeCctpTransfer,
   executeGatewayTransfer,
   type CrossChainProgress,
@@ -27,6 +28,24 @@ const RECIPIENT = getAddress('0x000000000000000000000000000000000000aBcd');
 const SOURCE_TOKEN = getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
 const DEST_TOKEN = getAddress('0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582');
 
+// execute.ts の ensureWalletChain は switchChainAsync 後に walletClient.getChainId()
+// が target に揃うまで poll する。実 wallet では getChainId は switch を反映するので、
+// mock も両者を 1 つの mutable chain state で連動させる。mockChainId は trackSwitch()
+// で更新され、makeWalletClient / 各 inline mock の getChainId が読む。beforeEach で
+// reset (getChainId は switch 後にしか呼ばれないので初期値は実質 sentinel)。
+let mockChainId = 0;
+beforeEach(() => {
+  mockChainId = 0;
+});
+
+// switchChainAsync の mock。呼ばれた chainId を mockChainId に反映し、後続の
+// getChainId poll が target に揃う (= 実 wallet の switch 成功を模す)。
+function trackSwitch() {
+  return vi.fn(async ({ chainId }: { chainId: number }) => {
+    mockChainId = chainId;
+  });
+}
+
 // args type を明示することで mock.calls[idx][0] が unknown ではなく実型として
 // 推論される (TS2493 回避)。test fixture なので overkill 気味だが、安全な assertion
 // を書くために必要。
@@ -37,6 +56,7 @@ function makeWalletClient(opts: {
   let i = 0;
   return {
     chain: { id: 84532 },
+    getChainId: vi.fn(async () => mockChainId),
     signTypedData: vi.fn(async (_args: Record<string, unknown>) => opts.signature),
     sendTransaction: vi.fn(async (_args: Record<string, unknown>) => {
       const h = opts.txHashes[i++];
@@ -68,7 +88,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
     });
     const sourcePublic = makePublicClient({ blockNumber: 500n });
     const destPublic = makePublicClient();
-    const switchChainAsync = vi.fn(async (_args: { chainId: number }) => undefined);
+    const switchChainAsync = trackSwitch();
     const mockFetch = vi.fn(
       async () =>
         new Response(
@@ -167,7 +187,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -208,7 +228,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -234,7 +254,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
     });
     const sourcePublic = makePublicClient();
     const destPublic = makePublicClient();
-    const switchChainAsync = vi.fn(async (_args: { chainId: number }) => undefined);
+    const switchChainAsync = trackSwitch();
     // 1st iris call returns complete immediately
     const mockFetch = vi.fn(
       async () =>
@@ -325,6 +345,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
   it('approve 失敗 → 後段 (burn / poll / receive) 全 skip', async () => {
     const walletClient = {
       chain: { id: 84532 },
+      getChainId: vi.fn(async () => mockChainId),
       signTypedData: vi.fn(),
       sendTransaction: vi.fn(),
       writeContract: vi.fn(async () => {
@@ -340,7 +361,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -377,7 +398,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -464,7 +485,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -483,6 +504,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
   it('Gateway: signTypedData fail (user reject) → attestation API 呼ばれない', async () => {
     const walletClient = {
       chain: { id: 84532 },
+      getChainId: vi.fn(async () => mockChainId),
       signTypedData: vi.fn(async () => {
         throw new Error('User denied message signature');
       }),
@@ -498,7 +520,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -518,6 +540,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
   it('Gateway: mint sendTransaction fail (wallet reject) → result 返らず throw', async () => {
     const walletClient = {
       chain: { id: 80002 },
+      getChainId: vi.fn(async () => mockChainId),
       signTypedData: vi.fn(async () => '0xsig'),
       sendTransaction: vi.fn(async () => {
         throw new Error('Transaction rejected by user');
@@ -539,7 +562,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -584,7 +607,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -606,6 +629,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
     // 本 plan §6 で「approve 残置は許容、buyer は次回 fresh approve で上書き」と documented。
     const walletClient = {
       chain: { id: 84532 },
+      getChainId: vi.fn(async () => mockChainId),
       signTypedData: vi.fn(),
       sendTransaction: vi.fn(async () => {
         throw new Error('burn tx rejected');
@@ -621,7 +645,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -669,7 +693,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -713,7 +737,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_args: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -746,6 +770,7 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
     let sendCallIdx = 0;
     const walletClient = {
       chain: polygonAmoy, // ← dest を指す (= stale)
+      getChainId: vi.fn(async () => mockChainId),
       signTypedData: vi.fn(),
       sendTransaction: vi.fn(async (_args: Record<string, unknown>) => {
         const hashes: Hex[] = ['0xburn', '0xreceive'];
@@ -773,7 +798,7 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: baseSepolia.id, // ← source = base sepolia
       destChainId: polygonAmoy.id,
@@ -809,6 +834,7 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
     // walletClient.chain は source (baseSepolia) を指す = source switchChain 完了後の stale state。
     const walletClient = {
       chain: baseSepolia, // ← source を指す
+      getChainId: vi.fn(async () => mockChainId),
       signTypedData: vi.fn(async (_args: Record<string, unknown>) => '0xsig'),
       sendTransaction: vi.fn(
         async (_args: Record<string, unknown>) => '0xmint' as Hex,
@@ -829,7 +855,7 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: baseSepolia.id,
       destChainId: polygonAmoy.id,
@@ -911,7 +937,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -986,7 +1012,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -1066,7 +1092,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -1121,7 +1147,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -1164,7 +1190,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -1211,7 +1237,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -1259,7 +1285,7 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -1296,7 +1322,7 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -1341,7 +1367,7 @@ describe('lib/crossChain/execute: burn hash を receipt 待ち前に永続化 (�
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -1396,7 +1422,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
-        switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+        switchChainAsync: trackSwitch(),
         account: ACCOUNT,
         sourceChainId: 84532,
         destChainId: 80002,
@@ -1440,7 +1466,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
-      switchChainAsync: vi.fn(async (_a: { chainId: number }) => undefined),
+      switchChainAsync: trackSwitch(),
       account: ACCOUNT,
       sourceChainId: 84532,
       destChainId: 80002,
@@ -1465,5 +1491,64 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
     expect(result.mintTxHash).toBe('0xmint_retry');
+  });
+});
+
+// 2026-05-27 (testnet 実機): Base Sepolia 受取 → OP Sepolia 支払元の CCTP で
+// approve が "current chain of the wallet (84532) does not match target (11155420)"
+// で abort。switchChainAsync は resolve したが injected provider の eth_chainId が
+// 新 chain を報告するまでに lag があり、viem writeContract の chain assert に間に
+// 合わなかったのが原因。ensureWalletChain は switch 後 live chainId が target に
+// 揃うまで bounded poll してこのレースを閉じる。
+describe('lib/crossChain/execute.ensureWalletChain (switch 後 chainId 確認 poll)', () => {
+  it('switch 直後は旧 chain でも poll で target に揃えば resolve する (race 解消)', async () => {
+    // getChainId: early-check=旧, poll1=旧 (まだ lag), poll2=target。
+    const seq = [84532, 84532, 11155420];
+    let idx = 0;
+    const walletClient = {
+      getChainId: vi.fn(async () => seq[Math.min(idx++, seq.length - 1)]),
+    };
+    const switchChainAsync = vi.fn(async (_a: { chainId: number }) => undefined);
+
+    vi.useFakeTimers();
+    try {
+      const p = ensureWalletChain(walletClient as never, switchChainAsync, 11155420);
+      await vi.advanceTimersByTimeAsync(150 * 3);
+      await expect(p).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(switchChainAsync).toHaveBeenCalledWith({ chainId: 11155420 });
+    // early-check 1 + poll 2 = 3 回 getChainId を見て揃ったところで止まる。
+    expect(walletClient.getChainId).toHaveBeenCalledTimes(3);
+  });
+
+  it('既に target chain なら switchChainAsync を呼ばず即 return (不要な popup 回避)', async () => {
+    const walletClient = { getChainId: vi.fn(async () => 11155420) };
+    const switchChainAsync = vi.fn(async (_a: { chainId: number }) => undefined);
+
+    await expect(
+      ensureWalletChain(walletClient as never, switchChainAsync, 11155420),
+    ).resolves.toBeUndefined();
+
+    expect(switchChainAsync).not.toHaveBeenCalled();
+    expect(walletClient.getChainId).toHaveBeenCalledTimes(1);
+  });
+
+  it('switch 後も target に揃わなければ bounded poll 後に明示 throw する', async () => {
+    // getChainId が永遠に旧 chain を返す = wallet が実際には switch していない。
+    const walletClient = { getChainId: vi.fn(async () => 84532) };
+    const switchChainAsync = vi.fn(async (_a: { chainId: number }) => undefined);
+
+    vi.useFakeTimers();
+    try {
+      const p = ensureWalletChain(walletClient as never, switchChainAsync, 11155420);
+      p.catch(() => {}); // unhandled rejection 抑制
+      await vi.advanceTimersByTimeAsync(150 * 25);
+      await expect(p).rejects.toThrow(/eth_chainId が一致しません/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

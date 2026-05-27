@@ -61,6 +61,13 @@ const jpycKairosDep: TokenDeployment = {
   paymasterMode: 'sponsorship',
 };
 
+// 既に Pimlico SimpleAccount (0xe6Cae8…) に委任済みの EOA を表す eth_getCode 戻り値。
+// pristine ('0x') は injected wallet で初回ガスレス委任を張れず throw するように
+// なったため、SimpleAccount build 経路 (paymaster 設定等) を検証する test は「委任済み」
+// code を使う。idle 系 test は queryFn が走らず getCode を読まないので影響しない。
+const PIMLICO_SIMPLE7702_ADDR = '0xe6Cae83BdE06E4c305530e199D7217f42808555B';
+const DELEGATED_PIMLICO_CODE = `0xef0100${PIMLICO_SIMPLE7702_ADDR.slice(2).toLowerCase()}`;
+
 function makeWrapper() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -103,7 +110,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       chainId: 1,
     });
     mockHook(useWalletClient, { data: { chain: { id: 1 } } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -118,7 +125,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: undefined });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -148,7 +155,7 @@ describe('useSmartAccount (smoke / boundary)', () => {
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep, false), {
       wrapper: makeWrapper(),
@@ -175,7 +182,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -211,7 +218,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: kairos.id,
     });
     mockHook(useWalletClient, { data: { chain: kairos } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycKairosDep), {
       wrapper: makeWrapper(),
@@ -246,7 +253,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: kaia.id,
     });
     mockHook(useWalletClient, { data: { chain: kaia } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycKaiaDep), {
       wrapper: makeWrapper(),
@@ -263,7 +270,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: baseSepolia.id,
     });
     mockHook(useWalletClient, { data: { chain: baseSepolia } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(usdcDep), {
       wrapper: makeWrapper(),
@@ -286,7 +293,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result: jpyc } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -339,7 +346,7 @@ describe('useSmartAccount (queryFn の defense-in-depth throw)', () => {
       chainId: polygonAmoy.id,
     });
     mockHook(useWalletClient, { data: undefined });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(jpycDep), {
       wrapper: makeWrapper(),
@@ -359,7 +366,7 @@ describe('useSmartAccount (queryFn の defense-in-depth throw)', () => {
       chainId: polygonAmoy.id, // wallet on Polygon
     });
     mockHook(useWalletClient, { data: { chain: polygonAmoy } });
-    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
     const { result } = renderHook(() => useSmartAccount(usdcDep), {
       // usdcDep は Base Sepolia (84532)、wallet は Polygon Amoy (80002)
@@ -395,6 +402,52 @@ describe('useSmartAccount (7702 delegation 分岐)', () => {
     expect(to7702SimpleSmartAccount).toHaveBeenCalledOnce();
     expect(createSmartAccountClient).toHaveBeenCalledOnce();
     expect(result.current.data!.paymasterMode).toBe('sponsorship');
+  });
+
+  it('pristine EOA (未委任 0x): errorPristineNoBootstrap を throw、SimpleAccount は構築しない', async () => {
+    // injected wallet では初回 7702 委任を gasless に張れない (viem signAuthorization
+    // が JSON-RPC 非対応) → doomed な SimpleAccount を作らず fail-fast し、UI を
+    // standard mode 案内に倒す。
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: baseSepolia.id,
+    });
+    mockHook(useWalletClient, { data: { chain: baseSepolia } });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+
+    const { result } = renderHook(() => useSmartAccount(usdcDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.error?.name).toBe('IncompatibleSmartAccountError');
+    expect((result.current.error as { i18nKey?: string })?.i18nKey).toBe(
+      'errorPristineNoBootstrap',
+    );
+    // pristine は delegate 不在なので delegateAddress は null
+    expect(
+      (result.current.error as { delegateAddress?: unknown })?.delegateAddress,
+    ).toBeNull();
+    expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
+    expect(createSmartAccountClient).not.toHaveBeenCalled();
+  });
+
+  it('空コード (length<=2) も pristine 扱いで errorPristineNoBootstrap', async () => {
+    mockHook(useAccount, {
+      address: '0x1111111111111111111111111111111111111111',
+      chainId: polygonAmoy.id,
+    });
+    mockHook(useWalletClient, { data: { chain: polygonAmoy } });
+    mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+
+    const { result } = renderHook(() => useSmartAccount(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect((result.current.error as { i18nKey?: string })?.i18nKey).toBe(
+      'errorPristineNoBootstrap',
+    );
+    expect(to7702SimpleSmartAccount).not.toHaveBeenCalled();
   });
 
   it('Alchemy MAv2 委任済 + feature flag OFF (default): IncompatibleSmartAccountError', async () => {
@@ -473,7 +526,7 @@ describe('useSmartAccount (queryFn 実走行: ERC20 mode @ mainnet)', () => {
         chainId: baseChain.id,
       });
       mockHook(useWalletClient, { data: { chain: baseChain } });
-      mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue('0x') });
+      mockHook(usePublicClient, { getCode: vi.fn().mockResolvedValue(DELEGATED_PIMLICO_CODE) });
 
       const { result } = renderHook(() => hookFresh(usdcDepFresh), {
         wrapper: makeWrapper(),

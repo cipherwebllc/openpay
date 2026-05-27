@@ -351,6 +351,11 @@ export function TipForm({ params }: { params: TipParams }) {
         <SmartAccountFallbackBanner
           delegateAddress={saError.delegateAddress}
           nativeToken={nativeToken}
+          reason={
+            saError.i18nKey === 'errorPristineNoBootstrap'
+              ? 'pristine'
+              : 'incompatible'
+          }
           canFallbackToStandard={false}
         />
       )}
@@ -407,6 +412,10 @@ export function TipForm({ params }: { params: TipParams }) {
             feeReceiver={env.feeReceiver}
             displayDecimals={deployment.decimals}
             tokenAddress={deployment.address}
+            // tip は常にガスレスモードだが、直接送金がガスレスなのは smart account が
+            // 実際に構築済 (saData あり) の時のみ。pristine/未対応 fallback・init 失敗・
+            // 取得中は gasless 不可なので「ガス代要」表示にする。
+            directIsGasless={!!saData}
           />
         )}
       </section>

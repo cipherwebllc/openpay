@@ -30,6 +30,9 @@ describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)'
     // Kaia + MAv2 (HashPort 等) 専用、Polygon フォールバック案内
     // (memory:project_kaia_evaluation、mav2.ts の Kaia chainId 早期 throw 経路)
     'errorMav2KaiaPolygon',
+    // pristine EOA (未委任) は injected wallet で初回ガスレス委任不可
+    // (useSmartAccount が standard mode 案内に倒す)
+    'errorPristineNoBootstrap',
   ] as const;
   for (const ns of FORM_NAMESPACES) {
     for (const key of SA_KEYS) {
