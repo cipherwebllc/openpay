@@ -253,8 +253,6 @@
     "receiverLabel": "受取ウォレットアドレス",
     "addressInvalid": "アドレス形式が正しくありません",
     "tokenLabel": "通貨",
-    "tokenChainHintMulti": "{count} chain で受信 (L1 USDC ファンは cross-chain 経由)",
-    "tokenChainHintJpyc": "{count} chain で受信 (Polygon / Kaia)",
     "chainLabel": "受取チェーン ({symbol})",
     "crossChainHeading": "Cross-chain 受信 (USDC のみ)",
     "crossChainToggleLabel": "他チェーンからの tip を許可",

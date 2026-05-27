@@ -53,22 +53,10 @@ import type { GasMode, PayMode } from '@/lib/fee';
 import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
+import { normalizeAmountList, truncateAmount } from '@/lib/amount';
 import { triggerDownload } from '@/lib/download';
 
 type Mode = 'amount' | 'static';
-
-// 数値以外を除去し、小数桁を token decimals に切り詰める。
-// 入力時と token 切替時の両方で適用することで「amount の小数桁数 > decimals」
-// 状態を構造的に発生させない (parseUnits の silent round / EIP-681 builder の
-// throw を上流で排除)。
-function sanitizeAmount(raw: string, decimals: number): string {
-  const cleaned = raw.replace(/[^\d.]/g, '');
-  const dotIdx = cleaned.indexOf('.');
-  if (dotIdx === -1) return cleaned;
-  const fracDigits = cleaned.length - dotIdx - 1;
-  if (fracDigits <= decimals) return cleaned;
-  return cleaned.slice(0, dotIdx + 1 + decimals);
-}
 
 const FILENAME_FALLBACK = 'openpay';
 
@@ -284,7 +272,7 @@ export function QrGenerator() {
     // 範囲へ truncate。amount を超過状態のまま残すと EIP-681 section が disable 表示
     // され UX が壊れるため、入力値を新 token に合わせる。
     setAmount((current) =>
-      sanitizeAmount(current, defaultDeploymentForSymbol(tok).decimals),
+      truncateAmount(current, defaultDeploymentForSymbol(tok).decimals),
     );
   }
 
@@ -310,7 +298,7 @@ export function QrGenerator() {
       quickAmounts: {
         ...s.quickAmounts,
         [s.token]: s.quickAmounts[s.token].map((q, i) =>
-          i === idx ? sanitizeAmount(value, deployment.decimals) : q,
+          i === idx ? truncateAmount(value, deployment.decimals) : q,
         ),
       },
     }));
@@ -342,19 +330,10 @@ export function QrGenerator() {
   // 現在の token decimals に合わせて truncate してから表示・適用する。truncate 後に
   // 重複した値は除外 (例: 0.1234567890123 と 0.1234567890124 を保存 → USDC では
   // どちらも 0.123456 に潰れるので片方のみ残す)。
-  const activeQuickAmounts = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const q of tokenQuickAmounts) {
-      if (!DECIMAL_PATTERN.test(q) || Number(q) <= 0) continue;
-      const truncated = sanitizeAmount(q, deployment.decimals);
-      if (!DECIMAL_PATTERN.test(truncated) || Number(truncated) <= 0) continue;
-      if (seen.has(truncated)) continue;
-      seen.add(truncated);
-      out.push(truncated);
-    }
-    return out;
-  }, [tokenQuickAmounts, deployment.decimals]);
+  const activeQuickAmounts = useMemo(
+    () => normalizeAmountList(tokenQuickAmounts, deployment.decimals),
+    [tokenQuickAmounts, deployment.decimals],
+  );
 
   return (
     <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
@@ -411,7 +390,7 @@ export function QrGenerator() {
                       inputMode="decimal"
                       value={amount}
                       onChange={(e) =>
-                        setAmount(sanitizeAmount(e.target.value, deployment.decimals))
+                        setAmount(truncateAmount(e.target.value, deployment.decimals))
                       }
                       placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"

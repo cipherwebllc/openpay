@@ -213,6 +213,53 @@ describe('TipEmbedGenerator — チップ金額プリセット (ボタン編集 
     expect(urlText).not.toContain('preset=');
   });
 
+  it('USDC 高精度プリセットは 6 桁に丸め + 丸め後重複を dedup (lib/amount 結線)', async () => {
+    // lib/amount.normalizeAmountList の丸め+dedup が TipEmbedGenerator の
+    // preview / URL まで結線されていることを component レベルで検証。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'usdc',
+        chain: 'base',
+        receiver: VALID,
+        presets: {
+          jpyc: ['300', '1000', '3000'],
+          usdc: ['0.1234567890123', '0.1234567890124', '5'],
+        },
+      }),
+    );
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    // プレビュー: 高精度 2 件は 0.123456 に潰れて 1 個 + 5 USDC
+    expect(screen.getAllByText('0.123456 USDC')).toHaveLength(1);
+    expect(screen.getByText('5 USDC')).toBeInTheDocument();
+    // URL: 丸め後の値 (default と異なるので preset 出力)
+    await waitFor(() => expectInUrl(/preset=0\.123456%2C5/));
+  });
+
+  it('× で全プリセット削除 → 空 input が 1 行残り、preview は既定へ fallback', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    // 既定 JPYC 3 chip を × で全削除 (removePreset の [''] 分岐を実行)
+    for (let i = 0; i < 3; i++) {
+      const removeBtns = screen.getAllByRole('button', {
+        name: /^プリセット \d+ を削除/,
+      });
+      await user.click(removeBtns[0]);
+    }
+
+    const remaining = screen.getAllByPlaceholderText(
+      '例: 1000',
+    ) as HTMLInputElement[];
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].value).toBe('');
+    // preview は既定 (300/1000/3000) に fallback
+    expect(screen.getByText('300 JPYC')).toBeInTheDocument();
+  });
+
   it('プリセットは token ごと独立 (JPYC↔USDC で別リスト・連動しない)', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);

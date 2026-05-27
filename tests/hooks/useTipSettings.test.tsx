@@ -277,6 +277,57 @@ describe('useTipSettings', () => {
     ]);
   });
 
+  it('新 object schema: 不正 / 0 / 負 / 重複 entry を strict に除外', async () => {
+    // object 分岐も CSV 分岐と同じ strict 検証 (lenient stripping しない)。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        presets: {
+          jpyc: ['abc', '100', '100', '0', '-5', '2000yen', '200'],
+          usdc: ['7'],
+        },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets.jpyc).toEqual(['100', '200']);
+    expect(result.current.settings.presets.usdc).toEqual(['7']);
+  });
+
+  it('新 object schema: token 内で最大 6 件に truncate', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        presets: { jpyc: ['1', '2', '3', '4', '5', '6', '7', '8'], usdc: ['5'] },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets.jpyc).toEqual([
+      '1', '2', '3', '4', '5', '6',
+    ]);
+    expect(result.current.settings.presets.usdc).toEqual(['5']);
+  });
+
+  it('新 object schema: 非配列の token 値 (string/number) は既定に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        presets: { jpyc: '100,200', usdc: 42 },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    // sanitizeTipPresetList は非配列 → [] → token 別既定へ fallback
+    expect(result.current.settings.presets).toEqual({
+      jpyc: ['300', '1000', '3000'],
+      usdc: ['5', '20', '50'],
+    });
+  });
+
   it('hydrate 完了前に localStorage を上書きしない', () => {
     window.localStorage.setItem(
       KEY,

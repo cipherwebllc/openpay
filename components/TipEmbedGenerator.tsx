@@ -25,10 +25,10 @@ import {
 } from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress } from '@/lib/format';
+import { normalizeAmountList, truncateAmount } from '@/lib/amount';
 import {
   buildTipUrl,
   COLOR_PATTERN,
-  DECIMAL_PATTERN,
   DEFAULT_TIP_PRESETS,
   TIP_PRESET_MAX,
   type TipParams,
@@ -48,17 +48,6 @@ const RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter((slug) =>
 );
 
 type PublishMode = 'share' | 'embed';
-
-// 入力値を現 token の decimals に丸める (QR の同名 helper と同等)。digits/dot 以外を
-// 除去し、小数桁が decimals を超えたら切り詰める。
-function sanitizeAmount(raw: string, decimals: number): string {
-  const cleaned = raw.replace(/[^\d.]/g, '');
-  const dotIdx = cleaned.indexOf('.');
-  if (dotIdx === -1) return cleaned;
-  const fracDigits = cleaned.length - dotIdx - 1;
-  if (fracDigits <= decimals) return cleaned;
-  return cleaned.slice(0, dotIdx + 1 + decimals);
-}
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -86,20 +75,13 @@ export function TipEmbedGenerator() {
   // 現在 token のプリセットリスト (token ごと独立)。エディタ・適用ともこのリストだけ操作。
   const tokenPresets = settings.presets[settings.token];
 
-  // 表示・URL 生成に使う有効プリセット: decimals に truncate → dedup → 0/invalid 除外。
-  // 空 (全削除 or 全 invalid) なら token 別 default に fallback。
+  // 表示・URL 生成に使う有効プリセット: decimals に丸め → 0/不正/重複を除外。
+  // 空 (全削除 or 全不正) なら token 別 default に fallback。
   const activePresets = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const p of tokenPresets) {
-      if (!DECIMAL_PATTERN.test(p) || Number(p) <= 0) continue;
-      const truncated = sanitizeAmount(p, deployment.decimals);
-      if (!DECIMAL_PATTERN.test(truncated) || Number(truncated) <= 0) continue;
-      if (seen.has(truncated)) continue;
-      seen.add(truncated);
-      out.push(truncated);
-    }
-    return out.length > 0 ? out : DEFAULT_TIP_PRESETS[settings.token];
+    const normalized = normalizeAmountList(tokenPresets, deployment.decimals);
+    return normalized.length > 0
+      ? normalized
+      : DEFAULT_TIP_PRESETS[settings.token];
   }, [tokenPresets, deployment.decimals, settings.token]);
 
   // URL の preset は default と値が異なる時のみ送る (default ちょうどなら省略し URL を簡潔に)。
@@ -182,7 +164,7 @@ export function TipEmbedGenerator() {
       presets: {
         ...s.presets,
         [s.token]: s.presets[s.token].map((p, i) =>
-          i === idx ? sanitizeAmount(value, deployment.decimals) : p,
+          i === idx ? truncateAmount(value, deployment.decimals) : p,
         ),
       },
     }));

@@ -253,8 +253,6 @@
     "receiverLabel": "Receiving wallet address",
     "addressInvalid": "Invalid address format",
     "tokenLabel": "Token",
-    "tokenChainHintMulti": "{count} chains for receiving (L1 USDC fans tip via cross-chain)",
-    "tokenChainHintJpyc": "{count} chains for receiving (Polygon / Kaia)",
     "chainLabel": "Receiving chain ({symbol})",
     "crossChainHeading": "Cross-chain receive (USDC only)",
     "crossChainToggleLabel": "Allow cross-chain tips",
