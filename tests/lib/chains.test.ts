@@ -299,11 +299,16 @@ describe('chainLogoPathForId', () => {
     ['kaia', kairos.id],
     ['ethereum', sepolia.id],
     ['avalanche', avalancheFuji.id],
-    // buyer-only chain (Unichain) も解決可能でないと CrossChainSourceChooser で
+    // buyer-only chain も解決可能でないと WalletBalances / CrossChainSourceChooser で
     // logo が欠落する (= 既存 chainNameForId と同じ覆域でなければならない)。
+    // 2026-05-28: worldchain / sonic / sei / hyperevm の logo SVG 収録で全 12 chain 揃い。
     ['unichain', unichainSepolia.id],
+    ['worldchain', 4801], // worldchainSepolia
+    ['sonic', 57054], // sonicBlazeTestnet
+    ['sei', 1328], // seiTestnet
+    ['hyperevm', 998], // HyperEVM testnet (viem/chains 未収録、lib/chains.ts defineChain)
   ] as const)(
-    'supportedChains の 8 chain (%s) すべてに /chains/<slug>.svg を返す',
+    'supportedChains の 12 chain (%s) すべてに /chains/<slug>.svg を返す',
     (slug, chainId) => {
       expect(chainLogoPathForId(chainId)).toBe(`/chains/${slug}.svg`);
     },

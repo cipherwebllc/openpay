@@ -2,10 +2,11 @@
 
 // /scan ページの client root component。
 //
-// 構成:
-//   1. ConnectionStatus (上部) — wallet 未接続/接続済を視認させる
-//   2. PwaInstallHint — standalone でなければ install 手順
-//   3. QrScannerSurface — カメラ起動 + decode + URL 手入力 fallback
+// 構成 (QR スキャナを最上部 = above the fold に保つため、ウォレットの状態はスキャナの
+// 下に置く。接続済みなら保有残高が増えて縦に伸びても スキャナはスクロール不要):
+//   1. PwaInstallHint — standalone でなければ install 手順 (条件付き)
+//   2. QrScannerSurface — カメラ起動 + decode + URL 手入力 fallback
+//   3. ConnectionStatus (+ WalletBalances) — wallet 未接続/接続済 + JPYC/USDC 保有残高
 //   4. ScanResultBanner — 「外部 URL」「未知 QR」「EIP-681」branch の警告 UI
 //
 // decode 成功 (kind: pay/tip/checkout) は即 router.push、success 後の戻る動線は
@@ -18,6 +19,7 @@ import { useAccount, useDisconnect } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { PwaInstallHint } from './PwaInstallHint';
 import { QrScannerSurface } from './QrScannerSurface';
+import { WalletBalances } from './WalletBalances';
 import { parseScannedUrl, type ScanAction } from '@/lib/scan/parseScannedUrl';
 import { useOrigin } from '@/hooks/useOrigin';
 import { shortAddress } from '@/lib/format';
@@ -68,40 +70,6 @@ export function ScanShell() {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-700">
-          {t('connectionTitle')}
-        </h2>
-        {isConnected && address ? (
-          // emerald badge = ready 状態の強調。隣に小さな切断 btn を置き、別 wallet
-          // への切替動線を確保する (切断→未接続 branch へ自動切替→ ConnectButton 再描画)。
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-              {shortAddress(address)}
-              {chain && (
-                <span className="text-emerald-600/70">/ {chain.name}</span>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={() => disconnect()}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            >
-              {tConnect('disconnect')}
-            </button>
-            <span className="text-xs text-slate-500">
-              {t('connectionReadyHint')}
-            </span>
-          </div>
-        ) : (
-          <div className="mt-2 space-y-2">
-            <p className="text-xs text-slate-500">{t('connectionPreHint')}</p>
-            <ConnectButton />
-          </div>
-        )}
-      </section>
-
       <PwaInstallHint />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -112,6 +80,45 @@ export function ScanShell() {
         <div className="mt-3">
           <QrScannerSurface onScanned={handleScanned} />
         </div>
+      </section>
+
+      {/* ウォレットの状態はスキャナの下に置く。接続済みなら保有残高 (JPYC/USDC を
+          チェーン別に) も表示する — リストが伸びてもスキャナは上に固定されたまま。 */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-slate-700">
+          {t('connectionTitle')}
+        </h2>
+        {isConnected && address ? (
+          // emerald badge = ready 状態の強調。隣に小さな切断 btn を置き、別 wallet
+          // への切替動線を確保する (切断→未接続 branch へ自動切替→ ConnectButton 再描画)。
+          <>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                {shortAddress(address)}
+                {chain && (
+                  <span className="text-emerald-600/70">/ {chain.name}</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => disconnect()}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              >
+                {tConnect('disconnect')}
+              </button>
+              <span className="text-xs text-slate-500">
+                {t('connectionReadyHint')}
+              </span>
+            </div>
+            <WalletBalances />
+          </>
+        ) : (
+          <div className="mt-2 space-y-2">
+            <p className="text-xs text-slate-500">{t('connectionPreHint')}</p>
+            <ConnectButton />
+          </div>
+        )}
       </section>
 
       {lastResult && (

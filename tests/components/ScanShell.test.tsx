@@ -18,6 +18,13 @@ vi.mock('wagmi', () => ({
 }));
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 
+// WalletBalances (接続済み branch で描画) は useWalletTokenBalances → useQuery を
+// 呼ぶが、本 test は QueryClientProvider で wrap しない。残高表示は WalletBalances 専用
+// test で検証するため、ここでは hook を境界 mock して描画を no-op にする。
+vi.mock('@/hooks/useWalletTokenBalances', () => ({
+  useWalletTokenBalances: () => ({ data: undefined, isLoading: false }),
+}));
+
 // useOrigin は jsdom の window.location.origin (= https://test.local) を実 hook
 // で読む経路と意味的に等価な値を default で返す mock を提供。test ごとに値を
 // 切替えたい (pre-hydrate race の '' 再現) ため variable 経由 mock を採用 —

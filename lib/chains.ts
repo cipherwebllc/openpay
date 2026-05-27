@@ -252,11 +252,9 @@ export function slugForChain(chainId: number): ChainSlug | undefined {
 }
 
 // public/chains/ に commit 済の logo が存在する slug の set。
-// phase 4b-3 で追加した buyer-only chain (worldchain / sonic / sei / hyperevm) は
-// 公式 brand SVG を sourcing 中のため未収録 (CrossChainSourceChooser は logo 無し
-// = chain 名のみで描画する、機能には影響しない)。logo 収録時に本 set に追加する。
-// TODO(phase 4b-3 follow-up): 4 chain の公式 logo SVG を public/chains/ に追加し、
-// 本 set からも除外を解除する。
+// public/chains/{slug}.svg が存在する slug。slug = file 名と 1:1。
+// 2026-05-28: buyer-only の worldchain / sonic / sei / hyperevm の logo SVG を収録
+// (全 supportedChains の logo が揃った)。
 const SLUGS_WITH_LOGOS = new Set<string>([
   'base',
   'arbitrum',
@@ -266,6 +264,10 @@ const SLUGS_WITH_LOGOS = new Set<string>([
   'ethereum',
   'avalanche',
   'unichain',
+  'worldchain',
+  'sonic',
+  'sei',
+  'hyperevm',
 ]);
 
 /** chainId → public/chains/{slug}.svg path (merchant + buyer-only 両方解決)。
