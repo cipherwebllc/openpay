@@ -10,7 +10,7 @@ test.describe('レジ用クイック金額: token ごと独立 (JPYC/USDC 連動
   test('fresh: JPYC は 500/1000/1500/3000、USDC へ切替で 5/10/20/50 に変わる', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
 
     // JPYC default のクイックボタン (amount 入力上の chip)
@@ -47,7 +47,7 @@ test.describe('レジ用クイック金額: token ごと独立 (JPYC/USDC 連動
         }),
       ],
     );
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
 
     // JPYC は保存したカスタム値
@@ -79,7 +79,7 @@ test.describe('レジ用クイック金額: token ごと独立 (JPYC/USDC 連動
         }),
       ],
     );
-    await page.goto('/ja');
+    await page.goto('/ja/create');
 
     // USDC 表示で $500/$1000 等の過大ボタンが出ない (本バグの returning user 版)
     await expect(page.getByRole('button', { name: /^5 USDC/ })).toBeVisible();

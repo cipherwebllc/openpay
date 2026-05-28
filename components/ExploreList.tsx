@@ -11,20 +11,14 @@ import {
 } from '@/lib/explore';
 import { ExploreEntryCard } from './ExploreEntry';
 
-const CATEGORY_I18N_KEY: Record<ExploreCategory, string> = {
-  exchange: 'categoryExchange',
-  dex: 'categoryDex',
-  dapp: 'categoryDapp',
-  bridge: 'categoryBridge',
-  resource: 'categoryResource',
-};
-
-const CATEGORY_DESCRIPTION_KEY: Record<ExploreCategory, string> = {
-  exchange: 'categoryExchangeDescription',
-  dex: 'categoryDexDescription',
-  dapp: 'categoryDappDescription',
-  bridge: 'categoryBridgeDescription',
-  resource: 'categoryResourceDescription',
+// 各 category の i18n key (Explore namespace 内、title + description)。
+// 並列 2 マップを 1 つに集約。
+const CATEGORY_I18N: Record<ExploreCategory, { title: string; description: string }> = {
+  exchange: { title: 'categoryExchange', description: 'categoryExchangeDescription' },
+  dex: { title: 'categoryDex', description: 'categoryDexDescription' },
+  dapp: { title: 'categoryDapp', description: 'categoryDappDescription' },
+  bridge: { title: 'categoryBridge', description: 'categoryBridgeDescription' },
+  resource: { title: 'categoryResource', description: 'categoryResourceDescription' },
 };
 
 export function ExploreList() {
@@ -36,6 +30,7 @@ export function ExploreList() {
       {EXPLORE_CATEGORY_ORDER.map((cat) => {
         const entries = grouped.get(cat) ?? [];
         if (entries.length === 0) return null;
+        const meta = CATEGORY_I18N[cat];
         return (
           <section
             key={cat}
@@ -46,11 +41,9 @@ export function ExploreList() {
               id={`explore-cat-${cat}`}
               className="text-lg font-bold text-slate-900 sm:text-xl"
             >
-              {t(CATEGORY_I18N_KEY[cat])}
+              {t(meta.title)}
             </h2>
-            <p className="mt-1 text-xs text-slate-500">
-              {t(CATEGORY_DESCRIPTION_KEY[cat])}
-            </p>
+            <p className="mt-1 text-xs text-slate-500">{t(meta.description)}</p>
             <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {entries.map((entry) => (
                 <li key={entry.id}>

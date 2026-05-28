@@ -11,13 +11,14 @@ import QRCode from 'qrcode';
 const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
 test.describe('/scan: ページ構造', () => {
-  test('/ja/scan が 200 + 主要 heading + ConnectButton (未接続) 描画', async ({
+  test('/ja/scan が 200 + 主要 heading + connectionPreHint (未接続) 描画', async ({
     page,
   }) => {
     const response = await page.goto('/ja/scan');
     expect(response?.status()).toBe(200);
+    // ページ heading は AppShell 採用により h2 (logo h1 と区別)
     await expect(
-      page.getByRole('heading', { name: 'スキャンして支払う' }),
+      page.getByRole('heading', { name: 'スキャンして支払う', level: 2 }),
     ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'ウォレットの状態' }),
@@ -25,9 +26,9 @@ test.describe('/scan: ページ構造', () => {
     await expect(
       page.getByRole('heading', { name: 'QR を読み取る' }),
     ).toBeVisible();
-    // 未接続時は connectionPreHint が出る (connect button は wagmi 環境依存だが
-    // pre-hint テキストは locale 文字列なので決定論的)
-    await expect(page.getByText(/あらかじめウォレットを接続/)).toBeVisible();
+    // 未接続時の connectionPreHint は「右上の接続ボタンから」案内に変更済
+    // (Connect ボタン本体は AppHeader 右上の WalletBadge に集約)
+    await expect(page.getByText(/右上の「接続」ボタンから/)).toBeVisible();
   });
 
   test('/en/scan も 200 + 英語 UI に切替', async ({ page }) => {
@@ -138,19 +139,19 @@ test.describe('/scan: URL 手入力 fallback', () => {
   });
 });
 
-test.describe('/scan: home からの導線', () => {
-  test('home の "📷 レジ前で素早く決済" CTA をクリック → /ja/scan へ遷移', async ({
+test.describe('/scan: home (LP) からの導線', () => {
+  test('LP の Hero "📱 支払う (スキャン)" CTA をクリック → /ja/scan へ遷移', async ({
     page,
   }) => {
     await page.goto('/ja');
-    const cta = page.getByRole('link', {
-      name: /レジ前で素早く決済/,
-    });
+    // 旧 demand-gating banner ("レジ前で素早く決済") は Phase 1 で LP の
+    // 2 大 CTA に置換された。新 CTA を辿る。
+    const cta = page.getByRole('link', { name: /📱 支払う/ });
     await expect(cta).toBeVisible();
     await cta.click();
     await expect(page).toHaveURL(/\/ja\/scan/);
     await expect(
-      page.getByRole('heading', { name: 'スキャンして支払う' }),
+      page.getByRole('heading', { name: 'スキャンして支払う', level: 2 }),
     ).toBeVisible();
   });
 });
@@ -434,13 +435,16 @@ test.describe('/scan: wallet 接続持続 (Phase 1 hypothesis)', () => {
 
     await page.goto('/ja/scan');
 
-    // wagmi の injected connector は target 未指定で button 名 "Injected" を露出する
-    // (isMetaMask=true でも connector 名は変わらない仕様)。
-    const connectButton = page.getByRole('button', { name: 'Injected' });
-    await connectButton.click();
+    // Phase 1 以降: connect ボタンは ScanShell 内ではなく AppHeader 右上の
+    // WalletBadge dropdown に集約。summary "接続" click → details open →
+    // wagmi の injected connector の menuitem 名 "Injected" を click する。
+    const header = page.locator('header');
+    await header.getByText('接続', { exact: true }).click();
+    await header.getByRole('menuitem', { name: 'Injected' }).click();
 
-    // 接続成功で短縮アドレスが表示される (shortAddress = 0x1234…5678)
-    await expect(page.getByText(/0x1234…5678/i)).toBeVisible({
+    // 接続成功で短縮アドレスが WalletBadge summary に表示される。
+    // ScanShell 内の status badge にも同 address が出るので、header 内に scope。
+    await expect(header.getByText(/0x1234…5678/i)).toBeVisible({
       timeout: 5_000,
     });
 

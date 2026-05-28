@@ -1,7 +1,7 @@
 // 全 page 共通の footer。app/[locale]/layout.tsx から 1 度だけ render される。
 // 役割は (1) legal page (/terms /privacy /disclaimer) への導線、(2) 事業者表記
-// + copyright、(3) Web3 技術スタックの soft 表示 (+ <details> 展開で ERC-4337
-// 等の技術ラベル開示)。
+// + copyright、(3) 技術スタックの soft 表示 (一般向けは「ステーブルコイン決済技術」、
+// <details> 展開で ERC-4337 等の技術ラベル開示)。
 //
 // QR ポスター印刷時は不要なので `print:hidden` で全体を非表示にする。
 

@@ -2,7 +2,7 @@
 
 // 「ポータル」系ページ (LP /, /create, /scan, /history, /explore) の共通レイアウト。
 // 上に AppHeader (logo + TopNav + WalletBadge) を sticky で置き、下に BottomNav
-// (md 未満のみ fixed) を置く。main は max-w-5xl と pb-20 で BottomNav と被らない。
+// (md 未満のみ fixed) を置く。main は max-w-5xl + pb-24 で mobile BottomNav と被らない。
 //
 // AppShell を採用しないページ (pay/checkout/tip/[address]/legal/experimental) は
 // 既存どおり個別 header を保つ — transactional leaf を focus 維持。

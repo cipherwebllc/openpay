@@ -7,16 +7,20 @@
 
 import Link from 'next/link';
 import NextImage from 'next/image';
-import { useLocale, useTranslations } from 'next-intl';
+import { useLocale } from 'next-intl';
 import { LocaleSwitcher } from './LocaleSwitcher';
 import { TopNav } from './TopNav';
 import { WalletBadge } from './WalletBadge';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 
+// ブランド名はロケール非依存 (alt / aria-label の logo a11y 名)。i18n 経由で
+// 別 namespace の "title" key を借りる必要は無く、ここで literal を保持する方が
+// 結合度が低い。
+const BRAND_NAME = 'OpenPay';
+
 export function AppHeader() {
   const locale = useLocale() as Locale;
-  const t = useTranslations('Create');
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur print:hidden">
@@ -25,12 +29,12 @@ export function AppHeader() {
           <Link
             href={`/${locale}`}
             prefetch={false}
-            aria-label={t('title')}
+            aria-label={BRAND_NAME}
             className="block"
           >
             <NextImage
               src="/logo.svg"
-              alt={t('title')}
+              alt={BRAND_NAME}
               width={205}
               height={48}
               priority

@@ -10,23 +10,35 @@ import { TrendingUp } from 'lucide-react';
 import { useMarketRates } from '@/hooks/useMarketRates';
 
 function formatYen(n: number): string {
-  // 整数部に桁区切り + 小数 2 桁 (例: 1543.21 → "1,543.21")
-  const intPart = Math.floor(n).toLocaleString('en-US');
-  const fracPart = (n - Math.floor(n)).toFixed(2).slice(2);
-  return `${intPart}.${fracPart}`;
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
-function TokenChip({ slug, label }: { slug: 'usdc' | 'jpyc'; label: string }) {
+function TokenChip({
+  slug,
+  label,
+  dimmed,
+  textClass,
+}: {
+  slug: 'usdc' | 'jpyc';
+  label: string;
+  /** error / N/A 時に icon を薄く */
+  dimmed?: boolean;
+  /** 文字色 (default: slate-700) */
+  textClass?: string;
+}) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className={`inline-flex items-center gap-1.5 ${textClass ?? 'text-slate-700'}`}>
       <NextImage
         src={`/tokens/${slug}.svg`}
         alt=""
         width={18}
         height={18}
-        className="h-4 w-4 flex-shrink-0"
+        className={`h-4 w-4 flex-shrink-0 ${dimmed ? 'opacity-50' : ''}`}
       />
-      <span className="text-slate-700">{label}</span>
+      <span>{label}</span>
     </span>
   );
 }
@@ -34,6 +46,7 @@ function TokenChip({ slug, label }: { slug: 'usdc' | 'jpyc'; label: string }) {
 export function MarketRates() {
   const t = useTranslations('Market');
   const { data, isLoading, isError } = useMarketRates();
+  const unavailable = isError || !data;
 
   return (
     <section
@@ -47,30 +60,24 @@ export function MarketRates() {
         </span>
         {isLoading ? (
           <span className="text-slate-500">{t('loading')}</span>
-        ) : isError || !data ? (
-          <>
-            <span className="inline-flex items-center gap-1.5 text-amber-700">
-              <NextImage
-                src="/tokens/usdc.svg"
-                alt=""
-                width={18}
-                height={18}
-                className="h-4 w-4 opacity-50"
-              />
-              {t('unavailable')}
-            </span>
-            <TokenChip slug="jpyc" label={t('jpycPeg')} />
-          </>
         ) : (
           <>
             <TokenChip
               slug="usdc"
-              label={t('usdcRate', { rate: formatYen(data.usdcJpy) })}
+              label={
+                unavailable
+                  ? t('unavailable')
+                  : t('usdcRate', { rate: formatYen(data.usdcJpy) })
+              }
+              dimmed={unavailable}
+              textClass={unavailable ? 'text-amber-700' : undefined}
             />
             <TokenChip slug="jpyc" label={t('jpycPeg')} />
-            <span className="ml-auto text-[10px] text-slate-400">
-              {t('referenceNote')}
-            </span>
+            {!unavailable && (
+              <span className="ml-auto text-[10px] text-slate-400">
+                {t('referenceNote')}
+              </span>
+            )}
           </>
         )}
       </div>

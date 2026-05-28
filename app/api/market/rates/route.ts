@@ -11,6 +11,11 @@
 // 5xx は upstream 不調、502 = 上流が 200 でも shape 不正のときに返す。
 // fetch 自体が throw した場合 (network / DNS 等) は Next が 500 を返すので
 // client (useMarketRates) は isError で graceful fallback する。
+//
+// 観測: 502 path はすべて logger.warn で event "market.rates.upstream_error" を
+// 発行。Sentry alert rule で event filter すれば CoinGecko の outage を検知できる。
+
+import { logger } from '@/lib/logger';
 
 export const revalidate = 300;
 
@@ -24,6 +29,10 @@ export async function GET(): Promise<Response> {
   });
 
   if (!res.ok) {
+    logger.warn('market.rates.upstream_error', {
+      reason: 'non-ok',
+      status: res.status,
+    });
     return Response.json(
       { error: 'upstream', status: res.status },
       { status: 502 },
@@ -33,6 +42,10 @@ export async function GET(): Promise<Response> {
   const data = (await res.json()) as { 'usd-coin'?: { jpy?: unknown } };
   const usdcJpy = data['usd-coin']?.jpy;
   if (typeof usdcJpy !== 'number' || !Number.isFinite(usdcJpy) || usdcJpy <= 0) {
+    logger.warn('market.rates.upstream_error', {
+      reason: 'invalid-shape',
+      jpyType: typeof usdcJpy,
+    });
     return Response.json({ error: 'invalid-shape' }, { status: 502 });
   }
 

@@ -8,11 +8,12 @@ import { test, expect } from '@playwright/test';
 test.describe('/history (browser-level smoke)', () => {
   test('ja: 空 LocalStorage で empty state が表示される', async ({ page }) => {
     await page.goto('/ja/history');
-    // タイトル
+    // ページタイトルは h2 (AppShell の logo h1 + NonCustodialNotice の h2 と
+    // 区別するため exact: true)
     await expect(
-      page.getByRole('heading', { name: '取引履歴', level: 1 }),
+      page.getByRole('heading', { name: '取引履歴', level: 2, exact: true }),
     ).toBeVisible();
-    // ノンカストディ宣言 (full variant)
+    // NonCustodialNotice の h2
     await expect(
       page.getByRole('heading', { name: '取引履歴について', level: 2 }),
     ).toBeVisible();
@@ -28,7 +29,11 @@ test.describe('/history (browser-level smoke)', () => {
   test('en: 英語 landing が hydrate される', async ({ page }) => {
     await page.goto('/en/history');
     await expect(
-      page.getByRole('heading', { name: 'Transaction history', level: 1 }),
+      page.getByRole('heading', {
+        name: 'Transaction history',
+        level: 2,
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'About transaction history', level: 2 }),
@@ -103,17 +108,30 @@ test.describe('/history (browser-level smoke)', () => {
     ).toBeEnabled();
   });
 
-  test('back link は home (/) を指す', async ({ page }) => {
+  test('AppShell ロゴ click で home (/ja) へ戻れる (旧 back link の代替)', async ({
+    page,
+  }) => {
     await page.goto('/ja/history');
-    const back = page.getByRole('link', { name: '← OpenPay' });
-    await expect(back).toHaveAttribute('href', '/');
+    // AppHeader 内のロゴ link を scope (HistoryEmptyState の "OpenPay →" CTA や
+    // SiteFooter の X link との strict mode 衝突を回避)
+    const header = page.locator('header');
+    const logoLink = header.getByRole('link', { name: 'OpenPay', exact: true });
+    await expect(logoLink).toHaveAttribute('href', '/ja');
   });
 
-  test('SiteFooter から /history への nav link がある', async ({ page }) => {
+  test('AppShell BottomNav / TopNav から /history への nav link がある (旧 SiteFooter link の置換)', async ({
+    page,
+  }) => {
     await page.goto('/ja');
-    await expect(
-      page.getByRole('contentinfo').getByRole('link', { name: '取引履歴' }),
-    ).toHaveAttribute('href', '/history');
+    // viewport 別: desktop は TopNav (md:flex / aria-label=primary navigation)、
+    // mobile は BottomNav (md:hidden / aria-label=bottom navigation) が visible に
+    // なる。両方の nav に同じ「履歴」 link が存在するため、role を nav 一般に広げて
+    // .first() で visible な方を取る。href は両 nav で同一 (/ja/history)。
+    const link = page
+      .getByRole('navigation')
+      .getByRole('link', { name: '履歴' })
+      .first();
+    await expect(link).toHaveAttribute('href', '/ja/history');
   });
 
   test('/pay (bare, query 空) → PayEmptyLanding に「履歴を見る」link', async ({

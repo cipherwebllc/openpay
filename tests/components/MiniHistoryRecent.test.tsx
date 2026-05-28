@@ -148,3 +148,130 @@ describe('MiniHistoryRecent', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('MiniHistoryRecent: status 別ドット色 + a11y label', () => {
+  it('success entry → 緑 (bg-emerald-500) + aria-label "成功"', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [entry({ id: 's1', status: 'success' })],
+      hydrated: true,
+    });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container.querySelector('.bg-emerald-500')).not.toBeNull();
+    expect(screen.getByLabelText('成功')).toBeInTheDocument();
+  });
+
+  it('reverted entry → 琥珀 (bg-amber-500) + aria-label "revert"', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [entry({ id: 'r1', status: 'reverted' })],
+      hydrated: true,
+    });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container.querySelector('.bg-amber-500')).not.toBeNull();
+    expect(screen.getByLabelText('revert')).toBeInTheDocument();
+  });
+
+  it('error entry → 赤 (bg-red-500) + aria-label "エラー"', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [entry({ id: 'e1', status: 'error' })],
+      hydrated: true,
+    });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container.querySelector('.bg-red-500')).not.toBeNull();
+    expect(screen.getByLabelText('エラー')).toBeInTheDocument();
+  });
+
+  it('混在 3 entries (success/reverted/error) → ドット 3 色すべて存在', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({ id: 's', status: 'success' }),
+        entry({ id: 'r', status: 'reverted' }),
+        entry({ id: 'e', status: 'error' }),
+      ],
+      hydrated: true,
+    });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container.querySelector('.bg-emerald-500')).not.toBeNull();
+    expect(container.querySelector('.bg-amber-500')).not.toBeNull();
+    expect(container.querySelector('.bg-red-500')).not.toBeNull();
+  });
+});
+
+describe('MiniHistoryRecent: chain 表示の境界', () => {
+  it('chainId が未対応 (testnet で未登録 chain) → chain 名は表記から省かれる', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({
+          id: 'unknown-chain',
+          chainId: 99999, // supportedChains に無い
+        }),
+      ],
+      hydrated: true,
+    });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    // " · ChainName" が出ない (chainName=undefined branch)
+    expect(container.textContent ?? '').not.toMatch(/ · [A-Z]/);
+  });
+
+  it('chainId 対応 → "datetime · chain名" 形式で chain 名が出る', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({
+          id: 'base-sepolia',
+          chainId: 84532,
+        }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    // testnet では Base Sepolia
+    expect(screen.getByText(/· Base Sepolia/)).toBeInTheDocument();
+  });
+});
+
+describe('MiniHistoryRecent: amount 整形の境界', () => {
+  it('小数を含む JPYC (1.234567...) → formatUnits の文字列をそのまま表示', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({
+          id: 'frac',
+          asset: 'jpyc',
+          merchantAmount: '1234567890000000000', // 1.23456789 JPYC
+        }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    expect(screen.getByText(/1\.23456789 JPYC/)).toBeInTheDocument();
+  });
+
+  it('巨大な金額 (10億 JPYC = 1e9 × 1e18 wei) → 精度欠落なし', () => {
+    // 1_000_000_000 JPYC = 1e9 * 1e18 wei = 1e27 wei (>2^53、Number 表現不可)。
+    // formatUnits は string 経由なので BigInt 精度を維持する。
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({
+          id: 'huge',
+          asset: 'jpyc',
+          merchantAmount: '1' + '0'.repeat(27), // 1e27
+        }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    expect(screen.getByText('1000000000 JPYC')).toBeInTheDocument();
+  });
+
+  it('数値でない merchantAmount (壊れた entry) → raw 文字列を fallback で出す', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({
+          id: 'broken',
+          merchantAmount: 'NaN-or-garbage',
+        }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    expect(screen.getByText('NaN-or-garbage')).toBeInTheDocument();
+  });
+});

@@ -103,4 +103,62 @@ describe('useMarketRates', () => {
       timeout: 5_000,
     });
   });
+
+  it('fetch が throw (network 切断 / DNS 失敗) → isError=true', async () => {
+    // fetch 自体が reject する経路 (offline / fetch failed) を verify
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    const { result } = renderHook(() => useMarketRates(), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), {
+      timeout: 5_000,
+    });
+    expect(result.current.data).toBeUndefined();
+  });
+
+  it('200 だが usdcJpy=NaN → isError=true (Number.isFinite ガード)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        // NaN は JSON.stringify で null になるが、明示的に "NaN" を返す server 経路想定
+        '{"usdcJpy": null, "updatedAt": "2026-01-01T00:00:00Z"}',
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const { result } = renderHook(() => useMarketRates(), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), {
+      timeout: 5_000,
+    });
+  });
+
+  it('200 だが usdcJpy=-1 (負値 sentinel) → isError=true', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ usdcJpy: -1, updatedAt: '2026-01-01T00:00:00Z' }),
+        { status: 200 },
+      ),
+    );
+    const { result } = renderHook(() => useMarketRates(), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), {
+      timeout: 5_000,
+    });
+  });
+
+  it('200 だが updatedAt が number (型不正) → isError=true', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ usdcJpy: 150, updatedAt: 1234567890 }),
+        { status: 200 },
+      ),
+    );
+    const { result } = renderHook(() => useMarketRates(), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), {
+      timeout: 5_000,
+    });
+  });
 });

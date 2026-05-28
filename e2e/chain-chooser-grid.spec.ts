@@ -30,7 +30,7 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
     page,
     viewport,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
 
     // USDC tab を選択 (default は JPYC)
     await page.getByRole('button', { name: 'USDC' }).click();
@@ -62,7 +62,7 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
     page,
     viewport,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await page
       .getByRole('button', { name: 'Tip widget (クリエイター)' })
       .click();

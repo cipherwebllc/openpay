@@ -1,7 +1,11 @@
 # Supply Chain Risks (npm audit accepted residuals)
 
-**Updated**: 2026-05-24
-**Last `npm audit --omit=dev` snapshot**: 29 vulnerabilities (13 low, 16 moderate, **0 high/critical**)
+**Updated**: 2026-05-28
+**Last `npm audit --omit=dev` snapshot**: 32 vulnerabilities (13 low, 19 moderate, **0 high/critical**)
+
+2026-05-28 確認: 受容済 advisory のみ (`scripts/audit-gate.mjs` exit 0)。
+2026-05-24 比 +3 MOD は同 root (postcss / uuid) の追加 transitive 経路で、
+新規 CVE root は無し。CI `audit-gate` は引き続き pass。
 
 ## 解消済 (production deploy で対応済)
 

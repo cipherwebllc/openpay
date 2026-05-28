@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
+import { FEE_BPS_GASLESS, FEE_BPS_STANDARD } from '@/lib/fee';
 
 const ONRAMP_KEYS = [
   'onrampCta',
@@ -260,6 +261,108 @@ describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
       (k) => k in (en.Create.offramp as Record<string, unknown>),
     );
     expect(jaKeys.sort()).toEqual(enKeys.sort());
+  });
+});
+
+describe('i18n: 手数料文言と FEE_BPS_* 定数の drift fence', () => {
+  // 真の source of truth = lib/fee.ts の FEE_BPS_STANDARD / FEE_BPS_GASLESS。
+  // i18n に "0.5%" "1.0%" の文字列が複数 namespace × ja/en で散在しており、定数が
+  // 変わったら test を落として全箇所を同期更新するよう強制する。
+  //
+  // FEE_BPS_STANDARD = 50n → 0.5%、FEE_BPS_GASLESS = 100n → 1.0% (現状)。
+  // 100 BPS = 1%、10 BPS = 0.1% なので pct = Number(bps) / 100、表示は toFixed(1)。
+
+  function bpsToPctString(bps: bigint): string {
+    return `${(Number(bps) / 100).toFixed(1)}%`;
+  }
+
+  const STANDARD_PCT = bpsToPctString(FEE_BPS_STANDARD);
+  const GASLESS_PCT = bpsToPctString(FEE_BPS_GASLESS);
+
+  // ドット区切り path で nested key にアクセス (例: "QrGenerator.advancedSummary.standard")
+  function getByPath(obj: unknown, path: string): unknown {
+    return path.split('.').reduce<unknown>((acc, k) => {
+      if (acc && typeof acc === 'object') {
+        return (acc as Record<string, unknown>)[k];
+      }
+      return undefined;
+    }, obj);
+  }
+
+  // STANDARD_PCT (0.5%) を含むべき key 一覧。
+  // Landing.benefitsFeeFocal は equality (focal text = "0.5%" だけ)、その他は contains。
+  const STANDARD_PATHS = [
+    'Landing.benefitsFeeBody',
+    'QrGenerator.payModeStandardDesc',
+    'QrGenerator.standardHint',
+    'QrGenerator.feeReceiverHintStandard',
+    'QrGenerator.advancedSummary.standard',
+    'QrGenerator.eip681FeeBypassTitle',
+    'PaymentForm.standardModeBody',
+    'PaymentForm.errorPristineNoBootstrap',
+    'CheckoutForm.errorPristineNoBootstrap',
+    'CheckoutLinkGenerator.payModeStandardDesc',
+    'SmartAccountFallback.bannerBody',
+    'SmartAccountFallback.pristineBannerBody',
+  ];
+
+  // GASLESS_PCT (1.0%) を含むべき key 一覧。
+  const GASLESS_PATHS = [
+    'Landing.benefitsFeeBody',
+    'Landing.faqA1',
+    'QrGenerator.payModeGaslessDesc',
+    'QrGenerator.advancedSummary.gaslessCustomerGas',
+    'QrGenerator.advancedSummary.gaslessMerchantGas',
+    'QrGenerator.feeReceiverHintJpyc',
+    'QrGenerator.feeReceiverHintUsdc',
+    'TipEmbedGenerator.feeNote',
+    'CheckoutLinkGenerator.payModeGaslessDesc',
+  ];
+
+  // sanity: 現状値の自己確認 (変更時には intentional な fence 更新を要求)
+  it('lib/fee.ts の定数が想定値であること', () => {
+    expect(STANDARD_PCT).toBe('0.5%');
+    expect(GASLESS_PCT).toBe('1.0%');
+  });
+
+  // LP focal text (大きい数字) は STANDARD と完全一致 (focal は他文字が混じらない)
+  it.each([
+    ['ja', ja],
+    ['en', en],
+  ])('%s.Landing.benefitsFeeFocal === STANDARD_PCT (完全一致)', (_label, m) => {
+    expect((m.Landing as Record<string, string>).benefitsFeeFocal).toBe(STANDARD_PCT);
+  });
+
+  // STANDARD_PCT が必要な全 path × ja/en で fence
+  describe('STANDARD_PCT (0.5%) を含むべき key', () => {
+    for (const path of STANDARD_PATHS) {
+      it.each([
+        ['ja', ja],
+        ['en', en],
+      ])(`%s.${path} が STANDARD_PCT を含む`, (_label, m) => {
+        const v = getByPath(m, path);
+        expect(typeof v, `${path} should be string`).toBe('string');
+        expect(v as string, `${path} should contain ${STANDARD_PCT}`).toContain(
+          STANDARD_PCT,
+        );
+      });
+    }
+  });
+
+  // GASLESS_PCT が必要な全 path × ja/en で fence
+  describe('GASLESS_PCT (1.0%) を含むべき key', () => {
+    for (const path of GASLESS_PATHS) {
+      it.each([
+        ['ja', ja],
+        ['en', en],
+      ])(`%s.${path} が GASLESS_PCT を含む`, (_label, m) => {
+        const v = getByPath(m, path);
+        expect(typeof v, `${path} should be string`).toBe('string');
+        expect(v as string, `${path} should contain ${GASLESS_PCT}`).toContain(
+          GASLESS_PCT,
+        );
+      });
+    }
   });
 });
 

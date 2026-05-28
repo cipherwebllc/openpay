@@ -70,6 +70,7 @@ Rule で個別に設定する:
 | `scan.external_qr` | `event:"scan.external_qr"` | 20 events / 1 hour | フィッシング QR の流通可能性 → 警告 UI 文言の強化 + Slack 通知 |
 | `scan.eip681_rejected` | `event:"scan.eip681_rejected"` | 5 events / 1 day | ethereum: URI の実需要 signal → Phase 2 検討入り |
 | `scan.unrecognized_qr` | `event:"scan.unrecognized_qr"` | 30 events / 1 hour | 未知 QR が連発 → 別決済 system QR の誤読 / URL 仕様変更の可能性 |
+| `market.rates.upstream_error` | `event:"market.rates.upstream_error"` | 5 events / 15 min | CoinGecko /simple/price の outage または shape 変更 → LP / /create の MarketRates strip が「レート取得不可」表示。client UI は graceful fallback、blocking ではない。10 件超で free-tier rate-limit の可能性も検討 |
 | 全体 error level spike | `level:error` | 任意 (既存) | 既存 generic alert を継続 |
 
 注: `scan.before_hydrate` も logger には残してあるが、`useOrigin` の useEffect が

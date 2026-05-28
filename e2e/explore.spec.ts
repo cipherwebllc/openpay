@@ -43,7 +43,11 @@ test.describe('/explore (Web3 サービス directory)', () => {
 
   test('en: page title が英語、Exchange/DEX heading が英語表記', async ({ page }) => {
     await page.goto('/en/explore');
-    await expect(page.getByRole('heading', { name: 'Explore' })).toBeVisible();
+    // h1 を level + exact name で固定 (h2 "Resources (explore & analyze)" との
+    // 部分一致衝突を回避)
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Explore' }),
+    ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: /Exchanges \(CEX\)/ }),
     ).toBeVisible();

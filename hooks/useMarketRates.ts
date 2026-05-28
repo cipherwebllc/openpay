@@ -12,19 +12,19 @@ export type MarketRates = {
 
 async function fetchMarketRates(): Promise<MarketRates> {
   const res = await fetch('/api/market/rates');
+  // 502 (upstream / invalid-shape) は !res.ok で throw → React Query 側 isError。
   if (!res.ok) {
     throw new Error(`market rates fetch failed: ${res.status}`);
   }
-  const json = (await res.json()) as Partial<MarketRates> & {
-    error?: string;
-  };
+  // 200 でも shape 検証 (defense in depth、free-tier CoinGecko の quirks 対策)。
+  const json = (await res.json()) as Partial<MarketRates>;
   if (
     typeof json.usdcJpy !== 'number' ||
     !Number.isFinite(json.usdcJpy) ||
     json.usdcJpy <= 0 ||
     typeof json.updatedAt !== 'string'
   ) {
-    throw new Error(`market rates invalid shape (error=${json.error ?? 'n/a'})`);
+    throw new Error('market rates invalid shape');
   }
   return { usdcJpy: json.usdcJpy, updatedAt: json.updatedAt };
 }

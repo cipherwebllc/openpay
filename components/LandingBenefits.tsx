@@ -15,69 +15,29 @@ import { getTranslations } from 'next-intl/server';
 import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-type BenefitTitleKey =
-  | 'benefitsFeeTitle'
-  | 'benefitsCostTitle'
-  | 'benefitsSettlementTitle'
-  | 'benefitsNoSignupTitle';
-
-type BenefitFocalKey =
-  | 'benefitsFeeFocal'
-  | 'benefitsCostFocal'
-  | 'benefitsSettlementFocal'
-  | 'benefitsNoSignupFocal';
-
-type BenefitBodyKey =
-  | 'benefitsFeeBody'
-  | 'benefitsCostBody'
-  | 'benefitsSettlementBody'
-  | 'benefitsNoSignupBody';
+// i18n key は `benefits${BenefitId}{Focal,Title,Body}` で命名統一済 (messages/*.json)、
+// 1 つの BenefitId discriminator から template literal で 3 key を派生させる。
+type BenefitId = 'Fee' | 'Cost' | 'Settlement' | 'NoSignup';
 
 type BenefitCard = {
+  id: BenefitId;
   audience: 'merchant' | 'customer';
   Icon: LucideIcon;
-  focalKey: BenefitFocalKey;
-  titleKey: BenefitTitleKey;
-  bodyKey: BenefitBodyKey;
 };
 
 const CARDS: readonly BenefitCard[] = [
-  {
-    audience: 'merchant',
-    Icon: Coins,
-    focalKey: 'benefitsFeeFocal',
-    titleKey: 'benefitsFeeTitle',
-    bodyKey: 'benefitsFeeBody',
-  },
-  {
-    audience: 'merchant',
-    Icon: Rocket,
-    focalKey: 'benefitsCostFocal',
-    titleKey: 'benefitsCostTitle',
-    bodyKey: 'benefitsCostBody',
-  },
-  {
-    audience: 'merchant',
-    Icon: Zap,
-    focalKey: 'benefitsSettlementFocal',
-    titleKey: 'benefitsSettlementTitle',
-    bodyKey: 'benefitsSettlementBody',
-  },
-  {
-    audience: 'customer',
-    Icon: UserCheck,
-    focalKey: 'benefitsNoSignupFocal',
-    titleKey: 'benefitsNoSignupTitle',
-    bodyKey: 'benefitsNoSignupBody',
-  },
+  { id: 'Fee', audience: 'merchant', Icon: Coins },
+  { id: 'Cost', audience: 'merchant', Icon: Rocket },
+  { id: 'Settlement', audience: 'merchant', Icon: Zap },
+  { id: 'NoSignup', audience: 'customer', Icon: UserCheck },
 ];
 
 // merchant / customer ごとの card tone。merchant=emerald (LandingHowItWorks の
-// merchant 列と整合)、customer=blue (同・customer 列)。
+// merchant 列と整合)、customer=blue (同・customer 列)。背景は両者とも bg-white で
+// 固定なので card className に直接置く (TONE には残さない)。
 const TONE = {
   merchant: {
     border: 'border-emerald-200',
-    cardBg: 'bg-white',
     focal: 'text-emerald-600',
     pillBg: 'bg-emerald-100',
     pillInk: 'text-emerald-800',
@@ -85,13 +45,17 @@ const TONE = {
   },
   customer: {
     border: 'border-blue-200',
-    cardBg: 'bg-white',
     focal: 'text-blue-600',
     pillBg: 'bg-blue-100',
     pillInk: 'text-blue-800',
     iconInk: 'text-blue-500',
   },
 } as const satisfies Record<BenefitCard['audience'], unknown>;
+
+const AUDIENCE_LABEL_KEY = {
+  merchant: 'benefitsAudienceMerchant',
+  customer: 'benefitsAudienceCustomer',
+} as const satisfies Record<BenefitCard['audience'], string>;
 
 export async function LandingBenefits() {
   const t = await getTranslations('Landing');
@@ -106,22 +70,18 @@ export async function LandingBenefits() {
       </div>
 
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {CARDS.map(({ audience, Icon, focalKey, titleKey, bodyKey }) => {
+        {CARDS.map(({ id, audience, Icon }) => {
           const c = TONE[audience];
-          const audienceLabel =
-            audience === 'merchant'
-              ? t('benefitsAudienceMerchant')
-              : t('benefitsAudienceCustomer');
           return (
             <li
-              key={titleKey}
-              className={`flex flex-col rounded-2xl border ${c.border} ${c.cardBg} p-5 shadow-sm`}
+              key={id}
+              className={`flex flex-col rounded-2xl border bg-white ${c.border} p-5 shadow-sm`}
             >
               <div className="flex items-center justify-between">
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${c.pillBg} ${c.pillInk}`}
                 >
-                  {audienceLabel}
+                  {t(AUDIENCE_LABEL_KEY[audience])}
                 </span>
                 <Icon className={`h-5 w-5 ${c.iconInk}`} aria-hidden />
               </div>
@@ -129,17 +89,16 @@ export async function LandingBenefits() {
               {/* focal: ビッグナンバー。break-keep + whitespace-nowrap で mobile
                   2 列でも 1 行に収める。 */}
               <p
-                className={`mt-4 whitespace-nowrap text-4xl font-extrabold leading-none ${c.focal} sm:text-5xl`}
-                style={{ wordBreak: 'keep-all' }}
+                className={`mt-4 whitespace-nowrap break-keep text-4xl font-extrabold leading-none ${c.focal} sm:text-5xl`}
               >
-                {t(focalKey)}
+                {t(`benefits${id}Focal`)}
               </p>
 
               <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
-                {t(titleKey)}
+                {t(`benefits${id}Title`)}
               </h3>
               <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
-                {t(bodyKey)}
+                {t(`benefits${id}Body`)}
               </p>
             </li>
           );

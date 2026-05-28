@@ -23,11 +23,16 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     ).toBeVisible();
   });
 
-  test('/en は 200 + 英語 UI', async ({ page }) => {
+  test('/en は 200 + 英語 LP (Hero leadline + 2 CTA)', async ({ page }) => {
     const response = await page.goto('/en');
     expect(response?.status()).toBe(200);
+    // Phase 1 で / は QR タブから LP に置換。LP の英語 leadline + Hero CTA を
+    // assert する (旧「Payment QR (merchant)」タブ button は /create に移動)。
     await expect(
-      page.getByRole('button', { name: 'Payment QR (merchant)' }),
+      page.getByRole('heading', { name: /JPYC \/ USDC payments/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: /Pay \(Scan\)/ }),
     ).toBeVisible();
   });
 

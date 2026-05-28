@@ -68,34 +68,52 @@ test.describe('landing / (LP)', () => {
     page,
   }) => {
     await page.goto('/ja');
-    await expect(page.getByRole('heading', { name: '使い方' })).toBeVisible();
-    // merchant 3 step (順序付きリスト内のテキスト)
-    await expect(page.getByText('受取ウォレットアドレスを入力')).toBeVisible();
-    // step3: 印刷 or スマホ提示 の両パターンを含む文言
-    await expect(page.getByText(/QR を印刷.*スマホ.*タブレット/)).toBeVisible();
+    const howItWorks = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: '使い方' }) });
+    await expect(howItWorks).toBeVisible();
+    // merchant 3 step
+    await expect(howItWorks.getByText('受取ウォレットアドレスを入力')).toBeVisible();
+    // step3: 印刷 or スマホ提示 の両パターン
+    await expect(
+      howItWorks.getByText(/QR を印刷.*スマホ.*タブレット/),
+    ).toBeVisible();
     // customer 3 step
     await expect(
-      page.getByText('右上の「接続」からウォレットを接続'),
+      howItWorks.getByText('右上の「接続」からウォレットを接続'),
     ).toBeVisible();
-    // step 2: 「スキャン」テキストリンクが /scan を指す
-    const scanLink = page.getByRole('link', { name: 'スキャン' });
+    // step 2: 「スキャン」テキストリンクが /scan を指す (HowItWorks 内に scope して
+    // TopNav / Hero CTA の同名 link との strict mode 衝突を回避)
+    const scanLink = howItWorks.getByRole('link', { name: 'スキャン', exact: true });
     await expect(scanLink).toHaveAttribute('href', '/ja/scan');
-    await expect(page.getByText('ウォレットで署名 → 完了')).toBeVisible();
+    await expect(howItWorks.getByText('ウォレットで署名 → 完了')).toBeVisible();
   });
 
   test('ja: FAQ-A4 は JPYC EX (jpyc.co.jp) と 受け取る (/create) のテキストリンクを含む', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // FAQ-Q4 を展開
-    await page.getByText('受け取った JPYC / USDC を日本円に換金するには?').click();
-    const jpycEx = page.getByRole('link', { name: 'JPYC EX' });
+    // FAQ-Q4 を展開し、対象 <details> 要素内で link を解決する (TopNav の同名 link
+    // との strict mode 衝突回避)。details は親 <li> 経由で locator を組む。
+    const q4Summary = page.getByText(
+      '受け取った JPYC / USDC を日本円に換金するには?',
+    );
+    const faqDetails = page
+      .locator('details')
+      .filter({ has: q4Summary });
+    await q4Summary.click();
+    await expect(faqDetails).toHaveAttribute('open', '');
+
+    const jpycEx = faqDetails.getByRole('link', { name: 'JPYC EX' });
     await expect(jpycEx).toBeVisible();
     await expect(jpycEx).toHaveAttribute('href', 'https://jpyc.co.jp/');
     await expect(jpycEx).toHaveAttribute('target', '_blank');
     await expect(jpycEx).toHaveAttribute('rel', 'noopener noreferrer');
-    // 「受け取る」 link → /ja/create (FAQ 内に同名 link は 1 つだけ)
-    const createLink = page.getByRole('link', { name: '受け取る', exact: true });
+
+    const createLink = faqDetails.getByRole('link', {
+      name: '受け取る',
+      exact: true,
+    });
     await expect(createLink).toHaveAttribute('href', '/ja/create');
   });
 
@@ -118,33 +136,47 @@ test.describe('landing / (LP)', () => {
     page,
   }) => {
     await page.goto('/ja');
-    await expect(page.getByRole('heading', { name: '導入メリット' })).toBeVisible();
-    // 4 focal text (ビッグナンバー)
-    await expect(page.getByText('0.5%')).toBeVisible();
-    await expect(page.getByText('¥0')).toBeVisible();
-    await expect(page.getByText('数秒')).toBeVisible();
-    await expect(page.getByText('0 step')).toBeVisible();
+    // Benefits section に scope (Features や FAQ にも 0.5% / 店舗 が出るため衝突回避)
+    const benefits = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
+    await expect(benefits).toBeVisible();
+    // 4 focal text (ビッグナンバー) — Benefits section 内に scope
+    await expect(benefits.getByText('0.5%', { exact: true })).toBeVisible();
+    await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
+    await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
+    await expect(benefits.getByText('0 step', { exact: true })).toBeVisible();
     // 4 title
     await expect(
-      page.getByRole('heading', { name: '手数料が安い' }),
+      benefits.getByRole('heading', { name: '手数料が安い' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: '導入コスト 0 円' }),
+      benefits.getByRole('heading', { name: '導入コスト 0 円' }),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: '即時着金' })).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: '会員登録不要' }),
+      benefits.getByRole('heading', { name: '即時着金' }),
     ).toBeVisible();
-    // audience pill: 店舗 3 / 顧客 1
-    expect(await page.getByText('店舗', { exact: true }).count()).toBe(3);
-    expect(await page.getByText('顧客', { exact: true }).count()).toBe(1);
+    await expect(
+      benefits.getByRole('heading', { name: '会員登録不要' }),
+    ).toBeVisible();
+    // audience pill: 店舗 3 / 顧客 1 — Benefits section 内のみカウント
+    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(3);
+    expect(await benefits.getByText('顧客', { exact: true }).count()).toBe(1);
   });
 
   test('ja: Trust セクションに GitHub link (target=_blank + rel=noopener)', async ({
     page,
   }) => {
     await page.goto('/ja');
-    const github = page.getByRole('link', { name: /ソースコード \(GitHub\)/ });
+    // SiteFooter にも同名 GitHub link があるため、Trust section (= LP <main> 内) に
+    // scope する。LandingTrust の link は icon + label + ↗ で SVG inline を含む。
+    const trust = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'オープン技術と透明性' }) });
+    await expect(trust).toBeVisible();
+    const github = trust.getByRole('link', {
+      name: /ソースコード \(GitHub\)/,
+    });
     await expect(github).toBeVisible();
     await expect(github).toHaveAttribute(
       'href',
