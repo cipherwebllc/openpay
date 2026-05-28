@@ -386,12 +386,17 @@ function PaymentDetails({ params }: { params: PayParams }) {
               value={fmt(breakdown.merchantReceives)}
             />
           )}
-          <Row
-            label={t('feeRow')}
-            value={fmt(
-              splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
-            )}
-          />
+          {/* Phase 1 (alpha): feeAmount = 0n のとき手数料行は非表示。Phase 2 で
+              課金復活時は自然に再表示される (i18n key feeRow は messages に残存)。 */}
+          {(splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount) >
+            0n && (
+            <Row
+              label={t('feeRow')}
+              value={fmt(
+                splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
+              )}
+            />
+          )}
           {isStandard ? (
             <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
           ) : (

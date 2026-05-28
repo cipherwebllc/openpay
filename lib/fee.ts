@@ -1,21 +1,20 @@
 // OpenPay 利用手数料 = amount * FEE_BPS / BPS_DENOM (両 token 共通、最低手数料なし)。
-// 決済モードは 2 種類で、それぞれ料率と gas 取り扱いが異なる:
-//   - gasless:  OpenPay が gas を肩代わり、OpenPay 利用手数料 1.0% (= FEE_BPS_GASLESS)
+// Phase 1 (alpha 期間中): FEE_BPS_GASLESS / FEE_BPS_STANDARD は 0n (手数料を徴収しない)。
+// 関数 signature / return shape は維持し、calcFee は常に 0n を返す。Phase 2 で
+// 課金モデル (月額固定 / 利用権販売など、決済額に連動しない方式) を検討予定。
+//
+// 決済モードは 2 種類で、gas 取り扱いが異なる:
+//   - gasless:  OpenPay が gas を肩代わり
 //               + 店主が gasMode で選択するネットワーク手数料見積 (顧客 / 店主負担)
-//   - standard: 顧客 wallet が自前で gas 負担、OpenPay 利用手数料 0.5% (= FEE_BPS_STANDARD)
-//               OpenPay は gas に touch しないため gasMode は irrelevant
+//   - standard: 顧客 wallet が自前で gas 負担、OpenPay は gas に touch しないため
+//               gasMode は irrelevant
 //
-// OpenPay 利用手数料は両モードで常に店主負担 (顧客には不可視)。
-//
-// gasless / gasMode の breakdown:
-//   gas=customer: customer = amount + gas, merchant = amount - fee
-//   gas=merchant: customer = amount,        merchant = amount - fee - gas
+// gasless / gasMode の breakdown (fee=0 なので merchant = amount - gasDeduction のみ):
+//   gas=customer: customer = amount + gas, merchant = amount
+//   gas=merchant: customer = amount,        merchant = amount - gas
 // gas 内訳 (gasless のみ):
-//   sponsorship (JPYC): 運営が POL gas 立替、徴収 JPYC で別途精算 — fee transfer に gas を内包
-//   erc20 paymaster (USDC): paymaster が顧客 USDC から actualGas 直接徴収 — fee transfer は fee のみ
-//
-// amount < fee + (gas=merchant ? gas : 0) で merchant が 0 になるケースは
-// PaymentForm 側で submit を block (運営の赤字回避)。
+//   sponsorship (JPYC): 運営が POL gas 立替 (Phase 1 では運営が吸収する純費用)
+//   erc20 paymaster (USDC): paymaster が顧客 USDC から actualGas 直接徴収
 import type { Address } from 'viem';
 import type { TokenSymbol } from './tokens';
 
@@ -26,10 +25,11 @@ export type PayMode = 'gasless' | 'standard';
 
 const BPS_DENOM = 10_000n;
 
-// gasless mode: 1.0% (gas 肩代わり + ネットワーク手数料変動リスクへの対応を含む対価)
-export const FEE_BPS_GASLESS = 100n;
-// standard mode: 0.5% (決済 UI / QR / 決済処理 / サービス運営のみ。gas 肩代わりなし)
-export const FEE_BPS_STANDARD = 50n;
+// Phase 1 (alpha 期間中): 両モードとも 0n。Phase 2 で課金モデルを再検討する際は
+// 定数だけを書き換えれば downstream は自然に追従する (calcFee → 0n、各 hook の
+// `fee > 0` ガードが自然に dead path から復活)。
+export const FEE_BPS_GASLESS = 0n;
+export const FEE_BPS_STANDARD = 0n;
 
 export function calcFee(
   amount: bigint,

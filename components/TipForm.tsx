@@ -305,7 +305,10 @@ export function TipForm({ params }: { params: TipParams }) {
         </p>
         <dl className="mt-2 space-y-1.5">
           <Row label={t('creatorRow')} value={fmt(breakdown.merchantReceives)} />
-          <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
+          {/* Phase 1 (alpha): feeAmount = 0n のとき手数料行は非表示。 */}
+          {breakdown.feeAmount > 0n && (
+            <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
+          )}
           <Row
             label={t('gasRow')}
             labelExtra={

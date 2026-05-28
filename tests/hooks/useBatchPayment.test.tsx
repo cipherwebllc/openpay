@@ -166,7 +166,7 @@ describe('useBatchPayment', () => {
     expect((d.args as readonly [string, bigint])[1]).toBe(100_000n);
   });
 
-  it('feeAmount = 0 → 必ずエラー (運営収益 + sponsorship 濫用防止のため fee 必須)', async () => {
+  it('Phase 1: feeAmount = 0 でも batch は成立、calls から fee transfer が除外される', async () => {
     mountReady();
     const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
@@ -180,12 +180,36 @@ describe('useBatchPayment', () => {
       feeAmount: 0n,
     });
 
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(sendUserOperation).toHaveBeenCalledOnce();
+    const arg = sendUserOperation.mock.calls[0][0];
+    // merchant transfer 1 件のみ、fee transfer なし
+    expect(arg.calls).toHaveLength(1);
+    const d = decodeFunctionData({ abi: erc20Abi, data: arg.calls[0].data });
+    expect((d.args as readonly [string, bigint])[0]).toBe(MERCHANT);
+    expect((d.args as readonly [string, bigint])[1]).toBe(50_000_000n);
+  });
+
+  it('Phase 1: feeAmount < 0 は非負ガードで reject', async () => {
+    mountReady();
+    const { result } = renderHook(() => useBatchPayment(usdcDep), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 50_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: -1n,
+    });
+
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/feeAmount|sponsorship/);
+    expect(result.current.error?.message).toMatch(/feeAmount/);
     expect(sendUserOperation).not.toHaveBeenCalled();
   });
 
-  it('両方 0 → エラーで sendUserOperation は呼ばれない', async () => {
+  it('Phase 1: 両方 0 → batch は no-op で成功 (calls 0 件は smart account 側で reject される想定だが本テストは guard 動作のみ確認)', async () => {
     mountReady();
     const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
@@ -199,9 +223,10 @@ describe('useBatchPayment', () => {
       feeAmount: 0n,
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/feeAmount|sponsorship/);
-    expect(sendUserOperation).not.toHaveBeenCalled();
+    // merchantAmount=0n は guard を通過、空 calls で sendUserOperation が呼ばれる
+    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
+    const arg = sendUserOperation.mock.calls[0][0];
+    expect(arg.calls).toHaveLength(0);
   });
 
   it('Smart Account 未準備 → エラー', async () => {
@@ -452,8 +477,9 @@ describe('useBatchPayment', () => {
       expect(getUserOperationGasPrice).not.toHaveBeenCalled();
     });
 
-    it('feeAmount=0 ガードは gas price チェックより先に発火', async () => {
-      // 運営収益確保 (feeAmount=0) のエラーパス: gas price 取得は不要なはず
+    it('Phase 1: feeAmount=0 でも gas price ceiling は通る (両方 OK で送信成立)', async () => {
+      // Phase 1: feeAmount=0 はもはやエラーパスではない。gas ceiling は normal に
+      // チェックされ、merchant tx 1 件で batch が成立する。
       mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
       const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
@@ -467,9 +493,8 @@ describe('useBatchPayment', () => {
         feeAmount: 0n,
       });
 
-      await waitFor(() => expect(result.current.isError).toBe(true));
-      expect(result.current.error?.message).toMatch(/feeAmount|sponsorship/);
-      expect(getUserOperationGasPrice).not.toHaveBeenCalled();
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
     });
 
     it('Polygon mainnet (chainId=137) sponsorship: 1000 gwei 以下 OK / 超過 reject', async () => {

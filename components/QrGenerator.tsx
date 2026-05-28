@@ -50,7 +50,6 @@ import {
   type ChainSlug,
 } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
-import { env } from '@/lib/env';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 import { normalizeAmountList, truncateAmount } from '@/lib/amount';
@@ -736,23 +735,10 @@ export function QrGenerator() {
                 </AdvancedSection>
               )}
 
-              {/* 手数料徴収先アドレス: 長い 0x... を常時露出すると一般 user に
-                  不安を与えるため、高度な設定 accordion 内 (default 閉) に移動。
-                  透明性 (誰が手数料を受け取るか可視) は維持しつつ初見ノイズを下げる。 */}
-              <AdvancedSection label={t('feeReceiverHeading')}>
-                <p className="break-all font-mono text-xs text-slate-700">
-                  {env.feeReceiver}
-                </p>
-                <p className="mt-2 text-xs text-slate-500">
-                  {isStandard
-                    ? t('feeReceiverHintStandard')
-                    : t(
-                        settings.token === 'jpyc'
-                          ? 'feeReceiverHintJpyc'
-                          : 'feeReceiverHintUsdc',
-                      )}
-                </p>
-              </AdvancedSection>
+              {/* Phase 1 (alpha): OpenPay 利用手数料 0% のため fee 徴収先 section は
+                  撤去。Phase 2 で課金モデル復活時は env.feeReceiver の透明性表示を
+                  ここに復活させる予定 (i18n key feeReceiverHeading/Hint* は messages
+                  に残してある)。 */}
             </SettingsAccordion>
           </div>
         </StepCard>
@@ -919,12 +905,10 @@ export function QrGenerator() {
               <p className="self-start text-xs text-slate-500">
                 {t('eip681Description')}
               </p>
-              {/* 店主向け fee bypass 警告: EIP-681 QR は OpenPay の checkout を経由しない
-                   純粋 ERC20 transfer のため OpenPay 利用手数料が徴収されない。 */}
-              <div className="w-full self-stretch rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-                <p className="font-semibold">{t('eip681FeeBypassTitle')}</p>
-                <p className="mt-0.5">{t('eip681FeeBypassBody')}</p>
-              </div>
+              {/* Phase 1 (alpha): OpenPay 利用手数料 0% のため EIP-681 経路と
+                  通常 QR の料率差がなく、fee bypass 警告は撤去。Phase 2 で課金
+                  復活時は再表示 (i18n key eip681FeeBypass{Title,Body} は messages
+                  に残してある)。 */}
               <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
               <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
                 {eip681Uri}

@@ -1,23 +1,27 @@
-// 導入メリット (4 cards: 店舗 3 + 顧客 1)。Server Component。
+// 導入メリット (3 cards: 店舗 2 + 顧客 1)。Server Component。
 //
 // LandingFeatures が「技術特長 (gasless / multichain / non-custody)」を伝えるのに
-// 対し、本セクションは「実利・実用メリット (手数料・コスト・着金・登録不要)」を
+// 対し、本セクションは「実利・実用メリット (コスト・着金・登録不要)」を
 // ビッグナンバーフォーカル (大きい数字/シンボル) で訴求する。
 //
 // LandingFeatures との視覚差別化:
 // - Features = horizontal 3 col、icon + heading + body
-// - Benefits  = horizontal 2 col mobile / 4 col desktop、focal text を中心に据える
+// - Benefits  = mobile 1 col / desktop 3 col、focal text を中心に据える
+//
+// Phase 1 (alpha) で OpenPay 決済手数料を 0% 化した際、Fee カード (focal="0.5%")
+// は削除。「手数料無料」訴求は LandingFeatures + FAQ に控えめに集約 (LP の
+// マーケ的押し出しを避け、Phase 2 での課金モデル復活時の整合性を保つため)。
 //
 // audience pill のカラーは LandingHowItWorks (merchant=emerald / customer=blue) と
 // 整合させる。
 
 import { getTranslations } from 'next-intl/server';
-import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
+import { Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // i18n key は `benefits${BenefitId}{Focal,Title,Body}` で命名統一済 (messages/*.json)、
 // 1 つの BenefitId discriminator から template literal で 3 key を派生させる。
-type BenefitId = 'Fee' | 'Cost' | 'Settlement' | 'NoSignup';
+type BenefitId = 'Cost' | 'Settlement' | 'NoSignup';
 
 type BenefitCard = {
   id: BenefitId;
@@ -26,7 +30,6 @@ type BenefitCard = {
 };
 
 const CARDS: readonly BenefitCard[] = [
-  { id: 'Fee', audience: 'merchant', Icon: Coins },
   { id: 'Cost', audience: 'merchant', Icon: Rocket },
   { id: 'Settlement', audience: 'merchant', Icon: Zap },
   { id: 'NoSignup', audience: 'customer', Icon: UserCheck },
@@ -69,7 +72,7 @@ export async function LandingBenefits() {
         <p className="mt-2 text-sm text-slate-600">{t('benefitsSubtitle')}</p>
       </div>
 
-      <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <ul className="mx-auto mt-8 grid max-w-5xl grid-cols-1 gap-4 sm:grid-cols-3">
         {CARDS.map(({ id, audience, Icon }) => {
           const c = TONE[audience];
           return (

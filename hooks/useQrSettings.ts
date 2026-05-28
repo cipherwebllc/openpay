@@ -21,9 +21,9 @@ type QrSettings = {
   // OpenPay 利用手数料は両モードとも常に店主負担。既定 customer (gas spike を店主が被らない安全側)。
   // payMode='standard' のとき gasMode は無視される (OpenPay は gas に touch しないため)。
   gasMode: GasMode;
-  // 決済モード:
-  //   gasless:  OpenPay が gas を肩代わり、OpenPay 利用手数料 1.0% (default)
-  //   standard: 顧客が wallet で自前 gas を支払、OpenPay 利用手数料 0.5%
+  // 決済モード (Phase 1 alpha: OpenPay 利用手数料は両モードとも 0%):
+  //   gasless:  OpenPay が gas を肩代わり (default)
+  //   standard: 顧客が wallet で自前 gas を支払う
   payMode: PayMode;
   // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人。
   // standard mode では UI 側で split を無効化するが、設定としては保持可能 (mode 切替時に復元される)。

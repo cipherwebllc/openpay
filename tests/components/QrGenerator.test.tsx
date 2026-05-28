@@ -155,9 +155,9 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
       });
       const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      // direct=false / gasMode=merchant → 日本語サマリ "ガス代：店主負担"
+      // direct=false / gasMode=merchant → 日本語サマリ "ガス代：店主負担" (Phase 1: 手数料% 表記なし)
       expect(
-        within(toggle).getByText(/手数料 1\.0% \/ ガス代：店主負担/),
+        within(toggle).getByText(/ガスレス決済 \/ ガス代：店主負担/),
       ).toBeInTheDocument();
     });
 
@@ -181,9 +181,9 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
       });
       const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      // gasMode default = customer → 日本語サマリ "ガス代：お客様負担"
+      // gasMode default = customer → 日本語サマリ "ガス代：お客様負担" (Phase 1: 手数料% 表記なし)
       expect(
-        within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+        within(toggle).getByText(/ガスレス決済 \/ ガス代：お客様負担/),
       ).toBeInTheDocument();
     });
 
@@ -747,9 +747,9 @@ describe('QrGenerator', () => {
         ).toBeInTheDocument();
       });
 
-      // 通常決済モードの説明 (hint) が表示される
+      // Phase 1: 通常決済モードの説明 (hint) が表示される (手数料% 表記なし)
       expect(
-        screen.getByText(/OpenPay 利用手数料は決済金額の 0\.5%/),
+        screen.getByText(/OpenPay は gas を肩代わりしません/),
       ).toBeInTheDocument();
 
       // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
@@ -775,7 +775,7 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('payMode=standard でアコーディオン閉時のサマリに「手数料 0.5%（通常決済）」と出る', async () => {
+    it('Phase 1: payMode=standard でアコーディオン閉時のサマリに「通常決済（ガスあり）」と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -795,11 +795,11 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
       expect(
-        within(toggle).getByText(/手数料 0\.5%（通常決済）/),
+        within(toggle).getByText(/通常決済（ガスあり）/),
       ).toBeInTheDocument();
     });
 
-    it('payMode=gasless (default) でアコーディオン閉時のサマリに「手数料 1.0% / ガス代：お客様負担」と出る', async () => {
+    it('Phase 1: payMode=gasless (default) でサマリに「ガスレス決済 / ガス代：お客様負担」と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -819,7 +819,7 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
       expect(
-        within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+        within(toggle).getByText(/ガスレス決済 \/ ガス代：お客様負担/),
       ).toBeInTheDocument();
     });
   });
@@ -942,15 +942,10 @@ describe('QrGenerator', () => {
       );
       expect(longestPath).toBeGreaterThan(500);
 
-      // fee bypass 警告 banner が EIP-681 section と同時に表示される (store 向け透明化)
+      // Phase 1: 旧 fee bypass 警告 banner は撤去済 (手数料 0% で bypass する意味がない)
       expect(
-        screen.getByText(/この QR では OpenPay 利用手数料.*徴収されません/),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          /両方を同時に掲示すると、顧客がどちらを scan するかで実質料率/,
-        ),
-      ).toBeInTheDocument();
+        screen.queryByText(/この QR では OpenPay 利用手数料/),
+      ).toBeNull();
     });
 
     it('EIP-681 section は default で閉じている (details summary が初期状態 closed)', async () => {
@@ -2145,28 +2140,19 @@ describe('QrGenerator', () => {
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
     });
 
-    it('手数料徴収先アドレスは default では visible でない (長 0x... を初見ノイズから排除)', async () => {
+    it('Phase 1: 手数料徴収先アドレスセクションは撤去されている (default + advanced 開いた状態の両方)', async () => {
+      const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      // 「OpenPay 利用手数料の徴収先」 label が DOM に存在しない (closed accordion 内)
+      // default では advanced 閉、当然 fee 徴収先は出ない
+      expect(screen.queryByText(/OpenPay 利用手数料の徴収先/)).toBeNull();
+      // advanced を開いても fee 徴収先セクションは復活しない
+      await openAdvanced(user);
       expect(screen.queryByText(/OpenPay 利用手数料の徴収先/)).toBeNull();
     });
 
-    it('高度な設定 を開くと 手数料徴収先アドレス が表示される (透明性は維持)', async () => {
-      const user = userEvent.setup();
-      render(<QrGenerator />);
-      await openAdvanced(user);
-      expect(
-        await screen.findByText(/OpenPay 利用手数料の徴収先/),
-      ).toBeInTheDocument();
-      // env.feeReceiver の実値が表示される (test env では 0x...dEaD placeholder)
-      const feeAddressMatch = await screen.findByText(/^0x[a-fA-F0-9]{40}$/);
-      expect(feeAddressMatch.className).toMatch(/font-mono/);
-    });
-
     it('Sub-summary に開発者向け内部値 (gas:cust / 0.5%/std) が漏れていない', async () => {
-      // 規制: 旧 mono サマリ (例 "1%/gas:cust") を 100% 撤去する。新サマリは
-      // 日本語/英語の自然文 ("ガス代：お客様負担") のみで構成される。
+      // 規制: 旧 mono サマリ (例 "1%/gas:cust") を 100% 撤去。Phase 1 で「手数料 X%」
+      // 文言も撤去し、advanced summary は日本語の自然文のみで構成される。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -2182,9 +2168,9 @@ describe('QrGenerator', () => {
       const toggle = await screen.findByRole('button', { name: /高度な設定/ });
       // closed 状態でも summary 全体に旧トークンが含まれない
       expect(container.textContent).not.toMatch(/gas:cust|gas:merch|%\/std/);
-      // toggle 内に新文言が出る
+      // toggle 内に新文言 (Phase 1: 手数料% 表記なし) が出る
       expect(
-        within(toggle).getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+        within(toggle).getByText(/ガスレス決済 \/ ガス代：お客様負担/),
       ).toBeInTheDocument();
     });
 
@@ -2195,17 +2181,17 @@ describe('QrGenerator', () => {
       {
         payMode: 'gasless',
         gasMode: 'customer',
-        expected: /Fee 1\.0% \/ gas: customer pays/,
+        expected: /Gasless \/ gas: customer pays/,
       },
       {
         payMode: 'gasless',
         gasMode: 'merchant',
-        expected: /Fee 1\.0% \/ gas: merchant pays/,
+        expected: /Gasless \/ gas: merchant pays/,
       },
       {
         payMode: 'standard',
         gasMode: 'customer',
-        expected: /Fee 0\.5% \(standard payment\)/,
+        expected: /Standard payment \(with gas\)/,
       },
     ] as const)(
       'en locale: payMode=$payMode gasMode=$gasMode → 英文サマリ "$expected"',

@@ -336,7 +336,7 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
           new Response(JSON.stringify({ balances: [] }), { status: 200 }),
       ),
     );
-    // requiredAtomic=5_000_000 → standard 0.5% fee = 25_000、bridged = 4_975_000。
+    // Phase 1: FEE_BPS_* = 0n のため fee=0、bridged=requiredAtomic 全額。
     // cctp-v2 (polygon→base) の session key に一致する中断 state を seed する。
     saveResumeState(
       {
@@ -345,8 +345,8 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
         sourceChainId: polygonAmoyId,
         destChainId: baseSepoliaId,
         recipient: RECIPIENT,
-        valueAtomic: 4_975_000n,
-        feeAtomic: 25_000n,
+        valueAtomic: 5_000_000n,
+        feeAtomic: 0n,
       },
       { approveTxHash: '0xapprove', burnTxHash: '0xburn' },
     );
@@ -496,14 +496,14 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     expect(screen.getByRole('link', { name: /Explorer で確認/ })).toBeInTheDocument();
 
     // paymentLog 呼出確認 (bridge='gateway')。
-    // cross-chain は請求額 5_000_000 を merchant 宛 bridgedAmount (= amount - 0.5%)
-    // と operator 宛 feeAmount に分割する。ログも内訳で記録する (stats 是正)。
+    // Phase 1: FEE_BPS_* = 0n のため feeAmount=0、bridgedAmount=amount で
+    // merchant 宛 1 本のみブリッジ。ログにも fee=0 で記録される。
     expect(logPostMock).toHaveBeenCalledTimes(1);
     const evt = logPostMock.mock.calls[0][0];
     expect(evt.bridge).toBe('gateway');
     expect(evt.result).toBe('success');
-    expect(evt.merchantAmount).toBe('4975000'); // 5_000_000 - 0.5% fee
-    expect(evt.feeAmount).toBe('25000'); // 0.5% of 5 USDC
+    expect(evt.merchantAmount).toBe('5000000'); // amount 全額 (fee=0)
+    expect(evt.feeAmount).toBe('0');
     expect(evt.chainId).toBe(baseSepoliaId);
 
     // Sentry success log

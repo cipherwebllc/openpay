@@ -1,28 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 
-// USDC は 6 decimals。10 USDC = 10_000_000 atomic。
+// Phase 1 (alpha): FEE_BPS_* = 0n のため computeCrossChainFeeSplit は両モードで
+// feeAmount = 0, bridgedAmount = amount を返す (merchant 宛 1 本ブリッジ)。
+// Phase 2 で課金復活時は fee=0.5% / 1% が戻り、operator 宛 2 本目が自動で復活する。
+
 const TEN_USDC = 10_000_000n;
 
-describe('computeCrossChainFeeSplit', () => {
-  it('gasless: 1.0% を fee、残りを bridge に分割する', () => {
+describe('computeCrossChainFeeSplit — Phase 1: 両モードで fee=0、bridge=amount', () => {
+  it('gasless: fee=0, bridge=amount', () => {
     const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
       TEN_USDC,
       'usdc',
       'gasless',
     );
-    expect(feeAmount).toBe(100_000n); // 0.1 USDC = 1%
-    expect(bridgedAmount).toBe(9_900_000n);
+    expect(feeAmount).toBe(0n);
+    expect(bridgedAmount).toBe(TEN_USDC);
   });
 
-  it('standard: 0.5% を fee、残りを bridge に分割する', () => {
+  it('standard: fee=0, bridge=amount', () => {
     const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
       TEN_USDC,
       'usdc',
       'standard',
     );
-    expect(feeAmount).toBe(50_000n); // 0.05 USDC = 0.5%
-    expect(bridgedAmount).toBe(9_950_000n);
+    expect(feeAmount).toBe(0n);
+    expect(bridgedAmount).toBe(TEN_USDC);
   });
 
   it('feeAmount + bridgedAmount === amount (顧客支出 = 請求額) を常に満たす', () => {
@@ -36,17 +39,6 @@ describe('computeCrossChainFeeSplit', () => {
         expect(feeAmount + bridgedAmount).toBe(amount);
       }
     }
-  });
-
-  it('極小額で fee が整数除算で 0 に潰れる場合は fee=0、bridge=amount', () => {
-    // 50 atomic × 1% = 5000/10000 = 0 (整数除算)
-    const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
-      50n,
-      'usdc',
-      'gasless',
-    );
-    expect(feeAmount).toBe(0n);
-    expect(bridgedAmount).toBe(50n);
   });
 
   it('amount=0 / 負値は両方 0 を返す', () => {

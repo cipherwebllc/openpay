@@ -32,30 +32,27 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 ## Payment modes
 
-| Mode | OpenPay fee | Gas | Best for |
-|---|---:|---|---|
-| **Standard payment (with gas)** | **0.5%** | Customer pays in their own wallet (POL / ETH) | Web3 users who already hold native gas |
-| **Gasless payment** | **1.0%** + estimated network fee | OpenPay sponsors gas via Pimlico Paymaster | Customers who only hold the payment token |
+| Mode | Gas | Best for |
+|---|---|---|
+| **Standard payment (with gas)** | Customer pays in their own wallet (POL / ETH) | Web3 users who already hold native gas |
+| **Gasless payment** | OpenPay sponsors gas via Pimlico Paymaster | Customers who only hold the payment token |
 
-- OpenPay fee is **always paid by the merchant** (invisible to the customer).
 - Gasless uses ERC-4337 + Pimlico + ERC-7702 — the customer's existing EOA is reused; no smart-wallet creation step.
-- Standard mode is a plain ERC20 `transfer` (one for merchant, one for the OpenPay fee).
+- Standard mode is a plain ERC20 `transfer` (single transfer to the merchant).
 - In gasless mode, the network-fee bearer is selectable: `gas=customer` (default) or `gas=merchant`.
 
 ## Fees
 
-- **Standard payment**: 0.5%
-- **Gasless payment**: 1.0% + estimated network fee
-- **No monthly fee, no minimum fee, no setup fee.**
-- Merchant funds → merchant wallet directly.
-- OpenPay fees → fee receiver wallet (separate transfer in the same UserOperation for gasless, second tx for standard).
+OpenPay service fee is **0% during the alpha period**. There are no monthly fees, minimum fees, or setup fees. Merchant funds flow directly to the merchant wallet.
+
+A future pricing model that is **not tied to transaction volume** (e.g. a monthly subscription or a prepaid usage license such as an NFT pass / time-limited rights) is under consideration. This direction is chosen so OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 
 ## Supported tokens and chains
 
 | Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
 |---|---|---|---|
 | **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via Pimlico Sponsorship Paymaster |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain** (6) | merchant 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on all 6 merchant chains. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments use the standard **0.5%** fee and require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain** (6) | merchant 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on all 6 merchant chains. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
 
 `NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia + World Chain Sepolia + Sonic Blaze Testnet + Sei Testnet + HyperEVM Testnet.
 
@@ -63,7 +60,7 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 > **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC), customers can pay from any of **11 chains** — the 6 receiving chains plus Unichain, World Chain, Sonic, Sei, and HyperEVM. The print poster lists all 11 so customers know up-front which wallet works. Circle Gateway / CCTP V2 forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path).
 
-> **Cross-chain is "gas-on" for the buyer.** Same-chain payments are gasless (the buyer pays gas in USDC via the paymaster). A cross-chain payment bridges from the buyer's wallet via their own EOA, so the buyer needs the **source chain's native gas (ETH/POL etc.)** — it cannot be completed with USDC alone. Accordingly cross-chain payments are charged the standard **0.5%** OpenPay fee (not the 1.0% gasless rate), collected to the fee-receiver wallet on the merchant's chain.
+> **Cross-chain is "gas-on" for the buyer.** Same-chain payments are gasless (the buyer pays gas in USDC via the paymaster). A cross-chain payment bridges from the buyer's wallet via their own EOA, so the buyer needs the **source chain's native gas (ETH/POL etc.)** — it cannot be completed with USDC alone.
 
 > **Ethereum L1 caveat:** USDC payments on Ethereum L1 support both gasless (Pimlico ERC20 Paymaster, customer pays gas in USDC) and standard modes. L1 gas is still 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
 
@@ -90,7 +87,7 @@ The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas,
 
 ## Non-custodial design
 
-OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay service fees are sent **separately** to the fee receiver wallet. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
+OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
 
 ## How it works
 
@@ -161,7 +158,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_NETWORK_ENV` | `testnet` (default) or `mainnet` | yes |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
-| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | OpenPay fee receiver wallet | **mainnet** |
+| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Fee/operator receiver wallet (unused during the alpha 0% period; reserved for a future Phase 2 pricing model) | optional |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect projectId (<https://cloud.reown.com>) | optional |
 | `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain | recommended on prod |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |

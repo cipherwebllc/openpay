@@ -1,14 +1,16 @@
 'use client';
 
-// 通常決済（ガスあり） / mode=standard: 顧客 EOA から ERC20.transfer を 2 件直列実行
-// (1. 店舗送金、2. OpenPay 利用手数料徴収)。Smart Account / Paymaster は経由せず、
-// 顧客 wallet が native gas を支払う。wallet が 2 連続 sign を要求する UX。
+// 通常決済（ガスあり） / mode=standard: 顧客 EOA から ERC20.transfer を実行。
+// Smart Account / Paymaster は経由せず、顧客 wallet が native gas を支払う。
 //
-// 失敗ハンドリング:
+// Phase 1 (alpha): FEE_BPS_* = 0n のため fee = 0、本 hook は merchant tx 1 件
+// のみを実行 (fee=0 skip path、行 155 / 238 参照)。Phase 2 で課金モデル復活時は
+// fee > 0 になり、2 件目の fee tx が自動で submit される (本 hook 側の変更不要)。
+//
+// 失敗ハンドリング (Phase 2 で fee > 0 復活時に有効):
 //   merchant tx 失敗 → fee tx は不送信 (運営損失なし、顧客が再試行)
 //   merchant 成功 + fee 失敗 → merchant 確定済を巻き戻せないため UI に retry を出す。
-//     OpenPay 側で後追い請求は持たず (alpha)、paymentLog に記録のみ。
-//   fee = 0 (整数除算で潰れる極小額) → fee tx をスキップして merchant 成功 = 全体成功。
+//   fee = 0 (Phase 1 標準動作) → fee tx をスキップして merchant 成功 = 全体成功。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { erc20Abi, type Address, type Hex } from 'viem';

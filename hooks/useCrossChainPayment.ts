@@ -42,11 +42,12 @@ import { resolveDeployment } from '@/lib/tokens';
 export interface UseCrossChainPaymentArgs {
   targetChainId: number;
   /** 請求額 (invoice amount, atomic)。cross-chain では顧客はこの額を source USDC
-   *  で支出し、内訳は merchant 宛 (amount - fee) + operator 宛 (fee) の 2 本ブリッジ。
-   *  0n のとき decision は skip (UI 起動時の判断遅延回避)。 */
+   *  で支出。Phase 1 では利用料 0% なので feeAmount = 0、merchant への 1 本
+   *  ブリッジのみ実行される。0n のとき decision は skip (UI 起動時の判断遅延回避)。 */
   requiredAtomic: bigint;
   recipient: Address;
-  /** OpenPay 利用料の送り先 (operator)。cross-chain でも利用料を徴収する (案A′)。 */
+  /** OpenPay 利用料の送り先 (operator)。Phase 1 では feeAmount = 0 なので使われない
+   *  が、Phase 2 で課金モデル復活時の宛先として env から渡し続ける。 */
   feeReceiver: Address;
   enabled?: boolean;
 }
@@ -169,11 +170,10 @@ export function useCrossChainPayment(
       };
 
       // 請求額を merchant 本送金 (bridgedAmount) と OpenPay 利用料 (feeAmount) に
-      // 分割する。execute は valueAtomic を merchant へ、feeAmount を feeReceiver へ
-      // それぞれブリッジする (案A′)。
-      // 利用料率は常に standard (0.5%)。cross-chain はブリッジ tx の native ガスを
-      // 顧客が自腹で払う = 通常決済 (ガスあり) モードと同じなので、ガス肩代わり込みの
-      // gasless レート (1.0%) ではなく standard レートを適用する。
+      // 分割する。Phase 1 (alpha) では FEE_BPS_* = 0n のため feeAmount = 0、
+      // bridgedAmount = requiredAtomic となり実質 merchant への 1 本ブリッジ。
+      // Phase 2 で課金モデル復活時は同じ計算経路で feeAmount > 0 になり、
+      // execute 側の `feeAmount > 0n` 分岐で自動的に 2 本ブリッジに戻る。
       const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
         args.requiredAtomic,
         'usdc',

@@ -22,7 +22,7 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText(/決済 URL が不正/)).toBeVisible();
   });
 
-  test('mode=standard → 通常決済（ガスあり）バッジが表示される', async ({ page }) => {
+  test('mode=standard → 通常決済（ガスあり）バッジが表示される (Phase 1: fee=0)', async ({ page }) => {
     // 日本語アサーションのため locale を明示。/pay へ素で行くと middleware が
     // Accept-Language (Playwright 既定 en-US) で /en/pay へ redirect する。
     await page.goto(
@@ -34,10 +34,10 @@ test.describe('/pay (URL parser smoke)', () => {
     ).toBeVisible();
     // 「ネットワーク手数料: ウォレットで別途支払い」明細
     await expect(page.getByText(/ウォレットで別途/)).toBeVisible();
-    // 0.5% fee: 10 USDC × 0.5% = 0.05 USDC
-    await expect(page.getByText('0.05 USDC')).toBeVisible();
-    // merchant 受取 = 9.95 USDC
-    await expect(page.getByText('9.95 USDC')).toBeVisible();
+    // Phase 1: fee=0 のため merchant 受取 = 10 USDC (請求額そのまま)
+    await expect(page.getByText('10 USDC').first()).toBeVisible();
+    // 旧手数料行は表示されない (Phase 1 fence)
+    expect(await page.getByText('0.05 USDC').count()).toBe(0);
   });
 
   test('legacy alias: mode=direct (旧 URL) → mode=standard と同じ UI に正規化される', async ({
@@ -50,8 +50,8 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(
       page.getByText('通常決済（ガスあり）').first(),
     ).toBeVisible();
-    // standard と同じ breakdown (0.05 USDC fee / 9.95 USDC merchant)
-    await expect(page.getByText('0.05 USDC')).toBeVisible();
+    // Phase 1: fee=0 のため merchant 受取 = 10 USDC
+    await expect(page.getByText('10 USDC').first()).toBeVisible();
   });
 
   test('mobile (iPhone 14 / 390px) header で switcher + env badge + back-link が overflow しない', async ({
@@ -74,7 +74,7 @@ test.describe('/pay (URL parser smoke)', () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   });
 
-  test('mode=gasless (default) → 1.0% fee + ネットワーク手数料見積行が出る', async ({
+  test('mode=gasless (default) → ネットワーク手数料見積行が出る (Phase 1: fee=0)', async ({
     page,
   }) => {
     await page.goto(`/ja/pay?to=${TO}&token=usdc&amount=10`);
@@ -82,9 +82,9 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText('通常決済（ガスあり）')).toHaveCount(0);
     // ネットワーク手数料見積行は出る (gasQuote 未取得状態でも label は描画)
     await expect(page.getByText(/ネットワーク手数料見積/).first()).toBeVisible();
-    // 1.0% fee: 10 USDC × 1% = 0.1 USDC
-    await expect(page.getByText('0.1 USDC')).toBeVisible();
-    // merchant = 9.9 USDC
-    await expect(page.getByText('9.9 USDC')).toBeVisible();
+    // Phase 1: fee=0 のため merchant 受取 = 10 USDC
+    await expect(page.getByText('10 USDC').first()).toBeVisible();
+    // 旧手数料行は表示されない (Phase 1 fence)
+    expect(await page.getByText('0.1 USDC').count()).toBe(0);
   });
 });

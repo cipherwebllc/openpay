@@ -289,80 +289,18 @@ describe('i18n: 手数料文言と FEE_BPS_* 定数の drift fence', () => {
     }, obj);
   }
 
-  // STANDARD_PCT (0.5%) を含むべき key 一覧。
-  // Landing.benefitsFeeFocal は equality (focal text = "0.5%" だけ)、その他は contains。
-  const STANDARD_PATHS = [
-    'Landing.benefitsFeeBody',
-    'QrGenerator.payModeStandardDesc',
-    'QrGenerator.standardHint',
-    'QrGenerator.feeReceiverHintStandard',
-    'QrGenerator.advancedSummary.standard',
-    'QrGenerator.eip681FeeBypassTitle',
-    'PaymentForm.standardModeBody',
-    'PaymentForm.errorPristineNoBootstrap',
-    'CheckoutForm.errorPristineNoBootstrap',
-    'CheckoutLinkGenerator.payModeStandardDesc',
-    'SmartAccountFallback.bannerBody',
-    'SmartAccountFallback.pristineBannerBody',
-  ];
+  // Phase 1 (alpha 期間中) で FEE_BPS_* = 0n に設定。STANDARD_PCT = "0.0%" /
+  // GASLESS_PCT = "0.0%" となり、Phase 1 では UI コピー側の「0.5%」「1.0%」
+  // 文字列をすべて撤去済 (Phase 2 で課金復活時は定数を戻し、PATH 配列を再有効化する)。
+  // 現状は sanity check のみ残し、PATH ベースの contains assertion は dead 化。
 
-  // GASLESS_PCT (1.0%) を含むべき key 一覧。
-  const GASLESS_PATHS = [
-    'Landing.benefitsFeeBody',
-    'Landing.faqA1',
-    'QrGenerator.payModeGaslessDesc',
-    'QrGenerator.advancedSummary.gaslessCustomerGas',
-    'QrGenerator.advancedSummary.gaslessMerchantGas',
-    'QrGenerator.feeReceiverHintJpyc',
-    'QrGenerator.feeReceiverHintUsdc',
-    'TipEmbedGenerator.feeNote',
-    'CheckoutLinkGenerator.payModeGaslessDesc',
-  ];
+  void getByPath; // unused-warn 抑止
 
-  // sanity: 現状値の自己確認 (変更時には intentional な fence 更新を要求)
-  it('lib/fee.ts の定数が想定値であること', () => {
-    expect(STANDARD_PCT).toBe('0.5%');
-    expect(GASLESS_PCT).toBe('1.0%');
-  });
-
-  // LP focal text (大きい数字) は STANDARD と完全一致 (focal は他文字が混じらない)
-  it.each([
-    ['ja', ja],
-    ['en', en],
-  ])('%s.Landing.benefitsFeeFocal === STANDARD_PCT (完全一致)', (_label, m) => {
-    expect((m.Landing as Record<string, string>).benefitsFeeFocal).toBe(STANDARD_PCT);
-  });
-
-  // STANDARD_PCT が必要な全 path × ja/en で fence
-  describe('STANDARD_PCT (0.5%) を含むべき key', () => {
-    for (const path of STANDARD_PATHS) {
-      it.each([
-        ['ja', ja],
-        ['en', en],
-      ])(`%s.${path} が STANDARD_PCT を含む`, (_label, m) => {
-        const v = getByPath(m, path);
-        expect(typeof v, `${path} should be string`).toBe('string');
-        expect(v as string, `${path} should contain ${STANDARD_PCT}`).toContain(
-          STANDARD_PCT,
-        );
-      });
-    }
-  });
-
-  // GASLESS_PCT が必要な全 path × ja/en で fence
-  describe('GASLESS_PCT (1.0%) を含むべき key', () => {
-    for (const path of GASLESS_PATHS) {
-      it.each([
-        ['ja', ja],
-        ['en', en],
-      ])(`%s.${path} が GASLESS_PCT を含む`, (_label, m) => {
-        const v = getByPath(m, path);
-        expect(typeof v, `${path} should be string`).toBe('string');
-        expect(v as string, `${path} should contain ${GASLESS_PCT}`).toContain(
-          GASLESS_PCT,
-        );
-      });
-    }
+  // sanity: 現状値の自己確認 (Phase 1 では 0%)。Phase 2 で 0.5% / 1.0% に戻す際に
+  // この assertion を更新する必要があり、それが意図的な定数変更の fence になる。
+  it('lib/fee.ts の定数 (Phase 1: 0%)', () => {
+    expect(STANDARD_PCT).toBe('0.0%');
+    expect(GASLESS_PCT).toBe('0.0%');
   });
 });
 
@@ -482,7 +420,7 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'howItWorksCustomerStep1',
     'howItWorksCustomerStep2',
     'howItWorksCustomerStep3',
-    // FAQ (5 Q/A pairs)
+    // FAQ (6 Q/A pairs — Q6/A6 は Phase 1 で「OpenPay の手数料はいくらか」を追加)
     'faqTitle',
     'faqQ1',
     'faqA1',
@@ -494,18 +432,18 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'faqA4',
     'faqQ5',
     'faqA5',
+    'faqQ6',
+    'faqA6',
     // Trust section
     'trustTitle',
     'trustBody',
     'trustGithubLabel',
-    // Benefits section (4 cards × {focal, title, body} + section meta)
+    // Benefits section (3 cards × {focal, title, body} + section meta)。Phase 1 で
+    // Fee カード (focal=0.5%) を削除、Cost / Settlement / NoSignup の 3 cards に縮小。
     'benefitsTitle',
     'benefitsSubtitle',
     'benefitsAudienceMerchant',
     'benefitsAudienceCustomer',
-    'benefitsFeeFocal',
-    'benefitsFeeTitle',
-    'benefitsFeeBody',
     'benefitsCostFocal',
     'benefitsCostTitle',
     'benefitsCostBody',

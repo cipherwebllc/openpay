@@ -530,60 +530,27 @@ describe('Legal pages', () => {
       // QrGenerator 固有
       expectNonEmptyString(ja.QrGenerator.standardHint, 'standardHint', 'ja.QrGenerator');
       expectNonEmptyString(en.QrGenerator.standardHint, 'standardHint', 'en.QrGenerator');
-      expectNonEmptyString(
-        ja.QrGenerator.feeReceiverHintStandard,
-        'feeReceiverHintStandard',
-        'ja.QrGenerator',
-      );
-      expectNonEmptyString(
-        en.QrGenerator.feeReceiverHintStandard,
-        'feeReceiverHintStandard',
-        'en.QrGenerator',
-      );
-      // EIP-681 fee bypass 警告 (mode=standard 0.5% との不整合を可視化)
-      expectNonEmptyString(
-        ja.QrGenerator.eip681FeeBypassTitle,
-        'eip681FeeBypassTitle',
-        'ja.QrGenerator',
-      );
-      expectNonEmptyString(
-        en.QrGenerator.eip681FeeBypassTitle,
-        'eip681FeeBypassTitle',
-        'en.QrGenerator',
-      );
-      expectNonEmptyString(
-        ja.QrGenerator.eip681FeeBypassBody,
-        'eip681FeeBypassBody',
-        'ja.QrGenerator',
-      );
-      expectNonEmptyString(
-        en.QrGenerator.eip681FeeBypassBody,
-        'eip681FeeBypassBody',
-        'en.QrGenerator',
-      );
-      // 警告本体に料率 (0.5%) と「徴収されません」が含まれる (semantic regression guard)
-      expect(ja.QrGenerator.eip681FeeBypassTitle).toMatch(/0\.5%/);
-      expect(ja.QrGenerator.eip681FeeBypassTitle).toMatch(/徴収されません/);
-      expect(en.QrGenerator.eip681FeeBypassTitle).toMatch(/0\.5%/);
-      expect(en.QrGenerator.eip681FeeBypassTitle).toMatch(/does NOT collect/);
+      // Phase 1 (alpha): OpenPay 利用手数料 0% 化に伴い、feeReceiverHint* /
+      // eip681FeeBypass* / 料率 (0.5%, 1.0%) 文言の regression fence は撤去。
+      // Phase 2 で課金復活時はこれらを再有効化する。
     });
 
-    it('payModeStandardDesc / standardModeBody は 0.5% 文言を含む (用語 regression)', async () => {
+    it('Phase 1: payModeStandardDesc / standardModeBody から 0.5% 文言が消えている', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const en = (await import('@/messages/en.json')).default;
-      expect(ja.QrGenerator.payModeStandardDesc).toMatch(/0\.5%/);
-      expect(en.QrGenerator.payModeStandardDesc).toMatch(/0\.5%/);
-      expect(ja.PaymentForm.standardModeBody).toMatch(/0\.5%/);
-      expect(en.PaymentForm.standardModeBody).toMatch(/0\.5%/);
+      expect(ja.QrGenerator.payModeStandardDesc).not.toMatch(/0\.5%/);
+      expect(en.QrGenerator.payModeStandardDesc).not.toMatch(/0\.5%/);
+      expect(ja.PaymentForm.standardModeBody).not.toMatch(/0\.5%/);
+      expect(en.PaymentForm.standardModeBody).not.toMatch(/0\.5%/);
     });
 
-    it('payModeGaslessDesc は 1.0% 文言を含む (用語 regression)', async () => {
+    it('Phase 1: payModeGaslessDesc から 1.0% 文言が消えている', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const en = (await import('@/messages/en.json')).default;
-      expect(ja.QrGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
-      expect(en.QrGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
-      expect(ja.CheckoutLinkGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
-      expect(en.CheckoutLinkGenerator.payModeGaslessDesc).toMatch(/1\.0%/);
+      expect(ja.QrGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
+      expect(en.QrGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
+      expect(ja.CheckoutLinkGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
+      expect(en.CheckoutLinkGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
     });
 
     it('旧 directHint / directOption / directOptionDesc が ja/en の QrGenerator から削除されている', async () => {

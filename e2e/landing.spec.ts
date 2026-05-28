@@ -132,27 +132,23 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
-  test('ja: Benefits セクション — 4 focal text + 「店舗」3 / 「顧客」1 pill', async ({
+  test('ja: Benefits セクション (Phase 1) — 3 focal text + 「店舗」2 / 「顧客」1 pill', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // Benefits section に scope (Features や FAQ にも 0.5% / 店舗 が出るため衝突回避)
+    // Phase 1: Fee カード (focal=0.5%) は削除、Cost / Settlement / NoSignup の 3 cards に縮小。
+    // Benefits section に scope して他セクションとの衝突を回避。
     const benefits = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
     await expect(benefits).toBeVisible();
-    // 4 focal text (ビッグナンバー) — Benefits section 内に scope
-    await expect(benefits.getByText('0.5%', { exact: true })).toBeVisible();
+    // 3 focal text
     await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
-    // 「登録不要」 focal は title (会員登録不要) との部分一致を避けて scope 内で
-    // 2 件出現 (focal 1 + title 1)。focal の class で限定するか、count 確認に
-    // 切替える。ここでは「2 件存在 = focal + title セット」を assert。
     expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);
-    // 4 title
-    await expect(
-      benefits.getByRole('heading', { name: '手数料が安い' }),
-    ).toBeVisible();
+    // Fee focal「0.5%」が消えている (Phase 1 fence)
+    expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
+    // 3 title
     await expect(
       benefits.getByRole('heading', { name: '導入コスト 0 円' }),
     ).toBeVisible();
@@ -162,8 +158,12 @@ test.describe('landing / (LP)', () => {
     await expect(
       benefits.getByRole('heading', { name: '会員登録不要' }),
     ).toBeVisible();
-    // audience pill: 店舗 3 / 顧客 1 — Benefits section 内のみカウント
-    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(3);
+    // 旧 Fee カード title「手数料が安い」が消えている
+    expect(
+      await benefits.getByRole('heading', { name: '手数料が安い' }).count(),
+    ).toBe(0);
+    // audience pill: 店舗 2 / 顧客 1 — Phase 1 で 4→3 cards に縮小
+    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(2);
     expect(await benefits.getByText('顧客', { exact: true }).count()).toBe(1);
   });
 
