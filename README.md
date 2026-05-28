@@ -17,7 +17,10 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 - **JPYC / USDC** support (Japan's electronic payment instrument + Circle's USD stablecoin).
 - **QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.
 - **Two payment modes** — Standard (customer pays gas) or Gasless (OpenPay sponsors gas via Pimlico).
+- **Portal UX** — a single app with separate surfaces for paying (`/scan`), receiving (`/create`), browsing history (`/history`), and discovering on-chain services (`/explore`), all behind a shared header / bottom-nav and wallet-state badge.
 - **Block explorer link** on every receipt — merchants verify on-chain truth, not just a UI screen.
+- **Local transaction history** — per-browser LocalStorage history at `/history`, with CSV export and a "latest 3" strip on the QR builder.
+- **Reference market rate** — a lightweight strip on `/` and `/create` shows `1 USDC = ¥X.XX` via a 5-min server-cached CoinGecko proxy; `1 JPYC = ¥1.00 (peg)` is fixed.
 - **Experimental x402 / agent payment** support for per-request paid APIs.
 - **OSS, self-hostable** under MIT.
 
@@ -91,17 +94,31 @@ OpenPay **never holds** merchant funds. Customer payments are sent **directly to
 
 ## How it works
 
+**Routes** (i18n-prefixed under `/ja` or `/en`, e.g. `/ja/create`):
+
+| Route | Purpose |
+|---|---|
+| `/` | Landing page — hero with two CTAs (📱 pay / 🏪 receive), benefits, how-it-works, FAQ |
+| `/create` | Merchant QR builder + Tip widget builder + offramp links + latest-3 history strip |
+| `/scan` | Customer scan-to-pay surface (QR scanner + connected-wallet balances) |
+| `/history` | Local-only transaction history with CSV export |
+| `/explore` | Curated directory of external stablecoin services (exchanges / DEX / dApps / bridges / explorers) |
+| `/pay`, `/checkout`, `/tip/[address]` | Transactional leaf surfaces — kept focused (no app-shell chrome) |
+
+Pages above the leaf surfaces share an `AppShell` with a sticky header (logo + wallet badge + locale + network pill) and a mobile bottom-nav. The leaf surfaces stay distraction-free intentionally.
+
 **Merchant**:
-1. Open <https://open-pay.jp> (or self-host).
+1. Open <https://open-pay.jp> and click **🏪 受け取る (決済 QR を作る)** — or go directly to `/create`.
 2. Enter the merchant wallet address.
 3. Enter the amount, select token + chain + payment mode.
-4. Show or share the QR code or payment link.
+4. Show or share the QR code or payment link. The latest 3 received payments appear under the form once any exist.
 
 **Customer**:
-1. Scan the QR.
-2. Review amount, token, chain, recipient in their wallet.
-3. Sign the transaction.
-4. See the completion screen with the on-chain tx hash + explorer link.
+1. Open <https://open-pay.jp> and click **📱 支払う (スキャン)** — or go directly to `/scan`.
+2. Scan the merchant QR (or land on `/pay` from an external link).
+3. Review amount, token, chain, recipient in the wallet.
+4. Sign the transaction.
+5. See the completion screen with the on-chain tx hash + explorer link.
 
 **Merchant verifies receipt** in their own wallet or on the block explorer — the completion screen alone is **not** proof of payment.
 
@@ -195,7 +212,6 @@ OpenPay is **not** a wallet, exchange, custodian, or redemption provider. Users 
 
 - More tested wallets + better wallet compatibility surface
 - Improved merchant receipt verification UX
-- Per-browser local payment history + CSV export
 - Per-chain native-gas → USDC/JPY approximate conversion in the chain chooser (currently shows gas units + token symbol only)
 - More x402 / agent payment examples
 - Demand-driven additional chains and tokens
