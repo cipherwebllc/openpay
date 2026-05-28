@@ -482,17 +482,23 @@ NEXT_PUBLIC_GAS_CEILING_KAIA_GWEI=<observed_max>
 
 > **重要 (案A / collect-at-ceiling): gas ceiling は 2 役を兼ねる。**
 > sponsorship (JPYC) では `useGasQuoteJpyc` が **ceiling 価格を徴収基準**に使う
-> (live price ではない)。これにより実 gas (= ceiling 以下) を必ず賄え、運営は
-> gas price スパイクで損をしない (ceiling と実支払い standard tier の差が黒字
-> マージン)。**副作用として ceiling は「混雑 block 閾値」と「徴収価格」を同時に
-> 決める** — ceiling を下げると徴収額 (= 顧客/店主負担) は減るが spike 時の
-> reject が増え、上げると逆になる。両者は本質的に coupling する (無損を保証する
-> には「通す上限価格 = 徴収価格」である必要があるため)。徴収額は決済額に連動
-> しない (gas units × ceiling 価格 × rate) インフラ実費。
+> (live price ではない)。**保証は PRICE 次元のみ**: `assertGasCeiling` (fast tier)
+> が ceiling 超を reject、submit は standard tier 支払いなので `standard ≤ ceiling`
+> → 徴収の ceiling 価格 ≥ 実支払い価格 + rate buffer のクッション。**GAS UNITS
+> 次元は無条件保証ではない**: 徴収は固定 overhead (200k) 見積で、実 UserOp の units
+> が超え (multi-recipient split で transfer 本数増) かつ congestion で standard が
+> ceiling 近くまで上がる稀ケースでは徴収 < 実費になり得る。平常時は ceiling/standard
+> 比 (Polygon ~3.3x) + rate buffer (POL +37%) で十分カバー。**副作用として ceiling は
+> 「混雑 block 閾値」と「徴収価格」を同時に決める** coupling — 下げると徴収額 (顧客/
+> 店主負担) 減 but spike reject 増、上げると逆。徴収額は決済額に連動しない
+> (gas units × ceiling 価格 × rate) インフラ実費。
 
 - [ ] 1 週間 sampling で 平常 P99 gas price 記録
-- [ ] sponsorship 経済性確認 (徴収 = ceiling 基準なので構造的に無損、平常時の
-      over-collect 幅 = ceiling / 実 standard price 比を許容範囲か確認)
+- [ ] sponsorship 経済性確認 (price 次元は構造的に保護、平常時の over-collect 幅
+      = ceiling / 実 standard price 比を許容範囲か確認)
+- [ ] **units 次元の残存リスク監視**: 実 sponsored gas (Pimlico 請求) vs 徴収
+      gasAmount の差分を log/Sentry で観測。split 利用時に under-collect が頻発
+      するなら overhead を call 本数でスケール or rate buffer を厚くする運用判断。
 - [ ] env 投入後 Sentry の `gas_congested` × chainId:8217 発生率 < 0.1%
 - [ ] 規約 / 特商法に「ネットワーク手数料は混雑時上限価格で固定徴収・余剰返金なし」
       の開示を反映済か確認 (UI 文言は gaslessHintJpyc / gasInfoJpyc に実装済)

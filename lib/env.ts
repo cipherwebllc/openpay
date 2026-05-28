@@ -303,7 +303,7 @@ export const isMainnet = env.networkEnv === 'mainnet';
 // mainnet 投入時の silent failure 防止:
 //   - FEE_RECEIVER 未設定 → JPYC sponsorship のガス代 reimbursement (案A、ceiling
 //     基準で徴収) が fallback の 0x...dEaD に送られて永久消失する。運営は native gas
-//     を立て替えたのに JPYC を回収できず「必ず黒字」が「必ず赤字」に反転する (検出不能)。
+//     を立て替えたのに JPYC を 1 円も回収できず全損になる (検出不能)。
 //     ※ Phase 1 で決済手数料 0% 化した際に一旦 optional へ降格したが、案A
 //       (collect-at-ceiling) でガス代徴収先として再び必須になったため復活。
 //   - PIMLICO_API_KEY 未設定 → 決済 click 時に runtime error
@@ -319,7 +319,7 @@ if (isMainnet) {
     throw new Error(
       'NEXT_PUBLIC_FEE_RECEIVER_ADDRESS が未設定です (mainnet 必須)。' +
         'JPYC sponsorship のガス代 reimbursement が 0x...dEaD に永久消失し、' +
-        '運営が立替えた gas を回収できず赤字になるため deploy を中止します。',
+        '運営が立替えた gas を回収できず全損になるため deploy を中止します。',
     );
   }
   if (!env.pimlicoApiKey) {

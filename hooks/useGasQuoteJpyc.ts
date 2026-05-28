@@ -5,11 +5,20 @@
 // Pimlico が chain native (POL / KAIA) でガスを立替え、運営は徴収 JPYC で精算する。
 // 徴収額 = (gas ceiling 価格) × (overhead gas units) × (native/JPYC rate)。
 //
-// 案A (collect-at-ceiling): 徴収を live gas price ではなく gas ceiling 価格で
-// 行う。assertGasCeiling が ceiling 超の UserOp を reject するため、実 execution
-// gas は常に ceiling 以下 → 徴収額 ≥ 実費 が保証され、運営は gas price スパイクで
-// 損をしない (ネットワーク実費の回収 + 上限との差が黒字マージン)。決済額には
-// 連動しない (= 為替/資金移動ではないインフラ実費)。
+// 案A (collect-at-ceiling): 徴収を live gas price ではなく gas ceiling 価格で行う。
+//
+// 保証の範囲 (正確に):
+//   - PRICE 次元は保証される。assertGasCeiling (useBatchPayment、fast tier) が
+//     ceiling 超を reject し、submit は standard tier で支払うので
+//     standard ≤ fast ≤ ceiling。徴収の ceiling 価格 ≥ 実支払いの standard 価格。
+//   - 加えて native→JPYC rate buffer (POL +37% 等) が実勢との差を吸収する。
+//   - ただし GAS UNITS 次元は無条件保証ではない。徴収は固定 overhead (既定 200k)
+//     見積で、実 UserOp の gas units がこれを大きく超え (例: multi-recipient split で
+//     transfer 本数増) かつ congestion で standard が ceiling 近くまで上がる稀ケースでは
+//     徴収 < 実費になり得る。平常時は ceiling/standard 比 (Polygon で ~3.3x) と rate
+//     buffer で十分カバーされるが、残存リスクとして運用監視する (DEPLOY_CHECKLIST §9.5)。
+//
+// 徴収は決済額に連動しない (= 為替/資金移動ではないインフラ実費)。
 //
 // rate は外部 API 依存を持たず env で運用更新可、設定漏れ時は chain ごと
 // hard-code default にフォールバック。
@@ -91,10 +100,10 @@ export function useGasQuoteJpyc(
         env.gasQuoteOverheadUnits !== undefined
           ? BigInt(env.gasQuoteOverheadUnits)
           : DEFAULT_USEROP_GAS_UNITS;
-      // 案A: live gas price ではなく ceiling 価格で徴収する。assertGasCeiling
-      // が ceiling 超の UserOp を弾くため実 gas は必ず ceiling 以下 = 徴収 ≥ 実費。
-      // submit 側 (simpleAccount / mav2) は standard tier で実際に支払うので、
-      // ceiling (fast tier base) との差が運営の黒字マージンになる。
+      // 案A: live gas price ではなく ceiling 価格で徴収する。assertGasCeiling が
+      // ceiling 超を弾くため実 price ≤ ceiling、submit の standard 価格との差が
+      // 黒字マージン (price 次元の保護)。gas UNITS 側は overhead 固定見積なので
+      // split 等で実 units が超えると congestion 時に不足し得る (header 参照)。
       const gasNative = overhead * ceilingGwei * GWEI;
       const gasAmount = gasNative * rate;
       return { gasAmount };
