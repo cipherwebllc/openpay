@@ -3,9 +3,12 @@
 // /create 下部に表示する「最近の取引 (最新 3 件)」ミニコンポーネント。
 // 店舗が決済直後に入金確認できる導線を提供。フル履歴は /history へ。
 //
-// 設計: useHistory().entries は降順 (最新が index 0) なので slice(0, 3) でそのまま
-// 上位 3 件を取得。0 件時は empty hint を出して /history への link は出さない
-// (まだ取引がないため意味なし)。1 件以上時は footer に「全件を見る → /history」link。
+// 設計: useHistory().entries は降順 (最新が index 0)。standard mode は merchant
+// 送金 tx の直後に OpenPay 利用手数料 tx を追加で append するため、entries は
+// [..., standard-fee, standard-merchant, ...] の順で並ぶ (appendHistory は prepend、
+// 追加順は merchant → fee なので最新が fee)。本 mini 表示では「店主が受け取った金額」
+// だけを見せたいので flow='standard-fee' を filter で除外してから slice(0, 3)。
+// /history のフル表示では fee tx も意味があるので除外しない (HistoryView の責務)。
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -51,7 +54,12 @@ export function MiniHistoryRecent() {
     return <div aria-hidden className="mt-6 h-32" />;
   }
 
-  const recent = entries.slice(0, RECENT_LIMIT);
+  // standard-fee (OpenPay 利用手数料の独立 tx) は merchant への売上ではないので
+  // mini 表示からは除外。standard-merchant + batch + direct のみを最新 N 件として
+  // 表示する。
+  const recent = entries
+    .filter((e) => e.flow !== 'standard-fee')
+    .slice(0, RECENT_LIMIT);
 
   return (
     <section

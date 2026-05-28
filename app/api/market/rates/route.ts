@@ -17,6 +17,14 @@
 
 import { logger } from '@/lib/logger';
 
+// Next 15: revalidate を export すると route が build 時に prerender される。
+// CoinGecko が build 時に到達不能だと fetch reject で `Export encountered an
+// error on /api/market/rates/route` で build 全体が abort する。
+// dynamic='force-dynamic' で prerender を抑止し、毎 request で route handler を
+// 実行する。data cache (下記 fetch の next.revalidate: 300) は引き続き 5 分
+// 間 server-side で revalidate されるので、CoinGecko への upstream は 5 分/region
+// に 1 回程度に圧縮される (build dependency は無くなる)。
+export const dynamic = 'force-dynamic';
 export const revalidate = 300;
 
 const COINGECKO_URL =

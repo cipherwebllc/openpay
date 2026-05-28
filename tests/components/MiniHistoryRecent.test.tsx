@@ -149,6 +149,75 @@ describe('MiniHistoryRecent', () => {
   });
 });
 
+describe('MiniHistoryRecent: standard-fee (OpenPay 利用手数料 tx) は除外', () => {
+  // standard mode は merchant 送金 → OpenPay 利用手数料 の 2 つの entry を
+  // append する。`appendHistory` は prepend なので順序は最新が fee 行。
+  // mini 表示は「店主が受け取った金額」を伝える surface なので、fee 行は
+  // 表示から除外する必要がある (Codex review 2026-05-28 指摘)。
+
+  it('standard-fee + standard-merchant 並びで fee を除外、merchant のみ表示', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        // 最新 (prepend 後の order = [fee, merchant, ...])
+        entry({
+          id: 'fee-1',
+          flow: 'standard-fee',
+          merchantAmount: '5000', // 0.005 USDC (手数料)
+          asset: 'usdc',
+        }),
+        entry({
+          id: 'merch-1',
+          flow: 'standard-merchant',
+          merchantAmount: '1000000', // 1 USDC (sale)
+          asset: 'usdc',
+        }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    // 売上 1 USDC のみ表示、fee 0.005 USDC は除外
+    expect(screen.getByText(/1 USDC/)).toBeInTheDocument();
+    expect(screen.queryByText(/0\.005 USDC/)).toBeNull();
+  });
+
+  it('standard-fee が 3 件混じっても、merchant 系 3 件まで表示される', () => {
+    // 「fee 行が slice の枠を埋める」regression のテスト。asset=usdc を全件に
+    // 明示 (entry() helper の default は jpyc/18dec で、override しないと
+    // merchantAmount=3000000 が 0.000000000003 JPYC として描画されてしまう)。
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({ id: 'fee-3', flow: 'standard-fee', asset: 'usdc', merchantAmount: '5000' }),
+        entry({ id: 'merch-3', flow: 'standard-merchant', asset: 'usdc', merchantAmount: '3000000' }),
+        entry({ id: 'fee-2', flow: 'standard-fee', asset: 'usdc', merchantAmount: '5000' }),
+        entry({ id: 'merch-2', flow: 'standard-merchant', asset: 'usdc', merchantAmount: '2000000' }),
+        entry({ id: 'fee-1', flow: 'standard-fee', asset: 'usdc', merchantAmount: '5000' }),
+        entry({ id: 'merch-1', flow: 'standard-merchant', asset: 'usdc', merchantAmount: '1000000' }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    // 3 件の merchant 売上が全部表示
+    expect(screen.getByText(/3 USDC/)).toBeInTheDocument();
+    expect(screen.getByText(/2 USDC/)).toBeInTheDocument();
+    expect(screen.getByText(/1 USDC/)).toBeInTheDocument();
+    // fee 行 (0.005 USDC) は 1 件も出ない
+    expect(screen.queryByText(/0\.005 USDC/)).toBeNull();
+  });
+
+  it('batch / direct flow は除外されない (gasless は fee が batch に同梱なので 1 entry)', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [
+        entry({ id: 'batch-1', flow: 'batch', merchantAmount: '500000000000000000000' }),
+        entry({ id: 'direct-1', flow: 'direct', merchantAmount: '300000000000000000000' }),
+      ],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />);
+    expect(screen.getByText(/500 JPYC/)).toBeInTheDocument();
+    expect(screen.getByText(/300 JPYC/)).toBeInTheDocument();
+  });
+});
+
 describe('MiniHistoryRecent: status 別ドット色 + a11y label', () => {
   it('success entry → 緑 (bg-emerald-500) + aria-label "成功"', () => {
     useHistoryMock.mockReturnValue({
