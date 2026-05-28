@@ -15,6 +15,7 @@
     "e2e": "playwright test",
     "e2e:local": "NEXT_PUBLIC_NETWORK_ENV=testnet NEXT_PUBLIC_PIMLICO_API_KEY=dummy NEXT_PUBLIC_FEE_RECEIVER_ADDRESS=0x000000000000000000000000000000000000dEaD next build && playwright test",
     "e2e:install": "playwright install --with-deps chromium webkit",
+    "load-test": "node scripts/load-test.mjs",
     "prepare": "husky"
   },
   "lint-staged": {

@@ -17,18 +17,26 @@
 // 2026-05-28 audit 追加検証: heap 6 → 12 GB / --pool=forks --maxForks=1 /
 // --isolate=false いずれも OOM 不解消。OOM タイミングは collect (~600ms) 後の
 // tests phase 内 (0ms 計測 = 最初の test 完了前)。原因は heap 限界ではなく
-// テスト実行中の memory leak (deps reference instability で useEffect が
-// infinite re-run する類の bug の可能性)。
+// module/環境 評価段階の病的メモリ。
+//
+// 2026-05-29 さらに切り分け: (a) 単一ファイル (PaymentForm.test 69 tests) を
+// 8 GB で隔離実行しても tests 0ms で worker 死 = test 数 (規模) ではなく
+// per-file の評価が原因。(b) vi.mock('@/lib/pimlico', importActual) を importActual
+// 無しの full static mock に差し替えても不解消 = pimlico (permissionless + viem
+// account-abstraction) graph が直接の犯人ではない。残る最有力は PaymentForm/
+// CheckoutForm/TipForm 本体が import する viem/wagmi 系 module graph を jsdom worker で
+// 評価→render する際の累積。よって単純なファイル分割では解消しない可能性が高く、
+// mock 層で component の重い import を遮断する再設計が要る。
 //
 // 機能カバレッジ: 該当ファイルが扱う UI 動作は e2e/pay.spec.ts / scan.spec.ts /
-// tip.spec.ts で覆われており、production behavior は実 Playwright で verified。
-// 失われているのは unit-level granularity の regression fence。
+// tip.spec.ts で覆われており、production behavior は実 build + 実 Playwright render で
+// verified (jsdom unit より高 fidelity)。失われているのは unit-level の regression fence。
 //
-// root cause fix の方針 (別 task): 1) describe ブロックごとにファイル分割
-// (PaymentForm.test.tsx 1257 行 → 3 ファイル / 各 ~400 行)、2) 共通 mock を
-// helper に extract、3) 各 describe 単位で leak の犯人 hook を bisect。
-// 「該当 6 ファイルに限り未 run を allow、他ファイルで silent skip が出れば fail」
-// で運用。
+// root cause fix の方針 (別 task、bounded だが不確実): component の重い依存
+// (viem/wagmi/permissionless) を test 境界で完全 mock し jsdom worker に実 graph を
+// 評価させない再設計 + describe 単位の分割。安全に行うには専用 effort が要る。
+// 暫定: 「該当 6 ファイルに限り未 run を allow、他ファイルで silent skip が出れば
+// fail」で運用 (本 allowlist が fence)。
 
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';

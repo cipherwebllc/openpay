@@ -962,6 +962,33 @@ DEPLOY § 3.1 の smoke 全 pass + `verify-production-config.mjs` が `✅ N/N a
 返すことが本番 deploy の go signal。1 件でも ✗ なら upstream env を設定するまで
 deploy 完了とみなさない。
 
+### §11.6 負荷測定 (本格運用前 必須、scripts/load-test.mjs)
+
+ゼロ依存の負荷スクリプトで LP / market-rates API / payment page を重み付き mix で
+叩き、レイテンシ p50/p90/p99・RPS・エラー率を実測する。エラー率 > 上限 or
+p99 > 上限で exit 1 (gate 化可能)。
+
+```bash
+# preview / 本番 URL に対して (deploy 済を対象に):
+npm run load-test -- --url https://open-pay.jp -c 50 -d 30 --max-error-rate 0.01 --max-p99-ms 1500
+# ローカル build で baseline を取る:
+npm run start &  # 別途 build 済前提
+npm run load-test -- --url http://localhost:3000 -c 20 -d 15
+```
+
+ローカル build baseline (2026-05-29 実測、Apple Silicon、concurrency=20 / 12s):
+| scenario | rps | p50 | p90 | p99 | err |
+|---|---|---|---|---|---|
+| LP (/ja) | 308 | 42ms | 53ms | 66ms | 0% |
+| market-rates | 184 | 11ms | 17ms | 35ms | 0% |
+| payment-page | 121 | 34ms | 43ms | 54ms | 0% |
+| **overall** | **613** | — | — | **66ms** | **0%** |
+
+- [ ] **本番/preview URL に対して負荷測定を実行**し、p99 と error_rate が許容範囲か確認
+      (本番は Vercel cold start / network 込みで local より遅くなる前提)。market-rates は
+      CoinGecko 5 分キャッシュ層の挙動 (cache hit/miss 比) を併せて観察。
+- [ ] 想定ピーク同時接続数で error_rate < 1% を確認
+
 ### §11.5 Accepted production risks (現状未対処)
 
 | Risk | 現状の緩和 | 将来の選択肢 |
