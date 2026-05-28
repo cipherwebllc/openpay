@@ -404,6 +404,46 @@ describe('stats: aggregate — chain / token / count / GMV', () => {
     expect(chain.totalFeeWei).toBe('60000000000000000');
   });
 
+  it('Phase 1: feeAmount=0 / undefined の batch・direct・standard-merchant で GMV 計上・totalFeeWei=0', async () => {
+    // Phase 1 (alpha) では決済手数料 0% なので、新規 entry は全て feeAmount=0
+    // (batch / direct は '0'、standard-merchant は undefined) で記録される。
+    // この常態で count / GMV (totalMerchantWei) は正常に積み上がり、totalFeeWei は
+    // 0 のままであることを fence する (fee 集計が誤って merchantAmount を拾わない)。
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({
+          flow: 'batch',
+          result: 'success',
+          merchantAmount: '1000000000000000000', // 1
+          feeAmount: '0',
+        }),
+        makeEntry({
+          flow: 'direct',
+          result: 'success',
+          merchantAmount: '2000000000000000000', // 2
+          feeAmount: '0',
+        }),
+        makeEntry({
+          flow: 'standard-merchant',
+          result: 'success',
+          merchantAmount: '3000000000000000000', // 3
+          feeAmount: undefined,
+        }),
+      ],
+    });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const chain = body.byChain[0];
+    // 3 件すべて 1 logical sale として count (fee tx が無いので standard-fee entry も無し)
+    expect(chain.successCount).toBe(3);
+    // GMV = 1 + 2 + 3 = 6
+    expect(chain.totalMerchantWei).toBe('6000000000000000000');
+    // 決済手数料 0% なので totalFeeWei は厳密に 0
+    expect(chain.totalFeeWei).toBe('0');
+  });
+
   it('巨大 bigint amount (1e30) でも overflow せず正しく加算', async () => {
     // wei は最大 uint256 ~ 1.15e77、JavaScript Number 上限 1.79e308 だが
     // 精度は 2^53 (~9e15) で失われる。BigInt 加算で精度保つことを verify。

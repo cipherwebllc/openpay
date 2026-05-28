@@ -1256,6 +1256,74 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
     expect(result.feeMintTxHash).toBeUndefined();
   });
+
+  it('CCTP: feeAmount=0 では approve=valueAtomic のみ・burn/mint 各 1 本 (Phase 1 既定経路)', async () => {
+    // Phase 1 (alpha) では fee=0 が常態。fee bridge を skip し、approve は
+    // valueAtomic + 0 = valueAtomic のみ (誤って +feeAmount しないこと)、
+    // burn/mint は merchant 宛 1 本ずつ、attestation polling も 1 回だけ。
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      // approve, burn_m, mint_m の 3 tx のみ (fee 系なし)
+      txHashes: ['0xapprove', '0xburn_m', '0xmint_m'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 10_000_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 0n, // fee なし → fee bridge skip
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // approve は valueAtomic のみ (誤って +feeAmount すると 10_000_000 を超える)
+    const approveArg = walletClient.writeContract.mock.calls[0][0] as unknown as {
+      args: [Address, bigint];
+    };
+    expect(approveArg.args[1]).toBe(10_000_000n);
+
+    // burn 1 本 + mint 1 本 = sendTransaction 2 回 (fee 系なし)
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+
+    // 唯一の burn は merchant 宛・全額
+    const burnM = decodeFunctionData({
+      abi: CCTP_V2_TOKEN_MESSENGER_ABI,
+      data: (
+        walletClient.sendTransaction.mock.calls[0][0] as unknown as { data: Hex }
+      ).data,
+    });
+    expect(burnM.args[0]).toBe(10_000_000n);
+    expect((burnM.args[2] as string).toLowerCase()).toContain(
+      RECIPIENT.slice(2).toLowerCase(),
+    );
+
+    // attestation polling は merchant burn の 1 回だけ
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    expect(result.feeBurnTxHash).toBeUndefined();
+    expect(result.feeMintTxHash).toBeUndefined();
+  });
 });
 
 // 2026-05-27 (LARP fix): viem の waitForTransactionReceipt は tx が revert しても

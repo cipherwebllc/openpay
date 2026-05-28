@@ -11,9 +11,12 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
-    // breakdown: 運営手数料は店主負担で顧客は preset そのまま (gas は未接続/見積前で 0)
-    // 「あなたの支払額」 + 「300 JPYC」が breakdown 行に表示される
+    // breakdown: Phase 1 (alpha) は決済手数料 0% なので「OpenPay 利用手数料」行は
+    // 非表示。creatorRow にはチップ満額が出て、顧客は preset そのまま (gas は別)。
+    await expect(page.getByText('クリエイター受取')).toBeVisible();
     await expect(page.getByText('あなたの支払額')).toBeVisible();
+    // fee 行 (feeRow) は feeAmount=0 で hide されている (Phase 1 regression fence)
+    await expect(page.getByText('OpenPay 利用手数料')).toHaveCount(0);
     // gas 行は Pimlico API が未呼出なので「見積取得中…」が表示
     await expect(page.getByText('見積取得中…')).toBeVisible();
     // 未接続なので submit ボタンは t('btnConnect') = 「ウォレットを接続してください」
