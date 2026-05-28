@@ -34,10 +34,15 @@ test.describe('/pay (URL parser smoke)', () => {
     ).toBeVisible();
     // 「ネットワーク手数料: ウォレットで別途支払い」明細
     await expect(page.getByText(/ウォレットで別途/)).toBeVisible();
-    // Phase 1: fee=0 のため merchant 受取 = 10 USDC (請求額そのまま)
-    await expect(page.getByText('10 USDC').first()).toBeVisible();
-    // 旧手数料行は表示されない (Phase 1 fence)
+    // Phase 1: fee=0 のため breakdown の「店主受取」行が請求額そのまま (10 USDC)。
+    // ヘッダーの金額表示と区別するため店主受取行 (Row の div) に scope する。
+    const merchantRow = page
+      .locator('div.justify-between')
+      .filter({ has: page.getByText('店主受取', { exact: true }) });
+    await expect(merchantRow).toContainText('10 USDC');
+    // 旧 fee 行 (0.5%=0.05 USDC) と fee 控除後 merchant 値 (9.95 USDC) は出ない
     expect(await page.getByText('0.05 USDC').count()).toBe(0);
+    expect(await page.getByText('9.95 USDC').count()).toBe(0);
   });
 
   test('legacy alias: mode=direct (旧 URL) → mode=standard と同じ UI に正規化される', async ({
@@ -50,8 +55,12 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(
       page.getByText('通常決済（ガスあり）').first(),
     ).toBeVisible();
-    // Phase 1: fee=0 のため merchant 受取 = 10 USDC
-    await expect(page.getByText('10 USDC').first()).toBeVisible();
+    // Phase 1: fee=0 のため店主受取行 = 10 USDC、fee 控除後の旧値 9.95 は出ない
+    const merchantRow = page
+      .locator('div.justify-between')
+      .filter({ has: page.getByText('店主受取', { exact: true }) });
+    await expect(merchantRow).toContainText('10 USDC');
+    expect(await page.getByText('9.95 USDC').count()).toBe(0);
   });
 
   test('mobile (iPhone 14 / 390px) header で switcher + env badge + back-link が overflow しない', async ({
@@ -82,9 +91,14 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText('通常決済（ガスあり）')).toHaveCount(0);
     // ネットワーク手数料見積行は出る (gasQuote 未取得状態でも label は描画)
     await expect(page.getByText(/ネットワーク手数料見積/).first()).toBeVisible();
-    // Phase 1: fee=0 のため merchant 受取 = 10 USDC
-    await expect(page.getByText('10 USDC').first()).toBeVisible();
-    // 旧手数料行は表示されない (Phase 1 fence)
+    // Phase 1: fee=0 のため店主受取行 = 10 USDC (gasless でも fee 控除なし)。
+    // gas=customer 既定なので gas は顧客支払額に上乗せ、merchant は満額。
+    const merchantRow = page
+      .locator('div.justify-between')
+      .filter({ has: page.getByText('店主受取', { exact: true }) });
+    await expect(merchantRow).toContainText('10 USDC');
+    // 旧 fee 行 (1.0%=0.1 USDC) と fee 控除後 merchant 値 (9.9 USDC) は出ない
     expect(await page.getByText('0.1 USDC').count()).toBe(0);
+    expect(await page.getByText('9.9 USDC').count()).toBe(0);
   });
 });

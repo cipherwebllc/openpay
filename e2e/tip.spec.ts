@@ -12,8 +12,12 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
     // breakdown: Phase 1 (alpha) は決済手数料 0% なので「OpenPay 利用手数料」行は
-    // 非表示。creatorRow にはチップ満額が出て、顧客は preset そのまま (gas は別)。
-    await expect(page.getByText('クリエイター受取')).toBeVisible();
+    // 非表示。creatorRow にはチップ満額 (既定 preset 300、fee 控除なし) が出る。
+    // 既定 preset[0]=300 が選択済なので creator 受取 = 300 JPYC。
+    const creatorRow = page
+      .locator('div.justify-between')
+      .filter({ has: page.getByText('クリエイター受取', { exact: true }) });
+    await expect(creatorRow).toContainText('300 JPYC');
     await expect(page.getByText('あなたの支払額')).toBeVisible();
     // fee 行 (feeRow) は feeAmount=0 で hide されている (Phase 1 regression fence)
     await expect(page.getByText('OpenPay 利用手数料')).toHaveCount(0);
