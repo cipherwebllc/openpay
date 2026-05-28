@@ -9,6 +9,7 @@ import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingTrust } from '@/components/LandingTrust';
+import { MarketRates } from '@/components/MarketRates';
 
 export default async function HomePage({
   params,
@@ -21,6 +22,9 @@ export default async function HomePage({
   return (
     <AppShell>
       <LandingHero />
+      <div className="mt-6">
+        <MarketRates />
+      </div>
       <LandingFeatures />
       <LandingHowItWorks />
       <LandingFaq />

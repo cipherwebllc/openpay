@@ -51,6 +51,14 @@
     "trustBody": "OpenPay is built on industry-standard open technologies: ERC-4337 (account abstraction), ERC-7702 (EOA → smart account delegation), Pimlico bundler/paymaster, permissionless.js, viem / wagmi. All source code is MIT-licensed and public.",
     "trustGithubLabel": "Source code (GitHub)"
   },
+  "Market": {
+    "title": "Market rate (reference)",
+    "loading": "Fetching rate…",
+    "usdcRate": "1 USDC = ¥{rate}",
+    "jpycPeg": "1 JPYC = ¥1.00 (peg 1:1)",
+    "referenceNote": "via CoinGecko · 5-min cache · reference only",
+    "unavailable": "USDC rate is unavailable right now"
+  },
   "Explore": {
     "pageTitle": "Explore",
     "pageDescription": "Curated external services, exchanges, dApps and bridges where JPYC / USDC can be used. Links open external sites.",

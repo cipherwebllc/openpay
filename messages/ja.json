@@ -51,6 +51,14 @@
     "trustBody": "OpenPay は ERC-4337 (Account Abstraction)、ERC-7702 (EOA → smart account 委任)、Pimlico bundler/paymaster、permissionless.js、viem / wagmi など、業界標準のオープン技術で構築されています。コードはすべて MIT ライセンスで公開しています。",
     "trustGithubLabel": "ソースコード (GitHub)"
   },
+  "Market": {
+    "title": "市場レート (参考)",
+    "loading": "レート取得中…",
+    "usdcRate": "1 USDC = ¥{rate}",
+    "jpycPeg": "1 JPYC = ¥1.00 (peg 1:1)",
+    "referenceNote": "※ CoinGecko (5 分キャッシュ) / 参考値",
+    "unavailable": "USDC のレートを取得できませんでした"
+  },
   "Explore": {
     "pageTitle": "探す",
     "pageDescription": "JPYC / USDC が使える外部サービス・取引所・dApp・bridge をカテゴリ別にまとめました。リンクは外部サイトに飛びます。",

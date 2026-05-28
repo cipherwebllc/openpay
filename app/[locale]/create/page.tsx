@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
+import { MarketRates } from '@/components/MarketRates';
 import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
@@ -24,6 +25,10 @@ export default function CreatePage() {
 
   return (
     <AppShell>
+      <div className="mb-4">
+        <MarketRates />
+      </div>
+
       <div className="mb-4 inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 print:hidden">
         {(
           [

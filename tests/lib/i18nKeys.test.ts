@@ -263,6 +263,33 @@ describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   });
 });
 
+describe('i18n: Market 名前空間 (LP / Create の strip, ja/en parity)', () => {
+  const MARKET_KEYS = [
+    'title',
+    'loading',
+    'usdcRate',
+    'jpycPeg',
+    'referenceNote',
+    'unavailable',
+  ] as const;
+  for (const key of MARKET_KEYS) {
+    it(`ja.Market.${key} は非空文字列`, () => {
+      const v = (ja.Market as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.Market.${key} は非空文字列`, () => {
+      const v = (en.Market as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+  it('Market.usdcRate は {rate} placeholder を持つ', () => {
+    expect((ja.Market as Record<string, string>).usdcRate).toContain('{rate}');
+    expect((en.Market as Record<string, string>).usdcRate).toContain('{rate}');
+  });
+});
+
 describe('i18n: Explore 名前空間 (ja/en parity)', () => {
   // /explore page で使う i18n key 集合。badge は nested object なので別途検証。
   const EXPLORE_KEYS = [
