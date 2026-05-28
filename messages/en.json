@@ -8,9 +8,9 @@
     "disconnect": "Disconnect"
   },
   "Landing": {
-    "tagline": "Gasless pay and receive with just a wallet.",
-    "heroLeadline": "One QR. JPYC / USDC payments.",
-    "heroBody": "Multi-chain support. Merchants receive instantly with just one wallet address.",
+    "tagline": "Start with just one wallet address",
+    "heroLeadline": "JPYC / USDC QR payments",
+    "heroBody": "Same-chain transfers settle in just JPYC / USDC; cross-chain USDC payments arrive in the merchant wallet the same way.",
     "ctaScanTitle": "📱 Pay (Scan)",
     "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",
     "ctaScanButton": "Scan to pay",
