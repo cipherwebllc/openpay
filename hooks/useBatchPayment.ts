@@ -20,11 +20,14 @@ import {
 import { useAccount } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
 import { assertGasCeiling } from '@/lib/gasCeiling';
+import { resolveNativeJpycRate } from '@/lib/gasReimbursement';
+import { logger } from '@/lib/logger';
 import {
   buildPaymentLogEvent,
   logPaymentEvent,
   type PaymentLogContext,
 } from '@/lib/paymentLog';
+import { resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 
 type BatchPaymentParams = {
@@ -44,6 +47,8 @@ type BatchPaymentResult = {
   txHash: Hex;
   blockNumber: bigint;
   success: boolean;
+  // UserOp が実際に消費した native gas コスト (wei)。sponsorship 収支の突合に使う。
+  actualGasCost: bigint;
 };
 
 export function useBatchPayment(
@@ -105,6 +110,7 @@ export function useBatchPayment(
         txHash: receipt.receipt.transactionHash,
         blockNumber: receipt.receipt.blockNumber,
         success: receipt.success,
+        actualGasCost: receipt.actualGasCost,
       };
     },
     onSuccess: (data, params) => {
@@ -116,6 +122,12 @@ export function useBatchPayment(
           blockNumber: data.blockNumber,
         }),
       );
+      reconcileSponsorshipGas(
+        deployment,
+        chainId,
+        params.feeAmount,
+        data.actualGasCost,
+      );
     },
     onError: (error, params) => {
       void logPaymentEvent(
@@ -126,6 +138,42 @@ export function useBatchPayment(
       );
     },
   });
+}
+
+// sponsorship 収支の実観測 (案A の units 次元残存リスクの監視)。
+// 運営は native gas を Pimlico sponsorship で立て替え、顧客から JPYC (feeAmount) で
+// 回収する。実 gas (actualGasCost native × native/JPYC rate) が回収額を上回ると
+// その tx は運営赤字 = collect-at-ceiling の units 次元で under-collect が実発生した
+// シグナル。logger.warn は Sentry に送られ、運用 (overhead/rate/ceiling 調整) の
+// トリガになる。erc20 paymaster mode は顧客が実 gas を直接負担するので対象外。
+function reconcileSponsorshipGas(
+  deployment: TokenDeployment,
+  chainId: number | undefined,
+  collectedJpyc: bigint,
+  actualGasCostNative: bigint,
+): void {
+  if (resolvePaymasterMode(deployment) !== 'sponsorship') return;
+  const cid = chainId ?? deployment.chainId;
+  const rate = resolveNativeJpycRate(cid);
+  const actualCostJpyc = actualGasCostNative * rate;
+  const base = {
+    chainId: cid,
+    collectedJpyc: collectedJpyc.toString(),
+    actualGasCostNative: actualGasCostNative.toString(),
+    actualCostJpyc: actualCostJpyc.toString(),
+    rate: rate.toString(),
+  };
+  if (actualCostJpyc > collectedJpyc) {
+    logger.warn('payment.sponsorship.under_collected', {
+      ...base,
+      shortfallJpyc: (actualCostJpyc - collectedJpyc).toString(),
+    });
+  } else {
+    logger.info('payment.sponsorship.gas_reconciled', {
+      ...base,
+      surplusJpyc: (collectedJpyc - actualCostJpyc).toString(),
+    });
+  }
 }
 
 function toCtx(

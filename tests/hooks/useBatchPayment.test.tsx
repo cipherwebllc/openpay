@@ -26,8 +26,21 @@ vi.mock('@/hooks/useSmartAccount', () => ({
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(),
 }));
+// logger は境界モック (sponsorship 収支突合の warn/info を assert するため)。
+vi.mock('@/lib/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+// resolvePaymasterMode を境界モック。reconcile の sponsorship/erc20 分岐を
+// testnet の fallback 挙動に依存せず決定論的に制御する (既定は実装に委譲)。
+vi.mock('@/lib/pimlico', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
+  return { ...actual, resolvePaymasterMode: vi.fn(actual.resolvePaymasterMode) };
+});
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useAccount } from 'wagmi';
+import { logger } from '@/lib/logger';
+import { resolvePaymasterMode } from '@/lib/pimlico';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const TOKEN: Address = getAddress(
@@ -74,6 +87,7 @@ function mountReady(opts?: {
     .mockResolvedValue(`0x${'a'.repeat(64)}` as Hex);
   waitForUserOperationReceipt = vi.fn().mockResolvedValue({
     success: true,
+    actualGasCost: 1_000n,
     receipt: {
       transactionHash: `0x${'b'.repeat(64)}` as Hex,
       blockNumber: 12345n,
@@ -593,6 +607,7 @@ describe('useBatchPayment', () => {
         .mockResolvedValue(`0x${'a'.repeat(64)}` as Hex);
       waitForUserOperationReceipt = vi.fn().mockResolvedValue({
         success: true,
+        actualGasCost: 1_000n,
         receipt: {
           transactionHash: `0x${'b'.repeat(64)}` as Hex,
           blockNumber: 1n,
@@ -682,6 +697,7 @@ describe('useBatchPayment', () => {
       mountReady();
       waitForUserOperationReceipt.mockResolvedValueOnce({
         success: false,
+        actualGasCost: 1_000n,
         receipt: {
           transactionHash: `0x${'f'.repeat(64)}` as Hex,
           blockNumber: 999n,
@@ -888,6 +904,7 @@ describe('useBatchPayment', () => {
       // 既定 receipt は success:true なので、上書きして reverted を演出
       waitForUserOperationReceipt.mockResolvedValueOnce({
         success: false,
+        actualGasCost: 1_000n,
         receipt: { transactionHash: TX, blockNumber: 99n },
       });
       mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER });
@@ -966,6 +983,107 @@ describe('useBatchPayment', () => {
       expect(body.customer).toBeUndefined();
       // chainId は deployment.chainId にフォールバック
       expect(body.chainId).toBe(usdcDep.chainId);
+    });
+  });
+
+  // 案A の units 次元残存リスク (under-collect) の実観測。sponsorship (JPYC) で
+  // 実 gas (actualGasCost × rate) が 徴収 (feeAmount) を上回ったら logger.warn、
+  // 賄えていれば logger.info。erc20 (USDC) は顧客が実 gas を直接負担するので対象外。
+  describe('sponsorship 収支の reconciliation 観測', () => {
+    it('JPYC sponsorship: 実 gas が徴収を上回ると under_collected を warn (Sentry)', async () => {
+      mountReady({ paymasterMode: 'sponsorship' });
+      vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
+      // 実 gas 1_000_000 native × POL rate 20 = 20_000_000 JPYC、徴収は 100 JPYC のみ
+      waitForUserOperationReceipt.mockResolvedValue({
+        success: true,
+        actualGasCost: 1_000_000n,
+        receipt: {
+          transactionHash: `0x${'b'.repeat(64)}` as Hex,
+          blockNumber: 12345n,
+        },
+      });
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 50_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 100n, // 徴収 100 JPYC (実費を大きく下回る)
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      await waitFor(() =>
+        expect(logger.warn).toHaveBeenCalledWith(
+          'payment.sponsorship.under_collected',
+          expect.objectContaining({
+            collectedJpyc: '100',
+            actualGasCostNative: '1000000',
+            actualCostJpyc: '20000000', // 1_000_000 × 20 (POL default rate)
+            shortfallJpyc: '19999900',
+          }),
+        ),
+      );
+    });
+
+    it('JPYC sponsorship: 徴収が実 gas を賄えていれば gas_reconciled を info', async () => {
+      mountReady({ paymasterMode: 'sponsorship' });
+      vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
+      // 実 gas 1_000 native × 20 = 20_000 JPYC、徴収 4e18 (ceiling 基準) で十分カバー
+      waitForUserOperationReceipt.mockResolvedValue({
+        success: true,
+        actualGasCost: 1_000n,
+        receipt: {
+          transactionHash: `0x${'b'.repeat(64)}` as Hex,
+          blockNumber: 12345n,
+        },
+      });
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 50_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 4_000_000_000_000_000_000n, // 4 JPYC (ceiling 基準の典型徴収)
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      await waitFor(() =>
+        expect(logger.info).toHaveBeenCalledWith(
+          'payment.sponsorship.gas_reconciled',
+          expect.objectContaining({
+            collectedJpyc: '4000000000000000000',
+            actualCostJpyc: '20000', // 1_000 × 20
+            surplusJpyc: '3999999999999980000',
+          }),
+        ),
+      );
+    });
+
+    it('USDC erc20: reconciliation は skip (運営は native gas を立て替えないため)', async () => {
+      mountReady({ paymasterMode: 'erc20' });
+      vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 50_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n,
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      // erc20 では sponsorship 観測ログを一切出さない
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        'payment.sponsorship.under_collected',
+        expect.anything(),
+      );
+      expect(logger.info).not.toHaveBeenCalledWith(
+        'payment.sponsorship.gas_reconciled',
+        expect.anything(),
+      );
     });
   });
 });

@@ -551,6 +551,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
         txHash: `0x${'b'.repeat(64)}`,
         blockNumber: 99n,
         success: true,
+        actualGasCost: 0n,
       },
       error: null,
     } as Partial<ReturnType<typeof useBatchPayment>>);
@@ -579,6 +580,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
         txHash: `0x${'d'.repeat(64)}`,
         blockNumber: 100n,
         success: true,
+        actualGasCost: 0n,
       },
       error: null,
     } as Partial<ReturnType<typeof useBatchPayment>>);

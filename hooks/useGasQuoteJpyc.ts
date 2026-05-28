@@ -24,9 +24,12 @@
 // hard-code default にフォールバック。
 
 import { useQuery } from '@tanstack/react-query';
-import { kaia, kairos, polygon, polygonAmoy } from 'viem/chains';
 import { env } from '@/lib/env';
 import { gasCeilingGweiForChain } from '@/lib/gasCeiling';
+import {
+  isJpycSponsorshipChain,
+  resolveNativeJpycRate,
+} from '@/lib/gasReimbursement';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -38,45 +41,12 @@ const GWEI = 10n ** 9n;
 // が大きすぎ UX 悪化したため見直し。
 const DEFAULT_USEROP_GAS_UNITS = 200_000n;
 
-// chain native token → JPYC 換算 default レート (1 native = N JPYC、整数)。
-// **env override が運用 SoT、本 default はサービス起動継続のための fallback**。
-// POL/KAIA は両方 18 decimals なので gasNative (wei) × rate でそのまま JPYC
-// (wei、18 decimals) になる。
-//
-// POL: 20n — 2026-05-23 user 確認の実勢 1 POL = $0.092 = ¥14.6 (1 USD ≈ ¥159
-//   時点) を base、DEPLOY_CHECKLIST §9.5b の policy で +37% over-collect に
-//   丸めた値。POL は履歴的に $0.30-$1.00 までの volatility があるため KAIA より
-//   buffer 厚め。実勢が ±30% 以上 drift したら `NEXT_PUBLIC_POL_JPYC_RATE`。
-//
-// KAIA: 10n — 2026-05-23 user 確認の実勢 1 KAIA = $0.07 = ¥8.21 (1.34 KAIA =
-//   $0.07 から計算) を base、DEPLOY_CHECKLIST §9.5b の policy で +22%
-//   over-collect に丸めた値。drift 監視と env 更新手順は同 docs。
-const DEFAULT_POL_JPYC_RATE = 20n;
-const DEFAULT_KAIA_JPYC_RATE = 10n;
-
-// JPYC sponsorship が動く chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。
-// 該当しない chain では gas を 0 として扱う (UI 表示の defensive、JPYC は元々
-// 4 chain にしか deploy されていないため通常は到達しない)。
-const JPYC_CHAIN_IDS = new Set<number>([
-  polygon.id,
-  polygonAmoy.id,
-  kaia.id,
-  kairos.id,
-]);
-
-function resolveNativeJpycRate(chainId: number): bigint {
-  const isKaia = chainId === kaia.id || chainId === kairos.id;
-  const envRate = isKaia ? env.kaiaJpycRate : env.polJpycRate;
-  if (envRate !== undefined) return BigInt(envRate);
-  return isKaia ? DEFAULT_KAIA_JPYC_RATE : DEFAULT_POL_JPYC_RATE;
-}
-
 export function useGasQuoteJpyc(
   deployment: TokenDeployment,
   enabled: boolean = true,
 ) {
   const isActive = enabled && resolvePaymasterMode(deployment) === 'sponsorship';
-  const isJpycChain = JPYC_CHAIN_IDS.has(deployment.chainId);
+  const isJpycChain = isJpycSponsorshipChain(deployment.chainId);
   const rate = resolveNativeJpycRate(deployment.chainId);
 
   const ceilingGwei = gasCeilingGweiForChain(deployment.chainId);
