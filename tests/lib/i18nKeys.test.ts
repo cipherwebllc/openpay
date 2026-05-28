@@ -339,7 +339,7 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
   // AppShell の BottomNav / TopNav (4 link) と LP 2 大 CTA で使う i18n key 集合。
   // 片方の locale だけ抜けて regression するのを fence する。
   const NAV_KEYS = [
-    'home',
+    'scan',
     'create',
     'history',
     'explore',

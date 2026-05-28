@@ -1,6 +1,6 @@
 {
   "Nav": {
-    "home": "ホーム",
+    "scan": "スキャン",
     "create": "受け取る",
     "history": "履歴",
     "explore": "探す",
@@ -21,9 +21,9 @@
     "featuresTitle": "OpenPay の特長",
     "featuresSubtitle": "登録不要・サーバ預かり無し。Web3 ウォレットだけで完結する決済体験。",
     "featuresGaslessTitle": "ガスレス決済",
-    "featuresGaslessBody": "顧客は POL / ETH を持っていなくても JPYC / USDC で支払えます。OpenPay が Pimlico の ERC-4337 paymaster 経由でガス代を肩代わりし、顧客はトークン残高だけで決済可能。",
+    "featuresGaslessBody": "店主が QR 作成時にガスレス決済モードを選択すると、店主の受取チェーン上で OpenPay が Pimlico の ERC-4337 paymaster 経由でガス代を肩代わりします。顧客は POL / ETH を持っていなくても JPYC / USDC 残高だけで支払えます (cross-chain で別 chain から支払う場合は source chain の gas は通常通り顧客負担)。",
     "featuresMultichainTitle": "マルチチェーン対応",
-    "featuresMultichainBody": "JPYC は Polygon / Kaia、USDC は Base / Arbitrum / Optimism / Polygon / Ethereum で受け取り可能。Circle CCTP V2 で USDC のクロスチェーン支払いも自動。",
+    "featuresMultichainBody": "JPYC は Polygon / Kaia、USDC は Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche で受け取り可能。Circle CCTP V2 で USDC のクロスチェーン支払いも自動。",
     "featuresNoncustodyTitle": "ノンカストディ設計",
     "featuresNoncustodyBody": "売上は OpenPay を経由せず、店舗ウォレットへ直接送金されます。サーバに残高 DB を持たないため、入金後の引き出し承認も不要。",
     "howItWorksTitle": "使い方",
@@ -31,7 +31,7 @@
     "howItWorksMerchantTitle": "🏪 受け取る (店舗)",
     "howItWorksMerchantStep1": "受取ウォレットアドレスを入力",
     "howItWorksMerchantStep2": "金額・通貨・チェーンを選択",
-    "howItWorksMerchantStep3": "QR を印刷してレジに掲示",
+    "howItWorksMerchantStep3": "QR を印刷してレジに掲示、もしくはスマホ・タブレット等の端末に表示してそのまま提示",
     "howItWorksCustomerTitle": "📱 支払う (顧客)",
     "howItWorksCustomerStep1": "右上の「接続」からウォレットを接続",
     "howItWorksCustomerStep2": "店舗 QR を /scan で読み取り",
@@ -639,8 +639,7 @@
       "terms": "利用規約",
       "privacy": "プライバシーポリシー",
       "disclaimer": "免責事項",
-      "tokutei": "特商法表記",
-      "history": "取引履歴"
+      "tokutei": "特商法表記"
     },
     "sourceLink": "ソースコード (GitHub)",
     "xLink": "OpenPay の X (旧 Twitter)"

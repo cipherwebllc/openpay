@@ -21,18 +21,14 @@ export function SiteFooter() {
       : `${LEGAL_ENTITY.copyrightStartYear}-${currentYear}`;
 
   return (
-    <footer className="mx-auto mt-12 w-full max-w-5xl px-4 pb-10 text-center text-xs text-slate-500 print:hidden">
+    // pb は mobile で AppShell の fixed BottomNav (~52px) と被らないよう余裕を取る。
+    // md 以上は BottomNav が消えるため通常 pb-10 で OK。
+    <footer className="mx-auto mt-12 w-full max-w-5xl px-4 pb-24 text-center text-xs text-slate-500 md:pb-10 print:hidden">
       <nav
         aria-label="Legal"
         className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2"
       >
-        <Link
-          href="/history"
-          className="hover:text-slate-700 hover:underline"
-          prefetch={false}
-        >
-          {t('links.history')}
-        </Link>
+        {/* 取引履歴は AppShell のメインメニューにあるため Footer からは外す。 */}
         <Link href="/terms" className="hover:text-slate-700 hover:underline" prefetch={false}>
           {t('links.terms')}
         </Link>

@@ -43,7 +43,8 @@ test.describe('landing / (LP)', () => {
     await page.goto('/ja');
     const bottomNav = page.getByRole('navigation', { name: 'bottom navigation' });
     await expect(bottomNav).toBeVisible();
-    await expect(bottomNav.getByRole('link', { name: /ホーム/ })).toBeVisible();
+    // ホームへの戻りは AppHeader 左上のロゴクリックに集約。Nav 1 slot 目は「スキャン」。
+    await expect(bottomNav.getByRole('link', { name: /スキャン/ })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: /受け取る/ })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: /履歴/ })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: /探す/ })).toBeVisible();
@@ -70,7 +71,8 @@ test.describe('landing / (LP)', () => {
     await expect(page.getByRole('heading', { name: '使い方' })).toBeVisible();
     // merchant 3 step (順序付きリスト内のテキスト)
     await expect(page.getByText('受取ウォレットアドレスを入力')).toBeVisible();
-    await expect(page.getByText('QR を印刷してレジに掲示')).toBeVisible();
+    // step3: 印刷 or スマホ提示 の両パターンを含む文言
+    await expect(page.getByText(/QR を印刷.*スマホ.*タブレット/)).toBeVisible();
     // customer 3 step
     await expect(
       page.getByText('右上の「接続」からウォレットを接続'),

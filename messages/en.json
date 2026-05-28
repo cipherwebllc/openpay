@@ -1,6 +1,6 @@
 {
   "Nav": {
-    "home": "Home",
+    "scan": "Scan",
     "create": "Receive",
     "history": "History",
     "explore": "Explore",
@@ -21,9 +21,9 @@
     "featuresTitle": "Why OpenPay",
     "featuresSubtitle": "No sign-up, no custody. A payment experience built entirely around your Web3 wallet.",
     "featuresGaslessTitle": "Gasless payments",
-    "featuresGaslessBody": "Customers don't need to hold POL or ETH — they can pay with just JPYC / USDC. OpenPay covers gas via Pimlico's ERC-4337 paymaster, so a token balance is all they need.",
+    "featuresGaslessBody": "When the merchant picks gasless mode while building the QR, OpenPay covers gas on the merchant's receive chain via Pimlico's ERC-4337 paymaster. Customers can pay with just JPYC / USDC — no POL or ETH needed (cross-chain source-chain gas is still paid by the customer as usual).",
     "featuresMultichainTitle": "Multi-chain",
-    "featuresMultichainBody": "Receive JPYC on Polygon / Kaia, USDC on Base / Arbitrum / Optimism / Polygon / Ethereum. Circle CCTP V2 handles cross-chain USDC payments automatically.",
+    "featuresMultichainBody": "Receive JPYC on Polygon / Kaia, USDC on Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche. Circle CCTP V2 handles cross-chain USDC payments automatically.",
     "featuresNoncustodyTitle": "Non-custodial by design",
     "featuresNoncustodyBody": "Funds flow straight to the merchant's wallet — OpenPay never holds your balance. No server-side ledger means no withdrawal approvals.",
     "howItWorksTitle": "How it works",
@@ -31,7 +31,7 @@
     "howItWorksMerchantTitle": "🏪 Receive (merchant)",
     "howItWorksMerchantStep1": "Enter your receiving wallet address",
     "howItWorksMerchantStep2": "Pick the amount, token and chain",
-    "howItWorksMerchantStep3": "Print the QR and display it at the register",
+    "howItWorksMerchantStep3": "Print the QR for the register, or show it from a phone / tablet screen",
     "howItWorksCustomerTitle": "📱 Pay (customer)",
     "howItWorksCustomerStep1": "Connect a wallet from the top-right \"Connect\"",
     "howItWorksCustomerStep2": "Scan the merchant QR via /scan",
@@ -639,8 +639,7 @@
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",
       "disclaimer": "Disclaimer",
-      "tokutei": "Business Disclosure",
-      "history": "Transaction history"
+      "tokutei": "Business Disclosure"
     },
     "sourceLink": "Source on GitHub",
     "xLink": "OpenPay on X"

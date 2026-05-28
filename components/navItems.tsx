@@ -7,21 +7,22 @@ import type { LucideIcon } from 'lucide-react';
 import { ScanLine, QrCode, History, Compass } from 'lucide-react';
 
 export type NavItem = {
-  key: 'home' | 'create' | 'history' | 'explore';
-  /** locale prefix を含まない path (空文字 = locale ルート) */
+  key: 'scan' | 'create' | 'history' | 'explore';
+  /** locale prefix を含まない path */
   href: string;
   icon: LucideIcon;
   /** locale prefix を取り除いた path に対する match 判定 */
   matches: (rest: string) => boolean;
 };
 
+// ホームへの戻りは AppHeader 左上のロゴクリックに集約 (Nav からは外す)。
+// 1 slot 目は「スキャン (= 支払う動線)」、それ以外は受取/履歴/探す。
 export const NAV_ITEMS: readonly NavItem[] = [
   {
-    key: 'home',
-    href: '',
+    key: 'scan',
+    href: '/scan',
     icon: ScanLine,
-    matches: (rest) =>
-      rest === '' || rest === '/' || rest === '/scan' || rest.startsWith('/scan/'),
+    matches: (rest) => rest === '/scan' || rest.startsWith('/scan/'),
   },
   {
     key: 'create',
