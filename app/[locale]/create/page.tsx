@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
+import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import type { Locale } from '@/i18n';
@@ -132,6 +133,8 @@ export default function CreatePage() {
           </p>
         </details>
       </section>
+
+      <MiniHistoryRecent />
     </AppShell>
   );
 }

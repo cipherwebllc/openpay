@@ -54,6 +54,9 @@
   "Create": {
     "title": "OpenPay",
     "subtitle": "ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR",
+    "recentHistoryTitle": "最近の取引 (最新 3 件)",
+    "recentHistoryEmpty": "このブラウザにはまだ取引履歴がありません。決済が完了するとここに表示されます。",
+    "recentHistoryViewAll": "全件を見る",
     "tabs": {
       "qr": "決済 QR (店舗)",
       "tip": "Tip widget (クリエイター)"

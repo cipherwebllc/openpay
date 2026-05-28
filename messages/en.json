@@ -54,6 +54,9 @@
   "Create": {
     "title": "OpenPay",
     "subtitle": "Wallet-only setup for merchant gasless payment QR",
+    "recentHistoryTitle": "Recent transactions (latest 3)",
+    "recentHistoryEmpty": "No transaction history in this browser yet. Completed payments will appear here.",
+    "recentHistoryViewAll": "View all",
     "tabs": {
       "qr": "Payment QR (merchant)",
       "tip": "Tip widget (creator)"
