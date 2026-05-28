@@ -393,6 +393,23 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'trustTitle',
     'trustBody',
     'trustGithubLabel',
+    // Benefits section (4 cards × {focal, title, body} + section meta)
+    'benefitsTitle',
+    'benefitsSubtitle',
+    'benefitsAudienceMerchant',
+    'benefitsAudienceCustomer',
+    'benefitsFeeFocal',
+    'benefitsFeeTitle',
+    'benefitsFeeBody',
+    'benefitsCostFocal',
+    'benefitsCostTitle',
+    'benefitsCostBody',
+    'benefitsSettlementFocal',
+    'benefitsSettlementTitle',
+    'benefitsSettlementBody',
+    'benefitsNoSignupFocal',
+    'benefitsNoSignupTitle',
+    'benefitsNoSignupBody',
   ] as const;
 
   for (const key of NAV_KEYS) {

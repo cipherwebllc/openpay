@@ -6,6 +6,7 @@ import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { LandingHero } from '@/components/LandingHero';
 import { LandingFeatures } from '@/components/LandingFeatures';
+import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingTrust } from '@/components/LandingTrust';
@@ -26,6 +27,7 @@ export default async function HomePage({
         <MarketRates />
       </div>
       <LandingFeatures />
+      <LandingBenefits />
       <LandingHowItWorks />
       <LandingFaq />
       <LandingTrust />

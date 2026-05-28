@@ -95,6 +95,32 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
+  test('ja: Benefits セクション — 4 focal text + 「店舗」3 / 「顧客」1 pill', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: '導入メリット' })).toBeVisible();
+    // 4 focal text (ビッグナンバー)
+    await expect(page.getByText('0.5%')).toBeVisible();
+    await expect(page.getByText('¥0')).toBeVisible();
+    await expect(page.getByText('数秒')).toBeVisible();
+    await expect(page.getByText('0 step')).toBeVisible();
+    // 4 title
+    await expect(
+      page.getByRole('heading', { name: '手数料が安い' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '導入コスト 0 円' }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: '即時着金' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '会員登録不要' }),
+    ).toBeVisible();
+    // audience pill: 店舗 3 / 顧客 1
+    expect(await page.getByText('店舗', { exact: true }).count()).toBe(3);
+    expect(await page.getByText('顧客', { exact: true }).count()).toBe(1);
+  });
+
   test('ja: Trust セクションに GitHub link (target=_blank + rel=noopener)', async ({
     page,
   }) => {
