@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import NextImage from 'next/image';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
@@ -24,8 +25,15 @@ export default function HomePage() {
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:py-12">
       <header className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between print:hidden">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            {t('title')}
+          <h1>
+            <NextImage
+              src="/logo.svg"
+              alt={t('title')}
+              width={205}
+              height={48}
+              priority
+              className="h-8 w-auto sm:h-10"
+            />
           </h1>
           <p className="mt-1 text-sm text-slate-500">{t('subtitle')}</p>
         </div>
