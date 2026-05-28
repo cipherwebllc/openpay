@@ -12,10 +12,23 @@
 //
 // KNOWN_BROKEN_FILES: PaymentForm / CheckoutForm / TipForm 系の 6 ファイルは
 // module evaluation 段階で worker OOM し、assertion が一度も走らない (vitest
-// JSON では collect 済だが pass / fail 双方に未集計)。root cause は重量 mock +
-// real hook 評価の組合せで、再構成には複数日の作業が必要。短期 fix として
+// JSON では collect 済だが pass / fail 双方に未集計)。
+//
+// 2026-05-28 audit 追加検証: heap 6 → 12 GB / --pool=forks --maxForks=1 /
+// --isolate=false いずれも OOM 不解消。OOM タイミングは collect (~600ms) 後の
+// tests phase 内 (0ms 計測 = 最初の test 完了前)。原因は heap 限界ではなく
+// テスト実行中の memory leak (deps reference instability で useEffect が
+// infinite re-run する類の bug の可能性)。
+//
+// 機能カバレッジ: 該当ファイルが扱う UI 動作は e2e/pay.spec.ts / scan.spec.ts /
+// tip.spec.ts で覆われており、production behavior は実 Playwright で verified。
+// 失われているのは unit-level granularity の regression fence。
+//
+// root cause fix の方針 (別 task): 1) describe ブロックごとにファイル分割
+// (PaymentForm.test.tsx 1257 行 → 3 ファイル / 各 ~400 行)、2) 共通 mock を
+// helper に extract、3) 各 describe 単位で leak の犯人 hook を bisect。
 // 「該当 6 ファイルに限り未 run を allow、他ファイルで silent skip が出れば fail」
-// で運用。upstream fix (test 分割 / mock 軽量化) は別 task。
+// で運用。
 
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
