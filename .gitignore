@@ -36,3 +36,6 @@ coverage/
 # Claude Code (worktrees, local settings)
 .claude/
 
+# Codex / local MCP tooling config (dev-only, not part of the app)
+.codex/
+
