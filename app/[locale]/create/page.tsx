@@ -67,6 +67,8 @@ export default function CreatePage() {
         </div>
       )}
 
+      <MiniHistoryRecent />
+
       <section
         aria-labelledby="offramp-heading"
         className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:hidden"
@@ -138,8 +140,6 @@ export default function CreatePage() {
           </p>
         </details>
       </section>
-
-      <MiniHistoryRecent />
     </AppShell>
   );
 }
