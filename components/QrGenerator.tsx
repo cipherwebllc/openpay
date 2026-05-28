@@ -735,10 +735,7 @@ export function QrGenerator() {
                 </AdvancedSection>
               )}
 
-              {/* Phase 1 (alpha): OpenPay 利用手数料 0% のため fee 徴収先 section は
-                  撤去。Phase 2 で課金モデル復活時は env.feeReceiver の透明性表示を
-                  ここに復活させる予定 (i18n key feeReceiverHeading/Hint* は messages
-                  に残してある)。 */}
+              {/* fee=0 のため徴収先 section は撤去 (Phase 1 alpha)。 */}
             </SettingsAccordion>
           </div>
         </StepCard>
@@ -905,10 +902,7 @@ export function QrGenerator() {
               <p className="self-start text-xs text-slate-500">
                 {t('eip681Description')}
               </p>
-              {/* Phase 1 (alpha): OpenPay 利用手数料 0% のため EIP-681 経路と
-                  通常 QR の料率差がなく、fee bypass 警告は撤去。Phase 2 で課金
-                  復活時は再表示 (i18n key eip681FeeBypass{Title,Body} は messages
-                  に残してある)。 */}
+              {/* fee=0 のため bypass 警告は撤去 (Phase 1 alpha)。 */}
               <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
               <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
                 {eip681Uri}

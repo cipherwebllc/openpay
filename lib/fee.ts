@@ -1,15 +1,12 @@
 // OpenPay 利用手数料 = amount * FEE_BPS / BPS_DENOM (両 token 共通、最低手数料なし)。
-// Phase 1 (alpha 期間中): FEE_BPS_GASLESS / FEE_BPS_STANDARD は 0n (手数料を徴収しない)。
-// 関数 signature / return shape は維持し、calcFee は常に 0n を返す。Phase 2 で
-// 課金モデル (月額固定 / 利用権販売など、決済額に連動しない方式) を検討予定。
+// Phase 1 (alpha) では FEE_BPS_* = 0n に設定し、calcFee が常に 0n を返す。Phase 2 で
+// 課金モデル (月額固定 / 利用権販売など) 復活時は定数を戻すだけで downstream が追従。
 //
-// 決済モードは 2 種類で、gas 取り扱いが異なる:
-//   - gasless:  OpenPay が gas を肩代わり
-//               + 店主が gasMode で選択するネットワーク手数料見積 (顧客 / 店主負担)
-//   - standard: 顧客 wallet が自前で gas 負担、OpenPay は gas に touch しないため
-//               gasMode は irrelevant
+// 決済モードは 2 種類で gas 取り扱いが異なる:
+//   gasless  — OpenPay が gas を肩代わり、店主が gasMode で負担者を選ぶ
+//   standard — 顧客 wallet が自前で gas 負担、gasMode は irrelevant
 //
-// gasless / gasMode の breakdown (fee=0 なので merchant = amount - gasDeduction のみ):
+// gasless / gasMode の breakdown (fee=0 想定):
 //   gas=customer: customer = amount + gas, merchant = amount
 //   gas=merchant: customer = amount,        merchant = amount - gas
 // gas 内訳 (gasless のみ):
@@ -25,9 +22,6 @@ export type PayMode = 'gasless' | 'standard';
 
 const BPS_DENOM = 10_000n;
 
-// Phase 1 (alpha 期間中): 両モードとも 0n。Phase 2 で課金モデルを再検討する際は
-// 定数だけを書き換えれば downstream は自然に追従する (calcFee → 0n、各 hook の
-// `fee > 0` ガードが自然に dead path から復活)。
 export const FEE_BPS_GASLESS = 0n;
 export const FEE_BPS_STANDARD = 0n;
 

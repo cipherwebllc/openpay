@@ -419,7 +419,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <div className="mt-3 border-t border-slate-200 pt-3">
           <dl className="space-y-1.5">
             <Row label={t('subtotalRow')} value={fmt(totalWei)} />
-            {/* Phase 1 (alpha): feeAmount = 0n のとき手数料行は非表示。 */}
+            {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。 */}
             {breakdown.feeAmount > 0n && (
               <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
             )}

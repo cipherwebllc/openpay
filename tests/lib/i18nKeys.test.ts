@@ -264,43 +264,12 @@ describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   });
 });
 
-describe('i18n: 手数料文言と FEE_BPS_* 定数の drift fence', () => {
-  // 真の source of truth = lib/fee.ts の FEE_BPS_STANDARD / FEE_BPS_GASLESS。
-  // i18n に "0.5%" "1.0%" の文字列が複数 namespace × ja/en で散在しており、定数が
-  // 変わったら test を落として全箇所を同期更新するよう強制する。
-  //
-  // FEE_BPS_STANDARD = 50n → 0.5%、FEE_BPS_GASLESS = 100n → 1.0% (現状)。
-  // 100 BPS = 1%、10 BPS = 0.1% なので pct = Number(bps) / 100、表示は toFixed(1)。
-
-  function bpsToPctString(bps: bigint): string {
-    return `${(Number(bps) / 100).toFixed(1)}%`;
-  }
-
-  const STANDARD_PCT = bpsToPctString(FEE_BPS_STANDARD);
-  const GASLESS_PCT = bpsToPctString(FEE_BPS_GASLESS);
-
-  // ドット区切り path で nested key にアクセス (例: "QrGenerator.advancedSummary.standard")
-  function getByPath(obj: unknown, path: string): unknown {
-    return path.split('.').reduce<unknown>((acc, k) => {
-      if (acc && typeof acc === 'object') {
-        return (acc as Record<string, unknown>)[k];
-      }
-      return undefined;
-    }, obj);
-  }
-
-  // Phase 1 (alpha 期間中) で FEE_BPS_* = 0n に設定。STANDARD_PCT = "0.0%" /
-  // GASLESS_PCT = "0.0%" となり、Phase 1 では UI コピー側の「0.5%」「1.0%」
-  // 文字列をすべて撤去済 (Phase 2 で課金復活時は定数を戻し、PATH 配列を再有効化する)。
-  // 現状は sanity check のみ残し、PATH ベースの contains assertion は dead 化。
-
-  void getByPath; // unused-warn 抑止
-
-  // sanity: 現状値の自己確認 (Phase 1 では 0%)。Phase 2 で 0.5% / 1.0% に戻す際に
-  // この assertion を更新する必要があり、それが意図的な定数変更の fence になる。
-  it('lib/fee.ts の定数 (Phase 1: 0%)', () => {
-    expect(STANDARD_PCT).toBe('0.0%');
-    expect(GASLESS_PCT).toBe('0.0%');
+describe('FEE_BPS_* 定数の drift fence (Phase 1: 0n)', () => {
+  // Phase 1 (alpha) では FEE_BPS_* = 0n。Phase 2 で課金復活時 (定数を非 0 に戻す)
+  // ここが落ち、UI コピー側の「X%」追加 / fee 関連 section の復活を同期させる強制が掛かる。
+  it('両モードとも 0n', () => {
+    expect(FEE_BPS_STANDARD).toBe(0n);
+    expect(FEE_BPS_GASLESS).toBe(0n);
   });
 });
 

@@ -1,21 +1,14 @@
 // 導入メリット (4 cards: 店舗 3 + 顧客 1)。Server Component。
 //
-// LandingFeatures が「技術特長 (gasless / multichain / non-custody)」を伝えるのに
-// 対し、本セクションは「実利・実用メリット (決済手数料・コスト・着金・登録不要)」を
-// ビッグナンバーフォーカル (大きい数字/シンボル) で訴求する。
+// LandingFeatures (技術特長) と差別化して「実利・実用メリット」をビッグナンバー
+// フォーカルで訴求する。レイアウトは mobile 2 col / desktop 4 col。
 //
-// LandingFeatures との視覚差別化:
-// - Features = horizontal 3 col、icon + heading + body
-// - Benefits  = mobile 2 col / desktop 4 col、focal text を中心に据える
+// Fee カード (focal="0%") は「決済額に連動した % 手数料は永久にゼロ」という
+// 個別コミットメントのみを打ち出す (Phase 1 alpha 全体の「OpenPay 利用無料」とは
+// 概念分離 — 将来の月額固定 / 利用権販売は別軸)。決済の媒介ではなくソフト /
+// インフラ提供者という規制論的ポジショニングの強化を兼ねる。
 //
-// Fee カード (focal="0%") は「決済額に連動した % 手数料 = 永久にゼロ」を訴求する。
-// Phase 1 で OpenPay 利用全体が 0% という位置づけだが、ここで強く打ち出すのは
-// 「決済手数料 (= 取引額連動の %)」の永続コミットメントのみ — 将来の月額固定
-// や利用権販売は別軸として、決済額連動の手数料は取らないという宣言は規制論的にも
-// 「決済の媒介ではなくソフト/インフラ提供者」を強化する。
-//
-// audience pill のカラーは LandingHowItWorks (merchant=emerald / customer=blue) と
-// 整合させる。
+// audience pill のカラーは LandingHowItWorks (merchant=emerald / customer=blue) と整合。
 
 import { getTranslations } from 'next-intl/server';
 import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';

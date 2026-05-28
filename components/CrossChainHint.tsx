@@ -38,12 +38,10 @@ export interface CrossChainHintProps {
   targetChainId: number;
   /** merchant 受取 address */
   recipient: Address;
-  /** 請求額 (invoice amount, atomic)。Phase 1 では feeAmount = 0 なので merchant
-   *  宛 1 本のみブリッジ (顧客が source USDC でこの額を支出)。ネットワークガスは
-   *  native (ETH/POL) 別途負担なので USDC 額には含めない。 */
+  /** 請求額 (invoice amount, atomic)。顧客は source USDC でこの額を支出。
+   *  ネットワークガスは native (ETH/POL) 別途負担で USDC 額には含めない。 */
   requiredAtomic: bigint;
-  /** OpenPay 利用料の送り先 (operator)。Phase 1 では feeAmount = 0 のため使われない
-   *  が、Phase 2 復活時の宛先として env から渡し続ける。 */
+  /** OpenPay 利用料の送り先 (operator)。fee=0 (Phase 1 alpha) では使われない。 */
   feeReceiver: Address;
   /** USDC decimals (= 6)。表示で formatUnits に使う */
   displayDecimals: number;
@@ -193,10 +191,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
         selectedOption.kind === 'cctp-v2'
           ? selectedOption.sourceChainId
           : undefined;
-      // Phase 1 (alpha): FEE_BPS_* = 0n のため feeAmount = 0、bridgedAmount =
-      // amount となり、cross-chain は merchant 宛 1 本のみブリッジ。Phase 2 で
-      // 課金復活時は同経路で feeAmount > 0 になり、operator 宛 2 本目のブリッジが
-      // 自動で復活する (execute 側の bridgeFee guard 経由)。
+      // fee=0 (Phase 1) では merchant 宛 1 本のみブリッジ。fee>0 で operator 宛 2 本目が
+      // 自動復活する (execute 側の bridgeFee guard 経由)。
       const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
         props.requiredAtomic,
         'usdc',

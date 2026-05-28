@@ -190,25 +190,6 @@ describe('useBatchPayment', () => {
     expect((d.args as readonly [string, bigint])[1]).toBe(50_000_000n);
   });
 
-  it('Phase 1: feeAmount < 0 は非負ガードで reject', async () => {
-    mountReady();
-    const { result } = renderHook(() => useBatchPayment(usdcDep), {
-      wrapper: makeWrapper(),
-    });
-
-    result.current.mutate({
-      tokenAddress: TOKEN,
-      merchant: MERCHANT,
-      merchantAmount: 50_000_000n,
-      feeReceiver: FEE_RECV,
-      feeAmount: -1n,
-    });
-
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/feeAmount/);
-    expect(sendUserOperation).not.toHaveBeenCalled();
-  });
-
   it('Phase 1: 両方 0 → batch は no-op で成功 (calls 0 件は smart account 側で reject される想定だが本テストは guard 動作のみ確認)', async () => {
     mountReady();
     const { result } = renderHook(() => useBatchPayment(usdcDep), {

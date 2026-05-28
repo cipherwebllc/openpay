@@ -42,12 +42,10 @@ import { resolveDeployment } from '@/lib/tokens';
 export interface UseCrossChainPaymentArgs {
   targetChainId: number;
   /** 請求額 (invoice amount, atomic)。cross-chain では顧客はこの額を source USDC
-   *  で支出。Phase 1 では利用料 0% なので feeAmount = 0、merchant への 1 本
-   *  ブリッジのみ実行される。0n のとき decision は skip (UI 起動時の判断遅延回避)。 */
+   *  で支出。0n のとき decision は skip (UI 起動時の判断遅延回避)。 */
   requiredAtomic: bigint;
   recipient: Address;
-  /** OpenPay 利用料の送り先 (operator)。Phase 1 では feeAmount = 0 なので使われない
-   *  が、Phase 2 で課金モデル復活時の宛先として env から渡し続ける。 */
+  /** OpenPay 利用料の送り先 (operator)。fee=0 (Phase 1 alpha) では使われない。 */
   feeReceiver: Address;
   enabled?: boolean;
 }
@@ -169,11 +167,9 @@ export function useCrossChainPayment(
         setProgress(p);
       };
 
-      // 請求額を merchant 本送金 (bridgedAmount) と OpenPay 利用料 (feeAmount) に
-      // 分割する。Phase 1 (alpha) では FEE_BPS_* = 0n のため feeAmount = 0、
-      // bridgedAmount = requiredAtomic となり実質 merchant への 1 本ブリッジ。
-      // Phase 2 で課金モデル復活時は同じ計算経路で feeAmount > 0 になり、
-      // execute 側の `feeAmount > 0n` 分岐で自動的に 2 本ブリッジに戻る。
+      // 請求額を merchant 本送金 (bridgedAmount) と OpenPay 利用料 (feeAmount) に分割。
+      // fee=0 (Phase 1) では実質 merchant 宛 1 本ブリッジ、fee>0 で execute 側の
+      // bridgeFee guard が operator 宛 2 本目を復活させる。
       const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
         args.requiredAtomic,
         'usdc',

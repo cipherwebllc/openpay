@@ -1,14 +1,12 @@
 'use client';
 
-// 店主送金 + (Phase 1 では skip される) 運営手数料の N 件 ERC20 transfer を
-// 1 UserOp にバッチ化し、片方だけ成功する中間状態を排除する。
+// 店主送金 + (feeAmount>0 のときに) 運営手数料の N 件 ERC20 transfer を 1 UserOp
+// にバッチ化し、片方だけ成功する中間状態を排除する。
 //
-// Phase 1 (alpha): feeAmount = 0n のときは fee transfer call を call 列から除外
-// する。calcFee → 0n を返すため通常パスでは fee = 0n が渡る。Phase 2 で課金
-// モデル復活時は feeAmount > 0 が渡され、自然に fee transfer が batch 内に追加
-// される (本 hook 側のコード変更不要)。
+// Phase 1 (alpha) では calcFee が常に 0n を返すので fee transfer は skip される。
+// Phase 2 で課金モデル復活時は feeAmount > 0 が渡り、自然に batch 内へ復活する。
 //
-// gas ceiling は **両 mode で適用**:
+// gas ceiling は両 mode で適用:
 //   - sponsorship mode: 運営の赤字回避 (フロア手数料が gas spike を吸収できない)
 //   - erc20 mode: 顧客の USDC 出費上限の保護 (Base 1 gwei = 約 1.6 USDC、
 //     spike 時の高額決済を防ぐ)
@@ -61,13 +59,6 @@ export function useBatchPayment(
         throw new Error(
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
-      }
-      // Phase 1: feeAmount = 0n は許容 (calcFee が常に 0n を返す方針)。
-      // Phase 2 で課金モデル復活時は feeAmount > 0 が渡され、call 列に
-      // 自然に追加される (下記 if 分岐の通り)。
-      // 防御: 負値や不正な値は明示的に reject。
-      if (params.feeAmount < 0n) {
-        throw new Error('feeAmount は非負である必要があります');
       }
       const { smartAccountClient, pimlicoClient } = clients;
 

@@ -310,9 +310,8 @@ export const isMainnet = env.networkEnv === 'mainnet';
 // バンドルへ展開されるため、ここで throw すれば deploy 自体を fail させられる。
 // testnet では fallback を許容して開発を阻害しない。
 //
-// NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: Phase 1 (alpha 期間) で決済手数料を 0% 化した
-// ため、fee transfer は発生しない。env は optional に降格 (Phase 2 で利用権販売
-// などの受取先として復活する想定で env 名と env.feeReceiver 経路は維持)。
+// NEXT_PUBLIC_FEE_RECEIVER_ADDRESS は Phase 1 (alpha) で決済手数料 0% 化に伴い
+// 必須 throw を撤去 (optional)。Phase 2 で課金モデル復活時に再有効化する想定。
 if (isMainnet) {
   if (!env.pimlicoApiKey) {
     throw new Error(
