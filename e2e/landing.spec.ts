@@ -77,7 +77,26 @@ test.describe('landing / (LP)', () => {
     await expect(
       page.getByText('右上の「接続」からウォレットを接続'),
     ).toBeVisible();
+    // step 2: 「スキャン」テキストリンクが /scan を指す
+    const scanLink = page.getByRole('link', { name: 'スキャン' });
+    await expect(scanLink).toHaveAttribute('href', '/ja/scan');
     await expect(page.getByText('ウォレットで署名 → 完了')).toBeVisible();
+  });
+
+  test('ja: FAQ-A4 は JPYC EX (jpyc.co.jp) と 受け取る (/create) のテキストリンクを含む', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    // FAQ-Q4 を展開
+    await page.getByText('受け取った JPYC / USDC を日本円に換金するには?').click();
+    const jpycEx = page.getByRole('link', { name: 'JPYC EX' });
+    await expect(jpycEx).toBeVisible();
+    await expect(jpycEx).toHaveAttribute('href', 'https://jpyc.co.jp/');
+    await expect(jpycEx).toHaveAttribute('target', '_blank');
+    await expect(jpycEx).toHaveAttribute('rel', 'noopener noreferrer');
+    // 「受け取る」 link → /ja/create (FAQ 内に同名 link は 1 つだけ)
+    const createLink = page.getByRole('link', { name: '受け取る', exact: true });
+    await expect(createLink).toHaveAttribute('href', '/ja/create');
   });
 
   test('ja: FAQ は <details> で default closed、click で展開される', async ({

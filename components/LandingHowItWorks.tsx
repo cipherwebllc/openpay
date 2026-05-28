@@ -1,19 +1,35 @@
 // 「使い方」: 受取側 (merchant) と支払側 (customer) の 3-step フロー。
 // Server Component。
+//
+// customer step 2 は t.rich() で <scan> tag を /scan へのテキストリンクとして
+// 描画する (一般ユーザに「/scan」path 表記は分かりにくいため)。
 
-import { getTranslations } from 'next-intl/server';
+import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { getLocale, getTranslations } from 'next-intl/server';
 
 export async function LandingHowItWorks() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
 
-  const merchant = [
+  const merchant: ReactNode[] = [
     t('howItWorksMerchantStep1'),
     t('howItWorksMerchantStep2'),
     t('howItWorksMerchantStep3'),
   ];
-  const customer = [
+  const customer: ReactNode[] = [
     t('howItWorksCustomerStep1'),
-    t('howItWorksCustomerStep2'),
+    t.rich('howItWorksCustomerStep2', {
+      scan: (chunks) => (
+        <Link
+          href={`/${locale}/scan`}
+          prefetch={false}
+          className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+        >
+          {chunks}
+        </Link>
+      ),
+    }),
     t('howItWorksCustomerStep3'),
   ];
 

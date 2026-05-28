@@ -1,18 +1,57 @@
 // FAQ アコーディオン。<details> ベースで JS 不要 (Server Component)。
+//
+// faqA4 は t.rich() で 2 つの inline link を埋め込む:
+//   - <jpycEx>: JPYC 公式 (https://jpyc.co.jp/) — JPYC EX label
+//   - <create>: 受け取るページ (/[locale]/create)
+// 「/create」path 直接表記は一般読み手に分かりにくいため、ラベル「受け取る」で
+// 内部 Link に置き換える。
 
-import { getTranslations } from 'next-intl/server';
+import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 
-const QA = [
+type FaqKey = 'faqQ1' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5';
+type FaqAnswerKey = 'faqA1' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5';
+
+const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
   { q: 'faqQ1', a: 'faqA1' },
   { q: 'faqQ2', a: 'faqA2' },
   { q: 'faqQ3', a: 'faqA3' },
   { q: 'faqQ4', a: 'faqA4' },
   { q: 'faqQ5', a: 'faqA5' },
-] as const;
+];
 
 export async function LandingFaq() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
+
+  function renderAnswer(key: FaqAnswerKey): ReactNode {
+    if (key === 'faqA4') {
+      return t.rich(key, {
+        jpycEx: (chunks) => (
+          <a
+            href="https://jpyc.co.jp/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+          >
+            {chunks}
+          </a>
+        ),
+        create: (chunks) => (
+          <Link
+            href={`/${locale}/create`}
+            prefetch={false}
+            className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+          >
+            {chunks}
+          </Link>
+        ),
+      });
+    }
+    return t(key);
+  }
 
   return (
     <section className="mt-14">
@@ -33,7 +72,9 @@ export async function LandingFaq() {
                   aria-hidden
                 />
               </summary>
-              <p className="mt-3 text-sm leading-relaxed text-slate-600">{t(a)}</p>
+              <p className="mt-3 text-sm leading-relaxed text-slate-600">
+                {renderAnswer(a)}
+              </p>
             </details>
           </li>
         ))}
