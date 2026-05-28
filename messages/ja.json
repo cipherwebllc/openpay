@@ -9,8 +9,8 @@
   },
   "Landing": {
     "tagline": "ウォレット 1 つで、ガスレスに支払う・受け取る。",
-    "heroLeadline": "QR ひとつで決済できる、JPYC / USDC 決済ポータル。",
-    "heroBody": "JPYC / USDC を多チェーン対応。顧客はガス代不要、店舗はアドレス 1 つで受け取り。",
+    "heroLeadline": "QRひとつで、JPYC / USDC決済。",
+    "heroBody": "マルチチェーン対応。店舗はウォレットアドレス1つで即座に受け取り。",
     "ctaScanTitle": "📱 支払う (スキャン)",
     "ctaScanBody": "ウォレットを接続して、店舗の QR を読み取り即決済。",
     "ctaScanButton": "スキャンして支払う",

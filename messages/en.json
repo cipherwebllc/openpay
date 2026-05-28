@@ -9,8 +9,8 @@
   },
   "Landing": {
     "tagline": "Gasless pay and receive with just a wallet.",
-    "heroLeadline": "A JPYC / USDC payment portal — one QR to pay, one wallet to receive.",
-    "heroBody": "JPYC / USDC across multiple chains. Customers pay without gas; merchants receive with just a wallet address.",
+    "heroLeadline": "One QR. JPYC / USDC payments.",
+    "heroBody": "Multi-chain support. Merchants receive instantly with just one wallet address.",
     "ctaScanTitle": "📱 Pay (Scan)",
     "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",
     "ctaScanButton": "Scan to pay",
