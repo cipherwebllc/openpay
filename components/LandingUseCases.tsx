@@ -12,9 +12,36 @@
 // Tip widget の存在感を LP にも持たせる狙いも兼ねる (機能としては /create タブで
 // 提供しているが、トップから見えにくかった)。
 
+import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
 
-const USE_CASES = ['1', '2', '3', '4', '5'] as const;
+const USE_CASES = [
+  {
+    id: '1',
+    image: '/landing/usecase-store-event.jpg',
+    altKey: 'useCase1ImageAlt',
+  },
+  {
+    id: '2',
+    image: '/landing/usecase-web3-event.jpg',
+    altKey: 'useCase2ImageAlt',
+  },
+  {
+    id: '3',
+    image: '/landing/usecase-creator-tip.jpg',
+    altKey: 'useCase3ImageAlt',
+  },
+  {
+    id: '4',
+    image: '/landing/usecase-community-dues.jpg',
+    altKey: 'useCase4ImageAlt',
+  },
+  {
+    id: '5',
+    image: '/landing/usecase-popup-payment.jpg',
+    altKey: 'useCase5ImageAlt',
+  },
+] as const;
 
 export async function LandingUseCases() {
   const t = await getTranslations('Landing');
@@ -32,17 +59,27 @@ export async function LandingUseCases() {
           独立して左寄せになる (素直な flow)。デザイン上 6 件目で揃えるよりも
           5 件を本気で並べる方が「内容が薄められない」感を出せる。 */}
       <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {USE_CASES.map((n) => (
+        {USE_CASES.map((useCase) => (
           <li
-            key={n}
-            className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            key={useCase.id}
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
           >
-            <h3 className="text-base font-semibold text-slate-900">
-              {t(`useCase${n}Title`)}
-            </h3>
-            <p className="text-sm leading-relaxed text-slate-600">
-              {t(`useCase${n}Body`)}
-            </p>
+            <Image
+              src={useCase.image}
+              alt={t(useCase.altKey)}
+              width={960}
+              height={540}
+              sizes="(min-width: 1024px) 31vw, (min-width: 640px) 46vw, calc(100vw - 2rem)"
+              className="aspect-video w-full object-cover"
+            />
+            <div className="flex flex-col gap-2 p-5">
+              <h3 className="text-base font-semibold text-slate-900">
+                {t(`useCase${useCase.id}Title`)}
+              </h3>
+              <p className="text-sm leading-relaxed text-slate-600">
+                {t(`useCase${useCase.id}Body`)}
+              </p>
+            </div>
           </li>
         ))}
       </ul>

@@ -5,6 +5,7 @@
 // 描画する (一般ユーザに「/scan」path 表記は分かりにくいため)。
 
 import type { ReactNode } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 
@@ -42,7 +43,18 @@ export async function LandingHowItWorks() {
         <p className="mt-2 text-sm text-slate-600">{t('howItWorksSubtitle')}</p>
       </div>
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-2">
+      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <Image
+          src="/landing/flow-qr-payment.jpg"
+          alt={t('howItWorksVisualAlt')}
+          width={1400}
+          height={788}
+          sizes="(min-width: 1024px) 1024px, calc(100vw - 2rem)"
+          className="h-auto w-full object-cover"
+        />
+      </div>
+
+      <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
           <h3 className="text-base font-semibold text-emerald-900">
             {t('howItWorksMerchantTitle')}
