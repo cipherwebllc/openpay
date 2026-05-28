@@ -132,23 +132,27 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
-  test('ja: Benefits セクション (Phase 1) — 3 focal text + 「店舗」2 / 「顧客」1 pill', async ({
+  test('ja: Benefits セクション (Phase 1) — Fee「0%」永続コミット + 4 focal + 店舗 3 / 顧客 1', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // Phase 1: Fee カード (focal=0.5%) は削除、Cost / Settlement / NoSignup の 3 cards に縮小。
-    // Benefits section に scope して他セクションとの衝突を回避。
+    // Phase 1: Fee カードを「永久 0%」文脈で再構成 (旧 focal="0.5%" の % 訴求は撤去)。
+    // Cost / Settlement / NoSignup と合わせて 4 cards 構成。
     const benefits = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
     await expect(benefits).toBeVisible();
-    // 3 focal text
+    // 4 focal text (ビッグナンバー) — Benefits section 内に scope
+    await expect(benefits.getByText('0%', { exact: true })).toBeVisible();
     await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
     expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);
-    // Fee focal「0.5%」が消えている (Phase 1 fence)
+    // 旧 % 訴求「0.5%」は消えている (Phase 1 regression fence)
     expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
-    // 3 title
+    // 4 title (新 Fee カードは title=「決済手数料ゼロ」、旧「手数料が安い」は消えている)
+    await expect(
+      benefits.getByRole('heading', { name: '決済手数料ゼロ' }),
+    ).toBeVisible();
     await expect(
       benefits.getByRole('heading', { name: '導入コスト 0 円' }),
     ).toBeVisible();
@@ -158,12 +162,11 @@ test.describe('landing / (LP)', () => {
     await expect(
       benefits.getByRole('heading', { name: '会員登録不要' }),
     ).toBeVisible();
-    // 旧 Fee カード title「手数料が安い」が消えている
     expect(
       await benefits.getByRole('heading', { name: '手数料が安い' }).count(),
     ).toBe(0);
-    // audience pill: 店舗 2 / 顧客 1 — Phase 1 で 4→3 cards に縮小
-    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(2);
+    // audience pill: 店舗 3 / 顧客 1 — Phase 1 で再び 4 cards
+    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(3);
     expect(await benefits.getByText('顧客', { exact: true }).count()).toBe(1);
   });
 
