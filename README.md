@@ -158,7 +158,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_NETWORK_ENV` | `testnet` (default) or `mainnet` | yes |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
-| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Fee/operator receiver wallet (unused during the alpha 0% period; reserved for a future Phase 2 pricing model) | optional |
+| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Operator receiver wallet — collects the JPYC gas-reimbursement for sponsored payments (unset → funds burn at 0x...dEaD) | **mainnet** |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect projectId (<https://cloud.reown.com>) | optional |
 | `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain | recommended on prod |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |

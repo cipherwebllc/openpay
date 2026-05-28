@@ -153,7 +153,7 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 
 - `NEXT_PUBLIC_NETWORK_ENV` = `mainnet` (Vercel production)
 - `NEXT_PUBLIC_PIMLICO_API_KEY` 設定済 + balance 残あり
-- `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` (Phase 1 / alpha 期間中は手数料 0% で未使用、optional。Phase 2 の課金モデル復活時に必須化予定)
+- `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定済 (mainnet 必須)。案A で JPYC sponsorship のガス代 reimbursement 送り先として使用。未設定だと 0x...dEaD に永久消失し運営赤字 (build で throw)
 - JPYC v3 contract `0xE7C3...3c29` が 4 chain (Polygon/Sepolia/Avalanche Fuji/Amoy) で alive
 - Sentry breadcrumb は wallet address を含み得るため `sendDefaultPii: false` を維持
 
@@ -913,7 +913,7 @@ graceful skip) で気付けないため、`verify-production-config.mjs` で必�
 | `NEXT_PUBLIC_SENTRY_DSN` | **必須** | browser 側 logger.warn/error が console のみ。本番 error 検知ゼロ (`smart_account.*`, `cross-chain.*`, `payment.*` 全 event 喪失) |
 | `SENTRY_DSN` | **必須** | server side (Route Handler) の error 検知ゼロ。/api/log/payment 等の障害が観測不能 |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | **必須** | gasless 決済全 fail (bundler 認証不能) |
-| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | 任意 | Phase 1 (alpha) は OpenPay 利用手数料 0% のため未使用。Phase 2 で固定額 / 利用権販売など別の課金モデル復活時に必須化予定 (lib/env.ts:guard はその時に再有効化) |
+| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | **必須** | 案A: JPYC sponsorship のガス代 reimbursement 送り先。未設定で build fail (lib/env.ts:guard)。0x...dEaD fallback に送ると運営が立替えた gas を回収できず赤字 |
 | `NEXT_PUBLIC_NETWORK_ENV` | **必須** | `mainnet` 想定 (testnet は preview/dev のみ) |
 | `PIMLICO_SPONSORSHIP_POLICY_ID` | 推奨 | 未設定で sponsorship policy なし運用 (chain ごとの上限なし) |
 | `NEXT_PUBLIC_PAYMENT_LOG_TOKEN` | 任意 | 設定すれば /api/log/payment の auth 強化 |

@@ -1,0 +1,6 @@
+[mcp_servers.hermes]
+command = "hermes"
+args = [
+    "mcp",
+    "serve",
+]

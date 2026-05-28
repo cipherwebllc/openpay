@@ -341,21 +341,22 @@ describe('lib/env (module-load validation)', () => {
 });
 
 describe('mainnet 投入時の silent failure ガード', () => {
-  // Phase 1 (alpha 期間): FEE_BPS_* = 0n のため fee transfer は発生せず、
-  // NEXT_PUBLIC_FEE_RECEIVER_ADDRESS は optional に降格。mainnet で未設定でも
-  // throw しないことを明示する regression fence。Phase 2 で課金復活時に
-  // この test 自体を「throw する」期待値に書き戻す。
-  it('Phase 1: mainnet + FEE_RECEIVER 未設定でも throw しない (alpha 期間中は optional)', async () => {
+  // 案A (collect-at-ceiling): JPYC sponsorship のガス代 reimbursement が
+  // feeReceiver へ送られるため、mainnet で未設定/placeholder だと 0x...dEaD に
+  // 永久消失して運営赤字になる。よって FEE_RECEIVER は mainnet 必須 (build で throw)。
+  it('mainnet + FEE_RECEIVER 未設定 → throw (ガス代 reimbursement の永久消失防止)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
     process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'pol_test';
     process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://example@sentry.io/123';
     delete process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS;
-    await expect(import('@/lib/env')).resolves.toBeDefined();
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_FEE_RECEIVER_ADDRESS/,
+    );
   });
 
-  it('Phase 1: mainnet + FEE_RECEIVER=dEaD placeholder でも throw しない', async () => {
+  it('mainnet + FEE_RECEIVER=dEaD placeholder → throw (fallback 値での deploy 防止)', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
     process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_key';
@@ -363,7 +364,9 @@ describe('mainnet 投入時の silent failure ガード', () => {
     process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://example@sentry.io/123';
     process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
       '0x000000000000000000000000000000000000dead';
-    await expect(import('@/lib/env')).resolves.toBeDefined();
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /NEXT_PUBLIC_FEE_RECEIVER_ADDRESS/,
+    );
   });
 
   it('mainnet + PIMLICO_API_KEY 未設定 → throw (決済 runtime error 防止)', async () => {
