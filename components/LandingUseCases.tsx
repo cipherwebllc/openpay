@@ -18,27 +18,27 @@ import { getTranslations } from 'next-intl/server';
 const USE_CASES = [
   {
     id: '1',
-    image: '/landing/usecase-store-event.jpg',
+    image: '/landing/usecase-store-event.avif',
     altKey: 'useCase1ImageAlt',
   },
   {
     id: '2',
-    image: '/landing/usecase-web3-event.jpg',
+    image: '/landing/usecase-web3-event.avif',
     altKey: 'useCase2ImageAlt',
   },
   {
     id: '3',
-    image: '/landing/usecase-creator-tip.jpg',
+    image: '/landing/usecase-creator-tip.avif',
     altKey: 'useCase3ImageAlt',
   },
   {
     id: '4',
-    image: '/landing/usecase-community-dues.jpg',
+    image: '/landing/usecase-community-dues.avif',
     altKey: 'useCase4ImageAlt',
   },
   {
     id: '5',
-    image: '/landing/usecase-popup-payment.jpg',
+    image: '/landing/usecase-popup-payment.avif',
     altKey: 'useCase5ImageAlt',
   },
 ] as const;

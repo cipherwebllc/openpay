@@ -45,7 +45,7 @@ export async function LandingHowItWorks() {
 
       <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <Image
-          src="/landing/flow-qr-payment.jpg"
+          src="/landing/flow-qr-payment.avif"
           alt={t('howItWorksVisualAlt')}
           width={1400}
           height={788}
