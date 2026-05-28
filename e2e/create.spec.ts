@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('home / (QR generator + Tip widget tab)', () => {
+test.describe('create /create (QR generator + Tip widget tab)', () => {
   test('default タブは決済 QR、QrGenerator が表示される', async ({ page }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await expect(
       page.getByRole('heading', { name: 'OpenPay' }).first(),
     ).toBeVisible();
@@ -16,7 +16,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('Tip widget タブに切り替えると TipEmbedGenerator が表示', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     await expect(
       page.getByRole('heading', { name: /応援を受け取る Tip widget を作成/ }),
@@ -29,7 +29,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('受取アドレス入力 → URL と iframe スニペットが生成される', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill(
@@ -53,7 +53,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   });
 
   test('英語ロケール (/en) でも UI が描画される', async ({ page }) => {
-    await page.goto('/en');
+    await page.goto('/en/create');
     await expect(
       page.getByRole('button', { name: 'Payment QR (merchant)' }),
     ).toBeVisible();
@@ -65,7 +65,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: offramp セクションに JPYC 公式 / SBI VC トレード のリンクが正しい href で描画される', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const offrampHeading = page.getByRole('heading', {
       name: '受け取った通貨を換金',
     });
@@ -112,7 +112,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     // regression が出やすい (例: onClick で setState + preventDefault すると
     // native toggle が壊れる)。chevron transform も assert することで Tailwind の
     // group-open: variant が build で消えた場合の silent UX 劣化を検知。
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const gasHintTitle = page.getByText(
       /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,
     );
@@ -161,7 +161,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     // inline SVG icon (TokenIcon) は decorative なので aria-hidden で a11y tree
     // から消えるが、DOM 上は token row 各々に <svg> として存在し、glyph (¥/$) を
     // 持つ。SVG 描画失敗 (例: import 漏れ、render error) を検知する。
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const offrampSection = page.locator('section[aria-labelledby="offramp-heading"]');
     // 各 row の text に対する SVG sibling を確認
     const jpycRow = offrampSection
@@ -216,7 +216,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
       await route.continue();
     });
 
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     await page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/).fill('vitalik.eth');
 
@@ -249,7 +249,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
     // iPhone 14 viewport (390px) で document.scrollWidth ≤ clientWidth を保証。
     // 負 control: min-w-0 を外すと scrollWidth=859 (2.2x overflow) で fail する。
     test.skip(testInfo.project.name !== 'mobile-safari', 'mobile viewport 専用');
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
@@ -270,7 +270,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('en: offramp セクションは Coinbase + JPYC official、注記/ヒントが両方出る', async ({
     page,
   }) => {
-    await page.goto('/en');
+    await page.goto('/en/create');
     await expect(
       page.getByRole('heading', { name: 'Off-ramp received tokens' }),
     ).toBeVisible();
@@ -293,7 +293,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: Step 1/2/3 の heading badge と Step 3 prominent border が visible', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await expect(page.getByRole('heading', { name: '金額' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '受取先' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'QR コード' })).toBeVisible();
@@ -308,7 +308,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: 高度な設定 を開くと gasless option に「おすすめ」 badge が出る', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     // Step 2 が default open (受取先未設定) なので高度な設定 toggle が見える。
     // accordion はデフォルト閉。click で開く。
     const toggle = page.getByRole('button', { name: /高度な設定/ });
@@ -328,7 +328,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   }) => {
     // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。
     // phase 4a で USDC は Ethereum L1 追加 (4 → 5 chain)。
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
     await expect(step1).toBeVisible();
     // token (JPYC/USDC) ボタンが Step 1 内、JPYC は multi-chain hint
@@ -354,7 +354,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: JPYC + Kaia 選択 → URL に chain=kaia が含まれる', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
     // JPYC は default、Kaia chain button を click
     await step1.getByRole('button', { name: /^Kai/ }).click();
@@ -374,7 +374,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: Step 2 は collapsible — 受取先入力後に手動で折り畳むと summary が出る', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const step2Toggle = page.getByRole('button', { name: /^受取先/ });
     // 初期 (LocalStorage 空) は default open
     await expect(step2Toggle).toHaveAttribute('aria-expanded', 'true');
@@ -394,7 +394,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: QR 生成時の Print ボタンは brand color (primary CTA) + Printer アイコン', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     // 必要項目を入力 → Step 3 で QR + Print ボタンが現れる
     await page
       .getByPlaceholder(/0x\.\.\./)
@@ -413,7 +413,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: Footer poweredBy は soft 文言で表示、技術詳細は <details> 展開で出る', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const footer = page.locator('footer');
     // soft 文言 (default visible)
     await expect(
@@ -436,7 +436,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: Step 2 toggle は Enter / Space キーで開閉できる (a11y)', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const toggle = page.getByRole('button', { name: /^受取先/ });
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     // 受取先を入力 (これで初期 state は確定し、以降は手動 toggle のみ)
@@ -460,7 +460,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: Step 2 toggle の ChevronDown は open/close で実 CSS transform が変わる', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     const toggle = page.getByRole('button', { name: /^受取先/ });
     // closed → chevron は未 rotate (matrix identity or none)
     await page
@@ -488,7 +488,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: 高度な設定 summary は日本語文 + 旧 mono トークンが見えない', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     // default 状態 (gasless + customer) で「ガス代：お客様負担」が closed summary に出る
     const toggle = page.getByRole('button', { name: /高度な設定/ });
     await expect(toggle).toBeVisible();
@@ -503,7 +503,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: 手数料徴収先アドレスは default visible でなく、高度な設定 開で出現', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     // 「OpenPay 利用手数料の徴収先」 heading は default 状態 (Step 2 open +
     // 高度な設定 closed) では visible ではない。
     await expect(
@@ -519,7 +519,7 @@ test.describe('home / (QR generator + Tip widget tab)', () => {
   test('ja: 受取先入力 → reload → Step 2 が default 折り畳まれる (returning user)', async ({
     page,
   }) => {
-    await page.goto('/ja');
+    await page.goto('/ja/create');
     await page
       .getByPlaceholder(/0x\.\.\./)
       .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');

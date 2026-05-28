@@ -78,24 +78,24 @@ describe('i18n: onramp keys (3 form 名前空間 × ja/en)', () => {
   }
 });
 
-describe('i18n: Home.offramp キー (ja/en parity)', () => {
+describe('i18n: Create.offramp キー (ja/en parity)', () => {
   for (const key of OFFRAMP_KEYS) {
-    it(`ja.Home.offramp.${key} は非空文字列`, () => {
-      const v = (ja.Home.offramp as Record<string, unknown>)[key];
+    it(`ja.Create.offramp.${key} は非空文字列`, () => {
+      const v = (ja.Create.offramp as Record<string, unknown>)[key];
       expect(typeof v).toBe('string');
       expect(v).not.toBe('');
     });
 
-    it(`en.Home.offramp.${key} は非空文字列`, () => {
-      const v = (en.Home.offramp as Record<string, unknown>)[key];
+    it(`en.Create.offramp.${key} は非空文字列`, () => {
+      const v = (en.Create.offramp as Record<string, unknown>)[key];
       expect(typeof v).toBe('string');
       expect(v).not.toBe('');
     });
   }
 
   it('Home.offramp.row は {token} placeholder を持つ', () => {
-    expect(ja.Home.offramp.row).toContain('{token}');
-    expect(en.Home.offramp.row).toContain('{token}');
+    expect(ja.Create.offramp.row).toContain('{token}');
+    expect(en.Create.offramp.row).toContain('{token}');
   });
 });
 
@@ -252,13 +252,64 @@ describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
     }
   });
 
-  it('Home.offramp キー集合が ja と en で一致', () => {
+  it('Create.offramp キー集合が ja と en で一致', () => {
     const jaKeys = OFFRAMP_KEYS.filter(
-      (k) => k in (ja.Home.offramp as Record<string, unknown>),
+      (k) => k in (ja.Create.offramp as Record<string, unknown>),
     );
     const enKeys = OFFRAMP_KEYS.filter(
-      (k) => k in (en.Home.offramp as Record<string, unknown>),
+      (k) => k in (en.Create.offramp as Record<string, unknown>),
     );
     expect(jaKeys.sort()).toEqual(enKeys.sort());
   });
+});
+
+describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () => {
+  // AppShell の BottomNav / TopNav (4 link) と LP 2 大 CTA で使う i18n key 集合。
+  // 片方の locale だけ抜けて regression するのを fence する。
+  const NAV_KEYS = [
+    'home',
+    'create',
+    'history',
+    'explore',
+    'connect',
+    'disconnect',
+  ] as const;
+  const LANDING_KEYS = [
+    'tagline',
+    'heroLeadline',
+    'heroBody',
+    'ctaScanTitle',
+    'ctaScanBody',
+    'ctaScanButton',
+    'ctaCreateTitle',
+    'ctaCreateBody',
+    'ctaCreateButton',
+    'wipNote',
+  ] as const;
+
+  for (const key of NAV_KEYS) {
+    it(`ja.Nav.${key} は非空文字列`, () => {
+      const v = (ja.Nav as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.Nav.${key} は非空文字列`, () => {
+      const v = (en.Nav as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+
+  for (const key of LANDING_KEYS) {
+    it(`ja.Landing.${key} は非空文字列`, () => {
+      const v = (ja.Landing as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.Landing.${key} は非空文字列`, () => {
+      const v = (en.Landing as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
 });

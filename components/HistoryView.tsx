@@ -4,7 +4,6 @@
 // page.tsx は server component で metadata だけ管理し、ここを mount する。
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { HISTORY_MAX_ENTRIES, removeHistoryEntry } from '@/lib/history';
 import { useHistory } from '@/hooks/useHistory';
@@ -33,16 +32,10 @@ export function HistoryView() {
   }, [entries, filter]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-3xl px-4 py-8 sm:py-10">
-      <header className="mb-6 flex items-center justify-between text-xs text-slate-500">
-        <Link href="/" className="hover:text-slate-700" prefetch={false}>
-          {t('back')}
-        </Link>
-      </header>
-
+    <div className="mx-auto w-full max-w-3xl">
       <section className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">{t('pageTitle')}</h1>
+          <h2 className="text-xl font-bold text-slate-900">{t('pageTitle')}</h2>
           <p className="mt-1 text-sm text-slate-600">{t('pageDescription')}</p>
         </div>
 
@@ -76,6 +69,6 @@ export function HistoryView() {
           </ul>
         )}
       </section>
-    </main>
+    </div>
   );
 }

@@ -1,5 +1,25 @@
 {
-  "Home": {
+  "Nav": {
+    "home": "ホーム",
+    "create": "受け取る",
+    "history": "履歴",
+    "explore": "探す",
+    "connect": "接続",
+    "disconnect": "切断"
+  },
+  "Landing": {
+    "tagline": "Web3 ウォレットで、ガスレスに支払う・受け取る。",
+    "heroLeadline": "QR ひとつで決済できる、Web3 決済ポータル。",
+    "heroBody": "JPYC / USDC を多チェーン対応。顧客はガス代不要、店舗はアドレス 1 つで受け取り。",
+    "ctaScanTitle": "📱 支払う (スキャン)",
+    "ctaScanBody": "ウォレットを接続して、店舗の QR を読み取り即決済。",
+    "ctaScanButton": "スキャンして支払う",
+    "ctaCreateTitle": "🏪 受け取る (決済 QR を作る)",
+    "ctaCreateBody": "受取アドレスと金額を入力するだけ。印刷可能な決済 QR を生成。",
+    "ctaCreateButton": "QR を作成する",
+    "wipNote": "機能紹介・市場情報・取引履歴・外部サービスへの導線は順次拡充予定です。"
+  },
+  "Create": {
     "title": "OpenPay",
     "subtitle": "ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR",
     "tabs": {
@@ -499,7 +519,7 @@
     "pageTitle": "スキャンして支払う",
     "pageSubtitle": "事前にウォレットを接続しておけば、レジでは QR を読むだけで決済を完了できます。",
     "connectionTitle": "ウォレットの状態",
-    "connectionPreHint": "あらかじめウォレットを接続しておくと、レジ前で「読む → 署名」の 2 ステップで決済できます。",
+    "connectionPreHint": "右上の「接続」ボタンからウォレットを接続しておくと、レジ前で「読む → 署名」の 2 ステップで決済できます。",
     "connectionReadyHint": "接続済みです。あとは QR を読むだけ。",
     "balancesTitle": "保有残高",
     "balancesLoading": "残高を確認中…",

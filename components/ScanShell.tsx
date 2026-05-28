@@ -15,8 +15,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { useAccount, useDisconnect } from 'wagmi';
-import { ConnectButton } from './ConnectButton';
+import { useAccount } from 'wagmi';
 import { PwaInstallHint } from './PwaInstallHint';
 import { QrScannerSurface } from './QrScannerSurface';
 import { WalletBalances } from './WalletBalances';
@@ -28,13 +27,10 @@ import { logger } from '@/lib/logger';
 
 export function ScanShell() {
   const t = useTranslations('Scan');
-  // ConnectButton.disconnect (切断 / Disconnect) を流用 — 専用 Scan 側 key 不要。
-  const tConnect = useTranslations('ConnectButton');
   const router = useRouter();
   const locale = useLocale() as Locale;
   const origin = useOrigin();
   const { address, isConnected, chain } = useAccount();
-  const { disconnect } = useDisconnect();
   const [lastResult, setLastResult] = useState<ScanAction | null>(null);
 
   // useQrScanner が onDecode を ref で持つため useCallback は不要 (毎 render で
@@ -89,8 +85,8 @@ export function ScanShell() {
           {t('connectionTitle')}
         </h2>
         {isConnected && address ? (
-          // emerald badge = ready 状態の強調。隣に小さな切断 btn を置き、別 wallet
-          // への切替動線を確保する (切断→未接続 branch へ自動切替→ ConnectButton 再描画)。
+          // 接続/切断は AppHeader 右上の WalletBadge に集約。ここでは ready 状態の
+          // 強調 (emerald badge) と保有残高だけを表示する。
           <>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
               <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
@@ -100,13 +96,6 @@ export function ScanShell() {
                   <span className="text-emerald-600/70">/ {chain.name}</span>
                 )}
               </span>
-              <button
-                type="button"
-                onClick={() => disconnect()}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                {tConnect('disconnect')}
-              </button>
               <span className="text-xs text-slate-500">
                 {t('connectionReadyHint')}
               </span>
@@ -114,9 +103,8 @@ export function ScanShell() {
             <WalletBalances />
           </>
         ) : (
-          <div className="mt-2 space-y-2">
+          <div className="mt-2">
             <p className="text-xs text-slate-500">{t('connectionPreHint')}</p>
-            <ConnectButton />
           </div>
         )}
       </section>

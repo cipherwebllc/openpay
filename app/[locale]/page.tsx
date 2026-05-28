@@ -1,221 +1,74 @@
-'use client';
+// トップページ = 紹介 LP。Server Component (LCP / SEO 優先)。
+// 「📱 支払う (スキャン)」と「🏪 受け取る (決済 QR を作る)」の 2 CTA をファースト
+// ビューに並列で配置する。AppShell が client component のため、children として
+// server-rendered コンテンツを渡す pattern (Next 15 で標準サポート)。
+//
+// Phase 1 の本ファイルは骨格 (Hero + 2 CTA + 暫定 WIP note)。Phase 2 で features /
+// FAQ / 信頼性セクション、Phase 5 で MarketRates を追加する。
 
-import { useState } from 'react';
 import Link from 'next/link';
-import NextImage from 'next/image';
-import { useLocale, useTranslations } from 'next-intl';
-import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
-import { LocaleSwitcher } from '@/components/LocaleSwitcher';
-import { QrGenerator } from '@/components/QrGenerator';
-import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
-import type { Locale } from '@/i18n';
-import { env } from '@/lib/env';
-import { getExchangeLink } from '@/lib/links';
-import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
+import { getTranslations, setRequestLocale } from 'next-intl/server';
+import { ScanLine, QrCode } from 'lucide-react';
+import { AppShell } from '@/components/AppShell';
 
-type Tab = 'qr' | 'tip';
-
-export default function HomePage() {
-  const [tab, setTab] = useState<Tab>('qr');
-  const t = useTranslations('Home');
-  const tScan = useTranslations('Scan');
-  const locale = useLocale() as Locale;
+export default async function HomePage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
+  const t = await getTranslations('Landing');
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:py-12">
-      <header className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between print:hidden">
-        <div>
-          <h1>
-            <NextImage
-              src="/logo.svg"
-              alt={t('title')}
-              width={205}
-              height={48}
-              priority
-              className="h-8 w-auto sm:h-10"
-            />
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">{t('subtitle')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-          <LocaleSwitcher />
-          <span className="rounded-full bg-slate-200 px-2 py-1 font-mono">
-            {env.networkEnv}
-          </span>
-        </div>
-      </header>
-
-      {/* Phase 1 experimental: 「事前接続して、レジで scan → sign」UX の入り口。
-          仮説検証期間中 (memory: feedback_demand_first.md)、demand-gated で
-          home からの 1 動線のみ提供する。需要 signal が出なければ rollback 容易。 */}
-      <Link
-        href={`/${locale}/scan`}
-        prefetch={false}
-        className="mb-4 block rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 transition hover:border-blue-300 hover:bg-blue-100 print:hidden"
-      >
-        <p className="text-sm font-semibold text-blue-900">
-          {tScan('homeCta.title')}
-        </p>
-        <p className="mt-1 text-xs text-blue-800">
-          {tScan('homeCta.body')}
-        </p>
-        <span className="mt-2 inline-block rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
-          {tScan('homeCta.button')} →
-        </span>
-      </Link>
-
-      <div className="mb-4 inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 print:hidden">
-        {(
-          [
-            ['qr', t('tabs.qr')],
-            ['tip', t('tabs.tip')],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${
-              tab === id
-                ? 'bg-white text-brand-dark shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* qr タブ: QrGenerator 内部で StepCard (border/bg/shadow を各 card が持つ)
-          を 3 つ並べるので、ここでは外側 wrapper を持たない。
-          tip タブ: TipEmbedGenerator は単一 form のため従来通り 1 つの outer card で包む。 */}
-      {tab === 'qr' ? (
-        <QrGenerator />
-      ) : (
-        // tip タブは TipEmbedGenerator 内部が StepCard を並べるので、qr タブと同様に
-        // 外側 card で包まない (card-in-card 回避)。見出しは素の header として出す。
-        <div className="space-y-5">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800">
-              {t('tipPanel.heading')}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {t('tipPanel.subheading')}
-            </p>
-          </div>
-          <TipEmbedGenerator />
-        </div>
-      )}
-
-      <section
-        aria-labelledby="offramp-heading"
-        className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:hidden"
-      >
-        <h2
-          id="offramp-heading"
-          className="flex items-center gap-2 text-base font-semibold text-slate-800"
-        >
-          <ArrowRightLeft className="h-5 w-5 text-brand" aria-hidden />
-          {t('offramp.heading')}
+    <AppShell>
+      <section className="mx-auto max-w-3xl pt-2 text-center sm:pt-6">
+        <p className="text-sm font-medium text-brand">{t('tagline')}</p>
+        <h2 className="mt-2 text-3xl font-bold leading-tight text-slate-900 sm:text-4xl">
+          {t('heroLeadline')}
         </h2>
-        <p className="mt-1 text-[11px] text-slate-400">{t('offramp.subheading')}</p>
-        <ul className="mt-3 space-y-2">
-          {TOKEN_SYMBOLS.map((token) => {
-            const link = getExchangeLink(token, locale);
-            return (
-              <li
-                key={token}
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
-              >
-                <TokenIcon token={token} />
-                <span className="text-slate-700">
-                  {t('offramp.row', { token: token.toUpperCase() })}
-                </span>
-                <a
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-brand hover:underline"
-                >
-                  {link.label} ↗
-                </a>
-                {link.jaResidentsOnly && (
-                  <span className="text-xs text-slate-500">
-                    {t('offramp.jaResidentsOnlyNote')}
-                  </span>
-                )}
-                {link.blocksJapaneseResidents && (
-                  <span className="text-xs text-slate-500">
-                    {t('offramp.japaneseUserHint')}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-        <p className="mt-3 text-[11px] text-slate-400">{t('offramp.hint')}</p>
-
-        {/* JPYC-only / POL 残高ゼロの novice 店主向け迂回路 (memory:
-            project_jpyc_only_users.md)。顧客側は OpenPay の gasless で救済済だが、
-            受取後の cash-out 経路にも同じ詰みがあるので MetaMask Swap (gasless meta-tx)
-            を案内する。MetaMask 提供機能なので OpenPay は責任範囲外と disclaimer 明示。
-            UX 簡潔化: 4 段の長文を <details> 折り畳みに変更。常時露出は icon + title +
-            chevron のみ、user が必要に応じて展開。e2e の title regex は summary 内に残存。 */}
-        <details className="group mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 open:pb-4">
-          <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold">
-            <Fuel className="h-4 w-4" aria-hidden />
-            <span className="flex-1">{t('offramp.gasHint.title')}</span>
-            <ChevronRight
-              className="h-3.5 w-3.5 transition-transform group-open:rotate-90"
-              aria-hidden
-            />
-          </summary>
-          <p className="mt-2 leading-relaxed">{t('offramp.gasHint.body')}</p>
-          <a
-            href="https://portfolio.metamask.io/swap"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-block font-medium text-amber-900 underline hover:text-amber-700"
-          >
-            {t('offramp.gasHint.linkLabel')} ↗
-          </a>
-          <p className="mt-2 text-[11px] text-amber-800">
-            {t('offramp.gasHint.disclaimer')}
-          </p>
-        </details>
+        <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-600 sm:text-base">
+          {t('heroBody')}
+        </p>
       </section>
 
-    </main>
-  );
-}
+      <section className="mt-8 grid gap-4 sm:mt-10 sm:grid-cols-2">
+        <Link
+          href={`/${locale}/scan`}
+          prefetch={false}
+          className="group flex flex-col gap-3 rounded-3xl border border-blue-200 bg-blue-50 p-6 shadow-sm transition hover:border-blue-300 hover:bg-blue-100 sm:p-7"
+        >
+          <div className="flex items-center gap-2 text-blue-900">
+            <ScanLine className="h-6 w-6" aria-hidden />
+            <h3 className="text-lg font-semibold sm:text-xl">
+              {t('ctaScanTitle')}
+            </h3>
+          </div>
+          <p className="text-sm text-blue-800">{t('ctaScanBody')}</p>
+          <span className="mt-auto inline-flex w-fit items-center gap-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition group-hover:bg-blue-700">
+            {t('ctaScanButton')} →
+          </span>
+        </Link>
 
-// 通貨記号入りの円形 token icon。JPYC=¥/円 (青)、USDC=$ (緑系)。
-// lucide には JPYC/USDC の token icon 相当がないため独自 SVG で残す。
-// 文字を Tailwind の text-color で塗り分けると flex 内で sibling text と色が
-// 競合するため、SVG の fill だけで完結させる。
-function TokenIcon({ token }: { token: TokenSymbol }) {
-  const fg = token === 'jpyc' ? '#1e40af' : '#047857';
-  const bg = token === 'jpyc' ? '#dbeafe' : '#d1fae5';
-  const glyph = token === 'jpyc' ? '¥' : '$';
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      aria-hidden
-    >
-      <circle cx="12" cy="12" r="11" fill={bg} stroke={fg} strokeWidth="1.2" />
-      <text
-        x="12"
-        y="16.5"
-        textAnchor="middle"
-        fontSize="14"
-        fontWeight="700"
-        fill={fg}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-      >
-        {glyph}
-      </text>
-    </svg>
+        <Link
+          href={`/${locale}/create`}
+          prefetch={false}
+          className="group flex flex-col gap-3 rounded-3xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-100 sm:p-7"
+        >
+          <div className="flex items-center gap-2 text-emerald-900">
+            <QrCode className="h-6 w-6" aria-hidden />
+            <h3 className="text-lg font-semibold sm:text-xl">
+              {t('ctaCreateTitle')}
+            </h3>
+          </div>
+          <p className="text-sm text-emerald-800">{t('ctaCreateBody')}</p>
+          <span className="mt-auto inline-flex w-fit items-center gap-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition group-hover:bg-emerald-700">
+            {t('ctaCreateButton')} →
+          </span>
+        </Link>
+      </section>
+
+      <p className="mt-10 text-center text-xs text-slate-400">{t('wipNote')}</p>
+    </AppShell>
   );
 }

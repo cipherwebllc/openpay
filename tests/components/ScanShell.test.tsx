@@ -122,25 +122,27 @@ function decode(data: string) {
   });
 }
 
-// wagmi (useAccount/useDisconnect) は boundary mock。本 describe は React 分岐
-// と event wiring のみ verify、実 connector 切断は wagmi 責務 + 本 repo の e2e
-// 範囲外 (playwright.config.ts 注記参照)。
+// wagmi (useAccount) は boundary mock。本 describe は React 分岐と event wiring の
+// 検証に絞る。Connect/Disconnect は AppHeader の WalletBadge に集約されたため
+// ScanShell には connect/disconnect ボタンが存在しないことを regression guard する。
 describe('ScanShell: 接続状態表示', () => {
-  it('未接続 → connectionPreHint と ConnectButton を表示', () => {
+  it('未接続 → connectionPreHint (右上の接続ボタンから...) を表示、inline ConnectButton は無い', () => {
     mockConnected(false);
     renderWithIntl(<ScanShell />);
-    expect(screen.getByText(/あらかじめウォレットを接続/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+    expect(screen.getByText(/右上の「接続」ボタンから/)).toBeInTheDocument();
+    // Connect/Disconnect は AppHeader 担当 → ScanShell には inline button が無い
+    expect(screen.queryByRole('button', { name: 'MetaMask' })).toBeNull();
   });
 
-  it('接続済み → shortAddress + chain 名 + ready hint + 切断ボタンを表示', () => {
+  it('接続済み → shortAddress + chain 名 + ready hint を表示 (inline 切断 btn は無い)', () => {
     mockConnected(true);
     renderWithIntl(<ScanShell />);
     expect(screen.getByText(/接続済みです/)).toBeInTheDocument();
     expect(screen.getByText(/Base Sepolia/)).toBeInTheDocument();
     expect(screen.getByText(/0x52d4…cA81/)).toBeInTheDocument();
-    // 切断ボタンが badge の隣に出ること (UX: 別 wallet に切替できる)
-    expect(screen.getByRole('button', { name: '切断' })).toBeInTheDocument();
+    // 切断は AppHeader 側の WalletBadge に集約 → ScanShell には button が無い
+    expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
   });
 
   it('接続済みで chain が undefined → chain 名は描画されず address のみ表示', () => {
@@ -150,28 +152,16 @@ describe('ScanShell: 接続状態表示', () => {
     expect(screen.getByText(/0x52d4…cA81/)).toBeInTheDocument();
     // "/ <chain>" の slash 区切りが描画されないこと
     expect(screen.queryByText(/\/ Base Sepolia/)).toBeNull();
-    // chain が立っていなくても切断ボタンは出る (再接続でやり直す動線確保)
-    expect(screen.getByRole('button', { name: '切断' })).toBeInTheDocument();
   });
 
-  it('接続済み → 切断ボタン click で useDisconnect.disconnect() が呼ばれる', () => {
-    const { disconnect } = mockConnected(true);
-    renderWithIntl(<ScanShell />);
-    fireEvent.click(screen.getByRole('button', { name: '切断' }));
-    expect(disconnect).toHaveBeenCalledTimes(1);
-  });
-
-  it('en locale: 接続済み → 切断ボタンの label が "Disconnect"', () => {
-    mockConnected(true);
-    renderWithIntl(<ScanShell />, { locale: 'en' });
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
-  });
-
-  it('未接続 branch では切断 btn が DOM に居ない (regression guard)', () => {
-    // 未接続時に「切断」label を持つ btn が ConnectButton 経由でも漏れていない
-    // ことを明示。Branch を誤って常時 disconnect btn 出す実装に regress させたら
-    // ここが落ちる。
+  it('未接続/接続済の両 branch で切断 btn が DOM に居ない (regression guard)', () => {
     mockConnected(false);
+    const { unmount } = renderWithIntl(<ScanShell />);
+    expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
+    unmount();
+
+    mockConnected(true);
     renderWithIntl(<ScanShell />);
     expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();

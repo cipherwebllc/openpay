@@ -1,5 +1,25 @@
 {
-  "Home": {
+  "Nav": {
+    "home": "Home",
+    "create": "Receive",
+    "history": "History",
+    "explore": "Explore",
+    "connect": "Connect",
+    "disconnect": "Disconnect"
+  },
+  "Landing": {
+    "tagline": "Gasless pay and receive with your Web3 wallet.",
+    "heroLeadline": "A Web3 payment portal — one QR to pay, one wallet to receive.",
+    "heroBody": "JPYC / USDC across multiple chains. Customers pay without gas; merchants receive with just a wallet address.",
+    "ctaScanTitle": "📱 Pay (Scan)",
+    "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",
+    "ctaScanButton": "Scan to pay",
+    "ctaCreateTitle": "🏪 Receive (Create payment QR)",
+    "ctaCreateBody": "Just enter a recipient address and amount — generates a printable payment QR.",
+    "ctaCreateButton": "Create a QR",
+    "wipNote": "Feature highlights, market info, transaction history, and external services will be added in upcoming updates."
+  },
+  "Create": {
     "title": "OpenPay",
     "subtitle": "Wallet-only setup for merchant gasless payment QR",
     "tabs": {
@@ -499,7 +519,7 @@
     "pageTitle": "Scan to pay",
     "pageSubtitle": "Connect your wallet once. At the register, just scan the QR and sign — done.",
     "connectionTitle": "Wallet status",
-    "connectionPreHint": "Connect your wallet ahead of time. At the register, paying becomes scan → sign in two steps.",
+    "connectionPreHint": "Connect your wallet from the top-right \"Connect\" button. At the register, paying becomes scan → sign in two steps.",
     "connectionReadyHint": "You're connected. Just scan a QR.",
     "balancesTitle": "Holdings",
     "balancesLoading": "Checking balances…",

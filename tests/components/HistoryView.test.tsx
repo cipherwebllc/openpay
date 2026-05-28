@@ -144,11 +144,8 @@ describe('HistoryView', () => {
     );
   });
 
-  it('back link は "/" を指す', async () => {
-    render(<HistoryView />);
-    const back = await screen.findByRole('link', { name: '← OpenPay' });
-    expect(back).toHaveAttribute('href', '/');
-  });
+  // 旧 back link assertion は AppShell.AppHeader の logo (/[locale]) に移管された
+  // ため、HistoryView 内で個別 assertion は不要。
 
   describe('Concurrency: 多重 append + cross-tab', () => {
     it('同タブで連続 10 件 append → すべて反映される (CustomEvent batched でも欠落しない)', async () => {
