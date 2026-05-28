@@ -485,35 +485,37 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
 
   // localStorage の persistence: 入力 → reload → 受取先 default 閉が再現される
   // ことを実 browser で検証 (useQrSettings + useEffect の hydrate 経路全体)。
-  test('ja: 高度な設定 summary は日本語文 + 旧 mono トークンが見えない', async ({
+  test('ja: 高度な設定 summary は日本語文 + 旧 mono/手数料% トークンが見えない', async ({
     page,
   }) => {
     await page.goto('/ja/create');
-    // default 状態 (gasless + customer) で「ガス代：お客様負担」が closed summary に出る
+    // Phase 1: default 状態 (gasless + customer) の closed summary は手数料% を
+    // 含まず「ガスレス決済 / ガス代：お客様負担」のみ。
     const toggle = page.getByRole('button', { name: /高度な設定/ });
     await expect(toggle).toBeVisible();
     await expect(
-      toggle.getByText(/手数料 1\.0% \/ ガス代：お客様負担/),
+      toggle.getByText(/ガスレス決済 \/ ガス代：お客様負担/),
     ).toBeVisible();
-    // 旧の開発者向け mono サマリ (例 "1%/gas:cust") は DOM 全体に存在しない
+    // 旧 mono サマリ + Phase 1 で撤去した手数料% (1.0%/0.5%) は DOM 全体に存在しない
     const bodyText = await page.locator('body').innerText();
     expect(bodyText).not.toMatch(/1%\/gas:cust|0\.5%\/std|gas:merch/);
+    expect(bodyText).not.toMatch(/手数料 1\.0%|手数料 0\.5%/);
   });
 
-  test('ja: 手数料徴収先アドレスは default visible でなく、高度な設定 開で出現', async ({
+  test('ja: 手数料徴収先アドレス section は Phase 1 で撤去 (高度な設定 開でも非表示)', async ({
     page,
   }) => {
     await page.goto('/ja/create');
-    // 「OpenPay 利用手数料の徴収先」 heading は default 状態 (Step 2 open +
-    // 高度な設定 closed) では visible ではない。
+    // Phase 1 (決済手数料 0%) で QrGenerator から fee 徴収先 section を撤去済。
+    // default でも、高度な設定を開いた後でも「OpenPay 利用手数料の徴収先」は出ない。
     await expect(
       page.getByText(/OpenPay 利用手数料の徴収先/),
-    ).toBeHidden();
-    // 高度な設定 を開くと表示される
+    ).toHaveCount(0);
     await page.getByRole('button', { name: /高度な設定/ }).click();
+    // 開いた後も復活しない
     await expect(
       page.getByText(/OpenPay 利用手数料の徴収先/),
-    ).toBeVisible();
+    ).toHaveCount(0);
   });
 
   test('ja: 受取先入力 → reload → Step 2 が default 折り畳まれる (returning user)', async ({
