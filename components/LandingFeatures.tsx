@@ -67,6 +67,10 @@ export async function LandingFeatures() {
       <ul className="mt-8 grid gap-4 sm:grid-cols-3">
         {CARDS.map(({ Icon, titleKey, bodyKey, tone }) => {
           const c = TONE[tone];
+          // ガスレス card のみ、本文の後に小さな技術詳細補足を出す
+          // (一般読者には主文だけで充足、開発者は技術名で確認できる)
+          const techSubtext =
+            titleKey === 'featuresGaslessTitle' ? t('featuresGaslessTech') : null;
           return (
             <li
               key={titleKey}
@@ -77,6 +81,9 @@ export async function LandingFeatures() {
                 {t(titleKey)}
               </h3>
               <p className="text-sm leading-relaxed text-slate-700">{t(bodyKey)}</p>
+              {techSubtext && (
+                <p className="mt-1 text-[11px] text-slate-500">{techSubtext}</p>
+              )}
             </li>
           );
         })}

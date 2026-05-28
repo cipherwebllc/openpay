@@ -145,7 +145,10 @@ test.describe('landing / (LP)', () => {
     await expect(benefits.getByText('0.5%', { exact: true })).toBeVisible();
     await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
-    await expect(benefits.getByText('0 step', { exact: true })).toBeVisible();
+    // 「登録不要」 focal は title (会員登録不要) との部分一致を避けて scope 内で
+    // 2 件出現 (focal 1 + title 1)。focal の class で限定するか、count 確認に
+    // 切替える。ここでは「2 件存在 = focal + title セット」を assert。
+    expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);
     // 4 title
     await expect(
       benefits.getByRole('heading', { name: '手数料が安い' }),

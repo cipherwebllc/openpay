@@ -24,6 +24,11 @@ export async function LandingTrust() {
           <GithubIcon />
           {t('trustGithubLabel')} ↗
         </a>
+        {/* 技術スタックは開発者向け補足として小さく出す (一般読者には trustBody
+            だけで充足、開発者は具体技術名で OpenPay の構成を検証できる)。 */}
+        <p className="mx-auto mt-4 max-w-2xl text-[11px] leading-relaxed text-slate-400">
+          {t('trustTechStack')}
+        </p>
       </div>
     </section>
   );

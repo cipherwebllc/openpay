@@ -513,6 +513,23 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'benefitsNoSignupFocal',
     'benefitsNoSignupTitle',
     'benefitsNoSignupBody',
+    // Use cases section (5 用途 × {title, body} + meta)
+    'useCasesTitle',
+    'useCasesSubtitle',
+    'useCase1Title',
+    'useCase1Body',
+    'useCase2Title',
+    'useCase2Body',
+    'useCase3Title',
+    'useCase3Body',
+    'useCase4Title',
+    'useCase4Body',
+    'useCase5Title',
+    'useCase5Body',
+    // Features の Gasless 技術詳細補足
+    'featuresGaslessTech',
+    // Trust の技術スタック補足
+    'trustTechStack',
   ] as const;
 
   for (const key of NAV_KEYS) {
