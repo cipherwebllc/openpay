@@ -417,11 +417,11 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     const footer = page.locator('footer');
     // soft 文言 (default visible)
     await expect(
-      footer.getByText('Web3 ウォレット決済技術を利用しています'),
+      footer.getByText('ステーブルコイン決済技術を利用しています'),
     ).toBeVisible();
     // 技術ラベルは default 折り畳まれていて DOM には存在するが <details> 内
     const techDetails = footer.locator(
-      'details:has(summary:has-text("Web3 ウォレット決済技術"))',
+      'details:has(summary:has-text("ステーブルコイン決済技術"))',
     );
     await expect(techDetails).not.toHaveAttribute('open', /.*/);
     // 展開

@@ -8,8 +8,8 @@
     "disconnect": "Disconnect"
   },
   "Landing": {
-    "tagline": "Gasless pay and receive with your Web3 wallet.",
-    "heroLeadline": "A Web3 payment portal — one QR to pay, one wallet to receive.",
+    "tagline": "Gasless pay and receive with just a wallet.",
+    "heroLeadline": "A JPYC / USDC payment portal — one QR to pay, one wallet to receive.",
     "heroBody": "JPYC / USDC across multiple chains. Customers pay without gas; merchants receive with just a wallet address.",
     "ctaScanTitle": "📱 Pay (Scan)",
     "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",
@@ -19,7 +19,7 @@
     "ctaCreateButton": "Create a QR",
     "wipNote": "Feature highlights, market info, transaction history, and external services will be added in upcoming updates.",
     "featuresTitle": "Why OpenPay",
-    "featuresSubtitle": "No sign-up, no custody. A payment experience built entirely around your Web3 wallet.",
+    "featuresSubtitle": "No sign-up, no custody. A payment experience that needs nothing more than a wallet.",
     "featuresGaslessTitle": "Gasless payments",
     "featuresGaslessBody": "When the merchant picks gasless mode while building the QR, OpenPay covers gas on the merchant's receive chain via Pimlico's ERC-4337 paymaster. Customers can pay with just JPYC / USDC — no POL or ETH needed (cross-chain source-chain gas is still paid by the customer as usual).",
     "featuresMultichainTitle": "Multi-chain",
@@ -47,7 +47,7 @@
     "faqA4": "JPYC redeems 1:1 at jpyc.co.jp. USDC can be sold via SBI VC Trade and other Japanese exchanges. The bottom of /create lists exchange links per token.",
     "faqQ5": "Where is transaction history stored?",
     "faqA5": "History is kept only in your browser's LocalStorage — never sent to OpenPay servers. You can export to CSV from the history page. Transaction hashes are recorded so you can verify on Etherscan / Polygonscan.",
-    "trustTitle": "Web3 stack & transparency",
+    "trustTitle": "Open stack & transparency",
     "trustBody": "OpenPay is built on industry-standard open technologies: ERC-4337 (account abstraction), ERC-7702 (EOA → smart account delegation), Pimlico bundler/paymaster, permissionless.js, viem / wagmi. All source code is MIT-licensed and public.",
     "trustGithubLabel": "Source code (GitHub)"
   },
@@ -67,7 +67,7 @@
     "categoryDex": "DEX (decentralized)",
     "categoryDexDescription": "On-chain DEXs and aggregators for stablecoin swaps.",
     "categoryDapp": "dApps / services",
-    "categoryDappDescription": "Web3 services that use JPYC / USDC — wallets, donations, yield, and more.",
+    "categoryDappDescription": "On-chain services that use JPYC / USDC — wallets, donations, yield, and more.",
     "categoryBridge": "Bridges (cross-chain)",
     "categoryBridgeDescription": "Protocols that move USDC and other tokens between chains.",
     "categoryResource": "Resources (explore & analyze)",
@@ -140,7 +140,7 @@
     "payModeGaslessBadge": "Recommended",
     "payModeGaslessDesc": "Customers can pay with JPYC / USDC alone — no need to hold gas tokens (OpenPay service fee 1.0% + estimated network fee; merchant or customer pays the gas portion).",
     "payModeStandardTitle": "Standard payment (with gas)",
-    "payModeStandardDesc": "For Web3-savvy customers. The customer pays their own gas (POL / ETH) (OpenPay service fee 0.5%).",
+    "payModeStandardDesc": "For crypto-experienced customers. The customer pays their own gas (POL / ETH) (OpenPay service fee 0.5%).",
     "standardHint": "Standard payment (with gas) mode: the customer pays gas (POL / ETH) from their own wallet. OpenPay does not sponsor gas. The OpenPay service fee is 0.5% of the transaction amount.",
     "gasLabel": "Gas-equivalent burden (gasless mode only)",
     "gasCustomerTitle": "Customer adds gas equivalent",
@@ -631,7 +631,7 @@
     "moreLink": "Details"
   },
   "Footer": {
-    "poweredBySoft": "Powered by Web3 wallet payment technology",
+    "poweredBySoft": "Powered by stablecoin payment technology",
     "poweredByTech": "ERC-4337 · Pimlico · permissionless.js · ERC-7702",
     "poweredByExpand": "Technical details",
     "copyright": "© {year} {company}",

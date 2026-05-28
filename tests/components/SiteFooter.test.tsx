@@ -113,14 +113,15 @@ describe('SiteFooter', () => {
   });
 
   // 3-step UI refactor (2026-05-23): poweredBy を soft + 技術詳細 (<details>) に
-  // 分離。一般店主には Web3 用語を露出せず、開発者は summary click で展開できる。
+  // 分離。一般店主には「Web3」用語を出さず (ネガティブ印象回避)、開発者は
+  // summary click で展開して ERC-4337 等の技術ラベルを確認できる。
   describe('poweredBy soft + 技術詳細', () => {
-    it('ja: summary に soft 文言、展開で ERC-4337 等の技術ラベル', () => {
+    it('ja: summary に soft 文言 (ステーブルコイン決済技術)、展開で ERC-4337 等の技術ラベル', () => {
       renderWithIntl(<SiteFooter />, { locale: 'ja' });
       const footer = screen.getByRole('contentinfo');
       // summary 文言 (default visible)
       expect(footer.textContent).toContain(
-        'Web3 ウォレット決済技術を利用しています',
+        'ステーブルコイン決済技術を利用しています',
       );
       // 旧の生 powered-by 文字列は summary に出ない (展開 trigger としてのみ存在)
       expect(footer.textContent).toContain('技術詳細');
@@ -131,11 +132,11 @@ describe('SiteFooter', () => {
       expect(footer.textContent).toContain('ERC-7702');
     });
 
-    it('en: 同じ構造で英訳 (Powered by Web3 wallet payment technology / Technical details)', () => {
+    it('en: 同じ構造で英訳 (Powered by stablecoin payment technology / Technical details)', () => {
       renderWithIntl(<SiteFooter />, { locale: 'en' });
       const footer = screen.getByRole('contentinfo');
       expect(footer.textContent).toContain(
-        'Powered by Web3 wallet payment technology',
+        'Powered by stablecoin payment technology',
       );
       expect(footer.textContent).toContain('Technical details');
       expect(footer.textContent).toContain('ERC-4337');
@@ -147,10 +148,19 @@ describe('SiteFooter', () => {
       const detailsEls = container.querySelectorAll('details');
       // poweredBy の <details> 要素は 1 つ存在
       const poweredByDetails = Array.from(detailsEls).find((d) =>
-        d.textContent?.includes('Web3 ウォレット決済技術'),
+        d.textContent?.includes('ステーブルコイン決済技術'),
       );
       expect(poweredByDetails).toBeDefined();
       expect(poweredByDetails!.open).toBe(false);
+    });
+
+    it('ja: summary に「Web3」リテラルが出ない (一般層に対する用語回避の regression guard)', () => {
+      renderWithIntl(<SiteFooter />, { locale: 'ja' });
+      const footer = screen.getByRole('contentinfo');
+      // <details> closed 状態 (default) の visible summary 部分に「Web3」が無いこと。
+      // 展開後の技術ラベル群には Web3 用語は元から含まれないので、textContent 全体で
+      // 「Web3」が出現しないことを fence する。
+      expect(footer.textContent).not.toMatch(/Web3/);
     });
   });
 });

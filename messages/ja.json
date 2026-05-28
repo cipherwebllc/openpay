@@ -8,8 +8,8 @@
     "disconnect": "切断"
   },
   "Landing": {
-    "tagline": "Web3 ウォレットで、ガスレスに支払う・受け取る。",
-    "heroLeadline": "QR ひとつで決済できる、Web3 決済ポータル。",
+    "tagline": "ウォレット 1 つで、ガスレスに支払う・受け取る。",
+    "heroLeadline": "QR ひとつで決済できる、JPYC / USDC 決済ポータル。",
     "heroBody": "JPYC / USDC を多チェーン対応。顧客はガス代不要、店舗はアドレス 1 つで受け取り。",
     "ctaScanTitle": "📱 支払う (スキャン)",
     "ctaScanBody": "ウォレットを接続して、店舗の QR を読み取り即決済。",
@@ -19,7 +19,7 @@
     "ctaCreateButton": "QR を作成する",
     "wipNote": "機能紹介・市場情報・取引履歴・外部サービスへの導線は順次拡充予定です。",
     "featuresTitle": "OpenPay の特長",
-    "featuresSubtitle": "登録不要・サーバ預かり無し。Web3 ウォレットだけで完結する決済体験。",
+    "featuresSubtitle": "登録不要・サーバ預かり無し。ウォレット 1 つで完結する決済体験。",
     "featuresGaslessTitle": "ガスレス決済",
     "featuresGaslessBody": "店主が QR 作成時にガスレス決済モードを選択すると、店主の受取チェーン上で OpenPay が Pimlico の ERC-4337 paymaster 経由でガス代を肩代わりします。顧客は POL / ETH を持っていなくても JPYC / USDC 残高だけで支払えます (cross-chain で別 chain から支払う場合は source chain の gas は通常通り顧客負担)。",
     "featuresMultichainTitle": "マルチチェーン対応",
@@ -47,7 +47,7 @@
     "faqA4": "JPYC は jpyc.co.jp で 1:1 で換金、USDC は SBI VC トレード等の国内取引所で売却可能です。/create ページ下部の「換金」セクションに各取引所のリンクをまとめています。",
     "faqQ5": "取引履歴はどこに保存されますか?",
     "faqA5": "履歴はお使いのブラウザの LocalStorage にのみ保存されます。OpenPay のサーバには送信されません。CSV エクスポートも履歴ページから可能。ブロックチェーン上の transaction hash は履歴に記録されるため、Etherscan 等で再確認できます。",
-    "trustTitle": "Web3 技術と透明性",
+    "trustTitle": "オープン技術と透明性",
     "trustBody": "OpenPay は ERC-4337 (Account Abstraction)、ERC-7702 (EOA → smart account 委任)、Pimlico bundler/paymaster、permissionless.js、viem / wagmi など、業界標準のオープン技術で構築されています。コードはすべて MIT ライセンスで公開しています。",
     "trustGithubLabel": "ソースコード (GitHub)"
   },
@@ -67,7 +67,7 @@
     "categoryDex": "DEX (分散型取引所)",
     "categoryDexDescription": "on-chain で stablecoin を交換できる DEX とアグリゲータ。",
     "categoryDapp": "dApp / サービス",
-    "categoryDappDescription": "JPYC / USDC を活用する Web3 サービス。ウォレット拡張・寄付・運用など。",
+    "categoryDappDescription": "JPYC / USDC を活用するオンチェーンサービス。ウォレット拡張・寄付・運用など。",
     "categoryBridge": "Bridge (cross-chain)",
     "categoryBridgeDescription": "チェーン間で USDC 等を移動する bridge プロトコル。",
     "categoryResource": "Resource (探索・分析)",
@@ -140,7 +140,7 @@
     "payModeGaslessBadge": "おすすめ",
     "payModeGaslessDesc": "お客様はガス代を用意せず、JPYC / USDC だけで支払えます (OpenPay 利用手数料 1.0% + ネットワーク手数料見積。負担者は顧客 / 店主から選択可能)",
     "payModeStandardTitle": "通常決済（ガスあり）",
-    "payModeStandardDesc": "Web3 に慣れたお客様向け。お客様自身がガス代 (POL / ETH) を支払います (OpenPay 利用手数料 0.5%)",
+    "payModeStandardDesc": "暗号資産ウォレットの操作に慣れたお客様向け。お客様自身がガス代 (POL / ETH) を支払います (OpenPay 利用手数料 0.5%)",
     "standardHint": "通常決済（ガスあり）モード: 顧客が自分のウォレットで gas (POL / ETH) を支払います。OpenPay は gas を肩代わりしません。OpenPay 利用手数料は決済金額の 0.5% です。",
     "gasLabel": "ネットワーク手数料の負担方法 (ガスレス決済時のみ)",
     "gasCustomerTitle": "顧客が gas 相当額を上乗せ",
@@ -631,7 +631,7 @@
     "moreLink": "詳細"
   },
   "Footer": {
-    "poweredBySoft": "Web3 ウォレット決済技術を利用しています",
+    "poweredBySoft": "ステーブルコイン決済技術を利用しています",
     "poweredByTech": "ERC-4337 · Pimlico · permissionless.js · ERC-7702",
     "poweredByExpand": "技術詳細",
     "copyright": "© {year} {company}",

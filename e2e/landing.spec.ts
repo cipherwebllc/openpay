@@ -13,7 +13,7 @@ test.describe('landing / (LP)', () => {
 
     // Hero leadline (h2)
     await expect(
-      page.getByRole('heading', { name: /Web3 決済ポータル/ }),
+      page.getByRole('heading', { name: /JPYC \/ USDC 決済ポータル/ }),
     ).toBeVisible();
 
     // 2 大 CTA
