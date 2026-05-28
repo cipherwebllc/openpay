@@ -263,6 +263,51 @@ describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   });
 });
 
+describe('i18n: Explore 名前空間 (ja/en parity)', () => {
+  // /explore page で使う i18n key 集合。badge は nested object なので別途検証。
+  const EXPLORE_KEYS = [
+    'pageTitle',
+    'pageDescription',
+    'categoryExchange',
+    'categoryExchangeDescription',
+    'categoryDex',
+    'categoryDexDescription',
+    'categoryDapp',
+    'categoryDappDescription',
+    'categoryBridge',
+    'categoryBridgeDescription',
+    'categoryResource',
+    'categoryResourceDescription',
+  ] as const;
+  const EXPLORE_BADGE_KEYS = ['jp-only', 'global', 'beta'] as const;
+
+  for (const key of EXPLORE_KEYS) {
+    it(`ja.Explore.${key} は非空文字列`, () => {
+      const v = (ja.Explore as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.Explore.${key} は非空文字列`, () => {
+      const v = (en.Explore as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+
+  for (const key of EXPLORE_BADGE_KEYS) {
+    it(`ja.Explore.badge.${key} は非空文字列`, () => {
+      const v = (ja.Explore.badge as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.Explore.badge.${key} は非空文字列`, () => {
+      const v = (en.Explore.badge as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+});
+
 describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () => {
   // AppShell の BottomNav / TopNav (4 link) と LP 2 大 CTA で使う i18n key 集合。
   // 片方の locale だけ抜けて regression するのを fence する。

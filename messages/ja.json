@@ -51,6 +51,25 @@
     "trustBody": "OpenPay は ERC-4337 (Account Abstraction)、ERC-7702 (EOA → smart account 委任)、Pimlico bundler/paymaster、permissionless.js、viem / wagmi など、業界標準のオープン技術で構築されています。コードはすべて MIT ライセンスで公開しています。",
     "trustGithubLabel": "ソースコード (GitHub)"
   },
+  "Explore": {
+    "pageTitle": "探す",
+    "pageDescription": "JPYC / USDC が使える外部サービス・取引所・dApp・bridge をカテゴリ別にまとめました。リンクは外部サイトに飛びます。",
+    "categoryExchange": "取引所 (CEX)",
+    "categoryExchangeDescription": "法定通貨と暗号資産を売買する取引所。日本居住者向け on/off-ramp 中心。",
+    "categoryDex": "DEX (分散型取引所)",
+    "categoryDexDescription": "on-chain で stablecoin を交換できる DEX とアグリゲータ。",
+    "categoryDapp": "dApp / サービス",
+    "categoryDappDescription": "JPYC / USDC を活用する Web3 サービス。ウォレット拡張・寄付・運用など。",
+    "categoryBridge": "Bridge (cross-chain)",
+    "categoryBridgeDescription": "チェーン間で USDC 等を移動する bridge プロトコル。",
+    "categoryResource": "Resource (探索・分析)",
+    "categoryResourceDescription": "ブロックエクスプローラ・統計・リサーチサイト。tx hash 検証等に。",
+    "badge": {
+      "jp-only": "日本居住者",
+      "global": "Global",
+      "beta": "Beta"
+    }
+  },
   "Create": {
     "title": "OpenPay",
     "subtitle": "ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR",

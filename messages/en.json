@@ -51,6 +51,25 @@
     "trustBody": "OpenPay is built on industry-standard open technologies: ERC-4337 (account abstraction), ERC-7702 (EOA → smart account delegation), Pimlico bundler/paymaster, permissionless.js, viem / wagmi. All source code is MIT-licensed and public.",
     "trustGithubLabel": "Source code (GitHub)"
   },
+  "Explore": {
+    "pageTitle": "Explore",
+    "pageDescription": "Curated external services, exchanges, dApps and bridges where JPYC / USDC can be used. Links open external sites.",
+    "categoryExchange": "Exchanges (CEX)",
+    "categoryExchangeDescription": "Centralized exchanges that trade fiat for crypto. Focused on on/off-ramp for Japan residents.",
+    "categoryDex": "DEX (decentralized)",
+    "categoryDexDescription": "On-chain DEXs and aggregators for stablecoin swaps.",
+    "categoryDapp": "dApps / services",
+    "categoryDappDescription": "Web3 services that use JPYC / USDC — wallets, donations, yield, and more.",
+    "categoryBridge": "Bridges (cross-chain)",
+    "categoryBridgeDescription": "Protocols that move USDC and other tokens between chains.",
+    "categoryResource": "Resources (explore & analyze)",
+    "categoryResourceDescription": "Block explorers, analytics and research sites — useful for verifying tx hashes.",
+    "badge": {
+      "jp-only": "Japan only",
+      "global": "Global",
+      "beta": "Beta"
+    }
+  },
   "Create": {
     "title": "OpenPay",
     "subtitle": "Wallet-only setup for merchant gasless payment QR",
