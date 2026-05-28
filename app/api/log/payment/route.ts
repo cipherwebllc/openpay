@@ -13,8 +13,18 @@ const MAX_BODY_BYTES = 8 * 1024;
 // alpha 6 ヶ月 + 余裕。古い entry は LPUSH 後の LTRIM で自動破棄。
 const LIST_CAP = 100_000;
 
+// flow 一覧:
+//   batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信、
+//                      feeAmount は同 entry 内に含まれる)
+//   direct:            同一チェーン直接送金 (cross-chain mint 成功ログ等で生成)
+//   standard-merchant: 通常決済（ガスあり）の merchant への送金 tx (EOA writeContract)
+//                      feeAmount は無い (fee は別 tx = standard-fee として独立)
+//   standard-fee:      通常決済（ガスあり）の OpenPay 利用手数料徴収 tx (EOA writeContract)
+//                      merchantAmount に手数料金額が入る (送金先 = feeReceiver)
+//                      → stats route 側で「fee tx として totalFeeWei にだけ計上、
+//                      GMV / count には含めない」特別扱いをする
 type Payload = {
-  flow: 'batch' | 'direct';
+  flow: 'batch' | 'direct' | 'standard-merchant' | 'standard-fee';
   result: 'success' | 'reverted' | 'error';
   chainId: number;
   tokenAddress: Address;
@@ -51,7 +61,13 @@ function validHex(v: unknown): v is Hex {
 function validate(raw: unknown): Payload | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
-  if (r.flow !== 'batch' && r.flow !== 'direct') return null;
+  if (
+    r.flow !== 'batch' &&
+    r.flow !== 'direct' &&
+    r.flow !== 'standard-merchant' &&
+    r.flow !== 'standard-fee'
+  )
+    return null;
   if (r.result !== 'success' && r.result !== 'reverted' && r.result !== 'error') return null;
   if (typeof r.chainId !== 'number' || !Number.isInteger(r.chainId) || r.chainId <= 0) return null;
   if (!validAddress(r.tokenAddress)) return null;

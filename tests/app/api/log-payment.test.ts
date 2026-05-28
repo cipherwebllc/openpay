@@ -227,6 +227,55 @@ describe('POST /api/log/payment', () => {
     expect(entry.feeAmount).toBeUndefined();
   });
 
+  it('standard-merchant flow (通常決済の merchant 送金 tx) を受理', async () => {
+    // useStandardPayment.emitLog の payload 形 (feeAmount は別 entry に分離)
+    const standardMerchant = {
+      flow: 'standard-merchant',
+      result: 'success',
+      chainId: 137,
+      tokenAddress: validBody.tokenAddress,
+      merchant: validBody.merchant,
+      merchantAmount: '1000000000000000000000', // 1000 JPYC (sale 価格)
+      customer: validBody.customer,
+      txHash: validBody.txHash,
+      blockNumber: '100',
+    };
+    const res = await POST(req(standardMerchant));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.flow).toBe('standard-merchant');
+    expect(entry.merchantAmount).toBe('1000000000000000000000');
+  });
+
+  it('standard-fee flow (通常決済の OpenPay 利用手数料 tx) を受理', async () => {
+    // useStandardPayment.emitLog の standard-fee payload 形:
+    //   merchant = feeReceiver、merchantAmount = feeAmount (手数料額)
+    const standardFee = {
+      flow: 'standard-fee',
+      result: 'success',
+      chainId: 137,
+      tokenAddress: validBody.tokenAddress,
+      merchant: '0x3333333333333333333333333333333333333333',
+      merchantAmount: '5000000000000000000', // 5 JPYC (= 1000 * 0.5%)
+      customer: validBody.customer,
+      feeReceiver: '0x3333333333333333333333333333333333333333',
+      feeAmount: '5000000000000000000',
+      txHash: validBody.txHash,
+      blockNumber: '101',
+    };
+    const res = await POST(req(standardFee));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.flow).toBe('standard-fee');
+    expect(entry.merchantAmount).toBe('5000000000000000000');
+    expect(entry.feeAmount).toBe('5000000000000000000');
+  });
+
+  it('未知 flow (例: legacy-foobar) は依然として 400 で reject', async () => {
+    const res = await POST(req({ ...validBody, flow: 'legacy-foobar' }));
+    expect(res.status).toBe(400);
+  });
+
   it('mixed-case address (非 checksum) も accept (strict:false)', async () => {
     // 全部小文字
     const mixed = '0xe7c3d8c9a439fede00d2600032d5db0be71c3c29';

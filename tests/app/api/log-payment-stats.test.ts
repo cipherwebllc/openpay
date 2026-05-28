@@ -285,6 +285,125 @@ describe('stats: aggregate — chain / token / count / GMV', () => {
     expect(chain.totalMerchantWei).toBe('1000000000000000000');
   });
 
+  it('standard-fee entry は GMV / count に含めず、success の merchantAmount を totalFeeWei に加算する', async () => {
+    // standard mode は merchant 送金 (standard-merchant) + 手数料徴収 (standard-fee)
+    // の 2 entry で 1 logical sale を構成する。standard-fee の merchantAmount は
+    // 手数料金額なので、GMV (totalMerchantWei) に加算してはいけない。
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({
+          flow: 'standard-merchant',
+          result: 'success',
+          merchantAmount: '1000000000000000000000', // 1000 token (sale 価格)
+          // standard-merchant payload は feeAmount を持たない
+          feeAmount: undefined,
+        }),
+        makeEntry({
+          flow: 'standard-fee',
+          result: 'success',
+          merchantAmount: '5000000000000000000', // 5 token (= 1000 × 0.5%)
+          feeAmount: '5000000000000000000',
+          merchant: '0x3333333333333333333333333333333333333333', // feeReceiver
+        }),
+      ],
+    });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const chain = body.byChain[0];
+    // count は standard-merchant の 1 件のみ (standard-fee は GMV / count に含めない)
+    expect(chain.successCount).toBe(1);
+    // GMV = sale 価格 のみ、手数料は含めない
+    expect(chain.totalMerchantWei).toBe('1000000000000000000000');
+    // 手数料は standard-fee の merchantAmount から計上
+    expect(chain.totalFeeWei).toBe('5000000000000000000');
+    // aggregatedCount は 2 (両 entry とも isAggregable で fee は special-case 内側で扱う)
+    expect(body.aggregatedCount).toBe(2);
+  });
+
+  it('standard-fee が reverted / error なら totalFeeWei は加算されない (未徴収)', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({
+          flow: 'standard-merchant',
+          result: 'success',
+          merchantAmount: '1000000000000000000000', // 1000 sale 成功
+          feeAmount: undefined,
+        }),
+        makeEntry({
+          flow: 'standard-fee',
+          result: 'reverted',
+          merchantAmount: '5000000000000000000', // 5 = 手数料、しかし徴収 revert
+          feeAmount: '5000000000000000000',
+        }),
+        makeEntry({
+          flow: 'standard-fee',
+          result: 'error',
+          merchantAmount: '5000000000000000000', // 5 = 手数料、しかし submit 失敗
+          feeAmount: '5000000000000000000',
+        }),
+      ],
+    });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const chain = body.byChain[0];
+    // count は merchant の 1 success のみ (fee の reverted/error は count しない)
+    expect(chain.successCount).toBe(1);
+    expect(chain.revertedCount).toBe(0);
+    expect(chain.errorCount).toBe(0);
+    expect(chain.totalMerchantWei).toBe('1000000000000000000000');
+    // fee は徴収失敗なので 0
+    expect(chain.totalFeeWei).toBe('0');
+  });
+
+  it('batch / direct entry の feeAmount は引き続き totalFeeWei に加算される (regression fence)', async () => {
+    // standard mode 対応で fee 集計ロジックが変わったが、既存 batch / direct の
+    // feeAmount 集計は壊さない。fee は同 entry の feeAmount から累積、
+    // standard-fee からは merchantAmount で累積、両者の和。
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({
+          flow: 'batch',
+          result: 'success',
+          merchantAmount: '1000000000000000000', // 1
+          feeAmount: '10000000000000000', // 0.01
+        }),
+        makeEntry({
+          flow: 'direct',
+          result: 'success',
+          merchantAmount: '2000000000000000000', // 2
+          feeAmount: '20000000000000000', // 0.02
+        }),
+        makeEntry({
+          flow: 'standard-merchant',
+          result: 'success',
+          merchantAmount: '3000000000000000000', // 3
+          feeAmount: undefined,
+        }),
+        makeEntry({
+          flow: 'standard-fee',
+          result: 'success',
+          merchantAmount: '30000000000000000', // 0.03 = standard 手数料
+          feeAmount: '30000000000000000',
+        }),
+      ],
+    });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const chain = body.byChain[0];
+    // count: batch + direct + standard-merchant = 3 (standard-fee は除外)
+    expect(chain.successCount).toBe(3);
+    // GMV: 1 + 2 + 3 = 6 (standard-fee の 0.03 は除外)
+    expect(chain.totalMerchantWei).toBe('6000000000000000000');
+    // fee: 0.01 (batch) + 0.02 (direct) + 0.03 (standard-fee) = 0.06
+    expect(chain.totalFeeWei).toBe('60000000000000000');
+  });
+
   it('巨大 bigint amount (1e30) でも overflow せず正しく加算', async () => {
     // wei は最大 uint256 ~ 1.15e77、JavaScript Number 上限 1.79e308 だが
     // 精度は 2^53 (~9e15) で失われる。BigInt 加算で精度保つことを verify。

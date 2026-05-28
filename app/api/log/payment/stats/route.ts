@@ -163,6 +163,17 @@ function aggregate(entries: LogEntry[]): {
     const merchantWei = parseWei(e.merchantAmount);
     const feeWei = parseWei(e.feeAmount);
     const bridgeKey = normalizeBridge(e.bridge);
+    // standard mode は merchant 送金 tx (flow=standard-merchant) と OpenPay 手数料
+    // 徴収 tx (flow=standard-fee) の 2 entry で 1 logical sale を構成する。
+    //   - standard-merchant: 通常 entry と同じく count++ / GMV 計上
+    //   - standard-fee: count / GMV には加算せず、success の場合のみ
+    //     merchantAmount (= 手数料金額) を totalFeeWei に計上する。
+    //     batch / direct と異なり standard mode の手数料は別 tx なので、その
+    //     収益情報を標準的な totalFeeWei 集計に統合する。
+    // この特別扱いをしないと、standard-fee entry の merchantAmount (= 0.5%
+    // 程度の手数料) が「店舗売上」として GMV に二重計上され、stats が systematically
+    // ~0.5% 膨らむ。
+    const isStandardFee = e.flow === 'standard-fee';
 
     let chain = byChain.get(chainId);
     if (!chain) {
@@ -202,6 +213,18 @@ function aggregate(entries: LogEntry[]): {
     if (!globalBridge) {
       globalBridge = emptyBridgeAgg(bridgeKey);
       globalByBridge.set(bridgeKey, globalBridge);
+    }
+
+    if (isStandardFee) {
+      // standard mode 手数料 tx: success の場合のみ totalFeeWei に計上
+      // (reverted / error は手数料未徴収なので 0 計上)。count / GMV は触らない。
+      if (result === 'success') {
+        chain.totalFeeWei += merchantWei;
+        token.totalFeeWei += merchantWei;
+        chainBridge.totalFeeWei += merchantWei;
+        globalBridge.totalFeeWei += merchantWei;
+      }
+      continue;
     }
 
     if (result === 'success') {
