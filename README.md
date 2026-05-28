@@ -21,7 +21,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 - **Block explorer link** on every receipt — merchants verify on-chain truth, not just a UI screen.
 - **Local transaction history** — per-browser LocalStorage history at `/history`, with CSV export and a "latest 3" strip on the QR builder.
 - **Reference market rate** — a lightweight strip on `/` and `/create` shows `1 USDC = ¥X.XX` via a 5-min server-cached CoinGecko proxy; `1 JPYC = ¥1.00 (peg)` is fixed.
-- **Experimental x402 / agent payment** support for per-request paid APIs.
+- **Experimental x402 / agent payment** support for per-request paid APIs — with both USDC and **JPYC** assets (most x402 servers are USDC-only).
 - **OSS, self-hostable** under MIT.
 
 ## Why OpenPay?
@@ -173,7 +173,18 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 
 ## x402 / API / agent payments
 
-OpenPay includes **experimental** x402 protocol support for per-request paid API endpoints (AI agent / API use cases — separate from the human checkout flow). `GET /api/paid/hello` returns HTTP 402; clients (e.g. `x402-fetch`) sign an EIP-3009 USDC authorization and retry. OpenPay verifies + settles via the Coinbase facilitator before returning content.
+OpenPay includes **experimental** x402 protocol support for per-request paid API endpoints (AI agent / API use cases — separate from the human checkout flow). `GET /api/paid/hello` returns HTTP 402; clients (e.g. `x402-fetch`) sign an EIP-3009 authorization and retry. OpenPay verifies + settles via the Coinbase facilitator before returning content. The client only signs — the facilitator submits the on-chain tx and pays gas, so agents need **no native gas** on the target chain.
+
+**OpenPay's distinct angle — JPYC support.** The wider x402 ecosystem is largely USDC-only (Coinbase's reference and most public servers). OpenPay's x402 server also accepts **JPYC v3 on Polygon / Polygon Amoy**, making it usable for **JPY-denominated agent / API billing** without routing through a USD asset. USDC on Base / Base-Sepolia is also supported.
+
+| Network | Asset | Status |
+|---|---|---|
+| `base` | USDC (Circle native) | mainnet |
+| `base-sepolia` | USDC (Circle native testnet) | testnet (default) |
+| `polygon` | JPYC v3 | mainnet (alpha-verified) |
+| `polygon-amoy` | JPYC v3 (testnet) | testnet |
+
+**Scope notes (different from the human checkout flow).** A paid route is pinned to **one (network, asset)** pair — agents must hold the token on that exact chain. The human checkout's Circle CCTP V2 / Gateway cross-chain bridging is **not** part of the x402 path (bridge overhead exceeds typical per-request micropayment value). Choose the network per route via `X402_NETWORK`.
 
 Wrap your own paid route in two lines:
 
