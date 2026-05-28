@@ -21,8 +21,10 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByText('あなたの支払額')).toBeVisible();
     // fee 行 (feeRow) は feeAmount=0 で hide されている (Phase 1 regression fence)
     await expect(page.getByText('OpenPay 利用手数料')).toHaveCount(0);
-    // gas 行は Pimlico API が未呼出なので「見積取得中…」が表示
-    await expect(page.getByText('見積取得中…')).toBeVisible();
+    // 案A: JPYC の gas は ceiling 価格から同期算出されるため Pimlico fetch 待ちの
+    // 「見積取得中…」は出ず、固定額 (最大 N JPYC) が即表示される。
+    await expect(page.getByText('見積取得中…')).toHaveCount(0);
+    await expect(page.getByText(/最大 .*JPYC/)).toBeVisible();
     // 未接続なので submit ボタンは t('btnConnect') = 「ウォレットを接続してください」
     // (TipForm.tsx 388-400 行: isConnected=false のとき btnConnect に倒れる)
     await expect(
@@ -95,7 +97,9 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
     await expect(page.getByText('あなたの支払額')).toBeVisible();
-    await expect(page.getByText('見積取得中…')).toBeVisible();
+    // 案A: Kaia 系も ceiling 価格から同期算出 → 固定額が即表示 (pending なし)
+    await expect(page.getByText('見積取得中…')).toHaveCount(0);
+    await expect(page.getByText(/最大 .*JPYC/)).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'ウォレットを接続してください' }),
     ).toBeVisible();

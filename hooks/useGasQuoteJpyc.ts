@@ -1,17 +1,27 @@
 'use client';
 
-// JPYC Sponsorship Paymaster の gas 見積 (JPYC 建て) を取得するフック。
+// JPYC Sponsorship Paymaster の gas 徴収額 (JPYC 建て) を算出するフック。
 //
-// Pimlico が chain native (POL / KAIA) でガスを立替え、運営は別途精算する。
-// 顧客から徴収する JPYC は (estimated native gas) × (native/JPYC rate) で換算し
-// fee transfer に内包する。rate は外部 API 依存を持たず env で運用更新可、
-// 設定漏れ時は NATIVE_JPYC_RATE の chain ごと hard-code default にフォールバック。
+// Pimlico が chain native (POL / KAIA) でガスを立替え、運営は徴収 JPYC で精算する。
+// 徴収額 = (gas ceiling 価格) × (overhead gas units) × (native/JPYC rate)。
+//
+// 案A (collect-at-ceiling): 徴収を live gas price ではなく gas ceiling 価格で
+// 行う。assertGasCeiling が ceiling 超の UserOp を reject するため、実 execution
+// gas は常に ceiling 以下 → 徴収額 ≥ 実費 が保証され、運営は gas price スパイクで
+// 損をしない (ネットワーク実費の回収 + 上限との差が黒字マージン)。決済額には
+// 連動しない (= 為替/資金移動ではないインフラ実費)。
+//
+// rate は外部 API 依存を持たず env で運用更新可、設定漏れ時は chain ごと
+// hard-code default にフォールバック。
 
 import { useQuery } from '@tanstack/react-query';
 import { kaia, kairos, polygon, polygonAmoy } from 'viem/chains';
 import { env } from '@/lib/env';
-import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
+import { gasCeilingGweiForChain } from '@/lib/gasCeiling';
+import { resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
+
+const GWEI = 10n ** 9n;
 
 // 実測 UserOp gas (Pimlico bundler 平均) は typical ~200k 前後 (ERC20 transfer
 // 2 件 + paymaster validate)。worst-case として 200k に圧縮、`NEXT_PUBLIC_GAS_
@@ -60,6 +70,8 @@ export function useGasQuoteJpyc(
   const isJpycChain = JPYC_CHAIN_IDS.has(deployment.chainId);
   const rate = resolveNativeJpycRate(deployment.chainId);
 
+  const ceilingGwei = gasCeilingGweiForChain(deployment.chainId);
+
   return useQuery({
     enabled: isActive,
     queryKey: [
@@ -67,23 +79,23 @@ export function useGasQuoteJpyc(
       'gas-quote-jpyc',
       deployment.chainId,
       Number(rate),
+      Number(ceilingGwei ?? 0n),
     ],
-    staleTime: 30_000,
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true,
-    queryFn: async () => {
-      if (!isJpycChain) return { gasAmount: 0n };
-      const pimlicoClient = createPimlico(deployment.chainId);
-      const gasPrice = await pimlicoClient.getUserOperationGasPrice();
+    staleTime: Infinity,
+    queryFn: () => {
+      // ceiling が定義された JPYC chain (Polygon/Amoy/Kaia/Kairos) のみ徴収。
+      // 非対象 chain や ceiling 未定義時は 0 (UI 表示の defensive、JPYC は元々
+      // 4 chain にしか deploy されていないため通常は到達しない)。
+      if (!isJpycChain || ceilingGwei === undefined) return { gasAmount: 0n };
       const overhead =
         env.gasQuoteOverheadUnits !== undefined
           ? BigInt(env.gasQuoteOverheadUnits)
           : DEFAULT_USEROP_GAS_UNITS;
-      // `standard` tier で見積 (= 数 block 程度の確認時間で済む典型値)。
-      // `fast` だと 2026-05 Polygon の DePIN/AI 需要混雑で priority fee が高騰し、
-      // 小額決済で gas が請求金額を上回る UX 不良が発生する。submit 側 (simple
-      // Account / mav2 の feeEstimator) も同 tier に揃え、見積と実費を一致させる。
-      const gasNative = overhead * gasPrice.standard.maxFeePerGas;
+      // 案A: live gas price ではなく ceiling 価格で徴収する。assertGasCeiling
+      // が ceiling 超の UserOp を弾くため実 gas は必ず ceiling 以下 = 徴収 ≥ 実費。
+      // submit 側 (simpleAccount / mav2) は standard tier で実際に支払うので、
+      // ceiling (fast tier base) との差が運営の黒字マージンになる。
+      const gasNative = overhead * ceilingGwei * GWEI;
       const gasAmount = gasNative * rate;
       return { gasAmount };
     },
