@@ -1,7 +1,12 @@
 // チェーン別の maxFeePerGas 上限 (gwei)。これを超える gas 価格で UserOp を送ると、
-// sponsorship mode では運営の肩代わり gas が見積バッファを食い潰して赤字に、erc20
-// mode では顧客の USDC 出費が想定外に膨らむため、送信前に弾いてユーザに
-// 「ネットワーク混雑、後で再試行」を返す。損益のクッションは gas 見積のバッファ係数のみ。
+// sponsorship mode では実 gas が徴収済みの gas 見積 (= gasAmount、feeReceiver へ
+// 回収済み・バッファ込み) を上回って肩代わり差額が運営赤字に、erc20 mode では
+// 顧客の USDC 出費が想定外に膨らむため、送信前に弾いてユーザに「ネットワーク混雑、
+// 後で再試行」を返す。損益のクッションは gas 見積のバッファ係数のみ。
+//
+// 注: sponsorship は本質的な赤字経路ではない。立替えた native gas は gasAmount
+// として顧客 (gas=customer) or 店主 (gas=merchant) から回収される。赤字になるのは
+// quote→execution 間に gas price がスパイクし実 gas が回収済み見積を超えた場合のみ。
 //
 // 値の根拠は Pimlico の `fast` tier 実測ベース (priority fee を含む quote)。
 // L2 については「実 base fee」ではなく「Pimlico fast quote」を基準に置く点
