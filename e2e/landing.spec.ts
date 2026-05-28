@@ -48,4 +48,62 @@ test.describe('landing / (LP)', () => {
     await expect(bottomNav.getByRole('link', { name: /履歴/ })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: /探す/ })).toBeVisible();
   });
+
+  test('ja: Features セクションに 3 カード (ガスレス/マルチチェーン/ノンカストディ) が出る', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: 'OpenPay の特長' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'ガスレス決済' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'マルチチェーン対応' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'ノンカストディ設計' }),
+    ).toBeVisible();
+  });
+
+  test('ja: HowItWorks セクションに merchant + customer の 3-step が出る', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: '使い方' })).toBeVisible();
+    // merchant 3 step (順序付きリスト内のテキスト)
+    await expect(page.getByText('受取ウォレットアドレスを入力')).toBeVisible();
+    await expect(page.getByText('QR を印刷してレジに掲示')).toBeVisible();
+    // customer 3 step
+    await expect(
+      page.getByText('右上の「接続」からウォレットを接続'),
+    ).toBeVisible();
+    await expect(page.getByText('ウォレットで署名 → 完了')).toBeVisible();
+  });
+
+  test('ja: FAQ は <details> で default closed、click で展開される', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: 'よくある質問' })).toBeVisible();
+    const q1 = page.getByText('本当にガス代は不要ですか?');
+    await expect(q1).toBeVisible();
+    // closed 状態では answer は hidden
+    const a1Body = page.getByText(/Pimlico paymaster 経由で立て替え/);
+    await expect(a1Body).toBeHidden();
+    // 展開
+    await q1.click();
+    await expect(a1Body).toBeVisible();
+  });
+
+  test('ja: Trust セクションに GitHub link (target=_blank + rel=noopener)', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const github = page.getByRole('link', { name: /ソースコード \(GitHub\)/ });
+    await expect(github).toBeVisible();
+    await expect(github).toHaveAttribute(
+      'href',
+      'https://github.com/cipherwebllc/openpay',
+    );
+    await expect(github).toHaveAttribute('target', '_blank');
+    await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
+  });
 });

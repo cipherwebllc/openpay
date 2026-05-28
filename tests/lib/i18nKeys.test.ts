@@ -285,6 +285,42 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'ctaCreateBody',
     'ctaCreateButton',
     'wipNote',
+    // Features section (3 cards)
+    'featuresTitle',
+    'featuresSubtitle',
+    'featuresGaslessTitle',
+    'featuresGaslessBody',
+    'featuresMultichainTitle',
+    'featuresMultichainBody',
+    'featuresNoncustodyTitle',
+    'featuresNoncustodyBody',
+    // HowItWorks (merchant + customer, 3 steps each)
+    'howItWorksTitle',
+    'howItWorksSubtitle',
+    'howItWorksMerchantTitle',
+    'howItWorksMerchantStep1',
+    'howItWorksMerchantStep2',
+    'howItWorksMerchantStep3',
+    'howItWorksCustomerTitle',
+    'howItWorksCustomerStep1',
+    'howItWorksCustomerStep2',
+    'howItWorksCustomerStep3',
+    // FAQ (5 Q/A pairs)
+    'faqTitle',
+    'faqQ1',
+    'faqA1',
+    'faqQ2',
+    'faqA2',
+    'faqQ3',
+    'faqA3',
+    'faqQ4',
+    'faqA4',
+    'faqQ5',
+    'faqA5',
+    // Trust section
+    'trustTitle',
+    'trustBody',
+    'trustGithubLabel',
   ] as const;
 
   for (const key of NAV_KEYS) {
