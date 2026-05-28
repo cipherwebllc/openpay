@@ -101,10 +101,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   const flowPending = isStandard ? standard.isPending : gasless.isPending;
   const gasQuoteReady = isStandard || gasQuote.data !== undefined;
-  // 運営の赤字防止: merchant が 0 になるケースは送信を block。
+  // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
+  // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ total < gas のみ)。
   //   gasless / customer:  total < fee → merchant = 0
   //   gasless / merchant:  total < fee + gas → merchant = 0
-  //   standard:            total < fee (0.5%) → merchant = 0
+  //   standard:            total < fee → merchant = 0
   const merchantUnderflow =
     totalWei > 0n &&
     (isStandard || !isMerchantGas || gasQuote.data !== undefined) &&

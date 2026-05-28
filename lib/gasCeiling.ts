@@ -1,7 +1,7 @@
-// チェーン別の maxFeePerGas 上限 (gwei)。これを超える gas 価格で UserOp を
-// 送ると、運営手数料 (1.0% 純プロポーショナル) + gas 見積バッファでも赤字に
-// なる可能性が高いため、送信前に弾いてユーザに「ネットワーク混雑、後で再試行」
-// を返す。運営損益のクッションは gas estimate のバッファ係数のみ。
+// チェーン別の maxFeePerGas 上限 (gwei)。これを超える gas 価格で UserOp を送ると、
+// sponsorship mode では運営の肩代わり gas が見積バッファを食い潰して赤字に、erc20
+// mode では顧客の USDC 出費が想定外に膨らむため、送信前に弾いてユーザに
+// 「ネットワーク混雑、後で再試行」を返す。損益のクッションは gas 見積のバッファ係数のみ。
 //
 // 値の根拠は Pimlico の `fast` tier 実測ベース (priority fee を含む quote)。
 // L2 については「実 base fee」ではなく「Pimlico fast quote」を基準に置く点

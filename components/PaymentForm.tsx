@@ -144,10 +144,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // (gas は paymaster が顧客から自動徴収するため二重徴収を避ける)。
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
 
-  // 運営の赤字防止: merchant が 0 になるケースは送信を block。
+  // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
+  // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ amount < gas のみ)。
   //   gasless / customer:  amount < fee → merchant = 0
   //   gasless / merchant:  amount < fee + gas → merchant = 0 (gasQuote load 完了必須)
-  //   standard:            amount < fee (= 0.5%) → merchant = 0
+  //   standard:            amount < fee → merchant = 0
   const merchantUnderflow =
     amountWei > 0n &&
     (isStandard || !isMerchantGas || gasQuote.data !== undefined) &&

@@ -178,8 +178,7 @@ export async function buildMav2SmartAccountClient(args: {
   const facade: Mav2SmartAccountClientFacade = {
     sendUserOperation: async ({ calls }) => {
       // permissionless の `{ calls: [{ to, data, value }] }` から
-      // aa-sdk の `{ uo: [{ target, data, value }] }` 形式へ変換。
-      // OpenPay は常に batch (merchant + fee の最低 2 件) なので array で渡す。
+      // aa-sdk の `{ uo: [{ target, data, value }] }` 形式へ変換 (1 件以上を array で渡す)。
       const uo = calls.map((c) => ({
         target: c.to,
         data: c.data,

@@ -7,12 +7,11 @@
 //   gas    ("customer" | "merchant", 省略時 customer) ※ merchant の場合のみ URL に出力
 //   amount (任意, 人間可読 — 据え置き QR では省略)
 //   mode   ("gasless" | "standard", 省略時 gasless) ※ standard のときのみ URL に出力
-//          旧名 "direct" (mode=direct, fee=0) は廃止。"direct" を受けたら "standard"
-//          (fee=0.5%) に正規化する legacy alias を parser で提供。
+//          旧名 "direct" は廃止。"direct" を受けたら "standard" に正規化する
+//          legacy alias を parser で提供 (既発行 QR の互換維持)。
 //   split  (任意, "0xB:30,0xC:20" 形式) — 追加受取人と分配 %。to が残余 % を取得
 //
-// OpenPay 利用手数料は常に店主負担 (顧客には不可視)。`gas` パラメタはネットワーク手数料の負担者
-// (gasless モード固有):
+// `gas` パラメタはネットワーク手数料の負担者 (gasless モード固有):
 //   gas=customer (default): 顧客がネットワーク手数料を上乗せ支払い (画面に明示表示)
 //   gas=merchant:           店主がネットワーク手数料も吸収、顧客は請求金額のみ支払う
 //   mode=standard 時は OpenPay は gas に touch しないため gas パラメタは irrelevant
@@ -313,7 +312,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     };
   }
   // mode=direct は旧名 (fee=0)。既発行 QR を破壊しないため legacy alias として受理し、
-  // 後段で standard (fee=0.5%) へ正規化する。
+  // 後段で standard へ正規化する。
   if (
     mode !== null &&
     mode !== 'gasless' &&

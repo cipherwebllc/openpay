@@ -18,10 +18,10 @@ type QrSettings = {
   // 送金チェーン (slug)。usdc では 4 chain から選択可能、jpyc は polygon 固定。
   chain: ChainSlug;
   // ネットワーク手数料 (gas) の負担者: customer (顧客上乗せ) / merchant (店主吸収)。
-  // OpenPay 利用手数料は両モードとも常に店主負担。既定 customer (gas spike を店主が被らない安全側)。
+  // 既定 customer (gas spike を店主が被らない安全側)。
   // payMode='standard' のとき gasMode は無視される (OpenPay は gas に touch しないため)。
   gasMode: GasMode;
-  // 決済モード (Phase 1 alpha: OpenPay 利用手数料は両モードとも 0%):
+  // 決済モード:
   //   gasless:  OpenPay が gas を肩代わり (default)
   //   standard: 顧客が wallet で自前 gas を支払う
   payMode: PayMode;
