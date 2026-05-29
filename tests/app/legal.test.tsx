@@ -409,12 +409,14 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: Phase 1 手数料 0% 化で terms/tokutei は 2026-05-29 改定、privacy/disclaimer は 2026-05-16 据置', () => {
+    it('effectiveDate: 手数料 0% / 案A 改定で terms/tokutei/disclaimer は 2026-05-29、privacy は 2026-05-16 据置', () => {
       // 2026-05-29: 料金条項 (Terms 第5条 / 特商法 役務の対価) を 0% 化に改定。
-      // privacy / disclaimer は料金に直接言及しないため据置。
+      // Disclaimer も同改定で「送金されるのはネットワーク手数料相当額」へ冒頭・第7条を
+      // 修正し、Terms 第9条(2) 賠償上限を固定額ベースに改めたため 2026-05-29 に更新。
+      // privacy は料金モデルに直接言及しないため 2026-05-16 据置。
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-05-29');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-05-29');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-05-16');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-05-29');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-05-16');
     });
   });
