@@ -10,6 +10,7 @@ import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingFaq } from '@/components/LandingFaq';
+import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
 import { MarketRates } from '@/components/MarketRates';
 
@@ -32,6 +33,7 @@ export default async function HomePage({
       <LandingUseCases />
       <LandingHowItWorks />
       <LandingFaq />
+      <LandingSupport />
       <LandingTrust />
     </AppShell>
   );

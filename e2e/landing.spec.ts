@@ -191,4 +191,34 @@ test.describe('landing / (LP)', () => {
     await expect(github).toHaveAttribute('target', '_blank');
     await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
   });
+
+  test('ja: OpenPay 利用料 セクション — 説明 + Tip widget 3 つ (JPYC Polygon/Kaia/USDC) を掲載', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    const support = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'OpenPay 利用料について' }) });
+    await expect(support).toBeVisible();
+    // 決済手数料は将来も取らない方針の説明 + Tip 依頼文
+    await expect(
+      support.getByText(/取引額に連動した % 手数料.*将来も取りません/),
+    ).toBeVisible();
+    await expect(support.getByText(/Tip を頂けると幸いです/)).toBeVisible();
+    // Tip widget iframe 3 つ (本番 /tip を埋め込み、JPYC Polygon / JPYC Kaia / USDC)
+    const frames = support.locator('iframe[title^="OpenPay Tip"]');
+    await expect(frames).toHaveCount(3);
+    // 各 iframe が運営の Tip address (open-pay.jp/tip/0x4284...) を指す
+    await expect(frames.first()).toHaveAttribute(
+      'src',
+      /open-pay\.jp\/tip\/0x428483FbA62eDCef1E3a100d3799F6d71759c560\?token=jpyc/,
+    );
+    // 3 種の token/chain を網羅 (jpyc polygon / jpyc kaia / usdc)
+    await expect(
+      support.locator('iframe[src*="token=jpyc&chain=kaia"]'),
+    ).toHaveCount(1);
+    await expect(
+      support.locator('iframe[src*="token=usdc"]'),
+    ).toHaveCount(1);
+  });
 });

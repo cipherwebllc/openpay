@@ -407,6 +407,14 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'trustTitle',
     'trustBody',
     'trustGithubLabel',
+    // Support / 利用料 section (FAQ 下、Tip widget 埋め込み)
+    'supportTitle',
+    'supportBody',
+    'supportTipRequest',
+    'supportTipFrameTitle',
+    'supportTipJpycPolygon',
+    'supportTipJpycKaia',
+    'supportTipUsdc',
     // Benefits section (4 cards × {focal, title, body} + section meta)。Phase 1 で
     // Fee カードは「永久に取引額連動の手数料を取らない」永続コミットメントとして
     // focal="0%" に再構成 (旧 focal="0.5%" の規制論的に危うい % 訴求は撤去)。
