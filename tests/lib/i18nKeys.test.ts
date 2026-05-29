@@ -411,7 +411,7 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'supportTitle',
     'supportBody',
     'supportTipRequest',
-    'supportTipFrameTitle',
+    'supportTipButton',
     'supportTipJpycPolygon',
     'supportTipJpycKaia',
     'supportTipUsdc',

@@ -192,7 +192,7 @@ test.describe('landing / (LP)', () => {
     await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: OpenPay 利用料 セクション — 説明 + Tip widget 3 つ (JPYC Polygon/Kaia/USDC) を掲載', async ({
+  test('ja: OpenPay 利用料 セクション — 説明 + Tip 応援 link button 3 つ (JPYC Polygon/Kaia/USDC)', async ({
     page,
   }) => {
     await page.goto('/ja');
@@ -205,20 +205,23 @@ test.describe('landing / (LP)', () => {
       support.getByText(/取引額に連動した % 手数料.*将来も取りません/),
     ).toBeVisible();
     await expect(support.getByText(/Tip を頂けると幸いです/)).toBeVisible();
-    // Tip widget iframe 3 つ (本番 /tip を埋め込み、JPYC Polygon / JPYC Kaia / USDC)
-    const frames = support.locator('iframe[title^="OpenPay Tip"]');
-    await expect(frames).toHaveCount(3);
-    // 各 iframe が運営の Tip address (open-pay.jp/tip/0x4284...) を指す
-    await expect(frames.first()).toHaveAttribute(
-      'src',
+    // 応援 link button 3 つ (新規タブで本番 /tip を開く)
+    const tipLinks = support.getByRole('link', { name: /で応援$/ });
+    await expect(tipLinks).toHaveCount(3);
+    // 先頭ボタン (JPYC Polygon) の href / target / rel
+    const first = support.getByRole('link', { name: 'JPYC (Polygon) で応援' });
+    await expect(first).toHaveAttribute(
+      'href',
       /open-pay\.jp\/tip\/0x428483FbA62eDCef1E3a100d3799F6d71759c560\?token=jpyc/,
     );
-    // 3 種の token/chain を網羅 (jpyc polygon / jpyc kaia / usdc)
+    await expect(first).toHaveAttribute('target', '_blank');
+    await expect(first).toHaveAttribute('rel', 'noopener noreferrer');
+    // 3 種の token/chain を網羅
     await expect(
-      support.locator('iframe[src*="token=jpyc&chain=kaia"]'),
-    ).toHaveCount(1);
+      support.getByRole('link', { name: 'JPYC (Kaia) で応援' }),
+    ).toHaveAttribute('href', /token=jpyc&chain=kaia/);
     await expect(
-      support.locator('iframe[src*="token=usdc"]'),
-    ).toHaveCount(1);
+      support.getByRole('link', { name: 'USDC (cross-chain) で応援' }),
+    ).toHaveAttribute('href', /token=usdc/);
   });
 });
