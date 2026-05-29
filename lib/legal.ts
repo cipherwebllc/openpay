@@ -17,10 +17,13 @@ export const LEGAL_ENTITY = {
 
   // 施行日 (各文書共通でサービス開始日に揃える)
   // 2026-05-16 改定: 通常決済（ガスあり）モード追加に伴う料金体系・用語の整理。
-  termsEffectiveDate: '2026-05-16',
+  // 2026-05-29 改定: OpenPay 利用手数料を 0% 化 (取引額連動の % 手数料を撤廃)、
+  //   ガスレスのネットワーク手数料相当額を上限価格基準の固定額で徴収する旨に
+  //   Terms 第5条 / 特商法 役務の対価 を改定 (利用者の一般の利益に適合)。
+  termsEffectiveDate: '2026-05-29',
   privacyEffectiveDate: '2026-05-16',
   disclaimerEffectiveDate: '2026-05-16',
-  tokuteiEffectiveDate: '2026-05-16',
+  tokuteiEffectiveDate: '2026-05-29',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,

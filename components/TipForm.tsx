@@ -99,6 +99,10 @@ export function TipForm({ params }: { params: TipParams }) {
     isConnected &&
     !wrongChain &&
     !!saData &&
+    // creator 受取 > 0 を要求 (custom amount 未入力だと gas 分で customerPays が
+    // 正になり得るが、tip 額 0 の空 batch は無意味)。hook 側でも calls.length===0
+    // を弾くが、UI でも button を無効化して金額入力を促す。
+    breakdown.merchantReceives > 0n &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !gasless.isPending &&
@@ -440,7 +444,7 @@ export function TipForm({ params }: { params: TipParams }) {
                 ? t('btnSaInit')
                 : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
-                  : breakdown.customerPays === 0n
+                  : breakdown.merchantReceives === 0n
                     ? t('btnSelectAmount')
                     : t('btnSend', { amount: fmt(totalCustomerOutflow) })}
       </button>

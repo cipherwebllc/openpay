@@ -112,8 +112,15 @@ function mountReady(opts?: {
 }
 
 describe('useBatchPayment', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // resolvePaymasterMode を毎テスト実装に戻す (mockReturnValue は clearAllMocks で
+    // 消えず leak するため)。各テストは必要に応じ mockReturnValue で上書きする。
+    const actual =
+      await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
+    vi.mocked(resolvePaymasterMode).mockImplementation(
+      actual.resolvePaymasterMode,
+    );
   });
 
   it('店主送金 + 手数料を 1 つの UserOp の calls[2] にバッチ化', async () => {
@@ -204,7 +211,53 @@ describe('useBatchPayment', () => {
     expect((d.args as readonly [string, bigint])[1]).toBe(50_000_000n);
   });
 
-  it('Phase 1: 両方 0 → batch は no-op で成功 (calls 0 件は smart account 側で reject される想定だが本テストは guard 動作のみ確認)', async () => {
+  it('JPYC sponsorship + feeAmount=0 → reject (sponsorship 濫用防御、Codex P2 fix)', async () => {
+    // JPYC sponsorship chain では運営が native gas を立替えるため reimbursement
+    // (feeAmount>0) 必須。0 を渡すと運営が gas を全額被るので送信前に弾く。
+    mountReady({ paymasterMode: 'sponsorship' });
+    vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
+    const { result } = renderHook(() => useBatchPayment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 50_000_000n, // merchant 送金はあるが reimbursement 欠落
+      feeReceiver: FEE_RECV,
+      feeAmount: 0n,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/reimbursement|ガス代/);
+    expect(sendUserOperation).not.toHaveBeenCalled();
+  });
+
+  it('JPYC sponsorship + feeAmount<0 (負値) も reject (invariant feeAmount>0 を完全強制)', async () => {
+    // === 0n だけでなく <= 0n で弾く。負値は calcFee からは出ないが、guard が
+    // documented invariant (feeAmount > 0) を完全に満たすことを fence。
+    mountReady({ paymasterMode: 'sponsorship' });
+    vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
+    const { result } = renderHook(() => useBatchPayment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 50_000_000n,
+      feeReceiver: FEE_RECV,
+      feeAmount: -1n,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/reimbursement|ガス代/);
+    expect(sendUserOperation).not.toHaveBeenCalled();
+  });
+
+  it('merchantAmount=0 かつ fee=0 (空 batch) → 送信せずエラー (Codex P2 fix)', async () => {
+    // Phase 1 で fee>0 guard を撤去した結果 calls=[] の UserOp が送られ得たため、
+    // calls.length===0 を明示 reject する。空 UserOp に gas を払う事故を防ぐ。
     mountReady();
     const { result } = renderHook(() => useBatchPayment(usdcDep), {
       wrapper: makeWrapper(),
@@ -218,10 +271,9 @@ describe('useBatchPayment', () => {
       feeAmount: 0n,
     });
 
-    // merchantAmount=0n は guard を通過、空 calls で sendUserOperation が呼ばれる
-    await waitFor(() => expect(sendUserOperation).toHaveBeenCalledOnce());
-    const arg = sendUserOperation.mock.calls[0][0];
-    expect(arg.calls).toHaveLength(0);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/送金額が 0/);
+    expect(sendUserOperation).not.toHaveBeenCalled();
   });
 
   it('Smart Account 未準備 → エラー', async () => {
@@ -472,9 +524,9 @@ describe('useBatchPayment', () => {
       expect(getUserOperationGasPrice).not.toHaveBeenCalled();
     });
 
-    it('Phase 1: feeAmount=0 でも gas price ceiling は通る (両方 OK で送信成立)', async () => {
-      // Phase 1: feeAmount=0 はもはやエラーパスではない。gas ceiling は normal に
-      // チェックされ、merchant tx 1 件で batch が成立する。
+    it('JPYC sponsorship + feeAmount>0 (gas reimbursement あり): gas ceiling 通過で送信成立', async () => {
+      // JPYC sponsorship は ceiling-based の gas reimbursement (feeAmount>0) を伴う。
+      // gas ceiling が normal にチェックされ、merchant + fee の batch が成立する。
       mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
       const { result } = renderHook(() => useBatchPayment(jpycDep), {
         wrapper: makeWrapper(),
@@ -485,7 +537,7 @@ describe('useBatchPayment', () => {
         merchant: MERCHANT,
         merchantAmount: 50_000_000n,
         feeReceiver: FEE_RECV,
-        feeAmount: 0n,
+        feeAmount: 4_000_000_000_000_000_000n, // ceiling 基準の gas reimbursement
       });
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -1080,6 +1132,50 @@ describe('useBatchPayment', () => {
         'payment.sponsorship.under_collected',
         expect.anything(),
       );
+      expect(logger.info).not.toHaveBeenCalledWith(
+        'payment.sponsorship.gas_reconciled',
+        expect.anything(),
+      );
+    });
+
+    it('revert (success=false): 徴収 0 で突合 = 必ず under_collected (Codex P2 fix)', async () => {
+      // UserOp revert 時は ERC20 transfer も atomic に巻き戻り feeReceiver は
+      // 何も受け取らない (徴収 0)。gas は消費済なので、collected=0 vs actual>0 で
+      // 必ず under_collected を warn する (params.feeAmount を渡して取りこぼしを
+      // 隠さない)。
+      mountReady({ paymasterMode: 'sponsorship' });
+      vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
+      waitForUserOperationReceipt.mockResolvedValue({
+        success: false,
+        actualGasCost: 1_000n, // gas は消費済
+        receipt: {
+          transactionHash: `0x${'b'.repeat(64)}` as Hex,
+          blockNumber: 12345n,
+        },
+      });
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 50_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 4_000_000_000_000_000_000n, // 要求徴収は 4 JPYC だが revert で実徴収 0
+      });
+      // revert は data.success=false だが mutation 自体は成功 (例外を投げない)
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      await waitFor(() =>
+        expect(logger.warn).toHaveBeenCalledWith(
+          'payment.sponsorship.under_collected',
+          expect.objectContaining({
+            collectedJpyc: '0', // revert なので要求 feeAmount ではなく 0
+            actualCostJpyc: '20000', // 1_000 × 20
+            shortfallJpyc: '20000',
+          }),
+        ),
+      );
+      // 誤って gas_reconciled (賄えた) を出さない
       expect(logger.info).not.toHaveBeenCalledWith(
         'payment.sponsorship.gas_reconciled',
         expect.anything(),

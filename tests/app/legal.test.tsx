@@ -238,11 +238,13 @@ describe('Legal pages', () => {
       ).toBeInTheDocument();
     });
 
-    it('役務の対価: 1.0% 単独表記、最低手数料 (5 JPYC / 0.05 USDC) 文の不在 (regression guard)', () => {
+    it('役務の対価: alpha 期間中 0% を明示、旧 % 手数料 (1.0%/0.5%) と最低手数料文の不在 (regression guard)', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      // 1% プロポーショナル単独であることを正面で assert
-      expect(main.textContent).toMatch(/1\.0%/);
+      // Phase 1: 0% (無料) を正面で assert、旧 % 表記は撤去済
+      expect(main.textContent).toMatch(/0%/);
+      expect(main.textContent).not.toMatch(/1\.0%/);
+      expect(main.textContent).not.toMatch(/0\.5%/);
       // MIN_FEE 文言の不在 (再導入されたら test 失敗)
       expect(main.textContent).not.toMatch(/最低 5 JPYC/);
       expect(main.textContent).not.toMatch(/最低 0\.05 USDC/);
@@ -260,22 +262,26 @@ describe('Legal pages', () => {
       expect(main.textContent).not.toMatch(/取引金額から自動的に控除/);
     });
 
-    it('OpenPay 利用手数料の負担者選択肢 (店主負担 / 顧客負担) を明示', () => {
+    it('ネットワーク手数料相当額の負担者選択 (顧客 / 店主) を明示', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      expect(main.textContent).toMatch(/店主負担.*顧客負担|顧客負担.*店主負担/);
+      // Phase 1: gasless の gas 相当額の負担者を店主が選択できる旨
+      expect(main.textContent).toMatch(/負担者.*顧客.*店主|顧客 \/ 店主/);
     });
   });
 
   describe('regression: MIN_FEE 撤廃の legal 反映', () => {
-    it('Terms 第 5 条 (料金) に「最低 5 JPYC / 0.05 USDC」の文が現れない', () => {
+    it('Terms 第 5 条 (料金) は 0% を明示し、旧 % 手数料 / 最低手数料文が現れない', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
       const article5Heading = screen.getByRole('heading', {
         level: 2,
         name: /第 5 条/,
       });
       const body = article5Heading.nextElementSibling;
-      expect(body?.textContent).toMatch(/1\.0%/);
+      // Phase 1: 0% 化、旧 % 表記と MIN_FEE 文言は撤去済
+      expect(body?.textContent).toMatch(/0%/);
+      expect(body?.textContent).not.toMatch(/1\.0%/);
+      expect(body?.textContent).not.toMatch(/0\.5%/);
       expect(body?.textContent).not.toMatch(/最低 5 JPYC/);
       expect(body?.textContent).not.toMatch(/最低 0\.05 USDC/);
     });
@@ -305,7 +311,7 @@ describe('Legal pages', () => {
   // 通常決済（ガスあり） / mode=standard 追加に伴う両モード並記 regression
   // -------------------------------------------------------------------------
   describe('regression: 通常決済（ガスあり）モード追加', () => {
-    it('ja Terms 第 5 条 (料金) に gasless 1.0% と standard 0.5% の両方が並記', () => {
+    it('ja Terms 第 5 条 (料金) は Phase 1 で 0% 化、両モードとネットワーク手数料負担者選択を明記', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
       const article5 = screen.getByRole('heading', {
         level: 2,
@@ -314,10 +320,12 @@ describe('Legal pages', () => {
       const body = article5.nextElementSibling;
       expect(body?.textContent).toMatch(/ガスレス決済/);
       expect(body?.textContent).toMatch(/通常決済（ガスあり）/);
-      expect(body?.textContent).toMatch(/1\.0%/);
-      expect(body?.textContent).toMatch(/0\.5%/);
-      // OpenPay 利用手数料は両モード共通で常に店主負担と明記
-      expect(body?.textContent).toMatch(/常に店主が負担/);
+      // Phase 1: 0% 化、旧 % 手数料は撤去
+      expect(body?.textContent).toMatch(/0%/);
+      expect(body?.textContent).not.toMatch(/1\.0%/);
+      expect(body?.textContent).not.toMatch(/0\.5%/);
+      // ネットワーク手数料相当額の負担者選択 (顧客/店主) を明記
+      expect(body?.textContent).toMatch(/顧客負担または店主負担/);
     });
 
     it('ja Terms 第 2 条 (定義) で「ガスレス決済」「通常決済（ガスあり）」が定義語として導入される', () => {
@@ -331,7 +339,7 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/「通常決済（ガスあり）」/);
     });
 
-    it('en Terms Article 5 で gasless 1.0% と standard 0.5% の両方を記載', () => {
+    it('en Terms Article 5 は Phase 1 で 0% 化、両モード記載で旧 % 手数料は不在', () => {
       renderWithIntl(<TermsPage />, { locale: 'en' });
       const article5 = screen.getByRole('heading', {
         level: 2,
@@ -340,19 +348,19 @@ describe('Legal pages', () => {
       const body = article5.nextElementSibling;
       expect(body?.textContent).toMatch(/Gasless Payment/);
       expect(body?.textContent).toMatch(/Standard Payment/);
-      expect(body?.textContent).toMatch(/1\.0%/);
-      expect(body?.textContent).toMatch(/0\.5%/);
+      expect(body?.textContent).toMatch(/0%/);
+      expect(body?.textContent).not.toMatch(/1\.0%/);
+      expect(body?.textContent).not.toMatch(/0\.5%/);
     });
 
-    it('ja Tokutei 役務の対価 に 1.0% と 0.5% の両モード記載 + 両モードで店主負担明記', () => {
+    it('ja Tokutei 役務の対価 は Phase 1 で 0% 化、両モード記載で旧 % 手数料は不在', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      expect(main.textContent).toMatch(/1\.0%/);
-      expect(main.textContent).toMatch(/0\.5%/);
+      expect(main.textContent).toMatch(/0%/);
+      expect(main.textContent).not.toMatch(/1\.0%/);
+      expect(main.textContent).not.toMatch(/0\.5%/);
       expect(main.textContent).toMatch(/ガスレス決済/);
       expect(main.textContent).toMatch(/通常決済（ガスあり）/);
-      // OpenPay 利用手数料は両モード共通で常に店主負担
-      expect(main.textContent).toMatch(/両モード共通で常に店主が負担/);
     });
 
     it('ja Disclaimer 第 4 条 (ネットワーク手数料の変動) で両モードの取扱いが明記', () => {
@@ -401,11 +409,12 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: terms / disclaimer / tokutei / privacy 全て 2026-05-16', () => {
-      // 通常決済モード追加で 4 文書とも改定 → 同日 effectiveDate
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-05-16');
+    it('effectiveDate: Phase 1 手数料 0% 化で terms/tokutei は 2026-05-29 改定、privacy/disclaimer は 2026-05-16 据置', () => {
+      // 2026-05-29: 料金条項 (Terms 第5条 / 特商法 役務の対価) を 0% 化に改定。
+      // privacy / disclaimer は料金に直接言及しないため据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-05-29');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-05-29');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-05-16');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-05-16');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-05-16');
     });
   });

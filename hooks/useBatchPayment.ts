@@ -20,7 +20,10 @@ import {
 import { useAccount } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
 import { assertGasCeiling } from '@/lib/gasCeiling';
-import { resolveNativeJpycRate } from '@/lib/gasReimbursement';
+import {
+  isJpycSponsorshipChain,
+  resolveNativeJpycRate,
+} from '@/lib/gasReimbursement';
 import { logger } from '@/lib/logger';
 import {
   buildPaymentLogEvent,
@@ -67,6 +70,22 @@ export function useBatchPayment(
       }
       const { smartAccountClient, pimlicoClient } = clients;
 
+      // sponsorship 濫用防御: JPYC sponsorship chain では運営が native gas を
+      // 立て替えるため、ガス代 reimbursement (feeAmount > 0) が必須。stale/改竄
+      // caller が feeAmount=0 を渡すと運営が gas を全額被る穴になるので reject する。
+      // collect-at-ceiling で正規の JPYC sponsorship は常に feeAmount = gasAmount > 0。
+      // (testnet USDC の sponsorship fallback は非 JPYC chain・gasAmount=0 が正常な
+      //  ため対象外。erc20 paymaster は顧客が実 gas を直接負担するので対象外。)
+      if (
+        resolvePaymasterMode(deployment) === 'sponsorship' &&
+        isJpycSponsorshipChain(deployment.chainId) &&
+        params.feeAmount <= 0n
+      ) {
+        throw new Error(
+          'JPYC ガスレス決済にはガス代 reimbursement (feeAmount > 0) が必須です。',
+        );
+      }
+
       // gas ceiling は両 mode で適用。sponsorship では運営赤字回避、erc20 では
       // 顧客の USDC 出費上限の保護として機能する (どちらも UX 上の安全弁)。
       if (chainId !== undefined) {
@@ -99,6 +118,14 @@ export function useBatchPayment(
         calls.push(transfer(params.feeReceiver, params.feeAmount));
       }
 
+      // 空 batch (merchantAmount=0 かつ fee=0 かつ split なし) を弾く。Phase 1 で
+      // fee>0 guard を撤去した結果、gasless で amount 未入力 (customerPays は
+      // gas 分だけ正) でも canSubmit が通り calls=[] の UserOp が送られ得る。
+      // 何も transfer しない UserOp に gas を払う/低レベル account error になるのを防ぐ。
+      if (calls.length === 0) {
+        throw new Error('送金額が 0 です。金額を入力してください。');
+      }
+
       const userOpHash = await smartAccountClient.sendUserOperation({ calls });
 
       const receipt = await pimlicoClient.waitForUserOperationReceipt({
@@ -122,10 +149,14 @@ export function useBatchPayment(
           blockNumber: data.blockNumber,
         }),
       );
+      // revert 時は ERC20 transfer も atomic に巻き戻り feeReceiver は何も
+      // 受け取らない (徴収 0)。collected に params.feeAmount を渡すと under-collect
+      // シグナルを隠すため、success=false では collected=0 で突合する
+      // (gas は消費済なので actualGasCost > 0 → under_collected を正しく検出)。
       reconcileSponsorshipGas(
         deployment,
         chainId,
-        params.feeAmount,
+        data.success ? params.feeAmount : 0n,
         data.actualGasCost,
       );
     },

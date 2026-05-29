@@ -43,7 +43,9 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 ## Fees
 
-OpenPay service fee is **0% during the alpha period**. There are no monthly fees, minimum fees, or setup fees. Merchant funds flow directly to the merchant wallet.
+OpenPay service fee is **0% during the alpha period**, and OpenPay never charges a fee tied to the transaction amount. There are no monthly fees, minimum fees, or setup fees. Merchant funds flow directly to the merchant wallet.
+
+In **gasless** mode, OpenPay sponsors the native gas (POL / ETH) via the Pimlico paymaster and recovers it as a **network-fee reimbursement collected in the payment token** (JPYC / USDC). For JPYC sponsorship this reimbursement is a **fixed amount based on the congestion-ceiling gas price** (independent of the transaction amount; any surplus over the actual gas is not refunded) — see [docs/DEPLOY_CHECKLIST.md §9.5](./docs/DEPLOY_CHECKLIST.md). In **standard** mode the customer pays gas directly from their own wallet and OpenPay does not touch it.
 
 A future pricing model that is **not tied to transaction volume** (e.g. a monthly subscription or a prepaid usage license such as an NFT pass / time-limited rights) is under consideration. This direction is chosen so OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 
@@ -147,6 +149,7 @@ npm run lint
 npm run test:run
 npm run build
 npm run e2e:local                      # Playwright with stub env
+npm run load-test -- --url <base-url>  # zero-dep load test (p50/p90/p99, RPS, error rate)
 ```
 
 ## Environment variables

@@ -168,6 +168,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
     isConnected &&
     !wrongChain &&
     (isStandard || !!saData) &&
+    // merchantReceives > 0 を要求 (amount 未入力だと gasless では customerPays が
+    // gas 分だけ正になり得るが、店舗送金額 0 の空 batch は無意味。hook 側でも
+    // calls.length===0 を弾くが、UI でも button を無効化して金額入力を促す)。
+    breakdown.merchantReceives > 0n &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !flowPending &&
@@ -538,7 +542,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 ? t('btnSaInit')
                 : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
-                  : breakdown.customerPays === 0n
+                  : breakdown.merchantReceives === 0n
                     ? t('btnEnterAmount')
                     : t('btnPay', { amount: fmt(totalCustomerOutflow) })}
       </button>
