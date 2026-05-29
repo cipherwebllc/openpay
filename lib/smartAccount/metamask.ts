@@ -110,5 +110,11 @@ export async function buildMetaMaskSmartAccountClient(args: {
     },
   });
 
-  return { smartAccountClient, pimlicoClient, paymasterMode };
+  return {
+    provider: 'pimlico',
+    entryPointVersion: '0.7',
+    smartAccountClient,
+    pimlicoClient,
+    paymasterMode,
+  };
 }

@@ -190,6 +190,8 @@ export async function buildMav2SmartAccountClient(args: {
   };
 
   return {
+    provider: 'pimlico',
+    entryPointVersion: '0.7',
     // facade を SmartAccountBundle 型に流し込む。本物の SmartAccountClient
     // ではないが、useBatchPayment が呼ぶのは sendUserOperation のみなので
     // 型上の不整合は cast で吸収する (consumer 側に変更を入れないための妥協)。

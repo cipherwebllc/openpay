@@ -292,6 +292,15 @@ export const env = {
   enableMav2:
     process.env.NEXT_PUBLIC_ENABLE_MAV2 === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_MAV2 === 'true',
+  // Circle Paymaster (USDC ガスレスを Pimlico erc20 → Circle 公式 paymaster に
+  // 切替える) の有効化フラグ。既定 OFF で投入し testnet 検証 → mainnet 1 chain
+  // (Base) と段階展開する。OFF の間は USDC ガスレスは従来通り Pimlico erc20。
+  // '1' / 'true' で ON。⚠️ Circle paymaster アドレスは lib/circlePaymaster.ts の
+  // hardcode allowlist が SoT で env override は持たせない (permit spender =
+  // 信頼境界のため、任意 override は顧客 USDC 流出に直結する)。
+  enableCirclePaymaster:
+    process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

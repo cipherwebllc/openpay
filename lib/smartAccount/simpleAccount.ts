@@ -25,7 +25,15 @@ import type { TokenDeployment } from '@/lib/tokens';
 
 export type SimpleAccountClient = SmartAccountClient;
 
+// Pimlico (EntryPoint v0.7) 経路の bundle。Circle Paymaster (v0.8) 経路を
+// 並行導入したため、provider/entryPointVersion を discriminant に持たせて
+// CircleSmartAccountBundle との discriminated union (lib/smartAccount/circleAccount.ts
+// の AnySmartAccountBundle) を構成する。既存 consumer (useBatchPayment) は
+// provider==='pimlico' に narrow した上で従来通り smartAccountClient/pimlicoClient
+// を使う。
 export type SmartAccountBundle = {
+  provider: 'pimlico';
+  entryPointVersion: '0.7';
   smartAccountClient: SimpleAccountClient;
   pimlicoClient: ReturnType<typeof createPimlico>;
   paymasterMode: 'sponsorship' | 'erc20';
@@ -74,5 +82,11 @@ export async function buildSimpleSmartAccountClient(args: {
     },
   });
 
-  return { smartAccountClient, pimlicoClient, paymasterMode };
+  return {
+    provider: 'pimlico',
+    entryPointVersion: '0.7',
+    smartAccountClient,
+    pimlicoClient,
+    paymasterMode,
+  };
 }
