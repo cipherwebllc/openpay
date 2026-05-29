@@ -41,7 +41,7 @@
     "howItWorksCustomerStep3": "Sign in your wallet — done",
     "faqTitle": "FAQ",
     "faqQ1": "Are payments truly gas-free?",
-    "faqA1": "In gasless mode, customers don't need POL or ETH — they pay with just their JPYC or USDC balance (that's what \"gasless\" means here). For JPYC payments, OpenPay advances the gas via Pimlico's paymaster and collects an equivalent amount in JPYC; whether that gas-equivalent is added on top of the customer's bill or absorbed by the merchant is chosen by the merchant when building the QR. For USDC payments, the customer pays gas in USDC to the paymaster, so there is no separate gas-equivalent collection or bearer choice.",
+    "faqA1": "In gasless mode, customers don't need POL or ETH — they pay with just their JPYC or USDC balance (that's what \"gasless\" means here). For JPYC payments, OpenPay advances the gas via Pimlico's paymaster and collects an equivalent amount in JPYC; whether that gas-equivalent is added on top of the customer's bill or absorbed by the merchant is chosen by the merchant when building the QR. For USDC payments, the customer pays gas in USDC to the paymaster, so OpenPay does not collect a separate gas-equivalent.",
     "faqQ2": "Can I receive both JPYC and USDC?",
     "faqA2": "Yes. JPYC is a good fit when you want JPY-denominated receipts; USDC is better for Web3-savvy or international customers. JPYC (JPY-pegged) is supported on Polygon and Kaia; USDC on Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche. Pick the chain in the QR builder. If the customer holds the token on a different chain, Circle CCTP V2 settles cross-chain automatically.",
     "faqQ3": "What if the customer has no wallet?",
