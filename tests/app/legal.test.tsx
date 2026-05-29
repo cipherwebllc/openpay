@@ -6,6 +6,8 @@ import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
 import TokuteiPage from '@/app/[locale]/tokutei/page';
 import { LEGAL_ENTITY } from '@/lib/legal';
+import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
+import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
 
 describe('Legal pages', () => {
   describe('Terms (利用規約)', () => {
@@ -599,6 +601,146 @@ describe('Legal pages', () => {
           (en.PaymentForm as Record<string, unknown>)[key],
         ).toBeUndefined();
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // C7: 賠償上限 (Terms 第9条) を lib/legal.ts の SoT に集約し、ja/en prose には
+  // {amount} 補間で注入。両言語が同一定数由来となり乖離不能であることを担保。
+  // -------------------------------------------------------------------------
+  describe('regression: 賠償上限の SoT 化 (lib/legal.ts liabilityCapJpy)', () => {
+    const expected = LEGAL_ENTITY.liabilityCapJpy.toLocaleString('en-US');
+
+    it('ja Terms 第9条が liabilityCapJpy の整形値を表示', () => {
+      renderWithIntl(<TermsPage />, { locale: 'ja' });
+      const body = screen.getByRole('heading', {
+        level: 2,
+        name: /第 9 条/,
+      }).nextElementSibling;
+      expect(body?.textContent).toContain(expected);
+    });
+
+    it('en Terms Article 9 が同一の整形値を表示 (ja と乖離しない)', () => {
+      renderWithIntl(<TermsPage />, { locale: 'en' });
+      const body = screen.getByRole('heading', {
+        level: 2,
+        name: /^Article 9 \(/,
+      }).nextElementSibling;
+      expect(body?.textContent).toContain(expected);
+    });
+
+    it('messages から旧ハードコード数値が消え {amount} 補間化されている (ja/en)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      // 旧固定文字列 "10,000" が prose に直書きされていないこと
+      expect(ja.Terms.article9.body).not.toMatch(/10,000/);
+      expect(en.Terms.article9.body).not.toMatch(/10,000/);
+      // {amount} 補間が両言語に存在
+      expect(ja.Terms.article9.body).toContain('{amount}');
+      expect(en.Terms.article9.body).toContain('{amount}');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // C8: 法務 prose (Terms art2(6)/art3/art5(2)・特商法) は「JPYC=sponsorship
+  // (当社徴収) / USDC=erc20 (顧客が Paymaster に支払い)」をハードコードしている。
+  // lib/tokens.ts の静的 paymasterMode マッピングが変わったら本テストが落ち、prose
+  // の見直しを促す。
+  //
+  // ⚠️ スコープ: 法務文書は **mainnet 本番商用サービス**を記述対象とする (プロダクト
+  // 判断)。本ガードは TOKEN_DEPLOYMENTS の静的 paymasterMode (mainnet/testnet で
+  // 不変: usdc=erc20 / jpyc=sponsorship) を固定する。testnet では実行時に
+  // resolvePaymasterMode が USDC erc20→sponsorship に倒すため挙動が異なるが、testnet
+  // は非商用テスト環境 (AlphaNotice) であり法務文書の記述対象外。testnet の USDC
+  // ガス代徴収挙動 (useGasQuote が sponsorship で発火) は本タスクとは別軸の
+  // コード論点として別途扱う。
+  // -------------------------------------------------------------------------
+  describe('regression: token->paymasterMode 前提を tokens.ts に固定 (法務 prose ドリフトガード)', () => {
+    it('per-deployment: merchant USDC は全て erc20 / JPYC は全て sponsorship / sponsorship は JPYC のみ', () => {
+      // merchant vs buyer-only の分類は paymasterMode ではなく **独立ソース**
+      // (lib/chains.ts USDC_CHAINS) から行う。paymasterMode で分類すると、merchant
+      // USDC が誤って 'unavailable' に変わった場合にフィルタで除外され検知できない
+      // (循環依存)。USDC_CHAINS は merchant 受信 chain の SoT。
+      //
+      // env-invariance note: paymasterMode は mainnet/testnet で同一 (usdc は常に
+      // 'erc20'、jpyc は常に 'sponsorship'、buyer-only は常に 'unavailable' を
+      // lib/tokens.ts がハードコード)。env で変わるのは address/chainId のみ。よって
+      // 本テストが testnet env (vitest.config) で走っても mainnet の paymasterMode
+      // マッピングを正しく検証する。実行時の resolvePaymasterMode による testnet
+      // フォールバックは法務 scope 外 (mainnet 商用)。
+      //
+      // 受容する残リスク (判断: 文書化して受容): 本テストは testnet env で読み込んだ
+      // 静的マッピングから mainnet を「推論」する。万一将来 usdcPaymasterModeFor 等を
+      // env 依存 (例: isMainnet で分岐) に書き換えると、mainnet 限定のドリフトを本
+      // テストは捕捉できない。mainnet env 再ロード test は lib/env.ts の mainnet ガード
+      // (FEE_RECEIVER 等未設定で throw) を全スタブ要で脆いため不採用。paymasterMode を
+      // env 依存化する変更を行う場合は、その PR で mainnet env 専用 test を追加すること。
+      const merchantUsdcChainIds = new Set(
+        USDC_CHAINS.map((slug) => chainForSlug(slug).id),
+      );
+      const usdc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'usdc');
+      const merchantUsdc = usdc.filter((d) =>
+        merchantUsdcChainIds.has(d.chainId),
+      );
+      const buyerOnlyUsdc = usdc.filter(
+        (d) => !merchantUsdcChainIds.has(d.chainId),
+      );
+      const jpyc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'jpyc');
+
+      // merchant 受信 USDC は全て erc20 (prose: 顧客が Paymaster に支払い・当社徴収なし)。
+      // unavailable へ漂流したら独立分類で拾われ every(erc20) が落ちる。
+      expect(merchantUsdc.length).toBe(USDC_CHAINS.length);
+      expect(merchantUsdc.every((d) => d.paymasterMode === 'erc20')).toBe(true);
+      // buyer-only USDC は gasless 非対応 (unavailable)、法務 prose 対象外。
+      expect(buyerOnlyUsdc.every((d) => d.paymasterMode === 'unavailable')).toBe(
+        true,
+      );
+      // JPYC は全て sponsorship (prose: 当社が肩代わり・JPYC で徴収)。
+      expect(jpyc.length).toBeGreaterThan(0);
+      expect(jpyc.every((d) => d.paymasterMode === 'sponsorship')).toBe(true);
+      // 逆向き: sponsorship 経路は JPYC のみ (新 sponsorship トークン追加を検知)。
+      expect(
+        TOKEN_DEPLOYMENTS.filter(
+          (d) => d.paymasterMode === 'sponsorship',
+        ).every((d) => d.symbol === 'jpyc'),
+      ).toBe(true);
+    });
+
+    it('USDC 非徴収 carve-out が同一節で USDC×ERC20 Paymaster×非徴収/非送金 を結びつけて art2/art3/art5/特商法 に存在', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+
+      // art2(6) 定義: ERC20 Paymaster 経路が USDC と同一節 (句点区切り無し) で結びつく
+      expect(ja.Terms.article2.body).toMatch(
+        /ERC20 Paymaster[^。]*USDC|USDC[^。]*ERC20 Paymaster/,
+      );
+      expect(en.Terms.article2.body).toMatch(
+        /ERC20 Paymaster \(e\.g\. USDC|ERC20 Paymaster for USDC/,
+      );
+
+      // art3 (本サービスの内容): USDC 経路は「当社指定ウォレットへの送金は生じない」
+      // を同一節でバインド。
+      expect(ja.Terms.article3.body).toMatch(
+        /USDC の ERC20 Paymaster[^。]*送金は生じません/,
+      );
+      expect(en.Terms.article3.body).toMatch(
+        /ERC20 Paymaster for USDC[^.]*no transfer is made/,
+      );
+
+      // art5(2) と特商法 additionalFees: 「USDC の ERC20 Paymaster …徴収しません」を
+      // 同一節で明記 (別パスへの付け替え・carve-out 削除を検知)。en も同一節バインド。
+      expect(ja.Terms.article5.body).toMatch(
+        /USDC の ERC20 Paymaster[^。]*徴収しません/,
+      );
+      expect(ja.Tokutei.rows.additionalFees.value).toMatch(
+        /USDC の ERC20 Paymaster[^。]*徴収しません/,
+      );
+      expect(en.Terms.article5.body).toMatch(
+        /ERC20 Paymaster for USDC[^.]*does not collect/,
+      );
+      expect(en.Tokutei.rows.additionalFees.value).toMatch(
+        /ERC20 Paymaster for USDC[^.]*does not collect/,
+      );
     });
   });
 });

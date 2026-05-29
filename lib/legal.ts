@@ -31,4 +31,10 @@ export const LEGAL_ENTITY = {
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,
+
+  // Terms 第9条(2) の損害賠償責任上限額 (円)。手数料 0% 化で消費者契約の軽過失
+  // 上限が実質 ¥0 化するのを避けるための固定下限。変更時は本定数のみ修正すれば
+  // よく、規約本文 (messages/{ja,en}.json art9) は {amount} 補間で追従するため
+  // ja/en が乖離しない (page 側で固定ロケール整形して同一文字列を両言語へ注入)。
+  liabilityCapJpy: 10000,
 } as const;

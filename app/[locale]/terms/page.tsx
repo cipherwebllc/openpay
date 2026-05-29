@@ -25,6 +25,9 @@ export default function TermsPage() {
     service: LEGAL_ENTITY.serviceName,
     email: LEGAL_ENTITY.contactEmail,
   };
+  // 賠償上限 (第9条) は lib/legal.ts の SoT を固定ロケールで 1 回整形し、ja/en の
+  // 双方へ同一文字列として注入する (locale 間で表記が乖離しないことを構造保証)。
+  const liabilityCap = LEGAL_ENTITY.liabilityCapJpy.toLocaleString('en-US');
 
   return (
     <LegalPageShell
@@ -34,7 +37,15 @@ export default function TermsPage() {
       legalNote={t('legalNote')}
     >
       {ARTICLES.map((k) => (
-        <LegalSection key={k} title={t(`${k}.title`)} body={t(`${k}.body`)} />
+        <LegalSection
+          key={k}
+          title={t(`${k}.title`)}
+          body={
+            k === 'article9'
+              ? t(`${k}.body`, { amount: liabilityCap })
+              : t(`${k}.body`)
+          }
+        />
       ))}
       <p className="text-sm leading-relaxed">
         {t('contact', { email: LEGAL_ENTITY.contactEmail })}
