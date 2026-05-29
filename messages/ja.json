@@ -69,7 +69,7 @@
     "benefitsAudienceCustomer": "顧客",
     "benefitsFeeFocal": "0%",
     "benefitsFeeTitle": "決済手数料ゼロ",
-    "benefitsFeeBody": "OpenPay は決済額に連動した手数料を取りません。クレジットカード (約 3%) や一般的な QR 決済 (1.5–3.25%) と違い、取引額が大きくても運営に流れる手数料はゼロです。将来の収益化は月額固定や利用権販売など、決済額と独立したモデルを検討しています。",
+    "benefitsFeeBody": "OpenPay は決済額に連動した手数料を取りません。クレジットカード (約 3%) や一般的な QR 決済 (1.5–3.25%) と違い、取引額が大きくても運営に流れる手数料はゼロです。",
     "benefitsCostFocal": "¥0",
     "benefitsCostTitle": "導入コスト 0 円",
     "benefitsCostBody": "POS 端末・契約書・初期費用は不要。ウォレットアドレス 1 つ用意するだけで、今日 QR 印刷まで完了できます。",
