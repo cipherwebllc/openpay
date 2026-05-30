@@ -66,6 +66,7 @@ import {
   arbitrumSepolia,
   avalanche,
   base,
+  mainnet,
   optimism,
   polygon,
 } from 'viem/chains';
@@ -153,6 +154,18 @@ const CHAIN_CONFIGS = {
     //   7702 スタックでは委任が適用されない (OP/Polygon/Base/Arb では同一スクリプトが成功)。
     //   → Circle だけでなく **Pimlico 7702 leg も失敗**。現スタックでは有効化不可。
     //   (canonical 7702 対応 or Avalanche 専用 AA 経路ができるまで保留。)
+  },
+  // Ethereum L1: Circle 化は見送り (見送り済) のため circlePaymaster は省略し、
+  // SMOKE_LEGS=pimlico での **既存 Pimlico erc20 ガスレスの動作確認専用**。
+  // ⚠️ L1 はガスが $ 単位 (L2 のセント単位より遥かに高い)・実行前に現在のガス価格を確認すること。
+  ethereum: {
+    chain: mainnet,
+    usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC_ETHEREUM_MAINNET (lib/tokens.ts)
+    rpcEnv: 'NEXT_PUBLIC_ETHEREUM_RPC_URL',
+    rpcUrl: 'https://ethereum-rpc.publicnode.com',
+    isMainnet: true,
+    funding:
+      '本物の Ethereum USDC を ~20-30 (⚠️ L1 ガスは $ 単位・混雑時さらに高い・SMOKE_LEGS=pimlico 専用・使い捨てのみ)',
   },
 };
 const SMOKE_CHAIN = process.env.SMOKE_CHAIN || 'arbitrum-sepolia';
