@@ -27,6 +27,9 @@
 //      SMOKE_PRIVATE_KEY=0x...        (or 既存の SPIKE_PRIVATE_KEY を流用)
 //      PIMLICO_API_KEY=...            (or NEXT_PUBLIC_PIMLICO_API_KEY)
 //      [SMOKE_CHAIN=base]             (既定: arbitrum-sepolia。base=Base mainnet 実マネー)
+//      [SMOKE_LEGS=pimlico]           (既定 all=Circle↔Pimlico 往復。pimlico=Pimlico erc20 のみ検証
+//                                      = Circle 非対応 chain / 「その chain で Pimlico ガスレスが
+//                                      動くか」を使い捨て EOA で確認。Avalanche は ACP-209 で失敗する)
 //      [SMOKE_MAINNET_OK=1]           (mainnet 実行時に必須・実 USDC 消費の明示同意)
 //      [SMOKE_RPC_URL=...]            (既定: chain ごとの公開 RPC)
 //      [SMOKE_ORIGIN=https://...]     (Origin 制限付き Pimlico キーのとき)
@@ -161,7 +164,13 @@ if (!CFG) {
 }
 const CHAIN = CFG.chain;
 const USDC = getAddress(CFG.usdc);
-const CIRCLE_PAYMASTER_V08 = getAddress(CFG.circlePaymaster);
+// SMOKE_LEGS=pimlico なら Circle を一切使わず Pimlico erc20 経路だけを検証する
+// (= Circle 非対応 chain や「その chain で Pimlico ガスレスが動くか」を使い捨て EOA で確認)。
+// 既定 'all' は Circle→Pimlico→Circle の往復ゲート。
+const SMOKE_LEGS = process.env.SMOKE_LEGS === 'pimlico' ? 'pimlico' : 'all';
+const CIRCLE_PAYMASTER_V08 = CFG.circlePaymaster
+  ? getAddress(CFG.circlePaymaster)
+  : null;
 const IMPL_7702 = getAddress('0xe6Cae83BdE06E4c305530e199D7217f42808555B');
 const MAX_UINT256 = 2n ** 256n - 1n;
 const CIRCLE_MIN_POSTOP_GAS = 15_000n;
@@ -232,9 +241,11 @@ async function summarizeUsdcOut(publicClient, txHash, owner) {
       l.args.from?.toLowerCase() === owner.toLowerCase(),
   );
   const total = outs.reduce((s, l) => s + l.args.value, 0n);
-  const toCircle = outs
-    .filter((l) => l.args.to?.toLowerCase() === CIRCLE_PAYMASTER_V08.toLowerCase())
-    .reduce((s, l) => s + l.args.value, 0n);
+  const toCircle = CIRCLE_PAYMASTER_V08
+    ? outs
+        .filter((l) => l.args.to?.toLowerCase() === CIRCLE_PAYMASTER_V08.toLowerCase())
+        .reduce((s, l) => s + l.args.value, 0n)
+    : 0n;
   return { total, toCircle, count: outs.length };
 }
 
@@ -489,14 +500,23 @@ async function main() {
 
   log(`EOA:              ${owner.address}`);
   log(`chain:            ${CHAIN.name} (${CHAIN.id})${CFG.isMainnet ? ' ⚠️ MAINNET (実 USDC)' : ' (testnet)'}`);
+  log(`mode:             SMOKE_LEGS=${SMOKE_LEGS}${SMOKE_LEGS === 'pimlico' ? ' (Pimlico erc20 のみ・Circle 不使用)' : ' (Circle↔Pimlico 往復)'}`);
   log(`USDC:             ${USDC}`);
-  log(`Circle Paymaster: ${CIRCLE_PAYMASTER_V08}`);
+  log(`Circle Paymaster: ${CIRCLE_PAYMASTER_V08 ?? '(pimlico-only・未使用)'}`);
   log(`permit ceiling:   ${formatUnits(permitAmount, 6)} USDC (deadline=MAX → 実行後も allowance 残存)`);
   log(`EntryPoint v0.8:  ${entryPoint08Address}`);
   log(`bundler Origin:   ${origin || '(なし)'}`);
 
-  // permit 署名前に paymaster (spender) が対象 chain に実在することを確認。
-  await assertPaymasterDeployed(publicClient, CIRCLE_PAYMASTER_V08);
+  // permit 署名前に paymaster (spender) が対象 chain に実在することを確認 (Circle leg を使う時のみ)。
+  if (SMOKE_LEGS === 'all') {
+    if (!CIRCLE_PAYMASTER_V08) {
+      throw new Error(
+        `SMOKE_CHAIN=${SMOKE_CHAIN} に circlePaymaster 未設定。Circle 往復には必須 ` +
+          '(Pimlico 単体検証なら SMOKE_LEGS=pimlico で実行)。',
+      );
+    }
+    await assertPaymasterDeployed(publicClient, CIRCLE_PAYMASTER_V08);
+  }
 
   const bal = await publicClient.readContract({
     address: USDC, abi: erc20Abi, functionName: 'balanceOf', args: [owner.address],
@@ -559,11 +579,19 @@ async function main() {
   // する (authorization 明示署名)。以降の Pimlico / Circle leg は委任済 EOA 上で走るため
   // production の cross-switch シナリオ (委任済 EOA で paymaster 切替) を正確に再現する。
   const results = [];
-  const legs = [
-    () => circleLeg({ owner, publicClient, bundlerTransport, permitAmount, label: 'leg1/circle' }),
-    () => pimlicoLeg({ owner, publicClient, bundlerTransport, label: 'leg2/pimlico' }),
-    () => circleLeg({ owner, publicClient, bundlerTransport, permitAmount, label: 'leg3/circle-again' }),
-  ];
+  const legs =
+    SMOKE_LEGS === 'pimlico'
+      ? [
+          // Pimlico erc20 単体検証。pristine EOA は leg1 で 7702 委任を bootstrap
+          // (maybeSignAuthorization)、leg2 は委任済 EOA 上で連続送信を確認。
+          () => pimlicoLeg({ owner, publicClient, bundlerTransport, label: 'leg1/pimlico' }),
+          () => pimlicoLeg({ owner, publicClient, bundlerTransport, label: 'leg2/pimlico-again' }),
+        ]
+      : [
+          () => circleLeg({ owner, publicClient, bundlerTransport, permitAmount, label: 'leg1/circle' }),
+          () => pimlicoLeg({ owner, publicClient, bundlerTransport, label: 'leg2/pimlico' }),
+          () => circleLeg({ owner, publicClient, bundlerTransport, permitAmount, label: 'leg3/circle-again' }),
+        ];
   for (const run of legs) {
     try {
       const r = await run();
@@ -597,16 +625,23 @@ async function main() {
 
   // ---- 判定 ----------------------------------------------------------------
   section('SMOKE 結果 (PASS / FAIL)');
-  const allOk = results.length === 3 && results.every((r) => r.ok);
+  const allOk = results.length === legs.length && results.every((r) => r.ok);
   const senders = new Set(results.filter((r) => r.txHash).map(() => owner.address.toLowerCase()));
   const epAllV08 = results
     .filter((r) => r.entryPoint)
     .every((r) => r.entryPoint.toLowerCase() === entryPoint08Address.toLowerCase());
-  const circleLegOk = results.some(
-    (r) => r.provider === 'circle' && r.ok &&
-      r.paymaster?.toLowerCase() === CIRCLE_PAYMASTER_V08.toLowerCase() &&
-      r.usdcOut?.toCircle > 0n,
-  );
+  // 'all' は Circle leg の実徴収を必須化。'pimlico' は Circle を使わないので不要。
+  const circleLegOk =
+    SMOKE_LEGS === 'pimlico'
+      ? true
+      : results.some(
+          (r) =>
+            r.provider === 'circle' &&
+            r.ok &&
+            CIRCLE_PAYMASTER_V08 &&
+            r.paymaster?.toLowerCase() === CIRCLE_PAYMASTER_V08.toLowerCase() &&
+            r.usdcOut?.toCircle > 0n,
+        );
   const delegationStable = delAfter?.toLowerCase() === IMPL_7702.toLowerCase();
 
   // 登録推奨 surcharge = max(表示基準を満たす最小 surcharge) + 300bps margin・100 切り上げ。
@@ -682,9 +717,15 @@ async function main() {
   }
 
   const PASS = allOk && epAllV08 && circleLegOk && delegationStable;
-  log(`\n${PASS ? '✅ PASS' : '❌ FAIL'} — ${PASS
-    ? '同一 EOA・同一 v0.8 EntryPoint で Pimlico↔Circle paymaster 往復成功。Circle 投入ゲート (送信面) クリア。'
-    : '上記 legs の error / フラグを確認。FAIL の間は Circle 有効化しない。'}`);
+  const passMsg =
+    SMOKE_LEGS === 'pimlico'
+      ? '同一 EOA・v0.8 EntryPoint で Pimlico erc20 ガスレスが連続成功。この chain は Pimlico 経路が動作する。'
+      : '同一 EOA・同一 v0.8 EntryPoint で Pimlico↔Circle paymaster 往復成功。Circle 投入ゲート (送信面) クリア。';
+  const failMsg =
+    SMOKE_LEGS === 'pimlico'
+      ? '上記 legs の error を確認。Pimlico 7702 経路がこの chain で動かない (例: Avalanche ACP-209 非互換) 可能性。'
+      : '上記 legs の error / フラグを確認。FAIL の間は Circle 有効化しない。';
+  log(`\n${PASS ? '✅ PASS' : '❌ FAIL'} — ${PASS ? passMsg : failMsg}`);
 }
 
 main().catch((e) => {

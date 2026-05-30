@@ -79,7 +79,11 @@ export type IncompatibleSmartAccountI18nKey =
   | 'errorMetaMaskKaia'
   // pristine EOA (未委任) は injected wallet で 7702 委任を初回ガスレス設定できない
   // (viem signAuthorization が JSON-RPC account 非対応)。standard mode 案内に倒す。
-  | 'errorPristineNoBootstrap';
+  | 'errorPristineNoBootstrap'
+  // canonical EIP-7702 非対応 chain (Avalanche C-Chain = ACP-209「7702 style」AA)。
+  // 委任済み EOA でも標準 bundler 経由の 7702 UserOp が AA23 で revert するため
+  // standard mode 案内に倒す ([[chainSupportsCanonical7702]])。
+  | 'errorChainNo7702';
 
 export class IncompatibleSmartAccountError extends Error {
   readonly delegateAddress: Address | null;

@@ -73,8 +73,29 @@ SMOKE_CHAIN=optimism SMOKE_MAINNET_OK=1 \
 > 異なり、標準 viem/permissionless/Pimlico 7702 スタックでは委任が張れず 3 leg とも AA23
 > (validateUserOp revert)。Circle だけでなく **Pimlico 7702 経路も失敗**するため、現スタックでは
 > Circle・Pimlico 7702 とも有効化不可。canonical 7702 対応 or Avalanche 専用 AA 経路ができるまで保留。
-> (副次的論点: Avalanche の既存 gasless が pristine EOA の 7702 委任に依存していれば同様に動かない
-> 可能性 — MAv2 等の deployed smart account 経路は別途要確認。)
+>
+> **製品側ガード (2026-05-31 追加)**: `lib/chains.ts` の `chainSupportsCanonical7702(chainId)` が
+> Avalanche/Fuji を非 canonical として弾き、`useSmartAccount` が委任済み (pimlico-simple / mav2 /
+> metamask) の口を **standard mode 案内 (`errorChainNo7702`)** に倒す。これが無いと委任済み EOA が
+> Avalanche で 7702 builder に入り送信時 AA23 (cryptic) になる。pristine EOA は元々 standard に倒れる
+> ので影響なし。新 chain 追加時は **`SMOKE_LEGS=pimlico` で Pimlico 7702 経路を使い捨て EOA 検証**して
+> から非 canonical 判定を見直す。
+
+## Pimlico 単体検証 (Circle 非対応 chain・`SMOKE_LEGS=pimlico`)
+
+Circle を使わず **Pimlico erc20 ガスレスがその chain で動くか**だけを使い捨て EOA で確認するモード。
+Avalanche のように Circle 非対応/7702 非互換が疑われる chain や、Pimlico 専用 chain の健全性確認に使う。
+
+```bash
+SMOKE_CHAIN=avalanche SMOKE_LEGS=pimlico SMOKE_MAINNET_OK=1 \
+  SMOKE_RPC_URL=<専用 RPC> SMOKE_PRIVATE_KEY=0x<使い捨て鍵> PIMLICO_API_KEY=<your-key> \
+  node scripts/smoke-circle-crossswitch.mjs
+```
+
+2 leg (Pimlico→Pimlico) を同一 EOA で送信し、Circle 抜きで PASS/FAIL を判定する (Circle paymaster の
+deploy/codehash 検査も skip)。Avalanche では leg1 が AA23 で FAIL する想定 (= ACP-209 非互換の再現)。
+Circle 未対応の Pimlico 専用 chain を検証したい場合は `CHAIN_CONFIGS` に最小 config (chain/usdc/rpc・
+`circlePaymaster` は省略可) を足して同モードで実行する。
 
 > ⚠️ Base mainnet は実 USDC (~2 で十分・ガスはセント単位)。`SMOKE_MAINNET_OK=1` 必須。
 > 公開 RPC (`mainnet.base.org`) は rate limit で 7702 bootstrap が壊れるため専用 RPC 必須。

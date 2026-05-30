@@ -34,6 +34,9 @@ describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)'
     // pristine EOA (未委任) は injected wallet で初回ガスレス委任不可
     // (useSmartAccount が standard mode 案内に倒す)
     'errorPristineNoBootstrap',
+    // canonical EIP-7702 非対応 chain (Avalanche = ACP-209「7702 style」AA) で
+    // 委任済み EOA を standard mode に倒す (chainSupportsCanonical7702 ガード)
+    'errorChainNo7702',
   ] as const;
   for (const ns of FORM_NAMESPACES) {
     for (const key of SA_KEYS) {

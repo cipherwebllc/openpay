@@ -293,6 +293,23 @@ export function isSupportedChainId(chainId: number | undefined): boolean {
   return supportedChains.some((c) => c.id === chainId);
 }
 
+// canonical な EIP-7702 (Ethereum Pectra と同じ nonce/balance 意味論) を実装している
+// chain か。**Avalanche C-Chain は ACP-209「EIP-7702 *style*」AA** で nonce/balance の
+// 扱いが canonical と異なり、標準 viem/permissionless/MetaMask/Alchemy + 標準 bundler/
+// EntryPoint 経由の 7702 UserOp が **AA23 (validateUserOp revert)** で必ず失敗する
+// (2026-05-31 実機ゲートで Pimlico SimpleAccount 経路を実証・docs/runbooks)。
+// よって委任済み EOA であっても 7702 ガスレス経路に乗せられないため、useSmartAccount は
+// standard mode 案内に倒す。pristine EOA は元々 standard に倒れるので影響なし。
+// blocklist 方式 (既知の非 canonical のみ false)。新 chain 追加時はゲートで 7702 を要確認。
+const NON_CANONICAL_7702_CHAIN_IDS: ReadonlySet<number> = new Set([
+  avalanche.id,
+  avalancheFuji.id,
+]);
+
+export function chainSupportsCanonical7702(chainId: number): boolean {
+  return !NON_CANONICAL_7702_CHAIN_IDS.has(chainId);
+}
+
 export function customRpcUrlForChain(chainId: number): string | undefined {
   // NETWORK_ENV と無関係に override を受付 (テストや mainnet/testnet 混在の切替コスト削減)。
   if (chainId === polygon.id) return env.rpc.polygon;
