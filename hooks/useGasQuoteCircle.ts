@@ -30,17 +30,19 @@ import {
   CIRCLE_MIN_POSTOP_GAS,
   resolveUsdcGaslessProvider,
 } from '@/lib/circlePaymaster';
-import { gasCeilingGweiForChain } from '@/lib/gasCeiling';
 import type { TokenDeployment } from '@/lib/tokens';
 
 // useGasQuoteUsdc と同じ worst-case gas 単位 (本番計測後に env で調整)。
 const DEFAULT_USEROP_GAS_UNITS = 500_000n;
-const GWEI = 10n ** 9n;
+// permit allowance の安全係数。quote→送信間の gas/rate drift を吸収しつつ、deadline=MAX で
+// 残る余剰 allowance を実費の数倍に抑える (ceiling ベースの数百〜数万倍を回避)。係数超の
+// 異常 drift は Circle pull 不足で revert (回復可能)・送信時 spike は assertGasCeiling が abort。
+const PERMIT_SAFETY_MULTIPLIER = 10n;
 
 export type CircleGasQuote = {
   /** 表示用 gas 額 (実費 + surcharge, USDC raw)。 */
   gasAmount: bigint;
-  /** permit allowance 上限 (ceiling ベース, USDC raw)。mutate に渡す。 */
+  /** permit allowance (実費 × 安全係数, USDC raw)。mutate に渡す。 */
   permitAmount: bigint;
   /** per-chain surcharge (bps)。 */
   surchargeBps: number;
@@ -106,14 +108,18 @@ export function useGasQuoteCircle(
         (totalGas * gasPrice.standard.maxFeePerGas * exchangeRate) / 10n ** 18n,
       );
 
-      // permit 上限: gas ceiling までの最大課金額 + surcharge (tight upper bound)。
-      const ceilingGwei = gasCeilingGweiForChain(deployment.chainId);
-      const ceilingMaxFee =
-        ceilingGwei !== undefined
-          ? ceilingGwei * GWEI
-          : gasPrice.standard.maxFeePerGas * 2n; // ceiling 未定義は保守的に standard×2
+      // permit allowance: 実費 (standard tier) × 安全係数。**過剰 allowance を避ける**ため
+      // gas ceiling ベース (ceiling/standard は数百〜数万倍) ではなく、quote→送信間の
+      // gas/rate drift を吸収する控えめな係数を掛ける。deadline=MAX なので残余 allowance が
+      // Circle paymaster (allowlist の信頼境界) に残るが、本係数で被害上限を実費の数倍に圧縮。
+      // 送信時の異常 spike は assertGasCeiling が別途 abort する。drift が係数を超えた稀ケースは
+      // Circle が pull 不足で revert (= 回復可能・二重決済や資金流出ではない)。
       const permitAmount = surcharge(
-        (totalGas * ceilingMaxFee * exchangeRate) / 10n ** 18n,
+        (totalGas *
+          gasPrice.standard.maxFeePerGas *
+          PERMIT_SAFETY_MULTIPLIER *
+          exchangeRate) /
+          10n ** 18n,
       );
 
       return { gasAmount, permitAmount, surchargeBps };

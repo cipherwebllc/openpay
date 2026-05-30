@@ -771,4 +771,15 @@ describe('POST /api/log/payment — Circle Paymaster 監査フィールド (Phas
     const res = await POST(req({ ...circleBody, circlePaymasterAddress: 'nope' }));
     expect(res.status).toBe(400);
   });
+
+  it("client 申告の 'verified' を reject (server verifier 専用・forge 防止)", async () => {
+    const res = await POST(req({ ...circleBody, circleVerification: 'verified' }));
+    expect(res.status).toBe(400);
+    expect(kvLpush).not.toHaveBeenCalled();
+  });
+
+  it("'unreconciled' は受理する", async () => {
+    const res = await POST(req({ ...circleBody, circleVerification: 'unreconciled' }));
+    expect(res.status).toBe(200);
+  });
 });

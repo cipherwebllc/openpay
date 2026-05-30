@@ -19,7 +19,10 @@ import {
 } from 'viem';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
-import { getCircleUserOpGasPrice } from '@/lib/smartAccount/circleAccount';
+import {
+  getCircleUserOpGasPrice,
+  entryPoint08Address,
+} from '@/lib/smartAccount/circleAccount';
 import { executeCirclePayment } from '@/lib/smartAccount/circleSend';
 import type { CircleSmartAccountBundle } from '@/lib/smartAccount/circleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
@@ -38,6 +41,7 @@ import {
   type CircleVerificationStatus,
 } from '@/lib/paymentLog';
 import { verifyCircleReceiptOnChain } from '@/lib/circleReceiptVerifier';
+import { CirclePendingError } from '@/lib/smartAccount/circleSend';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -177,10 +181,16 @@ export function useBatchPayment(
       }
     },
     onError: (error, params) => {
+      // CirclePendingError は broadcast 済 op を持つ「確認待ち」(失敗ではない)。
+      // userOpHash と provider を監査に残し、未 retry でも submitted op を追跡可能にする。
+      const pending = error instanceof CirclePendingError ? error : undefined;
+      const ctx = toCtx(params, customer, chainId, deployment);
+      if (clients?.provider === 'circle') ctx.provider = 'circle';
       void logPaymentEvent(
-        buildPaymentLogEvent(toCtx(params, customer, chainId, deployment), {
+        buildPaymentLogEvent(ctx, {
           result: 'error',
           errorMessage: error.message,
+          userOpHash: pending?.userOpHash,
         }),
       );
     },
@@ -276,6 +286,7 @@ async function runCirclePayment(args: {
         sender: customer,
         paymaster: bundle.paymasterAddress,
         token: bundle.deployment.address,
+        entryPoint: entryPoint08Address,
       },
     });
     if (v.status === 'verified') {
@@ -283,9 +294,27 @@ async function runCirclePayment(args: {
       circleVerification = 'client-reported';
     } else {
       circleVerification = 'unreconciled';
+      // unreconciled の reason を必ず記録。paymaster/sender 不一致は permit spender =
+      // 信頼境界の破れ (想定外/悪意 paymaster が顧客 USDC を pull した RED FLAG) なので
+      // error 段で上げ、RPC flake (catch 側) と log key/severity を分離する。
+      const bindingViolation = /paymaster|sender/.test(v.reason);
+      const entry = {
+        reason: v.reason,
+        userOpHash: result.userOpHash,
+        sender: customer,
+        paymaster: bundle.paymasterAddress,
+        bindingViolation,
+      };
+      if (bindingViolation) logger.error('circle.receipt.binding-violation', entry);
+      else logger.warn('circle.receipt.unreconciled', entry);
     }
-  } catch {
+  } catch (error) {
+    // receipt 取得失敗 (RPC flake) = binding 違反ではない。別 key で記録。
     circleVerification = 'unreconciled';
+    logger.warn('circle.receipt.verify-failed', {
+      userOpHash: result.userOpHash,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   return {

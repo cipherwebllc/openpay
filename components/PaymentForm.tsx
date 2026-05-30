@@ -154,7 +154,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   // Sponsorship 時は fee transfer に gas を含める。ERC20 Paymaster 時は fee のみ
   // (gas は paymaster が顧客から自動徴収するため二重徴収を避ける)。
-  const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
+  // Circle 経路は顧客が permit で USDC gas を Circle paymaster に支払うため、sponsorship
+  // 形式の gas 立替 reimbursement は加算しない (加算すると testnet で resolvePaymasterMode が
+  // sponsorship に倒れる際に gas 二重徴収 + OpenPay 徴収0 違反になる)。
+  const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
 
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ amount < gas のみ)。

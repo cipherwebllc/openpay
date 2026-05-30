@@ -54,7 +54,19 @@ export type CircleReconcileExpected = {
   paymaster: Address;
   /** USDC token アドレス。 */
   token: Address;
+  /** UserOperationEvent を emit すべき EntryPoint アドレス (v0.8)。同名 event を出す別
+   * contract による scope 汚染を防ぐため、発火元が EntryPoint であることを必須にする。 */
+  entryPoint: Address;
 };
+
+// UserOperationEvent data = abi.encode(nonce, success(bool), actualGasCost, actualGasUsed)。
+// success は 2 番目の 32-byte word。data が短い異常 log は判定不能として true 扱い
+// (既存の verified 挙動を壊さず、binding/scope 側の検証に委ねる)。
+function userOpSucceeded(data: Hex): boolean {
+  const hex = data.startsWith('0x') ? data.slice(2) : data;
+  if (hex.length < 128) return true;
+  return BigInt(`0x${hex.slice(64, 128)}`) !== 0n;
+}
 
 export type CircleReconcileResult =
   | {
@@ -90,14 +102,20 @@ export function reconcileCircleNetUsdc(args: {
   // logIndex 昇順で安定させる (receipt が順不同で来ても scope 計算を正しくする)。
   const logs = [...args.logs].sort((a, b) => a.logIndex - b.logIndex);
 
-  // UserOperationEvent を logIndex 順に抽出。
+  // UserOperationEvent を logIndex 順に抽出。**発火元が expected.entryPoint であることを
+  // 必須**にし、同名 event を出す別 contract による scope/targetIdx 汚染を防ぐ (C3 hardening)。
   const opEvents = logs
-    .filter((l) => l.topics[0] === USER_OPERATION_EVENT_TOPIC)
+    .filter(
+      (l) =>
+        l.topics[0] === USER_OPERATION_EVENT_TOPIC &&
+        eq(l.address, expected.entryPoint),
+    )
     .map((l) => ({
       logIndex: l.logIndex,
       userOpHash: l.topics[1],
       sender: l.topics[2] ? topicToAddress(l.topics[2]) : undefined,
       paymaster: l.topics[3] ? topicToAddress(l.topics[3]) : undefined,
+      data: l.data,
     }));
 
   const targetIdx = opEvents.findIndex(
@@ -123,6 +141,12 @@ export function reconcileCircleNetUsdc(args: {
       status: 'unreconciled',
       reason: `paymaster 不一致 (receipt=${target.paymaster} expected=${expected.paymaster})`,
     };
+  }
+  // UserOp が revert していたら (success=false) 正常な決済ではない → unreconciled。
+  // (merchant 転送は revert するが postOp の gas 徴収は起きうるため net は意味が異なる。
+  //  「verified な成功決済」として報告しない。)
+  if (!userOpSucceeded(target.data)) {
+    return { status: 'unreconciled', reason: 'UserOperation success=false (revert)' };
   }
 
   // scope: 直前の UserOperationEvent (無ければ -∞) より後 〜 この UserOp の event 以下。

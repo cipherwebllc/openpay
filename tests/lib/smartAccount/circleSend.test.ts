@@ -27,6 +27,12 @@ import {
   computeIdempotencyKey,
   findRecoverable,
   loadPendingRecord,
+  reserveOrResume,
+  markAwaitingSignature,
+  markSigned,
+  markSubmitting,
+  markConfirmed,
+  type PendingStatus,
 } from '@/lib/circlePending';
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
@@ -249,5 +255,79 @@ describe('同一 attemptId の resume', () => {
     expect(res.txHash).toBe(TX);
     expect(mockPermit).not.toHaveBeenCalled();
     expect(mockPrepare).not.toHaveBeenCalled();
+  });
+});
+
+describe('cross-invocation 二重決済ガード (別 attemptId・同 callHash)', () => {
+  // 同一 callHash だが別 paymentAttemptId の record を任意状態で seed する
+  // (別タブ/別デバイス/reload で paymentAttemptId が変わった他 attempt を模す)。
+  function seedOtherAttempt(attemptId: string, status: PendingStatus, at: number) {
+    const callHash = computeCallHash(CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: attemptId,
+      callHash,
+    });
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now: at,
+    });
+    if (status === 'reserved') return key;
+    markAwaitingSignature({ key, sender: OWNER, now: at });
+    if (status === 'awaiting_signature') return key;
+    markSigned({ key, sender: OWNER, signedUserOp: SIGNED_OP, userOpHash: UOH, now: at });
+    if (status === 'signed') return key;
+    markSubmitting({ key, sender: OWNER, now: at });
+    if (status === 'submitting') return key;
+    markConfirmed({ key, sender: OWNER, txHash: TX, success: true, now: at });
+    return key;
+  }
+
+  it('別 attemptId が confirmed (同 callHash) → 新規署名せず prior 結果を返す (再決済防止)', async () => {
+    happyMocks();
+    seedOtherAttempt('other', 'confirmed', 500);
+    const res = await run(); // attempt-1 (別 attemptId)
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).not.toHaveBeenCalled();
+    expect(mockPrepare).not.toHaveBeenCalled();
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('別 attemptId が直近の signed (pre-submit) → CirclePendingError で並行 broadcast しない', async () => {
+    happyMocks();
+    seedOtherAttempt('other', 'signed', 900); // clock 開始 1000 に近い = 直近
+    await expect(run()).rejects.toBeInstanceOf(CirclePendingError);
+    expect(mockPermit).not.toHaveBeenCalled();
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('別 attemptId が直近の submitting → recover (新規送信しない)', async () => {
+    happyMocks();
+    seedOtherAttempt('other', 'submitting', 900);
+    const res = await run();
+    expect(res.txHash).toBe(TX); // recoverSubmitting が wait→receipt で確定
+    expect(mockPermit).not.toHaveBeenCalled();
+    expect(mockPrepare).not.toHaveBeenCalled();
+  });
+
+  it('stale な signed orphan (reload 放置) は abandon して新規送信できる', async () => {
+    happyMocks();
+    seedOtherAttempt('orphan', 'signed', 0); // updatedAt=0
+    const res = await run({ now: () => 1_000_000 }); // 1e6 - 0 > 3min → stale
+    expect(res.txHash).toBe(TX);
+    expect(mockBroadcast).toHaveBeenCalledTimes(1); // 新規 broadcast に進んだ
+    const orphanKey = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: 'orphan',
+      callHash: computeCallHash(CALLS),
+    });
+    expect(loadPendingRecord(orphanKey)?.status).toBe('abandoned');
   });
 });

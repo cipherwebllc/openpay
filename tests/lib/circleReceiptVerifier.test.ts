@@ -27,11 +27,16 @@ function opEvent(
   userOpHash: Hex,
   sender: Address,
   paymaster: Address,
+  opts: { success?: boolean; emitter?: Address } = {},
 ): ReceiptLog {
+  // data = abi.encode(nonce, success(bool), actualGasCost, actualGasUsed) = 4 words。
+  const word = (v: bigint) => v.toString(16).padStart(64, '0');
+  const success = opts.success ?? true;
+  const data = `0x${word(0n)}${word(success ? 1n : 0n)}${word(0n)}${word(0n)}` as Hex;
   return {
-    address: ENTRYPOINT,
+    address: opts.emitter ?? ENTRYPOINT,
     topics: [USER_OPERATION_EVENT_TOPIC, userOpHash, pad(sender), pad(paymaster)],
-    data: valueHex(0n),
+    data,
     logIndex,
   };
 }
@@ -55,6 +60,7 @@ const expected = {
   sender: SENDER,
   paymaster: PAYMASTER,
   token: USDC,
+  entryPoint: ENTRYPOINT,
 };
 
 describe('reconcileCircleNetUsdc — 単一 UserOp', () => {
@@ -172,5 +178,39 @@ describe('reconcileCircleNetUsdc — 汚染耐性', () => {
     ];
     const r = reconcileCircleNetUsdc({ logs, expected });
     expect(r.status === 'verified' && r.netUsdc).toBe(9_000n);
+  });
+});
+
+describe('reconcileCircleNetUsdc — EntryPoint 発火元 + success 検証 (Codex BUG-2/D)', () => {
+  const FAKE_EP = getAddress('0x000000000000000000000000000000000000dEaD');
+
+  it('UserOperationEvent が EntryPoint 以外から出ていたら無視 (scope 汚染防止)', () => {
+    const logs: ReceiptLog[] = [
+      transfer(0, USDC, SENDER, PAYMASTER, 9_000n),
+      // 攻撃者 contract が同名 event を expected userOpHash で偽装発火
+      opEvent(1, UOH_A, SENDER, PAYMASTER, { emitter: FAKE_EP }),
+    ];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status).toBe('unreconciled'); // EntryPoint 由来の event が無い
+  });
+
+  it('正規 EntryPoint event のみ採用し偽装 event を混ぜても汚染されない', () => {
+    const logs: ReceiptLog[] = [
+      opEvent(0, UOH_A, SENDER, PAYMASTER, { emitter: FAKE_EP }), // 偽装 (無視)
+      transfer(1, USDC, SENDER, PAYMASTER, 9_000n),
+      opEvent(2, UOH_A, SENDER, PAYMASTER), // 正規 (ENTRYPOINT)
+    ];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status === 'verified' && r.netUsdc).toBe(9_000n);
+  });
+
+  it('UserOp success=false (revert) なら unreconciled', () => {
+    const logs: ReceiptLog[] = [
+      transfer(0, USDC, SENDER, PAYMASTER, 9_000n),
+      opEvent(1, UOH_A, SENDER, PAYMASTER, { success: false }),
+    ];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status).toBe('unreconciled');
+    if (r.status === 'unreconciled') expect(r.reason).toMatch(/success=false/);
   });
 });

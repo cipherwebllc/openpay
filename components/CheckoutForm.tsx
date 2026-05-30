@@ -94,7 +94,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
-  const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
+  // Circle 経路は顧客が permit で USDC gas を Circle paymaster に支払うため、sponsorship
+  // 形式の gas 立替 reimbursement は加算しない (testnet sponsorship 倒し時の二重徴収防止)。
+  const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   // ネイティブガストークン symbol を viem chain 経由で取得 (chain-aware)。

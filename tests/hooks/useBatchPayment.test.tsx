@@ -45,6 +45,15 @@ vi.mock('@/lib/pimlico', async () => {
 // useBatchPayment の provider 分岐 + permitAmount/calls threading + gas ceiling を検証する。
 vi.mock('@/lib/smartAccount/circleSend', () => ({
   executeCirclePayment: vi.fn(),
+  // useBatchPayment.onError が instanceof で判定するため、実クラスと同型の stub を提供。
+  CirclePendingError: class CirclePendingError extends Error {
+    userOpHash?: string;
+    constructor(userOpHash?: string) {
+      super('pending');
+      this.name = 'CirclePendingError';
+      this.userOpHash = userOpHash;
+    }
+  },
 }));
 vi.mock('@/lib/smartAccount/circleAccount', () => ({
   getCircleUserOpGasPrice: vi.fn(),

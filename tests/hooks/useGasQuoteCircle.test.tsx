@@ -85,9 +85,11 @@ describe('useGasQuoteCircle', () => {
     // 実費 = 550000 × 1e9 × 3e9 / 1e18 = 1_650_000、surcharge 10% → 1_815_000
     expect(q.gasAmount).toBe(1_815_000n);
     expect(q.surchargeBps).toBe(1000);
-    // ceiling = 1000 gwei → 550000 × 1000e9 × 3e9 / 1e18 = 1_650_000_000、+10% → 1_815_000_000
-    expect(q.permitAmount).toBe(1_815_000_000n);
-    // permitAmount は実費見積を必ず上回る (gas drift 吸収)
+    // permitAmount = 実費 × 安全係数(10) → 550000 × 1e9 × 10 × 3e9 / 1e18 = 16_500_000、
+    // +10% surcharge → 18_150_000 (= gasAmount × 10)。ceiling ベースの巨大 allowance を回避。
+    expect(q.permitAmount).toBe(18_150_000n);
+    expect(q.permitAmount).toBe(q.gasAmount * 10n);
+    // permitAmount は実費見積を上回る (gas/rate drift 吸収)
     expect(q.permitAmount).toBeGreaterThan(q.gasAmount);
   });
 

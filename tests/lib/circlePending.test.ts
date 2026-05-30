@@ -213,6 +213,7 @@ describe('FSM happy path', () => {
       key,
       sender: SENDER,
       txHash: '0xtx' as Hex,
+      success: true,
       now: 1_400,
     });
     expect(c.status).toBe('confirmed');
@@ -224,7 +225,7 @@ describe('CAS / FSM ガード', () => {
   it('reserved から直接 confirmed にはできない (CAS 失敗)', () => {
     const { key } = setup();
     expect(() =>
-      markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, now: 2_000 }),
+      markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, success: true, now: 2_000 }),
     ).toThrow(PendingStateError);
   });
 
@@ -352,6 +353,7 @@ describe('findRecoverable (reload 後の復旧スキャン)', () => {
       key: otherKey,
       sender: SENDER,
       txHash: '0xtx2' as Hex,
+      success: true,
       now: 5_400,
     });
 
@@ -381,6 +383,7 @@ describe('findRecoverable (reload 後の復旧スキャン)', () => {
       key: rec.key,
       sender: SENDER,
       txHash: '0xtx' as Hex,
+      success: true,
       now: 9_100,
     });
     expect(c.status).toBe('confirmed');
@@ -423,6 +426,7 @@ describe('pruneTerminal', () => {
       key: doneKey,
       sender: SENDER,
       txHash: '0xt' as Hex,
+      success: true,
       now: 1_400,
     });
 
