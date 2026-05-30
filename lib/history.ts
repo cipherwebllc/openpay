@@ -65,7 +65,18 @@ export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
 //
 // 既存 user データ救済の証拠は tests/lib/history.test.ts:「unversioned legacy 読込」群を参照。
 
-export const LATEST_SCHEMA_VERSION = 1 as const;
+// v2 (2026-05-30): Circle Paymaster (USDC ガスレス) 対応で provider 次元と Circle 監査
+// フィールドを追加。legacy(v1) は MIGRATIONS[1] で新フィールド=null backfill (drop しない)。
+export const LATEST_SCHEMA_VERSION = 2 as const;
+
+/** どの paymaster 系統で送ったか。legacy(v1) entry は記録が無いため null。 */
+export type HistoryProvider = 'pimlico' | 'circle';
+
+/** Circle 徴収額 (circlePaymasterNetUsdc) の検証ステータス。
+ * - verified: on-chain receipt から server/offline verifier が再計算した確定値
+ * - client-reported: client が receipt から算出 (改竄可能性あり・参考値)
+ * - unreconciled: receipt 照合不能 (txHash 解決不可・binding 不一致 等) */
+export type CircleVerification = 'verified' | 'client-reported' | 'unreconciled';
 
 export type HistoryEntry = {
   /** schema version. 新規 entry は常に LATEST_SCHEMA_VERSION を持つ。 */
@@ -106,6 +117,16 @@ export type HistoryEntry = {
   storeName: string;
   /** 任意メモ (将来の inline edit 用、Phase 2 投入時は空)。 */
   note: string;
+  // --- v2 追加 (Circle Paymaster 監査・legacy は null backfill) ---
+  /** paymaster 系統。gasless で 'pimlico' | 'circle'、standard / legacy は null。 */
+  provider: HistoryProvider | null;
+  /** Circle Paymaster (permit spender) アドレス。circle 経路のみ、他は null。 */
+  circlePaymasterAddress: string | null;
+  /** Circle が postOp で徴収した net USDC (raw・customer→paymaster − refund)。
+   * circle + 算出済のみ、他は null。 */
+  circlePaymasterNetUsdc: string | null;
+  /** circlePaymasterNetUsdc の検証ステータス。circle 経路のみ、他は null。 */
+  circleVerification: CircleVerification | null;
 };
 
 // LATEST_SCHEMA_VERSION の entry に対する shape 検証。migration 後の最終 entry に
@@ -145,6 +166,30 @@ function isValidEntry(value: unknown): value is HistoryEntry {
   if (e.errorMessage !== null && typeof e.errorMessage !== 'string') return false;
   if (typeof e.storeName !== 'string') return false;
   if (typeof e.note !== 'string') return false;
+  // v2 フィールド (legacy は migration で null backfill 済)。
+  if (
+    e.provider !== null &&
+    e.provider !== 'pimlico' &&
+    e.provider !== 'circle'
+  )
+    return false;
+  if (
+    e.circlePaymasterAddress !== null &&
+    typeof e.circlePaymasterAddress !== 'string'
+  )
+    return false;
+  if (
+    e.circlePaymasterNetUsdc !== null &&
+    typeof e.circlePaymasterNetUsdc !== 'string'
+  )
+    return false;
+  if (
+    e.circleVerification !== null &&
+    e.circleVerification !== 'verified' &&
+    e.circleVerification !== 'client-reported' &&
+    e.circleVerification !== 'unreconciled'
+  )
+    return false;
   return true;
 }
 
@@ -167,7 +212,19 @@ export type MigrationFn = (
  * `migrateToLatest` 内で「v1 として stamp」する固定処理で吸収し、
  * MIGRATIONS には登録しない (v0 → v1 ではなく "stamp" 扱い)。
  */
-export const MIGRATIONS: Record<number, MigrationFn> = {};
+export const MIGRATIONS: Record<number, MigrationFn> = {
+  // v1 → v2 (2026-05-30): Circle Paymaster 監査フィールドを追加。legacy entry には
+  // 記録が無いので null backfill (drop しない・UI/CSV から消さない)。schemaVersion は
+  // migrateToLatest のループが昇格させるが、明示しておく。
+  1: (entry) => ({
+    ...entry,
+    schemaVersion: 2,
+    provider: null,
+    circlePaymasterAddress: null,
+    circlePaymasterNetUsdc: null,
+    circleVerification: null,
+  }),
+};
 
 /**
  * 任意 version の生 entry を LATEST_SCHEMA_VERSION の HistoryEntry へ昇格させる。
@@ -292,6 +349,11 @@ export type BuildHistoryBase = {
   storeName: string;
   /** 任意メモ (CheckoutForm の params.description / orderId 等)。省略時 ''。 */
   note?: string;
+  // --- v2 (省略時はすべて null = legacy/standard 互換) ---
+  provider?: HistoryProvider | null;
+  circlePaymasterAddress?: string | null;
+  circlePaymasterNetUsdc?: string | null;
+  circleVerification?: CircleVerification | null;
 };
 
 /**
@@ -344,6 +406,10 @@ export function buildHistoryEntry(
         : input.errorMessage.slice(0, HISTORY_ERROR_MESSAGE_MAX_LENGTH),
     storeName: input.storeName,
     note: (input.note ?? '').slice(0, HISTORY_NOTE_MAX_LENGTH),
+    provider: input.provider ?? null,
+    circlePaymasterAddress: input.circlePaymasterAddress ?? null,
+    circlePaymasterNetUsdc: input.circlePaymasterNetUsdc ?? null,
+    circleVerification: input.circleVerification ?? null,
   };
 }
 

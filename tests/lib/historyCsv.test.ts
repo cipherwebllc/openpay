@@ -31,6 +31,10 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     errorMessage: null,
     storeName: 'Test Store',
     note: '',
+    provider: null,
+    circlePaymasterAddress: null,
+    circlePaymasterNetUsdc: null,
+    circleVerification: null,
     ...overrides,
   };
 }
@@ -177,6 +181,10 @@ describe('toCsv', () => {
         errorMessage: null,
         storeName: 'お店, テスト',
         note: 'a'.repeat(100),
+        provider: null,
+        circlePaymasterAddress: null,
+        circlePaymasterNetUsdc: null,
+        circleVerification: null,
       };
     }
     const entries = Array.from({ length: 1000 }, (_, i) =>
@@ -308,6 +316,10 @@ describe('CSV round-trip 整合性 (escape の逆 parse)', () => {
       errorMessage: null,
       storeName: '',
       note: '',
+      provider: null,
+      circlePaymasterAddress: null,
+      circlePaymasterNetUsdc: null,
+      circleVerification: null,
       ...overrides,
     };
   }

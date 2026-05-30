@@ -37,6 +37,10 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     errorMessage: null,
     storeName: 'Cafe X',
     note: 'order-42',
+    provider: null,
+    circlePaymasterAddress: null,
+    circlePaymasterNetUsdc: null,
+    circleVerification: null,
     ...overrides,
   };
 }

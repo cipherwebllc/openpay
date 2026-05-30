@@ -19,7 +19,7 @@ import {
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
-    schemaVersion: 1,
+    schemaVersion: LATEST_SCHEMA_VERSION,
     id: 'test-id',
     ts: 1_700_000_000_000,
     flow: 'batch',
@@ -41,6 +41,10 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     errorMessage: null,
     storeName: 'Test Store',
     note: '',
+    provider: null,
+    circlePaymasterAddress: null,
+    circlePaymasterNetUsdc: null,
+    circleVerification: null,
     ...overrides,
   };
 }
@@ -583,15 +587,17 @@ describe('history (LocalStorage)', () => {
   });
 
   describe('schema migration framework', () => {
+    // 実 MIGRATIONS (v1→v2 が登録済) を退避し、fake migration を足すテストの後に復元する。
+    const ORIGINAL_MIGRATIONS = { ...MIGRATIONS };
     afterEach(() => {
-      // テストが MIGRATIONS を mutate するため毎回 reset
       for (const k of Object.keys(MIGRATIONS)) {
         delete (MIGRATIONS as Record<number, MigrationFn>)[Number(k)];
       }
+      Object.assign(MIGRATIONS, ORIGINAL_MIGRATIONS);
     });
 
     describe('buildHistoryEntry が常に LATEST_SCHEMA_VERSION を stamp', () => {
-      it('新規 entry は schemaVersion = LATEST_SCHEMA_VERSION (= 1)', () => {
+      it('新規 entry は schemaVersion = LATEST_SCHEMA_VERSION (= 2)', () => {
         const base: BuildHistoryBase = {
           flow: 'batch',
           status: 'success',
@@ -613,7 +619,44 @@ describe('history (LocalStorage)', () => {
           storeName: '',
         };
         expect(buildHistoryEntry(base).schemaVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(buildHistoryEntry(base).schemaVersion).toBe(1);
+        expect(buildHistoryEntry(base).schemaVersion).toBe(2);
+        // 新規 entry の v2 フィールドは provider 未指定なら null backfill。
+        const built = buildHistoryEntry(base);
+        expect(built.provider).toBeNull();
+        expect(built.circlePaymasterAddress).toBeNull();
+        expect(built.circlePaymasterNetUsdc).toBeNull();
+        expect(built.circleVerification).toBeNull();
+      });
+
+      it('circle 経路の entry は provider/paymaster/net/verification を保持', () => {
+        const built = buildHistoryEntry({
+          flow: 'batch',
+          status: 'success',
+          chainId: 421614,
+          chainSlug: 'arbitrum',
+          asset: 'usdc',
+          tokenAddress: '0xT',
+          payMode: 'gasless',
+          gasMode: 'customer',
+          merchant: '0xM',
+          merchantAmount: 1n,
+          customer: '0xC',
+          feeReceiver: '0xF',
+          feeAmount: 0n,
+          txHash: '0xTx',
+          userOpHash: '0xUO',
+          blockNumber: 1n,
+          errorMessage: null,
+          storeName: '',
+          provider: 'circle',
+          circlePaymasterAddress: '0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966',
+          circlePaymasterNetUsdc: '9000',
+          circleVerification: 'client-reported',
+        });
+        expect(built.schemaVersion).toBe(2);
+        expect(built.provider).toBe('circle');
+        expect(built.circlePaymasterNetUsdc).toBe('9000');
+        expect(built.circleVerification).toBe('client-reported');
       });
     });
 
@@ -623,7 +666,26 @@ describe('history (LocalStorage)', () => {
         const out = migrateToLatest(e);
         expect(out).not.toBeNull();
         expect(out?.id).toBe('a');
-        expect(out?.schemaVersion).toBe(1);
+        expect(out?.schemaVersion).toBe(2);
+      });
+
+      it('実 v1 entry (Circle フィールド無し) → v2 へ null backfill で生存', () => {
+        // v2 フィールドを持たない正真正銘の v1 entry を構築。
+        const e = entry({ id: 'real-v1' });
+        const v1: Record<string, unknown> = { ...e, schemaVersion: 1 };
+        delete v1.provider;
+        delete v1.circlePaymasterAddress;
+        delete v1.circlePaymasterNetUsdc;
+        delete v1.circleVerification;
+        const out = migrateToLatest(v1);
+        expect(out).not.toBeNull();
+        expect(out?.id).toBe('real-v1');
+        expect(out?.schemaVersion).toBe(2);
+        // drop されず null backfill される
+        expect(out?.provider).toBeNull();
+        expect(out?.circlePaymasterAddress).toBeNull();
+        expect(out?.circlePaymasterNetUsdc).toBeNull();
+        expect(out?.circleVerification).toBeNull();
       });
 
       it('non-object 入力 → null', () => {
@@ -645,25 +707,25 @@ describe('history (LocalStorage)', () => {
         expect(migrateToLatest(far)).toBeNull();
       });
 
-      it('schemaVersion 不在 (Phase 2 初期 legacy データ) → v1 stamp で読み込み', () => {
+      it('schemaVersion 不在 (Phase 2 初期 legacy データ) → v1 stamp → v2 へ migration', () => {
         // schemaVersion を完全に欠落させた entry を直接構築
         const e = entry({ id: 'legacy' });
         const legacy: Record<string, unknown> = { ...e };
         delete legacy.schemaVersion;
         const out = migrateToLatest(legacy);
         expect(out).not.toBeNull();
-        expect(out?.schemaVersion).toBe(1);
+        expect(out?.schemaVersion).toBe(2);
         expect(out?.id).toBe('legacy');
       });
 
-      it('schemaVersion が non-number (string / null / object) → v1 stamp で読み込み', () => {
+      it('schemaVersion が non-number (string / null / object) → v1 stamp → v2', () => {
         const e = entry({ id: 'weird' });
         const out1 = migrateToLatest({ ...e, schemaVersion: '1' });
         const out2 = migrateToLatest({ ...e, schemaVersion: null });
         const out3 = migrateToLatest({ ...e, schemaVersion: { v: 1 } });
-        expect(out1?.schemaVersion).toBe(1);
-        expect(out2?.schemaVersion).toBe(1);
-        expect(out3?.schemaVersion).toBe(1);
+        expect(out1?.schemaVersion).toBe(2);
+        expect(out2?.schemaVersion).toBe(2);
+        expect(out3?.schemaVersion).toBe(2);
       });
 
       it('shape 不正 (id 欠落等) → migration 後 validation で null', () => {
@@ -707,7 +769,8 @@ describe('history (LocalStorage)', () => {
         const out = migrateToLatest(v0);
         expect(out).not.toBeNull();
         expect(out?.id).toBe('from-v0');
-        expect(out?.schemaVersion).toBe(1);
+        // v0 →(fake)→ v1 →(実 MIGRATIONS[1])→ v2 まで chain が走る
+        expect(out?.schemaVersion).toBe(2);
       });
 
       it('chain 内 migration が null を返したら drop', () => {
@@ -737,8 +800,8 @@ describe('history (LocalStorage)', () => {
         );
         const loaded = loadHistory();
         expect(loaded).toHaveLength(2);
-        expect(loaded[0].schemaVersion).toBe(1);
-        expect(loaded[1].schemaVersion).toBe(1);
+        expect(loaded[0].schemaVersion).toBe(2);
+        expect(loaded[1].schemaVersion).toBe(2);
       });
 
       it('LocalStorage に future version 混在 → future のみ drop', () => {
