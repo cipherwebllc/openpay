@@ -58,7 +58,14 @@ import {
   HttpRequestError,
   TimeoutError,
 } from 'viem';
-import { arbitrum, arbitrumSepolia, base } from 'viem/chains';
+import {
+  arbitrum,
+  arbitrumSepolia,
+  avalanche,
+  base,
+  optimism,
+  polygon,
+} from 'viem/chains';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import {
   createBundlerClient,
@@ -106,6 +113,37 @@ const CHAIN_CONFIGS = {
     rpcUrl: 'https://arb1.arbitrum.io/rpc',
     isMainnet: true,
     funding: '本物の Arbitrum USDC を ~2 (使い捨てウォレットのみ・faucet 無し)',
+  },
+  // ↓ OP / Polygon / Avalanche は Circle dev docs で 10% surcharge **非適用**だが
+  //   USDC→native の slippage spread が未定量。本 gate は実 receipt から「Circle が
+  //   実際に引いた USDC ÷ 実ガスの market USDC 換算」= 実効 fee を計測し、その値を
+  //   CIRCLE_GAS_SURCHARGE_BPS の登録根拠にする (計画 C4・docs/runbooks)。
+  optimism: {
+    chain: optimism,
+    usdc: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', // USDC_OPTIMISM_MAINNET (native・lib/tokens.ts)
+    circlePaymaster: '0x0578cFB241215b77442a541325d6A4E6dFE700Ec', // v0.8 mainnet (deterministic・全 chain 同一)
+    rpcEnv: 'NEXT_PUBLIC_OPTIMISM_RPC_URL',
+    rpcUrl: 'https://mainnet.optimism.io',
+    isMainnet: true,
+    funding: '本物の Optimism USDC を ~2 (使い捨てウォレットのみ・faucet 無し)',
+  },
+  polygon: {
+    chain: polygon,
+    usdc: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // USDC_POLYGON_MAINNET (native・USDC.e ではない・lib/tokens.ts)
+    circlePaymaster: '0x0578cFB241215b77442a541325d6A4E6dFE700Ec', // v0.8 mainnet (deterministic)
+    rpcEnv: 'NEXT_PUBLIC_POLYGON_RPC_URL',
+    rpcUrl: 'https://polygon-rpc.com',
+    isMainnet: true,
+    funding: '本物の Polygon USDC を ~2 (native・gas は POL だが gasless なので不要・使い捨てのみ)',
+  },
+  avalanche: {
+    chain: avalanche,
+    usdc: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', // USDC_AVALANCHE_MAINNET (native・lib/tokens.ts)
+    circlePaymaster: '0x0578cFB241215b77442a541325d6A4E6dFE700Ec', // v0.8 mainnet (deterministic)
+    rpcEnv: 'NEXT_PUBLIC_AVALANCHE_RPC_URL',
+    rpcUrl: 'https://api.avax.network/ext/bc/C/rpc',
+    isMainnet: true,
+    funding: '本物の Avalanche USDC を ~2 (native・使い捨てウォレットのみ・faucet 無し)',
   },
 };
 const SMOKE_CHAIN = process.env.SMOKE_CHAIN || 'arbitrum-sepolia';
@@ -237,6 +275,7 @@ async function pimlicoLeg({ owner, publicClient, bundlerTransport, label }) {
     entryPoint: receipt.entryPoint,
     paymaster: receipt.paymaster,
     usdcOut: usdc,
+    actualGasCost: receipt.actualGasCost,
   };
 }
 
@@ -349,6 +388,8 @@ async function circleLeg({ owner, publicClient, bundlerTransport, permitAmount, 
     entryPoint: receipt.entryPoint,
     paymaster: receipt.paymaster,
     usdcOut: usdc,
+    // EntryPoint が paymaster に課金した実ガス (native wei)。実効 fee 計測の分母。
+    actualGasCost: receipt.actualGasCost,
   };
 }
 
@@ -457,6 +498,33 @@ async function main() {
   log(`USDC balance:     ${formatUnits(bal, 6)} USDC`);
   if (bal === 0n) throw new Error(`USDC 残高 0 — ${CFG.funding} を入金して再実行`);
 
+  // Circle 実効 fee 計測用に market exchangeRate (USDC/native, 1e18 scale) を取得。
+  // useGasQuoteCircle が表示見積に使うのと同一の Pimlico getTokenQuotes rate。
+  // markup = Circle が引いた USDC ÷ (実ガス native × rate / 1e18) − 1。
+  let exchangeRate = null;
+  try {
+    const quoteClient = createPimlicoClient({
+      transport: bundlerTransport,
+      entryPoint: { address: entryPoint08Address, version: '0.8' },
+    });
+    const quotes = await quoteClient.getTokenQuotes({ tokens: [USDC], chain: CHAIN });
+    if (quotes.length > 0) exchangeRate = quotes[0].exchangeRate;
+  } catch (e) {
+    log(`(token quote 取得失敗 — 実効 fee 計測はスキップ: ${e.shortMessage || e.message})`);
+  }
+  log(`USDC/native rate: ${exchangeRate ?? '(取得不可)'} (1e18 scale・実効 fee 計測用)`);
+
+  // 実効 Circle fee (bps): 顧客から引いた USDC が、実ガス (native) の market USDC 換算より
+  // 何 % 高いか。= Circle surcharge + USDC→native 変換 spread + Circle buffer の合算。
+  // OP/Polygon/Avalanche は 10% surcharge 非適用なので、ここで出る値 (主に spread) を
+  // CIRCLE_GAS_SURCHARGE_BPS の登録根拠にする (計画 C4)。Base/Arb は ~10%+ が出るはず。
+  const effectiveMarkupBps = (toCircle, actualGasCost) => {
+    if (!exchangeRate || !actualGasCost || actualGasCost === 0n) return null;
+    const marketUsdc = (actualGasCost * exchangeRate) / 10n ** 18n;
+    if (marketUsdc <= 0n) return null;
+    return Number((toCircle * 10_000n) / marketUsdc) - 10_000;
+  };
+
   const delBefore = await delegateOf(publicClient, owner.address);
   log(`委任 (before):    ${delBefore ?? '0x (pristine — 初回 UserOp で自動委任)'}`);
 
@@ -473,10 +541,19 @@ async function main() {
   for (const run of legs) {
     try {
       const r = await run();
+      if (r.provider === 'circle') {
+        r.effectiveMarkupBps = effectiveMarkupBps(r.usdcOut.toCircle, r.actualGasCost);
+      }
       log(
         `  → success=${r.ok} entryPoint=${r.entryPoint} paymaster=${r.paymaster} ` +
           `USDC out=${formatUnits(r.usdcOut.total, 6)} (→Circle=${formatUnits(r.usdcOut.toCircle, 6)})`,
       );
+      if (typeof r.effectiveMarkupBps === 'number') {
+        log(
+          `     実効 Circle fee: ${(r.effectiveMarkupBps / 100).toFixed(2)}% ` +
+            `(徴収 ${formatUnits(r.usdcOut.toCircle, 6)} USDC vs 実ガス market 換算)`,
+        );
+      }
       results.push(r);
     } catch (e) {
       log(`  ✖ leg 失敗 [${isTransient(e) ? 'transient' : 'deterministic'}]: ${e.shortMessage || e.message}`);
@@ -501,8 +578,19 @@ async function main() {
   );
   const delegationStable = delAfter?.toLowerCase() === IMPL_7702.toLowerCase();
 
+  // 実効 fee 計測 → CIRCLE_GAS_SURCHARGE_BPS 登録推奨値。
+  // 推奨 = max(実測 markup) + 300bps margin を 100 単位で切り上げ (最低 0)。
+  // この値を lib/circlePaymaster.ts の対象 chain に登録してから flag 有効化する。
+  const circleMarkups = results
+    .filter((r) => r.provider === 'circle' && typeof r.effectiveMarkupBps === 'number')
+    .map((r) => r.effectiveMarkupBps);
+  const maxMarkupBps = circleMarkups.length ? Math.max(...circleMarkups) : null;
+  const recommendedSurchargeBps =
+    maxMarkupBps === null ? null : Math.max(0, Math.ceil((maxMarkupBps + 300) / 100) * 100);
+
   log(JSON.stringify(
     {
+      chain: `${CHAIN.name} (${CHAIN.id})`,
       allLegsSuccess: allOk,
       sameSender: senders.size <= 1,
       allEntryPointV08: epAllV08,
@@ -510,15 +598,30 @@ async function main() {
       delegationStable_0xe6Cae83: delegationStable,
       delegateBefore: delBefore,
       delegateAfter: delAfter,
+      circleEffectiveMarkupBps: maxMarkupBps,
+      recommendedSurchargeBps,
       legs: results.map((r) => ({
         leg: r.leg, provider: r.provider, ok: r.ok,
         entryPoint: r.entryPoint, paymaster: r.paymaster,
         usdcOut: r.usdcOut ? formatUnits(r.usdcOut.total, 6) : null,
+        usdcToCircle: r.usdcOut ? formatUnits(r.usdcOut.toCircle, 6) : null,
+        effectiveMarkupBps:
+          typeof r.effectiveMarkupBps === 'number' ? r.effectiveMarkupBps : null,
         txHash: r.txHash, error: r.error,
       })),
     },
     null, 2,
   ));
+
+  if (maxMarkupBps !== null) {
+    log(
+      `\n計測: Circle 実効 fee (最大) = ${(maxMarkupBps / 100).toFixed(2)}% ` +
+        `→ 推奨 CIRCLE_GAS_SURCHARGE_BPS[${CHAIN.id}] = ${recommendedSurchargeBps} ` +
+        `(実測 + 300bps margin・100 切り上げ)`,
+    );
+  } else {
+    log('\n計測: Circle 実効 fee は取得不可 (exchangeRate 欠落 or 全 circle leg 失敗)。');
+  }
 
   const PASS = allOk && epAllV08 && circleLegOk && delegationStable;
   log(`\n${PASS ? '✅ PASS' : '❌ FAIL'} — ${PASS

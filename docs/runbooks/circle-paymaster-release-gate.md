@@ -42,7 +42,23 @@ SMOKE_CHAIN=base SMOKE_MAINNET_OK=1 \
   SMOKE_PRIVATE_KEY=0x<使い捨て鍵> PIMLICO_API_KEY=<your-key> \
   SMOKE_ORIGIN=https://open-pay.jp \
   node scripts/smoke-circle-crossswitch.mjs
+
+# Optimism / Polygon / Avalanche mainnet (実 USDC・fee 実測ゲート)
+#   SMOKE_CHAIN を optimism / polygon / avalanche に変えるだけ。各 chain ごとに
+#   その chain の実 USDC ~2 を使い捨てウォレットに入れて 1 回ずつ実行する。
+SMOKE_CHAIN=optimism SMOKE_MAINNET_OK=1 \
+  SMOKE_RPC_URL=<専用 RPC (NEXT_PUBLIC_OPTIMISM_RPC_URL)> \
+  SMOKE_PRIVATE_KEY=0x<使い捨て鍵> PIMLICO_API_KEY=<your-key> \
+  SMOKE_ORIGIN=https://open-pay.jp \
+  node scripts/smoke-circle-crossswitch.mjs
 ```
+
+> **OP/Polygon/Avalanche は fee 実測ゲート**。Circle dev docs では 10% surcharge 非適用だが
+> USDC→native の slippage spread が未定量。gate は出力 JSON の
+> `circleEffectiveMarkupBps` (実効 fee) と `recommendedSurchargeBps` (= 実測 + 300bps
+> margin・100 切り上げ) を出す。**PASS かつ recommendedSurchargeBps を確認** したら、その値を
+> `lib/circlePaymaster.ts` の `CIRCLE_GAS_SURCHARGE_BPS[<chainId>]` に登録 → flag 有効化。
+> 登録するまでは `resolveUsdcGaslessProvider` が pimlico に倒れるため自動で安全側 (Pimlico erc20)。
 
 > ⚠️ Base mainnet は実 USDC (~2 で十分・ガスはセント単位)。`SMOKE_MAINNET_OK=1` 必須。
 > 公開 RPC (`mainnet.base.org`) は rate limit で 7702 bootstrap が壊れるため専用 RPC 必須。
@@ -140,13 +156,15 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
    登録で制御**する (ゲート通過まで登録しない)。
 4. **Arbitrum mainnet** (fee=10%・Circle dev docs で Arb/Base のみ 10% と確認): `SMOKE_CHAIN=arbitrum`
    で本 smoke ゲートを通過させ、`CIRCLE_GAS_SURCHARGE_BPS` に `[arbitrum.id]: 1000` を登録。
-5. **10% 非適用 chain (Optimism/Polygon/Ethereum/Avalanche/Unichain)**: Circle dev docs では
-   10% surcharge 非適用だが「USDC→ETH slippage の未定量 spread」があり **0% 確定ではない**。
-   各 chain で `SMOKE_CHAIN=<chain>` ゲートを実行し、**実 receipt の徴収 USDC vs 生ガスで実効 fee を
-   実測** → その値 (round-up + margin) を `CIRCLE_GAS_SURCHARGE_BPS` に登録してから有効化 (C4)。
+5. **10% 非適用 chain (Optimism/Polygon/Avalanche)**: Circle dev docs では 10% surcharge 非適用だが
+   「USDC→native slippage の未定量 spread」があり **0% 確定ではない**。**smoke config 整備済**
+   (`SMOKE_CHAIN=optimism|polygon|avalanche`)。gate が出力 JSON に `circleEffectiveMarkupBps` (実効
+   fee = 徴収 USDC ÷ 実ガス market 換算 − 1) と `recommendedSurchargeBps` (= 実測 + 300bps margin・
+   100 切り上げ) を出す。**PASS かつ** その推奨値を `CIRCLE_GAS_SURCHARGE_BPS` に登録してから有効化 (C4)。
    未登録の間は `resolveUsdcGaslessProvider` が pimlico に倒すため自動的に Pimlico erc20 fallback。
+   - **Ethereum L1 / Unichain は smoke 未整備**。L1 はガスが絶対額で高い (数$/tx) ため小額決済に
+     不向き、Unichain は buyer-only で優先度低。必要になった時点で同様に config を足す。
    - 全 mainnet で USDC は **native** を使用 (Polygon も `0x3c49…`・USDC.e ではない)。
-   - Ethereum L1 はガスが絶対額で高い (数$/tx) ため小額決済には不向き — 有効化の価値を要検討。
    - v0.8 paymaster は全 mainnet で `0x0578…700Ec` (deterministic)。gate が codehash を log するので
      Base と一致を確認後 `CIRCLE_PAYMASTER_CODEHASH` に登録すると本番の codehash 検証が効く。
 
