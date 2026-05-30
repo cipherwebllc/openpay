@@ -1,17 +1,51 @@
 # Circle Paymaster 投入ゲート (Phase 1 / C5 release blocker)
 
-> ステータス: **未通過 (flag OFF 維持)**。本ゲートを通すまで
-> `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER` は本番で有効化しない。
+> ステータス: **送信面ゲート通過 (testnet + Base mainnet)**。2026-05-30 に Base mainnet
+> 実機で 3 leg PASS (下記「実行結果」)。段階リリース step 3 の受入基準を充足したため
+> **Base mainnet に限り** `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER=1` 有効化可。他 chain は
+> fee 実測前のため flag OFF 維持。
 >
 > 計画: `docs/plans/circle-paymaster-phase1.md` §5 (C5)、§6 (段階リリース)。
+
+## 実行結果 (Base mainnet・2026-05-30)
+
+`SMOKE_CHAIN=base SMOKE_MAINNET_OK=1` で 3 leg (Circle → Pimlico → Circle) すべて PASS。
+pristine EOA (`delegateBefore=null`) が leg1/circle で 7702 委任 (→ `0xe6Cae83`) を
+bootstrap し、`delegateAfter=0xe6Cae83…` を確認:
+
+| leg | provider | paymaster | 実徴収 USDC | tx |
+|-----|----------|-----------|------------|-----|
+| 1 | circle | `0x0578…700Ec` (mainnet) | 0.012117 | `0x527224…b0e5e` |
+| 2 | pimlico | `0x8888…2402` (erc20) | 0.003822 | `0x355306…1aaddd` |
+| 3 | circle | `0x0578…700Ec` (mainnet) | 0.009384 | `0xb31b6f…73fc5e` |
+
+- 実徴収 USDC ≪ permit 上限 2 USDC（C4 fee 整合 OK）。
+- **観測**: Base mainnet で Circle のガス徴収 ≈ Pimlico の 3〜4倍 (Circle 10% surcharge +
+  Circle 自身の fee)。絶対額はセント単位だが「Circle 優先はコスト最適でなく信頼性/公式
+  サポート理由」という事実を記録。
+- **pristine bootstrap の要点**: viem/permissionless は prepareUserOperation 段階で 7702
+  authorization を stub 署名のまま送るため、明示署名 (`owner.signAuthorization`) して
+  estimate/send に渡さないと bundler が `recovered signer != sender` で弾く。smoke は
+  Circle leg を先頭にして spike 実証済の viem 経路で委任を張る (scripts 内で対応済)。
 
 ## 最短実行 (UI 不要・推奨)
 
 ```bash
+# testnet (既定: Arbitrum Sepolia)
 SMOKE_PRIVATE_KEY=0x<使い捨てtestnet鍵> \
   PIMLICO_API_KEY=<your-key> \
   node scripts/smoke-circle-crossswitch.mjs
+
+# Base mainnet (実 USDC を消費・使い捨てウォレットのみ)
+SMOKE_CHAIN=base SMOKE_MAINNET_OK=1 \
+  SMOKE_RPC_URL=<専用 Base RPC (NEXT_PUBLIC_BASE_RPC_URL)> \
+  SMOKE_PRIVATE_KEY=0x<使い捨て鍵> PIMLICO_API_KEY=<your-key> \
+  SMOKE_ORIGIN=https://open-pay.jp \
+  node scripts/smoke-circle-crossswitch.mjs
 ```
+
+> ⚠️ Base mainnet は実 USDC (~2 で十分・ガスはセント単位)。`SMOKE_MAINNET_OK=1` 必須。
+> 公開 RPC (`mainnet.base.org`) は rate limit で 7702 bootstrap が壊れるため専用 RPC 必須。
 
 鍵が無ければ `SMOKE_PRIVATE_KEY` 未設定で 1 度実行すると使い捨て鍵とアドレスが
 表示される → その ADDRESS に Arbitrum Sepolia USDC を ~1 入れて (faucet.circle.com)
