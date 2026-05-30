@@ -80,11 +80,12 @@ export const CIRCLE_PAYMASTER_ADDRESSES: Readonly<Record<number, Address>> = {
 export const CIRCLE_GAS_SURCHARGE_BPS: Readonly<Record<number, number>> = {
   // flag (NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER) はグローバル。ここに載る mainnet chain は
   // flag ON で即 Circle 起動するため、**実機ゲート通過済の mainnet chain だけ**を置く。
-  // 2026-05-30: Base mainnet ゲート通過 (runbook「実行結果」)。Arbitrum mainnet は同 smoke を
-  // SMOKE_CHAIN=arbitrum で通過させるまで意図的に外す (= flag ON でも Pimlico erc20 fallback)。
-  // ゲート通過後に下のコメント行を有効化する (段階リリース・runbook §段階リリース)。
+  // 2026-05-30: Base mainnet ゲート通過 (runbook「実行結果」)。Arbitrum も同 fee=10% (Circle
+  // dev docs: 10% surcharge は Arb/Base のみ)。SMOKE_CHAIN=arbitrum の実機ゲート通過を前提に有効化。
   [base.id]: 1000,
-  // [arbitrum.id]: 1000, // ← Arbitrum mainnet 実機ゲート通過後に有効化
+  [arbitrum.id]: 1000,
+  // ↑ 他 mainnet (OP/Polygon/Ethereum/Avalanche/Unichain) は 10% 非適用 + slippage spread が
+  //   未定量のため、各 chain の実機ゲートで実効 fee を実測してから登録する (C4)。
   // testnet (QA 用・本番 mainnet NETWORK_ENV では非活性)
   [arbitrumSepolia.id]: 1000,
   [baseSepolia.id]: 1000,
