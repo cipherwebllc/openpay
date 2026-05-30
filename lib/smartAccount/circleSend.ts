@@ -43,6 +43,7 @@ import {
   markSubmitting,
   reserveOrResume,
   type PendingRecord,
+  type PendingStatus,
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
 import type { PublicClient } from 'viem';
@@ -52,6 +53,31 @@ import type { PublicClient } from 'viem';
 // cross-invocation ガードで block せず abandon して掃除する (恒久ブロック防止)。署名 popup を
 // 2 つ跨いでも通常は数秒〜数十秒なので 3 分は十分長い安全側。
 const PRE_SUBMIT_STALE_MS = 3 * 60 * 1000;
+
+// 同一 callHash の confirmed record をどれだけ「偶発二重決済」とみなして抑止するか。
+// この窓内の再決済 (reload/再クリック) は既支払い結果を返して新規 broadcast しない。窓を
+// 過ぎた同額再決済は **正規のリピート購入** (例: 同じ店で同額を再度) とみなし通す
+// (callHash は paymentAttemptId 非依存なので、窓が無いと正規リピートを恒久抑止してしまう)。
+const CONFIRMED_DEDUP_WINDOW_MS = 90 * 1000;
+
+// cross-invocation ガードの処理優先度。confirmed/submitting を pre-submit より先に評価し、
+// stale でない pre-submit が confirmed/submitting を CirclePendingError で masked するのを防ぐ。
+function statusRank(s: PendingStatus): number {
+  switch (s) {
+    case 'confirmed':
+      return 0;
+    case 'submitting':
+      return 1;
+    case 'signed':
+      return 2;
+    case 'awaiting_signature':
+      return 3;
+    case 'reserved':
+      return 4;
+    default:
+      return 9; // failed/abandoned は findLiveByCallHash で除外済 (安全側)
+  }
+}
 
 export type CirclePaymentResult = {
   userOpHash: Hex;
@@ -195,14 +221,27 @@ export async function executeCirclePayment(
   // 別 attempt (別タブ/別デバイス/reload/再クリック) を捕捉できない。**callHash で同一決済の
   // 生きている別 record を全状態スキャン**し、自 attempt (excludeKey) 以外が在れば新規 op を
   // 作らない:
-  //   confirmed  → 既に支払い済 → その結果を返す (冪等)。
-  //   submitting → recover (receipt 照会 or 同一署名 op の冪等 rebroadcast)。
-  //   pre-submit → 別 attempt が署名中 → 並行 broadcast を作らず CirclePendingError。
-  //                ただし stale な orphan (reload 放置) は abandon して block しない。
-  const live = findLiveByCallHash({ sender, chainId, callHash, excludeKey: key });
+  //   confirmed (直近)  → 偶発二重 → 既支払い結果を返す。confirmed (古い) → 正規の再決済とみなし通す。
+  //   submitting        → recover (receipt 照会 or 同一署名 op の冪等 rebroadcast)。
+  //   pre-submit (直近)  → 別 attempt が署名中 → 並行 broadcast を作らず CirclePendingError。
+  //   pre-submit (stale) → reload 放置の orphan → abandon して block しない。
+  // status 優先 (confirmed > submitting > pre-submit) で処理し、stale でない pre-submit が
+  // 先に来て confirmed/submitting を CirclePendingError で masked するのを防ぐ。
+  // ⚠️ scan→reserve は単一同期 tick で自タブ内は実質 atomic だが、タブ/デバイス跨ぎの真の同時
+  // race は localStorage の限界で完全には塞げない。ただし**両 attempt は同一 sender の key-0
+  // sequential nonce を取るため、ERC-4337 EntryPoint の nonce 一意性が最終 double-spend ガード
+  // になる** (先着 1 件のみ included、後発は AA25 invalid-nonce で revert = merchant 転送は 1 回)。
+  const live = findLiveByCallHash({ sender, chainId, callHash, excludeKey: key }).sort(
+    (a, b) => statusRank(a.status) - statusRank(b.status),
+  );
   for (const rec of live) {
     if (rec.status === 'confirmed') {
-      return await resultFromConfirmed(bundle, rec);
+      // 直近 confirmed = reload/再クリックによる偶発二重 → 既支払い結果を返す (冪等)。
+      // 窓を過ぎた古い confirmed = 正規の同額リピート決済 → 抑止せず新規決済を許可。
+      if (now() - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS) {
+        return await resultFromConfirmed(bundle, rec);
+      }
+      continue;
     }
     if (rec.status === 'submitting') {
       const recovered = await recoverSubmitting({ bundle, record: rec, sender, now });
@@ -211,8 +250,13 @@ export async function executeCirclePayment(
     }
     // reserved / awaiting_signature / signed (pre-submit・未 broadcast)。
     if (now() - rec.updatedAt > PRE_SUBMIT_STALE_MS) {
-      // reload で見捨てられた orphan → abandon して掃除し、block しない。
-      abandon({ key: rec.key, sender, now: now() });
+      // reload で見捨てられた orphan → abandon して掃除し、block しない。並行遷移で from
+      // 不一致になっても無害 (二重決済ではなく一過性エラー) なので握り潰して continue。
+      try {
+        abandon({ key: rec.key, sender, now: now() });
+      } catch {
+        /* 並行 submitting 遷移等 → 次回スキャンで submitting として recover される */
+      }
       continue;
     }
     // 直近の pre-submit = 別 attempt が署名中。並行 broadcast を作らない。

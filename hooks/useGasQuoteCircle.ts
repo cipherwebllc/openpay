@@ -8,14 +8,13 @@
 //   exchangeRate は Pimlico の getTokenQuotes (USDC/native, 1e18 scale) を流用する
 //   (Circle 専用の rate oracle は不要)。
 //
-// permitAmount (USDC, allowance 上限):
+// permitAmount (USDC, allowance):
 //   Circle は permit を spender(=paymaster) に与え postOp で「実費+surcharge」を pull、
-//   過大分を返金する。**permitAmount は実費+surcharge を必ず賄い、かつ過剰 allowance を
-//   避ける** 必要がある (deadline=MAX なので余剰 allowance が残る)。
-//   そこで maxFeePerGas に **gas ceiling (assertGasCeiling と同値)** を使って「ceiling
-//   までの最大課金額」を tight upper bound として算定する。ceiling 超は送信前に
-//   GasCongestedError で弾かれるので、permitAmount は実行時課金 (standard tier ≤ ceiling)
-//   を必ず上回り、かつ青天井にならない。ceiling 未定義 chain は standard×2 を保守上限に。
+//   過大分を返金する。deadline=MAX なので余剰 allowance が残るため、**過剰 allowance を
+//   避ける**ことが重要。よって permitAmount は実費 (standard tier) × surcharge × 安全係数
+//   (PERMIT_SAFETY_MULTIPLIER) で算定する。gas ceiling ベース (ceiling/standard は数百〜数万倍)
+//   は残余 allowance が過大になるため採らない。送信時の異常 spike は assertGasCeiling が別途
+//   abort し、係数を超える drift は Circle の pull 不足で revert (回復可能・資金流出ではない)。
 //
 // useBatchPayment の circle 分岐は circlePermitAmount を必須にしているので、本フックの
 // permitAmount を PaymentForm/CheckoutForm が mutate に渡す。
