@@ -214,3 +214,45 @@ describe('reconcileCircleNetUsdc — EntryPoint 発火元 + success 検証 (Code
     if (r.status === 'unreconciled') expect(r.reason).toMatch(/success=false/);
   });
 });
+
+describe('reconcileCircleNetUsdc — 構造化 kind + no-charge guard (hardening)', () => {
+  it('binding-paymaster 不一致は kind=binding-paymaster (RED FLAG)', () => {
+    const logs: ReceiptLog[] = [
+      transfer(0, USDC, SENDER, OTHER, 9_000n),
+      opEvent(1, UOH_A, SENDER, OTHER),
+    ];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status === 'unreconciled' && r.kind).toBe('binding-paymaster');
+  });
+
+  it('sender 不一致は kind=binding-sender', () => {
+    const logs: ReceiptLog[] = [opEvent(1, UOH_A, OTHER, PAYMASTER)];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status === 'unreconciled' && r.kind).toBe('binding-sender');
+  });
+
+  it('event 不在は kind=event-absent', () => {
+    const logs: ReceiptLog[] = [opEvent(1, UOH_B, SENDER, PAYMASTER)];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status === 'unreconciled' && r.kind).toBe('event-absent');
+  });
+
+  it('success=false は kind=reverted', () => {
+    const logs: ReceiptLog[] = [
+      transfer(0, USDC, SENDER, PAYMASTER, 9_000n),
+      opEvent(1, UOH_A, SENDER, PAYMASTER, { success: false }),
+    ];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status === 'unreconciled' && r.kind).toBe('reverted');
+  });
+
+  it('paymaster 徴収が scope に無い (collector≠paymaster/無償) は kind=no-charge で verified にしない', () => {
+    const logs: ReceiptLog[] = [
+      transfer(0, USDC, SENDER, MERCHANT, 99_000_000n), // 決済のみ・gas 徴収なし
+      opEvent(1, UOH_A, SENDER, PAYMASTER),
+    ];
+    const r = reconcileCircleNetUsdc({ logs, expected });
+    expect(r.status).toBe('unreconciled');
+    if (r.status === 'unreconciled') expect(r.kind).toBe('no-charge');
+  });
+})

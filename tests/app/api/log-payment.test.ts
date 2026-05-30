@@ -136,6 +136,25 @@ describe('POST /api/log/payment', () => {
     expect(res.status).toBe(413);
   });
 
+  it('content-length header 無しでも実 body が 8KB 超なら 413 (header bypass 防止)', async () => {
+    // 巨大 errorMessage で body を 8KB 超に。Request 構築では content-length を付けず、
+    // route 側が実 byte 長を再検証することを確認する (chunked 転送の bypass を塞ぐ)。
+    const huge = { ...validBody, errorMessage: 'x'.repeat(9 * 1024) };
+    const r = new Request('http://localhost/api/log/payment', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(huge),
+    });
+    const res = await POST(r);
+    expect(res.status).toBe(413);
+    expect(kvLpush).not.toHaveBeenCalled();
+  });
+
+  it('8KB 直下の通常 body は 200 (cap が正常 payload を誤 reject しない)', async () => {
+    const res = await POST(req(validBody));
+    expect(res.status).toBe(200);
+  });
+
   it('KV 未設定 (unconfigured) でも 200 を返す (graceful degrade)', async () => {
     vi.mocked(kvLpush).mockResolvedValue({ ok: false, reason: 'unconfigured' });
     const res = await POST(req(validBody));

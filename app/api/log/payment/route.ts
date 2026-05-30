@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { kvLpush, kvLtrim } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import type { ClientReportedCircleVerification } from '@/lib/paymentLog';
 
 export const runtime = 'nodejs';
 
@@ -46,8 +47,9 @@ type Payload = {
   provider?: 'pimlico' | 'circle';
   circlePaymasterAddress?: Address;
   circlePaymasterNetUsdc?: string;
-  // client 経路では 'verified' は受理しない (server verifier 専用)。
-  circleVerification?: 'client-reported' | 'unreconciled';
+  // client 経路では 'verified' は受理しない (server verifier 専用)。型は paymentLog の
+  // CircleVerificationStatus から 'verified' を除いた導出型で、status 追加時に追従する。
+  circleVerification?: ClientReportedCircleVerification;
 };
 
 function isDecimalString(v: unknown): v is string {
@@ -152,13 +154,26 @@ function validate(raw: unknown): Payload | null {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  // content-length header での早期 reject (best-effort)。header は偽装/欠落しうるので
+  // これだけに頼らない。
   const lenHeader = req.headers.get('content-length');
   if (lenHeader && Number(lenHeader) > MAX_BODY_BYTES) {
     return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
   }
+  // 実 body を読んで byte 長を再検証する。chunked 転送など content-length が無い/偽の
+  // 経路でも上限を効かせ、巨大 JSON の parse コストを避ける (header だけだと bypass 可能)。
+  let bodyText: string;
+  try {
+    bodyText = await req.text();
+  } catch {
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
+  if (Buffer.byteLength(bodyText, 'utf8') > MAX_BODY_BYTES) {
+    return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
+  }
   let raw: unknown;
   try {
-    raw = await req.json();
+    raw = JSON.parse(bodyText);
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }

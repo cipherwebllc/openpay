@@ -68,6 +68,21 @@ function userOpSucceeded(data: Hex): boolean {
   return BigInt(`0x${hex.slice(64, 128)}`) !== 0n;
 }
 
+// unreconciled の構造化分類。reason 文字列の regex マッチに依存せず、呼出側 (監査ログ) が
+// binding 違反 (信頼境界破れ = RED FLAG) と良性ケースを確実に区別できるようにする。
+//   event-absent      : expected userOpHash の UserOperationEvent が EntryPoint から出ていない
+//   binding-sender    : receipt の sender が pending record と不一致
+//   binding-paymaster : receipt の paymaster が expected (allowlist) と不一致 ← 最重要 RED FLAG
+//   reverted          : UserOp success=false (merchant 転送 revert)
+//   no-charge         : scope 内に customer→paymaster の徴収 Transfer が無い (collector≠paymaster
+//                       の可能性 / testnet 無償 sponsor)。net=0 を verified と誤報告しないため。
+export type UnreconciledKind =
+  | 'event-absent'
+  | 'binding-sender'
+  | 'binding-paymaster'
+  | 'reverted'
+  | 'no-charge';
+
 export type CircleReconcileResult =
   | {
       status: 'verified';
@@ -77,7 +92,7 @@ export type CircleReconcileResult =
       pulledUsdc: bigint;
       refundedUsdc: bigint;
     }
-  | { status: 'unreconciled'; reason: string };
+  | { status: 'unreconciled'; reason: string; kind: UnreconciledKind };
 
 // 32byte topic (左 0 padding) を checksum address に。
 function topicToAddress(topic: Hex): Address {
@@ -124,6 +139,7 @@ export function reconcileCircleNetUsdc(args: {
   if (targetIdx === -1) {
     return {
       status: 'unreconciled',
+      kind: 'event-absent',
       reason: 'UserOperationEvent (expected userOpHash) が receipt に無い',
     };
   }
@@ -133,12 +149,14 @@ export function reconcileCircleNetUsdc(args: {
   if (!target.sender || !eq(target.sender, expected.sender)) {
     return {
       status: 'unreconciled',
+      kind: 'binding-sender',
       reason: `sender 不一致 (receipt=${target.sender} expected=${expected.sender})`,
     };
   }
   if (!target.paymaster || !eq(target.paymaster, expected.paymaster)) {
     return {
       status: 'unreconciled',
+      kind: 'binding-paymaster',
       reason: `paymaster 不一致 (receipt=${target.paymaster} expected=${expected.paymaster})`,
     };
   }
@@ -146,7 +164,11 @@ export function reconcileCircleNetUsdc(args: {
   // (merchant 転送は revert するが postOp の gas 徴収は起きうるため net は意味が異なる。
   //  「verified な成功決済」として報告しない。)
   if (!userOpSucceeded(target.data)) {
-    return { status: 'unreconciled', reason: 'UserOperation success=false (revert)' };
+    return {
+      status: 'unreconciled',
+      kind: 'reverted',
+      reason: 'UserOperation success=false (revert)',
+    };
   }
 
   // scope: 直前の UserOperationEvent (無ければ -∞) より後 〜 この UserOp の event 以下。
@@ -172,6 +194,19 @@ export function reconcileCircleNetUsdc(args: {
     else if (eq(from, expected.paymaster) && eq(to, expected.sender)) {
       refunded += value;
     }
+  }
+
+  // scope 内に customer→paymaster の徴収が 1 件も無い = net を 0 と確定できない。
+  // Circle が別 collector アドレスへ pull している (mainnet で要実測・runbook 参照) か、
+  // testnet 無償 sponsor の可能性。net=0 を「verified」と誤報告せず unreconciled に倒し、
+  // 監査で「徴収額不明」として可視化する (silent な 0 計上を防ぐ)。
+  if (pulled === 0n) {
+    return {
+      status: 'unreconciled',
+      kind: 'no-charge',
+      reason:
+        'scope 内に customer→paymaster の USDC 徴収が無い (collector≠paymaster の可能性 / 無償 sponsor)',
+    };
   }
 
   return {
