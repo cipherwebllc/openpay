@@ -1,4 +1,9 @@
-// Pimlico bundler/paymaster URL は同一エンドポイント。EntryPoint v0.7 を使用。
+// Pimlico bundler/paymaster URL は同一エンドポイント。EntryPoint 版は account builder
+// に合わせて createPimlico の引数で指定する (simpleAccount/circle=v0.8、metamask/mav2=v0.7)。
+// ⚠️ client の entryPoint 版は account.entryPoint と一致させること。erc20 paymaster 経路
+// (prepareUserOperationForErc20Paymaster) は getTokenQuotes を pimlicoActions decorator 経由で
+// 呼び、decorator が entryPointAddress を client 設定で上書きするため、client と account の版が
+// 食い違うと approve spender(client 版) と paymaster(account 版) が不一致になり postOp AA50 revert。
 //
 // 3 種類の Paymaster mode を deployment.paymasterMode に応じて使い分ける:
 //   - JPYC (Polygon / Kaia): Sponsorship (Verifying) Paymaster
@@ -17,7 +22,10 @@
 // 用意する手間を省くため (Ethereum Sepolia USDC も同じく sponsorship)。
 import { http } from 'viem';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
-import { entryPoint07Address } from 'viem/account-abstraction';
+import {
+  entryPoint07Address,
+  entryPoint08Address,
+} from 'viem/account-abstraction';
 import { env, isMainnet } from './env';
 import type { PaymasterMode, TokenDeployment } from './tokens';
 
@@ -30,10 +38,19 @@ export function pimlicoUrl(chainId: number): string {
   return `https://api.pimlico.io/v2/${chainId}/rpc?apikey=${env.pimlicoApiKey}`;
 }
 
-export function createPimlico(chainId: number) {
+// entryPointVersion は呼出側 (account builder) の account.entryPoint と必ず一致させる。
+// 既定 '0.7' は metamask/mav2 (v0.7 account) と従来の呼出を挙動不変に保つため。
+// simpleAccount/circle は v0.8 account なので '0.8' を渡す (erc20 の version 不一致 AA50 を防ぐ)。
+export function createPimlico(
+  chainId: number,
+  entryPointVersion: '0.7' | '0.8' = '0.7',
+) {
   return createPimlicoClient({
     transport: http(pimlicoUrl(chainId)),
-    entryPoint: { address: entryPoint07Address, version: '0.7' },
+    entryPoint:
+      entryPointVersion === '0.8'
+        ? { address: entryPoint08Address, version: '0.8' }
+        : { address: entryPoint07Address, version: '0.7' },
   });
 }
 

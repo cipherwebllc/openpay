@@ -148,9 +148,9 @@ async function pimlicoLeg({ owner, publicClient, bundlerTransport, label }) {
   const pimlicoClient = createPimlicoClient({
     transport: bundlerTransport,
     // account は v0.8 (permissionless to7702)。Pimlico client も v0.8 に揃える。
-    // ⚠️ 本番 lib/pimlico.ts createPimlico は entryPoint07 のままで、v0.8 account と
-    // 混ざると erc20 paymaster の approve spender (v0.8) と paymaster 指定 (v0.7) が
-    // 食い違い AA50 postOp revert する (本スモークで判明)。本番側も要修正。
+    // 本スモークで v0.7 client + v0.8 account の erc20 不一致 (approve spender と paymaster の
+    // version 食い違い → AA50 postOp revert) を発見。本番 lib/pimlico.ts も
+    // createPimlico(chainId,'0.8') で simpleAccount/circle を v0.8 に揃えて修正済。
     entryPoint: { address: entryPoint08Address, version: '0.8' },
   });
   const account = await to7702SimpleSmartAccount({ client: publicClient, owner });
