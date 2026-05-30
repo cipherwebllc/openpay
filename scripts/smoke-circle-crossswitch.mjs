@@ -144,6 +144,12 @@ const CHAIN_CONFIGS = {
     rpcUrl: 'https://api.avax.network/ext/bc/C/rpc',
     isMainnet: true,
     funding: '本物の Avalanche USDC を ~2 (native・使い捨てウォレットのみ・faucet 無し)',
+    // ⚠️ 2026-05-31 gate: pristine EOA で 3 leg とも AA23 (validateUserOp revert)・委任が
+    //   張られず delegateAfter=null。Avalanche C-Chain は ACP-209「EIP-7702 *style*」AA で
+    //   nonce/balance 扱いが canonical EIP-7702 と異なり、標準 viem/permissionless/Pimlico
+    //   7702 スタックでは委任が適用されない (OP/Polygon/Base/Arb では同一スクリプトが成功)。
+    //   → Circle だけでなく **Pimlico 7702 leg も失敗**。現スタックでは有効化不可。
+    //   (canonical 7702 対応 or Avalanche 専用 AA 経路ができるまで保留。)
   },
 };
 const SMOKE_CHAIN = process.env.SMOKE_CHAIN || 'arbitrum-sepolia';
@@ -498,27 +504,47 @@ async function main() {
   log(`USDC balance:     ${formatUnits(bal, 6)} USDC`);
   if (bal === 0n) throw new Error(`USDC 残高 0 — ${CFG.funding} を入金して再実行`);
 
-  // Circle 実効 fee 計測用に market exchangeRate (USDC/native, 1e18 scale) を取得。
-  // useGasQuoteCircle が表示見積に使うのと同一の Pimlico getTokenQuotes rate。
-  // markup = Circle が引いた USDC ÷ (実ガス native × rate / 1e18) − 1。
+  // 表示見積の基準値 (useGasQuoteCircle / useGasQuoteUsdc と同式) + 実効 fee の素材を取得。
+  //   displayBaseUsdc = (500k + postOp) × standard maxFeePerGas × rate / 1e18
+  //     = surcharge=0 で UI が「最大ガス代 (顧客負担)」として出す額。Circle の実徴収が
+  //       これを超えると顧客は表示より多く課金される → surcharge でこの基準を底上げする。
   let exchangeRate = null;
+  let displayBaseUsdc = null;
+  const OVERHEAD_UNITS = 500_000n; // DEFAULT_USEROP_GAS_UNITS (本番 NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS 未設定)
   try {
     const quoteClient = createPimlicoClient({
       transport: bundlerTransport,
       entryPoint: { address: entryPoint08Address, version: '0.8' },
     });
-    const quotes = await quoteClient.getTokenQuotes({ tokens: [USDC], chain: CHAIN });
-    if (quotes.length > 0) exchangeRate = quotes[0].exchangeRate;
+    const [quotes, gasPrice] = await Promise.all([
+      quoteClient.getTokenQuotes({ tokens: [USDC], chain: CHAIN }),
+      quoteClient.getUserOperationGasPrice(),
+    ]);
+    if (quotes.length > 0) {
+      exchangeRate = quotes[0].exchangeRate;
+      const effPostOp =
+        quotes[0].postOpGas > CIRCLE_MIN_POSTOP_GAS ? quotes[0].postOpGas : CIRCLE_MIN_POSTOP_GAS;
+      displayBaseUsdc =
+        ((OVERHEAD_UNITS + effPostOp) * BigInt(gasPrice.standard.maxFeePerGas) * exchangeRate) /
+        10n ** 18n;
+    }
   } catch (e) {
     log(`(token quote 取得失敗 — 実効 fee 計測はスキップ: ${e.shortMessage || e.message})`);
   }
-  log(`USDC/native rate: ${exchangeRate ?? '(取得不可)'} (1e18 scale・実効 fee 計測用)`);
+  log(`USDC/native rate: ${exchangeRate ?? '(取得不可)'} (1e18 scale)`);
+  log(
+    `表示 gas 基準 (surcharge=0): ${displayBaseUsdc !== null ? formatUnits(displayBaseUsdc, 6) + ' USDC' : '(計測不可)'}`,
+  );
 
-  // 実効 Circle fee (bps): 顧客から引いた USDC が、実ガス (native) の market USDC 換算より
-  // 何 % 高いか。= Circle surcharge + USDC→native 変換 spread + Circle buffer の合算。
-  // OP/Polygon/Avalanche は 10% surcharge 非適用なので、ここで出る値 (主に spread) を
-  // CIRCLE_GAS_SURCHARGE_BPS の登録根拠にする (計画 C4)。Base/Arb は ~10%+ が出るはず。
-  const effectiveMarkupBps = (toCircle, actualGasCost) => {
+  // **登録根拠** = 表示基準を Circle の実徴収まで底上げする最小 surcharge。
+  //   surchargeVsDisplayBps = max(0, Circle 実徴収 ÷ displayBase − 1)。
+  // 参考診断 = 実ガス (native) 比の markup。L2 は actualGasCost に L1 data fee が含まれず
+  //   過大に出るので**登録には使わない** (診断ログのみ)。
+  const surchargeVsDisplayBps = (toCircle) => {
+    if (displayBaseUsdc === null || displayBaseUsdc <= 0n || !toCircle) return null;
+    return Math.max(0, Number((toCircle * 10_000n) / displayBaseUsdc) - 10_000);
+  };
+  const markupVsActualGasBps = (toCircle, actualGasCost) => {
     if (!exchangeRate || !actualGasCost || actualGasCost === 0n) return null;
     const marketUsdc = (actualGasCost * exchangeRate) / 10n ** 18n;
     if (marketUsdc <= 0n) return null;
@@ -541,17 +567,22 @@ async function main() {
   for (const run of legs) {
     try {
       const r = await run();
-      if (r.provider === 'circle') {
-        r.effectiveMarkupBps = effectiveMarkupBps(r.usdcOut.toCircle, r.actualGasCost);
+      // ガス徴収額 = owner 発 USDC 総額 − merchant transfer (TRANSFER_AMOUNT)。
+      r.gasChargeUsdc = r.usdcOut ? r.usdcOut.total - TRANSFER_AMOUNT : null;
+      if (r.provider === 'circle' && r.usdcOut) {
+        r.surchargeVsDisplayBps = surchargeVsDisplayBps(r.usdcOut.toCircle);
+        r.markupVsActualGasBps = markupVsActualGasBps(r.usdcOut.toCircle, r.actualGasCost);
       }
       log(
         `  → success=${r.ok} entryPoint=${r.entryPoint} paymaster=${r.paymaster} ` +
-          `USDC out=${formatUnits(r.usdcOut.total, 6)} (→Circle=${formatUnits(r.usdcOut.toCircle, 6)})`,
+          `USDC out=${formatUnits(r.usdcOut.total, 6)} (gas 分=${r.gasChargeUsdc !== null ? formatUnits(r.gasChargeUsdc, 6) : '?'})`,
       );
-      if (typeof r.effectiveMarkupBps === 'number') {
+      if (typeof r.surchargeVsDisplayBps === 'number') {
         log(
-          `     実効 Circle fee: ${(r.effectiveMarkupBps / 100).toFixed(2)}% ` +
-            `(徴収 ${formatUnits(r.usdcOut.toCircle, 6)} USDC vs 実ガス market 換算)`,
+          `     Circle gas=${formatUnits(r.usdcOut.toCircle, 6)} USDC｜表示基準を満たす最小 surcharge=${(r.surchargeVsDisplayBps / 100).toFixed(2)}%` +
+            (typeof r.markupVsActualGasBps === 'number'
+              ? `｜(診断: 実ガス比 +${(r.markupVsActualGasBps / 100).toFixed(0)}%・L1 data fee 含まず)`
+              : ''),
         );
       }
       results.push(r);
@@ -578,15 +609,32 @@ async function main() {
   );
   const delegationStable = delAfter?.toLowerCase() === IMPL_7702.toLowerCase();
 
-  // 実効 fee 計測 → CIRCLE_GAS_SURCHARGE_BPS 登録推奨値。
-  // 推奨 = max(実測 markup) + 300bps margin を 100 単位で切り上げ (最低 0)。
-  // この値を lib/circlePaymaster.ts の対象 chain に登録してから flag 有効化する。
-  const circleMarkups = results
-    .filter((r) => r.provider === 'circle' && typeof r.effectiveMarkupBps === 'number')
-    .map((r) => r.effectiveMarkupBps);
-  const maxMarkupBps = circleMarkups.length ? Math.max(...circleMarkups) : null;
+  // 登録推奨 surcharge = max(表示基準を満たす最小 surcharge) + 300bps margin・100 切り上げ。
+  const displaySurcharges = results
+    .filter((r) => r.provider === 'circle' && typeof r.surchargeVsDisplayBps === 'number')
+    .map((r) => r.surchargeVsDisplayBps);
+  const maxDisplaySurchargeBps = displaySurcharges.length ? Math.max(...displaySurcharges) : null;
   const recommendedSurchargeBps =
-    maxMarkupBps === null ? null : Math.max(0, Math.ceil((maxMarkupBps + 300) / 100) * 100);
+    maxDisplaySurchargeBps === null
+      ? null
+      : Math.max(0, Math.ceil((maxDisplaySurchargeBps + 300) / 100) * 100);
+
+  // コスト競争力: Circle gas ÷ Pimlico gas (同 EOA・同 gate)。Pimlico が既に各 chain で
+  // 安価に動いているため、この比が大きい chain は Circle 有効化でガス代が上がる
+  // (Circle 優先は信頼性/公式サポート理由でコスト最適ではない、を定量化する)。
+  const circleGasCharges = results
+    .filter((r) => r.provider === 'circle' && r.gasChargeUsdc !== null && r.gasChargeUsdc > 0n)
+    .map((r) => r.gasChargeUsdc);
+  const pimlicoLegR = results.find(
+    (r) => r.provider === 'pimlico' && r.gasChargeUsdc !== null && r.gasChargeUsdc > 0n,
+  );
+  const avgCircleGas = circleGasCharges.length
+    ? circleGasCharges.reduce((s, v) => s + v, 0n) / BigInt(circleGasCharges.length)
+    : null;
+  const circleVsPimlicoRatio =
+    avgCircleGas !== null && pimlicoLegR
+      ? Number((avgCircleGas * 100n) / pimlicoLegR.gasChargeUsdc) / 100
+      : null;
 
   log(JSON.stringify(
     {
@@ -598,29 +646,39 @@ async function main() {
       delegationStable_0xe6Cae83: delegationStable,
       delegateBefore: delBefore,
       delegateAfter: delAfter,
-      circleEffectiveMarkupBps: maxMarkupBps,
+      displayBaseUsdc: displayBaseUsdc !== null ? formatUnits(displayBaseUsdc, 6) : null,
+      maxSurchargeVsDisplayBps: maxDisplaySurchargeBps,
       recommendedSurchargeBps,
+      circleVsPimlicoRatio,
       legs: results.map((r) => ({
         leg: r.leg, provider: r.provider, ok: r.ok,
         entryPoint: r.entryPoint, paymaster: r.paymaster,
         usdcOut: r.usdcOut ? formatUnits(r.usdcOut.total, 6) : null,
+        gasChargeUsdc: r.gasChargeUsdc !== null ? formatUnits(r.gasChargeUsdc, 6) : null,
         usdcToCircle: r.usdcOut ? formatUnits(r.usdcOut.toCircle, 6) : null,
-        effectiveMarkupBps:
-          typeof r.effectiveMarkupBps === 'number' ? r.effectiveMarkupBps : null,
+        surchargeVsDisplayBps:
+          typeof r.surchargeVsDisplayBps === 'number' ? r.surchargeVsDisplayBps : null,
+        markupVsActualGasBps:
+          typeof r.markupVsActualGasBps === 'number' ? r.markupVsActualGasBps : null,
         txHash: r.txHash, error: r.error,
       })),
     },
     null, 2,
   ));
 
-  if (maxMarkupBps !== null) {
+  if (maxDisplaySurchargeBps !== null) {
     log(
-      `\n計測: Circle 実効 fee (最大) = ${(maxMarkupBps / 100).toFixed(2)}% ` +
-        `→ 推奨 CIRCLE_GAS_SURCHARGE_BPS[${CHAIN.id}] = ${recommendedSurchargeBps} ` +
-        `(実測 + 300bps margin・100 切り上げ)`,
+      `\n計測: 表示基準を満たす最小 surcharge (最大) = ${(maxDisplaySurchargeBps / 100).toFixed(2)}% ` +
+        `→ 推奨 CIRCLE_GAS_SURCHARGE_BPS[${CHAIN.id}] = ${recommendedSurchargeBps} (+300bps margin・100 切り上げ)`,
     );
+    if (circleVsPimlicoRatio !== null) {
+      log(
+        `      コスト: Circle gas ≈ Pimlico の ${circleVsPimlicoRatio.toFixed(2)}倍 ` +
+          `(比が大きいほど Circle 有効化で顧客ガス代が上がる — 有効化是非の判断材料)`,
+      );
+    }
   } else {
-    log('\n計測: Circle 実効 fee は取得不可 (exchangeRate 欠落 or 全 circle leg 失敗)。');
+    log('\n計測: 表示基準 surcharge は取得不可 (displayBase 欠落 or 全 circle leg 失敗)。');
   }
 
   const PASS = allOk && epAllV08 && circleLegOk && delegationStable;

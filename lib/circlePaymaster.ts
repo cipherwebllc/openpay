@@ -86,9 +86,12 @@ export const CIRCLE_GAS_SURCHARGE_BPS: Readonly<Record<number, number>> = {
   [arbitrum.id]: 1000,
   // ↑ 他 mainnet (OP/Polygon/Ethereum/Avalanche/Unichain) は 10% 非適用 + slippage spread が
   //   未定量のため、各 chain の実機ゲートで実効 fee を実測してから登録する (C4)。
-  //   OP/Polygon/Avalanche は smoke config 整備済 (SMOKE_CHAIN=optimism|polygon|avalanche)。
-  //   gate が recommendedSurchargeBps を出力する → その値をここに登録して有効化する
-  //   (gate 未通過の間は未登録 = resolveUsdcGaslessProvider が pimlico に倒れて安全)。
+  //   gate (SMOKE_CHAIN=...) が recommendedSurchargeBps + circleVsPimlicoRatio を出力する。
+  //   2026-05-31 実測 (docs/runbooks):
+  //     - Optimism (10):   PASS・Circle ≈ Pimlico の ~2.5×。有効化候補 (未登録のまま判断待ち)。
+  //     - Polygon (137):   PASS だが Circle ≈ Pimlico の ~5.8× とコスト高 → Pimlico 維持が無難。
+  //     - Avalanche (43114): ❌ ACP-209「7702 style」AA 非互換で委任張れず (AA23)。有効化不可。
+  //   未登録の間は resolveUsdcGaslessProvider が pimlico に倒れて安全 (= 現状)。
   // testnet (QA 用・本番 mainnet NETWORK_ENV では非活性)
   [arbitrumSepolia.id]: 1000,
   [baseSepolia.id]: 1000,

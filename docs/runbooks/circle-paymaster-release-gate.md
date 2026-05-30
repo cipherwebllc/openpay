@@ -53,12 +53,28 @@ SMOKE_CHAIN=optimism SMOKE_MAINNET_OK=1 \
   node scripts/smoke-circle-crossswitch.mjs
 ```
 
-> **OP/Polygon/Avalanche は fee 実測ゲート**。Circle dev docs では 10% surcharge 非適用だが
-> USDC→native の slippage spread が未定量。gate は出力 JSON の
-> `circleEffectiveMarkupBps` (実効 fee) と `recommendedSurchargeBps` (= 実測 + 300bps
-> margin・100 切り上げ) を出す。**PASS かつ recommendedSurchargeBps を確認** したら、その値を
-> `lib/circlePaymaster.ts` の `CIRCLE_GAS_SURCHARGE_BPS[<chainId>]` に登録 → flag 有効化。
-> 登録するまでは `resolveUsdcGaslessProvider` が pimlico に倒れるため自動で安全側 (Pimlico erc20)。
+> **OP/Polygon/Avalanche は fee 実測ゲート**。gate 出力 JSON の見方:
+> - `recommendedSurchargeBps` = 表示基準 (surcharge=0 の `displayBaseUsdc`) を Circle の実徴収まで
+>   底上げする最小 surcharge + 300bps margin。**これが登録値**。`CIRCLE_GAS_SURCHARGE_BPS[<chainId>]`
+>   に入れてから flag 有効化。登録まで `resolveUsdcGaslessProvider` は pimlico に倒れる (安全側)。
+> - `circleVsPimlicoRatio` = Circle gas ÷ Pimlico gas (同 EOA・同 gate)。**有効化是非の判断材料**。
+>   Pimlico は既に全 chain で安価に動くため、比が大きい chain は Circle にするとガス代が上がる
+>   (Circle 優先は信頼性/公式サポート理由でコスト最適ではない)。
+> - `markupVsActualGasBps` は診断のみ (L2 は actualGasCost に L1 data fee が含まれず過大に出る)。登録に使わない。
+>
+> ### 2026-05-31 実測結果
+> | chain | gate | Circle gas | Pimlico gas | Circle÷Pimlico | 判定 |
+> |-------|------|-----------|-------------|----------------|------|
+> | Optimism (10) | ✅ PASS | ~0.0013 USDC | 0.00055 USDC | **~2.5×** | 有効化候補 (Base/Arb の 3-4× と同水準) |
+> | Polygon (137) | ✅ PASS | ~0.038 USDC | 0.0065 USDC | **~5.8×** | コスト高 — 有効化は要判断 (Pimlico 維持が無難) |
+> | Avalanche (43114) | ❌ FAIL | — | — | — | **7702 非互換**で有効化不可 (下記) |
+>
+> **Avalanche は ACP-209「EIP-7702 *style*」AA** で nonce/balance 扱いが canonical EIP-7702 と
+> 異なり、標準 viem/permissionless/Pimlico 7702 スタックでは委任が張れず 3 leg とも AA23
+> (validateUserOp revert)。Circle だけでなく **Pimlico 7702 経路も失敗**するため、現スタックでは
+> Circle・Pimlico 7702 とも有効化不可。canonical 7702 対応 or Avalanche 専用 AA 経路ができるまで保留。
+> (副次的論点: Avalanche の既存 gasless が pristine EOA の 7702 委任に依存していれば同様に動かない
+> 可能性 — MAv2 等の deployed smart account 経路は別途要確認。)
 
 > ⚠️ Base mainnet は実 USDC (~2 で十分・ガスはセント単位)。`SMOKE_MAINNET_OK=1` 必須。
 > 公開 RPC (`mainnet.base.org`) は rate limit で 7702 bootstrap が壊れるため専用 RPC 必須。
@@ -156,12 +172,16 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
    登録で制御**する (ゲート通過まで登録しない)。
 4. **Arbitrum mainnet** (fee=10%・Circle dev docs で Arb/Base のみ 10% と確認): `SMOKE_CHAIN=arbitrum`
    で本 smoke ゲートを通過させ、`CIRCLE_GAS_SURCHARGE_BPS` に `[arbitrum.id]: 1000` を登録。
-5. **10% 非適用 chain (Optimism/Polygon/Avalanche)**: Circle dev docs では 10% surcharge 非適用だが
-   「USDC→native slippage の未定量 spread」があり **0% 確定ではない**。**smoke config 整備済**
-   (`SMOKE_CHAIN=optimism|polygon|avalanche`)。gate が出力 JSON に `circleEffectiveMarkupBps` (実効
-   fee = 徴収 USDC ÷ 実ガス market 換算 − 1) と `recommendedSurchargeBps` (= 実測 + 300bps margin・
-   100 切り上げ) を出す。**PASS かつ** その推奨値を `CIRCLE_GAS_SURCHARGE_BPS` に登録してから有効化 (C4)。
-   未登録の間は `resolveUsdcGaslessProvider` が pimlico に倒すため自動的に Pimlico erc20 fallback。
+5. **10% 非適用 chain (Optimism/Polygon/Avalanche)**: smoke config 整備済
+   (`SMOKE_CHAIN=optimism|polygon|avalanche`)。gate が `displayBaseUsdc` / `recommendedSurchargeBps`
+   (表示基準を満たす最小 surcharge + 300bps margin) / `circleVsPimlicoRatio` (コスト competitiveness) を出す。
+   **PASS かつ** 推奨値を `CIRCLE_GAS_SURCHARGE_BPS` に登録してから有効化 (C4)。未登録の間は
+   `resolveUsdcGaslessProvider` が pimlico に倒すため自動的に Pimlico erc20 fallback。
+   2026-05-31 実測 (上記「2026-05-31 実測結果」表):
+   - **Optimism**: PASS・Circle ≈ Pimlico の ~2.5×。有効化候補。
+   - **Polygon**: PASS だが Circle ≈ Pimlico の ~5.8× とコスト高。Pimlico 維持が無難 (要判断)。
+   - **Avalanche**: ❌ ACP-209「7702 style」AA 非互換で 3 leg とも AA23・委任張れず。**有効化不可**
+     (Circle/Pimlico 7702 とも)。canonical 7702 or 専用 AA 経路ができるまで保留。
    - **Ethereum L1 / Unichain は smoke 未整備**。L1 はガスが絶対額で高い (数$/tx) ため小額決済に
      不向き、Unichain は buyer-only で優先度低。必要になった時点で同様に config を足す。
    - 全 mainnet で USDC は **native** を使用 (Polygon も `0x3c49…`・USDC.e ではない)。
