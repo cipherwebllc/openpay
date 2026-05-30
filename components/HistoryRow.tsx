@@ -9,6 +9,7 @@ import {
   formatHistoryTimestamp,
   HISTORY_ASSET_DECIMALS,
   HISTORY_ASSET_DISPLAY,
+  type CircleVerification,
   type HistoryEntry,
 } from '@/lib/history';
 import { shortAddress } from '@/lib/format';
@@ -39,6 +40,28 @@ const FLOW_KIND_I18N_KEY = {
   'standard-merchant': 'kindStandardMerchant',
   'standard-fee': 'kindStandardFee',
 } as const satisfies Record<HistoryEntry['flow'], string>;
+
+// Circle 徴収額の検証ステータス → badge class + i18n key。
+//   verified        : server verifier が on-chain receipt で再計算・一致 (緑)
+//   client-reported : client が best-effort 算出 (server 未検証・中立色)
+//   unreconciled    : binding 不一致 / event 不在 / 無徴収 等で照合不能 (注意色)
+const CIRCLE_VERIF_BADGE_CLASS = {
+  verified: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
+  'client-reported': 'bg-slate-100 text-slate-600 ring-slate-200',
+  unreconciled: 'bg-amber-100 text-amber-800 ring-amber-200',
+} as const satisfies Record<CircleVerification, string>;
+
+const CIRCLE_VERIF_I18N_KEY = {
+  verified: 'circleVerifiedBadge',
+  'client-reported': 'circleClientReportedBadge',
+  unreconciled: 'circleUnreconciledBadge',
+} as const satisfies Record<CircleVerification, string>;
+
+const CIRCLE_VERIF_HELP_KEY = {
+  verified: 'circleVerifiedHelp',
+  'client-reported': 'circleClientReportedHelp',
+  unreconciled: 'circleUnreconciledHelp',
+} as const satisfies Record<CircleVerification, string>;
 
 export function HistoryRow({
   entry,
@@ -125,12 +148,23 @@ export function HistoryRow({
           <dt className="text-slate-400">{t('columnFee')}</dt>
           <dd>{fmt(entry.feeAmount, entry.asset)}</dd>
         </div>
-        {entry.provider === 'circle' && entry.circlePaymasterNetUsdc && (
-          <div>
-            <dt className="text-slate-400">{t('columnCircleGas')}</dt>
-            <dd>{fmt(entry.circlePaymasterNetUsdc, 'usdc')}</dd>
-          </div>
-        )}
+        {entry.provider === 'circle' &&
+          (entry.circlePaymasterNetUsdc || entry.circleVerification) && (
+            <div>
+              <dt className="text-slate-400">{t('columnCircleGas')}</dt>
+              <dd className="flex flex-wrap items-center gap-1.5">
+                <span>{fmt(entry.circlePaymasterNetUsdc, 'usdc')}</span>
+                {entry.circleVerification && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${CIRCLE_VERIF_BADGE_CLASS[entry.circleVerification]}`}
+                    title={t(CIRCLE_VERIF_HELP_KEY[entry.circleVerification])}
+                  >
+                    {t(CIRCLE_VERIF_I18N_KEY[entry.circleVerification])}
+                  </span>
+                )}
+              </dd>
+            </div>
+          )}
         {entry.note && (
           <div className="sm:col-span-2">
             <dt className="text-slate-400">{t('columnNote')}</dt>

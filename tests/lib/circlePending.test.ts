@@ -5,6 +5,7 @@ import {
   computeCallHash,
   computeIdempotencyKey,
   findRecoverable,
+  gcStalePreSubmit,
   isPreSubmit,
   isTerminal,
   loadPendingRecord,
@@ -434,6 +435,94 @@ describe('pruneTerminal', () => {
     expect(removed).toBe(1);
     expect(loadPendingRecord(doneKey)).toBeUndefined();
     expect(loadPendingRecord(keep.key)?.status).toBe('submitting');
+  });
+});
+
+describe('gcStalePreSubmit', () => {
+  function reserveAt(attemptId: string, now: number) {
+    const callHash = computeCallHash(CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      paymentAttemptId: attemptId,
+      callHash,
+    });
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now,
+    });
+    return key;
+  }
+
+  it('stale な pre-submit (別 attempt) を abandoned にし、fresh は残す', () => {
+    const stale = reserveAt('stale', 1_000); // 経過 999_000ms
+    const fresh = reserveAt('fresh', 990_000); // 経過 10_000ms
+    const n = gcStalePreSubmit(60_000, 1_000_000);
+    expect(n).toBe(1);
+    expect(loadPendingRecord(stale)?.status).toBe('abandoned');
+    expect(loadPendingRecord(fresh)?.status).toBe('reserved');
+  });
+
+  it('excludeKey (実行中の自 attempt) は stale でも触らない', () => {
+    const self = reserveAt('self', 1_000);
+    const other = reserveAt('other', 1_000);
+    const n = gcStalePreSubmit(60_000, 1_000_000, self);
+    expect(n).toBe(1);
+    expect(loadPendingRecord(self)?.status).toBe('reserved'); // 保護される
+    expect(loadPendingRecord(other)?.status).toBe('abandoned');
+  });
+
+  it('signed (pre-submit) も stale なら abandoned にする', () => {
+    const key = reserveAt('signed-stale', 1_000);
+    markAwaitingSignature({ key, sender: SENDER, now: 1_050 });
+    markSigned({
+      key,
+      sender: SENDER,
+      signedUserOp: SIGNED_OP,
+      userOpHash: '0xh' as Hex,
+      now: 1_100,
+    });
+    const n = gcStalePreSubmit(60_000, 1_000_000);
+    expect(n).toBe(1);
+    expect(loadPendingRecord(key)?.status).toBe('abandoned');
+  });
+
+  it('submitting / terminal には触れない (復旧情報を守る)', () => {
+    const sub = setup(); // submitting
+    advanceToSubmitting(sub.key);
+    const conf = reserveAt('conf', 1_000);
+    markAwaitingSignature({ key: conf, sender: SENDER, now: 1_100 });
+    markSigned({
+      key: conf,
+      sender: SENDER,
+      signedUserOp: SIGNED_OP,
+      userOpHash: '0xh' as Hex,
+      now: 1_200,
+    });
+    markSubmitting({ key: conf, sender: SENDER, now: 1_300 });
+    markConfirmed({
+      key: conf,
+      sender: SENDER,
+      txHash: '0xt' as Hex,
+      success: true,
+      now: 1_400,
+    });
+    const n = gcStalePreSubmit(60_000, 1_000_000);
+    expect(n).toBe(0);
+    expect(loadPendingRecord(sub.key)?.status).toBe('submitting');
+    expect(loadPendingRecord(conf)?.status).toBe('confirmed');
+  });
+
+  it('storage 利用不可でも throw せず 0 (best-effort)', () => {
+    vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    expect(gcStalePreSubmit(0, 1)).toBe(0);
   });
 });
 

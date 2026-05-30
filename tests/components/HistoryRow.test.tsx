@@ -157,4 +157,52 @@ describe('HistoryRow', () => {
     );
     expect(screen.queryByText('顧客')).toBeNull();
   });
+
+  it('circle unreconciled: 未照合 badge (amber) を表示', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          provider: 'circle',
+          asset: 'usdc',
+          circlePaymasterNetUsdc: null,
+          circleVerification: 'unreconciled',
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    const badge = screen.getByText('未照合');
+    expect(badge.className).toMatch(/amber/);
+  });
+
+  it('circle client-reported: 自己申告 badge + net USDC 値を表示', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          provider: 'circle',
+          asset: 'usdc',
+          circlePaymasterNetUsdc: '9384', // 0.009384 USDC
+          circleVerification: 'client-reported',
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('自己申告')).toBeInTheDocument();
+    expect(screen.getByText(/0.009384 USDC/)).toBeInTheDocument();
+  });
+
+  it('circleVerification null → badge は描画されない', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          provider: 'circle',
+          asset: 'usdc',
+          circlePaymasterNetUsdc: '9384',
+          circleVerification: null,
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.queryByText('自己申告')).toBeNull();
+    expect(screen.queryByText('未照合')).toBeNull();
+  });
 });
