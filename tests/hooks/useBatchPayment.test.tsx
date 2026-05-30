@@ -25,6 +25,10 @@ vi.mock('@/hooks/useSmartAccount', () => ({
 }));
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(),
+  // 本ファイルは全て Pimlico (provider!=='circle') 経路なので circle 分岐は走らず、
+  // walletClient/publicClient は使われない。destructure が落ちない安全既定のみ与える。
+  useWalletClient: vi.fn(() => ({ data: undefined })),
+  usePublicClient: vi.fn(() => undefined),
 }));
 // logger は境界モック (sponsorship 収支突合の warn/info を assert するため)。
 vi.mock('@/lib/logger', () => ({
@@ -37,10 +41,20 @@ vi.mock('@/lib/pimlico', async () => {
     await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
   return { ...actual, resolvePaymasterMode: vi.fn(actual.resolvePaymasterMode) };
 });
+// Circle 経路の二重決済耐性 FSM (executeCirclePayment) と gas price 取得は境界モック。
+// useBatchPayment の provider 分岐 + permitAmount/calls threading + gas ceiling を検証する。
+vi.mock('@/lib/smartAccount/circleSend', () => ({
+  executeCirclePayment: vi.fn(),
+}));
+vi.mock('@/lib/smartAccount/circleAccount', () => ({
+  getCircleUserOpGasPrice: vi.fn(),
+}));
 import { useSmartAccount } from '@/hooks/useSmartAccount';
-import { useAccount } from 'wagmi';
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { executeCirclePayment } from '@/lib/smartAccount/circleSend';
+import { getCircleUserOpGasPrice } from '@/lib/smartAccount/circleAccount';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const TOKEN: Address = getAddress(
@@ -1180,6 +1194,120 @@ describe('useBatchPayment', () => {
         'payment.sponsorship.gas_reconciled',
         expect.anything(),
       );
+    });
+  });
+
+  describe('Circle provider 分岐 (chunk3c)', () => {
+    const CUSTOMER = getAddress(
+      '0x3333333333333333333333333333333333333333',
+    );
+    const PAYMASTER = getAddress(
+      '0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966',
+    );
+
+    function mountCircle() {
+      mockHook(useSmartAccount, {
+        data: {
+          provider: 'circle',
+          entryPointVersion: '0.8',
+          chainId: baseSepolia.id,
+          paymasterAddress: PAYMASTER,
+          account: {},
+          bundlerClient: {},
+          deployment: usdcDep,
+        },
+        isLoading: false,
+        error: null,
+      });
+      mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER });
+      vi.mocked(useWalletClient).mockReturnValue({
+        data: { _wallet: true },
+      } as never);
+      vi.mocked(usePublicClient).mockReturnValue({ _public: true } as never);
+      // 平常 gas price (Base Sepolia ceiling 1000 gwei を下回る)。
+      vi.mocked(getCircleUserOpGasPrice).mockResolvedValue({
+        maxFeePerGas: 5n * GWEI,
+        maxPriorityFeePerGas: 1n,
+      });
+      vi.mocked(executeCirclePayment).mockResolvedValue({
+        userOpHash: `0x${'c'.repeat(64)}` as Hex,
+        txHash: `0x${'d'.repeat(64)}` as Hex,
+        blockNumber: 7n,
+        success: true,
+        actualGasCost: 0n,
+      });
+    }
+
+    it('provider==circle で executeCirclePayment に calls/permitAmount/owner を渡す', async () => {
+      mountCircle();
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n,
+        circlePermitAmount: 5_000_000n,
+        paymentAttemptId: 'order-42',
+      });
+
+      await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledOnce());
+      // Pimlico の単発送信経路は使われない
+      expect(sendUserOperation).not.toHaveBeenCalled();
+
+      const arg = vi.mocked(executeCirclePayment).mock.calls[0][0];
+      expect(arg.owner).toBe(CUSTOMER);
+      expect(arg.permitAmount).toBe(5_000_000n);
+      expect(arg.paymentAttemptId).toBe('order-42');
+      // merchant 転送 1 件 (feeAmount=0 なので fee transfer なし)
+      expect(arg.calls).toHaveLength(1);
+      const d = decodeFunctionData({ abi: erc20Abi, data: arg.calls[0].data });
+      expect(d.functionName).toBe('transfer');
+      expect((d.args as readonly [string, bigint])[1]).toBe(99_000_000n);
+    });
+
+    it('circlePermitAmount 未指定なら送信せずエラー (過少/過大 allowance 防止)', async () => {
+      mountCircle();
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n,
+        // circlePermitAmount を渡さない
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error?.message).toMatch(/permitAmount/);
+      expect(executeCirclePayment).not.toHaveBeenCalled();
+    });
+
+    it('gas ceiling 超過なら GasCongestedError で executeCirclePayment を呼ばない', async () => {
+      mountCircle();
+      // Base Sepolia ceiling 1000 gwei を超える観測値
+      vi.mocked(getCircleUserOpGasPrice).mockResolvedValue({
+        maxFeePerGas: 2000n * GWEI,
+        maxPriorityFeePerGas: 1n,
+      });
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n,
+        circlePermitAmount: 5_000_000n,
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error?.message).toMatch(/gas_congested/);
+      expect(executeCirclePayment).not.toHaveBeenCalled();
     });
   });
 });

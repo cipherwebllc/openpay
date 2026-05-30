@@ -17,8 +17,13 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { useAccount } from 'wagmi';
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
+import { getCircleUserOpGasPrice } from '@/lib/smartAccount/circleAccount';
+import { executeCirclePayment } from '@/lib/smartAccount/circleSend';
+import type { CircleSmartAccountBundle } from '@/lib/smartAccount/circleAccount';
+import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
+import type { PublicClient } from 'viem';
 import { assertGasCeiling } from '@/lib/gasCeiling';
 import {
   isJpycSponsorshipChain,
@@ -43,6 +48,14 @@ type BatchPaymentParams = {
   // calcSplitBreakdown が計算した primary 以外の entries を渡す想定。
   // 各 amount > 0 を assertion (split で 0 になる極小ケースは UI 側で弾く前提)。
   extraRecipients?: ReadonlyArray<{ to: Address; amount: bigint }>;
+  // --- Circle Paymaster (USDC ガスレス) 経路用 (provider==='circle' のときのみ) ---
+  // permit allowance の上限 (gas 実費 + per-chain surcharge を賄う額)。useGasQuoteCircle
+  // (chunk5) が算定して渡す。Circle 経路で未指定なら送信を拒否する (過少 → AA revert、
+  // 過大 → 過剰 allowance のため、必ず quote 由来の確定値を要求する)。
+  circlePermitAmount?: bigint;
+  // 1 回の「支払う」操作で固定の冪等試行 ID (retry で不変)。未指定なら mutationFn が
+  // 採番する (同一試行内の crash recovery は callHash スキャンで担保される)。
+  paymentAttemptId?: string;
 };
 
 type BatchPaymentResult = {
@@ -60,6 +73,8 @@ export function useBatchPayment(
 ) {
   const { data: clients } = useSmartAccount(deployment, enabled);
   const { address: customer, chainId } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient();
 
   return useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
     mutationFn: async (params) => {
@@ -68,6 +83,20 @@ export function useBatchPayment(
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
       }
+
+      // provider で exhaustive 分岐 (計画 C6)。Circle は二重決済耐性 FSM
+      // (executeCirclePayment) に委譲、Pimlico は従来の単発送信。
+      if (clients.provider === 'circle') {
+        return runCirclePayment({
+          bundle: clients,
+          params,
+          customer,
+          chainId,
+          walletClient,
+          publicClient,
+        });
+      }
+
       const { smartAccountClient, pimlicoClient } = clients;
 
       // sponsorship 濫用防御: JPYC sponsorship chain では運営が native gas を
@@ -93,38 +122,7 @@ export function useBatchPayment(
         assertGasCeiling(chainId, gasPrice.fast.maxFeePerGas);
       }
 
-      const transfer = (to: Address, amount: bigint) => ({
-        to: params.tokenAddress,
-        data: encodeFunctionData({
-          abi: erc20Abi,
-          functionName: 'transfer' as const,
-          args: [to, amount],
-        }),
-      });
-
-      const calls: Array<{ to: Address; data: Hex }> = [];
-      if (params.merchantAmount > 0n) {
-        calls.push(transfer(params.merchant, params.merchantAmount));
-      }
-      for (const r of params.extraRecipients ?? []) {
-        if (r.amount <= 0n) {
-          throw new Error(
-            `split 受取人 ${r.to} の配分額が 0 です (UI 側で防がれているはず)`,
-          );
-        }
-        calls.push(transfer(r.to, r.amount));
-      }
-      if (params.feeAmount > 0n) {
-        calls.push(transfer(params.feeReceiver, params.feeAmount));
-      }
-
-      // 空 batch (merchantAmount=0 かつ fee=0 かつ split なし) を弾く。Phase 1 で
-      // fee>0 guard を撤去した結果、gasless で amount 未入力 (customerPays は
-      // gas 分だけ正) でも canSubmit が通り calls=[] の UserOp が送られ得る。
-      // 何も transfer しない UserOp に gas を払う/低レベル account error になるのを防ぐ。
-      if (calls.length === 0) {
-        throw new Error('送金額が 0 です。金額を入力してください。');
-      }
+      const calls = buildTransferCalls(params);
 
       const userOpHash = await smartAccountClient.sendUserOperation({ calls });
 
@@ -153,12 +151,16 @@ export function useBatchPayment(
       // 受け取らない (徴収 0)。collected に params.feeAmount を渡すと under-collect
       // シグナルを隠すため、success=false では collected=0 で突合する
       // (gas は消費済なので actualGasCost > 0 → under_collected を正しく検出)。
-      reconcileSponsorshipGas(
-        deployment,
-        chainId,
-        data.success ? params.feeAmount : 0n,
-        data.actualGasCost,
-      );
+      // Circle (erc20・顧客が USDC で gas 負担) は sponsorship 収支の概念が無く、
+      // かつ testnet では resolvePaymasterMode が sponsorship に倒れて誤検知するため除外。
+      if (clients?.provider !== 'circle') {
+        reconcileSponsorshipGas(
+          deployment,
+          chainId,
+          data.success ? params.feeAmount : 0n,
+          data.actualGasCost,
+        );
+      }
     },
     onError: (error, params) => {
       void logPaymentEvent(
@@ -168,6 +170,81 @@ export function useBatchPayment(
         }),
       );
     },
+  });
+}
+
+// merchant (+split +fee) への ERC20 transfer calls を組む。両 provider で共有。
+// 空 batch (何も transfer しない) は弾く (gas だけ払う UserOp / account error を防ぐ)。
+function buildTransferCalls(
+  params: BatchPaymentParams,
+): Array<{ to: Address; data: Hex }> {
+  const transfer = (to: Address, amount: bigint) => ({
+    to: params.tokenAddress,
+    data: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: 'transfer' as const,
+      args: [to, amount],
+    }),
+  });
+  const calls: Array<{ to: Address; data: Hex }> = [];
+  if (params.merchantAmount > 0n) {
+    calls.push(transfer(params.merchant, params.merchantAmount));
+  }
+  for (const r of params.extraRecipients ?? []) {
+    if (r.amount <= 0n) {
+      throw new Error(
+        `split 受取人 ${r.to} の配分額が 0 です (UI 側で防がれているはず)`,
+      );
+    }
+    calls.push(transfer(r.to, r.amount));
+  }
+  if (params.feeAmount > 0n) {
+    calls.push(transfer(params.feeReceiver, params.feeAmount));
+  }
+  if (calls.length === 0) {
+    throw new Error('送金額が 0 です。金額を入力してください。');
+  }
+  return calls;
+}
+
+// Circle Paymaster (USDC ガスレス) 経路。二重決済耐性 FSM (executeCirclePayment) に
+// 委譲する。permitAmount は useGasQuoteCircle (chunk5) が算定した確定値が params 経由で
+// 渡る。gas ceiling (顧客 USDC 保護) は送信前に適用する。
+async function runCirclePayment(args: {
+  bundle: CircleSmartAccountBundle;
+  params: BatchPaymentParams;
+  customer: Address | undefined;
+  chainId: number | undefined;
+  walletClient: ConnectedWalletClient | undefined;
+  publicClient: PublicClient | undefined;
+}): Promise<BatchPaymentResult> {
+  const { bundle, params, customer, chainId, walletClient, publicClient } = args;
+  if (!customer || !walletClient || !publicClient) {
+    throw new Error(
+      'ウォレットが接続されていません。接続とネットワークを確認してください。',
+    );
+  }
+  const permitAmount = params.circlePermitAmount;
+  if (permitAmount === undefined || permitAmount <= 0n) {
+    throw new Error(
+      'USDC ガスレス決済のガス上限 (permitAmount) が未算定です。再読み込みして再試行してください。',
+    );
+  }
+
+  // gas ceiling: 顧客の USDC 出費上限の UX 保護 (混雑時に異常 gas を弾く)。
+  const gasPrice = await getCircleUserOpGasPrice(bundle);
+  assertGasCeiling(chainId ?? bundle.chainId, gasPrice.maxFeePerGas);
+
+  const calls = buildTransferCalls(params);
+
+  return executeCirclePayment({
+    bundle,
+    publicClient,
+    walletClient,
+    owner: customer,
+    calls,
+    permitAmount,
+    paymentAttemptId: params.paymentAttemptId ?? crypto.randomUUID(),
   });
 }
 

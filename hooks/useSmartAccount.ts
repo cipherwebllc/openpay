@@ -33,6 +33,8 @@ import {
   isIncompatibleSmartAccountError,
 } from '@/lib/accountDetection';
 import { buildSimpleSmartAccountClient } from '@/lib/smartAccount/simpleAccount';
+import { buildCircleSmartAccountClient } from '@/lib/smartAccount/circleAccount';
+import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import type { TokenDeployment } from '@/lib/tokens';
@@ -44,6 +46,15 @@ export function useSmartAccount(
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const { address, chainId } = useAccount();
+
+  // USDC ガスレスを Circle Paymaster (v0.8) で組むか Pimlico erc20 (v0.7) のままに
+  // するかの解決 (単一の真実点)。queryKey に provider/entryPointVersion を含めて、
+  // flag/chain 変更で別 client を作り直させる (staleTime:Infinity のキャッシュ汚染防止)。
+  const usdcProvider = resolveUsdcGaslessProvider(
+    deployment,
+    chainId ?? deployment.chainId,
+  );
+  const entryPointVersion = usdcProvider === 'circle' ? '0.8' : '0.7';
 
   return useQuery({
     enabled:
@@ -60,6 +71,8 @@ export function useSmartAccount(
       chainId,
       deployment.symbol,
       deployment.chainId,
+      usdcProvider,
+      entryPointVersion,
     ],
     queryFn: async () => {
       // enabled で全条件を確認済みだが TS の narrowing のために再チェック
@@ -69,8 +82,25 @@ export function useSmartAccount(
 
       const detection = await detectAccountKind(publicClient, address);
 
-      // 既に Pimlico SimpleAccount に委任済みの口は従来通りガスレスで動く。
+      // 既に Pimlico SimpleAccount に委任済みの口。委任先 impl (0xe6Cae83) は
+      // Circle v0.8 経路 (permissionless to7702SimpleSmartAccount 既定) と同一なので、
+      // **再委任なし**で Circle Paymaster (USDC ガスレス) に routing できる。
+      // Circle に倒すのは「USDC + erc20 + allowlist+fee 在り + flag ON」を満たし、かつ
+      // 既委任 (pimlico-simple-7702) の時だけ — pristine は signAuthorization 非対応で
+      // 手前の detection.kind==='none' で errorPristineNoBootstrap に倒れるため到達しない。
       if (detection.kind === 'pimlico-simple-7702') {
+        if (usdcProvider === 'circle') {
+          logger.info('smart_account.circle_routed', {
+            chainId,
+            symbol: deployment.symbol,
+          });
+          return buildCircleSmartAccountClient({
+            walletClient,
+            publicClient,
+            chainId,
+            deployment,
+          });
+        }
         return buildSimpleSmartAccountClient({
           walletClient,
           publicClient,

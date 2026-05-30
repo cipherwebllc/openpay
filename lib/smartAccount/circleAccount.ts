@@ -24,6 +24,8 @@ import { http, type Address, type Hex, type PublicClient } from 'viem';
 import {
   createBundlerClient,
   entryPoint08Address,
+  formatUserOperationRequest,
+  getUserOperationHash,
 } from 'viem/account-abstraction';
 import { to7702SimpleSmartAccount } from 'permissionless/accounts';
 import {
@@ -243,6 +245,111 @@ export async function sendCircleUserOperation(args: {
     paymasterVerificationGasLimit: gas.paymasterVerificationGasLimit,
     paymasterPostOpGasLimit: gas.paymasterPostOpGasLimit,
   });
+}
+
+// ===========================================================================
+// 二重決済耐性 FSM 用の低レベル primitive (chunk 3c orchestrator が組合せる)
+// ===========================================================================
+//
+// 送信を **prepare+sign** と **broadcast** に分解する。永続 (pending store) を両者の
+// 間に挟み、broadcast は *常に* raw `eth_sendUserOperation` で「保存済の署名済 op」を
+// そのまま送る。これにより:
+//   - broadcast の前に署名済 op を耐久化できる (応答ロスト時に同一 op を rebroadcast)。
+//   - viem の sendUserOperation は account 有りだと毎回 prepareUserOperation を再実行
+//     (= gas 再見積→別 op→別 hash) してしまい冪等にならないため、broadcast には使わない。
+
+/** RPC 形式 (hex) の署名済 UserOp。formatUserOperationRequest の出力で、そのまま
+ * localStorage に保存でき、eth_sendUserOperation に渡せる。 */
+export type SignedCircleUserOp = Record<string, unknown>;
+
+/** prepare → sign(popup2) → hash。**broadcast はしない**。署名済 op (RPC hex 形式) と
+ * userOpHash を返す。paymasterPostOpGasLimit は Circle 下限 (15000) を署名前に強制する
+ * (prepareUserOperation の内部見積が下限割れしても、署名は floor 適用後の op に対して
+ * 行うので AA33 revert を防げる)。 */
+export async function prepareAndSignCircleUserOp(args: {
+  bundle: CircleSmartAccountBundle;
+  calls: BatchCall[];
+  paymasterData: Hex;
+}): Promise<{ signedUserOp: SignedCircleUserOp; userOpHash: Hex }> {
+  const { bundle, calls, paymasterData } = args;
+  const { maxFeePerGas, maxPriorityFeePerGas } =
+    await getCircleUserOpGasPrice(bundle);
+
+  const prepared = await bundle.bundlerClient.prepareUserOperation({
+    account: bundle.account,
+    calls,
+    paymaster: bundle.paymasterAddress,
+    paymasterData,
+    paymasterPostOpGasLimit: CIRCLE_MIN_POSTOP_GAS,
+    maxFeePerGas,
+    maxPriorityFeePerGas,
+  });
+
+  // prepareUserOperation 内部の gas 見積が postOp を下限割れさせても floor を強制。
+  // 署名前に確定させるので signature は floor 適用後の op をカバーする。
+  const postOp =
+    (prepared.paymasterPostOpGasLimit ?? 0n) > CIRCLE_MIN_POSTOP_GAS
+      ? prepared.paymasterPostOpGasLimit
+      : CIRCLE_MIN_POSTOP_GAS;
+  const floored = { ...prepared, paymasterPostOpGasLimit: postOp };
+
+  const signature = await bundle.account.signUserOperation(floored);
+  const signed = { ...floored, signature };
+
+  const userOpHash = getUserOperationHash({
+    chainId: bundle.chainId,
+    entryPointAddress: entryPoint08Address,
+    entryPointVersion: '0.8',
+    userOperation: signed,
+  });
+
+  const signedUserOp = formatUserOperationRequest(signed) as SignedCircleUserOp;
+  return { signedUserOp, userOpHash };
+}
+
+/** 保存済の署名済 op を **そのまま** broadcast する (raw eth_sendUserOperation・
+ * retryCount 0)。prepareUserOperation を経由しないので同一 op が保証され、
+ * ERC-4337 nonce により二重実行されない = **冪等 rebroadcast** に使える。 */
+export async function broadcastCircleUserOp(args: {
+  bundle: CircleSmartAccountBundle;
+  signedUserOp: SignedCircleUserOp;
+}): Promise<Hex> {
+  const request = args.bundle.bundlerClient.request as unknown as (
+    a: { method: string; params: unknown[] },
+    o?: { retryCount: number },
+  ) => Promise<Hex>;
+  return request(
+    {
+      method: 'eth_sendUserOperation',
+      params: [args.signedUserOp, entryPoint08Address],
+    },
+    { retryCount: 0 },
+  );
+}
+
+/** receipt を 1 回だけ照会。未 included (pending/unknown) は null を返す
+ * (例外を制御フローに使わない)。recovery で「included したか」を判定する用。 */
+export async function pollCircleReceipt(args: {
+  bundle: CircleSmartAccountBundle;
+  hash: Hex;
+}): Promise<{ success: boolean; txHash: Hex; blockNumber: bigint } | null> {
+  const request = args.bundle.bundlerClient.request as unknown as (a: {
+    method: string;
+    params: unknown[];
+  }) => Promise<{
+    success: boolean;
+    receipt: { transactionHash: Hex; blockNumber: Hex };
+  } | null>;
+  const raw = await request({
+    method: 'eth_getUserOperationReceipt',
+    params: [args.hash],
+  });
+  if (!raw) return null;
+  return {
+    success: Boolean(raw.success),
+    txHash: raw.receipt.transactionHash,
+    blockNumber: BigInt(raw.receipt.blockNumber),
+  };
 }
 
 /** UserOp receipt を待つ。entryPoint=v0.8 / paymaster=Circle の確認は呼出側 (verifier)。 */
