@@ -1,4 +1,21 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
+
+// hydration race 対策: 低速な webkit (mobile-safari) では controlled input への fill が
+// React hydration より前に走ると値が捨てられ、settings 更新 → localStorage 書込が起きず
+// 後続の waitForFunction/summary が 30s timeout する。fill 後に値の定着を確認し、消えていれば
+// hydration 完了後に再 fill する (toPass で retry)。test-only の安定化 (本番コード非変更)。
+async function fillStable(locator: Locator, value: string) {
+  await expect(locator).toBeVisible();
+  await expect(async () => {
+    if ((await locator.inputValue()) !== value) await locator.fill(value);
+    expect(await locator.inputValue()).toBe(value);
+  }).toPass({ timeout: 8000 });
+}
+
+// 受取先入力欄を hydration-safe に埋める shorthand。
+function receiverInput(page: Page): Locator {
+  return page.getByPlaceholder(/0x\.\.\./);
+}
 
 test.describe('create /create (QR generator + Tip widget tab)', () => {
   test('default タブは決済 QR、QrGenerator が表示される', async ({ page }) => {
@@ -359,9 +376,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // JPYC は default、Kaia chain button を click
     await step1.getByRole('button', { name: /^Kai/ }).click();
     // 受取先 + amount を入力 (Step 2 で receiver、Step 1 で amount)
-    await page
-      .getByPlaceholder(/0x\.\.\./)
-      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await fillStable(
+      receiverInput(page),
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    );
     await page.getByPlaceholder('1000').fill('500');
     // QR URL 表示 box (Step 3 内 font-mono.text-xs.bg-slate-50)
     const urlBox = page.locator('.font-mono.text-xs.bg-slate-50').first();
@@ -379,9 +397,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // 初期 (LocalStorage 空) は default open
     await expect(step2Toggle).toHaveAttribute('aria-expanded', 'true');
     // 受取先を入力して toggle を click すると collapsed + summary 表示
-    await page
-      .getByPlaceholder(/0x\.\.\./)
-      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await fillStable(
+      receiverInput(page),
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    );
     await step2Toggle.click();
     await expect(step2Toggle).toHaveAttribute('aria-expanded', 'false');
     // collapsed summary に short address (0x52d4…cA81) が出る
@@ -396,16 +415,18 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
   }) => {
     await page.goto('/ja/create');
     // 必要項目を入力 → Step 3 で QR + Print ボタンが現れる
-    await page
-      .getByPlaceholder(/0x\.\.\./)
-      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await fillStable(
+      receiverInput(page),
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    );
     // amount 入力 (JPYC plain で 750)
     await page.getByPlaceholder('1000').fill('750');
     const printBtn = page.getByRole('button', { name: /印刷/ });
     await expect(printBtn).toBeVisible();
-    const className = await printBtn.getAttribute('class');
-    expect(className).toMatch(/bg-brand/);
-    expect(className).toMatch(/text-white/);
+    // toHaveClass は auto-retry するため、webkit の CSS/レンダリング遅延でも安定する
+    // (一発読みの getAttribute は class 適用前に評価され flake する)。
+    await expect(printBtn).toHaveClass(/bg-brand/);
+    await expect(printBtn).toHaveClass(/text-white/);
     // Printer icon (lucide) が button 内に存在
     await expect(printBtn.locator('svg')).toHaveCount(1);
   });
@@ -440,9 +461,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     const toggle = page.getByRole('button', { name: /^受取先/ });
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     // 受取先を入力 (これで初期 state は確定し、以降は手動 toggle のみ)
-    await page
-      .getByPlaceholder(/0x\.\.\./)
-      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await fillStable(
+      receiverInput(page),
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    );
     // focus → Enter で close
     await toggle.focus();
     await page.keyboard.press('Enter');
@@ -463,9 +485,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await page.goto('/ja/create');
     const toggle = page.getByRole('button', { name: /^受取先/ });
     // closed → chevron は未 rotate (matrix identity or none)
-    await page
-      .getByPlaceholder(/0x\.\.\./)
-      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await fillStable(
+      receiverInput(page),
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    );
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     const chevron = toggle.locator('svg.transition-transform');
@@ -522,9 +545,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     page,
   }) => {
     await page.goto('/ja/create');
-    await page
-      .getByPlaceholder(/0x\.\.\./)
-      .fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
+    await fillStable(
+      receiverInput(page),
+      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    );
     // 設定が localStorage に保存されるまで待機 (useQrSettings の debounce 後)
     await page.waitForFunction(() => {
       const raw = window.localStorage.getItem('openpay:qr-settings:v2');
