@@ -171,7 +171,7 @@ async function recoverSubmitting(args: {
     try {
       await broadcastCircleUserOp({
         bundle,
-        signedUserOp: record.signedUserOp as SignedCircleUserOp,
+        signedUserOp: record.signedUserOp,
       });
     } catch (error) {
       // "already known" / nonce 使用済 等は in-flight or 確定済の証左なので無害。

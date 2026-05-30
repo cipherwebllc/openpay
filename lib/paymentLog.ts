@@ -22,10 +22,10 @@ export type PaymentFlow =
 export type PaymentBridge = 'gateway' | 'cctp-v2';
 
 // gasless 経路の paymaster 系統 (Circle Paymaster 並行対応・Phase1)。
-// standard / cross-chain では undefined。lib/history.ts の HistoryProvider と同値
-// (循環 import を避けるためここで独立定義)。
+// standard / cross-chain では undefined。**本型が SoT** で lib/history.ts の
+// HistoryProvider が alias する (history→paymentLog の一方向 import・循環なし)。
 export type PaymentProvider = 'pimlico' | 'circle';
-// circlePaymasterNetUsdc の検証ステータス。lib/history.ts CircleVerification と同値。
+// circlePaymasterNetUsdc の検証ステータス。**本型が SoT** (history CircleVerification が alias)。
 export type CircleVerificationStatus =
   | 'verified'
   | 'client-reported'
