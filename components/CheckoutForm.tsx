@@ -20,6 +20,8 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
+import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
+import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -63,6 +65,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const gasless = useBatchPayment(deployment, !isStandard);
   const standard = useStandardPayment();
   const gasQuote = useGasQuote(deployment, !isStandard);
+  // USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
+  const isCircle =
+    !isStandard &&
+    resolveUsdcGaslessProvider(deployment, deployment.chainId) === 'circle';
+  const circleQuote = useGasQuoteCircle(deployment, !isStandard && isCircle);
+  const activeQuote = isCircle ? circleQuote : gasQuote;
+  const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
 
   const totalWei = useMemo(
     () => calcCheckoutTotal(params.items, deployment.decimals),
@@ -70,7 +79,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   );
 
   // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
-  const gasAmount = !isStandard ? gasQuote.data?.gasAmount : undefined;
+  const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
   const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
     () =>
@@ -100,7 +109,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   );
 
   const flowPending = isStandard ? standard.isPending : gasless.isPending;
-  const gasQuoteReady = isStandard || gasQuote.data !== undefined;
+  const gasQuoteReady = isStandard || activeQuote.data !== undefined;
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ total < gas のみ)。
   //   gasless / customer:  total < fee → merchant = 0
@@ -108,7 +117,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   //   standard:            total < fee → merchant = 0
   const merchantUnderflow =
     totalWei > 0n &&
-    (isStandard || !isMerchantGas || gasQuote.data !== undefined) &&
+    (isStandard || !isMerchantGas || activeQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
   const minimumAmountWei =
     breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
@@ -129,7 +138,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     ? t('errorGasCongested')
     : (flowError?.message ??
       (isStandard || saFallback ? undefined : saError?.message) ??
-      (gasQuote.error ? t('errorGasQuote') : null) ??
+      (activeQuote.error ? t('errorGasQuote') : null) ??
       (merchantUnderflow
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
         : null));
@@ -156,8 +165,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [saError]);
 
   useEffect(() => {
-    if (gasQuote.error) logger.error('checkout.gas-quote.failed', { error: gasQuote.error });
-  }, [gasQuote.error]);
+    if (activeQuote.error) logger.error('checkout.gas-quote.failed', { error: activeQuote.error });
+  }, [activeQuote.error]);
 
   // mode 中立な決済結果ビュー: notification dedup key、webhook payload の hash field、
   // success_url query の (snake_case) hash field を 1 箇所に集約。
@@ -360,6 +369,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         merchantAmount: breakdown.merchantReceives,
         feeReceiver: env.feeReceiver,
         feeAmount: breakdown.feeAmount + gasReimbursement,
+        circlePermitAmount,
       });
     }
   }
@@ -432,9 +442,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 labelExtra={
                   <InfoTooltip
                     text={
-                      isErc20Paymaster
-                        ? t('gasInfoUsdc', { nativeToken })
-                        : t('gasInfoJpyc', { nativeToken })
+                      isCircle
+                        ? t('gasInfoUsdcCircle', { nativeToken })
+                        : isErc20Paymaster
+                          ? t('gasInfoUsdc', { nativeToken })
+                          : t('gasInfoJpyc', { nativeToken })
                     }
                   />
                 }

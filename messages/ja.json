@@ -271,6 +271,7 @@
     "gaslessBatchHintJpyc": "ネットワーク手数料は混雑時上限の価格で固定徴収します (余剰は返金されません・JPYC でお支払い)",
     "gaslessBatchHintUsdc": "最大表示。実費はこれ以下に収まります (USDC でお支払い)",
     "gasInfoUsdc": "Pimlico ERC20 Paymaster 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。表示額は worst-case 見積で、実費がそれ以下の場合は超過分は引き落とされません。",
+    "gasInfoUsdcCircle": "Circle Paymaster (公式) 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。ガス代には約 10% の Circle 手数料が上乗せされます。表示額は上限見積で、超過分は引き落とされません。OpenPay は当該手数料を徴収しません。",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster 経由で、運営が {nativeToken} ガスを肩代わりします。お客様は JPYC のみで完結し、ネイティブトークン ({nativeToken}) を保有する必要はありません。ネットワーク手数料は混雑時の上限価格を基準に固定額で徴収するため、平常時は実際の gas を上回ることがあります (差額は返金されません)。",
     "approvalCheckLink": "ガス代承認の状況を確認",
     "splitBatchHint": "ネットワーク手数料は OpenPay が肩代わり (Pimlico Sponsorship Paymaster)。{count} 件の transfer を 1 つの UserOperation でバッチ送信します。",
@@ -336,6 +337,7 @@
     "gaslessHintJpyc": "ネットワーク手数料は混雑時上限の価格で固定徴収します (余剰は返金されません)",
     "gaslessHintUsdc": "最大表示。実費はこれ以下に収まります",
     "gasInfoUsdc": "Pimlico ERC20 Paymaster 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。表示額は worst-case 見積で、実費がそれ以下の場合は超過分は引き落とされません。",
+    "gasInfoUsdcCircle": "Circle Paymaster (公式) 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。ガス代には約 10% の Circle 手数料が上乗せされます。表示額は上限見積で、超過分は引き落とされません。OpenPay は当該手数料を徴収しません。",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster 経由で、運営が {nativeToken} ガスを肩代わりします。お客様は JPYC のみで完結し、ネイティブトークン ({nativeToken}) を保有する必要はありません。ネットワーク手数料は混雑時の上限価格を基準に固定額で徴収するため、平常時は実際の gas を上回ることがあります (差額は返金されません)。",
     "approvalCheckLink": "ガス代承認の状況を確認",
     "walletSection": "ウォレット",
@@ -438,6 +440,7 @@
     "gaslessHintUsdc": "最大表示。実費はこれ以下に収まります",
     "standardHint": "通常決済（ガスあり）: ウォレットで transfer を 1 件承認します。ネットワーク手数料 ({nativeToken}) はウォレット側で別途請求されます。",
     "gasInfoUsdc": "Pimlico ERC20 Paymaster 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。表示額は worst-case 見積で、実費がそれ以下の場合は超過分は引き落とされません。",
+    "gasInfoUsdcCircle": "Circle Paymaster (公式) 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。ガス代には約 10% の Circle 手数料が上乗せされます。表示額は上限見積で、超過分は引き落とされません。OpenPay は当該手数料を徴収しません。",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster 経由で、運営が {nativeToken} ガスを肩代わりします。お客様は JPYC のみで完結し、ネイティブトークン ({nativeToken}) を保有する必要はありません。ネットワーク手数料は混雑時の上限価格を基準に固定額で徴収するため、平常時は実際の gas を上回ることがあります (差額は返金されません)。",
     "approvalCheckLink": "ガス代承認の状況を確認",
     "walletSection": "ウォレット",
@@ -798,7 +801,7 @@
     },
     "section3": {
       "title": "3. 第三者への提供および業務委託",
-      "body": "当社は、利用者本人の同意がある場合または法令に定める場合を除き、取得した個人情報を第三者に提供しません。ただし、本サービスの提供のため、以下の事業者に業務委託を行っており、これらの委託先には個情法に基づく必要かつ適切な監督を行います。- Vercel Inc. (米国): ホスティング、CDN、アクセス解析。- Pimlico Labs Inc. (米国): ERC-4337 bundler および paymaster サービス。- Alchemy Insights Inc. (米国): ブロックチェーン RPC 提供。当該委託先はいずれも米国に所在するため、利用者の個人情報は外国にある第三者に提供される場合があります (個情法第 28 条)。米国における個人情報保護制度の概要については、個人情報保護委員会が公表する「外国における個人情報の保護に関する制度等の調査」等を参照することができます。当社は、当該委託先との間で個人情報保護に関する契約を締結し、利用者の権利利益の保護に必要な措置を講じています。"
+      "body": "当社は、利用者本人の同意がある場合または法令に定める場合を除き、取得した個人情報を第三者に提供しません。ただし、本サービスの提供のため、以下の事業者に業務委託を行っており、これらの委託先には個情法に基づく必要かつ適切な監督を行います。- Vercel Inc. (米国): ホスティング、CDN、アクセス解析。- Pimlico Labs Inc. (米国): ERC-4337 bundler および paymaster サービス。- Circle Internet Financial, Inc. (米国): USDC ガスレス決済における Circle Paymaster (ERC-4337 paymaster) サービス。顧客が USDC で gas 相当額を当該 paymaster に支払うものであり、当社が当該手数料を徴収・取得することはありません。- Alchemy Insights Inc. (米国): ブロックチェーン RPC 提供。当該委託先はいずれも米国に所在するため、利用者の個人情報は外国にある第三者に提供される場合があります (個情法第 28 条)。米国における個人情報保護制度の概要については、個人情報保護委員会が公表する「外国における個人情報の保護に関する制度等の調査」等を参照することができます。当社は、当該委託先との間で個人情報保護に関する契約を締結し、利用者の権利利益の保護に必要な措置を講じています。"
     },
     "section4": {
       "title": "4. 保管期間",

@@ -27,6 +27,15 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
+// 走らせないよう stub (QueryClientProvider 無しで render する既存 test を壊さない)。
+vi.mock('@/hooks/useGasQuoteCircle', () => ({
+  useGasQuoteCircle: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    fetchStatus: 'idle',
+  })),
+}));
 // CrossChainHint は wagmi の useWalletClient / usePublicClient + react-query
 // に依存するが、本 test file の責務は PaymentForm 本体ロジックのため、Hint は
 // 空 component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。

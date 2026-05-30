@@ -484,3 +484,36 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     });
   }
 });
+
+describe('i18n: Circle Paymaster の gas help text (provider 次元・C4)', () => {
+  // PaymentForm / CheckoutForm は circle 経路で gasInfoUsdcCircle を表示する
+  // (gasInfoUsdc は Pimlico 名を含むため流用すると prose が不正確になる)。
+  const CIRCLE_FORMS = ['PaymentForm', 'CheckoutForm'] as const;
+
+  it.each(CIRCLE_FORMS)('%s.gasInfoUsdcCircle が ja/en 両方に存在する', (ns) => {
+    const j = (ja[ns] as Record<string, unknown>).gasInfoUsdcCircle;
+    const e = (en[ns] as Record<string, unknown>).gasInfoUsdcCircle;
+    expect(typeof j).toBe('string');
+    expect(typeof e).toBe('string');
+    expect((j as string).length).toBeGreaterThan(0);
+    expect((e as string).length).toBeGreaterThan(0);
+  });
+
+  it.each(CIRCLE_FORMS)(
+    '%s.gasInfoUsdcCircle は Circle を明示し Pimlico を含まない',
+    (ns) => {
+      for (const loc of [ja, en]) {
+        const text = (loc[ns] as Record<string, string>).gasInfoUsdcCircle;
+        expect(text).toMatch(/Circle/);
+        expect(text).not.toMatch(/Pimlico/);
+        // {nativeToken} placeholder を保持 (chain-aware)
+        expect(text).toContain('{nativeToken}');
+      }
+    },
+  );
+
+  it('当社徴収0 を ja/en で明示する (paymasterMode=erc20 の真正性)', () => {
+    expect(ja.PaymentForm.gasInfoUsdcCircle).toMatch(/徴収しません/);
+    expect(en.PaymentForm.gasInfoUsdcCircle).toMatch(/does not collect/i);
+  });
+});

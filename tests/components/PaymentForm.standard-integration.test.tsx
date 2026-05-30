@@ -100,6 +100,16 @@ vi.mock('@/hooks/useGasQuoteUsdc', () => ({
     error: null,
   }),
 }));
+// Circle quote stub (flag OFF で非 active・useQuery を走らせない)。
+vi.mock('@/hooks/useGasQuoteCircle', () => ({
+  useGasQuoteCircle: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+    fetchStatus: 'idle',
+  }),
+}));
 vi.mock('@/components/CrossChainHint', () => ({
   CrossChainHint: () => null,
 }));

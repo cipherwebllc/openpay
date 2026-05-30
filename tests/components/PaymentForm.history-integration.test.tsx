@@ -32,6 +32,14 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// Circle quote stub (flag OFF で非 active・useQuery を走らせない)。
+vi.mock('@/hooks/useGasQuoteCircle', () => ({
+  useGasQuoteCircle: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    fetchStatus: 'idle',
+  })),
+}));
 vi.mock('@/components/CrossChainHint', () => ({
   CrossChainHint: () => null,
 }));

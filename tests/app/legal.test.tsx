@@ -90,7 +90,7 @@ describe('Legal pages', () => {
       ).toBeGreaterThan(0);
     });
 
-    it('section 3 (第三者提供) に Vercel / Pimlico / Alchemy が含まれる', () => {
+    it('section 3 (第三者提供) に Vercel / Pimlico / Alchemy / Circle が含まれる', () => {
       renderWithIntl(<PrivacyPage />, { locale: 'ja' });
       const section3Heading = screen.getByRole('heading', {
         level: 2,
@@ -100,6 +100,23 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toContain('Vercel');
       expect(sectionBody?.textContent).toContain('Pimlico');
       expect(sectionBody?.textContent).toContain('Alchemy');
+      // Circle Paymaster (USDC ガスレス) を委託先として開示 (provider 次元・C4)。
+      expect(sectionBody?.textContent).toContain('Circle');
+      expect(sectionBody?.textContent).toMatch(/Paymaster/);
+      // 当社徴収0の明示 (paymasterMode='erc20' の真正性: 顧客が USDC で gas 負担)。
+      expect(sectionBody?.textContent).toMatch(/徴収・取得することはありません/);
+    });
+
+    it('en: section 3 に Circle Paymaster 委託先開示 + 当社徴収0', () => {
+      renderWithIntl(<PrivacyPage />, { locale: 'en' });
+      const section3Heading = screen.getByRole('heading', {
+        level: 2,
+        name: /^3\./,
+      });
+      const sectionBody = section3Heading.nextElementSibling;
+      expect(sectionBody?.textContent).toContain('Circle');
+      expect(sectionBody?.textContent).toMatch(/Paymaster/);
+      expect(sectionBody?.textContent).toMatch(/does not collect or receive/i);
     });
   });
 

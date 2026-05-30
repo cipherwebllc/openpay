@@ -18,6 +18,8 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
+import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
+import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -76,6 +78,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const gasless = useBatchPayment(deployment, !isStandard);
   const standard = useStandardPayment();
   const gasQuote = useGasQuote(deployment, !isStandard);
+  // USDC ガスレスが Circle Paymaster に解決される場合は surcharge 込みの quote +
+  // permit allowance を Circle 専用フックから取る (provider は flag/allowlist/fee で決まる)。
+  const isCircle =
+    !isStandard &&
+    resolveUsdcGaslessProvider(deployment, deployment.chainId) === 'circle';
+  const circleQuote = useGasQuoteCircle(deployment, !isStandard && isCircle);
+  // 表示・readiness・error は circle のときは circleQuote を本線にする。
+  const activeQuote = isCircle ? circleQuote : gasQuote;
+  // Circle 経路で useBatchPayment に渡す permit allowance 上限 (未取得なら undefined)。
+  const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
 
   const fixedAmount = params.amount ?? '';
   const isFixed = fixedAmount.length > 0;
@@ -97,7 +109,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
   //   Sponsorship (JPYC): Pimlico が POL gas を立替、運営は徴収した JPYC で別途精算。
   //   standard mode: 顧客 wallet が gas を自前で算定・支払うため OpenPay 側で見積らない。
-  const gasAmount = !isStandard ? gasQuote.data?.gasAmount : undefined;
+  const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
 
   const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
@@ -151,7 +163,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //   standard:            amount < fee → merchant = 0
   const merchantUnderflow =
     amountWei > 0n &&
-    (isStandard || !isMerchantGas || gasQuote.data !== undefined) &&
+    (isStandard || !isMerchantGas || activeQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
   const minimumAmountWei =
     breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
@@ -163,7 +175,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
 
   const flowPending = isStandard ? standard.isPending : gasless.isPending;
-  const gasQuoteReady = isStandard || gasQuote.data !== undefined;
+  const gasQuoteReady = isStandard || activeQuote.data !== undefined;
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -188,7 +200,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     ? t('errorGasCongested')
     : (flowError?.message ??
       (isStandard || saFallback ? undefined : saError?.message) ??
-      (gasQuote.error ? t('errorGasQuote') : null) ??
+      (activeQuote.error ? t('errorGasQuote') : null) ??
       (merchantUnderflow
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
         : null));
@@ -207,8 +219,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   }, [saError]);
 
   useEffect(() => {
-    if (gasQuote.error) logger.error('payment.gas-quote.failed', { error: gasQuote.error });
-  }, [gasQuote.error]);
+    if (activeQuote.error) logger.error('payment.gas-quote.failed', { error: activeQuote.error });
+  }, [activeQuote.error]);
 
   useEffect(() => {
     if (gasless.data) {
@@ -286,6 +298,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         feeReceiver: env.feeReceiver,
         feeAmount: splitBreakdown.feeAmount + gasReimbursement,
         extraRecipients: extras.map((e) => ({ to: e.to, amount: e.amount })),
+        circlePermitAmount,
       });
     } else {
       gasless.mutate({
@@ -294,6 +307,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         merchantAmount: breakdown.merchantReceives,
         feeReceiver: env.feeReceiver,
         feeAmount: breakdown.feeAmount + gasReimbursement,
+        circlePermitAmount,
       });
     }
   }
@@ -409,9 +423,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
               labelExtra={
                 <InfoTooltip
                   text={
-                    isErc20Paymaster
-                      ? t('gasInfoUsdc', { nativeToken })
-                      : t('gasInfoJpyc', { nativeToken })
+                    isCircle
+                      ? t('gasInfoUsdcCircle', { nativeToken })
+                      : isErc20Paymaster
+                        ? t('gasInfoUsdc', { nativeToken })
+                        : t('gasInfoJpyc', { nativeToken })
                   }
                 />
               }
