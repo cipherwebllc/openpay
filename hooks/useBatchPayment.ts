@@ -19,11 +19,9 @@ import {
 } from 'viem';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { useSmartAccount } from './useSmartAccount';
-import {
-  getCircleUserOpGasPrice,
-  entryPoint08Address,
-} from '@/lib/smartAccount/circleAccount';
-import { executeCirclePayment } from '@/lib/smartAccount/circleSend';
+// Circle 経路の重い実装 (getCircleUserOpGasPrice / executeCirclePayment / verifyCircleReceiptOnChain)
+// は runCirclePayment 内で **dynamic import** し、/pay /checkout の baseline bundle から外す
+// (bundle budget /pay 420kB を超えないため・circle 決済実行時のみロード)。型のみ静的 import。
 import type { CircleSmartAccountBundle } from '@/lib/smartAccount/circleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
 import type { PublicClient } from 'viem';
@@ -40,8 +38,6 @@ import {
   type PaymentProvider,
   type CircleVerificationStatus,
 } from '@/lib/paymentLog';
-import { verifyCircleReceiptOnChain } from '@/lib/circleReceiptVerifier';
-import { CirclePendingError } from '@/lib/smartAccount/circleSend';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -183,7 +179,11 @@ export function useBatchPayment(
     onError: (error, params) => {
       // CirclePendingError は broadcast 済 op を持つ「確認待ち」(失敗ではない)。
       // userOpHash と provider を監査に残し、未 retry でも submitted op を追跡可能にする。
-      const pending = error instanceof CirclePendingError ? error : undefined;
+      // circleSend を静的 import しないよう (bundle budget) instanceof でなく name で判定。
+      const pending =
+        error.name === 'CirclePendingError'
+          ? (error as Error & { userOpHash?: Hex })
+          : undefined;
       const ctx = toCtx(params, customer, chainId, deployment);
       if (clients?.provider === 'circle') ctx.provider = 'circle';
       void logPaymentEvent(
@@ -254,6 +254,14 @@ async function runCirclePayment(args: {
       'USDC ガスレス決済のガス上限 (permitAmount) が未算定です。再読み込みして再試行してください。',
     );
   }
+
+  // Circle 実装群を dynamic import (baseline bundle から除外・circle 決済実行時のみロード)。
+  const [{ getCircleUserOpGasPrice, entryPoint08Address }, { executeCirclePayment }, { verifyCircleReceiptOnChain }] =
+    await Promise.all([
+      import('@/lib/smartAccount/circleAccount'),
+      import('@/lib/smartAccount/circleSend'),
+      import('@/lib/circleReceiptVerifier'),
+    ]);
 
   // gas ceiling: 顧客の USDC 出費上限の UX 保護 (混雑時に異常 gas を弾く)。
   const gasPrice = await getCircleUserOpGasPrice(bundle);

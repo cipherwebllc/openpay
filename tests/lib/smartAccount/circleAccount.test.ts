@@ -8,7 +8,7 @@ import {
   buildCircleSmartAccountClient,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
-import { assertCirclePaymasterDeployed } from '@/lib/circlePaymaster';
+import { assertCirclePaymasterDeployed } from '@/lib/circlePermit';
 import { resolveDeployment } from '@/lib/tokens';
 
 // 重い account builder (permissionless to7702SimpleSmartAccount + viem

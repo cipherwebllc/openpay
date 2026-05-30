@@ -33,7 +33,6 @@ import {
   isIncompatibleSmartAccountError,
 } from '@/lib/accountDetection';
 import { buildSimpleSmartAccountClient } from '@/lib/smartAccount/simpleAccount';
-import { buildCircleSmartAccountClient } from '@/lib/smartAccount/circleAccount';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
@@ -94,6 +93,12 @@ export function useSmartAccount(
             chainId,
             symbol: deployment.symbol,
           });
+          // Circle 経路 (viem account-abstraction + permit/verifier 群) は dynamic import で
+          // /pay /checkout の baseline bundle から外す (flag OFF の大多数で未ロード・mav2/
+          // metamask と同方針)。bundle budget (/pay 420kB) を超えないため必須。
+          const { buildCircleSmartAccountClient } = await import(
+            '@/lib/smartAccount/circleAccount'
+          );
           return buildCircleSmartAccountClient({
             walletClient,
             publicClient,

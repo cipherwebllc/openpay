@@ -57,6 +57,16 @@ vi.mock('@/lib/smartAccount/circleSend', () => ({
 }));
 vi.mock('@/lib/smartAccount/circleAccount', () => ({
   getCircleUserOpGasPrice: vi.fn(),
+  // runCirclePayment が dynamic import で entryPoint08Address を destructure するため必須。
+  entryPoint08Address: '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108',
+}));
+// verify は best-effort。dynamic import される circleReceiptVerifier を stub し、
+// 実 RPC を叩かせない (verify 失敗で unreconciled に倒れるが decision には影響しない)。
+vi.mock('@/lib/circleReceiptVerifier', () => ({
+  verifyCircleReceiptOnChain: vi.fn(async () => ({
+    status: 'unreconciled',
+    reason: 'test-stub',
+  })),
 }));
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
