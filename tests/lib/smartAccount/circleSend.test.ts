@@ -331,3 +331,59 @@ describe('cross-invocation 二重決済ガード (別 attemptId・同 callHash)'
     expect(loadPendingRecord(orphanKey)?.status).toBe('abandoned');
   });
 });
+
+describe('cross-invocation ガード — 時間窓 + status 優先 (再レビュー NEW-1/NEW-3)', () => {
+  function seed(attemptId: string, status: PendingStatus, at: number) {
+    const callHash = computeCallHash(CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: attemptId,
+      callHash,
+    });
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now: at,
+    });
+    markAwaitingSignature({ key, sender: OWNER, now: at });
+    markSigned({ key, sender: OWNER, signedUserOp: SIGNED_OP, userOpHash: UOH, now: at });
+    if (status === 'signed') return key;
+    markSubmitting({ key, sender: OWNER, now: at });
+    markConfirmed({ key, sender: OWNER, txHash: TX, success: true, now: at });
+    return key;
+  }
+
+  it('NEW-1: 窓を過ぎた古い confirmed (同 callHash) は正規リピートとして新規決済を通す', async () => {
+    happyMocks();
+    seed('old', 'confirmed', 0); // updatedAt=0
+    // 1e6 - 0 > 90s 窓 → 古い confirmed → 抑止せず新規決済
+    const res = await run({ now: () => 1_000_000 });
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).toHaveBeenCalled(); // 新規決済に進んだ
+    expect(mockBroadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it('NEW-1: 窓内の confirmed (同 callHash) は偶発二重として既支払い結果を返す', async () => {
+    happyMocks();
+    seed('recent', 'confirmed', 990); // clock 1000 開始 → 直近
+    const res = await run();
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).not.toHaveBeenCalled(); // 新規署名せず
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('NEW-3: confirmed と直近 pre-submit が混在しても confirmed を優先 (pre-submit に masked されない)', async () => {
+    happyMocks();
+    seed('conf', 'confirmed', 900); // 直近 confirmed
+    seed('sig', 'signed', 950); // 直近 pre-submit (stale でない)
+    const res = await run();
+    // sort で confirmed が先に評価され既支払い結果を返す (CirclePendingError にならない)
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).not.toHaveBeenCalled();
+  });
+});
