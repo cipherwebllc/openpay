@@ -125,6 +125,12 @@ export function HistoryRow({
           <dt className="text-slate-400">{t('columnFee')}</dt>
           <dd>{fmt(entry.feeAmount, entry.asset)}</dd>
         </div>
+        {entry.provider === 'circle' && entry.circlePaymasterNetUsdc && (
+          <div>
+            <dt className="text-slate-400">{t('columnCircleGas')}</dt>
+            <dd>{fmt(entry.circlePaymasterNetUsdc, 'usdc')}</dd>
+          </div>
+        )}
         {entry.note && (
           <div className="sm:col-span-2">
             <dt className="text-slate-400">{t('columnNote')}</dt>

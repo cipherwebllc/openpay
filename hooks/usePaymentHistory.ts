@@ -10,7 +10,12 @@
 
 import { useEffect } from 'react';
 import type { Address, Hex } from 'viem';
-import { appendHistory, buildHistoryEntry } from '@/lib/history';
+import {
+  appendHistory,
+  buildHistoryEntry,
+  type CircleVerification,
+  type HistoryProvider,
+} from '@/lib/history';
 import type { GasMode, PayMode } from '@/lib/fee';
 import type { ChainSlug } from '@/lib/chains';
 import type { TokenSymbol } from '@/lib/tokens';
@@ -50,6 +55,11 @@ type GaslessSnapshot = {
     userOpHash: Hex;
     blockNumber: bigint;
     success: boolean;
+    // 監査次元 (useBatchPayment の BatchPaymentResult 由来)。circle 経路のみ非 null。
+    provider?: HistoryProvider;
+    circlePaymasterAddress?: string;
+    circlePaymasterNetUsdc?: string;
+    circleVerification?: CircleVerification;
   };
   error: Error | null;
   // react-query useMutation の variables (= mutate() に渡された params)。
@@ -127,6 +137,10 @@ export function usePaymentHistory(
         errorMessage: null,
         storeName: ctx.storeName,
         note: ctx.note,
+        provider: gaslessData.provider ?? null,
+        circlePaymasterAddress: gaslessData.circlePaymasterAddress ?? null,
+        circlePaymasterNetUsdc: gaslessData.circlePaymasterNetUsdc ?? null,
+        circleVerification: gaslessData.circleVerification ?? null,
       }),
     );
   }, [gaslessData, gaslessMerchantAmount, gaslessFeeAmount, ctx]);

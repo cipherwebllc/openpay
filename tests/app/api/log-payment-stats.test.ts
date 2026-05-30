@@ -844,3 +844,50 @@ describe('stats: bridge 別集計 (phase 2 cross-chain receive)', () => {
     expect(gateway.totalMerchantWei).toBe('1000000000000000000');
   });
 });
+
+describe('stats: byProvider 集計 (Phase1 Circle Paymaster)', () => {
+  it('provider 別 count + circle net を verified / reported に分けて集計', async () => {
+    const entries = [
+      // circle: client-reported net 9000
+      makeEntry({
+        chainId: 421614,
+        tokenAddress: USDC_BASE,
+        provider: 'circle',
+        circlePaymasterNetUsdc: '9000',
+        circleVerification: 'client-reported',
+      }),
+      // circle: verified net 8000
+      makeEntry({
+        chainId: 421614,
+        tokenAddress: USDC_BASE,
+        provider: 'circle',
+        circlePaymasterNetUsdc: '8000',
+        circleVerification: 'verified',
+      }),
+      // pimlico success
+      makeEntry({ provider: 'pimlico' }),
+      // provider 無し (standard/legacy) → unknown
+      makeEntry({}),
+    ];
+    vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: entries });
+    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: entries.length });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const byProvider = body.byProvider as Array<{
+      provider: string;
+      successCount: number;
+      circleNetUsdcVerified: string;
+      circleNetUsdcReported: string;
+    }>;
+    const circle = byProvider.find((p) => p.provider === 'circle')!;
+    expect(circle.successCount).toBe(2);
+    expect(circle.circleNetUsdcReported).toBe('9000');
+    expect(circle.circleNetUsdcVerified).toBe('8000');
+    const pimlico = byProvider.find((p) => p.provider === 'pimlico')!;
+    expect(pimlico.successCount).toBe(1);
+    expect(pimlico.circleNetUsdcReported).toBe('0');
+    expect(byProvider.find((p) => p.provider === 'unknown')?.successCount).toBe(1);
+  });
+})

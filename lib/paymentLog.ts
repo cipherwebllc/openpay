@@ -21,6 +21,16 @@ export type PaymentFlow =
 // stats endpoint で bridge 別 GMV 集計に使う ([[cross-chain-usdc-receive]] phase 3)。
 export type PaymentBridge = 'gateway' | 'cctp-v2';
 
+// gasless 経路の paymaster 系統 (Circle Paymaster 並行対応・Phase1)。
+// standard / cross-chain では undefined。lib/history.ts の HistoryProvider と同値
+// (循環 import を避けるためここで独立定義)。
+export type PaymentProvider = 'pimlico' | 'circle';
+// circlePaymasterNetUsdc の検証ステータス。lib/history.ts CircleVerification と同値。
+export type CircleVerificationStatus =
+  | 'verified'
+  | 'client-reported'
+  | 'unreconciled';
+
 export type PaymentLogEvent = {
   flow: PaymentFlow;
   result: PaymentResult;
@@ -44,6 +54,15 @@ export type PaymentLogEvent = {
   // bridge 経由時の source chain ID (本 chainId は destination)。
   // direct の場合は undefined。
   sourceChainId?: number;
+  // --- Circle Paymaster 監査 (gasless circle 経路のみ・C2/C3) ---
+  // paymaster 系統。gasless で 'pimlico' | 'circle'、standard/cross-chain は undefined。
+  provider?: PaymentProvider;
+  // Circle paymaster (permit spender) アドレス。circle 経路のみ。
+  circlePaymasterAddress?: Address;
+  // Circle が postOp で徴収した net USDC (raw)。client 申告 (verifier が後で再計算)。
+  circlePaymasterNetUsdc?: string;
+  // 上記 net の検証ステータス。client 経路は通常 'client-reported'。
+  circleVerification?: CircleVerificationStatus;
 };
 
 // 全 hook が共通で持つ「flow / chain / merchant / customer」を 1 度に詰める。
@@ -62,6 +81,11 @@ export type PaymentLogContext = {
   // cross-chain bridge 経由の場合のみ指定。direct (= 既存単一 chain) では undefined。
   bridge?: PaymentBridge;
   sourceChainId?: number;
+  // Circle Paymaster 経路の監査フィールド (gasless circle のみ)。
+  provider?: PaymentProvider;
+  circlePaymasterAddress?: Address;
+  circlePaymasterNetUsdc?: string;
+  circleVerification?: CircleVerificationStatus;
 };
 
 export function buildPaymentLogEvent(
@@ -88,6 +112,10 @@ export function buildPaymentLogEvent(
     feeTxHash: ctx.feeTxHash,
     bridge: ctx.bridge,
     sourceChainId: ctx.sourceChainId,
+    provider: ctx.provider,
+    circlePaymasterAddress: ctx.circlePaymasterAddress,
+    circlePaymasterNetUsdc: ctx.circlePaymasterNetUsdc,
+    circleVerification: ctx.circleVerification,
   };
   if (outcome.result === 'error') {
     return { ...base, errorMessage: outcome.errorMessage.slice(0, 500), txHash: outcome.txHash };

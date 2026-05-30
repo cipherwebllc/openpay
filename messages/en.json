@@ -714,6 +714,7 @@
     "columnCustomer": "Customer",
     "columnTxHash": "Tx",
     "columnNote": "Note",
+    "columnCircleGas": "Circle gas fee (USDC)",
     "columnActions": "Actions",
     "statusSuccess": "Success",
     "statusReverted": "Reverted",
