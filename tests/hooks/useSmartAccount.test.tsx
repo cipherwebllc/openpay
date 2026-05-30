@@ -44,8 +44,22 @@ import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { mockHook } from '../_helpers/wagmiMock';
 import { defaultDeploymentForSymbol, type TokenDeployment } from '@/lib/tokens';
 
+import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
+
 const usdcDep = defaultDeploymentForSymbol('usdc');
 const jpycDep = defaultDeploymentForSymbol('jpyc');
+
+// 本ファイルのテストは Circle flag OFF (NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER 未設定)
+// なので USDC でも provider は常に 'pimlico'。AnySmartAccountBundle を Pimlico bundle に
+// narrow しつつ、flag-off → pimlico の不変条件も同時に検証する。
+function pimlicoBundle(
+  data: ReturnType<typeof useSmartAccount>['data'],
+): SmartAccountBundle {
+  if (!data || data.provider !== 'pimlico') {
+    throw new Error(`expected pimlico bundle, got provider=${data?.provider}`);
+  }
+  return data;
+}
 
 // JPYC on Kairos (Kaia testnet)。env override が未設定なので
 // defaultDeploymentForSymbol では取れない。実 contract address が公表され
@@ -202,9 +216,9 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     expect(cfg.userOperation.prepareUserOperation).toBeUndefined();
 
     // 戻り値構造の検証
-    expect(result.current.data!.paymasterMode).toBe('sponsorship');
-    expect(result.current.data!.smartAccountClient).toBeDefined();
-    expect(result.current.data!.pimlicoClient).toBeDefined();
+    expect(pimlicoBundle(result.current.data).paymasterMode).toBe('sponsorship');
+    expect(pimlicoBundle(result.current.data).smartAccountClient).toBeDefined();
+    expect(pimlicoBundle(result.current.data).pimlicoClient).toBeDefined();
   });
 
   it('JPYC on Kaia/Kairos: SimpleAccount (7702) 経路へ routing、Pimlico Kairos URL が組み立てられる', async () => {
@@ -231,7 +245,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
 
     // Kairos の deployment で sponsorship mode が確定 (testnet erc20 → sponsorship
     // フォールバックを通らずに直接 sponsorship)
-    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+    expect(pimlicoBundle(result.current.data).paymasterMode).toBe('sponsorship');
     const cfg = lastSAConfig as {
       bundlerTransport: unknown;
       paymasterContext: unknown;
@@ -283,7 +297,7 @@ describe('useSmartAccount (queryFn 実走行: paymaster 設定の検証)', () =>
     };
     expect(cfg.paymasterContext).toEqual({ sponsorshipPolicyId: 'sp_test' });
     expect(cfg.userOperation.prepareUserOperation).toBeUndefined();
-    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+    expect(pimlicoBundle(result.current.data).paymasterMode).toBe('sponsorship');
   });
 
   it('queryKey が token を含む → 異なる token は異なるクエリとして共存', async () => {
@@ -401,7 +415,7 @@ describe('useSmartAccount (7702 delegation 分岐)', () => {
 
     expect(to7702SimpleSmartAccount).toHaveBeenCalledOnce();
     expect(createSmartAccountClient).toHaveBeenCalledOnce();
-    expect(result.current.data!.paymasterMode).toBe('sponsorship');
+    expect(pimlicoBundle(result.current.data).paymasterMode).toBe('sponsorship');
   });
 
   it('pristine EOA (未委任 0x): errorPristineNoBootstrap を throw、SimpleAccount は構築しない', async () => {
@@ -546,7 +560,7 @@ describe('useSmartAccount (queryFn 実走行: ERC20 mode @ mainnet)', () => {
       );
       // prepareUserOperation hook が関数として注入されている
       expect(cfg.userOperation.prepareUserOperation).toBeTypeOf('function');
-      expect(result.current.data!.paymasterMode).toBe('erc20');
+      expect(pimlicoBundle(result.current.data).paymasterMode).toBe('erc20');
     } finally {
       process.env = { ...ORIGINAL_ENV };
       vi.resetModules();
