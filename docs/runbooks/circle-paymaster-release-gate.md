@@ -134,19 +134,21 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
 
 1. flag OFF 既定のまま投入済 (現状)。
 2. testnet で本ゲート通過。
-3. **Base mainnet のみ** で `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER=1`
-   (Base は Circle fee=10% が docs 確認済 + 2026-05-30 実機ゲート通過)。
+3. **Base mainnet** で `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER=1` (2026-05-30 ゲート通過済)。
    ⚠️ **flag はグローバル** = ON にすると `CIRCLE_GAS_SURCHARGE_BPS` に載る全 mainnet
-   chain で Circle が起動する。Base のみに絞るため **Arbitrum mainnet (42161) は surcharge
-   config から外してある** (`lib/circlePaymaster.ts`・コメントアウト済)。よって flag ON で
-   有効化されるのは Base mainnet だけ。
-4. Arbitrum mainnet へ拡大するときは: ① `SMOKE_CHAIN=arbitrum` で本 smoke ゲートを通過させ
-   (Arbitrum mainnet の実 receipt で fee 整合を実測)、② `CIRCLE_GAS_SURCHARGE_BPS` の
-   `[arbitrum.id]: 1000` コメント行を戻す。これで初めて Arbitrum で Circle が有効になる。
-5. fee config 未確認の chain (Polygon/Optimism/Avalanche/Unichain) は
-   `CIRCLE_GAS_SURCHARGE_BPS` 未登録 = `resolveUsdcGaslessProvider` が pimlico に
-   倒すため、自動的に Pimlico erc20 fallback のまま (有効化されない)。docs で
-   per-chain fee が確認できた chain から surcharge config を追加して順次拡大。
+   chain で Circle が起動する。よって「どの chain を有効化するか」は **surcharge config への
+   登録で制御**する (ゲート通過まで登録しない)。
+4. **Arbitrum mainnet** (fee=10%・Circle dev docs で Arb/Base のみ 10% と確認): `SMOKE_CHAIN=arbitrum`
+   で本 smoke ゲートを通過させ、`CIRCLE_GAS_SURCHARGE_BPS` に `[arbitrum.id]: 1000` を登録。
+5. **10% 非適用 chain (Optimism/Polygon/Ethereum/Avalanche/Unichain)**: Circle dev docs では
+   10% surcharge 非適用だが「USDC→ETH slippage の未定量 spread」があり **0% 確定ではない**。
+   各 chain で `SMOKE_CHAIN=<chain>` ゲートを実行し、**実 receipt の徴収 USDC vs 生ガスで実効 fee を
+   実測** → その値 (round-up + margin) を `CIRCLE_GAS_SURCHARGE_BPS` に登録してから有効化 (C4)。
+   未登録の間は `resolveUsdcGaslessProvider` が pimlico に倒すため自動的に Pimlico erc20 fallback。
+   - 全 mainnet で USDC は **native** を使用 (Polygon も `0x3c49…`・USDC.e ではない)。
+   - Ethereum L1 はガスが絶対額で高い (数$/tx) ため小額決済には不向き — 有効化の価値を要検討。
+   - v0.8 paymaster は全 mainnet で `0x0578…700Ec` (deterministic)。gate が codehash を log するので
+     Base と一致を確認後 `CIRCLE_PAYMASTER_CODEHASH` に登録すると本番の codehash 検証が効く。
 
 ## ロールバック
 

@@ -210,21 +210,17 @@ describe('assertPermitDomain', () => {
 });
 
 describe('CIRCLE_GAS_SURCHARGE_BPS', () => {
-  it('Base mainnet + Arb/Base testnet は 10% (1000 bps)', async () => {
+  it('Arbitrum/Base mainnet + Arb/Base testnet は 10% (1000 bps)', async () => {
+    // Circle dev docs: 10% surcharge は Arbitrum/Base のみ。両者 + その testnet を登録。
     const { circle } = await loadWithFlag(false);
-    for (const id of [8453, 421614, 84532]) {
+    for (const id of [42161, 8453, 421614, 84532]) {
       expect(circle.CIRCLE_GAS_SURCHARGE_BPS[id]).toBe(1000);
     }
   });
 
-  it('Arbitrum mainnet (42161) は mainnet ゲート未通過のため意図的に未登録', async () => {
-    // flag グローバルのため、ゲート未通過 mainnet を載せると flag ON で即有効化されてしまう。
-    // Arbitrum mainnet smoke 通過後に lib/circlePaymaster.ts のコメント行を戻す。
-    const { circle } = await loadWithFlag(false);
-    expect(circle.CIRCLE_GAS_SURCHARGE_BPS[42161]).toBeUndefined();
-  });
-
-  it('fee 未確認 chain (Optimism/Polygon/Ethereum/Avalanche) は未登録', async () => {
+  it('10% 非適用 chain (Optimism/Polygon/Ethereum/Avalanche) は未登録 (要実測まで block)', async () => {
+    // これらは 10% 非適用 + slippage spread が未定量のため、実機ゲートで実効 fee 実測まで
+    // surcharge 未登録 = resolveUsdcGaslessProvider が pimlico に倒す (C4)。
     const { circle } = await loadWithFlag(false);
     for (const id of [10, 137, 1, 43114, 11155420, 80002]) {
       expect(circle.CIRCLE_GAS_SURCHARGE_BPS[id]).toBeUndefined();

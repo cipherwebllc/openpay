@@ -53,11 +53,12 @@ import {
   getAddress,
   parseErc6492Signature,
   parseEventLogs,
+  keccak256,
   BaseError,
   HttpRequestError,
   TimeoutError,
 } from 'viem';
-import { arbitrumSepolia, base } from 'viem/chains';
+import { arbitrum, arbitrumSepolia, base } from 'viem/chains';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import {
   createBundlerClient,
@@ -96,6 +97,15 @@ const CHAIN_CONFIGS = {
     rpcUrl: 'https://mainnet.base.org',
     isMainnet: true,
     funding: '本物の Base USDC を ~2 (使い捨てウォレットのみ・faucet 無し)',
+  },
+  arbitrum: {
+    chain: arbitrum,
+    usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // USDC_ARBITRUM_MAINNET (native・lib/tokens.ts)
+    circlePaymaster: '0x0578cFB241215b77442a541325d6A4E6dFE700Ec', // v0.8 mainnet (Base と同一・deterministic)
+    rpcEnv: 'NEXT_PUBLIC_ARBITRUM_RPC_URL',
+    rpcUrl: 'https://arb1.arbitrum.io/rpc',
+    isMainnet: true,
+    funding: '本物の Arbitrum USDC を ~2 (使い捨てウォレットのみ・faucet 無し)',
   },
 };
 const SMOKE_CHAIN = process.env.SMOKE_CHAIN || 'arbitrum-sepolia';
@@ -359,6 +369,11 @@ async function assertPaymasterDeployed(publicClient, addr) {
         'アドレス誤りの可能性 — permit を署名せず中断する。',
     );
   }
+  // codehash を log する (enforcement はまだ・lib/circlePermit.ts CIRCLE_PAYMASTER_CODEHASH は空)。
+  // deterministic deploy なら全 chain 同一のはず。新 chain の gate でこれを記録し、Base と一致を
+  // 確認できたら CIRCLE_PAYMASTER_CODEHASH に登録 → 本番 assertCirclePaymasterDeployed が
+  // codehash 一致まで検証できるようになる (信頼境界強化・circlePermit.ts:165 の TODO)。
+  log(`Circle Paymaster codehash: ${keccak256(code)} (chain ${CHAIN.id})`);
 }
 
 // pristine EOA は初回 UserOp に 7702 authorization を内包して委任 (→ IMPL_7702) を張る。
