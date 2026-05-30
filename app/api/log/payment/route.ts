@@ -42,6 +42,11 @@ type Payload = {
   // direct (同一 chain) では undefined、Gateway/CCTP V2 経由なら値が入る。
   bridge?: 'gateway' | 'cctp-v2';
   sourceChainId?: number;
+  // Circle Paymaster 監査 (gasless circle 経路のみ・Phase1 C2/C3)。
+  provider?: 'pimlico' | 'circle';
+  circlePaymasterAddress?: Address;
+  circlePaymasterNetUsdc?: string;
+  circleVerification?: 'verified' | 'client-reported' | 'unreconciled';
 };
 
 function isDecimalString(v: unknown): v is string {
@@ -94,6 +99,25 @@ function validate(raw: unknown): Payload | null {
       r.sourceChainId <= 0)
   )
     return null;
+  if (r.provider !== undefined && r.provider !== 'pimlico' && r.provider !== 'circle')
+    return null;
+  if (
+    r.circlePaymasterAddress !== undefined &&
+    !validAddress(r.circlePaymasterAddress)
+  )
+    return null;
+  if (
+    r.circlePaymasterNetUsdc !== undefined &&
+    !isDecimalString(r.circlePaymasterNetUsdc)
+  )
+    return null;
+  if (
+    r.circleVerification !== undefined &&
+    r.circleVerification !== 'verified' &&
+    r.circleVerification !== 'client-reported' &&
+    r.circleVerification !== 'unreconciled'
+  )
+    return null;
 
   const clean: Payload = {
     flow: r.flow,
@@ -113,6 +137,13 @@ function validate(raw: unknown): Payload | null {
   if (r.errorMessage !== undefined) clean.errorMessage = r.errorMessage;
   if (r.bridge !== undefined) clean.bridge = r.bridge;
   if (r.sourceChainId !== undefined) clean.sourceChainId = r.sourceChainId;
+  if (r.provider !== undefined) clean.provider = r.provider;
+  if (r.circlePaymasterAddress !== undefined)
+    clean.circlePaymasterAddress = r.circlePaymasterAddress;
+  if (r.circlePaymasterNetUsdc !== undefined)
+    clean.circlePaymasterNetUsdc = r.circlePaymasterNetUsdc;
+  if (r.circleVerification !== undefined)
+    clean.circleVerification = r.circleVerification;
   return clean;
 }
 

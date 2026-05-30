@@ -34,7 +34,10 @@ import {
   buildPaymentLogEvent,
   logPaymentEvent,
   type PaymentLogContext,
+  type PaymentProvider,
+  type CircleVerificationStatus,
 } from '@/lib/paymentLog';
+import { verifyCircleReceiptOnChain } from '@/lib/circleReceiptVerifier';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -65,6 +68,13 @@ type BatchPaymentResult = {
   success: boolean;
   // UserOp が実際に消費した native gas コスト (wei)。sponsorship 収支の突合に使う。
   actualGasCost: bigint;
+  // --- 監査次元 (provider/Circle) ---
+  provider: PaymentProvider;
+  // 以下は circle 経路のみ。usePaymentHistory / paymentLog が監査に使う。
+  circlePaymasterAddress?: Address;
+  // client が receipt から再計算した net USDC (raw・client-reported)。verify 失敗時は undefined。
+  circlePaymasterNetUsdc?: string;
+  circleVerification?: CircleVerificationStatus;
 };
 
 export function useBatchPayment(
@@ -136,16 +146,20 @@ export function useBatchPayment(
         blockNumber: receipt.receipt.blockNumber,
         success: receipt.success,
         actualGasCost: receipt.actualGasCost,
+        provider: 'pimlico' as const,
       };
     },
     onSuccess: (data, params) => {
       void logPaymentEvent(
-        buildPaymentLogEvent(toCtx(params, customer, chainId, deployment), {
-          result: data.success ? 'success' : 'reverted',
-          userOpHash: data.userOpHash,
-          txHash: data.txHash,
-          blockNumber: data.blockNumber,
-        }),
+        buildPaymentLogEvent(
+          toCtx(params, customer, chainId, deployment, data),
+          {
+            result: data.success ? 'success' : 'reverted',
+            userOpHash: data.userOpHash,
+            txHash: data.txHash,
+            blockNumber: data.blockNumber,
+          },
+        ),
       );
       // revert 時は ERC20 transfer も atomic に巻き戻り feeReceiver は何も
       // 受け取らない (徴収 0)。collected に params.feeAmount を渡すと under-collect
@@ -237,7 +251,7 @@ async function runCirclePayment(args: {
 
   const calls = buildTransferCalls(params);
 
-  return executeCirclePayment({
+  const result = await executeCirclePayment({
     bundle,
     publicClient,
     walletClient,
@@ -246,6 +260,41 @@ async function runCirclePayment(args: {
     permitAmount,
     paymentAttemptId: params.paymentAttemptId ?? crypto.randomUUID(),
   });
+
+  // 監査: receipt から net USDC を再計算 (client-reported)。pending record の
+  // userOpHash/sender/paymaster を expected binding に使う。verify は best-effort で、
+  // 失敗しても確定済の決済を巻き込まない (net は undefined のまま)。サーバ側 verifier が
+  // 後で on-chain 由来の verified 値で上書きする。
+  let circlePaymasterNetUsdc: string | undefined;
+  let circleVerification: CircleVerificationStatus | undefined;
+  try {
+    const v = await verifyCircleReceiptOnChain({
+      publicClient,
+      txHash: result.txHash,
+      expected: {
+        userOpHash: result.userOpHash,
+        sender: customer,
+        paymaster: bundle.paymasterAddress,
+        token: bundle.deployment.address,
+      },
+    });
+    if (v.status === 'verified') {
+      circlePaymasterNetUsdc = v.netUsdc.toString();
+      circleVerification = 'client-reported';
+    } else {
+      circleVerification = 'unreconciled';
+    }
+  } catch {
+    circleVerification = 'unreconciled';
+  }
+
+  return {
+    ...result,
+    provider: 'circle',
+    circlePaymasterAddress: bundle.paymasterAddress,
+    circlePaymasterNetUsdc,
+    circleVerification,
+  };
 }
 
 // sponsorship 収支の実観測 (案A の units 次元残存リスクの監視)。
@@ -289,6 +338,8 @@ function toCtx(
   customer: Address | undefined,
   chainId: number | undefined,
   deployment: TokenDeployment,
+  // 成功結果 (provider/Circle 監査フィールド)。error 経路では undefined。
+  result?: BatchPaymentResult,
 ): PaymentLogContext {
   return {
     flow: 'batch',
@@ -299,5 +350,9 @@ function toCtx(
     customer,
     feeReceiver: params.feeReceiver,
     feeAmount: params.feeAmount,
+    provider: result?.provider,
+    circlePaymasterAddress: result?.circlePaymasterAddress,
+    circlePaymasterNetUsdc: result?.circlePaymasterNetUsdc,
+    circleVerification: result?.circleVerification,
   };
 }

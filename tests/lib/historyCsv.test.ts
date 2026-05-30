@@ -420,3 +420,40 @@ describe('historyCsvFilename', () => {
     expect(historyCsvFilename()).toBe('openpay-history-2026-12-31.csv');
   });
 });
+
+describe('CSV: Circle Paymaster 監査列 (Phase1)', () => {
+  it('circle entry は Paymaster種別 / ガス代USDC / 検証列を出力する', () => {
+    const e = entry({
+      asset: 'usdc',
+      provider: 'circle',
+      circlePaymasterAddress: '0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966',
+      circlePaymasterNetUsdc: '9000', // 6dp → 0.009
+      circleVerification: 'client-reported',
+    });
+    const csv = toCsv([e]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length)).filter((r) =>
+      r.some((c) => c.length > 0),
+    );
+    const header = rows[0];
+    const row = rows[1];
+    const iProvider = header.indexOf('Paymaster種別');
+    const iNet = header.indexOf('Circleガス代USDC(decimal)');
+    const iVerif = header.indexOf('Circleガス代検証');
+    expect(iProvider).toBeGreaterThan(-1);
+    expect(row[iProvider]).toBe('Circle');
+    expect(row[iNet]).toBe('0.009');
+    expect(row[iVerif]).toBe('client 申告 (未検証)');
+  });
+
+  it('非 circle entry は Circle 列が空', () => {
+    const csv = toCsv([entry({ provider: null })]);
+    const rows = parseCsv(csv.slice(CSV_BOM.length)).filter((r) =>
+      r.some((c) => c.length > 0),
+    );
+    const header = rows[0];
+    const row = rows[1];
+    expect(row[header.indexOf('Paymaster種別')]).toBe('');
+    expect(row[header.indexOf('Circleガス代USDC(decimal)')]).toBe('');
+    expect(row[header.indexOf('Circleガス代検証')]).toBe('');
+  });
+});

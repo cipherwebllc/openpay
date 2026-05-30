@@ -552,6 +552,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
         blockNumber: 99n,
         success: true,
         actualGasCost: 0n,
+        provider: 'pimlico' as const,
       },
       error: null,
     } as Partial<ReturnType<typeof useBatchPayment>>);
@@ -581,6 +582,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
         blockNumber: 100n,
         success: true,
         actualGasCost: 0n,
+        provider: 'pimlico' as const,
       },
       error: null,
     } as Partial<ReturnType<typeof useBatchPayment>>);

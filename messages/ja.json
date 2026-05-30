@@ -714,6 +714,7 @@
     "columnCustomer": "顧客",
     "columnTxHash": "Tx",
     "columnNote": "メモ",
+    "columnCircleGas": "Circleガス代 (USDC)",
     "columnActions": "操作",
     "statusSuccess": "成功",
     "statusReverted": "revert",

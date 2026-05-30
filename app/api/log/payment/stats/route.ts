@@ -67,6 +67,24 @@ type LogEntry = {
   // 送金は両者とも undefined、Gateway / CCTP V2 経由なら値が入る。
   bridge?: string;
   sourceChainId?: number;
+  // Phase1 Circle Paymaster 監査フィールド (gasless circle 経路のみ)。
+  provider?: string;
+  circlePaymasterNetUsdc?: string;
+  circleVerification?: string;
+};
+
+// gasless paymaster 系統別の集計 key。undefined provider (standard/legacy) は 'unknown'。
+export type PaymentProviderKey = 'pimlico' | 'circle' | 'unknown';
+
+type ProviderAgg = {
+  provider: PaymentProviderKey;
+  successCount: number;
+  revertedCount: number;
+  errorCount: number;
+  // circle のみ: client 申告 net USDC と on-chain verified net USDC を別計上
+  // (verified と client-reported を区別する・C2/C3)。
+  circleNetUsdcReported: bigint;
+  circleNetUsdcVerified: bigint;
 };
 
 type TokenAgg = {
@@ -140,14 +158,33 @@ function emptyBridgeAgg(bridge: PaymentBridgeKey): BridgeAgg {
   };
 }
 
+function normalizeProvider(raw: string | undefined): PaymentProviderKey {
+  if (raw === 'pimlico') return 'pimlico';
+  if (raw === 'circle') return 'circle';
+  return 'unknown';
+}
+
+function emptyProviderAgg(provider: PaymentProviderKey): ProviderAgg {
+  return {
+    provider,
+    successCount: 0,
+    revertedCount: 0,
+    errorCount: 0,
+    circleNetUsdcReported: 0n,
+    circleNetUsdcVerified: 0n,
+  };
+}
+
 function aggregate(entries: LogEntry[]): {
   chains: ChainAgg[];
   aggregatedCount: number;
   invalidEntries: number;
   byBridge: BridgeAgg[];
+  byProvider: ProviderAgg[];
 } {
   const byChain = new Map<number, ChainAgg>();
   const globalByBridge = new Map<PaymentBridgeKey, BridgeAgg>();
+  const globalByProvider = new Map<PaymentProviderKey, ProviderAgg>();
   let aggregatedCount = 0;
   let invalidEntries = 0;
 
@@ -227,11 +264,29 @@ function aggregate(entries: LogEntry[]): {
       continue;
     }
 
+    // provider 別集計 (standard-fee は上で continue 済)。
+    const providerKey = normalizeProvider(e.provider);
+    let provider = globalByProvider.get(providerKey);
+    if (!provider) {
+      provider = emptyProviderAgg(providerKey);
+      globalByProvider.set(providerKey, provider);
+    }
+
     if (result === 'success') {
       chain.successCount++;
       token.successCount++;
       chainBridge.successCount++;
       globalBridge.successCount++;
+      provider.successCount++;
+      // Circle gas 徴収 net を verified / client-reported に分けて計上 (C2/C3)。
+      if (providerKey === 'circle') {
+        const net = parseWei(e.circlePaymasterNetUsdc);
+        if (e.circleVerification === 'verified') {
+          provider.circleNetUsdcVerified += net;
+        } else {
+          provider.circleNetUsdcReported += net;
+        }
+      }
       // GMV は success のみ計上 (reverted は資金移動なし、error は submit 失敗)
       chain.totalMerchantWei += merchantWei;
       chain.totalFeeWei += feeWei;
@@ -246,11 +301,13 @@ function aggregate(entries: LogEntry[]): {
       token.revertedCount++;
       chainBridge.revertedCount++;
       globalBridge.revertedCount++;
+      provider.revertedCount++;
     } else {
       chain.errorCount++;
       token.errorCount++;
       chainBridge.errorCount++;
       globalBridge.errorCount++;
+      provider.errorCount++;
     }
   }
 
@@ -272,7 +329,13 @@ function aggregate(entries: LogEntry[]): {
     .map((k) => globalByBridge.get(k))
     .filter((b): b is BridgeAgg => b !== undefined);
 
-  return { chains, aggregatedCount, invalidEntries, byBridge };
+  // provider は固定順 ('pimlico' → 'circle' → 'unknown')。
+  const providerOrder: PaymentProviderKey[] = ['pimlico', 'circle', 'unknown'];
+  const byProvider = providerOrder
+    .map((k) => globalByProvider.get(k))
+    .filter((p): p is ProviderAgg => p !== undefined);
+
+  return { chains, aggregatedCount, invalidEntries, byBridge, byProvider };
 }
 
 function serializeBridges(bridges: BridgeAgg[]) {
@@ -283,6 +346,19 @@ function serializeBridges(bridges: BridgeAgg[]) {
     errorCount: b.errorCount,
     totalMerchantWei: b.totalMerchantWei.toString(),
     totalFeeWei: b.totalFeeWei.toString(),
+  }));
+}
+
+function serializeProviders(providers: ProviderAgg[]) {
+  return providers.map((p) => ({
+    provider: p.provider,
+    successCount: p.successCount,
+    revertedCount: p.revertedCount,
+    errorCount: p.errorCount,
+    // Circle gas 徴収 net (raw USDC)。verified = on-chain receipt 由来、
+    // reported = client 申告 (未検証)。両者を混ぜない。
+    circleNetUsdcVerified: p.circleNetUsdcVerified.toString(),
+    circleNetUsdcReported: p.circleNetUsdcReported.toString(),
   }));
 }
 
@@ -429,7 +505,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     return true;
   });
 
-  const { chains, aggregatedCount, invalidEntries, byBridge } =
+  const { chains, aggregatedCount, invalidEntries, byBridge, byProvider } =
     aggregate(filtered);
 
   return NextResponse.json({
@@ -465,5 +541,9 @@ export async function GET(req: Request): Promise<NextResponse> {
     // gateway / cctp-v2 = 各 bridge 経由の集計。新規 cross-chain UX が
     // どれくらい使われているかを直接観測できる metric。
     byBridge: serializeBridges(byBridge),
+    // provider 別集計 (Phase1 Circle Paymaster 並行対応)。pimlico / circle / unknown。
+    // circle は gas 徴収 net を verified (on-chain) と reported (client 申告) に分けて出す
+    // (C2/C3: 監査では両者を混同しない)。dataSource 注記の通り reported は未検証値。
+    byProvider: serializeProviders(byProvider),
   });
 }

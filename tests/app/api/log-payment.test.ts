@@ -720,3 +720,55 @@ describe('POST /api/log/payment: bridge field validation (phase 2)', () => {
     });
   });
 });
+
+describe('POST /api/log/payment — Circle Paymaster 監査フィールド (Phase1 C2/C3)', () => {
+  beforeEach(() => {
+    vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const circleBody = {
+    ...validBody,
+    chainId: 421614,
+    provider: 'circle' as const,
+    circlePaymasterAddress: '0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966',
+    circlePaymasterNetUsdc: '9000',
+    circleVerification: 'client-reported' as const,
+  };
+
+  it('circle 監査フィールドを受理し KV に保存する', async () => {
+    const res = await POST(req(circleBody));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry).toMatchObject({
+      provider: 'circle',
+      circlePaymasterAddress: circleBody.circlePaymasterAddress,
+      circlePaymasterNetUsdc: '9000',
+      circleVerification: 'client-reported',
+    });
+  });
+
+  it('不正な provider を reject', async () => {
+    const res = await POST(req({ ...circleBody, provider: 'bogus' }));
+    expect(res.status).toBe(400);
+    expect(kvLpush).not.toHaveBeenCalled();
+  });
+
+  it('circlePaymasterNetUsdc が非 decimal なら reject', async () => {
+    const res = await POST(req({ ...circleBody, circlePaymasterNetUsdc: '9_000' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('不正な circleVerification を reject', async () => {
+    const res = await POST(req({ ...circleBody, circleVerification: 'maybe' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('circlePaymasterAddress が address でなければ reject', async () => {
+    const res = await POST(req({ ...circleBody, circlePaymasterAddress: 'nope' }));
+    expect(res.status).toBe(400);
+  });
+});

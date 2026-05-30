@@ -42,6 +42,10 @@ const HEADER: readonly string[] = [
   'ブロック',
   'メモ',
   'エラー',
+  // v2 追加 (Circle Paymaster 監査)。既存列順を崩さないよう末尾に追加する。
+  'Paymaster種別',
+  'Circleガス代USDC(decimal)',
+  'Circleガス代検証',
 ];
 
 const INJECTION_PREFIX = /^[=+\-@]/;
@@ -96,6 +100,27 @@ function payModeLabel(payMode: HistoryEntry['payMode']): string {
   return payMode === 'gasless' ? 'ガスレス決済' : '通常決済 (ガスあり)';
 }
 
+function providerLabel(provider: HistoryEntry['provider']): string {
+  if (provider === 'circle') return 'Circle';
+  if (provider === 'pimlico') return 'Pimlico';
+  return ''; // standard / legacy は空
+}
+
+function circleVerificationLabel(
+  v: HistoryEntry['circleVerification'],
+): string {
+  switch (v) {
+    case 'verified':
+      return '検証済 (on-chain)';
+    case 'client-reported':
+      return 'client 申告 (未検証)';
+    case 'unreconciled':
+      return '未照合';
+    default:
+      return '';
+  }
+}
+
 function entryToRow(e: HistoryEntry): string[] {
   return [
     formatHistoryTimestamp(e.ts),
@@ -119,6 +144,10 @@ function entryToRow(e: HistoryEntry): string[] {
     e.blockNumber ?? '',
     e.note,
     e.errorMessage ?? '',
+    providerLabel(e.provider),
+    // Circle ガス代 (net USDC, 6dp)。circle 経路で算出済のみ、他は空。
+    e.circlePaymasterNetUsdc ? rawToDecimal(e.circlePaymasterNetUsdc, 'usdc') : '',
+    circleVerificationLabel(e.circleVerification),
   ];
 }
 
