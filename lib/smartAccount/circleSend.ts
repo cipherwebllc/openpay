@@ -67,6 +67,14 @@ const CONFIRMED_DEDUP_WINDOW_MS = 90 * 1000;
 // (confirmed を消す前に偶発二重決済の dedup 窓を確実に過ぎさせる)。
 const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
 
+// gcStalePreSubmit が pre-submit 孤児を「確実に死んでいる」とみなす閾値。
+// **PRE_SUBMIT_STALE_MS (3分) より遥かに長くする**こと。理由: GC は全 callHash 横断で
+// 走るため、別タブの正規だが低速な署名 (wallet popup を数分開けっ放し等) を 3分閾値で
+// 巻き込むと、その attempt の markSigned CAS が失敗し決済が壊れる (二重決済ではないが UX 破壊)。
+// 同一 callHash の「並行中だから新規を block するか」判断は guard が PRE_SUBMIT_STALE_MS で行い、
+// GC は純粋に容量管理 (どんな低速署名も到達しない長さ = 1時間) に限定して干渉を避ける。
+const PRE_SUBMIT_GC_MS = 60 * 60 * 1000;
+
 // cross-invocation ガードの処理優先度。confirmed/submitting を pre-submit より先に評価し、
 // stale でない pre-submit が confirmed/submitting を CirclePendingError で masked するのを防ぐ。
 function statusRank(s: PendingStatus): number {
@@ -225,9 +233,10 @@ export async function executeCirclePayment(
 
   // --- housekeeping (best-effort・決済本体に影響させない) ------------------
   // 放置された pre-submit 孤児 (別 attempt) を abandon し、古い終端 record を物理削除する。
-  // 自 attempt (key) は excludeKey で守る。GC 失敗は無視 (容量管理であって決済の前提ではない)。
+  // GC は PRE_SUBMIT_GC_MS (≫ PRE_SUBMIT_STALE_MS) を使い、別タブの正規だが低速な署名を
+  // 巻き込まない (容量管理に限定)。自 attempt (key) は excludeKey で守る。失敗は無視。
   try {
-    gcStalePreSubmit(PRE_SUBMIT_STALE_MS, now(), key);
+    gcStalePreSubmit(PRE_SUBMIT_GC_MS, now(), key);
     pruneTerminal(TERMINAL_RETENTION_MS, now());
   } catch {
     /* housekeeping 失敗は決済に影響しない */
