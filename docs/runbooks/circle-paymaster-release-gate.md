@@ -65,8 +65,8 @@ SMOKE_CHAIN=optimism SMOKE_MAINNET_OK=1 \
 > ### 2026-05-31 実測結果
 > | chain | gate | Circle gas | Pimlico gas | Circle÷Pimlico | 判定 |
 > |-------|------|-----------|-------------|----------------|------|
-> | Optimism (10) | ✅ PASS | ~0.0013 USDC | 0.00055 USDC | **~2.5×** | 有効化候補 (Base/Arb の 3-4× と同水準) |
-> | Polygon (137) | ✅ PASS | ~0.038 USDC | 0.0065 USDC | **~5.8×** | コスト高 — 有効化は要判断 (Pimlico 維持が無難) |
+> | Optimism (10) | ✅ PASS | ~0.0012 USDC | 0.0005 USDC | **2.31×** | **有効化済** (surcharge 1000bps 登録)。再ゲート: displayBase 0.001336 ≥ 実徴収 0.001156 → 表示基準 surcharge 0%、10% は policy + L1 cushion |
+> | Polygon (137) | ✅ PASS | ~0.038 USDC | 0.0065 USDC | **~5.8×** | コスト高 — 有効化見送り (Pimlico 維持) |
 > | Avalanche (43114) | ❌ FAIL | — | — | — | **7702 非互換**で有効化不可 (下記) |
 >
 > **Avalanche は ACP-209「EIP-7702 *style*」AA** で nonce/balance 扱いが canonical EIP-7702 と
@@ -178,8 +178,9 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
    **PASS かつ** 推奨値を `CIRCLE_GAS_SURCHARGE_BPS` に登録してから有効化 (C4)。未登録の間は
    `resolveUsdcGaslessProvider` が pimlico に倒すため自動的に Pimlico erc20 fallback。
    2026-05-31 実測 (上記「2026-05-31 実測結果」表):
-   - **Optimism**: PASS・Circle ≈ Pimlico の ~2.5×。有効化候補。
-   - **Polygon**: PASS だが Circle ≈ Pimlico の ~5.8× とコスト高。Pimlico 維持が無難 (要判断)。
+   - **Optimism**: ✅ **有効化済** (`[optimism.id]: 1000`)。表示基準 surcharge 実測 0%、10% は Base/Arb
+     と揃える policy + OP-stack L1 data fee 変動への cushion。Circle ≈ Pimlico の 2.31×。
+   - **Polygon**: PASS だが Circle ≈ Pimlico の ~5.8× とコスト高 → 有効化見送り (Pimlico 維持)。
    - **Avalanche**: ❌ ACP-209「7702 style」AA 非互換で 3 leg とも AA23・委任張れず。**有効化不可**
      (Circle/Pimlico 7702 とも)。canonical 7702 or 専用 AA 経路ができるまで保留。
    - **Ethereum L1 / Unichain は smoke 未整備**。L1 はガスが絶対額で高い (数$/tx) ため小額決済に

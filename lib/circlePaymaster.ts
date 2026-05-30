@@ -84,14 +84,17 @@ export const CIRCLE_GAS_SURCHARGE_BPS: Readonly<Record<number, number>> = {
   // dev docs: 10% surcharge は Arb/Base のみ)。SMOKE_CHAIN=arbitrum の実機ゲート通過を前提に有効化。
   [base.id]: 1000,
   [arbitrum.id]: 1000,
-  // ↑ 他 mainnet (OP/Polygon/Ethereum/Avalanche/Unichain) は 10% 非適用 + slippage spread が
-  //   未定量のため、各 chain の実機ゲートで実効 fee を実測してから登録する (C4)。
+  // Optimism: 2026-05-31 ゲート通過。実測の表示基準 surcharge は 0% (displayBaseUsdc 0.001336 ≥
+  // Circle 実徴収 0.001156)・Circle ≈ Pimlico の 2.31×。10% は Base/Arb と揃える policy 値で、
+  // OP-stack の L1 data fee 変動 (displayBase は L2 gas price ベースで L1 を追従しない・実徴収が
+  // displayBase の 87% を消費し raw headroom が ~15% しかない) への余裕も兼ねる。gate は 10% が
+  // 必要最小 0% を十分上回ることを確認済 (permit 側は 10× 係数で実徴収を常にカバー・revert なし)。
+  [optimism.id]: 1000,
+  // ↑ 他 mainnet (Polygon/Ethereum/Avalanche/Unichain) は未登録 = Circle 無効 (Pimlico erc20 に倒れる)。
   //   gate (SMOKE_CHAIN=...) が recommendedSurchargeBps + circleVsPimlicoRatio を出力する。
   //   2026-05-31 実測 (docs/runbooks):
-  //     - Optimism (10):   PASS・Circle ≈ Pimlico の ~2.5×。有効化候補 (未登録のまま判断待ち)。
-  //     - Polygon (137):   PASS だが Circle ≈ Pimlico の ~5.8× とコスト高 → Pimlico 維持が無難。
+  //     - Polygon (137):     PASS だが Circle ≈ Pimlico の ~5.8× とコスト高 → Pimlico 維持 (有効化見送り)。
   //     - Avalanche (43114): ❌ ACP-209「7702 style」AA 非互換で委任張れず (AA23)。有効化不可。
-  //   未登録の間は resolveUsdcGaslessProvider が pimlico に倒れて安全 (= 現状)。
   // testnet (QA 用・本番 mainnet NETWORK_ENV では非活性)
   [arbitrumSepolia.id]: 1000,
   [baseSepolia.id]: 1000,
