@@ -29,16 +29,18 @@ import {
 } from 'viem/account-abstraction';
 import { to7702SimpleSmartAccount } from 'permissionless/accounts';
 import {
+  CIRCLE_MIN_POSTOP_GAS,
+  requireCirclePaymasterAddress,
+} from '@/lib/circlePaymaster';
+import {
   assertCirclePaymasterDeployed,
   assertPermitDomain,
   buildPermitTypedData,
-  CIRCLE_MIN_POSTOP_GAS,
   encodeCirclePaymasterData,
   normalizePermitSignature,
   readPermitDomain,
   readPermitNonce,
-  requireCirclePaymasterAddress,
-} from '@/lib/circlePaymaster';
+} from '@/lib/circlePermit';
 import { pimlicoUrl } from '@/lib/pimlico';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';

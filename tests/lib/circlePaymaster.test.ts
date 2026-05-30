@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { encodePacked, getAddress, type Address, type Hex } from 'viem';
+// permit ヘルパは flag 非依存の純関数で lib/circlePermit.ts に分離済 (bundle 対策)。
+// loadWithFlag (flag toggling) は不要なので静的 import で直接検証する。
+import {
+  encodeCirclePaymasterData,
+  buildPermitTypedData,
+  assertPermitDomain,
+} from '@/lib/circlePermit';
 
 // env (flag) はモジュール評価時に確定するため、flag を変える test は
 // process.env 設定 → vi.resetModules() → dynamic import の順で観測する。
@@ -121,11 +128,10 @@ describe('resolveUsdcGaslessProvider', () => {
 
 describe('encodeCirclePaymasterData', () => {
   it('abi.encodePacked(uint8(0), usdc, amount, sig) と一致する', async () => {
-    const { circle } = await loadWithFlag(false);
     const token = getAddress('0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d');
     const permitAmount = 5_000_000n;
     const sig = `0x${'ab'.repeat(65)}` as Hex;
-    const got = circle.encodeCirclePaymasterData({
+    const got = encodeCirclePaymasterData({
       token,
       permitAmount,
       permitSignature: sig,
@@ -140,10 +146,9 @@ describe('encodeCirclePaymasterData', () => {
 
 describe('buildPermitTypedData', () => {
   it('deadline=MAX_UINT256 / primaryType=Permit / 全 field を含む', async () => {
-    const { circle } = await loadWithFlag(false);
     const owner = getAddress('0x1111111111111111111111111111111111111111');
     const spender = TESTNET_V08;
-    const td = circle.buildPermitTypedData({
+    const td = buildPermitTypedData({
       domain: {
         name: 'USDC',
         version: '2',
@@ -177,9 +182,8 @@ describe('assertPermitDomain', () => {
   };
 
   it('一致すれば throw しない', async () => {
-    const { circle } = await loadWithFlag(false);
     expect(() =>
-      circle.assertPermitDomain(domain, {
+      assertPermitDomain(domain, {
         chainId: 421614,
         token: domain.verifyingContract,
       }),
@@ -187,9 +191,8 @@ describe('assertPermitDomain', () => {
   });
 
   it('chainId 不一致で throw', async () => {
-    const { circle } = await loadWithFlag(false);
     expect(() =>
-      circle.assertPermitDomain(domain, {
+      assertPermitDomain(domain, {
         chainId: 8453,
         token: domain.verifyingContract,
       }),
@@ -197,9 +200,8 @@ describe('assertPermitDomain', () => {
   });
 
   it('verifyingContract 不一致で throw', async () => {
-    const { circle } = await loadWithFlag(false);
     expect(() =>
-      circle.assertPermitDomain(domain, {
+      assertPermitDomain(domain, {
         chainId: 421614,
         token: getAddress('0x0000000000000000000000000000000000000abc'),
       }),
