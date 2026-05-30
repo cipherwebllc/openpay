@@ -47,10 +47,6 @@ import {
   type TokenSymbol,
 } from './tokens';
 
-// PayMode は lib/fee.ts で定義 (fee 計算が depend するため fee.ts を SoT に)。
-// URL 利用者向けに re-export して既存 import path を維持する。
-export type { PayMode };
-
 export type SplitEntry = {
   to: Address;
   // 1〜99 の整数 %。合計が 100 未満であること (残余を主 to が取得)。

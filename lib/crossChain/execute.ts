@@ -40,6 +40,7 @@ import {
   type BuildBurnIntentOverrides,
 } from './gateway';
 import type {
+  AttestationResponse,
   CircleDomain,
   FetchLike,
   SignedBurnIntentRequest,
@@ -176,9 +177,9 @@ async function settleMint(args: {
 
 export interface GatewayResumeState {
   /** merchant 本送金の attestation (取得済なら再 sign せず再利用 = 二重 debit 防止) */
-  merchantAttestation?: { attestation: Hex; signature: Hex };
+  merchantAttestation?: AttestationResponse;
   /** OpenPay 利用料 (operator 宛) の attestation */
-  feeAttestation?: { attestation: Hex; signature: Hex };
+  feeAttestation?: AttestationResponse;
   /** merchant mint 完了 tx */
   mintTxHash?: Hex;
   /** fee mint 完了 tx */
@@ -338,7 +339,7 @@ export async function executeGatewayTransfer(
     args.destChainId,
   );
 
-  const mint = (att: { attestation: Hex; signature: Hex }): Promise<Hex> => {
+  const mint = (att: AttestationResponse): Promise<Hex> => {
     const data = encodeGatewayMintCalldata(att.attestation, att.signature);
     return args.walletClient.sendTransaction({
       account: args.account,

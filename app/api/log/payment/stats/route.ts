@@ -124,7 +124,13 @@ type ChainAgg = {
 // validation: KV から取り出した entry が集計対象として有効か。raw export は
 // 別 endpoint で出すのでここでは strict — chainId / tokenAddress / result が
 // 揃った entry のみ集計に含める。
-function isAggregable(e: LogEntry): boolean {
+function isAggregable(
+  e: LogEntry,
+): e is LogEntry & {
+  chainId: number;
+  tokenAddress: string;
+  result: 'success' | 'reverted' | 'error';
+} {
   if (typeof e.chainId !== 'number' || !Number.isInteger(e.chainId)) return false;
   if (typeof e.tokenAddress !== 'string') return false;
   if (e.result !== 'success' && e.result !== 'reverted' && e.result !== 'error') {
@@ -194,9 +200,9 @@ function aggregate(entries: LogEntry[]): {
       continue;
     }
     aggregatedCount++;
-    const chainId = e.chainId as number;
-    const tokenAddress = (e.tokenAddress as string).toLowerCase();
-    const result = e.result as 'success' | 'reverted' | 'error';
+    const chainId = e.chainId;
+    const tokenAddress = e.tokenAddress.toLowerCase();
+    const result = e.result;
     const merchantWei = parseWei(e.merchantAmount);
     const feeWei = parseWei(e.feeAmount);
     const bridgeKey = normalizeBridge(e.bridge);

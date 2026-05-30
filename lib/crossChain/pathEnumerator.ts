@@ -212,8 +212,3 @@ function chainIdForDomainLocal(
   // ここで undefined を返しても上流の決済は壊れない。
   return undefined;
 }
-
-// 上流 (router.ts の selectPath) と整合性を保つための helper export。
-// 将来 router.ts と enumerator を統合する余地があるため、共通の domain
-// resolution を将来 refactor で 1 箇所にまとめる候補。
-export { domainForChainId as enumeratorDomainForChainId };

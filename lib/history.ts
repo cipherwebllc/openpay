@@ -22,7 +22,12 @@
 import { safeGet, safeSet } from './storage';
 import { logger } from './logger';
 import type { GasMode, PayMode } from './fee';
-import type { PaymentFlow, PaymentResult } from './paymentLog';
+import type {
+  CircleVerificationStatus,
+  PaymentFlow,
+  PaymentProvider,
+  PaymentResult,
+} from './paymentLog';
 import type { TokenSymbol } from './tokens';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
@@ -69,14 +74,16 @@ export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
 // フィールドを追加。legacy(v1) は MIGRATIONS[1] で新フィールド=null backfill (drop しない)。
 export const LATEST_SCHEMA_VERSION = 2 as const;
 
-/** どの paymaster 系統で送ったか。legacy(v1) entry は記録が無いため null。 */
-export type HistoryProvider = 'pimlico' | 'circle';
+/** どの paymaster 系統で送ったか。legacy(v1) entry は記録が無いため null。
+ * SoT は lib/paymentLog.ts の PaymentProvider (history→paymentLog の一方向 import)。 */
+export type HistoryProvider = PaymentProvider;
 
 /** Circle 徴収額 (circlePaymasterNetUsdc) の検証ステータス。
  * - verified: on-chain receipt から server/offline verifier が再計算した確定値
  * - client-reported: client が receipt から算出 (改竄可能性あり・参考値)
- * - unreconciled: receipt 照合不能 (txHash 解決不可・binding 不一致 等) */
-export type CircleVerification = 'verified' | 'client-reported' | 'unreconciled';
+ * - unreconciled: receipt 照合不能 (txHash 解決不可・binding 不一致 等)
+ * SoT は lib/paymentLog.ts の CircleVerificationStatus。 */
+export type CircleVerification = CircleVerificationStatus;
 
 export type HistoryEntry = {
   /** schema version. 新規 entry は常に LATEST_SCHEMA_VERSION を持つ。 */
