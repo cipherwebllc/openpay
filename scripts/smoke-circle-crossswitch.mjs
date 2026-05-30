@@ -59,7 +59,6 @@ import { createSmartAccountClient } from 'permissionless';
 import { to7702SimpleSmartAccount } from 'permissionless/accounts';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { prepareUserOperationForErc20Paymaster } from 'permissionless/experimental/pimlico';
-import { entryPoint07Address } from 'viem/account-abstraction';
 
 const CHAIN = arbitrumSepolia;
 // Arbitrum Sepolia の値 (lib/tokens.ts / lib/circlePaymaster.ts と一致)。
@@ -148,9 +147,11 @@ async function pimlicoLeg({ owner, publicClient, bundlerTransport, label }) {
   section(`[${label}] Pimlico ERC20 Paymaster 経由 (v0.8 account)`);
   const pimlicoClient = createPimlicoClient({
     transport: bundlerTransport,
-    // 本番 lib/pimlico.ts createPimlico と同じ設定。account は v0.8 だが paymaster
-    // action は account.entryPoint を使うため送信は v0.8 で行われる。
-    entryPoint: { address: entryPoint07Address, version: '0.7' },
+    // account は v0.8 (permissionless to7702)。Pimlico client も v0.8 に揃える。
+    // ⚠️ 本番 lib/pimlico.ts createPimlico は entryPoint07 のままで、v0.8 account と
+    // 混ざると erc20 paymaster の approve spender (v0.8) と paymaster 指定 (v0.7) が
+    // 食い違い AA50 postOp revert する (本スモークで判明)。本番側も要修正。
+    entryPoint: { address: entryPoint08Address, version: '0.8' },
   });
   const account = await to7702SimpleSmartAccount({ client: publicClient, owner });
   log(`account: ${account.address} entryPoint=${account.entryPoint?.address} v${account.entryPoint?.version}`);
