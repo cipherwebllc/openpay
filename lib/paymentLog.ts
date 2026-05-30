@@ -31,6 +31,14 @@ export type CircleVerificationStatus =
   | 'client-reported'
   | 'unreconciled';
 
+// client (ブラウザ) が log API に申告してよい検証ステータス。'verified' は server 側
+// verifier (verifyCircleReceiptOnChain) のみが付与でき、client 申告は forge 扱いで拒否する。
+// CircleVerificationStatus に状態を足したとき route が自動追従するよう Exclude で導出する。
+export type ClientReportedCircleVerification = Exclude<
+  CircleVerificationStatus,
+  'verified'
+>;
+
 export type PaymentLogEvent = {
   flow: PaymentFlow;
   result: PaymentResult;

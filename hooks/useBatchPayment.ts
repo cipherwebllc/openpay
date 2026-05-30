@@ -302,16 +302,17 @@ async function runCirclePayment(args: {
       circleVerification = 'client-reported';
     } else {
       circleVerification = 'unreconciled';
-      // unreconciled の reason を必ず記録。paymaster/sender 不一致は permit spender =
-      // 信頼境界の破れ (想定外/悪意 paymaster が顧客 USDC を pull した RED FLAG) なので
-      // error 段で上げ、RPC flake (catch 側) と log key/severity を分離する。
-      const bindingViolation = /paymaster|sender/.test(v.reason);
+      // 構造化 kind で分類 (reason 文字列の regex マッチに依存しない)。binding 不一致
+      // (paymaster/sender) は permit spender = 信頼境界の破れ (想定外/悪意 paymaster が
+      // 顧客 USDC を pull した RED FLAG) なので error、それ以外 (revert/no-charge/absent) は warn。
+      const bindingViolation =
+        v.kind === 'binding-paymaster' || v.kind === 'binding-sender';
       const entry = {
+        kind: v.kind,
         reason: v.reason,
         userOpHash: result.userOpHash,
         sender: customer,
         paymaster: bundle.paymasterAddress,
-        bindingViolation,
       };
       if (bindingViolation) logger.error('circle.receipt.binding-violation', entry);
       else logger.warn('circle.receipt.unreconciled', entry);
