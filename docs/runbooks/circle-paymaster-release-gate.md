@@ -5,25 +5,44 @@
 >
 > 計画: `docs/plans/circle-paymaster-phase1.md` §5 (C5)、§6 (段階リリース)。
 
+## 最短実行 (UI 不要・推奨)
+
+```bash
+SMOKE_PRIVATE_KEY=0x<使い捨てtestnet鍵> \
+  PIMLICO_API_KEY=<your-key> \
+  node scripts/smoke-circle-crossswitch.mjs
+```
+
+鍵が無ければ `SMOKE_PRIVATE_KEY` 未設定で 1 度実行すると使い捨て鍵とアドレスが
+表示される → その ADDRESS に Arbitrum Sepolia USDC を ~1 入れて (faucet.circle.com)
+同じ鍵で再実行。スクリプトが **Pimlico → Circle → Pimlico の 3 leg** を同一 EOA で
+送信し、receipt・徴収 USDC・委任先を検証して **PASS / FAIL** を出す (下記受入基準を自動判定)。
+MetaMask への鍵インポートや flag 再起動は不要 (ローカル鍵が自前で 7702 委任を bootstrap)。
+
+> UI で確認したい場合は末尾「UI で確認する場合」を参照 (要: 委任済 EOA のインポート)。
+
 ## なぜ手動ゲートが必要か
 
 Phase 1 の実装 (chunk 1–5) は unit / integration test で担保済みだが、以下は
 **実機 (テストネット) でしか検証できない**:
 
-- **EntryPoint 二系統の同一 EOA 往復**: JPYC = EntryPoint v0.7 (Pimlico)、
-  USDC-circle = EntryPoint v0.8 (Circle)。委任先 impl は両系統とも
-  `0xe6Cae83BdE06E4c305530e199D7217f42808555B` (spike 実証) だが、
-  `accountDetection.ts` は delegate アドレスしか見ないため、**nonce 名前空間 /
-  validation / paymaster データ差**は send 時にしか露見しない。delegate 一致 ≠
-  両 EntryPoint で送信成功、を実 receipt で潰す。
+- **同一 EOA での paymaster 往復**: ⚠️ 重要な事実 — permissionless / viem の 7702
+  SimpleAccount は **EntryPoint v0.8 専用**。よって本番 Pimlico 経路 (`simpleAccount.ts`)
+  も Circle 経路も **同一の EntryPoint v0.8 + 同一 impl `0xe6Cae83…`** で、差は
+  **paymaster だけ** (Pimlico ERC20 ↔ Circle Paymaster)。nonce 空間は単一なので
+  「二系統 EntryPoint の nonce 衝突」懸念は実は無いが、**同一 EOA で paymaster を
+  切替えても validation / 送信が連続成功するか**は実 receipt でしか確証できない。
+  (注: `SmartAccountBundle.entryPointVersion='0.7'` タグは label の名残で不正確。
+  実送信は v0.8。runtime は `provider` で分岐するため害は無いが、別途整理推奨。)
 - **Circle の実 USDC 徴収額**が表示 permitAmount 以内に収まるか
   (`useGasQuoteCircle` の surcharge 算定の妥当性)。
 - **二重決済 FSM の応答ロスト復旧** (`lib/circlePending.ts` + `circleSend.ts`) が
-  実 bundler timeout で意図通り動くか。
+  実 bundler timeout で意図通り動くか (UI 経路のみ・スクリプトは送信成功面のみ)。
 
 Phase 0 spike (`scripts/spike-circle-paymaster.mjs`、Arbitrum Sepolia) は
 「Circle 単体が動く」ことは実証済 (= GO)。本ゲートはそれに **「同一 EOA で
-Pimlico(v0.7) ↔ Circle(v0.8) を往復しても壊れない」** を足すもの。
+Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を足すもの
+(`scripts/smoke-circle-crossswitch.mjs`)。
 
 ## 前提
 
@@ -38,7 +57,12 @@ Pimlico(v0.7) ↔ Circle(v0.8) を往復しても壊れない」** を足すも�
 > sponsorship testnet (polygonAmoy 等) は別 chain。「往復」は **同一 EOA が**
 > chain をまたいで両経路を成功させることを指す (同一 chain で両方を要求しない)。
 
-## 手順
+## UI で確認する場合 (補助・要: 委任済 EOA)
+
+> ⚠️ 新規 MetaMask EOA は pristine (`detection.kind='none'`) で **standard mode に
+> 倒れ Circle に行かない**。UI で Circle を踏むには **0xe6Cae83 に委任済の EOA**
+> (= 上記スクリプト/spike を一度通した鍵) を MetaMask にインポートする必要がある。
+> 委任が無い状態で確認したいだけなら**スクリプト経路を使う方が速い**。
 
 1. **flag を一時的に ON** にしたローカル/preview で実施 (本番 flag は触らない):
    ```
