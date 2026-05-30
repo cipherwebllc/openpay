@@ -27,6 +27,7 @@
         "categories:best-practices": ["warn", { "minScore": 0.85 }],
         "categories:seo": ["warn", { "minScore": 0.9 }],
         "uses-text-compression": "warn",
+        "uses-responsive-images": "warn",
         "uses-rel-preconnect": "off",
         "render-blocking-resources": ["warn", { "maxLength": 3 }],
         "unused-javascript": ["warn", { "maxLength": 5 }],
