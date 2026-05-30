@@ -46,7 +46,8 @@ type Payload = {
   provider?: 'pimlico' | 'circle';
   circlePaymasterAddress?: Address;
   circlePaymasterNetUsdc?: string;
-  circleVerification?: 'verified' | 'client-reported' | 'unreconciled';
+  // client 経路では 'verified' は受理しない (server verifier 専用)。
+  circleVerification?: 'client-reported' | 'unreconciled';
 };
 
 function isDecimalString(v: unknown): v is string {
@@ -111,9 +112,12 @@ function validate(raw: unknown): Payload | null {
     !isDecimalString(r.circlePaymasterNetUsdc)
   )
     return null;
+  // ⚠️ 'verified' は **server/offline verifier が on-chain receipt で再計算した時のみ**
+  // 付与してよい値。本 endpoint は未認証で client 申告なので 'verified' を **拒否**する
+  // (client が verified Circle gas 総額を偽装し stats の verified bucket を汚染するのを防ぐ)。
+  // client が報告できるのは 'client-reported' / 'unreconciled' のみ。
   if (
     r.circleVerification !== undefined &&
-    r.circleVerification !== 'verified' &&
     r.circleVerification !== 'client-reported' &&
     r.circleVerification !== 'unreconciled'
   )

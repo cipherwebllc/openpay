@@ -104,6 +104,9 @@ export type PendingRecord = {
   permitDigest?: Hex;
   // confirmed 時。
   txHash?: Hex;
+  /** receipt の success (UserOp が revert せず実行されたか)。confirmed 時に永続。
+   * resultFromConfirmed の receipt 再取得失敗時に success を捏造しないために使う。 */
+  success?: boolean;
   // failed 時。
   errorMessage?: string;
 };
@@ -314,7 +317,12 @@ function transition(args: {
   patch?: Partial<
     Pick<
       PendingRecord,
-      'signedUserOp' | 'userOpHash' | 'permitDigest' | 'txHash' | 'errorMessage'
+      | 'signedUserOp'
+      | 'userOpHash'
+      | 'permitDigest'
+      | 'txHash'
+      | 'success'
+      | 'errorMessage'
     >
   >;
 }): PendingRecord {
@@ -403,11 +411,13 @@ export function markSubmitting(args: {
   });
 }
 
-/** submitting → confirmed (receipt 取得)。 */
+/** submitting → confirmed (receipt 取得)。success は receipt.success を永続する
+ * (resultFromConfirmed が receipt 再取得に失敗しても success を捏造しないため)。 */
 export function markConfirmed(args: {
   key: string;
   sender: Address;
   txHash: Hex;
+  success: boolean;
   now: number;
 }): PendingRecord {
   return transition({
@@ -416,7 +426,7 @@ export function markConfirmed(args: {
     from: ['submitting', 'confirmed'],
     to: 'confirmed',
     now: args.now,
-    patch: { txHash: args.txHash },
+    patch: { txHash: args.txHash, success: args.success },
   });
 }
 
@@ -456,6 +466,19 @@ export function abandon(args: {
 
 // ---- recovery scan ---------------------------------------------------------
 
+// PENDING_KEY_PREFIX の全 record を走査し predicate に合うものを返す共有ヘルパ。
+function scanPending(match: (r: PendingRecord) => boolean): PendingRecord[] {
+  const storage = requireStorage();
+  const out: PendingRecord[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const k = storage.key(i);
+    if (!k || !k.startsWith(PENDING_KEY_PREFIX)) continue;
+    const record = loadPendingRecord(k.slice(PENDING_KEY_PREFIX.length));
+    if (record && match(record)) out.push(record);
+  }
+  return out;
+}
+
 /** reload 後など paymentAttemptId を失った状況で、復旧対象 (submitting のまま宙吊り)
  * の record を sender + chainId の二次 index でスキャンする。呼出側は各 record を
  * userOpHash receipt 照会 → 無ければ *同一署名 op* の冪等 rebroadcast で確定させる。 */
@@ -463,23 +486,36 @@ export function findRecoverable(args: {
   sender: Address;
   chainId: number;
 }): PendingRecord[] {
-  const storage = requireStorage();
   const sender = normalizeAddress(args.sender);
-  const out: PendingRecord[] = [];
-  for (let i = 0; i < storage.length; i += 1) {
-    const k = storage.key(i);
-    if (!k || !k.startsWith(PENDING_KEY_PREFIX)) continue;
-    const record = loadPendingRecord(k.slice(PENDING_KEY_PREFIX.length));
-    if (!record) continue;
-    if (
-      record.status === 'submitting' &&
-      record.sender === sender &&
-      record.chainId === args.chainId
-    ) {
-      out.push(record);
-    }
-  }
-  return out;
+  return scanPending(
+    (r) =>
+      r.status === 'submitting' &&
+      r.sender === sender &&
+      r.chainId === args.chainId,
+  );
+}
+
+/** 同一決済 (sender+chainId+callHash) の「生きている」record (abandoned/failed 以外 =
+ * reserved/awaiting_signature/signed/submitting/confirmed) を列挙する。cross-invocation の
+ * 二重決済ガードに使う: paymentAttemptId が呼出毎に変わっても callHash で別 attempt を検出し、
+ * confirmed なら既支払い・submitting なら recover・pre-submit なら並行署名中として扱う。
+ * excludeKey で自 attempt の record を除外する (reserveOrResume の同一キー resume と二重に扱わない)。 */
+export function findLiveByCallHash(args: {
+  sender: Address;
+  chainId: number;
+  callHash: Hex;
+  excludeKey?: string;
+}): PendingRecord[] {
+  const sender = normalizeAddress(args.sender);
+  return scanPending(
+    (r) =>
+      r.sender === sender &&
+      r.chainId === args.chainId &&
+      r.callHash === args.callHash &&
+      r.key !== args.excludeKey &&
+      r.status !== 'abandoned' &&
+      r.status !== 'failed',
+  );
 }
 
 /** confirmed / failed / abandoned の終端 record を掃除する (任意・容量管理)。

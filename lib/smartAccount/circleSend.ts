@@ -35,7 +35,7 @@ import {
   abandon,
   computeCallHash,
   computeIdempotencyKey,
-  findRecoverable,
+  findLiveByCallHash,
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
@@ -46,6 +46,12 @@ import {
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
 import type { PublicClient } from 'viem';
+
+// pre-submit (reserved/awaiting_signature/signed) record をどれだけ「進行中」とみなすか。
+// これを超えて更新されていない pre-submit は reload で見捨てられた orphan とみなし、
+// cross-invocation ガードで block せず abandon して掃除する (恒久ブロック防止)。署名 popup を
+// 2 つ跨いでも通常は数秒〜数十秒なので 3 分は十分長い安全側。
+const PRE_SUBMIT_STALE_MS = 3 * 60 * 1000;
 
 export type CirclePaymentResult = {
   userOpHash: Hex;
@@ -61,10 +67,11 @@ export type CirclePaymentResult = {
  * **失敗ではない** — op は後で included しうるし、findRecoverable で復旧できる。UI は
  * 「送信済・確認待ち。再読み込みしても二重決済にならない」と案内する。 */
 export class CirclePendingError extends Error {
-  readonly userOpHash: Hex;
-  constructor(userOpHash: Hex) {
+  /** 確認待ち op の hash。pre-submit (まだ未署名/未 broadcast の別 attempt 検出) では undefined。 */
+  readonly userOpHash?: Hex;
+  constructor(userOpHash?: Hex) {
     super(
-      'USDC ガスレス決済を送信しましたが、確定の確認に時間がかかっています。' +
+      'USDC ガスレス決済を処理中です (確認待ち、または別タブで進行中)。' +
         'ページを再読み込みしても二重決済にはなりません (自動で復旧を試みます)。',
     );
     this.name = 'CirclePendingError';
@@ -142,6 +149,7 @@ async function recoverSubmitting(args: {
       key: record.key,
       sender,
       txHash: receipt.receipt.transactionHash,
+      success: receipt.success,
       now: now(),
     });
     return toResult(hash, receipt);
@@ -175,28 +183,43 @@ export async function executeCirclePayment(
   const sender = owner;
   const chainId = bundle.chainId;
   const callHash = computeCallHash(calls);
-
-  // --- cross-invocation recovery -----------------------------------------
-  // reload / timeout 後の再クリックで、同じ決済 (同一 callHash) の submitting 宙吊りが
-  // あれば **新規送信せず** それを確定させる。これが「応答ロスト→再試行で二重決済」の
-  // 主要ガード。
-  const inflight = findRecoverable({ sender, chainId }).filter(
-    (r) => r.callHash === callHash,
-  );
-  for (const rec of inflight) {
-    const recovered = await recoverSubmitting({ bundle, record: rec, sender, now });
-    if (recovered) return recovered;
-    // まだ confirm できない → 新規送信は危険なので pending を投げて待たせる。
-    throw new CirclePendingError(rec.userOpHash as Hex);
-  }
-
-  // --- reserve (idempotency gate) ----------------------------------------
   const key = computeIdempotencyKey({
     chainId,
     sender,
     paymentAttemptId: args.paymentAttemptId,
     callHash,
   });
+
+  // --- cross-invocation 二重決済ガード ------------------------------------
+  // paymentAttemptId は呼出毎に変わりうるので、冪等キー一致 (reserveOrResume) だけでは
+  // 別 attempt (別タブ/別デバイス/reload/再クリック) を捕捉できない。**callHash で同一決済の
+  // 生きている別 record を全状態スキャン**し、自 attempt (excludeKey) 以外が在れば新規 op を
+  // 作らない:
+  //   confirmed  → 既に支払い済 → その結果を返す (冪等)。
+  //   submitting → recover (receipt 照会 or 同一署名 op の冪等 rebroadcast)。
+  //   pre-submit → 別 attempt が署名中 → 並行 broadcast を作らず CirclePendingError。
+  //                ただし stale な orphan (reload 放置) は abandon して block しない。
+  const live = findLiveByCallHash({ sender, chainId, callHash, excludeKey: key });
+  for (const rec of live) {
+    if (rec.status === 'confirmed') {
+      return await resultFromConfirmed(bundle, rec);
+    }
+    if (rec.status === 'submitting') {
+      const recovered = await recoverSubmitting({ bundle, record: rec, sender, now });
+      if (recovered) return recovered;
+      throw new CirclePendingError(rec.userOpHash);
+    }
+    // reserved / awaiting_signature / signed (pre-submit・未 broadcast)。
+    if (now() - rec.updatedAt > PRE_SUBMIT_STALE_MS) {
+      // reload で見捨てられた orphan → abandon して掃除し、block しない。
+      abandon({ key: rec.key, sender, now: now() });
+      continue;
+    }
+    // 直近の pre-submit = 別 attempt が署名中。並行 broadcast を作らない。
+    throw new CirclePendingError(rec.userOpHash);
+  }
+
+  // --- reserve (idempotency gate・自 attempt のクラッシュ resume) ----------
   const { record, resumed } = reserveOrResume({
     key,
     chainId,
@@ -297,6 +320,7 @@ export async function executeCirclePayment(
       key,
       sender,
       txHash: receipt.receipt.transactionHash,
+      success: receipt.success,
       now: now(),
     });
     return toResult(userOpHash, receipt);
@@ -311,7 +335,9 @@ export async function executeCirclePayment(
 }
 
 // confirmed record から結果を復元する (resume 時)。actualGasCost は recovery では
-// 取れないので receipt 再照会で success/txHash/blockNumber を埋め、無ければ record 値。
+// 取れないので receipt 再照会で success/txHash/blockNumber を埋め、無ければ **永続済の
+// record.success** を使う (receipt 取得失敗時に success:true を捏造して revert 済 op を
+// 成功誤報告しない)。record.success が未確定 (旧 record) なら false 側に倒す。
 async function resultFromConfirmed(
   bundle: CircleSmartAccountBundle,
   record: PendingRecord,
@@ -323,7 +349,7 @@ async function resultFromConfirmed(
     userOpHash: hash,
     txHash: (record.txHash ?? ('0x' as Hex)) as Hex,
     blockNumber: 0n,
-    success: true,
+    success: record.success ?? false,
     actualGasCost: 0n,
   };
 }

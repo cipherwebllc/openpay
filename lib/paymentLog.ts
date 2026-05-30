@@ -97,7 +97,7 @@ export function buildPaymentLogEvent(
         txHash?: Hex;
         blockNumber?: bigint;
       }
-    | { result: 'error'; errorMessage: string; txHash?: Hex },
+    | { result: 'error'; errorMessage: string; txHash?: Hex; userOpHash?: Hex },
 ): PaymentLogEvent {
   const base: PaymentLogEvent = {
     flow: ctx.flow,
@@ -118,7 +118,14 @@ export function buildPaymentLogEvent(
     circleVerification: ctx.circleVerification,
   };
   if (outcome.result === 'error') {
-    return { ...base, errorMessage: outcome.errorMessage.slice(0, 500), txHash: outcome.txHash };
+    // Circle の確認待ち (CirclePendingError) は broadcast 済 op を持つので userOpHash を
+    // 監査に残す (未 retry でも submitted op handle を失わない)。
+    return {
+      ...base,
+      errorMessage: outcome.errorMessage.slice(0, 500),
+      txHash: outcome.txHash,
+      userOpHash: outcome.userOpHash,
+    };
   }
   return {
     ...base,
