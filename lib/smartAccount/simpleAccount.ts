@@ -25,15 +25,15 @@ import type { TokenDeployment } from '@/lib/tokens';
 
 export type SimpleAccountClient = SmartAccountClient;
 
-// Pimlico (EntryPoint v0.7) 経路の bundle。Circle Paymaster (v0.8) 経路を
-// 並行導入したため、provider/entryPointVersion を discriminant に持たせて
-// CircleSmartAccountBundle との discriminated union (lib/smartAccount/circleAccount.ts
-// の AnySmartAccountBundle) を構成する。既存 consumer (useBatchPayment) は
-// provider==='pimlico' に narrow した上で従来通り smartAccountClient/pimlicoClient
-// を使う。
+// Pimlico paymaster を使う bundle (3 builder で共有)。account builder により実 EntryPoint
+// 版が異なる: simpleAccount (to7702SimpleSmartAccount)=**v0.8**、metamask
+// (@metamask/delegation-toolkit)=v0.7、mav2 (Alchemy MAv2)=v0.7。よって entryPointVersion は
+// union。Circle (v0.8) 経路とは provider を discriminant にして discriminated union
+// (AnySmartAccountBundle) を成す。consumer (useBatchPayment) は **provider のみ**で分岐し、
+// entryPointVersion ラベルには依存しない (各 builder が自 account の版に一致させて createPimlico を作る)。
 export type SmartAccountBundle = {
   provider: 'pimlico';
-  entryPointVersion: '0.7';
+  entryPointVersion: '0.7' | '0.8';
   smartAccountClient: SimpleAccountClient;
   pimlicoClient: ReturnType<typeof createPimlico>;
   paymasterMode: 'sponsorship' | 'erc20';
@@ -51,7 +51,9 @@ export async function buildSimpleSmartAccountClient(args: {
   deployment: TokenDeployment;
 }): Promise<SmartAccountBundle> {
   const { walletClient, publicClient, chainId, deployment } = args;
-  const pimlicoClient = createPimlico(chainId);
+  // account は v0.8 (to7702SimpleSmartAccount)。erc20 paymaster の version 不一致
+  // (approve spender と paymaster の食い違いによる postOp AA50) を防ぐため client も v0.8。
+  const pimlicoClient = createPimlico(chainId, '0.8');
   const paymasterMode = assertGaslessSupported(
     deployment,
     chainId,
@@ -84,7 +86,7 @@ export async function buildSimpleSmartAccountClient(args: {
 
   return {
     provider: 'pimlico',
-    entryPointVersion: '0.7',
+    entryPointVersion: '0.8',
     smartAccountClient,
     pimlicoClient,
     paymasterMode,
