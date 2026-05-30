@@ -520,11 +520,13 @@ export function findLiveByCallHash(args: {
 
 /** 宙吊りの pre-submit 孤児 (reserved/awaiting_signature/signed のまま submitting に
  * 到達せず放置された **別 attempt** の record) を abandoned にする (best-effort)。
- * reload/タブ閉じで見捨てられた orphan が `findLiveByCallHash` の live 集合に残って
- * 容量を食ったり cross-invocation ガードを汚すのを防ぐ。pre-submit は未 broadcast なので
- * abandon しても二重決済リスクは無い (submitting/terminal には触れない)。abandoned 化後の
- * 物理削除は pruneTerminal が担う。
- * - olderThanMs: updatedAt からの経過がこれを超えた pre-submit のみ対象 (進行中を守る)。
+ * reload/タブ閉じで見捨てられた orphan が localStorage に無限に溜まるのを防ぐ
+ * **容量管理**が目的。pre-submit は未 broadcast なので abandon しても二重決済リスクは無い
+ * (submitting/terminal には触れない)。abandoned 化後の物理削除は pruneTerminal が担う。
+ * - olderThanMs: updatedAt からの経過がこれを超えた pre-submit のみ対象。**どんな正規の
+ *   署名フローも到達しない十分長い値**を渡すこと (GC は全 callHash 横断で走るため、短いと
+ *   別タブの低速だが正規な in-flight 署名を巻き込み markSigned CAS を壊す)。同一 callHash の
+ *   並行中ブロック判断は呼出側 guard が別途短い閾値で行う (GC はその責務を持たない)。
  * - excludeKey: 実行中の自 attempt key。GC が自分のレコードを巻き込まないため除外する。
  * 書込は best-effort (CAS/sender 検証を経ない直接 write・自タブ localStorage 限定の
  * housekeeping なので認可問題は無い)。失敗は握り潰す (決済に影響させない)。 */

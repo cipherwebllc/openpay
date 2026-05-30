@@ -387,3 +387,49 @@ describe('cross-invocation ガード — 時間窓 + status 優先 (再レビュ
     expect(mockPermit).not.toHaveBeenCalled();
   });
 });
+
+describe('housekeeping GC (#121): 別 callHash の低速 in-flight を巻き込まない', () => {
+  // run() の CALLS とは別 callHash。guard (findLiveByCallHash) は別 callHash を見ないので、
+  // この record に触れうるのは GC (全 callHash 横断) のみ → GC 閾値の挙動を単独で検証できる。
+  const DIFF_CALLS = [{ to: MERCHANT, data: '0x9999' as Hex }];
+  function seedDiff(attemptId: string, status: 'reserved' | 'awaiting_signature', at: number) {
+    const callHash = computeCallHash(DIFF_CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: attemptId,
+      callHash,
+    });
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now: at,
+    });
+    if (status === 'awaiting_signature') {
+      markAwaitingSignature({ key, sender: OWNER, now: at });
+    }
+    return key;
+  }
+
+  it('10分前の別 callHash pre-submit は新規決済時に GC されない (GC 閾値 1h ≫ guard 3min)', async () => {
+    // HIGH 修正の回帰テスト: 別タブの低速だが正規な署名 (popup を 10 分開けっ放し) を、
+    // 別決済の GC が abandon して壊さないこと。
+    const slow = seedDiff('slow', 'awaiting_signature', 1_000);
+    clock = 1_000 + 10 * 60 * 1000; // 10 分後
+    happyMocks();
+    await run(); // attempt-1 / CALLS (別 callHash)
+    expect(loadPendingRecord(slow)?.status).toBe('awaiting_signature');
+  });
+
+  it('1時間超の別 callHash pre-submit 孤児は GC で abandoned (容量管理)', async () => {
+    const orphan = seedDiff('orphan', 'reserved', 1_000);
+    clock = 1_000 + 2 * 60 * 60 * 1000; // 2h 後
+    happyMocks();
+    await run();
+    expect(loadPendingRecord(orphan)?.status).toBe('abandoned');
+  });
+});
