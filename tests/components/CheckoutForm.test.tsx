@@ -22,6 +22,15 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
+// 走らせないよう stub (QueryClientProvider 無しで render する既存 test を壊さない)。
+vi.mock('@/hooks/useGasQuoteCircle', () => ({
+  useGasQuoteCircle: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    fetchStatus: 'idle',
+  })),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn() })),
 }));

@@ -271,6 +271,7 @@
     "gaslessBatchHintJpyc": "The network fee is charged at a fixed upper-bound (congestion ceiling) price; any surplus is not refunded (paid in JPYC).",
     "gaslessBatchHintUsdc": "Upper-bound estimate. Actual gas is at or below this amount (paid in USDC).",
     "gasInfoUsdc": "Pay the network fee in USDC via Pimlico ERC20 Paymaster — no need to hold native {nativeToken}. The figure shown is a worst-case estimate; any surplus over the actual cost is not charged.",
+    "gasInfoUsdcCircle": "Pay the network fee in USDC via Circle Paymaster (official) — no need to hold native {nativeToken}. A Circle fee of about 10% is added on top of the gas cost. The figure shown is an upper-bound estimate; any surplus is not charged. OpenPay does not collect this fee.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers {nativeToken} gas; you complete the payment in JPYC alone with no native ({nativeToken}) holdings required. The network fee is charged as a fixed amount based on the congestion ceiling price, so during normal periods it may exceed the actual gas (the difference is not refunded).",
     "approvalCheckLink": "Review gas approvals",
     "splitBatchHint": "Gas is covered by OpenPay (Pimlico Sponsorship Paymaster). {count} transfers are batched in a single UserOperation.",
@@ -336,6 +337,7 @@
     "gaslessHintJpyc": "The network fee is charged at a fixed upper-bound (congestion ceiling) price; any surplus is not refunded.",
     "gaslessHintUsdc": "Upper-bound estimate. Actual gas is at or below this amount.",
     "gasInfoUsdc": "Pay the network fee in USDC via Pimlico ERC20 Paymaster — no need to hold native {nativeToken}. The figure shown is a worst-case estimate; any surplus over the actual cost is not charged.",
+    "gasInfoUsdcCircle": "Pay the network fee in USDC via Circle Paymaster (official) — no need to hold native {nativeToken}. A Circle fee of about 10% is added on top of the gas cost. The figure shown is an upper-bound estimate; any surplus is not charged. OpenPay does not collect this fee.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers {nativeToken} gas; you complete the payment in JPYC alone with no native ({nativeToken}) holdings required. The network fee is charged as a fixed amount based on the congestion ceiling price, so during normal periods it may exceed the actual gas (the difference is not refunded).",
     "approvalCheckLink": "Review gas approvals",
     "walletSection": "Wallet",
@@ -438,6 +440,7 @@
     "gaslessHintUsdc": "Upper-bound estimate. Actual gas is at or below this amount.",
     "standardHint": "Standard payment: approve a single transfer in your wallet. The network fee ({nativeToken}) is requested separately by your wallet.",
     "gasInfoUsdc": "Pay the network fee in USDC via Pimlico ERC20 Paymaster — no need to hold native {nativeToken}. The figure shown is a worst-case estimate; any surplus over the actual cost is not charged.",
+    "gasInfoUsdcCircle": "Pay the network fee in USDC via Circle Paymaster (official) — no need to hold native {nativeToken}. A Circle fee of about 10% is added on top of the gas cost. The figure shown is an upper-bound estimate; any surplus is not charged. OpenPay does not collect this fee.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers {nativeToken} gas; you complete the payment in JPYC alone with no native ({nativeToken}) holdings required. The network fee is charged as a fixed amount based on the congestion ceiling price, so during normal periods it may exceed the actual gas (the difference is not refunded).",
     "approvalCheckLink": "Review gas approvals",
     "walletSection": "Wallet",
@@ -798,7 +801,7 @@
     },
     "section3": {
       "title": "3. Sharing with Third Parties and Service Providers",
-      "body": "We do not share personal information with third parties without user consent or where required by law. However, we engage the following service providers to operate the Service, all of which we supervise as required by the APPI: - Vercel Inc. (United States): hosting, CDN, analytics. - Pimlico Labs Inc. (United States): ERC-4337 bundler and paymaster service. - Alchemy Insights Inc. (United States): blockchain RPC. Because these providers are located in the United States, personal information may be transferred to a third party located in a foreign country (APPI Article 28). Information on the personal data protection regime in the United States is published by the Personal Information Protection Commission of Japan in its \"Survey on Foreign Personal Information Protection Regimes.\" We have data protection agreements in place with these providers and have implemented measures to protect users' rights and interests."
+      "body": "We do not share personal information with third parties without user consent or where required by law. However, we engage the following service providers to operate the Service, all of which we supervise as required by the APPI: - Vercel Inc. (United States): hosting, CDN, analytics. - Pimlico Labs Inc. (United States): ERC-4337 bundler and paymaster service. - Circle Internet Financial, Inc. (United States): Circle Paymaster (ERC-4337 paymaster) service for USDC gasless payments. The customer pays the gas-equivalent amount in USDC to that paymaster; the Company does not collect or receive that fee. - Alchemy Insights Inc. (United States): blockchain RPC. Because these providers are located in the United States, personal information may be transferred to a third party located in a foreign country (APPI Article 28). Information on the personal data protection regime in the United States is published by the Personal Information Protection Commission of Japan in its \"Survey on Foreign Personal Information Protection Regimes.\" We have data protection agreements in place with these providers and have implemented measures to protect users' rights and interests."
     },
     "section4": {
       "title": "4. Retention Period",
