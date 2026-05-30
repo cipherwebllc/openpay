@@ -218,11 +218,18 @@ describe('CIRCLE_GAS_SURCHARGE_BPS', () => {
     }
   });
 
-  it('10% 非適用 chain (Optimism/Polygon/Ethereum/Avalanche) は未登録 (要実測まで block)', async () => {
-    // これらは 10% 非適用 + slippage spread が未定量のため、実機ゲートで実効 fee 実測まで
-    // surcharge 未登録 = resolveUsdcGaslessProvider が pimlico に倒す (C4)。
+  it('Optimism mainnet (10) は 2026-05-31 ゲート通過で 1000 bps 登録', async () => {
+    // 表示基準 surcharge 実測 0% (displayBase ≥ Circle 実徴収)・Circle ≈ Pimlico 2.31×。
+    // 10% は Base/Arb と揃える policy 値 + OP-stack L1 data fee 変動への余裕。
     const { circle } = await loadWithFlag(false);
-    for (const id of [10, 137, 1, 43114, 11155420, 80002]) {
+    expect(circle.CIRCLE_GAS_SURCHARGE_BPS[10]).toBe(1000);
+  });
+
+  it('未ゲート chain (Polygon/Ethereum/Avalanche + OP/Polygon Sepolia) は未登録 (block)', async () => {
+    // Polygon は Circle が Pimlico の ~5.8× で見送り、Avalanche は 7702 非互換で不可、
+    // Ethereum はガス高で保留。未登録 = resolveUsdcGaslessProvider が pimlico に倒す (C4)。
+    const { circle } = await loadWithFlag(false);
+    for (const id of [137, 1, 43114, 11155420, 80002]) {
       expect(circle.CIRCLE_GAS_SURCHARGE_BPS[id]).toBeUndefined();
     }
   });
