@@ -26,7 +26,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
-import { isSupportedChainId } from '@/lib/chains';
+import { isSupportedChainId, chainSupportsCanonical7702 } from '@/lib/chains';
 import {
   detectAccountKind,
   IncompatibleSmartAccountError,
@@ -80,6 +80,29 @@ export function useSmartAccount(
       }
 
       const detection = await detectAccountKind(publicClient, address);
+
+      // canonical EIP-7702 非対応 chain (Avalanche C-Chain = ACP-209「7702 style」AA) の
+      // ガード。委任済み (= 7702 系: pimlico-simple / mav2 / metamask) の口は、どの builder に
+      // routing しても標準 bundler/EntryPoint 経由の 7702 UserOp が送信時に AA23 で revert する
+      // (chain レベルの非互換・2026-05-31 ゲート実証)。kind 別の builder に入る前に fail-fast し、
+      // standard mode 案内 (errorChainNo7702) に倒す。pristine ('none') / unknown は下の既存分岐で
+      // それぞれ standard / 案内に倒れるため、ここでは既知の 7702 委任 kind のみを対象にする。
+      const isDelegated7702Kind =
+        detection.kind === 'pimlico-simple-7702' ||
+        detection.kind === 'alchemy-mav2-7702' ||
+        detection.kind === 'metamask-7702';
+      if (isDelegated7702Kind && !chainSupportsCanonical7702(chainId)) {
+        logger.warn('smart_account.non_canonical_7702_chain', {
+          chainId,
+          kind: detection.kind,
+          delegateAddress: detection.delegateAddress,
+          symbol: deployment.symbol,
+        });
+        throw new IncompatibleSmartAccountError({
+          delegateAddress: detection.delegateAddress,
+          i18nKey: 'errorChainNo7702',
+        });
+      }
 
       // 既に Pimlico SimpleAccount に委任済みの口。委任先 impl (0xe6Cae83) は
       // Circle v0.8 経路 (permissionless to7702SimpleSmartAccount 既定) と同一なので、

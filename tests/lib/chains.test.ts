@@ -4,6 +4,7 @@ import {
   blockExplorerUrl,
   chainForSlug,
   chainLogoPathForId,
+  chainSupportsCanonical7702,
   customRpcUrlForChain,
   isJpycChainSlug,
   isSupportedChainId,
@@ -316,5 +317,22 @@ describe('chainLogoPathForId', () => {
 
   it('未対応 chain は undefined (production guard、UI 側は logo skip)', () => {
     expect(chainLogoPathForId(999_999)).toBeUndefined();
+  });
+});
+
+describe('chainSupportsCanonical7702', () => {
+  it('Avalanche C-Chain (43114) / Fuji (43113) は非 canonical (ACP-209) で false', () => {
+    expect(chainSupportsCanonical7702(43114)).toBe(false);
+    expect(chainSupportsCanonical7702(43113)).toBe(false);
+  });
+
+  it('canonical 7702 chain (Base/Arbitrum/Optimism/Polygon/Ethereum) は true', () => {
+    for (const id of [8453, 42161, 10, 137, 1]) {
+      expect(chainSupportsCanonical7702(id)).toBe(true);
+    }
+  });
+
+  it('未知 chain は既定 true (blocklist 方式・新 chain はゲートで要確認)', () => {
+    expect(chainSupportsCanonical7702(999_999)).toBe(true);
   });
 });
