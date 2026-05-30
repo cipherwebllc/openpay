@@ -36,11 +36,13 @@ import {
   computeCallHash,
   computeIdempotencyKey,
   findLiveByCallHash,
+  gcStalePreSubmit,
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
   markSigned,
   markSubmitting,
+  pruneTerminal,
   reserveOrResume,
   type PendingRecord,
   type PendingStatus,
@@ -59,6 +61,11 @@ const PRE_SUBMIT_STALE_MS = 3 * 60 * 1000;
 // 過ぎた同額再決済は **正規のリピート購入** (例: 同じ店で同額を再度) とみなし通す
 // (callHash は paymentAttemptId 非依存なので、窓が無いと正規リピートを恒久抑止してしまう)。
 const CONFIRMED_DEDUP_WINDOW_MS = 90 * 1000;
+
+// 終端 record (confirmed/failed/abandoned) を localStorage に保持する期間。これを過ぎたら
+// pruneTerminal が物理削除する。CONFIRMED_DEDUP_WINDOW_MS (90s) を十分上回る必要がある
+// (confirmed を消す前に偶発二重決済の dedup 窓を確実に過ぎさせる)。
+const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 // cross-invocation ガードの処理優先度。confirmed/submitting を pre-submit より先に評価し、
 // stale でない pre-submit が confirmed/submitting を CirclePendingError で masked するのを防ぐ。
@@ -215,6 +222,16 @@ export async function executeCirclePayment(
     paymentAttemptId: args.paymentAttemptId,
     callHash,
   });
+
+  // --- housekeeping (best-effort・決済本体に影響させない) ------------------
+  // 放置された pre-submit 孤児 (別 attempt) を abandon し、古い終端 record を物理削除する。
+  // 自 attempt (key) は excludeKey で守る。GC 失敗は無視 (容量管理であって決済の前提ではない)。
+  try {
+    gcStalePreSubmit(PRE_SUBMIT_STALE_MS, now(), key);
+    pruneTerminal(TERMINAL_RETENTION_MS, now());
+  } catch {
+    /* housekeeping 失敗は決済に影響しない */
+  }
 
   // --- cross-invocation 二重決済ガード ------------------------------------
   // paymentAttemptId は呼出毎に変わりうるので、冪等キー一致 (reserveOrResume) だけでは

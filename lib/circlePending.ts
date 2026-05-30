@@ -518,6 +518,53 @@ export function findLiveByCallHash(args: {
   );
 }
 
+/** 宙吊りの pre-submit 孤児 (reserved/awaiting_signature/signed のまま submitting に
+ * 到達せず放置された **別 attempt** の record) を abandoned にする (best-effort)。
+ * reload/タブ閉じで見捨てられた orphan が `findLiveByCallHash` の live 集合に残って
+ * 容量を食ったり cross-invocation ガードを汚すのを防ぐ。pre-submit は未 broadcast なので
+ * abandon しても二重決済リスクは無い (submitting/terminal には触れない)。abandoned 化後の
+ * 物理削除は pruneTerminal が担う。
+ * - olderThanMs: updatedAt からの経過がこれを超えた pre-submit のみ対象 (進行中を守る)。
+ * - excludeKey: 実行中の自 attempt key。GC が自分のレコードを巻き込まないため除外する。
+ * 書込は best-effort (CAS/sender 検証を経ない直接 write・自タブ localStorage 限定の
+ * housekeeping なので認可問題は無い)。失敗は握り潰す (決済に影響させない)。 */
+export function gcStalePreSubmit(
+  olderThanMs: number,
+  now: number,
+  excludeKey?: string,
+): number {
+  let storage: Storage;
+  try {
+    storage = requireStorage();
+  } catch {
+    return 0;
+  }
+  // 走査中の write で index がずれないよう、対象キーを先に確定する。
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const k = storage.key(i);
+    if (k && k.startsWith(PENDING_KEY_PREFIX)) keys.push(k);
+  }
+  let count = 0;
+  for (const k of keys) {
+    const recordKey = k.slice(PENDING_KEY_PREFIX.length);
+    if (recordKey === excludeKey) continue;
+    const record = loadPendingRecord(recordKey);
+    if (!record || !isPreSubmit(record.status)) continue;
+    if (now - record.updatedAt <= olderThanMs) continue;
+    try {
+      storage.setItem(
+        k,
+        JSON.stringify({ ...record, status: 'abandoned', updatedAt: now }),
+      );
+      count += 1;
+    } catch {
+      // best-effort (GC 失敗は決済に影響しない)。
+    }
+  }
+  return count;
+}
+
 /** confirmed / failed / abandoned の終端 record を掃除する (任意・容量管理)。
  * submitting / pre-submit は消さない (復旧情報を失わないため)。 */
 export function pruneTerminal(olderThanMs: number, now: number): number {
