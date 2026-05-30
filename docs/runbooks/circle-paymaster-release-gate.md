@@ -135,9 +135,14 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
 1. flag OFF 既定のまま投入済 (現状)。
 2. testnet で本ゲート通過。
 3. **Base mainnet のみ** で `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER=1`
-   (Base は Circle fee=10% が docs 確認済)。**Base mainnet の実 receipt で徴収 USDC が
-   表示 max 以内**であることを再実測 (計画 §5 fee 整合テスト)。
-4. 問題なければ Arbitrum mainnet へ拡大。
+   (Base は Circle fee=10% が docs 確認済 + 2026-05-30 実機ゲート通過)。
+   ⚠️ **flag はグローバル** = ON にすると `CIRCLE_GAS_SURCHARGE_BPS` に載る全 mainnet
+   chain で Circle が起動する。Base のみに絞るため **Arbitrum mainnet (42161) は surcharge
+   config から外してある** (`lib/circlePaymaster.ts`・コメントアウト済)。よって flag ON で
+   有効化されるのは Base mainnet だけ。
+4. Arbitrum mainnet へ拡大するときは: ① `SMOKE_CHAIN=arbitrum` で本 smoke ゲートを通過させ
+   (Arbitrum mainnet の実 receipt で fee 整合を実測)、② `CIRCLE_GAS_SURCHARGE_BPS` の
+   `[arbitrum.id]: 1000` コメント行を戻す。これで初めて Arbitrum で Circle が有効になる。
 5. fee config 未確認の chain (Polygon/Optimism/Avalanche/Unichain) は
    `CIRCLE_GAS_SURCHARGE_BPS` 未登録 = `resolveUsdcGaslessProvider` が pimlico に
    倒すため、自動的に Pimlico erc20 fallback のまま (有効化されない)。docs で
