@@ -316,7 +316,7 @@ async function main() {
 
   const publicClient = createPublicClient({ chain: CHAIN, transport: http(rpcUrl) });
   const bundlerUrl = `https://api.pimlico.io/v2/${CHAIN.id}/rpc?apikey=${pimlicoApiKey}`;
-  const origin = process.env.SMOKE_ORIGIN;
+  const origin = process.env.SMOKE_ORIGIN ?? process.env.SPIKE_ORIGIN;
   const bundlerTransport = origin
     ? http(bundlerUrl, { fetchOptions: { headers: { Origin: origin } } })
     : http(bundlerUrl);
