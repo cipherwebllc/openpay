@@ -617,7 +617,8 @@ async function main() {
     } catch (e) {
       log(`  ✖ leg 失敗 [${isTransient(e) ? 'transient' : 'deterministic'}]: ${e.shortMessage || e.message}`);
       dumpError(e);
-      results.push({ leg: 'failed', ok: false, error: e.shortMessage || e.message });
+      // gasChargeUsdc を明示 null に (省略すると下流の formatUnits(undefined) で crash)。
+      results.push({ leg: 'failed', ok: false, error: e.shortMessage || e.message, gasChargeUsdc: null });
     }
   }
 
@@ -658,10 +659,12 @@ async function main() {
   // 安価に動いているため、この比が大きい chain は Circle 有効化でガス代が上がる
   // (Circle 優先は信頼性/公式サポート理由でコスト最適ではない、を定量化する)。
   const circleGasCharges = results
-    .filter((r) => r.provider === 'circle' && r.gasChargeUsdc !== null && r.gasChargeUsdc > 0n)
+    .filter(
+      (r) => r.provider === 'circle' && typeof r.gasChargeUsdc === 'bigint' && r.gasChargeUsdc > 0n,
+    )
     .map((r) => r.gasChargeUsdc);
   const pimlicoLegR = results.find(
-    (r) => r.provider === 'pimlico' && r.gasChargeUsdc !== null && r.gasChargeUsdc > 0n,
+    (r) => r.provider === 'pimlico' && typeof r.gasChargeUsdc === 'bigint' && r.gasChargeUsdc > 0n,
   );
   const avgCircleGas = circleGasCharges.length
     ? circleGasCharges.reduce((s, v) => s + v, 0n) / BigInt(circleGasCharges.length)
@@ -689,7 +692,8 @@ async function main() {
         leg: r.leg, provider: r.provider, ok: r.ok,
         entryPoint: r.entryPoint, paymaster: r.paymaster,
         usdcOut: r.usdcOut ? formatUnits(r.usdcOut.total, 6) : null,
-        gasChargeUsdc: r.gasChargeUsdc !== null ? formatUnits(r.gasChargeUsdc, 6) : null,
+        gasChargeUsdc:
+          typeof r.gasChargeUsdc === 'bigint' ? formatUnits(r.gasChargeUsdc, 6) : null,
         usdcToCircle: r.usdcOut ? formatUnits(r.usdcOut.toCircle, 6) : null,
         surchargeVsDisplayBps:
           typeof r.surchargeVsDisplayBps === 'number' ? r.surchargeVsDisplayBps : null,
