@@ -210,11 +210,18 @@ describe('assertPermitDomain', () => {
 });
 
 describe('CIRCLE_GAS_SURCHARGE_BPS', () => {
-  it('Arbitrum/Base (mainnet+testnet) は 10% (1000 bps)', async () => {
+  it('Base mainnet + Arb/Base testnet は 10% (1000 bps)', async () => {
     const { circle } = await loadWithFlag(false);
-    for (const id of [42161, 8453, 421614, 84532]) {
+    for (const id of [8453, 421614, 84532]) {
       expect(circle.CIRCLE_GAS_SURCHARGE_BPS[id]).toBe(1000);
     }
+  });
+
+  it('Arbitrum mainnet (42161) は mainnet ゲート未通過のため意図的に未登録', async () => {
+    // flag グローバルのため、ゲート未通過 mainnet を載せると flag ON で即有効化されてしまう。
+    // Arbitrum mainnet smoke 通過後に lib/circlePaymaster.ts のコメント行を戻す。
+    const { circle } = await loadWithFlag(false);
+    expect(circle.CIRCLE_GAS_SURCHARGE_BPS[42161]).toBeUndefined();
   });
 
   it('fee 未確認 chain (Optimism/Polygon/Ethereum/Avalanche) は未登録', async () => {
