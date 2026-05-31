@@ -716,6 +716,7 @@
     "columnAsset": "通貨",
     "columnAmount": "金額",
     "columnFee": "OpenPay 利用手数料",
+    "columnNetworkFee": "ネットワーク手数料",
     "columnNetwork": "ネットワーク",
     "columnMode": "決済モード",
     "columnGasMode": "ガス負担",

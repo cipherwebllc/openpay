@@ -133,6 +133,28 @@ describe('HistoryRow', () => {
     expect(screen.getByText(/通常決済 \(ガスあり\) · —/)).toBeInTheDocument();
   });
 
+  it('gasless で feeAmount>0 は「ネットワーク手数料」表示 (alpha は利用手数料 0% なので gas 実費回収)', () => {
+    render(
+      <HistoryRow
+        entry={entry({ payMode: 'gasless', feeAmount: '4000000000000000000' })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('ネットワーク手数料')).toBeInTheDocument();
+    expect(screen.queryByText('OpenPay 利用手数料')).toBeNull();
+  });
+
+  it('standard / feeAmount=0 は「OpenPay 利用手数料」表示 (混同しない)', () => {
+    render(
+      <HistoryRow
+        entry={entry({ payMode: 'standard', gasMode: null, feeAmount: '0' })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('OpenPay 利用手数料')).toBeInTheDocument();
+    expect(screen.queryByText('ネットワーク手数料')).toBeNull();
+  });
+
   it('削除 button → confirm true で onRemove(id) が呼ばれる', async () => {
     const user = userEvent.setup();
     const onRemove = vi.fn();
