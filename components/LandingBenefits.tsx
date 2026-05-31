@@ -103,6 +103,35 @@ export async function LandingBenefits() {
           );
         })}
       </ul>
+
+      {/* 「なぜ店舗決済に OpenPay が必要か」: ウォレット送金は送れる人には便利でも店舗
+          決済には不十分、という核心メッセージ。ビッグナンバーカードの下に narrative で補足。 */}
+      <div className="mx-auto mt-12 max-w-3xl">
+        <h3 className="text-center text-xl font-bold text-slate-900 sm:text-2xl">
+          {t('benefitsWhyTitle')}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-slate-600">
+          {t('benefitsWhyLead')}
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+            <h4 className="text-sm font-semibold text-slate-900 sm:text-base">
+              {t('benefitsWhyPoint1Title')}
+            </h4>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
+              {t('benefitsWhyPoint1Body')}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+            <h4 className="text-sm font-semibold text-slate-900 sm:text-base">
+              {t('benefitsWhyPoint2Title')}
+            </h4>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
+              {t('benefitsWhyPoint2Body')}
+            </p>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
