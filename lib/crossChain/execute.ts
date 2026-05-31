@@ -73,6 +73,21 @@ export type OnMerchantMint = (info: {
   burnTxHash?: Hex;
 }) => void;
 
+// onMerchantMint を隔離して呼ぶ。会計ログ (best-effort) の例外で、確定済の merchant mint
+// 後の決済 flow を中断させないため (callee は通常 void logPaymentEvent で fire-and-forget だが、
+// 契約として呼出側でも throw を握り潰す)。
+function fireMerchantMint(
+  cb: OnMerchantMint | undefined,
+  info: { mintTxHash: Hex; burnTxHash?: Hex },
+): void {
+  if (!cb) return;
+  try {
+    cb(info);
+  } catch {
+    /* audit ログ失敗は決済確定に影響させない */
+  }
+}
+
 // wagmi useSwitchChain.switchChainAsync の signature と互換。
 export type SwitchChainFn = (args: { chainId: number }) => Promise<unknown>;
 
@@ -374,7 +389,7 @@ export async function executeGatewayTransfer(
   // merchant mint 確定 → 会計ログ発火 (fee mint より前)。settleMint は resume / fresh /
   // 確認待ちを内部で吸収するので、ここに来た時点で merchant 着金は確定している。
   if (state.mintTxHash) {
-    args.onMerchantMint?.({ mintTxHash: state.mintTxHash });
+    fireMerchantMint(args.onMerchantMint, { mintTxHash: state.mintTxHash });
   }
   if (bridgeFee && state.feeAttestation) {
     await settleMint({
@@ -588,7 +603,10 @@ export async function executeCctpTransfer(
   // (merchantIris は !merchantMintLanded のときだけ取得される)。確定済の merchant 着金を
   // fee mint より前にここで会計ログ発火する (fee mint 失敗でも取りこぼさない・dedup は集計層)。
   if (merchantMintLanded && state.mintTxHash) {
-    args.onMerchantMint?.({ mintTxHash: state.mintTxHash, burnTxHash: burnHash });
+    fireMerchantMint(args.onMerchantMint, {
+      mintTxHash: state.mintTxHash,
+      burnTxHash: burnHash,
+    });
   }
 
   if (!merchantMintLanded || !feeMintLanded) {
@@ -647,7 +665,10 @@ export async function executeCctpTransfer(
       onProgress({ kind: 'dest_tx_pending', hash: mintHash });
       await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'cctp mint');
       // fresh merchant mint 確定 → 会計ログ発火 (下の fee mint より前)。
-      args.onMerchantMint?.({ mintTxHash: mintHash, burnTxHash: burnHash });
+      fireMerchantMint(args.onMerchantMint, {
+        mintTxHash: mintHash,
+        burnTxHash: burnHash,
+      });
     }
     if (feeIris) {
       const feeMintData = encodeReceiveMessageCalldata(
