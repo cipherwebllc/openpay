@@ -6,6 +6,7 @@ import {
   encodeCirclePaymasterData,
   buildPermitTypedData,
   assertPermitDomain,
+  CIRCLE_PAYMASTER_CODEHASH,
 } from '@/lib/circlePermit';
 
 // env (flag) はモジュール評価時に確定するため、flag を変える test は
@@ -231,6 +232,18 @@ describe('CIRCLE_GAS_SURCHARGE_BPS', () => {
     const { circle } = await loadWithFlag(false);
     for (const id of [137, 1, 43114, 11155420, 80002]) {
       expect(circle.CIRCLE_GAS_SURCHARGE_BPS[id]).toBeUndefined();
+    }
+  });
+});
+
+describe('CIRCLE_PAYMASTER_CODEHASH (B1 完全性)', () => {
+  it('allowlist の全 chain に codehash 登録あり (silent skip 防止)', async () => {
+    // assertCirclePaymasterDeployed は codehash 未登録 chain では非空 code 確認のみに留まる。
+    // allowlist の Circle chain が codehash を持たず黙って検証スキップするのを防ぐ完全性 fence
+    // (chain 追加時は scripts/verify-circle-codehash.mjs を再実行して登録すること)。
+    const { circle } = await loadWithFlag(false);
+    for (const id of Object.keys(circle.CIRCLE_PAYMASTER_ADDRESSES)) {
+      expect(CIRCLE_PAYMASTER_CODEHASH[Number(id)]).toBeDefined();
     }
   });
 });

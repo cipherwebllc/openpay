@@ -7,9 +7,6 @@ export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
-// 日時の 2 桁ゼロ埋め (history timestamp / CSV filename / SuccessOverlay 時刻表示で共用)。
-export const pad = (n: number): string => n.toString().padStart(2, '0');
-
 // wei 単位の bigint を "X.XX SYMBOL" にフォーマット。
 export function formatTokenAmount(wei: bigint, token: TokenDeployment): string {
   return `${formatUnits(wei, token.decimals)} ${token.displaySymbol}`;

@@ -10,7 +10,7 @@
 // - 列順は固定 (ja header)。会計ソフトへ貼り付けてもズレないよう先頭から固定。
 
 import { formatUnits } from 'viem';
-import { pad } from './format';
+import { pad } from './pad';
 import type { HistoryEntry } from './history';
 import {
   formatHistoryTimestamp,
