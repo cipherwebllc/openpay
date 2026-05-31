@@ -1,10 +1,13 @@
 'use client';
 
-// 店主送金 + (feeAmount>0 のときに) 運営手数料の N 件 ERC20 transfer を 1 UserOp
+// 店主送金 + (feeReceiver 集約額 > 0 のときに) operator 宛 ERC20 transfer を 1 UserOp
 // にバッチ化し、片方だけ成功する中間状態を排除する。
 //
-// Phase 1 (alpha) では calcFee が常に 0n を返すので fee transfer は skip される。
-// Phase 2 で課金モデル復活時は feeAmount > 0 が渡り、自然に batch 内へ復活する。
+// OpenPay 利用手数料 (calcFee = feeAmount) は alpha / 将来とも 0n (決済額非連動・収益化は
+// 周辺機能の月額/利用権で決済フロー非経由)。よって feeReceiver への transfer が載るのは
+// JPYC sponsorship の gas 立替回収 (gasReimbursement) があるときで、利用手数料 + 立替回収
+// (feeAmount + gasReimbursement) を 1 件の transfer に合算する。erc20 / circle は paymaster が
+// 顧客から gas を直接徴収するため gasReimbursement=0 = feeReceiver transfer なし。
 //
 // gas ceiling は両 mode で適用:
 //   - sponsorship mode: 運営の赤字回避 (フロア手数料が gas spike を吸収できない)
@@ -46,7 +49,18 @@ type BatchPaymentParams = {
   merchant: Address;
   merchantAmount: bigint;
   feeReceiver: Address;
+  // OpenPay 利用手数料 (サービス料) のみ。alpha / 将来とも 0n。
   feeAmount: bigint;
+  // ネットワーク手数料の立替回収分 (JPYC sponsorship のみ > 0)。feeReceiver への on-chain
+  // transfer は feeAmount + gasReimbursement の合算。erc20 / circle は paymaster が顧客から
+  // 直接徴収するため 0。sponsorship 収支突合 (reconcileSponsorshipGas) もこの値で行う。
+  gasReimbursement?: bigint;
+  // --- 履歴 / KV log の会計記録用 (on-chain transfer には影響しない) ---
+  // 売上総額 (gross・請求額)。GMV 集計の基礎として log に残す。
+  saleAmount?: bigint;
+  // ネットワーク手数料相当額 (非 circle の gasless 経路の記録値・raw)。circle は receipt 由来の
+  // circlePaymasterNetUsdc を検証ステータス付きで使うため未指定 (表示/集計側で coalesce)。
+  networkFeeEquivalent?: bigint;
   // 主受取人 (merchant) に加えて、追加の受取人 N 人へ同一トークンを transfer。
   // calcSplitBreakdown が計算した primary 以外の entries を渡す想定。
   // 各 amount > 0 を assertion (split で 0 になる極小ケースは UI 側で弾く前提)。
@@ -110,15 +124,15 @@ export function useBatchPayment(
       const { smartAccountClient, pimlicoClient } = clients;
 
       // sponsorship 濫用防御: JPYC sponsorship chain では運営が native gas を
-      // 立て替えるため、ガス代 reimbursement (feeAmount > 0) が必須。stale/改竄
-      // caller が feeAmount=0 を渡すと運営が gas を全額被る穴になるので reject する。
-      // collect-at-ceiling で正規の JPYC sponsorship は常に feeAmount = gasAmount > 0。
+      // 立て替えるため、feeReceiver への集約額 (利用手数料 + gas 立替回収) > 0 が必須。
+      // stale/改竄 caller が 0 を渡すと運営が gas を全額被る穴になるので reject する。
+      // collect-at-ceiling で正規の JPYC sponsorship は常に gasReimbursement = gasAmount > 0。
       // (testnet USDC の sponsorship fallback は非 JPYC chain・gasAmount=0 が正常な
       //  ため対象外。erc20 paymaster は顧客が実 gas を直接負担するので対象外。)
       if (
         resolvePaymasterMode(deployment) === 'sponsorship' &&
         isJpycSponsorshipChain(deployment.chainId) &&
-        params.feeAmount <= 0n
+        params.feeAmount + (params.gasReimbursement ?? 0n) <= 0n
       ) {
         throw new Error(
           'JPYC ガスレス決済にはガス代 reimbursement (feeAmount > 0) が必須です。',
@@ -162,16 +176,16 @@ export function useBatchPayment(
         ),
       );
       // revert 時は ERC20 transfer も atomic に巻き戻り feeReceiver は何も
-      // 受け取らない (徴収 0)。collected に params.feeAmount を渡すと under-collect
-      // シグナルを隠すため、success=false では collected=0 で突合する
-      // (gas は消費済なので actualGasCost > 0 → under_collected を正しく検出)。
+      // 受け取らない (回収 0)。collected には gas 立替回収分 (gasReimbursement) を渡す
+      // — 利用手数料 (サービス料) は gas 補填ではないので突合対象外。success=false では
+      // collected=0 (gas は消費済なので actualGasCost > 0 → under_collected を正しく検出)。
       // Circle (erc20・顧客が USDC で gas 負担) は sponsorship 収支の概念が無く、
       // かつ testnet では resolvePaymasterMode が sponsorship に倒れて誤検知するため除外。
       if (clients?.provider !== 'circle') {
         reconcileSponsorshipGas(
           deployment,
           chainId,
-          data.success ? params.feeAmount : 0n,
+          data.success ? (params.gasReimbursement ?? 0n) : 0n,
           data.actualGasCost,
         );
       }
@@ -222,8 +236,11 @@ function buildTransferCalls(
     }
     calls.push(transfer(r.to, r.amount));
   }
-  if (params.feeAmount > 0n) {
-    calls.push(transfer(params.feeReceiver, params.feeAmount));
+  // feeReceiver へは 利用手数料 (サービス料・0) + gas 立替回収 (JPYC sponsorship のみ) を
+  // 1 件に合算して送る。erc20 / circle は gasReimbursement=0 のため transfer は載らない。
+  const feeReceiverTotal = params.feeAmount + (params.gasReimbursement ?? 0n);
+  if (feeReceiverTotal > 0n) {
+    calls.push(transfer(params.feeReceiver, feeReceiverTotal));
   }
   if (calls.length === 0) {
     throw new Error('送金額が 0 です。金額を入力してください。');
@@ -388,6 +405,8 @@ function toCtx(
     customer,
     feeReceiver: params.feeReceiver,
     feeAmount: params.feeAmount,
+    saleAmount: params.saleAmount,
+    networkFeeEquivalent: params.networkFeeEquivalent,
     provider: result?.provider,
     circlePaymasterAddress: result?.circlePaymasterAddress,
     circlePaymasterNetUsdc: result?.circlePaymasterNetUsdc,

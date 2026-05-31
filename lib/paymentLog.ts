@@ -4,6 +4,12 @@
 import type { Address, Hex } from 'viem';
 import { logger } from './logger';
 
+// KV log の fee/gas 内訳セマンティクスの版。本フィールドを持つ log は分離記録済
+// (feeAmount = OpenPay 利用手数料 = サービス料のみ・ガスは networkFeeEquivalent)。
+// 持たない旧 log は内訳不明 (feeAmount が conflated) で stats 集計から除外判定する。
+// localStorage 側 (lib/history.FEE_BREAKDOWN_VERSION) とは独立の store・独立の版管理。
+export const LOG_FEE_BREAKDOWN_VERSION = 1 as const;
+
 export type PaymentResult = 'success' | 'reverted' | 'error';
 // batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信)
 // direct:            同一チェーン直接送金。cross-chain mint 成功ログで現役生成
@@ -49,6 +55,13 @@ export type PaymentLogEvent = {
   customer?: Address;
   feeReceiver?: Address;
   feeAmount?: string;
+  // 売上総額 (gross・raw)。feeAmount / ガス / split 控除前で GMV 集計の基礎。
+  saleAmount?: string;
+  // ネットワーク手数料相当額 (raw・支払トークン単位)。全 gasless 経路横断の統一項目。
+  // circle 経路は検証ステータス付きで circlePaymasterNetUsdc 側に保持するため省略。
+  networkFeeEquivalent?: string;
+  // fee/gas 内訳の版 (LOG_FEE_BREAKDOWN_VERSION)。持たない旧 log は内訳不明。
+  feeBreakdownVersion?: number;
   userOpHash?: Hex;
   txHash?: Hex;
   // cross-chain で利用料を merchant 送金とは別 tx で着金させた場合の fee mint tx hash。
@@ -84,6 +97,10 @@ export type PaymentLogContext = {
   customer?: Address;
   feeReceiver?: Address;
   feeAmount?: bigint;
+  // 売上総額 (gross)。sale を伴う flow で設定。
+  saleAmount?: bigint;
+  // ネットワーク手数料相当額 (非 circle の gasless 経路)。
+  networkFeeEquivalent?: bigint;
   // cross-chain で利用料を別 tx で着金させた場合の fee mint tx hash (監査用)。
   feeTxHash?: Hex;
   // cross-chain bridge 経由の場合のみ指定。direct (= 既存単一 chain) では undefined。
@@ -117,6 +134,9 @@ export function buildPaymentLogEvent(
     customer: ctx.customer,
     feeReceiver: ctx.feeReceiver,
     feeAmount: ctx.feeAmount?.toString(),
+    saleAmount: ctx.saleAmount?.toString(),
+    networkFeeEquivalent: ctx.networkFeeEquivalent?.toString(),
+    feeBreakdownVersion: LOG_FEE_BREAKDOWN_VERSION,
     feeTxHash: ctx.feeTxHash,
     bridge: ctx.bridge,
     sourceChainId: ctx.sourceChainId,

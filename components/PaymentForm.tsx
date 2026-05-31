@@ -159,6 +159,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // sponsorship に倒れる際に gas 二重徴収 + OpenPay 徴収0 違反になる)。
   const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
 
+  // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
+  // gasless 経路は gas 見積を計上する: JPYC sponsorship は立替回収 (= feeReceiver へ送る
+  // gasReimbursement と同額)、USDC erc20 は paymaster が顧客 USDC から直接徴収する gas。
+  // circle は receipt 由来の circlePaymasterNetUsdc を検証ステータス付きで使うため null、
+  // standard は OpenPay が gas に touch しないため null。
+  const networkFeeEquivalent =
+    !isStandard && !isCircle ? (gasAmount ?? 0n) : null;
+
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ amount < gas のみ)。
   //   gasless / customer:  amount < fee → merchant = 0
@@ -260,6 +268,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       customer: address,
       feeReceiver: env.feeReceiver,
       feeAmount: breakdown.feeAmount,
+      saleAmount: amountWei,
+      networkFeeEquivalent,
       storeName: '',
       note: '',
     }),
@@ -273,6 +283,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       isStandard,
       breakdown.merchantReceives,
       breakdown.feeAmount,
+      amountWei,
+      networkFeeEquivalent,
       address,
     ],
   );
@@ -299,7 +311,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
         merchant: primary.to,
         merchantAmount: primary.amount,
         feeReceiver: env.feeReceiver,
-        feeAmount: splitBreakdown.feeAmount + gasReimbursement,
+        feeAmount: splitBreakdown.feeAmount,
+        gasReimbursement,
+        saleAmount: amountWei,
+        networkFeeEquivalent: networkFeeEquivalent ?? undefined,
         extraRecipients: extras.map((e) => ({ to: e.to, amount: e.amount })),
         circlePermitAmount,
       });
@@ -309,7 +324,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
         merchant: params.to,
         merchantAmount: breakdown.merchantReceives,
         feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount + gasReimbursement,
+        feeAmount: breakdown.feeAmount,
+        gasReimbursement,
+        saleAmount: amountWei,
+        networkFeeEquivalent: networkFeeEquivalent ?? undefined,
         circlePermitAmount,
       });
     }

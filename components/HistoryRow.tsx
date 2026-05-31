@@ -7,8 +7,10 @@ import { formatUnits } from 'viem';
 import { addressExplorerUrl, txExplorerUrl } from '@/lib/chains';
 import {
   formatHistoryTimestamp,
+  hasSeparatedBreakdown,
   HISTORY_ASSET_DECIMALS,
   HISTORY_ASSET_DISPLAY,
+  networkFeeEquivalentOf,
   type CircleVerification,
   type HistoryEntry,
 } from '@/lib/history';
@@ -78,6 +80,31 @@ export function HistoryRow({
     : undefined;
   const merchantUrl = addressExplorerUrl(entry.chainId, entry.merchant);
 
+  // v3 fee/gas 分離表示。
+  // - OpenPay 利用手数料 (サービス料): native v3 で > 0 のときだけ行を出す (alpha / 将来とも
+  //   0 = 非表示。決済額非連動・収益化は周辺機能で決済フロー非経由)。
+  // - ネットワーク手数料相当額: 全経路横断の統一項目 (networkFeeEquivalentOf で coalesce)。
+  //   circle は検証ステータス badge を併記。
+  // - legacy(migrated v2): 分離記録が無く feeAmount に gas が混在しうるため、gasless かつ
+  //   feeAmount > 0 を旧 band-aid (PR #23) でネットワーク手数料相当額として表示する。
+  const separated = hasSeparatedBreakdown(entry);
+  const netFeeRaw = separated
+    ? networkFeeEquivalentOf(entry)
+    : entry.payMode === 'gasless'
+      ? entry.feeAmount
+      : null;
+  const isNonZero = (v: string | null): boolean =>
+    v != null && v !== '0' && v !== '';
+  const isCircle = entry.provider === 'circle';
+  // circle は net 不明 (unreconciled) でも検証ステータスを可視化するため行を出す。
+  const showNetFee =
+    isNonZero(netFeeRaw) || (isCircle && entry.circleVerification != null);
+  const showServiceFee = separated && isNonZero(entry.feeAmount);
+  // 売上総額は着金額 (merchantAmount) と異なるとき (gas=merchant / split 等) のみ明示。
+  // 一致時は上部の大きな金額が兼ねる。
+  const showGrossSale =
+    entry.saleAmount != null && entry.saleAmount !== entry.merchantAmount;
+
   function handleRemove() {
     if (!window.confirm(t('removeRowConfirm'))) return;
     onRemove(entry.id);
@@ -144,39 +171,34 @@ export function HistoryRow({
           <dt className="text-slate-400">{t('columnNetwork')}</dt>
           <dd>{entry.chainSlug}</dd>
         </div>
-        <div>
-          {/* alpha 中は OpenPay 利用手数料 0% のため、gasless で feeAmount>0 のときは
-              それは運営が立替えた gas の実費回収 (ネットワーク手数料相当・JPYC sponsorship)
-              であり利用手数料ではない。よってその場合は「ネットワーク手数料」と表示する。
-              (恒久対応: feeAmount に service fee と gas reimbursement を混在させず分離記録する。
-               将来 service fee>0 にする際は必須 — 下記 CSV/stats も同根。) */}
-          <dt className="text-slate-400">
-            {entry.payMode === 'gasless' &&
-            entry.feeAmount != null &&
-            entry.feeAmount !== '0' &&
-            entry.feeAmount !== ''
-              ? t('columnNetworkFee')
-              : t('columnFee')}
-          </dt>
-          <dd>{fmt(entry.feeAmount, entry.asset)}</dd>
-        </div>
-        {entry.provider === 'circle' &&
-          (entry.circlePaymasterNetUsdc || entry.circleVerification) && (
-            <div>
-              <dt className="text-slate-400">{t('columnCircleGas')}</dt>
-              <dd className="flex flex-wrap items-center gap-1.5">
-                <span>{fmt(entry.circlePaymasterNetUsdc, 'usdc')}</span>
-                {entry.circleVerification && (
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${CIRCLE_VERIF_BADGE_CLASS[entry.circleVerification]}`}
-                    title={t(CIRCLE_VERIF_HELP_KEY[entry.circleVerification])}
-                  >
-                    {t(CIRCLE_VERIF_I18N_KEY[entry.circleVerification])}
-                  </span>
-                )}
-              </dd>
-            </div>
-          )}
+        {showGrossSale && (
+          <div>
+            <dt className="text-slate-400">{t('columnSaleAmount')}</dt>
+            <dd>{fmt(entry.saleAmount, entry.asset)}</dd>
+          </div>
+        )}
+        {showServiceFee && (
+          <div>
+            <dt className="text-slate-400">{t('columnFee')}</dt>
+            <dd>{fmt(entry.feeAmount, entry.asset)}</dd>
+          </div>
+        )}
+        {showNetFee && (
+          <div>
+            <dt className="text-slate-400">{t('columnNetworkFee')}</dt>
+            <dd className="flex flex-wrap items-center gap-1.5">
+              <span>{fmt(netFeeRaw, entry.asset)}</span>
+              {isCircle && entry.circleVerification && (
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${CIRCLE_VERIF_BADGE_CLASS[entry.circleVerification]}`}
+                  title={t(CIRCLE_VERIF_HELP_KEY[entry.circleVerification])}
+                >
+                  {t(CIRCLE_VERIF_I18N_KEY[entry.circleVerification])}
+                </span>
+              )}
+            </dd>
+          </div>
+        )}
         {entry.note && (
           <div className="sm:col-span-2">
             <dt className="text-slate-400">{t('columnNote')}</dt>

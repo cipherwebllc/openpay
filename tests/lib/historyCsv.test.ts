@@ -35,6 +35,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
+    saleAmount: null,
+    networkFeeEquivalent: null,
+    feeBreakdownVersion: 1,
     ...overrides,
   };
 }
@@ -52,6 +55,32 @@ describe('toCsv', () => {
     // 1 行目 = header、最後は trailing CRLF 由来の空文字
     expect(lines[0]).toMatch(/^日時,ステータス,種別,/);
     expect(lines[lines.length - 1]).toBe('');
+  });
+
+  it('v3: 売上総額 / ネットワーク手数料相当額 / 内訳バージョン 列を出力 (分離済)', () => {
+    const csv = toCsv([
+      entry({
+        saleAmount: '1234000000000000000000', // 1234 (着金と区別できる値)
+        networkFeeEquivalent: '4000000000000000000', // 4
+        feeAmount: '0',
+        feeBreakdownVersion: 1,
+      }),
+    ]);
+    // ヘッダに新列 + 既存列の "raw wei" → "raw" 修正 (USDC は 6dp で wei 表記は不正確)
+    expect(csv).toContain('売上総額(decimal)');
+    expect(csv).toContain('ネットワーク手数料相当額(decimal)');
+    expect(csv).toContain('内訳バージョン');
+    expect(csv).toContain('金額(raw)');
+    expect(csv).not.toContain('raw wei');
+    // 値: 売上総額 raw / 網手数料相当額 raw / 内訳=分離済
+    expect(csv).toContain('1234000000000000000000');
+    expect(csv).toContain('4000000000000000000');
+    expect(csv).toContain('分離済');
+  });
+
+  it('v3: legacy(feeBreakdownVersion=0) は内訳バージョン列で「内訳不明 (旧データ)」', () => {
+    const csv = toCsv([entry({ feeBreakdownVersion: 0 })]);
+    expect(csv).toContain('内訳不明 (旧データ)');
   });
 
   it('1 件 entry の主要 columns が出力される (decimal 化含む)', () => {
@@ -185,6 +214,9 @@ describe('toCsv', () => {
         circlePaymasterAddress: null,
         circlePaymasterNetUsdc: null,
         circleVerification: null,
+        saleAmount: null,
+        networkFeeEquivalent: null,
+        feeBreakdownVersion: 1,
       };
     }
     const entries = Array.from({ length: 1000 }, (_, i) =>
@@ -320,6 +352,9 @@ describe('CSV round-trip 整合性 (escape の逆 parse)', () => {
       circlePaymasterAddress: null,
       circlePaymasterNetUsdc: null,
       circleVerification: null,
+      saleAmount: null,
+      networkFeeEquivalent: null,
+      feeBreakdownVersion: 1,
       ...overrides,
     };
   }

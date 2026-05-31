@@ -15,6 +15,8 @@ const CTX = {
   customer: '0xCustomer' as `0x${string}`,
   feeReceiver: '0xFee' as `0x${string}`,
   feeAmount: 10n,
+  saleAmount: 1000n,
+  networkFeeEquivalent: 10n,
   storeName: '',
   note: '',
 };
@@ -55,6 +57,56 @@ describe('usePaymentHistory', () => {
     expect(loaded[0].flow).toBe('batch');
     expect(loaded[0].status).toBe('success');
     expect(loaded[0].id).toBe('batch-0xTx');
+  });
+
+  it('gasless success: saleAmount / networkFeeEquivalent / feeBreakdownVersion を分離記録', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        CTX,
+        {
+          data: {
+            txHash: '0xTxS',
+            userOpHash: '0xUOS',
+            blockNumber: 1n,
+            success: true,
+          },
+          error: null,
+        },
+        NO_STANDARD,
+      ),
+    );
+    const e = loadHistory()[0];
+    expect(e.saleAmount).toBe('1000'); // CTX.saleAmount (gross)
+    expect(e.networkFeeEquivalent).toBe('10'); // CTX.networkFeeEquivalent (gas 相当)
+    expect(e.feeAmount).toBe('10'); // CTX.feeAmount (サービス料・分離後はこれのみ)
+    expect(e.feeBreakdownVersion).toBe(1); // native v3 = 分離済
+  });
+
+  it('circle gasless: networkFeeEquivalent は null (circlePaymasterNetUsdc 側に検証付きで保持)', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        CTX,
+        {
+          data: {
+            txHash: '0xTxC',
+            userOpHash: '0xUOC',
+            blockNumber: 1n,
+            success: true,
+            provider: 'circle',
+            circlePaymasterAddress: '0xPM',
+            circlePaymasterNetUsdc: '9384',
+            circleVerification: 'client-reported',
+          },
+          error: null,
+        },
+        NO_STANDARD,
+      ),
+    );
+    const e = loadHistory()[0];
+    // circle は networkFeeEquivalent を二重計上しない (circlePaymasterNetUsdc を使う)。
+    expect(e.networkFeeEquivalent).toBeNull();
+    expect(e.circlePaymasterNetUsdc).toBe('9384');
+    expect(e.provider).toBe('circle');
   });
 
   it('gasless reverted (success=false) → status=reverted で記録', () => {

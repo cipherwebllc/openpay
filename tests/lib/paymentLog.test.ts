@@ -67,6 +67,9 @@ describe('buildPaymentLogEvent', () => {
       customer: CUSTOMER,
       feeReceiver: FEE_RECV,
       feeAmount: '10000000000000000000',
+      // v3: 分離記録の印 (LOG_FEE_BREAKDOWN_VERSION)。saleAmount / networkFeeEquivalent は
+      // ctx 未指定なので undefined (toEqual は undefined プロパティを無視)。
+      feeBreakdownVersion: 1,
       userOpHash: USEROP,
       txHash: TX,
       blockNumber: '12345',

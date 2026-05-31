@@ -14,8 +14,10 @@ import { pad } from './pad';
 import type { HistoryEntry } from './history';
 import {
   formatHistoryTimestamp,
+  hasSeparatedBreakdown,
   HISTORY_ASSET_DECIMALS,
   HISTORY_ASSET_DISPLAY,
+  networkFeeEquivalentOf,
 } from './history';
 
 export const CSV_BOM = '﻿';
@@ -28,9 +30,9 @@ const HEADER: readonly string[] = [
   '店舗名',
   '通貨',
   '金額(decimal)',
-  '金額(raw wei)',
+  '金額(raw)',
   'OpenPay利用手数料(decimal)',
-  'OpenPay利用手数料(raw wei)',
+  'OpenPay利用手数料(raw)',
   'ネットワーク',
   'Chain ID',
   '決済モード',
@@ -47,6 +49,14 @@ const HEADER: readonly string[] = [
   'Paymaster種別',
   'Circleガス代USDC(decimal)',
   'Circleガス代検証',
+  // v3 追加 (fee/gas 分離・会計精度)。末尾に追加し既存列順を保つ。「金額」列は着金額
+  // (settlement)、「売上総額」が gross。空セルが 0 と誤読されないよう内訳バージョン列で
+  // 旧データ (内訳不明) を明示する。raw は token 単位 (JPYC=18dp / USDC=6dp)。
+  '売上総額(decimal)',
+  '売上総額(raw)',
+  'ネットワーク手数料相当額(decimal)',
+  'ネットワーク手数料相当額(raw)',
+  '内訳バージョン',
 ];
 
 const INJECTION_PREFIX = /^[=+\-@]/;
@@ -122,6 +132,12 @@ function circleVerificationLabel(
   }
 }
 
+// 空セル (売上総額 / 網手数料相当額) が 0 と誤読されないよう、内訳が分離記録済か
+// (native v3) / 旧データで不明かを明示する。
+function breakdownVersionLabel(e: HistoryEntry): string {
+  return hasSeparatedBreakdown(e) ? '分離済' : '内訳不明 (旧データ)';
+}
+
 function entryToRow(e: HistoryEntry): string[] {
   return [
     formatHistoryTimestamp(e.ts),
@@ -149,6 +165,13 @@ function entryToRow(e: HistoryEntry): string[] {
     // Circle ガス代 (net USDC, 6dp)。circle 経路で算出済のみ、他は空。
     e.circlePaymasterNetUsdc ? rawToDecimal(e.circlePaymasterNetUsdc, 'usdc') : '',
     circleVerificationLabel(e.circleVerification),
+    // v3: 売上総額 (gross) + 全経路横断のネットワーク手数料相当額 (circle は
+    // circlePaymasterNetUsdc を coalesce) + 内訳バージョン。
+    rawToDecimal(e.saleAmount, e.asset),
+    e.saleAmount ?? '',
+    rawToDecimal(networkFeeEquivalentOf(e), e.asset),
+    networkFeeEquivalentOf(e) ?? '',
+    breakdownVersionLabel(e),
   ];
 }
 

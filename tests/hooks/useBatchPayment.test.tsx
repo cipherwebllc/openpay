@@ -1095,7 +1095,8 @@ describe('useBatchPayment', () => {
         merchant: MERCHANT,
         merchantAmount: 50_000_000n,
         feeReceiver: FEE_RECV,
-        feeAmount: 100n, // 徴収 100 JPYC (実費を大きく下回る)
+        feeAmount: 0n, // 利用手数料 (サービス料) = 0
+        gasReimbursement: 100n, // gas 立替回収 100 JPYC (実費を大きく下回る)
       });
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       await waitFor(() =>
@@ -1131,7 +1132,8 @@ describe('useBatchPayment', () => {
         merchant: MERCHANT,
         merchantAmount: 50_000_000n,
         feeReceiver: FEE_RECV,
-        feeAmount: 4_000_000_000_000_000_000n, // 4 JPYC (ceiling 基準の典型徴収)
+        feeAmount: 0n, // 利用手数料 (サービス料) = 0
+        gasReimbursement: 4_000_000_000_000_000_000n, // 4 JPYC (ceiling 基準の典型立替回収)
       });
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       await waitFor(() =>

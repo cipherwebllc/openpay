@@ -34,6 +34,10 @@ type Payload = {
   customer?: Address;
   feeReceiver?: Address;
   feeAmount?: string;
+  // 売上総額 (gross・raw) と全経路横断のネットワーク手数料相当額 (raw)、内訳版 (v3)。
+  saleAmount?: string;
+  networkFeeEquivalent?: string;
+  feeBreakdownVersion?: number;
   userOpHash?: Hex;
   txHash?: Hex;
   feeTxHash?: Hex;
@@ -84,6 +88,19 @@ function validate(raw: unknown): Payload | null {
   if (r.customer !== undefined && !validAddress(r.customer)) return null;
   if (r.feeReceiver !== undefined && !validAddress(r.feeReceiver)) return null;
   if (r.feeAmount !== undefined && !isDecimalString(r.feeAmount)) return null;
+  if (r.saleAmount !== undefined && !isDecimalString(r.saleAmount)) return null;
+  if (
+    r.networkFeeEquivalent !== undefined &&
+    !isDecimalString(r.networkFeeEquivalent)
+  )
+    return null;
+  if (
+    r.feeBreakdownVersion !== undefined &&
+    (typeof r.feeBreakdownVersion !== 'number' ||
+      !Number.isInteger(r.feeBreakdownVersion) ||
+      r.feeBreakdownVersion < 0)
+  )
+    return null;
   if (r.userOpHash !== undefined && !validHex(r.userOpHash)) return null;
   if (r.txHash !== undefined && !validHex(r.txHash)) return null;
   if (r.feeTxHash !== undefined && !validHex(r.feeTxHash)) return null;
@@ -136,6 +153,11 @@ function validate(raw: unknown): Payload | null {
   if (r.customer !== undefined) clean.customer = r.customer;
   if (r.feeReceiver !== undefined) clean.feeReceiver = r.feeReceiver;
   if (r.feeAmount !== undefined) clean.feeAmount = r.feeAmount;
+  if (r.saleAmount !== undefined) clean.saleAmount = r.saleAmount;
+  if (r.networkFeeEquivalent !== undefined)
+    clean.networkFeeEquivalent = r.networkFeeEquivalent;
+  if (r.feeBreakdownVersion !== undefined)
+    clean.feeBreakdownVersion = r.feeBreakdownVersion;
   if (r.userOpHash !== undefined) clean.userOpHash = r.userOpHash;
   if (r.txHash !== undefined) clean.txHash = r.txHash;
   if (r.feeTxHash !== undefined) clean.feeTxHash = r.feeTxHash;

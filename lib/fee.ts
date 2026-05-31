@@ -1,6 +1,8 @@
 // OpenPay 利用手数料 = amount * FEE_BPS / BPS_DENOM (両 token 共通、最低手数料なし)。
-// Phase 1 (alpha) では FEE_BPS_* = 0n に設定し、calcFee が常に 0n を返す。Phase 2 で
-// 課金モデル (月額固定 / 利用権販売など) 復活時は定数を戻すだけで downstream が追従。
+// 決済手数料は alpha / 将来とも 0% (FEE_BPS_* = 0n で calcFee は常に 0n を返す)。収益化は
+// 周辺機能の月額固定 / 利用権販売など決済額非連動モデルで、決済フローを通さない
+// (= この per-tx 手数料は復活させない)。feeAmount を 0 で記録し続けるのは「利用手数料 0」
+// の会計証跡 + 既存スキーマ継続のため。
 //
 // 決済モードは 2 種類で gas 取り扱いが異なる:
 //   gasless  — OpenPay が gas を肩代わり、店主が gasMode で負担者を選ぶ
@@ -10,8 +12,11 @@
 //   gas=customer: customer = amount + gas, merchant = amount
 //   gas=merchant: customer = amount,        merchant = amount - gas
 // gas 内訳 (gasless のみ):
-//   sponsorship (JPYC): 運営が POL gas 立替 (Phase 1 では運営が吸収する純費用)
-//   erc20 paymaster (USDC): paymaster が顧客 USDC から actualGas 直接徴収
+//   sponsorship (JPYC): 運営が POL gas を立替え、顧客が同額相当を JPYC で負担する (案A:
+//     gasMode=customer は請求に上乗せ / gasMode=merchant は着金から控除)。運営は立替分を
+//     回収し利益 0 (= 肩代わりではなく立替・回収)。会計上はネットワーク手数料相当額として
+//     networkFeeEquivalent に分離記録する。
+//   erc20 paymaster (USDC): paymaster が顧客 USDC から actualGas を直接徴収
 import type { Address } from 'viem';
 import type { TokenSymbol } from './tokens';
 
