@@ -1285,6 +1285,62 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     expect(result.mintTxHash).toBe('0xminthash01');
   });
 
+  it('CCTP resume-landed + fee mint 失敗: merchant callback は fee mint より前に発火 (ordering guard)', async () => {
+    // merchant mint は landed 済 (resume.mintTxHash 在り)、fee mint 未了。fee mint の
+    // sendTransaction を hash 切れで throw させ、merchant callback が fee mint より「前」に
+    // 発火していることを fence する (callback を fee mint の後ろに動かすとこの test は落ちる)。
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: [], // 最初の sendTransaction (= fee mint) で throw
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              { status: 'complete', message: '0xmsg', attestation: '0xatt' },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 100_000n,
+        resume: {
+          approveTxHash: '0xapprove_prev',
+          burnTxHash: '0xburn_m_prev',
+          feeBurnTxHash: '0xburn_f_prev',
+          mintTxHash: '0xmint_m_prev',
+        },
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+        onMerchantMint: (i) => merchantMints.push(i),
+      }),
+    ).rejects.toThrow();
+
+    expect(merchantMints).toEqual([
+      { mintTxHash: '0xmint_m_prev', burnTxHash: '0xburn_m_prev' },
+    ]);
+  });
+
   it('Gateway resume: attestation 済なら再 sign せず mint だけ実行', async () => {
     const walletClient = makeWalletClient({
       signature: '0xshould_not_be_used',
