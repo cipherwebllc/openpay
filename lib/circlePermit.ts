@@ -162,9 +162,24 @@ export function normalizePermitSignature(raw: Hex): Hex {
 // ---- deploy/runtime guard (C3) ----------------------------------------------
 // allowlist アドレスに実際に contract code が在ることを検証してから permit spender
 // として使う。EOA/未 deploy アドレスに permit を出す事故を防ぐ最低限の sanity。
-// 期待 codehash を実機計測したら CIRCLE_PAYMASTER_CODEHASH に登録し、一致検証まで
-// 強める (現状は per-chain 計測値が無いので非空 code の確認に留める)。
-export const CIRCLE_PAYMASTER_CODEHASH: Readonly<Record<number, Hex>> = {};
+// 期待 codehash 登録済 → assertCirclePaymasterDeployed が非空 code に加えて
+// keccak256(code) 一致まで検証する (信頼境界 C3 強化)。
+// 値: scripts/verify-circle-codehash.mjs で 2026-05-31 に全 14 chain (mainnet 7 +
+// testnet 7・両 deployment class) の eth_getCode を keccak256 し **全て同一**を確認した。
+// deterministic CREATE2 deploy のため bytecode は全 chain 共通。**未検証 chain を自動
+// enforce しない**よう検証済 chainId を明示列挙する (chain 追加時は同 gate を再実行して足す)。
+const CIRCLE_PAYMASTER_V08_CODEHASH: Hex =
+  '0x6ed62b6e72af8fab750c07bebbe4de671b2d3c31f273cd2acefc0fa568f78a6a';
+const CODEHASH_VERIFIED_CHAIN_IDS: readonly number[] = [
+  // mainnet: Ethereum / Base / Arbitrum / Optimism / Polygon / Avalanche / Unichain
+  1, 8453, 42161, 10, 137, 43114, 130,
+  // testnet: Sepolia / Base Sepolia / Arb Sepolia / OP Sepolia / Polygon Amoy / Avax Fuji / Unichain Sepolia
+  11155111, 84532, 421614, 11155420, 80002, 43113, 1301,
+];
+export const CIRCLE_PAYMASTER_CODEHASH: Readonly<Record<number, Hex>> =
+  Object.fromEntries(
+    CODEHASH_VERIFIED_CHAIN_IDS.map((id) => [id, CIRCLE_PAYMASTER_V08_CODEHASH]),
+  );
 
 /** Circle Paymaster が allowlist アドレスに deploy 済か検証。code が空 (EOA/未 deploy)
  * なら throw。期待 codehash が登録済の chain では keccak256(code) 一致まで検証する。 */

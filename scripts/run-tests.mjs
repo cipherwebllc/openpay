@@ -35,6 +35,12 @@
 // root cause fix の方針 (別 task、bounded だが不確実): component の重い依存
 // (viem/wagmi/permissionless) を test 境界で完全 mock し jsdom worker に実 graph を
 // 評価させない再設計 + describe 単位の分割。安全に行うには専用 effort が要る。
+// 2026-05-31 追加切り分け: deps.optimizer の事前バンドルでも不解消。transform/collect は
+// 成功し tests phase 0ms (最初の render) で ~29s かけて OOM = **module 評価でなく render
+// フェーズ**が原因。かつ当該 test は既に wagmi / 全 app hook / lib/pimlico を mock 済・
+// historyCtx も memo 済 → 「重いグラフ評価」「再 render ループ」では説明できない。残るは
+// heap profiling / 未 mock の子 component を順次 mock する render 二分探索での犯人特定。
+// 挙動は e2e (pay/scan/tip) でカバー済のため allowlist 据え置き (本 fence が新規 skip を防ぐ)。
 // 暫定: 「該当 6 ファイルに限り未 run を allow、他ファイルで silent skip が出れば
 // fail」で運用 (本 allowlist が fence)。
 

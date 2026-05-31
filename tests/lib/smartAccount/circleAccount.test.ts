@@ -255,10 +255,13 @@ describe('assertCirclePaymasterDeployed (C3 guard)', () => {
     ).rejects.toThrow(/contract code/);
   });
 
-  it('code が在れば throw しない', async () => {
+  it('登録済 codehash と不一致の code なら throw (B1: 信頼境界 codehash 検証)', async () => {
+    // CHAIN_ID (421614=Arb Sepolia) は CIRCLE_PAYMASTER_CODEHASH 登録済。任意の
+    // 非空 code は実 paymaster の codehash と一致しないので keccak256 不一致で弾く。
+    // (一致 path = 実 bytecode は scripts/verify-circle-codehash.mjs が全 chain で on-chain 検証済。)
     const publicClient = fakePublicClient({ code: '0x6080604052' });
     await expect(
       assertCirclePaymasterDeployed(publicClient as never, CHAIN_ID),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow(/codehash/);
   });
 });
