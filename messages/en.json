@@ -934,12 +934,12 @@
   },
   "SmartAccountFallback": {
     "bannerTitle": "Unsupported Smart Account detected",
-    "bannerBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). You can switch to standard mode — you pay gas in {nativeToken} (the OpenPay service fee is 0% during the alpha period).",
+    "bannerBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). You can switch to standard mode — you pay gas in {nativeToken}.",
     "switchButton": "Switch to standard mode (you pay gas)",
     "tipOnlyTitle": "Unsupported Smart Account detected",
     "tipOnlyBody": "Your wallet is delegated to a Smart Account that OpenPay cannot use for gasless payments (delegate: {address}). Tips require gasless mode, so this wallet cannot send tips at this time. If you are using MetaMask, toggle off \"Smart account\" in Account details. Or try a different wallet.",
     "pristineTitle": "Gasless not available for this wallet yet",
-    "pristineBannerBody": "This wallet isn't set up for gasless payments yet. Switch to standard mode to pay now — you pay gas in {nativeToken} (the OpenPay service fee is 0% during the alpha period). If you use MetaMask, turn on \"Smart account\" in Account details to enable gasless next time.",
+    "pristineBannerBody": "This wallet isn't set up for gasless payments yet. Switch to standard mode to pay now — you pay gas in {nativeToken}. If you use MetaMask, turn on \"Smart account\" in Account details to enable gasless next time.",
     "pristineTipBody": "This wallet isn't set up for gasless payments yet, and tips require gasless mode. If you use MetaMask, turn on \"Smart account\" in Account details and reconnect, or try a wallet that's already set up for gasless."
   }
 }

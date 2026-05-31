@@ -934,12 +934,12 @@
   },
   "SmartAccountFallback": {
     "bannerTitle": "未対応の Smart Account を検出",
-    "bannerBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。通常決済モードに切り替えると決済できます — ガス代は {nativeToken} で自己負担です (OpenPay 利用手数料は alpha 期間中 0%)。",
+    "bannerBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。通常決済モードに切り替えると決済できます — ガス代は {nativeToken} で自己負担です。",
     "switchButton": "通常決済に切替 (ガス代自己負担)",
     "tipOnlyTitle": "未対応の Smart Account を検出",
     "tipOnlyBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。チップ送信にはガスレスモードが必要なため、このウォレットではチップを送れません。MetaMask の場合は「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
     "pristineTitle": "このウォレットはまだガスレス決済の準備ができていません",
-    "pristineBannerBody": "このウォレットはまだガスレス決済の準備ができていません。通常決済モードに切り替えると今すぐ支払えます — ガス代は {nativeToken} で自己負担です (OpenPay 利用手数料は alpha 期間中 0%)。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
+    "pristineBannerBody": "このウォレットはまだガスレス決済の準備ができていません。通常決済モードに切り替えると今すぐ支払えます — ガス代は {nativeToken} で自己負担です。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
     "pristineTipBody": "このウォレットはまだガスレス決済の準備ができていません。チップ送信にはガスレスモードが必要です。MetaMask の場合は「アカウント詳細 → Smart account」をオンにして再接続するか、ガスレス対応済みのウォレットでお試しください。"
   }
 }
