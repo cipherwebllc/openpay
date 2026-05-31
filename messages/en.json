@@ -57,7 +57,7 @@
     "trustTechStack": "Tech stack: ERC-4337 (account abstraction) / ERC-7702 (EOA → smart account delegation) / Pimlico bundler/paymaster / permissionless.js / viem / wagmi",
     "trustGithubLabel": "Source code (GitHub)",
     "supportTitle": "About OpenPay fees",
-    "supportBody": "OpenPay will never charge a payment fee tied to the transaction amount (a percentage fee). The overall service is free during the alpha period; future monetization is being explored as a volume-independent model such as a monthly subscription or usage license.",
+    "supportBody": "OpenPay will never charge a payment fee tied to the transaction amount (a percentage fee). The overall service is free during the alpha period; future monetization is being explored as a volume-independent model such as a monthly subscription or usage license for peripheral features.",
     "supportTipRequest": "If you'd like to help keep OpenPay running, a tip is hugely appreciated. You can support us from the buttons below (also handy for a quick try).",
     "supportTipButton": "Tip in {label}",
     "supportTipJpycPolygon": "JPYC (Polygon)",
