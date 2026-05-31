@@ -14,7 +14,12 @@ import { spawnSync } from 'node:child_process';
 const BUDGETS_KB = {
   '/_not-found': 250,
   '/[locale]': 320,
-  '/[locale]/pay': 420,
+  // /pay は慢性的に予算上限張り付き。Option B (会計データ分離・v3) で決済記録経路が
+  // saleAmount / networkFeeEquivalent / feeBreakdownVersion を扱うようになり 420→421kB に
+  // 微増 (appendHistory→loadHistory→migrate/isValidEntry + buildHistoryEntry の必須コード)。
+  // 機能上必要なため 423kB へ微増。⚠️ /pay 専用の slimming pass (lazy import 見直し) を別 task
+  // で要検討 — これ以上の安易な予算引き上げはしない。
+  '/[locale]/pay': 423,
   '/[locale]/tip/[address]': 420,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
