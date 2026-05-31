@@ -27,8 +27,9 @@ import {
   polygon,
   polygonAmoy,
 } from 'viem/chains';
-import { kvLrange, kvLlen, isKvConfigured } from '@/lib/kv';
+import { kvLrange, kvLlen } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import { requireAdminAuth } from '../_auth';
 
 export const runtime = 'nodejs';
 
@@ -398,25 +399,8 @@ function serialize(chains: ChainAgg[]) {
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
-  const adminToken = process.env.PAYMENT_LOG_ADMIN_TOKEN;
-  if (!adminToken) {
-    return NextResponse.json(
-      { ok: false, error: 'admin_token_not_configured' },
-      { status: 503 },
-    );
-  }
-  if (req.headers.get('authorization') !== `Bearer ${adminToken}`) {
-    return NextResponse.json(
-      { ok: false, error: 'unauthorized' },
-      { status: 401 },
-    );
-  }
-  if (!isKvConfigured()) {
-    return NextResponse.json(
-      { ok: false, error: 'kv_not_configured' },
-      { status: 503 },
-    );
-  }
+  const authError = requireAdminAuth(req);
+  if (authError) return authError;
 
   const url = new URL(req.url);
   const chainIdFilter = url.searchParams.get('chainId');

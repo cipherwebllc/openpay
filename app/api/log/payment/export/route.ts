@@ -2,30 +2,17 @@
 // 弁護士 review / 金融庁事前相談 / GMV 集計用。
 
 import { NextResponse } from 'next/server';
-import { kvLrange, kvLlen, isKvConfigured } from '@/lib/kv';
+import { kvLrange, kvLlen } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import { requireAdminAuth } from '../_auth';
 
 export const runtime = 'nodejs';
 
 const KV_KEY = 'openpay:payments:log';
 
 export async function GET(req: Request): Promise<NextResponse> {
-  const adminToken = process.env.PAYMENT_LOG_ADMIN_TOKEN;
-  if (!adminToken) {
-    return NextResponse.json(
-      { ok: false, error: 'admin_token_not_configured' },
-      { status: 503 },
-    );
-  }
-  if (req.headers.get('authorization') !== `Bearer ${adminToken}`) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  }
-  if (!isKvConfigured()) {
-    return NextResponse.json(
-      { ok: false, error: 'kv_not_configured' },
-      { status: 503 },
-    );
-  }
+  const authError = requireAdminAuth(req);
+  if (authError) return authError;
 
   const url = new URL(req.url);
   const from = Number(url.searchParams.get('from') ?? 0);
