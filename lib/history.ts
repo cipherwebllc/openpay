@@ -230,7 +230,12 @@ function isValidEntry(value: unknown): value is HistoryEntry {
     typeof e.networkFeeEquivalent !== 'string'
   )
     return false;
-  if (typeof e.feeBreakdownVersion !== 'number') return false;
+  if (
+    typeof e.feeBreakdownVersion !== 'number' ||
+    !Number.isInteger(e.feeBreakdownVersion) ||
+    e.feeBreakdownVersion < 0
+  )
+    return false;
   return true;
 }
 
