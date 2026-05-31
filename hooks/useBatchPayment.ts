@@ -94,8 +94,12 @@ type BatchPaymentResult = {
 export function useBatchPayment(
   deployment: TokenDeployment,
   enabled: boolean = true,
+  // Circle 経路を抑止して Pimlico erc20 に固定する (TipForm 用)。useSmartAccount に伝播
+  // させないと、決済実行に使う内部 client が Circle に routing され circlePermitAmount 不在で
+  // 送信時に throw する (呼出元が表示用に disableCircle を立てても無効になる)。
+  disableCircle: boolean = false,
 ) {
-  const { data: clients } = useSmartAccount(deployment, enabled);
+  const { data: clients } = useSmartAccount(deployment, enabled, disableCircle);
   const { address: customer, chainId } = useAccount();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
