@@ -7,11 +7,11 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { pad } from '@/lib/format';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
 
 function formatTimeHMS(d: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 

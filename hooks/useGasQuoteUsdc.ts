@@ -14,7 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Chain } from 'viem';
 import { env } from '@/lib/env';
 import { createPimlico, resolvePaymasterMode } from '@/lib/pimlico';
-import { supportedChains } from '@/lib/chains';
+import { chainObjectForId } from '@/lib/chains';
 import type { TokenDeployment } from '@/lib/tokens';
 
 // 値が小さすぎて approve allowance が不足すると userOp が postOp で revert する
@@ -26,9 +26,7 @@ export function useGasQuoteUsdc(
   enabled: boolean = true,
 ) {
   const isActive = enabled && resolvePaymasterMode(deployment) === 'erc20';
-  const chain: Chain | undefined = supportedChains.find(
-    (c) => c.id === deployment.chainId,
-  );
+  const chain: Chain | undefined = chainObjectForId(deployment.chainId);
 
   return useQuery({
     enabled: isActive && !!chain,

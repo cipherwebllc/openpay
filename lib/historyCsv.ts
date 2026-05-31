@@ -10,6 +10,7 @@
 // - 列順は固定 (ja header)。会計ソフトへ貼り付けてもズレないよう先頭から固定。
 
 import { formatUnits } from 'viem';
+import { pad } from './format';
 import type { HistoryEntry } from './history';
 import {
   formatHistoryTimestamp,
@@ -160,6 +161,5 @@ export function toCsv(entries: ReadonlyArray<HistoryEntry>): string {
 }
 
 export function historyCsvFilename(now: Date = new Date()): string {
-  const pad = (n: number) => n.toString().padStart(2, '0');
   return `openpay-history-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
 }
