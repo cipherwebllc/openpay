@@ -241,6 +241,13 @@ function computeMaxFee(value: bigint, ov: BuildBurnIntentOverrides): bigint {
   return computed < MIN_MAX_FEE_ATOMIC ? MIN_MAX_FEE_ATOMIC : computed;
 }
 
+// 会計ログ用の bridge fee **上限** 見積 (実 charge ではない・実 fee ≤ これ)。burn intent と
+// 同じ既定 (overrides 無し) で算出し、ログ値が calldata と drift しないようにする。記録は
+// reported/unreconciled 扱い、実 charge は mint receipt 照合 (B-3) で確定する。
+export function estimateGatewayMaxFee(value: bigint): bigint {
+  return computeMaxFee(value, {});
+}
+
 // EIP712Domain は viem が domain object から自動推論するため types には含めない。
 export function getBurnIntentTypedData(
   intent: BurnIntent,

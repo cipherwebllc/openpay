@@ -72,6 +72,33 @@ describe('POST /api/log/payment', () => {
     expect(entry.serverTs).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('Step3: cross-chain 会計フィールド (bridgedAmount / bridgeFeeMax / burnTxHash) を受理', async () => {
+    const res = await POST(
+      req({
+        ...validBody,
+        flow: 'direct',
+        bridge: 'cctp-v2',
+        sourceChainId: 8453,
+        saleAmount: '1000000',
+        bridgedAmount: '1000000',
+        bridgeFeeMax: '1000',
+        burnTxHash: '0x' + 'c'.repeat(64),
+        feeBreakdownVersion: 1,
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('Step3: bridgeFeeMax が数字以外なら 400', async () => {
+    const res = await POST(req({ ...validBody, bridgeFeeMax: '1.5' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('Step3: burnTxHash が hex でないと 400', async () => {
+    const res = await POST(req({ ...validBody, burnTxHash: 'notahex' }));
+    expect(res.status).toBe(400);
+  });
+
   it('flow が不正値だと 400', async () => {
     const res = await POST(req({ ...validBody, flow: 'invalid' }));
     expect(res.status).toBe(400);

@@ -142,6 +142,13 @@ function computeCctpMaxFee(
     : computed;
 }
 
+// 会計ログ用の bridge fee **上限** 見積 (実 charge ではない・実 fee ≤ これ)。calldata と
+// 同じ既定 (overrides 無し) で算出し、ログ値が calldata と drift しないようにする。記録は
+// reported/unreconciled 扱い、実 charge は mint receipt 照合 (B-3) で確定する。
+export function estimateCctpMaxFee(value: bigint): bigint {
+  return computeCctpMaxFee(value, {});
+}
+
 // 事前に erc20.approve(TOKEN_MESSENGER_ADDRESS, value) が必要。
 export function encodeDepositForBurnCalldata(
   args: BuildDepositForBurnArgs,

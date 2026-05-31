@@ -47,6 +47,11 @@ type Payload = {
   // direct (同一 chain) では undefined、Gateway/CCTP V2 経由なら値が入る。
   bridge?: 'gateway' | 'cctp-v2';
   sourceChainId?: number;
+  // cross-chain 会計フィールド (unreconciled・reported)。bridgedAmount / bridgeFeeMax は raw
+  // decimal、burnTxHash は CCTP source burn tx。
+  bridgedAmount?: string;
+  bridgeFeeMax?: string;
+  burnTxHash?: Hex;
   // Circle Paymaster 監査 (gasless circle 経路のみ・Phase1 C2/C3)。
   provider?: 'pimlico' | 'circle';
   circlePaymasterAddress?: Address;
@@ -119,6 +124,11 @@ function validate(raw: unknown): Payload | null {
       r.sourceChainId <= 0)
   )
     return null;
+  if (r.bridgedAmount !== undefined && !isDecimalString(r.bridgedAmount))
+    return null;
+  if (r.bridgeFeeMax !== undefined && !isDecimalString(r.bridgeFeeMax))
+    return null;
+  if (r.burnTxHash !== undefined && !validHex(r.burnTxHash)) return null;
   if (r.provider !== undefined && r.provider !== 'pimlico' && r.provider !== 'circle')
     return null;
   if (
@@ -165,6 +175,9 @@ function validate(raw: unknown): Payload | null {
   if (r.errorMessage !== undefined) clean.errorMessage = r.errorMessage;
   if (r.bridge !== undefined) clean.bridge = r.bridge;
   if (r.sourceChainId !== undefined) clean.sourceChainId = r.sourceChainId;
+  if (r.bridgedAmount !== undefined) clean.bridgedAmount = r.bridgedAmount;
+  if (r.bridgeFeeMax !== undefined) clean.bridgeFeeMax = r.bridgeFeeMax;
+  if (r.burnTxHash !== undefined) clean.burnTxHash = r.burnTxHash;
   if (r.provider !== undefined) clean.provider = r.provider;
   if (r.circlePaymasterAddress !== undefined)
     clean.circlePaymasterAddress = r.circlePaymasterAddress;

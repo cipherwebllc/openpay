@@ -15,14 +15,8 @@ import { useEffect, useState } from 'react';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
-import {
-  buildPaymentLogEvent,
-  logPaymentEvent,
-  type PaymentBridge,
-} from '@/lib/paymentLog';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
-import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
@@ -178,44 +172,14 @@ export function CrossChainHint(props: CrossChainHintProps) {
       // ここでは何もしない (= no-op、panel 残る)。
       return;
     }
-    let executeResult;
     try {
-      executeResult = await hook.executeOption(selectedOption);
+      // 会計ログ (KV) は useCrossChainPayment の onMerchantMint が merchant mint 確定時
+      // (fee mint より前) に発火する。fee mint 失敗でも merchant 着金を取りこぼさず、売上総額
+      // (saleAmount) / bridgeFeeMax / burnTxHash など v3 フィールドも含めて記録する。ここでは
+      // 実行のみ (success panel は hook.result state が駆動)。
+      await hook.executeOption(selectedOption);
     } catch {
-      return;
-    }
-    if (executeResult) {
-      const bridge: PaymentBridge =
-        selectedOption.kind === 'gateway' ? 'gateway' : 'cctp-v2';
-      const sourceChainIdForLog =
-        selectedOption.kind === 'cctp-v2'
-          ? selectedOption.sourceChainId
-          : undefined;
-      // fee=0 (Phase 1) では merchant 宛 1 本のみブリッジ。fee>0 で operator 宛 2 本目が
-      // 自動復活する (execute 側の bridgeFee guard 経由)。
-      const { feeAmount, bridgedAmount } = computeCrossChainFeeSplit(
-        props.requiredAtomic,
-        'usdc',
-        'standard',
-      );
-      const evt = buildPaymentLogEvent(
-        {
-          flow: 'direct',
-          chainId: props.targetChainId,
-          tokenAddress: props.tokenAddress,
-          merchant: props.recipient,
-          merchantAmount: bridgedAmount,
-          feeReceiver: props.feeReceiver,
-          feeAmount,
-          // 利用料は merchant mint とは別 tx で着金する。監査用に fee mint hash を
-          // 記録 (txHash は merchant mint なので、これが無いと fee 送金を辿れない)。
-          feeTxHash: executeResult.feeMintTxHash,
-          bridge,
-          sourceChainId: sourceChainIdForLog,
-        },
-        { result: 'success', txHash: executeResult.mintTxHash },
-      );
-      void logPaymentEvent(evt);
+      // 実行エラーは hook.error に反映される (ここでは何もしない)。
     }
   }
 

@@ -75,6 +75,10 @@ type LogEntry = {
   // 送金は両者とも undefined、Gateway / CCTP V2 経由なら値が入る。
   bridge?: string;
   sourceChainId?: number;
+  // cross-chain (Step 3) の dest mint tx (= idempotency key) と bridge fee 上限 (ceiling)。
+  // cross-chain success は resume で複数回 log され得るため (bridge+chainId+txHash) で dedup する。
+  txHash?: string;
+  bridgeFeeMax?: string;
   // Phase1 Circle Paymaster 監査フィールド (gasless circle 経路のみ)。
   provider?: string;
   circlePaymasterNetUsdc?: string;
@@ -120,6 +124,8 @@ type BridgeAgg = {
   totalFeeWei: bigint;
   totalSaleWei: bigint;
   totalNetworkFeeWei: bigint;
+  // cross-chain の bridge fee **上限** 合計 (ceiling・実 charge ではない・unreconciled)。
+  totalBridgeFeeMaxWei: bigint;
 };
 
 type ChainAgg = {
@@ -135,6 +141,8 @@ type ChainAgg = {
   totalSaleWei: bigint;
   totalNetworkFeeWei: bigint;
   unknownBreakdownCount: number;
+  // cross-chain bridge fee 上限合計 (ceiling・unreconciled)。
+  totalBridgeFeeMaxWei: bigint;
   byToken: Map<string, TokenAgg>;
   byBridge: Map<PaymentBridgeKey, BridgeAgg>;
 };
@@ -181,6 +189,7 @@ function emptyBridgeAgg(bridge: PaymentBridgeKey): BridgeAgg {
     totalFeeWei: 0n,
     totalSaleWei: 0n,
     totalNetworkFeeWei: 0n,
+    totalBridgeFeeMaxWei: 0n,
   };
 }
 
@@ -205,6 +214,7 @@ function aggregate(entries: LogEntry[]): {
   chains: ChainAgg[];
   aggregatedCount: number;
   invalidEntries: number;
+  crossChainDeduped: number;
   byBridge: BridgeAgg[];
   byProvider: ProviderAgg[];
 } {
@@ -213,11 +223,31 @@ function aggregate(entries: LogEntry[]): {
   const globalByProvider = new Map<PaymentProviderKey, ProviderAgg>();
   let aggregatedCount = 0;
   let invalidEntries = 0;
+  // cross-chain success は executor の onMerchantMint が resume で複数回発火し得る
+  // (route は POST を無条件 append)。同一着金の二重計上を防ぐため (bridge+chainId+txHash)
+  // で dedup する。dedup 件数は透明性のため response に出す。
+  let crossChainDeduped = 0;
+  const seenCrossChain = new Set<string>();
 
   for (const e of entries) {
     if (!isAggregable(e)) {
       invalidEntries++;
       continue;
+    }
+    // cross-chain success の冪等 dedup (mint tx hash 単位)。
+    const bridgeKeyForDedup = normalizeBridge(e.bridge);
+    if (
+      bridgeKeyForDedup !== 'direct' &&
+      e.result === 'success' &&
+      typeof e.txHash === 'string' &&
+      e.txHash.length > 0
+    ) {
+      const key = `${bridgeKeyForDedup}:${e.chainId}:${e.txHash}`;
+      if (seenCrossChain.has(key)) {
+        crossChainDeduped++;
+        continue;
+      }
+      seenCrossChain.add(key);
     }
     aggregatedCount++;
     const chainId = e.chainId;
@@ -226,6 +256,12 @@ function aggregate(entries: LogEntry[]): {
     const merchantWei = parseWei(e.merchantAmount);
     const feeWei = parseWei(e.feeAmount);
     const bridgeKey = normalizeBridge(e.bridge);
+    // cross-chain (bridge !== direct) の merchantAmount は bridged intent (実着金 = minted は
+    // bridge fee 控除後で未確定・B-3 で receipt 照合)。settled income ではないため chain/token の
+    // totalMerchantWei には計上せず、byBridge 側にのみ intent として残す。GMV (totalSaleWei) と
+    // bridge fee 上限 (totalBridgeFeeMaxWei) は計上する。
+    const isCrossChain = bridgeKey !== 'direct';
+    const bridgeFeeMaxWei = parseWei(e.bridgeFeeMax);
     // v3: 売上総額 (gross) は saleAmount を優先し、無い旧 log は着金額で代替 (gas=customer の
     // 大多数は両者一致するため GMV は概ね保たれる)。ネットワーク手数料相当額は非 circle の
     // networkFeeEquivalent と circle の circlePaymasterNetUsdc を coalesce。
@@ -264,6 +300,7 @@ function aggregate(entries: LogEntry[]): {
         totalSaleWei: 0n,
         totalNetworkFeeWei: 0n,
         unknownBreakdownCount: 0,
+        totalBridgeFeeMaxWei: 0n,
         byToken: new Map(),
         byBridge: new Map(),
       };
@@ -336,11 +373,15 @@ function aggregate(entries: LogEntry[]): {
       // 除外する (conflated feeAmount が利用手数料収益として誤計上されるのを防ぐ)。
       const serviceFeeWei = hasSeparatedBreakdown ? feeWei : 0n;
       if (!hasSeparatedBreakdown) chain.unknownBreakdownCount++;
-      chain.totalMerchantWei += merchantWei;
+      // settled income (totalMerchantWei) は同一 chain 決済のみ。cross-chain は bridged intent
+      // (実着金未確定) のため chain/token からは除外し、byBridge 側に intent として残す。
+      const settledMerchantWei = isCrossChain ? 0n : merchantWei;
+      chain.totalMerchantWei += settledMerchantWei;
       chain.totalFeeWei += serviceFeeWei;
       chain.totalSaleWei += saleWei;
       chain.totalNetworkFeeWei += netFeeWei;
-      token.totalMerchantWei += merchantWei;
+      chain.totalBridgeFeeMaxWei += bridgeFeeMaxWei;
+      token.totalMerchantWei += settledMerchantWei;
       token.totalFeeWei += serviceFeeWei;
       token.totalSaleWei += saleWei;
       token.totalNetworkFeeWei += netFeeWei;
@@ -348,10 +389,12 @@ function aggregate(entries: LogEntry[]): {
       chainBridge.totalFeeWei += serviceFeeWei;
       chainBridge.totalSaleWei += saleWei;
       chainBridge.totalNetworkFeeWei += netFeeWei;
+      chainBridge.totalBridgeFeeMaxWei += bridgeFeeMaxWei;
       globalBridge.totalMerchantWei += merchantWei;
       globalBridge.totalFeeWei += serviceFeeWei;
       globalBridge.totalSaleWei += saleWei;
       globalBridge.totalNetworkFeeWei += netFeeWei;
+      globalBridge.totalBridgeFeeMaxWei += bridgeFeeMaxWei;
     } else if (result === 'reverted') {
       chain.revertedCount++;
       token.revertedCount++;
@@ -391,7 +434,14 @@ function aggregate(entries: LogEntry[]): {
     .map((k) => globalByProvider.get(k))
     .filter((p): p is ProviderAgg => p !== undefined);
 
-  return { chains, aggregatedCount, invalidEntries, byBridge, byProvider };
+  return {
+    chains,
+    aggregatedCount,
+    invalidEntries,
+    crossChainDeduped,
+    byBridge,
+    byProvider,
+  };
 }
 
 function serializeBridges(bridges: BridgeAgg[]) {
@@ -404,6 +454,7 @@ function serializeBridges(bridges: BridgeAgg[]) {
     totalFeeWei: b.totalFeeWei.toString(),
     totalSaleWei: b.totalSaleWei.toString(),
     totalNetworkFeeWei: b.totalNetworkFeeWei.toString(),
+    totalBridgeFeeMaxWei: b.totalBridgeFeeMaxWei.toString(),
   }));
 }
 
@@ -432,6 +483,7 @@ function serialize(chains: ChainAgg[]) {
     totalFeeWei: c.totalFeeWei.toString(),
     totalSaleWei: c.totalSaleWei.toString(),
     totalNetworkFeeWei: c.totalNetworkFeeWei.toString(),
+    totalBridgeFeeMaxWei: c.totalBridgeFeeMaxWei.toString(),
     unknownBreakdownCount: c.unknownBreakdownCount,
     byToken: Array.from(c.byToken.values())
       .sort((a, b) => b.successCount - a.successCount)
@@ -551,8 +603,14 @@ export async function GET(req: Request): Promise<NextResponse> {
     return true;
   });
 
-  const { chains, aggregatedCount, invalidEntries, byBridge, byProvider } =
-    aggregate(filtered);
+  const {
+    chains,
+    aggregatedCount,
+    invalidEntries,
+    crossChainDeduped,
+    byBridge,
+    byProvider,
+  } = aggregate(filtered);
 
   return NextResponse.json({
     ok: true,
@@ -577,6 +635,8 @@ export async function GET(req: Request): Promise<NextResponse> {
     filteredCount: filtered.length,
     aggregatedCount,
     invalidEntries,
+    // cross-chain success の (bridge+chainId+txHash) 重複 (resume 由来) を除外した件数。
+    crossChainDeduped,
     filter: {
       chainId: parsedChainIdFilter ?? null,
       since: sinceFilter,

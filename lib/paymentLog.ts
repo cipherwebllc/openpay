@@ -75,6 +75,15 @@ export type PaymentLogEvent = {
   // bridge 経由時の source chain ID (本 chainId は destination)。
   // direct の場合は undefined。
   sourceChainId?: number;
+  // --- cross-chain (CCTP V2 / Gateway) の会計フィールド。全て **unreconciled** (reported)。 ---
+  // bridge に渡す intent (= gross - OpenPay 利用料)。bridge が fee を deduct する前の値で、
+  // 実着金 (minted) は未確定 (B-3 で mint receipt 照合)。settled income ではないため
+  // stats は totalMerchantWei に計上しない (bridge marker で除外)。
+  bridgedAmount?: string;
+  // bridge fee の **上限** (maxFee ceiling・実 charge ではない・実 fee ≤ これ)。
+  bridgeFeeMax?: string;
+  // cross-chain (CCTP) の source burn tx hash (照合用)。Gateway は burn-intent モデルで undefined。
+  burnTxHash?: Hex;
   // --- Circle Paymaster 監査 (gasless circle 経路のみ・C2/C3) ---
   // paymaster 系統。gasless で 'pimlico' | 'circle'、standard/cross-chain は undefined。
   provider?: PaymentProvider;
@@ -106,6 +115,10 @@ export type PaymentLogContext = {
   // cross-chain bridge 経由の場合のみ指定。direct (= 既存単一 chain) では undefined。
   bridge?: PaymentBridge;
   sourceChainId?: number;
+  // cross-chain 会計フィールド (unreconciled・reported)。詳細は PaymentLogEvent 参照。
+  bridgedAmount?: bigint;
+  bridgeFeeMax?: bigint;
+  burnTxHash?: Hex;
   // Circle Paymaster 経路の監査フィールド (gasless circle のみ)。
   provider?: PaymentProvider;
   circlePaymasterAddress?: Address;
@@ -140,6 +153,9 @@ export function buildPaymentLogEvent(
     feeTxHash: ctx.feeTxHash,
     bridge: ctx.bridge,
     sourceChainId: ctx.sourceChainId,
+    bridgedAmount: ctx.bridgedAmount?.toString(),
+    bridgeFeeMax: ctx.bridgeFeeMax?.toString(),
+    burnTxHash: ctx.burnTxHash,
     provider: ctx.provider,
     circlePaymasterAddress: ctx.circlePaymasterAddress,
     circlePaymasterNetUsdc: ctx.circlePaymasterNetUsdc,

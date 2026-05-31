@@ -63,6 +63,16 @@ export type CrossChainProgress =
 
 export type ProgressCallback = (p: CrossChainProgress) => void;
 
+// merchant mint が **確定** した時点で発火するコールバック (fee mint より前)。Gateway / CCTP は
+// merchant を fee より先に mint するため、fee mint が失敗しても merchant 着金を会計ログに
+// 取りこぼさないよう、このタイミングで呼ぶ。冪等ではなく resume で複数回呼ばれ得るので、
+// 呼出側 (会計ログの集計層) が (bridge + chainId + mintTxHash) で dedup する前提。
+export type OnMerchantMint = (info: {
+  mintTxHash: Hex;
+  /** CCTP の source burn tx (照合用)。Gateway は burn-intent モデルで undefined。 */
+  burnTxHash?: Hex;
+}) => void;
+
 // wagmi useSwitchChain.switchChainAsync の signature と互換。
 export type SwitchChainFn = (args: { chainId: number }) => Promise<unknown>;
 
@@ -213,6 +223,8 @@ export interface ExecuteGatewayTransferArgs {
   fetch?: FetchLike;
   attestationBaseUrl?: string;
   onProgress?: ProgressCallback;
+  /** merchant mint 確定時に発火 (fee mint より前)。会計ログ用。詳細は OnMerchantMint。 */
+  onMerchantMint?: OnMerchantMint;
 }
 
 export interface ExecuteGatewayTransferResult {
@@ -359,6 +371,11 @@ export async function executeGatewayTransfer(
     },
     label: 'gateway mint',
   });
+  // merchant mint 確定 → 会計ログ発火 (fee mint より前)。settleMint は resume / fresh /
+  // 確認待ちを内部で吸収するので、ここに来た時点で merchant 着金は確定している。
+  if (state.mintTxHash) {
+    args.onMerchantMint?.({ mintTxHash: state.mintTxHash });
+  }
   if (bridgeFee && state.feeAttestation) {
     await settleMint({
       client: args.destPublicClient,
@@ -431,6 +448,8 @@ export interface ExecuteCctpTransferArgs {
     'intervalMs' | 'timeoutMs' | 'sleep' | 'now'
   >;
   onProgress?: ProgressCallback;
+  /** merchant mint 確定時に発火 (fee mint より前)。会計ログ用。詳細は OnMerchantMint。 */
+  onMerchantMint?: OnMerchantMint;
 }
 
 export interface ExecuteCctpTransferResult {
@@ -565,6 +584,13 @@ export async function executeCctpTransfer(
   let attestationMessage: Hex | undefined;
   let attestationSignature: Hex | undefined;
 
+  // resume で merchant mint が既に landed している場合、この run では再 mint しない
+  // (merchantIris は !merchantMintLanded のときだけ取得される)。確定済の merchant 着金を
+  // fee mint より前にここで会計ログ発火する (fee mint 失敗でも取りこぼさない・dedup は集計層)。
+  if (merchantMintLanded && state.mintTxHash) {
+    args.onMerchantMint?.({ mintTxHash: state.mintTxHash, burnTxHash: burnHash });
+  }
+
   if (!merchantMintLanded || !feeMintLanded) {
     onProgress({ kind: 'poll_attestation' });
     // burn hash から attestation を再取得 (Iris は永続なので resume でも取得可能)。
@@ -620,6 +646,8 @@ export async function executeCctpTransfer(
       persist({ mintTxHash: mintHash });
       onProgress({ kind: 'dest_tx_pending', hash: mintHash });
       await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'cctp mint');
+      // fresh merchant mint 確定 → 会計ログ発火 (下の fee mint より前)。
+      args.onMerchantMint?.({ mintTxHash: mintHash, burnTxHash: burnHash });
     }
     if (feeIris) {
       const feeMintData = encodeReceiveMessageCalldata(
