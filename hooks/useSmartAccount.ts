@@ -41,6 +41,11 @@ import type { TokenDeployment } from '@/lib/tokens';
 export function useSmartAccount(
   deployment: TokenDeployment,
   enabled: boolean = true,
+  // Circle 経路を抑止して Pimlico erc20 に倒すフラグ。Circle 分岐 (useBatchPayment) は
+  // circlePermitAmount (useGasQuoteCircle 由来) を必須とするため、Circle を配線していない
+  // 呼出元 (TipForm) が pimlico-simple-7702 + USDC + Circle 有効 chain で Circle に routing
+  // されると送信時に "permitAmount 未算定" で throw する。そうした文脈で true を渡す。
+  disableCircle: boolean = false,
 ) {
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
@@ -49,10 +54,9 @@ export function useSmartAccount(
   // USDC ガスレスを Circle Paymaster (v0.8) で組むか Pimlico erc20 (v0.7) のままに
   // するかの解決 (単一の真実点)。queryKey に provider/entryPointVersion を含めて、
   // flag/chain 変更で別 client を作り直させる (staleTime:Infinity のキャッシュ汚染防止)。
-  const usdcProvider = resolveUsdcGaslessProvider(
-    deployment,
-    chainId ?? deployment.chainId,
-  );
+  const usdcProvider = disableCircle
+    ? 'pimlico'
+    : resolveUsdcGaslessProvider(deployment, chainId ?? deployment.chainId);
   const entryPointVersion = usdcProvider === 'circle' ? '0.8' : '0.7';
 
   return useQuery({

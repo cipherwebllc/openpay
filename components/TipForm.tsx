@@ -51,7 +51,10 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
-  const { data: saData, error: saError } = useSmartAccount(deployment, true);
+  // TipForm は Circle 未配線 (useGasQuoteCircle / circlePermitAmount を持たない)。USDC tip が
+  // Circle に routing されると useBatchPayment の circle 分岐が permitAmount 未算定で throw する
+  // ため、disableCircle=true で Pimlico erc20 に固定する (JPYC は sponsorship なので非影響)。
+  const { data: saData, error: saError } = useSmartAccount(deployment, true, true);
   const gasless = useBatchPayment(deployment);
   const gasQuote = useGasQuote(deployment);
 
