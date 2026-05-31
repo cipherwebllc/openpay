@@ -135,7 +135,7 @@ export function useBatchPayment(
         params.feeAmount + (params.gasReimbursement ?? 0n) <= 0n
       ) {
         throw new Error(
-          'JPYC ガスレス決済にはガス代 reimbursement (feeAmount > 0) が必須です。',
+          'JPYC ガスレス決済にはガス代の立替回収 (利用手数料 + gasReimbursement > 0) が必須です。',
         );
       }
 

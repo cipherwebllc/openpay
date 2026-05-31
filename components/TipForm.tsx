@@ -88,6 +88,9 @@ export function TipForm({ params }: { params: TipParams }) {
   //   Sponsorship (JPYC): Pimlico が立替、運営は徴収 JPYC で精算 (fee transfer に内包)。
   const totalCustomerOutflow = breakdown.customerPays;
   const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
+  // TipForm は常に gasless・非 circle (disableCircle)。記録用ネットワーク手数料相当額は gas
+  // 見積 (JPYC sponsorship の立替回収 / USDC erc20 で paymaster が顧客から徴収する gas)。
+  const networkFeeEquivalent = gasAmount ?? 0n;
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
@@ -222,7 +225,12 @@ export function TipForm({ params }: { params: TipParams }) {
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
       feeReceiver: env.feeReceiver,
-      feeAmount: breakdown.feeAmount + gasReimbursement,
+      // 利用手数料 (サービス料) と gas 立替回収を分離。feeReceiver への on-chain transfer は
+      // useBatchPayment が両者を合算する (挙動不変)。会計記録は分離フィールドで残す。
+      feeAmount: breakdown.feeAmount,
+      gasReimbursement,
+      saleAmount: amountWei,
+      networkFeeEquivalent,
     });
   }
 
