@@ -28,6 +28,7 @@ import type {
   PaymentProvider,
   PaymentResult,
 } from './paymentLog';
+import { pad } from './format';
 import type { TokenSymbol } from './tokens';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
@@ -423,6 +424,5 @@ export function buildHistoryEntry(
 /** 数値 timestamp を yyyy-MM-dd HH:mm:ss (locale 形式) に整形。CSV にも UI にも使う。 */
 export function formatHistoryTimestamp(ts: number): string {
   const d = new Date(ts);
-  const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }

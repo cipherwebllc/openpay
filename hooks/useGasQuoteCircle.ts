@@ -23,7 +23,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Chain } from 'viem';
 import { env } from '@/lib/env';
 import { createPimlico } from '@/lib/pimlico';
-import { supportedChains } from '@/lib/chains';
+import { chainObjectForId } from '@/lib/chains';
 import {
   CIRCLE_GAS_SURCHARGE_BPS,
   CIRCLE_MIN_POSTOP_GAS,
@@ -54,9 +54,7 @@ export function useGasQuoteCircle(
   const isActive =
     enabled &&
     resolveUsdcGaslessProvider(deployment, deployment.chainId) === 'circle';
-  const chain: Chain | undefined = supportedChains.find(
-    (c) => c.id === deployment.chainId,
-  );
+  const chain: Chain | undefined = chainObjectForId(deployment.chainId);
 
   return useQuery<CircleGasQuote>({
     enabled: isActive && !!chain,
