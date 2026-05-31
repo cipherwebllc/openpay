@@ -28,7 +28,7 @@ import type {
   PaymentProvider,
   PaymentResult,
 } from './paymentLog';
-import { pad } from './format';
+import { pad } from './pad';
 import type { TokenSymbol } from './tokens';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';

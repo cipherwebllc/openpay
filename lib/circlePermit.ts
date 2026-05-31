@@ -168,6 +168,10 @@ export function normalizePermitSignature(raw: Hex): Hex {
 // testnet 7・両 deployment class) の eth_getCode を keccak256 し **全て同一**を確認した。
 // deterministic CREATE2 deploy のため bytecode は全 chain 共通。**未検証 chain を自動
 // enforce しない**よう検証済 chainId を明示列挙する (chain 追加時は同 gate を再実行して足す)。
+// 注: codehash は **runtime bytecode を pin する補助防御** (主防御は hardcode address allowlist)。
+//   万一 paymaster が proxy なら shell を pin し背後 impl 差替は捕捉しない。Circle が code を
+//   更新した場合は本 guard が fail-closed (mismatch throw) になるため、flag OFF で Pimlico に
+//   退避 → gate 再実行 → 新 codehash 登録、で復旧する (docs/runbooks rollback 節)。
 const CIRCLE_PAYMASTER_V08_CODEHASH: Hex =
   '0x6ed62b6e72af8fab750c07bebbe4de671b2d3c31f273cd2acefc0fa568f78a6a';
 const CODEHASH_VERIFIED_CHAIN_IDS: readonly number[] = [

@@ -216,3 +216,13 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
 Pimlico erc20 経路に戻る (`paymasterMode='erc20'` 不変・法務 prose も両対応済)。
 進行中の Circle 決済は `circlePending` の submitting record が残るので、復旧は
 `findRecoverable` 経由で receipt 照会のみ (新規送信はしない)。
+
+### codehash mismatch (B1) の復旧手順
+`CIRCLE_PAYMASTER_CODEHASH` enforce 後に Circle が paymaster の bytecode を更新すると、
+`assertCirclePaymasterDeployed` が **fail-closed** (codehash 不一致で throw) し、当該 chain の
+Circle 経路が止まる (Pimlico へは自動 fallback しない・送信前に abort)。復旧:
+1. **即時退避**: `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER=0` + redeploy → 全 chain Pimlico erc20 に退避。
+2. **再検証**: `node scripts/verify-circle-codehash.mjs` を実行 (GATE PASS = 全 chain 到達 & 一致を確認)。
+3. **値更新**: 新 codehash を `lib/circlePermit.ts` の `CIRCLE_PAYMASTER_V08_CODEHASH` に反映。
+4. flag を戻して再有効化。
+(codehash は補助防御で、主防御は hardcode address allowlist。誤検知より fail-closed を優先する設計。)
