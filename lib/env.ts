@@ -292,6 +292,13 @@ export const env = {
   enableMav2:
     process.env.NEXT_PUBLIC_ENABLE_MAV2 === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_MAV2 === 'true',
+  // MetaMask Smart Account (Stateless7702) ガスレス経路の有効化フラグ。**既定 OFF**。
+  // 現在 viem 2.50 の ERC-7739 same-address ガードと delegation-toolkit 0.13.0 の
+  // 非互換で署名が全件失敗するため無効化し standard mode に倒している
+  // (hooks/useSmartAccount.ts)。upstream 互換修正 + 実機再検証後に '1'/'true' で再有効化。
+  enableMetaMaskSmartAccount:
+    process.env.NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT === 'true',
   // Circle Paymaster (USDC ガスレスを Pimlico erc20 → Circle 公式 paymaster に
   // 切替える) の有効化フラグ。既定 OFF で投入し testnet 検証 → mainnet 1 chain
   // (Base) と段階展開する。OFF の間は USDC ガスレスは従来通り Pimlico erc20。

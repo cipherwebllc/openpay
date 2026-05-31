@@ -83,7 +83,10 @@ export type IncompatibleSmartAccountI18nKey =
   // canonical EIP-7702 非対応 chain (Avalanche C-Chain = ACP-209「7702 style」AA)。
   // 委任済み EOA でも標準 bundler 経由の 7702 UserOp が AA23 で revert するため
   // standard mode 案内に倒す ([[chainSupportsCanonical7702]])。
-  | 'errorChainNo7702';
+  | 'errorChainNo7702'
+  // MetaMask Smart Account (Stateless7702) ガスレスが viem 2.50 ERC-7739 ガードと
+  // delegation-toolkit 0.13.0 の非互換で署名失敗するため一時無効化 (standard 案内に倒す)。
+  | 'errorMetaMaskGaslessUnavailable';
 
 export class IncompatibleSmartAccountError extends Error {
   readonly delegateAddress: Address | null;
