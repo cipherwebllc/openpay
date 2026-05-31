@@ -440,10 +440,10 @@ async function assertPaymasterDeployed(publicClient, addr) {
         'アドレス誤りの可能性 — permit を署名せず中断する。',
     );
   }
-  // codehash を log する (enforcement はまだ・lib/circlePermit.ts CIRCLE_PAYMASTER_CODEHASH は空)。
-  // deterministic deploy なら全 chain 同一のはず。新 chain の gate でこれを記録し、Base と一致を
-  // 確認できたら CIRCLE_PAYMASTER_CODEHASH に登録 → 本番 assertCirclePaymasterDeployed が
-  // codehash 一致まで検証できるようになる (信頼境界強化・circlePermit.ts:165 の TODO)。
+  // codehash を log する。enforcement は **有効** (2026-05-31〜): lib/circlePermit.ts
+  // CIRCLE_PAYMASTER_CODEHASH に全 14 chain 分を登録済で、本番 assertCirclePaymasterDeployed が
+  // keccak256(code) 一致まで検証する。全 chain の照合は scripts/verify-circle-codehash.mjs。
+  // deterministic deploy のため全 chain 同一 (= 0x6ed62b6e…68f78a6a)。新 chain の gate でこの値を確認すること。
   log(`Circle Paymaster codehash: ${keccak256(code)} (chain ${CHAIN.id})`);
 }
 
