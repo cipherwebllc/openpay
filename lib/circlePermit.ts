@@ -199,15 +199,21 @@ export async function assertCirclePaymasterDeployed(
         '(EOA/未 deploy)。permit spender として使えないため中止。',
     );
   }
+  // allowlist の Circle chain は全て codehash 登録必須 (circlePaymaster.test の完全性 fence)。
+  // 未登録のまま到達した = 設定漏れの bug なので silent skip せず fail-loud にする。
   const expected = CIRCLE_PAYMASTER_CODEHASH[chainId];
-  if (expected) {
-    const { keccak256 } = await import('viem');
-    const actual = keccak256(code);
-    if (actual.toLowerCase() !== expected.toLowerCase()) {
-      throw new Error(
-        `Circle Paymaster ${address} on chain ${chainId} の codehash 不一致: ` +
-          `${actual} ≠ 期待 ${expected}。`,
-      );
-    }
+  if (!expected) {
+    throw new Error(
+      `Circle Paymaster codehash が chain ${chainId} に未登録。allowlist 全 chain は ` +
+        'scripts/verify-circle-codehash.mjs で検証して CIRCLE_PAYMASTER_CODEHASH に登録すること。',
+    );
+  }
+  const { keccak256 } = await import('viem');
+  const actual = keccak256(code);
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(
+      `Circle Paymaster ${address} on chain ${chainId} の codehash 不一致: ` +
+        `${actual} ≠ 期待 ${expected}。`,
+    );
   }
 }

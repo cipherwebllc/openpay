@@ -110,21 +110,24 @@ async function main() {
     log('(登録可能な chain なし — 全 class で取得不足 or 不一致。enforce しない。)');
   }
 
-  // mainnet と testnet の codehash が同一かも参考表示 (同一 bytecode なら 1 値で全 chain 可)。
-  if (summary.mainnet.hash && summary.testnet.hash) {
-    log(
-      `\n参考: mainnet と testnet の codehash は ${
-        summary.mainnet.hash === summary.testnet.hash ? '同一' : '別'
-      }。`,
-    );
-  }
+  // production は CIRCLE_PAYMASTER_V08_CODEHASH を **全 chain 共通の単一値**として enforce する。
+  // よって gate も class 間 (mainnet ↔ testnet) の hash 同一まで要求する。片方だけ divergent でも
+  // 単一定数モデルが破綻するため (将来 class 別に分かれたら class 別 map へ切替)。
+  const crossClassMatch =
+    summary.mainnet.hash !== null && summary.mainnet.hash === summary.testnet.hash;
+  log(
+    `\n参考: mainnet と testnet の codehash は ${
+      crossClassMatch ? '同一' : '別 (単一定数モデルでは NG)'
+    }。`,
+  );
 
-  // ★ fail-closed gate: 両 class が「全 chain 到達 & 全一致」でなければ非ゼロ終了。
-  //   CI / 手動どちらでも、取得不足や divergence をはっきり失敗として扱う (Codex blocker fix)。
-  const pass = summary.mainnet.uniform && summary.testnet.uniform;
+  // ★ fail-closed gate: 両 class が「全 chain 到達 & 全一致」かつ class 間も同一でなければ非ゼロ終了。
+  //   取得不足 / class 内不一致 / class 間不一致 のいずれもはっきり失敗扱い (Codex blocker fix)。
+  const pass =
+    summary.mainnet.uniform && summary.testnet.uniform && crossClassMatch;
   log(`\n${pass ? '✅ GATE PASS' : '❌ GATE FAIL'} — ${pass
-    ? '全 14 chain 到達・両 class で codehash 一致。CIRCLE_PAYMASTER_CODEHASH の登録値として妥当。'
-    : '取得不足 or 不一致あり。登録/enforce しない (上記 missing / distinct を解消して再実行)。'}`);
+    ? '全 14 chain 到達・両 class で codehash 一致・class 間も同一。CIRCLE_PAYMASTER_V08_CODEHASH 登録値として妥当。'
+    : '取得不足 / class 内不一致 / class 間不一致あり。登録/enforce しない (上記を解消して再実行)。'}`);
   if (!pass) process.exitCode = 1;
 }
 
