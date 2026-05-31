@@ -145,7 +145,19 @@ export function HistoryRow({
           <dd>{entry.chainSlug}</dd>
         </div>
         <div>
-          <dt className="text-slate-400">{t('columnFee')}</dt>
+          {/* alpha 中は OpenPay 利用手数料 0% のため、gasless で feeAmount>0 のときは
+              それは運営が立替えた gas の実費回収 (ネットワーク手数料相当・JPYC sponsorship)
+              であり利用手数料ではない。よってその場合は「ネットワーク手数料」と表示する。
+              (恒久対応: feeAmount に service fee と gas reimbursement を混在させず分離記録する。
+               将来 service fee>0 にする際は必須 — 下記 CSV/stats も同根。) */}
+          <dt className="text-slate-400">
+            {entry.payMode === 'gasless' &&
+            entry.feeAmount != null &&
+            entry.feeAmount !== '0' &&
+            entry.feeAmount !== ''
+              ? t('columnNetworkFee')
+              : t('columnFee')}
+          </dt>
           <dd>{fmt(entry.feeAmount, entry.asset)}</dd>
         </div>
         {entry.provider === 'circle' &&

@@ -716,6 +716,7 @@
     "columnAsset": "Asset",
     "columnAmount": "Amount",
     "columnFee": "OpenPay fee",
+    "columnNetworkFee": "Network fee",
     "columnNetwork": "Network",
     "columnMode": "Mode",
     "columnGasMode": "Gas",
