@@ -37,6 +37,9 @@ describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)'
     // canonical EIP-7702 非対応 chain (Avalanche = ACP-209「7702 style」AA) で
     // 委任済み EOA を standard mode に倒す (chainSupportsCanonical7702 ガード)
     'errorChainNo7702',
+    // MetaMask Smart Account ガスレスが viem 2.50 ERC-7739 非互換で一時無効
+    // (standard mode 案内に倒す・useSmartAccount の metamask-7702 ガード)
+    'errorMetaMaskGaslessUnavailable',
   ] as const;
   for (const ns of FORM_NAMESPACES) {
     for (const key of SA_KEYS) {

@@ -191,6 +191,24 @@ export function useSmartAccount(
           chainId,
           symbol: deployment.symbol,
         });
+        // ⚠️ MetaMask Smart Account (Stateless7702) ガスレスは現在 viem ↔
+        // @metamask/delegation-toolkit の非互換で全件失敗する: Stateless7702 は
+        // account.address === 署名 EOA で、viem 2.50 の ERC-7739 ガードが「外部署名で
+        // verifyingContract に同一(internal)アドレスは不可」と弾く ("External signature
+        // requests cannot use internal accounts as the verifying contract")。toolkit 0.13.0
+        // が最新で upstream 修正待ち。既定 OFF で standard mode に倒し、生エラーを出さない。
+        // upstream 互換修正 + 実機再検証後に NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT で再有効化。
+        if (!env.enableMetaMaskSmartAccount) {
+          logger.warn('smart_account.metamask_gasless_disabled', {
+            delegateAddress: detection.delegateAddress,
+            chainId,
+            symbol: deployment.symbol,
+          });
+          throw new IncompatibleSmartAccountError({
+            delegateAddress: detection.delegateAddress,
+            i18nKey: 'errorMetaMaskGaslessUnavailable',
+          });
+        }
         // @metamask/delegation-toolkit は ~30 kB gzip。MetaMask Smart Account
         // ユーザ向けにのみ必要なので dynamic import で lazy load。
         const { buildMetaMaskSmartAccountClient } = await import(

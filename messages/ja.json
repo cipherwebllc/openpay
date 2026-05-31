@@ -307,8 +307,9 @@
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) での決済は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットでは決済できません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版 QR をご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません (MetaMask は Kaia への delegator を未 deploy)。MetaMask の場合は「アカウント詳細 → Smart account」をオフにして元の EOA に戻すか、別のウォレットでお試しください。Polygon / Base / Arbitrum / Optimism / Ethereum チェーンでは MetaMask Smart Account で gasless 決済可能です。",
-    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担) で今すぐ支払えます。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
+    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担) で今すぐ支払えます。",
     "errorChainNo7702": "このチェーンでは現在 USDC ガスレス決済に対応していません (このチェーンの EIP-7702 実装が標準と異なるため)。通常決済 (ガス代自己負担) で今すぐ支払えます。",
+    "errorMetaMaskGaslessUnavailable": "MetaMask Smart Account でのガスレス決済は現在ご利用いただけません (ウォレット側の互換性問題のため一時停止中)。通常決済 (ガス代自己負担) で今すぐ支払えます。",
     "successTitle": "決済が完了しました",
     "successUserOp": "UserOp Hash",
     "successTx": "Tx Hash",
@@ -363,8 +364,9 @@
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) でのチップ送信は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットからチップを送れません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版 Tip リンクをご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません。MetaMask の「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
-    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。チップにはガスレスモードが必要です。MetaMask の「アカウント詳細 → Smart account」をオンにして再接続するか、ガスレス対応済みのウォレットでお試しください。",
+    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。チップにはガスレスモードが必要です。ガスレス対応済みのウォレットでお試しください。",
     "errorChainNo7702": "このチェーンでは現在 USDC ガスレスに対応していないため、チップを送れません (このチェーンの EIP-7702 実装が標準と異なるため)。Polygon / Base / Arbitrum / Optimism 等の他チェーンをご利用ください。",
+    "errorMetaMaskGaslessUnavailable": "MetaMask Smart Account でのガスレス決済は現在ご利用いただけません (ウォレット側の互換性問題のため一時停止中)。チップにはガスレスが必要なため、ガスレス対応済みの別ウォレットでお試しください。",
     "successTitle": "チップを送信しました",
     "successUserOp": "UserOp",
     "successTx": "Tx",
@@ -478,8 +480,9 @@
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) での決済は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットでチェックアウトできません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版のチェックアウト URL をご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません。MetaMask の「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
-    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担) で今すぐ支払えます。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
+    "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担) で今すぐ支払えます。",
     "errorChainNo7702": "このチェーンでは現在 USDC ガスレス決済に対応していません (このチェーンの EIP-7702 実装が標準と異なるため)。通常決済 (ガス代自己負担) で今すぐ支払えます。",
+    "errorMetaMaskGaslessUnavailable": "MetaMask Smart Account でのガスレス決済は現在ご利用いただけません (ウォレット側の互換性問題のため一時停止中)。通常決済 (ガス代自己負担) で今すぐ支払えます。",
     "successTitle": "お支払いが完了しました",
     "successBody": "ご注文ありがとうございます。決済はオンチェーンで確定しました。",
     "successUserOp": "UserOp Hash",
@@ -939,7 +942,7 @@
     "tipOnlyTitle": "未対応の Smart Account を検出",
     "tipOnlyBody": "お使いのウォレットは OpenPay のガスレス決済に対応していない Smart Account に委任されています (delegate: {address})。チップ送信にはガスレスモードが必要なため、このウォレットではチップを送れません。MetaMask の場合は「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
     "pristineTitle": "このウォレットはまだガスレス決済の準備ができていません",
-    "pristineBannerBody": "このウォレットはまだガスレス決済の準備ができていません。通常決済モードに切り替えると今すぐ支払えます — ガス代は {nativeToken} で自己負担です。MetaMask の場合は「アカウント詳細 → Smart account」をオンにすると次回からガスレスになります。",
-    "pristineTipBody": "このウォレットはまだガスレス決済の準備ができていません。チップ送信にはガスレスモードが必要です。MetaMask の場合は「アカウント詳細 → Smart account」をオンにして再接続するか、ガスレス対応済みのウォレットでお試しください。"
+    "pristineBannerBody": "このウォレットはまだガスレス決済の準備ができていません。通常決済モードに切り替えると今すぐ支払えます — ガス代は {nativeToken} で自己負担です。",
+    "pristineTipBody": "このウォレットはまだガスレス決済の準備ができていません。チップ送信にはガスレスモードが必要です。ガスレス対応済みのウォレットでお試しください。"
   }
 }
