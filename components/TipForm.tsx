@@ -55,7 +55,10 @@ export function TipForm({ params }: { params: TipParams }) {
   // Circle に routing されると useBatchPayment の circle 分岐が permitAmount 未算定で throw する
   // ため、disableCircle=true で Pimlico erc20 に固定する (JPYC は sponsorship なので非影響)。
   const { data: saData, error: saError } = useSmartAccount(deployment, true, true);
-  const gasless = useBatchPayment(deployment);
+  // disableCircle=true を useBatchPayment にも渡す。これを渡さないと決済実行に使う内部
+  // useSmartAccount が Circle に routing され、USDC tip が circlePermitAmount 不在で送信時に
+  // throw する (saData 側だけ Pimlico でも実行 client は別)。
+  const gasless = useBatchPayment(deployment, true, true);
   const gasQuote = useGasQuote(deployment);
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(

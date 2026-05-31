@@ -344,7 +344,25 @@ describe('useBatchPayment', () => {
       wrapper: makeWrapper(),
     });
 
-    expect(useSmartAccount).toHaveBeenCalledWith(usdcDep, false);
+    // disableCircle (第3引数) は既定 false で伝播する。
+    expect(useSmartAccount).toHaveBeenCalledWith(usdcDep, false, false);
+  });
+
+  it('disableCircle=true を useSmartAccount に伝播する (TipForm 経路)', () => {
+    mockHook(useSmartAccount, {
+      data: undefined,
+      isLoading: false,
+      error: null,
+    });
+    mockHook(useAccount, { chainId: baseSepolia.id });
+
+    renderHook(() => useBatchPayment(usdcDep, true, true), {
+      wrapper: makeWrapper(),
+    });
+
+    // Circle 抑止が決済実行 client にも伝播することを fence (TipForm の USDC tip が
+    // Circle に routing されて permitAmount 不在で throw する regression を防ぐ)。
+    expect(useSmartAccount).toHaveBeenCalledWith(usdcDep, true, true);
   });
 
   it('成功時に userOpHash と txHash を返却', async () => {
@@ -1068,6 +1086,38 @@ describe('useBatchPayment', () => {
       expect(body.customer).toBeUndefined();
       // chainId は deployment.chainId にフォールバック
       expect(body.chainId).toBe(usdcDep.chainId);
+    });
+
+    it('v3: saleAmount / networkFeeEquivalent / feeBreakdownVersion を分離して log に記録', async () => {
+      // TipForm / PaymentForm が渡す分離後の caller contract を fence する。
+      // 利用手数料 (サービス料) と gas 立替回収を別フィールドで記録し、conflate しない。
+      mountReady();
+      mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER });
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 950n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n, // 利用手数料 (サービス料) = 0
+        gasReimbursement: 50n, // gas 立替回収
+        saleAmount: 1000n, // 売上総額 (gross)
+        networkFeeEquivalent: 50n, // ネットワーク手数料相当額
+      });
+      await waitFor(() =>
+        expect(fetchSpy).toHaveBeenCalledWith(
+          '/api/log/payment',
+          expect.anything(),
+        ),
+      );
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.result).toBe('success');
+      expect(body.feeAmount).toBe('0'); // サービス料のみ (gas を含めない)
+      expect(body.saleAmount).toBe('1000'); // gross を分離記録
+      expect(body.networkFeeEquivalent).toBe('50'); // 網手数料相当額を分離記録
+      expect(body.feeBreakdownVersion).toBe(1); // 分離済の印
     });
   });
 
