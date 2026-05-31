@@ -35,9 +35,9 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 | Mode | Gas | Best for |
 |---|---|---|
 | **Standard payment (with gas)** | Customer pays in their own wallet (POL / ETH) | Web3 users who already hold native gas |
-| **Gasless payment** | OpenPay sponsors gas via Pimlico Paymaster | Customers who only hold the payment token |
+| **Gasless payment** | OpenPay sponsors gas via Pimlico (and Circle Paymaster for USDC on Base / Arbitrum / Optimism) | Customers who only hold the payment token |
 
-- Gasless uses ERC-4337 + Pimlico + ERC-7702 — the customer's existing EOA is reused; no smart-wallet creation step.
+- Gasless uses ERC-4337 + ERC-7702 — the customer's existing EOA is reused; no smart-wallet creation step. Gas is sponsored via **Pimlico** (JPYC sponsorship / USDC ERC20 paymaster) or, for USDC on Base / Arbitrum / Optimism, **Circle Paymaster v0.8** (gas paid directly in USDC; OpenPay collects 0 fee). Both paths require EIP-7702, so gasless needs a chain that supports it (see the Avalanche note below).
 - Standard mode is a plain ERC20 `transfer` (single transfer to the merchant).
 - In gasless mode, the network-fee bearer is selectable: `gas=customer` (default) or `gas=merchant`.
 
@@ -54,7 +54,7 @@ A future pricing model that is **not tied to transaction volume** (e.g. a monthl
 | Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
 |---|---|---|---|
 | **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via Pimlico Sponsorship Paymaster |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain** (6) | merchant 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on all 6 merchant chains. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain** (6) | merchant 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on Base / Arbitrum / Optimism / Polygon / Ethereum L1; **Circle Paymaster v0.8** runs in parallel for USDC on Base / Arbitrum / Optimism (USDC-native gas, OpenPay 0 fee). **Avalanche C-Chain is standard-mode only for now** — its EIP-7702 (ACP-209) is not yet activated on mainnet, so gasless (which relies on 7702) gracefully falls back to standard payment; it re-enables automatically once ACP-209 ships. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
 
 `NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia + World Chain Sepolia + Sonic Blaze Testnet + Sei Testnet + HyperEVM Testnet.
 
@@ -85,7 +85,7 @@ Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio,
 - **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
 - **USDC** — receive on any of **6 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1 / Avalanche C-Chain). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on the 5 buyer-only chains (Unichain, World Chain, Sonic, Sei, HyperEVM). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
 
-The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success.
+The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success. (Because tips are gasless-only and gasless relies on EIP-7702, USDC tips on **Avalanche C-Chain** are unavailable until ACP-209 activates — fans are guided to another chain; see the Avalanche note above.)
 
 ## Non-custodial design
 
