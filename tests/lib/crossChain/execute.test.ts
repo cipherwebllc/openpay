@@ -1155,6 +1155,8 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
         ),
     );
 
+    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+
     const result = await executeCctpTransfer({
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
@@ -1178,6 +1180,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       },
       fetch: mockFetch as unknown as typeof fetch,
       pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      onMerchantMint: (i) => merchantMints.push(i),
     });
 
     // merchant mint 済なので fee poll のみ (1 回)、fee mint のみ (1 回)
@@ -1187,6 +1190,99 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     expect(result.feeMintTxHash).toBe('0xmint_f');
     // merchant mint を再実行していないので attestation は再取得されない
     expect(result.attestationMessage).toBeUndefined();
+    // resume で merchant mint が landed 済でも、会計ログ callback は (fee mint より前に)
+    // 確定済 merchant 着金を 1 度発火する (income を取りこぼさない)。
+    expect(merchantMints).toEqual([
+      { mintTxHash: '0xmint_m_prev', burnTxHash: '0xburn_m_prev' },
+    ]);
+  });
+
+  it('CCTP: fee mint が失敗しても merchant mint の会計 callback は発火済 (income を取りこぼさない)', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      // approve, burn_m, burn_f, mint_m まで成功、fee mint (mint_f) は hash 切れで throw。
+      txHashes: ['0xapprove', '0xburn_m', '0xburn_f', '0xmint_m'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              { status: 'complete', message: '0xmsg', attestation: '0xatt' },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 100_000n,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+        onMerchantMint: (i) => merchantMints.push(i),
+      }),
+    ).rejects.toThrow();
+
+    // fee mint で throw する前に merchant mint の会計 callback は発火済。
+    expect(merchantMints).toEqual([
+      { mintTxHash: '0xmint_m', burnTxHash: '0xburn_m' },
+    ]);
+  });
+
+  it('Gateway: onMerchantMint が throw しても決済 flow は中断しない (audit は隔離)', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0xsig',
+      txHashes: ['0xminthash01'],
+    });
+    const sourcePublic = makePublicClient({ blockNumber: 500n });
+    const destPublic = makePublicClient();
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await executeGatewayTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceToken: SOURCE_TOKEN,
+      destToken: DEST_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      fetch: mockFetch as unknown as typeof fetch,
+      onMerchantMint: () => {
+        throw new Error('audit log boom');
+      },
+    });
+
+    // callback の例外は fireMerchantMint で握り潰され、merchant mint は確定して result が返る。
+    expect(result.mintTxHash).toBe('0xminthash01');
   });
 
   it('Gateway resume: attestation 済なら再 sign せず mint だけ実行', async () => {
