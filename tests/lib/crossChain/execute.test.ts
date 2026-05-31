@@ -97,6 +97,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
         ),
     );
     const progress: CrossChainProgress[] = [];
+    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
 
     const result = await executeGatewayTransfer({
       walletClient: walletClient as unknown as Parameters<
@@ -120,6 +121,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
       valueAtomic: 1_000_000n,
       fetch: mockFetch as unknown as typeof fetch,
       onProgress: (p) => progress.push(p),
+      onMerchantMint: (i) => merchantMints.push(i),
     });
 
     // call sequence
@@ -143,6 +145,9 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
     expect(destPublic.waitForTransactionReceipt).toHaveBeenCalledWith({
       hash: '0xminthash01',
     });
+
+    // merchant mint 確定で onMerchantMint が発火 (会計ログ用・Gateway は burnTxHash 無し)
+    expect(merchantMints).toEqual([{ mintTxHash: '0xminthash01' }]);
 
     // result
     expect(result.path).toBe('gateway');
@@ -272,6 +277,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
         ),
     );
     const progress: CrossChainProgress[] = [];
+    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
 
     const result = await executeCctpTransfer({
       walletClient: walletClient as never,
@@ -289,6 +295,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
       fetch: mockFetch as unknown as typeof fetch,
       pollOptions: { sleep: vi.fn(async (_ms: number) => undefined), now: () => 0 },
       onProgress: (p) => progress.push(p),
+      onMerchantMint: (i) => merchantMints.push(i),
     });
 
     // approve は writeContract、burn と receive は sendTransaction
@@ -320,6 +327,11 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
     // wait は source (approve + burn) + dest (receive) = 3 回
     expect(sourcePublic.waitForTransactionReceipt).toHaveBeenCalledTimes(2);
     expect(destPublic.waitForTransactionReceipt).toHaveBeenCalledTimes(1);
+
+    // merchant mint 確定で onMerchantMint が発火 (会計ログ用・CCTP は burnTxHash 付き)
+    expect(merchantMints).toEqual([
+      { mintTxHash: '0xreceive01', burnTxHash: '0xburn01' },
+    ]);
 
     // result
     expect(result.path).toBe('cctp-v2');

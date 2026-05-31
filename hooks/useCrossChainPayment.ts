@@ -20,7 +20,11 @@ import {
   type ExecuteGatewayTransferArgs,
   type ExecuteGatewayTransferResult,
   type GatewayResumeState,
+  type OnMerchantMint,
 } from '@/lib/crossChain/execute';
+import { buildPaymentLogEvent, logPaymentEvent } from '@/lib/paymentLog';
+import { estimateCctpMaxFee } from '@/lib/crossChain/cctp';
+import { estimateGatewayMaxFee } from '@/lib/crossChain/gateway';
 import { selectPath, type PathDecision } from '@/lib/crossChain/router';
 import {
   enumeratePathOptions,
@@ -190,6 +194,39 @@ export function useCrossChainPayment(
       };
       const onStep = (s: ResumeState) => saveResumeState(sessionKey, s);
 
+      // merchant mint 確定時に会計ログ (KV) を発火する。cross-chain は買い手の端末で実行され
+      // localStorage は買い手の控えにしかならないため、店舗向けの会計記録は KV ログが本筋。
+      // 値は全て unreconciled (reported): merchantAmount=bridgedAmount は bridge intent (実着金
+      // = minted は bridge fee 控除後で B-3 の receipt 照合で確定)、bridgeFeeMax は ceiling。
+      // resume で複数回発火し得るので、集計層が (bridge+chainId+mintTxHash) で dedup する。
+      const onMerchantMint: OnMerchantMint = (info) => {
+        const bridgeFeeMax =
+          core.kind === 'cctp-v2'
+            ? estimateCctpMaxFee(bridgedAmount)
+            : estimateGatewayMaxFee(bridgedAmount);
+        void logPaymentEvent(
+          buildPaymentLogEvent(
+            {
+              flow: 'direct',
+              chainId: args.targetChainId,
+              tokenAddress: destDeployment.address,
+              merchant: args.recipient,
+              merchantAmount: bridgedAmount,
+              customer: account,
+              feeReceiver: args.feeReceiver,
+              feeAmount, // OpenPay cross-chain 利用料 (Phase1 alpha = 0)
+              saleAmount: args.requiredAtomic, // 請求総額 (gross)
+              bridge: core.kind,
+              sourceChainId: core.sourceChainId,
+              bridgedAmount,
+              bridgeFeeMax,
+              burnTxHash: info.burnTxHash,
+            },
+            { result: 'success', txHash: info.mintTxHash },
+          ),
+        );
+      };
+
       if (core.kind === 'gateway') {
         const gatewayArgs: ExecuteGatewayTransferArgs = {
           walletClient,
@@ -210,6 +247,7 @@ export function useCrossChainPayment(
           resume: loadResumeState<GatewayResumeState>(sessionKey),
           onStep,
           onProgress: reportProgress,
+          onMerchantMint,
         };
         const result = await executeGatewayTransfer(gatewayArgs);
         clearResumeState(sessionKey);
@@ -234,6 +272,7 @@ export function useCrossChainPayment(
         resume: loadResumeState<CctpResumeState>(sessionKey),
         onStep,
         onProgress: reportProgress,
+        onMerchantMint,
       };
       const result = await executeCctpTransfer(cctpArgs);
       clearResumeState(sessionKey);

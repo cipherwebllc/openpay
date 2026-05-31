@@ -442,6 +442,49 @@ describe('stats: aggregate — chain / token / count / GMV', () => {
     expect(chain.totalNetworkFeeWei).toBe('5000000000000000');
   });
 
+  it('Step3: cross-chain success は (bridge+chainId+txHash) で dedup・merchantAmount は settled income 除外・saleAmount/bridgeFeeMax を集計', async () => {
+    const cc = {
+      flow: 'direct',
+      result: 'success',
+      chainId: 8453,
+      tokenAddress: USDC_BASE,
+      merchant: MERCHANT,
+      merchantAmount: '1000000', // bridged intent (1 USDC)
+      saleAmount: '1000000', // gross
+      bridge: 'cctp-v2',
+      sourceChainId: 137,
+      txHash: '0xmint1',
+      bridgeFeeMax: '1000', // ceiling
+      feeAmount: '0',
+      feeBreakdownVersion: 1,
+    };
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      // 同一 mint の重複 (resume で onMerchantMint が複数回発火したケース)。
+      value: [makeEntry(cc), makeEntry(cc)],
+    });
+    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 2 });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    expect(body.crossChainDeduped).toBe(1); // 2 件中 1 件は重複除外
+    const chain = body.byChain.find(
+      (c: { chainId: number }) => c.chainId === 8453,
+    );
+    expect(chain.successCount).toBe(1); // dedup 後 1 件
+    // cross-chain は bridged intent (実着金未確定) なので settled income に計上しない
+    expect(chain.totalMerchantWei).toBe('0');
+    // GMV (gross) と bridge fee 上限は計上する
+    expect(chain.totalSaleWei).toBe('1000000');
+    expect(chain.totalBridgeFeeMaxWei).toBe('1000');
+    // byBridge には intent として残る
+    const cctp = body.byBridge.find(
+      (b: { bridge: string }) => b.bridge === 'cctp-v2',
+    );
+    expect(cctp.totalMerchantWei).toBe('1000000');
+    expect(cctp.totalBridgeFeeMaxWei).toBe('1000');
+  });
+
   it('Phase 1: feeAmount=0 / undefined の batch・direct・standard-merchant で GMV 計上・totalFeeWei=0', async () => {
     // Phase 1 (alpha) では決済手数料 0% なので、新規 entry は全て feeAmount=0
     // (batch / direct は '0'、standard-merchant は undefined) で記録される。
