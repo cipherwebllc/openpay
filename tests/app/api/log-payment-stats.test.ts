@@ -36,6 +36,9 @@ function makeEntry(over: Record<string, unknown> = {}) {
     merchant: MERCHANT,
     merchantAmount: '1000000000000000000', // 1 token (18 decimals)
     feeAmount: '10000000000000000', // 0.01 token
+    // v3: 分離記録済の印。これが無い旧 log は feeAmount が conflated とみなされ
+    // totalFeeWei から除外される (legacy 除外の挙動は専用テストで検証)。
+    feeBreakdownVersion: 1,
     ...over,
   });
 }
@@ -402,6 +405,41 @@ describe('stats: aggregate — chain / token / count / GMV', () => {
     expect(chain.totalMerchantWei).toBe('6000000000000000000');
     // fee: 0.01 (batch) + 0.02 (direct) + 0.03 (standard-fee) = 0.06
     expect(chain.totalFeeWei).toBe('60000000000000000');
+  });
+
+  it('v3: 旧 log (feeBreakdownVersion 不在) は conflated feeAmount を totalFeeWei から除外し、売上総額/網手数料相当額を集計', async () => {
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        // legacy (内訳不明): feeAmount は gas 混在の conflated 値 → totalFeeWei から除外。
+        // saleAmount 不在のため GMV は merchantAmount (1e18) で代替。
+        makeEntry({
+          feeAmount: '99000000000000000', // conflated 0.099
+          feeBreakdownVersion: undefined,
+          saleAmount: undefined,
+          networkFeeEquivalent: undefined,
+        }),
+        // native v3 (分離済): feeAmount=サービス料 (totalFeeWei に計上)、
+        // saleAmount=gross (GMV)、networkFeeEquivalent=網手数料相当額。
+        makeEntry({
+          feeAmount: '10000000000000000', // 0.01 サービス料
+          saleAmount: '2000000000000000000', // 2 gross
+          networkFeeEquivalent: '5000000000000000', // 0.005 網手数料相当額
+        }),
+      ],
+    });
+    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 2 });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    const chain = body.byChain[0];
+    // conflated 0.099 は除外、v3 の 0.01 のみ計上。
+    expect(chain.totalFeeWei).toBe('10000000000000000');
+    expect(chain.unknownBreakdownCount).toBe(1);
+    // GMV (gross): legacy=merchantAmount(1e18) 代替 + v3 saleAmount(2e18) = 3e18。
+    expect(chain.totalSaleWei).toBe('3000000000000000000');
+    // 網手数料相当額: v3 の 0.005 のみ (legacy は null)。
+    expect(chain.totalNetworkFeeWei).toBe('5000000000000000');
   });
 
   it('Phase 1: feeAmount=0 / undefined の batch・direct・standard-merchant で GMV 計上・totalFeeWei=0', async () => {

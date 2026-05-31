@@ -41,6 +41,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
+    saleAmount: null,
+    networkFeeEquivalent: null,
+    feeBreakdownVersion: 1,
     ...overrides,
   };
 }
@@ -133,26 +136,67 @@ describe('HistoryRow', () => {
     expect(screen.getByText(/通常決済 \(ガスあり\) · —/)).toBeInTheDocument();
   });
 
-  it('gasless で feeAmount>0 は「ネットワーク手数料」表示 (alpha は利用手数料 0% なので gas 実費回収)', () => {
+  it('legacy(内訳不明) gasless で feeAmount>0 は「ネットワーク手数料相当額」表示 (旧 band-aid)', () => {
+    // migrated v2 entry: 分離記録が無く feeAmount に gas が混在。feeBreakdownVersion=0 で
+    // legacy 判定され、gasless かつ feeAmount>0 を網手数料相当額として表示する。
     render(
       <HistoryRow
-        entry={entry({ payMode: 'gasless', feeAmount: '4000000000000000000' })}
+        entry={entry({
+          payMode: 'gasless',
+          feeAmount: '4000000000000000000',
+          networkFeeEquivalent: null,
+          feeBreakdownVersion: 0,
+        })}
         onRemove={() => undefined}
       />,
     );
-    expect(screen.getByText('ネットワーク手数料')).toBeInTheDocument();
+    expect(screen.getByText('ネットワーク手数料相当額')).toBeInTheDocument();
     expect(screen.queryByText('OpenPay 利用手数料')).toBeNull();
   });
 
-  it('standard / feeAmount=0 は「OpenPay 利用手数料」表示 (混同しない)', () => {
+  it('native v3 gasless: 利用手数料 0 は非表示・networkFeeEquivalent を網手数料相当額で表示', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          payMode: 'gasless',
+          feeAmount: '0',
+          networkFeeEquivalent: '4000000000000000000', // 4 JPYC
+          feeBreakdownVersion: 1,
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('ネットワーク手数料相当額')).toBeInTheDocument();
+    expect(screen.getByText(/4 JPYC/)).toBeInTheDocument();
+    expect(screen.queryByText('OpenPay 利用手数料')).toBeNull();
+  });
+
+  it('利用手数料 0 は行ごと非表示 (決済額非連動・0 を明記しない)', () => {
     render(
       <HistoryRow
         entry={entry({ payMode: 'standard', gasMode: null, feeAmount: '0' })}
         onRemove={() => undefined}
       />,
     );
-    expect(screen.getByText('OpenPay 利用手数料')).toBeInTheDocument();
-    expect(screen.queryByText('ネットワーク手数料')).toBeNull();
+    expect(screen.queryByText('OpenPay 利用手数料')).toBeNull();
+    expect(screen.queryByText('ネットワーク手数料相当額')).toBeNull();
+  });
+
+  it('売上総額が着金額と異なるとき (gas=merchant) は売上総額を明示', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          payMode: 'gasless',
+          gasMode: 'merchant',
+          merchantAmount: '996000000000000000000', // 着金 996 JPYC
+          saleAmount: '1000000000000000000000', // 売上総額 1000 JPYC
+          networkFeeEquivalent: '4000000000000000000',
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('売上総額')).toBeInTheDocument();
+    expect(screen.getByText(/1000 JPYC/)).toBeInTheDocument();
   });
 
   it('削除 button → confirm true で onRemove(id) が呼ばれる', async () => {

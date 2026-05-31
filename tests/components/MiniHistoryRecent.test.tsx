@@ -40,6 +40,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
+    saleAmount: null,
+    networkFeeEquivalent: null,
+    feeBreakdownVersion: 1,
     ...overrides,
   };
 }

@@ -73,7 +73,19 @@ export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
 
 // v2 (2026-05-30): Circle Paymaster (USDC ガスレス) 対応で provider 次元と Circle 監査
 // フィールドを追加。legacy(v1) は MIGRATIONS[1] で新フィールド=null backfill (drop しない)。
-export const LATEST_SCHEMA_VERSION = 2 as const;
+// v3 (2026-06-01): fee/gas データ分離 (会計精度・freee 前提)。feeAmount を OpenPay 利用
+// 手数料 (= サービス料、alpha/将来とも 0) のみに純化し、ネットワーク手数料相当額を
+// networkFeeEquivalent に分離。売上総額 saleAmount を追加 (split / 着金控除と区別し
+// GMV 集計の基礎にする)。legacy(v2) は MIGRATIONS[2] で null backfill + 内訳不明印
+// (feeBreakdownVersion=0)。
+export const LATEST_SCHEMA_VERSION = 3 as const;
+
+// fee/gas 内訳セマンティクスの版。schemaVersion とは独立: migration は schemaVersion を
+// 昇格させるが、migrate された旧 entry の feeAmount は依然 conflated (利用手数料 + ガス
+// reimbursement) で内訳不明のまま。native に v3 で記録した entry のみ「分離済」とみなす。
+export const FEE_BREAKDOWN_VERSION = 1 as const;
+// legacy / migrated entry の印 (利用手数料・網手数料の集計から除外する判定に使う)。
+export const FEE_BREAKDOWN_UNKNOWN = 0 as const;
 
 /** どの paymaster 系統で送ったか。legacy(v1) entry は記録が無いため null。
  * SoT は lib/paymentLog.ts の PaymentProvider (history→paymentLog の一方向 import)。 */
@@ -135,6 +147,19 @@ export type HistoryEntry = {
   circlePaymasterNetUsdc: string | null;
   /** circlePaymasterNetUsdc の検証ステータス。circle 経路のみ、他は null。 */
   circleVerification: CircleVerification | null;
+  // --- v3 追加 (fee/gas 分離・会計精度。legacy は MIGRATIONS[2] で null/0 backfill) ---
+  /** 売上総額 (請求額・raw)。利用手数料 / ガス / split 控除前の gross で、GMV 集計の
+   * 基礎。standard / gasless とも設定する。legacy(v2 以前) は記録が無く null。
+   * 注: 売上を伴わない leg (standard-fee = 手数料徴収 tx) も null。 */
+  saleAmount: string | null;
+  /** ネットワーク手数料相当額 (raw・支払トークン単位)。全 gasless 経路横断の統一項目:
+   * JPYC sponsorship の立替回収 / USDC Pimlico erc20 で paymaster が顧客から徴収する gas
+   * 見積。circle 経路のみ検証ステータス付きで circlePaymasterNetUsdc 側に保持するため
+   * null とし、表示/集計は networkFeeEquivalentOf で coalesce する。standard / legacy は null。 */
+  networkFeeEquivalent: string | null;
+  /** fee/gas 内訳セマンティクスの版。native v3 = FEE_BREAKDOWN_VERSION、
+   * legacy / migrated = FEE_BREAKDOWN_UNKNOWN (集計で利用手数料 / 網手数料 total から除外)。 */
+  feeBreakdownVersion: number;
 };
 
 // LATEST_SCHEMA_VERSION の entry に対する shape 検証。migration 後の最終 entry に
@@ -198,6 +223,14 @@ function isValidEntry(value: unknown): value is HistoryEntry {
     e.circleVerification !== 'unreconciled'
   )
     return false;
+  // v3 フィールド (legacy は migration で null/0 backfill 済)。
+  if (e.saleAmount !== null && typeof e.saleAmount !== 'string') return false;
+  if (
+    e.networkFeeEquivalent !== null &&
+    typeof e.networkFeeEquivalent !== 'string'
+  )
+    return false;
+  if (typeof e.feeBreakdownVersion !== 'number') return false;
   return true;
 }
 
@@ -231,6 +264,18 @@ export const MIGRATIONS: Record<number, MigrationFn> = {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
+  }),
+  // v2 → v3 (2026-06-01): fee/gas 分離フィールドを追加。legacy entry は内訳が記録されて
+  // おらず (feeAmount が利用手数料 + ガス reimbursement の conflated 値)、売上総額 / 網
+  // 手数料を後付けで分離できないため null backfill + feeBreakdownVersion=0 (内訳不明)。
+  // HistoryRow は networkFeeEquivalent===null を legacy 判定に使い、旧 heuristic
+  // (gasless かつ feeAmount>0 → ネットワーク手数料) を適用する。
+  2: (entry) => ({
+    ...entry,
+    schemaVersion: 3,
+    saleAmount: null,
+    networkFeeEquivalent: null,
+    feeBreakdownVersion: FEE_BREAKDOWN_UNKNOWN,
   }),
 };
 
@@ -362,6 +407,11 @@ export type BuildHistoryBase = {
   circlePaymasterAddress?: string | null;
   circlePaymasterNetUsdc?: string | null;
   circleVerification?: CircleVerification | null;
+  // --- v3 (fee/gas 分離。省略時 null = sale を伴わない leg / 互換) ---
+  /** 売上総額 (gross・請求額)。sale を伴う entry で設定、手数料徴収 leg 等は null。 */
+  saleAmount?: bigint | null;
+  /** ネットワーク手数料相当額 (非 circle の gasless 経路)。省略時 null。 */
+  networkFeeEquivalent?: bigint | null;
 };
 
 /**
@@ -418,7 +468,27 @@ export function buildHistoryEntry(
     circlePaymasterAddress: input.circlePaymasterAddress ?? null,
     circlePaymasterNetUsdc: input.circlePaymasterNetUsdc ?? null,
     circleVerification: input.circleVerification ?? null,
+    saleAmount: input.saleAmount == null ? null : input.saleAmount.toString(),
+    networkFeeEquivalent:
+      input.networkFeeEquivalent == null
+        ? null
+        : input.networkFeeEquivalent.toString(),
+    // native v3 で記録した entry は常に分離済印を持つ (migration 経路のみ UNKNOWN)。
+    feeBreakdownVersion: FEE_BREAKDOWN_VERSION,
   };
+}
+
+/** 表示 / 集計用にネットワーク手数料相当額を解決する (provider 横断で coalesce)。
+ * 非 circle 経路は networkFeeEquivalent、circle 経路は circlePaymasterNetUsdc
+ * (検証ステータスは circleVerification 側に保持)。どちらも無ければ null。 */
+export function networkFeeEquivalentOf(entry: HistoryEntry): string | null {
+  return entry.networkFeeEquivalent ?? entry.circlePaymasterNetUsdc;
+}
+
+/** fee/gas 内訳が分離記録済 (native v3) か。legacy / migrated は false
+ * (利用手数料 / 網手数料の集計から除外する判定に使う)。 */
+export function hasSeparatedBreakdown(entry: HistoryEntry): boolean {
+  return entry.feeBreakdownVersion >= FEE_BREAKDOWN_VERSION;
 }
 
 /** 数値 timestamp を yyyy-MM-dd HH:mm:ss (locale 形式) に整形。CSV にも UI にも使う。 */

@@ -64,6 +64,13 @@ type LogEntry = {
   tokenAddress?: string;
   merchantAmount?: string;
   feeAmount?: string;
+  // v3 fee/gas 分離フィールド。saleAmount = 売上総額 (gross・GMV の基礎)、
+  // networkFeeEquivalent = 非 circle のネットワーク手数料相当額、feeBreakdownVersion を
+  // 持つ log は分離記録済 (feeAmount = サービス料のみ)。持たない旧 log は feeAmount が
+  // conflated (gas 混在) のため、利用手数料 total から除外する。
+  saleAmount?: string;
+  networkFeeEquivalent?: string;
+  feeBreakdownVersion?: number;
   // phase 2 cross-chain bridge fields。direct (= bridge 経由でない) 同一 chain
   // 送金は両者とも undefined、Gateway / CCTP V2 経由なら値が入る。
   bridge?: string;
@@ -95,6 +102,9 @@ type TokenAgg = {
   errorCount: number;
   totalMerchantWei: bigint;
   totalFeeWei: bigint;
+  // v3: 売上総額 (gross・GMV) と全経路横断のネットワーク手数料相当額。
+  totalSaleWei: bigint;
+  totalNetworkFeeWei: bigint;
 };
 
 // "direct" = bridge 経由でない同一 chain transfer (entry.bridge undefined / 'none')。
@@ -108,6 +118,8 @@ type BridgeAgg = {
   errorCount: number;
   totalMerchantWei: bigint;
   totalFeeWei: bigint;
+  totalSaleWei: bigint;
+  totalNetworkFeeWei: bigint;
 };
 
 type ChainAgg = {
@@ -118,6 +130,11 @@ type ChainAgg = {
   errorCount: number;
   totalMerchantWei: bigint;
   totalFeeWei: bigint;
+  // v3: 売上総額 (gross・GMV)、全経路横断のネットワーク手数料相当額、内訳不明 (旧 log・
+  // feeBreakdownVersion 不在) の success 件数 (利用手数料 total から除外した分の可視化)。
+  totalSaleWei: bigint;
+  totalNetworkFeeWei: bigint;
+  unknownBreakdownCount: number;
   byToken: Map<string, TokenAgg>;
   byBridge: Map<PaymentBridgeKey, BridgeAgg>;
 };
@@ -162,6 +179,8 @@ function emptyBridgeAgg(bridge: PaymentBridgeKey): BridgeAgg {
     errorCount: 0,
     totalMerchantWei: 0n,
     totalFeeWei: 0n,
+    totalSaleWei: 0n,
+    totalNetworkFeeWei: 0n,
   };
 }
 
@@ -207,6 +226,19 @@ function aggregate(entries: LogEntry[]): {
     const merchantWei = parseWei(e.merchantAmount);
     const feeWei = parseWei(e.feeAmount);
     const bridgeKey = normalizeBridge(e.bridge);
+    // v3: 売上総額 (gross) は saleAmount を優先し、無い旧 log は着金額で代替 (gas=customer の
+    // 大多数は両者一致するため GMV は概ね保たれる)。ネットワーク手数料相当額は非 circle の
+    // networkFeeEquivalent と circle の circlePaymasterNetUsdc を coalesce。
+    const saleWei =
+      e.saleAmount !== undefined ? parseWei(e.saleAmount) : merchantWei;
+    const netFeeWei =
+      e.networkFeeEquivalent !== undefined
+        ? parseWei(e.networkFeeEquivalent)
+        : parseWei(e.circlePaymasterNetUsdc);
+    // feeBreakdownVersion を持たない旧 log は feeAmount が conflated (gas 混在) のため、
+    // OpenPay 利用手数料 total (totalFeeWei) には計上しない (内訳不明として別途カウント)。
+    const hasSeparatedBreakdown =
+      typeof e.feeBreakdownVersion === 'number' && e.feeBreakdownVersion >= 1;
     // standard mode は merchant 送金 tx (flow=standard-merchant) と OpenPay 手数料
     // 徴収 tx (flow=standard-fee) の 2 entry で 1 logical sale を構成する。
     //   - standard-merchant: 通常 entry と同じく count++ / GMV 計上
@@ -229,6 +261,9 @@ function aggregate(entries: LogEntry[]): {
         errorCount: 0,
         totalMerchantWei: 0n,
         totalFeeWei: 0n,
+        totalSaleWei: 0n,
+        totalNetworkFeeWei: 0n,
+        unknownBreakdownCount: 0,
         byToken: new Map(),
         byBridge: new Map(),
       };
@@ -244,6 +279,8 @@ function aggregate(entries: LogEntry[]): {
         errorCount: 0,
         totalMerchantWei: 0n,
         totalFeeWei: 0n,
+        totalSaleWei: 0n,
+        totalNetworkFeeWei: 0n,
       };
       chain.byToken.set(tokenAddress, token);
     }
@@ -294,15 +331,27 @@ function aggregate(entries: LogEntry[]): {
           provider.circleNetUsdcReported += net;
         }
       }
-      // GMV は success のみ計上 (reverted は資金移動なし、error は submit 失敗)
+      // GMV は success のみ計上 (reverted は資金移動なし、error は submit 失敗)。
+      // totalFeeWei (OpenPay 利用手数料) は分離記録済 log のみ計上し、内訳不明の旧 log は
+      // 除外する (conflated feeAmount が利用手数料収益として誤計上されるのを防ぐ)。
+      const serviceFeeWei = hasSeparatedBreakdown ? feeWei : 0n;
+      if (!hasSeparatedBreakdown) chain.unknownBreakdownCount++;
       chain.totalMerchantWei += merchantWei;
-      chain.totalFeeWei += feeWei;
+      chain.totalFeeWei += serviceFeeWei;
+      chain.totalSaleWei += saleWei;
+      chain.totalNetworkFeeWei += netFeeWei;
       token.totalMerchantWei += merchantWei;
-      token.totalFeeWei += feeWei;
+      token.totalFeeWei += serviceFeeWei;
+      token.totalSaleWei += saleWei;
+      token.totalNetworkFeeWei += netFeeWei;
       chainBridge.totalMerchantWei += merchantWei;
-      chainBridge.totalFeeWei += feeWei;
+      chainBridge.totalFeeWei += serviceFeeWei;
+      chainBridge.totalSaleWei += saleWei;
+      chainBridge.totalNetworkFeeWei += netFeeWei;
       globalBridge.totalMerchantWei += merchantWei;
-      globalBridge.totalFeeWei += feeWei;
+      globalBridge.totalFeeWei += serviceFeeWei;
+      globalBridge.totalSaleWei += saleWei;
+      globalBridge.totalNetworkFeeWei += netFeeWei;
     } else if (result === 'reverted') {
       chain.revertedCount++;
       token.revertedCount++;
@@ -353,6 +402,8 @@ function serializeBridges(bridges: BridgeAgg[]) {
     errorCount: b.errorCount,
     totalMerchantWei: b.totalMerchantWei.toString(),
     totalFeeWei: b.totalFeeWei.toString(),
+    totalSaleWei: b.totalSaleWei.toString(),
+    totalNetworkFeeWei: b.totalNetworkFeeWei.toString(),
   }));
 }
 
@@ -379,6 +430,9 @@ function serialize(chains: ChainAgg[]) {
     errorCount: c.errorCount,
     totalMerchantWei: c.totalMerchantWei.toString(),
     totalFeeWei: c.totalFeeWei.toString(),
+    totalSaleWei: c.totalSaleWei.toString(),
+    totalNetworkFeeWei: c.totalNetworkFeeWei.toString(),
+    unknownBreakdownCount: c.unknownBreakdownCount,
     byToken: Array.from(c.byToken.values())
       .sort((a, b) => b.successCount - a.successCount)
       .map((t) => ({
@@ -388,6 +442,8 @@ function serialize(chains: ChainAgg[]) {
         errorCount: t.errorCount,
         totalMerchantWei: t.totalMerchantWei.toString(),
         totalFeeWei: t.totalFeeWei.toString(),
+        totalSaleWei: t.totalSaleWei.toString(),
+        totalNetworkFeeWei: t.totalNetworkFeeWei.toString(),
       })),
     // chain ごとの bridge breakdown。固定順 (direct → gateway → cctp-v2 → unknown)。
     byBridge: serializeBridges(

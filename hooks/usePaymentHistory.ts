@@ -31,7 +31,14 @@ export type AppendPaymentHistoryCtx = {
   merchantAmount: bigint;
   customer: Address | undefined;
   feeReceiver: Address;
+  /** OpenPay 利用手数料 (サービス料) のみ。alpha / 将来とも 0n。 */
   feeAmount: bigint;
+  /** 売上総額 (gross・請求額)。手数料 / ガス / split 控除前で GMV 集計の基礎。
+   * sale を伴わない leg は null。 */
+  saleAmount: bigint | null;
+  /** ネットワーク手数料相当額 (非 circle の gasless 経路)。standard / circle は null
+   * (circle は result 由来の circlePaymasterNetUsdc を使う)。 */
+  networkFeeEquivalent: bigint | null;
   /**
    * 店舗名 — 現状は常に '' を渡す前提。URL params に店舗名 key が無いため
    * parent (PaymentForm / CheckoutForm) から流す source が無い。HistoryEntry の
@@ -47,6 +54,9 @@ export type AppendPaymentHistoryCtx = {
 type SubmittedAmounts = {
   merchantAmount: bigint;
   feeAmount: bigint;
+  // gasless の submit snapshot のみ設定する (standard は未設定 → ctx fallback / 導出)。
+  saleAmount?: bigint | null;
+  networkFeeEquivalent?: bigint | null;
 };
 
 type GaslessSnapshot = {
@@ -107,10 +117,20 @@ export function usePaymentHistory(
   const gaslessMerchantAmount =
     gaslessVariables?.merchantAmount ?? ctx.merchantAmount;
   const gaslessFeeAmount = gaslessVariables?.feeAmount ?? ctx.feeAmount;
+  const gaslessSaleAmount = gaslessVariables?.saleAmount ?? ctx.saleAmount;
+  const gaslessNetworkFee =
+    gaslessVariables?.networkFeeEquivalent ?? ctx.networkFeeEquivalent;
   const standardMerchantAmount =
     standardSubmittedParams?.merchantAmount ?? ctx.merchantAmount;
   const standardFeeAmount =
     standardSubmittedParams?.feeAmount ?? ctx.feeAmount;
+  // standard は gas 概念が無い。売上総額は submit snapshot (merchant 着金 + 手数料) から
+  // 復元して drift を避ける (手数料 = 0 の現状は merchantAmount に一致)。snapshot 不在の
+  // 旧 test 互換では ctx.saleAmount に fallback。
+  const standardSaleAmount =
+    standardSubmittedParams != null
+      ? standardSubmittedParams.merchantAmount + standardSubmittedParams.feeAmount
+      : ctx.saleAmount;
 
   // gasless 成功 (revert 含む)。data.success===false (チェーン上 revert) も
   // status='reverted' で記録 → 顧客が「失敗した tx」を Explorer で追跡可能。
@@ -131,6 +151,11 @@ export function usePaymentHistory(
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
         feeAmount: gaslessFeeAmount,
+        saleAmount: gaslessSaleAmount,
+        // circle はネットワーク手数料を検証ステータス付きで circlePaymasterNetUsdc に
+        // 持つため networkFeeEquivalent は null (表示/集計は networkFeeEquivalentOf が coalesce)。
+        networkFeeEquivalent:
+          gaslessData.provider === 'circle' ? null : gaslessNetworkFee,
         txHash: gaslessData.txHash,
         userOpHash: gaslessData.userOpHash,
         blockNumber: gaslessData.blockNumber,
@@ -143,7 +168,14 @@ export function usePaymentHistory(
         circleVerification: gaslessData.circleVerification ?? null,
       }),
     );
-  }, [gaslessData, gaslessMerchantAmount, gaslessFeeAmount, ctx]);
+  }, [
+    gaslessData,
+    gaslessMerchantAmount,
+    gaslessFeeAmount,
+    gaslessSaleAmount,
+    gaslessNetworkFee,
+    ctx,
+  ]);
 
   // gasless: throw 系エラー (paymaster reject / RPC 障害 / 残高不足 等)。
   // tx hash が無い時の dedupe 規則は buildHistoryEntry の id 生成 (秒+msg seed) に依存。
@@ -164,6 +196,10 @@ export function usePaymentHistory(
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
         feeAmount: gaslessFeeAmount,
+        saleAmount: gaslessSaleAmount,
+        // throw 系エラーは tx 未確定で provider 不明。ctx/variables が circle 経路で
+        // null を渡すため、非 circle の試行値のみが入る。
+        networkFeeEquivalent: gaslessNetworkFee,
         txHash: null,
         userOpHash: null,
         blockNumber: null,
@@ -172,7 +208,14 @@ export function usePaymentHistory(
         note: ctx.note,
       }),
     );
-  }, [gaslessError, gaslessMerchantAmount, gaslessFeeAmount, ctx]);
+  }, [
+    gaslessError,
+    gaslessMerchantAmount,
+    gaslessFeeAmount,
+    gaslessSaleAmount,
+    gaslessNetworkFee,
+    ctx,
+  ]);
 
   // standard 成功: merchant tx は必ず append。fee tx は feeTxHash があれば
   // 2 件目として append (会計上 「店舗着金 X + 手数料 Y」を分離記録)。
@@ -193,6 +236,9 @@ export function usePaymentHistory(
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
         feeAmount: standardFeeAmount,
+        saleAmount: standardSaleAmount,
+        // standard は OpenPay が gas に touch しない (顧客 wallet が native で別建て負担)。
+        networkFeeEquivalent: null,
         txHash: standardData.merchantTxHash,
         userOpHash: null,
         blockNumber: standardData.blockNumber,
@@ -217,6 +263,9 @@ export function usePaymentHistory(
           customer: ctx.customer,
           feeReceiver: ctx.feeReceiver,
           feeAmount: standardFeeAmount,
+          // 手数料徴収 leg は売上ではないため saleAmount=null (GMV に二重計上しない)。
+          saleAmount: null,
+          networkFeeEquivalent: null,
           txHash: standardData.feeTxHash,
           userOpHash: null,
           blockNumber: standardData.blockNumber,
@@ -226,7 +275,13 @@ export function usePaymentHistory(
         }),
       );
     }
-  }, [standardData, standardMerchantAmount, standardFeeAmount, ctx]);
+  }, [
+    standardData,
+    standardMerchantAmount,
+    standardFeeAmount,
+    standardSaleAmount,
+    ctx,
+  ]);
 
   // standard merchant-error: merchant 送金が失敗 (fee は未送信)。
   // wallet が tx 送信したが revert したケースは merchantTxHash あり、
@@ -253,6 +308,8 @@ export function usePaymentHistory(
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
         feeAmount: standardFeeAmount,
+        saleAmount: standardSaleAmount,
+        networkFeeEquivalent: null,
         txHash: standardMerchantTxHash ?? null,
         userOpHash: null,
         blockNumber: null,
@@ -267,6 +324,7 @@ export function usePaymentHistory(
     standardError,
     standardMerchantAmount,
     standardFeeAmount,
+    standardSaleAmount,
     ctx,
   ]);
 
@@ -297,6 +355,8 @@ export function usePaymentHistory(
           customer: ctx.customer,
           feeReceiver: ctx.feeReceiver,
           feeAmount: standardFeeAmount,
+          saleAmount: standardSaleAmount,
+          networkFeeEquivalent: null,
           txHash: standardMerchantTxHash,
           userOpHash: null,
           blockNumber: standardMerchantBlockNumber,
@@ -321,6 +381,8 @@ export function usePaymentHistory(
         customer: ctx.customer,
         feeReceiver: ctx.feeReceiver,
         feeAmount: standardFeeAmount,
+        saleAmount: null,
+        networkFeeEquivalent: null,
         txHash: standardFeeTxHash ?? null,
         userOpHash: null,
         blockNumber: null,
@@ -337,6 +399,7 @@ export function usePaymentHistory(
     standardError,
     standardMerchantAmount,
     standardFeeAmount,
+    standardSaleAmount,
     ctx,
   ]);
 }

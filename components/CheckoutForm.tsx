@@ -97,6 +97,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // Circle 経路は顧客が permit で USDC gas を Circle paymaster に支払うため、sponsorship
   // 形式の gas 立替 reimbursement は加算しない (testnet sponsorship 倒し時の二重徴収防止)。
   const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
+
+  // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
+  // gasless 経路は gas 見積を計上 (JPYC sponsorship=立替回収 / USDC erc20=paymaster 徴収分)。
+  // circle は receipt 由来の circlePaymasterNetUsdc を使うため null、standard は null。
+  const networkFeeEquivalent =
+    !isStandard && !isCircle ? (gasAmount ?? 0n) : null;
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   // ネイティブガストークン symbol を viem chain 経由で取得 (chain-aware)。
@@ -306,6 +312,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       customer: address,
       feeReceiver: env.feeReceiver,
       feeAmount: breakdown.feeAmount,
+      saleAmount: totalWei,
+      networkFeeEquivalent,
       storeName: '',
       note: params.description ?? params.orderId ?? '',
     }),
@@ -321,6 +329,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       isStandard,
       breakdown.merchantReceives,
       breakdown.feeAmount,
+      totalWei,
+      networkFeeEquivalent,
       address,
     ],
   );
@@ -370,7 +380,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         merchant: params.to,
         merchantAmount: breakdown.merchantReceives,
         feeReceiver: env.feeReceiver,
-        feeAmount: breakdown.feeAmount + gasReimbursement,
+        feeAmount: breakdown.feeAmount,
+        gasReimbursement,
+        saleAmount: totalWei,
+        networkFeeEquivalent: networkFeeEquivalent ?? undefined,
         circlePermitAmount,
       });
     }
