@@ -50,6 +50,7 @@ import {
   type ForwarderRecoverDeps,
 } from '@/lib/relay/forwarderRecover';
 import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
@@ -96,31 +97,30 @@ const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
 ]);
 
-// --- recover モード (forwarder で gas 相当額を JPYC 回収) の config ---------------------
-// forwarder アドレスが chain に設定されていれば recover モード (= 立替+回収)、無ければ free
-// (Phase A・直接 transferWithAuthorization)。NEXT_PUBLIC にするのは client が同じ値で nonce-commit
-// を組む必要があるため (server は値を信用せず一致を強制)。詳細は memory:gasless-legal-jp。
-function forwarderFor(chainId: number): Address | null {
-  const raw =
-    chainId === polygon.id
-      ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_POLYGON
-      : chainId === polygonAmoy.id
-        ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY
-        : undefined;
-  return raw && isAddress(raw) ? getAddress(raw) : null;
-}
+// recover モード config は client/server 共有 (lib/relay/forwarderConfig)。forwarder アドレスが
+// chain に設定されていれば recover モード (= 立替+回収)、無ければ free (Phase A 直接 transfer)。
+const forwarderFor = jpycForwarderFor;
 // forwarder の immutable feeReceiver と一致させる回収先 (= OpenPay fee receiver)。
 function feeReceiverFor(_chainId: number): Address | null {
   return isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
 }
-// server 権威の固定 gas 相当額 (開示バッファ・Polygon の sub-cent gas を十分賄う)。
-// NEXT_PUBLIC で client と共有 (nonce 一致のため)。既定 2 JPYC。
-const FLAT_FEE_VALUE = (() => {
-  const raw = process.env.NEXT_PUBLIC_RELAY_GAS_FEE_JPYC;
-  const human = raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 2n;
-  return human * 10n ** 18n;
-})();
+const FLAT_FEE_VALUE = relayGasFeeValue();
 const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
+
+// recover (forwarder 設定) は self-host relayer 前提 (recover 経路は forwarder.settle を自前 EOA で
+// submit する)。client は PROVIDER を見えないため forwarder 設定だけで recover payload を送る。
+// forwarder を設定したのに self-host でない構成は誤設定 (client の recover payload を handleFree が
+// 弾き 400 になる) → 起動時に警告。invariant: forwarder 設定 ⟹ RELAYER_PRIVATE_KEY 設定。
+if (
+  PROVIDER !== 'self-host' &&
+  (jpycForwarderFor(polygon.id) !== null ||
+    jpycForwarderFor(polygonAmoy.id) !== null)
+) {
+  logger.warn('relay.jpyc.misconfig', {
+    reason:
+      'forwarder configured but PROVIDER is not self-host; recover requires self-host',
+  });
+}
 
 function transportFor(chainId: number) {
   const cfg = SUPPORTED_CHAINS[chainId];
