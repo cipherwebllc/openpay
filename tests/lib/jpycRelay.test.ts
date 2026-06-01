@@ -256,18 +256,30 @@ describe('relayJpycAuthorization', () => {
     expect(releaseIdempotency).toHaveBeenCalledOnce();
   });
 
-  it('poll error → relay_error だが claim は解放しない (Gelato timeout=broadcast 済の可能性)', async () => {
+  it('poll error (未送信確実: Cancelled) → relay_error + claim 解放', async () => {
     const releaseIdempotency = vi.fn(async () => {});
     const deps = makeDeps({
       claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
       releaseIdempotency,
       pollTask: vi.fn(async () => ({
         state: 'error' as const,
-        detail: 'timeout',
+        detail: 'Cancelled',
       })),
     });
     const res = await relayJpycAuthorization(await makeInput(), deps);
     expect(res).toMatchObject({ kind: 'relay_error' });
+    expect(releaseIdempotency).toHaveBeenCalledOnce(); // 未送信確実なので解放してよい
+  });
+
+  it('poll pending (Gelato timeout・txHash 無し) → pending・claim 解放しない (fallback 禁止)', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency,
+      pollTask: vi.fn(async () => ({ state: 'pending' as const })),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('pending'); // 不確定 → standard へ落とさない
     expect(releaseIdempotency).not.toHaveBeenCalled(); // 再 submit による二重送金を防ぐ
   });
 });

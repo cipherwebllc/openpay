@@ -203,7 +203,8 @@ export async function recoverViaForwarder(
     if (outcome.txHash) await recordHash(outcome.txHash);
     return { kind: 'pending', txHash: outcome.txHash };
   }
-  // poll 'error' で claim は解放しない (Gelato 'error' は timeout=broadcast 済の可能性も含む)。
-  // 解放すると再 POST が再 submit でき二重送金しうる。claim は TTL で自然失効。
+  // poll 'error' = 未送信が確実な失敗のみ (timeout 等の不確定は pollTask で 'pending' に倒す)。
+  // → relay_error で fallback 可 + claim 解放。
+  await releaseClaim();
   return { kind: 'relay_error', detail: outcome.detail };
 }

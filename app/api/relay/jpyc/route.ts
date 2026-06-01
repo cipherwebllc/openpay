@@ -366,14 +366,15 @@ async function gelatoPoll(taskId: string): Promise<RelayTaskOutcome> {
         return { state: 'reverted', txHash: task?.transactionHash };
       }
       if (state === 'Cancelled' || state === 'Blacklisted' || state === 'NotFound') {
-        // Gelato は taskId が broadcast 前に返るため、これらは未送信扱い → fallback 可。
+        // これらは Gelato が broadcast しなかったことが確実 → error (fallback 可)。
         return { state: 'error', detail: state };
       }
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
-  // Gelato timeout も未確定だが taskId 段階 (broadcast 前の可能性) なので error。
-  return { state: 'error', detail: 'timeout' };
+  // timeout は broadcast 済か不確定 (Gelato は遅延後に submit しうる)。error にすると client が
+  // standard へ fallback し二重送金しうるため pending に倒す (Codex)。txHash は不明なので省略。
+  return { state: 'pending' };
 }
 
 function anonymizeIp(ip: string): string {

@@ -27,7 +27,10 @@ export type RelayInput = {
 export type RelayTaskOutcome =
   | { state: 'success'; txHash: Hex }
   | { state: 'reverted'; txHash?: Hex }
-  | { state: 'pending'; txHash: Hex }
+  // broadcast 済 or broadcast 不確定 (Gelato timeout 等)。txHash は分かれば同梱・無ければ省略。
+  | { state: 'pending'; txHash?: Hex }
+  // broadcast されなかったことが確実な失敗のみ (Gelato Cancelled/Blacklisted/NotFound)。
+  // client は standard へ fallback 可。timeout 等の不確定は 'pending' を使うこと。
   | { state: 'error'; detail: string };
 
 export type RelayDeps = {
@@ -227,10 +230,9 @@ export async function relayJpycAuthorization(
     if (outcome.txHash) await recordHash(outcome.txHash);
     return { kind: 'pending', txHash: outcome.txHash };
   }
-  // poll 'error': provider 依存。Gelato は taskId が broadcast 前に返るので 'error'
-  // (Cancelled/NotFound) = 未送信 → relay_error で fallback 可。self-host の pollReceipt は
-  // broadcast 後なので 'error' を返さず 'pending' に倒す (二重支払い回避は poll 側の責務)。
-  // claim は解放しない: Gelato の 'error' は timeout (= broadcast 済の可能性) も含むため、解放すると
-  // 再 POST が再 submit でき二重送金しうる (Codex)。claim は TTL(30分) で自然失効させる。
+  // poll 'error' = broadcast されなかったことが確実な失敗のみ (Gelato Cancelled/Blacklisted/
+  // NotFound)。timeout 等の不確定は pollTask 側で 'pending' に倒す約束なのでここには来ない。
+  // よって未送信が確実 → relay_error で fallback 可 + claim 解放 (正当な再試行を待たせない)。
+  await releaseClaim();
   return { kind: 'relay_error', detail: outcome.detail };
 }
