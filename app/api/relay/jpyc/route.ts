@@ -23,6 +23,7 @@ import {
   isAddress,
   isHex,
   getAddress,
+  keccak256,
   type Account,
   type Address,
   type Chain,
@@ -179,14 +180,26 @@ function selfHostIoFor(chainId: number): SelfHostIo {
     getBalance: () => publicClient.getBalance({ address: account.address }),
     estimateGas: (target, data) =>
       publicClient.estimateGas({ account, to: target, data }),
-    sendTransaction: (target, data, gas) =>
-      walletClient.sendTransaction({
+    getPendingNonce: () =>
+      publicClient.getTransactionCount({
+        address: account.address,
+        blockTag: 'pending',
+      }),
+    // pre-sign: prepare (fees/type を RPC で補完) → sign → keccak256 で txHash 確定。
+    signTx: async (target, data, gas, nonce) => {
+      const request = await walletClient.prepareTransactionRequest({
         account,
         chain: cfg.chain,
         to: target,
         data,
         gas,
-      }),
+        nonce,
+      });
+      const raw = await walletClient.signTransaction(request);
+      return { raw, hash: keccak256(raw) };
+    },
+    sendRawTransaction: (raw) =>
+      publicClient.sendRawTransaction({ serializedTransaction: raw }),
     waitForReceipt: async (hash) => {
       const r = await publicClient.waitForTransactionReceipt({
         hash,
