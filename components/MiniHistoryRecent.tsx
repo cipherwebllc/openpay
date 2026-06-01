@@ -28,12 +28,14 @@ const STATUS_DOT_CLASS = {
   success: 'bg-emerald-500',
   reverted: 'bg-amber-500',
   error: 'bg-red-500',
+  pending: 'bg-sky-500',
 } as const satisfies Record<HistoryEntry['status'], string>;
 
 const STATUS_I18N_KEY = {
   success: 'statusSuccess',
   reverted: 'statusReverted',
   error: 'statusError',
+  pending: 'statusPending',
 } as const satisfies Record<HistoryEntry['status'], string>;
 
 const RECENT_LIMIT = 3;

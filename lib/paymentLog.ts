@@ -10,7 +10,9 @@ import { logger } from './logger';
 // localStorage 側 (lib/history.FEE_BREAKDOWN_VERSION) とは独立の store・独立の版管理。
 export const LOG_FEE_BREAKDOWN_VERSION = 1 as const;
 
-export type PaymentResult = 'success' | 'reverted' | 'error';
+// 'pending': broadcast 済だが未確定 (EIP-3009 relay の receipt timeout 等)。確定したら
+// Explorer / 再照合で success/reverted に解決する想定 (現状は手動確認)。
+export type PaymentResult = 'success' | 'reverted' | 'error' | 'pending';
 // batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信)
 // direct:            同一チェーン直接送金。cross-chain mint 成功ログで現役生成
 //                    される + 旧 mode=direct の過去 log も含む。

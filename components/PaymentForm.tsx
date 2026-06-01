@@ -219,6 +219,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
       : gasless.isPending;
   // relay は gas quote も smart account も不要なので readiness は常に満たす。
   const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
+  // relay が成功 or pending (broadcast 済) の後の再送信を禁止。再送すると新しい nonce で
+  // 2 件目の authorization を出すことになり、元の tx が確定すると二重支払いになる。
+  // revert (確定失敗で送金未成立) は安全なので再試行を許す。
+  const relaySettledNoRetry =
+    useRelay && !!relay.data && (relay.data.success || !!relay.data.pending);
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -231,7 +236,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     !insufficientBalance &&
     !flowPending &&
     gasQuoteReady &&
-    !merchantUnderflow;
+    !merchantUnderflow &&
+    !relaySettledNoRetry;
 
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
   // 差し替え (standard モードは paymaster を経由しないため対象外)。
@@ -249,7 +255,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // どれも success panel も error も出ず「無反応」に見える穴を、明示メッセージで塞ぐ。
   const revertedNoFeedback =
     (!isStandard && !useRelay && !!gasless.data && !gasless.data.success) ||
-    (useRelay && !!relay.data && !relay.data.success) ||
+    (useRelay &&
+      !!relay.data &&
+      !relay.data.success &&
+      !relay.data.pending) ||
     (isStandard &&
       (standard.isMerchantError || standard.isFeeError) &&
       !standard.error);
@@ -357,9 +366,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
       address,
     ],
   );
-  // relay 成功/失敗を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt block を
-  // 持たないため両者 null。amount は mutate() の variables(value) で固定し drift を避ける。gas は
-  // OpenPay(Gelato Gas Tank) が肩代わりし顧客は立替えないため networkFeeEquivalent=0n・feeAmount=0n。
+  // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt
+  // block を持たないため両者 null。amount は mutate() の variables(value) で固定し drift を避ける。
+  // gas は OpenPay が肩代わりし顧客は立替えないため networkFeeEquivalent=0n・feeAmount=0n。
+  // pending (broadcast 済・未確定) は status='pending' で記録 (txHash 無しの既使用は記録しない)。
   const relayHistoryGasless = useMemo(
     () => ({
       data: relay.data
@@ -368,6 +378,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
             userOpHash: null,
             blockNumber: null,
             success: relay.data.success,
+            pending: relay.data.pending,
           }
         : undefined,
       error: relay.error,
@@ -729,11 +740,38 @@ function PaymentDetails({ params }: { params: PayParams }) {
       )}
 
       {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer link は overlay 側)。 */}
-      {useRelay && relay.data && relay.data.success && (
+      {useRelay && relay.data && relay.data.success && relay.data.txHash && (
         <ResultPanel
           title={t('successTitle')}
           rows={[{ label: t('successTx'), value: relay.data.txHash, copyable: true }]}
         />
+      )}
+
+      {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
+          (再送信は canSubmit の relaySettledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
+      {useRelay && relay.data?.pending && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="font-semibold">{t('pendingTitle')}</p>
+          <p className="mt-1 break-words">{t('pendingBody')}</p>
+          {relay.data.txHash && (
+            <p className="mt-2 break-all font-mono text-xs">
+              {relay.data.txHash}
+              {explorerBase && (
+                <>
+                  {' · '}
+                  <a
+                    href={`${explorerBase}/tx/${relay.data.txHash}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="font-sans underline hover:text-sky-900"
+                  >
+                    {t('pendingExplorerLink')} ↗
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+        </div>
       )}
 
       {isStandard && standard.data && (
@@ -775,7 +813,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
             onDismiss={() => setOverlayDismissed(true)}
           />
         )}
-      {!overlayDismissed && useRelay && relay.data && relay.data.success && (
+      {!overlayDismissed &&
+        useRelay &&
+        relay.data &&
+        relay.data.success &&
+        relay.data.txHash && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
           txHash={relay.data.txHash}

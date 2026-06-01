@@ -257,6 +257,9 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
     'errorRelayNotConfigured',
     'errorRelayInsufficientBalance',
     'errorRelayGeneric',
+    'pendingTitle',
+    'pendingBody',
+    'pendingExplorerLink',
   ] as const;
   for (const key of RELAY_KEYS) {
     it(`ja.PaymentForm.${key} は非空文字列`, () => {
@@ -266,6 +269,18 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
     });
     it(`en.PaymentForm.${key} は非空文字列`, () => {
       const v = (en.PaymentForm as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+
+  // relay の未確定 (pending) を履歴で示す status バッジ (HistoryRow / MiniHistoryRecent)。
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    it(`${loc.name}.History.statusPending は非空文字列`, () => {
+      const v = (loc.m.History as Record<string, unknown>).statusPending;
       expect(typeof v).toBe('string');
       expect(v).not.toBe('');
     });

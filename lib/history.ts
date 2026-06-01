@@ -179,7 +179,12 @@ function isValidEntry(value: unknown): value is HistoryEntry {
     e.flow !== 'standard-fee'
   )
     return false;
-  if (e.status !== 'success' && e.status !== 'reverted' && e.status !== 'error')
+  if (
+    e.status !== 'success' &&
+    e.status !== 'reverted' &&
+    e.status !== 'error' &&
+    e.status !== 'pending'
+  )
     return false;
   if (typeof e.chainId !== 'number') return false;
   if (typeof e.chainSlug !== 'string') return false;

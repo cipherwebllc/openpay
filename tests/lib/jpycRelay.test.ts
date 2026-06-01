@@ -151,6 +151,36 @@ describe('relayJpycAuthorization', () => {
     expect(res.kind).toBe('reverted');
   });
 
+  it('poll pending (broadcast 済・未確定) → {kind:pending, txHash} (relay_error にしない)', async () => {
+    const deps = makeDeps({
+      pollTask: vi.fn(async () => ({
+        state: 'pending' as const,
+        txHash: `0x${'cd'.repeat(32)}` as Hex,
+      })),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('pending');
+    if (res.kind === 'pending') expect(res.txHash).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('authorizationState 既使用 → pending (submit せず・二重支払い防止)', async () => {
+    const deps = makeDeps({
+      checkAuthorizationUsed: vi.fn(async () => true),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('pending');
+    expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+  });
+
+  it('authorizationState 未使用 → 通常どおり submit → success', async () => {
+    const deps = makeDeps({
+      checkAuthorizationUsed: vi.fn(async () => false),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('success');
+    expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
+  });
+
   it('poll error → relay_error', async () => {
     const deps = makeDeps({
       pollTask: vi.fn(async () => ({

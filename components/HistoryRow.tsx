@@ -28,12 +28,14 @@ const STATUS_BADGE_CLASS = {
   success: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
   reverted: 'bg-amber-100 text-amber-800 ring-amber-200',
   error: 'bg-red-100 text-red-800 ring-red-200',
+  pending: 'bg-sky-100 text-sky-800 ring-sky-200',
 } as const satisfies Record<HistoryEntry['status'], string>;
 
 const STATUS_I18N_KEY = {
   success: 'statusSuccess',
   reverted: 'statusReverted',
   error: 'statusError',
+  pending: 'statusPending',
 } as const satisfies Record<HistoryEntry['status'], string>;
 
 const FLOW_KIND_I18N_KEY = {

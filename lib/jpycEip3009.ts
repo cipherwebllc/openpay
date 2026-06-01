@@ -86,7 +86,8 @@ const TRANSFER_WITH_AUTHORIZATION_ABI = parseAbi([
   'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
 ]);
 
-// 65-byte signature を v/r/s に分解。EIP-2098 compact (64B) も許容する。
+// 65-byte signature (r||s||v) を v/r/s に分解。それ以外の長さ (EIP-2098 compact 64B 等) は
+// 想定外として弾く (wallet の eth_signTypedData_v4 は 65-byte を返す)。
 function splitSignature(signature: Hex): { v: number; r: Hex; s: Hex } {
   const hex = signature.slice(2);
   if (hex.length === 130) {

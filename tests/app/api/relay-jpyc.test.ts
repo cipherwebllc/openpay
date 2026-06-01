@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { POST } from '@/app/api/relay/jpyc/route';
 
-// GELATO_SPONSOR_API_KEY はテスト env に無いため、route は env-gate で 503 relay_not_configured
-// を返す = 設定するまで inert (client は他 provider に fallback)。鍵が要る検証/relay 経路の分岐は
-// lib/relay/jpycRelay の DI コア (tests/lib/jpycRelay.test.ts) で担保。
+// RELAYER_PRIVATE_KEY も GELATO_SPONSOR_API_KEY もテスト env に無いため、provider は起動時に
+// null と判定され route は 503 relay_not_configured を返す = 設定するまで inert (client は
+// 他 provider に fallback)。鍵が要る検証/submit/poll の分岐は DI コア (jpycRelay.test.ts) と
+// self-host I/O (selfHostRelayer.test.ts) で担保。
 function req(body: unknown): Request {
   return new Request('http://localhost/api/relay/jpyc', {
     method: 'POST',

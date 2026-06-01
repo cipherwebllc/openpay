@@ -21,10 +21,13 @@ export type RelayInput = {
   rateLimitKeys: string[];
 };
 
-// Gelato task の最終状態 (REST status の taskState を正規化)。
+// submit 済 tx の最終状態。'pending' は「broadcast 済だが確定待ち」(timeout 等)。
+// 重要: broadcast 後の不確定は 'error' ではなく 'pending' を返す。'error' は client を
+// standard mode に fallback させるため、tx が後で確定すると二重支払いになる (Codex #4)。
 export type RelayTaskOutcome =
   | { state: 'success'; txHash: Hex }
   | { state: 'reverted'; txHash?: Hex }
+  | { state: 'pending'; txHash: Hex }
   | { state: 'error'; detail: string };
 
 export type RelayDeps = {
@@ -40,6 +43,15 @@ export type RelayDeps = {
   ) => Promise<bigint>;
   // rate-limit。許可なら true。
   checkRateLimit: (keys: string[]) => Promise<boolean>;
+  // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
+  // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
+  // standard mode に fallback させない (二重支払い防止)。未提供ならスキップ。
+  checkAuthorizationUsed?: (
+    chainId: number,
+    token: Address,
+    from: Address,
+    nonce: Hex,
+  ) => Promise<boolean>;
   // Gelato sponsoredCall (REST)。taskId を返す。
   submitSponsoredCall: (
     chainId: number,
@@ -53,9 +65,13 @@ export type RelayDeps = {
 export type RelayResult =
   | { kind: 'success'; txHash: Hex }
   | { kind: 'reverted'; txHash?: Hex }
+  // broadcast 済だが未確定 (確認待ち)。client は standard へ fallback してはならない
+  // (二重支払い防止)。txHash があれば追跡可能、authorizationState 既使用時は無し。
+  | { kind: 'pending'; txHash?: Hex }
   // pre-submit に弾いた (検証/残高/rate-limit)。httpStatus + 理由コード。
   | { kind: 'rejected'; httpStatus: number; reason: string }
-  // Gelato/relay 自体のエラー (cancelled/timeout 等)。client は fallback 可。
+  // submit "前" のエラー (検証通過後〜broadcast 前: 残高 race / RPC / 資金不足)。tx は
+  // 出ていないので client は安全に fallback 可。broadcast 後は使わない (pending を使う)。
   | { kind: 'relay_error'; detail: string };
 
 export async function relayJpycAuthorization(
@@ -110,7 +126,20 @@ export async function relayJpycAuthorization(
     return { kind: 'rejected', httpStatus: 429, reason: 'rate_limited' };
   }
 
-  // 6. submit + poll。
+  // 5.5 authorization 既使用チェック (任意)。使用済なら submit は確実に revert する。
+  // ここで pending を返すことで gas を浪費せず、かつ「既に処理済かもしれない決済」を
+  // standard へ fallback させない (二重支払い防止)。
+  if (deps.checkAuthorizationUsed) {
+    const used = await deps.checkAuthorizationUsed(
+      chainId,
+      jpyc,
+      auth.from,
+      auth.nonce,
+    );
+    if (used) return { kind: 'pending' };
+  }
+
+  // 6. submit + poll。submit が throw = broadcast 前のエラー → relay_error (fallback 可)。
   const data = encodeTransferWithAuthorizationCalldata(auth, signature);
   let taskId: string;
   try {
@@ -123,6 +152,7 @@ export async function relayJpycAuthorization(
     };
   }
 
+  // ここから先は broadcast 済。error は返さず success/reverted/pending のいずれか。
   const outcome = await deps.pollTask(taskId);
   if (outcome.state === 'success') {
     return { kind: 'success', txHash: outcome.txHash };
@@ -130,5 +160,11 @@ export async function relayJpycAuthorization(
   if (outcome.state === 'reverted') {
     return { kind: 'reverted', txHash: outcome.txHash };
   }
+  if (outcome.state === 'pending') {
+    return { kind: 'pending', txHash: outcome.txHash };
+  }
+  // poll 'error': provider 依存。Gelato は taskId が broadcast 前に返るので 'error'
+  // (Cancelled/NotFound) = 未送信 → relay_error で fallback 可。self-host の pollReceipt は
+  // broadcast 後なので 'error' を返さず 'pending' に倒す (二重支払い回避は poll 側の責務)。
   return { kind: 'relay_error', detail: outcome.detail };
 }

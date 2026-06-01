@@ -99,6 +99,8 @@ function statusToLabel(status: HistoryEntry['status']): string {
       return 'revert';
     case 'error':
       return 'エラー';
+    case 'pending':
+      return '確認待ち';
   }
 }
 

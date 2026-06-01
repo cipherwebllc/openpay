@@ -20,12 +20,20 @@ import type { TokenDeployment } from '@/lib/tokens';
 
 export type JpycEip3009Params = { merchant: Address; value: bigint };
 // success=false は「relay は成立したが tx が on-chain で revert」(B2 と同じ表示方針)。
-export type JpycEip3009Result = { txHash: Hex; success: boolean };
+// pending=true は「broadcast 済だが未確定」(receipt timeout / authorizationState 既使用)。
+// 重要: pending は throw せず result で返す。throw だと form が standard へ fallback でき
+// 二重支払いになる。txHash は pending (既使用) では null になりうる。
+export type JpycEip3009Result = {
+  txHash: Hex | null;
+  success: boolean;
+  pending?: boolean;
+};
 
 type RelayResponse = {
   ok?: boolean;
-  txHash?: Hex;
+  txHash?: Hex | null;
   reverted?: boolean;
+  pending?: boolean;
   error?: string;
 };
 
@@ -88,6 +96,11 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       // relay は成立したが tx が revert (残高変動等)。success:false で記録/表示 (B2 方針)。
       if (body.reverted && body.txHash) {
         return { txHash: body.txHash, success: false };
+      }
+      // 202: broadcast 済だが未確定。throw せず pending を返す (form は standard へ
+      // fallback してはならない = 二重支払い防止)。txHash は既使用ケースで null になりうる。
+      if (res.status === 202 && body.pending) {
+        return { txHash: body.txHash ?? null, success: false, pending: true };
       }
       // それ以外は失敗。error code を message に載せ、form 側で i18n にマップする。
       throw new Error(body.error ?? `http_${res.status}`);

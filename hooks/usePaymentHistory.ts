@@ -8,7 +8,7 @@
 // 重複対策は lib/history.ts 側 (id dedupe) に任せ、ここでは StrictMode の
 // 二重 effect / react-query onSuccess 再呼出を素朴に許容する。
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Address, Hex } from 'viem';
 import {
   appendHistory,
@@ -61,12 +61,15 @@ type SubmittedAmounts = {
 
 type GaslessSnapshot = {
   data?: {
-    txHash: Hex;
+    // relay の pending (authorizationState 既使用) では txHash 不明 → null 許容。
+    txHash: Hex | null;
     // EIP-3009 relay は ERC-4337 を経由しない (userOp 無し)・Gelato は receipt block を
     // 返さないため、relay 経路では両者 null。useBatchPayment 経路は常に非 null。
     userOpHash: Hex | null;
     blockNumber: bigint | null;
     success: boolean;
+    // relay 経路で broadcast 済だが未確定 (receipt timeout 等)。status='pending' で記録。
+    pending?: boolean;
     // 監査次元 (useBatchPayment の BatchPaymentResult 由来)。circle 経路のみ非 null。
     provider?: HistoryProvider;
     circlePaymasterAddress?: string;
@@ -111,6 +114,10 @@ export function usePaymentHistory(
   const standardError = standard.error;
   const standardSubmittedParams = standard.lastSubmittedParams;
   const standardMerchantBlockNumber = standard.merchantBlockNumber;
+  // gasless/relay の throw 系エラーは txHash を持たないため id dedupe が効かず、ctx 変化で
+  // effect が再実行されると重複 append される (Codex A2 P3)。Error オブジェクト identity で
+  // 1 回に絞る (react-query は次の mutation まで同一 Error 参照を保持する)。
+  const appendedErrorRef = useRef<Error | null>(null);
 
   // R: gas quote 30s refetch / variable-amount /pay の編集で receipt 到達時に
   //    ctx.merchantAmount / ctx.feeAmount が drift する race を回避するため、
@@ -134,14 +141,22 @@ export function usePaymentHistory(
       ? standardSubmittedParams.merchantAmount + standardSubmittedParams.feeAmount
       : ctx.saleAmount;
 
-  // gasless 成功 (revert 含む)。data.success===false (チェーン上 revert) も
-  // status='reverted' で記録 → 顧客が「失敗した tx」を Explorer で追跡可能。
+  // gasless 成功 (revert / pending 含む)。data.success===false (チェーン上 revert) は
+  // status='reverted'、relay の未確定は status='pending' で記録 → Explorer で追跡可能。
+  // pending かつ txHash 無し (authorizationState 既使用 = 既に処理済) は、元の submission が
+  // 既に記録済のため重複記録しない。
   useEffect(() => {
     if (!gaslessData) return;
+    if (gaslessData.pending && !gaslessData.txHash) return;
+    const status = gaslessData.pending
+      ? ('pending' as const)
+      : gaslessData.success
+        ? ('success' as const)
+        : ('reverted' as const);
     appendHistory(
       buildHistoryEntry({
         flow: 'batch',
-        status: gaslessData.success ? 'success' : 'reverted',
+        status,
         chainId: ctx.chainId,
         chainSlug: ctx.chainSlug,
         asset: ctx.asset,
@@ -183,6 +198,8 @@ export function usePaymentHistory(
   // tx hash が無い時の dedupe 規則は buildHistoryEntry の id 生成 (秒+msg seed) に依存。
   useEffect(() => {
     if (!gaslessError) return;
+    if (appendedErrorRef.current === gaslessError) return;
+    appendedErrorRef.current = gaslessError;
     appendHistory(
       buildHistoryEntry({
         flow: 'batch',
