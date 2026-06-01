@@ -44,4 +44,6 @@ coverage/
 contracts/out/
 contracts/cache/
 contracts/lib/
+# forge script の broadcast 記録 (deploy tx ログ。機密値は contracts/cache/ 側で ignore 済)。
+broadcast/
 

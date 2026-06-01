@@ -38,3 +38,13 @@ forge create contracts/src/Eip3009Forwarder.sol:Eip3009Forwarder \
 
 > mainnet 投入は **外部セキュリティ監査 + Phase B (ガス上限 reject / KV nonce / idempotency /
 > ambiguous-send 回復)** が前提。Amoy (testnet) は監査不要でフロー検証可。
+
+## Deployed addresses
+
+| chain | Eip3009Forwarder | feeReceiver | 備考 |
+|---|---|---|---|
+| Polygon Amoy (80002) | `0x752B7AaD0089286EB7b553d84D05233d80c9FCB4` | `0x428483FbA62eDCef1E3a100d3799F6d71759c560` | 検証用 (2026-06-02 deploy・未監査) |
+| Polygon (137) | — | — | mainnet は監査 + Phase B 後 |
+
+設定: `NEXT_PUBLIC_JPYC_FORWARDER_AMOY` に上記アドレスを入れると Amoy が recover モードになる。
+feeReceiver は `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` と一致必須 (一致しないと署名検証が通らない)。
