@@ -418,20 +418,31 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const chainId = raw.chainId;
 
-  // B5: mainnet (polygon) を self-host で relay する場合、gas-cost ceiling 未設定は赤字リスク。
-  // silent disable を避け mainnet のみ拒否する (testnet は ceiling=0 で運用可・Codex P1)。
-  if (
-    PROVIDER === 'self-host' &&
-    chainId === polygon.id &&
-    RELAY_MAX_GAS_COST_WEI === 0n
-  ) {
-    logger.error('RELAY_MAX_GAS_COST_WEI unset on mainnet self-host (B5 必須)', {
-      chainId,
-    });
-    return NextResponse.json(
-      { ok: false, error: 'gas_ceiling_required' },
-      { status: 503 },
-    );
+  // mainnet (polygon) を self-host で relay する前提条件 (testnet は緩く運用可)。silent な無効化を
+  // 避け mainnet のみ 503 で拒否する。
+  if (PROVIDER === 'self-host' && chainId === polygon.id) {
+    // B5: gas-cost ceiling 未設定は赤字リスク (Codex P1)。
+    if (RELAY_MAX_GAS_COST_WEI === 0n) {
+      logger.error('RELAY_MAX_GAS_COST_WEI unset on mainnet self-host (B5 必須)', {
+        chainId,
+      });
+      return NextResponse.json(
+        { ok: false, error: 'gas_ceiling_required' },
+        { status: 503 },
+      );
+    }
+    // KV 必須: 未設定だと idempotency が fail-open になり、TTL 失効や重複 POST で同一 authorization の
+    // 二重 submit が起こりうる (fatal+unused→relay_error→standard fallback の安全性が崩れる・Codex)。
+    // mainnet では KV を必須にして fail-open 経路を塞ぐ (最終防壁の on-chain に加えた多層防御)。
+    if (!isKvConfigured()) {
+      logger.error('KV unconfigured on mainnet self-host (idempotency/budget 必須)', {
+        chainId,
+      });
+      return NextResponse.json(
+        { ok: false, error: 'kv_required' },
+        { status: 503 },
+      );
+    }
   }
 
   const ipPrefix = anonymizeIp(
