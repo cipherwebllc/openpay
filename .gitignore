@@ -39,3 +39,9 @@ coverage/
 # Codex / local MCP tooling config (dev-only, not part of the app)
 .codex/
 
+# Foundry (Solidity contracts under contracts/) — build artifacts + git-submodule deps.
+# NOTE: root lib/ is tracked TypeScript; only contracts/lib/ (forge deps) is ignored.
+contracts/out/
+contracts/cache/
+contracts/lib/
+
