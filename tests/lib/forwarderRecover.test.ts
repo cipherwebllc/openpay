@@ -172,6 +172,24 @@ describe('recoverViaForwarder', () => {
     expect(deps.submit).not.toHaveBeenCalled();
   });
 
+  it('B4: 日次予算超過 (checkGasBudget false) → rejected daily_budget_exceeded (submit せず)', async () => {
+    const deps = makeDeps({ checkGasBudget: vi.fn(async () => false) });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'daily_budget_exceeded',
+      httpStatus: 503,
+    });
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('B4: 予算内 (checkGasBudget true) → 通常どおり submit', async () => {
+    const deps = makeDeps({ checkGasBudget: vi.fn(async () => true) });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res.kind).toBe('success');
+    expect(deps.submit).toHaveBeenCalledOnce();
+  });
+
   it('冪等性: claimIdempotency duplicate → pending (submit せず)', async () => {
     const claimIdempotency = vi.fn<
       (c: number, from: Address, nonce: Hex) => Promise<'duplicate'>

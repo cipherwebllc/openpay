@@ -31,7 +31,15 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon, polygonAmoy } from 'viem/chains';
-import { kvLpush, kvLrange, kvLtrim, kvSet, isKvConfigured } from '@/lib/kv';
+import {
+  kvLpush,
+  kvLrange,
+  kvLtrim,
+  kvSet,
+  kvIncr,
+  kvExpire,
+  isKvConfigured,
+} from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { resolveDeployment } from '@/lib/tokens';
 import {
@@ -83,6 +91,17 @@ const MAX_VALUE = (() => {
 const RL_MAX = 5; // window 内の最大 relay 回数 (per key)
 const RL_WINDOW_MS = 60_000;
 const MAX_BODY_BYTES = 4 * 1024;
+// B4: chain 日次の relay 件数上限 (Sybil による POL 枯渇 griefing の circuit breaker)。
+const RELAY_DAILY_TX_CAP = (() => {
+  const raw = process.env.RELAY_DAILY_TX_CAP;
+  return raw && /^[0-9]+$/.test(raw) ? Number(raw) : 500;
+})();
+// B5: 1 tx の native (POL) gas コスト上限 (wei)。これを超える高騰時は relay せず standard へ倒す
+// (赤字防止)。未設定 (0) はスキップ — testnet 既定。mainnet は回収 fee 相当に合わせて設定。
+const RELAY_MAX_GAS_COST_WEI = (() => {
+  const raw = process.env.RELAY_MAX_GAS_COST_WEI;
+  return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 0n;
+})();
 
 // 対応 chain (Polygon mainnet + Amoy testnet)。同一 JPYC アドレス。Kaia は将来自前 relayer 拡張。
 const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = {
@@ -180,6 +199,7 @@ function selfHostIoFor(chainId: number): SelfHostIo {
     getBalance: () => publicClient.getBalance({ address: account.address }),
     estimateGas: (target, data) =>
       publicClient.estimateGas({ account, to: target, data }),
+    getGasPrice: () => publicClient.getGasPrice(),
     getPendingNonce: () =>
       publicClient.getTransactionCount({
         address: account.address,
@@ -240,6 +260,22 @@ async function claimIdempotency(
   const key = `relay:idem:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
   const r = await kvSet(key, '1', { nx: true, ttlSec: 1800 });
   return r.ok && r.value === null ? 'duplicate' : 'first';
+}
+
+// B4: 日次グローバル予算 (Sybil circuit breaker)。INCR relay:budget:{chainId}:{YYYYMMDD} し、
+// 初回のみ TTL 2 日。count が cap 以下なら許可。fail-open: KV 未設定/障害は許可 (rate-limit と
+// 同方針・alpha は可用性優先)。近似カウンタで足りる (応答喪失の二重カウントは早めに止まる=安全側)。
+async function checkGasBudget(chainId: number): Promise<boolean> {
+  if (!isKvConfigured()) return true;
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD (UTC)
+  const key = `relay:budget:${chainId}:${day}`;
+  const r = await kvIncr(key);
+  if (!r.ok) {
+    logger.warn('relay gas budget INCR failed (fail-open)', { chainId });
+    return true;
+  }
+  if (r.value === 1) await kvExpire(key, 2 * 24 * 3600); // 初回のみ自然失効を設定
+  return r.value <= RELAY_DAILY_TX_CAP;
 }
 
 async function gelatoSubmit(
@@ -405,6 +441,7 @@ async function handleFree(
     jpycAddressFor,
     getBalance,
     checkRateLimit,
+    checkGasBudget,
     claimIdempotency,
   };
   let deps: RelayDeps;
@@ -413,7 +450,8 @@ async function handleFree(
     deps = {
       ...common,
       checkAuthorizationUsed: readAuthorizationUsed,
-      submitSponsoredCall: (_c, target, data) => submitSelfHost(io!, target, data),
+      submitSponsoredCall: (_c, target, data) =>
+        submitSelfHost(io!, target, data, { maxGasCostWei: RELAY_MAX_GAS_COST_WEI }),
       pollTask: (taskId) => pollSelfHost(io!, taskId),
     };
   } else {
@@ -475,9 +513,11 @@ async function handleRecover(
     feeReceiverFor,
     getBalance,
     checkRateLimit,
+    checkGasBudget,
     checkAuthorizationUsed: readAuthorizationUsed,
     claimIdempotency,
-    submit: (_c, target, data) => submitSelfHost(io, target, data),
+    submit: (_c, target, data) =>
+      submitSelfHost(io, target, data, { maxGasCostWei: RELAY_MAX_GAS_COST_WEI }),
     pollTask: (taskId) => pollSelfHost(io, taskId),
   };
   const result = await recoverViaForwarder(

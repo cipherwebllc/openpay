@@ -34,6 +34,8 @@ export type SelfHostIo = {
   getBalance: () => Promise<bigint>;
   // tx の gas 見積。revert する tx はここで throw → broadcast 前なので relay_error。
   estimateGas: (target: Address, data: Hex) => Promise<bigint>;
+  // 現在の gas 価格 (wei)。B5 の赤字防止 (gas-cost ceiling) 判定に使う。
+  getGasPrice: () => Promise<bigint>;
   // pending を含む次の nonce。並行 submit の衝突検知/リトライに使う (B3)。
   getPendingNonce: () => Promise<number>;
   // pre-sign: raw tx + その hash を返す。broadcast "前" に txHash を確定させることで、
@@ -100,6 +102,7 @@ export async function submitSelfHost(
   io: SelfHostIo,
   target: Address,
   data: Hex,
+  opts: { maxGasCostWei?: bigint } = {},
 ): Promise<{ taskId: string }> {
   const balance = await io.getBalance();
   if (balance < MIN_RELAYER_BALANCE_WEI) {
@@ -110,6 +113,19 @@ export async function submitSelfHost(
   const estimated = await io.estimateGas(target, data);
   const buffered = estimated + estimated / 5n; // +20%
   const gas = buffered > RELAYER_GAS_CAP ? RELAYER_GAS_CAP : buffered;
+
+  // B5 赤字防止: gas-cost ceiling。回収する固定 fee を超える native コストになる高騰時は throw し、
+  // broadcast 前なので relay_error → client は standard へ fallback (顧客が自分で gas を払う)。
+  // ceiling 未設定 (0/undefined) はスキップ (testnet 既定)。
+  if (opts.maxGasCostWei && opts.maxGasCostWei > 0n) {
+    const gasPrice = await io.getGasPrice();
+    const cost = gas * gasPrice;
+    if (cost > opts.maxGasCostWei) {
+      throw new Error(
+        `gas_price_too_high: cost=${cost} cap=${opts.maxGasCostWei}`,
+      );
+    }
+  }
 
   // nonce 衝突は fresh nonce で再試行。各試行は pre-sign (hash 確定) → sendRaw。
   let lastError: unknown;

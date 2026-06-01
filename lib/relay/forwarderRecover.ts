@@ -39,6 +39,9 @@ export type ForwarderRecoverDeps = {
   feeReceiverFor: (chainId: number) => Address | null;
   getBalance: (chainId: number, token: Address, owner: Address) => Promise<bigint>;
   checkRateLimit: (keys: string[]) => Promise<boolean>;
+  // (任意) 日次グローバル予算 (circuit breaker)。Sybil による relayer POL 枯渇 griefing を chain
+  // 日次の relay 件数上限で止める。true=予算内 (許可)。fail-open (KV 障害は許可)。
+  checkGasBudget?: (chainId: number) => Promise<boolean>;
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
@@ -124,6 +127,13 @@ export async function recoverViaForwarder(
   // rate-limit。
   if (!(await deps.checkRateLimit(input.rateLimitKeys))) {
     return rejected(429, 'rate_limited');
+  }
+
+  // 日次グローバル予算 (Sybil circuit breaker)。超過なら submit せず reject (tx 未送信 → fallback 安全)。
+  if (deps.checkGasBudget) {
+    if (!(await deps.checkGasBudget(chainId))) {
+      return rejected(503, 'daily_budget_exceeded');
+    }
   }
 
   // authorizationState 既使用 → pending (guaranteed-revert 回避 + 二重支払い防止)。

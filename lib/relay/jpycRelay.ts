@@ -43,6 +43,10 @@ export type RelayDeps = {
   ) => Promise<bigint>;
   // rate-limit。許可なら true。
   checkRateLimit: (keys: string[]) => Promise<boolean>;
+  // (任意) 日次グローバル予算 (circuit breaker)。Sybil が fresh EOA を量産して relayer の POL を
+  // 枯渇させる griefing を、chain 日次の relay 件数上限で止める。true=予算内 (許可)。未提供なら
+  // スキップ。fail-open (KV 障害は許可) — alpha は可用性優先、mainnet は fail-closed 寄りに要見直し。
+  checkGasBudget?: (chainId: number) => Promise<boolean>;
   // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
   // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
   // standard mode に fallback させない (二重支払い防止)。未提供ならスキップ。
@@ -133,6 +137,14 @@ export async function relayJpycAuthorization(
   const allowed = await deps.checkRateLimit(input.rateLimitKeys);
   if (!allowed) {
     return { kind: 'rejected', httpStatus: 429, reason: 'rate_limited' };
+  }
+
+  // 5.4 日次グローバル予算 (Sybil circuit breaker)。超過なら submit せず reject。tx 未送信なので
+  // client は standard へ安全に fallback できる (二重支払いリスク無し)。
+  if (deps.checkGasBudget) {
+    if (!(await deps.checkGasBudget(chainId))) {
+      return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
+    }
   }
 
   // 5.5 authorization 既使用チェック (任意)。使用済なら submit は確実に revert する。

@@ -23,6 +23,7 @@ function makeIo(over: Partial<SelfHostIo> = {}): SelfHostIo {
   return {
     getBalance: vi.fn(async () => 10n ** 18n), // 1 native, 十分
     estimateGas: vi.fn(async () => 100_000n),
+    getGasPrice: vi.fn(async () => 30n * 10n ** 9n), // 30 gwei
     getPendingNonce: vi.fn(async () => 7),
     signTx: vi.fn(async () => ({ raw: RAW, hash: SIGNED_HASH })),
     sendRawTransaction: vi.fn(async () => SENT_HASH),
@@ -134,6 +135,32 @@ describe('submitSelfHost', () => {
     const res = await submitSelfHost(io, TARGET, DATA);
     expect(res.taskId).toBe(SIGNED_HASH); // poll → pending に倒れる hash
     expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 二重送信を避け再試行しない
+  });
+
+  // B5: gas-cost ceiling。gas=120_000 (100k+20%) × 30gwei = 3.6e15 wei。
+  it('B5: gas コストが ceiling 超過 → throw (broadcast せず → relay_error で standard へ)', async () => {
+    const io = makeIo();
+    await expect(
+      submitSelfHost(io, TARGET, DATA, { maxGasCostWei: 10n ** 15n }), // 1e15 < 3.6e15
+    ).rejects.toThrow('gas_price_too_high');
+    expect(io.signTx).not.toHaveBeenCalled();
+    expect(io.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('B5: gas コストが ceiling 以内 → 通常どおり broadcast', async () => {
+    const io = makeIo();
+    const res = await submitSelfHost(io, TARGET, DATA, {
+      maxGasCostWei: 10n ** 16n, // 1e16 > 3.6e15
+    });
+    expect(res.taskId).toBe(SENT_HASH);
+    expect(io.getGasPrice).toHaveBeenCalledOnce();
+    expect(io.sendRawTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('B5: ceiling 未設定 (opts なし) → getGasPrice を呼ばずスキップ', async () => {
+    const io = makeIo();
+    await submitSelfHost(io, TARGET, DATA);
+    expect(io.getGasPrice).not.toHaveBeenCalled();
   });
 });
 

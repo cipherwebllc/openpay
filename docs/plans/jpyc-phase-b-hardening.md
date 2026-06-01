@@ -80,10 +80,14 @@ budget 超過 reject) + **Amoy 実 chain で並行 submit (nonce 衝突しない
 
 ## 段階 (改訂)
 
-B1(済) → B2(idempotency) → B3(getTransactionCount + pre-sign + 衝突リトライ + 応答喪失=pending) →
-(B4 budget, B5 gas-ceiling) → Amoy 並行テスト (同時 submit で nonce 衝突を吸収できるか) →
+B1(済) → B2(idempotency・済) → B3(getTransactionCount + pre-sign + 衝突リトライ + 応答喪失=pending・済) →
+B4 budget(済) → B5 gas-ceiling(済) → Amoy 並行テスト (同時 submit で nonce 衝突を吸収できるか・次) →
 外部監査 → mainnet 有効化。KV allocator (旧 B6) は廃止。
 mainnet forwarder は別途 deploy (DeployForwarder + Polygon RPC/key)。
+
+実装済 (commit): B1=ce5d7d0 / B2=deffdc8 / B3=14627aa / B4+B5=本コミット。
+env: RELAY_DAILY_TX_CAP (B4・既定500・fail-open) / RELAY_MAX_GAS_COST_WEI (B5・既定0=無効)。
+残: Amoy 並行 submit 実 chain 検証 (nonce 衝突吸収) → 外部監査 → mainnet。
 
 ## 却下 / 非対象 (今は)
 
