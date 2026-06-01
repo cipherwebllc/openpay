@@ -1,12 +1,13 @@
 'use client';
 
-// JPYC ガスレス (EIP-3009) の client hook。顧客が transferWithAuthorization に EIP-712 署名
-// (eth_signTypedData_v4・委任不要・任意の injected wallet で可) → /api/relay/jpyc が Gelato
-// 経由で submit + gas 負担 → {txHash}。詳細は memory:jpyc-eip3009。
-//
-// Phase 1: 全額を customer→merchant に送る単発 transfer (fee/split/gas 相当額の徴収は Phase 2)。
-// flag/relay 未構成時は呼び出し元が resolveJpycGaslessProvider で 7702 経路を選ぶので、本 hook
-// は eip3009-relay 解決時のみ使われる。
+// JPYC ガスレス (EIP-3009) の client hook。顧客が EIP-712 署名 (eth_signTypedData_v4・委任不要・
+// 任意の injected wallet で可) → /api/relay/jpyc が relayer 経由で submit + gas 負担 → {txHash}。
+// 2 モード (server と同じ forwarderConfig で判定):
+//   recover (forwarder 設定あり): receiveWithAuthorization(to=forwarder) に署名 → forwarder が
+//     amount→店舗 + gas相当→feeReceiver に分割。gas 相当額を JPYC で回収 (立替+回収)。
+//   free (forwarder なし): transferWithAuthorization(to=merchant) に署名 → OpenPay がガス負担。
+// flag/relay 未構成時は呼び出し元が resolveJpycGaslessProvider で 7702 経路を選ぶ。詳細は
+// memory:jpyc-eip3009 / gasless-legal-jp。
 
 import { useMutation } from '@tanstack/react-query';
 import { useAccount, useWalletClient } from 'wagmi';
@@ -16,9 +17,18 @@ import {
   buildTransferWithAuthorizationTypedData,
   randomAuthorizationNonce,
 } from '@/lib/jpycEip3009';
+import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { env } from '@/lib/env';
+import type { GasMode } from '@/lib/fee';
 import type { TokenDeployment } from '@/lib/tokens';
 
-export type JpycEip3009Params = { merchant: Address; value: bigint };
+export type JpycEip3009Params = {
+  merchant: Address;
+  value: bigint; // 請求額 (bill amount)
+  // recover モードで gas 相当額を顧客上乗せ(customer) / 店主吸収(merchant) のどちらにするか。
+  gasMode?: GasMode;
+};
 // success=false は「relay は成立したが tx が on-chain で revert」(B2 と同じ表示方針)。
 // pending=true は「broadcast 済だが未確定」(receipt timeout / authorizationState 既使用)。
 // 重要: pending は throw せず result で返す。throw だと form が standard へ fallback でき
@@ -42,45 +52,98 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const { address, chainId } = useAccount();
 
   return useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
-    mutationFn: async ({ merchant, value }) => {
+    mutationFn: async ({ merchant, value, gasMode = 'customer' }) => {
       if (!walletClient || !address || chainId === undefined) {
         throw new Error('wallet_not_connected');
       }
+      const from = address as Address;
       const nowSec = Math.floor(Date.now() / 1000);
-      const auth = {
-        from: address as Address,
-        to: merchant,
-        value,
-        validAfter: 0n,
-        validBefore: BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC),
-        nonce: randomAuthorizationNonce(),
-      };
-      const typed = buildTransferWithAuthorizationTypedData(
-        auth,
-        chainId,
-        deployment.address,
-      );
-      const signature = (await walletClient.signTypedData({
-        account: address,
-        domain: typed.domain,
-        types: typed.types,
-        primaryType: typed.primaryType,
-        message: typed.message,
-      })) as Hex;
+      const validBefore = BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC);
+      const forwarder = jpycForwarderFor(chainId);
+
+      let payload: Record<string, unknown>;
+      if (forwarder) {
+        // recover: gas 相当額を JPYC 回収。customer は上乗せ、merchant は受取から吸収。
+        const feeValue = relayGasFeeValue();
+        const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
+        if (merchantValue <= 0n) throw new Error('amount_too_small');
+        const params: ForwarderSettleParams = {
+          from,
+          merchant,
+          merchantValue,
+          feeReceiver: env.feeReceiver as Address,
+          feeValue,
+          validAfter: 0n,
+          validBefore,
+          intentSalt: randomAuthorizationNonce(),
+        };
+        // recover 専用の intent 構築は lazy import (initial /pay バンドルに encodeAbiParameters
+        // 等を載せない・予算節約)。recover 決済が実行された時のみ chunk を読み込む。
+        const { buildReceiveWithAuthorizationTypedData } = await import(
+          '@/lib/relay/forwarderIntent'
+        );
+        const typed = buildReceiveWithAuthorizationTypedData(
+          params,
+          chainId,
+          deployment.address,
+          forwarder,
+        );
+        const signature = (await walletClient.signTypedData({
+          account: address,
+          domain: typed.domain,
+          types: typed.types,
+          primaryType: typed.primaryType,
+          message: typed.message,
+        })) as Hex;
+        payload = {
+          chainId,
+          from,
+          merchant,
+          merchantValue: merchantValue.toString(),
+          feeValue: feeValue.toString(),
+          validAfter: '0',
+          validBefore: validBefore.toString(),
+          intentSalt: params.intentSalt,
+          signature,
+        };
+      } else {
+        // free: 直接 transferWithAuthorization。OpenPay がガス負担 (回収しない)。
+        const auth = {
+          from,
+          to: merchant,
+          value,
+          validAfter: 0n,
+          validBefore,
+          nonce: randomAuthorizationNonce(),
+        };
+        const typed = buildTransferWithAuthorizationTypedData(
+          auth,
+          chainId,
+          deployment.address,
+        );
+        const signature = (await walletClient.signTypedData({
+          account: address,
+          domain: typed.domain,
+          types: typed.types,
+          primaryType: typed.primaryType,
+          message: typed.message,
+        })) as Hex;
+        payload = {
+          chainId,
+          from,
+          to: merchant,
+          value: value.toString(),
+          validAfter: '0',
+          validBefore: validBefore.toString(),
+          nonce: auth.nonce,
+          signature,
+        };
+      }
 
       const res = await fetch('/api/relay/jpyc', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          chainId,
-          from: auth.from,
-          to: auth.to,
-          value: value.toString(),
-          validAfter: auth.validAfter.toString(),
-          validBefore: auth.validBefore.toString(),
-          nonce: auth.nonce,
-          signature,
-        }),
+        body: JSON.stringify(payload),
       });
 
       let body: RelayResponse = {};
@@ -97,8 +160,8 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       if (body.reverted && body.txHash) {
         return { txHash: body.txHash, success: false };
       }
-      // 202: broadcast 済だが未確定。throw せず pending を返す (form は standard へ
-      // fallback してはならない = 二重支払い防止)。txHash は既使用ケースで null になりうる。
+      // 202: broadcast 済だが未確定。throw せず pending を返す (form は standard へ fallback
+      // してはならない = 二重支払い防止)。txHash は既使用ケースで null になりうる。
       if (res.status === 202 && body.pending) {
         return { txHash: body.txHash ?? null, success: false, pending: true };
       }

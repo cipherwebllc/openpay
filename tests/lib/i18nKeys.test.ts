@@ -253,6 +253,8 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
     'gasInfoJpycRelay',
     'gasRowRelayFree',
     'gaslessBatchHintJpycRelay',
+    'gasInfoJpycRecover',
+    'gaslessBatchHintJpycRecover',
     'errorRelayRateLimited',
     'errorRelayNotConfigured',
     'errorRelayInsufficientBalance',

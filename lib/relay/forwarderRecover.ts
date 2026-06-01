@@ -11,10 +11,12 @@
 import { getAddress, type Address, type Hex } from 'viem';
 import {
   buildForwarderNonce,
-  encodeSettleCalldata,
-  recoverReceiveWithAuthorizationSigner,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
+import {
+  encodeSettleCalldata,
+  recoverReceiveWithAuthorizationSigner,
+} from '@/lib/relay/forwarderSettle';
 import type { RelayResult, RelayTaskOutcome } from '@/lib/relay/jpycRelay';
 
 export type ForwarderRecoverInput = {

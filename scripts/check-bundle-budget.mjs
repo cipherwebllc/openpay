@@ -14,12 +14,13 @@ import { spawnSync } from 'node:child_process';
 const BUDGETS_KB = {
   '/_not-found': 250,
   '/[locale]': 320,
-  // /pay は慢性的に予算上限張り付き。Option B (会計データ分離・v3) で決済記録経路が
-  // saleAmount / networkFeeEquivalent / feeBreakdownVersion を扱うようになり 420→421kB に
-  // 微増 (appendHistory→loadHistory→migrate/isValidEntry + buildHistoryEntry の必須コード)。
-  // 機能上必要なため 423kB へ微増。⚠️ /pay 専用の slimming pass (lazy import 見直し) を別 task
-  // で要検討 — これ以上の安易な予算引き上げはしない。
-  '/[locale]/pay': 423,
+  // /pay は慢性的に予算上限張り付き。Option B (会計データ分離・v3) で 420→423kB。
+  // JPYC EIP-3009 recover モード (#131c・gas相当額の JPYC 回収) で forwarderConfig +
+  // recover breakdown/履歴 + 立替回収の開示 i18n (gasInfoJpycRecover 等) が必須で 423→424kB。
+  // 🚨 slimming 負債が限界。次に /pay へ追加する前に code-split pass を必須化:
+  //   SuccessOverlay / CrossChainHint を next/dynamic で First Load から外す (success/cross-chain
+  //   は決済後 or 条件付きなので遅延ロード可)。これ以上の安易な予算引き上げはしない。
+  '/[locale]/pay': 424,
   '/[locale]/tip/[address]': 420,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"

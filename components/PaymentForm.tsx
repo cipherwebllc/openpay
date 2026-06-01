@@ -22,6 +22,7 @@ import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -87,6 +88,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
       'eip3009-relay';
   const relay = useJpycEip3009Payment(deployment);
 
+  // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv は回収する固定 gas 相当額 (free は 0)。
+  const useRecover =
+    useRelay && jpycForwarderFor(chainId ?? deployment.chainId) !== null;
+  const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
+
   // Smart Account は gasless (非 relay) のみ必要 — standard / relay では enabled=false で skip。
   const { data: saData, error: saError } = useSmartAccount(
     deployment,
@@ -137,6 +144,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //   Sponsorship (JPYC): Pimlico が POL gas を立替、運営は徴収した JPYC で別途精算。
   //   standard mode: 顧客 wallet が gas を自前で算定・支払うため OpenPay 側で見積らない。
   const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
+  // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、
+  // 非 relay は paymaster quote。relay は quote を持たないため effective で切り替える。
+  const effectiveGasAmount: bigint | undefined = useRelay
+    ? relayGasEquiv
+    : gasAmount;
 
   const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
@@ -146,9 +158,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
         params.token,
         effectiveMode,
         params.gas,
-        gasAmount ?? 0n,
+        effectiveGasAmount ?? 0n,
       ),
-    [amountWei, params.token, effectiveMode, params.gas, gasAmount],
+    [amountWei, params.token, effectiveMode, params.gas, effectiveGasAmount],
   );
 
   // standard mode では split は無視 (シンプルな EOA 直列 transfer に限定)。
@@ -192,19 +204,20 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // circle は receipt 由来の circlePaymasterNetUsdc を検証ステータス付きで使うため null、
   // standard は OpenPay が gas に touch しないため null。
   const networkFeeEquivalent =
-    !isStandard && !isCircle ? (gasAmount ?? 0n) : null;
+    !isStandard && !isCircle ? (effectiveGasAmount ?? 0n) : null;
 
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ amount < gas のみ)。
   //   gasless / customer:  amount < fee → merchant = 0
   //   gasless / merchant:  amount < fee + gas → merchant = 0 (gasQuote load 完了必須)
   //   standard:            amount < fee → merchant = 0
+  // relay は固定 fee で見積待ちが無いので即判定可 (activeQuote ではなく useRelay で gate)。
   const merchantUnderflow =
     amountWei > 0n &&
-    (isStandard || !isMerchantGas || activeQuote.data !== undefined) &&
+    (isStandard || !isMerchantGas || useRelay || activeQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
   const minimumAmountWei =
-    breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
+    breakdown.feeAmount + (isMerchantGas ? (effectiveGasAmount ?? 0n) : 0n);
 
   const { balance, insufficientBalance, wrongChain } = useErc20BalanceAndChain(
     deployment,
@@ -367,11 +380,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
     ],
   );
   // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt
-  // block を持たないため両者 null。amount は mutate() の variables(value) で固定し drift を避ける。
-  // gas は OpenPay が肩代わりし顧客は立替えないため networkFeeEquivalent=0n・feeAmount=0n。
-  // pending (broadcast 済・未確定) は status='pending' で記録 (txHash 無しの既使用は記録しない)。
-  const relayHistoryGasless = useMemo(
-    () => ({
+  // block を持たないため両者 null。amount は mutate() の variables で固定し drift を避ける。
+  // recover は hook と同一式で split を再計算: feeAmount(=サービス料) は常に 0、ネットワーク手数料
+  // 相当額 = 回収した gas (feeValue)、merchantAmount は customer 上乗せなら満額・merchant 吸収なら
+  // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
+  const relayHistoryGasless = useMemo(() => {
+    const v = relay.variables;
+    const fee = useRecover ? relayGasFeeValue() : 0n;
+    const merchantAmount = v
+      ? useRecover && v.gasMode === 'merchant'
+        ? v.value - fee
+        : v.value
+      : 0n;
+    return {
       data: relay.data
         ? {
             txHash: relay.data.txHash,
@@ -382,17 +403,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
           }
         : undefined,
       error: relay.error,
-      variables: relay.variables
+      variables: v
         ? {
-            merchantAmount: relay.variables.value,
+            merchantAmount,
             feeAmount: 0n,
-            saleAmount: relay.variables.value,
-            networkFeeEquivalent: 0n,
+            saleAmount: v.value,
+            networkFeeEquivalent: fee,
           }
         : undefined,
-    }),
-    [relay.data, relay.error, relay.variables],
-  );
+    };
+  }, [relay.data, relay.error, relay.variables, useRecover]);
   usePaymentHistory(
     historyCtx,
     useRelay ? relayHistoryGasless : gasless,
@@ -415,7 +435,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。
       // fee=0・gas は OpenPay 肩代わりなので、全額 (amountWei) をそのまま merchant へ単発送金。
-      relay.mutate({ merchant: params.to, value: amountWei });
+      relay.mutate({ merchant: params.to, value: amountWei, gasMode: params.gas });
     } else if (splitBreakdown) {
       // recipients[0] は primary (params.to)、それ以降が split entries
       const [primary, ...extras] = splitBreakdown.recipients;
@@ -551,6 +571,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
           )}
           {isStandard ? (
             <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
+          ) : useRecover ? (
+            <Row
+              label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
+              labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
+              value={fmt(relayGasEquiv)}
+            />
           ) : useRelay ? (
             <Row
               label={t('gasRow')}
@@ -599,9 +625,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <p className="mt-4 text-xs text-slate-500">
           {isStandard
             ? t('standardBatchHint')
-            : useRelay
-              ? t('gaslessBatchHintJpycRelay')
-              : splitBreakdown
+            : useRecover
+              ? t('gaslessBatchHintJpycRecover')
+              : useRelay
+                ? t('gaslessBatchHintJpycRelay')
+                : splitBreakdown
                 ? t('splitBatchHint', {
                     count: splitBreakdown.recipients.length,
                   })

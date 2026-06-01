@@ -327,6 +327,8 @@
     "gasInfoJpycRelay": "For JPYC gasless payments, OpenPay advances the network fee (gas) in full. You complete the payment in JPYC alone — no native token holdings required. Just sign the transfer in your wallet.",
     "gasRowRelayFree": "Free (advanced by OpenPay)",
     "gaslessBatchHintJpycRelay": "OpenPay advances the network fee, so there is no charge to you (paid in JPYC, signature only).",
+    "gasInfoJpycRecover": "For JPYC gasless payments, OpenPay advances the network fee (gas) and collects the equivalent in JPYC (OpenPay takes no service fee). You need no native token — just sign the transfer in your wallet. Once JPYC supports a paymaster, we will switch to that.",
+    "gaslessBatchHintJpycRecover": "The network-fee-equivalent is collected in JPYC (advanced by OpenPay, zero service fee, signature only).",
     "errorRelayRateLimited": "Too many payments in a short period. Please wait a moment and try again.",
     "errorRelayNotConfigured": "Gasless payment (relay) is currently unavailable. Please try again later or use standard mode.",
     "errorRelayInsufficientBalance": "Your JPYC balance is insufficient. Check your balance and try again.",
