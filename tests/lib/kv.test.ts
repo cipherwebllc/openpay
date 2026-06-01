@@ -230,4 +230,91 @@ describe('lib/kv', () => {
     expect(init.headers['content-type']).toBe('application/json');
     expect(init.cache).toBe('no-store');
   });
+
+  // --- Phase B primitives (INCR / GET / SET[NX,EX] / EXPIRE) ---
+
+  it('kvIncr は INCR を送り number を返す', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: 3 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvIncr } = await import('@/lib/kv');
+    const res = await kvIncr('relay:budget:137:20260602');
+    expect(res).toEqual({ ok: true, value: 3 });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual(['INCR', 'relay:budget:137:20260602']);
+  });
+
+  it('kvSet(nx+ttl) は SET key val EX ttl NX を送り OK を返す', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: 'OK' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvSet } = await import('@/lib/kv');
+    const res = await kvSet('relay:idem:137:0xfrom:0xnonce', '1', {
+      nx: true,
+      ttlSec: 900,
+    });
+    expect(res).toEqual({ ok: true, value: 'OK' });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual([
+      'SET',
+      'relay:idem:137:0xfrom:0xnonce',
+      '1',
+      'EX',
+      '900',
+      'NX',
+    ]);
+  });
+
+  it('kvSet(nx) 既存キーは null (重複検知)', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: null }) }),
+    );
+    const { kvSet } = await import('@/lib/kv');
+    const res = await kvSet('k', '1', { nx: true });
+    expect(res).toEqual({ ok: true, value: null });
+  });
+
+  it('kvGet miss は null', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: null }) }),
+    );
+    const { kvGet } = await import('@/lib/kv');
+    expect(await kvGet('x')).toEqual({ ok: true, value: null });
+  });
+
+  it('kvExpire は EXPIRE key ttl を送る', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: 1 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvExpire } = await import('@/lib/kv');
+    await kvExpire('relay:nonce:137', 86400);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual(['EXPIRE', 'relay:nonce:137', '86400']);
+  });
+
+  it('Phase B primitives も unconfigured を一様に返す', async () => {
+    const { kvIncr, kvGet, kvSet, kvExpire } = await import('@/lib/kv');
+    expect(await kvIncr('k')).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(await kvGet('k')).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(await kvSet('k', 'v')).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(await kvExpire('k', 60)).toEqual({
+      ok: false,
+      reason: 'unconfigured',
+    });
+  });
 });

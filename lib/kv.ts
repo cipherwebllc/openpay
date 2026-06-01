@@ -85,3 +85,33 @@ export function kvLtrim(
 ): Promise<KvResult<'OK'>> {
   return call<'OK'>(['LTRIM', key, String(start), String(stop)]);
 }
+
+// --- Phase B hardening 用の原子プリミティブ (nonce 採番 / idempotency / gas budget) ---
+
+// 原子インクリメント (採番カウンタ・gas budget)。初回は 1。
+export function kvIncr(key: string): Promise<KvResult<number>> {
+  return call<number>(['INCR', key]);
+}
+
+// 値取得。未存在は null。
+export function kvGet(key: string): Promise<KvResult<string | null>> {
+  return call<string | null>(['GET', key]);
+}
+
+// SET key value [EX ttl] [NX]。nx 時、既存キーなら null (set されず)、新規なら 'OK'。
+// idempotency (SET NX) や seed 値の保存に使う。
+export function kvSet(
+  key: string,
+  value: string,
+  opts: { nx?: boolean; ttlSec?: number } = {},
+): Promise<KvResult<'OK' | null>> {
+  const cmd: string[] = ['SET', key, value];
+  if (opts.ttlSec !== undefined) cmd.push('EX', String(opts.ttlSec));
+  if (opts.nx) cmd.push('NX');
+  return call<'OK' | null>(cmd);
+}
+
+// TTL 設定 (採番カウンタ等の自然失効)。設定できれば 1、キー無しは 0。
+export function kvExpire(key: string, ttlSec: number): Promise<KvResult<number>> {
+  return call<number>(['EXPIRE', key, String(ttlSec)]);
+}
