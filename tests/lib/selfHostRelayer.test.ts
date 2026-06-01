@@ -12,31 +12,33 @@ import {
 
 const TARGET = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29' as Address;
 const DATA = '0xdeadbeef' as Hex;
-// signTx が返す pre-signed txHash (broadcast 前に確定する hash)。
+// signTx が返す pre-signed canonical txHash。submitSelfHost は send 結果ではなく常にこれを返す (P2)。
 const SIGNED_HASH = `0x${'ab'.repeat(32)}` as Hex;
-// sendRawTransaction が成功時に返す hash (通常は SIGNED_HASH と同一だが、テストでは
-// 「pre-signed hash を返したか / 送信結果を返したか」を区別するため別値にする)。
-const SENT_HASH = `0x${'cd'.repeat(32)}` as Hex;
 const RAW = '0x02abcd' as Hex;
+const FEE = 30n * 10n ** 9n; // 30 gwei (署名された maxFeePerGas)
+// gas = estimateGas(100k) + 20% = 120k。cost = 120k × 30gwei = 3.6e15 wei。
+const EXPECTED_COST = 120_000n * FEE;
 
 function makeIo(over: Partial<SelfHostIo> = {}): SelfHostIo {
   return {
     getBalance: vi.fn(async () => 10n ** 18n), // 1 native, 十分
     estimateGas: vi.fn(async () => 100_000n),
-    getGasPrice: vi.fn(async () => 30n * 10n ** 9n), // 30 gwei
     getPendingNonce: vi.fn(async () => 7),
-    signTx: vi.fn(async () => ({ raw: RAW, hash: SIGNED_HASH })),
-    sendRawTransaction: vi.fn(async () => SENT_HASH),
-    waitForReceipt: vi.fn(async () => ({ status: 'success' as const })),
+    signTx: vi.fn(async () => ({ raw: RAW, hash: SIGNED_HASH, maxFeePerGas: FEE })),
+    sendRawTransaction: vi.fn(async () => SIGNED_HASH),
+    waitForReceipt: vi.fn(async () => ({
+      status: 'success' as const,
+      transactionHash: SIGNED_HASH,
+    })),
     ...over,
   };
 }
 
 describe('submitSelfHost', () => {
-  it('正常: 残高十分 → pending nonce で pre-sign → sendRaw → {taskId: 送信結果}', async () => {
+  it('正常: pending nonce で pre-sign → sendRaw → {taskId: canonical hash}', async () => {
     const io = makeIo();
     const res = await submitSelfHost(io, TARGET, DATA);
-    expect(res.taskId).toBe(SENT_HASH);
+    expect(res.taskId).toBe(SIGNED_HASH); // 常に canonical pre-signed hash (送信結果は信用しない)
     expect(io.sendRawTransaction).toHaveBeenCalledOnce();
     expect(io.signTx).toHaveBeenCalledOnce();
     const [target, data, gas, nonce] = (
@@ -45,7 +47,7 @@ describe('submitSelfHost', () => {
     expect(target).toBe(TARGET);
     expect(data).toBe(DATA);
     expect(gas).toBe(100_000n + 100_000n / 5n); // +20% バッファ
-    expect(nonce).toBe(7); // getPendingNonce の値
+    expect(nonce).toBe(7);
   });
 
   it('gas 見積が cap 超過 → RELAYER_GAS_CAP で頭打ち (signTx に渡る gas)', async () => {
@@ -55,7 +57,7 @@ describe('submitSelfHost', () => {
     expect(gas).toBe(RELAYER_GAS_CAP);
   });
 
-  it('残高不足 → relayer_unfunded で throw (broadcast せず → コアが relay_error で fallback 可)', async () => {
+  it('残高不足 → relayer_unfunded で throw (sign/send せず → relay_error で fallback 可)', async () => {
     const io = makeIo({
       getBalance: vi.fn(async () => MIN_RELAYER_BALANCE_WEI - 1n),
     });
@@ -66,7 +68,7 @@ describe('submitSelfHost', () => {
     expect(io.sendRawTransaction).not.toHaveBeenCalled();
   });
 
-  it('gas 見積が revert で throw → 伝播 (broadcast せず)', async () => {
+  it('gas 見積が revert で throw → 伝播 (sign/send せず)', async () => {
     const io = makeIo({
       estimateGas: vi.fn(async () => {
         throw new Error('execution reverted');
@@ -74,93 +76,132 @@ describe('submitSelfHost', () => {
     });
     await expect(submitSelfHost(io, TARGET, DATA)).rejects.toThrow();
     expect(io.signTx).not.toHaveBeenCalled();
-    expect(io.sendRawTransaction).not.toHaveBeenCalled();
   });
 
-  it('nonce 衝突 → fresh nonce で再試行 → 2 回目で成功', async () => {
+  it('nonce 衝突 + authState 未使用 → fresh nonce で再試行 → 2 回目で成功', async () => {
     let calls = 0;
     const io = makeIo({
-      getPendingNonce: vi.fn(async () => 7),
       sendRawTransaction: vi.fn(async () => {
         calls += 1;
         if (calls === 1) throw new Error('nonce too low');
-        return SENT_HASH;
+        return SIGNED_HASH;
       }),
     });
-    const res = await submitSelfHost(io, TARGET, DATA);
-    expect(res.taskId).toBe(SENT_HASH);
+    const isAuthorizationUsed = vi.fn(async () => false);
+    const res = await submitSelfHost(io, TARGET, DATA, { isAuthorizationUsed });
+    expect(res.taskId).toBe(SIGNED_HASH);
     expect(io.sendRawTransaction).toHaveBeenCalledTimes(2);
-    expect(io.getPendingNonce).toHaveBeenCalledTimes(2); // 衝突後に fresh nonce 再取得
+    expect(io.getPendingNonce).toHaveBeenCalledTimes(2); // 衝突後 fresh nonce
     expect(io.signTx).toHaveBeenCalledTimes(2); // 再 sign
+    expect(isAuthorizationUsed).toHaveBeenCalledTimes(1); // 衝突 1 回ぶん再確認
   });
 
-  it('nonce 衝突が全リトライで尽きる → throw (自 tx は未 broadcast = fallback 安全)', async () => {
+  it('nonce 衝突 + authState 既使用 → 再試行せず pending (P0・二重送金防止)', async () => {
     const io = makeIo({
       sendRawTransaction: vi.fn(async () => {
         throw new Error('replacement transaction underpriced');
       }),
     });
-    await expect(submitSelfHost(io, TARGET, DATA)).rejects.toThrow();
-    // 初回 + RETRIES 回。
+    const isAuthorizationUsed = vi.fn(async () => true);
+    const res = await submitSelfHost(io, TARGET, DATA, { isAuthorizationUsed });
+    expect(res.taskId).toBe(SIGNED_HASH); // poll → pending (executed 済の可能性)
+    expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 再試行しない
+  });
+
+  it('nonce 衝突が全リトライで尽きる → throw せず pending (P0・fallback で二重送金しない)', async () => {
+    const io = makeIo({
+      sendRawTransaction: vi.fn(async () => {
+        throw new Error('nonce too low');
+      }),
+    });
+    const res = await submitSelfHost(io, TARGET, DATA, {
+      isAuthorizationUsed: vi.fn(async () => false),
+    });
+    expect(res.taskId).toBe(SIGNED_HASH); // 保守的に pending
     expect(io.sendRawTransaction).toHaveBeenCalledTimes(RELAYER_NONCE_RETRIES + 1);
   });
 
-  it('already known → pre-signed hash を返し poll (再試行せず・二重送金回避)', async () => {
+  it('already known → canonical hash を poll (再試行せず)', async () => {
     const io = makeIo({
       sendRawTransaction: vi.fn(async () => {
         throw new Error('already known');
       }),
     });
     const res = await submitSelfHost(io, TARGET, DATA);
-    expect(res.taskId).toBe(SIGNED_HASH); // 送信結果ではなく pre-signed hash
+    expect(res.taskId).toBe(SIGNED_HASH);
     expect(io.sendRawTransaction).toHaveBeenCalledOnce();
   });
 
-  it('fatal (insufficient funds) → throw (mempool 未到達確実 → relay_error で fallback 可)', async () => {
+  it('fatal + authState 未使用 → throw (mempool 未到達確実 → relay_error で fallback 可)', async () => {
     const io = makeIo({
       sendRawTransaction: vi.fn(async () => {
         throw new Error('insufficient funds for gas * price + value');
       }),
     });
-    await expect(submitSelfHost(io, TARGET, DATA)).rejects.toThrow();
-    expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 再試行しない
+    await expect(
+      submitSelfHost(io, TARGET, DATA, {
+        isAuthorizationUsed: vi.fn(async () => false),
+      }),
+    ).rejects.toThrow();
+    expect(io.sendRawTransaction).toHaveBeenCalledOnce();
   });
 
-  it('uncertain (timeout) → pre-signed hash を返し poll (再試行/fallback せず → pending 化)', async () => {
+  it('fatal + authState 既使用 → throw せず pending (P1・誤分類保険)', async () => {
+    const io = makeIo({
+      sendRawTransaction: vi.fn(async () => {
+        throw new Error('insufficient funds for gas * price + value');
+      }),
+    });
+    const res = await submitSelfHost(io, TARGET, DATA, {
+      isAuthorizationUsed: vi.fn(async () => true),
+    });
+    expect(res.taskId).toBe(SIGNED_HASH);
+  });
+
+  it('fatal + checker 無し → throw (relay_error)', async () => {
+    const io = makeIo({
+      sendRawTransaction: vi.fn(async () => {
+        throw new Error('intrinsic gas too low');
+      }),
+    });
+    await expect(submitSelfHost(io, TARGET, DATA)).rejects.toThrow();
+  });
+
+  it('uncertain (timeout) → canonical hash を poll (再試行/fallback せず → pending 化)', async () => {
     const io = makeIo({
       sendRawTransaction: vi.fn(async () => {
         throw new Error('request timed out');
       }),
     });
     const res = await submitSelfHost(io, TARGET, DATA);
-    expect(res.taskId).toBe(SIGNED_HASH); // poll → pending に倒れる hash
-    expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 二重送信を避け再試行しない
+    expect(res.taskId).toBe(SIGNED_HASH);
+    expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 二重送信回避
   });
 
-  // B5: gas-cost ceiling。gas=120_000 (100k+20%) × 30gwei = 3.6e15 wei。
-  it('B5: gas コストが ceiling 超過 → throw (broadcast せず → relay_error で standard へ)', async () => {
+  // B5: gas-cost ceiling は署名された maxFeePerGas で評価。
+  it('B5: gas コストが ceiling 超過 → throw (sign 後 send 前 → relay_error で standard へ)', async () => {
     const io = makeIo();
     await expect(
-      submitSelfHost(io, TARGET, DATA, { maxGasCostWei: 10n ** 15n }), // 1e15 < 3.6e15
+      submitSelfHost(io, TARGET, DATA, { maxGasCostWei: EXPECTED_COST - 1n }),
     ).rejects.toThrow('gas_price_too_high');
-    expect(io.signTx).not.toHaveBeenCalled();
-    expect(io.sendRawTransaction).not.toHaveBeenCalled();
+    expect(io.signTx).toHaveBeenCalledOnce(); // 署名はする (signed fee で判定)
+    expect(io.sendRawTransaction).not.toHaveBeenCalled(); // 送信しない
   });
 
   it('B5: gas コストが ceiling 以内 → 通常どおり broadcast', async () => {
     const io = makeIo();
     const res = await submitSelfHost(io, TARGET, DATA, {
-      maxGasCostWei: 10n ** 16n, // 1e16 > 3.6e15
+      maxGasCostWei: EXPECTED_COST,
     });
-    expect(res.taskId).toBe(SENT_HASH);
-    expect(io.getGasPrice).toHaveBeenCalledOnce();
+    expect(res.taskId).toBe(SIGNED_HASH);
     expect(io.sendRawTransaction).toHaveBeenCalledOnce();
   });
 
-  it('B5: ceiling 未設定 (opts なし) → getGasPrice を呼ばずスキップ', async () => {
+  it('B5: ceiling 未設定 (opts なし) → スキップして broadcast', async () => {
     const io = makeIo();
-    await submitSelfHost(io, TARGET, DATA);
-    expect(io.getGasPrice).not.toHaveBeenCalled();
+    const res = await submitSelfHost(io, TARGET, DATA);
+    expect(res.taskId).toBe(SIGNED_HASH);
+    expect(io.sendRawTransaction).toHaveBeenCalledOnce();
   });
 });
 
@@ -197,17 +238,31 @@ describe('classifySendError', () => {
 });
 
 describe('pollSelfHost', () => {
-  it('receipt success → {state:success, txHash}', async () => {
+  it('receipt success (hash 一致) → {state:success, txHash}', async () => {
     const r = await pollSelfHost(makeIo(), SIGNED_HASH);
     expect(r).toEqual({ state: 'success', txHash: SIGNED_HASH });
   });
 
-  it('receipt reverted → {state:reverted, txHash}', async () => {
+  it('receipt reverted (hash 一致) → {state:reverted, txHash}', async () => {
     const io = makeIo({
-      waitForReceipt: vi.fn(async () => ({ status: 'reverted' as const })),
+      waitForReceipt: vi.fn(async () => ({
+        status: 'reverted' as const,
+        transactionHash: SIGNED_HASH,
+      })),
     });
     const r = await pollSelfHost(io, SIGNED_HASH);
     expect(r).toEqual({ state: 'reverted', txHash: SIGNED_HASH });
+  });
+
+  it('receipt の hash が不一致 (replacement) → pending (P0・別 tx の結果を信用しない)', async () => {
+    const io = makeIo({
+      waitForReceipt: vi.fn(async () => ({
+        status: 'success' as const,
+        transactionHash: `0x${'99'.repeat(32)}` as Hex, // 別 tx
+      })),
+    });
+    const r = await pollSelfHost(io, SIGNED_HASH);
+    expect(r).toEqual({ state: 'pending', txHash: SIGNED_HASH });
   });
 
   it('timeout/throw → {state:pending, txHash} (二重支払い回避: error にしない)', async () => {

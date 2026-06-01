@@ -48,13 +48,23 @@ export type ForwarderRecoverDeps = {
     from: Address,
     nonce: Hex,
   ) => Promise<boolean>;
-  // (任意) 冪等性: 同一 (chainId,from,nonce) の重複 POST は再 broadcast せず pending。fail-open
-  // (KV 不確定/未設定は 'first')。資金の二重支払いは on-chain _authorizationStates が最終防壁。
+  // (任意) 冪等性: 同一 (chainId,from,nonce) を 1 回だけ claim。'duplicate' なら再 broadcast せず
+  // pending (記録済 txHash を同梱)。KV 設定済で応答不確定→duplicate(fail-safe)・未設定のみ first。
+  // 最終防壁は on-chain _authorizationStates。
   claimIdempotency?: (
     chainId: number,
     from: Address,
     nonce: Hex,
-  ) => Promise<'first' | 'duplicate'>;
+  ) => Promise<{ status: 'first' } | { status: 'duplicate'; txHash: Hex | null }>;
+  // (任意) broadcast 済 txHash を記録 (response-loss 後の重複 POST が explorer 追跡できるように)。
+  recordRelayHash?: (
+    chainId: number,
+    from: Address,
+    nonce: Hex,
+    txHash: Hex,
+  ) => Promise<void>;
+  // (任意) claim 解放。broadcast 前の relay_error 時に呼び false tombstone を防ぐ。
+  releaseIdempotency?: (chainId: number, from: Address, nonce: Hex) => Promise<void>;
   submit: (chainId: number, target: Address, data: Hex) => Promise<{ taskId: string }>;
   pollTask: (taskId: string) => Promise<RelayTaskOutcome>;
 };
@@ -129,13 +139,6 @@ export async function recoverViaForwarder(
     return rejected(429, 'rate_limited');
   }
 
-  // 日次グローバル予算 (Sybil circuit breaker)。超過なら submit せず reject (tx 未送信 → fallback 安全)。
-  if (deps.checkGasBudget) {
-    if (!(await deps.checkGasBudget(chainId))) {
-      return rejected(503, 'daily_budget_exceeded');
-    }
-  }
-
   // authorizationState 既使用 → pending (guaranteed-revert 回避 + 二重支払い防止)。
   // + 冪等性: 同一 authorization の重複 POST も pending (再 broadcast せず gas 浪費防止)。
   // nonce は両者共通 (forwarder commitment = EIP-3009 nonce)。
@@ -145,9 +148,27 @@ export async function recoverViaForwarder(
       return { kind: 'pending' };
     }
   }
+  let idemClaimed = false;
   if (deps.claimIdempotency) {
-    if ((await deps.claimIdempotency(chainId, params.from, nonce)) === 'duplicate') {
-      return { kind: 'pending' };
+    const claim = await deps.claimIdempotency(chainId, params.from, nonce);
+    if (claim.status === 'duplicate') {
+      return { kind: 'pending', txHash: claim.txHash ?? undefined };
+    }
+    idemClaimed = true;
+  }
+  const releaseClaim = async () => {
+    if (idemClaimed) await deps.releaseIdempotency?.(chainId, params.from, nonce);
+  };
+  const recordHash = async (txHash: Hex) => {
+    if (idemClaimed) await deps.recordRelayHash?.(chainId, params.from, nonce, txHash);
+  };
+
+  // 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
+  // (replay/duplicate が予算枠を消費する DoS を防ぐ・Codex P1)。超過は submit せず reject。
+  if (deps.checkGasBudget) {
+    if (!(await deps.checkGasBudget(chainId))) {
+      await releaseClaim();
+      return rejected(503, 'daily_budget_exceeded');
     }
   }
 
@@ -157,6 +178,7 @@ export async function recoverViaForwarder(
   try {
     taskId = (await deps.submit(chainId, forwarder, data)).taskId;
   } catch (e) {
+    await releaseClaim(); // broadcast 前失敗 → claim 解放
     return {
       kind: 'relay_error',
       detail: `submit_failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -165,8 +187,18 @@ export async function recoverViaForwarder(
 
   // broadcast 後は success/reverted/pending のみ (二重支払い回避は pollTask の責務)。
   const outcome = await deps.pollTask(taskId);
-  if (outcome.state === 'success') return { kind: 'success', txHash: outcome.txHash };
-  if (outcome.state === 'reverted') return { kind: 'reverted', txHash: outcome.txHash };
-  if (outcome.state === 'pending') return { kind: 'pending', txHash: outcome.txHash };
+  if (outcome.state === 'success') {
+    await recordHash(outcome.txHash);
+    return { kind: 'success', txHash: outcome.txHash };
+  }
+  if (outcome.state === 'reverted') {
+    if (outcome.txHash) await recordHash(outcome.txHash);
+    return { kind: 'reverted', txHash: outcome.txHash };
+  }
+  if (outcome.state === 'pending') {
+    if (outcome.txHash) await recordHash(outcome.txHash);
+    return { kind: 'pending', txHash: outcome.txHash };
+  }
+  await releaseClaim();
   return { kind: 'relay_error', detail: outcome.detail };
 }

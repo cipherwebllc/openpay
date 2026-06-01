@@ -190,25 +190,57 @@ describe('recoverViaForwarder', () => {
     expect(deps.submit).toHaveBeenCalledOnce();
   });
 
-  it('冪等性: claimIdempotency duplicate → pending (submit せず)', async () => {
+  it('B4: 予算チェックは重複ガードの後 (claim 済で予算超過 → release・Codex P1)', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      checkGasBudget: vi.fn(async () => false),
+      releaseIdempotency,
+    });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res).toMatchObject({ kind: 'rejected', reason: 'daily_budget_exceeded' });
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('冪等性: duplicate → pending (記録済 txHash を同梱・submit せず)', async () => {
+    const dupHash = `0x${'ef'.repeat(32)}` as Hex;
     const claimIdempotency = vi.fn<
-      (c: number, from: Address, nonce: Hex) => Promise<'duplicate'>
-    >(async () => 'duplicate');
+      (c: number, from: Address, nonce: Hex) => Promise<{ status: 'duplicate'; txHash: Hex }>
+    >(async () => ({ status: 'duplicate', txHash: dupHash }));
     const deps = makeDeps({ claimIdempotency });
     const res = await recoverViaForwarder(await makeInput(), deps);
-    expect(res.kind).toBe('pending');
+    expect(res).toMatchObject({ kind: 'pending', txHash: dupHash });
     expect(deps.submit).not.toHaveBeenCalled();
-    // claim には commitment nonce (= EIP-3009 nonce) が渡る。
     const [, from, nonce] = claimIdempotency.mock.calls[0];
     expect(getAddress(from)).toBe(getAddress(account.address));
     expect(nonce).toMatch(/^0x[0-9a-f]{64}$/i);
   });
 
-  it('冪等性: claimIdempotency first → 通常どおり submit → success', async () => {
-    const deps = makeDeps({ claimIdempotency: vi.fn(async () => 'first' as const) });
+  it('冪等性: first → submit → success で recordRelayHash 記録', async () => {
+    const recordRelayHash = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      recordRelayHash,
+    });
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res.kind).toBe('success');
     expect(deps.submit).toHaveBeenCalledOnce();
+    expect(recordRelayHash).toHaveBeenCalledOnce();
+  });
+
+  it('冪等性: submit throw (broadcast 前) → relay_error + claim release', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency,
+      submit: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res.kind).toBe('relay_error');
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
   });
 
   it('poll reverted → reverted', async () => {

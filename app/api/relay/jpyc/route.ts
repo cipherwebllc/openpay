@@ -36,8 +36,10 @@ import {
   kvLrange,
   kvLtrim,
   kvSet,
+  kvGet,
   kvIncr,
   kvExpire,
+  kvDel,
   isKvConfigured,
 } from '@/lib/kv';
 import { logger } from '@/lib/logger';
@@ -58,7 +60,10 @@ import {
   recoverViaForwarder,
   type ForwarderRecoverDeps,
 } from '@/lib/relay/forwarderRecover';
-import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
+import {
+  buildForwarderNonce,
+  type ForwarderSettleParams,
+} from '@/lib/relay/forwarderIntent';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { env } from '@/lib/env';
 
@@ -199,13 +204,13 @@ function selfHostIoFor(chainId: number): SelfHostIo {
     getBalance: () => publicClient.getBalance({ address: account.address }),
     estimateGas: (target, data) =>
       publicClient.estimateGas({ account, to: target, data }),
-    getGasPrice: () => publicClient.getGasPrice(),
     getPendingNonce: () =>
       publicClient.getTransactionCount({
         address: account.address,
         blockTag: 'pending',
       }),
     // pre-sign: prepare (fees/type を RPC で補完) → sign → keccak256 で txHash 確定。
+    // maxFeePerGas は B5 ceiling 判定用に「実際に署名された fee」を返す (legacy chain は gasPrice)。
     signTx: async (target, data, gas, nonce) => {
       const request = await walletClient.prepareTransactionRequest({
         account,
@@ -216,7 +221,9 @@ function selfHostIoFor(chainId: number): SelfHostIo {
         nonce,
       });
       const raw = await walletClient.signTransaction(request);
-      return { raw, hash: keccak256(raw) };
+      const maxFeePerGas =
+        request.maxFeePerGas ?? request.gasPrice ?? 0n;
+      return { raw, hash: keccak256(raw), maxFeePerGas };
     },
     sendRawTransaction: (raw) =>
       publicClient.sendRawTransaction({ serializedTransaction: raw }),
@@ -226,7 +233,8 @@ function selfHostIoFor(chainId: number): SelfHostIo {
         confirmations: 1,
         timeout: RELAYER_RECEIPT_TIMEOUT_MS,
       });
-      return { status: r.status };
+      // transactionHash は replacement 検出用 (pollSelfHost が待った hash と照合)。
+      return { status: r.status, transactionHash: r.transactionHash };
     },
   };
 }
@@ -249,17 +257,58 @@ async function checkRateLimit(keys: string[]): Promise<boolean> {
   return true;
 }
 
-// 冪等性: 同一 (chainId,from,nonce) を SET NX で1回だけ claim。null = 既存(重複) → 'duplicate'。
-// 'OK' = claimed → 'first'。KV error/unconfigured は fail-open ('first') — 資金の二重支払いは
-// on-chain _authorizationStates が最終防壁で、ここは重複 broadcast の gas 浪費を減らす最適化。
+const idemKey = (chainId: number, from: Address, nonce: Hex) =>
+  `relay:idem:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
+const IDEM_TTL_SEC = 1800;
+
+// 冪等性 claim (fail-SAFE)。SET NX:
+//  - 'OK' (新規) → first (処理続行)。
+//  - null (既存=重複 POST) → duplicate。記録済 txHash があれば返す (response-loss 後の explorer 追跡)。
+//  - KV error/timeout (応答不確定・KV は configured) → SET が通った可能性 → duplicate (二重 submit 回避)。
+//  - KV 未設定 → idempotency 無効 → first (可用性優先。最終防壁は on-chain _authorizationStates)。
 async function claimIdempotency(
   chainId: number,
   from: Address,
   nonce: Hex,
-): Promise<'first' | 'duplicate'> {
-  const key = `relay:idem:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
-  const r = await kvSet(key, '1', { nx: true, ttlSec: 1800 });
-  return r.ok && r.value === null ? 'duplicate' : 'first';
+): Promise<{ status: 'first' } | { status: 'duplicate'; txHash: Hex | null }> {
+  if (!isKvConfigured()) return { status: 'first' };
+  const key = idemKey(chainId, from, nonce);
+  const r = await kvSet(key, '1', { nx: true, ttlSec: IDEM_TTL_SEC });
+  if (r.ok) {
+    if (r.value === null) {
+      // 既存。記録済 hash を読んで同梱 (なければ null)。
+      const g = await kvGet(key);
+      const v = g.ok ? g.value : null;
+      const txHash =
+        v && v.startsWith('0x') && v.length === 66 ? (v as Hex) : null;
+      return { status: 'duplicate', txHash };
+    }
+    return { status: 'first' };
+  }
+  return { status: 'duplicate', txHash: null }; // fail-safe
+}
+
+// claim 済 authorization に broadcast 済 txHash を上書き記録 (NX なし)。重複 POST が
+// explorer 追跡できるように。TTL は claim と同じ。
+async function recordRelayHash(
+  chainId: number,
+  from: Address,
+  nonce: Hex,
+  txHash: Hex,
+): Promise<void> {
+  if (!isKvConfigured()) return;
+  await kvSet(idemKey(chainId, from, nonce), txHash, { ttlSec: IDEM_TTL_SEC });
+}
+
+// claim 解放。broadcast "前" の失敗 (relay_error) でのみ呼ぶ (tx 未送信なので安全)。正当な
+// 再試行を 30 分 (IDEM_TTL) 待たせない (false tombstone 防止)。
+async function releaseIdempotency(
+  chainId: number,
+  from: Address,
+  nonce: Hex,
+): Promise<void> {
+  if (!isKvConfigured()) return;
+  await kvDel(idemKey(chainId, from, nonce));
 }
 
 // B4: 日次グローバル予算 (Sybil circuit breaker)。INCR relay:budget:{chainId}:{YYYYMMDD} し、
@@ -274,7 +323,9 @@ async function checkGasBudget(chainId: number): Promise<boolean> {
     logger.warn('relay gas budget INCR failed (fail-open)', { chainId });
     return true;
   }
-  if (r.value === 1) await kvExpire(key, 2 * 24 * 3600); // 初回のみ自然失効を設定
+  // EXPIRE は毎回設定する (初回 EXPIRE が応答喪失すると TTL 無しの stale key が永続化するため・
+  // Codex P2)。EXPIRE は冪等なので再設定は無害。
+  await kvExpire(key, 2 * 24 * 3600);
   return r.value <= RELAY_DAILY_TX_CAP;
 }
 
@@ -365,6 +416,23 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
   const chainId = raw.chainId;
+
+  // B5: mainnet (polygon) を self-host で relay する場合、gas-cost ceiling 未設定は赤字リスク。
+  // silent disable を避け mainnet のみ拒否する (testnet は ceiling=0 で運用可・Codex P1)。
+  if (
+    PROVIDER === 'self-host' &&
+    chainId === polygon.id &&
+    RELAY_MAX_GAS_COST_WEI === 0n
+  ) {
+    logger.error('RELAY_MAX_GAS_COST_WEI unset on mainnet self-host (B5 必須)', {
+      chainId,
+    });
+    return NextResponse.json(
+      { ok: false, error: 'gas_ceiling_required' },
+      { status: 503 },
+    );
+  }
+
   const ipPrefix = anonymizeIp(
     req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
   );
@@ -443,15 +511,24 @@ async function handleFree(
     checkRateLimit,
     checkGasBudget,
     claimIdempotency,
+    recordRelayHash,
+    releaseIdempotency,
   };
   let deps: RelayDeps;
   if (PROVIDER === 'self-host') {
     const io = supported ? selfHostIoFor(chainId) : null;
+    const jpyc = jpycAddressFor(chainId);
+    // collision/fatal 時に「この authorization が執行済か」を再確認し pending/fallback を判断 (P0/P1)。
+    const isAuthorizationUsed =
+      jpyc ? () => readAuthorizationUsed(chainId, jpyc, auth.from, auth.nonce) : undefined;
     deps = {
       ...common,
       checkAuthorizationUsed: readAuthorizationUsed,
       submitSponsoredCall: (_c, target, data) =>
-        submitSelfHost(io!, target, data, { maxGasCostWei: RELAY_MAX_GAS_COST_WEI }),
+        submitSelfHost(io!, target, data, {
+          maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
+          isAuthorizationUsed,
+        }),
       pollTask: (taskId) => pollSelfHost(io!, taskId),
     };
   } else {
@@ -503,6 +580,19 @@ async function handleRecover(
     intentSalt: raw.intentSalt as Hex,
   };
   const io = selfHostIoFor(chainId);
+  // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
+  const jpyc = jpycAddressFor(chainId);
+  const forwarder = forwarderFor(chainId);
+  const isAuthorizationUsed =
+    jpyc && forwarder
+      ? () =>
+          readAuthorizationUsed(
+            chainId,
+            jpyc,
+            params.from,
+            buildForwarderNonce(params, chainId, forwarder),
+          )
+      : undefined;
   const deps: ForwarderRecoverDeps = {
     nowSec: () => Math.floor(Date.now() / 1000),
     expectedFeeValue: FLAT_FEE_VALUE,
@@ -516,8 +606,13 @@ async function handleRecover(
     checkGasBudget,
     checkAuthorizationUsed: readAuthorizationUsed,
     claimIdempotency,
+    recordRelayHash,
+    releaseIdempotency,
     submit: (_c, target, data) =>
-      submitSelfHost(io, target, data, { maxGasCostWei: RELAY_MAX_GAS_COST_WEI }),
+      submitSelfHost(io, target, data, {
+        maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
+        isAuthorizationUsed,
+      }),
     pollTask: (taskId) => pollSelfHost(io, taskId),
   };
   const result = await recoverViaForwarder(

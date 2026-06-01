@@ -34,23 +34,36 @@ export type SelfHostIo = {
   getBalance: () => Promise<bigint>;
   // tx の gas 見積。revert する tx はここで throw → broadcast 前なので relay_error。
   estimateGas: (target: Address, data: Hex) => Promise<bigint>;
-  // 現在の gas 価格 (wei)。B5 の赤字防止 (gas-cost ceiling) 判定に使う。
-  getGasPrice: () => Promise<bigint>;
   // pending を含む次の nonce。並行 submit の衝突検知/リトライに使う (B3)。
   getPendingNonce: () => Promise<number>;
-  // pre-sign: raw tx + その hash を返す。broadcast "前" に txHash を確定させることで、
-  // 送信応答が喪失 (timeout) しても hash を poll でき、relay_error→standard fallback による
-  // 二重送金を避けられる (B3 の肝)。
+  // pre-sign: raw tx + その hash + 署名された maxFeePerGas を返す。broadcast "前" に txHash を
+  // 確定させることで送信応答が喪失 (timeout) しても hash を poll でき、relay_error→standard
+  // fallback による二重送金を避けられる (B3 の肝)。maxFeePerGas は B5 赤字判定 (実際に署名された
+  // fee で gas-cost ceiling を評価する) に使う。
   signTx: (
     target: Address,
     data: Hex,
     gas: bigint,
     nonce: number,
-  ) => Promise<{ raw: Hex; hash: Hex }>;
-  // pre-signed raw tx を broadcast し txHash を返す。送信エラーは throw (submitSelfHost が分類)。
+  ) => Promise<{ raw: Hex; hash: Hex; maxFeePerGas: bigint }>;
+  // pre-signed raw tx を broadcast。送信エラーは throw (submitSelfHost が分類)。返り値 hash は
+  // 信用せず、常に pre-signed の canonical hash を poll する (P2)。
   sendRawTransaction: (raw: Hex) => Promise<Hex>;
   // txHash の receipt を confirmations>=1 で待つ。timeout/断は throw (pollSelfHost が pending 化)。
-  waitForReceipt: (hash: Hex) => Promise<{ status: 'success' | 'reverted' }>;
+  // transactionHash は replacement 検出用 (待っていた hash と異なれば別 tx の置換)。
+  waitForReceipt: (
+    hash: Hex,
+  ) => Promise<{ status: 'success' | 'reverted'; transactionHash: Hex }>;
+};
+
+// submit に渡すオプション。
+//  - maxGasCostWei: B5 gas-cost ceiling (赤字防止)。0/undefined はスキップ。
+//  - isAuthorizationUsed: 「この authorization が既に on-chain で執行済か」を返す callback。
+//    送信エラー時 (collision/fatal) に再確認し、執行済なら fallback せず pending に倒すための
+//    「serialized owner の証明」(Codex P0/P1)。未提供なら collision は retry、fatal は relay_error。
+export type SubmitSelfHostOpts = {
+  maxGasCostWei?: bigint;
+  isAuthorizationUsed?: () => Promise<boolean>;
 };
 
 // 送信エラーの分類 (B3)。安全側 default は 'uncertain' (broadcast したか不明 → hash を poll → pending)。
@@ -94,15 +107,15 @@ export function classifySendError(message: string): SendErrorClass {
   return 'uncertain';
 }
 
-// submit: 残高チェック → gas 見積 (+20%・cap) → pending nonce 取得 → pre-sign → sendRaw。
-// 返り値 taskId は (pre-signed) txHash。broadcast "前" の明確な失敗 (低残高 / 見積 revert /
-// node 拒否 / 全リトライ衝突=未送信) のみ throw し、コアに relay_error を返させて standard へ
-// 安全に fallback させる。送信応答が不確定なら hash を返し、pollSelfHost で pending 化する。
+// submit: 残高チェック → gas 見積 (+20%・cap) → pending nonce 取得 → pre-sign (B5 ceiling) → sendRaw。
+// 返り値 taskId は常に pre-signed の canonical txHash (送信応答値は信用しない・P2)。
+// 二重支払い防止の原則: 「自 authorization が執行されていない」と証明できる場合のみ throw=relay_error
+// (standard へ安全に fallback)。証明できない不確定は hash を返し pollSelfHost で pending 化する。
 export async function submitSelfHost(
   io: SelfHostIo,
   target: Address,
   data: Hex,
-  opts: { maxGasCostWei?: bigint } = {},
+  opts: SubmitSelfHostOpts = {},
 ): Promise<{ taskId: string }> {
   const balance = await io.getBalance();
   if (balance < MIN_RELAYER_BALANCE_WEI) {
@@ -114,50 +127,59 @@ export async function submitSelfHost(
   const buffered = estimated + estimated / 5n; // +20%
   const gas = buffered > RELAYER_GAS_CAP ? RELAYER_GAS_CAP : buffered;
 
-  // B5 赤字防止: gas-cost ceiling。回収する固定 fee を超える native コストになる高騰時は throw し、
-  // broadcast 前なので relay_error → client は standard へ fallback (顧客が自分で gas を払う)。
-  // ceiling 未設定 (0/undefined) はスキップ (testnet 既定)。
-  if (opts.maxGasCostWei && opts.maxGasCostWei > 0n) {
-    const gasPrice = await io.getGasPrice();
-    const cost = gas * gasPrice;
-    if (cost > opts.maxGasCostWei) {
-      throw new Error(
-        `gas_price_too_high: cost=${cost} cap=${opts.maxGasCostWei}`,
-      );
-    }
-  }
+  // 既に authorization が執行済か (collision/fatal 時に fallback を抑止し pending に倒すため)。
+  const authUsed = async () =>
+    opts.isAuthorizationUsed ? opts.isAuthorizationUsed() : false;
 
   // nonce 衝突は fresh nonce で再試行。各試行は pre-sign (hash 確定) → sendRaw。
-  let lastError: unknown;
+  let lastHash: Hex | undefined;
   for (let attempt = 0; attempt <= RELAYER_NONCE_RETRIES; attempt++) {
     const nonce = await io.getPendingNonce();
-    const { raw, hash } = await io.signTx(target, data, gas, nonce);
-    try {
-      const sent = await io.sendRawTransaction(raw);
-      return { taskId: sent };
-    } catch (e) {
-      lastError = e;
-      const cls = classifySendError(e instanceof Error ? e.message : String(e));
-      if (cls === 'collision') {
-        // 別 tx がこの nonce を消費。自 hash は未 broadcast → fresh nonce で再試行 (二重送金にならない)。
-        continue;
+    const { raw, hash, maxFeePerGas } = await io.signTx(target, data, gas, nonce);
+    lastHash = hash;
+
+    // B5 赤字防止: 実際に署名された maxFeePerGas で gas-cost ceiling を評価。超過は send 前なので
+    // throw → relay_error → client は standard へ fallback (顧客が自分で gas を払う)。未設定はスキップ。
+    if (opts.maxGasCostWei && opts.maxGasCostWei > 0n) {
+      const cost = gas * maxFeePerGas;
+      if (cost > opts.maxGasCostWei) {
+        throw new Error(
+          `gas_price_too_high: cost=${cost} cap=${opts.maxGasCostWei}`,
+        );
       }
+    }
+
+    try {
+      await io.sendRawTransaction(raw);
+      // 送信受理。node 返却 hash は信用せず canonical pre-signed hash を poll (P2)。
+      return { taskId: hash };
+    } catch (e) {
+      const cls = classifySendError(e instanceof Error ? e.message : String(e));
       if (cls === 'known') {
-        // 自 tx は既に mempool。pre-signed hash を返し poll させる。
+        // 自 tx は既に mempool。canonical hash を poll。
         return { taskId: hash };
       }
+      if (cls === 'collision') {
+        // 自 tx (この nonce) は submission で拒否され mempool 未到達。ただし「この authorization が
+        // 既に別 tx で執行済」可能性を排除するため authState を再確認 (P0)。執行済なら再試行/
+        // fallback せず pending に倒す。未使用なら fresh nonce で再試行 (別 authorization が nonce を
+        // 取った通常ケース)。
+        if (await authUsed()) return { taskId: hash };
+        continue;
+      }
       if (cls === 'fatal') {
-        // node が明確に拒否 (mempool 未到達) → throw して relay_error で fallback 可。
+        // node の明確な検証拒否 (insufficient funds 等) は mempool 未到達。ただし誤分類で実は
+        // broadcast 済の可能性に備え authState を確認 (P1): 執行済→pending / 未使用→relay_error。
+        if (await authUsed()) return { taskId: hash };
         throw e;
       }
-      // uncertain: broadcast したか不明。再試行 / fallback せず、pre-signed hash を poll → timeout で pending。
+      // uncertain: broadcast したか不明。再試行 / fallback せず canonical hash を poll → timeout で pending。
       return { taskId: hash };
     }
   }
-  // 全リトライが collision = 自 tx は一度も broadcast されていない → throw して fallback 安全。
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('nonce_collision_exhausted');
+  // 全リトライが collision (= 各試行は mempool 未到達)。証明なしに relay_error→fallback すると
+  // 万一の二重送金リスクがあるため、保守的に canonical hash を poll → pending に倒す (P0)。
+  return { taskId: (lastHash ?? `0x${'0'.repeat(64)}`) as Hex };
 }
 
 // poll: receipt を待つ。timeout/RPC 断は broadcast 済なので 'pending' (二重支払い回避)。
@@ -168,6 +190,12 @@ export async function pollSelfHost(
   const hash = taskId as Hex;
   try {
     const receipt = await io.waitForReceipt(hash);
+    // P0: replacement 検出。viem は同一 nonce の置換 tx の receipt を返しうる。受領 receipt が
+    // 待っていた hash と異なる (= 別 tx が置換) 場合、その status を自 authorization の結果として
+    // 信用しない → pending (自 tx の最終状態は不明)。
+    if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
+      return { state: 'pending', txHash: hash };
+    }
     return receipt.status === 'success'
       ? { state: 'success', txHash: hash }
       : { state: 'reverted', txHash: hash };

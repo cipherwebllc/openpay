@@ -199,29 +199,68 @@ describe('relayJpycAuthorization', () => {
     expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
   });
 
-  it('冪等性: claimIdempotency duplicate → pending (submit せず)', async () => {
+  it('B4: 予算チェックは重複ガードの後 (claim 済で予算超過 → release される・Codex P1)', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      checkGasBudget: vi.fn(async () => false),
+      releaseIdempotency,
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res).toMatchObject({ kind: 'rejected', reason: 'daily_budget_exceeded' });
+    expect(releaseIdempotency).toHaveBeenCalledOnce(); // false tombstone 防止
+    expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+  });
+
+  it('冪等性: duplicate → pending (記録済 txHash を同梱・submit せず)', async () => {
+    const dupHash = `0x${'cd'.repeat(32)}` as Hex;
     const claimIdempotency = vi.fn<
-      (c: number, from: Address, nonce: Hex) => Promise<'duplicate'>
-    >(async () => 'duplicate');
+      (c: number, from: Address, nonce: Hex) => Promise<{ status: 'duplicate'; txHash: Hex }>
+    >(async () => ({ status: 'duplicate', txHash: dupHash }));
     const deps = makeDeps({ claimIdempotency });
     const res = await relayJpycAuthorization(await makeInput(), deps);
-    expect(res.kind).toBe('pending');
+    expect(res).toMatchObject({ kind: 'pending', txHash: dupHash });
     expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
-    // nonce が claim に渡る (authorizationState と同一空間)。
     const [, from, nonce] = claimIdempotency.mock.calls[0];
     expect(getAddress(from)).toBe(getAddress(account.address));
     expect(nonce).toMatch(/^0x[0-9a-f]{64}$/i);
   });
 
-  it('冪等性: claimIdempotency first → 通常どおり submit → success', async () => {
-    const deps = makeDeps({ claimIdempotency: vi.fn(async () => 'first' as const) });
+  it('冪等性: first → submit → success で recordRelayHash 記録', async () => {
+    const recordRelayHash = vi.fn<
+      (c: number, from: Address, nonce: Hex, txHash: Hex) => Promise<void>
+    >(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      recordRelayHash,
+    });
     const res = await relayJpycAuthorization(await makeInput(), deps);
     expect(res.kind).toBe('success');
     expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
+    expect(recordRelayHash).toHaveBeenCalledOnce();
+    const [, , , txHash] = recordRelayHash.mock.calls[0];
+    expect(txHash).toMatch(/^0x[0-9a-f]{64}$/i);
   });
 
-  it('poll error → relay_error', async () => {
+  it('冪等性: submit throw (broadcast 前) → relay_error + claim release', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
     const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency,
+      submitSponsoredCall: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('relay_error');
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
+  });
+
+  it('poll error → relay_error + claim release', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency,
       pollTask: vi.fn(async () => ({
         state: 'error' as const,
         detail: 'cancelled',
@@ -229,5 +268,6 @@ describe('relayJpycAuthorization', () => {
     });
     const res = await relayJpycAuthorization(await makeInput(), deps);
     expect(res).toMatchObject({ kind: 'relay_error' });
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
   });
 });

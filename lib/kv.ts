@@ -115,3 +115,8 @@ export function kvSet(
 export function kvExpire(key: string, ttlSec: number): Promise<KvResult<number>> {
   return call<number>(['EXPIRE', key, String(ttlSec)]);
 }
+
+// キー削除 (idempotency claim の解放等)。削除数を返す (無ければ 0)。
+export function kvDel(key: string): Promise<KvResult<number>> {
+  return call<number>(['DEL', key]);
+}

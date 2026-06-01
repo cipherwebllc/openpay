@@ -56,15 +56,30 @@ export type RelayDeps = {
     from: Address,
     nonce: Hex,
   ) => Promise<boolean>;
-  // (任意) 冪等性: 同一 (chainId,from,nonce) の先行 submit があれば 'duplicate'。重複 POST
-  // (network retry / double-click) で二重 broadcast (gas 浪費) しないための最適化。'duplicate'
-  // なら submit せず pending。fail-open: KV 不確定/未設定は 'first' (proceed)。資金の二重支払いは
-  // on-chain _authorizationStates が最終防壁なので、ここは確定的重複のみ弾けば足りる。
+  // (任意) 冪等性: 同一 (chainId,from,nonce) を 1 回だけ claim。重複 POST (network retry /
+  // double-click) で二重 broadcast しないための保護。'duplicate' なら submit せず pending を返す
+  // (txHash が記録済なら explorer 追跡用に同梱)。KV 設定済で応答不確定なら duplicate に倒す
+  // (fail-safe)・KV 未設定のみ first。最終防壁は on-chain _authorizationStates。
   claimIdempotency?: (
     chainId: number,
     from: Address,
     nonce: Hex,
-  ) => Promise<'first' | 'duplicate'>;
+  ) => Promise<{ status: 'first' } | { status: 'duplicate'; txHash: Hex | null }>;
+  // (任意) claim 済 authorization に broadcast 済 txHash を記録 (response-loss 後の重複 POST が
+  // explorer で追跡できるように)。success/reverted/pending で hash が判れば呼ぶ。
+  recordRelayHash?: (
+    chainId: number,
+    from: Address,
+    nonce: Hex,
+    txHash: Hex,
+  ) => Promise<void>;
+  // (任意) claim を解放。broadcast "前" の失敗 (relay_error) 時に呼び、正当な再試行を idem TTL
+  // (30分) 待たせない (false tombstone 防止)。tx は出ていないので解放は安全。
+  releaseIdempotency?: (
+    chainId: number,
+    from: Address,
+    nonce: Hex,
+  ) => Promise<void>;
   // Gelato sponsoredCall (REST)。taskId を返す。
   submitSponsoredCall: (
     chainId: number,
@@ -139,14 +154,6 @@ export async function relayJpycAuthorization(
     return { kind: 'rejected', httpStatus: 429, reason: 'rate_limited' };
   }
 
-  // 5.4 日次グローバル予算 (Sybil circuit breaker)。超過なら submit せず reject。tx 未送信なので
-  // client は standard へ安全に fallback できる (二重支払いリスク無し)。
-  if (deps.checkGasBudget) {
-    if (!(await deps.checkGasBudget(chainId))) {
-      return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
-    }
-  }
-
   // 5.5 authorization 既使用チェック (任意)。使用済なら submit は確実に revert する。
   // ここで pending を返すことで gas を浪費せず、かつ「既に処理済かもしれない決済」を
   // standard へ fallback させない (二重支払い防止)。
@@ -160,10 +167,32 @@ export async function relayJpycAuthorization(
     if (used) return { kind: 'pending' };
   }
 
-  // 5.6 冪等性: 同一 authorization の重複 POST は再 broadcast せず pending (gas 浪費防止)。
+  // 5.6 冪等性: 同一 authorization の重複 POST は再 broadcast せず pending (記録済 hash を同梱)。
+  let idemClaimed = false;
   if (deps.claimIdempotency) {
     const claim = await deps.claimIdempotency(chainId, auth.from, auth.nonce);
-    if (claim === 'duplicate') return { kind: 'pending' };
+    if (claim.status === 'duplicate') {
+      return { kind: 'pending', txHash: claim.txHash ?? undefined };
+    }
+    idemClaimed = true;
+  }
+  const releaseClaim = async () => {
+    if (idemClaimed) await deps.releaseIdempotency?.(chainId, auth.from, auth.nonce);
+  };
+  const recordHash = async (txHash: Hex) => {
+    if (idemClaimed) {
+      await deps.recordRelayHash?.(chainId, auth.from, auth.nonce, txHash);
+    }
+  };
+
+  // 5.7 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
+  // (replay/duplicate が予算枠を消費して正当な決済を枯渇させる DoS を防ぐ・Codex P1)。超過は
+  // submit せず reject (tx 未送信 → standard へ安全に fallback)。claim 済なら解放 (false tombstone 防止)。
+  if (deps.checkGasBudget) {
+    if (!(await deps.checkGasBudget(chainId))) {
+      await releaseClaim();
+      return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
+    }
   }
 
   // 6. submit + poll。submit が throw = broadcast 前のエラー → relay_error (fallback 可)。
@@ -173,6 +202,7 @@ export async function relayJpycAuthorization(
     const submitted = await deps.submitSponsoredCall(chainId, jpyc, data);
     taskId = submitted.taskId;
   } catch (e) {
+    await releaseClaim(); // broadcast 前失敗 → claim 解放 (正当な再試行を待たせない)
     return {
       kind: 'relay_error',
       detail: `submit_failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -182,16 +212,20 @@ export async function relayJpycAuthorization(
   // ここから先は broadcast 済。error は返さず success/reverted/pending のいずれか。
   const outcome = await deps.pollTask(taskId);
   if (outcome.state === 'success') {
+    await recordHash(outcome.txHash);
     return { kind: 'success', txHash: outcome.txHash };
   }
   if (outcome.state === 'reverted') {
+    if (outcome.txHash) await recordHash(outcome.txHash);
     return { kind: 'reverted', txHash: outcome.txHash };
   }
   if (outcome.state === 'pending') {
+    if (outcome.txHash) await recordHash(outcome.txHash);
     return { kind: 'pending', txHash: outcome.txHash };
   }
   // poll 'error': provider 依存。Gelato は taskId が broadcast 前に返るので 'error'
   // (Cancelled/NotFound) = 未送信 → relay_error で fallback 可。self-host の pollReceipt は
   // broadcast 後なので 'error' を返さず 'pending' に倒す (二重支払い回避は poll 側の責務)。
+  await releaseClaim();
   return { kind: 'relay_error', detail: outcome.detail };
 }
