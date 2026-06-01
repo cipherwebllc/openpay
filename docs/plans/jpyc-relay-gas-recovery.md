@@ -86,9 +86,11 @@ nonce = keccak256(abi.encode(
 
 最小・**immutable**・owner なし・upgrade なし（audit 面積最小化）。
 - `constructor(immutable token, immutable feeReceiver)`。feeReceiver 変更は**新 forwarder を deploy**。
-- `settle(from, merchant, merchantValue, feeReceiver_, feeValue, validAfter, validBefore, intentSalt, v, r, s)`:
-  1. zero-address / value==0 / merchantValue==0 / feeValue==0 ガード、`feeReceiver_ == feeReceiver` 強制。
-  2. `nonce = keccak256(...§2...)` を再計算。
+- `settle(from, merchant, merchantValue, feeValue, validAfter, validBefore, intentSalt, v, r, s)`:
+  (実装済 — `feeReceiver` は immutable なので settle 引数に取らず内部の immutable 値を使う。
+  client は deploy 済 forwarder の `feeReceiver()` を読んで nonce commit に含める。)
+  1. zero-address / value==0 / merchantValue==0 / feeValue==0 / **intentSalt==0** / merchant==feeReceiver ガード。
+  2. `nonce = keccak256(...§2...)` を再計算 (内部 immutable feeReceiver + block.chainid + address(this) を使用)。
   3. `value = merchantValue + feeValue`。
   4. `token.receiveWithAuthorization(from, address(this), value, validAfter, validBefore, nonce, v,r,s)`
      （msg.sender == to == forwarder ✓）。

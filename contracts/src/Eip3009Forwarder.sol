@@ -56,6 +56,7 @@ contract Eip3009Forwarder is ReentrancyGuard {
 
     error ZeroAddress();
     error ZeroValue();
+    error ZeroSalt();
     error MerchantIsFeeReceiver();
 
     constructor(IERC20 token_, address feeReceiver_) {
@@ -91,6 +92,9 @@ contract Eip3009Forwarder is ReentrancyGuard {
     ) external nonReentrant {
         if (from == address(0) || merchant == address(0)) revert ZeroAddress();
         if (merchantValue == 0 || feeValue == 0) revert ZeroValue();
+        // intentSalt=0 は決定的 nonce になり同一決済で衝突する footgun → 明示禁止
+        // (一意性は client/server がランダム生成する責務だが、0 は契約でも弾く)。
+        if (intentSalt == bytes32(0)) revert ZeroSalt();
         // 店舗 == 回収先 は会計が崩れる (店舗が自分のガスを回収する形) ため明示禁止。
         if (merchant == feeReceiver) revert MerchantIsFeeReceiver();
 

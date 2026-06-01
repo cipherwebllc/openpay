@@ -214,8 +214,49 @@ contract Eip3009ForwarderTest is Test {
         uint256 fv = 3 ether;
         bytes32 salt = keccak256("sft");
         (uint8 v, bytes32 r, bytes32 s) = _sign(merchant, mv, fv, salt);
+        bytes32 nonce = _commitNonce(merchant, mv, fv, salt);
         // receive は成功して forwarder に着金するが、safeTransfer が false を弾いて全 revert。
         vm.expectRevert();
         forwarder.settle(customer, merchant, mv, fv, validAfter, validBefore, salt, v, r, s);
+        // 全 revert を確認: 残高変化なし + authorization 未消費 (= 再試行可能)。
+        assertEq(token.balanceOf(merchant), 0, "merchant unchanged");
+        assertEq(token.balanceOf(feeReceiver), 0, "feeReceiver unchanged");
+        assertEq(token.balanceOf(customer), 1_000_000 ether, "customer unchanged");
+        assertFalse(token.authorizationState(customer, nonce), "nonce not consumed");
+    }
+
+    // --- 追加 guards / token プロパティ (Codex code-review 反映) -----------
+
+    function test_settle_revertsZeroSalt() public {
+        uint256 mv = 1000 ether;
+        uint256 fv = 3 ether;
+        (uint8 v, bytes32 r, bytes32 s) = _sign(merchant, mv, fv, bytes32(0));
+        vm.expectRevert(Eip3009Forwarder.ZeroSalt.selector);
+        forwarder.settle(customer, merchant, mv, fv, validAfter, validBefore, bytes32(0), v, r, s);
+    }
+
+    function test_settle_revertsWhenExpired() public {
+        validBefore = block.timestamp + 10;
+        uint256 mv = 1000 ether;
+        uint256 fv = 3 ether;
+        bytes32 salt = keccak256("exp");
+        (uint8 v, bytes32 r, bytes32 s) = _sign(merchant, mv, fv, salt);
+        vm.warp(block.timestamp + 20); // validBefore を過ぎる
+        vm.expectRevert(MockEip3009Token.Expired.selector);
+        forwarder.settle(customer, merchant, mv, fv, validAfter, validBefore, salt, v, r, s);
+    }
+
+    // forwarder が依存する token の payee ガード (msg.sender==to) を直接確認。
+    function test_token_receiveWithAuthorization_rejectsNonPayee() public {
+        uint256 mv = 100 ether;
+        uint256 fv = 1 ether;
+        bytes32 salt = keccak256("payee");
+        (uint8 v, bytes32 r, bytes32 s) = _sign(merchant, mv, fv, salt);
+        bytes32 nonce = _commitNonce(merchant, mv, fv, salt);
+        // 呼び出し元 (この test 契約) != to (forwarder) → CallerNotPayee。
+        vm.expectRevert(MockEip3009Token.CallerNotPayee.selector);
+        token.receiveWithAuthorization(
+            customer, address(forwarder), mv + fv, validAfter, validBefore, nonce, v, r, s
+        );
     }
 }

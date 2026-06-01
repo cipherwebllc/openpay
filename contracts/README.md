@@ -18,8 +18,9 @@ src と lib を同階層に分けている (lib を src 内に置くと依存ま
 # 1. Foundry (forge/cast/anvil)
 curl -L https://foundry.paradigm.xyz | bash && foundryup
 
-# 2. 依存 (OpenZeppelin v5 + forge-std) を contracts/lib/ に install
-forge install OpenZeppelin/openzeppelin-contracts foundry-rs/forge-std --no-git
+# 2. 依存を contracts/lib/ に install (監査再現性のためタグ pin)
+#    OZ v5.6.1 (SafeERC20/ReentrancyGuard は deploy 契約に含む = 監査対象) / forge-std v1.10.0 (test 専用)
+forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 foundry-rs/forge-std@v1.10.0 --no-git
 
 # 3. ビルド & テスト
 forge build
