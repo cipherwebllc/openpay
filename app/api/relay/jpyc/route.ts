@@ -30,7 +30,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon, polygonAmoy } from 'viem/chains';
-import { kvLpush, kvLrange, kvLtrim, isKvConfigured } from '@/lib/kv';
+import { kvLpush, kvLrange, kvLtrim, kvSet, isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { resolveDeployment } from '@/lib/tokens';
 import {
@@ -216,6 +216,19 @@ async function checkRateLimit(keys: string[]): Promise<boolean> {
   return true;
 }
 
+// 冪等性: 同一 (chainId,from,nonce) を SET NX で1回だけ claim。null = 既存(重複) → 'duplicate'。
+// 'OK' = claimed → 'first'。KV error/unconfigured は fail-open ('first') — 資金の二重支払いは
+// on-chain _authorizationStates が最終防壁で、ここは重複 broadcast の gas 浪費を減らす最適化。
+async function claimIdempotency(
+  chainId: number,
+  from: Address,
+  nonce: Hex,
+): Promise<'first' | 'duplicate'> {
+  const key = `relay:idem:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
+  const r = await kvSet(key, '1', { nx: true, ttlSec: 1800 });
+  return r.ok && r.value === null ? 'duplicate' : 'first';
+}
+
 async function gelatoSubmit(
   chainId: number,
   target: Address,
@@ -379,6 +392,7 @@ async function handleFree(
     jpycAddressFor,
     getBalance,
     checkRateLimit,
+    claimIdempotency,
   };
   let deps: RelayDeps;
   if (PROVIDER === 'self-host') {
@@ -449,6 +463,7 @@ async function handleRecover(
     getBalance,
     checkRateLimit,
     checkAuthorizationUsed: readAuthorizationUsed,
+    claimIdempotency,
     submit: (_c, target, data) => submitSelfHost(io, target, data),
     pollTask: (taskId) => pollSelfHost(io, taskId),
   };

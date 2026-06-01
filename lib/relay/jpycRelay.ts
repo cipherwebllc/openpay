@@ -52,6 +52,15 @@ export type RelayDeps = {
     from: Address,
     nonce: Hex,
   ) => Promise<boolean>;
+  // (任意) 冪等性: 同一 (chainId,from,nonce) の先行 submit があれば 'duplicate'。重複 POST
+  // (network retry / double-click) で二重 broadcast (gas 浪費) しないための最適化。'duplicate'
+  // なら submit せず pending。fail-open: KV 不確定/未設定は 'first' (proceed)。資金の二重支払いは
+  // on-chain _authorizationStates が最終防壁なので、ここは確定的重複のみ弾けば足りる。
+  claimIdempotency?: (
+    chainId: number,
+    from: Address,
+    nonce: Hex,
+  ) => Promise<'first' | 'duplicate'>;
   // Gelato sponsoredCall (REST)。taskId を返す。
   submitSponsoredCall: (
     chainId: number,
@@ -137,6 +146,12 @@ export async function relayJpycAuthorization(
       auth.nonce,
     );
     if (used) return { kind: 'pending' };
+  }
+
+  // 5.6 冪等性: 同一 authorization の重複 POST は再 broadcast せず pending (gas 浪費防止)。
+  if (deps.claimIdempotency) {
+    const claim = await deps.claimIdempotency(chainId, auth.from, auth.nonce);
+    if (claim === 'duplicate') return { kind: 'pending' };
   }
 
   // 6. submit + poll。submit が throw = broadcast 前のエラー → relay_error (fallback 可)。

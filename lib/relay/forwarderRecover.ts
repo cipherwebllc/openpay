@@ -45,6 +45,13 @@ export type ForwarderRecoverDeps = {
     from: Address,
     nonce: Hex,
   ) => Promise<boolean>;
+  // (任意) 冪等性: 同一 (chainId,from,nonce) の重複 POST は再 broadcast せず pending。fail-open
+  // (KV 不確定/未設定は 'first')。資金の二重支払いは on-chain _authorizationStates が最終防壁。
+  claimIdempotency?: (
+    chainId: number,
+    from: Address,
+    nonce: Hex,
+  ) => Promise<'first' | 'duplicate'>;
   submit: (chainId: number, target: Address, data: Hex) => Promise<{ taskId: string }>;
   pollTask: (taskId: string) => Promise<RelayTaskOutcome>;
 };
@@ -120,9 +127,16 @@ export async function recoverViaForwarder(
   }
 
   // authorizationState 既使用 → pending (guaranteed-revert 回避 + 二重支払い防止)。
+  // + 冪等性: 同一 authorization の重複 POST も pending (再 broadcast せず gas 浪費防止)。
+  // nonce は両者共通 (forwarder commitment = EIP-3009 nonce)。
+  const nonce = buildForwarderNonce(params, chainId, forwarder);
   if (deps.checkAuthorizationUsed) {
-    const nonce = buildForwarderNonce(params, chainId, forwarder);
     if (await deps.checkAuthorizationUsed(chainId, jpyc, params.from, nonce)) {
+      return { kind: 'pending' };
+    }
+  }
+  if (deps.claimIdempotency) {
+    if ((await deps.claimIdempotency(chainId, params.from, nonce)) === 'duplicate') {
       return { kind: 'pending' };
     }
   }

@@ -181,6 +181,27 @@ describe('relayJpycAuthorization', () => {
     expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
   });
 
+  it('冪等性: claimIdempotency duplicate → pending (submit せず)', async () => {
+    const claimIdempotency = vi.fn<
+      (c: number, from: Address, nonce: Hex) => Promise<'duplicate'>
+    >(async () => 'duplicate');
+    const deps = makeDeps({ claimIdempotency });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('pending');
+    expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+    // nonce が claim に渡る (authorizationState と同一空間)。
+    const [, from, nonce] = claimIdempotency.mock.calls[0];
+    expect(getAddress(from)).toBe(getAddress(account.address));
+    expect(nonce).toMatch(/^0x[0-9a-f]{64}$/i);
+  });
+
+  it('冪等性: claimIdempotency first → 通常どおり submit → success', async () => {
+    const deps = makeDeps({ claimIdempotency: vi.fn(async () => 'first' as const) });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('success');
+    expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
+  });
+
   it('poll error → relay_error', async () => {
     const deps = makeDeps({
       pollTask: vi.fn(async () => ({
