@@ -1,7 +1,9 @@
 # Foundry 設定 (JPYC ガス回収 forwarder 用)。Next.js アプリと同居するため、Foundry の
 # dir を全て contracts/ 配下に隔離し、リポジトリ既存の lib/ (TypeScript) や out と衝突させない。
 [profile.default]
-src = "contracts"
+# src と lib は同じ階層 (contracts/src と contracts/lib) に分ける。lib を src の中に置くと
+# forge が依存 (OZ の fv/ 等) まで src 扱いでコンパイルして壊れるため。
+src = "contracts/src"
 out = "contracts/out"
 libs = ["contracts/lib"]
 test = "contracts/test"

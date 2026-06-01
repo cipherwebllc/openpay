@@ -38,8 +38,7 @@ contract Eip3009Forwarder is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /// @notice commit schema の version。将来 schema を変える際に旧署名を弾くための prefix。
-    bytes32 public constant COMMIT_VERSION =
-        keccak256("openpay.eip3009.forwarder.v1");
+    bytes32 public constant COMMIT_VERSION = keccak256("openpay.eip3009.forwarder.v1");
 
     /// @notice 決済トークン (JPYC・FiatToken 系・EIP-3009)。
     IERC20 public immutable token;
@@ -118,17 +117,10 @@ contract Eip3009Forwarder is ReentrancyGuard {
 
         // 受領 (msg.sender == to == address(this) を token が強制 = payee ガード)。
         // value / validAfter / validBefore / nonce / 署名 が一致しなければ token 側で revert。
-        IERC3009(address(token)).receiveWithAuthorization(
-            from,
-            address(this),
-            value,
-            validAfter,
-            validBefore,
-            nonce,
-            v,
-            r,
-            s
-        );
+        IERC3009(address(token))
+            .receiveWithAuthorization(
+                from, address(this), value, validAfter, validBefore, nonce, v, r, s
+            );
 
         // 分割送金。SafeERC20 で false 返り値も revert 扱い。いずれか失敗で全 revert = 資金非保持。
         token.safeTransfer(merchant, merchantValue);
