@@ -30,6 +30,17 @@ vi.mock('wagmi', () => ({
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
+// useJpycEip3009Payment は real だと wagmi useWalletClient + react-query に依存 (#131c)。
+// gasless 履歴経路は useBatchPayment 側なので idle stub で足りる。
+vi.mock('@/hooks/useJpycEip3009Payment', () => ({
+  useJpycEip3009Payment: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    variables: undefined,
+  })),
+}));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 // Circle quote stub (flag OFF で非 active・useQuery を走らせない)。

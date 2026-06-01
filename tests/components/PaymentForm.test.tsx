@@ -25,6 +25,18 @@ vi.mock('wagmi', () => ({
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
+// useJpycEip3009Payment は real だと wagmi useWalletClient + react-query (useMutation) に依存する
+// (#131c)。本 test の責務は PaymentForm 本体ロジックなので idle 状態で stub (relay 経路は
+// jpycRelay/forwarderRecover の unit + e2e で検証)。useMutation 互換の最小 shape を返す。
+vi.mock('@/hooks/useJpycEip3009Payment', () => ({
+  useJpycEip3009Payment: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    variables: undefined,
+  })),
+}));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 // Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を

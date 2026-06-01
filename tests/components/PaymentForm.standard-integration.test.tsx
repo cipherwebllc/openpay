@@ -89,6 +89,17 @@ vi.mock('@/hooks/useBatchPayment', () => ({
     error: null,
   }),
 }));
+// useJpycEip3009Payment は real だと wagmi useWalletClient + react-query に依存 (#131c)。
+// 本 test は standard 経路 (real useStandardPayment) の検証なので idle stub で足りる。
+vi.mock('@/hooks/useJpycEip3009Payment', () => ({
+  useJpycEip3009Payment: () => ({
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    variables: undefined,
+  }),
+}));
 vi.mock('@/hooks/useSmartAccount', () => ({
   useSmartAccount: () => ({ data: undefined, isLoading: false, error: null }),
 }));
