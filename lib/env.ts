@@ -308,6 +308,14 @@ export const env = {
   enableCirclePaymaster:
     process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER === 'true',
+  // JPYC ガスレスを EIP-3009 (transferWithAuthorization + Gelato relayer) で行う経路の
+  // 有効化フラグ。**既定 OFF**。ON にするのは server に GELATO_SPONSOR_API_KEY を設定し
+  // 1Balance を入金した時のみ (両者は運用者が同時に揃える前提)。OFF の間は JPYC ガスレスは
+  // 従来通り Pimlico/7702 sponsorship。委任不要で injected wallet でも動くため到達が広い
+  // (memory:jpyc-eip3009)。'1' / 'true' で ON。
+  enableJpycEip3009:
+    process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009 === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009 === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
