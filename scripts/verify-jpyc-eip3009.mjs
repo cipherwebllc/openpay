@@ -35,7 +35,7 @@ import {
   zeroHash,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, kaia } from 'viem/chains';
+import { polygon, polygonAmoy, kaia } from 'viem/chains';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function loadEnvFile(path) {
@@ -63,6 +63,12 @@ const TARGETS = [
     address: process.env.NEXT_PUBLIC_JPYC_POLYGON_ADDRESS ?? JPYC_V3,
   },
   {
+    name: 'Polygon Amoy',
+    chain: polygonAmoy,
+    rpc: process.env.NEXT_PUBLIC_POLYGON_AMOY_RPC_URL,
+    address: process.env.NEXT_PUBLIC_JPYC_POLYGON_AMOY_ADDRESS ?? JPYC_V3,
+  },
+  {
     name: 'Kaia',
     chain: kaia,
     rpc: process.env.NEXT_PUBLIC_KAIA_RPC_URL,
@@ -73,6 +79,7 @@ const TARGETS = [
 const abi = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
   'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
+  'function receiveWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
   'function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)',
   'function DOMAIN_SEPARATOR() view returns (bytes32)',
 ]);
@@ -278,6 +285,108 @@ for (const t of TARGETS) {
       }
     } catch (e) {
       rec(false, '(4) 署名 dry-run', `sign/encode error: ${e.shortMessage ?? e}`);
+    }
+
+    // (5) receiveWithAuthorization 対応 (forwarder の 1署名分割に必須)。
+    //   ReceiveWithAuthorization 署名を作り、msg.sender == to (payee) で simulate。
+    //     - "balance" 系 revert → 関数あり・sig 受理 = 対応 ✓ (forwarder 採用可)
+    //     - "signature" 系     → 関数はあるが domain/typehash 不一致 (要精査)
+    //     - data 無し/inconclusive → 未実装の可能性 (forwarder 方式の前提が崩れる)
+    //   さらに msg.sender != to で呼び "caller must be the payee" が出れば front-run ガード確認。
+    try {
+      const nonce = keccak256(toHex(`openpay-recv-${t.chain.id}-${Date.now()}`));
+      const value = 1n;
+      const validAfter = 0n;
+      const validBefore = 2n ** 48n - 1n;
+      const sig = await testAccount.signTypedData({
+        domain: {
+          name: domainName ?? ASSUMED_NAME,
+          version: domainVersion ?? ASSUMED_VERSION,
+          chainId: t.chain.id,
+          verifyingContract: getAddress(t.address),
+        },
+        types: {
+          ReceiveWithAuthorization: [
+            { name: 'from', type: 'address' },
+            { name: 'to', type: 'address' },
+            { name: 'value', type: 'uint256' },
+            { name: 'validAfter', type: 'uint256' },
+            { name: 'validBefore', type: 'uint256' },
+            { name: 'nonce', type: 'bytes32' },
+          ],
+        },
+        primaryType: 'ReceiveWithAuthorization',
+        message: {
+          from: testAccount.address,
+          to: RECIPIENT,
+          value,
+          validAfter,
+          validBefore,
+          nonce,
+        },
+      });
+      const r = `0x${sig.slice(2, 66)}`;
+      const s = `0x${sig.slice(66, 130)}`;
+      const v = parseInt(sig.slice(130, 132), 16);
+      const args = [
+        testAccount.address,
+        RECIPIENT,
+        value,
+        validAfter,
+        validBefore,
+        nonce,
+        v,
+        r,
+        s,
+      ];
+      // (5a) payee 自身が呼ぶ (msg.sender == to)
+      try {
+        await client.simulateContract({
+          address: t.address,
+          abi,
+          functionName: 'receiveWithAuthorization',
+          args,
+          account: RECIPIENT,
+        });
+        rec(true, '(5) receiveWithAuthorization', 'simulate 成功 (= 対応・sig受理・残高あり)');
+      } catch (e) {
+        const full = e.shortMessage ?? e.message ?? '';
+        const cls = classifyRevert(full);
+        const reasonLine =
+          full
+            .split('\n')
+            .map((l) => l.trim())
+            .find((l) =>
+              /balance|signature|exceeds|invalid|authoriz|payee|caller|not a function|reverted/i.test(
+                l,
+              ),
+            ) ?? full.split('\n')[0];
+        rec(
+          cls === 'sig-accepted',
+          '(5) receiveWithAuthorization',
+          `${cls}: "${reasonLine.slice(0, 160)}"`,
+        );
+      }
+      // (5b) payee 以外が呼ぶ → "caller must be the payee" であるべき (front-run ガード)
+      try {
+        await client.simulateContract({
+          address: t.address,
+          abi,
+          functionName: 'receiveWithAuthorization',
+          args,
+          account: '0x000000000000000000000000000000000000bEEF',
+        });
+        warn('(5b) caller!=payee guard', 'revert しなかった (想定外)');
+      } catch (e) {
+        const full = (e.shortMessage ?? e.message ?? '').toLowerCase();
+        const guard = /payee|caller|sender/.test(full);
+        warn(
+          '(5b) caller!=payee guard',
+          guard ? 'payee ガード確認' : `revert: "${full.slice(0, 100)}"`,
+        );
+      }
+    } catch (e) {
+      rec(false, '(5) receiveWithAuthorization', `sign/encode error: ${e.shortMessage ?? e}`);
     }
   } catch (e) {
     rec(false, `${t.name} RPC`, e.shortMessage ?? String(e));
