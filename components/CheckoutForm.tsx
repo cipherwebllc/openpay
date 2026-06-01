@@ -134,6 +134,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     isConnected &&
     !wrongChain &&
     (isStandard || !!saData) &&
+    // PaymentForm と揃える明示ガード。現状は totalWei>0 (有効 items) 不変で merchantUnderflow
+    // が拾うが、空 batch (merchant 受取 0) 送信を構造的にも塞ぐ defense-in-depth。
+    breakdown.merchantReceives > 0n &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !flowPending &&
@@ -142,6 +145,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   const flowError = isStandard ? standard.error : gasless.error;
   const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
+  // 送信は成立したがチェーン上で revert したケース (gasless: data.success===false /
+  // standard: phase=*-error だが receipt 成功で Error 無し)。無反応穴を明示メッセージで塞ぐ。
+  const revertedNoFeedback =
+    (!isStandard && !!gasless.data && !gasless.data.success) ||
+    (isStandard &&
+      (standard.isMerchantError || standard.isFeeError) &&
+      !standard.error);
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowError?.message ??
@@ -149,7 +159,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       (activeQuote.error ? t('errorGasQuote') : null) ??
       (merchantUnderflow
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-        : null));
+        : null) ??
+      (revertedNoFeedback ? t('errorReverted') : null));
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
   // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。

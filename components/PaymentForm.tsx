@@ -30,7 +30,12 @@ import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
-import { DECIMAL_PATTERN, parsePayParams, type PayParams } from '@/lib/url';
+import {
+  DECIMAL_PATTERN,
+  exceedsTokenPrecision,
+  parsePayParams,
+  type PayParams,
+} from '@/lib/url';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 
 export function PaymentForm() {
@@ -98,8 +103,15 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
+    // 精度超過は parseUnits が黙って丸めて表示額と実送金額が乖離するため弾く (0n=送信 block)。
+    if (exceedsTokenPrecision(amountStr, deployment.decimals)) return 0n;
     return parseUnits(amountStr, deployment.decimals);
   }, [amountStr, deployment.decimals]);
+  // 精度超過を UI で明示するためのフラグ (amountWei は 0n になるが理由を伝える)。
+  const amountPrecisionError =
+    !!amountStr &&
+    DECIMAL_PATTERN.test(amountStr) &&
+    exceedsTokenPrecision(amountStr, deployment.decimals);
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
@@ -207,14 +219,26 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
   const flowError = isStandard ? standard.error : gasless.error;
   const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
+  // 送信は成立したがチェーン上で revert したケース。gasless は data.success===false、standard は
+  // phase=*-error だが receipt 自体は成功 (status=reverted) なので Error オブジェクトが無い。
+  // どちらも success panel も error も出ず「無反応」に見える穴を、明示メッセージで塞ぐ。
+  const revertedNoFeedback =
+    (!isStandard && !!gasless.data && !gasless.data.success) ||
+    (isStandard &&
+      (standard.isMerchantError || standard.isFeeError) &&
+      !standard.error);
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowError?.message ??
       (isStandard || saFallback ? undefined : saError?.message) ??
       (activeQuote.error ? t('errorGasQuote') : null) ??
+      (amountPrecisionError
+        ? t('errorAmountPrecision', { decimals: deployment.decimals })
+        : null) ??
       (merchantUnderflow
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-        : null));
+        : null) ??
+      (revertedNoFeedback ? t('errorReverted') : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
