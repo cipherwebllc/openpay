@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Eip3009Forwarder} from "../src/Eip3009Forwarder.sol";
 import {MockEip3009Token} from "./mocks/MockEip3009Token.sol";
@@ -244,6 +245,33 @@ contract Eip3009ForwarderTest is Test {
         vm.warp(block.timestamp + 20); // validBefore を過ぎる
         vm.expectRevert(MockEip3009Token.Expired.selector);
         forwarder.settle(customer, merchant, mv, fv, validAfter, validBefore, salt, v, r, s);
+    }
+
+    // golden vector: 固定入力で nonce を計算してログ出力。TS (forwarderIntent) の
+    // buildForwarderNonce が同値になることを tests/lib/forwarderIntent.test.ts で照合する
+    // (Solidity の abi.encode と TS の encodeAbiParameters の一致を fence)。
+    function test_goldenVector_nonce() public view {
+        assertEq(
+            forwarder.COMMIT_VERSION(),
+            keccak256("openpay.eip3009.forwarder.v1"),
+            "COMMIT_VERSION must match the shared TS constant"
+        );
+        bytes32 nonce = keccak256(
+            abi.encode(
+                forwarder.COMMIT_VERSION(),
+                address(0x1111111111111111111111111111111111111111), // from
+                address(0x2222222222222222222222222222222222222222), // merchant
+                uint256(1000e18), // merchantValue
+                address(0x3333333333333333333333333333333333333333), // feeReceiver
+                uint256(2e18), // feeValue
+                uint256(0), // validAfter
+                uint256(1_000_000_000_000), // validBefore
+                bytes32(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef), // salt
+                uint256(80002), // chainId (Amoy)
+                address(0x4444444444444444444444444444444444444444) // forwarder
+            )
+        );
+        console2.logBytes32(nonce);
     }
 
     // forwarder が依存する token の payee ガード (msg.sender==to) を直接確認。
