@@ -185,6 +185,10 @@ export async function recoverViaForwarder(
     };
   }
 
+  // broadcast 直後に hash を記録 (self-host は taskId=txHash)。poll 前に落ちても重複 POST が
+  // explorer 追跡できる。Gelato (UUID) は除外。
+  if (/^0x[0-9a-fA-F]{64}$/.test(taskId)) await recordHash(taskId as Hex);
+
   // broadcast 後は success/reverted/pending のみ (二重支払い回避は pollTask の責務)。
   const outcome = await deps.pollTask(taskId);
   if (outcome.state === 'success') {
@@ -199,6 +203,7 @@ export async function recoverViaForwarder(
     if (outcome.txHash) await recordHash(outcome.txHash);
     return { kind: 'pending', txHash: outcome.txHash };
   }
-  await releaseClaim();
+  // poll 'error' で claim は解放しない (Gelato 'error' は timeout=broadcast 済の可能性も含む)。
+  // 解放すると再 POST が再 submit でき二重送金しうる。claim は TTL で自然失効。
   return { kind: 'relay_error', detail: outcome.detail };
 }

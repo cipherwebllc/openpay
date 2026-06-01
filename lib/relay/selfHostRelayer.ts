@@ -127,9 +127,17 @@ export async function submitSelfHost(
   const buffered = estimated + estimated / 5n; // +20%
   const gas = buffered > RELAYER_GAS_CAP ? RELAYER_GAS_CAP : buffered;
 
-  // 既に authorization が執行済か (collision/fatal 時に fallback を抑止し pending に倒すため)。
-  const authUsed = async () =>
-    opts.isAuthorizationUsed ? opts.isAuthorizationUsed() : false;
+  // authorization が既に on-chain で執行済か。RPC が throw した場合は 'unknown' (判定不能) を返し、
+  // 呼出側で保守的に pending へ倒す (callback の RPC エラーが relay_error→fallback に化けて二重
+  // 送金窓を再び開くのを防ぐ・Codex P0)。checker 未提供は 'unused' (従来挙動)。
+  const authState = async (): Promise<'used' | 'unused' | 'unknown'> => {
+    if (!opts.isAuthorizationUsed) return 'unused';
+    try {
+      return (await opts.isAuthorizationUsed()) ? 'used' : 'unused';
+    } catch {
+      return 'unknown';
+    }
+  };
 
   // nonce 衝突は fresh nonce で再試行。各試行は pre-sign (hash 確定) → sendRaw。
   let lastHash: Hex | undefined;
@@ -161,16 +169,17 @@ export async function submitSelfHost(
       }
       if (cls === 'collision') {
         // 自 tx (この nonce) は submission で拒否され mempool 未到達。ただし「この authorization が
-        // 既に別 tx で執行済」可能性を排除するため authState を再確認 (P0)。執行済なら再試行/
-        // fallback せず pending に倒す。未使用なら fresh nonce で再試行 (別 authorization が nonce を
-        // 取った通常ケース)。
-        if (await authUsed()) return { taskId: hash };
+        // 既に別 tx で執行済」可能性を排除するため authState を再確認 (P0)。used/unknown (執行済 or
+        // 判定不能) は再試行/fallback せず pending に倒す。unused のみ fresh nonce で再試行 (別
+        // authorization が nonce を取った通常ケース)。
+        if ((await authState()) !== 'unused') return { taskId: hash };
         continue;
       }
       if (cls === 'fatal') {
         // node の明確な検証拒否 (insufficient funds 等) は mempool 未到達。ただし誤分類で実は
-        // broadcast 済の可能性に備え authState を確認 (P1): 執行済→pending / 未使用→relay_error。
-        if (await authUsed()) return { taskId: hash };
+        // broadcast 済の可能性に備え authState を確認 (P1)。used/unknown→pending / unused (mempool
+        // 未到達が確実) のみ relay_error で fallback。
+        if ((await authState()) !== 'unused') return { taskId: hash };
         throw e;
       }
       // uncertain: broadcast したか不明。再試行 / fallback せず canonical hash を poll → timeout で pending。

@@ -158,6 +158,35 @@ describe('submitSelfHost', () => {
     expect(res.taskId).toBe(SIGNED_HASH);
   });
 
+  it('collision + isAuthorizationUsed が throw (RPC エラー) → pending (P0・relay_error にしない)', async () => {
+    const io = makeIo({
+      sendRawTransaction: vi.fn(async () => {
+        throw new Error('nonce too low');
+      }),
+    });
+    const res = await submitSelfHost(io, TARGET, DATA, {
+      isAuthorizationUsed: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    expect(res.taskId).toBe(SIGNED_HASH); // 判定不能 → 保守的に pending
+    expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 再試行しない
+  });
+
+  it('fatal + isAuthorizationUsed が throw → pending (P0・fallback しない)', async () => {
+    const io = makeIo({
+      sendRawTransaction: vi.fn(async () => {
+        throw new Error('insufficient funds');
+      }),
+    });
+    const res = await submitSelfHost(io, TARGET, DATA, {
+      isAuthorizationUsed: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    expect(res.taskId).toBe(SIGNED_HASH); // 判定不能 → pending (relay_error にしない)
+  });
+
   it('fatal + checker 無し → throw (relay_error)', async () => {
     const io = makeIo({
       sendRawTransaction: vi.fn(async () => {

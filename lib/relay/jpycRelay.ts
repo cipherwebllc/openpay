@@ -209,6 +209,10 @@ export async function relayJpycAuthorization(
     };
   }
 
+  // broadcast 直後に hash を記録 (self-host は taskId=txHash)。poll 前に worker が落ちても重複
+  // POST が explorer 追跡できる。Gelato の taskId は UUID なので txHash 形のみ記録する。
+  if (/^0x[0-9a-fA-F]{64}$/.test(taskId)) await recordHash(taskId as Hex);
+
   // ここから先は broadcast 済。error は返さず success/reverted/pending のいずれか。
   const outcome = await deps.pollTask(taskId);
   if (outcome.state === 'success') {
@@ -226,6 +230,7 @@ export async function relayJpycAuthorization(
   // poll 'error': provider 依存。Gelato は taskId が broadcast 前に返るので 'error'
   // (Cancelled/NotFound) = 未送信 → relay_error で fallback 可。self-host の pollReceipt は
   // broadcast 後なので 'error' を返さず 'pending' に倒す (二重支払い回避は poll 側の責務)。
-  await releaseClaim();
+  // claim は解放しない: Gelato の 'error' は timeout (= broadcast 済の可能性) も含むため、解放すると
+  // 再 POST が再 submit でき二重送金しうる (Codex)。claim は TTL(30分) で自然失効させる。
   return { kind: 'relay_error', detail: outcome.detail };
 }
