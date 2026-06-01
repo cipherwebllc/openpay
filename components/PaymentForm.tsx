@@ -19,7 +19,9 @@ import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
+import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -70,19 +72,32 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  // Smart Account は gasless のみ必要 — standard では enabled=false で skip。
+  // JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + Polygon)。OFF は 'pimlico-7702'
+  // で既存挙動 (memory:jpyc-eip3009)。relay 経路は smart account / gas quote 不要で、顧客が
+  // 署名するだけ・Gelato がガス負担。
+  // Phase 1 relay は単発 transfer のみ。split 指定時は従来の 7702 経路へ倒す (split 対応は Phase 2)。
+  const hasSplit = !!params.split && params.split.length > 0;
+  const useRelay =
+    !isStandard &&
+    !hasSplit &&
+    resolveJpycGaslessProvider(deployment, chainId ?? deployment.chainId) ===
+      'eip3009-relay';
+  const relay = useJpycEip3009Payment(deployment);
+
+  // Smart Account は gasless (非 relay) のみ必要 — standard / relay では enabled=false で skip。
   const { data: saData, error: saError } = useSmartAccount(
     deployment,
-    !isStandard,
+    !isStandard && !useRelay,
   );
 
-  // 両方のフックを常に call し、isStandard で送信先を分岐 (条件付きフックは禁止)。
-  const gasless = useBatchPayment(deployment, !isStandard);
+  // 全フックを常に call し、mode で送信先を分岐 (条件付きフックは禁止)。relay 経路は
+  // smart account / gas quote 不要なので enabled=false で skip する。
+  const gasless = useBatchPayment(deployment, !isStandard && !useRelay);
   const standard = useStandardPayment();
-  const gasQuote = useGasQuote(deployment, !isStandard);
+  const gasQuote = useGasQuote(deployment, !isStandard && !useRelay);
   // USDC ガスレスが Circle Paymaster に解決される場合は surcharge 込みの quote +
   // permit allowance を Circle 専用フックから取る (provider は flag/allowlist/fee で決まる)。
   const isCircle =
@@ -197,12 +212,17 @@ function PaymentDetails({ params }: { params: PayParams }) {
     totalCustomerOutflow,
   );
 
-  const flowPending = isStandard ? standard.isPending : gasless.isPending;
-  const gasQuoteReady = isStandard || activeQuote.data !== undefined;
+  const flowPending = isStandard
+    ? standard.isPending
+    : useRelay
+      ? relay.isPending
+      : gasless.isPending;
+  // relay は gas quote も smart account も不要なので readiness は常に満たす。
+  const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   const canSubmit =
     isConnected &&
     !wrongChain &&
-    (isStandard || !!saData) &&
+    (isStandard || useRelay || !!saData) &&
     // merchantReceives > 0 を要求 (amount 未入力だと gasless では customerPays が
     // gas 分だけ正になり得るが、店舗送金額 0 の空 batch は無意味。hook 側でも
     // calls.length===0 を弾くが、UI でも button を無効化して金額入力を促す)。
@@ -217,20 +237,32 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 差し替え (standard モードは paymaster を経由しないため対象外)。
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
-  const flowError = isStandard ? standard.error : gasless.error;
-  const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
-  // 送信は成立したがチェーン上で revert したケース。gasless は data.success===false、standard は
-  // phase=*-error だが receipt 自体は成功 (status=reverted) なので Error オブジェクトが無い。
-  // どちらも success panel も error も出ず「無反応」に見える穴を、明示メッセージで塞ぐ。
+  const flowError = isStandard
+    ? standard.error
+    : useRelay
+      ? relay.error
+      : gasless.error;
+  const saFallback =
+    !isStandard && !useRelay && isIncompatibleSmartAccountError(saError);
+  // 送信は成立したがチェーン上で revert したケース。gasless/relay は data.success===false、
+  // standard は phase=*-error だが receipt 自体は成功 (status=reverted) なので Error が無い。
+  // どれも success panel も error も出ず「無反応」に見える穴を、明示メッセージで塞ぐ。
   const revertedNoFeedback =
-    (!isStandard && !!gasless.data && !gasless.data.success) ||
+    (!isStandard && !useRelay && !!gasless.data && !gasless.data.success) ||
+    (useRelay && !!relay.data && !relay.data.success) ||
     (isStandard &&
       (standard.isMerchantError || standard.isFeeError) &&
       !standard.error);
+  // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
+  const flowErrorMessage = useRelay
+    ? flowError
+      ? relayErrorMessage(flowError, t)
+      : undefined
+    : flowError?.message;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : (flowError?.message ??
-      (isStandard || saFallback ? undefined : saError?.message) ??
+    : (flowErrorMessage ??
+      (isStandard || useRelay || saFallback ? undefined : saError?.message) ??
       (activeQuote.error ? t('errorGasQuote') : null) ??
       (amountPrecisionError
         ? t('errorAmountPrecision', { decimals: deployment.decimals })
@@ -275,6 +307,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
     }
   }, [standard.data]);
 
+  useEffect(() => {
+    if (relay.error) logger.error('payment.relay.failed', { error: relay.error });
+  }, [relay.error]);
+
+  useEffect(() => {
+    if (relay.data) {
+      logger.info('payment.relay.success', {
+        txHash: relay.data.txHash,
+        success: relay.data.success,
+      });
+    }
+  }, [relay.data]);
+
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
   // 注: storeName は URL params に乗らないため空文字列。merchant 自身が自分の QR
   // で test 決済しても storeName は QrSettings 側に閉じており PaymentForm から
@@ -312,7 +357,36 @@ function PaymentDetails({ params }: { params: PayParams }) {
       address,
     ],
   );
-  usePaymentHistory(historyCtx, gasless, standard);
+  // relay 成功/失敗を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt block を
+  // 持たないため両者 null。amount は mutate() の variables(value) で固定し drift を避ける。gas は
+  // OpenPay(Gelato Gas Tank) が肩代わりし顧客は立替えないため networkFeeEquivalent=0n・feeAmount=0n。
+  const relayHistoryGasless = useMemo(
+    () => ({
+      data: relay.data
+        ? {
+            txHash: relay.data.txHash,
+            userOpHash: null,
+            blockNumber: null,
+            success: relay.data.success,
+          }
+        : undefined,
+      error: relay.error,
+      variables: relay.variables
+        ? {
+            merchantAmount: relay.variables.value,
+            feeAmount: 0n,
+            saleAmount: relay.variables.value,
+            networkFeeEquivalent: 0n,
+          }
+        : undefined,
+    }),
+    [relay.data, relay.error, relay.variables],
+  );
+  usePaymentHistory(
+    historyCtx,
+    useRelay ? relayHistoryGasless : gasless,
+    standard,
+  );
 
   function onSubmit() {
     if (!canSubmit) return;
@@ -327,6 +401,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
         feeAmount: breakdown.feeAmount,
         chainId: deployment.chainId,
       });
+    } else if (useRelay) {
+      // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。
+      // fee=0・gas は OpenPay 肩代わりなので、全額 (amountWei) をそのまま merchant へ単発送金。
+      relay.mutate({ merchant: params.to, value: amountWei });
     } else if (splitBreakdown) {
       // recipients[0] は primary (params.to)、それ以降が split entries
       const [primary, ...extras] = splitBreakdown.recipients;
@@ -462,6 +540,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
           )}
           {isStandard ? (
             <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
+          ) : useRelay ? (
+            <Row
+              label={t('gasRow')}
+              labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
+              value={t('gasRowRelayFree')}
+            />
           ) : (
             <Row
               label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
@@ -504,13 +588,15 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <p className="mt-4 text-xs text-slate-500">
           {isStandard
             ? t('standardBatchHint')
-            : splitBreakdown
-              ? t('splitBatchHint', {
-                  count: splitBreakdown.recipients.length,
-                })
-              : isErc20Paymaster
-                ? t('gaslessBatchHintUsdc')
-                : t('gaslessBatchHintJpyc')}
+            : useRelay
+              ? t('gaslessBatchHintJpycRelay')
+              : splitBreakdown
+                ? t('splitBatchHint', {
+                    count: splitBreakdown.recipients.length,
+                  })
+                : isErc20Paymaster
+                  ? t('gaslessBatchHintUsdc')
+                  : t('gaslessBatchHintJpyc')}
         </p>
         {approvalCheckUrl && (
           <p className="mt-2 text-xs">
@@ -599,7 +685,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
             ? t('btnConnect')
             : wrongChain
               ? t('btnSwitchChain')
-              : !isStandard && !saData
+              : !isStandard && !useRelay && !saData
                 ? t('btnSaInit')
                 : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
@@ -631,7 +717,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {!isStandard && gasless.data && gasless.data.success && (
+      {!isStandard && !useRelay && gasless.data && gasless.data.success && (
         <ResultPanel
           title={t('successTitle')}
           rows={[
@@ -639,6 +725,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
             { label: t('successTx'), value: gasless.data.txHash, copyable: true },
             { label: t('successBlock'), value: gasless.data.blockNumber.toString() },
           ]}
+        />
+      )}
+
+      {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer link は overlay 側)。 */}
+      {useRelay && relay.data && relay.data.success && (
+        <ResultPanel
+          title={t('successTitle')}
+          rows={[{ label: t('successTx'), value: relay.data.txHash, copyable: true }]}
         />
       )}
 
@@ -666,12 +760,25 @@ function PaymentDetails({ params }: { params: PayParams }) {
       )}
 
       {/* PayPay 風 大型成功 overlay。dismiss するまで全画面で「決済完了」+ 金額 + 時刻表示。 */}
-      {!overlayDismissed && !isStandard && gasless.data && gasless.data.success && (
+      {!overlayDismissed &&
+        !isStandard &&
+        !useRelay &&
+        gasless.data &&
+        gasless.data.success && (
+          <SuccessOverlay
+            amountDisplay={fmt(totalCustomerOutflow)}
+            txHash={gasless.data.txHash}
+            userOpHash={gasless.data.userOpHash}
+            blockNumber={gasless.data.blockNumber}
+            explorerBase={explorerBase}
+            merchantAddress={params.to}
+            onDismiss={() => setOverlayDismissed(true)}
+          />
+        )}
+      {!overlayDismissed && useRelay && relay.data && relay.data.success && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={gasless.data.txHash}
-          userOpHash={gasless.data.userOpHash}
-          blockNumber={gasless.data.blockNumber}
+          txHash={relay.data.txHash}
           explorerBase={explorerBase}
           merchantAddress={params.to}
           onDismiss={() => setOverlayDismissed(true)}
@@ -707,6 +814,25 @@ function phaseLabel(
       return t('btnStandardFeeMining');
     default:
       return t('btnSending');
+  }
+}
+
+// JPYC relay (/api/relay/jpyc) の error code → 顧客向け i18n。検証系の細かな reason や
+// 技術コード (signature_*/unsupported_chain/http_* 等) は generic に丸め、顧客が取れる
+// アクションのある 3 種のみ専用文言にする。
+function relayErrorMessage(
+  err: Error,
+  t: ReturnType<typeof useTranslations<'PaymentForm'>>,
+): string {
+  switch (err.message) {
+    case 'rate_limited':
+      return t('errorRelayRateLimited');
+    case 'relay_not_configured':
+      return t('errorRelayNotConfigured');
+    case 'insufficient_balance':
+      return t('errorRelayInsufficientBalance');
+    default:
+      return t('errorRelayGeneric');
   }
 }
 

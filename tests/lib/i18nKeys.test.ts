@@ -246,6 +246,32 @@ describe('i18n: gasInfoJpyc / gasInfoUsdc は {nativeToken} placeholder を持�
   }
 });
 
+describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
+  // relay 経路 (eip3009-relay) のガス表示 + error コード→friendly 文言。flag-gate された
+  // 機能なので片 locale 抜けが silent regression しやすい。非空 + parity を fence する。
+  const RELAY_KEYS = [
+    'gasInfoJpycRelay',
+    'gasRowRelayFree',
+    'gaslessBatchHintJpycRelay',
+    'errorRelayRateLimited',
+    'errorRelayNotConfigured',
+    'errorRelayInsufficientBalance',
+    'errorRelayGeneric',
+  ] as const;
+  for (const key of RELAY_KEYS) {
+    it(`ja.PaymentForm.${key} は非空文字列`, () => {
+      const v = (ja.PaymentForm as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.PaymentForm.${key} は非空文字列`, () => {
+      const v = (en.PaymentForm as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+});
+
 describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   it('全 form 名前空間で onramp キー集合が ja と en で一致', () => {
     for (const ns of FORM_NAMESPACES) {

@@ -27,7 +27,8 @@ export function SuccessOverlay({
   amountDisplay: string;
   txHash: string;
   userOpHash?: string;
-  blockNumber: bigint;
+  // EIP-3009 relay (Gelato) は receipt の blockNumber を取らないため任意。未指定なら行を省く。
+  blockNumber?: bigint;
   explorerBase?: string;
   /**
    * 店舗ウォレットアドレス。指定時は Explorer の /address/ ページへの link を
@@ -129,10 +130,12 @@ export function SuccessOverlay({
             </dd>
           </div>
         )}
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="shrink-0 opacity-80">{t('blockLabel')}</dt>
-          <dd className="font-mono">{blockNumber.toString()}</dd>
-        </div>
+        {blockNumber !== undefined && (
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="shrink-0 opacity-80">{t('blockLabel')}</dt>
+            <dd className="font-mono">{blockNumber.toString()}</dd>
+          </div>
+        )}
       </dl>
 
       <div className="flex flex-col items-center gap-1 text-sm">

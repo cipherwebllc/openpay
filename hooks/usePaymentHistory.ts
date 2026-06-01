@@ -62,8 +62,10 @@ type SubmittedAmounts = {
 type GaslessSnapshot = {
   data?: {
     txHash: Hex;
-    userOpHash: Hex;
-    blockNumber: bigint;
+    // EIP-3009 relay は ERC-4337 を経由しない (userOp 無し)・Gelato は receipt block を
+    // 返さないため、relay 経路では両者 null。useBatchPayment 経路は常に非 null。
+    userOpHash: Hex | null;
+    blockNumber: bigint | null;
     success: boolean;
     // 監査次元 (useBatchPayment の BatchPaymentResult 由来)。circle 経路のみ非 null。
     provider?: HistoryProvider;
