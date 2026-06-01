@@ -36,6 +36,7 @@ import { resolveDeployment } from '@/lib/tokens';
 import {
   relayJpycAuthorization,
   type RelayDeps,
+  type RelayResult,
   type RelayTaskOutcome,
 } from '@/lib/relay/jpycRelay';
 import {
@@ -44,6 +45,12 @@ import {
   RELAYER_RECEIPT_TIMEOUT_MS,
   type SelfHostIo,
 } from '@/lib/relay/selfHostRelayer';
+import {
+  recoverViaForwarder,
+  type ForwarderRecoverDeps,
+} from '@/lib/relay/forwarderRecover';
+import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
+import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
@@ -88,6 +95,32 @@ const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = {
 const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
 ]);
+
+// --- recover モード (forwarder で gas 相当額を JPYC 回収) の config ---------------------
+// forwarder アドレスが chain に設定されていれば recover モード (= 立替+回収)、無ければ free
+// (Phase A・直接 transferWithAuthorization)。NEXT_PUBLIC にするのは client が同じ値で nonce-commit
+// を組む必要があるため (server は値を信用せず一致を強制)。詳細は memory:gasless-legal-jp。
+function forwarderFor(chainId: number): Address | null {
+  const raw =
+    chainId === polygon.id
+      ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_POLYGON
+      : chainId === polygonAmoy.id
+        ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY
+        : undefined;
+  return raw && isAddress(raw) ? getAddress(raw) : null;
+}
+// forwarder の immutable feeReceiver と一致させる回収先 (= OpenPay fee receiver)。
+function feeReceiverFor(_chainId: number): Address | null {
+  return isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
+}
+// server 権威の固定 gas 相当額 (開示バッファ・Polygon の sub-cent gas を十分賄う)。
+// NEXT_PUBLIC で client と共有 (nonce 一致のため)。既定 2 JPYC。
+const FLAT_FEE_VALUE = (() => {
+  const raw = process.env.NEXT_PUBLIC_RELAY_GAS_FEE_JPYC;
+  const human = raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 2n;
+  return human * 10n ** 18n;
+})();
+const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
 
 function transportFor(chainId: number) {
   const cfg = SUPPORTED_CHAINS[chainId];
@@ -266,67 +299,28 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
 
-  // shape 検証 (純コアに渡す前に型を固める)。
-  if (
-    typeof raw.chainId !== 'number' ||
-    !Number.isInteger(raw.chainId) ||
-    !isAddress(raw.from as string) ||
-    !isAddress(raw.to as string) ||
-    !isDec(raw.value) ||
-    !isDec(raw.validAfter) ||
-    !isDec(raw.validBefore) ||
-    typeof raw.nonce !== 'string' ||
-    !/^0x[0-9a-fA-F]{64}$/.test(raw.nonce) ||
-    typeof raw.signature !== 'string' ||
-    !isHex(raw.signature)
-  ) {
-    return NextResponse.json(
-      { ok: false, error: 'invalid_payload' },
-      { status: 400 },
-    );
+  if (typeof raw.chainId !== 'number' || !Number.isInteger(raw.chainId)) {
+    return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
-
   const chainId = raw.chainId;
   const ipPrefix = anonymizeIp(
     req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
   );
-  const auth = {
-    from: getAddress(raw.from as string),
-    to: getAddress(raw.to as string),
-    value: BigInt(raw.value),
-    validAfter: BigInt(raw.validAfter),
-    validBefore: BigInt(raw.validBefore),
-    nonce: raw.nonce as Hex,
-  };
 
-  // 送信戦略を起動時 PROVIDER で確定 (within-request failover なし)。chainId が対応済の時だけ
-  // self-host io を組む (未対応は core の jpycAddressFor が submit 前に reject する)。
-  const supported = chainId in SUPPORTED_CHAINS;
-  const common = {
-    nowSec: () => Math.floor(Date.now() / 1000),
-    maxValue: MAX_VALUE,
-    jpycAddressFor,
-    getBalance,
-    checkRateLimit,
-  };
-  let deps: RelayDeps;
-  if (PROVIDER === 'self-host') {
-    const io = supported ? selfHostIoFor(chainId) : null;
-    deps = {
-      ...common,
-      checkAuthorizationUsed: readAuthorizationUsed,
-      submitSponsoredCall: (_c, target, data) => submitSelfHost(io!, target, data),
-      pollTask: (taskId) => pollSelfHost(io!, taskId),
-    };
-  } else {
-    deps = { ...common, submitSponsoredCall: gelatoSubmit, pollTask: gelatoPoll };
-  }
+  // forwarder が設定された chain は recover モード (gas 相当額を JPYC 回収・self-host 限定)。
+  // 無ければ free モード (Phase A・直接 transferWithAuthorization)。
+  const recoverMode =
+    PROVIDER === 'self-host' &&
+    chainId in SUPPORTED_CHAINS &&
+    forwarderFor(chainId) !== null;
 
-  const result = await relayJpycAuthorization(
-    { chainId, auth, signature: raw.signature as Hex, rateLimitKeys: [auth.from, ipPrefix] },
-    deps,
-  );
+  return recoverMode
+    ? handleRecover(raw, chainId, ipPrefix)
+    : handleFree(raw, chainId, ipPrefix);
+}
 
+// 結果 → HTTP 応答 (free / recover 共通)。pending は 202 で client に fallback 禁止を伝える。
+function respond(result: RelayResult, chainId: number): NextResponse {
   switch (result.kind) {
     case 'success':
       return NextResponse.json({ ok: true, txHash: result.txHash });
@@ -347,9 +341,120 @@ export async function POST(req: Request): Promise<NextResponse> {
       );
     case 'relay_error':
       logger.warn('relay.jpyc.relay_error', { detail: result.detail, chainId });
-      return NextResponse.json(
-        { ok: false, error: 'relay_error' },
-        { status: 502 },
-      );
+      return NextResponse.json({ ok: false, error: 'relay_error' }, { status: 502 });
   }
+}
+
+// free モード: 直接 transferWithAuthorization (Phase A)。relayer が token に直接 submit。
+async function handleFree(
+  raw: Record<string, unknown>,
+  chainId: number,
+  ipPrefix: string,
+): Promise<NextResponse> {
+  if (
+    !isAddress(raw.from as string) ||
+    !isAddress(raw.to as string) ||
+    !isDec(raw.value) ||
+    !isDec(raw.validAfter) ||
+    !isDec(raw.validBefore) ||
+    typeof raw.nonce !== 'string' ||
+    !/^0x[0-9a-fA-F]{64}$/.test(raw.nonce) ||
+    typeof raw.signature !== 'string' ||
+    !isHex(raw.signature)
+  ) {
+    return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
+  }
+  const auth = {
+    from: getAddress(raw.from as string),
+    to: getAddress(raw.to as string),
+    value: BigInt(raw.value),
+    validAfter: BigInt(raw.validAfter),
+    validBefore: BigInt(raw.validBefore),
+    nonce: raw.nonce as Hex,
+  };
+  const supported = chainId in SUPPORTED_CHAINS;
+  const common = {
+    nowSec: () => Math.floor(Date.now() / 1000),
+    maxValue: MAX_VALUE,
+    jpycAddressFor,
+    getBalance,
+    checkRateLimit,
+  };
+  let deps: RelayDeps;
+  if (PROVIDER === 'self-host') {
+    const io = supported ? selfHostIoFor(chainId) : null;
+    deps = {
+      ...common,
+      checkAuthorizationUsed: readAuthorizationUsed,
+      submitSponsoredCall: (_c, target, data) => submitSelfHost(io!, target, data),
+      pollTask: (taskId) => pollSelfHost(io!, taskId),
+    };
+  } else {
+    deps = { ...common, submitSponsoredCall: gelatoSubmit, pollTask: gelatoPoll };
+  }
+  const result = await relayJpycAuthorization(
+    { chainId, auth, signature: raw.signature as Hex, rateLimitKeys: [auth.from, ipPrefix] },
+    deps,
+  );
+  return respond(result, chainId);
+}
+
+// recover モード: forwarder.settle 経由で amount→店舗 + gas相当→feeReceiver を 1 署名分割。
+// feeReceiver/feeValue は server 権威 (client 値は信用せず一致を強制)。
+async function handleRecover(
+  raw: Record<string, unknown>,
+  chainId: number,
+  ipPrefix: string,
+): Promise<NextResponse> {
+  if (
+    !isAddress(raw.from as string) ||
+    !isAddress(raw.merchant as string) ||
+    !isDec(raw.merchantValue) ||
+    !isDec(raw.feeValue) ||
+    !isDec(raw.validAfter) ||
+    !isDec(raw.validBefore) ||
+    typeof raw.intentSalt !== 'string' ||
+    !/^0x[0-9a-fA-F]{64}$/.test(raw.intentSalt) ||
+    typeof raw.signature !== 'string' ||
+    !isHex(raw.signature)
+  ) {
+    return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
+  }
+  const feeReceiver = feeReceiverFor(chainId);
+  if (!feeReceiver) {
+    return NextResponse.json(
+      { ok: false, error: 'relay_not_configured' },
+      { status: 503 },
+    );
+  }
+  const params: ForwarderSettleParams = {
+    from: getAddress(raw.from as string),
+    merchant: getAddress(raw.merchant as string),
+    merchantValue: BigInt(raw.merchantValue),
+    feeReceiver, // server 権威 (client 値は使わない・nonce で client と一致を強制)
+    feeValue: BigInt(raw.feeValue),
+    validAfter: BigInt(raw.validAfter),
+    validBefore: BigInt(raw.validBefore),
+    intentSalt: raw.intentSalt as Hex,
+  };
+  const io = selfHostIoFor(chainId);
+  const deps: ForwarderRecoverDeps = {
+    nowSec: () => Math.floor(Date.now() / 1000),
+    expectedFeeValue: FLAT_FEE_VALUE,
+    maxValue: MAX_VALUE,
+    maxValidityWindowSec: MAX_VALIDITY_WINDOW_SEC,
+    jpycAddressFor,
+    forwarderFor,
+    feeReceiverFor,
+    getBalance,
+    checkRateLimit,
+    checkAuthorizationUsed: readAuthorizationUsed,
+    submit: (_c, target, data) => submitSelfHost(io, target, data),
+    pollTask: (taskId) => pollSelfHost(io, taskId),
+  };
+  const result = await recoverViaForwarder(
+    { chainId, params, signature: raw.signature as Hex, rateLimitKeys: [params.from, ipPrefix] },
+    deps,
+  );
+  return respond(result, chainId);
 }

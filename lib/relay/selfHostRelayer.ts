@@ -18,8 +18,9 @@ import type { RelayTaskOutcome } from './jpycRelay';
 // relayer の native (POL) 残高がこれ未満なら submit 前に弾く (broadcast せず relay_error)。
 export const MIN_RELAYER_BALANCE_WEI = 10n ** 16n; // 0.01 native (POL)
 // 1 tx の gas 上限。見積に +20% バッファした上で、異常値を防ぐハードキャップ。
-// transferWithAuthorization は ~80–120k なので 300k で十分な余裕。
-export const RELAYER_GAS_CAP = 300_000n;
+// 直接 transferWithAuthorization は ~80–120k だが、forwarder.settle は receiveWithAuthorization
+// + safeTransfer×2 で実測 ~250–300k (Amoy fork で確認)。両経路を賄うため 500k に設定。
+export const RELAYER_GAS_CAP = 500_000n;
 // receipt 待ちの timeout。超過は broadcast 済のため 'pending' を返す (error にしない)。
 export const RELAYER_RECEIPT_TIMEOUT_MS = 60_000;
 
