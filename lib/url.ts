@@ -432,6 +432,19 @@ const TIP_THANKS_MAX = 200;
 export const TIP_PRESET_MAX = 6;
 export const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 export const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
+
+// amountStr の小数桁が token の decimals を超えると viem の parseUnits は **黙って丸める**
+// (例: USDC=6dp で "0.0000009" → 0.000001)。結果、画面表示額と実送金額が乖離する。これを
+// 防ぐため精度超過を検出し、呼出側は invalid 扱い (送信 block + 案内) にする。DECIMAL_PATTERN
+// 通過を前提 (小数点が高々 1 個)。
+export function exceedsTokenPrecision(
+  amountStr: string,
+  decimals: number,
+): boolean {
+  const dot = amountStr.indexOf('.');
+  if (dot === -1) return false;
+  return amountStr.length - dot - 1 > decimals;
+}
 // http/https のみ許可。URL.canParse を使うので try/catch 不要。
 // localhost / 127.0.0.1 は webhook テスト用途で許可するが、本番では
 // クリエイターが制御していない URL を貼ると意図しない POST 先になり得る点に注意。

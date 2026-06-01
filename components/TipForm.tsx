@@ -24,7 +24,12 @@ import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
-import { DECIMAL_PATTERN, DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
+import {
+  DECIMAL_PATTERN,
+  DEFAULT_TIP_PRESETS,
+  exceedsTokenPrecision,
+  type TipParams,
+} from '@/lib/url';
 import { formatTokenAmount } from '@/lib/format';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
@@ -72,8 +77,14 @@ export function TipForm({ params }: { params: TipParams }) {
   const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
+    // 精度超過は parseUnits が黙って丸めて表示額と実送金額が乖離するため弾く。
+    if (exceedsTokenPrecision(amountStr, deployment.decimals)) return 0n;
     return parseUnits(amountStr, deployment.decimals);
   }, [amountStr, deployment.decimals]);
+  const amountPrecisionError =
+    !!amountStr &&
+    DECIMAL_PATTERN.test(amountStr) &&
+    exceedsTokenPrecision(amountStr, deployment.decimals);
 
   // Tip widget は gasless / gas=customer 固定 (preset セマンティクス維持):
   // creator は preset - fee を受け取り、ファンは preset + gas を支払う。
@@ -121,11 +132,18 @@ export function TipForm({ params }: { params: TipParams }) {
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
   // gasQuote の失敗も同様に i18n 化 (詳細は logger 経由で Sentry へ)。
   const saFallback = isIncompatibleSmartAccountError(saError);
+  // 送信は成立したがチェーン上で revert したケース (gasless: data.success===false)。success
+  // overlay も error も出ず無反応に見える穴を明示メッセージで塞ぐ。
+  const revertedNoFeedback = !!gasless.data && !gasless.data.success;
   const error = isGasCongestedError(gasless.error)
     ? t('errorGasCongested')
     : (gasless.error?.message ??
       (saFallback ? undefined : saError?.message) ??
-      (gasQuote.error ? t('errorGasQuote') : null));
+      (gasQuote.error ? t('errorGasQuote') : null) ??
+      (amountPrecisionError
+        ? t('errorAmountPrecision', { decimals: deployment.decimals })
+        : null) ??
+      (revertedNoFeedback ? t('errorReverted') : null));
 
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });
@@ -142,16 +160,32 @@ export function TipForm({ params }: { params: TipParams }) {
   // userOpHash ごとに 1 回限りの webhook 発火。gasQuote の refetchInterval (30s)
   // で breakdown が再計算 → effect 再実行 → 二重発火を防ぐ gate。
   const notifiedUserOpHashRef = useRef<string | null>(null);
+  // 送信時点の確定スナップショット。webhook が live state (amountStr / breakdown) を読むと、
+  // 送信後にユーザが額を変えたり gasQuote が refetch されたとき、実際に送ったチップと異なる
+  // 値を creator へ通知してしまう。onSubmit でここに固定し、webhook はこちらを参照する。
+  const submittedRef = useRef<{
+    amount: string;
+    merchantAmount: string;
+    feeAmount: string;
+    customerPays: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!gasless.data || !gasless.data.success) return;
     if (notifiedUserOpHashRef.current === gasless.data.userOpHash) return;
     notifiedUserOpHashRef.current = gasless.data.userOpHash;
+    // 送信時スナップショット優先 (live state drift を排除)。万一未設定なら live に fallback。
+    const sent = submittedRef.current ?? {
+      amount: amountStr,
+      merchantAmount: breakdown.merchantReceives.toString(),
+      feeAmount: breakdown.feeAmount.toString(),
+      customerPays: breakdown.customerPays.toString(),
+    };
     logger.info('tip.success', {
       userOpHash: gasless.data.userOpHash,
       txHash: gasless.data.txHash,
       creator: params.to,
-      amount: amountStr,
+      amount: sent.amount,
       token: params.token,
     });
     // webhook 失敗 (CORS / non-2xx) は logger.warn のみ。tip は成立しているため UI には出さない。
@@ -163,10 +197,10 @@ export function TipForm({ params }: { params: TipParams }) {
         from: address,
         token: params.token,
         chain: chainSlug,
-        amount: amountStr,
-        merchantAmount: breakdown.merchantReceives.toString(),
-        feeAmount: breakdown.feeAmount.toString(),
-        customerPays: breakdown.customerPays.toString(),
+        amount: sent.amount,
+        merchantAmount: sent.merchantAmount,
+        feeAmount: sent.feeAmount,
+        customerPays: sent.customerPays,
         message: params.message,
         txHash: gasless.data.txHash,
         userOpHash: gasless.data.userOpHash,
@@ -223,6 +257,14 @@ export function TipForm({ params }: { params: TipParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
+    // 送信時点の値を固定 (webhook はこのスナップショットを使い、後続の編集 / gasQuote
+    // refetch による drift を排除する)。
+    submittedRef.current = {
+      amount: amountStr,
+      merchantAmount: breakdown.merchantReceives.toString(),
+      feeAmount: breakdown.feeAmount.toString(),
+      customerPays: breakdown.customerPays.toString(),
+    };
     gasless.mutate({
       tokenAddress: deployment.address,
       merchant: params.to,
@@ -279,7 +321,8 @@ export function TipForm({ params }: { params: TipParams }) {
                 key={p}
                 type="button"
                 onClick={() => selectPreset(p)}
-                className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition ${
+                disabled={gasless.isPending}
+                className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
                     ? 'border-transparent text-white shadow-sm'
                     : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
@@ -300,6 +343,7 @@ export function TipForm({ params }: { params: TipParams }) {
               type="text"
               inputMode="decimal"
               value={customAmount}
+              disabled={gasless.isPending}
               onFocus={selectCustom}
               onChange={(e) => {
                 setSelectedPreset(null);
@@ -310,7 +354,7 @@ export function TipForm({ params }: { params: TipParams }) {
                   ? t('amountCustomPlaceholderJpyc')
                   : t('amountCustomPlaceholderUsdc')
               }
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: customSelected ? themeColor : undefined }}
             />
           </label>

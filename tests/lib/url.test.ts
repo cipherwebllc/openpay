@@ -10,6 +10,7 @@ import {
   parseSplitDrafts,
   DEFAULT_TIP_PRESETS,
   searchParamsFromNext,
+  exceedsTokenPrecision,
 } from '@/lib/url';
 
 // USDC (Base) のアドレスは checksum 既知のため、テストの roundtrip が安定する。
@@ -1695,5 +1696,31 @@ describe('PayParams: crossChain (cross-chain receive)', () => {
     const r = parsePayParams(sp);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.crossChain).toBe(false);
+  });
+});
+
+describe('exceedsTokenPrecision', () => {
+  it('小数なしは常に false', () => {
+    expect(exceedsTokenPrecision('1000', 18)).toBe(false);
+    expect(exceedsTokenPrecision('0', 6)).toBe(false);
+    expect(exceedsTokenPrecision('100', 0)).toBe(false);
+  });
+
+  it('小数桁が decimals 以内なら false', () => {
+    expect(exceedsTokenPrecision('1.5', 18)).toBe(false);
+    expect(exceedsTokenPrecision('0.000001', 6)).toBe(false); // 6 桁 = USDC 上限
+    expect(exceedsTokenPrecision('1.123456', 6)).toBe(false);
+  });
+
+  it('小数桁が decimals を超えると true (parseUnits の黙る丸めを弾く)', () => {
+    // USDC 6dp: "0.0000009" は parseUnits で 0.000001 に丸まる → 表示額と乖離
+    expect(exceedsTokenPrecision('0.0000009', 6)).toBe(true);
+    expect(exceedsTokenPrecision('1.1234567', 6)).toBe(true); // 7 > 6
+    expect(exceedsTokenPrecision('1.0', 0)).toBe(true); // 整数 token に小数
+  });
+
+  it('JPYC 18dp の上限ちょうど / 超過', () => {
+    expect(exceedsTokenPrecision(`0.${'1'.repeat(18)}`, 18)).toBe(false);
+    expect(exceedsTokenPrecision(`0.${'1'.repeat(19)}`, 18)).toBe(true);
   });
 });
