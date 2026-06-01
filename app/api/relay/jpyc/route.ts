@@ -63,10 +63,12 @@ const RELAYER_ACCOUNT: Account | null = RELAYER_PRIVATE_KEY
   ? privateKeyToAccount(RELAYER_PRIVATE_KEY)
   : null;
 
-// relay 単発の上限 (濫用ガード)。GELATO_RELAY_MAX_JPYC は human JPYC (既定 100 万)。
+// relay 単発の上限 (濫用ガード + 立替を少額に限定して資金移動的に見えにくくする)。
+// RELAY_MAX_JPYC は human JPYC (アルファ既定 5 万)。旧 GELATO_RELAY_MAX_JPYC からリネーム
+// (provider 非依存の上限なので Gelato 名は外す)。旧名も後方互換で読む。
 const MAX_VALUE = (() => {
-  const raw = process.env.GELATO_RELAY_MAX_JPYC;
-  const human = raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 1_000_000n;
+  const raw = process.env.RELAY_MAX_JPYC ?? process.env.GELATO_RELAY_MAX_JPYC;
+  const human = raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 50_000n;
   return human * 10n ** 18n;
 })();
 const RL_MAX = 5; // window 内の最大 relay 回数 (per key)
