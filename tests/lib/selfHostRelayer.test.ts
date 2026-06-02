@@ -78,6 +78,27 @@ describe('submitSelfHost', () => {
     expect(io.signTx).not.toHaveBeenCalled();
   });
 
+  it('残高 < watermark (>= MIN) → onLowBalance を実残高で発火し submit は継続', async () => {
+    const io = makeIo({ getBalance: vi.fn(async () => 5n * 10n ** 16n) }); // 0.05 native
+    const onLowBalance = vi.fn();
+    const res = await submitSelfHost(io, TARGET, DATA, {
+      lowBalanceWei: 10n ** 17n, // 0.1 native
+      onLowBalance,
+    });
+    expect(onLowBalance).toHaveBeenCalledWith(5n * 10n ** 16n); // 実残高を渡す
+    expect(res.taskId).toMatch(/^0x[0-9a-fA-F]{64}$/); // 警告でも submit は止めない
+  });
+
+  it('残高 >= watermark → onLowBalance は発火しない', async () => {
+    const io = makeIo({ getBalance: vi.fn(async () => 10n ** 18n) }); // 1 native
+    const onLowBalance = vi.fn();
+    await submitSelfHost(io, TARGET, DATA, {
+      lowBalanceWei: 10n ** 17n,
+      onLowBalance,
+    });
+    expect(onLowBalance).not.toHaveBeenCalled();
+  });
+
   it('nonce 衝突 + authState 未使用 → fresh nonce で再試行 → 2 回目で成功', async () => {
     let calls = 0;
     const io = makeIo({

@@ -61,9 +61,13 @@ export type SelfHostIo = {
 //  - isAuthorizationUsed: 「この authorization が既に on-chain で執行済か」を返す callback。
 //    送信エラー時 (collision/fatal) に再確認し、執行済なら fallback せず pending に倒すための
 //    「serialized owner の証明」(Codex P0/P1)。未提供なら collision は retry、fatal は relay_error。
+//  - lowBalanceWei / onLowBalance: 残高はあるが watermark を下回ったら submit 前に発火する事前警告。
+//    relayer_unfunded は枯渇"後"の事後検知なので、その手前で operator に補充を促すため。0/未提供で無効。
 export type SubmitSelfHostOpts = {
   maxGasCostWei?: bigint;
   isAuthorizationUsed?: () => Promise<boolean>;
+  lowBalanceWei?: bigint;
+  onLowBalance?: (balanceWei: bigint) => void;
 };
 
 // 送信エラーの分類 (B3)。安全側 default は 'uncertain' (broadcast したか不明 → hash を poll → pending)。
@@ -121,6 +125,15 @@ export async function submitSelfHost(
   if (balance < MIN_RELAYER_BALANCE_WEI) {
     // pre-submit サーキットブレーカ。tx は出さない → client は standard へ安全に fallback。
     throw new Error('relayer_unfunded');
+  }
+  // 残高はあるが watermark 未満 → 枯渇前に事前警告 (operator が補充できるよう・上の throw は事後検知)。
+  // 警告は純粋に additive: callback (logger/telemetry) が throw しても正当な relay を中断させない。
+  if (opts.lowBalanceWei && opts.onLowBalance && balance < opts.lowBalanceWei) {
+    try {
+      opts.onLowBalance(balance);
+    } catch {
+      // 低残高警告の失敗は無視し relay 本処理を継続 (telemetry が決済を壊さないため)
+    }
   }
   // 見積が revert で throw した場合も broadcast 前 → 上位 (コア) で relay_error。
   const estimated = await io.estimateGas(target, data);

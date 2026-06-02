@@ -107,6 +107,12 @@ const RELAY_MAX_GAS_COST_WEI = (() => {
   const raw = process.env.RELAY_MAX_GAS_COST_WEI;
   return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 0n;
 })();
+// relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し
+// operator が補充できるように)。既定 0.1 native (1e17)。補充 cadence に応じ env で調整・0 で無効。
+const RELAY_LOW_BALANCE_ALERT_WEI = (() => {
+  const raw = process.env.RELAY_LOW_BALANCE_ALERT_WEI;
+  return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 10n ** 17n;
+})();
 
 // 対応 chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。JPYC v3 は全 chain 同一アドレス。
 // Kaia は Gelato 非対応だが自前 relayer (KAIA gas) で中継可能。RPC 未設定時は viem の default を使う。
@@ -146,10 +152,9 @@ const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
 // 弾き 400 になる) → 起動時に警告。invariant: forwarder 設定 ⟹ RELAYER_PRIVATE_KEY 設定。
 if (
   PROVIDER !== 'self-host' &&
-  (jpycForwarderFor(polygon.id) !== null ||
-    jpycForwarderFor(polygonAmoy.id) !== null ||
-    jpycForwarderFor(kaia.id) !== null ||
-    jpycForwarderFor(kairos.id) !== null)
+  Object.keys(SUPPORTED_CHAINS).some(
+    (id) => jpycForwarderFor(Number(id)) !== null,
+  )
 ) {
   logger.warn('relay.jpyc.misconfig', {
     reason:
@@ -550,6 +555,12 @@ async function handleFree(
         submitSelfHost(io!, target, data, {
           maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
           isAuthorizationUsed,
+          lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
+          onLowBalance: (b) =>
+            logger.warn('relay.relayer.balance_low', {
+              chainId,
+              balanceWei: b.toString(),
+            }),
         }),
       pollTask: (taskId) => pollSelfHost(io!, taskId),
     };
@@ -634,6 +645,12 @@ async function handleRecover(
       submitSelfHost(io, target, data, {
         maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
         isAuthorizationUsed,
+        lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
+        onLowBalance: (b) =>
+          logger.warn('relay.relayer.balance_low', {
+            chainId,
+            balanceWei: b.toString(),
+          }),
       }),
     pollTask: (taskId) => pollSelfHost(io, taskId),
   };

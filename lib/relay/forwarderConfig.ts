@@ -6,18 +6,17 @@
 import { isAddress, getAddress, type Address } from 'viem';
 import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
 
-// deploy 済 Eip3009Forwarder アドレス (chain 別)。未設定 = その chain は free モード。
+// deploy 済 Eip3009Forwarder アドレス (chain 別)。未設定 = その chain は free モード。NEXT_PUBLIC は
+// build 時に inline されるため、リテラル参照を module 直下の table に置いても挙動は同じ (chain 追加が 1 行)。
+const FORWARDER_ADDRESS_ENV: Record<number, string | undefined> = {
+  [polygon.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_POLYGON,
+  [polygonAmoy.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY,
+  [kaia.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIA,
+  [kairos.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIROS,
+};
+
 export function jpycForwarderFor(chainId: number): Address | null {
-  const raw =
-    chainId === polygon.id
-      ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_POLYGON
-      : chainId === polygonAmoy.id
-        ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY
-        : chainId === kaia.id
-          ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIA
-          : chainId === kairos.id
-            ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIROS
-            : undefined;
+  const raw = FORWARDER_ADDRESS_ENV[chainId];
   return raw && isAddress(raw) ? getAddress(raw) : null;
 }
 
