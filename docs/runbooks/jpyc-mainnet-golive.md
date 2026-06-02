@@ -4,15 +4,28 @@
 > 前提ドキュメント: `docs/audit/jpyc-eip3009-audit-scope.md`(監査スコープ)、`contracts/README.md`。
 > **このランブックは外部監査が完了するまで実行しないこと。** 各ステップは人間が承認して実行する。
 
-## 0. ハードゲート(すべて満たすまで deploy しない)
+## 0. ゲート(リスク階層型)
 
-- [ ] **外部セキュリティ監査が完了**し、指摘(あれば)を反映済(再監査 or 監査人の確認済)。
-      ※ 実マネーを扱う契約。LLM/Codex レビュー(実施済・全 CLOSED)は**監査の代替ではない**。
+監査の要否は **value at risk** に比例する。OpenPay は非カストディ + relayer=POL のみ + forwarder は
+残高非保持(atomic receive→split)+ owner/upgrade/rescue 無しで drain 面が構造的に最小。よって:
+
+### 0-a. アルファ(小キャップ)で出す場合のゲート — 実ファーム監査は**不要**
+- [x] **内部 adversarial レビュー完了**(Codex contract+relay・全 finding CLOSED。契約 P2
+      `merchant==forwarder` 修正済 = commit e2efe37)。
+- [ ] **per-tx + 日次キャップを小さく**(`RELAY_MAX_JPYC` を小・`RELAY_DAILY_TX_CAP` を控えめ)。
+- [ ] **alpha/未監査を明示開示**(既存 AlphaNotice + 利用規約。"外部監査未実施・少額のみ" を明記)。
+- [ ] mainnet 用 deployer 鍵(Polygon POL 保有)/ relayer 鍵(POL)/ KV(本番 Upstash・testnet と別)。
+- [ ] `RELAY_MAX_GAS_COST_WEI` を §5 の式で設定(未設定は mainnet self-host で 503)。
+- [ ] `feeReceiver` = 本番 `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 確定。
+- [ ] 稼働後 §8 の監視を有効化。
+
+### 0-b. 本格運用(キャップ引き上げ・本番訴求・パートナー/規制要件)に進む前
+- [ ] **実ファーム監査**(Trail of Bits / OpenZeppelin / Spearbit / 国内ファーム等)を実施し指摘反映。
+      LLM/Codex レビューは subtle bug を見落としうるため、守る価値が増えたら専門監査に切り替える。
 - [ ] `Eip3009Forwarder.sol` が監査時点からバイト単位で不変(下記 codehash 照合)。
-- [ ] mainnet 用の **deployer 鍵**(Polygon POL を保有・relayer 鍵とは別推奨)を用意。
-- [ ] mainnet 用 **relayer 鍵**(POL 保有)と **KV(本番 Upstash・testnet とは別 DB)** を用意。
-- [ ] `RELAY_MAX_GAS_COST_WEI` を後述の式で算出し設定(未設定だと mainnet self-host は 503 で拒否)。
-- [ ] `feeReceiver` mainnet アドレス確定(= 本番 `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` と一致必須)。
+
+> 残留リスク(アルファでも認識): 発行体による JPYC proxy upgrade、キャップは off-chain enforce、
+> 署名窓内での実行タイミングは relayer 任意、誤送 JPYC は回収不能(rescue 無し)。`docs/audit/...` §6。
 
 ## 1. ビルド再現性の確認(監査と同一バイトコード)
 
@@ -126,9 +139,16 @@ NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=<2 等>
 
 ---
 
-## 付録: 現状(2026-06-02 時点)の未充足項目
+## 付録: 現状(2026-06-02 時点)— アルファ投入に必要な残項目
 
-- 外部監査: 未実施(本ランブック §0 のハードゲート)。
-- `DEPLOYER_PRIVATE_KEY`: 未設定。relayer の Polygon mainnet POL: 0。
-- `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON` / `RELAY_MAX_GAS_COST_WEI`: 未設定。
-- → 上記が揃い、監査が完了するまで §3 以降は実行しない。
+コード面は **アルファ投入可**(内部レビュー完了・契約 P2 修正済 e2efe37・Codex 評定「小キャップ
+アルファなら firm 監査なしで妥当」)。残るは ops 設定のみ:
+
+- [ ] `DEPLOYER_PRIVATE_KEY`(Polygon POL 保有)。現状: 未設定。
+- [ ] relayer の **Polygon mainnet POL**。現状: 0(deploy/relay とも払えない)。
+- [ ] `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`(§3 deploy 後に設定)。
+- [ ] `RELAY_MAX_GAS_COST_WEI`(§5)/ 本番 KV / `RELAY_MAX_JPYC`(小さく)。
+- [ ] alpha/未監査の明示開示(AlphaNotice + 利用規約)。
+
+→ 上記が揃えば §1〜§7 を順に実行して**アルファとして本番 gasless を稼働**できる。
+本格運用(キャップ引き上げ)前に §0-b の実ファーム監査。

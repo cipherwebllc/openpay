@@ -94,8 +94,10 @@ gasMode:
 
 ### 4.A コントラクト(`Eip3009Forwarder.sol`)
 - **A1 funds-safe**: `settle` は `from!=0 / merchant!=0 / merchantValue!=0 / feeValue!=0 / intentSalt!=0 /
-  merchant!=feeReceiver` を検証し、`value = merchantValue + feeValue`(solc 0.8 overflow チェック)を
-  受領 → `safeTransfer(merchant, merchantValue)` + `safeTransfer(feeReceiver, feeValue)`。受領額 = 分割額の和。
+  merchant!=feeReceiver / merchant!=address(this)` を検証し、`value = merchantValue + feeValue`
+  (solc 0.8 overflow チェック)を受領 → `safeTransfer(merchant, merchantValue)` +
+  `safeTransfer(feeReceiver, feeValue)`。受領額 = 分割額の和。(`merchant==forwarder` ガードは Codex
+  最終 audit P2 で追加 = commit e2efe37・自己送金で資金閉じ込めを防止。server 側にも同ガード。)
 - **A2 nonce-commit**: 上記 nonce 式が client/server(`forwarderIntent.ts`)と **バイト単位一致**であること
   (golden vector で fence)。改竄→署名検証 revert。
 - **A3 payee ガード**: `receiveWithAuthorization(from, address(this), ...)` で `msg.sender==to` 強制。
@@ -162,8 +164,12 @@ gasMode:
   kv 20 = 88。全分岐を関数注入でカバー(viem/fetch/kv を mock せず)。
 - **golden vector**: client(TS)の nonce == Solidity の `abi.encode` を固定値
   `0xf1e88a8b02d5ff7edf8990e30fc9679ad4be8ba70f76bdbeb6a49742a84d20ab` で fence。
-- **Codex code-review**(B2–B5): P0×2 + P1×6 + P2×2 を指摘 → 2 ラウンド修正 + 最終確認で **全 CLOSED**
-  (commits 97a0d28→7cebc29)。要点は §4-B に反映済。
+- **Codex code-review**(B2–B5・relay): P0×2 + P1×6 + P2×2 を指摘 → 2 ラウンド修正 + 最終確認で
+  **全 CLOSED**(commits 97a0d28→7cebc29)。要点は §4-B に反映済。
+- **Codex 最終契約 audit-lens review**(`Eip3009Forwarder.sol`・auditor 視点): drain/split-redirection
+  経路は無し。actionable は P2×1(`merchant==address(this)` 資金閉じ込め)のみ → 修正済(e2efe37)。
+  評定「本修正後はキャップを絞った**アルファなら実ファーム監査なしで mainnet 妥当**」。残留リスクは §6。
+  → 本格運用(キャップ引き上げ・本番訴求)前に実ファーム監査を推奨(リスク階層型・runbook §0)。
 - **Amoy 実 chain 検証**:
   - 並行 submit(B3): 同時 6 → 3 settle(連続 nonce・hole なし)/ 3 未 broadcast 保守 pending・
     二重 broadcast なし・二重支払いなし(`scripts/amoy-concurrent-settle.mjs`)。
