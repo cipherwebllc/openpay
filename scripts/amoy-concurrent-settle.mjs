@@ -175,11 +175,30 @@ async function main() {
     console.log(`  #${res.i} [${res.status}] ${kind} tx=${j.txHash || '-'} (${res.ms}ms)`);
   }
 
-  // 確定待ち (broadcast 済 tx の mining)。
-  console.log('\n15s 待って on-chain 差分を照合...');
-  await new Promise((r) => setTimeout(r, 15_000));
+  // 確定待ち (broadcast 済 tx の mining)。高 concurrency 下では receipt-wait timeout で pending を
+  // 返した tx も後から mine しうるため、HTTP 応答ではなく on-chain で件数を確定させる。
+  console.log('\n20s 待って on-chain で照合 (HTTP 応答ではなく receipt を真とする)...');
+  await new Promise((r) => setTimeout(r, 20_000));
 
-  const successCount = results.filter((r) => r.json?.ok).length;
+  // 各 txHash の最終状態を on-chain で分類: mined-success / mined-revert / not-found(未 broadcast)。
+  let minedSuccess = 0;
+  let minedRevert = 0;
+  let notFound = 0;
+  const usedNonces = [];
+  for (const h of txHashes) {
+    let receipt = null;
+    let tx = null;
+    try { receipt = await client.getTransactionReceipt({ hash: h }); } catch { /* not mined */ }
+    try { tx = await client.getTransaction({ hash: h }); } catch { /* not found */ }
+    if (receipt) {
+      if (receipt.status === 'success') minedSuccess++;
+      else minedRevert++;
+      if (tx) usedNonces.push(tx.nonce);
+    } else if (!tx) {
+      notFound++; // pre-signed hash が chain に無い = broadcast されず (衝突枯渇の保守的 pending)
+    }
+  }
+
   const [buyerAfter, frAfter] = await Promise.all([
     client.readContract({ address: JPYC, abi: erc20, functionName: 'balanceOf', args: [buyer.address] }),
     client.readContract({ address: JPYC, abi: erc20, functionName: 'balanceOf', args: [FEE_RECEIVER] }),
@@ -187,16 +206,31 @@ async function main() {
   const frDelta = frAfter - frBefore;
   const buyerDelta = buyerBefore - buyerAfter;
   const distinct = new Set(txHashes);
+  // nonce hole 検査: 使われた nonce が連続か (gap が無いか)。
+  const sortedNonces = [...usedNonces].sort((a, b) => a - b);
+  const contiguous =
+    sortedNonces.length === 0 ||
+    sortedNonces.every((n, i) => i === 0 || n === sortedNonces[i - 1] + 1);
 
-  console.log('\n=== 不変条件 ===');
-  console.log(`success=${successCount} pending=${results.filter(r=>r.json?.pending).length} other=${results.filter(r=>!r.json?.ok && !r.json?.pending).length}`);
+  console.log('\n=== on-chain 照合 ===');
+  console.log(`mined success=${minedSuccess} revert=${minedRevert} not-found(未broadcast)=${notFound} / 計 ${txHashes.length}`);
+  console.log(`使用 nonce=[${sortedNonces.join(',')}]`);
+  console.log('\n=== 不変条件 (mined success 件数を真とする) ===');
   const ok1 = distinct.size === txHashes.length;
-  console.log(`1. txHash distinct: ${ok1 ? '✅' : '❌'} (${distinct.size}/${txHashes.length})`);
-  const ok2 = frDelta === FEE_VALUE * BigInt(successCount);
-  console.log(`2. feeReceiver +${formatUnits(frDelta,18)} == success×fee (${formatUnits(FEE_VALUE*BigInt(successCount),18)}): ${ok2 ? '✅' : '❌'}`);
-  const ok3 = buyerDelta === total * BigInt(successCount);
-  console.log(`3. buyer -${formatUnits(buyerDelta,18)} == success×(merchant+fee) (${formatUnits(total*BigInt(successCount),18)}): ${ok3 ? '✅' : '❌'}`);
-  console.log(`\n判定: ${ok1 && ok2 && ok3 ? '✅ PASS (二重支払い無し・nonce 衝突を吸収)' : '⚠️ 要確認 (pending 残や差分不一致は上記 per-request を参照)'}`);
+  console.log(`1. txHash distinct (二重 broadcast 無し): ${ok1 ? '✅' : '❌'} (${distinct.size}/${txHashes.length})`);
+  const ok2 = frDelta === FEE_VALUE * BigInt(minedSuccess);
+  console.log(`2. feeReceiver +${formatUnits(frDelta,18)} == mined×fee (${formatUnits(FEE_VALUE*BigInt(minedSuccess),18)}): ${ok2 ? '✅' : '❌'}`);
+  const ok3 = buyerDelta === total * BigInt(minedSuccess);
+  console.log(`3. buyer -${formatUnits(buyerDelta,18)} == mined×(merchant+fee) (${formatUnits(total*BigInt(minedSuccess),18)}): ${ok3 ? '✅' : '❌'}`);
+  const ok4 = contiguous;
+  console.log(`4. 使用 nonce が連続 (nonce hole 無し): ${ok4 ? '✅' : '❌'}`);
+  const pass = ok1 && ok2 && ok3 && ok4;
+  console.log(
+    `\n判定: ${pass ? '✅ PASS (二重支払い無し・nonce 衝突を安全に吸収)' : '❌ 要調査'}` +
+      (notFound > 0
+        ? `\n  注: ${notFound} 件は衝突枯渇で未 broadcast→pending (顧客は再試行で成立)。高 concurrency の安全な degrade。`
+        : ''),
+  );
   void relayerHint;
 }
 
