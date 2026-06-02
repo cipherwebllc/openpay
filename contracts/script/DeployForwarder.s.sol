@@ -29,7 +29,7 @@ contract DeployForwarder is Script {
         console2.log("  token (JPYC):", address(forwarder.token()));
         console2.log("  feeReceiver :", forwarder.feeReceiver());
         console2.log(
-            "-> set NEXT_PUBLIC_JPYC_FORWARDER_AMOY to the address above"
+            "-> set NEXT_PUBLIC_JPYC_FORWARDER_{AMOY|POLYGON} (deploy した chain に対応) to the address above"
         );
     }
 }
