@@ -30,7 +30,7 @@ import {
   type Hex,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy } from 'viem/chains';
+import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
 import {
   kvLpush,
   kvLrange,
@@ -108,14 +108,22 @@ const RELAY_MAX_GAS_COST_WEI = (() => {
   return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 0n;
 })();
 
-// 対応 chain (Polygon mainnet + Amoy testnet)。同一 JPYC アドレス。Kaia は将来自前 relayer 拡張。
+// 対応 chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。JPYC v3 は全 chain 同一アドレス。
+// Kaia は Gelato 非対応だが自前 relayer (KAIA gas) で中継可能。RPC 未設定時は viem の default を使う。
 const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = {
   [polygon.id]: { chain: polygon, rpc: process.env.NEXT_PUBLIC_POLYGON_RPC_URL },
   [polygonAmoy.id]: {
     chain: polygonAmoy,
     rpc: process.env.NEXT_PUBLIC_POLYGON_AMOY_RPC_URL,
   },
+  [kaia.id]: { chain: kaia, rpc: process.env.NEXT_PUBLIC_KAIA_RPC_URL },
+  [kairos.id]: { chain: kairos, rpc: process.env.NEXT_PUBLIC_KAIROS_RPC_URL },
 };
+
+// mainnet chain (実マネー)。recover の self-host hardening (KV + gas-cost ceiling 必須) を強制する
+// 判定に使う。testnet (Amoy/Kairos) は緩く運用可。新規 mainnet chain を SUPPORTED_CHAINS に
+// 足したら、ここにも追加して silent な fail-open を防ぐこと。
+const MAINNET_CHAINS: ReadonlySet<number> = new Set([polygon.id, kaia.id]);
 
 // JPYC (FiatToken) の EIP-3009 使用済フラグ。submit 前に読み guaranteed-revert を避ける。
 const AUTHORIZATION_STATE_ABI = parseAbi([
@@ -139,7 +147,9 @@ const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
 if (
   PROVIDER !== 'self-host' &&
   (jpycForwarderFor(polygon.id) !== null ||
-    jpycForwarderFor(polygonAmoy.id) !== null)
+    jpycForwarderFor(polygonAmoy.id) !== null ||
+    jpycForwarderFor(kaia.id) !== null ||
+    jpycForwarderFor(kairos.id) !== null)
 ) {
   logger.warn('relay.jpyc.misconfig', {
     reason:
@@ -418,9 +428,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const chainId = raw.chainId;
 
-  // mainnet (polygon) を self-host で relay する前提条件 (testnet は緩く運用可)。silent な無効化を
-  // 避け mainnet のみ 503 で拒否する。
-  if (PROVIDER === 'self-host' && chainId === polygon.id) {
+  // mainnet (Polygon/Kaia) を self-host で relay する前提条件 (testnet は緩く運用可)。silent な
+  // 無効化を避け mainnet のみ 503 で拒否する。
+  if (PROVIDER === 'self-host' && MAINNET_CHAINS.has(chainId)) {
     // B5: gas-cost ceiling 未設定は赤字リスク (Codex P1)。
     if (RELAY_MAX_GAS_COST_WEI === 0n) {
       logger.error('RELAY_MAX_GAS_COST_WEI unset on mainnet self-host (B5 必須)', {

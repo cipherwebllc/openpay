@@ -2,17 +2,20 @@
 // sponsorship のどちらに倒すかを決める単一の真実点。resolveUsdcGaslessProvider (Circle 用)
 // と同型。詳細・段階計画は memory:jpyc-eip3009。
 
-import { polygon, polygonAmoy } from 'viem/chains';
+import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
 import { env } from './env';
 import type { TokenDeployment } from './tokens';
 
 export type JpycGaslessProvider = 'eip3009-relay' | 'pimlico-7702';
 
-// EIP-3009 relay (Gelato sponsoredCall) が対応する chain。/api/relay/jpyc の SUPPORTED_CHAINS
-// と一致させる (Gelato は Polygon 対応・Kaia 非対応。Kaia は将来自前 relayer で別経路)。
+// EIP-3009 relay (自前 relayer) が対応する chain。/api/relay/jpyc の SUPPORTED_CHAINS と一致させる。
+// Polygon は当初 Gelato だったが自前 relayer に移行済。Kaia は Gelato 非対応のため当初除外していたが、
+// 自前 relayer 化で対応可能になった (relayer EOA に KAIA を入金して中継)。
 const EIP3009_RELAY_CHAINS: ReadonlySet<number> = new Set([
   polygon.id,
   polygonAmoy.id,
+  kaia.id,
+  kairos.id,
 ]);
 
 // JPYC ガスレスを EIP-3009 relay にするか、従来の Pimlico/7702 sponsorship にするか。

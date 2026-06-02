@@ -4,7 +4,7 @@
 // 無ければ free モード (Phase A・OpenPay がガス負担)。詳細は memory:gasless-legal-jp / jpyc-eip3009。
 
 import { isAddress, getAddress, type Address } from 'viem';
-import { polygon, polygonAmoy } from 'viem/chains';
+import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
 
 // deploy 済 Eip3009Forwarder アドレス (chain 別)。未設定 = その chain は free モード。
 export function jpycForwarderFor(chainId: number): Address | null {
@@ -13,7 +13,11 @@ export function jpycForwarderFor(chainId: number): Address | null {
       ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_POLYGON
       : chainId === polygonAmoy.id
         ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY
-        : undefined;
+        : chainId === kaia.id
+          ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIA
+          : chainId === kairos.id
+            ? process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIROS
+            : undefined;
   return raw && isAddress(raw) ? getAddress(raw) : null;
 }
 

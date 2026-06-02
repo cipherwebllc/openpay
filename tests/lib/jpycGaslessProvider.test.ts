@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { polygon, polygonAmoy, kaia } from 'viem/chains';
+import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
 import type { TokenDeployment } from '@/lib/tokens';
 
 // env.enableJpycEip3009 を test ごとに制御する (flag が resolver の唯一の env 依存)。
@@ -38,8 +38,9 @@ describe('resolveJpycGaslessProvider', () => {
     expect(resolveJpycGaslessProvider(usdc, polygon.id)).toBe('pimlico-7702');
   });
 
-  it('flag ON でも Kaia は pimlico-7702 (Gelato 非対応・自前 relayer は将来)', () => {
+  it('flag ON + JPYC + Kaia/Kairos → eip3009-relay (自前 relayer 化で対応)', () => {
     enableRef.value = true;
-    expect(resolveJpycGaslessProvider(jpyc, kaia.id)).toBe('pimlico-7702');
+    expect(resolveJpycGaslessProvider(jpyc, kaia.id)).toBe('eip3009-relay');
+    expect(resolveJpycGaslessProvider(jpyc, kairos.id)).toBe('eip3009-relay');
   });
 });
