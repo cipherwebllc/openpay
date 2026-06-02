@@ -37,7 +37,8 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 | **Standard payment (with gas)** | Customer pays in their own wallet (POL / ETH) | Web3 users who already hold native gas |
 | **Gasless payment** | OpenPay sponsors gas via Pimlico (and Circle Paymaster for USDC on Base / Arbitrum / Optimism) | Customers who only hold the payment token |
 
-- Gasless uses ERC-4337 + ERC-7702 — the customer's existing EOA is reused; no smart-wallet creation step. Gas is sponsored via **Pimlico** (JPYC sponsorship / USDC ERC20 paymaster) or, for USDC on Base / Arbitrum / Optimism, **Circle Paymaster v0.8** (gas paid directly in USDC; OpenPay collects 0 fee). Both paths require EIP-7702, so gasless needs a chain that supports it (see the Avalanche note below).
+- Gasless for **JPYC** uses OpenPay's self-hosted **EIP-3009 relayer**: the customer signs a `receiveWithAuthorization` (a plain EIP-712 signature — **no EIP-7702 delegation required**, so it works in MetaMask and other injected wallets), and the relayer forwards it to an on-chain forwarder contract that atomically pays the merchant and recovers a fixed gas-equivalent in JPYC. Live on **Polygon and Kaia** mainnet. Pimlico / EIP-7702 sponsorship remains as an automatic fallback.
+- Gasless for **USDC** uses ERC-4337 + ERC-7702 — the customer's existing EOA is reused; no smart-wallet creation step. Gas is sponsored via **Pimlico** (ERC20 paymaster) or, for USDC on Base / Arbitrum / Optimism, **Circle Paymaster v0.8** (gas paid directly in USDC; OpenPay collects 0 fee). These require EIP-7702, so USDC gasless needs a chain that supports it (see the Avalanche note below).
 - Standard mode is a plain ERC20 `transfer` (single transfer to the merchant).
 - In gasless mode, the network-fee bearer is selectable: `gas=customer` (default) or `gas=merchant`.
 
@@ -45,7 +46,7 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 OpenPay service fee is **0% during the alpha period**, and OpenPay never charges a fee tied to the transaction amount. There are no monthly fees, minimum fees, or setup fees. Merchant funds flow directly to the merchant wallet.
 
-In **gasless** mode, OpenPay sponsors the native gas (POL / ETH) via the Pimlico paymaster and recovers it as a **network-fee reimbursement collected in the payment token** (JPYC / USDC). For JPYC sponsorship this reimbursement is a **fixed amount based on the congestion-ceiling gas price** (independent of the transaction amount; any surplus over the actual gas is not refunded) — see [docs/DEPLOY_CHECKLIST.md §9.5](./docs/DEPLOY_CHECKLIST.md). In **standard** mode the customer pays gas directly from their own wallet and OpenPay does not touch it.
+In **gasless** mode, OpenPay advances the native gas (POL / KAIA / ETH) — via the **EIP-3009 relayer** for JPYC or the **Pimlico paymaster** for USDC — and recovers it as a **network-fee reimbursement collected in the payment token** (JPYC / USDC). For JPYC this reimbursement is a **fixed amount** (independent of the transaction amount; any surplus over the actual gas is not refunded) — see [docs/DEPLOY_CHECKLIST.md §9.5](./docs/DEPLOY_CHECKLIST.md). In **standard** mode the customer pays gas directly from their own wallet and OpenPay does not touch it.
 
 A future pricing model that is **not tied to transaction volume** (e.g. a monthly subscription or a prepaid usage license such as an NFT pass / time-limited rights) is under consideration. This direction is chosen so OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 
@@ -53,7 +54,7 @@ A future pricing model that is **not tied to transaction volume** (e.g. a monthl
 
 | Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
 |---|---|---|---|
-| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via Pimlico Sponsorship Paymaster |
+| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia | same (no cross-chain) | Gasless via OpenPay's self-hosted **EIP-3009 relayer** (signature-based, no EIP-7702 needed) — live on Polygon + Kaia; Pimlico / 7702 sponsorship as fallback |
 | **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain** (6) | merchant 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on Base / Arbitrum / Optimism / Polygon / Ethereum L1; **Circle Paymaster v0.8** runs in parallel for USDC on Base / Arbitrum / Optimism (USDC-native gas, OpenPay 0 fee). **Avalanche C-Chain is standard-mode only for now** — its EIP-7702 (ACP-209) is not yet activated on mainnet, so gasless (which relies on 7702) gracefully falls back to standard payment; it re-enables automatically once ACP-209 ships. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
 
 `NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia + World Chain Sepolia + Sonic Blaze Testnet + Sei Testnet + HyperEVM Testnet.
