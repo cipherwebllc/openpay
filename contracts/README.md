@@ -81,7 +81,7 @@ RELAY_URL=http://localhost:3000/api/relay/jpyc node scripts/amoy-idempotency.mjs
 | chain | Eip3009Forwarder | feeReceiver | 備考 |
 |---|---|---|---|
 | Polygon Amoy (80002) | `0x752B7AaD0089286EB7b553d84D05233d80c9FCB4` | `0x428483FbA62eDCef1E3a100d3799F6d71759c560` | 検証用 (2026-06-02 deploy・未監査) |
-| Polygon (137) | — | — | mainnet は監査 + Phase B 後 |
+| Polygon (137) | `0x0F4560a777415580F0680F8B56a79B0022C6B848` | `0x428483FbA62eDCef1E3a100d3799F6d71759c560` | **alpha 投入 (2026-06-02 deploy・未 firm 監査)**。COMMIT_VERSION on-chain 照合済。本格運用前に firm 監査 (runbook §0-b) |
 
 設定: `NEXT_PUBLIC_JPYC_FORWARDER_AMOY` に上記アドレスを入れると Amoy が recover モードになる。
 feeReceiver は `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` と一致必須 (一致しないと署名検証が通らない)。
