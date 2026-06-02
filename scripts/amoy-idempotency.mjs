@@ -159,21 +159,27 @@ async function main() {
   const successN = kinds.filter((k) => k === 'success').length;
   const pendingN = kinds.filter((k) => k === 'pending').length;
   const revertN = kinds.filter((k) => k === 'reverted').length;
-  // duplicate を submit 前に弾いた = pending が 1 件・かつ速い (<3s)・revert 無し。
-  const fastPending = [a1, a2].some((r) => kindOf(r) === 'pending' && r.ms < 3000);
+  // duplicate を submit 前に弾いた = pending が broadcast せず (txHash 無し) 返り、revert も無い。
+  // (latency は cold compile + RPC 往復で伸びるため判定には使わない。broadcast 有無が本質。)
+  const dupNoBroadcast = [a1, a2].some(
+    (r) => kindOf(r) === 'pending' && !r.json?.txHash,
+  );
 
   console.log('\n=== B2 idempotency 判定 ===');
   console.log(`同時POST: success=${successN} pending=${pendingN} reverted=${revertN}`);
-  const ok1 = frDelta === FEE_VALUE; // settle は 1 回だけ
-  console.log(`1. on-chain settle 1 回のみ (feeReceiver +${formatUnits(frDelta, 18)}==fee / buyer -${formatUnits(buyerDelta, 18)}==merchant+fee): ${ok1 && buyerDelta === total ? '✅' : '❌'}`);
+  const ok1 = frDelta === FEE_VALUE && buyerDelta === total; // settle は 1 回だけ
+  console.log(`1. on-chain settle 1 回のみ (feeReceiver +${formatUnits(frDelta, 18)}==fee / buyer -${formatUnits(buyerDelta, 18)}==merchant+fee): ${ok1 ? '✅' : '❌'}`);
   if (kvOn) {
-    const ok2 = pendingN >= 1 && revertN === 0 && fastPending;
-    console.log(`2. duplicate を submit 前に弾き pending (revert gas 浪費なし・<3s): ${ok2 ? '✅' : '⚠️'}`);
+    // B2 の本質: duplicate を submit 前に弾く = revert(無駄 broadcast) ゼロ + pending が broadcast 無し。
+    const ok2 = revertN === 0 && pendingN >= 1 && dupNoBroadcast;
+    console.log(`2. duplicate を submit 前に弾き pending (revert/二重 broadcast 無し): ${ok2 ? '✅' : '❌'}`);
     const ok3 = kv.configured && kv.value != null;
     console.log(`3. KV に idem key が claim 済: ${ok3 ? '✅' : '❌'} (${JSON.stringify(kv.value)})`);
     const ok4 = kindOf(a3) === 'pending';
     console.log(`4. 確定後の再POSTは pending (authState 既使用): ${ok4 ? '✅' : '❌'}`);
-    console.log(`\n判定: ${ok1 && buyerDelta === total && ok2 && ok3 && ok4 ? '✅ PASS (B2 idempotency 実環境で機能・二重支払いゼロ)' : '⚠️ 上記参照'}`);
+    const slowDup = [a1, a2].some((r) => kindOf(r) === 'pending' && r.ms >= 3000);
+    if (slowDup) console.log('   注: duplicate の応答が >3s だが cold compile + RPC 往復のため (broadcast 無しなので B2 は機能)。');
+    console.log(`\n判定: ${ok1 && ok2 && ok3 && ok4 ? '✅ PASS (B2 idempotency 実環境で機能・二重支払いゼロ)' : '⚠️ 上記参照'}`);
   } else {
     console.log('KV OFF: B2 は fail-open。duplicate も submit され片方は on-chain で revert (二重支払いは防げるが gas 浪費)。');
     console.log(`参考: success=${successN} reverted=${revertN}・settle 1 回=${ok1 && buyerDelta === total ? '✅' : '❌'}`);
