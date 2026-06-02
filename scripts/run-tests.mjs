@@ -10,55 +10,26 @@
 //   3. passed + failed < total かつ 未 run の test が KNOWN_BROKEN_FILES の
 //      範囲外 (= 新規 partial silent skip。regression 検知用 fence)
 //
-// KNOWN_BROKEN_FILES: PaymentForm / CheckoutForm / TipForm 系の 6 ファイルは
-// module evaluation 段階で worker OOM し、assertion が一度も走らない (vitest
-// JSON では collect 済だが pass / fail 双方に未集計)。
+// KNOWN_BROKEN_FILES: worker OOM 等で collect 後に run されないファイルを file→期待 missing
+// test 数の Map で登録する暫定 allowlist。KNOWN_MAX_MISSING はこの Map から導出するので、
+// ファイルを外せば fence がその件数分だけ自動的に厳しくなり (空なら missing 0 件のみ許容)、
+// 新規 partial silent skip を確実に fail させる。
 //
-// 2026-05-28 audit 追加検証: heap 6 → 12 GB / --pool=forks --maxForks=1 /
-// --isolate=false いずれも OOM 不解消。OOM タイミングは collect (~600ms) 後の
-// tests phase 内 (0ms 計測 = 最初の test 完了前)。原因は heap 限界ではなく
-// module/環境 評価段階の病的メモリ。
-//
-// 2026-05-29 さらに切り分け: (a) 単一ファイル (PaymentForm.test 69 tests) を
-// 8 GB で隔離実行しても tests 0ms で worker 死 = test 数 (規模) ではなく
-// per-file の評価が原因。(b) vi.mock('@/lib/pimlico', importActual) を importActual
-// 無しの full static mock に差し替えても不解消 = pimlico (permissionless + viem
-// account-abstraction) graph が直接の犯人ではない。残る最有力は PaymentForm/
-// CheckoutForm/TipForm 本体が import する viem/wagmi 系 module graph を jsdom worker で
-// 評価→render する際の累積。よって単純なファイル分割では解消しない可能性が高く、
-// mock 層で component の重い import を遮断する再設計が要る。
-//
-// 機能カバレッジ: 該当ファイルが扱う UI 動作は e2e/pay.spec.ts / scan.spec.ts /
-// tip.spec.ts で覆われており、production behavior は実 build + 実 Playwright render で
-// verified (jsdom unit より高 fidelity)。失われているのは unit-level の regression fence。
-//
-// root cause fix の方針 (別 task、bounded だが不確実): component の重い依存
-// (viem/wagmi/permissionless) を test 境界で完全 mock し jsdom worker に実 graph を
-// 評価させない再設計 + describe 単位の分割。安全に行うには専用 effort が要る。
-// 2026-05-31 追加切り分け: deps.optimizer の事前バンドルでも不解消。transform/collect は
-// 成功し tests phase 0ms (最初の render) で ~29s かけて OOM = **module 評価でなく render
-// フェーズ**が原因。かつ当該 test は既に wagmi / 全 app hook / lib/pimlico を mock 済・
-// historyCtx も memo 済 → 「重いグラフ評価」「再 render ループ」では説明できない。残るは
-// heap profiling / 未 mock の子 component を順次 mock する render 二分探索での犯人特定。
-// 挙動は e2e (pay/scan/tip) でカバー済のため allowlist 据え置き (本 fence が新規 skip を防ぐ)。
-// 暫定: 「該当 6 ファイルに限り未 run を allow、他ファイルで silent skip が出れば
-// fail」で運用 (本 allowlist が fence)。
+// 2026-06-03: 旧 6 ファイル (PaymentForm/CheckoutForm/TipForm 系) の worker OOM は真因が
+// ConnectButton の render (jsdom で重い wagmi/connector graph を評価) と判明。ConnectButton を
+// 軽量 stub (tests/_helpers/connectButtonStub.tsx) に差し替えることで全て実 run+pass に復帰した
+// ため allowlist を空にした。手数料 0% 化に伴う stale assertion も併せて更新済。
+// 詳細は memory:paymentform-oom-rootcause。
 
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// 既知の worker-OOM ファイル。upstream で test 再構成し直すまでの暫定 allowlist。
-// 新規 partial silent skip が出れば fail させるための fence であり、ここに足す
-// 操作には PR レビューで明示同意が必要。
-const KNOWN_BROKEN_FILES = new Set([
-  'tests/components/CheckoutForm.test.tsx',
-  'tests/components/PaymentForm.history-integration.test.tsx',
-  'tests/components/PaymentForm.standard-integration.test.tsx',
-  'tests/components/PaymentForm.test.tsx',
-  'tests/components/TipForm-crosschain.integration.test.tsx',
-  'tests/components/TipForm.test.tsx',
+// 既知の worker-OOM 等で未 run のファイル → 期待 missing test 数 (Map)。空 = 全ファイル run 前提
+// (missing が 1 件でも出れば fail)。ここに足す操作は PR レビューで明示同意が必要。
+const KNOWN_BROKEN_FILES = new Map([
+  // 例: ['tests/components/Foo.test.tsx', 42], // OOM 等で未 run のファイルと collect 済 test 数
 ]);
 
 const tmp = mkdtempSync(join(tmpdir(), 'vitest-out-'));
@@ -125,9 +96,13 @@ child.on('exit', (code) => {
     // vitest JSON reporter は worker crash 済 file の testResults entry を
     // 出さないため erroredRel が空になる場合がある (numTotalTests には別経路で
     // 加算済)。その場合は file 名を特定できないので allowlist 検証不能 →
-    // KNOWN_BROKEN_FILES の総 test 数を上限として「期待値内」かどうかで判定する。
-    // (期待値: 上記 6 ファイル合計 186 tests = 48+69+13+3+49+4)
-    const KNOWN_MAX_MISSING = 186;
+    // KNOWN_BROKEN_FILES に登録した期待 missing 数の合計を上限とする。allowlist が
+    // 空なら 0 = missing が 1 件でも出れば fail (= 全ファイル run を強制)。ファイルを
+    // 外せば fence がその件数分だけ自動で厳しくなる (ハードコードの 186 を廃止)。
+    const KNOWN_MAX_MISSING = [...KNOWN_BROKEN_FILES.values()].reduce(
+      (sum, n) => sum + n,
+      0,
+    );
     if (unknown.length > 0) {
       console.error(
         `[run-tests] FAIL: ${missing} 件の test が collect 済だが run されていない ` +

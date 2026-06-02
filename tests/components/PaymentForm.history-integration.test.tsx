@@ -77,6 +77,11 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
+// ConnectButton は実物だと jsdom で重い wagmi graph を render 評価し worker OOM
+// (memory:paymentform-oom-rootcause)。軽量 stub に差し替え。
+vi.mock('@/components/ConnectButton', async () => ({
+  ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
+}));
 import { PaymentForm } from '@/components/PaymentForm';
 import {
   HISTORY_STORAGE_KEY,
@@ -199,9 +204,9 @@ describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
     expect(entry.blockNumber).toBe('42');
     expect(entry.id).toBe(`batch-${GASLESS_TX}`);
     // bigint string で記録 (raw wei)。
-    // amount=1000 JPYC → fee 1.0% = 10 JPYC、merchantReceives = 990 JPYC
-    expect(entry.merchantAmount).toBe('990000000000000000000');
-    expect(entry.feeAmount).toBe('10000000000000000000');
+    // amount=1000 JPYC → fee=0 (手数料撤廃)、merchantReceives = 1000 JPYC 満額
+    expect(entry.merchantAmount).toBe('1000000000000000000000');
+    expect(entry.feeAmount).toBe('0');
   });
 
   it('gasless reverted: status=reverted で記録 (success=false)', async () => {

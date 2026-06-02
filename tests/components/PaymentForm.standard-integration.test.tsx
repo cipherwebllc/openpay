@@ -141,12 +141,16 @@ import {
   useSearchParams,
   type ReadonlyURLSearchParams,
 } from 'next/navigation';
+// ConnectButton は実物だと jsdom で重い wagmi graph を render 評価し worker OOM
+// (memory:paymentform-oom-rootcause)。軽量 stub に差し替え。
+vi.mock('@/components/ConnectButton', async () => ({
+  ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
+}));
 import { PaymentForm } from '@/components/PaymentForm';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
 const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
 const MERCHANT_TX: Hex = `0x${'a'.repeat(64)}`;
-const FEE_TX: Hex = `0x${'b'.repeat(64)}`;
 
 function setURL(query: string) {
   vi.mocked(useSearchParams).mockReturnValue(
@@ -182,7 +186,7 @@ beforeEach(() => {
 });
 
 describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
-  it('完全な happy path: mutate → merchant 確定 → fee 自動起動 → 全成功で SuccessOverlay', async () => {
+  it('happy path (fee=0): mutate → merchant 確定 → fee tx skip → success-no-fee で SuccessOverlay', async () => {
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     const { rerender } = render(<PaymentForm />);
@@ -195,8 +199,8 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     await user.click(payBtn);
     expect(writeMocks.merchant.writeContract).toHaveBeenCalledOnce();
     const merchantArgs = writeMocks.merchant.writeContract.mock.calls[0][0];
-    // 0.5% fee → merchant = 9.95 USDC, fee = 0.05 USDC
-    expect(merchantArgs.args).toEqual([MERCHANT, 9_950_000n]);
+    // fee=0 → merchant = 10 USDC 満額。fee tx は発火しない (success-no-fee)。
+    expect(merchantArgs.args).toEqual([MERCHANT, 10_000_000n]);
     expect(merchantArgs.functionName).toBe('transfer');
 
     // merchant tx broadcast (data set)
@@ -215,49 +219,10 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
       screen.getByRole('button', { name: /店舗送金を確定中/ }),
     ).toBeDisabled();
 
-    // merchant receipt 確定 (status=success) → useEffect が fee tx 自動起動
+    // merchant receipt 確定 (status=success) → fee=0 なので fee tx を skip して success
     act(() => {
       receiptMocks.byHash.set(MERCHANT_TX, {
         data: { status: 'success', blockNumber: 100n },
-        error: null,
-        isSuccess: true,
-        isError: false,
-      });
-    });
-    rerender(<PaymentForm />);
-    await waitFor(() =>
-      expect(writeMocks.fee.writeContract).toHaveBeenCalled(),
-    );
-    const feeArgs = writeMocks.fee.writeContract.mock.calls[0][0];
-    expect(feeArgs.args).toEqual([
-      // env.feeReceiver は test env で default ('0x...dEaD000...001234')
-      expect.any(String),
-      50_000n,
-    ]);
-    // phase: fee-sending
-    expect(
-      screen.getByRole('button', { name: /手数料の送金を承認してください/ }),
-    ).toBeDisabled();
-
-    // fee tx broadcast
-    act(() => {
-      writeMocks.fee.data = FEE_TX;
-      receiptMocks.byHash.set(FEE_TX, {
-        data: undefined,
-        error: null,
-        isSuccess: false,
-        isError: false,
-      });
-    });
-    rerender(<PaymentForm />);
-    expect(
-      screen.getByRole('button', { name: /手数料の送金を確定中/ }),
-    ).toBeDisabled();
-
-    // fee receipt 確定 → phase=success
-    act(() => {
-      receiptMocks.byHash.set(FEE_TX, {
-        data: { status: 'success', blockNumber: 101n },
         error: null,
         isSuccess: true,
         isError: false,
@@ -269,61 +234,16 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
       // SuccessOverlay の「決済完了」が出る
       expect(screen.getAllByText(/決済完了/).length).toBeGreaterThan(0);
     });
+    // fee=0: fee tx は一切発火しない (fee>0 の fee-tx サブフローは useStandardPayment.test.tsx で検証)
+    expect(writeMocks.fee.writeContract).not.toHaveBeenCalled();
     // inline ResultPanel に merchant tx hash の full が出る
     expect(screen.getAllByText(MERCHANT_TX).length).toBeGreaterThanOrEqual(1);
-    // fee tx hash も出る
-    expect(screen.getAllByText(FEE_TX).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('fee tx wallet reject → fee-error UI + retry button click で fee writeContract 再呼出', async () => {
-    const user = userEvent.setup();
-    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
-    const { rerender } = render(<PaymentForm />);
-
-    await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
-    expect(writeMocks.merchant.writeContract).toHaveBeenCalledOnce();
-
-    // merchant 確定 → fee 自動起動
-    act(() => {
-      writeMocks.merchant.data = MERCHANT_TX;
-      receiptMocks.byHash.set(MERCHANT_TX, {
-        data: { status: 'success', blockNumber: 100n },
-        error: null,
-        isSuccess: true,
-        isError: false,
-      });
-    });
-    rerender(<PaymentForm />);
-    await waitFor(() =>
-      expect(writeMocks.fee.writeContract).toHaveBeenCalledOnce(),
-    );
-
-    // fee tx wallet reject
-    act(() => {
-      writeMocks.fee.error = new Error('user rejected fee tx');
-    });
-    rerender(<PaymentForm />);
-
-    // fee-error retry UI が出る
-    await waitFor(() => {
-      expect(
-        screen.getByText(/OpenPay 利用手数料の送信に失敗/),
-      ).toBeInTheDocument();
-    });
-
-    // retry click → fee writeContract が 2 回目の呼出
-    const retryBtn = screen.getByRole('button', {
-      name: /手数料の送信を再試行/,
-    });
-    // 退避: reset() が呼ばれた後の状態を simulate (本物の wagmi なら data/error clear)
-    await user.click(retryBtn);
-    expect(writeMocks.fee.reset).toHaveBeenCalled();
-    expect(writeMocks.fee.writeContract).toHaveBeenCalledTimes(2);
-    // 引数は最初と同じ (= fee 徴収 ERC20.transfer)
-    const retryArgs = writeMocks.fee.writeContract.mock.calls[1][0];
-    expect(retryArgs.functionName).toBe('transfer');
-    expect(retryArgs.args[1]).toBe(50_000n);
-  });
+  // 注: fee>0 の fee-tx 自動起動 / wallet reject → fee-error retry サブフローは
+  // PaymentForm 経由では fee=0 (FEE_BPS_*=0n) のため到達不能。useStandardPayment の
+  // 該当ロジックは tests/hooks/useStandardPayment.test.tsx が feeAmount>0 を直接注入して
+  // 網羅検証している (fee tx 自動発火 / fee-error / retry)。ここでは重複検証しない。
 
   it('merchant tx wallet reject → fee tx 不送信、エラーメッセージ表示', async () => {
     const user = userEvent.setup();

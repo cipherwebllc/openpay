@@ -42,6 +42,11 @@ vi.mock('@/lib/pimlico', async () => {
     resolvePaymasterMode: vi.fn(actual.resolvePaymasterMode),
   };
 });
+// ConnectButton は実物だと jsdom で重い wagmi graph を render 評価し worker OOM
+// (memory:paymentform-oom-rootcause)。軽量 stub に差し替え。
+vi.mock('@/components/ConnectButton', async () => ({
+  ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
+}));
 
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -371,11 +376,12 @@ describe('CheckoutForm — 送信', () => {
 
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
-    // total 55 USDC, fee 1% = 0.55 USDC, sponsorship なので feeAmount += gas (0.1)
-    // merchantAmount = 55 - 0.55 = 54.45 USDC = 54_450_000
-    expect(call.merchantAmount).toBe(54_450_000n);
-    // testnet 環境では sponsorship に倒れるので feeAmount = 0.55 + 0.1 = 0.65 USDC
-    expect(call.feeAmount).toBe(550_000n + 100_000n);
+    // total 55 USDC, fee=0 → merchant = 55 満額。gas (0.1) を回収: networkFeeEquivalent=会計記録、
+    // gasReimbursement=useBatchPayment が実 on-chain で feeReceiver へ加算送金する額。
+    expect(call.merchantAmount).toBe(55_000_000n);
+    expect(call.feeAmount).toBe(0n);
+    expect(call.networkFeeEquivalent).toBe(100_000n);
+    expect(call.gasReimbursement).toBe(100_000n);
   });
 
   it('ERC20 mode (USDC mainnet 相当): feeAmount に gas を含めない', async () => {
@@ -394,9 +400,9 @@ describe('CheckoutForm — 送信', () => {
     );
 
     const call = mutate.mock.calls[0][0];
-    expect(call.merchantAmount).toBe(54_450_000n);
-    // erc20 paymaster: feeAmount は fee のみ (gas は paymaster が直接顧客から徴収)
-    expect(call.feeAmount).toBe(550_000n);
+    expect(call.merchantAmount).toBe(55_000_000n);
+    // fee=0。erc20 paymaster は gas を顧客から直接徴収するので feeAmount=0。
+    expect(call.feeAmount).toBe(0n);
   });
 
   it('gas=merchant: customer は subtotal だけ払い、gas は merchant から控除', () => {
@@ -430,7 +436,8 @@ describe('CheckoutForm — 送信', () => {
         }}
       />,
     );
-    expect(screen.getByText(/手数料を引くと店主受取が 0/)).toBeInTheDocument();
+    // fee=0 なので underflow は gas が原因 → メッセージは「gas を引くと店主受取が 0」
+    expect(screen.getByText(/店主受取が 0/)).toBeInTheDocument();
   });
 });
 
@@ -953,7 +960,7 @@ describe('CheckoutForm — mode=standard 統合', () => {
     );
   });
 
-  it('mode=standard で 「支払う」 クリック → standardMutate に正しい引数が渡る (0.5% fee)', async () => {
+  it('mode=standard で 「支払う」 クリック → standardMutate に正しい引数が渡る (fee=0)', async () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -963,10 +970,9 @@ describe('CheckoutForm — mode=standard 統合', () => {
     await user.click(screen.getByRole('button', { name: /55 USDC を支払う/ }));
     expect(standardMutate).toHaveBeenCalledOnce();
     const call = standardMutate.mock.calls[0][0];
-    // fee = 55 * 0.5% = 0.275 USDC
-    expect(call.feeAmount).toBe(275_000n);
-    // merchant = 55 - 0.275 = 54.725 USDC
-    expect(call.merchantAmount).toBe(54_725_000n);
+    // fee=0 → merchant = 55 満額
+    expect(call.feeAmount).toBe(0n);
+    expect(call.merchantAmount).toBe(55_000_000n);
     expect(call.chainId).toBe(baseSepolia.id);
   });
 

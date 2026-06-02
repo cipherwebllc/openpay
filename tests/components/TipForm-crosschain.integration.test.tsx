@@ -105,6 +105,11 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+// ConnectButton は実物だと jsdom で重い wagmi graph を render 評価し worker OOM
+// (memory:paymentform-oom-rootcause)。軽量 stub に差し替え (CrossChainHint は実物のまま統合検証)。
+vi.mock('@/components/ConnectButton', async () => ({
+  ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
+}));
 import { TipForm } from '@/components/TipForm';
 import type { TipParams } from '@/lib/url';
 
@@ -293,7 +298,10 @@ describe('TipForm + 実 CrossChainHint 統合', () => {
     renderWithIntl(withQueryClient(<TipForm params={JPYC_PARAMS} />));
 
     await waitFor(() => {
-      expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+      // fee=0 で「100 JPYC」が明細にも出て getByText が複数 match するため preset ボタンに限定
+      expect(
+        screen.getByRole('button', { name: '100 JPYC' }),
+      ).toBeInTheDocument();
     });
     expect(screen.queryByText(/支払元チェーンを選ぶ/)).toBeNull();
     expect(screen.queryByText(/Gateway/)).toBeNull();
