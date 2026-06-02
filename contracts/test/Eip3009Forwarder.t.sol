@@ -207,6 +207,17 @@ contract Eip3009ForwarderTest is Test {
         );
     }
 
+    function test_settle_revertsMerchantIsForwarder() public {
+        // merchant に forwarder 自身を指定 → merchantValue が閉じ込められる前に revert (Codex P2)。
+        uint256 mv = 1000 ether;
+        uint256 fv = 3 ether;
+        (uint8 v, bytes32 r, bytes32 s) = _sign(address(forwarder), mv, fv, keccak256("mfwd"));
+        vm.expectRevert(Eip3009Forwarder.MerchantIsForwarder.selector);
+        forwarder.settle(
+            customer, address(forwarder), mv, fv, validAfter, validBefore, keccak256("mfwd"), v, r, s
+        );
+    }
+
     // --- SafeERC20 (false 返り値) -----------------------------------------
 
     function test_settle_revertsOnTransferReturningFalse() public {

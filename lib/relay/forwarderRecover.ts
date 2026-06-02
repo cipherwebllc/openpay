@@ -99,6 +99,11 @@ export async function recoverViaForwarder(
   if (getAddress(params.merchant) === getAddress(feeReceiver)) {
     return rejected(400, 'merchant_is_fee_receiver');
   }
+  // merchant == forwarder は merchantValue を contract に閉じ込める (回収不能・Codex P2)。
+  // 契約側にもガードがあるが、既 deploy 済 forwarder (Amoy) 保護 + defense-in-depth で server も弾く。
+  if (getAddress(params.merchant) === getAddress(forwarder)) {
+    return rejected(400, 'merchant_is_forwarder');
+  }
   if (params.intentSalt.toLowerCase() === ZERO_BYTES32) {
     return rejected(400, 'zero_salt');
   }

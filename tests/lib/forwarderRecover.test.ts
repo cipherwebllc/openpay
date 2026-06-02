@@ -122,6 +122,13 @@ describe('recoverViaForwarder', () => {
     expect(res).toMatchObject({ kind: 'rejected', reason: 'merchant_is_fee_receiver' });
   });
 
+  it('merchant == forwarder → rejected (Codex P2・資金閉じ込め防止)', async () => {
+    const deps = makeDeps();
+    const res = await recoverViaForwarder(await makeInput({ merchant: FORWARDER }), deps);
+    expect(res).toMatchObject({ kind: 'rejected', reason: 'merchant_is_forwarder' });
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
   it('intentSalt=0 → rejected zero_salt', async () => {
     const deps = makeDeps();
     const res = await recoverViaForwarder(

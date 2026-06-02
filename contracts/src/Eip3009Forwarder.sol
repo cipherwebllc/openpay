@@ -58,6 +58,9 @@ contract Eip3009Forwarder is ReentrancyGuard {
     error ZeroValue();
     error ZeroSalt();
     error MerchantIsFeeReceiver();
+    /// @dev merchant にこの forwarder 自身を指定すると merchantValue が自己送金で閉じ込められる
+    ///   (rescue 無し=回収不能) ため明示禁止 (Codex audit P2)。
+    error MerchantIsForwarder();
 
     constructor(IERC20 token_, address feeReceiver_) {
         if (address(token_) == address(0) || feeReceiver_ == address(0)) {
@@ -97,6 +100,8 @@ contract Eip3009Forwarder is ReentrancyGuard {
         if (intentSalt == bytes32(0)) revert ZeroSalt();
         // 店舗 == 回収先 は会計が崩れる (店舗が自分のガスを回収する形) ため明示禁止。
         if (merchant == feeReceiver) revert MerchantIsFeeReceiver();
+        // merchant == この forwarder は merchantValue を自己送金で閉じ込める (回収不能) → 禁止。
+        if (merchant == address(this)) revert MerchantIsForwarder();
 
         // total は overflow チェック付き加算 (solc 0.8)。
         uint256 value = merchantValue + feeValue;
