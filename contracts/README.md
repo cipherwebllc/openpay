@@ -36,8 +36,45 @@ forge create contracts/src/Eip3009Forwarder.sol:Eip3009Forwarder \
   --constructor-args 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29 "$FEE_RECEIVER_ADDRESS"
 ```
 
-> mainnet 投入は **外部セキュリティ監査 + Phase B (ガス上限 reject / KV nonce / idempotency /
-> ambiguous-send 回復)** が前提。Amoy (testnet) は監査不要でフロー検証可。
+> mainnet 投入は **外部セキュリティ監査** が前提。Phase B 堅牢化 (B1–B5: idempotency /
+> ambiguous-send pre-sign / 日次予算 / gas ceiling) は実装済 + Codex review 全 finding CLOSED +
+> Amoy 実環境検証済。監査スコープ・不変条件・脅威モデルは `docs/audit/jpyc-eip3009-audit-scope.md`。
+> Amoy (testnet) は監査不要でフロー検証可。
+
+## 実環境検証ハーネス (Amoy)
+
+relay サーバ + forwarder を **実 chain (Amoy)** で検証するスクリプト群 (`scripts/`)。いずれも
+`.env.local` を読み、署名前に golden vector で nonce/encode が契約と一致することを fence する。
+機密は出力しない (秘密鍵は address のみ導出)。
+
+**前提**: `.env.local` に `RELAYER_PRIVATE_KEY` (POL 保有・self-host relayer) /
+`NEXT_PUBLIC_JPYC_FORWARDER_AMOY` / `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` /
+`NEXT_PUBLIC_POLYGON_AMOY_RPC_URL`。並行/idempotency テストは追加で `AMOY_TEST_BUYER_KEY`
+(JPYC 保有の署名元・使い捨て testnet 鍵) と、KV 検証時は `KV_REST_API_URL` / `KV_REST_API_TOKEN`。
+relay endpoint を動かすため別ターミナルで dev server (`npm run dev`) を起動しておく。
+
+```bash
+# 1. 前提チェック (読み取り専用): relayer POL / forwarder・JPYC 存在 / KV 到達性 / buyer JPYC 残高
+node scripts/amoy-relay-readiness.mjs [buyerAddress]
+
+# 2. 並行 submit (B3 nonce 衝突吸収): 単一 buyer が N 個の DISTINCT authorization を同時 POST →
+#    単一 relayer EOA の nonce 競合を誘発。on-chain で照合 (txHash distinct / settle 件数 /
+#    nonce 連続=hole なし / feeReceiver・buyer 差分)。
+RELAY_URL=http://localhost:3000/api/relay/jpyc N=6 node scripts/amoy-concurrent-settle.mjs
+
+# 3. idempotency (B2): 同一 authorization を 2 回同時 POST → 1 件 success / 1 件 pending
+#    (submit 前に弾く=revert/二重 broadcast なし)。on-chain settle 1 回のみ + KV idem key claim を確認。
+#    確定後の再 POST が authState 既使用で pending になることも確認。要 KV (未設定だと fail-open で B2 無効)。
+RELAY_URL=http://localhost:3000/api/relay/jpyc node scripts/amoy-idempotency.mjs
+```
+
+> 注: 重いテスト (60s 級の receipt 待ちが並行) とアプリ動作確認を同じ dev server で同時にやると
+> 単一プロセスが飽和する。テストは別ポート (`PORT=3001 npm run dev`) 推奨。
+> buyer の使い捨て鍵 / KV は **testnet 専用**にし、mainnet の鍵・KV とは必ず分ける。
+
+実測結果 (2026-06-02): 並行 submit = nonce 衝突を安全吸収 (settle は連続 nonce・未 broadcast 分は
+保守的 pending)・idempotency = duplicate を submit 前に弾く・いずれも二重支払いゼロ。詳細は
+`docs/audit/jpyc-eip3009-audit-scope.md` §7。
 
 ## Deployed addresses
 
