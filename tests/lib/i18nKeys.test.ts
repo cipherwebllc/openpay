@@ -637,3 +637,59 @@ describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
     }
   });
 });
+
+describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () => {
+  const HISTORY_KEYS = [
+    'filterStatusLabel',
+    'filterStatusAll',
+    'searchLabel',
+    'searchPlaceholder',
+    'dateRangeLabel',
+    'datePresetAll',
+    'datePresetThisMonth',
+    'datePresetLastMonth',
+    'datePresetCustom',
+    'dateFrom',
+    'dateTo',
+    'accountingFormatLabel',
+    'accountingFormatFreee',
+    'accountingFormatYayoi',
+    'exportAccountingCsv',
+    'accountingIncomeOnlyNote',
+    'accountingRateUnavailable',
+    'accountingNoRows',
+    'accountingTooManyRows',
+    'summaryTitle',
+    'summaryCountsLine',
+    'summaryGmv',
+    'gmvApproxChip',
+    'gmvRateUnavailable',
+    'gmvReferenceNote',
+    'filterEmpty',
+    'columnAnchor',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of HISTORY_KEYS) {
+      it(`${loc.name}.History.${key} は非空文字列`, () => {
+        const v = (loc.m.History as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('parameterized History keys が placeholder を含む (ja/en)', () => {
+    for (const m of [ja, en]) {
+      const h = m.History as Record<string, string>;
+      for (const ph of ['{total}', '{success}', '{reverted}', '{error}', '{pending}']) {
+        expect(h.summaryCountsLine).toContain(ph);
+      }
+      expect(h.summaryGmv).toContain('{amount}');
+      expect(h.accountingTooManyRows).toContain('{max}');
+    }
+  });
+});

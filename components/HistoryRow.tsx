@@ -15,6 +15,7 @@ import {
   type HistoryEntry,
 } from '@/lib/history';
 import { shortAddress } from '@/lib/format';
+import { displaySymbolFor } from '@/lib/tokens';
 
 function fmt(raw: string | null, asset: HistoryEntry['asset']): string {
   if (raw === null) return '—';
@@ -75,6 +76,8 @@ export function HistoryRow({
   onRemove: (id: string) => void;
 }) {
   const t = useTranslations('History');
+  // anchor 行は PaymentForm の fxAnchorLine/fxRateLine を再利用 (文言を一元化)。
+  const tp = useTranslations('PaymentForm');
   // 履歴に保存した chainId で URL を解決 (NETWORK_ENV mismatch のときは
   // supportedChains に該当しないため undefined になり Explorer リンクは描画されない)。
   const txUrl = entry.txHash
@@ -198,6 +201,26 @@ export function HistoryRow({
                   {t(CIRCLE_VERIF_I18N_KEY[entry.circleVerification])}
                 </span>
               )}
+            </dd>
+          </div>
+        )}
+        {entry.anchorAmount != null && entry.anchorSymbol && (
+          <div className="sm:col-span-2">
+            <dt className="text-slate-400">{t('columnAnchor')}</dt>
+            <dd className="break-words text-slate-700">
+              {tp('fxAnchorLine', {
+                refAmt: entry.anchorAmount,
+                anchorSymbol: displaySymbolFor(entry.anchorSymbol),
+                amount: /^\d+$/.test(entry.merchantAmount)
+                  ? formatUnits(
+                      BigInt(entry.merchantAmount),
+                      HISTORY_ASSET_DECIMALS[entry.asset],
+                    )
+                  : entry.merchantAmount,
+                symbol: HISTORY_ASSET_DISPLAY[entry.asset],
+              })}
+              {entry.fxRateUsdcJpy &&
+                ` ・ ${tp('fxRateLine', { rate: entry.fxRateUsdcJpy })}`}
             </dd>
           </div>
         )}

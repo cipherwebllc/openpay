@@ -1,18 +1,30 @@
 'use client';
 
-// Filter / CSV export / Clear all を 1 行に並べた toolbar。
-// clear は 2 段階確認 (browser native window.confirm)。
+// フィルタ (通貨 / 状態 / 検索 / 期間) + CSV エクスポート (生 + 会計) + 全消去 の toolbar。
+// フィルタ状態は HistoryView が保持 (single source)。期間はプリセット/カスタムを UI 表現として
+// ローカルに持ち、ms 境界 (fromTs/toTs) に変換して onFiltersChange で上げる。
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { downloadBlob } from '@/lib/download';
 import { clearHistory, type HistoryEntry } from '@/lib/history';
 import { historyCsvFilename, toCsv } from '@/lib/historyCsv';
+import {
+  accountingCsvFilename,
+  toAccountingCsv,
+  type AccountingFormat,
+} from '@/lib/accountingCsv';
+import {
+  currentMonthKey,
+  dayRangeToTsBounds,
+  monthBounds,
+  previousMonthKey,
+  type HistoryFilters,
+  type HistoryStatusFilter,
+} from '@/lib/historyFilters';
 
-export type HistoryFilter = 'all' | 'jpyc' | 'usdc';
-
-// filter option を 1 箇所に。新通貨追加時はここに 1 行足すだけで UI に反映される。
-const FILTER_OPTIONS: ReadonlyArray<{
-  key: HistoryFilter;
+const ASSET_OPTIONS: ReadonlyArray<{
+  key: HistoryFilters['asset'];
   i18nKey: 'filterAll' | 'filterJpyc' | 'filterUsdc';
   countKey: 'all' | 'jpyc' | 'usdc';
 }> = [
@@ -21,23 +33,75 @@ const FILTER_OPTIONS: ReadonlyArray<{
   { key: 'usdc', i18nKey: 'filterUsdc', countKey: 'usdc' },
 ];
 
+const STATUS_OPTIONS: ReadonlyArray<{
+  key: HistoryStatusFilter;
+  i18nKey:
+    | 'filterStatusAll'
+    | 'statusSuccess'
+    | 'statusReverted'
+    | 'statusError'
+    | 'statusPending';
+}> = [
+  { key: 'all', i18nKey: 'filterStatusAll' },
+  { key: 'success', i18nKey: 'statusSuccess' },
+  { key: 'reverted', i18nKey: 'statusReverted' },
+  { key: 'error', i18nKey: 'statusError' },
+  { key: 'pending', i18nKey: 'statusPending' },
+];
+
+type DatePreset = 'all' | 'this' | 'last' | 'custom';
+
 export function HistoryToolbar({
   entries,
-  filter,
-  onFilterChange,
+  filters,
+  onFiltersChange,
   counts,
+  usdcJpy,
 }: {
+  /** フィルタ適用後の entries (= 画面表示 = エクスポート対象)。 */
   entries: HistoryEntry[];
-  filter: HistoryFilter;
-  onFilterChange: (f: HistoryFilter) => void;
+  filters: HistoryFilters;
+  onFiltersChange: (next: HistoryFilters) => void;
   counts: { all: number; jpyc: number; usdc: number };
+  usdcJpy: number | undefined;
 }) {
   const t = useTranslations('History');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [fromDay, setFromDay] = useState('');
+  const [toDay, setToDay] = useState('');
+  const [acctFormat, setAcctFormat] = useState<AccountingFormat>('freee');
+
+  const set = (patch: Partial<HistoryFilters>) =>
+    onFiltersChange({ ...filters, ...patch });
+
+  function applyPreset(p: DatePreset) {
+    setDatePreset(p);
+    if (p === 'all') return set({ fromTs: null, toTs: null });
+    if (p === 'this') return set(monthBounds(currentMonthKey(new Date())));
+    if (p === 'last') return set(monthBounds(previousMonthKey(new Date())));
+    // custom: 現在の day 入力から算出
+    return set(dayRangeToTsBounds(fromDay || null, toDay || null));
+  }
 
   function handleExport() {
-    const csv = toCsv(entries);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([toCsv(entries)], { type: 'text/csv;charset=utf-8' });
     downloadBlob(blob, historyCsvFilename());
+  }
+
+  function handleAccountingExport() {
+    const r = toAccountingCsv(entries, { format: acctFormat, usdcJpy });
+    if (r.ok) {
+      const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' });
+      downloadBlob(blob, accountingCsvFilename(acctFormat));
+      return;
+    }
+    const msg =
+      r.reason === 'rate-unavailable'
+        ? t('accountingRateUnavailable')
+        : r.reason === 'no-rows'
+          ? t('accountingNoRows')
+          : t('accountingTooManyRows', { max: 5000 });
+    window.alert(msg);
   }
 
   function handleClear() {
@@ -48,30 +112,113 @@ export function HistoryToolbar({
   }
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div
-        role="group"
-        aria-label={t('filterLabel')}
-        className="flex flex-wrap gap-1"
-      >
-        {FILTER_OPTIONS.map((opt) => (
-          <FilterButton
-            key={opt.key}
-            active={filter === opt.key}
-            onClick={() => onFilterChange(opt.key)}
-            label={t(opt.i18nKey, { count: counts[opt.countKey] })}
-          />
-        ))}
+    <div className="space-y-3">
+      {/* 通貨フィルタ + 検索 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div role="group" aria-label={t('filterLabel')} className="flex flex-wrap gap-1">
+          {ASSET_OPTIONS.map((opt) => (
+            <Pill
+              key={opt.key}
+              active={filters.asset === opt.key}
+              onClick={() => set({ asset: opt.key })}
+              label={t(opt.i18nKey, { count: counts[opt.countKey] })}
+            />
+          ))}
+        </div>
+        <input
+          type="search"
+          value={filters.search}
+          onChange={(e) => set({ search: e.target.value })}
+          placeholder={t('searchPlaceholder')}
+          aria-label={t('searchLabel')}
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand focus:outline-none sm:w-56"
+        />
       </div>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={entries.length === 0}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('exportCsv')}
-        </button>
+
+      {/* 状態フィルタ + 期間 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div role="group" aria-label={t('filterStatusLabel')} className="flex flex-wrap gap-1">
+          {STATUS_OPTIONS.map((opt) => (
+            <Pill
+              key={opt.key}
+              active={filters.status === opt.key}
+              onClick={() => set({ status: opt.key })}
+              label={t(opt.i18nKey)}
+            />
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-[11px] text-slate-500">{t('dateRangeLabel')}</label>
+          <select
+            value={datePreset}
+            onChange={(e) => applyPreset(e.target.value as DatePreset)}
+            aria-label={t('dateRangeLabel')}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+          >
+            <option value="all">{t('datePresetAll')}</option>
+            <option value="this">{t('datePresetThisMonth')}</option>
+            <option value="last">{t('datePresetLastMonth')}</option>
+            <option value="custom">{t('datePresetCustom')}</option>
+          </select>
+          {datePreset === 'custom' && (
+            <>
+              <input
+                type="date"
+                value={fromDay}
+                aria-label={t('dateFrom')}
+                onChange={(e) => {
+                  setFromDay(e.target.value);
+                  set(dayRangeToTsBounds(e.target.value || null, toDay || null));
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              />
+              <span className="text-xs text-slate-400">–</span>
+              <input
+                type="date"
+                value={toDay}
+                aria-label={t('dateTo')}
+                onChange={(e) => {
+                  setToDay(e.target.value);
+                  set(dayRangeToTsBounds(fromDay || null, e.target.value || null));
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* エクスポート + 全消去 */}
+      <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={entries.length === 0}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('exportCsv')}
+          </button>
+          <span className="mx-1 h-4 w-px bg-slate-200" aria-hidden />
+          <label className="text-[11px] text-slate-500">{t('accountingFormatLabel')}</label>
+          <select
+            value={acctFormat}
+            onChange={(e) => setAcctFormat(e.target.value as AccountingFormat)}
+            aria-label={t('accountingFormatLabel')}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+          >
+            <option value="freee">{t('accountingFormatFreee')}</option>
+            <option value="yayoi">{t('accountingFormatYayoi')}</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleAccountingExport}
+            disabled={entries.length === 0}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('exportAccountingCsv')}
+          </button>
+        </div>
         <button
           type="button"
           onClick={handleClear}
@@ -81,11 +228,12 @@ export function HistoryToolbar({
           {t('clearAll')}
         </button>
       </div>
+      <p className="text-[11px] text-slate-400">{t('accountingIncomeOnlyNote')}</p>
     </div>
   );
 }
 
-function FilterButton({
+function Pill({
   active,
   onClick,
   label,

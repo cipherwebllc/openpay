@@ -274,4 +274,33 @@ describe('HistoryRow', () => {
     expect(screen.queryByText('自己申告')).toBeNull();
     expect(screen.queryByText('未照合')).toBeNull();
   });
+
+  it('anchor (FX換算) 行: 元の円価格 ≈ 受領額 + レートを表示', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          asset: 'usdc',
+          merchantAmount: '6400000', // 6.4 USDC 受領
+          anchorAmount: '1000',
+          anchorSymbol: 'jpyc',
+          fxRateUsdcJpy: '156.32',
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByText((t) => t.includes('1000 JPYC') && t.includes('6.4 USDC')),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/レート.*156\.32/)).toBeInTheDocument();
+  });
+
+  it('anchor 無し → anchor 行は描画されない', () => {
+    render(
+      <HistoryRow
+        entry={entry({ anchorAmount: null, anchorSymbol: null })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.queryByText(/≈/)).toBeNull();
+  });
 });

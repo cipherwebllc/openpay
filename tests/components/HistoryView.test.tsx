@@ -2,6 +2,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
+
+// HistoryView は useMarketRates (React Query) で円換算 GMV を出す。QueryClientProvider を
+// 張らない renderWithIntl なので hook をモックして固定レートを返す。
+vi.mock('@/hooks/useMarketRates', () => ({
+  useMarketRates: () => ({
+    data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+
 import { HistoryView } from '@/components/HistoryView';
 import {
   appendHistory,
@@ -91,11 +103,12 @@ describe('HistoryView', () => {
         screen.getByRole('button', { name: /JPYC \(1\)/ }),
       ).toBeInTheDocument(),
     );
-    // filter=all 状態: 両方の amount が表示される
-    expect(screen.getByText('5 JPYC')).toBeInTheDocument();
-    expect(screen.getByText('3 USDC')).toBeInTheDocument();
+    // filter=all 状態: 両方の amount が表示される (行 + 集計サマリの合計に出るため複数可)。
+    expect(screen.getAllByText('5 JPYC').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3 USDC').length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: /JPYC \(1\)/ }));
-    expect(screen.getByText('5 JPYC')).toBeInTheDocument();
+    // JPYC のみ: 5 JPYC は残り、USDC 行は消え集計も 0 USDC になるので '3 USDC' は消える。
+    expect(screen.getAllByText('5 JPYC').length).toBeGreaterThan(0);
     expect(screen.queryByText('3 USDC')).toBeNull();
   });
 

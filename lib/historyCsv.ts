@@ -11,6 +11,9 @@
 
 import { formatUnits } from 'viem';
 import { pad } from './pad';
+import { buildCsv } from './csv';
+// 後方互換: 既存 import (CSV_BOM/CSV_NEWLINE を @/lib/historyCsv から取得) を維持。
+export { CSV_BOM, CSV_NEWLINE } from './csv';
 import type { HistoryEntry } from './history';
 import {
   formatHistoryTimestamp,
@@ -19,9 +22,6 @@ import {
   HISTORY_ASSET_DISPLAY,
   networkFeeEquivalentOf,
 } from './history';
-
-export const CSV_BOM = '﻿';
-export const CSV_NEWLINE = '\r\n';
 
 const HEADER: readonly string[] = [
   '日時',
@@ -63,17 +63,6 @@ const HEADER: readonly string[] = [
   '請求建て通貨',
   'FXレート(USDC/JPY)',
 ];
-
-const INJECTION_PREFIX = /^[=+\-@]/;
-
-function escapeCsvCell(value: string): string {
-  // Excel formula injection 防御: `=cmd|...` 等の formula evaluator 起動を抑止
-  // (single quote prefix で「文字列」として扱われる)。
-  const defanged = INJECTION_PREFIX.test(value) ? `'${value}` : value;
-  const needsQuoting = /[",\r\n]/.test(defanged);
-  if (!needsQuoting) return defanged;
-  return `"${defanged.replace(/"/g, '""')}"`;
-}
 
 function rawToDecimal(raw: string | null, asset: HistoryEntry['asset']): string {
   if (raw === null) return '';
@@ -187,11 +176,7 @@ function entryToRow(e: HistoryEntry): string[] {
 }
 
 export function toCsv(entries: ReadonlyArray<HistoryEntry>): string {
-  const rows = [HEADER, ...entries.map(entryToRow)];
-  const body = rows
-    .map((row) => row.map(escapeCsvCell).join(','))
-    .join(CSV_NEWLINE);
-  return CSV_BOM + body + CSV_NEWLINE;
+  return buildCsv([HEADER, ...entries.map(entryToRow)]);
 }
 
 export function historyCsvFilename(now: Date = new Date()): string {
