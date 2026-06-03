@@ -406,6 +406,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
       networkFeeEquivalent,
       storeName: '',
       note: '',
+      // 異通貨建て (FX 換算 QR) の anchor。priceRefAmount/fxRate が URL に在るときのみ記録。
+      // anchorSymbol は settled token (params.token) の counterpart (= 価格を建てた側)。
+      anchorAmount: params.priceRefAmount ?? null,
+      anchorSymbol: params.priceRefAmount
+        ? counterpartSymbol(params.token)
+        : null,
+      fxRateUsdcJpy: params.fxRate ?? null,
     }),
     [
       deployment.chainId,
@@ -420,6 +427,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       amountWei,
       networkFeeEquivalent,
       address,
+      params.priceRefAmount,
+      params.fxRate,
     ],
   );
   // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt

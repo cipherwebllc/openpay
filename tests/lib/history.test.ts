@@ -48,6 +48,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
+    anchorAmount: null,
+    anchorSymbol: null,
+    fxRateUsdcJpy: null,
     ...overrides,
   };
 }
@@ -264,6 +267,26 @@ describe('history (LocalStorage)', () => {
     it('txHash あり → id="<flow>-<txHash>"', () => {
       const e = buildHistoryEntry(base());
       expect(e.id).toBe('batch-0xTx');
+    });
+
+    it('v4: anchor (元価格建て + FX レート) を記録する', () => {
+      const e = buildHistoryEntry(
+        base({
+          anchorAmount: '1000',
+          anchorSymbol: 'jpyc',
+          fxRateUsdcJpy: '156.32',
+        }),
+      );
+      expect(e.anchorAmount).toBe('1000');
+      expect(e.anchorSymbol).toBe('jpyc');
+      expect(e.fxRateUsdcJpy).toBe('156.32');
+    });
+
+    it('v4: anchor 省略時は null (通常決済)', () => {
+      const e = buildHistoryEntry(base());
+      expect(e.anchorAmount).toBeNull();
+      expect(e.anchorSymbol).toBeNull();
+      expect(e.fxRateUsdcJpy).toBeNull();
     });
 
     it('txHash null, userOpHash あり → id="<flow>-uo-<userOpHash>"', () => {
@@ -712,6 +735,39 @@ describe('history (LocalStorage)', () => {
         expect(out?.feeBreakdownVersion).toBe(0);
         // 旧 feeAmount (conflated) はそのまま保持 (HistoryRow が legacy heuristic を適用)。
         expect(out?.feeAmount).toBe('4000');
+      });
+
+      it('実 v3 entry (anchor 前) → v4 へ anchor=null backfill で生存', () => {
+        const e = entry({ id: 'real-v3' });
+        const v3: Record<string, unknown> = { ...e, schemaVersion: 3 };
+        delete v3.anchorAmount;
+        delete v3.anchorSymbol;
+        delete v3.fxRateUsdcJpy;
+        const out = migrateToLatest(v3);
+        expect(out).not.toBeNull();
+        expect(out?.id).toBe('real-v3');
+        expect(out?.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
+        expect(out?.anchorAmount).toBeNull();
+        expect(out?.anchorSymbol).toBeNull();
+        expect(out?.fxRateUsdcJpy).toBeNull();
+      });
+
+      it('v4 anchorSymbol が不正値 → isValidEntry 不通過で drop', () => {
+        const bad = { ...entry({ id: 'bad-anchor' }), anchorSymbol: 'eth' };
+        expect(migrateToLatest(bad)).toBeNull();
+      });
+
+      it('v4 anchor を持つ entry は migrate (no-op) を通過して保持される', () => {
+        const e = entry({
+          id: 'v4-anchor',
+          anchorAmount: '1000',
+          anchorSymbol: 'jpyc',
+          fxRateUsdcJpy: '156.32',
+        });
+        const out = migrateToLatest({ ...e });
+        expect(out?.anchorAmount).toBe('1000');
+        expect(out?.anchorSymbol).toBe('jpyc');
+        expect(out?.fxRateUsdcJpy).toBe('156.32');
       });
 
       it('non-object 入力 → null', () => {

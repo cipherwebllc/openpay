@@ -78,7 +78,11 @@ export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
 // networkFeeEquivalent に分離。売上総額 saleAmount を追加 (split / 着金控除と区別し
 // GMV 集計の基礎にする)。legacy(v2) は MIGRATIONS[2] で null backfill + 内訳不明印
 // (feeBreakdownVersion=0)。
-export const LATEST_SCHEMA_VERSION = 3 as const;
+// v4 (2026-06-03): 異通貨建て決済 (FX 換算動的 QR) の anchor 記録。店主が JPYC 価格を
+// USDC 建てで受領した等の「元の価格建て (anchorAmount/anchorSymbol) + 適用 FX レート
+// (fxRateUsdcJpy)」を残し、freee 等で「¥1000 の品を N USDC で決済」を照合可能にする。
+// 通常決済 (非換算) は null。legacy(v3) は MIGRATIONS[3] で null backfill。
+export const LATEST_SCHEMA_VERSION = 4 as const;
 
 // fee/gas 内訳セマンティクスの版。schemaVersion とは独立: migration は schemaVersion を
 // 昇格させるが、migrate された旧 entry の feeAmount は依然 conflated (利用手数料 + ガス
@@ -160,6 +164,15 @@ export type HistoryEntry = {
   /** fee/gas 内訳セマンティクスの版。native v3 = FEE_BREAKDOWN_VERSION、
    * legacy / migrated = FEE_BREAKDOWN_UNKNOWN (集計で利用手数料 / 網手数料 total から除外)。 */
   feeBreakdownVersion: number;
+  // --- v4 追加 (異通貨建て決済の anchor。非換算 / legacy は null) ---
+  /** 元の価格建て金額 (人間可読・例 "1000")。raw wei ではなく URL refAmt と同じ表示値。
+   * FX 換算で生成された QR の決済のみ非 null、通常決済は null。 */
+  anchorAmount: string | null;
+  /** 価格を建てたトークン (anchorAmount の単位)。settled の asset の counterpart。
+   * 例: USDC で受領したが元は JPYC 建て → 'jpyc'。非換算は null。 */
+  anchorSymbol: TokenSymbol | null;
+  /** 生成時に適用した usdcJpy (例 "156.32")。非換算は null。 */
+  fxRateUsdcJpy: string | null;
 };
 
 // LATEST_SCHEMA_VERSION の entry に対する shape 検証。migration 後の最終 entry に
@@ -241,6 +254,16 @@ function isValidEntry(value: unknown): value is HistoryEntry {
     e.feeBreakdownVersion < 0
   )
     return false;
+  // v4 フィールド (非換算 / legacy は migration で null backfill 済)。
+  if (e.anchorAmount !== null && typeof e.anchorAmount !== 'string') return false;
+  if (
+    e.anchorSymbol !== null &&
+    e.anchorSymbol !== 'jpyc' &&
+    e.anchorSymbol !== 'usdc'
+  )
+    return false;
+  if (e.fxRateUsdcJpy !== null && typeof e.fxRateUsdcJpy !== 'string')
+    return false;
   return true;
 }
 
@@ -286,6 +309,15 @@ export const MIGRATIONS: Record<number, MigrationFn> = {
     saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: FEE_BREAKDOWN_UNKNOWN,
+  }),
+  // v3 → v4 (2026-06-03): 異通貨建て決済の anchor フィールドを追加。legacy entry は
+  // FX 換算ではない (or 記録前) ため null backfill。
+  3: (entry) => ({
+    ...entry,
+    schemaVersion: 4,
+    anchorAmount: null,
+    anchorSymbol: null,
+    fxRateUsdcJpy: null,
   }),
 };
 
@@ -422,6 +454,13 @@ export type BuildHistoryBase = {
   saleAmount?: bigint | null;
   /** ネットワーク手数料相当額 (非 circle の gasless 経路)。省略時 null。 */
   networkFeeEquivalent?: bigint | null;
+  // --- v4 (異通貨建ての anchor。FX 換算決済の sale leg のみ設定・省略時 null) ---
+  /** 元の価格建て金額 (人間可読・raw wei ではない)。例 "1000"。 */
+  anchorAmount?: string | null;
+  /** 価格を建てたトークン (settled asset の counterpart)。 */
+  anchorSymbol?: TokenSymbol | null;
+  /** 生成時 usdcJpy (例 "156.32")。 */
+  fxRateUsdcJpy?: string | null;
 };
 
 /**
@@ -485,6 +524,9 @@ export function buildHistoryEntry(
         : input.networkFeeEquivalent.toString(),
     // native v3 で記録した entry は常に分離済印を持つ (migration 経路のみ UNKNOWN)。
     feeBreakdownVersion: FEE_BREAKDOWN_VERSION,
+    anchorAmount: input.anchorAmount ?? null,
+    anchorSymbol: input.anchorSymbol ?? null,
+    fxRateUsdcJpy: input.fxRateUsdcJpy ?? null,
   };
 }
 

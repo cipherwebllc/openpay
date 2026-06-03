@@ -57,6 +57,11 @@ const HEADER: readonly string[] = [
   'ネットワーク手数料相当額(decimal)',
   'ネットワーク手数料相当額(raw)',
   '内訳バージョン',
+  // v4 追加 (異通貨建て決済の anchor)。末尾に追加し既存列順を保つ。FX 換算で生成した
+  // QR の決済のみ値が入り、通常決済は空。「¥1000 建ての品を N USDC で決済」を freee 等で照合。
+  '請求建て金額',
+  '請求建て通貨',
+  'FXレート(USDC/JPY)',
 ];
 
 const INJECTION_PREFIX = /^[=+\-@]/;
@@ -174,6 +179,10 @@ function entryToRow(e: HistoryEntry): string[] {
     rawToDecimal(networkFeeEquivalentOf(e), e.asset),
     networkFeeEquivalentOf(e) ?? '',
     breakdownVersionLabel(e),
+    // v4: 異通貨建ての anchor。anchorAmount は人間可読 (raw 変換しない)。
+    e.anchorAmount ?? '',
+    e.anchorSymbol ? HISTORY_ASSET_DISPLAY[e.anchorSymbol] : '',
+    e.fxRateUsdcJpy ?? '',
   ];
 }
 

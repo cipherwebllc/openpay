@@ -46,6 +46,11 @@ export type AppendPaymentHistoryCtx = {
    */
   storeName: string;
   note: string;
+  /** 異通貨建て決済の anchor (FX 換算 QR のみ非 null)。元の価格建て金額 (人間可読)・
+   *  建てトークン・適用 FX レート。通常決済は省略 (= null)。全 sale leg 横断で同一値。 */
+  anchorAmount?: string | null;
+  anchorSymbol?: TokenSymbol | null;
+  fxRateUsdcJpy?: string | null;
 };
 
 // submit 時点で固定したい amount field のみを抜き出した snapshot。tx 完了前に
@@ -141,6 +146,9 @@ export function usePaymentHistory(
       ? standardSubmittedParams.merchantAmount + standardSubmittedParams.feeAmount
       : ctx.saleAmount;
 
+  // 異通貨建ての anchor (ctx.anchor*) は各 sale leg の buildHistoryEntry で直接読む
+  // (手数料徴収 leg = standard-fee は sale ではないため付けない)。
+
   // gasless 成功 (revert / pending 含む)。data.success===false (チェーン上 revert) は
   // status='reverted'、relay の未確定は status='pending' で記録 → Explorer で追跡可能。
   // pending かつ txHash 無し (authorizationState 既使用 = 既に処理済) は、元の submission が
@@ -183,6 +191,9 @@ export function usePaymentHistory(
         circlePaymasterAddress: gaslessData.circlePaymasterAddress ?? null,
         circlePaymasterNetUsdc: gaslessData.circlePaymasterNetUsdc ?? null,
         circleVerification: gaslessData.circleVerification ?? null,
+        anchorAmount: ctx.anchorAmount ?? null,
+        anchorSymbol: ctx.anchorSymbol ?? null,
+        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
       }),
     );
   }, [
@@ -225,6 +236,9 @@ export function usePaymentHistory(
         errorMessage: gaslessError.message,
         storeName: ctx.storeName,
         note: ctx.note,
+        anchorAmount: ctx.anchorAmount ?? null,
+        anchorSymbol: ctx.anchorSymbol ?? null,
+        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
       }),
     );
   }, [
@@ -264,6 +278,9 @@ export function usePaymentHistory(
         errorMessage: null,
         storeName: ctx.storeName,
         note: ctx.note,
+        anchorAmount: ctx.anchorAmount ?? null,
+        anchorSymbol: ctx.anchorSymbol ?? null,
+        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
       }),
     );
     if (standardData.feeTxHash) {
@@ -335,6 +352,9 @@ export function usePaymentHistory(
         errorMessage: standardError?.message ?? null,
         storeName: ctx.storeName,
         note: ctx.note,
+        anchorAmount: ctx.anchorAmount ?? null,
+        anchorSymbol: ctx.anchorSymbol ?? null,
+        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
       }),
     );
   }, [
@@ -382,6 +402,9 @@ export function usePaymentHistory(
           errorMessage: null,
           storeName: ctx.storeName,
           note: ctx.note,
+          anchorAmount: ctx.anchorAmount ?? null,
+          anchorSymbol: ctx.anchorSymbol ?? null,
+          fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
         }),
       );
     }

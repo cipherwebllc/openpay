@@ -38,6 +38,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
+    anchorAmount: null,
+    anchorSymbol: null,
+    fxRateUsdcJpy: null,
     ...overrides,
   };
 }
@@ -81,6 +84,32 @@ describe('toCsv', () => {
   it('v3: legacy(feeBreakdownVersion=0) は内訳バージョン列で「内訳不明 (旧データ)」', () => {
     const csv = toCsv([entry({ feeBreakdownVersion: 0 })]);
     expect(csv).toContain('内訳不明 (旧データ)');
+  });
+
+  it('v4: 異通貨建ての anchor (元価格建て + 通貨 + FX レート) 列を出力', () => {
+    const csv = toCsv([
+      entry({
+        asset: 'usdc', // USDC で受領したが
+        anchorAmount: '1500', // 元は 1500 JPYC 建て
+        anchorSymbol: 'jpyc',
+        fxRateUsdcJpy: '156.32',
+      }),
+    ]);
+    // 新ヘッダ
+    expect(csv).toContain('請求建て金額');
+    expect(csv).toContain('請求建て通貨');
+    expect(csv).toContain('FXレート(USDC/JPY)');
+    const [, row1] = csv.slice(CSV_BOM.length).split(CSV_NEWLINE);
+    // 行末に anchor: 1500 / JPYC / 156.32 (settled は USDC, anchor 通貨は JPYC で区別)
+    expect(row1).toContain('1500');
+    expect(row1).toContain('156.32');
+    expect(row1.endsWith('1500,JPYC,156.32')).toBe(true);
+  });
+
+  it('v4: 通常決済 (anchor 無し) は anchor 列が空', () => {
+    const [, row1] = toCsv([entry()]).slice(CSV_BOM.length).split(CSV_NEWLINE);
+    // 末尾 3 列 (請求建て金額/通貨/FXレート) は空 → ",,," で終わる
+    expect(row1.endsWith(',,')).toBe(true);
   });
 
   it('1 件 entry の主要 columns が出力される (decimal 化含む)', () => {
@@ -217,6 +246,9 @@ describe('toCsv', () => {
         saleAmount: null,
         networkFeeEquivalent: null,
         feeBreakdownVersion: 1,
+        anchorAmount: null,
+        anchorSymbol: null,
+        fxRateUsdcJpy: null,
       };
     }
     const entries = Array.from({ length: 1000 }, (_, i) =>
@@ -355,6 +387,9 @@ describe('CSV round-trip 整合性 (escape の逆 parse)', () => {
       saleAmount: null,
       networkFeeEquivalent: null,
       feeBreakdownVersion: 1,
+      anchorAmount: null,
+      anchorSymbol: null,
+      fxRateUsdcJpy: null,
       ...overrides,
     };
   }

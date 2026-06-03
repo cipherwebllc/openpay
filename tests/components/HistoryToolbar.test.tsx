@@ -39,6 +39,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
+    anchorAmount: null,
+    anchorSymbol: null,
+    fxRateUsdcJpy: null,
     ...overrides,
   };
 }

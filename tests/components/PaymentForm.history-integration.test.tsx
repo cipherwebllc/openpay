@@ -209,6 +209,60 @@ describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
     expect(entry.feeAmount).toBe('0');
   });
 
+  it('異通貨建て (FX 換算 QR): anchor (元価格建て JPYC + レート) を実 entry に記録', async () => {
+    // 1000 JPYC 建ての品を USDC で受領する convert QR。
+    setURL(
+      `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=156.32`,
+    );
+    mockHook(useBatchPayment, {
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+      isError: false,
+      data: {
+        userOpHash: GASLESS_UO,
+        txHash: GASLESS_TX,
+        blockNumber: 42n,
+        success: true,
+      },
+      error: null,
+    });
+
+    render(withIntl(<PaymentForm />));
+
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    const [entry] = loadHistory();
+    // 受領は USDC (settled)、anchor は元の JPYC 建て価格 + 生成時 FX レート。
+    expect(entry.asset).toBe('usdc');
+    expect(entry.merchantAmount).toBe('6400000'); // 6.4 USDC (6dp)
+    expect(entry.anchorAmount).toBe('1000');
+    expect(entry.anchorSymbol).toBe('jpyc');
+    expect(entry.fxRateUsdcJpy).toBe('156.32');
+  });
+
+  it('通常 QR (非換算): anchor は null で記録される', async () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000`);
+    mockHook(useBatchPayment, {
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+      isError: false,
+      data: {
+        userOpHash: GASLESS_UO,
+        txHash: GASLESS_TX,
+        blockNumber: 42n,
+        success: true,
+      },
+      error: null,
+    });
+    render(withIntl(<PaymentForm />));
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    const [entry] = loadHistory();
+    expect(entry.anchorAmount).toBeNull();
+    expect(entry.anchorSymbol).toBeNull();
+    expect(entry.fxRateUsdcJpy).toBeNull();
+  });
+
   it('gasless reverted: status=reverted で記録 (success=false)', async () => {
     setURL(`to=${MERCHANT}&token=jpyc&amount=1000`);
     mockHook(useBatchPayment, {
