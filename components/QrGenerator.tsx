@@ -35,12 +35,23 @@ import {
 } from '@/lib/url';
 import { buildEip681TransferUri } from '@/lib/eip681';
 import {
+  counterpartSymbol,
+  defaultConvertChainSlug,
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
   isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
+import {
+  convertAnchorAmount,
+  formatRemaining,
+  isExpired,
+  QR_EXPIRY_SECONDS,
+  rateIsSane,
+  secondsRemaining,
+} from '@/lib/fx';
+import { useMarketRates } from '@/hooks/useMarketRates';
 import {
   addressExplorerUrl,
   buyerUsdcChainNames,
@@ -56,6 +67,20 @@ import { normalizeAmountList, truncateAmount } from '@/lib/amount';
 import { triggerDownload } from '@/lib/download';
 
 type Mode = 'amount' | 'static';
+
+// 「他トークン建てで受け取る」(FX 換算) を適用した状態。生成時のレートで amount を
+// 確定済みなので、元の価格 (anchor) と適用レート・有効期限を保持し URL に焼き込む。
+// localStorage には永続化しない (時限的なので、ページ再訪で期限切れ QR を復元しない)。
+type ConvertState = {
+  anchorAmount: string;
+  anchorSymbol: TokenSymbol;
+  anchorChain: ChainSlug;
+  // convert 前の payMode (revert で復元する。convert で gasless 非対応 chain に
+  // 倒れて standard 強制された場合に元へ戻すため)。
+  anchorPayMode: PayMode;
+  fxRate: string;
+  expiresAt: number; // unix 秒
+};
 
 const FILENAME_FALLBACK = 'openpay';
 
@@ -125,6 +150,20 @@ export function QrGenerator() {
 
   const t = useTranslations('QrGenerator');
 
+  // 「他トークン建てで受け取る」用の為替レート (USDC→JPY)。convert 押下時に参照。
+  const { data: marketRates } = useMarketRates();
+  // convert 適用状態 (null = 通常 QR)。
+  const [convert, setConvert] = useState<ConvertState | null>(null);
+  // convert 中のみ 1 秒刻みで進める now (カウントダウン用)。convert null では更新しない。
+  const [convertNowMs, setConvertNowMs] = useState(0);
+
+  useEffect(() => {
+    if (!convert) return;
+    setConvertNowMs(Date.now());
+    const id = setInterval(() => setConvertNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [convert]);
+
   const effectiveReceiver = useMemo(
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
     [settings.receiver, resolvedReceiver],
@@ -172,6 +211,10 @@ export function QrGenerator() {
       // settings に false を持っていても token=jpyc なら URL に出ても無害だが、
       // 旧 QR との互換性を最大化するため token=usdc 時のみ出力する。
       crossChain: settings.token === 'usdc' ? settings.crossChain : undefined,
+      // convert 適用時のみ、期限と顧客への文脈表示 (元価格 + レート) を URL に乗せる。
+      expiresAt: convert?.expiresAt,
+      priceRefAmount: convert?.anchorAmount,
+      fxRate: convert?.fxRate,
     };
     return buildPayUrl(origin, params);
   }, [
@@ -187,6 +230,7 @@ export function QrGenerator() {
     amount,
     payMode,
     splitsForUrl,
+    convert,
   ]);
 
   function setSplits(next: SplitDraft[]) {
@@ -259,6 +303,8 @@ export function QrGenerator() {
   ]);
 
   function selectToken(tok: TokenSymbol) {
+    // token を手動切替したら convert (FX 換算ロック) は解除して通常 QR に戻す。
+    setConvert(null);
     // token を切り替えると chain も既定 (USDC→base, JPYC→polygon) にリセット。
     // jpyc は polygon 固定なので、互換性のため reset 必須。usdc は default に
     // 戻すことで、ユーザの直前の chain 選択 (例: arbitrum) を意図せず引き継がない。
@@ -285,6 +331,93 @@ export function QrGenerator() {
       chain: slug,
       payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
     }));
+  }
+
+  // --- 「他トークン建てで受け取る」(FX 換算・有効期限付き) ---
+  // 換算先トークン (現 token の反対)。FX 換算はチェーン非依存。
+  const convertTargetSymbol = counterpartSymbol(settings.token);
+  const convertTargetDisplay = convertTargetSymbol === 'jpyc' ? 'JPYC' : 'USDC';
+  const rateOk = !!marketRates && rateIsSane(marketRates.usdcJpy);
+  // convert ボタンを出す条件: 固定額モードで有効額・split 無し・レート取得済・未 convert。
+  const canShowConvert =
+    mode === 'amount' && amountValid && !splitsForUrl && !convert;
+  const convertRemaining = convert
+    ? secondsRemaining(convert.expiresAt, convertNowMs)
+    : 0;
+  const convertExpired = convert
+    ? isExpired(convert.expiresAt, convertNowMs)
+    : false;
+  const convertAnchorDisplay = convert
+    ? convert.anchorSymbol === 'jpyc'
+      ? 'JPYC'
+      : 'USDC'
+    : convertTargetDisplay;
+
+  // 店主の価格入力を現レートで換算し、token を換算先へ切替・amount を確定・期限を焼き込む。
+  function applyConvert() {
+    if (!marketRates || !rateIsSane(marketRates.usdcJpy)) return;
+    const target = counterpartSymbol(settings.token);
+    const res = convertAnchorAmount({
+      anchorAmount: amount,
+      anchorSymbol: settings.token,
+      targetSymbol: target,
+      usdcJpy: marketRates.usdcJpy,
+    });
+    if (!res.ok) return;
+    const targetChain = defaultConvertChainSlug(settings.chain, target);
+    const dep = deploymentForSlug(target, targetChain);
+    // convert と同時に nowMs を実時刻にして、初回描画で残り時間が巨大値で
+    // フラッシュするのを防ぐ (effect も後追いで更新する)。
+    setConvertNowMs(Date.now());
+    setConvert({
+      anchorAmount: amount,
+      anchorSymbol: settings.token,
+      anchorChain: settings.chain,
+      anchorPayMode: settings.payMode,
+      fxRate: String(marketRates.usdcJpy),
+      expiresAt: Math.floor(Date.now() / 1000) + QR_EXPIRY_SECONDS,
+    });
+    setSettings((s) => ({
+      ...s,
+      token: target,
+      chain: targetChain,
+      // 換算先が gasless 非対応 chain なら standard に倒す (URL parser reject 回避)。
+      payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
+    }));
+    setAmount(res.amount);
+  }
+
+  // 同じ anchor 価格を最新レートで再換算し、期限を 3 分リセット (token は据え置き)。
+  function recalcConvert() {
+    if (!convert || !marketRates || !rateIsSane(marketRates.usdcJpy)) return;
+    const res = convertAnchorAmount({
+      anchorAmount: convert.anchorAmount,
+      anchorSymbol: convert.anchorSymbol,
+      targetSymbol: settings.token,
+      usdcJpy: marketRates.usdcJpy,
+    });
+    if (!res.ok) return;
+    setConvertNowMs(Date.now());
+    setConvert({
+      ...convert,
+      fxRate: String(marketRates.usdcJpy),
+      expiresAt: Math.floor(Date.now() / 1000) + QR_EXPIRY_SECONDS,
+    });
+    setAmount(res.amount);
+  }
+
+  // 元の価格建て (anchor token + chain + amount + payMode) に戻す。
+  function revertConvert() {
+    if (!convert) return;
+    const { anchorAmount, anchorSymbol, anchorChain, anchorPayMode } = convert;
+    setConvert(null);
+    setSettings((s) => ({
+      ...s,
+      token: anchorSymbol,
+      chain: anchorChain,
+      payMode: anchorPayMode,
+    }));
+    setAmount(anchorAmount);
   }
 
   // クイック金額は token (JPYC=円 / USDC=ドル) ごとに独立。エディタ・適用とも
@@ -371,7 +504,10 @@ export function QrGenerator() {
                     <button
                       key={m}
                       type="button"
-                      onClick={() => setMode(m as Mode)}
+                      onClick={() => {
+                        setMode(m as Mode);
+                        setConvert(null);
+                      }}
                       className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
                         mode === m
                           ? 'bg-white text-brand-dark shadow-sm'
@@ -388,9 +524,10 @@ export function QrGenerator() {
                       type="text"
                       inputMode="decimal"
                       value={amount}
-                      onChange={(e) =>
-                        setAmount(truncateAmount(e.target.value, deployment.decimals))
-                      }
+                      onChange={(e) => {
+                        setAmount(truncateAmount(e.target.value, deployment.decimals));
+                        setConvert(null);
+                      }}
                       placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
                       autoFocus
@@ -401,7 +538,10 @@ export function QrGenerator() {
                           <button
                             key={q}
                             type="button"
-                            onClick={() => setAmount(q)}
+                            onClick={() => {
+                              setAmount(q);
+                              setConvert(null);
+                            }}
                             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
                           >
                             {q} {deployment.displaySymbol}
@@ -417,6 +557,77 @@ export function QrGenerator() {
                 )}
               </div>
             </Field>
+
+            {/* 他トークン建てで受け取る (FX 換算・有効期限付き動的 QR)。
+                例: JPYC 1000 入力 → USDC 建てで受け取る → 現レートで USDC 額を確定し
+                3 分間有効な QR を生成。スワップ無し (顧客が払った USDC をそのまま受領)。 */}
+            {canShowConvert && rateOk && (
+              <button
+                type="button"
+                onClick={applyConvert}
+                className="w-full rounded-lg border border-brand/40 bg-brand/5 px-3 py-2.5 text-sm font-semibold text-brand-dark transition hover:bg-brand/10"
+              >
+                {t('convertButton', { symbol: convertTargetDisplay })}
+              </button>
+            )}
+            {canShowConvert && !rateOk && (
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                {t('convertRateUnavailable')}
+              </p>
+            )}
+            {convert && (
+              <div
+                className={`space-y-1.5 rounded-lg border px-3 py-3 ${
+                  convertExpired
+                    ? 'border-amber-300 bg-amber-50'
+                    : 'border-emerald-200 bg-emerald-50'
+                }`}
+              >
+                <p className="text-sm font-semibold text-slate-800">
+                  {t('convertActiveSummary', {
+                    anchorAmount: convert.anchorAmount,
+                    anchorSymbol: convertAnchorDisplay,
+                    amount,
+                    symbol: deployment.displaySymbol,
+                  })}
+                </p>
+                <p className="text-xs text-slate-600">
+                  {t('convertRate', { rate: convert.fxRate })}
+                </p>
+                {convertExpired ? (
+                  <p className="text-xs font-medium text-amber-700">
+                    {t('convertExpired')}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-600">
+                    {t('convertRemaining', {
+                      time: formatRemaining(convertRemaining),
+                    })}
+                  </p>
+                )}
+                {settings.token === 'usdc' && (
+                  <p className="text-xs text-slate-500">
+                    {t('convertCrossChainNote')}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={recalcConvert}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    {t('convertRecalc')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={revertConvert}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    {t('convertRevert', { symbol: convertAnchorDisplay })}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </StepCard>
 

@@ -32,13 +32,18 @@ import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { resolvePaymasterMode } from '@/lib/pimlico';
-import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
+import {
+  counterpartSymbol,
+  DEFAULT_CHAIN_FOR_SYMBOL,
+  deploymentForSlug,
+} from '@/lib/tokens';
 import {
   DECIMAL_PATTERN,
   exceedsTokenPrecision,
   parsePayParams,
   type PayParams,
 } from '@/lib/url';
+import { formatRemaining, isExpired, secondsRemaining } from '@/lib/fx';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 
 export function PaymentForm() {
@@ -122,6 +127,25 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const amountStr = isFixed ? fixedAmount : inputAmount;
   // 成功時の大型 overlay (PayPay 風) を 1 度ユーザが閉じたら以降は inline panel のみ
   const [overlayDismissed, setOverlayDismissed] = useState(false);
+
+  // 動的 QR の有効期限。exp 付き QR (FX 換算で生成) のみカウントダウン + 期限切れ block。
+  // exp 無し (通常 QR) では nowMs=0 のまま・expired=false で従来挙動。
+  const [nowMs, setNowMs] = useState(0);
+  useEffect(() => {
+    if (params.expiresAt === undefined) return;
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [params.expiresAt]);
+  // nowMs は effect (client) で初めて実時刻になる。計測前 (nowMs=0) は expired=false に
+  // 固定し、submit は下記 canSubmit の (expiresAt undefined || nowMs>0) で計測後に限定する
+  // ことで「既に期限切れの QR を初回フレームで送信される」窓を塞ぐ。SSR/hydration では
+  // 両者 nowMs=0 で一致 (countdown も nowMs>0 まで非表示) なので mismatch しない。
+  const timeMeasured = nowMs > 0;
+  const expired = timeMeasured && isExpired(params.expiresAt, nowMs);
+  const remainingSeconds = secondsRemaining(params.expiresAt, nowMs);
+  // 顧客への文脈表示 (元の円価格 + レート)。anchor token は QR token の counterpart。
+  const anchorDisplay = counterpartSymbol(params.token) === 'jpyc' ? 'JPYC' : 'USDC';
 
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
@@ -250,7 +274,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
     !flowPending &&
     gasQuoteReady &&
     !merchantUnderflow &&
-    !relaySettledNoRetry;
+    !relaySettledNoRetry &&
+    // 動的 QR の有効期限切れは支払いをブロック (固定レートが陳腐化しているため)。
+    !expired &&
+    // exp 付き QR は now 計測 (effect 後) まで送信不可 = 計測前 (expired=false) の
+    // 初回フレームで既期限切れ QR が送信される窓を塞ぐ。
+    (params.expiresAt === undefined || timeMeasured);
 
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
   // 差し替え (standard モードは paymaster を経由しないため対象外)。
@@ -514,6 +543,43 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       </header>
 
+      {/* 動的 QR (FX 換算) の文脈表示: 元の円価格 ≈ 請求トークン額 + 生成時レート + 残り時間。
+          refAmt + fxRate が URL に在るときのみ。anchor token は QR token の counterpart。 */}
+      {params.priceRefAmount && params.fxRate && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-700">
+            {t('fxAnchorLine', {
+              refAmt: params.priceRefAmount,
+              anchorSymbol: anchorDisplay,
+              amount: fixedAmount,
+              symbol: deployment.displaySymbol,
+            })}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {t('fxRateLine', { rate: params.fxRate })}
+          </p>
+          {params.expiresAt !== undefined &&
+            timeMeasured &&
+            (expired ? (
+              <p className="mt-1 text-xs font-medium text-amber-700">
+                {t('fxExpiredShort')}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-slate-500">
+                {t('fxRemaining', { time: formatRemaining(remainingSeconds) })}
+              </p>
+            ))}
+        </div>
+      )}
+
+      {/* 有効期限切れ: 固定レートが陳腐化しているため支払いをブロックし、再生成を促す。 */}
+      {expired && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold">{t('expiredTitle')}</p>
+          <p className="mt-1 text-xs">{t('expiredBody')}</p>
+        </div>
+      )}
+
       {isStandard && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{t('standardModeTitle')}</p>
@@ -695,7 +761,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
         {params.token === 'usdc' && address && (
           <CrossChainHint
             token={params.token}
-            enabled={params.crossChain !== false}
+            // 有効期限切れは代替 cross-chain 経路 (CrossChainHint 内の独自 Pay) も封じる。
+            // これがないと main ボタンを block しても cross-chain chooser から支払えてしまう。
+            enabled={params.crossChain !== false && !expired}
             targetChainId={requiredChain.id}
             recipient={params.to}
             requiredAtomic={amountWei}
@@ -720,7 +788,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
           ? isStandard
             ? phaseLabel(standard.phase, t)
             : t('btnSending')
-          : !isConnected
+          : expired
+            ? t('btnExpired')
+            : !isConnected
             ? t('btnConnect')
             : wrongChain
               ? t('btnSwitchChain')

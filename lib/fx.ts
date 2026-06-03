@@ -1,0 +1,147 @@
+// JPYC⇄USDC の FX 換算と動的 QR の有効期限を扱う純粋ユーティリティ。
+//
+// 設計の肝:
+//   - **スワップ (交換業) ではない**。店主が「1000 JPYC (≈1000 円)」と価格を入力したら、
+//     その瞬間のレートで USDC 等価額を **算出して QR に焼き込む**だけ。顧客はその固定額の
+//     USDC を払い、店主はその USDC をそのまま受け取る (オンチェーン変換ゼロ)。
+//   - レートは生成時に固定されるため **オンチェーンのスリッページは発生しない**。唯一の
+//     リスクはレートの陳腐化で、短い有効期限 (QR_EXPIRY_SECONDS) で吸収する。
+//   - **チェーン非依存**: 1 USDC = R 円 は受取チェーンに依らない。decimals は token symbol で
+//     決まる (JPYC=18, USDC=6)。
+//
+// 本モジュールは React にも env にも依存しない (ユニットテスト容易・generator/route で共有)。
+
+import { formatUnits, parseUnits } from 'viem';
+import type { TokenSymbol } from './tokens';
+
+// usdcJpy (= 1 USDC が何円か) の異常値バンド。CoinGecko が単位ミス (USD を返す等) や
+// 桁化けを起こしたとき、絶対額をミスって焼き込まないための sanity guard。
+// USD/JPY は近代史上 ~75〜360 の範囲なので 50〜500 は十分広い「あり得ない値」検出帯。
+// app/api/market/rates/route.ts と本モジュールの単一情報源。
+export const FX_RATE_MIN = 50;
+export const FX_RATE_MAX = 500;
+
+// 動的 QR の有効期限 (秒)。生成時刻 + これを exp に焼き込む。
+export const QR_EXPIRY_SECONDS = 180;
+
+// token symbol → decimals。token の本質的属性で不変 (lib/tokens.ts の TokenDeployment.decimals
+// と一致)。fx.ts を env-free に保つためここに固定で持つ (tests/lib/fx.test.ts で drift を fence)。
+const TOKEN_DECIMALS: Record<TokenSymbol, number> = {
+  jpyc: 18,
+  usdc: 6,
+};
+
+// レートを整数 bigint 化する際のスケール (6 桁精度)。CoinGecko は概ね 2 桁なので十分。
+const RATE_SCALE = 1_000_000n;
+
+export function rateIsSane(usdcJpy: number): boolean {
+  return (
+    typeof usdcJpy === 'number' &&
+    Number.isFinite(usdcJpy) &&
+    usdcJpy >= FX_RATE_MIN &&
+    usdcJpy <= FX_RATE_MAX
+  );
+}
+
+export type ConvertAnchorArgs = {
+  // 店主が入力した価格 (anchor token の人間可読 decimal、例 "1000")。
+  anchorAmount: string;
+  // 価格の建て (= anchor) トークン。
+  anchorSymbol: TokenSymbol;
+  // 顧客が支払う (= target) トークン。anchorSymbol の反対。
+  targetSymbol: TokenSymbol;
+  // 1 USDC = usdcJpy 円。
+  usdcJpy: number;
+};
+
+export type ConvertAnchorResult =
+  | { ok: true; amount: string }
+  | { ok: false; reason: 'out-of-band' | 'invalid-amount' | 'rounds-to-zero' };
+
+// 正の bigint 同士の切り上げ除算。
+function ceilDiv(numerator: bigint, denominator: bigint): bigint {
+  return (numerator + denominator - 1n) / denominator;
+}
+
+// anchor 額 → target トークンの atomic 量を bigint で算出 (float drift 回避)。
+// 丸めは常に **切り上げ (ceil)**: 顧客が円換算で下回らない = 店主保護。dust は ≤1 atomic
+// (≤1e-6 USDC / ≤1e-18 JPYC) で経済的に無視可。
+function convertAtomic(
+  anchorAtomic: bigint,
+  anchorSymbol: TokenSymbol,
+  targetSymbol: TokenSymbol,
+  rateScaled: bigint,
+): bigint {
+  const aD = BigInt(TOKEN_DECIMALS[anchorSymbol]);
+  const tD = BigInt(TOKEN_DECIMALS[targetSymbol]);
+  const tenTarget = 10n ** tD;
+  const tenAnchor = 10n ** aD;
+  if (anchorSymbol === 'jpyc') {
+    // JPYC(円) → USDC(ドル): targetUSD = anchorJPY / R
+    // targetAtomic = anchorAtomic * 10^tD * RATE_SCALE / (10^aD * rateScaled)
+    return ceilDiv(anchorAtomic * tenTarget * RATE_SCALE, tenAnchor * rateScaled);
+  }
+  // USDC(ドル) → JPYC(円): targetJPY = anchorUSD * R
+  // targetAtomic = anchorAtomic * 10^tD * rateScaled / (10^aD * RATE_SCALE)
+  return ceilDiv(anchorAtomic * tenTarget * rateScaled, tenAnchor * RATE_SCALE);
+}
+
+// 店主の価格入力を、顧客が支払う target トークンの人間可読 decimal 文字列に換算。
+// generator の amount 欄に直接入れられる形で返す。
+export function convertAnchorAmount(args: ConvertAnchorArgs): ConvertAnchorResult {
+  const { anchorAmount, anchorSymbol, targetSymbol, usdcJpy } = args;
+  if (!rateIsSane(usdcJpy)) {
+    return { ok: false, reason: 'out-of-band' };
+  }
+  const anchorDecimals = TOKEN_DECIMALS[anchorSymbol];
+  let anchorAtomic: bigint;
+  try {
+    anchorAtomic = parseUnits(anchorAmount, anchorDecimals);
+  } catch {
+    return { ok: false, reason: 'invalid-amount' };
+  }
+  if (anchorAtomic <= 0n) {
+    return { ok: false, reason: 'invalid-amount' };
+  }
+  const rateScaled = BigInt(Math.round(usdcJpy * Number(RATE_SCALE)));
+  const targetAtomic = convertAtomic(
+    anchorAtomic,
+    anchorSymbol,
+    targetSymbol,
+    rateScaled,
+  );
+  if (targetAtomic <= 0n) {
+    // ceil なので anchor>0 のとき本来到達しないが、将来の丸め変更に対する防御。
+    return { ok: false, reason: 'rounds-to-zero' };
+  }
+  return {
+    ok: true,
+    amount: formatUnits(targetAtomic, TOKEN_DECIMALS[targetSymbol]),
+  };
+}
+
+// 有効期限 (unix 秒) を過ぎているか。expUnixSec が未定義なら期限なし扱い (false)。
+export function isExpired(
+  expUnixSec: number | undefined,
+  nowMs: number,
+): boolean {
+  if (expUnixSec === undefined) return false;
+  return Math.floor(nowMs / 1000) > expUnixSec;
+}
+
+// 有効期限までの残り秒。期限なし or 過ぎていれば 0。
+export function secondsRemaining(
+  expUnixSec: number | undefined,
+  nowMs: number,
+): number {
+  if (expUnixSec === undefined) return 0;
+  return Math.max(0, expUnixSec - Math.floor(nowMs / 1000));
+}
+
+// 残り秒を "m:ss" に整形 (カウントダウン表示用)。
+export function formatRemaining(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}

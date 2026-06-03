@@ -16,6 +16,7 @@
 // 発行。Sentry alert rule で event filter すれば CoinGecko の outage を検知できる。
 
 import { logger } from '@/lib/logger';
+import { FX_RATE_MIN, FX_RATE_MAX } from '@/lib/fx';
 
 // Next 15: revalidate を export すると route が build 時に prerender される。
 // CoinGecko が build 時に到達不能だと fetch reject で `Export encountered an
@@ -55,6 +56,16 @@ export async function GET(): Promise<Response> {
       jpyType: typeof usdcJpy,
     });
     return Response.json({ error: 'invalid-shape' }, { status: 502 });
+  }
+  // 決済 (動的 QR の FX 換算) で使う前提の sanity band。CoinGecko が単位ミス
+  // (USD を返す等) や桁化けを起こした絶対額を generator が焼き込まないための guard。
+  // 表示専用 strip も band 外を出すより unavailable に倒す方が安全。
+  if (usdcJpy < FX_RATE_MIN || usdcJpy > FX_RATE_MAX) {
+    logger.warn('market.rates.upstream_error', {
+      reason: 'out-of-band',
+      usdcJpy,
+    });
+    return Response.json({ error: 'out-of-band' }, { status: 502 });
   }
 
   return Response.json({

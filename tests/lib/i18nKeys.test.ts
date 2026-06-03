@@ -573,3 +573,67 @@ describe('i18n: Circle Paymaster の gas help text (provider 次元・C4)', () =
     expect(en.PaymentForm.gasInfoUsdcCircle).toMatch(/does not collect/i);
   });
 });
+
+describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
+  // QrGenerator の convert (他トークン建てで受け取る) keys。
+  const QR_CONVERT_KEYS = [
+    'convertButton',
+    'convertRateUnavailable',
+    'convertActiveSummary',
+    'convertRate',
+    'convertRemaining',
+    'convertExpired',
+    'convertRecalc',
+    'convertRevert',
+    'convertCrossChainNote',
+  ] as const;
+  // PaymentForm の FX 文脈 + 有効期限 keys。
+  const PAY_FX_KEYS = [
+    'fxAnchorLine',
+    'fxRateLine',
+    'fxRemaining',
+    'fxExpiredShort',
+    'expiredTitle',
+    'expiredBody',
+    'btnExpired',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of QR_CONVERT_KEYS) {
+      it(`${loc.name}.QrGenerator.${key} は非空文字列`, () => {
+        const v = (loc.m.QrGenerator as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+    for (const key of PAY_FX_KEYS) {
+      it(`${loc.name}.PaymentForm.${key} は非空文字列`, () => {
+        const v = (loc.m.PaymentForm as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('parameterized keys が ja/en 両方で必要な placeholder を含む', () => {
+    const placeholderChecks = [
+      ['QrGenerator', 'convertButton', ['{symbol}']],
+      ['QrGenerator', 'convertActiveSummary', ['{anchorAmount}', '{anchorSymbol}', '{amount}', '{symbol}']],
+      ['QrGenerator', 'convertRate', ['{rate}']],
+      ['QrGenerator', 'convertRemaining', ['{time}']],
+      ['QrGenerator', 'convertRevert', ['{symbol}']],
+      ['PaymentForm', 'fxAnchorLine', ['{refAmt}', '{anchorSymbol}', '{amount}', '{symbol}']],
+      ['PaymentForm', 'fxRateLine', ['{rate}']],
+      ['PaymentForm', 'fxRemaining', ['{time}']],
+    ] as const;
+    for (const [ns, key, phs] of placeholderChecks) {
+      for (const m of [ja, en]) {
+        const v = (m[ns] as Record<string, unknown>)[key] as string;
+        for (const ph of phs) expect(v).toContain(ph);
+      }
+    }
+  });
+});

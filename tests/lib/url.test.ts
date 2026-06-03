@@ -92,6 +92,90 @@ describe('buildPayUrl', () => {
   });
 });
 
+describe('動的 QR 付帯情報 (exp / refAmt / fxRate)', () => {
+  const base = {
+    to: VALID_TO as Address,
+    token: 'usdc' as const,
+    gas: 'customer' as const,
+    amount: '6.4',
+    mode: 'gasless' as const,
+  };
+  function parse(query: string) {
+    return parsePayParams(new URLSearchParams(query));
+  }
+
+  it('build: 在るときだけ exp/refAmt/fxRate を出力', () => {
+    const path = buildPayPath({
+      ...base,
+      expiresAt: 1_717_420_800,
+      priceRefAmount: '1000',
+      fxRate: '156.32',
+    });
+    expect(path).toContain('exp=1717420800');
+    expect(path).toContain('refAmt=1000');
+    expect(path).toContain('fxRate=156.32');
+  });
+
+  it('build: 未指定なら既定 URL は不変 (3 param とも出さない)', () => {
+    const path = buildPayPath(base);
+    expect(path).toBe(`/pay?to=${VALID_TO}&token=usdc&amount=6.4`);
+    expect(path).not.toContain('exp');
+    expect(path).not.toContain('refAmt');
+    expect(path).not.toContain('fxRate');
+  });
+
+  it('parse: 正の整数 exp を採用 / 非数値・0・負は undefined (= 期限なし)', () => {
+    const ok = parse(`to=${VALID_TO}&token=usdc&exp=1717420800`);
+    expect(ok.ok && ok.params.expiresAt).toBe(1_717_420_800);
+    // 非数値 / 0 / 負 / 小数 / 桁あふれ (MAX_SAFE_INTEGER 超→Infinity) はすべて undefined。
+    for (const bad of ['abc', '0', '-5', '1.5', '99999999999999999999']) {
+      const r = parse(`to=${VALID_TO}&token=usdc&exp=${encodeURIComponent(bad)}`);
+      expect(r.ok && r.params.expiresAt).toBeUndefined();
+    }
+  });
+
+  it('parse: refAmt は decimal のみ採用 / 不正は undefined (文脈非表示に degrade)', () => {
+    const ok = parse(`to=${VALID_TO}&token=usdc&refAmt=1000`);
+    expect(ok.ok && ok.params.priceRefAmount).toBe('1000');
+    const bad = parse(`to=${VALID_TO}&token=usdc&refAmt=abc`);
+    expect(bad.ok && bad.params.priceRefAmount).toBeUndefined();
+  });
+
+  it('parse: fxRate は sanity band 内のみ採用 / band 外・非数値は undefined', () => {
+    const ok = parse(`to=${VALID_TO}&token=usdc&fxRate=156.32`);
+    expect(ok.ok && ok.params.fxRate).toBe('156.32');
+    for (const bad of ['49', '999', 'abc']) {
+      const r = parse(`to=${VALID_TO}&token=usdc&fxRate=${bad}`);
+      expect(r.ok && r.params.fxRate).toBeUndefined();
+    }
+  });
+
+  it('壊れた exp でも支払いは止めない (parse 自体は ok・expiresAt のみ undefined)', () => {
+    const r = parse(`to=${VALID_TO}&token=usdc&amount=6.4&exp=notanumber`);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.amount).toBe('6.4');
+      expect(r.params.expiresAt).toBeUndefined();
+    }
+  });
+
+  it('round-trip: build → parse で 3 値が保存される', () => {
+    const path = buildPayPath({
+      ...base,
+      expiresAt: 1_717_420_800,
+      priceRefAmount: '1000',
+      fxRate: '156.32',
+    });
+    const r = parse(path.split('?')[1]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.expiresAt).toBe(1_717_420_800);
+      expect(r.params.priceRefAmount).toBe('1000');
+      expect(r.params.fxRate).toBe('156.32');
+    }
+  });
+});
+
 describe('parsePayParams', () => {
   function search(query: string) {
     return new URLSearchParams(query);

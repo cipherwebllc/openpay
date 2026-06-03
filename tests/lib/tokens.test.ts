@@ -7,6 +7,9 @@ import {
   resolveDeployment,
   TOKEN_DEPLOYMENTS,
   DEFAULT_CHAIN_FOR_SYMBOL,
+  counterpartSymbol,
+  symbolHasDeployment,
+  defaultConvertChainSlug,
 } from '@/lib/tokens';
 import {
   arbitrumSepolia,
@@ -320,6 +323,44 @@ describe('isGaslessSupported', () => {
     const mod = await import('@/lib/tokens');
     const d = mod.deploymentForSlug('jpyc', 'polygon');
     expect(mod.isGaslessSupported(d)).toBe(true);
+  });
+});
+
+describe('counterpartSymbol', () => {
+  it('jpyc ⇄ usdc', () => {
+    expect(counterpartSymbol('jpyc')).toBe('usdc');
+    expect(counterpartSymbol('usdc')).toBe('jpyc');
+  });
+});
+
+describe('symbolHasDeployment', () => {
+  it('jpyc@polygon → true / usdc@polygon → true (両トークン同居)', () => {
+    expect(symbolHasDeployment('jpyc', 'polygon')).toBe(true);
+    expect(symbolHasDeployment('usdc', 'polygon')).toBe(true);
+  });
+
+  it('usdc@kaia → false (Kaia に native USDC 無し) / jpyc@base → false (JPYC は Polygon/Kaia のみ)', () => {
+    expect(symbolHasDeployment('usdc', 'kaia')).toBe(false);
+    expect(symbolHasDeployment('jpyc', 'base')).toBe(false);
+    expect(symbolHasDeployment('jpyc', 'arbitrum')).toBe(false);
+  });
+});
+
+describe('defaultConvertChainSlug', () => {
+  it('jpyc@polygon → usdc: polygon 維持 (USDC も polygon に在る)', () => {
+    expect(defaultConvertChainSlug('polygon', 'usdc')).toBe('polygon');
+  });
+
+  it('jpyc@kaia → usdc: Kaia に USDC 無し → usdc 既定 (base)', () => {
+    expect(defaultConvertChainSlug('kaia', 'usdc')).toBe('base');
+  });
+
+  it('usdc@base → jpyc: Base に JPYC 無し → jpyc 既定 (polygon)', () => {
+    expect(defaultConvertChainSlug('base', 'jpyc')).toBe('polygon');
+  });
+
+  it('usdc@polygon → jpyc: polygon 維持 (JPYC も polygon に在る)', () => {
+    expect(defaultConvertChainSlug('polygon', 'jpyc')).toBe('polygon');
   });
 });
 

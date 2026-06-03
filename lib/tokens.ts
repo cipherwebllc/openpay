@@ -332,3 +332,36 @@ export function isValidTokenSymbol(value: string): value is TokenSymbol {
 export function isGaslessSupported(deployment: TokenDeployment): boolean {
   return deployment.paymasterMode !== 'unavailable';
 }
+
+// ---------------------------------------------------------------------------
+// 動的 QR の「他トークン建てで受け取る」(FX 換算) 用ヘルパ
+// ---------------------------------------------------------------------------
+
+// jpyc⇄usdc は 2 値なので counterpart は固定反転。
+export function counterpartSymbol(symbol: TokenSymbol): TokenSymbol {
+  return symbol === 'jpyc' ? 'usdc' : 'jpyc';
+}
+
+// (symbol, slug) に deployment が存在するか (lib/url.ts の private hasDeployment と同義、
+// 本 export は generator / convert ロジック用)。buyer-only USDC は ChainSlug 外なので対象外。
+export function symbolHasDeployment(
+  symbol: TokenSymbol,
+  slug: ChainSlug,
+): boolean {
+  const chainId = chainForSlug(slug).id;
+  return TOKEN_DEPLOYMENTS.some(
+    (d) => d.symbol === symbol && d.chainId === chainId,
+  );
+}
+
+// convert (token 切替) 時の既定受取チェーン。現 chain に target token が deploy 済なら
+// それを維持 (例: jpyc@polygon → usdc も polygon)、無ければ target の default chain
+// (usdc→base, jpyc→polygon)。店主は UI の chain セレクタで任意の対応 chain に変更可。
+// FX 換算自体はチェーン非依存なので、受取チェーンは純粋に「どこで受け取りたいか」の選択。
+export function defaultConvertChainSlug(
+  currentSlug: ChainSlug,
+  targetSymbol: TokenSymbol,
+): ChainSlug {
+  if (symbolHasDeployment(targetSymbol, currentSlug)) return currentSlug;
+  return DEFAULT_CHAIN_FOR_SYMBOL[targetSymbol];
+}

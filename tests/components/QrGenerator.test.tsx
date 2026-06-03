@@ -22,6 +22,25 @@ vi.mock('@/hooks/useOrigin', () => ({
   useOrigin: () => useOriginMock(),
 }));
 
+// useMarketRates は React Query 経由で /api/market/rates を叩く。テストでは
+// QueryClientProvider を張らない renderWithIntl を使うため、hook ごとモックして
+// 固定レート (1 USDC = 150 円) を返す。convert (他トークン建て) テストで参照。
+type MarketRatesResult = {
+  data: { usdcJpy: number; updatedAt: string } | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
+};
+const marketRatesData = vi.fn((): MarketRatesResult => ({
+  data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },
+  isLoading: false,
+  isError: false,
+  refetch: vi.fn(),
+}));
+vi.mock('@/hooks/useMarketRates', () => ({
+  useMarketRates: () => marketRatesData(),
+}));
+
 import { QrGenerator } from '@/components/QrGenerator';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -2223,5 +2242,145 @@ describe('QrGenerator', () => {
         expect(within(advancedToggle).getByText(expected)).toBeInTheDocument();
       },
     );
+  });
+});
+
+describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効期限付き)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useOriginMock.mockReturnValue('https://test.local');
+    marketRatesData.mockReturnValue({
+      data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+  });
+
+  it('JPYC + 金額入力で convert ボタンが出る (金額未入力では出ない)', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    expect(
+      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+    ).toBeNull();
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    expect(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('クリックで USDC 建てに換算 (1000 JPYC @150 → 6.666667 USDC) + URL に exp/refAmt/fxRate', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    await user.click(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    );
+
+    // token が USDC に切替 (placeholder 10.00) + amount は ceil 換算値
+    const input = (await screen.findByPlaceholderText(
+      '10.00',
+    )) as HTMLInputElement;
+    expect(input.value).toBe('6.666667');
+    // 換算サマリ (anchor 円価格 ≈ USDC 額)
+    expect(screen.getByText(/1000 JPYC ≈ 6\.666667 USDC/)).toBeInTheDocument();
+    // URL に変換情報が乗る
+    await waitFor(() => {
+      const url = screen.getByText(
+        (t) => t.includes('/pay?') && t.includes('amount=6.666667'),
+      );
+      expect(url.textContent).toContain('token=usdc');
+      expect(url.textContent).toContain('refAmt=1000');
+      expect(url.textContent).toContain('fxRate=150');
+      expect(url.textContent).toMatch(/exp=\d+/);
+    });
+  });
+
+  it('換算後に金額を手動編集すると換算ロック解除 (URL から refAmt が消える)', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    await user.click(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    );
+    const input = await screen.findByPlaceholderText('10.00');
+    await waitFor(() =>
+      expect(
+        screen.getByText((t) => t.includes('refAmt=1000')),
+      ).toBeInTheDocument(),
+    );
+    await user.clear(input);
+    await user.type(input, '5');
+    await waitFor(() =>
+      expect(screen.queryByText((t) => t.includes('refAmt='))).toBeNull(),
+    );
+  });
+
+  it('据え置きモードでは convert ボタンは出ない', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    expect(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /据え置き/ }));
+    expect(
+      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+    ).toBeNull();
+  });
+
+  it('「元の JPYC 建てに戻す」で anchor (JPYC 1000) に復帰', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    await user.click(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    );
+    await screen.findByPlaceholderText('10.00');
+    await user.click(
+      await screen.findByRole('button', { name: /元の JPYC 建てに戻す/ }),
+    );
+    const input = (await screen.findByPlaceholderText(
+      '1000',
+    )) as HTMLInputElement;
+    expect(input.value).toBe('1000');
+    expect(screen.queryByRole('button', { name: /再計算/ })).toBeNull();
+  });
+
+  it('USDC 建て換算後、cross-chain 受取の注記が出る', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    await user.click(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    );
+    expect(
+      await screen.findByText(/他チェーンの USDC でも支払い/),
+    ).toBeInTheDocument();
+  });
+
+  it('レート取得不可なら convert ボタンの代わりに注意文', async () => {
+    marketRatesData.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    expect(
+      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+    ).toBeNull();
+    expect(screen.getByText(/為替レートを取得できない/)).toBeInTheDocument();
   });
 });

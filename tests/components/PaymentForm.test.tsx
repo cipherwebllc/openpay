@@ -1286,3 +1286,78 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
     expect(props.enabled).toBe(false);
   });
 });
+
+describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
+  it('exp 過去: 期限切れバナー + 支払いボタンが無効 (btnExpired)', async () => {
+    setURL(
+      `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=150&exp=1000`,
+    );
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<PaymentForm />);
+
+    // 期限切れバナー (effect で now 取得後に確定)
+    expect(
+      await screen.findByText(/この QR は有効期限切れです/),
+    ).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: /有効期限切れ/ });
+    expect(btn).toBeDisabled();
+  });
+
+  it('exp 過去: CrossChainHint も enabled=false (代替 cross-chain 経路も封じる)', async () => {
+    setURL(
+      `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=150&exp=1000`,
+    );
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<PaymentForm />);
+
+    // 期限切れ確定後 (effect で now 計測) を待ってから props を検査
+    await screen.findByText(/この QR は有効期限切れです/);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall?.[0] as Record<string, unknown>;
+    expect(props.enabled).toBe(false);
+  });
+
+  it('exp 未来: 文脈行 (1000 JPYC ≈ 6.4 USDC) + レート + 残り時間、btnExpired は出ない', async () => {
+    const future = Math.floor(Date.now() / 1000) + 600;
+    setURL(
+      `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=150&exp=${future}`,
+    );
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setSmartAccount(true);
+    setGasQuote('ready');
+    setBalance(100_000_000n); // 100 USDC ≫ 6.5 USDC
+    render(<PaymentForm />);
+
+    // anchor 文脈行 (元の円価格 ≈ 請求 USDC 額)
+    expect(screen.getByText(/1000 JPYC ≈ 6\.4 USDC/)).toBeInTheDocument();
+    // 生成時レート
+    expect(screen.getByText(/1 USDC = 150 円/)).toBeInTheDocument();
+    // 残り時間カウントダウン (effect 後)
+    expect(await screen.findByText(/残り \d+:\d{2}/)).toBeInTheDocument();
+    // 期限切れ表示は出ない
+    expect(screen.queryByText(/この QR は有効期限切れです/)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /有効期限切れ/ }),
+    ).toBeNull();
+  });
+
+  it('exp 無し (通常 QR): 期限切れバナーも文脈行も出ない (従来挙動)', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setSmartAccount(true);
+    setGasQuote('ready');
+    setBalance(100_000_000n);
+    render(<PaymentForm />);
+
+    expect(screen.queryByText(/この QR は有効期限切れです/)).toBeNull();
+    expect(screen.queryByText(/≈/)).toBeNull();
+    // 通常の支払いボタンが出る (期限切れラベルではない)
+    expect(
+      screen.queryByRole('button', { name: /有効期限切れ/ }),
+    ).toBeNull();
+  });
+});
