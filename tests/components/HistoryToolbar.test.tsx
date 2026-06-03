@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { HistoryToolbar } from '@/components/HistoryToolbar';
@@ -147,6 +147,41 @@ describe('HistoryToolbar', () => {
     await user.click(screen.getByRole('button', { name: '会計CSVを書き出し' }));
     expect(downloadSpy).toHaveBeenCalledOnce();
     expect(downloadSpy.mock.calls[0]![1]).toMatch(/^openpay-freee-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+
+  it('会計CSV (MF 仕訳帳・JPYC) → downloadBlob (openpay-mf-*.csv)', async () => {
+    const user = userEvent.setup();
+    const downloadSpy = vi
+      .spyOn(downloadModule, 'downloadBlob')
+      .mockImplementation(() => undefined);
+    renderToolbar({
+      entries: [entry({ asset: 'jpyc' })],
+      counts: { all: 1, jpyc: 1, usdc: 0 },
+      usdcJpy: 150,
+    });
+    await user.selectOptions(screen.getByLabelText('会計ソフト形式'), 'mf');
+    await user.click(screen.getByRole('button', { name: '会計CSVを書き出し' }));
+    expect(downloadSpy).toHaveBeenCalledOnce();
+    expect(downloadSpy.mock.calls[0]![1]).toMatch(/^openpay-mf-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+
+  it('会計CSV (弥生ネイティブ) → Shift_JIS encode 後に downloadBlob (openpay-yayoi-native-*.csv)', async () => {
+    const user = userEvent.setup();
+    const downloadSpy = vi
+      .spyOn(downloadModule, 'downloadBlob')
+      .mockImplementation(() => undefined);
+    renderToolbar({
+      entries: [entry({ asset: 'jpyc' })],
+      counts: { all: 1, jpyc: 1, usdc: 0 },
+      usdcJpy: 150,
+    });
+    await user.selectOptions(screen.getByLabelText('会計ソフト形式'), 'yayoi-native');
+    await user.click(screen.getByRole('button', { name: '会計CSVを書き出し' }));
+    // encodeShiftJis は encoding-japanese を動的 import するため非同期で完了する。
+    await waitFor(() => expect(downloadSpy).toHaveBeenCalledOnce());
+    expect(downloadSpy.mock.calls[0]![1]).toMatch(
+      /^openpay-yayoi-native-\d{4}-\d{2}-\d{2}\.csv$/,
+    );
   });
 
   it('会計CSV: USDC無anchor + レート無 → alert・downloadBlob は呼ばれない', async () => {

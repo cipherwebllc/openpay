@@ -19,10 +19,16 @@ export function escapeCsvCell(value: string): string {
   return `"${defanged.replace(/"/g, '""')}"`;
 }
 
-// 行配列 → CSV 文字列 (BOM + 各セル escape + CRLF 区切り + 末尾 CRLF)。
-export function buildCsv(rows: ReadonlyArray<ReadonlyArray<string>>): string {
+// 行配列 → CSV 文字列 (各セル escape + CRLF 区切り + 末尾 CRLF)。既定で UTF-8 BOM を付与。
+// bom:false は Shift_JIS 出力 (弥生ネイティブ) 用 — Shift_JIS には BOM の概念が無く、
+// UTF-8 BOM (﻿) を残すと変換先で文字化け/不正バイトになるため呼出側が外す。
+export function buildCsv(
+  rows: ReadonlyArray<ReadonlyArray<string>>,
+  opts: { bom?: boolean } = {},
+): string {
   const body = rows
     .map((row) => row.map(escapeCsvCell).join(','))
     .join(CSV_NEWLINE);
-  return CSV_BOM + body + CSV_NEWLINE;
+  const csv = body + CSV_NEWLINE;
+  return opts.bom === false ? csv : CSV_BOM + csv;
 }

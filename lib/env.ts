@@ -316,6 +316,13 @@ export const env = {
   enableJpycEip3009:
     process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009 === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009 === 'true',
+  // freee 自動連携パネル (/history の SIWE ログイン + 「freee に同期」) の有効化フラグ。
+  // **既定 OFF (dark ship)**。会計 API の req/resp 形が実プラン freee で未検証のため、
+  // 検証が済むまで本番では出さない。kill-switch も兼ねる (問題時に OFF でパネル即非表示)。
+  // OFF でも CSV 書き出し (履歴) は従来通り使える。'1' / 'true' で ON。
+  enableFreeeSync:
+    process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

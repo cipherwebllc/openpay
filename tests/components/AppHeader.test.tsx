@@ -23,6 +23,21 @@ vi.mock('@/hooks/useVisibleConnectors', () => ({
   useVisibleConnectors: () => [],
 }));
 
+// SIWE セッション hook も boundary mock (WalletBadge 経由・未サインイン default)。
+vi.mock('@/hooks/useSiweSession', () => ({
+  useSiweSession: () => ({
+    sessionAddress: null,
+    isSignedIn: false,
+    mismatch: false,
+    isLoading: false,
+    signIn: vi.fn().mockResolvedValue(undefined),
+    isSigningIn: false,
+    signInError: null,
+    signOut: vi.fn().mockResolvedValue(undefined),
+    isSigningOut: false,
+  }),
+}));
+
 import { AppHeader } from '@/components/AppHeader';
 
 beforeEach(() => {

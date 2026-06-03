@@ -14,6 +14,12 @@ vi.mock('@/hooks/useMarketRates', () => ({
   }),
 }));
 
+// FreeeSyncPanel は wagmi (useSiweSession) + React Query を引くため boundary mock。
+// 連携 UI は FreeeSyncPanel 専用 test で検証。本 test は filter/summary/list に集中。
+vi.mock('@/components/FreeeSyncPanel', () => ({
+  FreeeSyncPanel: () => null,
+}));
+
 import { HistoryView } from '@/components/HistoryView';
 import {
   appendHistory,

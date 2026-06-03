@@ -1,10 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { convert, codeToString } from 'encoding-japanese';
 import {
   toAccountingCsv,
   accountingCsvFilename,
 } from '@/lib/accountingCsv';
+import { encodeShiftJis } from '@/lib/sjis';
 import { CSV_BOM, CSV_NEWLINE } from '@/lib/csv';
 import type { HistoryEntry } from '@/lib/history';
+
+// テスト用: Shift_JIS バイト列 → 文字列 (encodeShiftJis の逆変換)。
+function decodeShiftJis(bytes: Uint8Array): string {
+  return codeToString(convert(Array.from(bytes), 'UNICODE', 'SJIS'));
+}
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
@@ -146,10 +153,109 @@ describe('toAccountingCsv: 弥生 形式 (仕訳・25列・ヘッダ無し)', ()
   });
 });
 
+describe('toAccountingCsv: charset', () => {
+  it('freee/yayoi/mf は UTF-8 (BOM 付き)・yayoi-native は Shift_JIS (BOM 無し)', () => {
+    for (const format of ['freee', 'yayoi', 'mf'] as const) {
+      const r = toAccountingCsv([JPYC], { format, usdcJpy: 150 });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.charset).toBe('utf-8');
+      expect(r.csv.startsWith(CSV_BOM)).toBe(true);
+    }
+    const ynative = toAccountingCsv([JPYC], { format: 'yayoi-native', usdcJpy: 150 });
+    expect(ynative.ok).toBe(true);
+    if (!ynative.ok) return;
+    expect(ynative.charset).toBe('shift_jis');
+    expect(ynative.csv.startsWith(CSV_BOM)).toBe(false); // UTF-8 BOM を含まない
+  });
+});
+
+describe('toAccountingCsv: マネーフォワード 形式 (仕訳帳・ヘッダ付き・複式)', () => {
+  it('ヘッダ + 借方売掛金/貸方売上高・日付 YYYY/MM/DD・金額は両建て整数円', () => {
+    const r = toAccountingCsv([JPYC, USDC_ANCHOR], { format: 'mf', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.rowCount).toBe(2);
+    const rows = parseRows(r.csv);
+    expect(rows[0][0]).toBe('取引No');
+    expect(rows[0]).toContain('借方勘定科目');
+    expect(rows[0]).toContain('貸方勘定科目');
+    expect(rows[0]).toHaveLength(15);
+    const row = rows[1];
+    expect(row[0]).toBe('1'); // 取引No
+    expect(row[1]).toBe('2026/06/15'); // 取引日
+    expect(row[2]).toBe('売掛金'); // 借方勘定科目
+    expect(row[6]).toBe('1000'); // 借方金額(円) = JPYC 1:1
+    expect(row[8]).toBe('売上高'); // 貸方勘定科目
+    expect(row[12]).toBe('1000'); // 貸方金額(円)
+    expect(rows[2][6]).toBe('1500'); // USDC + anchor (exact)
+    expect(rows[2][14]).toContain('元:1500 JPYC'); // 摘要
+  });
+
+  it('income-only (status フィルタ非依存で revert/error/手数料を除外)', () => {
+    const r = toAccountingCsv([JPYC, REVERTED, FEE_LEG, ERRORED], {
+      format: 'mf',
+      usdcJpy: 150,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rowCount).toBe(1);
+  });
+});
+
+describe('toAccountingCsv: 弥生ネイティブ (Shift_JIS round-trip)', () => {
+  it('Shift_JIS エンコード → デコードで日本語列が保たれる (25列・ヘッダ無し)', async () => {
+    const r = toAccountingCsv([JPYC], { format: 'yayoi-native', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const bytes = await encodeShiftJis(r.csv);
+    const back = decodeShiftJis(bytes);
+    expect(back).toContain('売掛金');
+    expect(back).toContain('売上高');
+    expect(back).toContain('課税売上込10%');
+    expect(back).toContain('2026/06/15');
+    // 25 列・ヘッダ無し (yayoi と同一レイアウト) を round-trip 後も維持
+    const cols = back.split(CSV_NEWLINE).filter((l) => l.length > 0)[0].split(',');
+    expect(cols).toHaveLength(25);
+    expect(cols[0]).toBe('2000');
+  });
+});
+
+describe('取引先 / 備考 のエッジケース', () => {
+  it('storeName 空 → 取引先は customer にフォールバック (freee)', () => {
+    const e = entry({ asset: 'jpyc', storeName: '', customer: '0xCustomerAddr' });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(parseRows(r.csv)[1][5]).toBe('0xCustomerAddr'); // 取引先 列
+  });
+
+  it('storeName が formula injection (=cmd) → CSV defang (先頭 single quote)', () => {
+    const e = entry({ asset: 'jpyc', storeName: '=HYPERLINK("evil")' });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // escapeCsvCell が = 始まりを 'で無害化 + カンマ含むので quote
+    expect(r.csv).toContain('"\'=HYPERLINK(""evil"")"');
+  });
+
+  it('5000 行ちょうどは ok (上限内・境界)', () => {
+    const r = toAccountingCsv(Array.from({ length: 5000 }, () => JPYC), {
+      format: 'freee',
+      usdcJpy: 150,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rowCount).toBe(5000);
+  });
+});
+
 describe('accountingCsvFilename', () => {
   it('openpay-{format}-YYYY-MM-DD.csv', () => {
     const d = new Date(2026, 5, 3);
     expect(accountingCsvFilename('freee', d)).toBe('openpay-freee-2026-06-03.csv');
     expect(accountingCsvFilename('yayoi', d)).toBe('openpay-yayoi-2026-06-03.csv');
+    expect(accountingCsvFilename('mf', d)).toBe('openpay-mf-2026-06-03.csv');
+    expect(accountingCsvFilename('yayoi-native', d)).toBe(
+      'openpay-yayoi-native-2026-06-03.csv',
+    );
   });
 });

@@ -19,6 +19,33 @@ vi.mock('@/hooks/useVisibleConnectors', () => ({
   useVisibleConnectors: () => visibleConnectorsMock(),
 }));
 
+// SIWE セッション hook は boundary mock (React Query + useSignMessage を引かない)。
+// nonce→署名→verify の検証は lib/siwe (siwe.test) と route が担保。本 test は UI 分岐。
+const siweMock = vi.fn();
+vi.mock('@/hooks/useSiweSession', () => ({
+  useSiweSession: () => siweMock(),
+}));
+
+type SiweState = ReturnType<typeof defaultSiwe>;
+function defaultSiwe() {
+  return {
+    sessionAddress: null as string | null,
+    isSignedIn: false,
+    mismatch: false,
+    isLoading: false,
+    signIn: vi.fn().mockResolvedValue(undefined),
+    isSigningIn: false,
+    signInError: null as Error | null,
+    signOut: vi.fn().mockResolvedValue(undefined),
+    isSigningOut: false,
+  };
+}
+function setSiwe(overrides: Partial<SiweState> = {}) {
+  const state = { ...defaultSiwe(), ...overrides };
+  siweMock.mockReturnValue(state);
+  return state;
+}
+
 import { WalletBadge } from '@/components/WalletBadge';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -77,6 +104,7 @@ function openDropdown(summaryText: string | RegExp): HTMLDetailsElement {
 beforeEach(() => {
   vi.clearAllMocks();
   visibleConnectorsMock.mockReturnValue([]);
+  setSiwe();
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -148,6 +176,62 @@ describe('WalletBadge: 接続済 branch', () => {
     const details = openDropdown('0x52d4…cA81');
     // summary 内 (短縮表記) + dropdown header の 2 箇所に出る
     expect(within(details).getByText('Polygon Mainnet')).toBeInTheDocument();
+  });
+});
+
+describe('WalletBadge: SIWE サインイン', () => {
+  it('未サインイン → dropdown に「ログイン (署名)」menuitem・click で signIn(statement) 呼出', () => {
+    setConnected();
+    const siwe = setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    const btn = within(details).getByRole('menuitem', { name: 'ログイン (署名)' });
+    fireEvent.click(btn);
+    expect(siwe.signIn).toHaveBeenCalledWith('OpenPay にこのウォレットでログインします。');
+  });
+
+  it('サインイン済 → summary に ✓・dropdown に「ログイン済」+「ログアウト」menuitem', () => {
+    setConnected();
+    const siwe = setSiwe({ isSignedIn: true, sessionAddress: ADDR });
+    renderWithIntl(<WalletBadge />);
+    // summary の ✓ (aria-label = ログイン済)
+    expect(screen.getByLabelText('ログイン済')).toBeInTheDocument();
+    const details = openDropdown('0x52d4…cA81');
+    const signOutBtn = within(details).getByRole('menuitem', { name: 'ログアウト' });
+    fireEvent.click(signOutBtn);
+    expect(siwe.signOut).toHaveBeenCalledTimes(1);
+    // サインイン済では「ログイン (署名)」は出ない
+    expect(
+      within(details).queryByRole('menuitem', { name: 'ログイン (署名)' }),
+    ).toBeNull();
+  });
+
+  it('mismatch (別アドレスでセッション) → 「再ログイン」menuitem', () => {
+    setConnected();
+    setSiwe({ mismatch: true, sessionAddress: '0xother' });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: '別アドレスでログイン中 — 再ログイン' }),
+    ).toBeInTheDocument();
+  });
+
+  it('signInError → 赤エラー文言を dropdown 内に表示', () => {
+    setConnected();
+    setSiwe({ signInError: new Error('invalid_signature') });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(within(details).getByText('ログインに失敗しました')).toBeInTheDocument();
+  });
+
+  it('切断 menuitem → signOut + disconnect の両方を呼ぶ (宙ぶらりんセッション防止)', () => {
+    const { disconnect } = setConnected();
+    const siwe = setSiwe({ isSignedIn: true, sessionAddress: ADDR });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    fireEvent.click(within(details).getByRole('menuitem', { name: '切断' }));
+    expect(siwe.signOut).toHaveBeenCalledTimes(1);
+    expect(disconnect).toHaveBeenCalledTimes(1);
   });
 });
 
