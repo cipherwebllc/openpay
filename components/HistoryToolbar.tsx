@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { downloadBlob } from '@/lib/download';
+import { encodeShiftJis } from '@/lib/sjis';
 import { clearHistory, type HistoryEntry } from '@/lib/history';
 import { historyCsvFilename, toCsv } from '@/lib/historyCsv';
 import {
@@ -90,18 +91,28 @@ export function HistoryToolbar({
 
   function handleAccountingExport() {
     const r = toAccountingCsv(entries, { format: acctFormat, usdcJpy });
-    if (r.ok) {
-      const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' });
-      downloadBlob(blob, accountingCsvFilename(acctFormat));
+    if (!r.ok) {
+      const msg =
+        r.reason === 'rate-unavailable'
+          ? t('accountingRateUnavailable')
+          : r.reason === 'no-rows'
+            ? t('accountingNoRows')
+            : t('accountingTooManyRows', { max: 5000 });
+      window.alert(msg);
       return;
     }
-    const msg =
-      r.reason === 'rate-unavailable'
-        ? t('accountingRateUnavailable')
-        : r.reason === 'no-rows'
-          ? t('accountingNoRows')
-          : t('accountingTooManyRows', { max: 5000 });
-    window.alert(msg);
+    const filename = accountingCsvFilename(acctFormat);
+    if (r.charset === 'shift_jis') {
+      // 弥生ネイティブ: encoding-japanese を遅延ロードし Shift_JIS バイト列で書き出す。
+      void encodeShiftJis(r.csv).then((bytes) => {
+        downloadBlob(
+          new Blob([bytes], { type: 'text/csv;charset=shift_jis' }),
+          filename,
+        );
+      });
+      return;
+    }
+    downloadBlob(new Blob([r.csv], { type: 'text/csv;charset=utf-8' }), filename);
   }
 
   function handleClear() {
@@ -209,6 +220,8 @@ export function HistoryToolbar({
           >
             <option value="freee">{t('accountingFormatFreee')}</option>
             <option value="yayoi">{t('accountingFormatYayoi')}</option>
+            <option value="mf">{t('accountingFormatMf')}</option>
+            <option value="yayoi-native">{t('accountingFormatYayoiNative')}</option>
           </select>
           <button
             type="button"

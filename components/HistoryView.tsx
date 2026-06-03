@@ -8,6 +8,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { env } from '@/lib/env';
 import { HISTORY_MAX_ENTRIES, removeHistoryEntry } from '@/lib/history';
 import {
   applyHistoryFilters,
@@ -22,6 +23,8 @@ import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
 import { HistoryToolbar } from './HistoryToolbar';
 import { HistorySummary } from './HistorySummary';
+import { FreeeSyncPanel } from './FreeeSyncPanel';
+import { AccountingAffiliates } from './AccountingAffiliates';
 
 export function HistoryView() {
   const t = useTranslations('History');
@@ -80,6 +83,9 @@ export function HistoryView() {
               usdcJpy={usdcJpy}
             />
             <HistorySummary summary={summary} />
+            {env.enableFreeeSync && (
+              <FreeeSyncPanel entries={filtered} usdcJpy={usdcJpy} />
+            )}
           </>
         )}
 
@@ -98,6 +104,8 @@ export function HistoryView() {
             ))}
           </ul>
         )}
+
+        <AccountingAffiliates />
       </section>
     </div>
   );

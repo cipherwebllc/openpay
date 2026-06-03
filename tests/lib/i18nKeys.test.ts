@@ -654,6 +654,8 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
     'accountingFormatLabel',
     'accountingFormatFreee',
     'accountingFormatYayoi',
+    'accountingFormatMf',
+    'accountingFormatYayoiNative',
     'exportAccountingCsv',
     'accountingIncomeOnlyNote',
     'accountingRateUnavailable',
@@ -667,6 +669,9 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
     'gmvReferenceNote',
     'filterEmpty',
     'columnAnchor',
+    'affiliateHeading',
+    'affiliateAd',
+    'affiliateNote',
   ] as const;
 
   for (const loc of [
@@ -690,6 +695,57 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
       }
       expect(h.summaryGmv).toContain('{amount}');
       expect(h.accountingTooManyRows).toContain('{max}');
+    }
+  });
+});
+
+describe('i18n: FreeeSync keys (ja/en parity)', () => {
+  const FREEE_KEYS = [
+    'title',
+    'signInRequired',
+    'connectCta',
+    'connected',
+    'companyLabel',
+    'mappingRequired',
+    'accountItemLabel',
+    'taxCodeLabel',
+    'saveMapping',
+    'mappingSaved',
+    'editMapping',
+    'syncCta',
+    'syncing',
+    'noIncome',
+    'syncDone',
+    'syncRateNote',
+    'draftNote',
+    'connectError',
+    'syncError',
+    'loadError',
+    'entitlementRequired',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of FREEE_KEYS) {
+      it(`${loc.name}.FreeeSync.${key} は非空文字列`, () => {
+        const v = (loc.m.FreeeSync as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('parameterized FreeeSync keys が placeholder を含む (ja/en)', () => {
+    for (const m of [ja, en]) {
+      const f = m.FreeeSync as Record<string, string>;
+      expect(f.companyLabel).toContain('{name}');
+      expect(f.syncCta).toContain('{count}');
+      expect(f.syncRateNote).toContain('{count}');
+      for (const ph of ['{synced}', '{skipped}', '{errored}']) {
+        expect(f.syncDone).toContain(ph);
+      }
     }
   });
 });

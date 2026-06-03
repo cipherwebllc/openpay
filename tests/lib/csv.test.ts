@@ -38,4 +38,11 @@ describe('buildCsv', () => {
     expect(csv).toContain("'=x");
     expect(csv).toContain('"a,b"');
   });
+  it('bom:false で UTF-8 BOM を付けない (Shift_JIS 出力用)', () => {
+    const csv = buildCsv([['a', 'b']], { bom: false });
+    expect(csv.startsWith(CSV_BOM)).toBe(false);
+    expect(csv).toBe(`a,b${CSV_NEWLINE}`);
+    // escape は bom 有無に依らず効く
+    expect(buildCsv([['=x']], { bom: false })).toBe(`'=x${CSV_NEWLINE}`);
+  });
 });

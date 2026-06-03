@@ -120,3 +120,9 @@ export function kvExpire(key: string, ttlSec: number): Promise<KvResult<number>>
 export function kvDel(key: string): Promise<KvResult<number>> {
   return call<number>(['DEL', key]);
 }
+
+// GETDEL: 値取得と削除を atomic に行う (Redis 6.2+)。one-time トークン (OAuth state 等) の
+// 消費で get→del の TOCTOU を避けるために使う。未存在は null。
+export function kvGetDel(key: string): Promise<KvResult<string | null>> {
+  return call<string | null>(['GETDEL', key]);
+}

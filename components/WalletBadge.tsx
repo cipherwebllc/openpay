@@ -7,9 +7,10 @@
 
 import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
-import { ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { shortAddress } from '@/lib/format';
 import { useVisibleConnectors } from '@/hooks/useVisibleConnectors';
+import { useSiweSession } from '@/hooks/useSiweSession';
 
 function isUserRejection(err: Error): boolean {
   const msg = err.message.toLowerCase();
@@ -23,12 +24,27 @@ export function WalletBadge() {
   const t = useTranslations('Nav');
   const tConnect = useTranslations('ConnectButton');
   const visible = useVisibleConnectors(connectors);
+  const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut } =
+    useSiweSession();
+
+  // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。
+  const handleSignIn = () => {
+    void signIn(t('siweStatement')).catch(() => undefined);
+  };
+  // 切断時はセッション cookie も破棄して「ログイン済だが未接続」の宙ぶらりんを残さない。
+  const handleDisconnect = () => {
+    void signOut().catch(() => undefined);
+    disconnect();
+  };
 
   if (isConnected && address) {
     return (
       <details className="group relative">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
           <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+          {isSignedIn && (
+            <Check className="h-3 w-3 text-emerald-600" aria-label={t('signedIn')} />
+          )}
           <span className="font-mono">{shortAddress(address)}</span>
           {chain && (
             <span className="hidden text-slate-500 sm:inline">/ {chain.name}</span>
@@ -40,17 +56,46 @@ export function WalletBadge() {
         </summary>
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
+          className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
         >
           {chain && (
-            <p className="px-3 py-1 text-[11px] text-slate-500">
-              {chain.name}
+            <p className="px-3 py-1 text-[11px] text-slate-500">{chain.name}</p>
+          )}
+          {isSignedIn ? (
+            <>
+              <span className="flex items-center gap-1 px-3 py-1 text-[11px] font-medium text-emerald-600">
+                <Check className="h-3 w-3" aria-hidden />
+                {t('signedIn')}
+              </span>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void signOut().catch(() => undefined)}
+                className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
+              >
+                {t('signOut')}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={isSigningIn}
+              onClick={handleSignIn}
+              className="block w-full rounded-md px-3 py-1.5 text-left font-medium text-brand hover:bg-slate-100 disabled:opacity-50"
+            >
+              {mismatch ? t('reSignIn') : t('signIn')}
+            </button>
+          )}
+          {signInError && (
+            <p className="px-3 pb-1 pt-0.5 text-[11px] text-red-600">
+              {t('signInError')}
             </p>
           )}
           <button
             type="button"
             role="menuitem"
-            onClick={() => disconnect()}
+            onClick={handleDisconnect}
             className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
           >
             {t('disconnect')}
