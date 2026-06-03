@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
@@ -2248,6 +2248,12 @@ describe('QrGenerator', () => {
 describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効期限付き)', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    // convert ボタンは受取先確定が前提 (exp が QR 生成前に走らないようにするため)。
+    // 既定で receiver を seed し (Step 2 折り畳み)、Step 1 の amount/convert を検証する。
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ receiver: VALID, token: 'jpyc' }),
+    );
     useOriginMock.mockReturnValue('https://test.local');
     marketRatesData.mockReturnValue({
       data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },
@@ -2270,11 +2276,21 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     ).toBeInTheDocument();
   });
 
+  it('受取先 未設定では金額を入れても convert ボタンは出ない (exp の早期発火を防ぐ)', async () => {
+    window.localStorage.clear(); // receiver seed を無効化 (受取先なし状態)
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    expect(
+      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+    ).toBeNull();
+  });
+
   it('クリックで USDC 建てに換算 (1000 JPYC @150 → 6.666667 USDC) + URL に exp/refAmt/fxRate', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
       await screen.findByRole('button', { name: /為替換算して USDC/ }),
@@ -2302,8 +2318,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
   it('換算後に金額を手動編集すると換算ロック解除 (URL から refAmt が消える)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
       await screen.findByRole('button', { name: /為替換算して USDC/ }),
@@ -2382,5 +2397,50 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
       screen.queryByRole('button', { name: /為替換算して USDC/ }),
     ).toBeNull();
     expect(screen.getByText(/為替レートを取得できない/)).toBeInTheDocument();
+  });
+
+  it('再計算ボタンで換算パスが再実行される (額は同レートで維持・panel 継続)', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '1000');
+    await user.click(
+      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+    );
+    const input = (await screen.findByPlaceholderText(
+      '10.00',
+    )) as HTMLInputElement;
+    expect(input.value).toBe('6.666667');
+    // 再計算 (同レート 150) → 換算パスが走り、額は維持・convert パネルは継続
+    await user.click(await screen.findByRole('button', { name: /再計算/ }));
+    expect(
+      (screen.getByPlaceholderText('10.00') as HTMLInputElement).value,
+    ).toBe('6.666667');
+    expect(
+      screen.getByRole('button', { name: /元の JPYC 建てに戻す/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('convert 後 180s 経過で「再計算してください」表示に変わる (fake timers)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 5, 3, 12, 0, 0).getTime());
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await user.type(screen.getByPlaceholderText('1000'), '1000');
+      await user.click(
+        screen.getByRole('button', { name: /為替換算して USDC/ }),
+      );
+      // 期限内: 残り 3:00、期限切れ文言は無い
+      expect(screen.getByText(/残り 3:00/)).toBeInTheDocument();
+      expect(screen.queryByText(/再計算してください/)).toBeNull();
+      // 181s 経過 → interval が convertExpired を flip
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(181_000);
+      });
+      expect(screen.getByText(/再計算してください/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

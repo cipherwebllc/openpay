@@ -98,6 +98,50 @@ describe('/api/market/rates: GET', () => {
     expect(res.status).toBe(502);
   });
 
+  it('usdcJpy が band 下限未満 (40) → 502 out-of-band + logger.warn (決済用 sanity guard)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ 'usd-coin': { jpy: 40 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const res = await GET();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toBe('out-of-band');
+    expect(logger.warn).toHaveBeenCalledWith('market.rates.upstream_error', {
+      reason: 'out-of-band',
+      usdcJpy: 40,
+    });
+  });
+
+  it('usdcJpy が band 上限超 (600・単位ミス等) → 502 out-of-band (絶対額の誤焼込防止)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ 'usd-coin': { jpy: 600 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const res = await GET();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toBe('out-of-band');
+  });
+
+  it('band 境界内 (50 / 500) は 200 で通す', async () => {
+    for (const jpy of [50, 500]) {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ 'usd-coin': { jpy } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      const res = await GET();
+      expect(res.status).toBe(200);
+      expect((await res.json()).usdcJpy).toBe(jpy);
+    }
+  });
+
   it('User-Agent ヘッダ + Next revalidate オプションが付いて fetch される', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ 'usd-coin': { jpy: 150 } }), { status: 200 }),

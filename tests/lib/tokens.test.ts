@@ -8,6 +8,7 @@ import {
   TOKEN_DEPLOYMENTS,
   DEFAULT_CHAIN_FOR_SYMBOL,
   counterpartSymbol,
+  displaySymbolFor,
   symbolHasDeployment,
   defaultConvertChainSlug,
 } from '@/lib/tokens';
@@ -330,6 +331,13 @@ describe('counterpartSymbol', () => {
   it('jpyc ⇄ usdc', () => {
     expect(counterpartSymbol('jpyc')).toBe('usdc');
     expect(counterpartSymbol('usdc')).toBe('jpyc');
+  });
+});
+
+describe('displaySymbolFor', () => {
+  it('jpyc → JPYC / usdc → USDC (deployment 由来の単一情報源)', () => {
+    expect(displaySymbolFor('jpyc')).toBe('JPYC');
+    expect(displaySymbolFor('usdc')).toBe('USDC');
   });
 });
 

@@ -342,8 +342,17 @@ export function counterpartSymbol(symbol: TokenSymbol): TokenSymbol {
   return symbol === 'jpyc' ? 'usdc' : 'jpyc';
 }
 
-// (symbol, slug) に deployment が存在するか (lib/url.ts の private hasDeployment と同義、
-// 本 export は generator / convert ロジック用)。buyer-only USDC は ChainSlug 外なので対象外。
+// symbol の表示名 ('jpyc'→'JPYC' / 'usdc'→'USDC')。deployment が手元に無い文脈
+// (anchor/counterpart トークンの表示) の単一情報源。
+export function displaySymbolFor(symbol: TokenSymbol): string {
+  return defaultDeploymentForSymbol(symbol).displaySymbol;
+}
+
+// (symbol, slug) に deployment が存在するか。TOKEN_DEPLOYMENTS の実 deployment と
+// chainId 一致で判定する単一情報源 (URL parser の (token,chain) 検証 / generator の
+// convert 可否 / defaultConvertChainSlug が共用)。旧版のシンボル↔slug ホワイトリスト
+// 判定は JPYC 多 chain 化で同期漏れ (codex 2026-05 P1) を招いたため実 deployment 判定に統一。
+// buyer-only USDC は ChainSlug 外なので対象外。
 export function symbolHasDeployment(
   symbol: TokenSymbol,
   slug: ChainSlug,

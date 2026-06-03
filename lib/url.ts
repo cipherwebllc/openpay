@@ -31,7 +31,6 @@
 import { getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import {
-  chainForSlug,
   isValidChainSlug,
   type ChainSlug,
 } from './chains';
@@ -42,9 +41,9 @@ import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
-  deploymentsForSymbol,
   isGaslessSupported,
   isValidTokenSymbol,
+  symbolHasDeployment,
   type TokenSymbol,
 } from './tokens';
 
@@ -177,20 +176,6 @@ function parseSplitParam(raw: string): SplitEntry[] | null {
     entries.push({ to: getAddress(addr), percent });
   }
   return entries;
-}
-
-// (symbol, slug) ペアに deployment が存在するかをチェック。
-// 例: (jpyc, arbitrum) は deployment が無いので false。
-//
-// 実装メモ: 旧版はシンボル ↔ slug のホワイトリスト ({jpyc:polygon} 等) で
-// 判定していたが、JPYC が Polygon + Kaia の多 chain になった際に同期し忘れ
-// て (codex review 2026-05 P1)、生成された URL が parser に reject される
-// 不整合が出た。本実装は TOKEN_DEPLOYMENTS の実 deployment と chainId 一致
-// で判定する単一情報源にする。env override 未設定で deployment skip 状態
-// なら自動的に false を返し、UI 非露出と URL 拒否が一致する。
-function hasDeployment(symbol: TokenSymbol, slug: ChainSlug): boolean {
-  const chainId = chainForSlug(slug).id;
-  return deploymentsForSymbol(symbol).some((d) => d.chainId === chainId);
 }
 
 export function buildPayPath(params: PayParams): string {
@@ -355,7 +340,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   }
   const chainSlug = chainResult.slug;
   // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
-  if (!hasDeployment(token, chainSlug)) {
+  if (!symbolHasDeployment(token, chainSlug)) {
     return {
       ok: false,
       errorKind: 'invalid',
@@ -605,7 +590,7 @@ export function parseTipParams(
     return { ok: false, error: chainResult.error };
   }
   const chainSlug = chainResult.slug;
-  if (!hasDeployment(token, chainSlug)) {
+  if (!symbolHasDeployment(token, chainSlug)) {
     return {
       ok: false,
       error: `${token} は ${chainSlug} に対応していません`,
@@ -849,7 +834,7 @@ export function parseCheckoutParams(
     return { ok: false, error: chainResult.error };
   }
   const chainSlug = chainResult.slug;
-  if (!hasDeployment(token, chainSlug)) {
+  if (!symbolHasDeployment(token, chainSlug)) {
     return {
       ok: false,
       error: `${token} は ${chainSlug} に対応していません`,

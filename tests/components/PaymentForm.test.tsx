@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -86,6 +86,7 @@ import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { PaymentForm } from '@/components/PaymentForm';
+import { logger } from '@/lib/logger';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
@@ -1343,6 +1344,59 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     expect(
       screen.queryByRole('button', { name: /有効期限切れ/ }),
     ).toBeNull();
+  });
+
+  it('exp 未来→経過: interval が期限を enforce し submit が無効化される (fake timers)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const t0 = new Date(2026, 5, 3, 12, 0, 0).getTime();
+      vi.setSystemTime(t0);
+      const exp = Math.floor(t0 / 1000) + 5; // 5 秒後に失効
+      setURL(
+        `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=150&exp=${exp}`,
+      );
+      setAccount({ connected: true, chainId: polygonAmoy.id });
+      setSmartAccount(true);
+      setGasQuote('ready');
+      setBalance(100_000_000n);
+      render(<PaymentForm />);
+
+      // 初期: 期限内 (バナー無し)
+      expect(screen.queryByText(/この QR は有効期限切れです/)).toBeNull();
+
+      // 6 秒経過 → interval が expired を flip
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+
+      expect(
+        screen.getByText(/この QR は有効期限切れです/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /有効期限切れ/ }),
+      ).toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('exp 過去: 期限切れ QR 遭遇を logger.warn(pay.qr_expired) で観測 (Sentry alertable)', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    setURL(
+      `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=150&exp=1000`,
+    );
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setSmartAccount(true);
+    setGasQuote('ready');
+    render(<PaymentForm />);
+    await screen.findByText(/この QR は有効期限切れです/);
+    await waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith(
+        'pay.qr_expired',
+        expect.objectContaining({ asset: 'usdc' }),
+      ),
+    );
+    warnSpy.mockRestore();
   });
 
   it('exp 無し (通常 QR): 期限切れバナーも文脈行も出ない (従来挙動)', async () => {

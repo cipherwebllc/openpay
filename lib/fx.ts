@@ -8,6 +8,8 @@
 //     リスクはレートの陳腐化で、短い有効期限 (QR_EXPIRY_SECONDS) で吸収する。
 //   - **チェーン非依存**: 1 USDC = R 円 は受取チェーンに依らない。decimals は token symbol で
 //     決まる (JPYC=18, USDC=6)。
+//   - **前提: peg**。JPYC=¥1 / USDC=$1 を仮定し usdcJpy 1 本で両建てを換算する。どちらかが
+//     depeg すると換算額はその分ずれる (sanity band はグロスな異常レートのみ弾き、depeg は検知しない)。
 //
 // 本モジュールは React にも env にも依存しない (ユニットテスト容易・generator/route で共有)。
 
@@ -56,34 +58,10 @@ export type ConvertAnchorArgs = {
 
 export type ConvertAnchorResult =
   | { ok: true; amount: string }
-  | { ok: false; reason: 'out-of-band' | 'invalid-amount' | 'rounds-to-zero' };
+  | { ok: false; reason: 'out-of-band' | 'invalid-amount' };
 
-// 正の bigint 同士の切り上げ除算。
 function ceilDiv(numerator: bigint, denominator: bigint): bigint {
   return (numerator + denominator - 1n) / denominator;
-}
-
-// anchor 額 → target トークンの atomic 量を bigint で算出 (float drift 回避)。
-// 丸めは常に **切り上げ (ceil)**: 顧客が円換算で下回らない = 店主保護。dust は ≤1 atomic
-// (≤1e-6 USDC / ≤1e-18 JPYC) で経済的に無視可。
-function convertAtomic(
-  anchorAtomic: bigint,
-  anchorSymbol: TokenSymbol,
-  targetSymbol: TokenSymbol,
-  rateScaled: bigint,
-): bigint {
-  const aD = BigInt(TOKEN_DECIMALS[anchorSymbol]);
-  const tD = BigInt(TOKEN_DECIMALS[targetSymbol]);
-  const tenTarget = 10n ** tD;
-  const tenAnchor = 10n ** aD;
-  if (anchorSymbol === 'jpyc') {
-    // JPYC(円) → USDC(ドル): targetUSD = anchorJPY / R
-    // targetAtomic = anchorAtomic * 10^tD * RATE_SCALE / (10^aD * rateScaled)
-    return ceilDiv(anchorAtomic * tenTarget * RATE_SCALE, tenAnchor * rateScaled);
-  }
-  // USDC(ドル) → JPYC(円): targetJPY = anchorUSD * R
-  // targetAtomic = anchorAtomic * 10^tD * rateScaled / (10^aD * RATE_SCALE)
-  return ceilDiv(anchorAtomic * tenTarget * rateScaled, tenAnchor * RATE_SCALE);
 }
 
 // 店主の価格入力を、顧客が支払う target トークンの人間可読 decimal 文字列に換算。
@@ -94,6 +72,7 @@ export function convertAnchorAmount(args: ConvertAnchorArgs): ConvertAnchorResul
     return { ok: false, reason: 'out-of-band' };
   }
   const anchorDecimals = TOKEN_DECIMALS[anchorSymbol];
+  const targetDecimals = TOKEN_DECIMALS[targetSymbol];
   let anchorAtomic: bigint;
   try {
     anchorAtomic = parseUnits(anchorAmount, anchorDecimals);
@@ -104,20 +83,17 @@ export function convertAnchorAmount(args: ConvertAnchorArgs): ConvertAnchorResul
     return { ok: false, reason: 'invalid-amount' };
   }
   const rateScaled = BigInt(Math.round(usdcJpy * Number(RATE_SCALE)));
-  const targetAtomic = convertAtomic(
-    anchorAtomic,
-    anchorSymbol,
-    targetSymbol,
-    rateScaled,
-  );
-  if (targetAtomic <= 0n) {
-    // ceil なので anchor>0 のとき本来到達しないが、将来の丸め変更に対する防御。
-    return { ok: false, reason: 'rounds-to-zero' };
-  }
-  return {
-    ok: true,
-    amount: formatUnits(targetAtomic, TOKEN_DECIMALS[targetSymbol]),
-  };
+  const tenAnchor = 10n ** BigInt(anchorDecimals);
+  const tenTarget = 10n ** BigInt(targetDecimals);
+  // 丸めは常に切り上げ (ceil): 顧客が円換算で下回らない = 店主保護 (dust ≤1 atomic で無視可)。
+  // anchorAtomic>0 & rateScaled>0 (rateIsSane で usdcJpy≥50) なので targetAtomic は必ず ≥1。
+  const targetAtomic =
+    anchorSymbol === 'jpyc'
+      ? // JPYC(円)→USDC(ドル): targetUSD = anchorJPY / R
+        ceilDiv(anchorAtomic * tenTarget * RATE_SCALE, tenAnchor * rateScaled)
+      : // USDC(ドル)→JPYC(円): targetJPY = anchorUSD * R
+        ceilDiv(anchorAtomic * tenTarget * rateScaled, tenAnchor * RATE_SCALE);
+  return { ok: true, amount: formatUnits(targetAtomic, targetDecimals) };
 }
 
 // 有効期限 (unix 秒) を過ぎているか。expUnixSec が未定義なら期限なし扱い (false)。

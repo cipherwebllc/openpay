@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { parseUnits } from 'viem';
@@ -36,6 +36,7 @@ import {
   counterpartSymbol,
   DEFAULT_CHAIN_FOR_SYMBOL,
   deploymentForSlug,
+  displaySymbolFor,
 } from '@/lib/tokens';
 import {
   DECIMAL_PATTERN,
@@ -145,7 +146,20 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const expired = timeMeasured && isExpired(params.expiresAt, nowMs);
   const remainingSeconds = secondsRemaining(params.expiresAt, nowMs);
   // 顧客への文脈表示 (元の円価格 + レート)。anchor token は QR token の counterpart。
-  const anchorDisplay = counterpartSymbol(params.token) === 'jpyc' ? 'JPYC' : 'USDC';
+  const anchorDisplay = displaySymbolFor(counterpartSymbol(params.token));
+
+  // 期限切れ QR に顧客が遭遇したことを 1 度だけ観測 (logger.warn → Sentry alertable)。
+  // 3 分窓が摩擦を生んでいないか / 店主の再生成運用が回っているかの運用シグナル。
+  const expiryLoggedRef = useRef(false);
+  useEffect(() => {
+    if (expired && !expiryLoggedRef.current) {
+      expiryLoggedRef.current = true;
+      logger.warn('pay.qr_expired', {
+        chainId: deployment.chainId,
+        asset: params.token,
+      });
+    }
+  }, [expired, deployment.chainId, params.token]);
 
   const amountWei = useMemo(() => {
     if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;

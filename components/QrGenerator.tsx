@@ -40,6 +40,7 @@ import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
+  displaySymbolFor,
   isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
@@ -336,11 +337,13 @@ export function QrGenerator() {
   // --- 「他トークン建てで受け取る」(FX 換算・有効期限付き) ---
   // 換算先トークン (現 token の反対)。FX 換算はチェーン非依存。
   const convertTargetSymbol = counterpartSymbol(settings.token);
-  const convertTargetDisplay = convertTargetSymbol === 'jpyc' ? 'JPYC' : 'USDC';
+  const convertTargetDisplay = displaySymbolFor(convertTargetSymbol);
   const rateOk = !!marketRates && rateIsSane(marketRates.usdcJpy);
-  // convert ボタンを出す条件: 固定額モードで有効額・split 無し・レート取得済・未 convert。
+  // convert ボタンを出す条件: 受取先確定・固定額モードで有効額・split 無し・レート取得済・未 convert。
+  // receiverValid を要求するのは、exp(now+180s) を焼く時点で QR が即生成できる状態に限定するため
+  // (受取先未設定で convert すると入力が遅い間に「生成前に期限切れ」の QR を作れてしまう)。
   const canShowConvert =
-    mode === 'amount' && amountValid && !splitsForUrl && !convert;
+    receiverValid && mode === 'amount' && amountValid && !splitsForUrl && !convert;
   const convertRemaining = convert
     ? secondsRemaining(convert.expiresAt, convertNowMs)
     : 0;
@@ -348,9 +351,7 @@ export function QrGenerator() {
     ? isExpired(convert.expiresAt, convertNowMs)
     : false;
   const convertAnchorDisplay = convert
-    ? convert.anchorSymbol === 'jpyc'
-      ? 'JPYC'
-      : 'USDC'
+    ? displaySymbolFor(convert.anchorSymbol)
     : convertTargetDisplay;
 
   // 店主の価格入力を現レートで換算し、token を換算先へ切替・amount を確定・期限を焼き込む。
