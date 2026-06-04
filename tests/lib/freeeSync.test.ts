@@ -7,6 +7,7 @@ import {
   freeeDescription,
   type FreeeSyncDeps,
   type FreeeMapping,
+  type FreeeDealBody,
   type ClaimState,
 } from '@/lib/freeeSync';
 import type { HistoryEntry } from '@/lib/history';
@@ -48,6 +49,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -206,5 +213,59 @@ describe('runFreeeSync', () => {
     const r = await runFreeeSync([entry({ id: 'bad', merchantAmount: 'not-a-number' })], d);
     expect(r.items[0]).toMatchObject({ id: 'bad', status: 'error', error: 'invalid_entry' });
     expect(createDeal).not.toHaveBeenCalled();
+  });
+});
+
+describe('freeeDescription: v5 記帳補助メタ enrich (摘要)', () => {
+  it('商品名 / 管理番号 / メモ を摘要に含める', () => {
+    const d = freeeDescription(
+      entry({
+        productName: 'コーヒー',
+        receiptNo: 'R-1',
+        memo: 'イベント販売',
+        txHash: `0x${'a'.repeat(64)}`,
+      }),
+    );
+    expect(d).toContain('OpenPay');
+    expect(d).toContain('コーヒー');
+    expect(d).toContain('No:R-1');
+    expect(d).toContain('イベント販売');
+  });
+
+  it('冪等キーは v5 メタを足しても不変 (再同期で二重計上しない)', () => {
+    const a = entry({ txHash: '0xABC', productName: 'X' });
+    const b = entry({ txHash: '0xABC', productName: 'Y', memo: 'diff', receiptNo: 'R-9' });
+    expect(freeeIdempotencyKey(WALLET, a)).toBe(freeeIdempotencyKey(WALLET, b));
+  });
+
+  it('複数商品は摘要に「商品 x数量」を列挙 (1取引1 deal・明細は摘要)', () => {
+    const d = freeeDescription(
+      entry({
+        lineItems: [
+          { name: 'コーヒー', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+          { name: 'Tシャツ', quantity: 1, unitPrice: '3000', amount: '3000', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+        ],
+      }),
+    );
+    expect(d).toContain('コーヒー x2');
+    expect(d).toContain('Tシャツ x1');
+  });
+
+  it('runFreeeSync (実コア): 複数商品 entry → 1 取引 1 deal・摘要に明細サマリ', async () => {
+    const createDeal = vi.fn(async (_body: FreeeDealBody) => 555);
+    const d = deps({ createDeal });
+    const e = entry({
+      id: 'multi',
+      lineItems: [
+        { name: 'コーヒー', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+        { name: 'Tシャツ', quantity: 1, unitPrice: '3000', amount: '3000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+      ],
+    });
+    const r = await runFreeeSync([e], d);
+    expect(r.synced).toBe(1);
+    expect(createDeal).toHaveBeenCalledOnce(); // 明細を複数 deal に割らず 1 取引 1 deal
+    const body = createDeal.mock.calls[0][0];
+    expect(body.details[0].description).toContain('コーヒー x2');
+    expect(body.details[0].description).toContain('Tシャツ x1');
   });
 });

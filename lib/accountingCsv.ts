@@ -19,7 +19,17 @@ import { pad } from './pad';
 import { shortAddress } from './format';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue, type YenValue } from './historyYen';
-import { HISTORY_ASSET_DISPLAY, type HistoryEntry } from './history';
+import {
+  entryLineItems,
+  HISTORY_ASSET_DISPLAY,
+  type HistoryEntry,
+} from './history';
+import {
+  freeeTaxLabel,
+  mfCreditTaxLabel,
+  yayoiCreditTaxLabel,
+  type TaxCategory,
+} from './tax';
 
 export type AccountingFormat = 'freee' | 'yayoi' | 'mf' | 'yayoi-native';
 
@@ -54,9 +64,19 @@ function ymd(ts: number, sep: string): string {
   return `${d.getFullYear()}${sep}${pad(d.getMonth() + 1)}${sep}${pad(d.getDate())}`;
 }
 
-// 備考: OpenPay の追跡情報 (token/chain・短縮 tx・元の価格建て anchor・概算フラグ)。
+// 備考: 売上明細サマリ「商品名 x数量 / …」(記帳補助) + OpenPay の追跡情報 (token/chain・
+// 短縮 tx・元の価格建て anchor・概算フラグ) + 管理番号 + メモ。明細が無ければ従来どおり token/chain から。
 function bikou(e: HistoryEntry, yv: Valued['yv']): string {
-  const parts: string[] = [`${HISTORY_ASSET_DISPLAY[e.asset]}/${e.chainSlug}`];
+  const parts: string[] = [];
+  const items = entryLineItems(e);
+  if (items.length > 0) {
+    const summary = items
+      .slice(0, 5)
+      .map((li) => `${li.name} x${li.quantity}`)
+      .join(' / ');
+    parts.push(items.length > 5 ? `${summary} ほか` : summary);
+  }
+  parts.push(`${HISTORY_ASSET_DISPLAY[e.asset]}/${e.chainSlug}`);
   if (e.txHash) parts.push(`tx:${shortAddress(e.txHash)}`);
   if (e.anchorAmount != null && e.anchorSymbol) {
     parts.push(
@@ -64,7 +84,19 @@ function bikou(e: HistoryEntry, yv: Valued['yv']): string {
     );
   }
   if (yv.kind === 'approx') parts.push(`概算@${yv.rate}`);
+  if (e.receiptNo) parts.push(`No:${e.receiptNo}`);
+  if (e.memo) parts.push(e.memo);
   return parts.join(' / ');
+}
+
+// 仕訳CSV (1取引1行) の税区分: 明細の税区分が全行同一なら其れ、混在/不明なら entry の
+// taxCategory (= 既存デフォルト) に倒す。正確な行別税区分は明細CSV (lineItemsCsv) で出す。
+function representativeTaxCategory(e: HistoryEntry): TaxCategory | null {
+  const cats = entryLineItems(e)
+    .map((li) => li.taxCategory)
+    .filter((c): c is TaxCategory => c != null);
+  if (cats.length === 0) return e.taxCategory ?? null;
+  return cats.every((c) => c === cats[0]) ? cats[0] : (e.taxCategory ?? null);
 }
 
 function partner(e: HistoryEntry): string {
@@ -90,7 +122,7 @@ function freeeRows(valued: ReadonlyArray<Valued>): string[][] {
       '収入',
       ymd(e.ts, '-'),
       '売上高',
-      '課税売上10%',
+      freeeTaxLabel(representativeTaxCategory(e)), // 税区分: 明細の代表値 (混在→既存デフォルト)
       String(yv.yen),
       partner(e),
       bikou(e, yv),
@@ -119,7 +151,7 @@ function yayoiRows(valued: ReadonlyArray<Valued>): string[][] {
       '売上高', // 貸方勘定科目
       '', // 貸方補助科目
       '', // 貸方部門
-      '課税売上込10%', // 貸方税区分 (税込)
+      yayoiCreditTaxLabel(representativeTaxCategory(e)), // 貸方税区分 (税込・代表値)
       yen, // 貸方金額
       '0', // 貸方税金額
       bikou(e, yv), // 摘要
@@ -172,7 +204,7 @@ function mfRows(valued: ReadonlyArray<Valued>): string[][] {
       '売上高', // 貸方勘定科目
       '', // 貸方補助科目
       '', // 貸方部門
-      '課税売上10%', // 貸方税区分
+      mfCreditTaxLabel(representativeTaxCategory(e)), // 貸方税区分 (代表値)
       yen, // 貸方金額(円)
       '0', // 貸方税額
       bikou(e, yv), // 摘要

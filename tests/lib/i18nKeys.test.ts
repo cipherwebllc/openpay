@@ -749,3 +749,90 @@ describe('i18n: FreeeSync keys (ja/en parity)', () => {
     }
   });
 });
+
+describe('i18n: PayerReceipt keys (顧客向け電子レシート, ja/en parity)', () => {
+  // /scan の PayerReceiptList + PayerReceiptDetail + 完了画面で使う key 集合。
+  // 片 locale 抜けで t() が key を表示する regression を fence する。
+  const PAYER_RECEIPT_KEYS = [
+    'sectionTitle',
+    'sectionDescription',
+    'empty',
+    'emptyHint',
+    'merchantFallback',
+    'storageNotice',
+    'detailTitle',
+    'completionTitle',
+    'statusConfirmed',
+    'statusPending',
+    'statusFailed',
+    'statusUnknown',
+    'receiptNoLabel',
+    'paidAtLabel',
+    'merchantLabel',
+    'merchantWalletLabel',
+    'payerWalletLabel',
+    'currencyLabel',
+    'lineItemsLabel',
+    'anchorLabel',
+    'subtotalLabel',
+    'taxLabel',
+    'totalLabel',
+    'txHashLabel',
+    'memoLabel',
+    'explorerLink',
+    'copyButton',
+    'copiedButton',
+    'printButton',
+    'saveJsonButton',
+    'saveCsvButton',
+    'removeButton',
+    'removeConfirm',
+    'clearAllButton',
+    'clearAllConfirm',
+    'scanLink',
+    'disclaimer',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of PAYER_RECEIPT_KEYS) {
+      it(`${loc.name}.PayerReceipt.${key} は非空文字列`, () => {
+        const v = (loc.m.PayerReceipt as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('PayerReceipt キー集合が ja と en で一致 (構造 parity)', () => {
+    const jaKeys = Object.keys(ja.PayerReceipt).sort();
+    const enKeys = Object.keys(en.PayerReceipt).sort();
+    expect(jaKeys).toEqual(enKeys);
+  });
+
+  it('禁止表現を含まない (正式領収書/税務証憑/インボイス対応/必ず使える)', () => {
+    // spec の禁止表現。免責 (disclaimer) は「正式な領収書…ではありません」と否定文で使うため
+    // disclaimer は除外し、訴求系の文言にこれらが紛れていないことを fence する。
+    const banned = [
+      '正式な領収書として',
+      '税務証憑として有効',
+      'インボイス対応',
+      '経費精算に必ず使えます',
+      '会計・税務上有効であることを保証',
+    ];
+    const jaText = JSON.stringify(ja.PayerReceipt);
+    for (const phrase of banned) {
+      expect(jaText).not.toContain(phrase);
+    }
+  });
+
+  it('SuccessOverlay.viewReceiptsLink が ja/en に存在 (完了画面 → /scan 導線)', () => {
+    for (const m of [ja, en]) {
+      const v = (m.SuccessOverlay as Record<string, unknown>).viewReceiptsLink;
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    }
+  });
+});

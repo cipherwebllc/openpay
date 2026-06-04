@@ -14,11 +14,18 @@ import {
   appendHistory,
   buildHistoryEntry,
   type CircleVerification,
+  type HistoryEntry,
+  type HistoryLineItem,
   type HistoryProvider,
 } from '@/lib/history';
+import {
+  appendPayerReceipt,
+  payerReceiptFromHistoryEntry,
+} from '@/lib/payerReceipt';
 import type { GasMode, PayMode } from '@/lib/fee';
 import type { ChainSlug } from '@/lib/chains';
 import type { TokenSymbol } from '@/lib/tokens';
+import type { TaxCategory } from '@/lib/tax';
 
 export type AppendPaymentHistoryCtx = {
   chainId: number;
@@ -51,7 +58,30 @@ export type AppendPaymentHistoryCtx = {
   anchorAmount?: string | null;
   anchorSymbol?: TokenSymbol | null;
   fxRateUsdcJpy?: string | null;
+  /** v5 記帳補助メタ (商品名/メモ/税率/税区分/管理番号/売上明細)。sale leg のみ記録。
+   *  手数料徴収 leg (standard-fee) には付けない (anchor と同じ「sale だけ」規約)。 */
+  productName?: string | null;
+  memo?: string | null;
+  taxRate?: number | null;
+  taxCategory?: TaxCategory | null;
+  receiptNo?: string | null;
+  lineItems?: HistoryLineItem[] | null;
+  /** 顧客向け電子レシート (PayerReceipt) を保存する際の発生元 route / locale。
+   *  sale 成功 leg のみで使用。store 側 HistoryEntry には影響しない (受領控え専用)。 */
+  sourceRoute?: string;
+  locale?: string;
 };
+
+// sale 成功 leg の HistoryEntry から顧客向け電子レシート (PayerReceipt) を保存する。
+// dedupe (receiptId = txHash || userOpHash) は payerReceipt 側が担保。
+function saveReceiptFor(entry: HistoryEntry, ctx: AppendPaymentHistoryCtx): void {
+  appendPayerReceipt(
+    payerReceiptFromHistoryEntry(entry, {
+      sourceRoute: ctx.sourceRoute,
+      locale: ctx.locale,
+    }),
+  );
+}
 
 // submit 時点で固定したい amount field のみを抜き出した snapshot。tx 完了前に
 // 親コンポーネントの state (gas quote refetch / variable amount 編集) が変動しても、
@@ -161,41 +191,48 @@ export function usePaymentHistory(
       : gaslessData.success
         ? ('success' as const)
         : ('reverted' as const);
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'batch',
-        status,
-        chainId: ctx.chainId,
-        chainSlug: ctx.chainSlug,
-        asset: ctx.asset,
-        tokenAddress: ctx.tokenAddress,
-        payMode: 'gasless',
-        gasMode: ctx.gasMode,
-        merchant: ctx.merchant,
-        merchantAmount: gaslessMerchantAmount,
-        customer: ctx.customer,
-        feeReceiver: ctx.feeReceiver,
-        feeAmount: gaslessFeeAmount,
-        saleAmount: gaslessSaleAmount,
-        // circle はネットワーク手数料を検証ステータス付きで circlePaymasterNetUsdc に
-        // 持つため networkFeeEquivalent は null (表示/集計は networkFeeEquivalentOf が coalesce)。
-        networkFeeEquivalent:
-          gaslessData.provider === 'circle' ? null : gaslessNetworkFee,
-        txHash: gaslessData.txHash,
-        userOpHash: gaslessData.userOpHash,
-        blockNumber: gaslessData.blockNumber,
-        errorMessage: null,
-        storeName: ctx.storeName,
-        note: ctx.note,
-        provider: gaslessData.provider ?? null,
-        circlePaymasterAddress: gaslessData.circlePaymasterAddress ?? null,
-        circlePaymasterNetUsdc: gaslessData.circlePaymasterNetUsdc ?? null,
-        circleVerification: gaslessData.circleVerification ?? null,
-        anchorAmount: ctx.anchorAmount ?? null,
-        anchorSymbol: ctx.anchorSymbol ?? null,
-        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
-      }),
-    );
+    const entry = buildHistoryEntry({
+      flow: 'batch',
+      status,
+      chainId: ctx.chainId,
+      chainSlug: ctx.chainSlug,
+      asset: ctx.asset,
+      tokenAddress: ctx.tokenAddress,
+      payMode: 'gasless',
+      gasMode: ctx.gasMode,
+      merchant: ctx.merchant,
+      merchantAmount: gaslessMerchantAmount,
+      customer: ctx.customer,
+      feeReceiver: ctx.feeReceiver,
+      feeAmount: gaslessFeeAmount,
+      saleAmount: gaslessSaleAmount,
+      // circle はネットワーク手数料を検証ステータス付きで circlePaymasterNetUsdc に
+      // 持つため networkFeeEquivalent は null (表示/集計は networkFeeEquivalentOf が coalesce)。
+      networkFeeEquivalent:
+        gaslessData.provider === 'circle' ? null : gaslessNetworkFee,
+      txHash: gaslessData.txHash,
+      userOpHash: gaslessData.userOpHash,
+      blockNumber: gaslessData.blockNumber,
+      errorMessage: null,
+      storeName: ctx.storeName,
+      note: ctx.note,
+      provider: gaslessData.provider ?? null,
+      circlePaymasterAddress: gaslessData.circlePaymasterAddress ?? null,
+      circlePaymasterNetUsdc: gaslessData.circlePaymasterNetUsdc ?? null,
+      circleVerification: gaslessData.circleVerification ?? null,
+      anchorAmount: ctx.anchorAmount ?? null,
+      anchorSymbol: ctx.anchorSymbol ?? null,
+      fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
+      productName: ctx.productName ?? null,
+      memo: ctx.memo ?? null,
+      taxRate: ctx.taxRate ?? null,
+      taxCategory: ctx.taxCategory ?? null,
+      receiptNo: ctx.receiptNo ?? null,
+      lineItems: ctx.lineItems ?? null,
+    });
+    appendHistory(entry);
+    // 顧客向け電子レシート: 成功 / relay pending のみ控えを残す (reverted は控えない)。
+    if (status !== 'reverted') saveReceiptFor(entry, ctx);
   }, [
     gaslessData,
     gaslessMerchantAmount,
@@ -239,6 +276,12 @@ export function usePaymentHistory(
         anchorAmount: ctx.anchorAmount ?? null,
         anchorSymbol: ctx.anchorSymbol ?? null,
         fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
+        productName: ctx.productName ?? null,
+        memo: ctx.memo ?? null,
+        taxRate: ctx.taxRate ?? null,
+        taxCategory: ctx.taxCategory ?? null,
+        receiptNo: ctx.receiptNo ?? null,
+        lineItems: ctx.lineItems ?? null,
       }),
     );
   }, [
@@ -254,35 +297,42 @@ export function usePaymentHistory(
   // 2 件目として append (会計上 「店舗着金 X + 手数料 Y」を分離記録)。
   useEffect(() => {
     if (!standardData) return;
-    appendHistory(
-      buildHistoryEntry({
-        flow: 'standard-merchant',
-        status: 'success',
-        chainId: ctx.chainId,
-        chainSlug: ctx.chainSlug,
-        asset: ctx.asset,
-        tokenAddress: ctx.tokenAddress,
-        payMode: 'standard',
-        gasMode: null,
-        merchant: ctx.merchant,
-        merchantAmount: standardMerchantAmount,
-        customer: ctx.customer,
-        feeReceiver: ctx.feeReceiver,
-        feeAmount: standardFeeAmount,
-        saleAmount: standardSaleAmount,
-        // standard は OpenPay が gas に touch しない (顧客 wallet が native で別建て負担)。
-        networkFeeEquivalent: null,
-        txHash: standardData.merchantTxHash,
-        userOpHash: null,
-        blockNumber: standardData.blockNumber,
-        errorMessage: null,
-        storeName: ctx.storeName,
-        note: ctx.note,
-        anchorAmount: ctx.anchorAmount ?? null,
-        anchorSymbol: ctx.anchorSymbol ?? null,
-        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
-      }),
-    );
+    const entry = buildHistoryEntry({
+      flow: 'standard-merchant',
+      status: 'success',
+      chainId: ctx.chainId,
+      chainSlug: ctx.chainSlug,
+      asset: ctx.asset,
+      tokenAddress: ctx.tokenAddress,
+      payMode: 'standard',
+      gasMode: null,
+      merchant: ctx.merchant,
+      merchantAmount: standardMerchantAmount,
+      customer: ctx.customer,
+      feeReceiver: ctx.feeReceiver,
+      feeAmount: standardFeeAmount,
+      saleAmount: standardSaleAmount,
+      // standard は OpenPay が gas に touch しない (顧客 wallet が native で別建て負担)。
+      networkFeeEquivalent: null,
+      txHash: standardData.merchantTxHash,
+      userOpHash: null,
+      blockNumber: standardData.blockNumber,
+      errorMessage: null,
+      storeName: ctx.storeName,
+      note: ctx.note,
+      anchorAmount: ctx.anchorAmount ?? null,
+      anchorSymbol: ctx.anchorSymbol ?? null,
+      fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
+      productName: ctx.productName ?? null,
+      memo: ctx.memo ?? null,
+      taxRate: ctx.taxRate ?? null,
+      taxCategory: ctx.taxCategory ?? null,
+      receiptNo: ctx.receiptNo ?? null,
+      lineItems: ctx.lineItems ?? null,
+    });
+    appendHistory(entry);
+    // 顧客向け電子レシート (店舗着金確定 = sale 成功)。
+    saveReceiptFor(entry, ctx);
     if (standardData.feeTxHash) {
       appendHistory(
         buildHistoryEntry({
@@ -355,6 +405,12 @@ export function usePaymentHistory(
         anchorAmount: ctx.anchorAmount ?? null,
         anchorSymbol: ctx.anchorSymbol ?? null,
         fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
+        productName: ctx.productName ?? null,
+        memo: ctx.memo ?? null,
+        taxRate: ctx.taxRate ?? null,
+        taxCategory: ctx.taxCategory ?? null,
+        receiptNo: ctx.receiptNo ?? null,
+        lineItems: ctx.lineItems ?? null,
       }),
     );
   }, [
@@ -379,34 +435,41 @@ export function usePaymentHistory(
   useEffect(() => {
     if (standardPhase !== 'fee-error') return;
     if (standardMerchantTxHash && standardMerchantBlockNumber !== undefined) {
-      appendHistory(
-        buildHistoryEntry({
-          flow: 'standard-merchant',
-          status: 'success',
-          chainId: ctx.chainId,
-          chainSlug: ctx.chainSlug,
-          asset: ctx.asset,
-          tokenAddress: ctx.tokenAddress,
-          payMode: 'standard',
-          gasMode: null,
-          merchant: ctx.merchant,
-          merchantAmount: standardMerchantAmount,
-          customer: ctx.customer,
-          feeReceiver: ctx.feeReceiver,
-          feeAmount: standardFeeAmount,
-          saleAmount: standardSaleAmount,
-          networkFeeEquivalent: null,
-          txHash: standardMerchantTxHash,
-          userOpHash: null,
-          blockNumber: standardMerchantBlockNumber,
-          errorMessage: null,
-          storeName: ctx.storeName,
-          note: ctx.note,
-          anchorAmount: ctx.anchorAmount ?? null,
-          anchorSymbol: ctx.anchorSymbol ?? null,
-          fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
-        }),
-      );
+      const entry = buildHistoryEntry({
+        flow: 'standard-merchant',
+        status: 'success',
+        chainId: ctx.chainId,
+        chainSlug: ctx.chainSlug,
+        asset: ctx.asset,
+        tokenAddress: ctx.tokenAddress,
+        payMode: 'standard',
+        gasMode: null,
+        merchant: ctx.merchant,
+        merchantAmount: standardMerchantAmount,
+        customer: ctx.customer,
+        feeReceiver: ctx.feeReceiver,
+        feeAmount: standardFeeAmount,
+        saleAmount: standardSaleAmount,
+        networkFeeEquivalent: null,
+        txHash: standardMerchantTxHash,
+        userOpHash: null,
+        blockNumber: standardMerchantBlockNumber,
+        errorMessage: null,
+        storeName: ctx.storeName,
+        note: ctx.note,
+        anchorAmount: ctx.anchorAmount ?? null,
+        anchorSymbol: ctx.anchorSymbol ?? null,
+        fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
+        productName: ctx.productName ?? null,
+        memo: ctx.memo ?? null,
+        taxRate: ctx.taxRate ?? null,
+        taxCategory: ctx.taxCategory ?? null,
+        receiptNo: ctx.receiptNo ?? null,
+        lineItems: ctx.lineItems ?? null,
+      });
+      appendHistory(entry);
+      // fee は失敗したが店舗着金は確定 = 顧客にとっては支払い成立。控えを残す。
+      saveReceiptFor(entry, ctx);
     }
     appendHistory(
       buildHistoryEntry({

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
@@ -14,6 +14,7 @@ import { CrossChainHint } from './CrossChainHint';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { SuccessOverlay } from './SuccessOverlay';
+import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -69,6 +70,7 @@ export function PaymentForm() {
 
 function PaymentDetails({ params }: { params: PayParams }) {
   const t = useTranslations('PaymentForm');
+  const locale = useLocale();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
   const isStandard = params.mode === 'standard' || modeOverride === 'standard';
   // parsePayParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
@@ -386,9 +388,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   }, [relay.data]);
 
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
-  // 注: storeName は URL params に乗らないため空文字列。merchant 自身が自分の QR
-  // で test 決済しても storeName は QrSettings 側に閉じており PaymentForm から
-  // 見えない (将来 URL 拡張で乗せる余地あり、現状は CSV/UI に空欄で表示)。
+  // v5: 記帳補助メタ (店舗名/商品名/メモ/税/管理番号) は QR の URL params (store/pname/
+  // memo/tax/taxcat/rcpt) に乗るので決済側の履歴に記録できる。productName があれば
+  // 単一明細 (qty 1・単価=支払額) を組み立てて lineItems に入れる (複数明細は checkout)。
   const historyCtx = useMemo(
     () => ({
       chainId: deployment.chainId,
@@ -404,7 +406,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       feeAmount: breakdown.feeAmount,
       saleAmount: amountWei,
       networkFeeEquivalent,
-      storeName: '',
+      storeName: params.storeName ?? '',
       note: '',
       // 異通貨建て (FX 換算 QR) の anchor。priceRefAmount/fxRate が URL に在るときのみ記録。
       // anchorSymbol は settled token (params.token) の counterpart (= 価格を建てた側)。
@@ -413,6 +415,28 @@ function PaymentDetails({ params }: { params: PayParams }) {
         ? counterpartSymbol(params.token)
         : null,
       fxRateUsdcJpy: params.fxRate ?? null,
+      // v5 記帳補助メタ (任意項目 QR のみ非 null)。
+      productName: params.productName ?? null,
+      memo: params.memo ?? null,
+      taxRate: params.taxRate ?? null,
+      taxCategory: params.taxCategory ?? null,
+      receiptNo: params.receiptNo ?? null,
+      lineItems: params.productName
+        ? [
+            {
+              name: params.productName,
+              quantity: 1,
+              unitPrice: amountStr || '',
+              amount: amountStr || '',
+              taxRate: params.taxRate ?? null,
+              taxCategory: params.taxCategory ?? null,
+              memo: params.memo ?? null,
+            },
+          ]
+        : null,
+      // 顧客向け電子レシート (PayerReceipt) の発生元 / 表示 locale。
+      sourceRoute: '/pay',
+      locale,
     }),
     [
       deployment.chainId,
@@ -425,10 +449,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
       breakdown.merchantReceives,
       breakdown.feeAmount,
       amountWei,
+      amountStr,
       networkFeeEquivalent,
       address,
       params.priceRefAmount,
       params.fxRate,
+      params.storeName,
+      params.productName,
+      params.memo,
+      params.taxRate,
+      params.taxCategory,
+      params.receiptNo,
+      locale,
     ],
   );
   // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt
@@ -850,22 +882,30 @@ function PaymentDetails({ params }: { params: PayParams }) {
       )}
 
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (
-        <ResultPanel
-          title={t('successTitle')}
-          rows={[
-            { label: t('successUserOp'), value: gasless.data.userOpHash, copyable: true },
-            { label: t('successTx'), value: gasless.data.txHash, copyable: true },
-            { label: t('successBlock'), value: gasless.data.blockNumber.toString() },
-          ]}
-        />
+        <>
+          <ResultPanel
+            title={t('successTitle')}
+            rows={[
+              { label: t('successUserOp'), value: gasless.data.userOpHash, copyable: true },
+              { label: t('successTx'), value: gasless.data.txHash, copyable: true },
+              { label: t('successBlock'), value: gasless.data.blockNumber.toString() },
+            ]}
+          />
+          <PayerReceiptCompletion
+            candidateIds={[gasless.data.txHash, gasless.data.userOpHash]}
+          />
+        </>
       )}
 
       {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer link は overlay 側)。 */}
       {useRelay && relay.data && relay.data.success && relay.data.txHash && (
-        <ResultPanel
-          title={t('successTitle')}
-          rows={[{ label: t('successTx'), value: relay.data.txHash, copyable: true }]}
-        />
+        <>
+          <ResultPanel
+            title={t('successTitle')}
+            rows={[{ label: t('successTx'), value: relay.data.txHash, copyable: true }]}
+          />
+          <PayerReceiptCompletion candidateIds={[relay.data.txHash]} />
+        </>
       )}
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
@@ -896,26 +936,29 @@ function PaymentDetails({ params }: { params: PayParams }) {
       )}
 
       {isStandard && standard.data && (
-        <ResultPanel
-          title={t('successTitle')}
-          rows={[
-            {
-              label: t('standardMerchantTxLabel'),
-              value: standard.data.merchantTxHash,
-              copyable: true,
-            },
-            ...(standard.data.feeTxHash
-              ? [
-                  {
-                    label: t('standardFeeTxLabel'),
-                    value: standard.data.feeTxHash,
-                    copyable: true,
-                  },
-                ]
-              : []),
-            { label: t('successBlock'), value: standard.data.blockNumber.toString() },
-          ]}
-        />
+        <>
+          <ResultPanel
+            title={t('successTitle')}
+            rows={[
+              {
+                label: t('standardMerchantTxLabel'),
+                value: standard.data.merchantTxHash,
+                copyable: true,
+              },
+              ...(standard.data.feeTxHash
+                ? [
+                    {
+                      label: t('standardFeeTxLabel'),
+                      value: standard.data.feeTxHash,
+                      copyable: true,
+                    },
+                  ]
+                : []),
+              { label: t('successBlock'), value: standard.data.blockNumber.toString() },
+            ]}
+          />
+          <PayerReceiptCompletion candidateIds={[standard.data.merchantTxHash]} />
+        </>
       )}
 
       {/* PayPay 風 大型成功 overlay。dismiss するまで全画面で「決済完了」+ 金額 + 時刻表示。 */}

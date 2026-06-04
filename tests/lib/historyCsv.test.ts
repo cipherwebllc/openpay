@@ -41,6 +41,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -99,17 +105,24 @@ describe('toCsv', () => {
     expect(csv).toContain('請求建て金額');
     expect(csv).toContain('請求建て通貨');
     expect(csv).toContain('FXレート(USDC/JPY)');
-    const [, row1] = csv.slice(CSV_BOM.length).split(CSV_NEWLINE);
-    // 行末に anchor: 1500 / JPYC / 156.32 (settled は USDC, anchor 通貨は JPYC で区別)
-    expect(row1).toContain('1500');
-    expect(row1).toContain('156.32');
-    expect(row1.endsWith('1500,JPYC,156.32')).toBe(true);
+    // anchor は固定列 (v5 列がさらに後ろに追加されるため header 相対で検証)。
+    const lines = csv.slice(CSV_BOM.length).split(CSV_NEWLINE);
+    const header = lines[0].split(',');
+    const cells = lines[1].split(',');
+    const at = (name: string) => cells[header.indexOf(name)];
+    expect(at('請求建て金額')).toBe('1500');
+    expect(at('請求建て通貨')).toBe('JPYC');
+    expect(at('FXレート(USDC/JPY)')).toBe('156.32');
   });
 
   it('v4: 通常決済 (anchor 無し) は anchor 列が空', () => {
-    const [, row1] = toCsv([entry()]).slice(CSV_BOM.length).split(CSV_NEWLINE);
-    // 末尾 3 列 (請求建て金額/通貨/FXレート) は空 → ",,," で終わる
-    expect(row1.endsWith(',,')).toBe(true);
+    const lines = toCsv([entry()]).slice(CSV_BOM.length).split(CSV_NEWLINE);
+    const header = lines[0].split(',');
+    const cells = lines[1].split(',');
+    const at = (name: string) => cells[header.indexOf(name)];
+    expect(at('請求建て金額')).toBe('');
+    expect(at('請求建て通貨')).toBe('');
+    expect(at('FXレート(USDC/JPY)')).toBe('');
   });
 
   it('1 件 entry の主要 columns が出力される (decimal 化含む)', () => {
@@ -249,6 +262,12 @@ describe('toCsv', () => {
         anchorAmount: null,
         anchorSymbol: null,
         fxRateUsdcJpy: null,
+        productName: null,
+        memo: null,
+        taxRate: null,
+        taxCategory: null,
+        receiptNo: null,
+        lineItems: null,
       };
     }
     const entries = Array.from({ length: 1000 }, (_, i) =>
@@ -390,6 +409,12 @@ describe('CSV round-trip 整合性 (escape の逆 parse)', () => {
       anchorAmount: null,
       anchorSymbol: null,
       fxRateUsdcJpy: null,
+      productName: null,
+      memo: null,
+      taxRate: null,
+      taxCategory: null,
+      receiptNo: null,
+      lineItems: null,
       ...overrides,
     };
   }
@@ -525,5 +550,103 @@ describe('CSV: Circle Paymaster 監査列 (Phase1)', () => {
     expect(row[header.indexOf('Paymaster種別')]).toBe('');
     expect(row[header.indexOf('Circleガス代USDC(decimal)')]).toBe('');
     expect(row[header.indexOf('Circleガス代検証')]).toBe('');
+  });
+});
+
+describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で非破壊)', () => {
+  function cellsByHeader(csv: string): (name: string) => string {
+    const rows = parseCsv(csv.slice(CSV_BOM.length)).filter((r) =>
+      r.some((c) => c.length > 0),
+    );
+    const header = rows[0];
+    const row = rows[1];
+    return (name: string) => row[header.indexOf(name)];
+  }
+
+  it('JPYC: 商品名/メモ/税率/税区分/税額/管理番号/数量/単価/明細 を出力', () => {
+    const csv = toCsv([
+      entry({
+        productName: 'コーヒー',
+        memo: 'イベント販売',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        receiptNo: 'R-1',
+        merchantAmount: '1100000000000000000000', // 1100 JPYC (税込) → 内税 100
+        lineItems: [
+          {
+            name: 'コーヒー',
+            quantity: 2,
+            unitPrice: '550',
+            amount: '1100',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+        ],
+      }),
+    ]);
+    const at = cellsByHeader(csv);
+    expect(at('商品名')).toBe('コーヒー');
+    expect(at('会計メモ')).toBe('イベント販売');
+    expect(at('税率(%)')).toBe('10');
+    expect(at('税区分')).toBe('課税10%');
+    expect(at('税額(円)')).toBe('100');
+    expect(at('管理番号')).toBe('R-1');
+    expect(at('数量')).toBe('2');
+    expect(at('単価')).toBe('550');
+    expect(at('明細')).toBe('コーヒー×2@550');
+  });
+
+  it('USDC anchor 付き: 税額は anchor 円から算出 (rate 非依存)', () => {
+    const csv = toCsv([
+      entry({
+        asset: 'usdc',
+        merchantAmount: '6400000',
+        anchorAmount: '1100',
+        anchorSymbol: 'jpyc',
+        fxRateUsdcJpy: '156.32',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+      }),
+    ]);
+    expect(cellsByHeader(csv)('税額(円)')).toBe('100');
+  });
+
+  it('USDC anchor 無し + usdcJpy 無し: 税額は空 (強制 JPY 変換しない)', () => {
+    const csv = toCsv([
+      entry({
+        asset: 'usdc',
+        merchantAmount: '6400000',
+        anchorAmount: null,
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+      }),
+    ]);
+    expect(cellsByHeader(csv)('税額(円)')).toBe('');
+  });
+
+  it('USDC anchor 無し + usdcJpy 指定: 現レートで税額算出', () => {
+    const csv = toCsv(
+      [
+        entry({
+          asset: 'usdc',
+          merchantAmount: '6400000', // 6.4 USDC
+          anchorAmount: null,
+          taxRate: 10,
+          taxCategory: 'taxable_10',
+        }),
+      ],
+      { usdcJpy: 156.25 }, // 6.4 * 156.25 = 1000円 → 内税 91
+    );
+    expect(cellsByHeader(csv)('税額(円)')).toBe('91');
+  });
+
+  it('旧 entry (記帳補助メタ無し) は v5 列が空 (後方互換)', () => {
+    const at = cellsByHeader(toCsv([entry()]));
+    expect(at('商品名')).toBe('');
+    expect(at('税率(%)')).toBe('');
+    expect(at('税区分')).toBe('');
+    expect(at('税額(円)')).toBe('');
+    expect(at('明細')).toBe('');
   });
 });

@@ -2444,3 +2444,50 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     }
   });
 });
+
+describe('QrGenerator — 会計用任意項目 (記帳補助)', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it('seeded した商品名/税率/税区分が payUrl に乗る', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({
+        receiver: VALID,
+        token: 'jpyc',
+        chain: 'polygon',
+        productName: 'コーヒー',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+      }),
+    );
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '500');
+    await waitFor(() =>
+      expect(screen.getByText((t) => t.includes('tax=10'))).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText((t) => t.includes('taxcat=taxable_10')),
+    ).toBeInTheDocument();
+    expect(screen.getByText((t) => t.includes('pname='))).toBeInTheDocument();
+  });
+
+  it('会計項目 未設定なら payUrl に税/商品 params は出ない (既存挙動)', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon' }),
+    );
+    render(<QrGenerator />);
+    await waitFor(() => screen.getByPlaceholderText('1000'));
+    await user.type(screen.getByPlaceholderText('1000'), '500');
+    await waitFor(() =>
+      expect(
+        screen.getByText((t) => t.includes('amount=500')),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText((t) => t.includes('tax='))).toBeNull();
+    expect(screen.queryByText((t) => t.includes('pname='))).toBeNull();
+  });
+});

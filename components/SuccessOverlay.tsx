@@ -166,6 +166,14 @@ export function SuccessOverlay({
         >
           {t('viewLocalHistoryLink')}
         </Link>
+        {/* 顧客向け: /scan に保存された電子レシート (支払い控え) を見る導線。 */}
+        <Link
+          href="/scan"
+          prefetch={false}
+          className="underline underline-offset-4 hover:opacity-80"
+        >
+          {t('viewReceiptsLink')}
+        </Link>
       </div>
 
       {/* ノンカストディ宣言: 店主に「DB は持っていない、Explorer が source of truth」を毎回伝える */}

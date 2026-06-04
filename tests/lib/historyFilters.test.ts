@@ -46,6 +46,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -162,5 +168,38 @@ describe('日付 helper', () => {
   });
   it('dayRangeToTsBounds: null は境界なし', () => {
     expect(dayRangeToTsBounds(null, null)).toEqual({ fromTs: null, toTs: null });
+  });
+});
+
+describe('検索 (v5 記帳補助メタも対象)', () => {
+  it('商品名 / メモ / 管理番号 / 明細名 でヒットする', () => {
+    const a = entry({
+      id: 'a',
+      productName: '抹茶ラテ',
+      memo: '物販',
+      receiptNo: 'R-777',
+      lineItems: [
+        {
+          name: '限定Tシャツ',
+          quantity: 1,
+          unitPrice: '3000',
+          amount: '3000',
+          taxRate: 10,
+          taxCategory: 'taxable_10',
+          memo: null,
+        },
+      ],
+    });
+    const b = entry({ id: 'b' });
+    const list = [a, b];
+    const f = (q: string) =>
+      applyHistoryFilters(list, { ...EMPTY_HISTORY_FILTERS, search: q }).map(
+        (x) => x.id,
+      );
+    expect(f('抹茶')).toEqual(['a']);
+    expect(f('物販')).toEqual(['a']);
+    expect(f('R-777')).toEqual(['a']);
+    expect(f('限定T')).toEqual(['a']);
+    expect(f('zzz')).toEqual([]);
   });
 });

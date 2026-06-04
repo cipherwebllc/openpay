@@ -57,6 +57,8 @@ import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
+import { loadHistory } from '@/lib/history';
+import { loadPayerReceipts } from '@/lib/payerReceipt';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x2222222222222222222222222222222222222222';
@@ -451,9 +453,33 @@ describe('CheckoutForm — 成功時の挙動', () => {
     render(<CheckoutForm params={USDC_PARAMS} />);
     expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
     expect(screen.getByText(`0x${'a'.repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText(`0x${'b'.repeat(64)}`)).toBeInTheDocument();
+    // この test の対象は ResultRow の txHash 表示 (受領控えの全文表示と併せ複数箇所に出る)。
+    // 受領控えの埋め込み自体は次の専用 test で実検証する。
+    expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
     // orderId
     expect(screen.getByText('ord-42')).toBeInTheDocument();
+  });
+
+  it('成功 → 顧客向け電子レシート控えを保存し完了画面に埋め込む (/checkout・明細付き)', () => {
+    window.localStorage.clear();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    // (a) 控えが保存される (sourceRoute=/checkout・明細あり)。
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].sourceRoute).toBe('/checkout');
+    expect(receipts[0].receiptId).toBe(`0x${'b'.repeat(64)}`); // = txHash
+    expect(receipts[0].lineItems?.map((li) => li.name)).toEqual(['Tシャツ', 'マグ']);
+    // (b) 完了画面に控え詳細 (PayerReceiptDetail) + 明細 + /scan 導線が描画される。
+    expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
+    expect(screen.getByText(/\/scan で支払い履歴/).closest('a')).toHaveAttribute(
+      'href',
+      '/scan',
+    );
   });
 
   it('success_url 指定時: 「今すぐ確認ページへ」ボタンが表示される', () => {
@@ -1148,5 +1174,50 @@ describe('CheckoutForm — mode=standard 統合', () => {
     expect(
       screen.getByText(/0xcccccccc…cccccc/),
     ).toBeInTheDocument();
+  });
+});
+
+describe('CheckoutForm — 複数商品の履歴保存 (統合: usePaymentHistory→buildHistoryEntry→LocalStorage)', () => {
+  // usePaymentHistory / buildHistoryEntry / appendHistory / loadHistory は実物。決済 hook と
+  // wagmi のみ境界で mock し、gasless 成功で売上明細が LocalStorage に保存される実コードパスを検証。
+  it('gasless 成功 → lineItems (per-item 税/通貨/管理番号) が履歴に保存される', async () => {
+    window.localStorage.clear();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setGasQuote('ready');
+    setBatchPayment('success');
+    const params: CheckoutParams = {
+      to: MERCHANT,
+      token: 'usdc',
+      chain: 'base',
+      gas: 'customer',
+      items: [
+        { name: 'Tシャツ', qty: 1, price: '25', taxRate: 10, taxCategory: 'taxable_10' },
+        { name: '寄付', qty: 1, price: '5', taxRate: 0, taxCategory: 'out_of_scope' },
+      ],
+      receiptNo: 'R-1',
+    };
+    render(<CheckoutForm params={params} />);
+
+    await waitFor(() => expect(loadHistory().length).toBeGreaterThan(0));
+    const e = loadHistory().find((x) => x.txHash === `0x${'b'.repeat(64)}`);
+    expect(e).toBeDefined();
+    expect(e?.lineItems).toHaveLength(2);
+
+    const shirt = e?.lineItems?.find((l) => l.name === 'Tシャツ');
+    expect(shirt).toMatchObject({
+      quantity: 1,
+      unitPrice: '25',
+      currency: 'usdc',
+      taxRate: 10,
+      taxCategory: 'taxable_10',
+    });
+    expect(shirt?.taxAmount).toBe('2.27'); // 25 税込@10% (USDC 2桁) 内税
+
+    const donation = e?.lineItems?.find((l) => l.name === '寄付');
+    expect(donation).toMatchObject({ taxRate: 0, taxCategory: 'out_of_scope', taxAmount: '0' });
+
+    expect(e?.receiptNo).toBe('R-1');
+    expect(e?.productName).toBe('Tシャツ, 寄付'); // 代表名 = 明細名の連結
   });
 });

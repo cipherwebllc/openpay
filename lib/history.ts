@@ -28,8 +28,15 @@ import type {
   PaymentProvider,
   PaymentResult,
 } from './paymentLog';
+import { formatUnits } from 'viem';
 import { pad } from './pad';
 import type { TokenSymbol } from './tokens';
+import {
+  isTaxCategory,
+  taxAmountDecimal,
+  taxDisplayDecimals,
+  type TaxCategory,
+} from './tax';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
 export const HISTORY_CHANGED_EVENT = 'openpay:history-changed';
@@ -41,6 +48,11 @@ export const HISTORY_NOTE_MAX_LENGTH = 1000;
 // errorMessage は呼出元に依らず buildHistoryEntry で必ず cap される (Sentry / LocalStorage
 // 肥大化対策、 stack trace で巨大化する error.message を抑える)。
 export const HISTORY_ERROR_MESSAGE_MAX_LENGTH = 500;
+// v5 記帳補助メタデータの上限 (LocalStorage 肥大化対策・自由入力の攻撃面を構造的に制限)。
+export const HISTORY_PRODUCT_NAME_MAX = 80;
+export const HISTORY_RECEIPT_NO_MAX = 64;
+export const HISTORY_UNIT_AMOUNT_MAX = 32; // 人間可読 decimal 文字列 (token 単位)
+export const HISTORY_LINE_ITEMS_MAX = 20; // 1 entry あたり明細件数 (checkout 上限 10 を内包)
 
 // HistoryEntry は decimals / display symbol を保持しないため (raw wei + asset slug
 // のみ)、UI / CSV 出力時に lookup する。lib/tokens.ts の TokenDeployment と同一
@@ -82,7 +94,10 @@ export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
 // USDC 建てで受領した等の「元の価格建て (anchorAmount/anchorSymbol) + 適用 FX レート
 // (fxRateUsdcJpy)」を残し、freee 等で「¥1000 の品を N USDC で決済」を照合可能にする。
 // 通常決済 (非換算) は null。legacy(v3) は MIGRATIONS[3] で null backfill。
-export const LATEST_SCHEMA_VERSION = 4 as const;
+// v5 (2026-06-04): 記帳補助メタデータ (商品名/メモ/税率/税区分/管理番号/売上明細) を追加。店主が
+// 「何を売ったか・税率・レシート番号」を残せるようにし、CSV/freee へ補助情報として通す。会計ソフト
+// そのものではなく記帳補助。非該当・legacy(v4) は MIGRATIONS[4] で null backfill。
+export const LATEST_SCHEMA_VERSION = 5 as const;
 
 // fee/gas 内訳セマンティクスの版。schemaVersion とは独立: migration は schemaVersion を
 // 昇格させるが、migrate された旧 entry の feeAmount は依然 conflated (利用手数料 + ガス
@@ -101,6 +116,30 @@ export type HistoryProvider = PaymentProvider;
  * - unreconciled: receipt 照合不能 (txHash 解決不可・binding 不一致 等)
  * SoT は lib/paymentLog.ts の CircleVerificationStatus。 */
 export type CircleVerification = CircleVerificationStatus;
+
+/** 売上明細 1 行 (レジ / checkout の itemized 決済)。記帳補助メタデータ。
+ * unitPrice / amount は人間可読 decimal (支払トークン単位・例 "500" / "1000")。raw wei ではない。 */
+export type HistoryLineItem = {
+  name: string;
+  /** 数量 (1〜CHECKOUT_QTY_MAX)。 */
+  quantity: number;
+  unitPrice: string;
+  amount: string;
+  /** 行ごとの税率 (%)。複数商品カートでは行ごとに異なりうる。未指定は null。 */
+  taxRate: number | null;
+  taxCategory: TaxCategory | null;
+  memo: string | null;
+  // --- 複数商品カート対応で追加 (すべて任意・古い単品 lineItem は省略可)。
+  //     表示/CSV 時に entryLineItems で補完 (currency←asset / taxAmount←算出 / id←合成)。
+  /** 行の安定 id (React key / 明細CSV 用)。 */
+  id?: string;
+  /** 行の通貨 (同一カート単一通貨。省略時は entry.asset)。 */
+  currency?: TokenSymbol;
+  /** 内税 (token 単位・cart 確定時に算出)。省略時は表示/CSV で taxRate から算出。 */
+  taxAmount?: string;
+  /** 由来プリセット id (任意)。 */
+  presetId?: string;
+};
 
 export type HistoryEntry = {
   /** schema version. 新規 entry は常に LATEST_SCHEMA_VERSION を持つ。 */
@@ -173,11 +212,55 @@ export type HistoryEntry = {
   anchorSymbol: TokenSymbol | null;
   /** 生成時に適用した usdcJpy (例 "156.32")。非換算は null。 */
   fxRateUsdcJpy: string | null;
+  // --- v5 追加 (記帳補助メタデータ: 商品/税/明細。非該当・legacy は null backfill) ---
+  /** 商品名 / 用途名 (= ユーザ仕様の description)。記帳補助。未指定は null。 */
+  productName: string | null;
+  /** 会計補助メモ。既存 note (checkout の description/orderId) とは別系統で温存する。 */
+  memo: string | null;
+  /** 税率 (%) 10 / 8 / 0(非課税·対象外) / 任意(custom)。未指定は null (CSV では既存デフォルト扱い)。 */
+  taxRate: number | null;
+  /** 内部税区分。CSV / freee へのマッピング鍵。未指定は null。 */
+  taxCategory: TaxCategory | null;
+  /** 管理番号 / レシート番号。未指定は null。 */
+  receiptNo: string | null;
+  /** 売上明細。単一 QR は null か 1 要素、レジ/checkout は N 要素。明細なしは null。 */
+  lineItems: HistoryLineItem[] | null;
 };
 
 // LATEST_SCHEMA_VERSION の entry に対する shape 検証。migration 後の最終 entry に
 // 適用する。bigint string や address 形式の厳密検証は表示時
 // (formatTokenAmount / Explorer) の責務に委譲する。
+// v5 売上明細の shape 検証 (各要素を防御的に確認)。null は呼出側で別途許容。
+function isValidLineItems(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.every((li) => {
+    if (li === null || typeof li !== 'object') return false;
+    const o = li as Record<string, unknown>;
+    if (typeof o.name !== 'string') return false;
+    if (typeof o.quantity !== 'number' || !Number.isInteger(o.quantity)) return false;
+    if (typeof o.unitPrice !== 'string') return false;
+    if (typeof o.amount !== 'string') return false;
+    if (
+      o.taxRate !== null &&
+      (typeof o.taxRate !== 'number' || !Number.isFinite(o.taxRate))
+    )
+      return false;
+    if (o.taxCategory !== null && !isTaxCategory(o.taxCategory)) return false;
+    if (o.memo !== null && typeof o.memo !== 'string') return false;
+    // 複数商品カート用の任意フィールド (在れば型のみ検証・必須化しない)。
+    if (o.id !== undefined && typeof o.id !== 'string') return false;
+    if (
+      o.currency !== undefined &&
+      o.currency !== 'jpyc' &&
+      o.currency !== 'usdc'
+    )
+      return false;
+    if (o.taxAmount !== undefined && typeof o.taxAmount !== 'string') return false;
+    if (o.presetId !== undefined && typeof o.presetId !== 'string') return false;
+    return true;
+  });
+}
+
 function isValidEntry(value: unknown): value is HistoryEntry {
   if (value === null || typeof value !== 'object') return false;
   const e = value as Record<string, unknown>;
@@ -264,6 +347,17 @@ function isValidEntry(value: unknown): value is HistoryEntry {
     return false;
   if (e.fxRateUsdcJpy !== null && typeof e.fxRateUsdcJpy !== 'string')
     return false;
+  // v5 フィールド (legacy は migration で null backfill 済)。
+  if (e.productName !== null && typeof e.productName !== 'string') return false;
+  if (e.memo !== null && typeof e.memo !== 'string') return false;
+  if (
+    e.taxRate !== null &&
+    (typeof e.taxRate !== 'number' || !Number.isFinite(e.taxRate))
+  )
+    return false;
+  if (e.taxCategory !== null && !isTaxCategory(e.taxCategory)) return false;
+  if (e.receiptNo !== null && typeof e.receiptNo !== 'string') return false;
+  if (e.lineItems !== null && !isValidLineItems(e.lineItems)) return false;
   return true;
 }
 
@@ -318,6 +412,18 @@ export const MIGRATIONS: Record<number, MigrationFn> = {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+  }),
+  // v4 → v5 (2026-06-04): 記帳補助メタデータ (商品名/メモ/税率/税区分/管理番号/売上明細) を追加。
+  // legacy entry は記録が無いため null backfill (drop しない・既存 CSV 出力も taxCategory=null で不変)。
+  4: (entry) => ({
+    ...entry,
+    schemaVersion: 5,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
   }),
 };
 
@@ -461,7 +567,48 @@ export type BuildHistoryBase = {
   anchorSymbol?: TokenSymbol | null;
   /** 生成時 usdcJpy (例 "156.32")。 */
   fxRateUsdcJpy?: string | null;
+  // --- v5 (記帳補助メタデータ。sale leg のみ設定・省略時 null) ---
+  productName?: string | null;
+  memo?: string | null;
+  taxRate?: number | null;
+  taxCategory?: TaxCategory | null;
+  receiptNo?: string | null;
+  lineItems?: HistoryLineItem[] | null;
 };
+
+// 自由入力の length cap (LocalStorage 肥大化 / 悪意 URL 対策)。空文字は null に畳む。
+function cappedOrNull(value: string | null | undefined, max: number): string | null {
+  if (!value) return null;
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+// 売上明細を sanitize: 件数 cap・各文字列 cap・quantity を正整数へ。空配列は null。
+function sanitizeLineItems(
+  items: HistoryLineItem[] | null | undefined,
+): HistoryLineItem[] | null {
+  if (items == null || items.length === 0) return null;
+  return items.slice(0, HISTORY_LINE_ITEMS_MAX).map((it) => {
+    const out: HistoryLineItem = {
+      name: cappedOrNull(it.name, HISTORY_PRODUCT_NAME_MAX) ?? '',
+      quantity:
+        Number.isFinite(it.quantity) && it.quantity >= 1
+          ? Math.floor(it.quantity)
+          : 1,
+      unitPrice: cappedOrNull(it.unitPrice, HISTORY_UNIT_AMOUNT_MAX) ?? '',
+      amount: cappedOrNull(it.amount, HISTORY_UNIT_AMOUNT_MAX) ?? '',
+      taxRate: it.taxRate ?? null,
+      taxCategory: it.taxCategory ?? null,
+      memo: cappedOrNull(it.memo, HISTORY_NOTE_MAX_LENGTH),
+    };
+    // 任意フィールドは在るときだけ保存 (undefined を JSON に残さない)。
+    if (it.id) out.id = it.id.slice(0, 64);
+    if (it.currency === 'jpyc' || it.currency === 'usdc') out.currency = it.currency;
+    const ta = cappedOrNull(it.taxAmount, HISTORY_UNIT_AMOUNT_MAX);
+    if (ta) out.taxAmount = ta;
+    if (it.presetId) out.presetId = it.presetId.slice(0, 64);
+    return out;
+  });
+}
 
 /**
  * 一意 id の決定規則:
@@ -527,6 +674,12 @@ export function buildHistoryEntry(
     anchorAmount: input.anchorAmount ?? null,
     anchorSymbol: input.anchorSymbol ?? null,
     fxRateUsdcJpy: input.fxRateUsdcJpy ?? null,
+    productName: cappedOrNull(input.productName, HISTORY_PRODUCT_NAME_MAX),
+    memo: cappedOrNull(input.memo, HISTORY_NOTE_MAX_LENGTH),
+    taxRate: input.taxRate ?? null,
+    taxCategory: input.taxCategory ?? null,
+    receiptNo: cappedOrNull(input.receiptNo, HISTORY_RECEIPT_NO_MAX),
+    lineItems: sanitizeLineItems(input.lineItems),
   };
 }
 
@@ -541,6 +694,95 @@ export function networkFeeEquivalentOf(entry: HistoryEntry): string | null {
  * (利用手数料 / 網手数料の集計から除外する判定に使う)。 */
 export function hasSeparatedBreakdown(entry: HistoryEntry): boolean {
   return entry.feeBreakdownVersion >= FEE_BREAKDOWN_VERSION;
+}
+
+// raw wei → 人間可読 decimal 文字列 (非数値は "0")。lineItem 補完・集計で使う。
+function rawToDecimalStr(raw: string, decimals: number): string {
+  if (!/^\d+$/.test(raw)) return '0';
+  return formatUnits(BigInt(raw), decimals);
+}
+
+// 1 行を正規化 (任意フィールドを補完): currency←asset / taxAmount←算出 / id←合成。
+function normalizeLineItem(
+  li: HistoryLineItem,
+  entry: HistoryEntry,
+  index: number,
+): HistoryLineItem {
+  const currency = li.currency ?? entry.asset;
+  let taxAmount = li.taxAmount;
+  if (taxAmount == null) {
+    const t = taxAmountDecimal(
+      Number(li.amount),
+      li.taxRate,
+      taxDisplayDecimals(currency),
+    );
+    taxAmount = t == null ? '0' : String(t);
+  }
+  return { ...li, id: li.id ?? `${entry.id}-${index}`, currency, taxAmount };
+}
+
+/**
+ * 表示 / CSV / freee 用に正規化済みの売上明細を返す (記帳補助)。
+ *   - lineItems があれば各行を補完して返す。
+ *   - 無くても productName があれば「仮想 1 行」を合成 (req: 既存単品を lineItems へ変換)。
+ *   - 商品情報の無い legacy (productName なし) は []。
+ */
+export function entryLineItems(entry: HistoryEntry): HistoryLineItem[] {
+  if (entry.lineItems && entry.lineItems.length > 0) {
+    return entry.lineItems.map((li, i) => normalizeLineItem(li, entry, i));
+  }
+  if (entry.productName) {
+    const amount = rawToDecimalStr(
+      entry.merchantAmount,
+      HISTORY_ASSET_DECIMALS[entry.asset],
+    );
+    return [
+      normalizeLineItem(
+        {
+          name: entry.productName,
+          quantity: 1,
+          unitPrice: amount,
+          amount,
+          taxRate: entry.taxRate,
+          taxCategory: entry.taxCategory,
+          memo: entry.memo,
+        },
+        entry,
+        0,
+      ),
+    ];
+  }
+  return [];
+}
+
+/**
+ * 派生集計 (token 単位)。税込前提なので subtotal === total (= 着金額)、totalTax は行税額の合計。
+ * 保存はせず entryLineItems / merchantAmount から都度算出 (drift 回避)。
+ */
+export function entryTotals(entry: HistoryEntry): {
+  subtotal: string;
+  totalTax: string;
+  total: string;
+} {
+  const total = rawToDecimalStr(
+    entry.merchantAmount,
+    HISTORY_ASSET_DECIMALS[entry.asset],
+  );
+  const dec = taxDisplayDecimals(entry.asset);
+  const items = entryLineItems(entry);
+  let tax = 0;
+  if (items.length > 0) {
+    for (const li of items) {
+      const n = Number(li.taxAmount);
+      if (Number.isFinite(n)) tax += n;
+    }
+  } else if (entry.taxRate != null) {
+    // 明細は無いが entry に税率がある (商品名なしで税だけ指定した単品 QR 等) → 合計から算出。
+    tax = taxAmountDecimal(Number(total), entry.taxRate, dec) ?? 0;
+  }
+  const factor = 10 ** dec;
+  const totalTax = String(Math.round(tax * factor) / factor);
+  return { subtotal: total, totalTax, total };
 }
 
 /** 数値 timestamp を yyyy-MM-dd HH:mm:ss (locale 形式) に整形。CSV にも UI にも使う。 */

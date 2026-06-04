@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { addressExplorerUrl, txExplorerUrl } from '@/lib/chains';
 import {
+  entryLineItems,
+  entryTotals,
   formatHistoryTimestamp,
   hasSeparatedBreakdown,
   HISTORY_ASSET_DECIMALS,
@@ -110,6 +112,17 @@ export function HistoryRow({
   const showGrossSale =
     entry.saleAmount != null && entry.saleAmount !== entry.merchantAmount;
 
+  // v5 売上明細表示。entryLineItems で単品/legacy も仮想 1 行に正規化、entryTotals で
+  // 合計税額 (token 単位の内税・記帳補助の参考値) を派生する。税額は token 単位なので
+  // USDC でも JPY へ強制変換しない (JPY 換算は GMV サマリ側の責務)。
+  const items = entryLineItems(entry);
+  const totals = entryTotals(entry);
+  const tokenSymbol = HISTORY_ASSET_DISPLAY[entry.asset];
+  const repName = items.length > 0 ? items[0].name : '';
+  const showTax =
+    items.some((li) => li.taxRate != null && li.taxRate > 0) ||
+    (entry.taxRate != null && entry.taxRate > 0);
+
   function handleRemove() {
     if (!window.confirm(t('removeRowConfirm'))) return;
     onRemove(entry.id);
@@ -132,6 +145,22 @@ export function HistoryRow({
           {formatHistoryTimestamp(entry.ts)}
         </time>
       </div>
+
+      {repName && (
+        <p className="mt-2 break-words text-sm font-semibold text-slate-800">
+          {repName}
+          {items.length === 1 && items[0].quantity > 1 && (
+            <span className="ml-1 font-normal text-slate-400">
+              ×{items[0].quantity}
+            </span>
+          )}
+          {items.length > 1 && (
+            <span className="ml-1 font-normal text-slate-400">
+              {t('itemCountMore', { count: items.length - 1 })}
+            </span>
+          )}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2">
         <div className="text-2xl font-bold text-slate-900">
@@ -222,6 +251,52 @@ export function HistoryRow({
               {entry.fxRateUsdcJpy &&
                 ` ・ ${tp('fxRateLine', { rate: entry.fxRateUsdcJpy })}`}
             </dd>
+          </div>
+        )}
+        {items.length > 0 && (
+          <div className="sm:col-span-2">
+            <dt className="text-slate-400">{t('lineItemsLabel')}</dt>
+            <dd>
+              <ul className="mt-0.5 space-y-0.5">
+                {items.map((li) => (
+                  <li
+                    key={li.id}
+                    className="flex flex-wrap items-baseline justify-between gap-2"
+                  >
+                    <span className="break-words">
+                      {li.name}{' '}
+                      <span className="text-slate-400">×{li.quantity}</span>
+                      {li.taxRate != null && li.taxRate > 0 && (
+                        <span className="ml-1 text-slate-400">{li.taxRate}%</span>
+                      )}
+                    </span>
+                    <span className="font-mono text-slate-700">
+                      @{li.unitPrice} = {li.amount}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
+        {showTax && (
+          <div>
+            <dt className="text-slate-400">{t('columnTaxAmount')}</dt>
+            <dd>
+              {totals.totalTax} {tokenSymbol}
+            </dd>
+          </div>
+        )}
+        {entry.receiptNo && (
+          <div>
+            <dt className="text-slate-400">{t('columnReceiptNo')}</dt>
+            <dd className="font-mono break-all">{entry.receiptNo}</dd>
+          </div>
+        )}
+        {entry.memo && (
+          <div className="sm:col-span-2">
+            <dt className="text-slate-400">{t('columnMemo')}</dt>
+            <dd className="break-words">{entry.memo}</dd>
           </div>
         )}
         {entry.note && (

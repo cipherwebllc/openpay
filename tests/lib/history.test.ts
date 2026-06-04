@@ -3,6 +3,8 @@ import {
   appendHistory,
   buildHistoryEntry,
   clearHistory,
+  entryLineItems,
+  entryTotals,
   formatHistoryTimestamp,
   HISTORY_CHANGED_EVENT,
   HISTORY_MAX_ENTRIES,
@@ -51,6 +53,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -623,7 +631,7 @@ describe('history (LocalStorage)', () => {
     });
 
     describe('buildHistoryEntry が常に LATEST_SCHEMA_VERSION を stamp', () => {
-      it('新規 entry は schemaVersion = LATEST_SCHEMA_VERSION (= 3)', () => {
+      it('新規 entry は schemaVersion = LATEST_SCHEMA_VERSION', () => {
         const base: BuildHistoryBase = {
           flow: 'batch',
           status: 'success',
@@ -897,6 +905,370 @@ describe('history (LocalStorage)', () => {
         expect(loaded).toHaveLength(1);
         expect(loaded[0].id).toBe('v1');
       });
+    });
+  });
+
+  describe('v5 記帳補助メタデータ (商品名/メモ/税/管理番号/明細)', () => {
+    function v5base(overrides: Partial<BuildHistoryBase> = {}): BuildHistoryBase {
+      return {
+        flow: 'batch',
+        status: 'success',
+        chainId: 137,
+        chainSlug: 'polygon',
+        asset: 'jpyc',
+        tokenAddress: '0xT',
+        payMode: 'gasless',
+        gasMode: 'customer',
+        merchant: '0xM',
+        merchantAmount: 1100n,
+        customer: '0xC',
+        feeReceiver: '0xF',
+        feeAmount: 0n,
+        txHash: '0xTx',
+        userOpHash: null,
+        blockNumber: 1n,
+        errorMessage: null,
+        storeName: '',
+        ...overrides,
+      };
+    }
+
+    it('buildHistoryEntry: v5 field を保持 (商品名/メモ/税率/税区分/管理番号/明細)', () => {
+      const e = buildHistoryEntry(
+        v5base({
+          productName: 'コーヒー',
+          memo: 'イベント販売',
+          taxRate: 10,
+          taxCategory: 'taxable_10',
+          receiptNo: 'R-20260615-001',
+          lineItems: [
+            {
+              name: 'コーヒー',
+              quantity: 2,
+              unitPrice: '500',
+              amount: '1000',
+              taxRate: 10,
+              taxCategory: 'taxable_10',
+              memo: null,
+            },
+          ],
+        }),
+      );
+      expect(e.productName).toBe('コーヒー');
+      expect(e.memo).toBe('イベント販売');
+      expect(e.taxRate).toBe(10);
+      expect(e.taxCategory).toBe('taxable_10');
+      expect(e.receiptNo).toBe('R-20260615-001');
+      expect(e.lineItems).toHaveLength(1);
+      expect(e.lineItems?.[0]).toMatchObject({
+        name: 'コーヒー',
+        quantity: 2,
+        amount: '1000',
+      });
+    });
+
+    it('buildHistoryEntry: v5 省略時は null (通常 QR を壊さない)', () => {
+      const e = buildHistoryEntry(v5base());
+      expect(e.productName).toBeNull();
+      expect(e.memo).toBeNull();
+      expect(e.taxRate).toBeNull();
+      expect(e.taxCategory).toBeNull();
+      expect(e.receiptNo).toBeNull();
+      expect(e.lineItems).toBeNull();
+    });
+
+    it('buildHistoryEntry: 空文字 productName/receiptNo は null に畳む', () => {
+      const e = buildHistoryEntry(v5base({ productName: '', receiptNo: '' }));
+      expect(e.productName).toBeNull();
+      expect(e.receiptNo).toBeNull();
+    });
+
+    it('buildHistoryEntry: 自由入力を cap (商品名 80 / 管理番号 64 / 明細 20 件)', () => {
+      const many = Array.from({ length: 30 }, () => ({
+        name: 'X'.repeat(200),
+        quantity: 1,
+        unitPrice: '1',
+        amount: '1',
+        taxRate: null,
+        taxCategory: null,
+        memo: null,
+      }));
+      const e = buildHistoryEntry(
+        v5base({
+          productName: 'P'.repeat(200),
+          receiptNo: 'R'.repeat(200),
+          lineItems: many,
+        }),
+      );
+      expect(e.productName?.length).toBe(80);
+      expect(e.receiptNo?.length).toBe(64);
+      expect(e.lineItems).toHaveLength(20);
+      expect(e.lineItems?.[0].name.length).toBe(80);
+    });
+
+    it('buildHistoryEntry: 空配列 lineItems は null に畳む', () => {
+      const e = buildHistoryEntry(v5base({ lineItems: [] }));
+      expect(e.lineItems).toBeNull();
+    });
+
+    it('migrateToLatest: 実 v4 entry (v5 field 無し) → null backfill で生存', () => {
+      const e = entry({ id: 'real-v4' });
+      const v4: Record<string, unknown> = { ...e, schemaVersion: 4 };
+      delete v4.productName;
+      delete v4.memo;
+      delete v4.taxRate;
+      delete v4.taxCategory;
+      delete v4.receiptNo;
+      delete v4.lineItems;
+      const out = migrateToLatest(v4);
+      expect(out).not.toBeNull();
+      expect(out?.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
+      expect(out?.productName).toBeNull();
+      expect(out?.taxCategory).toBeNull();
+      expect(out?.lineItems).toBeNull();
+    });
+
+    it('isValidEntry: 正しい lineItems / taxCategory は通過', () => {
+      const e = entry({
+        id: 'with-items',
+        productName: 'Tシャツ',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        receiptNo: 'R-1',
+        lineItems: [
+          {
+            name: 'Tシャツ',
+            quantity: 1,
+            unitPrice: '3000',
+            amount: '3000',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+        ],
+      });
+      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify([e]));
+      const loaded = loadHistory();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].lineItems?.[0].name).toBe('Tシャツ');
+    });
+
+    it('isValidEntry: 不正な lineItems (quantity 非整数) / taxCategory は drop', () => {
+      const badItems = {
+        ...entry({ id: 'bad-items' }),
+        lineItems: [
+          {
+            name: 'x',
+            quantity: 1.5,
+            unitPrice: '1',
+            amount: '1',
+            taxRate: null,
+            taxCategory: null,
+            memo: null,
+          },
+        ],
+      };
+      const badCat = { ...entry({ id: 'bad-cat' }), taxCategory: 'taxable_5' };
+      window.localStorage.setItem(
+        HISTORY_STORAGE_KEY,
+        JSON.stringify([badItems, badCat]),
+      );
+      expect(loadHistory()).toHaveLength(0);
+    });
+  });
+
+  describe('entryLineItems / entryTotals (複数商品 + 仮想変換)', () => {
+    it('stored lineItems を正規化 (id/currency/taxAmount 補完)', () => {
+      const e = entry({
+        asset: 'jpyc',
+        lineItems: [
+          {
+            name: 'コーヒー',
+            quantity: 2,
+            unitPrice: '550',
+            amount: '1100',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+        ],
+      });
+      const items = entryLineItems(e);
+      expect(items).toHaveLength(1);
+      expect(items[0].currency).toBe('jpyc');
+      expect(items[0].taxAmount).toBe('100'); // 1100 税込@10% → 内税 100
+      expect(items[0].id).toBeTruthy();
+    });
+
+    it('lineItems 無し + productName → 仮想 1 行を合成', () => {
+      const e = entry({
+        asset: 'jpyc',
+        merchantAmount: '1100000000000000000000', // 1100 JPYC
+        productName: 'コーヒー',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        lineItems: null,
+      });
+      const items = entryLineItems(e);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        name: 'コーヒー',
+        quantity: 1,
+        amount: '1100',
+        taxAmount: '100',
+      });
+    });
+
+    it('商品情報の無い legacy は []', () => {
+      expect(entryLineItems(entry({ productName: null, lineItems: null }))).toEqual(
+        [],
+      );
+    });
+
+    it('entryTotals: 混在税率 (10% + 8%) の合計税額', () => {
+      const e = entry({
+        asset: 'jpyc',
+        merchantAmount: '4000000000000000000000', // 合計 4000 JPYC (税込)
+        lineItems: [
+          {
+            name: 'A',
+            quantity: 2,
+            unitPrice: '500',
+            amount: '1000', // 内税@10% = 91
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+          {
+            name: 'B',
+            quantity: 1,
+            unitPrice: '3000',
+            amount: '3000', // 内税@8% = 222
+            taxRate: 8,
+            taxCategory: 'taxable_8',
+            memo: null,
+          },
+        ],
+      });
+      const t = entryTotals(e);
+      expect(t.total).toBe('4000');
+      expect(t.subtotal).toBe('4000');
+      expect(t.totalTax).toBe('313'); // 91 + 222
+    });
+  });
+
+  describe('v5 lineItem フィールドの検証 / 保持', () => {
+    const v5Base: BuildHistoryBase = {
+      flow: 'batch',
+      status: 'success',
+      chainId: 137,
+      chainSlug: 'polygon',
+      asset: 'jpyc',
+      tokenAddress: '0xT',
+      payMode: 'gasless',
+      gasMode: 'customer',
+      merchant: '0xM',
+      merchantAmount: 1n,
+      customer: '0xC',
+      feeReceiver: '0xF',
+      feeAmount: 0n,
+      txHash: '0xTx',
+      userOpHash: null,
+      blockNumber: 1n,
+      errorMessage: null,
+      storeName: '',
+    };
+
+    it('entryLineItems: stored currency/taxAmount/id を尊重 (再算出/上書きしない)', () => {
+      const e = entry({
+        asset: 'jpyc',
+        lineItems: [
+          {
+            name: 'X',
+            quantity: 1,
+            unitPrice: '100',
+            amount: '100',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            id: 'fixed-id',
+            currency: 'usdc', // entry.asset(jpyc) で上書きしない
+            taxAmount: '9.99', // 再算出しない
+          },
+        ],
+      });
+      const [li] = entryLineItems(e);
+      expect(li.id).toBe('fixed-id');
+      expect(li.currency).toBe('usdc');
+      expect(li.taxAmount).toBe('9.99');
+    });
+
+    it('isValidEntry: 不正な lineItem (currency/id/taxAmount/presety 型) は drop', () => {
+      const bad = (over: Record<string, unknown>, id: string) => ({
+        ...entry({ id }),
+        lineItems: [
+          {
+            name: 'x',
+            quantity: 1,
+            unitPrice: '1',
+            amount: '1',
+            taxRate: null,
+            taxCategory: null,
+            memo: null,
+            ...over,
+          },
+        ],
+      });
+      window.localStorage.setItem(
+        HISTORY_STORAGE_KEY,
+        JSON.stringify([
+          bad({ currency: 'eth' }, 'c'),
+          bad({ id: 123 }, 'i'),
+          bad({ taxAmount: 9 }, 't'),
+          bad({ presetId: {} }, 'p'),
+        ]),
+      );
+      expect(loadHistory()).toHaveLength(0);
+    });
+
+    it('sanitizeLineItems: 任意フィールド保持・id は 64 文字 cap', () => {
+      const e = buildHistoryEntry({
+        ...v5Base,
+        lineItems: [
+          {
+            name: 'X',
+            quantity: 1,
+            unitPrice: '1',
+            amount: '1',
+            taxRate: null,
+            taxCategory: null,
+            memo: null,
+            id: 'I'.repeat(100),
+            currency: 'usdc',
+            taxAmount: '0.5',
+            presetId: 'p1',
+          },
+        ],
+      });
+      const li = e.lineItems![0];
+      expect(li.id?.length).toBe(64);
+      expect(li.currency).toBe('usdc');
+      expect(li.taxAmount).toBe('0.5');
+      expect(li.presetId).toBe('p1');
+    });
+
+    it('entryTotals: USDC は 2 桁で stored taxAmount を合算', () => {
+      const e = entry({
+        asset: 'usdc',
+        merchantAmount: '30000000', // 30 USDC
+        lineItems: [
+          { name: 'A', quantity: 1, unitPrice: '10', amount: '10', taxRate: 10, taxCategory: 'taxable_10', memo: null, currency: 'usdc', taxAmount: '0.91' },
+          { name: 'B', quantity: 1, unitPrice: '20', amount: '20', taxRate: 10, taxCategory: 'taxable_10', memo: null, currency: 'usdc', taxAmount: '1.82' },
+        ],
+      });
+      const t = entryTotals(e);
+      expect(t.total).toBe('30');
+      expect(t.totalTax).toBe('2.73'); // 0.91 + 1.82
     });
   });
 

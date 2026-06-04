@@ -21,6 +21,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 - **Block explorer link** on every receipt — merchants verify on-chain truth, not just a UI screen.
 - **Local transaction history** — per-browser LocalStorage history at `/history`, with filters (period / status / search), a JPY-converted GMV summary, CSV export, and a "latest 3" strip on the QR builder.
 - **Accounting integration** — `/history` exports income CSV in **freee**, **Money Forward**, and **Yayoi** formats (Yayoi-native in Shift_JIS), and — opt-in via `NEXT_PUBLIC_ENABLE_FREEE_SYNC` — connects to **freee over OAuth** to push income transactions in one click. Gated behind **SIWE wallet login** (no password/account) with an idempotent "sync to freee" batch (re-clicking never double-books).
+- **Sales line items & simple register** — the QR builder has an optional **accounting fields** section (product/purpose name, memo, tax rate & category, receipt no.), and `/create` adds a mobile-friendly **simple register**: add **multiple products to a cart** (from presets or typed), set per-line quantity / unit price / tax rate, and generate an itemized `/checkout` QR for the cart total. The line items travel with the payment and are recorded in `/history` as a **sales detail** (per-line product, quantity, unit price, tax rate, in-tax amount, total, receipt no.). They flow into the accounting CSVs (tax category + an item summary like “Coffee x2 / T-shirt x1” in the description), a dedicated **line-item CSV** (one row per product), and freee’s memo (one deal per transaction, items summarised — idempotent, never double-booked). One cart is a single currency. Register mode and product presets are stored locally (LocalStorage; no server DB). These are **bookkeeping aids for CSV import** — OpenPay is not a POS or accounting product, and final accounting (tax treatment, mixed-rate carts, etc.) should be confirmed in your accounting software / by a tax advisor. JPYC is treated as ¥1; tax is computed in the token’s own units (no forced JPY conversion for USDC).
 - **Reference market rate** — a lightweight strip on `/` and `/create` shows `1 USDC = ¥X.XX` via a 5-min server-cached CoinGecko proxy; `1 JPYC = ¥1.00 (peg)` is fixed.
 - **Experimental x402 / agent payment** support for per-request paid APIs — with both USDC and **JPYC** assets (most x402 servers are USDC-only).
 - **OSS, self-hostable** under MIT.
@@ -101,7 +102,7 @@ OpenPay **never holds** merchant funds. Customer payments are sent **directly to
 |---|---|
 | `/` | Landing page — hero with two CTAs (📱 pay / 🏪 receive), benefits, how-it-works, FAQ |
 | `/create` | Merchant QR builder + Tip widget builder + offramp links + latest-3 history strip |
-| `/scan` | Customer scan-to-pay surface (QR scanner + connected-wallet balances) |
+| `/scan` | Customer scan-to-pay surface (QR scanner + connected-wallet balances + saved payment receipts) |
 | `/history` | Local-only transaction history with CSV export |
 | `/explore` | Curated directory of external stablecoin services (exchanges / DEX / dApps / bridges / explorers) |
 | `/pay`, `/checkout`, `/tip/[address]` | Transactional leaf surfaces — kept focused (no app-shell chrome) |
@@ -119,9 +120,19 @@ Pages above the leaf surfaces share an `AppShell` with a sticky header (logo + w
 2. Scan the merchant QR (or land on `/pay` from an external link).
 3. Review amount, token, chain, recipient in the wallet.
 4. Sign the transaction.
-5. See the completion screen with the on-chain tx hash + explorer link.
+5. See the completion screen with the on-chain tx hash + explorer link, plus an **electronic receipt / payment record** (`電子レシート / 支払い控え`) of the payment.
 
 **Merchant verifies receipt** in their own wallet or on the block explorer — the completion screen alone is **not** proof of payment.
+
+### Customer-side payment receipts (`電子レシート / 支払い控え`)
+
+When a payment completes (`/pay`, `/checkout`, `/tip`), OpenPay saves an **electronic receipt / payment record** to the **payer's own browser** (LocalStorage key `openpay:payerReceipts:v1`, capped at 200, newest-first). View them on `/scan` and on the completion screen, with copy / print / JSON / CSV export.
+
+- **Stored locally only — never sent to a server.** No customer wallet address or payment history is persisted on OpenPay servers. The record holds only what is needed to confirm a payment: txHash, wallet addresses, amount, item names, tax, totals. JSON export contains no secrets.
+- **Separate from the merchant-side store** (`/history` / `openpay:history:v1`) and from freee sync — different key, different framing (`direction: 'paid'`). On a device that both pays and receives, both will appear; that is by design.
+- If the QR carried line items (`/checkout`), the receipt shows the **itemized breakdown, per-item tax, and totals**; otherwise a single virtual line is synthesized. The txHash links to the block explorer for final confirmation.
+- It **cannot be recovered** after changing devices, clearing browser data, or in private/incognito mode — print or save it to keep a copy. On `/scan` each receipt can be **deleted** individually and all receipts **cleared** at once (useful on a shared device).
+- This is **not a formal receipt, tax document, or invoice.** Final treatment should be confirmed with your organization, accounting rules, or tax advisor.
 
 ## Alpha notice
 

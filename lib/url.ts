@@ -38,6 +38,11 @@ import type { GasMode, PayMode } from './fee';
 import { stripControlChars } from './sanitize';
 import { rateIsSane } from './fx';
 import {
+  parseTaxCategoryParam,
+  parseTaxRateParam,
+  type TaxCategory,
+} from './tax';
+import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
   deploymentForSlug,
@@ -54,6 +59,12 @@ export type SplitEntry = {
 };
 
 export const SPLIT_MAX_ENTRIES = 3;
+
+// /pay・/checkout の記帳補助メタ (任意) の length cap。URL/QR 肥大化と自由入力の攻撃面を制限。
+export const PAY_PRODUCT_NAME_MAX = 80;
+export const PAY_MEMO_MAX = 200;
+export const PAY_RECEIPT_NO_MAX = 64;
+export const PAY_STORE_NAME_MAX = 48;
 
 export type PayParams = {
   to: Address;
@@ -81,6 +92,19 @@ export type PayParams = {
   priceRefAmount?: string;
   // 生成時の usdcJpy (例 "156.32")。顧客表示用。
   fxRate?: string;
+  // --- 記帳補助メタデータ (任意・表示/会計用)。在るときだけ URL に出る (旧 QR 不変)。 ---
+  // 店舗名 (予約済 storeName field を URL に乗せ、決済側の履歴に記録できるようにする)。
+  storeName?: string;
+  // 商品名 / 用途名。
+  productName?: string;
+  // 会計補助メモ。
+  memo?: string;
+  // 税率 (%)。0 (非課税/対象外) もありうるので undefined と区別する。
+  taxRate?: number;
+  // 内部税区分 (CSV/freee マッピング鍵)。
+  taxCategory?: TaxCategory;
+  // 管理番号 / レシート番号。
+  receiptNo?: string;
 };
 
 function buildSplitParam(split: SplitEntry[]): string {
@@ -217,6 +241,30 @@ export function buildPayPath(params: PayParams): string {
   if (params.fxRate && params.fxRate.length > 0) {
     sp.set('fxRate', params.fxRate);
   }
+  // 記帳補助メタ (在るときだけ・sanitize + cap)。
+  if (params.storeName) {
+    const v = sanitizeText(params.storeName, PAY_STORE_NAME_MAX);
+    if (v) sp.set('store', v);
+  }
+  if (params.productName) {
+    const v = sanitizeText(params.productName, PAY_PRODUCT_NAME_MAX);
+    if (v) sp.set('pname', v);
+  }
+  if (params.memo) {
+    const v = sanitizeText(params.memo, PAY_MEMO_MAX);
+    if (v) sp.set('memo', v);
+  }
+  // taxRate は 0 (非課税/対象外) もあるため undefined 判定。
+  if (params.taxRate !== undefined) {
+    sp.set('tax', String(params.taxRate));
+  }
+  if (params.taxCategory) {
+    sp.set('taxcat', params.taxCategory);
+  }
+  if (params.receiptNo) {
+    const v = sanitizeText(params.receiptNo, PAY_RECEIPT_NO_MAX);
+    if (v) sp.set('rcpt', v);
+  }
   return `/pay?${sp.toString()}`;
 }
 
@@ -242,6 +290,12 @@ const PAY_PARAM_KEYS = [
   'exp',
   'refAmt',
   'fxRate',
+  'store',
+  'pname',
+  'memo',
+  'tax',
+  'taxcat',
+  'rcpt',
 ] as const;
 
 /** URLSearchParams / Next の ReadonlyURLSearchParams どちらも構造的に受け取れる */
@@ -292,6 +346,12 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const expRaw = searchParams.get('exp');
   const refAmtRaw = searchParams.get('refAmt');
   const fxRateRaw = searchParams.get('fxRate');
+  const storeRaw = searchParams.get('store');
+  const pnameRaw = searchParams.get('pname');
+  const memoRaw = searchParams.get('memo');
+  const rcptRaw = searchParams.get('rcpt');
+  const taxRaw = searchParams.get('tax');
+  const taxcatRaw = searchParams.get('taxcat');
 
   if (!to) {
     // bare /pay (search 空) と「to なし + 他 param あり」を区別する。
@@ -408,6 +468,16 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const fxRate =
     fxRateRaw && rateIsSane(Number(fxRateRaw)) ? fxRateRaw : undefined;
 
+  // 記帳補助メタ (任意・sanitize + cap)。不正/欠落は undefined (= 従来 QR と同じ挙動)。
+  const storeName = storeRaw ? sanitizeText(storeRaw, PAY_STORE_NAME_MAX) : undefined;
+  const productName = pnameRaw
+    ? sanitizeText(pnameRaw, PAY_PRODUCT_NAME_MAX)
+    : undefined;
+  const memo = memoRaw ? sanitizeText(memoRaw, PAY_MEMO_MAX) : undefined;
+  const receiptNo = rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined;
+  const taxRate = parseTaxRateParam(taxRaw);
+  const taxCategory = parseTaxCategoryParam(taxcatRaw);
+
   return {
     ok: true,
     params: {
@@ -422,6 +492,12 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       expiresAt,
       priceRefAmount,
       fxRate,
+      storeName,
+      productName,
+      memo,
+      taxRate,
+      taxCategory,
+      receiptNo,
     },
   };
 }
@@ -661,6 +737,8 @@ export function parseTipParams(
 // ":" price で結合し、複数 items は "," で連結。decode 側は "," → ":" の順に
 // split して decodeURIComponent + sanitizeText する。これにより name に ":" や
 // "," を含めても 衝突しない。
+// 複数商品カートでは per-item の税/メモを履歴に残すため 6 セグへ拡張可:
+// "encName:qty:price:taxRate:taxCategory:encMemo" (在るときのみ・旧 3 セグと後方互換)。
 //
 // webhook payload は Tip と互換シェイプ (type 識別子だけ "openpay.checkout.success")。
 // マーチャントは 1 つの handler で Tip / Checkout 両対応可能。
@@ -669,6 +747,11 @@ export type CheckoutItem = {
   name: string;
   qty: number;       // 1〜999 の整数
   price: string;     // 人間可読 decimal (例: "25.00")。token decimals 内に収まる
+  // --- 複数商品カート対応で追加 (任意・per-item 税/メモ)。決済側の履歴に明細を残すため
+  //     URL に乗せる。在るときだけ 6 セグ encoding に拡張 (旧 3 セグと後方互換)。
+  taxRate?: number;
+  taxCategory?: TaxCategory;
+  memo?: string;
 };
 
 export type CheckoutParams = {
@@ -686,17 +769,33 @@ export type CheckoutParams = {
   successUrl?: string;
   cancelUrl?: string;
   webhook?: string;
+  // --- 記帳補助メタ (任意・チェックアウト単位の共通税)。レジモードが設定する。 ---
+  // 税率 (%)。0 (非課税/対象外) もありうる。
+  taxRate?: number;
+  taxCategory?: TaxCategory;
+  receiptNo?: string;
 };
 
 export const CHECKOUT_MAX_ITEMS = 10;
 export const CHECKOUT_QTY_MAX = 999;
 const CHECKOUT_NAME_MAX = 80;
+const CHECKOUT_ITEM_MEMO_MAX = 80;
 const CHECKOUT_ORDER_ID_MAX = 64;
 const CHECKOUT_DESCRIPTION_MAX = 200;
 const CHECKOUT_EMAIL_MAX = 240;
 
 function encodeItem(it: CheckoutItem): string {
-  return `${encodeURIComponent(it.name)}:${it.qty}:${it.price}`;
+  const base = `${encodeURIComponent(it.name)}:${it.qty}:${it.price}`;
+  // per-item の税/メモが在るときだけ 6 セグへ拡張。無ければ従来 3 セグ (旧 QR 互換)。
+  const hasMeta =
+    it.taxRate !== undefined ||
+    it.taxCategory !== undefined ||
+    (it.memo !== undefined && it.memo.length > 0);
+  if (!hasMeta) return base;
+  const tax = it.taxRate !== undefined ? String(it.taxRate) : '';
+  const cat = it.taxCategory ?? '';
+  const memo = it.memo ? encodeURIComponent(it.memo) : '';
+  return `${base}:${tax}:${cat}:${memo}`;
 }
 
 export function encodeItems(items: ReadonlyArray<CheckoutItem>): string {
@@ -735,8 +834,9 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
   const items: CheckoutItem[] = [];
   for (const t of tokens) {
     const parts = t.split(':');
-    if (parts.length !== 3) return null;
-    const [encodedName, qtyStr, priceStr] = parts;
+    // 3 = legacy (name:qty:price)、6 = 複数商品カート (+taxRate:taxCategory:memo)。
+    if (parts.length !== 3 && parts.length !== 6) return null;
+    const [encodedName, qtyStr, priceStr, taxStr, catStr, memoStr] = parts;
     if (encodedName.length === 0) return null;
     let decoded: string;
     try {
@@ -751,7 +851,25 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
       name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
     const v = validateItemFields(qtyStr, priceStr, decimals);
     if (!v.ok) return null;
-    items.push({ name: trimmedName, qty: v.qty, price: priceStr });
+    const item: CheckoutItem = { name: trimmedName, qty: v.qty, price: priceStr };
+    if (parts.length === 6) {
+      // 不正な税/メモは黙って落とす (決済の正本は qty/price なので止めない)。
+      const taxRate = parseTaxRateParam(taxStr || null);
+      if (taxRate !== undefined) item.taxRate = taxRate;
+      const taxCategory = parseTaxCategoryParam(catStr || null);
+      if (taxCategory !== undefined) item.taxCategory = taxCategory;
+      if (memoStr && memoStr.length > 0) {
+        let m: string;
+        try {
+          m = decodeURIComponent(memoStr);
+        } catch {
+          return null;
+        }
+        const cleaned = stripControlChars(m);
+        if (cleaned.length > 0) item.memo = cleaned.slice(0, CHECKOUT_ITEM_MEMO_MAX);
+      }
+    }
+    items.push(item);
   }
   return items;
 }
@@ -796,6 +914,17 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeUrl(params.webhook);
     if (v) sp.set('webhook', v);
   }
+  // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。
+  if (params.taxRate !== undefined) {
+    sp.set('tax', String(params.taxRate));
+  }
+  if (params.taxCategory) {
+    sp.set('taxcat', params.taxCategory);
+  }
+  if (params.receiptNo) {
+    const v = sanitizeText(params.receiptNo, PAY_RECEIPT_NO_MAX);
+    if (v) sp.set('rcpt', v);
+  }
   return `/checkout?${sp.toString()}`;
 }
 
@@ -822,6 +951,9 @@ export function parseCheckoutParams(
   const successUrl = searchParams.get('success_url');
   const cancelUrl = searchParams.get('cancel_url');
   const webhook = searchParams.get('webhook');
+  const taxRaw = searchParams.get('tax');
+  const taxcatRaw = searchParams.get('taxcat');
+  const rcptRaw = searchParams.get('rcpt');
 
   if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
   if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
@@ -889,6 +1021,9 @@ export function parseCheckoutParams(
       successUrl: successUrl ? sanitizeUrl(successUrl) : undefined,
       cancelUrl: cancelUrl ? sanitizeUrl(cancelUrl) : undefined,
       webhook: webhook ? sanitizeUrl(webhook) : undefined,
+      taxRate: parseTaxRateParam(taxRaw),
+      taxCategory: parseTaxCategoryParam(taxcatRaw),
+      receiptNo: rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined,
     },
   };
 }

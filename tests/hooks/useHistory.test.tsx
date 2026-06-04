@@ -44,6 +44,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }

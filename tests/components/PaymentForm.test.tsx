@@ -87,6 +87,7 @@ import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { PaymentForm } from '@/components/PaymentForm';
 import { logger } from '@/lib/logger';
+import { loadPayerReceipts } from '@/lib/payerReceipt';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
@@ -541,6 +542,29 @@ describe('PaymentForm — 送信フロー', () => {
     expect(screen.getAllByText(`0x${'a'.repeat(64)}`).length).toBeGreaterThan(0);
     expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
     expect(screen.getAllByText('42').length).toBeGreaterThan(0);
+  });
+
+  it('送信成功 → 顧客向け電子レシート控えを保存し完了画面に埋め込む (/pay)', () => {
+    window.localStorage.clear();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setPayment('success');
+    render(<PaymentForm />);
+    // (a) 控えが LocalStorage に保存される (実 usePaymentHistory → appendPayerReceipt 経路)。
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].sourceRoute).toBe('/pay');
+    expect(receipts[0].direction).toBe('paid');
+    expect(receipts[0].receiptId).toBe(`0x${'b'.repeat(64)}`); // = txHash
+    // (b) 完了画面に控え詳細 (PayerReceiptDetail) が描画される。
+    //     ctx → usePaymentHistory → appendPayerReceipt → CHANGED_EVENT →
+    //     usePayerReceipts → PayerReceiptCompletion → PayerReceiptDetail の全鎖を実証。
+    expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
+    // 完了画面の /scan 導線 (PayerReceiptCompletion 固有文言)。
+    const scanLink = screen.getByText(/\/scan で支払い履歴/);
+    expect(scanLink.closest('a')).toHaveAttribute('href', '/scan');
   });
 
   it('GasCongestedError → 生メッセージではなく i18n 案内 (sponsorship)', async () => {

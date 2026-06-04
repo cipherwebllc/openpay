@@ -12,7 +12,11 @@
 
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
-import { HISTORY_ASSET_DISPLAY, type HistoryEntry } from './history';
+import {
+  entryLineItems,
+  HISTORY_ASSET_DISPLAY,
+  type HistoryEntry,
+} from './history';
 import { shortAddress } from './format';
 import { pad } from './pad';
 
@@ -41,13 +45,27 @@ export function freeeIssueDate(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** 摘要: OpenPay 由来である事 + 追跡情報 (freee に draft 状態が無いため明記しレビューを促す)。 */
+/** 摘要: OpenPay 由来である事 + 記帳補助メタ (商品名/管理番号/メモ) + 追跡情報。
+ *  freee には deal の tax_code は mapping の単一値を使うため、税率以外の補助情報 (商品名・
+ *  管理番号・メモ) は反映できる範囲で摘要にまとめる (freee に draft 状態が無いため明記しレビューを促す)。 */
 export function freeeDescription(e: HistoryEntry): string {
   const parts = [`OpenPay ${HISTORY_ASSET_DISPLAY[e.asset]}/${e.chainSlug}`];
+  // 売上明細サマリ「商品名 x数量 / …」(複数商品も摘要に。freee deal は 1 取引=1 行で
+  // tax_code は mapping の単一値・明細は摘要にまとめる=二重計上回避優先)。
+  const items = entryLineItems(e);
+  if (items.length > 0) {
+    const summary = items
+      .slice(0, 5)
+      .map((li) => `${li.name} x${li.quantity}`)
+      .join(' / ');
+    parts.push(items.length > 5 ? `${summary} ほか` : summary);
+  }
   if (e.txHash) parts.push(`tx:${shortAddress(e.txHash)}`);
   if (e.anchorAmount != null && e.anchorSymbol) {
     parts.push(`元:${e.anchorAmount} ${HISTORY_ASSET_DISPLAY[e.anchorSymbol]}`);
   }
+  if (e.receiptNo) parts.push(`No:${e.receiptNo}`);
+  if (e.memo) parts.push(e.memo);
   return parts.join(' / ');
 }
 

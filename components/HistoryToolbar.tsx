@@ -15,6 +15,7 @@ import {
   toAccountingCsv,
   type AccountingFormat,
 } from '@/lib/accountingCsv';
+import { lineItemsCsvFilename, toLineItemsCsv } from '@/lib/lineItemsCsv';
 import {
   currentMonthKey,
   dayRangeToTsBounds,
@@ -85,7 +86,10 @@ export function HistoryToolbar({
   }
 
   function handleExport() {
-    const blob = new Blob([toCsv(entries)], { type: 'text/csv;charset=utf-8' });
+    // usdcJpy は v5 税額(円) 列で anchor 無し USDC を円換算するのに使う (JPYC は不要)。
+    const blob = new Blob([toCsv(entries, { usdcJpy })], {
+      type: 'text/csv;charset=utf-8',
+    });
     downloadBlob(blob, historyCsvFilename());
   }
 
@@ -113,6 +117,19 @@ export function HistoryToolbar({
       return;
     }
     downloadBlob(new Blob([r.csv], { type: 'text/csv;charset=utf-8' }), filename);
+  }
+
+  // 会計明細CSV: 1 商品 1 行 (混在税率の行別税額を正確に出す。仕訳CSV は 1 取引 1 行)。
+  function handleLineItemsExport() {
+    const r = toLineItemsCsv(entries);
+    if (!r.ok) {
+      window.alert(t('accountingNoRows'));
+      return;
+    }
+    downloadBlob(
+      new Blob([r.csv], { type: 'text/csv;charset=utf-8' }),
+      lineItemsCsvFilename(),
+    );
   }
 
   function handleClear() {
@@ -230,6 +247,14 @@ export function HistoryToolbar({
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportAccountingCsv')}
+          </button>
+          <button
+            type="button"
+            onClick={handleLineItemsExport}
+            disabled={entries.length === 0}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('exportLineItemsCsv')}
           </button>
         </div>
         <button

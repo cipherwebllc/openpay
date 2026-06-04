@@ -43,6 +43,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -129,7 +135,8 @@ describe('HistoryToolbar', () => {
     const entries = [entry({ id: '1' }), entry({ id: '2' })];
     renderToolbar({ entries, counts: { all: 2, jpyc: 2, usdc: 0 } });
     await user.click(screen.getByRole('button', { name: 'CSV ダウンロード' }));
-    expect(toCsvSpy).toHaveBeenCalledWith(entries);
+    // v5: 生 CSV は税額(円)算出用に usdcJpy を渡す (renderToolbar 既定は undefined)。
+    expect(toCsvSpy).toHaveBeenCalledWith(entries, { usdcJpy: undefined });
     expect(downloadSpy).toHaveBeenCalledOnce();
     expect(downloadSpy.mock.calls[0]![1]).toMatch(/^openpay-history-\d{4}-\d{2}-\d{2}\.csv$/);
   });

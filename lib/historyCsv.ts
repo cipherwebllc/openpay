@@ -22,6 +22,8 @@ import {
   HISTORY_ASSET_DISPLAY,
   networkFeeEquivalentOf,
 } from './history';
+import { entryYenValue } from './historyYen';
+import { taxAmountYen, taxCategoryShortLabel } from './tax';
 
 const HEADER: readonly string[] = [
   '日時',
@@ -62,6 +64,18 @@ const HEADER: readonly string[] = [
   '請求建て金額',
   '請求建て通貨',
   'FXレート(USDC/JPY)',
+  // v5 追加 (記帳補助メタ: 商品/税/明細)。末尾に追加し既存列順を保つ (旧データは空セル)。
+  // 税額(円) は円換算可能な行のみ算出 (JPYC=exact / USDC は anchor or rate がある時)、
+  // それ以外は空。会計ソフトではなく「記帳補助 / CSV 取込用」の参考値。
+  '商品名',
+  '会計メモ',
+  '税率(%)',
+  '税区分',
+  '税額(円)',
+  '管理番号',
+  '数量',
+  '単価',
+  '明細',
 ];
 
 function rawToDecimal(raw: string | null, asset: HistoryEntry['asset']): string {
@@ -134,7 +148,35 @@ function breakdownVersionLabel(e: HistoryEntry): string {
   return hasSeparatedBreakdown(e) ? '分離済' : '内訳不明 (旧データ)';
 }
 
-function entryToRow(e: HistoryEntry): string[] {
+// v5 税額(円): 内税を円換算値 (entryYenValue) と taxRate から算出。円換算不能 (USDC レート無) /
+// 税率未指定は空 (USDC を無理に税JPY変換しない方針)。
+function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
+  if (e.taxRate == null) return '';
+  const yv = entryYenValue(e, usdcJpy);
+  if (yv.kind === 'unavailable') return '';
+  const amt = taxAmountYen(yv.yen, e.taxRate);
+  return amt == null ? '' : String(amt);
+}
+
+// 単一明細の数量/単価のみセル化 (複数明細は「明細」列に要約)。
+function singleQtyCell(e: HistoryEntry): string {
+  return e.lineItems && e.lineItems.length === 1
+    ? String(e.lineItems[0].quantity)
+    : '';
+}
+function singleUnitCell(e: HistoryEntry): string {
+  return e.lineItems && e.lineItems.length === 1 ? e.lineItems[0].unitPrice : '';
+}
+
+// 明細要約 ("商品名×数量@単価; ...")。明細なしは空。
+function lineItemsCell(e: HistoryEntry): string {
+  if (!e.lineItems || e.lineItems.length === 0) return '';
+  return e.lineItems
+    .map((li) => `${li.name}×${li.quantity}@${li.unitPrice}`)
+    .join('; ');
+}
+
+function entryToRow(e: HistoryEntry, usdcJpy: number | undefined): string[] {
   return [
     formatHistoryTimestamp(e.ts),
     statusToLabel(e.status),
@@ -172,11 +214,26 @@ function entryToRow(e: HistoryEntry): string[] {
     e.anchorAmount ?? '',
     e.anchorSymbol ? HISTORY_ASSET_DISPLAY[e.anchorSymbol] : '',
     e.fxRateUsdcJpy ?? '',
+    // v5: 記帳補助メタ。
+    e.productName ?? '',
+    e.memo ?? '',
+    e.taxRate != null ? String(e.taxRate) : '',
+    taxCategoryShortLabel(e.taxCategory),
+    taxAmountCell(e, usdcJpy),
+    e.receiptNo ?? '',
+    singleQtyCell(e),
+    singleUnitCell(e),
+    lineItemsCell(e),
   ];
 }
 
-export function toCsv(entries: ReadonlyArray<HistoryEntry>): string {
-  return buildCsv([HEADER, ...entries.map(entryToRow)]);
+// usdcJpy は v5 税額(円) の USDC 円換算に使う (anchor の無い USDC 行のみ必要)。未指定なら
+// USDC 行の税額は空になる (JPYC / anchor 付き USDC は rate 非依存で算出される)。
+export function toCsv(
+  entries: ReadonlyArray<HistoryEntry>,
+  opts: { usdcJpy?: number } = {},
+): string {
+  return buildCsv([HEADER, ...entries.map((e) => entryToRow(e, opts.usdcJpy))]);
 }
 
 export function historyCsvFilename(now: Date = new Date()): string {

@@ -25,3 +25,23 @@ body {
     'Yu Gothic UI',
     sans-serif;
 }
+
+/* 電子レシート (PayerReceiptDetail) の「印刷」: 印刷時は対象レシート 1 枚だけを
+   残し他要素を隠す。print ボタン押下で body に openpay-printing-receipt を付与し、
+   対象 root に data-receipt-printing を立てる (afterprint で両者を解除)。
+   display:none ではなく visibility:hidden を使い layout を保ったまま絶対配置で出す。 */
+@media print {
+  body.openpay-printing-receipt * {
+    visibility: hidden;
+  }
+  body.openpay-printing-receipt [data-receipt-printing],
+  body.openpay-printing-receipt [data-receipt-printing] * {
+    visibility: visible;
+  }
+  body.openpay-printing-receipt [data-receipt-printing] {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    border: none;
+  }
+}

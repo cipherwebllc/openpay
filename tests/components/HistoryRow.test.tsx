@@ -47,6 +47,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -302,5 +308,82 @@ describe('HistoryRow', () => {
       />,
     );
     expect(screen.queryByText(/≈/)).toBeNull();
+  });
+
+  it('v5: 商品名/税率税区分/税額/管理番号/会計メモ/明細 を表示 (JPYC 税額は exact)', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          asset: 'jpyc',
+          merchantAmount: '1100000000000000000000', // 1100 JPYC 税込 → 内税 100
+          productName: 'コーヒー',
+          memo: 'イベント販売',
+          taxRate: 10,
+          taxCategory: 'taxable_10',
+          receiptNo: 'R-20260615-001',
+          lineItems: [
+            {
+              name: 'コーヒー',
+              quantity: 2,
+              unitPrice: '550',
+              amount: '1100',
+              taxRate: 10,
+              taxCategory: 'taxable_10',
+              memo: null,
+            },
+          ],
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    // 商品名は subtitle と明細の双方に出る
+    expect(screen.getAllByText(/コーヒー/).length).toBeGreaterThan(0);
+    expect(screen.getByText('R-20260615-001')).toBeInTheDocument();
+    expect(screen.getByText('イベント販売')).toBeInTheDocument();
+    expect(screen.getByText('10%')).toBeInTheDocument(); // 明細行の税率
+    expect(screen.getByText('100 JPYC')).toBeInTheDocument(); // 税額 (token 単位・内税)
+  });
+
+  it('v5: 複数明細は「代表名 + ほかN点」で要約表示', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          asset: 'jpyc',
+          merchantAmount: '4000000000000000000000',
+          lineItems: [
+            { name: 'コーヒー', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+            { name: 'Tシャツ', quantity: 1, unitPrice: '3000', amount: '3000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+          ],
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('ほか1点')).toBeInTheDocument(); // 代表名(コーヒー) + ほか1点
+    // 明細は両行とも展開表示される
+    expect(screen.getAllByText(/Tシャツ/).length).toBeGreaterThan(0);
+  });
+
+  it('v5: メタ未設定の entry は記帳補助行を出さない (後方互換)', () => {
+    render(<HistoryRow entry={entry()} onRemove={() => undefined} />);
+    expect(screen.queryByText('管理番号')).toBeNull();
+    expect(screen.queryByText('売上明細')).toBeNull();
+    expect(screen.queryByText(/約 .* 円/)).toBeNull();
+  });
+
+  it('v5: USDC は税額を token 単位で表示 (JPY へ強制変換しない)', () => {
+    render(
+      <HistoryRow
+        entry={entry({
+          asset: 'usdc',
+          merchantAmount: '6400000', // 6.4 USDC 税込@10% → 内税 0.58 USDC
+          anchorAmount: null,
+          taxRate: 10,
+          taxCategory: 'taxable_10',
+        })}
+        onRemove={() => undefined}
+      />,
+    );
+    expect(screen.getByText('0.58 USDC')).toBeInTheDocument(); // token 単位の内税
+    expect(screen.queryByText(/円/)).toBeNull(); // JPY へ変換しない
   });
 });

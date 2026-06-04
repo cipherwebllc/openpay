@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
@@ -12,6 +12,7 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
+import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
@@ -31,11 +32,13 @@ import {
   type TipParams,
 } from '@/lib/url';
 import { formatTokenAmount } from '@/lib/format';
+import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 
 export function TipForm({ params }: { params: TipParams }) {
   const t = useTranslations('TipForm');
+  const locale = useLocale();
   // parseTipParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const deployment = deploymentForSlug(params.token, chainSlug);
@@ -188,6 +191,26 @@ export function TipForm({ params }: { params: TipParams }) {
       amount: sent.amount,
       token: params.token,
     });
+    // 顧客向け電子レシート (支払い控え) を支払い側ブラウザに保存。/tip は usePaymentHistory
+    // 非経由のためここで直接 append (明細なし → 仮想 1 行)。dedupe は receiptId 任せ。
+    appendPayerReceipt(
+      buildPayerReceipt({
+        txHash: gasless.data.txHash,
+        userOpHash: gasless.data.userOpHash,
+        chainId: deployment.chainId,
+        asset: params.token,
+        tokenAddress: deployment.address,
+        amount: sent.amount,
+        merchantAddress: params.to,
+        merchantName: params.name ?? null,
+        payerAddress: address,
+        paymentMode: 'gasless',
+        gasMode: 'customer',
+        memo: params.message ?? null,
+        sourceRoute: '/tip',
+        locale,
+      }),
+    );
     // webhook 失敗 (CORS / non-2xx) は logger.warn のみ。tip は成立しているため UI には出さない。
     // fetch の Promise は HTTP non-2xx でも resolve するため res.ok を明示確認。
     if (params.webhook) {
@@ -235,6 +258,7 @@ export function TipForm({ params }: { params: TipParams }) {
     gasless.data,
     params.to,
     params.token,
+    params.name,
     chainSlug,
     params.message,
     params.webhook,
@@ -244,6 +268,8 @@ export function TipForm({ params }: { params: TipParams }) {
     breakdown.feeAmount,
     breakdown.customerPays,
     deployment.chainId,
+    deployment.address,
+    locale,
   ]);
 
   function selectPreset(preset: string) {
@@ -546,6 +572,13 @@ export function TipForm({ params }: { params: TipParams }) {
               value={gasless.data.blockNumber.toString()}
             />
           </dl>
+
+          {/* 顧客 (支援者) 向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
+          <div className="mt-3">
+            <PayerReceiptCompletion
+              candidateIds={[gasless.data.txHash, gasless.data.userOpHash]}
+            />
+          </div>
         </div>
       )}
 

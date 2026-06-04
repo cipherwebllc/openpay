@@ -11,12 +11,13 @@ import { AppShell } from '@/components/AppShell';
 import { MarketRates } from '@/components/MarketRates';
 import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
+import { RegisterMode } from '@/components/RegisterMode';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 
-type Tab = 'qr' | 'tip';
+type Tab = 'qr' | 'register' | 'tip';
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
@@ -33,6 +34,7 @@ export default function CreatePage() {
         {(
           [
             ['qr', t('tabs.qr')],
+            ['register', t('tabs.register')],
             ['tip', t('tabs.tip')],
           ] as const
         ).map(([id, label]) => (
@@ -51,9 +53,9 @@ export default function CreatePage() {
         ))}
       </div>
 
-      {tab === 'qr' ? (
-        <QrGenerator />
-      ) : (
+      {tab === 'qr' && <QrGenerator />}
+      {tab === 'register' && <RegisterMode />}
+      {tab === 'tip' && (
         <div className="space-y-5">
           <div>
             <h2 className="text-lg font-semibold text-slate-800">

@@ -28,7 +28,8 @@ export const EMPTY_HISTORY_FILTERS: HistoryFilters = {
   toTs: null,
 };
 
-// AND 合成 (安価な述語から順に)。検索は merchant/customer/storeName/note/txHash を大小無視 substring。
+// AND 合成 (安価な述語から順に)。検索は merchant/customer/storeName/note/txHash に加え
+// 記帳補助メタ (商品名/メモ/管理番号/明細名) も大小無視 substring 対象にする。
 export function applyHistoryFilters(
   entries: ReadonlyArray<HistoryEntry>,
   filters: HistoryFilters,
@@ -40,7 +41,9 @@ export function applyHistoryFilters(
     if (filters.fromTs != null && e.ts < filters.fromTs) return false;
     if (filters.toTs != null && e.ts > filters.toTs) return false;
     if (q.length > 0) {
-      const hay = `${e.merchant} ${e.customer ?? ''} ${e.storeName} ${e.note} ${e.txHash ?? ''}`.toLowerCase();
+      const lineNames = (e.lineItems ?? []).map((li) => li.name).join(' ');
+      const hay =
+        `${e.merchant} ${e.customer ?? ''} ${e.storeName} ${e.note} ${e.txHash ?? ''} ${e.productName ?? ''} ${e.memo ?? ''} ${e.receiptNo ?? ''} ${lineNames}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;

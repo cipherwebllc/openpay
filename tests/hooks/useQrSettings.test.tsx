@@ -26,6 +26,10 @@ describe('useQrSettings', () => {
         usdc: ['5', '10', '20', '50'],
       },
       crossChain: true,
+      productName: '',
+      memo: '',
+      taxRate: null,
+      taxCategory: null,
     });
   });
 
@@ -217,6 +221,10 @@ describe('useQrSettings', () => {
           usdc: ['5', '10', '20', '50'],
         },
         crossChain: true,
+        productName: '',
+        memo: '',
+        taxRate: null,
+        taxCategory: null,
       });
     });
 

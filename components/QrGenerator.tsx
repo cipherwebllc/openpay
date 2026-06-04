@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import type { Address } from 'viem';
 import {
+  ChevronRight,
   Coins,
   Fuel,
   Printer,
@@ -44,6 +45,7 @@ import {
   isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
+import { TaxCategorySelect } from './TaxCategorySelect';
 import {
   convertAnchorAmount,
   formatRemaining,
@@ -150,6 +152,8 @@ export function QrGenerator() {
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   const t = useTranslations('QrGenerator');
+  // 管理番号 (レシート番号) はトランザクション固有なので settings に永続せず local state。
+  const [receiptNo, setReceiptNo] = useState('');
 
   // 「他トークン建てで受け取る」用の為替レート (USDC→JPY)。convert 押下時に参照。
   const { data: marketRates } = useMarketRates();
@@ -216,6 +220,13 @@ export function QrGenerator() {
       expiresAt: convert?.expiresAt,
       priceRefAmount: convert?.anchorAmount,
       fxRate: convert?.fxRate,
+      // 記帳補助メタ (任意・空は undefined で URL に出さない)。決済側の履歴に記録される。
+      storeName: settings.storeName || undefined,
+      productName: settings.productName || undefined,
+      memo: settings.memo || undefined,
+      taxRate: settings.taxRate ?? undefined,
+      taxCategory: settings.taxCategory ?? undefined,
+      receiptNo: receiptNo || undefined,
     };
     return buildPayUrl(origin, params);
   }, [
@@ -227,6 +238,12 @@ export function QrGenerator() {
     settings.chain,
     settings.gasMode,
     settings.crossChain,
+    settings.storeName,
+    settings.productName,
+    settings.memo,
+    settings.taxRate,
+    settings.taxCategory,
+    receiptNo,
     mode,
     amount,
     payMode,
@@ -701,6 +718,66 @@ export function QrGenerator() {
                 maxLength={POSTER_NOTE_MAX}
               />
             </Field>
+
+            {/* 会計用の任意項目 (記帳補助・売上明細)。初心者向けに default 折り畳み。
+                未入力なら QR URL は不変 (PayParams 側で空は省略)。 */}
+            <details className="group rounded-2xl border border-slate-200 bg-white p-4">
+              <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
+                <span>{t('accountingFieldsTitle')}</span>
+                <ChevronRight
+                  className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
+                  aria-hidden
+                />
+              </summary>
+              <p className="mt-2 text-xs text-slate-500">
+                {t('accountingFieldsHint')}
+              </p>
+              <div className="mt-3 space-y-4">
+                <Field label={t('productNameLabel')}>
+                  <input
+                    type="text"
+                    value={settings.productName}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, productName: e.target.value }))
+                    }
+                    placeholder={t('productNamePlaceholder')}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                    maxLength={80}
+                  />
+                </Field>
+                <Field label={t('memoLabel')}>
+                  <input
+                    type="text"
+                    value={settings.memo}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, memo: e.target.value }))
+                    }
+                    placeholder={t('memoPlaceholder')}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                    maxLength={200}
+                  />
+                </Field>
+                <Field label={t('taxLabel')}>
+                  <TaxCategorySelect
+                    taxRate={settings.taxRate}
+                    taxCategory={settings.taxCategory}
+                    onChange={(next) => setSettings((s) => ({ ...s, ...next }))}
+                    ariaLabel={t('taxLabel')}
+                    customAriaLabel={t('taxCustomLabel')}
+                  />
+                </Field>
+                <Field label={t('receiptNoLabel')}>
+                  <input
+                    type="text"
+                    value={receiptNo}
+                    onChange={(e) => setReceiptNo(e.target.value)}
+                    placeholder={t('receiptNoPlaceholder')}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+                    maxLength={64}
+                  />
+                </Field>
+              </div>
+            </details>
 
             <SettingsAccordion
               open={accordionOpen}

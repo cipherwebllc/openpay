@@ -166,6 +166,16 @@ describe('ScanShell: 接続状態表示', () => {
     expect(screen.queryByRole('button', { name: '切断' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
   });
+
+  it('電子レシート / 支払い控えセクションを描画 (空状態 + 保存場所の注意)', () => {
+    window.localStorage.clear();
+    mockConnected(false);
+    renderWithIntl(<ScanShell />);
+    expect(screen.getByText('電子レシート / 支払い控え')).toBeTruthy();
+    expect(
+      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+    ).toBeTruthy();
+  });
 });
 
 describe('ScanShell: decode → router.push + logger.info', () => {

@@ -53,6 +53,7 @@ import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { TipForm } from '@/components/TipForm';
+import { loadPayerReceipts } from '@/lib/payerReceipt';
 import type { TipParams } from '@/lib/url';
 import { mockHook } from '../_helpers/wagmiMock';
 
@@ -417,6 +418,29 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     expect(
       screen.getByText('ありがとう！Discord 招待リンクをどうぞ'),
     ).toBeInTheDocument();
+  });
+
+  it('成功 → 顧客向け電子レシート (支払い控え) を /tip で保存', () => {
+    window.localStorage.clear();
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(20_000_000_000_000_000_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success');
+    render(<TipForm params={JPYC_PARAMS} />);
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].direction).toBe('paid');
+    expect(receipts[0].sourceRoute).toBe('/tip');
+    expect(receipts[0].merchantAddress).toBe(CREATOR);
+    expect(receipts[0].merchantName).toBe('山田太郎');
+    expect(receipts[0].receiptId).toBe(`0x${'b'.repeat(64)}`);
+    // 完了画面に控え詳細 (PayerReceiptDetail) + /scan 導線が描画される
+    // (TipForm 成功 effect → appendPayerReceipt → PayerReceiptCompletion 全鎖)。
+    expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
+    expect(screen.getByText(/\/scan で支払い履歴/).closest('a')).toHaveAttribute(
+      'href',
+      '/scan',
+    );
   });
 
   it('成功 + thanksUrl あり → リンクボタン表示', () => {

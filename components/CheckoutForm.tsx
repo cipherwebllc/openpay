@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
@@ -16,6 +16,7 @@ import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { SuccessOverlay } from './SuccessOverlay';
+import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -36,12 +37,14 @@ import {
   calcCheckoutTotal,
   type CheckoutParams,
 } from '@/lib/url';
+import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
 
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
+  const locale = useLocale();
   const router = useRouter();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
 
@@ -310,6 +313,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
   // note には description (なければ orderId) を入れ、CSV/UI で会計補助情報に使う。
+  // v5: itemized checkout の items を売上明細 (lineItems) として保存し、税/管理番号も記録。
+  // productName は明細名の連結 (buildHistoryEntry で 80 文字 cap)、memo は description。
   const historyCtx = useMemo(
     () => ({
       chainId: deployment.chainId,
@@ -327,22 +332,63 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       networkFeeEquivalent,
       storeName: '',
       note: params.description ?? params.orderId ?? '',
+      productName: params.items.map((it) => it.name).join(', '),
+      memo: params.description ?? null,
+      taxRate: params.taxRate ?? null,
+      taxCategory: params.taxCategory ?? null,
+      receiptNo: params.receiptNo ?? null,
+      lineItems: params.items.map((it, i) => {
+        // amount = price × qty を人間可読 decimal で (raw wei ではない)。
+        const amount = formatUnits(
+          calcCheckoutTotal([it], deployment.decimals),
+          deployment.decimals,
+        );
+        // per-item 税を優先 (混在税率カート)、無ければ checkout 単位 (単一税率) に fallback。
+        const taxRate = it.taxRate ?? params.taxRate ?? null;
+        const taxCategory = it.taxCategory ?? params.taxCategory ?? null;
+        const taxAmt = taxAmountDecimal(
+          Number(amount),
+          taxRate,
+          taxDisplayDecimals(params.token),
+        );
+        return {
+          id: String(i),
+          name: it.name,
+          quantity: it.qty,
+          unitPrice: it.price,
+          amount,
+          currency: params.token,
+          taxRate,
+          taxCategory,
+          taxAmount: taxAmt == null ? '0' : String(taxAmt),
+          memo: it.memo ?? null,
+        };
+      }),
+      // 顧客向け電子レシート (PayerReceipt) の発生元 / 表示 locale。
+      sourceRoute: '/checkout',
+      locale,
     }),
     [
       deployment.chainId,
       deployment.address,
+      deployment.decimals,
       chainSlug,
       params.token,
       params.gas,
       params.to,
       params.description,
       params.orderId,
+      params.items,
+      params.taxRate,
+      params.taxCategory,
+      params.receiptNo,
       isStandard,
       breakdown.merchantReceives,
       breakdown.feeAmount,
       totalWei,
       networkFeeEquivalent,
       address,
+      locale,
     ],
   );
   usePaymentHistory(historyCtx, gasless, standard);
@@ -679,6 +725,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               <ResultRow label={t('orderIdLabel')} value={params.orderId} />
             )}
           </dl>
+
+          {/* 顧客向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
+          <div className="mt-4">
+            <PayerReceiptCompletion
+              candidateIds={[
+                standard.data?.merchantTxHash,
+                gasless.data?.txHash,
+                gasless.data?.userOpHash,
+              ]}
+            />
+          </div>
+
           {params.successUrl && (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs">

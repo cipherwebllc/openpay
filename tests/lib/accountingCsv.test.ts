@@ -47,6 +47,12 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     anchorAmount: null,
     anchorSymbol: null,
     fxRateUsdcJpy: null,
+    productName: null,
+    memo: null,
+    taxRate: null,
+    taxCategory: null,
+    receiptNo: null,
+    lineItems: null,
     ...overrides,
   };
 }
@@ -257,5 +263,113 @@ describe('accountingCsvFilename', () => {
     expect(accountingCsvFilename('yayoi-native', d)).toBe(
       'openpay-yayoi-native-2026-06-03.csv',
     );
+  });
+});
+
+describe('toAccountingCsv: v5 税区分出し分け + 摘要 enrich (非破壊)', () => {
+  it('freee: taxCategory で税区分を出し分け + 商品名/管理番号/メモを備考へ', () => {
+    const e = entry({
+      taxCategory: 'taxable_8',
+      taxRate: 8,
+      productName: 'コーヒー',
+      receiptNo: 'R-1',
+      memo: 'イベント',
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows[1][3]).toBe('課税売上8%（軽）'); // 税区分列
+    expect(rows[1][6]).toContain('コーヒー'); // 備考: 商品名
+    expect(rows[1][6]).toContain('No:R-1'); // 備考: 管理番号
+    expect(rows[1][6]).toContain('イベント'); // 備考: メモ
+  });
+
+  it('freee: taxCategory 未指定 (旧データ) は従来どおり 課税売上10%', () => {
+    const r = toAccountingCsv([entry()], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(parseRows(r.csv)[1][3]).toBe('課税売上10%');
+  });
+
+  it('弥生: 貸方税区分 (idx 13) を taxCategory で出し分け', () => {
+    const r = toAccountingCsv([entry({ taxCategory: 'tax_free' })], {
+      format: 'yayoi',
+      usdcJpy: 150,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(parseRows(r.csv)[0][13]).toBe('非課税売上'); // 弥生はヘッダ無し → rows[0]=データ
+  });
+
+  it('MF: 貸方税区分を taxCategory で出し分け', () => {
+    const r = toAccountingCsv([entry({ taxCategory: 'out_of_scope' })], {
+      format: 'mf',
+      usdcJpy: 150,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    const idx = rows[0].indexOf('貸方税区分');
+    expect(rows[1][idx]).toBe('対象外');
+  });
+});
+
+describe('toAccountingCsv: 複数商品カート (摘要サマリ + 代表税区分)', () => {
+  it('freee 摘要に「商品 x数量」を列挙・混在税率の代表税区分は既存デフォルト', () => {
+    const e = entry({
+      lineItems: [
+        { name: 'コーヒー', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+        { name: 'Tシャツ', quantity: 1, unitPrice: '3000', amount: '3000', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows[1][6]).toContain('コーヒー x2'); // 備考
+    expect(rows[1][6]).toContain('Tシャツ x1');
+    expect(rows[1][3]).toBe('課税売上10%'); // 混在 → 既存デフォルト
+  });
+
+  it('全行同一税率なら代表税区分は其れ (軽減8%)', () => {
+    const e = entry({
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '100', amount: '100', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+        { name: 'B', quantity: 1, unitPrice: '200', amount: '200', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(parseRows(r.csv)[1][3]).toBe('課税売上8%（軽）');
+  });
+
+  it('明細 6 件以上 → 摘要は 5 件まで + 「ほか」', () => {
+    const li = (n: number) => ({
+      name: `P${n}`, quantity: 1, unitPrice: '1', amount: '1',
+      taxRate: 10, taxCategory: 'taxable_10' as const, memo: null,
+    });
+    const e = entry({ lineItems: [li(1), li(2), li(3), li(4), li(5), li(6)] });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const bikou = parseRows(r.csv)[1][6];
+    expect(bikou).toContain('P5 x1');
+    expect(bikou).toContain('ほか');
+    expect(bikou).not.toContain('P6 x1');
+  });
+
+  it('明細の税区分が全 null → entry.taxCategory に倒す (代表値)', () => {
+    const e = entry({
+      taxCategory: 'tax_free',
+      lineItems: [
+        { name: 'X', quantity: 1, unitPrice: '1', amount: '1', taxRate: null, taxCategory: null, memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(parseRows(r.csv)[1][3]).toBe('非課税売上');
   });
 });

@@ -10,6 +10,8 @@ import {
   type TokenSymbol,
 } from '@/lib/tokens';
 import type { SplitDraft } from '@/lib/url';
+import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
+import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 type QrSettings = {
@@ -39,6 +41,12 @@ type QrSettings = {
   // 受取れるよう PaymentForm が代替経路を提示)。false にすると URL に
   // crossChain=false が付き、PaymentForm が hint を出さない。USDC のみ意味あり。
   crossChain: boolean;
+  // 会計用任意項目 (記帳補助・店主の定番をローカルに記憶)。QR の URL params に乗る。
+  // receiptNo はトランザクション固有なので永続せず、QrGenerator の component state で持つ。
+  productName: string;
+  memo: string;
+  taxRate: number | null;
+  taxCategory: TaxCategory | null;
 };
 
 const STORAGE_KEY = 'openpay:qr-settings:v2';
@@ -76,6 +84,10 @@ const DEFAULT_SETTINGS: QrSettings = {
     usdc: [...DEFAULT_QUICK_AMOUNTS.usdc],
   },
   crossChain: true,
+  productName: '',
+  memo: '',
+  taxRate: null,
+  taxCategory: null,
 };
 
 export const STORE_NAME_MAX = 48;
@@ -220,6 +232,15 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
       typeof loaded.crossChain === 'boolean'
         ? loaded.crossChain
         : DEFAULT_SETTINGS.crossChain,
+    productName: sanitizeText(loaded.productName, PAY_PRODUCT_NAME_MAX),
+    memo: sanitizeText(loaded.memo, PAY_MEMO_MAX),
+    taxRate:
+      typeof loaded.taxRate === 'number' &&
+      Number.isFinite(loaded.taxRate) &&
+      loaded.taxRate >= 0
+        ? loaded.taxRate
+        : null,
+    taxCategory: isTaxCategory(loaded.taxCategory) ? loaded.taxCategory : null,
   };
 }
 

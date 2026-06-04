@@ -19,6 +19,7 @@ import { useAccount } from 'wagmi';
 import { PwaInstallHint } from './PwaInstallHint';
 import { QrScannerSurface } from './QrScannerSurface';
 import { WalletBalances } from './WalletBalances';
+import { PayerReceiptList } from './PayerReceiptList';
 import { parseScannedUrl, type ScanAction } from '@/lib/scan/parseScannedUrl';
 import { useOrigin } from '@/hooks/useOrigin';
 import { shortAddress } from '@/lib/format';
@@ -108,6 +109,10 @@ export function ScanShell() {
           </div>
         )}
       </section>
+
+      {/* 顧客向け電子レシート / 支払い控え (この端末のブラウザにのみ保存)。残高の下・
+          QR 結果バナーの上に置き、過去の支払い控えを接続有無に関わらず確認できるようにする。 */}
+      <PayerReceiptList />
 
       {lastResult && (
         <ScanResultBanner result={lastResult} onDismiss={() => setLastResult(null)} />
