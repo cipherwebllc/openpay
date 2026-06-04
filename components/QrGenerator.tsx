@@ -612,7 +612,6 @@ export function QrGenerator() {
                       }}
                       placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
-                      autoFocus
                     />
                     {activeQuickAmounts.length > 0 && (
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
