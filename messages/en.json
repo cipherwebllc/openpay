@@ -148,9 +148,7 @@
       "register": "Register"
     },
     "tabDesc": {
-      "qr": "For merchants: create a payment QR to display at the register.",
-      "register": "For merchant register use: pick products and itemize the sale.",
-      "tip": "For creators: build a tip (投げ銭) widget."
+      "qr": "For merchants: create a payment QR to display at the register."
     },
     "tipPanel": {
       "heading": "Create a Tip widget to receive support",

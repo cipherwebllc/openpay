@@ -162,24 +162,32 @@ describe('i18n: 取引履歴の受取/支払い統合キー (ja/en parity)', () 
 });
 
 describe('i18n: Create.tabs / tabDesc キー (ja/en parity)', () => {
-  // タブラベルは短縮済 (決済QR/レジ/チップ)、tabDesc は選択中タブの 1 行説明。
-  // 片 locale 抜けで折返し説明が消えるため非空 + parity を fence する。
+  // タブラベルは短縮済 (決済QR/レジ/チップ) で 3 タブ分必要。
   const TAB_KEYS = ['qr', 'register', 'tip'] as const;
   for (const key of TAB_KEYS) {
-    it(`ja/en の Create.tabs.${key} と tabDesc.${key} は非空文字列`, () => {
+    it(`ja/en の Create.tabs.${key} は非空文字列`, () => {
       for (const m of [ja, en]) {
         const tabs = m.Create.tabs as Record<string, unknown>;
-        const desc = (m.Create as Record<string, unknown>).tabDesc as Record<
-          string,
-          unknown
-        >;
         expect(typeof tabs[key]).toBe('string');
         expect(tabs[key]).not.toBe('');
-        expect(typeof desc[key]).toBe('string');
-        expect(desc[key]).not.toBe('');
       }
     });
   }
+
+  // tabDesc は決済QR タブのみ表示 (レジ/チップは各パネル先頭の見出し+説明と重複する
+  // ため非表示)。qr のみ非空 + parity を fence する。
+  it('ja/en の Create.tabDesc.qr は非空文字列 (register/tip は撤去)', () => {
+    for (const m of [ja, en]) {
+      const desc = (m.Create as Record<string, unknown>).tabDesc as Record<
+        string,
+        unknown
+      >;
+      expect(typeof desc.qr).toBe('string');
+      expect(desc.qr).not.toBe('');
+      expect(desc.register).toBeUndefined();
+      expect(desc.tip).toBeUndefined();
+    }
+  });
 });
 
 describe('i18n: Privacy policy が camera 利用を開示している (法的要件)', () => {

@@ -56,8 +56,11 @@ export default function CreatePage() {
         ))}
       </div>
 
-      {/* 選択中タブの用途・対象者を補う 1 行説明 (括弧から外した「店舗」「クリエイター」をここで補完)。 */}
-      <p className="mb-4 text-sm text-slate-500">{t(`tabDesc.${tab}`)}</p>
+      {/* 決済QR タブのみ 1 行説明を出す。レジ / チップは各パネル先頭に見出し+説明が
+          あり重複するため出さない。 */}
+      {tab === 'qr' && (
+        <p className="mb-4 text-sm text-slate-500">{t('tabDesc.qr')}</p>
+      )}
 
       {tab === 'qr' && <QrGenerator />}
       {tab === 'register' && (
