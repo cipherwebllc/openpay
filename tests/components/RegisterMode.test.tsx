@@ -36,7 +36,11 @@ function seedReceiver() {
   );
 }
 
+// checkout URL は「QRコードを表示する」→ 全画面モーダル内に表示される。モーダルを
+// 開いて (再クリックは冪等) URL を取り出す。
 async function parsedCheckout() {
+  const btn = await screen.findByRole('button', { name: /QRコードを表示する/ });
+  await userEvent.setup().click(btn);
   const el = await screen.findByText(/\/checkout\?/);
   return parseCheckoutParams(new URL(el.textContent!).searchParams);
 }
@@ -254,5 +258,56 @@ describe('RegisterMode', () => {
     expect(screen.getByText(/カートは JPYC のみ/)).toBeInTheDocument();
     const r = await parsedCheckout();
     expect(r.ok && r.params.items).toHaveLength(1); // コーヒーのみ
+  });
+
+  it('受取先/通貨/決済設定を読み取り表示 +「決済QRの受取先で変更」リンク', async () => {
+    seedReceiver();
+    render(<RegisterMode onEditCurrency={vi.fn()} />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    // 受取先は静的短縮表示 (編集 input は無い)。
+    expect(screen.getByText(/0x8335.*2913/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
+    // 決済設定サマリ (gasless 既定 = ガス代:お客様負担)。
+    expect(
+      screen.getByText(/ガスレス決済 \/ ガス代：お客様負担/),
+    ).toBeInTheDocument();
+    // 変更リンク文言。
+    expect(
+      screen.getByRole('button', { name: '決済QRの受取先で変更' }),
+    ).toBeInTheDocument();
+  });
+
+  it('空カートでも非空カートでも「決済QRの受取先で変更」→ onEditCurrency (非空は確認)', async () => {
+    const user = userEvent.setup();
+    const onEditCurrency = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    seedReceiver();
+    render(<RegisterMode onEditCurrency={onEditCurrency} />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    // 非空カート → 確認ダイアログ → OK で遷移。
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(
+      screen.getByRole('button', { name: '決済QRの受取先で変更' }),
+    );
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onEditCurrency).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('QR は「QRコードを表示する」→ 全画面モーダルで提示 (×閉じるで戻る)', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    // 即時には checkout URL を出さない。
+    expect(screen.queryByText(/\/checkout\?/)).toBeNull();
+    // ボタン → モーダルで URL / ポスター / コピー が出る。
+    await user.click(screen.getByRole('button', { name: /QRコードを表示する/ }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByText(/\/checkout\?/)).toBeInTheDocument();
+    // × 閉じる で dialog が消える。
+    await user.click(screen.getByRole('button', { name: /閉じる/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

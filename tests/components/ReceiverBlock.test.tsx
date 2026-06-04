@@ -70,6 +70,25 @@ describe('ReceiverBlock', () => {
     expect(onEditCurrency).toHaveBeenCalled();
   });
 
+  it('receiverReadonly: 受取先を静的バッジ表示 (AddressInput を出さない) + advancedSummary slot', () => {
+    render(
+      <ReceiverBlock
+        {...props({
+          currencyMode: 'readonly',
+          receiverReadonly: true,
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          advancedSummary: <span>決済設定: ガスレス決済</span>,
+          onEditCurrency: vi.fn(),
+        })}
+      />,
+    );
+    // 受取先は短縮静的表示 (編集 input は無い)。
+    expect(screen.getByText(/0x8335.*2913/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
+    // advancedSummary slot が描画される。
+    expect(screen.getByText('決済設定: ガスレス決済')).toBeInTheDocument();
+  });
+
   it('wallet.canUse → 「接続中のウォレットを使う」チップ', () => {
     render(
       <ReceiverBlock

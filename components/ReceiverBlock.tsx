@@ -21,6 +21,14 @@ import { ChainChooser } from './ChainChooser';
 import { Field } from './Field';
 import { defaultDeploymentForSymbol, type TokenSymbol } from '@/lib/tokens';
 import { chainForSlug, type ChainSlug } from '@/lib/chains';
+import { shortAddress } from '@/lib/format';
+
+// 0x アドレスは短縮表示、ENS 等はそのまま。空は '—'。
+function displayReceiver(receiver: string): string {
+  const v = receiver.trim();
+  if (!v) return '—';
+  return /^0x[0-9a-fA-F]{40}$/.test(v) ? shortAddress(v) : v;
+}
 
 export type ReceiverBlockLabels = {
   receiver: string;
@@ -34,6 +42,8 @@ export type ReceiverBlockLabels = {
   inheritedNote?: string;
   /** readonly モード: 「決済QRで変更」リンク文言 (onEditCurrency とセット)。 */
   changeLink?: string;
+  /** receiverReadonly モード: 受取ウォレット見出し (例「受取先」)。省略時は receiver を流用。 */
+  receiverReadonlyLabel?: string;
 };
 
 export function ReceiverBlock({
@@ -51,6 +61,8 @@ export function ReceiverBlock({
   currencyMode,
   onEditCurrency,
   chainGridClassName,
+  receiverReadonly,
+  advancedSummary,
   labels,
 }: {
   receiver: string;
@@ -68,28 +80,47 @@ export function ReceiverBlock({
   currencyMode: 'editable' | 'readonly';
   onEditCurrency?: () => void;
   chainGridClassName?: string;
+  /** 受取ウォレットも編集不可にし静的表示にする (レジ: 受取先は決済QRで設定)。 */
+  receiverReadonly?: boolean;
+  /** readonly モード: 通貨/チェーンバッジの下に差し込む決済設定サマリ (payMode/gasMode 等)。 */
+  advancedSummary?: ReactNode;
   labels: ReceiverBlockLabels;
 }) {
   return (
     <div className="space-y-4">
-      <Field label={labels.receiver}>
-        <AddressInput
-          value={receiver}
-          onChange={onReceiverChange}
-          onResolved={onResolved}
-        />
-        <ReceiverWalletChip
-          canUse={wallet.canUse}
-          matches={wallet.matches}
-          onUse={wallet.onUse}
-          useLabel={labels.useConnectedWallet}
-          matchLabel={labels.receiverMatchesWallet}
-        />
-        {showAddressInvalid && labels.addressInvalid && (
-          <p className="mt-1 text-xs text-red-600">{labels.addressInvalid}</p>
-        )}
-        {receiverExtra}
-      </Field>
+      {receiverReadonly ? (
+        <Field label={labels.receiverReadonlyLabel ?? labels.receiver}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-mono text-sm text-slate-700">
+              {displayReceiver(receiver)}
+            </span>
+            {wallet.matches && (
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                {labels.receiverMatchesWallet}
+              </span>
+            )}
+          </div>
+        </Field>
+      ) : (
+        <Field label={labels.receiver}>
+          <AddressInput
+            value={receiver}
+            onChange={onReceiverChange}
+            onResolved={onResolved}
+          />
+          <ReceiverWalletChip
+            canUse={wallet.canUse}
+            matches={wallet.matches}
+            onUse={wallet.onUse}
+            useLabel={labels.useConnectedWallet}
+            matchLabel={labels.receiverMatchesWallet}
+          />
+          {showAddressInvalid && labels.addressInvalid && (
+            <p className="mt-1 text-xs text-red-600">{labels.addressInvalid}</p>
+          )}
+          {receiverExtra}
+        </Field>
+      )}
 
       {currencyMode === 'editable' ? (
         <>
@@ -125,6 +156,7 @@ export function ReceiverBlock({
               </button>
             )}
           </div>
+          {advancedSummary && <div className="mt-2">{advancedSummary}</div>}
           {labels.inheritedNote && (
             <p className="mt-1 text-[11px] text-slate-400">{labels.inheritedNote}</p>
           )}

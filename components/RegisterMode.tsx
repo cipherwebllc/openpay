@@ -10,13 +10,13 @@
 // - 本格 POS ではなくイベント販売・少量販売向け。値引/在庫/カテゴリ/レシート印刷/日報は対象外。
 //   税額は税込金額からの内税の目安 (記帳補助)。最終的な会計処理は会計ソフト・税理士側で確認。
 
-import { useCallback, useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
+import { useCallback, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
-import { ChevronRight, Minus, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Trash2 } from 'lucide-react';
 import { ReceiverBlock } from './ReceiverBlock';
 import { AccountingSection } from './AccountingSection';
+import { QrPreviewModal } from './QrPreviewModal';
 import { Field } from './Field';
 import { ProductPresetManager } from './ProductPresetManager';
 import { useQrSettings } from '@/hooks/useQrSettings';
@@ -25,8 +25,10 @@ import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets
 import { randomId } from '@/lib/id';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import { pickEffectiveAddress } from '@/lib/format';
+import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 import { isLikelyName } from '@/lib/nameDetection';
+import { paymentPolicyKey } from '@/lib/paymentPolicy';
+import { chainForSlug } from '@/lib/chains';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
@@ -67,6 +69,9 @@ export function RegisterMode({
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
   const [currencyWarning, setCurrencyWarning] = useState(false);
+  // レジの QR も即時表示せず「QRコードを表示する」→ 全画面モーダルで提示。
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const qrRef = useRef<HTMLDivElement>(null);
 
   const effectiveReceiver = pickEffectiveAddress(settings.receiver, resolvedReceiver);
   const setReceiver = useCallback(
@@ -219,8 +224,8 @@ export function RegisterMode({
         <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
       </div>
 
-      {/* ① 受取先: 受取ウォレット + 通貨/チェーン (読み取り専用バッジ・変更は QR タブ)。
-          レジの通貨はカートの商品プリセットで決まるため、ここでは継承値を表示する。 */}
+      {/* ① 受取先 (読み取り専用): 受取ウォレット / 通貨・チェーン / 決済設定 を継承表示し、
+          1 本の「決済QRの受取先で変更」リンクで決済QRタブへ誘導する。レジでは編集させない。 */}
       <ReceiverBlock
         receiver={settings.receiver}
         onReceiverChange={autofill.handleManualChange}
@@ -241,9 +246,19 @@ export function RegisterMode({
         onTokenChange={() => {}}
         onChainChange={() => {}}
         currencyMode="readonly"
+        receiverReadonly
         onEditCurrency={onEditCurrency ? handleEditCurrency : undefined}
+        advancedSummary={
+          <p className="text-xs text-slate-600">
+            <span className="font-medium text-slate-500">
+              {t('paymentPolicyLabel')}:
+            </span>{' '}
+            {t(`paymentPolicy.${paymentPolicyKey(settings.payMode, settings.gasMode)}`)}
+          </p>
+        }
         labels={{
           receiver: t('merchantAddressLabel'),
+          receiverReadonlyLabel: t('merchantAddressLabel'),
           currency: t('currencyLabel'),
           chain: t('chainLabel'),
           useConnectedWallet: t('useConnectedWallet'),
@@ -452,30 +467,50 @@ export function RegisterMode({
         <p className="mt-2 text-[11px] text-slate-400">{t('taxInclusiveNote')}</p>
       </div>
 
-      {/* QR 生成 */}
+      {/* QR 生成: 即時表示せず「QRコードを表示する」→ 全画面モーダルで提示 (店員が
+          合計を確認してからお客様に画面を見せる対面フロー)。 */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         {checkoutUrl ? (
-          <div className="space-y-3">
-            <div className="flex justify-center">
-              <QRCodeSVG value={checkoutUrl} size={220} includeMargin level="M" />
-            </div>
-            <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-500">
-              {checkoutUrl}
-            </div>
-            <button
-              type="button"
-              onClick={() => copy(checkoutUrl)}
-              className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white hover:bg-brand-dark"
-            >
-              {copied ? t('copied') : t('copyUrl')}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setQrModalOpen(true)}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
+          >
+            <QrCodeIcon className="h-5 w-5" aria-hidden />
+            {t('showQr')}
+          </button>
         ) : (
           <p className="text-center text-sm text-slate-400">
             {t('previewPlaceholder')}
           </p>
         )}
       </div>
+
+      {/* 全画面プレビュー (ポスター調 + 印刷/URLコピー + × 閉じる)。決済QRと共通コンポーネント。 */}
+      {checkoutUrl && (
+        <QrPreviewModal
+          open={qrModalOpen}
+          onClose={() => setQrModalOpen(false)}
+          labels={{
+            title: t('qrModalTitle'),
+            close: t('qrModalClose'),
+            eyebrow: t('qrPosterEyebrow'),
+            print: t('printPoster'),
+            copy: t('copyUrl'),
+            copied: t('copied'),
+          }}
+          qrValue={checkoutUrl}
+          qrRef={qrRef}
+          storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
+          amountText={`${totalHuman} ${symbol}`}
+          note={settings.posterNote.trim() || undefined}
+          chainText={`${symbol} · ${chainForSlug(settings.chain).name}`}
+          receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
+          copied={copied}
+          onCopy={() => copy(checkoutUrl)}
+          onPrint={() => window.print()}
+        />
+      )}
 
       {/* 商品プリセット管理 (折りたたみ) */}
       <details
