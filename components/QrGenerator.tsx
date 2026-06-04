@@ -1,22 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import type { Address } from 'viem';
 import {
   ChevronRight,
   Coins,
   Fuel,
-  Printer,
   QrCode as QrCodeIcon,
   Store,
   Zap,
 } from 'lucide-react';
 import { AddressInput } from './AddressInput';
 import { ReceiverWalletChip } from './ReceiverWalletChip';
-import { ReceiverBlock } from './ReceiverBlock';
 import { AccountingSection } from './AccountingSection';
+import { QrPreviewModal } from './QrPreviewModal';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
@@ -147,9 +145,15 @@ export function QrGenerator() {
   const { copied, copy } = useCopyToClipboard();
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
   const qrRef = useRef<HTMLDivElement>(null);
-  // 高度な設定 (payMode / gas / split / quickAmount editor) は default 閉じる。
+  // 高度な設定 (payMode / gas / split) は default 閉じる。
   const [accordionOpen, setAccordionOpen] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
+  // ② 受取先は初期設定後あまり変えないため折りたたみ。hydrate 後に一度だけ
+  // 「受取先未設定なら開く / 設定済なら閉じる」を決める (step2Initialized 後は手動)。
+  const [step2Open, setStep2Open] = useState(true);
+  const [step2Initialized, setStep2Initialized] = useState(false);
+  // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
   const t = useTranslations('QrGenerator');
   // 管理番号 (レシート番号) はトランザクション固有なので settings に永続せず local state。
@@ -186,6 +190,13 @@ export function QrGenerator() {
     hydrated,
     setReceiver,
   });
+
+  // Step 2 の初期 open 状態を hydrate 後に一度だけ決定する。
+  useEffect(() => {
+    if (!hydrated || step2Initialized) return;
+    setStep2Open(effectiveReceiver === null);
+    setStep2Initialized(true);
+  }, [hydrated, effectiveReceiver, step2Initialized]);
 
   const receiverValid = effectiveReceiver !== null;
   const amountValid =
@@ -492,88 +503,28 @@ export function QrGenerator() {
   return (
     <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
       <div className="space-y-5 print:hidden">
-        {/* ① 受取先: 受取ウォレット / 通貨 / チェーン (3 モード共通 ReceiverBlock)。
-            通貨/チェーンは顧客ごとに変更頻度が高いが、IA 統一のため受取先と同じ①に集約。 */}
-        <StepCard step={1} icon={Store} title={t('steps.receiver')}>
+        {/* ① 金額: 通貨 / 受取チェーン / 請求金額。店員が毎回触る金額を先頭に置く
+            (受取先は初期設定後あまり変えないため ② へ・折りたたみ)。 */}
+        <StepCard step={1} icon={Coins} title={t('steps.amount')}>
           <div className="space-y-4">
-            <ReceiverBlock
-              receiver={settings.receiver}
-              onReceiverChange={autofill.handleManualChange}
-              onResolved={handleResolved}
-              showAddressInvalid={
-                !!settings.receiver &&
-                !receiverValid &&
-                !isLikelyName(settings.receiver)
-              }
-              receiverExtra={
-                effectiveReceiver ? (
-                  <a
-                    href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
-                  >
-                    {t('merchantExplorerLink', { chainName: chain.name })}
-                  </a>
-                ) : null
-              }
-              wallet={{
-                canUse: autofill.canUseConnected,
-                matches: autofill.matchesConnected,
-                onUse: autofill.useConnectedWallet,
-              }}
-              token={settings.token}
-              chain={settings.chain}
-              availableChains={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
-              onTokenChange={selectToken}
-              onChainChange={selectChain}
-              currencyMode="editable"
-              chainGridClassName={
-                settings.token === 'usdc'
-                  ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                  : 'grid grid-cols-2 gap-2'
-              }
-              labels={{
-                receiver: t('receiverLabel'),
-                currency: t('tokenLabel'),
-                chain: t('chainLabel'),
-                useConnectedWallet: t('useConnectedWallet'),
-                receiverMatchesWallet: t('receiverMatchesWallet'),
-                addressInvalid: t('addressInvalid'),
-              }}
-            />
+            {/* token + chain は金額のシンボル表示にも影響するので金額と同じ① に。 */}
+            <Field label={t('tokenLabel')}>
+              <TokenChooser selected={settings.token} onSelect={selectToken} />
+            </Field>
 
-            <Field label={t('storeNameLabel')}>
-              <input
-                type="text"
-                value={settings.storeName}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, storeName: e.target.value }))
+            <Field label={t('chainLabel')}>
+              <ChainChooser
+                slugs={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
+                selected={settings.chain}
+                onSelect={selectChain}
+                gridClassName={
+                  settings.token === 'usdc'
+                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
+                    : 'grid grid-cols-2 gap-2'
                 }
-                placeholder={t('storeNamePlaceholder')}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                maxLength={STORE_NAME_MAX}
               />
             </Field>
 
-            <Field label={t('posterNoteLabel')}>
-              <input
-                type="text"
-                value={settings.posterNote}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, posterNote: e.target.value }))
-                }
-                placeholder={t('posterNotePlaceholder')}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                maxLength={POSTER_NOTE_MAX}
-              />
-            </Field>
-          </div>
-        </StepCard>
-
-        {/* ② 金額 */}
-        <StepCard step={2} icon={Coins} title={t('steps.amount')}>
-          <div className="space-y-4">
             <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
               <div className="flex flex-col gap-2">
                 <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
@@ -612,6 +563,7 @@ export function QrGenerator() {
                       }}
                       placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
+                      autoFocus
                     />
                     {activeQuickAmounts.length > 0 && (
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -638,6 +590,51 @@ export function QrGenerator() {
                 )}
               </div>
             </Field>
+
+            {/* クイック金額の編集 (任意・token ごと独立)。金額入力の近くで設定できる
+                よう高度な設定から①へ移設。 */}
+            {mode === 'amount' && (
+              <details className="group rounded-2xl border border-slate-200 bg-white p-4">
+                <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
+                  <span>{t('quickAmountsLabel')}</span>
+                  <ChevronRight
+                    className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
+                    aria-hidden
+                  />
+                </summary>
+                <div className="mt-3 space-y-2">
+                  {tokenQuickAmounts.map((q, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={q}
+                        onChange={(e) => updateQuickAmount(i, e.target.value)}
+                        placeholder={t('quickAmountPlaceholder')}
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeQuickAmount(i)}
+                        aria-label={t('quickAmountRemove')}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {tokenQuickAmounts.length < QUICK_AMOUNT_MAX && (
+                    <button
+                      type="button"
+                      onClick={addQuickAmount}
+                      className="mt-1 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
+                    >
+                      {t('quickAmountAdd')}
+                    </button>
+                  )}
+                </div>
+              </details>
+            )}
 
             {/* 他トークン建てで受け取る (FX 換算・有効期限付き動的 QR)。
                 例: JPYC 1000 入力 → USDC 建てで受け取る → 現レートで USDC 額を確定し
@@ -709,6 +706,86 @@ export function QrGenerator() {
                 </div>
               </div>
             )}
+          </div>
+        </StepCard>
+
+        {/* ② 受取先: 受取ウォレット / 店舗名 / ポスター補足文。初期設定後あまり
+            変えないので折りたたみ (未設定なら開く・設定済は閉じて1行サマリ)。 */}
+        <StepCard
+          step={2}
+          icon={Store}
+          title={t('steps.receiver')}
+          collapsible
+          open={step2Open}
+          onToggle={() => setStep2Open((o) => !o)}
+          collapsedSummary={
+            <Step2Summary
+              storeName={settings.storeName}
+              receiver={effectiveReceiver}
+              fallback={t('steps.receiverNotSet')}
+            />
+          }
+        >
+          <div className="space-y-4">
+            <Field label={t('receiverLabel')}>
+              <AddressInput
+                value={settings.receiver}
+                onChange={autofill.handleManualChange}
+                onResolved={handleResolved}
+              />
+              <ReceiverWalletChip
+                canUse={autofill.canUseConnected}
+                matches={autofill.matchesConnected}
+                onUse={autofill.useConnectedWallet}
+                useLabel={t('useConnectedWallet')}
+                matchLabel={t('receiverMatchesWallet')}
+              />
+              {settings.receiver &&
+                !receiverValid &&
+                !isLikelyName(settings.receiver) && (
+                  <p className="mt-1 text-xs text-red-600">
+                    {t('addressInvalid')}
+                  </p>
+                )}
+              {/* 受取先確定後に Explorer の /address/ へ link (チェーン上が source of
+                  truth であることを店主に毎回視認させる)。 */}
+              {effectiveReceiver && (
+                <a
+                  href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
+                >
+                  {t('merchantExplorerLink', { chainName: chain.name })}
+                </a>
+              )}
+            </Field>
+
+            <Field label={t('storeNameLabel')}>
+              <input
+                type="text"
+                value={settings.storeName}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, storeName: e.target.value }))
+                }
+                placeholder={t('storeNamePlaceholder')}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                maxLength={STORE_NAME_MAX}
+              />
+            </Field>
+
+            <Field label={t('posterNoteLabel')}>
+              <input
+                type="text"
+                value={settings.posterNote}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, posterNote: e.target.value }))
+                }
+                placeholder={t('posterNotePlaceholder')}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                maxLength={POSTER_NOTE_MAX}
+              />
+            </Field>
           </div>
         </StepCard>
 
@@ -918,45 +995,6 @@ export function QrGenerator() {
                 </Field>
               )}
 
-              <AdvancedSection label={t('advancedExtra')}>
-                <div className="mb-4">
-                  <p className="mb-2 text-xs font-medium text-slate-700">
-                    {t('quickAmountsLabel')}
-                  </p>
-                  <div className="space-y-2">
-                    {tokenQuickAmounts.map((q, i) => (
-                      <div key={i} className="flex gap-2">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={q}
-                          onChange={(e) => updateQuickAmount(i, e.target.value)}
-                          placeholder={t('quickAmountPlaceholder')}
-                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeQuickAmount(i)}
-                          aria-label={t('quickAmountRemove')}
-                          className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  {tokenQuickAmounts.length < QUICK_AMOUNT_MAX && (
-                    <button
-                      type="button"
-                      onClick={addQuickAmount}
-                      className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
-                    >
-                      {t('quickAmountAdd')}
-                    </button>
-                  )}
-                </div>
-              </AdvancedSection>
-
               {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では disable)。
                   Default ON。Off にすると PaymentForm が代替経路 hint を出さない
                   (店主が「同一 chain で受け取りたい」と明示する用途)。 */}
@@ -990,63 +1028,31 @@ export function QrGenerator() {
             </SettingsAccordion>
       </div>
 
-      <div className="space-y-4 print:space-y-0">
+      <div className="space-y-4 print:hidden">
         <StepCard
           step={3}
           icon={QrCodeIcon}
           title={t('steps.qr')}
           variant="qr-prominent"
         >
-          <p className="-mt-2 mb-3 text-xs text-slate-500 print:hidden">
+          <p className="-mt-2 mb-3 text-xs text-slate-500">
             {t('qrDescription')}
           </p>
-          <div className="flex flex-col items-center gap-4 print:hidden">
+          <div className="flex flex-col items-center gap-4">
             {payUrl ? (
-              <>
-                <div ref={qrRef}>
-                  <QRCodeSVG value={payUrl} size={240} includeMargin level="M" />
-                </div>
-                <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
-                  {payUrl}
-                </div>
-                {/* Print は店舗向けの primary CTA (review #2 + #8 への対応)。
-                    Copy / SVG / PNG は secondary 扱いで outline。 */}
-                <div className="flex flex-wrap justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
-                  >
-                    <Printer className="h-4 w-4" aria-hidden />
-                    {t('printPoster')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => copy(payUrl)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                  >
-                    {copied ? t('qrCopied') : t('qrCopy')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => downloadSvg(`${qrFilename}.svg`, qrRef)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                  >
-                    {t('downloadSvg')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => downloadPng(`${qrFilename}.png`, qrRef)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                  >
-                    {t('downloadPng')}
-                  </button>
-                </div>
-              </>
+              // 即時表示せず、目立つボタン → 全画面モーダルで提示 (店員が金額を確認
+              // してからお客様に画面を見せる対面フロー)。
+              <button
+                type="button"
+                onClick={() => setQrModalOpen(true)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
+              >
+                <QrCodeIcon className="h-5 w-5" aria-hidden />
+                {t('showQr')}
+              </button>
             ) : receiverValid && amountValid ? (
-              // receiver + amount valid だが payUrl 未確定の遷移状態 (origin 空 = SSR / hydrate
-              // 直後の数フレーム間)。「生成中」を出すことで「checkbox 全部 ✓ なのに QR が出ない」
-              // 不整合の混乱を回避する。
+              // receiver + amount valid だが payUrl 未確定の遷移状態 (origin 空 = SSR /
+              // hydrate 直後の数フレーム間)。「生成中」で混乱を回避する。
               <p className="rounded-lg bg-slate-50 px-4 py-6 text-sm text-slate-400">
                 {t('qrPlaceholderGenerating')}
               </p>
@@ -1056,119 +1062,104 @@ export function QrGenerator() {
                 needLabel={t('qrEmptyState.needLabel')}
                 items={[
                   {
-                    label: t('qrEmptyState.needAddress'),
-                    done: receiverValid,
-                  },
-                  {
                     label: t('qrEmptyState.needAmount'),
                     done: amountValid,
+                  },
+                  {
+                    label: t('qrEmptyState.needAddress'),
+                    done: receiverValid,
                   },
                 ]}
               />
             )}
           </div>
         </StepCard>
-        {payUrl && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10">
-            <div className="mx-auto flex max-w-sm flex-col items-center text-center">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 print:text-base">
-                {t('posterEyebrow')}
-              </p>
-              <h3 className="mt-2 text-2xl font-bold text-slate-900 print:text-5xl">
-                {settings.storeName.trim() || t('posterDefaultStoreName')}
-              </h3>
-              <p className="mt-2 text-sm text-slate-500 print:text-xl">
-                {mode === 'amount'
-                  ? t('posterFixedAmount', {
-                      amount,
-                      symbol: deployment.displaySymbol,
-                    })
-                  : t('posterOpenAmount', {
-                      symbol: deployment.displaySymbol,
-                    })}
-              </p>
-              {/* 高度な設定を閉じたままだと creator は USDC+Ethereum 選択時に
-                  payMode が standard 強制された事実に気付けない。pay mode badge を
-                  poster に常時出すことで: (a) creator が screen preview で違和感に
-                  気付ける、(b) 印刷物を見た顧客が「自分で gas 必要か」事前判断可能。
-                  色: gasless=emerald (安心)、standard=amber (要 ETH/POL の注意喚起)。 */}
-              <p
-                className={`mt-3 inline-block rounded-full border px-3 py-1 text-xs font-semibold print:px-4 print:py-1.5 print:text-base ${
-                  payMode === 'gasless'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                }`}
-              >
-                {payMode === 'gasless'
-                  ? t('posterPayModeGasless')
-                  : t('posterPayModeStandard', {
-                      nativeToken: chain.nativeCurrency.symbol,
-                    })}
-              </p>
-              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-10 print:p-8">
-                <QRCodeSVG value={payUrl} size={260} includeMargin level="M" />
-              </div>
-              <p className="mt-4 text-sm font-medium text-slate-700 print:text-xl">
-                {settings.posterNote.trim() || t('posterDefaultNote')}
-              </p>
-              {/* 受信 chain の表示。crossChain ON + USDC では、buyer 視点で「どの
-                  chain の USDC でも払える」ことを示すため buyerUsdcChainNames() の
-                  全 chain (merchant 受信 6 incl. Ethereum + buyer-only 5) を列挙する
-                  (poster はお客向け = 顧客が「自分の chain で払えるか」確認する情報)。
-                  config.ts の merchant-and-buyer role と chains.ts の
-                  BUYER_SOURCE_USDC_SLUGS が sync している前提。
-                  crossChain OFF or JPYC では従来通り単一 chain (target chain) を表示。 */}
-              <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
-                {deployment.displaySymbol} ·{' '}
-                {settings.token === 'usdc' && settings.crossChain
-                  ? buyerUsdcChainNames().join(' / ')
-                  : chain.name}
-              </p>
-              <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">
-                {effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
-              </p>
-            </div>
-          </section>
-        )}
-        {eip681Uri && (
-          // EIP-681 互換 QR は default 閉 (上の OpenPay QR + poster QR で 2 つ
-          // 既に並ぶため視覚的ノイズを減らす)。Hashport / MetaMask Mobile 等の
-          // EIP-7702 非対応 wallet を救済する fallback として必要な人が summary
-          // クリックで開く動線。
-          <details className="rounded-2xl border border-dashed border-slate-300 bg-white print:hidden">
-            <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800 marker:hidden">
-              <span className="flex items-center gap-2">
-                <span>{t('eip681Title')}</span>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                  {t('eip681SummaryBadge')}
-                </span>
-              </span>
-              <span className="text-slate-400" aria-hidden>
-                ▼
-              </span>
-            </summary>
-            <div className="flex flex-col items-center gap-3 border-t border-dashed border-slate-200 px-4 py-4">
-              <p className="self-start text-xs text-slate-500">
-                {t('eip681Description')}
-              </p>
-              {/* fee=0 のため bypass 警告は撤去 (Phase 1 alpha)。 */}
-              <QRCodeSVG value={eip681Uri} size={180} includeMargin level="M" />
-              <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
-                {eip681Uri}
-              </div>
-              <button
-                type="button"
-                onClick={() => eip681Copy(eip681Uri)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-              >
-                {eip681Copied ? t('eip681Copied') : t('eip681Copy')}
-              </button>
-            </div>
-          </details>
-        )}
       </div>
+
+      {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
+      {payUrl && (
+        <QrPreviewModal
+          open={qrModalOpen}
+          onClose={() => setQrModalOpen(false)}
+          labels={{
+            title: t('qrModalTitle'),
+            close: t('qrModalClose'),
+            eyebrow: t('posterEyebrow'),
+            print: t('printPoster'),
+            copy: t('qrCopy'),
+            copied: t('qrCopied'),
+            downloadSvg: t('downloadSvg'),
+            downloadPng: t('downloadPng'),
+          }}
+          qrValue={payUrl}
+          qrRef={qrRef}
+          storeName={settings.storeName.trim() || t('posterDefaultStoreName')}
+          amountText={
+            mode === 'amount'
+              ? t('posterFixedAmount', {
+                  amount,
+                  symbol: deployment.displaySymbol,
+                })
+              : t('posterOpenAmount', { symbol: deployment.displaySymbol })
+          }
+          payModeBadge={{
+            text:
+              payMode === 'gasless'
+                ? t('posterPayModeGasless')
+                : t('posterPayModeStandard', {
+                    nativeToken: chain.nativeCurrency.symbol,
+                  }),
+            tone: payMode === 'gasless' ? 'gasless' : 'standard',
+          }}
+          note={settings.posterNote.trim() || t('posterDefaultNote')}
+          chainText={`${deployment.displaySymbol} · ${
+            settings.token === 'usdc' && settings.crossChain
+              ? buyerUsdcChainNames().join(' / ')
+              : chain.name
+          }`}
+          receiverShort={
+            effectiveReceiver ? shortAddress(effectiveReceiver) : ''
+          }
+          copied={copied}
+          onCopy={() => copy(payUrl)}
+          onPrint={() => window.print()}
+          onDownloadSvg={() => downloadSvg(`${qrFilename}.svg`, qrRef)}
+          onDownloadPng={() => downloadPng(`${qrFilename}.png`, qrRef)}
+          eip681={
+            eip681Uri
+              ? {
+                  uri: eip681Uri,
+                  copied: eip681Copied,
+                  onCopy: () => eip681Copy(eip681Uri),
+                  title: t('eip681Title'),
+                  badge: t('eip681SummaryBadge'),
+                  description: t('eip681Description'),
+                  copy: t('eip681Copy'),
+                  copiedLabel: t('eip681Copied'),
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
+}
+
+// ② 受取先を折りたたんだ時の 1 行サマリ。設定済なら「店舗名 · 0x1234…abcd」、
+// 未設定なら fallback 文言。
+function Step2Summary({
+  storeName,
+  receiver,
+  fallback,
+}: {
+  storeName: string;
+  receiver: Address | null;
+  fallback: string;
+}) {
+  if (!receiver) return <span>{fallback}</span>;
+  const addr = shortAddress(receiver);
+  const name = storeName.trim();
+  return <span className="font-mono">{name ? `${name} · ${addr}` : addr}</span>;
 }
 
 // 必要な項目を checkmark 付きで明示する empty state。初見店主が「何を

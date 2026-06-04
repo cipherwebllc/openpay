@@ -50,16 +50,20 @@ import { QrGenerator } from '@/components/QrGenerator';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-// IA 統一 (2026-06-05): ① 受取先は常時表示 (非折りたたみ) になったので Step 2 を
-// 開く操作は不要 = no-op。receiver / storeName / posterNote は常に見える。
+// UX 詰め (2026-06-05): 決済QR は ①金額 → ②受取先(折りたたみ) に戻した。② 受取先
+// (アドレス / 店舗名 / ポスター補足文) は折りたたみ可能。受取先未設定なら default open
+// なので空 LS のテストでは no-op。seeded receiver で閉じている場合のみ開く。
 async function openStep2(
-  _user: ReturnType<typeof userEvent.setup>,
+  user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
-  // 受取先は常時表示。互換のため残すが何もしない。
+  const toggle = screen.queryByRole('button', { name: /受取先/ });
+  if (toggle && toggle.getAttribute('aria-expanded') === 'false') {
+    await user.click(toggle);
+  }
 }
 
-// 高度な設定 accordion は ② 金額 の後ろの独立セクション (default 閉)。payMode / gas /
-// split / quickAmount editor を触るテストはこの accordion だけ開けばよい (Step 2 不要)。
+// 高度な設定 accordion は ② 受取先 の後ろの独立セクション (default 閉)。payMode / gas /
+// split を触るテストはこの accordion を開く。
 async function openAdvanced(
   user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
@@ -67,6 +71,25 @@ async function openAdvanced(
   if (toggle.getAttribute('aria-expanded') !== 'true') {
     await user.click(toggle);
   }
+}
+
+// QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。QR 本体 / 決済
+// URL / 印刷・コピー・SVG・PNG ボタン / ポスター調プレビュー / EIP-681 fallback はすべて
+// モーダル内 (閉じている間は DOM に無い)。それらを検証するテストは先にこれを呼ぶ。
+async function openQrModal(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const btn = await screen.findByRole('button', { name: /QRコードを表示する/ });
+  await user.click(btn);
+}
+
+// モーダルを開き、その中の EIP-681 互換 QR (details) を展開する。
+async function openEip681(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  await openQrModal(user);
+  const summary = await screen.findByText(/互換 QR \(EIP-681\)/);
+  await user.click(summary);
 }
 
 describe('QrGenerator', () => {
@@ -229,6 +252,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '12.5');
 
+      // QR / URL は「QRコードを表示する」→ モーダル内。
+      await openQrModal(user);
       await waitFor(() => {
         expect(container.querySelector('svg')).not.toBeNull();
       });
@@ -291,6 +316,8 @@ describe('QrGenerator', () => {
         'Show success screen',
       );
 
+      // ポスター調プレビューはモーダル内。
+      await openQrModal(user);
       expect(screen.getByText('Kanda Coffee')).toBeInTheDocument();
       expect(screen.getByText('Show success screen')).toBeInTheDocument();
       expect(screen.getByText('750 JPYC')).toBeInTheDocument();
@@ -584,6 +611,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
       await openAdvanced(user);
+      // URL はモーダル内。開いたまま gas トグル (背後の accordion ボタンは操作可)。
+      await openQrModal(user);
 
       // 既定は customer → URL に gas= は付かない
       await waitFor(() => {
@@ -754,6 +783,8 @@ describe('QrGenerator', () => {
       });
       await user.click(standardBtn);
 
+      // URL はモーダル内に表示。
+      await openQrModal(user);
       // URL に mode=standard が出る (font-mono の payUrl 表示 + 警告文等にも
       // "mode=standard" 文字列が含まれるため、payUrl 限定で /pay?... 形式の URL を assert)
       await waitFor(() => {
@@ -855,6 +886,8 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await openStep2(user);
       await user.type(screen.getByPlaceholderText('1000'), '100');
+      // payMode バッジはポスター調プレビュー (モーダル内)。
+      await openQrModal(user);
       await waitFor(() => {
         expect(screen.getByText('ガスレス決済')).toBeInTheDocument();
       });
@@ -878,6 +911,8 @@ describe('QrGenerator', () => {
       await openStep2(user);
       // USDC placeholder は '10.00' (decimals=6 想定の例値)
       await user.type(screen.getByPlaceholderText('10.00'), '5');
+      // payMode バッジはポスター調プレビュー (モーダル内)。
+      await openQrModal(user);
       await waitFor(() => {
         // {nativeToken} = ETH (Ethereum L1)、印刷物にも出る要注意警告
         expect(
@@ -903,6 +938,8 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await openStep2(user);
       await user.type(screen.getByPlaceholderText('10.00'), '5');
+      // payMode バッジはポスター調プレビュー (モーダル内)。
+      await openQrModal(user);
       await waitFor(() => {
         const badge = screen.getByText('ガスレス決済');
         expect(badge).toBeInTheDocument();
@@ -932,6 +969,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      // QR / EIP-681 fallback はモーダル内。
+      await openQrModal(user);
 
       const uri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
@@ -971,6 +1010,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
 
       // details 要素が DOM に存在 + 初期 open=false
       const summary = await screen.findByText(/互換 QR \(EIP-681\)/);
@@ -991,6 +1031,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
 
       // summary 内の badge (default 閉でも DOM には存在)
       expect(screen.getByText('上級者向け')).toBeInTheDocument();
@@ -1034,6 +1075,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '500');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
 
       // 形状 regex だけ pass する silent fund misdirection を排除するため、
       // 画面表示 URI と完全一致 + 受取人 + wei 値 + URL パーサ妥当性を全て assert。
@@ -1067,6 +1109,8 @@ describe('QrGenerator', () => {
         '10.00',
       ) as HTMLInputElement;
       await user.type(amountInput, '1.123456');
+      // EIP-681 URI はモーダル内 (amount 確定後に開く)。
+      await openQrModal(user);
       const uri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
       ).textContent!;
@@ -1097,6 +1141,7 @@ describe('QrGenerator', () => {
       await user.paste('1.1234567890');
       // USDC decimals=6 に truncate
       expect(amountInput.value).toBe('1.123456');
+      await openQrModal(user);
       const uri = (
         await screen.findByText((t) => t.startsWith('ethereum:'))
       ).textContent!;
@@ -1134,6 +1179,8 @@ describe('QrGenerator', () => {
       await user.click(
         screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
       );
+      // URI はモーダル内。開いたまま payMode を切替 (背後の accordion は操作可)。
+      await openQrModal(user);
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
@@ -1162,6 +1209,7 @@ describe('QrGenerator', () => {
       );
       await user.type(screen.getByPlaceholderText('%'), '30');
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
 
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
@@ -1197,6 +1245,7 @@ describe('QrGenerator', () => {
       await user.type(amountInput, '100');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
@@ -1215,6 +1264,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '1');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
 
       // JPYC: 1 JPYC = 1e18 wei
       const jpycUri = (
@@ -1241,6 +1291,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await openQrModal(user);
 
       // 既定: Base
       const baseUri = (
@@ -1274,6 +1325,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
 
+      // URLをコピー ボタンはモーダル内。
+      await openQrModal(user);
       const copyBtn = await screen.findByRole('button', {
         name: /URLをコピー/,
       });
@@ -1314,6 +1367,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
 
+      // 保存 / 印刷ボタンはモーダル内。
+      await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
       expect(createObjectURL).toHaveBeenCalledOnce();
       expect(click).toHaveBeenCalledOnce();
@@ -1351,6 +1406,7 @@ describe('QrGenerator', () => {
         '神田珈琲',
       );
 
+      await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
       expect(captured.length).toBe(1);
       const filename = captured[0];
@@ -1407,6 +1463,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '750');
 
+      await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /PNG保存/ }));
       // queueMicrotask 経由で onload → triggerDownload
       await waitFor(() => expect(captured.length).toBe(1));
@@ -1454,6 +1511,7 @@ describe('QrGenerator', () => {
         'a/b\\c:d*e?f"g<h>i|j',
       );
 
+      await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
       const filename = captured[0];
       // 全ての禁止文字が - に置換され、連続する - は 1 つに collapse される
@@ -1541,10 +1599,11 @@ describe('QrGenerator', () => {
       expect(list).not.toBeNull();
       const items = list!.querySelectorAll('li');
       expect(items.length).toBe(2);
-      // 1 つ目 (receiver) は done = emerald
-      expect(items[0].querySelector('span')!.className).toMatch(/bg-emerald-500/);
-      // 2 つ目 (amount) は未 done = border
-      expect(items[1].querySelector('span')!.className).toMatch(/border/);
+      // checklist 順は ①金額 → ②受取先。receiver のみ入力済なので:
+      // 1 つ目 (金額) は未 done = border
+      expect(items[0].querySelector('span')!.className).toMatch(/border/);
+      // 2 つ目 (受取先) は done = emerald
+      expect(items[1].querySelector('span')!.className).toMatch(/bg-emerald-500/);
     });
 
     it('Web3 用語の和らげ: gasless desc に「お客様はガス代を用意せず」が含まれる', async () => {
@@ -1575,13 +1634,15 @@ describe('QrGenerator', () => {
       expect(screen.queryByText(/UserOperation/)).toBeNull();
     });
 
-    it('Step 3 印刷ボタンは brand color (primary CTA) として描画', async () => {
+    it('モーダルの印刷ボタンは brand color (primary CTA) として描画', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '500');
 
+      // 印刷ボタンはモーダル内。
+      await openQrModal(user);
       const printBtn = await screen.findByRole('button', { name: /印刷/ });
       expect(printBtn.className).toMatch(/bg-brand/);
       expect(printBtn.className).toMatch(/text-white/);
@@ -1645,18 +1706,24 @@ describe('QrGenerator', () => {
       ).toBeNull();
     });
 
-    // IA 統一 (2026-06-05): ① 受取先は常時表示 (折りたたみ廃止)。旧 collapsible Step 2 の
-    // 一連テスト (default open/closed・collapsed summary・再 mount) は仕様変更で廃止。
-    it('① 受取先は常時表示 (折りたたみ無し): preset receiver 有無に関わらず input が見える', async () => {
+    // UX 詰め (2026-06-05): ② 受取先は折りたたみに戻した (初期設定後あまり変えない)。
+    // 受取先 seed 済 → default closed (toggle button あり・input は unmount)。開くと出る。
+    it('② 受取先は折りたたみ: seed 済は閉じて開くと input が出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({ receiver: VALID, token: 'jpyc' }),
       );
+      const user = userEvent.setup();
       render(<QrGenerator />);
-      // 受取先は折りたたみ button ではなく常時表示 → input が即見える。
+      // 受取先 seed 済 → ② は閉じる → toggle button が出て input は未 mount。
+      const toggle = await screen.findByRole('button', { name: /受取先/ });
+      await waitFor(() =>
+        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
+      );
+      expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
+      // 開くと receiver input が出る。
+      await user.click(toggle);
       expect(await screen.findByPlaceholderText(/0x\.\.\./)).toBeVisible();
-      // 折りたたみ toggle button (受取先) はもう存在しない。
-      expect(screen.queryByRole('button', { name: /^受取先/ })).toBeNull();
     });
   });
 
@@ -1682,10 +1749,11 @@ describe('QrGenerator', () => {
       )!;
       const items = list.querySelectorAll('li');
       expect(items.length).toBe(2);
-      // 1 つ目 (receiver) は未 done = border
-      expect(items[0].querySelector('span')!.className).toMatch(/border/);
-      // 2 つ目 (amount) は据え置きなので auto-done = emerald
-      expect(items[1].querySelector('span')!.className).toMatch(/bg-emerald-500/);
+      // checklist 順は ①金額 → ②受取先。
+      // 1 つ目 (金額) は据え置きなので auto-done = emerald
+      expect(items[0].querySelector('span')!.className).toMatch(/bg-emerald-500/);
+      // 2 つ目 (受取先) は未入力 = border
+      expect(items[1].querySelector('span')!.className).toMatch(/border/);
     });
 
     it('据え置きモード + 受取先 valid → "生成中" でも空状態でもなく QR が出る', async () => {
@@ -1694,20 +1762,20 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
-      // payUrl 生成 (amount 無しでも static で OK)
-      await waitFor(() => {
-        const svgs = container.querySelectorAll('svg');
-        // OpenPay QR (size=240) が描画される
-        const qrSvg = Array.from(svgs).find(
-          (s) => s.getAttribute('width') === '240',
-        );
-        expect(qrSvg).toBeDefined();
-      });
-      // empty state も "生成中" も出ない
+      // 入力画面は empty state も "生成中" も出ず「QRコードを表示する」ボタンになる。
       expect(
         screen.queryByText(/QR コードを作成する準備ができていません/),
       ).toBeNull();
       expect(screen.queryByText(/QR を生成中/)).toBeNull();
+      // QR 本体はモーダル内 (size=260)。
+      await openQrModal(user);
+      await waitFor(() => {
+        const svgs = container.querySelectorAll('svg');
+        const qrSvg = Array.from(svgs).find(
+          (s) => s.getAttribute('width') === '260',
+        );
+        expect(qrSvg).toBeDefined();
+      });
     });
 
     it('Step 1: rapid token switching (JPYC → USDC → JPYC) で chain が default に reset される', async () => {
@@ -1748,6 +1816,8 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('button', { name: /^USDC/ }));
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
+      // poster はモーダル内。
+      await openQrModal(user);
       // crossChain default=true (USDC は他 chain からも受信可能)、poster は
       // buyerUsdcChainNames() の対応 chain (merchant 受信 6: Base / Arbitrum /
       // Optimism / Polygon / Ethereum / Avalanche + buyer-only 5: Unichain /
@@ -1791,6 +1861,8 @@ describe('QrGenerator', () => {
       });
       await user.click(toggle);
       await user.type(screen.getByPlaceholderText('10.00'), '1');
+      // poster はモーダル内。
+      await openQrModal(user);
       // crossChain OFF → 単一 chain 名 (Arbitrum 系) のみ表示、他 chain 名は出ない
       await waitFor(() => {
         const el = screen.getByText(/USDC ·/);
@@ -1807,6 +1879,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       // JPYC は default、polygon chain も default
       await user.type(screen.getByPlaceholderText('1000'), '500');
+      // poster はモーダル内。
+      await openQrModal(user);
       await waitFor(() => {
         const el = screen.getByText(/JPYC ·/);
         // JPYC は 1 chain のみ ("·" の右側に / は出ない)
@@ -1825,7 +1899,8 @@ describe('QrGenerator', () => {
       // JPYC は default なので Kaia chain button を直接 click
       await user.click(screen.getByRole('button', { name: /^Kai/ }));
       await user.type(screen.getByPlaceholderText('1000'), '500');
-      // payUrl 表示 box (Step 3 内 font-mono.text-xs.bg-slate-50)
+      // payUrl 表示 box / poster はモーダル内 (font-mono.text-xs.bg-slate-50)
+      await openQrModal(user);
       await waitFor(() => {
         const urlBox = container.querySelector(
           '.font-mono.text-xs.bg-slate-50',
@@ -1849,6 +1924,8 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '100');
+      // URL box はモーダル内。開いたまま chain を切替 (背後の chooser は操作可)。
+      await openQrModal(user);
       // 既定は polygon
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
@@ -1925,14 +2002,16 @@ describe('QrGenerator', () => {
       const { container } = render(<QrGenerator />);
       await screen.findByPlaceholderText('1000');
       await user.type(screen.getByPlaceholderText('1000'), '500');
+      // QR / URL はモーダル内 (size=260)。
+      await openQrModal(user);
       await waitFor(() => {
         const svgs = container.querySelectorAll('svg');
         const qrSvg = Array.from(svgs).find(
-          (s) => s.getAttribute('width') === '240',
+          (s) => s.getAttribute('width') === '260',
         );
         expect(qrSvg).toBeDefined();
       });
-      // payUrl は QR ステップの URL 表示にテキストとして出る (container 全体で確認)。
+      // payUrl はモーダルの URL 表示にテキストとして出る (container 全体で確認)。
       expect(container.textContent).toContain(`to=${VALID}`);
       expect(container.textContent).toContain('amount=500');
     });
@@ -1946,6 +2025,8 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await screen.findByPlaceholderText('1000');
       await user.type(screen.getByPlaceholderText('1000'), '100');
+      // poster preview はモーダル内。開いたまま token を切替 (背後の chooser は操作可)。
+      await openQrModal(user);
       await waitFor(() =>
         expect(screen.getByText(/JPYC · Polygon/)).toBeInTheDocument(),
       );
@@ -2092,6 +2173,8 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     expect(input.value).toBe('6.666667');
     // 換算サマリ (anchor 円価格 ≈ USDC 額)
     expect(screen.getByText(/1000 JPYC ≈ 6\.666667 USDC/)).toBeInTheDocument();
+    // URL はモーダル内。
+    await openQrModal(user);
     // URL に変換情報が乗る
     await waitFor(() => {
       const url = screen.getByText(
@@ -2113,6 +2196,8 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
       await screen.findByRole('button', { name: /為替換算して USDC/ }),
     );
     const input = await screen.findByPlaceholderText('10.00');
+    // URL はモーダル内。開いたまま amount を編集 (背後の input は操作可)。
+    await openQrModal(user);
     await waitFor(() =>
       expect(
         screen.getByText((t) => t.includes('refAmt=1000')),
@@ -2253,6 +2338,8 @@ describe('QrGenerator — 会計用任意項目 (記帳補助)', () => {
     render(<QrGenerator />);
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '500');
+    // payUrl はモーダル内。
+    await openQrModal(user);
     await waitFor(() =>
       expect(screen.getByText((t) => t.includes('tax=10'))).toBeInTheDocument(),
     );
@@ -2271,6 +2358,8 @@ describe('QrGenerator — 会計用任意項目 (記帳補助)', () => {
     render(<QrGenerator />);
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '500');
+    // payUrl はモーダル内。
+    await openQrModal(user);
     await waitFor(() =>
       expect(
         screen.getByText((t) => t.includes('amount=500')),
