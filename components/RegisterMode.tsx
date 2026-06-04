@@ -10,7 +10,7 @@
 // - 本格 POS ではなくイベント販売・少量販売向け。値引/在庫/カテゴリ/レシート印刷/日報は対象外。
 //   税額は税込金額からの内税の目安 (記帳補助)。最終的な会計処理は会計ソフト・税理士側で確認。
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
 import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Trash2 } from 'lucide-react';
@@ -21,6 +21,7 @@ import { Field } from './Field';
 import { ProductPresetManager } from './ProductPresetManager';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
+import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
 import { randomId } from '@/lib/id';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -86,6 +87,19 @@ export function RegisterMode({
     hydrated,
     setReceiver,
   });
+
+  // レジは受取先を読み取り表示するため AddressInput を介さない。ENS/.base.eth の
+  // 名前解決は AddressInput と同じ hook で自前に行い resolvedReceiver を満たす
+  // (これが無いと名前建ての受取先で effectiveReceiver が null のままになり QR が出ない)。
+  const receiverName = isLikelyName(settings.receiver.trim())
+    ? settings.receiver.trim()
+    : '';
+  const resolveQuery = useResolveAddress(receiverName);
+  useEffect(() => {
+    setResolvedReceiver(
+      receiverName && resolveQuery.data ? resolveQuery.data.address : null,
+    );
+  }, [receiverName, resolveQuery.data]);
 
   // 通貨/チェーンは QR タブで設定 (レジは読み取り専用)。QR タブへ切替えるとレジは unmount され
   // カート/管理番号の編集中 state が破棄されるため、非空カート時は確認してから遷移する。
@@ -495,7 +509,6 @@ export function RegisterMode({
             title: t('qrModalTitle'),
             close: t('qrModalClose'),
             eyebrow: t('qrPosterEyebrow'),
-            print: t('printPoster'),
             copy: t('copyUrl'),
             copied: t('copied'),
           }}
@@ -508,7 +521,6 @@ export function RegisterMode({
           receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
           copied={copied}
           onCopy={() => copy(checkoutUrl)}
-          onPrint={() => window.print()}
         />
       )}
 

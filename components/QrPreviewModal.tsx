@@ -16,7 +16,8 @@ export type QrPreviewModalLabels = {
   title: string;
   close: string;
   eyebrow: string;
-  print: string;
+  /** 印刷ボタン文言。onPrint とセット (省略時は印刷ボタンを出さない)。 */
+  print?: string;
   copy: string;
   copied: string;
   downloadSvg?: string;
@@ -66,7 +67,7 @@ export function QrPreviewModal({
   receiverShort?: string;
   copied: boolean;
   onCopy: () => void;
-  onPrint: () => void;
+  onPrint?: () => void;
   onDownloadSvg?: () => void;
   onDownloadPng?: () => void;
   eip681?: QrPreviewEip681;
@@ -93,7 +94,11 @@ export function QrPreviewModal({
       aria-modal="true"
       aria-label={labels.title}
       tabIndex={-1}
-      className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-slate-900/70 px-4 py-8 print:static print:bg-white print:p-0"
+      className={`fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-slate-900/70 px-4 py-8 ${
+        // 印刷対応 (QR) はポスターを全画面印刷。印刷非対応 (レジ) はモーダルごと
+        // 印刷対象外にして背後のカートとの重なり (bleed) を防ぐ。
+        onPrint ? 'print:static print:bg-white print:p-0' : 'print:hidden'
+      }`}
     >
       <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-xl print:static print:max-w-none print:rounded-none print:p-0 print:shadow-none">
         {/* header: タイトル + × 閉じる (印刷では隠す) */}
@@ -163,14 +168,16 @@ export function QrPreviewModal({
 
         {/* 操作ボタン (印刷では隠す)。Print が primary CTA、他は outline。 */}
         <div className="mt-4 flex flex-wrap justify-center gap-2 print:hidden">
-          <button
-            type="button"
-            onClick={onPrint}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
-          >
-            <Printer className="h-4 w-4" aria-hidden />
-            {labels.print}
-          </button>
+          {onPrint && labels.print && (
+            <button
+              type="button"
+              onClick={onPrint}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+            >
+              <Printer className="h-4 w-4" aria-hidden />
+              {labels.print}
+            </button>
+          )}
           <button
             type="button"
             onClick={onCopy}

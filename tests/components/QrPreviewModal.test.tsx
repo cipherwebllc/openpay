@@ -91,18 +91,21 @@ describe('QrPreviewModal', () => {
     expect(screen.queryByRole('button', { name: 'URLをコピー' })).toBeNull();
   });
 
-  it('payModeBadge / download ハンドラ省略時は出さない', () => {
+  it('payModeBadge / print / download ハンドラ省略時はそのボタンを出さない (レジ想定)', () => {
     renderModal({
       payModeBadge: undefined,
+      onPrint: undefined,
       onDownloadSvg: undefined,
       onDownloadPng: undefined,
-      labels: { ...LABELS, downloadSvg: undefined, downloadPng: undefined },
+      labels: { ...LABELS, print: undefined, downloadSvg: undefined, downloadPng: undefined },
     });
     expect(screen.queryByText('ガスレス決済')).toBeNull();
+    expect(screen.queryByRole('button', { name: '印刷' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'SVG保存' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'PNG保存' })).toBeNull();
-    // 印刷 / コピーは残る
-    expect(screen.getByRole('button', { name: '印刷' })).toBeInTheDocument();
+    // コピー / 閉じる は残る
+    expect(screen.getByRole('button', { name: 'URLをコピー' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /閉じる/ })).toBeInTheDocument();
   });
 
   it('eip681 を渡すと fallback details を描画しコピーを委譲', async () => {
