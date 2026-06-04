@@ -58,6 +58,7 @@ function renderToolbar(
     entries: HistoryEntry[];
     filters: HistoryFilters;
     counts: { all: number; jpyc: number; usdc: number };
+    directionCounts: { all: number; in: number; out: number };
     usdcJpy: number | undefined;
   }> = {},
 ) {
@@ -68,6 +69,7 @@ function renderToolbar(
       filters={props.filters ?? EMPTY_HISTORY_FILTERS}
       onFiltersChange={onFiltersChange}
       counts={props.counts ?? { all: 0, jpyc: 0, usdc: 0 }}
+      directionCounts={props.directionCounts ?? { all: 0, in: 0, out: 0 }}
       usdcJpy={props.usdcJpy}
     />,
   );

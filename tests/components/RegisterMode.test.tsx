@@ -6,6 +6,11 @@ import userEvent from '@testing-library/user-event';
 vi.mock('@/hooks/useResolveAddress', () => ({
   useResolveAddress: vi.fn(() => ({ data: null, isFetching: false, error: null })),
 }));
+// 受取先の自動補完 (useReceiverAutofill) が useAccount を読むため最小モック。
+// 既定は未接続 = 自動補完もチップも出ない (既存テストの挙動を維持)。
+vi.mock('wagmi', () => ({
+  useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
+}));
 vi.mock('@/hooks/useOrigin', () => ({
   useOrigin: () => 'https://test.local',
 }));

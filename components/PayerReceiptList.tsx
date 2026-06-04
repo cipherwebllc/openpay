@@ -6,6 +6,7 @@
 // 控えは支払い側ブラウザの LocalStorage のみ (サーバ送信なし)。端末変更/削除/シークレットで
 // 復元できない旨を明記する。
 
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { usePayerReceipts } from '@/hooks/usePayerReceipts';
 import { PayerReceiptDetail } from './PayerReceiptDetail';
@@ -16,7 +17,7 @@ import {
   type PayerReceiptStatus,
 } from '@/lib/payerReceipt';
 
-const RECENT_LIMIT = 5;
+const RECENT_LIMIT = 3;
 
 const STATUS_DOT_CLASS = {
   confirmed: 'bg-emerald-500',
@@ -99,6 +100,17 @@ export function PayerReceiptList() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* 最新数件のみ表示 → 全件は取引履歴 (/history) に集約。 */}
+      {receipts.length > 0 && (
+        <Link
+          href={`/${locale}/history`}
+          prefetch={false}
+          className="mt-3 inline-block text-xs font-medium text-brand hover:underline"
+        >
+          {t('historyLink')} →
+        </Link>
       )}
 
       {/* 保存場所の注意 (空でも常時表示)。 */}

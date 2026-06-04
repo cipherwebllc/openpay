@@ -13,6 +13,9 @@ import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
 
 type TipSettings = {
   receiver: string;
+  // 受取先アドレスの由来。'auto' = 接続ウォレットからの自動補完 (切替に追従)、'manual' = 手入力/
+  // 既存保存値 (切替で据置)。useReceiverAutofill が更新する。
+  receiverSource: 'auto' | 'manual';
   token: TokenSymbol;
   // 送金チェーン (slug)。usdc は gasless 対応 chain 選択可、
   // jpyc は polygon / kaia から選択可。
@@ -37,6 +40,7 @@ const STORAGE_KEY = 'openpay:tip-settings:v2';
 
 const DEFAULT_SETTINGS: TipSettings = {
   receiver: '',
+  receiverSource: 'manual',
   token: 'jpyc',
   chain: 'polygon',
   name: '',
@@ -116,6 +120,8 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
       typeof loaded.receiver === 'string'
         ? loaded.receiver
         : DEFAULT_SETTINGS.receiver,
+    // 既定 'manual' = 既存保存値はウォレット切替で上書きしない。'auto' のみ追従。
+    receiverSource: loaded.receiverSource === 'auto' ? 'auto' : 'manual',
     token,
     chain,
     name:

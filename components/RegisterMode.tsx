@@ -10,15 +10,17 @@
 // - 本格 POS ではなくイベント販売・少量販売向け。値引/在庫/カテゴリ/レシート印刷/日報は対象外。
 //   税額は税込金額からの内税の目安 (記帳補助)。最終的な会計処理は会計ソフト・税理士側で確認。
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
 import { ChevronRight, Hash, Minus, Plus, Trash2 } from 'lucide-react';
 import { AddressInput } from './AddressInput';
+import { ReceiverWalletChip } from './ReceiverWalletChip';
 import { Field } from './Field';
 import { ProductPresetManager } from './ProductPresetManager';
 import { useQrSettings } from '@/hooks/useQrSettings';
+import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
 import { randomId } from '@/lib/id';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -62,6 +64,18 @@ export function RegisterMode() {
   const [currencyWarning, setCurrencyWarning] = useState(false);
 
   const effectiveReceiver = pickEffectiveAddress(settings.receiver, resolvedReceiver);
+  const setReceiver = useCallback(
+    (value: string, source: ReceiverSource) =>
+      setSettings((s) => ({ ...s, receiver: value, receiverSource: source })),
+    [setSettings],
+  );
+  const autofill = useReceiverAutofill({
+    receiver: settings.receiver,
+    receiverSource: settings.receiverSource,
+    effectiveReceiver,
+    hydrated,
+    setReceiver,
+  });
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const symbol = deployment.displaySymbol;
   const taxDec = taxDisplayDecimals(settings.token);
@@ -195,8 +209,15 @@ export function RegisterMode() {
       <Field label={t('merchantAddressLabel')}>
         <AddressInput
           value={settings.receiver}
-          onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
+          onChange={autofill.handleManualChange}
           onResolved={setResolvedReceiver}
+        />
+        <ReceiverWalletChip
+          canUse={autofill.canUseConnected}
+          matches={autofill.matchesConnected}
+          onUse={autofill.useConnectedWallet}
+          useLabel={t('useConnectedWallet')}
+          matchLabel={t('receiverMatchesWallet')}
         />
         {settings.receiver &&
           !effectiveReceiver &&

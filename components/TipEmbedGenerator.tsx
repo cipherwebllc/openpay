@@ -5,11 +5,16 @@ import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import { ChevronDown, Code2, Share2, Sparkles, Wallet } from 'lucide-react';
 import { AddressInput } from './AddressInput';
+import { ReceiverWalletChip } from './ReceiverWalletChip';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
 import { StepCard } from './StepCard';
 import { useTipSettings } from '@/hooks/useTipSettings';
+import {
+  useReceiverAutofill,
+  type ReceiverSource,
+} from '@/hooks/useReceiverAutofill';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
@@ -68,6 +73,19 @@ export function TipEmbedGenerator() {
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
     [settings.receiver, resolvedReceiver],
   );
+
+  const setReceiver = useCallback(
+    (value: string, source: ReceiverSource) =>
+      setSettings((s) => ({ ...s, receiver: value, receiverSource: source })),
+    [setSettings],
+  );
+  const autofill = useReceiverAutofill({
+    receiver: settings.receiver,
+    receiverSource: settings.receiverSource,
+    effectiveReceiver,
+    hydrated,
+    setReceiver,
+  });
 
   const colorValid = COLOR_PATTERN.test(settings.color);
   const deployment = deploymentForSlug(settings.token, settings.chain);
@@ -198,8 +216,15 @@ export function TipEmbedGenerator() {
             <Field label={t('receiverLabel')}>
               <AddressInput
                 value={settings.receiver}
-                onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
+                onChange={autofill.handleManualChange}
                 onResolved={handleResolved}
+              />
+              <ReceiverWalletChip
+                canUse={autofill.canUseConnected}
+                matches={autofill.matchesConnected}
+                onUse={autofill.useConnectedWallet}
+                useLabel={t('useConnectedWallet')}
+                matchLabel={t('receiverMatchesWallet')}
               />
               {settings.receiver &&
                 !effectiveReceiver &&

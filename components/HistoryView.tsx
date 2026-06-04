@@ -16,11 +16,19 @@ import {
   EMPTY_HISTORY_FILTERS,
   type HistoryFilters,
 } from '@/lib/historyFilters';
+import {
+  buildLedger,
+  applyLedgerFilters,
+  ledgerAssetCounts,
+  ledgerDirectionCounts,
+} from '@/lib/ledger';
 import { useHistory } from '@/hooks/useHistory';
+import { usePayerReceipts } from '@/hooks/usePayerReceipts';
 import { useMarketRates } from '@/hooks/useMarketRates';
 import { NonCustodialNotice } from './NonCustodialNotice';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
+import { LedgerPaidRow } from './LedgerPaidRow';
 import { HistoryToolbar } from './HistoryToolbar';
 import { HistorySummary } from './HistorySummary';
 import { FreeeSyncPanel } from './FreeeSyncPanel';
@@ -28,31 +36,39 @@ import { AccountingAffiliates } from './AccountingAffiliates';
 
 export function HistoryView() {
   const t = useTranslations('History');
-  const { entries, hydrated } = useHistory();
+  const { entries, hydrated: historyHydrated } = useHistory();
+  const { receipts, hydrated: receiptsHydrated } = usePayerReceipts();
+  const hydrated = historyHydrated && receiptsHydrated;
   const { data: rates } = useMarketRates();
   const usdcJpy = rates?.usdcJpy;
   const [filters, setFilters] = useState<HistoryFilters>(EMPTY_HISTORY_FILTERS);
 
-  // 通貨ボタンの件数は全 entries 基準 (フィルタで変動させない)。
-  const counts = useMemo(
-    () => ({
-      all: entries.length,
-      jpyc: entries.filter((e) => e.asset === 'jpyc').length,
-      usdc: entries.filter((e) => e.asset === 'usdc').length,
-    }),
-    [entries],
+  // 受取 (HistoryEntry) + 支払い (PayerReceipt) を時系列統合した ledger。方向は保存元で確定。
+  const ledger = useMemo(() => buildLedger(entries, receipts), [entries, receipts]);
+  // 一覧表示用 (direction を含む全フィルタ適用)。
+  const visible = useMemo(
+    () => applyLedgerFilters(ledger, filters),
+    [ledger, filters],
+  );
+  // 件数バッジは ledger 全体基準 (他フィルタで変動させない)。通貨/種別とも。
+  const counts = useMemo(() => ledgerAssetCounts(ledger), [ledger]);
+  const directionCounts = useMemo(
+    () => ledgerDirectionCounts(ledger),
+    [ledger],
   );
 
-  const filtered = useMemo(
+  // 集計 / 会計 CSV は受取(収入)のみ基準。direction フィルタは無視される
+  // (applyHistoryFilters は HistoryEntry=受取のみを扱い direction フィールドを持たない)。
+  const receivedFiltered = useMemo(
     () => applyHistoryFilters(entries, filters),
     [entries, filters],
   );
   const summary = useMemo(
-    () => summarizeHistory(filtered, usdcJpy),
-    [filtered, usdcJpy],
+    () => summarizeHistory(receivedFiltered, usdcJpy),
+    [receivedFiltered, usdcJpy],
   );
 
-  const hasEntries = entries.length > 0;
+  const hasEntries = entries.length > 0 || receipts.length > 0;
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -76,15 +92,22 @@ export function HistoryView() {
         {hydrated && hasEntries && (
           <>
             <HistoryToolbar
-              entries={filtered}
+              entries={receivedFiltered}
               filters={filters}
               onFiltersChange={setFilters}
               counts={counts}
+              directionCounts={directionCounts}
               usdcJpy={usdcJpy}
             />
             <HistorySummary summary={summary} />
+            {/* 支払いが在るとき、集計/CSV が受取のみ基準である旨を明示 (種別フィルタ時の誤解防止)。 */}
+            {directionCounts.out > 0 && (
+              <p className="text-[11px] text-slate-400">
+                {t('summaryReceivedOnlyNote')}
+              </p>
+            )}
             {env.enableFreeeSync && (
-              <FreeeSyncPanel entries={filtered} usdcJpy={usdcJpy} />
+              <FreeeSyncPanel entries={receivedFiltered} usdcJpy={usdcJpy} />
             )}
           </>
         )}
@@ -93,15 +116,23 @@ export function HistoryView() {
           <div className="h-32" aria-hidden />
         ) : !hasEntries ? (
           <HistoryEmptyState />
-        ) : filtered.length === 0 ? (
+        ) : visible.length === 0 ? (
           <p className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
             {t('filterEmpty')}
           </p>
         ) : (
           <ul className="space-y-2">
-            {filtered.map((e) => (
-              <HistoryRow key={e.id} entry={e} onRemove={removeHistoryEntry} />
-            ))}
+            {visible.map((it) =>
+              it.direction === 'in' && it.received ? (
+                <HistoryRow
+                  key={it.id}
+                  entry={it.received}
+                  onRemove={removeHistoryEntry}
+                />
+              ) : it.paid ? (
+                <LedgerPaidRow key={it.id} receipt={it.paid} />
+              ) : null,
+            )}
           </ul>
         )}
 

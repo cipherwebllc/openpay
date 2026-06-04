@@ -14,6 +14,7 @@ describe('useQrSettings', () => {
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '',
+      receiverSource: 'manual',
       token: 'jpyc',
       chain: 'polygon',
       gasMode: 'customer',
@@ -209,6 +210,7 @@ describe('useQrSettings', () => {
     act(() => {
       result.current.setSettings({
         receiver: '0xdef',
+        receiverSource: 'manual',
         token: 'jpyc',
         chain: 'polygon',
         gasMode: 'merchant',

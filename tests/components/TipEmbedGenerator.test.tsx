@@ -13,6 +13,11 @@ vi.mock('@/hooks/useResolveAddress', () => ({
     error: null,
   })),
 }));
+// 受取先の自動補完 (useReceiverAutofill) が useAccount を読むため最小モック。
+// 既定は未接続 = 自動補完もチップも出ない (既存テストの挙動を維持)。
+vi.mock('wagmi', () => ({
+  useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
+}));
 
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { chainForSlug } from '@/lib/chains';

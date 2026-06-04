@@ -14,6 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AddressInput } from './AddressInput';
+import { ReceiverWalletChip } from './ReceiverWalletChip';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
@@ -24,6 +25,10 @@ import {
   STORE_NAME_MAX,
   useQrSettings,
 } from '@/hooks/useQrSettings';
+import {
+  useReceiverAutofill,
+  type ReceiverSource,
+} from '@/hooks/useReceiverAutofill';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
@@ -173,6 +178,19 @@ export function QrGenerator() {
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
     [settings.receiver, resolvedReceiver],
   );
+
+  const setReceiver = useCallback(
+    (value: string, source: ReceiverSource) =>
+      setSettings((s) => ({ ...s, receiver: value, receiverSource: source })),
+    [setSettings],
+  );
+  const autofill = useReceiverAutofill({
+    receiver: settings.receiver,
+    receiverSource: settings.receiverSource,
+    effectiveReceiver,
+    hydrated,
+    setReceiver,
+  });
 
   // Step 2 の初期 open 状態を hydrate 後に一度だけ決定する。step2Initialized 後は
   // ユーザの click 操作だけが state を変えるので、receiver を typed して有効化
@@ -668,8 +686,15 @@ export function QrGenerator() {
             <Field label={t('receiverLabel')}>
               <AddressInput
                 value={settings.receiver}
-                onChange={(v) => setSettings((s) => ({ ...s, receiver: v }))}
+                onChange={autofill.handleManualChange}
                 onResolved={handleResolved}
+              />
+              <ReceiverWalletChip
+                canUse={autofill.canUseConnected}
+                matches={autofill.matchesConnected}
+                onUse={autofill.useConnectedWallet}
+                useLabel={t('useConnectedWallet')}
+                matchLabel={t('receiverMatchesWallet')}
               />
               {settings.receiver &&
                 !receiverValid &&

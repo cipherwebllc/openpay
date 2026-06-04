@@ -30,7 +30,10 @@ export default function CreatePage() {
         <MarketRates />
       </div>
 
-      <div className="mb-4 inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 print:hidden">
+      {/* タブバー: inline-flex のまま (flex にすると desktop で全幅に伸びる)。flex-nowrap +
+          overflow-x-auto + 各ボタン whitespace-nowrap/shrink-0 で、ラベル短縮済みでもスマホ
+          (360–390px) で 1 行を保ち、将来タブが増えても横スクロールで崩れない。 */}
+      <div className="mb-2 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1 print:hidden">
         {(
           [
             ['qr', t('tabs.qr')],
@@ -42,7 +45,7 @@ export default function CreatePage() {
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${
+            className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-medium transition ${
               tab === id
                 ? 'bg-white text-brand-dark shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
@@ -52,6 +55,9 @@ export default function CreatePage() {
           </button>
         ))}
       </div>
+
+      {/* 選択中タブの用途・対象者を補う 1 行説明 (括弧から外した「店舗」「クリエイター」をここで補完)。 */}
+      <p className="mb-4 text-sm text-slate-500">{t(`tabDesc.${tab}`)}</p>
 
       {tab === 'qr' && <QrGenerator />}
       {tab === 'register' && <RegisterMode />}

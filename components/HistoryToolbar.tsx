@@ -51,6 +51,18 @@ const STATUS_OPTIONS: ReadonlyArray<{
   { key: 'pending', i18nKey: 'statusPending' },
 ];
 
+// 種別 (受取/支払い) フィルタ。受取控え (history) と支払い控え (payerReceipts) を統合した
+// 一覧の絞り込み用。件数は ledger 全体 (フィルタ非依存) から数える。
+const DIRECTION_OPTIONS: ReadonlyArray<{
+  key: HistoryFilters['direction'];
+  i18nKey: 'filterDirectionAll' | 'filterDirectionIn' | 'filterDirectionOut';
+  countKey: 'all' | 'in' | 'out';
+}> = [
+  { key: 'all', i18nKey: 'filterDirectionAll', countKey: 'all' },
+  { key: 'in', i18nKey: 'filterDirectionIn', countKey: 'in' },
+  { key: 'out', i18nKey: 'filterDirectionOut', countKey: 'out' },
+];
+
 type DatePreset = 'all' | 'this' | 'last' | 'custom';
 
 export function HistoryToolbar({
@@ -58,13 +70,15 @@ export function HistoryToolbar({
   filters,
   onFiltersChange,
   counts,
+  directionCounts,
   usdcJpy,
 }: {
-  /** フィルタ適用後の entries (= 画面表示 = エクスポート対象)。 */
+  /** 会計用の受取(収入)entries (= summary/CSV 対象・direction フィルタ非適用)。 */
   entries: HistoryEntry[];
   filters: HistoryFilters;
   onFiltersChange: (next: HistoryFilters) => void;
   counts: { all: number; jpyc: number; usdc: number };
+  directionCounts: { all: number; in: number; out: number };
   usdcJpy: number | undefined;
 }) {
   const t = useTranslations('History');
@@ -141,6 +155,22 @@ export function HistoryToolbar({
 
   return (
     <div className="space-y-3">
+      {/* 種別フィルタ (受取/支払い)。受取控え + 支払い控えの統合一覧を絞り込む。 */}
+      <div
+        role="group"
+        aria-label={t('filterDirectionLabel')}
+        className="flex flex-wrap gap-1"
+      >
+        {DIRECTION_OPTIONS.map((opt) => (
+          <Pill
+            key={opt.key}
+            active={filters.direction === opt.key}
+            onClick={() => set({ direction: opt.key })}
+            label={t(opt.i18nKey, { count: directionCounts[opt.countKey] })}
+          />
+        ))}
+      </div>
+
       {/* 通貨フィルタ + 検索 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div role="group" aria-label={t('filterLabel')} className="flex flex-wrap gap-1">

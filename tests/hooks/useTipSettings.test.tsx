@@ -14,6 +14,7 @@ describe('useTipSettings', () => {
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '',
+      receiverSource: 'manual',
       token: 'jpyc',
       chain: 'polygon',
       name: '',
@@ -50,6 +51,7 @@ describe('useTipSettings', () => {
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings).toEqual({
       receiver: '0xabc',
+      receiverSource: 'manual',
       token: 'usdc',
       chain: 'base',
       name: 'Alice',
@@ -102,6 +104,7 @@ describe('useTipSettings', () => {
     act(() => {
       result.current.setSettings({
         receiver: '0xdef',
+        receiverSource: 'manual',
         token: 'usdc',
         chain: 'optimism',
         name: 'Bob',
@@ -121,6 +124,7 @@ describe('useTipSettings', () => {
       const parsed = JSON.parse(raw!);
       expect(parsed).toEqual({
         receiver: '0xdef',
+        receiverSource: 'manual',
         token: 'usdc',
         chain: 'optimism',
         name: 'Bob',
@@ -418,6 +422,7 @@ describe('useTipSettings', () => {
   it('jpyc + kaia + crossChain=false 保存 → 再 mount で完全復元', async () => {
     const persisted = {
       receiver: '0xabc',
+      receiverSource: 'manual' as const,
       token: 'jpyc' as const,
       chain: 'kaia' as const,
       name: 'Test',

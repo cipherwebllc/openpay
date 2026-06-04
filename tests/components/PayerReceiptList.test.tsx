@@ -64,13 +64,17 @@ describe('PayerReceiptList', () => {
     ).toBeNull();
   });
 
-  it('最新 5 件に制限 (6 件 seed → 5 件のみ詳細描画)', () => {
+  it('最新 3 件に制限 (6 件 seed → 3 件のみ詳細描画・全件は /history に集約)', () => {
     for (let i = 0; i < 6; i++) {
       seed({ txHash: `0x${String(i).repeat(64).slice(0, 64)}`, receiptNo: `OP-${i}`, merchantName: `Shop ${i}` });
     }
     render(<PayerReceiptList />);
-    // detailTitle は各レシート詳細に 1 つずつ → 5 件のみ
-    expect(screen.getAllByText('OpenPay 電子レシート')).toHaveLength(5);
+    // detailTitle は各レシート詳細に 1 つずつ → 3 件のみ
+    expect(screen.getAllByText('OpenPay 電子レシート')).toHaveLength(3);
+    // 全件を見る導線 (/history) が出る
+    expect(
+      screen.getByText(/すべての支払い履歴/).closest('a'),
+    ).toHaveAttribute('href', '/ja/history');
   });
 
   it('描画後に append (CHANGED_EVENT) → 空状態から一覧へ即時反映', () => {

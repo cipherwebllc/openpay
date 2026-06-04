@@ -106,6 +106,82 @@ describe('i18n: Create.offramp キー (ja/en parity)', () => {
   });
 });
 
+describe('i18n: 受取先「接続ウォレットで初期化」キー (3 namespace × ja/en parity)', () => {
+  // QR / レジ / Tip の各 namespace に同じ 2 キー (useConnectedWallet / receiverMatchesWallet)。
+  const NS = ['QrGenerator', 'RegisterMode', 'TipEmbedGenerator'] as const;
+  const KEYS = ['useConnectedWallet', 'receiverMatchesWallet'] as const;
+  for (const ns of NS) {
+    for (const key of KEYS) {
+      it(`ja/en の ${ns}.${key} は非空文字列`, () => {
+        for (const m of [ja, en]) {
+          const v = (m[ns] as Record<string, unknown>)[key];
+          expect(typeof v).toBe('string');
+          expect(v).not.toBe('');
+        }
+      });
+    }
+  }
+});
+
+describe('i18n: 取引履歴の受取/支払い統合キー (ja/en parity)', () => {
+  // 種別フィルタ/バッジ (History) + /scan→/history 導線 (PayerReceipt)。
+  const HISTORY_KEYS = [
+    'filterDirectionLabel',
+    'filterDirectionAll',
+    'filterDirectionIn',
+    'filterDirectionOut',
+    'directionInBadge',
+    'directionOutBadge',
+    'summaryReceivedOnlyNote',
+  ] as const;
+  for (const key of HISTORY_KEYS) {
+    it(`ja/en の History.${key} は非空文字列`, () => {
+      for (const m of [ja, en]) {
+        const v = (m.History as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      }
+    });
+  }
+  it('ja/en の PayerReceipt.historyLink は非空文字列', () => {
+    for (const m of [ja, en]) {
+      const v = (m.PayerReceipt as Record<string, unknown>).historyLink;
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    }
+  });
+  // count 付きラベルは {count} placeholder を持つ。
+  it('filterDirection* は {count} placeholder を持つ', () => {
+    for (const m of [ja, en]) {
+      const h = m.History as Record<string, string>;
+      expect(h.filterDirectionAll).toContain('{count}');
+      expect(h.filterDirectionIn).toContain('{count}');
+      expect(h.filterDirectionOut).toContain('{count}');
+    }
+  });
+});
+
+describe('i18n: Create.tabs / tabDesc キー (ja/en parity)', () => {
+  // タブラベルは短縮済 (決済QR/レジ/チップ)、tabDesc は選択中タブの 1 行説明。
+  // 片 locale 抜けで折返し説明が消えるため非空 + parity を fence する。
+  const TAB_KEYS = ['qr', 'register', 'tip'] as const;
+  for (const key of TAB_KEYS) {
+    it(`ja/en の Create.tabs.${key} と tabDesc.${key} は非空文字列`, () => {
+      for (const m of [ja, en]) {
+        const tabs = m.Create.tabs as Record<string, unknown>;
+        const desc = (m.Create as Record<string, unknown>).tabDesc as Record<
+          string,
+          unknown
+        >;
+        expect(typeof tabs[key]).toBe('string');
+        expect(tabs[key]).not.toBe('');
+        expect(typeof desc[key]).toBe('string');
+        expect(desc[key]).not.toBe('');
+      }
+    });
+  }
+});
+
 describe('i18n: Privacy policy が camera 利用を開示している (法的要件)', () => {
   // /scan 機能で camera permission を要求する以上、Privacy Policy で取得情報と
   // 利用目的を明示する必要がある (APPI / GDPR 一般原則)。disclosure が脱落

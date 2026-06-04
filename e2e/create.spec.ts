@@ -24,7 +24,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       page.getByRole('heading', { name: 'OpenPay' }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: '決済 QR (店舗)' }),
+      page.getByRole('button', { name: '決済QR' }),
     ).toBeVisible();
     // 金額モードのタブ (QrGenerator 内)
     await expect(page.getByRole('button', { name: '金額指定' })).toBeVisible();
@@ -34,7 +34,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     page,
   }) => {
     await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+    await page.getByRole('button', { name: 'チップ' }).click();
     await expect(
       page.getByRole('heading', { name: /応援を受け取る Tip widget を作成/ }),
     ).toBeVisible();
@@ -47,7 +47,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     page,
   }) => {
     await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+    await page.getByRole('button', { name: 'チップ' }).click();
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill(
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
@@ -72,10 +72,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
   test('英語ロケール (/en) でも UI が描画される', async ({ page }) => {
     await page.goto('/en/create');
     await expect(
-      page.getByRole('button', { name: 'Payment QR (merchant)' }),
+      page.getByRole('button', { name: 'Payment QR' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: 'Tip widget (creator)' }),
+      page.getByRole('button', { name: 'Tip', exact: true }),
     ).toBeVisible();
   });
 
@@ -234,7 +234,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     });
 
     await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+    await page.getByRole('button', { name: 'チップ' }).click();
     await page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/).fill('vitalik.eth');
 
     await expect(page.getByText(/✓ vitalik\.eth/)).toBeVisible({ timeout: 5_000 });
@@ -267,7 +267,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // 負 control: min-w-0 を外すと scrollWidth=859 (2.2x overflow) で fail する。
     test.skip(testInfo.project.name !== 'mobile-safari', 'mobile viewport 専用');
     await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+    await page.getByRole('button', { name: 'チップ' }).click();
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
 

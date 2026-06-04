@@ -26,6 +26,7 @@ import {
   HISTORY_STORAGE_KEY,
   type HistoryEntry,
 } from '@/lib/history';
+import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
@@ -99,6 +100,58 @@ describe('HistoryView', () => {
     );
     expect(screen.getByRole('button', { name: /JPYC \(2\)/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /USDC \(1\)/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'CSV ダウンロード' }),
+    ).toBeEnabled();
+  });
+
+  it('受取 + 支払いを統合表示・種別フィルタで切替・集計/CSV は受取基準で固定', async () => {
+    const user = userEvent.setup();
+    // 受取 1 件 (JPYC) + 支払い控え 1 件 (別ストア)。
+    appendHistory(entry({ id: 'recv', asset: 'jpyc' }));
+    appendPayerReceipt(
+      buildPayerReceipt(
+        {
+          asset: 'jpyc',
+          amount: '500',
+          merchantAddress: '0xShopAddr',
+          merchantName: 'Coffee Stand',
+          txHash: `0x${'b'.repeat(64)}`,
+          status: 'confirmed',
+        },
+        new Date('2026-06-01T00:00:00.000Z'),
+      ),
+    );
+
+    render(<HistoryView />);
+
+    // 種別バッジ: 受取(1) / 支払い(1) → 2 ストアが統合されている。
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /受取 \(1\)/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole('button', { name: /支払い \(1\)/ }),
+    ).toBeInTheDocument();
+    // 支払い行 (LedgerPaidRow) が統合一覧に出る。
+    expect(screen.getAllByText('Coffee Stand').length).toBeGreaterThan(0);
+    // 集計/会計 CSV は受取が在るので有効。
+    expect(
+      screen.getByRole('button', { name: 'CSV ダウンロード' }),
+    ).toBeEnabled();
+
+    // 種別=受取 → 支払い行は消える。集計/CSV は受取基準のまま (CSV 有効)。
+    await user.click(screen.getByRole('button', { name: /受取 \(1\)/ }));
+    expect(screen.queryAllByText('Coffee Stand')).toHaveLength(0);
+    expect(
+      screen.getByRole('button', { name: 'CSV ダウンロード' }),
+    ).toBeEnabled();
+
+    // 種別=支払い → 支払い行が出て受取行は消える。だが CSV は受取のみ対象なので依然有効
+    // (direction フィルタは集計/CSV に効かない = 受取基準で固定の不変条件)。
+    await user.click(screen.getByRole('button', { name: /支払い \(1\)/ }));
+    expect(screen.getAllByText('Coffee Stand').length).toBeGreaterThan(0);
     expect(
       screen.getByRole('button', { name: 'CSV ダウンロード' }),
     ).toBeEnabled();

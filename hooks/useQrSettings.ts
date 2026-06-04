@@ -16,6 +16,9 @@ import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 type QrSettings = {
   receiver: string;
+  // 受取先アドレスの由来。'auto' = 接続ウォレットからの自動補完 (ウォレット切替に追従)、
+  // 'manual' = ユーザが手入力 / 既存保存値 (切替で据置)。useReceiverAutofill が更新する。
+  receiverSource: 'auto' | 'manual';
   token: TokenSymbol;
   // 送金チェーン (slug)。usdc では 4 chain から選択可能、jpyc は polygon 固定。
   chain: ChainSlug;
@@ -72,6 +75,7 @@ function isLegacySharedDefault(list: string[]): boolean {
 
 const DEFAULT_SETTINGS: QrSettings = {
   receiver: '',
+  receiverSource: 'manual',
   token: 'jpyc',
   chain: 'polygon',
   gasMode: 'customer',
@@ -216,6 +220,8 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
       typeof loaded.receiver === 'string'
         ? loaded.receiver
         : DEFAULT_SETTINGS.receiver,
+    // 既定 'manual' = 既存保存値はウォレット切替で上書きしない。'auto' のみ追従。
+    receiverSource: loaded.receiverSource === 'auto' ? 'auto' : 'manual',
     token,
     chain,
     gasMode:

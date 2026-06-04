@@ -12,6 +12,10 @@ export type HistoryAssetFilter = 'all' | TokenSymbol;
 export type HistoryFilters = {
   asset: HistoryAssetFilter;
   status: HistoryStatusFilter;
+  /** 種別: 'all' | 'in' (受取) | 'out' (支払い)。受取/支払い統合ビュー (lib/ledger) 用。
+   *  applyHistoryFilters は HistoryEntry (=受取) のみを扱い direction フィールドを持たない
+   *  ため direction を無視する。集計/CSV はこの性質を利用して常に受取基準を保つ。 */
+  direction: 'all' | 'in' | 'out';
   /** 生入力。内部で trim + lowercase して部分一致。 */
   search: string;
   /** ローカル日の始端 (ms・inclusive)。null = 下限なし。 */
@@ -23,6 +27,7 @@ export type HistoryFilters = {
 export const EMPTY_HISTORY_FILTERS: HistoryFilters = {
   asset: 'all',
   status: 'all',
+  direction: 'all',
   search: '',
   fromTs: null,
   toTs: null,
