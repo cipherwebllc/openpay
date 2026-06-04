@@ -60,7 +60,9 @@ export default function CreatePage() {
       <p className="mb-4 text-sm text-slate-500">{t(`tabDesc.${tab}`)}</p>
 
       {tab === 'qr' && <QrGenerator />}
-      {tab === 'register' && <RegisterMode />}
+      {tab === 'register' && (
+        <RegisterMode onEditCurrency={() => setTab('qr')} />
+      )}
       {tab === 'tip' && (
         <div className="space-y-5">
           <div>

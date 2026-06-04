@@ -15,8 +15,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
 import { ChevronRight, Hash, Minus, Plus, Trash2 } from 'lucide-react';
-import { AddressInput } from './AddressInput';
-import { ReceiverWalletChip } from './ReceiverWalletChip';
+import { ReceiverBlock } from './ReceiverBlock';
 import { Field } from './Field';
 import { ProductPresetManager } from './ProductPresetManager';
 import { useQrSettings } from '@/hooks/useQrSettings';
@@ -50,7 +49,12 @@ type CartLine = {
   presetId?: string;
 };
 
-export function RegisterMode() {
+export function RegisterMode({
+  onEditCurrency,
+}: {
+  /** 通貨/チェーンを変更する導線 (page が QR タブへ切替える)。レジは読み取り専用表示。 */
+  onEditCurrency?: () => void;
+}) {
   const t = useTranslations('RegisterMode');
   const { settings, setSettings, hydrated } = useQrSettings();
   const presetStore = useProductPresets();
@@ -76,6 +80,14 @@ export function RegisterMode() {
     hydrated,
     setReceiver,
   });
+
+  // 通貨/チェーンは QR タブで設定 (レジは読み取り専用)。QR タブへ切替えるとレジは unmount され
+  // カート/管理番号の編集中 state が破棄されるため、非空カート時は確認してから遷移する。
+  function handleEditCurrency() {
+    if (cart.length > 0 && !window.confirm(t('editCurrencyConfirm'))) return;
+    onEditCurrency?.();
+  }
+
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const symbol = deployment.displaySymbol;
   const taxDec = taxDisplayDecimals(settings.token);
@@ -206,25 +218,40 @@ export function RegisterMode() {
         <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
       </div>
 
-      <Field label={t('merchantAddressLabel')}>
-        <AddressInput
-          value={settings.receiver}
-          onChange={autofill.handleManualChange}
-          onResolved={setResolvedReceiver}
-        />
-        <ReceiverWalletChip
-          canUse={autofill.canUseConnected}
-          matches={autofill.matchesConnected}
-          onUse={autofill.useConnectedWallet}
-          useLabel={t('useConnectedWallet')}
-          matchLabel={t('receiverMatchesWallet')}
-        />
-        {settings.receiver &&
+      {/* ① 受取先: 受取ウォレット + 通貨/チェーン (読み取り専用バッジ・変更は QR タブ)。
+          レジの通貨はカートの商品プリセットで決まるため、ここでは継承値を表示する。 */}
+      <ReceiverBlock
+        receiver={settings.receiver}
+        onReceiverChange={autofill.handleManualChange}
+        onResolved={setResolvedReceiver}
+        showAddressInvalid={
+          !!settings.receiver &&
           !effectiveReceiver &&
-          !isLikelyName(settings.receiver) && (
-            <p className="mt-1 text-xs text-red-600">{t('addressInvalid')}</p>
-          )}
-      </Field>
+          !isLikelyName(settings.receiver)
+        }
+        wallet={{
+          canUse: autofill.canUseConnected,
+          matches: autofill.matchesConnected,
+          onUse: autofill.useConnectedWallet,
+        }}
+        token={settings.token}
+        chain={settings.chain}
+        availableChains={[]}
+        onTokenChange={() => {}}
+        onChainChange={() => {}}
+        currencyMode="readonly"
+        onEditCurrency={onEditCurrency ? handleEditCurrency : undefined}
+        labels={{
+          receiver: t('merchantAddressLabel'),
+          currency: t('currencyLabel'),
+          chain: t('chainLabel'),
+          useConnectedWallet: t('useConnectedWallet'),
+          receiverMatchesWallet: t('receiverMatchesWallet'),
+          addressInvalid: t('addressInvalid'),
+          inheritedNote: t('currencyInheritedNote'),
+          changeLink: t('currencyChangeLink'),
+        }}
+      />
 
       {/* 商品プリセット (有効・配列順) */}
       {presetStore.enabledPresets.length > 0 && (

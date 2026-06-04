@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { AddressInput } from './AddressInput';
 import { ReceiverWalletChip } from './ReceiverWalletChip';
+import { ReceiverBlock } from './ReceiverBlock';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
@@ -147,13 +148,6 @@ export function QrGenerator() {
   const qrRef = useRef<HTMLDivElement>(null);
   // 高度な設定 (payMode / gas / split / quickAmount editor) は default 閉じる。
   const [accordionOpen, setAccordionOpen] = useState(false);
-  // Step 2 (受取先) の collapsible 状態。受取先は設定後ほぼ変更しないので、有効な
-  // address が localStorage に既にある returning user では default 折り畳む。
-  // 新規 user (receiver 未設定) には Step 2 を default open で出して入力を促す。
-  // useState の初期値は true (open) で SSR と一致させ、hydrate 後 useEffect で
-  // effectiveReceiver 由来の真値に切り替える (一度のみ、以降は user が制御)。
-  const [step2Open, setStep2Open] = useState(true);
-  const [step2Initialized, setStep2Initialized] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
 
   const t = useTranslations('QrGenerator');
@@ -191,15 +185,6 @@ export function QrGenerator() {
     hydrated,
     setReceiver,
   });
-
-  // Step 2 の初期 open 状態を hydrate 後に一度だけ決定する。step2Initialized 後は
-  // ユーザの click 操作だけが state を変えるので、receiver を typed して有効化
-  // した瞬間に section が勝手に閉じることはない (= 入力フローを中断しない)。
-  useEffect(() => {
-    if (!hydrated || step2Initialized) return;
-    setStep2Open(effectiveReceiver === null);
-    setStep2Initialized(true);
-  }, [hydrated, effectiveReceiver, step2Initialized]);
 
   const receiverValid = effectiveReceiver !== null;
   const amountValid =
@@ -506,28 +491,88 @@ export function QrGenerator() {
   return (
     <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
       <div className="space-y-5 print:hidden">
-        <StepCard step={1} icon={Coins} title={t('steps.amount')}>
+        {/* ① 受取先: 受取ウォレット / 通貨 / チェーン (3 モード共通 ReceiverBlock)。
+            通貨/チェーンは顧客ごとに変更頻度が高いが、IA 統一のため受取先と同じ①に集約。 */}
+        <StepCard step={1} icon={Store} title={t('steps.receiver')}>
           <div className="space-y-4">
-            {/* token + chain は顧客ごとに変更頻度が高い (JPYC か USDC か、USDC なら
-                どの chain か) ため Step 1 に置く。amount のシンボル表示も token に
-                依存するので、視覚的にも入力順は token → (chain) → amount が自然。 */}
-            <Field label={t('tokenLabel')}>
-              <TokenChooser selected={settings.token} onSelect={selectToken} />
-            </Field>
+            <ReceiverBlock
+              receiver={settings.receiver}
+              onReceiverChange={autofill.handleManualChange}
+              onResolved={handleResolved}
+              showAddressInvalid={
+                !!settings.receiver &&
+                !receiverValid &&
+                !isLikelyName(settings.receiver)
+              }
+              receiverExtra={
+                effectiveReceiver ? (
+                  <a
+                    href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
+                  >
+                    {t('merchantExplorerLink', { chainName: chain.name })}
+                  </a>
+                ) : null
+              }
+              wallet={{
+                canUse: autofill.canUseConnected,
+                matches: autofill.matchesConnected,
+                onUse: autofill.useConnectedWallet,
+              }}
+              token={settings.token}
+              chain={settings.chain}
+              availableChains={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
+              onTokenChange={selectToken}
+              onChainChange={selectChain}
+              currencyMode="editable"
+              chainGridClassName={
+                settings.token === 'usdc'
+                  ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
+                  : 'grid grid-cols-2 gap-2'
+              }
+              labels={{
+                receiver: t('receiverLabel'),
+                currency: t('tokenLabel'),
+                chain: t('chainLabel'),
+                useConnectedWallet: t('useConnectedWallet'),
+                receiverMatchesWallet: t('receiverMatchesWallet'),
+                addressInvalid: t('addressInvalid'),
+              }}
+            />
 
-            <Field label={t('chainLabel')}>
-              <ChainChooser
-                slugs={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
-                selected={settings.chain}
-                onSelect={selectChain}
-                gridClassName={
-                  settings.token === 'usdc'
-                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                    : 'grid grid-cols-2 gap-2'
+            <Field label={t('storeNameLabel')}>
+              <input
+                type="text"
+                value={settings.storeName}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, storeName: e.target.value }))
                 }
+                placeholder={t('storeNamePlaceholder')}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                maxLength={STORE_NAME_MAX}
               />
             </Field>
 
+            <Field label={t('posterNoteLabel')}>
+              <input
+                type="text"
+                value={settings.posterNote}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, posterNote: e.target.value }))
+                }
+                placeholder={t('posterNotePlaceholder')}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                maxLength={POSTER_NOTE_MAX}
+              />
+            </Field>
+          </div>
+        </StepCard>
+
+        {/* ② 金額 */}
+        <StepCard step={2} icon={Coins} title={t('steps.amount')}>
+          <div className="space-y-4">
             <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
               <div className="flex flex-col gap-2">
                 <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
@@ -667,85 +712,10 @@ export function QrGenerator() {
           </div>
         </StepCard>
 
-        <StepCard
-          step={2}
-          icon={Store}
-          title={t('steps.receiver')}
-          collapsible
-          open={step2Open}
-          onToggle={() => setStep2Open((o) => !o)}
-          collapsedSummary={
-            <Step2Summary
-              storeName={settings.storeName}
-              receiver={effectiveReceiver}
-              fallback={t('steps.receiverNotSet')}
-            />
-          }
-        >
-          <div className="space-y-4">
-            <Field label={t('receiverLabel')}>
-              <AddressInput
-                value={settings.receiver}
-                onChange={autofill.handleManualChange}
-                onResolved={handleResolved}
-              />
-              <ReceiverWalletChip
-                canUse={autofill.canUseConnected}
-                matches={autofill.matchesConnected}
-                onUse={autofill.useConnectedWallet}
-                useLabel={t('useConnectedWallet')}
-                matchLabel={t('receiverMatchesWallet')}
-              />
-              {settings.receiver &&
-                !receiverValid &&
-                !isLikelyName(settings.receiver) && (
-                  <p className="mt-1 text-xs text-red-600">
-                    {t('addressInvalid')}
-                  </p>
-                )}
-              {/* 受取先確定後に Explorer の /address/ ページへ link。店主に「DB ではなく
-                  チェーン上が source of truth」を毎回視認させ、Phase 2 (ローカル履歴) 投入
-                  後も Explorer が一次資料である運用を維持する。 */}
-              {effectiveReceiver && (
-                <a
-                  href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="mt-2 inline-flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
-                >
-                  {t('merchantExplorerLink', { chainName: chain.name })}
-                </a>
-              )}
-            </Field>
-
-            <Field label={t('storeNameLabel')}>
-              <input
-                type="text"
-                value={settings.storeName}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, storeName: e.target.value }))
-                }
-                placeholder={t('storeNamePlaceholder')}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                maxLength={STORE_NAME_MAX}
-              />
-            </Field>
-
-            <Field label={t('posterNoteLabel')}>
-              <input
-                type="text"
-                value={settings.posterNote}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, posterNote: e.target.value }))
-                }
-                placeholder={t('posterNotePlaceholder')}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                maxLength={POSTER_NOTE_MAX}
-              />
-            </Field>
-
-            {/* 会計用の任意項目 (記帳補助・売上明細)。初心者向けに default 折り畳み。
-                未入力なら QR URL は不変 (PayParams 側で空は省略)。 */}
+        {/* 記帳・会計 + 高度設定: ② の後に出す任意の折りたたみセクション (StepCard ではなく
+            素の details / SettingsAccordion を column に直接並べる)。共通化は Phase 1B/2。 */}
+        {/* 会計用の任意項目 (記帳補助・売上明細)。初心者向けに default 折り畳み。
+            未入力なら QR URL は不変 (PayParams 側で空は省略)。 */}
             <details className="group rounded-2xl border border-slate-200 bg-white p-4">
               <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
                 <span>{t('accountingFieldsTitle')}</span>
@@ -1051,8 +1021,6 @@ export function QrGenerator() {
 
               {/* fee=0 のため徴収先 section は撤去 (Phase 1 alpha)。 */}
             </SettingsAccordion>
-          </div>
-        </StepCard>
       </div>
 
       <div className="space-y-4 print:space-y-0">
@@ -1234,25 +1202,6 @@ export function QrGenerator() {
       </div>
     </div>
   );
-}
-
-// Step 2 collapsed 時の summary。store name (任意) + short address を 1 行で示し、
-// 店主が「受取先は設定済みだが今は触らなくて良い」と一目で判断できるようにする。
-// receiver 未設定の場合は fallback ("受取先未設定") を出す (Step 2 default open で
-// あまり当たらないが、user が手動で閉じた + receiver clear した時の保険)。
-function Step2Summary({
-  storeName,
-  receiver,
-  fallback,
-}: {
-  storeName: string;
-  receiver: Address | null;
-  fallback: string;
-}) {
-  if (!receiver) return <span>{fallback}</span>;
-  const addr = shortAddress(receiver);
-  const name = storeName.trim();
-  return <span className="font-mono">{name ? `${name} · ${addr}` : addr}</span>;
 }
 
 // 必要な項目を checkmark 付きで明示する empty state。初見店主が「何を

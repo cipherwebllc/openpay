@@ -4,10 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import { ChevronDown, Code2, Share2, Sparkles, Wallet } from 'lucide-react';
-import { AddressInput } from './AddressInput';
-import { ReceiverWalletChip } from './ReceiverWalletChip';
-import { ChainChooser } from './ChainChooser';
-import { TokenChooser } from './TokenChooser';
+import { ReceiverBlock } from './ReceiverBlock';
 import { Field } from './Field';
 import { StepCard } from './StepCard';
 import { useTipSettings } from '@/hooks/useTipSettings';
@@ -213,48 +210,44 @@ export function TipEmbedGenerator() {
       <div className="min-w-0 space-y-5">
         <StepCard step={1} icon={Wallet} title={t('step1Title')}>
           <div className="space-y-4">
-            <Field label={t('receiverLabel')}>
-              <AddressInput
-                value={settings.receiver}
-                onChange={autofill.handleManualChange}
-                onResolved={handleResolved}
-              />
-              <ReceiverWalletChip
-                canUse={autofill.canUseConnected}
-                matches={autofill.matchesConnected}
-                onUse={autofill.useConnectedWallet}
-                useLabel={t('useConnectedWallet')}
-                matchLabel={t('receiverMatchesWallet')}
-              />
-              {settings.receiver &&
+            <ReceiverBlock
+              receiver={settings.receiver}
+              onReceiverChange={autofill.handleManualChange}
+              onResolved={handleResolved}
+              showAddressInvalid={
+                !!settings.receiver &&
                 !effectiveReceiver &&
-                !isLikelyName(settings.receiver) && (
-                  <p className="mt-1 text-xs text-red-600">
-                    {t('addressInvalid')}
-                  </p>
-                )}
-            </Field>
-
-            <Field label={t('tokenLabel')}>
-              <TokenChooser selected={settings.token} onSelect={selectToken} />
-            </Field>
-
-            <Field label={t('chainLabel', { symbol: deployment.displaySymbol })}>
-              <ChainChooser
-                slugs={
-                  settings.token === 'usdc'
-                    ? RECEIVABLE_USDC_CHAINS
-                    : RECEIVABLE_JPYC_CHAINS
-                }
-                selected={settings.chain}
-                onSelect={selectChain}
-                gridClassName={
-                  settings.token === 'usdc'
-                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                    : 'grid grid-cols-2 gap-2'
-                }
-              />
-            </Field>
+                !isLikelyName(settings.receiver)
+              }
+              wallet={{
+                canUse: autofill.canUseConnected,
+                matches: autofill.matchesConnected,
+                onUse: autofill.useConnectedWallet,
+              }}
+              token={settings.token}
+              chain={settings.chain}
+              availableChains={
+                settings.token === 'usdc'
+                  ? RECEIVABLE_USDC_CHAINS
+                  : RECEIVABLE_JPYC_CHAINS
+              }
+              onTokenChange={selectToken}
+              onChainChange={selectChain}
+              currencyMode="editable"
+              chainGridClassName={
+                settings.token === 'usdc'
+                  ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
+                  : 'grid grid-cols-2 gap-2'
+              }
+              labels={{
+                receiver: t('receiverLabel'),
+                currency: t('tokenLabel'),
+                chain: t('chainLabel', { symbol: deployment.displaySymbol }),
+                useConnectedWallet: t('useConnectedWallet'),
+                receiverMatchesWallet: t('receiverMatchesWallet'),
+                addressInvalid: t('addressInvalid'),
+              }}
+            />
 
             {/* Cross-chain 受信許可 toggle (USDC のみ意味あり)。Default ON。OFF で
                 creator が指定 chain での同一 chain 送金のみ受け付ける。 */}
