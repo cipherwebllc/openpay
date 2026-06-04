@@ -1126,6 +1126,8 @@
     "receiptNoLabel": "管理番号 / レシート番号",
     "receiptNoPlaceholder": "任意",
     "receiptNoGenerate": "採番",
+    "accountingTitle": "記帳・会計 (任意)",
+    "cartAutoNote": "商品名・税率はカート明細から自動で記録されます。",
     "subtotal": "小計",
     "taxAmount": "うち税額",
     "total": "合計",

@@ -16,6 +16,7 @@ import {
 import { AddressInput } from './AddressInput';
 import { ReceiverWalletChip } from './ReceiverWalletChip';
 import { ReceiverBlock } from './ReceiverBlock';
+import { AccountingSection } from './AccountingSection';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
@@ -712,67 +713,34 @@ export function QrGenerator() {
           </div>
         </StepCard>
 
-        {/* 記帳・会計 + 高度設定: ② の後に出す任意の折りたたみセクション (StepCard ではなく
-            素の details / SettingsAccordion を column に直接並べる)。共通化は Phase 1B/2。 */}
-        {/* 会計用の任意項目 (記帳補助・売上明細)。初心者向けに default 折り畳み。
-            未入力なら QR URL は不変 (PayParams 側で空は省略)。 */}
-            <details className="group rounded-2xl border border-slate-200 bg-white p-4">
-              <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
-                <span>{t('accountingFieldsTitle')}</span>
-                <ChevronRight
-                  className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
-                  aria-hidden
-                />
-              </summary>
-              <p className="mt-2 text-xs text-slate-500">
-                {t('accountingFieldsHint')}
-              </p>
-              <div className="mt-3 space-y-4">
-                <Field label={t('productNameLabel')}>
-                  <input
-                    type="text"
-                    value={settings.productName}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, productName: e.target.value }))
-                    }
-                    placeholder={t('productNamePlaceholder')}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                    maxLength={80}
-                  />
-                </Field>
-                <Field label={t('memoLabel')}>
-                  <input
-                    type="text"
-                    value={settings.memo}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, memo: e.target.value }))
-                    }
-                    placeholder={t('memoPlaceholder')}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                    maxLength={200}
-                  />
-                </Field>
-                <Field label={t('taxLabel')}>
-                  <TaxCategorySelect
-                    taxRate={settings.taxRate}
-                    taxCategory={settings.taxCategory}
-                    onChange={(next) => setSettings((s) => ({ ...s, ...next }))}
-                    ariaLabel={t('taxLabel')}
-                    customAriaLabel={t('taxCustomLabel')}
-                  />
-                </Field>
-                <Field label={t('receiptNoLabel')}>
-                  <input
-                    type="text"
-                    value={receiptNo}
-                    onChange={(e) => setReceiptNo(e.target.value)}
-                    placeholder={t('receiptNoPlaceholder')}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                    maxLength={64}
-                  />
-                </Field>
-              </div>
-            </details>
+        {/* ▸ 記帳・会計 (任意): ② の後の独立折りたたみ。3 モード共通 AccountingSection。
+            QR は manual variant (商品名/メモ/税/管理番号を手入力・未入力なら URL 不変)。 */}
+        <AccountingSection
+          variant="manual"
+          productName={settings.productName}
+          onProductNameChange={(v) =>
+            setSettings((s) => ({ ...s, productName: v }))
+          }
+          memo={settings.memo}
+          onMemoChange={(v) => setSettings((s) => ({ ...s, memo: v }))}
+          taxRate={settings.taxRate}
+          taxCategory={settings.taxCategory}
+          onTaxChange={(next) => setSettings((s) => ({ ...s, ...next }))}
+          receiptNo={receiptNo}
+          onReceiptNoChange={setReceiptNo}
+          labels={{
+            title: t('accountingFieldsTitle'),
+            hint: t('accountingFieldsHint'),
+            productName: t('productNameLabel'),
+            productNamePlaceholder: t('productNamePlaceholder'),
+            memo: t('memoLabel'),
+            memoPlaceholder: t('memoPlaceholder'),
+            tax: t('taxLabel'),
+            taxCustom: t('taxCustomLabel'),
+            receiptNo: t('receiptNoLabel'),
+            receiptNoPlaceholder: t('receiptNoPlaceholder'),
+          }}
+        />
 
             <SettingsAccordion
               open={accordionOpen}

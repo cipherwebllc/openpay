@@ -1126,6 +1126,8 @@
     "receiptNoLabel": "Receipt / reference no.",
     "receiptNoPlaceholder": "Optional",
     "receiptNoGenerate": "Generate",
+    "accountingTitle": "Bookkeeping / accounting (optional)",
+    "cartAutoNote": "Product names and tax are recorded automatically from the cart items.",
     "subtotal": "Subtotal",
     "taxAmount": "Tax (incl.)",
     "total": "Total",

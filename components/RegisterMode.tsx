@@ -14,8 +14,9 @@ import { useCallback, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
-import { ChevronRight, Hash, Minus, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Minus, Plus, Trash2 } from 'lucide-react';
 import { ReceiverBlock } from './ReceiverBlock';
+import { AccountingSection } from './AccountingSection';
 import { Field } from './Field';
 import { ProductPresetManager } from './ProductPresetManager';
 import { useQrSettings } from '@/hooks/useQrSettings';
@@ -405,26 +406,24 @@ export function RegisterMode({
         {t('addLine')}
       </button>
 
-      <Field label={t('receiptNoLabel')}>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={receiptNo}
-            onChange={(e) => setReceiptNo(e.target.value)}
-            placeholder={t('receiptNoPlaceholder')}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 font-mono text-sm focus:border-brand focus:outline-none"
-            maxLength={64}
-          />
-          <button
-            type="button"
-            onClick={() => setReceiptNo(presetStore.nextReceiptNo())}
-            className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-300 px-3 py-2.5 text-xs font-medium text-slate-600 hover:border-brand"
-          >
-            <Hash className="h-3.5 w-3.5" aria-hidden />
-            {t('receiptNoGenerate')}
-          </button>
-        </div>
-      </Field>
+      {/* ▸ 記帳・会計 (任意): 3 モード共通 AccountingSection。レジは cart variant =
+          商品名/税はカート明細から自動反映するので手入力欄は出さず、管理番号 + 採番 のみ。 */}
+      <AccountingSection
+        variant="cart"
+        receiptNo={receiptNo}
+        onReceiptNoChange={setReceiptNo}
+        onGenerateReceiptNo={() => setReceiptNo(presetStore.nextReceiptNo())}
+        labels={{
+          title: t('accountingTitle'),
+          productName: '',
+          memo: '',
+          tax: '',
+          receiptNo: t('receiptNoLabel'),
+          receiptNoPlaceholder: t('receiptNoPlaceholder'),
+          generate: t('receiptNoGenerate'),
+          cartAutoNote: t('cartAutoNote'),
+        }}
+      />
 
       {/* 小計/税額/合計 */}
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
