@@ -22,7 +22,11 @@ import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
+import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -57,17 +61,32 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
   const isMerchantGas = !isStandard && params.gas === 'merchant';
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  // Smart Account / Pimlico 経路は gasless のみ必要 — standard では skip。
+  // JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応は
+  // 'pimlico-7702' で従来挙動 (Pimlico fallback)。relay は smart account / gas quote 不要で、顧客が
+  // 署名するだけ・自前 relayer がガス負担 (memory:jpyc-eip3009)。checkout は split 非対応なので
+  // PaymentForm のような split ガードは要らない。
+  const useRelay =
+    !isStandard &&
+    resolveJpycGaslessProvider(deployment, chainId ?? deployment.chainId) ===
+      'eip3009-relay';
+  const relay = useJpycEip3009Payment(deployment);
+  // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv は回収する固定 gas 相当額 (free は 0)。
+  const useRecover =
+    useRelay && jpycForwarderFor(chainId ?? deployment.chainId) !== null;
+  const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
+
+  // Smart Account / Pimlico 経路は gasless のみ必要 — standard / relay では skip。
   const { data: saData, error: saError } = useSmartAccount(
     deployment,
-    !isStandard,
+    !isStandard && !useRelay,
   );
-  const gasless = useBatchPayment(deployment, !isStandard);
+  const gasless = useBatchPayment(deployment, !isStandard && !useRelay);
   const standard = useStandardPayment();
-  const gasQuote = useGasQuote(deployment, !isStandard);
+  const gasQuote = useGasQuote(deployment, !isStandard && !useRelay);
   // USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
   const isCircle =
     !isStandard &&
@@ -83,6 +102,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
   const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
+  // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、非 relay は
+  // paymaster quote。relay は quote を持たないため effective で切り替える (PaymentForm と同型)。
+  const effectiveGasAmount: bigint | undefined = useRelay
+    ? relayGasEquiv
+    : gasAmount;
   const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
     () =>
@@ -91,9 +115,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         params.token,
         effectiveMode,
         params.gas,
-        gasAmount ?? 0n,
+        effectiveGasAmount ?? 0n,
       ),
-    [totalWei, params.token, effectiveMode, params.gas, gasAmount],
+    [totalWei, params.token, effectiveMode, params.gas, effectiveGasAmount],
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
@@ -102,10 +126,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
 
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
-  // gasless 経路は gas 見積を計上 (JPYC sponsorship=立替回収 / USDC erc20=paymaster 徴収分)。
-  // circle は receipt 由来の circlePaymasterNetUsdc を使うため null、standard は null。
+  // gasless 経路は gas 見積を計上 (JPYC relay=回収額/0 or sponsorship=立替回収 / USDC erc20=
+  // paymaster 徴収分)。circle は receipt 由来の circlePaymasterNetUsdc を使うため null、standard は null。
   const networkFeeEquivalent =
-    !isStandard && !isCircle ? (gasAmount ?? 0n) : null;
+    !isStandard && !isCircle ? (effectiveGasAmount ?? 0n) : null;
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   // ネイティブガストークン symbol を viem chain 経由で取得 (chain-aware)。
@@ -119,24 +143,36 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     totalCustomerOutflow,
   );
 
-  const flowPending = isStandard ? standard.isPending : gasless.isPending;
-  const gasQuoteReady = isStandard || activeQuote.data !== undefined;
+  const flowPending = isStandard
+    ? standard.isPending
+    : useRelay
+      ? relay.isPending
+      : gasless.isPending;
+  // relay は gas quote も smart account も不要なので readiness は常に満たす。
+  const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ total < gas のみ)。
   //   gasless / customer:  total < fee → merchant = 0
   //   gasless / merchant:  total < fee + gas → merchant = 0
   //   standard:            total < fee → merchant = 0
+  // relay は固定 fee で見積待ちが無いので即判定可 (activeQuote ではなく useRelay で gate)。
   const merchantUnderflow =
     totalWei > 0n &&
-    (isStandard || !isMerchantGas || activeQuote.data !== undefined) &&
+    (isStandard || !isMerchantGas || useRelay || activeQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
   const minimumAmountWei =
-    breakdown.feeAmount + (isMerchantGas ? (gasAmount ?? 0n) : 0n);
+    breakdown.feeAmount + (isMerchantGas ? (effectiveGasAmount ?? 0n) : 0n);
+
+  // relay が成功 or pending (broadcast 済) の後の再送信を禁止。再送すると新しい nonce で
+  // 2 件目の authorization を出すことになり、元の tx が確定すると二重支払いになる。
+  // revert (確定失敗で送金未成立) は安全なので再試行を許す (PaymentForm と同一防御)。
+  const relaySettledNoRetry =
+    useRelay && !!relay.data && (relay.data.success || !!relay.data.pending);
 
   const canSubmit =
     isConnected &&
     !wrongChain &&
-    (isStandard || !!saData) &&
+    (isStandard || useRelay || !!saData) &&
     // PaymentForm と揃える明示ガード。現状は totalWei>0 (有効 items) 不変で merchantUnderflow
     // が拾うが、空 batch (merchant 受取 0) 送信を構造的にも塞ぐ defense-in-depth。
     breakdown.merchantReceives > 0n &&
@@ -144,21 +180,34 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     !insufficientBalance &&
     !flowPending &&
     gasQuoteReady &&
-    !merchantUnderflow;
+    !merchantUnderflow &&
+    !relaySettledNoRetry;
 
-  const flowError = isStandard ? standard.error : gasless.error;
-  const saFallback = !isStandard && isIncompatibleSmartAccountError(saError);
-  // 送信は成立したがチェーン上で revert したケース (gasless: data.success===false /
-  // standard: phase=*-error だが receipt 成功で Error 無し)。無反応穴を明示メッセージで塞ぐ。
+  const flowError = isStandard
+    ? standard.error
+    : useRelay
+      ? relay.error
+      : gasless.error;
+  const saFallback =
+    !isStandard && !useRelay && isIncompatibleSmartAccountError(saError);
+  // 送信は成立したがチェーン上で revert したケース。gasless/relay は data.success===false、
+  // standard は phase=*-error だが receipt 成功で Error 無し。無反応穴を明示メッセージで塞ぐ。
   const revertedNoFeedback =
-    (!isStandard && !!gasless.data && !gasless.data.success) ||
+    (!isStandard && !useRelay && !!gasless.data && !gasless.data.success) ||
+    (useRelay && !!relay.data && !relay.data.success && !relay.data.pending) ||
     (isStandard &&
       (standard.isMerchantError || standard.isFeeError) &&
       !standard.error);
+  // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
+  const flowErrorMessage = useRelay
+    ? flowError
+      ? t(relayErrorKey(flowError))
+      : undefined
+    : flowError?.message;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : (flowError?.message ??
-      (isStandard || saFallback ? undefined : saError?.message) ??
+    : (flowErrorMessage ??
+      (isStandard || useRelay || saFallback ? undefined : saError?.message) ??
       (activeQuote.error ? t('errorGasQuote') : null) ??
       (merchantUnderflow
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
@@ -190,6 +239,19 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     if (activeQuote.error) logger.error('checkout.gas-quote.failed', { error: activeQuote.error });
   }, [activeQuote.error]);
 
+  useEffect(() => {
+    if (relay.error) logger.error('checkout.relay.failed', { error: relay.error });
+  }, [relay.error]);
+
+  useEffect(() => {
+    if (relay.data) {
+      logger.info('checkout.relay.success', {
+        txHash: relay.data.txHash,
+        success: relay.data.success,
+      });
+    }
+  }, [relay.data]);
+
   // mode 中立な決済結果ビュー: notification dedup key、webhook payload の hash field、
   // success_url query の (snake_case) hash field を 1 箇所に集約。
   const completion = useMemo(() => {
@@ -210,11 +272,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         },
       };
     }
-    if (!isStandard && gasless.data?.success) {
+    if (!isStandard && !useRelay && gasless.data?.success) {
       return {
         key: gasless.data.userOpHash,
         mode: 'gasless' as const,
-        blockNumber: gasless.data.blockNumber,
+        blockNumber: gasless.data.blockNumber as bigint | null,
         hashFields: {
           txHash: gasless.data.txHash,
           userOpHash: gasless.data.userOpHash,
@@ -225,8 +287,19 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         },
       };
     }
+    // relay は txHash のみ (userOpHash / blockNumber 無し)。202 pending も txHash を持ちうるため
+    // success を必須ガード (success を見ないと pending で webhook/redirect が誤発火する・Codex P1)。
+    if (useRelay && relay.data?.success && relay.data.txHash) {
+      return {
+        key: relay.data.txHash,
+        mode: 'gasless' as const,
+        blockNumber: null as bigint | null,
+        hashFields: { txHash: relay.data.txHash },
+        redirectQuery: { tx_hash: relay.data.txHash },
+      };
+    }
     return null;
-  }, [isStandard, gasless.data, standard.data]);
+  }, [isStandard, useRelay, gasless.data, standard.data, relay.data]);
 
   useEffect(() => {
     if (!completion) return;
@@ -261,7 +334,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         description: params.description,
         customerEmail: params.customerEmail,
         ...completion.hashFields,
-        blockNumber: completion.blockNumber.toString(),
+        // relay は block 不明 (txHash のみ)。null のときは payload から省略する
+        // (下流 consumer が missing と null を区別するため・"null" 文字列にしない)。
+        ...(completion.blockNumber !== null
+          ? { blockNumber: completion.blockNumber.toString() }
+          : {}),
         ts: Date.now(),
       };
       fetch(params.webhook, {
@@ -391,7 +468,45 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       locale,
     ],
   );
-  usePaymentHistory(historyCtx, gasless, standard);
+  // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt
+  // block を持たないため両者 null。amount は mutate() の variables で固定し drift を避ける。
+  // recover は hook と同一式で split を再計算: feeAmount(=サービス料) は常に 0、ネットワーク手数料
+  // 相当額 = 回収した gas (feeValue)、merchantAmount は customer 上乗せなら満額・merchant 吸収なら
+  // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
+  const relayHistoryGasless = useMemo(() => {
+    const v = relay.variables;
+    const fee = useRecover ? relayGasFeeValue() : 0n;
+    const merchantAmount = v
+      ? useRecover && v.gasMode === 'merchant'
+        ? v.value - fee
+        : v.value
+      : 0n;
+    return {
+      data: relay.data
+        ? {
+            txHash: relay.data.txHash,
+            userOpHash: null,
+            blockNumber: null,
+            success: relay.data.success,
+            pending: relay.data.pending,
+          }
+        : undefined,
+      error: relay.error,
+      variables: v
+        ? {
+            merchantAmount,
+            feeAmount: 0n,
+            saleAmount: v.value,
+            networkFeeEquivalent: fee,
+          }
+        : undefined,
+    };
+  }, [relay.data, relay.error, relay.variables, useRecover]);
+  usePaymentHistory(
+    historyCtx,
+    useRelay ? relayHistoryGasless : gasless,
+    standard,
+  );
 
   useEffect(() => {
     if (redirectIn === null) return;
@@ -410,7 +525,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     for (const [k, v] of Object.entries(completion.redirectQuery)) {
       u.searchParams.set(k, v);
     }
-    u.searchParams.set('block', completion.blockNumber.toString());
+    // relay は block 不明 — 値があるときだけ付与 (redirectQuery も relay は tx_hash のみ)。
+    if (completion.blockNumber !== null) {
+      u.searchParams.set('block', completion.blockNumber.toString());
+    }
     if (params.orderId) u.searchParams.set('order_id', params.orderId);
     u.searchParams.set('chain', chainSlug);
     u.searchParams.set('token', params.token);
@@ -431,6 +549,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         feeAmount: breakdown.feeAmount,
         chainId: deployment.chainId,
       });
+    } else if (useRelay) {
+      // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
+      // submit。fee=0・gas は OpenPay 肩代わり (free) or JPYC 回収 (recover・hook 内で分割)。
+      // 全額 (totalWei) をそのまま relay に渡す (recover の控除は hook 側)。
+      relay.mutate({ merchant: params.to, value: totalWei, gasMode: params.gas });
     } else {
       gasless.mutate({
         tokenAddress: deployment.address,
@@ -454,7 +577,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   const completed = isStandard
     ? !!standard.data
-    : !!(gasless.data && gasless.data.success);
+    : useRelay
+      ? !!(relay.data && relay.data.success)
+      : !!(gasless.data && gasless.data.success);
 
   return (
     <div className="space-y-4">
@@ -508,6 +633,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             )}
             {isStandard ? (
               <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
+            ) : useRecover ? (
+              <Row
+                label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
+                labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
+                value={fmt(relayGasEquiv)}
+              />
+            ) : useRelay ? (
+              <Row
+                label={t('gasRow')}
+                labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
+                value={t('gasRowRelayFree')}
+              />
             ) : (
               <Row
                 label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
@@ -546,9 +683,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {isStandard
             ? t('standardHint', { nativeToken })
-            : isErc20Paymaster
-              ? t('gaslessHintUsdc')
-              : t('gaslessHintJpyc')}
+            : useRecover
+              ? t('gaslessHintJpycRecover')
+              : useRelay
+                ? t('gaslessHintJpycRelay')
+                : isErc20Paymaster
+                  ? t('gaslessHintUsdc')
+                  : t('gaslessHintJpyc')}
         </p>
         {approvalCheckUrl && (
           <p className="mt-2 text-[11px]">
@@ -639,7 +780,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               ? t('btnConnect')
               : wrongChain
                 ? t('btnSwitchChain')
-                : !isStandard && !saData
+                : !isStandard && !useRelay && !saData
                   ? t('btnSaInit')
                   : !gasQuoteReady
                     ? t('btnGasQuoteLoading')
@@ -678,12 +819,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </div>
       )}
 
-      {completed && (gasless.data || standard.data) && (
+      {completed && (gasless.data || standard.data || relay.data) && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <p className="font-semibold">{t('successTitle')}</p>
           <p className="mt-1 text-xs">{t('successBody')}</p>
           <dl className="mt-3 space-y-1 text-xs">
-            {!isStandard && gasless.data && (
+            {!isStandard && !useRelay && gasless.data && (
               <>
                 <ResultRow
                   label={t('successUserOp')}
@@ -700,6 +841,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                   value={gasless.data.blockNumber.toString()}
                 />
               </>
+            )}
+            {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer は overlay 側)。 */}
+            {useRelay && relay.data?.success && relay.data.txHash && (
+              <ResultRow
+                label={t('successTx')}
+                value={relay.data.txHash}
+                copyable
+              />
             )}
             {isStandard && standard.data && (
               <>
@@ -733,6 +882,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 standard.data?.merchantTxHash,
                 gasless.data?.txHash,
                 gasless.data?.userOpHash,
+                relay.data?.txHash ?? undefined,
               ]}
             />
           </div>
@@ -765,6 +915,33 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </div>
       )}
 
+      {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
+          (再送信は canSubmit の relaySettledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
+      {useRelay && relay.data?.pending && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="font-semibold">{t('pendingTitle')}</p>
+          <p className="mt-1 break-words">{t('pendingBody')}</p>
+          {relay.data.txHash && (
+            <p className="mt-2 break-all font-mono text-xs">
+              {relay.data.txHash}
+              {explorerBase && (
+                <>
+                  {' · '}
+                  <a
+                    href={`${explorerBase}/tx/${relay.data.txHash}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="font-sans underline hover:text-sky-900"
+                  >
+                    {t('pendingExplorerLink')} ↗
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
       <p className="pt-2 text-center text-[10px] text-slate-400">
         {t('poweredBy')}{' '}
         <a
@@ -779,7 +956,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
       {/* PayPay 風 大型成功 overlay。dismiss 後は inline panel + redirect countdown を表示。
           success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。 */}
-      {!overlayDismissed && completed && !isStandard && gasless.data && (
+      {!overlayDismissed && completed && !isStandard && !useRelay && gasless.data && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
           txHash={gasless.data.txHash}
@@ -790,6 +967,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           onDismiss={() => setOverlayDismissed(true)}
         />
       )}
+      {/* relay は userOp/block 無し → txHash のみで overlay を出す。 */}
+      {!overlayDismissed &&
+        completed &&
+        useRelay &&
+        relay.data?.success &&
+        relay.data.txHash && (
+          <SuccessOverlay
+            amountDisplay={fmt(totalCustomerOutflow)}
+            txHash={relay.data.txHash}
+            explorerBase={explorerBase}
+            merchantAddress={params.to}
+            onDismiss={() => setOverlayDismissed(true)}
+          />
+        )}
       {!overlayDismissed && completed && isStandard && standard.data && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}

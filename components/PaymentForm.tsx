@@ -24,6 +24,7 @@ import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -323,7 +324,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
   const flowErrorMessage = useRelay
     ? flowError
-      ? relayErrorMessage(flowError, t)
+      ? t(relayErrorKey(flowError))
       : undefined
     : flowError?.message;
   const error = isGasCongestedError(flowError)
@@ -1020,25 +1021,6 @@ function phaseLabel(
       return t('btnStandardFeeMining');
     default:
       return t('btnSending');
-  }
-}
-
-// JPYC relay (/api/relay/jpyc) の error code → 顧客向け i18n。検証系の細かな reason や
-// 技術コード (signature_*/unsupported_chain/http_* 等) は generic に丸め、顧客が取れる
-// アクションのある 3 種のみ専用文言にする。
-function relayErrorMessage(
-  err: Error,
-  t: ReturnType<typeof useTranslations<'PaymentForm'>>,
-): string {
-  switch (err.message) {
-    case 'rate_limited':
-      return t('errorRelayRateLimited');
-    case 'relay_not_configured':
-      return t('errorRelayNotConfigured');
-    case 'insufficient_balance':
-      return t('errorRelayInsufficientBalance');
-    default:
-      return t('errorRelayGeneric');
   }
 }
 

@@ -31,6 +31,31 @@ vi.mock('@/hooks/useGasQuoteCircle', () => ({
     fetchStatus: 'idle',
   })),
 }));
+// useJpycEip3009Payment は real だと wagmi useWalletClient + react-query (useMutation) に依存し、
+// 本 test は QueryClientProvider 無しで render するため mock 必須 (PaymentForm.test と同方針)。
+vi.mock('@/hooks/useJpycEip3009Payment', () => ({
+  useJpycEip3009Payment: vi.fn(),
+}));
+// relay 経路の発火は env flag (module-load) ではなく resolveJpycGaslessProvider を直接制御する。
+// 既定は 'pimlico-7702' (= 従来挙動) で、relay テストのみ 'eip3009-relay' に切替える。
+vi.mock('@/lib/jpycGaslessProvider', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/jpycGaslessProvider')
+  >('@/lib/jpycGaslessProvider');
+  return { ...actual, resolveJpycGaslessProvider: vi.fn(() => 'pimlico-7702') };
+});
+// forwarder 設定は env 依存なので test で決定論的に制御する。既定 null = free モード
+// (OpenPay がガス負担)。recover モードは jpycForwarderFor をアドレスに差し替える。
+vi.mock('@/lib/relay/forwarderConfig', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/relay/forwarderConfig')
+  >('@/lib/relay/forwarderConfig');
+  return {
+    ...actual,
+    jpycForwarderFor: vi.fn(() => null),
+    relayGasFeeValue: vi.fn(() => 2n * 10n ** 18n),
+  };
+});
 vi.mock('next/navigation', () => ({
   useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn() })),
 }));
@@ -52,9 +77,12 @@ import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
+import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
 import { loadHistory } from '@/lib/history';
@@ -110,6 +138,40 @@ function setBatchPayment(
         : undefined,
     error: state === 'error' ? new Error(errMsg ?? 'AA21 fail') : null,
   } as Partial<ReturnType<typeof useBatchPayment>>);
+}
+
+let relayMutate: ReturnType<typeof vi.fn>;
+function setRelayPayment(
+  state:
+    | 'idle'
+    | 'pending-flow'
+    | 'success'
+    | 'reverted'
+    | 'broadcast-pending'
+    | 'error',
+  opts?: {
+    txHash?: `0x${string}`;
+    errMsg?: string;
+    variables?: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
+  },
+) {
+  relayMutate = vi.fn();
+  const txHash = opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`);
+  const data =
+    state === 'success'
+      ? { txHash, success: true }
+      : state === 'reverted'
+        ? { txHash, success: false }
+        : state === 'broadcast-pending'
+          ? { txHash, success: false, pending: true }
+          : undefined;
+  mockHook(useJpycEip3009Payment, {
+    mutate: relayMutate,
+    isPending: state === 'pending-flow',
+    data,
+    error: state === 'error' ? new Error(opts?.errMsg ?? 'rate_limited') : null,
+    variables: opts?.variables,
+  } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
 function setSwitchChain() {
@@ -216,9 +278,14 @@ beforeEach(() => {
   setSmartAccount(false);
   setBatchPayment('idle');
   setStandardPaymentDefault();
+  setRelayPayment('idle');
   setGasQuote('disabled');
   setAccount({ connected: false });
   vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
+  // 既定は従来の Pimlico 経路。relay テストのみ 'eip3009-relay' に切替える。
+  // (clearAllMocks は mockReturnValue を消さないので beforeEach で明示リセットが必要。)
+  vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+  vi.mocked(jpycForwarderFor).mockReturnValue(null);
 });
 
 const USDC_PARAMS: CheckoutParams = {
@@ -1219,5 +1286,252 @@ describe('CheckoutForm — 複数商品の履歴保存 (統合: usePaymentHistor
 
     expect(e?.receiptNo).toBe('R-1');
     expect(e?.productName).toBe('Tシャツ, 寄付'); // 代表名 = 明細名の連結
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JPYC EIP-3009 relay 経路 (/checkout・簡易レジ): resolveJpycGaslessProvider が
+// 'eip3009-relay' を返すとき、useBatchPayment (Pimlico) ではなく useJpycEip3009Payment へ。
+// ---------------------------------------------------------------------------
+describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
+  const JPYC_TOTAL = 3000n * 10n ** 18n; // 3000 JPYC (18 decimals)
+
+  function setupRelayReady() {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    // test env では 'polygon' slug は Amoy に解決される (既存 JPYC テストと同じ)。
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n); // 潤沢な JPYC 残高
+  }
+
+  it('flag ON + JPYC + Polygon: submit が relay.mutate を呼び gasless/standard は呼ばない (free)', async () => {
+    const user = userEvent.setup();
+    setupRelayReady();
+    setSmartAccount(false); // SA 未構築でも relay は submit 可能
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    // relay 経路では Smart Account / gas quote を skip (enabled=false)。
+    expect(useSmartAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'jpyc' }),
+      false,
+    );
+    // free モードの gas 行は「無料」表示。
+    expect(screen.getByText('無料 (OpenPay が立替)')).toBeInTheDocument();
+
+    const btn = screen.getByRole('button', { name: /3000 JPYC を支払う/ });
+    expect(btn).toBeEnabled();
+    await user.click(btn);
+
+    expect(relayMutate).toHaveBeenCalledOnce();
+    expect(relayMutate).toHaveBeenCalledWith({
+      merchant: MERCHANT,
+      value: JPYC_TOTAL,
+      gasMode: 'customer',
+    });
+    expect(mutate).not.toHaveBeenCalled(); // useBatchPayment.mutate (Pimlico)
+    expect(standardMutate).not.toHaveBeenCalled();
+  });
+
+  it('relay 成功: txHash パネル + 顧客向け控え埋込 (/checkout) + 履歴保存', () => {
+    window.localStorage.clear();
+    setupRelayReady();
+    setRelayPayment('success', {
+      txHash: `0x${'e'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
+    });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+    // txHash は成功パネル + 控え + overlay の複数箇所に出る。
+    expect(screen.getAllByText(`0x${'e'.repeat(64)}`).length).toBeGreaterThan(0);
+
+    // 控えが保存される (sourceRoute=/checkout・receiptId=txHash)。
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].sourceRoute).toBe('/checkout');
+    expect(receipts[0].receiptId).toBe(`0x${'e'.repeat(64)}`);
+    // 完了画面に控え詳細が埋め込まれる。
+    expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
+
+    // 履歴: relay は gasless variant・gross=saleAmount=3000・merchant=3000 (free/customer)。
+    const e = loadHistory().find((x) => x.txHash === `0x${'e'.repeat(64)}`);
+    expect(e).toBeDefined();
+    expect(e?.payMode).toBe('gasless');
+    // HistoryEntry は atomic 額を decimal 文字列で保持する。
+    expect(e?.saleAmount).toBe(JPYC_TOTAL.toString());
+    expect(e?.merchantAmount).toBe(JPYC_TOTAL.toString());
+    expect(e?.userOpHash).toBeNull();
+    expect(e?.blockNumber).toBeNull();
+  });
+
+  it('relay recover (forwarder 設定 + gas=merchant): gas 行に回収額 + 履歴 merchantAmount=value−fee', () => {
+    window.localStorage.clear();
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
+    setupRelayReady();
+    setRelayPayment('success', {
+      txHash: `0x${'e'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'merchant' },
+    });
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, gas: 'merchant' }} />);
+
+    // recover は固定回収額 (2 JPYC) を gas 行に表示。
+    expect(screen.getByText('2 JPYC')).toBeInTheDocument();
+
+    const e = loadHistory().find((x) => x.txHash === `0x${'e'.repeat(64)}`);
+    expect(e).toBeDefined();
+    // recover + merchant 吸収: merchantAmount = value − fee(2 JPYC)、saleAmount = value。
+    // (HistoryEntry は atomic 額を decimal 文字列で保持する。)
+    expect(e?.merchantAmount).toBe(((3000n - 2n) * 10n ** 18n).toString());
+    expect(e?.saleAmount).toBe(JPYC_TOTAL.toString());
+    expect(e?.networkFeeEquivalent).toBe((2n * 10n ** 18n).toString());
+  });
+
+  it('relay error code (rate_limited) → friendly i18n 文言に変換 (生コード非表示)', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'rate_limited' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/短時間に決済が集中/)).toBeInTheDocument();
+    expect(screen.queryByText('rate_limited')).toBeNull();
+  });
+
+  it('relay pending (broadcast 済・未確定): pending パネル + 再送ブロック (二重支払い防止)', () => {
+    setupRelayReady();
+    setRelayPayment('broadcast-pending', { txHash: `0x${'e'.repeat(64)}` });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    // pending パネルが出る (success パネルは出さない)。
+    expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
+    expect(screen.queryByText(/お支払いが完了しました/)).toBeNull();
+    // 再送ブロック: 支払いボタンは disabled (relaySettledNoRetry)。
+    expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
+    // pending は error ではないので error パネルは出ない。
+    expect(screen.queryByText(/エラー/)).toBeNull();
+  });
+
+  it('resolve=pimlico-7702 (relay 非選択): JPYC でも従来の Pimlico 経路 (gasless.mutate)', async () => {
+    const user = userEvent.setup();
+    // resolveJpycGaslessProvider は beforeEach で 'pimlico-7702'。
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce(); // useBatchPayment (Pimlico)
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+
+  it('relay 成功 + webhook: payload に txHash あり・blockNumber は省略 (null を直列化しない)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setupRelayReady();
+    setRelayPayment('success', {
+      txHash: `0x${'e'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
+    });
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, webhook: 'https://shop.example.com/hook' }}
+      />,
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(payload.txHash).toBe(`0x${'e'.repeat(64)}`);
+    expect(payload.mode).toBe('gasless');
+    // relay は block 不明 → payload から省略 (key 自体が無い・"null" 文字列にしない)。
+    expect('blockNumber' in payload).toBe(false);
+    expect(payload.userOpHash).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it('relay 成功 + success_url: redirect query は tx_hash のみ (block / user_op_hash なし)', async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    setupRelayReady();
+    setRelayPayment('success', {
+      txHash: `0x${'e'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
+    });
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, successUrl: 'https://shop.example.com/thanks' }}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /今すぐ確認ページへ/ }));
+    expect(assignSpy).toHaveBeenCalledOnce();
+    const url = new URL(assignSpy.mock.calls[0][0]);
+    expect(url.searchParams.get('tx_hash')).toBe(`0x${'e'.repeat(64)}`);
+    expect(url.searchParams.get('block')).toBeNull();
+    expect(url.searchParams.get('user_op_hash')).toBeNull();
+  });
+
+  it('relay pending: webhook も redirect も発火しない (未確定 = completion なし)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    setupRelayReady();
+    setRelayPayment('broadcast-pending', { txHash: `0x${'e'.repeat(64)}` });
+    render(
+      <CheckoutForm
+        params={{
+          ...JPYC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+          successUrl: 'https://shop.example.com/thanks',
+        }}
+      />,
+    );
+    expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
+    await Promise.resolve(); // microtask flush
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(/確認ページへ移動します/)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('relay in-flight (isPending): 送信中表示でボタン disabled (再送防止)', () => {
+    setupRelayReady();
+    setRelayPayment('pending-flow');
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.getByRole('button', { name: /送信中…/ })).toBeDisabled();
+  });
+
+  it('relay pending かつ txHash なし (authorizationState 既使用): tx 行なしの pending パネル + completion なし', () => {
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    mockHook(useJpycEip3009Payment, {
+      mutate: vi.fn(),
+      isPending: false,
+      data: { txHash: null, success: false, pending: true },
+      error: null,
+      variables: undefined,
+    } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, successUrl: 'https://shop.example.com/thanks' }}
+      />,
+    );
+    // pending パネルは出るが txHash 行は無い (txHash=null)。
+    expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
+    expect(screen.queryByText(/Explorer で確認/)).toBeNull();
+    // 成功扱いしない → 完了パネルも redirect も無い。
+    expect(screen.queryByText(/お支払いが完了しました/)).toBeNull();
+    expect(screen.queryByText(/確認ページへ移動します/)).toBeNull();
+    expect(assignSpy).not.toHaveBeenCalled();
   });
 });

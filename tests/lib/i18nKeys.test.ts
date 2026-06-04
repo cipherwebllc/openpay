@@ -276,6 +276,35 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
     });
   }
 
+  // CheckoutForm (/checkout・簡易レジ) も同じ relay 経路を持つ。hint キーは CheckoutForm の
+  // 命名規則 (gaslessHintJpyc*) に合わせる (PaymentForm は gaslessBatchHintJpyc*)。
+  const CHECKOUT_RELAY_KEYS = [
+    'gasInfoJpycRelay',
+    'gasRowRelayFree',
+    'gaslessHintJpycRelay',
+    'gasInfoJpycRecover',
+    'gaslessHintJpycRecover',
+    'errorRelayRateLimited',
+    'errorRelayNotConfigured',
+    'errorRelayInsufficientBalance',
+    'errorRelayGeneric',
+    'pendingTitle',
+    'pendingBody',
+    'pendingExplorerLink',
+  ] as const;
+  for (const key of CHECKOUT_RELAY_KEYS) {
+    it(`ja.CheckoutForm.${key} は非空文字列`, () => {
+      const v = (ja.CheckoutForm as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.CheckoutForm.${key} は非空文字列`, () => {
+      const v = (en.CheckoutForm as Record<string, unknown>)[key];
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
+
   // relay の未確定 (pending) を履歴で示す status バッジ (HistoryRow / MiniHistoryRecent)。
   for (const loc of [
     { name: 'ja', m: ja },
