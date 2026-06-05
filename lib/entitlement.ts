@@ -1,11 +1,25 @@
-// 収益化ゲート: freee 連携など周辺有料機能を「30日 利用権」(wallet 紐付・KV TTL) でゲート。
+// 収益化ゲート: 周辺有料機能を「30日 利用権」(wallet 紐付・KV TTL) でゲート。2 段階 tier:
+//   basic = /history 整形閲覧 + 会計CSV (T1 ¥300/月)
+//   pro   = basic を内包 + freee 自動連携 (T2 ¥3,000/月)
 // **アルファ中は ALPHA_ENTITLEMENT_BYPASS で全開放** (前払いオフ・memory:monetization_strategy)。
-// コア受取 (決済) は無料のまま — ここでゲートするのは freee sync 等の付加価値機能のみ。
+// コア受取 (決済) は無料のまま — ここでゲートするのは履歴整形/CSV/freee 等の付加価値機能のみ。
 //
-// server 専用 (process.env を読む・route からのみ import)。値 = 満了 ms epoch、KV TTL で自然失効。
+// server 専用 (process.env を読む・route からのみ import)。値 = JSON {tier,expiresAt}、KV TTL で
+// 自然失効。後方互換: 旧 bare ms-epoch 文字列は pro 利用権とみなす (Phase B 以前の付与=pro 相当)。
 import { kvGet, kvSet } from './kv';
 
 export const ENTITLEMENT_DEFAULT_DAYS = 30;
+
+export type EntitlementTier = 'basic' | 'pro';
+const TIER_RANK: Record<EntitlementTier, number> = { basic: 1, pro: 2 };
+
+/** have が min 以上の tier か (pro ⊃ basic)。have=null は常に false。 */
+export function tierAtLeast(
+  have: EntitlementTier | null,
+  min: EntitlementTier,
+): boolean {
+  return have !== null && TIER_RANK[have] >= TIER_RANK[min];
+}
 
 /** 既定 true (アルファ = 全開放)。'0' / 'false' で利用権必須運用へ切替。 */
 export function entitlementBypass(): boolean {
@@ -19,44 +33,96 @@ function entitlementKey(wallet: string): string {
 
 export type EntitlementStatus = {
   entitled: boolean;
+  tier: EntitlementTier | null;
   expiresAt: number | null;
   bypass: boolean;
 };
+
+type StoredEntitlement = { tier: EntitlementTier; expiresAt: number };
+
+// 保存値の解釈。JSON {tier,expiresAt} を優先し、旧 bare ms-epoch は pro 利用権として扱う。
+function parseStored(raw: string): StoredEntitlement | null {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const o = JSON.parse(trimmed) as { tier?: unknown; expiresAt?: unknown };
+      const tier =
+        o.tier === 'basic' || o.tier === 'pro' ? (o.tier as EntitlementTier) : null;
+      const expiresAt = Number(o.expiresAt);
+      if (tier && Number.isFinite(expiresAt)) return { tier, expiresAt };
+    } catch {
+      /* fall through → 不正 JSON は無効扱い */
+    }
+    return null;
+  }
+  const legacy = Number(trimmed);
+  if (Number.isFinite(legacy)) return { tier: 'pro', expiresAt: legacy };
+  return null;
+}
 
 export async function getEntitlement(
   wallet: string,
   nowMs: number = Date.now(),
 ): Promise<EntitlementStatus> {
   if (entitlementBypass()) {
-    return { entitled: true, expiresAt: null, bypass: true };
+    return { entitled: true, tier: 'pro', expiresAt: null, bypass: true };
   }
   const res = await kvGet(entitlementKey(wallet));
   if (!res.ok || !res.value) {
-    return { entitled: false, expiresAt: null, bypass: false };
+    return { entitled: false, tier: null, expiresAt: null, bypass: false };
   }
-  const expiresAt = Number(res.value);
-  if (!Number.isFinite(expiresAt)) {
-    return { entitled: false, expiresAt: null, bypass: false };
+  const stored = parseStored(res.value);
+  if (!stored) {
+    return { entitled: false, tier: null, expiresAt: null, bypass: false };
   }
-  return { entitled: expiresAt > nowMs, expiresAt, bypass: false };
+  const active = stored.expiresAt > nowMs;
+  return {
+    entitled: active,
+    tier: active ? stored.tier : null,
+    expiresAt: stored.expiresAt,
+    bypass: false,
+  };
 }
 
+/** wallet が min tier 以上の有効な利用権を持つか (既定 basic)。 */
 export async function isEntitled(
   wallet: string,
+  min: EntitlementTier = 'basic',
   nowMs: number = Date.now(),
 ): Promise<boolean> {
-  return (await getEntitlement(wallet, nowMs)).entitled;
+  const s = await getEntitlement(wallet, nowMs);
+  return s.entitled && tierAtLeast(s.tier, min);
 }
 
-/** 利用権を days 日付与 (満了 ms を保存・TTL で自然失効)。満了 ms を返す。 */
+/**
+ * 利用権を tier で days 日付与。既存の有効な利用権とマージする:
+ *  - tier   = max(既存, 新規) — 下位 tier の付与で上位を下げない (pro 中に basic 支払い等)
+ *  - expiry = max(既存, 新規) — 延長
+ * 確定 tier と満了 ms を返す。bypass 中も KV へは書く (bypass を切った時点で有効化)。
+ */
 export async function grantEntitlement(
   wallet: string,
+  tier: EntitlementTier,
   days: number = ENTITLEMENT_DEFAULT_DAYS,
   nowMs: number = Date.now(),
-): Promise<number> {
-  const expiresAt = nowMs + days * 86_400_000;
-  await kvSet(entitlementKey(wallet), String(expiresAt), {
-    ttlSec: days * 86_400,
-  });
-  return expiresAt;
+): Promise<{ tier: EntitlementTier; expiresAt: number }> {
+  const fresh = nowMs + days * 86_400_000;
+  let outTier = tier;
+  let outExpiry = fresh;
+
+  // 既存 (有効) とマージ。bypass 中は getEntitlement が expiresAt=null を返すため
+  // マージはスキップされ、要求 tier をそのまま書く。
+  const cur = await getEntitlement(wallet, nowMs);
+  if (cur.entitled && cur.tier && cur.expiresAt !== null) {
+    outTier = TIER_RANK[cur.tier] >= TIER_RANK[tier] ? cur.tier : tier;
+    outExpiry = Math.max(cur.expiresAt, fresh);
+  }
+
+  const ttlSec = Math.max(1, Math.ceil((outExpiry - nowMs) / 1000));
+  await kvSet(
+    entitlementKey(wallet),
+    JSON.stringify({ tier: outTier, expiresAt: outExpiry }),
+    { ttlSec },
+  );
+  return { tier: outTier, expiresAt: outExpiry };
 }

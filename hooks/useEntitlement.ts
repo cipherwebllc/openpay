@@ -4,8 +4,11 @@
 // アルファ中は server が bypass=true・entitled=true を返すため全開放。
 import { useQuery } from '@tanstack/react-query';
 
+export type EntitlementTier = 'basic' | 'pro';
+
 export type EntitlementStatus = {
   entitled: boolean;
+  tier: EntitlementTier | null;
   expiresAt: number | null;
   bypass: boolean;
 };
