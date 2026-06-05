@@ -17,7 +17,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
 import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Trash2 } from 'lucide-react';
-import { ReceiverBlock } from './ReceiverBlock';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { Field } from './Field';
@@ -83,7 +82,9 @@ export function RegisterMode({
       setSettings((s) => ({ ...s, receiver: value, receiverSource: source })),
     [setSettings],
   );
-  const autofill = useReceiverAutofill({
+  // 受取先は決済QRタブから継承 (レジでは編集しない)。autofill は接続ウォレットからの
+  // 受取先自動補完の side-effect のために呼ぶ (返り値は読まない)。
+  useReceiverAutofill({
     receiver: settings.receiver,
     receiverSource: settings.receiverSource,
     effectiveReceiver,
@@ -244,32 +245,35 @@ export function RegisterMode({
         <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
       </div>
 
-      {/* ① 受取先 (読み取り専用): 受取ウォレット / 通貨・チェーン / 決済設定 を継承表示し、
-          1 本の「決済QRの受取先で変更」リンクで決済QRタブへ誘導する。レジでは編集させない。
-          設定文脈なので上部に控えめに据え置き、会計操作は下の2カラムで前面化する。 */}
-      <ReceiverBlock
-        mode="readonly"
-        receiver={settings.receiver}
-        wallet={{ matches: autofill.matchesConnected }}
-        token={settings.token}
-        chain={settings.chain}
-        onEditCurrency={onEditCurrency ? handleEditCurrency : undefined}
-        advancedSummary={
-          <p className="text-xs text-slate-600">
-            <span className="font-medium text-slate-500">
-              {t('paymentPolicyLabel')}:
-            </span>{' '}
-            {t(`paymentPolicy.${paymentPolicyKey(settings.payMode, settings.gasMode)}`)}
-          </p>
-        }
-        labels={{
-          receiver: t('merchantAddressLabel'),
-          currency: t('currencyLabel'),
-          receiverMatchesWallet: t('receiverMatchesWallet'),
-          inheritedNote: t('currencyInheritedNote'),
-          changeLink: t('currencyChangeLink'),
-        }}
-      />
+      {/* 受取先/通貨/チェーン/決済設定は決済QRタブから継承。レジでは大きく露出させず、
+          確認用に 1 行のステータスバー (受取先・通貨/チェーン・決済設定 + 変更導線) へ圧縮し、
+          上部の縦幅を削って商品プリセットを上に押し上げる。 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+        <span className="font-medium text-slate-400">{t('statusReceiverLabel')}:</span>
+        <span className="font-mono text-slate-600">
+          {effectiveReceiver
+            ? shortAddress(effectiveReceiver)
+            : settings.receiver.trim() || '—'}
+        </span>
+        <span className="text-slate-400">
+          ({chainForSlug(settings.chain).name} / {symbol})
+        </span>
+        <span className="text-slate-300" aria-hidden>
+          ｜
+        </span>
+        <span className="text-slate-500">
+          {t(`paymentPolicy.${paymentPolicyKey(settings.payMode, settings.gasMode)}`)}
+        </span>
+        {onEditCurrency && (
+          <button
+            type="button"
+            onClick={handleEditCurrency}
+            className="font-medium text-brand hover:underline"
+          >
+            {t('statusChangeLink')}
+          </button>
+        )}
+      </div>
 
       {/* POS 2カラム: 左=操作 (page scroll) / 右=会計サマリ (lg で sticky 追従)。 */}
       <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">

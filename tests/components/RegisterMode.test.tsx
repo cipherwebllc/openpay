@@ -272,9 +272,10 @@ describe('RegisterMode', () => {
     expect(
       screen.getByText(/ガスレス決済 \/ ガス代：お客様負担/),
     ).toBeInTheDocument();
-    // 変更リンク文言。
+    // 受取先ラベル + コンパクトな「変更」リンク。
+    expect(screen.getByText('受取先:')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: '決済QRの受取先で変更' }),
+      screen.getByRole('button', { name: '変更' }),
     ).toBeInTheDocument();
   });
 
@@ -287,9 +288,7 @@ describe('RegisterMode', () => {
     await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
     // 非空カート → 確認ダイアログ → OK で遷移。
     await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(
-      screen.getByRole('button', { name: '決済QRの受取先で変更' }),
-    );
+    await user.click(screen.getByRole('button', { name: '変更' }));
     expect(confirmSpy).toHaveBeenCalled();
     expect(onEditCurrency).toHaveBeenCalled();
     confirmSpy.mockRestore();

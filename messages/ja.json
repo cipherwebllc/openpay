@@ -1129,6 +1129,8 @@
     "chainLabel": "受取チェーン",
     "currencyInheritedNote": "受取先・通貨・チェーン・決済設定は「決済QR」タブの設定を引き継ぎます。",
     "currencyChangeLink": "決済QRの受取先で変更",
+    "statusReceiverLabel": "受取先",
+    "statusChangeLink": "変更",
     "editCurrencyConfirm": "受取先・通貨・チェーンの変更は決済QRタブで行います。編集中のカートは破棄されますが続けますか？",
     "paymentPolicyLabel": "決済設定",
     "paymentPolicy": {

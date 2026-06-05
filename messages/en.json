@@ -1129,6 +1129,8 @@
     "chainLabel": "Receiving chain",
     "currencyInheritedNote": "Recipient, currency, chain and payment settings are inherited from the Payment QR tab.",
     "currencyChangeLink": "Change recipient in Payment QR",
+    "statusReceiverLabel": "Receiver",
+    "statusChangeLink": "Change",
     "editCurrencyConfirm": "Recipient/currency/chain is changed in the Payment QR tab. Your in-progress cart will be discarded — continue?",
     "paymentPolicyLabel": "Payment settings",
     "paymentPolicy": {
