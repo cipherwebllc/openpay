@@ -3,7 +3,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
-import { ChevronDown, Code2, Share2, Sparkles, Wallet } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  Share2,
+  Sparkles,
+  Wallet,
+} from 'lucide-react';
 import { ReceiverBlock } from './ReceiverBlock';
 import { Field } from './Field';
 import { StepCard } from './StepCard';
@@ -63,6 +70,7 @@ export function TipEmbedGenerator() {
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   const [publishMode, setPublishMode] = useState<PublishMode>('share');
   const [devOpen, setDevOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
   const tHeader = useTranslations('TipForm');
 
@@ -248,34 +256,6 @@ export function TipEmbedGenerator() {
                 addressInvalid: t('addressInvalid'),
               }}
             />
-
-            {/* Cross-chain 受信許可 toggle (USDC のみ意味あり)。Default ON。OFF で
-                creator が指定 chain での同一 chain 送金のみ受け付ける。 */}
-            {settings.token === 'usdc' && (
-              <Field label={t('crossChainHeading')}>
-                <label className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={settings.crossChain}
-                    onChange={(e) =>
-                      setSettings((s) => ({
-                        ...s,
-                        crossChain: e.target.checked,
-                      }))
-                    }
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                  />
-                  <span className="text-xs">
-                    <span className="font-semibold text-slate-700">
-                      {t('crossChainToggleLabel')}
-                    </span>
-                    <span className="block text-slate-500">
-                      {t('crossChainToggleDescription')}
-                    </span>
-                  </span>
-                </label>
-              </Field>
-            )}
           </div>
         </StepCard>
 
@@ -377,6 +357,66 @@ export function TipEmbedGenerator() {
             </Field>
           </div>
         </StepCard>
+
+        {/* ▸ 高度な設定 (任意): チップは設計上常にガスレス固定 (読み取り表示) +
+            crossChain (USDC のみ)。3 モードの IA を揃えるため折りたたみで集約。 */}
+        <details
+          className="group rounded-2xl border border-slate-200 bg-white"
+          open={advancedOpen}
+        >
+          <summary
+            onClick={(e) => {
+              e.preventDefault();
+              setAdvancedOpen((o) => !o);
+            }}
+            className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-slate-700"
+          >
+            <span>{t('advancedTitle')}</span>
+            <ChevronRight
+              className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
+              aria-hidden
+            />
+          </summary>
+          <div className="space-y-4 border-t border-slate-200 px-4 py-4">
+            {/* 決済方法 (読み取り): チップは常にガスレス固定 (ファンはガス代不要)。 */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                {t('paymentMethodLabel')}
+              </p>
+              <p className="mt-1 text-sm text-slate-700">
+                {t('paymentMethodGasless')}
+              </p>
+            </div>
+
+            {/* Cross-chain 受信許可 toggle (USDC のみ意味あり)。Default ON。OFF で
+                creator が指定 chain での同一 chain 送金のみ受け付ける。 */}
+            {settings.token === 'usdc' && (
+              <Field label={t('crossChainHeading')}>
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={settings.crossChain}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        crossChain: e.target.checked,
+                      }))
+                    }
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span className="text-xs">
+                    <span className="font-semibold text-slate-700">
+                      {t('crossChainToggleLabel')}
+                    </span>
+                    <span className="block text-slate-500">
+                      {t('crossChainToggleDescription')}
+                    </span>
+                  </span>
+                </label>
+              </Field>
+            )}
+          </div>
+        </details>
       </div>
 
       {/* 右カラム: プレビュー (主役) + 公開 + 開発者向け設定。desktop は sticky。 */}

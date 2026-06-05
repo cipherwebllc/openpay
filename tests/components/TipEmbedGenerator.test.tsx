@@ -499,6 +499,17 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
       screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
     ).toBeNull();
   });
+
+  it('高度な設定に「決済方法: ガスレス」が読み取り表示される (チップは常にガスレス固定)', async () => {
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    // 折りたたみ「高度な設定」見出し + 読み取りのガスレス決済方法 (選択 UI は無い)。
+    expect(screen.getByText('高度な設定 (任意)')).toBeInTheDocument();
+    expect(screen.getByText('決済方法')).toBeInTheDocument();
+    expect(
+      screen.getByText(/ファンはガス代を用意せず投げ銭できます/),
+    ).toBeInTheDocument();
+  });
 });
 
 describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorage)', () => {
