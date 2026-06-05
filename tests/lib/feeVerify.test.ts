@@ -1,0 +1,162 @@
+import { describe, it, expect, vi } from 'vitest';
+import type { Hex } from 'viem';
+import {
+  verifyJpycFeeTransfer,
+  verifyJpycFeeOnChain,
+  type FeeReceiptLog,
+} from '@/lib/feeVerify';
+
+const TRANSFER_TOPIC =
+  '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+const TOKEN = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29'; // JPYC v3
+const FROM = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+const TO = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const OTHER = '0x1111111111111111111111111111111111111111';
+const MIN = 300n * 10n ** 18n; // basic ¥300
+
+function pad32(addr: string): string {
+  return `0x${'0'.repeat(24)}${addr.slice(2).toLowerCase()}`;
+}
+
+function transferLog(args: {
+  token?: string;
+  from?: string;
+  to?: string;
+  value?: bigint;
+  topic?: string;
+}): FeeReceiptLog {
+  return {
+    address: args.token ?? TOKEN,
+    topics: [
+      args.topic ?? TRANSFER_TOPIC,
+      pad32(args.from ?? FROM),
+      pad32(args.to ?? TO),
+    ],
+    data: `0x${(args.value ?? MIN).toString(16)}`,
+  };
+}
+
+const expected = { token: TOKEN, from: FROM, to: TO, minValue: MIN } as const;
+
+describe('verifyJpycFeeTransfer', () => {
+  it('from→to に tier 額ちょうどの Transfer → ok', () => {
+    const r = verifyJpycFeeTransfer({ logs: [transferLog({})], expected });
+    expect(r).toEqual({ ok: true, value: MIN });
+  });
+
+  it('tier 額超過 → ok (value はそのまま)', () => {
+    const v = MIN + 1n;
+    const r = verifyJpycFeeTransfer({ logs: [transferLog({ value: v })], expected });
+    expect(r).toEqual({ ok: true, value: v });
+  });
+
+  it('額不足 → amount_too_low', () => {
+    const r = verifyJpycFeeTransfer({
+      logs: [transferLog({ value: MIN - 1n })],
+      expected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'amount_too_low' });
+  });
+
+  it('送金元が別 wallet → no_matching_transfer (なりすまし拒否)', () => {
+    const r = verifyJpycFeeTransfer({
+      logs: [transferLog({ from: OTHER })],
+      expected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('宛先が受領アドレス以外 → no_matching_transfer', () => {
+    const r = verifyJpycFeeTransfer({ logs: [transferLog({ to: OTHER })], expected });
+    expect(r).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('別トークンの Transfer は無視 → no_matching_transfer', () => {
+    const r = verifyJpycFeeTransfer({
+      logs: [transferLog({ token: OTHER })],
+      expected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('Transfer 以外の topic は無視', () => {
+    const r = verifyJpycFeeTransfer({
+      logs: [transferLog({ topic: `0x${'a'.repeat(64)}` })],
+      expected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('同一 tx 内の複数 from→to Transfer は合算', () => {
+    const r = verifyJpycFeeTransfer({
+      logs: [
+        transferLog({ value: 100n * 10n ** 18n }),
+        transferLog({ value: 200n * 10n ** 18n }),
+      ],
+      expected,
+    });
+    expect(r).toEqual({ ok: true, value: MIN }); // 100+200=300
+  });
+
+  it('小文字のログアドレス (token/from/to) を checksummed expected と照合 (getAddress 正規化)', () => {
+    // event log は小文字で来ることが多い。expected は checksummed (session.address /
+    // deployment.address)。getAddress で両者を正規化して照合する。
+    const r = verifyJpycFeeTransfer({
+      logs: [
+        transferLog({
+          token: TOKEN.toLowerCase(),
+          from: FROM.toLowerCase(),
+          to: TO.toLowerCase(),
+        }),
+      ],
+      expected,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('logs 空 → no_matching_transfer', () => {
+    expect(verifyJpycFeeTransfer({ logs: [], expected })).toEqual({
+      ok: false,
+      reason: 'no_matching_transfer',
+    });
+  });
+});
+
+describe('verifyJpycFeeOnChain', () => {
+  const txHash = `0x${'1'.repeat(64)}` as Hex;
+
+  it('status=success → 純関数へ委譲し ok', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({})],
+      }),
+    };
+    const r = await verifyJpycFeeOnChain({ publicClient, txHash, expected });
+    expect(r).toEqual({ ok: true, value: MIN });
+    expect(publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: txHash });
+  });
+
+  it('status=reverted → tx_reverted', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValue({ status: 'reverted', logs: [] }),
+    };
+    expect(await verifyJpycFeeOnChain({ publicClient, txHash, expected })).toEqual({
+      ok: false,
+      reason: 'tx_reverted',
+    });
+  });
+
+  it('receipt 取得失敗 (未マイニング等) → tx_not_found', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not found')),
+    };
+    expect(await verifyJpycFeeOnChain({ publicClient, txHash, expected })).toEqual({
+      ok: false,
+      reason: 'tx_not_found',
+    });
+  });
+});

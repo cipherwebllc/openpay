@@ -7,10 +7,12 @@
 // server 専用 (process.env を読む・route からのみ import)。値 = JSON {tier,expiresAt}、KV TTL で
 // 自然失効。後方互換: 旧 bare ms-epoch 文字列は pro 利用権とみなす (Phase B 以前の付与=pro 相当)。
 import { kvGet, kvSet } from './kv';
+import type { EntitlementTier } from './billing';
 
 export const ENTITLEMENT_DEFAULT_DAYS = 30;
 
-export type EntitlementTier = 'basic' | 'pro';
+// tier の正準定義は client/server 両用の lib/billing.ts。既存 importer 互換のため再 export。
+export type { EntitlementTier };
 const TIER_RANK: Record<EntitlementTier, number> = { basic: 1, pro: 2 };
 
 /** have が min 以上の tier か (pro ⊃ basic)。have=null は常に false。 */

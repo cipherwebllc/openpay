@@ -323,6 +323,12 @@ export const env = {
   enableFreeeSync:
     process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === 'true',
+  // 2段階 後払い定額利用権 (T1 履歴/CSV ¥300 + T2 freee ¥3,000) の有効化フラグ。
+  // **既定 OFF**。OFF の間は /history ぼかし等のゲートも支払い UI も出ず挙動完全不変。
+  // 本番点灯は flag ON + ALPHA_ENTITLEMENT_BYPASS=0 をセットで行う (Phase B go-live)。
+  enableBilling:
+    process.env.NEXT_PUBLIC_ENABLE_BILLING === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_BILLING === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
