@@ -241,26 +241,11 @@ export function RegisterMode({
       {/* ① 受取先 (読み取り専用): 受取ウォレット / 通貨・チェーン / 決済設定 を継承表示し、
           1 本の「決済QRの受取先で変更」リンクで決済QRタブへ誘導する。レジでは編集させない。 */}
       <ReceiverBlock
+        mode="readonly"
         receiver={settings.receiver}
-        onReceiverChange={autofill.handleManualChange}
-        onResolved={setResolvedReceiver}
-        showAddressInvalid={
-          !!settings.receiver &&
-          !effectiveReceiver &&
-          !isLikelyName(settings.receiver)
-        }
-        wallet={{
-          canUse: autofill.canUseConnected,
-          matches: autofill.matchesConnected,
-          onUse: autofill.useConnectedWallet,
-        }}
+        wallet={{ matches: autofill.matchesConnected }}
         token={settings.token}
         chain={settings.chain}
-        availableChains={[]}
-        onTokenChange={() => {}}
-        onChainChange={() => {}}
-        currencyMode="readonly"
-        receiverReadonly
         onEditCurrency={onEditCurrency ? handleEditCurrency : undefined}
         advancedSummary={
           <p className="text-xs text-slate-600">
@@ -272,12 +257,8 @@ export function RegisterMode({
         }
         labels={{
           receiver: t('merchantAddressLabel'),
-          receiverReadonlyLabel: t('merchantAddressLabel'),
           currency: t('currencyLabel'),
-          chain: t('chainLabel'),
-          useConnectedWallet: t('useConnectedWallet'),
           receiverMatchesWallet: t('receiverMatchesWallet'),
-          addressInvalid: t('addressInvalid'),
           inheritedNote: t('currencyInheritedNote'),
           changeLink: t('currencyChangeLink'),
         }}
@@ -444,9 +425,6 @@ export function RegisterMode({
         onGenerateReceiptNo={() => setReceiptNo(presetStore.nextReceiptNo())}
         labels={{
           title: t('accountingTitle'),
-          productName: '',
-          memo: '',
-          tax: '',
           receiptNo: t('receiptNoLabel'),
           receiptNoPlaceholder: t('receiptNoPlaceholder'),
           generate: t('receiptNoGenerate'),

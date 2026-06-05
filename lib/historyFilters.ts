@@ -33,8 +33,15 @@ export const EMPTY_HISTORY_FILTERS: HistoryFilters = {
   toTs: null,
 };
 
-// AND 合成 (安価な述語から順に)。検索は merchant/customer/storeName/note/txHash に加え
-// 記帳補助メタ (商品名/メモ/管理番号/明細名) も大小無視 substring 対象にする。
+// HistoryEntry の検索用 haystack (lowercase)。merchant/customer/storeName/note/txHash に加え
+// 記帳補助メタ (商品名/メモ/管理番号/明細名) を含む。lib/ledger の受取行検索と共有し、
+// 検索対象フィールドの追加/改名で両者がドリフトするのを防ぐ。
+export function historyEntrySearchText(e: HistoryEntry): string {
+  const lineNames = (e.lineItems ?? []).map((li) => li.name).join(' ');
+  return `${e.merchant} ${e.customer ?? ''} ${e.storeName} ${e.note} ${e.txHash ?? ''} ${e.productName ?? ''} ${e.memo ?? ''} ${e.receiptNo ?? ''} ${lineNames}`.toLowerCase();
+}
+
+// AND 合成 (安価な述語から順に)。検索は大小無視 substring。
 export function applyHistoryFilters(
   entries: ReadonlyArray<HistoryEntry>,
   filters: HistoryFilters,
@@ -45,12 +52,7 @@ export function applyHistoryFilters(
     if (filters.status !== 'all' && e.status !== filters.status) return false;
     if (filters.fromTs != null && e.ts < filters.fromTs) return false;
     if (filters.toTs != null && e.ts > filters.toTs) return false;
-    if (q.length > 0) {
-      const lineNames = (e.lineItems ?? []).map((li) => li.name).join(' ');
-      const hay =
-        `${e.merchant} ${e.customer ?? ''} ${e.storeName} ${e.note} ${e.txHash ?? ''} ${e.productName ?? ''} ${e.memo ?? ''} ${e.receiptNo ?? ''} ${lineNames}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
+    if (q.length > 0 && !historyEntrySearchText(e).includes(q)) return false;
     return true;
   });
 }

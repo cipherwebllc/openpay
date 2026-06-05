@@ -50,7 +50,6 @@ import {
   isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
-import { TaxCategorySelect } from './TaxCategorySelect';
 import {
   convertAnchorAmount,
   formatRemaining,
@@ -1256,10 +1255,11 @@ function SettingsSummary({
   gasMode: GasMode;
   payMode: PayMode;
 }) {
-  // 高度な設定 accordion 内には payMode / gas / split / quickAmount editor / 手数料
-  // 徴収先 のみ。summary では payMode (+ gasless 時のみ gas 負担者) を日本語/英語の
-  // 自然文で表示する。token / chain は Step 1、receiver は Step 2 summary に出るので
-  // ここでは重複させない。font-mono は外し、開発者向け内部値に見えないようにする。
+  // 高度な設定 accordion 内には payMode / gas / split のみ (quickAmount は Step ①、
+  // 手数料徴収先は fee=0 のため撤去済)。summary では payMode (+ gasless 時のみ gas
+  // 負担者) を日本語/英語の自然文で表示する。token / chain は Step 1、receiver は
+  // Step 2 summary に出るのでここでは重複させない。font-mono は外し、開発者向け
+  // 内部値に見えないようにする。
   const t = useTranslations('QrGenerator');
   const label =
     payMode === 'standard'

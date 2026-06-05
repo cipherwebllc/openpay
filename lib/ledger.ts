@@ -12,7 +12,7 @@ import type { HistoryEntry } from './history';
 import type { PayerReceipt, PayerReceiptStatus } from './payerReceipt';
 import type { PaymentResult } from './paymentLog';
 import type { TokenSymbol } from './tokens';
-import type { HistoryFilters } from './historyFilters';
+import { historyEntrySearchText, type HistoryFilters } from './historyFilters';
 
 export type LedgerDirection = 'in' | 'out';
 
@@ -42,7 +42,6 @@ function payerStatusToPaymentResult(s: PayerReceiptStatus): PaymentResult {
     case 'failed':
       return 'reverted';
     case 'pending':
-      return 'pending';
     case 'unknown':
       return 'pending';
   }
@@ -67,15 +66,13 @@ export function buildLedger(
 ): LedgerItem[] {
   const items: LedgerItem[] = [];
   for (const e of history) {
-    const lineNames = (e.lineItems ?? []).map((li) => li.name).join(' ');
     items.push({
       id: `in:${e.id}`,
       ts: e.ts,
       direction: 'in',
       asset: e.asset,
       status: e.status,
-      search:
-        `${e.merchant} ${e.customer ?? ''} ${e.storeName} ${e.note} ${e.txHash ?? ''} ${e.productName ?? ''} ${e.memo ?? ''} ${e.receiptNo ?? ''} ${lineNames}`.toLowerCase(),
+      search: historyEntrySearchText(e),
       kind: 'received',
       received: e,
     });

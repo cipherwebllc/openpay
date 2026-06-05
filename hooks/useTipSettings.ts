@@ -38,6 +38,14 @@ type TipSettings = {
 
 const STORAGE_KEY = 'openpay:tip-settings:v2';
 
+// token 別 default プリセットの新鮮なクローン (配列を共有しないよう毎回コピー)。
+function defaultTipPresets(): Record<TokenSymbol, string[]> {
+  return {
+    jpyc: [...DEFAULT_TIP_PRESETS.jpyc],
+    usdc: [...DEFAULT_TIP_PRESETS.usdc],
+  };
+}
+
 const DEFAULT_SETTINGS: TipSettings = {
   receiver: '',
   receiverSource: 'manual',
@@ -46,10 +54,7 @@ const DEFAULT_SETTINGS: TipSettings = {
   name: '',
   message: '',
   color: '#2563eb',
-  presets: {
-    jpyc: [...DEFAULT_TIP_PRESETS.jpyc],
-    usdc: [...DEFAULT_TIP_PRESETS.usdc],
-  },
+  presets: defaultTipPresets(),
   thanks: '',
   thanksUrl: '',
   webhook: '',
@@ -83,14 +88,10 @@ function sanitizeTipPresets(
   loaded: unknown,
   activeToken: TokenSymbol,
 ): Record<TokenSymbol, string[]> {
-  const withDefaults = (): Record<TokenSymbol, string[]> => ({
-    jpyc: [...DEFAULT_TIP_PRESETS.jpyc],
-    usdc: [...DEFAULT_TIP_PRESETS.usdc],
-  });
   if (typeof loaded === 'string') {
     const migrated = sanitizeTipPresetList(loaded.split(','));
-    if (migrated.length === 0) return withDefaults();
-    const result = withDefaults();
+    if (migrated.length === 0) return defaultTipPresets();
+    const result = defaultTipPresets();
     result[activeToken] = migrated;
     return result;
   }
@@ -98,12 +99,13 @@ function sanitizeTipPresets(
     const o = loaded as Record<string, unknown>;
     const jpyc = sanitizeTipPresetList(o.jpyc);
     const usdc = sanitizeTipPresetList(o.usdc);
+    const d = defaultTipPresets();
     return {
-      jpyc: jpyc.length > 0 ? jpyc : [...DEFAULT_TIP_PRESETS.jpyc],
-      usdc: usdc.length > 0 ? usdc : [...DEFAULT_TIP_PRESETS.usdc],
+      jpyc: jpyc.length > 0 ? jpyc : d.jpyc,
+      usdc: usdc.length > 0 ? usdc : d.usdc,
     };
   }
-  return withDefaults();
+  return defaultTipPresets();
 }
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {

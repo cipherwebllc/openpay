@@ -44,6 +44,12 @@ async function openEmbedTab(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('tab', { name: 'サイトに埋め込む' }));
 }
 
+// 「高度な設定」は折りたたみ (default 閉・button+条件描画)。中身 (決済方法表示 /
+// crossChain toggle) にアクセスするテストは先に開く。
+async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /高度な設定/ }));
+}
+
 describe('TipEmbedGenerator — 初期表示', () => {
   it('受取アドレス未入力 → share タブの URL プレースホルダが出る', async () => {
     render(<TipEmbedGenerator />);
@@ -467,6 +473,7 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
     await user.click(screen.getByRole('button', { name: /USDC/ }));
+    await openAdvanced(user);
 
     const checkbox = screen.getByRole('checkbox', {
       name: /他チェーンからの tip を許可/,
@@ -482,6 +489,7 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
 
     await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
     await user.click(screen.getByRole('button', { name: /USDC/ }));
+    await openAdvanced(user);
 
     const checkbox = screen.getByRole('checkbox', {
       name: /他チェーンからの tip を許可/,
@@ -493,18 +501,23 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
   });
 
   it('JPYC 選択時は cross-chain toggle 非表示 (USDC 専用機能)', async () => {
+    const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    // 高度な設定を開いても JPYC では crossChain toggle は出ない (token gate)。
+    await openAdvanced(user);
     expect(
       screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
     ).toBeNull();
   });
 
   it('高度な設定に「決済方法: ガスレス」が読み取り表示される (チップは常にガスレス固定)', async () => {
+    const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     // 折りたたみ「高度な設定」見出し + 読み取りのガスレス決済方法 (選択 UI は無い)。
     expect(screen.getByText('高度な設定 (任意)')).toBeInTheDocument();
+    await openAdvanced(user);
     expect(screen.getByText('決済方法')).toBeInTheDocument();
     expect(
       screen.getByText(/ファンはガス代を用意せず投げ銭できます/),
@@ -547,6 +560,7 @@ describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorag
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
     await user.click(screen.getByRole('button', { name: /USDC/ }));
+    await openAdvanced(user);
 
     const checkbox = screen.getByRole('checkbox', {
       name: /他チェーンからの tip を許可/,
@@ -563,6 +577,7 @@ describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorag
     unmount();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await openAdvanced(user);
     const restored = screen.getByRole('checkbox', {
       name: /他チェーンからの tip を許可/,
     });

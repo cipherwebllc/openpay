@@ -35,6 +35,7 @@ import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
+import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -473,35 +474,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // recover は hook と同一式で split を再計算: feeAmount(=サービス料) は常に 0、ネットワーク手数料
   // 相当額 = 回収した gas (feeValue)、merchantAmount は customer 上乗せなら満額・merchant 吸収なら
   // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
-  const relayHistoryGasless = useMemo(() => {
-    const v = relay.variables;
-    const fee = useRecover ? relayGasFeeValue() : 0n;
-    const merchantAmount = v
-      ? useRecover && v.gasMode === 'merchant'
-        ? v.value - fee
-        : v.value
-      : 0n;
-    return {
-      data: relay.data
-        ? {
-            txHash: relay.data.txHash,
-            userOpHash: null,
-            blockNumber: null,
-            success: relay.data.success,
-            pending: relay.data.pending,
-          }
-        : undefined,
-      error: relay.error,
-      variables: v
-        ? {
-            merchantAmount,
-            feeAmount: 0n,
-            saleAmount: v.value,
-            networkFeeEquivalent: fee,
-          }
-        : undefined,
-    };
-  }, [relay.data, relay.error, relay.variables, useRecover]);
+  const relayHistoryGasless = useRelayGaslessSnapshot(relay, useRecover);
   usePaymentHistory(
     historyCtx,
     useRelay ? relayHistoryGasless : gasless,

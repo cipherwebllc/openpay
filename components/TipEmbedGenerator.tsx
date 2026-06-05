@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import {
   ChevronDown,
-  ChevronRight,
   Code2,
   Share2,
   Sparkles,
@@ -45,6 +44,8 @@ import {
 
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
+// color 入力が不正 (COLOR_PATTERN 不一致) のときのプレビュー/プレースホルダ既定色。
+const DEFAULT_PREVIEW_COLOR = '#2563eb';
 
 // Tip widget は gasless 固定なので、受信可能な chain は gasless 対応のものだけ。
 // USDC は全 mainnet chain (Ethereum L1 含む) で ERC20 paymaster 対応、JPYC は
@@ -241,7 +242,7 @@ export function TipEmbedGenerator() {
               }
               onTokenChange={selectToken}
               onChainChange={selectChain}
-              currencyMode="editable"
+              mode="editable"
               chainGridClassName={
                 settings.token === 'usdc'
                   ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
@@ -294,7 +295,7 @@ export function TipEmbedGenerator() {
               <div className="flex items-center gap-3">
                 <input
                   type="color"
-                  value={colorValid ? settings.color : '#2563eb'}
+                  value={colorValid ? settings.color : DEFAULT_PREVIEW_COLOR}
                   onChange={(e) =>
                     setSettings((s) => ({ ...s, color: e.target.value }))
                   }
@@ -306,7 +307,7 @@ export function TipEmbedGenerator() {
                   onChange={(e) =>
                     setSettings((s) => ({ ...s, color: e.target.value }))
                   }
-                  placeholder="#2563eb"
+                  placeholder={DEFAULT_PREVIEW_COLOR}
                   className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
                 />
               </div>
@@ -360,24 +361,23 @@ export function TipEmbedGenerator() {
 
         {/* ▸ 高度な設定 (任意): チップは設計上常にガスレス固定 (読み取り表示) +
             crossChain (USDC のみ)。3 モードの IA を揃えるため折りたたみで集約。 */}
-        <details
-          className="group rounded-2xl border border-slate-200 bg-white"
-          open={advancedOpen}
-        >
-          <summary
-            onClick={(e) => {
-              e.preventDefault();
-              setAdvancedOpen((o) => !o);
-            }}
-            className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-slate-700"
+        <div className="rounded-2xl border border-slate-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((o) => !o)}
+            aria-expanded={advancedOpen}
+            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium text-slate-700"
           >
             <span>{t('advancedTitle')}</span>
-            <ChevronRight
-              className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
+            <ChevronDown
+              className={`h-4 w-4 flex-none text-slate-400 transition-transform ${
+                advancedOpen ? 'rotate-180' : ''
+              }`}
               aria-hidden
             />
-          </summary>
-          <div className="space-y-4 border-t border-slate-200 px-4 py-4">
+          </button>
+          {advancedOpen && (
+            <div className="space-y-4 border-t border-slate-200 px-4 py-4">
             {/* 決済方法 (読み取り): チップは常にガスレス固定 (ファンはガス代不要)。 */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -415,8 +415,9 @@ export function TipEmbedGenerator() {
                 </label>
               </Field>
             )}
-          </div>
-        </details>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 右カラム: プレビュー (主役) + 公開 + 開発者向け設定。desktop は sticky。 */}
@@ -428,7 +429,7 @@ export function TipEmbedGenerator() {
           </h3>
           <div
             className="rounded-2xl p-4 text-white shadow-sm"
-            style={{ backgroundColor: colorValid ? settings.color : '#2563eb' }}
+            style={{ backgroundColor: colorValid ? settings.color : DEFAULT_PREVIEW_COLOR }}
           >
             <p className="text-xs uppercase tracking-wider opacity-80">
               {tHeader('header')}

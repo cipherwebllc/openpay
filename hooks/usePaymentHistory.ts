@@ -94,7 +94,7 @@ type SubmittedAmounts = {
   networkFeeEquivalent?: bigint | null;
 };
 
-type GaslessSnapshot = {
+export type GaslessSnapshot = {
   data?: {
     // relay の pending (authorizationState 既使用) では txHash 不明 → null 許容。
     txHash: Hex | null;

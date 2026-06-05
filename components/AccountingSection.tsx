@@ -7,6 +7,9 @@
 //   variant='cart'   (レジ):   商品名/税はカート明細から自動反映するので手入力欄は出さず、
 //                              管理番号 + 採番 + 注記 のみ。
 // receiptNo はどちらも呼出側の component-local state (値+setter+採番ハンドラを受ける)。
+//
+// props は variant の discriminated union: cart は manual 専用のデータ/ラベルを *渡せない*
+// (型エラー)。これにより呼出側がダミーの空文字ラベルを渡す必要が無くなる。
 
 import { ChevronRight, Hash } from 'lucide-react';
 import { Field } from './Field';
@@ -16,53 +19,53 @@ import type { TaxCategory } from '@/lib/tax';
 const INPUT_CLASS =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
 
-export type AccountingSectionLabels = {
+type CommonLabels = {
   title: string;
   hint?: string;
-  productName: string;
-  productNamePlaceholder?: string;
-  memo: string;
-  memoPlaceholder?: string;
-  tax: string;
-  taxCustom?: string;
   receiptNo: string;
   receiptNoPlaceholder?: string;
   generate?: string;
-  cartAutoNote?: string;
 };
 
-export function AccountingSection({
-  variant,
-  labels,
-  productName,
-  onProductNameChange,
-  memo,
-  onMemoChange,
-  taxRate,
-  taxCategory,
-  onTaxChange,
-  receiptNo,
-  onReceiptNoChange,
-  onGenerateReceiptNo,
-}: {
-  variant: 'manual' | 'cart';
-  labels: AccountingSectionLabels;
-  // manual のみ:
-  productName?: string;
-  onProductNameChange?: (v: string) => void;
-  memo?: string;
-  onMemoChange?: (v: string) => void;
-  taxRate?: number | null;
-  taxCategory?: TaxCategory | null;
-  onTaxChange?: (next: {
-    taxRate: number | null;
-    taxCategory: TaxCategory | null;
-  }) => void;
-  // 共通:
+type CommonProps = {
   receiptNo: string;
   onReceiptNoChange: (v: string) => void;
   onGenerateReceiptNo?: () => void;
-}) {
+};
+
+type ManualProps = CommonProps & {
+  variant: 'manual';
+  labels: CommonLabels & {
+    productName: string;
+    productNamePlaceholder?: string;
+    memo: string;
+    memoPlaceholder?: string;
+    tax: string;
+    taxCustom?: string;
+  };
+  productName: string;
+  onProductNameChange: (v: string) => void;
+  memo: string;
+  onMemoChange: (v: string) => void;
+  taxRate: number | null;
+  taxCategory: TaxCategory | null;
+  onTaxChange: (next: {
+    taxRate: number | null;
+    taxCategory: TaxCategory | null;
+  }) => void;
+};
+
+type CartProps = CommonProps & {
+  variant: 'cart';
+  labels: CommonLabels & {
+    cartAutoNote?: string;
+  };
+};
+
+export type AccountingSectionProps = ManualProps | CartProps;
+
+export function AccountingSection(props: AccountingSectionProps) {
+  const { labels, receiptNo, onReceiptNoChange, onGenerateReceiptNo } = props;
   return (
     <details className="group rounded-2xl border border-slate-200 bg-white p-4">
       <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
@@ -74,41 +77,41 @@ export function AccountingSection({
       </summary>
       {labels.hint && <p className="mt-2 text-xs text-slate-500">{labels.hint}</p>}
       <div className="mt-3 space-y-4">
-        {variant === 'manual' && (
+        {props.variant === 'manual' && (
           <>
-            <Field label={labels.productName}>
+            <Field label={props.labels.productName}>
               <input
                 type="text"
-                value={productName ?? ''}
-                onChange={(e) => onProductNameChange?.(e.target.value)}
-                placeholder={labels.productNamePlaceholder}
+                value={props.productName}
+                onChange={(e) => props.onProductNameChange(e.target.value)}
+                placeholder={props.labels.productNamePlaceholder}
                 className={INPUT_CLASS}
                 maxLength={80}
               />
             </Field>
-            <Field label={labels.memo}>
+            <Field label={props.labels.memo}>
               <input
                 type="text"
-                value={memo ?? ''}
-                onChange={(e) => onMemoChange?.(e.target.value)}
-                placeholder={labels.memoPlaceholder}
+                value={props.memo}
+                onChange={(e) => props.onMemoChange(e.target.value)}
+                placeholder={props.labels.memoPlaceholder}
                 className={INPUT_CLASS}
                 maxLength={200}
               />
             </Field>
-            <Field label={labels.tax}>
+            <Field label={props.labels.tax}>
               <TaxCategorySelect
-                taxRate={taxRate ?? null}
-                taxCategory={taxCategory ?? null}
-                onChange={(next) => onTaxChange?.(next)}
-                ariaLabel={labels.tax}
-                customAriaLabel={labels.taxCustom}
+                taxRate={props.taxRate}
+                taxCategory={props.taxCategory}
+                onChange={(next) => props.onTaxChange(next)}
+                ariaLabel={props.labels.tax}
+                customAriaLabel={props.labels.taxCustom}
               />
             </Field>
           </>
         )}
-        {variant === 'cart' && labels.cartAutoNote && (
-          <p className="text-xs text-slate-500">{labels.cartAutoNote}</p>
+        {props.variant === 'cart' && props.labels.cartAutoNote && (
+          <p className="text-xs text-slate-500">{props.labels.cartAutoNote}</p>
         )}
         <Field label={labels.receiptNo}>
           <div className="flex items-center gap-2">
