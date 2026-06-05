@@ -894,6 +894,37 @@
     "itemCountMore": "+{count} more",
     "exportLineItemsCsv": "Line-item CSV"
   },
+  "Billing": {
+    "title": "Service plan",
+    "intro": "Receiving payments is free. Formatted transaction history, accounting CSV, and freee sync are available with a monthly plan (not tied to your payment volume).",
+    "currentActive": "Current plan: {tier} (until {date})",
+    "currentNone": "No active plan.",
+    "priceMonthly": "¥{yen}/mo",
+    "tier": {
+      "basic": {
+        "name": "Basic",
+        "desc": "Formatted transaction history and accounting CSV (freee / MF / Yayoi) downloads."
+      },
+      "pro": {
+        "name": "Accounting",
+        "desc": "Everything in Basic, plus automatic journal-entry sync to freee."
+      }
+    },
+    "connectRequired": "Connect a wallet to pay — use the button in the header.",
+    "mismatch": "Your signed-in wallet differs from the connected one. Please sign in again.",
+    "signIn": "Sign in with wallet",
+    "signingIn": "Confirming signature…",
+    "signInStatement": "Sign in to manage your OpenPay plan.",
+    "switchChain": "Switch to {chain}",
+    "payCta": "Pay ¥{yen} in {symbol}",
+    "sending": "Confirm in your wallet…",
+    "mining": "Waiting for confirmation…",
+    "verifying": "Verifying payment…",
+    "granted": "{tier} plan activated (until {date}).",
+    "payError": "Transfer failed. Check your balance and network, then try again.",
+    "verifyError": "Payment verification failed ({reason}). Make sure you sent the correct amount on the right chain.",
+    "softGateNote": "Your transaction data is your own, stored in this browser. The plan is consideration for formatting, CSV, and integrations."
+  },
   "FreeeSync": {
     "title": "freee sync (auto-journaling)",
     "signInRequired": "Sign in with your wallet to connect freee (\"Sign in\" at top right).",

@@ -894,6 +894,37 @@
     "itemCountMore": "ほか{count}点",
     "exportLineItemsCsv": "会計明細CSV"
   },
+  "Billing": {
+    "title": "システム利用料",
+    "intro": "決済の受け取りは無料です。取引履歴の整形表示・会計CSV・freee 連携は月額の利用権でご利用いただけます (決済額には連動しません)。",
+    "currentActive": "現在の利用権: {tier}（{date} まで）",
+    "currentNone": "現在、有効な利用権はありません。",
+    "priceMonthly": "¥{yen}/月",
+    "tier": {
+      "basic": {
+        "name": "ベーシック",
+        "desc": "取引履歴の整形表示と会計CSV (freee / MF / 弥生) のダウンロード。"
+      },
+      "pro": {
+        "name": "会計連携",
+        "desc": "ベーシックの全機能に加え、freee への自動仕訳連携。"
+      }
+    },
+    "connectRequired": "お支払いにはウォレットの接続が必要です。上部のボタンから接続してください。",
+    "mismatch": "ログイン中のウォレットと接続中のウォレットが異なります。再ログインしてください。",
+    "signIn": "ウォレットでログイン",
+    "signingIn": "署名を確認中…",
+    "signInStatement": "OpenPay の利用権を管理するためにログインします。",
+    "switchChain": "{chain} に切り替える",
+    "payCta": "¥{yen} を {symbol} で支払う",
+    "sending": "ウォレットで署名してください…",
+    "mining": "送金の確定を待っています…",
+    "verifying": "支払いを検証しています…",
+    "granted": "{tier} の利用権を付与しました（{date} まで）。",
+    "payError": "送金に失敗しました。残高・ネットワークを確認のうえ、再度お試しください。",
+    "verifyError": "支払いの検証に失敗しました ({reason})。正しい金額・チェーンで送金したかご確認ください。",
+    "softGateNote": "取引データはこのブラウザに保存された、お客様ご自身のものです。利用権は整形表示・CSV・連携などの付加機能の対価です。"
+  },
   "FreeeSync": {
     "title": "freee 連携 (自動仕訳)",
     "signInRequired": "freee 連携にはウォレットでのログインが必要です（右上の「ログイン (署名)」）。",
