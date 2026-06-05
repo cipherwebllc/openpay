@@ -163,9 +163,7 @@ export function HistoryToolbar({
         aria-label={t('filterDirectionLabel')}
         className="flex flex-wrap items-center gap-1"
       >
-        <span aria-hidden className="self-center text-[11px] font-medium text-slate-500">
-          {t('axisDirection')}
-        </span>
+        <AxisLabel label={t('axisDirection')} />
         {DIRECTION_OPTIONS.map((opt) => (
           <Pill
             key={opt.key}
@@ -179,9 +177,7 @@ export function HistoryToolbar({
       {/* 通貨フィルタ + 検索 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div role="group" aria-label={t('filterLabel')} className="flex flex-wrap items-center gap-1">
-          <span aria-hidden className="self-center text-[11px] font-medium text-slate-500">
-            {t('axisAsset')}
-          </span>
+          <AxisLabel label={t('axisAsset')} />
           {ASSET_OPTIONS.map((opt) => (
             <Pill
               key={opt.key}
@@ -204,9 +200,7 @@ export function HistoryToolbar({
       {/* 状態フィルタ + 期間 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div role="group" aria-label={t('filterStatusLabel')} className="flex flex-wrap items-center gap-1">
-          <span aria-hidden className="self-center text-[11px] font-medium text-slate-500">
-            {t('axisStatus')}
-          </span>
+          <AxisLabel label={t('axisStatus')} />
           {STATUS_OPTIONS.map((opt) => (
             <Pill
               key={opt.key}
@@ -310,6 +304,16 @@ export function HistoryToolbar({
       </div>
       <p className="text-[11px] text-slate-400">{t('accountingIncomeOnlyNote')}</p>
     </div>
+  );
+}
+
+// 各フィルタ行の左に置く軸見出し (種別/通貨/状態)。group に aria-label があるため
+// 視覚用テキストは aria-hidden で SR の二重読みを避ける。
+function AxisLabel({ label }: { label: string }) {
+  return (
+    <span aria-hidden className="text-[11px] font-medium text-slate-500">
+      {label}
+    </span>
   );
 }
 
