@@ -11,7 +11,20 @@ vi.mock('@/hooks/useResolveAddress', () => ({
   })),
 }));
 
+// JPYC ガス無料化: 負担者トグルは「JPYC EIP-3009 relay free 経路」のときだけ隠れる。
+// テスト env は relay flag OFF なので既定 'pimlico-7702' (= トグル表示)。free 経路の
+// 検証だけ provider を 'eip3009-relay' に上書きする (forwarder は env 未設定で null)。
+vi.mock('@/lib/jpycGaslessProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/jpycGaslessProvider')>();
+  return {
+    ...actual,
+    resolveJpycGaslessProvider: vi.fn(() => 'pimlico-7702' as const),
+  };
+});
+
 import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const STORAGE_KEY = 'openpay:checkout-settings:v1';
@@ -19,6 +32,36 @@ const STORAGE_KEY = 'openpay:checkout-settings:v1';
 describe('CheckoutLinkGenerator', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+  });
+
+  it('JPYC free 経路 (relay・forwarder 未設定): 負担者トグル非表示・gas=customer 固定', async () => {
+    // free 経路を模す: provider=relay + forwarder=null。storage に gasMode=merchant が
+    // 残っていても URL は gas=customer に正規化される。将来 JPYC が native Paymaster
+    // 対応 (forwarder 設定) されれば negative になり再表示される。
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        receiver: VALID,
+        token: 'jpyc',
+        chain: 'polygon',
+        gasMode: 'merchant',
+        items: [{ name: 'A', qty: '1', price: '100' }],
+      }),
+    );
+    render(<CheckoutLinkGenerator />);
+    await waitFor(() =>
+      screen.getByRole('button', { name: /URL をコピー/ }),
+    );
+    expect(
+      screen.queryByRole('button', { name: /店主が gas 相当額/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
+    ).not.toBeInTheDocument();
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/gas=merchant/);
   });
 
   it('初期レンダリング: JPYC が default、chain selector は非表示 (Polygon 固定)', async () => {

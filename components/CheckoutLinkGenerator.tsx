@@ -12,6 +12,8 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { USDC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { isLikelyName } from '@/lib/nameDetection';
 import { formatTokenAmount, pickEffectiveAddress } from '@/lib/format';
 import {
@@ -51,6 +53,17 @@ export function CheckoutLinkGenerator() {
   );
 
   const deployment = deploymentForSlug(settings.token, settings.chain);
+  // ガス負担者 (顧客/店主) の選択が無意味になるのは「JPYC の EIP-3009 relay free 経路」
+  // (OpenPay がガスを全額負担し誰からも徴収しない) のときだけ。USDC (Paymaster) や JPYC
+  // recover (forwarder 設定) では gas コストが発生し負担者が意味を持つ。決済側の
+  // useRelay && !useRecover と同じ条件で free 経路を判定し、その時だけトグルを隠して
+  // gas=customer 固定にする。将来 JPYC が native Paymaster 対応 (forwarder 設定) されれば
+  // 自動的に再表示される。
+  const isFreeGasless =
+    settings.payMode === 'gasless' &&
+    resolveJpycGaslessProvider(deployment, deployment.chainId) ===
+      'eip3009-relay' &&
+    jpycForwarderFor(deployment.chainId) === null;
   const itemsParsed = useMemo(
     () => parseCheckoutItemDrafts(settings.items, deployment.decimals),
     [settings.items, deployment.decimals],
@@ -72,7 +85,8 @@ export function CheckoutLinkGenerator() {
       to: effectiveReceiver,
       token: settings.token,
       chain: settings.chain,
-      gas: settings.gasMode,
+      // free 経路 (JPYC relay・無徴収) では負担者の概念が無いため customer 固定。
+      gas: isFreeGasless ? 'customer' : settings.gasMode,
       mode: settings.payMode,
       items: itemsParsed.items,
       orderId: settings.orderId.trim() || undefined,
@@ -91,6 +105,7 @@ export function CheckoutLinkGenerator() {
     settings.token,
     settings.chain,
     settings.gasMode,
+    isFreeGasless,
     settings.payMode,
     settings.orderId,
     settings.description,
@@ -324,7 +339,7 @@ export function CheckoutLinkGenerator() {
           </div>
         </Field>
 
-        {settings.payMode === 'gasless' && (
+        {settings.payMode === 'gasless' && !isFreeGasless && (
           <Field label={t('gasLabel')}>
             <div className="grid grid-cols-2 gap-2">
               {(['customer', 'merchant'] as GasMode[]).map((g) => {

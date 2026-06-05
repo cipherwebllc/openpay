@@ -152,7 +152,7 @@ describe('Legal pages', () => {
       expect(section2.textContent).toMatch(/不可逆性|取消/);
     });
 
-    it('section 7 (OpenPay 利用手数料および gas 肩代わり) の本文に差額精算なしの明示', () => {
+    it('section 7 (OpenPay 利用手数料および gas 肩代わり) の本文に JPYC 無料 (全額負担・無徴収) の明示', () => {
       renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
       const section7Heading = screen.getByRole('heading', {
         level: 2,
@@ -160,8 +160,10 @@ describe('Legal pages', () => {
       });
       const body = section7Heading.nextElementSibling;
       expect(body?.textContent).toMatch(/OpenPay 利用手数料/);
-      expect(body?.textContent).toMatch(/gas 肩代わり/);
-      expect(body?.textContent).toMatch(/差額精算/);
+      expect(body?.textContent).toMatch(/gas を肩代わり/);
+      // JPYC ガス無料化: 当社が全額負担し相当額を一切徴収しない旨を明示
+      expect(body?.textContent).toMatch(/全額負担/);
+      expect(body?.textContent).toMatch(/一切徴収しません/);
       expect(body?.textContent).toMatch(/取消.*返金.*修正/);
     });
 
@@ -185,7 +187,8 @@ describe('Legal pages', () => {
       expect(main.textContent).toMatch(
         /お客様の支払い[^。]*店舗売上[^。]*預かりません/,
       );
-      expect(main.textContent).toMatch(/店舗ウォレットへ直接送金/);
+      // JPYC ガス無料化で「全額が」直接送金される旨を挿入したため、間に文字を許容。
+      expect(main.textContent).toMatch(/店舗ウォレットへ[^。]*直接送金/);
     });
 
     it('en: section 7 / 8 が英訳で render される', () => {
@@ -272,8 +275,10 @@ describe('Legal pages', () => {
     it('支払時期: 「直接送金」表現で merchant 売上を預からない設計を明示', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      // ノンカストディ設計の明文化 — 「取引金額から自動的に控除」(預かり前提) でないこと
-      expect(main.textContent).toMatch(/当社指定ウォレットへ直接送金/);
+      // ノンカストディ設計の明文化 — 決済は顧客→店主へ直接送金 (預かり前提でない)。
+      // JPYC ガス無料化で当社指定ウォレットへの送金は生じず、商品代金等は全額が
+      // 店主の指定ウォレットへ直接届く。
+      expect(main.textContent).toMatch(/店主の指定ウォレットへ直接送金/);
       // 「受領・保管・管理」と否定形「ものではありません」が同一文に並ぶことを要求。
       // 単語の存在だけ見ると「受領、保管、管理します」のような affirmation 改変で
       // CI が素通りするため、否定形までを regex に含めて意味反転を検出する。
@@ -281,11 +286,16 @@ describe('Legal pages', () => {
       expect(main.textContent).not.toMatch(/取引金額から自動的に控除/);
     });
 
-    it('ネットワーク手数料相当額の負担者選択 (顧客 / 店主) を明示', () => {
+    it('JPYC ガス無料化: 当社が gas を全額負担し相当額を徴収しない旨を明示 (regression guard)', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      // Phase 1: gasless の gas 相当額の負担者を店主が選択できる旨
-      expect(main.textContent).toMatch(/負担者.*顧客.*店主|顧客 \/ 店主/);
+      // gasless の JPYC 経路で当社が gas を全額負担し利用者から相当額を徴収しないこと。
+      // 「回収/徴収」へ逆戻りしたら検知できるよう「徴収しません」を要求。
+      expect(main.textContent).toMatch(/全額負担/);
+      expect(main.textContent).toMatch(/徴収しません/);
+      // 旧モデルの「相当額を…徴収」「負担者 (顧客 / 店主)」記述が復活していないこと。
+      expect(main.textContent).not.toMatch(/負担者.*顧客.*店主|顧客 \/ 店主/);
+      expect(main.textContent).not.toMatch(/相当額を JPYC 等で徴収/);
     });
   });
 
@@ -330,7 +340,7 @@ describe('Legal pages', () => {
   // 通常決済（ガスあり） / mode=standard 追加に伴う両モード並記 regression
   // -------------------------------------------------------------------------
   describe('regression: 通常決済（ガスあり）モード追加', () => {
-    it('ja Terms 第 5 条 (料金) は Phase 1 で 0% 化、両モードとネットワーク手数料負担者選択を明記', () => {
+    it('ja Terms 第 5 条 (料金) は Phase 1 で 0% 化、両モード記載 + JPYC ガス無料 (全額負担・無徴収)', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
       const article5 = screen.getByRole('heading', {
         level: 2,
@@ -343,8 +353,16 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/0%/);
       expect(body?.textContent).not.toMatch(/1\.0%/);
       expect(body?.textContent).not.toMatch(/0\.5%/);
-      // ネットワーク手数料相当額の負担者選択 (顧客/店主) を明記
-      expect(body?.textContent).toMatch(/顧客負担または店主負担/);
+      // JPYC ガス無料化: 当社が全額負担し相当額を徴収しない。負担者選択 (顧客/店主) は撤去。
+      expect(body?.textContent).toMatch(/全額負担/);
+      // 無徴収を正面で要求 (USDC carve-out の「徴収しません」と区別するため JPYC 文脈で binding)。
+      expect(body?.textContent).toMatch(
+        /全額負担し[^。]*利用者から相当額を徴収しません/,
+      );
+      expect(body?.textContent).not.toMatch(/顧客負担または店主負担/);
+      // 旧モデル (相当額を JPYC 等で回収/徴収します) の affirmative が復活していないこと。
+      expect(body?.textContent).not.toMatch(/相当額を JPYC 等で[^。]*徴収します/);
+      expect(body?.textContent).not.toMatch(/回収として/);
     });
 
     it('ja Terms 第 2 条 (定義) で「ガスレス決済」「通常決済（ガスあり）」が定義語として導入される', () => {
@@ -370,6 +388,12 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/0%/);
       expect(body?.textContent).not.toMatch(/1\.0%/);
       expect(body?.textContent).not.toMatch(/0\.5%/);
+      // JPYC ガス無料化: en でも全額負担・無徴収を要求し、旧 collect-equivalent への
+      // 回帰を検知する (Codex finding: en art5 が collection 文言を取りこぼしていた)。
+      expect(body?.textContent).toMatch(/bears that Network Fee in full/);
+      expect(body?.textContent).toMatch(/does not collect any equivalent/);
+      expect(body?.textContent).not.toMatch(/collects an amount equivalent/i);
+      expect(body?.textContent).not.toMatch(/as recovery of the advanced gas/i);
     });
 
     it('ja Tokutei 役務の対価 は Phase 1 で 0% 化、両モード記載で旧 % 手数料は不在', () => {
@@ -428,14 +452,15 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: 手数料 0% / 案A 改定で terms/tokutei/disclaimer は 2026-05-29、privacy は 2026-05-16 据置', () => {
-      // 2026-05-29: 料金条項 (Terms 第5条 / 特商法 役務の対価) を 0% 化に改定。
-      // Disclaimer も同改定で「送金されるのはネットワーク手数料相当額」へ冒頭・第7条を
-      // 修正し、Terms 第9条(2) 賠償上限を固定額ベースに改めたため 2026-05-29 に更新。
-      // privacy は料金モデルに直接言及しないため 2026-05-16 据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-05-29');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-05-29');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-05-29');
+    it('effectiveDate: JPYC ガス無料化で terms/tokutei/disclaimer は 2026-06-05、privacy は 2026-05-16 据置', () => {
+      // 2026-06-05: JPYC ガスレスのネットワーク手数料相当額の徴収を全廃し、当社が
+      // ガスを全額負担し利用者から相当額を一切徴収しない旨に Terms 第3条/第5条・
+      // Disclaimer 冒頭/第7条・特商法 (役務の対価/対価以外/支払時期/返品) を改定。
+      // 負担者選択 (顧客/店主) の記述も撤去。privacy は料金モデルに直接言及しないため
+      // 2026-05-16 据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-05');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-05');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-05');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-05-16');
     });
   });
@@ -660,7 +685,8 @@ describe('Legal pages', () => {
 
   // -------------------------------------------------------------------------
   // C8: 法務 prose (Terms art2(6)/art3/art5(2)・特商法) は「JPYC=sponsorship
-  // (当社徴収) / USDC=erc20 (顧客が Paymaster に支払い)」をハードコードしている。
+  // (当社がガスを肩代わり・無徴収) / USDC=erc20 (顧客が Paymaster に支払い)」を
+  // ハードコードしている (paymasterMode は徴収有無ではなく paymaster 種別を表す)。
   // lib/tokens.ts の静的 paymasterMode マッピングが変わったら本テストが落ち、prose
   // の見直しを促す。
   //
@@ -712,7 +738,7 @@ describe('Legal pages', () => {
       expect(buyerOnlyUsdc.every((d) => d.paymasterMode === 'unavailable')).toBe(
         true,
       );
-      // JPYC は全て sponsorship (prose: 当社が肩代わり・JPYC で徴収)。
+      // JPYC は全て sponsorship (prose: 当社がガスを肩代わり・無徴収)。
       expect(jpyc.length).toBeGreaterThan(0);
       expect(jpyc.every((d) => d.paymasterMode === 'sponsorship')).toBe(true);
       // 逆向き: sponsorship 経路は JPYC のみ (新 sponsorship トークン追加を検知)。

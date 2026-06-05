@@ -59,7 +59,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const isStandard = params.mode === 'standard' || modeOverride === 'standard';
   const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
-  const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
+  // JPYC ガス無料化: JPYC ガスレスは recover を除き常に無徴収 (relay free / 非 relay
+  // sponsorship free のいずれも OpenPay が gas を全額負担)。USDC は従来どおり。
+  const isJpyc = deployment.symbol === 'jpyc';
   const isMerchantGas = !isStandard && params.gas === 'merchant';
 
   const { address, isConnected, chainId } = useAccount();
@@ -107,7 +109,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // paymaster quote。relay は quote を持たないため effective で切り替える (PaymentForm と同型)。
   const effectiveGasAmount: bigint | undefined = useRelay
     ? relayGasEquiv
-    : gasAmount;
+    : isJpyc
+      ? 0n
+      : gasAmount;
   const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
     () =>
@@ -122,9 +126,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
-  // Circle 経路は顧客が permit で USDC gas を Circle paymaster に支払うため、sponsorship
-  // 形式の gas 立替 reimbursement は加算しない (testnet sponsorship 倒し時の二重徴収防止)。
-  const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
+  // JPYC ガス無料化: JPYC は gas を一切徴収しないため 0 (OpenPay 全額負担)。mainnet USDC は
+  // erc20 で 0、残る testnet USDC sponsorship fallback (非商用・非 JPYC) のみ従来どおり回収。
+  const gasReimbursement =
+    !isJpyc && !isCircle && paymasterMode === 'sponsorship'
+      ? (gasAmount ?? 0n)
+      : 0n;
 
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
   // gasless 経路は gas 見積を計上 (JPYC relay=回収額/0 or sponsorship=立替回収 / USDC erc20=
@@ -612,7 +619,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
                 value={fmt(relayGasEquiv)}
               />
-            ) : useRelay ? (
+            ) : useRelay || isJpyc ? (
+              // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。
               <Row
                 label={t('gasRow')}
                 labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
@@ -658,7 +666,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             ? t('standardHint', { nativeToken })
             : useRecover
               ? t('gaslessHintJpycRecover')
-              : useRelay
+              : useRelay || isJpyc
                 ? t('gaslessHintJpycRelay')
                 : isErc20Paymaster
                   ? t('gaslessHintUsdc')

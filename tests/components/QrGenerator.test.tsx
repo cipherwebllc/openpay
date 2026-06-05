@@ -46,7 +46,21 @@ vi.mock('@/hooks/useMarketRates', () => ({
   useMarketRates: () => marketRatesData(),
 }));
 
+// JPYC ガス無料化: 負担者トグルは「JPYC EIP-3009 relay free 経路」のときだけ隠れる。
+// その判定は resolveJpycGaslessProvider(=relay) かつ forwarder 未設定。テスト env は
+// relay flag OFF なので既定は 'pimlico-7702' (= 負担者トグル表示)。free 経路の検証
+// テストだけ provider を 'eip3009-relay' に上書きする (forwarder は env 未設定で null)。
+vi.mock('@/lib/jpycGaslessProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/jpycGaslessProvider')>();
+  return {
+    ...actual,
+    resolveJpycGaslessProvider: vi.fn(() => 'pimlico-7702' as const),
+  };
+});
+
 import { QrGenerator } from '@/components/QrGenerator';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -96,10 +110,85 @@ async function openEip681(
   await user.click(summary);
 }
 
+// provider mock を各テスト前に既定 (pimlico-7702 = relay 非経路 = 負担者トグル表示) へ
+// 戻す。free 経路テストの 'eip3009-relay' 上書きが他テストへ漏れないようにする。
+beforeEach(() => {
+  vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+});
+
 describe('QrGenerator', () => {
   beforeEach(() => {
     window.localStorage.clear();
     useOriginMock.mockReturnValue('https://test.local');
+  });
+
+  describe('JPYC ガス無料化: free 経路 (EIP-3009 relay・forwarder 未設定)', () => {
+    it('gas 負担者トグルが非表示・サマリは「OpenPay がガス負担」・gas=customer 固定', async () => {
+      // free 経路を模す: provider=relay + forwarder=null (env 未設定で既定 null)。
+      vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          chain: 'polygon',
+          payMode: 'gasless',
+          gasMode: 'merchant',
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openStep2(user);
+      // accordion 閉のサマリ: 負担者ではなく「OpenPay がガス負担」
+      const toggle = await screen.findByRole('button', { name: /高度な設定/ });
+      expect(
+        within(toggle).getByText(/ガスレス決済（OpenPay がガス負担）/),
+      ).toBeInTheDocument();
+      // accordion を開く → 負担者トグルは存在しない
+      await openAdvanced(user);
+      expect(
+        screen.queryByRole('button', { name: /店主が gas 相当額/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
+      ).not.toBeInTheDocument();
+      // storage に gasMode=merchant が残っていても URL は gas=customer 固定 (merchant 出ない)
+      await user.type(screen.getByPlaceholderText('1000'), '5');
+      await openQrModal(user);
+      await waitFor(() => {
+        expect(screen.queryByText((t) => t.includes('gas=merchant'))).toBeNull();
+      });
+    });
+
+    it('split 指定時は free 判定にせず負担者トグルを表示 (PaymentForm が relay を外し非 free 経路になるため)', async () => {
+      // relay + forwarder null でも split があると決済側は sponsorship に倒れ非 free。
+      // 生成側も isFreeGasless=false とし、QR が「無料」と偽らないようトグルを出す。
+      vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          chain: 'polygon',
+          payMode: 'gasless',
+          gasMode: 'customer',
+          splits: [
+            { address: '0x2222222222222222222222222222222222222222', percent: '40' },
+          ],
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openStep2(user);
+      await openAdvanced(user);
+      // split があるので free 扱いにならず、負担者トグルが表示される
+      expect(
+        await screen.findByRole('button', { name: /顧客が gas 相当額/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /店主が gas 相当額/ }),
+      ).toBeInTheDocument();
+    });
   });
 
   describe('初期レンダリング', () => {

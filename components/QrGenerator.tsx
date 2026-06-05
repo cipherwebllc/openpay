@@ -68,6 +68,8 @@ import {
   type ChainSlug,
 } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 import { normalizeAmountList, truncateAmount } from '@/lib/amount';
@@ -216,13 +218,31 @@ export function QrGenerator() {
       ? splitParsed.entries
       : undefined;
 
+  // ガス負担者 (顧客/店主) の選択が無意味になるのは「JPYC の EIP-3009 relay free 経路」
+  // (OpenPay がガスを全額負担し誰からも徴収しない) のときだけ。USDC (Paymaster で顧客が
+  // gas を負担、店主吸収も可) や JPYC recover (forwarder 設定で相当額回収)、JPYC
+  // sponsorship (flag off) では gas コストが発生し負担者が意味を持つ。決済側の
+  // useRelay (= !isStandard && !hasSplit && provider==='eip3009-relay') かつ !useRecover
+  // と同条件で free 経路を判定し、その時だけトグルを隠して gas=customer 固定にする。
+  // split 指定時は PaymentForm が relay を外し sponsorship に倒す (= 非 free) ため除外する。
+  // 将来 JPYC が native Paymaster 対応 (forwarder 設定) されれば自動的に再表示される。
+  const isFreeGasless = useMemo(() => {
+    if (isStandard || splitsForUrl) return false;
+    const dep = deploymentForSlug(settings.token, settings.chain);
+    return (
+      resolveJpycGaslessProvider(dep, dep.chainId) === 'eip3009-relay' &&
+      jpycForwarderFor(dep.chainId) === null
+    );
+  }, [isStandard, splitsForUrl, settings.token, settings.chain]);
+
   const payUrl = useMemo(() => {
     if (!hydrated || !effectiveReceiver || !origin || !amountValid) return '';
     const params: PayParams = {
       to: effectiveReceiver,
       token: settings.token,
       chain: settings.chain,
-      gas: settings.gasMode,
+      // free 経路 (JPYC relay・無徴収) では負担者の概念が無いため customer 固定。
+      gas: isFreeGasless ? 'customer' : settings.gasMode,
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
       split: splitsForUrl,
@@ -251,6 +271,7 @@ export function QrGenerator() {
     settings.token,
     settings.chain,
     settings.gasMode,
+    isFreeGasless,
     settings.crossChain,
     settings.storeName,
     settings.productName,
@@ -822,7 +843,11 @@ export function QrGenerator() {
               onToggle={() => setAccordionOpen((o) => !o)}
               summaryLabel={t('advancedSettings')}
               summary={
-                <SettingsSummary gasMode={settings.gasMode} payMode={payMode} />
+                <SettingsSummary
+                  gasMode={settings.gasMode}
+                  payMode={payMode}
+                  showGasMode={!isFreeGasless}
+                />
               }
             >
               <Field label={t('payModeLabel')}>
@@ -885,7 +910,7 @@ export function QrGenerator() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
                   {t('standardHint')}
                 </div>
-              ) : (
+              ) : !isFreeGasless ? (
                 <Field label={t('gasLabel')}>
                   <div className="grid grid-cols-2 gap-2">
                     {(['customer', 'merchant'] as GasMode[]).map((g) => {
@@ -918,7 +943,7 @@ export function QrGenerator() {
                     })}
                   </div>
                 </Field>
-              )}
+              ) : null}
 
               {!isStandard && (
                 <Field
@@ -1268,12 +1293,16 @@ function SettingsAccordion({
 function SettingsSummary({
   gasMode,
   payMode,
+  showGasMode,
 }: {
   gasMode: GasMode;
   payMode: PayMode;
+  // 負担者 (顧客/店主) を summary に出すのは recover 有効時のみ。free / USDC では
+  // 負担者の概念が無いため、ガスレスは「OpenPay がガス負担」一本で表示する。
+  showGasMode: boolean;
 }) {
   // 高度な設定 accordion 内には payMode / gas / split のみ (quickAmount は Step ①、
-  // 手数料徴収先は fee=0 のため撤去済)。summary では payMode (+ gasless 時のみ gas
+  // 手数料徴収先は fee=0 のため撤去済)。summary では payMode (+ recover 有効時のみ gas
   // 負担者) を日本語/英語の自然文で表示する。token / chain は Step 1、receiver は
   // Step 2 summary に出るのでここでは重複させない。font-mono は外し、開発者向け
   // 内部値に見えないようにする。
@@ -1281,9 +1310,11 @@ function SettingsSummary({
   const label =
     payMode === 'standard'
       ? t('advancedSummary.standard')
-      : gasMode === 'customer'
-        ? t('advancedSummary.gaslessCustomerGas')
-        : t('advancedSummary.gaslessMerchantGas');
+      : !showGasMode
+        ? t('advancedSummary.gaslessFree')
+        : gasMode === 'customer'
+          ? t('advancedSummary.gaslessCustomerGas')
+          : t('advancedSummary.gaslessMerchantGas');
   return <span>{label}</span>;
 }
 

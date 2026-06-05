@@ -1092,7 +1092,7 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     expect(screen.getAllByText('100 USDC').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('表示: gas 込みで merchant 控除 (sponsorship JPYC, gas=2 JPYC)', () => {
+  it('JPYC ガス無料化: gas=merchant でも gas 控除なし (sponsorship JPYC・店主満額)', () => {
     setURL(`to=${MERCHANT}&token=jpyc&gas=merchant&amount=1000`);
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(2000n * 10n ** 18n);
@@ -1107,8 +1107,11 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     )!;
     expect(customerDt.parentElement).toHaveTextContent('1000 JPYC');
 
-    // 店主受取 = 1000 - 0 (fee) - 2 (gas) = 998
-    expect(screen.getByText('998 JPYC')).toBeInTheDocument();
+    // JPYC 無料化: OpenPay が gas を全額負担 → 店主受取 = 1000 (満額・gas 控除なし)。
+    // 旧モデルの 998 (gas 2 JPYC 控除) は出ない。
+    expect(screen.queryByText('998 JPYC')).not.toBeInTheDocument();
+    // 顧客支払額・店主受取がともに 1000 JPYC
+    expect(screen.getAllByText('1000 JPYC').length).toBeGreaterThanOrEqual(2);
   });
 
   it('内税の hint テキストが表示される (店主負担)', () => {
@@ -1121,7 +1124,7 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     ).toBeInTheDocument();
   });
 
-  it('submit: sponsorship JPYC で feeAmount=0・gas は networkFeeEquivalent で回収', async () => {
+  it('submit: JPYC 無料化で gas=merchant でも徴収なし (merchant 満額・各額 0)', async () => {
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=jpyc&gas=merchant&amount=1000`);
     setAccount({ connected: true, chainId: polygonAmoy.id });
@@ -1134,14 +1137,12 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     await user.click(screen.getByRole('button', { name: /1000 JPYC を支払う/ }));
 
     const call = mutate.mock.calls[0][0];
-    // merchant = 1000 - 0 (fee) - 2 (gas) = 998
-    expect(call.merchantAmount).toBe(998n * 10n ** 18n);
-    // fee=0 (サービス料撤廃)。運営は gas (2 JPYC) を回収: networkFeeEquivalent は会計記録、
-    // gasReimbursement は useBatchPayment が実 on-chain で feeReceiver へ加算送金する額。
+    // JPYC 無料化: OpenPay が gas を全額負担し一切徴収しない → merchant 満額 1000、
+    // fee / networkFeeEquivalent / gasReimbursement はすべて 0 (feeReceiver 送金なし)。
+    expect(call.merchantAmount).toBe(1000n * 10n ** 18n);
     expect(call.feeAmount).toBe(0n);
-    expect(call.networkFeeEquivalent).toBe(2n * 10n ** 18n);
-    expect(call.gasReimbursement).toBe(2n * 10n ** 18n);
-    // 合計 = merchant 998 + gas 2 = 1000 (顧客 outflow と一致)
+    expect(call.networkFeeEquivalent).toBe(0n);
+    expect(call.gasReimbursement).toBe(0n);
   });
 
   it('境界 underflow: amount < fee + gas → エラー表示 + 送信 disabled', () => {
@@ -1206,6 +1207,30 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     expect(call.feeAmount).toBe(0n);
     expect(call.networkFeeEquivalent).toBe(500_000n);
     expect(call.gasReimbursement).toBe(500_000n);
+  });
+
+  it('JPYC ガス無料化: split でも gas 控除なし (受取人満額按分・徴収 0)', async () => {
+    // JPYC split (非 relay sponsorship) も無徴収。受取人は gas 控除なしで満額按分され、
+    // gasReimbursement / networkFeeEquivalent はともに 0 (feeReceiver 送金なし)。gas quote が
+    // 出ても split 按分・徴収には反映されない (effectiveGasAmount=0)。
+    const user = userEvent.setup();
+    const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    setURL(`to=${MERCHANT}&token=jpyc&gas=merchant&amount=1000&split=${B}:50`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    setGasQuote('ready', 2n * 10n ** 18n); // gas quote は出るが無視される
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    await user.click(screen.getByRole('button', { name: /1000 JPYC を支払う/ }));
+    const call = mutate.mock.calls[0][0];
+    // distributable = 1000 - 0 (fee) - 0 (gas) = 1000, primary 50% = 500, B 50% = 500
+    expect(call.merchantAmount).toBe(500n * 10n ** 18n);
+    expect(call.extraRecipients[0].amount).toBe(500n * 10n ** 18n);
+    expect(call.feeAmount).toBe(0n);
+    expect(call.networkFeeEquivalent).toBe(0n);
+    expect(call.gasReimbursement).toBe(0n);
   });
 });
 

@@ -81,7 +81,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const requiredChain = chainForSlug(chainSlug);
   const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
-  const isSponsorship = !isStandard && paymasterMode === 'sponsorship';
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
@@ -180,17 +179,33 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   const isMerchantGas = !isStandard && params.gas === 'merchant';
+  // 「店主がガスを負担」表示が実態に合うのは、実際に gas コストが発生する経路のみ
+  // (recover relay、または非 relay の paymaster 見積)。free relay (OpenPay 全額負担)
+  // では gas コストが無く merchant が負担するものが無いため、旧 gas=merchant QR でも
+  // 負担者バナーを出さない。会計上の金額計算 (isMerchantGas) は不変。
+  // JPYC ガス無料化 (2026-06-05): JPYC のガスレスは recover (forwarder 設定) を除き
+  // 常に無料 (OpenPay が gas を全額負担し誰からも徴収しない)。relay free 経路だけでなく、
+  // 非 relay の Pimlico sponsorship 経路 (split など) も同様に無徴収とし、決済額は全額が
+  // 店主へ届く。USDC は従来どおり (顧客が paymaster に gas を支払う)。
+  const isJpyc = deployment.symbol === 'jpyc';
+  // 「店主がガスを負担」表示が実態に合うのは、実際に gas コストが店主に転嫁される経路
+  // のみ (USDC で gas=merchant、または JPYC recover)。JPYC の無料経路 (relay free /
+  // sponsorship free) では gas コストが無いため、旧 gas=merchant QR でも負担者バナーを
+  // 出さない。会計金額計算は effectiveGasAmount=0 で自然に「控除なし」になる。
+  const merchantGasActive = isMerchantGas && !(isJpyc && !useRecover);
 
   // gas 見積 (gasless mode のみ):
   //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
-  //   Sponsorship (JPYC): Pimlico が POL gas を立替、運営は徴収した JPYC で別途精算。
+  //   Sponsorship (JPYC): Pimlico が POL gas を立替、運営が全額負担 (無徴収)。
   //   standard mode: 顧客 wallet が gas を自前で算定・支払うため OpenPay 側で見積らない。
   const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
   // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、
-  // 非 relay は paymaster quote。relay は quote を持たないため effective で切り替える。
+  // JPYC 非 relay (sponsorship) は無徴収のため 0、USDC は paymaster quote。
   const effectiveGasAmount: bigint | undefined = useRelay
     ? relayGasEquiv
-    : gasAmount;
+    : isJpyc
+      ? 0n
+      : gasAmount;
 
   const effectiveMode = isStandard ? 'standard' : params.mode;
   const breakdown = useMemo(
@@ -206,6 +221,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
 
   // standard mode では split は無視 (シンプルな EOA 直列 transfer に限定)。
+  // gas 軸は calcBreakdown と同じ effectiveGasAmount を使う (JPYC は無料経路で 0 のため
+  // 受取人の按分・顧客 outflow が gas で目減りしない。raw gasAmount を使うと JPYC split で
+  // gasReimbursement=0 と矛盾し受取人が過少配分になる)。
   const splitBreakdown = useMemo(() => {
     if (isStandard || !params.split || params.split.length === 0) return null;
     return calcSplitBreakdown(
@@ -215,7 +233,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       params.split,
       params.mode,
       params.gas,
-      gasAmount ?? 0n,
+      effectiveGasAmount ?? 0n,
     );
   }, [
     isStandard,
@@ -225,7 +243,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     params.split,
     params.mode,
     params.gas,
-    gasAmount,
+    effectiveGasAmount,
   ]);
 
   // 顧客支払額: calcBreakdown が gasMode を考慮済 (customer なら +gas、merchant なら amount のまま)
@@ -233,12 +251,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
     ? splitBreakdown.customerPays
     : breakdown.customerPays;
 
-  // Sponsorship 時は fee transfer に gas を含める。ERC20 Paymaster 時は fee のみ
-  // (gas は paymaster が顧客から自動徴収するため二重徴収を避ける)。
-  // Circle 経路は顧客が permit で USDC gas を Circle paymaster に支払うため、sponsorship
-  // 形式の gas 立替 reimbursement は加算しない (加算すると testnet で resolvePaymasterMode が
-  // sponsorship に倒れる際に gas 二重徴収 + OpenPay 徴収0 違反になる)。
-  const gasReimbursement = isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
+  // JPYC ガス無料化: JPYC は recover (forwarder) 以外 gas を一切徴収しないため、JPYC の
+  // gasReimbursement は常に 0 (OpenPay が全額負担)。mainnet USDC は erc20 で 0 (paymaster が
+  // 顧客から直接徴収)。残るのは testnet の USDC sponsorship fallback (非商用・非 JPYC) のみで、
+  // ここは従来どおり gas 相当を回収する。circle は二重徴収回避で 0。
+  const gasReimbursement =
+    !isJpyc && !isCircle && paymasterMode === 'sponsorship'
+      ? (gasAmount ?? 0n)
+      : 0n;
 
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
   // gasless 経路は gas 見積を計上する: JPYC sponsorship は立替回収 (= feeReceiver へ送る
@@ -672,7 +692,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
               labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
               value={fmt(relayGasEquiv)}
             />
-          ) : useRelay ? (
+          ) : useRelay || isJpyc ? (
+            // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。
             <Row
               label={t('gasRow')}
               labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
@@ -712,7 +733,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
             strong
           />
         </dl>
-        {isMerchantGas && !isStandard && (
+        {merchantGasActive && !isStandard && (
           <p className="mt-3 text-xs text-emerald-700">
             {t('merchantGasHint')}
           </p>
@@ -722,7 +743,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
             ? t('standardBatchHint')
             : useRecover
               ? t('gaslessBatchHintJpycRecover')
-              : useRelay
+              : useRelay || isJpyc
                 ? t('gaslessBatchHintJpycRelay')
                 : splitBreakdown
                 ? t('splitBatchHint', {

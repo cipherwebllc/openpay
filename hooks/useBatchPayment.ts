@@ -29,10 +29,7 @@ import type { CircleSmartAccountBundle } from '@/lib/smartAccount/circleAccount'
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
 import type { PublicClient } from 'viem';
 import { assertGasCeiling } from '@/lib/gasCeiling';
-import {
-  isJpycSponsorshipChain,
-  resolveNativeJpycRate,
-} from '@/lib/gasReimbursement';
+import { resolveNativeJpycRate } from '@/lib/gasReimbursement';
 import { logger } from '@/lib/logger';
 import {
   buildPaymentLogEvent,
@@ -127,21 +124,10 @@ export function useBatchPayment(
 
       const { smartAccountClient, pimlicoClient } = clients;
 
-      // sponsorship 濫用防御: JPYC sponsorship chain では運営が native gas を
-      // 立て替えるため、feeReceiver への集約額 (利用手数料 + gas 立替回収) > 0 が必須。
-      // stale/改竄 caller が 0 を渡すと運営が gas を全額被る穴になるので reject する。
-      // collect-at-ceiling で正規の JPYC sponsorship は常に gasReimbursement = gasAmount > 0。
-      // (testnet USDC の sponsorship fallback は非 JPYC chain・gasAmount=0 が正常な
-      //  ため対象外。erc20 paymaster は顧客が実 gas を直接負担するので対象外。)
-      if (
-        resolvePaymasterMode(deployment) === 'sponsorship' &&
-        isJpycSponsorshipChain(deployment.chainId) &&
-        params.feeAmount + (params.gasReimbursement ?? 0n) <= 0n
-      ) {
-        throw new Error(
-          'JPYC ガスレス決済にはガス代の立替回収 (利用手数料 + gasReimbursement > 0) が必須です。',
-        );
-      }
+      // JPYC ガス無料化 (2026-06-05): JPYC sponsorship のガス代立替回収を全廃したため、
+      // 旧「feeReceiver 集約額 > 0 必須」の濫用防御ガードは撤去 (OpenPay が JPYC gas を
+      // 全額負担する設計に変更)。paymaster の濫用対策は Pimlico policy 制限と relayer/
+      // paymaster 低残高監視 (#148) に委ねる。gasReimbursement は呼出側で常に 0。
 
       // gas ceiling は両 mode で適用。sponsorship では運営赤字回避、erc20 では
       // 顧客の USDC 出費上限の保護として機能する (どちらも UX 上の安全弁)。

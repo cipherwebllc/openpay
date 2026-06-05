@@ -244,32 +244,11 @@ describe('useBatchPayment', () => {
     expect((d.args as readonly [string, bigint])[1]).toBe(50_000_000n);
   });
 
-  it('JPYC sponsorship + feeAmount=0 → reject (sponsorship 濫用防御、Codex P2 fix)', async () => {
-    // JPYC sponsorship chain では運営が native gas を立替えるため reimbursement
-    // (feeAmount>0) 必須。0 を渡すと運営が gas を全額被るので送信前に弾く。
-    mountReady({ paymasterMode: 'sponsorship' });
-    vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
-    const { result } = renderHook(() => useBatchPayment(jpycDep), {
-      wrapper: makeWrapper(),
-    });
-
-    result.current.mutate({
-      tokenAddress: TOKEN,
-      merchant: MERCHANT,
-      merchantAmount: 50_000_000n, // merchant 送金はあるが reimbursement 欠落
-      feeReceiver: FEE_RECV,
-      feeAmount: 0n,
-    });
-
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/reimbursement|ガス代/);
-    expect(sendUserOperation).not.toHaveBeenCalled();
-  });
-
-  it('JPYC sponsorship + feeAmount<0 (負値) も reject (invariant feeAmount>0 を完全強制)', async () => {
-    // === 0n だけでなく <= 0n で弾く。負値は calcFee からは出ないが、guard が
-    // documented invariant (feeAmount > 0) を完全に満たすことを fence。
-    mountReady({ paymasterMode: 'sponsorship' });
+  it('JPYC ガス無料化: sponsorship + reimbursement 0 (feeAmount=0) でも reject せず送信成立', async () => {
+    // 旧「JPYC sponsorship は reimbursement (feeAmount>0) 必須」濫用防御ガードは撤去。
+    // JPYC は OpenPay が gas を全額負担し一切徴収しないため、feeReceiver 集約額が 0 でも
+    // 送信が成立する (merchant transfer のみ・feeReceiver transfer なし)。
+    mountReady({ maxFeePerGas: 50n * GWEI, chainId: baseSepolia.id });
     vi.mocked(resolvePaymasterMode).mockReturnValue('sponsorship');
     const { result } = renderHook(() => useBatchPayment(jpycDep), {
       wrapper: makeWrapper(),
@@ -280,12 +259,17 @@ describe('useBatchPayment', () => {
       merchant: MERCHANT,
       merchantAmount: 50_000_000n,
       feeReceiver: FEE_RECV,
-      feeAmount: -1n,
+      feeAmount: 0n,
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toMatch(/reimbursement|ガス代/);
-    expect(sendUserOperation).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(sendUserOperation).toHaveBeenCalledOnce();
+    const arg = sendUserOperation.mock.calls[0][0];
+    // merchant transfer 1 件のみ (gas 立替回収なし → feeReceiver transfer は載らない)
+    expect(arg.calls).toHaveLength(1);
+    const d = decodeFunctionData({ abi: erc20Abi, data: arg.calls[0].data });
+    expect((d.args as readonly [string, bigint])[0]).toBe(MERCHANT);
+    expect((d.args as readonly [string, bigint])[1]).toBe(50_000_000n);
   });
 
   it('merchantAmount=0 かつ fee=0 (空 batch) → 送信せずエラー (Codex P2 fix)', async () => {

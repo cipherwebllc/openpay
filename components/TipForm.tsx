@@ -51,7 +51,9 @@ export function TipForm({ params }: { params: TipParams }) {
   const requiredChain = chainForSlug(chainSlug);
   const paymasterMode = resolvePaymasterMode(deployment);
   const isErc20Paymaster = paymasterMode === 'erc20';
-  const isSponsorship = paymasterMode === 'sponsorship';
+  // JPYC ガス無料化: JPYC ガスレスは recover を除き常に無徴収 (relay free / 非 relay
+  // sponsorship free のいずれも OpenPay が gas を全額負担)。USDC は従来どおり。
+  const isJpyc = deployment.symbol === 'jpyc';
   // ネイティブガストークン symbol (Polygon=POL / Kaia=KAIA / Base etc=ETH)。
   // gasInfoJpyc / gasInfoUsdc tooltip の {nativeToken} で使用。
   const nativeToken = requiredChain.nativeCurrency.symbol;
@@ -122,7 +124,9 @@ export function TipForm({ params }: { params: TipParams }) {
   // paymaster quote (circle / erc20)。relay は quote を持たないため effective で切り替える。
   const effectiveGasAmount: bigint | undefined = useRelay
     ? relayGasEquiv
-    : gasAmount;
+    : isJpyc
+      ? 0n
+      : gasAmount;
   const breakdown = useMemo(
     () =>
       calcBreakdown(
@@ -140,10 +144,12 @@ export function TipForm({ params }: { params: TipParams }) {
   //   Sponsorship (JPYC・非 relay): Pimlico が立替、運営は徴収 JPYC で精算 (fee transfer に内包)。
   //   EIP-3009 relay (JPYC): recover は forwarder が gas 相当を feeReceiver へ分割回収。
   const totalCustomerOutflow = breakdown.customerPays;
-  // gasReimbursement は Pimlico mutate にのみ渡る on-chain 立替回収額 (relay / circle では未使用)。
-  // circle は paymaster が permit で顧客 USDC から actualGas を別途徴収するため加算しない。
+  // JPYC ガス無料化: JPYC は gas を一切徴収しないため 0 (OpenPay 全額負担)。relay / circle は
+  // 元々 0。残る testnet USDC sponsorship fallback (非商用・非 JPYC) のみ従来どおり回収。
   const gasReimbursement =
-    !useRelay && isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
+    !useRelay && !isJpyc && !isCircle && paymasterMode === 'sponsorship'
+      ? (gasAmount ?? 0n)
+      : 0n;
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。relay=回収額/0、
   // 非 relay sponsorship=立替回収 / USDC erc20=paymaster 徴収分。circle は receipt 由来の
   // circlePaymasterNetUsdc を使うため null (mutate へは undefined)。
@@ -509,7 +515,8 @@ export function TipForm({ params }: { params: TipParams }) {
               labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
               value={fmt(relayGasEquiv)}
             />
-          ) : useRelay ? (
+          ) : useRelay || isJpyc ? (
+            // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。
             <Row
               label={t('gasRow')}
               labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
@@ -546,7 +553,7 @@ export function TipForm({ params }: { params: TipParams }) {
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {useRecover
             ? t('gaslessHintJpycRecover')
-            : useRelay
+            : useRelay || isJpyc
               ? t('gaslessHintJpycRelay')
               : isErc20Paymaster
                 ? t('gaslessHintUsdc')

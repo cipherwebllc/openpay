@@ -31,6 +31,8 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 import { isLikelyName } from '@/lib/nameDetection';
 import { paymentPolicyKey } from '@/lib/paymentPolicy';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { chainForSlug } from '@/lib/chains';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -114,6 +116,14 @@ export function RegisterMode({
 
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const symbol = deployment.displaySymbol;
+  // 決済QRタブから継承する設定に stale な gasMode=merchant が残っていても、JPYC free
+  // 経路 (relay・無徴収) では負担者の概念が無いため、レジの URL・ポリシー表示でも
+  // gas=customer 相当に正規化する (決済側 useRelay && !useRecover と同条件)。
+  const isFreeGasless =
+    settings.payMode === 'gasless' &&
+    resolveJpycGaslessProvider(deployment, deployment.chainId) ===
+      'eip3009-relay' &&
+    jpycForwarderFor(deployment.chainId) === null;
   const taxDec = taxDisplayDecimals(settings.token);
 
   function addFromPreset(p: ProductPreset) {
@@ -231,7 +241,7 @@ export function RegisterMode({
           to: effectiveReceiver,
           token: settings.token,
           chain: settings.chain,
-          gas: settings.gasMode,
+          gas: isFreeGasless ? 'customer' : settings.gasMode,
           mode: settings.payMode,
           items: validItems,
           receiptNo: receiptNo || undefined,
@@ -262,7 +272,11 @@ export function RegisterMode({
           ｜
         </span>
         <span className="text-slate-500">
-          {t(`paymentPolicy.${paymentPolicyKey(settings.payMode, settings.gasMode)}`)}
+          {isFreeGasless
+            ? t('paymentPolicy.gaslessFree')
+            : t(
+                `paymentPolicy.${paymentPolicyKey(settings.payMode, settings.gasMode)}`,
+              )}
         </span>
         {onEditCurrency && (
           <button

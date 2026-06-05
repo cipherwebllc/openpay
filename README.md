@@ -16,7 +16,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 - **No wallet lock-in** — any wallet that signs standard ERC20 / ERC-4337 / EIP-7702 transactions can pay; no app install required.
 - **JPYC / USDC** support (Japan's electronic payment instrument + Circle's USD stablecoin).
 - **QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.
-- **Two payment modes** — Standard (customer pays gas) or Gasless (OpenPay sponsors gas via Pimlico).
+- **Two payment modes** — Standard (customer pays gas in the native token) or Gasless (customer pays with just the token; for JPYC OpenPay bears the gas, for USDC gas is paid in USDC via the paymaster).
 - **Portal UX** — a single app with separate surfaces for paying (`/scan`), receiving (`/create`), browsing history (`/history`), and discovering on-chain services (`/explore`), all behind a shared header / bottom-nav and wallet-state badge.
 - **Block explorer link** on every receipt — merchants verify on-chain truth, not just a UI screen.
 - **Local transaction history** — per-browser LocalStorage history at `/history`, with filters (period / status / search), a JPY-converted GMV summary, CSV export, and a "latest 3" strip on the QR builder.
@@ -37,18 +37,18 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 | Mode | Gas | Best for |
 |---|---|---|
 | **Standard payment (with gas)** | Customer pays in their own wallet (POL / ETH) | Web3 users who already hold native gas |
-| **Gasless payment** | OpenPay sponsors gas via Pimlico (and Circle Paymaster for USDC on Base / Arbitrum / Optimism) | Customers who only hold the payment token |
+| **Gasless payment** | For JPYC, OpenPay bears the gas (collects nothing). For USDC, the customer pays gas in USDC via the Pimlico / Circle paymaster (OpenPay collects 0) | Customers who only hold the payment token |
 
-- Gasless for **JPYC** uses OpenPay's self-hosted **EIP-3009 relayer**: the customer signs a `receiveWithAuthorization` (a plain EIP-712 signature — **no EIP-7702 delegation required**, so it works in MetaMask and other injected wallets), and the relayer forwards it to an on-chain forwarder contract that atomically pays the merchant and recovers a fixed gas-equivalent in JPYC. Live on **Polygon and Kaia** mainnet. Pimlico / EIP-7702 sponsorship remains as an automatic fallback.
+- Gasless for **JPYC** uses OpenPay's self-hosted **EIP-3009 relayer**: in the free configuration the customer signs a `transferWithAuthorization` directly to the merchant (a plain EIP-712 signature — **no EIP-7702 delegation required**, so it works in MetaMask and other injected wallets), and the relayer submits it on-chain so the merchant is paid the full amount. OpenPay bears the gas (POL / KAIA) itself and collects nothing from the customer or merchant. (A `receiveWithAuthorization`-to-forwarder "recover" mode that reclaims a fixed gas-equivalent exists in the code but is **off by default**.) Live on **Polygon and Kaia** mainnet. Pimlico / EIP-7702 sponsorship remains as an automatic fallback.
 - Gasless for **USDC** uses ERC-4337 + ERC-7702 — the customer's existing EOA is reused; no smart-wallet creation step. Gas is sponsored via **Pimlico** (ERC20 paymaster) or, for USDC on Base / Arbitrum / Optimism, **Circle Paymaster v0.8** (gas paid directly in USDC; OpenPay collects 0 fee). These require EIP-7702, so USDC gasless needs a chain that supports it (see the Avalanche note below).
 - Standard mode is a plain ERC20 `transfer` (single transfer to the merchant).
-- In gasless mode, the network-fee bearer is selectable: `gas=customer` (default) or `gas=merchant`.
+- The gasless network-fee bearer can be set with `gas=customer` (default) or `gas=merchant`. It only has an effect on paths where OpenPay collects a gas-equivalent; **JPYC gasless currently collects nothing** (OpenPay bears the gas), so the full payment reaches the merchant either way.
 
 ## Fees
 
 OpenPay service fee is **0% during the alpha period**, and OpenPay never charges a fee tied to the transaction amount. There are no monthly fees, minimum fees, or setup fees. Merchant funds flow directly to the merchant wallet.
 
-In **gasless** mode, OpenPay advances the native gas (POL / KAIA / ETH) — via the **EIP-3009 relayer** for JPYC or the **Pimlico paymaster** for USDC — and recovers it as a **network-fee reimbursement collected in the payment token** (JPYC / USDC). For JPYC this reimbursement is a **fixed amount** (independent of the transaction amount; any surplus over the actual gas is not refunded) — see [docs/DEPLOY_CHECKLIST.md §9.5](./docs/DEPLOY_CHECKLIST.md). In **standard** mode the customer pays gas directly from their own wallet and OpenPay does not touch it.
+In **gasless** mode for **JPYC**, OpenPay bears the native gas (POL / KAIA) as a business cost and collects nothing from the customer or merchant — the full payment amount reaches the merchant wallet. For **USDC**, gas is paid by the customer directly in USDC via the Pimlico / Circle paymaster (OpenPay collects 0). In **standard** mode the customer pays gas directly from their own wallet and OpenPay does not touch it.
 
 A future pricing model that is **not tied to transaction volume** (e.g. a monthly subscription or a prepaid usage license such as an NFT pass / time-limited rights) is under consideration. This direction is chosen so OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 
@@ -88,7 +88,7 @@ Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio,
 - **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
 - **USDC** — receive on any of **6 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1 / Avalanche C-Chain). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on the 5 buyer-only chains (Unichain, World Chain, Sonic, Sei, HyperEVM). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
 
-The widget is gasless-only (Pimlico sponsorship — OpenPay absorbs network gas, fans only spend the tip token). Creator-defined presets, custom thank-you message, optional webhook on success. (Because tips are gasless-only and gasless relies on EIP-7702, USDC tips on **Avalanche C-Chain** are unavailable until ACP-209 activates — fans are guided to another chain; see the Avalanche note above.)
+The widget is gasless-only — fans only need the tip token, no native gas (for JPYC OpenPay bears the gas and collects nothing; for USDC the fan pays gas in USDC via the Pimlico / Circle paymaster, OpenPay collects 0). Creator-defined presets, custom thank-you message, optional webhook on success. (Because tips are gasless-only and gasless relies on EIP-7702, USDC tips on **Avalanche C-Chain** are unavailable until ACP-209 activates — fans are guided to another chain; see the Avalanche note above.)
 
 ## Non-custodial design
 
@@ -174,7 +174,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_NETWORK_ENV` | `testnet` (default) or `mainnet` | yes |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
-| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Operator receiver wallet — collects the JPYC gas-reimbursement for sponsored payments (unset → funds burn at 0x...dEaD) | **mainnet** |
+| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Operator receiver wallet. Still **required on mainnet** (the env guard rejects the placeholder), but it is **not used to collect anything in the default free config** — it only matters if the EIP-3009 forwarder's gas-reimbursement (recover) mode is enabled, which is off by default (JPYC gasless collects nothing) | **mainnet** |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect projectId (<https://cloud.reown.com>) | optional |
 | `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain | recommended on prod |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |
