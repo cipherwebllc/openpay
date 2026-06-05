@@ -26,6 +26,25 @@ vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => siweMock(),
 }));
 
+// SIWE ログイン UI は freee/利用権 が有効なときだけ出す。flag は holder で test 毎に切替
+// (既定 = freee ON で SIWE UI を出す。両 OFF で隠れることは専用 test で検証)。
+const flags = vi.hoisted(() => ({ enableFreeeSync: true, enableBilling: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableFreeeSync() {
+        return flags.enableFreeeSync;
+      },
+      get enableBilling() {
+        return flags.enableBilling;
+      },
+    },
+  };
+});
+
 type SiweState = ReturnType<typeof defaultSiwe>;
 function defaultSiwe() {
   return {
@@ -105,6 +124,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   visibleConnectorsMock.mockReturnValue([]);
   setSiwe();
+  flags.enableFreeeSync = true; // 既定: SIWE 機能 ON → ログイン UI を出す
+  flags.enableBilling = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -232,6 +253,24 @@ describe('WalletBadge: SIWE サインイン', () => {
     fireEvent.click(within(details).getByRole('menuitem', { name: '切断' }));
     expect(siwe.signOut).toHaveBeenCalledTimes(1);
     expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('SIWE 機能 (freee/利用権) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
+    flags.enableFreeeSync = false;
+    flags.enableBilling = false;
+    setConnected();
+    setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).queryByRole('menuitem', { name: 'ログイン (署名)' }),
+    ).toBeNull();
+    // サインイン済でも ✓/ログアウトは出さない (機能が無いので無意味)
+    expect(screen.queryByLabelText('ログイン済')).toBeNull();
+    // 切断は常に出る
+    expect(
+      within(details).getByRole('menuitem', { name: '切断' }),
+    ).toBeInTheDocument();
   });
 });
 

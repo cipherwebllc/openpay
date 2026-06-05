@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { Check, ChevronDown } from 'lucide-react';
 import { shortAddress } from '@/lib/format';
+import { env } from '@/lib/env';
 import { useVisibleConnectors } from '@/hooks/useVisibleConnectors';
 import { useSiweSession } from '@/hooks/useSiweSession';
 
@@ -26,6 +27,9 @@ export function WalletBadge() {
   const visible = useVisibleConnectors(connectors);
   const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut } =
     useSiweSession();
+  // SIWE ログインを必要とする機能 (freee 連携 / 利用権) が有効なときだけログイン UI を出す。
+  // どちらも OFF (現状の本番) では「繋ぐ/切る」だけ表示し、何にも繋がらないログイン導線を出さない。
+  const siweEnabled = env.enableFreeeSync || env.enableBilling;
 
   // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。
   const handleSignIn = () => {
@@ -42,7 +46,7 @@ export function WalletBadge() {
       <details className="group relative">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
           <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
-          {isSignedIn && (
+          {siweEnabled && isSignedIn && (
             <Check className="h-3 w-3 text-emerald-600" aria-label={t('signedIn')} />
           )}
           <span className="font-mono">{shortAddress(address)}</span>
@@ -61,33 +65,34 @@ export function WalletBadge() {
           {chain && (
             <p className="px-3 py-1 text-[11px] text-slate-500">{chain.name}</p>
           )}
-          {isSignedIn ? (
-            <>
-              <span className="flex items-center gap-1 px-3 py-1 text-[11px] font-medium text-emerald-600">
-                <Check className="h-3 w-3" aria-hidden />
-                {t('signedIn')}
-              </span>
+          {siweEnabled &&
+            (isSignedIn ? (
+              <>
+                <span className="flex items-center gap-1 px-3 py-1 text-[11px] font-medium text-emerald-600">
+                  <Check className="h-3 w-3" aria-hidden />
+                  {t('signedIn')}
+                </span>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void signOut().catch(() => undefined)}
+                  className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
+                >
+                  {t('signOut')}
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => void signOut().catch(() => undefined)}
-                className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
+                disabled={isSigningIn}
+                onClick={handleSignIn}
+                className="block w-full rounded-md px-3 py-1.5 text-left font-medium text-brand hover:bg-slate-100 disabled:opacity-50"
               >
-                {t('signOut')}
+                {mismatch ? t('reSignIn') : t('signIn')}
               </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={isSigningIn}
-              onClick={handleSignIn}
-              className="block w-full rounded-md px-3 py-1.5 text-left font-medium text-brand hover:bg-slate-100 disabled:opacity-50"
-            >
-              {mismatch ? t('reSignIn') : t('signIn')}
-            </button>
-          )}
-          {signInError && (
+            ))}
+          {siweEnabled && signInError && (
             <p className="px-3 pb-1 pt-0.5 text-[11px] text-red-600">
               {t('signInError')}
             </p>
