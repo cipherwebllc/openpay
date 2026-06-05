@@ -1164,7 +1164,7 @@
     "previewPlaceholder": "Enter address, product and price to see the QR.",
     "presetManagerTitle": "Manage product presets",
     "currencyMismatch": "This cart is {symbol}-only. Use a separate cart for other currencies.",
-    "cartEmpty": "Pick a preset or tap “Add item” to start the cart.",
+    "cartEmpty": "Pick a preset or tap “Custom item” to start the cart.",
     "removeLine": "Remove item",
     "lineAmount": "Amount",
     "memoLabel": "Memo",

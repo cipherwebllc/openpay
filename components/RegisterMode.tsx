@@ -550,8 +550,10 @@ export function RegisterMode({
         </aside>
       </div>
 
-      {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。 */}
-      <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+      {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。
+          グローバルの BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、
+          < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。 */}
+      <div className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:bottom-0 lg:hidden">
         <div className="min-w-0 flex-1">
           <div className="text-[11px] text-slate-400">{t('total')}</div>
           <div className="truncate font-mono text-lg font-bold text-slate-900">

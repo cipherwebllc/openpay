@@ -1164,7 +1164,7 @@
     "previewPlaceholder": "受取先と商品・単価を入力すると QR が表示されます。",
     "presetManagerTitle": "商品プリセットを管理",
     "currencyMismatch": "カートは {symbol} のみです。別通貨の商品は別のカートで作成してください。",
-    "cartEmpty": "商品プリセットを選ぶか「商品を追加」でカートに入れてください。",
+    "cartEmpty": "商品プリセットを選ぶか「＋ カスタム追加」でカートに入れてください。",
     "removeLine": "この商品を削除",
     "lineAmount": "金額",
     "memoLabel": "メモ",
