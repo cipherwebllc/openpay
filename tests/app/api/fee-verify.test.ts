@@ -43,11 +43,12 @@ vi.mock('@/lib/feeVerify', () => ({
   verifyJpycFeeOnChain: vi.fn(async () => hold.verify),
 }));
 const grantSpy = vi.hoisted(() => vi.fn());
+const hold2 = vi.hoisted(() => ({ grantOk: true }));
 vi.mock('@/lib/entitlement', () => ({
   ENTITLEMENT_DEFAULT_DAYS: 30,
   grantEntitlement: (...args: unknown[]) => {
     grantSpy(...args);
-    return Promise.resolve({ tier: args[1], expiresAt: 999_000 });
+    return Promise.resolve({ ok: hold2.grantOk, tier: args[1], expiresAt: 999_000 });
   },
 }));
 const kvSetSpy = vi.hoisted(() => vi.fn());
@@ -86,6 +87,7 @@ beforeEach(() => {
   hold.verify = { ok: true, value: 300n * 10n ** 18n };
   hold.kvSetValue = 'OK';
   hold.kvSetOk = true;
+  hold2.grantOk = true;
   grantSpy.mockClear();
   kvSetSpy.mockClear();
   kvDelSpy.mockClear();
@@ -150,5 +152,14 @@ describe('POST /api/fee/verify', () => {
       30,
     );
     expect(kvDelSpy).not.toHaveBeenCalled(); // 成功時は release しない
+  });
+
+  it('検証は成功だが利用権の永続化に失敗 → 503 grant_failed + release (kvDel)', async () => {
+    hold2.grantOk = false; // KV 書込 NG
+    const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'grant_failed' });
+    expect(grantSpy).toHaveBeenCalledOnce();
+    expect(kvDelSpy).toHaveBeenCalledOnce(); // 「支払い済なのに焼失」を防ぐため claim を解放
   });
 });

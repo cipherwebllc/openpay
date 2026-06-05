@@ -92,31 +92,36 @@ export async function isEntitled(
  * 利用権を tier で days 日付与。既存の有効な利用権とマージする:
  *  - tier   = max(既存, 新規) — 下位 tier の付与で上位を下げない (pro 中に basic 支払い等)
  *  - expiry = max(既存, 新規) — 延長
- * 確定 tier と満了 ms を返す。bypass 中も KV へは書く (bypass を切った時点で有効化)。
+ * `ok` は KV 書込が成功したか (false なら未永続化。呼出側は付与失敗として扱う)。
+ *
+ * マージは getEntitlement ではなく **保存値を直読** する: bypass(アルファ) 中でも保存済の
+ * 利用権を尊重し、下位 tier の付与で上位を踏み潰さない (bypass を切った時点での downgrade 防止)。
  */
 export async function grantEntitlement(
   wallet: string,
   tier: EntitlementTier,
   days: number = ENTITLEMENT_DEFAULT_DAYS,
   nowMs: number = Date.now(),
-): Promise<{ tier: EntitlementTier; expiresAt: number }> {
+): Promise<{ ok: boolean; tier: EntitlementTier; expiresAt: number }> {
   const fresh = nowMs + days * 86_400_000;
   let outTier = tier;
   let outExpiry = fresh;
 
-  // 既存 (有効) とマージ。bypass 中は getEntitlement が expiresAt=null を返すため
-  // マージはスキップされ、要求 tier をそのまま書く。
-  const cur = await getEntitlement(wallet, nowMs);
-  if (cur.entitled && cur.tier && cur.expiresAt !== null) {
-    outTier = TIER_RANK[cur.tier] >= TIER_RANK[tier] ? cur.tier : tier;
-    outExpiry = Math.max(cur.expiresAt, fresh);
+  // 既存 (有効) を保存値から直接読みマージ (bypass 非依存)。
+  const cur = await kvGet(entitlementKey(wallet));
+  if (cur.ok && cur.value) {
+    const stored = parseStored(cur.value);
+    if (stored && stored.expiresAt > nowMs) {
+      outTier = TIER_RANK[stored.tier] >= TIER_RANK[tier] ? stored.tier : tier;
+      outExpiry = Math.max(stored.expiresAt, fresh);
+    }
   }
 
   const ttlSec = Math.max(1, Math.ceil((outExpiry - nowMs) / 1000));
-  await kvSet(
+  const write = await kvSet(
     entitlementKey(wallet),
     JSON.stringify({ tier: outTier, expiresAt: outExpiry }),
     { ttlSec },
   );
-  return { tier: outTier, expiresAt: outExpiry };
+  return { ok: write.ok, tier: outTier, expiresAt: outExpiry };
 }

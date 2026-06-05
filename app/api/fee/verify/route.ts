@@ -23,6 +23,15 @@ export const dynamic = 'force-dynamic';
 // 利用権 (~30日) より十分長く保持し、同 txHash の再利用を恒久的に拒否する。
 const FEE_USED_TTL_SEC = 400 * 86_400;
 
+// idempotency claim の解放。kvDel 自体が失敗すると当該 txHash は焼失 (再提出が
+// already_processed になる) するため、運用で手動解放できるよう key を error log に残す。
+async function releaseClaim(usedKey: string, cause: string): Promise<void> {
+  const del = await kvDel(usedKey);
+  if (!del.ok) {
+    logger.error('billing.fee.release-failed', { usedKey, cause, reason: del.reason });
+  }
+}
+
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableBilling) {
     return NextResponse.json({ ok: false, error: 'billing_disabled' }, { status: 404 });
@@ -81,7 +90,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   });
 
   if (!result.ok) {
-    await kvDel(usedKey); // release → 正しい tx で再提出可能に
+    await releaseClaim(usedKey, 'verify-failed'); // release → 正しい tx で再提出可能に
     logger.warn('billing.fee.verify-failed', {
       wallet: session.address,
       chainId,
@@ -96,6 +105,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     tier,
     ENTITLEMENT_DEFAULT_DAYS,
   );
+  // 検証は通ったが利用権の永続化に失敗 (KV 書込 NG)。claim を解放し 503。
+  // 「支払い済なのに無付与かつ txHash 焼失」を防ぐ (正しい tx で再提出可能)。
+  if (!granted.ok) {
+    await releaseClaim(usedKey, 'grant-write-failed');
+    logger.error('billing.fee.grant-failed', {
+      wallet: session.address,
+      chainId,
+      tier,
+      txHash,
+    });
+    return NextResponse.json({ ok: false, error: 'grant_failed' }, { status: 503 });
+  }
   logger.info('billing.fee.verified', {
     wallet: session.address,
     chainId,

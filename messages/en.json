@@ -920,6 +920,7 @@
     "sending": "Confirm in your wallet…",
     "mining": "Waiting for confirmation…",
     "verifying": "Verifying payment…",
+    "retryVerify": "Re-verify payment",
     "granted": "{tier} plan activated (until {date}).",
     "payError": "Transfer failed. Check your balance and network, then try again.",
     "verifyError": "Payment verification failed ({reason}). Make sure you sent the correct amount on the right chain.",

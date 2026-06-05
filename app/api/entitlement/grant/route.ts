@@ -34,6 +34,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       : ENTITLEMENT_DEFAULT_DAYS;
   const wallet = getAddress(body.wallet);
   const granted = await grantEntitlement(wallet, tier, days);
+  if (!granted.ok) {
+    return NextResponse.json({ ok: false, error: 'grant_failed' }, { status: 503 });
+  }
   return NextResponse.json({
     ok: true,
     wallet,

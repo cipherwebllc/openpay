@@ -188,7 +188,7 @@ describe('grantEntitlement', () => {
     kv.set.mockResolvedValue({ ok: true, value: 'OK' });
     const r = await grantEntitlement(WALLET, 'basic', 30, now);
     const expiresAt = now + 30 * dayMs;
-    expect(r).toEqual({ tier: 'basic', expiresAt });
+    expect(r).toEqual({ ok: true, tier: 'basic', expiresAt });
     expect(kv.set).toHaveBeenCalledWith(
       KEY,
       JSON.stringify({ tier: 'basic', expiresAt }),
@@ -206,7 +206,7 @@ describe('grantEntitlement', () => {
     kv.set.mockResolvedValue({ ok: true, value: 'OK' });
     const r = await grantEntitlement(WALLET, 'pro', 30, now);
     const fresh = now + 30 * dayMs;
-    expect(r).toEqual({ tier: 'pro', expiresAt: fresh }); // fresh > curExpiry
+    expect(r).toEqual({ ok: true, tier: 'pro', expiresAt: fresh }); // fresh > curExpiry
   });
 
   it('ダウングレード防止: 既存 pro 有効中に basic 付与 → pro 維持・expiry max', async () => {
@@ -218,7 +218,21 @@ describe('grantEntitlement', () => {
     });
     kv.set.mockResolvedValue({ ok: true, value: 'OK' });
     const r = await grantEntitlement(WALLET, 'basic', 30, now);
-    expect(r).toEqual({ tier: 'pro', expiresAt: curExpiry }); // 維持・延長(max)
+    expect(r).toEqual({ ok: true, tier: 'pro', expiresAt: curExpiry }); // 維持・延長(max)
+  });
+
+  it('bypass ON 中でも保存済 pro を尊重し basic で downgrade しない (保存値直読)', async () => {
+    setBypass(undefined); // bypass 全開放中
+    const curExpiry = now + 40 * dayMs;
+    kv.get.mockResolvedValue({
+      ok: true,
+      value: JSON.stringify({ tier: 'pro', expiresAt: curExpiry }),
+    });
+    kv.set.mockResolvedValue({ ok: true, value: 'OK' });
+    const r = await grantEntitlement(WALLET, 'basic', 30, now);
+    // getEntitlement なら bypass で expiresAt:null となりマージ skip → basic に踏み潰される。
+    // 保存値直読なので pro を維持する。
+    expect(r).toEqual({ ok: true, tier: 'pro', expiresAt: curExpiry });
   });
 
   it('同 tier 再付与: expiry を max で延長', async () => {
@@ -230,6 +244,14 @@ describe('grantEntitlement', () => {
     });
     kv.set.mockResolvedValue({ ok: true, value: 'OK' });
     const r = await grantEntitlement(WALLET, 'basic', 30, now);
-    expect(r).toEqual({ tier: 'basic', expiresAt: now + 30 * dayMs });
+    expect(r).toEqual({ ok: true, tier: 'basic', expiresAt: now + 30 * dayMs });
+  });
+
+  it('KV 書込失敗 → ok:false (呼出側で付与失敗として扱える)', async () => {
+    setBypass('0');
+    kv.get.mockResolvedValue({ ok: true, value: null });
+    kv.set.mockResolvedValue({ ok: false, reason: 'unconfigured' });
+    const r = await grantEntitlement(WALLET, 'basic', 30, now);
+    expect(r).toEqual({ ok: false, tier: 'basic', expiresAt: now + 30 * dayMs });
   });
 });

@@ -12,8 +12,22 @@ const h = vi.hoisted(() => ({
   sync: {} as Record<string, unknown>,
   save: {} as Record<string, unknown>,
   entitlement: {} as Record<string, unknown>,
+  enableBilling: true,
 }));
 
+// pro 未加入時の paywall は billing flag ON 時のみ出す。flag は h.enableBilling で test 毎に切替。
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableBilling() {
+        return h.enableBilling;
+      },
+    },
+  };
+});
 vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => h.siwe }));
 vi.mock('@/hooks/useEntitlement', () => ({ useEntitlement: () => h.entitlement }));
 // freee は pro 必須。未加入時は BillingPaywall(pro) を出す。実 paywall は wagmi 境界なので
@@ -93,6 +107,7 @@ beforeEach(() => {
   };
   // 既定 entitled (アルファ bypass 相当)。
   h.entitlement = { data: { entitled: true, expiresAt: null, bypass: true } };
+  h.enableBilling = true;
 });
 
 describe('FreeeSyncPanel', () => {
@@ -240,6 +255,27 @@ describe('FreeeSyncPanel', () => {
     };
     renderWithIntl(<FreeeSyncPanel entries={[income()]} usdcJpy={150} />);
     expect(screen.getByTestId('paywall')).toHaveTextContent('paywall:pro');
+    expect(screen.queryByRole('button', { name: /freee に同期/ })).toBeNull();
+  });
+
+  it('billing OFF + pro 未加入 → paywall を出さず利用権必須テキスト (flag OFF inert)', () => {
+    h.enableBilling = false; // flag OFF
+    h.siwe = { isSignedIn: true };
+    h.status = {
+      isLoading: false,
+      isError: false,
+      data: { connected: true, mappingSet: true, companyName: 'X' },
+    };
+    h.entitlement = {
+      data: {
+        entitled: true,
+        tier: 'basic',
+        expiresAt: Date.now() + 1_000_000,
+        bypass: false,
+      },
+    };
+    renderWithIntl(<FreeeSyncPanel entries={[income()]} usdcJpy={150} />);
+    expect(screen.queryByTestId('paywall')).toBeNull(); // 支払い UI は出さない
     expect(screen.queryByRole('button', { name: /freee に同期/ })).toBeNull();
   });
 

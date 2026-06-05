@@ -17,6 +17,7 @@ import {
   BILLING_TIERS,
   TIER_PRICE_JPYC,
   TIER_PRICE_YEN,
+  tierAtLeast,
   type EntitlementTier,
 } from '@/lib/billing';
 import { env } from '@/lib/env';
@@ -98,6 +99,8 @@ export function BillingPaywall({
 
   function startPay() {
     if (!payDeployment || chainId == null) return;
+    // requiredTier 未満では支払わせない (pro gate で basic 過少支払い → 解除されない事故を防ぐ)。
+    if (!tierAtLeast(selectedTier, requiredTier)) return;
     payCtxRef.current = { tier: selectedTier, chainId };
     verifiedForRef.current = null;
     verify.reset();
@@ -106,6 +109,16 @@ export function BillingPaywall({
       to: env.feeReceiver,
       amount: TIER_PRICE_JPYC[selectedTier],
       chainId,
+    });
+  }
+
+  // 検証失敗時の再試行。既に確定済の txHash を再検証する (再送金させない → 二重支払い防止)。
+  function retryVerify() {
+    if (!pay.txHash || !payCtxRef.current) return;
+    verify.mutate({
+      txHash: pay.txHash,
+      chainId: payCtxRef.current.chainId,
+      tier: payCtxRef.current.tier,
     });
   }
 
@@ -134,17 +147,20 @@ export function BillingPaywall({
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {BILLING_TIERS.map((tier) => {
           const active = selectedTier === tier;
+          // requiredTier 未満は選択不可 (例: freee=pro gate で basic を選ばせない)。
+          const selectable = tierAtLeast(tier, requiredTier);
           return (
             <button
               key={tier}
               type="button"
-              onClick={() => setSelectedTier(tier)}
+              disabled={!selectable}
+              onClick={() => selectable && setSelectedTier(tier)}
               aria-pressed={active}
               className={`rounded-xl border px-4 py-3 text-left transition ${
                 active
                   ? 'border-brand bg-brand/5 ring-1 ring-brand'
                   : 'border-slate-200 bg-white hover:border-slate-300'
-              }`}
+              } ${!selectable ? 'cursor-not-allowed opacity-40' : ''}`}
             >
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-bold text-slate-900">
@@ -193,11 +209,30 @@ export function BillingPaywall({
           >
             {t('switchChain', { chain: defaultJpyc.name })}
           </button>
+        ) : pay.isConfirmed && pay.txHash ? (
+          // 送金は確定済。あとは検証のみ — 失敗しても再送金させず verify を再試行する。
+          <>
+            <button
+              type="button"
+              disabled={verify.isPending}
+              onClick={retryVerify}
+              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {verify.isPending ? t('verifying') : t('retryVerify')}
+            </button>
+            {verify.isError && (
+              <p className="text-[11px] text-red-600">
+                {t('verifyError', {
+                  reason: (verify.error as Error)?.message ?? 'verify_failed',
+                })}
+              </p>
+            )}
+          </>
         ) : (
           <>
             <button
               type="button"
-              disabled={pay.isSending || pay.isMining || verify.isPending}
+              disabled={pay.isSending || pay.isMining}
               onClick={startPay}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -205,23 +240,14 @@ export function BillingPaywall({
                 ? t('sending')
                 : pay.isMining
                   ? t('mining')
-                  : verify.isPending
-                    ? t('verifying')
-                    : t('payCta', {
-                        yen: TIER_PRICE_YEN[selectedTier],
-                        symbol: payDeployment.displaySymbol,
-                      })}
+                  : t('payCta', {
+                      yen: TIER_PRICE_YEN[selectedTier],
+                      symbol: payDeployment.displaySymbol,
+                    })}
             </button>
 
             {pay.isError && (
               <p className="text-[11px] text-red-600">{t('payError')}</p>
-            )}
-            {verify.isError && (
-              <p className="text-[11px] text-red-600">
-                {t('verifyError', {
-                  reason: (verify.error as Error)?.message ?? 'verify_failed',
-                })}
-              </p>
             )}
           </>
         )}
