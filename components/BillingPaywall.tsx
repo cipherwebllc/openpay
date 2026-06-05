@@ -48,6 +48,10 @@ export function BillingPaywall({
   const pay = useBillingPayment();
 
   const [selectedTier, setSelectedTier] = useState<EntitlementTier>(requiredTier);
+  // requiredTier が (mount 後に) 上がった場合、選択中が下回ったままにならないよう引き上げる。
+  useEffect(() => {
+    setSelectedTier((cur) => (tierAtLeast(cur, requiredTier) ? cur : requiredTier));
+  }, [requiredTier]);
   // pay() 起動時の tier/chain を固定し、確定後の verify に使う (選択変更で drift させない)。
   const payCtxRef = useRef<{ tier: EntitlementTier; chainId: number } | null>(null);
   const verifiedForRef = useRef<string | null>(null);
@@ -214,7 +218,7 @@ export function BillingPaywall({
           <>
             <button
               type="button"
-              disabled={verify.isPending}
+              disabled={verify.isPending || !payCtxRef.current}
               onClick={retryVerify}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >

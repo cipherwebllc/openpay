@@ -247,11 +247,23 @@ describe('grantEntitlement', () => {
     expect(r).toEqual({ ok: true, tier: 'basic', expiresAt: now + 30 * dayMs });
   });
 
-  it('KV 書込失敗 → ok:false (呼出側で付与失敗として扱える)', async () => {
+  it('KV 書込失敗 + read-back も未 landed → ok:false (呼出側で付与失敗として扱える)', async () => {
     setBypass('0');
-    kv.get.mockResolvedValue({ ok: true, value: null });
+    kv.get.mockResolvedValue({ ok: true, value: null }); // merge read も read-back も null
     kv.set.mockResolvedValue({ ok: false, reason: 'unconfigured' });
     const r = await grantEntitlement(WALLET, 'basic', 30, now);
     expect(r).toEqual({ ok: false, tier: 'basic', expiresAt: now + 30 * dayMs });
+  });
+
+  it('書込応答ロスでも read-back で landed 確認 → ok:true (ambiguous success 救済)', async () => {
+    setBypass('0');
+    const expiresAt = now + 30 * dayMs;
+    const payload = JSON.stringify({ tier: 'basic', expiresAt });
+    kv.get
+      .mockResolvedValueOnce({ ok: true, value: null }) // merge read: 既存なし
+      .mockResolvedValueOnce({ ok: true, value: payload }); // read-back: 実は landed
+    kv.set.mockResolvedValue({ ok: false, reason: 'http_error' });
+    const r = await grantEntitlement(WALLET, 'basic', 30, now);
+    expect(r).toEqual({ ok: true, tier: 'basic', expiresAt });
   });
 });

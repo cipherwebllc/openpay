@@ -118,10 +118,14 @@ export async function grantEntitlement(
   }
 
   const ttlSec = Math.max(1, Math.ceil((outExpiry - nowMs) / 1000));
-  const write = await kvSet(
-    entitlementKey(wallet),
-    JSON.stringify({ tier: outTier, expiresAt: outExpiry }),
-    { ttlSec },
-  );
-  return { ok: write.ok, tier: outTier, expiresAt: outExpiry };
+  const payload = JSON.stringify({ tier: outTier, expiresAt: outExpiry });
+  const write = await kvSet(entitlementKey(wallet), payload, { ttlSec });
+  if (write.ok) return { ok: true, tier: outTier, expiresAt: outExpiry };
+
+  // 書込応答が失われた (http_error 等) 場合: 実際には永続化された可能性がある。読み戻して
+  // 自分の payload が landed していれば成功扱い。これで「応答ロスで claim を release → 再提出
+  // → max マージで満了が静かに延長」を防ぐ (再提出は本当に未永続化のときだけ起こる)。
+  const readback = await kvGet(entitlementKey(wallet));
+  const persisted = readback.ok && readback.value === payload;
+  return { ok: persisted, tier: outTier, expiresAt: outExpiry };
 }
