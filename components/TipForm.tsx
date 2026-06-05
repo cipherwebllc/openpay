@@ -167,6 +167,10 @@ export function TipForm({ params }: { params: TipParams }) {
   // authorization を出し、元 tx 確定で二重支払いになる (CheckoutForm/PaymentForm と同一防御)。
   const relaySettledNoRetry =
     useRelay && !!relay.data && (relay.data.success || !!relay.data.pending);
+  // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
+  // 出してフィードバックの空白を防ぐ (再送は relaySettledNoRetry で既に禁止)。
+  const relayPending =
+    useRelay && !!relay.data && !relay.data.success && !!relay.data.pending;
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -235,6 +239,9 @@ export function TipForm({ params }: { params: TipParams }) {
     feeAmount: string;
     customerPays: string;
   } | null>(null);
+  // 成功 overlay の表示額は送信時点を固定 (送信後に金額編集しても overlay が live 値で
+  // ぶれないように・Codex P2)。onSubmit で fmt(totalCustomerOutflow) を保存。
+  const submittedAmountDisplayRef = useRef<string | null>(null);
 
   useEffect(() => {
     // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
@@ -365,6 +372,7 @@ export function TipForm({ params }: { params: TipParams }) {
       feeAmount: breakdown.feeAmount.toString(),
       customerPays: breakdown.customerPays.toString(),
     };
+    submittedAmountDisplayRef.current = fmt(totalCustomerOutflow);
     if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が署名するだけ・自前 relayer がガス負担。tip は customer 固定
       // (recover 時 forwarder が gas 相当を回収・free 時 OpenPay 負担)。value=tip 額。
@@ -431,7 +439,7 @@ export function TipForm({ params }: { params: TipParams }) {
                 key={p}
                 type="button"
                 onClick={() => selectPreset(p)}
-                disabled={gasless.isPending}
+                disabled={flowPending}
                 className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
                     ? 'border-transparent text-white shadow-sm'
@@ -453,7 +461,7 @@ export function TipForm({ params }: { params: TipParams }) {
               type="text"
               inputMode="decimal"
               value={customAmount}
-              disabled={gasless.isPending}
+              disabled={flowPending}
               onFocus={selectCustom}
               onChange={(e) => {
                 setSelectedPreset(null);
@@ -481,23 +489,39 @@ export function TipForm({ params }: { params: TipParams }) {
           {breakdown.feeAmount > 0n && (
             <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
           )}
-          <Row
-            label={t('gasRow')}
-            labelExtra={
-              <InfoTooltip
-                text={
-                  isErc20Paymaster
-                    ? t('gasInfoUsdc', { nativeToken })
-                    : t('gasInfoJpyc', { nativeToken })
-                }
-              />
-            }
-            value={
-              gasAmount !== undefined
-                ? t('gasRowValue', { amount: fmt(gasAmount) })
-                : t('gasRowPending')
-            }
-          />
+          {/* relay は gas quote 非取得。recover=固定回収額 / free=OpenPay 立替 (無料)。
+              非 relay は従来 paymaster quote (USDC erc20 / JPYC sponsorship)。 */}
+          {useRecover ? (
+            <Row
+              label={t('gasRow')}
+              labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
+              value={fmt(relayGasEquiv)}
+            />
+          ) : useRelay ? (
+            <Row
+              label={t('gasRow')}
+              labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
+              value={t('gasRowRelayFree')}
+            />
+          ) : (
+            <Row
+              label={t('gasRow')}
+              labelExtra={
+                <InfoTooltip
+                  text={
+                    isErc20Paymaster
+                      ? t('gasInfoUsdc', { nativeToken })
+                      : t('gasInfoJpyc', { nativeToken })
+                  }
+                />
+              }
+              value={
+                gasAmount !== undefined
+                  ? t('gasRowValue', { amount: fmt(gasAmount) })
+                  : t('gasRowPending')
+              }
+            />
+          )}
           <div className="my-1 border-t border-slate-200" />
           <Row
             label={t('customerRow')}
@@ -506,7 +530,13 @@ export function TipForm({ params }: { params: TipParams }) {
           />
         </dl>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {isErc20Paymaster ? t('gaslessHintUsdc') : t('gaslessHintJpyc')}
+          {useRecover
+            ? t('gaslessHintJpycRecover')
+            : useRelay
+              ? t('gaslessHintJpycRelay')
+              : isErc20Paymaster
+                ? t('gaslessHintUsdc')
+                : t('gaslessHintJpyc')}
         </p>
         {approvalCheckUrl && (
           <p className="mt-2 text-[11px]">
@@ -602,7 +632,7 @@ export function TipForm({ params }: { params: TipParams }) {
         className="w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
         style={{ backgroundColor: themeColor }}
       >
-        {flowPending
+        {flowPending || relayPending
           ? t('btnSending')
           : !isConnected
             ? t('btnConnect')
@@ -672,7 +702,7 @@ export function TipForm({ params }: { params: TipParams }) {
       {/* PayPay 風 大型成功 overlay。dismiss 後は上記の従来 panel (thanks 含む) を表示。 */}
       {!overlayDismissed && flowSuccess && flowTxHash && (
         <SuccessOverlay
-          amountDisplay={fmt(totalCustomerOutflow)}
+          amountDisplay={submittedAmountDisplayRef.current ?? fmt(totalCustomerOutflow)}
           txHash={flowTxHash}
           userOpHash={flowUserOpHash}
           blockNumber={flowBlockNumber}
