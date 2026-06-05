@@ -21,6 +21,16 @@ vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// Circle quote は default flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。
+// circle テスト block で 'circle' に override + permitAmount を返す。
+vi.mock('@/hooks/useGasQuoteCircle', () => ({ useGasQuoteCircle: vi.fn() }));
+vi.mock('@/lib/circlePaymaster', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/circlePaymaster')>(
+      '@/lib/circlePaymaster',
+    );
+  return { ...actual, resolveUsdcGaslessProvider: vi.fn(() => 'pimlico') };
+});
 // CrossChainHint は wagmi の useWalletClient / usePublicClient + react-query
 // に依存するが、本 test file の責務は TipForm 本体ロジックのため、Hint は空
 // component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
@@ -72,6 +82,8 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
+import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
+import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
@@ -162,6 +174,23 @@ function setGasQuote(state: 'disabled' | 'pending' | 'ready' | 'error', amount?:
   mockHook(useGasQuoteJpyc, mockState as Partial<ReturnType<typeof useGasQuoteJpyc>>);
 }
 
+// circle quote: state 'idle'(非active) / 'ready'(permitAmount + gasAmount を返す)。
+function setCircleQuote(
+  state: 'idle' | 'ready',
+  opts: { gasAmount?: bigint; permitAmount?: bigint } = {},
+) {
+  mockHook(useGasQuoteCircle, {
+    data:
+      state === 'ready'
+        ? {
+            gasAmount: opts.gasAmount ?? 0n,
+            permitAmount: opts.permitAmount ?? 1_000_000n,
+          }
+        : undefined,
+    error: null,
+  } as Partial<ReturnType<typeof useGasQuoteCircle>>);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setSwitchChain();
@@ -170,12 +199,15 @@ beforeEach(() => {
   setBatchPayment('idle');
   setRelay('idle');
   setGasQuote('disabled');
+  setCircleQuote('idle');
   setAccount({ connected: false });
   // 既定: testnet 環境 → 全 token sponsorship。erc20 を test したい block で override
   vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
   // 既定は従来 Pimlico 経路。relay を test したい block で 'eip3009-relay' へ override。
   vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
   vi.mocked(jpycForwarderFor).mockReturnValue(null);
+  // 既定 USDC は Pimlico erc20。circle テスト block で 'circle' へ override。
+  vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
 });
 
 const JPYC_PARAMS: TipParams = {
@@ -1077,5 +1109,44 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(
       screen.getByRole('button', { name: /100 JPYC を送る/ }),
     ).toBeEnabled();
+  });
+});
+
+// USDC Circle Paymaster 経路 (/tip): resolveUsdcGaslessProvider が 'circle' を返すとき、
+// useBatchPayment(Pimlico) ではなく circle 経路 (permitAmount を mutate へ) に乗る。
+// /pay・/checkout と統一。flag OFF (既定 'pimlico') は従来 Pimlico erc20 で不変。
+describe('TipForm — USDC Circle Paymaster', () => {
+  beforeEach(() => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); // USDC = erc20 paymaster
+    vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n); // 200 USDC
+    setSmartAccount(true);
+    setCircleQuote('ready', { gasAmount: 0n, permitAmount: 5_000_000n });
+  });
+
+  it('送信で gasless.mutate に circlePermitAmount を渡す (relay は呼ばない)', async () => {
+    const user = userEvent.setup();
+    render(<TipForm params={USDC_PARAMS} />);
+    // preset 1 USDC が初期選択 → gas=0 なので 1 USDC を送る
+    await user.click(screen.getByRole('button', { name: /1 USDC を送る/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    expect(mutate.mock.calls[0][0].circlePermitAmount).toBe(5_000_000n);
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+
+  it('circleQuote 未解決 (permitAmount 未算定) は送信不可 (見積取得中)', () => {
+    setCircleQuote('idle');
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.getByRole('button', { name: /見積/ })).toBeDisabled();
+  });
+
+  it('flag OFF (pimlico) では circlePermitAmount を渡さない (従来 erc20 経路)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
+    setGasQuote('ready', 0n); // Pimlico quote
+    render(<TipForm params={USDC_PARAMS} />);
+    await user.click(screen.getByRole('button', { name: /1 USDC を送る/ }));
+    expect(mutate.mock.calls[0][0].circlePermitAmount).toBeUndefined();
   });
 });

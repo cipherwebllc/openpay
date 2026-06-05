@@ -17,6 +17,7 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
+import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -26,6 +27,7 @@ import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -77,17 +79,18 @@ export function TipForm({ params }: { params: TipParams }) {
   const useRecover = useRelay && jpycForwarderFor(deployment.chainId) !== null;
   const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
 
-  // TipForm は Circle 未配線 (useGasQuoteCircle / circlePermitAmount を持たない)。USDC tip が
-  // Circle に routing されると useBatchPayment の circle 分岐が permitAmount 未算定で throw する
-  // ため、disableCircle=true で Pimlico erc20 に固定する (JPYC は sponsorship なので非影響)。
+  // USDC ガスレスが Circle に解決される場合は Circle Paymaster (permit + surcharge 込み quote)。
+  // それ以外 (JPYC sponsorship / USDC Pimlico erc20) は従来経路。/pay・/checkout と同配線。
   // relay 時は smart account / batch / gas quote とも skip (enabled=!useRelay)。
-  const { data: saData, error: saError } = useSmartAccount(
-    deployment,
-    !useRelay,
-    true,
-  );
-  const gasless = useBatchPayment(deployment, !useRelay, true);
+  const { data: saData, error: saError } = useSmartAccount(deployment, !useRelay);
+  const gasless = useBatchPayment(deployment, !useRelay);
   const gasQuote = useGasQuote(deployment, !useRelay);
+  const isCircle =
+    resolveUsdcGaslessProvider(deployment, deployment.chainId) === 'circle';
+  const circleQuote = useGasQuoteCircle(deployment, !useRelay && isCircle);
+  // 表示・readiness・error は circle のときは circleQuote を本線にする。
+  const activeQuote = isCircle ? circleQuote : gasQuote;
+  const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     presets[0] ?? null,
@@ -113,9 +116,10 @@ export function TipForm({ params }: { params: TipParams }) {
   // creator は preset - fee を受け取り、ファンは preset + gas を支払う。
   // standard mode (顧客 wallet で gas 自前負担) は creator-fan UX を崩すため
   // tip 文脈では非対応。URL で mode=standard が来ても無視して gasless で動かす。
-  const gasAmount = gasQuote.data?.gasAmount;
+  // circle のときは surcharge 込み circleQuote を使う。
+  const gasAmount = activeQuote.data?.gasAmount;
   // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、非 relay は
-  // paymaster quote。relay は quote を持たないため effective で切り替える (CheckoutForm と同型)。
+  // paymaster quote (circle / erc20)。relay は quote を持たないため effective で切り替える。
   const effectiveGasAmount: bigint | undefined = useRelay
     ? relayGasEquiv
     : gasAmount;
@@ -136,11 +140,16 @@ export function TipForm({ params }: { params: TipParams }) {
   //   Sponsorship (JPYC・非 relay): Pimlico が立替、運営は徴収 JPYC で精算 (fee transfer に内包)。
   //   EIP-3009 relay (JPYC): recover は forwarder が gas 相当を feeReceiver へ分割回収。
   const totalCustomerOutflow = breakdown.customerPays;
-  // gasReimbursement は Pimlico mutate にのみ渡る on-chain 立替回収額 (relay では未使用)。
-  const gasReimbursement = !useRelay && isSponsorship ? (gasAmount ?? 0n) : 0n;
+  // gasReimbursement は Pimlico mutate にのみ渡る on-chain 立替回収額 (relay / circle では未使用)。
+  // circle は paymaster が permit で顧客 USDC から actualGas を別途徴収するため加算しない。
+  const gasReimbursement =
+    !useRelay && isSponsorship && !isCircle ? (gasAmount ?? 0n) : 0n;
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。relay=回収額/0、
-  // 非 relay sponsorship=立替回収 / USDC erc20=paymaster 徴収分。
-  const networkFeeEquivalent = effectiveGasAmount ?? 0n;
+  // 非 relay sponsorship=立替回収 / USDC erc20=paymaster 徴収分。circle は receipt 由来の
+  // circlePaymasterNetUsdc を使うため null (mutate へは undefined)。
+  const networkFeeEquivalent: bigint | null = !isCircle
+    ? (effectiveGasAmount ?? 0n)
+    : null;
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
@@ -161,8 +170,9 @@ export function TipForm({ params }: { params: TipParams }) {
     ? undefined
     : gasless.data?.blockNumber;
 
-  // relay は gas quote / smart account 不要なので readiness 即満たす。
-  const gasQuoteReady = useRelay || gasQuote.data !== undefined;
+  // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
+  // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。
+  const gasQuoteReady = useRelay || activeQuote.data !== undefined;
   // relay が成功 or pending (broadcast 済) の後の再送信を禁止。再送すると新 nonce で 2 件目の
   // authorization を出し、元 tx 確定で二重支払いになる (CheckoutForm/PaymentForm と同一防御)。
   const relaySettledNoRetry =
@@ -205,7 +215,7 @@ export function TipForm({ params }: { params: TipParams }) {
     ? t('errorGasCongested')
     : (flowErrorMessage ??
       (useRelay || saFallback ? undefined : saError?.message) ??
-      (!useRelay && gasQuote.error ? t('errorGasQuote') : null) ??
+      (!useRelay && activeQuote.error ? t('errorGasQuote') : null) ??
       (amountPrecisionError
         ? t('errorAmountPrecision', { decimals: deployment.decimals })
         : null) ??
@@ -224,8 +234,9 @@ export function TipForm({ params }: { params: TipParams }) {
   }, [saError]);
 
   useEffect(() => {
-    if (gasQuote.error) logger.error('tip.gas-quote.failed', { error: gasQuote.error });
-  }, [gasQuote.error]);
+    if (activeQuote.error)
+      logger.error('tip.gas-quote.failed', { error: activeQuote.error });
+  }, [activeQuote.error]);
 
   // userOpHash ごとに 1 回限りの webhook 発火。gasQuote の refetchInterval (30s)
   // で breakdown が再計算 → effect 再実行 → 二重発火を防ぐ gate。
@@ -393,7 +404,8 @@ export function TipForm({ params }: { params: TipParams }) {
       feeAmount: breakdown.feeAmount,
       gasReimbursement,
       saleAmount: amountWei,
-      networkFeeEquivalent,
+      networkFeeEquivalent: networkFeeEquivalent ?? undefined,
+      circlePermitAmount,
     });
   }
 
@@ -509,9 +521,11 @@ export function TipForm({ params }: { params: TipParams }) {
               labelExtra={
                 <InfoTooltip
                   text={
-                    isErc20Paymaster
-                      ? t('gasInfoUsdc', { nativeToken })
-                      : t('gasInfoJpyc', { nativeToken })
+                    isCircle
+                      ? t('gasInfoUsdcCircle', { nativeToken })
+                      : isErc20Paymaster
+                        ? t('gasInfoUsdc', { nativeToken })
+                        : t('gasInfoJpyc', { nativeToken })
                   }
                 />
               }
