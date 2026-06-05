@@ -87,7 +87,8 @@ export function HistoryView() {
     billingActive &&
     (!isSignedIn || (entitlement.data != null && !entitledBasic));
 
-  // 整形表示・CSV・freee の「データ部」。ゲート時はこれをぼかしの背面に置く。
+  // 整形表示・CSV の「データ部」。basic ゲート時はこれをぼかしの背面に置く。
+  // freee 連携パネルは**無料機能**なのでゲート外 (下で別途描画・basic 未払いでも使える)。
   const dataSections = (
     <>
       <HistoryToolbar
@@ -103,9 +104,6 @@ export function HistoryView() {
         <p className="text-[11px] text-slate-400">
           {t('summaryReceivedOnlyNote')}
         </p>
-      )}
-      {env.enableFreeeSync && (
-        <FreeeSyncPanel entries={receivedFiltered} usdcJpy={usdcJpy} />
       )}
       {visible.length === 0 ? (
         <p className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
@@ -166,6 +164,12 @@ export function HistoryView() {
           </div>
         ) : (
           dataSections
+        )}
+
+        {/* freee 連携は無料機能。basic ゲートの外に置き、未払いユーザーも使えるようにする
+            (freee の有料アプリ規約を回避するため「対価を払わないと使えない」状態を作らない)。 */}
+        {hydrated && hasEntries && env.enableFreeeSync && (
+          <FreeeSyncPanel entries={receivedFiltered} usdcJpy={usdcJpy} />
         )}
 
         <AccountingAffiliates />

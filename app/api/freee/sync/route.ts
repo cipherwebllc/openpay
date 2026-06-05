@@ -1,11 +1,10 @@
-// 「freee に同期」batch push の核。SIWE 必須 + 利用権ゲート + freee 連携/マッピング済が前提。
+// 「freee に同期」batch push の核。SIWE 必須 + freee 連携/マッピング済が前提 (利用権ゲートなし=無料)。
 // クライアントが income-sale entries を送る → サーバで再検証 + 円換算 + 冪等 createDeal。
 // 冪等性 (SET NX claim) により再クリックしても取引を重複作成しない。
 import { NextResponse } from 'next/server';
 import type { HistoryEntry } from '@/lib/history';
 import { freeeEnv, getValidAccessToken, createDeal } from '@/lib/freee';
 import { runFreeeSync } from '@/lib/freeeSync';
-import { isEntitled } from '@/lib/entitlement';
 import { logger } from '@/lib/logger';
 import { requireSession } from '../../auth/siwe/_session';
 import {
@@ -33,11 +32,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  // 収益化ゲート: freee 同期は pro 利用権が必要 (アルファ中は bypass で全通過)。
-  if (!(await isEntitled(session.address, 'pro'))) {
-    return NextResponse.json({ ok: false, error: 'entitlement_required' }, { status: 402 });
-  }
-
+  // freee 同期は無料機能 (SIWE ログインのみ)。有料化は freee 有料アプリ要件を満たしてから別途。
   const env = freeeEnv();
   if (!env) {
     return NextResponse.json({ ok: false, error: 'freee_not_configured' }, { status: 503 });

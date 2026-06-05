@@ -14,10 +14,6 @@ import { useTranslations } from 'next-intl';
 import type { HistoryEntry } from '@/lib/history';
 import { isIncomeSaleEntry } from '@/lib/historyFilters';
 import { useSiweSession } from '@/hooks/useSiweSession';
-import { useEntitlement } from '@/hooks/useEntitlement';
-import { tierAtLeast } from '@/lib/billing';
-import { env } from '@/lib/env';
-import { BillingPaywall } from './BillingPaywall';
 import {
   useFreeeStatus,
   useFreeeMappingOptions,
@@ -34,7 +30,6 @@ export function FreeeSyncPanel({
   const t = useTranslations('FreeeSync');
   const { isSignedIn } = useSiweSession();
   const status = useFreeeStatus(isSignedIn);
-  const entitlement = useEntitlement(isSignedIn);
   const { saveMapping, sync } = useFreeeMutations();
   const [editingMapping, setEditingMapping] = useState(false);
 
@@ -42,14 +37,6 @@ export function FreeeSyncPanel({
     () => entries.filter(isIncomeSaleEntry),
     [entries],
   );
-  // freee は pro 利用権が必要。ロード中は true 既定 (gate のチラつき回避)。最終拒否は
-  // サーバ (402) が担保。bypass(アルファ) は全通過。
-  const proEntitled = entitlement.data
-    ? entitlement.data.bypass || tierAtLeast(entitlement.data.tier, 'pro')
-    : true;
-  // billing flag OFF では支払い UI を出さない (flag OFF inert)。pro 未加入時の表示は、
-  // 有効なら支払い paywall・無効なら従来の利用権必須テキスト。
-  const billingActive = env.enableBilling;
 
   function startConnect() {
     const returnTo = window.location.pathname + window.location.search;
@@ -92,14 +79,6 @@ export function FreeeSyncPanel({
               saving={saveMapping.isPending}
               saveError={saveMapping.isError}
             />
-          ) : !proEntitled ? (
-            // pro 未加入。billing 有効 → 利用料 paywall (basic からのアップグレード導線)。
-            // 無効 (flag OFF) → 従来どおり利用権必須テキスト (支払い UI は出さない)。
-            billingActive ? (
-              <BillingPaywall requiredTier="pro" />
-            ) : (
-              <p className="text-[11px] text-amber-700">{t('entitlementRequired')}</p>
-            )
           ) : (
             <div className="space-y-2">
               <button

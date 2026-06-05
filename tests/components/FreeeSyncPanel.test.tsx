@@ -11,32 +11,10 @@ const h = vi.hoisted(() => ({
   mappingOpts: {} as Record<string, unknown>,
   sync: {} as Record<string, unknown>,
   save: {} as Record<string, unknown>,
-  entitlement: {} as Record<string, unknown>,
-  enableBilling: true,
 }));
 
-// pro 未加入時の paywall は billing flag ON 時のみ出す。flag は h.enableBilling で test 毎に切替。
-vi.mock('@/lib/env', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/env')>();
-  return {
-    ...actual,
-    env: {
-      ...actual.env,
-      get enableBilling() {
-        return h.enableBilling;
-      },
-    },
-  };
-});
+// freee 連携は無料機能 (SIWE ログインのみ・利用権ゲートなし)。
 vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => h.siwe }));
-vi.mock('@/hooks/useEntitlement', () => ({ useEntitlement: () => h.entitlement }));
-// freee は pro 必須。未加入時は BillingPaywall(pro) を出す。実 paywall は wagmi 境界なので
-// stub し、requiredTier を marker に出す (paywall の実挙動は BillingPaywall 専用 test で)。
-vi.mock('@/components/BillingPaywall', () => ({
-  BillingPaywall: ({ requiredTier }: { requiredTier: string }) => (
-    <div data-testid="paywall">paywall:{requiredTier}</div>
-  ),
-}));
 vi.mock('@/hooks/useFreee', () => ({
   useFreeeStatus: () => h.status,
   useFreeeMappingOptions: () => h.mappingOpts,
@@ -105,9 +83,6 @@ beforeEach(() => {
     isPending: false,
     isError: false,
   };
-  // 既定 entitled (アルファ bypass 相当)。
-  h.entitlement = { data: { entitled: true, expiresAt: null, bypass: true } };
-  h.enableBilling = true;
 });
 
 describe('FreeeSyncPanel', () => {
@@ -237,46 +212,18 @@ describe('FreeeSyncPanel', () => {
     expect(screen.getByText(/同期 3 件・スキップ済 1 件・失敗 0 件/)).toBeInTheDocument();
   });
 
-  it('basic のみ (pro 未加入・bypass off) → 同期ボタンを出さず pro paywall', () => {
+  it('freee は無料機能: 利用権なしでも (連携+マッピング済なら) 同期ボタンを出す', () => {
     h.siwe = { isSignedIn: true };
     h.status = {
       isLoading: false,
       isError: false,
       data: { connected: true, mappingSet: true, companyName: 'X' },
     };
-    // basic 利用権はあるが freee は pro 必須 → paywall(pro)。
-    h.entitlement = {
-      data: {
-        entitled: true,
-        tier: 'basic',
-        expiresAt: Date.now() + 1_000_000,
-        bypass: false,
-      },
-    };
     renderWithIntl(<FreeeSyncPanel entries={[income()]} usdcJpy={150} />);
-    expect(screen.getByTestId('paywall')).toHaveTextContent('paywall:pro');
-    expect(screen.queryByRole('button', { name: /freee に同期/ })).toBeNull();
-  });
-
-  it('billing OFF + pro 未加入 → paywall を出さず利用権必須テキスト (flag OFF inert)', () => {
-    h.enableBilling = false; // flag OFF
-    h.siwe = { isSignedIn: true };
-    h.status = {
-      isLoading: false,
-      isError: false,
-      data: { connected: true, mappingSet: true, companyName: 'X' },
-    };
-    h.entitlement = {
-      data: {
-        entitled: true,
-        tier: 'basic',
-        expiresAt: Date.now() + 1_000_000,
-        bypass: false,
-      },
-    };
-    renderWithIntl(<FreeeSyncPanel entries={[income()]} usdcJpy={150} />);
-    expect(screen.queryByTestId('paywall')).toBeNull(); // 支払い UI は出さない
-    expect(screen.queryByRole('button', { name: /freee に同期/ })).toBeNull();
+    // paywall/利用権ゲートは存在しない → 同期ボタンが直接出る。
+    expect(
+      screen.getByRole('button', { name: /freee に同期/ }),
+    ).toBeInTheDocument();
   });
 
   it('income が無い → 同期ボタン disabled + noIncome 注記', () => {

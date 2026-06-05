@@ -90,12 +90,13 @@ beforeEach(() => {
 });
 
 describe('BillingPaywall', () => {
-  it('tier カード (ベーシック / 会計連携) と価格を表示', () => {
+  it('販売中の tier は basic のみ表示 (pro/会計連携 は販売せず非表示)', () => {
     renderPaywall();
     expect(screen.getByText('ベーシック')).toBeInTheDocument();
-    expect(screen.getByText('会計連携')).toBeInTheDocument();
     expect(screen.getByText('¥300/月')).toBeInTheDocument();
-    expect(screen.getByText('¥3000/月')).toBeInTheDocument();
+    // freee は無料機能に変更したため pro(会計連携) カードは出さない。
+    expect(screen.queryByText('会計連携')).toBeNull();
+    expect(screen.queryByText('¥3000/月')).toBeNull();
   });
 
   it('未接続 → 接続案内を表示 (支払いボタンなし)', () => {
@@ -159,24 +160,6 @@ describe('BillingPaywall', () => {
       screen.getByRole('button', { name: /に切り替える/ }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /で支払う/ })).toBeNull();
-  });
-
-  it('pro gate: requiredTier=pro なら basic カードは選択不可・支払いは pro 額 (過少支払い防止)', () => {
-    h.account = { isConnected: true, chainId: AMOY };
-    h.siwe = { ...h.siwe, isSignedIn: true };
-    h.entitlement = {
-      data: { entitled: false, tier: null, expiresAt: null, bypass: false },
-    };
-    renderPaywall('pro');
-    // basic カードは disabled (pro gate で ¥300 を選ばせない)。"¥300/月" は basic カード固有
-    // (pro は "¥3000/月"・支払いボタンは "¥3000 を…")。
-    expect(
-      (screen.getByRole('button', { name: /¥300\/月/ }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-    // 既定選択 = requiredTier(pro) → ¥3000 を支払う
-    expect(
-      screen.getByRole('button', { name: /¥3000 を JPYC で支払う/ }),
-    ).toBeInTheDocument();
   });
 
   it('支払い確定後は再送金ボタンを出さず再検証導線 (二重支払い防止)', () => {

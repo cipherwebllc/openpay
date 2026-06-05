@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server';
 import { isKvConfigured } from '@/lib/kv';
 import { freeeEnv, buildAuthorizeUrl } from '@/lib/freee';
 import { newSessionToken } from '@/lib/siwe';
-import { isEntitled } from '@/lib/entitlement';
 import { requireSession } from '../../auth/siwe/_session';
 import { setState } from '../_store';
 
@@ -18,11 +17,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  // 収益化ゲート: freee 連携は pro 利用権が必要 (アルファ中は bypass で全通過)。
-  if (!(await isEntitled(session.address, 'pro'))) {
-    return NextResponse.json({ ok: false, error: 'entitlement_required' }, { status: 402 });
-  }
-
+  // freee 連携は無料機能 (SIWE ログインのみ)。有料化は freee の有料アプリ要件
+  // (掲載+Stripe+無料トライアル) を満たしてから別途。それまで利用権ゲートは設けない。
   const env = freeeEnv();
   if (!env) {
     return NextResponse.json({ ok: false, error: 'freee_not_configured' }, { status: 503 });

@@ -13,7 +13,10 @@ export type EntitlementStatus = {
   bypass: boolean;
 };
 
-export const BILLING_TIERS: readonly EntitlementTier[] = ['basic', 'pro'];
+// paywall で販売中の tier。現状は basic のみ (履歴整形+CSV)。pro(freee連携) は freee の
+// 有料アプリ要件 (掲載+Stripe+無料トライアル) を満たすまで販売せず、freee は無料提供する。
+// EntitlementTier/TIER_RANK/TIER_PRICE_* には pro を残す (利用権システム + 将来の有料化用)。
+export const BILLING_TIERS: readonly EntitlementTier[] = ['basic'];
 
 /** 月額利用料 (円・表示用)。 */
 export const TIER_PRICE_YEN: Record<EntitlementTier, number> = {
