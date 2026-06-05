@@ -954,3 +954,60 @@ describe('i18n: PayerReceipt keys (顧客向け電子レシート, ja/en parity)
     }
   });
 });
+
+describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => {
+  // 深いキー集合を再帰収集 (tier.basic.name 等のネストを含む)。
+  function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
+    return Object.entries(o)
+      .flatMap(([k, v]) =>
+        v && typeof v === 'object'
+          ? deepKeys(v as Record<string, unknown>, `${prefix}${k}.`)
+          : [`${prefix}${k}`],
+      )
+      .sort();
+  }
+
+  it('ja と en でキー集合が完全一致', () => {
+    expect(deepKeys(ja.Billing as Record<string, unknown>)).toEqual(
+      deepKeys(en.Billing as Record<string, unknown>),
+    );
+  });
+
+  it('全 leaf が非空文字列 (空文字 silent regression 防止)', () => {
+    for (const m of [ja, en]) {
+      const flat = JSON.stringify(m.Billing);
+      const leaves = Object.values(
+        m.Billing as Record<string, unknown>,
+      ).flatMap((v) =>
+        v && typeof v === 'object' ? Object.values(v as object) : [v],
+      );
+      for (const leaf of leaves) {
+        // ネスト (tier) は object なので展開済。string のみ検査。
+        if (typeof leaf === 'string') {
+          expect(leaf.trim().length, flat).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('必須キー (tier/価格/支払い/検証/付与) が存在', () => {
+    for (const m of [ja, en]) {
+      const b = m.Billing as Record<string, unknown>;
+      for (const k of [
+        'title',
+        'intro',
+        'priceMonthly',
+        'payCta',
+        'verifying',
+        'granted',
+        'verifyError',
+        'softGateNote',
+      ]) {
+        expect(typeof b[k]).toBe('string');
+      }
+      const tier = b.tier as Record<string, { name?: unknown }>;
+      expect(typeof tier.basic.name).toBe('string');
+      expect(typeof tier.pro.name).toBe('string');
+    }
+  });
+});
