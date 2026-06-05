@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyHistoryFilters,
+  historyEntrySearchText,
   isIncomeSaleEntry,
   summarizeHistory,
   dayRangeToTsBounds,
@@ -161,6 +162,13 @@ describe('日付 helper', () => {
     expect(fromTs).toBe(new Date(2026, 5, 1, 0, 0, 0, 0).getTime());
     expect(toTs).toBe(new Date(2026, 5, 30, 23, 59, 59, 999).getTime());
   });
+  it('monthBounds: YYYY-MM 形式に合致しない入力は当月へ防御フォールバック', () => {
+    // 呼出側はプリセットからしか渡さない前提の保険 (regex 不一致のみが対象)。
+    const fallback = monthBounds(currentMonthKey(new Date()));
+    expect(monthBounds('garbage')).toEqual(fallback);
+    expect(monthBounds('')).toEqual(fallback);
+    expect(monthBounds('2026/06')).toEqual(fallback); // 区切りが '-' でない
+  });
   it('currentMonthKey / previousMonthKey (1月→前年12月 rollover)', () => {
     expect(currentMonthKey(new Date(2026, 5, 15))).toBe('2026-06');
     expect(previousMonthKey(new Date(2026, 0, 15))).toBe('2025-12');
@@ -201,5 +209,94 @@ describe('検索 (v5 記帳補助メタも対象)', () => {
     expect(f('R-777')).toEqual(['a']);
     expect(f('限定T')).toEqual(['a']);
     expect(f('zzz')).toEqual([]);
+  });
+});
+
+// 検索 haystack を組み立てる純関数。lib/ledger の受取行検索と共有 (ドリフト防止)。
+describe('historyEntrySearchText', () => {
+  it('全フィールドを小文字で連結 (merchant/customer/storeName/note/txHash/商品名/メモ/管理番号/明細名)', () => {
+    const e = entry({
+      merchant: '0xMERCHANT',
+      customer: '0xCUST',
+      storeName: 'CAFE Mocha',
+      note: 'REFUND',
+      txHash: '0xDEAD',
+      productName: '抹茶ラテ',
+      memo: '物販',
+      receiptNo: 'R-777',
+      lineItems: [
+        {
+          name: 'ケーキ',
+          quantity: 1,
+          unitPrice: '500',
+          amount: '500',
+          taxRate: 8,
+          taxCategory: 'taxable_8',
+          memo: null,
+        },
+        {
+          name: 'コーヒー',
+          quantity: 2,
+          unitPrice: '300',
+          amount: '600',
+          taxRate: 8,
+          taxCategory: 'taxable_8',
+          memo: null,
+        },
+      ],
+    });
+    const hay = historyEntrySearchText(e);
+    // 出力は完全に小文字化されている (大文字 ASCII が残らない)。
+    expect(hay).toBe(hay.toLowerCase());
+    // 各フィールドが含まれる (明細名は join で全件)。
+    for (const needle of [
+      '0xmerchant',
+      '0xcust',
+      'cafe mocha',
+      'refund',
+      '0xdead',
+      '抹茶ラテ',
+      '物販',
+      'r-777',
+      'ケーキ',
+      'コーヒー',
+    ]) {
+      expect(hay).toContain(needle);
+    }
+  });
+
+  it('nullable 欠落フィールドは "null"/"undefined" 文字列を混入させない (?? "" フォールバック)', () => {
+    const e = entry({
+      merchant: '0xAAA1',
+      customer: null,
+      storeName: '',
+      note: '',
+      txHash: null,
+      productName: null,
+      memo: null,
+      receiptNo: null,
+      lineItems: null,
+    });
+    const hay = historyEntrySearchText(e);
+    expect(hay).not.toContain('null');
+    expect(hay).not.toContain('undefined');
+    expect(hay).toContain('0xaaa1');
+  });
+
+  it('lineItems が null/未定義でも例外を投げず空 join で続行する', () => {
+    expect(() => historyEntrySearchText(entry({ lineItems: null }))).not.toThrow();
+    expect(() =>
+      historyEntrySearchText(entry({ lineItems: undefined })),
+    ).not.toThrow();
+  });
+
+  it('applyHistoryFilters と同一の文字列を使う (フィルタとの一貫性)', () => {
+    // フィルタが haystack に含まれる語でヒットし、含まれない語ではヒットしない。
+    const e = entry({ id: 'x', productName: 'ホットサンド' });
+    const hay = historyEntrySearchText(e);
+    expect(hay.includes('ホットサンド')).toBe(true);
+    expect(
+      applyHistoryFilters([e], F({ search: 'ホットサンド' })).map((x) => x.id),
+    ).toEqual(['x']);
   });
 });

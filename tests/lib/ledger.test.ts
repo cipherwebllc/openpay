@@ -100,6 +100,15 @@ describe('buildLedger', () => {
     expect(Number.isNaN(ledger[0].ts)).toBe(false);
   });
 
+  it('paidAt/createdAt 双方欠落の控え → ts=0 (undefined を Date.parse へ渡さない)', () => {
+    const ledger = buildLedger(
+      [],
+      [rcpt({ receiptId: 'nodate', paidAt: undefined, createdAt: undefined })],
+    );
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].ts).toBe(0);
+  });
+
   it('同一 tx が received と paid 両方にあっても両方表示 (dedup しない・意図的)', () => {
     const ledger = buildLedger(
       [hist({ id: 'x', txHash: '0xsame' })],

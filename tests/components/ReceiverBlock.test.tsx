@@ -123,6 +123,26 @@ describe('ReceiverBlock', () => {
     expect(screen.getByText('接続ウォレット＝受取先')).toBeInTheDocument();
   });
 
+  it('readonly wallet.matches → 静的受取先チップにも一致バッジを出す', () => {
+    render(
+      <ReceiverBlock
+        {...readonlyProps({
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          wallet: { matches: true },
+        })}
+      />,
+    );
+    expect(screen.getByText('接続ウォレット＝受取先')).toBeInTheDocument();
+  });
+
+  it('readonly: 受取先が空なら「—」、ENS 名はそのまま全文表示 (短縮しない)', () => {
+    const { rerender } = render(<ReceiverBlock {...readonlyProps({ receiver: '' })} />);
+    expect(screen.getByText('—')).toBeInTheDocument();
+    // ENS 等の非 0x 文字列は短縮せず原文表示。
+    rerender(<ReceiverBlock {...readonlyProps({ receiver: 'vitalik.eth' })} />);
+    expect(screen.getByText('vitalik.eth')).toBeInTheDocument();
+  });
+
   it('editable showAddressInvalid → 受取先 Field に注意文を描画する', () => {
     render(<ReceiverBlock {...editableProps({ showAddressInvalid: true })} />);
     expect(screen.getByText('アドレスが正しくありません。')).toBeInTheDocument();
