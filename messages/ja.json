@@ -1169,7 +1169,8 @@
     "lineAmount": "金額",
     "memoLabel": "メモ",
     "memoPlaceholder": "メモ (任意)",
-    "addLine": "＋ 商品を追加"
+    "addLine": "＋ カスタム追加",
+    "orderSummaryTitle": "ご注文内容"
   },
   "ProductPresetManager": {
     "empty": "プリセットがありません。下のフォームから追加できます。",

@@ -5,6 +5,9 @@
 // 生成する。決済画面 (/checkout) で内訳がレシート風に表示され、CheckoutForm が履歴に売上明細
 // (lineItems) + per-item 税/管理番号を保存する。
 //
+// レイアウトは POS レジ風: デスクトップ/タブレットは左右2カラム (左=操作スクロール / 右=会計
+// サマリ sticky)、モバイルは1カラム + 画面下部固定の会計バー (合計 + QR ボタン)。
+//
 // - 受取先/token/chain/gas/mode は QR タブと同じ useQrSettings を共有 (住所再入力不要)。
 // - 同一カートは単一通貨 (最初の商品で通貨確定・異通貨プリセットは警告)。チェーンは既存ロジック維持。
 // - 本格 POS ではなくイベント販売・少量販売向け。値引/在庫/カテゴリ/レシート印刷/日報は対象外。
@@ -201,6 +204,9 @@ export function RegisterMode({
     return { l, valid, amountHuman, lineTax };
   });
 
+  // 右サマリ用: 確定 (valid) 行のみの読み取りリスト。
+  const summaryLines = lines.filter((x) => x.valid);
+
   const validItems: CheckoutItem[] = lines
     .filter((x) => x.valid)
     .map(({ l }) => ({
@@ -239,7 +245,8 @@ export function RegisterMode({
       </div>
 
       {/* ① 受取先 (読み取り専用): 受取ウォレット / 通貨・チェーン / 決済設定 を継承表示し、
-          1 本の「決済QRの受取先で変更」リンクで決済QRタブへ誘導する。レジでは編集させない。 */}
+          1 本の「決済QRの受取先で変更」リンクで決済QRタブへ誘導する。レジでは編集させない。
+          設定文脈なので上部に控えめに据え置き、会計操作は下の2カラムで前面化する。 */}
       <ReceiverBlock
         mode="readonly"
         receiver={settings.receiver}
@@ -264,218 +271,302 @@ export function RegisterMode({
         }}
       />
 
-      {/* 商品プリセット (有効・配列順) */}
-      {presetStore.enabledPresets.length > 0 && (
-        <div>
-          <p className="mb-2 text-xs font-semibold text-slate-500">
-            {t('presetsLabel')}
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {presetStore.enabledPresets.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => addFromPreset(p)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-brand active:bg-brand/5"
-              >
-                <div className="truncate text-sm font-semibold text-slate-800">
-                  {p.name}
-                </div>
-                <div className="font-mono text-xs text-slate-500">
-                  {p.unitPrice}{' '}
-                  {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
-                    .displaySymbol}
-                </div>
-              </button>
-            ))}
-          </div>
-          {currencyWarning && (
-            <p className="mt-2 text-xs text-amber-600">
-              {t('currencyMismatch', { symbol })}
+      {/* POS 2カラム: 左=操作 (page scroll) / 右=会計サマリ (lg で sticky 追従)。 */}
+      <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
+        {/* ── LEFT: メイン操作エリア ── */}
+        <div className="min-w-0 space-y-5">
+          {/* 商品プリセット (常時描画・末尾に ＋カスタム追加 を同サイズで統合) */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-slate-500">
+              {t('presetsLabel')}
             </p>
-          )}
-        </div>
-      )}
-
-      {/* カート (商品行カード) */}
-      {cart.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-400">
-          {t('cartEmpty')}
-        </p>
-      ) : (
-        <ul className="space-y-3">
-          {lines.map(({ l, amountHuman, valid }) => (
-            <li
-              key={l.id}
-              className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3"
-            >
-              <div className="flex items-start gap-2">
-                <input
-                  type="text"
-                  value={l.name}
-                  onChange={(e) => updateLine(l.id, { name: e.target.value })}
-                  placeholder={t('productNamePlaceholder')}
-                  aria-label={t('productNameLabel')}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-brand focus:outline-none"
-                  maxLength={80}
-                />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {presetStore.enabledPresets.map((p) => (
                 <button
+                  key={p.id}
                   type="button"
-                  onClick={() => removeLine(l.id)}
-                  aria-label={t('removeLine')}
-                  className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:border-red-300 hover:text-red-600"
+                  onClick={() => addFromPreset(p)}
+                  className="flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
                 >
-                  <Trash2 className="h-4 w-4" aria-hidden />
+                  <div className="truncate text-sm font-semibold text-slate-800">
+                    {p.name}
+                  </div>
+                  <div className="font-mono text-xs text-slate-500">
+                    {p.unitPrice}{' '}
+                    {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
+                      .displaySymbol}
+                  </div>
                 </button>
-              </div>
+              ))}
+              {/* カスタム追加 (空行) — プリセットと同サイズの末尾セル。 */}
+              <button
+                type="button"
+                onClick={addEmptyLine}
+                disabled={cart.length >= CHECKOUT_MAX_ITEMS}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-slate-500 transition hover:border-brand hover:text-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-5 w-5" aria-hidden />
+                {t('addLine')}
+              </button>
+            </div>
+            {currencyWarning && (
+              <p className="mt-2 text-xs text-amber-600">
+                {t('currencyMismatch', { symbol })}
+              </p>
+            )}
+          </div>
 
-              <div className="flex flex-wrap items-end gap-3">
-                <Field label={t('unitPriceLabel', { symbol })}>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={l.unitPrice}
-                    onChange={(e) =>
-                      updateLine(l.id, {
-                        unitPrice: e.target.value.replace(/[^\d.]/g, ''),
-                      })
-                    }
-                    placeholder="0"
-                    aria-label={t('unitPriceLabel', { symbol })}
-                    className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-right font-mono text-base focus:border-brand focus:outline-none"
-                  />
-                </Field>
-                <Field label={t('quantityLabel')}>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setQty(l.id, l.quantity - 1)}
-                      aria-label={t('quantityDecrement')}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:border-brand"
-                    >
-                      <Minus className="h-5 w-5" aria-hidden />
-                    </button>
+          {/* カート (商品行カード) */}
+          {cart.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-400">
+              {t('cartEmpty')}
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {lines.map(({ l, amountHuman, valid }) => (
+                <li
+                  key={l.id}
+                  className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3"
+                >
+                  <div className="flex items-start gap-2">
                     <input
                       type="text"
-                      inputMode="numeric"
-                      value={l.quantity}
-                      aria-label={t('quantityLabel')}
-                      onChange={(e) => {
-                        const n = Number(e.target.value.replace(/[^\d]/g, ''));
-                        setQty(l.id, Number.isFinite(n) && n >= 1 ? n : 1);
-                      }}
-                      className="h-11 w-14 rounded-lg border border-slate-300 text-center font-mono text-lg focus:border-brand focus:outline-none"
+                      value={l.name}
+                      onChange={(e) => updateLine(l.id, { name: e.target.value })}
+                      placeholder={t('productNamePlaceholder')}
+                      aria-label={t('productNameLabel')}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-brand focus:outline-none"
+                      maxLength={80}
                     />
                     <button
                       type="button"
-                      onClick={() => setQty(l.id, l.quantity + 1)}
-                      aria-label={t('quantityIncrement')}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:border-brand"
+                      onClick={() => removeLine(l.id)}
+                      aria-label={t('removeLine')}
+                      className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:border-red-300 hover:text-red-600"
                     >
-                      <Plus className="h-5 w-5" aria-hidden />
+                      <Trash2 className="h-4 w-4" aria-hidden />
                     </button>
                   </div>
-                </Field>
-                <Field label={t('taxLabel')}>
-                  <TaxCategorySelect
-                    taxRate={l.taxRate}
-                    taxCategory={l.taxCategory}
-                    onChange={(next) => updateLine(l.id, next)}
-                    ariaLabel={t('taxLabel')}
-                    customAriaLabel={t('taxCustomLabel')}
-                  />
-                </Field>
-                <div className="ml-auto text-right">
-                  <div className="text-[11px] text-slate-400">{t('lineAmount')}</div>
-                  <div className="font-mono text-sm font-semibold text-slate-800">
-                    {valid ? `${amountHuman} ${symbol}` : '—'}
+
+                  <div className="flex flex-wrap items-end gap-3">
+                    <Field label={t('unitPriceLabel', { symbol })}>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={l.unitPrice}
+                        onChange={(e) =>
+                          updateLine(l.id, {
+                            unitPrice: e.target.value.replace(/[^\d.]/g, ''),
+                          })
+                        }
+                        placeholder="0"
+                        aria-label={t('unitPriceLabel', { symbol })}
+                        className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-right font-mono text-base focus:border-brand focus:outline-none"
+                      />
+                    </Field>
+                    <Field label={t('quantityLabel')}>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setQty(l.id, l.quantity - 1)}
+                          aria-label={t('quantityDecrement')}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:border-brand"
+                        >
+                          <Minus className="h-5 w-5" aria-hidden />
+                        </button>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={l.quantity}
+                          aria-label={t('quantityLabel')}
+                          onChange={(e) => {
+                            const n = Number(e.target.value.replace(/[^\d]/g, ''));
+                            setQty(l.id, Number.isFinite(n) && n >= 1 ? n : 1);
+                          }}
+                          className="h-11 w-14 rounded-lg border border-slate-300 text-center font-mono text-lg focus:border-brand focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setQty(l.id, l.quantity + 1)}
+                          aria-label={t('quantityIncrement')}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:border-brand"
+                        >
+                          <Plus className="h-5 w-5" aria-hidden />
+                        </button>
+                      </div>
+                    </Field>
+                    <Field label={t('taxLabel')}>
+                      <TaxCategorySelect
+                        taxRate={l.taxRate}
+                        taxCategory={l.taxCategory}
+                        onChange={(next) => updateLine(l.id, next)}
+                        ariaLabel={t('taxLabel')}
+                        customAriaLabel={t('taxCustomLabel')}
+                      />
+                    </Field>
+                    <div className="ml-auto text-right">
+                      <div className="text-[11px] text-slate-400">{t('lineAmount')}</div>
+                      <div className="font-mono text-sm font-semibold text-slate-800">
+                        {valid ? `${amountHuman} ${symbol}` : '—'}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <input
-                type="text"
-                value={l.memo}
-                onChange={(e) => updateLine(l.id, { memo: e.target.value })}
-                placeholder={t('memoPlaceholder')}
-                aria-label={t('memoLabel')}
-                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-brand focus:outline-none"
-                maxLength={80}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <button
-        type="button"
-        onClick={addEmptyLine}
-        disabled={cart.length >= CHECKOUT_MAX_ITEMS}
-        className="w-full rounded-xl border border-dashed border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:border-brand hover:text-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {t('addLine')}
-      </button>
-
-      {/* ▸ 記帳・会計 (任意): 3 モード共通 AccountingSection。レジは cart variant =
-          商品名/税はカート明細から自動反映するので手入力欄は出さず、管理番号 + 採番 のみ。 */}
-      <AccountingSection
-        variant="cart"
-        receiptNo={receiptNo}
-        onReceiptNoChange={setReceiptNo}
-        onGenerateReceiptNo={() => setReceiptNo(presetStore.nextReceiptNo())}
-        labels={{
-          title: t('accountingTitle'),
-          receiptNo: t('receiptNoLabel'),
-          receiptNoPlaceholder: t('receiptNoPlaceholder'),
-          generate: t('receiptNoGenerate'),
-          cartAutoNote: t('cartAutoNote'),
-        }}
-      />
-
-      {/* 小計/税額/合計 */}
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <dl className="space-y-1.5 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-slate-500">{t('subtotal')}</dt>
-            <dd className="font-mono text-slate-800">
-              {totalHuman} {symbol}
-            </dd>
-          </div>
-          {totalTaxRounded > 0 && (
-            <div className="flex justify-between">
-              <dt className="text-slate-500">{t('taxAmount')}</dt>
-              <dd className="font-mono text-slate-600">
-                {totalTaxRounded} {symbol}
-              </dd>
-            </div>
+                  <input
+                    type="text"
+                    value={l.memo}
+                    onChange={(e) => updateLine(l.id, { memo: e.target.value })}
+                    placeholder={t('memoPlaceholder')}
+                    aria-label={t('memoLabel')}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-brand focus:outline-none"
+                    maxLength={80}
+                  />
+                </li>
+              ))}
+            </ul>
           )}
-          <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base font-semibold">
-            <dt>{t('total')}</dt>
-            <dd className="font-mono text-slate-900">
-              {totalHuman} {symbol}
-            </dd>
+
+          {/* ▸ 記帳・会計 (任意): 3 モード共通 AccountingSection。レジは cart variant =
+              商品名/税はカート明細から自動反映するので手入力欄は出さず、管理番号 + 採番 のみ。 */}
+          <AccountingSection
+            variant="cart"
+            receiptNo={receiptNo}
+            onReceiptNoChange={setReceiptNo}
+            onGenerateReceiptNo={() => setReceiptNo(presetStore.nextReceiptNo())}
+            labels={{
+              title: t('accountingTitle'),
+              receiptNo: t('receiptNoLabel'),
+              receiptNoPlaceholder: t('receiptNoPlaceholder'),
+              generate: t('receiptNoGenerate'),
+              cartAutoNote: t('cartAutoNote'),
+            }}
+          />
+
+          {/* 商品プリセット管理 (折りたたみ) */}
+          <details
+            className="group rounded-2xl border border-slate-200 bg-white p-4"
+            open={managerOpen}
+          >
+            <summary
+              onClick={(e) => {
+                e.preventDefault();
+                setManagerOpen((o) => !o);
+              }}
+              className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700"
+            >
+              <span>{t('presetManagerTitle')}</span>
+              <ChevronRight
+                className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
+                aria-hidden
+              />
+            </summary>
+            <div className="mt-3">
+              <ProductPresetManager
+                presets={presetStore.presets}
+                addPreset={presetStore.addPreset}
+                updatePreset={presetStore.updatePreset}
+                removePreset={presetStore.removePreset}
+                movePreset={presetStore.movePreset}
+              />
+            </div>
+          </details>
+        </div>
+
+        {/* ── RIGHT: 会計サマリ (lg で sticky 追従・モバイルは in-flow) ── */}
+        <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)]">
+          <div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:max-h-[calc(100vh-6rem)]">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-700">
+                {t('orderSummaryTitle')}
+              </p>
+            </div>
+
+            {/* 注文明細 (読み取り・確定行のみ。長いカートは内部スクロール) */}
+            <div className="min-h-[3rem] flex-1 overflow-y-auto px-4 py-3">
+              {summaryLines.length === 0 ? (
+                <p className="py-3 text-center text-xs text-slate-400">
+                  {t('previewPlaceholder')}
+                </p>
+              ) : (
+                <ul className="space-y-2 text-sm">
+                  {summaryLines.map(({ l, amountHuman }) => (
+                    <li
+                      key={l.id}
+                      className="flex items-baseline justify-between gap-2"
+                    >
+                      <span className="min-w-0 truncate text-slate-700">
+                        {l.name}
+                        <span className="ml-1 text-slate-400">×{l.quantity}</span>
+                      </span>
+                      <span className="shrink-0 font-mono text-slate-800">
+                        {amountHuman} {symbol}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* 小計 / 税額 / 合計 (大) */}
+            <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
+              <dl className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-slate-500">{t('subtotal')}</dt>
+                  <dd className="font-mono text-slate-800">
+                    {totalHuman} {symbol}
+                  </dd>
+                </div>
+                {totalTaxRounded > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-slate-500">{t('taxAmount')}</dt>
+                    <dd className="font-mono text-slate-600">
+                      {totalTaxRounded} {symbol}
+                    </dd>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between border-t border-slate-200 pt-2">
+                  <dt className="text-sm font-semibold text-slate-700">{t('total')}</dt>
+                  <dd className="font-mono text-xl font-bold text-slate-900">
+                    {totalHuman} {symbol}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-2 text-[11px] text-slate-400">{t('taxInclusiveNote')}</p>
+            </div>
+
+            {/* デスクトップ CTA (サイドバー最下部に固定表示)。モバイルは下部バー側を使う。 */}
+            <div className="hidden border-t border-slate-100 p-3 lg:block">
+              <button
+                type="button"
+                onClick={() => setQrModalOpen(true)}
+                disabled={!checkoutUrl}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                <QrCodeIcon className="h-5 w-5" aria-hidden />
+                {t('showQr')}
+              </button>
+            </div>
           </div>
-        </dl>
-        <p className="mt-2 text-[11px] text-slate-400">{t('taxInclusiveNote')}</p>
+        </aside>
       </div>
 
-      {/* QR 生成: 即時表示せず「QRコードを表示する」→ 全画面モーダルで提示 (店員が
-          合計を確認してからお客様に画面を見せる対面フロー)。 */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5">
-        {checkoutUrl ? (
-          <button
-            type="button"
-            onClick={() => setQrModalOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
-          >
-            <QrCodeIcon className="h-5 w-5" aria-hidden />
-            {t('showQr')}
-          </button>
-        ) : (
-          <p className="text-center text-sm text-slate-400">
-            {t('previewPlaceholder')}
-          </p>
-        )}
+      {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。 */}
+      <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] text-slate-400">{t('total')}</div>
+          <div className="truncate font-mono text-lg font-bold text-slate-900">
+            {totalHuman} {symbol}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setQrModalOpen(true)}
+          disabled={!checkoutUrl}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          <QrCodeIcon className="h-5 w-5" aria-hidden />
+          {t('showQr')}
+        </button>
       </div>
 
       {/* 全画面プレビュー (ポスター調 + 印刷/URLコピー + × 閉じる)。決済QRと共通コンポーネント。 */}
@@ -501,35 +592,6 @@ export function RegisterMode({
           onCopy={() => copy(checkoutUrl)}
         />
       )}
-
-      {/* 商品プリセット管理 (折りたたみ) */}
-      <details
-        className="group rounded-2xl border border-slate-200 bg-white p-4"
-        open={managerOpen}
-      >
-        <summary
-          onClick={(e) => {
-            e.preventDefault();
-            setManagerOpen((o) => !o);
-          }}
-          className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700"
-        >
-          <span>{t('presetManagerTitle')}</span>
-          <ChevronRight
-            className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
-            aria-hidden
-          />
-        </summary>
-        <div className="mt-3">
-          <ProductPresetManager
-            presets={presetStore.presets}
-            addPreset={presetStore.addPreset}
-            updatePreset={presetStore.updatePreset}
-            removePreset={presetStore.removePreset}
-            movePreset={presetStore.movePreset}
-          />
-        </div>
-      </details>
     </div>
   );
 }

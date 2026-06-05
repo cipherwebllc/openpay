@@ -37,10 +37,11 @@ function seedReceiver() {
 }
 
 // checkout URL は「QRコードを表示する」→ 全画面モーダル内に表示される。モーダルを
-// 開いて (再クリックは冪等) URL を取り出す。
+// 開いて (再クリックは冪等) URL を取り出す。CTA はデスクトップ右サイドバーとモバイル
+// 下部バーの2箇所に描画される (jsdom は CSS 非適用で両方 DOM に居る) ので先頭をクリック。
 async function parsedCheckout() {
-  const btn = await screen.findByRole('button', { name: /QRコードを表示する/ });
-  await userEvent.setup().click(btn);
+  const btns = await screen.findAllByRole('button', { name: /QRコードを表示する/ });
+  await userEvent.setup().click(btns[0]);
   const el = await screen.findByText(/\/checkout\?/);
   return parseCheckoutParams(new URL(el.textContent!).searchParams);
 }
@@ -193,7 +194,7 @@ describe('RegisterMode', () => {
     render(<RegisterMode />);
     await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
     await user.click(screen.getByRole('button', { name: /コーヒー/ })); // 有効 1 行
-    await user.click(screen.getByRole('button', { name: '＋ 商品を追加' })); // 空行 (無効)
+    await user.click(screen.getByRole('button', { name: '＋ カスタム追加' })); // 空行 (無効)
     const r = await parsedCheckout();
     expect(r.ok && r.params.items).toHaveLength(1); // 空行は除外
   });
@@ -203,7 +204,7 @@ describe('RegisterMode', () => {
     seedReceiver();
     render(<RegisterMode />);
     await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: '＋ 商品を追加' }));
+    await user.click(screen.getByRole('button', { name: '＋ カスタム追加' }));
     // カート行の入力欄 (placeholder='0' は単価のみ・名前は DOM 先頭の "例: コーヒー")。
     await user.type(screen.getAllByPlaceholderText('例: コーヒー')[0], 'おにぎり');
     await user.type(screen.getByPlaceholderText('0'), '120');
@@ -229,11 +230,11 @@ describe('RegisterMode', () => {
     expect(r.ok && r.params.items[0].qty).toBe(1);
   });
 
-  it('明細は最大 10 件 (＋商品を追加が 10 件で disabled)', async () => {
+  it('明細は最大 10 件 (＋カスタム追加が 10 件で disabled)', async () => {
     const user = userEvent.setup();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: '＋ 商品を追加' }));
-    const add = () => screen.getByRole('button', { name: '＋ 商品を追加' });
+    await waitFor(() => screen.getByRole('button', { name: '＋ カスタム追加' }));
+    const add = () => screen.getByRole('button', { name: '＋ カスタム追加' });
     for (let i = 0; i < 10; i += 1) await user.click(add());
     expect(add()).toBeDisabled();
   });
@@ -302,12 +303,43 @@ describe('RegisterMode', () => {
     await user.click(screen.getByRole('button', { name: /コーヒー/ }));
     // 即時には checkout URL を出さない。
     expect(screen.queryByText(/\/checkout\?/)).toBeNull();
-    // ボタン → モーダルで URL / ポスター / コピー が出る。
-    await user.click(screen.getByRole('button', { name: /QRコードを表示する/ }));
+    // ボタン → モーダルで URL / ポスター / コピー が出る (CTA は2箇所描画なので先頭)。
+    await user.click(
+      screen.getAllByRole('button', { name: /QRコードを表示する/ })[0],
+    );
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(await screen.findByText(/\/checkout\?/)).toBeInTheDocument();
     // × 閉じる で dialog が消える。
     await user.click(screen.getByRole('button', { name: /閉じる/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('右サイドバーに注文サマリ (ご注文内容 + 小計/合計) を表示する', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    // POS サマリ: 見出し + 小計ラベルが描画される (旧・単独サマリボックスから刷新)。
+    expect(screen.getByText('ご注文内容')).toBeInTheDocument();
+    expect(screen.getByText('小計')).toBeInTheDocument();
+    // 確定行がサマリ明細に出る (商品名 ×数量)。
+    expect(screen.getByText('×1')).toBeInTheDocument();
+  });
+
+  it('プリセット0件でも「＋ カスタム追加」を常時描画する (グリッド統合)', async () => {
+    // 有効プリセットが空でも空行追加導線は出す (常時描画化のエッジ)。
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({ presets: [] }),
+    );
+    render(<RegisterMode />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: '＋ カスタム追加' }),
+      ).toBeInTheDocument(),
+    );
+    // サンプルプリセット (コーヒー等) は出ない。
+    expect(screen.queryByRole('button', { name: /コーヒー/ })).toBeNull();
   });
 });

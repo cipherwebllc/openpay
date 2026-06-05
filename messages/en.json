@@ -1169,7 +1169,8 @@
     "lineAmount": "Amount",
     "memoLabel": "Memo",
     "memoPlaceholder": "Memo (optional)",
-    "addLine": "+ Add item"
+    "addLine": "+ Custom item",
+    "orderSummaryTitle": "Order"
   },
   "ProductPresetManager": {
     "empty": "No presets yet. Add one below.",
