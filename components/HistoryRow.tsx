@@ -134,6 +134,11 @@ export function HistoryRow({
         <div className="flex items-center gap-2">
           <span
             className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_BADGE_CLASS[entry.status]}`}
+            title={
+              entry.status === 'reverted'
+                ? t('statusRevertedTooltip')
+                : undefined
+            }
           >
             {t(STATUS_I18N_KEY[entry.status])}
           </span>

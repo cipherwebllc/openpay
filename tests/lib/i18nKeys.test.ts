@@ -755,6 +755,11 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
   const HISTORY_KEYS = [
     'filterStatusLabel',
     'filterStatusAll',
+    // フィルタ各行の可視軸ラベル (種別/通貨/状態) + revert 専門用語のホバー補足。
+    'axisDirection',
+    'axisAsset',
+    'axisStatus',
+    'statusRevertedTooltip',
     'searchLabel',
     'searchPlaceholder',
     'dateRangeLabel',

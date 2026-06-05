@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 
@@ -95,7 +95,9 @@ describe('HistoryView', () => {
     render(<HistoryView />);
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: /全て \(3\)/ }),
+        within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(3\)/,
+        }),
       ).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /JPYC \(2\)/ })).toBeInTheDocument();
@@ -189,7 +191,9 @@ describe('HistoryView', () => {
       expect(screen.queryByText(/履歴はまだありません/)).toBeNull(),
     );
     expect(
-      screen.getByRole('button', { name: /全て \(1\)/ }),
+      within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(1\)/,
+        }),
     ).toBeInTheDocument();
   });
 
@@ -245,7 +249,9 @@ describe('HistoryView', () => {
       }
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(10\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(10\)/,
+        }),
         ).toBeInTheDocument(),
       );
     });
@@ -268,7 +274,9 @@ describe('HistoryView', () => {
       );
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(1\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(1\)/,
+        }),
         ).toBeInTheDocument(),
       );
 
@@ -276,7 +284,9 @@ describe('HistoryView', () => {
       appendHistory(entry({ id: 'self', merchantAmount: '700000000000000000000' }));
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(2\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(2\)/,
+        }),
         ).toBeInTheDocument(),
       );
     });
@@ -287,7 +297,9 @@ describe('HistoryView', () => {
       render(<HistoryView />);
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(2\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(2\)/,
+        }),
         ).toBeInTheDocument(),
       );
 
@@ -304,7 +316,9 @@ describe('HistoryView', () => {
       render(<HistoryView />);
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(1\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(1\)/,
+        }),
         ).toBeInTheDocument(),
       );
       // 自分の key 以外の storage event 多発 (CSS prefs / theme 等の他アプリ書込)
@@ -318,7 +332,9 @@ describe('HistoryView', () => {
       }
       // state は変わらない
       expect(
-        screen.getByRole('button', { name: /全て \(1\)/ }),
+        within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(1\)/,
+        }),
       ).toBeInTheDocument();
     });
   });
@@ -337,7 +353,9 @@ describe('HistoryView', () => {
       render(<HistoryView />);
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(1000\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(1000\)/,
+        }),
         ).toBeInTheDocument(),
       );
       const dt = performance.now() - t0;
@@ -365,7 +383,9 @@ describe('HistoryView', () => {
       render(<HistoryView />);
       await waitFor(() =>
         expect(
-          screen.getByRole('button', { name: /全て \(500\)/ }),
+          within(screen.getByRole('group', { name: 'フィルタ' })).getByRole('button', {
+          name: /すべて \(500\)/,
+        }),
         ).toBeInTheDocument(),
       );
       expect(

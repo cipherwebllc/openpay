@@ -83,7 +83,7 @@ describe('HistoryRow', () => {
 
   it('reverted badge は amber 色クラス', () => {
     render(<HistoryRow entry={entry({ status: 'reverted' })} onRemove={() => undefined} />);
-    expect(screen.getByText('revert').className).toMatch(/amber/);
+    expect(screen.getByText('差し戻し').className).toMatch(/amber/);
   });
 
   it('error badge は red 色クラス + errorMessage を出す', () => {

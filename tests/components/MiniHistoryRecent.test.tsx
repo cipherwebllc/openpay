@@ -245,14 +245,14 @@ describe('MiniHistoryRecent: status 別ドット色 + a11y label', () => {
     expect(screen.getByLabelText('成功')).toBeInTheDocument();
   });
 
-  it('reverted entry → 琥珀 (bg-amber-500) + aria-label "revert"', () => {
+  it('reverted entry → 琥珀 (bg-amber-500) + aria-label "差し戻し"', () => {
     useHistoryMock.mockReturnValue({
       entries: [entry({ id: 'r1', status: 'reverted' })],
       hydrated: true,
     });
     const { container } = renderWithIntl(<MiniHistoryRecent />);
     expect(container.querySelector('.bg-amber-500')).not.toBeNull();
-    expect(screen.getByLabelText('revert')).toBeInTheDocument();
+    expect(screen.getByLabelText('差し戻し')).toBeInTheDocument();
   });
 
   it('error entry → 赤 (bg-red-500) + aria-label "エラー"', () => {

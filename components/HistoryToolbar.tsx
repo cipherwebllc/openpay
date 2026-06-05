@@ -43,10 +43,12 @@ const STATUS_OPTIONS: ReadonlyArray<{
     | 'statusReverted'
     | 'statusError'
     | 'statusPending';
+  // 専門用語 (差し戻し=revert) はホバーで補足する。
+  tooltipKey?: 'statusRevertedTooltip';
 }> = [
   { key: 'all', i18nKey: 'filterStatusAll' },
   { key: 'success', i18nKey: 'statusSuccess' },
-  { key: 'reverted', i18nKey: 'statusReverted' },
+  { key: 'reverted', i18nKey: 'statusReverted', tooltipKey: 'statusRevertedTooltip' },
   { key: 'error', i18nKey: 'statusError' },
   { key: 'pending', i18nKey: 'statusPending' },
 ];
@@ -159,8 +161,11 @@ export function HistoryToolbar({
       <div
         role="group"
         aria-label={t('filterDirectionLabel')}
-        className="flex flex-wrap gap-1"
+        className="flex flex-wrap items-center gap-1"
       >
+        <span aria-hidden className="self-center text-[11px] font-medium text-slate-500">
+          {t('axisDirection')}
+        </span>
         {DIRECTION_OPTIONS.map((opt) => (
           <Pill
             key={opt.key}
@@ -173,7 +178,10 @@ export function HistoryToolbar({
 
       {/* 通貨フィルタ + 検索 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div role="group" aria-label={t('filterLabel')} className="flex flex-wrap gap-1">
+        <div role="group" aria-label={t('filterLabel')} className="flex flex-wrap items-center gap-1">
+          <span aria-hidden className="self-center text-[11px] font-medium text-slate-500">
+            {t('axisAsset')}
+          </span>
           {ASSET_OPTIONS.map((opt) => (
             <Pill
               key={opt.key}
@@ -195,13 +203,17 @@ export function HistoryToolbar({
 
       {/* 状態フィルタ + 期間 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div role="group" aria-label={t('filterStatusLabel')} className="flex flex-wrap gap-1">
+        <div role="group" aria-label={t('filterStatusLabel')} className="flex flex-wrap items-center gap-1">
+          <span aria-hidden className="self-center text-[11px] font-medium text-slate-500">
+            {t('axisStatus')}
+          </span>
           {STATUS_OPTIONS.map((opt) => (
             <Pill
               key={opt.key}
               active={filters.status === opt.key}
               onClick={() => set({ status: opt.key })}
               label={t(opt.i18nKey)}
+              title={opt.tooltipKey ? t(opt.tooltipKey) : undefined}
             />
           ))}
         </div>
@@ -305,15 +317,18 @@ function Pill({
   active,
   onClick,
   label,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       aria-pressed={active}
       className={`rounded-full px-3 py-1 text-xs font-medium transition ${
         active

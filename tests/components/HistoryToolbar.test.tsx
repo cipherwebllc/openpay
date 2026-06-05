@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { HistoryToolbar } from '@/components/HistoryToolbar';
@@ -83,10 +83,11 @@ describe('HistoryToolbar', () => {
   it('通貨フィルタ: active は aria-pressed=true・クリックで onFiltersChange(asset)', async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = renderToolbar({ counts: { all: 3, jpyc: 2, usdc: 1 } });
-    expect(screen.getByRole('button', { name: /全て \(3\)/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    // 通貨「すべて(3)」は方向「すべて(3)」と同テキストなので通貨グループにスコープ。
+    const assetGroup = within(screen.getByRole('group', { name: 'フィルタ' }));
+    expect(
+      assetGroup.getByRole('button', { name: /すべて \(3\)/ }),
+    ).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: /JPYC \(2\)/ }));
     expect(onFiltersChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ asset: 'jpyc' }),
