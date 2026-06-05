@@ -523,6 +523,33 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
       screen.getByText(/ファンはガス代を用意せず投げ銭できます/),
     ).toBeInTheDocument();
   });
+
+  it('高度な設定を開かなくても (折りたたみのまま) crossChain=false が URL に直列化される', async () => {
+    // 折りたたみを button+条件描画へ統一したリファクタの load-bearing 前提を検証:
+    // crossChain は settings 駆動で URL 化される (checkbox の描画有無に依存しない)。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'usdc',
+        chain: 'base',
+        receiver: VALID,
+        crossChain: false,
+      }),
+    );
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    // 高度な設定は閉じたまま = crossChain チェックボックスは DOM 不在。
+    expect(
+      screen.getByRole('button', { name: /高度な設定/ }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
+    ).toBeNull();
+
+    // それでも保存済み crossChain=false が URL に反映される (描画非依存)。
+    await waitFor(() => expectInUrl(/crossChain=false/));
+  });
 });
 
 describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorage)', () => {

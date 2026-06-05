@@ -86,6 +86,20 @@ describe('HistoryRow', () => {
     expect(screen.getByText('差し戻し').className).toMatch(/amber/);
   });
 
+  it('reverted badge は専門用語補足の title ツールチップを持つ (他 status は持たない)', () => {
+    const { rerender } = render(
+      <HistoryRow entry={entry({ status: 'reverted' })} onRemove={() => undefined} />,
+    );
+    expect(screen.getByText('差し戻し')).toHaveAttribute(
+      'title',
+      'チェーン上で処理が巻き戻された取引',
+    );
+    rerender(
+      <HistoryRow entry={entry({ status: 'success' })} onRemove={() => undefined} />,
+    );
+    expect(screen.getByText('成功')).not.toHaveAttribute('title');
+  });
+
   it('error badge は red 色クラス + errorMessage を出す', () => {
     render(
       <HistoryRow

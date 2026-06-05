@@ -75,6 +75,9 @@ describe('useRelayGaslessSnapshot', () => {
       saleAmount: value, // gross は不変 (GMV 基礎)
       networkFeeEquivalent: FEE,
     });
+    // FEE=0 でも自明に通らないよう「実際に控除が起きた」ことを厳密に要求。
+    expect(result.current.variables!.merchantAmount).toBeLessThan(value);
+    expect(result.current.variables!.saleAmount).toBe(value); // gross > net
   });
 
   it('gasMode 未指定 (= customer 既定の relay) は recover でも控除しない', () => {

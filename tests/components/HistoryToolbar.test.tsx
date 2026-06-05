@@ -80,6 +80,28 @@ describe('HistoryToolbar', () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
+  it('各フィルタ行の左に可視の軸ラベル 種別：/通貨：/状態： を描画する', () => {
+    renderToolbar();
+    // aria-hidden だが DOM には存在し画面に出る (機能の核 = 何の軸か即時伝達)。
+    expect(screen.getByText('種別：')).toBeInTheDocument();
+    expect(screen.getByText('通貨：')).toBeInTheDocument();
+    expect(screen.getByText('状態：')).toBeInTheDocument();
+  });
+
+  it('状態フィルタの「差し戻し」pill は専門用語補足の title ツールチップを持つ', () => {
+    renderToolbar();
+    const statusGroup = within(
+      screen.getByRole('group', { name: '状態で絞り込み' }),
+    );
+    expect(
+      statusGroup.getByRole('button', { name: '差し戻し' }),
+    ).toHaveAttribute('title', 'チェーン上で処理が巻き戻された取引');
+    // 専門用語でない他の pill には title を付けない (過剰表示を避ける)。
+    expect(
+      statusGroup.getByRole('button', { name: '成功' }),
+    ).not.toHaveAttribute('title');
+  });
+
   it('通貨フィルタ: active は aria-pressed=true・クリックで onFiltersChange(asset)', async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = renderToolbar({ counts: { all: 3, jpyc: 2, usdc: 1 } });
