@@ -25,6 +25,18 @@ import { resolveDeployment, defaultDeploymentForSymbol } from '@/lib/tokens';
 
 type VerifyResponse = { ok: true; tier: EntitlementTier; expiresAt: number };
 
+// 行動エリアの排他状態。優先順位順に評価して 1 つだけ描画する (深いネスト三項を避け、
+// 状態の追加/編集を独立させる)。
+type ActionKind =
+  | 'misconfigured' // 受領アドレス未設定 (送金先が burn)
+  | 'connect' // ウォレット未接続
+  | 'mismatch' // ログイン中と接続中の wallet 不一致
+  | 'signIn' // 未ログイン
+  | 'granted' // 付与完了
+  | 'switchChain' // 非 JPYC chain
+  | 'verify' // 送金確定済 → 検証/再検証フェーズ
+  | 'pay'; // 支払い待ち
+
 function formatDate(ms: number): string {
   // 利用権の満了日を YYYY/MM/DD (ローカル日付) で表示。
   const d = new Date(ms);
@@ -92,11 +104,14 @@ export function BillingPaywall({
 
   // 確定済 txHash を /api/fee/verify へ。pay 起動時に固定した tier/chain を使う (選択変更で
   // drift させない)。自動起動 (pay 確定) と手動再試行 (検証失敗) の両方から呼ぶ。
+  // dep は verify 全体でなく安定参照の verify.mutate にする (useMutation の戻り object は
+  // 毎 render で identity が変わるため、verify を dep にすると runVerify が毎 render 再生成される)。
+  const verifyMutate = verify.mutate;
   const runVerify = useCallback(() => {
     const ctx = payCtxRef.current;
     if (!pay.txHash || !ctx) return;
-    verify.mutate({ txHash: pay.txHash, chainId: ctx.chainId, tier: ctx.tier });
-  }, [pay.txHash, verify]);
+    verifyMutate({ txHash: pay.txHash, chainId: ctx.chainId, tier: ctx.tier });
+  }, [pay.txHash, verifyMutate]);
 
   // pay 確定 → verify を一度だけ自動起動。
   useEffect(() => {
@@ -124,6 +139,23 @@ export function BillingPaywall({
   const granted = verify.data;
   const currentTier = entitlement.data?.tier ?? null;
   const currentExpiry = entitlement.data?.expiresAt ?? null;
+
+  // 排他状態を優先順位順に 1 つ決める。各状態の描画は下の {action === ...} で独立に行う。
+  const action: ActionKind = !env.feeReceiverConfigured
+    ? 'misconfigured'
+    : !isConnected
+      ? 'connect'
+      : mismatch
+        ? 'mismatch'
+        : !isSignedIn
+          ? 'signIn'
+          : granted
+            ? 'granted'
+            : !payDeployment
+              ? 'switchChain'
+              : pay.isConfirmed && pay.txHash
+                ? 'verify'
+                : 'pay';
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -177,16 +209,19 @@ export function BillingPaywall({
         })}
       </div>
 
-      {/* 行動エリア: (設定不備チェック →) 接続 → ログイン → 支払い */}
+      {/* 行動エリア: action (排他状態) ごとに独立して描画。優先順位は action 算出側に集約。 */}
       <div className="mt-4 space-y-2">
-        {!env.feeReceiverConfigured ? (
+        {action === 'misconfigured' && (
           // 受領アドレス未設定 → 送金先が burn になるため支払いを出さない (運用設定不備)。
           <p className="text-xs text-amber-700">{t('misconfigured')}</p>
-        ) : !isConnected ? (
+        )}
+        {action === 'connect' && (
           <p className="text-xs text-slate-500">{t('connectRequired')}</p>
-        ) : mismatch ? (
+        )}
+        {action === 'mismatch' && (
           <p className="text-xs text-amber-700">{t('mismatch')}</p>
-        ) : !isSignedIn ? (
+        )}
+        {action === 'signIn' && (
           <>
             <button
               type="button"
@@ -200,14 +235,16 @@ export function BillingPaywall({
               <p className="text-[11px] text-red-600">{t('signInError')}</p>
             )}
           </>
-        ) : granted ? (
+        )}
+        {action === 'granted' && granted && (
           <p className="text-sm font-semibold text-emerald-700">
             {t('granted', {
               tier: t(`tier.${granted.tier}.name`),
               date: formatDate(granted.expiresAt),
             })}
           </p>
-        ) : !payDeployment ? (
+        )}
+        {action === 'switchChain' && (
           <button
             type="button"
             disabled={isSwitching}
@@ -216,7 +253,8 @@ export function BillingPaywall({
           >
             {t('switchChain', { chain: defaultJpyc.name })}
           </button>
-        ) : pay.isConfirmed && pay.txHash ? (
+        )}
+        {action === 'verify' && (
           // 送金は確定済。あとは検証のみ — 失敗しても再送金させず verify を再試行する。
           <>
             <button
@@ -235,7 +273,8 @@ export function BillingPaywall({
               </p>
             )}
           </>
-        ) : (
+        )}
+        {action === 'pay' && payDeployment && (
           <>
             <button
               type="button"

@@ -120,10 +120,20 @@ export async function grantEntitlement(
   const write = await kvSet(entitlementKey(wallet), payload, { ttlSec });
   if (write.ok) return { ok: true, tier: outTier, expiresAt: outExpiry };
 
-  // 書込応答が失われた (http_error 等) 場合: 実際には永続化された可能性がある。読み戻して
-  // 自分の payload が landed していれば成功扱い。これで「応答ロスで claim を release → 再提出
-  // → max マージで満了が静かに延長」を防ぐ (再提出は本当に未永続化のときだけ起こる)。
+  // 書込応答が失われた (http_error/timeout) 場合: 実際には永続化された可能性がある。読み戻して
+  // 「我々の意図 (outTier 以上 かつ outExpiry 以上) が満たされているか」を確認し、満たされていれば
+  // 成功扱いにする。これで「応答ロスで claim を release → 再提出 → max マージで満了が静かに延長」を
+  // 防ぐ。exact 一致でなく意図充足で判定するのは、並行する同 wallet の grant が別 payload (例: 上位
+  // tier) を landed させていても、その結果が我々の意図を包含するなら成功とみなすため (false-negative
+  // 回避)。本当に未永続化のときだけ ok:false となり再提出される。
   const readback = await kvGet(entitlementKey(wallet));
-  const persisted = readback.ok && readback.value === payload;
+  let persisted = false;
+  if (readback.ok && readback.value) {
+    const stored = parseStored(readback.value);
+    persisted =
+      stored !== null &&
+      tierAtLeast(stored.tier, outTier) &&
+      stored.expiresAt >= outExpiry;
+  }
   return { ok: persisted, tier: outTier, expiresAt: outExpiry };
 }

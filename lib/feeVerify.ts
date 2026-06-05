@@ -22,7 +22,10 @@ export type FeeVerifyResult =
         | 'no_matching_transfer'
         | 'amount_too_low'
         | 'tx_reverted'
-        | 'tx_not_found';
+        | 'tx_not_found'
+        // RPC/transport 障害 (ダウン/rate limit/network/timeout)。tx_not_found (= 顧客が
+        // 未マイニング/誤った hash を出した) とは別物で、呼出側は retryable + alert に回す。
+        | 'rpc_error';
     };
 
 // viem の Log と構造的に互換な最小形 (テストでモック可能・重い generic を避ける)。
@@ -105,8 +108,15 @@ export async function verifyJpycFeeOnChain(args: {
   let receipt: Awaited<ReturnType<ReceiptReader['getTransactionReceipt']>>;
   try {
     receipt = await args.publicClient.getTransactionReceipt({ hash: args.txHash });
-  } catch {
-    return { ok: false, reason: 'tx_not_found' };
+  } catch (e) {
+    // viem は未マイニング/不明な tx に TransactionReceiptNotFoundError を投げる (= 顧客側
+    // の正当な「まだ見つからない」)。それ以外 (RPC ダウン / rate limit / network / timeout) は
+    // transport 障害として区別し、呼出側で retryable 503 + alert へ回す。
+    const name = (e as { name?: unknown })?.name;
+    if (name === 'TransactionReceiptNotFoundError') {
+      return { ok: false, reason: 'tx_not_found' };
+    }
+    return { ok: false, reason: 'rpc_error' };
   }
   if (receipt.status !== 'success') return { ok: false, reason: 'tx_reverted' };
   return verifyJpycFeeTransfer({ logs: receipt.logs, expected: args.expected });

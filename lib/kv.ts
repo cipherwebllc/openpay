@@ -15,6 +15,16 @@ type KvResult<T> = KvOk<T> | KvErr;
 // 1 リクエストを bound する (これが無いと route の maxDuration まで slot を占有する)。
 const KV_TIMEOUT_MS = 5_000;
 
+// 投げられた値から name/detail を抽出する (Error / DOMException / 非Error を一様に扱う・
+// realm 差異で instanceof Error が一致しないケースに依存しない)。
+function errInfo(e: unknown): { name: string; detail: string } {
+  const o = e as { name?: unknown; message?: unknown };
+  return {
+    name: typeof o?.name === 'string' ? o.name : '',
+    detail: typeof o?.message === 'string' ? o.message : String(e),
+  };
+}
+
 function endpoint(): { url: string; token: string } | null {
   const url = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
@@ -43,15 +53,9 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     });
   } catch (e) {
     // AbortSignal.timeout 発火は DOMException('TimeoutError')、明示 abort は 'AbortError'。
-    // DOMException は realm によって instanceof Error が一致しないため (test/edge)、
-    // name/message を property として読み判定する (Error/DOMException/非Error を一様に扱う)。
-    const err = e as { name?: unknown; message?: unknown };
-    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
-    return {
-      ok: false,
-      reason: timedOut ? 'timeout' : 'http_error',
-      detail: typeof err?.message === 'string' ? err.message : String(e),
-    };
+    const { name, detail } = errInfo(e);
+    const timedOut = name === 'TimeoutError' || name === 'AbortError';
+    return { ok: false, reason: timedOut ? 'timeout' : 'http_error', detail };
   }
   if (!res.ok) {
     return { ok: false, reason: 'http_error', status: res.status };
@@ -63,11 +67,7 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     }
     return { ok: true, value: json.result as T };
   } catch (e) {
-    return {
-      ok: false,
-      reason: 'parse_error',
-      detail: e instanceof Error ? e.message : String(e),
-    };
+    return { ok: false, reason: 'parse_error', detail: errInfo(e).detail };
   }
 }
 

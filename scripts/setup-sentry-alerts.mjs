@@ -28,6 +28,7 @@
 //   cross-chain.balance-query.* > 100 件/h
 //   billing.fee.grant-failed    > 3 件/h  (顧客が支払ったのに未付与)
 //   billing.fee.unexpected      > 3 件/h  (money-path の想定外 throw)
+//   billing.fee.rpc-error       > 3 件/h  (chain RPC 障害で検証不能)
 //   billing.fee.misconfigured   > 1 件/h  (FEE_RECEIVER 未設定の運用ミス)
 //   billing.fee.release-failed  > 1 件/h  (txHash 焼失・手動 KV 削除が必要)
 //
@@ -132,6 +133,16 @@ export const RULES = [
       '/api/fee/verify の nx-claim 後で想定外の例外 (RPC/transport 不調等)。1 時間に 3 件超で ' +
       '通知。claim は release 済 (txHash 焼失なし) だが、RPC エンドポイント障害の早期検知に使う。',
     eventTag: 'billing.fee.unexpected',
+    threshold: 3,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.fee.rpc-error (chain RPC outage)',
+    description:
+      '/api/fee/verify の getTransactionReceipt が transport 障害 (RPC ダウン/rate limit/timeout)。' +
+      'tx_not_found (顧客の誤 tx) と区別され 503 を返す。1 時間に 3 件超で通知 = RPC 障害が ' +
+      '支払い検証を広く弾いているサイン (顧客は正しい tx でも検証できない)。RPC override の確認/切替を。',
+    eventTag: 'billing.fee.rpc-error',
     threshold: 3,
     interval: '1h',
   },

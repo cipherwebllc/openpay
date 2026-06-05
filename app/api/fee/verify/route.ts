@@ -10,11 +10,15 @@ import {
   grantEntitlement,
   ENTITLEMENT_DEFAULT_DAYS,
 } from '@/lib/entitlement';
-import { isEntitlementTier, TIER_PRICE_JPYC } from '@/lib/billing';
+import {
+  isEntitlementTier,
+  TIER_PRICE_JPYC,
+  type EntitlementTier,
+} from '@/lib/billing';
 import { verifyJpycFeeOnChain } from '@/lib/feeVerify';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
-import { kvSet, kvDel } from '@/lib/kv';
+import { kvSet, kvGet, kvDel } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -23,11 +27,41 @@ export const dynamic = 'force-dynamic';
 // 遅延/ハングした RPC が関数スロットを長時間占有しないようにする。
 export const maxDuration = 20;
 
-// 利用権 (~30日) より十分長く保持し、同 txHash の再利用を恒久的に拒否する。
-const FEE_USED_TTL_SEC = 400 * 86_400;
+// idempotency は 2 段階: まず短い「処理ロック」を nx で取り、付与確定後に「結果」へ昇格する。
+//  - 処理ロック (LOCK_MARKER・短 TTL): 検証/付与の最中だけ他リクエストを弾く。maxDuration kill や
+//    途中中断ではロックが自然失効するため、txHash が恒久 claim されたまま焼失することがない。
+//  - 結果 (FEE_RESULT_PREFIX + JSON・恒久 TTL): 付与済を表す。同 txHash の再提出は再付与せず
+//    この結果を replay で返す (満了の暗黙延長を防ぐ)。
+const FEE_LOCK_TTL_SEC = 120;
+const FEE_RESULT_TTL_SEC = 400 * 86_400;
+const LOCK_MARKER = 'pending';
+const FEE_RESULT_PREFIX = 'r:';
 
-// idempotency claim の解放。kvDel 自体が失敗すると当該 txHash は焼失 (再提出が
-// already_processed になる) するため、運用で手動解放できるよう key を error log に残す。
+type FeeResult = { tier: EntitlementTier; expiresAt: number };
+
+// claim 値が「確定結果」なら parse して返す (処理ロック中 / 不正値は null)。
+function parseFeeResult(value: string | null): FeeResult | null {
+  if (!value || !value.startsWith(FEE_RESULT_PREFIX)) return null;
+  try {
+    const o = JSON.parse(value.slice(FEE_RESULT_PREFIX.length)) as {
+      tier?: unknown;
+      expiresAt?: unknown;
+    };
+    if (
+      isEntitlementTier(o.tier) &&
+      typeof o.expiresAt === 'number' &&
+      Number.isFinite(o.expiresAt)
+    ) {
+      return { tier: o.tier, expiresAt: o.expiresAt };
+    }
+  } catch {
+    /* 不正な結果値は replay 不可として扱う */
+  }
+  return null;
+}
+
+// 処理ロックの解放。kvDel 自体が失敗すると当該 txHash は短 TTL の失効まで再提出が
+// already_processed になるため、運用で気付けるよう key を error log に残す。
 async function releaseClaim(usedKey: string, cause: string): Promise<void> {
   const del = await kvDel(usedKey);
   if (!del.ok) {
@@ -76,18 +110,31 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'unsupported_chain' }, { status: 400 });
   }
 
-  // 二重付与防止: txHash を nx で claim。既に使用済なら 409。verify 失敗時は release し再試行可。
+  // 処理ロックを nx で取得。取れなければ既存 = 確定結果 (replay) か処理中 (409)。
   const usedKey = `fee:used:${chainId}:${txHash.toLowerCase()}`;
-  const claim = await kvSet(usedKey, '1', { nx: true, ttlSec: FEE_USED_TTL_SEC });
+  const claim = await kvSet(usedKey, LOCK_MARKER, {
+    nx: true,
+    ttlSec: FEE_LOCK_TTL_SEC,
+  });
   if (!claim.ok) {
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
   if (claim.value !== 'OK') {
+    // 既に確定済 (結果あり) → 再付与せず同じ結果を replay。処理中 (ロックのみ) → 409。
+    const existing = await kvGet(usedKey);
+    const prior = existing.ok ? parseFeeResult(existing.value) : null;
+    if (prior) {
+      return NextResponse.json({
+        ok: true,
+        tier: prior.tier,
+        expiresAt: prior.expiresAt,
+        replay: true,
+      });
+    }
     return NextResponse.json({ ok: false, error: 'already_processed' }, { status: 409 });
   }
 
-  // nx-claim 後の処理は想定外 throw (RPC/transport 設定不備等) でも claim を必ず解放する。
-  // さもなくば「未付与なのに txHash が恒久 claim されたまま焼失」する。
+  // ロック取得後の処理は想定外 throw (RPC/transport 設定不備等) でも必ずロックを解放する。
   try {
     const publicClient = createPublicClient({
       chain,
@@ -105,7 +152,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     });
 
     if (!result.ok) {
-      await releaseClaim(usedKey, 'verify-failed'); // release → 正しい tx で再提出可能に
+      await releaseClaim(usedKey, result.reason); // release → 正しい tx で再提出可能に
+      // RPC/transport 障害は顧客の誤 tx (tx_not_found 等) と区別し retryable + alert へ。
+      if (result.reason === 'rpc_error') {
+        logger.error('billing.fee.rpc-error', {
+          wallet: session.address,
+          chainId,
+          tier,
+        });
+        return NextResponse.json(
+          { ok: false, error: 'verify_unavailable' },
+          { status: 503 },
+        );
+      }
       logger.warn('billing.fee.verify-failed', {
         wallet: session.address,
         chainId,
@@ -120,8 +179,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       tier,
       ENTITLEMENT_DEFAULT_DAYS,
     );
-    // 検証は通ったが利用権の永続化に失敗 (KV 書込 NG)。claim を解放し 503。
-    // 「支払い済なのに無付与かつ txHash 焼失」を防ぐ (正しい tx で再提出可能)。
+    // 検証は通ったが利用権の永続化に失敗 (KV 書込 NG)。ロックを解放し 503。
+    // 「支払い済なのに無付与」を防ぐ (正しい tx で再提出可能・ロックは短 TTL で失効)。
     if (!granted.ok) {
       await releaseClaim(usedKey, 'grant-write-failed');
       logger.error('billing.fee.grant-failed', {
@@ -131,6 +190,22 @@ export async function POST(req: Request): Promise<NextResponse> {
         txHash,
       });
       return NextResponse.json({ ok: false, error: 'grant_failed' }, { status: 503 });
+    }
+
+    // 付与確定 → ロックを結果へ昇格 (恒久 TTL)。以後の再提出は replay になり再付与しない。
+    // 昇格失敗でも付与は済んでいる: ロックは FEE_LOCK_TTL_SEC で失効し、その後の再提出は
+    // grant の max-merge が安全に吸収する (観測のため warn は残す)。
+    const promote = await kvSet(
+      usedKey,
+      FEE_RESULT_PREFIX +
+        JSON.stringify({ tier: granted.tier, expiresAt: granted.expiresAt }),
+      { ttlSec: FEE_RESULT_TTL_SEC },
+    );
+    if (!promote.ok) {
+      logger.warn('billing.fee.promote-failed', {
+        usedKey,
+        reason: promote.reason,
+      });
     }
     logger.info('billing.fee.verified', {
       wallet: session.address,

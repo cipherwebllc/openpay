@@ -266,4 +266,33 @@ describe('grantEntitlement', () => {
     const r = await grantEntitlement(WALLET, 'basic', 30, now);
     expect(r).toEqual({ ok: true, tier: 'basic', expiresAt });
   });
+
+  it('書込応答ロス + 並行 grant が上位 tier を landed → 意図充足で ok:true (false-negative 回避)', async () => {
+    setBypass('0');
+    const expiresAt = now + 30 * dayMs;
+    kv.get
+      .mockResolvedValueOnce({ ok: true, value: null }) // merge read: 既存なし → 我々の意図 basic/+30d
+      .mockResolvedValueOnce({
+        ok: true,
+        // 並行する pro grant が先に landed (別 payload・上位 tier・より長い満了)
+        value: JSON.stringify({ tier: 'pro', expiresAt: expiresAt + dayMs }),
+      });
+    kv.set.mockResolvedValue({ ok: false, reason: 'http_error' });
+    const r = await grantEntitlement(WALLET, 'basic', 30, now);
+    // stored(pro, +31d) は intent(basic, +30d) を包含 → 成功扱い (exact 一致でないが意図充足)
+    expect(r).toEqual({ ok: true, tier: 'basic', expiresAt });
+  });
+
+  it('書込応答ロス + read-back が意図未充足 (下位 tier) → ok:false', async () => {
+    setBypass('0');
+    kv.get
+      .mockResolvedValueOnce({ ok: true, value: null }) // 我々の意図 pro/+30d
+      .mockResolvedValueOnce({
+        ok: true,
+        value: JSON.stringify({ tier: 'basic', expiresAt: now + 5 * dayMs }),
+      }); // stored は basic/+5d → pro/+30d を充足しない
+    kv.set.mockResolvedValue({ ok: false, reason: 'http_error' });
+    const r = await grantEntitlement(WALLET, 'pro', 30, now);
+    expect(r.ok).toBe(false);
+  });
 });

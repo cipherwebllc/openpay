@@ -12,9 +12,11 @@ const hold = vi.hoisted(() => ({
     | { ok: true; value: bigint }
     | { ok: false; reason: string },
   verifyThrows: false, // verifyJpycFeeOnChain が想定外 throw する経路 (LARP-2)
-  // kvSet(nx) の戻り: 'OK' = 新規取得 / null = 既に存在 (二重)。
+  // kvSet(nx) の戻り: 'OK' = ロック取得 / null = 既に存在 (処理中 or 確定済)。
   kvSetValue: 'OK' as 'OK' | null,
   kvSetOk: true,
+  // nx 失敗時に route が読む既存 claim 値。'pending'=処理中(409) / 'r:{...}'=確定(replay)。
+  kvGetValue: 'pending' as string | null,
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -62,6 +64,7 @@ vi.mock('@/lib/entitlement', () => ({
 }));
 const kvSetSpy = vi.hoisted(() => vi.fn());
 const kvDelSpy = vi.hoisted(() => vi.fn());
+const kvGetSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   kvSet: (...args: unknown[]) => {
     kvSetSpy(...args);
@@ -70,6 +73,10 @@ vi.mock('@/lib/kv', () => ({
         ? { ok: true, value: hold.kvSetValue }
         : { ok: false, reason: 'unconfigured' },
     );
+  },
+  kvGet: (...args: unknown[]) => {
+    kvGetSpy(...args);
+    return Promise.resolve({ ok: true, value: hold.kvGetValue });
   },
   kvDel: (...args: unknown[]) => {
     kvDelSpy(...args);
@@ -98,9 +105,11 @@ beforeEach(() => {
   hold.verifyThrows = false;
   hold.kvSetValue = 'OK';
   hold.kvSetOk = true;
+  hold.kvGetValue = 'pending';
   hold2.grantOk = true;
   grantSpy.mockClear();
   kvSetSpy.mockClear();
+  kvGetSpy.mockClear();
   kvDelSpy.mockClear();
 });
 
@@ -162,11 +171,27 @@ describe('POST /api/fee/verify', () => {
     expect(await res.json()).toMatchObject({ error: 'unsupported_chain' });
   });
 
-  it('idempotency: 既に使用済 txHash (nx 失敗) → 409 already_processed・grant せず', async () => {
+  it('idempotency: 処理中ロックが既存 (nx 失敗・結果未確定) → 409 already_processed・grant せず', async () => {
     hold.kvSetValue = null; // nx: 既存
+    hold.kvGetValue = 'pending'; // ロックのみ (結果なし)
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
     expect(res.status).toBe(409);
     expect(grantSpy).not.toHaveBeenCalled();
+  });
+
+  it('idempotency replay: 確定結果が既存 → 200 で同じ結果を返し再付与しない', async () => {
+    hold.kvSetValue = null; // nx: 既存
+    hold.kvGetValue = `r:${JSON.stringify({ tier: 'pro', expiresAt: 1_888_000 })}`;
+    const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      tier: 'pro',
+      expiresAt: 1_888_000,
+      replay: true,
+    });
+    expect(grantSpy).not.toHaveBeenCalled(); // 再付与しない → 満了の暗黙延長なし
+    expect(kvDelSpy).not.toHaveBeenCalled();
   });
 
   it('on-chain 検証失敗 → 422 + idempotency を release (kvDel) し grant せず', async () => {
@@ -175,6 +200,15 @@ describe('POST /api/fee/verify', () => {
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: 'amount_too_low' });
     expect(kvDelSpy).toHaveBeenCalledOnce(); // release
+    expect(grantSpy).not.toHaveBeenCalled();
+  });
+
+  it('RPC/transport 障害 (rpc_error) → 503 verify_unavailable + release・422 にしない', async () => {
+    hold.verify = { ok: false, reason: 'rpc_error' };
+    const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
+    expect(res.status).toBe(503); // 顧客の誤 tx (422) でなく retryable
+    expect(await res.json()).toMatchObject({ error: 'verify_unavailable' });
+    expect(kvDelSpy).toHaveBeenCalledOnce(); // ロック解放 → 復旧後に再提出可
     expect(grantSpy).not.toHaveBeenCalled();
   });
 

@@ -11,8 +11,8 @@ import {
 } from '../../scripts/setup-sentry-alerts.mjs';
 
 describe('setup-sentry-alerts: RULES schema', () => {
-  it('11 個の rule 定義が存在 (payment / smart-account / x402 / history.load / localStorage.set / cross-chain×2 / billing×4)', () => {
-    expect(RULES).toHaveLength(11);
+  it('12 個の rule 定義が存在 (payment / smart-account / x402 / history.load / localStorage.set / cross-chain×2 / billing×5)', () => {
+    expect(RULES).toHaveLength(12);
     const tags = RULES.map((r) => r.eventTag);
     expect(tags).toContain('payment.failed');
     expect(tags).toContain('smart-account.init-failed');
@@ -23,6 +23,7 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(tags).toContain('cross-chain.balance-query.failed');
     expect(tags).toContain('billing.fee.grant-failed');
     expect(tags).toContain('billing.fee.unexpected');
+    expect(tags).toContain('billing.fee.rpc-error');
     expect(tags).toContain('billing.fee.misconfigured');
     expect(tags).toContain('billing.fee.release-failed');
   });
@@ -31,6 +32,7 @@ describe('setup-sentry-alerts: RULES schema', () => {
     const byTag = (t: string) => RULES.find((r) => r.eventTag === t);
     expect(byTag('billing.fee.grant-failed')?.threshold).toBe(3);
     expect(byTag('billing.fee.unexpected')?.threshold).toBe(3);
+    expect(byTag('billing.fee.rpc-error')?.threshold).toBe(3);
     expect(byTag('billing.fee.misconfigured')?.threshold).toBe(1);
     expect(byTag('billing.fee.release-failed')?.threshold).toBe(1);
     // verify-failed は warn かつ期待挙動 (顧客の誤 tx) なので alert を作らない

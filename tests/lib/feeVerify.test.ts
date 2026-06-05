@@ -199,13 +199,29 @@ describe('verifyJpycFeeOnChain', () => {
     });
   });
 
-  it('receipt 取得失敗 (未マイニング等) → tx_not_found', async () => {
+  it('未マイニング/不明な tx (TransactionReceiptNotFoundError) → tx_not_found', async () => {
+    const notFound = Object.assign(new Error('receipt not found'), {
+      name: 'TransactionReceiptNotFoundError',
+    });
     const publicClient = {
-      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not found')),
+      getTransactionReceipt: vi.fn().mockRejectedValue(notFound),
     };
     expect(await verifyJpycFeeOnChain({ publicClient, txHash, expected })).toEqual({
       ok: false,
       reason: 'tx_not_found',
+    });
+  });
+
+  it('RPC/transport 障害 (それ以外の例外) → rpc_error (tx_not_found と区別)', async () => {
+    const rpcDown = Object.assign(new Error('fetch failed'), {
+      name: 'HttpRequestError',
+    });
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(rpcDown),
+    };
+    expect(await verifyJpycFeeOnChain({ publicClient, txHash, expected })).toEqual({
+      ok: false,
+      reason: 'rpc_error',
     });
   });
 });

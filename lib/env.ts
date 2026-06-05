@@ -5,7 +5,7 @@
 // **リテラルアクセスのみ** を build 時に値へ置換する。`process.env[name]` の
 // ような動的アクセスはクライアントバンドルでは undefined になるため、ここでは
 // 全て `process.env.NEXT_PUBLIC_*` のリテラル参照を経由して値を取り出す。
-import { getAddress, isAddress, type Address } from 'viem';
+import { getAddress, isAddress, isAddressEqual, type Address } from 'viem';
 
 const PLACEHOLDER_FEE_RECEIVER: Address =
   '0x000000000000000000000000000000000000dEaD';
@@ -60,9 +60,12 @@ const feeReceiverResolved = parseAddress(
   PLACEHOLDER_FEE_RECEIVER,
 );
 // 実アドレスが設定済か (placeholder=burn でない)。billing は未設定だと利用料が burn へ
-// 送られるため、この値で支払い UI / 検証 route をゲートする。
-const feeReceiverConfigured =
-  feeReceiverResolved.toLowerCase() !== PLACEHOLDER_FEE_RECEIVER.toLowerCase();
+// 送られるため、この値で支払い UI / 検証 route をゲートする。両者とも checksummed Address
+// なので isAddressEqual で比較する (手書きの toLowerCase 比較を避ける)。
+const feeReceiverConfigured = !isAddressEqual(
+  feeReceiverResolved,
+  PLACEHOLDER_FEE_RECEIVER,
+);
 
 export const env = {
   networkEnv: networkEnvRaw,
