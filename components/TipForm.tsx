@@ -14,6 +14,7 @@ import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
+import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
@@ -24,6 +25,9 @@ import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   DECIMAL_PATTERN,
@@ -59,15 +63,31 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
+
+  // JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応 /
+  // USDC は 'pimlico-7702' で従来挙動 (Pimlico fallback)。relay は smart account / gas quote 不要で
+  // 顧客が署名するだけ・自前 relayer がガス負担 (PaymentForm/CheckoutForm と同型・memory:jpyc-eip3009)。
+  // tip は常に gasless / gas=customer 固定なので standard / split 分岐は無い。
+  const useRelay =
+    resolveJpycGaslessProvider(deployment, deployment.chainId) ===
+    'eip3009-relay';
+  const relay = useJpycEip3009Payment(deployment);
+  // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (tip は customer 上乗せ固定)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv は回収する固定 gas 相当額 (free は 0)。
+  const useRecover = useRelay && jpycForwarderFor(deployment.chainId) !== null;
+  const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
+
   // TipForm は Circle 未配線 (useGasQuoteCircle / circlePermitAmount を持たない)。USDC tip が
   // Circle に routing されると useBatchPayment の circle 分岐が permitAmount 未算定で throw する
   // ため、disableCircle=true で Pimlico erc20 に固定する (JPYC は sponsorship なので非影響)。
-  const { data: saData, error: saError } = useSmartAccount(deployment, true, true);
-  // disableCircle=true を useBatchPayment にも渡す。これを渡さないと決済実行に使う内部
-  // useSmartAccount が Circle に routing され、USDC tip が circlePermitAmount 不在で送信時に
-  // throw する (saData 側だけ Pimlico でも実行 client は別)。
-  const gasless = useBatchPayment(deployment, true, true);
-  const gasQuote = useGasQuote(deployment);
+  // relay 時は smart account / batch / gas quote とも skip (enabled=!useRelay)。
+  const { data: saData, error: saError } = useSmartAccount(
+    deployment,
+    !useRelay,
+    true,
+  );
+  const gasless = useBatchPayment(deployment, !useRelay, true);
+  const gasQuote = useGasQuote(deployment, !useRelay);
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     presets[0] ?? null,
@@ -94,20 +114,33 @@ export function TipForm({ params }: { params: TipParams }) {
   // standard mode (顧客 wallet で gas 自前負担) は creator-fan UX を崩すため
   // tip 文脈では非対応。URL で mode=standard が来ても無視して gasless で動かす。
   const gasAmount = gasQuote.data?.gasAmount;
+  // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、非 relay は
+  // paymaster quote。relay は quote を持たないため effective で切り替える (CheckoutForm と同型)。
+  const effectiveGasAmount: bigint | undefined = useRelay
+    ? relayGasEquiv
+    : gasAmount;
   const breakdown = useMemo(
     () =>
-      calcBreakdown(amountWei, params.token, 'gasless', 'customer', gasAmount ?? 0n),
-    [amountWei, params.token, gasAmount],
+      calcBreakdown(
+        amountWei,
+        params.token,
+        'gasless',
+        'customer',
+        effectiveGasAmount ?? 0n,
+      ),
+    [amountWei, params.token, effectiveGasAmount],
   );
 
   // gas 軸:
   //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
-  //   Sponsorship (JPYC): Pimlico が立替、運営は徴収 JPYC で精算 (fee transfer に内包)。
+  //   Sponsorship (JPYC・非 relay): Pimlico が立替、運営は徴収 JPYC で精算 (fee transfer に内包)。
+  //   EIP-3009 relay (JPYC): recover は forwarder が gas 相当を feeReceiver へ分割回収。
   const totalCustomerOutflow = breakdown.customerPays;
-  const gasReimbursement = isSponsorship ? (gasAmount ?? 0n) : 0n;
-  // TipForm は常に gasless・非 circle (disableCircle)。記録用ネットワーク手数料相当額は gas
-  // 見積 (JPYC sponsorship の立替回収 / USDC erc20 で paymaster が顧客から徴収する gas)。
-  const networkFeeEquivalent = gasAmount ?? 0n;
+  // gasReimbursement は Pimlico mutate にのみ渡る on-chain 立替回収額 (relay では未使用)。
+  const gasReimbursement = !useRelay && isSponsorship ? (gasAmount ?? 0n) : 0n;
+  // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。relay=回収額/0、
+  // 非 relay sponsorship=立替回収 / USDC erc20=paymaster 徴収分。
+  const networkFeeEquivalent = effectiveGasAmount ?? 0n;
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
@@ -117,32 +150,58 @@ export function TipForm({ params }: { params: TipParams }) {
     totalCustomerOutflow,
   );
 
-  const gasQuoteReady = gasQuote.data !== undefined;
+  // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
+  const flowPending = useRelay ? relay.isPending : gasless.isPending;
+  const flowSuccess = useRelay
+    ? !!(relay.data?.success && relay.data.txHash)
+    : !!gasless.data?.success;
+  const flowTxHash = useRelay ? relay.data?.txHash : gasless.data?.txHash;
+  const flowUserOpHash = useRelay ? undefined : gasless.data?.userOpHash;
+  const flowBlockNumber: bigint | undefined = useRelay
+    ? undefined
+    : gasless.data?.blockNumber;
+
+  // relay は gas quote / smart account 不要なので readiness 即満たす。
+  const gasQuoteReady = useRelay || gasQuote.data !== undefined;
+  // relay が成功 or pending (broadcast 済) の後の再送信を禁止。再送すると新 nonce で 2 件目の
+  // authorization を出し、元 tx 確定で二重支払いになる (CheckoutForm/PaymentForm と同一防御)。
+  const relaySettledNoRetry =
+    useRelay && !!relay.data && (relay.data.success || !!relay.data.pending);
   const canSubmit =
     isConnected &&
     !wrongChain &&
-    !!saData &&
+    (useRelay || !!saData) &&
     // creator 受取 > 0 を要求 (custom amount 未入力だと gas 分で customerPays が
     // 正になり得るが、tip 額 0 の空 batch は無意味)。hook 側でも calls.length===0
     // を弾くが、UI でも button を無効化して金額入力を促す。
     breakdown.merchantReceives > 0n &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
-    !gasless.isPending &&
-    gasQuoteReady;
+    !flowPending &&
+    gasQuoteReady &&
+    !relaySettledNoRetry;
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
   // gasQuote の失敗も同様に i18n 化 (詳細は logger 経由で Sentry へ)。
-  const saFallback = isIncompatibleSmartAccountError(saError);
-  // 送信は成立したがチェーン上で revert したケース (gasless: data.success===false)。success
-  // overlay も error も出ず無反応に見える穴を明示メッセージで塞ぐ。
-  const revertedNoFeedback = !!gasless.data && !gasless.data.success;
-  const error = isGasCongestedError(gasless.error)
+  const saFallback = !useRelay && isIncompatibleSmartAccountError(saError);
+  // 送信は成立したがチェーン上で revert したケース (gasless/relay: data.success===false・relay は
+  // pending を除外)。success overlay も error も出ず無反応に見える穴を明示メッセージで塞ぐ。
+  const revertedNoFeedback =
+    (!useRelay && !!gasless.data && !gasless.data.success) ||
+    (useRelay && !!relay.data && !relay.data.success && !relay.data.pending);
+  // relay の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
+  const flowError = useRelay ? relay.error : gasless.error;
+  const flowErrorMessage = useRelay
+    ? flowError
+      ? t(relayErrorKey(flowError))
+      : undefined
+    : flowError?.message;
+  const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
-    : (gasless.error?.message ??
-      (saFallback ? undefined : saError?.message) ??
-      (gasQuote.error ? t('errorGasQuote') : null) ??
+    : (flowErrorMessage ??
+      (useRelay || saFallback ? undefined : saError?.message) ??
+      (!useRelay && gasQuote.error ? t('errorGasQuote') : null) ??
       (amountPrecisionError
         ? t('errorAmountPrecision', { decimals: deployment.decimals })
         : null) ??
@@ -151,6 +210,10 @@ export function TipForm({ params }: { params: TipParams }) {
   useEffect(() => {
     if (gasless.error) logger.error('tip.failed', { error: gasless.error });
   }, [gasless.error]);
+
+  useEffect(() => {
+    if (relay.error) logger.error('tip.relay.failed', { error: relay.error });
+  }, [relay.error]);
 
   useEffect(() => {
     if (saError) logger.error('tip.smart-account.init-failed', { error: saError });
@@ -174,9 +237,12 @@ export function TipForm({ params }: { params: TipParams }) {
   } | null>(null);
 
   useEffect(() => {
-    if (!gasless.data || !gasless.data.success) return;
-    if (notifiedUserOpHashRef.current === gasless.data.userOpHash) return;
-    notifiedUserOpHashRef.current = gasless.data.userOpHash;
+    // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
+    if (!flowSuccess || !flowTxHash) return;
+    // dedup 鍵: gasless は userOpHash、relay は txHash。
+    const dedupKey = flowUserOpHash ?? flowTxHash;
+    if (notifiedUserOpHashRef.current === dedupKey) return;
+    notifiedUserOpHashRef.current = dedupKey;
     // 送信時スナップショット優先 (live state drift を排除)。万一未設定なら live に fallback。
     const sent = submittedRef.current ?? {
       amount: amountStr,
@@ -185,8 +251,9 @@ export function TipForm({ params }: { params: TipParams }) {
       customerPays: breakdown.customerPays.toString(),
     };
     logger.info('tip.success', {
-      userOpHash: gasless.data.userOpHash,
-      txHash: gasless.data.txHash,
+      mode: useRelay ? 'relay' : 'gasless',
+      userOpHash: flowUserOpHash,
+      txHash: flowTxHash,
       creator: params.to,
       amount: sent.amount,
       token: params.token,
@@ -195,8 +262,8 @@ export function TipForm({ params }: { params: TipParams }) {
     // 非経由のためここで直接 append (明細なし → 仮想 1 行)。dedupe は receiptId 任せ。
     appendPayerReceipt(
       buildPayerReceipt({
-        txHash: gasless.data.txHash,
-        userOpHash: gasless.data.userOpHash,
+        txHash: flowTxHash,
+        userOpHash: flowUserOpHash ?? null,
         chainId: deployment.chainId,
         asset: params.token,
         tokenAddress: deployment.address,
@@ -225,9 +292,12 @@ export function TipForm({ params }: { params: TipParams }) {
         feeAmount: sent.feeAmount,
         customerPays: sent.customerPays,
         message: params.message,
-        txHash: gasless.data.txHash,
-        userOpHash: gasless.data.userOpHash,
-        blockNumber: gasless.data.blockNumber.toString(),
+        txHash: flowTxHash,
+        // relay は userOpHash / blockNumber を持たない → payload から省略 (null 文字列化しない)。
+        ...(flowUserOpHash ? { userOpHash: flowUserOpHash } : {}),
+        ...(flowBlockNumber !== undefined
+          ? { blockNumber: flowBlockNumber.toString() }
+          : {}),
         chainId: deployment.chainId,
         ts: Date.now(),
       };
@@ -255,7 +325,11 @@ export function TipForm({ params }: { params: TipParams }) {
         );
     }
   }, [
-    gasless.data,
+    flowSuccess,
+    flowTxHash,
+    flowUserOpHash,
+    flowBlockNumber,
+    useRelay,
     params.to,
     params.token,
     params.name,
@@ -291,6 +365,16 @@ export function TipForm({ params }: { params: TipParams }) {
       feeAmount: breakdown.feeAmount.toString(),
       customerPays: breakdown.customerPays.toString(),
     };
+    if (useRelay) {
+      // JPYC EIP-3009 relay: 顧客が署名するだけ・自前 relayer がガス負担。tip は customer 固定
+      // (recover 時 forwarder が gas 相当を回収・free 時 OpenPay 負担)。value=tip 額。
+      relay.mutate({
+        merchant: params.to,
+        value: amountWei,
+        gasMode: 'customer',
+      });
+      return;
+    }
     gasless.mutate({
       tokenAddress: deployment.address,
       merchant: params.to,
@@ -518,13 +602,13 @@ export function TipForm({ params }: { params: TipParams }) {
         className="w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
         style={{ backgroundColor: themeColor }}
       >
-        {gasless.isPending
+        {flowPending
           ? t('btnSending')
           : !isConnected
             ? t('btnConnect')
             : wrongChain
               ? t('btnSwitchChain')
-              : !saData
+              : !useRelay && !saData
                 ? t('btnSaInit')
                 : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
@@ -540,7 +624,7 @@ export function TipForm({ params }: { params: TipParams }) {
         </div>
       )}
 
-      {gasless.data && gasless.data.success && (
+      {flowSuccess && flowTxHash && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
           <p className="font-semibold">{t('successTitle')}</p>
           {params.thanks && (
@@ -557,38 +641,41 @@ export function TipForm({ params }: { params: TipParams }) {
             </a>
           )}
           <dl className="mt-3 space-y-1">
-            <ResultRow
-              label={t('successUserOp')}
-              value={gasless.data.userOpHash}
-              copyable
-            />
-            <ResultRow
-              label={t('successTx')}
-              value={gasless.data.txHash}
-              copyable
-            />
-            <ResultRow
-              label={t('successBlock')}
-              value={gasless.data.blockNumber.toString()}
-            />
+            {/* relay は userOpHash / blockNumber を持たない (txHash のみ) → 該当行は省略。 */}
+            {flowUserOpHash && (
+              <ResultRow
+                label={t('successUserOp')}
+                value={flowUserOpHash}
+                copyable
+              />
+            )}
+            <ResultRow label={t('successTx')} value={flowTxHash} copyable />
+            {flowBlockNumber !== undefined && (
+              <ResultRow
+                label={t('successBlock')}
+                value={flowBlockNumber.toString()}
+              />
+            )}
           </dl>
 
           {/* 顧客 (支援者) 向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
           <div className="mt-3">
             <PayerReceiptCompletion
-              candidateIds={[gasless.data.txHash, gasless.data.userOpHash]}
+              candidateIds={[flowTxHash, flowUserOpHash].filter(
+                (v): v is NonNullable<typeof v> => !!v,
+              )}
             />
           </div>
         </div>
       )}
 
       {/* PayPay 風 大型成功 overlay。dismiss 後は上記の従来 panel (thanks 含む) を表示。 */}
-      {!overlayDismissed && gasless.data && gasless.data.success && (
+      {!overlayDismissed && flowSuccess && flowTxHash && (
         <SuccessOverlay
           amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={gasless.data.txHash}
-          userOpHash={gasless.data.userOpHash}
-          blockNumber={gasless.data.blockNumber}
+          txHash={flowTxHash}
+          userOpHash={flowUserOpHash}
+          blockNumber={flowBlockNumber}
           explorerBase={explorerBase}
           onDismiss={() => setOverlayDismissed(true)}
         />

@@ -45,6 +45,27 @@ vi.mock('@/lib/pimlico', async () => {
 vi.mock('@/components/ConnectButton', async () => ({
   ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
 }));
+// useJpycEip3009Payment は real だと wagmi useWalletClient + react-query (useMutation) に依存する。
+// relay/Pimlico の分岐は resolveJpycGaslessProvider を直接制御して検証する (CheckoutForm.test と同型)。
+vi.mock('@/hooks/useJpycEip3009Payment', () => ({
+  useJpycEip3009Payment: vi.fn(),
+}));
+vi.mock('@/lib/jpycGaslessProvider', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/jpycGaslessProvider')
+  >('@/lib/jpycGaslessProvider');
+  return { ...actual, resolveJpycGaslessProvider: vi.fn(() => 'pimlico-7702') };
+});
+vi.mock('@/lib/relay/forwarderConfig', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/relay/forwarderConfig')
+  >('@/lib/relay/forwarderConfig');
+  return {
+    ...actual,
+    jpycForwarderFor: vi.fn(() => null),
+    relayGasFeeValue: vi.fn(() => 2n * 10n ** 18n),
+  };
+});
 
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -52,6 +73,9 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { TipForm } from '@/components/TipForm';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 import type { TipParams } from '@/lib/url';
@@ -105,6 +129,20 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
   } as Partial<ReturnType<typeof useBatchPayment>>);
 }
 
+let relayMutate: ReturnType<typeof vi.fn>;
+function setRelay(state: 'idle' | 'pending' | 'success' | 'error') {
+  relayMutate = vi.fn();
+  mockHook(useJpycEip3009Payment, {
+    mutate: relayMutate,
+    isPending: state === 'pending',
+    data:
+      state === 'success'
+        ? { txHash: `0x${'c'.repeat(64)}`, success: true }
+        : undefined,
+    error: state === 'error' ? new Error('rate_limited') : null,
+  } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
+}
+
 function setSwitchChain() {
   mockHook(useSwitchChain, {
     switchChain: vi.fn(),
@@ -130,10 +168,14 @@ beforeEach(() => {
   setBalance(undefined);
   setSmartAccount(false);
   setBatchPayment('idle');
+  setRelay('idle');
   setGasQuote('disabled');
   setAccount({ connected: false });
   // 既定: testnet 環境 → 全 token sponsorship。erc20 を test したい block で override
   vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
+  // 既定は従来 Pimlico 経路。relay を test したい block で 'eip3009-relay' へ override。
+  vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+  vi.mocked(jpycForwarderFor).mockReturnValue(null);
 });
 
 const JPYC_PARAMS: TipParams = {
@@ -974,5 +1016,66 @@ describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', ()
       expect(latest.enabled).toBe(true);
       expect(latest.targetChainId).toBe(baseSepolia.id);
     });
+  });
+});
+
+// JPYC EIP-3009 relay 経路 (/tip): resolveJpycGaslessProvider が 'eip3009-relay' を返すとき、
+// useBatchPayment (Pimlico) ではなく useJpycEip3009Payment へ。tip は gasless/customer 固定。
+describe('TipForm — EIP-3009 relay (JPYC)', () => {
+  beforeEach(() => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(1000n * 10n ** 18n); // 1000 JPYC (十分)
+  });
+
+  it('送信で relay.mutate({merchant,value,gasMode:customer}) を呼び、Pimlico mutate は呼ばない', async () => {
+    const user = userEvent.setup();
+    render(<TipForm params={JPYC_PARAMS} />);
+    // preset 100 が初期選択 → free relay は gas 0 で 100 JPYC を送る
+    await user.click(screen.getByRole('button', { name: /100 JPYC を送る/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    expect(relayMutate).toHaveBeenCalledWith({
+      merchant: CREATOR,
+      value: 100n * 10n ** 18n,
+      gasMode: 'customer',
+    });
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('relay recover (forwarder 設定) → gas 相当が customer 上乗せ (value は tip 額のまま)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x752B000000000000000000000000000000000000' as Address,
+    );
+    render(<TipForm params={JPYC_PARAMS} />);
+    // customerPays = 100 + relayGasFee(2 JPYC) = 102 JPYC。value は tip 額 (gas は forwarder 回収)。
+    await user.click(screen.getByRole('button', { name: /102 JPYC を送る/ }));
+    expect(relayMutate).toHaveBeenCalledWith({
+      merchant: CREATOR,
+      value: 100n * 10n ** 18n,
+      gasMode: 'customer',
+    });
+  });
+
+  it('relay 成功 → txHash 表示 (userOpHash / block 行は無い)', () => {
+    setRelay('success');
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    // relay は userOpHash / blockNumber を持たない (gasless mock の 99 は出ない)。
+    expect(screen.queryByText('99')).toBeNull();
+  });
+
+  it('relay error → friendly な i18n メッセージ (rate_limited)', () => {
+    setRelay('error');
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/短時間に送金が集中/)).toBeInTheDocument();
+  });
+
+  it('relay は smart account 不要 — saData 無しでも送信ボタンが活性', () => {
+    setSmartAccount(false);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(
+      screen.getByRole('button', { name: /100 JPYC を送る/ }),
+    ).toBeEnabled();
   });
 });
