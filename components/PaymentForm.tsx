@@ -694,8 +694,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
             />
           ) : useRelay || isJpyc ? (
             // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。
+            // 顧客負担ではないため中立ラベル (gasRowFree)。
             <Row
-              label={t('gasRow')}
+              label={t('gasRowFree')}
               labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
               value={t('gasRowRelayFree')}
             />

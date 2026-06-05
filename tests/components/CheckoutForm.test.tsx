@@ -1315,7 +1315,7 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       false,
     );
     // free モードの gas 行は「無料」表示。
-    expect(screen.getByText('無料 (OpenPay が立替)')).toBeInTheDocument();
+    expect(screen.getByText('無料 (OpenPay が負担)')).toBeInTheDocument();
 
     const btn = screen.getByRole('button', { name: /3000 JPYC を支払う/ });
     expect(btn).toBeEnabled();

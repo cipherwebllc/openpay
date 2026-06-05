@@ -620,9 +620,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 value={fmt(relayGasEquiv)}
               />
             ) : useRelay || isJpyc ? (
-              // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。
+              // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。中立ラベル。
               <Row
-                label={t('gasRow')}
+                label={t('gasRowFree')}
                 labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
                 value={t('gasRowRelayFree')}
               />
