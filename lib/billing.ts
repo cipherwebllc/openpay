@@ -24,3 +24,13 @@ export const TIER_PRICE_JPYC: Record<EntitlementTier, bigint> = {
 export function isEntitlementTier(v: unknown): v is EntitlementTier {
   return v === 'basic' || v === 'pro';
 }
+
+export const TIER_RANK: Record<EntitlementTier, number> = { basic: 1, pro: 2 };
+
+/** have が min 以上の tier か (pro ⊃ basic)。have=null は常に false。client/server 両用。 */
+export function tierAtLeast(
+  have: EntitlementTier | null,
+  min: EntitlementTier,
+): boolean {
+  return have !== null && TIER_RANK[have] >= TIER_RANK[min];
+}

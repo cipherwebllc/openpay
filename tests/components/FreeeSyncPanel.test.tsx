@@ -16,6 +16,13 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => h.siwe }));
 vi.mock('@/hooks/useEntitlement', () => ({ useEntitlement: () => h.entitlement }));
+// freee は pro 必須。未加入時は BillingPaywall(pro) を出す。実 paywall は wagmi 境界なので
+// stub し、requiredTier を marker に出す (paywall の実挙動は BillingPaywall 専用 test で)。
+vi.mock('@/components/BillingPaywall', () => ({
+  BillingPaywall: ({ requiredTier }: { requiredTier: string }) => (
+    <div data-testid="paywall">paywall:{requiredTier}</div>
+  ),
+}));
 vi.mock('@/hooks/useFreee', () => ({
   useFreeeStatus: () => h.status,
   useFreeeMappingOptions: () => h.mappingOpts,
@@ -215,16 +222,24 @@ describe('FreeeSyncPanel', () => {
     expect(screen.getByText(/同期 3 件・スキップ済 1 件・失敗 0 件/)).toBeInTheDocument();
   });
 
-  it('利用権なし (bypass off) → 同期ボタンを出さず利用権案内', () => {
+  it('basic のみ (pro 未加入・bypass off) → 同期ボタンを出さず pro paywall', () => {
     h.siwe = { isSignedIn: true };
     h.status = {
       isLoading: false,
       isError: false,
       data: { connected: true, mappingSet: true, companyName: 'X' },
     };
-    h.entitlement = { data: { entitled: false, expiresAt: null, bypass: false } };
+    // basic 利用権はあるが freee は pro 必須 → paywall(pro)。
+    h.entitlement = {
+      data: {
+        entitled: true,
+        tier: 'basic',
+        expiresAt: Date.now() + 1_000_000,
+        bypass: false,
+      },
+    };
     renderWithIntl(<FreeeSyncPanel entries={[income()]} usdcJpy={150} />);
-    expect(screen.getByText(/利用権が必要/)).toBeInTheDocument();
+    expect(screen.getByTestId('paywall')).toHaveTextContent('paywall:pro');
     expect(screen.queryByRole('button', { name: /freee に同期/ })).toBeNull();
   });
 

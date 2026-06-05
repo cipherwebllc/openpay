@@ -18,8 +18,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  // 収益化ゲート (アルファ中は bypass で全通過)。
-  if (!(await isEntitled(session.address))) {
+  // 収益化ゲート: freee 連携は pro 利用権が必要 (アルファ中は bypass で全通過)。
+  if (!(await isEntitled(session.address, 'pro'))) {
     return NextResponse.json({ ok: false, error: 'entitlement_required' }, { status: 402 });
   }
 

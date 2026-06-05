@@ -19,6 +19,18 @@ vi.mock('@/hooks/useMarketRates', () => ({
 vi.mock('@/components/FreeeSyncPanel', () => ({
   FreeeSyncPanel: () => null,
 }));
+// 履歴ゲート (billing) は既定 OFF で inert だが、HistoryView が siwe/entitlement hook を
+// 呼ぶため boundary mock (wagmi/React Query 境界)。BillingPaywall も stub。ゲート挙動
+// (billing ON) は専用 test で検証。
+vi.mock('@/hooks/useSiweSession', () => ({
+  useSiweSession: () => ({ isSignedIn: false, mismatch: false }),
+}));
+vi.mock('@/hooks/useEntitlement', () => ({
+  useEntitlement: () => ({ data: undefined }),
+}));
+vi.mock('@/components/BillingPaywall', () => ({
+  BillingPaywall: () => null,
+}));
 
 import { HistoryView } from '@/components/HistoryView';
 import {

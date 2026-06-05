@@ -15,6 +15,8 @@ import type { HistoryEntry } from '@/lib/history';
 import { isIncomeSaleEntry } from '@/lib/historyFilters';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { tierAtLeast } from '@/lib/billing';
+import { BillingPaywall } from './BillingPaywall';
 import {
   useFreeeStatus,
   useFreeeMappingOptions,
@@ -39,8 +41,11 @@ export function FreeeSyncPanel({
     () => entries.filter(isIncomeSaleEntry),
     [entries],
   );
-  // ロード中は true 既定 (gate のチラつき回避)。最終的な拒否はサーバ (402) が担保。
-  const entitled = entitlement.data ? entitlement.data.entitled : true;
+  // freee は pro 利用権が必要。ロード中は true 既定 (gate のチラつき回避)。最終拒否は
+  // サーバ (402) が担保。bypass(アルファ) は全通過。
+  const proEntitled = entitlement.data
+    ? entitlement.data.bypass || tierAtLeast(entitlement.data.tier, 'pro')
+    : true;
 
   function startConnect() {
     const returnTo = window.location.pathname + window.location.search;
@@ -83,8 +88,9 @@ export function FreeeSyncPanel({
               saving={saveMapping.isPending}
               saveError={saveMapping.isError}
             />
-          ) : !entitled ? (
-            <p className="text-[11px] text-amber-700">{t('entitlementRequired')}</p>
+          ) : !proEntitled ? (
+            // pro 未加入 → freee 連携の利用料 paywall (basic からのアップグレード導線)。
+            <BillingPaywall requiredTier="pro" />
           ) : (
             <div className="space-y-2">
               <button
