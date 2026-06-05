@@ -79,8 +79,12 @@ async function openAdvanced(
 async function openQrModal(
   user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
-  const btn = await screen.findByRole('button', { name: /QRコードを表示する/ });
-  await user.click(btn);
+  // CTA は右サイドバー (Step3) とモバイル下部バーの2箇所に描画される (jsdom は CSS
+  // 非適用で両方 DOM に居る) ので先頭 (= Step3・DOM 先頭) をクリック。
+  const btns = await screen.findAllByRole('button', {
+    name: /QRコードを表示する/,
+  });
+  await user.click(btns[0]);
 }
 
 // モーダルを開き、その中の EIP-681 互換 QR (details) を展開する。
@@ -264,6 +268,24 @@ describe('QrGenerator', () => {
       expect(
         screen.queryByText((t) => t.includes('mode=')),
       ).toBeNull();
+    });
+
+    it('payUrl 有効時のみ「QRコードを表示する」CTA を2箇所 (右サイドバー + モバイル下部バー) 描画', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      // 受取先/金額 未入力 → payUrl 無し → CTA は描画されない (空状態を維持)。
+      expect(
+        screen.queryAllByRole('button', { name: /QRコードを表示する/ }),
+      ).toHaveLength(0);
+      // 受取先 + 金額 → payUrl 有効 → デスクトップ右サイドバー + モバイル下部バーの2箇所。
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole('button', { name: /QRコードを表示する/ }),
+        ).toHaveLength(2),
+      );
     });
 
     it('据え置きモードへ切替: 金額入力が消えてもメッセージが出る', async () => {

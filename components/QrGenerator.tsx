@@ -500,7 +500,7 @@ export function QrGenerator() {
   );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2 print:block print:gap-0">
+    <div className="grid gap-6 lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start print:block print:gap-0">
       <div className="space-y-5 print:hidden">
         {/* ① 金額: 通貨 / 受取チェーン / 請求金額。店員が毎回触る金額を先頭に置く
             (受取先は初期設定後あまり変えないため ② へ・折りたたみ)。 */}
@@ -1027,7 +1027,7 @@ export function QrGenerator() {
             </SettingsAccordion>
       </div>
 
-      <div className="space-y-4 print:hidden">
+      <div className="space-y-4 print:hidden lg:sticky lg:top-20">
         <StepCard
           step={3}
           icon={QrCodeIcon}
@@ -1139,6 +1139,23 @@ export function QrGenerator() {
               : undefined
           }
         />
+      )}
+
+      {/* モバイル下部固定 CTA: 「QRコードを表示する」を全幅の主役ボタンとして常時固定。
+          グローバル BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、
+          < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。lg は右
+          サイドバー CTA を使うので非表示。payUrl 真のときのみ (Step3 と同じゲート)。 */}
+      {payUrl && (
+        <div className="sticky bottom-14 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:bottom-0 lg:hidden print:hidden">
+          <button
+            type="button"
+            onClick={() => setQrModalOpen(true)}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
+          >
+            <QrCodeIcon className="h-5 w-5" aria-hidden />
+            {t('showQr')}
+          </button>
+        </div>
       )}
     </div>
   );
