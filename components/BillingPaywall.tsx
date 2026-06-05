@@ -5,7 +5,7 @@
 // /history のぼかしオーバーレイ (B4) と freee パネルの両方から requiredTier を変えて使う。
 // soft-gate: 強制力は無く、生データは本人のもの。回避可能 (思想と整合)。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAccount, useSwitchChain } from 'wagmi';
@@ -26,7 +26,7 @@ import { resolveDeployment, defaultDeploymentForSymbol } from '@/lib/tokens';
 type VerifyResponse = { ok: true; tier: EntitlementTier; expiresAt: number };
 
 function formatDate(ms: number): string {
-  // ローカル日付 (YYYY/MM/DD)。SSR/CSR で安定するよう UTC ベースで簡易整形。
+  // 利用権の満了日を YYYY/MM/DD (ローカル日付) で表示。
   const d = new Date(ms);
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -43,7 +43,8 @@ export function BillingPaywall({
   const qc = useQueryClient();
   const { isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
-  const { isSignedIn, signIn, isSigningIn, mismatch } = useSiweSession();
+  const { isSignedIn, signIn, isSigningIn, mismatch, signInError } =
+    useSiweSession();
   const entitlement = useEntitlement(isSignedIn);
   const pay = useBillingPayment();
 
@@ -89,17 +90,21 @@ export function BillingPaywall({
   );
   const defaultJpyc = defaultDeploymentForSymbol('jpyc');
 
-  // pay 確定 → verify を一度だけ起動。
+  // 確定済 txHash を /api/fee/verify へ。pay 起動時に固定した tier/chain を使う (選択変更で
+  // drift させない)。自動起動 (pay 確定) と手動再試行 (検証失敗) の両方から呼ぶ。
+  const runVerify = useCallback(() => {
+    const ctx = payCtxRef.current;
+    if (!pay.txHash || !ctx) return;
+    verify.mutate({ txHash: pay.txHash, chainId: ctx.chainId, tier: ctx.tier });
+  }, [pay.txHash, verify]);
+
+  // pay 確定 → verify を一度だけ自動起動。
   useEffect(() => {
     if (!pay.isConfirmed || !pay.txHash || !payCtxRef.current) return;
     if (verifiedForRef.current === pay.txHash) return;
     verifiedForRef.current = pay.txHash;
-    verify.mutate({
-      txHash: pay.txHash,
-      chainId: payCtxRef.current.chainId,
-      tier: payCtxRef.current.tier,
-    });
-  }, [pay.isConfirmed, pay.txHash, verify]);
+    runVerify();
+  }, [pay.isConfirmed, pay.txHash, runVerify]);
 
   function startPay() {
     if (!payDeployment || chainId == null) return;
@@ -113,16 +118,6 @@ export function BillingPaywall({
       to: env.feeReceiver,
       amount: TIER_PRICE_JPYC[selectedTier],
       chainId,
-    });
-  }
-
-  // 検証失敗時の再試行。既に確定済の txHash を再検証する (再送金させない → 二重支払い防止)。
-  function retryVerify() {
-    if (!pay.txHash || !payCtxRef.current) return;
-    verify.mutate({
-      txHash: pay.txHash,
-      chainId: payCtxRef.current.chainId,
-      tier: payCtxRef.current.tier,
     });
   }
 
@@ -182,21 +177,29 @@ export function BillingPaywall({
         })}
       </div>
 
-      {/* 行動エリア: 接続 → ログイン → 支払い */}
+      {/* 行動エリア: (設定不備チェック →) 接続 → ログイン → 支払い */}
       <div className="mt-4 space-y-2">
-        {!isConnected ? (
+        {!env.feeReceiverConfigured ? (
+          // 受領アドレス未設定 → 送金先が burn になるため支払いを出さない (運用設定不備)。
+          <p className="text-xs text-amber-700">{t('misconfigured')}</p>
+        ) : !isConnected ? (
           <p className="text-xs text-slate-500">{t('connectRequired')}</p>
         ) : mismatch ? (
           <p className="text-xs text-amber-700">{t('mismatch')}</p>
         ) : !isSignedIn ? (
-          <button
-            type="button"
-            disabled={isSigningIn}
-            onClick={() => void signIn(t('signInStatement')).catch(() => undefined)}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-          >
-            {isSigningIn ? t('signingIn') : t('signIn')}
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={isSigningIn}
+              onClick={() => void signIn(t('signInStatement')).catch(() => undefined)}
+              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              {isSigningIn ? t('signingIn') : t('signIn')}
+            </button>
+            {signInError && (
+              <p className="text-[11px] text-red-600">{t('signInError')}</p>
+            )}
+          </>
         ) : granted ? (
           <p className="text-sm font-semibold text-emerald-700">
             {t('granted', {
@@ -219,7 +222,7 @@ export function BillingPaywall({
             <button
               type="button"
               disabled={verify.isPending || !payCtxRef.current}
-              onClick={retryVerify}
+              onClick={runVerify}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {verify.isPending ? t('verifying') : t('retryVerify')}

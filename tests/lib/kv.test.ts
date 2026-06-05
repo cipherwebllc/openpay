@@ -44,6 +44,8 @@ describe('lib/kv', () => {
     expect(init.method).toBe('POST');
     expect(init.headers.Authorization).toBe('Bearer secret');
     expect(JSON.parse(init.body)).toEqual(['LPUSH', 'k', 'v']);
+    // 全リクエストに timeout 用の AbortSignal が張られる (hang 防止の実配線確認)
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('HTTP 非 2xx は http_error と status を返す', async () => {
@@ -121,6 +123,20 @@ describe('lib/kv', () => {
       ok: false,
       reason: 'http_error',
       detail: 'ECONNREFUSED',
+    });
+  });
+
+  it('fetch が timeout (AbortSignal.timeout 発火) した場合 reason=timeout', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const timeoutErr = new DOMException('The operation timed out', 'TimeoutError');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeoutErr));
+    const { kvLpush } = await import('@/lib/kv');
+    const res = await kvLpush('k', 'v');
+    expect(res).toMatchObject({
+      ok: false,
+      reason: 'timeout',
+      detail: 'The operation timed out',
     });
   });
 

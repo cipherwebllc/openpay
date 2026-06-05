@@ -121,6 +121,55 @@ describe('verifyJpycFeeTransfer', () => {
       reason: 'no_matching_transfer',
     });
   });
+
+  it('data が hex でない (BigInt 例外) → そのログは無視', () => {
+    const bad: FeeReceiptLog = {
+      address: TOKEN,
+      topics: [TRANSFER_TOPIC, pad32(FROM), pad32(TO)],
+      data: '0xnothex',
+    };
+    expect(verifyJpycFeeTransfer({ logs: [bad], expected })).toEqual({
+      ok: false,
+      reason: 'no_matching_transfer',
+    });
+  });
+
+  it('topics が 3 未満 (非標準ログ) → 無視', () => {
+    const short: FeeReceiptLog = {
+      address: TOKEN,
+      topics: [TRANSFER_TOPIC],
+      data: `0x${MIN.toString(16)}`,
+    };
+    expect(verifyJpycFeeTransfer({ logs: [short], expected })).toEqual({
+      ok: false,
+      reason: 'no_matching_transfer',
+    });
+  });
+
+  it('log.address が不正 (getAddress 例外) → そのログは無視', () => {
+    const bad: FeeReceiptLog = {
+      address: '0xnot-an-address',
+      topics: [TRANSFER_TOPIC, pad32(FROM), pad32(TO)],
+      data: `0x${MIN.toString(16)}`,
+    };
+    expect(verifyJpycFeeTransfer({ logs: [bad], expected })).toEqual({
+      ok: false,
+      reason: 'no_matching_transfer',
+    });
+  });
+
+  it('不正ログが混在しても有効な Transfer は集計される (堅牢性)', () => {
+    const bad: FeeReceiptLog = {
+      address: TOKEN,
+      topics: [TRANSFER_TOPIC, pad32(FROM), pad32(TO)],
+      data: '0xZZ', // 壊れた data → 無視
+    };
+    const r = verifyJpycFeeTransfer({
+      logs: [bad, transferLog({ value: MIN })],
+      expected,
+    });
+    expect(r).toEqual({ ok: true, value: MIN });
+  });
 });
 
 describe('verifyJpycFeeOnChain', () => {

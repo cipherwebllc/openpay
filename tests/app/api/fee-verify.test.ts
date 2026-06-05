@@ -4,12 +4,14 @@ import { NextResponse } from 'next/server';
 // 制御用ホルダ (各 test で差し替え)。
 const hold = vi.hoisted(() => ({
   enableBilling: true,
+  feeReceiverConfigured: true,
   session: { ok: true, address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' } as
     | { ok: true; address: string }
     | { ok: false; response: unknown },
   verify: { ok: true, value: 0n } as
     | { ok: true; value: bigint }
     | { ok: false; reason: string },
+  verifyThrows: false, // verifyJpycFeeOnChain が想定外 throw する経路 (LARP-2)
   // kvSet(nx) の戻り: 'OK' = 新規取得 / null = 既に存在 (二重)。
   kvSetValue: 'OK' as 'OK' | null,
   kvSetOk: true,
@@ -21,8 +23,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
     ...actual,
     env: {
       ...actual.env,
+      feeReceiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       get enableBilling() {
         return hold.enableBilling;
+      },
+      get feeReceiverConfigured() {
+        return hold.feeReceiverConfigured;
       },
     },
   };
@@ -40,7 +46,10 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
         },
 }));
 vi.mock('@/lib/feeVerify', () => ({
-  verifyJpycFeeOnChain: vi.fn(async () => hold.verify),
+  verifyJpycFeeOnChain: vi.fn(async () => {
+    if (hold.verifyThrows) throw new Error('rpc down');
+    return hold.verify;
+  }),
 }));
 const grantSpy = vi.hoisted(() => vi.fn());
 const hold2 = vi.hoisted(() => ({ grantOk: true }));
@@ -83,8 +92,10 @@ function req(body: unknown): Request {
 
 beforeEach(() => {
   hold.enableBilling = true;
+  hold.feeReceiverConfigured = true;
   hold.session = { ok: true, address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' };
   hold.verify = { ok: true, value: 300n * 10n ** 18n };
+  hold.verifyThrows = false;
   hold.kvSetValue = 'OK';
   hold.kvSetOk = true;
   hold2.grantOk = true;
@@ -99,6 +110,15 @@ describe('POST /api/fee/verify', () => {
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: 'billing_disabled' });
+  });
+
+  it('FEE_RECEIVER 未設定 (burn) → 503 billing_misconfigured・claim もしない', async () => {
+    hold.feeReceiverConfigured = false;
+    const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'billing_misconfigured' });
+    expect(kvSetSpy).not.toHaveBeenCalled(); // burn 先への送金を付与しない
+    expect(grantSpy).not.toHaveBeenCalled();
   });
 
   it('未ログイン → 401', async () => {
@@ -117,6 +137,23 @@ describe('POST /api/fee/verify', () => {
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'gold' }));
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: 'invalid_tier' });
+  });
+
+  it('本文が JSON でない → 400 invalid_json', async () => {
+    const bad = new Request('http://localhost/api/fee/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    const res = await POST(bad);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_json' });
+  });
+
+  it('chainId が整数でない (float) → 400 invalid_chain', async () => {
+    const res = await POST(req({ txHash: TXHASH, chainId: 1.5, tier: 'basic' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_chain' });
   });
 
   it('JPYC 非対応 chain → 400 unsupported_chain', async () => {
@@ -161,5 +198,14 @@ describe('POST /api/fee/verify', () => {
     expect(await res.json()).toMatchObject({ error: 'grant_failed' });
     expect(grantSpy).toHaveBeenCalledOnce();
     expect(kvDelSpy).toHaveBeenCalledOnce(); // 「支払い済なのに焼失」を防ぐため claim を解放
+  });
+
+  it('検証中の想定外 throw (RPC 不通等) → 503 + claim を release (txHash 焼失防止)', async () => {
+    hold.verifyThrows = true;
+    const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'verify_unavailable' });
+    expect(kvDelSpy).toHaveBeenCalledOnce(); // claim を解放 → 再提出可能
+    expect(grantSpy).not.toHaveBeenCalled();
   });
 });

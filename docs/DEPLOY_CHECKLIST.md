@@ -1000,3 +1000,57 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 **判断根拠**: いずれも `validate demand before building speculative features`
 方針 + 「現状障害なし + 緩和層あり」のため、demand signal 出現前の preemptive
 engineering を避ける。将来 incident で demand 確認後に対処する。
+
+## §12 Phase B billing (2段階 後払い利用権) go-live SOP
+
+決済コアは無料のまま、`/history` 整形閲覧・会計CSV (basic ¥300/月) と freee 連携
+(pro ¥3,000/月) を後払い月額でゲートする。JPYC を `FEE_RECEIVER` へ送金 → 自己申告
+txHash をサーバが on-chain 照合 → 30 日 tier 自動付与。詳細実装は memory:project_jpyc_free_pivot。
+
+### §12.1 既定 (現状 = inert)
+- `NEXT_PUBLIC_ENABLE_BILLING` 既定 **OFF** → paywall / `/history` ぼかし / `/api/fee/verify`
+  (404) が一切出ない。`ALPHA_ENTITLEMENT_BYPASS` 既定 **ON** → `getEntitlement` が KV を読まず
+  pro 固定を返す = ゲート全開放。**この既定の組み合わせが安全状態であり、ロールバック先でもある**。
+
+### §12.2 go-live 手順 (順序厳守)
+1. **先に testnet で実機 E2E (必須・下記 §12.4)**。これを通すまで mainnet 点灯しない。
+2. `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` に実受領アドレスが設定済か確認 (mainnet は未設定だと
+   env が build を throw 停止。testnet は未設定だと burn になるため route が 503 で弾く)。
+3. `NEXT_PUBLIC_ENABLE_BILLING=1` をセット (build-time inline → 再デプロイ必須)。
+4. `ALPHA_ENTITLEMENT_BYPASS=0` をセット (利用権必須運用へ。server runtime)。
+5. Sentry alert を登録: `node scripts/setup-sentry-alerts.mjs` (SENTRY_AUTH_TOKEN 等必要・§11.5)。
+   billing.fee.* 4 rule が idempotent に作成される。
+
+### §12.3 ロールバック (安全状態へ即復帰)
+- **最速 (UI 全停止)**: `NEXT_PUBLIC_ENABLE_BILLING=0` に戻して再デプロイ → paywall/ゲートが消え
+  挙動完全 inert。
+- **ゲートのみ開放 (UI は残す)**: `ALPHA_ENTITLEMENT_BYPASS=1` → 全 wallet が pro 相当で全機能開放。
+- **コード巻き戻し**: 該当 commit を `git revert`。
+- ※ NEXT_PUBLIC_* は build-time inline のため env 変更には再デプロイが要る (Vercel)。
+
+### §12.4 testnet 実機 E2E (リリース前必須・未自動化の唯一の経路)
+on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log 解析) は単体テストでは
+合成ログ/fake client でしか検証していない。**実チェーンでの実証はこの手順のみ**:
+1. SIWE ログイン → `/history` がぼかし + paywall になる。
+2. ¥300 相当 JPYC を `FEE_RECEIVER` へ送金 → txHash を `/api/fee/verify` へ提出。
+3. basic 付与 → `/history` 解除・CSV 可・freee は pro 要求。
+4. ¥3,000 で pro → freee 同期可。
+5. **同 txHash 再提出が 409 `already_processed` で拒否される**ことを確認 (二重付与防止)。
+
+### §12.5 監視 (§12.2-5 で登録される alert)
+| event (tag) | 閾値 | 意味 / 対処 |
+|---|---|---|
+| `billing.fee.grant-failed` | >3/h | 支払い済だが KV 永続化失敗 (顧客未付与)。KV/Upstash 不調を疑う |
+| `billing.fee.unexpected` | >3/h | money-path の想定外 throw。RPC エンドポイント障害を疑う |
+| `billing.fee.misconfigured` | >1/h | billing ON なのに FEE_RECEIVER 未設定。即 env 修正 or flag OFF |
+| `billing.fee.release-failed` | >1/h | idempotency claim 解放失敗 = txHash 焼失。log の usedKey を手動 KV 削除 |
+
+### §12.6 既知の前提 / 制約 (accepted)
+- **maxDuration=20s** (`app/api/fee/verify/route.ts`) は Vercel plan が 20s 以上を許す前提
+  (freee sync は 60s で稼働実績あり)。`lib/kv.ts` は per-call 5s timeout (AbortSignal.timeout) を
+  持つので、KV ハング時は 5s で reason=timeout に倒れ slot に張り付かない (maxDuration は二重の backstop)。
+- 検証成功後の KV 書込応答ロス時、read-back で landed 確認できなければ claim を release し再提出を
+  許す。再提出は max マージで満了が数秒〜分延長され得る (self-only・非 farmable・許容)。
+- soft-gate (`/history` ぼかし) は回避可能 (生データは本人の localStorage・思想と整合)。サーバ強制は
+  freee (`isEntitled(_,'pro')`) と CSV 由来データのみ。
+- 料金性質 (前払式該当性・決済額非連動の定額) の**弁護士確認は実績後に後ろ倒し** (合意済)。

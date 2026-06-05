@@ -54,17 +54,24 @@ if (networkEnvRaw !== 'mainnet' && networkEnvRaw !== 'testnet') {
   );
 }
 
+const feeReceiverResolved = parseAddress(
+  'NEXT_PUBLIC_FEE_RECEIVER_ADDRESS',
+  process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS,
+  PLACEHOLDER_FEE_RECEIVER,
+);
+// 実アドレスが設定済か (placeholder=burn でない)。billing は未設定だと利用料が burn へ
+// 送られるため、この値で支払い UI / 検証 route をゲートする。
+const feeReceiverConfigured =
+  feeReceiverResolved.toLowerCase() !== PLACEHOLDER_FEE_RECEIVER.toLowerCase();
+
 export const env = {
   networkEnv: networkEnvRaw,
   pimlicoApiKey: nonEmpty(process.env.NEXT_PUBLIC_PIMLICO_API_KEY) ?? '',
   pimlicoSponsorshipPolicyId: nonEmpty(
     process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID,
   ),
-  feeReceiver: parseAddress(
-    'NEXT_PUBLIC_FEE_RECEIVER_ADDRESS',
-    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS,
-    PLACEHOLDER_FEE_RECEIVER,
-  ),
+  feeReceiver: feeReceiverResolved,
+  feeReceiverConfigured,
   wcProjectId: nonEmpty(process.env.NEXT_PUBLIC_WC_PROJECT_ID) ?? '',
   rpc: {
     polygon: nonEmpty(process.env.NEXT_PUBLIC_POLYGON_RPC_URL),
@@ -352,7 +359,7 @@ export const isMainnet = env.networkEnv === 'mainnet';
 // バンドルへ展開されるため、ここで throw すれば deploy 自体を fail させられる。
 // testnet では fallback を許容して開発を阻害しない。
 if (isMainnet) {
-  if (env.feeReceiver.toLowerCase() === PLACEHOLDER_FEE_RECEIVER.toLowerCase()) {
+  if (!env.feeReceiverConfigured) {
     throw new Error(
       'NEXT_PUBLIC_FEE_RECEIVER_ADDRESS が未設定です (mainnet 必須)。' +
         'JPYC sponsorship のガス代 reimbursement が 0x...dEaD に永久消失し、' +

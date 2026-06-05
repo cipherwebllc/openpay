@@ -26,6 +26,10 @@
 //   localStorage.set failed     > 100 件/h
 //   cross-chain.execute.failed  > 20 件/h
 //   cross-chain.balance-query.* > 100 件/h
+//   billing.fee.grant-failed    > 3 件/h  (顧客が支払ったのに未付与)
+//   billing.fee.unexpected      > 3 件/h  (money-path の想定外 throw)
+//   billing.fee.misconfigured   > 1 件/h  (FEE_RECEIVER 未設定の運用ミス)
+//   billing.fee.release-failed  > 1 件/h  (txHash 焼失・手動 KV 削除が必要)
 //
 // re-calibration 手順 (production 1 週間後):
 //   1. Sentry で各 event の week-over-week 実 traffic 集計
@@ -106,6 +110,48 @@ export const RULES = [
       'down / 個別 chain RPC down の早期検知に使う。',
     eventTag: 'cross-chain.balance-query.failed',
     threshold: 100,
+    interval: '1h',
+  },
+  // --- Phase B billing (利用料 → 利用権付与) の money-path 監視。閾値は低め:
+  //     正常運用ではほぼ 0 のはずで、発生は即調査対象 (顧客が支払ったのに未付与等)。
+  //     verify-failed は warn かつ「顧客が誤った tx を出した」期待挙動なので alert 対象外
+  //     (noise になる)。
+  {
+    name: 'OpenPay: billing.fee.grant-failed (paid but not granted)',
+    description:
+      'on-chain 検証は通ったが利用権の永続化 (KV 書込) に失敗。顧客が JPYC を支払ったのに ' +
+      '利用権が付かない状態。1 時間に 3 件超で通知 (KV 障害 / Upstash 不調のサイン)。' +
+      'route は claim を release し 503 を返すため顧客は再提出可能だが、継続発生は要対処。',
+    eventTag: 'billing.fee.grant-failed',
+    threshold: 3,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.fee.unexpected (money-path throw)',
+    description:
+      '/api/fee/verify の nx-claim 後で想定外の例外 (RPC/transport 不調等)。1 時間に 3 件超で ' +
+      '通知。claim は release 済 (txHash 焼失なし) だが、RPC エンドポイント障害の早期検知に使う。',
+    eventTag: 'billing.fee.unexpected',
+    threshold: 3,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.fee.misconfigured (FEE_RECEIVER unset)',
+    description:
+      'billing 有効なのに FEE_RECEIVER 未設定 (送金先が burn になる運用設定不備)。' +
+      '1 時間に 1 件超で通知 = env 設定ミスの即時検知。検出したら NEXT_PUBLIC_ENABLE_BILLING を ' +
+      'OFF に戻すか FEE_RECEIVER を設定して再デプロイする。',
+    eventTag: 'billing.fee.misconfigured',
+    threshold: 1,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.fee.release-failed (txHash burned)',
+    description:
+      'idempotency claim の解放 (kvDel) に失敗。当該 txHash は再提出が already_processed で ' +
+      '弾かれ恒久 claim のまま焼失する。1 時間に 1 件超で通知し、log の usedKey を運用で手動削除する。',
+    eventTag: 'billing.fee.release-failed',
+    threshold: 1,
     interval: '1h',
   },
 ];

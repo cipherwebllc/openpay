@@ -5,6 +5,14 @@
 
 export type EntitlementTier = 'basic' | 'pro';
 
+/** 利用権の状態 (API 戻り値・client/server 共有)。bypass 時は tier:'pro' 相当。 */
+export type EntitlementStatus = {
+  entitled: boolean;
+  tier: EntitlementTier | null;
+  expiresAt: number | null;
+  bypass: boolean;
+};
+
 export const BILLING_TIERS: readonly EntitlementTier[] = ['basic', 'pro'];
 
 /** 月額利用料 (円・表示用)。 */
@@ -13,12 +21,12 @@ export const TIER_PRICE_YEN: Record<EntitlementTier, number> = {
   pro: 3000,
 };
 
-const JPYC_DECIMALS = 18;
+const JPYC_UNIT = 10n ** 18n; // JPYC decimals 18
 
 /** 月額利用料 (JPYC minor units・decimals 18)。¥1=1JPYC。on-chain 検証/送金額。 */
 export const TIER_PRICE_JPYC: Record<EntitlementTier, bigint> = {
-  basic: BigInt(TIER_PRICE_YEN.basic) * 10n ** BigInt(JPYC_DECIMALS),
-  pro: BigInt(TIER_PRICE_YEN.pro) * 10n ** BigInt(JPYC_DECIMALS),
+  basic: BigInt(TIER_PRICE_YEN.basic) * JPYC_UNIT,
+  pro: BigInt(TIER_PRICE_YEN.pro) * JPYC_UNIT,
 };
 
 export function isEntitlementTier(v: unknown): v is EntitlementTier {

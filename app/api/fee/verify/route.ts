@@ -19,6 +19,9 @@ import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// RPC の getTransactionReceipt (viem 既定 timeout 10s) + KV を平台レベルで bound し、
+// 遅延/ハングした RPC が関数スロットを長時間占有しないようにする。
+export const maxDuration = 20;
 
 // 利用権 (~30日) より十分長く保持し、同 txHash の再利用を恒久的に拒否する。
 const FEE_USED_TTL_SEC = 400 * 86_400;
@@ -35,6 +38,15 @@ async function releaseClaim(usedKey: string, cause: string): Promise<void> {
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableBilling) {
     return NextResponse.json({ ok: false, error: 'billing_disabled' }, { status: 404 });
+  }
+  // FEE_RECEIVER 未設定 (placeholder=burn) では検証しない。さもなくば burn への送金を
+  // 「正当な利用料」と誤認して付与してしまう (mainnet は env で deploy 自体を停止)。
+  if (!env.feeReceiverConfigured) {
+    logger.error('billing.fee.misconfigured', { reason: 'fee_receiver_unset' });
+    return NextResponse.json(
+      { ok: false, error: 'billing_misconfigured' },
+      { status: 503 },
+    );
   }
 
   const session = await requireSession();
@@ -74,58 +86,74 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'already_processed' }, { status: 409 });
   }
 
-  const publicClient = createPublicClient({
-    chain,
-    transport: transportForChain(chainId),
-  });
-  const result = await verifyJpycFeeOnChain({
-    publicClient,
-    txHash,
-    expected: {
-      token: deployment.address,
-      from: session.address,
-      to: env.feeReceiver,
-      minValue: TIER_PRICE_JPYC[tier],
-    },
-  });
-
-  if (!result.ok) {
-    await releaseClaim(usedKey, 'verify-failed'); // release → 正しい tx で再提出可能に
-    logger.warn('billing.fee.verify-failed', {
-      wallet: session.address,
-      chainId,
-      tier,
-      reason: result.reason,
+  // nx-claim 後の処理は想定外 throw (RPC/transport 設定不備等) でも claim を必ず解放する。
+  // さもなくば「未付与なのに txHash が恒久 claim されたまま焼失」する。
+  try {
+    const publicClient = createPublicClient({
+      chain,
+      transport: transportForChain(chainId),
     });
-    return NextResponse.json({ ok: false, error: result.reason }, { status: 422 });
-  }
+    const result = await verifyJpycFeeOnChain({
+      publicClient,
+      txHash,
+      expected: {
+        token: deployment.address,
+        from: session.address,
+        to: env.feeReceiver,
+        minValue: TIER_PRICE_JPYC[tier],
+      },
+    });
 
-  const granted = await grantEntitlement(
-    session.address,
-    tier,
-    ENTITLEMENT_DEFAULT_DAYS,
-  );
-  // 検証は通ったが利用権の永続化に失敗 (KV 書込 NG)。claim を解放し 503。
-  // 「支払い済なのに無付与かつ txHash 焼失」を防ぐ (正しい tx で再提出可能)。
-  if (!granted.ok) {
-    await releaseClaim(usedKey, 'grant-write-failed');
-    logger.error('billing.fee.grant-failed', {
+    if (!result.ok) {
+      await releaseClaim(usedKey, 'verify-failed'); // release → 正しい tx で再提出可能に
+      logger.warn('billing.fee.verify-failed', {
+        wallet: session.address,
+        chainId,
+        tier,
+        reason: result.reason,
+      });
+      return NextResponse.json({ ok: false, error: result.reason }, { status: 422 });
+    }
+
+    const granted = await grantEntitlement(
+      session.address,
+      tier,
+      ENTITLEMENT_DEFAULT_DAYS,
+    );
+    // 検証は通ったが利用権の永続化に失敗 (KV 書込 NG)。claim を解放し 503。
+    // 「支払い済なのに無付与かつ txHash 焼失」を防ぐ (正しい tx で再提出可能)。
+    if (!granted.ok) {
+      await releaseClaim(usedKey, 'grant-write-failed');
+      logger.error('billing.fee.grant-failed', {
+        wallet: session.address,
+        chainId,
+        tier,
+        txHash,
+      });
+      return NextResponse.json({ ok: false, error: 'grant_failed' }, { status: 503 });
+    }
+    logger.info('billing.fee.verified', {
       wallet: session.address,
       chainId,
-      tier,
+      tier: granted.tier,
       txHash,
     });
-    return NextResponse.json({ ok: false, error: 'grant_failed' }, { status: 503 });
+    return NextResponse.json({
+      ok: true,
+      tier: granted.tier,
+      expiresAt: granted.expiresAt,
+    });
+  } catch (e) {
+    await releaseClaim(usedKey, 'unexpected-error');
+    logger.error('billing.fee.unexpected', {
+      wallet: session.address,
+      chainId,
+      tier,
+      detail: e instanceof Error ? e.message : String(e),
+    });
+    return NextResponse.json(
+      { ok: false, error: 'verify_unavailable' },
+      { status: 503 },
+    );
   }
-  logger.info('billing.fee.verified', {
-    wallet: session.address,
-    chainId,
-    tier: granted.tier,
-    txHash,
-  });
-  return NextResponse.json({
-    ok: true,
-    tier: granted.tier,
-    expiresAt: granted.expiresAt,
-  });
 }

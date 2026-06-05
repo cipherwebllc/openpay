@@ -7,12 +7,17 @@
 // server 専用 (process.env を読む・route からのみ import)。値 = JSON {tier,expiresAt}、KV TTL で
 // 自然失効。後方互換: 旧 bare ms-epoch 文字列は pro 利用権とみなす (Phase B 以前の付与=pro 相当)。
 import { kvGet, kvSet } from './kv';
-import { TIER_RANK, tierAtLeast, type EntitlementTier } from './billing';
+import {
+  TIER_RANK,
+  tierAtLeast,
+  type EntitlementTier,
+  type EntitlementStatus,
+} from './billing';
 
 export const ENTITLEMENT_DEFAULT_DAYS = 30;
 
-// tier の正準定義・rank・比較は client/server 両用の lib/billing.ts。既存 importer 互換で再 export。
-export type { EntitlementTier };
+// tier の正準定義・状態型・rank・比較は client/server 両用の lib/billing.ts。既存 importer 互換で再 export。
+export type { EntitlementTier, EntitlementStatus };
 export { tierAtLeast };
 
 /** 既定 true (アルファ = 全開放)。'0' / 'false' で利用権必須運用へ切替。 */
@@ -24,13 +29,6 @@ export function entitlementBypass(): boolean {
 function entitlementKey(wallet: string): string {
   return `entitlement:${wallet.toLowerCase()}`;
 }
-
-export type EntitlementStatus = {
-  entitled: boolean;
-  tier: EntitlementTier | null;
-  expiresAt: number | null;
-  bypass: boolean;
-};
 
 type StoredEntitlement = { tier: EntitlementTier; expiresAt: number };
 

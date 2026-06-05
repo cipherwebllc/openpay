@@ -915,6 +915,8 @@
     "signIn": "ウォレットでログイン",
     "signingIn": "署名を確認中…",
     "signInStatement": "OpenPay の利用権を管理するためにログインします。",
+    "signInError": "ログインに失敗しました。署名を承認のうえ、再度お試しください。",
+    "misconfigured": "現在お支払いを受け付けられません (受領先が未設定)。時間をおいて再度お試しください。",
     "switchChain": "{chain} に切り替える",
     "payCta": "¥{yen} を {symbol} で支払う",
     "sending": "ウォレットで署名してください…",

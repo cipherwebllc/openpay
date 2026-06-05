@@ -184,6 +184,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `FREEE_CLIENT_ID` / `FREEE_CLIENT_SECRET` / `FREEE_REDIRECT_URI` | freee OAuth app (server-only secret; callback `…/api/freee/callback`) | freee only |
 | `SIWE_ALLOWED_DOMAINS` | Extra SIWE-login domains beyond the canonical host (localhost auto-allowed in dev) | optional |
 | `ALPHA_ENTITLEMENT_BYPASS` | Open all paid features during alpha (default on; `0`/`false` to require an entitlement) | optional |
+| `NEXT_PUBLIC_ENABLE_BILLING` | Show the optional postpaid-plan UI — formatted `/history` + accounting CSV (basic) and freee sync (pro) behind a 30-day entitlement, paid in JPYC to the receiver wallet and auto-granted after on-chain verification of the self-submitted txHash. Default **off** — dark ship; go-live pairs with `ALPHA_ENTITLEMENT_BYPASS=0`. Receiving payments stays free either way. | optional |
 | `X402_*` | x402 paid-API config | x402 only |
 
 **Never commit `.env.local` or private keys.** `NEXT_PUBLIC_*` values are bundled into the client — treat them as public. Production and development should use **separate** Pimlico API keys and fee receiver wallets.

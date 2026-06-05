@@ -60,7 +60,7 @@ export function verifyJpycFeeTransfer(args: {
     }
     if (logToken !== token) continue;
     if (log.topics.length < 3) continue;
-    if (log.topics[0]?.toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
+    if (log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
 
     let logFrom: Address;
     let logTo: Address;
@@ -108,7 +108,6 @@ export async function verifyJpycFeeOnChain(args: {
   } catch {
     return { ok: false, reason: 'tx_not_found' };
   }
-  if (!receipt) return { ok: false, reason: 'tx_not_found' };
   if (receipt.status !== 'success') return { ok: false, reason: 'tx_reverted' };
   return verifyJpycFeeTransfer({ logs: receipt.logs, expected: args.expected });
 }

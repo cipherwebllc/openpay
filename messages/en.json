@@ -915,6 +915,8 @@
     "signIn": "Sign in with wallet",
     "signingIn": "Confirming signature…",
     "signInStatement": "Sign in to manage your OpenPay plan.",
+    "signInError": "Sign-in failed. Approve the signature and try again.",
+    "misconfigured": "Payments are unavailable right now (receiver not configured). Please try again later.",
     "switchChain": "Switch to {chain}",
     "payCta": "Pay ¥{yen} in {symbol}",
     "sending": "Confirm in your wallet…",

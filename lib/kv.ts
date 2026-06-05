@@ -5,11 +5,15 @@
 type KvOk<T> = { ok: true; value: T };
 type KvErr = {
   ok: false;
-  reason: 'unconfigured' | 'http_error' | 'parse_error';
+  reason: 'unconfigured' | 'http_error' | 'parse_error' | 'timeout';
   status?: number;
   detail?: string;
 };
 type KvResult<T> = KvOk<T> | KvErr;
+
+// Upstash REST は通常 <100ms。serverless 関数が応答しない接続に張り付くのを防ぐため
+// 1 リクエストを bound する (これが無いと route の maxDuration まで slot を占有する)。
+const KV_TIMEOUT_MS = 5_000;
 
 function endpoint(): { url: string; token: string } | null {
   const url = process.env.KV_REST_API_URL;
@@ -35,12 +39,18 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
       },
       body: JSON.stringify(body),
       cache: 'no-store',
+      signal: AbortSignal.timeout(KV_TIMEOUT_MS),
     });
   } catch (e) {
+    // AbortSignal.timeout 発火は DOMException('TimeoutError')、明示 abort は 'AbortError'。
+    // DOMException は realm によって instanceof Error が一致しないため (test/edge)、
+    // name/message を property として読み判定する (Error/DOMException/非Error を一様に扱う)。
+    const err = e as { name?: unknown; message?: unknown };
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
     return {
       ok: false,
-      reason: 'http_error',
-      detail: e instanceof Error ? e.message : String(e),
+      reason: timedOut ? 'timeout' : 'http_error',
+      detail: typeof err?.message === 'string' ? err.message : String(e),
     };
   }
   if (!res.ok) {
