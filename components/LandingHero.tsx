@@ -1,6 +1,5 @@
 // Hero + 2 大 CTA。Server Component。
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ScanLine, QrCode } from 'lucide-react';
@@ -22,16 +21,22 @@ export async function LandingHero() {
           </p>
         </div>
 
-        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:mt-8">
-          <Image
-            src="/landing/hero-qr-payment.avif"
-            alt={t('heroVisualAlt')}
-            width={1400}
-            height={788}
-            priority
-            sizes="(min-width: 1024px) 1024px, calc(100vw - 2rem)"
-            className="h-auto w-full object-cover"
-          />
+        {/* ファーストビューで「動く製品」を見せる短尺デモ (受取=金額→QR)。
+            実機 iPhone 録画を中央にミニ端末風で。自動再生抑止時は poster を表示。
+            LCP に効くので poster + preload=metadata で軽く出す。 */}
+        <div className="mt-6 flex justify-center sm:mt-8">
+          <video
+            className="w-[260px] rounded-[28px] border border-slate-200 shadow-xl sm:w-[290px]"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            poster="/demo/create-qr-mobile-poster.png"
+            aria-label={t('howItWorksDemoCreateAlt')}
+          >
+            <source src="/demo/create-qr-mobile.mp4" type="video/mp4" />
+          </video>
         </div>
       </section>
 

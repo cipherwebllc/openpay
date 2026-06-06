@@ -8,6 +8,10 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 
 ![OpenPay screenshot](./public/og-image.png)
 
+**Live demo (mobile) — receive / register / pay · 実際の操作（受取・レジ・支払い）**
+
+![OpenPay demo: receive (payment QR), register (POS), pay (customer)](./public/demo/sns-row.gif)
+
 ---
 
 ## Key features
