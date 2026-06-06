@@ -256,7 +256,8 @@
       "title": "Not ready to create the QR code yet",
       "needLabel": "Required:",
       "needAddress": "Receiver wallet address",
-      "needAmount": "Amount"
+      "needAmount": "Amount",
+      "trySample": "Try with sample amount {amount}"
     },
     "crossChainHeading": "From another chain (USDC only)",
     "crossChainToggleLabel": "Allow cross-chain payments",

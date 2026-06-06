@@ -256,7 +256,8 @@
       "title": "QR コードを作成する準備ができていません",
       "needLabel": "必要な項目:",
       "needAddress": "受取先ウォレットアドレス",
-      "needAmount": "請求金額"
+      "needAmount": "請求金額",
+      "trySample": "サンプル金額 {amount} で試す"
     },
     "crossChainHeading": "別チェーンからの受取 (USDC のみ)",
     "crossChainToggleLabel": "他チェーンからの支払を許可",

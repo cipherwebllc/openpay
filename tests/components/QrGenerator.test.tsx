@@ -1718,6 +1718,38 @@ describe('QrGenerator', () => {
       expect(items[1].querySelector('span')!.className).toMatch(/bg-emerald-500/);
     });
 
+    it('QR empty state: receiver のみ入力 → サンプル金額ワンタップで QR が生成される', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+      // 受取先のみ済 → empty state にサンプル導線ボタンが出る (JPYC 既定 = 1000)
+      const sampleBtn = await screen.findByRole('button', {
+        name: /サンプル金額 1000 で試す/,
+      });
+      await user.click(sampleBtn);
+
+      // 金額が 1000 で埋まり、empty state は消える (QR 生成可能状態へ)
+      expect(screen.getByPlaceholderText('1000')).toHaveValue('1000');
+      await waitFor(() =>
+        expect(
+          screen.queryByText(/QR コードを作成する準備ができていません/),
+        ).toBeNull(),
+      );
+    });
+
+    it('QR empty state: receiver 未入力なら サンプル導線ボタンは出ない', async () => {
+      render(<QrGenerator />);
+      await waitFor(() =>
+        screen.getByText(/QR コードを作成する準備ができていません/),
+      );
+      // 受取先未済の段階ではサンプル導線を出さない (まず受取先を促す)
+      expect(
+        screen.queryByRole('button', { name: /サンプル金額/ }),
+      ).toBeNull();
+    });
+
     it('Web3 用語の和らげ: gasless desc に「お客様はガス代を用意せず」が含まれる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);

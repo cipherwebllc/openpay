@@ -1101,6 +1101,19 @@ export function QrGenerator() {
                     done: receiverValid,
                   },
                 ]}
+                // 受取先は済だが金額が空のとき、サンプル金額ワンタップで
+                // 最初の QR を出して操作感を掴ませる導線。
+                sample={
+                  receiverValid && !amountValid
+                    ? {
+                        label: t('qrEmptyState.trySample', {
+                          amount: settings.token === 'usdc' ? '5' : '1000',
+                        }),
+                        onUse: () =>
+                          setAmount(settings.token === 'usdc' ? '5' : '1000'),
+                      }
+                    : undefined
+                }
               />
             )}
           </div>
@@ -1230,10 +1243,13 @@ function QrEmptyState({
   title,
   needLabel,
   items,
+  sample,
 }: {
   title: string;
   needLabel: string;
   items: { label: string; done: boolean }[];
+  // 受取先は済だが金額未入力のとき、サンプル金額ワンタップで最初の QR を出す導線。
+  sample?: { label: string; onUse: () => void };
 }) {
   return (
     <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-lg bg-slate-50 px-4 py-6 text-center">
@@ -1265,6 +1281,15 @@ function QrEmptyState({
           ))}
         </ul>
       </div>
+      {sample && (
+        <button
+          type="button"
+          onClick={sample.onUse}
+          className="rounded-lg border border-brand/40 bg-brand/5 px-3 py-1.5 text-xs font-semibold text-brand-dark hover:border-brand"
+        >
+          {sample.label}
+        </button>
+      )}
     </div>
   );
 }
