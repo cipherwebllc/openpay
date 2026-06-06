@@ -3,13 +3,17 @@
 export const QR_SETTINGS_KEY = 'openpay:qr-settings:v2';
 export const DEMO_RECEIVER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
-// 収録時だけスクロールバーを隠す (overflow-y-auto のモーダルで右に 15px の
-// スクロールバー溝が出て中央寄せが左にズレ、右側に灰色が残るのを防ぐ)。
-// 製品 CSS は変えず addInitScript で注入する録画専用の見た目調整。
-export function hideScrollbars() {
+// 収録時だけの見た目調整 (製品 CSS は不変・addInitScript で注入する録画専用):
+//   1. スクロールバーを隠す (overflow-y-auto のモーダルで右に溝が出て中央寄せが
+//      左へズレ、右に灰色が残るのを防ぐ)。
+//   2. QR モーダルの暗い背景 (bg-slate-900/70) を白に上書き。背景がグレーだと
+//      クロップで縁に灰色が残るため、白にして「灰色余白ゼロ」を保証する。
+//      カードは shadow-xl + border で分離が出る。
+export function demoChrome() {
   const css =
     '::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}' +
-    'html{scrollbar-width:none!important}';
+    'html{scrollbar-width:none!important}' +
+    '[role="dialog"][aria-modal="true"]{background-color:#ffffff!important}';
   const apply = () => {
     const s = document.createElement('style');
     s.textContent = css;

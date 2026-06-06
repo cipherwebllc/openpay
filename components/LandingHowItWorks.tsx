@@ -71,9 +71,11 @@ export async function LandingHowItWorks() {
           },
         ].map((d) => (
           <figure key={d.src} className="flex flex-col items-center">
-            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-2 shadow-sm">
+            {/* 動画は 330x560 で白パディング済み・3 本とも同寸。枠は白カードで
+                グレー余白を出さない (overflow-hidden で角丸クリップ)。 */}
+            <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
               <video
-                className="h-auto w-[200px] rounded-2xl"
+                className="block h-auto w-[200px]"
                 autoPlay
                 muted
                 loop

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { QR_SETTINGS_KEY, SEED_QR_SETTINGS, hideScrollbars } from './_seed';
+import { QR_SETTINGS_KEY, SEED_QR_SETTINGS, demoChrome } from './_seed';
 
 // ランディング用デモ① 受取 (決済QR)。受取先は「初回に一度設定すれば次回スキップ」
 // という実運用に合わせ、localStorage に設定済みでスタート → 金額を入れて QR を出すだけ
@@ -9,7 +9,7 @@ test('受取(決済QR)デモ — 金額入力→QR', async ({ page }) => {
     ([key, val]) => localStorage.setItem(key, val),
     [QR_SETTINGS_KEY, JSON.stringify(SEED_QR_SETTINGS)] as const,
   );
-  await page.addInitScript(hideScrollbars);
+  await page.addInitScript(demoChrome);
   await page.goto('/ja/create');
   await expect(page.getByRole('button', { name: '決済QR' })).toBeVisible();
   // 受取先は設定済 (② は折りたたみサマリ「OpenPay Store · 0x52d4…cA81」) → すぐ金額へ。

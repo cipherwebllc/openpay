@@ -18,7 +18,10 @@ export default defineConfig({
   projects: [
     {
       name: 'mobile-safari',
-      use: { ...devices['iPhone 14'] },
+      // iPhone 14 の幅 (390) を保ちつつ縦を高く (900) して QR モーダルが
+      // ビューポートに収まるようにし、overflow-y-auto のスクロールバー
+      // (右に灰色の縦帯) が出ないようにする。録画専用の調整。
+      use: { ...devices['iPhone 14'], viewport: { width: 390, height: 900 } },
     },
   ],
   webServer: {

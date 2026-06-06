@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { QR_SETTINGS_KEY, SEED_QR_SETTINGS, hideScrollbars } from './_seed';
+import { QR_SETTINGS_KEY, SEED_QR_SETTINGS, demoChrome } from './_seed';
 
 // ランディング用デモ② レジ (POS)。受取先は設定済みで開始 → レジタブ → 既定プリセット
 // (コーヒー/Tシャツ/イベント参加費…) をタップしてカートを組み立て → 合計確認 → 全画面QR。
@@ -9,7 +9,7 @@ test('レジ(POS)デモ — プリセットでカート→QR', async ({ page }) 
     ([key, val]) => localStorage.setItem(key, val),
     [QR_SETTINGS_KEY, JSON.stringify(SEED_QR_SETTINGS)] as const,
   );
-  await page.addInitScript(hideScrollbars);
+  await page.addInitScript(demoChrome);
   await page.goto('/ja/create');
   await expect(page.getByRole('button', { name: '決済QR' })).toBeVisible();
   await page.waitForTimeout(900);
