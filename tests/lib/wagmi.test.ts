@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { baseSepolia, kairos, polygonAmoy } from 'viem/chains';
-import { wagmiConfig } from '@/lib/wagmi';
+import { wagmiConfig, guardedLocalStorage } from '@/lib/wagmi';
 import { supportedChains } from '@/lib/chains';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -77,5 +77,37 @@ describe('wagmiConfig', () => {
     delete process.env.NEXT_PUBLIC_WC_PROJECT_ID;
     const withoutWc = await import('@/lib/wagmi');
     expect(withoutWc.wagmiConfig.connectors).toHaveLength(3);
+  });
+});
+
+// localStorage がブロックされる環境 (SNS アプリ内ブラウザ・「サイトデータをブロック」設定・
+// sandboxed iframe) では window.localStorage の getter 自体が SecurityError を投げ、
+// 以前は WagmiProvider のハイドレーション全体がクラッシュして白画面になっていた。
+describe('guardedLocalStorage (ストレージ拒否環境のクラッシュ防止)', () => {
+  const lsDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  afterEach(() => {
+    if (lsDescriptor) Object.defineProperty(window, 'localStorage', lsDescriptor);
+  });
+
+  it('window.localStorage プロパティアクセスが throw しても getItem は null を返し例外を投げない', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('Access is denied for this document.', 'SecurityError');
+      },
+    });
+    const s = guardedLocalStorage();
+    expect(() => s.getItem('foo')).not.toThrow();
+    expect(s.getItem('foo')).toBeNull();
+    expect(() => s.setItem('foo', 'bar')).not.toThrow();
+    expect(() => s.removeItem('foo')).not.toThrow();
+  });
+
+  it('通常環境では localStorage を読み書きする', () => {
+    const s = guardedLocalStorage();
+    s.setItem('wagmi-test-key', 'v1');
+    expect(s.getItem('wagmi-test-key')).toBe('v1');
+    s.removeItem('wagmi-test-key');
+    expect(s.getItem('wagmi-test-key')).toBeNull();
   });
 });
