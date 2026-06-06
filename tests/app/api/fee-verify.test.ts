@@ -101,7 +101,7 @@ beforeEach(() => {
   hold.enableBilling = true;
   hold.feeReceiverConfigured = true;
   hold.session = { ok: true, address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' };
-  hold.verify = { ok: true, value: 300n * 10n ** 18n };
+  hold.verify = { ok: true, value: 4980n * 10n ** 18n }; // basic = 4980 JPYC/年
   hold.verifyThrows = false;
   hold.kvSetValue = 'OK';
   hold.kvSetOk = true;
@@ -216,11 +216,11 @@ describe('POST /api/fee/verify', () => {
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY, tier: 'basic' }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, tier: 'basic', expiresAt: 999_000 });
-    // grantEntitlement(wallet, 'basic', 30) が呼ばれる
+    // grantEntitlement(wallet, 'basic', 365) が呼ばれる (basic = 年額 = TIER_PERIOD_DAYS.basic)
     expect(grantSpy).toHaveBeenCalledWith(
       hold.session.ok ? hold.session.address : '',
       'basic',
-      30,
+      365,
     );
     expect(kvDelSpy).not.toHaveBeenCalled(); // 成功時は release しない
   });

@@ -7,6 +7,7 @@ import {
   buildTipPath,
   buildTipUrl,
   parseTipParams,
+  parseNativeTipParams,
   parseSplitDrafts,
   DEFAULT_TIP_PRESETS,
   searchParamsFromNext,
@@ -696,6 +697,62 @@ describe('buildTipUrl', () => {
     expect(url).toBe(
       `https://openpay.example.com/tip/${VALID_TO}?token=jpyc&name=Bob`,
     );
+  });
+});
+
+describe('parseNativeTipParams', () => {
+  function search(query: string) {
+    return new URLSearchParams(query);
+  }
+
+  it('native=polygon で成功 (POL)', () => {
+    const r = parseNativeTipParams(VALID_TO, search('native=polygon'));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.to).toBe(VALID_TO);
+      expect(r.params.chain).toBe('polygon');
+      expect(r.params.name).toBeUndefined();
+      expect(r.params.presets).toBeUndefined();
+    }
+  });
+
+  it('native=kaia で成功 (KAIA) + 全パラメータ', () => {
+    const r = parseNativeTipParams(
+      VALID_TO,
+      search('native=kaia&name=OpenPay&message=thx&color=%232563eb&preset=1,5,10'),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.chain).toBe('kaia');
+      expect(r.params.name).toBe('OpenPay');
+      expect(r.params.message).toBe('thx');
+      expect(r.params.color).toBe('#2563eb');
+      expect(r.params.presets).toEqual(['1', '5', '10']);
+    }
+  });
+
+  it('native 無し → エラー', () => {
+    const r = parseNativeTipParams(VALID_TO, search(''));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('native');
+  });
+
+  it('native が ERC20 専用 chain (base) → エラー (POL/KAIA のみ)', () => {
+    const r = parseNativeTipParams(VALID_TO, search('native=base'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('native');
+  });
+
+  it('address が不正 → エラー', () => {
+    const r = parseNativeTipParams('not-an-address', search('native=polygon'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('不正');
+  });
+
+  it('小文字 address は checksum 正規化される', () => {
+    const r = parseNativeTipParams(VALID_TO.toLowerCase(), search('native=polygon'));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.to).toBe(VALID_TO);
   });
 });
 

@@ -93,7 +93,7 @@ describe('BillingPaywall', () => {
   it('販売中の tier は basic のみ表示 (pro/会計連携 は販売せず非表示)', () => {
     renderPaywall();
     expect(screen.getByText('ベーシック')).toBeInTheDocument();
-    expect(screen.getByText('¥300/月')).toBeInTheDocument();
+    expect(screen.getByText('¥4980/年')).toBeInTheDocument();
     // freee は無料機能に変更したため pro(会計連携) カードは出さない。
     expect(screen.queryByText('会計連携')).toBeNull();
     expect(screen.queryByText('¥3000/月')).toBeNull();
@@ -143,9 +143,9 @@ describe('BillingPaywall', () => {
       data: { entitled: false, tier: null, expiresAt: null, bypass: false },
     };
     renderPaywall('basic');
-    // 既定選択 = requiredTier(basic) → ¥300 を JPYC で支払う
+    // 既定選択 = requiredTier(basic) → ¥4980 を JPYC で支払う
     expect(
-      screen.getByRole('button', { name: /¥300 を JPYC で支払う/ }),
+      screen.getByRole('button', { name: /¥4980 を JPYC で支払う/ }),
     ).toBeInTheDocument();
   });
 
@@ -185,10 +185,10 @@ describe('BillingPaywall', () => {
       data: { entitled: false, tier: null, expiresAt: null, bypass: false },
     };
     renderPaywall('basic');
-    await user.click(screen.getByRole('button', { name: /¥300 を JPYC で支払う/ }));
+    await user.click(screen.getByRole('button', { name: /¥4980 を JPYC で支払う/ }));
     expect(h.pay.pay).toHaveBeenCalledOnce();
     const arg = h.pay.pay.mock.calls[0][0] as { amount: bigint; chainId: number };
-    expect(arg.amount).toBe(300n * 10n ** 18n);
+    expect(arg.amount).toBe(4980n * 10n ** 18n);
     expect(arg.chainId).toBe(AMOY);
   });
 
@@ -220,7 +220,7 @@ describe('BillingPaywall', () => {
     const { rerender } = renderWithIntl(makeUi(), { locale: 'ja' });
 
     // 1) 支払いボタン押下 → startPay が tier/chain を payCtxRef に固定
-    await user.click(screen.getByRole('button', { name: /¥300 を JPYC で支払う/ }));
+    await user.click(screen.getByRole('button', { name: /¥4980 を JPYC で支払う/ }));
 
     // 2) 送金確定をシミュレート → 自動 verify (固定した tier/chain を使用)
     h.pay = { ...h.pay, isConfirmed: true, txHash: `0x${'a'.repeat(64)}` };

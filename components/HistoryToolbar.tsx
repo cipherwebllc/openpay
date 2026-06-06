@@ -74,6 +74,7 @@ export function HistoryToolbar({
   counts,
   directionCounts,
   usdcJpy,
+  csvLocked = false,
 }: {
   /** 会計用の受取(収入)entries (= summary/CSV 対象・direction フィルタ非適用)。 */
   entries: HistoryEntry[];
@@ -82,6 +83,9 @@ export function HistoryToolbar({
   counts: { all: number; jpyc: number; usdc: number };
   directionCounts: { all: number; in: number; out: number };
   usdcJpy: number | undefined;
+  /** CSV ダウンロードゲート (basic 利用権未満)。true で CSV 系ボタンを無効化する。
+   *  閲覧 (フィルタ/集計/一覧) は無料なので影響しない。利用料 paywall は親 (HistoryView) が出す。 */
+  csvLocked?: boolean;
 }) {
   const t = useTranslations('History');
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
@@ -102,6 +106,7 @@ export function HistoryToolbar({
   }
 
   function handleExport() {
+    if (csvLocked) return; // ボタンは disabled だが念のためガード (利用権未満)。
     // usdcJpy は v5 税額(円) 列で anchor 無し USDC を円換算するのに使う (JPYC は不要)。
     const blob = new Blob([toCsv(entries, { usdcJpy })], {
       type: 'text/csv;charset=utf-8',
@@ -110,6 +115,7 @@ export function HistoryToolbar({
   }
 
   function handleAccountingExport() {
+    if (csvLocked) return; // ボタンは disabled だが念のためガード (利用権未満)。
     const r = toAccountingCsv(entries, { format: acctFormat, usdcJpy });
     if (!r.ok) {
       const msg =
@@ -137,6 +143,7 @@ export function HistoryToolbar({
 
   // 会計明細CSV: 1 商品 1 行 (混在税率の行別税額を正確に出す。仕訳CSV は 1 取引 1 行)。
   function handleLineItemsExport() {
+    if (csvLocked) return; // ボタンは disabled だが念のためガード (利用権未満)。
     const r = toLineItemsCsv(entries);
     if (!r.ok) {
       window.alert(t('accountingNoRows'));
@@ -258,7 +265,7 @@ export function HistoryToolbar({
           <button
             type="button"
             onClick={handleExport}
-            disabled={entries.length === 0}
+            disabled={entries.length === 0 || csvLocked}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportCsv')}
@@ -269,7 +276,8 @@ export function HistoryToolbar({
             value={acctFormat}
             onChange={(e) => setAcctFormat(e.target.value as AccountingFormat)}
             aria-label={t('accountingFormatLabel')}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+            disabled={csvLocked}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value="freee">{t('accountingFormatFreee')}</option>
             <option value="yayoi">{t('accountingFormatYayoi')}</option>
@@ -279,7 +287,7 @@ export function HistoryToolbar({
           <button
             type="button"
             onClick={handleAccountingExport}
-            disabled={entries.length === 0}
+            disabled={entries.length === 0 || csvLocked}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportAccountingCsv')}
@@ -287,7 +295,7 @@ export function HistoryToolbar({
           <button
             type="button"
             onClick={handleLineItemsExport}
-            disabled={entries.length === 0}
+            disabled={entries.length === 0 || csvLocked}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportLineItemsCsv')}
@@ -302,6 +310,11 @@ export function HistoryToolbar({
           {t('clearAll')}
         </button>
       </div>
+      {csvLocked && (
+        <p className="text-[11px] font-medium text-amber-700">
+          {t('csvLockedNote')}
+        </p>
+      )}
       <p className="text-[11px] text-slate-400">{t('accountingIncomeOnlyNote')}</p>
     </div>
   );

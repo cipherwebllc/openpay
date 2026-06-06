@@ -31,8 +31,10 @@
 import { getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import {
+  isJpycChainSlug,
   isValidChainSlug,
   type ChainSlug,
+  type JpycChainSlug,
 } from './chains';
 import type { GasMode, PayMode } from './fee';
 import { stripControlChars } from './sanitize';
@@ -711,6 +713,65 @@ export function parseTipParams(
       thanksUrl: thanksUrl ? sanitizeUrl(thanksUrl) : undefined,
       webhook: webhook ? sanitizeUrl(webhook) : undefined,
       crossChain,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// /tip native (POL / KAIA) — ネイティブトークンの応援 (Tip)
+// ---------------------------------------------------------------------------
+//
+// ERC20 (jpyc/usdc) の TipForm とは別系統。ネイティブ送金は approval / relay /
+// gasless が無く、送り手が自分のガス (POL/KAIA) を払うだけで OpenPay は徴収も
+// 負担もしない。`TokenSymbol` に pol/kaia を足すと deployment/fee 全体へ波及する
+// ため、native は token とは独立した別パラメタとして扱う。
+//
+// URL: /tip/{address}?native=polygon|kaia (&name &message &color &preset)
+//   native = チェーン slug (polygon=POL / kaia=KAIA)。native があれば NativeTipForm を
+//            描画し、token パラメタは無視する (tip page で分岐)。
+export type NativeTipParams = {
+  to: Address;
+  // ネイティブ POL / KAIA を持つ chain (= JpycChainSlug: polygon | kaia)。
+  chain: JpycChainSlug;
+  name?: string;
+  message?: string;
+  color?: string;
+  presets?: string[];
+};
+
+export type ParsedNativeTipParams =
+  | { ok: true; params: NativeTipParams }
+  | { ok: false; error: string };
+
+export function parseNativeTipParams(
+  addressParam: string,
+  searchParams: SearchParamsLike,
+): ParsedNativeTipParams {
+  if (!addressParam || !isAddress(addressParam)) {
+    return { ok: false, error: '宛先アドレスが不正です' };
+  }
+  const native = searchParams.get('native');
+  if (!native || !isJpycChainSlug(native)) {
+    return {
+      ok: false,
+      error: 'native は polygon または kaia を指定してください',
+    };
+  }
+  const name = searchParams.get('name');
+  const message = searchParams.get('message');
+  const color = searchParams.get('color');
+  const preset = searchParams.get('preset');
+  const sanitizedColor =
+    color && COLOR_PATTERN.test(color) ? color.toLowerCase() : undefined;
+  return {
+    ok: true,
+    params: {
+      to: getAddress(addressParam),
+      chain: native,
+      name: name ? sanitizeText(name, TIP_NAME_MAX) : undefined,
+      message: message ? sanitizeText(message, TIP_MESSAGE_MAX) : undefined,
+      color: sanitizedColor,
+      presets: preset ? sanitizePresets(preset) : undefined,
     },
   };
 }

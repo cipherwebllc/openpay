@@ -74,20 +74,21 @@ export function HistoryView() {
 
   const hasEntries = entries.length > 0 || receipts.length > 0;
 
-  // 履歴ゲート (basic 利用権): billing 有効時のみ。未ログイン or basic 未満ならページを
-  // ぼかして BillingPaywall を出す (soft-gate・回避可)。bypass(アルファ) は全開放。
-  // ログイン済でロード中 (data 未取得) はチラつき回避のためぼかさない。
+  // CSV ダウンロードゲート (basic 利用権): billing 有効時のみ。履歴の**閲覧は無料**で、
+  // CSV ダウンロードのみ利用権が要る。未ログイン or basic 未満なら CSV をロックし、閲覧を
+  // 妨げない位置に利用料 paywall を出す (soft-gate・回避可)。bypass(アルファ) は全開放。
+  // **fail-closed**: basic 利用権を確実に持つと確認できない限りロックする (未ログイン・読込中・
+  // 取得失敗・未付与は全てロック)。有料機能なので「読込中はチラつき回避で開ける」(fail-open) より
+  // 安全側に倒す — 確認待ちの一瞬で未払いダウンロードを許さない。
   const billingActive = env.enableBilling;
   const { isSignedIn } = useSiweSession();
   const entitlement = useEntitlement(isSignedIn && billingActive);
   const entitledBasic = entitlement.data
     ? entitlement.data.bypass || tierAtLeast(entitlement.data.tier, 'basic')
     : false;
-  const gateBlocked =
-    billingActive &&
-    (!isSignedIn || (entitlement.data != null && !entitledBasic));
+  const csvLocked = billingActive && !entitledBasic;
 
-  // 整形表示・CSV の「データ部」。basic ゲート時はこれをぼかしの背面に置く。
+  // 整形表示・CSV の「データ部」。閲覧は常時可能で、CSV ダウンロードだけ csvLocked でロックする。
   // freee 連携パネルは**無料機能**なのでゲート外 (下で別途描画・basic 未払いでも使える)。
   const dataSections = (
     <>
@@ -98,7 +99,14 @@ export function HistoryView() {
         counts={counts}
         directionCounts={directionCounts}
         usdcJpy={usdcJpy}
+        csvLocked={csvLocked}
       />
+      {/* CSV ロック時のみ、閲覧を妨げない位置に利用料 paywall (年額) を出す。 */}
+      {csvLocked && (
+        <div className="mx-auto w-full max-w-md">
+          <BillingPaywall requiredTier="basic" />
+        </div>
+      )}
       <HistorySummary summary={summary} />
       {directionCounts.out > 0 && (
         <p className="text-[11px] text-slate-400">
@@ -137,7 +145,7 @@ export function HistoryView() {
 
         <NonCustodialNotice variant="full" />
 
-        {hydrated && hasEntries && !gateBlocked && (
+        {hydrated && hasEntries && (
           <p className="text-[11px] text-slate-500">
             {t('browserScopeNote', {
               count: entries.length,
@@ -146,22 +154,11 @@ export function HistoryView() {
           </p>
         )}
 
+        {/* 閲覧は無料。CSV ダウンロードのみ csvLocked で toolbar 内ロック + paywall を出す。 */}
         {!hydrated ? (
           <div className="h-32" aria-hidden />
         ) : !hasEntries ? (
           <HistoryEmptyState />
-        ) : gateBlocked ? (
-          // 履歴ゲート: データ部をぼかし、利用料 paywall をオーバーレイ (soft-gate)。
-          <div className="relative">
-            <div className="pointer-events-none select-none blur-sm" aria-hidden>
-              {dataSections}
-            </div>
-            <div className="absolute inset-0 flex justify-center overflow-y-auto px-2 pt-6">
-              <div className="w-full max-w-md">
-                <BillingPaywall requiredTier="basic" />
-              </div>
-            </div>
-          </div>
         ) : (
           dataSections
         )}

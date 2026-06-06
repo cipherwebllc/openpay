@@ -1,0 +1,339 @@
+'use client';
+
+// ネイティブトークン (POL / KAIA) の応援 (Tip) フォーム。
+//
+// ERC20 の TipForm とは別系統で意図的に最小限: ネイティブ送金は approval / relay /
+// smart account / gasless / 手数料分割が一切なく、送り手が自分のガスを払って value を
+// 送るだけ。OpenPay は徴収も負担もしない (受領アドレスへ素の transfer)。
+// 送金は wagmi useSendTransaction、確定待ちは useWaitForTransactionReceipt。
+// payerReceipt は asset:TokenSymbol を要求し native は対象外のため保存しない
+// (成功パネル + エクスプローラリンクで控えとする)。
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { formatUnits, parseEther } from 'viem';
+import {
+  useAccount,
+  useBalance,
+  useSendTransaction,
+  useSwitchChain,
+  useWaitForTransactionReceipt,
+} from 'wagmi';
+import { ConnectButton } from './ConnectButton';
+import { ResultRow } from './ResultRow';
+import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
+import { logger } from '@/lib/logger';
+import { DECIMAL_PATTERN, exceedsTokenPrecision, type NativeTipParams } from '@/lib/url';
+
+const DEFAULT_THEME_COLOR = '#2563eb';
+// POL / KAIA とも 18 桁のネイティブトークン。
+const NATIVE_DECIMALS = 18;
+
+// 変動するネイティブトークン建ての控えめなプリセット (任意の応援額)。厳密な円価値では
+// なく「気軽に押せる額」を意図。custom 入力で任意額も可。
+const NATIVE_TIP_PRESETS: Record<NativeTipParams['chain'], string[]> = {
+  polygon: ['1', '5', '10'],
+  kaia: ['5', '25', '100'],
+};
+
+// user reject (署名拒否) は握りつぶしてエラー表示しない。それ以外は表示する。
+function isUserRejection(err: { message?: string } | null): boolean {
+  const msg = err?.message?.toLowerCase() ?? '';
+  return (
+    msg.includes('user rejected') ||
+    msg.includes('user denied') ||
+    msg.includes('rejected the request')
+  );
+}
+
+// 残高/送金額の表示整形 (full precision は冗長なので最大 4 桁に丸める)。
+function fmtNative(value: bigint): string {
+  const n = Number(formatUnits(value, NATIVE_DECIMALS));
+  if (!Number.isFinite(n)) return formatUnits(value, NATIVE_DECIMALS);
+  return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+}
+
+export function NativeTipForm({ params }: { params: NativeTipParams }) {
+  const t = useTranslations('NativeTipForm');
+  const requiredChain = chainForSlug(params.chain);
+  const nativeSymbol = requiredChain.nativeCurrency.symbol;
+  const presets =
+    params.presets && params.presets.length > 0
+      ? params.presets
+      : NATIVE_TIP_PRESETS[params.chain];
+  const themeColor = params.color ?? DEFAULT_THEME_COLOR;
+  const creatorName = params.name ?? '';
+  const creatorMessage = params.message ?? '';
+
+  const { address, isConnected, chainId } = useAccount();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const { data: balance } = useBalance({
+    address,
+    chainId: requiredChain.id,
+  });
+  const {
+    sendTransaction,
+    data: txHash,
+    isPending: isSending,
+    error: sendError,
+  } = useSendTransaction();
+  const receipt = useWaitForTransactionReceipt({
+    hash: txHash,
+    chainId: requiredChain.id,
+  });
+
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(
+    presets[0] ?? null,
+  );
+  const [customAmount, setCustomAmount] = useState('');
+  const customSelected = selectedPreset === null;
+  const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
+
+  const amountWei = useMemo(() => {
+    if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
+    // 精度超過は parseEther が黙って丸めて表示額と実送金額が乖離するため弾く。
+    if (exceedsTokenPrecision(amountStr, NATIVE_DECIMALS)) return 0n;
+    return parseEther(amountStr);
+  }, [amountStr]);
+
+  const wrongChain = isConnected && chainId !== requiredChain.id;
+  // value のみ照合し gas 分は予約しない (チェーン毎に変動し正確な予約が困難なため)。
+  // 残高ぴったりを送ろうとした場合の gas 不足はウォレットが弾き、その error を下に表示する。
+  const insufficientBalance =
+    balance !== undefined && amountWei > 0n && amountWei > balance.value;
+
+  const confirmed = receipt.isSuccess && receipt.data?.status === 'success';
+  const reverted = receipt.data?.status === 'reverted';
+  const isMining = !!txHash && receipt.isLoading;
+
+  // 送信中・確定済 (成功) は再送金を禁止し二重チップを防ぐ。ただし revert (チェーン上で失敗)
+  // 後は再送を許す: txHash が残るが結果は失敗なので、リロードせずに金額調整→再試行できる。
+  const canSubmit =
+    isConnected &&
+    !wrongChain &&
+    amountWei > 0n &&
+    !insufficientBalance &&
+    !isSending &&
+    (txHash === undefined || reverted);
+
+  const error =
+    sendError && !isUserRejection(sendError)
+      ? sendError.message
+      : reverted
+        ? t('errorReverted')
+        : null;
+
+  // 成功は txHash ごとに 1 回だけログ。送信時の入力額を固定して live state drift を避ける。
+  const submittedAmountRef = useRef<string>('');
+  const notifiedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!confirmed || !txHash) return;
+    if (notifiedRef.current === txHash) return;
+    notifiedRef.current = txHash;
+    logger.info('tip.native.success', {
+      txHash,
+      chain: params.chain,
+      chainId: requiredChain.id,
+      to: params.to,
+      amount: submittedAmountRef.current || amountStr,
+      symbol: nativeSymbol,
+    });
+  }, [
+    confirmed,
+    txHash,
+    params.chain,
+    params.to,
+    requiredChain.id,
+    amountStr,
+    nativeSymbol,
+  ]);
+
+  function selectPreset(preset: string) {
+    setSelectedPreset(preset);
+    setCustomAmount('');
+  }
+
+  function onSubmit() {
+    if (!canSubmit) return;
+    submittedAmountRef.current = amountStr;
+    sendTransaction({
+      to: params.to,
+      value: amountWei,
+      chainId: requiredChain.id,
+    });
+  }
+
+  const explorerBase = blockExplorerUrl(requiredChain.id);
+  const explorerTxUrl =
+    explorerBase && txHash ? `${explorerBase}/tx/${txHash}` : undefined;
+
+  return (
+    <div className="space-y-4">
+      <header
+        className="rounded-2xl p-5 text-white shadow-sm"
+        style={{ backgroundColor: themeColor }}
+      >
+        <p className="text-xs uppercase tracking-wider opacity-80">
+          {t('header')}
+        </p>
+        <p className="mt-2 text-xl font-bold leading-tight">
+          {creatorName
+            ? t('headerNamed', { name: creatorName })
+            : t('headerGeneric')}
+        </p>
+        {creatorMessage && (
+          <p className="mt-2 whitespace-pre-wrap text-sm opacity-90">
+            {creatorMessage}
+          </p>
+        )}
+        <p className="mt-3 text-xs opacity-70">
+          {requiredChain.name} · {nativeSymbol}
+        </p>
+      </header>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {t('amountTitle')}
+        </p>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {presets.map((p) => {
+            const active = !customSelected && selectedPreset === p;
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => selectPreset(p)}
+                disabled={isSending || isMining}
+                className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  active
+                    ? 'border-transparent text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                }`}
+                style={active ? { backgroundColor: themeColor } : undefined}
+              >
+                {p} {nativeSymbol}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-3">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {t('amountCustom')}
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={customAmount}
+              disabled={isSending || isMining}
+              onFocus={() => setSelectedPreset(null)}
+              onChange={(e) => {
+                setSelectedPreset(null);
+                setCustomAmount(e.target.value.replace(/[^\d.]/g, ''));
+              }}
+              placeholder={t('amountCustomPlaceholder')}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ borderColor: customSelected ? themeColor : undefined }}
+            />
+          </label>
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          {t('gasNote', { symbol: nativeSymbol })}
+        </p>
+      </section>
+
+      <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {t('walletSection')}
+        </p>
+        <ConnectButton />
+
+        {isConnected && wrongChain && (
+          <button
+            type="button"
+            onClick={() => switchChain({ chainId: requiredChain.id })}
+            disabled={isSwitching}
+            className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+          >
+            {isSwitching
+              ? t('switchingChain')
+              : t('switchChain', { chainName: requiredChain.name })}
+          </button>
+        )}
+
+        {isConnected && !wrongChain && balance !== undefined && (
+          <p className="text-xs text-slate-500">
+            {t('balanceLabel')}{' '}
+            <span className="font-mono">
+              {fmtNative(balance.value)} {nativeSymbol}
+            </span>
+          </p>
+        )}
+
+        {insufficientBalance && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+            {t('insufficientBalance', { symbol: nativeSymbol })}
+          </div>
+        )}
+      </section>
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={!canSubmit}
+        className="w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ backgroundColor: themeColor }}
+      >
+        {isSending
+          ? t('btnSending')
+          : isMining
+            ? t('btnMining')
+            : !isConnected
+              ? t('btnConnect')
+              : wrongChain
+                ? t('btnSwitchChain')
+                : amountWei === 0n
+                  ? t('btnSelectAmount')
+                  : t('btnSend', { amount: amountStr, symbol: nativeSymbol })}
+      </button>
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          <p className="font-semibold">{t('errorTitle')}</p>
+          <p className="mt-1 break-words">{error}</p>
+        </div>
+      )}
+
+      {confirmed && txHash && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+          <p className="font-semibold">{t('successTitle')}</p>
+          <dl className="mt-3 space-y-1">
+            <ResultRow label={t('successTx')} value={txHash} copyable />
+          </dl>
+          {explorerTxUrl && (
+            <a
+              href={explorerTxUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-2 inline-block underline hover:text-emerald-900"
+            >
+              {t('viewOnExplorer')} ↗
+            </a>
+          )}
+        </div>
+      )}
+
+      <p className="pt-2 text-center text-[10px] text-slate-400">
+        {t('poweredBy')}{' '}
+        <a
+          href="https://github.com/cipherwebllc/openpay"
+          target="_blank"
+          rel="noreferrer"
+          className="underline hover:text-slate-600"
+        >
+          OpenPay
+        </a>
+      </p>
+    </div>
+  );
+}

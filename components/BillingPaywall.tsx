@@ -2,7 +2,7 @@
 
 // 利用料の支払い UI (ペイウォール)。SIWE ログイン → tier 選択 → JPYC を OpenPay 受領
 // アドレスへ送金 → txHash を /api/fee/verify に提出 → on-chain 照合で利用権付与。
-// /history のぼかしオーバーレイ (B4) と freee パネルの両方から requiredTier を変えて使う。
+// /history の CSV ダウンロードゲート (閲覧は無料) や freee パネルから requiredTier を変えて使う。
 // soft-gate: 強制力は無く、生データは本人のもの。回避可能 (思想と整合)。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,6 +15,7 @@ import { useEntitlement } from '@/hooks/useEntitlement';
 import { useBillingPayment } from '@/hooks/useBillingPayment';
 import {
   BILLING_TIERS,
+  TIER_PERIOD,
   TIER_PRICE_JPYC,
   TIER_PRICE_YEN,
   tierAtLeast,
@@ -198,7 +199,10 @@ export function BillingPaywall({
                   {t(`tier.${tier}.name`)}
                 </span>
                 <span className="text-sm font-semibold text-slate-900">
-                  {t('priceMonthly', { yen: TIER_PRICE_YEN[tier] })}
+                  {t(
+                    TIER_PERIOD[tier] === 'year' ? 'priceAnnual' : 'priceMonthly',
+                    { yen: TIER_PRICE_YEN[tier] },
+                  )}
                 </span>
               </div>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-500">

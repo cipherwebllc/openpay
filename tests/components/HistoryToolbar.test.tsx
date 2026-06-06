@@ -60,6 +60,7 @@ function renderToolbar(
     counts: { all: number; jpyc: number; usdc: number };
     directionCounts: { all: number; in: number; out: number };
     usdcJpy: number | undefined;
+    csvLocked: boolean;
   }> = {},
 ) {
   const onFiltersChange = vi.fn();
@@ -71,6 +72,7 @@ function renderToolbar(
       counts={props.counts ?? { all: 0, jpyc: 0, usdc: 0 }}
       directionCounts={props.directionCounts ?? { all: 0, in: 0, out: 0 }}
       usdcJpy={props.usdcJpy}
+      csvLocked={props.csvLocked ?? false}
     />,
   );
   return { onFiltersChange };
@@ -86,6 +88,32 @@ describe('HistoryToolbar', () => {
     expect(screen.getByText('種別：')).toBeInTheDocument();
     expect(screen.getByText('通貨：')).toBeInTheDocument();
     expect(screen.getByText('状態：')).toBeInTheDocument();
+  });
+
+  it('csvLocked=true → CSV系3ボタンを無効化 + 利用権ノートを表示 (閲覧は無料)', () => {
+    renderToolbar({ entries: [entry()], csvLocked: true });
+    expect(
+      (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: '会計CSVを書き出し' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: '会計明細CSV' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(screen.getByText(/年額の利用権が必要/)).toBeInTheDocument();
+  });
+
+  it('csvLocked=false (取引あり) → CSV系ボタン有効 + ノート非表示', () => {
+    renderToolbar({ entries: [entry()], csvLocked: false });
+    expect(
+      (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(screen.queryByText(/年額の利用権が必要/)).toBeNull();
   });
 
   it('状態フィルタの「差し戻し」pill は専門用語補足の title ツールチップを持つ', () => {

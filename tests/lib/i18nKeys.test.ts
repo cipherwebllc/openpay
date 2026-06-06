@@ -997,6 +997,7 @@ describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => 
         'title',
         'intro',
         'priceMonthly',
+        'priceAnnual',
         'payCta',
         'verifying',
         'granted',

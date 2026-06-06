@@ -5,7 +5,9 @@ import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { TipForm } from '@/components/TipForm';
+import { NativeTipForm } from '@/components/NativeTipForm';
 import {
+  parseNativeTipParams,
   parseTipParams,
   searchParamsFromNext,
   type RouteSearch,
@@ -29,8 +31,40 @@ export default async function TipPage({
   setRequestLocale(locale);
 
   const raw = await searchParams;
-  const parsed = parseTipParams(address, searchParamsFromNext(raw));
-  const t = await getTranslations('TipForm');
+  const sp = searchParamsFromNext(raw);
+
+  // native=polygon|kaia があればネイティブ (POL/KAIA) チップ。ERC20 (jpyc/usdc) とは
+  // 別系統のため token パラメタは無視し NativeTipForm を描画する。
+  let inner: React.ReactNode;
+  if (sp.get('native') != null) {
+    const parsedNative = parseNativeTipParams(address, sp);
+    if (parsedNative.ok) {
+      inner = <NativeTipForm params={parsedNative.params} />;
+    } else {
+      const tn = await getTranslations('NativeTipForm');
+      inner = (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+          <p className="font-semibold">{tn('urlInvalidTitle')}</p>
+          <p className="mt-2">{parsedNative.error}</p>
+        </div>
+      );
+    }
+  } else {
+    const parsed = parseTipParams(address, sp);
+    const t = await getTranslations('TipForm');
+    inner = parsed.ok ? (
+      <TipForm params={parsed.params} />
+    ) : (
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+        <p className="font-semibold">{t('urlInvalidTitle')}</p>
+        <p className="mt-2">{parsed.error}</p>
+        <p
+          className="mt-3 text-xs text-red-600/80"
+          dangerouslySetInnerHTML={{ __html: t.raw('urlExample') as string }}
+        />
+      </div>
+    );
+  }
 
   return (
     <main className="mx-auto w-full max-w-md px-3 py-4">
@@ -38,18 +72,7 @@ export default async function TipPage({
       <div className="mb-3 flex justify-end">
         <LocaleSwitcher />
       </div>
-      {parsed.ok ? (
-        <TipForm params={parsed.params} />
-      ) : (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-          <p className="font-semibold">{t('urlInvalidTitle')}</p>
-          <p className="mt-2">{parsed.error}</p>
-          <p
-            className="mt-3 text-xs text-red-600/80"
-            dangerouslySetInnerHTML={{ __html: t.raw('urlExample') as string }}
-          />
-        </div>
-      )}
+      {inner}
     </main>
   );
 }

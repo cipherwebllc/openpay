@@ -1,18 +1,17 @@
 // JPYC 利用料の自己申告検証 → 利用権の自動付与 (SIWE 必須)。
 // 店主が tier 額の JPYC を OpenPay 受領アドレス (env.feeReceiver) へ送金し、その txHash を提出。
 // サーバが on-chain で「セッション wallet → 受領アドレス・JPYC・tier 額以上」を照合し、成立すれば
-// 30 日 tier を付与する。二重付与は txHash idempotency (KV nx) で防止。billing flag OFF では無効。
+// tier 別期間 (basic=365日/pro=30日) を付与する。二重付与は txHash idempotency (KV nx) で防止。
+// billing flag OFF では無効。
 import { NextResponse } from 'next/server';
 import { createPublicClient, isHex, type Hex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
-import {
-  grantEntitlement,
-  ENTITLEMENT_DEFAULT_DAYS,
-} from '@/lib/entitlement';
+import { grantEntitlement } from '@/lib/entitlement';
 import {
   isEntitlementTier,
   TIER_PRICE_JPYC,
+  TIER_PERIOD_DAYS,
   type EntitlementTier,
 } from '@/lib/billing';
 import { verifyJpycFeeOnChain } from '@/lib/feeVerify';
@@ -177,7 +176,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     const granted = await grantEntitlement(
       session.address,
       tier,
-      ENTITLEMENT_DEFAULT_DAYS,
+      TIER_PERIOD_DAYS[tier],
     );
     // 検証は通ったが利用権の永続化に失敗 (KV 書込 NG)。ロックを解放し 503。
     // 「支払い済なのに無付与」を防ぐ (正しい tx で再提出可能・ロックは短 TTL で失効)。

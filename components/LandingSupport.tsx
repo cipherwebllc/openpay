@@ -13,8 +13,9 @@ import { Heart } from 'lucide-react';
 const TIP_ORIGIN = 'https://open-pay.jp';
 const TIP_ADDRESS = '0x428483FbA62eDCef1E3a100d3799F6d71759c560';
 
-// 3 種の応援先 (JPYC Polygon / JPYC Kaia / USDC cross-chain)。message は Tip ページ
-// 見出しに出る説明文 (URL encode 済)、labelKey は button ラベル用。
+// 応援先。ERC20 (JPYC Polygon / JPYC Kaia / USDC cross-chain) + ネイティブ
+// (POL / KAIA)。message は Tip ページ見出しに出る説明文 (URL encode 済)、labelKey は
+// button ラベル用。native=polygon|kaia は NativeTipForm (素のネイティブ送金) へ遷移する。
 const TIP_LINKS = [
   {
     labelKey: 'supportTipJpycPolygon',
@@ -27,6 +28,14 @@ const TIP_LINKS = [
   {
     labelKey: 'supportTipUsdc',
     href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?token=usdc&name=OpenPay&message=USDC%E3%82%AF%E3%83%AD%E3%82%B9%E3%83%81%E3%82%A7%E3%83%BC%E3%83%B3Tip&color=%232563eb`,
+  },
+  {
+    labelKey: 'supportTipPol',
+    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?native=polygon&name=OpenPay&color=%232563eb`,
+  },
+  {
+    labelKey: 'supportTipKaia',
+    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?native=kaia&name=OpenPay&color=%232563eb`,
   },
 ] as const;
 

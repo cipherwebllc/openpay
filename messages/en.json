@@ -69,6 +69,8 @@
     "supportTipJpycPolygon": "JPYC (Polygon)",
     "supportTipJpycKaia": "JPYC (Kaia)",
     "supportTipUsdc": "USDC (cross-chain)",
+    "supportTipPol": "POL (Polygon)",
+    "supportTipKaia": "KAIA (Kaia)",
     "benefitsTitle": "Why merchants & customers choose OpenPay",
     "benefitsSubtitle": "Real value for merchants, simplicity for customers.",
     "benefitsAudienceMerchant": "Merchant",
@@ -382,6 +384,33 @@
     "emptyLandingBody": "Scan a merchant's OpenPay QR or open a payment URL shared by a merchant to make a payment here. There is nothing to pay on this page alone.",
     "emptyLandingToHome": "Open OpenPay (merchant)",
     "emptyLandingToHistory": "View history on this browser"
+  },
+  "NativeTipForm": {
+    "header": "Support (native token)",
+    "headerNamed": "Support {name}",
+    "headerGeneric": "Support OpenPay",
+    "amountTitle": "Support amount",
+    "amountCustom": "Or custom amount",
+    "amountCustomPlaceholder": "e.g. 1",
+    "gasNote": "This is a native token ({symbol}) transfer. The gas fee is paid from your own wallet. OpenPay charges no fee.",
+    "walletSection": "Wallet",
+    "switchChain": "Switch to {chainName}",
+    "switchingChain": "Switching…",
+    "balanceLabel": "Balance",
+    "insufficientBalance": "Insufficient {symbol} balance.",
+    "btnConnect": "Connect wallet",
+    "btnSwitchChain": "Switch chain",
+    "btnSelectAmount": "Enter an amount",
+    "btnSend": "Send {amount} {symbol}",
+    "btnSending": "Sending…",
+    "btnMining": "Confirming…",
+    "errorTitle": "Error",
+    "errorReverted": "The transfer reverted on-chain. Please check your balance and network.",
+    "successTitle": "Thank you for your support!",
+    "successTx": "Transaction",
+    "viewOnExplorer": "View on explorer",
+    "poweredBy": "Powered by",
+    "urlInvalidTitle": "Invalid URL"
   },
   "TipForm": {
     "header": "OpenPay Tip",
@@ -873,6 +902,7 @@
     "accountingFormatYayoiNative": "Yayoi desktop (native, Shift_JIS)",
     "exportAccountingCsv": "Export accounting CSV",
     "accountingIncomeOnlyNote": "The accounting CSV exports successful sales (income) only. Account titles and tax categories can be remapped during import.",
+    "csvLockedNote": "CSV downloads require an annual plan. Use the panel below to unlock (viewing your history is free).",
     "accountingRateUnavailable": "FX rate unavailable, so USDC transactions without a fixed JPY price can't be converted to yen. Please retry once the rate loads.",
     "accountingNoRows": "No sales (successful income) to export.",
     "accountingTooManyRows": "Can't export more than {max} rows. Please narrow by period.",
@@ -896,14 +926,15 @@
   },
   "Billing": {
     "title": "Service plan",
-    "intro": "Receiving payments is free. Formatted transaction history, accounting CSV, and freee sync are available with a monthly plan (not tied to your payment volume).",
+    "intro": "Receiving payments and viewing your transaction history are free. Only accounting CSV downloads require an annual plan (not tied to your payment volume).",
     "currentActive": "Current plan: {tier} (until {date})",
     "currentNone": "No active plan.",
     "priceMonthly": "¥{yen}/mo",
+    "priceAnnual": "¥{yen}/yr",
     "tier": {
       "basic": {
         "name": "Basic",
-        "desc": "Formatted transaction history and accounting CSV (freee / MF / Yayoi) downloads."
+        "desc": "Accounting CSV (freee / MF / Yayoi) downloads. Viewing your transaction history is free."
       },
       "pro": {
         "name": "Accounting",

@@ -69,6 +69,8 @@
     "supportTipJpycPolygon": "JPYC (Polygon)",
     "supportTipJpycKaia": "JPYC (Kaia)",
     "supportTipUsdc": "USDC (cross-chain)",
+    "supportTipPol": "POL (Polygon)",
+    "supportTipKaia": "KAIA (Kaia)",
     "benefitsTitle": "導入メリット",
     "benefitsSubtitle": "店舗の実利と、顧客の手軽さ。",
     "benefitsAudienceMerchant": "店舗",
@@ -382,6 +384,33 @@
     "emptyLandingBody": "店舗の OpenPay QR を読み取るか、店舗から共有された決済 URL を開くとここで決済できます。決済情報がないため、このページ単体ではご利用いただけません。",
     "emptyLandingToHome": "OpenPay (店舗向け) を開く",
     "emptyLandingToHistory": "このブラウザの履歴を見る"
+  },
+  "NativeTipForm": {
+    "header": "応援 (ネイティブトークン)",
+    "headerNamed": "{name} を応援",
+    "headerGeneric": "OpenPay を応援",
+    "amountTitle": "応援する額",
+    "amountCustom": "またはカスタム額",
+    "amountCustomPlaceholder": "例: 1",
+    "gasNote": "ネイティブトークン ({symbol}) の送金です。ガス代はご自身のウォレットから支払われます。OpenPay は手数料を一切取りません。",
+    "walletSection": "ウォレット",
+    "switchChain": "{chainName} に切り替える",
+    "switchingChain": "切り替え中…",
+    "balanceLabel": "残高",
+    "insufficientBalance": "{symbol} の残高が不足しています。",
+    "btnConnect": "ウォレットを接続",
+    "btnSwitchChain": "チェーンを切り替える",
+    "btnSelectAmount": "金額を入力してください",
+    "btnSend": "{amount} {symbol} を送る",
+    "btnSending": "送信中…",
+    "btnMining": "確定待ち…",
+    "errorTitle": "エラー",
+    "errorReverted": "送金がチェーン上で失敗しました (revert)。残高やネットワークをご確認ください。",
+    "successTitle": "応援ありがとうございます！",
+    "successTx": "トランザクション",
+    "viewOnExplorer": "エクスプローラで確認",
+    "poweredBy": "Powered by",
+    "urlInvalidTitle": "URL が不正です"
   },
   "TipForm": {
     "header": "OpenPay Tip",
@@ -873,6 +902,7 @@
     "accountingFormatYayoiNative": "弥生会計 (インストール版・Shift_JIS)",
     "exportAccountingCsv": "会計CSVを書き出し",
     "accountingIncomeOnlyNote": "会計CSVは成功した売上 (収入) のみを書き出します。勘定科目・税区分は取込時に各ソフトで調整できます。",
+    "csvLockedNote": "CSV ダウンロードには年額の利用権が必要です。下の案内からご利用いただけます (履歴の閲覧は無料です)。",
     "accountingRateUnavailable": "為替レートを取得できないため、USDC (円価格未確定) の取引を円換算できません。レート取得後に再度お試しください。",
     "accountingNoRows": "書き出せる売上 (成功・収入) がありません。",
     "accountingTooManyRows": "{max} 件を超えるため書き出せません。期間で絞り込んでください。",
@@ -896,14 +926,15 @@
   },
   "Billing": {
     "title": "システム利用料",
-    "intro": "決済の受け取りは無料です。取引履歴の整形表示・会計CSV・freee 連携は月額の利用権でご利用いただけます (決済額には連動しません)。",
+    "intro": "決済の受け取りも取引履歴の閲覧も無料です。会計CSV のダウンロードのみ、年額の利用権でご利用いただけます (決済額には連動しません)。",
     "currentActive": "現在の利用権: {tier}（{date} まで）",
     "currentNone": "現在、有効な利用権はありません。",
     "priceMonthly": "¥{yen}/月",
+    "priceAnnual": "¥{yen}/年",
     "tier": {
       "basic": {
         "name": "ベーシック",
-        "desc": "取引履歴の整形表示と会計CSV (freee / MF / 弥生) のダウンロード。"
+        "desc": "会計CSV (freee / MF / 弥生) のダウンロード。取引履歴の閲覧は無料です。"
       },
       "pro": {
         "name": "会計連携",
