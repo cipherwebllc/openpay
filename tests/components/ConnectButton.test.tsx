@@ -172,6 +172,27 @@ describe('ConnectButton (disconnected)', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it('ウォレット未検出 (provider 全滅) → 検出確定後に案内 + MetaMask で開く リンク', async () => {
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [injectedNoProvider('1', 'Injected')],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    // probe 確定 (短い猶予) 後に未検出案内が出る (検出中のチラつき防止)。
+    expect(
+      await screen.findByText(/ウォレットが見つかりません/, undefined, {
+        timeout: 2000,
+      }),
+    ).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /MetaMask で開く/ });
+    expect(link.getAttribute('href')).toContain('metamask.app.link');
+  });
+
   it('同名 connector の重複は排除される', async () => {
     mockHook(useAccount, { isConnected: false, address: undefined });
     mockHook(useConnect, {

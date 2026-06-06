@@ -709,7 +709,10 @@
   },
   "ConnectButton": {
     "disconnect": "Disconnect",
-    "connectError": "Connection error: {message}"
+    "connectError": "Connection error: {message}",
+    "noWalletTitle": "No wallet detected",
+    "noWalletHint": "On mobile, open this page in a wallet app's in-app browser (e.g. MetaMask).",
+    "openInMetaMask": "Open in MetaMask"
   },
   "AddressInput": {
     "placeholder": "0x... or vitalik.eth / name.base.eth",

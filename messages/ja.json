@@ -709,7 +709,10 @@
   },
   "ConnectButton": {
     "disconnect": "切断",
-    "connectError": "接続エラー: {message}"
+    "connectError": "接続エラー: {message}",
+    "noWalletTitle": "ウォレットが見つかりません",
+    "noWalletHint": "スマホの場合は、MetaMask などウォレットアプリのブラウザでこのページを開いてください。",
+    "openInMetaMask": "MetaMask で開く"
   },
   "AddressInput": {
     "placeholder": "0x... または vitalik.eth / name.base.eth",
