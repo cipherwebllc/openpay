@@ -351,6 +351,9 @@ describe('PaymentForm — 接続状態によるボタン', () => {
       name: /ウォレットを接続/,
     });
     expect(btn).toBeDisabled();
+    // 初回向け 3 ステップガイド + 「アプリ/登録不要」を表示
+    expect(screen.getByText('署名で完了')).toBeInTheDocument();
+    expect(screen.getByText(/アプリのDL・登録は不要/)).toBeInTheDocument();
   });
 
   it('接続済 + 違うチェーン → ネットワーク切替ボタン表示 / 送信ボタンに切替メッセージ', () => {
@@ -417,6 +420,8 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     setGasQuote('ready', 0n);
     render(<PaymentForm />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    // 不足額 (あと◯◯必要) を明示
+    expect(screen.getByText(/あと.*必要/)).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /10 USDC を支払う/ }),
     ).toBeDisabled();

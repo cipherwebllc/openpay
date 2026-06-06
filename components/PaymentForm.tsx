@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
+import { PayStepStrip } from './PayStepStrip';
 import { PayEmptyLanding } from './PayEmptyLanding';
 import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
@@ -768,6 +769,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
         )}
       </section>
 
+      {/* 初回向け 3 ステップ視覚ガイド (未接続時のみ・「アプリ/登録不要」)。 */}
+      {!isConnected && <PayStepStrip />}
+
       <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-slate-700">
           {t('walletSection')}
@@ -801,6 +805,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 amount: fmt(totalCustomerOutflow),
               })}
             </p>
+            {balance !== undefined && totalCustomerOutflow > balance && (
+              <p className="mt-0.5 font-semibold">
+                {t('insufficientShortfall', {
+                  amount: fmt(totalCustomerOutflow - balance),
+                })}
+              </p>
+            )}
             <OnrampCta token={params.token} namespace="PaymentForm" />
           </div>
         )}
