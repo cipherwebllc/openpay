@@ -1,5 +1,5 @@
-import NextImage from 'next/image';
 import { chainForSlug, type ChainSlug } from '@/lib/chains';
+import { ChainLogo } from './AssetLogo';
 
 interface ChainChooserProps {
   slugs: readonly ChainSlug[];
@@ -36,14 +36,7 @@ export function ChainChooser({
                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
             }`}
           >
-            <NextImage
-              src={`/chains/${slug}.svg`}
-              alt=""
-              width={20}
-              height={20}
-              className="h-5 w-5 shrink-0"
-              aria-hidden
-            />
+            <ChainLogo slug={slug} size={20} className="h-5 w-5 shrink-0" />
             <div className="min-w-0">
               <div className="truncate font-semibold">{c.name}</div>
               <div className="text-xs text-slate-500">id: {c.id}</div>

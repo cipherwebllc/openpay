@@ -4,7 +4,13 @@
 
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
-import { addressExplorerUrl, txExplorerUrl } from '@/lib/chains';
+import {
+  addressExplorerUrl,
+  chainNameForId,
+  slugForChain,
+  txExplorerUrl,
+} from '@/lib/chains';
+import { TokenLogo, ChainLogo } from './AssetLogo';
 import {
   entryLineItems,
   entryTotals,
@@ -168,8 +174,26 @@ export function HistoryRow({
       )}
 
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2">
-        <div className="text-2xl font-bold text-slate-900">
-          {fmt(entry.merchantAmount, entry.asset)}
+        <div className="flex items-center gap-2">
+          <TokenLogo
+            symbol={entry.asset}
+            size={22}
+            className="h-[22px] w-[22px] shrink-0 self-center"
+          />
+          <span className="text-2xl font-bold text-slate-900">
+            {fmt(entry.merchantAmount, entry.asset)}
+          </span>
+          {(() => {
+            const slug = slugForChain(entry.chainId);
+            return slug ? (
+              <ChainLogo
+                slug={slug}
+                size={16}
+                alt={chainNameForId(entry.chainId) ?? slug}
+                className="h-4 w-4 shrink-0 self-center opacity-80"
+              />
+            ) : null;
+          })()}
         </div>
         <div className="text-[11px] text-slate-500">
           {entry.payMode === 'gasless' ? t('modeGasless') : t('modeStandard')}

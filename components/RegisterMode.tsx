@@ -45,6 +45,7 @@ import {
 } from '@/lib/url';
 import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from '@/lib/tax';
 import { TaxCategorySelect } from './TaxCategorySelect';
+import { TokenLogo, ChainLogo } from './AssetLogo';
 
 type CartLine = {
   id: string;
@@ -265,7 +266,9 @@ export function RegisterMode({
             ? shortAddress(effectiveReceiver)
             : settings.receiver.trim() || '—'}
         </span>
-        <span className="text-slate-400">
+        <span className="inline-flex items-center gap-1 text-slate-400">
+          <TokenLogo symbol={settings.token} size={14} className="h-3.5 w-3.5" />
+          <ChainLogo slug={settings.chain} size={14} className="h-3.5 w-3.5" />
           ({chainForSlug(settings.chain).name} / {symbol})
         </span>
         <span className="text-slate-300" aria-hidden>

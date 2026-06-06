@@ -7,8 +7,8 @@
 // 注: CheckoutLinkGenerator は「symbol + 対応 chain 数 hint」の別レイアウト
 // (ロゴ無し) を使うため本コンポーネントは共有せず据え置き (variant 分岐を避ける)。
 
-import NextImage from 'next/image';
 import { defaultDeploymentForSymbol, type TokenSymbol } from '@/lib/tokens';
+import { TokenLogo } from './AssetLogo';
 
 export function TokenChooser({
   selected,
@@ -33,14 +33,7 @@ export function TokenChooser({
                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
             }`}
           >
-            <NextImage
-              src={`/tokens/${tok}.svg`}
-              alt=""
-              width={24}
-              height={24}
-              className="h-6 w-6 shrink-0"
-              aria-hidden
-            />
+            <TokenLogo symbol={tok} size={24} className="h-6 w-6 shrink-0" />
             <span>{info.displaySymbol}</span>
           </button>
         );
