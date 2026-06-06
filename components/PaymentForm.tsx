@@ -14,6 +14,7 @@ import { OnrampCta } from './OnrampCta';
 import { CrossChainHint } from './CrossChainHint';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { SuccessOverlay } from './SuccessOverlay';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -883,7 +884,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p className="font-semibold">{t('errorTitle')}</p>
+          <p className="flex items-center gap-1.5 font-semibold">
+            <AlertCircle className="h-4 w-4 flex-none" aria-hidden />
+            {t('errorTitle')}
+          </p>
           <p className="mt-1 break-words">{error}</p>
         </div>
       )}
@@ -919,7 +923,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
           (再送信は canSubmit の relaySettledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
       {useRelay && relay.data?.pending && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="font-semibold">{t('pendingTitle')}</p>
+          <p className="flex items-center gap-1.5 font-semibold">
+            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {t('pendingTitle')}
+          </p>
           <p className="mt-1 break-words">{t('pendingBody')}</p>
           {relay.data.txHash && (
             <p className="mt-2 break-all font-mono text-xs">
