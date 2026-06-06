@@ -427,11 +427,12 @@ describe('QrGenerator', () => {
         'Show success screen',
       );
 
-      // ポスター調プレビューはモーダル内。
+      // ポスター調プレビューはモーダル内。金額は下部バーにも出るため dialog 内に限定して照合。
       await openQrModal(user);
-      expect(screen.getByText('Kanda Coffee')).toBeInTheDocument();
-      expect(screen.getByText('Show success screen')).toBeInTheDocument();
-      expect(screen.getByText('750 JPYC')).toBeInTheDocument();
+      const dialog = within(screen.getByRole('dialog'));
+      expect(dialog.getByText('Kanda Coffee')).toBeInTheDocument();
+      expect(dialog.getByText('Show success screen')).toBeInTheDocument();
+      expect(dialog.getByText('750 JPYC')).toBeInTheDocument();
     });
 
     it('クイック金額を編集して追加ボタンに反映する', async () => {
@@ -2478,5 +2479,61 @@ describe('QrGenerator — 会計用任意項目 (記帳補助)', () => {
     );
     expect(screen.queryByText((t) => t.includes('tax='))).toBeNull();
     expect(screen.queryByText((t) => t.includes('pname='))).toBeNull();
+  });
+});
+
+describe('QrGenerator: モバイル下部バー (請求金額 + QR ボタン重複回避)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useOriginMock.mockReturnValue('https://test.local');
+  });
+
+  it('金額入力 → 下部バーに請求金額を表示・「QRコードを表示する」は重複しない (Step3=lg限定/バー=モバイル限定)', async () => {
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon' }),
+    );
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(screen.getByPlaceholderText('1000'), '12345');
+
+    // payUrl 確定後、CTA は Step3 (lg 右サイド) と下部バー (モバイル) の 2 箇所に出る。
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('button', { name: /QRコードを表示する/ }),
+      ).toHaveLength(2),
+    );
+    const btns = screen.getAllByRole('button', { name: /QRコードを表示する/ });
+    // DOM 先頭 = Step3 ボタン。モバイル非表示 (lg のみ) になっている。
+    expect(btns[0].className).toContain('hidden');
+    expect(btns[0].className).toContain('lg:inline-flex');
+    // 2 つ目 = 下部バー側。モバイル限定 (lg:hidden) コンテナで、請求金額を表示する。
+    const bar = btns[1].closest('div');
+    expect(bar?.className).toContain('lg:hidden');
+    expect(bar?.textContent).toContain('12345 JPYC');
+    // モバイルでは重複ボタンの代わりに誘導文を出す。
+    expect(
+      screen.getByText(/下のバーの「QRコードを表示する」から/),
+    ).toBeInTheDocument();
+  });
+
+  it('据え置き (static) モードは固定額が無いので金額入力の案内を出す', async () => {
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon' }),
+    );
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    // 「金額を据え置きにしない」= static モードへ切替 (モード選択ボタン)。
+    await user.click(screen.getByRole('button', { name: /据え置き|金額未指定|static/i }));
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('button', { name: /QRコードを表示する/ }).length,
+      ).toBeGreaterThanOrEqual(1),
+    );
+    const btns = screen.getAllByRole('button', { name: /QRコードを表示する/ });
+    const bar = btns[btns.length - 1].closest('div');
+    // static は posterOpenAmount = "{symbol} で金額を入力" を表示。
+    expect(bar?.textContent).toContain('JPYC で金額を入力');
   });
 });

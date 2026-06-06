@@ -233,6 +233,8 @@
     "qrTitle": "QR code",
     "qrDescription": "Confirm the amount, then tap \"Show QR code\" to present it full-screen to your customer.",
     "showQr": "Show QR code",
+    "bottomAmountLabel": "Amount",
+    "qrMobileBarHint": "Use \"Show QR code\" in the bar below to present it.",
     "qrModalTitle": "Payment QR code",
     "qrModalClose": "Close",
     "qrCopy": "Copy URL",

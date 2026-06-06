@@ -233,6 +233,8 @@
     "qrTitle": "QRコード",
     "qrDescription": "金額を確認してから「QRコードを表示する」を押すと、全画面でお客様に提示できます。",
     "showQr": "QRコードを表示する",
+    "bottomAmountLabel": "請求金額",
+    "qrMobileBarHint": "下のバーの「QRコードを表示する」から提示できます。",
     "qrModalTitle": "決済用 QR コード",
     "qrModalClose": "閉じる",
     "qrCopy": "URLをコピー",

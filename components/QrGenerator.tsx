@@ -1066,14 +1066,21 @@ export function QrGenerator() {
             {payUrl ? (
               // 即時表示せず、目立つボタン → 全画面モーダルで提示 (店員が金額を確認
               // してからお客様に画面を見せる対面フロー)。
-              <button
-                type="button"
-                onClick={() => setQrModalOpen(true)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
-              >
-                <QrCodeIcon className="h-5 w-5" aria-hidden />
-                {t('showQr')}
-              </button>
+              // ボタンは lg (右サイドバー) のみ表示。モバイルは下部固定バーが担うので
+              // ここでは出さず、「QRコードを表示する」が2つ並ぶのを防ぐ (誘導文だけ出す)。
+              <>
+                <button
+                  type="button"
+                  onClick={() => setQrModalOpen(true)}
+                  className="hidden w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark lg:inline-flex"
+                >
+                  <QrCodeIcon className="h-5 w-5" aria-hidden />
+                  {t('showQr')}
+                </button>
+                <p className="text-center text-sm text-slate-500 lg:hidden">
+                  {t('qrMobileBarHint')}
+                </p>
+              </>
             ) : receiverValid && amountValid ? (
               // receiver + amount valid だが payUrl 未確定の遷移状態 (origin 空 = SSR /
               // hydrate 直後の数フレーム間)。「生成中」で混乱を回避する。
@@ -1166,16 +1173,30 @@ export function QrGenerator() {
         />
       )}
 
-      {/* モバイル下部固定 CTA: 「QRコードを表示する」を全幅の主役ボタンとして常時固定。
-          グローバル BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、
-          < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。lg は右
-          サイドバー CTA を使うので非表示。payUrl 真のときのみ (Step3 と同じゲート)。 */}
+      {/* モバイル下部固定 会計バー: 請求金額 + 「QRコードを表示する」を常時固定。レジの下部バーと
+          揃え、店員が金額を確認してから QR を提示できるようにする (amount モードは固定額、
+          static モードは「金額を入力」表示)。グローバル BottomNav (fixed bottom-0 z-20・md:hidden)
+          の上に重ねるため < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。
+          lg は右サイドバー CTA を使うので非表示。payUrl 真のときのみ (Step3 と同じゲート)。 */}
       {payUrl && (
-        <div className="sticky bottom-14 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:bottom-0 lg:hidden print:hidden">
+        <div className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:bottom-0 lg:hidden print:hidden">
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] text-slate-400">
+              {t('bottomAmountLabel')}
+            </div>
+            <div className="truncate font-mono text-lg font-bold text-slate-900">
+              {mode === 'amount'
+                ? t('posterFixedAmount', {
+                    amount,
+                    symbol: deployment.displaySymbol,
+                  })
+                : t('posterOpenAmount', { symbol: deployment.displaySymbol })}
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setQrModalOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
           >
             <QrCodeIcon className="h-5 w-5" aria-hidden />
             {t('showQr')}
