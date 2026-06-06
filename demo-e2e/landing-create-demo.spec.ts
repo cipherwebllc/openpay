@@ -15,15 +15,19 @@ test('受取(決済QR)デモ — 金額入力→QR', async ({ page }) => {
   // 受取先は設定済 (② は折りたたみサマリ「OpenPay Store · 0x52d4…cA81」) → すぐ金額へ。
   await page.waitForTimeout(1300);
 
+  // 金額入力 (ゆっくり打って「入力している」のが分かるように)。
   const amount = page.getByPlaceholder('1000', { exact: true });
+  await amount.scrollIntoViewIfNeeded();
   await amount.click();
-  await amount.pressSequentially('1280', { delay: 75 });
-  await page.waitForTimeout(700);
+  await amount.pressSequentially('1280', { delay: 95 });
+  await page.waitForTimeout(1300);
 
-  // モバイル下部固定バーから全画面 QR を提示 (DOM 末尾 = bottom bar)。
+  // 下部固定バーの「QRコードを表示する」を見せてからタップ (DOM 末尾 = bottom bar)。
   const showQr = page.getByRole('button', { name: 'QRコードを表示する' }).last();
+  await showQr.scrollIntoViewIfNeeded();
   await expect(showQr).toBeVisible();
+  await page.waitForTimeout(900);
   await showQr.click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.waitForTimeout(2400);
+  await page.waitForTimeout(2600);
 });

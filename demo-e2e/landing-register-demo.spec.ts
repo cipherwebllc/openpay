@@ -25,9 +25,11 @@ test('レジ(POS)デモ — プリセットでカート→QR', async ({ page }) 
   await page.getByRole('button', { name: /イベント参加費/ }).click();
   await page.waitForTimeout(900);
 
-  // 下部固定バーの合計 → 全画面 QR を提示 (DOM 末尾 = bottom bar)。
+  // 下部固定バーの合計 → 「QRコードを表示する」を見せてからタップ (DOM 末尾 = bottom bar)。
   const showQr = page.getByRole('button', { name: 'QRコードを表示する' }).last();
+  await showQr.scrollIntoViewIfNeeded();
   await expect(showQr).toBeVisible();
+  await page.waitForTimeout(1000);
   await showQr.click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.waitForTimeout(2400);

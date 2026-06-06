@@ -13,7 +13,11 @@ export function demoChrome() {
   const css =
     '::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}' +
     'html{scrollbar-width:none!important}' +
-    '[role="dialog"][aria-modal="true"]{background-color:#ffffff!important}';
+    '[role="dialog"][aria-modal="true"]{background-color:#ffffff!important}' +
+    // QR モーダルの URL 表示 (localhost…) と操作ボタン (印刷/コピー/保存)・
+    // EIP-681 詳細を録画時だけ隠し、カード(QR本体)だけを見せる。poster セクションの
+    // 後続兄弟を全部隠す。これで全画面寄りにクロップしても localhost URL が映らない。
+    '[role="dialog"][aria-modal="true"] section ~ *{display:none!important}';
   const apply = () => {
     const s = document.createElement('style');
     s.textContent = css;
