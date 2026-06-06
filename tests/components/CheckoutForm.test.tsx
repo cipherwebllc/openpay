@@ -1037,11 +1037,11 @@ const STANDARD_USDC_PARAMS: CheckoutParams = {
 };
 
 describe('CheckoutForm — mode=standard 統合', () => {
-  it('明細: mode=standard では gas 見積行が「ウォレットで別途支払い」になり、SA 初期化は走らない', () => {
+  it('明細: mode=standard では gas 見積行が「ウォレットで支払い」になり、SA 初期化は走らない', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
-    expect(screen.getByText(/ウォレットで別途支払い/)).toBeInTheDocument();
+    expect(screen.getByText(/ウォレットで支払い/)).toBeInTheDocument();
     // 「通常決済（ガスあり）」バッジ + standardHint で複数箇所
     expect(
       screen.getAllByText(/通常決済（ガスあり）/).length,

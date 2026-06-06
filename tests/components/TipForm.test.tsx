@@ -316,7 +316,7 @@ describe('TipForm — 接続状態', () => {
   it('未接続: 送信ボタンに接続を促すラベル / disabled', () => {
     render(<TipForm params={USDC_PARAMS} />);
     const btn = screen.getByRole('button', {
-      name: /ウォレットを接続してください/,
+      name: /ウォレットを接続/,
     });
     expect(btn).toBeDisabled();
   });
@@ -330,7 +330,7 @@ describe('TipForm — 接続状態', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: /ネットワークを切替えてください/,
+        name: /ネットワークを切替え/,
       }),
     ).toBeDisabled();
   });
@@ -918,7 +918,7 @@ describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', ()
     // 接続ボタン表示で render 完了を確認 (未接続時の不変表示)
     await waitFor(() => {
       expect(
-        screen.getByText(/ウォレットを接続してください/),
+        screen.getByText(/ウォレットを接続/),
       ).toBeInTheDocument();
     });
     expect(crossChainHintSpy).not.toHaveBeenCalled();

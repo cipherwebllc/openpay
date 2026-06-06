@@ -202,7 +202,7 @@ describe('QrGenerator', () => {
           screen.getByRole('button', { name: /^JPYC$/ }),
         ).toBeInTheDocument();
       });
-      const usdcBtn = screen.getByRole('button', { name: /^USDC/ });
+      const usdcBtn = screen.getByRole('button', { name: /^USDC$/ });
       const jpycBtn = screen.getByRole('button', { name: /^JPYC$/ });
       expect(jpycBtn.className).toMatch(/border-brand/);
       expect(usdcBtn.className).not.toMatch(/border-brand/);
@@ -225,7 +225,7 @@ describe('QrGenerator', () => {
         /kaia\.svg/,
       );
       // USDC に切替 → chain chooser に Base/Arbitrum/Optimism/Polygon/Ethereum logo
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await waitFor(() =>
         screen.getByRole('button', { name: /^Base/ }),
       );
@@ -254,7 +254,7 @@ describe('QrGenerator', () => {
         screen.getByRole('button', { name: /^JPYC$/ }),
       );
       const jpycBtn = screen.getByRole('button', { name: /^JPYC$/ });
-      const usdcBtn = screen.getByRole('button', { name: /^USDC/ });
+      const usdcBtn = screen.getByRole('button', { name: /^USDC$/ });
       const jpycImg = jpycBtn.querySelector('img');
       const usdcImg = usdcBtn.querySelector('img');
       expect(jpycImg).not.toBeNull();
@@ -527,7 +527,7 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
 
       // USDC へ切替 → USDC リスト。JPYC の値は出ない (= 連動しない)。
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await waitFor(() => screen.getByPlaceholderText('10.00'));
 
       expect(
@@ -1213,7 +1213,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
@@ -1241,7 +1241,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
 
@@ -1273,7 +1273,7 @@ describe('QrGenerator', () => {
       expect(jpycInput.value).toBe('1.1234567890');
 
       // USDC へ切替 → amount が 6 桁に truncate されているはず
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       const usdcInput = screen.getByPlaceholderText(
         '10.00',
       ) as HTMLInputElement;
@@ -1385,7 +1385,7 @@ describe('QrGenerator', () => {
       expect(jpycUri).toContain('uint256=1000000000000000000');
 
       // amount state は token 切替で reset されず、新しい decimals で再評価される。
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await waitFor(() => {
         const usdcUri = screen.getByText((t) => t.startsWith('ethereum:'))
           .textContent!;
@@ -1399,7 +1399,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
@@ -1772,7 +1772,7 @@ describe('QrGenerator', () => {
         within(step1).getByRole('button', { name: /^JPYC$/ }),
       ).toBeInTheDocument();
       expect(
-        within(step1).getByRole('button', { name: /^USDC/ }),
+        within(step1).getByRole('button', { name: /^USDC$/ }),
       ).toBeInTheDocument();
     });
 
@@ -1798,7 +1798,7 @@ describe('QrGenerator', () => {
         within(step1).queryByRole('button', { name: /^Base/ }),
       ).toBeNull();
       // USDC に切替 → chain chooser が USDC 5 chain に切替
-      await user.click(within(step1).getByRole('button', { name: /^USDC/ }));
+      await user.click(within(step1).getByRole('button', { name: /^USDC$/ }));
       await waitFor(() => {
         expect(
           within(step1).getByRole('button', { name: /^Base/ }),
@@ -1898,7 +1898,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       // USDC へ
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       // chain chooser から Arbitrum を選択
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       // chain=arbitrum を localStorage で確認
@@ -1913,7 +1913,7 @@ describe('QrGenerator', () => {
         expect(JSON.parse(raw!).chain).toBe('polygon');
       });
       // 再 USDC → chain は base に戻る (直前の arbitrum は引き継がない)
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('base');
@@ -1925,7 +1925,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // poster はモーダル内。
@@ -1963,7 +1963,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
       // 高度な設定 accordion を開く (cross-chain toggle が中にある)
       await user.click(screen.getByRole('button', { name: /高度な設定|Advanced settings/ }));
@@ -2074,7 +2074,7 @@ describe('QrGenerator', () => {
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       // 一度 USDC にして USDC chain chooser を露出
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       const step1 = container.querySelector(
         '[aria-labelledby="step-1-heading"]',
       ) as HTMLElement;
@@ -2142,7 +2142,7 @@ describe('QrGenerator', () => {
       await waitFor(() =>
         expect(screen.getByText(/JPYC · Polygon/)).toBeInTheDocument(),
       );
-      await user.click(screen.getByRole('button', { name: /^USDC/ }));
+      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await waitFor(() =>
         expect(screen.getByText(/USDC · Base/)).toBeInTheDocument(),
       );
@@ -2250,11 +2250,11 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     render(<QrGenerator />);
     await waitFor(() => screen.getByPlaceholderText('1000'));
     expect(
-      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+      screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     expect(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeInTheDocument();
   });
 
@@ -2265,7 +2265,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     expect(
-      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+      screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
   });
 
@@ -2275,7 +2275,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
 
     // token が USDC に切替 (placeholder 10.00) + amount は ceil 換算値
@@ -2305,7 +2305,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
     const input = await screen.findByPlaceholderText('10.00');
     // URL はモーダル内。開いたまま amount を編集 (背後の input は操作可)。
@@ -2328,11 +2328,11 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     expect(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /据え置き/ }));
     expect(
-      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+      screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
   });
 
@@ -2342,7 +2342,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
     await screen.findByPlaceholderText('10.00');
     await user.click(
@@ -2361,7 +2361,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
     expect(
       await screen.findByText(/他チェーンの USDC でも支払い/),
@@ -2380,7 +2380,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     expect(
-      screen.queryByRole('button', { name: /為替換算して USDC/ }),
+      screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
     expect(screen.getByText(/為替レートを取得できない/)).toBeInTheDocument();
   });
@@ -2391,7 +2391,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
     await waitFor(() => screen.getByPlaceholderText('1000'));
     await user.type(screen.getByPlaceholderText('1000'), '1000');
     await user.click(
-      await screen.findByRole('button', { name: /為替換算して USDC/ }),
+      await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
     const input = (await screen.findByPlaceholderText(
       '10.00',
@@ -2415,7 +2415,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
       render(<QrGenerator />);
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await user.click(
-        screen.getByRole('button', { name: /為替換算して USDC/ }),
+        screen.getByRole('button', { name: /USDC 建てで受取る/ }),
       );
       // 期限内: 残り 3:00、期限切れ文言は無い
       expect(screen.getByText(/残り 3:00/)).toBeInTheDocument();

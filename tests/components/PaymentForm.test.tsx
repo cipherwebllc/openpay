@@ -348,7 +348,7 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     setAccount({ connected: false });
     render(<PaymentForm />);
     const btn = screen.getByRole('button', {
-      name: /ウォレットを接続してください/,
+      name: /ウォレットを接続/,
     });
     expect(btn).toBeDisabled();
   });
@@ -363,7 +363,7 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: /ネットワークを切替えてください/,
+        name: /ネットワークを切替え/,
       }),
     ).toBeDisabled();
   });
@@ -672,7 +672,7 @@ describe('PaymentForm — 通常決済（ガスあり） / mode=standard', () =>
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it('明細: 手数料 0%、ネットワーク手数料はウォレットで別途、顧客支払額は amount のまま', () => {
+  it('明細: 手数料 0%、ネットワーク手数料はウォレットで支払い、顧客支払額は amount のまま', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
@@ -680,8 +680,8 @@ describe('PaymentForm — 通常決済（ガスあり） / mode=standard', () =>
     // fee=0: 旧 0.05 fee / 9.95 控除は出ない。merchant は amount 満額。
     expect(screen.queryByText('0.05 USDC')).not.toBeInTheDocument();
     expect(screen.queryByText('9.95 USDC')).not.toBeInTheDocument();
-    // ネットワーク手数料はウォレットで別途 (standard 固有・手数料とは独立)
-    expect(screen.getByText(/ウォレットで別途/)).toBeInTheDocument();
+    // ネットワーク手数料はウォレットで支払い (standard 固有・手数料とは独立)
+    expect(screen.getByText(/ウォレットで支払い/)).toBeInTheDocument();
     // 顧客支払額・merchant 受取とも 10 USDC (header 含め複数箇所)
     expect(screen.getAllByText('10 USDC').length).toBeGreaterThanOrEqual(2);
   });
@@ -969,7 +969,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
   });
 
-  it('standard mode + USDC params: ガス代見積は呼ばれない (paymaster 不使用)、ネットワーク手数料行は「ウォレットで別途」表示', () => {
+  it('standard mode + USDC params: ガス代見積は呼ばれない (paymaster 不使用)、ネットワーク手数料行は「ウォレットで支払い」表示', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
@@ -977,8 +977,8 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     setGasQuote('disabled');
     render(<PaymentForm />);
 
-    // ネットワーク手数料行は「ウォレットで別途」表示で出る (見積額は出さない)
-    expect(screen.getByText(/ウォレットで別途/)).toBeInTheDocument();
+    // ネットワーク手数料行は「ウォレットで支払い」表示で出る (見積額は出さない)
+    expect(screen.getByText(/ウォレットで支払い/)).toBeInTheDocument();
     // standard モードバッジは出る (タイトル + hint で複数箇所)
     expect(
       screen.getAllByText(/通常決済（ガスあり）/).length,
@@ -1157,7 +1157,7 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     expect(screen.getByText(/店主受取が 0 になります/)).toBeInTheDocument();
     // underflow (merchantReceives===0) ではボタンが btnEnterAmount に切替 + disabled
     expect(
-      screen.getByRole('button', { name: /金額を入力してください/ }),
+      screen.getByRole('button', { name: /金額を入力/ }),
     ).toBeDisabled();
   });
 
