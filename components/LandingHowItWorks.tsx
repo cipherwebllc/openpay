@@ -42,29 +42,55 @@ export async function LandingHowItWorks() {
         <p className="mt-2 text-sm text-slate-600">{t('howItWorksSubtitle')}</p>
       </div>
 
-      {/* 実機 (iPhone) で撮った実際の操作デモ。静止画の図より「本当に動く」が
-          伝わるため、決済QR作成フロー (受取先 → 金額 → 全画面QR) の録画を提示する。
+      {/* 実機 (iPhone) で撮った実際の操作デモ 3 本。静止画の図より「本当に動く」が
+          伝わる。受取 (決済QR) / レジ (POS) は店舗側、支払い は顧客側を提示。
           autoplay/muted/loop/playsInline で GIF 同等に自動再生 (iOS Safari 含む)、
-          自動再生が抑止される環境では poster (最終QR画面) を表示する。 */}
-      <div className="mt-8 flex justify-center">
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
-          <video
-            className="h-auto w-[260px] rounded-2xl sm:w-[300px]"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="metadata"
-            poster="/demo/create-qr-mobile-poster.png"
-            aria-label={t('howItWorksDemoAlt')}
-          >
-            <source src="/demo/create-qr-mobile.mp4" type="video/mp4" />
-          </video>
-        </div>
-      </div>
-      <p className="mt-3 text-center text-xs text-slate-500">
+          自動再生が抑止される環境では poster を表示する。 */}
+      <p className="mt-6 text-center text-xs font-medium text-slate-500">
         {t('howItWorksDemoCaption')}
       </p>
+      <div className="mt-3 grid gap-5 sm:grid-cols-3">
+        {[
+          {
+            src: '/demo/create-qr-mobile.mp4',
+            poster: '/demo/create-qr-mobile-poster.png',
+            label: t('howItWorksDemoCreate'),
+            alt: t('howItWorksDemoCreateAlt'),
+          },
+          {
+            src: '/demo/register-mobile.mp4',
+            poster: '/demo/register-mobile-poster.png',
+            label: t('howItWorksDemoRegister'),
+            alt: t('howItWorksDemoRegisterAlt'),
+          },
+          {
+            src: '/demo/pay-mobile.mp4',
+            poster: '/demo/pay-mobile-poster.png',
+            label: t('howItWorksDemoPay'),
+            alt: t('howItWorksDemoPayAlt'),
+          },
+        ].map((d) => (
+          <figure key={d.src} className="flex flex-col items-center">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-2 shadow-sm">
+              <video
+                className="h-auto w-[200px] rounded-2xl"
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                poster={d.poster}
+                aria-label={d.alt}
+              >
+                <source src={d.src} type="video/mp4" />
+              </video>
+            </div>
+            <figcaption className="mt-2 text-center text-xs font-medium text-slate-600">
+              {d.label}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
