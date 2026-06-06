@@ -37,6 +37,8 @@
     "howItWorksTitle": "使い方",
     "howItWorksSubtitle": "受け取る側も支払う側も、3 ステップで完了します。",
     "howItWorksVisualAlt": "店舗が決済 QR を作り、顧客がスマホで読み取り、店舗ウォレットへ売上が届く流れの図",
+    "howItWorksDemoAlt": "スマホで受取先を入力し、金額を入れると決済 QR が表示されるまでの実際の操作デモ",
+    "howItWorksDemoCaption": "実際の操作（モバイル・約9秒）",
     "howItWorksMerchantTitle": "🏪 受け取る (店舗)",
     "howItWorksMerchantStep1": "受取ウォレットアドレスを入力",
     "howItWorksMerchantStep2": "金額・通貨・チェーンを選択",

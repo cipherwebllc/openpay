@@ -5,7 +5,6 @@
 // 描画する (一般ユーザに「/scan」path 表記は分かりにくいため)。
 
 import type { ReactNode } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 
@@ -43,16 +42,29 @@ export async function LandingHowItWorks() {
         <p className="mt-2 text-sm text-slate-600">{t('howItWorksSubtitle')}</p>
       </div>
 
-      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <Image
-          src="/landing/flow-qr-payment.avif"
-          alt={t('howItWorksVisualAlt')}
-          width={1400}
-          height={788}
-          sizes="(min-width: 1024px) 1024px, calc(100vw - 2rem)"
-          className="h-auto w-full object-cover"
-        />
+      {/* 実機 (iPhone) で撮った実際の操作デモ。静止画の図より「本当に動く」が
+          伝わるため、決済QR作成フロー (受取先 → 金額 → 全画面QR) の録画を提示する。
+          autoplay/muted/loop/playsInline で GIF 同等に自動再生 (iOS Safari 含む)、
+          自動再生が抑止される環境では poster (最終QR画面) を表示する。 */}
+      <div className="mt-8 flex justify-center">
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
+          <video
+            className="h-auto w-[260px] rounded-2xl sm:w-[300px]"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            poster="/demo/create-qr-mobile-poster.png"
+            aria-label={t('howItWorksDemoAlt')}
+          >
+            <source src="/demo/create-qr-mobile.mp4" type="video/mp4" />
+          </video>
+        </div>
       </div>
+      <p className="mt-3 text-center text-xs text-slate-500">
+        {t('howItWorksDemoCaption')}
+      </p>
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
