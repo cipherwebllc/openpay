@@ -386,13 +386,13 @@ describe('TipForm — 接続状態', () => {
     expect(onramp).toHaveAttribute('href', 'https://jpyc.co.jp/');
   });
 
-  it('Smart Account 初期化中 → 「初期化中…」', () => {
+  it('決済の準備中 → 「初期化中…」', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(false);
     render(<TipForm params={USDC_PARAMS} />);
     expect(
-      screen.getByRole('button', { name: /Smart Account 初期化中/ }),
+      screen.getByRole('button', { name: /決済の準備中/ }),
     ).toBeDisabled();
   });
 });

@@ -770,13 +770,13 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await openAdvanced(user);
-      await waitFor(() => screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await waitFor(() => screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       // 切替前は表示
       expect(
         screen.getByRole('button', { name: /顧客が gas 相当額/ }),
       ).toBeInTheDocument();
       // 直接送金 ON
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       // トグル消失
       expect(
         screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
@@ -880,8 +880,8 @@ describe('QrGenerator', () => {
     });
   });
 
-  describe('決済モード切替 (gasless / 通常決済（ガスあり）)', () => {
-    it('「通常決済（ガスあり）」を選択すると URL に mode=standard が出る + 説明バッジが表示される', async () => {
+  describe('決済モード切替 (gasless / 通常決済（ガス代は自分で負担）)', () => {
+    it('「通常決済（ガス代は自分で負担）」を選択すると URL に mode=standard が出る + 説明バッジが表示される', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -891,7 +891,7 @@ describe('QrGenerator', () => {
 
       // mode radio (gasless / 通常決済) のうち standard 側を click
       const standardBtn = screen.getByRole('button', {
-        name: /通常決済（ガスあり）/,
+        name: /通常決済（ガス代は自分で負担）/,
       });
       await user.click(standardBtn);
 
@@ -919,10 +919,10 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await openAdvanced(user);
       await waitFor(() =>
-        screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
+        screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }),
       );
       await user.click(
-        screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
+        screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }),
       );
 
       await waitFor(() => {
@@ -933,7 +933,7 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('Phase 1: payMode=standard でアコーディオン閉時のサマリに「通常決済（ガスあり）」と出る', async () => {
+    it('Phase 1: payMode=standard でアコーディオン閉時のサマリに「通常決済（ガス代は自分で負担）」と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -953,7 +953,7 @@ describe('QrGenerator', () => {
         expect(toggle.getAttribute('aria-expanded')).toBe('false'),
       );
       expect(
-        within(toggle).getByText(/通常決済（ガスあり）/),
+        within(toggle).getByText(/通常決済（ガス代は自分で負担）/),
       ).toBeInTheDocument();
     });
 
@@ -1001,7 +1001,7 @@ describe('QrGenerator', () => {
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
       await waitFor(() => {
-        expect(screen.getByText('ガスレス決済')).toBeInTheDocument();
+        expect(screen.getByText('ガス代不要')).toBeInTheDocument();
       });
     });
 
@@ -1032,7 +1032,7 @@ describe('QrGenerator', () => {
         ).toBeInTheDocument();
       });
       // gasless badge は出ない (誤って併発しないこと)
-      expect(screen.queryByText('ガスレス決済')).toBeNull();
+      expect(screen.queryByText('ガス代不要')).toBeNull();
     });
 
     it('USDC + Polygon (gasless 対応): "ガスレス決済" badge (色 emerald 系)', async () => {
@@ -1053,7 +1053,7 @@ describe('QrGenerator', () => {
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
       await waitFor(() => {
-        const badge = screen.getByText('ガスレス決済');
+        const badge = screen.getByText('ガス代不要');
         expect(badge).toBeInTheDocument();
         // gasless = emerald 系 (creator/顧客の安心 visual cue)
         expect(badge.className).toMatch(/emerald/);
@@ -1080,7 +1080,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       // QR / EIP-681 fallback はモーダル内。
       await openQrModal(user);
 
@@ -1121,7 +1121,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
 
       // details 要素が DOM に存在 + 初期 open=false
@@ -1142,7 +1142,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1000');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
 
       // summary 内の badge (default 閉でも DOM には存在)
@@ -1167,7 +1167,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
 
       expect(screen.queryByText(/互換 QR \(EIP-681\)/)).toBeNull();
@@ -1186,7 +1186,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '500');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
 
       // 形状 regex だけ pass する silent fund misdirection を排除するため、
@@ -1215,7 +1215,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
 
       const amountInput = screen.getByPlaceholderText(
         '10.00',
@@ -1243,7 +1243,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
 
       const amountInput = screen.getByPlaceholderText(
         '10.00',
@@ -1289,7 +1289,7 @@ describe('QrGenerator', () => {
       await openAdvanced(user);
 
       await user.click(
-        screen.getByRole('button', { name: /通常決済（ガスあり）/ }),
+        screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }),
       );
       // URI はモーダル内。開いたまま payMode を切替 (背後の accordion は操作可)。
       await openQrModal(user);
@@ -1298,7 +1298,7 @@ describe('QrGenerator', () => {
       );
 
       // ガスレス決済に戻すと EIP-681 URI は非表示 (gasless では EIP-681 で表現不可)
-      await user.click(screen.getByRole('button', { name: /ガスレス決済/ }));
+      await user.click(screen.getByRole('button', { name: /ガス代不要/ }));
       await waitFor(() =>
         expect(screen.queryByText(/^ethereum:/)).toBeNull(),
       );
@@ -1320,7 +1320,7 @@ describe('QrGenerator', () => {
         '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
       );
       await user.type(screen.getByPlaceholderText('%'), '30');
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
 
       await waitFor(() =>
@@ -1356,7 +1356,7 @@ describe('QrGenerator', () => {
       const amountInput = screen.getByPlaceholderText('1000');
       await user.type(amountInput, '100');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
@@ -1375,7 +1375,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '1');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
 
       // JPYC: 1 JPYC = 1e18 wei
@@ -1402,7 +1402,7 @@ describe('QrGenerator', () => {
       await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /通常決済（ガスあり）/ }));
+      await user.click(screen.getByRole('button', { name: /通常決済（ガス代は自分で負担）/ }));
       await openQrModal(user);
 
       // 既定: Base
@@ -1665,12 +1665,12 @@ describe('QrGenerator', () => {
       await openAdvanced(user);
       // gasless ボタンの accessible name 内に "おすすめ" を含む
       const gaslessBtn = await screen.findByRole('button', {
-        name: /ガスレス決済.*おすすめ/,
+        name: /ガス代不要.*おすすめ/,
       });
       expect(gaslessBtn).toBeInTheDocument();
       // 通常決済 ボタンは「おすすめ」 badge を含まない
       const standardBtn = screen.getByRole('button', {
-        name: /^通常決済（ガスあり）/,
+        name: /^通常決済（ガス代は自分で負担）/,
       });
       expect(standardBtn.textContent).not.toMatch(/おすすめ/);
     });
@@ -1723,7 +1723,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await openAdvanced(user);
       const gaslessBtn = await screen.findByRole('button', {
-        name: /ガスレス決済/,
+        name: /ガス代不要/,
       });
       expect(gaslessBtn.textContent).toMatch(/お客様はガス代を用意せず/);
       // 旧文言 (「OpenPay がガスを肩代わり。」) は消えている
@@ -2199,7 +2199,7 @@ describe('QrGenerator', () => {
       {
         payMode: 'standard',
         gasMode: 'customer',
-        expected: /Standard payment \(with gas\)/,
+        expected: /Standard \(you pay gas\)/,
       },
     ] as const)(
       'en locale: payMode=$payMode gasMode=$gasMode → 英文サマリ "$expected"',

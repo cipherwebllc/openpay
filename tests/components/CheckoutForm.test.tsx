@@ -363,7 +363,7 @@ describe('CheckoutForm — 接続フロー', () => {
     setSmartAccount(false);
     render(<CheckoutForm params={USDC_PARAMS} />);
     expect(
-      screen.getByRole('button', { name: /Smart Account 初期化中/ }),
+      screen.getByRole('button', { name: /決済の準備中/ }),
     ).toBeDisabled();
   });
 
@@ -1028,7 +1028,7 @@ describe('CheckoutForm — エラー表示', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 通常決済（ガスあり） / mode=standard の統合テスト
+// 通常決済（ガス代は自分で負担） / mode=standard の統合テスト
 // ---------------------------------------------------------------------------
 
 const STANDARD_USDC_PARAMS: CheckoutParams = {
@@ -1042,9 +1042,9 @@ describe('CheckoutForm — mode=standard 統合', () => {
     setBalance(200_000_000n);
     render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
     expect(screen.getByText(/ウォレットで支払い/)).toBeInTheDocument();
-    // 「通常決済（ガスあり）」バッジ + standardHint で複数箇所
+    // 「通常決済（ガス代は自分で負担）」バッジ + standardHint で複数箇所
     expect(
-      screen.getAllByText(/通常決済（ガスあり）/).length,
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
     ).toBeGreaterThanOrEqual(1);
     // useSmartAccount は enabled=false で呼ばれる
     expect(useSmartAccount).toHaveBeenCalledWith(

@@ -149,7 +149,7 @@ describe('NativeTipForm', () => {
     h.send = { ...h.send, data: `0x${'a'.repeat(64)}` };
     h.receipt = { data: { status: 'reverted' }, isLoading: false, isSuccess: false };
     render();
-    expect(screen.getByText(/チェーン上で失敗/)).toBeInTheDocument();
+    expect(screen.getByText(/ネットワーク上で失敗/)).toBeInTheDocument();
     // revert 後は txHash が残っても再送を許す (二重チップは success 時のみ防ぐ)。
     expect(
       (screen.getByRole('button', { name: /を送る/ }) as HTMLButtonElement).disabled,

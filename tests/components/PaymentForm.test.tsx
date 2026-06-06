@@ -466,14 +466,14 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     expect(screen.queryByRole('link', { name: /で USDC を購入/ })).toBeNull();
   });
 
-  it('Smart Account 初期化中 → 「初期化中…」ラベル', () => {
+  it('決済の準備中 → 「初期化中…」ラベル', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(false);
     render(<PaymentForm />);
     expect(
-      screen.getByRole('button', { name: /Smart Account 初期化中/ }),
+      screen.getByRole('button', { name: /決済の準備中/ }),
     ).toBeDisabled();
   });
 });
@@ -651,15 +651,15 @@ describe('PaymentForm — split (C1)', () => {
   });
 });
 
-describe('PaymentForm — 通常決済（ガスあり） / mode=standard', () => {
-  it('バッジ「通常決済（ガスあり）」が表示される', () => {
+describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=standard', () => {
+  it('バッジ「通常決済（ガス代は自分で負担）」が表示される', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     render(<PaymentForm />);
-    // 「通常決済（ガスあり）」はタイトルバッジ + breakdown hint に出るので複数
+    // 「通常決済（ガス代は自分で負担）」はタイトルバッジ + breakdown hint に出るので複数
     expect(
-      screen.getAllByText(/通常決済（ガスあり）/).length,
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
     ).toBeGreaterThanOrEqual(1);
     // ETH (USDC のネイティブガス) の案内が出る
     expect(
@@ -673,7 +673,7 @@ describe('PaymentForm — 通常決済（ガスあり） / mode=standard', () =>
     setBalance(20_000_000n);
     render(<PaymentForm />);
     expect(
-      screen.getAllByText(/通常決済（ガスあり）/).length,
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
     ).toBeGreaterThanOrEqual(1);
   });
 
@@ -986,7 +986,7 @@ describe('PaymentForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     expect(screen.getByText(/ウォレットで支払い/)).toBeInTheDocument();
     // standard モードバッジは出る (タイトル + hint で複数箇所)
     expect(
-      screen.getAllByText(/通常決済（ガスあり）/).length,
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
     ).toBeGreaterThanOrEqual(1);
     // useGasQuoteUsdc は enabled=false で呼ばれる (no fetch)。第 1 引数は USDC deployment。
     expect(useGasQuoteUsdc).toHaveBeenCalledWith(
