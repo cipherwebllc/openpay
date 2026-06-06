@@ -77,16 +77,31 @@ cast call <FORWARDER_POLYGON> "COMMIT_VERSION()(bytes32)" --rpc-url "$NEXT_PUBLI
 `feeReceiver` が本番 `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` と**一致しないと署名検証が通らない**。不一致なら
 deploy しなおし(immutable のため変更不可)。
 
-## 5. RELAY_MAX_GAS_COST_WEI の算出(B5・赤字防止)
+## 5. RELAY_MAX_GAS_COST_WEI の算出(B5・赤字防止サーキットブレーカー)
 
-回収する固定 fee(`NEXT_PUBLIC_RELAY_GAS_FEE_JPYC`・既定 2 JPYC)を超えない native コスト上限を設定する。
+1 tx の native(POL)gas コスト上限(wei)。署名済 tx の `gas × maxFeePerGas` がこれを超えると
+relay せず throw → 顧客は standard へ誘導される。**未設定(0)は mainnet self-host で 503**
+(`gas_ceiling_required`・deploy 直後の事故防止)。
 
+> **無料化(Phase A)後の位置づけ**: forwarder 未設定 = free モードでは OpenPay が gas を全額
+> 負担し、JPYC からの回収 fee は無い(memory: JPYCガス完全無料化ピボット / jpyc-eip3009)。
+> よってこの上限は「回収 fee を超えない値」ではなく、**ガス暴騰時に 1 tx で許容できる赤字の
+> 上限 = 異常スパイクの最終ブレーカー**として設定する。旧版の "2 JPYC fee を超えない" 算式は
+> recover モード時のみ該当し、free モードでは失効している(この値を 0.05 POL 等へ下げ戻さない)。
+
+設定の考え方(free モード):
 - settle のガス実測 ≈ 250–300k gas(Amoy fork 実測)。
-- 許容 gasPrice 上限 = (回収 fee を JPYC→POL 換算した値) / gas。
-- 保守的には worst-case の Polygon gasPrice(混雑時)× 300k を JPYC 換算し、回収 fee を超える分は relay
-  しない(顧客は standard で自分の gas を払う)値に設定。
-- 例(要・実値で再計算): `RELAY_MAX_GAS_COST_WEI=` (例 0.05 POL = `50000000000000000`)。
-  → 運用開始後、実 gas と POL/JPY レートを見て調整。**未設定は 503 で安全側(deploy 直後の事故防止)**。
+- 上限 ÷ gas = 許容 maxFeePerGas。Polygon の通常〜中規模混雑(数百 gwei)を吸収できる値にする。
+  **低すぎると通常混雑で頻繁にトリップ → ガスレス客は POL を持たず standard に倒せないため決済が
+  落ちる**。高すぎると runaway spike 時の赤字露出が増える。
+- **現行本番値 = 0.2 POL(`200000000000000000`)** → 300k gas 換算で ~666 gwei まで許容。通常〜
+  中規模混雑を吸収しつつ、>1000 gwei 級の異常時のみブレーカーが効く(2026-06 に 0.05→0.2 へ引上げ。
+  旧 0.05 POL は ~166 gwei しか許容せず通常混雑でトリップしていた)。
+- 運用後は Sentry の `relay.jpyc.relay_error`(detail に `gas_price_too_high: cost=… cap=…`)の発火
+  頻度で調整。新上限(`cap=200000000000000000`)でも頻発するなら引き上げ、皆無なら据え置き。
+
+> recover モード(forwarder 設定時)を併用する場合は、回収 fee(`NEXT_PUBLIC_RELAY_GAS_FEE_JPYC`)を
+> POL 換算した額が実 gas を賄えるか(fee < 実 gas なら recover でも赤字)も併せて確認する。
 
 ## 6. 本番環境変数の設定(Vercel 等)
 
@@ -94,9 +109,9 @@ deploy しなおし(immutable のため変更不可)。
 NEXT_PUBLIC_JPYC_FORWARDER_POLYGON=<FORWARDER_POLYGON>
 RELAYER_PRIVATE_KEY=<本番 relayer・POL 保有>           # server only
 KV_REST_API_URL / KV_REST_API_TOKEN=<本番 Upstash>     # mainnet 必須
-RELAY_MAX_GAS_COST_WEI=<§5 で算出>
+RELAY_MAX_GAS_COST_WEI=<§5 で算出・現行本番 200000000000000000=0.2 POL>
 RELAY_MAX_JPYC=<初期は小さく・例 5000 から段階引き上げ>
-NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=<2 等>
+NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=<recover モード時のみ・free(forwarder 未設定)では不要>
 ```
 
 - `RELAYER_PRIVATE_KEY` があると PROVIDER=self-host。Polygon + forwarder 設定で recover モードになる。
