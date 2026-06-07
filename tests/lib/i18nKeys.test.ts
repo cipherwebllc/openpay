@@ -954,6 +954,16 @@ describe('i18n: PayerReceipt keys (顧客向け電子レシート, ja/en parity)
       expect(v).not.toBe('');
     }
   });
+
+  it('SuccessOverlay 完了音トグルの aria-label (muteSound/unmuteSound) が ja/en に存在', () => {
+    for (const m of [ja, en]) {
+      for (const key of ['muteSound', 'unmuteSound'] as const) {
+        const v = (m.SuccessOverlay as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      }
+    }
+  });
 });
 
 describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => {

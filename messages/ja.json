@@ -707,7 +707,9 @@
     "viewLocalHistoryLink": "このブラウザの履歴を見る ↗",
     "viewReceiptsLink": "電子レシート / 支払い控えを見る ↗",
     "dismiss": "閉じる",
-    "dismissHelp": "店主が確認したら閉じてください"
+    "dismissHelp": "店主が確認したら閉じてください",
+    "muteSound": "完了音をオフにする",
+    "unmuteSound": "完了音をオンにする"
   },
   "NonCustodialNotice": {
     "shortTitle": "履歴はブロックチェーン上にあります",

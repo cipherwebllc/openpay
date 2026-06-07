@@ -31,6 +31,7 @@ import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
+import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
@@ -520,6 +521,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
+    // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
+    primeChimeAudio();
     if (isStandard) {
       standard.mutate({
         tokenAddress: deployment.address,

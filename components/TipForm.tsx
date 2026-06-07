@@ -22,6 +22,7 @@ import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
+import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
@@ -381,6 +382,8 @@ export function TipForm({ params }: { params: TipParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
+    // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
+    primeChimeAudio();
     // 送信時点の値を固定 (webhook はこのスナップショットを使い、後続の編集 / gasQuote
     // refetch による drift を排除する)。
     submittedRef.current = {

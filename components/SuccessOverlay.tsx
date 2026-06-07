@@ -7,7 +7,11 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { Volume2, VolumeX } from 'lucide-react';
 import { pad } from '@/lib/pad';
+import { isSuccessSoundEnabled } from '@/lib/soundPref';
+import { playSuccessChime } from '@/lib/successChime';
+import { useSuccessSoundPref } from '@/hooks/useSuccessSoundPref';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
 
@@ -40,12 +44,31 @@ export function SuccessOverlay({
   const t = useTranslations('SuccessOverlay');
   const [now, setNow] = useState(() => new Date());
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [soundOn, setSoundOn] = useSuccessSoundPref();
+
+  // 決済完了チャイム (PayPay の「ペイペイ！」音 相当)。overlay マウント時に 1 回だけ
+  // 鳴らす。有効判定は永続値を直接読む (toggle state の hydration を待たない)。
+  // 各 form の onSubmit で primeChimeAudio() 済なので iOS でも鳴る。
+  const chimedRef = useRef(false);
+  useEffect(() => {
+    if (chimedRef.current) return;
+    chimedRef.current = true;
+    if (isSuccessSoundEnabled()) playSuccessChime();
+  }, []);
 
   // 1 秒ごとに現在時刻を更新 (店主が「今支払った」と判断する時計)
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // 完了音 ON/OFF トグル。ON に切り替えた瞬間は user gesture 内なので、確認用に
+  // 1 回プレビュー再生する (「鳴る音」を体験させる)。
+  function toggleSound() {
+    const next = !soundOn;
+    setSoundOn(next);
+    if (next) playSuccessChime();
+  }
 
   // ESC で dismiss + dialog に focus (a11y)
   useEffect(() => {
@@ -73,6 +96,22 @@ export function SuccessOverlay({
       tabIndex={-1}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 overflow-y-auto bg-emerald-500 px-4 py-8 text-white"
     >
+      {/* 完了音 ON/OFF トグル (右上)。PayPay 風チャイムのミュート切替・localStorage 永続。 */}
+      <button
+        type="button"
+        onClick={toggleSound}
+        aria-pressed={soundOn}
+        aria-label={soundOn ? t('muteSound') : t('unmuteSound')}
+        title={soundOn ? t('muteSound') : t('unmuteSound')}
+        className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+      >
+        {soundOn ? (
+          <Volume2 className="h-5 w-5" aria-hidden />
+        ) : (
+          <VolumeX className="h-5 w-5" aria-hidden />
+        )}
+      </button>
+
       {/* 大きい ✓ + タイトル */}
       <div className="flex items-center gap-3">
         <span

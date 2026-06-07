@@ -707,7 +707,9 @@
     "viewLocalHistoryLink": "View history on this browser ↗",
     "viewReceiptsLink": "View payment receipts ↗",
     "dismiss": "Close",
-    "dismissHelp": "Close after the merchant has confirmed"
+    "dismissHelp": "Close after the merchant has confirmed",
+    "muteSound": "Mute completion sound",
+    "unmuteSound": "Enable completion sound"
   },
   "NonCustodialNotice": {
     "shortTitle": "Settlement lives on-chain",

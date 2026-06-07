@@ -249,3 +249,73 @@ describe('SuccessOverlay', () => {
     writeText.mockRestore();
   });
 });
+
+describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
+  const SOUND_KEY = 'openpay:success-sound';
+
+  beforeEach(() => {
+    // 既定 ON 状態から始める (前テストの永続値を持ち越さない)。
+    try {
+      window.localStorage.removeItem(SOUND_KEY);
+    } catch {
+      /* noop */
+    }
+  });
+
+  it('ja: 既定で音ON → 「完了音をオフにする」トグルを表示', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: '完了音をオフにする' }),
+    ).toBeInTheDocument();
+  });
+
+  it('クリックで OFF へ切替 → ラベルが「完了音をオンにする」+ localStorage に永続', async () => {
+    const user = userEvent.setup();
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        onDismiss={() => undefined}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: '完了音をオフにする' }));
+    expect(
+      screen.getByRole('button', { name: '完了音をオンにする' }),
+    ).toBeInTheDocument();
+    expect(window.localStorage.getItem(SOUND_KEY)).toBe('0');
+  });
+
+  it('永続値 OFF を初期反映 (mount 後に OFF ラベル)', () => {
+    window.localStorage.setItem(SOUND_KEY, '0');
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: '完了音をオンにする' }),
+    ).toBeInTheDocument();
+  });
+
+  it('en: トグルの aria-label が英訳 (Mute completion sound)', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        onDismiss={() => undefined}
+      />,
+      { locale: 'en' },
+    );
+    expect(
+      screen.getByRole('button', { name: 'Mute completion sound' }),
+    ).toBeInTheDocument();
+  });
+});

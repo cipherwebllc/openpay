@@ -31,6 +31,7 @@ import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
+import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
@@ -501,6 +502,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
+    // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
+    primeChimeAudio();
     if (isStandard) {
       // standard mode: EOA から merchant transfer + fee transfer の 2 件直列。
       // split は標準モードでは無効化されているため breakdown を直接使う。
