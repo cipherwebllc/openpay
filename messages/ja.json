@@ -822,7 +822,7 @@
   },
   "Footer": {
     "poweredBySoft": "ステーブルコイン決済技術を利用しています",
-    "poweredByTech": "ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "poweredByTech": "EIP-3009 · Circle Paymaster · CCTP V2 · ERC-4337 · ERC-7702 · Pimlico",
     "poweredByExpand": "技術詳細",
     "copyright": "© {year} {company}",
     "links": {

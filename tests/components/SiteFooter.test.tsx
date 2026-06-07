@@ -125,10 +125,13 @@ describe('SiteFooter', () => {
       );
       // 旧の生 powered-by 文字列は summary に出ない (展開 trigger としてのみ存在)
       expect(footer.textContent).toContain('技術詳細');
-      // 技術ラベル文字列は <details> 内に存在 (closed でも DOM にはある)
+      // 技術ラベル文字列は <details> 内に存在 (closed でも DOM にはある)。
+      // 現行アーキテクチャに更新済: 旧 Pimlico/permissionless.js 中心 →
+      // EIP-3009 (JPYC) / Circle Paymaster (USDC) / CCTP V2 (cross-chain) を前面に。
+      expect(footer.textContent).toContain('EIP-3009');
+      expect(footer.textContent).toContain('Circle Paymaster');
+      expect(footer.textContent).toContain('CCTP V2');
       expect(footer.textContent).toContain('ERC-4337');
-      expect(footer.textContent).toContain('Pimlico');
-      expect(footer.textContent).toContain('permissionless.js');
       expect(footer.textContent).toContain('ERC-7702');
     });
 

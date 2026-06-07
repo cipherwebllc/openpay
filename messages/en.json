@@ -822,7 +822,7 @@
   },
   "Footer": {
     "poweredBySoft": "Powered by stablecoin payment technology",
-    "poweredByTech": "ERC-4337 · Pimlico · permissionless.js · ERC-7702",
+    "poweredByTech": "EIP-3009 · Circle Paymaster · CCTP V2 · ERC-4337 · ERC-7702 · Pimlico",
     "poweredByExpand": "Technical details",
     "copyright": "© {year} {company}",
     "links": {
