@@ -1059,7 +1059,7 @@
     "intro": "{company} (the \"Company\") establishes this Privacy Policy (the \"Policy\") regarding the handling of personal information in connection with the blockchain payment service \"{service}\" (the \"Service\"), in compliance with the Act on the Protection of Personal Information of Japan (the \"APPI\") and related laws.",
     "section1": {
       "title": "1. Information We Collect",
-      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us; (5) on-chain transaction information generated or referenced through the Service (such as transaction hash, sender wallet address, recipient wallet address, supported token, supported chain, transfer amount, OpenPay service fee, payment mode, and payment status); (6) if the user grants camera permission on pages such as /scan for QR code reading, the camera video frames and the decoded QR string. Some of this information is publicly recorded on the blockchain and may not be deletable or hideable by the Company. We may use cookies or local storage, but currently do not assign cookie identifiers that directly identify individual users."
+      "body": "We collect the following information in connection with the Service: (1) blockchain wallet addresses that the Company observes when users connect their wallet to the Service; (2) server log information including browser information, IP address, referrer, access timestamps, and page navigation; (3) anonymized statistics collected by Vercel Analytics, such as page views, visitor country/region, and device type; (4) email address and inquiry content when users contact us; (5) on-chain transaction information generated or referenced through the Service (such as transaction hash, sender wallet address, recipient wallet address, supported token, supported chain, transfer amount, OpenPay service fee, payment mode, and payment status); (6) if the user grants camera permission on pages such as /scan for QR code reading, the camera video frames and the decoded QR string. Some of this information is publicly recorded on the blockchain and may not be deletable or hideable by the Company. To provide the Service's functionality, the Company may store in the user's browser local storage settings related to display and payments, transaction history, payment receipts, wallet connection state, and similar data. Such data is used within the client (the user's device) and is not transmitted to the Company's servers, nor used for cross-site behavioral tracking or advertising. The Company does not use tracking or advertising cookies. For features that involve sign-in (where used), the Company may use session cookies necessary to provide those features. The Company does not collect special-care-required personal information (such as race, creed, social status, medical history, or criminal record). The Company also does not carry out automated decision-making (including profiling) regarding users."
     },
     "section2": {
       "title": "2. Purposes of Use",
@@ -1073,16 +1073,20 @@
       "title": "4. Retention Period",
       "body": "We retain collected information only for the period necessary to fulfill the purposes of use. Server logs are deleted in sequence 90 days after collection. Inquiry records are deleted 3 years after the last correspondence. On-chain transaction records, by their nature, are permanently public outside our control, and we cannot delete them."
     },
+    "sectionSecurity": {
+      "title": "5. Security Measures for Personal Information",
+      "body": "To prevent the leakage, loss, or damage of acquired personal information and otherwise ensure its safe management, the Company implements necessary and appropriate security measures, including encryption of communications via SSL/TLS, management of access privileges, measures against unauthorized access, and necessary and appropriate supervision of service providers."
+    },
     "section5": {
-      "title": "5. Requests for Disclosure, Correction, and Suspension of Use",
-      "body": "Users may request disclosure, correction, addition, deletion, suspension of use, erasure, or suspension of third-party provision of their personal information held by us, pursuant to APPI Articles 33 through 35. For request procedures and fees, please contact us at the address shown in Section 6. We may require identity verification before responding."
+      "title": "6. Requests for Disclosure, Correction, and Suspension of Use",
+      "body": "Users may request disclosure, correction, addition, deletion, suspension of use, erasure, or suspension of third-party provision of their personal information held by us, pursuant to APPI Articles 33 through 35. For request procedures and fees, please contact us at the address shown in Section 7. We may require identity verification before responding."
     },
     "section6": {
-      "title": "6. Contact",
+      "title": "7. Contact",
       "body": "For inquiries regarding this Policy or requests under APPI: Operator: {company}. Address: {address}. Personal Information Manager: {representative}. Email: {email}."
     },
     "section7": {
-      "title": "7. Amendments to this Policy",
+      "title": "8. Amendments to this Policy",
       "body": "We may amend this Policy in response to changes in law, changes to the Service, or other necessary reasons. Amended Policies take effect when posted on the Service."
     },
     "legalNote": "The Japanese version of this Policy prevails. This English version is provided for reference only."
@@ -1093,7 +1097,7 @@
     "intro": "This Disclaimer sets out the risks of using the blockchain payment service \"{service}\" (the \"Service\") operated by {company} (the \"Company\") and the matters for which the Company assumes no responsibility. Please read this Disclaimer together with the Terms of Service before using the Service. OpenPay does not hold customer payments or merchant sales proceeds. The price of goods and similar amounts are transferred in full directly to the merchant's wallet. In Gasless Payment where the Company sponsors gas (e.g. JPYC payments), the Company bears the Network Fee in full and collects no equivalent from the user. Only the OpenPay service fee, if such a fee is introduced in the future, is transferred separately to a wallet designated by the Company.",
     "section1": {
       "title": "1. As-Is Provision",
-      "body": "The Service is provided \"as is.\" The Company makes no express or implied warranty as to the accuracy, completeness, usefulness, fitness for a particular purpose, continuous availability, freedom from errors or vulnerabilities, or absence of malicious code in the Service."
+      "body": "The Service is provided \"as is.\" The Company makes no express or implied warranty as to the accuracy, completeness, usefulness, fitness for a particular purpose, continuous availability, freedom from errors or vulnerabilities, or absence of malicious code in the Service. The Company is not liable for any losses caused by or related to technical vulnerabilities, bugs, or defects in the Service or in the smart contracts it uses (including ERC-4337-related contracts) or other blockchain technologies."
     },
     "section2": {
       "title": "2. Irreversibility of Blockchain Transactions",
@@ -1101,7 +1105,7 @@
     },
     "section3": {
       "title": "3. Third-Party Issued Tokens",
-      "body": "JPYC is an electronic payment instrument (a JPY-denominated stablecoin) issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act; USDC is a stablecoin issued by Circle Internet Financial, Inc. Each Supported Token is issued and operated by a third-party issuer independent of the Company. The price, liquidity, availability, technical soundness, financial condition of the issuer, and regulatory compliance of each token (including maintenance of issuer registration and performance of redemption obligations) are the responsibility of the respective issuer, not the Company."
+      "body": "JPYC is an electronic payment instrument (a JPY-denominated stablecoin) issued by JPYC Inc. as a funds transfer service provider registered under Japan's Payment Services Act; USDC is a stablecoin issued by Circle Internet Financial, Inc. Each Supported Token is issued and operated by a third-party issuer independent of the Company. The price, liquidity, availability, technical soundness, financial condition of the issuer, and regulatory compliance of each token (including maintenance of issuer registration and performance of redemption obligations) are the responsibility of the respective issuer, not the Company. Each token does not guarantee that it will maintain its peg (e.g., 1 JPYC = 1 JPY, 1 USDC = 1 USD); its value may fluctuate or deviate from that peg (de-peg) depending on the issuer's situation and market conditions."
     },
     "section4": {
       "title": "4. Network Fee Volatility",
@@ -1131,7 +1135,7 @@
     "intro": "This page is provided pursuant to Article 11 of the Specified Commercial Transaction Act of Japan and its enforcement regulations, disclosing business information of {company} (the \"Company\") concerning the blockchain payment service \"{service}\" (the \"Service\").",
     "rows": {
       "seller": {
-        "label": "Seller",
+        "label": "Business Operator (Service Provider)",
         "value": "{company} (Corporate Number: {corporateNumber})"
       },
       "manager": {
@@ -1176,11 +1180,11 @@
       },
       "paymentTiming": {
         "label": "Payment Timing and Method",
-        "value": "Payments through the Service are transferred on-chain directly from the Customer's wallet to the Merchant's designated wallet at the time each transaction is executed. In Gasless Payment where the Company sponsors gas (e.g. JPYC payments), the Company bears that Network Fee in full and no transfer is made to a wallet designated by the Company (and where the Customer pays gas in a Supported Token, e.g. the ERC20 Paymaster for USDC, that fee is paid to the Paymaster provider and no transfer is made to a wallet designated by the Company). The OpenPay service fee is currently 0%, and if introduced in the future it will be transferred from the user's wallet to a wallet designated by the Company. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable to Merchants. The Company does not issue separate invoices, hold funds in escrow, operate a prepaid charge system, or settle merchant sales."
+        "value": "Payments through the Service are transferred on-chain directly from the Customer's wallet to the Merchant's designated wallet at the time each transaction is executed. In Gasless Payment where the Company sponsors gas (e.g. JPYC payments), the Company bears that Network Fee in full and no transfer is made to a wallet designated by the Company (and where the Customer pays gas in a Supported Token, e.g. the ERC20 Paymaster for USDC, that fee is paid to the Paymaster provider and no transfer is made to a wallet designated by the Company). The OpenPay service fee is currently 0%, and if introduced in the future it will be transferred from the user's wallet to a wallet designated by the Company. The Company does not receive, hold, manage, or later settle the price of goods, service fees, or other sales proceeds payable to Merchants. The Company does not issue separate invoices, hold funds in escrow, operate a prepaid charge system, or settle merchant sales. The only payment method for the Service is on-chain transfer of Supported Tokens (such as JPYC / USDC); credit cards, bank transfers, cash, and other payment methods are not supported."
       },
       "returnPolicy": {
         "label": "Refunds and Cancellations",
-        "value": "Due to the technical nature of blockchain, finalized transfers (including transfers of the price of goods) cannot, in principle, be cancelled, refunded, or modified. The OpenPay service fee is consideration for use of the Service, including payment processing, gas sponsorship in Gasless Payment mode, and mitigation of network-fee volatility risk, and is, in principle, non-refundable after payment is completed (it is free during the alpha period). In Gasless Payment where the Company sponsors gas (e.g. JPYC payments), the Company bears that gas in full and collects no equivalent from the user, so no refund or difference settlement arises. Before submitting, users must verify the destination address, amount, supported token, supported chain, and payment mode. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope."
+        "value": "Due to the technical nature of blockchain, finalized transfers (including transfers of the price of goods) cannot, in principle, be cancelled, refunded, or modified. The OpenPay service fee is consideration for use of the Service, including payment processing, gas sponsorship in Gasless Payment mode, and mitigation of network-fee volatility risk, and is, in principle, non-refundable after payment is completed (it is free during the alpha period). In Gasless Payment where the Company sponsors gas (e.g. JPYC payments), the Company bears that gas in full and collects no equivalent from the user, so no refund or difference settlement arises. Before submitting, users must verify the destination address, amount, supported token, supported chain, and payment mode. If the Service is unusable due to a material defect, please contact us by email; we will investigate and respond within a reasonable scope. The Service is an alpha version provided \"as is,\" and the Company does not provide any special warranty (including warranty against defects) for the Service (see the Disclaimer and Terms of Service for details)."
       },
       "environment": {
         "label": "Required Environment",

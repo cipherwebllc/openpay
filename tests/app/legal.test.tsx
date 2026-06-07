@@ -118,6 +118,64 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toMatch(/Paymaster/);
       expect(sectionBody?.textContent).toMatch(/does not collect or receive/i);
     });
+
+    // 外部レビュー対応: Cookie/localStorage 正確化 + 要配慮個人情報 非取得 +
+    // プロファイリング非実施 (1節) + 安全管理措置 (新5節) + 番号繰下げ。
+    it('ja: 1節に localStorage 実態・要配慮非取得・プロファイリング非実施がある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const body = ja.Privacy.section1.body;
+      expect(body).toContain('ローカルストレージ');
+      // 「Cookie/localStorage を利用しません」という事実誤認を書いていないこと
+      expect(body).not.toMatch(/ローカルストレージを利用しません/);
+      expect(body).toContain('追跡または広告目的の Cookie を利用しません');
+      expect(body).toContain('要配慮個人情報');
+      expect(body).toContain('プロファイリング');
+      // カメラ開示 (i18nKeys.test の法的要件) が維持されていること
+      expect(body).toMatch(/カメラ/);
+    });
+
+    it('en: 1節に local storage / special-care info / profiling 文がある', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      const body = en.Privacy.section1.body;
+      expect(body).toMatch(/local storage/i);
+      expect(body).toMatch(/tracking or advertising cookies/i);
+      expect(body).toMatch(/special-care-required/i);
+      expect(body).toMatch(/profiling/i);
+    });
+
+    it('安全管理措置の節 (sectionSecurity) が ja/en に存在し SSL/TLS を含む', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Privacy.sectionSecurity.title).toContain('安全管理措置');
+      expect(ja.Privacy.sectionSecurity.body).toContain('SSL/TLS');
+      expect(en.Privacy.sectionSecurity.title).toMatch(/Security Measures/i);
+      expect(en.Privacy.sectionSecurity.body).toMatch(/SSL\/TLS/);
+    });
+
+    it('安全管理措置節 挿入で開示請求=6/問い合わせ=7/改定=8 に繰下げ済 (ja)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      expect(ja.Privacy.sectionSecurity.title).toMatch(/^5\./);
+      expect(ja.Privacy.section5.title).toMatch(/^6\./);
+      expect(ja.Privacy.section6.title).toMatch(/^7\./);
+      expect(ja.Privacy.section7.title).toMatch(/^8\./);
+      // section5 本文の相互参照 (お問い合わせ窓口) が renumber 後の「第7項」に追従
+      // (旧「第6項」のまま残ると参照ずれ・Codex 指摘)
+      expect(ja.Privacy.section5.body).toContain('第 7 項');
+      expect(ja.Privacy.section5.body).not.toContain('第 6 項');
+    });
+
+    it('en: section5 本文の相互参照が Section 7 に追従 (Section 6 は残らない)', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      expect(en.Privacy.section5.body).toMatch(/Section 7/);
+      expect(en.Privacy.section5.body).not.toMatch(/Section 6/);
+    });
+
+    it('安全管理措置の節が実際に描画される (ja, 見出し「5.」)', () => {
+      renderWithIntl(<PrivacyPage />, { locale: 'ja' });
+      expect(
+        screen.getByRole('heading', { level: 2, name: /個人情報の安全管理措置/ }),
+      ).toBeInTheDocument();
+    });
   });
 
   describe('Disclaimer (免責事項)', () => {
@@ -207,13 +265,13 @@ describe('Legal pages', () => {
   });
 
   describe('Tokutei (特商法表記)', () => {
-    it('ja: h1 と必須 row (販売事業者 / 所在地 / 役務の対価 / 返品) が render される', () => {
+    it('ja: h1 と必須 row (事業者 / 所在地 / 役務の対価 / 返品) が render される', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       expect(
         screen.getByRole('heading', { level: 1, name: '特定商取引法に基づく表記' }),
       ).toBeInTheDocument();
-      // 主要 row label が出ている
-      expect(screen.getByText('販売事業者')).toBeInTheDocument();
+      // 主要 row label が出ている (役務提供のため「販売事業者」→「事業者（役務提供事業者）」)
+      expect(screen.getByText('事業者（役務提供事業者）')).toBeInTheDocument();
       expect(screen.getByText('所在地')).toBeInTheDocument();
       expect(screen.getByText('電話番号')).toBeInTheDocument();
       expect(screen.getByText('役務の対価 (OpenPay 利用手数料)')).toBeInTheDocument();
@@ -823,6 +881,51 @@ describe('Legal pages', () => {
       expect(en.Tokutei.rows.additionalFees.value).toMatch(
         /ERC20 Paymaster for USDC[^.]*does not collect/,
       );
+    });
+  });
+
+  // 外部レビュー対応: 免責事項に脱ペッグ明記 (section3) と SC 脆弱性免責 (section1)。
+  describe('regression: 免責事項 脱ペッグ + SC脆弱性免責 (外部レビュー対応)', () => {
+    it('脱ペッグ明記が ja/en の Disclaimer section3 にある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Disclaimer.section3.body).toContain('脱ペッグ');
+      expect(en.Disclaimer.section3.body).toMatch(/de-peg/i);
+    });
+
+    it('スマートコントラクト脆弱性免責が ja/en の Disclaimer section1 にある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Disclaimer.section1.body).toContain('スマートコントラクト');
+      expect(ja.Disclaimer.section1.body).toContain('脆弱性');
+      expect(en.Disclaimer.section1.body).toMatch(/smart contract/i);
+      expect(en.Disclaimer.section1.body).toMatch(/vulnerabilit/i);
+    });
+  });
+
+  // 外部レビュー対応: 特商法 支払方法 wallet-only 明確化 + 事業者種精緻化 + 保証なし明記。
+  describe('regression: 特商法 支払方法/事業者種/保証 (外部レビュー対応)', () => {
+    it('事業者種が役務提供事業者に精緻化 (ja/en)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Tokutei.rows.seller.label).toContain('役務提供事業者');
+      expect(en.Tokutei.rows.seller.label).toMatch(/Service Provider/i);
+    });
+
+    it('支払方法 wallet-only (カード/振込/現金 非対応) が ja/en に明記', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Tokutei.rows.paymentTiming.value).toContain('オンチェーン送金のみ');
+      expect(ja.Tokutei.rows.paymentTiming.value).toContain('クレジットカード');
+      expect(en.Tokutei.rows.paymentTiming.value).toMatch(/credit cards/i);
+      expect(en.Tokutei.rows.paymentTiming.value).toMatch(/not supported/i);
+    });
+
+    it('返品欄に「特別な保証なし (現状有姿)」が ja/en に明記', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Tokutei.rows.returnPolicy.value).toContain('特別な保証');
+      expect(en.Tokutei.rows.returnPolicy.value).toMatch(/special warranty/i);
     });
   });
 });
