@@ -24,6 +24,14 @@ if (dsn) {
   Sentry.init({
     dsn,
     environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
+    // 注入ウォレット拡張 (MetaMask/Rabby/Coinbase) や WalletConnect/Coinbase SDK は
+    // 内部 promise を Error でない値 (undefined / [object Object] 等) で reject することがあり、
+    // それが onunhandledrejection でグローバルに漏れて "Non-Error promise rejection captured
+    // with value: ..." として上がる。スタックがアプリ内を指さず .catch でも塞げない非アクショ
+    // ナブルなノイズ (同族に Outlook SafeLink の "Object Not Found Matching Id" 等) なので、
+    // この family をまとめて drop してアラートを汚さない。自前コードは例外を必ず Error で
+    // 投げる (throw new Error(...)) ため、実シグナルの取りこぼしリスクは実質ゼロ。
+    ignoreErrors: [/Non-Error promise rejection captured/],
     tracesSampleRate: parseSampleRate(
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
       1.0,
