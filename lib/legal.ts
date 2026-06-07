@@ -26,10 +26,13 @@ export const LEGAL_ENTITY = {
   // (2026-05-29 改定: OpenPay 利用手数料を 0% 化 (取引額連動の % 手数料を撤廃) し、
   //   当時はガスレスのネットワーク手数料相当額を固定額で徴収する旨に改定していた。
   //   本 2026-06-05 改定でその徴収自体を廃止。)
-  termsEffectiveDate: '2026-06-05',
+  // 2026-06-07 改定: 「取引額連動の % 手数料は将来も取らない」という将来を縛る断定を撤回し、
+  //   「現在は 0%・将来の料金体系は検討中・変更時は事前周知し変更後の取引に適用」へ改める
+  //   (Terms 第3条/第5条・Disclaimer §7・特商法 役務の対価/支払時期・Landing 文言)。現在の無徴収は不変。
+  termsEffectiveDate: '2026-06-07',
   privacyEffectiveDate: '2026-05-16',
-  disclaimerEffectiveDate: '2026-06-05',
-  tokuteiEffectiveDate: '2026-06-05',
+  disclaimerEffectiveDate: '2026-06-07',
+  tokuteiEffectiveDate: '2026-06-07',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,

@@ -452,15 +452,15 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: JPYC ガス無料化で terms/tokutei/disclaimer は 2026-06-05、privacy は 2026-05-16 据置', () => {
-      // 2026-06-05: JPYC ガスレスのネットワーク手数料相当額の徴収を全廃し、当社が
-      // ガスを全額負担し利用者から相当額を一切徴収しない旨に Terms 第3条/第5条・
-      // Disclaimer 冒頭/第7条・特商法 (役務の対価/対価以外/支払時期/返品) を改定。
-      // 負担者選択 (顧客/店主) の記述も撤去。privacy は料金モデルに直接言及しないため
-      // 2026-05-16 据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-05');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-05');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-05');
+    it('effectiveDate: 手数料文言の将来留保化で terms/tokutei/disclaimer は 2026-06-07、privacy は 2026-05-16 据置', () => {
+      // 2026-06-05: JPYC ガス無料化 (全額負担・無徴収) の改定。
+      // 2026-06-07: 「取引額連動の % 手数料は将来も取らない」という将来を縛る断定を撤回し、
+      //   「現在は 0%・将来の料金体系は検討中・変更時は事前周知し変更後の取引に適用」へ改定
+      //   (Terms 第3条/第5条・Disclaimer §7・特商法 役務の対価/支払時期・Landing 文言)。
+      //   現在の無徴収 (0%) は不変。privacy は料金モデルに直接言及しないため 2026-05-16 据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-07');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-07');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-07');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-05-16');
     });
   });
