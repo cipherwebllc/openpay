@@ -146,6 +146,7 @@ export function QrGenerator() {
   const { copied, copy } = useCopyToClipboard();
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
   const qrRef = useRef<HTMLDivElement>(null);
+  const bottomBarRef = useRef<HTMLDivElement>(null);
   // 高度な設定 (payMode / gas / split) は default 閉じる。
   const [accordionOpen, setAccordionOpen] = useState(false);
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
@@ -310,6 +311,19 @@ export function QrGenerator() {
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const chain = chainForSlug(settings.chain);
+
+  // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部バーの子テキストを
+  // JS で書き換えても合成レイヤーが再ラスタライズされず古い表示が残ることがある (RegisterMode
+  // と同根)。表示金額/通貨/モードが変わるたび transform を 1 フレーム入れて再描画を強制する。
+  useEffect(() => {
+    const el = bottomBarRef.current;
+    if (!el) return;
+    el.style.transform = 'translateZ(0)';
+    const id = requestAnimationFrame(() => {
+      if (el) el.style.transform = '';
+    });
+    return () => cancelAnimationFrame(id);
+  }, [amount, mode, deployment.displaySymbol]);
   const qrFilename = useMemo(() => {
     const parts = [
       fileSafe(settings.storeName),
@@ -1192,7 +1206,10 @@ export function QrGenerator() {
           の上に重ねるため < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。
           lg は右サイドバー CTA を使うので非表示。payUrl 真のときのみ (Step3 と同じゲート)。 */}
       {payUrl && (
-        <div className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:bottom-0 lg:hidden print:hidden">
+        <div
+          ref={bottomBarRef}
+          className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.04)] md:bottom-0 lg:hidden print:hidden"
+        >
           <div className="min-w-0 flex-1">
             <div className="text-[11px] text-slate-400">
               {t('bottomAmountLabel')}
