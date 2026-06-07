@@ -29,10 +29,16 @@ export const LEGAL_ENTITY = {
   // 2026-06-07 改定: 「取引額連動の % 手数料は将来も取らない」という将来を縛る断定を撤回し、
   //   「現在は 0%・将来の料金体系は検討中・変更時は事前周知し変更後の取引に適用」へ改める
   //   (Terms 第3条/第5条・Disclaimer §7・特商法 役務の対価/支払時期・Landing 文言)。現在の無徴収は不変。
-  termsEffectiveDate: '2026-06-07',
-  privacyEffectiveDate: '2026-05-16',
-  disclaimerEffectiveDate: '2026-06-07',
-  tokuteiEffectiveDate: '2026-06-07',
+  // 2026-06-08 改定 (外部レビュー精査に基づく開示拡充・4文書): Terms (行為能力/未成年者
+  //   同意・違反時のサービス利用制限/提供停止【非カストディ前提】)、Privacy (Cookie/
+  //   localStorage の実態正確化・要配慮個人情報 非取得・プロファイリング非実施・安全管理
+  //   措置の節を新設し以降を繰下げ)、Disclaimer (脱ペッグ明記・スマートコントラクト脆弱性
+  //   免責の明示強化)、特商法 (支払方法 wallet-only 明確化・事業者種を役務提供事業者へ
+  //   精緻化・現状有姿/無保証の明記)。いずれも開示の明確化で利用者の一般の利益に適合。
+  termsEffectiveDate: '2026-06-08',
+  privacyEffectiveDate: '2026-06-08',
+  disclaimerEffectiveDate: '2026-06-08',
+  tokuteiEffectiveDate: '2026-06-08',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,

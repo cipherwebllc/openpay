@@ -510,16 +510,15 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: 手数料文言の将来留保化で terms/tokutei/disclaimer は 2026-06-07、privacy は 2026-05-16 据置', () => {
-      // 2026-06-05: JPYC ガス無料化 (全額負担・無徴収) の改定。
-      // 2026-06-07: 「取引額連動の % 手数料は将来も取らない」という将来を縛る断定を撤回し、
-      //   「現在は 0%・将来の料金体系は検討中・変更時は事前周知し変更後の取引に適用」へ改定
-      //   (Terms 第3条/第5条・Disclaimer §7・特商法 役務の対価/支払時期・Landing 文言)。
-      //   現在の無徴収 (0%) は不変。privacy は料金モデルに直接言及しないため 2026-05-16 据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-07');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-07');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-07');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-05-16');
+    it('effectiveDate: 外部レビュー精査の開示拡充で 4 文書とも 2026-06-08 に統一', () => {
+      // 2026-06-07: 手数料文言の将来留保化 (terms/tokutei/disclaimer)。privacy は当時据置。
+      // 2026-06-08: 外部レビュー精査に基づく開示拡充を 4 文書に反映 (Terms 行為能力/利用停止・
+      //   Privacy Cookie正確化/安全管理措置節・Disclaimer 脱ペッグ/SC脆弱性・特商法 支払方法/
+      //   事業者種/無保証)。実質的改定のため施行日 (特商法は最終更新日) を更新。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-08');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-08');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-08');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-06-08');
     });
   });
 
