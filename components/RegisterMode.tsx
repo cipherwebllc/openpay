@@ -78,6 +78,7 @@ export function RegisterMode({
   // レジの QR も即時表示せず「QRコードを表示する」→ 全画面モーダルで提示。
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const qrRef = useRef<HTMLDivElement>(null);
+  const totalBarRef = useRef<HTMLDivElement>(null);
 
   const effectiveReceiver = pickEffectiveAddress(settings.receiver, resolvedReceiver);
   const setReceiver = useCallback(
@@ -235,6 +236,20 @@ export function RegisterMode({
   const totalTax = lines.reduce((s, x) => s + (x.lineTax ?? 0), 0);
   const totalTaxRounded =
     Math.round(totalTax * 10 ** taxDec) / 10 ** taxDec;
+
+  // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部会計バーの
+  // 子テキストを JS で書き換えても合成レイヤーが再ラスタライズされず、合計が古いまま残る
+  // ことがある (スクロール等の別トリガーで初めて反映 = ユーザ報告「モバイルだけ合計反映が
+  // 遅い」)。合計が変わるたび transform を 1 フレームだけ入れてレイヤーの再描画を強制する。
+  useEffect(() => {
+    const el = totalBarRef.current;
+    if (!el) return;
+    el.style.transform = 'translateZ(0)';
+    const id = requestAnimationFrame(() => {
+      if (el) el.style.transform = '';
+    });
+    return () => cancelAnimationFrame(id);
+  }, [totalHuman, totalTaxRounded]);
 
   const checkoutUrl =
     hydrated && effectiveReceiver && origin && validItems.length > 0
@@ -574,7 +589,10 @@ export function RegisterMode({
       {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。
           グローバルの BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、
           < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。 */}
-      <div className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:bottom-0 lg:hidden">
+      <div
+        ref={totalBarRef}
+        className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.04)] md:bottom-0 lg:hidden"
+      >
         <div className="min-w-0 flex-1">
           <div className="text-[11px] text-slate-400">{t('total')}</div>
           <div className="truncate font-mono text-lg font-bold text-slate-900">

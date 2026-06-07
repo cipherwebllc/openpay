@@ -25,6 +25,9 @@ playwright-report/
 test-results/
 playwright/.cache/
 
+# デモ収録のスクラッチ出力 (raw webm 等)。最終アセットは public/demo に手で配置する。
+demo-artifacts/
+
 # Lighthouse CI
 .lighthouseci/
 
