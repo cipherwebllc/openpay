@@ -1020,7 +1020,7 @@
     },
     "article4": {
       "title": "Article 4 (Usage Environment)",
-      "body": "Users are responsible for preparing, at their own cost and risk, a compatible wallet, internet connection, token balance, and (when using Standard Payment (with Gas) mode or any other path where the Company does not sponsor gas) gas in the native token. Supported chains and tokens may be added, changed, or suspended at the Company's discretion without prior notice."
+      "body": "Users are responsible for preparing, at their own cost and risk, a compatible wallet, internet connection, token balance, and (when using Standard Payment (with Gas) mode or any other path where the Company does not sponsor gas) gas in the native token. Supported chains and tokens may be added, changed, or suspended at the Company's discretion without prior notice. In addition, users must have the legal capacity required to use the Service. Minors may use the Service only with the consent of a parent or other legal representative."
     },
     "article5": {
       "title": "Article 5 (Fees)",
@@ -1032,7 +1032,7 @@
     },
     "article7": {
       "title": "Article 7 (Prohibited Acts)",
-      "body": "Users must not: (1) violate laws or public order; (2) engage in money laundering, terrorism financing, fraud, or trade in drugs, weapons, or child sexual abuse material; (3) transact with persons or regions under international economic sanctions; (4) infringe the rights of the Company, other users, or third parties; (5) perform unauthorized access, excessive load, modification, or reverse engineering of the Service; (6) use the Service if affiliated with anti-social forces; or (7) engage in any other acts the Company deems inappropriate."
+      "body": "Users must not: (1) violate laws or public order; (2) engage in money laundering, terrorism financing, fraud, or trade in drugs, weapons, or child sexual abuse material; (3) transact with persons or regions under international economic sanctions; (4) infringe the rights of the Company, other users, or third parties; (5) perform unauthorized access, excessive load, modification, or reverse engineering of the Service; (6) use the Service if affiliated with anti-social forces; or (7) engage in any other acts the Company deems inappropriate. Where the Company reasonably determines that a user falls under any item of this Article, it may, without prior notice, restrict that user's use of the Service or suspend the Service in whole or in part. However, the Service is non-custodial, and the Company cannot access, restrict, or freeze users' wallets or their on-chain assets."
     },
     "article8": {
       "title": "Article 8 (Third-Party Services)",

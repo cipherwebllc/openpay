@@ -684,6 +684,45 @@ describe('Legal pages', () => {
   });
 
   // -------------------------------------------------------------------------
+  // 外部レビュー対応: (A) 行為能力・未成年者条項 (4条) と (B) 違反時の利用制限・
+  // 提供停止条項 (7条) を追加。(B) は非カストディ前提を崩さないよう「ウォレット/
+  // 資産にはアクセス・凍結できない」を明記する。文言が将来落ちないよう fence。
+  // -------------------------------------------------------------------------
+  describe('regression: 行為能力/未成年 (4条) + 利用制限/提供停止 (7条)', () => {
+    it('ja: 4条に行為能力・未成年者の法定代理人同意がある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const body = ja.Terms.article4.body;
+      expect(body).toContain('行為能力');
+      expect(body).toContain('未成年者');
+      expect(body).toContain('法定代理人');
+    });
+
+    it('en: 4条に capacity / minor / legal representative がある', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      const body = en.Terms.article4.body;
+      expect(body).toMatch(/capacity/i);
+      expect(body).toMatch(/minor/i);
+      expect(body).toMatch(/legal representative/i);
+    });
+
+    it('ja: 7条に利用制限・提供停止 + 非カストディ (凍結不能) がある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const body = ja.Terms.article7.body;
+      expect(body).toContain('提供を停止');
+      expect(body).toContain('ノンカストディアル');
+      expect(body).toContain('凍結');
+    });
+
+    it('en: 7条に suspend + non-custodial (cannot freeze) がある', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      const body = en.Terms.article7.body;
+      expect(body).toMatch(/suspend/i);
+      expect(body).toMatch(/non-custodial/i);
+      expect(body).toMatch(/freeze/i);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // C8: 法務 prose (Terms art2(6)/art3/art5(2)・特商法) は「JPYC=sponsorship
   // (当社がガスを肩代わり・無徴収) / USDC=erc20 (顧客が Paymaster に支払い)」を
   // ハードコードしている (paymasterMode は徴収有無ではなく paymaster 種別を表す)。
