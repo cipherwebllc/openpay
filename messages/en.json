@@ -834,7 +834,9 @@
       "tokutei": "Business Disclosure"
     },
     "sourceLink": "Source on GitHub",
-    "xLink": "OpenPay on X"
+    "xLink": "OpenPay on X",
+    "discordLink": "OpenPay on Discord",
+    "noteLink": "note (OpenPay Magazine)"
   },
   "History": {
     "pageTitle": "Transaction history",

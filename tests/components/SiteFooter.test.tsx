@@ -73,6 +73,38 @@ describe('SiteFooter', () => {
     expect(link.getAttribute('href')).toBe('https://x.com/openpay_jp');
   });
 
+  it('Discord 公式チャンネルへのリンクが aria-label 付きで露出 (ja)', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'ja' });
+    const link = screen.getByRole('link', { name: 'OpenPay の Discord' });
+    expect(link.getAttribute('href')).toBe('https://discord.gg/Cfywb3aNWg');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('en locale で Discord link aria-label が "OpenPay on Discord" として render', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'en' });
+    const link = screen.getByRole('link', { name: 'OpenPay on Discord' });
+    expect(link.getAttribute('href')).toBe('https://discord.gg/Cfywb3aNWg');
+  });
+
+  it('note (OpenPay マガジン) へのテキストリンクが露出 (ja)', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'ja' });
+    const link = screen.getByRole('link', { name: 'note (OpenPay マガジン)' });
+    expect(link.getAttribute('href')).toBe(
+      'https://note.com/masia02/m/mf28261a21eb1',
+    );
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('en locale で note link が "note (OpenPay Magazine)" として render', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'en' });
+    const link = screen.getByRole('link', { name: 'note (OpenPay Magazine)' });
+    expect(link.getAttribute('href')).toBe(
+      'https://note.com/masia02/m/mf28261a21eb1',
+    );
+  });
+
   it('print:hidden が footer 要素に付与されている (QR ポスター印刷時非表示)', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     const footer = screen.getByRole('contentinfo');
