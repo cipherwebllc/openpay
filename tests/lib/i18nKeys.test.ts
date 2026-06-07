@@ -623,9 +623,8 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'useCase5Title',
     'useCase5Body',
     'useCase5ImageAlt',
-    // Features の Gasless 技術詳細補足
-    'featuresGaslessTech',
-    // Trust の技術スタック補足
+    // 技術詳細は Trust「オープン技術と透明性」の技術スタックに一本化
+    // (旧 featuresGaslessTech は撤去)。
     'trustTechStack',
   ] as const;
 
