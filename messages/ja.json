@@ -139,6 +139,7 @@
     "categoryBridgeDescription": "チェーン間で USDC 等を移動する bridge プロトコル。",
     "categoryResource": "Resource (探索・分析)",
     "categoryResourceDescription": "ブロックエクスプローラ・統計・リサーチサイト。tx hash 検証等に。",
+    "affiliateAd": "広告",
     "badge": {
       "jp-only": "日本居住者",
       "global": "Global",

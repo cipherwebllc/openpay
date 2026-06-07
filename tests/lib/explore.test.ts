@@ -67,6 +67,22 @@ describe('lib/explore: EXPLORE_ENTRIES の整合性', () => {
       }
     }
   });
+
+  it('affiliate が指定されている場合は boolean (型 fence)', () => {
+    for (const e of EXPLORE_ENTRIES) {
+      if (e.affiliate === undefined) continue;
+      expect(typeof e.affiliate).toBe('boolean');
+    }
+  });
+
+  it('GMOコイン (gmo-coin) が exchange に affiliate=true で存在し A8 計測リンクを指す', () => {
+    // 景表法対応の「広告」開示は affiliate=true が UI 側のトリガ。データ側で固定する。
+    const gmo = EXPLORE_ENTRIES.find((e) => e.id === 'gmo-coin');
+    expect(gmo).toBeDefined();
+    expect(gmo?.category).toBe('exchange');
+    expect(gmo?.affiliate).toBe(true);
+    expect(gmo?.url).toMatch(/^https:\/\/px\.a8\.net\//);
+  });
 });
 
 describe('lib/explore: entriesByCategory', () => {

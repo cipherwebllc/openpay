@@ -2,6 +2,9 @@
 
 // /explore の 1 entry card。target=_blank + rel=noopener (外部リンク必須)。
 // description は locale で出し分け、badge / token chip は補助的に小さく表示。
+// affiliate=true の entry は成果報酬リンク (広告) なので、景表法 (ステマ規制) 準拠の
+// 「広告」開示チップを出し、rel に sponsored (有料リンク明示) を付す。表記は /history の
+// AccountingAffiliates と統一 (affiliateAd)。
 
 import { useLocale, useTranslations } from 'next-intl';
 import type { Locale } from '@/i18n';
@@ -22,16 +25,27 @@ export function ExploreEntryCard({ entry }: { entry: Entry }) {
     <a
       href={entry.url}
       target="_blank"
-      rel="noopener noreferrer"
+      // affiliate は有料リンク → sponsored を明示 (Google 推奨)。A8 規定の nofollow も併記。
+      rel={
+        entry.affiliate
+          ? 'sponsored nofollow noopener noreferrer'
+          : 'noopener noreferrer'
+      }
       className="group flex h-full flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand/40 hover:shadow"
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900 group-hover:text-brand-dark">
           {entry.name} <span className="font-normal text-slate-400">↗</span>
         </h3>
-        {entry.badges && entry.badges.length > 0 && (
-          <div className="flex flex-shrink-0 gap-1">
-            {entry.badges.map((b) => (
+        {(entry.affiliate || (entry.badges && entry.badges.length > 0)) && (
+          <div className="flex flex-shrink-0 items-center gap-1">
+            {/* 景表法 (ステマ規制): 広告である旨を明示。badge より先頭に出して目立たせる。 */}
+            {entry.affiliate && (
+              <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                {t('affiliateAd')}
+              </span>
+            )}
+            {entry.badges?.map((b) => (
               <span
                 key={b}
                 className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${BADGE_TONE[b]}`}

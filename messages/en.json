@@ -139,6 +139,7 @@
     "categoryBridgeDescription": "Protocols that move USDC and other tokens between chains.",
     "categoryResource": "Resources (explore & analyze)",
     "categoryResourceDescription": "Block explorers, analytics and research sites — useful for verifying tx hashes.",
+    "affiliateAd": "Ad",
     "badge": {
       "jp-only": "Japan only",
       "global": "Global",

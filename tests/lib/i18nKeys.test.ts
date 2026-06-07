@@ -477,6 +477,8 @@ describe('i18n: Explore 名前空間 (ja/en parity)', () => {
     'categoryBridgeDescription',
     'categoryResource',
     'categoryResourceDescription',
+    // affiliate entry (GMOコイン等) の景表法「広告」開示ラベル。
+    'affiliateAd',
   ] as const;
   const EXPLORE_BADGE_KEYS = ['jp-only', 'global', 'beta'] as const;
 

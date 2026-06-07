@@ -29,6 +29,12 @@ export type ExploreEntry = {
   badges?: readonly ExploreBadge[];
   /** 関連 token (該当する場合)。chip 表示で利用。 */
   tokens?: readonly TokenSymbol[];
+  /**
+   * アフィリエイトリンク (成果報酬を得る広告リンク) か。true のとき UI は
+   * 景表法 (ステマ規制) 準拠の「広告」開示チップを出し、rel に sponsored を付す。
+   * 既定 (undefined/false) は通常の curated 紹介リンク (非広告)。
+   */
+  affiliate?: boolean;
 };
 
 export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
@@ -79,6 +85,19 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
       en: 'A major Japanese crypto exchange operated by Monex Group.',
     },
     badges: ['jp-only'],
+  },
+  {
+    id: 'gmo-coin',
+    name: 'GMOコイン',
+    // A8.net 計測リンク (アフィリエイト)。成果は redirect の a8mat クッキーで成立。
+    url: 'https://px.a8.net/svt/ejp?a8mat=2ZL5EQ+2DQLAI+3VI8+5YJRM',
+    category: 'exchange',
+    description: {
+      ja: 'GMOインターネットグループが運営する国内大手暗号資産取引所。日本円での暗号資産売買・送金に対応。',
+      en: 'A major Japanese crypto exchange operated by GMO Internet Group, supporting JPY trading and transfers of crypto assets.',
+    },
+    badges: ['jp-only'],
+    affiliate: true,
   },
   {
     id: 'coinbase',
