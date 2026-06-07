@@ -926,5 +926,70 @@ describe('Legal pages', () => {
       expect(ja.Tokutei.rows.returnPolicy.value).toContain('特別な保証');
       expect(en.Tokutei.rows.returnPolicy.value).toMatch(/special warranty/i);
     });
+
+    it('商品紛争は店主↔顧客で解決・当社は非当事者 (ja/en)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Tokutei.rows.returnPolicy.value).toContain('店主と顧客の間で直接解決');
+      expect(ja.Tokutei.rows.returnPolicy.value).toContain('当事者ではなく');
+      expect(en.Tokutei.rows.returnPolicy.value).toMatch(/between the merchant and the customer/i);
+      expect(en.Tokutei.rows.returnPolicy.value).toMatch(/not a party/i);
+    });
+  });
+
+  // 外部レビュー対応: 9条(2) 賠償上限を取引金額連動に + 9条(3) ガスレス一時停止/遅延の免責。
+  describe('regression: 利用規約 9条 賠償上限/ガスレス免責 (外部レビュー対応)', () => {
+    it('9条(2): 賠償上限が取引金額連動 (最も高い額) に (ja/en)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Terms.article9.body).toContain('取引金額');
+      expect(ja.Terms.article9.body).toContain('最も高い額');
+      // {amount} の floor は維持
+      expect(ja.Terms.article9.body).toContain('{amount}');
+      expect(en.Terms.article9.body).toMatch(/transaction amount of the specific payment/i);
+      expect(en.Terms.article9.body).toMatch(/greatest of/i);
+    });
+
+    it('9条(3): ガスレス決済機能の一時停止/遅延の免責が明示 (ja/en)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Terms.article9.body).toContain('ガスレス決済機能の一時的な停止');
+      expect(en.Terms.article9.body).toMatch(/gasless payment functionality/i);
+    });
+  });
+
+  // 外部レビュー対応 (Privacy/免責 第2巡): localStorage 削除導線・Sentry 漏洩時措置・
+  // SC アップグレード/移行免責・免責と規約の相互補完。
+  describe('regression: Privacy(localStorage削除/Sentry) + 免責(SC移行/相互補完)', () => {
+    it('P4: localStorage 削除コントロールが ja/en の Privacy section1 に', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Privacy.section1.body).toContain('任意に削除');
+      expect(en.Privacy.section1.body).toMatch(/delete this client-side data/i);
+    });
+
+    it('P3: Sentry 漏洩時の削除/マスクが ja/en の Privacy section2 に', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Privacy.section2.body).toContain('マスク');
+      expect(en.Privacy.section2.body).toMatch(/deletion or masking/i);
+    });
+
+    it('D3: SC アップグレード/移行免責が ja/en の Disclaimer section1 に', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Disclaimer.section1.body).toContain('移行');
+      expect(ja.Disclaimer.section1.body).toContain('切替え');
+      expect(en.Disclaimer.section1.body).toMatch(/migrate/i);
+      expect(en.Disclaimer.section1.body).toMatch(/switchover/i);
+    });
+
+    it('D1: 免責と利用規約は相互補完 (旧「利用規約が優先」を撤去)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Disclaimer.legalNote).toContain('相互に補完');
+      expect(ja.Disclaimer.legalNote).not.toContain('利用規約が優先');
+      expect(en.Disclaimer.legalNote).toMatch(/complement each other/i);
+    });
   });
 });
