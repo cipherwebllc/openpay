@@ -987,6 +987,7 @@
   "UsageFee": {
     "title": "OpenPay usage fee",
     "intro": "Your monthly fee for using OpenPay (including gasless payments, where neither your shop nor your customers pay gas). It's based on 1% of the amount you received via gasless payments, billed the following month. Receiving payments (the core feature) is free.",
+    "receiverMismatchNote": "This receiving address differs from your connected wallet. The gasless OpenPay fee is billed to this receiving address; to view and pay it, sign in with this address.",
     "dueBannerTitle": "Your OpenPay fee is due",
     "dueBannerBody": "Last month's fee of {fee} JPYC is unpaid. From {date}, gasless payments and history view will be paused. Please pay soon.",
     "dueBannerCta": "Pay now",

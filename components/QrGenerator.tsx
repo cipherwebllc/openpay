@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { env } from '@/lib/env';
 import type { Address } from 'viem';
 import {
   ChevronRight,
@@ -158,6 +159,7 @@ export function QrGenerator() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
 
   const t = useTranslations('QrGenerator');
+  const tFee = useTranslations('UsageFee');
   // 管理番号 (レシート番号) はトランザクション固有なので settings に永続せず local state。
   const [receiptNo, setReceiptNo] = useState('');
 
@@ -779,6 +781,15 @@ export function QrGenerator() {
                 !isLikelyName(settings.receiver) && (
                   <p className="mt-1 text-xs text-red-600">
                     {t('addressInvalid')}
+                  </p>
+                )}
+              {/* a1 利用料の注記: 受取先が接続ウォレットと違うとき、ガスレス利用料の請求/支払いは
+                  その受取先アドレスでサインインする必要がある (請求は着金先に紐づくため)。a1 点灯時のみ。 */}
+              {env.enableUsageFee &&
+                autofill.canUseConnected &&
+                effectiveReceiver && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    {tFee('receiverMismatchNote')}
                   </p>
                 )}
               {/* 受取先確定後に Explorer の /address/ へ link (チェーン上が source of
