@@ -1017,6 +1017,28 @@
     "paid": "Thank you for your payment.",
     "note": "Receiving payments (core) is free. The fee is for using OpenPay (including gasless payments, where OpenPay fronts the gas); if unpaid, only gasless relaying is paused (customers can still pay with their own gas)."
   },
+  "AdminBilling": {
+    "title": "OpenPay fee revenue (operator)",
+    "intro": "Review a1 OpenPay fee payments and export raw-data CSV for your accountant / freee import (operator only).",
+    "connectRequired": "Please connect your wallet.",
+    "mismatch": "Your signed-in wallet doesn't match the connected wallet. Please switch.",
+    "signInStatement": "Sign in to review OpenPay fee revenue.",
+    "signIn": "Sign in to view revenue",
+    "signingIn": "Signing in…",
+    "signInError": "Sign-in failed. Please try again.",
+    "loading": "Loading revenue…",
+    "forbidden": "This wallet does not have admin access.",
+    "loadError": "Failed to load revenue.",
+    "total": "Total revenue",
+    "paymentsCount": "{count} payments",
+    "downloadCsv": "Download revenue CSV (freee / accountant)",
+    "reconcileTitle": "Reconciliation for {period} (billed vs paid)",
+    "reconcileEmpty": "No billed merchants in this period.",
+    "paid": "Paid",
+    "unpaid": "Unpaid",
+    "payments": "Payments",
+    "noPayments": "No payments yet."
+  },
   "FreeeSync": {
     "title": "freee sync (auto-journaling)",
     "signInRequired": "Sign in with your wallet to connect freee (\"Sign in\" at top right).",

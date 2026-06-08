@@ -201,4 +201,19 @@ describe('a1 統合: meter → invoice → gate → settle → fee-current (全�
     expect(b.replay).toBe(true);
     expect(b.expiresAt).toBe(a.expiresAt);
   });
+
+  it('settle 成功で収益台帳 (billing:revenue) に1件記録・replay で二重計上しない', async () => {
+    await recordRelayedVolume({ chainId: AMOY, merchant: MERCHANT, value: 10_000n * JPYC, nowMs: tsInDue });
+    await settlePOST(settleReq({ txHash: TX, chainId: AMOY }));
+    const ledger = () => store.lists.get('billing:revenue') ?? [];
+    expect(ledger()).toHaveLength(1);
+    const ev = JSON.parse(ledger()[0]);
+    expect(ev.v).toBe((100n * JPYC).toString()); // 10,000 × 1%
+    expect(ev.p).toBe(duePeriod);
+    expect(ev.h).toBe(TX);
+    expect(ev.m).toBe(MERCHANT.toLowerCase());
+    // replay (同 txHash 再清算) → 台帳に二重計上しない (初回成功時のみ記録)。
+    await settlePOST(settleReq({ txHash: TX, chainId: AMOY }));
+    expect(ledger()).toHaveLength(1);
+  });
 });

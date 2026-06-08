@@ -1017,6 +1017,28 @@
     "paid": "お支払いありがとうございます。",
     "note": "決済の受け取り（コア機能）は無料です。利用料は OpenPay（ガスを立て替えるガスレス決済を含む）のご利用に対するもので、未払いの場合はガスレス中継のみ停止します（お客様はご自身のガスで決済を継続できます）。"
   },
+  "AdminBilling": {
+    "title": "OpenPay 利用料 収益（運営）",
+    "intro": "a1 OpenPay 利用料の入金を確認し、税理士へ渡す/freee へ取り込むための生データCSVを出力します（運営専用）。",
+    "connectRequired": "ウォレットを接続してください。",
+    "mismatch": "ログイン中のウォレットと接続中のウォレットが一致しません。接続を切り替えてください。",
+    "signInStatement": "OpenPay 利用料の収益確認のためにサインインします。",
+    "signIn": "サインインして収益を確認",
+    "signingIn": "サインイン中…",
+    "signInError": "サインインに失敗しました。もう一度お試しください。",
+    "loading": "収益情報を読み込み中…",
+    "forbidden": "このウォレットには管理者権限がありません。",
+    "loadError": "収益情報の取得に失敗しました。",
+    "total": "累計収益",
+    "paymentsCount": "{count} 件の入金",
+    "downloadCsv": "収益CSVをダウンロード（freee/税理士用）",
+    "reconcileTitle": "{period} 分の支払い照合（請求 vs 入金）",
+    "reconcileEmpty": "この期間に請求対象の店主はいません。",
+    "paid": "入金済み",
+    "unpaid": "未入金",
+    "payments": "入金一覧",
+    "noPayments": "まだ入金はありません。"
+  },
   "FreeeSync": {
     "title": "freee 連携 (自動仕訳)",
     "signInRequired": "freee 連携にはウォレットでのログインが必要です（右上の「ログイン (署名)」）。",

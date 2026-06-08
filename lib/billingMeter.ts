@@ -20,6 +20,7 @@ import {
   kvLlen,
   kvLtrim,
   kvExpire,
+  kvSet,
   isKvConfigured,
 } from './kv';
 import { logger } from './logger';
@@ -56,6 +57,20 @@ export function meterKey(period: string, merchant: Address): string {
   return `meter:${period}:${merchant.toLowerCase()}`;
 }
 
+// 期間内に中継実績がある店主の索引 (admin 照合用)。KV に SCAN が無いため自前で持つ。
+const merchantIndexKey = (period: string): string => `billing:merchants:${period}`;
+// その (period, merchant) を索引に既に入れたかの nx ガード (毎中継 push しないため)。
+const merchantSeenKey = (period: string, merchant: Address): string =>
+  `billing:midx:${period}:${merchant.toLowerCase()}`;
+
+// 期間 P で中継実績のある店主アドレス (lowercase・重複排除) を返す。admin reconciliation 用。
+export async function getMeteredMerchants(period: string): Promise<string[]> {
+  if (!isKvConfigured()) return [];
+  const r = await kvLrange(merchantIndexKey(period), 0, -1);
+  if (!r.ok) return [];
+  return [...new Set(r.value.map((s) => s.toLowerCase()))];
+}
+
 // relay 成功時に呼ぶ。失敗しても決済応答は壊さない (呼出側で握り潰す前提)。KV 障害時は
 // 記録欠落 = undercount となるが、overcharge は起こさない (fail-open・honest)。
 export async function recordRelayedVolume(input: {
@@ -89,6 +104,21 @@ export async function recordRelayedVolume(input: {
   }
   // 最新書込から TTL を張り直す (自然失効)。
   await kvExpire(key, METER_RETENTION_SEC);
+
+  // admin 照合用の店主索引: その (period, merchant) 初回のみ索引へ追加 (nx ガードで毎中継 push しない)。
+  // 索引は補助なので失敗しても課金/決済に影響させない (try/catch)。
+  try {
+    const seen = await kvSet(merchantSeenKey(period, input.merchant), '1', {
+      nx: true,
+      ttlSec: METER_RETENTION_SEC,
+    });
+    if (seen.ok && seen.value !== null) {
+      await kvLpush(merchantIndexKey(period), input.merchant.toLowerCase());
+      await kvExpire(merchantIndexKey(period), METER_RETENTION_SEC);
+    }
+  } catch {
+    // 索引欠落は reconciliation の取りこぼしになるだけ (課金根拠=meter 本体は無傷)
+  }
   // 異常膨張ガード: 上限超過なら古い側 (LPUSH の末尾) を捨てる。silent にせず log で開示。
   if (r.value > MAX_EVENTS_PER_PERIOD) {
     logger.warn('billing.meter.capped', {

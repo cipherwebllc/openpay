@@ -10,6 +10,7 @@ import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
 import { grantFeeCurrent } from '@/lib/feeCurrent';
 import { loadUsageInvoice } from '@/lib/billingMeter';
+import { recordFeeRevenue } from '@/lib/feeRevenue';
 import { previousPeriod, feeCoverageThrough } from '@/lib/feeGate';
 import { verifyJpycFeeOnChain } from '@/lib/feeVerify';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
@@ -232,6 +233,16 @@ export async function POST(req: Request): Promise<NextResponse> {
         reason: promote.reason,
       });
     }
+    // 収益台帳に入金を記録 (admin 収益確認/freee CSV/照合 用)。初回成功時のみここに到達する
+    // (replay は上の claim 分岐で早期 return)。台帳書込失敗は決済を壊さない (内部で握り潰し)。
+    await recordFeeRevenue({
+      merchant: session.address,
+      period,
+      feeWei: invoice.feeWei,
+      chainId,
+      txHash,
+      paidAtMs: Date.now(),
+    });
     logger.info('billing.settle.verified', {
       wallet: session.address,
       chainId,
