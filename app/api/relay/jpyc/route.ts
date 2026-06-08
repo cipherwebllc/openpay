@@ -43,6 +43,8 @@ import {
   isKvConfigured,
 } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import { recordRelayedVolume } from '@/lib/billingMeter';
+import { isGaslessRelayBlocked } from '@/lib/feeGate';
 import { resolveDeployment } from '@/lib/tokens';
 import {
   relayJpycAuthorization,
@@ -466,6 +468,9 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // forwarder が設定された chain は recover モード (gas 相当額を JPYC 回収・self-host 限定)。
   // 無ければ free モード (Phase A・直接 transferWithAuthorization)。
+  // ⚠️ recover (per-tx ガス回収) と a1 月額 OpenPay 利用料 (NEXT_PUBLIC_ENABLE_BILLING) は **排他**:
+  // 両方有効にすると二重課金 + recover 経路が利用料ゲート/メーターを迂回する。a1 を点灯する chain では
+  // forwarder を設定しない (= free モード固定)。詳細は docs/plans/merchant-gasless-fee-a1.md (S5/P3)。
   const recoverMode =
     PROVIDER === 'self-host' &&
     chainId in SUPPORTED_CHAINS &&
@@ -529,6 +534,19 @@ async function handleFree(
     validBefore: BigInt(raw.validBefore),
     nonce: raw.nonce as Hex,
   };
+
+  // 利用料支払い (店主→FEE_RECEIVER) かどうか。関所ゲート除外 + メーター除外で共用する。
+  const feeRecv = feeReceiverFor(chainId);
+  const isFeePayment =
+    feeRecv !== null && auth.to.toLowerCase() === feeRecv.toLowerCase();
+
+  // OpenPay 利用料 関所ゲート (S5): billing 点灯中、利用料が未払い (前月請求あり・猶予超過) の店主は
+  // ガスレス中継を停止する。顧客は standard モード (自分でガス負担) で無料のまま決済できる。
+  // billing OFF / アルファ bypass / 利用料支払い自体 は遮断しない。KV 障害時は fail-open。
+  if (await isGaslessRelayBlocked(auth.to, isFeePayment)) {
+    return NextResponse.json({ ok: false, error: 'fee_required' }, { status: 402 });
+  }
+
   const supported = chainId in SUPPORTED_CHAINS;
   const common = {
     nowSec: () => Math.floor(Date.now() / 1000),
@@ -571,6 +589,28 @@ async function handleFree(
     { chainId, auth, signature: raw.signature as Hex, rateLimitKeys: [auth.from, ipPrefix] },
     deps,
   );
+  // OpenPay 利用料メーター (S1): 中継成功した gasless 決済の店主別出来高をサーバ権威で記録する
+  // (将来の月次利用料 a1 の課金根拠)。merchant=auth.to / value=auth.value。点灯前から貯める
+  // 設計で NEXT_PUBLIC_ENABLE_BILLING に依存しない。失敗しても決済応答は壊さない (undercount=honest)。
+  // 除外: 店主が利用料を FEE_RECEIVER へ支払う tx を「売上出来高」として誤計上しない (isFeePayment 共用)。
+  if (result.kind === 'success') {
+    if (!isFeePayment) {
+      try {
+        await recordRelayedVolume({
+          chainId,
+          merchant: auth.to,
+          value: auth.value,
+          nowMs: Date.now(),
+          txHash: result.txHash,
+        });
+      } catch (e) {
+        logger.warn('billing.meter.record_failed', {
+          chainId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+  }
   return respond(result, chainId);
 }
 
