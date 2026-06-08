@@ -29,6 +29,7 @@ import { useMarketRates } from '@/hooks/useMarketRates';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useBillingInvoice } from '@/hooks/useBillingInvoice';
 import { NonCustodialNotice } from './NonCustodialNotice';
+import { BillingDueBanner } from './BillingDueBanner';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
 import { LedgerPaidRow } from './LedgerPaidRow';
@@ -172,6 +173,9 @@ export function HistoryView() {
         </div>
 
         <NonCustodialNotice variant="full" />
+
+        {/* 予告バナー: 利用料が未払いで猶予中のときだけ非ブロッキングで告知 (延滞後はゲートが引き継ぐ)。 */}
+        <BillingDueBanner />
 
         {hydrated && hasEntries && (
           <p className="text-[11px] text-slate-500">

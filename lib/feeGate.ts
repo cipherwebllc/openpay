@@ -41,6 +41,17 @@ export function feeCoverageThrough(paidPeriod: string): number {
   return Date.UTC(y, m + 1, 1) + RELAY_GATE_GRACE_DAYS * DAY_MS;
 }
 
+// 当月の猶予が終わり延滞遮断が始まる瞬間 (ms・UTC)。day=(grace+1) の 00:00 UTC。
+// 予告バナー (BillingDueBanner) が「この時刻以降ガスレス/履歴が止まる」と告知するのに使う。
+// shouldBlockGaslessRelay の `dayOfMonthUtc <= graceDays` 条件と整合 (day grace+1 から遮断)。
+export function graceEndsAt(nowMs: number): number {
+  const d = new Date(nowMs);
+  return (
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) +
+    RELAY_GATE_GRACE_DAYS * DAY_MS
+  );
+}
+
 // ガスレス中継を遮断すべきか (純関数・判定の単一ソース)。
 export function shouldBlockGaslessRelay(input: {
   enabled: boolean; // billing 点灯

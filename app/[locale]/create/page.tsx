@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
+import { BillingDueBanner } from '@/components/BillingDueBanner';
 import { MarketRates } from '@/components/MarketRates';
 import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
@@ -26,6 +27,7 @@ export default function CreatePage() {
 
   return (
     <AppShell>
+      <BillingDueBanner />
       <div className="mb-4">
         <MarketRates />
       </div>

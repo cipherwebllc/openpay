@@ -8,7 +8,11 @@ import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
 import { loadUsageInvoice, meterPeriod } from '@/lib/billingMeter';
 import { getFeeStatus } from '@/lib/feeCurrent';
-import { previousPeriod, isGaslessRelayBlocked } from '@/lib/feeGate';
+import {
+  previousPeriod,
+  isGaslessRelayBlocked,
+  graceEndsAt,
+} from '@/lib/feeGate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,6 +68,7 @@ export async function GET(): Promise<NextResponse> {
     lastPaidPeriod: fee.lastPaidPeriod,
     bypass: fee.bypass,
     delinquent,
+    graceEndsAt: graceEndsAt(nowMs), // 当月の遮断開始時刻 (予告バナーの「○○以降停止」用)
     due,
     current,
   });

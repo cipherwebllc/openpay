@@ -27,6 +27,7 @@ vi.mock('@/hooks/useBillingInvoice', () => ({
       lastPaidPeriod: null,
       bypass: false,
       delinquent: true, // ← 延滞
+      graceEndsAt: Date.UTC(2026, 6, 8),
       due: {
         period: '2026-05',
         count: 3,
