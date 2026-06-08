@@ -20,6 +20,7 @@ export type BillingInvoiceData = {
   expiresAt: number | null;
   lastPaidPeriod: string | null;
   bypass: boolean;
+  delinquent: boolean; // 前月請求あり+未払い+猶予超過 (履歴ぼかし+CSVロックの単一ソース)
   due: BillingInvoiceLine; // 前月 (清算対象)
   current: BillingInvoiceLine; // 当月これまで (informational)
 };

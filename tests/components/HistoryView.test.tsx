@@ -19,17 +19,14 @@ vi.mock('@/hooks/useMarketRates', () => ({
 vi.mock('@/components/FreeeSyncPanel', () => ({
   FreeeSyncPanel: () => null,
 }));
-// 履歴ゲート (billing) は既定 OFF で inert だが、HistoryView が siwe/entitlement hook を
-// 呼ぶため boundary mock (wagmi/React Query 境界)。BillingPaywall も stub。ゲート挙動
-// (billing ON) は専用 test で検証。
+// a1 延滞ゲート (履歴ぼかし + CSV ロック) は既定 OFF/未ログインで inert だが、HistoryView が
+// siwe / useBillingInvoice (React Query) を呼ぶため boundary mock。未ログイン → feeGated=false で
+// 閲覧フル開放。延滞時のぼかし挙動は OpenPayFeePanel / billing-integration 専用 test で検証。
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({ isSignedIn: false, mismatch: false }),
 }));
-vi.mock('@/hooks/useEntitlement', () => ({
-  useEntitlement: () => ({ data: undefined }),
-}));
-vi.mock('@/components/BillingPaywall', () => ({
-  BillingPaywall: () => null,
+vi.mock('@/hooks/useBillingInvoice', () => ({
+  useBillingInvoice: () => ({ data: undefined }),
 }));
 
 import { HistoryView } from '@/components/HistoryView';

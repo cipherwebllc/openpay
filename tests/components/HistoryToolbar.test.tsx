@@ -90,7 +90,7 @@ describe('HistoryToolbar', () => {
     expect(screen.getByText('状態：')).toBeInTheDocument();
   });
 
-  it('csvLocked=true → CSV系3ボタンを無効化 + 利用権ノートを表示 (閲覧は無料)', () => {
+  it('csvLocked=true → CSV系3ボタンを無効化 + 利用料未払いノートを表示', () => {
     renderToolbar({ entries: [entry()], csvLocked: true });
     expect(
       (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
@@ -104,7 +104,7 @@ describe('HistoryToolbar', () => {
       (screen.getByRole('button', { name: '会計明細CSV' }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    expect(screen.getByText(/年額の利用権が必要/)).toBeInTheDocument();
+    expect(screen.getByText(/会計CSVのダウンロードを一時的に制限/)).toBeInTheDocument();
   });
 
   it('csvLocked=false (取引あり) → CSV系ボタン有効 + ノート非表示', () => {
@@ -113,7 +113,7 @@ describe('HistoryToolbar', () => {
       (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
-    expect(screen.queryByText(/年額の利用権が必要/)).toBeNull();
+    expect(screen.queryByText(/会計CSVのダウンロードを一時的に制限/)).toBeNull();
   });
 
   it('状態フィルタの「差し戻し」pill は専門用語補足の title ツールチップを持つ', () => {

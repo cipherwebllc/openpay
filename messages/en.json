@@ -924,7 +924,10 @@
     "accountingFormatYayoiNative": "Yayoi desktop (native, Shift_JIS)",
     "exportAccountingCsv": "Export accounting CSV",
     "accountingIncomeOnlyNote": "The accounting CSV exports successful sales (income) only. Account titles and tax categories can be remapped during import.",
-    "csvLockedNote": "CSV downloads require an annual plan. Use the panel below to unlock (viewing your history is free).",
+    "csvLockedNote": "Your previous month's OpenPay fee is unpaid, so accounting CSV downloads are temporarily restricted. Paying unlocks them.",
+    "feeGateTitle": "Pay your OpenPay fee to view",
+    "feeGateBody": "Your previous month's OpenPay fee is unpaid, so history view and accounting CSV are temporarily restricted. Paying unlocks them (you can still receive payments for free).",
+    "feeGateCta": "Pay the fee",
     "accountingRateUnavailable": "FX rate unavailable, so USDC transactions without a fixed JPY price can't be converted to yen. Please retry once the rate loads.",
     "accountingNoRows": "No sales (successful income) to export.",
     "accountingTooManyRows": "Can't export more than {max} rows. Please narrow by period.",
@@ -983,7 +986,7 @@
   },
   "UsageFee": {
     "title": "OpenPay usage fee",
-    "intro": "Monthly usage fee for OpenPay's gasless payments (so neither your shop nor your customers pay gas). You pay the previous month's amount based on relayed volume. Receiving payments (the core feature) is free.",
+    "intro": "Your monthly fee for using OpenPay (including gasless payments, where neither your shop nor your customers pay gas). It's based on 1% of the amount you received via gasless payments, billed the following month. Receiving payments (the core feature) is free.",
     "misconfigured": "Payments are temporarily unavailable (receiver not configured). Please try again later.",
     "connectRequired": "Please connect your wallet.",
     "mismatch": "Your signed-in wallet doesn't match the connected wallet. Please switch.",
@@ -1008,7 +1011,7 @@
     "retrySettle": "Retry confirmation",
     "settleError": "Confirmation failed ({reason}). Please retry (no need to pay again).",
     "paid": "Thank you for your payment.",
-    "note": "Receiving payments (core) is free. The fee is for the value of gasless relaying; if unpaid, only gasless relaying is paused (customers can still pay with their own gas)."
+    "note": "Receiving payments (core) is free. The fee is for using OpenPay (including gasless payments, where OpenPay fronts the gas); if unpaid, only gasless relaying is paused (customers can still pay with their own gas)."
   },
   "FreeeSync": {
     "title": "freee sync (auto-journaling)",

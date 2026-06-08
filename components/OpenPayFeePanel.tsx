@@ -2,7 +2,7 @@
 
 // OpenPay 利用料 (a1) の店主向け支払いパネル。SIWE ログイン → インボイス表示 (前月分=清算対象 +
 // 当月これまで) → JPYC をガスレス (EIP-3009 署名のみ・店主は native gas 不要) で FEE_RECEIVER へ送金 →
-// /api/billing/settle で on-chain 照合 → fee-current 付与。NEXT_PUBLIC_ENABLE_BILLING ON のときのみ
+// /api/billing/settle で on-chain 照合 → fee-current 付与。NEXT_PUBLIC_ENABLE_USAGE_FEE ON のときのみ
 // 親が描画する。アルファ (bypass) 中は「無料」を表示し支払いを出さない。
 // 設計: docs/plans/merchant-gasless-fee-a1.md (S6)。
 //

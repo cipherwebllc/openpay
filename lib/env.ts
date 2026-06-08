@@ -333,17 +333,11 @@ export const env = {
   enableFreeeSync:
     process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === 'true',
-  // 旧 Phase B「利用権 tier」(basic=履歴CSV DL ゲート / pro=freee) の有効化フラグ。**既定 OFF**。
-  // OFF の間は /history の CSV ペイウォール (BillingPaywall) も /api/fee/verify も出ず挙動不変。
-  // ⚠️ a1 OpenPay 利用料 (出来高連動・別系統) とは**別フラグ** (enableUsageFee)。両者は独立に点灯でき、
-  //   同時に点灯すると二重課金になるため通常はどちらか一方。本番点灯は flag ON + ALPHA_ENTITLEMENT_BYPASS=0。
-  enableBilling:
-    process.env.NEXT_PUBLIC_ENABLE_BILLING === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_BILLING === 'true',
-  // a1 OpenPay 利用料 (月次・出来高 1%・gasless relay 関所ゲート + 利用料清算) の有効化フラグ。
-  // **既定 OFF**。OFF の間は relay 関所も /api/billing/* も OpenPayFeePanel も inert (メーター記録は
-  // BILLING_METER_DISABLED で別管理・既定 ON)。本命の課金モデル。点灯 = flag ON + ALPHA_ENTITLEMENT_BYPASS=0
-  // + OPENPAY_USAGE_FEE_START_PERIOD 設定。旧 enableBilling (CSV/freee tier) とは独立。
+  // a1 OpenPay 利用料 (月次・出来高 1%・gasless relay 関所ゲート + 利用料清算 + /history 延滞ぼかし/
+  // CSV ロック) の有効化フラグ。**既定 OFF**。OFF の間は relay 関所も /api/billing/* も OpenPayFeePanel も
+  // /history ゲートも inert (メーター記録は BILLING_METER_DISABLED で別管理・既定 ON)。本命の課金モデル。
+  // 点灯 = flag ON + ALPHA_ENTITLEMENT_BYPASS=0 + OPENPAY_USAGE_FEE_START_PERIOD 設定。
+  // 注: 旧 NEXT_PUBLIC_ENABLE_BILLING (¥4,980/年 CSV tier) は a1 への一本化で退役済 (2026-06-09)。
   enableUsageFee:
     process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === 'true',

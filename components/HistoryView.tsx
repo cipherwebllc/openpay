@@ -7,7 +7,8 @@
 // filtered を導出 → list・summary・toolbar(両 CSV) に渡す ("見えるもの = 書き出すもの")。
 
 import { useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useTranslations, useLocale } from 'next-intl';
 import { env } from '@/lib/env';
 import { HISTORY_MAX_ENTRIES, removeHistoryEntry } from '@/lib/history';
 import {
@@ -22,14 +23,12 @@ import {
   ledgerAssetCounts,
   ledgerDirectionCounts,
 } from '@/lib/ledger';
-import { tierAtLeast } from '@/lib/billing';
 import { useHistory } from '@/hooks/useHistory';
 import { usePayerReceipts } from '@/hooks/usePayerReceipts';
 import { useMarketRates } from '@/hooks/useMarketRates';
 import { useSiweSession } from '@/hooks/useSiweSession';
-import { useEntitlement } from '@/hooks/useEntitlement';
+import { useBillingInvoice } from '@/hooks/useBillingInvoice';
 import { NonCustodialNotice } from './NonCustodialNotice';
-import { BillingPaywall } from './BillingPaywall';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
 import { LedgerPaidRow } from './LedgerPaidRow';
@@ -40,6 +39,7 @@ import { AccountingAffiliates } from './AccountingAffiliates';
 
 export function HistoryView() {
   const t = useTranslations('History');
+  const locale = useLocale();
   const { entries, hydrated: historyHydrated } = useHistory();
   const { receipts, hydrated: receiptsHydrated } = usePayerReceipts();
   const hydrated = historyHydrated && receiptsHydrated;
@@ -74,39 +74,22 @@ export function HistoryView() {
 
   const hasEntries = entries.length > 0 || receipts.length > 0;
 
-  // CSV ダウンロードゲート (basic 利用権): billing 有効時のみ。履歴の**閲覧は無料**で、
-  // CSV ダウンロードのみ利用権が要る。未ログイン or basic 未満なら CSV をロックし、閲覧を
-  // 妨げない位置に利用料 paywall を出す (soft-gate・回避可)。bypass(アルファ) は全開放。
-  // **fail-closed**: basic 利用権を確実に持つと確認できない限りロックする (未ログイン・読込中・
-  // 取得失敗・未付与は全てロック)。有料機能なので「読込中はチラつき回避で開ける」(fail-open) より
-  // 安全側に倒す — 確認待ちの一瞬で未払いダウンロードを許さない。
-  const billingActive = env.enableBilling;
+  // OpenPay 利用料 (a1) の **延滞ゲート**: a1 点灯中、店主が前月分の利用料を延滞している
+  // (前月に請求あり + 未払い + 月初猶予超過) ときだけ、履歴をぼかし + 会計CSVをロックする。
+  // soft-gate (生tx はエクスプローラで見える・回避可) で、本当の関所はサーバ側 relay ゲート。
+  // **fail-open に倒す**: 延滞が**確定**したときだけ締める。未ログイン・読込中・未延滞・a1 OFF・
+  // bypass(アルファ) は全て解放 — 履歴閲覧は原則無料で、確定した延滞店だけ締めてリテンションを守る。
+  // (判定は /api/billing/invoice の delinquent = relay ゲートと同一のサーバ権威ロジック。)
+  const usageFeeActive = env.enableUsageFee;
   const { isSignedIn } = useSiweSession();
-  const entitlement = useEntitlement(isSignedIn && billingActive);
-  const entitledBasic = entitlement.data
-    ? entitlement.data.bypass || tierAtLeast(entitlement.data.tier, 'basic')
-    : false;
-  const csvLocked = billingActive && !entitledBasic;
+  const invoice = useBillingInvoice(isSignedIn && usageFeeActive);
+  const feeGated =
+    usageFeeActive && isSignedIn && invoice.data?.delinquent === true;
+  const csvLocked = feeGated;
 
-  // 整形表示・CSV の「データ部」。閲覧は常時可能で、CSV ダウンロードだけ csvLocked でロックする。
-  // freee 連携パネルは**無料機能**なのでゲート外 (下で別途描画・basic 未払いでも使える)。
-  const dataSections = (
+  // 集計 + 一覧 (= 整形表示の「データ部」)。延滞時は blur + overlay でぼかし、CSV は csvLocked。
+  const summaryAndList = (
     <>
-      <HistoryToolbar
-        entries={receivedFiltered}
-        filters={filters}
-        onFiltersChange={setFilters}
-        counts={counts}
-        directionCounts={directionCounts}
-        usdcJpy={usdcJpy}
-        csvLocked={csvLocked}
-      />
-      {/* CSV ロック時のみ、閲覧を妨げない位置に利用料 paywall (年額) を出す。 */}
-      {csvLocked && (
-        <div className="mx-auto w-full max-w-md">
-          <BillingPaywall requiredTier="basic" />
-        </div>
-      )}
       <HistorySummary summary={summary} />
       {directionCounts.out > 0 && (
         <p className="text-[11px] text-slate-400">
@@ -131,6 +114,51 @@ export function HistoryView() {
             ) : null,
           )}
         </ul>
+      )}
+    </>
+  );
+
+  // 整形表示・CSV の「データ部」。閲覧は原則無料で、延滞 (feeGated) のときだけ CSV ロック +
+  // 一覧/集計をぼかして利用料の支払い (/billing) へ誘導する。freee 連携パネルは無料機能で
+  // ゲート外 (下で別途描画・延滞でも使える = freee 有料アプリ規約の「対価必須」状態を作らない)。
+  const dataSections = (
+    <>
+      <HistoryToolbar
+        entries={receivedFiltered}
+        filters={filters}
+        onFiltersChange={setFilters}
+        counts={counts}
+        directionCounts={directionCounts}
+        usdcJpy={usdcJpy}
+        csvLocked={csvLocked}
+      />
+      {feeGated ? (
+        <div className="relative">
+          <div
+            className="pointer-events-none select-none space-y-4 blur-sm"
+            aria-hidden
+          >
+            {summaryAndList}
+          </div>
+          <div className="absolute inset-0 z-10 flex items-start justify-center p-4">
+            <div className="mt-8 w-full max-w-sm rounded-xl border border-amber-300 bg-white/95 p-4 text-center shadow-sm">
+              <p className="text-sm font-semibold text-slate-900">
+                {t('feeGateTitle')}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                {t('feeGateBody')}
+              </p>
+              <Link
+                href={`/${locale}/billing`}
+                className="mt-3 inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                {t('feeGateCta')}
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : (
+        summaryAndList
       )}
     </>
   );

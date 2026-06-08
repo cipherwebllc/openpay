@@ -10,7 +10,7 @@
 // list + JS 合算を採る。副産物として件数と per-tx 内訳 (UI 表示用) も得られる。
 // 月 × 店主でキーを分け、~13 か月 TTL で自然失効 (年次請求 + 監査の余裕)。
 //
-// **本メーターは NEXT_PUBLIC_ENABLE_BILLING に依存しない** (点灯前の 6 月アルファから volume を
+// **本メーターは NEXT_PUBLIC_ENABLE_USAGE_FEE に依存しない** (点灯前の 6 月アルファから volume を
 // 貯め始めるため・記録していない過去分には後から課金できない)。課金 (徴収) 側だけが flag で gate。
 
 import type { Address, Hex } from 'viem';

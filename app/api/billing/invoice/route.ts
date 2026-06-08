@@ -8,7 +8,7 @@ import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
 import { loadUsageInvoice, meterPeriod } from '@/lib/billingMeter';
 import { getFeeStatus } from '@/lib/feeCurrent';
-import { previousPeriod } from '@/lib/feeGate';
+import { previousPeriod, isGaslessRelayBlocked } from '@/lib/feeGate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +52,10 @@ export async function GET(): Promise<NextResponse> {
   const fee = await getFeeStatus(session.address, nowMs);
   const due = await invoiceFor(previousPeriod(nowMs), session.address);
   const current = await invoiceFor(meterPeriod(nowMs), session.address);
+  // 延滞 (前月請求あり + 未払い + 月初猶予超過) か。relay 関所ゲートと同一の権威判定を再利用する
+  // (isFeePayment=false)。店主 UI が「ガスレス停止 + 履歴/CSV 制限」を出すかの単一ソース。
+  // a1 OFF / bypass / fee-current のときは false。
+  const delinquent = await isGaslessRelayBlocked(session.address, false, nowMs);
 
   return NextResponse.json({
     ok: true,
@@ -59,6 +63,7 @@ export async function GET(): Promise<NextResponse> {
     expiresAt: fee.expiresAt,
     lastPaidPeriod: fee.lastPaidPeriod,
     bypass: fee.bypass,
+    delinquent,
     due,
     current,
   });

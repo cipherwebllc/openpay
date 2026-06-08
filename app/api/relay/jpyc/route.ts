@@ -468,7 +468,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // forwarder が設定された chain は recover モード (gas 相当額を JPYC 回収・self-host 限定)。
   // 無ければ free モード (Phase A・直接 transferWithAuthorization)。
-  // ⚠️ recover (per-tx ガス回収) と a1 月額 OpenPay 利用料 (NEXT_PUBLIC_ENABLE_BILLING) は **排他**:
+  // ⚠️ recover (per-tx ガス回収) と a1 月額 OpenPay 利用料 (NEXT_PUBLIC_ENABLE_USAGE_FEE) は **排他**:
   // 両方有効にすると二重課金 + recover 経路が利用料ゲート/メーターを迂回する。a1 を点灯する chain では
   // forwarder を設定しない (= free モード固定)。詳細は docs/plans/merchant-gasless-fee-a1.md (S5/P3)。
   const recoverMode =
@@ -591,7 +591,7 @@ async function handleFree(
   );
   // OpenPay 利用料メーター (S1): 中継成功した gasless 決済の店主別出来高をサーバ権威で記録する
   // (将来の月次利用料 a1 の課金根拠)。merchant=auth.to / value=auth.value。点灯前から貯める
-  // 設計で NEXT_PUBLIC_ENABLE_BILLING に依存しない。失敗しても決済応答は壊さない (undercount=honest)。
+  // 設計で NEXT_PUBLIC_ENABLE_USAGE_FEE に依存しない。失敗しても決済応答は壊さない (undercount=honest)。
   // 除外: 店主が利用料を FEE_RECEIVER へ支払う tx を「売上出来高」として誤計上しない (isFeePayment 共用)。
   if (result.kind === 'success') {
     if (!isFeePayment) {
