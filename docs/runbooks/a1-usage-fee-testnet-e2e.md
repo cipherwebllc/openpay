@@ -20,10 +20,11 @@
 ```
 NEXT_PUBLIC_ENABLE_USAGE_FEE=1   # ★a1 専用フラグ。旧 CSV ゲートの NEXT_PUBLIC_ENABLE_BILLING とは別物。a1 だけ点灯するならこちらを 1・ENABLE_BILLING は 0 のまま (両方 1 にすると CSV年額 4,980 と二重課金)
 ALPHA_ENTITLEMENT_BYPASS=0
-OPENPAY_USAGE_FEE_START_PERIOD=2020-01   # ★テストはこの過去日付で固定する。意味=「2020-01 以降の全取引が 1% 対象」。
-# 【なぜ当月(2026-06)ではダメか】清算(Phase3)も関所(Phase5)も必ず【前月】を課金/判定する。今 6月に実行すると
-#   前月=2026-05。start を当月 2026-06 にすると前月 2026-05 が「開始前=0%」扱いになり、清算は nothingDue・関所は
-#   遮断せず → Phase3/5 がテストできない。過去日付で全期間 1% にしておくのが最も確実 (自動テストも 2020-01 を使用)。
+OPENPAY_USAGE_FEE_START_PERIOD=2026-05   # ★テスト値。意味=「2026年5月分(=前月)以降が 1% 対象」。
+# 【なぜ前月(2026-05)か】清算(Phase3)も関所(Phase5)も必ず【前月】を課金/判定する(後払い=前月分を翌月請求)。
+#   今 6月に実行すると前月=2026-05。start を当月 2026-06 にすると前月 2026-05 が「開始前=0%」扱いで、清算は
+#   nothingDue・関所は遮断せず → Phase3/5 がテストできない。なので「前月」を指す 2026-05 を入れる(=「前月から課金」と読める)。
+#   ※ 別の月に実行するなら「その月の前月」を入れる。迷うなら過去日付 2020-01 (=全期間1%) でも確実に動く(自動テストはこれ)。
 # 【本番 go-live では別】本番はここを実際の開始月 2026-07 にする (7月の取引から 1%・8/1 に初回徴収)。テスト専用の値。
 OPENPAY_USAGE_FEE_BPS=100                # 1% (既定)
 NEXT_PUBLIC_FEE_RECEIVER_ADDRESS=<testnet の OpenPay 受領アドレス>   # burn(0x…dEaD) 以外
@@ -91,9 +92,12 @@ NEXT_PUBLIC_POLYGON_AMOY_RPC_URL=<Amoy RPC>
 1. **前月シード** (Upstash console。前月=2026-05・10,000 JPYC → 利用料 100 JPYC。`<merchant小文字>` は MERCHANT アドレスを全部小文字にしたもの):
    ```
    LPUSH meter:2026-05:0xあなたのmerchantアドレス小文字 {"v":"10000000000000000000000","c":80002,"t":1778803200000}
+   LPUSH billing:merchants:2026-05 0xあなたのmerchantアドレス小文字
    ```
    (2026-05 = 前月。`v` は 10,000 JPYC = `node -e "console.log((10000n*10n**18n).toString())"`。`t` は参考値で
-    計上月には影響しない — 計上月はキーの `2026-05` で決まる。)
+    計上月には影響しない — 計上月はキーの `2026-05` で決まる。**2 行目の `billing:merchants:2026-05` は admin 照合
+    [請求 vs 入金] 用の店主索引** — 実リレーなら自動で入るが、手シード時は手動で入れないと /admin/billing の照合に
+    この店主が出ない。収益台帳自体は清算で別途記録されるので 2 行目を忘れても収益額・入金一覧には影響しない。)
 2. /billing を再読込 → 「2026-05 分: 1 件 / 10,000 JPYC × 1% / 利用料 **100 JPYC**」+「100 JPYC を支払う」ボタン。
 3. ボタン押下 → MERCHANT が **ガスレス署名のみ** (native gas 不要) → relayer が `MERCHANT→FEE_RECEIVER` を broadcast → settle が **実 receipt を照合** → fee-current 付与 → 「お支払いありがとうございます」。
 4. **検証**:
@@ -102,6 +106,11 @@ NEXT_PUBLIC_POLYGON_AMOY_RPC_URL=<Amoy RPC>
      (`1783468800000` = 前月 2026-05 の 2 か月後の月初 2026-07-01 + 猶予 7 日 = **2026-07-08 00:00 UTC**)。
    - /billing が「お支払い済みです（有効期限 …）」表示。
    - **利用料支払いはメーターに計上されない**: `LLEN meter:2026-06:<feeReceiver小文字>` → 0 (当月キー・FEE_RECEIVER 宛除外)。
+   - **収益台帳**: `LLEN billing:revenue` → 1 (settle 成功で 1 件記録)。
+5. **admin 収益ビュー検証** (運営側): 別ウォレット (= `ADMIN_WALLETS` に入れた弊社 wallet) を接続し `/admin/billing` を開く →
+   SIWE → ダッシュボードに「累計収益 100 JPYC・入金 1 件」、照合に MERCHANT が「**入金済み**」、CSV ダウンロードで
+   1 行 (100 JPYC) を確認。非 admin wallet では「権限がありません」。
+   ※ env に `ADMIN_WALLETS=<弊社 wallet>` を設定し再起動しておくこと (未設定だと全員 403)。
 
 ## Phase 4 — 冪等性 (実 KV nx)
 

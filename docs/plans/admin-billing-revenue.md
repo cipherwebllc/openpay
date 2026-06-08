@@ -123,6 +123,10 @@ go-live して実際に徴収が始まると、自社の売上計上・残高照
 - 店主索引は relay hot-path に nx 1回追加 (Phase2 採用時のみ)。
 - crypto 収入の会計/税務は本 CSV では保証しない (利便ツール・専門家確認前提)。
 
+## 将来 TODO (収益が出てから・ユーザ要望 2026-06-09)
+- **毎月の収益推移グラフ**: admin ダッシュボードに byPaymentMonth (入金月別) を折れ線/棒で表示。データは
+  `summarizeRevenue().byPaymentMonth` で既に集計済み → 描画 (recharts 等) を足すだけ。収益 0 の現状は後回し。
+
 ## 実装ステップ案 (確認後)
 - **Phase 1 (収益確認 + CSV)**: 台帳記録(settle) + `lib/feeRevenue`/`feeRevenueCsv` + `adminAuth` + admin API + admin ページ
   (collected のみ) + env + i18n + tests。← ユーザの中核要望を満たす最小。
