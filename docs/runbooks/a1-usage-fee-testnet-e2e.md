@@ -158,3 +158,34 @@ NEXT_PUBLIC_POLYGON_AMOY_RPC_URL=<Amoy RPC>
 - **UTC 期間境界**: 深夜 JST の決済は計上月が前後 (UTC 月初 = JST 9:00 が境界)。
 - **relayer POL 残高**: 枯渇すると relay 失敗 (顧客決済・利用料支払いの両方が止まる)。
 - これらが通って初めて本番点灯 (mainnet env + S7 開示改訂の同時適用)。
+
+## 本番化 検証状況 (2026-06-09・正直な棚卸し)
+
+a1 は本番 LIVE (env 点灯済) だが、検証の「深さ」は項目で差がある。
+**CI/コードレベルで検証済 ✅** と **運用レベルで未確認/要ユーザ確認 ⚠️** を分けて明記する。
+
+### ✅ CI/コードで検証済 (証拠あり)
+- 全 3973 vitest green (実コードパス・モックは hook/fetch 境界のみ)。
+- 本番ビルド (`npm run build`) 成功・typecheck・lint クリーン。
+- `vitest` は devDependencies のみ = 本番バンドル非同梱 (npm audit critical は test 専用)。
+- 依存 pin (package-lock) + npm audit 全件 triage (`docs/npm-audit-triage.md`)。
+- money-path のエラーは loud (settle は HTTP 4xx/5xx + `billing.*` ログ・meter 失敗は
+  非ブロッキングで `billing.meter.record_failed` ログ)。秘密は env 外部化 (.env.local は gitignore)。
+- Sentry アラート tag が実 emit 文字列と一致することを source 走査テストで恒久 fence
+  (`tests/scripts/setup-sentry-alerts.test.ts`・bad tag 注入で fail することを実証済)。
+
+### ⚠️ 運用レベルで未確認 / 要ユーザ確認 (Claude は権限外)
+- **Sentry catch-all アラート「OpenPay billing failures」が enabled で実発火するか** — 未確認
+  (test event での発火確認が必要)。per-event script 規則は未実行。
+- **本番 env の実値** — `NEXT_PUBLIC_ENABLE_USAGE_FEE=1` / `ALPHA_ENTITLEMENT_BYPASS=0` /
+  `OPENPAY_USAGE_FEE_START_PERIOD=2026-07` / `FEE_RECEIVER` 設定 / `NEXT_PUBLIC_NETWORK_ENV=mainnet`
+  が実際にセットされているか目視確認。**NETWORK_ENV が unknown だと Sentry アラートが
+  別 env を向き監視が静かに無効化する**。
+- **Vercel 最新デプロイの green** — ローカル build 成功は確認済だが Vercel 実デプロイは未確認。
+- **ロールバック (env-flip → redeploy) の実動** — フラグの存在は確認済だが end-to-end 未実行。
+
+### 🔮 本質的に未証明 (初回まで検証不能)
+- **実 mainnet の課金 (settle)** — testnet E2E のみ検証済。7月利用分の初回 settle (8月) が
+  実 JPYC で想定通り (検証/付与/収益記録/冪等) 動くかは初回まで未証明。初回だけ実機監視する。
+- **想定負荷下の実測性能** — 設計は非ブロッキング + KV bounded (AbortSignal/maxDuration) だが、
+  合成ロードテスト基盤は未整備 (将来 k6/autocannon)。
