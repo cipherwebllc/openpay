@@ -123,6 +123,33 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
     badges: ['global'],
     tokens: ['usdc'],
   },
+  {
+    id: 'bitget',
+    name: 'Bitget',
+    // Bitget アフィリエイトリンク (clacCode 紹介コード)。成果報酬型のため affiliate 扱い (広告開示)。
+    url: 'https://www.bitget.com/ja/events/rewards-pack?clacCode=09J57KDA&utmSource=rewardsnew',
+    category: 'exchange',
+    description: {
+      ja: 'スポット・デリバティブ・コピートレードを提供するグローバル暗号資産取引所。USDC など主要通貨を取扱う。',
+      en: 'A global crypto exchange offering spot, derivatives and copy trading, supporting USDC and other major assets.',
+    },
+    badges: ['global'],
+    tokens: ['usdc'],
+    affiliate: true,
+  },
+  {
+    id: 'zoomex',
+    name: 'Zoomex',
+    // Zoomex 招待リンク (ref 紹介コード)。成果報酬型のため affiliate 扱い (広告開示)。
+    url: 'https://www.zoomex.com/ja-JP/invite/?ref=RJ6XOV',
+    category: 'exchange',
+    description: {
+      ja: '暗号資産デリバティブ (先物・コピートレード) を中心としたグローバル取引所。',
+      en: 'A global crypto exchange focused on derivatives (futures and copy trading).',
+    },
+    badges: ['global'],
+    affiliate: true,
+  },
 
   // ─── DEX (on-chain trading) ────────────────────────────────────────
   {

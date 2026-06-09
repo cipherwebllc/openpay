@@ -100,6 +100,24 @@ describe('lib/explore: EXPLORE_ENTRIES の整合性', () => {
     expect(oisy?.url).toMatch(/^https:\/\/oisy\.com\/\?referrer=/);
   });
 
+  it('Bitget (bitget) が exchange に affiliate=true で存在し紹介リンク (clacCode) を指す', () => {
+    const bg = EXPLORE_ENTRIES.find((e) => e.id === 'bitget');
+    expect(bg).toBeDefined();
+    expect(bg?.category).toBe('exchange');
+    expect(bg?.affiliate).toBe(true);
+    expect(bg?.url).toMatch(/^https:\/\/www\.bitget\.com\//);
+    expect(bg?.url).toContain('clacCode=');
+  });
+
+  it('Zoomex (zoomex) が exchange に affiliate=true で存在し invite 紹介リンク (ref) を指す', () => {
+    const zx = EXPLORE_ENTRIES.find((e) => e.id === 'zoomex');
+    expect(zx).toBeDefined();
+    expect(zx?.category).toBe('exchange');
+    expect(zx?.affiliate).toBe(true);
+    expect(zx?.url).toMatch(/^https:\/\/www\.zoomex\.com\//);
+    expect(zx?.url).toContain('ref=');
+  });
+
   it('A8 計測リンク (px.a8.net) の entry は必ず affiliate=true (景表法: 未開示の広告リンクを禁止)', () => {
     // affiliate=true が UI の「広告」開示チップ + rel=sponsored のトリガ。a8.net リンクを
     // affiliate なしで足すと未開示広告 (ステマ規制違反) になるため、データ側で恒久 fence。
