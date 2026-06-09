@@ -75,6 +75,10 @@ describe('WalletBalances', () => {
     expect(screen.getByText('12.50')).toBeInTheDocument();
     expect(screen.getByText('20.00')).toBeInTheDocument();
     expect(screen.getByText('1,000')).toBeInTheDocument();
+    // 並び順: JPYC (日本のホームトークン) を先頭、USDC を後に。
+    const items = screen.getAllByRole('listitem');
+    expect(items[0].textContent).toContain('JPYC');
+    expect(items[items.length - 1].textContent).toContain('USDC');
   });
 
   it('ゼロ残高は表示しない (非ゼロのみ)', () => {

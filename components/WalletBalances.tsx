@@ -20,8 +20,8 @@ import { TokenOnChainBadge } from '@/components/AssetLogo';
 import type { TokenChainBalance } from '@/lib/walletBalances';
 import type { TokenSymbol } from '@/lib/tokens';
 
-// 並び順 (USDC を先頭、JPYC を後)。
-const TOKEN_ORDER: readonly TokenSymbol[] = ['usdc', 'jpyc'];
+// 並び順 (JPYC を先頭、USDC を後)。日本のホームトークン JPYC を上に出す。
+const TOKEN_ORDER: readonly TokenSymbol[] = ['jpyc', 'usdc'];
 
 // atomic 残高を表示用文字列に整形する。USDC (6 decimals) は小数 2 桁固定、
 // JPYC (18 decimals) は整数 (yen)。Number 変換の精度欠落を避けるため formatUnits の
