@@ -58,12 +58,12 @@ export type ResolveHandleResult =
   | { ok: true; record: HandleRecord | null }
   | { ok: false };
 
-/** handle → 保存レコード。KV 未設定/未存在/malformed は {ok:true, record:null}。KV エラーは {ok:false}。 */
+/** handle → 保存レコード。未存在/malformed は {ok:true, record:null}。KV 未設定/エラーは {ok:false}
+ *  (「未設定」を「未存在」と誤魔化さない — outage 中に 404/空きと誤答するのを防ぐ)。 */
 export async function resolveHandle(
   handle: string,
 ): Promise<ResolveHandleResult> {
-  if (!isKvConfigured()) return { ok: true, record: null };
-  const res = await kvGet(handleKey(handle));
+  const res = await kvGet(handleKey(handle)); // 未設定なら call() が {ok:false,'unconfigured'}
   if (!res.ok) return { ok: false };
   return { ok: true, record: parseHandleRecord(res.value) };
 }

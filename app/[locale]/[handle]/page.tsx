@@ -14,6 +14,8 @@ import { env } from '@/lib/env';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { TipForm } from '@/components/TipForm';
 import { parseTipParams } from '@/lib/url';
+import { isKvConfigured } from '@/lib/kv';
+import { logger } from '@/lib/logger';
 import { normalizeHandle, configToSearchParams } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import {
@@ -23,6 +25,12 @@ import {
   type TipCardFacts,
   type TipOgLocale,
 } from '@/lib/ogTipCard';
+
+// catch-all かつ KV を実行時に読むため、静的最適化させず必ず Node ランタイムでリクエスト時に
+// 解決する (API route と揃える)。これがないと環境によって KV env が解決時に見えない/
+// 静的 404 にされる可能性がある。
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
   params,
@@ -82,10 +90,19 @@ export default async function HandlePage({
   setRequestLocale(locale);
   if (!segment.startsWith('@')) notFound();
 
-  const resolved = await resolveHandle(normalizeHandle(segment));
-  // KV outage は誤って「存在しない (404)」と返さず 5xx に倒す (transient と gone を区別)。
+  const normalized = normalizeHandle(segment);
+  const resolved = await resolveHandle(normalized);
+  // KV 未設定/outage は誤って「存在しない (404)」と返さず 5xx に倒す (transient と gone を区別)。
   if (!resolved.ok) throw new Error('handle_store_unavailable');
-  if (!resolved.record) notFound();
+  if (!resolved.record) {
+    // 診断: KV は応答しているのに未存在 = 真の not-found。kvConfigured も記録し「env が
+    // 解決時に見えない」系の取りこぼしと区別する (Sentry / Vercel logs)。
+    logger.warn('handle.resolve.miss', {
+      handle: normalized,
+      kvConfigured: isKvConfigured(),
+    });
+    notFound();
+  }
   const record = resolved.record;
 
   const t = await getTranslations('TipForm');
