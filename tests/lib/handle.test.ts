@@ -136,7 +136,7 @@ describe('configToSearchParams', () => {
 });
 
 describe('validateHandleTipConfig', () => {
-  it('accepts the 3 default methods (JPYC Polygon / Kaia / USDC cross-chain)', () => {
+  it('accepts the default methods (JPYC Polygon / Kaia)', () => {
     const res = validateHandleTipConfig({
       to: ADDR.toLowerCase(),
       name: 'Alice',
@@ -146,10 +146,20 @@ describe('validateHandleTipConfig', () => {
     if (res.ok) {
       expect(res.config.to).toBe(getAddress(ADDR));
       const keys = res.config.methods.map((m) => `${m.token}:${m.chain}`);
-      expect(keys).toContain('jpyc:polygon');
-      expect(keys).toContain('jpyc:kaia');
-      expect(keys.some((k) => k.startsWith('usdc:'))).toBe(true);
-      // USDC 方法は crossChain を保持
+      expect(keys).toEqual(['jpyc:polygon', 'jpyc:kaia']);
+    }
+  });
+  it('still accepts a legacy USDC cross-chain method (back-compat)', () => {
+    // ビルダーからは提供終了したが、既存レコードの usdc method は検証/公開とも通り続ける。
+    const res = validateHandleTipConfig({
+      to: ADDR,
+      methods: [
+        { token: 'jpyc', chain: 'polygon' },
+        { token: 'usdc', chain: 'base', crossChain: true },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
       const usdc = res.config.methods.find((m) => m.token === 'usdc');
       expect(usdc?.crossChain).toBe(true);
     }

@@ -143,11 +143,13 @@ export interface HandleTipConfig {
   presets?: Partial<Record<TokenSymbol, string[]>>;
 }
 
-// 既定の受取方法 (ユーザ決定): JPYC Polygon / JPYC Kaia / USDC cross-chain。
+// 既定の受取方法 (ユーザ決定): JPYC Polygon / JPYC Kaia。
+// USDC (cross-chain) はビルダーから提供終了 (着金チェーンを選べず Base 固定になるため)。
+// 必要ならチップタブで個別に作成しリンク集へ追加する運用。既存レコードの usdc method は
+// 検証/公開ページとも後方互換で受け続ける (ビルダーで更新すると外れる)。
 export const DEFAULT_RECEIVE_METHODS: readonly HandleReceiveMethod[] = [
   { token: 'jpyc', chain: 'polygon' },
   { token: 'jpyc', chain: 'kaia' },
-  { token: 'usdc', chain: DEFAULT_CHAIN_FOR_SYMBOL.usdc, crossChain: true },
 ] as const;
 
 export interface HandleRecord {

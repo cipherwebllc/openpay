@@ -1,8 +1,11 @@
 'use client';
 
 // 「プロフ」タブ: @handle の link-in-bio ページを組み立てるビルダー。受取先 + 受取方法
-// (JPYC Polygon / JPYC Kaia / USDC cross-chain) + 見た目 (名前/色/金額プリセット) +
-// プロフィール (bio/avatar/SNSアイコン/links) を編集し、SIWE で取得/更新 (HandleClaimPanel)。
+// (JPYC Polygon / JPYC Kaia) + 見た目 (名前/色/金額プリセット) + プロフィール
+// (bio/avatar/SNSアイコン/links) を編集し、SIWE で取得/更新 (HandleClaimPanel)。
+// USDC (cross-chain) は着金チェーンを選べず Base 固定になるためビルダーから提供終了 —
+// 必要ならチップタブで個別に作成しリンク集へ追加する。既存レコードの usdc method は
+// 公開ページでは引き続き描画されるが、ビルダーで更新すると外れる (編集時に明示)。
 // レイアウトは他タブ (チップ/レジ) と同じ 2 カラム: 左=編集・右=ライブプレビュー+公開
 // (lg で sticky 追従)。下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。
 // flag OFF で何も描画しない。
@@ -68,6 +71,8 @@ export function HandleProfileBuilder() {
   const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
   const { address: connected } = useAccount();
   const [resolved, setResolved] = useState<Address | null>(null);
+  // 編集中レコードが旧 USDC (cross-chain) method を持つか。更新で外れることを明示する。
+  const [editedHadUsdc, setEditedHadUsdc] = useState(false);
 
   const colorValid = COLOR_PATTERN.test(draft.color);
 
@@ -75,21 +80,8 @@ export function HandleProfileBuilder() {
     const m: HandleReceiveMethod[] = [];
     if (draft.jpycPolygon) m.push({ token: 'jpyc', chain: 'polygon' });
     if (draft.jpycKaia) m.push({ token: 'jpyc', chain: 'kaia' });
-    if (draft.usdcCrossChain)
-      m.push({
-        token: 'usdc',
-        chain: draft.usdcChain,
-        // 旧レコードの opt-out (false) を保持。新規は既定 true (cross-chain で受け取る)。
-        crossChain: draft.usdcCrossChainFlag,
-      });
     return m;
-  }, [
-    draft.jpycPolygon,
-    draft.jpycKaia,
-    draft.usdcCrossChain,
-    draft.usdcCrossChainFlag,
-    draft.usdcChain,
-  ]);
+  }, [draft.jpycPolygon, draft.jpycKaia]);
 
   // 入力中の有効プリセット (strict)。空欄や不正値は URL/保存に出さない。
   const validPresets = (list: string[]) =>
@@ -118,10 +110,7 @@ export function HandleProfileBuilder() {
       name: draft.name.trim() || undefined,
       color: colorValid ? draft.color : undefined,
       methods,
-      presets: {
-        jpyc: validPresets(draft.presetsJpyc),
-        usdc: validPresets(draft.presetsUsdc),
-      },
+      presets: { jpyc: validPresets(draft.presetsJpyc) },
     };
   }, [
     effectiveReceiver,
@@ -130,7 +119,6 @@ export function HandleProfileBuilder() {
     draft.color,
     colorValid,
     draft.presetsJpyc,
-    draft.presetsUsdc,
   ]);
 
   // 送信する profile は https / 非空のみ採用 (不正 link/avatar/social は除外 → claim を通す)。
@@ -173,6 +161,8 @@ export function HandleProfileBuilder() {
     p?: HandleProfile,
   ) => {
     setResolved(isAddress(c.to) ? getAddress(c.to) : null);
+    // 旧レコードの USDC method はビルダーで編集できない → 更新で外れることを明示する。
+    setEditedHadUsdc(c.methods.some((m) => m.token === 'usdc'));
     // 編集対象レコードに無いフィールドは「前の下書き値」(s.*) ではなく **builder 既定**へ戻す。
     // でないと別プロフィールの色/プリセットが update 時にこの handle へ混入する。
     setSettings((s) => ({
@@ -185,15 +175,7 @@ export function HandleProfileBuilder() {
           : DEFAULT_PROFILE_DRAFT.color,
       jpycPolygon: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'polygon'),
       jpycKaia: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'kaia'),
-      usdcCrossChain: c.methods.some((m) => m.token === 'usdc'),
-      // USDC method の crossChain 値を保持 (旧 opt-out=false を update で true に戻さない)。
-      usdcCrossChainFlag:
-        c.methods.find((m) => m.token === 'usdc')?.crossChain ?? true,
-      usdcChain:
-        c.methods.find((m) => m.token === 'usdc')?.chain ??
-        DEFAULT_PROFILE_DRAFT.usdcChain,
       presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
-      presetsUsdc: c.presets?.usdc ?? DEFAULT_PROFILE_DRAFT.presetsUsdc,
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
       socials: p?.socials ?? [],
@@ -203,9 +185,9 @@ export function HandleProfileBuilder() {
 
   // プリセット編集 (token 別)。
   const renderPresetEditor = (
-    token: 'jpyc' | 'usdc',
+    token: 'jpyc',
     list: string[],
-    key: 'presetsJpyc' | 'presetsUsdc',
+    key: 'presetsJpyc',
   ) => (
     <Field label={t('presetsLabel', { token: displaySymbolFor(token) })}>
       <div className="space-y-1.5">
@@ -289,10 +271,6 @@ export function HandleProfileBuilder() {
             {([
               ['jpycPolygon', { token: 'jpyc', chain: 'polygon' } as const],
               ['jpycKaia', { token: 'jpyc', chain: 'kaia' } as const],
-              [
-                'usdcCrossChain',
-                { token: 'usdc', chain: draft.usdcChain, crossChain: draft.usdcCrossChainFlag } as const,
-              ],
             ] as const).map(([key, method]) => (
               <label key={key} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
                 <input
@@ -306,6 +284,9 @@ export function HandleProfileBuilder() {
           </div>
           {methods.length === 0 && (
             <p className="mt-1 text-xs text-red-600">{t('atLeastOneMethod')}</p>
+          )}
+          {editedHadUsdc && (
+            <p className="mt-1 text-xs text-amber-700">{t('usdcDiscontinued')}</p>
           )}
         </fieldset>
 
@@ -338,9 +319,6 @@ export function HandleProfileBuilder() {
         </Field>
         {draft.jpycPolygon || draft.jpycKaia
           ? renderPresetEditor('jpyc', draft.presetsJpyc, 'presetsJpyc')
-          : null}
-        {draft.usdcCrossChain
-          ? renderPresetEditor('usdc', draft.presetsUsdc, 'presetsUsdc')
           : null}
       </div>
 

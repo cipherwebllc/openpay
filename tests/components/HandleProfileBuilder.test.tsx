@@ -40,9 +40,31 @@ vi.mock('@/components/AddressInput', () => ({
   ),
 }));
 // claim panel は config の有無だけ反映 (SIWE/react-query を持ち込まない)。
+// edit-legacy-usdc: 旧 USDC method 持ちレコードの「編集」を模擬し onEdit を発火する。
 vi.mock('@/components/HandleClaimPanel', () => ({
-  HandleClaimPanel: ({ config }: { config: unknown }) => (
-    <div data-testid="claim">{config ? 'config-ready' : 'no-config'}</div>
+  HandleClaimPanel: ({
+    config,
+    onEdit,
+  }: {
+    config: unknown;
+    onEdit?: (handle: string, config: unknown, profile?: unknown) => void;
+  }) => (
+    <div data-testid="claim">
+      {config ? 'config-ready' : 'no-config'}
+      <button
+        type="button"
+        data-testid="edit-legacy-usdc"
+        onClick={() =>
+          onEdit?.('alice', {
+            to: ADDR,
+            methods: [
+              { token: 'jpyc', chain: 'polygon' },
+              { token: 'usdc', chain: 'base', crossChain: true },
+            ],
+          })
+        }
+      />
+    </div>
   ),
 }));
 
@@ -60,7 +82,7 @@ describe('HandleProfileBuilder', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('flag ON → 3 受取方法トグル + claim panel を描画', () => {
+  it('flag ON → JPYC 2 受取方法トグル + claim panel を描画 (USDC は提供終了)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }),
@@ -69,8 +91,8 @@ describe('HandleProfileBuilder', () => {
       screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('checkbox', { name: 'USDC (cross-chain)' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('checkbox', { name: 'USDC (cross-chain)' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId('claim')).toBeInTheDocument();
   });
 
@@ -111,8 +133,17 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
     fireEvent.click(screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'USDC (cross-chain)' }));
     expect(screen.getByTestId('claim')).toHaveTextContent('no-config');
     expect(screen.getByText('受取方法を 1 つ以上選んでください。')).toBeInTheDocument();
+  });
+
+  it('旧 USDC method 持ちレコードの編集時は「更新で外れる」通知を表示', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(
+      screen.getByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+    ).toBeInTheDocument();
+    // ビルダーが組む methods には usdc が含まれない (JPYC のみで config 完成)
+    expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
   });
 });
