@@ -11,8 +11,8 @@ import {
 } from '../../scripts/setup-sentry-alerts.mjs';
 
 describe('setup-sentry-alerts: RULES schema', () => {
-  it('12 個の rule 定義が存在 (payment / smart-account / x402 / history.load / localStorage.set / cross-chain×2 / billing×5)', () => {
-    expect(RULES).toHaveLength(12);
+  it('14 個の rule 定義が存在 (payment / smart-account / x402 / history.load / localStorage.set / cross-chain×2 / a1 billing×7)', () => {
+    expect(RULES).toHaveLength(14);
     const tags = RULES.map((r) => r.eventTag);
     expect(tags).toContain('payment.failed');
     expect(tags).toContain('smart-account.init-failed');
@@ -21,22 +21,41 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(tags).toContain('localStorage.set failed');
     expect(tags).toContain('cross-chain.execute.failed');
     expect(tags).toContain('cross-chain.balance-query.failed');
-    expect(tags).toContain('billing.fee.grant-failed');
-    expect(tags).toContain('billing.fee.unexpected');
-    expect(tags).toContain('billing.fee.rpc-error');
-    expect(tags).toContain('billing.fee.misconfigured');
-    expect(tags).toContain('billing.fee.release-failed');
+    // a1 OpenPay 利用料 (現行実装のイベント名)。旧 billing.fee.* は退役済。
+    expect(tags).toContain('billing.settle.misconfigured');
+    expect(tags).toContain('billing.settle.grant');
+    expect(tags).toContain('billing.settle.rpc');
+    expect(tags).toContain('billing.settle.unexpected');
+    expect(tags).toContain('billing.settle.release');
+    expect(tags).toContain('billing.meter.record_failed');
+    expect(tags).toContain('billing.revenue.record_failed');
   });
 
-  it('billing money-path rule は低 threshold (正常時ほぼ 0・即調査対象)', () => {
+  it('退役した旧 billing.fee.* タグは RULES に残っていない (現行コードが発火しないため)', () => {
+    const tags = RULES.map((r) => r.eventTag);
+    for (const stale of [
+      'billing.fee.grant-failed',
+      'billing.fee.unexpected',
+      'billing.fee.rpc-error',
+      'billing.fee.misconfigured',
+      'billing.fee.release-failed',
+    ]) {
+      expect(tags).not.toContain(stale);
+    }
+  });
+
+  it('a1 billing money-path rule は低 threshold (正常時ほぼ 0・即調査対象)', () => {
     const byTag = (t: string) => RULES.find((r) => r.eventTag === t);
-    expect(byTag('billing.fee.grant-failed')?.threshold).toBe(3);
-    expect(byTag('billing.fee.unexpected')?.threshold).toBe(3);
-    expect(byTag('billing.fee.rpc-error')?.threshold).toBe(3);
-    expect(byTag('billing.fee.misconfigured')?.threshold).toBe(1);
-    expect(byTag('billing.fee.release-failed')?.threshold).toBe(1);
-    // verify-failed は warn かつ期待挙動 (顧客の誤 tx) なので alert を作らない
-    expect(byTag('billing.fee.verify-failed')).toBeUndefined();
+    expect(byTag('billing.settle.misconfigured')?.threshold).toBe(1);
+    expect(byTag('billing.settle.grant')?.threshold).toBe(3);
+    expect(byTag('billing.settle.rpc')?.threshold).toBe(3);
+    expect(byTag('billing.settle.unexpected')?.threshold).toBe(3);
+    expect(byTag('billing.settle.release')?.threshold).toBe(1);
+    expect(byTag('billing.meter.record_failed')?.threshold).toBe(5);
+    expect(byTag('billing.revenue.record_failed')?.threshold).toBe(3);
+    // settle.verify (warn=店主の誤 tx・期待挙動) / settle.promote (warn=一過性) は alert を作らない
+    expect(byTag('billing.settle.verify')).toBeUndefined();
+    expect(byTag('billing.settle.promote')).toBeUndefined();
   });
 
   it('history 系 rule は threshold 100/h (LocalStorage は per-user 由来で noise 多め)', () => {

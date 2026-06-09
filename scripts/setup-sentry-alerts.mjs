@@ -9,7 +9,10 @@
 //   SENTRY_PROJECT_SLUG   - project の URL slug (例: "javascript-nextjs")
 //
 // 任意 env:
-//   SENTRY_ALERT_ENV      - 対象 environment (default: 'production')
+//   SENTRY_ALERT_ENV      - 対象 environment (default: 'mainnet')。本番ランタイムは
+//                           Sentry init で environment=NEXT_PUBLIC_NETWORK_ENV='mainnet'
+//                           (instrumentation*.ts)。'production' という environment は
+//                           存在しないので指定しないこと (rule が一切 match しなくなる)。
 //   SENTRY_API_BASE       - Sentry SaaS なら https://sentry.io 既定。
 //                           self-host なら https://sentry.example.com 等を指定
 //
@@ -26,11 +29,13 @@
 //   localStorage.set failed     > 100 件/h
 //   cross-chain.execute.failed  > 20 件/h
 //   cross-chain.balance-query.* > 100 件/h
-//   billing.fee.grant-failed    > 3 件/h  (顧客が支払ったのに未付与)
-//   billing.fee.unexpected      > 3 件/h  (money-path の想定外 throw)
-//   billing.fee.rpc-error       > 3 件/h  (chain RPC 障害で検証不能)
-//   billing.fee.misconfigured   > 1 件/h  (FEE_RECEIVER 未設定の運用ミス)
-//   billing.fee.release-failed  > 1 件/h  (txHash 焼失・手動 KV 削除が必要)
+//   billing.settle.misconfigured  > 1 件/h  (FEE_RECEIVER 未設定の運用ミス)
+//   billing.settle.grant          > 3 件/h  (検証OKだが付与KV書込失敗=支払ったのに未反映)
+//   billing.settle.rpc            > 3 件/h  (chain RPC 障害で検証不能)
+//   billing.settle.unexpected     > 3 件/h  (money-path の想定外 throw)
+//   billing.settle.release        > 1 件/h  (idempotency ロック焼失・手動 KV 削除が必要)
+//   billing.meter.record_failed   > 5 件/h  (出来高メーター取りこぼし=利用料 undercount)
+//   billing.revenue.record_failed > 3 件/h  (収益台帳の欠落=会計ギャップ)
 //
 // re-calibration 手順 (production 1 週間後):
 //   1. Sentry で各 event の week-over-week 実 traffic 集計
@@ -38,7 +43,7 @@
 //   3. Sentry Dashboard で旧 rule を delete
 //   4. 本 script を再実行 (idempotent、新 rule が registered される)
 
-const ALERT_ENV = process.env.SENTRY_ALERT_ENV || 'production';
+const ALERT_ENV = process.env.SENTRY_ALERT_ENV || 'mainnet';
 const API_BASE = process.env.SENTRY_API_BASE || 'https://sentry.io';
 
 // 各 rule の name は冪等性 key として使う (Sentry rule に unique id がないため)。
@@ -113,56 +118,80 @@ export const RULES = [
     threshold: 100,
     interval: '1h',
   },
-  // --- Phase B billing (利用料 → 利用権付与) の money-path 監視。閾値は低め:
-  //     正常運用ではほぼ 0 のはずで、発生は即調査対象 (顧客が支払ったのに未付与等)。
-  //     verify-failed は warn かつ「顧客が誤った tx を出した」期待挙動なので alert 対象外
-  //     (noise になる)。
+  // --- a1 OpenPay 利用料 (JPYC ガスレス → 月次利用料) の money-path 監視。
+  //     現行実装が出すイベント (logger.warn/error → Sentry tag `event`) に対応:
+  //       /api/billing/settle (清算)            → billing.settle.*
+  //       /api/relay/jpyc + lib/billingMeter    → billing.meter.*   (出来高メーター)
+  //       lib/feeRevenue                        → billing.revenue.* (収益台帳)
+  //     正常運用ではほぼ 0 のはずで、発生は即調査対象。閾値は低め。
+  //     ⚠️ 旧 billing.fee.* (退役した /api/fee/verify 経路) からの移行。旧タグは現行コードが
+  //        一切発火しないため、本 a1 タグへ更新済 (2026-06-09)。
+  //     除外: billing.settle.verify (warn=店主の誤 tx・期待挙動) / billing.settle.promote
+  //     (warn=一過性) は noise。meter/revenue の capped/lpush_failed/dropped_entries は
+  //     record_failed と重複しがちなので代表として record_failed のみ採用。
   {
-    name: 'OpenPay: billing.fee.grant-failed (paid but not granted)',
+    name: 'OpenPay: billing.settle.misconfigured (FEE_RECEIVER unset)',
     description:
-      'on-chain 検証は通ったが利用権の永続化 (KV 書込) に失敗。顧客が JPYC を支払ったのに ' +
-      '利用権が付かない状態。1 時間に 3 件超で通知 (KV 障害 / Upstash 不調のサイン)。' +
-      'route は claim を release し 503 を返すため顧客は再提出可能だが、継続発生は要対処。',
-    eventTag: 'billing.fee.grant-failed',
-    threshold: 3,
-    interval: '1h',
-  },
-  {
-    name: 'OpenPay: billing.fee.unexpected (money-path throw)',
-    description:
-      '/api/fee/verify の nx-claim 後で想定外の例外 (RPC/transport 不調等)。1 時間に 3 件超で ' +
-      '通知。claim は release 済 (txHash 焼失なし) だが、RPC エンドポイント障害の早期検知に使う。',
-    eventTag: 'billing.fee.unexpected',
-    threshold: 3,
-    interval: '1h',
-  },
-  {
-    name: 'OpenPay: billing.fee.rpc-error (chain RPC outage)',
-    description:
-      '/api/fee/verify の getTransactionReceipt が transport 障害 (RPC ダウン/rate limit/timeout)。' +
-      'tx_not_found (顧客の誤 tx) と区別され 503 を返す。1 時間に 3 件超で通知 = RPC 障害が ' +
-      '支払い検証を広く弾いているサイン (顧客は正しい tx でも検証できない)。RPC override の確認/切替を。',
-    eventTag: 'billing.fee.rpc-error',
-    threshold: 3,
-    interval: '1h',
-  },
-  {
-    name: 'OpenPay: billing.fee.misconfigured (FEE_RECEIVER unset)',
-    description:
-      'billing 有効なのに FEE_RECEIVER 未設定 (送金先が burn になる運用設定不備)。' +
-      '1 時間に 1 件超で通知 = env 設定ミスの即時検知。検出したら NEXT_PUBLIC_ENABLE_BILLING を ' +
-      'OFF に戻すか FEE_RECEIVER を設定して再デプロイする。',
-    eventTag: 'billing.fee.misconfigured',
+      'billing 有効なのに FEE_RECEIVER 未設定 (利用料の送金先が定まらない運用設定不備)。' +
+      '1 時間に 1 件超で通知 = env 設定ミスの即時検知。NEXT_PUBLIC_ENABLE_USAGE_FEE を OFF に戻すか ' +
+      'FEE_RECEIVER を設定して再デプロイする。',
+    eventTag: 'billing.settle.misconfigured',
     threshold: 1,
     interval: '1h',
   },
   {
-    name: 'OpenPay: billing.fee.release-failed (txHash burned)',
+    name: 'OpenPay: billing.settle.grant-failed (paid but not credited)',
     description:
-      'idempotency claim の解放 (kvDel) に失敗。当該 txHash は再提出が already_processed で ' +
-      '弾かれ恒久 claim のまま焼失する。1 時間に 1 件超で通知し、log の usedKey を運用で手動削除する。',
-    eventTag: 'billing.fee.release-failed',
+      'on-chain 検証は通ったが利用権/支払期間の永続化 (KV 書込) に失敗。店主が JPYC で利用料を ' +
+      '払ったのに反映されない状態。1 時間に 3 件超で通知 (KV / Upstash 障害のサイン)。',
+    eventTag: 'billing.settle.grant',
+    threshold: 3,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.settle.rpc (chain RPC outage on verify)',
+    description:
+      '/api/billing/settle の getTransactionReceipt が transport 障害 (RPC ダウン/rate limit/timeout)。' +
+      'tx_not_found (店主の誤 tx) とは区別される。1 時間に 3 件超で通知 = RPC 障害が利用料の検証を ' +
+      '広く弾いているサイン。RPC override の確認/切替を。',
+    eventTag: 'billing.settle.rpc',
+    threshold: 3,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.settle.unexpected (money-path throw)',
+    description:
+      '/api/billing/settle の処理ロック取得後で想定外の例外。1 時間に 3 件超で通知。' +
+      'ロックは解放され再提出可能だが、継続発生は要対処。',
+    eventTag: 'billing.settle.unexpected',
+    threshold: 3,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.settle.release-failed (idempotency lock burned)',
+    description:
+      'idempotency 処理ロックの解放 (kvDel) に失敗。当該 txHash は再提出が already_processed で ' +
+      '弾かれロックが焼失する。1 時間に 1 件超で通知し、log の settledKey を運用で手動削除する。',
+    eventTag: 'billing.settle.release',
     threshold: 1,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.meter.record-failed (usage volume undercount)',
+    description:
+      'ガスレス中継成功後の出来高メーター書込 (KV) に失敗。利用料の算定根拠 (JPYC ガスレス受領額) を ' +
+      '取りこぼす (undercount)。決済自体は壊さないが収益の過少計上につながる。1 時間に 5 件超で通知。',
+    eventTag: 'billing.meter.record_failed',
+    threshold: 5,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: billing.revenue.record-failed (revenue ledger gap)',
+    description:
+      '清算成功後の収益台帳 (billing:revenue) 書込に失敗。会計の元データに欠落が生じる。' +
+      '1 時間に 3 件超で通知。',
+    eventTag: 'billing.revenue.record_failed',
+    threshold: 3,
     interval: '1h',
   },
 ];
