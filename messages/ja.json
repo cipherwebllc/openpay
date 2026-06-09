@@ -944,7 +944,7 @@
     "columnAnchor": "建て (FX換算)",
     "affiliateHeading": "クラウド会計ソフト",
     "affiliateAd": "広告",
-    "affiliateNote": "OpenPay の売上は、下記クラウド会計ソフトへ CSV 取込 / freee 連携で記帳できます。",
+    "affiliateNote": "OpenPay の売上は、下記クラウド会計ソフト向けの形式 (freee / MF / 弥生) で CSV を書き出して記帳できます。",
     "columnTaxAmount": "税額",
     "columnReceiptNo": "管理番号",
     "columnMemo": "会計メモ",
