@@ -99,7 +99,8 @@ describe('setup-sentry-alerts: RULES schema', () => {
     const re = /logger\.(?:warn|error)\(\s*['"`](billing\.[A-Za-z0-9._-]+)['"`]/g;
     for (const root of ['app', 'lib']) {
       const files = readdirSync(root, { recursive: true }).filter(
-        (f): f is string => typeof f === 'string' && f.endsWith('.ts'),
+        (f): f is string =>
+          typeof f === 'string' && /\.(?:ts|tsx|mjs|js)$/.test(f),
       );
       for (const f of files) {
         const src = readFileSync(join(root, f), 'utf8');

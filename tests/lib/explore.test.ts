@@ -75,48 +75,46 @@ describe('lib/explore: EXPLORE_ENTRIES の整合性', () => {
     }
   });
 
-  it('GMOコイン (gmo-coin) が exchange に affiliate=true で存在し A8 計測リンクを指す', () => {
-    // 景表法対応の「広告」開示は affiliate=true が UI 側のトリガ。データ側で固定する。
-    const gmo = EXPLORE_ENTRIES.find((e) => e.id === 'gmo-coin');
-    expect(gmo).toBeDefined();
-    expect(gmo?.category).toBe('exchange');
-    expect(gmo?.affiliate).toBe(true);
-    expect(gmo?.url).toMatch(/^https:\/\/px\.a8\.net\//);
-  });
+  // 景表法対応の「広告」開示は affiliate=true が UI 側のトリガ。各アフィリエイト entry の
+  // 存在・category・affiliate=true・計測/紹介リンク形式をデータ側で固定する (table 駆動)。
+  const AFFILIATE_CASES: ReadonlyArray<{
+    id: string;
+    category: string;
+    urlPattern: RegExp;
+    urlContains?: string;
+  }> = [
+    { id: 'gmo-coin', category: 'exchange', urlPattern: /^https:\/\/px\.a8\.net\// },
+    { id: 'hashport-wallet', category: 'dapp', urlPattern: /^https:\/\/px\.a8\.net\// },
+    {
+      id: 'oisy-wallet',
+      category: 'dapp',
+      urlPattern: /^https:\/\/oisy\.com\/\?referrer=/,
+    },
+    {
+      id: 'bitget',
+      category: 'exchange',
+      urlPattern: /^https:\/\/www\.bitget\.com\//,
+      urlContains: 'clacCode=',
+    },
+    {
+      id: 'zoomex',
+      category: 'exchange',
+      urlPattern: /^https:\/\/www\.zoomex\.com\//,
+      urlContains: 'ref=',
+    },
+  ] as const;
 
-  it('HashPort Wallet (hashport-wallet) が dapp に affiliate=true で存在し A8 計測リンクを指す', () => {
-    const hp = EXPLORE_ENTRIES.find((e) => e.id === 'hashport-wallet');
-    expect(hp).toBeDefined();
-    expect(hp?.category).toBe('dapp');
-    expect(hp?.affiliate).toBe(true);
-    expect(hp?.url).toMatch(/^https:\/\/px\.a8\.net\//);
-  });
-
-  it('OISY Wallet (oisy-wallet) が dapp に affiliate=true で存在し referrer 紹介リンクを指す', () => {
-    const oisy = EXPLORE_ENTRIES.find((e) => e.id === 'oisy-wallet');
-    expect(oisy).toBeDefined();
-    expect(oisy?.category).toBe('dapp');
-    expect(oisy?.affiliate).toBe(true);
-    expect(oisy?.url).toMatch(/^https:\/\/oisy\.com\/\?referrer=/);
-  });
-
-  it('Bitget (bitget) が exchange に affiliate=true で存在し紹介リンク (clacCode) を指す', () => {
-    const bg = EXPLORE_ENTRIES.find((e) => e.id === 'bitget');
-    expect(bg).toBeDefined();
-    expect(bg?.category).toBe('exchange');
-    expect(bg?.affiliate).toBe(true);
-    expect(bg?.url).toMatch(/^https:\/\/www\.bitget\.com\//);
-    expect(bg?.url).toContain('clacCode=');
-  });
-
-  it('Zoomex (zoomex) が exchange に affiliate=true で存在し invite 紹介リンク (ref) を指す', () => {
-    const zx = EXPLORE_ENTRIES.find((e) => e.id === 'zoomex');
-    expect(zx).toBeDefined();
-    expect(zx?.category).toBe('exchange');
-    expect(zx?.affiliate).toBe(true);
-    expect(zx?.url).toMatch(/^https:\/\/www\.zoomex\.com\//);
-    expect(zx?.url).toContain('ref=');
-  });
+  it.each(AFFILIATE_CASES)(
+    'アフィリエイト entry $id が $category に affiliate=true で存在し計測/紹介リンクを指す',
+    ({ id, category, urlPattern, urlContains }) => {
+      const e = EXPLORE_ENTRIES.find((x) => x.id === id);
+      expect(e, `${id} が存在しない`).toBeDefined();
+      expect(e?.category).toBe(category);
+      expect(e?.affiliate).toBe(true);
+      expect(e?.url).toMatch(urlPattern);
+      if (urlContains) expect(e?.url).toContain(urlContains);
+    },
+  );
 
   it('A8 計測リンク (px.a8.net) の entry は必ず affiliate=true (景表法: 未開示の広告リンクを禁止)', () => {
     // affiliate=true が UI の「広告」開示チップ + rel=sponsored のトリガ。a8.net リンクを

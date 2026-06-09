@@ -45,10 +45,8 @@
 //
 // ⚠️ 冪等性は rule NAME 一致で判定する。eventTag (filter) や threshold を変更しても、同名の
 //   既存 rule があれば SKIP され filter/threshold は更新されない。tag/threshold を変えた場合は
-//   必ず Sentry Dashboard で旧 rule を削除してから再実行すること。
-//   (2026-06-09: billing.settle.{grant,rpc,release} → {grant-failed,rpc-error,release-failed} へ
-//    eventTag を修正。rule NAME は元から -failed/-error 表記で不変。本 script は未実行のため
-//    旧 tag の rule は本番未作成だが、もし作成済の環境があれば削除してから再実行する。)
+//   必ず Sentry Dashboard で旧 rule を削除してから再実行すること
+//   (この制約は eventTag を後から修正した時の取りこぼし防止のため)。
 
 const ALERT_ENV = process.env.SENTRY_ALERT_ENV || 'mainnet';
 const API_BASE = process.env.SENTRY_API_BASE || 'https://sentry.io';
@@ -156,7 +154,7 @@ export const RULES = [
     interval: '1h',
   },
   {
-    name: 'OpenPay: billing.settle.rpc (chain RPC outage on verify)',
+    name: 'OpenPay: billing.settle.rpc-error (chain RPC outage on verify)',
     description:
       '/api/billing/settle の getTransactionReceipt が transport 障害 (RPC ダウン/rate limit/timeout)。' +
       'tx_not_found (店主の誤 tx) とは区別される。1 時間に 3 件超で通知 = RPC 障害が利用料の検証を ' +
@@ -335,8 +333,9 @@ export async function main() {
     console.log('既存のため skip した rule:');
     for (const n of results.skipped) console.log(`  - ${n}`);
     console.log(
-      '\nしきい値を変更する場合は Sentry Dashboard で該当 rule を編集するか、' +
-        '本 script の RULES.threshold を更新後、Dashboard で旧 rule を削除してから再実行してください。',
+      '\nしきい値・eventTag(filter) を変更する場合は Sentry Dashboard で該当 rule を編集するか、' +
+        '本 script の RULES を更新後、同名の旧 rule を Dashboard で削除してから再実行してください ' +
+        '(冪等性は rule 名一致で判定するため、同名 rule の filter/threshold は再実行では更新されません)。',
     );
   }
 }
