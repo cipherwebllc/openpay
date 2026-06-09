@@ -83,6 +83,26 @@ describe('lib/explore: EXPLORE_ENTRIES の整合性', () => {
     expect(gmo?.affiliate).toBe(true);
     expect(gmo?.url).toMatch(/^https:\/\/px\.a8\.net\//);
   });
+
+  it('HashPort Wallet (hashport-wallet) が dapp に affiliate=true で存在し A8 計測リンクを指す', () => {
+    const hp = EXPLORE_ENTRIES.find((e) => e.id === 'hashport-wallet');
+    expect(hp).toBeDefined();
+    expect(hp?.category).toBe('dapp');
+    expect(hp?.affiliate).toBe(true);
+    expect(hp?.url).toMatch(/^https:\/\/px\.a8\.net\//);
+  });
+
+  it('A8 計測リンク (px.a8.net) の entry は必ず affiliate=true (景表法: 未開示の広告リンクを禁止)', () => {
+    // affiliate=true が UI の「広告」開示チップ + rel=sponsored のトリガ。a8.net リンクを
+    // affiliate なしで足すと未開示広告 (ステマ規制違反) になるため、データ側で恒久 fence。
+    for (const e of EXPLORE_ENTRIES) {
+      if (/^https:\/\/px\.a8\.net\//.test(e.url)) {
+        expect(e.affiliate, `${e.id} は a8.net リンクなので affiliate=true が必須`).toBe(
+          true,
+        );
+      }
+    }
+  });
 });
 
 describe('lib/explore: entriesByCategory', () => {

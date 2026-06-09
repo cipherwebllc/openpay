@@ -200,6 +200,20 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
     tokens: ['jpyc', 'usdc'],
   },
   {
+    id: 'hashport-wallet',
+    name: 'HashPort Wallet',
+    // A8.net 計測リンク (アフィリエイト)。成果は redirect の a8mat クッキーで成立。
+    url: 'https://px.a8.net/svt/ejp?a8mat=4B5R05+BDMFX6+5W0S+5YJRM',
+    category: 'dapp',
+    description: {
+      ja: '日本発のマルチチェーン対応ウォレットアプリ。複数チェーンの暗号資産・NFT をスマホで管理でき、対応チェーン上で JPYC / USDC 等の ERC20 も保有できる。',
+      en: 'A Japan-based multi-chain wallet app for managing crypto assets and NFTs from your phone; can also hold ERC20s such as JPYC / USDC on supported chains.',
+    },
+    badges: ['jp-only'],
+    tokens: ['jpyc', 'usdc'],
+    affiliate: true,
+  },
+  {
     id: 'safe',
     name: 'Safe',
     url: 'https://app.safe.global/',
