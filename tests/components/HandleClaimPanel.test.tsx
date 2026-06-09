@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { screen } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { HandleTipConfig } from '@/lib/handle';
 
@@ -22,6 +22,9 @@ vi.mock('@/hooks/useOrigin', () => ({ useOrigin: () => 'https://test.local' }));
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: h.isSignedIn,
+    sessionAddress: h.isSignedIn
+      ? '0x52d4901142e2B5680027da5EB47C86CB02a3cA81'
+      : null,
     signIn: vi.fn(),
     isSigningIn: false,
     signInError: null,
@@ -35,18 +38,45 @@ const CONFIG: HandleTipConfig = {
   methods: [{ token: 'jpyc', chain: 'polygon' }],
 };
 
-function renderPanel(config: HandleTipConfig | null) {
+function renderPanel(
+  config: HandleTipConfig | null,
+  extra?: Partial<Parameters<typeof HandleClaimPanel>[0]>,
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
     <QueryClientProvider client={qc}>
-      <HandleClaimPanel config={config} />
+      <HandleClaimPanel config={config} {...extra} />
     </QueryClientProvider>,
+  );
+}
+
+// サインイン済みフロー用: GET /api/handle (mine) を所有1件で応答する fetch スタブ。
+function stubMine(handles: { handle: string; config: HandleTipConfig }[]) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u === '/api/handle') {
+        return new Response(JSON.stringify({ ok: true, handles, max: 3 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, available: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }),
   );
 }
 
 beforeEach(() => {
   h.enableHandles = true;
   h.isSignedIn = false;
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('HandleClaimPanel', () => {
@@ -69,5 +99,44 @@ describe('HandleClaimPanel', () => {
     expect(
       screen.getByRole('button', { name: 'サインインして取得' }),
     ).toBeInTheDocument();
+  });
+
+  it('サインイン済み: 所有一覧が先頭 (編集/開く/コピー/解放) + 新規取得セクション', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    renderPanel(CONFIG, { onEdit: vi.fn() });
+    await waitFor(() =>
+      expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: '編集' })).toBeInTheDocument();
+    const open = screen.getByRole('link', { name: '開く' });
+    expect(open).toHaveAttribute('href', 'https://test.local/@alice');
+    expect(open).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('button', { name: '解放' })).toBeInTheDocument();
+    expect(screen.getByText('新しいハンドルを取得')).toBeInTheDocument();
+  });
+
+  it('編集モード: バナー + 編集をやめる + 別名入力で複製警告', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    const onStopEditing = vi.fn();
+    renderPanel(CONFIG, { editingHandle: 'alice', onStopEditing });
+    await waitFor(() =>
+      expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument(),
+    );
+    // バナーは一覧側 (該当行) とフォーム側の両方に出る
+    expect(screen.getAllByText('「@alice」を編集中').length).toBeGreaterThan(0);
+    // 別名を入力すると「同内容の複製になる」事前警告
+    fireEvent.change(screen.getByPlaceholderText('alice'), {
+      target: { value: 'bob' },
+    });
+    expect(
+      screen.getByText(
+        '「@alice」はそのまま残し、同じ内容で新しいハンドル「@bob」を取得します。',
+      ),
+    ).toBeInTheDocument();
+    // 編集をやめる → 親へ通知
+    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
+    expect(onStopEditing).toHaveBeenCalled();
   });
 });

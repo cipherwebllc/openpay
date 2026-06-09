@@ -1,10 +1,13 @@
 'use client';
 
 // @handle 恒久リンクの取得 UI。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
-// SIWE サインイン → handle 入力 + 空き確認 → 現在のプロフィール設定 (config+profile) を publish →
-// /@handle リンク (コピー / QR) を提示。取得済み handle の一覧 + 編集 (prefill) + 解放も扱う。
-// 設定は親 (HandleProfileBuilder) から HandleTipConfig + HandleProfile として受け取る
-// (受取先/方法 未確定なら config=null)。
+// SIWE サインイン → 取得済み一覧 (編集/開く/コピー/解放) → handle 入力 + 空き確認 →
+// 現在のプロフィール設定 (config+profile) を publish。設定は親 (HandleProfileBuilder) から
+// HandleTipConfig + HandleProfile として受け取る (受取先/方法 未確定なら config=null)。
+//
+// 編集モードは親が所有 (editingHandle)。「編集」でフォームに prefill + モード開始、
+// バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
+// (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -39,6 +42,9 @@ export function HandleClaimPanel({
   config,
   profile,
   onEdit,
+  editingHandle = null,
+  onStopEditing,
+  onPublished,
 }: {
   config: HandleTipConfig | null;
   profile?: HandleProfile;
@@ -47,6 +53,11 @@ export function HandleClaimPanel({
     config: HandleTipConfig,
     profile?: HandleProfile,
   ) => void;
+  /** 親 (builder) が保持する編集モード。null = 新規取得モード。 */
+  editingHandle?: string | null;
+  onStopEditing?: () => void;
+  /** 公開成功 (created/updated) 後に親へ通知 — 以後その handle の編集モードに入る。 */
+  onPublished?: (handle: string) => void;
 }) {
   const t = useTranslations('HandleClaim');
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
@@ -56,6 +67,19 @@ export function HandleClaimPanel({
   const qc = useQueryClient();
   const [input, setInput] = useState('');
   const [debounced, setDebounced] = useState('');
+  // 直近の公開結果 (成功メッセージ用)。入力を変えたらクリア。
+  const [published, setPublished] = useState<{
+    handle: string;
+    status: 'created' | 'updated';
+  } | null>(null);
+
+  // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
+  useEffect(() => {
+    if (editingHandle === null) {
+      setInput('');
+      setPublished(null);
+    }
+  }, [editingHandle]);
 
   // env は build 時定数なので hook 後に early-return しても hook 数は不変。
   const validation = useMemo(() => validateHandle(input), [input]);
@@ -108,10 +132,15 @@ export function HandleClaimPanel({
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
       return json;
     },
-    onSuccess: () => {
+    onSuccess: (json, handle) => {
       qc.invalidateQueries({ queryKey: ['handle-mine'] });
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
-      setInput('');
+      // 入力は消さず「いま @handle を編集している」状態に遷移する (続けて微調整できる)。
+      setPublished({
+        handle,
+        status: json.status === 'created' ? 'created' : 'updated',
+      });
+      onPublished?.(handle);
     },
   });
 
@@ -155,80 +184,9 @@ export function HandleClaimPanel({
         </div>
       ) : (
         <div className="mt-3 space-y-3">
-          {/* 受取先/方法 未確定なら取得は不可だが、サインイン + 取得済み一覧の編集は可能。 */}
-          {!config && (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              {t('needReceiver')}
-            </p>
-          )}
-          {/* 取得フォーム */}
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm text-slate-400">{origin || 'open-pay.jp'}/@</span>
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={t('handlePlaceholder')}
-                maxLength={30}
-                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              />
-            </div>
-            <p className="mt-1 text-xs text-slate-400">{t('formatHint')}</p>
-            {/* 入力検証 + 空き状態 */}
-            {input.length > 0 && !validation.ok && (
-              <p className="mt-1 text-xs text-red-600">
-                {validation.reason === 'reserved' ? t('reservedWord') : t('invalidFormat')}
-              </p>
-            )}
-            {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。 */}
-            {validation.ok &&
-              debounced === normalized &&
-              !ownedNames.includes(normalized) && (
-                <p className="mt-1 text-xs">
-                  {availability.isFetching ? (
-                    <span className="text-slate-400">{t('checking')}</span>
-                  ) : availability.data?.available ? (
-                    <span className="text-emerald-600">{t('available')}</span>
-                  ) : availability.data ? (
-                    <span className="text-red-600">{t('taken')}</span>
-                  ) : null}
-                </p>
-              )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => normalized && config && publish.mutate(normalized)}
-            disabled={
-              !config || // 受取先/方法 未確定では取得/更新できない
-              !validation.ok ||
-              publish.isPending ||
-              // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
-              (availability.data?.available === false &&
-                !ownedNames.includes(normalized)) ||
-              (atLimit && !ownedNames.includes(normalized))
-            }
-            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {publish.isPending
-              ? t('claiming')
-              : ownedNames.includes(normalized)
-                ? t('updateButton')
-                : t('claimButton')}
-          </button>
-          {atLimit && (
-            <p className="text-xs text-amber-700">{t('limitReached', { max })}</p>
-          )}
-          {publish.isError && (
-            <p className="text-xs text-red-600">
-              {t('claimError', { error: (publish.error as Error).message })}
-            </p>
-          )}
-
-          {/* 取得済み handle 一覧 */}
+          {/* 取得済み handle 一覧 (2回目以降は編集が主動線なので先頭に置く) */}
           {owned.length > 0 && (
-            <div className="border-t border-slate-100 pt-3">
+            <div>
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {t('yourHandles', { count: owned.length, max })}
               </h4>
@@ -236,8 +194,14 @@ export function HandleClaimPanel({
                 {owned.map((o) => {
                   const h = o.handle;
                   const link = origin ? `${origin}/@${h}` : `/@${h}`;
+                  const isEditing = editingHandle === h;
                   return (
-                    <li key={h} className="rounded-lg bg-slate-50 p-3">
+                    <li
+                      key={h}
+                      className={`rounded-lg p-3 ${
+                        isEditing ? 'bg-amber-50 ring-1 ring-amber-300' : 'bg-slate-50'
+                      }`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <span className="break-all font-mono text-xs text-slate-700">
                           {link}
@@ -250,6 +214,7 @@ export function HandleClaimPanel({
                                 // 入力欄を編集対象 handle に合わせる (update が正しい handle を
                                 // 狙うため)。同時に親へ config/profile の prefill を通知。
                                 setInput(o.handle);
+                                setPublished(null);
                                 onEdit(o.handle, o.config, o.profile);
                               }}
                               className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
@@ -257,6 +222,14 @@ export function HandleClaimPanel({
                               {t('edit')}
                             </button>
                           )}
+                          <a
+                            href={link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                          >
+                            {t('open')}
+                          </a>
                           <button
                             type="button"
                             onClick={() => linkCopy.copy(link)}
@@ -287,6 +260,119 @@ export function HandleClaimPanel({
               </ul>
             </div>
           )}
+
+          {/* 取得/更新フォーム */}
+          <div className={owned.length > 0 ? 'border-t border-slate-100 pt-3' : ''}>
+            {editingHandle ? (
+              // 編集モードを明示 (黙ってフォームが書き換わるのが最大の混乱源)。
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2">
+                <span className="text-xs font-medium text-amber-800">
+                  {t('editingBanner', { handle: editingHandle })}
+                </span>
+                {onStopEditing && (
+                  <button
+                    type="button"
+                    onClick={onStopEditing}
+                    className="flex-none text-xs font-semibold text-amber-700 underline hover:text-amber-900"
+                  >
+                    {t('stopEditing')}
+                  </button>
+                )}
+              </div>
+            ) : (
+              owned.length > 0 && (
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('newHandleTitle')}
+                </h4>
+              )
+            )}
+            {/* 受取先/方法 未確定なら取得は不可だが、サインイン + 取得済み一覧の編集は可能。 */}
+            {!config && (
+              <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                {t('needReceiver')}
+              </p>
+            )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-slate-400">{origin || 'open-pay.jp'}/@</span>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  setPublished(null);
+                }}
+                placeholder={t('handlePlaceholder')}
+                maxLength={30}
+                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-400">{t('formatHint')}</p>
+            {/* 入力検証 + 空き状態 */}
+            {input.length > 0 && !validation.ok && (
+              <p className="mt-1 text-xs text-red-600">
+                {validation.reason === 'reserved' ? t('reservedWord') : t('invalidFormat')}
+              </p>
+            )}
+            {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。 */}
+            {validation.ok &&
+              debounced === normalized &&
+              !ownedNames.includes(normalized) && (
+                <p className="mt-1 text-xs">
+                  {availability.isFetching ? (
+                    <span className="text-slate-400">{t('checking')}</span>
+                  ) : availability.data?.available ? (
+                    <span className="text-emerald-600">{t('available')}</span>
+                  ) : availability.data ? (
+                    <span className="text-red-600">{t('taken')}</span>
+                  ) : null}
+                </p>
+              )}
+            {/* 編集中に別名を入れた場合: 同内容の複製になることを事前警告。 */}
+            {editingHandle &&
+              validation.ok &&
+              normalized !== editingHandle && (
+                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  {t('copyAsNewHint', { editing: editingHandle, name: normalized })}
+                </p>
+              )}
+
+            <button
+              type="button"
+              onClick={() => normalized && config && publish.mutate(normalized)}
+              disabled={
+                !config || // 受取先/方法 未確定では取得/更新できない
+                !validation.ok ||
+                publish.isPending ||
+                // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
+                (availability.data?.available === false &&
+                  !ownedNames.includes(normalized)) ||
+                (atLimit && !ownedNames.includes(normalized))
+              }
+              className="mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {publish.isPending
+                ? t('claiming')
+                : ownedNames.includes(normalized)
+                  ? t('updateButton')
+                  : t('claimButton')}
+            </button>
+            {/* 公開結果のフィードバック (無言で入力が消えるのは「何が起きたか」不明だった) */}
+            {published && !publish.isPending && (
+              <p className="mt-2 text-xs font-medium text-emerald-600">
+                {published.status === 'created'
+                  ? t('publishedCreated', { handle: published.handle })
+                  : t('publishedUpdated', { handle: published.handle })}
+              </p>
+            )}
+            {atLimit && (
+              <p className="mt-2 text-xs text-amber-700">{t('limitReached', { max })}</p>
+            )}
+            {publish.isError && (
+              <p className="mt-2 text-xs text-red-600">
+                {t('claimError', { error: (publish.error as Error).message })}
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -146,4 +146,17 @@ describe('HandleProfileBuilder', () => {
     // ビルダーが組む methods には usdc が含まれない (JPYC のみで config 完成)
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
   });
+
+  it('編集開始でヘッダに「編集中」バッジ・「編集をやめる」でフォームを既定へ戻す', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(screen.queryByText('「@alice」を編集中')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(screen.getByText('「@alice」を編集中')).toBeInTheDocument();
+    // やめる → バッジと USDC 通知が消え、新規作成モードへ
+    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
+    expect(screen.queryByText('「@alice」を編集中')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+    ).not.toBeInTheDocument();
+  });
 });

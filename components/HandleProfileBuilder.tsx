@@ -10,7 +10,7 @@
 // (lg で sticky 追従)。下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。
 // flag OFF で何も描画しない。
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
@@ -68,11 +68,16 @@ const inputClass =
 
 export function HandleProfileBuilder() {
   const t = useTranslations('HandleProfile');
+  const tc = useTranslations('HandleClaim');
   const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
   const { address: connected } = useAccount();
   const [resolved, setResolved] = useState<Address | null>(null);
   // 編集中レコードが旧 USDC (cross-chain) method を持つか。更新で外れることを明示する。
   const [editedHadUsdc, setEditedHadUsdc] = useState(false);
+  // どの @handle を編集中か (null = 新規作成)。「編集」でフォームが黙って書き換わるのが
+  // 混乱源だったため、ヘッダのバッジ + パネルのバナーで対象を常時明示する。
+  const [editingHandle, setEditingHandle] = useState<string | null>(null);
+  const headingRef = useRef<HTMLDivElement>(null);
 
   const colorValid = COLOR_PATTERN.test(draft.color);
 
@@ -155,11 +160,22 @@ export function HandleProfileBuilder() {
     }
   };
 
+  // 編集をやめて新規作成へ。フォームは既定に戻す (受取先だけは使い回せるので保持)。
+  const onStopEditing = () => {
+    setEditingHandle(null);
+    setEditedHadUsdc(false);
+    setSettings((s) => ({ ...DEFAULT_PROFILE_DRAFT, to: s.to }));
+  };
+
   const onEditExisting = (
-    _handle: string,
+    handle: string,
     c: HandleTipConfig,
     p?: HandleProfile,
   ) => {
+    setEditingHandle(handle);
+    // パネル (右カラム/モバイルは下部) から押すとフォームの書き換わりが見えないため、
+    // フォーム先頭へスクロールして「いま編集している」ことを視覚的に伝える。
+    headingRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     setResolved(isAddress(c.to) ? getAddress(c.to) : null);
     // 旧レコードの USDC method はビルダーで編集できない → 更新で外れることを明示する。
     setEditedHadUsdc(c.methods.some((m) => m.token === 'usdc'));
@@ -237,8 +253,22 @@ export function HandleProfileBuilder() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-800">{t('builderHeading')}</h2>
+      <div ref={headingRef} className="scroll-mt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-lg font-semibold text-slate-800">{t('builderHeading')}</h2>
+          {editingHandle && (
+            <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+              {tc('editingBanner', { handle: editingHandle })}
+              <button
+                type="button"
+                onClick={onStopEditing}
+                className="underline hover:text-amber-950"
+              >
+                {tc('stopEditing')}
+              </button>
+            </span>
+          )}
+        </div>
         <p className="mt-1 text-sm text-slate-500">{t('builderSubheading')}</p>
       </div>
 
@@ -467,7 +497,14 @@ export function HandleProfileBuilder() {
             </div>
           )}
 
-          <HandleClaimPanel config={config} profile={profile} onEdit={onEditExisting} />
+          <HandleClaimPanel
+            config={config}
+            profile={profile}
+            onEdit={onEditExisting}
+            editingHandle={editingHandle}
+            onStopEditing={onStopEditing}
+            onPublished={setEditingHandle}
+          />
         </aside>
       </div>
     </div>

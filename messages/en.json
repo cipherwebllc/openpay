@@ -583,7 +583,14 @@
     "copied": "Copied",
     "edit": "Edit",
     "release": "Release",
-    "releaseConfirm": "Release {handle}? This permanent link will stop working."
+    "releaseConfirm": "Release {handle}? This permanent link will stop working.",
+    "editingBanner": "Editing “@{handle}”",
+    "stopEditing": "Stop editing",
+    "newHandleTitle": "Claim a new handle",
+    "open": "Open",
+    "copyAsNewHint": "“@{editing}” stays as is — a new handle “@{name}” will be claimed with the same content.",
+    "publishedCreated": "Claimed “@{handle}”! You can keep editing and updating it.",
+    "publishedUpdated": "Updated “@{handle}”."
   },
   "HandleProfile": {
     "supportHeading": "Choose how to support",

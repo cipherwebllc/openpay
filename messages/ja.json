@@ -583,7 +583,14 @@
     "copied": "コピー済み",
     "edit": "編集",
     "release": "解放",
-    "releaseConfirm": "{handle} を解放しますか？この恒久リンクは無効になります。"
+    "releaseConfirm": "{handle} を解放しますか？この恒久リンクは無効になります。",
+    "editingBanner": "「@{handle}」を編集中",
+    "stopEditing": "編集をやめる",
+    "newHandleTitle": "新しいハンドルを取得",
+    "open": "開く",
+    "copyAsNewHint": "「@{editing}」はそのまま残し、同じ内容で新しいハンドル「@{name}」を取得します。",
+    "publishedCreated": "「@{handle}」を取得しました！続けてこのまま編集・更新できます。",
+    "publishedUpdated": "「@{handle}」を更新しました。"
   },
   "HandleProfile": {
     "supportHeading": "応援する方法を選ぶ",
