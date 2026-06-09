@@ -56,7 +56,7 @@ describe('WalletBalances', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('非ゼロ残高をトークン別グループで表示し、整形される', () => {
+  it('非ゼロ残高をフラット表示し、各行に金額 + トークン記号サフィックスを出す', () => {
     useWalletTokenBalances.mockReturnValue({
       isLoading: false,
       data: [
@@ -68,9 +68,10 @@ describe('WalletBalances', () => {
     renderWithIntl(<WalletBalances />);
 
     expect(screen.getByText('保有残高')).toBeInTheDocument();
-    expect(screen.getByText('USDC')).toBeInTheDocument();
-    expect(screen.getByText('JPYC')).toBeInTheDocument();
-    // USDC は小数 2 桁、JPYC は整数 + 桁区切り
+    // グループ見出しは廃止。記号は各行のサフィックスとして出る (USDC×2 行 / JPYC×1 行)。
+    expect(screen.getAllByText('USDC')).toHaveLength(2);
+    expect(screen.getAllByText('JPYC')).toHaveLength(1);
+    // 金額は記号と別 span (数字のみのノード)。USDC は小数 2 桁、JPYC は整数 + 桁区切り。
     expect(screen.getByText('12.50')).toBeInTheDocument();
     expect(screen.getByText('20.00')).toBeInTheDocument();
     expect(screen.getByText('1,000')).toBeInTheDocument();
