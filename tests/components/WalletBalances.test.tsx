@@ -120,4 +120,17 @@ describe('WalletBalances', () => {
       screen.getByText('一部のチェーンは残高を取得できませんでした。'),
     ).toBeInTheDocument();
   });
+
+  it('チェーン名が解決できない chainId は "chain <id>" フォールバックで行を描画 (graceful)', () => {
+    useWalletTokenBalances.mockReturnValue({
+      isLoading: false,
+      data: [bal('usdc', 999_999, 3_000_000n)], // 3.00・未対応 chainId (name/logo 無し)
+    });
+    renderWithIntl(<WalletBalances />);
+    expect(screen.getByText('3.00')).toBeInTheDocument();
+    // chainNameForId 解決不可 → `chain <id>` フォールバック名で描画。
+    expect(screen.getByText('chain 999999')).toBeInTheDocument();
+    // logo 無し chain は TokenOnChainBadge が graceful degrade → 行の img はトークン 1 枚のみ。
+    expect(screen.getByRole('listitem').querySelectorAll('img')).toHaveLength(1);
+  });
 });
