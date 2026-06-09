@@ -78,10 +78,15 @@ describe('BillingDueBanner', () => {
     ).toHaveAttribute('href', '/ja/billing');
   });
 
-  it('延滞後 (delinquent=true) → 出さない (ゲートが引き継ぐ)', () => {
+  it('延滞中 (delinquent=true) → 停止警告を出す (受取/create 側にも気づかせる)', () => {
     h.invoice = graceInvoice({ delinquent: true });
-    const { container } = renderWithIntl(<BillingDueBanner />, { locale: 'ja' });
-    expect(container).toBeEmptyDOMElement();
+    renderWithIntl(<BillingDueBanner />, { locale: 'ja' });
+    expect(screen.getByText(/ガスレス決済が停止中/)).toBeInTheDocument();
+    expect(screen.getByText(/100 JPYC が未払い/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /今すぐ支払う/ })).toHaveAttribute(
+      'href',
+      '/ja/billing',
+    );
   });
 
   it('支払い済み (feeCurrent=true) → 出さない', () => {

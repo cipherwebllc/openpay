@@ -31,24 +31,45 @@ export function BillingDueBanner() {
   const data = invoice.data;
   if (!enabled || !data) return null;
 
-  // 猶予中 (前月請求あり・未払い・まだ delinquent でない) のときだけ予告。
+  // 前月分が未払い (請求あり・未清算・非bypass)。2 状態で店主に告知する:
+  //   猶予中 (delinquent=false): 予告「お支払い時期です・◯日以降停止」(黄)
+  //   延滞中 (delinquent=true) : 停止「ガスレス停止中・客は払えない・払えば再開」(赤) ← /create でも必ず出す
   const dueWei = BigInt(data.due.feeWei);
-  const show =
-    !data.bypass && !data.feeCurrent && !data.delinquent && dueWei > 0n;
-  if (!show) return null;
+  const owe = !data.bypass && !data.feeCurrent && dueWei > 0n;
+  if (!owe) return null;
 
+  const fee = formatJpyc(data.due.feeWei);
+
+  // 延滞中: ガスレスが実際に止まっている → 強い赤の停止警告 (受取側に必ず気づかせる)。
+  if (data.delinquent) {
+    return (
+      <div className="mb-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 print:hidden">
+        <p className="text-sm font-semibold text-red-900">{t('pausedTitle')}</p>
+        <p className="mt-1 text-xs leading-relaxed text-red-800">
+          {t('pausedBody', { fee })}
+        </p>
+        <Link
+          href={`/${locale}/billing`}
+          className="mt-2 inline-block rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+        >
+          {t('dueBannerCta')}
+        </Link>
+      </div>
+    );
+  }
+
+  // 猶予中: まだ止まっていない → 黄の予告 (○○以降停止)。
   const deadline = new Date(data.graceEndsAt).toLocaleDateString(
     locale === 'ja' ? 'ja-JP' : 'en-US',
     { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric' },
   );
-
   return (
     <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 print:hidden">
       <p className="text-sm font-semibold text-amber-900">
         {t('dueBannerTitle')}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-amber-800">
-        {t('dueBannerBody', { fee: formatJpyc(data.due.feeWei), date: deadline })}
+        {t('dueBannerBody', { fee, date: deadline })}
       </p>
       <Link
         href={`/${locale}/billing`}

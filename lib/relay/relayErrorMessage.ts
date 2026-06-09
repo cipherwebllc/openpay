@@ -7,6 +7,7 @@ export type RelayErrorKey =
   | 'errorRelayRateLimited'
   | 'errorRelayNotConfigured'
   | 'errorRelayInsufficientBalance'
+  | 'errorRelayFeePaused'
   | 'errorRelayGeneric';
 
 export function relayErrorKey(err: Error): RelayErrorKey {
@@ -17,6 +18,10 @@ export function relayErrorKey(err: Error): RelayErrorKey {
       return 'errorRelayNotConfigured';
     case 'insufficient_balance':
       return 'errorRelayInsufficientBalance';
+    // a1 関所: 店主の利用料が延滞でガスレスが停止中。一過性でないので「再試行」案内は出さず、
+    // 店主への確認 / 通常モードへ誘導する (顧客に店主の未払いは明かさない)。
+    case 'fee_required':
+      return 'errorRelayFeePaused';
     default:
       return 'errorRelayGeneric';
   }
