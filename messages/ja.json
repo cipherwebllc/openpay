@@ -544,7 +544,18 @@
     "urlPlaceholder": "受取アドレスを入力すると URL が生成されます",
     "snippetPlaceholder": "受取アドレスを入力するとスニペットが生成されます",
     "openInNewTab": "新しいタブで開く →",
-    "embedHint": "ブログ・ポートフォリオサイト・GitHub README (raw HTML が許可されている場合) などにそのまま貼り付けられます。"
+    "embedHint": "ブログ・ポートフォリオサイト・GitHub README (raw HTML が許可されている場合) などにそのまま貼り付けられます。",
+    "shareXButton": "X でシェア",
+    "shareTextNamed": "{name} さんへ — OpenPay で JPYC / USDC のチップを送れます",
+    "shareTextGeneric": "OpenPay で JPYC / USDC のチップを送れます",
+    "qrTitle": "リンクの QR コード",
+    "qrHint": "印刷やレジ横に。スマホで読み取ってそのまま開けます。",
+    "embedIframeTab": "iframe",
+    "embedButtonTab": "ボタン",
+    "buttonSnippetTitle": "ボタン埋め込みコード",
+    "buttonSnippetHint": "note・Linktree・ブログに貼れる「チップ」ボタンです。",
+    "buttonLabelNamed": "{name} さんにチップ",
+    "buttonLabelGeneric": "チップを送る"
   },
   "CheckoutForm": {
     "header": "ご注文のお支払い",

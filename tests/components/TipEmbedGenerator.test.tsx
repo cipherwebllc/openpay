@@ -353,6 +353,95 @@ describe('TipEmbedGenerator — コピーボタン', () => {
   });
 });
 
+describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め込み)', () => {
+  it('share タブ: アドレス入力で「X でシェア」(twitter intent + tipUrl) と QR が出る', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+    const xLink = await screen.findByRole('link', { name: 'X でシェア' });
+    const href = xLink.getAttribute('href') ?? '';
+    expect(href).toContain('twitter.com/intent/tweet');
+    expect(href).toContain(VALID); // url= に tipUrl が含まれる
+
+    // QR: 見出し + svg が share タブに出る
+    expect(screen.getByText('リンクの QR コード')).toBeInTheDocument();
+    expect(container.querySelector('svg')).not.toBeNull();
+  });
+
+  it('share タブ: アドレス未入力なら X シェア / QR は出ない', async () => {
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    expect(screen.queryByRole('link', { name: 'X でシェア' })).toBeNull();
+    expect(screen.queryByText('リンクの QR コード')).toBeNull();
+  });
+
+  it('embed タブ: iframe→ボタン 切替で <a> スニペット (tipUrl + ラベル) を出す', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await openEmbedTab(user);
+
+    // default は iframe
+    expect(screen.getByText('iframe 埋め込みコード')).toBeInTheDocument();
+
+    // ボタン サブタブへ
+    await user.click(screen.getByRole('tab', { name: 'ボタン' }));
+    expect(screen.getByText('ボタン埋め込みコード')).toBeInTheDocument();
+    expect(screen.queryByText('iframe 埋め込みコード')).toBeNull();
+
+    const code = container.querySelector('pre code');
+    expect(code?.textContent).toContain(
+      `<a href="https://test.local/tip/${VALID}`,
+    );
+    expect(code?.textContent).toContain('チップを送る');
+  });
+
+  it('embed タブ ボタン: コピーで <a> スニペットが clipboard に入る', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await openEmbedTab(user);
+    await user.click(screen.getByRole('tab', { name: 'ボタン' }));
+    await user.click(screen.getByRole('button', { name: 'コピー' }));
+
+    expect(writeText).toHaveBeenCalled();
+    expect(writeText.mock.calls[0][0]).toContain('<a href=');
+    expect(writeText.mock.calls[0][0]).toContain(`/tip/${VALID}`);
+  });
+
+  it('tipUrl が QR 容量を超えても crash せず QR を省略 (リンク/X シェアは残る)', async () => {
+    // 長い webhook で tipUrl を肥大させると qrcode.react が throw しうる。長さガードで
+    // QR を省略し、share タブが落ちないことを検証する。
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        chain: 'polygon',
+        receiver: VALID,
+        webhook: `https://hook.example.com/${'a'.repeat(1400)}`,
+      }),
+    );
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    // X シェアは長い URL でも出る (crash していない)
+    expect(
+      await screen.findByRole('link', { name: 'X でシェア' }),
+    ).toBeInTheDocument();
+    // QR は容量超過のため省略される
+    expect(screen.queryByText('リンクの QR コード')).toBeNull();
+  });
+});
+
 describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => {
   it('default 閉。開くと thanks / thanksUrl / webhook 入力が出る', async () => {
     const user = userEvent.setup();

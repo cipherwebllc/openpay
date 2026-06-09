@@ -6,6 +6,12 @@ const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // OG 画像ルート (/api/og/tip) は実行時に fs で日本語フォントを読む。serverless
+  // 関数バンドルに .ttf を確実に含めるため出力ファイルトレースに明示追加する
+  // (動的 path の fs 読込は nft が自動検出できないため)。
+  outputFileTracingIncludes: {
+    '/api/og/tip': ['./app/api/og/fonts/**'],
+  },
   // /tip/[address] は iframe 埋め込みを想定するため、X-Frame-Options を出さず、
   // CSP frame-ancestors で全 origin 許可する。アクションは MetaMask 等のウォレット
   // ポップアップ内で行われるため、iframe 内でのクリックジャッキングは成立しない。

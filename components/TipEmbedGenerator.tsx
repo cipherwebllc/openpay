@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   ChevronDown,
   Code2,
@@ -44,6 +45,10 @@ import {
 
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
+// QR を描く tipUrl の上限長。これを超えると qrcode.react が「Data too long」で throw し
+// share タブが落ちる (長い webhook/thanksUrl/preset で URL が肥大した場合)。容量に余裕を
+// 持たせた閾値で、超過時は QR を省略する (リンク/X シェアは長い URL でも機能する)。
+const QR_MAX_URL_LEN = 1200;
 // color 入力が不正 (COLOR_PATTERN 不一致) のときのプレビュー/プレースホルダ既定色。
 const DEFAULT_PREVIEW_COLOR = '#2563eb';
 
@@ -58,6 +63,7 @@ const RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter((slug) =>
 );
 
 type PublishMode = 'share' | 'embed';
+type EmbedFormat = 'iframe' | 'button';
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -70,6 +76,7 @@ export function TipEmbedGenerator() {
   const iframeCopy = useCopyToClipboard();
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   const [publishMode, setPublishMode] = useState<PublishMode>('share');
+  const [embedFormat, setEmbedFormat] = useState<EmbedFormat>('iframe');
   const [devOpen, setDevOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
@@ -168,6 +175,33 @@ export function TipEmbedGenerator() {
   loading="lazy"
 ></iframe>`;
   }, [tipUrl]);
+
+  // SNS シェア: X (Twitter) の intent。text と url を別々に渡し、X 側で url を unfurl
+  // させる (P1 の動的 OG カードが表示される)。tipUrl 未確定なら空。
+  const shareText = settings.name
+    ? t('shareTextNamed', { name: settings.name })
+    : t('shareTextGeneric');
+  const xShareUrl = useMemo(() => {
+    if (!tipUrl) return '';
+    return `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+      shareText,
+    )}&url=${encodeURIComponent(tipUrl)}`;
+  }, [tipUrl, shareText]);
+
+  // ボタン埋め込み: note / Linktree / ブログに貼れる「チップ」ボタン (styled <a>)。
+  // ラベル・URL とも HTML へ実体参照化して注入 (escapeAttr は & " < > を変換)。
+  const buttonLabel = settings.name
+    ? t('buttonLabelNamed', { name: settings.name })
+    : t('buttonLabelGeneric');
+  const buttonColor = colorValid ? settings.color : DEFAULT_PREVIEW_COLOR;
+  const buttonSnippet = useMemo(() => {
+    if (!tipUrl) return '';
+    return `<a href="${escapeAttr(tipUrl)}" target="_blank" rel="noopener"
+  style="display:inline-block;background:${buttonColor};color:#fff;font-weight:700;padding:12px 22px;border-radius:9999px;text-decoration:none;font-family:system-ui,-apple-system,sans-serif">${escapeAttr(buttonLabel)}</a>`;
+  }, [tipUrl, buttonColor, buttonLabel]);
+
+  // embed タブで実際に表示/コピーするスニペット (iframe / button の切替)。
+  const activeSnippet = embedFormat === 'iframe' ? iframeSnippet : buttonSnippet;
 
   function selectToken(tok: TokenSymbol) {
     setSettings((s) => ({
@@ -516,17 +550,80 @@ export function TipEmbedGenerator() {
                   {t('openInNewTab')}
                 </a>
               )}
+              {tipUrl && (
+                <div className="mt-3 space-y-3">
+                  {/* X (Twitter) シェア: 貼ると P1 の動的 OG カードが unfurl される。 */}
+                  <a
+                    href={xShareUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400"
+                  >
+                    <Share2 className="h-3.5 w-3.5" aria-hidden />
+                    {t('shareXButton')}
+                  </a>
+                  {/* リンクの QR: 印刷・レジ横・対面で読み取って開ける。URL が QR 容量を
+                      超える長さだと qrcode.react が throw するため、閾値以下のみ描画。 */}
+                  {tipUrl.length <= QR_MAX_URL_LEN && (
+                    <div>
+                      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t('qrTitle')}
+                      </h4>
+                      <div className="flex justify-center rounded-lg border border-slate-200 bg-white p-3">
+                        <QRCodeSVG
+                          value={tipUrl}
+                          size={148}
+                          includeMargin
+                          level="M"
+                        />
+                      </div>
+                      <p className="mt-1.5 text-xs text-slate-400">
+                        {t('qrHint')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div>
+              {/* 形式切替: iframe (全画面ウィジェット) / button (リンク貼付)。default iframe。 */}
+              <div
+                className="mb-2 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
+                role="tablist"
+              >
+                {(
+                  [
+                    ['iframe', t('embedIframeTab')],
+                    ['button', t('embedButtonTab')],
+                  ] as const
+                ).map(([fmt, label]) => (
+                  <button
+                    key={fmt}
+                    type="button"
+                    role="tab"
+                    aria-selected={embedFormat === fmt}
+                    onClick={() => setEmbedFormat(fmt)}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      embedFormat === fmt
+                        ? 'bg-white text-brand-dark shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="mb-1.5 flex items-center justify-between">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('iframeTitle')}
+                  {embedFormat === 'iframe'
+                    ? t('iframeTitle')
+                    : t('buttonSnippetTitle')}
                 </h4>
                 <button
                   type="button"
-                  onClick={() => iframeCopy.copy(iframeSnippet)}
-                  disabled={!iframeSnippet}
+                  onClick={() => iframeCopy.copy(activeSnippet)}
+                  disabled={!activeSnippet}
                   className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {iframeCopy.copied ? t('copied') : t('copy')}
@@ -534,14 +631,18 @@ export function TipEmbedGenerator() {
               </div>
               <pre className="overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">
                 <code>
-                  {iframeSnippet || (
+                  {activeSnippet || (
                     <span className="text-slate-500">
                       {t('snippetPlaceholder')}
                     </span>
                   )}
                 </code>
               </pre>
-              <p className="mt-2 text-xs text-slate-500">{t('embedHint')}</p>
+              <p className="mt-2 text-xs text-slate-500">
+                {embedFormat === 'iframe'
+                  ? t('embedHint')
+                  : t('buttonSnippetHint')}
+              </p>
             </div>
           )}
 

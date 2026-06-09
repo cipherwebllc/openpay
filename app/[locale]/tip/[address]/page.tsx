@@ -12,12 +12,91 @@ import {
   searchParamsFromNext,
   type RouteSearch,
 } from '@/lib/url';
+import {
+  buildTipMeta,
+  buildTipOgImageUrl,
+  tokenLabelFor,
+  nativeLabelFor,
+  type TipCardFacts,
+  type TipOgLocale,
+} from '@/lib/ogTipCard';
 
-export const metadata: Metadata = {
-  title: 'OpenPay Tip',
-  description:
-    'OpenPay Tip widget — instant tipping in JPYC / USDC, gasless via ERC-4337.',
-};
+// SNS シェア時の OGP を creator ごとに動的生成する。受取人名・トークンを反映した
+// title/description と、/api/og/tip の動的 OG 画像 (1200x630) を返す。URL 不正は
+// generic に倒す (parseTipParams の入力検証は本体描画が担う)。og:image は相対パス
+// で返し、root layout の metadataBase で絶対化する。
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string; address: string }>;
+  searchParams: Promise<RouteSearch>;
+}): Promise<Metadata> {
+  const { locale, address } = await params;
+  const ogLocale: TipOgLocale = locale === 'en' ? 'en' : 'ja';
+  const sp = searchParamsFromNext(await searchParams);
+
+  // native (POL/KAIA) tip は ?native= の別系統で、送り手が自分のガスを払う = gasless
+  // ではない。token tip (gasless) と分けて facts を組み、「ガス不要」の誤表示を防ぐ。
+  let facts: TipCardFacts | null = null;
+  let ogImage = `/api/og/tip?locale=${ogLocale}`;
+  if (sp.get('native') != null) {
+    const native = parseNativeTipParams(address, sp);
+    if (native.ok) {
+      facts = {
+        name: native.params.name,
+        tokenLabel: nativeLabelFor(native.params.chain),
+        gasless: false,
+      };
+      ogImage = buildTipOgImageUrl(
+        address,
+        {
+          native: native.params.chain,
+          name: native.params.name,
+          color: native.params.color,
+        },
+        ogLocale,
+      );
+    }
+  } else {
+    const parsed = parseTipParams(address, sp);
+    if (parsed.ok) {
+      facts = {
+        name: parsed.params.name,
+        tokenLabel: tokenLabelFor(parsed.params.token),
+        gasless: true,
+      };
+      ogImage = buildTipOgImageUrl(
+        address,
+        {
+          token: parsed.params.token,
+          name: parsed.params.name,
+          color: parsed.params.color,
+        },
+        ogLocale,
+      );
+    }
+  }
+
+  const { title, description } = buildTipMeta(facts, ogLocale);
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: 'website',
+      images: [{ url: ogImage, width: 1200, height: 630, alt: title }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImage],
+    },
+  };
+}
 
 export default async function TipPage({
   params,

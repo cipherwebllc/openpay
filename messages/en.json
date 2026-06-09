@@ -544,7 +544,18 @@
     "urlPlaceholder": "Enter the receiver address to generate a URL",
     "snippetPlaceholder": "Enter the receiver address to generate a snippet",
     "openInNewTab": "Open in new tab →",
-    "embedHint": "Paste into a blog, portfolio, or GitHub README (where raw HTML is allowed)."
+    "embedHint": "Paste into a blog, portfolio, or GitHub README (where raw HTML is allowed).",
+    "shareXButton": "Share on X",
+    "shareTextNamed": "Tip {name} with JPYC / USDC on OpenPay",
+    "shareTextGeneric": "Send a tip in JPYC / USDC with OpenPay",
+    "qrTitle": "Link QR code",
+    "qrHint": "Print it or show at the counter — scan to open.",
+    "embedIframeTab": "iframe",
+    "embedButtonTab": "Button",
+    "buttonSnippetTitle": "Button embed code",
+    "buttonSnippetHint": "A \"Tip\" button for note, Linktree, or your blog.",
+    "buttonLabelNamed": "Tip {name}",
+    "buttonLabelGeneric": "Send a tip"
   },
   "CheckoutForm": {
     "header": "Order checkout",

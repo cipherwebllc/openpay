@@ -87,12 +87,14 @@ The chooser is hidden when the customer has USDC on **only** the merchant's chai
 
 ### Tip widget (creator surface)
 
-Creators can embed a **Tip widget** (`/tip/[address]`) on their blog, portfolio, or GitHub README via a single `<iframe>` snippet. Same chain reach as the payment page:
+Creators can **share a tip link** (`/tip/[address]`) or **embed a Tip widget** on their blog, portfolio, or GitHub README. Same chain reach as the payment page:
 
 - **JPYC** — receive tips on **Polygon or Kaia**. Default is Polygon; switch to Kaia in the creator dashboard chain chooser when generating the embed snippet.
 - **USDC** — receive on any of **6 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1 / Avalanche C-Chain). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on the 5 buyer-only chains (Unichain, World Chain, Sonic, Sei, HyperEVM). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
 
 The widget is gasless-only — fans only need the tip token, no native gas (for JPYC OpenPay bears the gas and collects nothing; for USDC the fan pays gas in USDC via the Pimlico / Circle paymaster, OpenPay collects 0). Creator-defined presets, custom thank-you message, optional webhook on success. (Because tips are gasless-only and gasless relies on EIP-7702, USDC tips on **Avalanche C-Chain** are unavailable until ACP-209 activates — fans are guided to another chain; see the Avalanche note above.)
+
+**Sharing & social preview** — the tip builder (`/create` → tip) outputs the link with one-tap copy, a **link QR** (for print / in-person; omitted automatically if the URL is too long for a scannable code), and a **“Share on X”** button, plus two embeds: the full **`<iframe>`** widget and a paste-anywhere **“Tip” button** snippet (note / Linktree / blog). Tip links shared on X / Discord / LINE unfurl into a **dynamic OG card** (`/api/og/tip`, 1200×630) with the creator’s name + token + brand (Japanese names rendered via a bundled Noto Sans JP). The card stays accurate per mode — gasless JPYC/USDC say “no gas”, native POL/KAIA tips don’t (the sender pays their own gas). The OG endpoint only honours the creator name for a valid tip link (`to` + token/native); arbitrary direct hits fall back to a generic branded card.
 
 ## Non-custodial design
 
