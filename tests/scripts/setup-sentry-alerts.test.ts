@@ -4,6 +4,8 @@
 // このファイル内で完結検証する。
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   RULES,
   buildRulePayload,
@@ -23,10 +25,10 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(tags).toContain('cross-chain.balance-query.failed');
     // a1 OpenPay 利用料 (現行実装のイベント名)。旧 billing.fee.* は退役済。
     expect(tags).toContain('billing.settle.misconfigured');
-    expect(tags).toContain('billing.settle.grant');
-    expect(tags).toContain('billing.settle.rpc');
+    expect(tags).toContain('billing.settle.grant-failed');
+    expect(tags).toContain('billing.settle.rpc-error');
     expect(tags).toContain('billing.settle.unexpected');
-    expect(tags).toContain('billing.settle.release');
+    expect(tags).toContain('billing.settle.release-failed');
     expect(tags).toContain('billing.meter.record_failed');
     expect(tags).toContain('billing.revenue.record_failed');
   });
@@ -47,10 +49,10 @@ describe('setup-sentry-alerts: RULES schema', () => {
   it('a1 billing money-path rule は低 threshold (正常時ほぼ 0・即調査対象)', () => {
     const byTag = (t: string) => RULES.find((r) => r.eventTag === t);
     expect(byTag('billing.settle.misconfigured')?.threshold).toBe(1);
-    expect(byTag('billing.settle.grant')?.threshold).toBe(3);
-    expect(byTag('billing.settle.rpc')?.threshold).toBe(3);
+    expect(byTag('billing.settle.grant-failed')?.threshold).toBe(3);
+    expect(byTag('billing.settle.rpc-error')?.threshold).toBe(3);
     expect(byTag('billing.settle.unexpected')?.threshold).toBe(3);
-    expect(byTag('billing.settle.release')?.threshold).toBe(1);
+    expect(byTag('billing.settle.release-failed')?.threshold).toBe(1);
     expect(byTag('billing.meter.record_failed')?.threshold).toBe(5);
     expect(byTag('billing.revenue.record_failed')?.threshold).toBe(3);
     // settle.verify (warn=店主の誤 tx・期待挙動) / settle.promote (warn=一過性) は alert を作らない
@@ -86,6 +88,33 @@ describe('setup-sentry-alerts: RULES schema', () => {
   it('rule name はユニーク (冪等性 key として機能するため)', () => {
     const names = RULES.map((r) => r.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('全 billing.* eventTag は app/lib のソースで実際に emit されている (tag タイポでアラート不発を防ぐ)', () => {
+    // 過去バグ (Codex review で検出): 'billing.settle.grant' を指定したが実 emit は
+    // 'billing.settle.grant-failed' で、アラートが永久に発火しなかった。RULES の billing tag が
+    // 実 logger.warn/error 文字列に存在することをソース走査で恒久 fence する (script の
+    // 自己整合だけでは tag タイポを検出できないため)。
+    const emitted = new Set<string>();
+    const re = /logger\.(?:warn|error)\(\s*['"`](billing\.[A-Za-z0-9._-]+)['"`]/g;
+    for (const root of ['app', 'lib']) {
+      const files = readdirSync(root, { recursive: true }).filter(
+        (f): f is string => typeof f === 'string' && f.endsWith('.ts'),
+      );
+      for (const f of files) {
+        const src = readFileSync(join(root, f), 'utf8');
+        for (const m of src.matchAll(re)) emitted.add(m[1]);
+      }
+    }
+    // sanity: 走査が機能している保証 (billing イベントは複数存在する)。
+    expect(emitted.size).toBeGreaterThan(3);
+    for (const rule of RULES) {
+      if (!rule.eventTag.startsWith('billing.')) continue;
+      expect(
+        emitted.has(rule.eventTag),
+        `${rule.eventTag} は app/lib のどこからも logger.warn/error で emit されていない (tag タイポ?)`,
+      ).toBe(true);
+    }
   });
 });
 

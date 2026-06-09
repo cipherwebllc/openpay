@@ -29,11 +29,11 @@
 //   localStorage.set failed     > 100 件/h
 //   cross-chain.execute.failed  > 20 件/h
 //   cross-chain.balance-query.* > 100 件/h
-//   billing.settle.misconfigured  > 1 件/h  (FEE_RECEIVER 未設定の運用ミス)
-//   billing.settle.grant          > 3 件/h  (検証OKだが付与KV書込失敗=支払ったのに未反映)
-//   billing.settle.rpc            > 3 件/h  (chain RPC 障害で検証不能)
-//   billing.settle.unexpected     > 3 件/h  (money-path の想定外 throw)
-//   billing.settle.release        > 1 件/h  (idempotency ロック焼失・手動 KV 削除が必要)
+//   billing.settle.misconfigured   > 1 件/h  (FEE_RECEIVER 未設定の運用ミス)
+//   billing.settle.grant-failed    > 3 件/h  (検証OKだが付与KV書込失敗=支払ったのに未反映)
+//   billing.settle.rpc-error       > 3 件/h  (chain RPC 障害で検証不能)
+//   billing.settle.unexpected      > 3 件/h  (money-path の想定外 throw)
+//   billing.settle.release-failed  > 1 件/h  (idempotency ロック焼失・手動 KV 削除が必要)
 //   billing.meter.record_failed   > 5 件/h  (出来高メーター取りこぼし=利用料 undercount)
 //   billing.revenue.record_failed > 3 件/h  (収益台帳の欠落=会計ギャップ)
 //
@@ -42,6 +42,13 @@
 //   2. p95 × 2 を新 threshold として本 RULES 配列を更新
 //   3. Sentry Dashboard で旧 rule を delete
 //   4. 本 script を再実行 (idempotent、新 rule が registered される)
+//
+// ⚠️ 冪等性は rule NAME 一致で判定する。eventTag (filter) や threshold を変更しても、同名の
+//   既存 rule があれば SKIP され filter/threshold は更新されない。tag/threshold を変えた場合は
+//   必ず Sentry Dashboard で旧 rule を削除してから再実行すること。
+//   (2026-06-09: billing.settle.{grant,rpc,release} → {grant-failed,rpc-error,release-failed} へ
+//    eventTag を修正。rule NAME は元から -failed/-error 表記で不変。本 script は未実行のため
+//    旧 tag の rule は本番未作成だが、もし作成済の環境があれば削除してから再実行する。)
 
 const ALERT_ENV = process.env.SENTRY_ALERT_ENV || 'mainnet';
 const API_BASE = process.env.SENTRY_API_BASE || 'https://sentry.io';
@@ -144,7 +151,7 @@ export const RULES = [
     description:
       'on-chain 検証は通ったが利用権/支払期間の永続化 (KV 書込) に失敗。店主が JPYC で利用料を ' +
       '払ったのに反映されない状態。1 時間に 3 件超で通知 (KV / Upstash 障害のサイン)。',
-    eventTag: 'billing.settle.grant',
+    eventTag: 'billing.settle.grant-failed',
     threshold: 3,
     interval: '1h',
   },
@@ -154,7 +161,7 @@ export const RULES = [
       '/api/billing/settle の getTransactionReceipt が transport 障害 (RPC ダウン/rate limit/timeout)。' +
       'tx_not_found (店主の誤 tx) とは区別される。1 時間に 3 件超で通知 = RPC 障害が利用料の検証を ' +
       '広く弾いているサイン。RPC override の確認/切替を。',
-    eventTag: 'billing.settle.rpc',
+    eventTag: 'billing.settle.rpc-error',
     threshold: 3,
     interval: '1h',
   },
@@ -172,7 +179,7 @@ export const RULES = [
     description:
       'idempotency 処理ロックの解放 (kvDel) に失敗。当該 txHash は再提出が already_processed で ' +
       '弾かれロックが焼失する。1 時間に 1 件超で通知し、log の settledKey を運用で手動削除する。',
-    eventTag: 'billing.settle.release',
+    eventTag: 'billing.settle.release-failed',
     threshold: 1,
     interval: '1h',
   },

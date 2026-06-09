@@ -6,8 +6,8 @@
 //
 // 各行は「トークンアイコン (主役) + チェーンを右下に小バッジで重ね + チェーン名 +
 // 金額 + トークン記号」。チェーンロゴだけだと OP / Kaia 等のネイティブトークンと
-// 誤読されるため、トークンを主役に据える (TokenOnChainBadge)。並びは USDC 先頭 →
-// JPYC、各トークン内は残高降順。
+// 誤読されるため、トークンを主役に据える (TokenOnChainBadge)。並びは JPYC 先頭 →
+// USDC (日本のホームトークン JPYC を上に)、各トークン内は残高降順。
 //
 // 取得失敗 (RPC timeout 等) の chain は表示から除外し (非ブロッキング)、1 件でも
 // 失敗があれば控えめな注記を出す。
@@ -59,7 +59,7 @@ export function WalletBalances() {
     );
   }
 
-  // フラット表示: USDC 先頭 → JPYC、各トークン内は残高降順。各行が
+  // フラット表示: JPYC 先頭 → USDC、各トークン内は残高降順。各行が
   // トークンアイコン + 記号で自己完結するため、旧トークン別グループ見出しは廃止。
   const rows = [...nonZero].sort((a, b) => {
     const oa = TOKEN_ORDER.indexOf(a.deployment.symbol);
