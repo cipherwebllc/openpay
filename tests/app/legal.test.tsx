@@ -324,7 +324,7 @@ describe('Legal pages', () => {
       ).toBeInTheDocument();
     });
 
-    it('役務の対価: OpenPay 利用料 1% (2026年7月から・中抜きでない・6月まで無料)、旧 % 都度手数料 (1.0%/0.5%) と最低手数料文の不在 (regression guard)', () => {
+    it('役務の対価: OpenPay 利用料 1% (2026年7月から・JPYC ガスレス限定・月次後払い・6月まで無料)、旧 % 都度手数料 (1.0%/0.5%) と最低手数料文の不在 (regression guard)', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
       // a1: OpenPay 利用料 1% (2026年7月のご利用分から) を正面で assert
@@ -333,6 +333,9 @@ describe('Legal pages', () => {
       expect(main.textContent).toMatch(/2026 年 7 月/);
       // 各決済から差し引かず月次でまとめて後払い (都度の差引でない) を明示
       expect(main.textContent).toMatch(/後払い/);
+      // 課金トリガー = JPYC ガスレスのみ。「対応トークン」(USDC を巻き込む) への逆戻りを検知。
+      expect(main.textContent).toMatch(/JPYC のガスレス決済/);
+      expect(main.textContent).not.toMatch(/ガスレス決済モードで受領した対応トークンの額/);
       // 旧 % 都度手数料 (決済額連動の都度徴収) 表記は撤去済 (1.0% / 0.5%)
       expect(main.textContent).not.toMatch(/1\.0%/);
       expect(main.textContent).not.toMatch(/0\.5%/);
@@ -424,6 +427,8 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/2026 年 7 月/);
       expect(body?.textContent).toMatch(/後払い/);
       expect(body?.textContent).toMatch(/0%/);
+      // 課金トリガー = JPYC ガスレスのみ (USDC を巻き込む「対応トークン」への逆戻りを検知)
+      expect(body?.textContent).toMatch(/JPYC のガスレス決済/);
       // 旧 % 都度手数料は撤去
       expect(body?.textContent).not.toMatch(/1\.0%/);
       expect(body?.textContent).not.toMatch(/0\.5%/);
@@ -461,6 +466,8 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/1%/);
       expect(body?.textContent).toMatch(/July 2026/);
       expect(body?.textContent).toMatch(/billed monthly rather than deducted/i);
+      // 課金トリガー = JPYC ガスレスのみ ("Supported Tokens via Gasless Payment mode" への逆戻り検知)
+      expect(body?.textContent).toMatch(/JPYC gasless payments/);
       expect(body?.textContent).toMatch(/0%/);
       expect(body?.textContent).not.toMatch(/1\.0%/);
       expect(body?.textContent).not.toMatch(/0\.5%/);
