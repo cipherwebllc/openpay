@@ -96,6 +96,22 @@ export function kvLtrim(
   return call<'OK'>(['LTRIM', key, String(start), String(stop)]);
 }
 
+// LREM key 0 value: value の全出現を原子的に削除 (削除数を返す)。read-modify-write を
+// 避けて list から 1 要素を消す (例: 所有 handle index からの解放)。
+export function kvLrem(key: string, value: string): Promise<KvResult<number>> {
+  return call<number>(['LREM', key, '0', value]);
+}
+
+// EVAL: Lua スクリプトを原子実行する。compare-and-set (例: 所有者一致時のみ更新/削除) など
+// nx/incr で表せない原子操作に使う。Upstash REST は EVAL + 標準 Lua (cjson 含む) を提供。
+export function kvEval<T = unknown>(
+  script: string,
+  keys: string[],
+  args: string[],
+): Promise<KvResult<T>> {
+  return call<T>(['EVAL', script, String(keys.length), ...keys, ...args]);
+}
+
 // --- Phase B hardening 用の原子プリミティブ (nonce 採番 / idempotency / gas budget) ---
 
 // 原子インクリメント (採番カウンタ・gas budget)。初回は 1。

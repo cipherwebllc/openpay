@@ -341,6 +341,12 @@ export const env = {
   enableUsageFee:
     process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === 'true',
+  // @handle 恒久クリエイターリンク (open-pay.jp/@alice) の有効化フラグ。**既定 OFF**。
+  // OFF の間は /@handle ページ・/api/handle/* ・dashboard の claim UI すべて inert
+  // (404/非表示)。staged rollout 用 (testnet + モデレーション体制確認後に点灯)。要 KV。
+  enableHandles:
+    process.env.NEXT_PUBLIC_ENABLE_HANDLES === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_HANDLES === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
