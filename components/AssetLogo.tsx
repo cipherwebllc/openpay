@@ -64,18 +64,16 @@ export function TokenOnChainBadge({
   symbol,
   chainId,
   size = 24,
-  className,
 }: {
   symbol: TokenSymbol;
   chainId: number;
   size?: number;
-  className?: string;
 }) {
   const chainLogo = chainLogoPathForId(chainId);
   const badge = Math.round(size * 0.58);
   return (
     <span
-      className={`relative inline-block shrink-0${className ? ` ${className}` : ''}`}
+      className="relative inline-block shrink-0"
       style={{ width: size, height: size }}
     >
       <TokenLogo symbol={symbol} size={size} />
