@@ -214,6 +214,20 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
     affiliate: true,
   },
   {
+    id: 'oisy-wallet',
+    name: 'OISY Wallet',
+    // OISY 紹介リンク (referrer)。成果報酬型の紹介のため affiliate 扱い (広告開示)。
+    url: 'https://oisy.com/?referrer=1855321185',
+    category: 'dapp',
+    description: {
+      ja: 'Internet Computer 上で動く、拡張機能やシードフレーズ不要のブラウザ完結型マルチチェーンウォレット。ETH / BTC / USDC 等を passkey で管理できる。',
+      en: 'A fully on-chain, browser-based multi-chain wallet on the Internet Computer — no extension or seed phrase, managing ETH / BTC / USDC and more via passkeys.',
+    },
+    badges: ['global'],
+    tokens: ['usdc'],
+    affiliate: true,
+  },
+  {
     id: 'safe',
     name: 'Safe',
     url: 'https://app.safe.global/',
