@@ -1023,3 +1023,37 @@ describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => 
     }
   });
 });
+
+describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity)', () => {
+  function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
+    return Object.entries(o)
+      .flatMap(([k, v]) =>
+        v && typeof v === 'object'
+          ? deepKeys(v as Record<string, unknown>, `${prefix}${k}.`)
+          : [`${prefix}${k}`],
+      )
+      .sort();
+  }
+
+  for (const ns of ['HandleClaim', 'HandleProfile'] as const) {
+    it(`${ns}: ja と en でキー集合が完全一致`, () => {
+      expect(deepKeys(ja[ns] as Record<string, unknown>)).toEqual(
+        deepKeys(en[ns] as Record<string, unknown>),
+      );
+    });
+    it(`${ns}: 全 leaf が非空文字列`, () => {
+      for (const m of [ja, en]) {
+        for (const leaf of Object.values(m[ns] as Record<string, unknown>)) {
+          if (typeof leaf === 'string') {
+            expect(leaf.trim().length).toBeGreaterThan(0);
+          }
+        }
+      }
+    });
+  }
+
+  it('Create.tabs.profile が ja/en 双方に存在', () => {
+    expect(typeof (ja.Create as { tabs: Record<string, string> }).tabs.profile).toBe('string');
+    expect(typeof (en.Create as { tabs: Record<string, string> }).tabs.profile).toBe('string');
+  });
+});

@@ -1,26 +1,23 @@
 // @handle 恒久リンクの解決ページ (catch-all)。`open-pay.jp/@alice` → /{locale}/@alice。
-// segment が `@` 始まりのみ handle として解決し、保存設定から /tip と同じ TipForm を描画 +
-// 動的 OGP (P1 再利用)。それ以外の未知 segment と flag OFF と未存在は notFound。
+// segment が `@` 始まりのみ handle として解決し、保存設定から link-in-bio プロフィール
+// (HandleProfileView) + 受取方法メニュー (ReceiveMethodPicker → TipForm) を描画 + 動的 OGP。
+// それ以外の未知 segment と flag OFF と未存在は notFound。
 //
 // 注: catch-all なので未知の単一 segment を全て受けるが、static route (pay/tip/create…) が
 // 優先され、`@` 以外は即 notFound するため KV は `/@...` のときだけ読む。
 
 import type { Metadata } from 'next';
-import { getTranslations, setRequestLocale } from 'next-intl/server';
+import { setRequestLocale } from 'next-intl/server';
 import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { env } from '@/lib/env';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
-import { TipForm } from '@/components/TipForm';
-import { parseTipParams } from '@/lib/url';
+import { HandleProfileView } from '@/components/HandleProfile';
+import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
-import {
-  normalizeHandle,
-  decodeHandleSegment,
-  configToSearchParams,
-} from '@/lib/handle';
+import { normalizeHandle, decodeHandleSegment } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import {
   buildTipMeta,
@@ -54,16 +51,17 @@ export async function generateMetadata({
     return { title: generic.title, description: generic.description };
   }
   const c = resolved.record.config;
-  // @handle config は token tip (ERC20 gasless) 固定。
+  // OGP カードは代表方法 (最初の受取方法) の token で表示。受取自体は全方法 gasless。
+  const primary = c.methods[0];
   const facts: TipCardFacts = {
     name: c.name,
-    tokenLabel: tokenLabelFor(c.token),
+    tokenLabel: tokenLabelFor(primary.token),
     gasless: true,
   };
   const { title, description } = buildTipMeta(facts, ogLocale);
   const ogImage = buildTipOgImageUrl(
     c.to,
-    { token: c.token, name: c.name, color: c.color },
+    { token: primary.token, name: c.name, color: c.color },
     ogLocale,
   );
   return {
@@ -111,29 +109,23 @@ export default async function HandlePage({
     notFound();
   }
   const record = resolved.record;
-
-  const t = await getTranslations('TipForm');
-  // 保存設定を tip クエリに戻して parseTipParams で再検証 (token/chain 非対応化等の
-  // staleness を /tip と同じ UI で吸収する)。
-  const parsed = parseTipParams(
-    record.config.to,
-    configToSearchParams(record.config),
-  );
-  const inner = parsed.ok ? (
-    <TipForm params={parsed.params} />
-  ) : (
-    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-      <p className="font-semibold">{t('urlInvalidTitle')}</p>
-      <p className="mt-2">{parsed.error}</p>
-    </div>
-  );
+  const profile = record.profile;
+  const hasProfile =
+    !!profile &&
+    (!!profile.bio || !!profile.avatar || (profile.links?.length ?? 0) > 0);
 
   return (
     <main className="mx-auto w-full max-w-md px-3 py-4">
       <div className="mb-3 flex justify-end">
         <LocaleSwitcher />
       </div>
-      {inner}
+      {hasProfile && (
+        <div className="mb-6">
+          <HandleProfileView config={record.config} profile={profile} />
+        </div>
+      )}
+      {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
+      <ReceiveMethodPicker config={record.config} />
     </main>
   );
 }

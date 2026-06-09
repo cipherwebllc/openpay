@@ -17,16 +17,22 @@ vi.mock('@/lib/kv', () => kv);
 import {
   resolveHandle,
   listHandlesForOwner,
+  listHandleRecordsForOwner,
   reserveOrUpdateHandle,
   releaseHandle,
 } from '@/lib/handleStore';
+import type { HandleTipConfig } from '@/lib/handle';
 
 const OWNER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const OTHER = '0x000000000000000000000000000000000000dEaD';
+const CONFIG: HandleTipConfig = {
+  to: OWNER,
+  methods: [{ token: 'jpyc', chain: 'polygon' }],
+};
 const recJson = (owner: string, createdAt = 1) =>
   JSON.stringify({
     owner,
-    config: { to: OWNER, token: 'jpyc' },
+    config: CONFIG,
     createdAt,
     updatedAt: createdAt,
   });
@@ -77,7 +83,7 @@ describe('resolveHandle', () => {
 });
 
 describe('reserveOrUpdateHandle', () => {
-  const base = { handle: 'alice', owner: OWNER, config: { to: OWNER, token: 'jpyc' as const }, nowMs: 100 };
+  const base = { handle: 'alice', owner: OWNER, config: CONFIG, nowMs: 100 };
 
   it('KV 未設定 → kv_unavailable', async () => {
     kv.isKvConfigured.mockReturnValue(false);
@@ -96,6 +102,54 @@ describe('reserveOrUpdateHandle', () => {
     expect(res.record?.createdAt).toBe(42);
     expect(kv.kvEval).toHaveBeenCalled(); // owner-conditional CAS で置換
     expect(kv.kvSet).not.toHaveBeenCalled(); // nx claim は新規のみ
+  });
+
+  it('update は builder 非管理の tip メタ (message/webhook) を既存から保持', async () => {
+    const existing = JSON.stringify({
+      owner: OWNER,
+      config: {
+        to: OWNER,
+        methods: [{ token: 'jpyc', chain: 'polygon' }],
+        message: 'thx',
+        webhook: 'https://hook.example',
+      },
+      createdAt: 5,
+      updatedAt: 5,
+    });
+    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    // base.config は message/webhook を持たない (builder が送らない) → 既存値を保持。
+    const res = await reserveOrUpdateHandle(base);
+    expect(res.status).toBe('updated');
+    expect(res.record?.config.message).toBe('thx');
+    expect(res.record?.config.webhook).toBe('https://hook.example');
+  });
+
+  it('update で profile 省略 → 既存 profile を保持 (config-only update が消さない)', async () => {
+    const existing = JSON.stringify({
+      owner: OWNER,
+      config: CONFIG,
+      profile: { bio: 'keep me' },
+      createdAt: 5,
+      updatedAt: 5,
+    });
+    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    const res = await reserveOrUpdateHandle(base); // base に profile 無し (undefined)
+    expect(res.status).toBe('updated');
+    expect(res.record?.profile).toEqual({ bio: 'keep me' });
+  });
+
+  it('update で profile:{} 明示 → クリア', async () => {
+    const existing = JSON.stringify({
+      owner: OWNER,
+      config: CONFIG,
+      profile: { bio: 'x' },
+      createdAt: 5,
+      updatedAt: 5,
+    });
+    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    const res = await reserveOrUpdateHandle({ ...base, profile: {} });
+    expect(res.status).toBe('updated');
+    expect(res.record?.profile).toBeUndefined();
   });
 
   it('既存 & 同 owner だが CAS で owner 変化 (value!=1) → taken', async () => {
@@ -139,6 +193,54 @@ describe('reserveOrUpdateHandle', () => {
       'wallet:handles:' + OWNER.toLowerCase(),
       'alice',
     );
+  });
+
+  it('profile 付きで created → record に profile を含み serialize される', async () => {
+    const profile = { bio: 'hi', links: [{ label: 'X', url: 'https://x.com/a' }] };
+    const res = await reserveOrUpdateHandle({ ...base, profile });
+    expect(res.status).toBe('created');
+    expect(res.record?.profile).toEqual(profile);
+    const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
+    expect(stored.profile).toEqual(profile);
+  });
+
+  it('空 profile ({}) は record に持たせない', async () => {
+    const res = await reserveOrUpdateHandle({ ...base, profile: {} });
+    expect(res.status).toBe('created');
+    expect(res.record?.profile).toBeUndefined();
+    const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
+    expect(stored.profile).toBeUndefined();
+  });
+});
+
+describe('listHandleRecordsForOwner', () => {
+  it('名前一覧 → 各 record を取得して {handle, record}[] を返す', async () => {
+    kv.kvLrange.mockResolvedValue({ ok: true, value: ['alice', 'bob'] });
+    kv.kvGet
+      .mockResolvedValueOnce({ ok: true, value: recJson(OWNER, 1) }) // alice
+      .mockResolvedValueOnce({ ok: true, value: recJson(OWNER, 2) }); // bob
+    const res = await listHandleRecordsForOwner(OWNER);
+    expect(res?.map((o) => o.handle)).toEqual(['alice', 'bob']);
+    expect(res?.[0].record.config.methods[0].token).toBe('jpyc');
+  });
+  it('record 取得が KV エラー → null (空と区別)', async () => {
+    kv.kvLrange.mockResolvedValue({ ok: true, value: ['alice'] });
+    kv.kvGet.mockResolvedValue({ ok: false });
+    expect(await listHandleRecordsForOwner(OWNER)).toBeNull();
+  });
+  it('名前一覧が null (KV エラー) → null', async () => {
+    kv.kvLrange.mockResolvedValue({ ok: false });
+    expect(await listHandleRecordsForOwner(OWNER)).toBeNull();
+  });
+  it('index に名前はあるが record 消失 → 黙ってスキップ', async () => {
+    kv.kvLrange.mockResolvedValue({ ok: true, value: ['ghost'] });
+    kv.kvGet.mockResolvedValue({ ok: true, value: null });
+    expect(await listHandleRecordsForOwner(OWNER)).toEqual([]);
+  });
+  it('stale index が別 owner の record を指す → スキップ (他人の handle を返さない)', async () => {
+    kv.kvLrange.mockResolvedValue({ ok: true, value: ['taken'] });
+    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OTHER) }); // 別 owner
+    expect(await listHandleRecordsForOwner(OWNER)).toEqual([]);
   });
 });
 

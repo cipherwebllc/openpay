@@ -154,7 +154,8 @@
     "tabs": {
       "qr": "決済QR",
       "tip": "チップ",
-      "register": "レジ"
+      "register": "レジ",
+      "profile": "プロフ"
     },
     "tabDesc": {
       "qr": "店舗向け: レジ掲示用の決済 QR を作成します。"
@@ -580,8 +581,37 @@
     "yourHandles": "取得済み ({count}/{max})",
     "copy": "コピー",
     "copied": "コピー済み",
+    "edit": "編集",
     "release": "解放",
     "releaseConfirm": "{handle} を解放しますか？この恒久リンクは無効になります。"
+  },
+  "HandleProfile": {
+    "supportHeading": "応援する方法を選ぶ",
+    "supportWith": "{label} で応援",
+    "crossChain": "cross-chain",
+    "builderHeading": "プロフィールページ (@handle)",
+    "builderSubheading": "覚えやすい固定リンクに、複数の通貨での受け取り口とリンク集をまとめます。",
+    "receiverLabel": "受取先 (全方法 共通)",
+    "receiverHint": "アドレス / ENS。すべての受取方法がこの 1 つのウォレットに着金します。",
+    "useConnectedWallet": "接続中のウォレットを使う",
+    "methodsLabel": "受け取る方法",
+    "atLeastOneMethod": "受取方法を 1 つ以上選んでください。",
+    "nameLabel": "表示名",
+    "colorLabel": "テーマ色",
+    "presetsLabel": "金額プリセット ({token})",
+    "addPreset": "金額を追加",
+    "removePreset": "削除",
+    "profileSection": "プロフィール",
+    "bioLabel": "ひとこと (bio)",
+    "avatarLabel": "アバター画像 URL",
+    "avatarHint": "https:// の画像 URL を指定 (任意)。",
+    "linksLabel": "リンク",
+    "httpsOnlyHint": "リンクは https:// のみ。安全のため http や javascript は無効です。",
+    "linkLabelPlaceholder": "ラベル (例: X)",
+    "addLink": "リンクを追加",
+    "removeLink": "削除",
+    "insecureDropped": "https 以外のリンク / 画像は保存されません。",
+    "previewHeading": "プレビュー"
   },
   "CheckoutForm": {
     "header": "ご注文のお支払い",

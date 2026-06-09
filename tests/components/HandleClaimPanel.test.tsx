@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
-import type { PublishableTipConfig } from '@/lib/handle';
+import type { HandleTipConfig } from '@/lib/handle';
 
 // env フラグ / SIWE 状態を制御する hoisted state。
 const h = vi.hoisted(() => ({ enableHandles: true, isSignedIn: false }));
@@ -30,12 +30,12 @@ vi.mock('@/hooks/useSiweSession', () => ({
 
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 
-const CONFIG: PublishableTipConfig = {
+const CONFIG: HandleTipConfig = {
   to: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
-  token: 'jpyc',
+  methods: [{ token: 'jpyc', chain: 'polygon' }],
 };
 
-function renderPanel(config: PublishableTipConfig | null) {
+function renderPanel(config: HandleTipConfig | null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
     <QueryClientProvider client={qc}>
@@ -56,10 +56,11 @@ describe('HandleClaimPanel', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('flag ON + config 無し → 受取先設定の案内', () => {
+  it('flag ON + 未サインイン → config の有無に関わらずサインインボタン (編集到達性)', () => {
+    // config 無しでもサインインを出す (既存 handle の編集/解放を受取先未設定でも到達可能に)。
     renderPanel(null);
     expect(
-      screen.getByText('先に受取先を設定すると取得できます。'),
+      screen.getByRole('button', { name: 'サインインして取得' }),
     ).toBeInTheDocument();
   });
 

@@ -1,7 +1,7 @@
 // @handle 予約/更新 + 所有一覧 API (SIWE 必須)。NEXT_PUBLIC_ENABLE_HANDLES OFF で 404 (inert)。
 //
-// POST /api/handle { handle, config }  → 予約 (新規) or 所有者による設定更新
-// GET  /api/handle                     → 自分が保有する handle 一覧
+// POST /api/handle { handle, config, profile? }  → 予約 (新規) or 所有者による設定更新
+// GET  /api/handle  → 自分が保有する handle を**レコード込み**で返す (編集 UI の prefill 用)
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
@@ -9,10 +9,15 @@ import { logger } from '@/lib/logger';
 import { requireSession } from '../auth/siwe/_session';
 import {
   validateHandle,
-  validateTipConfig,
+  validateHandleTipConfig,
+  validateProfile,
   MAX_HANDLES_PER_WALLET,
+  type HandleProfile,
 } from '@/lib/handle';
-import { reserveOrUpdateHandle, listHandlesForOwner } from '@/lib/handleStore';
+import {
+  reserveOrUpdateHandle,
+  listHandleRecordsForOwner,
+} from '@/lib/handleStore';
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
@@ -25,13 +30,19 @@ export async function GET() {
   if (!env.enableHandles) return notFound();
   const session = await requireSession();
   if (!session.ok) return session.response;
-  const handles = await listHandlesForOwner(session.address);
-  if (handles === null) {
+  const owned = await listHandleRecordsForOwner(session.address);
+  if (owned === null) {
     return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 502 });
   }
+  // 編集 prefill のため config/profile も返す (公開ページと同じレコード)。
   return NextResponse.json({
     ok: true,
-    handles,
+    handles: owned.map((o) => ({
+      handle: o.handle,
+      config: o.record.config,
+      profile: o.record.profile,
+      updatedAt: o.record.updatedAt,
+    })),
     max: MAX_HANDLES_PER_WALLET,
   });
 }
@@ -50,7 +61,11 @@ export async function POST(req: Request) {
   if (typeof body !== 'object' || body === null) {
     return NextResponse.json({ ok: false, error: 'invalid_body' }, { status: 400 });
   }
-  const { handle: rawHandle, config: rawConfig } = body as Record<string, unknown>;
+  const {
+    handle: rawHandle,
+    config: rawConfig,
+    profile: rawProfile,
+  } = body as Record<string, unknown>;
   if (typeof rawHandle !== 'string') {
     return NextResponse.json({ ok: false, error: 'handle_required' }, { status: 400 });
   }
@@ -63,7 +78,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const config = validateTipConfig(rawConfig);
+  const config = validateHandleTipConfig(rawConfig);
   if (!config.ok) {
     return NextResponse.json(
       { ok: false, error: 'invalid_config', detail: config.error },
@@ -71,10 +86,25 @@ export async function POST(req: Request) {
     );
   }
 
+  // profile が body に無ければ undefined を渡す (= update で既存 profile を保持)。
+  // 明示的に与えられた場合のみ検証して置換 (空 {} はクリア)。
+  let profileArg: HandleProfile | undefined;
+  if (rawProfile !== undefined && rawProfile !== null) {
+    const profile = validateProfile(rawProfile);
+    if (!profile.ok) {
+      return NextResponse.json(
+        { ok: false, error: 'invalid_profile', detail: profile.error },
+        { status: 400 },
+      );
+    }
+    profileArg = profile.profile;
+  }
+
   const result = await reserveOrUpdateHandle({
     handle: validated.handle,
     owner: session.address,
     config: config.config,
+    profile: profileArg,
     nowMs: Date.now(),
   });
 

@@ -42,9 +42,6 @@ import {
   TIP_PRESET_MAX,
   type TipParams,
 } from '@/lib/url';
-import { HandleClaimPanel } from './HandleClaimPanel';
-import type { PublishableTipConfig } from '@/lib/handle';
-import { env } from '@/lib/env';
 
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
@@ -205,37 +202,6 @@ export function TipEmbedGenerator() {
 
   // embed タブで実際に表示/コピーするスニペット (iframe / button の切替)。
   const activeSnippet = embedFormat === 'iframe' ? iframeSnippet : buttonSnippet;
-
-  // @handle 恒久リンクに publish する設定 (tipUrl と同じ source から導出)。受取先未確定は null。
-  const publishableConfig = useMemo<PublishableTipConfig | null>(() => {
-    if (!effectiveReceiver) return null;
-    return {
-      to: effectiveReceiver,
-      token: settings.token,
-      chain: settings.chain,
-      name: settings.name || undefined,
-      message: settings.message || undefined,
-      color: colorValid ? settings.color : undefined,
-      presets: presetsForUrl,
-      thanks: settings.thanks || undefined,
-      thanksUrl: settings.thanksUrl || undefined,
-      webhook: settings.webhook || undefined,
-      crossChain: settings.token === 'usdc' ? settings.crossChain : undefined,
-    };
-  }, [
-    effectiveReceiver,
-    settings.token,
-    settings.chain,
-    settings.name,
-    settings.message,
-    colorValid,
-    settings.color,
-    presetsForUrl,
-    settings.thanks,
-    settings.thanksUrl,
-    settings.webhook,
-    settings.crossChain,
-  ]);
 
   function selectToken(tok: TokenSymbol) {
     setSettings((s) => ({
@@ -683,9 +649,8 @@ export function TipEmbedGenerator() {
           <p className="mt-3 text-xs text-slate-400">{t('feeNote')}</p>
         </StepCard>
 
-        {/* @handle 恒久リンク。flag OFF では mount しない (react-query hook を走らせない
-            ため親でゲート。panel 内にも防御の早期 return null あり)。 */}
-        {env.enableHandles && <HandleClaimPanel config={publishableConfig} />}
+        {/* @handle 恒久リンクは「プロフ」タブ (HandleProfileBuilder) へ移設。チップタブは
+            単一チップの生成に専念する。 */}
 
         {/* 開発者向け設定 (折りたたみ、default 閉): 成功画面 + webhook */}
         <div className="rounded-2xl border border-slate-200 bg-white">

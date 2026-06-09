@@ -14,11 +14,13 @@ import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
 import { RegisterMode } from '@/components/RegisterMode';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
+import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
+import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 
-type Tab = 'qr' | 'register' | 'tip';
+type Tab = 'qr' | 'register' | 'tip' | 'profile';
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
@@ -41,6 +43,10 @@ export default function CreatePage() {
             ['qr', t('tabs.qr')],
             ['register', t('tabs.register')],
             ['tip', t('tabs.tip')],
+            // 「プロフ」(@handle link-in-bio) は flag ON のときだけ露出。
+            ...(env.enableHandles
+              ? ([['profile', t('tabs.profile')]] as const)
+              : []),
           ] as const
         ).map(([id, label]) => (
           <button
@@ -81,6 +87,7 @@ export default function CreatePage() {
           <TipEmbedGenerator />
         </div>
       )}
+      {tab === 'profile' && env.enableHandles && <HandleProfileBuilder />}
 
       <MiniHistoryRecent />
 

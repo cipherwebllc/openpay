@@ -38,6 +38,7 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
 const store = vi.hoisted(() => ({
   reserveOrUpdateHandle: vi.fn(),
   listHandlesForOwner: vi.fn(),
+  listHandleRecordsForOwner: vi.fn(),
   resolveHandle: vi.fn(),
   releaseHandle: vi.fn(),
 }));
@@ -47,6 +48,8 @@ import { GET as mineGET, POST } from '@/app/api/handle/route';
 import { GET as availGET, DELETE } from '@/app/api/handle/[handle]/route';
 
 const ADDR = OWNER;
+// 新スキーマの最小有効 config (マルチ方法)。
+const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
 function postReq(body: unknown) {
   return new Request('http://localhost/api/handle', {
     method: 'POST',
@@ -66,36 +69,65 @@ beforeEach(() => {
 describe('POST /api/handle', () => {
   it('flag OFF → 404 (inert) and never touches the store', async () => {
     h.enableHandles = false;
-    const res = await POST(postReq({ handle: 'alice', config: { to: ADDR, token: 'jpyc' } }));
+    const res = await POST(postReq({ handle: 'alice', config: CFG }));
     expect(res.status).toBe(404);
     expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
   });
 
   it('unauthenticated → 401', async () => {
     h.authed = false;
-    const res = await POST(postReq({ handle: 'alice', config: { to: ADDR, token: 'jpyc' } }));
+    const res = await POST(postReq({ handle: 'alice', config: CFG }));
     expect(res.status).toBe(401);
   });
 
   it('reserve success → 201 with owner from session', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({ status: 'created' });
-    const res = await POST(postReq({ handle: '@Alice', config: { to: ADDR, token: 'jpyc' } }));
+    const res = await POST(postReq({ handle: '@Alice', config: CFG }));
     expect(res.status).toBe(201);
     const call = store.reserveOrUpdateHandle.mock.calls[0][0];
     expect(call.handle).toBe('alice'); // normalized
     expect(call.owner).toBe(OWNER);
-    expect(call.config.token).toBe('jpyc');
+    expect(call.config.methods[0].token).toBe('jpyc');
+  });
+
+  it('passes a validated profile through to the store', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'created' });
+    await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: { bio: 'hi', links: [{ label: 'X', url: 'https://x.com/a' }] },
+      }),
+    );
+    const call = store.reserveOrUpdateHandle.mock.calls[0][0];
+    expect(call.profile).toEqual({
+      bio: 'hi',
+      links: [{ label: 'X', url: 'https://x.com/a' }],
+    });
+  });
+
+  it('invalid profile (non-https link) → 400 invalid_profile, no store hit', async () => {
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: { links: [{ label: 'x', url: 'http://insecure' }] },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid_profile');
+    expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
   });
 
   it('taken → 409, limit → 409', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({ status: 'taken' });
-    expect((await POST(postReq({ handle: 'alice', config: { to: ADDR, token: 'jpyc' } }))).status).toBe(409);
+    expect((await POST(postReq({ handle: 'alice', config: CFG }))).status).toBe(409);
     store.reserveOrUpdateHandle.mockResolvedValue({ status: 'limit' });
-    expect((await POST(postReq({ handle: 'bob', config: { to: ADDR, token: 'jpyc' } }))).status).toBe(409);
+    expect((await POST(postReq({ handle: 'bob', config: CFG }))).status).toBe(409);
   });
 
   it('reserved handle → 400 (reserved) without hitting the store', async () => {
-    const res = await POST(postReq({ handle: 'pay', config: { to: ADDR, token: 'jpyc' } }));
+    const res = await POST(postReq({ handle: 'pay', config: CFG }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('reserved');
     expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
@@ -114,12 +146,29 @@ describe('GET /api/handle (mine)', () => {
     h.enableHandles = false;
     expect((await mineGET()).status).toBe(404);
   });
-  it('returns owned handles', async () => {
-    store.listHandlesForOwner.mockResolvedValue(['alice', 'bob']);
+  it('returns owned handles with config/profile (for edit prefill)', async () => {
+    store.listHandleRecordsForOwner.mockResolvedValue([
+      {
+        handle: 'alice',
+        record: {
+          owner: OWNER,
+          config: CFG,
+          profile: { bio: 'hi' },
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      },
+    ]);
     const res = await mineGET();
     const json = await res.json();
-    expect(json.handles).toEqual(['alice', 'bob']);
+    expect(json.handles).toEqual([
+      { handle: 'alice', config: CFG, profile: { bio: 'hi' }, updatedAt: 2 },
+    ]);
     expect(json.max).toBe(3);
+  });
+  it('KV エラー (null) → 502', async () => {
+    store.listHandleRecordsForOwner.mockResolvedValue(null);
+    expect((await mineGET()).status).toBe(502);
   });
 });
 

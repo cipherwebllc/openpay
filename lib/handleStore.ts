@@ -26,7 +26,8 @@ import {
   serializeHandleRecord,
   MAX_HANDLES_PER_WALLET,
   type HandleRecord,
-  type PublishableTipConfig,
+  type HandleTipConfig,
+  type HandleProfile,
 } from '@/lib/handle';
 
 const handleKey = (handle: string) => `handle:${handle}`;
@@ -84,6 +85,34 @@ export async function listHandlesForOwner(
   return Array.from(new Set(list)); // 防御的 dedup (通常フローでは重複しない)
 }
 
+export interface OwnedHandle {
+  handle: string;
+  record: HandleRecord;
+}
+
+/**
+ * owner が保有する handle を **保存レコード込み**で返す (編集 UI の prefill 用)。
+ * 名前一覧 → 各 handle の record 取得 (最大 MAX_HANDLES_PER_WALLET=3 件なので N+1 許容)。
+ * **KV エラーは null** を返し「空」と区別する (listHandlesForOwner と同じ流儀)。index に
+ * 名前はあるが record が消えている/壊れている entry は黙ってスキップ (self-heal は別 op)。
+ */
+export async function listHandleRecordsForOwner(
+  owner: string,
+): Promise<OwnedHandle[] | null> {
+  const names = await listHandlesForOwner(owner);
+  if (names === null) return null;
+  const out: OwnedHandle[] = [];
+  for (const handle of names) {
+    const res = await kvGet(handleKey(handle));
+    if (!res.ok) return null; // 取得失敗は「空」と誤認しない
+    const record = parseHandleRecord(res.value);
+    // owner を再確認: stale index (LREM 失敗後に別 wallet が再取得) で他人の record を
+    // 編集対象として返さない (release の index cleanup 失敗時の安全策)。
+    if (record && sameOwner(record.owner, owner)) out.push({ handle, record });
+  }
+  return out;
+}
+
 export type ReserveStatus =
   | 'created'
   | 'updated'
@@ -106,12 +135,19 @@ export interface ReserveResult {
 export async function reserveOrUpdateHandle(input: {
   handle: string;
   owner: string;
-  config: PublishableTipConfig;
+  config: HandleTipConfig;
+  profile?: HandleProfile;
   nowMs: number;
 }): Promise<ReserveResult> {
   if (!isKvConfigured()) return { status: 'kv_unavailable' };
-  const { handle, owner, config, nowMs } = input;
+  const { handle, owner, config, profile, nowMs } = input;
   const key = handleKey(handle);
+  // profile の三状態: undefined = 「変更しない」(update は既存を保持・新規は無し)、
+  // object = 置換 (空 {} は明示クリア)。config だけ更新する client が link-in-bio を
+  // 不意に消さないため (omit と explicit-empty を区別)。
+  const profileProvided = profile !== undefined;
+  const cleanedProfile =
+    profileProvided && Object.keys(profile).length > 0 ? profile : undefined;
 
   const existingRes = await kvGet(key);
   if (!existingRes.ok) return { status: 'kv_error' };
@@ -119,9 +155,22 @@ export async function reserveOrUpdateHandle(input: {
 
   if (existing) {
     if (!sameOwner(existing.owner, owner)) return { status: 'taken' };
+    // 高度 tip メタ (message/thanks/thanksUrl/webhook) は現行 UI が管理しない。新 config が
+    // 省略していれば既存値を保持する (旧 Tip タブ / API 由来の設定を update で消さない)。
+    // builder が明示送信した値があればそれを優先 (= 将来 UI を足したときに上書き可能)。
+    const mergedConfig: HandleTipConfig = {
+      ...config,
+      message: config.message ?? existing.config.message,
+      thanks: config.thanks ?? existing.config.thanks,
+      thanksUrl: config.thanksUrl ?? existing.config.thanksUrl,
+      webhook: config.webhook ?? existing.config.webhook,
+    };
+    // omit (undefined) なら既存 profile を保持、provided なら置換 (空はクリア)。
+    const nextProfile = profileProvided ? cleanedProfile : existing.profile;
     const record: HandleRecord = {
       owner: existing.owner,
-      config,
+      config: mergedConfig,
+      ...(nextProfile ? { profile: nextProfile } : {}),
       createdAt: existing.createdAt,
       updatedAt: nowMs,
     };
@@ -143,6 +192,7 @@ export async function reserveOrUpdateHandle(input: {
   const record: HandleRecord = {
     owner,
     config,
+    ...(cleanedProfile ? { profile: cleanedProfile } : {}),
     createdAt: nowMs,
     updatedAt: nowMs,
   };

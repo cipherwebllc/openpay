@@ -1,9 +1,10 @@
 'use client';
 
-// @handle 恒久リンクの取得 UI (dashboard)。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
-// SIWE サインイン → handle 入力 + 空き確認 → 現在のチップ設定を publish → /@handle リンク
-// (コピー / QR) を提示。取得済み handle の一覧 + 解放も扱う。設定は親 (TipEmbedGenerator) から
-// PublishableTipConfig として受け取る (受取先未設定なら config=null)。
+// @handle 恒久リンクの取得 UI。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
+// SIWE サインイン → handle 入力 + 空き確認 → 現在のプロフィール設定 (config+profile) を publish →
+// /@handle リンク (コピー / QR) を提示。取得済み handle の一覧 + 編集 (prefill) + 解放も扱う。
+// 設定は親 (HandleProfileBuilder) から HandleTipConfig + HandleProfile として受け取る
+// (受取先/方法 未確定なら config=null)。
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -13,10 +14,20 @@ import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import { validateHandle, type PublishableTipConfig } from '@/lib/handle';
+import {
+  validateHandle,
+  type HandleTipConfig,
+  type HandleProfile,
+} from '@/lib/handle';
 
 type Availability = { available: boolean; reason?: string };
-type MineResponse = { handles: string[]; max: number };
+type OwnedHandle = {
+  handle: string;
+  config: HandleTipConfig;
+  profile?: HandleProfile;
+  updatedAt?: number;
+};
+type MineResponse = { handles: OwnedHandle[]; max: number };
 
 async function fetchJson(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
@@ -26,8 +37,16 @@ async function fetchJson(url: string, init?: RequestInit) {
 
 export function HandleClaimPanel({
   config,
+  profile,
+  onEdit,
 }: {
-  config: PublishableTipConfig | null;
+  config: HandleTipConfig | null;
+  profile?: HandleProfile;
+  onEdit?: (
+    handle: string,
+    config: HandleTipConfig,
+    profile?: HandleProfile,
+  ) => void;
 }) {
   const t = useTranslations('HandleClaim');
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
@@ -66,12 +85,16 @@ export function HandleClaimPanel({
     enabled: env.enableHandles && isSignedIn,
     queryFn: async (): Promise<MineResponse> => {
       const { json } = await fetchJson('/api/handle');
-      return {
-        handles: Array.isArray(json.handles)
-          ? (json.handles as string[])
-          : [],
-        max: typeof json.max === 'number' ? json.max : 3,
-      };
+      const handles = Array.isArray(json.handles)
+        ? (json.handles as unknown[]).filter(
+            (h): h is OwnedHandle =>
+              !!h &&
+              typeof h === 'object' &&
+              typeof (h as OwnedHandle).handle === 'string' &&
+              !!(h as OwnedHandle).config,
+          )
+        : [];
+      return { handles, max: typeof json.max === 'number' ? json.max : 3 };
     },
   });
 
@@ -80,7 +103,7 @@ export function HandleClaimPanel({
       const { ok, status, json } = await fetchJson('/api/handle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ handle, config }),
+        body: JSON.stringify({ handle, config, profile }),
       });
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
       return json;
@@ -107,6 +130,7 @@ export function HandleClaimPanel({
 
   const max = mine.data?.max ?? 3;
   const owned = mine.data?.handles ?? [];
+  const ownedNames = owned.map((o) => o.handle);
   const atLimit = owned.length >= max;
 
   return (
@@ -114,11 +138,8 @@ export function HandleClaimPanel({
       <h3 className="text-sm font-semibold text-slate-800">{t('title')}</h3>
       <p className="mt-1 text-xs text-slate-500">{t('description')}</p>
 
-      {!config ? (
-        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          {t('needReceiver')}
-        </p>
-      ) : !isSignedIn ? (
+      {!isSignedIn ? (
+        // サインインは config の有無に関わらず出す (既存 handle の編集/解放を受取先未設定でも到達可能に)。
         <div className="mt-3">
           <button
             type="button"
@@ -134,6 +155,12 @@ export function HandleClaimPanel({
         </div>
       ) : (
         <div className="mt-3 space-y-3">
+          {/* 受取先/方法 未確定なら取得は不可だが、サインイン + 取得済み一覧の編集は可能。 */}
+          {!config && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {t('needReceiver')}
+            </p>
+          )}
           {/* 取得フォーム */}
           <div>
             <div className="flex items-center gap-1.5">
@@ -157,7 +184,7 @@ export function HandleClaimPanel({
             {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。 */}
             {validation.ok &&
               debounced === normalized &&
-              !owned.includes(normalized) && (
+              !ownedNames.includes(normalized) && (
                 <p className="mt-1 text-xs">
                   {availability.isFetching ? (
                     <span className="text-slate-400">{t('checking')}</span>
@@ -172,20 +199,21 @@ export function HandleClaimPanel({
 
           <button
             type="button"
-            onClick={() => normalized && publish.mutate(normalized)}
+            onClick={() => normalized && config && publish.mutate(normalized)}
             disabled={
+              !config || // 受取先/方法 未確定では取得/更新できない
               !validation.ok ||
               publish.isPending ||
               // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
               (availability.data?.available === false &&
-                !owned.includes(normalized)) ||
-              (atLimit && !owned.includes(normalized))
+                !ownedNames.includes(normalized)) ||
+              (atLimit && !ownedNames.includes(normalized))
             }
             className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40"
           >
             {publish.isPending
               ? t('claiming')
-              : owned.includes(normalized)
+              : ownedNames.includes(normalized)
                 ? t('updateButton')
                 : t('claimButton')}
           </button>
@@ -205,7 +233,8 @@ export function HandleClaimPanel({
                 {t('yourHandles', { count: owned.length, max })}
               </h4>
               <ul className="space-y-3">
-                {owned.map((h) => {
+                {owned.map((o) => {
+                  const h = o.handle;
                   const link = origin ? `${origin}/@${h}` : `/@${h}`;
                   return (
                     <li key={h} className="rounded-lg bg-slate-50 p-3">
@@ -214,6 +243,20 @@ export function HandleClaimPanel({
                           {link}
                         </span>
                         <div className="flex flex-none gap-1.5">
+                          {onEdit && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // 入力欄を編集対象 handle に合わせる (update が正しい handle を
+                                // 狙うため)。同時に親へ config/profile の prefill を通知。
+                                setInput(o.handle);
+                                onEdit(o.handle, o.config, o.profile);
+                              }}
+                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                            >
+                              {t('edit')}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => linkCopy.copy(link)}

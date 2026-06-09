@@ -154,7 +154,8 @@
     "tabs": {
       "qr": "Payment QR",
       "tip": "Tip",
-      "register": "Register"
+      "register": "Register",
+      "profile": "Profile"
     },
     "tabDesc": {
       "qr": "For merchants: create a payment QR to display at the register."
@@ -580,8 +581,37 @@
     "yourHandles": "Your handles ({count}/{max})",
     "copy": "Copy",
     "copied": "Copied",
+    "edit": "Edit",
     "release": "Release",
     "releaseConfirm": "Release {handle}? This permanent link will stop working."
+  },
+  "HandleProfile": {
+    "supportHeading": "Choose how to support",
+    "supportWith": "Support with {label}",
+    "crossChain": "cross-chain",
+    "builderHeading": "Profile page (@handle)",
+    "builderSubheading": "Bundle multiple receive options and a link list into one memorable link.",
+    "receiverLabel": "Receiver (shared by all methods)",
+    "receiverHint": "Address / ENS. Every receive method settles to this single wallet.",
+    "useConnectedWallet": "Use connected wallet",
+    "methodsLabel": "Receive methods",
+    "atLeastOneMethod": "Select at least one receive method.",
+    "nameLabel": "Display name",
+    "colorLabel": "Theme color",
+    "presetsLabel": "Amount presets ({token})",
+    "addPreset": "Add amount",
+    "removePreset": "Remove",
+    "profileSection": "Profile",
+    "bioLabel": "Bio",
+    "avatarLabel": "Avatar image URL",
+    "avatarHint": "An https:// image URL (optional).",
+    "linksLabel": "Links",
+    "httpsOnlyHint": "Links must be https:// only. http and javascript are disabled for safety.",
+    "linkLabelPlaceholder": "Label (e.g. X)",
+    "addLink": "Add link",
+    "removeLink": "Remove",
+    "insecureDropped": "Non-https links / images will not be saved.",
+    "previewHeading": "Preview"
   },
   "CheckoutForm": {
     "header": "Order checkout",

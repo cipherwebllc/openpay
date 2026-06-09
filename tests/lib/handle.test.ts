@@ -7,11 +7,17 @@ import {
   isReserved,
   validateHandle,
   validateTipConfig,
+  validateHandleTipConfig,
+  validateProfile,
+  methodToPublishableConfig,
   configToSearchParams,
   parseHandleRecord,
   serializeHandleRecord,
   MAX_HANDLES_PER_WALLET,
+  MAX_PROFILE_LINKS,
+  DEFAULT_RECEIVE_METHODS,
   type HandleRecord,
+  type HandleTipConfig,
   type PublishableTipConfig,
 } from '@/lib/handle';
 import { parseTipParams } from '@/lib/url';
@@ -129,33 +135,219 @@ describe('configToSearchParams', () => {
   });
 });
 
+describe('validateHandleTipConfig', () => {
+  it('accepts the 3 default methods (JPYC Polygon / Kaia / USDC cross-chain)', () => {
+    const res = validateHandleTipConfig({
+      to: ADDR.toLowerCase(),
+      name: 'Alice',
+      methods: [...DEFAULT_RECEIVE_METHODS],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.to).toBe(getAddress(ADDR));
+      const keys = res.config.methods.map((m) => `${m.token}:${m.chain}`);
+      expect(keys).toContain('jpyc:polygon');
+      expect(keys).toContain('jpyc:kaia');
+      expect(keys.some((k) => k.startsWith('usdc:'))).toBe(true);
+      // USDC 方法は crossChain を保持
+      const usdc = res.config.methods.find((m) => m.token === 'usdc');
+      expect(usdc?.crossChain).toBe(true);
+    }
+  });
+  it('dedupes identical token+chain methods', () => {
+    const res = validateHandleTipConfig({
+      to: ADDR,
+      methods: [
+        { token: 'jpyc', chain: 'polygon' },
+        { token: 'jpyc', chain: 'polygon' },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.config.methods).toHaveLength(1);
+  });
+  it('drops gasless-unsupported / invalid methods but keeps valid ones', () => {
+    const res = validateHandleTipConfig({
+      to: ADDR,
+      methods: [
+        { token: 'jpyc', chain: 'polygon' },
+        { token: 'eth', chain: 'polygon' }, // 無効 token → 除外
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.config.methods).toHaveLength(1);
+  });
+  it('rejects when no method is valid / methods empty / to missing', () => {
+    expect(validateHandleTipConfig({ to: ADDR, methods: [] }).ok).toBe(false);
+    expect(validateHandleTipConfig({ methods: [{ token: 'jpyc', chain: 'polygon' }] }).ok).toBe(
+      false,
+    );
+    expect(
+      validateHandleTipConfig({ to: ADDR, methods: [{ token: 'eth', chain: 'polygon' }] }).ok,
+    ).toBe(false);
+    expect(validateHandleTipConfig(null).ok).toBe(false);
+  });
+  it('keeps per-token presets', () => {
+    const res = validateHandleTipConfig({
+      to: ADDR,
+      methods: [
+        { token: 'jpyc', chain: 'polygon' },
+        { token: 'usdc', chain: 'base', crossChain: true },
+      ],
+      presets: { jpyc: ['300', '500'], usdc: ['5'] },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.presets?.jpyc).toEqual(['300', '500']);
+      expect(res.config.presets?.usdc).toEqual(['5']);
+    }
+  });
+});
+
+describe('validateProfile', () => {
+  it('accepts bio + https avatar + https links', () => {
+    const res = validateProfile({
+      bio: '  Web3 creator ',
+      avatar: 'https://cdn.example.com/a.png',
+      links: [{ label: ' X ', url: 'https://x.com/alice' }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.profile.bio).toBe('Web3 creator');
+      expect(res.profile.avatar).toBe('https://cdn.example.com/a.png');
+      expect(res.profile.links).toEqual([{ label: 'X', url: 'https://x.com/alice' }]);
+    }
+  });
+  it('treats empty / undefined as {} (no profile)', () => {
+    expect(validateProfile(undefined)).toEqual({ ok: true, profile: {} });
+    expect(validateProfile({ bio: '   ', avatar: '', links: [] })).toEqual({
+      ok: true,
+      profile: {},
+    });
+  });
+  it('rejects non-https avatar and link urls (javascript:/data:/http:)', () => {
+    expect(validateProfile({ avatar: 'http://x.com/a.png' }).ok).toBe(false);
+    expect(validateProfile({ links: [{ label: 'x', url: 'javascript:alert(1)' }] }).ok).toBe(
+      false,
+    );
+    expect(validateProfile({ links: [{ label: 'x', url: 'http://x.com' }] }).ok).toBe(false);
+    expect(
+      validateProfile({ links: [{ label: 'x', url: 'data:text/html,hi' }] }).ok,
+    ).toBe(false);
+  });
+  it('rejects too-long bio / too-many links / empty label', () => {
+    expect(validateProfile({ bio: 'x'.repeat(161) }).ok).toBe(false);
+    const many = Array.from({ length: MAX_PROFILE_LINKS + 1 }, (_, i) => ({
+      label: `l${i}`,
+      url: 'https://x.com',
+    }));
+    expect(validateProfile({ links: many }).ok).toBe(false);
+    expect(validateProfile({ links: [{ label: '  ', url: 'https://x.com' }] }).ok).toBe(false);
+  });
+  it('rejects an over-long link url', () => {
+    const longUrl = 'https://x.com/' + 'a'.repeat(520);
+    expect(validateProfile({ links: [{ label: 'x', url: longUrl }] }).ok).toBe(false);
+  });
+});
+
+describe('methodToPublishableConfig', () => {
+  it('maps a method + shared identity to a PublishableTipConfig', () => {
+    const config: HandleTipConfig = {
+      to: ADDR,
+      name: 'Alice',
+      color: '#2563eb',
+      methods: [{ token: 'usdc', chain: 'base', crossChain: true }],
+      presets: { jpyc: ['300'], usdc: ['5'] },
+    };
+    const pc = methodToPublishableConfig(config, config.methods[0]);
+    expect(pc.to).toBe(ADDR);
+    expect(pc.token).toBe('usdc');
+    expect(pc.chain).toBe('base');
+    expect(pc.crossChain).toBe(true);
+    expect(pc.presets).toEqual(['5']); // usdc 用 preset を選ぶ
+    expect(pc.name).toBe('Alice');
+  });
+});
+
 describe('parseHandleRecord', () => {
   const good: HandleRecord = {
     owner: ADDR,
-    config: { to: ADDR, token: 'jpyc', name: 'Alice' },
+    config: {
+      to: ADDR,
+      name: 'Alice',
+      methods: [
+        { token: 'jpyc', chain: 'polygon' },
+        { token: 'jpyc', chain: 'kaia' },
+        { token: 'usdc', chain: 'base', crossChain: true },
+      ],
+      presets: { jpyc: ['300'] },
+    },
+    profile: {
+      bio: 'hi',
+      links: [{ label: 'X', url: 'https://x.com/a' }],
+    },
     createdAt: 1,
     updatedAt: 2,
   };
 
-  it('parses a well-formed record (round-trip)', () => {
+  it('parses a well-formed multi-method record (round-trip)', () => {
     expect(parseHandleRecord(serializeHandleRecord(good))).toEqual(good);
+  });
+  it('migrates a legacy single-config record to methods[1]', () => {
+    const legacy = {
+      owner: ADDR,
+      config: { to: ADDR, token: 'jpyc', chain: 'kaia', name: 'Bob', presets: ['100'] },
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const parsed = parseHandleRecord(JSON.stringify(legacy));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.config.methods).toEqual([{ token: 'jpyc', chain: 'kaia' }]);
+    expect(parsed?.config.presets).toEqual({ jpyc: ['100'] });
+    expect(parsed?.config.name).toBe('Bob');
+  });
+  it('migrates a legacy config with no chain to the token default', () => {
+    const legacy = {
+      owner: ADDR,
+      config: { to: ADDR, token: 'jpyc' },
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const parsed = parseHandleRecord(JSON.stringify(legacy));
+    expect(parsed?.config.methods).toEqual([{ token: 'jpyc', chain: 'polygon' }]);
+  });
+  it('drops malformed profile parts but keeps the tip config', () => {
+    const rec = {
+      ...good,
+      profile: {
+        bio: 'ok',
+        avatar: 'http://insecure/a.png', // 非https → drop
+        links: [
+          { label: 'good', url: 'https://x.com' },
+          { label: 'bad', url: 'javascript:1' }, // drop
+        ],
+      },
+    };
+    const parsed = parseHandleRecord(JSON.stringify(rec));
+    expect(parsed?.profile?.bio).toBe('ok');
+    expect(parsed?.profile?.avatar).toBeUndefined();
+    expect(parsed?.profile?.links).toEqual([{ label: 'good', url: 'https://x.com' }]);
   });
   it('returns null for null / malformed JSON', () => {
     expect(parseHandleRecord(null)).toBeNull();
     expect(parseHandleRecord('not json')).toBeNull();
     expect(parseHandleRecord('123')).toBeNull();
   });
-  it('returns null when required fields are missing or mistyped', () => {
+  it('returns null when required fields are missing or config invalid', () => {
     expect(parseHandleRecord(JSON.stringify({ owner: ADDR }))).toBeNull();
+    expect(parseHandleRecord(JSON.stringify({ ...good, owner: 123 }))).toBeNull();
+    // config に to も token も methods も無い
     expect(
-      parseHandleRecord(JSON.stringify({ ...good, owner: 123 })),
+      parseHandleRecord(JSON.stringify({ ...good, config: { name: 'x' } })),
     ).toBeNull();
-    expect(
-      parseHandleRecord(JSON.stringify({ ...good, config: { token: 'jpyc' } })),
-    ).toBeNull();
+    // methods 要素が壊れている
     expect(
       parseHandleRecord(
-        JSON.stringify({ ...good, config: { to: ADDR, token: 'jpyc', presets: [1, 2] } }),
+        JSON.stringify({ ...good, config: { to: ADDR, methods: [{ token: 'jpyc' }] } }),
       ),
     ).toBeNull();
   });
