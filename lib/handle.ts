@@ -37,6 +37,18 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set<string>([
   'app',
 ]);
 
+// URL のパスセグメントは `@` が `%40` にエンコードされて届くことがある (Next.js は
+// dynamic route param を自動デコードしない)。`@` 接頭辞の判定や normalize の前に一度だけ
+// 安全にデコードする。不正な `%` シーケンスは decode せず raw を返す (どのみち後段の
+// `@`/形式チェックで弾かれる)。冪等: `@alice` / `alice` はそのまま返る。
+export function decodeHandleSegment(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 // 先頭 `@` を除去し小文字化・trim。URL segment ('@alice') / 入力どちらも受ける。
 export function normalizeHandle(raw: string): string {
   return raw.trim().replace(/^@+/, '').toLowerCase();

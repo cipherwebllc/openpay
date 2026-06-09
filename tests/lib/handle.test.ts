@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { getAddress } from 'viem';
 import {
   normalizeHandle,
+  decodeHandleSegment,
   isValidHandleFormat,
   isReserved,
   validateHandle,
@@ -22,6 +23,26 @@ describe('normalizeHandle', () => {
     expect(normalizeHandle('@Alice')).toBe('alice');
     expect(normalizeHandle('  @@Bob ')).toBe('bob');
     expect(normalizeHandle('CDX_01')).toBe('cdx_01');
+  });
+});
+
+describe('decodeHandleSegment', () => {
+  it('decodes percent-encoded @ that Next.js delivers in the dynamic param', () => {
+    // 本番の 404 の真因: Next.js は `/ja/@masia` の dynamic param を `%40masia` で渡す。
+    expect(decodeHandleSegment('%40masia')).toBe('@masia');
+    expect(decodeHandleSegment('%40Alice')).toBe('@Alice');
+  });
+  it('is idempotent for already-decoded / plain segments', () => {
+    expect(decodeHandleSegment('@masia')).toBe('@masia');
+    expect(decodeHandleSegment('masia')).toBe('masia');
+  });
+  it('returns the raw segment on malformed percent sequences (no throw)', () => {
+    expect(decodeHandleSegment('%')).toBe('%');
+    expect(decodeHandleSegment('%zz')).toBe('%zz');
+    expect(decodeHandleSegment('100%done')).toBe('100%done');
+  });
+  it('feeds normalizeHandle to the canonical handle after decode', () => {
+    expect(normalizeHandle(decodeHandleSegment('%40masia'))).toBe('masia');
   });
 });
 

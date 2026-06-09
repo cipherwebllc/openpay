@@ -16,7 +16,11 @@ import { TipForm } from '@/components/TipForm';
 import { parseTipParams } from '@/lib/url';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
-import { normalizeHandle, configToSearchParams } from '@/lib/handle';
+import {
+  normalizeHandle,
+  decodeHandleSegment,
+  configToSearchParams,
+} from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import {
   buildTipMeta,
@@ -37,7 +41,8 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; handle: string }>;
 }): Promise<Metadata> {
-  const { locale, handle: segment } = await params;
+  const { locale, handle: rawSegment } = await params;
+  const segment = decodeHandleSegment(rawSegment);
   const ogLocale: TipOgLocale = locale === 'en' ? 'en' : 'ja';
   if (!env.enableHandles || !segment.startsWith('@')) {
     return { title: 'OpenPay' };
@@ -85,7 +90,9 @@ export default async function HandlePage({
   params: Promise<{ locale: string; handle: string }>;
 }) {
   if (!env.enableHandles) notFound();
-  const { locale, handle: segment } = await params;
+  const { locale, handle: rawSegment } = await params;
+  // Next.js は dynamic param を自動デコードしないため `@` が `%40` で届く。先にデコードする。
+  const segment = decodeHandleSegment(rawSegment);
   if (!hasLocale(LOCALES, locale)) notFound();
   setRequestLocale(locale);
   if (!segment.startsWith('@')) notFound();
