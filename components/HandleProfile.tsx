@@ -1,13 +1,15 @@
 'use client';
 
 // @handle 公開ページの link-in-bio ヘッダー。アバター(https URL・無ければ頭文字イニシャル)
-// + 名前 + bio + 外部リンク。リンクは https のみ (保存時に検証済) + rel="noopener noreferrer
-// nofollow" target="_blank"。テーマ色は config.color。決済本体には触れない純表示。
+// + 名前 + bio + SNS アイコン行 (Linktree 風・ドメイン自動判定) + 外部リンク。リンクは https
+// のみ (保存時に検証済) + rel="noopener noreferrer nofollow" target="_blank"。テーマ色は
+// config.color。決済本体には触れない純表示。
 //
 // client component: avatar の読込失敗 (onError) でイニシャルに fallback するため。公開ページ
 // (server) からもビルダー (client) のプレビューからも同一描画できる。
 
 import { useEffect, useState } from 'react';
+import { SocialIconLinks } from '@/components/SocialIconLinks';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 
 const DEFAULT_ACCENT = '#2563eb';
@@ -34,6 +36,7 @@ export function HandleProfileView({
       ? config.color
       : DEFAULT_ACCENT;
   const showAvatarImg = !!profile.avatar && !avatarFailed;
+  const socials = profile.socials ?? [];
   const links = profile.links ?? [];
 
   return (
@@ -65,6 +68,12 @@ export function HandleProfileView({
         <p className="mt-1 max-w-xs whitespace-pre-wrap text-sm text-slate-500">
           {profile.bio}
         </p>
+      )}
+
+      {socials.length > 0 && (
+        <div className="mt-3">
+          <SocialIconLinks urls={socials} />
+        </div>
       )}
 
       {links.length > 0 && (

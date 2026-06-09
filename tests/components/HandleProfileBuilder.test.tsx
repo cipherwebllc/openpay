@@ -83,6 +83,28 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
   });
 
+  it('SNS リンクを追加でき、非 https は警告が出て送信から除外される', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    // Field の label 内にあるためアクセシブル名は label 文字列になる → テキストで特定
+    fireEvent.click(screen.getByText('＋ SNS リンクを追加'));
+    const input = screen.getByPlaceholderText('https://x.com/yourname');
+    // 非 https → 注意喚起 (送信からは除外)
+    fireEvent.change(input, { target: { value: 'http://x.com/alice' } });
+    expect(
+      screen.getByText('https 以外のリンク / 画像は保存されません。'),
+    ).toBeInTheDocument();
+    // https に直すと警告が消える
+    fireEvent.change(input, { target: { value: 'https://x.com/alice' } });
+    expect(
+      screen.queryByText('https 以外のリンク / 画像は保存されません。'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('プレビューは受取先未確定でも常時表示される', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(screen.getByText('プレビュー')).toBeInTheDocument();
+  });
+
   it('全方法 OFF にすると config=null (最低1必須の警告)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });

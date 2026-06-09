@@ -26,6 +26,7 @@ export interface HandleProfileDraft {
   presetsUsdc: string[];
   bio: string;
   avatar: string;
+  socials: string[]; // SNS プロフィール URL (アイコンはドメイン自動判定)
   links: { label: string; url: string }[];
 }
 
@@ -51,6 +52,7 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   presetsUsdc: defaultPresets().usdc,
   bio: '',
   avatar: '',
+  socials: [],
   links: [],
 };
 
@@ -87,6 +89,17 @@ function sanitizeLinks(
   return out;
 }
 
+function sanitizeSocials(loaded: unknown): string[] {
+  if (!Array.isArray(loaded)) return [];
+  const out: string[] = [];
+  for (const s of loaded) {
+    if (typeof s !== 'string') continue;
+    out.push(s); // 入力途中の値も下書きとしては保持 (検証は submit 側)
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
 function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
   const str = (v: unknown, d: string) => (typeof v === 'string' ? v : d);
   const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
@@ -109,6 +122,7 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     presetsUsdc: sanitizePresetList(loaded.presetsUsdc, d.usdc),
     bio: str(loaded.bio, ''),
     avatar: str(loaded.avatar, ''),
+    socials: sanitizeSocials(loaded.socials),
     links: sanitizeLinks(loaded.links),
   };
 }

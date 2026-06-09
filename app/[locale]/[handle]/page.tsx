@@ -7,7 +7,8 @@
 // 優先され、`@` 以外は即 notFound するため KV は `/@...` のときだけ読む。
 
 import type { Metadata } from 'next';
-import { setRequestLocale } from 'next-intl/server';
+import Link from 'next/link';
+import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
@@ -112,7 +113,11 @@ export default async function HandlePage({
   const profile = record.profile;
   const hasProfile =
     !!profile &&
-    (!!profile.bio || !!profile.avatar || (profile.links?.length ?? 0) > 0);
+    (!!profile.bio ||
+      !!profile.avatar ||
+      (profile.socials?.length ?? 0) > 0 ||
+      (profile.links?.length ?? 0) > 0);
+  const t = await getTranslations({ locale, namespace: 'HandleProfile' });
 
   return (
     <main className="mx-auto w-full max-w-md px-3 py-4">
@@ -126,6 +131,15 @@ export default async function HandlePage({
       )}
       {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
       <ReceiveMethodPicker config={record.config} />
+      {/* このページは共有先から直接開かれる入口 — OpenPay 本体への戻り導線を常設する。 */}
+      <footer className="mt-10 pb-2 text-center text-xs">
+        <Link
+          href={`/${locale}`}
+          className="font-medium text-slate-400 underline-offset-2 hover:text-brand hover:underline"
+        >
+          {t('backToTop')}
+        </Link>
+      </footer>
     </main>
   );
 }

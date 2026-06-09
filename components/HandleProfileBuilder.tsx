@@ -2,8 +2,10 @@
 
 // 「プロフ」タブ: @handle の link-in-bio ページを組み立てるビルダー。受取先 + 受取方法
 // (JPYC Polygon / JPYC Kaia / USDC cross-chain) + 見た目 (名前/色/金額プリセット) +
-// プロフィール (bio/avatar/links) を編集し、SIWE で取得/更新 (HandleClaimPanel)。
-// 下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。flag OFF で何も描画しない。
+// プロフィール (bio/avatar/SNSアイコン/links) を編集し、SIWE で取得/更新 (HandleClaimPanel)。
+// レイアウトは他タブ (チップ/レジ) と同じ 2 カラム: 左=編集・右=ライブプレビュー+公開
+// (lg で sticky 追従)。下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。
+// flag OFF で何も描画しない。
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -13,6 +15,7 @@ import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { HandleProfileView } from '@/components/HandleProfile';
+import { SocialIcon } from '@/components/SocialIconLinks';
 import { methodLabel } from '@/components/ReceiveMethodPicker';
 import {
   useHandleProfileDraft,
@@ -23,6 +26,7 @@ import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import {
   MAX_BIO_LEN,
   MAX_PROFILE_LINKS,
+  MAX_SOCIAL_LINKS,
   type HandleReceiveMethod,
   type HandleTipConfig,
   type HandleProfile,
@@ -129,20 +133,26 @@ export function HandleProfileBuilder() {
     draft.presetsUsdc,
   ]);
 
-  // 送信する profile は https / 非空のみ採用 (不正 link/avatar は除外 → claim を通す)。
+  // 送信する profile は https / 非空のみ採用 (不正 link/avatar/social は除外 → claim を通す)。
   const trimmedLinks = draft.links
     .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
     .filter((l) => l.label && isHttpsUrl(l.url))
     .slice(0, MAX_PROFILE_LINKS);
+  const validSocials = draft.socials
+    .map((s) => s.trim())
+    .filter((s) => isHttpsUrl(s))
+    .slice(0, MAX_SOCIAL_LINKS);
   const avatarValid = !!draft.avatar.trim() && isHttpsUrl(draft.avatar.trim());
   const profile: HandleProfile = {
     bio: draft.bio.trim() || undefined,
     avatar: avatarValid ? draft.avatar.trim() : undefined,
+    socials: validSocials.length > 0 ? validSocials : undefined,
     links: trimmedLinks.length > 0 ? trimmedLinks : undefined,
   };
-  // 入力に非 https の link/avatar があれば注意喚起 (送信からは除外済み)。
+  // 入力に非 https の link/avatar/social があれば注意喚起 (送信からは除外済み)。
   const hasInsecure =
     (!!draft.avatar.trim() && !avatarValid) ||
+    draft.socials.some((s) => s.trim() && !isHttpsUrl(s.trim())) ||
     draft.links.some((l) => l.url.trim() && !isHttpsUrl(l.url.trim()));
 
   if (!env.enableHandles) return null;
@@ -186,6 +196,7 @@ export function HandleProfileBuilder() {
       presetsUsdc: c.presets?.usdc ?? DEFAULT_PROFILE_DRAFT.presetsUsdc,
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
+      socials: p?.socials ?? [],
       links: p?.links ?? [],
     }));
   };
@@ -234,6 +245,14 @@ export function HandleProfileBuilder() {
     </Field>
   );
 
+  // プレビューは受取先が未確定でも常時表示 (config が組めない間は draft から見た目だけ組む)。
+  const previewConfig: HandleTipConfig = config ?? {
+    to: effectiveReceiver ?? '',
+    name: draft.name.trim() || undefined,
+    color: colorValid ? draft.color : undefined,
+    methods,
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -241,6 +260,9 @@ export function HandleProfileBuilder() {
         <p className="mt-1 text-sm text-slate-500">{t('builderSubheading')}</p>
       </div>
 
+      {/* 2カラム: 左=編集 (page scroll) / 右=プレビュー+公開 (lg で sticky 追従)。 */}
+      <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
+        <div className="min-w-0 space-y-5">
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
         {/* 受取先 */}
         <Field label={t('receiverLabel')} hint={t('receiverHint')}>
@@ -346,6 +368,48 @@ export function HandleProfileBuilder() {
             className={inputClass}
           />
         </Field>
+        {/* SNS アイコンリンク (URL のみ・アイコンはドメイン自動判定) */}
+        <Field label={t('socialsLabel')} hint={t('socialsHint')}>
+          <div className="space-y-2">
+            {draft.socials.map((s, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="shrink-0 text-slate-400">
+                  <SocialIcon url={s.trim()} className="h-5 w-5" />
+                </span>
+                <input
+                  type="url"
+                  value={s}
+                  placeholder="https://x.com/yourname"
+                  onChange={(e) => {
+                    const next = [...draft.socials];
+                    next[i] = e.target.value;
+                    update({ socials: next });
+                  }}
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    update({ socials: draft.socials.filter((_, j) => j !== i) })
+                  }
+                  className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                  aria-label={t('removeSocial')}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            {draft.socials.length < MAX_SOCIAL_LINKS && (
+              <button
+                type="button"
+                onClick={() => update({ socials: [...draft.socials, ''] })}
+                className="text-xs font-medium text-brand hover:underline"
+              >
+                ＋ {t('addSocial')}
+              </button>
+            )}
+          </div>
+        </Field>
         <Field label={t('linksLabel')} hint={t('httpsOnlyHint')}>
           <div className="space-y-2">
             {draft.links.map((l, i) => (
@@ -398,31 +462,36 @@ export function HandleProfileBuilder() {
           <p className="text-xs text-amber-700">{t('insecureDropped')}</p>
         )}
       </div>
-
-      {/* プレビュー */}
-      {hydrated && config && (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {t('previewHeading')}
-          </p>
-          <div className="mx-auto max-w-xs rounded-xl bg-white p-4 shadow-sm">
-            <HandleProfileView config={config} profile={profile} />
-            <div className="mt-4 flex flex-col gap-2">
-              {config.methods.map((m, i) => (
-                <span
-                  key={i}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600"
-                >
-                  {t('supportWith', { label: methodLabel(m, t('crossChain')) })}
-                </span>
-              ))}
-            </div>
-          </div>
         </div>
-      )}
 
-      {/* 取得 / 更新 (SIWE) */}
-      <HandleClaimPanel config={config} profile={profile} onEdit={onEditExisting} />
+        {/* 右カラム: ライブプレビュー (常時) + 取得/更新 (SIWE)。desktop は sticky。 */}
+        <aside className="mt-6 min-w-0 space-y-4 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+          {hydrated && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('previewHeading')}
+              </p>
+              <div className="mx-auto max-w-xs rounded-xl bg-white p-4 shadow-sm">
+                <HandleProfileView config={previewConfig} profile={profile} />
+                {methods.length > 0 && (
+                  <div className="mt-4 flex flex-col gap-2">
+                    {methods.map((m, i) => (
+                      <span
+                        key={i}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600"
+                      >
+                        {t('supportWith', { label: methodLabel(m, t('crossChain')) })}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <HandleClaimPanel config={config} profile={profile} onEdit={onEditExisting} />
+        </aside>
+      </div>
     </div>
   );
 }

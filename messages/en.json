@@ -605,13 +605,18 @@
     "bioLabel": "Bio",
     "avatarLabel": "Avatar image URL",
     "avatarHint": "An https:// image URL (optional).",
+    "socialsLabel": "Social icons",
+    "socialsHint": "https:// URLs of your social profiles. Icons for X / Instagram / YouTube / TikTok / LINE and more are detected from the domain.",
+    "addSocial": "Add social link",
+    "removeSocial": "Remove",
     "linksLabel": "Links",
     "httpsOnlyHint": "Links must be https:// only. http and javascript are disabled for safety.",
     "linkLabelPlaceholder": "Label (e.g. X)",
     "addLink": "Add link",
     "removeLink": "Remove",
     "insecureDropped": "Non-https links / images will not be saved.",
-    "previewHeading": "Preview"
+    "previewHeading": "Preview",
+    "backToTop": "Go to OpenPay home"
   },
   "CheckoutForm": {
     "header": "Order checkout",

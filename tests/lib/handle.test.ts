@@ -247,6 +247,30 @@ describe('validateProfile', () => {
     const longUrl = 'https://x.com/' + 'a'.repeat(520);
     expect(validateProfile({ links: [{ label: 'x', url: longUrl }] }).ok).toBe(false);
   });
+  it('accepts https socials (trimmed) and treats empty array as no socials', () => {
+    const res = validateProfile({
+      socials: [' https://x.com/alice ', 'https://github.com/alice'],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.profile.socials).toEqual([
+        'https://x.com/alice',
+        'https://github.com/alice',
+      ]);
+    }
+    expect(validateProfile({ socials: [] })).toEqual({ ok: true, profile: {} });
+  });
+  it('rejects invalid socials (non-https / non-string / empty / too many / too long)', () => {
+    expect(validateProfile({ socials: ['http://x.com/a'] }).ok).toBe(false);
+    expect(validateProfile({ socials: ['javascript:alert(1)'] }).ok).toBe(false);
+    expect(validateProfile({ socials: [123] }).ok).toBe(false);
+    expect(validateProfile({ socials: ['   '] }).ok).toBe(false);
+    expect(validateProfile({ socials: 'https://x.com/a' }).ok).toBe(false);
+    const many = Array.from({ length: 7 }, (_, i) => `https://x.com/u${i}`);
+    expect(validateProfile({ socials: many }).ok).toBe(false);
+    const longUrl = 'https://x.com/' + 'a'.repeat(520);
+    expect(validateProfile({ socials: [longUrl] }).ok).toBe(false);
+  });
 });
 
 describe('methodToPublishableConfig', () => {
@@ -283,6 +307,7 @@ describe('parseHandleRecord', () => {
     },
     profile: {
       bio: 'hi',
+      socials: ['https://x.com/a', 'https://line.me/abc'],
       links: [{ label: 'X', url: 'https://x.com/a' }],
     },
     createdAt: 1,
@@ -321,6 +346,7 @@ describe('parseHandleRecord', () => {
       profile: {
         bio: 'ok',
         avatar: 'http://insecure/a.png', // 非https → drop
+        socials: ['https://x.com/good', 'http://insecure', 42, 'javascript:1'],
         links: [
           { label: 'good', url: 'https://x.com' },
           { label: 'bad', url: 'javascript:1' }, // drop
@@ -330,6 +356,7 @@ describe('parseHandleRecord', () => {
     const parsed = parseHandleRecord(JSON.stringify(rec));
     expect(parsed?.profile?.bio).toBe('ok');
     expect(parsed?.profile?.avatar).toBeUndefined();
+    expect(parsed?.profile?.socials).toEqual(['https://x.com/good']);
     expect(parsed?.profile?.links).toEqual([{ label: 'good', url: 'https://x.com' }]);
   });
   it('returns null for null / malformed JSON', () => {

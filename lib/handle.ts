@@ -27,6 +27,8 @@ export const MAX_BIO_LEN = 160;
 export const MAX_LINK_LABEL_LEN = 40;
 export const MAX_LINK_URL_LEN = 512;
 export const MAX_AVATAR_URL_LEN = 512;
+// SNS アイコンリンク (URL のみ保存・アイコンは lib/socialLinks がドメイン判定) の上限。
+export const MAX_SOCIAL_LINKS = 6;
 // 1 handle が公開できる受取方法の上限 (token 2 × chain 数の現実的な上限)。
 export const MAX_RECEIVE_METHODS = 6;
 
@@ -121,6 +123,9 @@ export interface HandleLink {
 export interface HandleProfile {
   bio?: string;
   avatar?: string; // https URL (ホスティングはしない)
+  // SNS プロフィール URL (https のみ)。アイコンは表示側がドメインから自動判定
+  // (lib/socialLinks)。platform は保存しない (判定更新で既存データも追従)。
+  socials?: string[];
   links?: HandleLink[];
 }
 
@@ -371,6 +376,31 @@ export function validateProfile(raw: unknown): ValidatedProfile {
     }
   }
 
+  if (r.socials !== undefined && r.socials !== null) {
+    if (!Array.isArray(r.socials)) {
+      return { ok: false, error: 'socials must be an array' };
+    }
+    if (r.socials.length > MAX_SOCIAL_LINKS) {
+      return { ok: false, error: 'too many socials' };
+    }
+    const socials: string[] = [];
+    for (const s of r.socials) {
+      if (typeof s !== 'string') {
+        return { ok: false, error: 'invalid social url' };
+      }
+      const url = s.trim();
+      if (!url) return { ok: false, error: 'social url is required' };
+      if (url.length > MAX_LINK_URL_LEN) {
+        return { ok: false, error: 'social url too long' };
+      }
+      if (!isHttpsUrl(url)) {
+        return { ok: false, error: 'social url must be https' };
+      }
+      socials.push(url);
+    }
+    if (socials.length > 0) profile.socials = socials;
+  }
+
   if (r.links !== undefined && r.links !== null) {
     if (!Array.isArray(r.links)) return { ok: false, error: 'links must be an array' };
     if (r.links.length > MAX_PROFILE_LINKS) {
@@ -528,6 +558,17 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
     if (avatar && avatar.length <= MAX_AVATAR_URL_LEN && isHttpsUrl(avatar)) {
       profile.avatar = avatar;
     }
+  }
+  if (Array.isArray(r.socials)) {
+    const socials: string[] = [];
+    for (const s of r.socials) {
+      if (socials.length >= MAX_SOCIAL_LINKS) break;
+      if (typeof s !== 'string') continue;
+      const url = s.trim();
+      if (!url || url.length > MAX_LINK_URL_LEN || !isHttpsUrl(url)) continue;
+      socials.push(url);
+    }
+    if (socials.length > 0) profile.socials = socials;
   }
   if (Array.isArray(r.links)) {
     const links: HandleLink[] = [];

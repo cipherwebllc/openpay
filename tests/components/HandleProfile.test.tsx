@@ -79,6 +79,31 @@ describe('HandleProfileView', () => {
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer nofollow');
   });
+
+  it('renders social icon links (brand label for known, hostname for unknown)', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          socials: [
+            'https://x.com/alice',
+            'https://line.me/R/ti/p/@alice',
+            'https://example.com/me',
+          ],
+        }}
+      />,
+    );
+    const x = screen.getByRole('link', { name: 'X' });
+    expect(x).toHaveAttribute('href', 'https://x.com/alice');
+    expect(x).toHaveAttribute('target', '_blank');
+    expect(x).toHaveAttribute('rel', 'noopener noreferrer nofollow');
+    expect(screen.getByRole('link', { name: 'LINE' })).toHaveAttribute(
+      'href',
+      'https://line.me/R/ti/p/@alice',
+    );
+    // 未知ドメインは hostname がラベルになり globe アイコンで描画される
+    expect(screen.getByRole('link', { name: 'example.com' })).toBeInTheDocument();
+  });
 });
 
 describe('ReceiveMethodPicker', () => {
