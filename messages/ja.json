@@ -481,7 +481,7 @@
     "errorRelayNotConfigured": "ガスレス送金 (リレー) は現在ご利用いただけません。時間をおいて再度お試しください。",
     "errorRelayInsufficientBalance": "JPYC の残高が不足しています。残高をご確認のうえ、再度お試しください。",
     "errorRelayGeneric": "ガスレス送金を完了できませんでした。時間をおいて再度お試しください。",
-    "errorRelayFeePaused": "このお店へのガスレス送金は現在停止しています。お店の方にご確認ください。",
+    "errorRelayFeePaused": "クリエイターへのガスレス送金は現在停止しています。クリエイターの方にご確認ください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットからチップを送れません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版 Tip リンクをご利用いただくか、別のウォレットでお試しください。",
     "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません。MetaMask の「アカウント詳細 → Smart account」をオフにするか、別のウォレットでお試しください。",
     "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。チップにはガスレスモードが必要です。ガスレス対応済みのウォレットでお試しください。",
