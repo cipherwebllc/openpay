@@ -1,5 +1,6 @@
+import type { ReactElement } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -269,6 +270,68 @@ function setStandardPayment(
     merchantTxHash: undefined,
     feeTxHash: undefined,
   } as Partial<ReturnType<typeof useStandardPayment>>);
+}
+
+// webhook / redirect は submit 時点の snapshot を真実とするため、成功 data を mock するだけでは
+// 発火しない (submit を経て snapshot ref が固定される必要がある)。これらの helper は idle→submit→
+// success を 1 component インスタンスで踏み、snapshot を正しく固定したうえで成功描画させる。
+// (success data を直接 mock するのは「submit 無しで mutation data が存在する」= 本番では起こらない
+// 状態なので、実際の submit を経由するこの helper で置き換える。)
+//
+// rerender には毎回 fresh な element を渡す (makeUi() で生成)。同一 element 参照を渡すと React が
+// root で bailout して再 render が走らず、success mock が反映されないため。
+type MakeUi = () => ReactElement;
+
+// gasless (useBatchPayment) 成功までを踏む。data は setBatchPayment('success') と同形。
+async function submitGaslessThenSucceed(
+  user: ReturnType<typeof userEvent.setup>,
+  rerender: (ui: ReactElement) => void,
+  makeUi: MakeUi,
+) {
+  await user.click(screen.getByRole('button', { name: /を支払う/ }));
+  expect(mutate).toHaveBeenCalledOnce();
+  setBatchPayment('success');
+  rerender(makeUi());
+}
+
+// standard 成功までを踏む。
+async function submitStandardThenSucceed(
+  user: ReturnType<typeof userEvent.setup>,
+  rerender: (ui: ReactElement) => void,
+  makeUi: MakeUi,
+) {
+  await user.click(screen.getByRole('button', { name: /を支払う/ }));
+  expect(standardMutate).toHaveBeenCalledOnce();
+  setStandardPayment('success');
+  rerender(makeUi());
+}
+
+// fake timers 下では userEvent が使えないため fireEvent で同期 submit する版。
+// gasless 経路の支払いボタンを click → snapshot 固定 → success に遷移 → rerender。
+function submitGaslessThenSucceedSync(
+  rerender: (ui: ReactElement) => void,
+  makeUi: MakeUi,
+) {
+  fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+  expect(mutate).toHaveBeenCalledOnce();
+  setBatchPayment('success');
+  rerender(makeUi());
+}
+
+// relay (useJpycEip3009Payment) 成功までを踏む。
+async function submitRelayThenSucceed(
+  user: ReturnType<typeof userEvent.setup>,
+  rerender: (ui: ReactElement) => void,
+  makeUi: MakeUi,
+  opts: {
+    txHash: `0x${string}`;
+    variables: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
+  },
+) {
+  await user.click(screen.getByRole('button', { name: /を支払う/ }));
+  expect(relayMutate).toHaveBeenCalledOnce();
+  setRelayPayment('success', opts);
+  rerender(makeUi());
 }
 
 beforeEach(() => {
@@ -609,22 +672,28 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(url.searchParams.get('token')).toBe('usdc');
   });
 
-  it('webhook 指定 → POST が発火 (Tip と互換シェイプ + items)', async () => {
+  it('webhook 指定 → POST が発火 (Tip と互換シェイプ + items・customerEmail は不在)', async () => {
+    const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
-    setBatchPayment('success');
     setGasQuote('ready', 100_000n);
-    render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
+          // customerEmail を URL に持つ状態でも payload には載らないことを確認する。
+          customerEmail: 'alice@example.com',
           webhook: 'https://shop.example.com/hook',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    // submit を経て snapshot を固定 → 成功描画で webhook 発火。
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, opts] = fetchSpy.mock.calls[0];
     expect(url).toBe('https://shop.example.com/hook');
@@ -637,49 +706,41 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(payload.items).toEqual(USDC_PARAMS.items);
     expect(payload.orderId).toBe('ord-42');
     expect(payload.txHash).toBe(`0x${'b'.repeat(64)}`);
+    // URL 仕様で customerEmail は prefill 専用・クライアントから送信しない → payload に不在。
+    expect('customerEmail' in payload).toBe(false);
     vi.unstubAllGlobals();
   });
 
   it('[regression] 異なる userOpHash (新規送金) では webhook が再発火する (ref が永久 lock しない)', async () => {
+    const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
-
-    // 1 回目の決済成功 (userOpHash = aaaa...)
-    const firstHash = `0x${'a'.repeat(64)}`;
-    mockHook(useBatchPayment, {
-      mutate: vi.fn(),
-      isPending: false,
-      isSuccess: true,
-      isError: false,
-      data: {
-        userOpHash: firstHash,
-        txHash: `0x${'b'.repeat(64)}`,
-        blockNumber: 99n,
-        success: true,
-        actualGasCost: 0n,
-        provider: 'pimlico' as const,
-      },
-      error: null,
-    } as Partial<ReturnType<typeof useBatchPayment>>);
-
-    const { rerender } = render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
           webhook: 'https://shop.example.com/hook',
         }}
-      />,
+      />
     );
+
+    // 1 回目の送信 → 成功 (userOpHash = aaaa...・setBatchPayment('success') の既定 data)。
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const firstPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(firstPayload.userOpHash).toBe(firstHash);
+    expect(firstPayload.userOpHash).toBe(`0x${'a'.repeat(64)}`);
 
-    // 2 回目の決済成功 (userOpHash = cccc... に変化、同じ component 内で再 mutate)
+    // 同一 component で 2 回目の送信 (= 新規 mutate)。idle に戻すと支払いボタンが再表示され、
+    // click で snapshot が再固定される。異なる userOpHash の成功 → webhook が再発火する。
     const secondHash = `0x${'c'.repeat(64)}`;
+    setBatchPayment('idle');
+    rerender(makeUi());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
     mockHook(useBatchPayment, {
       mutate: vi.fn(),
       isPending: false,
@@ -695,14 +756,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
       },
       error: null,
     } as Partial<ReturnType<typeof useBatchPayment>>);
-    rerender(
-      <CheckoutForm
-        params={{
-          ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
-        }}
-      />,
-    );
+    rerender(makeUi());
 
     // 新しい userOpHash で webhook が再発火する (ref が永久 lock していない)
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
@@ -712,47 +766,73 @@ describe('CheckoutForm — 成功時の挙動', () => {
   });
 
   it('[regression] 同一 userOpHash で再 render が起きても webhook は 1 回しか POST されない (gasQuote refetch 耐性)', async () => {
+    const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
-    setBatchPayment('success');
     // 初回 gasAmount = 100_000n
     setGasQuote('ready', 100_000n);
-    const { rerender } = render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
           webhook: 'https://shop.example.com/hook',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    // submit 時点の gas = 100_000n で snapshot を固定 → 成功描画で webhook 発火。
+    await submitGaslessThenSucceed(user, rerender, makeUi);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
 
     // gasQuote の refetchInterval を模擬: gasAmount を 200_000n に変えて再 render。
     // breakdown が変わるが webhook は再発火してはならない (同一 userOpHash)。
     setGasQuote('ready', 200_000n);
-    rerender(
-      <CheckoutForm
-        params={{
-          ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
-        }}
-      />,
-    );
+    rerender(makeUi());
     setGasQuote('ready', 300_000n);
-    rerender(
-      <CheckoutForm
-        params={{
-          ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
-        }}
-      />,
-    );
+    rerender(makeUi());
 
     // breakdown が 2 回変わっても webhook fetch は最初の 1 回のみ
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('[regression] webhook payload の amount/customerPays は submit 時点の値 (成功後の gas quote 変動を反映しない)', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    // submit 時点の gasAmount = 100_000n。gas=customer なので customerPays = 55 + 0.1 = 55.1 USDC。
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+        }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // 成功描画後に gas quote が跳ねる (refetch)。live breakdown では customerPays が
+    // 55.3 USDC に動くが、webhook は submit snapshot を報告するため変わってはならない。
+    setGasQuote('ready', 300_000n);
+    rerender(makeUi());
+
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    // amount = 税込注文小計 (gas を含まない) = 55 USDC。
+    expect(payload.amount).toBe('55');
+    // customerPays = submit 時点の 55.1 USDC (= 55_100_000)。live の 55.3 ではない。
+    expect(payload.customerPays).toBe('55100000');
+    // merchant 着金は満額 55 USDC (customer モードなので gas は merchant 控除に乗らない)。
+    expect(payload.merchantAmount).toBe('55000000');
+    expect(payload.feeAmount).toBe('0');
     vi.unstubAllGlobals();
   });
 
@@ -766,16 +846,18 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
-    setBatchPayment('success');
     setGasQuote('ready', 100_000n);
-    const { rerender } = render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
           successUrl: 'https://shop.example.com/thanks',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    // submit を経て成功 → カウントダウン start (snapshot 必須なので click が前提)。
+    submitGaslessThenSucceedSync(rerender, makeUi);
     expect(screen.getByText(/3 秒後に確認ページへ移動します/)).toBeInTheDocument();
     // 1 秒進める → 2 秒 (act + 1 tick)
     await act(async () => {
@@ -784,14 +866,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
     // gasQuote refetch を模擬し再 render — 同一 userOpHash なのでカウントダウンは継続のはず
     setGasQuote('ready', 200_000n);
-    rerender(
-      <CheckoutForm
-        params={{
-          ...USDC_PARAMS,
-          successUrl: 'https://shop.example.com/thanks',
-        }}
-      />,
-    );
+    rerender(makeUi());
 
     // 残り 2 秒進めて assign 発火を観測 (もしカウントダウンが 3 にリセットされていたら +1 秒不足で発火しない)
     for (let i = 0; i < 3; i++) {
@@ -804,6 +879,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
   });
 
   it('webhook 失敗 (CORS 等) → UI には影響しない (logger.warn のみ)', async () => {
+    const user = userEvent.setup();
     const fetchSpy = vi
       .fn()
       .mockRejectedValue(new Error('CORS blocked'));
@@ -811,16 +887,17 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
-    setBatchPayment('success');
     setGasQuote('ready', 100_000n);
-    render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
           webhook: 'https://shop.example.com/hook',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     // 成功 UI は影響を受けない
     expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
@@ -910,16 +987,18 @@ describe('CheckoutForm — 自動 redirect カウントダウン (fake timers)',
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
-    setBatchPayment('success');
     setGasQuote('ready', 100_000n);
-    render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
           successUrl: 'https://shop.example.com/thanks',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    // submit を経て成功 → カウントダウン start (snapshot 必須)。
+    submitGaslessThenSucceedSync(rerender, makeUi);
     // 成功 panel が出ている (success_url 指定あり → カウントダウン start)
     expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
     expect(screen.getByText(/3 秒後に確認ページへ移動します/)).toBeInTheDocument();
@@ -1069,21 +1148,25 @@ describe('CheckoutForm — mode=standard 統合', () => {
     expect(call.chainId).toBe(baseSepolia.id);
   });
 
-  it('mode=standard 成功時の webhook payload に mode/merchantTxHash/feeTxHash が含まれる', async () => {
+  it('mode=standard 成功時の webhook payload に mode/merchantTxHash/feeTxHash が含まれる (customerEmail は不在)', async () => {
+    const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
-    setStandardPayment('success');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(null, { status: 200 }),
     );
-    render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...STANDARD_USDC_PARAMS,
+          customerEmail: 'alice@example.com',
           webhook: 'https://shop.example.com/hook',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    // submit を経て snapshot を固定 → 成功描画で webhook 発火。
+    await submitStandardThenSucceed(user, rerender, makeUi);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe('https://shop.example.com/hook');
@@ -1095,44 +1178,36 @@ describe('CheckoutForm — mode=standard 統合', () => {
     // gasless の userOpHash は出ない (mode=standard の payload では別 schema)
     expect(body.userOpHash).toBeUndefined();
     expect(body.txHash).toBeUndefined();
-    expect(body.merchantAmount).toBeDefined();
-    expect(body.feeAmount).toBeDefined();
+    // amount = 税込注文小計 (55 USDC)・merchant 着金は満額 (fee=0)。submit snapshot 由来。
+    expect(body.amount).toBe('55');
+    expect(body.merchantAmount).toBe('55000000');
+    expect(body.feeAmount).toBe('0');
+    // customerEmail は payload に載らない (URL 仕様: prefill 専用)。
+    expect('customerEmail' in body).toBe(false);
     fetchSpy.mockRestore();
   });
 
   it('mode=standard 成功時の webhook が同一 merchantTxHash で再 render しても 1 回しか発火しない (dedup)', async () => {
+    const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
-    setStandardPayment('success');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(null, { status: 200 }),
     );
-    const { rerender } = render(
+    const makeUi = () => (
       <CheckoutForm
         params={{
           ...STANDARD_USDC_PARAMS,
           webhook: 'https://shop.example.com/hook',
         }}
-      />,
+      />
     );
+    const { rerender } = render(makeUi());
+    await submitStandardThenSucceed(user, rerender, makeUi);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     // 連続 rerender しても dedup されて発火されない
-    rerender(
-      <CheckoutForm
-        params={{
-          ...STANDARD_USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
-        }}
-      />,
-    );
-    rerender(
-      <CheckoutForm
-        params={{
-          ...STANDARD_USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
-        }}
-      />,
-    );
+    rerender(makeUi());
+    rerender(makeUi());
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     fetchSpy.mockRestore();
   });
@@ -1430,22 +1505,30 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
   });
 
   it('relay 成功 + webhook: payload に txHash あり・blockNumber は省略 (null を直列化しない)', async () => {
+    const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
     setupRelayReady();
-    setRelayPayment('success', {
+    setRelayPayment('idle');
+    const makeUi = () => (
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, webhook: 'https://shop.example.com/hook' }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    // submit を経て snapshot を固定 → 成功描画で webhook 発火。
+    await submitRelayThenSucceed(user, rerender, makeUi, {
       txHash: `0x${'e'.repeat(64)}`,
       variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
     });
-    render(
-      <CheckoutForm
-        params={{ ...JPYC_PARAMS, webhook: 'https://shop.example.com/hook' }}
-      />,
-    );
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
     expect(payload.txHash).toBe(`0x${'e'.repeat(64)}`);
     expect(payload.mode).toBe('gasless');
+    // amount = 注文小計 3000 JPYC・merchant 着金は満額 (free/customer)。submit snapshot 由来。
+    expect(payload.amount).toBe('3000');
+    expect(payload.merchantAmount).toBe(JPYC_TOTAL.toString());
+    expect(payload.customerPays).toBe(JPYC_TOTAL.toString());
     // relay は block 不明 → payload から省略 (key 自体が無い・"null" 文字列にしない)。
     expect('blockNumber' in payload).toBe(false);
     expect(payload.userOpHash).toBeUndefined();

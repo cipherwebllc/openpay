@@ -243,6 +243,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   //    される。同一 tx hash の重複 webhook を防ぐため key 単位の dedup gate を使う。
   const notifiedKeyRef = useRef<string | null>(null);
 
+  // webhook/記録は「送金した瞬間の額」を報告する (成功描画時の live breakdown は
+  // gas quote 再取得等で動きうるため、submit 時点の snapshot を真実とする)。
+  // onSubmit が mutate へ渡すのと同源 (totalWei / breakdown) を固定する。
+  const submitSnapshotRef = useRef<{
+    totalWei: bigint;
+    merchantReceives: bigint;
+    feeAmount: bigint;
+    customerPays: bigint;
+  } | null>(null);
+
   useEffect(() => {
     if (gasless.error) logger.error('checkout.failed', { error: gasless.error });
   }, [gasless.error]);
@@ -324,6 +334,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   useEffect(() => {
     if (!completion) return;
+    // completion は同一セッションの submit 後 (mutation の in-memory data 由来) にのみ発火する
+    // ため snapshot は必ず存在する。両ガードで型を自然に絞る (live breakdown への silent
+    // fallback は乖離バグの再発口になるため書かない)。
+    const snapshot = submitSnapshotRef.current;
+    if (!snapshot) return;
     if (notifiedKeyRef.current === completion.key) return;
     notifiedKeyRef.current = completion.key;
 
@@ -346,14 +361,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         token: params.token,
         chain: chainSlug,
         chainId: deployment.chainId,
-        amount: formatUnits(totalWei, deployment.decimals),
+        // amount = 税込注文小計 (totalWei・gas を含まない)。顧客の総支払いは customerPays、
+        // 店主着金は merchantAmount。金額はすべて submit 時点の snapshot で固定する
+        // (成功描画時の live 値ではない)。
+        amount: formatUnits(snapshot.totalWei, deployment.decimals),
         items: params.items,
-        merchantAmount: breakdown.merchantReceives.toString(),
-        feeAmount: breakdown.feeAmount.toString(),
-        customerPays: breakdown.customerPays.toString(),
+        merchantAmount: snapshot.merchantReceives.toString(),
+        feeAmount: snapshot.feeAmount.toString(),
+        customerPays: snapshot.customerPays.toString(),
         orderId: params.orderId,
         description: params.description,
-        customerEmail: params.customerEmail,
+        // URL 仕様 (lib/url.ts) で customerEmail は prefill 専用・クライアントから送信しない、
+        // と明記しているため payload に含めない (orderId で突合可能)。
         ...completion.hashFields,
         // relay は block 不明 (txHash のみ)。null のときは payload から省略する
         // (下流 consumer が missing と null を区別するため・"null" 文字列にしない)。
@@ -389,6 +408,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     if (params.successUrl) {
       setRedirectIn(SUCCESS_REDIRECT_DELAY_MS / 1000);
     }
+    // 金額は submitSnapshotRef (ref・非 reactive) から読む。snapshot は submit と同期で固定され、
+    // completion (mutation 解決) が変わるのはその後なので、ref で十分かつ live 値の混入を防げる。
   }, [
     completion,
     params.to,
@@ -397,16 +418,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     params.items,
     params.orderId,
     params.description,
-    params.customerEmail,
     params.webhook,
     params.successUrl,
     address,
-    breakdown.merchantReceives,
-    breakdown.feeAmount,
-    breakdown.customerPays,
     deployment.chainId,
     deployment.decimals,
-    totalWei,
   ]);
 
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
@@ -533,6 +549,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
+    // webhook/記録は「送金した瞬間の額」を報告する (成功描画時の live breakdown は
+    // gas quote 再取得等で動きうるため、submit 時点の snapshot を真実とする)。
+    // 下の各 mutate は breakdown.merchantReceives / breakdown.feeAmount / totalWei を渡す
+    // (relay は totalWei・recover 控除は hook 側)。snapshot はそれと同源。
+    submitSnapshotRef.current = {
+      totalWei,
+      merchantReceives: breakdown.merchantReceives,
+      feeAmount: breakdown.feeAmount,
+      customerPays: breakdown.customerPays,
+    };
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     primeChimeAudio();
     if (isStandard) {
