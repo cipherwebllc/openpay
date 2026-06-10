@@ -7,12 +7,14 @@ import type { Address } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
 import { loadUsageInvoice, meterPeriod } from '@/lib/billingMeter';
-import { getFeeStatus } from '@/lib/feeCurrent';
+import { getFeeStatus, getUnpaidPeriods } from '@/lib/feeCurrent';
 import {
   previousPeriod,
   isGaslessRelayBlocked,
   graceEndsAt,
+  owedCandidatePeriods,
 } from '@/lib/feeGate';
+import { usageFeeConfig } from '@/lib/usageFee';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,10 +58,27 @@ export async function GET(): Promise<NextResponse> {
   const fee = await getFeeStatus(session.address, nowMs);
   const due = await invoiceFor(previousPeriod(nowMs), session.address);
   const current = await invoiceFor(meterPeriod(nowMs), session.address);
-  // 延滞 (前月請求あり + 未払い + 月初猶予超過) か。relay 関所ゲートと同一の権威判定を再利用する
+  // 延滞 (lookback 内に未払い請求あり + 月初猶予超過) か。relay 関所ゲートと同一の権威判定を再利用する
   // (isFeePayment=false)。店主 UI が「ガスレス停止 + 履歴/CSV 制限」を出すかの単一ソース。
   // a1 OFF / bypass / fee-current のときは false。
   const delinquent = await isGaslessRelayBlocked(session.address, false, nowMs);
+
+  // 未払いの請求期間一覧 (lookback 内・新しい順)。古い未収を期間別に清算させる UI 用。
+  // ゲートと同じ合成: 「請求あり (feeWei>0)」かつ「支払い済みマーカー無し」かつ lastPaidPeriod でない。
+  const candidates = owedCandidatePeriods(nowMs, usageFeeConfig().startPeriod);
+  const candidateInvoices = await Promise.all(
+    candidates.map((p) => invoiceFor(p, session.address)),
+  );
+  const billedPeriods = candidateInvoices
+    .filter((inv) => inv.feeWei !== '0')
+    .map((inv) => inv.period);
+  const unpaidSet = new Set(await getUnpaidPeriods(session.address, billedPeriods));
+  const owed = candidateInvoices.filter(
+    (inv) =>
+      inv.feeWei !== '0' &&
+      unpaidSet.has(inv.period) &&
+      inv.period !== fee.lastPaidPeriod,
+  );
 
   return NextResponse.json({
     ok: true,
@@ -71,5 +90,6 @@ export async function GET(): Promise<NextResponse> {
     graceEndsAt: graceEndsAt(nowMs), // 当月の遮断開始時刻 (予告バナーの「○○以降停止」用)
     due,
     current,
+    owed, // 未払いの請求期間一覧 (新しい順・期間別清算 UI 用)
   });
 }

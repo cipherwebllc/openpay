@@ -7,8 +7,10 @@
 // = 徴収しない。点灯は flag ON + ALPHA_ENTITLEMENT_BYPASS=0。
 // 値 = JSON {expiresAt, lastPaidPeriod?, lastTxHash?}・KV TTL で自然失効。
 
+import { type Address } from 'viem';
 import { kvGet, kvSet } from './kv';
 import { entitlementBypass } from './entitlement';
+import { logger } from './logger';
 
 export type FeeStatus = {
   current: boolean;
@@ -128,4 +130,56 @@ export async function grantFeeCurrent(
     persisted = stored !== null && stored.expiresAt >= outExpiry;
   }
   return { ok: persisted, expiresAt: outExpiry };
+}
+
+// --- 期間別「支払い済み」マーカー (古い未収を清算したことを期間粒度で記録する) ---
+//
+// fee-current (上の expiresAt) は「現行カバレッジ」を表すため、古い期間 (例 4 か月前) を後から
+// 清算しても expiresAt は過去なので current にはならない (= 関所ゲートは現行カバレッジで通す)。
+// しかしゲートは「lookback 内に未払いの請求期間が残っているか」も見るため、どの期間を清算したかを
+// 期間粒度で覚える必要がある。それがこのマーカー。fee-current とは別キーで持つ。
+//
+// TTL は関所ゲートの lookback (12 か月) を余裕で超える 800 日に置く。マーカーがゲートの lookback
+// より先に失効すると「払ったのに未払い扱い」で再遮断されるため、lookback を確実に上回る寿命にする。
+export const PAID_MARKER_TTL_SEC = 800 * 86_400;
+
+function paidKey(merchant: string, period: string): string {
+  return `billing:paid:${merchant.toLowerCase()}:${period}`;
+}
+
+// 期間 period を清算したマーカーを記録する (値 = 清算 tx の txHash・監査用)。settle が grant 後に呼ぶ。
+// `ok` は KV 書込成功 (false=未永続化→呼出側で清算失敗扱い・同 txHash で再試行可能)。
+export async function markPeriodPaid(
+  merchant: Address,
+  period: string,
+  txHash: string,
+): Promise<{ ok: boolean }> {
+  const write = await kvSet(paidKey(merchant, period), txHash, {
+    ttlSec: PAID_MARKER_TTL_SEC,
+  });
+  return { ok: write.ok };
+}
+
+// periods のうち「支払い済みマーカーが無い」= 未払いの期間だけを返す。
+// マーカー読み取り失敗は **支払い済み扱い (fail-open)** とする: 本モジュールは「KV 不調で決済を
+// 壊さない」方針 (= 過剰遮断しない) を貫くため、読めない期間を未払いと断じて relay を止めない。
+// マーカー無し (= 読めて null) のみ未払いと判定する。
+export async function getUnpaidPeriods(
+  merchant: Address,
+  periods: string[],
+): Promise<string[]> {
+  const results = await Promise.all(
+    periods.map(async (period) => {
+      const res = await kvGet(paidKey(merchant, period));
+      if (!res.ok) {
+        logger.warn('billing.paid_marker.read_failed', {
+          period,
+          reason: res.reason,
+        });
+        return null; // fail-open: 読めない期間は未払い扱いにしない
+      }
+      return res.value === null || res.value === '' ? period : null;
+    }),
+  );
+  return results.filter((p): p is string => p !== null);
 }

@@ -1101,6 +1101,8 @@
     "noneDue": "No usage fee is currently due.",
     "dueSummary": "{period}: {count} relayed / {volume} JPYC × {rate}",
     "dueAmount": "Usage fee: {fee} JPYC",
+    "owedListTitle": "You have {count} unpaid usage fees. Please pay them month by month.",
+    "owedPeriodAmount": "Usage fee: {fee} JPYC",
     "switchChain": "Switch to {chain}",
     "signing": "Signing & sending…",
     "settling": "Confirming…",

@@ -20,10 +20,11 @@ export type BillingInvoiceData = {
   expiresAt: number | null;
   lastPaidPeriod: string | null;
   bypass: boolean;
-  delinquent: boolean; // 前月請求あり+未払い+猶予超過 (履歴ぼかし+CSVロックの単一ソース)
+  delinquent: boolean; // lookback 内に未払い請求あり+猶予超過 (履歴ぼかし+CSVロックの単一ソース)
   graceEndsAt: number; // 当月の遮断開始時刻 ms・UTC (予告バナーの「○○以降停止」用)
   due: BillingInvoiceLine; // 前月 (清算対象)
   current: BillingInvoiceLine; // 当月これまで (informational)
+  owed: BillingInvoiceLine[]; // 未払いの請求期間一覧 (lookback 内・新しい順・期間別清算 UI 用)
 };
 
 export function useBillingInvoice(enabled: boolean) {

@@ -5,7 +5,14 @@ vi.mock('@/lib/kv', () => ({
   kvSet: vi.fn(),
 }));
 
-import { getFeeStatus, isFeeCurrent, grantFeeCurrent } from '@/lib/feeCurrent';
+import {
+  getFeeStatus,
+  isFeeCurrent,
+  grantFeeCurrent,
+  markPeriodPaid,
+  getUnpaidPeriods,
+  PAID_MARKER_TTL_SEC,
+} from '@/lib/feeCurrent';
 import { kvGet, kvSet } from '@/lib/kv';
 
 const WALLET = '0xAbC0000000000000000000000000000000000009';
@@ -122,5 +129,52 @@ describe('grantFeeCurrent', () => {
       .mockResolvedValueOnce({ ok: true, value: null }); // readback: 無し
     const r = await grantFeeCurrent(WALLET, { expiresAt: EXP }, NOW);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('markPeriodPaid (期間別 支払い済みマーカー)', () => {
+  it('billing:paid:{wallet}:{period} に txHash を lookback 超え TTL で書く', async () => {
+    mSet.mockResolvedValue({ ok: true, value: 'OK' });
+    const r = await markPeriodPaid(WALLET, '2026-04', '0xfeed');
+    expect(r.ok).toBe(true);
+    const [key, value, opts] = mSet.mock.calls[0];
+    expect(key).toBe(`billing:paid:${WALLET.toLowerCase()}:2026-04`);
+    expect(value).toBe('0xfeed');
+    // ゲート lookback (12 か月) を余裕で超える 800 日。
+    expect((opts as { ttlSec: number }).ttlSec).toBe(PAID_MARKER_TTL_SEC);
+    expect(PAID_MARKER_TTL_SEC).toBe(800 * 86_400);
+  });
+
+  it('KV 書込失敗 → ok:false (呼出側で清算失敗扱い)', async () => {
+    mSet.mockResolvedValue({ ok: false, reason: 'timeout' });
+    const r = await markPeriodPaid(WALLET, '2026-04', '0xfeed');
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('getUnpaidPeriods (マーカー無し=未払い・読み失敗は fail-open)', () => {
+  const KEY_OF = (p: string) => `billing:paid:${WALLET.toLowerCase()}:${p}`;
+
+  it('マーカー無し (null) の期間だけ未払いとして返す', async () => {
+    mGet.mockImplementation(async (key: string) => {
+      if (key === KEY_OF('2026-05')) return { ok: true, value: '0xpaid' }; // 支払い済み
+      return { ok: true, value: null }; // 04, 06 はマーカー無し
+    });
+    const out = await getUnpaidPeriods(WALLET, ['2026-06', '2026-05', '2026-04']);
+    expect(out.sort()).toEqual(['2026-04', '2026-06']);
+  });
+
+  it('読み取り失敗の期間は支払い済み扱い (fail-open・未払いに含めない)', async () => {
+    mGet.mockImplementation(async (key: string) => {
+      if (key === KEY_OF('2026-06')) return { ok: false, reason: 'timeout' }; // 読めない
+      return { ok: true, value: null }; // 05 はマーカー無し = 未払い
+    });
+    const out = await getUnpaidPeriods(WALLET, ['2026-06', '2026-05']);
+    expect(out).toEqual(['2026-05']); // 06 は fail-open で除外
+  });
+
+  it('空配列 → 空配列', async () => {
+    const out = await getUnpaidPeriods(WALLET, []);
+    expect(out).toEqual([]);
   });
 });

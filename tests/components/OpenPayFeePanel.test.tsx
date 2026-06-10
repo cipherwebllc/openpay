@@ -94,7 +94,18 @@ const invoiceData = (over?: Partial<Record<string, unknown>>) => ({
     feeWei: (30n * JPYC).toString(),
     free: false,
   },
+  owed: [], // 既定は単一 due フロー (owed 一覧を出さない)
   ...over,
+});
+
+// 未払い行のヘルパ (owed 一覧テスト用)。
+const owedLine = (period: string, jpyc: bigint) => ({
+  period,
+  count: 5,
+  volumeWei: (jpyc * 100n * JPYC).toString(), // feeWei = jpyc になるよう逆算 (1%)
+  rateBps: 100,
+  feeWei: (jpyc * JPYC).toString(),
+  free: false,
 });
 
 beforeEach(() => {
@@ -248,6 +259,72 @@ describe('OpenPayFeePanel', () => {
       expect(screen.getByText(/確定待ち/)).toBeInTheDocument(),
     );
     expect(fetchSpy).not.toHaveBeenCalled(); // settle しない
+    fetchSpy.mockRestore();
+  });
+
+  it('owed が複数 → 期間別の一覧 + 各月の支払いボタンを描画', () => {
+    h.invoice = {
+      data: invoiceData({
+        feeCurrent: false,
+        owed: [owedLine('2026-07', 100n), owedLine('2026-05', 50n)],
+      }),
+      isLoading: false,
+      isError: false,
+    };
+    renderPanel();
+    // 一覧見出し (件数入り)。
+    expect(screen.getByText(/未払いの利用料が 2 件あります/)).toBeInTheDocument();
+    // 各月の金額・支払いボタン。
+    expect(
+      screen.getByRole('button', { name: /100 JPYC を支払う/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /50 JPYC を支払う/ }),
+    ).toBeInTheDocument();
+    // 期間が両方表示される。
+    expect(screen.getByText(/2026-07/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-05/)).toBeInTheDocument();
+  });
+
+  it('owed 複数: 古い月のボタン押下で その period 指定で settle が発火', async () => {
+    h.pay = {
+      mutateAsync: vi.fn(async () => ({
+        txHash: '0xold',
+        success: true,
+        pending: false,
+      })),
+      isPending: false,
+      isError: false,
+      error: null,
+    };
+    h.invoice = {
+      data: invoiceData({
+        feeCurrent: false,
+        owed: [owedLine('2026-07', 100n), owedLine('2026-05', 50n)],
+      }),
+      isLoading: false,
+      isError: false,
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, expiresAt: 1 }), { status: 200 }),
+      );
+    const { default: userEvent } = await import('@testing-library/user-event');
+    renderPanel();
+    // 古い月 (2026-05・50 JPYC) を支払う。
+    await userEvent.click(screen.getByRole('button', { name: /50 JPYC を支払う/ }));
+    expect(h.pay.mutateAsync).toHaveBeenCalledWith({ value: 50n * JPYC });
+    // settle に period=2026-05 が渡る。
+    await waitFor(() => {
+      const settleCall = fetchSpy.mock.calls.find(
+        (c) => c[0] === '/api/billing/settle',
+      );
+      expect(settleCall).toBeTruthy();
+      const body = JSON.parse((settleCall![1] as RequestInit).body as string);
+      expect(body.period).toBe('2026-05');
+      expect(body.txHash).toBe('0xold');
+    });
     fetchSpy.mockRestore();
   });
 

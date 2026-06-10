@@ -1101,6 +1101,8 @@
     "noneDue": "現在お支払いいただく利用料はありません。",
     "dueSummary": "{period} 分: 中継 {count} 件 / 出来高 {volume} JPYC × {rate}",
     "dueAmount": "利用料 {fee} JPYC",
+    "owedListTitle": "未払いの利用料が {count} 件あります。月ごとにお支払いください。",
+    "owedPeriodAmount": "利用料 {fee} JPYC",
     "switchChain": "{chain} に切り替える",
     "signing": "署名・送信中…",
     "settling": "確認中…",

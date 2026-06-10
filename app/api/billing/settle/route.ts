@@ -8,10 +8,15 @@ import { NextResponse } from 'next/server';
 import { createPublicClient, isHex, type Hex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
-import { grantFeeCurrent } from '@/lib/feeCurrent';
+import { grantFeeCurrent, markPeriodPaid } from '@/lib/feeCurrent';
 import { loadUsageInvoice } from '@/lib/billingMeter';
 import { recordFeeRevenue } from '@/lib/feeRevenue';
-import { previousPeriod, feeCoverageThrough } from '@/lib/feeGate';
+import {
+  previousPeriod,
+  feeCoverageThrough,
+  owedCandidatePeriods,
+} from '@/lib/feeGate';
+import { usageFeeConfig } from '@/lib/usageFee';
 import { verifyJpycFeeOnChain } from '@/lib/feeVerify';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
@@ -81,7 +86,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  let body: { txHash?: unknown; chainId?: unknown };
+  let body: { txHash?: unknown; chainId?: unknown; period?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -91,7 +96,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  const { txHash, chainId } = body;
+  const { txHash, chainId, period: periodIn } = body;
   if (typeof chainId !== 'number' || !Number.isInteger(chainId)) {
     return NextResponse.json(
       { ok: false, error: 'invalid_chain' },
@@ -108,9 +113,30 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  // 清算対象は **サーバが決める前月** (= gate が参照する、閉じた課金対象期)。caller に period を
-  // 選ばせない (任意の 0 円/低額期間を投げて current を得る・未払いを回避する悪用を断つ)。
-  const period = previousPeriod(Date.now());
+  // 清算対象期間。未指定は従来どおりサーバが決める前月 (後方互換)。指定時は **lookback 内の閉じた
+  // 期間のみ選択可** (古い未収を遡って清算する手段)。任意の 0 円/低額期間で current を得る悪用は、
+  // 下の invoice.feeWei===0n → nothingDue 早期 return が引き続き防ぐ (grant もマーカーも起きない)。
+  const nowMs = Date.now();
+  let period: string;
+  if (periodIn === undefined) {
+    period = previousPeriod(nowMs);
+  } else if (typeof periodIn !== 'string' || !/^\d{4}-\d{2}$/.test(periodIn)) {
+    return NextResponse.json(
+      { ok: false, error: 'period_out_of_range' },
+      { status: 400 },
+    );
+  } else {
+    // 検証: startPeriod 以上・前月以下・lookback (12 か月) の候補範囲内。owedCandidatePeriods が
+    // この閉区間の単一ソース (ゲート/invoice と共有)。範囲外 (未来/古すぎ/未点灯) は 400。
+    const candidates = owedCandidatePeriods(nowMs, usageFeeConfig().startPeriod);
+    if (!candidates.includes(periodIn)) {
+      return NextResponse.json(
+        { ok: false, error: 'period_out_of_range' },
+        { status: 400 },
+      );
+    }
+    period = periodIn;
+  }
   const invoice = await loadUsageInvoice(period, session.address);
 
   // 請求 0 (アルファ料率 0% / 前月出来高 0) → そもそも gate は遮断しない (前月請求なし) ので付与不要。
@@ -210,6 +236,25 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (!granted.ok) {
       await releaseClaim(usedKey, 'grant-write-failed');
       logger.error('billing.settle.grant-failed', {
+        wallet: session.address,
+        chainId,
+        period,
+        txHash,
+      });
+      return NextResponse.json(
+        { ok: false, error: 'grant_failed' },
+        { status: 503 },
+      );
+    }
+
+    // 期間別「支払い済み」マーカーを記録する。古い期間の清算では expiresAt が過去で fee-current は
+    // 付かない (= 現行カバレッジは買えない・これが正しい挙動) ため、関所ゲートが「この期間はもう
+    // 払った」と認識する唯一の手段がこのマーカー。書込失敗は grant-write-failed と同じ回復則:
+    // releaseClaim + 503 で、同じ txHash の再提出で再試行できる (二重支払いは起きない)。
+    const marked = await markPeriodPaid(session.address, period, txHash);
+    if (!marked.ok) {
+      await releaseClaim(usedKey, 'paid-marker-write-failed');
+      logger.error('billing.settle.paid-marker-failed', {
         wallet: session.address,
         chainId,
         period,

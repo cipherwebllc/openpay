@@ -1024,6 +1024,35 @@ describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => 
   });
 });
 
+describe('i18n: UsageFee owed 一覧 keys (古い未収の期間別清算・ja/en parity)', () => {
+  // REM-3 で追加。owed 複数月の一覧見出し ({count}) と各月の支払い金額 ({fee})。
+  const OWED_KEYS = ['owedListTitle', 'owedPeriodAmount'] as const;
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of OWED_KEYS) {
+      it(`${loc.name}.UsageFee.${key} は非空文字列`, () => {
+        const v = (loc.m.UsageFee as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+  it('owedListTitle は {count}・owedPeriodAmount は {fee} placeholder を持つ', () => {
+    for (const m of [ja, en]) {
+      const u = m.UsageFee as Record<string, string>;
+      expect(u.owedListTitle).toContain('{count}');
+      expect(u.owedPeriodAmount).toContain('{fee}');
+    }
+  });
+  it('UsageFee キー集合が ja と en で一致 (構造 parity)', () => {
+    expect(Object.keys(ja.UsageFee).sort()).toEqual(
+      Object.keys(en.UsageFee).sort(),
+    );
+  });
+});
+
 describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity)', () => {
   function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
     return Object.entries(o)

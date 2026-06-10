@@ -11,7 +11,7 @@
 // 返したら再送せず確定待ちを促す。連署名ウォレット不一致 (mismatch) 中は支払いを出さない
 // (送金元と SIWE セッションが食い違い settle が from 不一致で失敗するため)。
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactElement } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAccount, useSwitchChain } from 'wagmi';
@@ -54,16 +54,25 @@ export function OpenPayFeePanel() {
   // hook は常に有効な deployment で呼ぶ (条件付き呼出は不可)。実支払いは payDeployment 定義時のみ。
   const pay = useUsageFeePayment(payDeployment ?? defaultJpyc);
 
-  // 送金確定後の txHash を保持し、settle 失敗時はこの hash で settle だけ再試行する (再送金しない)。
-  const payTxRef = useRef<Hex | null>(null);
-  const [payPending, setPayPending] = useState(false);
+  // 送金確定後の txHash を **期間別に** 保持し、settle 失敗時はこの hash で settle だけ再試行する
+  // (再送金しない)。期間別清算 (owed 複数) でも単一 due フローでも同じ ref を期間キーで使い回す。
+  const payTxByPeriod = useRef<Map<string, Hex>>(new Map());
+  // pending (relay 未確定) になった期間。再送せず確定待ちを促す。
+  const [pendingPeriod, setPendingPeriod] = useState<string | null>(null);
+  // 今どの期間を清算中か (settle mutation の状態を期間別に表示するため)。
+  const [activePeriod, setActivePeriod] = useState<string | null>(null);
 
   const settle = useMutation({
-    mutationFn: async (txHash: Hex) => {
+    mutationFn: async (vars: { txHash: Hex; period?: string }) => {
       const res = await fetch('/api/billing/settle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ txHash, chainId }), // period はサーバが前月で導出
+        // period 未指定はサーバが前月で導出 (後方互換)。期間別清算では明示する。
+        body: JSON.stringify({
+          txHash: vars.txHash,
+          chainId,
+          ...(vars.period ? { period: vars.period } : {}),
+        }),
       });
       const json = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -77,26 +86,109 @@ export function OpenPayFeePanel() {
   });
 
   // 送金 → 確定で txHash を保持 → settle 自動起動。pending は再送/清算せず確定待ちを促す。
-  async function startPay() {
-    const due = invoice.data?.due;
-    if (!payDeployment || !due) return;
+  // line = 清算対象期間のインボイス行。period を settle に渡す (owed 複数で期間を取り違えない)。
+  async function startPay(line: { period: string; feeWei: string }) {
+    if (!payDeployment) return;
+    setActivePeriod(line.period);
+    setPendingPeriod(null);
     const r = await pay
-      .mutateAsync({ value: BigInt(due.feeWei) })
+      .mutateAsync({ value: BigInt(line.feeWei) })
       .catch(() => null);
     if (!r) return; // 送金エラーは pay.isError で表示
     if (r.pending) {
-      setPayPending(true);
+      setPendingPeriod(line.period);
       return;
     }
     if (r.success && r.txHash) {
-      payTxRef.current = r.txHash;
-      settle.mutate(r.txHash);
+      payTxByPeriod.current.set(line.period, r.txHash);
+      settle.mutate({ txHash: r.txHash, period: line.period });
     }
+  }
+
+  // settle 失敗後の再試行 (再送金せず、保持済み txHash で settle のみ再実行)。
+  function retrySettle(period: string) {
+    const tx = payTxByPeriod.current.get(period);
+    if (!tx) return;
+    setActivePeriod(period);
+    settle.mutate({ txHash: tx, period });
   }
 
   const data = invoice.data;
   const due = data?.due;
   const current = data?.current;
+  // 未払い請求の一覧 (lookback 内・新しい順)。複数あれば期間別清算 UI を出す。
+  const owed = data?.owed ?? [];
+  const multiOwed = owed.length > 1;
+
+  // 期間 line の支払いボタン群 (送金→settle・pending・再試行)。単一 due と期間別 owed で共有する。
+  // 状態 (pending/error/success) は period 別に判定し、複数期間で取り違えないようにする。
+  function renderPayControls(line: {
+    period: string;
+    feeWei: string;
+  }): ReactElement {
+    const isPending = pendingPeriod === line.period;
+    const hasTx = payTxByPeriod.current.has(line.period);
+    const isActive = activePeriod === line.period;
+    // settle のエラー/進行/成功はグローバル mutation の状態を「今その期間を清算中か」で絞る。
+    const settleErrored = isActive && settle.isError && hasTx;
+    const settling = isActive && settle.isPending;
+    if (!payDeployment) {
+      return (
+        <button
+          type="button"
+          disabled={isSwitching}
+          onClick={() => switchChain({ chainId: defaultJpyc.chainId })}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
+        >
+          {t('switchChain', { chain: defaultJpyc.name })}
+        </button>
+      );
+    }
+    if (isPending) {
+      return <p className="text-[11px] text-amber-700">{t('pending')}</p>;
+    }
+    if (settleErrored) {
+      // 送金は確定済。settle のみ再試行する (再送金しない)。
+      return (
+        <>
+          <button
+            type="button"
+            disabled={settle.isPending}
+            onClick={() => retrySettle(line.period)}
+            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {settling ? t('settling') : t('retrySettle')}
+          </button>
+          <p className="text-[11px] text-red-600">
+            {t('settleError', {
+              reason: (settle.error as Error)?.message ?? 'error',
+            })}
+          </p>
+        </>
+      );
+    }
+    return (
+      <>
+        <button
+          type="button"
+          disabled={pay.isPending || settle.isPending}
+          onClick={() => void startPay(line)}
+          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isActive && pay.isPending
+            ? t('signing')
+            : settling
+              ? t('settling')
+              : t('payCta', { fee: formatJpyc(line.feeWei) })}
+        </button>
+        {isActive && pay.isError && (
+          <p className="text-[11px] text-red-600">
+            {t('payError', { reason: (pay.error as Error)?.message ?? 'error' })}
+          </p>
+        )}
+      </>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -180,89 +272,67 @@ export function OpenPayFeePanel() {
                     </p>
                   )}
 
-                  {due && due.free ? (
-                    <p className="text-xs text-slate-500">{t('noneDue')}</p>
-                  ) : due ? (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                      <p className="text-xs text-slate-600">
-                        {t('dueSummary', {
-                          period: due.period,
-                          count: due.count,
-                          volume: formatJpyc(due.volumeWei),
-                          rate: `${(due.rateBps / 100).toString()}%`,
-                        })}
-                      </p>
-                      <p className="mt-1 text-lg font-bold text-slate-900">
-                        {t('dueAmount', { fee: formatJpyc(due.feeWei) })}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {/* 支払い: 残額あり・未払い・ウォレット一致のときのみ。mismatch は上で警告済。 */}
-                  {due && !due.free && !data.feeCurrent && !mismatch && (
+                  {multiOwed ? (
+                    /* 未払いが複数月 (古い未収あり): 期間別に明細 + 「この月分を支払う」を出す。
+                       期間ごとに送金→settle を実行し、settle には period を渡す。 */
                     <div className="space-y-2">
-                      {!payDeployment ? (
-                        <button
-                          type="button"
-                          disabled={isSwitching}
-                          onClick={() =>
-                            switchChain({ chainId: defaultJpyc.chainId })
-                          }
-                          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
-                        >
-                          {t('switchChain', { chain: defaultJpyc.name })}
-                        </button>
-                      ) : payPending ? (
-                        <p className="text-[11px] text-amber-700">
-                          {t('pending')}
-                        </p>
-                      ) : payTxRef.current && settle.isError ? (
-                        // 送金は確定済。settle のみ再試行する (再送金しない)。
-                        <>
-                          <button
-                            type="button"
-                            disabled={settle.isPending}
-                            onClick={() =>
-                              settle.mutate(payTxRef.current as Hex)
-                            }
-                            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+                      <p className="text-xs font-semibold text-slate-700">
+                        {t('owedListTitle', { count: owed.length })}
+                      </p>
+                      <ul className="space-y-2">
+                        {owed.map((line) => (
+                          <li
+                            key={line.period}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
                           >
-                            {settle.isPending
-                              ? t('settling')
-                              : t('retrySettle')}
-                          </button>
-                          <p className="text-[11px] text-red-600">
-                            {t('settleError', {
-                              reason:
-                                (settle.error as Error)?.message ?? 'error',
-                            })}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            disabled={pay.isPending || settle.isPending}
-                            onClick={() => void startPay()}
-                            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {pay.isPending
-                              ? t('signing')
-                              : settle.isPending
-                                ? t('settling')
-                                : t('payCta', { fee: formatJpyc(due.feeWei) })}
-                          </button>
-                          {pay.isError && (
-                            <p className="text-[11px] text-red-600">
-                              {t('payError', {
-                                reason:
-                                  (pay.error as Error)?.message ?? 'error',
+                            <p className="text-xs text-slate-600">
+                              {t('dueSummary', {
+                                period: line.period,
+                                count: line.count,
+                                volume: formatJpyc(line.volumeWei),
+                                rate: `${(line.rateBps / 100).toString()}%`,
                               })}
                             </p>
-                          )}
-                        </>
-                      )}
+                            <p className="mt-1 text-base font-bold text-slate-900">
+                              {t('owedPeriodAmount', {
+                                fee: formatJpyc(line.feeWei),
+                              })}
+                            </p>
+                            {/* 期間別の支払い: ウォレット一致のときのみ (mismatch は上で警告済)。 */}
+                            {!mismatch && (
+                              <div className="mt-2 space-y-2">
+                                {renderPayControls(line)}
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
+                  ) : (
+                    <>
+                      {due && due.free ? (
+                        <p className="text-xs text-slate-500">{t('noneDue')}</p>
+                      ) : due ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <p className="text-xs text-slate-600">
+                            {t('dueSummary', {
+                              period: due.period,
+                              count: due.count,
+                              volume: formatJpyc(due.volumeWei),
+                              rate: `${(due.rateBps / 100).toString()}%`,
+                            })}
+                          </p>
+                          <p className="mt-1 text-lg font-bold text-slate-900">
+                            {t('dueAmount', { fee: formatJpyc(due.feeWei) })}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {/* 支払い: 残額あり・未払い・ウォレット一致のときのみ。mismatch は上で警告済。 */}
+                      {due && !due.free && !data.feeCurrent && !mismatch && (
+                        <div className="space-y-2">{renderPayControls(due)}</div>
+                      )}
+                    </>
                   )}
 
                   {settle.isSuccess && (
