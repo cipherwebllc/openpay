@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
+import { getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+const ADDR2 = '0x000000000000000000000000000000000000dead';
 const h = vi.hoisted(() => ({ enableHandles: true }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -45,12 +47,14 @@ vi.mock('@/components/HandleClaimPanel', () => ({
   HandleClaimPanel: ({
     config,
     onEdit,
+    onPublished,
   }: {
     config: unknown;
     onEdit?: (handle: string, config: unknown, profile?: unknown) => void;
+    onPublished?: (handle: string) => void;
   }) => (
     <div data-testid="claim">
-      {config ? 'config-ready' : 'no-config'}
+      {config ? `config-ready:${(config as { to: string }).to}` : 'no-config'}
       <button
         type="button"
         data-testid="edit-legacy-usdc"
@@ -63,6 +67,11 @@ vi.mock('@/components/HandleClaimPanel', () => ({
             ],
           })
         }
+      />
+      <button
+        type="button"
+        data-testid="publish-mock"
+        onClick={() => onPublished?.('alice')}
       />
     </div>
   ),
@@ -145,6 +154,49 @@ describe('HandleProfileBuilder', () => {
     ).toBeInTheDocument();
     // ビルダーが組む methods には usdc が含まれない (JPYC のみで config 完成)
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
+  });
+
+  it('手入力した生 0x アドレスが stale な resolved を上書きする (誤送金防止)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    // 編集 prefill で resolved に旧アドレス (ADDR) が入る
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(screen.getByTestId('claim')).toHaveTextContent(`config-ready:${ADDR}`);
+    // 別の生アドレスを手入力 — mock の AddressInput は常に stale な ADDR を
+    // onResolved で発火し続けるが、isAddress な生入力が最優先で採用されること
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR2 } });
+    expect(screen.getByTestId('claim')).toHaveTextContent(
+      `config-ready:${getAddress(ADDR2)}`,
+    );
+    expect(screen.getByTestId('claim')).not.toHaveTextContent(`config-ready:${ADDR}`);
+  });
+
+  it('編集クリックでフォーム先頭へ smooth スクロールする (配線検証)', () => {
+    // jsdom は scrollIntoView 未実装 → prototype に spy を立てて呼び出しを実証する
+    const spy = vi.fn();
+    Element.prototype.scrollIntoView = spy;
+    try {
+      renderWithIntl(<HandleProfileBuilder />);
+      expect(spy).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+      expect(spy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it('公開成功後は旧レコード由来の「USDC 提供終了」通知が消える (stale 通知防止)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(
+      screen.getByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+    ).toBeInTheDocument();
+    // 更新/取得が成功 → 公開後のレコードに usdc は無いので通知は stale
+    fireEvent.click(screen.getByTestId('publish-mock'));
+    expect(
+      screen.queryByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+    ).not.toBeInTheDocument();
+    // 編集モード自体は継続 (公開した handle を編集中)
+    expect(screen.getByText('「@alice」を編集中')).toBeInTheDocument();
   });
 
   it('編集開始でヘッダに「編集中」バッジ・「編集をやめる」でフォームを既定へ戻す', () => {

@@ -89,6 +89,8 @@ import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { TipForm } from '@/components/TipForm';
+import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
+import type { HandleTipConfig } from '@/lib/handle';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 import type { TipParams } from '@/lib/url';
 import { mockHook } from '../_helpers/wagmiMock';
@@ -1148,5 +1150,55 @@ describe('TipForm — USDC Circle Paymaster', () => {
     render(<TipForm params={USDC_PARAMS} />);
     await user.click(screen.getByRole('button', { name: /1 USDC を送る/ }));
     expect(mutate.mock.calls[0][0].circlePermitAmount).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ReceiveMethodPicker × 実 TipForm — @handle 公開ページの受取方法切替。
+// TipForm は preset/金額 state を mount 時の params から初期化するため、picker は
+// `key={token:chain}` で再マウントして金額を隔離する (Codex R2: JPYC 500 のまま
+// USDC 500 として送られる誤金額の防止)。ここではスタブでなく**実 TipForm** で
+// 「切替後に前方法の金額が持ち越されない」ことを実証する。
+// ─────────────────────────────────────────────────────────────────────────────
+describe('ReceiveMethodPicker × 実 TipForm — 切替で金額がリセットされる', () => {
+  beforeEach(() => {
+    setGasQuote('ready', 0n);
+  });
+
+  const HANDLE_CONFIG: HandleTipConfig = {
+    to: CREATOR,
+    name: '山田太郎',
+    methods: [
+      { token: 'jpyc', chain: 'polygon' },
+      { token: 'usdc', chain: 'base', crossChain: true },
+    ],
+    presets: { jpyc: ['100', '500', '1000'], usdc: ['1', '5', '10'] },
+  };
+
+  it('JPYC で 500 を選択 → USDC へ切替 → USDC 既定 preset (1) に戻る', async () => {
+    const user = userEvent.setup();
+    render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
+    // 既定 = 最初の方法 (JPYC) が描画され、500 を選ぶと明細に反映
+    await user.click(screen.getByRole('button', { name: '500 JPYC' }));
+    expectBreakdownRow('クリエイター受取', '500 JPYC');
+    // USDC へ切替 → 再マウントで USDC の最初の preset (1 USDC) が選択される。
+    // 500 が USDC として持ち越されないことが本題。
+    await user.click(screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }));
+    expectBreakdownRow('クリエイター受取', '1 USDC');
+    expect(screen.queryByText('500 USDC')).not.toBeInTheDocument();
+    // JPYC へ戻しても 500 ではなく JPYC の最初の preset (100) から
+    await user.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
+    expectBreakdownRow('クリエイター受取', '100 JPYC');
+  });
+
+  it('カスタム入力も方法切替で持ち越されない', async () => {
+    const user = userEvent.setup();
+    render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
+    await user.type(screen.getByPlaceholderText('例: 2500'), '7777');
+    expectBreakdownRow('クリエイター受取', '7777 JPYC');
+    await user.click(screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }));
+    expectBreakdownRow('クリエイター受取', '1 USDC');
+    // USDC 側のカスタム入力欄は空 (JPYC の 7777 が残らない)
+    expect(screen.getByPlaceholderText('例: 7.50')).toHaveValue('');
   });
 });

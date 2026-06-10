@@ -590,7 +590,11 @@
     "open": "開く",
     "copyAsNewHint": "「@{editing}」はそのまま残し、同じ内容で新しいハンドル「@{name}」を取得します。",
     "publishedCreated": "「@{handle}」を取得しました！続けてこのまま編集・更新できます。",
-    "publishedUpdated": "「@{handle}」を更新しました。"
+    "publishedUpdated": "「@{handle}」を更新しました。",
+    "mineError": "取得済みハンドルの一覧を読み込めませんでした。",
+    "retry": "再試行",
+    "availabilityUnknown": "空き状況を確認できませんでした。時間をおいて再度お試しください。",
+    "releaseError": "解放に失敗しました ({error})"
   },
   "HandleProfile": {
     "supportHeading": "応援する方法を選ぶ",

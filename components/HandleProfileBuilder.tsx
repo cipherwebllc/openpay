@@ -503,7 +503,12 @@ export function HandleProfileBuilder() {
             onEdit={onEditExisting}
             editingHandle={editingHandle}
             onStopEditing={onStopEditing}
-            onPublished={setEditingHandle}
+            onPublished={(h) => {
+              setEditingHandle(h);
+              // 公開後のレコードは builder 製 = USDC method を含まないため、旧レコード由来の
+              // 「USDC 提供終了」通知は以後 stale (更新で外れる、はもう外れた後)。
+              setEditedHadUsdc(false);
+            }}
           />
         </aside>
       </div>

@@ -6,6 +6,7 @@
 
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import { DEFAULT_TIP_PRESETS } from '@/lib/url';
+import { MAX_PROFILE_LINKS, MAX_SOCIAL_LINKS } from '@/lib/handle';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 // 受取方法は JPYC Polygon / JPYC Kaia の ON/OFF。USDC (cross-chain) は着金チェーンを
@@ -70,7 +71,7 @@ function sanitizeLinks(
       label: typeof ll.label === 'string' ? ll.label : '',
       url: typeof ll.url === 'string' ? ll.url : '',
     });
-    if (out.length >= 6) break;
+    if (out.length >= MAX_PROFILE_LINKS) break;
   }
   return out;
 }
@@ -81,7 +82,7 @@ function sanitizeSocials(loaded: unknown): string[] {
   for (const s of loaded) {
     if (typeof s !== 'string') continue;
     out.push(s); // 入力途中の値も下書きとしては保持 (検証は submit 側)
-    if (out.length >= 6) break;
+    if (out.length >= MAX_SOCIAL_LINKS) break;
   }
   return out;
 }

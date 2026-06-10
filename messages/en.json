@@ -590,7 +590,11 @@
     "open": "Open",
     "copyAsNewHint": "“@{editing}” stays as is — a new handle “@{name}” will be claimed with the same content.",
     "publishedCreated": "Claimed “@{handle}”! You can keep editing and updating it.",
-    "publishedUpdated": "Updated “@{handle}”."
+    "publishedUpdated": "Updated “@{handle}”.",
+    "mineError": "Could not load your handles.",
+    "retry": "Retry",
+    "availabilityUnknown": "Could not check availability. Please try again later.",
+    "releaseError": "Failed to release ({error})"
   },
   "HandleProfile": {
     "supportHeading": "Choose how to support",

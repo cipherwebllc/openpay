@@ -19,6 +19,7 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
   validateHandle,
+  MAX_HANDLES_PER_WALLET,
   type HandleTipConfig,
   type HandleProfile,
 } from '@/lib/handle';
@@ -72,6 +73,9 @@ export function HandleClaimPanel({
     handle: string;
     status: 'created' | 'updated';
   } | null>(null);
+  // どの handle のリンクをコピーしたか。copied フラグはフック単位なので、これが無いと
+  // 複数所有時に全行が「コピー済み」表示になる。
+  const [copiedHandle, setCopiedHandle] = useState<string | null>(null);
 
   // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
   useEffect(() => {
@@ -108,7 +112,11 @@ export function HandleClaimPanel({
     queryKey: ['handle-mine', sessionAddress],
     enabled: env.enableHandles && isSignedIn,
     queryFn: async (): Promise<MineResponse> => {
-      const { json } = await fetchJson('/api/handle');
+      const { ok, status, json } = await fetchJson('/api/handle');
+      // KV 障害 (502 等) を「ハンドル 0 件」と偽装しない — isError でエラー表示 + 再試行へ。
+      if (!ok) {
+        throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
+      }
       const handles = Array.isArray(json.handles)
         ? (json.handles as unknown[]).filter(
             (h): h is OwnedHandle =>
@@ -118,7 +126,10 @@ export function HandleClaimPanel({
               !!(h as OwnedHandle).config,
           )
         : [];
-      return { handles, max: typeof json.max === 'number' ? json.max : 3 };
+      return {
+        handles,
+        max: typeof json.max === 'number' ? json.max : MAX_HANDLES_PER_WALLET,
+      };
     },
   });
 
@@ -157,7 +168,7 @@ export function HandleClaimPanel({
 
   if (!env.enableHandles) return null;
 
-  const max = mine.data?.max ?? 3;
+  const max = mine.data?.max ?? MAX_HANDLES_PER_WALLET;
   const owned = mine.data?.handles ?? [];
   const ownedNames = owned.map((o) => o.handle);
   const atLimit = owned.length >= max;
@@ -184,6 +195,19 @@ export function HandleClaimPanel({
         </div>
       ) : (
         <div className="mt-3 space-y-3">
+          {/* 一覧の読み込み失敗は隠さない (KV 障害を「0件」と誤認させない)。 */}
+          {mine.isError && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+              <span>{t('mineError')}</span>{' '}
+              <button
+                type="button"
+                onClick={() => void mine.refetch()}
+                className="font-semibold underline hover:text-red-900"
+              >
+                {t('retry')}
+              </button>
+            </div>
+          )}
           {/* 取得済み handle 一覧 (2回目以降は編集が主動線なので先頭に置く) */}
           {owned.length > 0 && (
             <div>
@@ -232,10 +256,15 @@ export function HandleClaimPanel({
                           </a>
                           <button
                             type="button"
-                            onClick={() => linkCopy.copy(link)}
+                            onClick={() => {
+                              void linkCopy.copy(link);
+                              setCopiedHandle(h);
+                            }}
                             className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
                           >
-                            {linkCopy.copied ? t('copied') : t('copy')}
+                            {linkCopy.copied && copiedHandle === h
+                              ? t('copied')
+                              : t('copy')}
                           </button>
                           <button
                             type="button"
@@ -258,6 +287,12 @@ export function HandleClaimPanel({
                   );
                 })}
               </ul>
+              {/* 解放失敗を無言で握りつぶさない (リンクが生きているのに消えたと誤認させない)。 */}
+              {release.isError && (
+                <p className="mt-2 text-xs text-red-600">
+                  {t('releaseError', { error: (release.error as Error).message })}
+                </p>
+              )}
             </div>
           )}
 
@@ -313,7 +348,8 @@ export function HandleClaimPanel({
                 {validation.reason === 'reserved' ? t('reservedWord') : t('invalidFormat')}
               </p>
             )}
-            {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。 */}
+            {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。
+                KV 障害 (reason:'unavailable') は「使用済み」と偽らず「確認できない」と正直に出す。 */}
             {validation.ok &&
               debounced === normalized &&
               !ownedNames.includes(normalized) && (
@@ -322,6 +358,9 @@ export function HandleClaimPanel({
                     <span className="text-slate-400">{t('checking')}</span>
                   ) : availability.data?.available ? (
                     <span className="text-emerald-600">{t('available')}</span>
+                  ) : availability.data?.reason === 'unavailable' ||
+                    availability.isError ? (
+                    <span className="text-amber-700">{t('availabilityUnknown')}</span>
                   ) : availability.data ? (
                     <span className="text-red-600">{t('taken')}</span>
                   ) : null}
