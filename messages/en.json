@@ -556,7 +556,8 @@
     "buttonSnippetTitle": "Button embed code",
     "buttonSnippetHint": "A \"Tip\" button for note, Linktree, or your blog.",
     "buttonLabelNamed": "Tip {name}",
-    "buttonLabelGeneric": "Send a tip"
+    "buttonLabelGeneric": "Send a tip",
+    "qrClose": "Close"
   },
   "HandleClaim": {
     "title": "Permanent link (@handle)",

@@ -354,9 +354,9 @@ describe('TipEmbedGenerator — コピーボタン', () => {
 });
 
 describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め込み)', () => {
-  it('share タブ: アドレス入力で「X でシェア」(twitter intent + tipUrl) と QR が出る', async () => {
+  it('share タブ: アドレス入力で「X でシェア」と QR ボタン → ポップアップ表示', async () => {
     const user = userEvent.setup();
-    const { container } = render(<TipEmbedGenerator />);
+    render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
 
@@ -365,9 +365,16 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
     expect(href).toContain('twitter.com/intent/tweet');
     expect(href).toContain(VALID); // url= に tipUrl が含まれる
 
-    // QR: 見出し + svg が share タブに出る
-    expect(screen.getByText('リンクの QR コード')).toBeInTheDocument();
-    expect(container.querySelector('svg')).not.toBeNull();
+    // QR は常時表示せずボタン → ポップアップ (dialog 内に svg + フル URL)
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'リンクの QR コード' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.querySelector('svg')).not.toBeNull();
+    expect(dialog.textContent).toContain(VALID); // フル URL を提示
+    // 閉じる
+    await user.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('share タブ: アドレス未入力なら X シェア / QR は出ない', async () => {

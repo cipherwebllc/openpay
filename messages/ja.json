@@ -556,7 +556,8 @@
     "buttonSnippetTitle": "ボタン埋め込みコード",
     "buttonSnippetHint": "note・Linktree・ブログに貼れる「チップ」ボタンです。",
     "buttonLabelNamed": "{name} さんにチップ",
-    "buttonLabelGeneric": "チップを送る"
+    "buttonLabelGeneric": "チップを送る",
+    "qrClose": "閉じる"
   },
   "HandleClaim": {
     "title": "恒久リンク (@handle)",

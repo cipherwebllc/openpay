@@ -9,11 +9,11 @@
 // バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
 // (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { QRCodeSVG } from 'qrcode.react';
 import { env } from '@/lib/env';
+import { LinkQrModal } from '@/components/LinkQrModal';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -80,32 +80,6 @@ export function HandleClaimPanel({
   // ボタン経由のモーダル提示にする。
   const [qrHandle, setQrHandle] = useState<string | null>(null);
 
-  // QR モーダルの ESC 閉じ + フォーカス管理 (開いたら閉じるボタンへ・閉じたら元の要素へ復元)。
-  const qrCloseRef = useRef<HTMLButtonElement>(null);
-  const qrReturnFocusRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (qrHandle === null) {
-      qrReturnFocusRef.current?.focus?.();
-      qrReturnFocusRef.current = null;
-      return;
-    }
-    qrReturnFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    qrCloseRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setQrHandle(null);
-      // ダイアログ内のフォーカス可能要素は閉じるボタンのみ → Tab で背後のページへ
-      // 抜けないよう閉じるボタンに留める (aria-modal を実挙動で担保)。
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        qrCloseRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [qrHandle]);
 
   // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
   useEffect(() => {
@@ -454,45 +428,14 @@ export function HandleClaimPanel({
         </div>
       )}
 
-      {/* QR ポップアップ (一覧に常時並べると縦長で読みにくいためボタン経由)。
-          overlay クリック / ESC / 閉じるボタンで閉じる。 */}
-      {qrHandle !== null && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`@${qrHandle}`}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
-          onClick={() => setQrHandle(null)}
-        >
-          <div
-            className="w-full max-w-xs rounded-2xl bg-white p-6 text-center shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="break-all font-mono text-sm font-semibold text-slate-800">
-              @{qrHandle}
-            </p>
-            <div className="mt-4 flex justify-center">
-              <QRCodeSVG
-                value={origin ? `${origin}/@${qrHandle}` : `/@${qrHandle}`}
-                size={220}
-                includeMargin
-                level="M"
-              />
-            </div>
-            <p className="mt-3 break-all text-xs text-slate-400">
-              {origin ? `${origin}/@${qrHandle}` : `/@${qrHandle}`}
-            </p>
-            <button
-              ref={qrCloseRef}
-              type="button"
-              onClick={() => setQrHandle(null)}
-              className="mt-4 w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-            >
-              {t('qrClose')}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* QR ポップアップ (一覧に常時並べると縦長で読みにくいためボタン経由)。 */}
+      <LinkQrModal
+        open={qrHandle !== null}
+        value={qrHandle ? (origin ? `${origin}/@${qrHandle}` : `/@${qrHandle}`) : ''}
+        title={qrHandle ? `@${qrHandle}` : ''}
+        closeLabel={t('qrClose')}
+        onClose={() => setQrHandle(null)}
+      />
     </div>
   );
 }

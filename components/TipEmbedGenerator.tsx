@@ -3,14 +3,15 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
-import { QRCodeSVG } from 'qrcode.react';
 import {
   ChevronDown,
   Code2,
+  QrCode,
   Share2,
   Sparkles,
   Wallet,
 } from 'lucide-react';
+import { LinkQrModal } from './LinkQrModal';
 import { ReceiverBlock } from './ReceiverBlock';
 import { Field } from './Field';
 import { StepCard } from './StepCard';
@@ -78,6 +79,7 @@ export function TipEmbedGenerator() {
   const [publishMode, setPublishMode] = useState<PublishMode>('share');
   const [embedFormat, setEmbedFormat] = useState<EmbedFormat>('iframe');
   const [devOpen, setDevOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
   const tHeader = useTranslations('TipForm');
@@ -562,24 +564,28 @@ export function TipEmbedGenerator() {
                     <Share2 className="h-3.5 w-3.5" aria-hidden />
                     {t('shareXButton')}
                   </a>
-                  {/* リンクの QR: 印刷・レジ横・対面で読み取って開ける。URL が QR 容量を
-                      超える長さだと qrcode.react が throw するため、閾値以下のみ描画。 */}
+                  {/* リンクの QR: 常時表示せずボタン → ポップアップ (プロフの所有一覧と同じ作法)。
+                      URL が QR 容量を超える長さだと qrcode.react が throw するため、閾値以下のみ提示。 */}
                   {tipUrl.length <= QR_MAX_URL_LEN && (
                     <div>
-                      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setQrOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400"
+                      >
+                        <QrCode className="h-3.5 w-3.5" aria-hidden />
                         {t('qrTitle')}
-                      </h4>
-                      <div className="flex justify-center rounded-lg border border-slate-200 bg-white p-3">
-                        <QRCodeSVG
-                          value={tipUrl}
-                          size={148}
-                          includeMargin
-                          level="M"
-                        />
-                      </div>
+                      </button>
                       <p className="mt-1.5 text-xs text-slate-400">
                         {t('qrHint')}
                       </p>
+                      <LinkQrModal
+                        open={qrOpen}
+                        value={tipUrl}
+                        title={t('qrTitle')}
+                        closeLabel={t('qrClose')}
+                        onClose={() => setQrOpen(false)}
+                      />
                     </div>
                   )}
                 </div>
