@@ -4,7 +4,7 @@
 // 壊さない (undercount=安全側)。server 専用 (KV)。設計: docs/plans/admin-billing-revenue.md。
 
 import type { Address } from 'viem';
-import { kvLpush, kvLrange, kvLtrim, isKvConfigured } from './kv';
+import { kvLpush, kvLrange, kvLtrim, kvSet, isKvConfigured } from './kv';
 import { logger } from './logger';
 import {
   meterPeriod,
@@ -16,6 +16,10 @@ const REVENUE_KEY = 'billing:revenue';
 // 入金は店主×月 1 件程度の低頻度なので 1 万件で数年分。超過時は古い側を捨て log で開示。
 // 真実は on-chain なので台帳上限は安全 (admin は定期 export 推奨)。
 const MAX_REVENUE_EVENTS = 10_000;
+// txHash 単位の記録済みマーカー TTL。settle の結果 TTL (SETTLE_RESULT_TTL_SEC=400日) と揃える:
+// settle 側で同 txHash が replay 扱いになる期間とこの台帳冪等が同じ寿命を持つことで、
+// 「promote 失敗 → ロック失効 → 同 txHash 再提出」が起きてもマーカーがまだ生きていて二重計上を防ぐ。
+const REVENUE_RECORDED_TTL_SEC = 400 * 86_400;
 
 export type FeeRevenueEvent = {
   m: string; // merchant (lowercase)
@@ -37,6 +41,29 @@ export async function recordFeeRevenue(input: {
 }): Promise<void> {
   try {
     if (!isKvConfigured()) return;
+    // txHash 単位の NX 冪等マーカーを LPUSH の前に立てる。settle 側 (route) の promote (ロック→
+    // 結果昇格) が失敗するとロックが短命のまま失効し、同 txHash 再提出が claim を取り直して
+    // verify/grant (冪等) を経て本関数を再実行しうる。LPUSH 自体は無防備なので、ここで二重計上を断つ。
+    // マーカー先行の理由: 「マーカー成功 → LPUSH 失敗」は台帳の **欠落** (undercount=本モジュール
+    // の文書化済み安全側) に倒れる。逆順 (LPUSH 先) だと LPUSH 後・マーカー前の crash で二重計上が復活する。
+    const markerKey = `billing:revenue:recorded:${input.chainId}:${input.txHash.toLowerCase()}`;
+    const marker = await kvSet(markerKey, '1', {
+      nx: true,
+      ttlSec: REVENUE_RECORDED_TTL_SEC,
+    });
+    if (!marker.ok) {
+      // KV 不調。台帳欠落は決済を壊さない (undercount=安全側) ので LPUSH せず諦める。
+      logger.warn('billing.revenue.marker_failed', { reason: marker.reason });
+      return;
+    }
+    if (marker.value !== 'OK') {
+      // 記録済み (promote 失敗後の再提出 replay 等)。二重計上しない。
+      logger.info('billing.revenue.duplicate_skip', {
+        chainId: input.chainId,
+        txHash: input.txHash,
+      });
+      return;
+    }
     const event: FeeRevenueEvent = {
       m: input.merchant.toLowerCase(),
       p: input.period,

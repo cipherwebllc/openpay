@@ -2,18 +2,23 @@
 // feeRevenue (台帳/集計/照合) を実際に通し、reconciliation が「請求 vs 入金」を正しく突合するか確認。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { kvMod, store } = vi.hoisted(() => {
+const { kvMod, store, spies } = vi.hoisted(() => {
   const vals = new Map<string, string>();
   const lists = new Map<string, string[]>();
+  // 個別 op を観測/制御するためのフック (テストで lpush 回数や kvSet 失敗を注入する)。
+  const lpush = vi.fn();
+  const failSet = { on: false };
   const kvMod = {
     isKvConfigured: () => true,
     kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
     kvSet: async (k: string, v: string, opts: { nx?: boolean } = {}) => {
+      if (failSet.on) return { ok: false as const, reason: 'unconfigured' as const };
       if (opts.nx && vals.has(k)) return { ok: true as const, value: null };
       vals.set(k, v);
       return { ok: true as const, value: 'OK' as const };
     },
     kvLpush: async (k: string, v: string) => {
+      lpush(k, v);
       const l = lists.get(k) ?? [];
       l.unshift(v);
       lists.set(k, l);
@@ -30,12 +35,13 @@ const { kvMod, store } = vi.hoisted(() => {
     },
     kvExpire: async () => ({ ok: true as const, value: 1 }),
   };
-  return { kvMod, store: { vals, lists } };
+  return { kvMod, store: { vals, lists }, spies: { lpush, failSet } };
 });
 vi.mock('@/lib/kv', () => kvMod);
-vi.mock('@/lib/logger', () => ({
+const loggerMod = vi.hoisted(() => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+vi.mock('@/lib/logger', () => loggerMod);
 
 import { recordRelayedVolume } from '@/lib/billingMeter';
 import {
@@ -55,6 +61,10 @@ const JUL3 = Date.UTC(2026, 6, 3); // 入金: 2026-07-03
 beforeEach(() => {
   store.vals.clear();
   store.lists.clear();
+  spies.lpush.mockClear();
+  spies.failSet.on = false;
+  loggerMod.logger.info.mockClear();
+  loggerMod.logger.warn.mockClear();
   process.env.OPENPAY_USAGE_FEE_START_PERIOD = '2020-01'; // 全期間 1%
   delete process.env.OPENPAY_USAGE_FEE_BPS;
 });
@@ -73,6 +83,47 @@ describe('feeRevenue 台帳 + 集計', () => {
     expect(s.totalWei).toBe(150n * JPYC);
     expect(s.count).toBe(2);
     expect(s.byBilledPeriod[0]).toMatchObject({ period: '2026-06', count: 2, feeWei: 150n * JPYC });
+  });
+});
+
+describe('feeRevenue txHash 冪等 (promote 失敗→再提出の二重計上防止)', () => {
+  const TX = `0x${'1'.repeat(64)}` as `0x${string}`;
+
+  it('初回呼出: NX マーカー成功 → LPUSH が1回走る', async () => {
+    await recordFeeRevenue({ merchant: A, period: '2026-06', feeWei: 100n * JPYC, chainId: AMOY, txHash: TX, paidAtMs: JUL3 });
+    expect(spies.lpush).toHaveBeenCalledTimes(1);
+    expect(spies.lpush).toHaveBeenCalledWith('billing:revenue', expect.any(String));
+    // マーカーが txHash 単位 (lowercase) で立っている。
+    expect(store.vals.get(`billing:revenue:recorded:${AMOY}:${TX.toLowerCase()}`)).toBe('1');
+  });
+
+  it('同 (chainId, txHash) の2回目: マーカー記録済み → LPUSH しない (duplicate_skip)', async () => {
+    await recordFeeRevenue({ merchant: A, period: '2026-06', feeWei: 100n * JPYC, chainId: AMOY, txHash: TX, paidAtMs: JUL3 });
+    await recordFeeRevenue({ merchant: A, period: '2026-06', feeWei: 100n * JPYC, chainId: AMOY, txHash: TX, paidAtMs: JUL3 });
+    expect(spies.lpush).toHaveBeenCalledTimes(1); // 2回目はスキップ
+    expect((store.lists.get('billing:revenue') ?? []).length).toBe(1);
+    expect(loggerMod.logger.info).toHaveBeenCalledWith(
+      'billing.revenue.duplicate_skip',
+      expect.objectContaining({ chainId: AMOY, txHash: TX }),
+    );
+  });
+
+  it('txHash 大文字小文字違いの2回目も同様にスキップ (lowercase 正規化)', async () => {
+    const lower = `0x${'a'.repeat(64)}` as `0x${string}`;
+    const upper = `0x${'A'.repeat(64)}` as `0x${string}`;
+    await recordFeeRevenue({ merchant: A, period: '2026-06', feeWei: 100n * JPYC, chainId: AMOY, txHash: lower, paidAtMs: JUL3 });
+    await recordFeeRevenue({ merchant: A, period: '2026-06', feeWei: 100n * JPYC, chainId: AMOY, txHash: upper, paidAtMs: JUL3 });
+    expect(spies.lpush).toHaveBeenCalledTimes(1); // 同一 txHash 扱い
+  });
+
+  it('マーカー kvSet 失敗 (!ok): LPUSH しない + warn (台帳欠落=安全側)', async () => {
+    spies.failSet.on = true;
+    await recordFeeRevenue({ merchant: A, period: '2026-06', feeWei: 100n * JPYC, chainId: AMOY, txHash: TX, paidAtMs: JUL3 });
+    expect(spies.lpush).not.toHaveBeenCalled();
+    expect(loggerMod.logger.warn).toHaveBeenCalledWith(
+      'billing.revenue.marker_failed',
+      expect.objectContaining({ reason: 'unconfigured' }),
+    );
   });
 });
 

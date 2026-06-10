@@ -10,10 +10,16 @@ import { NextResponse } from 'next/server';
 const { kvMod, store } = vi.hoisted(() => {
   const vals = new Map<string, string>();
   const lists = new Map<string, string[]>();
+  // promote (ロック→結果昇格・value が 'r:' で始まる SET) だけを失敗させるフック。
+  // settle の「promote 失敗 → ロック失効 → 同 txHash 再提出」シナリオの再現に使う。
+  const failPromote = { on: false };
   const kvMod = {
     isKvConfigured: () => true,
     kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
     kvSet: async (k: string, v: string, opts: { nx?: boolean; ttlSec?: number } = {}) => {
+      if (failPromote.on && v.startsWith('r:')) {
+        return { ok: false as const, reason: 'unconfigured' as const };
+      }
       if (opts.nx && vals.has(k)) return { ok: true as const, value: null };
       vals.set(k, v);
       return { ok: true as const, value: 'OK' as const };
@@ -42,7 +48,7 @@ const { kvMod, store } = vi.hoisted(() => {
     },
     kvExpire: async () => ({ ok: true as const, value: 1 }),
   };
-  return { kvMod, store: { vals, lists } };
+  return { kvMod, store: { vals, lists, failPromote } };
 });
 vi.mock('@/lib/kv', () => kvMod);
 
@@ -110,6 +116,7 @@ const gateNow = Date.UTC(dy, dm, 15); // duePeriod の翌月 15 日 (previousPer
 beforeEach(() => {
   store.vals.clear();
   store.lists.clear();
+  store.failPromote.on = false;
   verifyFn.mockClear();
   verifyFn.mockResolvedValue({ ok: true });
   process.env.ALPHA_ENTITLEMENT_BYPASS = '0'; // 徴収運用
@@ -215,5 +222,29 @@ describe('a1 統合: meter → invoice → gate → settle → fee-current (全�
     // replay (同 txHash 再清算) → 台帳に二重計上しない (初回成功時のみ記録)。
     await settlePOST(settleReq({ txHash: TX, chainId: AMOY }));
     expect(ledger()).toHaveLength(1);
+  });
+
+  it('promote 失敗 → ロック失効後の同 txHash 再提出でも 台帳 LPUSH は合計1回 (feeRevenue 冪等)', async () => {
+    await recordRelayedVolume({ chainId: AMOY, merchant: MERCHANT, value: 10_000n * JPYC, nowMs: tsInDue });
+    const ledger = () => store.lists.get('billing:revenue') ?? [];
+    const lockKey = `billing:settled:${AMOY}:${TX.toLowerCase()}`;
+
+    // 1回目: promote (ロック→結果昇格) を失敗させる。台帳記録 (recordFeeRevenue) は走り 1 件入る。
+    // promote 失敗でロックは短命 LOCK_MARKER ('pending') のまま残る。
+    store.failPromote.on = true;
+    const r1 = await settlePOST(settleReq({ txHash: TX, chainId: AMOY }));
+    expect(r1.status).toBe(200); // promote 失敗は warn のみで決済成立 (route 不変)
+    expect(ledger()).toHaveLength(1);
+    expect(store.vals.get(lockKey)).toBe('pending'); // 結果へ昇格できていない
+
+    // ロックの TTL 失効をシミュレート (in-memory mock は TTL を持たないため明示削除)。
+    store.vals.delete(lockKey);
+
+    // 2回目: promote は正常に戻す。claim を取り直し verify/grant (冪等) を経て recordFeeRevenue 再実行。
+    // feeRevenue 側の txHash マーカーが既に立っているので LPUSH はスキップされ、台帳は合計 1 件のまま。
+    store.failPromote.on = false;
+    const r2 = await settlePOST(settleReq({ txHash: TX, chainId: AMOY }));
+    expect(r2.status).toBe(200);
+    expect(ledger()).toHaveLength(1); // 二重計上なし
   });
 });
