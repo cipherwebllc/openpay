@@ -25,20 +25,22 @@ export function LinkQrModal({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  // onClose を ref 経由で読む。inline arrow は毎レンダ別 identity なので、これを effect の
+  // dep にすると表示中の親再レンダで effect が再実行され returnFocusRef を閉じるボタン自身で
+  // 上書きしてしまう (閉じた後の復元 focus が detach ノードへの no-op になり a11y 退行)。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
+  // 捕捉/復元は open の遷移時のみ走らせる (deps は [open] に限定)。
   useEffect(() => {
-    if (!open) {
-      returnFocusRef.current?.focus?.();
-      returnFocusRef.current = null;
-      return;
-    }
+    if (!open) return;
     returnFocusRef.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
       // ダイアログ内のフォーカス可能要素は閉じるボタンのみ → Tab で背後のページへ
       // 抜けないよう閉じるボタンに留める。
       if (e.key === 'Tab') {
@@ -47,8 +49,13 @@ export function LinkQrModal({
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    // cleanup (= 閉じる/unmount 時) に元の要素へフォーカスを復元する。
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      returnFocusRef.current?.focus?.();
+      returnFocusRef.current = null;
+    };
+  }, [open]);
 
   if (!open) return null;
 

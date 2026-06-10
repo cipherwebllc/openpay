@@ -101,14 +101,16 @@ export async function listHandleRecordsForOwner(
 ): Promise<OwnedHandle[] | null> {
   const names = await listHandlesForOwner(owner);
   if (names === null) return null;
+  // 各 handle の record 取得は独立なので並列化 (上限 3 件・直列 N+1 を 1 ラウンドに潰す)。
+  const results = await Promise.all(names.map((h) => kvGet(handleKey(h))));
   const out: OwnedHandle[] = [];
-  for (const handle of names) {
-    const res = await kvGet(handleKey(handle));
+  for (let i = 0; i < names.length; i++) {
+    const res = results[i];
     if (!res.ok) return null; // 取得失敗は「空」と誤認しない
     const record = parseHandleRecord(res.value);
     // owner を再確認: stale index (LREM 失敗後に別 wallet が再取得) で他人の record を
     // 編集対象として返さない (release の index cleanup 失敗時の安全策)。
-    if (record && sameOwner(record.owner, owner)) out.push({ handle, record });
+    if (record && sameOwner(record.owner, owner)) out.push({ handle: names[i], record });
   }
   return out;
 }

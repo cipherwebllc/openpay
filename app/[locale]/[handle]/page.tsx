@@ -6,6 +6,7 @@
 // 注: catch-all なので未知の単一 segment を全て受けるが、static route (pay/tip/create…) が
 // 優先され、`@` 以外は即 notFound するため KV は `/@...` のときだけ読む。
 
+import { cache } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import NextImage from 'next/image';
@@ -35,6 +36,10 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// generateMetadata と本体が同一リクエストで同じ handle を解決するため、React の cache() で
+// リクエスト単位にメモ化し KV への重複 REST I/O を1回に潰す (結果の不整合も防ぐ)。
+const resolveHandleCached = cache(resolveHandle);
+
 export async function generateMetadata({
   params,
 }: {
@@ -46,7 +51,7 @@ export async function generateMetadata({
   if (!env.enableHandles || !segment.startsWith('@')) {
     return { title: 'OpenPay' };
   }
-  const resolved = await resolveHandle(normalizeHandle(segment));
+  const resolved = await resolveHandleCached(normalizeHandle(segment));
   if (!resolved.ok || !resolved.record) {
     // 未存在 or KV エラー → 汎用ブランドカードの meta (ページ本体が notFound/5xx を出す)。
     const generic = buildTipMeta(null, ogLocale);
@@ -105,7 +110,7 @@ export default async function HandlePage({
   if (!segment.startsWith('@')) notFound();
 
   const normalized = normalizeHandle(segment);
-  const resolved = await resolveHandle(normalized);
+  const resolved = await resolveHandleCached(normalized);
   // KV 未設定/outage は誤って「存在しない (404)」と返さず 5xx に倒す (transient と gone を区別)。
   if (!resolved.ok) throw new Error('handle_store_unavailable');
   if (!resolved.record) {

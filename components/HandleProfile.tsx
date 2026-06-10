@@ -16,7 +16,8 @@ const DEFAULT_ACCENT = '#2563eb';
 
 function initialOf(name?: string): string {
   const n = (name ?? '').trim();
-  return n ? n.slice(0, 1).toUpperCase() : '@';
+  // コードポイント単位で先頭1文字 (絵文字/補助漢字 𠮷 を割って tofu にしない)。
+  return n ? ([...n][0] ?? '').toUpperCase() : '@';
 }
 
 export function HandleProfileView({

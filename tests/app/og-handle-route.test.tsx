@@ -141,13 +141,68 @@ describe('GET /api/og/handle', () => {
     expect(collectText(element).join(' ')).toContain('山'); // initial
   });
 
-  it('未存在 handle / KV エラーは汎用ブランドカードに倒す (壊れた画像を出さない)', async () => {
+  it('未存在 handle は汎用ブランドカード + 短期キャッシュ可 (200)', async () => {
     h.record = null;
-    const { element } = await callGet('h=ghost&locale=ja');
+    const { element, options } = await callGet('h=ghost&locale=ja');
     expect(collectText(element).join(' ')).toContain('チップを送る');
+    expect(options.status ?? 200).toBe(200);
+    expect((options.headers as Record<string, string>)['cache-control']).toContain(
+      'max-age=300',
+    );
+  });
+
+  it('KV 障害 (resolved.ok=false) は 503 + no-store で返す (汎用カードを固定化しない)', async () => {
     h.resolveOk = false;
-    const second = await callGet('h=masia&locale=ja');
-    expect(collectText(second.element).join(' ')).toContain('チップを送る');
+    const { element, options } = await callGet('h=masia&locale=ja');
+    expect(collectText(element).join(' ')).toContain('チップを送る');
+    expect(options.status).toBe(503);
+    expect((options.headers as Record<string, string>)['cache-control']).toBe(
+      'no-store',
+    );
+  });
+
+  it('webp/avif アバターは satori が decode 不可 → イニシャル円へフォールバック', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { 'content-type': 'image/webp' },
+        }),
+      ),
+    );
+    const { element } = await callGet('h=masia&locale=ja');
+    const srcs = collectImgSrcs(element);
+    expect(srcs).toHaveLength(1); // ブランドアイコンのみ (avatar は弾かれた)
+    expect(srcs.some((s) => s.startsWith('data:image/webp'))).toBe(false);
+    expect(collectText(element).join(' ')).toContain('山'); // initial fallback
+  });
+
+  it('Content-Length 上限超過のアバターは body を読まず弾く', async () => {
+    const readSpy = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        headers: {
+          get: (k: string) =>
+            k.toLowerCase() === 'content-type'
+              ? 'image/png'
+              : k.toLowerCase() === 'content-length'
+                ? String(9_000_000)
+                : null,
+        },
+        body: {
+          getReader: () => {
+            readSpy();
+            return { read: async () => ({ done: true }), cancel: async () => {} };
+          },
+        },
+      })),
+    );
+    const { element } = await callGet('h=masia&locale=ja');
+    expect(readSpy).not.toHaveBeenCalled(); // content-length で早期 reject
+    expect(collectImgSrcs(element)).toHaveLength(1); // avatar 不採用
   });
 
   it('flag OFF / 不正 handle も汎用カード', async () => {

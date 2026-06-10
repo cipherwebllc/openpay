@@ -181,6 +181,39 @@ describe('buildTipMeta', () => {
   });
 });
 
+describe('firstGrapheme / truncateGraphemes (サロゲート安全)', () => {
+  it('絵文字/補助多言語面の漢字を先頭1文字で割らない', async () => {
+    const { firstGrapheme } = await import('@/lib/ogTipCard');
+    expect(firstGrapheme('🌸さくら')).toBe('🌸');
+    expect(firstGrapheme('𠮷田太郎')).toBe('𠮷'); // U+20BB7 サロゲートペア
+    expect(firstGrapheme('Alice')).toBe('A');
+    expect(firstGrapheme('')).toBe('');
+    expect('🌸'.slice(0, 1)).not.toBe(firstGrapheme('🌸さくら')); // 素の slice は壊れる
+  });
+  it('truncate はコードポイント単位で … を付ける', async () => {
+    const { truncateGraphemes } = await import('@/lib/ogTipCard');
+    expect(truncateGraphemes('abc', 5)).toBe('abc');
+    expect(truncateGraphemes('abcdef', 3)).toBe('abc…');
+    const out = truncateGraphemes('🌸'.repeat(4), 2);
+    expect(out).toBe('🌸🌸…');
+    expect(out.isWellFormed()).toBe(true);
+  });
+});
+
+describe('buildHandleOgModel — サロゲート安全な initial', () => {
+  it('絵文字始まりの名前でも initial が壊れない', async () => {
+    const { buildHandleOgModel } = await import('@/lib/ogTipCard');
+    const card = buildHandleOgModel({
+      handle: 'sakura',
+      name: '🌸さくら',
+      tokenLabels: ['JPYC'],
+      locale: 'ja',
+    });
+    expect(card.initial).toBe('🌸');
+    expect(card.initial.isWellFormed()).toBe(true);
+  });
+});
+
 describe('hexToRgba', () => {
   it('hex → rgba 変換・不正 hex は既定色に倒す', async () => {
     const { hexToRgba, OG_DEFAULT_COLOR } = await import('@/lib/ogTipCard');

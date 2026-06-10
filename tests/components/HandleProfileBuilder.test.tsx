@@ -262,4 +262,18 @@ describe('HandleProfileBuilder', () => {
       screen.queryByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
     ).not.toBeInTheDocument();
   });
+
+  it('未公開の下書きは「編集」→「編集をやめる」で元通り復元される (作業を消さない)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    // 新規作成中の下書きを作り込む (bio に未公開の入力)。
+    const bio = screen.getByLabelText(/ひとこと/);
+    fireEvent.change(bio, { target: { value: '未公開のメモ' } });
+    expect(screen.getByLabelText(/ひとこと/)).toHaveValue('未公開のメモ');
+    // 既存 @alice を編集 → bio はレコード値 (空) で上書きされる。
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(screen.getByLabelText(/ひとこと/)).not.toHaveValue('未公開のメモ');
+    // 編集をやめる → 編集前の下書きが丸ごと復元される。
+    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
+    expect(screen.getByLabelText(/ひとこと/)).toHaveValue('未公開のメモ');
+  });
 });

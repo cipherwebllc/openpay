@@ -41,14 +41,25 @@ function normalizeLocale(raw: string | null | undefined): TipOgLocale {
   return raw === 'en' ? 'en' : 'ja';
 }
 
+// コードポイント単位の truncate (… 付き)。UTF-16 code unit 単位の slice は絵文字や
+// 補助多言語面の漢字 (例: 𠮷田・サロゲートペア) を途中で割り tofu/U+FFFD を生むため、
+// [...str] でコードポイント配列にしてから切る。
+export function truncateGraphemes(str: string, max: number): string {
+  const cps = [...str];
+  return cps.length > max ? `${cps.slice(0, max).join('')}…` : str;
+}
+
+// 先頭1コードポイント (アバター無し時のイニシャル円用)。サロゲートを割らない。
+export function firstGrapheme(str: string): string {
+  return [...str][0] ?? '';
+}
+
 // 制御文字を除去し、表示上限で truncate (… 付き)。空なら undefined。
 function displayName(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   const cleaned = stripControlChars(raw).trim();
   if (cleaned.length === 0) return undefined;
-  return cleaned.length > OG_NAME_DISPLAY_MAX
-    ? `${cleaned.slice(0, OG_NAME_DISPLAY_MAX)}…`
-    : cleaned;
+  return truncateGraphemes(cleaned, OG_NAME_DISPLAY_MAX);
 }
 
 // ?token= の表示ラベル。未指定/不正は両トークン併記に倒す。
@@ -229,7 +240,7 @@ export function tipModelToCard(m: TipOgModel): OgCardModel {
   const initial =
     m.heading === generic
       ? 'TIP'
-      : (ja ? m.heading : m.heading.replace(/^Tip /, '')).slice(0, 1);
+      : firstGrapheme(ja ? m.heading : m.heading.replace(/^Tip /, ''));
   return {
     accent: m.color,
     heading: m.heading,
@@ -258,11 +269,7 @@ export function buildHandleOgModel(input: HandleOgInput): OgCardModel {
   const heading = name ?? `@${input.handle}`;
   const bioClean = input.bio ? stripControlChars(input.bio).trim() : '';
   const bio =
-    bioClean.length === 0
-      ? undefined
-      : bioClean.length > OG_BIO_DISPLAY_MAX
-        ? `${bioClean.slice(0, OG_BIO_DISPLAY_MAX)}…`
-        : bioClean;
+    bioClean.length === 0 ? undefined : truncateGraphemes(bioClean, OG_BIO_DISPLAY_MAX);
   const tokens =
     input.tokenLabels.length > 0 ? input.tokenLabels.join(' / ') : 'JPYC';
   const chips = ja
@@ -278,7 +285,7 @@ export function buildHandleOgModel(input: HandleOgInput): OgCardModel {
     handleLine: `@${input.handle}`,
     bio,
     chips,
-    initial: (name ?? input.handle).slice(0, 1).toUpperCase(),
+    initial: firstGrapheme(name ?? input.handle).toUpperCase(),
     footer: ja ? 'ウォレットで直接受け取り' : 'Straight to your wallet',
     url: 'open-pay.jp',
     brand: 'OpenPay',

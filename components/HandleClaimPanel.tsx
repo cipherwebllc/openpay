@@ -167,7 +167,18 @@ export function HandleClaimPanel({
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
       return json;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['handle-mine'] }),
+    onSuccess: (_json, handle) => {
+      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      // 解放した handle を空き確認キャッシュからも無効化 (旧 'taken' を残さない)。
+      qc.invalidateQueries({ queryKey: ['handle-availability'] });
+      // 編集中の handle を解放したら編集モードを解除する (onEdit/onStopEditing と対称に)。
+      // でないと「@x を編集中」バナー・input・publish ボタンが消えた handle を指し続け、
+      // 1 クリックで削除したはずの handle を再作成してしまう。
+      if (editingHandle === handle) {
+        setCopiedHandle(null);
+        onStopEditing?.();
+      }
+    },
   });
 
   if (!env.enableHandles) return null;

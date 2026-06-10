@@ -384,4 +384,35 @@ describe('HandleClaimPanel', () => {
       expect(screen.getByText('解放に失敗しました (kv_error)')).toBeInTheDocument(),
     );
   });
+
+  it('編集中の handle を解放したら編集モードを解除する (onStopEditing 呼出)', async () => {
+    h.isSignedIn = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const u = String(url);
+        if (u === '/api/handle') {
+          return new Response(
+            JSON.stringify({ ok: true, handles: [{ handle: 'alice', config: CONFIG }], max: 3 }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (init?.method === 'DELETE') {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }),
+    );
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onStopEditing = vi.fn();
+    renderPanel(CONFIG, { editingHandle: 'alice', onStopEditing });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '解放' })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '解放' }));
+    await waitFor(() => expect(onStopEditing).toHaveBeenCalled());
+  });
 });

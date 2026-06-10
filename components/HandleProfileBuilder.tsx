@@ -78,6 +78,9 @@ export function HandleProfileBuilder() {
   // どの @handle を編集中か (null = 新規作成)。「編集」でフォームが黙って書き換わるのが
   // 混乱源だったため、ヘッダのバッジ + パネルのバナーで対象を常時明示する。
   const [editingHandle, setEditingHandle] = useState<string | null>(null);
+  // 編集に入る直前の下書き (未公開の新規入力)。編集をやめたら丸ごと復元し、確認なしの
+  // 上書きで作業が消えるのを防ぐ。新規作成モード (editingHandle===null) の間だけ撮る。
+  const preEditDraftRef = useRef<typeof draft | null>(null);
   const headingRef = useRef<HTMLDivElement>(null);
   // SNS / リンクのドラッグ並べ替え (HTML5 DnD)。どのリストの何番目を掴んでいるかを保持。
   const dragRef = useRef<{ list: 'socials' | 'links'; index: number } | null>(
@@ -170,27 +173,36 @@ export function HandleProfileBuilder() {
     draft.presetsJpyc,
   ]);
 
-  // 送信する profile は https / 非空のみ採用 (不正 link/avatar/social は除外 → claim を通す)。
-  const trimmedLinks = draft.links
-    .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
-    .filter((l) => l.label && isHttpsUrl(l.url))
-    .slice(0, MAX_PROFILE_LINKS);
-  const validSocials = draft.socials
-    .map((s) => s.trim())
-    .filter((s) => isHttpsUrl(s))
-    .slice(0, MAX_SOCIAL_LINKS);
-  const avatarValid = !!draft.avatar.trim() && isHttpsUrl(draft.avatar.trim());
-  const profile: HandleProfile = {
-    bio: draft.bio.trim() || undefined,
-    avatar: avatarValid ? draft.avatar.trim() : undefined,
-    socials: validSocials.length > 0 ? validSocials : undefined,
-    links: trimmedLinks.length > 0 ? trimmedLinks : undefined,
-  };
-  // 入力に非 https の link/avatar/social があれば注意喚起 (送信からは除外済み)。
-  const hasInsecure =
-    (!!draft.avatar.trim() && !avatarValid) ||
-    draft.socials.some((s) => s.trim() && !isHttpsUrl(s.trim())) ||
-    draft.links.some((l) => l.url.trim() && !isHttpsUrl(l.url.trim()));
+  // 送信する profile (https/非空のみ) と insecure 警告を 1 パスで導出し useMemo 化する。
+  // 入力 1 打鍵ごとに ~13 URL へ isHttpsUrl(new URL) を二重適用するのを避け、profile の
+  // identity も draft 不変時は安定させる (他の methods/config と規約を揃える)。
+  const { profile, hasInsecure } = useMemo<{
+    profile: HandleProfile;
+    hasInsecure: boolean;
+  }>(() => {
+    const trimmedLinks = draft.links
+      .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
+      .filter((l) => l.label && isHttpsUrl(l.url))
+      .slice(0, MAX_PROFILE_LINKS);
+    const validSocials = draft.socials
+      .map((s) => s.trim())
+      .filter((s) => isHttpsUrl(s))
+      .slice(0, MAX_SOCIAL_LINKS);
+    const avatar = draft.avatar.trim();
+    const avatarValid = !!avatar && isHttpsUrl(avatar);
+    return {
+      profile: {
+        bio: draft.bio.trim() || undefined,
+        avatar: avatarValid ? avatar : undefined,
+        socials: validSocials.length > 0 ? validSocials : undefined,
+        links: trimmedLinks.length > 0 ? trimmedLinks : undefined,
+      },
+      hasInsecure:
+        (!!avatar && !avatarValid) ||
+        draft.socials.some((s) => s.trim() && !isHttpsUrl(s.trim())) ||
+        draft.links.some((l) => l.url.trim() && !isHttpsUrl(l.url.trim())),
+    };
+  }, [draft.links, draft.socials, draft.avatar, draft.bio]);
 
   if (!env.enableHandles) return null;
 
@@ -204,11 +216,19 @@ export function HandleProfileBuilder() {
     }
   };
 
-  // 編集をやめて新規作成へ。フォームは既定に戻す (受取先だけは使い回せるので保持)。
+  // 編集をやめて新規作成へ。編集前の下書きがあれば復元 (作業を消さない)。スナップショットが
+  // 無い (= 直接新規作成中に呼ばれた等) ときだけ既定へ (受取先は使い回せるので保持)。
   const onStopEditing = () => {
     setEditingHandle(null);
     setEditedHadUsdc(false);
-    setSettings((s) => ({ ...DEFAULT_PROFILE_DRAFT, to: s.to }));
+    const snapshot = preEditDraftRef.current;
+    preEditDraftRef.current = null;
+    if (snapshot) {
+      setResolved(isAddress(snapshot.to) ? getAddress(snapshot.to) : null);
+      setSettings(() => snapshot);
+    } else {
+      setSettings((s) => ({ ...DEFAULT_PROFILE_DRAFT, to: s.to }));
+    }
   };
 
   const onEditExisting = (
@@ -216,6 +236,9 @@ export function HandleProfileBuilder() {
     c: HandleTipConfig,
     p?: HandleProfile,
   ) => {
+    // 新規作成モードから編集に入る初回のみ、現在の下書きを退避 (編集→別編集の連続では
+    // 退避済みの「編集前」を保ったまま上書きしない)。
+    if (editingHandle === null) preEditDraftRef.current = draft;
     setEditingHandle(handle);
     // パネル (右カラム/モバイルは下部) から押すとフォームの書き換わりが見えないため、
     // フォーム先頭へスクロールして「いま編集している」ことを視覚的に伝える。
