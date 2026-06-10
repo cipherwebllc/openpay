@@ -188,3 +188,110 @@ export function buildTipMeta(
         description: `Support creators with ${tokenLabel}. ${noGasEn}straight to their wallet.`,
       };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 共有カード描画モデル (チップ / プロフ共通)。app/api/og/_card.tsx がこの形を描く。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// プロフの bio をカードに載せる際の表示上限 (1 行に収める)。
+const OG_BIO_DISPLAY_MAX = 48;
+
+/** #rrggbb → rgba() 文字列。カードのアクセント発光/チップ背景に使う (純関数)。 */
+export function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  const v = m ? m[1] : OG_DEFAULT_COLOR.slice(1);
+  const r = parseInt(v.slice(0, 2), 16);
+  const g = parseInt(v.slice(2, 4), 16);
+  const b = parseInt(v.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// 共有カードの描画モデル。tip / handle 両ルートがこれに正規化してから描く。
+export interface OgCardModel {
+  accent: string; // #rrggbb (検証済み)
+  heading: string; // 名前 or 汎用見出し
+  handleLine?: string; // '@alice' (プロフのみ)
+  bio?: string; // 1 行 bio (プロフのみ・truncate 済)
+  chips: string[]; // 'JPYC で応援' / 'ガス不要' などのピル
+  initial: string; // アバター無し時の円内文字 (1 文字 or 短語)
+  footer: string;
+  url: string; // 'open-pay.jp'
+  brand: string; // 'OpenPay'
+}
+
+/** TipOgModel → 共有カードモデル。チップカードは TIP 円 + 見出し + ピル。 */
+export function tipModelToCard(m: TipOgModel): OgCardModel {
+  const ja = m.locale === 'ja';
+  // sub ('JPYC で応援 · ガス不要') をピルに分解する。
+  const chips = m.sub.split(' · ');
+  // 見出しから名前の頭文字を採る ('山田太郎 さんへ' / 'Tip Alice')。汎用見出しは 'TIP'。
+  const generic = ja ? 'チップを送る' : 'Send a tip';
+  const initial =
+    m.heading === generic
+      ? 'TIP'
+      : (ja ? m.heading : m.heading.replace(/^Tip /, '')).slice(0, 1);
+  return {
+    accent: m.color,
+    heading: m.heading,
+    chips,
+    initial,
+    footer: m.footer,
+    url: m.url,
+    brand: m.brand,
+  };
+}
+
+// プロフ (@handle) カードの入力 (KV レコード由来・route が解決して渡す)。
+export interface HandleOgInput {
+  handle: string; // normalize 済み ('alice')
+  name?: string;
+  color?: string;
+  bio?: string;
+  tokenLabels: string[]; // methods 由来の表示トークン ['JPYC'] / ['JPYC','USDC']
+  locale: TipOgLocale;
+}
+
+/** @handle プロフィールカードの描画モデル (純関数・単体テスト対象)。 */
+export function buildHandleOgModel(input: HandleOgInput): OgCardModel {
+  const ja = input.locale === 'ja';
+  const name = displayName(input.name);
+  const heading = name ?? `@${input.handle}`;
+  const bioClean = input.bio ? stripControlChars(input.bio).trim() : '';
+  const bio =
+    bioClean.length === 0
+      ? undefined
+      : bioClean.length > OG_BIO_DISPLAY_MAX
+        ? `${bioClean.slice(0, OG_BIO_DISPLAY_MAX)}…`
+        : bioClean;
+  const tokens =
+    input.tokenLabels.length > 0 ? input.tokenLabels.join(' / ') : 'JPYC';
+  const chips = ja
+    ? [`${tokens} で応援`, 'ガス不要']
+    : [`Support with ${tokens}`, 'No gas'];
+  const color =
+    input.color && COLOR_PATTERN.test(input.color)
+      ? input.color
+      : OG_DEFAULT_COLOR;
+  return {
+    accent: color,
+    heading,
+    handleLine: `@${input.handle}`,
+    bio,
+    chips,
+    initial: (name ?? input.handle).slice(0, 1).toUpperCase(),
+    footer: ja ? 'ウォレットで直接受け取り' : 'Straight to your wallet',
+    url: 'open-pay.jp',
+    brand: 'OpenPay',
+  };
+}
+
+/** @handle ページの generateMetadata 用 og:image 相対パス。 */
+export function buildHandleOgImageUrl(
+  handle: string,
+  locale: TipOgLocale,
+): string {
+  const q = new URLSearchParams();
+  q.set('h', handle);
+  q.set('locale', locale);
+  return `/api/og/handle?${q.toString()}`;
+}

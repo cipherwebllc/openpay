@@ -180,3 +180,83 @@ describe('buildTipMeta', () => {
     expect(buildTipMeta(null, 'en').title).toBe('Send a tip with OpenPay');
   });
 });
+
+describe('hexToRgba', () => {
+  it('hex → rgba 変換・不正 hex は既定色に倒す', async () => {
+    const { hexToRgba, OG_DEFAULT_COLOR } = await import('@/lib/ogTipCard');
+    expect(hexToRgba('#2563eb', 0.5)).toBe('rgba(37, 99, 235, 0.5)');
+    expect(hexToRgba('oops', 1)).toBe(hexToRgba(OG_DEFAULT_COLOR, 1));
+  });
+});
+
+describe('tipModelToCard', () => {
+  it('sub をピルに分解し、名前の頭文字を initial に採る', async () => {
+    const { buildTipOgModel, tipModelToCard } = await import('@/lib/ogTipCard');
+    const m = buildTipOgModel(
+      new URLSearchParams({
+        to: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+        token: 'jpyc',
+        name: '山田太郎',
+        locale: 'ja',
+      }),
+    );
+    const card = tipModelToCard(m);
+    expect(card.chips).toEqual(['JPYCで応援', 'ガス不要']);
+    expect(card.initial).toBe('山');
+    expect(card.handleLine).toBeUndefined();
+  });
+  it('汎用カードは initial=TIP', async () => {
+    const { buildTipOgModel, tipModelToCard } = await import('@/lib/ogTipCard');
+    const card = tipModelToCard(buildTipOgModel(new URLSearchParams({ locale: 'ja' })));
+    expect(card.initial).toBe('TIP');
+    expect(card.heading).toBe('チップを送る');
+  });
+});
+
+describe('buildHandleOgModel / buildHandleOgImageUrl', () => {
+  it('名前あり: heading=名前・handleLine=@x・initial=頭文字・ピル', async () => {
+    const { buildHandleOgModel } = await import('@/lib/ogTipCard');
+    const card = buildHandleOgModel({
+      handle: 'masia',
+      name: '山田太郎',
+      color: '#2563eb',
+      bio: 'Web3 クリエイター',
+      tokenLabels: ['JPYC'],
+      locale: 'ja',
+    });
+    expect(card.heading).toBe('山田太郎');
+    expect(card.handleLine).toBe('@masia');
+    expect(card.bio).toBe('Web3 クリエイター');
+    expect(card.chips).toEqual(['JPYC で応援', 'ガス不要']);
+    expect(card.initial).toBe('山');
+    expect(card.accent).toBe('#2563eb');
+  });
+  it('名前なし: heading=@handle・initial=handle 頭文字 (大文字)・不正色は既定色', async () => {
+    const { buildHandleOgModel, OG_DEFAULT_COLOR } = await import('@/lib/ogTipCard');
+    const card = buildHandleOgModel({
+      handle: 'alice',
+      color: 'red',
+      tokenLabels: [],
+      locale: 'en',
+    });
+    expect(card.heading).toBe('@alice');
+    expect(card.initial).toBe('A');
+    expect(card.accent).toBe(OG_DEFAULT_COLOR);
+    expect(card.chips[0]).toContain('JPYC'); // tokenLabels 空でも JPYC に倒す
+  });
+  it('長い bio は truncate (… 付き)', async () => {
+    const { buildHandleOgModel } = await import('@/lib/ogTipCard');
+    const card = buildHandleOgModel({
+      handle: 'a_b',
+      bio: 'x'.repeat(100),
+      tokenLabels: ['JPYC', 'USDC'],
+      locale: 'ja',
+    });
+    expect(card.bio).toBe('x'.repeat(48) + '…');
+    expect(card.chips[0]).toBe('JPYC / USDC で応援');
+  });
+  it('og:image URL は /api/og/handle?h=&locale=', async () => {
+    const { buildHandleOgImageUrl } = await import('@/lib/ogTipCard');
+    expect(buildHandleOgImageUrl('masia', 'ja')).toBe('/api/og/handle?h=masia&locale=ja');
+  });
+});

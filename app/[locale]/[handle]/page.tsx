@@ -23,7 +23,7 @@ import { normalizeHandle, decodeHandleSegment } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import {
   buildTipMeta,
-  buildTipOgImageUrl,
+  buildHandleOgImageUrl,
   tokenLabelFor,
   type TipCardFacts,
   type TipOgLocale,
@@ -53,19 +53,26 @@ export async function generateMetadata({
     return { title: generic.title, description: generic.description };
   }
   const c = resolved.record.config;
-  // OGP カードは代表方法 (最初の受取方法) の token で表示。受取自体は全方法 gasless。
+  const normalized = normalizeHandle(segment);
+  // タイトルは link-in-bio らしく「名前 (@handle)」。説明は bio があれば bio を優先。
+  const title = c.name
+    ? `${c.name} (@${normalized}) — OpenPay`
+    : `@${normalized} — OpenPay`;
   const primary = c.methods[0];
   const facts: TipCardFacts = {
     name: c.name,
     tokenLabel: tokenLabelFor(primary.token),
     gasless: true,
   };
-  const { title, description } = buildTipMeta(facts, ogLocale);
-  const ogImage = buildTipOgImageUrl(
-    c.to,
-    { token: primary.token, name: c.name, color: c.color },
-    ogLocale,
-  );
+  const bio = resolved.record.profile?.bio?.trim();
+  const description =
+    bio && bio.length > 0
+      ? bio.length > 90
+        ? `${bio.slice(0, 90)}…`
+        : bio
+      : buildTipMeta(facts, ogLocale).description;
+  // OGP 画像はプロフ専用カード (KV からアバター/名前/bio を解決して描画)。
+  const ogImage = buildHandleOgImageUrl(normalized, ogLocale);
   return {
     title,
     description,
