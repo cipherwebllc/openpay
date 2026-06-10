@@ -31,6 +31,14 @@ describe('detectSocialPlatform', () => {
     expect(detectSocialPlatform('https://t.me/alice')).toBe('telegram');
     expect(detectSocialPlatform('https://wa.me/810000000000')).toBe('whatsapp');
     expect(detectSocialPlatform('https://www.whatsapp.com/channel/x')).toBe('whatsapp');
+    // ニュースレター/ブログ/クリエイター系 (サブドメイン形式の URL も拾う)
+    expect(detectSocialPlatform('https://alice.substack.com')).toBe('substack');
+    expect(detectSocialPlatform('https://medium.com/@alice')).toBe('medium');
+    expect(detectSocialPlatform('https://zenn.dev/alice')).toBe('zenn');
+    expect(detectSocialPlatform('https://qiita.com/alice')).toBe('qiita');
+    expect(detectSocialPlatform('https://open.spotify.com/artist/abc')).toBe('spotify');
+    expect(detectSocialPlatform('https://soundcloud.com/alice')).toBe('soundcloud');
+    expect(detectSocialPlatform('https://www.patreon.com/alice')).toBe('patreon');
   });
 
   it('subdomain は許容・大文字 host は正規化', () => {
