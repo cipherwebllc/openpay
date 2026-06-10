@@ -180,12 +180,14 @@ export function TipForm({ params }: { params: TipParams }) {
   // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
   // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。
   const gasQuoteReady = useRelay || activeQuote.data !== undefined;
-  // relay が成功 or pending (broadcast 済) の後の再送信を禁止。再送すると新 nonce で 2 件目の
-  // authorization を出し、元 tx 確定で二重支払いになる (CheckoutForm/PaymentForm と同一防御)。
-  const relaySettledNoRetry =
-    useRelay && !!relay.data && (relay.data.success || !!relay.data.pending);
+  // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一受取人へ
+  // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
+  // (CheckoutForm/PaymentForm と同一防御。TipForm は standard 経路を持たないため gasless/relay のみ)。
+  const settledNoRetry =
+    (!useRelay && !!gasless.data?.success) ||
+    (useRelay && !!relay.data && (relay.data.success || !!relay.data.pending));
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
-  // 出してフィードバックの空白を防ぐ (再送は relaySettledNoRetry で既に禁止)。
+  // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
     useRelay && !!relay.data && !relay.data.success && !!relay.data.pending;
   const canSubmit =
@@ -200,7 +202,7 @@ export function TipForm({ params }: { params: TipParams }) {
     !insufficientBalance &&
     !flowPending &&
     gasQuoteReady &&
-    !relaySettledNoRetry;
+    !settledNoRetry;
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。

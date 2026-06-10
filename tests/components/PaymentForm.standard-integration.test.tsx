@@ -240,6 +240,37 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     expect(screen.getAllByText(MERCHANT_TX).length).toBeGreaterThanOrEqual(1);
   });
 
+  it('成功後: Pay ボタンが disabled になり、再クリックしても merchant writeContract が再呼出されない (二重支払い防止)', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    const { rerender } = render(<PaymentForm />);
+
+    // 送信 → merchant broadcast → receipt 確定 (= phase success, standard.data 定義済)
+    await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
+    expect(writeMocks.merchant.writeContract).toHaveBeenCalledOnce();
+    act(() => {
+      writeMocks.merchant.data = MERCHANT_TX;
+      receiptMocks.byHash.set(MERCHANT_TX, {
+        data: { status: 'success', blockNumber: 100n },
+        error: null,
+        isSuccess: true,
+        isError: false,
+      });
+    });
+    rerender(<PaymentForm />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/決済完了/).length).toBeGreaterThan(0);
+    });
+
+    // 成功後も main Pay ボタンは DOM に残るが settledNoRetry で disabled。
+    const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    expect(payBtn).toBeDisabled();
+    // 再クリックしても merchant writeContract は 1 回のまま (2 件目の送金を阻止)。
+    await user.click(payBtn);
+    expect(writeMocks.merchant.writeContract).toHaveBeenCalledOnce();
+  });
+
   // 注: fee>0 の fee-tx 自動起動 / wallet reject → fee-error retry サブフローは
   // PaymentForm 経由では fee=0 (FEE_BPS_*=0n) のため到達不能。useStandardPayment の
   // 該当ロジックは tests/hooks/useStandardPayment.test.tsx が feeAmount>0 を直接注入して

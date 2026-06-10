@@ -172,11 +172,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const minimumAmountWei =
     breakdown.feeAmount + (isMerchantGas ? (effectiveGasAmount ?? 0n) : 0n);
 
-  // relay が成功 or pending (broadcast 済) の後の再送信を禁止。再送すると新しい nonce で
-  // 2 件目の authorization を出すことになり、元の tx が確定すると二重支払いになる。
-  // revert (確定失敗で送金未成立) は安全なので再試行を許す (PaymentForm と同一防御)。
-  const relaySettledNoRetry =
-    useRelay && !!relay.data && (relay.data.success || !!relay.data.pending);
+  // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一
+  // 受取人へ 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全
+  // なので再試行を許す。standard の fee-error は merchant transfer が確定済なので
+  // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する
+  // (PaymentForm と同一防御)。
+  const settledNoRetry =
+    (!isStandard && !useRelay && !!gasless.data?.success) ||
+    (useRelay && !!relay.data && (relay.data.success || !!relay.data.pending)) ||
+    (isStandard && (!!standard.data || standard.isFeeError));
 
   const canSubmit =
     isConnected &&
@@ -190,7 +194,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     !flowPending &&
     gasQuoteReady &&
     !merchantUnderflow &&
-    !relaySettledNoRetry;
+    !settledNoRetry;
 
   const flowError = isStandard
     ? standard.error
@@ -900,7 +904,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       )}
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
-          (再送信は canSubmit の relaySettledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
+          (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
       {useRelay && relay.data?.pending && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="font-semibold">{t('pendingTitle')}</p>

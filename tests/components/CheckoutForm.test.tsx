@@ -1395,7 +1395,8 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(screen.queryByText('rate_limited')).toBeNull();
   });
 
-  it('relay pending (broadcast 済・未確定): pending パネル + 再送ブロック (二重支払い防止)', () => {
+  it('relay pending (broadcast 済・未確定): pending パネル + 再送ブロック (二重支払い防止)', async () => {
+    const user = userEvent.setup();
     setupRelayReady();
     setRelayPayment('broadcast-pending', { txHash: `0x${'e'.repeat(64)}` });
     render(<CheckoutForm params={JPYC_PARAMS} />);
@@ -1403,8 +1404,13 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     // pending パネルが出る (success パネルは出さない)。
     expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
     expect(screen.queryByText(/お支払いが完了しました/)).toBeNull();
-    // 再送ブロック: 支払いボタンは disabled (relaySettledNoRetry)。
-    expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
+    // 再送ブロック: 支払いボタンは disabled (settledNoRetry)。broadcast 済 tx が確定すると
+    // 再送分は 2 件目の on-chain 送金 = 二重支払いになるため。
+    const payBtn = screen.getByRole('button', { name: /を支払う/ });
+    expect(payBtn).toBeDisabled();
+    // 再クリックしても relay.mutate は発火しない。
+    await user.click(payBtn);
+    expect(relayMutate).not.toHaveBeenCalled();
     // pending は error ではないので error パネルは出ない。
     expect(screen.queryByText(/エラー/)).toBeNull();
   });

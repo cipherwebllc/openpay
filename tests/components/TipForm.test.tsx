@@ -466,6 +466,23 @@ describe('TipForm — 送信', () => {
     expect(screen.getAllByText('99').length).toBeGreaterThan(0);
   });
 
+  it('gasless 送信成功後: 送信ボタンが disabled・再クリックで mutate が再呼出されない (二重支払い防止)', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setBatchPayment('success'); // data.success === true
+    render(<TipForm params={USDC_PARAMS} />);
+
+    // 成功後も送信ボタンは DOM に残るが settledNoRetry で disabled (既定 preset = 1 USDC)。
+    const sendBtn = screen.getByRole('button', { name: /1 USDC を送る/ });
+    expect(sendBtn).toBeDisabled();
+    // 再クリックしても useBatchPayment.mutate は発火しない (2 件目の送金を阻止)。
+    await user.click(sendBtn);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it('失敗 → エラー表示', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);

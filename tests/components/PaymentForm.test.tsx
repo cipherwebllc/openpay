@@ -549,6 +549,24 @@ describe('PaymentForm — 送信フロー', () => {
     expect(screen.getAllByText('42').length).toBeGreaterThan(0);
   });
 
+  it('gasless 送信成功後: Pay ボタンが disabled・再クリックで mutate が再呼出されない (二重支払い防止)', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setPayment('success'); // data.success === true
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+
+    // 成功後も main Pay ボタンは DOM に残るが settledNoRetry で disabled。
+    const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    expect(payBtn).toBeDisabled();
+    // 再クリックしても useBatchPayment.mutate は発火しない (2 件目の on-chain 送金を阻止)。
+    await user.click(payBtn);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it('送信成功 → 顧客向け電子レシート控えを保存し完了画面に埋め込む (/pay)', () => {
     window.localStorage.clear();
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
@@ -776,6 +794,43 @@ describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=s
     expect(
       screen.getByText(/OpenPay 利用手数料の送信に失敗/),
     ).toBeInTheDocument();
+    const retryBtn = screen.getByRole('button', { name: /手数料の送信を再試行/ });
+    expect(retryBtn).not.toBeDisabled();
+    await user.click(retryBtn);
+    expect(standardRetryFee).toHaveBeenCalledOnce();
+  });
+
+  it('standard 送信成功後: main Pay ボタンが disabled・再クリックで mutate が再呼出されない (二重支払い防止)', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('success'); // standard.data 定義済 (phase=success)
+    render(<PaymentForm />);
+
+    // 成功後も main Pay ボタンは DOM に残るが settledNoRetry で disabled。
+    const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    expect(payBtn).toBeDisabled();
+    // 再クリックしても merchant transfer (standard.mutate) は再発火しない。
+    await user.click(payBtn);
+    expect(standardMutate).not.toHaveBeenCalled();
+  });
+
+  it('fee-error (merchant 確定済 / fee 失敗): main Pay ボタンは disabled・retryFee ボタンは有効', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('fee-error'); // merchant transfer 確定済・fee transfer だけ失敗
+    render(<PaymentForm />);
+
+    // main Pay ボタンは disabled = merchant transfer の再送 (重複) を阻止。
+    const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    expect(payBtn).toBeDisabled();
+    await user.click(payBtn);
+    expect(standardMutate).not.toHaveBeenCalled();
+
+    // fee の再送は専用 retryFee ボタンのみで実行可 (merchant は再送しない)。
     const retryBtn = screen.getByRole('button', { name: /手数料の送信を再試行/ });
     expect(retryBtn).not.toBeDisabled();
     await user.click(retryBtn);
