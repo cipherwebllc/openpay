@@ -307,3 +307,86 @@ describe('cross-mode invariants (Phase 1: fee = 0)', () => {
     expect(sum).toBe(amount);
   });
 });
+
+// ============================================================
+// USDC erc20/circle gas=merchant ネット経済性の不変条件
+// ============================================================
+// 【背景・偽陽性記録】
+// コードレビューで「USDC gas=merchant は merchant 着金から gas を控除しつつ
+// paymaster が顧客からも実 gas を pull するので二重計上」という指摘が出たが、
+// 主監査で偽陽性と確定した。
+//
+// 【正しい経済性】
+// amount=100, gas=2 のとき:
+//   merchant transfer = 98 (=amount−gas)
+//   paymaster が顧客 USDC から 2 を pull
+//   → 顧客総支出 = 98 + 2 = 100 = 表示 customerPays ✓
+//   → 店主受領 = 98 ✓
+// 控除分は顧客の手元に残り、顧客がそれで paymaster pull を賄う
+// (= 控除は顧客への前補填)。JPYC recover (控除分を feeReceiver へ送り
+// 立替者=OpenPay を補償) とネットで等価。
+// gasMode の約束 (店主吸収: 顧客は請求額のみ・店主は amount−gas) は USDC でも成立。
+//
+// このテストは上記不変条件を calcBreakdown レベルで固定し、
+// 将来のリファクタで壊れた場合に即検出できるようにする。
+describe('USDC gas=merchant ネット経済性不変条件 (偽陽性 "二重徴収" を防ぐフェンス)', () => {
+  const ONE_USDC = 1_000_000n; // 6 decimals
+
+  it('USDC 100, gas=2, gasMode=merchant: merchantReceives=98, customerPays=100 (顧客支出は amount のみ)', () => {
+    // 控除は「顧客への前補填」: 顧客は 100 を支払い、うち 98 が merchant へ transfer、
+    // 残 2 は顧客の手元に留まり paymaster pull (実 gas) を賄う。二重徴収ではない。
+    const r = calcBreakdown(100n * ONE_USDC, 'usdc', 'gasless', 'merchant', 2n * ONE_USDC);
+    expect(r.merchantReceives).toBe(98n * ONE_USDC);
+    expect(r.customerPays).toBe(100n * ONE_USDC);
+    expect(r.feeAmount).toBe(0n);
+  });
+
+  it('USDC 100, gas=2, gasMode=merchant: transfer合計 + paymaster pull = customerPays (等式の明示)', () => {
+    // transfer合計 (merchant + feeReceiver) = 98
+    // paymaster pull (= 控除分で顧客が賄う) = 2
+    // 98 + 2 = 100 = customerPays ✓
+    const GAS = 2n * ONE_USDC;
+    const AMOUNT = 100n * ONE_USDC;
+    const r = calcBreakdown(AMOUNT, 'usdc', 'gasless', 'merchant', GAS);
+    const transferTotal = r.merchantReceives + r.feeAmount; // fee=0 なので = 98
+    const paymasterPull = GAS; // 顧客の手元に残り paymaster pull を賄う前補填分
+    expect(transferTotal + paymasterPull).toBe(r.customerPays);
+  });
+
+  it('USDC 100, gas=2, gasMode=customer (比較対象): merchantReceives=100, customerPays=102', () => {
+    // gas=customer では顧客が gas を上乗せして支払い、merchant は全額受領。
+    // transfer合計(100) + pull(2) = customerPays(102) も等式が成立している。
+    const r = calcBreakdown(100n * ONE_USDC, 'usdc', 'gasless', 'customer', 2n * ONE_USDC);
+    expect(r.merchantReceives).toBe(100n * ONE_USDC);
+    expect(r.customerPays).toBe(102n * ONE_USDC);
+    expect(r.feeAmount).toBe(0n);
+    // transfer合計 + pull = customerPays の等式 (gas=customer 版)
+    const transferTotal = r.merchantReceives + r.feeAmount;
+    const paymasterPull = 2n * ONE_USDC;
+    expect(transferTotal + paymasterPull).toBe(r.customerPays);
+  });
+
+  it('USDC 50, gas=1, gasMode=merchant: merchantReceives=49, customerPays=50 (別額でも等式成立)', () => {
+    const GAS = 1n * ONE_USDC;
+    const AMOUNT = 50n * ONE_USDC;
+    const r = calcBreakdown(AMOUNT, 'usdc', 'gasless', 'merchant', GAS);
+    expect(r.merchantReceives).toBe(49n * ONE_USDC);
+    expect(r.customerPays).toBe(50n * ONE_USDC);
+    const transferTotal = r.merchantReceives + r.feeAmount;
+    expect(transferTotal + GAS).toBe(r.customerPays);
+  });
+
+  it('gas=merchant と gas=customer で顧客支出の差 = 0 (同一 amount で gas 負担者だけ変わる)', () => {
+    // gas=merchant: customerPays = amount (顧客は amount のみ負担、merchant が gas を吸収)
+    // gas=customer: customerPays = amount + gas (顧客が gas を追加負担)
+    // → どちらも約束通りの経済性
+    const AMOUNT = 100n * ONE_USDC;
+    const GAS = 2n * ONE_USDC;
+    const merchant = calcBreakdown(AMOUNT, 'usdc', 'gasless', 'merchant', GAS);
+    const customer = calcBreakdown(AMOUNT, 'usdc', 'gasless', 'customer', GAS);
+    expect(merchant.customerPays).toBe(AMOUNT);
+    expect(customer.customerPays).toBe(AMOUNT + GAS);
+    // merchant 受領の差 = gas (店主吸収分だけ少ない)
+    expect(customer.merchantReceives - merchant.merchantReceives).toBe(GAS);
+  });
+});

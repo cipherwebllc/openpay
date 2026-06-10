@@ -204,6 +204,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
   // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、
   // JPYC 非 relay (sponsorship) は無徴収のため 0、USDC は paymaster quote。
+  //
+  // 【不変条件: USDC erc20/circle の gas=merchant は二重徴収ではない】
+  // merchant 着金から gas 見積を控除するが、その控除分は顧客の手元に残り、
+  // 顧客がそれで paymaster の実 gas pull を賄う (= 控除は顧客への前補填)。
+  // ネットで 顧客支出 = amount・店主受領 = amount − gas となり、
+  // JPYC recover (控除分を feeReceiver へ送って立替者を補償) と等価。
+  // gasMode の約束 (店主吸収: 顧客は請求額のみ・店主は amount−gas) は USDC でも成立。
+  // 残る差は gas 見積と実 pull 額の僅差のみ (standard tier で有界)。
   const effectiveGasAmount: bigint | undefined = useRelay
     ? relayGasEquiv
     : isJpyc
