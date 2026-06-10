@@ -21,6 +21,16 @@ describe('detectSocialPlatform', () => {
     expect(detectSocialPlatform('https://www.twitch.tv/alice')).toBe('twitch');
     expect(detectSocialPlatform('https://note.com/alice')).toBe('note');
     expect(detectSocialPlatform('https://www.pixiv.net/users/123')).toBe('pixiv');
+    expect(detectSocialPlatform('https://www.threads.net/@alice')).toBe('threads');
+    expect(detectSocialPlatform('https://threads.com/@alice')).toBe('threads');
+    expect(detectSocialPlatform('https://bsky.app/profile/alice.bsky.social')).toBe(
+      'bluesky',
+    );
+    expect(detectSocialPlatform('https://www.linkedin.com/in/alice')).toBe('linkedin');
+    expect(detectSocialPlatform('https://lnkd.in/abc')).toBe('linkedin');
+    expect(detectSocialPlatform('https://t.me/alice')).toBe('telegram');
+    expect(detectSocialPlatform('https://wa.me/810000000000')).toBe('whatsapp');
+    expect(detectSocialPlatform('https://www.whatsapp.com/channel/x')).toBe('whatsapp');
   });
 
   it('subdomain は許容・大文字 host は正規化', () => {
