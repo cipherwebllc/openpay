@@ -11,6 +11,7 @@
 // flag OFF で何も描画しない。
 
 import { useMemo, useRef, useState } from 'react';
+import { GripVertical } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
@@ -78,6 +79,10 @@ export function HandleProfileBuilder() {
   // 混乱源だったため、ヘッダのバッジ + パネルのバナーで対象を常時明示する。
   const [editingHandle, setEditingHandle] = useState<string | null>(null);
   const headingRef = useRef<HTMLDivElement>(null);
+  // SNS / リンクのドラッグ並べ替え (HTML5 DnD)。どのリストの何番目を掴んでいるかを保持。
+  const dragRef = useRef<{ list: 'socials' | 'links'; index: number } | null>(
+    null,
+  );
 
   const colorValid = COLOR_PATTERN.test(draft.color);
 
@@ -87,6 +92,45 @@ export function HandleProfileBuilder() {
     if (draft.jpycKaia) m.push({ token: 'jpyc', chain: 'kaia' });
     return m;
   }, [draft.jpycPolygon, draft.jpycKaia]);
+
+  // ドラッグ並べ替え: from の要素を抜いて to へ挿入した新配列を返す。
+  const moveItem = <T,>(arr: T[], from: number, to: number): T[] => {
+    const next = [...arr];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    return next;
+  };
+
+  // ▲▼ 移動ボタン。HTML5 drag イベントを発火しないモバイルブラウザ/キーボード操作の
+  // ための並べ替え手段 (ドラッグハンドルと併設)。境界では disabled。
+  const renderMoveButtons = (
+    index: number,
+    length: number,
+    onMove: (from: number, to: number) => void,
+  ) => (
+    <span className="flex shrink-0 flex-col">
+      <button
+        type="button"
+        onClick={() => onMove(index, index - 1)}
+        disabled={index === 0}
+        aria-label={t('moveUp')}
+        title={t('moveUp')}
+        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
+      >
+        ▲
+      </button>
+      <button
+        type="button"
+        onClick={() => onMove(index, index + 1)}
+        disabled={index >= length - 1}
+        aria-label={t('moveDown')}
+        title={t('moveDown')}
+        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
+      >
+        ▼
+      </button>
+    </span>
+  );
 
   // 入力中の有効プリセット (strict)。空欄や不正値は URL/保存に出さない。
   const validPresets = (list: string[]) =>
@@ -380,7 +424,40 @@ export function HandleProfileBuilder() {
         <Field label={t('socialsLabel')} hint={t('socialsHint')}>
           <div className="space-y-2">
             {draft.socials.map((s, i) => (
-              <div key={i} className="flex items-center gap-2">
+              <div
+                key={i}
+                className="flex items-center gap-2"
+                onDragOver={(e) => {
+                  if (dragRef.current?.list === 'socials') e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  const d = dragRef.current;
+                  if (d?.list !== 'socials') return;
+                  e.preventDefault();
+                  if (d.index !== i) {
+                    update({ socials: moveItem(draft.socials, d.index, i) });
+                  }
+                  dragRef.current = null;
+                }}
+              >
+                <span
+                  draggable
+                  onDragStart={() => {
+                    dragRef.current = { list: 'socials', index: i };
+                  }}
+                  onDragEnd={() => {
+                    dragRef.current = null;
+                  }}
+                  role="button"
+                  aria-label={t('dragToReorder')}
+                  title={t('dragToReorder')}
+                  className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
+                >
+                  <GripVertical className="h-4 w-4" />
+                </span>
+                {renderMoveButtons(i, draft.socials.length, (from, to) =>
+                  update({ socials: moveItem(draft.socials, from, to) }),
+                )}
                 <span className="shrink-0 text-slate-400">
                   <SocialIcon url={s.trim()} className="h-5 w-5" />
                 </span>
@@ -421,7 +498,40 @@ export function HandleProfileBuilder() {
         <Field label={t('linksLabel')} hint={t('httpsOnlyHint')}>
           <div className="space-y-2">
             {draft.links.map((l, i) => (
-              <div key={i} className="flex gap-2">
+              <div
+                key={i}
+                className="flex items-center gap-2"
+                onDragOver={(e) => {
+                  if (dragRef.current?.list === 'links') e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  const d = dragRef.current;
+                  if (d?.list !== 'links') return;
+                  e.preventDefault();
+                  if (d.index !== i) {
+                    update({ links: moveItem(draft.links, d.index, i) });
+                  }
+                  dragRef.current = null;
+                }}
+              >
+                <span
+                  draggable
+                  onDragStart={() => {
+                    dragRef.current = { list: 'links', index: i };
+                  }}
+                  onDragEnd={() => {
+                    dragRef.current = null;
+                  }}
+                  role="button"
+                  aria-label={t('dragToReorder')}
+                  title={t('dragToReorder')}
+                  className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
+                >
+                  <GripVertical className="h-4 w-4" />
+                </span>
+                {renderMoveButtons(i, draft.links.length, (from, to) =>
+                  update({ links: moveItem(draft.links, from, to) }),
+                )}
                 <input
                   type="text"
                   value={l.label}

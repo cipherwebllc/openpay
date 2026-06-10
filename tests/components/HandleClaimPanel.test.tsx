@@ -106,7 +106,7 @@ describe('HandleClaimPanel', () => {
     stubMine([{ handle: 'alice', config: CONFIG }]);
     renderPanel(CONFIG, { onEdit: vi.fn() });
     await waitFor(() =>
-      expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument(),
+      expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: '編集' })).toBeInTheDocument();
     const open = screen.getByRole('link', { name: '開く' });
@@ -122,7 +122,7 @@ describe('HandleClaimPanel', () => {
     const onStopEditing = vi.fn();
     renderPanel(CONFIG, { editingHandle: 'alice', onStopEditing });
     await waitFor(() =>
-      expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument(),
+      expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
     // バナーは一覧側 (該当行) とフォーム側の両方に出る
     expect(screen.getAllByText('「@alice」を編集中').length).toBeGreaterThan(0);
@@ -218,7 +218,7 @@ describe('HandleClaimPanel', () => {
     );
     renderPanel(CONFIG);
     await waitFor(() =>
-      expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument(),
+      expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
     fireEvent.change(screen.getByPlaceholderText('alice'), {
       target: { value: 'alice' },
@@ -290,6 +290,43 @@ describe('HandleClaimPanel', () => {
     expect(screen.queryByText('すでに使用されています')).not.toBeInTheDocument();
   });
 
+  it('QRコードは一覧に常時出さず、ボタンでポップアップ表示 → 閉じる', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    renderPanel(CONFIG);
+    await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
+    // 一覧にはフル URL も QR (svg) も出ていない
+    expect(screen.queryByText('https://test.local/@alice')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // QR ボタンでモーダルが開き、ハンドル + フル URL を提示
+    fireEvent.click(screen.getByRole('button', { name: 'QRコード' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument();
+    // 閉じる
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('QR ダイアログ: 開くとフォーカスが閉じるボタンへ移り、閉じると QR ボタンへ復元', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    renderPanel(CONFIG);
+    await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
+    const qrButton = screen.getByRole('button', { name: 'QRコード' });
+    qrButton.focus();
+    fireEvent.click(qrButton);
+    const close = screen.getByRole('button', { name: '閉じる' });
+    expect(document.activeElement).toBe(close);
+    // Tab は背後のページへ抜けず閉じるボタンに留まる (focus trap)
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(close);
+    // 閉じると元の QR ボタンへ復元
+    fireEvent.click(close);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(qrButton);
+  });
+
   it('コピー済み表示はコピーした行だけに出る (全行に伝播しない)', async () => {
     h.isSignedIn = true;
     stubMine([
@@ -303,7 +340,7 @@ describe('HandleClaimPanel', () => {
     });
     renderPanel(CONFIG);
     await waitFor(() =>
-      expect(screen.getByText('https://test.local/@bob')).toBeInTheDocument(),
+      expect(screen.getByText('@bob')).toBeInTheDocument(),
     );
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     expect(copyButtons).toHaveLength(2);

@@ -9,7 +9,7 @@
 // バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
 // (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
@@ -76,6 +76,36 @@ export function HandleClaimPanel({
   // どの handle のリンクをコピーしたか。copied フラグはフック単位なので、これが無いと
   // 複数所有時に全行が「コピー済み」表示になる。
   const [copiedHandle, setCopiedHandle] = useState<string | null>(null);
+  // QR ポップアップ対象 (null = 閉)。一覧に常時 QR を並べると縦に長く読みにくいため
+  // ボタン経由のモーダル提示にする。
+  const [qrHandle, setQrHandle] = useState<string | null>(null);
+
+  // QR モーダルの ESC 閉じ + フォーカス管理 (開いたら閉じるボタンへ・閉じたら元の要素へ復元)。
+  const qrCloseRef = useRef<HTMLButtonElement>(null);
+  const qrReturnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (qrHandle === null) {
+      qrReturnFocusRef.current?.focus?.();
+      qrReturnFocusRef.current = null;
+      return;
+    }
+    qrReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    qrCloseRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setQrHandle(null);
+      // ダイアログ内のフォーカス可能要素は閉じるボタンのみ → Tab で背後のページへ
+      // 抜けないよう閉じるボタンに留める (aria-modal を実挙動で担保)。
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        qrCloseRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [qrHandle]);
 
   // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
   useEffect(() => {
@@ -226,11 +256,12 @@ export function HandleClaimPanel({
                         isEditing ? 'bg-amber-50 ring-1 ring-amber-300' : 'bg-slate-50'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="break-all font-mono text-xs text-slate-700">
-                          {link}
-                        </span>
-                        <div className="flex flex-none gap-1.5">
+                      {/* 1段目: ハンドル名のみ (URL 全文は詰まって読めないため出さない —
+                          フル URL は コピー/開く/QR が担う)。2段目: 操作ボタン (折返し可)。 */}
+                      <p className="break-all font-mono text-sm font-semibold text-slate-800">
+                        @{h}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
                           {onEdit && (
                             <button
                               type="button"
@@ -268,6 +299,13 @@ export function HandleClaimPanel({
                           </button>
                           <button
                             type="button"
+                            onClick={() => setQrHandle(h)}
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                          >
+                            {t('showQr')}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => {
                               if (window.confirm(t('releaseConfirm', { handle: h }))) {
                                 release.mutate(h);
@@ -278,11 +316,12 @@ export function HandleClaimPanel({
                           >
                             {t('release')}
                           </button>
-                        </div>
                       </div>
-                      <div className="mt-2 flex justify-center rounded-md border border-slate-200 bg-white p-2">
-                        <QRCodeSVG value={link} size={120} includeMargin level="M" />
-                      </div>
+                      {isEditing && (
+                        <p className="mt-1.5 text-xs font-medium text-amber-700">
+                          {t('editingBanner', { handle: h })}
+                        </p>
+                      )}
                     </li>
                   );
                 })}
@@ -411,6 +450,46 @@ export function HandleClaimPanel({
                 {t('claimError', { error: (publish.error as Error).message })}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* QR ポップアップ (一覧に常時並べると縦長で読みにくいためボタン経由)。
+          overlay クリック / ESC / 閉じるボタンで閉じる。 */}
+      {qrHandle !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`@${qrHandle}`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          onClick={() => setQrHandle(null)}
+        >
+          <div
+            className="w-full max-w-xs rounded-2xl bg-white p-6 text-center shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="break-all font-mono text-sm font-semibold text-slate-800">
+              @{qrHandle}
+            </p>
+            <div className="mt-4 flex justify-center">
+              <QRCodeSVG
+                value={origin ? `${origin}/@${qrHandle}` : `/@${qrHandle}`}
+                size={220}
+                includeMargin
+                level="M"
+              />
+            </div>
+            <p className="mt-3 break-all text-xs text-slate-400">
+              {origin ? `${origin}/@${qrHandle}` : `/@${qrHandle}`}
+            </p>
+            <button
+              ref={qrCloseRef}
+              type="button"
+              onClick={() => setQrHandle(null)}
+              className="mt-4 w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+            >
+              {t('qrClose')}
+            </button>
           </div>
         </div>
       )}

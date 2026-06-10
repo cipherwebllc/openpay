@@ -131,6 +131,57 @@ describe('HandleProfileBuilder', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('SNS リンクをドラッグで並べ替えできる', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ SNS リンクを追加'));
+    fireEvent.click(screen.getByText('＋ SNS リンクを追加'));
+    const inputs = screen.getAllByPlaceholderText('https://x.com/yourname');
+    fireEvent.change(inputs[0], { target: { value: 'https://x.com/one' } });
+    fireEvent.change(inputs[1], { target: { value: 'https://github.com/two' } });
+    // 1行目のハンドルを掴んで 2行目へドロップ → 順序が入れ替わる
+    const grips = screen.getAllByLabelText('ドラッグで並べ替え');
+    expect(grips).toHaveLength(2);
+    fireEvent.dragStart(grips[0]);
+    fireEvent.drop(grips[1].parentElement!);
+    const after = screen.getAllByPlaceholderText('https://x.com/yourname');
+    expect(after[0]).toHaveValue('https://github.com/two');
+    expect(after[1]).toHaveValue('https://x.com/one');
+  });
+
+  it('▲▼ ボタンでも並べ替えできる (タッチ/キーボード fallback)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ SNS リンクを追加'));
+    fireEvent.click(screen.getByText('＋ SNS リンクを追加'));
+    const inputs = screen.getAllByPlaceholderText('https://x.com/yourname');
+    fireEvent.change(inputs[0], { target: { value: 'https://x.com/one' } });
+    fireEvent.change(inputs[1], { target: { value: 'https://github.com/two' } });
+    const downs = screen.getAllByRole('button', { name: '下へ移動' });
+    // 先頭行の ▼ で入れ替え・末尾行の ▼ は disabled
+    expect(downs[1]).toBeDisabled();
+    fireEvent.click(downs[0]);
+    const after = screen.getAllByPlaceholderText('https://x.com/yourname');
+    expect(after[0]).toHaveValue('https://github.com/two');
+    expect(after[1]).toHaveValue('https://x.com/one');
+    // 先頭行の ▲ は disabled
+    expect(screen.getAllByRole('button', { name: '上へ移動' })[0]).toBeDisabled();
+  });
+
+  it('リンク集もドラッグで並べ替えできる (SNS とは独立)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const labels = screen.getAllByPlaceholderText('ラベル (例: X)');
+    fireEvent.change(labels[0], { target: { value: 'Blog' } });
+    fireEvent.change(labels[1], { target: { value: 'Shop' } });
+    const grips = screen.getAllByLabelText('ドラッグで並べ替え');
+    expect(grips).toHaveLength(2); // links の 2 行のみ (socials は未追加)
+    fireEvent.dragStart(grips[0]);
+    fireEvent.drop(grips[1].parentElement!);
+    const after = screen.getAllByPlaceholderText('ラベル (例: X)');
+    expect(after[0]).toHaveValue('Shop');
+    expect(after[1]).toHaveValue('Blog');
+  });
+
   it('プレビューは受取先未確定でも常時表示される', () => {
     renderWithIntl(<HandleProfileBuilder />);
     expect(screen.getByText('プレビュー')).toBeInTheDocument();

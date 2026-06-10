@@ -594,7 +594,9 @@
     "mineError": "Could not load your handles.",
     "retry": "Retry",
     "availabilityUnknown": "Could not check availability. Please try again later.",
-    "releaseError": "Failed to release ({error})"
+    "releaseError": "Failed to release ({error})",
+    "showQr": "QR code",
+    "qrClose": "Close"
   },
   "HandleProfile": {
     "supportHeading": "Choose how to support",
@@ -628,7 +630,10 @@
     "removeLink": "Remove",
     "insecureDropped": "Non-https links / images will not be saved.",
     "previewHeading": "Preview",
-    "backToTop": "Go to OpenPay home"
+    "backToTop": "Go to OpenPay home",
+    "dragToReorder": "Drag to reorder",
+    "moveUp": "Move up",
+    "moveDown": "Move down"
   },
   "CheckoutForm": {
     "header": "Order checkout",

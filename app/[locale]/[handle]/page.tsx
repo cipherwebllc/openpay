@@ -8,6 +8,7 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import NextImage from 'next/image';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
@@ -131,13 +132,22 @@ export default async function HandlePage({
       )}
       {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
       <ReceiveMethodPicker config={record.config} />
-      {/* このページは共有先から直接開かれる入口 — OpenPay 本体への戻り導線を常設する。 */}
-      <footer className="mt-10 pb-2 text-center text-xs">
+      {/* このページは共有先から直接開かれる入口 — OpenPay 本体への戻り導線を常設する。
+          文言でなく OpenPay のアイコンマークで控えめに (link-in-bio の主役はクリエイター)。 */}
+      <footer className="mt-10 flex justify-center pb-2">
         <Link
           href={`/${locale}`}
-          className="font-medium text-slate-400 underline-offset-2 hover:text-brand hover:underline"
+          aria-label={t('backToTop')}
+          title={t('backToTop')}
+          className="opacity-50 transition hover:opacity-100"
         >
-          {t('backToTop')}
+          <NextImage
+            src="/icon-512.png"
+            alt="OpenPay"
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
+          />
         </Link>
       </footer>
     </main>
