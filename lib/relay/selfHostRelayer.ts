@@ -214,9 +214,12 @@ export async function pollSelfHost(
     const receipt = await io.waitForReceipt(hash);
     // P0: replacement 検出。viem は同一 nonce の置換 tx の receipt を返しうる。受領 receipt が
     // 待っていた hash と異なる (= 別 tx が置換) 場合、その status を自 authorization の結果として
-    // 信用しない → pending (自 tx の最終状態は不明)。
+    // 信用しない → pending (自 tx の最終状態は不明)。txHash は置換 tx の方を返す: canonical
+    // hash は nonce が置換で消費され永遠に mine されない (explorer で Not Found) ため、KV 記録と
+    // 202 応答の追跡ポインタは実際に nonce を消費した tx を指す (fee-bump 同 payload で執行
+    // 済みか cancel かは receipt 側で判別できる)。
     if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
-      return { state: 'pending', txHash: hash };
+      return { state: 'pending', txHash: receipt.transactionHash };
     }
     return receipt.status === 'success'
       ? { state: 'success', txHash: hash }

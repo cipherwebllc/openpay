@@ -304,15 +304,19 @@ describe('pollSelfHost', () => {
     expect(r).toEqual({ state: 'reverted', txHash: SIGNED_HASH });
   });
 
-  it('receipt の hash が不一致 (replacement) → pending (P0・別 tx の結果を信用しない)', async () => {
+  it('receipt の hash が不一致 (replacement) → pending + 置換 tx の hash (P0・別 tx の結果を信用しないが追跡は実 tx)', async () => {
+    const replacementHash = `0x${'99'.repeat(32)}` as Hex;
     const io = makeIo({
       waitForReceipt: vi.fn(async () => ({
         status: 'success' as const,
-        transactionHash: `0x${'99'.repeat(32)}` as Hex, // 別 tx
+        transactionHash: replacementHash, // 別 tx
       })),
     });
     const r = await pollSelfHost(io, SIGNED_HASH);
-    expect(r).toEqual({ state: 'pending', txHash: SIGNED_HASH });
+    // canonical hash は nonce 消費済で永遠に mine されない (explorer で Not Found) ため、
+    // 追跡ポインタは実際に nonce を消費した置換 tx を指す。state は pending のまま
+    // (置換 tx の status を自 authorization の結果として信用しない)。
+    expect(r).toEqual({ state: 'pending', txHash: replacementHash });
   });
 
   it('timeout/throw → {state:pending, txHash} (二重支払い回避: error にしない)', async () => {
