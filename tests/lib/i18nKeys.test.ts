@@ -402,6 +402,67 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
   }
 });
 
+describe('i18n: SignReassurance 名前空間 (署名安心 UX・ja/en parity)', () => {
+  // 署名安心パネル + 署名待ちオーバーレイ + 照合表の i18n キー集合。片 locale 抜けで
+  // t() が key を表示する regression を fence する。
+  const SIGN_KEYS = [
+    'headline',
+    'badgeApprove',
+    'badgeAmount',
+    'badgeExpiry',
+    'blockaidNote',
+    'detailsSummary',
+    'rowToField',
+    'rowToMeaning',
+    'rowValueField',
+    'rowValueMeaning',
+    'rowValidBeforeField',
+    'rowValidBeforeMeaning',
+    'rowNonceField',
+    'rowNonceMeaning',
+    'detailsWalletVariesNote',
+    'awaitingTitle',
+    'awaitingAmountLabel',
+    'awaitingToLabel',
+    'awaitingNote',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of SIGN_KEYS) {
+      it(`${loc.name}.SignReassurance.${key} は非空文字列`, () => {
+        const v = (loc.m.SignReassurance as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('キー集合が ja と en で完全一致 (構造 parity)', () => {
+    expect(Object.keys(ja.SignReassurance).sort()).toEqual(
+      Object.keys(en.SignReassurance).sort(),
+    );
+  });
+
+  it('parameterized キーが必要な placeholder を持つ (ja/en)', () => {
+    for (const m of [ja, en]) {
+      const s = m.SignReassurance as Record<string, string>;
+      // 金額バッジ + 照合表 value 欄は amount/symbol を差し込む。
+      for (const ph of ['{amount}', '{symbol}']) {
+        expect(s.badgeAmount).toContain(ph);
+        expect(s.rowValueMeaning).toContain(ph);
+      }
+      // value 欄の意味説明は decimals を差し込む。
+      expect(s.rowValueMeaning).toContain('{decimals}');
+      // 失効バッジ + validBefore 欄は minutes を差し込む。
+      expect(s.badgeExpiry).toContain('{minutes}');
+      expect(s.rowValidBeforeMeaning).toContain('{minutes}');
+    }
+  });
+});
+
 describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   it('全 form 名前空間で onramp キー集合が ja と en で一致', () => {
     for (const ns of FORM_NAMESPACES) {

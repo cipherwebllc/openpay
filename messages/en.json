@@ -402,6 +402,27 @@
     "emptyLandingToHome": "Open OpenPay (merchant)",
     "emptyLandingToHistory": "View history on this browser"
   },
+  "SignReassurance": {
+    "headline": "All this payment asks for is a single signature, valid only for this one payment.",
+    "badgeApprove": "No Approve (spending allowance) is requested — no access to your balance is granted",
+    "badgeAmount": "Only exactly {amount} {symbol} can move, and only to this store",
+    "badgeExpiry": "The signature expires automatically in {minutes} minutes and can be used only once",
+    "blockaidNote": "Some wallets may show a security warning. As long as the spender (recipient) in the warning matches the store address below, this signature only authorizes a single transfer of the displayed amount.",
+    "detailsSummary": "Check what your wallet will show",
+    "rowToField": "to (recipient)",
+    "rowToMeaning": "The store's receiving address",
+    "rowValueField": "value (amount)",
+    "rowValueMeaning": "Internal representation of {amount} {symbol} ({decimals} digits)",
+    "rowValidBeforeField": "validBefore (expiry)",
+    "rowValidBeforeMeaning": "Valid for only {minutes} minutes after signing",
+    "rowNonceField": "nonce",
+    "rowNonceMeaning": "A single-use number (changes every time)",
+    "detailsWalletVariesNote": "The exact display varies by wallet.",
+    "awaitingTitle": "Please check the signature screen in your wallet",
+    "awaitingAmountLabel": "Amount",
+    "awaitingToLabel": "Recipient",
+    "awaitingNote": "This signature grants no Approve and no access to your balance. It is submitted automatically after you sign (a few seconds)."
+  },
   "NativeTipForm": {
     "header": "Support (native token)",
     "headerNamed": "Support {name}",

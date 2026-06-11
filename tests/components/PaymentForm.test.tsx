@@ -37,6 +37,27 @@ vi.mock('@/hooks/useJpycEip3009Payment', () => ({
     variables: undefined,
   })),
 }));
+// relay 経路の発火は env flag (module-load) ではなく resolveJpycGaslessProvider を直接
+// 制御する。既定は 'pimlico-7702' (= 従来挙動) で、relay テストのみ 'eip3009-relay' に
+// 切替える (CheckoutForm.test と同型)。
+vi.mock('@/lib/jpycGaslessProvider', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/jpycGaslessProvider')
+  >('@/lib/jpycGaslessProvider');
+  return { ...actual, resolveJpycGaslessProvider: vi.fn(() => 'pimlico-7702') };
+});
+// forwarder 設定は env 依存なので test で決定論的に制御する。既定 null = free モード
+// (OpenPay がガス負担・署名安心パネルを出す対象)。recover は jpycForwarderFor をアドレスに。
+vi.mock('@/lib/relay/forwarderConfig', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/relay/forwarderConfig')
+  >('@/lib/relay/forwarderConfig');
+  return {
+    ...actual,
+    jpycForwarderFor: vi.fn(() => null),
+    relayGasFeeValue: vi.fn(() => 2n * 10n ** 18n),
+  };
+});
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 // Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
@@ -84,7 +105,10 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
+import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { PaymentForm } from '@/components/PaymentForm';
 import { logger } from '@/lib/logger';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
@@ -157,6 +181,37 @@ function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error
         ? (err ?? new Error('AA21 didn\'t pay prefund'))
         : null,
   } as Partial<ReturnType<typeof useBatchPayment>>);
+}
+
+// relay (useJpycEip3009Payment) の状態を制御する helper。CheckoutForm.test と同型。
+let relayMutate: ReturnType<typeof vi.fn>;
+function setRelay(
+  state: 'idle' | 'pending-flow' | 'success' | 'broadcast-pending' | 'error',
+  opts?: {
+    txHash?: `0x${string}`;
+    errMsg?: string;
+    variables?: {
+      merchant: Address;
+      value: bigint;
+      gasMode?: 'customer' | 'merchant';
+    };
+  },
+) {
+  relayMutate = vi.fn();
+  const txHash = opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`);
+  const data =
+    state === 'success'
+      ? { txHash, success: true }
+      : state === 'broadcast-pending'
+        ? { txHash, success: false, pending: true }
+        : undefined;
+  mockHook(useJpycEip3009Payment, {
+    mutate: relayMutate,
+    isPending: state === 'pending-flow',
+    data,
+    error: state === 'error' ? new Error(opts?.errMsg ?? 'rate_limited') : null,
+    variables: opts?.variables,
+  } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
 // useStandardPayment は phase + 2-tx data shape を持つ。state は phase に直接 1:1
@@ -247,11 +302,15 @@ beforeEach(() => {
   setSmartAccount(false);
   setPayment('idle');
   setStandardPayment('idle');
+  setRelay('idle');
   setGasQuote('disabled');
   setAccount({ connected: false });
   // 既定は testnet 環境の挙動 (USDC/JPYC とも sponsorship)。ERC20 mode を
   // 検証する describe ブロックでだけ override する。
   vi.mocked(resolvePaymasterMode).mockImplementation(() => 'sponsorship');
+  // 既定は従来の Pimlico 経路 + free 構成 (forwarder 無し)。relay テストでのみ切替える。
+  vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+  vi.mocked(jpycForwarderFor).mockReturnValue(null);
 });
 
 describe('PaymentForm — URL parse', () => {
@@ -1522,5 +1581,89 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     expect(
       screen.queryByRole('button', { name: /有効期限切れ/ }),
     ).toBeNull();
+  });
+});
+
+// 「署名安心 UX」(plans/sign-reassurance-ux.md・P1)。relay free mode (forwarder 未設定)
+// でのみ Pay ボタン直上に SignReassurance パネルを出す。
+describe('PaymentForm — 署名安心パネル (SignReassurance・relay free)', () => {
+  // test env では 'polygon' slug は Amoy に解決される (既存 JPYC テストと同じ)。
+  function setupRelayFree() {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null); // free
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+  }
+
+  it('relay free + 金額あり → パネル表示 + 金額一致 (照合表に生の数字)', () => {
+    setupRelayFree();
+    render(<PaymentForm />);
+
+    // 安心パネルの見出し + バッジ。
+    expect(
+      screen.getByText(/求められるのは「署名」1回だけ/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Approve \(利用許可\) は求めません/)).toBeInTheDocument();
+    // バッジの金額が請求額 (300 JPYC) と一致。
+    expect(
+      screen.getByText(/動かせるのは 300 JPYC ちょうど/),
+    ).toBeInTheDocument();
+    // 折りたたみ照合表に署名する生の数字 (300 * 10^18) が出る = mutate に渡す value と同一。
+    expect(screen.getByText('300000000000000000000')).toBeInTheDocument();
+  });
+
+  it('relay.isPending → 署名待ち文言に切替 (通常バッジは消える)', () => {
+    setupRelayFree();
+    setRelay('pending-flow');
+    render(<PaymentForm />);
+
+    expect(
+      screen.getByText(/ウォレットの署名画面をご確認ください/),
+    ).toBeInTheDocument();
+    // 通常パネルのバッジは置換されて出ない。
+    expect(screen.queryByText(/Approve \(利用許可\) は求めません/)).toBeNull();
+  });
+
+  it('standard 経路では非表示 (relay でないため)', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
+  it('USDC (非 relay) では非表示', () => {
+    // resolveJpycGaslessProvider は USDC でも 'pimlico-7702' (beforeEach 既定)。
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
+  it('forwarder 構成 (recover) では非表示 (free のみ・虚偽の安心を出さない)', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    // forwarder をアドレスに差し替える = recover 構成。
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
+  it('金額未入力 (据え置き QR) では非表示 (amountWei=0)', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    setURL(`to=${MERCHANT}&token=jpyc`); // amount 無し
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
   });
 });

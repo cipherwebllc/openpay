@@ -402,6 +402,27 @@
     "emptyLandingToHome": "OpenPay (店舗向け) を開く",
     "emptyLandingToHistory": "このブラウザの履歴を見る"
   },
+  "SignReassurance": {
+    "headline": "この支払いで求められるのは「署名」1回だけ。この1回のお支払いにだけ有効です。",
+    "badgeApprove": "Approve (利用許可) は求めません — 残高へのアクセス権は渡りません",
+    "badgeAmount": "動かせるのは {amount} {symbol} ちょうど。送金先はこのお店だけです",
+    "badgeExpiry": "署名は {minutes} 分で自動失効し、1回しか使えません",
+    "blockaidNote": "ウォレットによってはセキュリティ警告が表示される場合があります。警告内の spender (受け手) が下記のお店のアドレスと一致していれば、この署名が許可するのは表示金額の1回限りの送金だけです。",
+    "detailsSummary": "ウォレットに表示される内容を確認",
+    "rowToField": "to (送金先)",
+    "rowToMeaning": "お店の受取アドレス",
+    "rowValueField": "value (金額)",
+    "rowValueMeaning": "{amount} {symbol} の内部表記 ({decimals}桁)",
+    "rowValidBeforeField": "validBefore (失効)",
+    "rowValidBeforeMeaning": "署名から {minutes} 分間のみ有効",
+    "rowNonceField": "nonce",
+    "rowNonceMeaning": "1回限りの使い捨て番号 (毎回変わります)",
+    "detailsWalletVariesNote": "表示形式はウォレットにより異なります。",
+    "awaitingTitle": "ウォレットの署名画面をご確認ください",
+    "awaitingAmountLabel": "金額",
+    "awaitingToLabel": "送金先",
+    "awaitingNote": "この署名で Approve や残高へのアクセス権が渡ることはありません。署名後は自動で送信されます (数秒)。"
+  },
   "NativeTipForm": {
     "header": "応援 (ネイティブトークン)",
     "headerNamed": "{name} を応援",

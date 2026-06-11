@@ -16,6 +16,7 @@ import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { SuccessOverlay } from './SuccessOverlay';
+import { SignReassurance } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -52,6 +53,7 @@ import {
 } from '@/lib/url';
 import { formatRemaining, isExpired, secondsRemaining } from '@/lib/fx';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
+import { buildJpycRelaySignPreview } from '@/lib/signPreview';
 
 export function PaymentForm() {
   const search = useSearchParams();
@@ -575,6 +577,25 @@ function PaymentDetails({ params }: { params: PayParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
+  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P1)。relay free mode (forwarder 未設定)
+  // でのみ表示する。recover (forwarder 設定済) は to=forwarder で free と説明が異なり、
+  // コピー未対応のため出さない (虚偽の安心を出さない・計画 §3.3 / §10-7・P4)。
+  // preview は relay.mutate({ merchant: params.to, value: amountWei, ... }) と同一変数から
+  // 導出し、ウォレットに出る生の数字 (value) と OpenPay 表示の乖離をゼロにする。
+  const showSignReassurance =
+    useRelay &&
+    jpycForwarderFor(chainId ?? deployment.chainId) === null &&
+    amountWei > 0n;
+  const signPreview = showSignReassurance
+    ? buildJpycRelaySignPreview({
+        value: amountWei,
+        merchant: params.to,
+        storeName: params.storeName,
+        decimals: deployment.decimals,
+        displaySymbol: deployment.displaySymbol,
+      })
+    : null;
+
   return (
     <div className="space-y-6">
       <header className="rounded-2xl bg-gradient-to-br from-brand to-brand-dark p-6 text-white">
@@ -854,6 +875,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
           />
         )}
       </section>
+
+      {/* 署名安心パネル (Pay ボタン直上)。relay free mode のみ・recover/standard/USDC は
+          P2/P4 で別 kind が必要なため出さない。署名待ち (relay.isPending) 中は待機表示に
+          置換する。表示専用で決済ロジックには触れない。 */}
+      {signPreview && (
+        <SignReassurance preview={signPreview} awaiting={relay.isPending} />
+      )}
 
       <button
         type="button"

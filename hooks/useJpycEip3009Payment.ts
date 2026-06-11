@@ -20,6 +20,8 @@ import {
 import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { env } from '@/lib/env';
+import { logger } from '@/lib/logger';
+import { isUserRejection } from '@/lib/walletErrors';
 import type { GasMode } from '@/lib/fee';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -61,6 +63,41 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       const validBefore = BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC);
       const forwarder = jpycForwarderFor(chainId);
 
+      // 「署名安心 UX」(plans/sign-reassurance-ux.md §5) の計測: 署名要求の前後と拒否/失敗
+      // をログ化し、拒否率ファネル (Sentry) を取れるようにする。free/recover の 2 経路で
+      // signTypedData を呼ぶため共通化する (署名内容は各 typed を渡すだけで不変)。catch は
+      // 分類のための必要な制御フローで、必ず rethrow する (挙動不変・防御的握り潰しではない)。
+      const signWithLogging = async (typed: Parameters<
+        NonNullable<typeof walletClient>['signTypedData']
+      >[0]): Promise<Hex> => {
+        logger.info('payment.sign_requested', {
+          path: 'jpyc-relay',
+          chainId,
+          mode: forwarder ? 'recover' : 'free',
+        });
+        try {
+          const signature = (await walletClient.signTypedData(typed)) as Hex;
+          logger.info('payment.sign_completed', { path: 'jpyc-relay', chainId });
+          return signature;
+        } catch (err) {
+          if (isUserRejection(err)) {
+            logger.info('payment.sign_rejected', {
+              path: 'jpyc-relay',
+              chainId,
+              mode: forwarder ? 'recover' : 'free',
+            });
+          } else {
+            logger.warn('payment.sign_failed', {
+              path: 'jpyc-relay',
+              chainId,
+              mode: forwarder ? 'recover' : 'free',
+              error: err,
+            });
+          }
+          throw err;
+        }
+      };
+
       let payload: Record<string, unknown>;
       if (forwarder) {
         // recover: gas 相当額を JPYC 回収。customer は上乗せ、merchant は受取から吸収。
@@ -88,13 +125,13 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           deployment.address,
           forwarder,
         );
-        const signature = (await walletClient.signTypedData({
+        const signature = await signWithLogging({
           account: address,
           domain: typed.domain,
           types: typed.types,
           primaryType: typed.primaryType,
           message: typed.message,
-        })) as Hex;
+        });
         payload = {
           chainId,
           from,
@@ -121,13 +158,13 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           chainId,
           deployment.address,
         );
-        const signature = (await walletClient.signTypedData({
+        const signature = await signWithLogging({
           account: address,
           domain: typed.domain,
           types: typed.types,
           primaryType: typed.primaryType,
           message: typed.message,
-        })) as Hex;
+        });
         payload = {
           chainId,
           from,
