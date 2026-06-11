@@ -191,18 +191,19 @@ export async function loadReconciliation(
   for (const e of events) {
     if (e.p === period && !paidIndex.has(e.m)) paidIndex.set(e.m, e);
   }
-  const rows: ReconciliationRow[] = [];
-  for (const m of merchants) {
-    const inv = await loadUsageInvoice(period, m as Address);
-    const paidEvent = paidIndex.get(m.toLowerCase());
-    rows.push({
-      merchant: m.toLowerCase(),
-      billedFeeWei: inv.feeWei,
-      paid: !!paidEvent,
-      txHash: paidEvent?.h ?? null,
-      paidAtMs: paidEvent?.t ?? null,
-    });
-  }
+  const rows: ReconciliationRow[] = await Promise.all(
+    merchants.map(async (m) => {
+      const inv = await loadUsageInvoice(period, m as Address);
+      const paidEvent = paidIndex.get(m.toLowerCase());
+      return {
+        merchant: m.toLowerCase(),
+        billedFeeWei: inv.feeWei,
+        paid: !!paidEvent,
+        txHash: paidEvent?.h ?? null,
+        paidAtMs: paidEvent?.t ?? null,
+      };
+    }),
+  );
   rows.sort(
     (a, b) =>
       Number(a.paid) - Number(b.paid) ||

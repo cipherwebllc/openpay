@@ -485,6 +485,38 @@ describe('stats: aggregate — chain / token / count / GMV', () => {
     expect(cctp.totalBridgeFeeMaxWei).toBe('1000');
   });
 
+  it('cross-chain dedup: txHash が大文字小文字違いの2件は同一とみなし 1件のみ集計 (lowercase 正規化)', async () => {
+    const base = {
+      flow: 'direct',
+      result: 'success',
+      chainId: 8453,
+      tokenAddress: USDC_BASE,
+      merchant: MERCHANT,
+      merchantAmount: '1000000',
+      bridge: 'cctp-v2',
+      sourceChainId: 137,
+      feeAmount: '0',
+      feeBreakdownVersion: 1,
+    };
+    vi.mocked(kvLrange).mockResolvedValue({
+      ok: true,
+      value: [
+        makeEntry({ ...base, txHash: '0xABCDEF1234567890' }),
+        makeEntry({ ...base, txHash: '0xabcdef1234567890' }),
+      ],
+    });
+    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 2 });
+
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    const body = await res.json();
+    // 大文字小文字違いの txHash は同一 mint として dedup される
+    expect(body.crossChainDeduped).toBe(1);
+    const chain = body.byChain.find(
+      (c: { chainId: number }) => c.chainId === 8453,
+    );
+    expect(chain.successCount).toBe(1);
+  });
+
   it('Phase 1: feeAmount=0 / undefined の batch・direct・standard-merchant で GMV 計上・totalFeeWei=0', async () => {
     // Phase 1 (alpha) では決済手数料 0% なので、新規 entry は全て feeAmount=0
     // (batch / direct は '0'、standard-merchant は undefined) で記録される。

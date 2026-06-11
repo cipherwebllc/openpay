@@ -420,4 +420,25 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
     expect(res.status).toBe(307);
     expect(res.headers.get('location') ?? '').toContain('reason=session_mismatch');
   });
+
+  it('companies 空 → reason=no_company で errorRedirect し、KV に token を保存しない', async () => {
+    seedSession();
+    h.store.set(
+      'freee:state:STATE_NC',
+      JSON.stringify({ wallet: MERCHANT, returnTo: '/' }),
+    );
+    // token endpoint は company_id なし、companies API は空配列を返す。
+    mockFreeeFetch({
+      token: { access_token: 'AT', refresh_token: 'RT', expires_in: 21_600 },
+      companies: { companies: [] },
+    });
+    const res = await callbackGET(
+      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE_NC'),
+    );
+    expect(res.status).toBe(307);
+    const loc = res.headers.get('location') ?? '';
+    expect(loc).toContain('reason=no_company');
+    // KV に token が保存されていないこと (setToken が呼ばれていない)。
+    expect(h.store.has(`freee:tok:${MERCHANT.toLowerCase()}`)).toBe(false);
+  });
 });

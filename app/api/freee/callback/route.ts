@@ -57,11 +57,13 @@ export async function GET(req: Request): Promise<NextResponse> {
       await delMapping(stateValue.wallet);
     }
 
+    if (companyId == null) {
+      logger.warn('freee.callback.no-company', { wallet: stateValue.wallet });
+      return errorRedirect(req, 'no_company');
+    }
     token = { ...token, companyId };
     await setToken(stateValue.wallet, token);
-    if (companyId != null) {
-      await setMeta(stateValue.wallet, { companyId, companyName });
-    }
+    await setMeta(stateValue.wallet, { companyId, companyName });
   } catch (e) {
     logger.warn('freee.callback.token_exchange_failed', {
       reason: e instanceof Error ? e.message : String(e),

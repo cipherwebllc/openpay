@@ -158,4 +158,33 @@ describe('feeRevenue 照合 (請求 vs 入金・実 billingMeter 索引)', () =>
     expect(recon).toHaveLength(1); // A は1回だけ
     expect(recon[0].billedFeeWei).toBe(30n * JPYC); // (1,000+2,000) × 1%
   });
+
+  it('loadReconciliation: 複数店主の loadUsageInvoice は並行実行される (直列でない)', async () => {
+    // A・B ともに 2026-06 に中継 (索引に入る)。
+    await recordRelayedVolume({ chainId: AMOY, merchant: A, value: 1_000n * JPYC, nowMs: JUN });
+    await recordRelayedVolume({ chainId: AMOY, merchant: B, value: 2_000n * JPYC, nowMs: JUN });
+    const events = await getFeeRevenueEvents();
+
+    // loadUsageInvoice を遅延付きで観測: 同時飛行数が >= 2 に達することで並行実行を証明する。
+    const billingMeterMod = await import('@/lib/billingMeter');
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const orig = billingMeterMod.loadUsageInvoice;
+    const spy = vi
+      .spyOn(billingMeterMod, 'loadUsageInvoice')
+      .mockImplementation(async (...args) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        // 短い遅延で各 call が「重なる」機会を作る。
+        await new Promise<void>((r) => setTimeout(r, 10));
+        inFlight--;
+        return orig(...args);
+      });
+
+    await loadReconciliation('2026-06', events);
+    spy.mockRestore();
+
+    // 並行実装なら 2 店主が同時飛行するはずで maxInFlight >= 2。
+    expect(maxInFlight).toBeGreaterThanOrEqual(2);
+  });
 });

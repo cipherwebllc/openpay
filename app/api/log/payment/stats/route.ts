@@ -242,7 +242,7 @@ function aggregate(entries: LogEntry[]): {
       typeof e.txHash === 'string' &&
       e.txHash.length > 0
     ) {
-      const key = `${bridgeKeyForDedup}:${e.chainId}:${e.txHash}`;
+      const key = `${bridgeKeyForDedup}:${e.chainId}:${e.txHash.toLowerCase()}`;
       if (seenCrossChain.has(key)) {
         crossChainDeduped++;
         continue;
