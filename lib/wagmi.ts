@@ -55,11 +55,18 @@ const connectors = [
         walletConnect({
           projectId: env.wcProjectId,
           showQrModal: true,
+          // metadata はウォレット側の「要求元」表示と Reown Verify API のドメイン照合に使われる。
+          // url が空/不一致・icons が空だと未検証扱いになり、Blockaid の deceptive 判定
+          // (要求元がハッシュ表示・赤警告) を誘発する一因になる (plans/sign-reassurance-ux.md §9)。
+          // url は実 origin (preview/local も自分の origin)・SSR 評価時のみ canonical へ fallback。
           metadata: {
             name: 'OpenPay',
             description: 'Gasless QR payment for small merchants',
-            url: typeof window !== 'undefined' ? window.location.origin : '',
-            icons: [],
+            url:
+              typeof window !== 'undefined'
+                ? window.location.origin
+                : 'https://open-pay.jp',
+            icons: ['https://open-pay.jp/icon-512.png'],
           },
         }),
       ]
