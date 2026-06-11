@@ -110,7 +110,7 @@ describe('lib/kv', () => {
     expect(url).toBe('https://example.upstash.io/');
   });
 
-  it('fetch 自体が throw した場合 http_error + detail を返す', async () => {
+  it('fetch 自体が throw した場合 network_error + detail を返す (http_error と区別)', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
     vi.stubGlobal(
@@ -121,9 +121,37 @@ describe('lib/kv', () => {
     const res = await kvLpush('k', 'v');
     expect(res).toEqual({
       ok: false,
-      reason: 'http_error',
+      reason: 'network_error',
       detail: 'ECONNREFUSED',
     });
+  });
+
+  it('result も error も無い 200 body は parse_error (ok:true value:undefined に仕立てない)', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+    );
+    const { kvLpush } = await import('@/lib/kv');
+    const res = await kvLpush('k', 'v');
+    expect(res).toEqual({
+      ok: false,
+      reason: 'parse_error',
+      detail: 'missing result key',
+    });
+  });
+
+  it('result: null (kvGet の miss) は従来どおり ok:true value:null', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: null }) }),
+    );
+    const { kvGet } = await import('@/lib/kv');
+    const res = await kvGet('k');
+    expect(res).toEqual({ ok: true, value: null });
   });
 
   it('fetch が timeout (AbortSignal.timeout 発火) した場合 reason=timeout', async () => {
@@ -140,13 +168,13 @@ describe('lib/kv', () => {
     });
   });
 
-  it('fetch.reject が Error でない (string) でも http_error として処理', async () => {
+  it('fetch.reject が Error でない (string) でも network_error として処理', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue('boom'));
     const { kvLpush } = await import('@/lib/kv');
     const res = await kvLpush('k', 'v');
-    expect(res).toEqual({ ok: false, reason: 'http_error', detail: 'boom' });
+    expect(res).toEqual({ ok: false, reason: 'network_error', detail: 'boom' });
   });
 
   it('json parse が throw した場合 parse_error を返す', async () => {

@@ -5,7 +5,10 @@
 type KvOk<T> = { ok: true; value: T };
 type KvErr = {
   ok: false;
-  reason: 'unconfigured' | 'http_error' | 'parse_error' | 'timeout';
+  // network_error = fetch 自体の失敗 (DNS/接続断・KV に届いていない)。
+  // http_error = KV が応答した上での失敗 (非2xx or Upstash {error})。
+  // 「KV 到達不能」と「KV がコマンドを拒否」の切り分けが alert triage に効く。
+  reason: 'unconfigured' | 'network_error' | 'http_error' | 'parse_error' | 'timeout';
   status?: number;
   detail?: string;
 };
@@ -53,9 +56,10 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     });
   } catch (e) {
     // AbortSignal.timeout 発火は DOMException('TimeoutError')、明示 abort は 'AbortError'。
+    // それ以外の fetch reject は KV に届く前の network 障害 (DNS/ECONNRESET 等)。
     const { name, detail } = errInfo(e);
     const timedOut = name === 'TimeoutError' || name === 'AbortError';
-    return { ok: false, reason: timedOut ? 'timeout' : 'http_error', detail };
+    return { ok: false, reason: timedOut ? 'timeout' : 'network_error', detail };
   }
   if (!res.ok) {
     return { ok: false, reason: 'http_error', status: res.status };
@@ -64,6 +68,13 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     const json = (await res.json()) as { result?: T; error?: string };
     if (json.error) {
       return { ok: false, reason: 'http_error', detail: json.error };
+    }
+    // result も error も無い body ({} 等) を ok:true value:undefined に仕立てると、
+    // <number> 等に型を偽った undefined が呼出側の比較 (`r.value <= cap` 等) を黙って
+    // 誤らせる。result キーの欠落は契約違反として parse_error で表面化させる
+    // (kvGet の miss は {result: null} で届くため 'result' in json は true)。
+    if (!('result' in json)) {
+      return { ok: false, reason: 'parse_error', detail: 'missing result key' };
     }
     return { ok: true, value: json.result as T };
   } catch (e) {
