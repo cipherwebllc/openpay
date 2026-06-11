@@ -387,3 +387,74 @@ describe('USDC は Kaia chain id で resolve しない (型レベル除外の ru
     expect(chainIds).not.toContain(kairos.id);
   });
 });
+
+// ---------------------------------------------------------------------------
+// REM-19: テーブル化リファクタの回帰フェンス
+// ---------------------------------------------------------------------------
+
+describe('usdcAddress テーブル化: 全 UsdcChainSlug × testnet で従来アドレスを返す', () => {
+  // 各 slug が従来の if-chain と同じ testnet アドレスに解決されることを確認する。
+  // テーブル化は純リファクタであり値の変更を一切伴わない。
+  it.each([
+    ['base',      '0x036cbd53842c5426634e7929541ec2318f3dcf7e'],
+    ['arbitrum',  '0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d'],
+    ['optimism',  '0x5fd84259d66cd46123540766be93dfe6d43130d7'],
+    ['polygon',   '0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582'],
+    ['ethereum',  '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238'],
+    ['avalanche', '0x5425890298aed601595a70ab815c96711a31bc65'],
+  ] as const)('usdc@%s (testnet) → %s', (slug, expectedAddr) => {
+    const d = deploymentForSlug('usdc', slug);
+    expect(d.address.toLowerCase()).toBe(expectedAddr);
+  });
+});
+
+describe('usdcAddress テーブル化: 全 UsdcChainSlug × mainnet で従来アドレスを返す', () => {
+  // mainnet env へ切り替えて全 slug の mainnet アドレスを回帰確認する。
+  it.each([
+    ['base',      '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'],
+    ['arbitrum',  '0xaf88d065e77c8cc2239327c5edb3a432268e5831'],
+    ['optimism',  '0x0b2c639c533813f4aa9d7837caf62653d097ff85'],
+    ['polygon',   '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359'],
+    ['ethereum',  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'],
+    ['avalanche', '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e'],
+  ] as const)('usdc@%s (mainnet) → %s', async (slug, expectedAddr) => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_NETWORK_ENV = 'mainnet';
+    process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS =
+      '0xdead000000000000000000000000000000001234';
+    process.env.NEXT_PUBLIC_PIMLICO_API_KEY = 'test_pimlico_key';
+    process.env.NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID = 'sp_test';
+    process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://abc@o1.ingest.sentry.io/2';
+    const mod = await import('@/lib/tokens');
+    const d = mod.deploymentForSlug('usdc', slug);
+    expect(d.address.toLowerCase()).toBe(expectedAddr);
+  });
+});
+
+describe('chainIdFor テーブル化: 全 ChainSlug × testnet で従来 chainId を返す', () => {
+  it.each([
+    ['base',      baseSepolia.id],
+    ['arbitrum',  arbitrumSepolia.id],
+    ['optimism',  optimismSepolia.id],
+    ['polygon',   polygonAmoy.id],
+    ['kaia',      kairos.id],
+    ['ethereum',  sepolia.id],
+  ] as const)('chainIdFor("%s") testnet → %d', (slug, expectedId) => {
+    const d = deploymentForSlug(slug === 'kaia' ? 'jpyc' : 'usdc', slug as never);
+    expect(d.chainId).toBe(expectedId);
+  });
+});
+
+describe('chainIdFor テーブル化: unknown slug は runtime throw', () => {
+  it('型を欺いた unknown slug ("notachain") は chainForSlug か chainIdFor のいずれかで throw する', async () => {
+    // deploymentForSlug は chainForSlug(slug) を先に呼ぶため、そこで throw する場合と
+    // chainIdFor テーブルで throw する場合の両方がある。
+    // 重要な不変条件は「黙って Polygon 等にフォールスルーしない」こと。
+    vi.resetModules();
+    const mod = await import('@/lib/tokens');
+    // 型ガードを迂回して runtime フェンスをテスト (as never でコンパイル通過)
+    expect(() =>
+      mod.deploymentForSlug('usdc', 'notachain' as never),
+    ).toThrow();
+  });
+});

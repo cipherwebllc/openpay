@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { decodeFunctionData, getAddress, pad, type Hex } from 'viem';
 import {
   addressToBytes32,
@@ -23,6 +23,12 @@ import {
   TRANSFER_SPEC_TYPED_DATA,
   type AttestationResponse,
 } from '@/lib/crossChain/types';
+
+const ORIGINAL_ENV = { ...process.env };
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+  vi.resetModules();
+});
 
 const DEPOSITOR = getAddress('0x1234567890123456789012345678901234567890');
 const RECIPIENT = getAddress('0x000000000000000000000000000000000000aBcd');
@@ -398,4 +404,53 @@ describe('lib/crossChain/gateway', () => {
 
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// REM-19: DEFAULT_MAX_FEE_BPS env パースの 10 進限定ガード
+// ---------------------------------------------------------------------------
+
+describe('DEFAULT_MAX_FEE_BPS env パース (REM-19)', () => {
+  // DEFAULT_MAX_FEE_BPS はモジュールロード時 IIFE で評価されるため、
+  // vi.resetModules() + 動的 import で各テストケースを独立評価する。
+
+  const BASE_ARGS = {
+    sourceDomain: CIRCLE_DOMAIN_BASE,
+    destinationDomain: CIRCLE_DOMAIN_POLYGON,
+    sourceToken: SOURCE_TOKEN,
+    destinationToken: DEST_TOKEN,
+    depositor: DEPOSITOR,
+    recipient: RECIPIENT,
+    value: 100_000_000n, // 100 USDC — bps 計算が整数になる額
+    currentBlockHeight: 0n,
+  };
+
+  it('hex 表記 ("0x32") は fallback 10n — 5_000_000 * 10 / 10000 = 5000', async () => {
+    // Number('0x32') = 50。もし通ると maxFee = 100_000_000 * 50 / 10000 = 500_000 になる。
+    // fallback(10n) なら 100_000_000 * 10 / 10000 = 100_000。
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS = '0x32';
+    const mod = await import('@/lib/crossChain/gateway');
+    const intent = mod.buildBurnIntent(BASE_ARGS);
+    // fallback 10n が効いていれば maxFee = 100_000_000 * 10 / 10000 = 100_000
+    expect(intent.maxFee).toBe(100_000n);
+  });
+
+  it('正常な 10 進整数 ("25") は 25n として採用', async () => {
+    // 100_000_000 * 25 / 10000 = 250_000
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS = '25';
+    const mod = await import('@/lib/crossChain/gateway');
+    const intent = mod.buildBurnIntent(BASE_ARGS);
+    expect(intent.maxFee).toBe(250_000n);
+  });
+
+  it('未設定は fallback 10n', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS;
+    const mod = await import('@/lib/crossChain/gateway');
+    const intent = mod.buildBurnIntent(BASE_ARGS);
+    // 100_000_000 * 10 / 10000 = 100_000
+    expect(intent.maxFee).toBe(100_000n);
+  });
 });

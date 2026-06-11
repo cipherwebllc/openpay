@@ -53,9 +53,12 @@ const TRANSFER_SPEC_VERSION = 1;
 
 // maxFee 上限 (Circle early access fee 実勢 0.5 bps の 20 倍の safety margin)。
 // env NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS で再 deploy なし上書き可。
+// '0x32'→50 のような hex / '1e2'→100 のような指数表記を誤採用しないよう
+// 10 進整数 (/^[0-9]+$/) のみ受理し、不合格は fallback (10n) に倒す。
 const DEFAULT_MAX_FEE_BPS: bigint = (() => {
   const raw = process.env.NEXT_PUBLIC_CROSS_CHAIN_MAX_FEE_BPS;
   if (!raw) return 10n;
+  if (!/^[0-9]+$/.test(raw)) return 10n;
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0 || n > 10000) return 10n;
   return BigInt(n);

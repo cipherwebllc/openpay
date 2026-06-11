@@ -33,10 +33,18 @@ function parseAddress(
   return getAddress(v);
 }
 
-/** 正の整数として妥当か検証し、Number で返す。不正値は undefined + warn。 */
+/** 正の整数として妥当か検証し、Number で返す。不正値は undefined + warn。
+ *  '1e3'→1000 や '0x10'→16 のような Number() の暗黙変換を防ぐため、
+ *  10 進整数のみ (/^[0-9]+$/) を受理する。 */
 function parsePositiveInt(name: string, raw: string | undefined): number | undefined {
   const v = nonEmpty(raw);
   if (!v) return undefined;
+  if (!/^[0-9]+$/.test(v)) {
+    console.warn(
+      `[OpenPay] ${name} is not a positive integer ("${v}"); falling back.`,
+    );
+    return undefined;
+  }
   const n = Number(v);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
     console.warn(

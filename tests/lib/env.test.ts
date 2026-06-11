@@ -291,6 +291,44 @@ describe('lib/env (module-load validation)', () => {
     warn.mockRestore();
   });
 
+  // REM-19: 10 進限定ガードの追加テスト
+  it('parsePositiveInt: 指数表記 ("1e3") は不受理 → undefined + warn', async () => {
+    // Number('1e3') = 1000 が通ってしまうと GAS_CEILING 等で意図と違う値が採用される。
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.NEXT_PUBLIC_POL_JPYC_RATE = '1e3';
+    const mod = await import('@/lib/env');
+    expect(mod.env.polJpycRate).toBeUndefined();
+    expect(
+      warn.mock.calls.some((c) =>
+        String(c[0]).includes('NEXT_PUBLIC_POL_JPYC_RATE'),
+      ),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('parsePositiveInt: hex 表記 ("0x10") は不受理 → undefined + warn', async () => {
+    // Number('0x10') = 16 が通ってしまうと maxFee cap 等が意図せず変わり得る。
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI = '0x10';
+    const mod = await import('@/lib/env');
+    expect(mod.env.gasCeilingGwei.polygon).toBeUndefined();
+    expect(
+      warn.mock.calls.some((c) =>
+        String(c[0]).includes('NEXT_PUBLIC_GAS_CEILING_POLYGON_GWEI'),
+      ),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('parsePositiveInt: 正常な 10 進整数 ("123") は 123 として受理', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_KAIA_JPYC_RATE = '123';
+    const mod = await import('@/lib/env');
+    expect(mod.env.kaiaJpycRate).toBe(123);
+  });
+
   it('parsePositiveInt: 空文字 / 未設定 → undefined (warn なし)', async () => {
     // 空文字は nonEmpty で undefined に倒れるため warn は出さない
     // (ユーザは「未設定」を意図しているので警告ノイズを増やさない)。

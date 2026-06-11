@@ -125,46 +125,65 @@ const USDC_HYPEREVM_TESTNET: Address =
 // kaia には native USDC 未 deploy のため対象外 (UsdcChainSlug で型レベル除外)。
 type UsdcChainSlug = Exclude<ChainSlug, 'kaia'>;
 
+// mainnet/testnet それぞれの USDC デフォルトアドレス網羅テーブル。
+// Record<UsdcChainSlug, Address> により slug を追加し損ねると TS コンパイルエラーになる。
+const USDC_MAINNET_DEFAULTS: Record<UsdcChainSlug, Address> = {
+  base:      USDC_BASE_MAINNET,
+  arbitrum:  USDC_ARBITRUM_MAINNET,
+  optimism:  USDC_OPTIMISM_MAINNET,
+  polygon:   USDC_POLYGON_MAINNET,
+  ethereum:  USDC_ETHEREUM_MAINNET,
+  avalanche: USDC_AVALANCHE_MAINNET,
+};
+
+const USDC_TESTNET_DEFAULTS: Record<UsdcChainSlug, Address> = {
+  base:      USDC_BASE_SEPOLIA,
+  arbitrum:  USDC_ARBITRUM_SEPOLIA,
+  optimism:  USDC_OPTIMISM_SEPOLIA,
+  polygon:   USDC_POLYGON_AMOY,
+  ethereum:  USDC_SEPOLIA,
+  avalanche: USDC_AVALANCHE_FUJI,
+};
+
 function usdcAddress(slug: UsdcChainSlug): Address {
   if (isMainnet) {
-    const overrides = env.mainnetTokenOverrides.usdc;
-    const o = overrides[slug];
-    if (o) return o;
-    if (slug === 'base') return USDC_BASE_MAINNET;
-    if (slug === 'arbitrum') return USDC_ARBITRUM_MAINNET;
-    if (slug === 'optimism') return USDC_OPTIMISM_MAINNET;
-    if (slug === 'ethereum') return USDC_ETHEREUM_MAINNET;
-    if (slug === 'avalanche') return USDC_AVALANCHE_MAINNET;
-    return USDC_POLYGON_MAINNET; // polygon
+    return env.mainnetTokenOverrides.usdc[slug] ?? USDC_MAINNET_DEFAULTS[slug];
   }
-  const overrides = env.testnetTokenOverrides.usdc;
-  const o = overrides[slug];
-  if (o) return o;
-  if (slug === 'base') return USDC_BASE_SEPOLIA;
-  if (slug === 'arbitrum') return USDC_ARBITRUM_SEPOLIA;
-  if (slug === 'optimism') return USDC_OPTIMISM_SEPOLIA;
-  if (slug === 'ethereum') return USDC_SEPOLIA;
-  if (slug === 'avalanche') return USDC_AVALANCHE_FUJI;
-  return USDC_POLYGON_AMOY; // polygon
+  return env.testnetTokenOverrides.usdc[slug] ?? USDC_TESTNET_DEFAULTS[slug];
 }
 
+// mainnet/testnet それぞれの chainId 網羅テーブル。
+// Record<ChainSlug, number> により slug を追加し損ねると TS コンパイルエラーになる。
+const CHAIN_ID_MAINNET: Record<ChainSlug, number> = {
+  base:      base.id,
+  arbitrum:  arbitrum.id,
+  optimism:  optimism.id,
+  polygon:   polygon.id,
+  kaia:      kaia.id,
+  ethereum:  mainnet.id,
+  avalanche: avalanche.id,
+};
+
+const CHAIN_ID_TESTNET: Record<ChainSlug, number> = {
+  base:      baseSepolia.id,
+  arbitrum:  arbitrumSepolia.id,
+  optimism:  optimismSepolia.id,
+  polygon:   polygonAmoy.id,
+  kaia:      kairos.id,
+  ethereum:  sepolia.id,
+  avalanche: avalancheFuji.id,
+};
+
 function chainIdFor(slug: ChainSlug): number {
-  if (isMainnet) {
-    if (slug === 'base') return base.id;
-    if (slug === 'arbitrum') return arbitrum.id;
-    if (slug === 'optimism') return optimism.id;
-    if (slug === 'kaia') return kaia.id;
-    if (slug === 'ethereum') return mainnet.id;
-    if (slug === 'avalanche') return avalanche.id;
-    return polygon.id;
+  const table = isMainnet ? CHAIN_ID_MAINNET : CHAIN_ID_TESTNET;
+  // テーブルは Record<ChainSlug, number> で全 slug を網羅しているため
+  // value が undefined になるのは slug が型を欺いて渡された場合のみ。
+  // URL parser 等の未型付き境界向けの runtime フェンスとして throw する。
+  const id = table[slug as ChainSlug];
+  if (id === undefined) {
+    throw new Error(`tokens: unknown chain slug "${slug}"`);
   }
-  if (slug === 'base') return baseSepolia.id;
-  if (slug === 'arbitrum') return arbitrumSepolia.id;
-  if (slug === 'optimism') return optimismSepolia.id;
-  if (slug === 'kaia') return kairos.id;
-  if (slug === 'ethereum') return sepolia.id;
-  if (slug === 'avalanche') return avalancheFuji.id;
-  return polygonAmoy.id;
+  return id;
 }
 
 const USDC_SLUGS: readonly UsdcChainSlug[] = [
@@ -210,25 +229,35 @@ const BUYER_ONLY_USDC_SLUGS: readonly BuyerOnlyChainSlug[] = [
   'hyperevm',
 ];
 
+// buyer-only USDC デフォルトアドレス網羅テーブル。
+// Record<BuyerOnlyChainSlug, Address> により slug 追加漏れをコンパイルエラー化。
+const BUYER_ONLY_USDC_MAINNET_DEFAULTS: Record<BuyerOnlyChainSlug, Address> = {
+  unichain:   USDC_UNICHAIN_MAINNET,
+  worldchain: USDC_WORLDCHAIN_MAINNET,
+  sonic:      USDC_SONIC_MAINNET,
+  sei:        USDC_SEI_MAINNET,
+  hyperevm:   USDC_HYPEREVM_MAINNET,
+};
+
+const BUYER_ONLY_USDC_TESTNET_DEFAULTS: Record<BuyerOnlyChainSlug, Address> = {
+  unichain:   USDC_UNICHAIN_SEPOLIA,
+  worldchain: USDC_WORLDCHAIN_SEPOLIA,
+  sonic:      USDC_SONIC_TESTNET,
+  sei:        USDC_SEI_TESTNET,
+  hyperevm:   USDC_HYPEREVM_TESTNET,
+};
+
 function buyerOnlyUsdcAddress(slug: BuyerOnlyChainSlug): Address {
   if (isMainnet) {
-    const overrides = env.mainnetTokenOverrides.usdc;
-    const o = overrides[slug];
-    if (o) return o;
-    if (slug === 'unichain') return USDC_UNICHAIN_MAINNET;
-    if (slug === 'worldchain') return USDC_WORLDCHAIN_MAINNET;
-    if (slug === 'sonic') return USDC_SONIC_MAINNET;
-    if (slug === 'sei') return USDC_SEI_MAINNET;
-    return USDC_HYPEREVM_MAINNET; // hyperevm
+    return (
+      env.mainnetTokenOverrides.usdc[slug] ??
+      BUYER_ONLY_USDC_MAINNET_DEFAULTS[slug]
+    );
   }
-  const overrides = env.testnetTokenOverrides.usdc;
-  const o = overrides[slug];
-  if (o) return o;
-  if (slug === 'unichain') return USDC_UNICHAIN_SEPOLIA;
-  if (slug === 'worldchain') return USDC_WORLDCHAIN_SEPOLIA;
-  if (slug === 'sonic') return USDC_SONIC_TESTNET;
-  if (slug === 'sei') return USDC_SEI_TESTNET;
-  return USDC_HYPEREVM_TESTNET; // hyperevm
+  return (
+    env.testnetTokenOverrides.usdc[slug] ??
+    BUYER_ONLY_USDC_TESTNET_DEFAULTS[slug]
+  );
 }
 
 const usdcBuyerOnlyDeployments: TokenDeployment[] = BUYER_ONLY_USDC_SLUGS.map(
