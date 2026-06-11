@@ -151,12 +151,6 @@ export async function relayJpycAuthorization(
     return { kind: 'rejected', httpStatus: 400, reason: 'insufficient_balance' };
   }
 
-  // 5. rate-limit (relayer は gas を払うので濫用/DoS の標的)。
-  const allowed = await deps.checkRateLimit(input.rateLimitKeys);
-  if (!allowed) {
-    return { kind: 'rejected', httpStatus: 429, reason: 'rate_limited' };
-  }
-
   // 5.5 authorization 既使用チェック (任意)。使用済なら submit は確実に revert する。
   // ここで pending を返すことで gas を浪費せず、かつ「既に処理済かもしれない決済」を
   // standard へ fallback させない (二重支払い防止)。
@@ -187,6 +181,17 @@ export async function relayJpycAuthorization(
       await deps.recordRelayHash?.(chainId, auth.from, auth.nonce, txHash);
     }
   };
+
+  // 5.65 rate-limit (relayer は gas を払うので濫用/DoS の標的)。重複ガード (5.5/5.6) の後に
+  // 置く: network retry / double-click の正当な重複 POST は pending で吸収され rate-limit 枠を
+  // 浪費しない (枠を浪費すると broadcast 済の決済に 429 が返り「失敗」に見える)。グローバル
+  // 日次予算 (5.7) より前に置き、rate-limit される actor が予算枠を消費しないようにする。
+  // reject 時は claim を解放 (false tombstone 防止・5.7 と同じ)。
+  const allowed = await deps.checkRateLimit(input.rateLimitKeys);
+  if (!allowed) {
+    await releaseClaim();
+    return { kind: 'rejected', httpStatus: 429, reason: 'rate_limited' };
+  }
 
   // 5.7 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
   // (replay/duplicate が予算枠を消費して正当な決済を枯渇させる DoS を防ぐ・Codex P1)。超過は

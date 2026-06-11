@@ -133,6 +133,63 @@ describe('relayJpycAuthorization', () => {
     expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
   });
 
+  it('rate-limit: duplicate claim は rate-limit を呼ばずに pending (枠を浪費しない)', async () => {
+    const checkRateLimit = vi.fn(async () => true);
+    const dupHash = `0x${'cd'.repeat(32)}` as Hex;
+    const deps = makeDeps({
+      checkRateLimit,
+      claimIdempotency: vi.fn<
+        (c: number, from: Address, nonce: Hex) => Promise<{ status: 'duplicate'; txHash: Hex }>
+      >(async () => ({ status: 'duplicate', txHash: dupHash })),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res).toMatchObject({ kind: 'pending', txHash: dupHash });
+    expect(checkRateLimit).toHaveBeenCalledTimes(0);
+    expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+  });
+
+  it('rate-limit: authorization 既使用は rate-limit を呼ばずに pending (枠を浪費しない)', async () => {
+    const checkRateLimit = vi.fn(async () => true);
+    const deps = makeDeps({
+      checkRateLimit,
+      checkAuthorizationUsed: vi.fn(async () => true),
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('pending');
+    expect(checkRateLimit).toHaveBeenCalledTimes(0);
+    expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+  });
+
+  it('rate-limit: claim first 後に rate-limit false → 429 + claim release (false tombstone 防止)', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      checkRateLimit: vi.fn(async () => false),
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency,
+    });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'rate_limited',
+      httpStatus: 429,
+    });
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
+    expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+  });
+
+  it('rate-limit: 正常系では rate-limit が claimIdempotency の後に呼ばれる', async () => {
+    const checkRateLimit = vi.fn(async () => true);
+    const claimIdempotency = vi.fn(async () => ({ status: 'first' as const }));
+    const deps = makeDeps({ checkRateLimit, claimIdempotency });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe('success');
+    expect(checkRateLimit).toHaveBeenCalledOnce();
+    expect(claimIdempotency).toHaveBeenCalledOnce();
+    const claimOrder = claimIdempotency.mock.invocationCallOrder[0];
+    const rateOrder = checkRateLimit.mock.invocationCallOrder[0];
+    expect(rateOrder).toBeGreaterThan(claimOrder);
+  });
+
   it('submit 失敗 → relay_error', async () => {
     const deps = makeDeps({
       submitSponsoredCall: vi.fn(async () => {
