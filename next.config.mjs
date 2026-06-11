@@ -13,16 +13,27 @@ const nextConfig = {
     '/api/og/tip': ['./app/api/og/fonts/**', './public/icon-512.png'],
     '/api/og/handle': ['./app/api/og/fonts/**', './public/icon-512.png'],
   },
-  // /tip/[address] は iframe 埋め込みを想定するため、X-Frame-Options を出さず、
-  // CSP frame-ancestors で全 origin 許可する。アクションは MetaMask 等のウォレット
-  // ポップアップ内で行われるため、iframe 内でのクリックジャッキングは成立しない。
-  // /ja/tip/* と /en/tip/* の両方に適用。
+  // frame 方針は default-deny: /tip/[address] だけが iframe 埋め込みを想定するため
+  // frame-ancestors * を許可し (アクションは MetaMask 等のウォレットポップアップ内で
+  // 行われるため、iframe 内でのクリックジャッキングは成立しない)、それ以外の全ページ
+  // (/pay /checkout /create /history /scan 等) は同一 origin に限定する。Next.js は
+  // 既定で X-Frame-Options を出さないため、明示しない限り任意 origin から iframe 化
+  // できてしまう。2 つ目の source は negative lookahead で /ja/tip・/en/tip 配下を
+  // 除外 (重複 match させると tip 側にも X-Frame-Options が付き、CSP を見ない古い
+  // 実装で埋め込みが壊れるため、排他に分ける)。
   async headers() {
     return [
       {
         source: '/:locale(ja|en)/tip/:path*',
         headers: [
           { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+        ],
+      },
+      {
+        source: '/((?!(?:ja|en)/tip(?:/|$)).*)',
+        headers: [
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
         ],
       },
     ];
