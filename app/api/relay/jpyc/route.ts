@@ -169,19 +169,28 @@ if (
 // recover 経路 (handleRecover) は isGaslessRelayBlocked の延滞遮断も recordRelayedVolume の
 // 出来高メーターも通らないため、同時設定は (1) 延滞店主のガスレスが止まらない (ゲートの
 // teeth 喪失) (2) recover 経路の出来高が a1 メーターに乗らず undercount、を黙って起こす。
-// 誤設定はデプロイ時に即死 (route 全体 500・client は relay 不可で standard へ誘導) させ、
-// ゲート素通りのまま運用される事故を防ぐ。
-if (
-  env.enableUsageFee &&
-  Object.keys(SUPPORTED_CHAINS).some(
-    (id) => jpycForwarderFor(Number(id)) !== null,
-  )
-) {
-  throw new Error(
-    'relay.jpyc misconfig: NEXT_PUBLIC_JPYC_FORWARDER_* (recover) と ' +
-      'NEXT_PUBLIC_ENABLE_USAGE_FEE=1 (a1 利用料) は併用できません。' +
-      'recover 経路は利用料ゲート/出来高メーターを通らないため、どちらか一方を解除してください。',
-  );
+// 強制は POST handler の per-chain 503 (mainnet のみ・fail-closed) で行う — module load で
+// throw すると、開発 .env.local の併設や next build (Collecting page data) まで即死して
+// しまうため、ここでは起動時の可視化 (Sentry) に留める。testnet 併設は非商用の開発構成
+// として許容 (self-host hardening と同じ「testnet は緩く運用可」方針)。
+if (env.enableUsageFee) {
+  if ([...MAINNET_CHAINS].some((id) => jpycForwarderFor(id) !== null)) {
+    logger.error('relay.jpyc.misconfig', {
+      reason:
+        'mainnet forwarder (recover) configured while usage fee (a1) is enabled; ' +
+        'recover bypasses the fee gate/meter — relay requests on those chains will be refused (503)',
+    });
+  } else if (
+    Object.keys(SUPPORTED_CHAINS).some(
+      (id) => jpycForwarderFor(Number(id)) !== null,
+    )
+  ) {
+    logger.warn('relay.jpyc.misconfig', {
+      reason:
+        'testnet forwarder (recover) configured while usage fee (a1) is enabled; ' +
+        'recover bypasses the fee gate/meter (allowed on testnet only)',
+    });
+  }
 }
 
 function transportFor(chainId: number) {
@@ -469,6 +478,25 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
   const chainId = raw.chainId;
+
+  // 排他 invariant の強制 (fail-closed): mainnet で recover (forwarder)×a1 が併設されたままの
+  // relay は受けない (受けるとゲート/メーターを素通りする)。free 経路へ silent degrade も
+  // しない — client は forwarder 設定を見て recover payload を送ってくるため handleFree が
+  // 400 で弾き意図が曖昧になる。明示の 503 で設定解消まで relay を止める (顧客は standard
+  // mode で支払える)。module load では throw しない (開発 .env.local の testnet 併設や
+  // next build を壊さないため・起動時 logger.error で可視化済)。
+  if (
+    env.enableUsageFee &&
+    MAINNET_CHAINS.has(chainId) &&
+    PROVIDER === 'self-host' &&
+    forwarderFor(chainId) !== null
+  ) {
+    logger.error('relay.jpyc.recover_usage_fee_conflict', { chainId });
+    return NextResponse.json(
+      { ok: false, error: 'relay_misconfigured' },
+      { status: 503 },
+    );
+  }
 
   // mainnet (Polygon/Kaia) を self-host で relay する前提条件 (testnet は緩く運用可)。silent な
   // 無効化を避け mainnet のみ 503 で拒否する。
