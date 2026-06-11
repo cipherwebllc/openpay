@@ -623,6 +623,42 @@ export function gcStalePreSubmit(
   return count;
 }
 
+/** submitting のまま放置された孤児 record を物理削除する (任意・容量管理)。
+ * broadcast 直後に reload → 同一 callHash を二度と起動しないと、submitting record は
+ * gcStalePreSubmit (pre-submit のみ) にも pruneTerminal (terminal のみ) にも該当せず
+ * localStorage に永久残留する (緩慢リーク)。これを回収するための GC。
+ *
+ * 安全性根拠: submitting の物理削除は recover 手段 (receipt 照会 / 同一署名 op の冪等
+ * rebroadcast) を失わせるが、maxAgeMs (7 日) 後の同一 callHash 再決済は
+ * CONFIRMED_DEDUP_WINDOW (90s) を遥かに超えており正規リピートとして扱う設計。op 冪等性
+ * (同一署名 op は EntryPoint nonce 一意性で included は最大 1 回) が二重決済の最終ガードで
+ * あり、ここでの削除は容量回収が目的。 */
+export function pruneStaleSubmitting(maxAgeMs: number, now: number): void {
+  let storage: Storage;
+  try {
+    storage = requireStorage();
+  } catch {
+    return;
+  }
+  const toRemove: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const k = storage.key(i);
+    if (!k || !k.startsWith(PENDING_KEY_PREFIX)) continue;
+    const record = loadPendingRecord(k.slice(PENDING_KEY_PREFIX.length));
+    if (!record) continue;
+    if (record.status === 'submitting' && now - record.updatedAt > maxAgeMs) {
+      toRemove.push(k);
+    }
+  }
+  for (const k of toRemove) {
+    try {
+      storage.removeItem(k);
+    } catch {
+      // best-effort prune (掃除失敗は決済に影響しない)。
+    }
+  }
+}
+
 /** confirmed / failed / abandoned の終端 record を掃除する (任意・容量管理)。
  * submitting / pre-submit は消さない (復旧情報を失わないため)。 */
 export function pruneTerminal(olderThanMs: number, now: number): number {

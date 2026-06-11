@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
 import {
   reconcileCircleNetUsdc,
@@ -6,6 +6,7 @@ import {
   USER_OPERATION_EVENT_TOPIC,
   type ReceiptLog,
 } from '@/lib/circleReceiptVerifier';
+import { logger } from '@/lib/logger';
 
 const ENTRYPOINT = getAddress('0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108');
 const USDC = getAddress('0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d');
@@ -254,5 +255,19 @@ describe('reconcileCircleNetUsdc — 構造化 kind + no-charge guard (hardening
     const r = reconcileCircleNetUsdc({ logs, expected });
     expect(r.status).toBe('unreconciled');
     if (r.status === 'unreconciled') expect(r.kind).toBe('no-charge');
+  });
+
+  it('no-charge では logger.warn(circle.verify.no-charge) を発火し Sentry で気づける', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const logs: ReceiptLog[] = [
+      transfer(0, USDC, SENDER, MERCHANT, 99_000_000n), // gas 徴収なし
+      opEvent(1, UOH_A, SENDER, PAYMASTER),
+    ];
+    reconcileCircleNetUsdc({ logs, expected });
+    expect(warnSpy).toHaveBeenCalledWith(
+      'circle.verify.no-charge',
+      expect.objectContaining({ paymaster: PAYMASTER, userOpHash: UOH_A }),
+    );
+    warnSpy.mockRestore();
   });
 })

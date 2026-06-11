@@ -21,6 +21,7 @@ import {
   PendingStateError,
   PendingStoreUnavailableError,
   PendingStoreWriteError,
+  pruneStaleSubmitting,
   pruneTerminal,
   reserveOrResume,
   stableAttemptId,
@@ -438,6 +439,118 @@ describe('pruneTerminal', () => {
     expect(removed).toBe(1);
     expect(loadPendingRecord(doneKey)).toBeUndefined();
     expect(loadPendingRecord(keep.key)?.status).toBe('submitting');
+  });
+});
+
+describe('pruneStaleSubmitting', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const RETENTION = 7 * DAY_MS;
+
+  function submittingAt(attemptId: string, now: number) {
+    const callHash = computeCallHash(CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      paymentAttemptId: attemptId,
+      callHash,
+    });
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now,
+    });
+    markAwaitingSignature({ key, sender: SENDER, now: now + 1 });
+    markSigned({
+      key,
+      sender: SENDER,
+      signedUserOp: SIGNED_OP,
+      userOpHash: '0xhash' as Hex,
+      now: now + 2,
+    });
+    markSubmitting({ key, sender: SENDER, now: now + 3 });
+    return key;
+  }
+
+  it('8 日前の submitting は物理削除する (緩慢リーク回収)', () => {
+    const NOW = 100 * DAY_MS;
+    const stale = submittingAt('stale', NOW - 8 * DAY_MS);
+    pruneStaleSubmitting(RETENTION, NOW);
+    expect(loadPendingRecord(stale)).toBeUndefined();
+  });
+
+  it('1 日前の submitting は残す (recover 手段を温存)', () => {
+    const NOW = 100 * DAY_MS;
+    const recent = submittingAt('recent', NOW - 1 * DAY_MS);
+    pruneStaleSubmitting(RETENTION, NOW);
+    expect(loadPendingRecord(recent)?.status).toBe('submitting');
+  });
+
+  it('terminal (confirmed) / pre-submit (reserved) には触れない (既存 GC の責務)', () => {
+    const NOW = 100 * DAY_MS;
+    // 古い confirmed (pruneTerminal の責務)。
+    const callHash = computeCallHash(CALLS);
+    const confKey = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      paymentAttemptId: 'conf',
+      callHash,
+    });
+    reserveOrResume({
+      key: confKey,
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      callHash,
+      paymentAttemptId: 'conf',
+      paymaster: PAYMASTER,
+      now: NOW - 30 * DAY_MS,
+    });
+    markAwaitingSignature({ key: confKey, sender: SENDER, now: NOW - 30 * DAY_MS + 1 });
+    markSigned({
+      key: confKey,
+      sender: SENDER,
+      signedUserOp: SIGNED_OP,
+      userOpHash: '0xh' as Hex,
+      now: NOW - 30 * DAY_MS + 2,
+    });
+    markSubmitting({ key: confKey, sender: SENDER, now: NOW - 30 * DAY_MS + 3 });
+    markConfirmed({
+      key: confKey,
+      sender: SENDER,
+      txHash: '0xt' as Hex,
+      success: true,
+      now: NOW - 30 * DAY_MS + 4,
+    });
+    // 古い reserved (pre-submit・gcStalePreSubmit の責務)。
+    const reservedKey = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      paymentAttemptId: 'reserved-old',
+      callHash,
+    });
+    reserveOrResume({
+      key: reservedKey,
+      chainId: CHAIN_ID,
+      sender: SENDER,
+      callHash,
+      paymentAttemptId: 'reserved-old',
+      paymaster: PAYMASTER,
+      now: NOW - 30 * DAY_MS,
+    });
+
+    pruneStaleSubmitting(RETENTION, NOW);
+    expect(loadPendingRecord(confKey)?.status).toBe('confirmed');
+    expect(loadPendingRecord(reservedKey)?.status).toBe('reserved');
+  });
+
+  it('storage 利用不可でも throw しない (best-effort)', () => {
+    vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    expect(() => pruneStaleSubmitting(0, 1)).not.toThrow();
   });
 });
 

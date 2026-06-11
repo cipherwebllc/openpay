@@ -24,6 +24,7 @@ import {
   type Hex,
   type PublicClient,
 } from 'viem';
+import { logger } from './logger';
 
 // keccak256(UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256))
 // = EntryPoint v0.6/v0.7/v0.8 共通の UserOperationEvent topic0。
@@ -201,6 +202,15 @@ export function reconcileCircleNetUsdc(args: {
   // testnet 無償 sponsor の可能性。net=0 を「verified」と誤報告せず unreconciled に倒し、
   // 監査で「徴収額不明」として可視化する (silent な 0 計上を防ぐ)。
   if (pulled === 0n) {
+    // Sentry で気づけるようにする (mainnet で collector≠paymaster だった場合に netUsdc の
+    // 会計突合が恒久空欄化する既知リスク・runbook 参照)。戻り値・挙動は不変。
+    logger.warn('circle.verify.no-charge', {
+      userOpHash: expected.userOpHash,
+      sender: expected.sender,
+      paymaster: expected.paymaster,
+      token: expected.token,
+      entryPoint: expected.entryPoint,
+    });
     return {
       status: 'unreconciled',
       kind: 'no-charge',

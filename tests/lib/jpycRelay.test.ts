@@ -339,4 +339,85 @@ describe('relayJpycAuthorization', () => {
     expect(res.kind).toBe('pending'); // 不確定 → standard へ落とさない
     expect(releaseIdempotency).not.toHaveBeenCalled(); // 再 submit による二重送金を防ぐ
   });
+
+  describe('refundGasBudget (未 broadcast 失敗の予算返却)', () => {
+    it('submit throw (broadcast 前確実失敗) → refundGasBudget 1 回 (枠を戻す)', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => true),
+        refundGasBudget,
+        submitSponsoredCall: vi.fn(async () => {
+          throw new Error('rpc down');
+        }),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('relay_error');
+      expect(refundGasBudget).toHaveBeenCalledTimes(1);
+      expect(refundGasBudget).toHaveBeenCalledWith(CHAIN);
+    });
+
+    it('poll error (未送信確実: Cancelled) → refundGasBudget 1 回', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => true),
+        refundGasBudget,
+        pollTask: vi.fn(async () => ({
+          state: 'error' as const,
+          detail: 'Cancelled',
+        })),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('relay_error');
+      expect(refundGasBudget).toHaveBeenCalledTimes(1);
+    });
+
+    it('成功 → refundGasBudget 0 回 (枠を消費したまま)', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => true),
+        refundGasBudget,
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('success');
+      expect(refundGasBudget).not.toHaveBeenCalled();
+    });
+
+    it('reverted (broadcast 済) → refundGasBudget 0 回', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => true),
+        refundGasBudget,
+        pollTask: vi.fn(async () => ({ state: 'reverted' as const })),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('reverted');
+      expect(refundGasBudget).not.toHaveBeenCalled();
+    });
+
+    it('pending (broadcast 済・不確定) → refundGasBudget 0 回', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => true),
+        refundGasBudget,
+        pollTask: vi.fn(async () => ({ state: 'pending' as const })),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('pending');
+      expect(refundGasBudget).not.toHaveBeenCalled();
+    });
+
+    it('checkGasBudget 未通過 (deps 未提供) で submit throw → refundGasBudget 0 回', async () => {
+      // checkGasBudget を提供しない = 枠を消費していない → refund もしない。
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        refundGasBudget,
+        submitSponsoredCall: vi.fn(async () => {
+          throw new Error('rpc down');
+        }),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('relay_error');
+      expect(refundGasBudget).not.toHaveBeenCalled();
+    });
+  });
 });

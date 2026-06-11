@@ -1630,6 +1630,77 @@ describe('QrGenerator', () => {
       expect(filename).not.toMatch(/[\\/:*?"<>|]/);
       expect(filename).toMatch(/^a-b-c-d-e-f-g-h-i-j-jpyc-polygon-5\.svg$/);
     });
+
+    it('productName があれば store の後ろに segment として挟まる (同店舗の複数 QR 取り違え防止)', async () => {
+      const user = userEvent.setup();
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          chain: 'polygon',
+          storeName: '神田珈琲',
+          productName: 'ブレンド',
+        }),
+      );
+      Object.defineProperty(URL, 'createObjectURL', {
+        value: vi.fn(() => 'blob:qr'),
+        configurable: true,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        value: vi.fn(),
+        configurable: true,
+      });
+      const captured: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+        function (this: HTMLAnchorElement) {
+          captured.push(this.download);
+        },
+      );
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+
+      await openQrModal(user);
+      await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
+      expect(captured[0]).toMatch(/^神田珈琲-ブレンド-jpyc-polygon-500\.svg$/);
+    });
+
+    it('productName 未設定なら従来形 ({store}-{token}-{chain}-{amount})', async () => {
+      const user = userEvent.setup();
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          chain: 'polygon',
+          storeName: '神田珈琲',
+        }),
+      );
+      Object.defineProperty(URL, 'createObjectURL', {
+        value: vi.fn(() => 'blob:qr'),
+        configurable: true,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        value: vi.fn(),
+        configurable: true,
+      });
+      const captured: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+        function (this: HTMLAnchorElement) {
+          captured.push(this.download);
+        },
+      );
+
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+
+      await openQrModal(user);
+      await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
+      expect(captured[0]).toMatch(/^神田珈琲-jpyc-polygon-500\.svg$/);
+    });
   });
 
   describe('3-step UI refresh', () => {

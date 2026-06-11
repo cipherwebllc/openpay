@@ -423,6 +423,7 @@
     "btnMining": "確定待ち…",
     "errorTitle": "エラー",
     "errorReverted": "送金がネットワーク上で失敗しました (処理が取り消されました)。残高やネットワークをご確認ください。",
+    "errorAmountPrecision": "金額の小数点以下は最大 {decimals} 桁までです。表示額と実際の送金額がずれないよう、桁を減らしてください。",
     "successTitle": "応援ありがとうございます！",
     "successTx": "トランザクション",
     "viewOnExplorer": "エクスプローラで確認",

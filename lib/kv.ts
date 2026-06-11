@@ -130,6 +130,11 @@ export function kvIncr(key: string): Promise<KvResult<number>> {
   return call<number>(['INCR', key]);
 }
 
+// 原子デクリメント (gas budget の refund 等)。INCR で消費した枠を戻すのに使う。
+export function kvDecr(key: string): Promise<KvResult<number>> {
+  return call<number>(['DECR', key]);
+}
+
 // 値取得。未存在は null。
 export function kvGet(key: string): Promise<KvResult<string | null>> {
   return call<string | null>(['GET', key]);

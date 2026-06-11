@@ -50,6 +50,10 @@ export type RelayDeps = {
   // 枯渇させる griefing を、chain 日次の relay 件数上限で止める。true=予算内 (許可)。未提供なら
   // スキップ。fail-open (KV 障害は許可) — alpha は可用性優先、mainnet は fail-closed 寄りに要見直し。
   checkGasBudget?: (chainId: number) => Promise<boolean>;
+  // (任意) checkGasBudget で消費した日次枠を 1 戻す。tx が 1 件も broadcast されなかったことが
+  // 確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に正当決済が
+  // daily_budget_exceeded で 503 になるのを防ぐ。checkGasBudget を通過した場合のみ呼ぶ。
+  refundGasBudget?: (chainId: number) => Promise<void>;
   // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
   // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
   // standard mode に fallback させない (二重支払い防止)。未提供ならスキップ。
@@ -196,12 +200,19 @@ export async function relayJpycAuthorization(
   // 5.7 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
   // (replay/duplicate が予算枠を消費して正当な決済を枯渇させる DoS を防ぐ・Codex P1)。超過は
   // submit せず reject (tx 未送信 → standard へ安全に fallback)。claim 済なら解放 (false tombstone 防止)。
+  let gasBudgetConsumed = false;
   if (deps.checkGasBudget) {
     if (!(await deps.checkGasBudget(chainId))) {
       await releaseClaim();
       return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
     }
+    gasBudgetConsumed = true;
   }
+  // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
+  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。
+  const refundBudget = async () => {
+    if (gasBudgetConsumed) await deps.refundGasBudget?.(chainId);
+  };
 
   // 6. submit + poll。submit が throw = broadcast 前のエラー → relay_error (fallback 可)。
   const data = encodeTransferWithAuthorizationCalldata(auth, signature);
@@ -211,6 +222,7 @@ export async function relayJpycAuthorization(
     taskId = submitted.taskId;
   } catch (e) {
     await releaseClaim(); // broadcast 前失敗 → claim 解放 (正当な再試行を待たせない)
+    await refundBudget(); // tx 未送信が確実 → 予算枠を戻す
     return {
       kind: 'relay_error',
       detail: `submit_failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -237,7 +249,9 @@ export async function relayJpycAuthorization(
   }
   // poll 'error' = broadcast されなかったことが確実な失敗のみ (Gelato Cancelled/Blacklisted/
   // NotFound)。timeout 等の不確定は pollTask 側で 'pending' に倒す約束なのでここには来ない。
-  // よって未送信が確実 → relay_error で fallback 可 + claim 解放 (正当な再試行を待たせない)。
+  // よって未送信が確実 → relay_error で fallback 可 + claim 解放 (正当な再試行を待たせない)
+  // + 予算枠を戻す (tx 未送信が確実なので消費した枠を回収)。
   await releaseClaim();
+  await refundBudget();
   return { kind: 'relay_error', detail: outcome.detail };
 }

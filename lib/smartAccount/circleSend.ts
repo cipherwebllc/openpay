@@ -42,6 +42,7 @@ import {
   markConfirmed,
   markSigned,
   markSubmitting,
+  pruneStaleSubmitting,
   pruneTerminal,
   reserveOrResume,
   type PendingRecord,
@@ -66,6 +67,12 @@ const CONFIRMED_DEDUP_WINDOW_MS = 90 * 1000;
 // pruneTerminal が物理削除する。CONFIRMED_DEDUP_WINDOW_MS (90s) を十分上回る必要がある
 // (confirmed を消す前に偶発二重決済の dedup 窓を確実に過ぎさせる)。
 const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+// submitting のまま放置された孤児 record を物理削除するまでの期間。broadcast 直後に reload →
+// 同一 callHash を二度と起動しないと、submitting record は gcStalePreSubmit (pre-submit のみ) にも
+// pruneTerminal (terminal のみ) にも該当せず永久残留する (緩慢リーク)。7 日後の同一 callHash
+// 再決済は CONFIRMED_DEDUP_WINDOW_MS (90s) を遥かに超え正規リピート扱いなので回収して安全。
+const SUBMITTING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 // gcStalePreSubmit が pre-submit 孤児を「確実に死んでいる」とみなす閾値。
 // **PRE_SUBMIT_STALE_MS (3分) より遥かに長くする**こと。理由: GC は全 callHash 横断で
@@ -238,6 +245,7 @@ export async function executeCirclePayment(
   try {
     gcStalePreSubmit(PRE_SUBMIT_GC_MS, now(), key);
     pruneTerminal(TERMINAL_RETENTION_MS, now());
+    pruneStaleSubmitting(SUBMITTING_RETENTION_MS, now());
   } catch {
     /* housekeeping 失敗は決済に影響しない */
   }

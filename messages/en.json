@@ -423,6 +423,7 @@
     "btnMining": "Confirming…",
     "errorTitle": "Error",
     "errorReverted": "The transfer failed on-chain (it was reverted). Please check your balance and network.",
+    "errorAmountPrecision": "Amount can have at most {decimals} decimal places. Trim the digits so the displayed amount matches what is actually sent.",
     "successTitle": "Thank you for your support!",
     "successTx": "Transaction",
     "viewOnExplorer": "View on explorer",

@@ -327,14 +327,28 @@ export function QrGenerator() {
     return () => cancelAnimationFrame(id);
   }, [amount, mode, deployment.displaySymbol]);
   const qrFilename = useMemo(() => {
+    // storeName が空だと fileSafe は 'openpay' に倒れ、同一店舗の複数 QR (商品違い・
+    // 受取先違い) が全部同名 PNG になり DL フォルダで取り違える。productName があれば
+    // {store}-{product}-{token}-{chain}-{amount} の segment として挟んで識別性を上げる。
+    const product = settings.productName?.trim()
+      ? fileSafe(settings.productName)
+      : undefined;
     const parts = [
       fileSafe(settings.storeName),
+      ...(product ? [product] : []),
       settings.token,
       settings.chain,
       mode === 'amount' && amount ? amount.replace('.', '-') : 'open',
     ];
     return parts.join('-');
-  }, [settings.storeName, settings.token, settings.chain, mode, amount]);
+  }, [
+    settings.storeName,
+    settings.productName,
+    settings.token,
+    settings.chain,
+    mode,
+    amount,
+  ]);
 
   // 互換 QR (EIP-681) — standard + amount のときだけ併発行 (gasless / split は
   // EIP-681 で表現不可)。standard でも OpenPay の決済 UI を経由する派生 QR とは

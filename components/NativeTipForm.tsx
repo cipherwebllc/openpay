@@ -29,6 +29,11 @@ const DEFAULT_THEME_COLOR = '#2563eb';
 // POL / KAIA とも 18 桁のネイティブトークン。
 const NATIVE_DECIMALS = 18;
 
+// ネイティブ送金は gas も同一残高から払うため、予約なしだと満額プリセットが必ずウォレット
+// 拒否で終わる。0.001 (= 10^15 wei) は 21k gas × 数十 gwei を桁余裕で賄い、かつ実用上の
+// チップ額を阻害しない (POL/KAIA とも transfer gas を十分カバー)。
+const NATIVE_GAS_RESERVE_WEI = 10n ** 15n;
+
 // 変動するネイティブトークン建ての控えめなプリセット (任意の応援額)。厳密な円価値では
 // なく「気軽に押せる額」を意図。custom 入力で任意額も可。
 const NATIVE_TIP_PRESETS: Record<NativeTipParams['chain'], string[]> = {
@@ -95,12 +100,21 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
     if (exceedsTokenPrecision(amountStr, NATIVE_DECIMALS)) return 0n;
     return parseEther(amountStr);
   }, [amountStr]);
+  // 18 桁超の小数入力は amountWei が 0n に落ち、ボタンが btnSelectAmount のまま理由不明に
+  // なる。ERC20 版 TipForm と同型に明示エラーを出す (DECIMAL_PATTERN は通るが桁超過のケース)。
+  const amountPrecisionError =
+    !!amountStr &&
+    DECIMAL_PATTERN.test(amountStr) &&
+    exceedsTokenPrecision(amountStr, NATIVE_DECIMALS);
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
-  // value のみ照合し gas 分は予約しない (チェーン毎に変動し正確な予約が困難なため)。
-  // 残高ぴったりを送ろうとした場合の gas 不足はウォレットが弾き、その error を下に表示する。
+  // ネイティブ送金は gas も同一残高から払うため、amountWei + gas 予約分が残高を超えるなら
+  // 送れない (予約なしだと満額プリセットが必ずウォレット拒否で終わる)。残るウォレット側の
+  // 厳密な gas 不足チェックは送信時に行われ、その error を下に表示する。
   const insufficientBalance =
-    balance !== undefined && amountWei > 0n && amountWei > balance.value;
+    balance !== undefined &&
+    amountWei > 0n &&
+    amountWei + NATIVE_GAS_RESERVE_WEI > balance.value;
 
   const confirmed = receipt.isSuccess && receipt.data?.status === 'success';
   const reverted = receipt.data?.status === 'reverted';
@@ -121,7 +135,9 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
       ? sendError.message
       : reverted
         ? t('errorReverted')
-        : null;
+        : amountPrecisionError
+          ? t('errorAmountPrecision', { decimals: NATIVE_DECIMALS })
+          : null;
 
   // 成功は txHash ごとに 1 回だけログ。送信時の入力額を固定して live state drift を避ける。
   const submittedAmountRef = useRef<string>('');

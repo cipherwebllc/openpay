@@ -155,4 +155,43 @@ describe('NativeTipForm', () => {
       (screen.getByRole('button', { name: /を送る/ }) as HTMLButtonElement).disabled,
     ).toBe(false);
   });
+
+  it('19 桁小数の custom 入力 → 精度超過エラー文言を表示 (理由不明の不送信を解消)', async () => {
+    const user = userEvent.setup();
+    h.account = { address: TO, isConnected: true, chainId: POLYGON.id };
+    h.balance = { data: { value: parseEther('100') } };
+    render();
+    // 18 桁ネイティブに対し 19 桁 = 精度超過 (amountWei は 0n に落ちる)。
+    await user.type(
+      screen.getByPlaceholderText('例: 1'),
+      '1.1234567890123456789',
+    );
+    expect(screen.getByText(/小数点以下は最大 18 桁/)).toBeInTheDocument();
+  });
+
+  it('残高ぴったり → gas 予約分で insufficient 扱い・送信不可', () => {
+    h.account = { address: TO, isConnected: true, chainId: POLYGON.id };
+    // 既定プリセット 1 POL に対し残高もちょうど 1 POL。gas 予約 (0.001) が乗らず拒否される。
+    h.balance = { data: { value: parseEther('1') } };
+    render();
+    expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
+    expect(
+      (screen.getByRole('button', { name: /を送る/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it('残高 − 0.002 の額 → gas 予約 (0.001) を差し引いても足り送信可', async () => {
+    const user = userEvent.setup();
+    h.account = { address: TO, isConnected: true, chainId: POLYGON.id };
+    h.balance = { data: { value: parseEther('1') } };
+    render();
+    // 1 − 0.002 = 0.998。0.998 + 0.001 予約 = 0.999 ≤ 1 残高 → 送信可。
+    await user.type(screen.getByPlaceholderText('例: 1'), '0.998');
+    expect(screen.queryByText(/残高が不足/)).toBeNull();
+    expect(
+      (screen.getByRole('button', { name: /を送る/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
 });

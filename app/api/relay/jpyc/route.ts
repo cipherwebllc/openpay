@@ -38,6 +38,7 @@ import {
   kvSet,
   kvGet,
   kvIncr,
+  kvDecr,
   kvExpire,
   kvDel,
   isKvConfigured,
@@ -347,13 +348,17 @@ async function releaseIdempotency(
   await kvDel(idemKey(chainId, from, nonce));
 }
 
+// 日次予算カウンタのキー導出 (INCR で消費・DECR で refund する側でキーを完全一致させるため
+// 関数に括り出して共有する)。YYYYMMDD は UTC。
+const gasBudgetKey = (chainId: number) =>
+  `relay:budget:${chainId}:${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+
 // B4: 日次グローバル予算 (Sybil circuit breaker)。INCR relay:budget:{chainId}:{YYYYMMDD} し、
 // 初回のみ TTL 2 日。count が cap 以下なら許可。fail-open: KV 未設定/障害は許可 (rate-limit と
 // 同方針・alpha は可用性優先)。近似カウンタで足りる (応答喪失の二重カウントは早めに止まる=安全側)。
 async function checkGasBudget(chainId: number): Promise<boolean> {
   if (!isKvConfigured()) return true;
-  const day = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD (UTC)
-  const key = `relay:budget:${chainId}:${day}`;
+  const key = gasBudgetKey(chainId);
   const r = await kvIncr(key);
   if (!r.ok) {
     logger.warn('relay gas budget INCR failed (fail-open)', { chainId });
@@ -363,6 +368,17 @@ async function checkGasBudget(chainId: number): Promise<boolean> {
   // Codex P2)。EXPIRE は冪等なので再設定は無害。
   await kvExpire(key, 2 * 24 * 3600);
   return r.value <= RELAY_DAILY_TX_CAP;
+}
+
+// checkGasBudget で INCR 消費した日次枠を DECR で 1 戻す。tx が 1 件も broadcast されなかった
+// ことが確実な失敗でのみ呼ぶ (jpycRelay の refundGasBudget 契約)。日付跨ぎ直後の refund は
+// 新しい日の枠を 1 減らすが、減る方向の歪みは安全側 (枠が厳しくなるだけ) で頻度も無視できる。
+async function refundGasBudget(chainId: number): Promise<void> {
+  if (!isKvConfigured()) return;
+  const r = await kvDecr(gasBudgetKey(chainId));
+  if (!r.ok) {
+    logger.warn('relay gas budget DECR failed (枠が 1 過消費のまま)', { chainId });
+  }
 }
 
 async function gelatoSubmit(
@@ -574,6 +590,7 @@ async function handleFree(
     getBalance,
     checkRateLimit,
     checkGasBudget,
+    refundGasBudget,
     claimIdempotency,
     recordRelayHash,
     releaseIdempotency,
@@ -695,6 +712,9 @@ async function handleRecover(
     feeReceiverFor,
     getBalance,
     checkRateLimit,
+    // refund (未 broadcast 失敗の予算返却) は free 経路 (jpycRelay) のみ配線。recover 経路は
+    // forwarderRecover が refund 契約を持たず、かつ recover×a1 併用は上の fail-fast で排除済
+    // (本番は forwarder 未設定の free 運用)。recover 本格運用時に同様の refund を検討する。
     checkGasBudget,
     checkAuthorizationUsed: readAuthorizationUsed,
     claimIdempotency,

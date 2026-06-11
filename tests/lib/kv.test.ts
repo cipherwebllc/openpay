@@ -332,6 +332,20 @@ describe('lib/kv', () => {
     expect(JSON.parse(init.body)).toEqual(['INCR', 'relay:budget:137:20260602']);
   });
 
+  it('kvDecr は DECR を送り number を返す', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: 2 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvDecr } = await import('@/lib/kv');
+    const res = await kvDecr('relay:budget:137:20260602');
+    expect(res).toEqual({ ok: true, value: 2 });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual(['DECR', 'relay:budget:137:20260602']);
+  });
+
   it('kvSet(nx+ttl) は SET key val EX ttl NX を送り OK を返す', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
