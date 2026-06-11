@@ -316,8 +316,11 @@ describe('toAccountingCsv: v5 税区分出し分け + 摘要 enrich (非破壊)'
 });
 
 describe('toAccountingCsv: 複数商品カート (摘要サマリ + 代表税区分)', () => {
-  it('freee 摘要に「商品 x数量」を列挙・混在税率の代表税区分は既存デフォルト', () => {
+  // REM-22: 混在税率は税区分グループ別に分割するようセマンティクスを更新
+  // (旧: 単一行・代表税区分=既存デフォルト → 新: 税区分別に分割・合計 === entry yen)。
+  it('freee 摘要に「商品 x数量」を列挙・混在税率は税区分別に分割', () => {
     const e = entry({
+      // entry yen = 1000 (default merchantAmount), 明細比率 1000:3000 = 1:3 → 250 + 750
       lineItems: [
         { name: 'コーヒー', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
         { name: 'Tシャツ', quantity: 1, unitPrice: '3000', amount: '3000', taxRate: 8, taxCategory: 'taxable_8', memo: null },
@@ -327,9 +330,21 @@ describe('toAccountingCsv: 複数商品カート (摘要サマリ + 代表税区
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const rows = parseRows(r.csv);
-    expect(rows[1][6]).toContain('コーヒー x2'); // 備考
+    // ヘッダ + 2 分割行
+    expect(rows).toHaveLength(3);
+    expect(rows[1][6]).toContain('コーヒー x2'); // 備考は同一 entry の全行に同じサマリ
     expect(rows[1][6]).toContain('Tシャツ x1');
-    expect(rows[1][3]).toBe('課税売上10%'); // 混在 → 既存デフォルト
+    expect(rows[2][6]).toContain('コーヒー x2');
+    // 税区分は出現順 (taxable_10 → taxable_8)
+    expect(rows[1][3]).toBe('課税売上10%');
+    expect(rows[2][3]).toBe('課税売上8%（軽）');
+    // 金額: 1:3 按分 → 250 + 750・合計 === entry yen (1000)
+    expect(rows[1][4]).toBe('250');
+    expect(rows[2][4]).toBe('750');
+    expect(Number(rows[1][4]) + Number(rows[2][4])).toBe(1000);
+    // 分割識別子 (取込側が同一取引と分かるように)
+    expect(rows[1][6]).toContain('税区分別 1/2');
+    expect(rows[2][6]).toContain('税区分別 2/2');
   });
 
   it('全行同一税率なら代表税区分は其れ (軽減8%)', () => {
@@ -371,5 +386,142 @@ describe('toAccountingCsv: 複数商品カート (摘要サマリ + 代表税区
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(parseRows(r.csv)[1][3]).toBe('非課税売上');
+  });
+});
+
+// REM-22: 混在税率カートの仕訳行を税区分グループ別に分割 (8% 分が 10% で申告される事故防止)。
+// 不変条件: グループ yen 合計 === エントリ yen (largest-remainder 法で円整数配分)。
+describe('toAccountingCsv: 混在税率の税区分グループ別分割 (REM-22)', () => {
+  // 10% 1000円 + 8% 500円 = 1500円 (JPYC)・比率 1000:500 = 2:1 → 1000 + 500
+  const MIXED_1500 = entry({
+    merchantAmount: '1500000000000000000000', // 1500 JPYC → yv.yen = 1500
+    lineItems: [
+      { name: 'A', quantity: 1, unitPrice: '1000', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+      { name: 'B', quantity: 1, unitPrice: '500', amount: '500', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+    ],
+  });
+
+  it('freee: 2 行に分割・合計 === エントリ yen・各行の税区分ラベルが正しい', () => {
+    const r = toAccountingCsv([MIXED_1500], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows).toHaveLength(3); // ヘッダ + 2 分割行
+    expect(rows[1][3]).toBe('課税売上10%');
+    expect(rows[2][3]).toBe('課税売上8%（軽）');
+    expect(rows[1][4]).toBe('1000');
+    expect(rows[2][4]).toBe('500');
+    expect(Number(rows[1][4]) + Number(rows[2][4])).toBe(1500); // 不変条件
+  });
+
+  it('弥生: 2 仕訳に分割・伝票No 連番・貸方税区分 (idx 13) と金額が正しい', () => {
+    const r = toAccountingCsv([MIXED_1500], { format: 'yayoi', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv); // ヘッダ無し
+    expect(rows).toHaveLength(2);
+    expect(rows[0][1]).toBe('1'); // 伝票No (分割行も独立連番)
+    expect(rows[1][1]).toBe('2');
+    expect(rows[0][13]).toBe('課税売上込10%');
+    expect(rows[1][13]).toBe('課税売上込8%(軽)');
+    // 借方金額(8) / 貸方金額(14) ともグループ yen
+    expect(rows[0][8]).toBe('1000');
+    expect(rows[0][14]).toBe('1000');
+    expect(rows[1][8]).toBe('500');
+    expect(Number(rows[0][14]) + Number(rows[1][14])).toBe(1500);
+  });
+
+  it('MF: 2 仕訳に分割・取引No 連番・貸方税区分と金額が正しい', () => {
+    const r = toAccountingCsv([MIXED_1500], { format: 'mf', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv); // ヘッダ付き
+    expect(rows).toHaveLength(3);
+    const taxIdx = rows[0].indexOf('貸方税区分');
+    const creditIdx = rows[0].indexOf('貸方金額(円)');
+    expect(rows[1][0]).toBe('1'); // 取引No 連番
+    expect(rows[2][0]).toBe('2');
+    expect(rows[1][taxIdx]).toBe('課税売上10%');
+    expect(rows[2][taxIdx]).toBe('課税売上8%(軽)');
+    expect(rows[1][creditIdx]).toBe('1000');
+    expect(rows[2][creditIdx]).toBe('500');
+    expect(Number(rows[1][creditIdx]) + Number(rows[2][creditIdx])).toBe(1500);
+  });
+
+  it('按分丸め: 割り切れない 1:2 (total 1000) → 333 + 667 で合計厳密一致', () => {
+    // 1000 * 1/3 = 333.33 → floor 333、1000 * 2/3 = 666.67 → floor 666、余り 1 を
+    // 剰余の大きい group2 (0.67) へ → 333 + 667。
+    const e = entry({
+      merchantAmount: '1000000000000000000000', // 1000 JPYC
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '1000', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+        { name: 'B', quantity: 1, unitPrice: '2000', amount: '2000', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows[1][4]).toBe('333');
+    expect(rows[2][4]).toBe('667');
+    expect(Number(rows[1][4]) + Number(rows[2][4])).toBe(1000); // 不変条件
+  });
+
+  it('明細に金額情報が欠ける混在 entry → 単一行 fallback (按分不能)', () => {
+    const e = entry({
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '1000', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+        { name: 'B', quantity: 1, unitPrice: 'x', amount: 'abc', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows).toHaveLength(2); // ヘッダ + 単一行
+    expect(rows[1][3]).toBe('課税売上10%'); // 混在 → representativeTaxCategory = entry default
+    expect(rows[1][4]).toBe('1000'); // entry yen そのまま
+  });
+
+  it('全行同一実効税区分 (8%) → 従来どおり 1 行 (回帰フェンス)', () => {
+    const e = entry({
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '100', amount: '100', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+        { name: 'B', quantity: 1, unitPrice: '200', amount: '200', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: 150 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows).toHaveLength(2);
+    expect(rows[1][3]).toBe('課税売上8%（軽）');
+    expect(rows[1][6]).not.toContain('税区分別'); // 単一なので分割識別子は付かない
+  });
+
+  it('USDC+anchor (exact) の混在 entry でも分割合計 === yv.yen', () => {
+    // yv.yen = anchor 1500 (exact・レート非依存)。明細は販売建て (USDC) だが比率按分で
+    // 通貨単位は約分される (1000:500 = 2:1 → 1000 + 500)。
+    const e = entry({
+      asset: 'usdc',
+      merchantAmount: '6400000', // 6.4 USDC (受領額・按分には使わない)
+      anchorAmount: '1500',
+      anchorSymbol: 'jpyc',
+      fxRateUsdcJpy: '156.32',
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '10', amount: '1000', currency: 'usdc', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+        { name: 'B', quantity: 1, unitPrice: '5', amount: '500', currency: 'usdc', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const r = toAccountingCsv([e], { format: 'freee', usdcJpy: undefined });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const rows = parseRows(r.csv);
+    expect(rows).toHaveLength(3);
+    expect(rows[1][3]).toBe('課税売上10%');
+    expect(rows[2][3]).toBe('課税売上8%（軽）');
+    expect(rows[1][4]).toBe('1000');
+    expect(rows[2][4]).toBe('500');
+    expect(Number(rows[1][4]) + Number(rows[2][4])).toBe(1500); // === yv.yen (anchor)
   });
 });

@@ -12,6 +12,9 @@
 
 import { formatUnits } from 'viem';
 import { HISTORY_ASSET_DECIMALS, type HistoryEntry } from './history';
+// 正の decimal (小数点高々 1 個) の単一情報源。url.ts:541 と共有 (循環 import 無し:
+// url.ts は historyYen を import しない)。anchorAmount の数値検証に使う。
+import { DECIMAL_PATTERN } from './url';
 
 export type YenValue =
   | { kind: 'exact'; yen: number }
@@ -42,8 +45,15 @@ export function entryYenValue(
     };
   }
   // asset === 'usdc'
-  if (entry.anchorAmount != null && entry.anchorSymbol === 'jpyc') {
+  if (
+    entry.anchorAmount != null &&
+    entry.anchorSymbol === 'jpyc' &&
+    DECIMAL_PATTERN.test(entry.anchorAmount)
+  ) {
     // (b) 元の価格建てが JPYC = 店主が意図した円価格そのもの (レート非依存・exact)。
+    // anchorAmount は LocalStorage 由来の人間可読 decimal。"1,000"/""/"abc" 等の壊れた値が
+    // Number() で NaN→roundYen=0 / 0 になり「silent ¥0 の確定売上」として会計 CSV・GMV に
+    // 出るのを防ぐ。DECIMAL_PATTERN 不合格は path(b) をスキップし path(c)/unavailable へ降格。
     return { kind: 'exact', yen: roundYen(Number(entry.anchorAmount)) };
   }
   // (c) anchor 無し USDC は現レートで概算。レートが無ければ評価不能。

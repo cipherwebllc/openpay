@@ -18,6 +18,7 @@ import {
   formatHistoryTimestamp,
   HISTORY_ASSET_DISPLAY,
   type HistoryEntry,
+  type HistoryLineItem,
 } from './history';
 
 const HEADER: readonly string[] = [
@@ -36,6 +37,17 @@ const HEADER: readonly string[] = [
   '取引合計',
   'メモ',
 ];
+
+/**
+ * 明細 1 行の税込額 (= 明細CSV の「明細金額」列 li.amount を数値化したもの)。
+ * OpenPay は内税前提なので li.amount が税込額そのもの。非数値 (壊れた LocalStorage 値) は
+ * null を返し、呼出側が「金額情報を欠く行」と判定できるようにする (仕訳CSV の按分可否判定に
+ * 使う。二重実装を避けるため accountingCsv はこれを共有する)。
+ */
+export function lineItemGrossAmount(li: HistoryLineItem): number | null {
+  const n = Number(li.amount);
+  return Number.isFinite(n) ? n : null;
+}
 
 function rowsForEntry(e: HistoryEntry): string[][] {
   const totals = entryTotals(e);

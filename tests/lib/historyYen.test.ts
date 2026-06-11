@@ -112,4 +112,46 @@ describe('entryYenValue', () => {
       yen: 0,
     });
   });
+
+  // REM-22: 壊れた anchorAmount ("1,000"/""/"abc") は path(b) exact にしない
+  // (silent ¥0 の確定売上を防ぐ)。レート有りなら approx・無しなら unavailable へ降格。
+  describe('(b) anchorAmount の数値検証 (壊れた値は exact にしない)', () => {
+    const broken = (anchorAmount: string) =>
+      entry({
+        asset: 'usdc',
+        merchantAmount: '6400000', // 6.4 USDC
+        anchorAmount,
+        anchorSymbol: 'jpyc',
+      });
+
+    it.each(['1,000', '', 'abc', ' 1000', '1.2.3'])(
+      'anchorAmount=%j + レート有 → exact でなく approx (path(c) 降格)',
+      (bad) => {
+        const r = entryYenValue(broken(bad), 156.32);
+        expect(r.kind).toBe('approx');
+        // 6.4 * 156.32 = 1000.448 → round 1000
+        expect(r).toEqual({ kind: 'approx', yen: 1000, rate: 156.32 });
+      },
+    );
+
+    it.each(['1,000', '', 'abc'])(
+      'anchorAmount=%j + レート無 → exact でなく unavailable',
+      (bad) => {
+        expect(entryYenValue(broken(bad), undefined)).toEqual({
+          kind: 'unavailable',
+        });
+      },
+    );
+
+    it('正常な anchorAmount ("1000" / "1234.56") は従来どおり exact', () => {
+      expect(entryYenValue(broken('1000'), undefined)).toEqual({
+        kind: 'exact',
+        yen: 1000,
+      });
+      expect(entryYenValue(broken('1234.56'), undefined)).toEqual({
+        kind: 'exact',
+        yen: 1235, // round-half-up
+      });
+    });
+  });
 });
