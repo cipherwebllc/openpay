@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { decodeFunctionData, getAddress, type Address, type Hex } from 'viem';
+import { decodeFunctionData, getAddress, zeroAddress, type Address, type Hex } from 'viem';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
+import { logger } from '@/lib/logger';
 import { CCTP_V2_TOKEN_MESSENGER_ABI } from '@/lib/crossChain/cctp';
 import {
   ensureWalletChain,
@@ -1782,5 +1783,421 @@ describe('lib/crossChain/execute.ensureWalletChain (switch 後 chainId 確認 po
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// 2026-06-11 (REM-15 / money-path P2): txAlreadySucceeded は transport 障害を「tx 未着」と
+// 誤判定しない。従来の getTransactionReceipt(...).catch(()=>null) は RPC ダウン / timeout を
+// false (=未着) に潰し、landed 済 mint の再 broadcast (既消費 attestation で必ず revert) を
+// 誘発していた。未発見 (TransactionReceiptNotFoundError) のみ false、それ以外は throw して
+// resume 再試行に倒す (feeVerify.ts CR-2 と同じ区別)。
+describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs not-found)', () => {
+  // viem の TransactionReceiptNotFoundError 様 (name プロパティを持つ Error)。
+  function notFoundError(): Error {
+    const e = new Error('Transaction receipt with hash "0x..." could not be found.');
+    e.name = 'TransactionReceiptNotFoundError';
+    return e;
+  }
+
+  it('CCTP resume: getTransactionReceipt が not-found → 再 broadcast 経路 (従来挙動)', async () => {
+    // 前回 broadcast した merchant mint が未 mine (not-found) → landed=false → 再 poll + 再 mint。
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_retry'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = {
+      getBlockNumber: vi.fn(),
+      getTransactionReceipt: vi.fn(async () => {
+        throw notFoundError();
+      }),
+      waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    };
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: destPublic as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xb',
+        mintTxHash: '0xmint_old',
+      },
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // not-found は landed=false 扱い → 再 poll + 再 mint (従来の catch(()=>null) と同じ結果)。
+    expect(destPublic.getTransactionReceipt).toHaveBeenCalledWith({ hash: '0xmint_old' });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(result.mintTxHash).toBe('0xmint_retry');
+  });
+
+  it('CCTP resume: getTransactionReceipt が一般 Error (network) → throw・再 broadcast しない', async () => {
+    // RPC 一時障害は「未着」と区別できないので false に潰さず throw。landed 済 mint の
+    // 再 broadcast (= 必ず revert・失敗表示) を防ぎ、resume 再試行に倒す。
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_retry'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = {
+      getBlockNumber: vi.fn(),
+      getTransactionReceipt: vi.fn(async () => {
+        throw new Error('fetch failed: ECONNREFUSED'); // name は既定の "Error"
+      }),
+      waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    };
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        resume: {
+          approveTxHash: '0xa',
+          burnTxHash: '0xb',
+          mintTxHash: '0xmint_old',
+        },
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      }),
+    ).rejects.toThrow(/ECONNREFUSED/);
+
+    // transport 障害は throw に伝播 → 再 poll / 再 mint へ進まない (再 broadcast しない)。
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+});
+
+// 2026-06-11 (REM-15): feeReceiver が burn address (zero / 0x...dEaD placeholder) のまま
+// 走ると利用料分の USDC が永久焼失する。該当時は fee ブリッジ自体を skip (顧客が fee 分を
+// 保持する安全側) し warn する。merchant 経路は通常完走。
+describe('lib/crossChain/execute: feeReceiver burn-address ガード', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  for (const burnAddr of [zeroAddress, getAddress('0x000000000000000000000000000000000000dEaD')]) {
+    it(`Gateway: feeReceiver=${burnAddr} → fee burn せず merchant のみ完走・warn`, async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const walletClient = makeWalletClient({
+        signature: '0xsig',
+        txHashes: ['0xmint_m'], // merchant mint のみ (fee mint は出ない)
+      });
+      const sourcePublic = makePublicClient({ blockNumber: 100n });
+      const destPublic = makePublicClient();
+      const mockFetch = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+            { status: 200 },
+          ),
+      );
+
+      const result = await executeGatewayTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceToken: SOURCE_TOKEN,
+        destToken: DEST_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: burnAddr,
+        feeAmount: 100_000n, // >0 だが burn address なので skip
+        fetch: mockFetch as unknown as typeof fetch,
+      });
+
+      // sign / mint は merchant の 1 本だけ (fee 系は出ない = 焼失しない)
+      expect(walletClient.signTypedData).toHaveBeenCalledTimes(1);
+      expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+      expect(result.mintTxHash).toBe('0xmint_m');
+      expect(result.feeMintTxHash).toBeUndefined();
+      // warn が 1 回発火 (event 名 + feeReceiver fields)
+      expect(warnSpy).toHaveBeenCalledWith('cross-chain.fee.burn-address-receiver', {
+        feeReceiver: burnAddr,
+      });
+    });
+
+    it(`CCTP: feeReceiver=${burnAddr} → fee burn/mint せず merchant のみ完走・warn`, async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const walletClient = makeWalletClient({
+        signature: '0x',
+        // approve, burn_m, mint_m のみ (fee 系 tx は出ない)
+        txHashes: ['0xapprove', '0xburn_m', '0xmint_m'],
+      });
+      const sourcePublic = makePublicClient();
+      const destPublic = makePublicClient();
+      const mockFetch = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+            }),
+            { status: 200 },
+          ),
+      );
+
+      const result = await executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: burnAddr,
+        feeAmount: 100_000n,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      });
+
+      // approve は valueAtomic + feeAmount (guard は bridgeFee を false にするだけで feeAmount は
+      // 触らない)。fee burn は出ないので余分な allowance は orphaned で無害 (既存の orphaned
+      // approve 許容と同じ)。焼失するのは「fee を実際に burn/mint した時」だけなので skip で十分。
+      const approveArg = walletClient.writeContract.mock.calls[0][0] as unknown as {
+        args: [Address, bigint];
+      };
+      expect(approveArg.args[1]).toBe(10_000_000n);
+      // burn 1 + mint 1 = sendTransaction 2 回 (fee 系なし → 焼失しない)
+      expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledTimes(1); // merchant poll のみ
+      expect(result.feeBurnTxHash).toBeUndefined();
+      expect(result.feeMintTxHash).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith('cross-chain.fee.burn-address-receiver', {
+        feeReceiver: burnAddr,
+      });
+    });
+  }
+});
+
+// 2026-06-11 (REM-15): resume の merchant / fee attestation poll を Promise.allSettled で
+// 並列化し、一方が timeout で throw しても他方の burn 済資金の mint を巻き込まないことを担保。
+// fee 側は merchant の attestation 可用性に依存しない (逆も同様)。
+describe('lib/crossChain/execute: CCTP resume の attestation poll 非直列化 (巻き添え解消)', () => {
+  // burnHash 別に Iris レスポンスを出し分ける fetch stub。Iris URL は
+  // `?transactionHash=<burnHash>` を含むので URL で判定する。`fail` 指定の hash は
+  // 常に pending を返し → poll が timeout で throw する。
+  function makeIrisFetch(opts: { failHashes: Hex[] }) {
+    return vi.fn(async (url: string) => {
+      const failing = opts.failHashes.some((h) => url.includes(`transactionHash=${h}`));
+      if (failing) {
+        return new Response(
+          JSON.stringify({ messages: [{ status: 'pending_confirmations' }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+        }),
+        { status: 200 },
+      );
+    });
+  }
+
+  // timeout を確実に踏むための now (呼ばれるたびに大きく進む)。
+  function fastForwardNow() {
+    let t = 0;
+    return vi.fn(() => {
+      const cur = t;
+      t += 100_000;
+      return cur;
+    });
+  }
+
+  const RESUME_BOTH_BURNED = {
+    approveTxHash: '0xapprove_prev' as Hex,
+    burnTxHash: '0xburn_m_prev' as Hex,
+    feeBurnTxHash: '0xburn_f_prev' as Hex,
+  };
+
+  it('(a) merchant poll reject + fee poll 成功 → fee mint を broadcast し feeMintTxHash persist 後に throw', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_f'], // fee mint のみ broadcast される
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    // merchant burn (0xburn_m_prev) の poll は fail、fee burn (0xburn_f_prev) は成功。
+    const mockFetch = makeIrisFetch({ failHashes: ['0xburn_m_prev'] });
+    const steps: Array<Record<string, unknown>> = [];
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 100_000n,
+        resume: RESUME_BOTH_BURNED,
+        onStep: (s) => steps.push({ ...s }),
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: {
+          sleep: vi.fn(async () => undefined),
+          now: fastForwardNow(),
+          timeoutMs: 90_000,
+        },
+      }),
+    ).rejects.toThrow(/timeout/);
+
+    // fee mint は broadcast され feeMintTxHash が persist された (merchant timeout の巻き添えに
+    // ならず、取得できた fee 資金は着金させる)。
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1); // fee mint のみ
+    expect(steps.some((s) => s.feeMintTxHash === '0xmint_f')).toBe(true);
+    // merchant mint は broadcast されていない (poll が取得できなかった)。
+    expect(steps.some((s) => s.mintTxHash === '0xmint_f')).toBe(false);
+  });
+
+  it('(b) fee poll reject + merchant poll 成功 → merchant mint + onMerchantMint 完了後に throw', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint_m'], // merchant mint のみ broadcast される
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    // fee burn (0xburn_f_prev) の poll は fail、merchant burn は成功。
+    const mockFetch = makeIrisFetch({ failHashes: ['0xburn_f_prev'] });
+    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const steps: Array<Record<string, unknown>> = [];
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 100_000n,
+        resume: RESUME_BOTH_BURNED,
+        onStep: (s) => steps.push({ ...s }),
+        onMerchantMint: (i) => merchantMints.push(i),
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: {
+          sleep: vi.fn(async () => undefined),
+          now: fastForwardNow(),
+          timeoutMs: 90_000,
+        },
+      }),
+    ).rejects.toThrow(/timeout/);
+
+    // merchant mint は broadcast + 会計 callback 発火 (fee timeout の巻き添えにならない)。
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1); // merchant mint のみ
+    expect(steps.some((s) => s.mintTxHash === '0xmint_m')).toBe(true);
+    expect(merchantMints).toEqual([
+      { mintTxHash: '0xmint_m', burnTxHash: '0xburn_m_prev' },
+    ]);
+    // fee mint は broadcast されていない。
+    expect(steps.some((s) => s.feeMintTxHash === '0xmint_m')).toBe(false);
+  });
+
+  it('(c) 両 poll reject → 即 throw・mint 系 sendTransaction 不発', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xshould_not_be_used'],
+    });
+    const sourcePublic = makePublicClient();
+    const destPublic = makePublicClient();
+    // 両 burn とも poll fail。
+    const mockFetch = makeIrisFetch({
+      failHashes: ['0xburn_m_prev', '0xburn_f_prev'],
+    });
+    const switchChainAsync = trackSwitch();
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: destPublic as never,
+        switchChainAsync,
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 9_900_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 100_000n,
+        resume: RESUME_BOTH_BURNED,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: {
+          sleep: vi.fn(async () => undefined),
+          now: fastForwardNow(),
+          timeoutMs: 90_000,
+        },
+      }),
+    ).rejects.toThrow(/timeout/);
+
+    // どちらの attestation も取得できないので mint は 1 本も broadcast しない。
+    expect(walletClient.sendTransaction).not.toHaveBeenCalled();
+    // 両 reject なら chain switch せず即 throw する (dest への switch は呼ばれない)。
+    expect(switchChainAsync).not.toHaveBeenCalledWith({ chainId: 80002 });
   });
 });

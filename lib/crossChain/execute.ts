@@ -15,6 +15,7 @@
 
 import {
   erc20Abi,
+  zeroAddress,
   type Address,
   type Chain,
   type Hex,
@@ -22,6 +23,7 @@ import {
   type WalletClient,
 } from 'viem';
 import { chainObjectForId } from '../chains';
+import { logger } from '../logger';
 import {
   CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
   CCTP_V2_TOKEN_MESSENGER_ADDRESS,
@@ -163,16 +165,44 @@ async function waitForReceiptOrThrow(
   }
 }
 
-// 既に broadcast 済の hash が on-chain で成功確定しているかを非 throw で確認する。
-// receipt が未取得 (未 mine / dropped) や revert の場合は false。
+// 既に broadcast 済の hash が on-chain で成功確定しているかを確認する。「未発見」
+// (TransactionReceiptNotFoundError = 未 mine / dropped) のみ false。それ以外の reject
+// (RPC ダウン / timeout / 5xx) は transport 障害で「未着」と区別できず、false に潰すと
+// landed 済 mint の再 broadcast (既消費 attestation で必ず revert・失敗表示) を誘発する
+// ため throw で伝播し、resume 再試行に倒す (CR-2 と同じ区別)。
+// status==='reverted' は従来どおり false (revert した mint は attestation 未消費なので
+// 再 broadcast が正しい)。
 async function txAlreadySucceeded(
   client: PublicClient,
   hash: Hex,
 ): Promise<boolean> {
-  const receipt = await client
-    .getTransactionReceipt({ hash })
-    .catch(() => null);
-  return receipt?.status === 'success';
+  try {
+    const receipt = await client.getTransactionReceipt({ hash });
+    return receipt.status === 'success';
+  } catch (e) {
+    if ((e as { name?: unknown })?.name === 'TransactionReceiptNotFoundError') return false;
+    throw e;
+  }
+}
+
+// 設定ミス (zero / dEaD placeholder) の feeReceiver へブリッジすると利用料分の USDC が
+// 永久に焼失する。該当時は fee ブリッジ自体をスキップ (顧客が fee 分を保持する安全側)
+// して warn (billing 側の feeReceiverConfigured ガードと同等の防御)。
+const FEE_RECEIVER_BURN_ADDRESSES: ReadonlySet<string> = new Set([
+  zeroAddress,
+  '0x000000000000000000000000000000000000dead',
+]);
+
+function isFeeReceiverBridgeable(
+  feeReceiver: Address | undefined,
+  feeAmount: bigint,
+): boolean {
+  if (feeReceiver === undefined || feeAmount <= 0n) return false;
+  if (FEE_RECEIVER_BURN_ADDRESSES.has(feeReceiver.toLowerCase())) {
+    logger.warn('cross-chain.fee.burn-address-receiver', { feeReceiver });
+    return false;
+  }
+  return true;
 }
 
 // dest チェーンの mint を「再開安全」に実行する。既に broadcast 済の hash があれば
@@ -261,7 +291,7 @@ export async function executeGatewayTransfer(
   const onStep = args.onStep ?? (() => {});
   const feeReceiver = args.feeReceiver;
   const feeAmount = args.feeAmount ?? 0n;
-  const bridgeFee = feeReceiver !== undefined && feeAmount > 0n;
+  const bridgeFee = isFeeReceiverBridgeable(feeReceiver, feeAmount);
 
   let state: GatewayResumeState = { ...(args.resume ?? {}) };
   const persist = (patch: Partial<GatewayResumeState>) => {
@@ -339,7 +369,8 @@ export async function executeGatewayTransfer(
       });
     }
     if (needFeeAtt) {
-      const f = await signAndAttest(feeReceiver, feeAmount, 'fee');
+      // needFeeAtt → bridgeFee=true → isFeeReceiverBridgeable が feeReceiver!==undefined を保証
+      const f = await signAndAttest(feeReceiver!, feeAmount, 'fee');
       persist({
         feeAttestation: {
           attestation: f.attestation,
@@ -488,7 +519,7 @@ export async function executeCctpTransfer(
   const onStep = args.onStep ?? (() => {});
   const feeReceiver = args.feeReceiver;
   const feeAmount = args.feeAmount ?? 0n;
-  const bridgeFee = feeReceiver !== undefined && feeAmount > 0n;
+  const bridgeFee = isFeeReceiverBridgeable(feeReceiver, feeAmount);
 
   let state: CctpResumeState = { ...(args.resume ?? {}) };
   const persist = (patch: Partial<CctpResumeState>) => {
@@ -565,7 +596,8 @@ export async function executeCctpTransfer(
       await waitForReceiptOrThrow(args.sourcePublicClient, burnHash, 'cctp burn');
     }
     if (needFeeBurn) {
-      const feeBurnHash = await burn(feeReceiver, feeAmount);
+      // needFeeBurn → bridgeFee=true → isFeeReceiverBridgeable が feeReceiver!==undefined を保証
+      const feeBurnHash = await burn(feeReceiver!, feeAmount);
       persist({ feeBurnTxHash: feeBurnHash });
       onProgress({ kind: 'fee_source_tx_pending', hash: feeBurnHash });
       await waitForReceiptOrThrow(
@@ -612,35 +644,71 @@ export async function executeCctpTransfer(
   if (!merchantMintLanded || !feeMintLanded) {
     onProgress({ kind: 'poll_attestation' });
     // burn hash から attestation を再取得 (Iris は永続なので resume でも取得可能)。
+    // merchant と fee の poll は Promise.allSettled で並列化する。fee 側は merchant の
+    // attestation 可用性に依存しない (逆も同様)。直列だとどちらかが timeout で throw した
+    // 際、もう一方の burn 済資金の mint まで巻き添えで放置される (merchant timeout → fee
+    // 永久未 mint / fee timeout → merchant 着金まで止まる)。並列化して、取得できた側だけは
+    // 確実に mint し、取得できなかった側のエラーは mint 完了後に throw する (landed 分の hash
+    // は persist 済なので、次回 resume は失敗側だけを再 poll する)。
+    const pollOpts = {
+      fetch: args.fetch,
+      baseUrl: args.irisBaseUrl,
+      intervalMs: args.pollOptions?.intervalMs,
+      timeoutMs: args.pollOptions?.timeoutMs,
+      sleep: args.pollOptions?.sleep,
+      now: args.pollOptions?.now,
+    };
+    const needMerchantPoll = !merchantMintLanded;
+    const needFeePoll = !feeMintLanded && state.feeBurnTxHash !== undefined;
+
+    const merchantPoll = needMerchantPoll
+      ? pollIrisAttestation(args.sourceDomain, burnHash, pollOpts)
+      : undefined;
+    const feePoll = needFeePoll
+      ? pollIrisAttestation(args.sourceDomain, state.feeBurnTxHash!, pollOpts)
+      : undefined;
+
+    const [merchantSettled, feeSettled] = await Promise.allSettled([
+      merchantPoll ?? Promise.resolve(undefined),
+      feePoll ?? Promise.resolve(undefined),
+    ]);
+
     let merchantIris: { message: Hex; attestation: Hex } | undefined;
-    if (!merchantMintLanded) {
-      const iris = await pollIrisAttestation(args.sourceDomain, burnHash, {
-        fetch: args.fetch,
-        baseUrl: args.irisBaseUrl,
-        intervalMs: args.pollOptions?.intervalMs,
-        timeoutMs: args.pollOptions?.timeoutMs,
-        sleep: args.pollOptions?.sleep,
-        now: args.pollOptions?.now,
-      });
-      merchantIris = { message: iris.message as Hex, attestation: iris.attestation as Hex };
-      attestationMessage = merchantIris.message;
-      attestationSignature = merchantIris.attestation;
-    }
     let feeIris: { message: Hex; attestation: Hex } | undefined;
-    if (!feeMintLanded && state.feeBurnTxHash) {
-      const iris = await pollIrisAttestation(
-        args.sourceDomain,
-        state.feeBurnTxHash,
-        {
-          fetch: args.fetch,
-          baseUrl: args.irisBaseUrl,
-          intervalMs: args.pollOptions?.intervalMs,
-          timeoutMs: args.pollOptions?.timeoutMs,
-          sleep: args.pollOptions?.sleep,
-          now: args.pollOptions?.now,
-        },
-      );
-      feeIris = { message: iris.message as Hex, attestation: iris.attestation as Hex };
+    // 取得できなかった (rejected) 側のエラー。両方必要だった場合、片方だけ rejected なら
+    // 取得できた mint を完了させてから throw する (もう一方の burn 済資金を巻き込まない)。
+    let merchantPollError: unknown;
+    let feePollError: unknown;
+
+    if (needMerchantPoll) {
+      if (merchantSettled.status === 'fulfilled' && merchantSettled.value) {
+        merchantIris = {
+          message: merchantSettled.value.message as Hex,
+          attestation: merchantSettled.value.attestation as Hex,
+        };
+        attestationMessage = merchantIris.message;
+        attestationSignature = merchantIris.attestation;
+      } else if (merchantSettled.status === 'rejected') {
+        merchantPollError = merchantSettled.reason;
+      }
+    }
+    if (needFeePoll) {
+      if (feeSettled.status === 'fulfilled' && feeSettled.value) {
+        feeIris = {
+          message: feeSettled.value.message as Hex,
+          attestation: feeSettled.value.attestation as Hex,
+        };
+      } else if (feeSettled.status === 'rejected') {
+        feePollError = feeSettled.reason;
+      }
+    }
+
+    // 必要だった poll が両方 reject → どちらの attestation も使えないので chain switch せず
+    // 即時 throw する (merchant 側のエラーを優先して伝播)。
+    const merchantFailed = needMerchantPoll && merchantIris === undefined;
+    const feeFailed = needFeePoll && feeIris === undefined;
+    if (merchantFailed && feeFailed) {
+      throw merchantPollError ?? feePollError;
     }
 
     onProgress({ kind: 'switch_chain', targetChainId: args.destChainId });
@@ -689,6 +757,13 @@ export async function executeCctpTransfer(
         'cctp fee mint',
       );
     }
+
+    // 片方だけ取得できたケース: 取得できた mint を完了させた後で、取得できなかった側の
+    // エラーを throw する。landed 分の hash は persist 済なので、次回 resume は失敗側だけを
+    // 再 poll する。末尾の整合性チェック (approve/mint 未完了) より前に throw することで、
+    // merchant poll 失敗時に「内部不整合」へ化けさせない。
+    if (merchantFailed) throw merchantPollError;
+    if (feeFailed) throw feePollError;
   }
 
   if (!state.approveTxHash || !state.mintTxHash) {
