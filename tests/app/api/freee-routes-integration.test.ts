@@ -11,6 +11,17 @@ const h = vi.hoisted(() => ({
   cookieToken: { value: undefined as string | undefined },
 }));
 
+vi.mock('@/lib/env', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...mod,
+    env: new Proxy(mod.env, {
+      get: (target, prop) =>
+        prop === 'enableFreeeSync' ? true : Reflect.get(target, prop),
+    }),
+  };
+});
+
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
   kvGet: async (k: string) => ({ ok: true, value: h.store.has(k) ? h.store.get(k) : null }),

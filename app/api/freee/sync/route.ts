@@ -6,6 +6,7 @@ import type { HistoryEntry } from '@/lib/history';
 import { freeeEnv, getValidAccessToken, createDeal } from '@/lib/freee';
 import { runFreeeSync } from '@/lib/freeeSync';
 import { logger } from '@/lib/logger';
+import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import {
   getToken,
@@ -29,6 +30,10 @@ export const maxDuration = 60;
 const MAX_SYNC_ENTRIES = 1000;
 
 export async function POST(req: Request): Promise<NextResponse> {
+  // kill-switch: フラグ OFF の間は UI 非表示に加え API 自体も閉じる (直接 POST を防ぐ)
+  if (!appEnv.enableFreeeSync) {
+    return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
+  }
   const session = await requireSession();
   if (!session.ok) return session.response;
 

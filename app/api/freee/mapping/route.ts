@@ -10,6 +10,7 @@ import {
   getTaxCodes,
 } from '@/lib/freee';
 import { logger } from '@/lib/logger';
+import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import { getToken, setToken, delToken, getMapping, setMapping } from '../_store';
 
@@ -17,6 +18,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
+  // kill-switch: フラグ OFF の間は UI 非表示に加え API 自体も閉じる (直接 POST を防ぐ)
+  if (!appEnv.enableFreeeSync) {
+    return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
+  }
   const session = await requireSession();
   if (!session.ok) return session.response;
   const env = freeeEnv();
@@ -49,6 +54,9 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  if (!appEnv.enableFreeeSync) {
+    return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
+  }
   const session = await requireSession();
   if (!session.ok) return session.response;
   const token = await getToken(session.address);

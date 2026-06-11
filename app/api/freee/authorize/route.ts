@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { isKvConfigured } from '@/lib/kv';
 import { freeeEnv, buildAuthorizeUrl } from '@/lib/freee';
 import { newSessionToken } from '@/lib/siwe';
+import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import { setState } from '../_store';
 
@@ -11,6 +12,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request): Promise<NextResponse> {
+  // kill-switch: フラグ OFF の間は UI 非表示に加え API 自体も閉じる (直接 POST を防ぐ)
+  if (!appEnv.enableFreeeSync) {
+    return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
+  }
   if (!isKvConfigured()) {
     return NextResponse.json({ ok: false, error: 'kv_not_configured' }, { status: 503 });
   }

@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server';
 import { freeeEnv, exchangeCode, getCompanies } from '@/lib/freee';
 import { logger } from '@/lib/logger';
+import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import { consumeState, setToken, setMeta, getMeta, delMapping } from '../_store';
 
@@ -17,6 +18,8 @@ function errorRedirect(req: Request, reason: string): NextResponse {
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
+  // kill-switch: フラグ OFF の間は UI 非表示に加え API 自体も閉じる (直接 POST を防ぐ)
+  if (!appEnv.enableFreeeSync) return errorRedirect(req, 'disabled');
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
