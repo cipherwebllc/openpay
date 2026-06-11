@@ -584,7 +584,13 @@ describe('GET /api/log/payment/export', () => {
     const res = await GET(r);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, total: 0, returned: 0, entries: [] });
+    expect(body).toEqual({
+      ok: true,
+      total: 0,
+      returned: 0,
+      nextFrom: null,
+      entries: [],
+    });
   });
 
   it('LRANGE の entry に malformed JSON が混在しても _parseError として返す', async () => {
@@ -624,12 +630,12 @@ describe('GET /api/log/payment/export', () => {
     expect(body.entries).toHaveLength(1);
   });
 
-  it('?from / ?to 欠落時は from=0 to=-1 (全件)', async () => {
+  it('?from / ?to 欠落時は from=0 to=9999 (EXPORT_MAX_WINDOW 窓)', async () => {
     const r = new Request('http://localhost/api/log/payment/export', {
       headers: { authorization: 'Bearer admin-secret' },
     });
     await GET(r);
-    expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, -1);
+    expect(kvLrange).toHaveBeenCalledWith('openpay:payments:log', 0, 9_999);
   });
 
   it('Authorization header 欠落は 401', async () => {
