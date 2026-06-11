@@ -6,6 +6,7 @@
 // 正式な領収書・税務証憑ではない (末尾に免責)。サーバ送信なし・LocalStorage の控えを描画するだけ。
 
 import { useRef } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { addressExplorerUrl } from '@/lib/chains';
 import { downloadBlob } from '@/lib/download';
@@ -290,6 +291,22 @@ export function PayerReceiptDetail({
       <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
         {t('disclaimer')}
       </p>
+
+      {/* 成長ループ CTA: 支払った顧客 = 将来の店主候補への控えめな導線。
+          印刷時は広告を紙に載せないため print:hidden。
+          onRemove あり (= /scan 管理一覧) では各カードに繰り返し出るため非表示にし、
+          完了画面 (onRemove なし) でのみ表示してノイズを最小化する。 */}
+      {!onRemove && (
+        <div className="mt-3 border-t border-slate-100 pt-3 print:hidden">
+          <p className="text-xs text-slate-400">{t('ctaText')}</p>
+          <Link
+            href={`/${locale}`}
+            className="text-xs text-brand underline underline-offset-2 hover:opacity-80"
+          >
+            {t('ctaLink')}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

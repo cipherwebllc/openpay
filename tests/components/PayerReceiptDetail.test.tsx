@@ -327,3 +327,38 @@ describe('PayerReceiptDetail — アクションボタン (実コードパス)',
     expect(text).toContain('コーヒー');
   });
 });
+
+describe('PayerReceiptDetail — 成長ループ CTA', () => {
+  function baseReceipt(): PayerReceipt {
+    return buildPayerReceipt(
+      {
+        txHash: TX,
+        chainId: POLYGON_AMOY_ID,
+        asset: 'jpyc',
+        amount: '1000',
+        merchantAddress: '0xMerchantWallet',
+        merchantName: 'OpenPay Cafe',
+      },
+      NOW,
+    );
+  }
+
+  it('onRemove なし (完了画面) → CTA テキストとリンクが描画される', () => {
+    render(<PayerReceiptDetail receipt={baseReceipt()} />);
+    expect(screen.getByText('このお店は OpenPay で受け取っています。')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'あなたも無料でお店を開く →' })).toBeTruthy();
+  });
+
+  it('onRemove なし → CTA リンクの href が /{locale} (例: /ja) を指す', () => {
+    render(<PayerReceiptDetail receipt={baseReceipt()} />);
+    const link = screen.getByRole('link', { name: 'あなたも無料でお店を開く →' }) as HTMLAnchorElement;
+    // renderWithIntl はデフォルト locale=ja でレンダリングする
+    expect(link.getAttribute('href')).toBe('/ja');
+  });
+
+  it('onRemove あり (管理一覧) → CTA は描画されない (一覧での繰り返し表示を避ける)', () => {
+    render(<PayerReceiptDetail receipt={baseReceipt()} onRemove={() => {}} />);
+    expect(screen.queryByText('このお店は OpenPay で受け取っています。')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'あなたも無料でお店を開く →' })).toBeNull();
+  });
+});

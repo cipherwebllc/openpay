@@ -1530,6 +1530,8 @@
     "clearAllButton": "Clear all",
     "clearAllConfirm": "Clear all payment receipts saved on this device? (cannot be undone)",
     "scanLink": "View payment receipts on /scan ↗",
-    "disclaimer": "This is an electronic record to help confirm a payment; it is not an official receipt, tax document, or invoice. Please confirm final treatment with your organization, accounting rules, or tax advisor."
+    "disclaimer": "This is an electronic record to help confirm a payment; it is not an official receipt, tax document, or invoice. Please confirm final treatment with your organization, accounting rules, or tax advisor.",
+    "ctaText": "This store receives payments with OpenPay.",
+    "ctaLink": "Open your own store for free →"
   }
 }
