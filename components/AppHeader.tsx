@@ -9,6 +9,7 @@ import Link from 'next/link';
 import NextImage from 'next/image';
 import { useLocale } from 'next-intl';
 import { LocaleSwitcher } from './LocaleSwitcher';
+import { NewsBell } from './NewsBell';
 import { TopNav } from './TopNav';
 import { WalletBadge } from './WalletBadge';
 import { env } from '@/lib/env';
@@ -49,6 +50,7 @@ export function AppHeader() {
 
         <div className="flex flex-shrink-0 items-center gap-2 text-xs text-slate-500">
           <WalletBadge />
+          <NewsBell />
           <LocaleSwitcher />
           <span className="hidden rounded-full bg-slate-200 px-2 py-1 font-mono sm:inline">
             {env.networkEnv}

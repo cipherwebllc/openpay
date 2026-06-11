@@ -145,6 +145,16 @@
       "beta": "Beta"
     }
   },
+  "News": {
+    "pageTitle": "お知らせ",
+    "pageDescription": "OpenPay 運営からの新機能・料金・お知らせをまとめています。",
+    "categoryFeature": "新機能",
+    "categoryPricing": "料金",
+    "categoryNotice": "お知らせ",
+    "bellAria": "お知らせを開く",
+    "unreadAria": "お知らせ ({count} 件の未読)",
+    "empty": "現在お知らせはありません。"
+  },
   "Create": {
     "title": "OpenPay",
     "subtitle": "ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR",

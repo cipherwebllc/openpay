@@ -570,6 +570,44 @@ describe('i18n: Explore 名前空間 (ja/en parity)', () => {
   }
 });
 
+describe('i18n: News 名前空間 (お知らせ・ja/en parity)', () => {
+  // /news page + NewsBell の UI シャーシ用 key 集合。お知らせ本文 (title/body) は
+  // lib/news.ts に ja/en 同梱なのでここには含めない (explore.ts と同方針)。
+  const NEWS_KEYS = [
+    'pageTitle',
+    'pageDescription',
+    'categoryFeature',
+    'categoryPricing',
+    'categoryNotice',
+    'bellAria',
+    'unreadAria',
+    'empty',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of NEWS_KEYS) {
+      it(`${loc.name}.News.${key} は非空文字列`, () => {
+        const v = (loc.m.News as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('unreadAria は {count} placeholder を持つ (件数読み上げ)', () => {
+    for (const m of [ja, en]) {
+      expect((m.News as Record<string, string>).unreadAria).toContain('{count}');
+    }
+  });
+
+  it('News キー集合が ja と en で一致 (構造 parity)', () => {
+    expect(Object.keys(ja.News).sort()).toEqual(Object.keys(en.News).sort());
+  });
+});
+
 describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () => {
   // AppShell の BottomNav / TopNav (4 link) と LP 2 大 CTA で使う i18n key 集合。
   // 片方の locale だけ抜けて regression するのを fence する。

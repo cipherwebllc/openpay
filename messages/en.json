@@ -145,6 +145,16 @@
       "beta": "Beta"
     }
   },
+  "News": {
+    "pageTitle": "Announcements",
+    "pageDescription": "New features, pricing, and announcements from the OpenPay team.",
+    "categoryFeature": "Feature",
+    "categoryPricing": "Pricing",
+    "categoryNotice": "Notice",
+    "bellAria": "Open announcements",
+    "unreadAria": "Announcements ({count} unread)",
+    "empty": "No announcements right now."
+  },
   "Create": {
     "title": "OpenPay",
     "subtitle": "Wallet-only setup for merchant gasless payment QR",
