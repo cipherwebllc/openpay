@@ -863,7 +863,10 @@
     "connectError": "Connection error: {message}",
     "noWalletTitle": "No wallet detected",
     "noWalletHint": "On mobile, open this page in a wallet app's in-app browser (e.g. MetaMask).",
-    "openInMetaMask": "Open in MetaMask"
+    "openInMetaMask": "Open in MetaMask",
+    "openInAppRecommendedTitle": "Open in the MetaMask app for a smoother checkout",
+    "openInAppRecommendedBody": "Opening inside the app's browser lets you pay without security warnings.",
+    "orConnectAnother": "Or connect another way"
   },
   "AddressInput": {
     "placeholder": "0x... or vitalik.eth / name.base.eth",

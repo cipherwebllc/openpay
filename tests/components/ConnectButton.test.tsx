@@ -34,8 +34,29 @@ const other = (uid: string, name: string) => ({
   getProvider: () => Promise.resolve({}),
 });
 
+// モバイル誘導テスト用の navigator stub。isMobilePlatform() は UA + maxTouchPoints を
+// 見るので PwaInstallHint.test と同じ defineProperty 様式で差し替える。
+function setUserAgent(ua: string) {
+  Object.defineProperty(window.navigator, 'userAgent', {
+    value: ua,
+    configurable: true,
+  });
+}
+function setMaxTouchPoints(n: number) {
+  Object.defineProperty(window.navigator, 'maxTouchPoints', {
+    value: n,
+    configurable: true,
+  });
+}
+const DESKTOP_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15';
+const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)';
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // 既定はデスクトップ Mac (maxTouchPoints=0) に倒す。各 test が必要なら上書きする。
+  setUserAgent(DESKTOP_UA);
+  setMaxTouchPoints(0);
 });
 
 describe('ConnectButton (disconnected)', () => {
@@ -242,6 +263,120 @@ describe('ConnectButton (disconnected)', () => {
     expect(iconSrc('WalletConnect')).toBe('/wallets/walletConnectWallet.svg');
     expect(iconSrc('Phantom')).toBe(dataUri);
     expect(iconSrc('Unknown Wallet')).toBe('/wallets/injectedWallet.svg');
+  });
+});
+
+describe('ConnectButton: MetaMask アプリ内ブラウザ誘導 (Blockaid 回避)', () => {
+  it('モバイル + injected 無し (WC のみ) → 推奨バナーが接続ボタンより前に出る、WC は「別の方法」見出し下に残る', async () => {
+    setUserAgent(IPHONE_UA);
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [other('1', 'WalletConnect')],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+
+    // probeSettled (700ms) + isMobile effect 後に推奨バナーが出る。
+    const recTitle = await screen.findByText(
+      /MetaMask アプリで開くとスムーズです/,
+      undefined,
+      { timeout: 2000 },
+    );
+    expect(recTitle).toBeInTheDocument();
+    expect(
+      screen.getByText(/セキュリティ警告が出ずにそのままお支払いできます/),
+    ).toBeInTheDocument();
+
+    // 推奨 CTA は metamask.app.link を含むディープリンク。
+    const link = screen.getByRole('link', { name: /MetaMask で開く/ });
+    expect(link.getAttribute('href')).toContain('metamask.app.link');
+
+    // WC ボタンは「または別の方法で接続」見出しの下に残る (選択肢を奪わない)。
+    expect(screen.getByText(/または別の方法で接続/)).toBeInTheDocument();
+    const wcButton = screen.getByRole('button', { name: 'WalletConnect' });
+    expect(wcButton).toBeInTheDocument();
+
+    // DOM 順序: 推奨バナー (link) が WC 接続ボタンより前に来る。
+    expect(
+      link.compareDocumentPosition(wcButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // 推奨が出るとき amber の noWallet 文面は二重表示しない。
+    expect(screen.queryByText(/ウォレットが見つかりません/)).not.toBeInTheDocument();
+  });
+
+  it('injected が visible (MetaMask アプリ内ブラウザ相当) → 推奨バナーは出ない', async () => {
+    setUserAgent(IPHONE_UA);
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [injected('1', 'MetaMask'), other('2', 'WalletConnect')],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/MetaMask アプリで開くとスムーズです/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/または別の方法で接続/)).not.toBeInTheDocument();
+  });
+
+  it('PC (Mac UA + maxTouchPoints=0) → injected 無くても推奨バナーは出ない', async () => {
+    // beforeEach の既定 (DESKTOP_UA + 0) のまま。
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [other('1', 'WalletConnect')],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'WalletConnect' }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/MetaMask アプリで開くとスムーズです/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/または別の方法で接続/)).not.toBeInTheDocument();
+  });
+
+  it('モバイル + コネクタ皆無 → 推奨バナーは出る (WC 見出しは出ない)', async () => {
+    setUserAgent(IPHONE_UA);
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [injectedNoProvider('1', 'Injected')],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    expect(
+      await screen.findByText(
+        /MetaMask アプリで開くとスムーズです/,
+        undefined,
+        { timeout: 2000 },
+      ),
+    ).toBeInTheDocument();
+    // visible が空なので「別の方法」見出しは出さない。
+    expect(screen.queryByText(/または別の方法で接続/)).not.toBeInTheDocument();
+    // amber の noWallet は推奨に寄せたので出さない。
+    expect(screen.queryByText(/ウォレットが見つかりません/)).not.toBeInTheDocument();
   });
 });
 

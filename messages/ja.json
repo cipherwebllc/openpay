@@ -863,7 +863,10 @@
     "connectError": "接続エラー: {message}",
     "noWalletTitle": "ウォレットが見つかりません",
     "noWalletHint": "スマホの場合は、MetaMask などウォレットアプリのブラウザでこのページを開いてください。",
-    "openInMetaMask": "MetaMask で開く"
+    "openInMetaMask": "MetaMask で開く",
+    "openInAppRecommendedTitle": "MetaMask アプリで開くとスムーズです",
+    "openInAppRecommendedBody": "アプリ内のブラウザで開くと、セキュリティ警告が出ずにそのままお支払いできます。",
+    "orConnectAnother": "または別の方法で接続"
   },
   "AddressInput": {
     "placeholder": "0x... または vitalik.eth / name.base.eth",

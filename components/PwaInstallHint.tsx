@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
+import { detectMobilePlatform, type MobilePlatform } from '@/lib/walletDeepLink';
 
 // beforeinstallprompt event の Chrome 拡張型 (W3C draft、TS lib に未含)。
 type BeforeInstallPromptEvent = Event & {
@@ -14,21 +15,7 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 };
 
-type Platform = 'ios' | 'android' | 'other';
-
-function detectPlatform(): Platform {
-  if (typeof navigator === 'undefined') return 'other';
-  const ua = navigator.userAgent;
-  // iPad は iPadOS 13+ で「Mac 風 UA」を返すので UA だけでは見分け不可。
-  // navigator.maxTouchPoints が iPadOS 公式推奨の判別シグナル (Safari/iPadOS では
-  // 5 を返し、純デスクトップ Mac では 0)。`'ontouchend' in document` は
-  // GlobalEventHandlers 由来で多くの環境で常に true を返すため当てにならない。
-  const maxTouch = navigator.maxTouchPoints ?? 0;
-  const isIpad = /Macintosh/.test(ua) && maxTouch > 1;
-  if (/iPhone|iPod/.test(ua) || isIpad) return 'ios';
-  if (/Android/i.test(ua)) return 'android';
-  return 'other';
-}
+type Platform = MobilePlatform;
 
 export function PwaInstallHint() {
   const t = useTranslations('Scan');
@@ -43,7 +30,7 @@ export function PwaInstallHint() {
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    setPlatform(detectPlatform());
+    setPlatform(detectMobilePlatform());
     function onBeforeInstall(e: Event) {
       // Chrome の自動 prompt を抑制し、ユーザのボタン操作に紐付ける。
       e.preventDefault();
