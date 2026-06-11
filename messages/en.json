@@ -587,8 +587,6 @@
     "copy": "Copy",
     "copied": "Copied",
     "edit": "Edit",
-    "release": "Release",
-    "releaseConfirm": "Release {handle}? This permanent link will stop working.",
     "editingBanner": "Editing “@{handle}”",
     "stopEditing": "Stop editing",
     "newHandleTitle": "Claim a new handle",
@@ -601,7 +599,12 @@
     "availabilityUnknown": "Could not check availability. Please try again later.",
     "releaseError": "Failed to release ({error})",
     "showQr": "QR code",
-    "qrClose": "Close"
+    "qrClose": "Close",
+    "delete": "Delete",
+    "releaseModalTitle": "Delete @{handle}?",
+    "releaseModalBody": "Deleting disables this permanent link (open-pay.jp/@{handle}) and anyone will be able to claim this handle name again. This cannot be undone.",
+    "releaseModalConfirm": "Release",
+    "releaseModalCancel": "Cancel"
   },
   "HandleProfile": {
     "supportHeading": "Choose how to support",
@@ -617,10 +620,6 @@
     "usdcDiscontinued": "USDC (cross-chain) is no longer offered on profile pages. Updating this @handle will remove its USDC receive method. If you still need it, create a USDC tip link in the Tip tab and add it to your links.",
     "nameLabel": "Display name",
     "colorLabel": "Theme color",
-    "presetsLabel": "Amount presets ({token})",
-    "addPreset": "Add amount",
-    "removePreset": "Remove",
-    "profileSection": "Profile",
     "bioLabel": "Bio",
     "avatarLabel": "Avatar image URL",
     "avatarHint": "An https:// image URL (optional).",
@@ -638,7 +637,11 @@
     "backToTop": "Go to OpenPay home",
     "dragToReorder": "Drag to reorder",
     "moveUp": "Move up",
-    "moveDown": "Move down"
+    "moveDown": "Move down",
+    "stepHandleTitle": "Permanent link (@handle)",
+    "stepReceiverTitle": "Receiver",
+    "stepProfileTitle": "Profile",
+    "stepPreviewTitle": "Preview"
   },
   "CheckoutForm": {
     "header": "Order checkout",

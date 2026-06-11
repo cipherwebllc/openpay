@@ -17,7 +17,7 @@
 import type { ReactNode } from 'react';
 import { ChevronDown, type LucideIcon } from 'lucide-react';
 
-type StepNumber = 1 | 2 | 3;
+type StepNumber = 1 | 2 | 3 | 4;
 type StepVariant = 'default' | 'qr-prominent';
 
 interface StepCardProps {

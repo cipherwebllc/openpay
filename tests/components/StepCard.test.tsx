@@ -24,7 +24,7 @@ describe('StepCard', () => {
       expect(within(heading as HTMLElement).getByText('1')).toBeInTheDocument();
     });
 
-    it('step 番号は 1 / 2 / 3 で aria-labelledby も連動する', () => {
+    it('step 番号は 1 / 2 / 3 / 4 で aria-labelledby も連動する', () => {
       const { container, rerender } = render(
         <StepCard step={1} icon={Coins} title="A">
           <div>x</div>
@@ -49,6 +49,15 @@ describe('StepCard', () => {
       expect(
         container.querySelector('[aria-labelledby="step-3-heading"]'),
       ).not.toBeNull();
+      // step=4 (@handle ビルダーの ④ プレビュー) も受け付ける。
+      rerender(
+        <StepCard step={4} icon={QrCode} title="D">
+          <div>x</div>
+        </StepCard>,
+      );
+      const heading4 = container.querySelector('#step-4-heading');
+      expect(heading4).not.toBeNull();
+      expect(within(heading4 as HTMLElement).getByText('4')).toBeInTheDocument();
     });
 
     it('children は default で mount される (collapsible 未指定)', () => {

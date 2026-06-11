@@ -1232,7 +1232,8 @@ describe('ReceiveMethodPicker × 実 TipForm — 切替で金額がリセット�
   it('JPYC で 500 を選択 → USDC へ切替 → USDC 既定 preset (1) に戻る', async () => {
     const user = userEvent.setup();
     render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
-    // 既定 = 最初の方法 (JPYC) が描画され、500 を選ぶと明細に反映
+    // アコーディオン化により初期は全折りたたみ → まず JPYC の方法ボタンで展開する
+    await user.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
     await user.click(screen.getByRole('button', { name: '500 JPYC' }));
     expectBreakdownRow('クリエイター受取', '500 JPYC');
     // USDC へ切替 → 再マウントで USDC の最初の preset (1 USDC) が選択される。
@@ -1248,6 +1249,8 @@ describe('ReceiveMethodPicker × 実 TipForm — 切替で金額がリセット�
   it('カスタム入力も方法切替で持ち越されない', async () => {
     const user = userEvent.setup();
     render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
+    // アコーディオン化により初期は全折りたたみ → まず JPYC の方法ボタンで展開する
+    await user.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
     await user.type(screen.getByPlaceholderText('例: 2500'), '7777');
     expectBreakdownRow('クリエイター受取', '7777 JPYC');
     await user.click(screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }));

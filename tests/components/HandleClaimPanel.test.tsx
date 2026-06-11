@@ -101,18 +101,19 @@ describe('HandleClaimPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('サインイン済み: 所有一覧が先頭 (編集/開く/コピー/解放) + 新規取得セクション', async () => {
+  it('サインイン済み: 所有一覧が先頭 (編集/削除 のみ) + 新規取得セクション', async () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }]);
     renderPanel(CONFIG, { onEdit: vi.fn() });
     await waitFor(() =>
       expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
+    // 行ボタンは 編集/削除 の 2 つのみ (開く/コピー/QR は ④ プレビュー下へ移動)。
     expect(screen.getByRole('button', { name: '編集' })).toBeInTheDocument();
-    const open = screen.getByRole('link', { name: '開く' });
-    expect(open).toHaveAttribute('href', 'https://test.local/@alice');
-    expect(open).toHaveAttribute('target', '_blank');
-    expect(screen.getByRole('button', { name: '解放' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '削除' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '開く' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'コピー' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'QRコード' })).not.toBeInTheDocument();
     expect(screen.getByText('新しいハンドルを取得')).toBeInTheDocument();
   });
 
@@ -290,96 +291,101 @@ describe('HandleClaimPanel', () => {
     expect(screen.queryByText('すでに使用されています')).not.toBeInTheDocument();
   });
 
-  it('QRコードは一覧に常時出さず、ボタンでポップアップ表示 → 閉じる', async () => {
+  it('削除クリックで danger 確認モーダルを表示 (window.confirm でなく dialog)', async () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }]);
     renderPanel(CONFIG);
     await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
-    // 一覧にはフル URL も QR (svg) も出ていない
-    expect(screen.queryByText('https://test.local/@alice')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    // QR ボタンでモーダルが開き、ハンドル + フル URL を提示
-    fireEvent.click(screen.getByRole('button', { name: 'QRコード' }));
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
-    expect(screen.getByText('https://test.local/@alice')).toBeInTheDocument();
-    // 閉じる
-    fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // モーダル見出し (releaseModalTitle) を表示する。
+    expect(screen.getByText('@alice を削除しますか？')).toBeInTheDocument();
   });
 
-  it('QR ダイアログ: 開くとフォーカスが閉じるボタンへ移り、閉じると QR ボタンへ復元', async () => {
+  it('キャンセルで DELETE を発火せずモーダルを閉じる', async () => {
     h.isSignedIn = true;
-    stubMine([{ handle: 'alice', config: CONFIG }]);
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(url) === '/api/handle') {
+        return new Response(
+          JSON.stringify({ ok: true, handles: [{ handle: 'alice', config: CONFIG }], max: 3 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
     renderPanel(CONFIG);
     await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
-    const qrButton = screen.getByRole('button', { name: 'QRコード' });
-    qrButton.focus();
-    fireEvent.click(qrButton);
-    const close = screen.getByRole('button', { name: '閉じる' });
-    expect(document.activeElement).toBe(close);
-    // Tab は背後のページへ抜けず閉じるボタンに留まる (focus trap)
-    fireEvent.keyDown(window, { key: 'Tab' });
-    expect(document.activeElement).toBe(close);
-    // 閉じると元の QR ボタンへ復元
-    fireEvent.click(close);
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(qrButton);
+    // DELETE は一度も呼ばれていない (mine の GET のみ)。
+    expect(
+      fetchMock.mock.calls.some(
+        (c) => (c[1] as RequestInit | undefined)?.method === 'DELETE',
+      ),
+    ).toBe(false);
   });
 
-  it('コピー済み表示はコピーした行だけに出る (全行に伝播しない)', async () => {
+  it('ESC でも確認モーダルを閉じる (DELETE 不発)', async () => {
     h.isSignedIn = true;
-    stubMine([
-      { handle: 'alice', config: CONFIG },
-      { handle: 'bob', config: CONFIG },
-    ]);
-    // jsdom には clipboard が無い → available=true にするため最小スタブ
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText: vi.fn(async () => undefined) },
-      configurable: true,
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(url) === '/api/handle') {
+        return new Response(
+          JSON.stringify({ ok: true, handles: [{ handle: 'alice', config: CONFIG }], max: 3 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
+    vi.stubGlobal('fetch', fetchMock);
     renderPanel(CONFIG);
-    await waitFor(() =>
-      expect(screen.getByText('@bob')).toBeInTheDocument(),
-    );
-    const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
-    expect(copyButtons).toHaveLength(2);
-    fireEvent.click(copyButtons[0]); // alice 行をコピー
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'コピー済み' })).toBeInTheDocument(),
-    );
-    // 「コピー済み」は 1 行だけ・もう 1 行は「コピー」のまま
-    expect(screen.getAllByRole('button', { name: 'コピー済み' })).toHaveLength(1);
-    expect(screen.getAllByRole('button', { name: 'コピー' })).toHaveLength(1);
+    await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        (c) => (c[1] as RequestInit | undefined)?.method === 'DELETE',
+      ),
+    ).toBe(false);
   });
 
-  it('解放失敗は無言にせずエラーメッセージを表示', async () => {
+  it('「解放する」で DELETE fetch が発火 → 失敗は無言にせずエラー表示', async () => {
     h.isSignedIn = true;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-        const u = String(url);
-        if (u === '/api/handle') {
-          return new Response(
-            JSON.stringify({ ok: true, handles: [{ handle: 'alice', config: CONFIG }], max: 3 }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          );
-        }
-        if (init?.method === 'DELETE') {
-          return new Response(JSON.stringify({ ok: false, error: 'kv_error' }), {
-            status: 502,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }),
-    );
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u === '/api/handle') {
+        return new Response(
+          JSON.stringify({ ok: true, handles: [{ handle: 'alice', config: CONFIG }], max: 3 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (init?.method === 'DELETE') {
+        return new Response(JSON.stringify({ ok: false, error: 'kv_error' }), {
+          status: 502,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
     renderPanel(CONFIG);
+    await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    // モーダルの確定ボタン (releaseModalConfirm) で DELETE 発火。
+    fireEvent.click(screen.getByRole('button', { name: '解放する' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '解放' })).toBeInTheDocument(),
+      expect(
+        fetchMock.mock.calls.some(
+          (c) => (c[1] as RequestInit | undefined)?.method === 'DELETE',
+        ),
+      ).toBe(true),
     );
-    fireEvent.click(screen.getByRole('button', { name: '解放' }));
     await waitFor(() =>
       expect(screen.getByText('解放に失敗しました (kv_error)')).toBeInTheDocument(),
     );
@@ -406,13 +412,13 @@ describe('HandleClaimPanel', () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }),
     );
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const onStopEditing = vi.fn();
     renderPanel(CONFIG, { editingHandle: 'alice', onStopEditing });
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '解放' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '削除' })).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole('button', { name: '解放' }));
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    fireEvent.click(screen.getByRole('button', { name: '解放する' }));
     await waitFor(() => expect(onStopEditing).toHaveBeenCalled());
   });
 });

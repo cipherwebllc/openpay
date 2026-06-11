@@ -587,8 +587,6 @@
     "copy": "コピー",
     "copied": "コピー済み",
     "edit": "編集",
-    "release": "解放",
-    "releaseConfirm": "{handle} を解放しますか？この恒久リンクは無効になります。",
     "editingBanner": "「@{handle}」を編集中",
     "stopEditing": "編集をやめる",
     "newHandleTitle": "新しいハンドルを取得",
@@ -601,7 +599,12 @@
     "availabilityUnknown": "空き状況を確認できませんでした。時間をおいて再度お試しください。",
     "releaseError": "解放に失敗しました ({error})",
     "showQr": "QRコード",
-    "qrClose": "閉じる"
+    "qrClose": "閉じる",
+    "delete": "削除",
+    "releaseModalTitle": "@{handle} を削除しますか？",
+    "releaseModalBody": "削除するとこの恒久リンク (open-pay.jp/@{handle}) は無効になり、誰でもこのハンドル名を再取得できるようになります。この操作は元に戻せません。",
+    "releaseModalConfirm": "解放する",
+    "releaseModalCancel": "キャンセル"
   },
   "HandleProfile": {
     "supportHeading": "応援する方法を選ぶ",
@@ -617,10 +620,6 @@
     "usdcDiscontinued": "USDC (cross-chain) のプロフでの提供は終了しました。この @handle を更新すると USDC の受取方法は外れます。必要な場合はチップタブで USDC のチップリンクを作成し、リンク集に追加してください。",
     "nameLabel": "表示名",
     "colorLabel": "テーマ色",
-    "presetsLabel": "金額プリセット ({token})",
-    "addPreset": "金額を追加",
-    "removePreset": "削除",
-    "profileSection": "プロフィール",
     "bioLabel": "ひとこと (bio)",
     "avatarLabel": "アバター画像 URL",
     "avatarHint": "https:// の画像 URL を指定 (任意)。",
@@ -638,7 +637,11 @@
     "backToTop": "OpenPay のトップページへ",
     "dragToReorder": "ドラッグで並べ替え",
     "moveUp": "上へ移動",
-    "moveDown": "下へ移動"
+    "moveDown": "下へ移動",
+    "stepHandleTitle": "恒久リンク (@handle)",
+    "stepReceiverTitle": "受取先",
+    "stepProfileTitle": "プロフィール",
+    "stepPreviewTitle": "プレビュー"
   },
   "CheckoutForm": {
     "header": "ご注文のお支払い",

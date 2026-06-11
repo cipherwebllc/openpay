@@ -11,7 +11,7 @@
 // flag OFF で何も描画しない。
 
 import { useMemo, useRef, useState } from 'react';
-import { GripVertical } from 'lucide-react';
+import { AtSign, Eye, GripVertical, UserRound, Wallet } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
@@ -19,13 +19,16 @@ import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { HandleProfileView } from '@/components/HandleProfile';
+import { LinkQrModal } from '@/components/LinkQrModal';
 import { SocialIcon } from '@/components/SocialIconLinks';
+import { StepCard } from '@/components/StepCard';
 import { methodLabel } from '@/components/ReceiveMethodPicker';
 import {
   useHandleProfileDraft,
   DEFAULT_PROFILE_DRAFT,
 } from '@/hooks/useHandleProfileDraft';
-import { displaySymbolFor } from '@/lib/tokens';
+import { useOrigin } from '@/hooks/useOrigin';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import {
   MAX_BIO_LEN,
@@ -72,7 +75,11 @@ export function HandleProfileBuilder() {
   const tc = useTranslations('HandleClaim');
   const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
   const { address: connected } = useAccount();
+  const origin = useOrigin();
+  const linkCopy = useCopyToClipboard();
   const [resolved, setResolved] = useState<Address | null>(null);
+  // ④ プレビュー下の QR モーダル開閉 (編集中 handle のフル URL を提示)。
+  const [showQr, setShowQr] = useState(false);
   // 編集中レコードが旧 USDC (cross-chain) method を持つか。更新で外れることを明示する。
   const [editedHadUsdc, setEditedHadUsdc] = useState(false);
   // どの @handle を編集中か (null = 新規作成)。「編集」でフォームが黙って書き換わるのが
@@ -266,50 +273,6 @@ export function HandleProfileBuilder() {
     }));
   };
 
-  // プリセット編集 (token 別)。
-  const renderPresetEditor = (
-    token: 'jpyc',
-    list: string[],
-    key: 'presetsJpyc',
-  ) => (
-    <Field label={t('presetsLabel', { token: displaySymbolFor(token) })}>
-      <div className="space-y-1.5">
-        {list.map((p, i) => (
-          <div key={i} className="flex gap-2">
-            <input
-              type="text"
-              inputMode="decimal"
-              value={p}
-              onChange={(e) => {
-                const next = [...list];
-                next[i] = e.target.value;
-                update({ [key]: next } as Partial<typeof draft>);
-              }}
-              className={inputClass}
-            />
-            <button
-              type="button"
-              onClick={() => update({ [key]: list.filter((_, j) => j !== i) } as Partial<typeof draft>)}
-              className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
-              aria-label={t('removePreset')}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-        {list.length < TIP_PRESET_MAX && (
-          <button
-            type="button"
-            onClick={() => update({ [key]: [...list, ''] } as Partial<typeof draft>)}
-            className="text-xs font-medium text-brand hover:underline"
-          >
-            ＋ {t('addPreset')}
-          </button>
-        )}
-      </div>
-    </Field>
-  );
-
   // プレビューは受取先が未確定でも常時表示 (config が組めない間は draft から見た目だけ組む)。
   const previewConfig: HandleTipConfig = config ?? {
     to: effectiveReceiver ?? '',
@@ -339,114 +302,128 @@ export function HandleProfileBuilder() {
         <p className="mt-1 text-sm text-slate-500">{t('builderSubheading')}</p>
       </div>
 
-      {/* 2カラム: 左=編集 (page scroll) / 右=プレビュー+公開 (lg で sticky 追従)。 */}
+      {/* 2カラム: 左=① 恒久リンク / ② 受取先 / ③ プロフィール (page scroll)、
+          右=④ プレビュー (lg で sticky 追従)。 */}
       <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
         <div className="min-w-0 space-y-5">
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
-        {/* 受取先 */}
-        <Field label={t('receiverLabel')} hint={t('receiverHint')}>
-          <AddressInput
-            value={draft.to}
-            onChange={(v) => update({ to: v })}
-            onResolved={setResolved}
-          />
-          {connected && (
-            <button
-              type="button"
-              onClick={onUseConnected}
-              className="mt-1.5 text-xs font-medium text-brand hover:underline"
-            >
-              {t('useConnectedWallet')}
-            </button>
-          )}
-        </Field>
+          {/* ① 恒久リンク (@handle) */}
+          <StepCard step={1} icon={AtSign} title={t('stepHandleTitle')}>
+            <HandleClaimPanel
+              config={config}
+              profile={profile}
+              onEdit={onEditExisting}
+              editingHandle={editingHandle}
+              onStopEditing={onStopEditing}
+              onPublished={(h) => {
+                setEditingHandle(h);
+                // 公開後のレコードは builder 製 = USDC method を含まないため、旧レコード由来の
+                // 「USDC 提供終了」通知は以後 stale (更新で外れる、はもう外れた後)。
+                setEditedHadUsdc(false);
+              }}
+            />
+          </StepCard>
 
-        {/* 受取方法 */}
-        <fieldset>
-          <legend className="text-sm font-medium text-slate-700">{t('methodsLabel')}</legend>
-          <div className="mt-1 space-y-1.5">
-            {([
-              ['jpycPolygon', { token: 'jpyc', chain: 'polygon' } as const],
-              ['jpycKaia', { token: 'jpyc', chain: 'kaia' } as const],
-            ] as const).map(([key, method]) => (
-              <label key={key} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={draft[key]}
-                  onChange={(e) => update({ [key]: e.target.checked } as Partial<typeof draft>)}
+          {/* ② 受取先 (AddressInput + 接続ウォレット + 受取方法) */}
+          <StepCard step={2} icon={Wallet} title={t('stepReceiverTitle')}>
+            <div className="space-y-4">
+              <Field label={t('receiverLabel')} hint={t('receiverHint')}>
+                <AddressInput
+                  value={draft.to}
+                  onChange={(v) => update({ to: v })}
+                  onResolved={setResolved}
                 />
-                {methodLabel(method, t('crossChain'))}
-              </label>
-            ))}
-          </div>
-          {methods.length === 0 && (
-            <p className="mt-1 text-xs text-red-600">{t('atLeastOneMethod')}</p>
-          )}
-          {editedHadUsdc && (
-            <p className="mt-1 text-xs text-amber-700">{t('usdcDiscontinued')}</p>
-          )}
-        </fieldset>
+                {connected && (
+                  <button
+                    type="button"
+                    onClick={onUseConnected}
+                    className="mt-1.5 text-xs font-medium text-brand hover:underline"
+                  >
+                    {t('useConnectedWallet')}
+                  </button>
+                )}
+              </Field>
 
-        {/* 見た目 */}
-        <Field label={t('nameLabel')}>
-          <input
-            type="text"
-            value={draft.name}
-            maxLength={60}
-            onChange={(e) => update({ name: e.target.value })}
-            className={inputClass}
-          />
-        </Field>
-        <Field label={t('colorLabel')}>
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={colorValid ? draft.color : '#2563eb'}
-              onChange={(e) => update({ color: e.target.value })}
-              className="h-9 w-12 rounded border border-slate-300"
-            />
-            <input
-              type="text"
-              value={draft.color}
-              onChange={(e) => update({ color: e.target.value })}
-              placeholder="#2563eb"
-              className={inputClass}
-            />
-          </div>
-        </Field>
-        {draft.jpycPolygon || draft.jpycKaia
-          ? renderPresetEditor('jpyc', draft.presetsJpyc, 'presetsJpyc')
-          : null}
-      </div>
+              <fieldset>
+                <legend className="text-sm font-medium text-slate-700">{t('methodsLabel')}</legend>
+                <div className="mt-1 space-y-1.5">
+                  {([
+                    ['jpycPolygon', { token: 'jpyc', chain: 'polygon' } as const],
+                    ['jpycKaia', { token: 'jpyc', chain: 'kaia' } as const],
+                  ] as const).map(([key, method]) => (
+                    <label key={key} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={draft[key]}
+                        onChange={(e) => update({ [key]: e.target.checked } as Partial<typeof draft>)}
+                      />
+                      {methodLabel(method, t('crossChain'))}
+                    </label>
+                  ))}
+                </div>
+                {methods.length === 0 && (
+                  <p className="mt-1 text-xs text-red-600">{t('atLeastOneMethod')}</p>
+                )}
+                {editedHadUsdc && (
+                  <p className="mt-1 text-xs text-amber-700">{t('usdcDiscontinued')}</p>
+                )}
+              </fieldset>
+            </div>
+          </StepCard>
 
-      {/* プロフィール (link-in-bio) */}
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-800">{t('profileSection')}</h3>
-        <Field
-          label={t('bioLabel')}
-          hint={`${draft.bio.trim().length}/${MAX_BIO_LEN}`}
-        >
-          <textarea
-            value={draft.bio}
-            maxLength={MAX_BIO_LEN}
-            rows={2}
-            onChange={(e) => update({ bio: e.target.value })}
-            className={inputClass}
-          />
-        </Field>
-        <Field label={t('avatarLabel')} hint={t('avatarHint')}>
-          <input
-            type="url"
-            value={draft.avatar}
-            placeholder="https://"
-            onChange={(e) => update({ avatar: e.target.value })}
-            className={inputClass}
-          />
-        </Field>
-        {/* SNS アイコンリンク (URL のみ・アイコンはドメイン自動判定) */}
-        <Field label={t('socialsLabel')} hint={t('socialsHint')}>
-          <div className="space-y-2">
-            {draft.socials.map((s, i) => (
+          {/* ③ プロフィール (表示名・テーマ色 + bio/avatar/SNS/links) */}
+          <StepCard step={3} icon={UserRound} title={t('stepProfileTitle')}>
+            <div className="space-y-4">
+              <Field label={t('nameLabel')}>
+                <input
+                  type="text"
+                  value={draft.name}
+                  maxLength={60}
+                  onChange={(e) => update({ name: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={t('colorLabel')}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={colorValid ? draft.color : '#2563eb'}
+                    onChange={(e) => update({ color: e.target.value })}
+                    className="h-9 w-12 rounded border border-slate-300"
+                  />
+                  <input
+                    type="text"
+                    value={draft.color}
+                    onChange={(e) => update({ color: e.target.value })}
+                    placeholder="#2563eb"
+                    className={inputClass}
+                  />
+                </div>
+              </Field>
+              <Field
+                label={t('bioLabel')}
+                hint={`${draft.bio.trim().length}/${MAX_BIO_LEN}`}
+              >
+                <textarea
+                  value={draft.bio}
+                  maxLength={MAX_BIO_LEN}
+                  rows={2}
+                  onChange={(e) => update({ bio: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={t('avatarLabel')} hint={t('avatarHint')}>
+                <input
+                  type="url"
+                  value={draft.avatar}
+                  placeholder="https://"
+                  onChange={(e) => update({ avatar: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+              {/* SNS アイコンリンク (URL のみ・アイコンはドメイン自動判定) */}
+              <Field label={t('socialsLabel')} hint={t('socialsHint')}>
+                <div className="space-y-2">
+                  {draft.socials.map((s, i) => (
               <div
                 key={i}
                 className="flex items-center gap-2"
@@ -516,135 +493,168 @@ export function HandleProfileBuilder() {
                 ＋ {t('addSocial')}
               </button>
             )}
-          </div>
-        </Field>
-        <Field label={t('linksLabel')} hint={t('httpsOnlyHint')}>
-          <div className="space-y-2">
-            {draft.links.map((l, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2"
-                onDragOver={(e) => {
-                  if (dragRef.current?.list === 'links') e.preventDefault();
-                }}
-                onDrop={(e) => {
-                  const d = dragRef.current;
-                  if (d?.list !== 'links') return;
-                  e.preventDefault();
-                  if (d.index !== i) {
-                    update({ links: moveItem(draft.links, d.index, i) });
-                  }
-                  dragRef.current = null;
-                }}
-              >
-                <span
-                  draggable
-                  onDragStart={() => {
-                    dragRef.current = { list: 'links', index: i };
-                  }}
-                  onDragEnd={() => {
-                    dragRef.current = null;
-                  }}
-                  role="button"
-                  aria-label={t('dragToReorder')}
-                  title={t('dragToReorder')}
-                  className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
-                >
-                  <GripVertical className="h-4 w-4" />
-                </span>
-                {renderMoveButtons(i, draft.links.length, (from, to) =>
-                  update({ links: moveItem(draft.links, from, to) }),
+                  </div>
+                </Field>
+                <Field label={t('linksLabel')} hint={t('httpsOnlyHint')}>
+                  <div className="space-y-2">
+                    {draft.links.map((l, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2"
+                        onDragOver={(e) => {
+                          if (dragRef.current?.list === 'links') e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          const d = dragRef.current;
+                          if (d?.list !== 'links') return;
+                          e.preventDefault();
+                          if (d.index !== i) {
+                            update({ links: moveItem(draft.links, d.index, i) });
+                          }
+                          dragRef.current = null;
+                        }}
+                      >
+                        <span
+                          draggable
+                          onDragStart={() => {
+                            dragRef.current = { list: 'links', index: i };
+                          }}
+                          onDragEnd={() => {
+                            dragRef.current = null;
+                          }}
+                          role="button"
+                          aria-label={t('dragToReorder')}
+                          title={t('dragToReorder')}
+                          className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </span>
+                        {renderMoveButtons(i, draft.links.length, (from, to) =>
+                          update({ links: moveItem(draft.links, from, to) }),
+                        )}
+                        <input
+                          type="text"
+                          value={l.label}
+                          placeholder={t('linkLabelPlaceholder')}
+                          maxLength={40}
+                          onChange={(e) => {
+                            const next = [...draft.links];
+                            next[i] = { ...next[i], label: e.target.value };
+                            update({ links: next });
+                          }}
+                          className={`${inputClass} flex-[2]`}
+                        />
+                        <input
+                          type="url"
+                          value={l.url}
+                          placeholder="https://"
+                          onChange={(e) => {
+                            const next = [...draft.links];
+                            next[i] = { ...next[i], url: e.target.value };
+                            update({ links: next });
+                          }}
+                          className={`${inputClass} flex-[3]`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
+                          className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                          aria-label={t('removeLink')}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {draft.links.length < MAX_PROFILE_LINKS && (
+                      <button
+                        type="button"
+                        onClick={() => update({ links: [...draft.links, { label: '', url: '' }] })}
+                        className="text-xs font-medium text-brand hover:underline"
+                      >
+                        ＋ {t('addLink')}
+                      </button>
+                    )}
+                  </div>
+                </Field>
+                {hasInsecure && (
+                  <p className="text-xs text-amber-700">{t('insecureDropped')}</p>
                 )}
-                <input
-                  type="text"
-                  value={l.label}
-                  placeholder={t('linkLabelPlaceholder')}
-                  maxLength={40}
-                  onChange={(e) => {
-                    const next = [...draft.links];
-                    next[i] = { ...next[i], label: e.target.value };
-                    update({ links: next });
-                  }}
-                  className={`${inputClass} flex-[2]`}
-                />
-                <input
-                  type="url"
-                  value={l.url}
-                  placeholder="https://"
-                  onChange={(e) => {
-                    const next = [...draft.links];
-                    next[i] = { ...next[i], url: e.target.value };
-                    update({ links: next });
-                  }}
-                  className={`${inputClass} flex-[3]`}
-                />
-                <button
-                  type="button"
-                  onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
-                  className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
-                  aria-label={t('removeLink')}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            {draft.links.length < MAX_PROFILE_LINKS && (
-              <button
-                type="button"
-                onClick={() => update({ links: [...draft.links, { label: '', url: '' }] })}
-                className="text-xs font-medium text-brand hover:underline"
-              >
-                ＋ {t('addLink')}
-              </button>
-            )}
-          </div>
-        </Field>
-        {hasInsecure && (
-          <p className="text-xs text-amber-700">{t('insecureDropped')}</p>
-        )}
-      </div>
+            </div>
+          </StepCard>
         </div>
 
-        {/* 右カラム: ライブプレビュー (常時) + 取得/更新 (SIWE)。desktop は sticky。 */}
-        <aside className="mt-6 min-w-0 space-y-4 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-          {hydrated && (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('previewHeading')}
-              </p>
-              <div className="mx-auto max-w-xs rounded-xl bg-white p-4 shadow-sm">
-                <HandleProfileView config={previewConfig} profile={profile} />
-                {methods.length > 0 && (
-                  <div className="mt-4 flex flex-col gap-2">
-                    {methods.map((m, i) => (
-                      <span
-                        key={i}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600"
-                      >
-                        {t('supportWith', { label: methodLabel(m, t('crossChain')) })}
-                      </span>
-                    ))}
-                  </div>
-                )}
+        {/* 右カラム: ④ ライブプレビュー (常時) + 編集中 handle の 開く/コピー/QR。desktop は sticky。 */}
+        <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+          <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
+            {hydrated && (
+              <div className="rounded-xl bg-slate-50 p-4">
+                <div className="mx-auto max-w-xs rounded-xl bg-white p-4 shadow-sm">
+                  <HandleProfileView config={previewConfig} profile={profile} />
+                  {methods.length > 0 && (
+                    <div className="mt-4 flex flex-col gap-2">
+                      {methods.map((m, i) => (
+                        <span
+                          key={i}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600"
+                        >
+                          {t('supportWith', { label: methodLabel(m, t('crossChain')) })}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <HandleClaimPanel
-            config={config}
-            profile={profile}
-            onEdit={onEditExisting}
-            editingHandle={editingHandle}
-            onStopEditing={onStopEditing}
-            onPublished={(h) => {
-              setEditingHandle(h);
-              // 公開後のレコードは builder 製 = USDC method を含まないため、旧レコード由来の
-              // 「USDC 提供終了」通知は以後 stale (更新で外れる、はもう外れた後)。
-              setEditedHadUsdc(false);
-            }}
-          />
+            {/* プレビュー対象 (編集中 handle) のアクション行。新規未公開時は handle が無いので非表示。 */}
+            {editingHandle && (
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                <a
+                  href={origin ? `${origin}/@${editingHandle}` : `/@${editingHandle}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                >
+                  {tc('open')}
+                </a>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void linkCopy.copy(
+                      origin ? `${origin}/@${editingHandle}` : `/@${editingHandle}`,
+                    )
+                  }
+                  className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
+                >
+                  {linkCopy.copied ? tc('copied') : tc('copy')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowQr(true)}
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                >
+                  {tc('showQr')}
+                </button>
+              </div>
+            )}
+          </StepCard>
         </aside>
       </div>
+
+      {/* 編集中 handle のリンク QR (一覧に常時並べると縦長で読みにくいためボタン経由)。 */}
+      <LinkQrModal
+        open={showQr && editingHandle !== null}
+        value={
+          editingHandle
+            ? origin
+              ? `${origin}/@${editingHandle}`
+              : `/@${editingHandle}`
+            : ''
+        }
+        title={editingHandle ? `@${editingHandle}` : ''}
+        closeLabel={tc('qrClose')}
+        onClose={() => setShowQr(false)}
+      />
     </div>
   );
 }

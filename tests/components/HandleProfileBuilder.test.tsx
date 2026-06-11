@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, within } from '@testing-library/react';
 import { getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -185,6 +185,71 @@ describe('HandleProfileBuilder', () => {
   it('プレビューは受取先未確定でも常時表示される', () => {
     renderWithIntl(<HandleProfileBuilder />);
     expect(screen.getByText('プレビュー')).toBeInTheDocument();
+  });
+
+  it('4 ステップの番号見出しを描画する (① 恒久リンク / ② 受取先 / ③ プロフィール / ④ プレビュー)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    // StepCard は section[aria-labelledby=step-N-heading] + 見出し内に番号 badge + title。
+    for (const [step, title] of [
+      [1, '恒久リンク (@handle)'],
+      [2, '受取先'],
+      [3, 'プロフィール'],
+      [4, 'プレビュー'],
+    ] as const) {
+      const heading = document.getElementById(`step-${step}-heading`);
+      expect(heading).not.toBeNull();
+      expect(heading!.textContent).toContain(title);
+      expect(heading!.textContent).toContain(String(step));
+    }
+  });
+
+  it('表示名・テーマ色入力は ③ プロフィール step に置かれる (② 受取先 ではない)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    const step3 = document.getElementById('step-3-body')!;
+    const step2 = document.getElementById('step-2-body')!;
+    // 表示名 (nameLabel)・テーマ色 (colorLabel) は ③ プロフィール側に存在。
+    expect(within(step3).getByText('表示名')).toBeInTheDocument();
+    expect(within(step3).getByText('テーマ色')).toBeInTheDocument();
+    // 受取先 step には表示名/テーマ色を置かない。
+    expect(within(step2).queryByText('表示名')).not.toBeInTheDocument();
+    expect(within(step2).queryByText('テーマ色')).not.toBeInTheDocument();
+  });
+
+  it('金額プリセット editor は描画されない (UI 非表示・config 導出は温存)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
+    // 旧プリセット editor の追加ボタン文言は出ない。
+    expect(screen.queryByText('＋ 金額を追加')).not.toBeInTheDocument();
+    // 受取先が確定すれば config は完成 (プリセット非表示でも壊れない)。
+    expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
+  });
+
+  it('④ プレビュー下: 新規 (未公開) では 開く/コピー/QR を出さない', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(screen.queryByRole('link', { name: '開く' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'コピー' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'QRコード' })).not.toBeInTheDocument();
+  });
+
+  it('④ プレビュー下: 編集中 (editingHandle) に 開く/コピー/QR を出す', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    // mock の edit ボタンが onEdit('alice', ...) を発火 → editingHandle='alice'
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    const open = screen.getByRole('link', { name: '開く' });
+    expect(open).toHaveAttribute('href', expect.stringContaining('/@alice'));
+    expect(open).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('button', { name: 'コピー' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'QRコード' })).toBeInTheDocument();
+  });
+
+  it('④ QR ボタンで LinkQrModal が開き 編集中 handle のフル URL を提示', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'QRコード' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('全方法 OFF にすると config=null (最低1必須の警告)', () => {

@@ -1,28 +1,131 @@
 'use client';
 
 // @handle 恒久リンクの取得 UI。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
-// SIWE サインイン → 取得済み一覧 (編集/開く/コピー/解放) → handle 入力 + 空き確認 →
+// StepCard ① の中身として描画される (枠と見出しは StepCard が提供)。
+// SIWE サインイン → 取得済み一覧 (編集/削除) → handle 入力 + 空き確認 →
 // 現在のプロフィール設定 (config+profile) を publish。設定は親 (HandleProfileBuilder) から
 // HandleTipConfig + HandleProfile として受け取る (受取先/方法 未確定なら config=null)。
+// 開く/コピー/QR は ④ プレビュー下 (builder 側) に集約したのでここには持たない。
 //
 // 編集モードは親が所有 (editingHandle)。「編集」でフォームに prefill + モード開始、
 // バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
 // (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
-import { LinkQrModal } from '@/components/LinkQrModal';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import {
   validateHandle,
   MAX_HANDLES_PER_WALLET,
   type HandleTipConfig,
   type HandleProfile,
 } from '@/lib/handle';
+
+// 削除確認の danger モーダル。LinkQrModal と同じ a11y パターン: 開いたら確定ボタンへ
+// フォーカス・Tab は背後へ抜けないようトラップ・閉じたら元の要素へ復元・ESC/背景で閉じる。
+// window.confirm はブラウザ依存で文言制御もできず、削除という不可逆操作の警告に弱いため。
+function ReleaseConfirmModal({
+  open,
+  handle,
+  link,
+  title,
+  body,
+  confirmLabel,
+  cancelLabel,
+  confirmDisabled,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  handle: string;
+  link: string;
+  title: string;
+  body: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  confirmDisabled: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  // inline arrow は毎レンダ別 identity なので effect dep にせず ref 経由で読む
+  // (表示中の親再レンダで returnFocusRef がボタン自身に上書きされ復元 focus が壊れるのを防ぐ)。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    // 破壊的操作の確認なので初期フォーカスは安全側 (キャンセル) に置く
+    // (開いた直後の Enter 誤打で解放が確定しないように)。
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+      // フォーカス可能要素は確定/キャンセルの 2 つ → Tab/Shift+Tab で 2 ボタン間を循環させ
+      // 背後のページへ抜けないようトラップする。
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const active = document.activeElement;
+        if (active === confirmRef.current) cancelRef.current?.focus();
+        else confirmRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      returnFocusRef.current?.focus?.();
+      returnFocusRef.current = null;
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-sm font-semibold text-slate-800">{title}</p>
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">{body}</p>
+        <p className="mt-2 break-all font-mono text-xs text-slate-400">{link}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            ref={confirmRef}
+            type="button"
+            onClick={onConfirm}
+            disabled={confirmDisabled}
+            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type Availability = { available: boolean; reason?: string };
 type OwnedHandle = {
@@ -64,7 +167,6 @@ export function HandleClaimPanel({
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
     useSiweSession();
   const origin = useOrigin();
-  const linkCopy = useCopyToClipboard();
   const qc = useQueryClient();
   const [input, setInput] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -73,12 +175,8 @@ export function HandleClaimPanel({
     handle: string;
     status: 'created' | 'updated';
   } | null>(null);
-  // どの handle のリンクをコピーしたか。copied フラグはフック単位なので、これが無いと
-  // 複数所有時に全行が「コピー済み」表示になる。
-  const [copiedHandle, setCopiedHandle] = useState<string | null>(null);
-  // QR ポップアップ対象 (null = 閉)。一覧に常時 QR を並べると縦に長く読みにくいため
-  // ボタン経由のモーダル提示にする。
-  const [qrHandle, setQrHandle] = useState<string | null>(null);
+  // 削除確認モーダルの対象 handle (null = 閉)。window.confirm を置き換える danger 確認。
+  const [releaseTarget, setReleaseTarget] = useState<string | null>(null);
 
 
   // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
@@ -171,11 +269,12 @@ export function HandleClaimPanel({
       qc.invalidateQueries({ queryKey: ['handle-mine'] });
       // 解放した handle を空き確認キャッシュからも無効化 (旧 'taken' を残さない)。
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
+      // 確認モーダルを閉じる (成功で消す。失敗時は開いたまま再試行できるよう残す)。
+      setReleaseTarget(null);
       // 編集中の handle を解放したら編集モードを解除する (onEdit/onStopEditing と対称に)。
       // でないと「@x を編集中」バナー・input・publish ボタンが消えた handle を指し続け、
       // 1 クリックで削除したはずの handle を再作成してしまう。
       if (editingHandle === handle) {
-        setCopiedHandle(null);
         onStopEditing?.();
       }
     },
@@ -189,12 +288,11 @@ export function HandleClaimPanel({
   const atLimit = owned.length >= max;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-800">{t('title')}</h3>
-      <p className="mt-1 text-xs text-slate-500">{t('description')}</p>
+    <div>
+      <p className="text-xs text-slate-500">{t('description')}</p>
 
       {!isSignedIn ? (
-        // サインインは config の有無に関わらず出す (既存 handle の編集/解放を受取先未設定でも到達可能に)。
+        // サインインは config の有無に関わらず出す (既存 handle の編集/削除を受取先未設定でも到達可能に)。
         <div className="mt-3">
           <button
             type="button"
@@ -232,7 +330,6 @@ export function HandleClaimPanel({
               <ul className="space-y-3">
                 {owned.map((o) => {
                   const h = o.handle;
-                  const link = origin ? `${origin}/@${h}` : `/@${h}`;
                   const isEditing = editingHandle === h;
                   return (
                     <li
@@ -242,7 +339,7 @@ export function HandleClaimPanel({
                       }`}
                     >
                       {/* 1段目: ハンドル名のみ (URL 全文は詰まって読めないため出さない —
-                          フル URL は コピー/開く/QR が担う)。2段目: 操作ボタン (折返し可)。 */}
+                          開く/コピー/QR は ④ プレビュー下に集約)。2段目: 操作ボタン。 */}
                       <p className="break-all font-mono text-sm font-semibold text-slate-800">
                         @{h}
                       </p>
@@ -262,44 +359,12 @@ export function HandleClaimPanel({
                               {t('edit')}
                             </button>
                           )}
-                          <a
-                            href={link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
-                          >
-                            {t('open')}
-                          </a>
                           <button
                             type="button"
-                            onClick={() => {
-                              void linkCopy.copy(link);
-                              setCopiedHandle(h);
-                            }}
-                            className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
+                            onClick={() => setReleaseTarget(h)}
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
                           >
-                            {linkCopy.copied && copiedHandle === h
-                              ? t('copied')
-                              : t('copy')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setQrHandle(h)}
-                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
-                          >
-                            {t('showQr')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.confirm(t('releaseConfirm', { handle: h }))) {
-                                release.mutate(h);
-                              }
-                            }}
-                            disabled={release.isPending}
-                            className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 disabled:opacity-40"
-                          >
-                            {t('release')}
+                            {t('delete')}
                           </button>
                       </div>
                       {isEditing && (
@@ -439,13 +504,24 @@ export function HandleClaimPanel({
         </div>
       )}
 
-      {/* QR ポップアップ (一覧に常時並べると縦長で読みにくいためボタン経由)。 */}
-      <LinkQrModal
-        open={qrHandle !== null}
-        value={qrHandle ? (origin ? `${origin}/@${qrHandle}` : `/@${qrHandle}`) : ''}
-        title={qrHandle ? `@${qrHandle}` : ''}
-        closeLabel={t('qrClose')}
-        onClose={() => setQrHandle(null)}
+      {/* 削除 (解放) 確認モーダル。不可逆操作なので window.confirm でなく danger ダイアログで明示。 */}
+      <ReleaseConfirmModal
+        open={releaseTarget !== null}
+        handle={releaseTarget ?? ''}
+        link={
+          releaseTarget
+            ? origin
+              ? `${origin}/@${releaseTarget}`
+              : `open-pay.jp/@${releaseTarget}`
+            : ''
+        }
+        title={t('releaseModalTitle', { handle: releaseTarget ?? '' })}
+        body={t('releaseModalBody', { handle: releaseTarget ?? '' })}
+        confirmLabel={t('releaseModalConfirm')}
+        cancelLabel={t('releaseModalCancel')}
+        confirmDisabled={release.isPending}
+        onConfirm={() => releaseTarget && release.mutate(releaseTarget)}
+        onClose={() => setReleaseTarget(null)}
       />
     </div>
   );
