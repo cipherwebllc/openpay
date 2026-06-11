@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
+import { Loader2 } from 'lucide-react';
 import { ConnectButton } from './ConnectButton';
 import { CrossChainHint } from './CrossChainHint';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
@@ -677,6 +678,36 @@ export function TipForm({ params }: { params: TipParams }) {
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
           <p className="font-semibold">{t('errorTitle')}</p>
           <p className="mt-1 break-words">{error}</p>
+        </div>
+      )}
+
+      {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
+          (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
+      {useRelay && relay.data?.pending && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="flex items-center gap-1.5 font-semibold">
+            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {t('pendingTitle')}
+          </p>
+          <p className="mt-1 break-words">{t('pendingBody')}</p>
+          {relay.data.txHash && (
+            <p className="mt-2 break-all font-mono text-xs">
+              {relay.data.txHash}
+              {explorerBase && (
+                <>
+                  {' · '}
+                  <a
+                    href={`${explorerBase}/tx/${relay.data.txHash}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="font-sans underline hover:text-sky-900"
+                  >
+                    {t('pendingExplorerLink')} ↗
+                  </a>
+                </>
+              )}
+            </p>
+          )}
         </div>
       )}
 

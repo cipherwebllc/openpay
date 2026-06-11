@@ -144,7 +144,7 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
 }
 
 let relayMutate: ReturnType<typeof vi.fn>;
-function setRelay(state: 'idle' | 'pending' | 'success' | 'error') {
+function setRelay(state: 'idle' | 'pending' | 'success' | 'error' | 'pendingResult') {
   relayMutate = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
@@ -152,7 +152,9 @@ function setRelay(state: 'idle' | 'pending' | 'success' | 'error') {
     data:
       state === 'success'
         ? { txHash: `0x${'c'.repeat(64)}`, success: true }
-        : undefined,
+        : state === 'pendingResult'
+          ? { txHash: `0x${'d'.repeat(64)}`, success: false, pending: true }
+          : undefined,
     error: state === 'error' ? new Error('rate_limited') : null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
@@ -1128,6 +1130,41 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(
       screen.getByRole('button', { name: /100 JPYC を送る/ }),
     ).toBeEnabled();
+  });
+
+  it('relay pending → pendingTitle パネルが表示され Explorer リンクが /tx/ href を持つ', () => {
+    setRelay('pendingResult');
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
+    const explorerLink = screen.getByRole('link', { name: /Explorer で確認/ });
+    expect(explorerLink).toHaveAttribute('href', expect.stringContaining(`/tx/0x${'d'.repeat(64)}`));
+  });
+
+  it('relay pending → 送信ボタンは disabled かつ「送信中」表示', () => {
+    setRelay('pendingResult');
+    render(<TipForm params={JPYC_PARAMS} />);
+    const btn = screen.getByRole('button', { name: /送信中/ });
+    expect(btn).toBeDisabled();
+  });
+
+  it('relay pending → successTitle も errorTitle も描画されない', () => {
+    setRelay('pendingResult');
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText('チップを送信しました')).toBeNull();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
+
+  it('relay pending (txHash 無し) → パネル本体は出るが txHash 行が無い', () => {
+    relayMutate = vi.fn();
+    mockHook(useJpycEip3009Payment, {
+      mutate: relayMutate,
+      isPending: false,
+      data: { txHash: null, success: false, pending: true },
+      error: null,
+    } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Explorer で確認/ })).toBeNull();
   });
 });
 
