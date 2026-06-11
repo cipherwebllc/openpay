@@ -421,7 +421,17 @@
     "awaitingTitle": "Please check the signature screen in your wallet",
     "awaitingAmountLabel": "Amount",
     "awaitingToLabel": "Recipient",
-    "awaitingNote": "This signature grants no Approve and no access to your balance. It is submitted automatically after you sign (a few seconds)."
+    "awaitingNote": "This signature grants no Approve and no access to your balance. It is submitted automatically after you sign (a few seconds).",
+    "permitHeadline": "This payment will ask you to confirm a \"spending cap (利用許可)\" and a signature.",
+    "permitBadgeCap": "The spending cap is for this payment amount plus a gas limit only — not an unlimited Approve",
+    "permitBadgeCapCapped": "The spending cap is for this payment amount plus a gas limit only — up to {cap} {symbol}, not an unlimited Approve",
+    "permitBadgeRecipient": "The recipient is this store only",
+    "permitBadgeRecipientSplit": "{count} transfers (split payout) are made in a single confirmation",
+    "permitBadgeScope": "This permission is used only for this payment ({amount} {symbol})",
+    "permitAwaitingTitle": "Please check the confirmation screen in your wallet — a spending cap and a transfer confirmation will be shown.",
+    "permitAwaitingTitleCapped": "Please check the confirmation screen in your wallet — a spending cap (up to {cap} {symbol}) and a transfer confirmation will be shown.",
+    "standardHint": "Your wallet will show a standard transfer confirmation. Please review the amount and recipient before approving.",
+    "nativeHint": "Your wallet will show a standard transfer confirmation. Please review the amount and recipient before approving."
   },
   "NativeTipForm": {
     "header": "Support (native token)",

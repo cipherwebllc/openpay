@@ -8,26 +8,153 @@
 // 受取先固定・5 分失効・1 回限り) で、この恐怖は実態と乖離した「認知の問題」なので
 // 説明だけで解消できる (計画 §1)。
 //
-// スコープは P1 = JPYC relay free mode のみ。standard/USDC/recover は別 kind が必要なため
-// 本コンポーネントは出さない (計画 §3.3)。決済ロジックには一切触れない (preview を受けて
-// 描画するだけ・isPending を受けて待機表示に切替えるだけ)。
+// kind 別の出し分け (計画 §3.3 経路別コピーマトリクス・誠実性の要):
+//   jpyc-relay-free : 上記 5 点フルパネル (最強コピー・P1 不変)。
+//   usdc-permit     : Circle Paymaster 経路。EIP-2612 permit (Spending cap) を求めるので
+//                     「Approve は求めません」とは書けない。有界 permit (この決済額+ガス
+//                     上限のみ・無制限ではない) を正直に説明する (計画 §3.3 の誠実性が本質)。
+//   standard/native : 通常の送金確認。説明過剰にしない 1 行ヒントのみ (計画 §3.3)。
 //
-// トーン: 断定的安全宣言を避け事実 (構造) の説明に徹する (計画 §3.3/§6・景表法整合)。
-// 非技術表現を主・技術表現を従で併記する (計画 §8 Q4)。
+// 決済ロジックには一切触れない (preview/値を受けて描画するだけ・awaiting を受けて待機表示に
+// 切替えるだけ)。トーン: 断定的安全宣言を避け事実 (構造) の説明に徹する (計画 §3.3/§6・
+// 景表法整合)。非技術表現を主・技術表現を従で併記する (計画 §8 Q4)。
 
 import { useTranslations } from 'next-intl';
 import { ShieldCheck, Check, Loader2 } from 'lucide-react';
 import { shortAddress } from '@/lib/format';
 import type { JpycRelaySignPreview } from '@/lib/signPreview';
 
-export function SignReassurance({
+export type SignReassuranceProps =
+  // P1 の JPYC relay free フルパネル (照合表込み・不変)。
+  | { kind: 'jpyc-relay-free'; preview: JpycRelaySignPreview; awaiting: boolean }
+  // Circle Paymaster (USDC) 経路。permit (Spending cap) を有界として説明する。
+  // permitCapHuman は circle quote の permitAmount を formatUnits したもの (取れなければ省略)。
+  // transferCount>1 は split (分割受取) を 1 回の permit で行うケース。
+  | {
+      kind: 'usdc-permit';
+      amountHuman: string;
+      symbol: string;
+      permitCapHuman?: string;
+      transferCount?: number;
+      awaiting: boolean;
+    }
+  // 通常送金 (standard / native)。フルパネルでなく 1 行ヒント。awaiting なし。
+  | { kind: 'standard' | 'native'; awaiting?: false };
+
+export function SignReassurance(props: SignReassuranceProps) {
+  const t = useTranslations('SignReassurance');
+
+  if (props.kind === 'jpyc-relay-free') {
+    return <JpycRelayFreePanel preview={props.preview} awaiting={props.awaiting} t={t} />;
+  }
+
+  if (props.kind === 'usdc-permit') {
+    return <UsdcPermitPanel {...props} t={t} />;
+  }
+
+  // standard / native: 通常の送金確認なので説明過剰にしない 1 行ヒント (計画 §3.3)。
+  // 文言は同一だがキーは分ける (将来分岐用)。
+  return (
+    <p className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+      <ShieldCheck
+        className="mt-0.5 h-4 w-4 flex-none text-slate-500"
+        aria-hidden
+      />
+      <span>{t(props.kind === 'native' ? 'nativeHint' : 'standardHint')}</span>
+    </p>
+  );
+}
+
+type Translate = ReturnType<typeof useTranslations<'SignReassurance'>>;
+
+// Circle Paymaster (USDC) の有界 permit パネル。emerald 同系だがバッジ文言を変える
+// (Approve なしとは書かない・有界 permit を正直に説明する)。照合表は P2 では出さない
+// (permit の生フィールドは P4 検討・虚偽や不正確を出さないため・計画 §3.3)。
+function UsdcPermitPanel({
+  amountHuman,
+  symbol,
+  permitCapHuman,
+  transferCount,
+  awaiting,
+  t,
+}: {
+  amountHuman: string;
+  symbol: string;
+  permitCapHuman?: string;
+  transferCount?: number;
+  awaiting: boolean;
+  t: Translate;
+}) {
+  // 署名「中」: ウォレットアプリへ画面が切り替わるモバイルでも文脈を見失わないよう、
+  // 通常パネルと置換して大きく待機表示を出す (計画 §3.2)。
+  if (awaiting) {
+    return (
+      <div
+        className="rounded-2xl border-2 border-brand bg-brand/5 p-5"
+        role="status"
+        aria-live="polite"
+      >
+        <p className="flex items-center gap-2 text-sm font-semibold text-brand-dark">
+          <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+          {permitCapHuman
+            ? t('permitAwaitingTitleCapped', { cap: permitCapHuman, symbol })
+            : t('permitAwaitingTitle')}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+      <p className="flex items-start gap-2 text-sm font-semibold text-emerald-900">
+        <ShieldCheck
+          className="mt-0.5 h-5 w-5 flex-none text-emerald-600"
+          aria-hidden
+        />
+        <span>{t('permitHeadline')}</span>
+      </p>
+
+      <ul className="mt-3 space-y-2 text-sm text-emerald-900">
+        <li className="flex items-start gap-2">
+          <Check className="mt-0.5 h-4 w-4 flex-none text-emerald-600" aria-hidden />
+          <span>
+            {permitCapHuman
+              ? t('permitBadgeCapCapped', { cap: permitCapHuman, symbol })
+              : t('permitBadgeCap')}
+          </span>
+        </li>
+        <li className="flex items-start gap-2">
+          <Check className="mt-0.5 h-4 w-4 flex-none text-emerald-600" aria-hidden />
+          <span>
+            {transferCount !== undefined && transferCount > 1
+              ? t('permitBadgeRecipientSplit', { count: transferCount })
+              : t('permitBadgeRecipient')}
+          </span>
+        </li>
+        <li className="flex items-start gap-2">
+          <Check className="mt-0.5 h-4 w-4 flex-none text-emerald-600" aria-hidden />
+          <span>{t('permitBadgeScope', { amount: amountHuman, symbol })}</span>
+        </li>
+      </ul>
+
+      {/* Blockaid 暫定注記は jpyc-relay-free と共通文言を再利用 (計画指定)。 */}
+      <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        {t('blockaidNote')}
+      </p>
+    </div>
+  );
+}
+
+// P1 の JPYC relay free フルパネル + 署名待ちオーバーレイ。挙動は P1 から不変。
+function JpycRelayFreePanel({
   preview,
   awaiting,
+  t,
 }: {
   preview: JpycRelaySignPreview;
   awaiting: boolean;
+  t: Translate;
 }) {
-  const t = useTranslations('SignReassurance');
   const { amountHuman, symbol, amountAtomic, to, storeName, expiresInMin, decimals } =
     preview;
 

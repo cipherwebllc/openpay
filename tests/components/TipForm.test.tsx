@@ -1259,3 +1259,66 @@ describe('ReceiveMethodPicker × 実 TipForm — 切替で金額がリセット�
     expect(screen.getByPlaceholderText('例: 7.50')).toHaveValue('');
   });
 });
+
+// 「署名安心 UX」P2: relay free でフルパネル・Circle で usdc-permit (tip は standard 経路なし)。
+describe('TipForm — 署名安心パネル (SignReassurance・P2)', () => {
+  it('relay free + JPYC: jpyc-relay-free フルパネル (preview は amountWei と同一ソース)', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null); // free
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<TipForm params={JPYC_PARAMS} />);
+
+    // フルパネルの見出し + バッジ。preset[0]=100 JPYC が初期選択。
+    expect(
+      screen.getByText(/求められるのは「署名」1回だけ/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/動かせるのは 100 JPYC ちょうど/)).toBeInTheDocument();
+    // 照合表に署名する生の数字 (100 * 10^18) が出る。
+    expect(screen.getByText('100000000000000000000')).toBeInTheDocument();
+  });
+
+  it('relay recover (forwarder 設定) では非表示 (free のみ・虚偽の安心を出さない)', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
+  it('Circle (USDC gasless): usdc-permit パネル + permitCap (上限) を formatUnits で表示', () => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+    vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    // permitAmount=1.5 USDC (= 1_500_000 atomic・6 桁)。preset[0]=1 USDC。
+    setCircleQuote('ready', { gasAmount: 0n, permitAmount: 1_500_000n });
+    render(<TipForm params={USDC_PARAMS} />);
+
+    expect(
+      screen.getByText(/利用許可 \(Spending cap\).+署名/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/上限 1\.5 USDC まで/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/この許可はこの決済 \(1 USDC\) にのみ使われます/),
+    ).toBeInTheDocument();
+    // 有界 permit のため「Approve は求めません」は書かない (誠実性)。
+    expect(screen.queryByText(/Approve \(利用許可\) は求めません/)).toBeNull();
+  });
+
+  it('USDC Pimlico erc20 (非 circle): どのパネルも出さない (スコープ外)', () => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+    // resolveUsdcGaslessProvider 既定 'pimlico'。
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.queryByText(/利用許可 \(Spending cap\)/)).toBeNull();
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+});

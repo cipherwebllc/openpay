@@ -421,7 +421,17 @@
     "awaitingTitle": "ウォレットの署名画面をご確認ください",
     "awaitingAmountLabel": "金額",
     "awaitingToLabel": "送金先",
-    "awaitingNote": "この署名で Approve や残高へのアクセス権が渡ることはありません。署名後は自動で送信されます (数秒)。"
+    "awaitingNote": "この署名で Approve や残高へのアクセス権が渡ることはありません。署名後は自動で送信されます (数秒)。",
+    "permitHeadline": "この支払いでは「利用許可 (Spending cap)」と「署名」の確認が表示されます。",
+    "permitBadgeCap": "利用許可は この決済額+ガス代上限のみ です — 無制限の Approve ではありません",
+    "permitBadgeCapCapped": "利用許可は この決済額+ガス代上限のみ です — 上限 {cap} {symbol} まで・無制限の Approve ではありません",
+    "permitBadgeRecipient": "送金先はこのお店だけです",
+    "permitBadgeRecipientSplit": "{count} 件の送金 (分割受取) を 1 回の確認で行います",
+    "permitBadgeScope": "この許可はこの決済 ({amount} {symbol}) にのみ使われます",
+    "permitAwaitingTitle": "ウォレットの確認画面をご確認ください — 利用許可と送金の確認が表示されます。",
+    "permitAwaitingTitleCapped": "ウォレットの確認画面をご確認ください — 利用許可 (上限 {cap} {symbol}) と送金の確認が表示されます。",
+    "standardHint": "ウォレットには通常の送金確認が表示されます。金額と宛先をご確認のうえ承認してください。",
+    "nativeHint": "ウォレットには通常の送金確認が表示されます。金額と宛先をご確認のうえ承認してください。"
   },
   "NativeTipForm": {
     "header": "応援 (ネイティブトークン)",

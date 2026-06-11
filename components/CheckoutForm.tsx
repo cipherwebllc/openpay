@@ -16,6 +16,7 @@ import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { SuccessOverlay } from './SuccessOverlay';
+import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -45,6 +46,7 @@ import {
 } from '@/lib/url';
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
+import { buildJpycRelaySignPreview } from '@/lib/signPreview';
 
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
 
@@ -602,6 +604,43 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? !!(relay.data && relay.data.success)
       : !!(gasless.data && gasless.data.success);
 
+  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
+  //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
+  //       渡す変数 (params.to / totalWei) と同一ソース。recover はコピー未対応で出さない (§10-7・P4)。
+  //   (b) standard: 通常の送金確認 1 行ヒント。
+  //   (c) Circle (USDC gasless): usdc-permit。permitCap は circle quote の permitAmount を
+  //       formatUnits (未取得なら省略)。checkout は split 非対応のため transferCount は出さない。
+  // 署名内容は不変・表示のみ。Pimlico 7702 経路 (非 relay JPYC sponsorship 等) はスコープ外。
+  const showRelayFree =
+    useRelay &&
+    jpycForwarderFor(chainId ?? deployment.chainId) === null &&
+    totalWei > 0n;
+  const signReassurance: SignReassuranceProps | null = showRelayFree
+    ? {
+        kind: 'jpyc-relay-free',
+        preview: buildJpycRelaySignPreview({
+          value: totalWei,
+          merchant: params.to,
+          decimals: deployment.decimals,
+          displaySymbol: deployment.displaySymbol,
+        }),
+        awaiting: relay.isPending,
+      }
+    : isStandard
+      ? { kind: 'standard' }
+      : isCircle && totalWei > 0n
+        ? {
+            kind: 'usdc-permit',
+            amountHuman: formatUnits(totalWei, deployment.decimals),
+            symbol: deployment.displaySymbol,
+            permitCapHuman:
+              circlePermitAmount !== undefined
+                ? formatUnits(circlePermitAmount, deployment.decimals)
+                : undefined,
+            awaiting: gasless.isPending,
+          }
+        : null;
+
   return (
     <div className="space-y-4">
       <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -785,6 +824,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             </p>
           )}
         </section>
+      )}
+
+      {/* 署名安心パネル/ヒント (支払いボタン直上)。経路別に kind を出し分ける (計画 §3.3)。
+          完了後は出さない。表示専用で決済ロジックには触れない。 */}
+      {!completed && signReassurance && (
+        <SignReassurance {...signReassurance} />
       )}
 
       {!completed && (

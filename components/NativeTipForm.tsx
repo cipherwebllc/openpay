@@ -21,6 +21,7 @@ import {
 } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { ResultRow } from './ResultRow';
+import { SignReassurance } from './SignReassurance';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { logger } from '@/lib/logger';
 import { DECIMAL_PATTERN, exceedsTokenPrecision, type NativeTipParams } from '@/lib/url';
@@ -292,6 +293,10 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
           </div>
         )}
       </section>
+
+      {/* 署名安心ヒント (送信ボタン直上)。ネイティブ送金は通常の送金確認 1 行のみ (計画 §3.3)。
+          表示専用で決済ロジックには触れない。 */}
+      {!confirmed && <SignReassurance kind="native" />}
 
       <button
         type="button"

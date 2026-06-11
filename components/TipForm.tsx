@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { parseUnits } from 'viem';
+import { formatUnits, parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { Loader2 } from 'lucide-react';
 import { ConnectButton } from './ConnectButton';
@@ -13,6 +13,7 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SuccessOverlay } from './SuccessOverlay';
+import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
@@ -41,6 +42,7 @@ import {
 } from '@/lib/url';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
+import { buildJpycRelaySignPreview } from '@/lib/signPreview';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 
@@ -427,6 +429,40 @@ export function TipForm({ params }: { params: TipParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
+  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。tip は standard 経路を持たないので
+  // (a) relay free と (b) Circle USDC の 2 kind のみ (計画 §3.3)。
+  //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
+  //       渡す変数 (params.to / amountWei) と同一ソース。recover はコピー未対応で出さない (P4)。
+  //   (c) Circle (USDC gasless): usdc-permit。permitCap は circle quote の permitAmount を
+  //       formatUnits (未取得なら省略)。tip は split 非対応のため transferCount は出さない。
+  // 署名内容は不変・表示のみ。Pimlico 7702 経路はスコープ外。
+  const showRelayFree =
+    useRelay && !useRecover && amountWei > 0n;
+  const signReassurance: SignReassuranceProps | null = showRelayFree
+    ? {
+        kind: 'jpyc-relay-free',
+        preview: buildJpycRelaySignPreview({
+          value: amountWei,
+          merchant: params.to,
+          storeName: params.name ?? undefined,
+          decimals: deployment.decimals,
+          displaySymbol: deployment.displaySymbol,
+        }),
+        awaiting: relay.isPending,
+      }
+    : isCircle && amountWei > 0n
+      ? {
+          kind: 'usdc-permit',
+          amountHuman: formatUnits(amountWei, deployment.decimals),
+          symbol: deployment.displaySymbol,
+          permitCapHuman:
+            circlePermitAmount !== undefined
+              ? formatUnits(circlePermitAmount, deployment.decimals)
+              : undefined,
+          awaiting: gasless.isPending,
+        }
+      : null;
+
   return (
     <div className="space-y-4">
       <header
@@ -651,6 +687,11 @@ export function TipForm({ params }: { params: TipParams }) {
           />
         )}
       </section>
+
+      {/* 署名安心パネル/ヒント (送信ボタン直上)。relay free=フルパネル / Circle USDC=usdc-permit。
+          recover/Pimlico 7702 はスコープ外で出さない。署名/確認待ち中は待機表示に置換する。
+          表示専用で決済ロジックには触れない。 */}
+      {signReassurance && <SignReassurance {...signReassurance} />}
 
       <button
         type="button"

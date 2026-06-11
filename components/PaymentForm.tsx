@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { parseUnits } from 'viem';
+import { formatUnits, parseUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { PayStepStrip } from './PayStepStrip';
@@ -16,7 +16,7 @@ import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { SuccessOverlay } from './SuccessOverlay';
-import { SignReassurance } from './SignReassurance';
+import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -577,24 +577,48 @@ function PaymentDetails({ params }: { params: PayParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
-  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P1)。relay free mode (forwarder 未設定)
-  // でのみ表示する。recover (forwarder 設定済) は to=forwarder で free と説明が異なり、
-  // コピー未対応のため出さない (虚偽の安心を出さない・計画 §3.3 / §10-7・P4)。
-  // preview は relay.mutate({ merchant: params.to, value: amountWei, ... }) と同一変数から
-  // 導出し、ウォレットに出る生の数字 (value) と OpenPay 表示の乖離をゼロにする。
-  const showSignReassurance =
+  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P1+P2)。経路別に kind を出し分ける
+  // (計画 §3.3 経路別コピーマトリクス・署名内容は不変・表示のみ)。Pimlico 7702 経路 (split の
+  // 非 relay JPYC など) はスコープ外なので出さない (計画 §2)。
+  //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate
+  //       ({ merchant: params.to, value: amountWei }) と同一変数から導出し、ウォレットに出る
+  //       生の数字 (value) と OpenPay 表示の乖離をゼロにする。recover (forwarder 設定済) は
+  //       to=forwarder で free と説明が異なり、コピー未対応のため出さない (計画 §3.3 / §10-7・P4)。
+  //   (b) standard: 通常の送金確認 1 行ヒント。
+  //   (c) Circle (USDC gasless): usdc-permit。permitCap は circle quote の permitAmount を
+  //       formatUnits (未取得なら省略)。split があれば transferCount を渡す。
+  const showRelayFree =
     useRelay &&
     jpycForwarderFor(chainId ?? deployment.chainId) === null &&
     amountWei > 0n;
-  const signPreview = showSignReassurance
-    ? buildJpycRelaySignPreview({
-        value: amountWei,
-        merchant: params.to,
-        storeName: params.storeName,
-        decimals: deployment.decimals,
-        displaySymbol: deployment.displaySymbol,
-      })
-    : null;
+  const signReassurance: SignReassuranceProps | null = showRelayFree
+    ? {
+        kind: 'jpyc-relay-free',
+        preview: buildJpycRelaySignPreview({
+          value: amountWei,
+          merchant: params.to,
+          storeName: params.storeName,
+          decimals: deployment.decimals,
+          displaySymbol: deployment.displaySymbol,
+        }),
+        awaiting: relay.isPending,
+      }
+    : isStandard
+      ? { kind: 'standard' }
+      : isCircle && amountWei > 0n
+        ? {
+            kind: 'usdc-permit',
+            amountHuman: formatUnits(amountWei, deployment.decimals),
+            symbol: deployment.displaySymbol,
+            permitCapHuman:
+              circlePermitAmount !== undefined
+                ? formatUnits(circlePermitAmount, deployment.decimals)
+                : undefined,
+            // split の追加受取人 + primary を 1 permit で行うので transferCount = 1 + extras。
+            transferCount: hasSplit ? 1 + (params.split?.length ?? 0) : undefined,
+            awaiting: gasless.isPending,
+          }
+        : null;
 
   return (
     <div className="space-y-6">
@@ -876,12 +900,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
         )}
       </section>
 
-      {/* 署名安心パネル (Pay ボタン直上)。relay free mode のみ・recover/standard/USDC は
-          P2/P4 で別 kind が必要なため出さない。署名待ち (relay.isPending) 中は待機表示に
-          置換する。表示専用で決済ロジックには触れない。 */}
-      {signPreview && (
-        <SignReassurance preview={signPreview} awaiting={relay.isPending} />
-      )}
+      {/* 署名安心パネル/ヒント (Pay ボタン直上)。経路別に kind を出し分ける (計画 §3.3)。
+          relay free=フルパネル / standard=1 行ヒント / Circle USDC=usdc-permit。recover と
+          Pimlico 7702 はスコープ外で出さない。署名/確認待ち中は待機表示に置換する。
+          表示専用で決済ロジックには触れない。 */}
+      {signReassurance && <SignReassurance {...signReassurance} />}
 
       <button
         type="button"

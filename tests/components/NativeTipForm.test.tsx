@@ -194,4 +194,25 @@ describe('NativeTipForm', () => {
         .disabled,
     ).toBe(false);
   });
+
+  // 「署名安心 UX」P2: ネイティブ送金は通常の送金確認 1 行ヒントのみ (計画 §3.3)。
+  it('署名安心: native ヒント 1 行を送信ボタン直上に出す (フルパネルは出さない)', () => {
+    h.account = { address: TO, isConnected: true, chainId: POLYGON.id };
+    h.balance = { data: { value: parseEther('100') } };
+    render();
+    expect(
+      screen.getByText(/通常の送金確認が表示されます/),
+    ).toBeInTheDocument();
+    // フルパネル (relay free) の見出しは出さない。
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
+  it('署名安心: 確定後 (成功) は native ヒントを出さない', () => {
+    h.account = { address: TO, isConnected: true, chainId: POLYGON.id };
+    h.balance = { data: { value: parseEther('100') } };
+    h.send = { ...h.send, data: `0x${'a'.repeat(64)}` };
+    h.receipt = { data: { status: 'success' }, isLoading: false, isSuccess: true };
+    render();
+    expect(screen.queryByText(/通常の送金確認が表示されます/)).toBeNull();
+  });
 });

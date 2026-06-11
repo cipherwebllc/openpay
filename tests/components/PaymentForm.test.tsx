@@ -62,13 +62,17 @@ vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
 // Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
 // 走らせないよう stub (QueryClientProvider 無しで render する既存 test を壊さない)。
-vi.mock('@/hooks/useGasQuoteCircle', () => ({
-  useGasQuoteCircle: vi.fn(() => ({
-    data: undefined,
-    error: null,
-    fetchStatus: 'idle',
-  })),
-}));
+// circle 経路 (usdc-permit 署名安心) テストでのみ setCircleQuote で data を持たせる。
+vi.mock('@/hooks/useGasQuoteCircle', () => ({ useGasQuoteCircle: vi.fn() }));
+// resolveUsdcGaslessProvider は既定 'pimlico' (= 従来 erc20)。circle テストでのみ
+// 'circle' に切替える (TipForm.test と同型)。
+vi.mock('@/lib/circlePaymaster', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/circlePaymaster')>(
+      '@/lib/circlePaymaster',
+    );
+  return { ...actual, resolveUsdcGaslessProvider: vi.fn(() => 'pimlico') };
+});
 // CrossChainHint は wagmi の useWalletClient / usePublicClient + react-query
 // に依存するが、本 test file の責務は PaymentForm 本体ロジックのため、Hint は
 // 空 component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
@@ -105,6 +109,8 @@ import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
 import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
+import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
+import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
@@ -280,6 +286,25 @@ function setSwitchChain() {
   });
 }
 
+// Circle quote: 'idle' (非 active・既定) / 'ready' (permitAmount + gasAmount を返す)。
+// circle 経路 (usdc-permit 署名安心) テストで data を持たせる (TipForm.test と同型)。
+function setCircleQuote(
+  state: 'idle' | 'ready',
+  opts: { gasAmount?: bigint; permitAmount?: bigint } = {},
+) {
+  mockHook(useGasQuoteCircle, {
+    data:
+      state === 'ready'
+        ? {
+            gasAmount: opts.gasAmount ?? 0n,
+            permitAmount: opts.permitAmount ?? 1_000_000n,
+          }
+        : undefined,
+    error: null,
+    fetchStatus: 'idle',
+  } as Partial<ReturnType<typeof useGasQuoteCircle>>);
+}
+
 // useGasQuoteUsdc は ERC20 paymaster mode のみ動く。テストの大半は testnet 環境で
 // USDC が sponsorship にフォールバックされるので enabled=false → data=undefined に
 // なる。下記の状態を既定にし、ERC20 mode テストだけ data を持たせる。
@@ -304,6 +329,7 @@ beforeEach(() => {
   setStandardPayment('idle');
   setRelay('idle');
   setGasQuote('disabled');
+  setCircleQuote('idle');
   setAccount({ connected: false });
   // 既定は testnet 環境の挙動 (USDC/JPYC とも sponsorship)。ERC20 mode を
   // 検証する describe ブロックでだけ override する。
@@ -311,6 +337,8 @@ beforeEach(() => {
   // 既定は従来の Pimlico 経路 + free 構成 (forwarder 無し)。relay テストでのみ切替える。
   vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
   vi.mocked(jpycForwarderFor).mockReturnValue(null);
+  // 既定 USDC は Pimlico erc20。circle テストでのみ 'circle' へ override。
+  vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
 });
 
 describe('PaymentForm — URL parse', () => {
@@ -1664,6 +1692,89 @@ describe('PaymentForm — 署名安心パネル (SignReassurance・relay free)',
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(10_000n * 10n ** 18n);
     render(<PaymentForm />);
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+});
+
+// 「署名安心 UX」P2: standard 経路は 1 行ヒント・Circle (USDC gasless) は usdc-permit。
+describe('PaymentForm — 署名安心 P2 (standard ヒント / Circle usdc-permit)', () => {
+  it('standard 経路: 通常送金の 1 行ヒント (フルパネル/usdc-permit は出さない)', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<PaymentForm />);
+    expect(screen.getByText(/通常の送金確認が表示されます/)).toBeInTheDocument();
+    // relay-free フルパネルは出さない。
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
+  it('Circle (USDC gasless): usdc-permit パネル + permitCap (上限) を formatUnits で表示', () => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+    vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    // permitAmount=100.5 USDC (= 100_500_000 atomic・6 桁)。cap 表示を formatUnits で検証。
+    setCircleQuote('ready', { gasAmount: 0n, permitAmount: 100_500_000n });
+    render(<PaymentForm />);
+
+    // 有界 permit 見出し + cap バッジ + この決済にのみ。
+    expect(
+      screen.getByText(/利用許可 \(Spending cap\).+署名/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/上限 100\.5 USDC まで/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/この許可はこの決済 \(100 USDC\) にのみ使われます/),
+    ).toBeInTheDocument();
+    // relay-free の「Approve は求めません」は出さない (有界 permit のため・誠実性)。
+    expect(screen.queryByText(/Approve \(利用許可\) は求めません/)).toBeNull();
+  });
+
+  it('Circle で split QR: transferCount で「N 件の送金 (分割受取)」を表示', () => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+    vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+    // split=addr:30 → primary + 1 extra = 2 件。
+    const SPLIT: Address = '0x3333333333333333333333333333333333333333';
+    setURL(`to=${MERCHANT}&token=usdc&amount=100&split=${SPLIT}:30`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setCircleQuote('ready', { gasAmount: 0n, permitAmount: 100_000_000n });
+    render(<PaymentForm />);
+    expect(
+      screen.getByText(/2 件の送金 \(分割受取\) を 1 回の確認で行います/),
+    ).toBeInTheDocument();
+  });
+
+  it('Circle 経路で permitAmount 未取得: cap なし文言 (上限なし版バッジ)', () => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+    vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    // permit 未算定 (idle) でもパネルは出る (cap 省略)。
+    setCircleQuote('idle');
+    render(<PaymentForm />);
+    expect(
+      screen.getByText(/この決済額\+ガス代上限のみ/),
+    ).toBeInTheDocument();
+    // cap 文言 (上限 … まで) は出ない。
+    expect(screen.queryByText(/上限 .+ まで/)).toBeNull();
+  });
+
+  it('USDC Pimlico erc20 (非 circle・非 standard): どのパネルも出さない (スコープ外)', () => {
+    vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+    // resolveUsdcGaslessProvider 既定 'pimlico'。
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    expect(screen.queryByText(/利用許可 \(Spending cap\)/)).toBeNull();
+    expect(screen.queryByText(/通常の送金確認が表示されます/)).toBeNull();
     expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
   });
 });
