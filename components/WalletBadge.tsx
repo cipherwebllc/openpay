@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { Check, ChevronDown } from 'lucide-react';
 import { shortAddress } from '@/lib/format';
+import { walletIconSrc } from '@/lib/walletIcons';
 import { env } from '@/lib/env';
 import { useVisibleConnectors } from '@/hooks/useVisibleConnectors';
 import { useSiweSession } from '@/hooks/useSiweSession';
@@ -133,8 +134,16 @@ export function WalletBadge() {
               role="menuitem"
               disabled={isPending}
               onClick={() => connect({ connector: c })}
-              className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 disabled:opacity-50"
             >
+              {/* ウォレットアイコン (EIP-6963 data URI or 同梱 SVG)。装飾なので alt は空。 */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={walletIconSrc(c)}
+                alt=""
+                aria-hidden
+                className="h-4 w-4 shrink-0 object-contain"
+              />
               {c.name}
             </button>
           ))

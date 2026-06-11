@@ -214,6 +214,35 @@ describe('ConnectButton (disconnected)', () => {
     const rabbyButtons = screen.getAllByRole('button', { name: 'Rabby Wallet' });
     expect(rabbyButtons).toHaveLength(1);
   });
+
+  it('各ボタンにウォレットアイコン (EIP-6963 icon 優先・同梱 SVG マッピング・汎用 fallback)', async () => {
+    const dataUri = 'data:image/svg+xml;base64,PHN2Zy8+';
+    mockHook(useAccount, { isConnected: false, address: undefined });
+    mockHook(useConnect, {
+      connectors: [
+        injected('1', 'MetaMask'),
+        other('2', 'WalletConnect'),
+        // EIP-6963 が provider 自身のアイコンを告知するケース → マッピングより優先
+        { ...injected('3', 'Phantom'), icon: dataUri },
+        injected('4', 'Unknown Wallet'),
+      ],
+      connect: vi.fn(),
+      isPending: false,
+      error: null,
+    });
+    mockHook(useDisconnect, { disconnect: vi.fn() });
+
+    render(<ConnectButton />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'MetaMask' })).toBeInTheDocument();
+    });
+    const iconSrc = (name: string) =>
+      screen.getByRole('button', { name }).querySelector('img')?.getAttribute('src');
+    expect(iconSrc('MetaMask')).toBe('/wallets/MetaMask.svg');
+    expect(iconSrc('WalletConnect')).toBe('/wallets/walletConnectWallet.svg');
+    expect(iconSrc('Phantom')).toBe(dataUri);
+    expect(iconSrc('Unknown Wallet')).toBe('/wallets/injectedWallet.svg');
+  });
 });
 
 describe('ConnectButton (connected)', () => {

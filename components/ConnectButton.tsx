@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { shortAddress } from '@/lib/format';
+import { walletIconSrc } from '@/lib/walletIcons';
 import { useVisibleConnectors } from '@/hooks/useVisibleConnectors';
 
 function isUserRejection(err: Error): boolean {
@@ -68,8 +69,17 @@ export function ConnectButton() {
             type="button"
             disabled={isPending}
             onClick={() => connect({ connector: c })}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
           >
+            {/* ウォレットアイコン (EIP-6963 data URI or 同梱 SVG)。brand 青地で青系ロゴが
+                沈まないよう白チップに載せる。装飾なので alt は空。 */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={walletIconSrc(c)}
+              alt=""
+              aria-hidden
+              className="h-5 w-5 shrink-0 rounded-md bg-white object-contain p-0.5"
+            />
             {c.name}
           </button>
         ))}

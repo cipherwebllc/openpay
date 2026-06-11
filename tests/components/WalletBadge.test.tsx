@@ -312,6 +312,23 @@ describe('WalletBadge: 未接続 branch', () => {
     expect(btn.disabled).toBe(true);
   });
 
+  it('connector menuitem にウォレットアイコン (同梱 SVG マッピング) を表示', () => {
+    setDisconnected();
+    visibleConnectorsMock.mockReturnValue([
+      { uid: '1', name: 'MetaMask' },
+      { uid: '2', name: 'Coinbase Wallet' },
+    ]);
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('接続');
+    const iconSrc = (name: string) =>
+      within(details)
+        .getByRole('menuitem', { name })
+        .querySelector('img')
+        ?.getAttribute('src');
+    expect(iconSrc('MetaMask')).toBe('/wallets/MetaMask.svg');
+    expect(iconSrc('Coinbase Wallet')).toBe('/wallets/coinbaseWallet.svg');
+  });
+
   it('visible connector が空 → "…" placeholder が dropdown 内に出る (open 状態で確認)', () => {
     setDisconnected();
     visibleConnectorsMock.mockReturnValue([]);
