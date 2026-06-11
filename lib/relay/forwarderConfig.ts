@@ -5,6 +5,7 @@
 
 import { isAddress, getAddress, type Address } from 'viem';
 import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
+import { env } from '@/lib/env';
 
 // deploy 済 Eip3009Forwarder アドレス (chain 別)。未設定 = その chain は free モード。NEXT_PUBLIC は
 // build 時に inline されるため、リテラル参照を module 直下の table に置いても挙動は同じ (chain 追加が 1 行)。
@@ -15,9 +16,21 @@ const FORWARDER_ADDRESS_ENV: Record<number, string | undefined> = {
   [kairos.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIROS,
 };
 
-export function jpycForwarderFor(chainId: number): Address | null {
+// 設定された (= 生の env) forwarder アドレス。a1 を考慮しない素の値で、起動時の運営向け
+// 診断 (route.ts の misconfig 警告) でのみ使う。決済経路の判定には jpycForwarderFor を使うこと。
+export function configuredJpycForwarderFor(chainId: number): Address | null {
   const raw = FORWARDER_ADDRESS_ENV[chainId];
   return raw && isAddress(raw) ? getAddress(raw) : null;
+}
+
+// a1 利用料 (env.enableUsageFee) と recover は排他: recover 経路は a1 のゲート/メーターを
+// 迂回するため両立できない。a1 を優先し、a1 が ON のときは *実効* forwarder を全箇所で null に
+// 倒す → client は free payload を組み、server は free モード (a1 ゲート+メーター付き) で処理する。
+// これにより client/server が payload 形で食い違うことがなく、致命的な 503 も不要になる。
+// configuredJpycForwarderFor は生の値で、運営向けの起動時診断にのみ使う。
+export function jpycForwarderFor(chainId: number): Address | null {
+  if (env.enableUsageFee) return null;
+  return configuredJpycForwarderFor(chainId);
 }
 
 // 顧客から JPYC で回収する gas 相当額 (atomic・18 decimals)。固定の開示バッファ (Polygon の

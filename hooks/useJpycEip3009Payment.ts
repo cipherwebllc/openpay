@@ -18,7 +18,8 @@ import {
   randomAuthorizationNonce,
 } from '@/lib/jpycEip3009';
 import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
-import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { isUserRejection } from '@/lib/walletErrors';
@@ -100,8 +101,11 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
 
       let payload: Record<string, unknown>;
       if (forwarder) {
-        // recover: gas 相当額を JPYC 回収。customer は上乗せ、merchant は受取から吸収。
-        const feeValue = relayGasFeeValue();
+        // recover: per-tx 手数料を JPYC 回収。customer は上乗せ、merchant は受取から吸収。
+        // feeValue = max(ガスフロア, billAmount × bps/10000)。bps=0 (既定) ではフロア
+        // (= 固定 2 JPYC) になり従来挙動と一致。server も同式で再計算し一致を強制する
+        // (nonce にコミットされるため client/server がずれると署名検証が失敗する)。
+        const feeValue = recoverFeeValue(value);
         const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
         if (merchantValue <= 0n) throw new Error('amount_too_small');
         const params: ForwarderSettleParams = {
@@ -138,6 +142,10 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           merchant,
           merchantValue: merchantValue.toString(),
           feeValue: feeValue.toString(),
+          // gasMode は server が billAmount を (merchantValue, feeValue) から再構成し
+          // expectedFee を求めるための検証ヒント (署名対象ではない)。誤った gasMode は
+          // expectedFee が署名済 feeValue と食い違い fee_value_mismatch で安全に弾かれる。
+          gasMode,
           validAfter: '0',
           validBefore: validBefore.toString(),
           intentSalt: params.intentSalt,

@@ -67,7 +67,11 @@ import {
   buildForwarderNonce,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
-import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import {
+  jpycForwarderFor,
+  configuredJpycForwarderFor,
+} from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
@@ -146,7 +150,6 @@ const forwarderFor = jpycForwarderFor;
 function feeReceiverFor(_chainId: number): Address | null {
   return isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
 }
-const FLAT_FEE_VALUE = relayGasFeeValue();
 const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
 
 // recover (forwarder 設定) は self-host relayer 前提 (recover 経路は forwarder.settle を自前 EOA で
@@ -156,7 +159,7 @@ const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
 if (
   PROVIDER !== 'self-host' &&
   Object.keys(SUPPORTED_CHAINS).some(
-    (id) => jpycForwarderFor(Number(id)) !== null,
+    (id) => configuredJpycForwarderFor(Number(id)) !== null,
   )
 ) {
   logger.warn('relay.jpyc.misconfig', {
@@ -167,28 +170,28 @@ if (
 
 // recover (forwarder 立替+回収) と a1 利用料 (NEXT_PUBLIC_ENABLE_USAGE_FEE) は併用不可。
 // recover 経路 (handleRecover) は isGaslessRelayBlocked の延滞遮断も recordRelayedVolume の
-// 出来高メーターも通らないため、同時設定は (1) 延滞店主のガスレスが止まらない (ゲートの
-// teeth 喪失) (2) recover 経路の出来高が a1 メーターに乗らず undercount、を黙って起こす。
-// 強制は POST handler の per-chain 503 (mainnet のみ・fail-closed) で行う — module load で
-// throw すると、開発 .env.local の併設や next build (Collecting page data) まで即死して
-// しまうため、ここでは起動時の可視化 (Sentry) に留める。testnet 併設は非商用の開発構成
-// として許容 (self-host hardening と同じ「testnet は緩く運用可」方針)。
+// 出来高メーターも通らないため、両立すると延滞ゲート/出来高メーターを迂回する。排他は resolver
+// (jpycForwarderFor) で解決済み: a1 が ON のとき jpycForwarderFor は全 chain で null を返すため
+// client は free payload を組み、server も recoverMode=false で handleFree に倒れる (ゲート/メーター付き)。
+// 致命的な 503 は不要。ただし両方を *設定* した運営の構成ミスは可視化する必要があるため、ここでは
+// 生の forwarder 値 (configuredJpycForwarderFor) で起動時に警告する (a1 が ON でも検出できる)。
 if (env.enableUsageFee) {
-  if ([...MAINNET_CHAINS].some((id) => jpycForwarderFor(id) !== null)) {
+  if ([...MAINNET_CHAINS].some((id) => configuredJpycForwarderFor(id) !== null)) {
     logger.error('relay.jpyc.misconfig', {
       reason:
         'mainnet forwarder (recover) configured while usage fee (a1) is enabled; ' +
-        'recover bypasses the fee gate/meter — relay requests on those chains will be refused (503)',
+        'recover bypasses the fee gate/meter — a1 takes precedence so recover is disabled ' +
+        '(effective forwarder=null, relay runs free mode); remove the forwarder env to clear this',
     });
   } else if (
     Object.keys(SUPPORTED_CHAINS).some(
-      (id) => jpycForwarderFor(Number(id)) !== null,
+      (id) => configuredJpycForwarderFor(Number(id)) !== null,
     )
   ) {
     logger.warn('relay.jpyc.misconfig', {
       reason:
         'testnet forwarder (recover) configured while usage fee (a1) is enabled; ' +
-        'recover bypasses the fee gate/meter (allowed on testnet only)',
+        'a1 takes precedence so recover is disabled (effective forwarder=null, relay runs free mode)',
     });
   }
 }
@@ -479,24 +482,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const chainId = raw.chainId;
 
-  // 排他 invariant の強制 (fail-closed): mainnet で recover (forwarder)×a1 が併設されたままの
-  // relay は受けない (受けるとゲート/メーターを素通りする)。free 経路へ silent degrade も
-  // しない — client は forwarder 設定を見て recover payload を送ってくるため handleFree が
-  // 400 で弾き意図が曖昧になる。明示の 503 で設定解消まで relay を止める (顧客は standard
-  // mode で支払える)。module load では throw しない (開発 .env.local の testnet 併設や
-  // next build を壊さないため・起動時 logger.error で可視化済)。
-  if (
-    env.enableUsageFee &&
-    MAINNET_CHAINS.has(chainId) &&
-    PROVIDER === 'self-host' &&
-    forwarderFor(chainId) !== null
-  ) {
-    logger.error('relay.jpyc.recover_usage_fee_conflict', { chainId });
-    return NextResponse.json(
-      { ok: false, error: 'relay_misconfigured' },
-      { status: 503 },
-    );
-  }
+  // recover (forwarder)×a1 の排他は resolver (jpycForwarderFor) で解決済み: a1 が ON のとき
+  // forwarderFor(chainId) は null を返す → 下の recoverMode が false → handleFree に倒れ、a1 の
+  // 関所ゲート + 出来高メーターが効く。よって顧客決済を壊す致命的な 503 は不要 (config guard が
+  // 顧客の支払いを止めるのは誤り)。両方を *設定* した運営の構成ミスは起動時 logger
+  // (configuredJpycForwarderFor 基準) で可視化済み。
 
   // mainnet (Polygon/Kaia) を self-host で relay する前提条件 (testnet は緩く運用可)。silent な
   // 無効化を避け mainnet のみ 503 で拒否する。
@@ -532,8 +522,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   // forwarder が設定された chain は recover モード (gas 相当額を JPYC 回収・self-host 限定)。
   // 無ければ free モード (Phase A・直接 transferWithAuthorization)。
   // ⚠️ recover (per-tx ガス回収) と a1 月額 OpenPay 利用料 (NEXT_PUBLIC_ENABLE_USAGE_FEE) は **排他**:
-  // 両方有効にすると二重課金 + recover 経路が利用料ゲート/メーターを迂回する。a1 を点灯する chain では
-  // forwarder を設定しない (= free モード固定)。詳細は docs/plans/merchant-gasless-fee-a1.md (S5/P3)。
+  // 両方有効にすると recover 経路が利用料ゲート/メーターを迂回する。排他は forwarderFor (= a1-aware な
+  // jpycForwarderFor) で解決済み: a1 が ON なら forwarderFor は null を返すため recoverMode=false に
+  // 倒れ handleFree (ゲート+メーター付き) で処理される。client も同じ resolver で free payload を組む
+  // ため payload 形が食い違わない。詳細は docs/plans/merchant-gasless-fee-a1.md (S5/P3)。
   const recoverMode =
     PROVIDER === 'self-host' &&
     chainId in SUPPORTED_CHAINS &&
@@ -716,6 +708,21 @@ async function handleRecover(
     validBefore: BigInt(raw.validBefore),
     intentSalt: raw.intentSalt as Hex,
   };
+  // gasMode は手数料計算の検証ヒント (署名対象ではない)。billAmount を (merchantValue, feeValue)
+  // から再構成するために使う:
+  //   customer: merchantValue == billAmount (顧客が手数料を上乗せ・店舗は満額受領)
+  //   merchant: merchantValue == billAmount − feeValue (店舗が手数料を吸収・顧客は表示額ちょうど)
+  // 旧 client は gasMode を送らない → 'customer' に既定 (後方互換・bps=0 なら gasMode は無関係)。
+  // 不正値も 'customer' に倒す。誤った gasMode は expectedFee が署名済 feeValue と食い違い
+  // fee_value_mismatch で安全に弾かれる (悪用不可・client 値を信用しているわけではない)。
+  const gasMode = raw.gasMode === 'merchant' ? 'merchant' : 'customer';
+  const billAmount =
+    gasMode === 'merchant'
+      ? params.merchantValue + params.feeValue
+      : params.merchantValue;
+  // server 権威の per-tx 手数料 (= max(ガスフロア, billAmount × bps/10000))。client と同式
+  // (recoverFeeValue) で算出し、forwarderRecover が feeValue === expectedFeeValue を強制する。
+  const expectedFee = recoverFeeValue(billAmount);
   const io = selfHostIoFor(chainId);
   // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
   const jpyc = jpycAddressFor(chainId);
@@ -732,7 +739,7 @@ async function handleRecover(
       : undefined;
   const deps: ForwarderRecoverDeps = {
     nowSec: () => Math.floor(Date.now() / 1000),
-    expectedFeeValue: FLAT_FEE_VALUE,
+    expectedFeeValue: expectedFee,
     maxValue: MAX_VALUE,
     maxValidityWindowSec: MAX_VALIDITY_WINDOW_SEC,
     jpycAddressFor,
@@ -741,8 +748,9 @@ async function handleRecover(
     getBalance,
     checkRateLimit,
     // refund (未 broadcast 失敗の予算返却) は free 経路 (jpycRelay) のみ配線。recover 経路は
-    // forwarderRecover が refund 契約を持たず、かつ recover×a1 併用は上の fail-fast で排除済
-    // (本番は forwarder 未設定の free 運用)。recover 本格運用時に同様の refund を検討する。
+    // forwarderRecover が refund 契約を持たず、かつ recover×a1 併用時は resolver (jpycForwarderFor)
+    // が forwarder=null に倒すため handleRecover には到達しない (a1 OFF の純 recover 構成のみ実行)。
+    // recover 本格運用時に同様の refund を検討する。
     checkGasBudget,
     checkAuthorizationUsed: readAuthorizationUsed,
     claimIdempotency,

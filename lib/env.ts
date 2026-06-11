@@ -55,6 +55,40 @@ function parsePositiveInt(name: string, raw: string | undefined): number | undef
   return n;
 }
 
+/** 非負整数 (0 を含む) を 10 進のみで受理し、[0, max] に clamp して返す。不正値/範囲外は
+ *  fallback (既定 0)。recover 手数料 bps のような「0 が正規の既定 (= inert) で、上限を超える
+ *  fat-finger は黙って ceiling に寄せたい」knob 用 (parsePositiveInt は 0 を弾くため別関数)。
+ *  '1e3'/'0x10'/'2.5'/' 3 ' のような暗黙変換・空白は /^[0-9]+$/ で排除する。 */
+function parseBoundedNonNegativeInt(
+  name: string,
+  raw: string | undefined,
+  max: number,
+  fallback = 0,
+): number {
+  const v = nonEmpty(raw);
+  if (!v) return fallback;
+  if (!/^[0-9]+$/.test(v)) {
+    console.warn(
+      `[OpenPay] ${name} is not a non-negative integer ("${v}"); falling back to ${fallback}.`,
+    );
+    return fallback;
+  }
+  const n = Number(v);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+    console.warn(
+      `[OpenPay] ${name} is not a non-negative integer ("${v}"); falling back to ${fallback}.`,
+    );
+    return fallback;
+  }
+  if (n > max) {
+    console.warn(
+      `[OpenPay] ${name} (${n}) exceeds the max ${max}; clamping to ${max}.`,
+    );
+    return max;
+  }
+  return n;
+}
+
 const networkEnvRaw = nonEmpty(process.env.NEXT_PUBLIC_NETWORK_ENV) ?? 'testnet';
 if (networkEnvRaw !== 'mainnet' && networkEnvRaw !== 'testnet') {
   throw new Error(
@@ -349,6 +383,18 @@ export const env = {
   enableUsageFee:
     process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === 'true',
+  // recover (forwarder) モードの per-tx サービス手数料率 (basis points)。**既定 0 (= inert)**。
+  // recover の徴収額は lib/relay/recoverFee.ts の recoverFeeValue で
+  // max(ガス回収フロア, billAmount × bps/10000) として計算する。0 のときは常にフロア
+  // (= NEXT_PUBLIC_RELAY_GAS_FEE_JPYC・既定 2 JPYC) になり、現行の固定 2 JPYC 挙動と
+  // 完全に一致する。100 = 1%。fat-finger 防止に上限 1000 (=10%) で clamp する
+  // (それ以上は黙って 1000 に寄せる)。client/server が同値を読む必要があるため NEXT_PUBLIC。
+  recoverFeeBps: parseBoundedNonNegativeInt(
+    'NEXT_PUBLIC_RECOVER_FEE_BPS',
+    process.env.NEXT_PUBLIC_RECOVER_FEE_BPS,
+    1000,
+    0,
+  ),
   // @handle 恒久クリエイターリンク (open-pay.jp/@alice) の有効化フラグ。**既定 OFF**。
   // OFF の間は /@handle ページ・/api/handle/* ・dashboard の claim UI すべて inert
   // (404/非表示)。staged rollout 用 (testnet + モデレーション体制確認後に点灯)。要 KV。

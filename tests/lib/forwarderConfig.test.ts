@@ -11,6 +11,9 @@ const FWD_KEYS = [
   'NEXT_PUBLIC_JPYC_FORWARDER_KAIA',
   'NEXT_PUBLIC_JPYC_FORWARDER_KAIROS',
   'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC',
+  // a1 利用料フラグ。forwarderConfig は jpycForwarderFor の解決でこれを (env 経由で) 読むため、
+  // forwarder env と同じく毎回リセットして決定論にする。
+  'NEXT_PUBLIC_ENABLE_USAGE_FEE',
 ] as const;
 
 type FwdKey = (typeof FWD_KEYS)[number];
@@ -98,6 +101,57 @@ describe('jpycForwarderFor', () => {
       });
       expect(jpycForwarderFor(kairos.id), `bad=${JSON.stringify(v)}`).toBeNull();
     }
+  });
+
+  it('a1 未設定 (=0/unset) なら設定済 forwarder をそのまま返す', async () => {
+    const { jpycForwarderFor } = await loadWith({
+      NEXT_PUBLIC_JPYC_FORWARDER_POLYGON: CHECKSUMMED,
+    });
+    expect(jpycForwarderFor(polygon.id)).toBe(CHECKSUMMED);
+  });
+
+  it('a1 (enableUsageFee) が ON なら forwarder env が設定済でも null (recover 自動無効化)', async () => {
+    // a1 と recover は排他: a1 優先で *実効* forwarder を全 chain null に倒す → client は free
+    // payload を組み、server も recoverMode=false で handleFree (ゲート/メーター付き) に倒れる。
+    const { jpycForwarderFor } = await loadWith({
+      NEXT_PUBLIC_JPYC_FORWARDER_POLYGON: CHECKSUMMED,
+      NEXT_PUBLIC_JPYC_FORWARDER_AMOY: CHECKSUMMED,
+      NEXT_PUBLIC_JPYC_FORWARDER_KAIA: CHECKSUMMED,
+      NEXT_PUBLIC_JPYC_FORWARDER_KAIROS: CHECKSUMMED,
+      NEXT_PUBLIC_ENABLE_USAGE_FEE: '1',
+    });
+    expect(jpycForwarderFor(polygon.id)).toBeNull();
+    expect(jpycForwarderFor(polygonAmoy.id)).toBeNull();
+    expect(jpycForwarderFor(kaia.id)).toBeNull();
+    expect(jpycForwarderFor(kairos.id)).toBeNull();
+  });
+});
+
+describe('configuredJpycForwarderFor (生の env 値・診断専用)', () => {
+  it('a1 が ON でも設定済 forwarder アドレスをそのまま返す (起動時診断で構成ミスを検出するため)', async () => {
+    const { configuredJpycForwarderFor, jpycForwarderFor } = await loadWith({
+      NEXT_PUBLIC_JPYC_FORWARDER_POLYGON: CHECKSUMMED,
+      NEXT_PUBLIC_ENABLE_USAGE_FEE: '1',
+    });
+    // 生の lookup は a1 に依存せず設定値を返す。
+    expect(configuredJpycForwarderFor(polygon.id)).toBe(CHECKSUMMED);
+    // 一方 a1-aware な jpycForwarderFor は同じ chain で null (実効 = free)。
+    expect(jpycForwarderFor(polygon.id)).toBeNull();
+  });
+
+  it('a1 OFF では configuredJpycForwarderFor と jpycForwarderFor は一致する', async () => {
+    const { configuredJpycForwarderFor, jpycForwarderFor } = await loadWith({
+      NEXT_PUBLIC_JPYC_FORWARDER_KAIA: CHECKSUMMED,
+    });
+    expect(configuredJpycForwarderFor(kaia.id)).toBe(CHECKSUMMED);
+    expect(jpycForwarderFor(kaia.id)).toBe(CHECKSUMMED);
+  });
+
+  it('未設定 chain は a1 状態にかかわらず null', async () => {
+    const { configuredJpycForwarderFor } = await loadWith({
+      NEXT_PUBLIC_ENABLE_USAGE_FEE: '1',
+    });
+    expect(configuredJpycForwarderFor(polygon.id)).toBeNull();
   });
 });
 
