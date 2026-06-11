@@ -72,7 +72,10 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
-import { executeCirclePayment } from '@/lib/smartAccount/circleSend';
+import {
+  executeCirclePayment,
+  CirclePendingError,
+} from '@/lib/smartAccount/circleSend';
 import { getCircleUserOpGasPrice } from '@/lib/smartAccount/circleAccount';
 import { mockHook } from '../_helpers/wagmiMock';
 
@@ -1363,6 +1366,98 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.error?.message).toMatch(/gas_congested/);
       expect(executeCirclePayment).not.toHaveBeenCalled();
+    });
+
+    // REM-16: paymentAttemptId を呼出毎の新規 UUID から sessionStorage の安定マッピングに
+    // 切替えたことで、同一タブの再クリック/reload が同一 attemptId で resume できる
+    // (executeCirclePayment 内の crash-resume 分岐が本番で機能する) ことを fence する。
+    describe('paymentAttemptId 安定マッピング (REM-16)', () => {
+      // circlePending は本ファイルで mock していないので実 sessionStorage を使う。
+      beforeEach(() => {
+        window.sessionStorage.clear();
+      });
+
+      // 同一 params を 2 回 mutate して、executeCirclePayment が受けた attemptId を返す。
+      async function mutateTwice(opts: {
+        firstThrows?: Error;
+        // 2 回目を発火する前に呼ばれる (mock の再設定など)。
+        beforeSecond?: () => void;
+      }): Promise<{ first: string; second: string }> {
+        mountCircle();
+        if (opts.firstThrows) {
+          vi.mocked(executeCirclePayment).mockRejectedValueOnce(opts.firstThrows);
+        }
+        const { result } = renderHook(() => useBatchPayment(usdcDep), {
+          wrapper: makeWrapper(),
+        });
+        const params = {
+          tokenAddress: TOKEN,
+          merchant: MERCHANT,
+          merchantAmount: 99_000_000n,
+          feeReceiver: FEE_RECV,
+          feeAmount: 0n,
+          circlePermitAmount: 5_000_000n,
+        };
+
+        result.current.mutate(params);
+        await waitFor(() =>
+          expect(executeCirclePayment).toHaveBeenCalledTimes(1),
+        );
+        const first = vi.mocked(executeCirclePayment).mock.calls[0][0]
+          .paymentAttemptId;
+
+        opts.beforeSecond?.();
+        result.current.reset?.();
+        result.current.mutate(params);
+        await waitFor(() =>
+          expect(executeCirclePayment).toHaveBeenCalledTimes(2),
+        );
+        const second = vi.mocked(executeCirclePayment).mock.calls[1][0]
+          .paymentAttemptId;
+
+        return { first, second };
+      }
+
+      it('1 回目が CirclePendingError なら 2 回目は同一 attemptId (自 attempt を resume)', async () => {
+        const { first, second } = await mutateTwice({
+          firstThrows: new CirclePendingError('0xhash' as Hex) as Error,
+        });
+        expect(first).toBe(second);
+      });
+
+      it('1 回目成功なら 2 回目は別 attemptId (次の同額購入は新 attempt)', async () => {
+        const { first, second } = await mutateTwice({});
+        expect(first).not.toBe(second);
+      });
+
+      it('1 回目が一般エラー (AA25) なら 2 回目は別 attemptId (終端マッピングを破棄)', async () => {
+        const { first, second } = await mutateTwice({
+          firstThrows: new Error('AA25 invalid account nonce'),
+        });
+        expect(first).not.toBe(second);
+      });
+
+      it('params.paymentAttemptId 明示なら素通し (sessionStorage マッピング不使用)', async () => {
+        mountCircle();
+        const { result } = renderHook(() => useBatchPayment(usdcDep), {
+          wrapper: makeWrapper(),
+        });
+        result.current.mutate({
+          tokenAddress: TOKEN,
+          merchant: MERCHANT,
+          merchantAmount: 99_000_000n,
+          feeReceiver: FEE_RECV,
+          feeAmount: 0n,
+          circlePermitAmount: 5_000_000n,
+          paymentAttemptId: 'order-explicit',
+        });
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledOnce());
+        expect(
+          vi.mocked(executeCirclePayment).mock.calls[0][0].paymentAttemptId,
+        ).toBe('order-explicit');
+        // 明示供給時はマッピングを一切書かない。
+        expect(window.sessionStorage.length).toBe(0);
+      });
     });
   });
 });

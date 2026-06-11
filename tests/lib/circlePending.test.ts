@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
 import {
   abandon,
+  ATTEMPT_KEY_PREFIX,
+  clearStableAttemptId,
   computeCallHash,
   computeIdempotencyKey,
   findRecoverable,
@@ -21,6 +23,7 @@ import {
   PendingStoreWriteError,
   pruneTerminal,
   reserveOrResume,
+  stableAttemptId,
   type SerializedUserOp,
 } from '@/lib/circlePending';
 
@@ -523,6 +526,63 @@ describe('gcStalePreSubmit', () => {
       throw new Error('denied');
     });
     expect(gcStalePreSubmit(0, 1)).toBe(0);
+  });
+});
+
+describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング)', () => {
+  const CALL_HASH = computeCallHash(CALLS);
+  const OTHER_HASH = computeCallHash([
+    { to: MERCHANT, data: '0xdead' as Hex },
+  ]);
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('同一 (chainId,sender,callHash) は同じ attemptId を返す (再クリック/reload で resume)', () => {
+    const a = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    const b = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    expect(a).toBe(b);
+  });
+
+  it('callHash が違えば別 attemptId (別決済 intent)', () => {
+    const a = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    const b = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: OTHER_HASH });
+    expect(a).not.toBe(b);
+  });
+
+  it('clear 後は新しい attemptId を採番する (次の同額購入は別 attempt)', () => {
+    const a = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    clearStableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    const b = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    expect(b).not.toBe(a);
+  });
+
+  it('sessionStorage.setItem が throw する環境では毎回新規 UUID (throw せず fallback)', () => {
+    const spy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('SecurityError: private mode');
+      });
+    const a = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    const b = stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    // 保存できないので安定しない (毎回新規)。だが throw はしない (決済可否を左右させない)。
+    expect(a).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(b).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(a).not.toBe(b);
+    spy.mockRestore();
+  });
+
+  it('key は ATTEMPT_KEY_PREFIX で始まり PENDING_KEY_PREFIX と衝突しない', () => {
+    stableAttemptId({ chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH });
+    const keys: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const k = window.sessionStorage.key(i);
+      if (k) keys.push(k);
+    }
+    expect(keys).toHaveLength(1);
+    expect(keys[0].startsWith(ATTEMPT_KEY_PREFIX)).toBe(true);
+    expect(keys[0].startsWith(PENDING_KEY_PREFIX)).toBe(false);
   });
 });
 

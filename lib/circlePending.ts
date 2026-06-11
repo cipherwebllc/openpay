@@ -44,6 +44,10 @@ import { logger } from './logger';
 export const PENDING_KEY_PREFIX = 'openpay.circle.pending.';
 const PENDING_SCHEMA_VERSION = 1 as const;
 
+// sessionStorage に「進行中 attempt の attemptId」を紐付けるキー接頭辞。
+// PENDING_KEY_PREFIX (localStorage の pending record) とは別 namespace・別 storage。
+export const ATTEMPT_KEY_PREFIX = 'openpay.circle.attempt.';
+
 export type PendingStatus =
   | 'reserved'
   | 'awaiting_signature'
@@ -192,6 +196,58 @@ export function computeIdempotencyKey(args: {
     args.paymentAttemptId,
     args.callHash,
   ].join(':');
+}
+
+// ---- stable attempt mapping (sessionStorage) -------------------------------
+
+// sessionStorage 上の attempt マッピングキー。pending record キー (storageKey) とは
+// 別 storage / 別接頭辞なので衝突しない。
+function attemptStorageKey(args: {
+  chainId: number;
+  sender: Address;
+  callHash: Hex;
+}): string {
+  return `${ATTEMPT_KEY_PREFIX}${args.chainId}:${normalizeAddress(args.sender)}:${args.callHash}`;
+}
+
+/** 「同一決済 intent の進行中 attempt」を表す attemptId を sessionStorage に永続化する。
+ * - 同一タブの reload / 再クリックで同じ attemptId を返す → reserveOrResume の
+ *   crash-resume 分岐 (自 attempt の resume) が本番で機能する。
+ * - sessionStorage はタブを閉じれば消える → 古いマッピングが翌日の正規リピート決済を
+ *   旧 confirmed record (TERMINAL_RETENTION_MS=24h 残存) に誤って resume させない。
+ * - 別タブ/別デバイスは sessionStorage を共有しないが、その層は findLiveByCallHash の
+ *   callHash スキャン (attemptId 非依存) が引き続き担う。
+ * - sessionStorage 不可 (SSR / プライベートモード例外) は fresh UUID に fallback
+ *   (= 従来挙動。マッピングは defense-in-depth であり決済可否を左右させない)。 */
+export function stableAttemptId(args: {
+  chainId: number;
+  sender: Address;
+  callHash: Hex;
+}): string {
+  const storageKeyName = attemptStorageKey(args);
+  try {
+    const existing = window.sessionStorage.getItem(storageKeyName);
+    if (existing) return existing;
+    const fresh = crypto.randomUUID();
+    window.sessionStorage.setItem(storageKeyName, fresh);
+    return fresh;
+  } catch {
+    // SSR / private mode / quota → 保存せず fresh UUID を返す (環境依存の制御フロー)。
+    return crypto.randomUUID();
+  }
+}
+
+/** stableAttemptId のマッピングを破棄する (終端到達時)。次回は新規 attemptId を採番する。 */
+export function clearStableAttemptId(args: {
+  chainId: number;
+  sender: Address;
+  callHash: Hex;
+}): void {
+  try {
+    window.sessionStorage.removeItem(attemptStorageKey(args));
+  } catch {
+    // best-effort (破棄失敗は決済に影響しない)。
+  }
 }
 
 // ---- low-level persistence (fail-closed) -----------------------------------

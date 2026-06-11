@@ -263,12 +263,18 @@ async function runCirclePayment(args: {
   }
 
   // Circle 実装群を dynamic import (baseline bundle から除外・circle 決済実行時のみロード)。
-  const [{ getCircleUserOpGasPrice, entryPoint08Address }, { executeCirclePayment }, { verifyCircleReceiptOnChain }] =
-    await Promise.all([
-      import('@/lib/smartAccount/circleAccount'),
-      import('@/lib/smartAccount/circleSend'),
-      import('@/lib/circleReceiptVerifier'),
-    ]);
+  // circlePending は circleSend (動的) が依存する軽量モジュールなので同じ群に含めて baseline から外す。
+  const [
+    { getCircleUserOpGasPrice, entryPoint08Address },
+    { executeCirclePayment },
+    { verifyCircleReceiptOnChain },
+    { computeCallHash, stableAttemptId, clearStableAttemptId },
+  ] = await Promise.all([
+    import('@/lib/smartAccount/circleAccount'),
+    import('@/lib/smartAccount/circleSend'),
+    import('@/lib/circleReceiptVerifier'),
+    import('@/lib/circlePending'),
+  ]);
 
   // gas ceiling: 顧客の USDC 出費上限の UX 保護 (混雑時に異常 gas を弾く)。
   const gasPrice = await getCircleUserOpGasPrice(bundle);
@@ -276,15 +282,39 @@ async function runCirclePayment(args: {
 
   const calls = buildTransferCalls(params);
 
-  const result = await executeCirclePayment({
-    bundle,
-    publicClient,
-    walletClient,
-    owner: customer,
-    calls,
-    permitAmount,
-    paymentAttemptId: params.paymentAttemptId ?? crypto.randomUUID(),
-  });
+  // 冪等試行 ID:
+  //   - 明示供給 (params.paymentAttemptId) があればそれを素通しし、マッピングは一切触らない。
+  //   - 無ければ callHash 由来の安定マッピング (sessionStorage) で同一タブの再クリック/reload に
+  //     同じ attemptId を割り当て、executeCirclePayment 内の crash-resume 分岐を機能させる。
+  // sender は executeCirclePayment が computeIdempotencyKey に使う owner (=customer) と同一値、
+  // chainId は executeCirclePayment が使う bundle.chainId と同一値にする (key 不一致を避ける)。
+  const usesStableMapping = params.paymentAttemptId === undefined;
+  const attemptArgs = { chainId: bundle.chainId, sender: customer, callHash: computeCallHash(calls) };
+  const attemptId = params.paymentAttemptId ?? stableAttemptId(attemptArgs);
+
+  let result: Awaited<ReturnType<typeof executeCirclePayment>>;
+  try {
+    result = await executeCirclePayment({
+      bundle,
+      publicClient,
+      walletClient,
+      owner: customer,
+      calls,
+      permitAmount,
+      paymentAttemptId: attemptId,
+    });
+  } catch (error) {
+    // CirclePendingError (broadcast 済・確認待ち) はマッピングを保持し、再クリックで自 attempt を
+    // resume させる。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
+    // resumed 分岐の「この決済試行は既に終了しています」に正規の再試行がぶつからないようにする。
+    if (usesStableMapping && (error as Error).name !== 'CirclePendingError') {
+      clearStableAttemptId(attemptArgs);
+    }
+    throw error;
+  }
+  // 成功確定 → マッピングを破棄 (次の同額購入は新 attempt。直近 double-click の dedup は
+  // scan の CONFIRMED_DEDUP_WINDOW_MS が引き続き担う)。
+  if (usesStableMapping) clearStableAttemptId(attemptArgs);
 
   // 監査: receipt から net USDC を再計算 (client-reported)。pending record の
   // userOpHash/sender/paymaster を expected binding に使う。verify は best-effort で、
