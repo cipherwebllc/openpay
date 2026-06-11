@@ -219,7 +219,7 @@ describe('ストア (LocalStorage)', () => {
     window.localStorage.setItem(
       PAYER_RECEIPTS_STORAGE_KEY,
       JSON.stringify([
-        { schemaVersion: PAYER_RECEIPT_SCHEMA_VERSION, receiptId: 'ok', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
+        { schemaVersion: PAYER_RECEIPT_SCHEMA_VERSION, receiptId: 'ok', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
         { foo: 'bar' }, // 不正
         null,
         { receiptId: 'no-kind', direction: 'paid', kind: 'wrong', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', schemaVersion: 1 },
@@ -240,9 +240,9 @@ describe('ストア (LocalStorage)', () => {
       PAYER_RECEIPTS_STORAGE_KEY,
       JSON.stringify([
         // 未知の未来 version → migrator 無し → drop (silent regression を避ける)
-        { schemaVersion: 999, receiptId: 'future', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
+        { schemaVersion: 999, receiptId: 'future', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
         // schemaVersion 欠落 (旧データ) → 1 として正規化し、他が妥当なら救済
-        { receiptId: 'legacy', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
+        { receiptId: 'legacy', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
       ]),
     );
     const loaded = loadPayerReceipts();
@@ -250,11 +250,32 @@ describe('ストア (LocalStorage)', () => {
     expect(loaded[0].schemaVersion).toBe(PAYER_RECEIPT_SCHEMA_VERSION);
   });
 
+  it('許容外/欠落 status のレシートは drop・正規 4 status は通す', () => {
+    window.localStorage.setItem(
+      PAYER_RECEIPTS_STORAGE_KEY,
+      JSON.stringify([
+        // 許容外 status は STATUS_BADGE_CLASS/STATUS_I18N_KEY 引きが undefined になり
+        // className 崩れ・t(undefined) throw を起こすため drop。
+        { schemaVersion: 1, receiptId: 'bad-status', direction: 'paid', kind: 'payment_receipt', status: 'x', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
+        { schemaVersion: 1, receiptId: 'no-status', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM' },
+        ...['confirmed', 'pending', 'failed', 'unknown'].map((st) => ({
+          schemaVersion: 1, receiptId: `ok-${st}`, direction: 'paid', kind: 'payment_receipt', status: st, createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM',
+        })),
+      ]),
+    );
+    expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual([
+      'ok-confirmed',
+      'ok-pending',
+      'ok-failed',
+      'ok-unknown',
+    ]);
+  });
+
   it('lineItems が array でない不正レシートは drop', () => {
     window.localStorage.setItem(
       PAYER_RECEIPTS_STORAGE_KEY,
       JSON.stringify([
-        { schemaVersion: 1, receiptId: 'bad-li', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: 'not-array' },
+        { schemaVersion: 1, receiptId: 'bad-li', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: 'not-array' },
       ]),
     );
     expect(loadPayerReceipts()).toEqual([]);
@@ -265,9 +286,9 @@ describe('ストア (LocalStorage)', () => {
       PAYER_RECEIPTS_STORAGE_KEY,
       JSON.stringify([
         // name はあるが quantity(number)/unitPrice/amount(string) が欠落 → undefined 表示を防ぐため drop。
-        { schemaVersion: 1, receiptId: 'broken-li', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: [{ name: 'コーヒー' }] },
+        { schemaVersion: 1, receiptId: 'broken-li', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: [{ name: 'コーヒー' }] },
         // 完全な lineItem は通す (回帰防止)。
-        { schemaVersion: 1, receiptId: 'ok-li', direction: 'paid', kind: 'payment_receipt', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: [{ name: 'コーヒー', quantity: 1, unitPrice: '1', amount: '1', taxRate: null, taxCategory: 'out_of_scope', taxAmount: '0', memo: null }] },
+        { schemaVersion: 1, receiptId: 'ok-li', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: [{ name: 'コーヒー', quantity: 1, unitPrice: '1', amount: '1', taxRate: null, taxCategory: 'out_of_scope', taxAmount: '0', memo: null }] },
       ]),
     );
     expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual(['ok-li']);
@@ -449,11 +470,14 @@ describe('payerReceiptFromHistoryEntry: 異通貨建て (anchor)', () => {
     expect(r.fxRate).toBe('155.5');
   });
 
-  it('copyText に元価格 + レート行を含む', () => {
+  it('copyText に元価格 + レート行を含む (通貨単位つき・表示 i18n fxRateLine と整合)', () => {
     const r = payerReceiptFromHistoryEntry(fxEntry(), { now: NOW });
     const t = payerReceiptCopyText(r, 'ja');
     expect(t).toContain('元の価格：1000 JPYC ≈ 6.4 USDC');
-    expect(t).toContain('1 USDC = 155.5');
+    // 単位を欠くと第三者に渡した控えでレートの分母通貨が曖昧になる (ja=「円」/en=「¥」)。
+    expect(t).toContain('1 USDC = 155.5 円');
+    const tEn = payerReceiptCopyText(r, 'en');
+    expect(tEn).toContain('1 USDC = ¥155.5');
   });
 
   it('通常決済 (anchor 無し) → anchor フィールドは undefined', () => {

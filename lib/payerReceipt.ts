@@ -232,12 +232,24 @@ function isValidLineItems(value: unknown): boolean {
   });
 }
 
+// status の許容値 (PayerReceiptStatus と同期 — satisfies が乖離をコンパイルエラー化する)。
+// 許容外 status は描画側の STATUS_BADGE_CLASS / STATUS_I18N_KEY 引きが undefined になり
+// className 崩れ・t(undefined) throw を起こすため、validator で drop する
+// (direction/kind と同じ厳格度)。
+const VALID_RECEIPT_STATUSES: ReadonlySet<string> = new Set([
+  'confirmed',
+  'pending',
+  'failed',
+  'unknown',
+] satisfies PayerReceiptStatus[]);
+
 function isValidReceipt(value: unknown): value is PayerReceipt {
   if (value === null || typeof value !== 'object') return false;
   const r = value as Record<string, unknown>;
   if (r.schemaVersion !== PAYER_RECEIPT_SCHEMA_VERSION) return false;
   if (typeof r.receiptId !== 'string' || r.receiptId.length === 0) return false;
   if (r.direction !== 'paid' || r.kind !== 'payment_receipt') return false;
+  if (typeof r.status !== 'string' || !VALID_RECEIPT_STATUSES.has(r.status)) return false;
   if (typeof r.createdAt !== 'string') return false;
   if (typeof r.tokenSymbol !== 'string') return false;
   if (typeof r.amount !== 'string') return false;
@@ -392,7 +404,11 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
     lines.push(
       `${en ? 'Original price' : '元の価格'}：${r.anchorAmount} ${r.anchorSymbol} ≈ ${r.totalAmount ?? r.amount} ${r.currency}`,
     );
-    if (r.fxRate) lines.push(`${en ? 'Rate' : 'レート'}：1 USDC = ${r.fxRate}`);
+    // 通貨単位は詳細表示の i18n fxRateLine (ja「{rate} 円」/ en「¥{rate}」) と揃える
+    // (単位を欠くと第三者に渡した控えでレートの分母通貨が曖昧になる)。
+    if (r.fxRate) {
+      lines.push(en ? `Rate：1 USDC = ¥${r.fxRate}` : `レート：1 USDC = ${r.fxRate} 円`);
+    }
   }
   lines.push('');
   lines.push(
