@@ -1865,3 +1865,80 @@ describe('exceedsTokenPrecision', () => {
     expect(exceedsTokenPrecision(`0.${'1'.repeat(19)}`, 18)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// surrogate-safe truncate: buildCheckoutPath / parseCheckoutParams /
+// parseCheckoutItemDrafts が絵文字境界で throw しない回帰テスト
+// ---------------------------------------------------------------------------
+describe('checkout surrogate-safe (name/memo 境界絵文字)', () => {
+  // CHECKOUT_NAME_MAX = 80
+  const VALID_TO = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
+
+  it('80文字目が絵文字ペアの途中 — buildCheckoutPath が throw せず孤立サロゲートなし', async () => {
+    const { buildCheckoutPath } = await import('@/lib/url');
+    // 79 ASCII + 🎉 (2 code units) = 81 code units → 80文字目が high surrogate
+    const name = 'a'.repeat(79) + '🎉';
+    expect(name.length).toBe(81);
+    let path: string;
+    expect(() => {
+      path = buildCheckoutPath({
+        to: VALID_TO,
+        token: 'jpyc',
+        gas: 'customer',
+        items: [{ name, qty: 1, price: '100' }],
+      });
+    }).not.toThrow();
+    // 孤立サロゲートが無いことを確認 ([\uD800-\uDFFF] は surrogate range 全体)
+    expect(/[\uD800-\uDFFF]/.test(path!)).toBe(false);
+    // encodeURIComponent がサロゲート範囲に当たらないことを確認
+    expect(() => encodeURIComponent(path!)).not.toThrow();
+  });
+
+  it('parse roundtrip: 絵文字境界 name を buildCheckoutPath → parseCheckoutParams で壊れない', async () => {
+    const { buildCheckoutPath, parseCheckoutParams } = await import('@/lib/url');
+    const name = 'a'.repeat(79) + '🎉'; // 81 units → truncateSafe → 79 units
+    const path = buildCheckoutPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      gas: 'customer',
+      items: [{ name, qty: 1, price: '500' }],
+    });
+    const sp = new URLSearchParams(path.replace(/^\/checkout\?/, ''));
+    const result = parseCheckoutParams(sp);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const parsedName = result.params.items[0]?.name ?? '';
+      // 孤立サロゲートが無いこと
+      expect(/[\uD800-\uDFFF]/.test(parsedName)).toBe(false);
+    }
+  });
+
+  it('memo 境界絵文字 — buildCheckoutPath が throw しない', async () => {
+    const { buildCheckoutPath } = await import('@/lib/url');
+    // CHECKOUT_ITEM_MEMO_MAX = 80: 79 ASCII + 🎉 = 81 units
+    const memo = 'b'.repeat(79) + '🎉';
+    expect(memo.length).toBe(81);
+    expect(() => {
+      buildCheckoutPath({
+        to: VALID_TO,
+        token: 'jpyc',
+        gas: 'customer',
+        items: [{ name: 'item', qty: 1, price: '200', memo }],
+      });
+    }).not.toThrow();
+  });
+
+  it('parseCheckoutItemDrafts: draft name 境界絵文字 — throw せず孤立サロゲートなし', async () => {
+    const { parseCheckoutItemDrafts } = await import('@/lib/url');
+    const name = 'c'.repeat(79) + '🎉'; // 81 units
+    expect(name.length).toBe(81);
+    const result = parseCheckoutItemDrafts(
+      [{ name, qty: '1', price: '300' }],
+      18,
+    );
+    expect(result.errors.length).toBe(0);
+    expect(result.items).not.toBeNull();
+    const parsedName = result.items?.[0]?.name ?? '';
+    expect(/[\uD800-\uDFFF]/.test(parsedName)).toBe(false);
+  });
+});

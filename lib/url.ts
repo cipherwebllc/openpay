@@ -37,7 +37,7 @@ import {
   type JpycChainSlug,
 } from './chains';
 import type { GasMode, PayMode } from './fee';
-import { stripControlChars } from './sanitize';
+import { stripControlChars, truncateSafe } from './sanitize';
 import { rateIsSane } from './fx';
 import {
   parseTaxCategoryParam,
@@ -570,7 +570,7 @@ function sanitizeText(value: string, max: number): string | undefined {
   // 空文字は省略扱い、上限超は切詰。制御文字 strip は lib/sanitize.ts に集約。
   const cleaned = stripControlChars(value);
   if (cleaned.length === 0) return undefined;
-  return cleaned.length > max ? cleaned.slice(0, max) : cleaned;
+  return truncateSafe(cleaned, max);
 }
 
 function sanitizePresets(raw: string): string[] | undefined {
@@ -908,8 +908,7 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
     // 空文字は invalid、上限超は切詰。
     const name = stripControlChars(decoded);
     if (name.length === 0) return null;
-    const trimmedName =
-      name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
+    const trimmedName = truncateSafe(name, CHECKOUT_NAME_MAX);
     const v = validateItemFields(qtyStr, priceStr, decimals);
     if (!v.ok) return null;
     const item: CheckoutItem = { name: trimmedName, qty: v.qty, price: priceStr };
@@ -927,7 +926,7 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
           return null;
         }
         const cleaned = stripControlChars(m);
-        if (cleaned.length > 0) item.memo = cleaned.slice(0, CHECKOUT_ITEM_MEMO_MAX);
+        if (cleaned.length > 0) item.memo = truncateSafe(cleaned, CHECKOUT_ITEM_MEMO_MAX);
       }
     }
     items.push(item);
@@ -1127,8 +1126,7 @@ export function parseCheckoutItemDrafts(
       errors.push({ index: i, reason: v.reason });
       return;
     }
-    const trimmedName =
-      name.length > CHECKOUT_NAME_MAX ? name.slice(0, CHECKOUT_NAME_MAX) : name;
+    const trimmedName = truncateSafe(name, CHECKOUT_NAME_MAX);
     items.push({ name: trimmedName, qty: v.qty, price: priceStr });
   });
 
