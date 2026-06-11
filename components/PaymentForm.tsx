@@ -54,6 +54,8 @@ import {
 import { formatRemaining, isExpired, secondsRemaining } from '@/lib/fx';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 import { buildJpycRelaySignPreview } from '@/lib/signPreview';
+import { buildRecoverFeeDisplay } from '@/lib/recoverFeeDisplay';
+import { RecoverFeeDisclosurePanel } from './RecoverFeeDisclosurePanel';
 
 export function PaymentForm() {
   const search = useSearchParams();
@@ -620,6 +622,33 @@ function PaymentDetails({ params }: { params: PayParams }) {
           }
         : null;
 
+  // Recover モードの手数料開示。amountWei が確定してから表示。
+  const recoverFeeDisclosure = useMemo(() => {
+    if (!useRecover || amountWei <= 0n) return null;
+    return buildRecoverFeeDisplay(amountWei, deployment.chainId, params.gas ?? 'customer');
+  }, [useRecover, amountWei, deployment.chainId, params.gas]);
+
+  const recoverFeeLabelPF = recoverFeeDisclosure
+    ? recoverFeeDisclosure.bps === 0
+      ? t('recoverFeeDisclosureGasOnly', { feeHuman: recoverFeeDisclosure.feeHuman })
+      : t('recoverFeeDisclosurePercent', {
+          feeHuman: recoverFeeDisclosure.feeHuman,
+          pct: recoverFeeDisclosure.bps / 100,
+          floorHuman: recoverFeeDisclosure.floorHuman,
+        })
+    : '';
+  const recoverSplitLabelPF = recoverFeeDisclosure
+    ? recoverFeeDisclosure.gasMode === 'customer'
+      ? t('recoverFeeCustomer', {
+          customerPays: recoverFeeDisclosure.customerPaysHuman,
+          merchantReceives: recoverFeeDisclosure.merchantReceivesHuman,
+        })
+      : t('recoverFeeMerchant', {
+          customerPays: recoverFeeDisclosure.customerPaysHuman,
+          merchantReceives: recoverFeeDisclosure.merchantReceivesHuman,
+        })
+    : '';
+
   return (
     <div className="space-y-6">
       <header className="rounded-2xl bg-gradient-to-br from-brand to-brand-dark p-6 text-white">
@@ -652,6 +681,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
           )}
         </div>
       </header>
+
+      {recoverFeeDisclosure && (
+        <RecoverFeeDisclosurePanel
+          disclosure={recoverFeeDisclosure}
+          feeLabel={recoverFeeLabelPF}
+          splitLabel={recoverSplitLabelPF}
+        />
+      )}
 
       {/* 動的 QR (FX 換算) の文脈表示: 元の円価格 ≈ 請求トークン額 + 生成時レート + 残り時間。
           refAmt + fxRate が URL に在るときのみ。anchor token は QR token の counterpart。 */}

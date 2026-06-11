@@ -1829,8 +1829,13 @@ describe('QrGenerator', () => {
         name: /ガス代不要/,
       });
       expect(gaslessBtn.textContent).toMatch(/お客様はガス代を用意せず/);
-      // 旧文言 (「OpenPay がガスを肩代わり。」) は消えている
-      expect(gaslessBtn.textContent).not.toMatch(/OpenPay がガスを肩代わり/);
+      // 旧 Web3 ジャーゴンの先頭文 (「OpenPay がガスを肩代わり。」を単独で言い切る形) は消え、
+      // 顧客便益を先頭に据えている。なお per-tx 利用料化に伴い、肩代わりの語は利用料開示の
+      // 文脈内で出現する (full-stop で言い切る旧形ではない) ため、そこは許容する。
+      expect(gaslessBtn.textContent).not.toMatch(/^OpenPay がガスを肩代わりします。/);
+      // per-tx 利用料化: gasless モード説明に OpenPay 利用料 (約 2 JPYC / 7月〜1%) が開示される。
+      expect(gaslessBtn.textContent).toMatch(/OpenPay 利用料/);
+      expect(gaslessBtn.textContent).toMatch(/約 2 JPYC/);
     });
 
     it('Web3 用語の和らげ: split label が「売上の自動分配」に変わっている', async () => {
