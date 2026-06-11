@@ -352,6 +352,18 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
 
   // ─── Resource (explorer / analytics / info) ─────────────────────────
   {
+    id: 'jpyc-map',
+    name: 'JPYC-MAP.com',
+    url: 'https://jpyc-map.com/',
+    category: 'resource',
+    description: {
+      ja: 'JPYC が使える店舗・サービスを地図から探せるマップサイト。OpenPay 導入店の周知にも。',
+      en: 'A map site for finding stores and services that accept JPYC across Japan.',
+    },
+    badges: ['jp-only'],
+    tokens: ['jpyc'],
+  },
+  {
     id: 'etherscan',
     name: 'Etherscan',
     url: 'https://etherscan.io/',
