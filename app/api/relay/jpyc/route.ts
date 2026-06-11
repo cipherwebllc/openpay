@@ -164,6 +164,25 @@ if (
   });
 }
 
+// recover (forwarder 立替+回収) と a1 利用料 (NEXT_PUBLIC_ENABLE_USAGE_FEE) は併用不可。
+// recover 経路 (handleRecover) は isGaslessRelayBlocked の延滞遮断も recordRelayedVolume の
+// 出来高メーターも通らないため、同時設定は (1) 延滞店主のガスレスが止まらない (ゲートの
+// teeth 喪失) (2) recover 経路の出来高が a1 メーターに乗らず undercount、を黙って起こす。
+// 誤設定はデプロイ時に即死 (route 全体 500・client は relay 不可で standard へ誘導) させ、
+// ゲート素通りのまま運用される事故を防ぐ。
+if (
+  env.enableUsageFee &&
+  Object.keys(SUPPORTED_CHAINS).some(
+    (id) => jpycForwarderFor(Number(id)) !== null,
+  )
+) {
+  throw new Error(
+    'relay.jpyc misconfig: NEXT_PUBLIC_JPYC_FORWARDER_* (recover) と ' +
+      'NEXT_PUBLIC_ENABLE_USAGE_FEE=1 (a1 利用料) は併用できません。' +
+      'recover 経路は利用料ゲート/出来高メーターを通らないため、どちらか一方を解除してください。',
+  );
+}
+
 function transportFor(chainId: number) {
   const cfg = SUPPORTED_CHAINS[chainId];
   return http(cfg.rpc ?? cfg.chain.rpcUrls.default.http[0]);
