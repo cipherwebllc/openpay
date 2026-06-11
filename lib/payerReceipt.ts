@@ -284,13 +284,54 @@ function broadcastChange(): void {
 export function appendPayerReceipt(receipt: PayerReceipt): void {
   if (typeof window === 'undefined') return;
   const current = loadPayerReceipts();
-  // 同一 receiptId (= 同一 tx) は no-op で dedupe (StrictMode 二重発火・再描画吸収)。
-  if (current.some((r) => r.receiptId === receipt.receiptId)) return;
+  // 同一 receiptId (= 同一 tx) は基本 no-op で dedupe する。ただし relay/gasless が
+  // pending (txHash あり) で先に保存した控えに対し、後続で同一 tx の confirmed/failed
+  // が来た場合のみ **既存 entry を昇格** (pending → confirmed/failed) して保存・broadcast
+  // する。StrictMode 二重発火・再描画は同一 status なので引き続き no-op (昇格しない)。
+  // downgrade 方向 (例: confirmed → pending) や既存が non-pending の再 append も no-op。
+  const idx = current.findIndex((r) => r.receiptId === receipt.receiptId);
+  if (idx >= 0) {
+    const existing = current[idx];
+    const isPromotion =
+      existing.status === 'pending' &&
+      (receipt.status === 'confirmed' || receipt.status === 'failed');
+    if (!isPromotion) return;
+    const next = [...current];
+    next[idx] = {
+      ...existing,
+      status: receipt.status,
+      paidAt: receipt.paidAt ?? existing.paidAt,
+    };
+    safeSet(PAYER_RECEIPTS_STORAGE_KEY, next);
+    broadcastChange();
+    return;
+  }
   const next = [receipt, ...current];
   const trimmed =
     next.length > PAYER_RECEIPTS_MAX ? next.slice(0, PAYER_RECEIPTS_MAX) : next;
   safeSet(PAYER_RECEIPTS_STORAGE_KEY, trimmed);
   broadcastChange();
+}
+
+/**
+ * pending 控えの status を on-chain 確定結果で昇格する。対象 receipt が存在し
+ * status==='pending' のときのみ status を更新して保存・broadcast し true を返す。
+ * 不在 / 既に non-pending の場合は false (no-op)。reconcile (lib/payerReceiptReconcile.ts)
+ * が on-chain receipt と突き合わせて呼ぶ。
+ */
+export function promotePayerReceiptStatus(
+  receiptId: string,
+  status: 'confirmed' | 'failed',
+): boolean {
+  if (typeof window === 'undefined') return false;
+  const current = loadPayerReceipts();
+  const idx = current.findIndex((r) => r.receiptId === receiptId);
+  if (idx < 0 || current[idx].status !== 'pending') return false;
+  const next = [...current];
+  next[idx] = { ...current[idx], status };
+  safeSet(PAYER_RECEIPTS_STORAGE_KEY, next);
+  broadcastChange();
+  return true;
 }
 
 export function removePayerReceipt(receiptId: string): void {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { polygonAmoy } from 'viem/chains';
 import { buildHistoryEntry, type BuildHistoryBase } from '@/lib/history';
 import {
@@ -12,10 +12,12 @@ import {
   formatReceiptDateTime,
   payerReceiptHasTax,
   appendPayerReceipt,
+  promotePayerReceiptStatus,
   loadPayerReceipts,
   removePayerReceipt,
   clearPayerReceipts,
   PAYER_RECEIPTS_STORAGE_KEY,
+  PAYER_RECEIPTS_CHANGED_EVENT,
   PAYER_RECEIPTS_MAX,
   PAYER_RECEIPT_SCHEMA_VERSION,
   type PayerReceipt,
@@ -290,6 +292,89 @@ describe('ストア (LocalStorage)', () => {
     appendPayerReceipt(buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xkeep' }, NOW));
     removePayerReceipt('0xnonexistent');
     expect(loadPayerReceipts()).toHaveLength(1);
+  });
+});
+
+describe('appendPayerReceipt: pending → confirmed/failed 昇格', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  function pendingReceipt(txHash: string): PayerReceipt {
+    return { ...buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash }, NOW), status: 'pending', paidAt: undefined };
+  }
+
+  it('pending 保存後に同一 tx の confirmed を append → status 昇格・1 件のまま・paidAt 反映', () => {
+    appendPayerReceipt(pendingReceipt('0xpa'));
+    expect(loadPayerReceipts()[0].status).toBe('pending');
+    const confirmed: PayerReceipt = { ...pendingReceipt('0xpa'), status: 'confirmed', paidAt: NOW.toISOString() };
+    appendPayerReceipt(confirmed);
+    const loaded = loadPayerReceipts();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].status).toBe('confirmed');
+    expect(loaded[0].paidAt).toBe(NOW.toISOString());
+  });
+
+  it('pending 保存後に failed を append → status=failed に昇格 (1 件のまま)', () => {
+    appendPayerReceipt(pendingReceipt('0xpb'));
+    appendPayerReceipt({ ...pendingReceipt('0xpb'), status: 'failed' });
+    const loaded = loadPayerReceipts();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].status).toBe('failed');
+  });
+
+  it('confirmed 保存後に同一 tx の pending を append → downgrade しない (no-op)', () => {
+    appendPayerReceipt(buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xpc' }, NOW)); // status=confirmed
+    appendPayerReceipt(pendingReceipt('0xpc'));
+    expect(loadPayerReceipts()[0].status).toBe('confirmed');
+  });
+
+  it('同一 status の再 append は no-op (配列参照・storage 不変)', () => {
+    appendPayerReceipt(pendingReceipt('0xpd'));
+    const before = window.localStorage.getItem(PAYER_RECEIPTS_STORAGE_KEY);
+    appendPayerReceipt(pendingReceipt('0xpd')); // 同 status (pending) → no-op (StrictMode 二重発火)
+    expect(window.localStorage.getItem(PAYER_RECEIPTS_STORAGE_KEY)).toBe(before);
+    expect(loadPayerReceipts()).toHaveLength(1);
+  });
+
+  it('昇格時に CHANGED_EVENT を dispatch する', () => {
+    appendPayerReceipt(pendingReceipt('0xpe'));
+    const spy = vi.fn();
+    window.addEventListener(PAYER_RECEIPTS_CHANGED_EVENT, spy);
+    appendPayerReceipt({ ...pendingReceipt('0xpe'), status: 'confirmed', paidAt: NOW.toISOString() });
+    window.removeEventListener(PAYER_RECEIPTS_CHANGED_EVENT, spy);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('promotePayerReceiptStatus', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  function seedPending(txHash: string) {
+    appendPayerReceipt({ ...buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash }, NOW), status: 'pending', paidAt: undefined });
+  }
+
+  it('pending → confirmed: true を返し status 更新', () => {
+    seedPending('0xq1');
+    expect(promotePayerReceiptStatus('0xq1', 'confirmed')).toBe(true);
+    expect(loadPayerReceipts()[0].status).toBe('confirmed');
+  });
+
+  it('non-pending → false (no-op)', () => {
+    appendPayerReceipt(buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xq2' }, NOW)); // confirmed
+    expect(promotePayerReceiptStatus('0xq2', 'failed')).toBe(false);
+    expect(loadPayerReceipts()[0].status).toBe('confirmed');
+  });
+
+  it('不在 id → false', () => {
+    expect(promotePayerReceiptStatus('0xnope', 'confirmed')).toBe(false);
+  });
+
+  it('true 時に CHANGED_EVENT を dispatch', () => {
+    seedPending('0xq3');
+    const spy = vi.fn();
+    window.addEventListener(PAYER_RECEIPTS_CHANGED_EVENT, spy);
+    promotePayerReceiptStatus('0xq3', 'confirmed');
+    window.removeEventListener(PAYER_RECEIPTS_CHANGED_EVENT, spy);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 

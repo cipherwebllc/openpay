@@ -1,8 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { PayerReceiptCompletion } from '@/components/PayerReceiptCompletion';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
+
+// usePayerReceipts の hydrate 後 reconcile を no-op 化 (jsdom に実 RPC 無し)。
+vi.mock('@/lib/payerReceiptReconcile', () => ({
+  reconcilePendingReceipts: vi.fn(async () => 0),
+  fetchReceiptTxStatus: vi.fn(async () => 'unknown' as const),
+}));
 
 const NOW = new Date('2026-06-04T01:42:00.000Z');
 const POLYGON_AMOY_ID = 80002;
