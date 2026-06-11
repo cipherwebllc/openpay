@@ -30,6 +30,12 @@ vi.mock('@/lib/kv', () => ({
     h.store.set(k, v);
     return { ok: true, value: 'OK' };
   },
+  // SET NX GET 原子 claim (REM-21): null=新設(fresh)、旧値=既存。
+  kvSetNxGet: async (k: string, v: string) => {
+    if (h.store.has(k)) return { ok: true, value: h.store.get(k) };
+    h.store.set(k, v);
+    return { ok: true, value: null };
+  },
   kvDel: async (k: string) => {
     const had = h.store.has(k);
     h.store.delete(k);

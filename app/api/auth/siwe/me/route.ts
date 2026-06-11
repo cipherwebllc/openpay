@@ -9,5 +9,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
   const address = await getSessionAddress();
-  return NextResponse.json({ ok: true, address });
+  return NextResponse.json(
+    { ok: true, address },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }

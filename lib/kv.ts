@@ -163,3 +163,13 @@ export function kvDel(key: string): Promise<KvResult<number>> {
 export function kvGetDel(key: string): Promise<KvResult<string | null>> {
   return call<string | null>(['GETDEL', key]);
 }
+
+// SET key value EX ttl NX GET — 原子的 claim。成功 (キー新設) なら null、既存なら旧値。
+// claim 判定と旧値読取りを 1 round-trip にし、NX 失敗→GET 間の昇格 race を消す (Redis ≥7)。
+export function kvSetNxGet(
+  key: string,
+  value: string,
+  ttlSec: number,
+): Promise<KvResult<string | null>> {
+  return call<string | null>(['SET', key, value, 'EX', String(ttlSec), 'NX', 'GET']);
+}

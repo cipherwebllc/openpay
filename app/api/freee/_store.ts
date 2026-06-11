@@ -5,7 +5,7 @@
 //   freee:map:{wallet}     → FreeeMapping (companyId/accountItemId/taxCode)
 //   freee:state:{state}    → OAuth state (JSON {wallet, returnTo}・TTL 10分)
 //   freee:synced:{wallet}:{txOrId} → 同期済 deal id (冪等・runFreeeSync が claim/finalize)
-import { kvGet, kvSet, kvDel, kvGetDel } from '@/lib/kv';
+import { kvGet, kvSet, kvDel, kvGetDel, kvSetNxGet } from '@/lib/kv';
 import type { StoredToken } from '@/lib/freee';
 import type { FreeeMapping, ClaimState } from '@/lib/freeeSync';
 
@@ -90,18 +90,18 @@ export async function consumeState(
   }
 }
 
-// --- runFreeeSync 用の冪等 claim/finalize/release (SET NX + TTL pending) ---
+// --- runFreeeSync 用の冪等 claim/finalize/release (SET NX GET + TTL pending) ---
 
+// SET NX GET で原子化 (昇格 race 根絶): NX 失敗と GET の間に finalizeSync が
+// 'pending'→dealId へ昇格すると done を in-flight と誤判定する race があった。
+// SET key value EX ttl NX GET は成功(キー新設)なら null、既存なら旧値を 1 round-trip で返す。
 export async function claimSync(syncKey: string): Promise<ClaimState> {
-  const set = await kvSet(syncKey, 'pending', { nx: true, ttlSec: CLAIM_TTL_SEC });
-  if (set.ok && set.value === 'OK') return { kind: 'fresh' };
-  // 既存: pending (処理中) か 数値 (同期済 deal id)。
-  const cur = await kvGet(syncKey);
-  if (!cur.ok || !cur.value || cur.value === 'pending') return { kind: 'in-flight' };
-  const dealId = Number(cur.value);
-  return Number.isFinite(dealId)
-    ? { kind: 'done', dealId }
-    : { kind: 'in-flight' };
+  const res = await kvSetNxGet(syncKey, 'pending', CLAIM_TTL_SEC);
+  if (!res.ok) return { kind: 'in-flight' }; // KV 失敗は従来どおり安全側 (skip)
+  if (res.value === null) return { kind: 'fresh' };
+  if (res.value === 'pending') return { kind: 'in-flight' };
+  const dealId = Number(res.value);
+  return Number.isFinite(dealId) ? { kind: 'done', dealId } : { kind: 'in-flight' };
 }
 
 /** 同期成功を確定 (dealId を TTL 無しで恒久保存)。**書込成功時のみ true**。

@@ -34,6 +34,36 @@ describe('freee routes ガード', () => {
   beforeEach(() => {
     flags.enableFreeeSync = true;
   });
+
+  // --- REM-21: Sec-Fetch-Site CSRF 緩和 ---
+  it('authorize: Sec-Fetch-Site: cross-site → 403 cross_site_request', async () => {
+    const res = await authorizeGET(
+      new Request('http://localhost/api/freee/authorize?returnTo=/ja/history', {
+        headers: { 'sec-fetch-site': 'cross-site' },
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ ok: false, error: 'cross_site_request' });
+  });
+
+  it('authorize: Sec-Fetch-Site: same-origin → 従来フロー (kv_not_configured 503 に到達)', async () => {
+    const res = await authorizeGET(
+      new Request('http://localhost/api/freee/authorize?returnTo=/ja/history', {
+        headers: { 'sec-fetch-site': 'same-origin' },
+      }),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'kv_not_configured' });
+  });
+
+  it('authorize: Sec-Fetch-Site ヘッダ無し → 従来フロー (kv_not_configured 503 に到達)', async () => {
+    const res = await authorizeGET(
+      new Request('http://localhost/api/freee/authorize?returnTo=/ja/history'),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'kv_not_configured' });
+  });
+
   it('authorize: KV 未設定 → 503 kv_not_configured', async () => {
     const res = await authorizeGET(
       new Request('http://localhost/api/freee/authorize?returnTo=/ja/history'),

@@ -6,12 +6,14 @@ const kv = vi.hoisted(() => ({
   set: vi.fn(),
   del: vi.fn(),
   getdel: vi.fn(),
+  setNxGet: vi.fn(),
 }));
 vi.mock('@/lib/kv', () => ({
   kvGet: (...a: unknown[]) => kv.get(...a),
   kvSet: (...a: unknown[]) => kv.set(...a),
   kvDel: (...a: unknown[]) => kv.del(...a),
   kvGetDel: (...a: unknown[]) => kv.getdel(...a),
+  kvSetNxGet: (...a: unknown[]) => kv.setNxGet(...a),
 }));
 
 import {
@@ -32,37 +34,38 @@ beforeEach(() => {
   kv.set.mockReset();
   kv.del.mockReset();
   kv.getdel.mockReset();
+  kv.setNxGet.mockReset();
 });
 
-describe('claimSync (SET NX 冪等状態機械)', () => {
-  it('fresh: NX 取得成功 → pending を TTL 付きで claim', async () => {
-    kv.set.mockResolvedValue({ ok: true, value: 'OK' });
+// REM-21: claimSync は kvSetNxGet (SET NX GET 原子化) を使う。
+// kvSetNxGet は null=新設(fresh) / 旧値=既存(in-flight or done)。
+describe('claimSync (SET NX GET 原子化・REM-21)', () => {
+  it('fresh: kvSetNxGet が null → pending を TTL 付きで claim', async () => {
+    kv.setNxGet.mockResolvedValue({ ok: true, value: null });
     expect(await claimSync(KEY)).toEqual({ kind: 'fresh' });
-    expect(kv.set).toHaveBeenCalledWith(KEY, 'pending', { nx: true, ttlSec: 300 });
+    expect(kv.setNxGet).toHaveBeenCalledWith(KEY, 'pending', 300);
+    // kvGet / kvSet は不使用 (原子化済)
     expect(kv.get).not.toHaveBeenCalled();
+    expect(kv.set).not.toHaveBeenCalled();
   });
 
-  it('done: NX 衝突 + 既存値が数値 → 既存 dealId を返す', async () => {
-    kv.set.mockResolvedValue({ ok: true, value: null });
-    kv.get.mockResolvedValue({ ok: true, value: '9001' });
+  it('done: 既存値が数値 → 既存 dealId を返す', async () => {
+    kv.setNxGet.mockResolvedValue({ ok: true, value: '9001' });
     expect(await claimSync(KEY)).toEqual({ kind: 'done', dealId: 9001 });
   });
 
-  it('in-flight: NX 衝突 + 既存値が pending', async () => {
-    kv.set.mockResolvedValue({ ok: true, value: null });
-    kv.get.mockResolvedValue({ ok: true, value: 'pending' });
+  it('in-flight: 既存値が pending', async () => {
+    kv.setNxGet.mockResolvedValue({ ok: true, value: 'pending' });
     expect(await claimSync(KEY)).toEqual({ kind: 'in-flight' });
   });
 
-  it('in-flight: NX 衝突 + 既存値が非数値 (異常値) でも安全に in-flight 扱い', async () => {
-    kv.set.mockResolvedValue({ ok: true, value: null });
-    kv.get.mockResolvedValue({ ok: true, value: 'garbage' });
+  it('in-flight: 既存値が非数値 (異常値) でも安全に in-flight 扱い', async () => {
+    kv.setNxGet.mockResolvedValue({ ok: true, value: 'garbage' });
     expect(await claimSync(KEY)).toEqual({ kind: 'in-flight' });
   });
 
-  it('in-flight: NX 衝突 + 既存値 read 失敗', async () => {
-    kv.set.mockResolvedValue({ ok: true, value: null });
-    kv.get.mockResolvedValue({ ok: false, reason: 'http_error' });
+  it('in-flight: KV 失敗 (ok:false) → 安全側 in-flight (skip)', async () => {
+    kv.setNxGet.mockResolvedValue({ ok: false, reason: 'http_error' });
     expect(await claimSync(KEY)).toEqual({ kind: 'in-flight' });
   });
 });

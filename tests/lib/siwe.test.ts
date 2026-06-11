@@ -16,6 +16,11 @@ import {
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const DOMAIN = 'openpay.test';
 
+// issuedAt/expirationTime は verifySiweLogin の鮮度チェックに必須 (REM-21)。
+// 正規クライアントと同様に issued=now、exp=now+10min を既定値とする。
+const NOW = new Date('2026-06-11T00:00:00.000Z');
+const EXP_10M = new Date(NOW.getTime() + 10 * 60 * 1000);
+
 function message(overrides: Partial<Parameters<typeof createSiweMessage>[0]> = {}) {
   return createSiweMessage({
     domain: DOMAIN,
@@ -24,6 +29,8 @@ function message(overrides: Partial<Parameters<typeof createSiweMessage>[0]> = {
     version: '1',
     chainId: 137,
     nonce: 'abc12345',
+    issuedAt: NOW,
+    expirationTime: EXP_10M,
     ...overrides,
   });
 }
@@ -164,6 +171,53 @@ describe('verifySiweLogin (DI core)', () => {
     expect(d.createSession).not.toHaveBeenCalled();
   });
 
+  // --- REM-21: expirationTime 必須化 + 15 分 cap ---
+  it('expirationTime 無し → 400 invalid_message (署名検証に到達しない)', async () => {
+    const d = deps();
+    const r = await verifySiweLogin(
+      { message: message({ expirationTime: undefined }), signature: '0xdead' },
+      d,
+    );
+    expect(r).toMatchObject({ ok: false, status: 400, error: 'invalid_message' });
+    expect(d.verify).not.toHaveBeenCalled();
+  });
+
+  it('issuedAt 無し → 400 invalid_message', async () => {
+    const d = deps();
+    const r = await verifySiweLogin(
+      { message: message({ issuedAt: undefined }), signature: '0xdead' },
+      d,
+    );
+    expect(r).toMatchObject({ ok: false, status: 400, error: 'invalid_message' });
+    expect(d.verify).not.toHaveBeenCalled();
+  });
+
+  it('expirationTime - issuedAt が 16 分 → 400 invalid_message (cap 超過)', async () => {
+    const iat = NOW;
+    const expOver = new Date(iat.getTime() + 16 * 60 * 1000);
+    const d = deps();
+    const r = await verifySiweLogin(
+      { message: message({ issuedAt: iat, expirationTime: expOver }), signature: '0xdead' },
+      d,
+    );
+    expect(r).toMatchObject({ ok: false, status: 400, error: 'invalid_message' });
+    expect(d.verify).not.toHaveBeenCalled();
+  });
+
+  it('expirationTime - issuedAt が 10 分 → 署名検証段階まで到達 (valid_message)', async () => {
+    const iat = NOW;
+    const exp10m = new Date(iat.getTime() + 10 * 60 * 1000);
+    const d = deps();
+    const r = await verifySiweLogin(
+      { message: message({ issuedAt: iat, expirationTime: exp10m }), signature: '0xdead' },
+      d,
+    );
+    // verify が呼ばれた = 鮮度チェックを通過。
+    expect(d.verify).toHaveBeenCalledOnce();
+    // 成功フロー (verify=true, consumeNonce=true 固定)
+    expect(r).toMatchObject({ ok: true });
+  });
+
   it('createSession が throw (session 永続化失敗) → verifySiweLogin も reject (route が 503 に倒す)', async () => {
     const d = deps({
       createSession: vi.fn().mockRejectedValue(new Error('session_persist_failed')),
@@ -180,6 +234,7 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
   it('実鍵で署名 → ok・address は署名者・session 発行', async () => {
     const account = privateKeyToAccount(generatePrivateKey());
     const chain = supportedChains[0];
+    const iat = new Date();
     const message = createSiweMessage({
       domain: 'open-pay.jp',
       address: account.address,
@@ -187,6 +242,8 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
       version: '1',
       chainId: chain.id,
       nonce: generateSiweNonce(),
+      issuedAt: iat,
+      expirationTime: new Date(iat.getTime() + 10 * 60 * 1000),
     });
     const signature = await account.signMessage({ message });
     const client = createPublicClient({ chain, transport: http() });
@@ -218,6 +275,7 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
   it('許可外 domain で署名 (evil.com) → domain_mismatch・署名検証に到達しない', async () => {
     const account = privateKeyToAccount(generatePrivateKey());
     const chain = supportedChains[0];
+    const iat2 = new Date();
     const message = createSiweMessage({
       domain: 'evil.com',
       address: account.address,
@@ -225,6 +283,8 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
       version: '1',
       chainId: chain.id,
       nonce: generateSiweNonce(),
+      issuedAt: iat2,
+      expirationTime: new Date(iat2.getTime() + 10 * 60 * 1000),
     });
     const signature = await account.signMessage({ message });
     const verify = vi.fn();

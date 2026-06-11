@@ -275,6 +275,47 @@ describe('lib/kv', () => {
     expect(init.cache).toBe('no-store');
   });
 
+  // --- REM-21: kvSetNxGet (SET NX GET 原子 claim) ---
+
+  it('kvSetNxGet: SET key val EX ttl NX GET コマンド形式を送る', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: null }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvSetNxGet } = await import('@/lib/kv');
+    const res = await kvSetNxGet('freee:synced:0xabc:0xtx', 'pending', 900);
+    expect(res).toEqual({ ok: true, value: null });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual([
+      'SET',
+      'freee:synced:0xabc:0xtx',
+      'pending',
+      'EX',
+      '900',
+      'NX',
+      'GET',
+    ]);
+  });
+
+  it('kvSetNxGet: 既存キーは旧値を返す (claim 衝突)', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: 'pending' }) }),
+    );
+    const { kvSetNxGet } = await import('@/lib/kv');
+    const res = await kvSetNxGet('k', 'pending', 300);
+    expect(res).toEqual({ ok: true, value: 'pending' });
+  });
+
+  it('kvSetNxGet: 未設定 → unconfigured', async () => {
+    const { kvSetNxGet } = await import('@/lib/kv');
+    expect(await kvSetNxGet('k', 'v', 60)).toEqual({ ok: false, reason: 'unconfigured' });
+  });
+
   // --- Phase B primitives (INCR / GET / SET[NX,EX] / EXPIRE) ---
 
   it('kvIncr は INCR を送り number を返す', async () => {

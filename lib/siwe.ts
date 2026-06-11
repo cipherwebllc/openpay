@@ -15,6 +15,8 @@ import { LEGAL_ENTITY } from './legal';
 
 /** セッション cookie 名。httpOnly のため client JS からは読めない。 */
 export const SESSION_COOKIE = 'op_sess';
+/** verifySiweLogin で許容する最大有効期間 (issued→exp の差)。正規クライアントは 10 分以内。 */
+const MAX_SIWE_VALIDITY_MS = 15 * 60 * 1000;
 /** セッション有効期間 (KV TTL と cookie maxAge を揃える)。 */
 export const SESSION_TTL_SEC = 60 * 60 * 24 * 7; // 7 日
 /** nonce 有効期間 (署名までの猶予)。 */
@@ -132,6 +134,19 @@ export async function verifySiweLogin(
   }
   if (!deps.isAllowedDomain(domain)) {
     return { ok: false, status: 401, error: 'domain_mismatch' };
+  }
+
+  // 鮮度束縛 (defense-in-depth): expirationTime を必須化し issuedAt+15分以内に cap。
+  // viem は expirationTime が present のときしか判定せず、省略した message が nonce TTL
+  // だけを境界に受理されてしまう。正規クライアント (useSiweSession) は常に issuedAt と
+  // 10 分 exp を付ける。
+  const { issuedAt, expirationTime } = fields;
+  if (!issuedAt || !expirationTime) {
+    return { ok: false, status: 400, error: 'invalid_message' };
+  }
+  const validityMs = expirationTime.getTime() - issuedAt.getTime();
+  if (validityMs <= 0 || validityMs > MAX_SIWE_VALIDITY_MS) {
+    return { ok: false, status: 400, error: 'invalid_message' };
   }
 
   const checksum = getAddress(address);

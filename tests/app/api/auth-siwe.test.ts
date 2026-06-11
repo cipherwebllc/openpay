@@ -45,6 +45,11 @@ describe('SIWE routes', () => {
     expect(await res.json()).toEqual({ ok: true, address: null });
   });
 
+  it('me: Cache-Control: private, no-store を返す (CDN キャッシュ汚染防止)', async () => {
+    const res = await meGET();
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
   it('logout: cookie 無しでも 200 (冪等) + op_sess を maxAge0 で失効', async () => {
     const res = await logoutPOST();
     expect(res.status).toBe(200);

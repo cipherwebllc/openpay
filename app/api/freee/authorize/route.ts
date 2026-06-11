@@ -16,6 +16,13 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!appEnv.enableFreeeSync) {
     return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
   }
+  // CSRF 緩和: 状態変更 (KV state 予約) を伴う GET。クロスサイト発のナビゲーションで
+  // 踏まされないよう Sec-Fetch-Site: cross-site を拒否 (same-origin/same-site/none =
+  // 自サイト遷移・直接入力のみ許可。ヘッダ未送出の旧ブラウザは SIWE セッション必須が
+  // 引き続き下限の防御)。正規導線は FreeeSyncPanel の same-origin 遷移。
+  if (req.headers.get('sec-fetch-site') === 'cross-site') {
+    return NextResponse.json({ ok: false, error: 'cross_site_request' }, { status: 403 });
+  }
   if (!isKvConfigured()) {
     return NextResponse.json({ ok: false, error: 'kv_not_configured' }, { status: 503 });
   }
