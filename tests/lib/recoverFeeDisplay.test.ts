@@ -55,6 +55,35 @@ describe('buildRecoverFeeDisplay', () => {
       expect(result!.gasMode).toBe('merchant');
       expect(result!.customerPaysHuman).toBe('1000');
       expect(result!.merchantReceivesHuman).toBe('998'); // 1000 - 2
+      expect(result!.tooSmall).toBe(false);
+    });
+
+    it('merchant mode, billAmount < fee: tooSmall true + merchantReceives clamped to "0"', () => {
+      // merchant が 1 JPYC・floor 2 JPYC → 1000 - fee がマイナスになる。負の受取額を
+      // 表示せず '0' にクランプし、tooSmall フラグを立てる (F2)。
+      const ONE_JPYC = 1n * 10n ** 18n;
+      const result = buildRecoverFeeDisplay(ONE_JPYC, 137, 'merchant');
+      expect(result).not.toBeNull();
+      expect(result!.tooSmall).toBe(true);
+      expect(result!.merchantReceivesHuman).toBe('0');
+    });
+
+    it('merchant mode, billAmount === fee: tooSmall true (<= 境界) + merchantReceives "0"', () => {
+      // billAmount == fee (2 JPYC) も受取 0 で受付不可。<= 境界が含まれることを fence。
+      const TWO_JPYC = 2n * 10n ** 18n;
+      const result = buildRecoverFeeDisplay(TWO_JPYC, 137, 'merchant');
+      expect(result!.tooSmall).toBe(true);
+      expect(result!.merchantReceivesHuman).toBe('0');
+    });
+
+    it('customer mode, small amount: tooSmall false (顧客が amount+fee を払うので成立)', () => {
+      // customer 負担では金額が手数料以下でも顧客が amount + fee を払うため受付可能。
+      // tooSmall は merchant 専用フラグなので常に false。
+      const ONE_JPYC = 1n * 10n ** 18n;
+      const result = buildRecoverFeeDisplay(ONE_JPYC, 137, 'customer');
+      expect(result!.tooSmall).toBe(false);
+      expect(result!.customerPaysHuman).toBe('3'); // 1 + 2
+      expect(result!.merchantReceivesHuman).toBe('1');
     });
 
     it('bps=100 (1%): returns bps=100 and floorHuman="2"', () => {

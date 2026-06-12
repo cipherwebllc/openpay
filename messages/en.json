@@ -304,11 +304,14 @@
     "taxLabel": "Tax rate / category",
     "taxCustomLabel": "Custom tax rate (%)",
     "receiptNoLabel": "Receipt / reference no.",
-    "receiptNoPlaceholder": "Optional",
-    "recoverFeeDisclosureGasOnly": "Payment fee: {feeHuman} JPYC (gas equivalent)",
-    "recoverFeeDisclosurePercent": "Payment fee: {feeHuman} JPYC ({pct}% of amount, min {floorHuman} JPYC)",
-    "recoverFeeCustomer": "You pay: {customerPays} JPYC / Merchant receives: {merchantReceives} JPYC (fee paid by customer)",
-    "recoverFeeMerchant": "You pay: {customerPays} JPYC / Merchant receives: {merchantReceives} JPYC (fee absorbed by merchant)"
+    "receiptNoPlaceholder": "Optional"
+  },
+  "RecoverFee": {
+    "disclosureGasOnly": "Payment fee: {feeHuman} JPYC (gas equivalent)",
+    "disclosurePercent": "Payment fee: {feeHuman} JPYC ({pct}% of amount, min {floorHuman} JPYC)",
+    "splitCustomer": "You pay: {customerPays} JPYC / Merchant receives: {merchantReceives} JPYC (fee paid by customer)",
+    "splitMerchant": "You pay: {customerPays} JPYC / Merchant receives: {merchantReceives} JPYC (fee absorbed by merchant)",
+    "tooSmall": "This amount is at or below the fee ({fee} JPYC), so it can't be accepted."
   },
   "PaymentForm": {
     "title": "OpenPay Payment",
@@ -403,10 +406,6 @@
     "gaslessBatchHintJpycRelay": "OpenPay covers the network fee, so there is no charge to you (paid in JPYC, signature only).",
     "gasInfoJpycRecover": "For JPYC gasless payments, OpenPay sponsors the network fee (gas) and charges a per-transaction OpenPay usage fee (for now about 2 JPYC; from the July 2026 usage period, 1% of the payment with a 2 JPYC minimum), deducted at settlement and split to OpenPay's designated wallet within the same transaction. The merchant chooses who bears it (the customer adds it on top, or the merchant absorbs it from their receipt) — see the amount shown below. You need no native token — just sign the transfer in your wallet.",
     "gaslessBatchHintJpycRecover": "A per-transaction OpenPay usage fee applies (for now about 2 JPYC; from July, 1% of the payment, min 2 JPYC). The merchant chooses who bears it (signature only).",
-    "recoverFeeDisclosureGasOnly": "Payment fee: {feeHuman} JPYC (gas equivalent)",
-    "recoverFeeDisclosurePercent": "Payment fee: {feeHuman} JPYC ({pct}% of amount, min {floorHuman} JPYC)",
-    "recoverFeeCustomer": "You pay: {customerPays} JPYC / Merchant receives: {merchantReceives} JPYC (fee paid by customer)",
-    "recoverFeeMerchant": "You pay: {customerPays} JPYC / Merchant receives: {merchantReceives} JPYC (fee absorbed by merchant)",
     "errorRelayRateLimited": "Too many payments in a short period. Please wait a moment and try again.",
     "errorRelayNotConfigured": "Gasless payment (relay) is currently unavailable. Please try again later or use standard mode.",
     "errorRelayInsufficientBalance": "Your JPYC balance is insufficient. Check your balance and try again.",

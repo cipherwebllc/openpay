@@ -5,8 +5,7 @@ import { useTranslations } from 'next-intl';
 import { env } from '@/lib/env';
 import type { Address } from 'viem';
 import { parseUnits } from 'viem';
-import { buildRecoverFeeDisplay } from '@/lib/recoverFeeDisplay';
-import { RecoverFeeDisclosurePanel } from './RecoverFeeDisclosurePanel';
+import { RecoverFeeNotice } from './RecoverFeeNotice';
 import {
   ChevronRight,
   Coins,
@@ -241,38 +240,20 @@ export function QrGenerator() {
     );
   }, [isStandard, splitsForUrl, settings.token, settings.chain]);
 
-  // Recover モードの手数料開示。bps=0 は固定ガス開示、bps>0 は % 開示。
-  // FREE モード (forwarder null) → null → パネル非表示。
-  const recoverDisclosure = useMemo(() => {
+  // Recover モードの手数料開示に渡す請求額 (wei) と負担者。FREE モード (forwarder null)
+  // では共有 RecoverFeeNotice が null を返してパネルを描画しない。
+  // free 経路 (JPYC relay・無徴収) は負担者の概念が無いため customer 固定。
+  const recoverBillAmount = useMemo(() => {
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
-    const amountWei = (() => {
-      try { return parseUnits(amount, dep.decimals); } catch { return null; }
-    })();
-    if (!amountWei || amountWei <= 0n) return null;
-    return buildRecoverFeeDisplay(amountWei, dep.chainId, isFreeGasless ? 'customer' : settings.gasMode);
-  }, [amountValid, mode, settings.token, settings.chain, amount, settings.gasMode, isFreeGasless]);
-
-  const recoverFeeLabel = recoverDisclosure
-    ? recoverDisclosure.bps === 0
-      ? t('recoverFeeDisclosureGasOnly', { feeHuman: recoverDisclosure.feeHuman })
-      : t('recoverFeeDisclosurePercent', {
-          feeHuman: recoverDisclosure.feeHuman,
-          pct: recoverDisclosure.bps / 100,
-          floorHuman: recoverDisclosure.floorHuman,
-        })
-    : '';
-  const recoverSplitLabel = recoverDisclosure
-    ? recoverDisclosure.gasMode === 'customer'
-      ? t('recoverFeeCustomer', {
-          customerPays: recoverDisclosure.customerPaysHuman,
-          merchantReceives: recoverDisclosure.merchantReceivesHuman,
-        })
-      : t('recoverFeeMerchant', {
-          customerPays: recoverDisclosure.customerPaysHuman,
-          merchantReceives: recoverDisclosure.merchantReceivesHuman,
-        })
-    : '';
+    try {
+      const wei = parseUnits(amount, dep.decimals);
+      return wei > 0n ? wei : null;
+    } catch {
+      return null;
+    }
+  }, [amountValid, mode, settings.token, settings.chain, amount]);
+  const recoverGasMode: GasMode = isFreeGasless ? 'customer' : settings.gasMode;
 
   const payUrl = useMemo(() => {
     if (!hydrated || !effectiveReceiver || !origin || !amountValid) return '';
@@ -793,13 +774,11 @@ export function QrGenerator() {
               </div>
             )}
           </div>
-          {recoverDisclosure && (
-            <RecoverFeeDisclosurePanel
-              disclosure={recoverDisclosure}
-              feeLabel={recoverFeeLabel}
-              splitLabel={recoverSplitLabel}
-            />
-          )}
+          <RecoverFeeNotice
+            billAmount={recoverBillAmount}
+            chainId={deployment.chainId}
+            gasMode={recoverGasMode}
+          />
         </StepCard>
 
         {/* ② 受取先: 受取ウォレット / 店舗名 / ポスター補足文。初期設定後あまり

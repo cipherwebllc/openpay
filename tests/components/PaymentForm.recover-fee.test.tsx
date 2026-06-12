@@ -117,4 +117,23 @@ describe('PaymentForm recover fee disclosure', () => {
     render(<PaymentForm />);
     expect(screen.getByText(/手数料は店舗負担/)).toBeInTheDocument();
   });
+
+  it('RECOVER mode, gasMode=merchant, amount<=fee: shows tooSmall warning (F2)', () => {
+    // merchant 吸収で金額が手数料 (floor 2 JPYC) 以下 → 負の受取額を出さず受付不可警告。
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    setupSearch({
+      to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      token: 'jpyc',
+      chain: 'polygon',
+      amount: '1',
+      gas: 'merchant',
+      mode: 'gasless',
+    });
+    render(<PaymentForm />);
+    // 分担行 (店舗受取) は出さず、手数料以下の受付不可警告を表示。
+    expect(
+      screen.getByText(/この金額では受け付けられません/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/手数料は店舗負担/)).toBeNull();
+  });
 });

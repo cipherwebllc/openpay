@@ -1498,6 +1498,37 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(screen.queryByText('rate_limited')).toBeNull();
   });
 
+  // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice) ---
+  it('recover (forwarder 設定 + customer): 支払いボタン上に手数料開示を表示 (RecoverFeeNotice)', () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
+    setupRelayReady();
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    // bps=0 (既定) → ガス相当の固定手数料を開示 + 顧客負担の分担行。
+    expect(
+      screen.getByText(/決済手数料: 2 JPYC（ガス相当）/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/手数料はお客様負担/)).toBeInTheDocument();
+  });
+
+  it('recover (gas=merchant): 分担行に店舗負担を表示 (3000 JPYC は手数料超なので tooSmall 警告なし)', () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
+    setupRelayReady();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, gas: 'merchant' }} />);
+    expect(screen.getByText(/手数料は店舗負担/)).toBeInTheDocument();
+    expect(screen.queryByText(/受け付けられません/)).toBeNull();
+  });
+
+  it('FREE モード (forwarder null): 手数料開示は出さない', () => {
+    // setupRelayReady は forwarder null (free) のまま。relay 経路だが開示パネルは非表示。
+    setupRelayReady();
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/決済手数料/)).toBeNull();
+  });
+
   it('relay pending (broadcast 済・未確定): pending パネル + 再送ブロック (二重支払い防止)', async () => {
     const user = userEvent.setup();
     setupRelayReady();

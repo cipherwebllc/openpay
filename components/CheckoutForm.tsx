@@ -47,6 +47,7 @@ import {
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 import { buildJpycRelaySignPreview } from '@/lib/signPreview';
+import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
 
@@ -830,6 +831,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           完了後は出さない。表示専用で決済ロジックには触れない。 */}
       {!completed && signReassurance && (
         <SignReassurance {...signReassurance} />
+      )}
+
+      {/* Recover モードの手数料開示 (支払いボタン直上)。free モード / 非 recover では
+          RecoverFeeNotice が null を返して何も描画しない。負担者は params.gas (既定 customer)。 */}
+      {!completed && (
+        <RecoverFeeNotice
+          billAmount={useRecover && totalWei > 0n ? totalWei : null}
+          chainId={deployment.chainId}
+          gasMode={params.gas ?? 'customer'}
+        />
       )}
 
       {!completed && (

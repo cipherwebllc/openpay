@@ -304,11 +304,14 @@
     "taxLabel": "税率 / 税区分",
     "taxCustomLabel": "カスタム税率 (%)",
     "receiptNoLabel": "管理番号 / レシート番号",
-    "receiptNoPlaceholder": "任意",
-    "recoverFeeDisclosureGasOnly": "決済手数料: {feeHuman} JPYC（ガス相当）",
-    "recoverFeeDisclosurePercent": "決済手数料: {feeHuman} JPYC（決済額の{pct}%・最低{floorHuman} JPYC）",
-    "recoverFeeCustomer": "お客様支払: {customerPays} JPYC / 店舗受取: {merchantReceives} JPYC（手数料はお客様負担）",
-    "recoverFeeMerchant": "お客様支払: {customerPays} JPYC / 店舗受取: {merchantReceives} JPYC（手数料は店舗負担）"
+    "receiptNoPlaceholder": "任意"
+  },
+  "RecoverFee": {
+    "disclosureGasOnly": "決済手数料: {feeHuman} JPYC（ガス相当）",
+    "disclosurePercent": "決済手数料: {feeHuman} JPYC（決済額の{pct}%・最低{floorHuman} JPYC）",
+    "splitCustomer": "お客様支払: {customerPays} JPYC / 店舗受取: {merchantReceives} JPYC（手数料はお客様負担）",
+    "splitMerchant": "お客様支払: {customerPays} JPYC / 店舗受取: {merchantReceives} JPYC（手数料は店舗負担）",
+    "tooSmall": "金額が手数料（{fee} JPYC）以下のため、この金額では受け付けられません"
   },
   "PaymentForm": {
     "title": "OpenPay 決済",
@@ -403,10 +406,6 @@
     "gaslessBatchHintJpycRelay": "ネットワーク手数料は OpenPay が負担するため、お客様の負担はありません (JPYC でお支払い・署名のみ)",
     "gasInfoJpycRecover": "JPYC のガスレス決済では、OpenPay がネットワーク手数料 (ガス) を肩代わりし、決済 1 件ごとに OpenPay 利用料 (当面 約 2 JPYC、2026 年 7 月のご利用分から 決済額の 1%・最低 2 JPYC) を決済時に申し受けます。この利用料は決済と同じ取引内で OpenPay 指定ウォレットへ分割され、負担者 (お客様が上乗せ／店舗が受取から吸収) は店舗が選択します (実額は下の表示をご確認ください)。ネイティブトークンの保有は不要で、ウォレットで送金内容に署名するだけで完了します。",
     "gaslessBatchHintJpycRecover": "決済 1 件ごとに OpenPay 利用料 (当面 約 2 JPYC、7 月〜 決済額の 1%・最低 2 JPYC) を申し受けます。負担者は店舗が選択 (署名のみ)",
-    "recoverFeeDisclosureGasOnly": "決済手数料: {feeHuman} JPYC（ガス相当）",
-    "recoverFeeDisclosurePercent": "決済手数料: {feeHuman} JPYC（決済額の{pct}%・最低{floorHuman} JPYC）",
-    "recoverFeeCustomer": "お客様支払: {customerPays} JPYC / 店舗受取: {merchantReceives} JPYC（手数料はお客様負担）",
-    "recoverFeeMerchant": "お客様支払: {customerPays} JPYC / 店舗受取: {merchantReceives} JPYC（手数料は店舗負担）",
     "errorRelayRateLimited": "短時間に決済が集中しています。少し時間をおいてから、再度お試しください。",
     "errorRelayNotConfigured": "ガスレス決済 (リレー) は現在ご利用いただけません。時間をおいて再度お試しいただくか、通常モードをご利用ください。",
     "errorRelayInsufficientBalance": "JPYC の残高が不足しています。残高をご確認のうえ、再度お試しください。",

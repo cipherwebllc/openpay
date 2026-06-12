@@ -1110,6 +1110,25 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     });
   });
 
+  // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice・tip は customer 固定) ---
+  it('recover (forwarder 設定): 送信ボタン上に手数料開示 (顧客負担) を表示', () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x752B000000000000000000000000000000000000' as Address,
+    );
+    render(<TipForm params={JPYC_PARAMS} />);
+    // bps=0 → ガス相当の固定手数料。tip は gas=customer 固定なので顧客負担の分担行。
+    expect(
+      screen.getByText(/決済手数料: 2 JPYC（ガス相当）/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/手数料はお客様負担/)).toBeInTheDocument();
+  });
+
+  it('FREE モード (forwarder null): 手数料開示は出さない', () => {
+    // beforeEach は forwarder を mock しない → free モード。relay 経路だが開示は非表示。
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/決済手数料/)).toBeNull();
+  });
+
   it('relay 成功 → txHash 表示 (userOpHash / block 行は無い)', () => {
     setRelay('success');
     render(<TipForm params={JPYC_PARAMS} />);

@@ -402,6 +402,69 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
   }
 });
 
+describe('i18n: RecoverFee 名前空間 (recover 手数料開示・共有 RecoverFeeNotice・ja/en parity)', () => {
+  // QrGenerator / PaymentForm に重複していた recover 手数料ラベルを 1 つの共有名前空間へ
+  // 集約 (RecoverFeeNotice が消費)。F2 で tooSmall (金額 <= 手数料の受付不可) を追加。
+  const RECOVER_FEE_KEYS = [
+    'disclosureGasOnly',
+    'disclosurePercent',
+    'splitCustomer',
+    'splitMerchant',
+    'tooSmall',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of RECOVER_FEE_KEYS) {
+      it(`${loc.name}.RecoverFee.${key} は非空文字列`, () => {
+        const v = (loc.m.RecoverFee as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('キー集合が ja と en で完全一致 (構造 parity)', () => {
+    expect(Object.keys(ja.RecoverFee).sort()).toEqual(
+      Object.keys(en.RecoverFee).sort(),
+    );
+  });
+
+  it('parameterized キーが必要な placeholder を持つ (ja/en)', () => {
+    for (const m of [ja, en]) {
+      const r = m.RecoverFee as Record<string, string>;
+      expect(r.disclosureGasOnly).toContain('{feeHuman}');
+      for (const ph of ['{feeHuman}', '{pct}', '{floorHuman}']) {
+        expect(r.disclosurePercent).toContain(ph);
+      }
+      for (const ph of ['{customerPays}', '{merchantReceives}']) {
+        expect(r.splitCustomer).toContain(ph);
+        expect(r.splitMerchant).toContain(ph);
+      }
+      expect(r.tooSmall).toContain('{fee}');
+    }
+  });
+
+  it('旧 per-namespace の recoverFee* キーは QrGenerator / PaymentForm から削除済 (移設 fence)', () => {
+    // 重複の出戻りを防ぐ: 旧キーが片方の namespace に復活したら CI を赤くする。
+    const OLD_KEYS = [
+      'recoverFeeDisclosureGasOnly',
+      'recoverFeeDisclosurePercent',
+      'recoverFeeCustomer',
+      'recoverFeeMerchant',
+    ] as const;
+    for (const m of [ja, en]) {
+      for (const ns of ['QrGenerator', 'PaymentForm'] as const) {
+        for (const key of OLD_KEYS) {
+          expect((m[ns] as Record<string, unknown>)[key]).toBeUndefined();
+        }
+      }
+    }
+  });
+});
+
 describe('i18n: SignReassurance 名前空間 (署名安心 UX・ja/en parity)', () => {
   // 署名安心パネル + 署名待ちオーバーレイ + 照合表の i18n キー集合。片 locale 抜けで
   // t() が key を表示する regression を fence する。

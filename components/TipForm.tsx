@@ -43,6 +43,7 @@ import {
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 import { buildJpycRelaySignPreview } from '@/lib/signPreview';
+import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 
@@ -692,6 +693,14 @@ export function TipForm({ params }: { params: TipParams }) {
           recover/Pimlico 7702 はスコープ外で出さない。署名/確認待ち中は待機表示に置換する。
           表示専用で決済ロジックには触れない。 */}
       {signReassurance && <SignReassurance {...signReassurance} />}
+
+      {/* Recover モードの手数料開示 (送信ボタン直上)。tip は gas=customer 固定 (チッパーが
+          チップ + 手数料を負担)。free モード / 非 recover では何も描画しない。 */}
+      <RecoverFeeNotice
+        billAmount={useRecover && amountWei > 0n ? amountWei : null}
+        chainId={deployment.chainId}
+        gasMode="customer"
+      />
 
       <button
         type="button"

@@ -16,10 +16,17 @@ export type RecoverFeeDisplay = {
   bps: number;
   /** 顧客支払額の人間可読額 (customer 負担時 = amount + fee)。 */
   customerPaysHuman: string;
-  /** 店主受取額の人間可読額 (merchant 負担時 = amount - fee)。 */
+  /** 店主受取額の人間可読額 (merchant 負担時 = amount - fee)。tooSmall のときは '0' にクランプ。 */
   merchantReceivesHuman: string;
   /** gasMode = 'customer' か 'merchant' か。 */
   gasMode: 'customer' | 'merchant';
+  /**
+   * merchant 負担で billAmount <= fee のとき true。merchant 受取が 0 以下になり
+   * 実際の決済も別所 (amount_too_small) でブロックされるため、分担行ではなく
+   * 受付不可の警告を出すべきことを示す。customer 負担では常に false (顧客が
+   * amount + fee を払うので成立する)。
+   */
+  tooSmall: boolean;
 };
 
 /**
@@ -46,10 +53,26 @@ export function buildRecoverFeeDisplay(
       ? formatUnits(billAmount + fee, 18)
       : formatUnits(billAmount, 18);
 
+  // merchant 負担で billAmount <= fee だと billAmount - fee が 0 以下 → 負の受取額が
+  // 表示されてしまう (例: 1 JPYC・fee 2 JPYC → -1 JPYC)。実際の決済は別所で
+  // amount_too_small としてブロックされるので、ここでは '0' にクランプし、コンポーネント
+  // 側で分担行の代わりに「受付不可」警告を出させる (tooSmall フラグで通知)。
+  const tooSmall = gasMode === 'merchant' && billAmount <= fee;
+
   const merchantReceivesHuman =
     gasMode === 'merchant'
-      ? formatUnits(billAmount - fee, 18)
+      ? tooSmall
+        ? '0'
+        : formatUnits(billAmount - fee, 18)
       : formatUnits(billAmount, 18);
 
-  return { feeHuman, floorHuman, bps, customerPaysHuman, merchantReceivesHuman, gasMode };
+  return {
+    feeHuman,
+    floorHuman,
+    bps,
+    customerPaysHuman,
+    merchantReceivesHuman,
+    gasMode,
+    tooSmall,
+  };
 }
