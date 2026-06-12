@@ -8,9 +8,10 @@
 // 未読状態 (どこまで既読か) は lib/newsRead.ts + hooks/useNewsRead.ts が localStorage
 // で持つ。サーバ DB / ログインは不要。
 //
-// 文面の誠実性: pricing 項目は lib/legal.ts の開示 (施行日 2026-06-09・2026 年 7 月利用分
-// から・ガスレス受領額の 1% 基準・通常決済/受け取り自体は無料) と矛盾させない。確定でない
-// ことを断定で書かない。文面は最終的に運営が直す前提の plausible な雛形だが、虚偽・誇大は禁止。
+// 文面の誠実性: pricing 項目は lib/legal.ts の開示 (施行日 2026-06-12・JPYC ガスレスは
+// 決済1件ごとの利用料 = 当面 約2 JPYC・2026 年 7 月利用分から決済額の 1%・最低 2 JPYC・
+// 負担者は店舗が選択・通常決済/受け取り自体/USDC 経路は無料) と矛盾させない。確定でない
+// ことを断定で書かない。過去のお知らせは黙って書き換えず「置き換え済み」注記で更新する。
 
 export type NewsCategory = 'feature' | 'pricing' | 'notice'; // 新機能 / 料金 / お知らせ
 
@@ -31,6 +32,20 @@ export type NewsItem = {
 // date 降順 (新しい順) で宣言する。sortedNews() が降順を保証するため宣言順自体は
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
+  {
+    id: 'per-tx-fee-2026-06-12',
+    date: '2026-06-12',
+    category: 'pricing',
+    title: {
+      ja: 'JPYC ガスレス決済の料金を改定しました（決済ごとの利用料へ）',
+      en: 'JPYC gasless pricing revised: per-payment fee',
+    },
+    body: {
+      ja: 'JPYC のガスレス決済では、決済 1 件ごとに OpenPay 利用料（当面 約 2 JPYC・2026 年 7 月のご利用分からは決済額の 1%・最低 2 JPYC）を決済時に申し受けます。手数料をお客様負担にするか店舗負担にするかは、店舗が決済設定で選択できます。\n本改定により、月次後払いの利用料（6/9 のお知らせ）および JPYC ガス全額負担（6/5 のお知らせ）の内容は置き換えられます。決済の受け取りそのもの・通常決済（ガスあり）・USDC 経路は引き続き無料です。\n詳しくは利用規約をご確認ください。',
+      en: 'For JPYC gasless payments, a per-payment OpenPay fee applies at settlement (about 2 JPYC for now; from the July 2026 usage period, 1% of the payment with a 2 JPYC minimum). The merchant chooses whether the customer or the store bears it.\nThis supersedes the monthly billed-in-arrears fee (announced 6/9) and the full gas sponsorship (announced 6/5). Receiving payments itself, standard (gas-on) payments, and the USDC route remain free.\nSee the Terms of Service for details.',
+    },
+    link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
+  },
   {
     id: 'jpyc-map-added',
     date: '2026-06-10',
@@ -54,8 +69,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: 'OpenPay usage fee starts with July 2026 usage',
     },
     body: {
-      ja: 'ガスレス決済モードをご利用の店主向けに、当月のガスレス受領額の 1% を基準とした月額の利用料を、2026 年 7 月のご利用分から翌月以降にまとめて後払いで申し受けます。\n商品代金は引き続き全額が店主へ直接・即時に着金し、当社が売上を受領・保管することはありません。決済の受け取りそのもの・通常決済（ガスあり）・顧客が gas を負担する USDC 経路は無料です。\n詳しくは利用規約をご確認ください。',
-      en: 'For merchants using gasless payment mode, a monthly usage fee based on 1% of that month\'s gasless receipts will be billed in arrears, starting with July 2026 usage.\nProduct payments continue to settle in full, directly and instantly, to the merchant; OpenPay never receives or holds your sales. Receiving payments itself, standard (gas-on) payments, and the customer-pays-gas USDC route remain free.\nSee the Terms of Service for details.',
+      ja: 'ガスレス決済モードをご利用の店主向けに、当月のガスレス受領額の 1% を基準とした月額の利用料を、2026 年 7 月のご利用分から翌月以降にまとめて後払いで申し受けるとお知らせしていました。\n※ 2026-06-12 の料金改定により、本お知らせの内容は「決済 1 件ごとの利用料」へ置き換えられました。最新のお知らせ・利用規約をご確認ください。',
+      en: 'We previously announced a monthly usage fee based on 1% of gasless receipts, billed in arrears starting with July 2026 usage.\nNote: superseded by the 2026-06-12 pricing revision, which replaces this with a per-payment fee. See the latest announcement and the Terms of Service.',
     },
     link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
   },
@@ -68,8 +83,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: 'OpenPay covers all JPYC gas (gasless payments)',
     },
     body: {
-      ja: 'JPYC のガスレス決済では、ネットワーク手数料 (gas) を OpenPay が全額負担し、利用者から相当額を一切徴収しません。お客様は gas 用のネイティブトークンを用意せずに JPYC で支払えます。',
-      en: 'For JPYC gasless payments, OpenPay covers the network fee (gas) in full and collects no equivalent from users. Customers can pay in JPYC without holding a native gas token.',
+      ja: 'JPYC のガスレス決済で、ネットワーク手数料 (gas) を OpenPay が全額負担する運用を開始したとお知らせしていました。お客様が gas 用のネイティブトークンを用意せずに JPYC で支払える点は変わりません。\n※ 2026-06-12 の料金改定により、ガスの負担方式は「決済 1 件ごとの利用料」へ置き換えられました。最新のお知らせ・利用規約をご確認ください。',
+      en: 'We previously announced that OpenPay covers JPYC gasless network fees in full. Customers can still pay in JPYC without holding a native gas token.\nNote: superseded by the 2026-06-12 pricing revision, which replaces this with a per-payment fee. See the latest announcement and the Terms of Service.',
     },
   },
 ];

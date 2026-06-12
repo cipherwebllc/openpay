@@ -56,8 +56,15 @@ describe('NewsList: 一覧描画 / 既読化', () => {
     renderWithIntl(<NewsList />);
     const internal = sortedNews().find((n) => n.link?.href.startsWith('/'));
     if (!internal) return; // 内部 link 無しなら skip (規約上は存在)
-    const link = screen.getByRole('link', { name: new RegExp(internal.link!.labelJa) });
-    expect(link).toHaveAttribute('href', `/ja${internal.link!.href}`);
+    // 同一 label の内部 link が複数 item に存在しうる (例: /terms へ「利用規約を読む」が
+    // 料金改定と旧料金告知の両方に)。全該当 link が locale prefix 付きであることを assert。
+    const links = screen.getAllByRole('link', {
+      name: new RegExp(internal.link!.labelJa),
+    });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', `/ja${internal.link!.href}`);
+    }
   });
 
   it('マウント時に markAllSeen を 1 回呼ぶ (= 開いたら既読)', () => {

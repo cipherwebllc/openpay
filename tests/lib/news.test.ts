@@ -74,13 +74,29 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(NEWS_ITEMS.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('pricing 文面が legal.ts の開示と矛盾しない (1% / 2026 年 7 月 / 後払い)', () => {
-    const pricing = NEWS_ITEMS.find((n) => n.category === 'pricing');
+  it('最新の pricing 文面が legal.ts の開示と矛盾しない (決済1件ごと / 1% / 最低2JPYC / 7月)', () => {
+    // 最新 (date 降順先頭) の pricing が現行の料金 SOT。2026-06-12 改定 = per-tx 利用料。
+    const pricing = sortedNews().find((n) => n.category === 'pricing');
     expect(pricing).toBeDefined();
-    // 1% 基準・2026 年 7 月利用分から・通常決済/受け取りは無料 を ja 本文で明示。
+    expect(pricing!.body.ja).toMatch(/決済\s*1\s*件ごと/);
     expect(pricing!.body.ja).toContain('1%');
+    expect(pricing!.body.ja).toMatch(/最低\s*2\s*JPYC/);
     expect(pricing!.body.ja).toMatch(/7\s*月/);
     // 断定的な「無料」誤誘導ではなく、無料の範囲 (通常決済等) を明記している。
     expect(pricing!.body.ja).toMatch(/無料/);
+    // 負担者は店舗が選択できることを明示 (gasMode トグルの開示)。
+    expect(pricing!.body.ja).toMatch(/店舗が.*選択/);
+  });
+
+  it('置き換え済みの旧 pricing/feature お知らせは superseded 注記を持つ (黙った書き換え禁止)', () => {
+    const monthly = NEWS_ITEMS.find((n) => n.id === 'usage-fee-2026-07');
+    const free = NEWS_ITEMS.find((n) => n.id === 'jpyc-gasless-free');
+    for (const stale of [monthly, free]) {
+      expect(stale).toBeDefined();
+      expect(stale!.body.ja).toMatch(/置き換えられました/);
+      expect(stale!.body.en).toMatch(/superseded/i);
+    }
+    // 旧文面が現行料金を断定しない (全額負担/徴収しません の現在形断定が残っていない)。
+    expect(free!.body.ja).not.toMatch(/一切徴収しません/);
   });
 });
