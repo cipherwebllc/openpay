@@ -401,6 +401,14 @@ export const env = {
   enableHandles:
     process.env.NEXT_PUBLIC_ENABLE_HANDLES === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_HANDLES === 'true',
+  // OpenPay Pro (月額固定 ¥500=500 JPYC の前払いサブスク・ゲート対象 = CSV ダウンロードのみ) の
+  // 有効化フラグ (client 露出)。**既定 OFF**。OFF の間は /api/pro/* は 404・ProPaywall 非表示・
+  // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
+  // per-tx の recover 手数料 (NEXT_PUBLIC_RECOVER_FEE_BPS) / a1 利用料とは別系統の収益で両立する。
+  // 設計: plans/pro-plan.md。'1' / 'true' で ON。
+  enablePro:
+    process.env.NEXT_PUBLIC_ENABLE_PRO === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_PRO === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

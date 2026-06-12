@@ -16,6 +16,11 @@ vi.mock('@/hooks/useMarketRates', () => ({
   }),
 }));
 vi.mock('@/components/FreeeSyncPanel', () => ({ FreeeSyncPanel: () => null }));
+// Pro ゲートは本 test では OFF (enablePro 未上書き=false)。useProStatus (React Query) を
+// boundary mock して proLocked=false に固定する (a1 延滞ぼかしの検証に集中)。
+vi.mock('@/hooks/useProStatus', () => ({
+  useProStatus: () => ({ data: undefined }),
+}));
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({ isSignedIn: true, mismatch: false }),
 }));

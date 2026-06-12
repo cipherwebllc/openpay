@@ -187,6 +187,42 @@ describe('verifyJpycFeeOnChain', () => {
     expect(publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: txHash });
   });
 
+  it('status=success → 成功時に receipt の blockNumber を載せる (Pro 付与の決定論用)', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({})],
+        blockNumber: 12345n,
+      }),
+    };
+    const r = await verifyJpycFeeOnChain({ publicClient, txHash, expected });
+    expect(r).toEqual({ ok: true, value: MIN, blockNumber: 12345n });
+  });
+
+  it('blockNumber 欠落の receipt でも成功は壊さない (blockNumber undefined)', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({})],
+        // blockNumber 無し (古い mock / 非標準 client)
+      }),
+    };
+    const r = await verifyJpycFeeOnChain({ publicClient, txHash, expected });
+    expect(r).toEqual({ ok: true, value: MIN });
+  });
+
+  it('検証失敗時は blockNumber を載せない (reason のみ)', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({ value: MIN - 1n })],
+        blockNumber: 999n,
+      }),
+    };
+    const r = await verifyJpycFeeOnChain({ publicClient, txHash, expected });
+    expect(r).toEqual({ ok: false, reason: 'amount_too_low' });
+  });
+
   it('status=reverted → tx_reverted', async () => {
     const publicClient = {
       getTransactionReceipt: vi

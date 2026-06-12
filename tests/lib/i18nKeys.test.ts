@@ -1231,6 +1231,73 @@ describe('i18n: UsageFee owed 一覧 keys (古い未収の期間別清算・ja/e
   });
 });
 
+describe('i18n: Pro 名前空間 (OpenPay Pro paywall・ja/en parity)', () => {
+  // Pro 加入パネル (ProPaywall) で使う key 集合。flag-gate された機能なので片 locale 抜けが
+  // silent regression しやすい。非空 + 構造 parity + placeholder を fence する。
+  const PRO_KEYS = [
+    'title',
+    'intro',
+    'price',
+    'misconfigured',
+    'connectRequired',
+    'mismatch',
+    'signIn',
+    'signingIn',
+    'signInStatement',
+    'signInError',
+    'switchChain',
+    'reviewCta',
+    'confirmPrice',
+    'confirmNoAutoRenew',
+    'confirmNoRefund',
+    'confirmOverpay',
+    'confirmGas',
+    'payCta',
+    'paying',
+    'verifying',
+    'retryVerify',
+    'verifyError',
+    'payError',
+    'granted',
+    'grantedNoDate',
+    'note',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of PRO_KEYS) {
+      it(`${loc.name}.Pro.${key} は非空文字列`, () => {
+        const v = (loc.m.Pro as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('Pro キー集合が ja と en で完全一致 (構造 parity)', () => {
+    expect(Object.keys(ja.Pro).sort()).toEqual(Object.keys(en.Pro).sort());
+  });
+
+  it('parameterized Pro キーが必要な placeholder を持つ (ja/en)', () => {
+    for (const m of [ja, en]) {
+      const p = m.Pro as Record<string, string>;
+      expect(p.price).toContain('{price}');
+      expect(p.price).toContain('{days}');
+      expect(p.confirmPrice).toContain('{price}');
+      expect(p.confirmPrice).toContain('{days}');
+      expect(p.confirmOverpay).toContain('{price}');
+      expect(p.payCta).toContain('{price}');
+      expect(p.reviewCta).toContain('{price}');
+      expect(p.switchChain).toContain('{chain}');
+      expect(p.granted).toContain('{date}');
+      expect(p.verifyError).toContain('{reason}');
+      expect(p.payError).toContain('{reason}');
+    }
+  });
+});
+
 describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity)', () => {
   function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
     return Object.entries(o)

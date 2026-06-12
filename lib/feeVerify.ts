@@ -15,7 +15,11 @@ export type FeeTransferExpected = {
 };
 
 export type FeeVerifyResult =
-  | { ok: true; value: bigint }
+  // blockNumber は **on-chain 検証 (verifyJpycFeeOnChain) のみ** で埋まる (receipt から取得)。
+  // 純関数 verifyJpycFeeTransfer は logs しか持たないため常に undefined。Pro 加入 route は
+  // この blockNumber → getBlock で支払い tx の block timestamp を引き、決定論的な付与満了
+  // (= blockTs + 30日) を算出する (now() を使わない・retry 冪等の核心)。
+  | { ok: true; value: bigint; blockNumber?: bigint }
   | {
       ok: false;
       reason:
@@ -96,10 +100,14 @@ type ReceiptReader = {
   getTransactionReceipt: (a: { hash: Hex }) => Promise<{
     status: 'success' | 'reverted';
     logs: readonly FeeReceiptLog[];
+    // viem の receipt は blockNumber: bigint を含む。Pro 加入の決定論的付与で使う
+    // (block timestamp → targetExpiresAt)。billing/settle 経路はこの値を読まない (period 基準)。
+    blockNumber?: bigint;
   }>;
 };
 
-/** on-chain: receipt 取得 → status 確認 → 純関数で照合。publicClient は chain ごとに呼出側が用意。 */
+/** on-chain: receipt 取得 → status 確認 → 純関数で照合。publicClient は chain ごとに呼出側が用意。
+ *  成功時は receipt の blockNumber を結果に載せる (純関数の判定は不変・追加フィールドのみ)。 */
 export async function verifyJpycFeeOnChain(args: {
   publicClient: ReceiptReader;
   txHash: Hex;
@@ -119,5 +127,11 @@ export async function verifyJpycFeeOnChain(args: {
     return { ok: false, reason: 'rpc_error' };
   }
   if (receipt.status !== 'success') return { ok: false, reason: 'tx_reverted' };
-  return verifyJpycFeeTransfer({ logs: receipt.logs, expected: args.expected });
+  const result = verifyJpycFeeTransfer({ logs: receipt.logs, expected: args.expected });
+  // 照合成功時のみ blockNumber を付加する (失敗時は reason だけ・形を変えない)。
+  // settle はこのフィールドを無視するので既存挙動に影響しない (追加のみ・破壊なし)。
+  if (result.ok && receipt.blockNumber !== undefined) {
+    return { ...result, blockNumber: receipt.blockNumber };
+  }
+  return result;
 }

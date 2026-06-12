@@ -28,7 +28,9 @@ import { usePayerReceipts } from '@/hooks/usePayerReceipts';
 import { useMarketRates } from '@/hooks/useMarketRates';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useBillingInvoice } from '@/hooks/useBillingInvoice';
+import { useProStatus } from '@/hooks/useProStatus';
 import { NonCustodialNotice } from './NonCustodialNotice';
+import { ProPaywall } from './ProPaywall';
 import { BillingDueBanner } from './BillingDueBanner';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
@@ -84,9 +86,19 @@ export function HistoryView() {
   const usageFeeActive = env.enableUsageFee;
   const { isSignedIn } = useSiweSession();
   const invoice = useBillingInvoice(isSignedIn && usageFeeActive);
-  const feeGated =
+  // a1 延滞ロック (確定した延滞のみ・bypass/未ログイン/読込中は解放)。これは履歴をぼかす唯一の経路。
+  const a1Locked =
     usageFeeActive && isSignedIn && invoice.data?.delinquent === true;
-  const csvLocked = feeGated;
+
+  // OpenPay Pro の CSV ゲート (独立合成・Codex P2)。Pro 点灯中、サインイン済かつ Pro 未加入なら CSV
+  // をロックして ProPaywall を出す。**履歴閲覧はぼかさない** (a1 の blur とは別系統・Pro は CSV のみ)。
+  const proActive = env.enablePro;
+  const proStatus = useProStatus(isSignedIn && proActive);
+  const proLocked = proActive && isSignedIn && proStatus.data?.pro === false;
+
+  // CSV ダウンロードのロックは a1 延滞 OR Pro 未加入 (独立評価)。閲覧ぼかしは a1Locked のみ。
+  const csvLocked = a1Locked || proLocked;
+  const feeGated = a1Locked; // 履歴ぼかし + a1 paywall は延滞時のみ (従来挙動を不変に保つ)。
 
   // 集計 + 一覧 (= 整形表示の「データ部」)。延滞時は blur + overlay でぼかし、CSV は csvLocked。
   const summaryAndList = (
@@ -133,6 +145,9 @@ export function HistoryView() {
         usdcJpy={usdcJpy}
         csvLocked={csvLocked}
       />
+      {/* CSV が Pro ゲートでロックされ、かつ a1 延滞でない (a1 優先) ときに加入パネルを出す。
+          閲覧 (summaryAndList) はぼかさない — Pro は CSV のみのゲート。 */}
+      {!feeGated && proLocked && <ProPaywall />}
       {feeGated ? (
         <div className="relative">
           <div
