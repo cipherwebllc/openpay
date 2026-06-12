@@ -28,7 +28,11 @@ vi.mock('@/hooks/useSiweSession', () => ({
 
 // SIWE ログイン UI は freee/利用権 が有効なときだけ出す。flag は holder で test 毎に切替
 // (既定 = freee ON で SIWE UI を出す。両 OFF で隠れることは専用 test で検証)。
-const flags = vi.hoisted(() => ({ enableFreeeSync: true, enableBilling: false }));
+const flags = vi.hoisted(() => ({
+  enableFreeeSync: true,
+  enableBilling: false,
+  enablePro: false,
+}));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -40,6 +44,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableBilling() {
         return flags.enableBilling;
+      },
+      get enablePro() {
+        return flags.enablePro;
       },
     },
   };
@@ -126,6 +133,7 @@ beforeEach(() => {
   setSiwe();
   flags.enableFreeeSync = true; // 既定: SIWE 機能 ON → ログイン UI を出す
   flags.enableBilling = false;
+  flags.enablePro = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -255,9 +263,10 @@ describe('WalletBadge: SIWE サインイン', () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('SIWE 機能 (freee/利用権) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
+  it('SIWE 機能 (freee/利用権/Pro) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
     flags.enableFreeeSync = false;
     flags.enableBilling = false;
+    flags.enablePro = false;
     setConnected();
     setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
     renderWithIntl(<WalletBadge />);
@@ -270,6 +279,21 @@ describe('WalletBadge: SIWE サインイン', () => {
     // 切断は常に出る
     expect(
       within(details).getByRole('menuitem', { name: '切断' }),
+    ).toBeInTheDocument();
+  });
+
+  it('Pro のみ ON (freee/利用権 OFF) → ログイン UI を出す (Pro 加入にサインインが要る)', () => {
+    // 回帰防止: siweEnabled に enablePro を含めないと、Pro 単独構成でヘッダーからサインイン
+    // できず、Pro ゲート (ProPaywall) が不到達になる。Pro だけでもログイン導線を出す。
+    flags.enableFreeeSync = false;
+    flags.enableBilling = false;
+    flags.enablePro = true;
+    setConnected();
+    setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: 'ログイン (署名)' }),
     ).toBeInTheDocument();
   });
 });

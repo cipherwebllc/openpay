@@ -84,17 +84,29 @@ export function HistoryView() {
   // bypass(アルファ) は全て解放 — 履歴閲覧は原則無料で、確定した延滞店だけ締めてリテンションを守る。
   // (判定は /api/billing/invoice の delinquent = relay ゲートと同一のサーバ権威ロジック。)
   const usageFeeActive = env.enableUsageFee;
-  const { isSignedIn } = useSiweSession();
+  const { isSignedIn, isLoading: sessionLoading } = useSiweSession();
   const invoice = useBillingInvoice(isSignedIn && usageFeeActive);
   // a1 延滞ロック (確定した延滞のみ・bypass/未ログイン/読込中は解放)。これは履歴をぼかす唯一の経路。
   const a1Locked =
     usageFeeActive && isSignedIn && invoice.data?.delinquent === true;
 
-  // OpenPay Pro の CSV ゲート (独立合成・Codex P2)。Pro 点灯中、サインイン済かつ Pro 未加入なら CSV
-  // をロックして ProPaywall を出す。**履歴閲覧はぼかさない** (a1 の blur とは別系統・Pro は CSV のみ)。
+  // OpenPay Pro の CSV ゲート (独立合成・Codex P2)。Pro 点灯中は Pro 加入が確認できるまで CSV を
+  // ロックして ProPaywall を出す。**未サインインも Pro ではありえないのでロック**し、ProPaywall が
+  // 接続→サインイン→¥500 のファネルを出す (サインイン導線がここにしか無いため isSignedIn 必須にすると
+  // ゲート自体が不到達になる)。bypass(アルファ) 中は status が pro=true を返すのでロックしない。
+  // **履歴閲覧はぼかさない** (a1 の blur とは別系統・Pro は CSV のみ)。
   const proActive = env.enablePro;
   const proStatus = useProStatus(isSignedIn && proActive);
-  const proLocked = proActive && isSignedIn && proStatus.data?.pro === false;
+  // 読込中 (セッション確認中 or サインイン済で status 取得中) はロック判定を保留し、既加入者に
+  // paywall が一瞬出る点滅を防ぐ。確定後のみロックする。**未サインインは必ずロック**する: react-query は
+  // query を disable しても前回の data ({pro:true}) を残すため、`data?.pro !== true` だけだと加入者が
+  // サインアウトしても CSV が開いたままになる (Codex 指摘)。`!isSignedIn ||` で signed-out を明示ロック。
+  const proResolving =
+    proActive && (sessionLoading || (isSignedIn && proStatus.isLoading));
+  const proLocked =
+    proActive &&
+    !proResolving &&
+    (!isSignedIn || proStatus.data?.pro !== true);
 
   // CSV ダウンロードのロックは a1 延滞 OR Pro 未加入 (独立評価)。閲覧ぼかしは a1Locked のみ。
   const csvLocked = a1Locked || proLocked;

@@ -28,9 +28,11 @@ export function WalletBadge() {
   const visible = useVisibleConnectors(connectors);
   const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut } =
     useSiweSession();
-  // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料) が有効なときだけログイン UI を出す。
-  // すべて OFF (現状の本番) では「繋ぐ/切る」だけ表示し、無意味なログイン導線を出さない。
-  const siweEnabled = env.enableFreeeSync || env.enableUsageFee;
+  // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料 / Pro 加入) が有効なときだけ
+  // ログイン UI を出す。すべて OFF (現状の本番) では「繋ぐ/切る」だけ表示し、無意味なログイン導線を
+  // 出さない。Pro が含まれていないとヘッダーからサインアウトできず、サインイン済表示も出ない。
+  const siweEnabled =
+    env.enableFreeeSync || env.enableUsageFee || env.enablePro;
 
   // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。
   const handleSignIn = () => {

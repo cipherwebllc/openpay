@@ -4,9 +4,9 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 
 // OpenPay Pro の CSV ゲートを HistoryView 上で検証する (Codex 不変条件 #8)。
 //   csvLocked = a1Locked || proLocked (独立合成)
-//   proLocked = enablePro && isSignedIn && !pro
-// 4 状態 (両 off / a1 のみ / Pro のみ / 両方) で CSV ロックを確認し、Pro ゲートでは履歴閲覧を
-// **ぼかさない** (a1 の blur とは別系統) ことを実 HistoryView で確認する。
+//   proLocked = enablePro && !resolving && pro!==true  (**未サインインもロック** = 加入導線を出す)
+// 各状態 (両 off / a1 のみ / Pro のみ / 両方 / 未サインイン / 読込中) で CSV ロックを確認し、Pro
+// ゲートでは履歴閲覧を **ぼかさない** (a1 の blur とは別系統) ことを実 HistoryView で確認する。
 
 vi.mock('@/hooks/useMarketRates', () => ({
   useMarketRates: () => ({
@@ -42,8 +42,13 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
+const siweHold = vi.hoisted(() => ({ isSignedIn: true, isLoading: false }));
 vi.mock('@/hooks/useSiweSession', () => ({
-  useSiweSession: () => ({ isSignedIn: true, mismatch: false }),
+  useSiweSession: () => ({
+    isSignedIn: siweHold.isSignedIn,
+    isLoading: siweHold.isLoading,
+    mismatch: false,
+  }),
 }));
 
 const invoiceHold = vi.hoisted(() => ({ delinquent: false }));
@@ -76,9 +81,21 @@ vi.mock('@/hooks/useBillingInvoice', () => ({
   }),
 }));
 
-const proHold = vi.hoisted(() => ({ pro: false as boolean | undefined }));
+const proHold = vi.hoisted(() => ({
+  pro: false as boolean | undefined,
+  isLoading: false,
+  // 実 react-query は query を disable しても前回 data をキャッシュに残す。retainWhenDisabled で
+  // 「サインアウト後も旧 wallet の {pro:true} が残る」状態を再現し、ゲートが leak しないか検証する。
+  retainWhenDisabled: false,
+}));
 vi.mock('@/hooks/useProStatus', () => ({
-  useProStatus: () => ({ data: { pro: proHold.pro, expiresAt: null, bypass: false } }),
+  useProStatus: (enabled: boolean) => ({
+    data:
+      enabled || proHold.retainWhenDisabled
+        ? { pro: proHold.pro, expiresAt: null, bypass: false }
+        : undefined,
+    isLoading: proHold.isLoading,
+  }),
 }));
 
 import type { HistoryEntry } from '@/lib/history';
@@ -148,6 +165,10 @@ beforeEach(() => {
   flags.enablePro = false;
   invoiceHold.delinquent = false;
   proHold.pro = false;
+  proHold.isLoading = false;
+  proHold.retainWhenDisabled = false;
+  siweHold.isSignedIn = true;
+  siweHold.isLoading = false;
   entryHold.entries = [makeEntry()];
 });
 
@@ -184,6 +205,47 @@ describe('HistoryView Pro CSV ゲート (4 状態 × 閲覧非ぼかし)', () =>
   it('Pro 加入済 → CSV 無料 (ボタン有効)・ProPaywall 非表示', () => {
     flags.enablePro = true;
     proHold.pro = true;
+    render(<HistoryView />);
+    expect(exportButton().disabled).toBe(false);
+    expect(screen.queryByTestId('pro-paywall')).toBeNull();
+  });
+
+  it('Pro のみ・未サインイン → CSV ロック + ProPaywall 表示 (加入導線が出る)', () => {
+    // 回帰防止: 旧実装は proLocked に isSignedIn を要求し、サインイン入口がパネル内にしか
+    // 無いため未サインインだとゲートが永久に不到達だった。未サインインでもロックして導線を出す。
+    flags.enablePro = true;
+    siweHold.isSignedIn = false;
+    render(<HistoryView />);
+    expect(exportButton().disabled).toBe(true);
+    expect(screen.getByTestId('pro-paywall')).toBeInTheDocument();
+    // Pro ゲートは閲覧をぼかさない。
+    expect(document.querySelector('.blur-sm')).toBeNull();
+  });
+
+  it('サインアウト後に旧 wallet の pro=true がキャッシュに残っていてもロックする (Codex 回帰)', () => {
+    // react-query は disable 後も前回 data を残す。`data?.pro !== true` だけだと加入者がサインアウト
+    // しても CSV が開いたままになる。`!isSignedIn` で signed-out を明示ロックしているか検証する。
+    flags.enablePro = true;
+    siweHold.isSignedIn = false;
+    proHold.retainWhenDisabled = true; // disabled でも data 残存
+    proHold.pro = true; // 旧 wallet の pro=true が残る
+    render(<HistoryView />);
+    expect(exportButton().disabled).toBe(true);
+    expect(screen.getByTestId('pro-paywall')).toBeInTheDocument();
+  });
+
+  it('Pro on・status 読込中 (サインイン済) → ロック保留で CSV 据え置き (点滅防止)', () => {
+    flags.enablePro = true;
+    proHold.isLoading = true;
+    render(<HistoryView />);
+    expect(exportButton().disabled).toBe(false);
+    expect(screen.queryByTestId('pro-paywall')).toBeNull();
+  });
+
+  it('Pro on・セッション確認中 → ロック保留 (点滅防止)', () => {
+    flags.enablePro = true;
+    siweHold.isLoading = true;
+    siweHold.isSignedIn = false;
     render(<HistoryView />);
     expect(exportButton().disabled).toBe(false);
     expect(screen.queryByTestId('pro-paywall')).toBeNull();
