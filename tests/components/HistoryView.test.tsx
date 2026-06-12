@@ -28,10 +28,10 @@ vi.mock('@/hooks/useSiweSession', () => ({
 vi.mock('@/hooks/useBillingInvoice', () => ({
   useBillingInvoice: () => ({ data: undefined }),
 }));
-// Pro ゲートは既定 OFF (enablePro=false) で inert。HistoryView が useProStatus (React Query) を
-// 呼ぶため boundary mock (data:undefined → proLocked=false で CSV フル開放・閲覧非ぼかし)。
-vi.mock('@/hooks/useProStatus', () => ({
-  useProStatus: () => ({ data: undefined }),
+// CSV パスゲートは既定 OFF (enableCsvPass=false) で inert。HistoryView が useCsvPassStatus
+// (React Query) を呼ぶため boundary mock (data:undefined → passLocked=false で CSV フル開放・閲覧非ぼかし)。
+vi.mock('@/hooks/useCsvPassStatus', () => ({
+  useCsvPassStatus: () => ({ data: undefined }),
 }));
 
 import { HistoryView } from '@/components/HistoryView';

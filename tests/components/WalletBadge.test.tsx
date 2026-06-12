@@ -32,6 +32,7 @@ const flags = vi.hoisted(() => ({
   enableFreeeSync: true,
   enableBilling: false,
   enablePro: false,
+  enableCsvPass: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -47,6 +48,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enablePro() {
         return flags.enablePro;
+      },
+      get enableCsvPass() {
+        return flags.enableCsvPass;
       },
     },
   };
@@ -134,6 +138,7 @@ beforeEach(() => {
   flags.enableFreeeSync = true; // 既定: SIWE 機能 ON → ログイン UI を出す
   flags.enableBilling = false;
   flags.enablePro = false;
+  flags.enableCsvPass = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -263,10 +268,11 @@ describe('WalletBadge: SIWE サインイン', () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('SIWE 機能 (freee/利用権/Pro) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
+  it('SIWE 機能 (freee/利用権/Pro/CSVパス) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
     flags.enableFreeeSync = false;
     flags.enableBilling = false;
     flags.enablePro = false;
+    flags.enableCsvPass = false;
     setConnected();
     setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
     renderWithIntl(<WalletBadge />);
@@ -288,6 +294,22 @@ describe('WalletBadge: SIWE サインイン', () => {
     flags.enableFreeeSync = false;
     flags.enableBilling = false;
     flags.enablePro = true;
+    setConnected();
+    setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: 'ログイン (署名)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('CSVパスのみ ON (freee/利用権/Pro OFF) → ログイン UI を出す (パス購入にサインインが要る)', () => {
+    // 回帰防止: siweEnabled に enableCsvPass を含めないと、CSV パス単独構成 (= 現行の CSV ゲート)
+    // でヘッダーからサインインできず、CSV パスゲート (CsvPassPaywall) が不到達になる。
+    flags.enableFreeeSync = false;
+    flags.enableBilling = false;
+    flags.enablePro = false;
+    flags.enableCsvPass = true;
     setConnected();
     setSiwe({ isSignedIn: false });
     renderWithIntl(<WalletBadge />);

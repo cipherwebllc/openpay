@@ -28,9 +28,9 @@ import { usePayerReceipts } from '@/hooks/usePayerReceipts';
 import { useMarketRates } from '@/hooks/useMarketRates';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useBillingInvoice } from '@/hooks/useBillingInvoice';
-import { useProStatus } from '@/hooks/useProStatus';
+import { useCsvPassStatus } from '@/hooks/useCsvPassStatus';
 import { NonCustodialNotice } from './NonCustodialNotice';
-import { ProPaywall } from './ProPaywall';
+import { CsvPassPaywall } from './CsvPassPaywall';
 import { BillingDueBanner } from './BillingDueBanner';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
@@ -90,26 +90,27 @@ export function HistoryView() {
   const a1Locked =
     usageFeeActive && isSignedIn && invoice.data?.delinquent === true;
 
-  // OpenPay Pro の CSV ゲート (独立合成・Codex P2)。Pro 点灯中は Pro 加入が確認できるまで CSV を
-  // ロックして ProPaywall を出す。**未サインインも Pro ではありえないのでロック**し、ProPaywall が
-  // 接続→サインイン→¥500 のファネルを出す (サインイン導線がここにしか無いため isSignedIn 必須にすると
-  // ゲート自体が不到達になる)。bypass(アルファ) 中は status が pro=true を返すのでロックしない。
-  // **履歴閲覧はぼかさない** (a1 の blur とは別系統・Pro は CSV のみ)。
-  const proActive = env.enablePro;
-  const proStatus = useProStatus(isSignedIn && proActive);
-  // 読込中 (セッション確認中 or サインイン済で status 取得中) はロック判定を保留し、既加入者に
+  // CSV 24時間パスの CSV ゲート (独立合成・Codex P2)。パス点灯中は有効なパスが確認できるまで CSV を
+  // ロックして CsvPassPaywall を出す。**未サインインもパス保持ではありえないのでロック**し、Paywall が
+  // 接続→サインイン→100 JPYC のファネルを出す (サインイン導線がここにしか無いため isSignedIn 必須に
+  // すると ゲート自体が不到達になる)。bypass(アルファ) 中は status が active=true を返すのでロックしない。
+  // **履歴閲覧はぼかさない** (a1 の blur とは別系統・パスは CSV のみ)。Pro ⊃ CSV: server 側 status が
+  // pro:exp も見て active を返す (Pro 加入者はパス無しでも解放)。
+  const passActive = env.enableCsvPass;
+  const passStatus = useCsvPassStatus(isSignedIn && passActive);
+  // 読込中 (セッション確認中 or サインイン済で status 取得中) はロック判定を保留し、既保持者に
   // paywall が一瞬出る点滅を防ぐ。確定後のみロックする。**未サインインは必ずロック**する: react-query は
-  // query を disable しても前回の data ({pro:true}) を残すため、`data?.pro !== true` だけだと加入者が
+  // query を disable しても前回の data ({active:true}) を残すため、`data?.active !== true` だけだと保持者が
   // サインアウトしても CSV が開いたままになる (Codex 指摘)。`!isSignedIn ||` で signed-out を明示ロック。
-  const proResolving =
-    proActive && (sessionLoading || (isSignedIn && proStatus.isLoading));
-  const proLocked =
-    proActive &&
-    !proResolving &&
-    (!isSignedIn || proStatus.data?.pro !== true);
+  const passResolving =
+    passActive && (sessionLoading || (isSignedIn && passStatus.isLoading));
+  const passLocked =
+    passActive &&
+    !passResolving &&
+    (!isSignedIn || passStatus.data?.active !== true);
 
-  // CSV ダウンロードのロックは a1 延滞 OR Pro 未加入 (独立評価)。閲覧ぼかしは a1Locked のみ。
-  const csvLocked = a1Locked || proLocked;
+  // CSV ダウンロードのロックは a1 延滞 OR パス未保持 (独立評価)。閲覧ぼかしは a1Locked のみ。
+  const csvLocked = a1Locked || passLocked;
   const feeGated = a1Locked; // 履歴ぼかし + a1 paywall は延滞時のみ (従来挙動を不変に保つ)。
 
   // 集計 + 一覧 (= 整形表示の「データ部」)。延滞時は blur + overlay でぼかし、CSV は csvLocked。
@@ -156,10 +157,11 @@ export function HistoryView() {
         directionCounts={directionCounts}
         usdcJpy={usdcJpy}
         csvLocked={csvLocked}
+        csvLockReason={a1Locked ? 'fee' : 'pass'}
       />
-      {/* CSV が Pro ゲートでロックされ、かつ a1 延滞でない (a1 優先) ときに加入パネルを出す。
-          閲覧 (summaryAndList) はぼかさない — Pro は CSV のみのゲート。 */}
-      {!feeGated && proLocked && <ProPaywall />}
+      {/* CSV がパスゲートでロックされ、かつ a1 延滞でない (a1 優先) ときに購入パネルを出す。
+          閲覧 (summaryAndList) はぼかさない — CSV パスは CSV のみのゲート。 */}
+      {!feeGated && passLocked && <CsvPassPaywall />}
       {feeGated ? (
         <div className="relative">
           <div

@@ -61,6 +61,7 @@ function renderToolbar(
     directionCounts: { all: number; in: number; out: number };
     usdcJpy: number | undefined;
     csvLocked: boolean;
+    csvLockReason: 'fee' | 'pass';
   }> = {},
 ) {
   const onFiltersChange = vi.fn();
@@ -73,6 +74,7 @@ function renderToolbar(
       directionCounts={props.directionCounts ?? { all: 0, in: 0, out: 0 }}
       usdcJpy={props.usdcJpy}
       csvLocked={props.csvLocked ?? false}
+      csvLockReason={props.csvLockReason}
     />,
   );
   return { onFiltersChange };
@@ -90,7 +92,7 @@ describe('HistoryToolbar', () => {
     expect(screen.getByText('状態：')).toBeInTheDocument();
   });
 
-  it('csvLocked=true → CSV系3ボタンを無効化 + 利用料未払いノートを表示', () => {
+  it('csvLocked=true (既定 reason=fee) → CSV系3ボタンを無効化 + 利用料未払いノートを表示', () => {
     renderToolbar({ entries: [entry()], csvLocked: true });
     expect(
       (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
@@ -104,7 +106,21 @@ describe('HistoryToolbar', () => {
       (screen.getByRole('button', { name: '会計明細CSV' }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+    // a1 延滞専用の文言 (cause-aware の既定 'fee')。
     expect(screen.getByText(/会計CSVのダウンロードを一時的に制限/)).toBeInTheDocument();
+  });
+
+  it('csvLocked=true・reason=pass → CSV パス購入を促す cause-aware ノート (延滞文言ではない)', () => {
+    renderToolbar({ entries: [entry()], csvLocked: true, csvLockReason: 'pass' });
+    expect(
+      (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    // パスゲートの文言: CSV 24時間パスの購入導線。a1 延滞専用文言は出ない (出し分けの核)。
+    expect(
+      screen.getByText(/CSV 24時間パスが必要です/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/会計CSVのダウンロードを一時的に制限/)).toBeNull();
   });
 
   it('csvLocked=false (取引あり) → CSV系ボタン有効 + ノート非表示', () => {

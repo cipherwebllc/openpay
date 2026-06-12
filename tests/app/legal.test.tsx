@@ -1205,4 +1205,96 @@ describe('Legal pages', () => {
       expect(d).toMatch(/recoverFeeBps/);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // CSV 24時間パス (都度 100 JPYC) の開示。CSV ダウンロードゲートを Pro (月額) から都度型へ置換
+  // (2026-06-13・plans/csv-pass.md)。実課金前の必須開示として Terms 第5条・特商法 (役務の内容/
+  // 返品)・免責 §7 に「100 JPYC / 24時間 / 任意 (閲覧無料) / 前払い / 返金不可 / 合算なし / 超過も24時間 /
+  // ガス代利用者負担 / 提供開始は本機能の有効化後に告知」を追記。既存の per-tx 利用料文言とは独立。
+  // source-scan で本文 (message レベル) に必須語を pin し、片側の変更で fail させる。
+  // -------------------------------------------------------------------------
+  describe('regression: CSV 24時間パスの開示 (Terms/特商法/免責・ja/en)', () => {
+    it('ja: Disclaimer §7 に CSV パス (100 JPYC / 24時間 / 返金不可 / 合算なし / ガス代利用者負担 / 提供開始告知) がある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const body = ja.Disclaimer.section7.body;
+      expect(body).toContain('CSV 24時間パス');
+      expect(body).toContain('100 JPYC');
+      expect(body).toContain('24時間');
+      expect(body).toContain('返金');
+      expect(body).toContain('合算されません');
+      expect(body).toContain('ガス代は利用者のご負担');
+      expect(body).toContain('提供開始時期');
+    });
+
+    it('en: Disclaimer §7 に CSV pass (100 JPYC / 24 hours / non-refundable / not stack / gas borne by user) がある', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      const body = en.Disclaimer.section7.body;
+      expect(body).toMatch(/CSV 24-hour pass/);
+      expect(body).toMatch(/100 JPYC/);
+      expect(body).toMatch(/24 hours/);
+      expect(body).toMatch(/non-refundable/i);
+      expect(body).toMatch(/does not stack/i);
+      expect(body).toMatch(/gas .*borne by the user/i);
+      expect(body).toMatch(/becomes available within the Service/i);
+    });
+
+    it('ja: Terms 第5条 (料金) に CSV パスの任意利用権 (100 JPYC / 24時間 / 返金不可 / 合算なし) がある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const body = ja.Terms.article5.body;
+      expect(body).toContain('CSV 24時間パス');
+      expect(body).toContain('100 JPYC');
+      expect(body).toContain('24時間');
+      expect(body).toContain('合算されず');
+      // 閲覧・受け取りは無料の据え置きを明示。
+      expect(body).toContain('閲覧および決済の受け取りそのものは引き続き無料');
+    });
+
+    it('en: Terms Article 5 (Fees) に CSV pass の任意利用権が明示', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      const body = en.Terms.article5.body;
+      expect(body).toMatch(/CSV 24-hour pass/);
+      expect(body).toMatch(/100 JPYC/);
+      expect(body).toMatch(/24 hours/);
+      expect(body).toMatch(/does not stack/i);
+      expect(body).toMatch(/remain free/i);
+    });
+
+    it('ja: 特商法 役務の内容 + 返品 に CSV パス (任意・前払い・返金不可・合算なし) がある', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const content = ja.Tokutei.rows.serviceContent.value;
+      const ret = ja.Tokutei.rows.returnPolicy.value;
+      expect(content).toContain('CSV 24時間パス');
+      expect(content).toContain('100 JPYC');
+      expect(ret).toContain('CSV 24時間パス');
+      expect(ret).toContain('返金');
+      expect(ret).toContain('合算されません');
+    });
+
+    it('en: 特商法 Service Description + Refunds に CSV pass が明示', async () => {
+      const en = (await import('@/messages/en.json')).default;
+      const content = en.Tokutei.rows.serviceContent.value;
+      const ret = en.Tokutei.rows.returnPolicy.value;
+      expect(content).toMatch(/CSV 24-hour pass/);
+      expect(content).toMatch(/100 JPYC/);
+      expect(ret).toMatch(/CSV 24-hour pass/);
+      expect(ret).toMatch(/non-refundable/i);
+      expect(ret).toMatch(/does not stack/i);
+    });
+
+    it('実描画: Disclaimer §7 (ja) の本文に CSV 24時間パスが現れる (message だけでなく page)', () => {
+      renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
+      const section7 = screen.getByRole('heading', { level: 2, name: /^7\./ });
+      const body = section7.nextElementSibling?.textContent ?? '';
+      expect(body).toMatch(/CSV 24時間パス/);
+      expect(body).toMatch(/100 JPYC/);
+      expect(body).toMatch(/24時間/);
+    });
+
+    it('実描画: 特商法 (ja) の本文に CSV 24時間パスが現れる', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'ja' });
+      const text = screen.getByRole('main').textContent ?? '';
+      expect(text).toMatch(/CSV 24時間パス/);
+      expect(text).toMatch(/100 JPYC/);
+    });
+  });
 });

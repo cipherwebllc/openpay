@@ -409,6 +409,14 @@ export const env = {
   enablePro:
     process.env.NEXT_PUBLIC_ENABLE_PRO === '1' ||
     process.env.NEXT_PUBLIC_ENABLE_PRO === 'true',
+  // CSV 24時間パス (都度 100 JPYC・ゲート対象 = 会計CSVダウンロードのみ) の有効化フラグ
+  // (client 露出)。**既定 OFF**。OFF の間は /api/csv-pass/* は 404・CsvPassPaywall 非表示・
+  // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
+  // Pro (月額固定) とは別系統 (CSV ゲートは都度パスへ置換・Pro は温存して将来傘へ)・recover 手数料 /
+  // a1 利用料とも両立する。Pro ⊃ CSV (有効な pro:exp はパス無しでも CSV を解放)。設計: plans/csv-pass.md。
+  enableCsvPass:
+    process.env.NEXT_PUBLIC_ENABLE_CSV_PASS === '1' ||
+    process.env.NEXT_PUBLIC_ENABLE_CSV_PASS === 'true',
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

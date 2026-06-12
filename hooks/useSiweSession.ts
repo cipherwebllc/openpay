@@ -15,13 +15,14 @@ import type { Address } from 'viem';
 const ME_KEY = ['siwe', 'me'] as const;
 // nonce TTL (server: 10分) に合わせ message の有効期限も 10 分にする。
 const MESSAGE_TTL_MS = 10 * 60_000;
-// 認証状態が変わったら freee/entitlement/pro のキャッシュも破棄する。これらは wallet 固有なので
+// 認証状態が変わったら freee/entitlement/pro/csvpass のキャッシュも破棄する。これらは wallet 固有なので
 // 別 wallet へのログイン/ログアウト後に旧 wallet の status/mapping を再利用させない。
 const AUTH_DEPENDENT_KEYS = [
   ['siwe', 'me'],
   ['freee'],
   ['entitlement'],
   ['pro'],
+  ['csvpass'],
 ] as const;
 
 type MeResponse = { ok: boolean; address: Address | null };

@@ -1298,6 +1298,87 @@ describe('i18n: Pro 名前空間 (OpenPay Pro paywall・ja/en parity)', () => {
   });
 });
 
+describe('i18n: CsvPass 名前空間 (CSV 24時間パス paywall・ja/en parity)', () => {
+  // CSV パス購入パネル (CsvPassPaywall) で使う key 集合。flag-gate された機能なので片 locale 抜けが
+  // silent regression しやすい。非空 + 構造 parity + placeholder を fence する。Pro と同型だが期間が
+  // 「日」でなく「時間」(hours)・再購入合算なし (confirmNoStacking) が追加。
+  const CSV_PASS_KEYS = [
+    'title',
+    'intro',
+    'price',
+    'misconfigured',
+    'connectRequired',
+    'mismatch',
+    'signIn',
+    'signingIn',
+    'signInStatement',
+    'signInError',
+    'switchChain',
+    'reviewCta',
+    'confirmPrice',
+    'confirmNoAutoRenew',
+    'confirmNoRefund',
+    'confirmNoStacking',
+    'confirmOverpay',
+    'confirmGas',
+    'payCta',
+    'paying',
+    'verifying',
+    'retryVerify',
+    'verifyError',
+    'payError',
+    'granted',
+    'grantedNoDate',
+    'note',
+  ] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of CSV_PASS_KEYS) {
+      it(`${loc.name}.CsvPass.${key} は非空文字列`, () => {
+        const v = (loc.m.CsvPass as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('CsvPass キー集合が ja と en で完全一致 (構造 parity)', () => {
+    expect(Object.keys(ja.CsvPass).sort()).toEqual(
+      Object.keys(en.CsvPass).sort(),
+    );
+  });
+
+  it('parameterized CsvPass キーが必要な placeholder を持つ (ja/en)', () => {
+    for (const m of [ja, en]) {
+      const p = m.CsvPass as Record<string, string>;
+      expect(p.price).toContain('{price}');
+      expect(p.price).toContain('{hours}');
+      expect(p.confirmPrice).toContain('{price}');
+      expect(p.confirmPrice).toContain('{hours}');
+      expect(p.confirmNoStacking).toContain('{hours}');
+      expect(p.confirmOverpay).toContain('{price}');
+      expect(p.confirmOverpay).toContain('{hours}');
+      expect(p.payCta).toContain('{price}');
+      expect(p.reviewCta).toContain('{price}');
+      expect(p.switchChain).toContain('{chain}');
+      expect(p.granted).toContain('{date}');
+      expect(p.verifyError).toContain('{reason}');
+      expect(p.payError).toContain('{reason}');
+    }
+  });
+
+  it('History.csvPassLockedNote が ja/en に存在 (パスゲートの cause-aware 文言)', () => {
+    for (const m of [ja, en]) {
+      const v = (m.History as Record<string, unknown>).csvPassLockedNote;
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    }
+  });
+});
+
 describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity)', () => {
   function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
     return Object.entries(o)

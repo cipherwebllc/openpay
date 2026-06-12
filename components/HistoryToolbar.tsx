@@ -75,6 +75,7 @@ export function HistoryToolbar({
   directionCounts,
   usdcJpy,
   csvLocked = false,
+  csvLockReason = 'fee',
 }: {
   /** 会計用の受取(収入)entries (= summary/CSV 対象・direction フィルタ非適用)。 */
   entries: HistoryEntry[];
@@ -83,9 +84,12 @@ export function HistoryToolbar({
   counts: { all: number; jpyc: number; usdc: number };
   directionCounts: { all: number; in: number; out: number };
   usdcJpy: number | undefined;
-  /** CSV ダウンロードゲート (basic 利用権未満)。true で CSV 系ボタンを無効化する。
-   *  閲覧 (フィルタ/集計/一覧) は無料なので影響しない。利用料 paywall は親 (HistoryView) が出す。 */
+  /** CSV ダウンロードゲート。true で CSV 系ボタンを無効化する。
+   *  閲覧 (フィルタ/集計/一覧) は無料なので影響しない。利用料/購入 paywall は親 (HistoryView) が出す。 */
   csvLocked?: boolean;
+  /** ロック理由。説明文言を出し分ける: 'fee'=a1 利用料延滞 / 'pass'=CSV 24時間パス未保持。
+   *  Codex 指摘: 旧実装は延滞専用の文章のみで、パスゲート時に文脈の合わない案内が出ていた。 */
+  csvLockReason?: 'fee' | 'pass';
 }) {
   const t = useTranslations('History');
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
@@ -312,7 +316,9 @@ export function HistoryToolbar({
       </div>
       {csvLocked && (
         <p className="text-[11px] font-medium text-amber-700">
-          {t('csvLockedNote')}
+          {csvLockReason === 'pass'
+            ? t('csvPassLockedNote')
+            : t('csvLockedNote')}
         </p>
       )}
       <p className="text-[11px] text-slate-400">{t('accountingIncomeOnlyNote')}</p>
