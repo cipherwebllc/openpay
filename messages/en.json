@@ -424,7 +424,7 @@
     "badgeApprove": "No Approve (spending allowance) is requested — no access to your balance is granted",
     "badgeAmount": "Only exactly {amount} {symbol} can move, and only to this store",
     "badgeExpiry": "The signature expires automatically in {minutes} minutes and can be used only once",
-    "blockaidNote": "Some wallets may show a security warning. As long as the spender (recipient) in the warning matches the store address below, this signature only authorizes a single transfer of the displayed amount.",
+    "blockaidNote": "On your wallet's confirmation screen, please check that the amount and recipient match the details below before approving.",
     "detailsSummary": "Check what your wallet will show",
     "rowToField": "to (recipient)",
     "rowToMeaning": "The store's receiving address",
@@ -448,7 +448,13 @@
     "permitAwaitingTitle": "Please check the confirmation screen in your wallet — a spending cap and a transfer confirmation will be shown.",
     "permitAwaitingTitleCapped": "Please check the confirmation screen in your wallet — a spending cap (up to {cap} {symbol}) and a transfer confirmation will be shown.",
     "standardHint": "Your wallet will show a standard transfer confirmation. Please review the amount and recipient before approving.",
-    "nativeHint": "Your wallet will show a standard transfer confirmation. Please review the amount and recipient before approving."
+    "nativeHint": "Your wallet will show a standard transfer confirmation. Please review the amount and recipient before approving.",
+    "recoverBadgeAmountCustomer": "Only exactly {total} {symbol} can move (payment {amount} + fee {fee}), and only to this store",
+    "recoverBadgeAmountMerchant": "Only exactly {amount} {symbol} can move, and only to this store",
+    "recoverBadgeRecipient": "OpenPay's payment contract routes the funds to the store instantly within the same transaction (the store's receipt is never delayed)",
+    "recoverRowToMeaning": "OpenPay's payment contract that routes the funds to the store",
+    "recoverRowValueMeaningCustomer": "Internal representation of payment {amount} + fee {fee} = {total} {symbol}",
+    "recoverAwaitingToVia": "(via the payment contract)"
   },
   "NativeTipForm": {
     "header": "Support (native token)",

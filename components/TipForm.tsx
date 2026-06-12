@@ -42,7 +42,10 @@ import {
 } from '@/lib/url';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
-import { buildJpycRelaySignPreview } from '@/lib/signPreview';
+import {
+  buildJpycRelaySignPreview,
+  buildJpycRecoverSignPreview,
+} from '@/lib/signPreview';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
@@ -430,15 +433,30 @@ export function TipForm({ params }: { params: TipParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
-  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。tip は standard 経路を持たないので
-  // (a) relay free と (b) Circle USDC の 2 kind のみ (計画 §3.3)。
+  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2+P4)。tip は standard 経路を持たないので
+  // (a) relay free / (a') relay recover / (c) Circle USDC の 3 kind のみ (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
-  //       渡す変数 (params.to / amountWei) と同一ソース。recover はコピー未対応で出さない (P4)。
+  //       渡す変数 (params.to / amountWei) と同一ソース。testnet 等 forwarder 無し chain 用。
+  //   (a') relay recover (forwarder 設定済・本番): jpyc-relay-recover フルパネル (P4)。tip は gas=
+  //       customer 固定なのでウォレットは amountWei+fee を出す。照合表で内訳を説明する。forwarder
+  //       無しなら build が null → free 経路へ倒れる。
   //   (c) Circle (USDC gasless): usdc-permit。permitCap は circle quote の permitAmount を
   //       formatUnits (未取得なら省略)。tip は split 非対応のため transferCount は出さない。
   // 署名内容は不変・表示のみ。Pimlico 7702 経路はスコープ外。
   const showRelayFree =
     useRelay && !useRecover && amountWei > 0n;
+  const recoverPreview =
+    useRelay && useRecover && amountWei > 0n
+      ? buildJpycRecoverSignPreview({
+          value: amountWei,
+          merchant: params.to,
+          storeName: params.name ?? undefined,
+          decimals: deployment.decimals,
+          displaySymbol: deployment.displaySymbol,
+          chainId: deployment.chainId,
+          gasMode: 'customer',
+        })
+      : null;
   const signReassurance: SignReassuranceProps | null = showRelayFree
     ? {
         kind: 'jpyc-relay-free',
@@ -451,7 +469,13 @@ export function TipForm({ params }: { params: TipParams }) {
         }),
         awaiting: relay.isPending,
       }
-    : isCircle && amountWei > 0n
+    : recoverPreview
+      ? {
+          kind: 'jpyc-relay-recover',
+          preview: recoverPreview,
+          awaiting: relay.isPending,
+        }
+      : isCircle && amountWei > 0n
       ? {
           kind: 'usdc-permit',
           amountHuman: formatUnits(amountWei, deployment.decimals),

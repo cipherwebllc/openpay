@@ -424,7 +424,7 @@
     "badgeApprove": "Approve (利用許可) は求めません — 残高へのアクセス権は渡りません",
     "badgeAmount": "動かせるのは {amount} {symbol} ちょうど。送金先はこのお店だけです",
     "badgeExpiry": "署名は {minutes} 分で自動失効し、1回しか使えません",
-    "blockaidNote": "ウォレットによってはセキュリティ警告が表示される場合があります。警告内の spender (受け手) が下記のお店のアドレスと一致していれば、この署名が許可するのは表示金額の1回限りの送金だけです。",
+    "blockaidNote": "ウォレットの確認画面で、金額と受け取り先が下記の内容と一致していることをご確認のうえ承認してください。",
     "detailsSummary": "ウォレットに表示される内容を確認",
     "rowToField": "to (送金先)",
     "rowToMeaning": "お店の受取アドレス",
@@ -448,7 +448,13 @@
     "permitAwaitingTitle": "ウォレットの確認画面をご確認ください — 利用許可と送金の確認が表示されます。",
     "permitAwaitingTitleCapped": "ウォレットの確認画面をご確認ください — 利用許可 (上限 {cap} {symbol}) と送金の確認が表示されます。",
     "standardHint": "ウォレットには通常の送金確認が表示されます。金額と宛先をご確認のうえ承認してください。",
-    "nativeHint": "ウォレットには通常の送金確認が表示されます。金額と宛先をご確認のうえ承認してください。"
+    "nativeHint": "ウォレットには通常の送金確認が表示されます。金額と宛先をご確認のうえ承認してください。",
+    "recoverBadgeAmountCustomer": "動かせるのは {total} {symbol} ちょうど（お支払い {amount} + 手数料 {fee}）。送金先はこのお店だけです",
+    "recoverBadgeAmountMerchant": "動かせるのは {amount} {symbol} ちょうど。送金先はこのお店だけです",
+    "recoverBadgeRecipient": "OpenPay の決済コントラクトが同じ取引の中でお店へ即時に振り分けます（お店の受取が遅れることはありません）",
+    "recoverRowToMeaning": "お店への振り分けを行う OpenPay の決済コントラクト",
+    "recoverRowValueMeaningCustomer": "お支払い {amount} + 手数料 {fee} = {total} {symbol} の内部表記",
+    "recoverAwaitingToVia": "（決済コントラクト経由）"
   },
   "NativeTipForm": {
     "header": "応援 (ネイティブトークン)",

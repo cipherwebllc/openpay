@@ -53,7 +53,10 @@ import {
 } from '@/lib/url';
 import { formatRemaining, isExpired, secondsRemaining } from '@/lib/fx';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
-import { buildJpycRelaySignPreview } from '@/lib/signPreview';
+import {
+  buildJpycRelaySignPreview,
+  buildJpycRecoverSignPreview,
+} from '@/lib/signPreview';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 export function PaymentForm() {
@@ -583,8 +586,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 非 relay JPYC など) はスコープ外なので出さない (計画 §2)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate
   //       ({ merchant: params.to, value: amountWei }) と同一変数から導出し、ウォレットに出る
-  //       生の数字 (value) と OpenPay 表示の乖離をゼロにする。recover (forwarder 設定済) は
-  //       to=forwarder で free と説明が異なり、コピー未対応のため出さない (計画 §3.3 / §10-7・P4)。
+  //       生の数字 (value) と OpenPay 表示の乖離をゼロにする。testnet 等 forwarder 無し chain 用。
+  //   (a') relay recover (forwarder 設定済・本番 Polygon/Kaia): jpyc-relay-recover フルパネル (P4)。
+  //       to=forwarder (決済コントラクト)・customer は value+fee をウォレットに出すため、照合表で
+  //       内訳を説明する。preview は relay.mutate の変数 (params.to / amountWei / params.gas) と
+  //       同一ソース。forwarder 無しなら build が null → free 経路へ倒れる。
   //   (b) standard: 通常の送金確認 1 行ヒント。
   //   (c) Circle (USDC gasless): usdc-permit。permitCap は circle quote の permitAmount を
   //       formatUnits (未取得なら省略)。split があれば transferCount を渡す。
@@ -592,6 +598,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
     useRelay &&
     jpycForwarderFor(chainId ?? deployment.chainId) === null &&
     amountWei > 0n;
+  const recoverPreview =
+    useRecover && amountWei > 0n
+      ? buildJpycRecoverSignPreview({
+          value: amountWei,
+          merchant: params.to,
+          storeName: params.storeName,
+          decimals: deployment.decimals,
+          displaySymbol: deployment.displaySymbol,
+          chainId: chainId ?? deployment.chainId,
+          gasMode: params.gas ?? 'customer',
+        })
+      : null;
   const signReassurance: SignReassuranceProps | null = showRelayFree
     ? {
         kind: 'jpyc-relay-free',
@@ -604,7 +622,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
         }),
         awaiting: relay.isPending,
       }
-    : isStandard
+    : recoverPreview
+      ? {
+          kind: 'jpyc-relay-recover',
+          preview: recoverPreview,
+          awaiting: relay.isPending,
+        }
+      : isStandard
       ? { kind: 'standard' }
       : isCircle && amountWei > 0n
         ? {

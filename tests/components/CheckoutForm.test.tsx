@@ -1704,7 +1704,9 @@ describe('CheckoutForm — 署名安心パネル (SignReassurance・P2)', () => 
     expect(screen.getByText('3000000000000000000000')).toBeInTheDocument();
   });
 
-  it('relay recover (forwarder 設定) では非表示 (free のみ・虚偽の安心を出さない)', () => {
+  it('relay recover (forwarder 設定 + merchant): jpyc-relay-recover フルパネル (ウォレット表示 = 表示価格)', () => {
+    // P4: recover でも安心パネルを出す。merchant 吸収はウォレット表示 = 表示価格 (3000)。
+    // 内訳 (お支払い + 手数料) は出さない (手数料は受取から内枠吸収のため)。
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     vi.mocked(jpycForwarderFor).mockReturnValue(
       '0x1111111111111111111111111111111111111111',
@@ -1712,7 +1714,33 @@ describe('CheckoutForm — 署名安心パネル (SignReassurance・P2)', () => 
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(10_000n * 10n ** 18n);
     render(<CheckoutForm params={{ ...JPYC_PARAMS, gas: 'merchant' }} />);
-    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+    expect(
+      screen.getByText(/求められるのは「署名」1回だけ/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/動かせるのは 3000 JPYC ちょうど/),
+    ).toBeInTheDocument();
+    // merchant モードは内訳バッジを出さない。
+    expect(screen.queryByText(/お支払い 3000 \+ 手数料/)).toBeNull();
+    // 照合表に signedTotal (= value = 3000) の生の数字が出る。
+    expect(screen.getByText('3000000000000000000000')).toBeInTheDocument();
+  });
+
+  it('relay recover (forwarder 設定 + customer): 合計 = 表示価格 + 手数料 の内訳を出す', () => {
+    // customer 吸収はウォレット表示 = value + fee (3000 + 2 = 3002)。内訳を照合表が説明。
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, gas: 'customer' }} />);
+    expect(
+      screen.getByText(
+        /動かせるのは 3002 JPYC ちょうど（お支払い 3000 \+ 手数料 2）/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('3002000000000000000000')).toBeInTheDocument();
   });
 
   it('standard 経路: 通常送金の 1 行ヒント (フルパネルは出さない)', () => {

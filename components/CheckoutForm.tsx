@@ -46,7 +46,10 @@ import {
 } from '@/lib/url';
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
-import { buildJpycRelaySignPreview } from '@/lib/signPreview';
+import {
+  buildJpycRelaySignPreview,
+  buildJpycRecoverSignPreview,
+} from '@/lib/signPreview';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
@@ -607,7 +610,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
-  //       渡す変数 (params.to / totalWei) と同一ソース。recover はコピー未対応で出さない (§10-7・P4)。
+  //       渡す変数 (params.to / totalWei) と同一ソース。testnet 等 forwarder 無し chain 用。
+  //   (a') relay recover (forwarder 設定済・本番): jpyc-relay-recover フルパネル (P4)。to=forwarder
+  //       で customer は totalWei+fee をウォレットに出すため照合表で内訳を説明。preview は
+  //       relay.mutate の変数 (params.to / totalWei / params.gas) と同一ソース。forwarder 無しなら
+  //       build が null → free 経路へ倒れる。
   //   (b) standard: 通常の送金確認 1 行ヒント。
   //   (c) Circle (USDC gasless): usdc-permit。permitCap は circle quote の permitAmount を
   //       formatUnits (未取得なら省略)。checkout は split 非対応のため transferCount は出さない。
@@ -616,6 +623,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     useRelay &&
     jpycForwarderFor(chainId ?? deployment.chainId) === null &&
     totalWei > 0n;
+  const recoverPreview =
+    useRecover && totalWei > 0n
+      ? buildJpycRecoverSignPreview({
+          value: totalWei,
+          merchant: params.to,
+          decimals: deployment.decimals,
+          displaySymbol: deployment.displaySymbol,
+          chainId: chainId ?? deployment.chainId,
+          gasMode: params.gas ?? 'customer',
+        })
+      : null;
   const signReassurance: SignReassuranceProps | null = showRelayFree
     ? {
         kind: 'jpyc-relay-free',
@@ -627,7 +645,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         }),
         awaiting: relay.isPending,
       }
-    : isStandard
+    : recoverPreview
+      ? {
+          kind: 'jpyc-relay-recover',
+          preview: recoverPreview,
+          awaiting: relay.isPending,
+        }
+      : isStandard
       ? { kind: 'standard' }
       : isCircle && totalWei > 0n
         ? {

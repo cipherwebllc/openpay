@@ -488,6 +488,13 @@ describe('i18n: SignReassurance 名前空間 (署名安心 UX・ja/en parity)', 
     'awaitingAmountLabel',
     'awaitingToLabel',
     'awaitingNote',
+    // P4: recover (forwarder) パネルのバッジ/照合表/待機補足キー。
+    'recoverBadgeAmountCustomer',
+    'recoverBadgeAmountMerchant',
+    'recoverBadgeRecipient',
+    'recoverRowToMeaning',
+    'recoverRowValueMeaningCustomer',
+    'recoverAwaitingToVia',
   ] as const;
 
   for (const loc of [
@@ -522,6 +529,15 @@ describe('i18n: SignReassurance 名前空間 (署名安心 UX・ja/en parity)', 
       // 失効バッジ + validBefore 欄は minutes を差し込む。
       expect(s.badgeExpiry).toContain('{minutes}');
       expect(s.rowValidBeforeMeaning).toContain('{minutes}');
+      // P4: recover customer バッジ + value 欄は total/amount/fee/symbol を差し込む
+      // (ウォレットに出る合計 = 表示額 + 手数料 の内訳説明が本質)。
+      for (const ph of ['{total}', '{amount}', '{fee}', '{symbol}']) {
+        expect(s.recoverBadgeAmountCustomer).toContain(ph);
+        expect(s.recoverRowValueMeaningCustomer).toContain(ph);
+      }
+      // recover merchant バッジは amount/symbol のみ (手数料は受取から内枠吸収)。
+      expect(s.recoverBadgeAmountMerchant).toContain('{amount}');
+      expect(s.recoverBadgeAmountMerchant).toContain('{symbol}');
     }
   });
 });

@@ -137,3 +137,39 @@ describe('PaymentForm recover fee disclosure', () => {
     expect(screen.queryByText(/手数料は店舗負担/)).toBeNull();
   });
 });
+
+describe('PaymentForm sign reassurance panel (P4 recover)', () => {
+  beforeEach(() => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
+    vi.mocked(recoverFeeBps).mockReturnValue(0);
+    setupSearch({
+      to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      token: 'jpyc',
+      chain: 'polygon',
+      amount: '1000',
+      gas: 'customer',
+      mode: 'gasless',
+    });
+  });
+
+  it('RECOVER + customer: 安心パネルにウォレット表示の合計 1002 (= 1000 + 手数料 2) が出る', () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    render(<PaymentForm />);
+    // 1000 円決済 + 手数料 2 → ウォレットは 1002 JPYC を出す。その内訳を安心パネルが説明する。
+    expect(
+      screen.getByText(
+        /動かせるのは 1002 JPYC ちょうど（お支払い 1000 \+ 手数料 2）/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('FREE: 旧 free パネル (内訳なしの金額固定バッジ) のまま・recover 文言は出ない', () => {
+    // forwarder=null (testnet 等) は free 経路。recover の内訳バッジは出さない。
+    render(<PaymentForm />);
+    expect(
+      screen.getByText(/動かせるのは 1000 JPYC ちょうど/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/お支払い 1000 \+ 手数料 2/)).toBeNull();
+  });
+});

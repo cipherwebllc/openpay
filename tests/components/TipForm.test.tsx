@@ -1297,7 +1297,9 @@ describe('TipForm — 署名安心パネル (SignReassurance・P2)', () => {
     expect(screen.getByText('100000000000000000000')).toBeInTheDocument();
   });
 
-  it('relay recover (forwarder 設定) では非表示 (free のみ・虚偽の安心を出さない)', () => {
+  it('relay recover (forwarder 設定): jpyc-relay-recover フルパネル (P4・合計 = チップ + 手数料)', () => {
+    // P4: recover でも安心パネルを出す。tip は gas=customer 固定なのでウォレットは
+    // チップ + 手数料 (100 + 2 = 102 JPYC) を出す。その内訳を照合表が説明する。
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     vi.mocked(jpycForwarderFor).mockReturnValue(
       '0x1111111111111111111111111111111111111111',
@@ -1305,7 +1307,17 @@ describe('TipForm — 署名安心パネル (SignReassurance・P2)', () => {
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(10_000n * 10n ** 18n);
     render(<TipForm params={JPYC_PARAMS} />);
-    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+    // 見出しは free と共通。preset[0]=100 JPYC・fee=2 JPYC (relayGasFeeValue mock) → 合計 102。
+    expect(
+      screen.getByText(/求められるのは「署名」1回だけ/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /動かせるのは 102 JPYC ちょうど（お支払い 100 \+ 手数料 2）/,
+      ),
+    ).toBeInTheDocument();
+    // 照合表に署名する生の数字 (signedTotal = 102 * 10^18) が出る。
+    expect(screen.getByText('102000000000000000000')).toBeInTheDocument();
   });
 
   it('Circle (USDC gasless): usdc-permit パネル + permitCap (上限) を formatUnits で表示', () => {
