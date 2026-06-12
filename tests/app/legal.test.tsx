@@ -1137,16 +1137,21 @@ describe('Legal pages', () => {
       expect(recoverFeeBps()).toBe(0);
     });
 
-    // feeDisclosureDivergence(): live env が開示済み数値と一致なら null、乖離なら非 null 理由文字列。
-    it('feeDisclosureDivergence: 既定 env (floor=2 / bps=0) は乖離なし (null)', async () => {
+    // feeDisclosureDivergence(): live env が開示済み数値と (日付対応で) 一致なら null、乖離なら
+    // 非 null 理由文字列。CDX-4b: 開示は「当面フロアのみ (bps=0)、2026 年 7 月のご利用分から 1%」。
+    // 期待 bps は現在日付で一意に決まる: 7 月前は 0、7 月以降は percentFromJulyBps(=100)。
+    const JUNE = new Date('2026-06-20T00:00:00Z'); // 7 月前
+    const JULY = new Date('2026-07-05T00:00:00Z'); // 7 月以降
+
+    it('CDX-4b: 6 月・bps=0 → 乖離なし (null)', async () => {
       vi.resetModules();
       vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
       vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
       const { feeDisclosureDivergence } = await import('@/lib/legal');
-      expect(feeDisclosureDivergence()).toBeNull();
+      expect(feeDisclosureDivergence(JUNE)).toBeNull();
     });
 
-    it('feeDisclosureDivergence: bps を開示済み 7 月料率 (=percentFromJulyBps) にしても乖離なし', async () => {
+    it('CDX-4b: 6 月・bps=100 (早期設定) → 乖離を検出 (非 null・理由に bps)', async () => {
       vi.resetModules();
       vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
       vi.stubEnv(
@@ -1154,7 +1159,30 @@ describe('Legal pages', () => {
         String(DISCLOSED_RECOVER_FEE.percentFromJulyBps),
       );
       const { feeDisclosureDivergence } = await import('@/lib/legal');
-      expect(feeDisclosureDivergence()).toBeNull();
+      const d = feeDisclosureDivergence(JUNE);
+      expect(d).not.toBeNull();
+      expect(d).toMatch(/recoverFeeBps/);
+    });
+
+    it('CDX-4b: 7 月・bps=0 (反映漏れ) → 乖離を検出 (非 null・理由に bps)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      const d = feeDisclosureDivergence(JULY);
+      expect(d).not.toBeNull();
+      expect(d).toMatch(/recoverFeeBps/);
+    });
+
+    it('CDX-4b: 7 月・bps=100 → 乖離なし (null)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      vi.stubEnv(
+        'NEXT_PUBLIC_RECOVER_FEE_BPS',
+        String(DISCLOSED_RECOVER_FEE.percentFromJulyBps),
+      );
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      expect(feeDisclosureDivergence(JULY)).toBeNull();
     });
 
     it('feeDisclosureDivergence: floor を開示と違う額にすると乖離を検出 (非 null・理由に floor)', async () => {
@@ -1162,7 +1190,7 @@ describe('Legal pages', () => {
       vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '5'); // 開示は 2
       vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
       const { feeDisclosureDivergence } = await import('@/lib/legal');
-      const d = feeDisclosureDivergence();
+      const d = feeDisclosureDivergence(JUNE);
       expect(d).not.toBeNull();
       expect(d).toMatch(/relayGasFeeValue/);
     });
@@ -1170,9 +1198,9 @@ describe('Legal pages', () => {
     it('feeDisclosureDivergence: bps を開示外の率 (例 50) にすると乖離を検出 (非 null・理由に bps)', async () => {
       vi.resetModules();
       vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
-      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '50'); // 開示は {0, 100}
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '50'); // 6 月の期待は 0
       const { feeDisclosureDivergence } = await import('@/lib/legal');
-      const d = feeDisclosureDivergence();
+      const d = feeDisclosureDivergence(JUNE);
       expect(d).not.toBeNull();
       expect(d).toMatch(/recoverFeeBps/);
     });

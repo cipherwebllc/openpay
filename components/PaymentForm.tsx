@@ -26,7 +26,8 @@ import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, calcSplitBreakdown, type GasMode } from '@/lib/fee';
@@ -107,10 +108,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const relay = useJpycEip3009Payment(deployment);
 
   // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
-  // 未設定は free (OpenPay 負担)。relayGasEquiv は回収する固定 gas 相当額 (free は 0)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv (= recover 時の利用料) は amountWei 確定後に算出する
+  // (CDX-3: 実スケジュール recoverFeeValue を使い、bps>0 で会計サマリと実 settle 額を一致させる)。
   const useRecover =
     useRelay && jpycForwarderFor(chainId ?? deployment.chainId) !== null;
-  const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
 
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
@@ -189,6 +190,15 @@ function PaymentDetails({ params }: { params: PayParams }) {
     !!amountStr &&
     DECIMAL_PATTERN.test(amountStr) &&
     exceedsTokenPrecision(amountStr, deployment.decimals);
+
+  // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
+  // recoverFeeValue(billAmount, effectiveGas) を使う。billAmount は relay.mutate に渡す amountWei、
+  // effectiveGas は recover で強制される 'merchant'。これにより会計サマリ・merchant net・履歴
+  // スナップショットが実 settle 額と一致する。bps=0 では floor (= 2 JPYC) になり従来挙動と完全一致。
+  // free (非 recover) は 0n。
+  const relayGasEquiv = useRecover
+    ? recoverFeeValue(amountWei, effectiveGas)
+    : 0n;
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 

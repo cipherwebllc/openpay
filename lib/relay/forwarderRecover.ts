@@ -40,11 +40,17 @@ export type ForwarderRecoverDeps = {
   getBalance: (chainId: number, token: Address, owner: Address) => Promise<bigint>;
   checkRateLimit: (keys: string[]) => Promise<boolean>;
   // (任意) 日次グローバル予算 (circuit breaker)。Sybil による relayer POL 枯渇 griefing を chain
-  // 日次の relay 件数上限で止める。true=予算内 (許可)。fail-open (KV 障害は許可)。
-  checkGasBudget?: (chainId: number) => Promise<boolean>;
-  // (任意) checkGasBudget で消費した日次枠を 1 戻す。tx が 1 件も broadcast されなかったことが
-  // 確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に正当決済が
-  // daily_budget_exceeded で 503 になるのを防ぐ。checkGasBudget を通過した場合のみ呼ぶ。
+  // 日次の relay 件数上限で止める。返り値:
+  //   allowed  = 予算内で relay を許可するか (fail-open: KV 障害でも true)。
+  //   consumed = カウンタを実際に INCR して 1 枠を消費したか (KV INCR 失敗の fail-open allow では
+  //              false)。consumed=false の枠は refundGasBudget (DECR) してはならない (INCR していない
+  //              枠を DECR するとカウンタが負に振れ余剰許容枠を与える・CDX-5)。fail-open (KV 障害は許可)。
+  checkGasBudget?: (
+    chainId: number,
+  ) => Promise<{ allowed: boolean; consumed: boolean }>;
+  // (任意) checkGasBudget で実際に消費した (consumed=true) 日次枠を 1 戻す。tx が 1 件も broadcast
+  // されなかったことが確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に
+  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。consumed=true のときのみ呼ぶ。
   // jpycRelay (free 経路) の refundGasBudget 契約とセマンティクス完全一致 (fail-quiet・自分でログ)。
   refundGasBudget?: (chainId: number) => Promise<void>;
   checkAuthorizationUsed?: (
@@ -99,6 +105,13 @@ export async function recoverViaForwarder(
   }
   if (params.feeValue !== deps.expectedFeeValue) {
     return rejected(400, 'fee_value_mismatch');
+  }
+  // 防御層 (CDX-2): expectedFeeValue が 0 の構成 (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=0 等の誤設定) は、
+  // Eip3009Forwarder.settle が feeValue==0 で ZeroValue revert するため、broadcast すれば必ず revert
+  // する tx を出して relayer の gas を捨てる (false flow)。submit 前に弾く。フロアは relayGasFeeValue が
+  // 1 wei 以上を保証する (forwarderConfig) ため通常は到達しないが、二重に塞ぐ。
+  if (deps.expectedFeeValue === 0n) {
+    return rejected(400, 'fee_misconfigured');
   }
   if (params.merchantValue <= 0n) return rejected(400, 'invalid_merchant_value');
   if (getAddress(params.merchant) === getAddress(feeReceiver)) {
@@ -177,11 +190,14 @@ export async function recoverViaForwarder(
   // (replay/duplicate が予算枠を消費する DoS を防ぐ・Codex P1)。超過は submit せず reject。
   let gasBudgetConsumed = false;
   if (deps.checkGasBudget) {
-    if (!(await deps.checkGasBudget(chainId))) {
+    const budget = await deps.checkGasBudget(chainId);
+    if (!budget.allowed) {
       await releaseClaim();
       return rejected(503, 'daily_budget_exceeded');
     }
-    gasBudgetConsumed = true;
+    // 実際に INCR で枠を消費したときのみ refund 対象にする。KV INCR 失敗の fail-open allow
+    // (consumed=false) を消費扱いすると、後の DECR がカウンタを負に振り余剰枠を与える (CDX-5)。
+    gasBudgetConsumed = budget.consumed;
   }
   // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
   // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。

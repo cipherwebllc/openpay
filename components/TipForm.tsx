@@ -31,7 +31,8 @@ import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
-import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -85,9 +86,10 @@ export function TipForm({ params }: { params: TipParams }) {
     'eip3009-relay';
   const relay = useJpycEip3009Payment(deployment);
   // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (tip は customer 上乗せ固定)。
-  // 未設定は free (OpenPay 負担)。relayGasEquiv は回収する固定 gas 相当額 (free は 0)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv は amountWei 確定後に算出する (CDX-3: 実スケジュール
+  // recoverFeeValue を使う。チップは gasMode=customer 固定でフロアのみ — bps を適用しないため
+  // bps>0 でも常にフロア = 従来挙動と一致)。
   const useRecover = useRelay && jpycForwarderFor(deployment.chainId) !== null;
-  const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
 
   // USDC ガスレスが Circle に解決される場合は Circle Paymaster (permit + surcharge 込み quote)。
   // それ以外 (JPYC sponsorship / USDC Pimlico erc20) は従来経路。/pay・/checkout と同配線。
@@ -121,6 +123,13 @@ export function TipForm({ params }: { params: TipParams }) {
     !!amountStr &&
     DECIMAL_PATTERN.test(amountStr) &&
     exceedsTokenPrecision(amountStr, deployment.decimals);
+
+  // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
+  // recoverFeeValue を使う。チップは gasMode=customer 固定で、recoverFeeValue は customer に bps を
+  // 適用せず常にフロア (= 2 JPYC) を返す → bps>0 でもフロアのまま従来挙動と一致。free (非 recover) は 0n。
+  const relayGasEquiv = useRecover
+    ? recoverFeeValue(amountWei, 'customer')
+    : 0n;
 
   // Tip widget は gasless / gas=customer 固定 (preset セマンティクス維持):
   // creator は preset - fee を受け取り、ファンは preset + gas を支払う。

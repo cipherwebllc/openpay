@@ -239,7 +239,7 @@ describe('relayJpycAuthorization', () => {
   });
 
   it('B4: 日次予算超過 (checkGasBudget false) → rejected daily_budget_exceeded (submit せず)', async () => {
-    const deps = makeDeps({ checkGasBudget: vi.fn(async () => false) });
+    const deps = makeDeps({ checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: false })) });
     const res = await relayJpycAuthorization(await makeInput(), deps);
     expect(res).toMatchObject({
       kind: 'rejected',
@@ -250,7 +250,7 @@ describe('relayJpycAuthorization', () => {
   });
 
   it('B4: 予算内 (checkGasBudget true) → 通常どおり submit', async () => {
-    const deps = makeDeps({ checkGasBudget: vi.fn(async () => true) });
+    const deps = makeDeps({ checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })) });
     const res = await relayJpycAuthorization(await makeInput(), deps);
     expect(res.kind).toBe('success');
     expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
@@ -260,7 +260,7 @@ describe('relayJpycAuthorization', () => {
     const releaseIdempotency = vi.fn(async () => {});
     const deps = makeDeps({
       claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
-      checkGasBudget: vi.fn(async () => false),
+      checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: false })),
       releaseIdempotency,
     });
     const res = await relayJpycAuthorization(await makeInput(), deps);
@@ -344,7 +344,7 @@ describe('relayJpycAuthorization', () => {
     it('submit throw (broadcast 前確実失敗) → refundGasBudget 1 回 (枠を戻す)', async () => {
       const refundGasBudget = vi.fn(async () => {});
       const deps = makeDeps({
-        checkGasBudget: vi.fn(async () => true),
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
         refundGasBudget,
         submitSponsoredCall: vi.fn(async () => {
           throw new Error('rpc down');
@@ -359,7 +359,7 @@ describe('relayJpycAuthorization', () => {
     it('poll error (未送信確実: Cancelled) → refundGasBudget 1 回', async () => {
       const refundGasBudget = vi.fn(async () => {});
       const deps = makeDeps({
-        checkGasBudget: vi.fn(async () => true),
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
         refundGasBudget,
         pollTask: vi.fn(async () => ({
           state: 'error' as const,
@@ -374,7 +374,7 @@ describe('relayJpycAuthorization', () => {
     it('成功 → refundGasBudget 0 回 (枠を消費したまま)', async () => {
       const refundGasBudget = vi.fn(async () => {});
       const deps = makeDeps({
-        checkGasBudget: vi.fn(async () => true),
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
         refundGasBudget,
       });
       const res = await relayJpycAuthorization(await makeInput(), deps);
@@ -385,7 +385,7 @@ describe('relayJpycAuthorization', () => {
     it('reverted (broadcast 済) → refundGasBudget 0 回', async () => {
       const refundGasBudget = vi.fn(async () => {});
       const deps = makeDeps({
-        checkGasBudget: vi.fn(async () => true),
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
         refundGasBudget,
         pollTask: vi.fn(async () => ({ state: 'reverted' as const })),
       });
@@ -397,7 +397,7 @@ describe('relayJpycAuthorization', () => {
     it('pending (broadcast 済・不確定) → refundGasBudget 0 回', async () => {
       const refundGasBudget = vi.fn(async () => {});
       const deps = makeDeps({
-        checkGasBudget: vi.fn(async () => true),
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
         refundGasBudget,
         pollTask: vi.fn(async () => ({ state: 'pending' as const })),
       });
@@ -418,6 +418,52 @@ describe('relayJpycAuthorization', () => {
       const res = await relayJpycAuthorization(await makeInput(), deps);
       expect(res.kind).toBe('relay_error');
       expect(refundGasBudget).not.toHaveBeenCalled();
+    });
+
+    // CDX-5: INCR 失敗の fail-open allow (allowed:true, consumed:false) は枠を消費していない。
+    // 後で submit が throw しても refundGasBudget を呼んではならない (呼ぶと INCR していない
+    // カウンタを DECR して負に振れ、cap 超過の余剰枠を与える)。
+    it('INCR 失敗の fail-open allow (consumed:false) → relay は許可されるが、submit throw でも refund しない', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: false })),
+        refundGasBudget,
+        submitSponsoredCall: vi.fn(async () => {
+          throw new Error('rpc down');
+        }),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('relay_error'); // 許可された (= submit まで到達して throw)
+      expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
+      expect(refundGasBudget).not.toHaveBeenCalled(); // 消費していないので戻さない (負カウンタ防止)
+    });
+
+    // CDX-5: INCR 成功で cap 超過 (allowed:false) → submit せず reject。refund もしない (枠は取れていない)。
+    it('INCR 成功・cap 超過 (allowed:false, consumed:true) → daily_budget_exceeded・submit せず・refund しない', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: true })),
+        refundGasBudget,
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res).toMatchObject({ kind: 'rejected', reason: 'daily_budget_exceeded' });
+      expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+      expect(refundGasBudget).not.toHaveBeenCalled();
+    });
+
+    // CDX-5: INCR 成功で cap 内 (allowed:true, consumed:true) → 許可。submit throw で refund する (枠を戻す)。
+    it('INCR 成功・cap 内 (consumed:true) で submit throw → refundGasBudget 1 回 (消費枠を戻す)', async () => {
+      const refundGasBudget = vi.fn(async () => {});
+      const deps = makeDeps({
+        checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+        refundGasBudget,
+        submitSponsoredCall: vi.fn(async () => {
+          throw new Error('rpc down');
+        }),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res.kind).toBe('relay_error');
+      expect(refundGasBudget).toHaveBeenCalledTimes(1);
     });
   });
 });

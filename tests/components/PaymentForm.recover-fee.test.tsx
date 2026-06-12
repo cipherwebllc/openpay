@@ -153,6 +153,55 @@ describe('PaymentForm recover fee disclosure', () => {
   });
 });
 
+// CDX-3: 会計サマリ (breakdown) の「ネットワーク手数料見積」行 (= relayGasEquiv) が、実スケジュール
+// recoverFeeValue(amountWei, 'merchant') を反映することを確認する。旧実装はフラットなフロア
+// (relayGasFeeValue) を表示していたため bps>0 で実 settle 額と乖離していた。
+// bps=0 では floor (2 JPYC) になり従来挙動と完全一致 (behavior-neutral today)。
+describe('PaymentForm recover 会計サマリ手数料行 = recoverFeeValue (CDX-3)', () => {
+  beforeEach(() => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    setupSearch({
+      to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      token: 'jpyc',
+      chain: 'polygon',
+      amount: '1000',
+      gas: 'customer', // recover は merchant に倒れる
+      mode: 'gasless',
+    });
+  });
+
+  function gasRowValue(): string | null {
+    // 「ネットワーク手数料見積 (店主負担)」の dt の sibling dd を読む。
+    const dt = screen.getByText('ネットワーク手数料見積 (店主負担)');
+    return dt.parentElement?.querySelector('dd')?.textContent ?? null;
+  }
+
+  it('bps=0: 会計サマリ手数料行 = floor 2 JPYC (recoverFeeValue 出力)', () => {
+    vi.mocked(recoverFeeBps).mockReturnValue(0);
+    vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
+    render(<PaymentForm />);
+    expect(gasRowValue()).toMatch(/2 JPYC/);
+    // floor を確認するため recoverFeeValue が amount(1000) と merchant で呼ばれたこと。
+    expect(vi.mocked(recoverFeeValue)).toHaveBeenCalledWith(
+      1000n * 10n ** 18n,
+      'merchant',
+    );
+  });
+
+  it('bps=100: 会計サマリ手数料行 = recoverFeeValue 出力 (1% = 10 JPYC)・フロア固定でない', () => {
+    vi.mocked(recoverFeeBps).mockReturnValue(100);
+    vi.mocked(recoverFeeValue).mockReturnValue(10n * 10n ** 18n); // 1% of 1000
+    render(<PaymentForm />);
+    // 旧実装 (relayGasFeeValue フロア固定) なら 2 JPYC で乖離。実スケジュールなら 10 JPYC。
+    expect(gasRowValue()).toMatch(/10 JPYC/);
+    expect(gasRowValue()).not.toMatch(/^2 JPYC$/);
+    expect(vi.mocked(recoverFeeValue)).toHaveBeenCalledWith(
+      1000n * 10n ** 18n,
+      'merchant',
+    );
+  });
+});
+
 describe('PaymentForm sign reassurance panel (P4 recover)', () => {
   beforeEach(() => {
     vi.mocked(jpycForwarderFor).mockReturnValue(null);

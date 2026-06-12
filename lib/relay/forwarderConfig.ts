@@ -35,8 +35,25 @@ export function jpycForwarderFor(chainId: number): Address | null {
 
 // 顧客から JPYC で回収する gas 相当額 (atomic・18 decimals)。固定の開示バッファ (Polygon の
 // sub-cent gas を十分賄う)。既定 2 JPYC。NEXT_PUBLIC で client/server 共有 (nonce 一致のため)。
+//
+// フロアは 1 wei 以上を保証する (CDX-2)。Eip3009Forwarder.settle は feeValue==0 で ZeroValue revert
+// するため、NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=0 (誤設定) を素通りさせると recover が「必ず revert する tx」
+// を broadcast し relayer の gas を捨てる (false flow)。0 が来たら誤設定とみなし既定 2 JPYC に倒す
+// (一度だけ warn)。recoverFeeValue (merchant/customer 双方) はこのフロアを下限に使うため、フロアが
+// 1 wei 以上である限り expectedFeeValue も 0 にならない。
+let relayGasFeeFloorWarned = false;
 export function relayGasFeeValue(): bigint {
   const raw = process.env.NEXT_PUBLIC_RELAY_GAS_FEE_JPYC;
+  if (raw !== undefined && /^[0-9]+$/.test(raw) && BigInt(raw) === 0n) {
+    // 0 は contract が ZeroValue で必ず revert する誤設定。既定フロアへ倒して保護する。
+    if (!relayGasFeeFloorWarned) {
+      relayGasFeeFloorWarned = true;
+      console.warn(
+        'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=0 は recover の guaranteed-revert (Eip3009Forwarder ZeroValue) を招くため、既定の 2 JPYC フロアに倒しました。',
+      );
+    }
+    return 2n * 10n ** 18n;
+  }
   const human = raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 2n;
   return human * 10n ** 18n;
 }

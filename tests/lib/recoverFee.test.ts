@@ -140,17 +140,22 @@ describe('recoverFeeValue — フロア override (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC
     expect(recoverFeeValue(400n * JPYC, 'merchant')).toBe(5n * JPYC);
   });
 
-  it('フロア=0 (= 下限フロア無し), bps=100: merchant は小口でも 1% がそのまま乗る・customer は 0', async () => {
+  // CDX-2: NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=0 は contract ZeroValue revert を招く誤設定として、
+  // relayGasFeeValue が既定の 2 JPYC フロアに倒す (フロアは 1 wei 以上を保証)。よって floor は
+  // 0 にならず、merchant は max(2 JPYC, 1%)・customer は 2 JPYC になる。
+  it('CDX-2: フロア=0 (誤設定) は 2 JPYC フロアに倒れる・merchant は max(2, 1%)・customer は 2 固定', async () => {
     const { recoverFeeValue } = await loadWith({
       NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '0',
       NEXT_PUBLIC_RECOVER_FEE_BPS: '100',
     });
-    // floor=0 なので merchant では pct (>=0) が常に勝つ (pct > 0 のとき)。100 JPYC → 1 JPYC。
-    expect(recoverFeeValue(100n * JPYC, 'merchant')).toBe(1n * JPYC);
-    // billAmount=0 → pct=0, floor=0 → 0n (pct > floor は false なので floor=0)。
-    expect(recoverFeeValue(0n, 'merchant')).toBe(0n);
-    // customer は floor=0 をそのまま返す (bps 無視)。大口でも 0。
-    expect(recoverFeeValue(100n * JPYC, 'customer')).toBe(0n);
-    expect(recoverFeeValue(0n, 'customer')).toBe(0n);
+    // floor は 0 でなく 2 JPYC に倒れる。小口 100 JPYC → 1% = 1 JPYC < フロア 2 → フロア 2 JPYC。
+    expect(recoverFeeValue(100n * JPYC, 'merchant')).toBe(2n * JPYC);
+    // 大口 1000 JPYC → 1% = 10 JPYC > フロア 2 → 10 JPYC (pct が勝つ)。
+    expect(recoverFeeValue(1000n * JPYC, 'merchant')).toBe(10n * JPYC);
+    // billAmount=0 → pct=0 < フロア 2 → フロア 2 JPYC (もはや 0 にならない)。
+    expect(recoverFeeValue(0n, 'merchant')).toBe(2n * JPYC);
+    // customer は bps 無視で常にフロア = 2 JPYC。
+    expect(recoverFeeValue(100n * JPYC, 'customer')).toBe(2n * JPYC);
+    expect(recoverFeeValue(0n, 'customer')).toBe(2n * JPYC);
   });
 });

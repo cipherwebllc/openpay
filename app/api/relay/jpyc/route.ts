@@ -144,6 +144,100 @@ const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
 ]);
 
+// CDX-1: forwarder の immutable getter (Eip3009Forwarder.token / feeReceiver)。健全性チェックで読む。
+const FORWARDER_GETTERS_ABI = parseAbi([
+  'function token() view returns (address)',
+  'function feeReceiver() view returns (address)',
+]);
+
+// CDX-1: chain 別 forwarder 健全性チェックの判定キャッシュ (process lifetime)。'valid' (肯定的に検証済み)
+// と DETERMINISTIC 無効 (no-code / token mismatch / feeReceiver mismatch・恒久) のみキャッシュする。
+// 検証不能 (RPC throw 等) はキャッシュせず毎リクエストで再試行する (自己回復)。値: 'valid' = 健全,
+// 文字列(理由) = 恒久的に無効。
+const forwarderVerdictCache = new Map<number, 'valid' | string>();
+// 設計 (Codex 4 round の最終形): 「**肯定的に検証できた時だけ submit**」。
+// getBytecode/getter の throw (RPC flake でも別コントラクトの revert でも) は理由を問わず
+// 「今回は検証不能」とし submit しない (= 非 null を返す) が **キャッシュしない** → 次リクエストで再試行し
+// 自己回復する。これにより:
+//   (a) false-success (EOA / 別コントラクトの settle no-op) を完全に塞ぐ (検証成功時のみ先へ進むため)。
+//   (b) 一時的 RPC flake で chain を恒久 503 キャッシュしない (throw は非キャッシュ)。
+//   (c) エラー文字列を transport/contract に分類する fragile なロジックが不要になる。
+// 代償は「RPC flake 中の初回 recover が standard へ落ちる」だけ (安全・自己回復・利用者は支払える)。
+// 返り値: null = 肯定的に検証済み (submit 可) / 非 null = 503 relay_not_configured に倒す理由。
+async function verifyRecoverForwarder(
+  chainId: number,
+  forwarder: Address,
+  jpyc: Address,
+  feeReceiver: Address,
+): Promise<string | null> {
+  const cached = forwarderVerdictCache.get(chainId);
+  if (cached !== undefined) return cached === 'valid' ? null : cached;
+
+  const client = createPublicClient({
+    chain: SUPPORTED_CHAINS[chainId].chain,
+    transport: transportFor(chainId),
+  });
+
+  // STEP 1: bytecode。no-code (EOA/未デプロイ) は DETERMINISTIC 無効 → キャッシュ + 503。
+  //         throw は検証不能 → 非キャッシュで 503 (次回再試行)。
+  let code: Hex | undefined;
+  try {
+    code = await client.getBytecode({ address: forwarder });
+  } catch (e) {
+    logger.warn('relay.jpyc.forwarder_unverified', {
+      chainId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return 'forwarder_unverified'; // 非キャッシュ: 次リクエストで再試行
+  }
+  if (!code || code === '0x') {
+    forwarderVerdictCache.set(chainId, 'no_bytecode');
+    logger.error('relay.jpyc.forwarder_invalid', { chainId, forwarder, reason: 'no_bytecode' });
+    return 'no_bytecode';
+  }
+
+  // STEP 2: immutable getter を **肯定的に** 読む。throw は理由を問わず検証不能 → 非キャッシュ 503。
+  //         token()/feeReceiver() を持たない別コントラクトも、RPC flake も、ここで一律に submit しない
+  //         (= false-success を構造的に排除)。値が取れた時だけ不一致判定へ進む。
+  let token: Address;
+  let onChainFeeReceiver: Address;
+  try {
+    token = await client.readContract({
+      address: forwarder,
+      abi: FORWARDER_GETTERS_ABI,
+      functionName: 'token',
+    });
+    onChainFeeReceiver = await client.readContract({
+      address: forwarder,
+      abi: FORWARDER_GETTERS_ABI,
+      functionName: 'feeReceiver',
+    });
+  } catch (e) {
+    logger.warn('relay.jpyc.forwarder_unverified', {
+      chainId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return 'forwarder_unverified'; // 非キャッシュ: getter が取れない限り submit しない
+  }
+
+  // 値が取れた → DETERMINISTIC 不一致判定 (恒久・キャッシュする)。
+  let reason: string | null = null;
+  if (getAddress(token) !== getAddress(jpyc)) {
+    reason = `token_mismatch(${token} != ${jpyc})`;
+  } else if (getAddress(onChainFeeReceiver) !== getAddress(feeReceiver)) {
+    reason = `fee_receiver_mismatch(${onChainFeeReceiver} != ${feeReceiver})`;
+  }
+
+  if (reason) {
+    forwarderVerdictCache.set(chainId, reason);
+    logger.error('relay.jpyc.forwarder_invalid', { chainId, forwarder, reason });
+    return reason;
+  }
+
+  forwarderVerdictCache.set(chainId, 'valid');
+  return null;
+}
+
 // recover モード config は client/server 共有 (lib/relay/forwarderConfig)。forwarder アドレスが
 // chain に設定されていれば recover モード (= 立替+回収)、無ければ free (Phase A 直接 transfer)。
 const forwarderFor = jpycForwarderFor;
@@ -387,18 +481,26 @@ const gasBudgetKey = (chainId: number) =>
 // B4: 日次グローバル予算 (Sybil circuit breaker)。INCR relay:budget:{chainId}:{YYYYMMDD} し、
 // 初回のみ TTL 2 日。count が cap 以下なら許可。fail-open: KV 未設定/障害は許可 (rate-limit と
 // 同方針・alpha は可用性優先)。近似カウンタで足りる (応答喪失の二重カウントは早めに止まる=安全側)。
-async function checkGasBudget(chainId: number): Promise<boolean> {
-  if (!isKvConfigured()) return true;
+//
+// 返り値 (CDX-5): { allowed, consumed }。
+//   allowed  = relay を許可するか。
+//   consumed = カウンタを実際に INCR したか。KV 未設定 / INCR 失敗の fail-open allow では INCR して
+//              いないので consumed=false。consumed=false の枠を後で DECR (refund) すると、INCR して
+//              いないカウンタを減らして負に振れ、cap を超える余剰枠を与えてしまう (= refund しない)。
+async function checkGasBudget(
+  chainId: number,
+): Promise<{ allowed: boolean; consumed: boolean }> {
+  if (!isKvConfigured()) return { allowed: true, consumed: false };
   const key = gasBudgetKey(chainId);
   const r = await kvIncr(key);
   if (!r.ok) {
     logger.warn('relay gas budget INCR failed (fail-open)', { chainId });
-    return true;
+    return { allowed: true, consumed: false };
   }
   // EXPIRE は毎回設定する (初回 EXPIRE が応答喪失すると TTL 無しの stale key が永続化するため・
   // Codex P2)。EXPIRE は冪等なので再設定は無害。
   await kvExpire(key, 2 * 24 * 3600);
-  return r.value <= RELAY_DAILY_TX_CAP;
+  return { allowed: r.value <= RELAY_DAILY_TX_CAP, consumed: true };
 }
 
 // checkGasBudget で INCR 消費した日次枠を DECR で 1 戻す。tx が 1 件も broadcast されなかった
@@ -777,6 +879,22 @@ async function handleRecover(
   // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
   const jpyc = jpycAddressFor(chainId);
   const forwarder = forwarderFor(chainId);
+
+  // CDX-1: submit 前に forwarder を on-chain で **肯定的に** 検証する。env の forwarder が EOA や
+  // 別コントラクト/別 token/別 feeReceiver だと settle() が no-op SUCCESS して「API 成功・着金ゼロ・
+  // authorization 未消費」になる。検証成功 (null) のときだけ submit へ進み、無効 or 検証不能 (非 null) は
+  // 503 relay_not_configured に倒す (client が standard へ綺麗にフォールバック)。RPC flake 中の検証不能は
+  // キャッシュされないので RPC 回復後に自動で recover へ戻る (verifyRecoverForwarder の説明参照)。
+  if (jpyc && forwarder) {
+    const invalid = await verifyRecoverForwarder(chainId, forwarder, jpyc, feeReceiver);
+    if (invalid) {
+      return NextResponse.json(
+        { ok: false, error: 'relay_not_configured' },
+        { status: 503 },
+      );
+    }
+  }
+
   const isAuthorizationUsed =
     jpyc && forwarder
       ? () =>

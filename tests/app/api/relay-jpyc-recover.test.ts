@@ -8,12 +8,37 @@
 // Amoy (testnet) forwarder を設定して recoverMode に倒す (mainnet hardening の KV/gas-ceiling を回避)。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { getAddress } from 'viem';
 
 // 1. relayer self-host を有効化 + Amoy forwarder を設定 (import 前に env を立てる)。
 vi.hoisted(() => {
   process.env.RELAYER_PRIVATE_KEY = '0x' + '1'.repeat(64);
   process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY =
     '0x0F4560a777415580F0680F8B56a79B0022C6B848';
+});
+
+// CDX-1: route の forwarder 健全性チェック (verifyRecoverForwarder) は createPublicClient で
+// getBytecode/token()/feeReceiver() を読む。ここを mock しないと実 Amoy RPC に出てネットワーク依存で
+// flaky になる (実 forwarder の feeReceiver != テスト env feeReceiver で 503 になる)。常に valid を返す
+// stub に固定して hermetic にする (本テストの関心 = expectedFee 配線であり forwarder 検証ではない)。
+const JPYC_AMOY_ADDR = getAddress('0x0000000000000000000000000000000000000abc'); // vitest.config の Amoy JPYC
+const FEE_RECEIVER_ADDR = getAddress('0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e'); // 下の env mock と一致
+vi.mock('viem', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('viem')>();
+  return {
+    ...actual,
+    createPublicClient: () => ({
+      getBytecode: () => Promise.resolve('0x60' as `0x${string}`),
+      readContract: (args: { functionName: string }) => {
+        if (args.functionName === 'token') return Promise.resolve(JPYC_AMOY_ADDR);
+        if (args.functionName === 'feeReceiver') return Promise.resolve(FEE_RECEIVER_ADDR);
+        return Promise.resolve(0n);
+      },
+      getBalance: () => Promise.resolve(0n),
+      estimateGas: () => Promise.resolve(21000n),
+      getTransactionCount: () => Promise.resolve(0),
+    }),
+  };
 });
 
 // 2. recoverViaForwarder を境界モック (deps.expectedFeeValue を捕捉)。実コアは forwarderRecover.test。

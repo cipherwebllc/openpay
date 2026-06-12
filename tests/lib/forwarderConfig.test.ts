@@ -168,11 +168,13 @@ describe('relayGasFeeValue', () => {
     expect(relayGasFeeValue()).toBe(5n * 10n ** 18n);
   });
 
-  it('"0" は有効 → 0n (下限フロア無し・境界値)', async () => {
+  it('CDX-2: "0" は誤設定として既定 2 JPYC に倒す (forwarder ZeroValue revert 回避・フロアは 1 wei 以上)', async () => {
+    // Eip3009Forwarder.settle は feeValue==0 で ZeroValue revert する。0 を素通りさせると recover が
+    // guaranteed-revert tx を broadcast して relayer gas を捨てる → フロアは 0 にならないことを保証する。
     const { relayGasFeeValue } = await loadWith({
       NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '0',
     });
-    expect(relayGasFeeValue()).toBe(0n);
+    expect(relayGasFeeValue()).toBe(2n * 10n ** 18n);
   });
 
   it('非整数/不正値は既定 2 にフォールバック', async () => {

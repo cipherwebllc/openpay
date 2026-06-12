@@ -47,12 +47,18 @@ export type RelayDeps = {
   // rate-limit。許可なら true。
   checkRateLimit: (keys: string[]) => Promise<boolean>;
   // (任意) 日次グローバル予算 (circuit breaker)。Sybil が fresh EOA を量産して relayer の POL を
-  // 枯渇させる griefing を、chain 日次の relay 件数上限で止める。true=予算内 (許可)。未提供なら
-  // スキップ。fail-open (KV 障害は許可) — alpha は可用性優先、mainnet は fail-closed 寄りに要見直し。
-  checkGasBudget?: (chainId: number) => Promise<boolean>;
-  // (任意) checkGasBudget で消費した日次枠を 1 戻す。tx が 1 件も broadcast されなかったことが
-  // 確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に正当決済が
-  // daily_budget_exceeded で 503 になるのを防ぐ。checkGasBudget を通過した場合のみ呼ぶ。
+  // 枯渇させる griefing を、chain 日次の relay 件数上限で止める。返り値:
+  //   allowed  = 予算内で relay を許可するか (fail-open: KV 障害でも true)。
+  //   consumed = カウンタを実際に INCR して 1 枠を消費したか (KV INCR 失敗の fail-open allow では
+  //              false)。consumed=false の枠は後で refundGasBudget (DECR) してはならない — INCR して
+  //              いない枠を DECR するとカウンタが負に振れて余剰許容枠を与えてしまう (CDX-5)。
+  // 未提供ならスキップ。alpha は可用性優先、mainnet は fail-closed 寄りに要見直し。
+  checkGasBudget?: (
+    chainId: number,
+  ) => Promise<{ allowed: boolean; consumed: boolean }>;
+  // (任意) checkGasBudget で実際に消費した (consumed=true) 日次枠を 1 戻す。tx が 1 件も broadcast
+  // されなかったことが確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に
+  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。consumed=true のときのみ呼ぶ。
   refundGasBudget?: (chainId: number) => Promise<void>;
   // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
   // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
@@ -202,11 +208,14 @@ export async function relayJpycAuthorization(
   // submit せず reject (tx 未送信 → standard へ安全に fallback)。claim 済なら解放 (false tombstone 防止)。
   let gasBudgetConsumed = false;
   if (deps.checkGasBudget) {
-    if (!(await deps.checkGasBudget(chainId))) {
+    const budget = await deps.checkGasBudget(chainId);
+    if (!budget.allowed) {
       await releaseClaim();
       return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
     }
-    gasBudgetConsumed = true;
+    // 実際に INCR で枠を消費したときのみ refund 対象にする。KV INCR 失敗の fail-open allow
+    // (consumed=false) を消費扱いすると、後の DECR がカウンタを負に振り余剰枠を与える (CDX-5)。
+    gasBudgetConsumed = budget.consumed;
   }
   // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
   // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。

@@ -41,7 +41,15 @@ vi.mock('viem', async (importOriginal) => {
   return {
     ...actual,
     createPublicClient: () => ({
-      readContract: async () => 0n, // balanceOf → 0n
+      // CDX-1 forwarder 健全性チェック (submit 前) を通すため getBytecode + token()/feeReceiver() を
+      // valid 相当に。これらが取れないと route は検証不能で 503 に倒す (= 本テストの fee/署名/残高の
+      // 検証点に到達できない)。token=JPYC_AMOY / feeReceiver=FEE_RECEIVER は下で定義する解決値と一致。
+      getBytecode: async () => '0x60' as `0x${string}`,
+      readContract: async (args: { functionName?: string }) => {
+        if (args.functionName === 'token') return JPYC_AMOY;
+        if (args.functionName === 'feeReceiver') return FEE_RECEIVER;
+        return 0n; // balanceOf → 0n (残高不足で submit 前に弾く)
+      },
       getBalance: async () => 0n,
       estimateGas: async () => 21000n,
       getTransactionCount: async () => 0,

@@ -26,7 +26,8 @@ import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { calcBreakdown, type GasMode } from '@/lib/fee';
@@ -83,10 +84,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       'eip3009-relay';
   const relay = useJpycEip3009Payment(deployment);
   // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
-  // 未設定は free (OpenPay 負担)。relayGasEquiv は回収する固定 gas 相当額 (free は 0)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv (= recover 時の利用料) は totalWei 確定後に算出する
+  // (CDX-3: 実スケジュール recoverFeeValue を使い、bps>0 で会計サマリと実 settle 額を一致させる)。
   const useRecover =
     useRelay && jpycForwarderFor(chainId ?? deployment.chainId) !== null;
-  const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
 
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
@@ -114,6 +115,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     () => calcCheckoutTotal(params.items, deployment.decimals),
     [params.items, deployment.decimals],
   );
+
+  // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
+  // recoverFeeValue(billAmount, effectiveGas) を使う。billAmount は relay.mutate に渡す totalWei、
+  // effectiveGas は recover で強制される 'merchant'。bps=0 では floor (= 2 JPYC) になり従来挙動と
+  // 完全一致。free (非 recover) は 0n。
+  const relayGasEquiv = useRecover
+    ? recoverFeeValue(totalWei, effectiveGas)
+    : 0n;
 
   // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
   const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
