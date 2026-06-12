@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NEWS_ITEMS, sortedNews, latestNewsId } from '@/lib/news';
+import { DISCLOSED_RECOVER_FEE } from '@/lib/legal';
 
 describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
   it('id が重複しない', () => {
@@ -92,6 +93,21 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(pricing!.body.ja).toMatch(/1%\s*は適用しません/);
     // 「店舗が選択」式の負担者トグル開示が残っていないこと (撤去済み)。
     expect(pricing!.body.ja).not.toMatch(/店舗が.*選択/);
+  });
+
+  // L4: 最新 pricing 本文の数値を lib/legal.ts の DISCLOSED_RECOVER_FEE 定数に結びつける。
+  // 定数だけ・本文だけの片側変更で fail する (お知らせが env/法務開示と黙って乖離するのを防ぐ)。
+  it('最新 pricing 本文が定数由来の数値 (約/最低 N JPYC・M%) を ja/en で含む (L4 フェンス)', () => {
+    const floorJpyc = DISCLOSED_RECOVER_FEE.floorJpyc; // 2
+    const percentFromJuly = DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100; // 1 (%)
+    const pricing = sortedNews().find((n) => n.category === 'pricing');
+    expect(pricing).toBeDefined();
+    expect(pricing!.body.ja).toContain(`約 ${floorJpyc} JPYC`);
+    expect(pricing!.body.ja).toContain(`最低 ${floorJpyc} JPYC`);
+    expect(pricing!.body.ja).toContain(`${percentFromJuly}%`);
+    // en も同じ数値 (about N JPYC / N JPYC minimum / M%)。
+    expect(pricing!.body.en).toContain(`${floorJpyc} JPYC`);
+    expect(pricing!.body.en).toContain(`${percentFromJuly}%`);
   });
 
   it('置き換え済みの旧 pricing/feature お知らせは superseded 注記を持つ (黙った書き換え禁止)', () => {

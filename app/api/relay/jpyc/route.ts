@@ -72,6 +72,7 @@ import {
   configuredJpycForwarderFor,
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
@@ -192,6 +193,24 @@ if (env.enableUsageFee) {
       reason:
         'testnet forwarder (recover) configured while usage fee (a1) is enabled; ' +
         'a1 takes precedence so recover is disabled (effective forwarder=null, relay runs free mode)',
+    });
+  }
+}
+
+// L4: 法務開示と実 env の乖離検知。live の徴収数値 (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC /
+// NEXT_PUBLIC_RECOVER_FEE_BPS) が、Terms/Disclaimer/特商法/お知らせ で利用者に約束した数値
+// (lib/legal.ts DISCLOSED_RECOVER_FEE) と食い違っていれば起動時に warn を出す。運営が文書を改定
+// せず env だけ変えると文書が黙って嘘になるため、Sentry でその乖離を可視化する (throw はしない —
+// 決済は止めない)。一致していれば何もしない。
+{
+  const divergence = feeDisclosureDivergence();
+  if (divergence) {
+    logger.warn('relay.jpyc.fee_disclosure_divergence', {
+      reason:
+        'live relay fee env diverges from the disclosed numbers in Terms/Disclaimer/Tokutei/news ' +
+        '(lib/legal.ts DISCLOSED_RECOVER_FEE); changing fees requires revising the legal text ' +
+        '(new 改定 entry). Either revert the env or revise the disclosure.',
+      detail: divergence,
     });
   }
 }
@@ -519,6 +538,33 @@ export async function POST(req: Request): Promise<NextResponse> {
     req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
   );
 
+  // L5: forwarder を設定した chain なのに self-host relayer 鍵が無い (PROVIDER!=='self-host') 構成は、
+  // client が recover payload (merchant/merchantValue/feeValue/intentSalt) を送ってくるのに handleFree が
+  // それを invalid_payload (400) として弾く → 全 JPYC 決済が汎用エラーで死ぬ。これを明示の
+  // 503 relay_not_configured に倒し、client が standard モードへ綺麗に fallback できるようにする
+  // (client は relay_not_configured → errorRelayNotConfigured + standard 案内にマップ済み)。
+  // 生の forwarder lookup (configuredJpycForwarderFor) で判定する: ただし a1 (env.enableUsageFee) が
+  // ON のときは resolver (jpycForwarderFor) が意図的に forwarder=null に倒し client も free payload を
+  // 組むため、recover payload は来ない → この場合は 503 を出さず free 経路へ通す (顧客決済を壊さない)。
+  // Gelato (PROVIDER==='gelato') も recover (forwarder.settle を自前 EOA で submit) はできないため
+  // 同じ 503 に倒す (PROVIDER!=='self-host' で一括カバー)。
+  if (
+    PROVIDER !== 'self-host' &&
+    !env.enableUsageFee &&
+    configuredJpycForwarderFor(chainId) !== null
+  ) {
+    logger.warn('relay.jpyc.relay_not_configured', {
+      chainId,
+      reason:
+        'forwarder configured for this chain but relayer key missing (PROVIDER is not self-host); ' +
+        'recover requires self-host RELAYER_PRIVATE_KEY — returning 503 so client falls back to standard',
+    });
+    return NextResponse.json(
+      { ok: false, error: 'relay_not_configured' },
+      { status: 503 },
+    );
+  }
+
   // forwarder が設定された chain は recover モード (gas 相当額を JPYC 回収・self-host 限定)。
   // 無ければ free モード (Phase A・直接 transferWithAuthorization)。
   // ⚠️ recover (per-tx ガス回収) と a1 月額 OpenPay 利用料 (NEXT_PUBLIC_ENABLE_USAGE_FEE) は **排他**:
@@ -751,11 +797,12 @@ async function handleRecover(
     feeReceiverFor,
     getBalance,
     checkRateLimit,
-    // refund (未 broadcast 失敗の予算返却) は free 経路 (jpycRelay) のみ配線。recover 経路は
-    // forwarderRecover が refund 契約を持たず、かつ recover×a1 併用時は resolver (jpycForwarderFor)
-    // が forwarder=null に倒すため handleRecover には到達しない (a1 OFF の純 recover 構成のみ実行)。
-    // recover 本格運用時に同様の refund を検討する。
+    // refund (未 broadcast 失敗の予算返却) を recover 経路にも配線。recover は本番標準経路に昇格した
+    // ため、free 経路 (jpycRelay) と同一セマンティクスで日次予算を回収する: checkGasBudget で INCR 消費
+    // した枠を、tx が 1 件も broadcast されなかったことが確実な失敗 (submit throw / poll 'error') でのみ
+    // DECR で 1 戻す (RPC 不安定日に正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。fail-quiet。
     checkGasBudget,
+    refundGasBudget,
     checkAuthorizationUsed: readAuthorizationUsed,
     claimIdempotency,
     recordRelayHash,

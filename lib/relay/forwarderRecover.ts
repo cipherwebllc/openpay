@@ -42,6 +42,11 @@ export type ForwarderRecoverDeps = {
   // (任意) 日次グローバル予算 (circuit breaker)。Sybil による relayer POL 枯渇 griefing を chain
   // 日次の relay 件数上限で止める。true=予算内 (許可)。fail-open (KV 障害は許可)。
   checkGasBudget?: (chainId: number) => Promise<boolean>;
+  // (任意) checkGasBudget で消費した日次枠を 1 戻す。tx が 1 件も broadcast されなかったことが
+  // 確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に正当決済が
+  // daily_budget_exceeded で 503 になるのを防ぐ。checkGasBudget を通過した場合のみ呼ぶ。
+  // jpycRelay (free 経路) の refundGasBudget 契約とセマンティクス完全一致 (fail-quiet・自分でログ)。
+  refundGasBudget?: (chainId: number) => Promise<void>;
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
@@ -170,12 +175,20 @@ export async function recoverViaForwarder(
 
   // 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
   // (replay/duplicate が予算枠を消費する DoS を防ぐ・Codex P1)。超過は submit せず reject。
+  let gasBudgetConsumed = false;
   if (deps.checkGasBudget) {
     if (!(await deps.checkGasBudget(chainId))) {
       await releaseClaim();
       return rejected(503, 'daily_budget_exceeded');
     }
+    gasBudgetConsumed = true;
   }
+  // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
+  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。
+  // jpycRelay (free 経路) の refundBudget と同一セマンティクス。
+  const refundBudget = async () => {
+    if (gasBudgetConsumed) await deps.refundGasBudget?.(chainId);
+  };
 
   // submit (relayer → forwarder.settle) + poll。submit が throw = broadcast 前 → relay_error。
   const data = encodeSettleCalldata(params, signature);
@@ -184,6 +197,7 @@ export async function recoverViaForwarder(
     taskId = (await deps.submit(chainId, forwarder, data)).taskId;
   } catch (e) {
     await releaseClaim(); // broadcast 前失敗 → claim 解放
+    await refundBudget(); // tx 未送信が確実 → 予算枠を戻す
     return {
       kind: 'relay_error',
       detail: `submit_failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -209,7 +223,8 @@ export async function recoverViaForwarder(
     return { kind: 'pending', txHash: outcome.txHash };
   }
   // poll 'error' = 未送信が確実な失敗のみ (timeout 等の不確定は pollTask で 'pending' に倒す)。
-  // → relay_error で fallback 可 + claim 解放。
+  // → relay_error で fallback 可 + claim 解放 + 予算枠を戻す (tx 未送信が確実なので消費した枠を回収)。
   await releaseClaim();
+  await refundBudget();
   return { kind: 'relay_error', detail: outcome.detail };
 }

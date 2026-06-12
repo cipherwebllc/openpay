@@ -14,11 +14,16 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
   >('@/lib/relay/forwarderConfig');
   return { ...actual, jpycForwarderFor: vi.fn(() => null) };
 });
+// L2: recoverFeeValue mock の戻り値を distinctive な 7e18 (≠ floor 2e18) にする。以前は
+// 2e18 (= floor と同値) を返していたため、buildJpycRecoverSignPreview が recoverFeeValue へ
+// 委譲しているのか floor をハードコードしているのか区別できず tautology だった。fee=7 にすると
+// totalAtomic / feeHuman が「recoverFeeValue 由来」であることを実証できる。
+const DISTINCT_FEE = 7n * 10n ** 18n; // 7 JPYC
 vi.mock('@/lib/relay/recoverFee', async () => {
   const actual = await vi.importActual<typeof import('@/lib/relay/recoverFee')>(
     '@/lib/relay/recoverFee',
   );
-  return { ...actual, recoverFeeValue: vi.fn(() => 2n * 10n ** 18n) };
+  return { ...actual, recoverFeeValue: vi.fn(() => 7n * 10n ** 18n) };
 });
 
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
@@ -113,12 +118,12 @@ describe('buildJpycRelaySignPreview', () => {
 describe('buildJpycRecoverSignPreview', () => {
   beforeEach(() => {
     vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
-    // 既定 fee = floor 2 JPYC (bps=0 と同じ・現行挙動)。
-    vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
+    // distinctive fee (7 JPYC ≠ floor 2 JPYC) で「fee は recoverFeeValue 由来」を実証する。
+    vi.mocked(recoverFeeValue).mockReturnValue(DISTINCT_FEE);
   });
 
   it('customer モード: signedTotal = value + fee (ウォレットは表示額より大きい数を出す)', () => {
-    // 1000 JPYC 決済・fee 2 JPYC → ウォレットは 1002 JPYC を出す。これが本質。
+    // 1000 JPYC 決済・fee 7 JPYC → ウォレットは 1007 JPYC を出す。これが本質。
     const value = 1000n * 10n ** 18n;
     const p = buildJpycRecoverSignPreview({
       value,
@@ -130,10 +135,13 @@ describe('buildJpycRecoverSignPreview', () => {
     });
     expect(p).not.toBeNull();
     expect(p!.amountHuman).toBe('1000');
-    expect(p!.feeHuman).toBe('2');
-    expect(p!.totalHuman).toBe('1002');
+    // 委譲フェンス: floor をハードコードしていたら "2"。recoverFeeValue を呼べば "7"。
+    expect(p!.feeHuman).toBe('7');
+    expect(p!.totalHuman).toBe('1007');
     // 照合表の生の数字 = (value + fee).toString()。
-    expect(p!.totalAtomic).toBe((1002n * 10n ** 18n).toString());
+    expect(p!.totalAtomic).toBe((1007n * 10n ** 18n).toString());
+    // recoverFeeValue が (value, gasMode) で実際に呼ばれたことを確認 (delegation の直接証明)。
+    expect(recoverFeeValue).toHaveBeenCalledWith(value, 'customer');
     expect(p!.gasMode).toBe('customer');
     expect(p!.symbol).toBe('JPYC');
   });
@@ -151,9 +159,10 @@ describe('buildJpycRecoverSignPreview', () => {
     expect(p).not.toBeNull();
     // merchantValue = value - fee, signedTotal = merchantValue + fee = value。
     expect(p!.amountHuman).toBe('1000');
-    expect(p!.feeHuman).toBe('2');
+    expect(p!.feeHuman).toBe('7');
     expect(p!.totalHuman).toBe('1000');
     expect(p!.totalAtomic).toBe(value.toString());
+    expect(recoverFeeValue).toHaveBeenCalledWith(value, 'merchant');
     expect(p!.gasMode).toBe('merchant');
   });
 

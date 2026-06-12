@@ -93,7 +93,12 @@ describe('QrGenerator recover fee disclosure', () => {
     const receiverInput = screen.getByPlaceholderText(/0x/i);
     await user.type(receiverInput, VALID_RECEIVER);
     await fillAmount(user, '1000');
-    expect(screen.getByText(/決済手数料: 2 JPYC（ガス相当）/)).toBeInTheDocument();
+    // L6: 数字の前後を境界で締める (`:\s*` 直後 + 後続 `（`) — 「12 JPYC（」等の部分一致を排除。
+    expect(
+      screen.getByText(/決済手数料:\s*2 JPYC（ガス相当）/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/決済手数料:\s*12 JPYC/)).toBeNull();
+    expect(screen.queryByText(/決済手数料:\s*20 JPYC/)).toBeNull();
   });
 
   it('RECOVER mode, bps=100: shows % form disclosure (merchant 固定)', async () => {
@@ -107,7 +112,11 @@ describe('QrGenerator recover fee disclosure', () => {
     await user.type(receiverInput, VALID_RECEIVER);
     await fillAmount(user, '1000');
     // % form: "決済手数料: 10 JPYC（決済額の1%・最低2 JPYC）" (merchant スケジュール)
-    expect(screen.getByText(/決済手数料: 10 JPYC（決済額の1%/)).toBeInTheDocument();
+    // L6: `10 JPYC` の前後を締める (`:\s*` + 後続 `（決済額の1%`)。`110`/`100` の bleed を防ぐ。
+    expect(
+      screen.getByText(/決済手数料:\s*10 JPYC（決済額の1%/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/決済手数料:\s*110 JPYC/)).toBeNull();
   });
 
   // 確定モデル (2026-06-13): JPYC recover は店舗負担固定。開示は merchant 分担行を出す。

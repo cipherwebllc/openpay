@@ -189,6 +189,12 @@ describe('useJpycEip3009Payment — 署名計測 (sign_requested / completed / r
 // payload に gasMode を載せる。client/server は同式 (recoverFeeValue) で feeValue を求める必要が
 // あるため (nonce 一致)、ここでは「client が recoverFeeValue を呼び、その値で payload を組む」
 // ことを検証する。手数料の負担者は gasMode が決める (customer=上乗せ / merchant=吸収)。
+//
+// 注: この mock はスケジュールを再実装しているが、表示↔請求↔server の **実 recoverFee 統合**
+// (モック撤廃) は tests/lib/recoverFeeConsistency.test.ts が別途カバーする (L2)。ここでは
+// hook が payload を recoverFeeValue(value, gasMode) の戻り値で正しく組むことだけを fence する。
+// 各ケースで mock が exact (value, gasMode) 引数で呼ばれたことを assert し、hook が独自計算で
+// なく recoverFeeValue へ委譲していることを証明する。
 describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(value) + gasMode)', () => {
   const FORWARDER = getAddress('0x0F4560a777415580F0680F8B56a79B0022C6B848');
 
@@ -254,6 +260,8 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     result.current.mutate({ merchant: MERCHANT, value });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    // 既定 customer でも recoverFeeValue は exact (value, 'customer') で呼ばれる (delegation 証明)。
+    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'customer');
     const body = lastPostBody();
     expect(body.gasMode).toBe('customer');
   });

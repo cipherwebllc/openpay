@@ -1508,9 +1508,11 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     // JPYC_PARAMS は gas=customer だが、recover では merchant に倒れる。
     render(<CheckoutForm params={JPYC_PARAMS} />);
     // bps=0 (既定) → ガス相当の固定手数料を開示 + 店舗負担の分担行。
+    // L6: 数字の前後を境界で締める (`:\s*` 直後 + 後続 `（`) — 「12 JPYC（」等の部分一致を排除。
     expect(
-      screen.getByText(/決済手数料: 2 JPYC（ガス相当）/),
+      screen.getByText(/決済手数料:\s*2 JPYC（ガス相当）/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/決済手数料:\s*12 JPYC/)).toBeNull();
     expect(screen.getByText(/手数料は店舗負担/)).toBeInTheDocument();
     expect(screen.queryByText(/手数料はお客様負担/)).toBeNull();
   });

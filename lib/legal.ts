@@ -5,6 +5,15 @@
 // 値の出所: 国税庁法人番号公表サイト (1110003003789) で住所・商号・代表者を
 // 突合済 (2026-05-14)。文面そのものは alpha 段階で弁護士 review 未実施の
 // draft 扱い (本番昇格時に文言精査が必要)。
+//
+// import 方針: 本モジュールは法務開示の SOT (定数 + 開示数値) であり、live env から
+// 開示数値を読む下流ヘルパ (feeDisclosureDivergence) のためにのみ relay の floor reader
+// (relayGasFeeValue・forwarderConfig) と env を import する。bps は env.recoverFeeBps を直接読む
+// (recoverFee.ts ではなく env から読むことで、recoverFee を mock する下流テストに影響しない)。
+// forwarderConfig / env は legal を import し返さないため循環は生じない (legal → {forwarderConfig, env})。
+
+import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { env } from '@/lib/env';
 
 export const LEGAL_ENTITY = {
   serviceName: 'OpenPay',
@@ -95,3 +104,55 @@ export const LEGAL_ENTITY = {
   // 両言語へ注入)。
   liabilityCapJpy: 10000,
 } as const;
+
+// 開示済みの JPYC ガスレス決済 per-tx 利用料の「約束した数値」(SOT)。Terms 第3条/第5条・
+// Disclaimer §7・特商法 (役務の対価/支払時期/返品)・お知らせ (lib/news.ts) の本文に書かれている
+// 数値そのもので、これらの文書はこの定数と矛盾してはならない。
+//   floorJpyc          = 当面 (= 2026 年 6 月利用分まで・および 7 月以降の最低額) の固定フロア
+//                        「約 2 JPYC」「最低 2 JPYC」として開示。
+//                        実装の既定 = relayGasFeeValue() (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC 既定 2)。
+//   percentFromJulyBps = 2026 年 7 月のご利用分から適用する決済額連動率 (= 1% = 100 bps) として開示。
+//                        実装 = recoverFeeBps() (NEXT_PUBLIC_RECOVER_FEE_BPS・現在 0・7 月に 100 予定)。
+//
+// ⚠️ 重要: これらは法務文書 (Terms/Disclaimer/特商法/お知らせ) で利用者に約束した数値である。
+//   ここを変更する = 利用者への開示を変更することなので、必ず法務文書本文の改定 (新しい
+//   「改定」エントリの追記 + 施行日更新 + 弁護士確認) を伴わなければならない。逆に env
+//   (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC / NEXT_PUBLIC_RECOVER_FEE_BPS) をこの定数と乖離させて
+//   運用すると、文書が黙って嘘になる。relay route module load の起動時診断
+//   (feeDisclosureDivergence) が live env とこの定数を突き合わせて Sentry に警告する。
+//   フェンステスト (tests/app/legal.test.tsx / tests/lib/news.test.ts) が、描画される法務/お知らせ
+//   本文がこの定数から導いた数値を含むことを assert する (定数だけ・本文だけの片側変更で fail)。
+export const DISCLOSED_RECOVER_FEE = {
+  floorJpyc: 2,
+  percentFromJulyBps: 100,
+} as const;
+
+// L4: live env (実際に徴収する数値) が法務文書で開示済みの数値 (DISCLOSED_RECOVER_FEE) と
+// 乖離していないかを判定する純関数。乖離していれば人間可読な理由文字列を、一致していれば null を返す。
+//   - floor: relayGasFeeValue() (= NEXT_PUBLIC_RELAY_GAS_FEE_JPYC) が「約 2 JPYC / 最低 2 JPYC」
+//     として開示した floorJpyc (×10^18) と一致するか。
+//   - bps: env.recoverFeeBps (= NEXT_PUBLIC_RECOVER_FEE_BPS) が、開示済みの 2 値
+//     {0 (= 7 月前の無徴収相当・現在), percentFromJulyBps (= 1% = 100・7 月以降)} のいずれかか。
+//     それ以外の率を運用すると、文書が約束していない料率を黙って徴収することになる。
+// relay route module load の起動時診断がこれを呼び、非 null なら logger.warn で Sentry に上げる
+// (throw はしない — 決済は止めず、運営に「文書を改定せず env だけ変えた」乖離を可視化するだけ)。
+export function feeDisclosureDivergence(): string | null {
+  const floorActual = relayGasFeeValue();
+  const floorExpected = BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10n ** 18n;
+  const bps = env.recoverFeeBps;
+  const allowedBps = [0, DISCLOSED_RECOVER_FEE.percentFromJulyBps];
+  const issues: string[] = [];
+  if (floorActual !== floorExpected) {
+    issues.push(
+      `relayGasFeeValue=${floorActual} != disclosed floor ${floorExpected} ` +
+        `(NEXT_PUBLIC_RELAY_GAS_FEE_JPYC vs DISCLOSED_RECOVER_FEE.floorJpyc=${DISCLOSED_RECOVER_FEE.floorJpyc})`,
+    );
+  }
+  if (!allowedBps.includes(bps)) {
+    issues.push(
+      `recoverFeeBps=${bps} not in disclosed {${allowedBps.join(', ')}} ` +
+        `(NEXT_PUBLIC_RECOVER_FEE_BPS vs DISCLOSED_RECOVER_FEE.percentFromJulyBps=${DISCLOSED_RECOVER_FEE.percentFromJulyBps})`,
+    );
+  }
+  return issues.length > 0 ? issues.join('; ') : null;
+}

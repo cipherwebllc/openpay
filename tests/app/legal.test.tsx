@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import TermsPage from '@/app/[locale]/terms/page';
 import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
 import TokuteiPage from '@/app/[locale]/tokutei/page';
-import { LEGAL_ENTITY } from '@/lib/legal';
+import { LEGAL_ENTITY, DISCLOSED_RECOVER_FEE } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
 
@@ -1076,6 +1076,105 @@ describe('Legal pages', () => {
       expect(ja.Disclaimer.legalNote).toContain('相互に補完');
       expect(ja.Disclaimer.legalNote).not.toContain('利用規約が優先');
       expect(en.Disclaimer.legalNote).toMatch(/complement each other/i);
+    });
+  });
+
+  // L4: 法務開示 ↔ env のフェンス。文書本文に書かれた数値 (約 2 JPYC / 1% / 最低 2 JPYC) と
+  // lib/legal.ts の DISCLOSED_RECOVER_FEE 定数を結びつけ、片側だけの変更で fail させる。
+  // また実装の既定 (relayGasFeeValue() / recoverFeeBps()) を開示済み数値にピン留めする。
+  describe('L4: per-tx 利用料の開示数値 ↔ 定数/実装デフォルトのフェンス', () => {
+    // 定数から導いた表示文字列。文書本文がこれを含むことを assert する (定数だけ・本文だけの
+    // 片側変更が fail する)。floorJpyc=2 → "2 JPYC" / percentFromJulyBps=100 → "1%"。
+    const floorJpyc = DISCLOSED_RECOVER_FEE.floorJpyc; // 2
+    const percentFromJuly = DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100; // 1 (%)
+
+    it('Tokutei (役務の対価) の描画本文が定数由来の数値 (約 2 JPYC / 最低 2 JPYC / 1%) を含む', () => {
+      renderWithIntl(<TokuteiPage />, { locale: 'ja' });
+      const text = screen.getByRole('main').textContent ?? '';
+      expect(text).toContain(`約 ${floorJpyc} JPYC`);
+      expect(text).toContain(`最低 ${floorJpyc} JPYC`);
+      expect(text).toContain(`${percentFromJuly}%`);
+    });
+
+    it('Disclaimer (§7 OpenPay 利用料) の描画本文が定数由来の数値を含む', () => {
+      renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
+      const section7 = screen.getByRole('heading', { level: 2, name: /^7\./ });
+      const body = section7.nextElementSibling?.textContent ?? '';
+      expect(body).toContain(`約 ${floorJpyc} JPYC`);
+      expect(body).toContain(`最低 ${floorJpyc} JPYC`);
+      expect(body).toContain(`${percentFromJuly}%`);
+    });
+
+    it('Terms (第5条 料金) のメッセージ本文が定数由来の数値を含む (ja)', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const body = ja.Terms.article5.body;
+      expect(body).toContain(`約 ${floorJpyc} JPYC`);
+      expect(body).toContain(`最低 ${floorJpyc} JPYC`);
+      expect(body).toContain(`${percentFromJuly}%`);
+    });
+
+    // code-default consistency: relayGasFeeValue() を env 未設定 (clean) で評価し、
+    // 開示済みフロア (floorJpyc × 10^18) と一致することをピン留めする。env をクリーンにするため
+    // NEXT_PUBLIC_RELAY_GAS_FEE_JPYC を undefined に stub し resetModules で再 import する。
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    it('relayGasFeeValue() の既定 (env 未設定) === BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10^18', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      const { relayGasFeeValue } = await import('@/lib/relay/forwarderConfig');
+      expect(relayGasFeeValue()).toBe(
+        BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10n ** 18n,
+      );
+    });
+
+    it('recoverFeeBps() の既定 (env 未設定) === 0 (= 7 月前の無徴収相当・開示済み許可値)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
+      const { recoverFeeBps } = await import('@/lib/relay/recoverFee');
+      expect(recoverFeeBps()).toBe(0);
+    });
+
+    // feeDisclosureDivergence(): live env が開示済み数値と一致なら null、乖離なら非 null 理由文字列。
+    it('feeDisclosureDivergence: 既定 env (floor=2 / bps=0) は乖離なし (null)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      expect(feeDisclosureDivergence()).toBeNull();
+    });
+
+    it('feeDisclosureDivergence: bps を開示済み 7 月料率 (=percentFromJulyBps) にしても乖離なし', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      vi.stubEnv(
+        'NEXT_PUBLIC_RECOVER_FEE_BPS',
+        String(DISCLOSED_RECOVER_FEE.percentFromJulyBps),
+      );
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      expect(feeDisclosureDivergence()).toBeNull();
+    });
+
+    it('feeDisclosureDivergence: floor を開示と違う額にすると乖離を検出 (非 null・理由に floor)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '5'); // 開示は 2
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      const d = feeDisclosureDivergence();
+      expect(d).not.toBeNull();
+      expect(d).toMatch(/relayGasFeeValue/);
+    });
+
+    it('feeDisclosureDivergence: bps を開示外の率 (例 50) にすると乖離を検出 (非 null・理由に bps)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '50'); // 開示は {0, 100}
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      const d = feeDisclosureDivergence();
+      expect(d).not.toBeNull();
+      expect(d).toMatch(/recoverFeeBps/);
     });
   });
 });

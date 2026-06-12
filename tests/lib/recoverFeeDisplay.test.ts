@@ -5,8 +5,13 @@ vi.mock('@/lib/relay/forwarderConfig', () => ({
   jpycForwarderFor: vi.fn(() => null),
   relayGasFeeValue: vi.fn(() => 2n * 10n ** 18n),
 }));
+// L2: mock の戻り値は floor (relayGasFeeValue=2e18) と **別の distinctive な値** (7e18) にする。
+// 以前は recoverFeeValue mock が 2e18 (= floor と同値) を返していたため、buildRecoverFeeDisplay
+// が「recoverFeeValue を呼んで委譲している」のか「floor をハードコードしている」のかを区別できず
+// テストが tautology だった。fee≠floor にすることで、表示が fee 側を使うこと (= 委譲) を実証する。
+const DISTINCT_FEE = 7n * 10n ** 18n; // 7 JPYC: floor(2) とも 1000 とも異なる
 vi.mock('@/lib/relay/recoverFee', () => ({
-  recoverFeeValue: vi.fn((amount: bigint) => 2n * 10n ** 18n), // default bps=0: returns floor
+  recoverFeeValue: vi.fn(() => 7n * 10n ** 18n), // distinctive ≠ floor(2e18) で委譲を実証
   recoverFeeBps: vi.fn(() => 0),
 }));
 
@@ -33,33 +38,37 @@ describe('buildRecoverFeeDisplay', () => {
     beforeEach(() => {
       vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
       vi.mocked(recoverFeeBps).mockReturnValue(0);
-      vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
+      // distinctive fee (7 JPYC ≠ floor 2 JPYC) で「fee は recoverFeeValue 由来」を実証する。
+      vi.mocked(recoverFeeValue).mockReturnValue(DISTINCT_FEE);
     });
 
-    it('bps=0: feeHuman is "2", bps is 0', () => {
+    it('feeHuman は recoverFeeValue 由来 ("7"・floor の "2" ではない)・bps は 0', () => {
       const result = buildRecoverFeeDisplay(AMOUNT_1000, 137, 'customer');
       expect(result).not.toBeNull();
       expect(result!.bps).toBe(0);
-      expect(result!.feeHuman).toBe('2');
+      // 委譲フェンス: floor をハードコードしていたら "2" になるが、recoverFeeValue を呼べば "7"。
+      expect(result!.feeHuman).toBe('7');
+      // recoverFeeValue が (billAmount, gasMode) で実際に呼ばれたことを確認 (delegation の直接証明)。
+      expect(recoverFeeValue).toHaveBeenCalledWith(AMOUNT_1000, 'customer');
     });
 
-    it('bps=0, gasMode=customer: customerPaysHuman = amount+fee', () => {
+    it('gasMode=customer: customerPaysHuman = amount + fee (fee=7)', () => {
       const result = buildRecoverFeeDisplay(AMOUNT_1000, 137, 'customer');
       expect(result!.gasMode).toBe('customer');
-      expect(result!.customerPaysHuman).toBe('1002'); // 1000 + 2
+      expect(result!.customerPaysHuman).toBe('1007'); // 1000 + 7
       expect(result!.merchantReceivesHuman).toBe('1000');
     });
 
-    it('bps=0, gasMode=merchant: merchantReceivesHuman = amount-fee', () => {
+    it('gasMode=merchant: merchantReceivesHuman = amount − fee (fee=7)', () => {
       const result = buildRecoverFeeDisplay(AMOUNT_1000, 137, 'merchant');
       expect(result!.gasMode).toBe('merchant');
       expect(result!.customerPaysHuman).toBe('1000');
-      expect(result!.merchantReceivesHuman).toBe('998'); // 1000 - 2
+      expect(result!.merchantReceivesHuman).toBe('993'); // 1000 - 7
       expect(result!.tooSmall).toBe(false);
     });
 
     it('merchant mode, billAmount < fee: tooSmall true + merchantReceives clamped to "0"', () => {
-      // merchant が 1 JPYC・floor 2 JPYC → 1000 - fee がマイナスになる。負の受取額を
+      // merchant が 1 JPYC・fee 7 JPYC → 1 - fee がマイナスになる。負の受取額を
       // 表示せず '0' にクランプし、tooSmall フラグを立てる (F2)。
       const ONE_JPYC = 1n * 10n ** 18n;
       const result = buildRecoverFeeDisplay(ONE_JPYC, 137, 'merchant');
@@ -69,9 +78,10 @@ describe('buildRecoverFeeDisplay', () => {
     });
 
     it('merchant mode, billAmount === fee: tooSmall true (<= 境界) + merchantReceives "0"', () => {
-      // billAmount == fee (2 JPYC) も受取 0 で受付不可。<= 境界が含まれることを fence。
-      const TWO_JPYC = 2n * 10n ** 18n;
-      const result = buildRecoverFeeDisplay(TWO_JPYC, 137, 'merchant');
+      // billAmount == fee (7 JPYC) も受取 0 で受付不可。<= 境界が含まれることを fence。
+      // distinctive fee (7) ちょうどの billAmount を渡し、境界が floor ではなく fee で効くことを示す。
+      const SEVEN_JPYC = 7n * 10n ** 18n;
+      const result = buildRecoverFeeDisplay(SEVEN_JPYC, 137, 'merchant');
       expect(result!.tooSmall).toBe(true);
       expect(result!.merchantReceivesHuman).toBe('0');
     });
@@ -82,7 +92,7 @@ describe('buildRecoverFeeDisplay', () => {
       const ONE_JPYC = 1n * 10n ** 18n;
       const result = buildRecoverFeeDisplay(ONE_JPYC, 137, 'customer');
       expect(result!.tooSmall).toBe(false);
-      expect(result!.customerPaysHuman).toBe('3'); // 1 + 2
+      expect(result!.customerPaysHuman).toBe('8'); // 1 + 7
       expect(result!.merchantReceivesHuman).toBe('1');
     });
 

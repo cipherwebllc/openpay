@@ -87,7 +87,14 @@ describe('PaymentForm recover fee disclosure', () => {
   it('RECOVER mode, bps=0: shows gas-only disclosure', () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     render(<PaymentForm />);
-    expect(screen.getByText(/決済手数料: 2 JPYC（ガス相当）/)).toBeInTheDocument();
+    // L6: 数字の前後を境界で締める (`: ` 直後 + 後続 `（`) — 「12 JPYC（」「20 JPYC（」が
+    // 部分一致で誤って通らないよう、数字の手前を `:\s*`、直後を非数字 (` J`) と `（` で固定。
+    expect(
+      screen.getByText(/決済手数料:\s*2 JPYC（ガス相当）/),
+    ).toBeInTheDocument();
+    // 反証フェンス: 末尾の数字違い (12/20) では一致しないことを明示。
+    expect(screen.queryByText(/決済手数料:\s*12 JPYC/)).toBeNull();
+    expect(screen.queryByText(/決済手数料:\s*20 JPYC/)).toBeNull();
   });
 
   it('RECOVER mode, bps=100: shows % disclosure', () => {
@@ -95,7 +102,11 @@ describe('PaymentForm recover fee disclosure', () => {
     vi.mocked(recoverFeeBps).mockReturnValue(100);
     vi.mocked(recoverFeeValue).mockReturnValue(10n * 10n ** 18n);
     render(<PaymentForm />);
-    expect(screen.getByText(/決済手数料: 10 JPYC（決済額の1%/)).toBeInTheDocument();
+    // L6: `10 JPYC` の前後を締める (`:\s*` + 後続 `（決済額の1%`)。`110`/`100` の bleed を防ぐ。
+    expect(
+      screen.getByText(/決済手数料:\s*10 JPYC（決済額の1%/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/決済手数料:\s*110 JPYC/)).toBeNull();
   });
 
   // 確定モデル (2026-06-13): JPYC recover は URL の gas=customer を無視し merchant 固定。

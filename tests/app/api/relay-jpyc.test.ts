@@ -98,3 +98,90 @@ describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)',
     expect(body.error).not.toBe('relay_misconfigured');
   });
 });
+
+// L5: forwarder を設定したのに relayer 鍵が無い (self-host でない) 構成は、recover payload を
+// handleFree が 400 invalid_payload で弾いて全 JPYC 決済が汎用エラーで死ぬ。これを明示の 503
+// relay_not_configured に倒し、client が standard へ綺麗に fallback できるようにする。a1 が ON の
+// ときは resolver が free に倒し client も free payload を組むため 503 を出さず free 経路へ通す。
+describe('L5: forwarder 設定 + relayer 鍵欠落 → 明示 503 relay_not_configured', () => {
+  const DUMMY_RELAYER_KEY = `0x${'11'.repeat(32)}`;
+  const DUMMY_FORWARDER = '0x0000000000000000000000000000000000000001';
+  const DUMMY_GELATO_KEY = 'gelato-test-key';
+  // recover payload の形 (merchant/merchantValue/feeValue/intentSalt 入り)。鍵欠落だと handleFree が
+  // これを 400 invalid_payload で弾いていた (= バグ)。L5 で 503 relay_not_configured に倒す。
+  const recoverBody = {
+    chainId: 80002, // Amoy (testnet・mainnet hardening を回避)
+    from: '0x0000000000000000000000000000000000000def',
+    merchant: '0x0000000000000000000000000000000000000abc',
+    merchantValue: (1_000n * 10n ** 18n).toString(),
+    feeValue: (2n * 10n ** 18n).toString(),
+    validAfter: '0',
+    validBefore: String(Math.floor(Date.now() / 1000) + 600),
+    intentSalt: `0x${'22'.repeat(32)}`,
+    signature: `0x${'b'.repeat(130)}`,
+  };
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('forwarder 設定 + GELATO 鍵あり (self-host でない) → recover payload は 503 relay_not_configured (400 invalid_payload にしない)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
+    vi.stubEnv('GELATO_SPONSOR_API_KEY', DUMMY_GELATO_KEY);
+    // RELAYER_PRIVATE_KEY は設定しない → PROVIDER='gelato' (recover 不可)。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req(recoverBody));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { ok: boolean; error?: string };
+    expect(body).toEqual({ ok: false, error: 'relay_not_configured' });
+  });
+
+  it('forwarder 設定 + 鍵なし (relayer も gelato も無し) → 503 relay_not_configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
+    // RELAYER_PRIVATE_KEY も GELATO も無し → PROVIDER=null。recover 構成だが鍵が無いので 503。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req(recoverBody));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { ok: boolean; error?: string };
+    expect(body.error).toBe('relay_not_configured');
+  });
+
+  it('a1 ON + forwarder 設定 + GELATO 鍵あり → L5 の 503 は出さない (free 経路へ・invalid_payload で落ちる)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
+    vi.stubEnv('GELATO_SPONSOR_API_KEY', DUMMY_GELATO_KEY);
+    const mod = await import('@/app/api/relay/jpyc/route');
+    // recover payload を送るが、a1 ON では free 経路に倒れ free の payload 検証で 400 になる
+    // (L5 の 503 relay_not_configured ではない = free 挙動が変わっていない)。
+    const res = await mod.POST(req(recoverBody));
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).not.toBe('relay_not_configured');
+    expect(body.error).toBe('invalid_payload');
+  });
+
+  it('a1 ON + forwarder 設定 + GELATO 鍵あり → free payload は通常フロー (503 を出さない)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
+    vi.stubEnv('GELATO_SPONSOR_API_KEY', DUMMY_GELATO_KEY);
+    const mod = await import('@/app/api/relay/jpyc/route');
+    // free payload (to/value/nonce 入り) は free 経路で処理される (L5 の 503 は出ない)。
+    const freeBody = {
+      chainId: 80002,
+      from: '0x0000000000000000000000000000000000000def',
+      to: '0x0000000000000000000000000000000000000abc',
+      value: (1_000n * 10n ** 18n).toString(),
+      validAfter: '0',
+      validBefore: String(Math.floor(Date.now() / 1000) + 600),
+      nonce: `0x${'33'.repeat(32)}`,
+      signature: `0x${'b'.repeat(130)}`,
+    };
+    const res = await mod.POST(req(freeBody));
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).not.toBe('relay_not_configured');
+  });
+});
