@@ -101,11 +101,13 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
 
       let payload: Record<string, unknown>;
       if (forwarder) {
-        // recover: per-tx 手数料を JPYC 回収。customer は上乗せ、merchant は受取から吸収。
-        // feeValue = max(ガスフロア, billAmount × bps/10000)。bps=0 (既定) ではフロア
-        // (= 固定 2 JPYC) になり従来挙動と一致。server も同式で再計算し一致を強制する
-        // (nonce にコミットされるため client/server がずれると署名検証が失敗する)。
-        const feeValue = recoverFeeValue(value);
+        // recover: per-tx 手数料を JPYC 回収。決済 (merchant) は店舗が受取から吸収、
+        // チップ (customer) はチッパーが上乗せ。料金スケジュールは gasMode で選択される:
+        // merchant = max(ガスフロア, billAmount × bps/10000)・customer = フロアのみ (bps 無視)。
+        // bps=0 (既定) ではいずれもフロア (= 固定 2 JPYC) になり従来挙動と一致。server も同じ
+        // payload gasMode で同式再計算し一致を強制する (nonce にコミットされるため client/server
+        // がずれると署名検証が失敗する)。
+        const feeValue = recoverFeeValue(value, gasMode);
         const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
         if (merchantValue <= 0n) throw new Error('amount_too_small');
         const params: ForwarderSettleParams = {

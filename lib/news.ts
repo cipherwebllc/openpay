@@ -8,10 +8,11 @@
 // 未読状態 (どこまで既読か) は lib/newsRead.ts + hooks/useNewsRead.ts が localStorage
 // で持つ。サーバ DB / ログインは不要。
 //
-// 文面の誠実性: pricing 項目は lib/legal.ts の開示 (施行日 2026-06-12・JPYC ガスレスは
+// 文面の誠実性: pricing 項目は lib/legal.ts の開示 (施行日 2026-06-13・JPYC ガスレスは
 // 決済1件ごとの利用料 = 当面 約2 JPYC・2026 年 7 月利用分から決済額の 1%・最低 2 JPYC・
-// 負担者は店舗が選択・通常決済/受け取り自体/USDC 経路は無料) と矛盾させない。確定でない
-// ことを断定で書かない。過去のお知らせは黙って書き換えず「置き換え済み」注記で更新する。
+// 決済は店舗負担固定でお客様は表示額のみ／チップはガス相当額をお客様(チッパー)負担で 1% 非適用・
+// 通常決済/受け取り自体/USDC 経路は無料) と矛盾させない。確定でないことを断定で書かない。
+// 過去のお知らせは黙って書き換えず「置き換え済み」注記で更新する。
 
 export type NewsCategory = 'feature' | 'pricing' | 'notice'; // 新機能 / 料金 / お知らせ
 
@@ -41,8 +42,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: 'JPYC gasless pricing revised: per-payment fee',
     },
     body: {
-      ja: 'JPYC のガスレス決済では、決済 1 件ごとに OpenPay 利用料（当面 約 2 JPYC・2026 年 7 月のご利用分からは決済額の 1%・最低 2 JPYC）を決済時に申し受けます。手数料をお客様負担にするか店舗負担にするかは、店舗が決済設定で選択できます。\n本改定により、月次後払いの利用料（6/9 のお知らせ）および JPYC ガス全額負担（6/5 のお知らせ）の内容は置き換えられます。決済の受け取りそのもの・通常決済（ガスあり）・USDC 経路は引き続き無料です。\n詳しくは利用規約をご確認ください。',
-      en: 'For JPYC gasless payments, a per-payment OpenPay fee applies at settlement (about 2 JPYC for now; from the July 2026 usage period, 1% of the payment with a 2 JPYC minimum). The merchant chooses whether the customer or the store bears it.\nThis supersedes the monthly billed-in-arrears fee (announced 6/9) and the full gas sponsorship (announced 6/5). Receiving payments itself, standard (gas-on) payments, and the USDC route remain free.\nSee the Terms of Service for details.',
+      ja: 'JPYC のガスレス決済では、決済 1 件ごとに OpenPay 利用料（当面 約 2 JPYC・2026 年 7 月のご利用分からは決済額の 1%・最低 2 JPYC）を決済時に申し受けます。この利用料は店舗が負担し、お客様は表示額のみをお支払いになります。なお、クリエイターへのチップ送付では、ガス相当額（約 2 JPYC・決済額の 1% は適用しません）を、チップをお送りになるお客様にご負担いただきます。\n本改定により、月次後払いの利用料（6/9 のお知らせ）および JPYC ガス全額負担（6/5 のお知らせ）の内容は置き換えられます。決済の受け取りそのもの・通常決済（ガスあり）・USDC 経路は引き続き無料です。\n詳しくは利用規約をご確認ください。',
+      en: 'For JPYC gasless payments, a per-payment OpenPay fee applies at settlement (about 2 JPYC for now; from the July 2026 usage period, 1% of the payment with a 2 JPYC minimum). The store bears this fee, and the customer pays only the displayed amount. For tips to creators, the gas-equivalent amount (about 2 JPYC; the 1% does not apply) is borne by the customer sending the tip.\nThis supersedes the monthly billed-in-arrears fee (announced 6/9) and the full gas sponsorship (announced 6/5). Receiving payments itself, standard (gas-on) payments, and the USDC route remain free.\nSee the Terms of Service for details.',
     },
     link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
   },

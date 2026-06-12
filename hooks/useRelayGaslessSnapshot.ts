@@ -11,7 +11,7 @@
 import { useMemo } from 'react';
 import type { Hex } from 'viem';
 import type { GasMode } from '@/lib/fee';
-import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import type { GaslessSnapshot } from './usePaymentHistory';
 
 // 利用する relay mutation の最小構造 (useJpycEip3009Payment の戻りに構造的に適合)。
@@ -27,9 +27,13 @@ export function useRelayGaslessSnapshot(
 ): GaslessSnapshot {
   return useMemo(() => {
     const v = relay.variables;
-    const fee = useRecover ? relayGasFeeValue() : 0n;
+    // 実際に hook/server が回収する手数料と一致させる (gasMode で料金スケジュールが変わる:
+    // merchant=max(floor,bps) / customer=floor)。これがずれると履歴の netFee/merchant 着金が
+    // 実 settle と乖離する。gasMode 不明 (旧 variables) は customer に倒す (hook 既定と一致)。
+    const gasMode: GasMode = v?.gasMode ?? 'customer';
+    const fee = useRecover && v ? recoverFeeValue(v.value, gasMode) : 0n;
     const merchantAmount = v
-      ? useRecover && v.gasMode === 'merchant'
+      ? useRecover && gasMode === 'merchant'
         ? v.value - fee
         : v.value
       : 0n;

@@ -226,9 +226,14 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/1%/);
       expect(body?.textContent).toMatch(/最低 2 JPYC/);
       expect(body?.textContent).toMatch(/各決済の実行時/);
-      // 負担者 (お客様上乗せ / 店主吸収) は店主が選択する
-      expect(body?.textContent).toMatch(/負担者/);
-      expect(body?.textContent).toMatch(/店主が選択/);
+      // 確定モデル (2026-06-13): 決済は店舗 (店主) が利用料を負担し、お客様は表示額のみ。
+      // 旧「店主が gasMode で負担者を選択」式は撤去 (固定化)。
+      expect(body?.textContent).toMatch(/店舗 \(店主\) が負担|店舗が負担/);
+      expect(body?.textContent).toMatch(/表示された決済額のみ|表示額のみ/);
+      expect(body?.textContent).not.toMatch(/店主が選択/);
+      // チップはガス相当額をお客様 (チッパー) 負担・1% 非適用。
+      expect(body?.textContent).toMatch(/チップ/);
+      expect(body?.textContent).toMatch(/1% は適用しません|1% は適用しない/);
       // gas の回収目的ではなく gas 額と非連動 (回収/立替フレーミングへの逆戻り検知)
       expect(body?.textContent).toMatch(/gas の回収を目的とするものではなく/);
       // 旧「無料化ピボット」の絶対主張 (JPYC gas を全額負担・徴収しません・月次後払い) は撤回済
@@ -347,9 +352,10 @@ describe('Legal pages', () => {
       // 各決済の実行時 (オンチェーン精算時) に同一取引内で申し受ける (per-tx・決済時)。月次後払い文言は撤回。
       expect(main.textContent).toMatch(/各決済の実行時/);
       expect(main.textContent).not.toMatch(/後払い/);
-      // 負担者 (お客様上乗せ / 店主吸収) は店主が選択
-      expect(main.textContent).toMatch(/負担者/);
-      expect(main.textContent).toMatch(/店主が選択/);
+      // 確定モデル (2026-06-13): 決済は店舗が負担しお客様は表示額のみ (負担者トグルは撤去)。
+      expect(main.textContent).toMatch(/店舗 \(店主\) が負担|店舗が負担/);
+      expect(main.textContent).toMatch(/表示された決済額のみ|表示額のみ/);
+      expect(main.textContent).not.toMatch(/店主が選択/);
       // 課金トリガー = JPYC ガスレスのみ。「対応トークン」(USDC を巻き込む) への逆戻りを検知。
       expect(main.textContent).toMatch(/JPYC のガスレス決済/);
       expect(main.textContent).not.toMatch(/ガスレス決済モードで受領した対応トークンの額/);
@@ -452,9 +458,10 @@ describe('Legal pages', () => {
       // per-tx・決済時に同一取引内で申し受ける。月次後払い文言は撤回。
       expect(body?.textContent).toMatch(/各決済の実行時/);
       expect(body?.textContent).not.toMatch(/後払い/);
-      // 負担者 (お客様上乗せ / 店主吸収) は店主が選択 (純額は選択により異なる)
-      expect(body?.textContent).toMatch(/負担者/);
-      expect(body?.textContent).toMatch(/店主が選択/);
+      // 確定モデル (2026-06-13): 決済は店舗が利用料を負担しお客様は表示額のみ (負担者トグルは撤去)。
+      expect(body?.textContent).toMatch(/店舗 \(店主\) が負担|店舗が負担/);
+      expect(body?.textContent).toMatch(/表示された決済額のみ|表示額のみ/);
+      expect(body?.textContent).not.toMatch(/店主が選択/);
       // 課金トリガー = JPYC ガスレスのみ (USDC を巻き込む「対応トークン」への逆戻りを検知)
       expect(body?.textContent).toMatch(/JPYC のガスレス決済/);
       // 旧 % 都度手数料は撤去
@@ -484,7 +491,7 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/「通常決済（ガスあり）」/);
     });
 
-    it('en Terms Article 5 は per-tx OpenPay usage fee (about 2 JPYC / 1% from July・min 2 JPYC / at settlement / merchant chooses payer)、両モード記載で旧 % 手数料 + 旧 "bears in full / monthly arrears" 主張は不在 (USDC carve-out は温存)', () => {
+    it('en Terms Article 5 は per-tx OpenPay usage fee (about 2 JPYC / 1% from July・min 2 JPYC / at settlement / payment borne by merchant・customer pays displayed amount only)、両モード記載で旧 % 手数料 + 旧 "bears in full / monthly arrears" 主張は不在 (USDC carve-out は温存)', () => {
       renderWithIntl(<TermsPage />, { locale: 'en' });
       const article5 = screen.getByRole('heading', {
         level: 2,
@@ -504,8 +511,11 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/at on-chain settlement/i);
       expect(body?.textContent).not.toMatch(/billed monthly rather than deducted/i);
       expect(body?.textContent).not.toMatch(/billed in arrears/i);
-      // merchant chooses who bears the fee
-      expect(body?.textContent).toMatch(/Merchant chooses who bears/i);
+      // 確定モデル (2026-06-13): payments are borne by the Merchant; customer pays only the
+      // displayed amount (the per-QR payer toggle is removed).
+      expect(body?.textContent).toMatch(/borne by the Merchant/i);
+      expect(body?.textContent).toMatch(/pays only the displayed/i);
+      expect(body?.textContent).not.toMatch(/Merchant chooses who bears/i);
       // 課金トリガー = JPYC ガスレスのみ
       expect(body?.textContent).toMatch(/JPYC gasless/i);
       expect(body?.textContent).toMatch(/0%/);
@@ -581,17 +591,19 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: per-tx 利用料化 (無料化ピボット撤回) の 3 文書 (Terms/Disclaimer/特商法) は 2026-06-12、Privacy は据置 2026-06-08', () => {
+    it('effectiveDate: 負担者固定化 (決済=店舗負担 / チップ=顧客ガス相当) の 3 文書 (Terms/Disclaimer/特商法) は 2026-06-13、Privacy は据置 2026-06-08', () => {
       // 2026-06-08: 外部レビュー精査に基づく開示拡充を 4 文書に反映。
       // 2026-06-09: OpenPay 利用料 (月額・ガスレス受領額1%・後払いの a1 モデル) の有料化開始を事前開示。
       // 2026-06-12: 無料化ピボットの絶対主張 (gas 全額負担・無徴収・100%着金) と a1 月次後払い
       //   モデルのいずれも JPYC ガスレスについて撤回し、決済 1 件ごとに決済時に申し受ける per-tx の
-      //   OpenPay 利用料 (約 2 JPYC、2026年7月から決済額の1%・最低 2 JPYC) へ改定。料金性質に直接
-      //   関わる Terms/Disclaimer/特商法 を改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は
-      //   料金モデルに直接言及しないため据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-12');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-12');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-12');
+      //   OpenPay 利用料 (約 2 JPYC、2026年7月から決済額の1%・最低 2 JPYC) へ改定。
+      // 2026-06-13: per-tx 利用料の負担者を固定化 — 決済 (/pay・/checkout・レジ) は店舗が手数料を
+      //   常に負担しお客様は表示額のみ (per-QR トグル撤去)、チップ (/tip・@handle) はガス相当額
+      //   (約 2 JPYC・1% 非適用) をチッパーが負担。料金性質に直接関わる Terms/Disclaimer/特商法 を
+      //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-13');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-13');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-06-08');
     });
   });

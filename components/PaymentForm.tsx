@@ -29,7 +29,7 @@ import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
-import { calcBreakdown, calcSplitBreakdown } from '@/lib/fee';
+import { calcBreakdown, calcSplitBreakdown, type GasMode } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
@@ -112,6 +112,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
     useRelay && jpycForwarderFor(chainId ?? deployment.chainId) !== null;
   const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
 
+  // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
+  // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
+  // user-approved)。recover 以外は URL の gas をそのまま使う (USDC の負担者トグルは不変)。
+  const effectiveGas: GasMode = useRecover ? 'merchant' : (params.gas ?? 'customer');
+
   // Smart Account は gasless (非 relay) のみ必要 — standard / relay では enabled=false で skip。
   const { data: saData, error: saError } = useSmartAccount(
     deployment,
@@ -187,7 +192,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
-  const isMerchantGas = !isStandard && params.gas === 'merchant';
+  const isMerchantGas = !isStandard && effectiveGas === 'merchant';
   // 「店主がガスを負担」表示が実態に合うのは、実際に gas コストが発生する経路のみ
   // (recover relay、または非 relay の paymaster 見積)。free relay (OpenPay 全額負担)
   // では gas コストが無く merchant が負担するものが無いため、旧 gas=merchant QR でも
@@ -231,10 +236,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
         amountWei,
         params.token,
         effectiveMode,
-        params.gas,
+        effectiveGas,
         effectiveGasAmount ?? 0n,
       ),
-    [amountWei, params.token, effectiveMode, params.gas, effectiveGasAmount],
+    [amountWei, params.token, effectiveMode, effectiveGas, effectiveGasAmount],
   );
 
   // standard mode では split は無視 (シンプルな EOA 直列 transfer に限定)。
@@ -440,7 +445,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       asset: params.token,
       tokenAddress: deployment.address,
       payMode: isStandard ? ('standard' as const) : ('gasless' as const),
-      gasMode: isStandard ? null : params.gas,
+      gasMode: isStandard ? null : effectiveGas,
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
       customer: address,
@@ -485,7 +490,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       deployment.address,
       chainSlug,
       params.token,
-      params.gas,
+      effectiveGas,
       params.to,
       isStandard,
       breakdown.merchantReceives,
@@ -535,7 +540,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。
       // fee=0・gas は OpenPay 肩代わりなので、全額 (amountWei) をそのまま merchant へ単発送金。
-      relay.mutate({ merchant: params.to, value: amountWei, gasMode: params.gas });
+      relay.mutate({ merchant: params.to, value: amountWei, gasMode: effectiveGas });
     } else if (splitBreakdown) {
       // recipients[0] は primary (params.to)、それ以降が split entries
       const [primary, ...extras] = splitBreakdown.recipients;
@@ -607,7 +612,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           decimals: deployment.decimals,
           displaySymbol: deployment.displaySymbol,
           chainId: chainId ?? deployment.chainId,
-          gasMode: params.gas ?? 'customer',
+          gasMode: effectiveGas,
         })
       : null;
   const signReassurance: SignReassuranceProps | null = showRelayFree
@@ -684,7 +689,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       <RecoverFeeNotice
         billAmount={recoverBillAmount}
         chainId={deployment.chainId}
-        gasMode={params.gas ?? 'customer'}
+        gasMode={effectiveGas}
       />
 
       {/* 動的 QR (FX 換算) の文脈表示: 元の円価格 ≈ 請求トークン額 + 生成時レート + 残り時間。

@@ -240,9 +240,32 @@ export function QrGenerator() {
     );
   }, [isStandard, splitsForUrl, settings.token, settings.chain]);
 
+  // JPYC recover (forwarder 設定済) は確定モデルで「店舗が常に手数料を吸収」(gasMode=merchant
+  // 固定・per-QR 負担者トグルは撤去) になる。よってトグルを隠し gasMode を merchant に強制する
+  // (URL params・読み戻しサマリ・RecoverFeeNotice すべて)。USDC や他トークンの recover では
+  // トグルを従来どおり出す (この flag は JPYC かつ forwarder 設定済のときだけ true)。
+  const isJpycRecover = useMemo(() => {
+    if (isStandard || splitsForUrl || settings.token !== 'jpyc') return false;
+    const dep = deploymentForSlug(settings.token, settings.chain);
+    return (
+      resolveJpycGaslessProvider(dep, dep.chainId) === 'eip3009-relay' &&
+      jpycForwarderFor(dep.chainId) !== null
+    );
+  }, [isStandard, splitsForUrl, settings.token, settings.chain]);
+
+  // 負担者トグルを隠すべき経路 (free = 概念なし・customer 固定 / JPYC recover = merchant 固定)。
+  // USDC や JPYC recover 以外では従来どおりトグルを出す。
+  const hideGasMode = isFreeGasless || isJpycRecover;
+  // URL・サマリ・開示に焼き込む実効 gasMode。free=customer 固定 / JPYC recover=merchant 固定 /
+  // それ以外 (USDC 等) は店主の選択 (settings.gasMode)。
+  const effectiveGasMode: GasMode = isFreeGasless
+    ? 'customer'
+    : isJpycRecover
+      ? 'merchant'
+      : settings.gasMode;
+
   // Recover モードの手数料開示に渡す請求額 (wei) と負担者。FREE モード (forwarder null)
-  // では共有 RecoverFeeNotice が null を返してパネルを描画しない。
-  // free 経路 (JPYC relay・無徴収) は負担者の概念が無いため customer 固定。
+  // では共有 RecoverFeeNotice が null を返してパネルを描画しない。JPYC recover は merchant 固定。
   const recoverBillAmount = useMemo(() => {
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
@@ -253,7 +276,7 @@ export function QrGenerator() {
       return null;
     }
   }, [amountValid, mode, settings.token, settings.chain, amount]);
-  const recoverGasMode: GasMode = isFreeGasless ? 'customer' : settings.gasMode;
+  const recoverGasMode: GasMode = effectiveGasMode;
 
   const payUrl = useMemo(() => {
     if (!hydrated || !effectiveReceiver || !origin || !amountValid) return '';
@@ -261,8 +284,9 @@ export function QrGenerator() {
       to: effectiveReceiver,
       token: settings.token,
       chain: settings.chain,
-      // free 経路 (JPYC relay・無徴収) では負担者の概念が無いため customer 固定。
-      gas: isFreeGasless ? 'customer' : settings.gasMode,
+      // free 経路 (JPYC relay・無徴収) は customer 固定 / JPYC recover は merchant 固定
+      // (確定モデル: 決済は店舗が手数料を吸収) / それ以外 (USDC 等) は店主の選択。
+      gas: effectiveGasMode,
       amount: mode === 'amount' ? amount : undefined,
       mode: payMode,
       split: splitsForUrl,
@@ -290,8 +314,7 @@ export function QrGenerator() {
     amountValid,
     settings.token,
     settings.chain,
-    settings.gasMode,
-    isFreeGasless,
+    effectiveGasMode,
     settings.crossChain,
     settings.storeName,
     settings.productName,
@@ -905,9 +928,10 @@ export function QrGenerator() {
               summaryLabel={t('advancedSettings')}
               summary={
                 <SettingsSummary
-                  gasMode={settings.gasMode}
+                  gasMode={effectiveGasMode}
                   payMode={payMode}
-                  showGasMode={!isFreeGasless}
+                  showGasMode={!hideGasMode}
+                  jpycRecover={isJpycRecover}
                 />
               }
             >
@@ -971,7 +995,13 @@ export function QrGenerator() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
                   {t('standardHint')}
                 </div>
-              ) : !isFreeGasless ? (
+              ) : isJpycRecover ? (
+                // JPYC recover は店舗が手数料を吸収する固定モデル (per-QR トグル撤去)。
+                // トグルの代わりに固定であることを 1 行で明示する。
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                  {t('gasMerchantFixedHint')}
+                </div>
+              ) : !hideGasMode ? (
                 <Field label={t('gasLabel')}>
                   <div className="grid grid-cols-2 gap-2">
                     {(['customer', 'merchant'] as GasMode[]).map((g) => {
@@ -1404,27 +1434,32 @@ function SettingsSummary({
   gasMode,
   payMode,
   showGasMode,
+  jpycRecover,
 }: {
   gasMode: GasMode;
   payMode: PayMode;
-  // 負担者 (顧客/店主) を summary に出すのは recover 有効時のみ。free / USDC では
-  // 負担者の概念が無いため、ガスレスは「OpenPay がガス負担」一本で表示する。
+  // 負担者 (顧客/店主) を summary にトグル選択として出すのは USDC recover 等のみ。
+  // free (概念なし) / JPYC recover (merchant 固定) では選択トグルを出さない。
   showGasMode: boolean;
+  // JPYC recover (確定モデルで店舗が手数料を吸収する固定) のとき true。固定であることを
+  // 明示する専用ラベルを出す (USDC のトグル選択 merchant とは文言を分ける)。
+  jpycRecover: boolean;
 }) {
   // 高度な設定 accordion 内には payMode / gas / split のみ (quickAmount は Step ①、
-  // 手数料徴収先は fee=0 のため撤去済)。summary では payMode (+ recover 有効時のみ gas
-  // 負担者) を日本語/英語の自然文で表示する。token / chain は Step 1、receiver は
-  // Step 2 summary に出るのでここでは重複させない。font-mono は外し、開発者向け
-  // 内部値に見えないようにする。
+  // 手数料徴収先は fee=0 のため撤去済)。summary では payMode (+ 負担者) を日本語/英語の
+  // 自然文で表示する。token / chain は Step 1、receiver は Step 2 summary に出るので
+  // ここでは重複させない。font-mono は外し、開発者向け内部値に見えないようにする。
   const t = useTranslations('QrGenerator');
   const label =
     payMode === 'standard'
       ? t('advancedSummary.standard')
-      : !showGasMode
-        ? t('advancedSummary.gaslessFree')
-        : gasMode === 'customer'
-          ? t('advancedSummary.gaslessCustomerGas')
-          : t('advancedSummary.gaslessMerchantGas');
+      : jpycRecover
+        ? t('advancedSummary.gaslessMerchantFixed')
+        : !showGasMode
+          ? t('advancedSummary.gaslessFree')
+          : gasMode === 'customer'
+            ? t('advancedSummary.gaslessCustomerGas')
+            : t('advancedSummary.gaslessMerchantGas');
   return <span>{label}</span>;
 }
 

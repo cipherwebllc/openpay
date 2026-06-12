@@ -12,7 +12,7 @@ export type RecoverFeeDisplay = {
   feeHuman: string;
   /** bps > 0 の場合のみ: floor の人間可読額。 */
   floorHuman: string;
-  /** bps。0 = ガス固定、>0 = % 形式。 */
+  /** 開示形式の選択用。0 = ガス固定 (フロアのみ・チップ customer は常に 0)、>0 = % 形式 (merchant のみ)。 */
   bps: number;
   /** 顧客支払額の人間可読額 (customer 負担時 = amount + fee)。 */
   customerPaysHuman: string;
@@ -41,9 +41,12 @@ export function buildRecoverFeeDisplay(
   if (jpycForwarderFor(chainId) === null) return null;
   if (billAmount <= 0n) return null;
 
-  const fee = recoverFeeValue(billAmount);
+  const fee = recoverFeeValue(billAmount, gasMode);
   const floor = relayGasFeeValue();
-  const bps = recoverFeeBps();
+  // bps は merchant スケジュールでのみ % 形式の開示に使う。customer (チップ) は bps を適用
+  // しないフラットなフロアなので、% 開示が出ないよう 0 として扱う (RecoverFeeNotice が
+  // disclosureGasOnly を選ぶ)。
+  const bps = gasMode === 'merchant' ? recoverFeeBps() : 0;
 
   const feeHuman = formatUnits(fee, 18);
   const floorHuman = formatUnits(floor, 18);

@@ -29,7 +29,7 @@ import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
-import { calcBreakdown } from '@/lib/fee';
+import { calcBreakdown, type GasMode } from '@/lib/fee';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
@@ -69,7 +69,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // JPYC ガス無料化: JPYC ガスレスは recover を除き常に無徴収 (relay free / 非 relay
   // sponsorship free のいずれも OpenPay が gas を全額負担)。USDC は従来どおり。
   const isJpyc = deployment.symbol === 'jpyc';
-  const isMerchantGas = !isStandard && params.gas === 'merchant';
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
@@ -88,6 +87,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const useRecover =
     useRelay && jpycForwarderFor(chainId ?? deployment.chainId) !== null;
   const relayGasEquiv = useRecover ? relayGasFeeValue() : 0n;
+
+  // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
+  // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
+  // user-approved)。recover 以外は URL の gas をそのまま使う (USDC の負担者トグルは不変)。
+  const effectiveGas: GasMode = useRecover ? 'merchant' : (params.gas ?? 'customer');
+  const isMerchantGas = !isStandard && effectiveGas === 'merchant';
 
   // Smart Account / Pimlico 経路は gasless のみ必要 — standard / relay では skip。
   const { data: saData, error: saError } = useSmartAccount(
@@ -134,10 +139,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         totalWei,
         params.token,
         effectiveMode,
-        params.gas,
+        effectiveGas,
         effectiveGasAmount ?? 0n,
       ),
-    [totalWei, params.token, effectiveMode, params.gas, effectiveGasAmount],
+    [totalWei, params.token, effectiveMode, effectiveGas, effectiveGasAmount],
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
@@ -442,7 +447,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       asset: params.token,
       tokenAddress: deployment.address,
       payMode: isStandard ? ('standard' as const) : ('gasless' as const),
-      gasMode: isStandard ? null : params.gas,
+      gasMode: isStandard ? null : effectiveGas,
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
       customer: address,
@@ -494,7 +499,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       deployment.decimals,
       chainSlug,
       params.token,
-      params.gas,
+      effectiveGas,
       params.to,
       params.description,
       params.orderId,
@@ -580,7 +585,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
       // submit。fee=0・gas は OpenPay 肩代わり (free) or JPYC 回収 (recover・hook 内で分割)。
       // 全額 (totalWei) をそのまま relay に渡す (recover の控除は hook 側)。
-      relay.mutate({ merchant: params.to, value: totalWei, gasMode: params.gas });
+      relay.mutate({ merchant: params.to, value: totalWei, gasMode: effectiveGas });
     } else {
       gasless.mutate({
         tokenAddress: deployment.address,
@@ -631,7 +636,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           decimals: deployment.decimals,
           displaySymbol: deployment.displaySymbol,
           chainId: chainId ?? deployment.chainId,
-          gasMode: params.gas ?? 'customer',
+          gasMode: effectiveGas,
         })
       : null;
   const signReassurance: SignReassuranceProps | null = showRelayFree
@@ -858,12 +863,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       )}
 
       {/* Recover モードの手数料開示 (支払いボタン直上)。free モード / 非 recover では
-          RecoverFeeNotice が null を返して何も描画しない。負担者は params.gas (既定 customer)。 */}
+          RecoverFeeNotice が null を返して何も描画しない。JPYC recover は店舗吸収固定
+          (effectiveGas=merchant)。 */}
       {!completed && (
         <RecoverFeeNotice
           billAmount={useRecover && totalWei > 0n ? totalWei : null}
           chainId={deployment.chainId}
-          gasMode={params.gas ?? 'customer'}
+          gasMode={effectiveGas}
         />
       )}
 

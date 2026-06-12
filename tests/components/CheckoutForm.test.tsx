@@ -1499,17 +1499,20 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
   });
 
   // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice) ---
-  it('recover (forwarder 設定 + customer): 支払いボタン上に手数料開示を表示 (RecoverFeeNotice)', () => {
+  // 確定モデル (2026-06-13): /checkout recover は URL gas=customer を無視し merchant 固定。
+  it('recover (forwarder 設定): URL gas=customer は無視され merchant 分担行 (店舗負担) を表示', () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(
       '0x1111111111111111111111111111111111111111',
     );
     setupRelayReady();
+    // JPYC_PARAMS は gas=customer だが、recover では merchant に倒れる。
     render(<CheckoutForm params={JPYC_PARAMS} />);
-    // bps=0 (既定) → ガス相当の固定手数料を開示 + 顧客負担の分担行。
+    // bps=0 (既定) → ガス相当の固定手数料を開示 + 店舗負担の分担行。
     expect(
       screen.getByText(/決済手数料: 2 JPYC（ガス相当）/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/手数料はお客様負担/)).toBeInTheDocument();
+    expect(screen.getByText(/手数料は店舗負担/)).toBeInTheDocument();
+    expect(screen.queryByText(/手数料はお客様負担/)).toBeNull();
   });
 
   it('recover (gas=merchant): 分担行に店舗負担を表示 (3000 JPYC は手数料超なので tooSmall 警告なし)', () => {
@@ -1726,8 +1729,9 @@ describe('CheckoutForm — 署名安心パネル (SignReassurance・P2)', () => 
     expect(screen.getByText('3000000000000000000000')).toBeInTheDocument();
   });
 
-  it('relay recover (forwarder 設定 + customer): 合計 = 表示価格 + 手数料 の内訳を出す', () => {
-    // customer 吸収はウォレット表示 = value + fee (3000 + 2 = 3002)。内訳を照合表が説明。
+  it('relay recover: URL gas=customer は無視され merchant 固定 (ウォレット表示 = 表示価格 3000)', () => {
+    // 確定モデル (2026-06-13): /checkout recover は URL gas=customer を無視し merchant に倒す。
+    // merchant 吸収はウォレット表示 = value (3000・上乗せ無し)。signedTotal も 3000。
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     vi.mocked(jpycForwarderFor).mockReturnValue(
       '0x1111111111111111111111111111111111111111',
@@ -1736,11 +1740,11 @@ describe('CheckoutForm — 署名安心パネル (SignReassurance・P2)', () => 
     setBalance(10_000n * 10n ** 18n);
     render(<CheckoutForm params={{ ...JPYC_PARAMS, gas: 'customer' }} />);
     expect(
-      screen.getByText(
-        /動かせるのは 3002 JPYC ちょうど（お支払い 3000 \+ 手数料 2）/,
-      ),
+      screen.getByText(/動かせるのは 3000 JPYC ちょうど/),
     ).toBeInTheDocument();
-    expect(screen.getByText('3002000000000000000000')).toBeInTheDocument();
+    // customer 内訳 (お支払い 3000 + 手数料 2) は merchant 固定では出ない。
+    expect(screen.queryByText(/お支払い 3000 \+ 手数料 2/)).toBeNull();
+    expect(screen.getByText('3000000000000000000000')).toBeInTheDocument();
   });
 
   it('standard 経路: 通常送金の 1 行ヒント (フルパネルは出さない)', () => {

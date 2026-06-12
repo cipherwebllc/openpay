@@ -69,10 +69,20 @@ export const LEGAL_ENTITY = {
   //   施行日 (2026-06-12) 以降の利用に適用 (利用料はガスレスを使わなければ発生せず通常決済・USDC 経路は
   //   無料のため、変更の相当性・必要性を充足)。Privacy は料金モデルに直接言及しないため据置。
   //   ⚠️ 本文面は弁護士 review 前の draft。per-tx 利用料 vs gas-recovery framing 等は要法務確認。
-  termsEffectiveDate: '2026-06-12',
+  // 2026-06-13 改定 (負担者の固定化・3文書 Terms/Disclaimer/特商法): 2026-06-12 の per-tx 利用料の
+  //   負担者を「店主が gasMode トグルで選択 (お客様上乗せ/店舗吸収)」としていた点を撤回し、決済
+  //   (/pay・/checkout・レジ) は **店舗 (店主) が手数料を常に負担する固定** に改める (お客様は表示
+  //   された決済額のみをお支払いになり、利用料は店主の受取額から差し引かれる・per-QR の負担者トグルは
+  //   撤去)。利用料率は不変 (1 決済あたり当面 約 2 JPYC、2026 年 7 月のご利用分から 決済額の 1%・最低
+  //   2 JPYC)。他方、クリエイターへのチップ (/tip・@handle) については、チップをお送りになるお客様
+  //   (チッパー) が **ガス相当額 (1 件あたり 約 2 JPYC・決済額の 1% は適用しない)** をチップ額に上乗せ
+  //   して負担する (チップは固定額のガス相当のみで、bps の 1% は乗せない)。通常決済（ガスあり）および
+  //   顧客が自ら gas を負担する USDC 経路 (Circle / ERC20 Paymaster) の carve-out (無料) は不変。
+  //   民法 548 条の 4 に基づき施行日 (2026-06-13) 以降の利用に適用。Privacy は据置。⚠️ 弁護士 review 前 draft。
+  termsEffectiveDate: '2026-06-13',
   privacyEffectiveDate: '2026-06-08',
-  disclaimerEffectiveDate: '2026-06-12',
-  tokuteiEffectiveDate: '2026-06-12',
+  disclaimerEffectiveDate: '2026-06-13',
+  tokuteiEffectiveDate: '2026-06-13',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,

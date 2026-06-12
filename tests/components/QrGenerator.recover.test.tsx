@@ -96,7 +96,7 @@ describe('QrGenerator recover fee disclosure', () => {
     expect(screen.getByText(/決済手数料: 2 JPYC（ガス相当）/)).toBeInTheDocument();
   });
 
-  it('RECOVER mode, bps=100: shows % form disclosure', async () => {
+  it('RECOVER mode, bps=100: shows % form disclosure (merchant 固定)', async () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     vi.mocked(recoverFeeBps).mockReturnValue(100);
     vi.mocked(recoverFeeValue).mockReturnValue(10n * 10n ** 18n); // 1% of 1000 = 10
@@ -106,11 +106,12 @@ describe('QrGenerator recover fee disclosure', () => {
     const receiverInput = screen.getByPlaceholderText(/0x/i);
     await user.type(receiverInput, VALID_RECEIVER);
     await fillAmount(user, '1000');
-    // % form: "決済手数料: 10 JPYC（決済額の1%・最低2 JPYC）"
+    // % form: "決済手数料: 10 JPYC（決済額の1%・最低2 JPYC）" (merchant スケジュール)
     expect(screen.getByText(/決済手数料: 10 JPYC（決済額の1%/)).toBeInTheDocument();
   });
 
-  it('RECOVER mode, customer gasMode: shows customer split label', async () => {
+  // 確定モデル (2026-06-13): JPYC recover は店舗負担固定。開示は merchant 分担行を出す。
+  it('RECOVER mode: shows merchant split label (店舗負担固定・お客様上乗せ表記なし)', async () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     const user = userEvent.setup();
     render(<QrGenerator />);
@@ -118,7 +119,79 @@ describe('QrGenerator recover fee disclosure', () => {
     const receiverInput = screen.getByPlaceholderText(/0x/i);
     await user.type(receiverInput, VALID_RECEIVER);
     await fillAmount(user, '1000');
-    // default gasMode = 'customer'
-    expect(screen.getByText(/手数料はお客様負担/)).toBeInTheDocument();
+    // JPYC recover は merchant 固定 → 「手数料は店舗負担」。customer 負担表記は出ない。
+    expect(screen.getByText(/手数料は店舗負担/)).toBeInTheDocument();
+    expect(screen.queryByText(/手数料はお客様負担/)).toBeNull();
+  });
+});
+
+// 確定モデル (2026-06-13): JPYC recover は per-QR の負担者トグルを撤去し merchant 固定。
+// URL params も gas=merchant に焼き込む。USDC はトグルを従来どおり出す (回帰防止)。
+describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merchant 固定)', () => {
+  beforeEach(() => {
+    vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
+    vi.mocked(recoverFeeBps).mockReturnValue(0);
+  });
+
+  async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+    const adv = screen.getByText('高度な設定');
+    await user.click(adv);
+  }
+
+  it('JPYC recover: gas 負担者トグルは出ない (gasCustomerTitle/gasMerchantTitle が無い) + 固定ヒントが出る', async () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await openStep2(user);
+    const receiverInput = screen.getByPlaceholderText(/0x/i);
+    await user.type(receiverInput, VALID_RECEIVER);
+    await fillAmount(user, '1000');
+    await openAdvanced(user);
+    // 負担者トグル (顧客が gas 相当額を上乗せ / 店主が gas 相当額を吸収) は描画されない。
+    expect(screen.queryByText('顧客が gas 相当額を上乗せ')).toBeNull();
+    expect(screen.queryByText('店主が gas 相当額を吸収')).toBeNull();
+    // 代わりに「店舗負担固定」ヒントを出す。
+    expect(
+      screen.getByText(/OpenPay 利用料は店舗が負担します/),
+    ).toBeInTheDocument();
+  });
+
+  it('JPYC recover: 生成 URL に gas=merchant が焼き込まれる', async () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await openStep2(user);
+    const receiverInput = screen.getByPlaceholderText(/0x/i);
+    await user.type(receiverInput, VALID_RECEIVER);
+    await fillAmount(user, '1000');
+    // QR を全画面モーダルで開き、URL コピー対象 (payUrl) に gas=merchant が乗ることを確認。
+    const showBtn = screen.getAllByRole('button', { name: /QR/ })[0];
+    await user.click(showBtn);
+    // モーダルの QR value はリンクの href / コピー対象に現れる。gas=merchant を含む。
+    const bodyText = document.body.innerHTML;
+    expect(bodyText).toMatch(/gas=merchant/);
+    expect(bodyText).not.toMatch(/gas=customer/);
+  });
+
+  it('USDC (非 JPYC recover): gas 負担者トグルは従来どおり出る (回帰防止)', async () => {
+    // USDC は forwarder と無関係にトグルを出す。jpycForwarderFor が non-null でも USDC では
+    // isJpycRecover=false (token!=='jpyc') なのでトグルが出る。
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    // token を USDC に切替 (TokenChooser)。
+    const usdcBtn = screen.getByRole('button', { name: /USDC/i });
+    await user.click(usdcBtn);
+    await openStep2(user);
+    const receiverInput = screen.getByPlaceholderText(/0x/i);
+    await user.type(receiverInput, VALID_RECEIVER);
+    // USDC は placeholder '10.00'。
+    const amountInput = screen.getByPlaceholderText('10.00');
+    await user.clear(amountInput);
+    await user.type(amountInput, '10');
+    await openAdvanced(user);
+    // USDC は負担者トグルが描画される。
+    expect(screen.getByText('顧客が gas 相当額を上乗せ')).toBeInTheDocument();
+    expect(screen.getByText('店主が gas 相当額を吸収')).toBeInTheDocument();
   });
 });

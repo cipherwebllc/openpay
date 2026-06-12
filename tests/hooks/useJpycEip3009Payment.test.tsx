@@ -26,15 +26,20 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
     relayGasFeeValue: vi.fn(() => 2n * 10n ** 18n),
   };
 });
-// recover 手数料は境界モック。client が payload の feeValue/merchantValue を recoverFeeValue(value)
-// から組むことを検証する (実 env 依存を避け決定論にする)。既定は max(2 JPYC, 1% = value/100)。
-const recoverFeeMock = vi.fn((billAmount: bigint) => {
-  const floor = 2n * 10n ** 18n;
+// recover 手数料は境界モック。client が payload の feeValue/merchantValue を
+// recoverFeeValue(value, gasMode) から組むことを検証する (実 env 依存を避け決定論にする)。
+// 確定モデル (2026-06-12): gasMode で料金スケジュールが分かれる:
+//   merchant (決済): max(2 JPYC, 1% = value/100)。
+//   customer (チップ): フロア 2 JPYC のみ (bps 無視)。
+const FLOOR_FEE = 2n * 10n ** 18n;
+const recoverFeeMock = vi.fn((billAmount: bigint, gasMode: 'customer' | 'merchant') => {
+  if (gasMode === 'customer') return FLOOR_FEE;
   const pct = (billAmount * 100n) / 10000n;
-  return pct > floor ? pct : floor;
+  return pct > FLOOR_FEE ? pct : FLOOR_FEE;
 });
 vi.mock('@/lib/relay/recoverFee', () => ({
-  recoverFeeValue: (b: bigint) => recoverFeeMock(b),
+  recoverFeeValue: (b: bigint, gasMode: 'customer' | 'merchant') =>
+    recoverFeeMock(b, gasMode),
   recoverFeeBps: () => 100,
 }));
 
@@ -198,21 +203,23 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     recoverFeeMock.mockClear();
   });
 
-  it('gasMode=customer (既定): merchantValue=value, feeValue=recoverFeeValue(value), payload に gasMode=customer', async () => {
+  it('gasMode=customer (チップ): feeValue=フロア (1% 非適用)・merchantValue=value・payload に gasMode=customer', async () => {
     mount();
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
       wrapper: makeWrapper(),
     });
-    const value = 1_000n * 10n ** 18n; // 1000 JPYC → 1% = 10 JPYC (フロア超過)
+    const value = 1_000n * 10n ** 18n; // 1000 JPYC: merchant なら 1% = 10 JPYC だが customer はフロア
     result.current.mutate({ merchant: MERCHANT, value, gasMode: 'customer' });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(recoverFeeMock).toHaveBeenCalledWith(value);
+    // 確定モデル: client は payload の gasMode をそのまま recoverFeeValue へ渡す。
+    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'customer');
     const body = lastPostBody();
     expect(body.gasMode).toBe('customer');
     // customer: 店舗は満額受領 (merchantValue == value)。
     expect(body.merchantValue).toBe(value.toString());
-    expect(body.feeValue).toBe((10n * 10n ** 18n).toString()); // recoverFeeValue(1000 JPYC)=10 JPYC
+    // チップは 1% を乗せずフロア (= 2 JPYC) のまま。merchant なら 10 JPYC になる額で対比。
+    expect(body.feeValue).toBe(FLOOR_FEE.toString());
     // recover モードの署名計測 (mode=recover)。
     expect(logger.info).toHaveBeenCalledWith(
       'payment.sign_requested',
@@ -220,7 +227,7 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     );
   });
 
-  it('gasMode=merchant: merchantValue=value−feeValue, payload に gasMode=merchant', async () => {
+  it('gasMode=merchant (決済): merchantValue=value−feeValue (feeValue=1%)・payload に gasMode=merchant', async () => {
     mount();
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
       wrapper: makeWrapper(),
@@ -229,10 +236,10 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     result.current.mutate({ merchant: MERCHANT, value, gasMode: 'merchant' });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(recoverFeeMock).toHaveBeenCalledWith(value);
+    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'merchant');
     const body = lastPostBody();
     expect(body.gasMode).toBe('merchant');
-    const fee = 10n * 10n ** 18n;
+    const fee = 10n * 10n ** 18n; // 決済は 1% = 10 JPYC (フロア超過)
     // merchant: 店舗が手数料を吸収 (merchantValue == value − fee)。
     expect(body.merchantValue).toBe((value - fee).toString());
     expect(body.feeValue).toBe(fee.toString());

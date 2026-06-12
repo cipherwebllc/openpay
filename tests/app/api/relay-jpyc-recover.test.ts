@@ -41,12 +41,15 @@ vi.mock('@/lib/relay/forwarderRecover', () => ({
 //    なので、ここでは route が *どの billAmount で recoverFeeValue を呼ぶか* を捕捉して検証する。
 const JPYC = 10n ** 18n;
 const FLOOR = 2n * JPYC;
-let recoverFeeImpl: (billAmount: bigint) => bigint = () => FLOOR;
+type GasMode = 'customer' | 'merchant';
+let recoverFeeImpl: (billAmount: bigint, gasMode: GasMode) => bigint = () => FLOOR;
 let lastBillAmount: bigint | undefined;
+let lastGasMode: GasMode | undefined;
 vi.mock('@/lib/relay/recoverFee', () => ({
-  recoverFeeValue: (billAmount: bigint) => {
+  recoverFeeValue: (billAmount: bigint, gasMode: GasMode) => {
     lastBillAmount = billAmount;
-    return recoverFeeImpl(billAmount);
+    lastGasMode = gasMode;
+    return recoverFeeImpl(billAmount, gasMode);
   },
   recoverFeeBps: () => 0,
 }));
@@ -96,6 +99,7 @@ function payload(over: Record<string, unknown> = {}): Request {
 beforeEach(() => {
   capturedExpectedFee = undefined;
   lastBillAmount = undefined;
+  lastGasMode = undefined;
   recoverFeeImpl = () => FLOOR; // 既定 bps=0 相当 (常にフロア)
   recoverFn.mockClear();
   recoverFn.mockResolvedValue({ kind: 'success', txHash: '0x' + 'ab'.repeat(32) });
@@ -140,24 +144,30 @@ describe('relay route handleRecover — billAmount 再構成 + expectedFee 配�
     expect(lastBillAmount).toBe(1_000n * JPYC);
   });
 
-  it('bps=100 相当: gasMode=customer, merchantValue=1000 JPYC → expectedFee=1% =10e18', async () => {
-    recoverFeeImpl = (b) => {
-      const pct = (b * 100n) / 10000n;
-      return pct > FLOOR ? pct : FLOOR;
-    };
+  // 確定モデル (2026-06-12): gasMode で料金スケジュールが分かれる。
+  //   merchant (決済): max(floor, billAmount × bps/10000)。
+  //   customer (チップ): floor のみ (bps 無視)。
+  // route は payload の gasMode をそのまま recoverFeeValue へ渡す (client と同式・nonce 一致)。
+  const SCHEDULE = (b: bigint, gasMode: GasMode): bigint => {
+    if (gasMode === 'customer') return FLOOR;
+    const pct = (b * 100n) / 10000n;
+    return pct > FLOOR ? pct : FLOOR;
+  };
+
+  it('bps=100 相当: gasMode=customer (チップ), merchantValue=1000 JPYC → expectedFee=フロア (1% 非適用)', async () => {
+    recoverFeeImpl = SCHEDULE;
     const res = await POST(
       payload({ gasMode: 'customer', merchantValue: (1_000n * JPYC).toString() }),
     );
     expect(res.status).toBe(200);
     expect(lastBillAmount).toBe(1_000n * JPYC);
-    expect(capturedExpectedFee).toBe(10n * JPYC);
+    expect(lastGasMode).toBe('customer');
+    // チップは bps を適用しないため、大口でもフロア (= 2 JPYC)。merchant なら 10 JPYC になる額。
+    expect(capturedExpectedFee).toBe(FLOOR);
   });
 
-  it('bps=100 相当: gasMode=merchant, mv=990 fv=10 → billAmount=1000 JPYC, expectedFee=10e18', async () => {
-    recoverFeeImpl = (b) => {
-      const pct = (b * 100n) / 10000n;
-      return pct > FLOOR ? pct : FLOOR;
-    };
+  it('bps=100 相当: gasMode=merchant (決済), mv=990 fv=10 → billAmount=1000 JPYC, expectedFee=1% =10e18', async () => {
+    recoverFeeImpl = SCHEDULE;
     const res = await POST(
       payload({
         gasMode: 'merchant',
@@ -171,16 +181,30 @@ describe('relay route handleRecover — billAmount 再構成 + expectedFee 配�
     expect(capturedExpectedFee).toBe(10n * JPYC);
   });
 
-  it('bps=100 相当・小口: customer, merchantValue=100 JPYC → 1% =1 JPYC < フロア → expectedFee=フロア', async () => {
-    recoverFeeImpl = (b) => {
-      const pct = (b * 100n) / 10000n;
-      return pct > FLOOR ? pct : FLOOR;
-    };
+  it('bps=100 相当・小口: customer (チップ), merchantValue=100 JPYC → expectedFee=フロア (1% 非適用)', async () => {
+    recoverFeeImpl = SCHEDULE;
     const res = await POST(
       payload({ gasMode: 'customer', merchantValue: (100n * JPYC).toString() }),
     );
     expect(res.status).toBe(200);
     expect(lastBillAmount).toBe(100n * JPYC);
+    expect(lastGasMode).toBe('customer');
     expect(capturedExpectedFee).toBe(FLOOR);
+  });
+
+  it('bps=100 相当・大口: merchant (決済), mv=10000 fv=100 → billAmount=10100 JPYC, expectedFee=1% =101e18', async () => {
+    recoverFeeImpl = SCHEDULE;
+    const res = await POST(
+      payload({
+        gasMode: 'merchant',
+        merchantValue: (10_000n * JPYC).toString(),
+        feeValue: (100n * JPYC).toString(),
+      }),
+    );
+    expect(res.status).toBe(200);
+    // 店舗吸収: billAmount = mv + fv = 10000 + 100 = 10100 JPYC。1% = 101 JPYC。
+    expect(lastBillAmount).toBe(10_100n * JPYC);
+    expect(lastGasMode).toBe('merchant');
+    expect(capturedExpectedFee).toBe(101n * JPYC);
   });
 });

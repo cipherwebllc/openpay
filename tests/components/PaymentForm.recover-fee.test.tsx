@@ -98,13 +98,17 @@ describe('PaymentForm recover fee disclosure', () => {
     expect(screen.getByText(/決済手数料: 10 JPYC（決済額の1%/)).toBeInTheDocument();
   });
 
-  it('RECOVER mode, gasMode=customer: shows customer split label', () => {
+  // 確定モデル (2026-06-13): JPYC recover は URL の gas=customer を無視し merchant 固定。
+  // 旧 QR (gas=customer) を読んでも開示は merchant 分担行 (店舗負担) になる。
+  it('RECOVER mode: URL gas=customer は無視され merchant 分担行 (店舗負担) を表示', () => {
+    // setupSearch (beforeEach) が gas=customer を入れているが、recover では merchant に倒れる。
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     render(<PaymentForm />);
-    expect(screen.getByText(/手数料はお客様負担/)).toBeInTheDocument();
+    expect(screen.getByText(/手数料は店舗負担/)).toBeInTheDocument();
+    expect(screen.queryByText(/手数料はお客様負担/)).toBeNull();
   });
 
-  it('RECOVER mode, gasMode=merchant: shows merchant split label', () => {
+  it('RECOVER mode, URL gas=merchant: そのまま merchant 分担行 (店舗負担) を表示', () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     setupSearch({
       to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
@@ -153,15 +157,17 @@ describe('PaymentForm sign reassurance panel (P4 recover)', () => {
     });
   });
 
-  it('RECOVER + customer: 安心パネルにウォレット表示の合計 1002 (= 1000 + 手数料 2) が出る', () => {
+  // 確定モデル (2026-06-13): /pay の JPYC recover は merchant 固定 (URL gas=customer を無視)。
+  // merchant 吸収ではウォレット表示 = 表示価格 (1000) で、手数料は受取から内枠吸収される。
+  it('RECOVER (merchant 固定): 安心パネルはウォレット表示 = 表示額 1000 ちょうど (内訳上乗せ無し)', () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     render(<PaymentForm />);
-    // 1000 円決済 + 手数料 2 → ウォレットは 1002 JPYC を出す。その内訳を安心パネルが説明する。
+    // merchant モードのバッジ: 動かせるのは 1000 JPYC ちょうど (お支払い + 手数料 の上乗せ表記は出ない)。
     expect(
-      screen.getByText(
-        /動かせるのは 1002 JPYC ちょうど（お支払い 1000 \+ 手数料 2）/,
-      ),
+      screen.getByText(/動かせるのは 1000 JPYC ちょうど/),
     ).toBeInTheDocument();
+    // customer 内訳 (お支払い X + 手数料 Y) は merchant では出ない。
+    expect(screen.queryByText(/＋ 手数料|\+ 手数料 2）/)).toBeNull();
   });
 
   it('FREE: 旧 free パネル (内訳なしの金額固定バッジ) のまま・recover 文言は出ない', () => {
@@ -171,5 +177,50 @@ describe('PaymentForm sign reassurance panel (P4 recover)', () => {
       screen.getByText(/動かせるのは 1000 JPYC ちょうど/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/お支払い 1000 \+ 手数料 2/)).toBeNull();
+  });
+});
+
+// 確定モデル (2026-06-13): /pay の JPYC recover は URL gas=customer を無視し、relay.mutate へ
+// gasMode='merchant' を渡す (送信 payload レベルの検証)。
+describe('PaymentForm recover: relay.mutate gasMode=merchant (URL gas=customer を無視)', () => {
+  beforeEach(() => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
+    vi.mocked(recoverFeeBps).mockReturnValue(0);
+    // 旧 QR を模す: URL は gas=customer。
+    setupSearch({
+      to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      token: 'jpyc',
+      chain: 'polygon',
+      amount: '1000',
+      gas: 'customer',
+      mode: 'gasless',
+    });
+  });
+
+  it('Pay 押下 → relay.mutate に gasMode=merchant が渡る (customer ではない)', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default;
+    const mutate = vi.fn();
+    const { useJpycEip3009Payment } = await import(
+      '@/hooks/useJpycEip3009Payment'
+    );
+    vi.mocked(useJpycEip3009Payment).mockReturnValue({
+      data: undefined,
+      error: null,
+      isPending: false,
+      mutate,
+      variables: undefined,
+    } as unknown as ReturnType<typeof useJpycEip3009Payment>);
+
+    const user = userEvent.setup();
+    render(<PaymentForm />);
+    // 接続済 (wagmi mock) なので Pay ボタンが活性。amount は URL 固定 1000。
+    const payBtn = screen.getByRole('button', { name: /1000 JPYC/ });
+    await user.click(payBtn);
+
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ gasMode: 'merchant', value: 1000n * 10n ** 18n }),
+    );
   });
 });

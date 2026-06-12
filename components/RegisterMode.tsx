@@ -118,14 +118,29 @@ export function RegisterMode({
 
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const symbol = deployment.displaySymbol;
-  // 決済QRタブから継承する設定に stale な gasMode=merchant が残っていても、JPYC free
-  // 経路 (relay・無徴収) では負担者の概念が無いため、レジの URL・ポリシー表示でも
-  // gas=customer 相当に正規化する (決済側 useRelay && !useRecover と同条件)。
+  // 決済QRタブから継承する設定に stale な gasMode が残っていても、経路ごとに正規化する:
+  //   JPYC free (relay・無徴収): 負担者の概念が無いため gas=customer 相当 (決済側 useRelay
+  //     && !useRecover と同条件)。
+  //   JPYC recover (forwarder 設定済): 確定モデルで店舗が手数料を吸収する固定 (gas=merchant)。
+  //     CheckoutForm 側も recover では URL の gas を無視して merchant に倒すが、URL とポリシー
+  //     表示も merchant に揃えて齟齬を無くす。
   const isFreeGasless =
     settings.payMode === 'gasless' &&
     resolveJpycGaslessProvider(deployment, deployment.chainId) ===
       'eip3009-relay' &&
     jpycForwarderFor(deployment.chainId) === null;
+  const isJpycRecover =
+    settings.payMode === 'gasless' &&
+    settings.token === 'jpyc' &&
+    resolveJpycGaslessProvider(deployment, deployment.chainId) ===
+      'eip3009-relay' &&
+    jpycForwarderFor(deployment.chainId) !== null;
+  // URL・ポリシー表示の実効 gasMode (free=customer / JPYC recover=merchant / 他=店主選択)。
+  const effectiveGasMode = isFreeGasless
+    ? 'customer'
+    : isJpycRecover
+      ? 'merchant'
+      : settings.gasMode;
   const taxDec = taxDisplayDecimals(settings.token);
 
   function addFromPreset(p: ProductPreset) {
@@ -257,7 +272,7 @@ export function RegisterMode({
           to: effectiveReceiver,
           token: settings.token,
           chain: settings.chain,
-          gas: isFreeGasless ? 'customer' : settings.gasMode,
+          gas: effectiveGasMode,
           mode: settings.payMode,
           items: validItems,
           receiptNo: receiptNo || undefined,
@@ -293,7 +308,7 @@ export function RegisterMode({
           {isFreeGasless
             ? t('paymentPolicy.gaslessFree')
             : t(
-                `paymentPolicy.${paymentPolicyKey(settings.payMode, settings.gasMode)}`,
+                `paymentPolicy.${paymentPolicyKey(settings.payMode, effectiveGasMode)}`,
               )}
         </span>
         {onEditCurrency && (

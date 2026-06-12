@@ -1672,27 +1672,29 @@ describe('PaymentForm — 署名安心パネル (SignReassurance・relay free)',
     expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
   });
 
-  it('forwarder 構成 (recover + customer) → jpyc-relay-recover パネル (合計 = 表示額 + 手数料・P4)', () => {
+  it('forwarder 構成 (recover) → jpyc-relay-recover パネル (確定モデル: merchant 固定・ウォレット表示=表示額)', () => {
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     // forwarder をアドレスに差し替える = recover 構成。fee=2 JPYC (relayGasFeeValue mock)。
     vi.mocked(jpycForwarderFor).mockReturnValue(
       '0x1111111111111111111111111111111111111111',
     );
-    setURL(`to=${MERCHANT}&token=jpyc&amount=300`); // gas 既定 customer
+    // URL は gas 既定 customer だが、確定モデル (2026-06-13) で /pay recover は merchant 固定。
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(10_000n * 10n ** 18n);
     render(<PaymentForm />);
-    // 見出しは free と共通。customer モードはウォレットに 300 + 2 = 302 JPYC を出す。
+    // 見出しは free と共通。merchant モードはウォレット表示 = 表示額 300 JPYC ちょうど
+    // (手数料は受取から内枠吸収・上乗せ表記は出ない)。
     expect(
       screen.getByText(/求められるのは「署名」1回だけ/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /動かせるのは 302 JPYC ちょうど（お支払い 300 \+ 手数料 2）/,
-      ),
+      screen.getByText(/動かせるのは 300 JPYC ちょうど/),
     ).toBeInTheDocument();
-    // 照合表に signedTotal (= 302 * 10^18) の生の数字が出る (ウォレット表示との突合)。
-    expect(screen.getByText('302000000000000000000')).toBeInTheDocument();
+    // customer 内訳 (お支払い + 手数料) は merchant では出ない。
+    expect(screen.queryByText(/お支払い 300 \+ 手数料 2/)).toBeNull();
+    // 照合表に signedTotal (= merchantValue 298 + feeValue 2 = 300 * 10^18) の生の数字が出る。
+    expect(screen.getByText('300000000000000000000')).toBeInTheDocument();
   });
 
   it('金額未入力 (据え置き QR) では非表示 (amountWei=0)', () => {

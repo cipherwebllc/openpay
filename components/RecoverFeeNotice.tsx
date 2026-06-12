@@ -54,11 +54,15 @@ export function RecoverFeeNotice({ billAmount, chainId, gasMode }: Props) {
     );
   }
 
+  // customer 負担はチップ (/tip・@handle) 専用 (確定モデルで決済は merchant 固定)。
+  // 受取側はお店ではなくクリエイターになりうるため中立な「受取」+ 内訳 (チップ + 手数料)
+  // を出す。merchant 負担は決済 (店舗が手数料を吸収) の分担行。
   const splitLabel =
     disclosure.gasMode === 'customer'
       ? t('splitCustomer', {
           customerPays: disclosure.customerPaysHuman,
           merchantReceives: disclosure.merchantReceivesHuman,
+          fee: disclosure.feeHuman,
         })
       : t('splitMerchant', {
           customerPays: disclosure.customerPaysHuman,

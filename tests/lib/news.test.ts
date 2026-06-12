@@ -84,8 +84,14 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(pricing!.body.ja).toMatch(/7\s*月/);
     // 断定的な「無料」誤誘導ではなく、無料の範囲 (通常決済等) を明記している。
     expect(pricing!.body.ja).toMatch(/無料/);
-    // 負担者は店舗が選択できることを明示 (gasMode トグルの開示)。
-    expect(pricing!.body.ja).toMatch(/店舗が.*選択/);
+    // 確定モデル (2026-06-13): 決済は店舗が手数料を負担し、お客様は表示額のみ。
+    expect(pricing!.body.ja).toMatch(/店舗が負担/);
+    expect(pricing!.body.ja).toMatch(/表示額のみ/);
+    // チップはガス相当額をお送りになるお客様 (チッパー) が負担し、1% は適用しない。
+    expect(pricing!.body.ja).toMatch(/チップ/);
+    expect(pricing!.body.ja).toMatch(/1%\s*は適用しません/);
+    // 「店舗が選択」式の負担者トグル開示が残っていないこと (撤去済み)。
+    expect(pricing!.body.ja).not.toMatch(/店舗が.*選択/);
   });
 
   it('置き換え済みの旧 pricing/feature お知らせは superseded 注記を持つ (黙った書き換え禁止)', () => {

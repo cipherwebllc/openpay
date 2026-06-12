@@ -1116,11 +1116,14 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
       '0x752B000000000000000000000000000000000000' as Address,
     );
     render(<TipForm params={JPYC_PARAMS} />);
-    // bps=0 → ガス相当の固定手数料。tip は gas=customer 固定なので顧客負担の分担行。
+    // bps=0 → ガス相当の固定手数料。tip は gas=customer 固定 → チップ内訳 + チッパー負担の文言。
     expect(
       screen.getByText(/決済手数料: 2 JPYC（ガス相当）/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/手数料はお客様負担/)).toBeInTheDocument();
+    // 確定モデル: チップ文脈の分担行 (チップ N + 手数料 M・お送りになるお客様のご負担)。
+    expect(
+      screen.getByText(/手数料はお送りになるお客様のご負担です/),
+    ).toBeInTheDocument();
   });
 
   it('FREE モード (forwarder null): 手数料開示は出さない', () => {
