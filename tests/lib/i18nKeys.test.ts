@@ -542,6 +542,40 @@ describe('i18n: SignReassurance 名前空間 (署名安心 UX・ja/en parity)', 
   });
 });
 
+describe('i18n: RelayFallback 名前空間 (relay API 失敗→通常決済へ切替・ja/en parity)', () => {
+  // B1 graceful degradation: relay が API レベルで失敗したとき Pay ボタン直上に出す
+  // 「通常決済へ切替」banner の固定文言 (title / switchButton / gasHint)。per-error の
+  // friendly 文言は PaymentForm/CheckoutForm の errorRelay* を流用する (banner には prop で渡す)。
+  const RELAY_FALLBACK_KEYS = ['title', 'switchButton', 'gasHint'] as const;
+
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const key of RELAY_FALLBACK_KEYS) {
+      it(`${loc.name}.RelayFallback.${key} は非空文字列`, () => {
+        const v = (loc.m.RelayFallback as Record<string, unknown>)[key];
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+      });
+    }
+  }
+
+  it('キー集合が ja と en で完全一致 (構造 parity)', () => {
+    expect(Object.keys(ja.RelayFallback).sort()).toEqual(
+      Object.keys(en.RelayFallback).sort(),
+    );
+  });
+
+  it('gasHint は {nativeToken} placeholder を持つ (chain-aware・ja/en)', () => {
+    for (const m of [ja, en]) {
+      expect((m.RelayFallback as Record<string, string>).gasHint).toContain(
+        '{nativeToken}',
+      );
+    }
+  });
+});
+
 describe('i18n: ja/en 構造 parity (onramp + offramp)', () => {
   it('全 form 名前空間で onramp キー集合が ja と en で一致', () => {
     for (const ns of FORM_NAMESPACES) {

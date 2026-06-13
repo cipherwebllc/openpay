@@ -15,6 +15,7 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
+import { RelayFallbackBanner } from './RelayFallbackBanner';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -292,6 +293,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
         : null) ??
       (revertedNoFeedback ? t('errorReverted') : null));
+
+  // B1 graceful degradation: relay が API レベルで失敗 (rate_limited 等の error code) したとき、
+  // ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
+  // (relay.data.success===false) は別経路 (revertedNoFeedback) で扱うため、ここでは relay.error
+  // (= API 失敗) のみを条件にする。banner の中で friendly 文言を 1 度だけ出し、下の汎用 error
+  // ブロックでは重複表示しない (relayFallbackActive で抑止)。
+  const relayFallbackActive = useRelay && !!relay.error;
+  const relayFallbackMessage = relay.error
+    ? t(relayErrorKey(relay.error))
+    : '';
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
   // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。
@@ -1001,12 +1012,24 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </a>
       )}
 
-      {error && !completed && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-          <p className="font-semibold">{t('errorTitle')}</p>
-          <p className="mt-1 break-words">{error}</p>
-        </div>
-      )}
+      {/* B1: relay の API レベル失敗は「通常決済へ切替」導線付きの banner で出す
+          (friendly 文言は banner 内に 1 度だけ)。それ以外の error は従来どおり赤ボックス。
+          いずれも完了後 (completed) は出さない。 */}
+      {!completed &&
+        (relayFallbackActive ? (
+          <RelayFallbackBanner
+            message={relayFallbackMessage}
+            nativeToken={nativeToken}
+            onSwitchToStandard={() => setModeOverride('standard')}
+          />
+        ) : (
+          error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              <p className="font-semibold">{t('errorTitle')}</p>
+              <p className="mt-1 break-words">{error}</p>
+            </div>
+          )
+        ))}
 
       {completed && (gasless.data || standard.data || relay.data) && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">

@@ -1495,6 +1495,11 @@
     "pristineBannerBody": "This wallet isn't set up for gasless payments yet. Switch to standard mode to pay now — you pay gas in {nativeToken}.",
     "pristineTipBody": "This wallet isn't set up for gasless payments yet, and tips require gasless mode. Please try a wallet that's already set up for gasless."
   },
+  "RelayFallback": {
+    "title": "Gasless payment is temporarily unavailable",
+    "switchButton": "Switch to standard payment (you pay gas)",
+    "gasHint": "If you hold {nativeToken}, you can switch and pay right now."
+  },
   "Tax": {
     "none": "None",
     "taxable10": "Taxable 10%",

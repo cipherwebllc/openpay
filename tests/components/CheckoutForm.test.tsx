@@ -1490,13 +1490,64 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(e?.networkFeeEquivalent).toBe((2n * 10n ** 18n).toString());
   });
 
-  it('relay error code (rate_limited) → friendly i18n 文言に変換 (生コード非表示)', () => {
+  it('relay error code (rate_limited) → friendly i18n 文言に変換 (生コード非表示) + 通常決済へ切替 banner', () => {
     setupRelayReady();
     setRelayPayment('error', { errMsg: 'rate_limited' });
     render(<CheckoutForm params={JPYC_PARAMS} />);
+    // friendly 文言は (banner 内に) 1 度だけ出る。生コードは出さない。
     expect(screen.getByText(/短時間に決済が集中/)).toBeInTheDocument();
     expect(screen.queryByText('rate_limited')).toBeNull();
+    // B1 graceful degradation: 通常決済へ切り替える banner (title + switch button) が出る。
+    expect(
+      screen.getByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeInTheDocument();
   });
+
+  it('relay error: 切替ボタンを押すと standard モードへ (banner 消滅 + 通常決済バッジ表示)', async () => {
+    const user = userEvent.setup();
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'rate_limited' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    const switchBtn = screen.getByRole('button', {
+      name: /通常支払い（自分でガスを払う）に切り替える/,
+    });
+    await user.click(switchBtn);
+
+    // 切替後は modeOverride='standard' → isStandard。relay banner は消え、通常決済 UI に変わる。
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+    // standard モードのバッジ (header の modeBadgeStandard) が出る。
+    expect(
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it.each([
+    ['relay_not_configured', /リレー\) は現在ご利用いただけません/],
+    ['insufficient_balance', /JPYC の残高が不足/],
+    ['fee_required', /現在停止しています/],
+    ['boom', /完了できませんでした/],
+  ])(
+    'relay error (%s) でも切替 banner を出す (API レベル失敗は通常決済が次手)',
+    (errMsg, bodyPattern) => {
+      setupRelayReady();
+      setRelayPayment('error', { errMsg });
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      // 各 error code の friendly 文言が banner 本文に出る。
+      expect(screen.getByText(bodyPattern)).toBeInTheDocument();
+      // どの API 失敗でも切替ボタンを出す (SA fallback と同じ「常に切替を提示」方針)。
+      expect(
+        screen.getByRole('button', {
+          name: /通常支払い（自分でガスを払う）に切り替える/,
+        }),
+      ).toBeInTheDocument();
+    },
+  );
 
   // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice) ---
   // 確定モデル (2026-06-13): /checkout recover は URL gas=customer を無視し merchant 固定。

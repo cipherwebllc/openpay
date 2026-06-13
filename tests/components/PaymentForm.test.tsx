@@ -1711,6 +1711,107 @@ describe('PaymentForm — 署名安心パネル (SignReassurance・relay free)',
   });
 });
 
+// B1 graceful degradation: relay が API レベルで失敗したとき、ガス代自己負担の「通常決済」へ
+// 1 タップ切替する banner を Pay ボタン直上に出す。on-chain revert (data.success===false) は
+// 別経路 (revertedNoFeedback) で扱うため、ここでは relay.error (= API 失敗) のみ対象。
+describe('PaymentForm — relay 失敗時の通常決済フォールバック (B1)', () => {
+  function setupRelayError(errMsg = 'rate_limited') {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null); // free
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    setRelay('error', { errMsg });
+  }
+
+  it('relay error (rate_limited): friendly 文言 + 通常決済へ切替 banner (生コードは非表示)', () => {
+    setupRelayError('rate_limited');
+    render(<PaymentForm />);
+    // friendly 文言は banner 内に 1 度だけ出る (生コードは出さない)。
+    expect(screen.getByText(/短時間に決済が集中/)).toBeInTheDocument();
+    expect(screen.queryByText('rate_limited')).toBeNull();
+    // banner の title + 切替ボタン。
+    expect(
+      screen.getByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('friendly 文言は 1 度だけ表示 (赤エラーボックスとの重複なし)', () => {
+    setupRelayError('rate_limited');
+    render(<PaymentForm />);
+    // 文言は banner 内のみ (旧 errorTitle 付き赤ボックスでは重複表示しない)。
+    expect(screen.getAllByText(/短時間に決済が集中/)).toHaveLength(1);
+    // 汎用エラー見出し (errorTitle) は relay fallback では出さない。
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
+
+  it('切替ボタンを押すと standard モードへ (banner 消滅 + 通常決済バッジ表示)', async () => {
+    const user = userEvent.setup();
+    setupRelayError('rate_limited');
+    render(<PaymentForm />);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    );
+
+    // modeOverride='standard' → isStandard。relay banner は消え通常決済 UI に変わる。
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+    // 通常決済バッジ (standardModeTitle) が出る。
+    expect(
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it.each([
+    ['relay_not_configured', /リレー\) は現在ご利用いただけません/],
+    ['insufficient_balance', /JPYC の残高が不足/],
+    ['fee_required', /現在停止しています/],
+    ['boom', /完了できませんでした/],
+  ])(
+    'relay error (%s) でも切替 banner を出す (API レベル失敗は通常決済が次手)',
+    (errMsg, bodyPattern) => {
+      setupRelayError(errMsg);
+      render(<PaymentForm />);
+      expect(screen.getByText(bodyPattern)).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {
+          name: /通常支払い（自分でガスを払う）に切り替える/,
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it('relay の on-chain revert (data.success=false・error なし) は banner を出さない (別経路)', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    // revert は data.success=false かつ error=null。setRelay には reverted 状態が無いため直接 mock。
+    mockHook(useJpycEip3009Payment, {
+      mutate: vi.fn(),
+      isPending: false,
+      data: { txHash: `0x${'e'.repeat(64)}`, success: false },
+      error: null,
+      variables: undefined,
+    } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
+    render(<PaymentForm />);
+    // revert は通常決済フォールバック banner ではなく従来の errorReverted 文言 (再試行が安全)。
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+  });
+});
+
 // 「署名安心 UX」P2: standard 経路は 1 行ヒント・Circle (USDC gasless) は usdc-permit。
 describe('PaymentForm — 署名安心 P2 (standard ヒント / Circle usdc-permit)', () => {
   it('standard 経路: 通常送金の 1 行ヒント (フルパネル/usdc-permit は出さない)', () => {

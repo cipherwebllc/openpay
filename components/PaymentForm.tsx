@@ -14,6 +14,7 @@ import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
+import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import {
@@ -454,6 +455,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
         ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
         : null) ??
       (revertedNoFeedback ? t('errorReverted') : null));
+
+  // B1 graceful degradation: relay が API レベルで失敗 (rate_limited 等の error code) したとき、
+  // ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
+  // (relay.data.success===false) は別経路 (revertedNoFeedback) で扱うため、ここでは relay.error
+  // (= API 失敗) のみを条件にする。banner の中で friendly 文言を 1 度だけ出し、下の汎用 error
+  // ブロックでは重複表示しない (relayFallbackActive で抑止)。
+  const relayFallbackActive = useRelay && !!relay.error;
+  const relayFallbackMessage = relay.error
+    ? t(relayErrorKey(relay.error))
+    : '';
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
@@ -1087,14 +1098,24 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p className="flex items-center gap-1.5 font-semibold">
-            <AlertCircle className="h-4 w-4 flex-none" aria-hidden />
-            {t('errorTitle')}
-          </p>
-          <p className="mt-1 break-words">{error}</p>
-        </div>
+      {/* B1: relay の API レベル失敗は「通常決済へ切替」導線付きの banner で出す
+          (friendly 文言は banner 内に 1 度だけ)。それ以外の error は従来どおり赤ボックス。 */}
+      {relayFallbackActive ? (
+        <RelayFallbackBanner
+          message={relayFallbackMessage}
+          nativeToken={nativeToken}
+          onSwitchToStandard={() => setModeOverride('standard')}
+        />
+      ) : (
+        error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <p className="flex items-center gap-1.5 font-semibold">
+              <AlertCircle className="h-4 w-4 flex-none" aria-hidden />
+              {t('errorTitle')}
+            </p>
+            <p className="mt-1 break-words">{error}</p>
+          </div>
+        )
       )}
 
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (
