@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits, parseUnits } from 'viem';
@@ -11,13 +12,27 @@ import { PayEmptyLanding } from './PayEmptyLanding';
 import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
-import { CrossChainHint } from './CrossChainHint';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { SuccessOverlay } from './SuccessOverlay';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
-import { PayerReceiptCompletion } from './PayerReceiptCompletion';
+
+// First Load JS から外すための遅延ロード (bundle 予算)。いずれも client 専用で
+// 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後)
+// のため SSR 不要。挙動は静的 import と同一。
+const CrossChainHint = dynamic(
+  () => import('./CrossChainHint').then((m) => m.CrossChainHint),
+  { ssr: false },
+);
+const SuccessOverlay = dynamic(
+  () => import('./SuccessOverlay').then((m) => m.SuccessOverlay),
+  { ssr: false },
+);
+const PayerReceiptCompletion = dynamic(
+  () =>
+    import('./PayerReceiptCompletion').then((m) => m.PayerReceiptCompletion),
+  { ssr: false },
+);
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';

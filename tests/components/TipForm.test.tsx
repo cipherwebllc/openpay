@@ -515,7 +515,7 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     ).toBeInTheDocument();
   });
 
-  it('成功 → 顧客向け電子レシート (支払い控え) を /tip で保存', () => {
+  it('成功 → 顧客向け電子レシート (支払い控え) を /tip で保存', async () => {
     window.localStorage.clear();
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(20_000_000_000_000_000_000_000n);
@@ -531,7 +531,8 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     expect(receipts[0].receiptId).toBe(`0x${'b'.repeat(64)}`);
     // 完了画面に控え詳細 (PayerReceiptDetail) + /scan 導線が描画される
     // (TipForm 成功 effect → appendPayerReceipt → PayerReceiptCompletion 全鎖)。
-    expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
+    // PayerReceiptCompletion は next/dynamic で遅延ロードのため findByText で待つ。
+    expect(await screen.findByText('OpenPay 電子レシート')).toBeInTheDocument();
     expect(screen.getByText(/\/scan で支払い履歴/).closest('a')).toHaveAttribute(
       'href',
       '/scan',

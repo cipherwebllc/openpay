@@ -654,7 +654,7 @@ describe('PaymentForm — 送信フロー', () => {
     expect(mutate).not.toHaveBeenCalled();
   });
 
-  it('送信成功 → 顧客向け電子レシート控えを保存し完了画面に埋め込む (/pay)', () => {
+  it('送信成功 → 顧客向け電子レシート控えを保存し完了画面に埋め込む (/pay)', async () => {
     window.localStorage.clear();
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
@@ -671,7 +671,10 @@ describe('PaymentForm — 送信フロー', () => {
     // (b) 完了画面に控え詳細 (PayerReceiptDetail) が描画される。
     //     ctx → usePaymentHistory → appendPayerReceipt → CHANGED_EVENT →
     //     usePayerReceipts → PayerReceiptCompletion → PayerReceiptDetail の全鎖を実証。
-    expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
+    //     PayerReceiptCompletion は next/dynamic で遅延ロードのため findByText で待つ。
+    expect(
+      await screen.findByText('OpenPay 電子レシート'),
+    ).toBeInTheDocument();
     // 完了画面の /scan 導線 (PayerReceiptCompletion 固有文言)。
     const scanLink = screen.getByText(/\/scan で支払い履歴/);
     expect(scanLink.closest('a')).toHaveAttribute('href', '/scan');
