@@ -137,9 +137,9 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     const to = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
     await page.goto(`/ja/pay?to=${to}&token=usdc&amount=10`);
 
-    // 初期は日本語 UI (Connect 文言 ja)
+    // 初期は日本語 UI (Connect 文言 ja・btnConnect は「ウォレットを接続」に短縮済み)
     await expect(
-      page.getByRole('button', { name: /ウォレットを接続してください/ }),
+      page.getByRole('button', { name: /ウォレットを接続/ }),
     ).toBeVisible();
 
     // LocaleSwitcher の English ボタンを押下
@@ -193,16 +193,17 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     const name = encodeURIComponent('山田太郎');
     await page.goto(`/ja/tip/${to}?token=jpyc&name=${name}&preset=200,800`);
 
-    // 日本語 header: 「山田太郎 さんへチップを送る」
-    await expect(page.getByText(/山田太郎.+チップ/)).toBeVisible();
+    // 日本語 header: 「山田太郎 さんへチップを送る」。<title> も /山田太郎.+チップ/ に
+    // match する (OG タイトル「山田太郎 さんへチップ — OpenPay」) ため main 配下に scope。
+    await expect(page.locator('main').getByText(/山田太郎.+チップ/)).toBeVisible();
 
     await page.getByRole('button', { name: 'English' }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/en/tip/${to}\\?token=jpyc&name=${name}&preset=200,800$`),
     );
-    // 英語 header: name は preserved
-    await expect(page.getByText(/山田太郎/)).toBeVisible();
+    // 英語 header: name は preserved (header <p> に scope して <title> との衝突を避ける)
+    await expect(page.locator('main').getByText(/山田太郎/)).toBeVisible();
     // preset ボタン (200/800) は URL query から復元
     await expect(page.getByRole('button', { name: '200 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '800 JPYC' })).toBeVisible();
@@ -218,10 +219,10 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     // 現在 locale (ja) の「日本語」ボタンを押下
     await page.getByRole('button', { name: '日本語' }).click();
 
-    // navigation が起きない (URL 不変、PaymentForm そのまま)
+    // navigation が起きない (URL 不変、PaymentForm そのまま・btnConnect 短縮済み)
     await expect(page).toHaveURL(before);
     await expect(
-      page.getByRole('button', { name: /ウォレットを接続してください/ }),
+      page.getByRole('button', { name: /ウォレットを接続/ }),
     ).toBeVisible();
   });
 });

@@ -21,14 +21,16 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByText('あなたの支払額')).toBeVisible();
     // fee 行 (feeRow) は feeAmount=0 で hide されている (Phase 1 regression fence)
     await expect(page.getByText('OpenPay 利用手数料')).toHaveCount(0);
-    // 案A: JPYC の gas は ceiling 価格から同期算出されるため Pimlico fetch 待ちの
-    // 「見積取得中…」は出ず、固定額 (最大 N JPYC) が即表示される。
+    // JPYC ガスレス (testnet・forwarder 未設定 = free モード) は OpenPay がガスを全額負担する
+    // ため、ネットワーク手数料行は Pimlico fetch 待ちの「見積取得中…」も「最大 N」見積も出さず、
+    // 確定文言「無料 (OpenPay が負担)」を即表示する。creator は preset 満額 (300)、ファンの
+    // 支払いも preset 満額 (gas 上乗せなし) になる。
     await expect(page.getByText('見積取得中…')).toHaveCount(0);
-    await expect(page.getByText(/最大 .*JPYC/)).toBeVisible();
-    // 未接続なので submit ボタンは t('btnConnect') = 「ウォレットを接続してください」
-    // (TipForm.tsx 388-400 行: isConnected=false のとき btnConnect に倒れる)
+    await expect(page.getByText('無料 (OpenPay が負担)')).toBeVisible();
+    // 未接続なので submit ボタンは t('btnConnect') = 「ウォレットを接続」
+    // (isConnected=false のとき btnConnect に倒れる)
     await expect(
-      page.getByRole('button', { name: 'ウォレットを接続してください' }),
+      page.getByRole('button', { name: 'ウォレットを接続' }),
     ).toBeVisible();
   });
 
@@ -97,11 +99,12 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
     await expect(page.getByText('あなたの支払額')).toBeVisible();
-    // 案A: Kaia 系も ceiling 価格から同期算出 → 固定額が即表示 (pending なし)
+    // Kaia 系も JPYC ガスレス free モード (testnet・forwarder 未設定) → OpenPay 全額負担で
+    // 「無料 (OpenPay が負担)」を即表示 (pending なし)。
     await expect(page.getByText('見積取得中…')).toHaveCount(0);
-    await expect(page.getByText(/最大 .*JPYC/)).toBeVisible();
+    await expect(page.getByText('無料 (OpenPay が負担)')).toBeVisible();
     await expect(
-      page.getByRole('button', { name: 'ウォレットを接続してください' }),
+      page.getByRole('button', { name: 'ウォレットを接続' }),
     ).toBeVisible();
 
     // 裏返し: 同じ URL から chain=kaia を外す → Polygon (default) が出る
@@ -142,10 +145,11 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await page.setViewportSize({ width: 380, height: 640 });
     await page.goto(`/ja/tip/${TO}?token=usdc&crossChain=false`);
     await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();
-    // CrossChainHint の i18n key (title / subtitle 等) が DOM に無いこと
-    await expect(page.locator('body')).not.toContainText('支払元チェーン');
-    await expect(page.locator('body')).not.toContainText('Gateway');
-    await expect(page.locator('body')).not.toContainText('CCTP');
+    // CrossChainHint / SourceChooser が mount されていないことを、その UI 固有の文言で検証する。
+    // ("CCTP" / "Gateway" 単体は footer の技術スタック表記 "CCTP V2" 等に正当に現れるため
+    // body 全体への substring 否定は誤検出になる → hint 専用の i18n 文字列で strict に確認する。)
+    await expect(page.locator('body')).not.toContainText('支払元チェーンを選ぶ'); // SourceChooser.title
+    await expect(page.locator('body')).not.toContainText('選択したチェーンで支払う'); // CrossChainHint.payWithSelected
     // 横 overflow なし
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,

@@ -7,7 +7,8 @@ const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
 async function openTipTab(page: Page) {
   await page.goto('/ja/create');
-  await page.getByRole('button', { name: 'Tip widget (クリエイター)' }).click();
+  // タブラベルは短縮済み (旧「Tip widget (クリエイター)」→「チップ」)。
+  await page.getByRole('button', { name: 'チップ' }).click();
   await expect(
     page.getByRole('heading', { name: /応援を受け取る Tip widget を作成/ }),
   ).toBeVisible();

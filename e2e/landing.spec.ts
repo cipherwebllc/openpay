@@ -45,7 +45,8 @@ test.describe('landing / (LP)', () => {
     await expect(bottomNav).toBeVisible();
     // ホームへの戻りは AppHeader 左上のロゴクリックに集約。Nav 1 slot 目は「スキャン」。
     await expect(bottomNav.getByRole('link', { name: /スキャン/ })).toBeVisible();
-    await expect(bottomNav.getByRole('link', { name: /受け取る/ })).toBeVisible();
+    // Nav の受取導線ラベルは「受取る」(Nav.create)。
+    await expect(bottomNav.getByRole('link', { name: /受取る/ })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: /履歴/ })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: /探す/ })).toBeVisible();
   });
@@ -55,7 +56,8 @@ test.describe('landing / (LP)', () => {
   }) => {
     await page.goto('/ja');
     await expect(page.getByRole('heading', { name: 'OpenPay の特長' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'ガスレス決済' })).toBeVisible();
+    // ガスレス特長カードの見出しは「ガス代不要」(featuresGaslessTitle)。
+    await expect(page.getByRole('heading', { name: 'ガス代不要' })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'マルチチェーン対応' }),
     ).toBeVisible();
@@ -124,34 +126,36 @@ test.describe('landing / (LP)', () => {
     await expect(page.getByRole('heading', { name: 'よくある質問' })).toBeVisible();
     const q1 = page.getByText('本当にガス代は不要ですか?');
     await expect(q1).toBeVisible();
-    // closed 状態では answer は hidden
-    const a1Body = page.getByText(/Pimlico paymaster 経由で立て替え/);
+    // closed 状態では answer は hidden。faqA1 の本文 (回答) に固有の一節で照合する
+    // (質問文ではなく回答 body であることを担保)。
+    const a1Body = page.getByText(/JPYC または USDC の残高だけで支払いを完結/);
     await expect(a1Body).toBeHidden();
     // 展開
     await q1.click();
     await expect(a1Body).toBeVisible();
   });
 
-  test('ja: Benefits セクション (Phase 1) — Fee「0%」永続コミット + 4 focal + 店舗 3 / 顧客 1', async ({
+  test('ja: Benefits セクション — Fee「1%」(7 月〜) + 4 focal + 店舗 3 / 顧客 1', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // Phase 1: Fee カードを「永久 0%」文脈で再構成 (旧 focal="0.5%" の % 訴求は撤去)。
-    // Cost / Settlement / NoSignup と合わせて 4 cards 構成。
+    // recover 課金ピボット (2026-06-12): Fee カードは「利用料 1%（7 月〜）」訴求に再構成
+    // (旧「永久 0% / 決済手数料ゼロ」から変更)。Cost / Settlement / NoSignup と合わせ 4 cards。
     const benefits = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
     await expect(benefits).toBeVisible();
-    // 4 focal text (ビッグナンバー) — Benefits section 内に scope
-    await expect(benefits.getByText('0%', { exact: true })).toBeVisible();
+    // 4 focal text (ビッグナンバー) — Benefits section 内に scope (benefitsFeeFocal="1%")
+    await expect(benefits.getByText('1%', { exact: true })).toBeVisible();
     await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
     expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);
-    // 旧 % 訴求「0.5%」は消えている (Phase 1 regression fence)
+    // 旧 % 訴求「0.5%」と旧「0%」永続コミット文脈は撤去済 (regression fence)
     expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
-    // 4 title (新 Fee カードは title=「決済手数料ゼロ」、旧「手数料が安い」は消えている)
+    expect(await benefits.getByText('0%', { exact: true }).count()).toBe(0);
+    // 4 title (新 Fee カードは title=「利用料 1%（7 月〜）」、旧「決済手数料ゼロ/手数料が安い」は消えている)
     await expect(
-      benefits.getByRole('heading', { name: '決済手数料ゼロ' }),
+      benefits.getByRole('heading', { name: '利用料 1%（7 月〜）' }),
     ).toBeVisible();
     await expect(
       benefits.getByRole('heading', { name: '導入コスト 0 円' }),
@@ -165,7 +169,10 @@ test.describe('landing / (LP)', () => {
     expect(
       await benefits.getByRole('heading', { name: '手数料が安い' }).count(),
     ).toBe(0);
-    // audience pill: 店舗 3 / 顧客 1 — Phase 1 で再び 4 cards
+    expect(
+      await benefits.getByRole('heading', { name: '決済手数料ゼロ' }).count(),
+    ).toBe(0);
+    // audience pill: 店舗 3 / 顧客 1 — 4 cards
     expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(3);
     expect(await benefits.getByText('顧客', { exact: true }).count()).toBe(1);
   });
@@ -192,7 +199,7 @@ test.describe('landing / (LP)', () => {
     await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: OpenPay 利用料 セクション — 説明 + Tip 応援 link button 3 つ (JPYC Polygon/Kaia/USDC)', async ({
+  test('ja: OpenPay 利用料 セクション — 説明 + Tip 応援 link button 5 つ (JPYC Polygon/Kaia/USDC + POL/KAIA)', async ({
     page,
   }) => {
     await page.goto('/ja');
@@ -200,14 +207,18 @@ test.describe('landing / (LP)', () => {
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'OpenPay 利用料について' }) });
     await expect(support).toBeVisible();
-    // 決済手数料は将来も取らない方針の説明 + Tip 依頼文
+    // 利用料ポリシーの説明 (recover ピボット後: JPYC ガスレスは利用料あり / 通常決済・顧客 gas 負担の
+    // USDC は対象外=無料) + Tip 依頼文。
     await expect(
-      support.getByText(/取引額に連動した % 手数料.*将来も取りません/),
+      support.getByText(
+        /通常決済（ガスあり）および顧客が自らガスを負担する USDC 経路は対象外/,
+      ),
     ).toBeVisible();
     await expect(support.getByText(/Tip を頂けると幸いです/)).toBeVisible();
-    // 応援 link button 3 つ (新規タブで本番 /tip を開く)
+    // 応援 link button 5 つ (新規タブで本番 /tip を開く): JPYC Polygon/Kaia, USDC cross-chain,
+    // および native POL / KAIA。
     const tipLinks = support.getByRole('link', { name: /で応援$/ });
-    await expect(tipLinks).toHaveCount(3);
+    await expect(tipLinks).toHaveCount(5);
     // 先頭ボタン (JPYC Polygon) の href / target / rel
     const first = support.getByRole('link', { name: 'JPYC (Polygon) で応援' });
     await expect(first).toHaveAttribute(

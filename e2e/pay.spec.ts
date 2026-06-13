@@ -10,9 +10,10 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText('Base Sepolia')).toBeVisible();
     // ヘッダの大文字金額表示
     await expect(page.getByText('10 USDC').first()).toBeVisible();
-    // 接続ボタンは disabled (未接続)
+    // 接続ボタンは disabled (未接続)。btnConnect は短縮済み (旧「ウォレットを接続してください」
+    // → 「ウォレットを接続」)。
     const submit = page.getByRole('button', {
-      name: /ウォレットを接続してください/,
+      name: /ウォレットを接続/,
     });
     await expect(submit).toBeDisabled();
   });
@@ -32,8 +33,9 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(
       page.getByText('通常決済（ガスあり）').first(),
     ).toBeVisible();
-    // 「ネットワーク手数料: ウォレットで別途支払い」明細
-    await expect(page.getByText(/ウォレットで別途/)).toBeVisible();
+    // 「ネットワーク手数料: ウォレットで支払い」明細 (standard mode は顧客が wallet で
+    // ガスを別途負担する旨。文言は gasRowStandardValue = 「ウォレットで支払い」に短縮済み)。
+    await expect(page.getByText(/ウォレットで支払い/)).toBeVisible();
     // Phase 1: fee=0 のため breakdown の「店主受取」行が請求額そのまま (10 USDC)。
     // ヘッダーの金額表示と区別するため店主受取行 (Row の div) に scope する。
     const merchantRow = page

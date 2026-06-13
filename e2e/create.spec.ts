@@ -333,9 +333,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // gasless option button に「おすすめ」 badge
+    // gasless option button に「おすすめ」 badge。タイトルは payModeGaslessTitle=「ガス代不要」
+    // (旧「ガスレス決済」から短縮)、badge は payModeGaslessBadge=「おすすめ」。
     const gaslessBtn = page.getByRole('button', {
-      name: /ガスレス決済.*おすすめ/,
+      name: /ガス代不要.*おすすめ/,
     });
     await expect(gaslessBtn).toBeVisible();
   });
@@ -380,9 +381,19 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       receiverInput(page),
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    await page.getByPlaceholder('1000').fill('500');
-    // QR URL 表示 box (Step 3 内 font-mono.text-xs.bg-slate-50)
-    const urlBox = page.locator('.font-mono.text-xs.bg-slate-50').first();
+    // 金額入力 (main amount)。quick-amount 編集欄の placeholder「例: 1000」と区別するため exact。
+    await page.getByPlaceholder('1000', { exact: true }).fill('500');
+    // QR URL は即時表示せず「QRコードを表示する」→ 全画面 QrPreviewModal 内に表示される
+    // (UX 簡潔化で QR/URL/印刷をモーダルへ集約)。desktop は右サイドバー、mobile は下部固定バーの
+    // ボタン (どちらも同じ label) を押してモーダルを開く。
+    await page
+      .getByRole('button', { name: 'QRコードを表示する' })
+      .first()
+      .click();
+    // モーダル (role=dialog) 内の URL 表示 box に query が焼き込まれている。
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const urlBox = dialog.locator('.font-mono.bg-slate-50').first();
     await expect(urlBox).toBeVisible();
     await expect(urlBox).toContainText('chain=kaia');
     await expect(urlBox).toContainText('token=jpyc');
@@ -419,9 +430,17 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       receiverInput(page),
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    // amount 入力 (JPYC plain で 750)
-    await page.getByPlaceholder('1000').fill('750');
-    const printBtn = page.getByRole('button', { name: /印刷/ });
+    // amount 入力 (JPYC plain で 750)。quick-amount 編集欄「例: 1000」と区別するため exact。
+    await page.getByPlaceholder('1000', { exact: true }).fill('750');
+    // QR / 印刷ボタンは「QRコードを表示する」→ 全画面 QrPreviewModal に集約済み。先にモーダルを開く。
+    await page
+      .getByRole('button', { name: 'QRコードを表示する' })
+      .first()
+      .click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    // モーダル内の印刷ボタン (primary CTA)。
+    const printBtn = dialog.getByRole('button', { name: /印刷/ });
     await expect(printBtn).toBeVisible();
     // toHaveClass は auto-retry するため、webkit の CSS/レンダリング遅延でも安定する
     // (一発読みの getAttribute は class 適用前に評価され flake する)。

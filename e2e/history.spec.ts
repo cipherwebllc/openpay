@@ -17,13 +17,19 @@ test.describe('/history (browser-level smoke)', () => {
     await expect(
       page.getByRole('heading', { name: '取引履歴について', level: 2 }),
     ).toBeVisible();
-    // empty state
+    // empty state (HistoryEmptyState): 説明文 + ヒント + 「OpenPay →」CTA。
     await expect(page.getByText(/履歴はまだありません/)).toBeVisible();
-    // CSV / Clear ボタンは disabled
+    await expect(
+      page.getByRole('link', { name: 'OpenPay →' }),
+    ).toBeVisible();
+    // 履歴ゼロのときは toolbar 自体を描画しないので CSV / 全削除ボタンは存在しない
+    // (旧 UX は disabled ボタンを出していたが、空状態は専用 EmptyState に置換済み)。
     await expect(
       page.getByRole('button', { name: 'CSV ダウンロード' }),
-    ).toBeDisabled();
-    await expect(page.getByRole('button', { name: '全て削除' })).toBeDisabled();
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: '全て削除' }),
+    ).toHaveCount(0);
   });
 
   test('en: 英語 landing が hydrate される', async ({ page }) => {
@@ -89,17 +95,22 @@ test.describe('/history (browser-level smoke)', () => {
       );
     });
 
-    // filter ボタンが新 count を反映
+    // filter ボタンが新 count を反映。「全て」→「すべて」に統一され、かつ種別軸 (受取/支払い) と
+    // 通貨軸の両方に「すべて (1)」が出るため、通貨フィルタ群 (aria-label="フィルタ") に scope して
+    // strict mode 衝突を避ける。
+    const assetFilter = page.getByRole('group', { name: 'フィルタ' });
     await expect(
-      page.getByRole('button', { name: /全て \(1\)/ }),
+      assetFilter.getByRole('button', { name: /すべて \(1\)/ }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /JPYC \(1\)/ }),
+      assetFilter.getByRole('button', { name: /JPYC \(1\)/ }),
     ).toBeVisible();
-    // 金額表示 (500 JPYC)
-    await expect(page.getByText('500 JPYC')).toBeVisible();
-    // status badge
-    await expect(page.getByText('成功')).toBeVisible();
+    // 金額表示 (500 JPYC)。集計欄にも同額が出るため、履歴行 (listitem) に scope する。
+    await expect(
+      page.getByRole('listitem').getByText('500 JPYC'),
+    ).toBeVisible();
+    // status badge。フィルタ pill / 集計文 / 会計注記にも「成功」が現れるため履歴行に scope。
+    await expect(page.getByRole('listitem').getByText('成功')).toBeVisible();
     // Explorer 行内リンクは NETWORK_ENV と chainId の組合せで決まるため
     // 環境非依存に検証しない (chainId=80002 は testnet のみ supportedChains 内)。
     // CSV / Clear が enabled

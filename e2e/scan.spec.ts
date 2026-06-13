@@ -458,9 +458,9 @@ test.describe('/scan: wallet 接続持続 (Phase 1 hypothesis)', () => {
 
     await expect(page).toHaveURL(/\/ja\/pay/);
     // /pay の PaymentForm が「接続済み」を認識: 未接続のとき出る
-    // 「ウォレットを接続してください」ボタンが描画されないこと
+    // 「ウォレットを接続」ボタン (btnConnect・旧「…してください」から短縮) が描画されないこと
     await expect(
-      page.getByRole('button', { name: /ウォレットを接続してください/ }),
+      page.getByRole('button', { name: /ウォレットを接続/ }),
     ).toHaveCount(0);
     // 金額が PaymentForm に反映されている (正常レンダ確認)
     await expect(page.getByText('1 USDC').first()).toBeVisible();

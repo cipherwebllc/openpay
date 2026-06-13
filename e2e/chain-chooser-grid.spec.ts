@@ -63,8 +63,9 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
     viewport,
   }) => {
     await page.goto('/ja/create');
+    // タブラベルは短縮済み (旧「Tip widget (クリエイター)」→「チップ」)。
     await page
-      .getByRole('button', { name: 'Tip widget (クリエイター)' })
+      .getByRole('button', { name: 'チップ' })
       .click();
 
     // USDC tab に切替 (Tip default は JPYC)
