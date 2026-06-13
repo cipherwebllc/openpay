@@ -7,7 +7,6 @@ import type { Address } from 'viem';
 import { parseUnits } from 'viem';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 import {
-  ChevronRight,
   Coins,
   Fuel,
   QrCode as QrCodeIcon,
@@ -22,6 +21,9 @@ import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
 import { StepCard } from './StepCard';
+import { QuickAmountEditor } from './qr/QuickAmountEditor';
+import { ConvertPanel } from './qr/ConvertPanel';
+import { SplitEditor } from './qr/SplitEditor';
 import {
   POSTER_NOTE_MAX,
   QUICK_AMOUNT_MAX,
@@ -52,7 +54,7 @@ import {
   isGaslessSupported,
   type TokenSymbol,
 } from '@/lib/tokens';
-import { formatRemaining, rateIsSane } from '@/lib/fx';
+import { rateIsSane } from '@/lib/fx';
 import { useFxConvert } from '@/hooks/useFxConvert';
 import { useMarketRates } from '@/hooks/useMarketRates';
 import {
@@ -596,118 +598,30 @@ export function QrGenerator() {
             {/* クイック金額の編集 (任意・token ごと独立)。金額入力の近くで設定できる
                 よう高度な設定から①へ移設。 */}
             {mode === 'amount' && (
-              <details className="group rounded-2xl border border-slate-200 bg-white p-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
-                  <span>{t('quickAmountsLabel')}</span>
-                  <ChevronRight
-                    className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
-                    aria-hidden
-                  />
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {tokenQuickAmounts.map((q, i) => (
-                    <div key={i} className="flex gap-2">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={q}
-                        onChange={(e) => updateQuickAmount(i, e.target.value)}
-                        placeholder={t('quickAmountPlaceholder')}
-                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeQuickAmount(i)}
-                        aria-label={t('quickAmountRemove')}
-                        className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {tokenQuickAmounts.length < QUICK_AMOUNT_MAX && (
-                    <button
-                      type="button"
-                      onClick={addQuickAmount}
-                      className="mt-1 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
-                    >
-                      {t('quickAmountAdd')}
-                    </button>
-                  )}
-                </div>
-              </details>
+              <QuickAmountEditor
+                items={tokenQuickAmounts}
+                max={QUICK_AMOUNT_MAX}
+                onUpdate={updateQuickAmount}
+                onAdd={addQuickAmount}
+                onRemove={removeQuickAmount}
+              />
             )}
 
-            {/* 他トークン建てで受け取る (FX 換算・有効期限付き動的 QR)。
-                例: JPYC 1000 入力 → USDC 建てで受け取る → 現レートで USDC 額を確定し
-                3 分間有効な QR を生成。スワップ無し (顧客が払った USDC をそのまま受領)。 */}
-            {canShowConvert && rateOk && (
-              <button
-                type="button"
-                onClick={applyConvert}
-                className="w-full rounded-lg border border-brand/40 bg-brand/5 px-3 py-2.5 text-sm font-semibold text-brand-dark transition hover:bg-brand/10"
-              >
-                {t('convertButton', { symbol: convertTargetDisplay })}
-              </button>
-            )}
-            {canShowConvert && !rateOk && (
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
-                {t('convertRateUnavailable')}
-              </p>
-            )}
-            {convert && (
-              <div
-                className={`space-y-1.5 rounded-lg border px-3 py-3 ${
-                  convertExpired
-                    ? 'border-amber-300 bg-amber-50'
-                    : 'border-emerald-200 bg-emerald-50'
-                }`}
-              >
-                <p className="text-sm font-semibold text-slate-800">
-                  {t('convertActiveSummary', {
-                    anchorAmount: convert.anchorAmount,
-                    anchorSymbol: convertAnchorDisplay,
-                    amount,
-                    symbol: deployment.displaySymbol,
-                  })}
-                </p>
-                <p className="text-xs text-slate-600">
-                  {t('convertRate', { rate: convert.fxRate })}
-                </p>
-                {convertExpired ? (
-                  <p className="text-xs font-medium text-amber-700">
-                    {t('convertExpired')}
-                  </p>
-                ) : (
-                  <p className="text-xs text-slate-600">
-                    {t('convertRemaining', {
-                      time: formatRemaining(convertRemaining),
-                    })}
-                  </p>
-                )}
-                {settings.token === 'usdc' && (
-                  <p className="text-xs text-slate-500">
-                    {t('convertCrossChainNote')}
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={recalcConvert}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                  >
-                    {t('convertRecalc')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={revertConvert}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                  >
-                    {t('convertRevert', { symbol: convertAnchorDisplay })}
-                  </button>
-                </div>
-              </div>
-            )}
+            <ConvertPanel
+              canShowConvert={canShowConvert}
+              rateOk={rateOk}
+              convert={convert}
+              convertExpired={convertExpired}
+              convertRemaining={convertRemaining}
+              convertTargetDisplay={convertTargetDisplay}
+              convertAnchorDisplay={convertAnchorDisplay}
+              amount={amount}
+              displaySymbol={deployment.displaySymbol}
+              isUsdc={settings.token === 'usdc'}
+              onApply={applyConvert}
+              onRecalc={recalcConvert}
+              onRevert={revertConvert}
+            />
           </div>
           <RecoverFeeNotice
             billAmount={recoverBillAmount}
@@ -949,77 +863,16 @@ export function QrGenerator() {
               ) : null}
 
               {!isStandard && (
-                <Field
-                  label={t('splitLabel', {
-                    primaryPercent: 100 - splitParsed.sum,
-                  })}
-                >
-                  <p className="mb-2 text-xs text-slate-500">
-                    {t('splitDescription', { max: SPLIT_MAX_ENTRIES })}
-                  </p>
-                  <div className="space-y-2">
-                    {settings.splits.map((s, i) => (
-                      <div key={i} className="flex flex-wrap items-start gap-2">
-                        <input
-                          type="text"
-                          value={s.address}
-                          onChange={(e) =>
-                            updateSplit(i, { address: e.target.value.trim() })
-                          }
-                          placeholder="0x..."
-                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                          spellCheck={false}
-                          autoCapitalize="off"
-                          autoCorrect="off"
-                        />
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={s.percent}
-                          onChange={(e) =>
-                            updateSplit(i, {
-                              percent: e.target.value.replace(/[^\d]/g, ''),
-                            })
-                          }
-                          placeholder="%"
-                          className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
-                          maxLength={2}
-                          aria-label={t('splitPercentLabel')}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeSplit(i)}
-                          aria-label={t('splitRemove')}
-                          className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  {settings.splits.length < SPLIT_MAX_ENTRIES && (
-                    <button
-                      type="button"
-                      onClick={addSplit}
-                      className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
-                    >
-                      {t('splitAdd')}
-                    </button>
-                  )}
-                  {splitParsed.error && (
-                    <p className="mt-2 text-xs text-red-600">
-                      {t(`splitError.${splitParsed.error}`)}
-                    </p>
-                  )}
-                  {splitsForUrl && splitsForUrl.length > 0 && (
-                    <p className="mt-2 text-xs text-emerald-700">
-                      {t('splitSummary', {
-                        count: splitsForUrl.length,
-                        primaryPercent: 100 - splitParsed.sum,
-                      })}
-                    </p>
-                  )}
-                </Field>
+                <SplitEditor
+                  splits={settings.splits}
+                  max={SPLIT_MAX_ENTRIES}
+                  sum={splitParsed.sum}
+                  error={splitParsed.error}
+                  summaryCount={splitsForUrl ? splitsForUrl.length : null}
+                  onUpdate={updateSplit}
+                  onAdd={addSplit}
+                  onRemove={removeSplit}
+                />
               )}
 
               {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では disable)。
