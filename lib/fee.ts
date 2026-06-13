@@ -40,7 +40,7 @@ export function calcFee(
   return (amount * bps) / BPS_DENOM;
 }
 
-type Breakdown = {
+export type Breakdown = {
   customerPays: bigint;
   merchantReceives: bigint;
   feeAmount: bigint;

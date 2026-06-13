@@ -37,7 +37,17 @@ import {
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
-import { calcBreakdown, type GasMode } from '@/lib/fee';
+import { type GasMode } from '@/lib/fee';
+import {
+  effectiveGasMode,
+  isMerchantGasAbsorb,
+  effectivePayMode,
+  effectiveGasAmount as deriveEffectiveGasAmount,
+  paymentBreakdown,
+  gasReimbursementValue,
+  networkFeeEquivalentValue,
+  minimumAmountWei as deriveMinimumAmountWei,
+} from '@/lib/paymentMoney';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
@@ -113,8 +123,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
   // user-approved)。recover 以外は URL の gas をそのまま使う (USDC の負担者トグルは不変)。
-  const effectiveGas: GasMode = useRecover ? 'merchant' : (params.gas ?? 'customer');
-  const isMerchantGas = !isStandard && effectiveGas === 'merchant';
+  // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
+  const effectiveGas: GasMode = effectiveGasMode(route, params.gas);
+  const isMerchantGas = isMerchantGasAbsorb(route, effectiveGas);
 
   // Smart Account / Pimlico 経路は gasless のみ必要 — standard / relay では skip。
   const { data: saData, error: saError } = useSmartAccount(
@@ -155,37 +166,39 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // JPYC recover (控除分を feeReceiver へ送って立替者を補償) と等価。
   // gasMode の約束 (店主吸収: 顧客は請求額のみ・店主は amount−gas) は USDC でも成立。
   // 残る差は gas 見積と実 pull 額の僅差のみ (standard tier で有界)。
-  const effectiveGasAmount: bigint | undefined = useRelay
-    ? relayGasEquiv
-    : isJpyc
-      ? 0n
-      : gasAmount;
-  const effectiveMode = isStandard ? 'standard' : params.mode;
+  const effectiveGasAmount: bigint | undefined = deriveEffectiveGasAmount(
+    route,
+    { isJpyc, relayGasEquiv, gasAmount },
+  );
+  const effectiveMode = effectivePayMode(route, params.mode);
   const breakdown = useMemo(
     () =>
-      calcBreakdown(
+      paymentBreakdown({
         totalWei,
-        params.token,
-        effectiveMode,
-        effectiveGas,
-        effectiveGasAmount ?? 0n,
-      ),
+        token: params.token,
+        payMode: effectiveMode,
+        gasMode: effectiveGas,
+        effectiveGasAmount,
+      }),
     [totalWei, params.token, effectiveMode, effectiveGas, effectiveGasAmount],
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
   // JPYC ガス無料化: JPYC は gas を一切徴収しないため 0 (OpenPay 全額負担)。mainnet USDC は
   // erc20 で 0、残る testnet USDC sponsorship fallback (非商用・非 JPYC) のみ従来どおり回収。
-  const gasReimbursement =
-    !isJpyc && !isCircle && paymasterMode === 'sponsorship'
-      ? (gasAmount ?? 0n)
-      : 0n;
+  const gasReimbursement = gasReimbursementValue(route, {
+    isJpyc,
+    paymasterMode,
+    gasAmount,
+  });
 
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
   // gasless 経路は gas 見積を計上 (JPYC relay=回収額/0 or sponsorship=立替回収 / USDC erc20=
   // paymaster 徴収分)。circle は receipt 由来の circlePaymasterNetUsdc を使うため null、standard は null。
-  const networkFeeEquivalent =
-    !isStandard && !isCircle ? (effectiveGasAmount ?? 0n) : null;
+  const networkFeeEquivalent = networkFeeEquivalentValue(
+    route,
+    effectiveGasAmount,
+  );
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   // ネイティブガストークン symbol を viem chain 経由で取得 (chain-aware)。
@@ -216,8 +229,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     totalWei > 0n &&
     (isStandard || !isMerchantGas || useRelay || activeQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
-  const minimumAmountWei =
-    breakdown.feeAmount + (isMerchantGas ? (effectiveGasAmount ?? 0n) : 0n);
+  const minimumAmountWei = deriveMinimumAmountWei({
+    feeAmount: breakdown.feeAmount,
+    isMerchantGas,
+    effectiveGasAmount,
+  });
 
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一
   // 受取人へ 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全
