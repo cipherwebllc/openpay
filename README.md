@@ -156,6 +156,14 @@ Just visit <https://open-pay.jp>, enter your wallet, and generate a QR. No signu
 
 ### For developers (self-host)
 
+**One-click deploy** — spin up your own instance on Vercel:
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcipherwebllc%2Fopenpay&env=NEXT_PUBLIC_NETWORK_ENV,NEXT_PUBLIC_PIMLICO_API_KEY&envDescription=Network%20env%20plus%20optional%20gasless%2FKV%20keys%3B%20see%20.env.local.example&envLink=https%3A%2F%2Fgithub.com%2Fcipherwebllc%2Fopenpay%2Fblob%2Fmain%2F.env.local.example)
+
+It deploys instantly and **boots on testnet by default**. Receiving payments works out of the box; **gasless** (Pimlico) and the **KV-backed** features (SIWE / freee / billing / payment log) need their own keys — set them in the Vercel env step (full list in [`.env.local.example`](./.env.local.example)). For **mainnet**, also set `NEXT_PUBLIC_NETWORK_ENV=mainnet` + `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` + per-chain RPC + Sentry. (Self-hosting on Netlify / Railway / any Node host works too — they just don't have a one-click button.)
+
+Or run locally:
+
 ```bash
 git clone https://github.com/cipherwebllc/openpay
 cd openpay
