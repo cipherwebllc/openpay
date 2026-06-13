@@ -310,35 +310,58 @@ export function chainSupportsCanonical7702(chainId: number): boolean {
   return !NON_CANONICAL_7702_CHAIN_IDS.has(chainId);
 }
 
+// slug → [mainnet RPC env key, testnet RPC env key]。NETWORK_ENV と無関係に
+// 両方を登録する (= mainnet/testnet 双方の chainId に override が効く)。
+// Record は full slug union で keyed なので、slug を追加して RPC key を書き忘れると
+// **TS コンパイルエラー**になる (RPC override 配線漏れの footgun ガード)。
+// 値の型 (keyof typeof env.rpc) により env.rpc から消えた / typo の key も compile error。
+const RPC_KEYS_BY_SLUG: Record<
+  ChainSlug,
+  readonly [keyof typeof env.rpc, keyof typeof env.rpc]
+> = {
+  base: ['base', 'baseSepolia'],
+  arbitrum: ['arbitrum', 'arbitrumSepolia'],
+  optimism: ['optimism', 'optimismSepolia'],
+  polygon: ['polygon', 'polygonAmoy'],
+  kaia: ['kaia', 'kairos'],
+  ethereum: ['ethereum', 'sepolia'],
+  avalanche: ['avalanche', 'avalancheFuji'],
+};
+
+const RPC_KEYS_BY_BUYER_ONLY_SLUG: Record<
+  BuyerOnlyChainSlug,
+  readonly [keyof typeof env.rpc, keyof typeof env.rpc]
+> = {
+  unichain: ['unichain', 'unichainSepolia'],
+  worldchain: ['worldchain', 'worldchainSepolia'],
+  sonic: ['sonic', 'sonicTestnet'],
+  sei: ['sei', 'seiTestnet'],
+  hyperevm: ['hyperevm', 'hyperevmTestnet'],
+};
+
+// module load 時に一度だけ chainId → env.rpc 値の Map を組む。
+// mainnet/testnet 両方の chainId を登録するため NETWORK_ENV と無関係 (上記コメント)。
+// 値は env.rpc[key] (string | undefined) をそのまま格納 → 旧 if-chain と byte 一致。
+const RPC_OVERRIDE_BY_CHAIN_ID: ReadonlyMap<number, string | undefined> =
+  (() => {
+    const map = new Map<number, string | undefined>();
+    for (const slug of ALL_SLUGS) {
+      const [mainnetKey, testnetKey] = RPC_KEYS_BY_SLUG[slug];
+      map.set(MAINNET_SLUG_TO_CHAIN[slug].id, env.rpc[mainnetKey]);
+      map.set(TESTNET_SLUG_TO_CHAIN[slug].id, env.rpc[testnetKey]);
+    }
+    for (const slug of ALL_BUYER_ONLY_SLUGS) {
+      const [mainnetKey, testnetKey] = RPC_KEYS_BY_BUYER_ONLY_SLUG[slug];
+      map.set(MAINNET_BUYER_ONLY_TO_CHAIN[slug].id, env.rpc[mainnetKey]);
+      map.set(TESTNET_BUYER_ONLY_TO_CHAIN[slug].id, env.rpc[testnetKey]);
+    }
+    return map;
+  })();
+
 export function customRpcUrlForChain(chainId: number): string | undefined {
   // NETWORK_ENV と無関係に override を受付 (テストや mainnet/testnet 混在の切替コスト削減)。
-  if (chainId === polygon.id) return env.rpc.polygon;
-  if (chainId === polygonAmoy.id) return env.rpc.polygonAmoy;
-  if (chainId === base.id) return env.rpc.base;
-  if (chainId === baseSepolia.id) return env.rpc.baseSepolia;
-  if (chainId === arbitrum.id) return env.rpc.arbitrum;
-  if (chainId === arbitrumSepolia.id) return env.rpc.arbitrumSepolia;
-  if (chainId === optimism.id) return env.rpc.optimism;
-  if (chainId === optimismSepolia.id) return env.rpc.optimismSepolia;
-  if (chainId === kaia.id) return env.rpc.kaia;
-  if (chainId === kairos.id) return env.rpc.kairos;
-  if (chainId === mainnet.id) return env.rpc.ethereum;
-  if (chainId === sepolia.id) return env.rpc.sepolia;
-  // buyer-only chain (phase 4b-1)
-  if (chainId === avalanche.id) return env.rpc.avalanche;
-  if (chainId === avalancheFuji.id) return env.rpc.avalancheFuji;
-  if (chainId === unichain.id) return env.rpc.unichain;
-  if (chainId === unichainSepolia.id) return env.rpc.unichainSepolia;
-  // buyer-only chain (phase 4b-3)
-  if (chainId === worldchain.id) return env.rpc.worldchain;
-  if (chainId === worldchainSepolia.id) return env.rpc.worldchainSepolia;
-  if (chainId === sonic.id) return env.rpc.sonic;
-  if (chainId === sonicBlazeTestnet.id) return env.rpc.sonicTestnet;
-  if (chainId === sei.id) return env.rpc.sei;
-  if (chainId === seiTestnet.id) return env.rpc.seiTestnet;
-  if (chainId === hyperEvm.id) return env.rpc.hyperevm;
-  if (chainId === hyperEvmTestnet.id) return env.rpc.hyperevmTestnet;
-  return undefined;
+  // 未登録 chainId は Map.get が undefined を返す (旧 if-chain の末尾 return undefined と同値)。
+  return RPC_OVERRIDE_BY_CHAIN_ID.get(chainId);
 }
 
 // Ethereum L1 公開 RPC の信頼性問題に対応するための fallback endpoint。
