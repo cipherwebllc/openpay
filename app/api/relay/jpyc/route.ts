@@ -16,49 +16,33 @@
 import { NextResponse } from 'next/server';
 import {
   createPublicClient,
-  createWalletClient,
-  http,
   parseAbi,
-  erc20Abi,
   isAddress,
   isHex,
   getAddress,
-  keccak256,
-  type Account,
   type Address,
-  type Chain,
   type Hex,
 } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
-import {
-  kvLpush,
-  kvLrange,
-  kvLtrim,
-  kvSet,
-  kvGet,
-  kvIncr,
-  kvDecr,
-  kvExpire,
-  kvDel,
-  isKvConfigured,
-} from '@/lib/kv';
+import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { recordRelayedVolume } from '@/lib/billingMeter';
 import { isGaslessRelayBlocked } from '@/lib/feeGate';
-import { resolveDeployment } from '@/lib/tokens';
+import type { RelayResult } from '@/lib/relay/jpycRelay';
 import {
-  relayJpycAuthorization,
-  type RelayDeps,
-  type RelayResult,
-  type RelayTaskOutcome,
-} from '@/lib/relay/jpycRelay';
-import {
-  submitSelfHost,
-  pollSelfHost,
-  RELAYER_RECEIPT_TIMEOUT_MS,
-  type SelfHostIo,
-} from '@/lib/relay/selfHostRelayer';
+  PROVIDER,
+  MAX_VALUE,
+  MAINNET_CHAINS,
+  RELAY_MAX_GAS_COST_WEI,
+  RELAY_LOW_BALANCE_ALERT_WEI,
+  SUPPORTED_CHAINS,
+  transportFor,
+  jpycAddressFor,
+  getBalance,
+  readAuthorizationUsed,
+  selfHostIoFor,
+  relayFreeAuthorization,
+} from '@/lib/relay/relayProvider';
+import { submitSelfHost, pollSelfHost } from '@/lib/relay/selfHostRelayer';
 import {
   recoverViaForwarder,
   type ForwarderRecoverDeps,
@@ -72,77 +56,18 @@ import {
   configuredJpycForwarderFor,
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import {
+  checkRateLimit,
+  checkGasBudget,
+  refundGasBudget,
+  makeIdempotency,
+} from '@/lib/relay/relayGuards';
 import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
-const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY as Hex | undefined;
-const GELATO_API_KEY = process.env.GELATO_SPONSOR_API_KEY;
-const GELATO_BASE =
-  process.env.GELATO_RELAY_BASE_URL ?? 'https://api.gelato.digital';
-
-// provider を起動時に1回確定 (within-request failover はしない)。
-const PROVIDER: 'self-host' | 'gelato' | null = RELAYER_PRIVATE_KEY
-  ? 'self-host'
-  : GELATO_API_KEY
-    ? 'gelato'
-    : null;
-// 不正鍵は module load で fail-fast (全リクエスト 500 になり設定ミスが顕在化する)。
-const RELAYER_ACCOUNT: Account | null = RELAYER_PRIVATE_KEY
-  ? privateKeyToAccount(RELAYER_PRIVATE_KEY)
-  : null;
-
-// relay 単発の上限 (濫用ガード + 立替を少額に限定して資金移動的に見えにくくする)。
-// RELAY_MAX_JPYC は human JPYC (アルファ既定 5 万)。旧 GELATO_RELAY_MAX_JPYC からリネーム
-// (provider 非依存の上限なので Gelato 名は外す)。旧名も後方互換で読む。
-const MAX_VALUE = (() => {
-  const raw = process.env.RELAY_MAX_JPYC ?? process.env.GELATO_RELAY_MAX_JPYC;
-  const human = raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 50_000n;
-  return human * 10n ** 18n;
-})();
-const RL_MAX = 5; // window 内の最大 relay 回数 (per key)
-const RL_WINDOW_MS = 60_000;
 const MAX_BODY_BYTES = 4 * 1024;
-// B4: chain 日次の relay 件数上限 (Sybil による POL 枯渇 griefing の circuit breaker)。
-const RELAY_DAILY_TX_CAP = (() => {
-  const raw = process.env.RELAY_DAILY_TX_CAP;
-  return raw && /^[0-9]+$/.test(raw) ? Number(raw) : 500;
-})();
-// B5: 1 tx の native (POL) gas コスト上限 (wei)。これを超える高騰時は relay せず standard へ倒す
-// (赤字防止)。未設定 (0) はスキップ — testnet 既定。mainnet は回収 fee 相当に合わせて設定。
-const RELAY_MAX_GAS_COST_WEI = (() => {
-  const raw = process.env.RELAY_MAX_GAS_COST_WEI;
-  return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 0n;
-})();
-// relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し
-// operator が補充できるように)。既定 0.1 native (1e17)。補充 cadence に応じ env で調整・0 で無効。
-const RELAY_LOW_BALANCE_ALERT_WEI = (() => {
-  const raw = process.env.RELAY_LOW_BALANCE_ALERT_WEI;
-  return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 10n ** 17n;
-})();
-
-// 対応 chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。JPYC v3 は全 chain 同一アドレス。
-// Kaia は Gelato 非対応だが自前 relayer (KAIA gas) で中継可能。RPC 未設定時は viem の default を使う。
-const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = {
-  [polygon.id]: { chain: polygon, rpc: process.env.NEXT_PUBLIC_POLYGON_RPC_URL },
-  [polygonAmoy.id]: {
-    chain: polygonAmoy,
-    rpc: process.env.NEXT_PUBLIC_POLYGON_AMOY_RPC_URL,
-  },
-  [kaia.id]: { chain: kaia, rpc: process.env.NEXT_PUBLIC_KAIA_RPC_URL },
-  [kairos.id]: { chain: kairos, rpc: process.env.NEXT_PUBLIC_KAIROS_RPC_URL },
-};
-
-// mainnet chain (実マネー)。recover の self-host hardening (KV + gas-cost ceiling 必須) を強制する
-// 判定に使う。testnet (Amoy/Kairos) は緩く運用可。新規 mainnet chain を SUPPORTED_CHAINS に
-// 足したら、ここにも追加して silent な fail-open を防ぐこと。
-const MAINNET_CHAINS: ReadonlySet<number> = new Set([polygon.id, kaia.id]);
-
-// JPYC (FiatToken) の EIP-3009 使用済フラグ。submit 前に読み guaranteed-revert を避ける。
-const AUTHORIZATION_STATE_ABI = parseAbi([
-  'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
-]);
 
 // CDX-1: forwarder の immutable getter (Eip3009Forwarder.token / feeReceiver)。健全性チェックで読む。
 const FORWARDER_GETTERS_ABI = parseAbi([
@@ -309,258 +234,12 @@ if (env.enableUsageFee) {
   }
 }
 
-function transportFor(chainId: number) {
-  const cfg = SUPPORTED_CHAINS[chainId];
-  return http(cfg.rpc ?? cfg.chain.rpcUrls.default.http[0]);
-}
-
-function jpycAddressFor(chainId: number): Address | null {
-  if (!(chainId in SUPPORTED_CHAINS)) return null;
-  const d = resolveDeployment('jpyc', chainId);
-  return d ? d.address : null;
-}
-
-async function getBalance(
-  chainId: number,
-  token: Address,
-  owner: Address,
-): Promise<bigint> {
-  const client = createPublicClient({
-    chain: SUPPORTED_CHAINS[chainId].chain,
-    transport: transportFor(chainId),
-  });
-  return client.readContract({
-    address: token,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: [owner],
-  });
-}
-
-async function readAuthorizationUsed(
-  chainId: number,
-  token: Address,
-  from: Address,
-  nonce: Hex,
-): Promise<boolean> {
-  const client = createPublicClient({
-    chain: SUPPORTED_CHAINS[chainId].chain,
-    transport: transportFor(chainId),
-  });
-  return client.readContract({
-    address: token,
-    abi: AUTHORIZATION_STATE_ABI,
-    functionName: 'authorizationState',
-    args: [from, nonce],
-  });
-}
-
-// self-host: relayer EOA / chain client から SelfHostIo を組む (chainId は対応済前提)。
-function selfHostIoFor(chainId: number): SelfHostIo {
-  const cfg = SUPPORTED_CHAINS[chainId];
-  const transport = transportFor(chainId);
-  const account = RELAYER_ACCOUNT as Account;
-  const publicClient = createPublicClient({ chain: cfg.chain, transport });
-  const walletClient = createWalletClient({ account, chain: cfg.chain, transport });
-  return {
-    getBalance: () => publicClient.getBalance({ address: account.address }),
-    estimateGas: (target, data) =>
-      publicClient.estimateGas({ account, to: target, data }),
-    getPendingNonce: () =>
-      publicClient.getTransactionCount({
-        address: account.address,
-        blockTag: 'pending',
-      }),
-    // pre-sign: prepare (fees/type を RPC で補完) → sign → keccak256 で txHash 確定。
-    // maxFeePerGas は B5 ceiling 判定用に「実際に署名された fee」を返す (legacy chain は gasPrice)。
-    signTx: async (target, data, gas, nonce) => {
-      const request = await walletClient.prepareTransactionRequest({
-        account,
-        chain: cfg.chain,
-        to: target,
-        data,
-        gas,
-        nonce,
-      });
-      const raw = await walletClient.signTransaction(request);
-      const maxFeePerGas =
-        request.maxFeePerGas ?? request.gasPrice ?? 0n;
-      return { raw, hash: keccak256(raw), maxFeePerGas };
-    },
-    sendRawTransaction: (raw) =>
-      publicClient.sendRawTransaction({ serializedTransaction: raw }),
-    waitForReceipt: async (hash) => {
-      const r = await publicClient.waitForTransactionReceipt({
-        hash,
-        confirmations: 1,
-        timeout: RELAYER_RECEIPT_TIMEOUT_MS,
-      });
-      // transactionHash は replacement 検出用 (pollSelfHost が待った hash と照合)。
-      return { status: r.status, transactionHash: r.transactionHash };
-    },
-  };
-}
-
-// KV sliding-window rate-limit (kv は list ops のみなので timestamp list で近似)。
-// KV 未設定時は通す (本番は KV 設定が前提)。
-async function checkRateLimit(keys: string[]): Promise<boolean> {
-  if (!isKvConfigured()) return true;
-  const now = Date.now();
-  for (const key of keys) {
-    const k = `relay:rl:${key}`;
-    await kvLpush(k, String(now));
-    await kvLtrim(k, 0, RL_MAX * 4);
-    const r = await kvLrange(k, 0, RL_MAX * 4);
-    const recent = (r.ok ? r.value : []).filter(
-      (ts) => now - Number(ts) < RL_WINDOW_MS,
-    );
-    if (recent.length > RL_MAX) return false;
-  }
-  return true;
-}
-
-const idemKey = (chainId: number, from: Address, nonce: Hex) =>
-  `relay:idem:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
-const IDEM_TTL_SEC = 1800;
-
-// 冪等性 claim (fail-SAFE)。SET NX:
-//  - 'OK' (新規) → first (処理続行)。
-//  - null (既存=重複 POST) → duplicate。記録済 txHash があれば返す (response-loss 後の explorer 追跡)。
-//  - KV error/timeout (応答不確定・KV は configured) → SET が通った可能性 → duplicate (二重 submit 回避)。
-//  - KV 未設定 → idempotency 無効 → first (可用性優先。最終防壁は on-chain _authorizationStates)。
-async function claimIdempotency(
-  chainId: number,
-  from: Address,
-  nonce: Hex,
-): Promise<{ status: 'first' } | { status: 'duplicate'; txHash: Hex | null }> {
-  if (!isKvConfigured()) return { status: 'first' };
-  const key = idemKey(chainId, from, nonce);
-  const r = await kvSet(key, '1', { nx: true, ttlSec: IDEM_TTL_SEC });
-  if (r.ok) {
-    if (r.value === null) {
-      // 既存。記録済 hash を読んで同梱 (なければ null)。
-      const g = await kvGet(key);
-      const v = g.ok ? g.value : null;
-      const txHash =
-        v && v.startsWith('0x') && v.length === 66 ? (v as Hex) : null;
-      return { status: 'duplicate', txHash };
-    }
-    return { status: 'first' };
-  }
-  return { status: 'duplicate', txHash: null }; // fail-safe
-}
-
-// claim 済 authorization に broadcast 済 txHash を上書き記録 (NX なし)。重複 POST が
-// explorer 追跡できるように。TTL は claim と同じ。
-async function recordRelayHash(
-  chainId: number,
-  from: Address,
-  nonce: Hex,
-  txHash: Hex,
-): Promise<void> {
-  if (!isKvConfigured()) return;
-  await kvSet(idemKey(chainId, from, nonce), txHash, { ttlSec: IDEM_TTL_SEC });
-}
-
-// claim 解放。broadcast "前" の失敗 (relay_error) でのみ呼ぶ (tx 未送信なので安全)。正当な
-// 再試行を 30 分 (IDEM_TTL) 待たせない (false tombstone 防止)。
-async function releaseIdempotency(
-  chainId: number,
-  from: Address,
-  nonce: Hex,
-): Promise<void> {
-  if (!isKvConfigured()) return;
-  await kvDel(idemKey(chainId, from, nonce));
-}
-
-// 日次予算カウンタのキー導出 (INCR で消費・DECR で refund する側でキーを完全一致させるため
-// 関数に括り出して共有する)。YYYYMMDD は UTC。
-const gasBudgetKey = (chainId: number) =>
-  `relay:budget:${chainId}:${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
-
-// B4: 日次グローバル予算 (Sybil circuit breaker)。INCR relay:budget:{chainId}:{YYYYMMDD} し、
-// 初回のみ TTL 2 日。count が cap 以下なら許可。fail-open: KV 未設定/障害は許可 (rate-limit と
-// 同方針・alpha は可用性優先)。近似カウンタで足りる (応答喪失の二重カウントは早めに止まる=安全側)。
-//
-// 返り値 (CDX-5): { allowed, consumed }。
-//   allowed  = relay を許可するか。
-//   consumed = カウンタを実際に INCR したか。KV 未設定 / INCR 失敗の fail-open allow では INCR して
-//              いないので consumed=false。consumed=false の枠を後で DECR (refund) すると、INCR して
-//              いないカウンタを減らして負に振れ、cap を超える余剰枠を与えてしまう (= refund しない)。
-async function checkGasBudget(
-  chainId: number,
-): Promise<{ allowed: boolean; consumed: boolean }> {
-  if (!isKvConfigured()) return { allowed: true, consumed: false };
-  const key = gasBudgetKey(chainId);
-  const r = await kvIncr(key);
-  if (!r.ok) {
-    logger.warn('relay gas budget INCR failed (fail-open)', { chainId });
-    return { allowed: true, consumed: false };
-  }
-  // EXPIRE は毎回設定する (初回 EXPIRE が応答喪失すると TTL 無しの stale key が永続化するため・
-  // Codex P2)。EXPIRE は冪等なので再設定は無害。
-  await kvExpire(key, 2 * 24 * 3600);
-  return { allowed: r.value <= RELAY_DAILY_TX_CAP, consumed: true };
-}
-
-// checkGasBudget で INCR 消費した日次枠を DECR で 1 戻す。tx が 1 件も broadcast されなかった
-// ことが確実な失敗でのみ呼ぶ (jpycRelay の refundGasBudget 契約)。日付跨ぎ直後の refund は
-// 新しい日の枠を 1 減らすが、減る方向の歪みは安全側 (枠が厳しくなるだけ) で頻度も無視できる。
-async function refundGasBudget(chainId: number): Promise<void> {
-  if (!isKvConfigured()) return;
-  const r = await kvDecr(gasBudgetKey(chainId));
-  if (!r.ok) {
-    logger.warn('relay gas budget DECR failed (枠が 1 過消費のまま)', { chainId });
-  }
-}
-
-async function gelatoSubmit(
-  chainId: number,
-  target: Address,
-  data: Hex,
-): Promise<{ taskId: string }> {
-  const res = await fetch(`${GELATO_BASE}/relays/v2/sponsored-call`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      chainId,
-      target,
-      data,
-      sponsorApiKey: GELATO_API_KEY,
-    }),
-  });
-  if (!res.ok) throw new Error(`gelato_http_${res.status}`);
-  const j = (await res.json()) as { taskId?: string };
-  if (!j.taskId) throw new Error('gelato_no_task_id');
-  return { taskId: j.taskId };
-}
-
-async function gelatoPoll(taskId: string): Promise<RelayTaskOutcome> {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    const res = await fetch(`${GELATO_BASE}/tasks/status/${taskId}`);
-    if (res.ok) {
-      const { task } = (await res.json()) as {
-        task?: { taskState?: string; transactionHash?: Hex };
-      };
-      const state = task?.taskState;
-      if (state === 'ExecSuccess' && task?.transactionHash) {
-        return { state: 'success', txHash: task.transactionHash };
-      }
-      if (state === 'ExecReverted') {
-        return { state: 'reverted', txHash: task?.transactionHash };
-      }
-      if (state === 'Cancelled' || state === 'Blacklisted' || state === 'NotFound') {
-        // これらは Gelato が broadcast しなかったことが確実 → error (fallback 可)。
-        return { state: 'error', detail: state };
-      }
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  // timeout は broadcast 済か不確定 (Gelato は遅延後に submit しうる)。error にすると client が
-  // standard へ fallback し二重送金しうるため pending に倒す (Codex)。txHash は不明なので省略。
-  return { state: 'pending' };
-}
+// 冪等性ヘルパは共有 relayGuards から prefix 指定で生成する。決済 relay は従来の prefix
+// (relay:idem:) を維持し挙動を不変に保つ (rate-limit / 日次予算は共有キーで両 route 共通)。
+// recover 経路 (handleRecover) でこの helper を inject する (free 経路は relayFreeAuthorization が
+// 同 prefix で内製する)。
+const { claimIdempotency, recordRelayHash, releaseIdempotency } =
+  makeIdempotency('relay:idem:');
 
 function anonymizeIp(ip: string): string {
   const first = ip.split(',')[0].trim();
@@ -750,48 +429,14 @@ async function handleFree(
     return NextResponse.json({ ok: false, error: 'fee_required' }, { status: 402 });
   }
 
-  const supported = chainId in SUPPORTED_CHAINS;
-  const common = {
-    nowSec: () => Math.floor(Date.now() / 1000),
-    maxValue: MAX_VALUE,
-    jpycAddressFor,
-    getBalance,
-    checkRateLimit,
-    checkGasBudget,
-    refundGasBudget,
-    claimIdempotency,
-    recordRelayHash,
-    releaseIdempotency,
-  };
-  let deps: RelayDeps;
-  if (PROVIDER === 'self-host') {
-    const io = supported ? selfHostIoFor(chainId) : null;
-    const jpyc = jpycAddressFor(chainId);
-    // collision/fatal 時に「この authorization が執行済か」を再確認し pending/fallback を判断 (P0/P1)。
-    const isAuthorizationUsed =
-      jpyc ? () => readAuthorizationUsed(chainId, jpyc, auth.from, auth.nonce) : undefined;
-    deps = {
-      ...common,
-      checkAuthorizationUsed: readAuthorizationUsed,
-      submitSponsoredCall: (_c, target, data) =>
-        submitSelfHost(io!, target, data, {
-          maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
-          isAuthorizationUsed,
-          lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
-          onLowBalance: (b) =>
-            logger.warn('relay.relayer.balance_low', {
-              chainId,
-              balanceWei: b.toString(),
-            }),
-        }),
-      pollTask: (taskId) => pollSelfHost(io!, taskId),
-    };
-  } else {
-    deps = { ...common, submitSponsoredCall: gelatoSubmit, pollTask: gelatoPoll };
-  }
-  const result = await relayJpycAuthorization(
-    { chainId, auth, signature: raw.signature as Hex, rateLimitKeys: [auth.from, ipPrefix] },
-    deps,
+  // PROVIDER 種別ごとの deps 構築 (self-host IO / Gelato submit-poll / idempotency prefix relay:idem:)
+  // は共有 relayFreeAuthorization に集約。CSV パス購入 relay と同一の self-host/poll/ガード経路を通る。
+  const result = await relayFreeAuthorization(
+    chainId,
+    auth,
+    raw.signature as Hex,
+    [auth.from, ipPrefix],
+    { idemPrefix: 'relay:idem:' },
   );
   // OpenPay 利用料メーター (S1): 中継成功した gasless 決済の店主別出来高をサーバ権威で記録する
   // (将来の月次利用料 a1 の課金根拠)。merchant=auth.to / value=auth.value。点灯前から貯める

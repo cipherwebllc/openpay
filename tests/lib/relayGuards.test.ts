@@ -1,0 +1,155 @@
+// relayGuards (決済 relay と CSV パス relay の共有ガード) のユニット。抽出後も挙動が同一であること、
+// とりわけ **rate-limit (relay:rl:) と日次予算 (relay:budget:) は両 route で同一キー**、idempotency は
+// prefix 引数で名前空間が分離されることを、in-memory KV で検証する (実 route から独立)。
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// 最下層境界 (KV) のみ in-memory モック。
+const { kvMod, store } = vi.hoisted(() => {
+  const vals = new Map<string, string>();
+  const lists = new Map<string, string[]>();
+  const counters = new Map<string, number>();
+  const setCalls: Array<{
+    key: string;
+    value: string;
+    opts: { nx?: boolean; ttlSec?: number };
+  }> = [];
+  const expireCalls: Array<{ key: string; ttlSec: number }> = [];
+  const kvMod = {
+    isKvConfigured: () => true,
+    kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
+    kvSet: async (
+      k: string,
+      v: string,
+      opts: { nx?: boolean; ttlSec?: number } = {},
+    ) => {
+      setCalls.push({ key: k, value: v, opts: { ...opts } });
+      if (opts.nx && vals.has(k)) return { ok: true as const, value: null };
+      vals.set(k, v);
+      return { ok: true as const, value: 'OK' as const };
+    },
+    kvDel: async (k: string) => ({ ok: true as const, value: vals.delete(k) ? 1 : 0 }),
+    kvIncr: async (k: string) => {
+      const n = (counters.get(k) ?? 0) + 1;
+      counters.set(k, n);
+      return { ok: true as const, value: n };
+    },
+    kvDecr: async (k: string) => {
+      const n = (counters.get(k) ?? 0) - 1;
+      counters.set(k, n);
+      return { ok: true as const, value: n };
+    },
+    kvLpush: async (k: string, v: string) => {
+      const l = lists.get(k) ?? [];
+      l.unshift(v);
+      lists.set(k, l);
+      return { ok: true as const, value: l.length };
+    },
+    kvLrange: async (k: string, start: number, stop: number) => {
+      const l = lists.get(k) ?? [];
+      return { ok: true as const, value: l.slice(start, stop === -1 ? l.length : stop + 1) };
+    },
+    kvLtrim: async (k: string, start: number, stop: number) => {
+      lists.set(k, (lists.get(k) ?? []).slice(start, stop + 1));
+      return { ok: true as const, value: 'OK' as const };
+    },
+    kvExpire: async (key: string, ttlSec: number) => {
+      expireCalls.push({ key, ttlSec });
+      return { ok: true as const, value: 1 };
+    },
+  };
+  return { kvMod, store: { vals, lists, counters, setCalls, expireCalls } };
+});
+vi.mock('@/lib/kv', () => kvMod);
+vi.mock('@/lib/logger', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+import {
+  checkRateLimit,
+  checkGasBudget,
+  refundGasBudget,
+  makeIdempotency,
+  gasBudgetKey,
+  RL_MAX,
+  IDEM_TTL_SEC,
+} from '@/lib/relay/relayGuards';
+import type { Address, Hex } from 'viem';
+
+const FROM = '0x000000000000000000000000000000000000abcd' as Address;
+const NONCE = ('0x' + 'a'.repeat(64)) as Hex;
+
+beforeEach(() => {
+  store.vals.clear();
+  store.lists.clear();
+  store.counters.clear();
+  store.setCalls.length = 0;
+  store.expireCalls.length = 0;
+});
+
+describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
+  it('RL_MAX 回までは許可・超過で deny。キーは relay:rl: で両 route 共有', async () => {
+    // window 内で RL_MAX 件まで許可 (recent.length が RL_MAX を超えた瞬間に deny)。
+    for (let i = 0; i < RL_MAX; i++) {
+      expect(await checkRateLimit([FROM])).toBe(true);
+    }
+    // RL_MAX を 1 件超えたら deny。
+    expect(await checkRateLimit([FROM])).toBe(false);
+    // KV キーが relay:rl: prefix (= 決済 relay と同一名前空間)。
+    expect([...store.lists.keys()].some((k) => k === `relay:rl:${FROM}`)).toBe(true);
+  });
+});
+
+describe('relayGuards 日次予算 (共有キー relay:budget:)', () => {
+  it('INCR で consumed=true・キーは relay:budget:{chainId}:{date}・refund で DECR', async () => {
+    const r = await checkGasBudget(137);
+    expect(r.allowed).toBe(true);
+    expect(r.consumed).toBe(true);
+    const key = gasBudgetKey(137);
+    expect(key.startsWith('relay:budget:137:')).toBe(true);
+    expect(store.counters.get(key)).toBe(1);
+    expect(store.expireCalls).toContainEqual({ key, ttlSec: 2 * 24 * 3600 });
+    await refundGasBudget(137);
+    expect(store.counters.get(key)).toBe(0);
+  });
+});
+
+describe('relayGuards idempotency (prefix 名前空間分離)', () => {
+  it('別 prefix の同 (chain,from,nonce) は衝突しない (決済 relay と CSV パス relay の独立)', async () => {
+    const pay = makeIdempotency('relay:idem:');
+    const pass = makeIdempotency('csvpassrelay:idem:');
+
+    // 決済側で claim → first。
+    expect((await pay.claimIdempotency(137, FROM, NONCE)).status).toBe('first');
+    // 決済側の再 claim → duplicate。
+    expect((await pay.claimIdempotency(137, FROM, NONCE)).status).toBe('duplicate');
+    // CSV パス側は **別 prefix** なので同 (chain,from,nonce) でも first (名前空間が独立)。
+    expect((await pass.claimIdempotency(137, FROM, NONCE)).status).toBe('first');
+
+    // 記録された KV キーが prefix で分かれている。
+    expect(store.vals.has(`relay:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`)).toBe(true);
+    expect(
+      store.vals.has(`csvpassrelay:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`),
+    ).toBe(true);
+    const csvPassKey = `csvpassrelay:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+    expect(store.setCalls).toContainEqual({
+      key: csvPassKey,
+      value: '1',
+      opts: { nx: true, ttlSec: IDEM_TTL_SEC },
+    });
+    expect(IDEM_TTL_SEC).toBe(1800);
+  });
+
+  it('recordRelayHash で txHash を記録 → 重複 claim が hash を同梱・release で解放', async () => {
+    const pass = makeIdempotency('csvpassrelay:idem:');
+    await pass.claimIdempotency(137, FROM, NONCE);
+    const TX = ('0x' + 'f'.repeat(64)) as Hex;
+    await pass.recordRelayHash(137, FROM, NONCE, TX);
+    const dup = await pass.claimIdempotency(137, FROM, NONCE);
+    expect(dup.status).toBe('duplicate');
+    expect(dup.status === 'duplicate' && dup.txHash).toBe(TX);
+    // release で claim が消える → 再 claim が first に戻る (false tombstone 防止)。
+    await pass.releaseIdempotency(137, FROM, NONCE);
+    expect((await pass.claimIdempotency(137, FROM, NONCE)).status).toBe('first');
+  });
+});

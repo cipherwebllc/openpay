@@ -1214,7 +1214,7 @@ describe('Legal pages', () => {
   // source-scan で本文 (message レベル) に必須語を pin し、片側の変更で fail させる。
   // -------------------------------------------------------------------------
   describe('regression: CSV 24時間パスの開示 (Terms/特商法/免責・ja/en)', () => {
-    it('ja: Disclaimer §7 に CSV パス (100 JPYC / 24時間 / 返金不可 / 合算なし / ガス代利用者負担 / 提供開始告知) がある', async () => {
+    it('ja: Disclaimer §7 に CSV パス (100 JPYC / 24時間 / 返金不可 / 合算なし / ガスレス原則+ガスあり時は利用者負担 / 提供開始告知) がある', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const body = ja.Disclaimer.section7.body;
       expect(body).toContain('CSV 24時間パス');
@@ -1222,11 +1222,15 @@ describe('Legal pages', () => {
       expect(body).toContain('24時間');
       expect(body).toContain('返金');
       expect(body).toContain('合算されません');
+      // W2-5: ガスレス購入 (署名のみ・当社がガス負担) を原則とし、ガスあり購入を選んだ場合は利用者負担。
+      expect(body).toContain('ガスレス購入');
+      expect(body).toMatch(/署名のみ.*ガス代は当社が負担|ガス代は当社が負担/);
+      expect(body).toContain('ガスありで送金して購入');
       expect(body).toContain('ガス代は利用者のご負担');
       expect(body).toContain('提供開始時期');
     });
 
-    it('en: Disclaimer §7 に CSV pass (100 JPYC / 24 hours / non-refundable / not stack / gas borne by user) がある', async () => {
+    it('en: Disclaimer §7 に CSV pass (100 JPYC / 24 hours / non-refundable / not stack / gasless default + gas-paid route borne by user) がある', async () => {
       const en = (await import('@/messages/en.json')).default;
       const body = en.Disclaimer.section7.body;
       expect(body).toMatch(/CSV 24-hour pass/);
@@ -1234,11 +1238,15 @@ describe('Legal pages', () => {
       expect(body).toMatch(/24 hours/);
       expect(body).toMatch(/non-refundable/i);
       expect(body).toMatch(/does not stack/i);
+      // W2-5: gasless purchase (sign only・we bear gas) is the default; gas-paid route is borne by the user.
+      expect(body).toMatch(/gasless purchase/i);
+      expect(body).toMatch(/we bear the blockchain gas/i);
+      expect(body).toMatch(/buying by sending with gas/i);
       expect(body).toMatch(/gas .*borne by the user/i);
       expect(body).toMatch(/becomes available within the Service/i);
     });
 
-    it('ja: Terms 第5条 (料金) に CSV パスの任意利用権 (100 JPYC / 24時間 / 返金不可 / 合算なし) がある', async () => {
+    it('ja: Terms 第5条 (料金) に CSV パスの任意利用権 (100 JPYC / 24時間 / 返金不可 / 合算なし / ガスレス原則) がある', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const body = ja.Terms.article5.body;
       expect(body).toContain('CSV 24時間パス');
@@ -1247,9 +1255,13 @@ describe('Legal pages', () => {
       expect(body).toContain('合算されず');
       // 閲覧・受け取りは無料の据え置きを明示。
       expect(body).toContain('閲覧および決済の受け取りそのものは引き続き無料');
+      // W2-5: ガスレス購入 (署名のみ・当社がガス負担) を原則とし、ガスあり購入を選んだ場合は利用者負担。
+      expect(body).toContain('ガスレス購入');
+      expect(body).toContain('ガスありで送金して購入');
+      expect(body).toMatch(/ネットワーク手数料 \(gas\) は利用者のご負担/);
     });
 
-    it('en: Terms Article 5 (Fees) に CSV pass の任意利用権が明示', async () => {
+    it('en: Terms Article 5 (Fees) に CSV pass の任意利用権が明示 (ガスレス原則)', async () => {
       const en = (await import('@/messages/en.json')).default;
       const body = en.Terms.article5.body;
       expect(body).toMatch(/CSV 24-hour pass/);
@@ -1257,6 +1269,10 @@ describe('Legal pages', () => {
       expect(body).toMatch(/24 hours/);
       expect(body).toMatch(/does not stack/i);
       expect(body).toMatch(/remain free/i);
+      // W2-5: gasless purchase default + gas-paid route borne by user.
+      expect(body).toMatch(/gasless purchase/i);
+      expect(body).toMatch(/buying by sending with gas/i);
+      expect(body).toMatch(/Network Fee \(gas\) for that transfer is borne by the user/i);
     });
 
     it('ja: 特商法 役務の内容 + 返品 に CSV パス (任意・前払い・返金不可・合算なし) がある', async () => {

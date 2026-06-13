@@ -30,7 +30,7 @@ import { useSiweSession } from '@/hooks/useSiweSession';
 import { useBillingInvoice } from '@/hooks/useBillingInvoice';
 import { useCsvPassStatus } from '@/hooks/useCsvPassStatus';
 import { NonCustodialNotice } from './NonCustodialNotice';
-import { CsvPassPaywall } from './CsvPassPaywall';
+import { CsvPassModal } from './CsvPassModal';
 import { BillingDueBanner } from './BillingDueBanner';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import { HistoryRow } from './HistoryRow';
@@ -49,6 +49,9 @@ export function HistoryView() {
   const { data: rates } = useMarketRates();
   const usdcJpy = rates?.usdcJpy;
   const [filters, setFilters] = useState<HistoryFilters>(EMPTY_HISTORY_FILTERS);
+  // CSV パス購入モーダルの開閉 (W1)。CSV ボタン押下 (pass ロック時) で開く。購入成功で passLocked が
+  // flip しても自動で閉じない (中の success 表示を見せる・閉じるのは利用者の close 操作のみ)。
+  const [passModalOpen, setPassModalOpen] = useState(false);
 
   // 受取 (HistoryEntry) + 支払い (PayerReceipt) を時系列統合した ledger。方向は保存元で確定。
   const ledger = useMemo(() => buildLedger(entries, receipts), [entries, receipts]);
@@ -158,10 +161,15 @@ export function HistoryView() {
         usdcJpy={usdcJpy}
         csvLocked={csvLocked}
         csvLockReason={a1Locked ? 'fee' : 'pass'}
+        // pass ロック時に CSV ボタン押下で購入モーダルを開く (a1 延滞 'fee' では disabled なので無効)。
+        onCsvPassRequired={() => setPassModalOpen(true)}
+        // パス保持中の有効期限 (パス点灯 + status active 時のみ・bypass/未付与は null で「有効: …」非表示)。
+        csvPassExpiresAt={
+          passActive && passStatus.data?.active === true
+            ? (passStatus.data?.expiresAt ?? null)
+            : null
+        }
       />
-      {/* CSV がパスゲートでロックされ、かつ a1 延滞でない (a1 優先) ときに購入パネルを出す。
-          閲覧 (summaryAndList) はぼかさない — CSV パスは CSV のみのゲート。 */}
-      {!feeGated && passLocked && <CsvPassPaywall />}
       {feeGated ? (
         <div className="relative">
           <div
@@ -232,6 +240,13 @@ export function HistoryView() {
 
         <AccountingAffiliates />
       </section>
+
+      {/* CSV パス購入モーダル (W1)。CSV ボタン押下 (pass ロック時) で開く。購入成功で passLocked が
+          flip しても自動で閉じない (中の success 表示を見せる)。 */}
+      <CsvPassModal
+        open={passModalOpen}
+        onClose={() => setPassModalOpen(false)}
+      />
     </div>
   );
 }

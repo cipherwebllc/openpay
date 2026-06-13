@@ -1330,6 +1330,8 @@ describe('i18n: CsvPass 名前空間 (CSV 24時間パス paywall・ja/en parity)
     'granted',
     'grantedNoDate',
     'note',
+    'noteGasless',
+    'noteGasPaid',
   ] as const;
 
   for (const loc of [

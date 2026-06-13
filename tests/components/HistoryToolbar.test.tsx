@@ -62,9 +62,12 @@ function renderToolbar(
     usdcJpy: number | undefined;
     csvLocked: boolean;
     csvLockReason: 'fee' | 'pass';
+    onCsvPassRequired: () => void;
+    csvPassExpiresAt: number | null;
   }> = {},
 ) {
   const onFiltersChange = vi.fn();
+  const onCsvPassRequired = props.onCsvPassRequired ?? vi.fn();
   render(
     <HistoryToolbar
       entries={props.entries ?? []}
@@ -75,9 +78,11 @@ function renderToolbar(
       usdcJpy={props.usdcJpy}
       csvLocked={props.csvLocked ?? false}
       csvLockReason={props.csvLockReason}
+      onCsvPassRequired={onCsvPassRequired}
+      csvPassExpiresAt={props.csvPassExpiresAt ?? null}
     />,
   );
-  return { onFiltersChange };
+  return { onFiltersChange, onCsvPassRequired };
 }
 
 describe('HistoryToolbar', () => {
@@ -110,17 +115,44 @@ describe('HistoryToolbar', () => {
     expect(screen.getByText(/会計CSVのダウンロードを一時的に制限/)).toBeInTheDocument();
   });
 
-  it('csvLocked=true・reason=pass → CSV パス購入を促す cause-aware ノート (延滞文言ではない)', () => {
-    renderToolbar({ entries: [entry()], csvLocked: true, csvLockReason: 'pass' });
+  it('csvLocked=true・reason=pass → CSV系3ボタンは有効 + 🔒 ラベル + click で onCsvPassRequired + 一行ヒント', async () => {
+    const user = userEvent.setup();
+    const onCsvPassRequired = vi.fn();
+    renderToolbar({
+      entries: [entry()],
+      csvLocked: true,
+      csvLockReason: 'pass',
+      onCsvPassRequired,
+    });
+    // pass ロックではボタンは **disabled にせず** 🔒 を付けて click で購入導線を出す。
+    const csvBtn = screen.getByRole('button', {
+      name: /CSV ダウンロード 🔒/,
+    }) as HTMLButtonElement;
+    expect(csvBtn.disabled).toBe(false);
     expect(
-      (screen.getByRole('button', { name: 'CSV ダウンロード' }) as HTMLButtonElement)
+      (screen.getByRole('button', { name: /会計CSVを書き出し 🔒/ }) as HTMLButtonElement)
         .disabled,
-    ).toBe(true);
-    // パスゲートの文言: CSV 24時間パスの購入導線。a1 延滞専用文言は出ない (出し分けの核)。
+    ).toBe(false);
     expect(
-      screen.getByText(/CSV 24時間パスが必要です/),
+      (screen.getByRole('button', { name: /会計明細CSV 🔒/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    // click は export せず onCsvPassRequired を呼ぶ (購入モーダルを開く)。
+    await user.click(csvBtn);
+    expect(onCsvPassRequired).toHaveBeenCalledTimes(1);
+    // 一行ヒント (購入導線)。a1 延滞専用文言は出ない (出し分けの核)。
+    expect(
+      screen.getByText(/CSV は 24時間パス（100 JPYC）🔒/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/会計CSVのダウンロードを一時的に制限/)).toBeNull();
+  });
+
+  it('csvLocked=false + csvPassExpiresAt 指定 → 「パス有効: {date} まで」を表示', () => {
+    const expiresAt = Date.UTC(2026, 5, 14, 3, 30); // 2026/06/14 ...
+    renderToolbar({ entries: [entry()], csvPassExpiresAt: expiresAt });
+    // ロックなしでも有効期限が判明していれば残り有効を表示する。
+    expect(screen.getByText(/パス有効:/)).toBeInTheDocument();
+    expect(screen.getByText(/まで/)).toBeInTheDocument();
   });
 
   it('csvLocked=false (取引あり) → CSV系ボタン有効 + ノート非表示', () => {

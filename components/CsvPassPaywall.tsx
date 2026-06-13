@@ -6,7 +6,7 @@
 // 検証 + 付与。検証失敗時は再支払いさせず再検証導線を出す。FEE_RECEIVER 未設定時は支払いボタンを
 // 無効化する (未設定の宛先へ 100 JPYC を送らせない)。設計: plans/csv-pass.md。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { useSiweSession } from '@/hooks/useSiweSession';
@@ -35,6 +35,8 @@ export function CsvPassPaywall() {
     useSiweSession();
   // 支払い前の最終確認を経たか (100 JPYC/24時間/返金不可 等を提示してから署名させる)。
   const [confirmed, setConfirmed] = useState(false);
+  // relay 503 後のガスあり fallback は、ガスレス時の確認を流用せず別途同意を取る。
+  const [gasPaidFallbackConfirmed, setGasPaidFallbackConfirmed] = useState(false);
 
   const payDeployment = useMemo(
     () => (chainId != null ? resolveDeployment('jpyc', chainId) : undefined),
@@ -44,7 +46,17 @@ export function CsvPassPaywall() {
   // hook は常に有効な deployment で呼ぶ (条件付き呼出は不可)。実支払いは payDeployment 定義時のみ。
   const sub = useCsvPassSubscribe(payDeployment ?? defaultJpyc);
 
+  useEffect(() => {
+    if (!sub.gaslessUnavailable) return;
+    setConfirmed(false);
+    setGasPaidFallbackConfirmed(false);
+  }, [sub.gaslessUnavailable]);
+
   const feeReceiverReady = env.feeReceiverConfigured;
+  const gaslessMode = sub.gasless && !sub.gaslessUnavailable;
+  const activeConfirmed = sub.gaslessUnavailable
+    ? gasPaidFallbackConfirmed
+    : confirmed;
 
   return (
     <div className="rounded-2xl border border-amber-300 bg-white p-5 shadow-sm">
@@ -101,7 +113,10 @@ export function CsvPassPaywall() {
             <li>{t('confirmNoRefund')}</li>
             <li>{t('confirmNoStacking', { hours: CSV_PASS_GRANT_HOURS })}</li>
             <li>{t('confirmOverpay', { hours: CSV_PASS_GRANT_HOURS })}</li>
-            <li>{t('confirmGas')}</li>
+            {/* ガスレス時は「ガス代は当社負担」、ガスあり (fallback 確定後) は従来のガス代利用者負担。 */}
+            <li>
+              {gaslessMode ? t('confirmGasGasless') : t('confirmGas')}
+            </li>
           </ul>
 
           {!payDeployment ? (
@@ -136,15 +151,26 @@ export function CsvPassPaywall() {
             </div>
           ) : (
             <div className="space-y-2">
-              {!confirmed ? (
+              {/* 未解決の署名済 relay payload がある間は通常の購入 CTA を隠す (Codex P1):
+                  再署名 = 新 nonce = 二重支払いリスク。再試行 (同一署名の再送信) のみを提示する。
+                  engine 側 (startGasless/startGasPaid) にも同ガードがあり二重防御。 */}
+              {!activeConfirmed && !sub.canRetryRelay ? (
                 <button
                   type="button"
-                  onClick={() => setConfirmed(true)}
+                  onClick={() => {
+                    if (sub.gaslessUnavailable) {
+                      setGasPaidFallbackConfirmed(true);
+                    } else {
+                      setConfirmed(true);
+                    }
+                  }}
                   className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
                 >
                   {t('reviewCta', { price: CSV_PASS_PRICE_JPYC })}
                 </button>
-              ) : (
+              ) : activeConfirmed &&
+                !sub.canRetryRelay &&
+                !sub.gaslessUnavailable ? (
                 <button
                   type="button"
                   disabled={sub.isPaying || sub.isSubscribing}
@@ -155,21 +181,54 @@ export function CsvPassPaywall() {
                     ? t('paying')
                     : sub.isSubscribing
                       ? t('verifying')
-                      : t('payCta', { price: CSV_PASS_PRICE_JPYC })}
+                      : // ガスレス可なら「署名のみ・ガス代不要」CTA、不可ならガスあり CTA。
+                        gaslessMode
+                        ? t('payCtaGasless', { price: CSV_PASS_PRICE_JPYC })
+                        : t('payCta', { price: CSV_PASS_PRICE_JPYC })}
+                </button>
+              ) : null}
+              {/* ガスレス relay が pending(hash 無し) で宙吊り → 同一署名を再送信 (再署名しない)。 */}
+              {sub.canRetryRelay && (
+                <button
+                  type="button"
+                  disabled={sub.isPaying || sub.isSubscribing}
+                  onClick={sub.retryRelay}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t('retryRelay')}
                 </button>
               )}
-              {sub.isPayError && (
-                <p className="text-[11px] text-red-600">
-                  {t('payError', { reason: sub.error?.message ?? 'error' })}
-                </p>
+              {/* relay 未構成 (503) → 自動フォールバックはせず、明示の「ガスありで送金して購入」を出す。 */}
+              {sub.gaslessUnavailable && (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-amber-700">
+                    {t('relayUnavailable')}
+                  </p>
+                  {gasPaidFallbackConfirmed && (
+                    <button
+                      type="button"
+                      disabled={sub.isPaying || sub.isSubscribing}
+                      onClick={sub.startGasPaid}
+                      className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {t('fallbackGasPaid')}
+                    </button>
+                  )}
+                </div>
               )}
+              {sub.isPayError &&
+                (!sub.gaslessUnavailable || gasPaidFallbackConfirmed) && (
+                  <p className="text-[11px] text-red-600">
+                    {t('payError', { reason: sub.error?.message ?? 'error' })}
+                  </p>
+                )}
             </div>
           )}
         </div>
       )}
 
       <p className="mt-3 text-[10px] leading-relaxed text-slate-400">
-        {t('note')}
+        {t('note')} {gaslessMode ? t('noteGasless') : t('noteGasPaid')}
       </p>
     </div>
   );

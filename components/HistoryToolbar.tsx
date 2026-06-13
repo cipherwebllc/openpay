@@ -76,6 +76,8 @@ export function HistoryToolbar({
   usdcJpy,
   csvLocked = false,
   csvLockReason = 'fee',
+  onCsvPassRequired,
+  csvPassExpiresAt = null,
 }: {
   /** 会計用の受取(収入)entries (= summary/CSV 対象・direction フィルタ非適用)。 */
   entries: HistoryEntry[];
@@ -84,18 +86,32 @@ export function HistoryToolbar({
   counts: { all: number; jpyc: number; usdc: number };
   directionCounts: { all: number; in: number; out: number };
   usdcJpy: number | undefined;
-  /** CSV ダウンロードゲート。true で CSV 系ボタンを無効化する。
-   *  閲覧 (フィルタ/集計/一覧) は無料なので影響しない。利用料/購入 paywall は親 (HistoryView) が出す。 */
+  /** CSV ダウンロードゲート。true で CSV 系ボタンをロックする。
+   *  閲覧 (フィルタ/集計/一覧) は無料なので影響しない。利用料/購入導線は親 (HistoryView) が出す。 */
   csvLocked?: boolean;
-  /** ロック理由。説明文言を出し分ける: 'fee'=a1 利用料延滞 / 'pass'=CSV 24時間パス未保持。
-   *  Codex 指摘: 旧実装は延滞専用の文章のみで、パスゲート時に文脈の合わない案内が出ていた。 */
+  /** ロック理由。挙動・説明を出し分ける: 'fee'=a1 利用料延滞 (disabled・延滞文言) /
+   *  'pass'=CSV 24時間パス未保持 (ボタンは有効・🔒・click で onCsvPassRequired・購入モーダル)。 */
   csvLockReason?: 'fee' | 'pass';
+  /** pass ロック時に CSV ボタン押下で呼ぶ (= 購入モーダルを開く)。reason 'pass' でのみ意味を持つ。 */
+  onCsvPassRequired?: () => void;
+  /** パス保持中の有効期限 (ms)。非 null のとき「パス有効: {date} まで」を表示 (bypass は null で非表示)。 */
+  csvPassExpiresAt?: number | null;
 }) {
   const t = useTranslations('History');
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
   const [fromDay, setFromDay] = useState('');
   const [toDay, setToDay] = useState('');
   const [acctFormat, setAcctFormat] = useState<AccountingFormat>('freee');
+
+  // pass ロック (CSV 24時間パス未保持) は **ボタンを無効化せず** 🔒 を付けて click で購入モーダルを開く。
+  // fee ロック (a1 利用料延滞) は従来どおり disabled (支払いは /billing 経由)。
+  const passLock = csvLocked && csvLockReason === 'pass';
+  const feeLock = csvLocked && csvLockReason === 'fee';
+  // CSV ボタンの disabled: entries 空 or fee ロックのみ (pass ロックは有効のまま購入導線へ誘導)。
+  const csvButtonsDisabled = (extra = false) =>
+    entries.length === 0 || feeLock || extra;
+  // pass ロック中はラベルに 🔒 を付ける (有効だが購入が必要だと示す)。
+  const lockSuffix = passLock ? ' 🔒' : '';
 
   const set = (patch: Partial<HistoryFilters>) =>
     onFiltersChange({ ...filters, ...patch });
@@ -109,8 +125,17 @@ export function HistoryToolbar({
     return set(dayRangeToTsBounds(fromDay || null, toDay || null));
   }
 
+  // pass ロック中は export せず購入モーダルを開く / fee ロック中は何もしない (ボタン disabled の二重防御)。
+  function exportGuard(): boolean {
+    if (passLock) {
+      onCsvPassRequired?.();
+      return true; // ブロック (export しない)
+    }
+    return csvLocked; // fee ロックは hard return
+  }
+
   function handleExport() {
-    if (csvLocked) return; // ボタンは disabled だが念のためガード (利用権未満)。
+    if (exportGuard()) return;
     // usdcJpy は v5 税額(円) 列で anchor 無し USDC を円換算するのに使う (JPYC は不要)。
     const blob = new Blob([toCsv(entries, { usdcJpy })], {
       type: 'text/csv;charset=utf-8',
@@ -119,7 +144,7 @@ export function HistoryToolbar({
   }
 
   function handleAccountingExport() {
-    if (csvLocked) return; // ボタンは disabled だが念のためガード (利用権未満)。
+    if (exportGuard()) return;
     const r = toAccountingCsv(entries, { format: acctFormat, usdcJpy });
     if (!r.ok) {
       const msg =
@@ -147,7 +172,7 @@ export function HistoryToolbar({
 
   // 会計明細CSV: 1 商品 1 行 (混在税率の行別税額を正確に出す。仕訳CSV は 1 取引 1 行)。
   function handleLineItemsExport() {
-    if (csvLocked) return; // ボタンは disabled だが念のためガード (利用権未満)。
+    if (exportGuard()) return;
     const r = toLineItemsCsv(entries);
     if (!r.ok) {
       window.alert(t('accountingNoRows'));
@@ -269,10 +294,11 @@ export function HistoryToolbar({
           <button
             type="button"
             onClick={handleExport}
-            disabled={entries.length === 0 || csvLocked}
+            disabled={csvButtonsDisabled()}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportCsv')}
+            {lockSuffix}
           </button>
           <span className="mx-1 h-4 w-px bg-slate-200" aria-hidden />
           <label className="text-[11px] text-slate-500">{t('accountingFormatLabel')}</label>
@@ -280,7 +306,7 @@ export function HistoryToolbar({
             value={acctFormat}
             onChange={(e) => setAcctFormat(e.target.value as AccountingFormat)}
             aria-label={t('accountingFormatLabel')}
-            disabled={csvLocked}
+            disabled={entries.length === 0 || feeLock}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value="freee">{t('accountingFormatFreee')}</option>
@@ -291,18 +317,20 @@ export function HistoryToolbar({
           <button
             type="button"
             onClick={handleAccountingExport}
-            disabled={entries.length === 0 || csvLocked}
+            disabled={csvButtonsDisabled()}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportAccountingCsv')}
+            {lockSuffix}
           </button>
           <button
             type="button"
             onClick={handleLineItemsExport}
-            disabled={entries.length === 0 || csvLocked}
+            disabled={csvButtonsDisabled()}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('exportLineItemsCsv')}
+            {lockSuffix}
           </button>
         </div>
         <button
@@ -314,16 +342,37 @@ export function HistoryToolbar({
           {t('clearAll')}
         </button>
       </div>
-      {csvLocked && (
+      {/* ロック理由別の一行ヒント (長文の説明パネルは廃止し、ボタン近くに簡潔に出す)。
+          pass = 購入導線の一行ヒント (🔒)・fee = a1 延滞の従来文言。 */}
+      {passLock && (
         <p className="text-[11px] font-medium text-amber-700">
-          {csvLockReason === 'pass'
-            ? t('csvPassLockedNote')
-            : t('csvLockedNote')}
+          {t('csvPassHint')}
+        </p>
+      )}
+      {feeLock && (
+        <p className="text-[11px] font-medium text-amber-700">
+          {t('csvLockedNote')}
+        </p>
+      )}
+      {/* パス保持中 (未ロック + 有効期限が判明) は残り有効期限を表示。bypass は expiresAt=null で非表示。 */}
+      {!csvLocked && csvPassExpiresAt != null && (
+        <p className="text-[11px] font-medium text-emerald-700">
+          {t('csvPassValidUntil', { date: formatPassDate(csvPassExpiresAt) })}
         </p>
       )}
       <p className="text-[11px] text-slate-400">{t('accountingIncomeOnlyNote')}</p>
     </div>
   );
+}
+
+// パス有効期限 (ms) の表示用整形 (YYYY/MM/DD HH:mm・CsvPassPaywall と同形)。
+function formatPassDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(
+    d.getDate(),
+  ).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(
+    d.getMinutes(),
+  ).padStart(2, '0')}`;
 }
 
 // 各フィルタ行の左に置く軸見出し (種別/通貨/状態)。group に aria-label があるため

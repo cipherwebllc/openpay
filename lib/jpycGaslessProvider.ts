@@ -11,7 +11,7 @@ export type JpycGaslessProvider = 'eip3009-relay' | 'pimlico-7702';
 // EIP-3009 relay (自前 relayer) が対応する chain。/api/relay/jpyc の SUPPORTED_CHAINS と一致させる。
 // Polygon は当初 Gelato だったが自前 relayer に移行済。Kaia は Gelato 非対応のため当初除外していたが、
 // 自前 relayer 化で対応可能になった (relayer EOA に KAIA を入金して中継)。
-const EIP3009_RELAY_CHAINS: ReadonlySet<number> = new Set([
+export const EIP3009_RELAY_CHAINS: ReadonlySet<number> = new Set([
   polygon.id,
   polygonAmoy.id,
   kaia.id,
