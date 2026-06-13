@@ -89,6 +89,14 @@ function parseBoundedNonNegativeInt(
   return n;
 }
 
+/** boolean env flag のパース。'1' または 'true' のみ真 (現行の `=== '1' || === 'true'` と
+ *  バイト等価: trim/小文字化はしない)。複数 flag 定義の重複を単一情報源化する (§8.3)。
+ *  ※ 意図的に別実装で残す例外: billingMeter ('1' のみ) / x402 ('true' のみ) /
+ *    entitlement.entitlementBypass (trim+小文字化 + '1/true/yes/on'・既定ON・fail-closed)。 */
+export function parseBoolFlag(raw: string | undefined): boolean {
+  return raw === '1' || raw === 'true';
+}
+
 const networkEnvRaw = nonEmpty(process.env.NEXT_PUBLIC_NETWORK_ENV) ?? 'testnet';
 if (networkEnvRaw !== 'mainnet' && networkEnvRaw !== 'testnet') {
   throw new Error(
@@ -341,48 +349,42 @@ export const env = {
   // HashPort wallet など EOA が MAv2 へ 7702 委任済のケースで動かす。
   // Pimlico bundler が MAv2 sender を accept するか実機で確認するまでは
   // 既定 OFF。'1' / 'true' で ON。
-  enableMav2:
-    process.env.NEXT_PUBLIC_ENABLE_MAV2 === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_MAV2 === 'true',
+  enableMav2: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MAV2),
   // MetaMask Smart Account (Stateless7702) ガスレス経路の有効化フラグ。**既定 OFF**。
   // 現在 viem 2.50 の ERC-7739 same-address ガードと delegation-toolkit 0.13.0 の
   // 非互換で署名が全件失敗するため無効化し standard mode に倒している
   // (hooks/useSmartAccount.ts)。upstream 互換修正 + 実機再検証後に '1'/'true' で再有効化。
-  enableMetaMaskSmartAccount:
-    process.env.NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT === 'true',
+  enableMetaMaskSmartAccount: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT,
+  ),
   // Circle Paymaster (USDC ガスレスを Pimlico erc20 → Circle 公式 paymaster に
   // 切替える) の有効化フラグ。既定 OFF で投入し testnet 検証 → mainnet 1 chain
   // (Base) と段階展開する。OFF の間は USDC ガスレスは従来通り Pimlico erc20。
   // '1' / 'true' で ON。⚠️ Circle paymaster アドレスは lib/circlePaymaster.ts の
   // hardcode allowlist が SoT で env override は持たせない (permit spender =
   // 信頼境界のため、任意 override は顧客 USDC 流出に直結する)。
-  enableCirclePaymaster:
-    process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER === 'true',
+  enableCirclePaymaster: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER,
+  ),
   // JPYC ガスレスを EIP-3009 (transferWithAuthorization + Gelato relayer) で行う経路の
   // 有効化フラグ。**既定 OFF**。ON にするのは server に GELATO_SPONSOR_API_KEY を設定し
   // 1Balance を入金した時のみ (両者は運用者が同時に揃える前提)。OFF の間は JPYC ガスレスは
   // 従来通り Pimlico/7702 sponsorship。委任不要で injected wallet でも動くため到達が広い
   // (memory:jpyc-eip3009)。'1' / 'true' で ON。
-  enableJpycEip3009:
-    process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009 === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009 === 'true',
+  enableJpycEip3009: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009,
+  ),
   // freee 自動連携パネル (/history の SIWE ログイン + 「freee に同期」) の有効化フラグ。
   // **既定 OFF (dark ship)**。会計 API の req/resp 形が実プラン freee で未検証のため、
   // 検証が済むまで本番では出さない。kill-switch も兼ねる (問題時に OFF でパネル即非表示)。
   // OFF でも CSV 書き出し (履歴) は従来通り使える。'1' / 'true' で ON。
-  enableFreeeSync:
-    process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC === 'true',
+  enableFreeeSync: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC),
   // a1 OpenPay 利用料 (月次・出来高 1%・gasless relay 関所ゲート + 利用料清算 + /history 延滞ぼかし/
   // CSV ロック) の有効化フラグ。**既定 OFF**。OFF の間は relay 関所も /api/billing/* も OpenPayFeePanel も
   // /history ゲートも inert (メーター記録は BILLING_METER_DISABLED で別管理・既定 ON)。本命の課金モデル。
   // 点灯 = flag ON + ALPHA_ENTITLEMENT_BYPASS=0 + OPENPAY_USAGE_FEE_START_PERIOD 設定。
   // 注: 旧 NEXT_PUBLIC_ENABLE_BILLING (¥4,980/年 CSV tier) は a1 への一本化で退役済 (2026-06-09)。
-  enableUsageFee:
-    process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE === 'true',
+  enableUsageFee: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE),
   // recover (forwarder) モードの per-tx サービス手数料率 (basis points)。**既定 0 (= inert)**。
   // recover の徴収額は lib/relay/recoverFee.ts の recoverFeeValue で
   // max(ガス回収フロア, billAmount × bps/10000) として計算する。0 のときは常にフロア
@@ -398,25 +400,19 @@ export const env = {
   // @handle 恒久クリエイターリンク (open-pay.jp/@alice) の有効化フラグ。**既定 OFF**。
   // OFF の間は /@handle ページ・/api/handle/* ・dashboard の claim UI すべて inert
   // (404/非表示)。staged rollout 用 (testnet + モデレーション体制確認後に点灯)。要 KV。
-  enableHandles:
-    process.env.NEXT_PUBLIC_ENABLE_HANDLES === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_HANDLES === 'true',
+  enableHandles: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_HANDLES),
   // OpenPay Pro (月額固定 ¥500=500 JPYC の前払いサブスク・ゲート対象 = CSV ダウンロードのみ) の
   // 有効化フラグ (client 露出)。**既定 OFF**。OFF の間は /api/pro/* は 404・ProPaywall 非表示・
   // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
   // per-tx の recover 手数料 (NEXT_PUBLIC_RECOVER_FEE_BPS) / a1 利用料とは別系統の収益で両立する。
   // 設計: plans/pro-plan.md。'1' / 'true' で ON。
-  enablePro:
-    process.env.NEXT_PUBLIC_ENABLE_PRO === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_PRO === 'true',
+  enablePro: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_PRO),
   // CSV 24時間パス (都度 100 JPYC・ゲート対象 = 会計CSVダウンロードのみ) の有効化フラグ
   // (client 露出)。**既定 OFF**。OFF の間は /api/csv-pass/* は 404・CsvPassPaywall 非表示・
   // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
   // Pro (月額固定) とは別系統 (CSV ゲートは都度パスへ置換・Pro は温存して将来傘へ)・recover 手数料 /
   // a1 利用料とも両立する。Pro ⊃ CSV (有効な pro:exp はパス無しでも CSV を解放)。設計: plans/csv-pass.md。
-  enableCsvPass:
-    process.env.NEXT_PUBLIC_ENABLE_CSV_PASS === '1' ||
-    process.env.NEXT_PUBLIC_ENABLE_CSV_PASS === 'true',
+  enableCsvPass: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_CSV_PASS),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

@@ -26,7 +26,7 @@ import {
   worldchainSepolia,
 } from 'viem/chains';
 import type { Address } from 'viem';
-import { isMainnet } from '../env';
+import { isMainnet, parseBoolFlag } from '../env';
 import {
   CIRCLE_DOMAIN_ARBITRUM,
   CIRCLE_DOMAIN_AVALANCHE,
@@ -90,17 +90,17 @@ export const CIRCLE_GATEWAY_API_BASE_URL: string =
       : CIRCLE_GATEWAY_API_TESTNET;
 
 // demo route mount control (default false = production で 404)。
-export const EXPERIMENTAL_CROSS_CHAIN_ENABLED: boolean =
-  process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED === '1' ||
-  process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED === 'true';
+export const EXPERIMENTAL_CROSS_CHAIN_ENABLED: boolean = parseBoolFlag(
+  process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED,
+);
 
 // Incident kill switch: Circle attestation API mass failure / Sentry で
 // cross-chain.execute.failed の急増を観測した時、operator が Vercel env で
 // "true" / "1" を設定すると CrossChainHint が non-mount になる (redeploy 不要)。
 // merchant 個別 opt-out (URL crossChain=false) より優先される global guard。
-export const CROSS_CHAIN_DISABLED: boolean =
-  process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED === '1' ||
-  process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED === 'true';
+export const CROSS_CHAIN_DISABLED: boolean = parseBoolFlag(
+  process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED,
+);
 
 // chainId → Circle domain (CCTP/Gateway 共通、mainnet/testnet 同一 domain ID)。
 const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
