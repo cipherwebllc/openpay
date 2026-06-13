@@ -14,7 +14,7 @@ import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
-type QrSettings = {
+export type QrSettings = {
   receiver: string;
   // 受取先アドレスの由来。'auto' = 接続ウォレットからの自動補完 (ウォレット切替に追従)、
   // 'manual' = ユーザが手入力 / 既存保存値 (切替で据置)。useReceiverAutofill が更新する。
