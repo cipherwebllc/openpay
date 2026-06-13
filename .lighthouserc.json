@@ -38,6 +38,7 @@
         "non-composited-animations": "off",
         "prioritize-lcp-image": "off",
         "color-contrast": "off",
+        "target-size": "warn",
         "bf-cache": "off",
         "errors-in-console": "off",
         "meta-description": "off"

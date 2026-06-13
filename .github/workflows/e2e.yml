@@ -14,7 +14,8 @@ env:
 jobs:
   playwright:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # chromium+webkit の 2 ブラウザ suite が 20 分に収まらず cancelled していたため 30 分へ。
+    timeout-minutes: 30
     env:
       NEXT_PUBLIC_NETWORK_ENV: testnet
       NEXT_PUBLIC_PIMLICO_API_KEY: dummy_for_build
