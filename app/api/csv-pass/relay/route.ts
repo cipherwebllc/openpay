@@ -31,49 +31,21 @@ import {
   relayFreeAuthorization,
 } from '@/lib/relay/relayProvider';
 import { isKvConfigured } from '@/lib/kv';
-import type { RelayResult } from '@/lib/relay/jpycRelay';
+import {
+  MAX_BODY_BYTES,
+  isDec,
+  anonymizeIp,
+  makeRespond,
+} from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
 
-const MAX_BODY_BYTES = 4 * 1024;
 const CSV_PASS_RELAY_MAX_MULTIPLE = 10n;
 
-function isDec(v: unknown): v is string {
-  return typeof v === 'string' && /^[0-9]+$/.test(v);
-}
-
-function anonymizeIp(ip: string): string {
-  const first = ip.split(',')[0].trim();
-  if (first.includes(':')) return first.split(':').slice(0, 4).join(':') + '::/64';
-  const p = first.split('.');
-  return p.length === 4 ? `${p[0]}.${p[1]}.${p[2]}.0/24` : 'unknown';
-}
-
-// 結果 → HTTP 応答 (決済 relay の respond と同形)。pending は 202 で client に fallback 禁止を伝える。
-function respond(result: RelayResult, chainId: number): NextResponse {
-  switch (result.kind) {
-    case 'success':
-      return NextResponse.json({ ok: true, txHash: result.txHash });
-    case 'reverted':
-      logger.warn('csvpass.relay.reverted', { txHash: result.txHash, chainId });
-      return NextResponse.json({ ok: false, reverted: true, txHash: result.txHash });
-    case 'pending':
-      // broadcast 済だが未確定。client は standard へ fallback してはならない (二重支払い防止)。
-      logger.warn('csvpass.relay.pending', { txHash: result.txHash, chainId });
-      return NextResponse.json(
-        { ok: false, pending: true, txHash: result.txHash ?? null },
-        { status: 202 },
-      );
-    case 'rejected':
-      return NextResponse.json(
-        { ok: false, error: result.reason },
-        { status: result.httpStatus },
-      );
-    case 'relay_error':
-      logger.warn('csvpass.relay.relay_error', { detail: result.detail, chainId });
-      return NextResponse.json({ ok: false, error: 'relay_error' }, { status: 502 });
-  }
-}
+// MAX_BODY_BYTES / isDec / anonymizeIp / respond は共有 relayRoute へ集約 (決済 relay と同形)。
+// respond は logger イベント prefix を 'csvpass.relay' で束ね、現行のイベント名を完全再現する
+// (応答 body/status は決済 relay と同形)。
+const respond = makeRespond('csvpass.relay');
 
 export async function POST(req: Request): Promise<NextResponse> {
   // flag-off は **認証より前** に 404 (subscribe/pro/billing と同型・inert を最優先)。

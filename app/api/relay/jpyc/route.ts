@@ -27,7 +27,6 @@ import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { recordRelayedVolume } from '@/lib/billingMeter';
 import { isGaslessRelayBlocked } from '@/lib/feeGate';
-import type { RelayResult } from '@/lib/relay/jpycRelay';
 import {
   PROVIDER,
   MAX_VALUE,
@@ -62,12 +61,19 @@ import {
   refundGasBudget,
   makeIdempotency,
 } from '@/lib/relay/relayGuards';
+import {
+  MAX_BODY_BYTES,
+  isDec,
+  anonymizeIp,
+  makeRespond,
+} from '@/lib/relay/relayRoute';
 import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
-const MAX_BODY_BYTES = 4 * 1024;
+// MAX_BODY_BYTES / isDec / anonymizeIp / respond は共有 relayRoute へ集約 (CSV パス relay と同形)。
+// respond は logger イベント prefix を 'relay.jpyc' で束ね、現行のイベント名を完全再現する。
 
 // CDX-1: forwarder の immutable getter (Eip3009Forwarder.token / feeReceiver)。健全性チェックで読む。
 const FORWARDER_GETTERS_ABI = parseAbi([
@@ -241,16 +247,9 @@ if (env.enableUsageFee) {
 const { claimIdempotency, recordRelayHash, releaseIdempotency } =
   makeIdempotency('relay:idem:');
 
-function anonymizeIp(ip: string): string {
-  const first = ip.split(',')[0].trim();
-  if (first.includes(':')) return first.split(':').slice(0, 4).join(':') + '::/64';
-  const p = first.split('.');
-  return p.length === 4 ? `${p[0]}.${p[1]}.${p[2]}.0/24` : 'unknown';
-}
-
-function isDec(v: unknown): v is string {
-  return typeof v === 'string' && /^[0-9]+$/.test(v);
-}
+// 結果 → HTTP 応答 (free / recover 共通)。共有 makeRespond に prefix 'relay.jpyc' を束ねて、
+// 従来のイベント名 (relay.jpyc.reverted / .pending / .relay_error) と応答 body/status を完全再現する。
+const respond = makeRespond('relay.jpyc');
 
 export async function POST(req: Request): Promise<NextResponse> {
   // relay 未構成なら早期に signal (client が fallback 判定できるよう専用コード)。
@@ -361,32 +360,6 @@ export async function POST(req: Request): Promise<NextResponse> {
   return recoverMode
     ? handleRecover(raw, chainId, ipPrefix)
     : handleFree(raw, chainId, ipPrefix);
-}
-
-// 結果 → HTTP 応答 (free / recover 共通)。pending は 202 で client に fallback 禁止を伝える。
-function respond(result: RelayResult, chainId: number): NextResponse {
-  switch (result.kind) {
-    case 'success':
-      return NextResponse.json({ ok: true, txHash: result.txHash });
-    case 'reverted':
-      logger.warn('relay.jpyc.reverted', { txHash: result.txHash, chainId });
-      return NextResponse.json({ ok: false, reverted: true, txHash: result.txHash });
-    case 'pending':
-      // broadcast 済だが未確定。client は standard へ fallback してはならない (二重支払い防止)。
-      logger.warn('relay.jpyc.pending', { txHash: result.txHash, chainId });
-      return NextResponse.json(
-        { ok: false, pending: true, txHash: result.txHash ?? null },
-        { status: 202 },
-      );
-    case 'rejected':
-      return NextResponse.json(
-        { ok: false, error: result.reason },
-        { status: result.httpStatus },
-      );
-    case 'relay_error':
-      logger.warn('relay.jpyc.relay_error', { detail: result.detail, chainId });
-      return NextResponse.json({ ok: false, error: 'relay_error' }, { status: 502 });
-  }
 }
 
 // free モード: 直接 transferWithAuthorization (Phase A)。relayer が token に直接 submit。
