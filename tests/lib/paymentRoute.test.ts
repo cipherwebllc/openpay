@@ -176,3 +176,72 @@ describe('resolvePaymentRoute — 経路ごとの代表例 (現行 CheckoutForm 
     expect(isCircleRoute(route)).toBe(false);
   });
 });
+
+describe('resolvePaymentRoute — disableRelay (PaymentForm の split 専用ガード)', () => {
+  // disableRelay は PaymentForm の `useRelay = !isStandard && !hasSplit && ...` の `!hasSplit` に対応。
+  // split 決済では relay (Phase 1 単発のみ) を抑止し、JPYC は非 relay の Pimlico 経路 (USDC provider は
+  // JPYC で常に 'pimlico')、USDC は circle 判定不変 (現行 isCircle は split を gate しない) になる。
+  // CheckoutForm は split 非対応で disableRelay を渡さない (省略 = false = relay 抑止なし)。
+
+  it('省略時は relay 抑止なし (CheckoutForm 現行挙動): JPYC relay 解決 → relay', () => {
+    expect(
+      resolvePaymentRoute({
+        isStandard: false,
+        jpycGaslessProvider: 'eip3009-relay',
+        usdcGaslessProvider: 'pimlico',
+        hasJpycForwarder: false,
+      }),
+    ).toEqual({ kind: 'relay', recover: false });
+  });
+
+  it('disableRelay=false は省略と同値 (relay 解決 → relay)', () => {
+    expect(
+      resolvePaymentRoute({
+        isStandard: false,
+        jpycGaslessProvider: 'eip3009-relay',
+        usdcGaslessProvider: 'pimlico',
+        hasJpycForwarder: true,
+        disableRelay: false,
+      }),
+    ).toEqual({ kind: 'relay', recover: true });
+  });
+
+  it('JPYC split (disableRelay=true): relay 抑止 → gasless/pimlico (USDC provider は JPYC で常に pimlico)', () => {
+    expect(
+      resolvePaymentRoute({
+        isStandard: false,
+        jpycGaslessProvider: 'eip3009-relay',
+        usdcGaslessProvider: 'pimlico',
+        hasJpycForwarder: true,
+        disableRelay: true,
+      }),
+    ).toEqual({ kind: 'gasless', provider: 'pimlico' });
+  });
+
+  it('USDC split + circle (disableRelay=true): relay は元々非成立なので circle 判定は不変', () => {
+    // USDC deployment では jpycProvider が常に 'pimlico-7702' で relay にならないため、
+    // disableRelay の有無に関わらず circle に倒れる (現行 PaymentForm の isCircle が split を gate
+    // しないのと一致)。
+    const route = resolvePaymentRoute({
+      isStandard: false,
+      jpycGaslessProvider: 'pimlico-7702',
+      usdcGaslessProvider: 'circle',
+      hasJpycForwarder: false,
+      disableRelay: true,
+    });
+    expect(route).toEqual({ kind: 'gasless', provider: 'circle' });
+    expect(isCircleRoute(route)).toBe(true);
+  });
+
+  it('standard は disableRelay より優先 (standard 最優先は不変)', () => {
+    expect(
+      resolvePaymentRoute({
+        isStandard: true,
+        jpycGaslessProvider: 'eip3009-relay',
+        usdcGaslessProvider: 'pimlico',
+        hasJpycForwarder: true,
+        disableRelay: true,
+      }),
+    ).toEqual({ kind: 'standard' });
+  });
+});

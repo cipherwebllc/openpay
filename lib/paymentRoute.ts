@@ -28,8 +28,8 @@ export type PaymentRoute =
   | { kind: 'relay'; recover: boolean }
   | { kind: 'gasless'; provider: 'pimlico' | 'circle' };
 
-// resolvePaymentRoute の入力。すべて呼出側 (CheckoutForm) が現行どおりに算出する**解決済み値**で、
-// ここで env / chain を再解決しない (= 判定の単一情報源を resolver 群に保つ)。
+// resolvePaymentRoute の入力。すべて呼出側 (CheckoutForm / PaymentForm) が現行どおりに算出する
+// **解決済み値**で、ここで env / chain を再解決しない (= 判定の単一情報源を resolver 群に保つ)。
 export type PaymentRouteInput = {
   // params.mode === 'standard' || modeOverride === 'standard' (SA fallback 後の override 込み)。
   isStandard: boolean;
@@ -39,14 +39,24 @@ export type PaymentRouteInput = {
   usdcGaslessProvider: UsdcGaslessProvider;
   // jpycForwarderFor(chainId) !== null。relay 経路で recover (回収) か free かを分ける。
   hasJpycForwarder: boolean;
+  // relay (EIP-3009) 経路を無効化して非 relay 経路 (gasless/pimlico|circle) に倒すか。
+  // PaymentForm の split 決済専用ガード: Phase 1 relay は単発 transfer のみのため、split 指定時は
+  // 従来の Pimlico 7702 経路で複数受取人をバッチ送金する (= 現行 PaymentForm の
+  // `useRelay = !isStandard && !hasSplit && provider==='eip3009-relay'` の `!hasSplit`)。
+  // 省略時は false で relay 抑止なし (CheckoutForm は split 非対応なので渡さない = 現行挙動を維持)。
+  disableRelay?: boolean;
 };
 
 /**
- * 現行 CheckoutForm の経路判定を**そのまま**再現する純関数。優先順位・短絡は現行コードと一致:
+ * 現行 CheckoutForm / PaymentForm の経路判定を**そのまま**再現する純関数。優先順位・短絡は
+ * 現行コードと一致:
  *   1. isStandard が最優先 (現行の useRelay / isCircle は両方 `!isStandard` で gate されているため、
  *      standard のときは relay も circle も成立しない)。
- *   2. 非 standard かつ JPYC provider='eip3009-relay' → relay。recover は forwarder 設定の有無で決まる
- *      (現行: useRecover = useRelay && jpycForwarderFor(...) !== null)。
+ *   2. 非 standard かつ relay 無効化なし (disableRelay !== true) かつ JPYC provider='eip3009-relay'
+ *      → relay。recover は forwarder 設定の有無で決まる
+ *      (現行: useRecover = useRelay && jpycForwarderFor(...) !== null)。disableRelay は PaymentForm の
+ *      split 専用ガードで、現行 `useRelay = !isStandard && !hasSplit && ...` の `!hasSplit` に対応する
+ *      (CheckoutForm は split 非対応で渡さない = relay 抑止なし)。
  *   3. 非 standard かつ非 relay かつ USDC provider='circle' → gasless/circle
  *      (現行: isCircle = !isStandard && resolveUsdcGaslessProvider(...) === 'circle')。
  *   4. それ以外 → gasless/pimlico (従来の Pimlico erc20 / sponsorship 経路)。
@@ -54,10 +64,13 @@ export type PaymentRouteInput = {
  * 注: relay と circle は現行コードでは独立フラグだが、JPYC deployment では USDC provider が常に
  * 'pimlico'、USDC deployment では JPYC provider が常に 'pimlico-7702' になるため実際には排他で、
  * relay を circle より先に評価しても挙動は変わらない (token が両者を同時に満たすことはない)。
+ * disableRelay も同様に排他性を崩さない: JPYC split では relay を抑止して pimlico に倒れ
+ * (USDC provider は JPYC で常に 'pimlico')、USDC split では relay は元々成立しないため circle 判定は
+ * 不変 (現行 isCircle が split を gate しないのと一致)。
  */
 export function resolvePaymentRoute(input: PaymentRouteInput): PaymentRoute {
   if (input.isStandard) return { kind: 'standard' };
-  if (input.jpycGaslessProvider === 'eip3009-relay') {
+  if (!input.disableRelay && input.jpycGaslessProvider === 'eip3009-relay') {
     return { kind: 'relay', recover: input.hasJpycForwarder };
   }
   if (input.usdcGaslessProvider === 'circle') {
