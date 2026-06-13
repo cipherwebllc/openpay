@@ -381,8 +381,11 @@ export const env = {
   enableFreeeSync: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC),
   // a1 OpenPay 利用料 (月次・出来高 1%・gasless relay 関所ゲート + 利用料清算 + /history 延滞ぼかし/
   // CSV ロック) の有効化フラグ。**既定 OFF**。OFF の間は relay 関所も /api/billing/* も OpenPayFeePanel も
-  // /history ゲートも inert (メーター記録は BILLING_METER_DISABLED で別管理・既定 ON)。本命の課金モデル。
-  // 点灯 = flag ON + ALPHA_ENTITLEMENT_BYPASS=0 + OPENPAY_USAGE_FEE_START_PERIOD 設定。
+  // /history ゲートも inert (メーター記録は BILLING_METER_DISABLED で別管理・既定 ON)。
+  // ⚠️当面棚上げ (2026-06-14 ユーザ決定): 一次収益化は per-tx の recover 手数料
+  // (NEXT_PUBLIC_RECOVER_FEE_BPS・max(2 JPYC, 1%)・決済時に申し受け) であり、この月額アカウント
+  // 計量モデルは使わない。将来の新機能への転用用に flag/実装を温存する。
+  // (点灯する場合は flag ON + ALPHA_ENTITLEMENT_BYPASS=0 + OPENPAY_USAGE_FEE_START_PERIOD 設定。)
   // 注: 旧 NEXT_PUBLIC_ENABLE_BILLING (¥4,980/年 CSV tier) は a1 への一本化で退役済 (2026-06-09)。
   enableUsageFee: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE),
   // recover (forwarder) モードの per-tx サービス手数料率 (basis points)。**既定 0 (= inert)**。
