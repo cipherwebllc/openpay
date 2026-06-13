@@ -262,6 +262,8 @@
     "downloadSvg": "Save SVG",
     "downloadPng": "Save PNG",
     "localGenNote": "This QR is generated on your device (no network needed) — it works even with no signal.",
+    "paymentWatching": "Watching for payment… (confirmed here)",
+    "paymentReceived": "Payment received ✓ (+{amount})",
     "printPoster": "Print",
     "posterEyebrow": "OpenPay payment QR",
     "posterDefaultStoreName": "Scan to pay",

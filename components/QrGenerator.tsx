@@ -69,7 +69,8 @@ import type { GasMode, PayMode } from '@/lib/fee';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { isLikelyName } from '@/lib/nameDetection';
-import { pickEffectiveAddress, shortAddress } from '@/lib/format';
+import { pickEffectiveAddress, shortAddress, formatTokenAmount } from '@/lib/format';
+import { useIncomingPaymentWatch } from '@/hooks/useIncomingPaymentWatch';
 import { normalizeAmountList, truncateAmount } from '@/lib/amount';
 import { triggerDownload } from '@/lib/download';
 
@@ -340,6 +341,31 @@ export function QrGenerator() {
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const chain = chainForSlug(settings.chain);
+
+  // 固定額 QR が表す金額 (wei)。着金検知ヒント (useIncomingPaymentWatch) と同じ
+  // parseUnits(deployment.decimals) で、QR が encode する amount と整合させる
+  // (RecoverFeeNotice と同じ解釈・新たな parse は導入しない)。amount 無効や
+  // static モードでは 0n (= watch しない)。
+  const expectedAmountWei = useMemo(() => {
+    if (mode !== 'amount' || !amountValid) return 0n;
+    try {
+      const wei = parseUnits(amount, deployment.decimals);
+      return wei > 0n ? wei : 0n;
+    } catch {
+      return 0n;
+    }
+  }, [mode, amountValid, amount, deployment.decimals]);
+
+  // 店員が決済 QR を提示している間 (モーダル open + 固定額 + 受取先/金額 valid)、
+  // 受取先残高をポーリングし「おおよその着金」を検知する advisory ヒント。
+  // static / EIP-681 QR は固定の期待額が無いため watch しない (enabled=false)。
+  const { status: incomingStatus, receivedWei } = useIncomingPaymentWatch({
+    receiver: effectiveReceiver,
+    tokenAddress: deployment.address,
+    chainId: deployment.chainId,
+    expectedAmountWei,
+    enabled: qrModalOpen && mode === 'amount' && receiverValid && amountValid,
+  });
 
   // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部バーの子テキストを
   // JS で書き換えても合成レイヤーが再ラスタライズされず古い表示が残ることがある (RegisterMode
@@ -1039,6 +1065,21 @@ export function QrGenerator() {
                   copiedLabel: t('eip681Copied'),
                 }
               : undefined
+          }
+          // 着金検知ヒント (advisory)。watching=監視中 / received=おおよその着金検知。
+          // idle (未監視・固定額でない等) は prop を渡さず非表示。received は受信額を
+          // 表示通貨でフォーマットして添える (正本は Explorer・ここはあくまでヒント)。
+          paymentStatus={
+            incomingStatus === 'received'
+              ? {
+                  state: 'received' as const,
+                  text: t('paymentReceived', {
+                    amount: formatTokenAmount(receivedWei, deployment),
+                  }),
+                }
+              : incomingStatus === 'watching'
+                ? { state: 'watching' as const, text: t('paymentWatching') }
+                : undefined
           }
         />
       )}

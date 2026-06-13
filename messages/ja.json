@@ -262,6 +262,8 @@
     "downloadSvg": "SVG保存",
     "downloadPng": "PNG保存",
     "localGenNote": "この QR は端末内で生成（通信不要）。圏外でも表示・提示できます。",
+    "paymentWatching": "着金を監視中…（この画面で確認できます）",
+    "paymentReceived": "着金を確認しました ✓（+{amount} 受信）",
     "printPoster": "印刷",
     "posterEyebrow": "OpenPay 決済 QR",
     "posterDefaultStoreName": "お支払いはこちら",

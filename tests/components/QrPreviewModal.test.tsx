@@ -148,4 +148,34 @@ describe('QrPreviewModal', () => {
     await user.click(screen.getByRole('button', { name: 'URI をコピー' }));
     expect(onCopy).toHaveBeenCalledOnce();
   });
+
+  it('paymentStatus 省略時は着金ヒントを描画しない (既存呼び出し元は無影響)', () => {
+    renderModal();
+    expect(screen.queryByText(/着金を監視中/)).toBeNull();
+    expect(screen.queryByText(/着金を確認しました/)).toBeNull();
+    // status role の line も無い
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('paymentStatus=watching で監視中テキストを status として描画', () => {
+    renderModal({
+      paymentStatus: {
+        state: 'watching',
+        text: '着金を監視中…（この画面で確認できます）',
+      },
+    });
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('着金を監視中…（この画面で確認できます）');
+  });
+
+  it('paymentStatus=received で着金確認テキストを status として描画', () => {
+    renderModal({
+      paymentStatus: {
+        state: 'received',
+        text: '着金を確認しました ✓（+1000 JPYC 受信）',
+      },
+    });
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('着金を確認しました ✓（+1000 JPYC 受信）');
+  });
 });

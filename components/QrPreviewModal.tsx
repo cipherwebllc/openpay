@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, type RefObject } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Printer, X } from 'lucide-react';
+import { CircleCheck, Printer, X } from 'lucide-react';
 
 export type QrPreviewModalLabels = {
   title: string;
@@ -25,6 +25,14 @@ export type QrPreviewModalLabels = {
   /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
    *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
   localGenNote?: string;
+};
+
+// 店員が QR を提示している間の「着金検知ヒント」表示 (任意)。watching=監視中、
+// received=おおよその着金を検知。あくまで advisory (正本は Explorer / 履歴)。
+// 印刷ポスターには出さない (print:hidden)。prop 省略時は何も描画しない。
+export type QrPreviewPaymentStatus = {
+  state: 'watching' | 'received';
+  text: string;
 };
 
 export type QrPreviewEip681 = {
@@ -56,6 +64,7 @@ export function QrPreviewModal({
   onDownloadSvg,
   onDownloadPng,
   eip681,
+  paymentStatus,
 }: {
   open: boolean;
   onClose: () => void;
@@ -74,6 +83,7 @@ export function QrPreviewModal({
   onDownloadSvg?: () => void;
   onDownloadPng?: () => void;
   eip681?: QrPreviewEip681;
+  paymentStatus?: QrPreviewPaymentStatus;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -168,6 +178,31 @@ export function QrPreviewModal({
                 {labels.localGenNote}
               </p>
             )}
+            {/* 着金検知ヒント (任意・advisory)。watching=監視中 (淡い slate + 脈打つドット)、
+                received=検知 (emerald + ✓)。印刷ポスターには出さない。prop 省略時は非描画。 */}
+            {paymentStatus &&
+              (paymentStatus.state === 'received' ? (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600 print:hidden"
+                >
+                  <CircleCheck className="h-4 w-4 flex-none" aria-hidden />
+                  {paymentStatus.text}
+                </p>
+              ) : (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 print:hidden"
+                >
+                  <span
+                    aria-hidden
+                    className="inline-block h-2 w-2 flex-none animate-pulse rounded-full bg-slate-400"
+                  />
+                  {paymentStatus.text}
+                </p>
+              ))}
           </div>
         </section>
 

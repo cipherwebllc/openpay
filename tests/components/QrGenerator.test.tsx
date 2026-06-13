@@ -15,8 +15,12 @@ vi.mock('@/hooks/useResolveAddress', () => ({
 }));
 // 受取先の自動補完 (useReceiverAutofill) が useAccount を読むため最小モック。
 // 既定は未接続 = 自動補完もチップも出ない (既存テストの挙動を維持)。
+// useReadContract は着金検知ヒック (useIncomingPaymentWatch) が受取先残高を読む
+// ために使う。既定は data 未取得 (= ヒントは「監視中」止まりで既存 assertion に
+// 影響しない)。着金検知の検証は useIncomingPaymentWatch.test.tsx 側で行う。
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
+  useReadContract: vi.fn(() => ({ data: undefined })),
 }));
 
 // useOrigin を関数経由でモックして、特定テストだけ空文字列に倒せるようにする
