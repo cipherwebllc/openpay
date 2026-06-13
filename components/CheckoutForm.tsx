@@ -15,7 +15,10 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
-import { SuccessOverlay } from './SuccessOverlay';
+import {
+  PaymentSuccessOverlay,
+  type PaymentSuccessOverlayPayload,
+} from './PaymentSuccessOverlay';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -657,6 +660,40 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? !!(relay.data && relay.data.success)
       : !!(gasless.data && gasless.data.success);
 
+  // PayPay 風 大型成功 overlay の payload (Phase 1.4)。従来は gasless / relay / standard 経路ごとに
+  // 3 連で SuccessOverlay を出していたのを、各経路と byte 一致する payload 1 個に集約する。各
+  // ガードは従来の `completed && <mode> && <data>` と同値 (completed は mode 別に success/data を
+  // 既に要求するため、各 `completed && gasless.data` 等は data.success と一致)。relay は userOpHash/
+  // blockNumber を省き (undefined)、standard は userOpHash を省く — いずれも従来の overlay 呼び出しと
+  // 同じ。amountDisplay=fmt(totalCustomerOutflow)・merchantAddress=params.to・explorerBase は全経路
+  // 共通で従来どおり。
+  const successOverlayPayload: PaymentSuccessOverlayPayload | null =
+    !isStandard && !useRelay && gasless.data && gasless.data.success
+      ? {
+          amountDisplay: fmt(totalCustomerOutflow),
+          txHash: gasless.data.txHash,
+          userOpHash: gasless.data.userOpHash,
+          blockNumber: gasless.data.blockNumber,
+          explorerBase,
+          merchantAddress: params.to,
+        }
+      : useRelay && relay.data?.success && relay.data.txHash
+        ? {
+            amountDisplay: fmt(totalCustomerOutflow),
+            txHash: relay.data.txHash,
+            explorerBase,
+            merchantAddress: params.to,
+          }
+        : isStandard && standard.data
+          ? {
+              amountDisplay: fmt(totalCustomerOutflow),
+              txHash: standard.data.merchantTxHash,
+              blockNumber: standard.data.blockNumber,
+              explorerBase,
+              merchantAddress: params.to,
+            }
+          : null;
+
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
   //       渡す変数 (params.to / totalWei) と同一ソース。testnet 等 forwarder 無し chain 用。
@@ -1107,42 +1144,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       </p>
 
       {/* PayPay 風 大型成功 overlay。dismiss 後は inline panel + redirect countdown を表示。
-          success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。 */}
-      {!overlayDismissed && completed && !isStandard && !useRelay && gasless.data && (
-        <SuccessOverlay
-          amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={gasless.data.txHash}
-          userOpHash={gasless.data.userOpHash}
-          blockNumber={gasless.data.blockNumber}
-          explorerBase={explorerBase}
-          merchantAddress={params.to}
-          onDismiss={() => setOverlayDismissed(true)}
-        />
-      )}
-      {/* relay は userOp/block 無し → txHash のみで overlay を出す。 */}
-      {!overlayDismissed &&
-        completed &&
-        useRelay &&
-        relay.data?.success &&
-        relay.data.txHash && (
-          <SuccessOverlay
-            amountDisplay={fmt(totalCustomerOutflow)}
-            txHash={relay.data.txHash}
-            explorerBase={explorerBase}
-            merchantAddress={params.to}
-            onDismiss={() => setOverlayDismissed(true)}
-          />
-        )}
-      {!overlayDismissed && completed && isStandard && standard.data && (
-        <SuccessOverlay
-          amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={standard.data.merchantTxHash}
-          blockNumber={standard.data.blockNumber}
-          explorerBase={explorerBase}
-          merchantAddress={params.to}
-          onDismiss={() => setOverlayDismissed(true)}
-        />
-      )}
+          success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。gasless / relay /
+          standard の 3 連は共通 PaymentSuccessOverlay へ集約 (payload で mode 差を吸収・挙動不変)。 */}
+      <PaymentSuccessOverlay
+        dismissed={overlayDismissed}
+        payload={successOverlayPayload}
+        onDismiss={() => setOverlayDismissed(true)}
+      />
     </div>
   );
 }

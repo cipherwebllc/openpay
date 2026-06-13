@@ -16,16 +16,16 @@ import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
+import {
+  PaymentSuccessOverlay,
+  type PaymentSuccessOverlayPayload,
+} from './PaymentSuccessOverlay';
 
 // First Load JS から外すための遅延ロード (bundle 予算)。いずれも client 専用で
 // 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後)
 // のため SSR 不要。挙動は静的 import と同一。
 const CrossChainHint = dynamic(
   () => import('./CrossChainHint').then((m) => m.CrossChainHint),
-  { ssr: false },
-);
-const SuccessOverlay = dynamic(
-  () => import('./SuccessOverlay').then((m) => m.SuccessOverlay),
   { ssr: false },
 );
 const PayerReceiptCompletion = dynamic(
@@ -722,6 +722,38 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // Recover モードの手数料開示に渡す請求額。recover でなければ null で非表示。
   const recoverBillAmount = useRecover && amountWei > 0n ? amountWei : null;
 
+  // PayPay 風 大型成功 overlay の payload (Phase 1.4)。従来は gasless / relay / standard 経路ごとに
+  // 3 連で SuccessOverlay を出していたのを、各経路と byte 一致する payload 1 個に集約する。各ガードは
+  // 従来の overlay 呼び出しと完全同一 (relay は userOpHash/blockNumber を省き、standard は userOpHash を
+  // 省く = undefined)。amountDisplay=fmt(totalCustomerOutflow)・merchantAddress=params.to・explorerBase
+  // は全経路共通で従来どおり。いずれの経路でもない (未成功) ときは null で overlay 非表示。
+  const successOverlayPayload: PaymentSuccessOverlayPayload | null =
+    !isStandard && !useRelay && gasless.data && gasless.data.success
+      ? {
+          amountDisplay: fmt(totalCustomerOutflow),
+          txHash: gasless.data.txHash,
+          userOpHash: gasless.data.userOpHash,
+          blockNumber: gasless.data.blockNumber,
+          explorerBase,
+          merchantAddress: params.to,
+        }
+      : useRelay && relay.data && relay.data.success && relay.data.txHash
+        ? {
+            amountDisplay: fmt(totalCustomerOutflow),
+            txHash: relay.data.txHash,
+            explorerBase,
+            merchantAddress: params.to,
+          }
+        : isStandard && standard.data
+          ? {
+              amountDisplay: fmt(totalCustomerOutflow),
+              txHash: standard.data.merchantTxHash,
+              blockNumber: standard.data.blockNumber,
+              explorerBase,
+              merchantAddress: params.to,
+            }
+          : null;
+
   return (
     <div className="space-y-6">
       <header className="rounded-2xl bg-gradient-to-br from-brand to-brand-dark p-6 text-white">
@@ -1148,45 +1180,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </>
       )}
 
-      {/* PayPay 風 大型成功 overlay。dismiss するまで全画面で「決済完了」+ 金額 + 時刻表示。 */}
-      {!overlayDismissed &&
-        !isStandard &&
-        !useRelay &&
-        gasless.data &&
-        gasless.data.success && (
-          <SuccessOverlay
-            amountDisplay={fmt(totalCustomerOutflow)}
-            txHash={gasless.data.txHash}
-            userOpHash={gasless.data.userOpHash}
-            blockNumber={gasless.data.blockNumber}
-            explorerBase={explorerBase}
-            merchantAddress={params.to}
-            onDismiss={() => setOverlayDismissed(true)}
-          />
-        )}
-      {!overlayDismissed &&
-        useRelay &&
-        relay.data &&
-        relay.data.success &&
-        relay.data.txHash && (
-        <SuccessOverlay
-          amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={relay.data.txHash}
-          explorerBase={explorerBase}
-          merchantAddress={params.to}
-          onDismiss={() => setOverlayDismissed(true)}
-        />
-      )}
-      {!overlayDismissed && isStandard && standard.data && (
-        <SuccessOverlay
-          amountDisplay={fmt(totalCustomerOutflow)}
-          txHash={standard.data.merchantTxHash}
-          blockNumber={standard.data.blockNumber}
-          explorerBase={explorerBase}
-          merchantAddress={params.to}
-          onDismiss={() => setOverlayDismissed(true)}
-        />
-      )}
+      {/* PayPay 風 大型成功 overlay。dismiss するまで全画面で「決済完了」+ 金額 + 時刻表示。
+          gasless / relay / standard の 3 連は共通 PaymentSuccessOverlay へ集約 (payload で mode 差を
+          吸収・挙動不変)。 */}
+      <PaymentSuccessOverlay
+        dismissed={overlayDismissed}
+        payload={successOverlayPayload}
+        onDismiss={() => setOverlayDismissed(true)}
+      />
     </div>
   );
 }

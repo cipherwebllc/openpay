@@ -13,16 +13,16 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
+import {
+  PaymentSuccessOverlay,
+  type PaymentSuccessOverlayPayload,
+} from './PaymentSuccessOverlay';
 
 // First Load JS から外すための遅延ロード (bundle 予算)。いずれも client 専用で
 // 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後)
 // のため SSR 不要。挙動は静的 import と同一。
 const CrossChainHint = dynamic(
   () => import('./CrossChainHint').then((m) => m.CrossChainHint),
-  { ssr: false },
-);
-const SuccessOverlay = dynamic(
-  () => import('./SuccessOverlay').then((m) => m.SuccessOverlay),
   { ssr: false },
 );
 const PayerReceiptCompletion = dynamic(
@@ -492,6 +492,23 @@ export function TipForm({ params }: { params: TipParams }) {
       ? `${explorerBase}/tokenapprovalchecker?search=${address}`
       : undefined;
 
+  // PayPay 風 大型成功 overlay の payload (Phase 1.4)。tip は経路が gasless / relay の 1 系統 (mode
+  // 中立化済の flow* を使う) なので overlay も元から 1 個。共通 PaymentSuccessOverlay へ寄せても挙動は
+  // 不変。amountDisplay は submit 時点の固定値 (送信後の金額編集で overlay がぶれない・Codex P2)、
+  // txHash/userOpHash/blockNumber は flow* (relay は userOpHash/blockNumber 無し)。tip は店舗アドレス
+  // explorer link を出さないため merchantAddress は渡さない (= 従来どおり省略)。未成功は null。
+  const successOverlayPayload: PaymentSuccessOverlayPayload | null =
+    flowSuccess && flowTxHash
+      ? {
+          amountDisplay:
+            submittedAmountDisplayRef.current ?? fmt(totalCustomerOutflow),
+          txHash: flowTxHash,
+          userOpHash: flowUserOpHash,
+          blockNumber: flowBlockNumber,
+          explorerBase,
+        }
+      : null;
+
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2+P4)。tip は standard 経路を持たないので
   // (a) relay free / (a') relay recover / (c) Circle USDC の 3 kind のみ (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
@@ -889,17 +906,13 @@ export function TipForm({ params }: { params: TipParams }) {
         </div>
       )}
 
-      {/* PayPay 風 大型成功 overlay。dismiss 後は上記の従来 panel (thanks 含む) を表示。 */}
-      {!overlayDismissed && flowSuccess && flowTxHash && (
-        <SuccessOverlay
-          amountDisplay={submittedAmountDisplayRef.current ?? fmt(totalCustomerOutflow)}
-          txHash={flowTxHash}
-          userOpHash={flowUserOpHash}
-          blockNumber={flowBlockNumber}
-          explorerBase={explorerBase}
-          onDismiss={() => setOverlayDismissed(true)}
-        />
-      )}
+      {/* PayPay 風 大型成功 overlay。dismiss 後は上記の従来 panel (thanks 含む) を表示。共通
+          PaymentSuccessOverlay へ集約 (payload で表示値を確定・挙動不変)。 */}
+      <PaymentSuccessOverlay
+        dismissed={overlayDismissed}
+        payload={successOverlayPayload}
+        onDismiss={() => setOverlayDismissed(true)}
+      />
 
       <p className="pt-2 text-center text-[10px] text-slate-400">
         {t('poweredBy')}{' '}
