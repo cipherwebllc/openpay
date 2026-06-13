@@ -18,8 +18,10 @@
 //   - paymasterMode: gasReimbursement の sponsorship 判定に必要 (route と独立)。
 //   - gasAmount / relayGasEquiv: paymaster quote と recover 手数料の解決済み値。
 
+import type { Address } from 'viem';
 import {
   calcBreakdown,
+  calcSplitBreakdown,
   type Breakdown,
   type GasMode,
   type PayMode,
@@ -135,6 +137,51 @@ export function paymentBreakdown(inputs: {
   return calcBreakdown(
     inputs.totalWei,
     inputs.token,
+    inputs.payMode,
+    inputs.gasMode,
+    inputs.effectiveGasAmount ?? 0n,
+  );
+}
+
+/**
+ * 複数受取人 (split) の breakdown。PaymentForm 専用 (CheckoutForm / TipForm は split 非対応)。
+ * calcSplitBreakdown を route 由来の payMode / gasMode / effectiveGasAmount で呼ぶ薄いラッパで、
+ * primary (残余 %) + split entries の按分・端数集約・feeAmount は calcSplitBreakdown が持つ
+ * (= paymentBreakdown と同型の単一情報源化・按分ロジック自体は lib/fee に温存)。
+ *
+ * 現行 PaymentForm:
+ *   ```
+ *   const splitBreakdown = calcSplitBreakdown(
+ *     amountWei, params.token, params.to, params.split,
+ *     params.mode, params.gas, effectiveGasAmount ?? 0n,
+ *   );
+ *   ```
+ * split は standard では null (呼出側が isStandard で gate) かつ relay 抑止 (disableRelay=hasSplit)
+ * のため recover も非活性。よって PaymentForm の effectiveMode (= 非 standard なら params.mode)・
+ * effectiveGas (= 非 recover なら params.gas ?? 'customer') は split 経路では params.mode /
+ * params.gas と一致する。calcSplitBreakdown の gasMode 既定 'customer' が params.gas=undefined を
+ * 吸収する点も含め、呼出側が現行どおりの解決済み値 (payMode=effectiveMode・gasMode=effectiveGas)
+ * を渡せば byte 単位で同一。effectiveGasAmount ?? 0n で undefined を 0n に倒すのも paymentBreakdown と同じ。
+ */
+export function paymentSplitBreakdown(inputs: {
+  totalWei: bigint;
+  token: TokenSymbol;
+  primary: Address;
+  splits: ReadonlyArray<{ to: Address; percent: number }>;
+  payMode: PayMode | undefined;
+  /**
+   * gasMode は PaymentForm が **解決前の params.gas** をそのまま渡しうる (undefined 可)。split は
+   * 非 recover 経路のため effectiveGas (= params.gas ?? 'customer') と一致し、undefined は
+   * calcSplitBreakdown の既定 'customer' に倒れる (現行 PaymentForm と byte 単位で同一)。
+   */
+  gasMode: GasMode | undefined;
+  effectiveGasAmount: bigint | undefined;
+}): ReturnType<typeof calcSplitBreakdown> {
+  return calcSplitBreakdown(
+    inputs.totalWei,
+    inputs.token,
+    inputs.primary,
+    inputs.splits,
     inputs.payMode,
     inputs.gasMode,
     inputs.effectiveGasAmount ?? 0n,

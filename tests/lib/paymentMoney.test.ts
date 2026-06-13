@@ -1,15 +1,22 @@
 import { describe, it, expect } from 'vitest';
+import type { Address } from 'viem';
 import {
   effectiveGasMode,
   isMerchantGasAbsorb,
   effectivePayMode,
   effectiveGasAmount,
   paymentBreakdown,
+  paymentSplitBreakdown,
   gasReimbursementValue,
   networkFeeEquivalentValue,
   minimumAmountWei,
 } from '@/lib/paymentMoney';
-import { calcBreakdown, type GasMode, type PayMode } from '@/lib/fee';
+import {
+  calcBreakdown,
+  calcSplitBreakdown,
+  type GasMode,
+  type PayMode,
+} from '@/lib/fee';
 import type { PaymentRoute } from '@/lib/paymentRoute';
 import type { PaymasterMode } from '@/lib/tokens';
 import type { TokenSymbol } from '@/lib/tokens';
@@ -314,6 +321,126 @@ describe('paymentBreakdown — calcBreakdown との完全一致 (route × gasMod
     // customer は満額 (上乗せ無し)、merchant は回収額を内枠吸収。
     expect(b.customerPays).toBe(3000n * JPYC);
     expect(b.merchantReceives).toBe((3000n - 2n) * JPYC);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// paymentSplitBreakdown: calcSplitBreakdown を route 由来の payMode/gasMode/effectiveGasAmount で
+// 呼ぶ薄いラッパ (PaymentForm 専用・split)。calcSplitBreakdown と完全一致 + undefined→0n の透過、
+// および PaymentForm.test.tsx が pin する具体額 (USDC merchant split / JPYC free split) を錨固定する。
+// ---------------------------------------------------------------------------
+describe('paymentSplitBreakdown — calcSplitBreakdown との完全一致 + split 按分の wei 固定', () => {
+  const MERCHANT = '0x1111111111111111111111111111111111111111' as Address;
+  const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
+  const SPLITS: ReadonlyArray<{ to: Address; percent: number }> = [
+    { to: B, percent: 50 },
+  ];
+
+  // calcSplitBreakdown を直接呼んだ参照と、ラッパ経由 (effectiveGasAmount=undefined→0n) が一致。
+  const AMOUNTS: ReadonlyArray<{ token: TokenSymbol; amount: bigint; label: string }> = [
+    { token: 'usdc', amount: 100n * USDC, label: 'USDC 100' },
+    { token: 'jpyc', amount: 1000n * JPYC, label: 'JPYC 1000' },
+    { token: 'usdc', amount: 0n, label: 'USDC 0' },
+  ];
+  const GAS_AMOUNTS: ReadonlyArray<bigint | undefined> = [undefined, 0n, 500_000n];
+  const PAY_MODES: ReadonlyArray<PayMode | undefined> = [undefined, 'gasless'];
+  const SPLIT_GAS_MODES: ReadonlyArray<GasMode | undefined> = [
+    undefined,
+    'customer',
+    'merchant',
+  ];
+
+  let count = 0;
+  for (const { token, amount, label } of AMOUNTS) {
+    for (const payMode of PAY_MODES) {
+      for (const gasMode of SPLIT_GAS_MODES) {
+        for (const gas of GAS_AMOUNTS) {
+          count++;
+          it(`token=${label} payMode=${payMode ?? 'undefined'} gasMode=${gasMode ?? 'undefined'} gas=${gas ?? 'undefined'}`, () => {
+            const got = paymentSplitBreakdown({
+              totalWei: amount,
+              token,
+              primary: MERCHANT,
+              splits: SPLITS,
+              payMode,
+              gasMode,
+              effectiveGasAmount: gas,
+            });
+            // 参照: calcSplitBreakdown を直接呼ぶ。ラッパは undefined→0n のみを足す
+            // (gasMode undefined は calcSplitBreakdown の既定 'customer' に倒れる)。
+            const want = calcSplitBreakdown(
+              amount,
+              token,
+              MERCHANT,
+              SPLITS,
+              payMode,
+              gasMode,
+              gas ?? 0n,
+            );
+            expect(got).toEqual(want);
+          });
+        }
+      }
+    }
+  }
+
+  it('split 直積を網羅 (3 amounts × 2 payModes × 3 gasModes × 3 gasAmounts = 54)', () => {
+    expect(count).toBe(54);
+  });
+
+  // PaymentForm.test.tsx の split 送信ケースを錨固定 (byte-equivalence の回帰検知)。
+  // USDC merchant split: distributable = amount - fee(0) - gas, primary 50% / B 50%。
+  it('USDC merchant split (PaymentForm 相当): distributable=amount-gas を 50/50 按分', () => {
+    const s = paymentSplitBreakdown({
+      totalWei: 100n * USDC, // 100 USDC
+      token: 'usdc',
+      primary: MERCHANT,
+      splits: SPLITS,
+      payMode: 'gasless',
+      gasMode: 'merchant',
+      effectiveGasAmount: 500_000n, // gas 0.5 USDC
+    });
+    // distributable = 100 - 0(fee) - 0.5(gas) = 99.5 → primary 49.75 / B 49.75。
+    expect(s.recipients[0].amount).toBe(49_750_000n);
+    expect(s.recipients[1].amount).toBe(49_750_000n);
+    expect(s.feeAmount).toBe(0n);
+    // gas=merchant のため customerPays は満額 (上乗せなし)。
+    expect(s.customerPays).toBe(100n * USDC);
+  });
+
+  // JPYC free split: effectiveGasAmount=0 (ガス無料化) のため受取人は満額按分・customer 満額。
+  it('JPYC free split (PaymentForm 相当・ega=0): 受取人満額 50/50・gas 控除なし', () => {
+    const s = paymentSplitBreakdown({
+      totalWei: 1000n * JPYC,
+      token: 'jpyc',
+      primary: MERCHANT,
+      splits: SPLITS,
+      payMode: 'gasless',
+      gasMode: 'merchant', // 旧 QR の gas=merchant でも JPYC 無料化で ega=0 のため控除 0
+      effectiveGasAmount: 0n,
+    });
+    expect(s.recipients[0].amount).toBe(500n * JPYC);
+    expect(s.recipients[1].amount).toBe(500n * JPYC);
+    expect(s.feeAmount).toBe(0n);
+    expect(s.customerPays).toBe(1000n * JPYC);
+  });
+
+  // gasMode undefined (params.gas 省略) は calcSplitBreakdown 既定 'customer' に倒れる
+  // (PaymentForm が effectiveGas へ正規化せず params.gas を渡すケースの byte 同一性)。
+  it('gasMode=undefined は customer 扱い: customer=amount+gas, 受取人は満額按分', () => {
+    const s = paymentSplitBreakdown({
+      totalWei: 100n * USDC,
+      token: 'usdc',
+      primary: MERCHANT,
+      splits: SPLITS,
+      payMode: 'gasless',
+      gasMode: undefined, // = 'customer'
+      effectiveGasAmount: 500_000n,
+    });
+    // customer = amount + gas (customer 負担)、受取人 = amount を 50/50 (gas 控除なし)。
+    expect(s.customerPays).toBe(100n * USDC + 500_000n);
+    expect(s.recipients[0].amount).toBe(50n * USDC);
+    expect(s.recipients[1].amount).toBe(50n * USDC);
   });
 });
 

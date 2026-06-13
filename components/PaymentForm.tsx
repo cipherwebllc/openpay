@@ -52,7 +52,18 @@ import {
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
-import { calcBreakdown, calcSplitBreakdown, type GasMode } from '@/lib/fee';
+import { type GasMode } from '@/lib/fee';
+import {
+  effectiveGasMode,
+  isMerchantGasAbsorb,
+  effectivePayMode,
+  effectiveGasAmount as deriveEffectiveGasAmount,
+  paymentBreakdown,
+  paymentSplitBreakdown,
+  gasReimbursementValue,
+  networkFeeEquivalentValue,
+  minimumAmountWei as deriveMinimumAmountWei,
+} from '@/lib/paymentMoney';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
@@ -156,7 +167,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
   // user-approved)。recover 以外は URL の gas をそのまま使う (USDC の負担者トグルは不変)。
-  const effectiveGas: GasMode = useRecover ? 'merchant' : (params.gas ?? 'customer');
+  // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
+  const effectiveGas: GasMode = effectiveGasMode(route, params.gas);
 
   // Smart Account は gasless (非 relay) のみ必要 — standard / relay では enabled=false で skip。
   const { data: saData, error: saError } = useSmartAccount(
@@ -240,7 +252,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
-  const isMerchantGas = !isStandard && effectiveGas === 'merchant';
+  const isMerchantGas = isMerchantGasAbsorb(route, effectiveGas);
   // 「店主がガスを負担」表示が実態に合うのは、実際に gas コストが発生する経路のみ
   // (recover relay、または非 relay の paymaster 見積)。free relay (OpenPay 全額負担)
   // では gas コストが無く merchant が負担するものが無いため、旧 gas=merchant QR でも
@@ -271,22 +283,22 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // JPYC recover (控除分を feeReceiver へ送って立替者を補償) と等価。
   // gasMode の約束 (店主吸収: 顧客は請求額のみ・店主は amount−gas) は USDC でも成立。
   // 残る差は gas 見積と実 pull 額の僅差のみ (standard tier で有界)。
-  const effectiveGasAmount: bigint | undefined = useRelay
-    ? relayGasEquiv
-    : isJpyc
-      ? 0n
-      : gasAmount;
+  // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
+  const effectiveGasAmount: bigint | undefined = deriveEffectiveGasAmount(
+    route,
+    { isJpyc, relayGasEquiv, gasAmount },
+  );
 
-  const effectiveMode = isStandard ? 'standard' : params.mode;
+  const effectiveMode = effectivePayMode(route, params.mode);
   const breakdown = useMemo(
     () =>
-      calcBreakdown(
-        amountWei,
-        params.token,
-        effectiveMode,
-        effectiveGas,
-        effectiveGasAmount ?? 0n,
-      ),
+      paymentBreakdown({
+        totalWei: amountWei,
+        token: params.token,
+        payMode: effectiveMode,
+        gasMode: effectiveGas,
+        effectiveGasAmount,
+      }),
     [amountWei, params.token, effectiveMode, effectiveGas, effectiveGasAmount],
   );
 
@@ -296,15 +308,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // gasReimbursement=0 と矛盾し受取人が過少配分になる)。
   const splitBreakdown = useMemo(() => {
     if (isStandard || !params.split || params.split.length === 0) return null;
-    return calcSplitBreakdown(
-      amountWei,
-      params.token,
-      params.to,
-      params.split,
-      params.mode,
-      params.gas,
-      effectiveGasAmount ?? 0n,
-    );
+    // split は非 standard かつ relay 抑止 (disableRelay=hasSplit) のため、effectiveMode=params.mode・
+    // effectiveGas=params.gas??'customer' と一致する。byte 単位の同一性のため現行どおり params.mode /
+    // params.gas をそのまま渡す (calcSplitBreakdown の gasMode 既定 'customer' が undefined を吸収)。
+    return paymentSplitBreakdown({
+      totalWei: amountWei,
+      token: params.token,
+      primary: params.to,
+      splits: params.split,
+      payMode: params.mode,
+      gasMode: params.gas,
+      effectiveGasAmount,
+    });
   }, [
     isStandard,
     amountWei,
@@ -325,18 +340,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // gasReimbursement は常に 0 (OpenPay が全額負担)。mainnet USDC は erc20 で 0 (paymaster が
   // 顧客から直接徴収)。残るのは testnet の USDC sponsorship fallback (非商用・非 JPYC) のみで、
   // ここは従来どおり gas 相当を回収する。circle は二重徴収回避で 0。
-  const gasReimbursement =
-    !isJpyc && !isCircle && paymasterMode === 'sponsorship'
-      ? (gasAmount ?? 0n)
-      : 0n;
+  const gasReimbursement = gasReimbursementValue(route, {
+    isJpyc,
+    paymasterMode,
+    gasAmount,
+  });
 
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
   // gasless 経路は gas 見積を計上する: JPYC sponsorship は立替回収 (= feeReceiver へ送る
   // gasReimbursement と同額)、USDC erc20 は paymaster が顧客 USDC から直接徴収する gas。
   // circle は receipt 由来の circlePaymasterNetUsdc を検証ステータス付きで使うため null、
   // standard は OpenPay が gas に touch しないため null。
-  const networkFeeEquivalent =
-    !isStandard && !isCircle ? (effectiveGasAmount ?? 0n) : null;
+  const networkFeeEquivalent = networkFeeEquivalentValue(
+    route,
+    effectiveGasAmount,
+  );
 
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ amount < gas のみ)。
@@ -348,8 +366,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
     amountWei > 0n &&
     (isStandard || !isMerchantGas || useRelay || activeQuote.data !== undefined) &&
     breakdown.merchantReceives === 0n;
-  const minimumAmountWei =
-    breakdown.feeAmount + (isMerchantGas ? (effectiveGasAmount ?? 0n) : 0n);
+  const minimumAmountWei = deriveMinimumAmountWei({
+    feeAmount: breakdown.feeAmount,
+    isMerchantGas,
+    effectiveGasAmount,
+  });
 
   const { balance, insufficientBalance, wrongChain } = useErc20BalanceAndChain(
     deployment,
