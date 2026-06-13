@@ -8,6 +8,10 @@ vi.mock('@/hooks/useResolveAddress', () => ({
 }));
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
+  // QrGenerator は useIncomingPaymentWatch 経由で着金監視に useReadContract を呼ぶ。
+  // この recover テストは QueryClientProvider を張らないため、wagmi 自体をモックして
+  // 残高クエリを undefined 固定 (= 監視中) にしておく (着金ヒントは本テストの対象外)。
+  useReadContract: vi.fn(() => ({ data: undefined })),
 }));
 vi.mock('@/hooks/useOrigin', () => ({
   useOrigin: () => 'https://test.local',
