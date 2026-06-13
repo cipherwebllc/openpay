@@ -636,6 +636,7 @@ export function RegisterMode({
             eyebrow: t('qrPosterEyebrow'),
             copy: t('copyUrl'),
             copied: t('copied'),
+            localGenNote: t('qrLocalGenNote'),
           }}
           qrValue={checkoutUrl}
           qrRef={qrRef}

@@ -61,6 +61,24 @@ describe('QrPreviewModal', () => {
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true');
   });
 
+  it('labels.localGenNote 指定時のみ「端末内生成 (通信不要)」の安心表示を出す (C1)', () => {
+    // 既定 LABELS には無いので未指定では出ない
+    const { unmount } = renderModal();
+    expect(screen.queryByText(/端末内で生成/)).toBeNull();
+    unmount();
+    // 指定すると QR 近くに圏外現場向けの安心表示が出る
+    renderModal({
+      labels: {
+        ...LABELS,
+        localGenNote:
+          'この QR は端末内で生成（通信不要）。圏外でも表示・提示できます。',
+      },
+    });
+    expect(
+      screen.getByText(/端末内で生成（通信不要）/),
+    ).toBeInTheDocument();
+  });
+
   it('× 閉じる で onClose、ESC でも onClose', async () => {
     const user = userEvent.setup();
     const { props } = renderModal();

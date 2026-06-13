@@ -990,6 +990,7 @@ export function QrGenerator() {
             copied: t('qrCopied'),
             downloadSvg: t('downloadSvg'),
             downloadPng: t('downloadPng'),
+            localGenNote: t('localGenNote'),
           }}
           qrValue={payUrl}
           qrRef={qrRef}

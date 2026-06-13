@@ -22,6 +22,9 @@ export type QrPreviewModalLabels = {
   copied: string;
   downloadSvg?: string;
   downloadPng?: string;
+  /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
+   *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
+  localGenNote?: string;
 };
 
 export type QrPreviewEip681 = {
@@ -156,6 +159,13 @@ export function QrPreviewModal({
             {receiverShort && (
               <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">
                 {receiverShort}
+              </p>
+            )}
+            {/* 圏外の現場向け安心表示。QR の生成・提示は端末内で完結し通信不要。
+                印刷ポスターには不要なので print:hidden。 */}
+            {labels.localGenNote && (
+              <p className="mt-3 text-xs text-slate-400 print:hidden">
+                {labels.localGenNote}
               </p>
             )}
           </div>
