@@ -5,6 +5,14 @@
 
 import { kvEval } from './kv';
 
+// 数値 (ms) として妥当な expiresAt を取り出す。値は素の数値文字列 (例 "1750000000000")。
+export function parseExpiresAt(raw: string | null): number | null {
+  if (raw === null || raw === '') return null;
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
 // 原子的 max-grant: 既存 expiry と targetExpiresAt の大きい方を SET し、その値の残り秒を TTL にする。
 // read-modify-write を 1 つの Lua で不可分にすることで、(a) 2 つの並行支払いが互いを上書きしない、
 // (b) 同一 txHash の再適用 (= 同じ target) が max で no-op になり冪等、を同時に満たす。
@@ -24,10 +32,7 @@ export const GRANT_MAX_SCRIPT =
 function parseExpiresAtMs(raw: string | number | null): number | null {
   if (raw === null) return null;
   const s = typeof raw === 'number' ? String(raw) : raw;
-  if (s === '') return null;
-  const n = Number(s.trim());
-  if (!Number.isFinite(n)) return null;
-  return n;
+  return parseExpiresAt(s);
 }
 
 /**

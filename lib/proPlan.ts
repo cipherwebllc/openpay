@@ -11,7 +11,7 @@
 import type { Address } from 'viem';
 import { kvGet } from './kv';
 import { entitlementBypass } from './entitlement';
-import { grantTimedMax } from './timedGrant';
+import { grantTimedMax, parseExpiresAt } from './timedGrant';
 
 // ¥500 / 月 (= 500 JPYC・18 decimals)。overpayment は受理するが付与は常に 30日 1 期間のみ。
 export const PRO_PRICE_JPYC = 500;
@@ -28,14 +28,6 @@ export type ProStatus = {
 
 function proKey(wallet: string): string {
   return `pro:exp:${wallet.toLowerCase()}`;
-}
-
-// 数値 (ms) として妥当な expiresAt を取り出す。値は素の数値文字列 (例 "1750000000000")。
-function parseExpiresAt(raw: string | null): number | null {
-  if (raw === null || raw === '') return null;
-  const n = Number(raw.trim());
-  if (!Number.isFinite(n)) return null;
-  return n;
 }
 
 /**

@@ -6,7 +6,7 @@
 // 購入確定後は ['csvpass'] を invalidate して最新へ更新する (useCsvPassSubscribe)。
 // Pro ⊃ CSV: server 側 getCsvPassStatus が pro:exp も見て active を返す。
 
-import { useQuery } from '@tanstack/react-query';
+import { useEntitlementStatus } from './useEntitlementStatus';
 
 export type CsvPassStatusData = {
   active: boolean;
@@ -17,24 +17,11 @@ export type CsvPassStatusData = {
 export const CSV_PASS_STATUS_KEY = ['csvpass', 'status'] as const;
 
 export function useCsvPassStatus(enabled: boolean) {
-  return useQuery<CsvPassStatusData>({
+  return useEntitlementStatus({
     queryKey: CSV_PASS_STATUS_KEY,
     enabled,
-    queryFn: async () => {
-      const res = await fetch('/api/csv-pass/status', { cache: 'no-store' });
-      const json = (await res.json().catch(() => ({}))) as
-        | (CsvPassStatusData & { ok: true })
-        | { ok?: false; error?: string };
-      if (!res.ok || !('ok' in json) || !json.ok) {
-        throw new Error(
-          'error' in json && json.error ? json.error : 'csvpass_status_failed',
-        );
-      }
-      return {
-        active: json.active,
-        expiresAt: json.expiresAt,
-        bypass: json.bypass,
-      };
-    },
+    endpoint: '/api/csv-pass/status',
+    field: 'active',
+    fallbackError: 'csvpass_status_failed',
   });
 }
