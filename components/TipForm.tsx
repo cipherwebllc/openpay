@@ -36,7 +36,12 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
-import { calcBreakdown } from '@/lib/fee';
+import {
+  effectiveGasAmount as deriveEffectiveGasAmount,
+  paymentBreakdown,
+  gasReimbursementValue,
+  networkFeeEquivalentValue,
+} from '@/lib/paymentMoney';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
@@ -177,20 +182,22 @@ export function TipForm({ params }: { params: TipParams }) {
   const gasAmount = activeQuote.data?.gasAmount;
   // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、非 relay は
   // paymaster quote (circle / erc20)。relay は quote を持たないため effective で切り替える。
-  const effectiveGasAmount: bigint | undefined = useRelay
-    ? relayGasEquiv
-    : isJpyc
-      ? 0n
-      : gasAmount;
+  // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
+  const effectiveGasAmount: bigint | undefined = deriveEffectiveGasAmount(
+    route,
+    { isJpyc, relayGasEquiv, gasAmount },
+  );
+  // tip は payMode='gasless' / gasMode='customer' 固定 (creator-fan UX)。recover でも顧客上乗せの
+  // ままなので effectiveGasMode (recover→'merchant') は使わず literal を渡す (現行と byte 一致)。
   const breakdown = useMemo(
     () =>
-      calcBreakdown(
-        amountWei,
-        params.token,
-        'gasless',
-        'customer',
-        effectiveGasAmount ?? 0n,
-      ),
+      paymentBreakdown({
+        totalWei: amountWei,
+        token: params.token,
+        payMode: 'gasless',
+        gasMode: 'customer',
+        effectiveGasAmount,
+      }),
     [amountWei, params.token, effectiveGasAmount],
   );
 
@@ -201,16 +208,21 @@ export function TipForm({ params }: { params: TipParams }) {
   const totalCustomerOutflow = breakdown.customerPays;
   // JPYC ガス無料化: JPYC は gas を一切徴収しないため 0 (OpenPay 全額負担)。relay / circle は
   // 元々 0。残る testnet USDC sponsorship fallback (非商用・非 JPYC) のみ従来どおり回収。
-  const gasReimbursement =
-    !useRelay && !isJpyc && !isCircle && paymasterMode === 'sponsorship'
-      ? (gasAmount ?? 0n)
-      : 0n;
+  // 現行の余分な `!useRelay` ガードは relay⟹JPYC (resolveJpycGaslessProvider が JPYC のみ relay 化)
+  // のため !isJpyc に内包され、shared 関数 (gasReimbursementValue) と reachable 入力で byte 一致。
+  const gasReimbursement = gasReimbursementValue(route, {
+    isJpyc,
+    paymasterMode,
+    gasAmount,
+  });
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。relay=回収額/0、
   // 非 relay sponsorship=立替回収 / USDC erc20=paymaster 徴収分。circle は receipt 由来の
-  // circlePaymasterNetUsdc を使うため null (mutate へは undefined)。
-  const networkFeeEquivalent: bigint | null = !isCircle
-    ? (effectiveGasAmount ?? 0n)
-    : null;
+  // circlePaymasterNetUsdc を使うため null (mutate へは undefined)。tip は route が常に非 standard
+  // のため networkFeeEquivalentValue の !isStandard 句は常に真 → 現行の `!isCircle` 条件と byte 一致。
+  const networkFeeEquivalent: bigint | null = networkFeeEquivalentValue(
+    route,
+    effectiveGasAmount,
+  );
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
