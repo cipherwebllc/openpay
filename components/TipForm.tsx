@@ -47,6 +47,12 @@ import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import {
+  resolvePaymentRoute,
+  isRelayRoute,
+  isRecoverRoute,
+  isCircleRoute,
+} from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -92,28 +98,45 @@ export function TipForm({ params }: { params: TipParams }) {
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  // JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応 /
-  // USDC は 'pimlico-7702' で従来挙動 (Pimlico fallback)。relay は smart account / gas quote 不要で
-  // 顧客が署名するだけ・自前 relayer がガス負担 (PaymentForm/CheckoutForm と同型・memory:jpyc-eip3009)。
-  // tip は常に gasless / gas=customer 固定なので standard / split 分岐は無い。
-  const useRelay =
-    resolveJpycGaslessProvider(deployment, deployment.chainId) ===
-    'eip3009-relay';
+  // 決済経路の単一情報源 (Phase 1.1)。散在していた useRelay / useRecover / isCircle を
+  // この 1 値から導出する。引数は現行どおりに算出した解決済み値で、判定の優先順位・短絡は
+  // resolvePaymentRoute が現行ロジックをそのまま再現する (挙動不変)。/pay・/checkout と同型だが、
+  // tip は常に gasless / gas=customer 固定で standard 経路を持たず、split も非対応なので
+  // isStandard は常に false・disableRelay は渡さない (CheckoutForm と同じく省略)。
+  // ⚠️ chain 引数は TipForm の現行どおり deployment.chainId を渡す (PaymentForm/CheckoutForm は
+  // useAccount() の chainId ?? deployment.chainId だが、TipForm は chainId を読まないため差異あり)。
+  //   - JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応 /
+  //     USDC は 'pimlico-7702' で従来挙動 (Pimlico fallback)。relay は smart account / gas quote 不要で
+  //     顧客が署名するだけ・自前 relayer がガス負担 (memory:jpyc-eip3009)。
+  //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (tip は customer 上乗せ固定)。
+  //     未設定は free (OpenPay 負担)。
+  //   - USDC ガスレスが Circle に解決される場合は Circle Paymaster (permit + surcharge 込み quote)。
+  const route = resolvePaymentRoute({
+    isStandard: false,
+    jpycGaslessProvider: resolveJpycGaslessProvider(
+      deployment,
+      deployment.chainId,
+    ),
+    usdcGaslessProvider: resolveUsdcGaslessProvider(
+      deployment,
+      deployment.chainId,
+    ),
+    hasJpycForwarder: jpycForwarderFor(deployment.chainId) !== null,
+  });
+  const useRelay = isRelayRoute(route);
   const relay = useJpycEip3009Payment(deployment);
-  // recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (tip は customer 上乗せ固定)。
+  // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収・tip は customer 上乗せ固定)。
   // 未設定は free (OpenPay 負担)。relayGasEquiv は amountWei 確定後に算出する (CDX-3: 実スケジュール
   // recoverFeeValue を使う。チップは gasMode=customer 固定でフロアのみ — bps を適用しないため
   // bps>0 でも常にフロア = 従来挙動と一致)。
-  const useRecover = useRelay && jpycForwarderFor(deployment.chainId) !== null;
+  const useRecover = isRecoverRoute(route);
 
-  // USDC ガスレスが Circle に解決される場合は Circle Paymaster (permit + surcharge 込み quote)。
-  // それ以外 (JPYC sponsorship / USDC Pimlico erc20) は従来経路。/pay・/checkout と同配線。
   // relay 時は smart account / batch / gas quote とも skip (enabled=!useRelay)。
   const { data: saData, error: saError } = useSmartAccount(deployment, !useRelay);
   const gasless = useBatchPayment(deployment, !useRelay);
   const gasQuote = useGasQuote(deployment, !useRelay);
-  const isCircle =
-    resolveUsdcGaslessProvider(deployment, deployment.chainId) === 'circle';
+  // USDC ガスレスが Circle に解決される場合は Circle Paymaster (route 由来)。
+  const isCircle = isCircleRoute(route);
   const circleQuote = useGasQuoteCircle(deployment, !useRelay && isCircle);
   // 表示・readiness・error は circle のときは circleQuote を本線にする。
   const activeQuote = isCircle ? circleQuote : gasQuote;
