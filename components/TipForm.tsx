@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatUnits, parseUnits } from 'viem';
+import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { Loader2 } from 'lucide-react';
 import { ConnectButton } from './ConnectButton';
@@ -36,6 +36,7 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
+import { useTipAmount } from '@/hooks/useTipAmount';
 import {
   effectiveGasAmount as deriveEffectiveGasAmount,
   paymentBreakdown,
@@ -61,12 +62,7 @@ import {
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
-import {
-  DECIMAL_PATTERN,
-  DEFAULT_TIP_PRESETS,
-  exceedsTokenPrecision,
-  type TipParams,
-} from '@/lib/url';
+import { DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 import {
@@ -147,25 +143,21 @@ export function TipForm({ params }: { params: TipParams }) {
   const activeQuote = isCircle ? circleQuote : gasQuote;
   const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
 
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(
-    presets[0] ?? null,
-  );
-  const [customAmount, setCustomAmount] = useState('');
-  const customSelected = selectedPreset === null;
+  // プリセット + カスタム金額の選択ステートマシン (NativeTipForm と共有・挙動不変)。
+  // amountWei の精度ガード連鎖・amountStr 導出・各ハンドラは hooks/useTipAmount.ts に集約。
+  const {
+    selectedPreset,
+    customAmount,
+    customSelected,
+    amountStr,
+    amountWei,
+    amountPrecisionError,
+    selectPreset,
+    selectCustom,
+    changeCustomAmount,
+  } = useTipAmount({ presets, decimals: deployment.decimals });
   // PayPay 風 大型成功 overlay (dismiss するまで全画面)
   const [overlayDismissed, setOverlayDismissed] = useState(false);
-
-  const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
-  const amountWei = useMemo(() => {
-    if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
-    // 精度超過は parseUnits が黙って丸めて表示額と実送金額が乖離するため弾く。
-    if (exceedsTokenPrecision(amountStr, deployment.decimals)) return 0n;
-    return parseUnits(amountStr, deployment.decimals);
-  }, [amountStr, deployment.decimals]);
-  const amountPrecisionError =
-    !!amountStr &&
-    DECIMAL_PATTERN.test(amountStr) &&
-    exceedsTokenPrecision(amountStr, deployment.decimals);
 
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
   // recoverFeeValue を使う。チップは gasMode=customer 固定で、recoverFeeValue は customer に bps を
@@ -439,15 +431,6 @@ export function TipForm({ params }: { params: TipParams }) {
     locale,
   ]);
 
-  function selectPreset(preset: string) {
-    setSelectedPreset(preset);
-    setCustomAmount('');
-  }
-
-  function selectCustom() {
-    setSelectedPreset(null);
-  }
-
   function onSubmit() {
     if (!canSubmit) return;
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
@@ -624,10 +607,7 @@ export function TipForm({ params }: { params: TipParams }) {
               value={customAmount}
               disabled={flowPending}
               onFocus={selectCustom}
-              onChange={(e) => {
-                setSelectedPreset(null);
-                setCustomAmount(e.target.value.replace(/[^\d.]/g, ''));
-              }}
+              onChange={(e) => changeCustomAmount(e.target.value)}
               placeholder={
                 params.token === 'jpyc'
                   ? t('amountCustomPlaceholderJpyc')

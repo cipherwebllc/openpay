@@ -9,9 +9,9 @@
 // payerReceipt は asset:TokenSymbol を要求し native は対象外のため保存しない
 // (成功パネル + エクスプローラリンクで控えとする)。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { formatUnits, parseEther } from 'viem';
+import { formatUnits } from 'viem';
 import {
   useAccount,
   useBalance,
@@ -24,7 +24,8 @@ import { ResultRow } from './ResultRow';
 import { SignReassurance } from './SignReassurance';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { logger } from '@/lib/logger';
-import { DECIMAL_PATTERN, exceedsTokenPrecision, type NativeTipParams } from '@/lib/url';
+import { type NativeTipParams } from '@/lib/url';
+import { useTipAmount } from '@/hooks/useTipAmount';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 // POL / KAIA とも 18 桁のネイティブトークン。
@@ -88,25 +89,22 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
     chainId: requiredChain.id,
   });
 
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(
-    presets[0] ?? null,
-  );
-  const [customAmount, setCustomAmount] = useState('');
-  const customSelected = selectedPreset === null;
-  const amountStr = customSelected ? customAmount : (selectedPreset ?? '');
-
-  const amountWei = useMemo(() => {
-    if (!amountStr || !DECIMAL_PATTERN.test(amountStr)) return 0n;
-    // 精度超過は parseEther が黙って丸めて表示額と実送金額が乖離するため弾く。
-    if (exceedsTokenPrecision(amountStr, NATIVE_DECIMALS)) return 0n;
-    return parseEther(amountStr);
-  }, [amountStr]);
+  // プリセット + カスタム金額の選択ステートマシン (ERC20 版 TipForm と共有・挙動不変)。
+  // parseEther(x) は定義上 parseUnits(x, 18) と同一で NATIVE_DECIMALS === 18 のため、
+  // hook に decimals=NATIVE_DECIMALS を渡すと amountWei は従来の parseEther 経路と byte 一致。
   // 18 桁超の小数入力は amountWei が 0n に落ち、ボタンが btnSelectAmount のまま理由不明に
-  // なる。ERC20 版 TipForm と同型に明示エラーを出す (DECIMAL_PATTERN は通るが桁超過のケース)。
-  const amountPrecisionError =
-    !!amountStr &&
-    DECIMAL_PATTERN.test(amountStr) &&
-    exceedsTokenPrecision(amountStr, NATIVE_DECIMALS);
+  // なる。amountPrecisionError は DECIMAL_PATTERN は通るが桁超過のケースを明示する (hook 内)。
+  const {
+    selectedPreset,
+    customAmount,
+    customSelected,
+    amountStr,
+    amountWei,
+    amountPrecisionError,
+    selectPreset,
+    selectCustom,
+    changeCustomAmount,
+  } = useTipAmount({ presets, decimals: NATIVE_DECIMALS });
 
   const wrongChain = isConnected && chainId !== requiredChain.id;
   // ネイティブ送金は gas も同一残高から払うため、amountWei + gas 予約分が残高を超えるなら
@@ -164,11 +162,6 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
     amountStr,
     nativeSymbol,
   ]);
-
-  function selectPreset(preset: string) {
-    setSelectedPreset(preset);
-    setCustomAmount('');
-  }
 
   function onSubmit() {
     if (!canSubmit) return;
@@ -243,11 +236,8 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
               inputMode="decimal"
               value={customAmount}
               disabled={isSending || isMining}
-              onFocus={() => setSelectedPreset(null)}
-              onChange={(e) => {
-                setSelectedPreset(null);
-                setCustomAmount(e.target.value.replace(/[^\d.]/g, ''));
-              }}
+              onFocus={selectCustom}
+              onChange={(e) => changeCustomAmount(e.target.value)}
               placeholder={t('amountCustomPlaceholder')}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: customSelected ? themeColor : undefined }}
