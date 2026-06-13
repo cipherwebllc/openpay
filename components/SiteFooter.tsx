@@ -60,7 +60,9 @@ export function SiteFooter() {
           残したいので <details> で折り畳む。summary は soft な日本語/英語、
           展開時に技術ラベルを表示。review (2026-05-23) #15 対応。 */}
       <details className="mt-1 inline-block text-slate-400 marker:hidden">
-        <summary className="cursor-pointer list-none hover:text-slate-700">
+        {/* min-h + inline-flex で tap target 高さを 24px 以上に確保 (a11y target-size)。
+            inline-flex のままなので <details> の inline-block レイアウトは不変。 */}
+        <summary className="inline-flex min-h-[24px] cursor-pointer list-none items-center justify-center hover:text-slate-700">
           {t('poweredBySoft')}{' '}
           <span className="text-[10px] underline-offset-2 hover:underline">
             ({t('poweredByExpand')})
@@ -83,7 +85,7 @@ export function SiteFooter() {
           rel="noopener noreferrer"
           aria-label={t('xLink')}
           title={t('xLink')}
-          className="inline-flex items-center hover:text-slate-700"
+          className="inline-flex h-6 w-6 items-center justify-center hover:text-slate-700"
         >
           <XIcon />
         </a>
@@ -93,7 +95,7 @@ export function SiteFooter() {
           rel="noopener noreferrer"
           aria-label={t('discordLink')}
           title={t('discordLink')}
-          className="inline-flex items-center hover:text-slate-700"
+          className="inline-flex h-6 w-6 items-center justify-center hover:text-slate-700"
         >
           <DiscordIcon />
         </a>
