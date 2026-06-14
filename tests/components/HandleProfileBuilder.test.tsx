@@ -5,7 +5,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
-const h = vi.hoisted(() => ({ enableHandles: true }));
+const h = vi.hoisted(() => ({ enableHandles: true, enableJpycAvalanche: false }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -15,6 +15,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       get enableHandles() {
         return h.enableHandles;
+      },
+      get enableJpycAvalanche() {
+        return h.enableJpycAvalanche;
       },
     },
   };
@@ -81,6 +84,7 @@ import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
 
 beforeEach(() => {
   h.enableHandles = true;
+  h.enableJpycAvalanche = false;
   localStorage.clear();
 });
 
@@ -103,6 +107,28 @@ describe('HandleProfileBuilder', () => {
       screen.queryByRole('checkbox', { name: 'USDC (cross-chain)' }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId('claim')).toBeInTheDocument();
+  });
+
+  it('enableJpycAvalanche OFF (既定) → JPYC (Avalanche) トグルは出ない (inert)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(
+      screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'JPYC (Avalanche)' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('enableJpycAvalanche ON → JPYC (Avalanche) トグルが出て、ON で受取方法に加わる', () => {
+    h.enableJpycAvalanche = true;
+    renderWithIntl(<HandleProfileBuilder />);
+    const avax = screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' });
+    expect(avax).toBeInTheDocument();
+    expect(avax).not.toBeChecked(); // opt-in (flag ON でも既定 OFF)
+    // 受取先解決 + Avalanche を ON → checkbox が反映される
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
+    fireEvent.click(avax);
+    expect(avax).toBeChecked();
   });
 
   it('受取先未確定では config=null・解決後に config-ready', () => {

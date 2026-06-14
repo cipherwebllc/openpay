@@ -9,14 +9,17 @@ import { DEFAULT_TIP_PRESETS } from '@/lib/url';
 import { MAX_PROFILE_LINKS, MAX_SOCIAL_LINKS } from '@/lib/handle';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
-// 受取方法は JPYC Polygon / JPYC Kaia の ON/OFF。USDC (cross-chain) は着金チェーンを
-// 選べず Base 固定になるためビルダーから提供終了 (チップタブで個別作成→リンク集へ)。
+// 受取方法は JPYC Polygon / JPYC Kaia の ON/OFF (+ env.enableJpycAvalanche=ON で JPYC Avalanche)。
+// USDC (cross-chain) は着金チェーンを選べず Base 固定になるためビルダーから提供終了
+// (チップタブで個別作成→リンク集へ)。
 export interface HandleProfileDraft {
   to: string; // 生入力 (アドレス or ENS)・submit 時に再解決
   name: string;
   color: string;
   jpycPolygon: boolean;
   jpycKaia: boolean;
+  // Avalanche は env.enableJpycAvalanche=ON のときだけビルダーで提供 (Phase 2・既定 OFF)。
+  jpycAvalanche: boolean;
   presetsJpyc: string[];
   bio: string;
   avatar: string;
@@ -36,6 +39,7 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   color: '#2563eb',
   jpycPolygon: true,
   jpycKaia: true,
+  jpycAvalanche: false, // opt-in (flag ON でも既定 OFF)
   presetsJpyc: defaultPresets().jpyc,
   bio: '',
   avatar: '',
@@ -100,6 +104,7 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
         : DEFAULT_PROFILE_DRAFT.color,
     jpycPolygon: bool(loaded.jpycPolygon, true),
     jpycKaia: bool(loaded.jpycKaia, true),
+    jpycAvalanche: bool(loaded.jpycAvalanche, false),
     presetsJpyc: sanitizePresetList(loaded.presetsJpyc, d.jpyc),
     bio: str(loaded.bio, ''),
     avatar: str(loaded.avatar, ''),

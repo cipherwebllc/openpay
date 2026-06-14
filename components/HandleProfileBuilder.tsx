@@ -100,8 +100,26 @@ export function HandleProfileBuilder() {
     const m: HandleReceiveMethod[] = [];
     if (draft.jpycPolygon) m.push({ token: 'jpyc', chain: 'polygon' });
     if (draft.jpycKaia) m.push({ token: 'jpyc', chain: 'kaia' });
+    // Avalanche は env.enableJpycAvalanche=ON のときだけ (Phase 2・既定 OFF=inert)。
+    // flag OFF で古い draft が jpycAvalanche=true でも method には載せない (provably inert)。
+    if (env.enableJpycAvalanche && draft.jpycAvalanche) {
+      m.push({ token: 'jpyc', chain: 'avalanche' });
+    }
     return m;
-  }, [draft.jpycPolygon, draft.jpycKaia]);
+  }, [draft.jpycPolygon, draft.jpycKaia, draft.jpycAvalanche]);
+
+  // 受取方法トグルの選択肢。Avalanche はチップの JPYC_CHAINS と同思想で
+  // env.enableJpycAvalanche=ON のときだけ表示 (既定 OFF=非表示で完全 inert)。実際に受取可能か
+  // (forwarder 設定で gasless 成立) は公開ページ/publish 時の parseTipParams が判定する。
+  const methodOptions: Array<
+    ['jpycPolygon' | 'jpycKaia' | 'jpycAvalanche', HandleReceiveMethod]
+  > = [
+    ['jpycPolygon', { token: 'jpyc', chain: 'polygon' }],
+    ['jpycKaia', { token: 'jpyc', chain: 'kaia' }],
+  ];
+  if (env.enableJpycAvalanche) {
+    methodOptions.push(['jpycAvalanche', { token: 'jpyc', chain: 'avalanche' }]);
+  }
 
   // ドラッグ並べ替え: from の要素を抜いて to へ挿入した新配列を返す。
   const moveItem = <T,>(arr: T[], from: number, to: number): T[] => {
@@ -265,6 +283,9 @@ export function HandleProfileBuilder() {
           : DEFAULT_PROFILE_DRAFT.color,
       jpycPolygon: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'polygon'),
       jpycKaia: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'kaia'),
+      jpycAvalanche: c.methods.some(
+        (m) => m.token === 'jpyc' && m.chain === 'avalanche',
+      ),
       presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
@@ -346,10 +367,7 @@ export function HandleProfileBuilder() {
               <fieldset>
                 <legend className="text-sm font-medium text-slate-700">{t('methodsLabel')}</legend>
                 <div className="mt-1 space-y-1.5">
-                  {([
-                    ['jpycPolygon', { token: 'jpyc', chain: 'polygon' } as const],
-                    ['jpycKaia', { token: 'jpyc', chain: 'kaia' } as const],
-                  ] as const).map(([key, method]) => (
+                  {methodOptions.map(([key, method]) => (
                     <label key={key} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
                       <input
                         type="checkbox"
