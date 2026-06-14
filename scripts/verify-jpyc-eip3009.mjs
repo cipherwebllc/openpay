@@ -35,7 +35,7 @@ import {
   zeroHash,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy, kaia } from 'viem/chains';
+import { polygon, polygonAmoy, kaia, avalanche, avalancheFuji } from 'viem/chains';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function loadEnvFile(path) {
@@ -73,6 +73,18 @@ const TARGETS = [
     chain: kaia,
     rpc: process.env.NEXT_PUBLIC_KAIA_RPC_URL,
     address: process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS ?? JPYC_V3,
+  },
+  {
+    name: 'Avalanche',
+    chain: avalanche,
+    rpc: process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL,
+    address: process.env.NEXT_PUBLIC_JPYC_AVALANCHE_ADDRESS ?? JPYC_V3,
+  },
+  {
+    name: 'Avalanche Fuji',
+    chain: avalancheFuji,
+    rpc: process.env.NEXT_PUBLIC_AVALANCHE_FUJI_RPC_URL,
+    address: process.env.NEXT_PUBLIC_JPYC_AVALANCHE_FUJI_ADDRESS ?? JPYC_V3,
   },
 ];
 

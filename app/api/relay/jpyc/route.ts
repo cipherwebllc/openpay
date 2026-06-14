@@ -31,7 +31,7 @@ import {
   PROVIDER,
   MAX_VALUE,
   MAINNET_CHAINS,
-  RELAY_MAX_GAS_COST_WEI,
+  relayMaxGasCostWei,
   RELAY_LOW_BALANCE_ALERT_WEI,
   SUPPORTED_CHAINS,
   transportFor,
@@ -290,8 +290,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   // mainnet (Polygon/Kaia) を self-host で relay する前提条件 (testnet は緩く運用可)。silent な
   // 無効化を避け mainnet のみ 503 で拒否する。
   if (PROVIDER === 'self-host' && MAINNET_CHAINS.has(chainId)) {
-    // B5: gas-cost ceiling 未設定は赤字リスク (Codex P1)。
-    if (RELAY_MAX_GAS_COST_WEI === 0n) {
+    // B5: gas-cost ceiling 未設定は赤字リスク (Codex P1)。per-chain 解決
+    // (Avalanche は RELAY_MAX_GAS_COST_WEI_AVALANCHE 必須・グローバルは POL/KAIA 用)。
+    if (relayMaxGasCostWei(chainId) === 0n) {
       logger.error('RELAY_MAX_GAS_COST_WEI unset on mainnet self-host (B5 必須)', {
         chainId,
       });
@@ -545,7 +546,7 @@ async function handleRecover(
     releaseIdempotency,
     submit: (_c, target, data) =>
       submitSelfHost(io, target, data, {
-        maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
+        maxGasCostWei: relayMaxGasCostWei(chainId),
         isAuthorizationUsed,
         lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
         onLowBalance: (b) =>

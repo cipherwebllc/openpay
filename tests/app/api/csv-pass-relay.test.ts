@@ -50,6 +50,9 @@ vi.mock('@/lib/relay/relayProvider', () => ({
   get RELAY_MAX_GAS_COST_WEI() {
     return providerHold.gasCeilWei;
   },
+  // route は per-chain relayMaxGasCostWei(chainId) を呼ぶ。テストは chain 非依存に
+  // providerHold.gasCeilWei を返す (上限の有無/値はテストが gasCeilWei で制御)。
+  relayMaxGasCostWei: () => providerHold.gasCeilWei,
   relayFreeAuthorization,
 }));
 // route は isKvConfigured のみ参照 (csvPass 経由の kvGet 等は import されるだけで呼ばれない)。

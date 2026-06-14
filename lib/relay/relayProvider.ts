@@ -26,7 +26,14 @@ import {
   type Hex,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
+import {
+  polygon,
+  polygonAmoy,
+  kaia,
+  kairos,
+  avalanche,
+  avalancheFuji,
+} from 'viem/chains';
 import { logger } from '@/lib/logger';
 import { resolveDeployment } from '@/lib/tokens';
 import type { Eip3009Authorization } from '@/lib/jpycEip3009';
@@ -79,6 +86,22 @@ export const RELAY_MAX_GAS_COST_WEI = (() => {
   const raw = process.env.RELAY_MAX_GAS_COST_WEI;
   return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 0n;
 })();
+// per-chain の native gas 上限 (wei)。⚠️ native の価値が桁違い (AVAX ~$15-40 vs POL/KAIA ~$0.1-0.5)
+// のため、同じ wei 上限を全 chain 共有すると AVAX で USD 換算 ~100倍 緩くなり高騰時に赤字を素通しする。
+// Avalanche は専用上限を必須にする (server 専用 env なので動的キーでなく静的テーブルで列挙)。
+const PER_CHAIN_MAX_GAS_COST_WEI_ENV: Record<number, string | undefined> = {
+  [avalanche.id]: process.env.RELAY_MAX_GAS_COST_WEI_AVALANCHE,
+  [avalancheFuji.id]: process.env.RELAY_MAX_GAS_COST_WEI_FUJI,
+};
+// chainId の native gas 上限 (wei)。per-chain env → グローバル RELAY_MAX_GAS_COST_WEI → 0n (未設定)。
+// 0n は「上限なし」(testnet 既定)。mainnet self-host は route が 0n を 503 で弾く (B5 hardening)。
+// ⚠️ Avalanche mainnet はグローバル fallback (POL/KAIA 調整値) では緩すぎるため、必ず
+// RELAY_MAX_GAS_COST_WEI_AVALANCHE を AVAX 用に設定すること (.env.local.example 参照)。
+export function relayMaxGasCostWei(chainId: number): bigint {
+  const perChain = PER_CHAIN_MAX_GAS_COST_WEI_ENV[chainId];
+  if (perChain && /^[0-9]+$/.test(perChain)) return BigInt(perChain);
+  return RELAY_MAX_GAS_COST_WEI;
+}
 // relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し
 // operator が補充できるように)。既定 0.1 native (1e17)。補充 cadence に応じ env で調整・0 で無効。
 export const RELAY_LOW_BALANCE_ALERT_WEI = (() => {
@@ -96,12 +119,24 @@ export const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = 
   },
   [kaia.id]: { chain: kaia, rpc: process.env.NEXT_PUBLIC_KAIA_RPC_URL },
   [kairos.id]: { chain: kairos, rpc: process.env.NEXT_PUBLIC_KAIROS_RPC_URL },
+  [avalanche.id]: {
+    chain: avalanche,
+    rpc: process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL,
+  },
+  [avalancheFuji.id]: {
+    chain: avalancheFuji,
+    rpc: process.env.NEXT_PUBLIC_AVALANCHE_FUJI_RPC_URL,
+  },
 };
 
 // mainnet chain (実マネー)。recover の self-host hardening (KV + gas-cost ceiling 必須) を強制する
 // 判定に使う。testnet (Amoy/Kairos) は緩く運用可。新規 mainnet chain を SUPPORTED_CHAINS に
 // 足したら、ここにも追加して silent な fail-open を防ぐこと。
-export const MAINNET_CHAINS: ReadonlySet<number> = new Set([polygon.id, kaia.id]);
+export const MAINNET_CHAINS: ReadonlySet<number> = new Set([
+  polygon.id,
+  kaia.id,
+  avalanche.id, // mainnet のみ (Fuji=avalancheFuji.id は testnet=緩和)
+]);
 
 // JPYC (FiatToken) の EIP-3009 使用済フラグ。submit 前に読み guaranteed-revert を避ける。
 const AUTHORIZATION_STATE_ABI = parseAbi([
@@ -286,7 +321,7 @@ export function relayFreeAuthorization(
       checkAuthorizationUsed: readAuthorizationUsed,
       submitSponsoredCall: (_c, target, data) =>
         submitSelfHost(io!, target, data, {
-          maxGasCostWei: RELAY_MAX_GAS_COST_WEI,
+          maxGasCostWei: relayMaxGasCostWei(chainId),
           isAuthorizationUsed,
           lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
           onLowBalance: (b) =>

@@ -190,6 +190,12 @@ export const env = {
         'NEXT_PUBLIC_JPYC_KAIA_ADDRESS',
         process.env.NEXT_PUBLIC_JPYC_KAIA_ADDRESS,
       ),
+      // JPYC v3 は Avalanche mainnet でも同一アドレス (0xE7C3…) なので既定 (JPYC_V3_ADDRESS) で十分。
+      // この override は緊急アドレス変更用 (未設定 = 既定)。
+      avalanche: parseAddress(
+        'NEXT_PUBLIC_JPYC_AVALANCHE_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_AVALANCHE_MAINNET_ADDRESS,
+      ),
     },
     usdc: {
       base: parseAddress(
@@ -249,6 +255,11 @@ export const env = {
       kaia: parseAddress(
         'NEXT_PUBLIC_JPYC_KAIROS_ADDRESS',
         process.env.NEXT_PUBLIC_JPYC_KAIROS_ADDRESS,
+      ),
+      // Avalanche Fuji の JPYC も同一アドレス (0xE7C3…)。override は未設定 = 既定。
+      avalanche: parseAddress(
+        'NEXT_PUBLIC_JPYC_AVALANCHE_FUJI_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_AVALANCHE_FUJI_ADDRESS,
       ),
     },
     usdc: {
@@ -373,6 +384,15 @@ export const env = {
   // (memory:jpyc-eip3009)。'1' / 'true' で ON。
   enableJpycEip3009: parseBoolFlag(
     process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009,
+  ),
+  // JPYC を Avalanche (本番) / Avalanche Fuji (testnet) でも提供するかのフラグ。**既定 OFF**。
+  // OFF の間は JPYC_CHAINS=['polygon','kaia'] のままで挙動完全不変。ON にすると JPYC_CHAINS に
+  // 'avalanche' が加わり、NETWORK_ENV=testnet では Fuji・mainnet では Avalanche が JPYC チェーンに
+  // なる。⚠️ Avalanche は recover-required (forwarder 未設定なら relay せず通常送金へ倒す) — free
+  // モードで OpenPay relayer が AVAX を持ち出す赤字を構造的に防ぐ (lib/jpycGaslessProvider)。
+  // 点灯 = '1'/'true' + 該当 chain の forwarder (NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE/_FUJI) 設定。
+  enableJpycAvalanche: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE,
   ),
   // freee 自動連携パネル (/history の SIWE ログイン + 「freee に同期」) の有効化フラグ。
   // **既定 OFF (dark ship)**。会計 API の req/resp 形が実プラン freee で未検証のため、

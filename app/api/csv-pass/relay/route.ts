@@ -27,7 +27,7 @@ import { csvPassPriceWei } from '@/lib/csvPass';
 import {
   PROVIDER,
   MAINNET_CHAINS,
-  RELAY_MAX_GAS_COST_WEI,
+  relayMaxGasCostWei,
   relayFreeAuthorization,
 } from '@/lib/relay/relayProvider';
 import { isKvConfigured } from '@/lib/kv';
@@ -102,7 +102,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // になり relayer を素通しで焼ける。エラーコードも決済 relay と揃える (503 → client は
   // gaslessUnavailable → ガスあり fallback 導線へ)。
   if (PROVIDER === 'self-host' && MAINNET_CHAINS.has(chainId)) {
-    if (RELAY_MAX_GAS_COST_WEI === 0n) {
+    if (relayMaxGasCostWei(chainId) === 0n) {
       logger.error('csvpass.relay.gas_ceiling_required', { chainId });
       return NextResponse.json(
         { ok: false, error: 'gas_ceiling_required' },

@@ -41,6 +41,8 @@ const NATIVE_GAS_RESERVE_WEI = 10n ** 15n;
 const NATIVE_TIP_PRESETS: Record<NativeTipParams['chain'], string[]> = {
   polygon: ['1', '5', '10'],
   kaia: ['5', '25', '100'],
+  // AVAX は単価が高い (~$15-40) ので小さめの「気軽額」。custom 入力で任意額も可。
+  avalanche: ['0.05', '0.2', '0.5'],
 };
 
 // user reject (署名拒否) は握りつぶしてエラー表示しない。それ以外は表示する。

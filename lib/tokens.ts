@@ -26,6 +26,7 @@ import {
   type ChainSlug,
   type JpycChainSlug,
 } from './chains';
+import { configuredJpycForwarderFor } from './relay/forwarderConfig';
 
 // 対応トークン一覧。type と runtime enumeration を兼ねる。
 export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
@@ -272,19 +273,35 @@ const usdcBuyerOnlyDeployments: TokenDeployment[] = BUYER_ONLY_USDC_SLUGS.map(
   }),
 );
 
-// JPYC v3 cross-chain consistency により 4 chain (Polygon mainnet/Amoy + Kaia
-// mainnet/Kairos) 全てで同一 address を hard-code default として持つ。env
-// override は emergency address 変更用。戻り値は常に Address (型保証)。
+// JPYC v3 cross-chain consistency により全 chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos +
+// Avalanche mainnet/Fuji) で同一 address を hard-code default として持つ。env override は emergency
+// address 変更用。overrides[slug] の index アクセスで全 JpycChainSlug を網羅 (slug 追加時に env キー
+// 欠落をコンパイルエラー化)。戻り値は常に Address (型保証)。
 function jpycAddress(slug: JpycChainSlug): Address {
   const overrides = isMainnet
     ? env.mainnetTokenOverrides.jpyc
     : env.testnetTokenOverrides.jpyc;
-  return (slug === 'polygon' ? overrides.polygon : overrides.kaia) ?? JPYC_V3_ADDRESS;
+  return overrides[slug] ?? JPYC_V3_ADDRESS;
 }
 
-// JPYC は Polygon (mainnet/Amoy) + Kaia (mainnet/Kairos) の 2 chain で常に
-// deploy 済 (JPYC v3 cross-chain consistency)。hard-code default が必ず効く
-// ので deployment skip 経路は存在しない。
+// recover-required chain (Avalanche) は forwarder 設定済のときだけ gasless (recover) を提供する。
+// 未設定なら paymasterMode='unavailable' → isGaslessSupported=false → URL/UI が standard を強制
+// (free モードで OpenPay relayer が AVAX を持ち出す赤字を構造的に防ぐ・recover-required ポリシーの
+// 単一ゲート)。Polygon/Kaia は従来どおり常に 'sponsorship' (free モード許容・歴史的経緯で不変)。
+// configuredJpycForwarderFor は生の forwarder env を読む (a1 非考慮)。
+function jpycPaymasterModeForSlug(slug: JpycChainSlug): PaymasterMode {
+  if (slug === 'avalanche') {
+    return configuredJpycForwarderFor(chainIdFor(slug)) !== null
+      ? 'sponsorship'
+      : 'unavailable';
+  }
+  return 'sponsorship';
+}
+
+// JPYC は Polygon (mainnet/Amoy) + Kaia (mainnet/Kairos) で常に deploy 済 (JPYC v3 cross-chain
+// consistency)。Avalanche (mainnet/Fuji) は env.enableJpycAvalanche=ON のとき JPYC_CHAINS に加わる
+// (forwarder 設定で gasless 提供・未設定は standard のみ)。hard-code default が必ず効くので
+// deployment skip 経路は存在しない。
 const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.map((slug) => ({
   symbol: 'jpyc' as const,
   displaySymbol: 'JPYC',
@@ -292,7 +309,7 @@ const jpycDeployments: TokenDeployment[] = JPYC_CHAINS.map((slug) => ({
   decimals: 18,
   address: jpycAddress(slug),
   chainId: chainIdFor(slug),
-  paymasterMode: 'sponsorship' as const,
+  paymasterMode: jpycPaymasterModeForSlug(slug),
 }));
 
 // 全 deployment のフラット配列。順序は QR token セレクター・chain セレクターの

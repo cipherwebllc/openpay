@@ -21,6 +21,10 @@ const FORWARDER_ADDRESS_ENV: Record<number, string | undefined> = {
   [polygonAmoy.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY,
   [kaia.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIA,
   [kairos.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_KAIROS,
+  // Avalanche は recover-required (forwarder 未設定なら gasless 非提供=standard へ倒す)。
+  // tokens.ts の paymasterMode 計算がこの値の有無で gasless 可否を決める。
+  [avalanche.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE,
+  [avalancheFuji.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_FUJI,
 };
 
 // 設定された (= 生の env) forwarder アドレス。a1 を考慮しない素の値で、起動時の運営向け

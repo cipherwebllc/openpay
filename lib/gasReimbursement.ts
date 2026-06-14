@@ -24,9 +24,12 @@ import { env } from './env';
 export const DEFAULT_POL_JPYC_RATE = 20n;
 export const DEFAULT_KAIA_JPYC_RATE = 10n;
 
-// JPYC sponsorship が動く chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。
-// 該当しない chain では gas を 0 として扱う (UI 表示の defensive、JPYC は元々
-// 4 chain にしか deploy されていないため通常は到達しない)。
+// JPYC sponsorship (案A: OpenPay が native gas を立て替え JPYC で回収) が動く chain
+// (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。該当しない chain では gas を 0 として扱う。
+// ⚠️ Avalanche は **意図的に除外**: Avalanche は recover-required (forwarder 設定で eip3009-relay
+// recover / 未設定で standard) のため sponsorship/pimlico 経路に構造的に到達しない。よって本 set にも
+// resolveNativeJpycRate にも avalanche を足さない (到達不能な POL レート誤用コードを避ける)。将来
+// Avalanche で sponsorship を使うなら、ここと resolveNativeJpycRate に AVAX レートを追加すること。
 export const JPYC_SPONSORSHIP_CHAIN_IDS: ReadonlySet<number> = new Set<number>([
   polygon.id,
   polygonAmoy.id,
