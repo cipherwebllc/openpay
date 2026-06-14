@@ -19,13 +19,14 @@ export type JpycGaslessProvider = 'eip3009-relay' | 'pimlico-7702';
 // Polygon は当初 Gelato だったが自前 relayer に移行済。Kaia は Gelato 非対応のため当初除外していたが、
 // 自前 relayer 化で対応可能になった (relayer EOA に KAIA を入金して中継)。Avalanche/Fuji は
 // env.enableJpycAvalanche=ON + forwarder 設定済のときに recover 経路で使う (recover-required)。
+// Avalanche/Fuji は env.enableJpycAvalanche=ON のときだけ含める。OFF (既定) では完全に除外され、
+// flag-off が provably inert になる (health/relay 列挙にも出ない・Codex P2)。
 export const EIP3009_RELAY_CHAINS: ReadonlySet<number> = new Set([
   polygon.id,
   polygonAmoy.id,
   kaia.id,
   kairos.id,
-  avalanche.id,
-  avalancheFuji.id,
+  ...(env.enableJpycAvalanche ? [avalanche.id, avalancheFuji.id] : []),
 ]);
 
 // JPYC ガスレスを EIP-3009 relay にするか、従来の Pimlico/7702 sponsorship にするか。

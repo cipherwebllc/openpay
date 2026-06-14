@@ -3,10 +3,13 @@ import { polygon, polygonAmoy, kaia, kairos } from 'viem/chains';
 import type { TokenDeployment } from '@/lib/tokens';
 
 // env.enableJpycEip3009 を test ごとに制御する (flag が resolver の唯一の env 依存)。
-const enableRef = { value: false };
+// enableJpycAvalanche は EIP3009_RELAY_CHAINS が **module load 時** に読むため、mock factory が
+// hoisted import 中に getter を発火する → enableRef を vi.hoisted で巻き上げないと TDZ になる。
+// avalanche は既定 false 固定 (これらの test は avalanche 非対象・Polygon/Kaia/Kairos のみ)。
+const enableRef = vi.hoisted(() => ({ value: false }));
 vi.mock('@/lib/env', () => ({
   get env() {
-    return { enableJpycEip3009: enableRef.value };
+    return { enableJpycEip3009: enableRef.value, enableJpycAvalanche: false };
   },
 }));
 

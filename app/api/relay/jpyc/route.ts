@@ -53,6 +53,7 @@ import {
 import {
   jpycForwarderFor,
   configuredJpycForwarderFor,
+  isRecoverRequiredChain,
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import {
@@ -357,6 +358,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     PROVIDER === 'self-host' &&
     chainId in SUPPORTED_CHAINS &&
     forwarderFor(chainId) !== null;
+
+  // recover-required chain (Avalanche) は free モード禁止 (OpenPay relayer の AVAX 持ち出し防止)。
+  // recover でない (forwarder 未設定 or a1 ON で実効 null) なら handleFree に倒さず 503 で拒否し、
+  // client を standard へ誘導する。⚠️ server 権威の安全策: client ゲート (paymasterMode→standard) を
+  // 迂回する直接署名 POST でもここで止まる (Codex P1)。
+  if (!recoverMode && isRecoverRequiredChain(chainId)) {
+    logger.warn('relay.jpyc.recover_required_no_forwarder', { chainId });
+    return NextResponse.json(
+      { ok: false, error: 'relay_not_configured' },
+      { status: 503 },
+    );
+  }
 
   return recoverMode
     ? handleRecover(raw, chainId, ipPrefix)

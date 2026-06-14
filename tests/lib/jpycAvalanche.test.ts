@@ -19,6 +19,7 @@ const FUJI_FORWARDER = '0x0F4560a777415580F0680F8B56a79B0022C6B848';
 const KEYS = [
   'NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE',
   'NEXT_PUBLIC_ENABLE_JPYC_EIP3009',
+  'NEXT_PUBLIC_ENABLE_USAGE_FEE',
   'NEXT_PUBLIC_NETWORK_ENV',
   'NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE',
   'NEXT_PUBLIC_JPYC_FORWARDER_FUJI',
@@ -37,7 +38,8 @@ async function loadWith(envVars: Partial<Record<Key, string>>) {
   const tokens = await import('@/lib/tokens');
   const provider = await import('@/lib/jpycGaslessProvider');
   const relayProvider = await import('@/lib/relay/relayProvider');
-  return { chains, tokens, provider, relayProvider };
+  const forwarderConfig = await import('@/lib/relay/forwarderConfig');
+  return { chains, tokens, provider, relayProvider, forwarderConfig };
 }
 
 afterEach(() => {
@@ -127,13 +129,51 @@ describe('Avalanche recover-required (forwarder 有無で gasless 可否)', () =
       'sponsorship',
     );
   });
+
+  it('a1 (NEXT_PUBLIC_ENABLE_USAGE_FEE) ON + Fuji forwarder 設定済 → 実効 forwarder=null → unavailable (Codex P1#2)', async () => {
+    // a1 と recover は排他: jpycForwarderFor は a1 ON で null を返す。paymasterMode が
+    // configuredJpycForwarderFor (raw) を見ていると sponsorship 誤判定→server free→AVAX 持ち出し。
+    // 実効 jpycForwarderFor を見ることで a1 ON 時は 'unavailable' → standard に倒れる。
+    const { tokens } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'testnet',
+      NEXT_PUBLIC_JPYC_FORWARDER_FUJI: FUJI_FORWARDER,
+      NEXT_PUBLIC_ENABLE_USAGE_FEE: '1',
+    });
+    expect(tokens.deploymentForSlug('jpyc', 'avalanche').paymasterMode).toBe(
+      'unavailable',
+    );
+  });
 });
 
-describe('EIP3009_RELAY_CHAINS に Avalanche/Fuji を含む', () => {
-  it('avalanche.id (43114) と avalancheFuji.id (43113) が relay 対応 chain', async () => {
-    const { provider } = await loadWith({});
+describe('isRecoverRequiredChain (server 権威の free 禁止セット・flag 非依存)', () => {
+  it('avalanche/fuji は recover-required・既存 chain は false', async () => {
+    const { forwarderConfig } = await loadWith({});
+    expect(forwarderConfig.isRecoverRequiredChain(avalanche.id)).toBe(true);
+    expect(forwarderConfig.isRecoverRequiredChain(avalancheFuji.id)).toBe(true);
+    expect(forwarderConfig.isRecoverRequiredChain(137)).toBe(false);
+    expect(forwarderConfig.isRecoverRequiredChain(8217)).toBe(false);
+  });
+
+  it('flag OFF でも recover-required 判定は有効 (client ゲート迂回 POST への server 安全策)', async () => {
+    const { forwarderConfig } = await loadWith({});
+    expect(forwarderConfig.isRecoverRequiredChain(avalanche.id)).toBe(true);
+  });
+});
+
+describe('EIP3009_RELAY_CHAINS の Avalanche/Fuji 包含は flag で制御 (Codex P2: flag-off 完全 inert)', () => {
+  it('flag ON: avalanche.id (43114) と avalancheFuji.id (43113) が relay 対応 chain', async () => {
+    const { provider } = await loadWith({ NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE: '1' });
     expect(provider.EIP3009_RELAY_CHAINS.has(avalanche.id)).toBe(true);
     expect(provider.EIP3009_RELAY_CHAINS.has(avalancheFuji.id)).toBe(true);
+  });
+
+  it('flag OFF (既定): avalanche/fuji は EIP3009_RELAY_CHAINS に含まれない (inert)', async () => {
+    const { provider } = await loadWith({});
+    expect(provider.EIP3009_RELAY_CHAINS.has(avalanche.id)).toBe(false);
+    expect(provider.EIP3009_RELAY_CHAINS.has(avalancheFuji.id)).toBe(false);
+    // 既存 chain は不変。
+    expect(provider.EIP3009_RELAY_CHAINS.has(137)).toBe(true);
   });
 });
 
@@ -143,13 +183,16 @@ describe('relayMaxGasCostWei — per-chain gas 上限 (AVAX は native 価値が
     expect(relayProvider.relayMaxGasCostWei(avalanche.id)).toBe(0n);
   });
 
-  it('グローバルのみ設定 → 全 chain がグローバル値 (後方互換)', async () => {
+  it('グローバルのみ設定: 既存 chain はグローバル値・Avalanche は global fallback を使わず 0n (Codex P1)', async () => {
     const { relayProvider } = await loadWith({
-      RELAY_MAX_GAS_COST_WEI: '10000000000000000', // 0.01
+      RELAY_MAX_GAS_COST_WEI: '10000000000000000', // 0.01 (POL/KAIA 用)
     });
-    expect(relayProvider.relayMaxGasCostWei(avalanche.id)).toBe(
-      10000000000000000n,
-    );
+    // 既存 chain (Polygon 137) はグローバル値 (後方互換)。
+    expect(relayProvider.relayMaxGasCostWei(137)).toBe(10000000000000000n);
+    // ⚠️ Avalanche は recover-required: POL/KAIA 用グローバル値を流用しない (AVAX には過大)。
+    // per-chain 未設定 → 0n → mainnet B5 gate が 503 で点灯を止める。
+    expect(relayProvider.relayMaxGasCostWei(avalanche.id)).toBe(0n);
+    expect(relayProvider.relayMaxGasCostWei(avalancheFuji.id)).toBe(0n);
   });
 
   it('per-chain (Avalanche) はグローバルより優先 (AVAX 専用上限)', async () => {

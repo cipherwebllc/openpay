@@ -26,7 +26,7 @@ import {
   type ChainSlug,
   type JpycChainSlug,
 } from './chains';
-import { configuredJpycForwarderFor } from './relay/forwarderConfig';
+import { jpycForwarderFor } from './relay/forwarderConfig';
 
 // 対応トークン一覧。type と runtime enumeration を兼ねる。
 export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
@@ -288,10 +288,12 @@ function jpycAddress(slug: JpycChainSlug): Address {
 // 未設定なら paymasterMode='unavailable' → isGaslessSupported=false → URL/UI が standard を強制
 // (free モードで OpenPay relayer が AVAX を持ち出す赤字を構造的に防ぐ・recover-required ポリシーの
 // 単一ゲート)。Polygon/Kaia は従来どおり常に 'sponsorship' (free モード許容・歴史的経緯で不変)。
-// configuredJpycForwarderFor は生の forwarder env を読む (a1 非考慮)。
+// jpycForwarderFor は **実効** forwarder (a1=enableUsageFee 考慮: a1 ON なら null)。これにより
+// a1 ON + Avalanche forwarder 設定済でも paymasterMode='unavailable' → standard に倒れ、server が
+// free モード (handleFree) で AVAX を持ち出す乖離 (Codex P1) を防ぐ。client/server が同じ実効値で一致。
 function jpycPaymasterModeForSlug(slug: JpycChainSlug): PaymasterMode {
   if (slug === 'avalanche') {
-    return configuredJpycForwarderFor(chainIdFor(slug)) !== null
+    return jpycForwarderFor(chainIdFor(slug)) !== null
       ? 'sponsorship'
       : 'unavailable';
   }

@@ -35,7 +35,9 @@ import {
   avalancheFuji,
 } from 'viem/chains';
 import { logger } from '@/lib/logger';
+import { env } from '@/lib/env';
 import { resolveDeployment } from '@/lib/tokens';
+import { RECOVER_REQUIRED_CHAINS } from './forwarderConfig';
 import type { Eip3009Authorization } from '@/lib/jpycEip3009';
 import {
   relayJpycAuthorization,
@@ -100,6 +102,11 @@ const PER_CHAIN_MAX_GAS_COST_WEI_ENV: Record<number, string | undefined> = {
 export function relayMaxGasCostWei(chainId: number): bigint {
   const perChain = PER_CHAIN_MAX_GAS_COST_WEI_ENV[chainId];
   if (perChain && /^[0-9]+$/.test(perChain)) return BigInt(perChain);
+  // recover-required chain (Avalanche) は global fallback を **使わない**: POL/KAIA 用に調整した
+  // グローバル wei 上限は AVAX には過大 (USD 換算 ~100倍 緩い) で赤字を素通しする。per-chain 未設定
+  // なら 0n を返し、mainnet self-host の B5 gate (route の === 0n) が gas_ceiling_required で点灯を
+  // 止める (Codex P1: グローバル fallback による silent な過大上限を防ぐ)。
+  if (RECOVER_REQUIRED_CHAINS.has(chainId)) return 0n;
   return RELAY_MAX_GAS_COST_WEI;
 }
 // relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し
@@ -119,15 +126,20 @@ export const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = 
   },
   [kaia.id]: { chain: kaia, rpc: process.env.NEXT_PUBLIC_KAIA_RPC_URL },
   [kairos.id]: { chain: kairos, rpc: process.env.NEXT_PUBLIC_KAIROS_RPC_URL },
-  [avalanche.id]: {
+};
+// Avalanche/Fuji は env.enableJpycAvalanche=ON のときだけ追加 (OFF=完全 inert・Codex P2: health/
+// relay 列挙にも出さない)。条件付き object spread は optional-key 型になり Record に不適合のため
+// 宣言後に代入する。
+if (env.enableJpycAvalanche) {
+  SUPPORTED_CHAINS[avalanche.id] = {
     chain: avalanche,
     rpc: process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL,
-  },
-  [avalancheFuji.id]: {
+  };
+  SUPPORTED_CHAINS[avalancheFuji.id] = {
     chain: avalancheFuji,
     rpc: process.env.NEXT_PUBLIC_AVALANCHE_FUJI_RPC_URL,
-  },
-};
+  };
+}
 
 // mainnet chain (実マネー)。recover の self-host hardening (KV + gas-cost ceiling 必須) を強制する
 // 判定に使う。testnet (Amoy/Kairos) は緩く運用可。新規 mainnet chain を SUPPORTED_CHAINS に
@@ -135,7 +147,8 @@ export const SUPPORTED_CHAINS: Record<number, { chain: Chain; rpc?: string }> = 
 export const MAINNET_CHAINS: ReadonlySet<number> = new Set([
   polygon.id,
   kaia.id,
-  avalanche.id, // mainnet のみ (Fuji=avalancheFuji.id は testnet=緩和)
+  // Avalanche mainnet のみ (Fuji=testnet=緩和)。flag ON のときだけ (OFF=完全 inert)。
+  ...(env.enableJpycAvalanche ? [avalanche.id] : []),
 ]);
 
 // JPYC (FiatToken) の EIP-3009 使用済フラグ。submit 前に読み guaranteed-revert を避ける。

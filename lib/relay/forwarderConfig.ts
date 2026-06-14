@@ -27,6 +27,20 @@ const FORWARDER_ADDRESS_ENV: Record<number, string | undefined> = {
   [avalancheFuji.id]: process.env.NEXT_PUBLIC_JPYC_FORWARDER_FUJI,
 };
 
+// recover-required chain: free モード (OpenPay relayer が native gas を全額負担) を **禁止** する chain。
+// native が高価な Avalanche (AVAX) では free relay が赤字になるため、forwarder 設定済 (recover) で
+// なければ relay せず standard へ倒す。⚠️ これは flag (enableJpycAvalanche) に依存しない server 権威の
+// 安全策: client ゲート (paymasterMode) を迂回する直接 POST でも、route がこの set で free を拒否する。
+export const RECOVER_REQUIRED_CHAINS: ReadonlySet<number> = new Set([
+  avalanche.id,
+  avalancheFuji.id,
+]);
+
+/** chainId が recover-required (free モード禁止) か。 */
+export function isRecoverRequiredChain(chainId: number): boolean {
+  return RECOVER_REQUIRED_CHAINS.has(chainId);
+}
+
 // 設定された (= 生の env) forwarder アドレス。a1 を考慮しない素の値で、起動時の運営向け
 // 診断 (route.ts の misconfig 警告) でのみ使う。決済経路の判定には jpycForwarderFor を使うこと。
 export function configuredJpycForwarderFor(chainId: number): Address | null {

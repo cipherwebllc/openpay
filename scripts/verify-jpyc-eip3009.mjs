@@ -78,7 +78,8 @@ const TARGETS = [
     name: 'Avalanche',
     chain: avalanche,
     rpc: process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL,
-    address: process.env.NEXT_PUBLIC_JPYC_AVALANCHE_ADDRESS ?? JPYC_V3,
+    // env 名はアプリ (lib/env.ts mainnetTokenOverrides.jpyc.avalanche) と一致させる。
+    address: process.env.NEXT_PUBLIC_JPYC_AVALANCHE_MAINNET_ADDRESS ?? JPYC_V3,
   },
   {
     name: 'Avalanche Fuji',

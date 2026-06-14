@@ -30,6 +30,7 @@ import {
   relayMaxGasCostWei,
   relayFreeAuthorization,
 } from '@/lib/relay/relayProvider';
+import { isRecoverRequiredChain } from '@/lib/relay/forwarderConfig';
 import { isKvConfigured } from '@/lib/kv';
 import {
   MAX_BODY_BYTES,
@@ -96,6 +97,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
   const chainId = raw.chainId;
+
+  // CSV パス購入は free モード (OpenPay relayer が native gas を負担) のみ。recover-required chain
+  // (Avalanche) は free 禁止 (AVAX 持ち出し赤字) なので CSV パス relay の対象外として拒否する
+  // (Codex P1: client ゲートを迂回する直接 POST でも server で止める)。
+  if (isRecoverRequiredChain(chainId)) {
+    logger.warn('csvpass.relay.recover_required_chain_rejected', { chainId });
+    return NextResponse.json(
+      { ok: false, error: 'unsupported_chain' },
+      { status: 400 },
+    );
+  }
 
   // mainnet self-host preflight (決済 relay と同一・Codex P1): これが無いと CSV relay 経由で
   // (a) gas-cost ceiling 無しの無制限ガス支出 (b) KV 未設定で idempotency/日次予算が fail-open
