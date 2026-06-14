@@ -42,6 +42,7 @@ import {
   readPermitNonce,
 } from '@/lib/circlePermit';
 import { pimlicoUrl } from '@/lib/pimlico';
+import { assertGasCeiling } from '@/lib/gasCeiling';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
 import type { TokenDeployment } from '@/lib/tokens';
@@ -168,8 +169,16 @@ export async function getCircleUserOpGasPrice(
     method: 'pimlico_getUserOperationGasPrice',
     params: [],
   });
+  const maxFeePerGas = BigInt(gp.standard.maxFeePerGas);
+  // P2 (Codex): 署名/送信に実際に使う gas price に ceiling を適用する。useBatchPayment の
+  // Pimlico 分岐は assertGasCeiling するが circle 分岐はその手前で return するため、Circle の
+  // 全送信経路 (sendCircleUserOperation / prepareAndSignCircleUserOp) が共通で通る本関数で
+  // 一元ガードする。送信時に gas がスパイクすると署名 op の maxFeePerGas を介して顧客 USDC が
+  // permit 上限 (実費×10) まで過大に pull されうるため、ceiling 超過は GasCongestedError で
+  // 送信前に弾く (ceiling 未設定 chain は pass-through)。
+  assertGasCeiling(bundle.chainId, maxFeePerGas);
   return {
-    maxFeePerGas: BigInt(gp.standard.maxFeePerGas),
+    maxFeePerGas,
     maxPriorityFeePerGas: BigInt(gp.standard.maxPriorityFeePerGas),
   };
 }

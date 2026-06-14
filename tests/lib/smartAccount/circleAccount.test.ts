@@ -146,6 +146,20 @@ describe('getCircleUserOpGasPrice', () => {
       params: [],
     });
   });
+
+  it('ceiling 超過の gas price は GasCongestedError で弾く (P2: Circle 送信経路の上限ガード)', async () => {
+    // arbSepolia (421614) の既定 ceiling は 1000 gwei。これを超える standard gas は署名/送信前に
+    // 拒否し、送信時スパイクで顧客 USDC が permit 上限まで過大 pull されるのを防ぐ。
+    const request = vi.fn(async () => ({
+      standard: {
+        maxFeePerGas: `0x${(2000n * 10n ** 9n).toString(16)}`, // 2000 gwei > 1000 ceiling
+        maxPriorityFeePerGas: '0x1dcd6500',
+      },
+    }));
+    await expect(
+      getCircleUserOpGasPrice(fakeBundle({ request })),
+    ).rejects.toThrow(/gas_congested/);
+  });
 });
 
 describe('estimateCircleUserOp', () => {

@@ -262,9 +262,13 @@ export async function executeCirclePayment(
   // status 優先 (confirmed > submitting > pre-submit) で処理し、stale でない pre-submit が
   // 先に来て confirmed/submitting を CirclePendingError で masked するのを防ぐ。
   // ⚠️ scan→reserve は単一同期 tick で自タブ内は実質 atomic だが、タブ/デバイス跨ぎの真の同時
-  // race は localStorage の限界で完全には塞げない。ただし**両 attempt は同一 sender の key-0
-  // sequential nonce を取るため、ERC-4337 EntryPoint の nonce 一意性が最終 double-spend ガード
-  // になる** (先着 1 件のみ included、後発は AA25 invalid-nonce で revert = merchant 転送は 1 回)。
+  // race は localStorage の限界で完全には塞げない。**並行 (同一 nonce) race** は両 attempt が
+  // 同一 sender の key-0 sequential nonce を取るため EntryPoint の nonce 一意性で吸収される
+  // (先着 1 件のみ included、後発は AA25 invalid-nonce で revert = merchant 転送は 1 回)。
+  // ⚠️ ただし「先行が confirmed 済 → 別デバイス (ローカル記録なし) で同じ QR を再決済」は新しい
+  // nonce を取るため別決済として通る。これは server 権威の請求状態を持たない非カストディ設計の
+  // 一般特性で、JPYC relay / Pimlico 7702 / standard の全ライブ経路と同じ (Circle 固有ではない)。
+  // 正本は on-chain / 履歴で、店舗は着金確認で運用する (将来 server 請求 dedup を入れるなら全経路共通)。
   const live = findLiveByCallHash({ sender, chainId, callHash, excludeKey: key }).sort(
     (a, b) => statusRank(a.status) - statusRank(b.status),
   );

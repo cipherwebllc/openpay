@@ -109,7 +109,7 @@ export function useGasQuoteCircle(
       // gas ceiling ベース (ceiling/standard は数百〜数万倍) ではなく、quote→送信間の
       // gas/rate drift を吸収する控えめな係数を掛ける。deadline=MAX なので残余 allowance が
       // Circle paymaster (allowlist の信頼境界) に残るが、本係数で被害上限を実費の数倍に圧縮。
-      // 送信時の異常 spike は assertGasCeiling が別途 abort する。drift が係数を超えた稀ケースは
+      // 送信時の異常 spike は getCircleUserOpGasPrice 内の assertGasCeiling が abort する。drift が係数を超えた稀ケースは
       // Circle が pull 不足で revert (= 回復可能・二重決済や資金流出ではない)。
       const permitAmount = surcharge(
         (totalGas *
