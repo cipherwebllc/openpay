@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { getAddress } from 'viem';
-import { polygon, polygonAmoy, kaia, kairos, mainnet, base } from 'viem/chains';
+import {
+  polygon,
+  polygonAmoy,
+  kaia,
+  kairos,
+  avalanche,
+  mainnet,
+  base,
+} from 'viem/chains';
 
 // forwarderConfig は module 評価時 (FORWARDER_ADDRESS_ENV) と関数呼出時 (relayGasFeeValue) の
 // 両方で process.env を読む。env を確定 → resetModules → 動的 import することで、毎回 "実モジュール"
@@ -11,6 +19,14 @@ const FWD_KEYS = [
   'NEXT_PUBLIC_JPYC_FORWARDER_KAIA',
   'NEXT_PUBLIC_JPYC_FORWARDER_KAIROS',
   'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC',
+  // per-chain floor 上書き env (PER_CHAIN_FLOOR_ENV)。relayGasFeeValue(chainId) が module 評価時に
+  // リテラル参照するため、決定論のため毎回リセットする。
+  'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON',
+  'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_KAIA',
+  'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AVALANCHE',
+  'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AMOY',
+  'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_KAIROS',
+  'NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_FUJI',
   // a1 利用料フラグ。forwarderConfig は jpycForwarderFor の解決でこれを (env 経由で) 読むため、
   // forwarder env と同じく毎回リセットして決定論にする。
   'NEXT_PUBLIC_ENABLE_USAGE_FEE',
@@ -155,35 +171,38 @@ describe('configuredJpycForwarderFor (生の env 値・診断専用)', () => {
   });
 });
 
-describe('relayGasFeeValue', () => {
+describe('relayGasFeeValue (per-chain floor)', () => {
   it('未設定 → 既定 2 JPYC (2e18)', async () => {
     const { relayGasFeeValue } = await loadWith({});
-    expect(relayGasFeeValue()).toBe(2n * 10n ** 18n);
+    expect(relayGasFeeValue(polygon.id)).toBe(2n * 10n ** 18n);
   });
 
-  it('整数文字列 → その JPYC 量 (18 decimals)', async () => {
+  it('グローバル env の整数文字列 → その JPYC 量 (18 decimals)・全 chain 共通', async () => {
     const { relayGasFeeValue } = await loadWith({
       NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '5',
     });
-    expect(relayGasFeeValue()).toBe(5n * 10n ** 18n);
+    // per-chain env 未設定なのでグローバル env が全 chain に適用される (後方互換)。
+    expect(relayGasFeeValue(polygon.id)).toBe(5n * 10n ** 18n);
+    expect(relayGasFeeValue(kaia.id)).toBe(5n * 10n ** 18n);
+    expect(relayGasFeeValue(avalanche.id)).toBe(5n * 10n ** 18n);
   });
 
-  it('CDX-2: "0" は誤設定として既定 2 JPYC に倒す (forwarder ZeroValue revert 回避・フロアは 1 wei 以上)', async () => {
+  it('CDX-2: グローバル "0" は誤設定として既定 2 JPYC に倒す (forwarder ZeroValue revert 回避・フロアは 1 wei 以上)', async () => {
     // Eip3009Forwarder.settle は feeValue==0 で ZeroValue revert する。0 を素通りさせると recover が
     // guaranteed-revert tx を broadcast して relayer gas を捨てる → フロアは 0 にならないことを保証する。
     const { relayGasFeeValue } = await loadWith({
       NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '0',
     });
-    expect(relayGasFeeValue()).toBe(2n * 10n ** 18n);
+    expect(relayGasFeeValue(polygon.id)).toBe(2n * 10n ** 18n);
   });
 
-  it('非整数/不正値は既定 2 にフォールバック', async () => {
+  it('非整数/不正なグローバル値は既定 2 にフォールバック', async () => {
     const bad = ['abc', '-1', '2.5', ' 3 ', '1e3', '0x5', '', '1_000'];
     for (const v of bad) {
       const { relayGasFeeValue } = await loadWith({
         NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: v,
       });
-      expect(relayGasFeeValue(), `bad=${JSON.stringify(v)}`).toBe(
+      expect(relayGasFeeValue(polygon.id), `bad=${JSON.stringify(v)}`).toBe(
         2n * 10n ** 18n,
       );
     }
@@ -193,6 +212,46 @@ describe('relayGasFeeValue', () => {
     const { relayGasFeeValue } = await loadWith({
       NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '1000000',
     });
-    expect(relayGasFeeValue()).toBe(1_000_000n * 10n ** 18n);
+    expect(relayGasFeeValue(polygon.id)).toBe(1_000_000n * 10n ** 18n);
+  });
+
+  // --- per-chain 上書き (Avalanche 汎用化の核) ---
+
+  it('per-chain env が当該 chain にのみ適用される (他 chain は不変)', async () => {
+    const { relayGasFeeValue } = await loadWith({
+      NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AVALANCHE: '10',
+    });
+    expect(relayGasFeeValue(avalanche.id)).toBe(10n * 10n ** 18n);
+    // Polygon/Kaia は per-chain 未設定 → 既定 2 のまま (チェーン独立)。
+    expect(relayGasFeeValue(polygon.id)).toBe(2n * 10n ** 18n);
+    expect(relayGasFeeValue(kaia.id)).toBe(2n * 10n ** 18n);
+  });
+
+  it('per-chain env はグローバル env より優先 (解決順 1 > 3)', async () => {
+    const { relayGasFeeValue } = await loadWith({
+      NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '2',
+      NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AVALANCHE: '15',
+    });
+    expect(relayGasFeeValue(avalanche.id)).toBe(15n * 10n ** 18n); // per-chain 勝ち
+    expect(relayGasFeeValue(polygon.id)).toBe(2n * 10n ** 18n); // グローバルへ
+  });
+
+  it('per-chain "0"/不正値は採用せずグローバル env (→ 2) へフォールバック', async () => {
+    for (const bad of ['0', 'abc', '2.5', '']) {
+      const { relayGasFeeValue } = await loadWith({
+        NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AVALANCHE: bad,
+        NEXT_PUBLIC_RELAY_GAS_FEE_JPYC: '3',
+      });
+      expect(relayGasFeeValue(avalanche.id), `bad=${JSON.stringify(bad)}`).toBe(
+        3n * 10n ** 18n,
+      );
+    }
+  });
+
+  it('per-chain "0" + グローバル未設定 → 既定 2 JPYC (どの段でも 0 を採用しない)', async () => {
+    const { relayGasFeeValue } = await loadWith({
+      NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AVALANCHE: '0',
+    });
+    expect(relayGasFeeValue(avalanche.id)).toBe(2n * 10n ** 18n);
   });
 });

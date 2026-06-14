@@ -81,7 +81,7 @@ describe('recover fee consistency: 表示 == 請求 == 照合表 == server (実 
           const { buildJpycRecoverSignPreview } = signPreview;
 
           // --- (a) hook が署名する値を hook と同式で再導出 (useJpycEip3009Payment の recover 分岐) ---
-          const feeValue = recoverFeeValue(value, gasMode);
+          const feeValue = recoverFeeValue(value, gasMode, CHAIN_ID);
           const merchantValue =
             gasMode === 'merchant' ? value - feeValue : value;
           // hook は merchantValue<=0 を amount_too_small で弾く。本テストの value はすべて
@@ -136,6 +136,7 @@ describe('recover fee consistency: 表示 == 請求 == 照合表 == server (実 
           const serverExpectedFee = recoverFeeValue(
             reconstructedBillAmount,
             gasMode,
+            CHAIN_ID,
           );
           expect(serverExpectedFee).toBe(feeValue);
           // billAmount の再構成自体も元の value に戻る (gasMode の意味論が両側で一致)。
@@ -151,8 +152,8 @@ describe('recover fee consistency: 表示 == 請求 == 照合表 == server (実 
     const { recoverFee } = await loadRealModules(100);
     const { recoverFeeValue } = recoverFee;
     const big = 1000n * JPYC;
-    const merchantFee = recoverFeeValue(big, 'merchant');
-    const customerFee = recoverFeeValue(big, 'customer');
+    const merchantFee = recoverFeeValue(big, 'merchant', CHAIN_ID);
+    const customerFee = recoverFeeValue(big, 'customer', CHAIN_ID);
     expect(merchantFee).toBe(10n * JPYC); // 1% of 1000 = 10 JPYC (フロア超)
     expect(customerFee).toBe(2n * JPYC); // チップはフロアのみ (bps 非適用)
     expect(merchantFee).not.toBe(customerFee); // 同額にならない (gasMode で確実に分岐)
@@ -162,7 +163,7 @@ describe('recover fee consistency: 表示 == 請求 == 照合表 == server (実 
     const { recoverFee } = await loadRealModules(0);
     const { recoverFeeValue } = recoverFee;
     const big = 1000n * JPYC;
-    expect(recoverFeeValue(big, 'merchant')).toBe(2n * JPYC);
-    expect(recoverFeeValue(big, 'customer')).toBe(2n * JPYC);
+    expect(recoverFeeValue(big, 'merchant', CHAIN_ID)).toBe(2n * JPYC);
+    expect(recoverFeeValue(big, 'customer', CHAIN_ID)).toBe(2n * JPYC);
   });
 });

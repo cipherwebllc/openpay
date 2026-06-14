@@ -12,6 +12,7 @@
 // (recoverFee.ts ではなく env から読むことで、recoverFee を mock する下流テストに影響しない)。
 // forwarderConfig / env は legal を import し返さないため循環は生じない (legal → {forwarderConfig, env})。
 
+import { polygon, kaia } from 'viem/chains';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { env } from '@/lib/env';
 
@@ -132,10 +133,17 @@ export const DISCLOSED_RECOVER_FEE = {
 // 開示済みの正。日付境界の比較に使う (CDX-4b)。
 const PERCENT_EFFECTIVE_FROM = Date.UTC(2026, 6, 1); // 2026-07-01T00:00:00Z (month は 0-indexed)
 
+// 開示済みフロア (DISCLOSED_RECOVER_FEE.floorJpyc) を「約 2 JPYC / 最低 2 JPYC」として約束した mainnet
+// relay チェーン。現状は Polygon/Kaia が同一フロアで開示済み。Avalanche を floor≠2 で relay 昇格する際は
+// (1) ここへ avalanche.id を追加し (2) DISCLOSED_RECOVER_FEE を per-chain 化して同一リリースで開示本文も
+// 改定する。本ガードが per-chain で乖離を検出するため、片側だけの変更 (env だけ / 定数だけ) は fail する。
+const DISCLOSED_FLOOR_CHAINS: number[] = [polygon.id, kaia.id];
+
 // L4: live env (実際に徴収する数値) が法務文書で開示済みの数値 (DISCLOSED_RECOVER_FEE) と
 // 乖離していないかを判定する純関数。乖離していれば人間可読な理由文字列を、一致していれば null を返す。
-//   - floor: relayGasFeeValue() (= NEXT_PUBLIC_RELAY_GAS_FEE_JPYC) が「約 2 JPYC / 最低 2 JPYC」
-//     として開示した floorJpyc (×10^18) と一致するか。
+//   - floor (per-chain): 開示済み各 mainnet relay チェーン (DISCLOSED_FLOOR_CHAINS) で
+//     relayGasFeeValue(chainId) が「約 2 JPYC / 最低 2 JPYC」として開示した floorJpyc (×10^18) と一致するか。
+//     per-chain env (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_<SLUG>) かグローバル env のどちらで乖離させても検出する。
 //   - bps (CDX-4b: 日付対応): 開示スケジュールは「当面フロアのみ (bps=0)、2026 年 7 月のご利用分から
 //     1% (= percentFromJulyBps = 100)」。よって *現在日付* で期待 bps が決まる:
 //       2026-07-01 UTC より前 → 期待 bps は 0。100 を早期に設定すると開示前に 1% を徴収する乖離 (warn)。
@@ -145,7 +153,6 @@ const PERCENT_EFFECTIVE_FROM = Date.UTC(2026, 6, 1); // 2026-07-01T00:00:00Z (mo
 // 起動時診断がこれを呼び、非 null なら logger.warn で Sentry に上げる (throw はしない — 決済は止めず、
 // 運営に「文書を改定せず env だけ変えた」乖離を可視化するだけ)。
 export function feeDisclosureDivergence(now: Date = new Date()): string | null {
-  const floorActual = relayGasFeeValue();
   const floorExpected = BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10n ** 18n;
   const bps = env.recoverFeeBps;
   // 現在が 7 月以降か否かで開示済みの期待 bps が一意に決まる (単一の許容値・日付対応)。
@@ -154,11 +161,14 @@ export function feeDisclosureDivergence(now: Date = new Date()): string | null {
       ? DISCLOSED_RECOVER_FEE.percentFromJulyBps
       : 0;
   const issues: string[] = [];
-  if (floorActual !== floorExpected) {
-    issues.push(
-      `relayGasFeeValue=${floorActual} != disclosed floor ${floorExpected} ` +
-        `(NEXT_PUBLIC_RELAY_GAS_FEE_JPYC vs DISCLOSED_RECOVER_FEE.floorJpyc=${DISCLOSED_RECOVER_FEE.floorJpyc})`,
-    );
+  for (const chainId of DISCLOSED_FLOOR_CHAINS) {
+    const floorActual = relayGasFeeValue(chainId);
+    if (floorActual !== floorExpected) {
+      issues.push(
+        `relayGasFeeValue(${chainId})=${floorActual} != disclosed floor ${floorExpected} ` +
+          `(NEXT_PUBLIC_RELAY_GAS_FEE_JPYC[_<chain>] vs DISCLOSED_RECOVER_FEE.floorJpyc=${DISCLOSED_RECOVER_FEE.floorJpyc})`,
+      );
+    }
   }
   if (bps !== expectedBps) {
     issues.push(

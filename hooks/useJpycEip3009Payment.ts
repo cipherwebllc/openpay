@@ -107,7 +107,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         // bps=0 (既定) ではいずれもフロア (= 固定 2 JPYC) になり従来挙動と一致。server も同じ
         // payload gasMode で同式再計算し一致を強制する (nonce にコミットされるため client/server
         // がずれると署名検証が失敗する)。
-        const feeValue = recoverFeeValue(value, gasMode);
+        const feeValue = recoverFeeValue(value, gasMode, chainId);
         const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
         if (merchantValue <= 0n) throw new Error('amount_too_small');
         const params: ForwarderSettleParams = {

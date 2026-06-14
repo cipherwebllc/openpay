@@ -48,8 +48,8 @@ describe('buildRecoverFeeDisplay', () => {
       expect(result!.bps).toBe(0);
       // 委譲フェンス: floor をハードコードしていたら "2" になるが、recoverFeeValue を呼べば "7"。
       expect(result!.feeHuman).toBe('7');
-      // recoverFeeValue が (billAmount, gasMode) で実際に呼ばれたことを確認 (delegation の直接証明)。
-      expect(recoverFeeValue).toHaveBeenCalledWith(AMOUNT_1000, 'customer');
+      // recoverFeeValue が (billAmount, gasMode, chainId) で実際に呼ばれたことを確認 (delegation の直接証明)。
+      expect(recoverFeeValue).toHaveBeenCalledWith(AMOUNT_1000, 'customer', 137);
     });
 
     it('gasMode=customer: customerPaysHuman = amount + fee (fee=7)', () => {

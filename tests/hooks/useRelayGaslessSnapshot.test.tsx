@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { Hex } from 'viem';
+import { polygon } from 'viem/chains';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import type { GasMode } from '@/lib/fee';
 
-// 実依存をそのまま使う (mock しない)。既定 2 JPYC = 2e18。
-const FEE = relayGasFeeValue();
+// 実依存をそのまま使う (mock しない)。per-chain 未設定の代表 chain で既定 2 JPYC = 2e18。
+const CHAIN = polygon.id;
+const FEE = relayGasFeeValue(CHAIN);
 
 type Relay = {
   data?: { txHash: Hex | null; success: boolean; pending?: boolean };
@@ -25,7 +27,7 @@ describe('useRelayGaslessSnapshot', () => {
 
   it('mutate 前 (variables 未確定) → data/variables ともに undefined・error 素通し', () => {
     const { result } = renderHook(() =>
-      useRelayGaslessSnapshot(relayObj(), false),
+      useRelayGaslessSnapshot(relayObj(), false, CHAIN),
     );
     expect(result.current.data).toBeUndefined();
     expect(result.current.variables).toBeUndefined();
@@ -37,6 +39,7 @@ describe('useRelayGaslessSnapshot', () => {
       useRelayGaslessSnapshot(
         relayObj({ variables: { value: 1000n, gasMode: 'customer' } }),
         false,
+        CHAIN,
       ),
     );
     expect(result.current.variables).toEqual({
@@ -53,6 +56,7 @@ describe('useRelayGaslessSnapshot', () => {
       useRelayGaslessSnapshot(
         relayObj({ variables: { value, gasMode: 'customer' } }),
         true,
+        CHAIN,
       ),
     );
     // 顧客負担は請求額満額が着金 (控除されない)。
@@ -67,6 +71,7 @@ describe('useRelayGaslessSnapshot', () => {
       useRelayGaslessSnapshot(
         relayObj({ variables: { value, gasMode: 'merchant' } }),
         true,
+        CHAIN,
       ),
     );
     expect(result.current.variables).toEqual({
@@ -83,7 +88,7 @@ describe('useRelayGaslessSnapshot', () => {
   it('gasMode 未指定 (= customer 既定の relay) は recover でも控除しない', () => {
     const value = 500n * 10n ** 18n;
     const { result } = renderHook(() =>
-      useRelayGaslessSnapshot(relayObj({ variables: { value } }), true),
+      useRelayGaslessSnapshot(relayObj({ variables: { value } }), true, CHAIN),
     );
     expect(result.current.variables?.merchantAmount).toBe(value);
   });
@@ -96,6 +101,7 @@ describe('useRelayGaslessSnapshot', () => {
           variables: { value: 1n, gasMode: 'customer' },
         }),
         false,
+        CHAIN,
       ),
     );
     expect(result.current.data).toEqual({
@@ -112,6 +118,7 @@ describe('useRelayGaslessSnapshot', () => {
       useRelayGaslessSnapshot(
         relayObj({ data: { txHash: null, success: false, pending: true } }),
         false,
+        CHAIN,
       ),
     );
     expect(result.current.data).toEqual({
@@ -126,7 +133,7 @@ describe('useRelayGaslessSnapshot', () => {
   it('error 透過 (relay 失敗)', () => {
     const err = new Error('rate_limited');
     const { result } = renderHook(() =>
-      useRelayGaslessSnapshot(relayObj({ error: err }), false),
+      useRelayGaslessSnapshot(relayObj({ error: err }), false, CHAIN),
     );
     expect(result.current.error).toBe(err);
   });
@@ -134,7 +141,8 @@ describe('useRelayGaslessSnapshot', () => {
   it('memoize: 同一 relay 参照 + 同一 useRecover で再 render → 同一参照 (deps 安定)', () => {
     const relay = relayObj({ variables: { value: 5n, gasMode: 'customer' } });
     const { result, rerender } = renderHook(
-      ({ r, u }: { r: Relay; u: boolean }) => useRelayGaslessSnapshot(r, u),
+      ({ r, u }: { r: Relay; u: boolean }) =>
+        useRelayGaslessSnapshot(r, u, CHAIN),
       { initialProps: { r: relay, u: false } },
     );
     const first = result.current;
@@ -145,7 +153,7 @@ describe('useRelayGaslessSnapshot', () => {
   it('useRecover が false→true へ変化 → 再計算され networkFeeEquivalent が 0→FEE', () => {
     const relay = relayObj({ variables: { value: 100n * 10n ** 18n, gasMode: 'merchant' } });
     const { result, rerender } = renderHook(
-      ({ u }: { u: boolean }) => useRelayGaslessSnapshot(relay, u),
+      ({ u }: { u: boolean }) => useRelayGaslessSnapshot(relay, u, CHAIN),
       { initialProps: { u: false } },
     );
     expect(result.current.variables?.networkFeeEquivalent).toBe(0n);

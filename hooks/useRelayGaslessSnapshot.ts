@@ -24,14 +24,16 @@ type RelayMutationLike = {
 export function useRelayGaslessSnapshot(
   relay: RelayMutationLike,
   useRecover: boolean,
+  chainId: number,
 ): GaslessSnapshot {
   return useMemo(() => {
     const v = relay.variables;
     // 実際に hook/server が回収する手数料と一致させる (gasMode で料金スケジュールが変わる:
-    // merchant=max(floor,bps) / customer=floor)。これがずれると履歴の netFee/merchant 着金が
-    // 実 settle と乖離する。gasMode 不明 (旧 variables) は customer に倒す (hook 既定と一致)。
+    // merchant=max(floor,bps) / customer=floor。floor は chainId 別)。これがずれると履歴の
+    // netFee/merchant 着金が実 settle と乖離する。chainId は決済対象チェーン (deployment.chainId)
+    // を渡す。gasMode 不明 (旧 variables) は customer に倒す (hook 既定と一致)。
     const gasMode: GasMode = v?.gasMode ?? 'customer';
-    const fee = useRecover && v ? recoverFeeValue(v.value, gasMode) : 0n;
+    const fee = useRecover && v ? recoverFeeValue(v.value, gasMode, chainId) : 0n;
     const merchantAmount = v
       ? useRecover && gasMode === 'merchant'
         ? v.value - fee
@@ -57,5 +59,5 @@ export function useRelayGaslessSnapshot(
           }
         : undefined,
     };
-  }, [relay.data, relay.error, relay.variables, useRecover]);
+  }, [relay.data, relay.error, relay.variables, useRecover, chainId]);
 }

@@ -163,7 +163,7 @@ export function TipForm({ params }: { params: TipParams }) {
   // recoverFeeValue を使う。チップは gasMode=customer 固定で、recoverFeeValue は customer に bps を
   // 適用せず常にフロア (= 2 JPYC) を返す → bps>0 でもフロアのまま従来挙動と一致。free (非 recover) は 0n。
   const relayGasEquiv = useRecover
-    ? recoverFeeValue(amountWei, 'customer')
+    ? recoverFeeValue(amountWei, 'customer', deployment.chainId)
     : 0n;
 
   // Tip widget は gasless / gas=customer 固定 (preset セマンティクス維持):

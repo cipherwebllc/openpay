@@ -109,7 +109,7 @@ export function buildJpycRecoverSignPreview(args: {
   const forwarder = jpycForwarderFor(args.chainId);
   if (forwarder === null) return null;
 
-  const feeValue = recoverFeeValue(args.value, args.gasMode);
+  const feeValue = recoverFeeValue(args.value, args.gasMode, args.chainId);
   const merchantValue =
     args.gasMode === 'merchant' ? args.value - feeValue : args.value;
   const signedTotal = merchantValue + feeValue;

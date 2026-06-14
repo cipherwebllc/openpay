@@ -37,12 +37,17 @@ export function recoverFeeBps(): number {
   return env.recoverFeeBps;
 }
 
-// per-tx recover 手数料。gasMode で料金スケジュールを選ぶ (client & server が同 gasMode で同式
-// 算出する = nonce 一致の必須条件)。BigInt の floor 除算 (端数切り捨て)。
+// per-tx recover 手数料。gasMode で料金スケジュールを、chainId でガスフロアを選ぶ (client & server が
+// 同 gasMode + 同 chainId で同式算出する = nonce 一致の必須条件。chainId は EIP-3009 署名にも焼き込まれ、
+// relay payload で送受される単一値なので両者がずれない)。BigInt の floor 除算 (端数切り捨て)。
 //   merchant (決済): max(ガスフロア, billAmount × bps/10000) — 大口は bps が乗る。
 //   customer (チップ): フロアのみ (bps を無視・フラットなガス相当)。
-export function recoverFeeValue(billAmount: bigint, gasMode: GasMode): bigint {
-  const floor = relayGasFeeValue();
+export function recoverFeeValue(
+  billAmount: bigint,
+  gasMode: GasMode,
+  chainId: number,
+): bigint {
+  const floor = relayGasFeeValue(chainId);
   // チップ (customer 固定) は bps を適用しない: 常にフラットなガス相当フロア。
   if (gasMode === 'customer') return floor;
   const pct = (billAmount * BigInt(recoverFeeBps())) / 10000n;

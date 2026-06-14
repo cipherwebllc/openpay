@@ -492,7 +492,7 @@ async function handleRecover(
   // client と **同じ payload gasMode** で同式 (recoverFeeValue) 算出し、forwarderRecover が
   // feeValue === expectedFeeValue を強制する。gasMode の偽造は有界 (customer 主張でも最低
   // フロアを払い、署名済の分割は nonce で固定される)。
-  const expectedFee = recoverFeeValue(billAmount, gasMode);
+  const expectedFee = recoverFeeValue(billAmount, gasMode, chainId);
   const io = selfHostIoFor(chainId);
   // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
   const jpyc = jpycAddressFor(chainId);

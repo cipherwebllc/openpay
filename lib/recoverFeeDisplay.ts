@@ -41,8 +41,8 @@ export function buildRecoverFeeDisplay(
   if (jpycForwarderFor(chainId) === null) return null;
   if (billAmount <= 0n) return null;
 
-  const fee = recoverFeeValue(billAmount, gasMode);
-  const floor = relayGasFeeValue();
+  const fee = recoverFeeValue(billAmount, gasMode, chainId);
+  const floor = relayGasFeeValue(chainId);
   // bps は merchant スケジュールでのみ % 形式の開示に使う。customer (チップ) は bps を適用
   // しないフラットなフロアなので、% 開示が出ないよう 0 として扱う (RecoverFeeNotice が
   // disclosureGasOnly を選ぶ)。

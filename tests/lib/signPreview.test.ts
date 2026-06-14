@@ -140,8 +140,8 @@ describe('buildJpycRecoverSignPreview', () => {
     expect(p!.totalHuman).toBe('1007');
     // 照合表の生の数字 = (value + fee).toString()。
     expect(p!.totalAtomic).toBe((1007n * 10n ** 18n).toString());
-    // recoverFeeValue が (value, gasMode) で実際に呼ばれたことを確認 (delegation の直接証明)。
-    expect(recoverFeeValue).toHaveBeenCalledWith(value, 'customer');
+    // recoverFeeValue が (value, gasMode, chainId) で実際に呼ばれたことを確認 (delegation の直接証明)。
+    expect(recoverFeeValue).toHaveBeenCalledWith(value, 'customer', 137);
     expect(p!.gasMode).toBe('customer');
     expect(p!.symbol).toBe('JPYC');
   });
@@ -162,7 +162,7 @@ describe('buildJpycRecoverSignPreview', () => {
     expect(p!.feeHuman).toBe('7');
     expect(p!.totalHuman).toBe('1000');
     expect(p!.totalAtomic).toBe(value.toString());
-    expect(recoverFeeValue).toHaveBeenCalledWith(value, 'merchant');
+    expect(recoverFeeValue).toHaveBeenCalledWith(value, 'merchant', 137);
     expect(p!.gasMode).toBe('merchant');
   });
 

@@ -5,6 +5,7 @@ import TermsPage from '@/app/[locale]/terms/page';
 import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
 import TokuteiPage from '@/app/[locale]/tokutei/page';
+import { polygon } from 'viem/chains';
 import { LEGAL_ENTITY, DISCLOSED_RECOVER_FEE } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
@@ -1121,11 +1122,12 @@ describe('Legal pages', () => {
       vi.resetModules();
     });
 
-    it('relayGasFeeValue() の既定 (env 未設定) === BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10^18', async () => {
+    it('relayGasFeeValue(chainId) の既定 (env 未設定) === BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10^18', async () => {
       vi.resetModules();
       vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
       const { relayGasFeeValue } = await import('@/lib/relay/forwarderConfig');
-      expect(relayGasFeeValue()).toBe(
+      // per-chain 未設定の代表 chain (Polygon) は開示済みフロアに一致する。
+      expect(relayGasFeeValue(polygon.id)).toBe(
         BigInt(DISCLOSED_RECOVER_FEE.floorJpyc) * 10n ** 18n,
       );
     });

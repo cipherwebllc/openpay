@@ -163,7 +163,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // effectiveGas は recover で強制される 'merchant'。bps=0 では floor (= 2 JPYC) になり従来挙動と
   // 完全一致。free (非 recover) は 0n。
   const relayGasEquiv = useRecover
-    ? recoverFeeValue(totalWei, effectiveGas)
+    ? recoverFeeValue(totalWei, effectiveGas, deployment.chainId)
     : 0n;
 
   // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
@@ -593,7 +593,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // recover は hook と同一式で split を再計算: feeAmount(=サービス料) は常に 0、ネットワーク手数料
   // 相当額 = 回収した gas (feeValue)、merchantAmount は customer 上乗せなら満額・merchant 吸収なら
   // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
-  const relayHistoryGasless = useRelayGaslessSnapshot(relay, useRecover);
+  const relayHistoryGasless = useRelayGaslessSnapshot(
+    relay,
+    useRecover,
+    deployment.chainId,
+  );
   usePaymentHistory(
     historyCtx,
     useRelay ? relayHistoryGasless : gasless,

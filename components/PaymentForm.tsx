@@ -256,7 +256,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // スナップショットが実 settle 額と一致する。bps=0 では floor (= 2 JPYC) になり従来挙動と完全一致。
   // free (非 recover) は 0n。
   const relayGasEquiv = useRecover
-    ? recoverFeeValue(amountWei, effectiveGas)
+    ? recoverFeeValue(amountWei, effectiveGas, deployment.chainId)
     : 0n;
 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
@@ -608,7 +608,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // recover は hook と同一式で split を再計算: feeAmount(=サービス料) は常に 0、ネットワーク手数料
   // 相当額 = 回収した gas (feeValue)、merchantAmount は customer 上乗せなら満額・merchant 吸収なら
   // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
-  const relayHistoryGasless = useRelayGaslessSnapshot(relay, useRecover);
+  const relayHistoryGasless = useRelayGaslessSnapshot(
+    relay,
+    useRecover,
+    deployment.chainId,
+  );
   usePaymentHistory(
     historyCtx,
     useRelay ? relayHistoryGasless : gasless,

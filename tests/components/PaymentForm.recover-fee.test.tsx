@@ -186,10 +186,11 @@ describe('PaymentForm recover 会計サマリ手数料行 = recoverFeeValue (CDX
     vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
     render(<PaymentForm />);
     expect(gasRowValue()).toMatch(/2 JPYC/);
-    // floor を確認するため recoverFeeValue が amount(1000) と merchant で呼ばれたこと。
+    // floor を確認するため recoverFeeValue が amount(1000)・merchant・chainId(137=Polygon) で呼ばれたこと。
     expect(vi.mocked(recoverFeeValue)).toHaveBeenCalledWith(
       1000n * 10n ** 18n,
       'merchant',
+      137,
     );
   });
 
@@ -203,6 +204,7 @@ describe('PaymentForm recover 会計サマリ手数料行 = recoverFeeValue (CDX
     expect(vi.mocked(recoverFeeValue)).toHaveBeenCalledWith(
       1000n * 10n ** 18n,
       'merchant',
+      137,
     );
   });
 });

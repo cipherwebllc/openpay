@@ -32,14 +32,18 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
 //   merchant (決済): max(2 JPYC, 1% = value/100)。
 //   customer (チップ): フロア 2 JPYC のみ (bps 無視)。
 const FLOOR_FEE = 2n * 10n ** 18n;
-const recoverFeeMock = vi.fn((billAmount: bigint, gasMode: 'customer' | 'merchant') => {
-  if (gasMode === 'customer') return FLOOR_FEE;
-  const pct = (billAmount * 100n) / 10000n;
-  return pct > FLOOR_FEE ? pct : FLOOR_FEE;
-});
+// chainId も受け取り、hook が (value, gasMode, chainId) で呼ぶことを assert 可能にする
+// (per-chain floor 汎用化: client は署名 chainId を recoverFeeValue へ渡す)。計算は chainId 非依存。
+const recoverFeeMock = vi.fn(
+  (billAmount: bigint, gasMode: 'customer' | 'merchant', _chainId: number) => {
+    if (gasMode === 'customer') return FLOOR_FEE;
+    const pct = (billAmount * 100n) / 10000n;
+    return pct > FLOOR_FEE ? pct : FLOOR_FEE;
+  },
+);
 vi.mock('@/lib/relay/recoverFee', () => ({
-  recoverFeeValue: (b: bigint, gasMode: 'customer' | 'merchant') =>
-    recoverFeeMock(b, gasMode),
+  recoverFeeValue: (b: bigint, gasMode: 'customer' | 'merchant', chainId: number) =>
+    recoverFeeMock(b, gasMode, chainId),
   recoverFeeBps: () => 100,
 }));
 
@@ -218,8 +222,8 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     result.current.mutate({ merchant: MERCHANT, value, gasMode: 'customer' });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // 確定モデル: client は payload の gasMode をそのまま recoverFeeValue へ渡す。
-    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'customer');
+    // 確定モデル: client は payload の gasMode + 署名 chainId をそのまま recoverFeeValue へ渡す。
+    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'customer', polygon.id);
     const body = lastPostBody();
     expect(body.gasMode).toBe('customer');
     // customer: 店舗は満額受領 (merchantValue == value)。
@@ -242,7 +246,7 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     result.current.mutate({ merchant: MERCHANT, value, gasMode: 'merchant' });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'merchant');
+    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'merchant', polygon.id);
     const body = lastPostBody();
     expect(body.gasMode).toBe('merchant');
     const fee = 10n * 10n ** 18n; // 決済は 1% = 10 JPYC (フロア超過)
@@ -260,8 +264,8 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     result.current.mutate({ merchant: MERCHANT, value });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // 既定 customer でも recoverFeeValue は exact (value, 'customer') で呼ばれる (delegation 証明)。
-    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'customer');
+    // 既定 customer でも recoverFeeValue は exact (value, 'customer', chainId) で呼ばれる (delegation 証明)。
+    expect(recoverFeeMock).toHaveBeenCalledWith(value, 'customer', polygon.id);
     const body = lastPostBody();
     expect(body.gasMode).toBe('customer');
   });
