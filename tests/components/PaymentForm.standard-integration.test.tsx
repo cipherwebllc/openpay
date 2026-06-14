@@ -146,6 +146,11 @@ import {
 vi.mock('@/components/ConnectButton', async () => ({
   ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
 }));
+// B1 Layer B: relayer 健全性プローブ。useRelayHealth は useQuery を使うため、QueryClientProvider
+// を張らない本テストでは hook ごとモックして既定 non-degraded を返す (preflight banner 非表示)。
+vi.mock('@/hooks/useRelayHealth', () => ({
+  useRelayHealth: vi.fn(() => ({ degraded: false })),
+}));
 import { PaymentForm } from '@/components/PaymentForm';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
