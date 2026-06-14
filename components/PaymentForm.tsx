@@ -73,6 +73,7 @@ import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
+import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import {
   counterpartSymbol,
@@ -159,6 +160,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const useRelay = isRelayRoute(route);
   const relay = useJpycEip3009Payment(deployment);
+  // B1 Layer B: relay 経路でのみ relayer の事前 (preflight) 健全性を polling する。degraded なら
+  // 署名 *前* に「通常決済へ切替」を先回り案内する (Layer A は submit 失敗 *後* の reactive な導線)。
+  // fail-open (読込中/error は degraded:false) なので advisory に徹し決済実行には影響しない。
+  const relayHealth = useRelayHealth({
+    chainId: deployment.chainId,
+    enabled: useRelay,
+  });
 
   // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収)。relayGasEquiv (= recover 時の
   // 利用料) は amountWei 確定後に算出する (CDX-3: 実スケジュール recoverFeeValue を使い、bps>0 で
@@ -456,15 +464,20 @@ function PaymentDetails({ params }: { params: PayParams }) {
         : null) ??
       (revertedNoFeedback ? t('errorReverted') : null));
 
-  // B1 graceful degradation: relay が API レベルで失敗 (rate_limited 等の error code) したとき、
-  // ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
+  // B1 graceful degradation (Layer A): relay が API レベルで失敗 (rate_limited 等の error code) した
+  // とき、ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
   // (relay.data.success===false) は別経路 (revertedNoFeedback) で扱うため、ここでは relay.error
   // (= API 失敗) のみを条件にする。banner の中で friendly 文言を 1 度だけ出し、下の汎用 error
   // ブロックでは重複表示しない (relayFallbackActive で抑止)。
   const relayFallbackActive = useRelay && !!relay.error;
-  const relayFallbackMessage = relay.error
-    ? t(relayErrorKey(relay.error))
-    : '';
+  // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
+  // (relay.error なし・relay.data なし) ときに、署名 *前* に「通常決済へ切替」を先回りで促す。
+  // Layer A (relay.error) とは独立に評価する (両方 true にはならない・!relay.error が排他)。
+  const relayPreflightActive =
+    useRelay && relayHealth.degraded && !relay.error && !relay.data;
+  // Layer A の banner 文言 (per-error friendly)。Layer A は汎用 error box を「置換」する (同じ relay
+  // error が二重表示になるのを防ぐ) が、Layer B は「additive」に出す (汎用 error box を抑止しない)。
+  const relayFallbackMessage = relay.error ? t(relayErrorKey(relay.error)) : '';
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
@@ -1098,8 +1111,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {/* B1: relay の API レベル失敗は「通常決済へ切替」導線付きの banner で出す
-          (friendly 文言は banner 内に 1 度だけ)。それ以外の error は従来どおり赤ボックス。 */}
+      {/* B1 Layer A: relay の API レベル失敗 (rate_limited 等) は「通常決済へ切替」banner で出し、
+          下の汎用 error box は抑止する (同じ relay error の二重表示を防ぐ)。それ以外の error は
+          従来どおり赤ボックス。 */}
       {relayFallbackActive ? (
         <RelayFallbackBanner
           message={relayFallbackMessage}
@@ -1116,6 +1130,17 @@ function PaymentDetails({ params }: { params: PayParams }) {
             <p className="mt-1 break-words">{error}</p>
           </div>
         )
+      )}
+
+      {/* B1 Layer B (preflight): relayer が degraded なときは署名 *前* に additive banner を出す。
+          Layer A と違い汎用 error box を抑止しない (金額精度/店主受取0 など pre-submit 検証エラーを
+          隠さない・Codex P1)。relay.error / relay.data があるときは出さない (排他は変数側で担保)。 */}
+      {relayPreflightActive && (
+        <RelayFallbackBanner
+          message={t('relayDegradedPreflight')}
+          nativeToken={nativeToken}
+          onSwitchToStandard={() => setModeOverride('standard')}
+        />
       )}
 
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (

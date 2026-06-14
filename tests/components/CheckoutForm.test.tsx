@@ -23,6 +23,11 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// B1 Layer B: relayer 事前健全性プローブ。既定 non-degraded (= 既存テストに影響しない)。
+// preflight banner テストでのみ degraded:true に差し替える。
+vi.mock('@/hooks/useRelayHealth', () => ({
+  useRelayHealth: vi.fn(() => ({ degraded: false })),
+}));
 // Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
 // 走らせないよう stub (QueryClientProvider 無しで render する既存 test を壊さない)。
 // circle 経路 (usdc-permit 署名安心) テストでのみ setCircleQuote で data を持たせる。
@@ -90,6 +95,7 @@ import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
 import { loadHistory } from '@/lib/history';
@@ -377,6 +383,8 @@ beforeEach(() => {
   vi.mocked(jpycForwarderFor).mockReturnValue(null);
   // 既定 USDC は Pimlico erc20。circle テストでのみ 'circle' へ override。
   vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
+  // 既定 relayer 健全 (non-degraded)。preflight banner テストでのみ degraded へ override。
+  vi.mocked(useRelayHealth).mockReturnValue({ degraded: false });
 });
 
 const USDC_PARAMS: CheckoutParams = {
@@ -1548,6 +1556,90 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       ).toBeInTheDocument();
     },
   );
+
+  // --- B1 Layer B: relayer preflight degraded (署名前の先回り banner) ---
+  it('preflight degraded + error なし + 未 submit → preflight 文言 + 通常決済へ切替 banner', () => {
+    setupRelayReady();
+    vi.mocked(useRelayHealth).mockReturnValue({
+      degraded: true,
+      reason: 'low_balance',
+    });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(
+      screen.getByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('Layer A 優先: relay.error があれば preflight ではなく per-error 文言 (banner は 1 つ)', () => {
+    setupRelayReady();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setRelayPayment('error', { errMsg: 'rate_limited' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/短時間に決済が集中/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeNull();
+    expect(
+      screen.getAllByText(/ガスレス決済が一時的に利用できません/),
+    ).toHaveLength(1);
+  });
+
+  it('preflight 切替ボタンで standard モードへ (banner 消滅)', async () => {
+    const user = userEvent.setup();
+    setupRelayReady();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    await user.click(
+      screen.getByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    );
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+  });
+
+  it('degraded でも submit 済 (relay.data あり) なら preflight banner を出さない', () => {
+    setupRelayReady();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setRelayPayment('success');
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(
+      screen.queryByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeNull();
+  });
+
+  it('preflight degraded + merchantUnderflow(recover): preflight banner と underflow エラーを両方出す (Codex P1: additive)', () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    ); // recover (固定回収 2 JPYC)
+    setupRelayReady();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    // 注文小計 1 JPYC < 回収手数料 2 JPYC → 店主受取 0 → merchantUnderflow (pre-submit 検証エラー)。
+    render(
+      <CheckoutForm
+        params={{
+          ...JPYC_PARAMS,
+          gas: 'merchant',
+          items: [{ name: 'x', qty: 1, price: '1' }],
+        }}
+      />,
+    );
+    // additive preflight banner が出る。
+    expect(
+      screen.getByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeInTheDocument();
+    // かつ underflow 検証エラーが抑止されず両方見える (旧 relayBannerActive 置換では隠れていた回帰)。
+    expect(screen.getByText(/店主受取が 0/)).toBeInTheDocument();
+  });
 
   // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice) ---
   // 確定モデル (2026-06-13): /checkout recover は URL gas=customer を無視し merchant 固定。

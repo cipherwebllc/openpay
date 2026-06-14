@@ -60,6 +60,11 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
 });
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+// B1 Layer B: relayer 事前健全性プローブ。既定 non-degraded (= 既存テストに影響しない)。
+// preflight banner テストでのみ degraded:true に差し替える。
+vi.mock('@/hooks/useRelayHealth', () => ({
+  useRelayHealth: vi.fn(() => ({ degraded: false })),
+}));
 // Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
 // 走らせないよう stub (QueryClientProvider 無しで render する既存 test を壊さない)。
 // circle 経路 (usdc-permit 署名安心) テストでのみ setCircleQuote で data を持たせる。
@@ -112,6 +117,7 @@ import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
+import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
@@ -339,6 +345,8 @@ beforeEach(() => {
   vi.mocked(jpycForwarderFor).mockReturnValue(null);
   // 既定 USDC は Pimlico erc20。circle テストでのみ 'circle' へ override。
   vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
+  // 既定 relayer 健全 (non-degraded)。preflight banner テストでのみ degraded へ override。
+  vi.mocked(useRelayHealth).mockReturnValue({ degraded: false });
 });
 
 describe('PaymentForm — URL parse', () => {
@@ -1809,6 +1817,111 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     expect(
       screen.queryByText(/ガスレス決済が一時的に利用できません/),
     ).toBeNull();
+  });
+});
+
+// B1 Layer B (preflight): relayer 健全性プローブ (useRelayHealth) が degraded を返したとき、
+// 署名 *前* に同じ「通常決済へ切替」banner を出す。Layer A (relay.error) との優先順位を検証する。
+describe('PaymentForm — relayer preflight degraded (B1 Layer B)', () => {
+  function setupRelayFree() {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null); // free
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+  }
+
+  it('degraded + error なし + 未 submit → preflight 文言 + 通常決済へ切替 banner', () => {
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({
+      degraded: true,
+      reason: 'low_balance',
+    });
+    render(<PaymentForm />);
+    // preflight 文言 (新 i18n key) が出る。
+    expect(
+      screen.getByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeInTheDocument();
+    // banner の title + 切替ボタン。
+    expect(
+      screen.getByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('切替ボタンで standard モードへ (banner 消滅)', async () => {
+    const user = userEvent.setup();
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    render(<PaymentForm />);
+    await user.click(
+      screen.getByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    );
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+    expect(
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Layer A 優先: relay.error があれば preflight 文言ではなく per-error 文言を出す (二重表示なし)', () => {
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setRelay('error', { errMsg: 'rate_limited' });
+    render(<PaymentForm />);
+    // Layer A の per-error 文言が出る。
+    expect(screen.getByText(/短時間に決済が集中/)).toBeInTheDocument();
+    // preflight 文言は出さない (両方は出さない)。
+    expect(
+      screen.queryByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeNull();
+    // banner (title + 切替) は 1 つだけ。
+    expect(
+      screen.getAllByText(/ガスレス決済が一時的に利用できません/),
+    ).toHaveLength(1);
+  });
+
+  it('degraded でも submit 済 (relay.data あり) なら preflight banner を出さない', () => {
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    // 成功 data がある = 既に決済が進んだ状態。preflight は出さない。
+    setRelay('success');
+    render(<PaymentForm />);
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+  });
+
+  it('standard 経路では degraded でも banner を出さない (relay 経路のみ)', () => {
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    render(<PaymentForm />);
+    expect(
+      screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+  });
+
+  it('preflight degraded + 金額精度エラー: preflight banner と検証エラーを両方出す (Codex P1: additive・抑止しない)', () => {
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    // JPYC(18 桁) を超える 19 桁小数 → amountPrecisionError (pre-submit 検証エラー)。
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1.1234567890123456789`);
+    render(<PaymentForm />);
+    // additive preflight banner が出る。
+    expect(
+      screen.getByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeInTheDocument();
+    // かつ精度エラーが抑止されず両方見える (旧 relayBannerActive 置換では隠れていた回帰)。
+    expect(screen.getByText(/金額の小数点以下は最大/)).toBeInTheDocument();
   });
 });
 

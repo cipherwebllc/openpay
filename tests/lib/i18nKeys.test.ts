@@ -400,6 +400,22 @@ describe('i18n: JPYC EIP-3009 relay keys (PaymentForm × ja/en parity)', () => {
       expect(v).not.toBe('');
     });
   }
+
+  // B1 Layer B: relayer 健全性プローブ (useRelayHealth) が degraded を返したとき、署名 *前* に出す
+  // 事前 (preflight) banner の文言。PaymentForm + CheckoutForm が RelayFallbackBanner の message prop
+  // に渡す (Layer A の errorRelay* と同じく form 名前空間)。/tip (TipForm) は対象外なので持たない。
+  for (const ns of ['PaymentForm', 'CheckoutForm'] as const) {
+    it(`ja.${ns}.relayDegradedPreflight は非空文字列`, () => {
+      const v = (ja[ns] as Record<string, unknown>).relayDegradedPreflight;
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+    it(`en.${ns}.relayDegradedPreflight は非空文字列`, () => {
+      const v = (en[ns] as Record<string, unknown>).relayDegradedPreflight;
+      expect(typeof v).toBe('string');
+      expect(v).not.toBe('');
+    });
+  }
 });
 
 describe('i18n: RecoverFee 名前空間 (recover 手数料開示・共有 RecoverFeeNotice・ja/en parity)', () => {

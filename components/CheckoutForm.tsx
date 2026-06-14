@@ -60,6 +60,7 @@ import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
+import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -120,6 +121,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const useRelay = isRelayRoute(route);
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const relay = useJpycEip3009Payment(deployment);
+  // B1 Layer B: relay 経路でのみ relayer の事前 (preflight) 健全性を polling する。degraded なら
+  // 署名 *前* に「通常決済へ切替」を先回り案内する (Layer A は submit 失敗 *後* の reactive な導線)。
+  // fail-open (読込中/error は degraded:false) なので advisory に徹し決済実行には影響しない。
+  const relayHealth = useRelayHealth({
+    chainId: deployment.chainId,
+    enabled: useRelay,
+  });
   // relayGasEquiv (= recover 時の利用料) は totalWei 確定後に算出する
   // (CDX-3: 実スケジュール recoverFeeValue を使い、bps>0 で会計サマリと実 settle 額を一致させる)。
   const useRecover = isRecoverRoute(route);
@@ -298,11 +306,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
   // (relay.data.success===false) は別経路 (revertedNoFeedback) で扱うため、ここでは relay.error
   // (= API 失敗) のみを条件にする。banner の中で friendly 文言を 1 度だけ出し、下の汎用 error
-  // ブロックでは重複表示しない (relayFallbackActive で抑止)。
+  // ブロックでは重複表示しない (relayBannerActive で抑止)。
   const relayFallbackActive = useRelay && !!relay.error;
-  const relayFallbackMessage = relay.error
-    ? t(relayErrorKey(relay.error))
-    : '';
+  // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
+  // (relay.error なし・relay.data なし) ときに、署名 *前* に同じ banner で「通常決済へ切替」を促す。
+  // 優先順位: relay.error → Layer A (per-error 文言) / それ以外で preflight-degraded → Layer B
+  // (固定の preflight 文言)。両方は出さない (relay.error が優先)。
+  const relayPreflightActive =
+    useRelay && relayHealth.degraded && !relay.error && !relay.data;
+  // Layer A は汎用 error box を「置換」する (relay error の二重表示防止)、Layer B は「additive」
+  // に出す (汎用 error box を抑止しない)。両者は !relay.error で排他。
+  const relayFallbackMessage = relay.error ? t(relayErrorKey(relay.error)) : '';
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
   // PayPay 風 大型成功 overlay。dismiss 後は inline 成功 panel + redirect countdown を表示。
@@ -1012,9 +1026,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </a>
       )}
 
-      {/* B1: relay の API レベル失敗は「通常決済へ切替」導線付きの banner で出す
-          (friendly 文言は banner 内に 1 度だけ)。それ以外の error は従来どおり赤ボックス。
-          いずれも完了後 (completed) は出さない。 */}
+      {/* B1 Layer A: relay の API レベル失敗は「通常決済へ切替」banner で出し汎用 error box を
+          抑止する (relay error の二重表示防止)。それ以外の error は従来どおり赤ボックス。完了後は出さない。 */}
       {!completed &&
         (relayFallbackActive ? (
           <RelayFallbackBanner
@@ -1030,6 +1043,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             </div>
           )
         ))}
+
+      {/* B1 Layer B (preflight): relayer degraded は additive banner で出す (Layer A と違い汎用
+          error box を抑止しない・pre-submit 検証エラー[店主受取0 等]を隠さない・Codex P1)。完了後は出さない。 */}
+      {!completed && relayPreflightActive && (
+        <RelayFallbackBanner
+          message={t('relayDegradedPreflight')}
+          nativeToken={nativeToken}
+          onSwitchToStandard={() => setModeOverride('standard')}
+        />
+      )}
 
       {completed && (gasless.data || standard.data || relay.data) && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
