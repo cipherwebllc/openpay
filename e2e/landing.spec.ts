@@ -124,7 +124,10 @@ test.describe('landing / (LP)', () => {
   }) => {
     await page.goto('/ja');
     await expect(page.getByRole('heading', { name: 'よくある質問' })).toBeVisible();
-    const q1 = page.getByText('本当にガス代は不要ですか?');
+    // FAQ 質問は <summary> 要素。featuresGaslessBody が同じ質問文を引用するため
+    // (「…『本当にガス代は不要ですか?』で説明しています」)、getByText だと <p> と二重一致する。
+    // <summary> に限定して FAQ アコーディオンの質問を一意に取る。
+    const q1 = page.locator('summary', { hasText: '本当にガス代は不要ですか?' });
     await expect(q1).toBeVisible();
     // closed 状態では answer は hidden。faqA1 の本文 (回答) に固有の一節で照合する
     // (質問文ではなく回答 body であることを担保)。
