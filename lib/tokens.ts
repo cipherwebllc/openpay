@@ -26,7 +26,7 @@ import {
   type ChainSlug,
   type JpycChainSlug,
 } from './chains';
-import { jpycForwarderFor } from './relay/forwarderConfig';
+import { jpycForwarderFor, isRecoverRequiredChain } from './relay/forwarderConfig';
 
 // 対応トークン一覧。type と runtime enumeration を兼ねる。
 export const TOKEN_SYMBOLS = ['jpyc', 'usdc'] as const;
@@ -284,15 +284,16 @@ function jpycAddress(slug: JpycChainSlug): Address {
   return overrides[slug] ?? JPYC_V3_ADDRESS;
 }
 
-// recover-required chain (Avalanche) は forwarder 設定済のときだけ gasless (recover) を提供する。
-// 未設定なら paymasterMode='unavailable' → isGaslessSupported=false → URL/UI が standard を強制
-// (free モードで OpenPay relayer が AVAX を持ち出す赤字を構造的に防ぐ・recover-required ポリシーの
-// 単一ゲート)。Polygon/Kaia は従来どおり常に 'sponsorship' (free モード許容・歴史的経緯で不変)。
+// recover-required chain (Avalanche / Ethereum L1) は forwarder 設定済のときだけ gasless (recover) を
+// 提供する。未設定なら paymasterMode='unavailable' → isGaslessSupported=false → URL/UI が standard を
+// 強制 (free モードで OpenPay relayer が native gas を持ち出す赤字を構造的に防ぐ・recover-required の
+// 単一ゲート)。Ethereum L1 は forwarder env を設けない設計なので常に 'unavailable' = standard 固定
+// (顧客が ETH ガスを負担)。Polygon/Kaia は従来どおり常に 'sponsorship' (free モード許容・不変)。
 // jpycForwarderFor は **実効** forwarder (a1=enableUsageFee 考慮: a1 ON なら null)。これにより
-// a1 ON + Avalanche forwarder 設定済でも paymasterMode='unavailable' → standard に倒れ、server が
-// free モード (handleFree) で AVAX を持ち出す乖離 (Codex P1) を防ぐ。client/server が同じ実効値で一致。
+// a1 ON + forwarder 設定済でも paymasterMode='unavailable' → standard に倒れ、server が free モード
+// (handleFree) で native を持ち出す乖離 (Codex P1) を防ぐ。client/server が同じ実効値で一致。
 function jpycPaymasterModeForSlug(slug: JpycChainSlug): PaymasterMode {
-  if (slug === 'avalanche') {
+  if (isRecoverRequiredChain(chainIdFor(slug))) {
     return jpycForwarderFor(chainIdFor(slug)) !== null
       ? 'sponsorship'
       : 'unavailable';

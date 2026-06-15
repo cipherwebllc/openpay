@@ -11,6 +11,7 @@ import {
   kairos,
   avalanche,
   avalancheFuji,
+  mainnet,
 } from 'viem/chains';
 import { env } from '@/lib/env';
 
@@ -28,13 +29,19 @@ const FORWARDER_ADDRESS_ENV: Record<number, string | undefined> = {
 };
 
 // recover-required chain: free モード (OpenPay relayer が native gas を全額負担) を **禁止** する chain。
-// native が高価な Avalanche (AVAX) では free relay が赤字になるため、forwarder 設定済 (recover) で
-// なければ relay せず standard へ倒す。⚠️ これは flag (enableJpycAvalanche) に依存しない server 権威の
-// 安全策: client ゲート (paymasterMode) を迂回する直接 POST でも、route が isRecoverRequiredChain() で
-// free を拒否する。Set は impl 詳細として非公開にし、判定は必ず述語経由に統一する (route/relayProvider 共通)。
+// native が高価で free relay が赤字になるため、forwarder 設定済 (recover) でなければ relay せず standard
+// へ倒す。⚠️ これは flag に依存しない server 権威の安全策: client ゲート (paymasterMode) を迂回する
+// 直接 POST でも、route が isRecoverRequiredChain() で free を拒否する。Set は impl 詳細として非公開にし、
+// 判定は必ず述語経由に統一する (route/relayProvider 共通)。
+//   - Avalanche/Fuji: forwarder を設定すれば gasless (recover) になる。
+//   - Ethereum L1 (mainnet): L1 ガスは高変動で gasless recover が不経済なため forwarder を **意図的に
+//     設けない** (FORWARDER_ADDRESS_ENV に ethereum entry なし → jpycForwarderFor=null 固定 →
+//     paymasterMode='unavailable' → standard 強制)。recover-required 集合に入れることで、万一の直接
+//     relay POST も 503 で弾く (free relay で OpenPay が ETH を持ち出さない)。
 const RECOVER_REQUIRED_CHAINS: ReadonlySet<number> = new Set([
   avalanche.id,
   avalancheFuji.id,
+  mainnet.id, // Ethereum L1 = standard 固定 (forwarder 永久未設定)
 ]);
 
 /** chainId が recover-required (free モード禁止) か。route / relayProvider 共通の単一判定点。 */

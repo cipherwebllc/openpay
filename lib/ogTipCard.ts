@@ -35,6 +35,7 @@ const NATIVE_LABEL: Record<JpycChainSlug, string> = {
   polygon: 'POL',
   kaia: 'KAIA',
   avalanche: 'AVAX',
+  ethereum: 'ETH',
 };
 const BOTH_TOKENS_LABEL = 'JPYC / USDC';
 

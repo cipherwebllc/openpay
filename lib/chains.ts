@@ -229,14 +229,21 @@ export function buyerUsdcChainNames(): string[] {
  * mainnet/Kairos) 全てで同一 address `0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`
  * が hard-code default として lib/tokens.ts に存在、env (NEXT_PUBLIC_JPYC_*_ADDRESS)
  * で emergency 上書き可能。 */
-// 型は常に 'avalanche' を含む (コンパイル時の網羅性確保)。実行時に JPYC チェーンとして提供するかは
-// env.enableJpycAvalanche で制御。OFF (既定) は JPYC_CHAINS=['polygon','kaia'] のままで挙動完全不変
-// (isJpycChainSlug('avalanche') も false = 受理されない)。ON で Avalanche (NETWORK_ENV=testnet→Fuji /
-// mainnet→Avalanche・JPYC v3 は同一アドレス 0xE7C3…) が加わる。
-export type JpycChainSlug = 'polygon' | 'kaia' | 'avalanche';
-export const JPYC_CHAINS: readonly JpycChainSlug[] = env.enableJpycAvalanche
-  ? ['polygon', 'kaia', 'avalanche']
-  : ['polygon', 'kaia'];
+// 型は常に 'avalanche'/'ethereum' を含む (コンパイル時の網羅性確保)。実行時に JPYC チェーンとして
+// 提供するかは env フラグで制御。OFF (既定) は JPYC_CHAINS=['polygon','kaia'] のまま挙動完全不変
+// (isJpycChainSlug() も false = 受理されない)。
+//   - Avalanche: enableJpycAvalanche=ON で追加 (NETWORK_ENV=testnet→Fuji / mainnet→Avalanche・
+//     JPYC v3 同一アドレス 0xE7C3…・forwarder 設定で gasless)。
+//   - Ethereum L1: enableJpycEthereum=ON **かつ mainnet 限定** (JPYC は L1 mainnet のみ・Sepolia 未
+//     deploy)。L1 ガスは高変動で gasless recover が不経済なため **standard モード固定**
+//     (paymasterMode='unavailable'・顧客が ETH ガス負担・OpenPay relayer/forwarder 不使用)。
+export type JpycChainSlug = 'polygon' | 'kaia' | 'avalanche' | 'ethereum';
+export const JPYC_CHAINS: readonly JpycChainSlug[] = [
+  'polygon',
+  'kaia',
+  ...(env.enableJpycAvalanche ? (['avalanche'] as const) : []),
+  ...(env.enableJpycEthereum && isMainnet ? (['ethereum'] as const) : []),
+];
 
 export function isJpycChainSlug(value: string): value is JpycChainSlug {
   return (JPYC_CHAINS as readonly string[]).includes(value);

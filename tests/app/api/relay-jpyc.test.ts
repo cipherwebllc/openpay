@@ -231,3 +231,37 @@ describe('Avalanche recover-required: 直接 POST の server ガード (P1#1 / P
     expect(await res.json()).toEqual({ ok: false, error: 'relay_not_configured' });
   });
 });
+
+// Ethereum L1 (chainId 1) は **standard 固定** (forwarder を設けない設計・SUPPORTED_CHAINS にも入れない)。
+// client の paymasterMode ゲート (unavailable→standard) を迂回する直接署名 POST が来ても、server が
+// free relay を拒否して OpenPay relayer が ETH を持ち出さないことを保証する。recover-required 判定
+// (isRecoverRequiredChain(mainnet.id)) は flag 非依存なので enableJpycEthereum の有無を問わず弾く。
+describe('Ethereum L1 standard 固定: 直接 POST の server ガード (free relay 拒否)', () => {
+  const DUMMY_RELAYER_KEY = `0x${'11'.repeat(32)}`;
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('Ethereum mainnet (1) + flag ON + self-host → 503 relay_not_configured (free relay に倒さない)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM', '1');
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY); // PROVIDER=self-host (ETH 持ち出しの危険ケース)
+    // Ethereum は SUPPORTED_CHAINS 外 (relay 非対応) + forwarder 永久未設定 → recoverMode=false。
+    // mainnet.id は MAINNET_CHAINS 外 (relay 用) なので B5 ゲートには届かず、recover-required ガードが弾く。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 1 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'relay_not_configured' });
+  });
+
+  it('flag OFF (既定): Ethereum mainnet (1) + self-host → 503 relay_not_configured (flag 非依存・inert)', async () => {
+    vi.resetModules();
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
+    // enableJpycEthereum 無しでも isRecoverRequiredChain(1)=true で free relay を拒否する。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 1 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'relay_not_configured' });
+  });
+});

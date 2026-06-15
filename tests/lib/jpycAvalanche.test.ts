@@ -10,7 +10,7 @@
 //   - forwarder 設定済 = paymasterMode='sponsorship' → 'eip3009-relay' (recover)。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { avalanche, avalancheFuji } from 'viem/chains';
+import { avalanche, avalancheFuji, mainnet } from 'viem/chains';
 
 // 有効な checksummed アドレス (forwarderConfig.test と同一)。configuredJpycForwarderFor は
 // viem isAddress (strict checksum) で検証するため checksum が正しい必要がある。
@@ -18,11 +18,13 @@ const FUJI_FORWARDER = '0x0F4560a777415580F0680F8B56a79B0022C6B848';
 
 const KEYS = [
   'NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE',
+  'NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM',
   'NEXT_PUBLIC_ENABLE_JPYC_EIP3009',
   'NEXT_PUBLIC_ENABLE_USAGE_FEE',
   'NEXT_PUBLIC_NETWORK_ENV',
   'NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE',
   'NEXT_PUBLIC_JPYC_FORWARDER_FUJI',
+  'NEXT_PUBLIC_JPYC_ETHEREUM_MAINNET_ADDRESS',
   'RELAY_MAX_GAS_COST_WEI',
   'RELAY_MAX_GAS_COST_WEI_AVALANCHE',
   'RELAY_MAX_GAS_COST_WEI_FUJI',
@@ -82,6 +84,74 @@ describe('Avalanche JPYC enablement flag (NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE)', (
     });
     const dep = tokens.deploymentForSlug('jpyc', 'avalanche');
     expect(dep.chainId).toBe(avalanche.id);
+  });
+});
+
+// Ethereum L1 は Avalanche と違い **standard モード固定** (L1 ガスは高変動で gasless recover が不経済)。
+// forwarder env を設けない設計で paymasterMode は常に 'unavailable' → isGaslessSupported=false →
+// URL/UI が standard を強制。さらに JPYC は L1 mainnet のみ (Sepolia 未 deploy) なので isMainnet ゲートも併用。
+describe('Ethereum L1 JPYC enablement (NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM・standard 固定)', () => {
+  it('フラグ OFF (既定): ethereum は JPYC_CHAINS 外・isJpycChainSlug は false (inert)', async () => {
+    const { chains } = await loadWith({ NEXT_PUBLIC_NETWORK_ENV: 'mainnet' });
+    expect(chains.JPYC_CHAINS).toEqual(['polygon', 'kaia']);
+    expect(chains.isJpycChainSlug('ethereum')).toBe(false);
+  });
+
+  it('フラグ ON + mainnet: ethereum 追加・chainId=1・JPYC v3 同一アドレス・standard 固定 (unavailable)', async () => {
+    const { chains, tokens } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'mainnet',
+    });
+    expect(chains.JPYC_CHAINS).toContain('ethereum');
+    expect(chains.isJpycChainSlug('ethereum')).toBe(true);
+    const dep = tokens.deploymentForSlug('jpyc', 'ethereum');
+    expect(dep.chainId).toBe(mainnet.id);
+    // JPYC v3 は L1 mainnet でも同一アドレス (実 RPC で JPY Coin/JPYC/18 を実証済)。
+    expect(dep.address).toBe('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
+    // forwarder 永久未設定 → gasless 非提供 → standard 固定 (顧客が ETH ガス負担)。
+    expect(dep.paymasterMode).toBe('unavailable');
+    expect(tokens.isGaslessSupported(dep)).toBe(false);
+  });
+
+  it('フラグ ON + mainnet: gasless provider は非 relay (paymasterMode=unavailable → pimlico-7702=standard)', async () => {
+    const { tokens, provider } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM: '1',
+      NEXT_PUBLIC_ENABLE_JPYC_EIP3009: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'mainnet',
+    });
+    const dep = tokens.deploymentForSlug('jpyc', 'ethereum');
+    // eip3009 ON でも unavailable は relay に乗らず standard へ倒れる (ETH 持ち出し防止)。
+    expect(provider.resolveJpycGaslessProvider(dep, dep.chainId)).toBe(
+      'pimlico-7702',
+    );
+  });
+
+  it('フラグ ON + testnet: ethereum は JPYC_CHAINS 外 (JPYC は L1 mainnet 限定・Sepolia 未 deploy)', async () => {
+    const { chains } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'testnet',
+    });
+    // isMainnet ゲートで testnet では追加されない (flag ON でも inert)。
+    expect(chains.JPYC_CHAINS).toEqual(['polygon', 'kaia']);
+    expect(chains.isJpycChainSlug('ethereum')).toBe(false);
+  });
+
+  it('mainnet.id は recover-required (flag 非依存) かつ forwarder は永久 null (standard 固定の根拠)', async () => {
+    const { forwarderConfig } = await loadWith({});
+    expect(forwarderConfig.isRecoverRequiredChain(mainnet.id)).toBe(true);
+    // forwarder env を設けない設計 → 生の値も実効値も常に null → recoverMode に決して入らない。
+    expect(forwarderConfig.configuredJpycForwarderFor(mainnet.id)).toBe(null);
+    expect(forwarderConfig.jpycForwarderFor(mainnet.id)).toBe(null);
+  });
+
+  it('mainnet override env を設定すると ethereum address に反映 (緊急アドレス変更用)', async () => {
+    const OVERRIDE = '0x0F4560a777415580F0680F8B56a79B0022C6B848';
+    const { tokens } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'mainnet',
+      NEXT_PUBLIC_JPYC_ETHEREUM_MAINNET_ADDRESS: OVERRIDE,
+    });
+    expect(tokens.deploymentForSlug('jpyc', 'ethereum').address).toBe(OVERRIDE);
   });
 });
 

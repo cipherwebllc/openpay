@@ -43,6 +43,8 @@ const NATIVE_TIP_PRESETS: Record<NativeTipParams['chain'], string[]> = {
   kaia: ['5', '25', '100'],
   // AVAX は単価が高い (~$15-40) ので小さめの「気軽額」。custom 入力で任意額も可。
   avalanche: ['0.05', '0.2', '0.5'],
+  // ETH は単価が最も高い (~$3-4k) ので最小の「気軽額」(~$3-40)。チッパーが ETH ガスを負担。
+  ethereum: ['0.001', '0.005', '0.01'],
 };
 
 // user reject (署名拒否) は握りつぶしてエラー表示しない。それ以外は表示する。

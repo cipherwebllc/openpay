@@ -196,6 +196,11 @@ export const env = {
         'NEXT_PUBLIC_JPYC_AVALANCHE_MAINNET_ADDRESS',
         process.env.NEXT_PUBLIC_JPYC_AVALANCHE_MAINNET_ADDRESS,
       ),
+      // JPYC は Ethereum L1 mainnet にも同一アドレス (0xE7C3…・実 RPC 実証済) で存在。override は緊急用。
+      ethereum: parseAddress(
+        'NEXT_PUBLIC_JPYC_ETHEREUM_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_ETHEREUM_MAINNET_ADDRESS,
+      ),
     },
     usdc: {
       base: parseAddress(
@@ -260,6 +265,12 @@ export const env = {
       avalanche: parseAddress(
         'NEXT_PUBLIC_JPYC_AVALANCHE_FUJI_ADDRESS',
         process.env.NEXT_PUBLIC_JPYC_AVALANCHE_FUJI_ADDRESS,
+      ),
+      // Ethereum L1 JPYC は mainnet 限定 (chains.ts の isMainnet ゲート)。testnet 側は型完全性のための
+      // プレースホルダで実際には使われない (JPYC は Sepolia 未 deploy)。
+      ethereum: parseAddress(
+        'NEXT_PUBLIC_JPYC_ETHEREUM_SEPOLIA_ADDRESS',
+        process.env.NEXT_PUBLIC_JPYC_ETHEREUM_SEPOLIA_ADDRESS,
       ),
     },
     usdc: {
@@ -393,6 +404,13 @@ export const env = {
   // 点灯 = '1'/'true' + 該当 chain の forwarder (NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE/_FUJI) 設定。
   enableJpycAvalanche: parseBoolFlag(
     process.env.NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE,
+  ),
+  // JPYC を Ethereum L1 (mainnet) で受取可能にするフラグ (既定 OFF)。L1 ガスは高変動で gasless recover が
+  // 不経済なため **standard モード固定** (顧客が ETH ガスを負担・OpenPay relayer 不使用・forwarder を
+  // 設けない設計で paymasterMode='unavailable')。JPYC は L1 mainnet のみ (Sepolia 未 deploy) なので
+  // chains.ts で isMainnet ゲートも併用。点灯 = '1'/'true' + NETWORK_ENV=mainnet。
+  enableJpycEthereum: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM,
   ),
   // freee 自動連携パネル (/history の SIWE ログイン + 「freee に同期」) の有効化フラグ。
   // **既定 OFF (dark ship)**。会計 API の req/resp 形が実プラン freee で未検証のため、
