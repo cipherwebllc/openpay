@@ -161,6 +161,18 @@ describe('POST /api/csv-pass/relay — mainnet self-host preflight (Codex P1)', 
     expect(relayFreeAuthorization).not.toHaveBeenCalled();
   });
 
+  // CSV パス購入は free モード専用。recover-required chain (Avalanche/Fuji) は free 禁止 (AVAX 持ち出し)
+  // なので chainId パース直後に 400 unsupported_chain で拒否する (実 isRecoverRequiredChain 経由・flag 非依存)。
+  it.each([
+    ['Avalanche mainnet', 43114],
+    ['Fuji testnet', 43113],
+  ])('recover-required chain (%s=%d) → 400 unsupported_chain・relay へ進まない', async (_label, chainId) => {
+    const res = await POST(req(validBody({ chainId })));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'unsupported_chain' });
+    expect(relayFreeAuthorization).not.toHaveBeenCalled();
+  });
+
   it('testnet (Amoy 80002) は preflight 対象外 — gas ceiling 0n でも中継する', async () => {
     providerHold.gasCeilWei = 0n;
     providerHold.kvConfigured = false;

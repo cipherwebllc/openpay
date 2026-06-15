@@ -217,4 +217,13 @@ describe('relayMaxGasCostWei — per-chain gas 上限 (AVAX は native 価値が
     // Avalanche mainnet は未設定 → 0n (グローバルも無し)。
     expect(relayProvider.relayMaxGasCostWei(avalanche.id)).toBe(0n);
   });
+
+  it('per-chain env が不正値 (非数値) → 無視し recover-required の 0n に倒す (不正入力)', async () => {
+    const { relayProvider } = await loadWith({
+      RELAY_MAX_GAS_COST_WEI_AVALANCHE: 'abc', // 非数値 → /^[0-9]+$/ 不一致で無視
+      RELAY_MAX_GAS_COST_WEI: '10000000000000000', // グローバルはあるが recover-required は流用しない
+    });
+    // 不正な per-chain 値は黙って無視され、グローバル fallback にも倒れず 0n (赤字素通しを防ぐ安全側)。
+    expect(relayProvider.relayMaxGasCostWei(avalanche.id)).toBe(0n);
+  });
 });

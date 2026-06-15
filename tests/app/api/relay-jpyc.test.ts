@@ -185,3 +185,49 @@ describe('L5: forwarder 設定 + relayer 鍵欠落 → 明示 503 relay_not_conf
     expect(body.error).not.toBe('relay_not_configured');
   });
 });
+
+// Avalanche は recover-required (free モード禁止)。client の paymasterMode ゲートを迂回する直接 POST
+// でも server が止める (Codex P1#1)。実 route + 実 relayProvider/forwarderConfig を env-stub で走らせ、
+// flag ON・relayer 鍵あり・forwarder 未設定の条件で各 503 を実際の status/error で検証する。
+describe('Avalanche recover-required: 直接 POST の server ガード (P1#1 / P1#3)', () => {
+  const DUMMY_RELAYER_KEY = `0x${'11'.repeat(32)}`;
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('Fuji (43113) + flag ON + self-host + forwarder 未設定 → 503 relay_not_configured (free に倒さない)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE', '1');
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY); // PROVIDER=self-host
+    // Fuji forwarder は未設定 → recoverMode=false。Fuji は testnet で MAINNET_CHAINS 外 (B5 回避) なので
+    // recover-required ガードが発火する経路を分離して検証できる。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 43113 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'relay_not_configured' });
+  });
+
+  it('Avalanche mainnet (43114) + flag ON + self-host + per-chain ceiling 未設定 → 503 gas_ceiling_required (B5/P1#3)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE', '1');
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
+    // RELAY_MAX_GAS_COST_WEI_AVALANCHE 未設定 → relayMaxGasCostWei(43114)=0n (recover-required は
+    // グローバル fallback を使わない)。mainnet self-host の B5 gate が点灯を止める。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 43114 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'gas_ceiling_required' });
+  });
+
+  it('flag OFF (既定): Avalanche mainnet (43114) は SUPPORTED_CHAINS 外 → recover-required ガードに到達しない (inert)', async () => {
+    vi.resetModules();
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
+    // flag OFF では avalanche は SUPPORTED_CHAINS/MAINNET_CHAINS に出ない → recoverMode=false だが
+    // recover-required ガードは flag 非依存で 503 relay_not_configured を返す (free に倒れない = 安全)。
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 43114 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'relay_not_configured' });
+  });
+});
