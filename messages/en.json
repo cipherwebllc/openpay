@@ -202,7 +202,7 @@
     "staticHint": "With an open-amount QR, the customer enters the amount.",
     "advancedSettings": "Advanced settings",
     "advancedSummary": {
-      "standard": "Standard (you pay gas)",
+      "standard": "Standard (customer pays gas)",
       "gaslessFree": "Gasless (OpenPay covers gas)",
       "gaslessCustomerGas": "Gasless / gas: customer pays",
       "gaslessMerchantGas": "Gasless / gas: merchant pays",
@@ -225,7 +225,7 @@
     "payModeGaslessTitle": "No gas fee",
     "payModeGaslessBadge": "Recommended",
     "payModeGaslessDesc": "Customers can pay with JPYC / USDC alone — no need to hold gas tokens. For JPYC, OpenPay sponsors the gas and charges a per-transaction OpenPay usage fee (for now about 2 JPYC; from July, 1% of the payment with a 2 JPYC minimum); the store bears the fee and the customer pays only the displayed amount. For USDC the customer pays gas in USDC to the paymaster (requires an EIP-7702-capable wallet; otherwise standard payment).",
-    "payModeStandardTitle": "Standard (you pay gas)",
+    "payModeStandardTitle": "Standard (customer pays gas)",
     "payModeStandardDesc": "For crypto-experienced customers. The customer pays their own gas (POL / ETH).",
     "standardHint": "Standard payment (with gas) mode: the customer pays gas (POL / ETH) from their own wallet. OpenPay does not sponsor gas.",
     "gasLabel": "Gas-equivalent burden (gasless mode only)",
@@ -823,7 +823,7 @@
     "payModeLabel": "Payment mode",
     "payModeGaslessTitle": "No gas fee",
     "payModeGaslessDesc": "Customers pay with the supported token alone — no need to hold native gas tokens (POL / ETH).",
-    "payModeStandardTitle": "Standard (you pay gas)",
+    "payModeStandardTitle": "Standard (customer pays gas)",
     "payModeStandardDesc": "Customer pays gas from their own wallet (no gas sponsorship).",
     "gasLabel": "Gas-equivalent burden (gasless mode only)",
     "gasCustomerTitle": "Customer adds gas equivalent",
@@ -1529,7 +1529,7 @@
     "editCurrencyConfirm": "Recipient/currency/chain is changed in the Payment QR tab. Your in-progress cart will be discarded — continue?",
     "paymentPolicyLabel": "Payment settings",
     "paymentPolicy": {
-      "standard": "Standard (you pay gas)",
+      "standard": "Standard (customer pays gas)",
       "gaslessFree": "Gasless (OpenPay covers gas)",
       "gaslessCustomerGas": "Gasless / gas paid by customer",
       "gaslessMerchantGas": "Gasless / gas absorbed by you"
