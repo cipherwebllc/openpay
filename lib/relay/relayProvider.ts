@@ -88,25 +88,20 @@ export const RELAY_MAX_GAS_COST_WEI = (() => {
   const raw = process.env.RELAY_MAX_GAS_COST_WEI;
   return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 0n;
 })();
-// per-chain の native gas 上限 (wei)。⚠️ native の価値が桁違い (AVAX ~$15-40 vs POL/KAIA ~$0.1-0.5)
-// のため、同じ wei 上限を全 chain 共有すると AVAX で USD 換算 ~100倍 緩くなり高騰時に赤字を素通しする。
-// Avalanche は専用上限を必須にする (server 専用 env なので動的キーでなく静的テーブルで列挙)。
+// per-chain の native gas 上限 (wei)。native の価値が桁違い (AVAX ~$15-40 vs POL/KAIA ~$0.1-0.5) なため、
+// 全 chain で同じ wei 上限を共有すると AVAX では USD 換算 ~100倍 緩くなり高騰時に赤字を素通しする
+// → Avalanche は専用上限を必須にする (server 専用 env なので静的テーブルで列挙)。
 const PER_CHAIN_MAX_GAS_COST_WEI_ENV: Record<number, string | undefined> = {
   [avalanche.id]: process.env.RELAY_MAX_GAS_COST_WEI_AVALANCHE,
   [avalancheFuji.id]: process.env.RELAY_MAX_GAS_COST_WEI_FUJI,
 };
-// chainId の native gas 上限 (wei)。per-chain env → グローバル RELAY_MAX_GAS_COST_WEI → 0n (未設定)。
-// 0n は「上限なし」(testnet 既定)。mainnet self-host は route が 0n を 503 で弾く (B5 hardening)。
-// ⚠️ Avalanche mainnet はグローバル fallback (POL/KAIA 調整値) では緩すぎるため、必ず
-// RELAY_MAX_GAS_COST_WEI_AVALANCHE を AVAX 用に設定すること (.env.local.example 参照)。
+// 解決順: per-chain env → (recover-required は上記の理由でグローバル fallback を使わず 0n) → グローバル。
+// 0n = 上限なし (testnet 既定)。mainnet self-host は route が 0n を 503 gas_ceiling_required で弾く
+// (B5 hardening) ため、本番 Avalanche は必ず RELAY_MAX_GAS_COST_WEI_AVALANCHE を設定 (.env.local.example)。
 export function relayMaxGasCostWei(chainId: number): bigint {
   const perChain = PER_CHAIN_MAX_GAS_COST_WEI_ENV[chainId];
   if (perChain && /^[0-9]+$/.test(perChain)) return BigInt(perChain);
-  // recover-required chain (Avalanche) は global fallback を **使わない**: POL/KAIA 用に調整した
-  // グローバル wei 上限は AVAX には過大 (USD 換算 ~100倍 緩い) で赤字を素通しする。per-chain 未設定
-  // なら 0n を返し、mainnet self-host の B5 gate (route の === 0n) が gas_ceiling_required で点灯を
-  // 止める (Codex P1: グローバル fallback による silent な過大上限を防ぐ)。
-  if (isRecoverRequiredChain(chainId)) return 0n;
+  if (isRecoverRequiredChain(chainId)) return 0n; // global fallback は AVAX に過大 (Codex P1)
   return RELAY_MAX_GAS_COST_WEI;
 }
 // relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し
