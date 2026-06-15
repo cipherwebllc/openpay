@@ -15,6 +15,7 @@
 // lib/relay/relayProvider を再利用する (鍵/アドレス/client を重複定義しない)。
 
 import { NextResponse } from 'next/server';
+import { avalanche } from 'viem/chains';
 import { logger } from '@/lib/logger';
 import {
   PROVIDER,
@@ -43,10 +44,21 @@ type HealthResult =
 // 補充 cadence の目安として同じ保守値を使う)。env で override 可 (運用者が cadence に合わせ調整)。
 // 既定: Polygon/Kaia は 5 native (5e18)、それ以外 (testnet 含む) は 0.01 native (1e16)。
 const FIVE_NATIVE_WEI = 5n * 10n ** 18n;
+const TENTH_NATIVE_WEI = 10n ** 17n; // 0.1 native
 const HUNDREDTH_NATIVE_WEI = 10n ** 16n;
+// chain 別の低残高フロア (mainnet 既定 5 native を上書き)。⚠️ Avalanche は native (AVAX ~$30) が
+// POL/KAIA (~$0.1-0.5) より桁違いに高価かつ実 gas が極小 (≈0.0000016 AVAX/件) のため、5 AVAX フロア
+// は ~320 万件分で過大 → 1 AVAX 保有でも誤って degraded:low_balance になり preflight banner が
+// 常時出てしまう。0.1 AVAX (~$3・~6 万件分) に下げる (submit 時の RELAY_LOW_BALANCE_ALERT_WEI 既定
+// 0.1 native とも整合)。フロア≠既定の chain を足すときはここに per-chain で明示する。
+const PER_CHAIN_LOW_BALANCE_FLOOR_WEI: Record<number, bigint> = {
+  [avalanche.id]: TENTH_NATIVE_WEI,
+};
 function lowBalanceFloorWei(chainId: number): bigint {
   const override = process.env.RELAY_HEALTH_MIN_BALANCE_WEI;
   if (override && /^[0-9]+$/.test(override)) return BigInt(override);
+  const perChain = PER_CHAIN_LOW_BALANCE_FLOOR_WEI[chainId];
+  if (perChain !== undefined) return perChain;
   return MAINNET_CHAINS.has(chainId) ? FIVE_NATIVE_WEI : HUNDREDTH_NATIVE_WEI;
 }
 

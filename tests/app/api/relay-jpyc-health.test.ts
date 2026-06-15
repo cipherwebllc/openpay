@@ -129,6 +129,26 @@ describe('GET /api/relay/jpyc/health', () => {
     expect(await res.json()).toEqual({ degraded: true, reason: 'low_balance' });
   });
 
+  it('Avalanche (43114) は per-chain フロア 0.1 AVAX: 1 AVAX で健全 (mainnet 既定 5 native は不適用)', async () => {
+    // AVAX は高価かつ gas 極小のため 5 native フロアは過大 → per-chain で 0.1 AVAX に。
+    // 1 AVAX は旧 5 native フロアなら low_balance だったが、per-chain 0.1 では健全。
+    hold.supported = new Set<number>([43114]);
+    hold.mainnet = new Set<number>([43114]);
+    hold.balanceWei = 1n * 10n ** 18n; // 1 AVAX >= 0.1 AVAX フロア
+    const GET = await freshGet();
+    const res = await GET(req(43114));
+    expect(await res.json()).toEqual({ degraded: false });
+  });
+
+  it('Avalanche (43114): 0.05 AVAX (0.1 フロア未満) → degraded:low_balance', async () => {
+    hold.supported = new Set<number>([43114]);
+    hold.mainnet = new Set<number>([43114]);
+    hold.balanceWei = 5n * 10n ** 16n; // 0.05 AVAX < 0.1 AVAX フロア
+    const GET = await freshGet();
+    const res = await GET(req(43114));
+    expect(await res.json()).toEqual({ degraded: true, reason: 'low_balance' });
+  });
+
   it('RELAY_HEALTH_MIN_BALANCE_WEI override が chain 既定より優先', async () => {
     // override を高く設定すると健全残高でも low_balance に倒れる。
     vi.stubEnv('RELAY_HEALTH_MIN_BALANCE_WEI', (50n * 10n ** 18n).toString());
