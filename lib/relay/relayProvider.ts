@@ -37,7 +37,7 @@ import {
 import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { resolveDeployment } from '@/lib/tokens';
-import { RECOVER_REQUIRED_CHAINS } from './forwarderConfig';
+import { isRecoverRequiredChain } from './forwarderConfig';
 import type { Eip3009Authorization } from '@/lib/jpycEip3009';
 import {
   relayJpycAuthorization,
@@ -106,7 +106,7 @@ export function relayMaxGasCostWei(chainId: number): bigint {
   // グローバル wei 上限は AVAX には過大 (USD 換算 ~100倍 緩い) で赤字を素通しする。per-chain 未設定
   // なら 0n を返し、mainnet self-host の B5 gate (route の === 0n) が gas_ceiling_required で点灯を
   // 止める (Codex P1: グローバル fallback による silent な過大上限を防ぐ)。
-  if (RECOVER_REQUIRED_CHAINS.has(chainId)) return 0n;
+  if (isRecoverRequiredChain(chainId)) return 0n;
   return RELAY_MAX_GAS_COST_WEI;
 }
 // relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し

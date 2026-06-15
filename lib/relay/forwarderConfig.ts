@@ -30,13 +30,14 @@ const FORWARDER_ADDRESS_ENV: Record<number, string | undefined> = {
 // recover-required chain: free モード (OpenPay relayer が native gas を全額負担) を **禁止** する chain。
 // native が高価な Avalanche (AVAX) では free relay が赤字になるため、forwarder 設定済 (recover) で
 // なければ relay せず standard へ倒す。⚠️ これは flag (enableJpycAvalanche) に依存しない server 権威の
-// 安全策: client ゲート (paymasterMode) を迂回する直接 POST でも、route がこの set で free を拒否する。
-export const RECOVER_REQUIRED_CHAINS: ReadonlySet<number> = new Set([
+// 安全策: client ゲート (paymasterMode) を迂回する直接 POST でも、route が isRecoverRequiredChain() で
+// free を拒否する。Set は impl 詳細として非公開にし、判定は必ず述語経由に統一する (route/relayProvider 共通)。
+const RECOVER_REQUIRED_CHAINS: ReadonlySet<number> = new Set([
   avalanche.id,
   avalancheFuji.id,
 ]);
 
-/** chainId が recover-required (free モード禁止) か。 */
+/** chainId が recover-required (free モード禁止) か。route / relayProvider 共通の単一判定点。 */
 export function isRecoverRequiredChain(chainId: number): boolean {
   return RECOVER_REQUIRED_CHAINS.has(chainId);
 }
