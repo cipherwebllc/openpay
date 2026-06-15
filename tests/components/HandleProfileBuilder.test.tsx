@@ -119,16 +119,25 @@ describe('HandleProfileBuilder', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('enableJpycAvalanche ON → JPYC (Avalanche) トグルが出て、ON で受取方法に加わる', () => {
+  it('enableJpycAvalanche ON → JPYC (Avalanche) を ON にすると methods に伝播し受取方法として描画される', () => {
     h.enableJpycAvalanche = true;
     renderWithIntl(<HandleProfileBuilder />);
     const avax = screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' });
     expect(avax).toBeInTheDocument();
     expect(avax).not.toBeChecked(); // opt-in (flag ON でも既定 OFF)
-    // 受取先解決 + Avalanche を ON → checkbox が反映される
+    // 初期は avalanche 受取方法が描画されていない (checkbox→methods→描画の伝播を実証する前提条件)。
+    expect(
+      screen.queryByText('JPYC (Avalanche) で応援'),
+    ).not.toBeInTheDocument();
+    // 受取先解決 + Avalanche を ON。
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
     fireEvent.click(avax);
     expect(avax).toBeChecked();
+    // checkbox 状態だけでなく、config.methods への反映 → 受取方法サマリ/プレビュー描画まで実際に
+    // 伝播していることを実出力で検証 (LARP: トグルが効いて method が描画されることの実証)。
+    expect(
+      screen.getAllByText('JPYC (Avalanche) で応援').length,
+    ).toBeGreaterThan(0);
   });
 
   it('受取先未確定では config=null・解決後に config-ready', () => {
