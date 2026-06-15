@@ -12,7 +12,7 @@
 // (recoverFee.ts ではなく env から読むことで、recoverFee を mock する下流テストに影響しない)。
 // forwarderConfig / env は legal を import し返さないため循環は生じない (legal → {forwarderConfig, env})。
 
-import { polygon, kaia } from 'viem/chains';
+import { polygon, kaia, avalanche } from 'viem/chains';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { env } from '@/lib/env';
 
@@ -134,10 +134,13 @@ export const DISCLOSED_RECOVER_FEE = {
 const PERCENT_EFFECTIVE_FROM = Date.UTC(2026, 6, 1); // 2026-07-01T00:00:00Z (month は 0-indexed)
 
 // 開示済みフロア (DISCLOSED_RECOVER_FEE.floorJpyc) を「約 2 JPYC / 最低 2 JPYC」として約束した mainnet
-// relay チェーン。現状は Polygon/Kaia が同一フロアで開示済み。Avalanche を floor≠2 で relay 昇格する際は
-// (1) ここへ avalanche.id を追加し (2) DISCLOSED_RECOVER_FEE を per-chain 化して同一リリースで開示本文も
-// 改定する。本ガードが per-chain で乖離を検出するため、片側だけの変更 (env だけ / 定数だけ) は fail する。
-const DISCLOSED_FLOOR_CHAINS: number[] = [polygon.id, kaia.id];
+// relay チェーン。Polygon/Kaia/Avalanche が同一フロア (2 JPYC) で開示済み。Avalanche は 2026-06-15 に
+// 本点灯したが、実 gas が極小 (≈¥0.006/件) のため Polygon/Kaia と同一の 2 JPYC フロアを採用 → 既存の
+// 汎用開示文「約 2 JPYC / 最低 2 JPYC」がそのまま正確に適用され、per-chain 開示本文の改定は不要。
+// ⚠️ いずれかの chain を floor≠2 で運用する場合は (1) DISCLOSED_RECOVER_FEE を per-chain 化し
+// (2) 同一リリースで開示本文 (Terms/Disclaimer/特商法/お知らせ ja+en) も改定すること。本ガードが per-chain
+// で乖離を検出するため、片側だけの変更 (env だけ floor=7 等 / 定数だけ) は warn する。
+const DISCLOSED_FLOOR_CHAINS: number[] = [polygon.id, kaia.id, avalanche.id];
 
 // L4: live env (実際に徴収する数値) が法務文書で開示済みの数値 (DISCLOSED_RECOVER_FEE) と
 // 乖離していないかを判定する純関数。乖離していれば人間可読な理由文字列を、一致していれば null を返す。

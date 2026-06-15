@@ -5,7 +5,7 @@ import TermsPage from '@/app/[locale]/terms/page';
 import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
 import TokuteiPage from '@/app/[locale]/tokutei/page';
-import { polygon } from 'viem/chains';
+import { polygon, avalanche } from 'viem/chains';
 import { LEGAL_ENTITY, DISCLOSED_RECOVER_FEE } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
@@ -1195,6 +1195,19 @@ describe('Legal pages', () => {
       const d = feeDisclosureDivergence(JUNE);
       expect(d).not.toBeNull();
       expect(d).toMatch(/relayGasFeeValue/);
+    });
+
+    it('feeDisclosureDivergence: Avalanche per-chain floor を開示(2)と違う額にすると乖離を検出 (理由に avalanche chainId)', async () => {
+      // Avalanche を DISCLOSED_FLOOR_CHAINS に追加した硬化の実証。per-chain env だけ
+      // 乖離させても (グローバルは開示どおり) Avalanche について検出すること。
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC', '');
+      vi.stubEnv('NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_AVALANCHE', '7'); // 開示は 2
+      vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', '');
+      const { feeDisclosureDivergence } = await import('@/lib/legal');
+      const d = feeDisclosureDivergence(JUNE);
+      expect(d).not.toBeNull();
+      expect(d).toMatch(new RegExp(String(avalanche.id))); // 43114
     });
 
     it('feeDisclosureDivergence: bps を開示外の率 (例 50) にすると乖離を検出 (非 null・理由に bps)', async () => {
