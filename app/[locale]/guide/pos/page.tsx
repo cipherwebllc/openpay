@@ -27,16 +27,31 @@ export async function generateMetadata({
   };
 }
 
-// 図版プレースホルダ。public/guide/<file> 配置後は <Image> に差し替える。
-function GuideFigure({ image, pending }: { image: GuideImage; pending: string }) {
+// public/guide/<file> の SVG 図版の intrinsic 寸法 (CLS 防止の width/height 用)。
+const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
+  'hero.svg': { w: 1200, h: 675 },
+  'overview-flow.svg': { w: 1000, h: 320 },
+  'pos-add-method.svg': { w: 760, h: 480 },
+  'four-steps.svg': { w: 1100, h: 280 },
+  'payment-success.svg': { w: 420, h: 720 },
+  'history-reconcile.svg': { w: 1000, h: 420 },
+  'cost-compare.svg': { w: 900, h: 360 },
+};
+
+// 静的 SVG 図版を描画 (最適化不要なので素の <img>・既存 HandleProfile 等と同方針)。
+function GuideFigure({ image, className }: { image: GuideImage; className?: string }) {
+  const dims = FIGURE_DIMS[image.file] ?? { w: 1200, h: 720 };
   return (
-    <figure className="my-6">
-      <div className="flex min-h-[140px] items-center justify-center rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/60 p-6 text-center">
-        <figcaption className="text-xs text-slate-500">
-          <span className="block font-medium text-slate-600">{image.alt}</span>
-          <span className="mt-1 block">{pending}</span>
-        </figcaption>
-      </div>
+    <figure className={className ?? 'my-6'}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`/guide/${image.file}`}
+        alt={image.alt}
+        width={dims.w}
+        height={dims.h}
+        loading="lazy"
+        className="h-auto w-full rounded-2xl border border-slate-200 bg-white"
+      />
     </figure>
   );
 }
@@ -74,7 +89,7 @@ export default async function GuidePosPage({
           </p>
         </header>
 
-        <GuideFigure image={c.heroImage} pending={c.imagePending} />
+        <GuideFigure image={c.heroImage} />
 
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
@@ -143,7 +158,7 @@ export default async function GuidePosPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.overviewBody}
           </p>
-          <GuideFigure image={c.overviewImage} pending={c.imagePending} />
+          <GuideFigure image={c.overviewImage} />
         </section>
 
         {/* STEP 0 準備 */}
@@ -166,7 +181,7 @@ export default async function GuidePosPage({
               </li>
             ))}
           </ol>
-          <GuideFigure image={c.setupImage} pending={c.imagePending} />
+          <GuideFigure image={c.setupImage} />
         </section>
 
         {/* 毎回の会計フロー */}
@@ -189,10 +204,14 @@ export default async function GuidePosPage({
               </li>
             ))}
           </ol>
-          <GuideFigure image={c.flowImage} pending={c.imagePending} />
+          <GuideFigure image={c.flowImage} />
           <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
             {c.safetyNote}
           </p>
+          <GuideFigure
+            image={c.successImage}
+            className="mx-auto mt-6 max-w-[230px]"
+          />
         </section>
 
         {/* 閉店後の突合 */}
@@ -216,7 +235,7 @@ export default async function GuidePosPage({
               </li>
             ))}
           </ul>
-          <GuideFigure image={c.reconcileImage} pending={c.imagePending} />
+          <GuideFigure image={c.reconcileImage} />
         </section>
 
         {/* おすすめ無料POS (アフィリエイト枠) */}
@@ -286,7 +305,7 @@ export default async function GuidePosPage({
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.costNote}
           </p>
-          <GuideFigure image={c.costImage} pending={c.imagePending} />
+          <GuideFigure image={c.costImage} />
         </section>
 
         {/* FAQ */}

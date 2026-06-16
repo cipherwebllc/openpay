@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" width="900" height="360" role="img" aria-label="カード決済と無料POS×OpenPayのコスト比較イメージ">
+  <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
+  <rect width="900" height="360" fill="#ffffff"/>
+  <!-- baseline -->
+  <line x1="110" y1="248" x2="730" y2="248" stroke="#e2e8f0" stroke-width="2"/>
+  <!-- card bar (tall) -->
+  <rect x="190" y="92" width="100" height="156" rx="8" fill="#94a3b8"/>
+  <text x="240" y="80" font-size="17" font-weight="700" fill="#475569" text-anchor="middle">数％程度</text>
+  <text x="240" y="278" font-size="17" font-weight="700" fill="#334155" text-anchor="middle">カード決済</text>
+  <!-- openpay bar (short) -->
+  <rect x="550" y="184" width="100" height="64" rx="8" fill="#059669"/>
+  <text x="600" y="172" font-size="17" font-weight="700" fill="#047857" text-anchor="middle">軽いご利用料</text>
+  <text x="600" y="278" font-size="16" font-weight="700" fill="#047857" text-anchor="middle">無料POS × OpenPay</text>
+  <!-- benefit badges -->
+  <rect x="92" y="306" width="216" height="40" rx="20" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.5"/>
+  <text x="200" y="332" font-size="15" font-weight="600" fill="#047857" text-anchor="middle">即時・直接着金</text>
+  <rect x="342" y="306" width="216" height="40" rx="20" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.5"/>
+  <text x="450" y="332" font-size="15" font-weight="600" fill="#047857" text-anchor="middle">ノンカストディ</text>
+  <rect x="592" y="306" width="216" height="40" rx="20" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.5"/>
+  <text x="700" y="332" font-size="15" font-weight="600" fill="#047857" text-anchor="middle">初期費用ゼロ</text>
+</svg>

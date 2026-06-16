@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 480" width="760" height="480" role="img" aria-label="POSレジの支払い方法に「OpenPay」を追加した設定画面">
+  <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
+  <rect width="760" height="480" rx="16" fill="#f8fafc"/>
+  <rect x="120" y="36" width="520" height="408" rx="18" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="150" y="90" font-size="24" font-weight="700" fill="#0f172a">支払い方法</text>
+  <line x1="150" y1="106" x2="610" y2="106" stroke="#e2e8f0" stroke-width="2"/>
+  <!-- 現金 -->
+  <rect x="150" y="126" width="460" height="56" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <circle cx="184" cy="154" r="13" fill="#cbd5e1"/>
+  <text x="216" y="161" font-size="19" fill="#334155">現金</text>
+  <!-- クレジットカード -->
+  <rect x="150" y="192" width="460" height="56" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="172" y="210" width="26" height="20" rx="3" fill="#cbd5e1"/>
+  <text x="216" y="227" font-size="19" fill="#334155">クレジットカード</text>
+  <!-- 電子マネー -->
+  <rect x="150" y="258" width="460" height="56" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <circle cx="184" cy="286" r="13" fill="#cbd5e1"/>
+  <text x="216" y="293" font-size="19" fill="#334155">電子マネー</text>
+  <!-- OpenPay (highlighted) -->
+  <rect x="150" y="324" width="460" height="64" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2.5"/>
+  <circle cx="186" cy="356" r="15" fill="#059669"/>
+  <text x="186" y="363" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">¥</text>
+  <text x="218" y="363" font-size="20" font-weight="700" fill="#047857">OpenPay</text>
+  <rect x="518" y="341" width="70" height="30" rx="15" fill="#059669"/>
+  <text x="553" y="362" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">追加</text>
+</svg>

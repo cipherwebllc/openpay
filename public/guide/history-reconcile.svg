@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img" aria-label="POSの明細とOpenPayの履歴/CSVを金額・番号で突き合わせる図">
+  <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
+  <rect width="1000" height="420" fill="#ffffff"/>
+  <!-- center match label -->
+  <rect x="350" y="30" width="300" height="40" rx="20" fill="#f1f5f9"/>
+  <text x="500" y="56" font-size="16" font-weight="700" fill="#334155" text-anchor="middle">金額・レシート番号で一致</text>
+  <!-- left card: POS -->
+  <rect x="40" y="100" width="380" height="280" rx="16" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
+  <text x="68" y="142" font-size="19" font-weight="700" fill="#1e40af">POS：その他決済</text>
+  <line x1="68" y1="156" x2="392" y2="156" stroke="#dbeafe" stroke-width="2"/>
+  <g>
+    <rect x="68" y="178" width="324" height="50" rx="8" fill="#eff6ff"/>
+    <text x="86" y="209" font-size="16" fill="#334155">14:32</text>
+    <text x="226" y="209" font-size="16" font-weight="700" fill="#1e3a8a">¥1,200</text>
+    <text x="320" y="209" font-size="15" fill="#64748b">No.001</text>
+  </g>
+  <g>
+    <rect x="68" y="240" width="324" height="50" rx="8" fill="#eff6ff"/>
+    <text x="86" y="271" font-size="16" fill="#334155">15:10</text>
+    <text x="238" y="271" font-size="16" font-weight="700" fill="#1e3a8a">¥800</text>
+    <text x="320" y="271" font-size="15" fill="#64748b">No.002</text>
+  </g>
+  <g>
+    <rect x="68" y="302" width="324" height="50" rx="8" fill="#eff6ff"/>
+    <text x="86" y="333" font-size="16" fill="#334155">16:48</text>
+    <text x="226" y="333" font-size="16" font-weight="700" fill="#1e3a8a">¥3,500</text>
+    <text x="320" y="333" font-size="15" fill="#64748b">No.003</text>
+  </g>
+  <!-- right card: OpenPay -->
+  <rect x="580" y="100" width="380" height="280" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="2"/>
+  <text x="608" y="142" font-size="19" font-weight="700" fill="#047857">OpenPay：履歴 / CSV</text>
+  <line x1="608" y1="156" x2="932" y2="156" stroke="#d1fae5" stroke-width="2"/>
+  <g>
+    <rect x="608" y="178" width="324" height="50" rx="8" fill="#ecfdf5"/>
+    <text x="626" y="209" font-size="16" fill="#334155">14:32</text>
+    <text x="766" y="209" font-size="16" font-weight="700" fill="#047857">¥1,200</text>
+    <text x="860" y="209" font-size="15" fill="#64748b">No.001</text>
+  </g>
+  <g>
+    <rect x="608" y="240" width="324" height="50" rx="8" fill="#ecfdf5"/>
+    <text x="626" y="271" font-size="16" fill="#334155">15:10</text>
+    <text x="778" y="271" font-size="16" font-weight="700" fill="#047857">¥800</text>
+    <text x="860" y="271" font-size="15" fill="#64748b">No.002</text>
+  </g>
+  <g>
+    <rect x="608" y="302" width="324" height="50" rx="8" fill="#ecfdf5"/>
+    <text x="626" y="333" font-size="16" fill="#334155">16:48</text>
+    <text x="766" y="333" font-size="16" font-weight="700" fill="#047857">¥3,500</text>
+    <text x="860" y="333" font-size="15" fill="#64748b">No.003</text>
+  </g>
+  <!-- match arrows -->
+  <g stroke="#94a3b8" stroke-width="3" fill="none">
+    <line x1="420" y1="203" x2="580" y2="203" stroke-dasharray="8 7"/>
+    <line x1="420" y1="265" x2="580" y2="265" stroke-dasharray="8 7"/>
+    <line x1="420" y1="327" x2="580" y2="327" stroke-dasharray="8 7"/>
+  </g>
+  <g fill="#10b981">
+    <circle cx="500" cy="203" r="14"/><circle cx="500" cy="265" r="14"/><circle cx="500" cy="327" r="14"/>
+  </g>
+  <g stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M493 203 l4 5 l9 -10"/><path d="M493 265 l4 5 l9 -10"/><path d="M493 327 l4 5 l9 -10"/>
+  </g>
+</svg>

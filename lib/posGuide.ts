@@ -52,6 +52,7 @@ export type GuideContent = {
   readonly flowNote: string;
   readonly flowSteps: readonly GuideStep[];
   readonly flowImage: GuideImage;
+  readonly successImage: GuideImage;
   readonly safetyNote: string;
 
   readonly reconcileTitle: string;
@@ -162,6 +163,7 @@ const ja: GuideContent = {
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: '会計→QR表示→スキャン→完了確認 の4ステップ' },
+  successImage: { file: 'payment-success.svg', alt: 'スマホに「支払い完了」と緑のチェックが表示された画面' },
   safetyNote:
     '重要：完了表示の前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
 
@@ -305,6 +307,7 @@ const en: GuideContent = {
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: 'Four steps: ring up → show QR → scan → confirm' },
+  successImage: { file: 'payment-success.svg', alt: 'A phone screen showing “Payment complete” with a green check' },
   safetyNote:
     'Important: do not hand over goods before the completion screen. Conversely, a completed payment cannot be reversed (it has settled directly to your wallet).',
 

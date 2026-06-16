@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 720" width="420" height="720" role="img" aria-label="スマホに「支払い完了」と緑のチェックが表示された画面">
+  <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
+  <rect width="420" height="720" rx="28" fill="#f8fafc"/>
+  <rect x="66" y="58" width="288" height="604" rx="46" fill="#ffffff" stroke="#0f172a" stroke-width="8"/>
+  <rect x="170" y="80" width="80" height="14" rx="7" fill="#0f172a"/>
+  <circle cx="210" cy="304" r="92" fill="#10b981"/>
+  <path d="M168 304 l30 32 l54 -64" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="210" y="452" font-size="30" font-weight="700" fill="#0f172a" text-anchor="middle">支払い完了</text>
+  <text x="210" y="516" font-size="40" font-weight="700" fill="#047857" text-anchor="middle">¥1,200</text>
+  <text x="210" y="548" font-size="18" fill="#64748b" text-anchor="middle">JPYC で受け取りました</text>
+  <rect x="120" y="588" width="180" height="44" rx="22" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="2"/>
+  <text x="210" y="616" font-size="16" font-weight="600" fill="#047857" text-anchor="middle">着金済み</text>
+</svg>
