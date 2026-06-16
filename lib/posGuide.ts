@@ -4,8 +4,7 @@
 // 設計方針:
 // - 長文コンテンツは messages/*.json でなく本モジュールに置く (lib/explore.ts / lib/news.ts と同方針)。
 //   → 新規 i18n namespace を増やさず parity test の対象を汚さない。ja/en は本モジュールに同梱。
-// - 図版は public/guide/<image>.svg を後日配置 (Codex 生成・docs/guides/pos-combo-image-prompts.md 参照)。
-//   未配置のあいだページは「図版は準備中」プレースホルダを描画する (404 を出さない)。
+// - 図版は public/guide/<image>.svg に配置済み (Codex 生成・docs/guides/pos-combo-image-prompts.md 参照)。
 // - 数値 (手数料率/カード料率/POS プラン詳細) は本文に断定で書かない: 正確な値は料金/規約ページへ誘導する。
 //   景表法 (比較広告/ステマ規制) の配慮 + 料金改定での陳腐化回避のため。
 // - POS アフィリエイトは affiliate=true のとき 景表法「広告」開示が要る (lib/explore.ts と同じ思想)。
@@ -85,7 +84,6 @@ export type GuideContent = {
   readonly ctaButtonHref: string;
 
   readonly backHome: string;
-  readonly imagePending: string;
 };
 
 const ja: GuideContent = {
@@ -233,7 +231,6 @@ const ja: GuideContent = {
   ctaButtonHref: '/create',
 
   backHome: '← トップにもどる',
-  imagePending: '（図版は準備中）',
 };
 
 const en: GuideContent = {
@@ -381,7 +378,6 @@ const en: GuideContent = {
   ctaButtonHref: '/create',
 
   backHome: '← Back to home',
-  imagePending: '(illustration coming soon)',
 };
 
 export const POS_GUIDE: Record<GuideLocale, GuideContent> = { ja, en };
