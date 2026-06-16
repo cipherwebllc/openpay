@@ -17,6 +17,7 @@ import { AddressInput } from '@/components/AddressInput';
 import { StepCard } from '@/components/StepCard';
 import { LinkQrModal } from '@/components/LinkQrModal';
 import { SocialIcon } from '@/components/SocialIconLinks';
+import { StorefrontPublishPanel } from '@/components/StorefrontPublishPanel';
 import { useMobileOrderDraft, draftToConfig, presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
@@ -59,9 +60,12 @@ function Field({
 
 export function MobileOrderBuilder({
   onManageProducts,
+  onGetHandle,
 }: {
   /** 「レジで商品を管理」導線 (create ページが register タブへ切替える)。 */
   onManageProducts?: () => void;
+  /** 「@handle を取得」導線 (create ページが profile タブへ切替える)。 */
+  onGetHandle?: () => void;
 } = {}) {
   const t = useTranslations('MobileOrder');
   const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft();
@@ -107,6 +111,11 @@ export function MobileOrderBuilder({
   // 店舗アイコンのプレビュー (https のみ・読込前検証)。無ければ店名の頭文字を円に表示。
   const avatarPreview = safeHttpUrl(draft.avatar.trim());
   const previewInitial = ([...draft.shopName.trim()][0] ?? '').toUpperCase();
+
+  // @handle 公開用の店舗固有部分 (identity は handle 由来)。メニュー未充足なら null (公開不可)。
+  const storefrontParts = hasMenu
+    ? { chain: draft.chain, mode: draft.mode, feePayer: draft.feePayer, menu: menuItems }
+    : null;
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
 
@@ -414,6 +423,12 @@ export function MobileOrderBuilder({
               </div>
             </div>
           </StepCard>
+
+          {/* レジ商品を @handle に公開して固定店舗 URL にする (handles ON のときだけマウント:
+              react-query を使うため OFF 環境/テストで QueryClient を要求しない)。 */}
+          {env.enableHandles && (
+            <StorefrontPublishPanel storefront={storefrontParts} onGetHandle={onGetHandle} />
+          )}
         </div>
 
         {/* 右カラム: ④ プレビュー + 注文 URL (desktop は sticky) */}
