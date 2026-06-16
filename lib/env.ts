@@ -454,6 +454,10 @@ export const env = {
   // Pro (月額固定) とは別系統 (CSV ゲートは都度パスへ置換・Pro は温存して将来傘へ)・recover 手数料 /
   // a1 利用料とも両立する。Pro ⊃ CSV (有効な pro:exp はパス無しでも CSV を解放)。設計: plans/csv-pass.md。
   enableCsvPass: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_CSV_PASS),
+  // モバイルオーダー (事前決済 + 店頭/券売機 + Nostr 通知 + QR 照合) の有効化フラグ
+  // (client 露出)。**既定 OFF** = 注文ページ/設定UI/ダッシュボードは非表示・本番完全 inert。
+  // 点灯は開示更新 (店頭1%/モバイル3%) + 弁護士/FSA 確認後。計画: plans/mobile-order-nostr.md。
+  enableMobileOrder: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
