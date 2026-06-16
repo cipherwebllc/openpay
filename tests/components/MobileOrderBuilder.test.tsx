@@ -70,6 +70,17 @@ describe('MobileOrderBuilder', () => {
     expect(within(box).getByText('店名')).toBeInTheDocument();
   });
 
+  it('メニュー各行に可視ラベル付きの価格欄があり入力できる (placeholder 頼みにしない)', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    // Field の可視ラベル経由で価格欄が見つかる (seed 2 件)。
+    const priceInputs = screen.getAllByLabelText('価格（JPYC）');
+    expect(priceInputs.length).toBeGreaterThanOrEqual(2);
+    fireEvent.change(priceInputs[0], { target: { value: '777' } });
+    expect((priceInputs[0] as HTMLInputElement).value).toBe('777');
+    // 商品名欄もラベル付き。
+    expect(screen.getAllByLabelText('商品名').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('受取チェーン select (JPYC) を描画 — 既定 Polygon + Kaia', () => {
     renderWithIntl(<MobileOrderBuilder />);
     const chainSelect = screen.getByRole('combobox', { name: '受取チェーン' }) as HTMLSelectElement;

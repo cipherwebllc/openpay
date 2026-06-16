@@ -266,64 +266,71 @@ export function MobileOrderBuilder() {
                   <div key={m.id} className="rounded-xl border border-slate-200 p-3">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1 space-y-2">
-                        <input
-                          type="text"
-                          value={m.name}
-                          maxLength={MENU_NAME_MAX}
-                          placeholder={t('itemNamePlaceholder')}
-                          onChange={(e) => updateItem(m.id, { name: e.target.value })}
-                          className={inputClass}
-                          aria-label={t('itemNameLabel')}
-                        />
-                        <div className="flex gap-2">
+                        {/* 各欄に可視ラベル (商品名/価格/画像・絵文字) を付け、価格欄を見つけやすくする。 */}
+                        <Field label={t('itemNameLabel')}>
                           <input
                             type="text"
-                            inputMode="decimal"
-                            value={m.price}
-                            placeholder={t('itemPricePlaceholder')}
-                            onChange={(e) => updateItem(m.id, { price: sanitizePriceInput(e.target.value) })}
-                            className={`${inputClass} flex-1 ${priceInvalid ? 'border-red-400' : ''}`}
-                            aria-label={t('itemPriceLabel')}
+                            value={m.name}
+                            maxLength={MENU_NAME_MAX}
+                            placeholder={t('itemNamePlaceholder')}
+                            onChange={(e) => updateItem(m.id, { name: e.target.value })}
+                            className={inputClass}
                           />
-                          <select
-                            value={m.visualKind}
-                            onChange={(e) =>
-                              updateItem(m.id, {
-                                visualKind: e.target.value as typeof m.visualKind,
-                              })
-                            }
-                            className={`${inputClass} w-28`}
-                            aria-label={t('visualLabel')}
-                          >
-                            <option value="none">{t('visualNone')}</option>
-                            <option value="emoji">{t('visualEmoji')}</option>
-                            <option value="image">{t('visualImage')}</option>
-                          </select>
+                        </Field>
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <Field label={t('itemPriceLabel')}>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={m.price}
+                                placeholder={t('itemPricePlaceholder')}
+                                onChange={(e) => updateItem(m.id, { price: sanitizePriceInput(e.target.value) })}
+                                className={`${inputClass} ${priceInvalid ? 'border-red-400' : ''}`}
+                              />
+                            </Field>
+                          </div>
+                          <div className="w-32">
+                            <Field label={t('visualLabel')}>
+                              <select
+                                value={m.visualKind}
+                                onChange={(e) =>
+                                  updateItem(m.id, {
+                                    visualKind: e.target.value as typeof m.visualKind,
+                                  })
+                                }
+                                className={inputClass}
+                              >
+                                <option value="none">{t('visualNone')}</option>
+                                <option value="emoji">{t('visualEmoji')}</option>
+                                <option value="image">{t('visualImage')}</option>
+                              </select>
+                            </Field>
+                          </div>
                         </div>
                         {priceInvalid && <p className="text-xs text-red-600">{t('priceInvalid')}</p>}
                         {m.visualKind === 'emoji' && (
-                          <input
-                            type="text"
-                            value={m.emoji}
-                            maxLength={EMOJI_MAX}
-                            placeholder={t('emojiPlaceholder')}
-                            onChange={(e) => updateItem(m.id, { emoji: e.target.value })}
-                            className={inputClass}
-                            aria-label={t('visualEmoji')}
-                          />
+                          <Field label={t('visualEmoji')}>
+                            <input
+                              type="text"
+                              value={m.emoji}
+                              maxLength={EMOJI_MAX}
+                              placeholder={t('emojiPlaceholder')}
+                              onChange={(e) => updateItem(m.id, { emoji: e.target.value })}
+                              className={inputClass}
+                            />
+                          </Field>
                         )}
                         {m.visualKind === 'image' && (
-                          <input
-                            type="url"
-                            value={m.imageUrl}
-                            placeholder="https://"
-                            onChange={(e) => updateItem(m.id, { imageUrl: e.target.value })}
-                            className={inputClass}
-                            aria-label={t('visualImage')}
-                          />
-                        )}
-                        {m.visualKind === 'image' && (
-                          <p className="text-xs text-slate-400">{t('imageHttpsHint')}</p>
+                          <Field label={t('visualImage')} hint={t('imageHttpsHint')}>
+                            <input
+                              type="url"
+                              value={m.imageUrl}
+                              placeholder="https://"
+                              onChange={(e) => updateItem(m.id, { imageUrl: e.target.value })}
+                              className={inputClass}
+                            />
+                          </Field>
                         )}
                       </div>
                       <div className="flex shrink-0 flex-col items-center gap-1">
