@@ -91,6 +91,32 @@ describe('MobileOrderBuilder', () => {
     expect(screen.getByText('コピー')).toBeInTheDocument();
   });
 
+  it('SNS リンクを 追加・入力・▼で並び替え・×で削除 できる (@handle と同型)', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    // 既定は SNS ゼロ → 「SNS リンクを追加」ボタンから行を増やす (Field の label 内ゆえ
+    // 追加ボタンには aria-label が無く名前は label に吸われるので text で取得)。
+    fireEvent.click(screen.getByText(/SNS リンクを追加/));
+    fireEvent.click(screen.getByText(/SNS リンクを追加/));
+    const inputs = screen.getAllByPlaceholderText('https://x.com/yourshop') as HTMLInputElement[];
+    expect(inputs).toHaveLength(2);
+    fireEvent.change(inputs[0], { target: { value: 'https://a.example' } });
+    fireEvent.change(inputs[1], { target: { value: 'https://b.example' } });
+    // 1 行目を「下へ移動」(aria-label は名前として優先される) → 並びが入れ替わる。
+    fireEvent.click(screen.getAllByRole('button', { name: '下へ移動' })[0]);
+    expect(
+      (screen.getAllByPlaceholderText('https://x.com/yourshop') as HTMLInputElement[]).map(
+        (i) => i.value,
+      ),
+    ).toEqual(['https://b.example', 'https://a.example']);
+    // 1 行目 (×) を削除 → 残り 1 件。
+    fireEvent.click(screen.getAllByRole('button', { name: '削除' })[0]);
+    expect(
+      (screen.getAllByPlaceholderText('https://x.com/yourshop') as HTMLInputElement[]).map(
+        (i) => i.value,
+      ),
+    ).toEqual(['https://a.example']);
+  });
+
   it('既定 (店頭モード) では手数料の負担トグルを出さない', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.queryByText('手数料の負担')).toBeNull();

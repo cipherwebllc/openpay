@@ -103,8 +103,7 @@ function baseDraft(): MobileOrderDraft {
     shopName: '珈琲スタンド',
     mode: 'storefront',
     feePayer: 'merchant',
-    socialX: '  https://x.com/shop  ', // trim 検証用
-    socialInstagram: '',
+    socials: ['  https://x.com/shop  '], // trim 検証用
   };
 }
 
@@ -117,7 +116,7 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
       shopName: '珈琲スタンド',
       mode: 'storefront',
       feePayer: 'merchant',
-      socials: { x: 'https://x.com/shop' },
+      socials: ['https://x.com/shop'],
       menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
     });
   });

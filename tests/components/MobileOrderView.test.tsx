@@ -14,7 +14,7 @@ const config: MobileOrderConfig = {
   shopName: 'テスト珈琲店',
   mode: 'storefront',
   feePayer: 'merchant',
-  socials: { x: 'https://x.com/shop' },
+  socials: ['https://x.com/shop'],
   menu: [
     { id: 'a', name: 'ブレンド', price: '500', visual: { kind: 'emoji', value: '☕' } },
     { id: 'b', name: 'チーズケーキ', price: '650', visual: { kind: 'image', url: 'https://img/x.png' } },
@@ -51,6 +51,22 @@ describe('MobileOrderView', () => {
     expect(x?.getAttribute('rel')).toContain('nofollow');
     // テキストリンクでなくアイコン (svg) を内包する (プロフと同じ表示)。
     expect(x?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('複数 SNS を配列の順序どおりにアイコン行で描画 (@handle と同型・並び替え可)', () => {
+    const multi: MobileOrderConfig = {
+      ...config,
+      socials: ['https://instagram.com/shop', 'https://x.com/shop', 'https://youtube.com/@shop'],
+    };
+    const { container } = renderWithIntl(<MobileOrderView config={multi} />);
+    const hrefs = Array.from(container.querySelectorAll('a[href]')).map((a) =>
+      a.getAttribute('href'),
+    );
+    expect(hrefs).toEqual([
+      'https://instagram.com/shop',
+      'https://x.com/shop',
+      'https://youtube.com/@shop',
+    ]);
   });
 
   it('カート空では合計/支払いを出さず案内 (poweredBy は出る)', () => {
@@ -101,7 +117,7 @@ describe('MobileOrderView', () => {
       shopName: '悪意の店',
       mode: 'storefront',
       feePayer: 'merchant',
-      socials: { x: 'javascript:alert(1)', instagram: 'data:text/html,<script>1</script>' },
+      socials: ['javascript:alert(1)', 'data:text/html,<script>1</script>'],
       menu: [{ id: 'a', name: '罠', price: '1', visual: { kind: 'image', url: 'data:image/svg+xml,x' } }],
     };
     const { container } = renderWithIntl(<MobileOrderView config={hostile} />);

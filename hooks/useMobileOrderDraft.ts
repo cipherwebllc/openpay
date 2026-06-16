@@ -17,11 +17,11 @@ import { isJpycChainSlug, type JpycChainSlug } from '@/lib/chains';
 import {
   validateOrderConfig,
   SHOP_NAME_MAX,
+  SOCIALS_MAX,
   URL_FIELD_MAX,
   type MobileOrderConfig,
   type MobileOrderMode,
   type MenuItem,
-  type ShopSocials,
   type FeePayer,
 } from '@/lib/mobileOrder';
 import type { ProductPreset } from './useProductPresets';
@@ -35,8 +35,7 @@ export interface MobileOrderDraft {
   shopName: string;
   mode: MobileOrderMode; // 'storefront' (店頭/券売機) | 'preorder' (事前モバイルオーダー)
   feePayer: FeePayer; // 手数料の負担者 (preorder 時のみ意味を持つ)
-  socialX: string; // 公式 X URL (任意)
-  socialInstagram: string; // 公式 Instagram URL (任意)
+  socials: string[]; // SNS URL の配列 (生入力・並び替え可・https 検証は URL 生成時)
 }
 
 const STORAGE_KEY = 'openpay:mobile-order-draft:v1';
@@ -54,8 +53,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   shopName: '',
   mode: 'storefront', // 最も安全な経路 (その場払いその場受取) を既定に
   feePayer: 'merchant',
-  socialX: '',
-  socialInstagram: '',
+  socials: [],
 };
 
 // 旧 schema (menu フィールド) は無視される — メニューは presets が単一情報源になったため。
@@ -68,8 +66,13 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     shopName: clampStr(loaded.shopName, SHOP_NAME_MAX),
     mode: loaded.mode === 'preorder' ? 'preorder' : 'storefront',
     feePayer: loaded.feePayer === 'customer' ? 'customer' : 'merchant',
-    socialX: clampStr(loaded.socialX, URL_FIELD_MAX),
-    socialInstagram: clampStr(loaded.socialInstagram, URL_FIELD_MAX),
+    // SNS は入力途中の値も下書きとして保持 (https 検証は URL 生成時)。length と件数だけ clamp。
+    socials: Array.isArray(loaded.socials)
+      ? loaded.socials
+          .filter((s): s is string => typeof s === 'string')
+          .map((s) => clampStr(s, URL_FIELD_MAX))
+          .slice(0, SOCIALS_MAX)
+      : [],
   };
 }
 
@@ -110,19 +113,14 @@ export function draftToConfig(
   effectiveReceiver: Address | null,
   presets: ProductPreset[],
 ): MobileOrderConfig | null {
-  const socials: ShopSocials = {};
-  const x = draft.socialX.trim();
-  const ig = draft.socialInstagram.trim();
-  if (x) socials.x = x;
-  if (ig) socials.instagram = ig;
-
   return validateOrderConfig({
     receiver: effectiveReceiver ?? '',
     chain: draft.chain,
     shopName: draft.shopName.trim(),
     mode: draft.mode,
     feePayer: draft.feePayer,
-    socials,
+    // trim のみ。https 検証 + 件数 slice は validateOrderConfig が行う。
+    socials: draft.socials.map((s) => s.trim()),
     menu: presetsToMenu(presets),
   });
 }

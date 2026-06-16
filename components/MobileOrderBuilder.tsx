@@ -8,14 +8,15 @@
 //
 // ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P0/P2 ゲート後。
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Eye, Store, UtensilsCrossed, Wallet } from 'lucide-react';
+import { Eye, GripVertical, Store, UtensilsCrossed, Wallet } from 'lucide-react';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { StepCard } from '@/components/StepCard';
 import { LinkQrModal } from '@/components/LinkQrModal';
+import { SocialIcon } from '@/components/SocialIconLinks';
 import { useMobileOrderDraft, draftToConfig, presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
@@ -23,7 +24,13 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import { JPYC_CHAINS, type JpycChainSlug } from '@/lib/chains';
-import { buildOrderUrl, safeHttpUrl, JPYC_CHAIN_LABEL, SHOP_NAME_MAX } from '@/lib/mobileOrder';
+import {
+  buildOrderUrl,
+  safeHttpUrl,
+  JPYC_CHAIN_LABEL,
+  SHOP_NAME_MAX,
+  SOCIALS_MAX,
+} from '@/lib/mobileOrder';
 
 // QR を描く URL の上限長 (qrcode.react は長大入力で throw する)。超過時は QR を省略し
 // リンク/コピーのみ提供する (TipEmbedGenerator と同方針)。メニューが多いと URL が伸びる。
@@ -98,6 +105,40 @@ export function MobileOrderBuilder({
   const hasMenu = menuItems.length > 0;
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
+
+  // SNS の並べ替え (@handle プロフと同型: ドラッグ + ▲▼ ボタンの 2 系統)。
+  const dragIndex = useRef<number | null>(null);
+  const moveItem = <T,>(arr: T[], from: number, to: number): T[] => {
+    const next = [...arr];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    return next;
+  };
+  // ▲▼ ボタン。drag を発火しないモバイル/キーボード操作のための並べ替え手段。境界では disabled。
+  const renderMoveButtons = (index: number, length: number) => (
+    <span className="flex shrink-0 flex-col">
+      <button
+        type="button"
+        onClick={() => update({ socials: moveItem(draft.socials, index, index - 1) })}
+        disabled={index === 0}
+        aria-label={t('moveUp')}
+        title={t('moveUp')}
+        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
+      >
+        ▲
+      </button>
+      <button
+        type="button"
+        onClick={() => update({ socials: moveItem(draft.socials, index, index + 1) })}
+        disabled={index >= length - 1}
+        aria-label={t('moveDown')}
+        title={t('moveDown')}
+        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
+      >
+        ▼
+      </button>
+    </span>
+  );
 
   if (!env.enableMobileOrder) return null;
 
@@ -231,20 +272,72 @@ export function MobileOrderBuilder({
 
               <Field label={t('socialsLabel')} hint={t('socialsHint')}>
                 <div className="space-y-2">
-                  <input
-                    type="url"
-                    value={draft.socialX}
-                    placeholder="https://x.com/yourshop"
-                    onChange={(e) => update({ socialX: e.target.value })}
-                    className={inputClass}
-                  />
-                  <input
-                    type="url"
-                    value={draft.socialInstagram}
-                    placeholder="https://instagram.com/yourshop"
-                    onChange={(e) => update({ socialInstagram: e.target.value })}
-                    className={inputClass}
-                  />
+                  {draft.socials.map((s, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2"
+                      onDragOver={(e) => {
+                        if (dragIndex.current !== null) e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        const from = dragIndex.current;
+                        if (from === null) return;
+                        e.preventDefault();
+                        if (from !== i) update({ socials: moveItem(draft.socials, from, i) });
+                        dragIndex.current = null;
+                      }}
+                    >
+                      <span
+                        draggable
+                        onDragStart={() => {
+                          dragIndex.current = i;
+                        }}
+                        onDragEnd={() => {
+                          dragIndex.current = null;
+                        }}
+                        role="button"
+                        aria-label={t('dragToReorder')}
+                        title={t('dragToReorder')}
+                        className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </span>
+                      {renderMoveButtons(i, draft.socials.length)}
+                      <span className="shrink-0 text-slate-400">
+                        <SocialIcon url={s.trim()} className="h-5 w-5" />
+                      </span>
+                      <input
+                        type="url"
+                        value={s}
+                        placeholder="https://x.com/yourshop"
+                        onChange={(e) => {
+                          const next = [...draft.socials];
+                          next[i] = e.target.value;
+                          update({ socials: next });
+                        }}
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update({ socials: draft.socials.filter((_, j) => j !== i) })
+                        }
+                        className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                        aria-label={t('removeSocial')}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {draft.socials.length < SOCIALS_MAX && (
+                    <button
+                      type="button"
+                      onClick={() => update({ socials: [...draft.socials, ''] })}
+                      className="text-xs font-medium text-brand hover:underline"
+                    >
+                      ＋ {t('addSocial')}
+                    </button>
+                  )}
                 </div>
               </Field>
             </div>

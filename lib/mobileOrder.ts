@@ -32,7 +32,7 @@ export type MenuItem = {
   taxCategory?: TaxCategory;
 };
 
-export type ShopSocials = { x?: string; instagram?: string };
+export const SOCIALS_MAX = 6; // SNS リンク上限 (@handle と同数)
 
 export type MobileOrderConfig = {
   receiver: Address; // 店舗ウォレット (着金先)・全 EVM チェーン共通
@@ -40,7 +40,7 @@ export type MobileOrderConfig = {
   shopName: string;
   mode: MobileOrderMode;
   feePayer: FeePayer;
-  socials: ShopSocials;
+  socials: string[]; // SNS URL 配列 (https のみ・表示順保持・SocialIconLinks がドメイン自動判定)
   menu: MenuItem[];
 };
 
@@ -187,20 +187,10 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (o.mode !== 'storefront' && o.mode !== 'preorder') return null;
   if (o.feePayer !== 'merchant' && o.feePayer !== 'customer') return null;
 
-  // socials (任意・あれば https のみ)
-  const socials: ShopSocials = {};
-  const rawSocials =
-    o.socials && typeof o.socials === 'object'
-      ? (o.socials as Record<string, unknown>)
-      : {};
-  if (rawSocials.x != null) {
-    if (!isHttpsUrl(rawSocials.x)) return null;
-    socials.x = rawSocials.x;
-  }
-  if (rawSocials.instagram != null) {
-    if (!isHttpsUrl(rawSocials.instagram)) return null;
-    socials.instagram = rawSocials.instagram;
-  }
+  // socials (任意・https のみ・≤ SOCIALS_MAX・表示順保持)。不正 URL は黙って除外 (注文は壊さない)。
+  const socials = Array.isArray(o.socials)
+    ? o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX)
+    : [];
 
   // menu (1..MENU_MAX・各項目検証)
   if (!Array.isArray(o.menu) || o.menu.length < 1 || o.menu.length > MENU_MAX) {

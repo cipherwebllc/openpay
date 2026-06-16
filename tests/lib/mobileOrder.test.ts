@@ -12,6 +12,7 @@ import {
   MENU_MAX,
   SHOP_NAME_MAX,
   EMOJI_MAX,
+  SOCIALS_MAX,
   type MobileOrderConfig,
 } from '@/lib/mobileOrder';
 
@@ -24,7 +25,7 @@ function baseConfig(): MobileOrderConfig {
     shopName: '珈琲スタンド OpenPay',
     mode: 'preorder',
     feePayer: 'merchant',
-    socials: { x: 'https://x.com/openpay', instagram: 'https://instagram.com/openpay' },
+    socials: ['https://x.com/openpay', 'https://instagram.com/openpay'],
     menu: [
       { id: 'a1', name: 'ブレンド☕', price: '500', visual: { kind: 'emoji', value: '☕' } },
       { id: 'a2', name: 'チーズケーキ', price: '650', visual: { kind: 'image', url: 'https://i.imgur.com/x.png' } },
@@ -47,7 +48,7 @@ describe('mobileOrder: encode/decode round-trip', () => {
       shopName: '店',
       mode: 'storefront',
       feePayer: 'customer',
-      socials: {},
+      socials: [],
       menu: [{ id: 'x', name: 'A', price: '100' }],
     };
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
@@ -142,9 +143,32 @@ describe('mobileOrder: decode は untrusted 入力を全検証 (不正は null)'
     ).toBeNull();
   });
 
-  it('SNS が https でない → null', () => {
-    expect(corrupt((c) => ((c.socials as { x: string }).x = 'http://x.com'))).toBeNull();
-    expect(corrupt((c) => ((c.socials as { x: string }).x = 'ftp://x'))).toBeNull();
+  // socials は配列。不正 URL は **黙って除外** (注文自体は壊さない・@handle と同型)。
+  it('SNS の非 https / 非文字列は除外し、有効な https のみ順序保持 (config は null にしない)', () => {
+    const decoded = corrupt((c) => {
+      c.socials = [
+        'http://x.com', // http は不可
+        'https://ok.example/a', // 有効
+        'javascript:alert(1)', // XSS スキーム
+        42, // 非文字列
+        'https://ok.example/b', // 有効
+      ];
+    });
+    expect(decoded).not.toBeNull();
+    expect(decoded?.socials).toEqual(['https://ok.example/a', 'https://ok.example/b']);
+  });
+
+  it('SNS が配列でなければ空配列 (null にしない)', () => {
+    expect(corrupt((c) => (c.socials = { x: 'https://x.com' }))?.socials).toEqual([]);
+    expect(corrupt((c) => (c.socials = 'https://x.com'))?.socials).toEqual([]);
+    expect(corrupt((c) => delete c.socials)?.socials).toEqual([]);
+  });
+
+  it('SNS は SOCIALS_MAX 件で切り詰め', () => {
+    const decoded = corrupt((c) => {
+      c.socials = Array.from({ length: SOCIALS_MAX + 3 }, (_, i) => `https://s${i}.example`);
+    });
+    expect(decoded?.socials).toHaveLength(SOCIALS_MAX);
   });
 });
 
@@ -212,7 +236,7 @@ describe('mobileOrder: メニュー項目の税 (taxRate/taxCategory) — preset
       shopName: '店',
       mode: 'storefront',
       feePayer: 'merchant',
-      socials: {},
+      socials: [],
       menu: [{ id: 'a', name: 'A', price: '500', taxRate: 10, taxCategory: 'taxable_10' }],
     };
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
@@ -227,7 +251,7 @@ describe('mobileOrder: メニュー項目の税 (taxRate/taxCategory) — preset
           shopName: '店',
           mode: 'storefront',
           feePayer: 'merchant',
-          socials: {},
+          socials: [],
           menu,
         }),
         'utf8',

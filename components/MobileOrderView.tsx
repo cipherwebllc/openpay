@@ -30,10 +30,10 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
 
   // 二重防御: config は https のみへ検証済みだが、注文トークンは attacker-controllable な
   // ので href/src へ描画する直前にも scheme を再確認 (javascript:/data: を排除)。
-  // プロフ(@handle) と同じ SocialIconLinks でアイコン行として描画 (ドメイン自動判定)。
-  const socialUrls = [safeHttpUrl(config.socials.x), safeHttpUrl(config.socials.instagram)].filter(
-    (u): u is string => Boolean(u),
-  );
+  // プロフ(@handle) と同じ SocialIconLinks でアイコン行として描画 (表示順保持・ドメイン自動判定)。
+  const socialUrls = config.socials
+    .map((u) => safeHttpUrl(u))
+    .filter((u): u is string => Boolean(u));
 
   const decimals = deploymentForSlug('jpyc', config.chain).decimals;
   const setItemQty = (id: string, n: number) =>
