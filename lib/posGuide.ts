@@ -193,14 +193,14 @@ const ja: GuideContent = {
   costColCard: '一般的なカード決済',
   costColOpenpay: '無料POS × OpenPay',
   costRows: [
-    { label: '決済手数料', card: '数％程度（例）', openpay: 'ご利用料 約1%（最低 約2 JPYC）。着金から自動で差し引き（最新は料金ページ参照）' },
+    { label: '決済手数料', card: '約3%程度（例）', openpay: 'ご利用料 約1%（最低 約2 JPYC）。着金から自動で差し引き（最新は利用規約参照）' },
     { label: '入金', card: '数日後・締めあり', openpay: '即時・直接あなたのウォレットへ' },
     { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ（誰も預からない）' },
   ],
   costNote:
-    '※手数料の最新・正確な条件は OpenPay の料金／規約ページをご確認ください。比較は一般的な例であり、契約条件により異なります。',
+    '※手数料の最新・正確な条件は OpenPay の利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例であり、契約条件により異なります。',
   feeNote:
-    '着金額について：OpenPay のガスレス決済では、決済時に OpenPay のご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれ、残りがあなたのウォレットに着金します（例：¥1,200 の売上なら約 ¥1,188 が着金）。POS レジに記録されるのは売上額（お客様の支払額）なので、ウォレットの着金額はそれより少なくなります。正確な料率は料金ページをご確認ください。',
+    '着金額について：OpenPay のガスレス決済では、決済時に OpenPay のご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれ、残りがあなたのウォレットに着金します（例：¥1,200 の売上なら約 ¥1,188 が着金）。POS レジに記録されるのは売上額（お客様の支払額）なので、ウォレットの着金額はそれより少なくなります。※アルファ期間中は当面 約 2 JPYC、2026 年 7 月のご利用分から決済額の 1%（最低 2 JPYC）です。正確な料率は利用規約・特定商取引法に基づく表記をご確認ください。',
   costImage: { file: 'cost-compare.svg', alt: 'カード決済と無料POS×OpenPayのコスト比較イメージ' },
 
   faqTitle: 'よくある質問',
@@ -341,14 +341,14 @@ const en: GuideContent = {
   costColCard: 'Typical card payment',
   costColOpenpay: 'Free POS × OpenPay',
   costRows: [
-    { label: 'Payment fee', card: 'a few percent (example)', openpay: 'Usage fee ~1% (min ~2 JPYC), auto-deducted from the amount received (see pricing page)' },
+    { label: 'Payment fee', card: 'about 3% (example)', openpay: 'Usage fee ~1% (min ~2 JPYC), auto-deducted from the amount received (see Terms)' },
     { label: 'Settlement', card: 'days later, with cutoffs', openpay: 'instant, directly to your wallet' },
     { label: 'Custody', card: 'the processor holds funds first', openpay: 'non-custodial (no one holds funds)' },
   ],
   costNote:
-    '* For the latest, exact fee terms, see OpenPay’s pricing/terms page. The comparison is a general example and varies by contract.',
+    '* For the latest, exact fee terms, see OpenPay’s Terms / legal notice. The comparison is a general example and varies by contract.',
   feeNote:
-    'About the amount received: with OpenPay’s gasless payments, OpenPay’s usage fee (about 1% of the amount, minimum about 2 JPYC) is automatically deducted at settlement, and the remainder arrives in your wallet (e.g. a ¥1,200 sale → about ¥1,188 received). Your POS records the sale amount (what the customer pays), so your wallet receipt is slightly less. See the pricing page for the exact rate.',
+    'About the amount received: with OpenPay’s gasless payments, OpenPay’s usage fee (about 1% of the amount, minimum about 2 JPYC) is automatically deducted at settlement, and the remainder arrives in your wallet (e.g. a ¥1,200 sale → about ¥1,188 received). Your POS records the sale amount (what the customer pays), so your wallet receipt is slightly less. During the alpha period the fee is about 2 JPYC per payment for now; from the July 2026 usage period it becomes 1% of the amount (min 2 JPYC). See the Terms / legal notice for the exact rate.',
   costImage: { file: 'cost-compare.svg', alt: 'Cost comparison: card payment vs free POS × OpenPay' },
 
   faqTitle: 'FAQ',
