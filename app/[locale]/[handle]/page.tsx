@@ -141,7 +141,20 @@ export default async function HandlePage({
 
   return (
     <main className="mx-auto w-full max-w-md px-3 py-4">
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        {/* 店舗ページは入口として開かれるので OpenPay への戻り導線を上部に出す
+            (link-in-bio はフッターのアイコンが主導線なので左は空) */}
+        {storefront ? (
+          <Link
+            href={`/${locale}`}
+            prefetch={false}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700"
+          >
+            ← OpenPay
+          </Link>
+        ) : (
+          <span />
+        )}
         <LocaleSwitcher />
       </div>
       {storefront ? (

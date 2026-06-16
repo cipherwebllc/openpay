@@ -54,6 +54,11 @@ export type StorefrontParts = {
   chain: JpycChainSlug;
   mode: MobileOrderMode;
   feePayer: FeePayer;
+  // 店舗のブランディング (ビルダー由来)。公開ページはこれを優先し、無ければ @handle 側の
+  // 名前/アバター/SNS にフォールバックする (handleStorefrontConfig)。受取先は @handle が権威。
+  shopName?: string;
+  avatar?: string; // https のみ
+  socials?: string[]; // https のみ・表示順
   menu: MenuItem[];
 };
 
@@ -211,7 +216,15 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
     if (!item) return null;
     menu.push(item);
   }
-  return { chain: o.chain, mode: o.mode, feePayer: o.feePayer, menu };
+  const parts: StorefrontParts = { chain: o.chain, mode: o.mode, feePayer: o.feePayer, menu };
+  // 任意のブランディング (不正は黙って除外・注文は壊さない)。avatar/socials は https のみ。
+  if (isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) parts.shopName = o.shopName.trim();
+  if (isHttpsUrl(o.avatar)) parts.avatar = o.avatar;
+  if (Array.isArray(o.socials)) {
+    const socials = o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX);
+    if (socials.length > 0) parts.socials = socials;
+  }
+  return parts;
 }
 
 export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {

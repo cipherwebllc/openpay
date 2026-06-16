@@ -455,6 +455,22 @@ describe('handleStorefrontConfig', () => {
     const badTo: HandleRecord = { ...base, config: { ...base.config, to: 'not-an-address' } };
     expect(handleStorefrontConfig(badTo, 'shop')).toBeNull();
   });
+
+  it('storefront のブランディング (店名/アイコン/SNS) を @handle より優先 (ビルダー由来)', () => {
+    const withBrand: HandleRecord = {
+      ...base,
+      storefront: {
+        ...base.storefront!,
+        shopName: 'ビルダー店名',
+        avatar: 'https://img.example/builder.png',
+        socials: ['https://x.com/builder'],
+      },
+    };
+    const config = handleStorefrontConfig(withBrand, 'shop');
+    expect(config?.shopName).toBe('ビルダー店名'); // config.name ('テスト珈琲店') ではなく storefront 優先
+    expect(config?.avatar).toBe('https://img.example/builder.png'); // profile.avatar ではなく
+    expect(config?.socials).toEqual(['https://x.com/builder']); // profile.socials ではなく
+  });
 });
 
 describe('MAX_HANDLES_PER_WALLET', () => {

@@ -242,6 +242,23 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     expect(validateStorefrontParts(null)).toBeNull();
     expect(validateStorefrontParts('x')).toBeNull();
   });
+  it('店舗ブランディング (shopName/avatar/socials) を保持・不正は除外', () => {
+    const r = validateStorefrontParts({
+      ...good,
+      shopName: 'テスト珈琲店',
+      avatar: 'https://img.example/icon.png',
+      socials: ['https://x.com/shop', 'http://insecure', 'javascript:1'],
+    });
+    expect(r?.shopName).toBe('テスト珈琲店');
+    expect(r?.avatar).toBe('https://img.example/icon.png');
+    expect(r?.socials).toEqual(['https://x.com/shop']); // 非 https は除外
+  });
+  it('不正な avatar / 全て非 https の socials は載せない (任意・null にしない)', () => {
+    const r = validateStorefrontParts({ ...good, avatar: 'http://x/a.png', socials: ['http://x'] });
+    expect(r).not.toBeNull();
+    expect(r?.avatar).toBeUndefined();
+    expect(r?.socials).toBeUndefined();
+  });
 });
 
 describe('mobileOrder: buildOrderUrl', () => {

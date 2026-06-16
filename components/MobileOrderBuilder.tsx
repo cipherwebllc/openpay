@@ -112,9 +112,19 @@ export function MobileOrderBuilder({
   const avatarPreview = safeHttpUrl(draft.avatar.trim());
   const previewInitial = ([...draft.shopName.trim()][0] ?? '').toUpperCase();
 
-  // @handle 公開用の店舗固有部分 (identity は handle 由来)。メニュー未充足なら null (公開不可)。
+  // @handle 公開用の店舗固有部分。受取先は @handle が権威だが、店名/アイコン/SNS は
+  // ビルダーの設定をそのまま公開ページへ載せる (https 検証は validateStorefrontParts が行う)。
+  // メニュー未充足なら null (公開不可)。
   const storefrontParts = hasMenu
-    ? { chain: draft.chain, mode: draft.mode, feePayer: draft.feePayer, menu: menuItems }
+    ? {
+        chain: draft.chain,
+        mode: draft.mode,
+        feePayer: draft.feePayer,
+        shopName: draft.shopName.trim() || undefined,
+        avatar: draft.avatar.trim() || undefined,
+        socials: draft.socials.map((s) => s.trim()).filter(Boolean),
+        menu: menuItems,
+      }
     : null;
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));

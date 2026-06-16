@@ -181,14 +181,16 @@ export function handleStorefrontConfig(
 ): MobileOrderConfig | null {
   const sf = record.storefront;
   if (!sf) return null;
+  // ブランディングは storefront (ビルダー由来) を優先し、無ければ @handle 側へフォールバック。
+  // 受取先 (receiver) は @handle が権威 (config.to)。
   return validateOrderConfig({
     receiver: record.config.to,
     chain: sf.chain,
-    shopName: record.config.name?.trim() || `@${handle}`,
-    avatar: record.profile?.avatar,
+    shopName: sf.shopName || record.config.name?.trim() || `@${handle}`,
+    avatar: sf.avatar ?? record.profile?.avatar,
     mode: sf.mode,
     feePayer: sf.feePayer,
-    socials: record.profile?.socials ?? [],
+    socials: sf.socials ?? record.profile?.socials ?? [],
     menu: sf.menu,
   });
 }
