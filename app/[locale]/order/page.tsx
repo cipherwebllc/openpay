@@ -1,6 +1,7 @@
 // 顧客向け「注文ページ」(/order?s=<base64url>)。ビルダー (MobileOrderBuilder) が発行した
-// 設定トークンを decode して店舗名/SNS/メニューを **読み取り専用** で描画する (P1.2)。
-// 注文確定・お支払いは P2 (money-path/開示ゲート) で配線するため、本ページは閲覧 + 「準備中」まで。
+// 設定トークンを decode して店舗名/チェーン/SNS/メニューを描画し、カート (数量+合計) から
+// 既存 /checkout (手数料0・現開示と整合) へ引き継ぐ (P2a・MobileOrderView)。モバイルオーダー
+// 固有の % 手数料は P0 (開示更新) 後の別増分で、ここには無い。
 //
 // flag `env.enableMobileOrder` OFF (本番既定) では notFound = ページ自体が存在しない (inert)。
 

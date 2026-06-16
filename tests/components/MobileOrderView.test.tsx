@@ -2,7 +2,7 @@
 // 店舗名 / メニュー (名前・価格・絵文字・画像) / SNS / 「準備中」表示が出ること。
 
 import { describe, it, expect } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { MobileOrderView } from '@/components/MobileOrderView';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
@@ -52,12 +52,26 @@ describe('MobileOrderView', () => {
     expect(x?.querySelector('svg')).not.toBeNull();
   });
 
-  it('注文・支払いは「準備中」を明示 (P2 未配線) + OpenPay 受取の表示', () => {
+  it('カート空では合計/支払いを出さず案内 (poweredBy は出る)', () => {
     renderWithIntl(<MobileOrderView config={config} />);
-    expect(
-      screen.getByText('注文・お支払い機能は現在準備中です。店頭でご注文ください。'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('商品を選ぶと合計が表示されます')).toBeInTheDocument();
+    expect(screen.queryByText('支払いへ進む')).toBeNull();
     expect(screen.getByText('このお店は OpenPay で受け取っています')).toBeInTheDocument();
+  });
+
+  it('数量を選ぶと合計 + /checkout への支払いリンク (手数料0・既存決済流用・chain伝播)', () => {
+    // chain は kaia (JPYC 既定 polygon でない) で URL に明示されることを確認。
+    renderWithIntl(<MobileOrderView config={{ ...config, chain: 'kaia' }} />);
+    // ブレンド(500) + 水(100) を各 +1 → 合計 600 JPYC
+    const inc = screen.getAllByRole('button', { name: '数量を増やす' });
+    fireEvent.click(inc[0]); // ブレンド
+    fireEvent.click(inc[2]); // 水
+    expect(screen.getByText('600 JPYC')).toBeInTheDocument();
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const url = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
+    expect(url.pathname).toBe('/checkout');
+    expect(url.searchParams.get('to')?.toLowerCase()).toBe(config.receiver.toLowerCase());
+    expect(url.searchParams.get('chain')).toBe('kaia');
   });
 
   // 二重防御: 通常 config は validateOrderConfig で https のみに検証済みだが、検証を
