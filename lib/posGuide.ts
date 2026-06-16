@@ -48,7 +48,6 @@ export type GuideContent = {
   readonly setupImage: GuideImage;
 
   readonly flowTitle: string;
-  readonly flowNote: string;
   readonly flowSteps: readonly GuideStep[];
   readonly flowImage: GuideImage;
   readonly successImage: GuideImage;
@@ -139,7 +138,6 @@ const ja: GuideContent = {
   setupImage: { file: 'pos-add-method.svg', alt: 'POSレジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
 
   flowTitle: '毎回の会計フロー（4ステップ・慣れれば約10秒）',
-  flowNote: '',
   flowSteps: [
     {
       n: 1,
@@ -286,7 +284,6 @@ const en: GuideContent = {
   setupImage: { file: 'pos-add-method.svg', alt: 'A POS settings mockup adding an “OpenPay” payment method' },
 
   flowTitle: 'Every checkout (4 steps, ~10 seconds once used to it)',
-  flowNote: '',
   flowSteps: [
     {
       n: 1,

@@ -1,17 +1,16 @@
 // /guide/pos: 「無料POS × OpenPay 手動2台持ち」店舗向け運用ガイド。
 //
 // content SOT は lib/posGuide.ts (ja/en 同梱)。長文を messages/*.json に置かない方針は
-// lib/explore.ts / lib/news.ts と同じ。図版は public/guide/*.svg を後日配置
-// (docs/guides/pos-combo-image-prompts.md の Codex 発注で生成)。未配置のあいだは
-// プレースホルダ枠を描画して 404 を出さない。
+// lib/explore.ts / lib/news.ts と同じ。図版は public/guide/*.svg を素の <img> で描画する。
 //
 // SEO 価値がある集客コンテンツなので noindex は設定しない (explore と同方針)。
 
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { guideContentFor, type GuideImage } from '@/lib/posGuide';
+import { guideContentFor, type GuideImage, type GuideStep } from '@/lib/posGuide';
 
 export async function generateMetadata({
   params,
@@ -38,6 +37,72 @@ const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
   'cost-compare.svg': { w: 900, h: 360 },
 };
 
+// 標準セクション (mt-10 + 見出し)。カード型の できること/cannot・CTA は独自スタイルなので使わない。
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mt-10">
+      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+// 箇条書き (できること=✓ / その他=•・マーカー色のみ可変)。
+function BulletList({
+  items,
+  marker,
+  markerClassName,
+}: {
+  items: readonly string[];
+  marker: string;
+  markerClassName: string;
+}) {
+  return (
+    <ul className="mt-3 space-y-2">
+      {items.map((item) => (
+        <li
+          key={item}
+          className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
+        >
+          <span aria-hidden className={`mt-0.5 ${markerClassName}`}>
+            {marker}
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// 番号付きステップ (準備=淡色バッジ / 会計フロー=濃色バッジ・バッジ配色のみ可変)。
+function StepList({
+  steps,
+  badgeClassName,
+}: {
+  steps: readonly GuideStep[];
+  badgeClassName: string;
+}) {
+  return (
+    <ol className="mt-4 space-y-4">
+      {steps.map((step) => (
+        <li key={step.n} className="flex items-start gap-3">
+          <span
+            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${badgeClassName}`}
+          >
+            {step.n}
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-slate-900">{step.title}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700">
+              {step.body}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 // 静的 SVG 図版を描画 (最適化不要なので素の <img>・既存 HandleProfile 等と同方針)。
 function GuideFigure({
   image,
@@ -48,7 +113,7 @@ function GuideFigure({
   className?: string;
   caption?: string;
 }) {
-  const dims = FIGURE_DIMS[image.file] ?? { w: 1200, h: 720 };
+  const dims = FIGURE_DIMS[image.file] ?? { w: 1200, h: 675 };
   return (
     <figure className={className ?? 'my-6'}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -110,113 +175,57 @@ export default async function GuidePosPage({
             <h2 className="text-base font-semibold text-emerald-900">
               {c.canDoTitle}
             </h2>
-            <ul className="mt-3 space-y-2">
-              {c.canDo.map((item) => (
-                <li
-                  key={item}
-                  className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-                >
-                  <span aria-hidden className="mt-0.5 text-emerald-600">
-                    ✓
-                  </span>
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+            <BulletList
+              items={c.canDo}
+              marker="✓"
+              markerClassName="text-emerald-600"
+            />
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">
               {c.cannotTitle}
             </h2>
-            <ul className="mt-3 space-y-2">
-              {c.cannot.map((item) => (
-                <li
-                  key={item}
-                  className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-                >
-                  <span aria-hidden className="mt-0.5 text-slate-400">
-                    •
-                  </span>
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+            <BulletList
+              items={c.cannot}
+              marker="•"
+              markerClassName="text-slate-400"
+            />
           </section>
         </div>
 
         {/* 必要なもの */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">{c.needTitle}</h2>
-          <ul className="mt-3 space-y-2">
-            {c.need.map((item) => (
-              <li
-                key={item}
-                className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-              >
-                <span aria-hidden className="mt-0.5 text-emerald-600">
-                  •
-                </span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <Section title={c.needTitle}>
+          <BulletList
+            items={c.need}
+            marker="•"
+            markerClassName="text-emerald-600"
+          />
+        </Section>
 
         {/* 仕組み */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">
-            {c.overviewTitle}
-          </h2>
+        <Section title={c.overviewTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.overviewBody}
           </p>
           <GuideFigure image={c.overviewImage} />
-        </section>
+        </Section>
 
         {/* STEP 0 準備 */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">{c.setupTitle}</h2>
-          <ol className="mt-4 space-y-4">
-            {c.setupSteps.map((step) => (
-              <li key={step.n} className="flex items-start gap-3">
-                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">
-                  {step.n}
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {step.title}
-                  </p>
-                  <p className="mt-1 text-sm leading-relaxed text-slate-700">
-                    {step.body}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
+        <Section title={c.setupTitle}>
+          <StepList
+            steps={c.setupSteps}
+            badgeClassName="bg-emerald-100 text-emerald-700"
+          />
           <GuideFigure image={c.setupImage} />
-        </section>
+        </Section>
 
         {/* 毎回の会計フロー */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">{c.flowTitle}</h2>
-          <ol className="mt-4 space-y-4">
-            {c.flowSteps.map((step) => (
-              <li key={step.n} className="flex items-start gap-3">
-                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">
-                  {step.n}
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {step.title}
-                  </p>
-                  <p className="mt-1 text-sm leading-relaxed text-slate-700">
-                    {step.body}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
+        <Section title={c.flowTitle}>
+          <StepList
+            steps={c.flowSteps}
+            badgeClassName="bg-emerald-600 text-white"
+          />
           <GuideFigure image={c.flowImage} />
           <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
             {c.safetyNote}
@@ -226,35 +235,23 @@ export default async function GuidePosPage({
             caption={c.successCaption}
             className="mx-auto mt-6 max-w-[260px]"
           />
-        </section>
+        </Section>
 
         {/* 閉店後の突合 */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">
-            {c.reconcileTitle}
-          </h2>
+        <Section title={c.reconcileTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.reconcileBody}
           </p>
-          <ul className="mt-3 space-y-2">
-            {c.reconcileBullets.map((item) => (
-              <li
-                key={item}
-                className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-              >
-                <span aria-hidden className="mt-0.5 text-emerald-600">
-                  •
-                </span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+          <BulletList
+            items={c.reconcileBullets}
+            marker="•"
+            markerClassName="text-emerald-600"
+          />
           <GuideFigure image={c.reconcileImage} />
-        </section>
+        </Section>
 
         {/* おすすめ無料POS (アフィリエイト枠) */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">{c.posTitle}</h2>
+        <Section title={c.posTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.posBody}
           </p>
@@ -275,11 +272,10 @@ export default async function GuidePosPage({
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.posCaveat}
           </p>
-        </section>
+        </Section>
 
         {/* コスト比較 */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">{c.costTitle}</h2>
+        <Section title={c.costTitle}>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -323,11 +319,10 @@ export default async function GuidePosPage({
             {c.costNote}
           </p>
           <GuideFigure image={c.costImage} />
-        </section>
+        </Section>
 
         {/* FAQ */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">{c.faqTitle}</h2>
+        <Section title={c.faqTitle}>
           <dl className="mt-4 space-y-5">
             {c.faqs.map((f) => (
               <div key={f.q}>
@@ -338,7 +333,7 @@ export default async function GuidePosPage({
               </div>
             ))}
           </dl>
-        </section>
+        </Section>
 
         {/* CTA */}
         <section className="mt-12 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
