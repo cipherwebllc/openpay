@@ -28,6 +28,7 @@ const EMPTY_DRAFT = {
   unitPrice: '',
   token: 'jpyc' as TokenSymbol,
   taxCategory: 'taxable_10' as TaxCategory,
+  image: '',
 };
 
 export function ProductPresetManager({
@@ -53,6 +54,7 @@ export function ProductPresetManager({
       taxCategory: draft.taxCategory,
       memo: null,
       enabled: true,
+      image: draft.image.trim() || undefined,
     });
     setDraft(EMPTY_DRAFT);
   }
@@ -120,6 +122,18 @@ export function ProductPresetManager({
                 />
                 {t('enabledLabel')}
               </label>
+              {p.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+              )}
+              <input
+                type="url"
+                value={p.image ?? ''}
+                aria-label={t('imageLabel')}
+                placeholder={t('imagePlaceholder')}
+                onChange={(e) => updatePreset(p.id, { image: e.target.value.trim() || undefined })}
+                className="min-w-0 flex-1 basis-40 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+              />
               <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"
@@ -215,6 +229,15 @@ export function ProductPresetManager({
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label={t('imageLabel')}>
+            <input
+              type="url"
+              value={draft.image}
+              onChange={(e) => setDraft((d) => ({ ...d, image: e.target.value }))}
+              placeholder={t('imagePlaceholder')}
+              className="w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+            />
           </Field>
           <button
             type="button"

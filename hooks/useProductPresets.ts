@@ -26,6 +26,8 @@ export type ProductPreset = {
   taxRate: number | null;
   taxCategory: TaxCategory | null;
   memo: string | null;
+  /** 商品画像 URL (https のみ・任意)。レジ一覧サムネ + モバイルオーダーのメニュー画像で共有。 */
+  image?: string;
   /** 表示順 (= 配列 index をミラー)。 */
   sortOrder: number;
   enabled: boolean;
@@ -72,6 +74,16 @@ function sanitizeTaxRate(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
+// 商品画像 URL: https のみ許可 (描画は <img src>・XSS/データ流出回避)・512 字上限。不可は undefined。
+export const PRESET_IMAGE_MAX = 512;
+function sanitizeImage(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim();
+  return t.length > 0 && t.length <= PRESET_IMAGE_MAX && /^https:\/\/\S+$/i.test(t)
+    ? t
+    : undefined;
+}
+
 function sanitizePreset(raw: unknown, index: number): ProductPreset | null {
   if (raw === null || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
@@ -87,6 +99,7 @@ function sanitizePreset(raw: unknown, index: number): ProductPreset | null {
     taxRate: sanitizeTaxRate(o.taxRate),
     taxCategory: isTaxCategory(o.taxCategory) ? o.taxCategory : null,
     memo: typeof o.memo === 'string' ? clampStr(o.memo, PRESET_MEMO_MAX) || null : null,
+    image: sanitizeImage(o.image),
     sortOrder: index,
     enabled: o.enabled !== false, // 既定 true
   };
@@ -143,6 +156,7 @@ export function useProductPresets() {
           name: clampStr(input.name, PRESET_NAME_MAX),
           unitPrice: sanitizePrice(input.unitPrice),
           memo: input.memo ? clampStr(input.memo, PRESET_MEMO_MAX) || null : null,
+          image: sanitizeImage(input.image),
           id: randomId(),
           sortOrder: s.presets.length,
         };

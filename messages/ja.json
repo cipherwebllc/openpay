@@ -1582,6 +1582,8 @@
     "tokenLabel": "通貨",
     "taxLabel": "税区分",
     "enabledLabel": "表示",
+    "imageLabel": "画像URL(任意)",
+    "imagePlaceholder": "https://",
     "moveUp": "上へ",
     "moveDown": "下へ",
     "remove": "削除",

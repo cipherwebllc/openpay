@@ -50,6 +50,42 @@ describe('useProductPresets', () => {
     expect(result.current.presets).toHaveLength(3);
   });
 
+  it('image は https のみ採用・非 https は drop (addPreset + 再 load sanitize)', () => {
+    const { result, unmount } = renderHook(() => useProductPresets());
+    act(() => {
+      result.current.addPreset({
+        name: '画像あり',
+        unitPrice: '500',
+        token: 'jpyc',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        memo: null,
+        enabled: true,
+        image: 'https://img.example/a.png',
+      });
+      result.current.addPreset({
+        name: '不正画像',
+        unitPrice: '500',
+        token: 'jpyc',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        memo: null,
+        enabled: true,
+        image: 'javascript:alert(1)',
+      });
+    });
+    expect(result.current.presets.find((p) => p.name === '画像あり')?.image).toBe(
+      'https://img.example/a.png',
+    );
+    expect(result.current.presets.find((p) => p.name === '不正画像')?.image).toBeUndefined();
+    unmount();
+    // 再 load 時の sanitize でも https のみ残る。
+    const second = renderHook(() => useProductPresets());
+    expect(second.result.current.presets.find((p) => p.name === '画像あり')?.image).toBe(
+      'https://img.example/a.png',
+    );
+  });
+
   it('全削除後の再マウントで seed は復活しない (削除を尊重)', () => {
     const first = renderHook(() => useProductPresets());
     act(() => {

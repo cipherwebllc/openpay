@@ -1582,6 +1582,8 @@
     "tokenLabel": "Token",
     "taxLabel": "Tax",
     "enabledLabel": "Show",
+    "imageLabel": "Image URL (optional)",
+    "imagePlaceholder": "https://",
     "moveUp": "Move up",
     "moveDown": "Move down",
     "remove": "Delete",
