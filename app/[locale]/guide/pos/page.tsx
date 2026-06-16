@@ -39,7 +39,15 @@ const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
 };
 
 // 静的 SVG 図版を描画 (最適化不要なので素の <img>・既存 HandleProfile 等と同方針)。
-function GuideFigure({ image, className }: { image: GuideImage; className?: string }) {
+function GuideFigure({
+  image,
+  className,
+  caption,
+}: {
+  image: GuideImage;
+  className?: string;
+  caption?: string;
+}) {
   const dims = FIGURE_DIMS[image.file] ?? { w: 1200, h: 720 };
   return (
     <figure className={className ?? 'my-6'}>
@@ -52,6 +60,11 @@ function GuideFigure({ image, className }: { image: GuideImage; className?: stri
         loading="lazy"
         className="h-auto w-full rounded-2xl border border-slate-200 bg-white"
       />
+      {caption ? (
+        <figcaption className="mt-2 text-center text-xs leading-relaxed text-slate-500">
+          {caption}
+        </figcaption>
+      ) : null}
     </figure>
   );
 }
@@ -210,7 +223,8 @@ export default async function GuidePosPage({
           </p>
           <GuideFigure
             image={c.successImage}
-            className="mx-auto mt-6 max-w-[230px]"
+            caption={c.successCaption}
+            className="mx-auto mt-6 max-w-[260px]"
           />
         </section>
 

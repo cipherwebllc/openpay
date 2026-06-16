@@ -53,6 +53,7 @@ export type GuideContent = {
   readonly flowSteps: readonly GuideStep[];
   readonly flowImage: GuideImage;
   readonly successImage: GuideImage;
+  readonly successCaption: string;
   readonly safetyNote: string;
 
   readonly reconcileTitle: string;
@@ -159,14 +160,16 @@ const ja: GuideContent = {
     },
     {
       n: 4,
-      title: '「支払い完了」を確認してからレジを締める',
-      body: 'OpenPay画面に「支払い完了 / 着金しました」が出たことを必ず確認してから、商品をお渡し・レジを締めます。',
+      title: '着金を確認してからレジを締める',
+      body: 'QR画面に「着金を確認しました ✓」が出たら、商品をお渡し・レジを締めます。これは残高の増加を検知する目安表示なので、混雑時など確実を期すときは、お客様の完了画面や取引履歴／ブロックチェーン Explorer でもご確認ください。',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: '会計→QR表示→スキャン→完了確認 の4ステップ' },
-  successImage: { file: 'payment-success.svg', alt: 'スマホに「支払い完了」と緑のチェックが表示された画面' },
+  successImage: { file: 'payment-success.svg', alt: 'お客様のスマホに表示される支払い完了画面' },
+  successCaption:
+    '※これはお客様のスマホに表示される完了画面の例です。店舗側はQR画面に「着金を確認しました ✓」が表示されます。',
   safetyNote:
-    '重要：完了表示の前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
+    '重要：着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
 
   reconcileTitle: '閉店後 ― 売上の付け合わせ',
   reconcileBody:
@@ -305,14 +308,16 @@ const en: GuideContent = {
     },
     {
       n: 4,
-      title: 'Confirm “Payment complete”, then close',
-      body: 'Make sure “Payment complete / received” appears on the OpenPay screen before handing over goods and closing the sale.',
+      title: 'Confirm the payment, then close',
+      body: 'When “Payment received ✓” appears on the QR screen, hand over the goods and close the sale. This is an approximate hint (it detects a balance increase), so when you need certainty (e.g. during a rush), also confirm via the customer’s completion screen or your transaction history / a blockchain explorer.',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: 'Four steps: ring up → show QR → scan → confirm' },
-  successImage: { file: 'payment-success.svg', alt: 'A phone screen showing “Payment complete” with a green check' },
+  successImage: { file: 'payment-success.svg', alt: 'The payment-complete screen shown on the customer’s phone' },
+  successCaption:
+    '* This is an example of the completion screen on the customer’s phone. On the store side, the QR screen shows “Payment received ✓”.',
   safetyNote:
-    'Important: do not hand over goods before the completion screen. Conversely, a completed payment cannot be reversed (it has settled directly to your wallet).',
+    'Important: do not hand over goods before confirming receipt. Conversely, a completed payment cannot be reversed (it has settled directly to your wallet).',
 
   reconcileTitle: 'After closing — reconciling sales',
   reconcileBody:
