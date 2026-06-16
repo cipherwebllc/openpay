@@ -122,18 +122,6 @@ export function ProductPresetManager({
                 />
                 {t('enabledLabel')}
               </label>
-              {p.image && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
-              )}
-              <input
-                type="url"
-                value={p.image ?? ''}
-                aria-label={t('imageLabel')}
-                placeholder={t('imagePlaceholder')}
-                onChange={(e) => updatePreset(p.id, { image: e.target.value.trim() || undefined })}
-                className="min-w-0 flex-1 basis-40 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
-              />
               <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"
@@ -165,6 +153,21 @@ export function ProductPresetManager({
                 >
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
+              </div>
+              {/* 画像は専用の全幅行へ (商品名欄を潰さないため)。 */}
+              <div className="flex w-full items-center gap-2">
+                {p.image && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                )}
+                <input
+                  type="url"
+                  value={p.image ?? ''}
+                  aria-label={t('imageLabel')}
+                  placeholder={t('imagePlaceholder')}
+                  onChange={(e) => updatePreset(p.id, { image: e.target.value.trim() || undefined })}
+                  className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                />
               </div>
             </li>
           ))}
