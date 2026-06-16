@@ -42,11 +42,14 @@ describe('MobileOrderView', () => {
     expect(img).toHaveAttribute('src', 'https://img/x.png');
   });
 
-  it('SNS リンク (X) を target=_blank で描画', () => {
-    renderWithIntl(<MobileOrderView config={config} />);
-    const x = screen.getByRole('link', { name: 'X' });
-    expect(x).toHaveAttribute('href', 'https://x.com/shop');
+  it('SNS をアイコンのリンク行 (target=_blank・nofollow・svg アイコン) で描画', () => {
+    const { container } = renderWithIntl(<MobileOrderView config={config} />);
+    const x = container.querySelector('a[href="https://x.com/shop"]');
+    expect(x).not.toBeNull();
     expect(x).toHaveAttribute('target', '_blank');
+    expect(x?.getAttribute('rel')).toContain('nofollow');
+    // テキストリンクでなくアイコン (svg) を内包する (プロフと同じ表示)。
+    expect(x?.querySelector('svg')).not.toBeNull();
   });
 
   it('注文・支払いは「準備中」を明示 (P2 未配線) + OpenPay 受取の表示', () => {
@@ -70,9 +73,8 @@ describe('MobileOrderView', () => {
       menu: [{ id: 'a', name: '罠', price: '1', visual: { kind: 'image', url: 'data:image/svg+xml,x' } }],
     };
     const { container } = renderWithIntl(<MobileOrderView config={hostile} />);
-    // SNS リンクは描画されない (scheme が https でない)。
-    expect(screen.queryByRole('link', { name: 'X' })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Instagram' })).toBeNull();
+    // SNS は https でないので 1 件も描画されない → アンカー自体ゼロ。
+    expect(container.querySelectorAll('a')).toHaveLength(0);
     // 危険スキームを持つ要素は一切無い。商品名は残る (画像だけ落ちる)。
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('[href^="javascript:"]')).toBeNull();

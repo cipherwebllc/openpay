@@ -7,14 +7,17 @@
 //   本ビューは「準備中」を明示する (P1.2 = 設定/メニュー閲覧まで)。料率は表示しない。
 
 import { useTranslations } from 'next-intl';
+import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { safeHttpUrl, JPYC_CHAIN_LABEL, type MobileOrderConfig } from '@/lib/mobileOrder';
 
 export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
   const t = useTranslations('MobileOrder');
   // 二重防御: config は https のみへ検証済みだが、注文トークンは attacker-controllable な
   // ので href/src へ描画する直前にも scheme を再確認する (javascript:/data: を排除)。
-  const xUrl = safeHttpUrl(config.socials.x);
-  const igUrl = safeHttpUrl(config.socials.instagram);
+  // プロフ(@handle) と同じ SocialIconLinks でアイコン行として描画 (ドメイン自動判定)。
+  const socialUrls = [safeHttpUrl(config.socials.x), safeHttpUrl(config.socials.instagram)].filter(
+    (u): u is string => Boolean(u),
+  );
   return (
     <div className="space-y-5">
       <header className="text-center">
@@ -22,28 +25,9 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
         <p className="mt-1 text-xs text-slate-500">
           {t('viewChainBadge', { chain: JPYC_CHAIN_LABEL[config.chain] })}
         </p>
-        {(xUrl || igUrl) && (
-          <div className="mt-2 flex justify-center gap-3 text-sm">
-            {xUrl && (
-              <a
-                href={xUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-brand hover:underline"
-              >
-                X
-              </a>
-            )}
-            {igUrl && (
-              <a
-                href={igUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-brand hover:underline"
-              >
-                Instagram
-              </a>
-            )}
+        {socialUrls.length > 0 && (
+          <div className="mt-3">
+            <SocialIconLinks urls={socialUrls} />
           </div>
         )}
       </header>
