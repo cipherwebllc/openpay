@@ -88,7 +88,6 @@ export default async function GuidePosPage({
           </section>
         </div>
 
-        {/* 必要なもの */}
         <Section title={c.needTitle}>
           <BulletList
             items={c.need}
@@ -97,7 +96,6 @@ export default async function GuidePosPage({
           />
         </Section>
 
-        {/* 仕組み */}
         <Section title={c.overviewTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.overviewBody}
@@ -105,7 +103,6 @@ export default async function GuidePosPage({
           <GuideFigure image={c.overviewImage} />
         </Section>
 
-        {/* STEP 0 準備 */}
         <Section title={c.setupTitle}>
           <StepList
             steps={c.setupSteps}
@@ -114,7 +111,6 @@ export default async function GuidePosPage({
           <GuideFigure image={c.setupImage} />
         </Section>
 
-        {/* 毎回の会計フロー */}
         <Section title={c.flowTitle}>
           <StepList
             steps={c.flowSteps}
@@ -131,7 +127,6 @@ export default async function GuidePosPage({
           />
         </Section>
 
-        {/* 閉店後の突合 */}
         <Section title={c.reconcileTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.reconcileBody}
@@ -144,7 +139,6 @@ export default async function GuidePosPage({
           <GuideFigure image={c.reconcileImage} />
         </Section>
 
-        {/* おすすめ無料POS (アフィリエイト枠) */}
         <Section title={c.posTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.posBody}
@@ -168,7 +162,6 @@ export default async function GuidePosPage({
           </p>
         </Section>
 
-        {/* コスト比較 */}
         <Section title={c.costTitle}>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full border-collapse text-sm">
@@ -215,7 +208,6 @@ export default async function GuidePosPage({
           <GuideFigure image={c.costImage} />
         </Section>
 
-        {/* FAQ */}
         <Section title={c.faqTitle}>
           <dl className="mt-4 space-y-5">
             {c.faqs.map((f) => (
