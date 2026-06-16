@@ -29,6 +29,7 @@ import {
   type HandleTipConfig,
   type HandleProfile,
 } from '@/lib/handle';
+import type { StorefrontParts } from '@/lib/mobileOrder';
 
 const handleKey = (handle: string) => `handle:${handle}`;
 const ownerIndexKey = (owner: string) => `wallet:handles:${owner.toLowerCase()}`;
@@ -139,10 +140,13 @@ export async function reserveOrUpdateHandle(input: {
   owner: string;
   config: HandleTipConfig;
   profile?: HandleProfile;
+  // storefront の三状態: undefined = 変更しない / null = 削除 / object = 置換。
+  // (StorefrontParts は menu≥1 ゆえ「空オブジェクトでクリア」が表現できないため null を使う。)
+  storefront?: StorefrontParts | null;
   nowMs: number;
 }): Promise<ReserveResult> {
   if (!isKvConfigured()) return { status: 'kv_unavailable' };
-  const { handle, owner, config, profile, nowMs } = input;
+  const { handle, owner, config, profile, storefront, nowMs } = input;
   const key = handleKey(handle);
   // profile の三状態: undefined = 「変更しない」(update は既存を保持・新規は無し)、
   // object = 置換 (空 {} は明示クリア)。config だけ更新する client が link-in-bio を
@@ -150,6 +154,7 @@ export async function reserveOrUpdateHandle(input: {
   const profileProvided = profile !== undefined;
   const cleanedProfile =
     profileProvided && Object.keys(profile).length > 0 ? profile : undefined;
+  const storefrontProvided = storefront !== undefined;
 
   const existingRes = await kvGet(key);
   if (!existingRes.ok) return { status: 'kv_error' };
@@ -169,10 +174,13 @@ export async function reserveOrUpdateHandle(input: {
     };
     // omit (undefined) なら既存 profile を保持、provided なら置換 (空はクリア)。
     const nextProfile = profileProvided ? cleanedProfile : existing.profile;
+    // storefront も同様: undefined=保持 / null=クリア / object=置換。
+    const nextStorefront = storefrontProvided ? (storefront ?? undefined) : existing.storefront;
     const record: HandleRecord = {
       owner: existing.owner,
       config: mergedConfig,
       ...(nextProfile ? { profile: nextProfile } : {}),
+      ...(nextStorefront ? { storefront: nextStorefront } : {}),
       createdAt: existing.createdAt,
       updatedAt: nowMs,
     };
@@ -195,6 +203,7 @@ export async function reserveOrUpdateHandle(input: {
     owner,
     config,
     ...(cleanedProfile ? { profile: cleanedProfile } : {}),
+    ...(storefront ? { storefront } : {}),
     createdAt: nowMs,
     updatedAt: nowMs,
   };

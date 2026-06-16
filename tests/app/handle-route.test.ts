@@ -50,6 +50,13 @@ import { GET as availGET, DELETE } from '@/app/api/handle/[handle]/route';
 const ADDR = OWNER;
 // 新スキーマの最小有効 config (マルチ方法)。
 const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
+// 最小有効 storefront (店舗固有部分のみ・identity は handle 由来)。
+const STORE = {
+  chain: 'polygon',
+  mode: 'storefront',
+  feePayer: 'merchant',
+  menu: [{ id: 'a', name: 'A', price: '500' }],
+};
 function postReq(body: unknown) {
   return new Request('http://localhost/api/handle', {
     method: 'POST',
@@ -119,6 +126,33 @@ describe('POST /api/handle', () => {
     expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
   });
 
+  it('passes a validated storefront through to the store (店舗公開)', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated' });
+    await POST(postReq({ handle: 'alice', config: CFG, storefront: STORE }));
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].storefront).toEqual(STORE);
+  });
+
+  it('storefront:null → null (clear) を store へ渡す (店舗取り下げ)', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated' });
+    await POST(postReq({ handle: 'alice', config: CFG, storefront: null }));
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].storefront).toBeNull();
+  });
+
+  it('storefront 省略 → undefined を渡す (既存保持)', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated' });
+    await POST(postReq({ handle: 'alice', config: CFG }));
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].storefront).toBeUndefined();
+  });
+
+  it('invalid storefront (JPYC でない chain) → 400 invalid_storefront, no store hit', async () => {
+    const res = await POST(
+      postReq({ handle: 'alice', config: CFG, storefront: { ...STORE, chain: 'base' } }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid_storefront');
+    expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+  });
+
   it('taken → 409, limit → 409', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({ status: 'taken' });
     expect((await POST(postReq({ handle: 'alice', config: CFG }))).status).toBe(409);
@@ -165,6 +199,16 @@ describe('GET /api/handle (mine)', () => {
       { handle: 'alice', config: CFG, profile: { bio: 'hi' }, updatedAt: 2 },
     ]);
     expect(json.max).toBe(3);
+  });
+  it('includes storefront in mine when published (公開済み prefill)', async () => {
+    store.listHandleRecordsForOwner.mockResolvedValue([
+      {
+        handle: 'shop',
+        record: { owner: OWNER, config: CFG, storefront: STORE, createdAt: 1, updatedAt: 2 },
+      },
+    ]);
+    const json = await (await mineGET()).json();
+    expect(json.handles[0].storefront).toEqual(STORE);
   });
   it('KV エラー (null) → 502', async () => {
     store.listHandleRecordsForOwner.mockResolvedValue(null);

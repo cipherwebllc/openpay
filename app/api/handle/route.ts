@@ -14,6 +14,7 @@ import {
   MAX_HANDLES_PER_WALLET,
   type HandleProfile,
 } from '@/lib/handle';
+import { validateStorefrontParts, type StorefrontParts } from '@/lib/mobileOrder';
 import {
   reserveOrUpdateHandle,
   listHandleRecordsForOwner,
@@ -41,6 +42,7 @@ export async function GET() {
       handle: o.handle,
       config: o.record.config,
       profile: o.record.profile,
+      storefront: o.record.storefront, // 店舗公開済みかの prefill (ビルダーの「公開済み」表示)
       updatedAt: o.record.updatedAt,
     })),
     max: MAX_HANDLES_PER_WALLET,
@@ -65,6 +67,7 @@ export async function POST(req: Request) {
     handle: rawHandle,
     config: rawConfig,
     profile: rawProfile,
+    storefront: rawStorefront,
   } = body as Record<string, unknown>;
   if (typeof rawHandle !== 'string') {
     return NextResponse.json({ ok: false, error: 'handle_required' }, { status: 400 });
@@ -100,11 +103,24 @@ export async function POST(req: Request) {
     profileArg = profile.profile;
   }
 
+  // storefront の三状態: 省略 = 変更しない / null = 削除 / object = 検証して置換 (店舗公開)。
+  let storefrontArg: StorefrontParts | null | undefined;
+  if (rawStorefront === null) {
+    storefrontArg = null; // 明示クリア (店舗を取り下げ)
+  } else if (rawStorefront !== undefined) {
+    const sf = validateStorefrontParts(rawStorefront);
+    if (!sf) {
+      return NextResponse.json({ ok: false, error: 'invalid_storefront' }, { status: 400 });
+    }
+    storefrontArg = sf;
+  }
+
   const result = await reserveOrUpdateHandle({
     handle: validated.handle,
     owner: session.address,
     config: config.config,
     profile: profileArg,
+    storefront: storefrontArg,
     nowMs: Date.now(),
   });
 

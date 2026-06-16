@@ -22,12 +22,19 @@ import {
   releaseHandle,
 } from '@/lib/handleStore';
 import type { HandleTipConfig } from '@/lib/handle';
+import type { StorefrontParts } from '@/lib/mobileOrder';
 
 const OWNER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const OTHER = '0x000000000000000000000000000000000000dEaD';
 const CONFIG: HandleTipConfig = {
   to: OWNER,
   methods: [{ token: 'jpyc', chain: 'polygon' }],
+};
+const STORE: StorefrontParts = {
+  chain: 'polygon',
+  mode: 'storefront',
+  feePayer: 'merchant',
+  menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
 };
 const recJson = (owner: string, createdAt = 1) =>
   JSON.stringify({
@@ -210,6 +217,56 @@ describe('reserveOrUpdateHandle', () => {
     expect(res.record?.profile).toBeUndefined();
     const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
     expect(stored.profile).toBeUndefined();
+  });
+
+  it('storefront 付きで created → record に含み serialize される', async () => {
+    const res = await reserveOrUpdateHandle({ ...base, storefront: STORE });
+    expect(res.status).toBe('created');
+    expect(res.record?.storefront).toEqual(STORE);
+    const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
+    expect(stored.storefront).toEqual(STORE);
+  });
+
+  it('update で storefront 省略 → 既存 storefront を保持 (config-only update が消さない)', async () => {
+    const existing = JSON.stringify({
+      owner: OWNER,
+      config: CONFIG,
+      storefront: STORE,
+      createdAt: 5,
+      updatedAt: 5,
+    });
+    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    const res = await reserveOrUpdateHandle(base); // base に storefront 無し (undefined)
+    expect(res.status).toBe('updated');
+    expect(res.record?.storefront).toEqual(STORE);
+  });
+
+  it('update で storefront:null 明示 → クリア (店舗取り下げ)', async () => {
+    const existing = JSON.stringify({
+      owner: OWNER,
+      config: CONFIG,
+      storefront: STORE,
+      createdAt: 5,
+      updatedAt: 5,
+    });
+    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    const res = await reserveOrUpdateHandle({ ...base, storefront: null });
+    expect(res.status).toBe('updated');
+    expect(res.record?.storefront).toBeUndefined();
+  });
+
+  it('update で storefront object → 置換', async () => {
+    const existing = JSON.stringify({
+      owner: OWNER,
+      config: CONFIG,
+      storefront: STORE,
+      createdAt: 5,
+      updatedAt: 5,
+    });
+    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    const next: StorefrontParts = { ...STORE, chain: 'kaia' };
+    const res = await reserveOrUpdateHandle({ ...base, storefront: next });
+    expect(res.record?.storefront).toEqual(next);
   });
 });
 
