@@ -18,9 +18,10 @@ import { env } from '@/lib/env';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { HandleProfileView } from '@/components/HandleProfile';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
+import { MobileOrderView } from '@/components/MobileOrderView';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
-import { normalizeHandle, decodeHandleSegment } from '@/lib/handle';
+import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import {
   buildTipMeta,
@@ -130,6 +131,12 @@ export default async function HandlePage({
       !!profile.avatar ||
       (profile.socials?.length ?? 0) > 0 ||
       (profile.links?.length ?? 0) > 0);
+  // 店舗 (storefront) が公開されていれば @handle ページ自体を店舗ページにする (固定店舗 URL)。
+  // MobileOrderView がアバター/店名/SNS ヘッダー + メニュー + カート + /checkout 引き継ぎを内包。
+  // flag OFF (本番既定) では storefront を無視し従来の link-in-bio + tip のまま (inert)。
+  const storefront = env.enableMobileOrder
+    ? handleStorefrontConfig(record, normalized)
+    : null;
   const t = await getTranslations({ locale, namespace: 'HandleProfile' });
 
   return (
@@ -137,13 +144,20 @@ export default async function HandlePage({
       <div className="mb-3 flex justify-end">
         <LocaleSwitcher />
       </div>
-      {hasProfile && (
-        <div className="mb-6">
-          <HandleProfileView config={record.config} profile={profile} />
-        </div>
+      {storefront ? (
+        // 店舗公開時: /@shop = 店そのもの (メニュー + カート + 支払い)。
+        <MobileOrderView config={storefront} />
+      ) : (
+        <>
+          {hasProfile && (
+            <div className="mb-6">
+              <HandleProfileView config={record.config} profile={profile} />
+            </div>
+          )}
+          {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
+          <ReceiveMethodPicker config={record.config} />
+        </>
       )}
-      {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
-      <ReceiveMethodPicker config={record.config} />
       {/* このページは共有先から直接開かれる入口 — OpenPay 本体への戻り導線を常設する。
           文言でなく OpenPay のアイコンマークで控えめに (link-in-bio の主役はクリエイター)。 */}
       <footer className="mt-10 flex justify-center pb-2">
