@@ -156,29 +156,36 @@ export function ProductPresetManager({
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
               </div>
-              {/* カテゴリー + 画像は専用の全幅行へ (商品名欄を潰さないため)。 */}
-              <div className="flex w-full items-center gap-2">
-                {p.image && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
-                )}
-                <input
-                  type="text"
-                  value={p.category ?? ''}
-                  aria-label={t('categoryLabel')}
-                  placeholder={t('categoryPlaceholder')}
-                  maxLength={24}
-                  onChange={(e) => updatePreset(p.id, { category: e.target.value || undefined })}
-                  className="w-28 shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
-                />
-                <input
-                  type="url"
-                  value={p.image ?? ''}
-                  aria-label={t('imageLabel')}
-                  placeholder={t('imagePlaceholder')}
-                  onChange={(e) => updatePreset(p.id, { image: e.target.value.trim() || undefined })}
-                  className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
-                />
+              {/* 専用の全幅行へ (商品名欄を潰さない)。画像 (サムネ + URL) を隣接させ、
+                  カテゴリーはラベル付きの別グループに分離 (間に挟まず分かりやすく)。 */}
+              <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  {p.image && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                  )}
+                  <input
+                    type="url"
+                    value={p.image ?? ''}
+                    aria-label={t('imageLabel')}
+                    placeholder={t('imagePlaceholder')}
+                    onChange={(e) =>
+                      updatePreset(p.id, { image: e.target.value.trim() || undefined })
+                    }
+                    className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                  />
+                </div>
+                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                  {t('categoryLabel')}
+                  <input
+                    type="text"
+                    value={p.category ?? ''}
+                    placeholder={t('categoryPlaceholder')}
+                    maxLength={24}
+                    onChange={(e) => updatePreset(p.id, { category: e.target.value || undefined })}
+                    className="w-28 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-brand focus:outline-none"
+                  />
+                </label>
               </div>
             </li>
           ))}
