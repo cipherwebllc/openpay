@@ -104,6 +104,10 @@ export function MobileOrderBuilder({
   const hasShopName = draft.shopName.trim().length > 0;
   const hasMenu = menuItems.length > 0;
 
+  // 店舗アイコンのプレビュー (https のみ・読込前検証)。無ければ店名の頭文字を円に表示。
+  const avatarPreview = safeHttpUrl(draft.avatar.trim());
+  const previewInitial = ([...draft.shopName.trim()][0] ?? '').toUpperCase();
+
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
 
   // SNS の並べ替え (@handle プロフと同型: ドラッグ + ▲▼ ボタンの 2 系統)。
@@ -212,6 +216,27 @@ export function MobileOrderBuilder({
                   onChange={(e) => update({ shopName: e.target.value })}
                   className={inputClass}
                 />
+              </Field>
+
+              {/* 店舗アイコン (https URL・@handle のアバターと同型)。左に円形プレビュー。 */}
+              <Field label={t('avatarLabel')} hint={t('avatarHint')}>
+                <div className="flex items-center gap-3">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-lg font-bold text-white">
+                    {avatarPreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span aria-hidden>{previewInitial}</span>
+                    )}
+                  </span>
+                  <input
+                    type="url"
+                    value={draft.avatar}
+                    placeholder="https://"
+                    onChange={(e) => update({ avatar: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
               </Field>
 
               <fieldset>
@@ -397,6 +422,14 @@ export function MobileOrderBuilder({
             {hydrated && (
               <div className="rounded-xl bg-slate-50 p-4">
                 <div className="mx-auto max-w-xs rounded-xl bg-white p-4 shadow-sm">
+                  <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-brand text-lg font-bold text-white">
+                    {avatarPreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span aria-hidden>{previewInitial}</span>
+                    )}
+                  </div>
                   <p className="text-center text-base font-semibold text-slate-800">
                     {draft.shopName.trim() || t('previewShopPlaceholder')}
                   </p>

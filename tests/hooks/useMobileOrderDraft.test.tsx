@@ -101,6 +101,7 @@ function baseDraft(): MobileOrderDraft {
     receiverSource: 'auto',
     chain: 'polygon',
     shopName: '珈琲スタンド',
+    avatar: '  https://img.example/icon.png  ', // trim 検証用
     mode: 'storefront',
     feePayer: 'merchant',
     socials: ['  https://x.com/shop  '], // trim 検証用
@@ -114,11 +115,20 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
       receiver: ADDR,
       chain: 'polygon',
       shopName: '珈琲スタンド',
+      avatar: 'https://img.example/icon.png', // trim されて載る
       mode: 'storefront',
       feePayer: 'merchant',
       socials: ['https://x.com/shop'],
       menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
     });
+  });
+
+  it('avatar が空/非 https のときは config に載らない (任意フィールド)', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    expect(draftToConfig({ ...baseDraft(), avatar: '' }, ADDR, presets)?.avatar).toBeUndefined();
+    expect(
+      draftToConfig({ ...baseDraft(), avatar: 'http://x/icon.png' }, ADDR, presets)?.avatar,
+    ).toBeUndefined();
   });
 
   it('受取先 null → null / 有効商品ゼロ → null', () => {

@@ -1643,6 +1643,8 @@
     "stepShopTitle": "Shop settings",
     "shopNameLabel": "Shop name",
     "shopNamePlaceholder": "e.g. OpenPay Coffee Stand",
+    "avatarLabel": "Shop icon image (optional)",
+    "avatarHint": "An https:// image URL, shown as a circle at the top of the order page (like the profile avatar).",
     "modeLabel": "Order method",
     "modeStorefront": "In-store / kiosk",
     "modePreorder": "Mobile pre-order",

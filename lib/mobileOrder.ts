@@ -38,6 +38,7 @@ export type MobileOrderConfig = {
   receiver: Address; // 店舗ウォレット (着金先)・全 EVM チェーン共通
   chain: JpycChainSlug; // 受取チェーン (JPYC のみ・単一)。顧客はこのチェーンで支払う (P2)。
   shopName: string;
+  avatar?: string; // 店舗アイコン画像 URL (https のみ・任意・@handle のアバターと同型)
   mode: MobileOrderMode;
   feePayer: FeePayer;
   socials: string[]; // SNS URL 配列 (https のみ・表示順保持・SocialIconLinks がドメイン自動判定)
@@ -187,6 +188,9 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (o.mode !== 'storefront' && o.mode !== 'preorder') return null;
   if (o.feePayer !== 'merchant' && o.feePayer !== 'customer') return null;
 
+  // avatar (任意・https のみ)。不正/空は黙って除外 (注文は壊さない・socials と同じ寛容さ)。
+  const avatar = isHttpsUrl(o.avatar) ? o.avatar : undefined;
+
   // socials (任意・https のみ・≤ SOCIALS_MAX・表示順保持)。不正 URL は黙って除外 (注文は壊さない)。
   const socials = Array.isArray(o.socials)
     ? o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX)
@@ -203,7 +207,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     menu.push(item);
   }
 
-  return {
+  const config: MobileOrderConfig = {
     receiver: o.receiver,
     chain: o.chain,
     shopName: o.shopName,
@@ -212,4 +216,6 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     socials,
     menu,
   };
+  if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
+  return config;
 }

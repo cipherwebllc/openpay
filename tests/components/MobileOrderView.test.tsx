@@ -69,6 +69,27 @@ describe('MobileOrderView', () => {
     ]);
   });
 
+  it('店舗アイコン (avatar) を円形 <img> で先頭に描画 (referrerPolicy=no-referrer)', () => {
+    const withAvatar: MobileOrderConfig = { ...config, avatar: 'https://img.example/icon.png' };
+    const { container } = renderWithIntl(<MobileOrderView config={withAvatar} />);
+    const imgs = Array.from(container.querySelectorAll('img'));
+    // 先頭の img が店舗アイコン (ヘッダーがメニューより前)。
+    expect(imgs[0]).toHaveAttribute('src', 'https://img.example/icon.png');
+    expect(imgs[0]).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('avatar 未設定なら店名の頭文字を表示 (img でなく @handle と同型のイニシャル)', () => {
+    renderWithIntl(<MobileOrderView config={config} />); // config は avatar 無し
+    expect(screen.getByText('テ')).toBeInTheDocument(); // 'テスト珈琲店' の先頭
+  });
+
+  it('avatar が javascript: は <img> に描画せず頭文字へ fallback (XSS 防御)', () => {
+    const hostileAvatar: MobileOrderConfig = { ...config, avatar: 'javascript:alert(1)' };
+    const { container } = renderWithIntl(<MobileOrderView config={hostileAvatar} />);
+    expect(container.querySelector('[src^="javascript:"]')).toBeNull();
+    expect(screen.getByText('テ')).toBeInTheDocument();
+  });
+
   it('カート空では合計/支払いを出さず案内 (poweredBy は出る)', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     expect(screen.getByText('商品を選ぶと合計が表示されます')).toBeInTheDocument();

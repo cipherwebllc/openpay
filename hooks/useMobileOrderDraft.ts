@@ -33,6 +33,7 @@ export interface MobileOrderDraft {
   receiverSource: ReceiverSource; // 接続ウォレット追従の可否 (useReceiverAutofill 用)
   chain: JpycChainSlug; // 受取チェーン (JPYC・単一)
   shopName: string;
+  avatar: string; // 店舗アイコン画像 URL (生入力・https 検証は URL 生成時・@handle と同型)
   mode: MobileOrderMode; // 'storefront' (店頭/券売機) | 'preorder' (事前モバイルオーダー)
   feePayer: FeePayer; // 手数料の負担者 (preorder 時のみ意味を持つ)
   socials: string[]; // SNS URL の配列 (生入力・並び替え可・https 検証は URL 生成時)
@@ -51,6 +52,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   receiverSource: 'auto',
   chain: 'polygon', // JPYC の既定チェーン (店主が変更可)
   shopName: '',
+  avatar: '',
   mode: 'storefront', // 最も安全な経路 (その場払いその場受取) を既定に
   feePayer: 'merchant',
   socials: [],
@@ -64,6 +66,7 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     chain:
       typeof loaded.chain === 'string' && isJpycChainSlug(loaded.chain) ? loaded.chain : 'polygon',
     shopName: clampStr(loaded.shopName, SHOP_NAME_MAX),
+    avatar: clampStr(loaded.avatar, URL_FIELD_MAX), // https 検証は URL 生成時。length だけ clamp。
     mode: loaded.mode === 'preorder' ? 'preorder' : 'storefront',
     feePayer: loaded.feePayer === 'customer' ? 'customer' : 'merchant',
     // SNS は入力途中の値も下書きとして保持 (https 検証は URL 生成時)。length と件数だけ clamp。
@@ -117,6 +120,8 @@ export function draftToConfig(
     receiver: effectiveReceiver ?? '',
     chain: draft.chain,
     shopName: draft.shopName.trim(),
+    // trim のみ。https 検証 + 空/不正の除外は validateOrderConfig が行う。
+    avatar: draft.avatar.trim(),
     mode: draft.mode,
     feePayer: draft.feePayer,
     // trim のみ。https 検証 + 件数 slice は validateOrderConfig が行う。

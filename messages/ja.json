@@ -1643,6 +1643,8 @@
     "stepShopTitle": "店舗設定",
     "shopNameLabel": "店名",
     "shopNamePlaceholder": "例: 珈琲スタンド OpenPay",
+    "avatarLabel": "店舗アイコン画像（任意）",
+    "avatarHint": "https:// の画像 URL。注文ページの先頭に丸く表示されます（プロフィールのアバターと同じ）。",
     "modeLabel": "受取方法",
     "modeStorefront": "店頭・券売機",
     "modePreorder": "事前モバイルオーダー",

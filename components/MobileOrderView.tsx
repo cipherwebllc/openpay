@@ -8,7 +8,7 @@
 // /checkout へ deep-link するだけ。実際の送金/relay/控えは CheckoutForm 側 (既存)。
 // モバイルオーダー固有の % 手数料は P0 (開示更新) 後の別増分で、ここには無い。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
@@ -23,10 +23,23 @@ import {
 } from '@/lib/url';
 import { safeHttpUrl, JPYC_CHAIN_LABEL, type MobileOrderConfig } from '@/lib/mobileOrder';
 
+// アバター読込失敗/未設定時のフォールバック頭文字 (@handle と同じくコードポイント単位)。
+function initialOf(name: string): string {
+  const n = name.trim();
+  return n ? ([...n][0] ?? '').toUpperCase() : '🏪';
+}
+
 export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
   const [qty, setQty] = useState<Record<string, number>>({});
+
+  // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
+  // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const avatarUrl = safeHttpUrl(config.avatar);
+  useEffect(() => setAvatarFailed(false), [config.avatar]);
+  const showAvatar = !!avatarUrl && !avatarFailed;
 
   // 二重防御: config は https のみへ検証済みだが、注文トークンは attacker-controllable な
   // ので href/src へ描画する直前にも scheme を再確認 (javascript:/data: を排除)。
@@ -74,7 +87,23 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
   return (
     <div className="space-y-5">
       <header className="text-center">
-        <h1 className="text-xl font-bold text-slate-900">{config.shopName}</h1>
+        <div className="mx-auto flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-brand text-2xl font-bold text-white">
+          {showAvatar ? (
+            // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatarUrl}
+              alt={config.shopName}
+              referrerPolicy="no-referrer"
+              loading="lazy"
+              className="h-full w-full object-cover"
+              onError={() => setAvatarFailed(true)}
+            />
+          ) : (
+            <span aria-hidden>{initialOf(config.shopName)}</span>
+          )}
+        </div>
+        <h1 className="mt-3 text-xl font-bold text-slate-900">{config.shopName}</h1>
         <p className="mt-1 text-xs text-slate-500">
           {t('viewChainBadge', { chain: JPYC_CHAIN_LABEL[config.chain] })}
         </p>

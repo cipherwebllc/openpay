@@ -117,6 +117,18 @@ describe('MobileOrderBuilder', () => {
     ).toEqual(['https://a.example']);
   });
 
+  it('店舗アイコン URL を入力するとプレビュー (円形 img) に反映される', () => {
+    const { container } = renderWithIntl(<MobileOrderBuilder />);
+    // アバター入力は placeholder 'https://' (SNS は 'https://x.com/yourshop' で別物)。
+    const avatarInput = screen.getByPlaceholderText('https://') as HTMLInputElement;
+    fireEvent.change(avatarInput, { target: { value: 'https://img.example/icon.png' } });
+    const matched = Array.from(container.querySelectorAll('img')).filter(
+      (i) => i.getAttribute('src') === 'https://img.example/icon.png',
+    );
+    // 入力欄横プレビュー + 右カラムのプレビューカード。最低 1 箇所に出れば配線 OK。
+    expect(matched.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('既定 (店頭モード) では手数料の負担トグルを出さない', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.queryByText('手数料の負担')).toBeNull();

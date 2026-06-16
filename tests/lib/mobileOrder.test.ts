@@ -23,6 +23,7 @@ function baseConfig(): MobileOrderConfig {
     receiver: RECEIVER,
     chain: 'polygon',
     shopName: '珈琲スタンド OpenPay',
+    avatar: 'https://img.example/shop-icon.png',
     mode: 'preorder',
     feePayer: 'merchant',
     socials: ['https://x.com/openpay', 'https://instagram.com/openpay'],
@@ -169,6 +170,22 @@ describe('mobileOrder: decode は untrusted 入力を全検証 (不正は null)'
       c.socials = Array.from({ length: SOCIALS_MAX + 3 }, (_, i) => `https://s${i}.example`);
     });
     expect(decoded?.socials).toHaveLength(SOCIALS_MAX);
+  });
+
+  // avatar も socials と同じ寛容さ: 非 https / 空 / 非文字列は黙って除外 (config は壊さない)。
+  it('avatar が非 https / 空 / 非文字列は除外し config は null にしない', () => {
+    expect(corrupt((c) => (c.avatar = 'http://x/icon.png'))?.avatar).toBeUndefined();
+    expect(corrupt((c) => (c.avatar = 'javascript:alert(1)'))?.avatar).toBeUndefined();
+    expect(corrupt((c) => (c.avatar = ''))?.avatar).toBeUndefined();
+    expect(corrupt((c) => (c.avatar = 123))?.avatar).toBeUndefined();
+    expect(corrupt((c) => delete c.avatar)?.avatar).toBeUndefined();
+    // 不正 avatar でも他が valid なら config 自体は成立する。
+    expect(corrupt((c) => (c.avatar = 'ftp://x'))).not.toBeNull();
+  });
+
+  it('valid な avatar (https) は往復で保持される', () => {
+    const c = baseConfig();
+    expect(decodeOrderConfig(encodeOrderConfig(c))?.avatar).toBe(c.avatar);
   });
 });
 
