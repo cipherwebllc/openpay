@@ -24,6 +24,11 @@ type OwnedHandle = {
   config: HandleTipConfig;
   storefront?: StorefrontParts;
 };
+// ⚠️ queryKey `['handle-mine', …]` と**この返り値の形** `{handles, max}` は HandleClaimPanel と
+// 共有する (同一 endpoint・同一 cache)。HandleClaim が先に profile タブで cache を `{handles, max}`
+// で埋めるため、形を一致させないと cache 衝突で handles がオブジェクトになり handles.find が
+// 落ちる (実際に発生したクラッシュ)。両者の形は必ず一致させること。
+type MineResponse = { handles: OwnedHandle[]; max: number };
 
 async function fetchJson(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
@@ -49,13 +54,14 @@ export function StorefrontPublishPanel({
 
   const mine = useQuery({
     // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ (HandleClaim と同流儀)。
+    // 返り値の形 `{handles, max}` は HandleClaimPanel と一致させる (同一 cache キーを共有するため)。
     queryKey: ['handle-mine', sessionAddress],
     enabled: env.enableHandles && isSignedIn,
-    queryFn: async (): Promise<OwnedHandle[]> => {
+    queryFn: async (): Promise<MineResponse> => {
       const { ok, status, json } = await fetchJson('/api/handle');
       // KV 障害 (502 等) を「handle 0 件」と偽装しない (isError でエラー表示 + 再試行)。
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
-      return Array.isArray(json.handles)
+      const list = Array.isArray(json.handles)
         ? (json.handles as unknown[]).filter(
             (h): h is OwnedHandle =>
               !!h &&
@@ -64,10 +70,11 @@ export function StorefrontPublishPanel({
               !!(h as OwnedHandle).config,
           )
         : [];
+      return { handles: list, max: typeof json.max === 'number' ? json.max : list.length };
     },
   });
 
-  const handles = useMemo(() => mine.data ?? [], [mine.data]);
+  const handles = useMemo(() => mine.data?.handles ?? [], [mine.data]);
   // 公開先を **派生** で決める (useEffect の 1 レンダ遅延を避け、初回描画で確定させる):
   // ユーザが選択済みでそれが一覧に在ればそれ、無ければ「店舗公開済み handle → 先頭」を既定に。
   const effectiveSelected =

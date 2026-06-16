@@ -130,6 +130,28 @@ describe('StorefrontPublishPanel', () => {
     expect(screen.getByText(/公開するには有効な JPYC 商品/)).toBeInTheDocument();
   });
 
+  it('HandleClaim が先に埋めた {handles,max} 形の共有 cache を読んでも落ちない (キー共有・回帰)', async () => {
+    // profile タブで HandleClaimPanel が先に ['handle-mine', addr] を {handles,max} で埋めた状態を再現。
+    // 修正前は handles がオブジェクトのまま handles.find が呼ばれてクラッシュしていた。
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['handle-mine', ADDR], { handles: [{ handle: 'shop', config: CFG }], max: 3 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG }], max: 3 }),
+      }),
+    );
+    renderWithIntl(
+      <QueryClientProvider client={qc}>
+        <StorefrontPublishPanel storefront={STORE} />
+      </QueryClientProvider>,
+    );
+    // クラッシュせず公開ボタンが出る (handles は配列として読まれる)。
+    expect(await screen.findByRole('button', { name: 'この @handle に公開' })).toBeInTheDocument();
+  });
+
   it('handle 読み込みエラー (502) は正直にエラー表示 (0件と偽装しない)', async () => {
     vi.stubGlobal(
       'fetch',
