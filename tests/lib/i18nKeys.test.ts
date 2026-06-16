@@ -1443,7 +1443,7 @@ describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity
       .sort();
   }
 
-  for (const ns of ['HandleClaim', 'HandleProfile'] as const) {
+  for (const ns of ['HandleClaim', 'HandleProfile', 'MobileOrder'] as const) {
     it(`${ns}: ja と en でキー集合が完全一致`, () => {
       expect(deepKeys(ja[ns] as Record<string, unknown>)).toEqual(
         deepKeys(en[ns] as Record<string, unknown>),
@@ -1463,5 +1463,10 @@ describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity
   it('Create.tabs.profile が ja/en 双方に存在', () => {
     expect(typeof (ja.Create as { tabs: Record<string, string> }).tabs.profile).toBe('string');
     expect(typeof (en.Create as { tabs: Record<string, string> }).tabs.profile).toBe('string');
+  });
+
+  it('Create.tabs.mobileOrder が ja/en 双方に存在 (flag裏タブのラベル)', () => {
+    expect(typeof (ja.Create as { tabs: Record<string, string> }).tabs.mobileOrder).toBe('string');
+    expect(typeof (en.Create as { tabs: Record<string, string> }).tabs.mobileOrder).toBe('string');
   });
 });

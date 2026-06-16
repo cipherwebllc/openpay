@@ -10,6 +10,7 @@
 //   本モジュールは P1.1 = 設定/メニュー/URL のみ (本番 inert・money-path 非該当)。
 
 import { isAddress, type Address } from 'viem';
+import { isJpycChainSlug, type JpycChainSlug } from './chains';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
 export type FeePayer = 'merchant' | 'customer'; // 3% を店舗負担 | 顧客上乗せ (preorder 時のみ意味を持つ)
@@ -29,7 +30,8 @@ export type MenuItem = {
 export type ShopSocials = { x?: string; instagram?: string };
 
 export type MobileOrderConfig = {
-  receiver: Address; // 店舗ウォレット (着金先)
+  receiver: Address; // 店舗ウォレット (着金先)・全 EVM チェーン共通
+  chain: JpycChainSlug; // 受取チェーン (JPYC のみ・単一)。顧客はこのチェーンで支払う (P2)。
   shopName: string;
   mode: MobileOrderMode;
   feePayer: FeePayer;
@@ -42,6 +44,14 @@ export const MENU_NAME_MAX = 80;
 export const MENU_MAX = 60;
 export const EMOJI_MAX = 8; // JS 文字長 (絵文字は 2+ code unit ゆえ実質 2〜4 絵文字)
 export const URL_FIELD_MAX = 512; // SNS / 画像 URL の上限
+
+/** 受取チェーンの表示名 (ブランド名・非翻訳)。builder の選択肢 + 注文ページのバッジで共有。 */
+export const JPYC_CHAIN_LABEL: Record<JpycChainSlug, string> = {
+  polygon: 'Polygon',
+  kaia: 'Kaia',
+  avalanche: 'Avalanche',
+  ethereum: 'Ethereum',
+};
 
 // ── base64url(utf8) コーデック (browser / jsdom / Node 共通: btoa/atob + TextEncoder) ──
 function toBase64Url(json: string): string {
@@ -106,6 +116,35 @@ export function encodeOrderConfig(config: MobileOrderConfig): string {
   return toBase64Url(JSON.stringify(config));
 }
 
+/** 注文ページのルート path (locale prefix 無し・middleware が解決。/pay・/tip と同流儀)。 */
+export const ORDER_PATH = '/order';
+
+/**
+ * 検証済み設定を注文ページのフル URL へ。token は base64url ([A-Za-z0-9_-]) ゆえ
+ * URL 安全なので再エンコード不要。呼出側は valid な config (validateOrderConfig 通過) を渡す。
+ */
+export function buildOrderUrl(origin: string, config: MobileOrderConfig): string {
+  return `${origin}${ORDER_PATH}?s=${encodeOrderConfig(config)}`;
+}
+
+/**
+ * href / src へ描画してよい URL を返す (不可なら undefined)。**https のみ許可**
+ * (validateOrderConfig と同じ scheme 契約)。
+ *
+ * config は decode/build 時に既に https のみへ検証済みだが、注文トークンは
+ * **attacker-controllable** (誰でも /order?s=… を作って送れる) ため、`<a href>` /
+ * `<img src>` という XSS sink へ描画する直前にも scheme を再確認する二重防御。
+ * `javascript:` / `data:` / `http:` は undefined を返し、呼出側はリンク/画像を描画しない。
+ */
+export function safeHttpUrl(u: string | undefined): string | undefined {
+  if (!u) return undefined;
+  try {
+    return new URL(u).protocol === 'https:' ? u : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 注文ページ URL のトークンを検証付きでデコード。untrusted 入力ゆえ全項目を検証し、
  * 一つでも不正なら **null** を返す (例外は投げない)。
@@ -117,10 +156,21 @@ export function decodeOrderConfig(token: string): MobileOrderConfig | null {
   } catch {
     return null; // 不正な base64 / JSON
   }
+  return validateOrderConfig(raw);
+}
+
+/**
+ * 任意の untrusted な値 (URL 由来 / builder 由来) を MobileOrderConfig へ検証する。
+ * 一つでも不正なら null。**decode (URL 取込) と builder (URL 生成前) の単一情報源** —
+ * 同じ検証を 2 か所に複製しないため切り出している。
+ */
+export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
 
   if (typeof o.receiver !== 'string' || !isAddress(o.receiver)) return null;
+  // chain は JPYC チェーンのみ (flag-gated JPYC_CHAINS のメンバ)。OFF のチェーンは受理しない。
+  if (typeof o.chain !== 'string' || !isJpycChainSlug(o.chain)) return null;
   if (!isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) return null;
   if (o.mode !== 'storefront' && o.mode !== 'preorder') return null;
   if (o.feePayer !== 'merchant' && o.feePayer !== 'customer') return null;
@@ -153,6 +203,7 @@ export function decodeOrderConfig(token: string): MobileOrderConfig | null {
 
   return {
     receiver: o.receiver,
+    chain: o.chain,
     shopName: o.shopName,
     mode: o.mode,
     feePayer: o.feePayer,

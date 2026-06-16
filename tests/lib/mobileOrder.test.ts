@@ -5,6 +5,10 @@ import { describe, it, expect } from 'vitest';
 import {
   encodeOrderConfig,
   decodeOrderConfig,
+  validateOrderConfig,
+  buildOrderUrl,
+  safeHttpUrl,
+  ORDER_PATH,
   MENU_MAX,
   SHOP_NAME_MAX,
   EMOJI_MAX,
@@ -16,6 +20,7 @@ const RECEIVER = '0x1111111111111111111111111111111111111111' as const;
 function baseConfig(): MobileOrderConfig {
   return {
     receiver: RECEIVER,
+    chain: 'polygon',
     shopName: '珈琲スタンド OpenPay',
     mode: 'preorder',
     feePayer: 'merchant',
@@ -38,6 +43,7 @@ describe('mobileOrder: encode/decode round-trip', () => {
   it('SNS 無し・visual 無しの最小構成も往復一致', () => {
     const c: MobileOrderConfig = {
       receiver: RECEIVER,
+      chain: 'kaia',
       shopName: '店',
       mode: 'storefront',
       feePayer: 'customer',
@@ -93,6 +99,12 @@ describe('mobileOrder: decode は untrusted 入力を全検証 (不正は null)'
     expect(corrupt((c) => (c.feePayer = 'platform'))).toBeNull();
   });
 
+  it('chain が JPYC チェーンslug でない / 欠落 → null', () => {
+    expect(corrupt((c) => (c.chain = 'base'))).toBeNull(); // base は JPYC チェーンでない
+    expect(corrupt((c) => (c.chain = 'polygonn'))).toBeNull();
+    expect(corrupt((c) => delete c.chain)).toBeNull(); // 欠落
+  });
+
   it('menu が空 / 上限超過 → null', () => {
     expect(corrupt((c) => (c.menu = []))).toBeNull();
     expect(
@@ -133,5 +145,61 @@ describe('mobileOrder: decode は untrusted 入力を全検証 (不正は null)'
   it('SNS が https でない → null', () => {
     expect(corrupt((c) => ((c.socials as { x: string }).x = 'http://x.com'))).toBeNull();
     expect(corrupt((c) => ((c.socials as { x: string }).x = 'ftp://x'))).toBeNull();
+  });
+});
+
+describe('mobileOrder: validateOrderConfig は decode と検証を共有 (単一情報源)', () => {
+  it('valid なオブジェクトはそのまま config を返す (encode/decode 経由しない)', () => {
+    const c = baseConfig();
+    expect(validateOrderConfig(c)).toEqual(c);
+  });
+
+  it('非オブジェクト / 不正 receiver は null', () => {
+    expect(validateOrderConfig(null)).toBeNull();
+    expect(validateOrderConfig('x')).toBeNull();
+    expect(validateOrderConfig({ ...baseConfig(), receiver: 'nope' })).toBeNull();
+  });
+
+  it('decode は validateOrderConfig に委譲する (往復が validate と一致)', () => {
+    const c = baseConfig();
+    expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(validateOrderConfig(c));
+  });
+});
+
+describe('mobileOrder: buildOrderUrl', () => {
+  it('origin + /order?s=<token> を組み立て、token は元 config へ復号できる', () => {
+    const c = baseConfig();
+    const url = buildOrderUrl('https://open-pay.jp', c);
+    expect(url.startsWith(`https://open-pay.jp${ORDER_PATH}?s=`)).toBe(true);
+    const token = url.slice(`https://open-pay.jp${ORDER_PATH}?s=`.length);
+    expect(decodeOrderConfig(token)).toEqual(c);
+  });
+
+  it('クエリ値は URL 安全 (base64url のみ・%エンコード不要)', () => {
+    const url = buildOrderUrl('https://open-pay.jp', baseConfig());
+    const token = url.split('?s=')[1];
+    expect(token).toMatch(/^[A-Za-z0-9_-]+$/);
+    // new URL で round-trip しても s パラメータが変質しない (エスケープ不要)。
+    expect(new URL(url).searchParams.get('s')).toBe(token);
+  });
+});
+
+describe('mobileOrder: safeHttpUrl (href/src 描画直前の XSS 二重防御)', () => {
+  it('https はそのまま返す', () => {
+    expect(safeHttpUrl('https://x.com/shop')).toBe('https://x.com/shop');
+    expect(safeHttpUrl('https://i.imgur.com/a.png')).toBe('https://i.imgur.com/a.png');
+  });
+
+  it('javascript: / data: / http: / vbscript: は undefined (XSS スキーム排除)', () => {
+    expect(safeHttpUrl('javascript:alert(1)')).toBeUndefined();
+    expect(safeHttpUrl('data:text/html,<script>alert(1)</script>')).toBeUndefined();
+    expect(safeHttpUrl('http://x.com')).toBeUndefined(); // https のみ
+    expect(safeHttpUrl('vbscript:msgbox(1)')).toBeUndefined();
+  });
+
+  it('空 / undefined / 解析不能は undefined', () => {
+    expect(safeHttpUrl(undefined)).toBeUndefined();
+    expect(safeHttpUrl('')).toBeUndefined();
+    expect(safeHttpUrl('not a url')).toBeUndefined();
   });
 });

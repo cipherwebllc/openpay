@@ -15,12 +15,13 @@ import { QrGenerator } from '@/components/QrGenerator';
 import { RegisterMode } from '@/components/RegisterMode';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
+import { MobileOrderBuilder } from '@/components/MobileOrderBuilder';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 
-type Tab = 'qr' | 'register' | 'tip' | 'profile';
+type Tab = 'qr' | 'register' | 'tip' | 'profile' | 'mobileOrder';
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
@@ -42,6 +43,10 @@ export default function CreatePage() {
           [
             ['qr', t('tabs.qr')],
             ['register', t('tabs.register')],
+            // 「モバイルオーダー」は flag ON のときだけ露出 (レジとチップの間・既定 OFF=本番非表示)。
+            ...(env.enableMobileOrder
+              ? ([['mobileOrder', t('tabs.mobileOrder')]] as const)
+              : []),
             ['tip', t('tabs.tip')],
             // 「プロフ」(@handle link-in-bio) は flag ON のときだけ露出。
             ...(env.enableHandles
@@ -88,6 +93,7 @@ export default function CreatePage() {
         </div>
       )}
       {tab === 'profile' && env.enableHandles && <HandleProfileBuilder />}
+      {tab === 'mobileOrder' && env.enableMobileOrder && <MobileOrderBuilder />}
 
       <MiniHistoryRecent />
 
