@@ -127,6 +127,16 @@ export async function LandingHowItWorks() {
           </ol>
         </article>
       </div>
+
+      <p className="mt-6 text-center text-sm">
+        <Link
+          href={`/${locale}/guide/pos`}
+          prefetch={false}
+          className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+        >
+          {t('posGuideLink')}
+        </Link>
+      </p>
     </section>
   );
 }

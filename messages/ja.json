@@ -35,6 +35,7 @@
     "featuresNoncustodyBody": "売上は OpenPay を経由せず、店舗ウォレットへ直接送金されます。サーバに残高 DB を持たないため、入金後の引き出し承認も不要。",
     "howItWorksTitle": "使い方",
     "howItWorksSubtitle": "受け取る側も支払う側も、3 ステップで完了します。",
+    "posGuideLink": "詳しい運用ガイド：既存のPOSレジと併用する →",
     "howItWorksVisualAlt": "店舗が決済 QR を作り、顧客がスマホで読み取り、店舗ウォレットへ売上が届く流れの図",
     "howItWorksDemoCaption": "実際の操作（モバイル）",
     "howItWorksDemoCreate": "① 受取（決済QR）",
