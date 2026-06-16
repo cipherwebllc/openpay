@@ -2,15 +2,21 @@
 //
 // content SOT は lib/posGuide.ts (ja/en 同梱)。長文を messages/*.json に置かない方針は
 // lib/explore.ts / lib/news.ts と同じ。図版は public/guide/*.svg を素の <img> で描画する。
+// 描画ヘルパは components/guide/PosGuidePieces.tsx に分離 (実描画テスト可能)。
 //
 // SEO 価値がある集客コンテンツなので noindex は設定しない (explore と同方針)。
 
 import type { Metadata } from 'next';
-import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { guideContentFor, type GuideImage, type GuideStep } from '@/lib/posGuide';
+import {
+  BulletList,
+  GuideFigure,
+  Section,
+  StepList,
+} from '@/components/guide/PosGuidePieces';
+import { guideContentFor, guidePosMetadata } from '@/lib/posGuide';
 
 export async function generateMetadata({
   params,
@@ -19,119 +25,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   setRequestLocale(locale);
-  const c = guideContentFor(locale);
-  return {
-    title: `${c.metaTitle} · OpenPay`,
-    description: c.metaDescription,
-  };
-}
-
-// public/guide/<file> の SVG 図版の intrinsic 寸法 (CLS 防止の width/height 用)。
-const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
-  'hero.svg': { w: 1200, h: 675 },
-  'overview-flow.svg': { w: 1000, h: 320 },
-  'pos-add-method.svg': { w: 760, h: 480 },
-  'four-steps.svg': { w: 1100, h: 280 },
-  'payment-success.svg': { w: 420, h: 720 },
-  'history-reconcile.svg': { w: 1000, h: 420 },
-  'cost-compare.svg': { w: 900, h: 360 },
-};
-
-// 標準セクション (mt-10 + 見出し)。カード型の できること/cannot・CTA は独自スタイルなので使わない。
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mt-10">
-      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-// 箇条書き (できること=✓ / その他=•・マーカー色のみ可変)。
-function BulletList({
-  items,
-  marker,
-  markerClassName,
-}: {
-  items: readonly string[];
-  marker: string;
-  markerClassName: string;
-}) {
-  return (
-    <ul className="mt-3 space-y-2">
-      {items.map((item) => (
-        <li
-          key={item}
-          className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-        >
-          <span aria-hidden className={`mt-0.5 ${markerClassName}`}>
-            {marker}
-          </span>
-          <span>{item}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-// 番号付きステップ (準備=淡色バッジ / 会計フロー=濃色バッジ・バッジ配色のみ可変)。
-function StepList({
-  steps,
-  badgeClassName,
-}: {
-  steps: readonly GuideStep[];
-  badgeClassName: string;
-}) {
-  return (
-    <ol className="mt-4 space-y-4">
-      {steps.map((step) => (
-        <li key={step.n} className="flex items-start gap-3">
-          <span
-            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${badgeClassName}`}
-          >
-            {step.n}
-          </span>
-          <div>
-            <p className="text-sm font-semibold text-slate-900">{step.title}</p>
-            <p className="mt-1 text-sm leading-relaxed text-slate-700">
-              {step.body}
-            </p>
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-// 静的 SVG 図版を描画 (最適化不要なので素の <img>・既存 HandleProfile 等と同方針)。
-function GuideFigure({
-  image,
-  className,
-  caption,
-}: {
-  image: GuideImage;
-  className?: string;
-  caption?: string;
-}) {
-  const dims = FIGURE_DIMS[image.file] ?? { w: 1200, h: 675 };
-  return (
-    <figure className={className ?? 'my-6'}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={`/guide/${image.file}`}
-        alt={image.alt}
-        width={dims.w}
-        height={dims.h}
-        loading="lazy"
-        className="h-auto w-full rounded-2xl border border-slate-200 bg-white"
-      />
-      {caption ? (
-        <figcaption className="mt-2 text-center text-xs leading-relaxed text-slate-500">
-          {caption}
-        </figcaption>
-      ) : null}
-    </figure>
-  );
+  return guidePosMetadata(locale);
 }
 
 export default async function GuidePosPage({

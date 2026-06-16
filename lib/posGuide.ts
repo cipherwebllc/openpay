@@ -383,3 +383,12 @@ export const POS_GUIDE: Record<GuideLocale, GuideContent> = { ja, en };
 export function guideContentFor(locale: string): GuideContent {
   return locale === 'en' ? POS_GUIDE.en : POS_GUIDE.ja;
 }
+
+/** /guide/pos の <title>/<description> を組み立てる (page の generateMetadata が利用)。 */
+export function guidePosMetadata(locale: string): {
+  title: string;
+  description: string;
+} {
+  const c = guideContentFor(locale);
+  return { title: `${c.metaTitle} · OpenPay`, description: c.metaDescription };
+}
