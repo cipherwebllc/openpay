@@ -302,6 +302,9 @@ export default async function GuidePosPage({
               </tbody>
             </table>
           </div>
+          <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-900">
+            {c.feeNote}
+          </p>
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.costNote}
           </p>
