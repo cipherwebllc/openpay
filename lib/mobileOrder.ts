@@ -45,6 +45,18 @@ export type MobileOrderConfig = {
   menu: MenuItem[];
 };
 
+/**
+ * モバイルオーダーの「店舗固有部分」(chain/mode/feePayer/menu)。@handle ストアに保存する形。
+ * identity (receiver/shopName/avatar/socials) は handle レコードから補完するため持たない
+ * (open-pay.jp/@shop = 固定店舗 URL。lib/handle.handleStorefrontConfig が両者を合成する)。
+ */
+export type StorefrontParts = {
+  chain: JpycChainSlug;
+  mode: MobileOrderMode;
+  feePayer: FeePayer;
+  menu: MenuItem[];
+};
+
 export const SHOP_NAME_MAX = 48;
 export const MENU_NAME_MAX = 80;
 export const MENU_MAX = 60;
@@ -177,25 +189,18 @@ export function decodeOrderConfig(token: string): MobileOrderConfig | null {
  * 一つでも不正なら null。**decode (URL 取込) と builder (URL 生成前) の単一情報源** —
  * 同じ検証を 2 か所に複製しないため切り出している。
  */
-export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
+/**
+ * untrusted な {chain, mode, feePayer, menu} を検証 (menu は validMenuItem 共有・1..MENU_MAX)。
+ * identity を持たない点以外は validateOrderConfig と同じ規則。不正は一つでもあれば null。
+ * **validateOrderConfig と @handle storefront の単一情報源** (同じ検証を複製しない)。
+ */
+export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
-
-  if (typeof o.receiver !== 'string' || !isAddress(o.receiver)) return null;
   // chain は JPYC チェーンのみ (flag-gated JPYC_CHAINS のメンバ)。OFF のチェーンは受理しない。
   if (typeof o.chain !== 'string' || !isJpycChainSlug(o.chain)) return null;
-  if (!isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) return null;
   if (o.mode !== 'storefront' && o.mode !== 'preorder') return null;
   if (o.feePayer !== 'merchant' && o.feePayer !== 'customer') return null;
-
-  // avatar (任意・https のみ)。不正/空は黙って除外 (注文は壊さない・socials と同じ寛容さ)。
-  const avatar = isHttpsUrl(o.avatar) ? o.avatar : undefined;
-
-  // socials (任意・https のみ・≤ SOCIALS_MAX・表示順保持)。不正 URL は黙って除外 (注文は壊さない)。
-  const socials = Array.isArray(o.socials)
-    ? o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX)
-    : [];
-
   // menu (1..MENU_MAX・各項目検証)
   if (!Array.isArray(o.menu) || o.menu.length < 1 || o.menu.length > MENU_MAX) {
     return null;
@@ -206,15 +211,36 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     if (!item) return null;
     menu.push(item);
   }
+  return { chain: o.chain, mode: o.mode, feePayer: o.feePayer, menu };
+}
+
+export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+
+  if (typeof o.receiver !== 'string' || !isAddress(o.receiver)) return null;
+  if (!isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) return null;
+
+  // chain/mode/feePayer/menu は @handle storefront と同一規則 (単一情報源)。
+  const parts = validateStorefrontParts(o);
+  if (!parts) return null;
+
+  // avatar (任意・https のみ)。不正/空は黙って除外 (注文は壊さない・socials と同じ寛容さ)。
+  const avatar = isHttpsUrl(o.avatar) ? o.avatar : undefined;
+
+  // socials (任意・https のみ・≤ SOCIALS_MAX・表示順保持)。不正 URL は黙って除外 (注文は壊さない)。
+  const socials = Array.isArray(o.socials)
+    ? o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX)
+    : [];
 
   const config: MobileOrderConfig = {
     receiver: o.receiver,
-    chain: o.chain,
+    chain: parts.chain,
     shopName: o.shopName,
-    mode: o.mode,
-    feePayer: o.feePayer,
+    mode: parts.mode,
+    feePayer: parts.feePayer,
     socials,
-    menu,
+    menu: parts.menu,
   };
   if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
   return config;

@@ -6,6 +6,7 @@ import {
   encodeOrderConfig,
   decodeOrderConfig,
   validateOrderConfig,
+  validateStorefrontParts,
   buildOrderUrl,
   safeHttpUrl,
   ORDER_PATH,
@@ -204,6 +205,42 @@ describe('mobileOrder: validateOrderConfig は decode と検証を共有 (単一
   it('decode は validateOrderConfig に委譲する (往復が validate と一致)', () => {
     const c = baseConfig();
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(validateOrderConfig(c));
+  });
+});
+
+describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情報源)', () => {
+  const good = {
+    chain: 'polygon',
+    mode: 'storefront',
+    feePayer: 'merchant',
+    menu: [{ id: 'a', name: 'A', price: '500' }],
+  };
+  it('valid な {chain,mode,feePayer,menu} を返す', () => {
+    expect(validateStorefrontParts(good)).toEqual(good);
+  });
+  it('chain が JPYC チェーンでない → null', () => {
+    expect(validateStorefrontParts({ ...good, chain: 'base' })).toBeNull();
+    expect(validateStorefrontParts({ ...good, chain: 'polygonn' })).toBeNull();
+  });
+  it('mode / feePayer が enum 外 → null', () => {
+    expect(validateStorefrontParts({ ...good, mode: 'delivery' })).toBeNull();
+    expect(validateStorefrontParts({ ...good, feePayer: 'platform' })).toBeNull();
+  });
+  it('menu が空 / 上限超過 → null', () => {
+    expect(validateStorefrontParts({ ...good, menu: [] })).toBeNull();
+    expect(
+      validateStorefrontParts({
+        ...good,
+        menu: Array.from({ length: MENU_MAX + 1 }, (_, i) => ({ id: `i${i}`, name: 'x', price: '1' })),
+      }),
+    ).toBeNull();
+  });
+  it('menu 要素が不正 (価格0) → null', () => {
+    expect(validateStorefrontParts({ ...good, menu: [{ id: 'a', name: 'A', price: '0' }] })).toBeNull();
+  });
+  it('非オブジェクト → null', () => {
+    expect(validateStorefrontParts(null)).toBeNull();
+    expect(validateStorefrontParts('x')).toBeNull();
   });
 });
 

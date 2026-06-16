@@ -13,6 +13,7 @@ import {
   configToSearchParams,
   parseHandleRecord,
   serializeHandleRecord,
+  handleStorefrontConfig,
   MAX_HANDLES_PER_WALLET,
   MAX_PROFILE_LINKS,
   DEFAULT_RECEIVE_METHODS,
@@ -369,6 +370,30 @@ describe('parseHandleRecord', () => {
     expect(parsed?.profile?.socials).toEqual(['https://x.com/good']);
     expect(parsed?.profile?.links).toEqual([{ label: 'good', url: 'https://x.com' }]);
   });
+  it('parses + round-trips a storefront (menu/chain/mode)', () => {
+    const withStore: HandleRecord = {
+      ...good,
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
+      },
+    };
+    expect(parseHandleRecord(serializeHandleRecord(withStore))).toEqual(withStore);
+  });
+  it('drops a malformed storefront but keeps the tip config + profile', () => {
+    const rec = {
+      ...good,
+      // base は JPYC チェーンでない → storefront は丸ごと drop (tip/profile は残す)。
+      storefront: { chain: 'base', mode: 'storefront', feePayer: 'merchant', menu: [{ id: 'a', name: 'x', price: '1' }] },
+    };
+    const parsed = parseHandleRecord(JSON.stringify(rec));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.storefront).toBeUndefined();
+    expect(parsed?.config.name).toBe('Alice');
+    expect(parsed?.profile?.bio).toBe('hi');
+  });
   it('returns null for null / malformed JSON', () => {
     expect(parseHandleRecord(null)).toBeNull();
     expect(parseHandleRecord('not json')).toBeNull();
@@ -387,6 +412,48 @@ describe('parseHandleRecord', () => {
         JSON.stringify({ ...good, config: { to: ADDR, methods: [{ token: 'jpyc' }] } }),
       ),
     ).toBeNull();
+  });
+});
+
+describe('handleStorefrontConfig', () => {
+  const base: HandleRecord = {
+    owner: ADDR,
+    config: { to: ADDR, name: 'テスト珈琲店', methods: [{ token: 'jpyc', chain: 'polygon' }] },
+    profile: { avatar: 'https://img.example/icon.png', socials: ['https://x.com/shop'] },
+    storefront: {
+      chain: 'kaia',
+      mode: 'storefront',
+      feePayer: 'merchant',
+      menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
+    },
+    createdAt: 1,
+    updatedAt: 2,
+  };
+
+  it('storefront 無しは null', () => {
+    const noStore: HandleRecord = { owner: ADDR, config: base.config, createdAt: 1, updatedAt: 2 };
+    expect(handleStorefrontConfig(noStore, 'shop')).toBeNull();
+  });
+
+  it('identity を handle 由来で合成して MobileOrderConfig を返す (受取先/店名/アイコン/SNS)', () => {
+    const config = handleStorefrontConfig(base, 'shop');
+    expect(config).not.toBeNull();
+    expect(config?.receiver.toLowerCase()).toBe(ADDR.toLowerCase());
+    expect(config?.shopName).toBe('テスト珈琲店');
+    expect(config?.avatar).toBe('https://img.example/icon.png');
+    expect(config?.socials).toEqual(['https://x.com/shop']);
+    expect(config?.chain).toBe('kaia'); // storefront 側のチェーン (tip method と独立)
+    expect(config?.menu).toEqual([{ id: 'a', name: 'ブレンド', price: '500' }]);
+  });
+
+  it('config.name が無ければ @handle を店名にフォールバック', () => {
+    const noName: HandleRecord = { ...base, config: { ...base.config, name: undefined } };
+    expect(handleStorefrontConfig(noName, 'shop')?.shopName).toBe('@shop');
+  });
+
+  it('受取先が不正なら null (validateOrderConfig 委譲)', () => {
+    const badTo: HandleRecord = { ...base, config: { ...base.config, to: 'not-an-address' } };
+    expect(handleStorefrontConfig(badTo, 'shop')).toBeNull();
   });
 });
 

@@ -17,6 +17,12 @@ import {
 } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
 import { buildTipPath, parseTipParams, type TipParams } from '@/lib/url';
+import {
+  validateStorefrontParts,
+  validateOrderConfig,
+  type StorefrontParts,
+  type MobileOrderConfig,
+} from '@/lib/mobileOrder';
 
 // 1 wallet が保有できる handle の上限 (squatting 抑制・D2)。
 export const MAX_HANDLES_PER_WALLET = 3;
@@ -156,8 +162,35 @@ export interface HandleRecord {
   owner: string; // 所有 wallet (checksum address)
   config: HandleTipConfig;
   profile?: HandleProfile;
+  // モバイルオーダー店舗 (open-pay.jp/@shop = 固定店舗 URL)。店舗固有部分 (menu/chain/mode) のみ
+  // 保存し、identity (受取先/店名/アイコン/SNS) は config/profile から合成 (handleStorefrontConfig)。
+  storefront?: StorefrontParts;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * handle レコード + 保存済み storefront → 顧客向け MobileOrderConfig (無ければ null)。
+ * identity は handle 由来: receiver=config.to / shopName=config.name||@handle /
+ * avatar=profile.avatar / socials=profile.socials。最終検証は validateOrderConfig に委譲
+ * (storefront と公開ページの単一情報源)。受取先などが不正なら null。
+ */
+export function handleStorefrontConfig(
+  record: HandleRecord,
+  handle: string,
+): MobileOrderConfig | null {
+  const sf = record.storefront;
+  if (!sf) return null;
+  return validateOrderConfig({
+    receiver: record.config.to,
+    chain: sf.chain,
+    shopName: record.config.name?.trim() || `@${handle}`,
+    avatar: record.profile?.avatar,
+    mode: sf.mode,
+    feePayer: sf.feePayer,
+    socials: record.profile?.socials ?? [],
+    menu: sf.menu,
+  });
 }
 
 // config → TipParams (TipForm / OGP に渡す)。to は保存時に検証済みなので Address とみなす。
@@ -611,6 +644,9 @@ export function parseHandleRecord(json: string | null): HandleRecord | null {
   const config = normalizeStoredConfig(rec.config);
   if (!config) return null;
   const profile = parseStoredProfile(rec.profile);
+  // storefront も寛容に読む (壊れていれば店舗無し扱い・@handle の tip/profile は落とさない)。
+  // 検証規則は mobileOrder と単一情報源 (validateStorefrontParts)。
+  const storefront = validateStorefrontParts(rec.storefront);
   const record: HandleRecord = {
     owner: rec.owner,
     config,
@@ -618,6 +654,7 @@ export function parseHandleRecord(json: string | null): HandleRecord | null {
     updatedAt: rec.updatedAt,
   };
   if (profile) record.profile = profile;
+  if (storefront) record.storefront = storefront;
   return record;
 }
 
