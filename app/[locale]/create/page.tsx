@@ -93,7 +93,9 @@ export default function CreatePage() {
         </div>
       )}
       {tab === 'profile' && env.enableHandles && <HandleProfileBuilder />}
-      {tab === 'mobileOrder' && env.enableMobileOrder && <MobileOrderBuilder />}
+      {tab === 'mobileOrder' && env.enableMobileOrder && (
+        <MobileOrderBuilder onManageProducts={() => setTab('register')} />
+      )}
 
       <MiniHistoryRecent />
 

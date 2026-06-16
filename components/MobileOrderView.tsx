@@ -40,11 +40,17 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
     setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) }));
 
   // qty>0 の行を CheckoutItem[] へ (表示順維持)。決済額は /checkout が items から再計算する。
+  // 税率/税区分 (presets 由来) も渡し、/checkout のレシート・履歴・freee に 小計/うち税額 を反映。
   const cartItems = useMemo<CheckoutItem[]>(
     () =>
       config.menu
         .filter((m) => (qty[m.id] ?? 0) > 0)
-        .map((m) => ({ name: m.name, qty: qty[m.id], price: m.price })),
+        .map((m) => {
+          const item: CheckoutItem = { name: m.name, qty: qty[m.id], price: m.price };
+          if (typeof m.taxRate === 'number') item.taxRate = m.taxRate;
+          if (m.taxCategory) item.taxCategory = m.taxCategory;
+          return item;
+        }),
     [config.menu, qty],
   );
 

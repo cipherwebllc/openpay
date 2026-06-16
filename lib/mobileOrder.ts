@@ -11,6 +11,7 @@
 
 import { isAddress, type Address } from 'viem';
 import { isJpycChainSlug, type JpycChainSlug } from './chains';
+import { isTaxCategory, type TaxCategory } from './tax';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
 export type FeePayer = 'merchant' | 'customer'; // 3% を店舗負担 | 顧客上乗せ (preorder 時のみ意味を持つ)
@@ -25,6 +26,10 @@ export type MenuItem = {
   /** 人間可読 decimal (JPYC 単位、例 "500")。 */
   price: string;
   visual?: MenuVisual;
+  /** 税率 % (0〜100・任意)。レジ商品 (presets) 由来 → /checkout のレシート小計/うち税額へ。 */
+  taxRate?: number;
+  /** 税区分 (任意・presets 由来)。 */
+  taxCategory?: TaxCategory;
 };
 
 export type ShopSocials = { x?: string; instagram?: string };
@@ -108,6 +113,13 @@ function validMenuItem(v: unknown): MenuItem | null {
   if (visual === null) return null; // 指定されたが不正
   const item: MenuItem = { id: o.id, name: o.name, price: o.price };
   if (visual) item.visual = visual;
+  // 税 (任意・accounting メタ)。不正なら黙って無視 (注文自体は壊さない・/checkout 側で再検証)。
+  if (typeof o.taxRate === 'number' && Number.isFinite(o.taxRate) && o.taxRate >= 0 && o.taxRate <= 100) {
+    item.taxRate = o.taxRate;
+  }
+  if (isTaxCategory(o.taxCategory)) {
+    item.taxCategory = o.taxCategory;
+  }
   return item;
 }
 

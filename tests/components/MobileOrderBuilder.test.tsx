@@ -57,28 +57,19 @@ describe('MobileOrderBuilder', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('flag ON で見出し + seed メニュー + 未充足チェックリストを描画', () => {
+  it('flag ON で見出し + レジ商品由来メニュー + 未充足チェックリストを描画', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.getByText('モバイルオーダーを作成')).toBeInTheDocument();
-    // seed メニュー 2 件が入力欄に出る
-    expect(screen.getByDisplayValue('ブレンドコーヒー')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('チーズケーキ')).toBeInTheDocument();
-    // 受取先/店名が未入力 → URL は出ず、必要項目リストが出る (ラベルと文言が重複するので
-    // チェックリストの箱 (needLabel の親) 内で assert する)。
+    // メニューはレジの有効な JPYC 商品 (useProductPresets の seed: コーヒー等) を読み取り表示。
+    expect(
+      screen.getByText('メニューは「レジ」タブの有効な JPYC 商品です（画像・税率も共有）。'),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('コーヒー').length).toBeGreaterThanOrEqual(1); // 一覧 + プレビュー
+    // 受取先/店名 未入力 → URL は出ず必要項目リスト (menu は seed 済みなので needMenu は出ない)。
     const box = screen.getByText('注文ページ URL の発行に必要:').closest('div')!;
     expect(within(box).getByText('受取ウォレットアドレス')).toBeInTheDocument();
     expect(within(box).getByText('店名')).toBeInTheDocument();
-  });
-
-  it('メニュー各行に可視ラベル付きの価格欄があり入力できる (placeholder 頼みにしない)', () => {
-    renderWithIntl(<MobileOrderBuilder />);
-    // Field の可視ラベル経由で価格欄が見つかる (seed 2 件)。
-    const priceInputs = screen.getAllByLabelText('価格（JPYC）');
-    expect(priceInputs.length).toBeGreaterThanOrEqual(2);
-    fireEvent.change(priceInputs[0], { target: { value: '777' } });
-    expect((priceInputs[0] as HTMLInputElement).value).toBe('777');
-    // 商品名欄もラベル付き。
-    expect(screen.getAllByLabelText('商品名').length).toBeGreaterThanOrEqual(2);
+    expect(within(box).queryByText('有効な JPYC 商品（レジで管理）を 1 件以上')).toBeNull();
   });
 
   it('受取チェーン select (JPYC) を描画 — 既定 Polygon + Kaia', () => {
@@ -95,7 +86,7 @@ describe('MobileOrderBuilder', () => {
     fireEvent.change(screen.getByPlaceholderText(/珈琲スタンド/), {
       target: { value: 'テスト店舗' },
     });
-    // seed メニューが既に有効行なので、受取先 + 店名で config が成立 → URL 表示。
+    // メニュー = レジ商品 seed (有効) なので、受取先 + 店名で config 成立 → URL 表示。
     expect(screen.getByText(/\/order\?s=/)).toBeInTheDocument();
     expect(screen.getByText('コピー')).toBeInTheDocument();
   });

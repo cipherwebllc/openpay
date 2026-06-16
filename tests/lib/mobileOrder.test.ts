@@ -203,3 +203,42 @@ describe('mobileOrder: safeHttpUrl (href/src 描画直前の XSS 二重防御)',
     expect(safeHttpUrl('not a url')).toBeUndefined();
   });
 });
+
+describe('mobileOrder: メニュー項目の税 (taxRate/taxCategory) — presets 由来', () => {
+  it('税率/税区分を持つ項目が往復一致', () => {
+    const c: MobileOrderConfig = {
+      receiver: RECEIVER,
+      chain: 'polygon',
+      shopName: '店',
+      mode: 'storefront',
+      feePayer: 'merchant',
+      socials: {},
+      menu: [{ id: 'a', name: 'A', price: '500', taxRate: 10, taxCategory: 'taxable_10' }],
+    };
+    expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
+  });
+
+  it('不正な税率/税区分は黙って無視 (項目自体は残る)', () => {
+    const enc = (menu: unknown) =>
+      Buffer.from(
+        JSON.stringify({
+          receiver: RECEIVER,
+          chain: 'polygon',
+          shopName: '店',
+          mode: 'storefront',
+          feePayer: 'merchant',
+          socials: {},
+          menu,
+        }),
+        'utf8',
+      )
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    const decoded = decodeOrderConfig(
+      enc([{ id: 'a', name: 'A', price: '500', taxRate: 999, taxCategory: 'bogus' }]),
+    );
+    expect(decoded?.menu[0]).toEqual({ id: 'a', name: 'A', price: '500' });
+  });
+});

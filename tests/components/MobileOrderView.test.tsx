@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { MobileOrderView } from '@/components/MobileOrderView';
+import { parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
 
 const config: MobileOrderConfig = {
@@ -72,6 +73,23 @@ describe('MobileOrderView', () => {
     expect(url.pathname).toBe('/checkout');
     expect(url.searchParams.get('to')?.toLowerCase()).toBe(config.receiver.toLowerCase());
     expect(url.searchParams.get('chain')).toBe('kaia');
+  });
+
+  it('税率付き商品はカート→/checkout の items に税率/税区分が伝播する (レシート小計/うち税額)', () => {
+    const taxed: MobileOrderConfig = {
+      ...config,
+      menu: [{ id: 'a', name: '課税商品', price: '500', taxRate: 10, taxCategory: 'taxable_10' }],
+    };
+    renderWithIntl(<MobileOrderView config={taxed} />);
+    fireEvent.click(screen.getByRole('button', { name: '数量を増やす' }));
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const u = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
+    const parsed = parseCheckoutParams(u.searchParams);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.items[0].taxRate).toBe(10);
+      expect(parsed.params.items[0].taxCategory).toBe('taxable_10');
+    }
   });
 
   // 二重防御: 通常 config は validateOrderConfig で https のみに検証済みだが、検証を

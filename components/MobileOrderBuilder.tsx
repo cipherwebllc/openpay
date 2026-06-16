@@ -1,12 +1,12 @@
 'use client';
 
-// 「モバイルオーダー」タブ: 店舗が メニュー + 店舗設定 (店頭/事前・SNS) を編集し、
-// 顧客向け「注文ページ URL」(設定一式を base64url で同梱) を発行するビルダー。
-// レイアウトは他タブ (チップ/プロフ) と同じ 2 カラム: 左=編集 / 右=プレビュー + URL (sticky)。
-// 下書きは useMobileOrderDraft (localStorage)。flag `env.enableMobileOrder` OFF で何も描画しない。
+// 「モバイルオーダー」タブ: 店舗が 受取先 + 店舗設定 (店頭/事前・SNS) を編集し、顧客向け
+// 「注文ページ URL」(設定一式を base64url で同梱) を発行するビルダー。
+// **メニューは独立管理しない** — レジの商品プリセット (有効な JPYC 商品) を単一カタログとして
+// 共有・読み取り表示し、URL に焼き込む (商品の追加/編集/画像/税率は「レジ」タブで一元管理)。
+// レイアウトは他タブと同じ 2 カラム。下書きは useMobileOrderDraft。flag OFF で何も描画しない。
 //
-// ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P2 + 開示更新
-//   (P0) ゲート後。本タブは P1.2 = 設定/メニュー/URL のみ (本番 inert・money-path 非該当)。
+// ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P0/P2 ゲート後。
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -16,31 +16,18 @@ import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { StepCard } from '@/components/StepCard';
 import { LinkQrModal } from '@/components/LinkQrModal';
-import {
-  useMobileOrderDraft,
-  draftToConfig,
-  sanitizePriceInput,
-} from '@/hooks/useMobileOrderDraft';
+import { useMobileOrderDraft, draftToConfig, presetsToMenu } from '@/hooks/useMobileOrderDraft';
+import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import { JPYC_CHAINS, type JpycChainSlug } from '@/lib/chains';
-import {
-  buildOrderUrl,
-  safeHttpUrl,
-  JPYC_CHAIN_LABEL,
-  EMOJI_MAX,
-  MENU_MAX,
-  MENU_NAME_MAX,
-  SHOP_NAME_MAX,
-} from '@/lib/mobileOrder';
+import { buildOrderUrl, safeHttpUrl, JPYC_CHAIN_LABEL, SHOP_NAME_MAX } from '@/lib/mobileOrder';
 
 // QR を描く URL の上限長 (qrcode.react は長大入力で throw する)。超過時は QR を省略し
 // リンク/コピーのみ提供する (TipEmbedGenerator と同方針)。メニューが多いと URL が伸びる。
 const QR_MAX_URL_LEN = 1200;
-// 正の decimal (価格の妥当性ヒント表示用・lib/mobileOrder の isPositiveDecimal と同条件)。
-const POSITIVE_DECIMAL = /^\d{1,12}(\.\d{1,18})?$/;
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
@@ -63,10 +50,15 @@ function Field({
   );
 }
 
-export function MobileOrderBuilder() {
+export function MobileOrderBuilder({
+  onManageProducts,
+}: {
+  /** 「レジで商品を管理」導線 (create ページが register タブへ切替える)。 */
+  onManageProducts?: () => void;
+} = {}) {
   const t = useTranslations('MobileOrder');
-  const { settings: draft, setSettings, hydrated, setReceiver, addItem, updateItem, removeItem, moveItem } =
-    useMobileOrderDraft();
+  const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft();
+  const { presets } = useProductPresets();
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
   // 決済QR タブの受取先 (レジと同じく「引き継ぐ」ショートカット用)。
@@ -91,18 +83,19 @@ export function MobileOrderBuilder() {
     setReceiver,
   });
 
+  // メニュー = レジの有効な JPYC 商品 (単一カタログ)。
+  const menuItems = useMemo(() => presetsToMenu(presets), [presets]);
+
   const config = useMemo(
-    () => (hydrated ? draftToConfig(draft, effectiveReceiver) : null),
-    [hydrated, draft, effectiveReceiver],
+    () => (hydrated ? draftToConfig(draft, effectiveReceiver, presets) : null),
+    [hydrated, draft, effectiveReceiver, presets],
   );
   const orderUrl = config && origin ? buildOrderUrl(origin, config) : '';
 
   // URL が組めない理由 (右カラムのチェックリスト)。core 3 条件で導く。
   const hasReceiver = effectiveReceiver !== null;
   const hasShopName = draft.shopName.trim().length > 0;
-  const hasCompleteRow = draft.menu.some(
-    (m) => m.name.trim() !== '' && m.price.trim() !== '',
-  );
+  const hasMenu = menuItems.length > 0;
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
 
@@ -210,7 +203,7 @@ export function MobileOrderBuilder() {
               </fieldset>
 
               {/* 手数料の負担者は事前モバイルオーダー時のみ意味を持つ (店頭は運営負担)。
-                  ⚠️ 料率はここでは表示しない (P2/P0 ゲート)。 */}
+                  ⚠️ 料率はここでは表示しない (P0/P2 ゲート)。 */}
               {draft.mode === 'preorder' && (
                 <fieldset>
                   <legend className="text-sm font-medium text-slate-700">{t('feePayerLabel')}</legend>
@@ -257,132 +250,49 @@ export function MobileOrderBuilder() {
             </div>
           </StepCard>
 
-          {/* ③ メニュー */}
+          {/* ③ メニュー = レジの有効な JPYC 商品 (読み取り専用・編集はレジで) */}
           <StepCard step={3} icon={UtensilsCrossed} title={t('stepMenuTitle')}>
             <div className="space-y-3">
-              {draft.menu.map((m, i) => {
-                const priceInvalid = m.price.trim() !== '' && !POSITIVE_DECIMAL.test(m.price.trim());
-                return (
-                  <div key={m.id} className="rounded-xl border border-slate-200 p-3">
-                    <div className="flex items-start gap-2">
-                      <div className="min-w-0 flex-1 space-y-2">
-                        {/* 各欄に可視ラベル (商品名/価格/画像・絵文字) を付け、価格欄を見つけやすくする。 */}
-                        <Field label={t('itemNameLabel')}>
-                          <input
-                            type="text"
-                            value={m.name}
-                            maxLength={MENU_NAME_MAX}
-                            placeholder={t('itemNamePlaceholder')}
-                            onChange={(e) => updateItem(m.id, { name: e.target.value })}
-                            className={inputClass}
-                          />
-                        </Field>
-                        <div className="flex gap-2">
-                          <div className="flex-1">
-                            <Field label={t('itemPriceLabel')}>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={m.price}
-                                placeholder={t('itemPricePlaceholder')}
-                                onChange={(e) => updateItem(m.id, { price: sanitizePriceInput(e.target.value) })}
-                                className={`${inputClass} ${priceInvalid ? 'border-red-400' : ''}`}
-                              />
-                            </Field>
-                          </div>
-                          <div className="w-32">
-                            <Field label={t('visualLabel')}>
-                              <select
-                                value={m.visualKind}
-                                onChange={(e) =>
-                                  updateItem(m.id, {
-                                    visualKind: e.target.value as typeof m.visualKind,
-                                  })
-                                }
-                                className={inputClass}
-                              >
-                                <option value="none">{t('visualNone')}</option>
-                                <option value="emoji">{t('visualEmoji')}</option>
-                                <option value="image">{t('visualImage')}</option>
-                              </select>
-                            </Field>
-                          </div>
-                        </div>
-                        {priceInvalid && <p className="text-xs text-red-600">{t('priceInvalid')}</p>}
-                        {m.visualKind === 'emoji' && (
-                          <Field label={t('visualEmoji')}>
-                            <input
-                              type="text"
-                              value={m.emoji}
-                              maxLength={EMOJI_MAX}
-                              placeholder={t('emojiPlaceholder')}
-                              onChange={(e) => updateItem(m.id, { emoji: e.target.value })}
-                              className={inputClass}
-                            />
-                          </Field>
-                        )}
-                        {m.visualKind === 'image' && (
-                          <Field label={t('visualImage')} hint={t('imageHttpsHint')}>
-                            <input
-                              type="url"
-                              value={m.imageUrl}
-                              placeholder="https://"
-                              onChange={(e) => updateItem(m.id, { imageUrl: e.target.value })}
-                              className={inputClass}
-                            />
-                          </Field>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 flex-col items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => moveItem(m.id, 'up')}
-                          disabled={i === 0}
-                          aria-label={t('moveUp')}
-                          title={t('moveUp')}
-                          className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveItem(m.id, 'down')}
-                          disabled={i >= draft.menu.length - 1}
-                          aria-label={t('moveDown')}
-                          title={t('moveDown')}
-                          className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
-                        >
-                          ▼
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(m.id)}
-                          aria-label={t('removeItem')}
-                          title={t('removeItem')}
-                          className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              <p className="text-sm text-slate-500">{t('menuFromPresetsNote')}</p>
+              {hydrated && menuItems.length === 0 ? (
+                <p className="text-xs text-amber-700">{t('menuEmptyNote')}</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                  {menuItems.map((item) => {
+                    const imgUrl =
+                      item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
+                    return (
+                      <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                        <span className="flex min-w-0 items-center gap-2">
+                          {imgUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={imgUrl} alt="" className="h-7 w-7 rounded object-cover" />
+                          )}
+                          <span className="truncate text-slate-800">{item.name}</span>
+                        </span>
+                        <span className="shrink-0 font-medium text-slate-900">{item.price} JPYC</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
               <div className="flex items-center justify-between">
-                {draft.menu.length < MENU_MAX ? (
+                {onManageProducts ? (
                   <button
                     type="button"
-                    onClick={addItem}
+                    onClick={onManageProducts}
                     className="text-sm font-medium text-brand hover:underline"
                   >
-                    ＋ {t('addItem')}
+                    {t('manageInRegister')}
                   </button>
                 ) : (
                   <span />
                 )}
-                <span className="text-xs text-slate-400">
-                  {t('menuCount', { count: draft.menu.length, max: MENU_MAX })}
-                </span>
+                {menuItems.length > 0 && (
+                  <span className="text-xs text-slate-400">
+                    {t('menuItemsCount', { count: menuItems.length })}
+                  </span>
+                )}
               </div>
             </div>
           </StepCard>
@@ -398,13 +308,12 @@ export function MobileOrderBuilder() {
                     {draft.shopName.trim() || t('previewShopPlaceholder')}
                   </p>
                   <ul className="mt-3 space-y-1.5">
-                    {(config?.menu ?? []).map((item) => {
+                    {menuItems.map((item) => {
                       const imgUrl =
                         item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
                       return (
                         <li key={item.id} className="flex items-center justify-between gap-2 text-sm">
                           <span className="flex min-w-0 items-center gap-1.5">
-                            {item.visual?.kind === 'emoji' && <span aria-hidden>{item.visual.value}</span>}
                             {imgUrl && (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img src={imgUrl} alt="" className="h-5 w-5 rounded object-cover" />
@@ -416,7 +325,9 @@ export function MobileOrderBuilder() {
                       );
                     })}
                   </ul>
-                  {!config && <p className="mt-2 text-center text-xs text-slate-400">{t('previewNoMenu')}</p>}
+                  {menuItems.length === 0 && (
+                    <p className="mt-2 text-center text-xs text-slate-400">{t('previewNoMenu')}</p>
+                  )}
                 </div>
               </div>
             )}
@@ -463,8 +374,8 @@ export function MobileOrderBuilder() {
                   <ul className="mt-1 list-inside list-disc space-y-0.5">
                     {!hasReceiver && <li>{t('needReceiver')}</li>}
                     {!hasShopName && <li>{t('needShopName')}</li>}
-                    {!hasCompleteRow && <li>{t('needMenu')}</li>}
-                    {hasReceiver && hasShopName && hasCompleteRow && <li>{t('needValid')}</li>}
+                    {!hasMenu && <li>{t('needMenu')}</li>}
+                    {hasReceiver && hasShopName && hasMenu && <li>{t('needValid')}</li>}
                   </ul>
                 </div>
               )}
