@@ -34,6 +34,28 @@ describe('MobileOrderView', () => {
     expect(screen.getByText('100 JPYC')).toBeInTheDocument();
   });
 
+  it('カテゴリーがあれば見出し別にグループ化して描画 (2カラムカード)', () => {
+    const categorized: MobileOrderConfig = {
+      ...config,
+      menu: [
+        { id: 'a', name: 'ブレンド', price: '500', category: 'ドリンク' },
+        { id: 'b', name: 'チーズケーキ', price: '650', category: 'フード' },
+        { id: 'c', name: 'カフェラテ', price: '600', category: 'ドリンク' },
+      ],
+    };
+    renderWithIntl(<MobileOrderView config={categorized} />);
+    expect(screen.getByText('ドリンク')).toBeInTheDocument();
+    expect(screen.getByText('フード')).toBeInTheDocument();
+    expect(screen.getByText('ブレンド')).toBeInTheDocument();
+    expect(screen.getByText('カフェラテ')).toBeInTheDocument();
+  });
+
+  it('カテゴリーが無ければ見出し (その他) を出さない', () => {
+    // base config の menu は category 無し → 単一グリッド・見出しなし。
+    renderWithIntl(<MobileOrderView config={config} />);
+    expect(screen.queryByText('その他')).toBeNull();
+  });
+
   it('絵文字はテキスト・画像は <img> で描画', () => {
     // 画像は装飾扱い (alt="" → role=presentation) なので src で取得する。
     const { container } = renderWithIntl(<MobileOrderView config={config} />);

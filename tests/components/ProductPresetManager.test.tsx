@@ -96,6 +96,26 @@ describe('ProductPresetManager', () => {
     );
   });
 
+  it('カテゴリー編集で updatePreset を呼ぶ', () => {
+    const fns = setup([preset({ id: 'a' })]);
+    // 行内カテゴリー入力 (add フォームより前に出る) を編集。
+    const catInputs = screen.getAllByPlaceholderText('例: ドリンク');
+    fireEvent.change(catInputs[0], { target: { value: 'ドリンク' } });
+    expect(fns.updatePreset).toHaveBeenCalledWith('a', { category: 'ドリンク' });
+  });
+
+  it('追加フォーム: カテゴリーも addPreset に渡す', async () => {
+    const user = userEvent.setup();
+    const fns = setup([]); // 空 → カテゴリー入力は add フォームの 1 つだけ
+    await user.type(screen.getByPlaceholderText('例: コーヒー'), 'カフェラテ');
+    await user.type(screen.getByPlaceholderText('500'), '600');
+    await user.type(screen.getByPlaceholderText('例: ドリンク'), 'ドリンク');
+    await user.click(screen.getByRole('button', { name: '追加' }));
+    expect(fns.addPreset).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'ドリンク' }),
+    );
+  });
+
   it('プリセットが空のとき empty メッセージを表示', () => {
     setup([]);
     expect(

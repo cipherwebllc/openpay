@@ -28,6 +28,8 @@ export type ProductPreset = {
   memo: string | null;
   /** 商品画像 URL (https のみ・任意)。レジ一覧サムネ + モバイルオーダーのメニュー画像で共有。 */
   image?: string;
+  /** カテゴリー名 (任意・自由入力)。モバイルオーダー公開ページで見出し別にグループ化。 */
+  category?: string;
   /** 表示順 (= 配列 index をミラー)。 */
   sortOrder: number;
   enabled: boolean;
@@ -42,6 +44,7 @@ type ProductPresetStore = {
 const STORAGE_KEY = 'openpay:product-presets:v1';
 export const PRESET_NAME_MAX = 80;
 export const PRESET_MEMO_MAX = 200;
+export const PRESET_CATEGORY_MAX = 24;
 export const PRESET_MAX = 100;
 const RECEIPT_PREFIX = 'R';
 
@@ -100,6 +103,7 @@ function sanitizePreset(raw: unknown, index: number): ProductPreset | null {
     taxCategory: isTaxCategory(o.taxCategory) ? o.taxCategory : null,
     memo: typeof o.memo === 'string' ? clampStr(o.memo, PRESET_MEMO_MAX) || null : null,
     image: sanitizeImage(o.image),
+    category: clampStr(o.category, PRESET_CATEGORY_MAX) || undefined,
     sortOrder: index,
     enabled: o.enabled !== false, // 既定 true
   };
@@ -157,6 +161,7 @@ export function useProductPresets() {
           unitPrice: sanitizePrice(input.unitPrice),
           memo: input.memo ? clampStr(input.memo, PRESET_MEMO_MAX) || null : null,
           image: sanitizeImage(input.image),
+          category: clampStr(input.category, PRESET_CATEGORY_MAX) || undefined,
           id: randomId(),
           sortOrder: s.presets.length,
         };

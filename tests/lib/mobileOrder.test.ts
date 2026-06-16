@@ -7,7 +7,9 @@ import {
   decodeOrderConfig,
   validateOrderConfig,
   validateStorefrontParts,
+  groupMenuByCategory,
   buildOrderUrl,
+  type MenuItem,
   safeHttpUrl,
   ORDER_PATH,
   MENU_MAX,
@@ -258,6 +260,63 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     expect(r).not.toBeNull();
     expect(r?.avatar).toBeUndefined();
     expect(r?.socials).toBeUndefined();
+  });
+});
+
+describe('mobileOrder: category (メニューのカテゴリー)', () => {
+  it('category 付き項目が往復一致 (validMenuItem が保持)', () => {
+    const c: MobileOrderConfig = {
+      ...baseConfig(),
+      menu: [{ id: 'a', name: 'A', price: '500', category: 'ドリンク' }],
+    };
+    expect(decodeOrderConfig(encodeOrderConfig(c))?.menu[0].category).toBe('ドリンク');
+  });
+  it('空/長すぎる category は無視 (項目自体は残る)', () => {
+    const enc = (cat: unknown) =>
+      Buffer.from(
+        JSON.stringify({
+          ...baseConfig(),
+          menu: [{ id: 'a', name: 'A', price: '500', category: cat }],
+        }),
+        'utf8',
+      )
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    expect(decodeOrderConfig(enc(''))?.menu[0].category).toBeUndefined();
+    expect(decodeOrderConfig(enc('あ'.repeat(25)))?.menu[0].category).toBeUndefined();
+    expect(decodeOrderConfig(enc('あ'.repeat(25)))?.menu[0].name).toBe('A'); // 項目は残る
+  });
+});
+
+describe('mobileOrder: groupMenuByCategory', () => {
+  const item = (id: string, category?: string): MenuItem => ({
+    id,
+    name: id,
+    price: '100',
+    ...(category ? { category } : {}),
+  });
+  it('カテゴリー出現順にグループ化・各グループ内は menu 順', () => {
+    const groups = groupMenuByCategory([
+      item('a', 'ドリンク'),
+      item('b', 'フード'),
+      item('c', 'ドリンク'),
+      item('d'),
+    ]);
+    expect(groups.map((g) => g.category)).toEqual(['ドリンク', 'フード', null]);
+    expect(groups[0].items.map((i) => i.id)).toEqual(['a', 'c']);
+    expect(groups[1].items.map((i) => i.id)).toEqual(['b']);
+    expect(groups[2].items.map((i) => i.id)).toEqual(['d']); // 未分類
+  });
+  it('全て未分類なら 1 グループ (category:null)', () => {
+    const groups = groupMenuByCategory([item('a'), item('b')]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].category).toBeNull();
+    expect(groups[0].items).toHaveLength(2);
+  });
+  it('空メニューは空配列', () => {
+    expect(groupMenuByCategory([])).toEqual([]);
   });
 });
 

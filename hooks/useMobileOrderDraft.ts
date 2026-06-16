@@ -95,6 +95,9 @@ function presetToMenuItem(p: ProductPreset): MenuItem | null {
     item.taxRate = p.taxRate;
   }
   if (p.taxCategory) item.taxCategory = p.taxCategory;
+  // 公開ページのカテゴリー見出し用。trim して揃える (updatePreset は sanitize を通らないため・
+  // 「ドリンク」と「ドリンク 」を別グループにしない)。空は付けない。
+  if (p.category && p.category.trim()) item.category = p.category.trim();
   return item;
 }
 

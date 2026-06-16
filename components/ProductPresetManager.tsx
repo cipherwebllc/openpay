@@ -29,6 +29,7 @@ const EMPTY_DRAFT = {
   token: 'jpyc' as TokenSymbol,
   taxCategory: 'taxable_10' as TaxCategory,
   image: '',
+  category: '',
 };
 
 export function ProductPresetManager({
@@ -55,6 +56,7 @@ export function ProductPresetManager({
       memo: null,
       enabled: true,
       image: draft.image.trim() || undefined,
+      category: draft.category.trim() || undefined,
     });
     setDraft(EMPTY_DRAFT);
   }
@@ -154,12 +156,21 @@ export function ProductPresetManager({
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
               </div>
-              {/* 画像は専用の全幅行へ (商品名欄を潰さないため)。 */}
+              {/* カテゴリー + 画像は専用の全幅行へ (商品名欄を潰さないため)。 */}
               <div className="flex w-full items-center gap-2">
                 {p.image && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
                 )}
+                <input
+                  type="text"
+                  value={p.category ?? ''}
+                  aria-label={t('categoryLabel')}
+                  placeholder={t('categoryPlaceholder')}
+                  maxLength={24}
+                  onChange={(e) => updatePreset(p.id, { category: e.target.value || undefined })}
+                  className="w-28 shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                />
                 <input
                   type="url"
                   value={p.image ?? ''}
@@ -232,6 +243,16 @@ export function ProductPresetManager({
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label={t('categoryLabel')}>
+            <input
+              type="text"
+              value={draft.category}
+              onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
+              placeholder={t('categoryPlaceholder')}
+              maxLength={24}
+              className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+            />
           </Field>
           <Field label={t('imageLabel')}>
             <input

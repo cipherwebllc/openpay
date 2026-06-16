@@ -28,6 +28,7 @@ function preset(over: Partial<ProductPreset>): ProductPreset {
     taxCategory: over.taxCategory ?? null,
     memo: over.memo ?? null,
     image: over.image,
+    category: over.category,
     sortOrder: over.sortOrder ?? 0,
     enabled: over.enabled ?? true,
   };
@@ -78,6 +79,15 @@ describe('presetsToMenu: 有効な JPYC presets → MenuItem[]', () => {
       },
       { id: 'b', name: '水', price: '100' },
     ]);
+  });
+
+  it('preset の category を MenuItem に引き継ぐ (trim・公開ページのカテゴリー見出し用)', () => {
+    const menu = presetsToMenu([
+      preset({ id: 'a', name: 'A', unitPrice: '100', category: '  ドリンク  ' }),
+      preset({ id: 'b', name: 'B', unitPrice: '200' }), // category 無し
+    ]);
+    expect(menu[0].category).toBe('ドリンク');
+    expect(menu[1].category).toBeUndefined();
   });
 
   it('無効 (disabled / 非jpyc / 価格0 / 名前空) は除外、非https画像は visual のみ落とす', () => {
