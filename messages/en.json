@@ -1674,6 +1674,7 @@
     "previewNoMenu": "Add at least one menu item to preview.",
     "orderUrlTitle": "Order-page URL",
     "orderUrlHint": "Share this URL / QR in-store or on social media so customers can open the order page.",
+    "shareAgainHint": "Changes auto-save, but URLs / QRs you already shared won't update. After editing the menu or settings, re-share the updated URL / QR.",
     "copy": "Copy",
     "copied": "Copied",
     "open": "Open",

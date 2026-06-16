@@ -1674,6 +1674,7 @@
     "previewNoMenu": "メニューを 1 件以上入力すると表示されます。",
     "orderUrlTitle": "注文ページ URL",
     "orderUrlHint": "この URL / QR を店頭や SNS で共有すると、顧客が注文ページを開けます。",
+    "shareAgainHint": "変更は自動保存されます。ただし、すでに渡した URL / QR には反映されません。メニューや設定を変えたら、更新後の URL / QR を共有し直してください。",
     "copy": "コピー",
     "copied": "コピーしました",
     "open": "開く",
