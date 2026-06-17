@@ -1054,3 +1054,74 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 - soft-gate (`/history` ぼかし) は回避可能 (生データは本人の localStorage・思想と整合)。サーバ強制は
   freee (`isEntitled(_,'pro')`) と CSV 由来データのみ。
 - 料金性質 (前払式該当性・決済額非連動の定額) の**弁護士確認は実績後に後ろ倒し** (合意済)。
+
+## §13 モバイル注文 / レジ システム利用料 go-live SOP
+
+決済コアは無料のまま、モバイル注文 (店頭 1% / 事前 3%) と レジ standard (7 月から 1%) の
+システム利用料を**経路非依存**で課金する。料金は決済と同一 tx 内で `FEE_RECEIVER` へ分割
+(ノンカストディ不変)。詳細実装は memory:project_mobile_order_fee。料率の真実点は
+`lib/mobileOrderFee.ts` (legal `DISCLOSED_MOBILE_ORDER_FEE` フェンス) と `RECOVER_FEE_BPS`
+(legal `DISCLOSED_RECOVER_FEE` フェンス)。
+
+### §13.1 既定 (現状 = inert・ロールバック先)
+- `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` / `NEXT_PUBLIC_ENABLE_REGISTER_FEE` 既定 **OFF**。
+  OFF では CheckoutForm が feeKind を分割せず、relay route が feeKind を無視 (従来 recover に倒す)、
+  MobileOrderView / RegisterMode が feeKind を URL に付けない = **完全 inert (本番挙動不変)**。
+- **この OFF の組み合わせが安全状態であり、ロールバック先でもある**。
+
+### §13.2 go-live 手順 (順序厳守)
+1. **先に testnet 実機 E2E (必須・§13.4)**。通すまで mainnet 点灯しない。
+   ⚠️ 本機能の on-chain settle は単体/統合テストでは forwarderRecover を **mock** しており**未実証**。
+   settle 機構は LIVE の recover (Polygon/Kaia/Avalanche 本番稼働) と同一だが、feeKind を nonce に
+   コミットした実 settle はこの手順が初回。
+2. **開示の同梱** (法務本文は条件付きでマージ済・施行日 2026-06-17):
+   - モバイル注文 fee 点灯時は `lib/news.ts` にお知らせ (モバイル注文システム利用料・店頭 1% / 事前 3%)
+     を**同一リリースで追加** (flag OFF 中は未提供機能の告知になるため未追加が正・点灯と同梱が正)。
+   - レジ fee は `RECOVER_FEE_BPS` の既存スケジュール + 「standard=無料」への carve-in (マージ済) に追従。
+3. `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` に実受領アドレスが設定済か確認 (mainnet 未設定は build throw)。
+4. **モバイル注文の対象 chain に forwarder が設定済か確認** (`NEXT_PUBLIC_JPYC_FORWARDER_<CHAIN>`)。
+   未設定 chain で mobile fee を点灯すると free 経路となり hook が `mobile_fee_requires_recover` を
+   throw → standard fallback (mobile fee は recover 経路必須・素通りはしない)。
+5. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
+   - モバイル注文公開: `NEXT_PUBLIC_ENABLE_MOBILE_ORDER=1` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY=1`
+     (受注が店主へ届く・KV 必須 §11) + `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE=1`。
+   - レジ利用料: `NEXT_PUBLIC_ENABLE_REGISTER_FEE=1` + (7 月から) `RECOVER_FEE_BPS=100`。
+     ⚠️ `RECOVER_FEE_BPS` は決済QR / relay の既存 recover 利用料と**共有**。7 月前は 0 = フラグ ON でも
+     レジ standard は無料。変更は開示済数値の変更 → legal フェンス (`DISCLOSED_RECOVER_FEE`) 確認必須。
+
+### §13.3 ロールバック (安全状態へ即復帰)
+- **最速 (課金全停止)**: 該当 flag を `0` に戻して再デプロイ → feeKind が付かず/無視され完全 inert。
+- **レジだけ止める**: `NEXT_PUBLIC_ENABLE_REGISTER_FEE=0` (RECOVER_FEE_BPS を 0 にすると決済QR/relay の
+  recover 利用料も全部 0 になるので注意)。
+- **コード巻き戻し**: 該当 commit を `git revert` (本機能は 9027b9c / 507e96c + 硬化 37dff56〜88c9036)。
+- ※ NEXT_PUBLIC_* は build-time inline のため env 変更には再デプロイが要る (Vercel)。
+
+### §13.4 testnet 実機 E2E (リリース前必須・未自動化の唯一の経路)
+flag ON + forwarder 設定済の testnet (Amoy / Fuji / Kairos) で実 settle を確認する。route テストは
+forwarderRecover を mock しているため、**実 on-chain 分割の実証はこの手順のみ**:
+1. **モバイル 店頭 (storefront・店舗負担)**: 注文 → 顧客は原価のみ支払い → settle で merchant = 原価−1%・
+   `FEE_RECEIVER` = 1% が同一 tx で着金することを explorer で確認。履歴/CSV が feeAmount (システム利用料) 記帳。
+2. **モバイル 事前 (preorder・顧客上乗せ)**: 客の表示総額 = 原価+3% → merchant = 原価満額・`FEE_RECEIVER` = 3%。
+3. **モバイル 事前 (preorder・店舗負担)**: 客 = 原価のみ → merchant = 原価−3%・`FEE_RECEIVER` = 3%。
+4. **改竄耐性**: 改ざんした feeValue で relay POST → `fee_value_mismatch` で拒否 (server 権威・率は再計算)。
+5. **forwarder 未設定 chain**: mobile fee 付き注文 → hook が `mobile_fee_requires_recover` で standard
+   fallback (free 経路で素通りしない) を確認。
+6. **レジ standard (`RECOVER_FEE_BPS=100` 相当)**: レジ JPYC standard 決済 → merchant = 売上−1%・
+   `FEE_RECEIVER` = 1% の 2-tx 分割。relay 経路は既存 recover のまま不変。USDC レジ standard = 0 (対象外)。
+
+### §13.5 監視
+- 既存の relay route ログ (`checkout.relay.failed` 等・§3.2) + `components/CheckoutForm.tsx` の
+  relay error effect で fee / relay 失敗が Sentry へ届く。fee 固有の専用 metric は現状なし
+  (relay tx に相乗り)。点灯直後は `FEE_RECEIVER` の着金 + `checkout.relay.*` を目視。
+- 起動時 `relay.jpyc.fee_disclosure_divergence` (recover の env↔開示乖離) は §12 同様 Sentry へ。
+  モバイル料率は静的定数で CI フェンス (`tests/lib/mobileOrderFeeDisclosure.test.ts`) が担保するため
+  runtime 診断は持たない (env を読む recover 版とは非対称・意図的)。
+
+### §13.6 既知の前提 / 制約 (accepted)
+- **standard 経路は client 主導**ゆえサーバ強制が原理的に不可 (feeKind 削除 / 手動 checkout リンクで
+  回避余地)。relay は on-chain 強制済。店舗負担ゆえ顧客に剥がす動機なし・店舗の回避はレジ不使用と同等。
+- **feeKind 申告で安い kind を主張可** (例: preorder を storefront と詐称)。server は率を**定数表から
+  再計算**するため率自体は下げられず、残余は過少徴収のみ (資金毀損なし)。
+- 決済QR (`/pay`)・チップ (`/tip`)・USDC・手動 checkout リンクは**対象外** (本機能で不変)。
+- 料金性質の弁護士確認は不要 (memory:project_fsa_clearance: % 連動でも資金決済法上の登録不要)・
+  税務は別 (税理士)。特商法 / 景表法の開示は条件付き本文 (施行日 2026-06-17) でマージ済。
