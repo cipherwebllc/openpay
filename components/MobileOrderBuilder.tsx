@@ -15,7 +15,7 @@ import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { StepCard } from '@/components/StepCard';
-import { SocialIcon } from '@/components/SocialIconLinks';
+import { SocialIcon, SocialIconLinks } from '@/components/SocialIconLinks';
 import { StorefrontPublishPanel } from '@/components/StorefrontPublishPanel';
 import { useMobileOrderDraft, presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useProductPresets } from '@/hooks/useProductPresets';
@@ -98,6 +98,10 @@ export function MobileOrderBuilder({
   // 店舗アイコンのプレビュー (https のみ・読込前検証)。無ければ店名の頭文字を円に表示。
   const avatarPreview = safeHttpUrl(draft.avatar.trim());
   const previewInitial = ([...draft.shopName.trim()][0] ?? '').toUpperCase();
+  // プレビュー用の SNS (https のみ・公開ページ MobileOrderView と同じ SocialIconLinks で描画)。
+  const socialPreview = draft.socials
+    .map((s) => safeHttpUrl(s.trim()))
+    .filter((u): u is string => Boolean(u));
 
   // @handle 公開用の店舗固有部分。受取先は @handle が権威だが、店名/アイコン/SNS は
   // ビルダーの設定をそのまま公開ページへ載せる (https 検証は validateStorefrontParts が行う)。
@@ -547,6 +551,12 @@ export function MobileOrderBuilder({
                       {draft.hours.trim() && <p className="truncate">{draft.hours.trim()}</p>}
                       {draft.address.trim() && <p className="truncate">{draft.address.trim()}</p>}
                       {draft.phone.trim() && <p className="truncate">{draft.phone.trim()}</p>}
+                    </div>
+                  )}
+                  {/* SNS アイコン (公開ページと同じ描画)。プレビューにも反映。 */}
+                  {socialPreview.length > 0 && (
+                    <div className="mt-2 flex justify-center">
+                      <SocialIconLinks urls={socialPreview} />
                     </div>
                   )}
                 </div>
