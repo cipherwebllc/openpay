@@ -173,6 +173,22 @@ describe('MobileOrderBuilder', () => {
     expect(takeout).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('プレビュー: SNS は店舗情報より前 (公開ページと同じヘッダー位置)', () => {
+    const { container } = renderWithIntl(<MobileOrderBuilder />);
+    // 営業時間 (店舗情報) + SNS を 1 件ずつ入力。
+    fireEvent.change(screen.getByPlaceholderText(/水曜定休/), { target: { value: '11:00-22:00' } });
+    fireEvent.click(screen.getByText(/SNS リンクを追加/));
+    fireEvent.change(screen.getByPlaceholderText('https://x.com/yourshop'), {
+      target: { value: 'https://x.com/myshop' },
+    });
+    // プレビューの SNS アンカー (SocialIconLinks) と店舗情報テキスト。
+    const sns = container.querySelector('a[href="https://x.com/myshop"]');
+    const hours = screen.getByText('11:00-22:00'); // プレビューの営業時間行 (input は value で別物)
+    expect(sns).not.toBeNull();
+    // SNS が DOM 上で店舗情報より前 = ヘッダー内 (店名/チェーン直下) の正しい位置。
+    expect(sns!.compareDocumentPosition(hours) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('既定 (店頭モード) では手数料の負担トグルを出さない', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.queryByText('手数料の負担')).toBeNull();
