@@ -122,9 +122,9 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(mo!.body.ja).toContain(`${preorder}%`); // 事前モバイルオーダー 3%
     expect(mo!.body.en).toContain(`${storefront}%`);
     expect(mo!.body.en).toContain(`${preorder}%`);
-    // 経路非依存 + gas-recovery とは別物 + 対象外 (/pay・チップ・通常リンク) を明記。
+    // 経路非依存 + 非二重課金 (gas-recovery と重複/加算しない) + 対象外 (/pay・チップ・通常リンク) を明記。
     expect(mo!.body.ja).toMatch(/経路を問わず|通常決済/);
-    expect(mo!.body.ja).toMatch(/別物/);
+    expect(mo!.body.ja).toMatch(/重複|加算され/);
     expect(mo!.body.ja).toMatch(/対象外/);
   });
 
