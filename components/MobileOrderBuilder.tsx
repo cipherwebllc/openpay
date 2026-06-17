@@ -119,6 +119,7 @@ export function MobileOrderBuilder({
         hours: draft.hours.trim() || undefined,
         phone: draft.phone.trim() || undefined,
         acceptingOrders: draft.acceptingOrders,
+        dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
         menu: menuItems,
       }
     : null;
@@ -357,6 +358,36 @@ export function MobileOrderBuilder({
                 </div>
                 <p className="mt-1 text-xs text-slate-400">
                   {draft.mode === 'storefront' ? t('modeHintStorefront') : t('modeHintPreorder')}
+                </p>
+              </fieldset>
+
+              {/* 提供形態 (テイクアウト / 店内)。店内なら公開ページで注文時にテーブル番号を入力させる。 */}
+              <fieldset>
+                <legend className="text-sm font-medium text-slate-700">{t('serviceLabel')}</legend>
+                <div className="mt-1 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+                  {(
+                    [
+                      [false, t('serviceTakeout')],
+                      [true, t('serviceDineIn')],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={String(value)}
+                      type="button"
+                      onClick={() => update({ dineIn: value })}
+                      aria-pressed={draft.dineIn === value}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                        draft.dineIn === value
+                          ? 'bg-white text-brand-dark shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-slate-400">
+                  {draft.dineIn ? t('serviceHintDineIn') : t('serviceHintTakeout')}
                 </p>
               </fieldset>
 

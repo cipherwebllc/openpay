@@ -1667,6 +1667,11 @@
     "modePreorder": "事前モバイルオーダー",
     "modeHintStorefront": "その場で注文・その場で受け取り（店内/店頭）。配送はありません。",
     "modeHintPreorder": "来店前にスマホから注文・事前決済。受け取りは店頭です（配送はありません）。",
+    "serviceLabel": "提供形態",
+    "serviceTakeout": "テイクアウト",
+    "serviceDineIn": "店内",
+    "serviceHintTakeout": "店頭での受け渡し。注文時のテーブル番号入力はありません。",
+    "serviceHintDineIn": "店内のテーブルで飲食。注文時に顧客がテーブル番号を入力します。",
     "feePayerLabel": "手数料の負担",
     "feePayerMerchant": "店舗が負担する",
     "feePayerCustomer": "顧客価格に上乗せする",
@@ -1731,6 +1736,10 @@
     "viewAddressLabel": "住所",
     "viewHoursLabel": "営業時間",
     "viewPhoneLabel": "電話番号",
-    "viewClosedNotice": "ただいま注文を受け付けていません"
+    "viewClosedNotice": "ただいま注文を受け付けていません",
+    "tableLabel": "テーブル番号",
+    "tablePlaceholder": "例: 12",
+    "tableRequired": "テーブル番号を入力してください",
+    "tableDescPrefix": "テーブル {table}"
   }
 }

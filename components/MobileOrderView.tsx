@@ -33,6 +33,9 @@ import {
   type MobileOrderConfig,
 } from '@/lib/mobileOrder';
 
+// 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
+const TABLE_NUMBER_MAX = 16;
+
 // アバター読込失敗/未設定時のフォールバック頭文字 (@handle と同じくコードポイント単位)。
 function initialOf(name: string): string {
   const n = name.trim();
@@ -55,6 +58,8 @@ export function MobileOrderView({
   const [qty, setQty] = useState<Record<string, number>>({});
   // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。
   const [cartOpen, setCartOpen] = useState(false);
+  // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
+  const [tableNumber, setTableNumber] = useState('');
 
   // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
   // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。
@@ -103,6 +108,12 @@ export function MobileOrderView({
       : '0';
   // カートマークのバッジ点数 (合計数量)。
   const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
+  // 店内 (dineIn) 時: テーブル番号を /checkout の description (→ 控え/履歴 memo) に載せ、
+  // 受け渡し先を記録する (後続のフルフィルメント = Nostr 通知 / QR 照合 でも引き継げる)。
+  const tableNum = config.dineIn ? tableNumber.trim() : '';
+  const orderDescription = tableNum ? t('tableDescPrefix', { table: tableNum }) : undefined;
+  // 店内なのにテーブル番号が未入力なら支払いを止める (どのテーブルか不明な注文を防ぐ)。
+  const needsTable = Boolean(config.dineIn) && tableNum.length === 0;
   const baseCheckoutUrl =
     origin && cartItems.length > 0 && !tooMany
       ? buildCheckoutUrl(origin, {
@@ -111,6 +122,7 @@ export function MobileOrderView({
           chain, // 顧客が選んだ受取チェーン (単一なら config.chain)
           gas: 'customer',
           items: cartItems,
+          description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
         })
       : '';
   // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
@@ -344,6 +356,26 @@ export function MobileOrderView({
           </p>
         ) : (
           <div className="space-y-3">
+            {/* 店内 (dineIn): テーブル番号 (必須)。未入力なら支払いボタンを無効化。 */}
+            {config.dineIn && (
+              <div>
+                <label htmlFor="mo-table" className="block text-sm font-medium text-slate-700">
+                  {t('tableLabel')}
+                </label>
+                <input
+                  id="mo-table"
+                  type="text"
+                  inputMode="numeric"
+                  value={tableNumber}
+                  onChange={(e) => setTableNumber(e.target.value.slice(0, TABLE_NUMBER_MAX))}
+                  placeholder={t('tablePlaceholder')}
+                  aria-required="true"
+                  aria-invalid={needsTable}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                />
+                {needsTable && <p className="mt-1 text-xs text-amber-700">{t('tableRequired')}</p>}
+              </div>
+            )}
             {/* ご注文内容 (合計の上)。カートマーク+点数のタップで明細を開閉。明細では −n+ で増減。 */}
             {cartOpen && (
               <ul className="space-y-2 border-b border-slate-100 pb-3">
@@ -406,12 +438,23 @@ export function MobileOrderView({
               <span className="text-base font-semibold text-slate-900">{totalHuman} JPYC</span>
             </button>
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
-            <a
-              href={checkoutUrl}
-              className="block rounded-xl bg-brand px-4 py-3 text-center text-sm font-semibold text-white hover:bg-brand-dark"
-            >
-              {t('payButton')}
-            </a>
+            {needsTable ? (
+              // テーブル番号 未入力 (店内): 支払いを止める。入力すればリンクへ切り替わる。
+              <button
+                type="button"
+                disabled
+                className="block w-full cursor-not-allowed rounded-xl bg-slate-300 px-4 py-3 text-center text-sm font-semibold text-white"
+              >
+                {t('payButton')}
+              </button>
+            ) : (
+              <a
+                href={checkoutUrl}
+                className="block rounded-xl bg-brand px-4 py-3 text-center text-sm font-semibold text-white hover:bg-brand-dark"
+              >
+                {t('payButton')}
+              </a>
+            )}
           </div>
         )}
       </section>

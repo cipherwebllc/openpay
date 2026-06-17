@@ -497,6 +497,16 @@ describe('handleStorefrontConfig', () => {
     };
     expect(handleStorefrontConfig(multi, 'shop')?.chains).toEqual(['kaia', 'polygon']);
   });
+
+  it('storefront の dineIn (店内・提供形態) を MobileOrderConfig へ載せる', () => {
+    const dineIn: HandleRecord = {
+      ...base,
+      storefront: { ...base.storefront!, dineIn: true },
+    };
+    expect(handleStorefrontConfig(dineIn, 'shop')?.dineIn).toBe(true);
+    // 未設定 (テイクアウト) は dineIn を持たない。
+    expect('dineIn' in (handleStorefrontConfig(base, 'shop') ?? {})).toBe(false);
+  });
 });
 
 describe('MAX_HANDLES_PER_WALLET', () => {

@@ -45,6 +45,7 @@ export interface MobileOrderDraft {
   hours: string; // 営業時間 (任意・自由記入)
   phone: string; // 電話番号 (任意・生入力)
   acceptingOrders: boolean; // 注文受付 (既定 true)。false で公開ページの支払いを止める。
+  dineIn: boolean; // 提供形態 (既定 false=テイクアウト)。true=店内 (注文時にテーブル番号を入力)。
 }
 
 const STORAGE_KEY = 'openpay:mobile-order-draft:v1';
@@ -68,6 +69,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   hours: '',
   phone: '',
   acceptingOrders: true, // 既定は受付中
+  dineIn: false, // 既定はテイクアウト・店頭受け渡し (テーブル番号入力なし)
 };
 
 // 旧 schema (menu フィールド) は無視される — メニューは presets が単一情報源になったため。
@@ -106,6 +108,8 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     phone: clampStr(loaded.phone, PHONE_MAX),
     // 既定は受付中 (true)。明示的に false のときだけ停止として復元。
     acceptingOrders: loaded.acceptingOrders === false ? false : true,
+    // 既定はテイクアウト (false)。明示的に true のときだけ店内 (テーブル番号) として復元。
+    dineIn: loaded.dineIn === true,
   };
 }
 
@@ -168,6 +172,8 @@ export function draftToConfig(
     hours: draft.hours.trim(),
     phone: draft.phone.trim(),
     acceptingOrders: draft.acceptingOrders,
+    // 店内のときだけ true が保存される (validateOrderConfig が round-trip 最小化)。
+    dineIn: draft.dineIn,
   });
 }
 

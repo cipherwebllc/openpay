@@ -198,6 +198,7 @@ export function handleStorefrontConfig(
     hours: sf.hours,
     phone: sf.phone,
     acceptingOrders: sf.acceptingOrders,
+    dineIn: sf.dineIn, // 提供形態 (店内ならテーブル番号入力・validateOrderConfig が再検証)
   });
 }
 

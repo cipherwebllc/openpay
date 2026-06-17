@@ -1667,6 +1667,11 @@
     "modePreorder": "Mobile pre-order",
     "modeHintStorefront": "Order and receive on the spot (in-store). No delivery.",
     "modeHintPreorder": "Order and prepay from a phone before arriving; pickup is in-store (no delivery).",
+    "serviceLabel": "Service style",
+    "serviceTakeout": "Takeout",
+    "serviceDineIn": "Dine-in",
+    "serviceHintTakeout": "Pickup at the counter. No table number is collected at order time.",
+    "serviceHintDineIn": "Dining at an in-store table. Customers enter their table number at order time.",
     "feePayerLabel": "Who pays the fee",
     "feePayerMerchant": "Shop absorbs it",
     "feePayerCustomer": "Add on top of customer price",
@@ -1731,6 +1736,10 @@
     "viewAddressLabel": "Address",
     "viewHoursLabel": "Hours",
     "viewPhoneLabel": "Phone",
-    "viewClosedNotice": "Not accepting orders right now"
+    "viewClosedNotice": "Not accepting orders right now",
+    "tableLabel": "Table number",
+    "tablePlaceholder": "e.g. 12",
+    "tableRequired": "Please enter your table number",
+    "tableDescPrefix": "Table {table}"
   }
 }

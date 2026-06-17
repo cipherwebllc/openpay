@@ -242,6 +242,39 @@ describe('MobileOrderView', () => {
     expect(screen.queryByText('ただいま注文を受け付けていません')).toBeNull();
   });
 
+  it('dineIn=店内: テーブル番号入力を出し、未入力は支払い無効・入力で有効化', () => {
+    renderWithIntl(<MobileOrderView config={{ ...config, dineIn: true }} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const input = screen.getByLabelText('テーブル番号');
+    expect(input).toBeInTheDocument();
+    // 未入力: 支払いリンクは無く (無効ボタン)、必須メッセージが出る。
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+    expect(screen.getByText('テーブル番号を入力してください')).toBeInTheDocument();
+    // テーブル番号を入力すると支払いリンクへ切り替わる。
+    fireEvent.change(input, { target: { value: '12' } });
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
+    expect(screen.queryByText('テーブル番号を入力してください')).toBeNull();
+  });
+
+  it('dineIn: テーブル番号を /checkout の description に載せる', () => {
+    renderWithIntl(<MobileOrderView config={{ ...config, dineIn: true }} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '7' } });
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const u = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
+    expect(u.searchParams.get('description')).toBe('テーブル 7');
+  });
+
+  it('テイクアウト (dineIn 未設定) はテーブル番号入力を出さず即支払い可', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByLabelText('テーブル番号')).toBeNull();
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const u = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
+    expect(u.searchParams.get('description')).toBeNull(); // テイクアウトは description 無し
+  });
+
   it('カート要約: 🛒+点数トグルで明細を開閉し、明細の −/+ で増減できる (合計の上)', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     // ブレンド(500) を +2。

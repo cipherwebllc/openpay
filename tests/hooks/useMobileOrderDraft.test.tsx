@@ -41,6 +41,7 @@ describe('useMobileOrderDraft: 既定 + 永続', () => {
     expect(result.current.settings.mode).toBe('storefront');
     expect(result.current.settings.feePayer).toBe('merchant');
     expect(result.current.settings.chains).toEqual(['polygon']);
+    expect(result.current.settings.dineIn).toBe(false); // 既定はテイクアウト
     expect('menu' in result.current.settings).toBe(false);
   });
 
@@ -51,6 +52,15 @@ describe('useMobileOrderDraft: 既定 + 永続', () => {
     expect(result.current.settings.receiverSource).toBe('manual');
     const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!);
     expect(stored.receiver).toBe(ADDR);
+  });
+
+  it('LS の dineIn は true のみ復元・非 boolean / 欠落は false (テイクアウト)', () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ dineIn: true }));
+    expect(renderHook(() => useMobileOrderDraft()).result.current.settings.dineIn).toBe(true);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ dineIn: 'yes' }));
+    expect(renderHook(() => useMobileOrderDraft()).result.current.settings.dineIn).toBe(false);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ shopName: 'x' }));
+    expect(renderHook(() => useMobileOrderDraft()).result.current.settings.dineIn).toBe(false);
   });
 });
 
@@ -119,6 +129,7 @@ function baseDraft(): MobileOrderDraft {
     hours: '',
     phone: '',
     acceptingOrders: true,
+    dineIn: false,
   };
 }
 
@@ -176,5 +187,12 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
     const cfg = draftToConfig({ ...baseDraft(), acceptingOrders: true }, ADDR, presets);
     expect(cfg).not.toBeNull();
     expect('acceptingOrders' in (cfg ?? {})).toBe(false);
+  });
+
+  it('dineIn=true を config に伝播・false (既定) は載せない', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    expect(draftToConfig({ ...baseDraft(), dineIn: true }, ADDR, presets)?.dineIn).toBe(true);
+    const takeout = draftToConfig({ ...baseDraft(), dineIn: false }, ADDR, presets);
+    expect('dineIn' in (takeout ?? {})).toBe(false);
   });
 });

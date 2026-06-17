@@ -162,6 +162,17 @@ describe('MobileOrderBuilder', () => {
     expect(matched.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('提供形態トグル: 既定テイクアウト・店内に切替えると aria-pressed が反転', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    const takeout = screen.getByRole('button', { name: 'テイクアウト' });
+    const dineIn = screen.getByRole('button', { name: '店内' });
+    expect(takeout).toHaveAttribute('aria-pressed', 'true'); // 既定はテイクアウト
+    expect(dineIn).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(dineIn);
+    expect(dineIn).toHaveAttribute('aria-pressed', 'true');
+    expect(takeout).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('既定 (店頭モード) では手数料の負担トグルを出さない', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.queryByText('手数料の負担')).toBeNull();

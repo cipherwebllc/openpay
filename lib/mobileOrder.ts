@@ -57,6 +57,8 @@ export type MobileOrderConfig = {
   // 注文受付の可否。false のとき公開ページは支払いを止める (不可逆決済の事故防止)。
   // 既定 (未設定) は受付中。
   acceptingOrders?: boolean;
+  // 提供形態。true=店内 (注文時に顧客がテーブル番号を入力)、false/未設定=テイクアウト・店頭受け渡し。
+  dineIn?: boolean;
 };
 
 /**
@@ -80,6 +82,7 @@ export type StorefrontParts = {
   hours?: string;
   phone?: string;
   acceptingOrders?: boolean;
+  dineIn?: boolean; // true=店内 (テーブル番号入力)、false/未設定=テイクアウト・店頭受け渡し
 };
 
 export const SHOP_NAME_MAX = 48;
@@ -315,6 +318,8 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (isNonEmptyStr(o.phone, PHONE_MAX)) parts.phone = o.phone.trim();
   // 既定 (受付中) は「フィールド無し」で表し、停止時のみ false を保持 (round-trip 最小化)。
   if (o.acceptingOrders === false) parts.acceptingOrders = false;
+  // 提供形態: 既定 (テイクアウト) は「フィールド無し」、店内のときのみ true を保持。
+  if (o.dineIn === true) parts.dineIn = true;
   return parts;
 }
 
@@ -353,5 +358,6 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (parts.hours) config.hours = parts.hours;
   if (parts.phone) config.phone = parts.phone;
   if (parts.acceptingOrders === false) config.acceptingOrders = false;
+  if (parts.dineIn) config.dineIn = true;
   return config;
 }

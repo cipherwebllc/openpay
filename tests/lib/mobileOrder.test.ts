@@ -309,6 +309,30 @@ describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せ
   });
 });
 
+describe('mobileOrder: dineIn (提供形態・店内のテーブル番号)', () => {
+  const good = {
+    chain: 'polygon',
+    mode: 'storefront',
+    feePayer: 'merchant',
+    menu: [{ id: 'a', name: 'A', price: '500' }],
+  };
+  it('dineIn=true のときだけ parts に true を保持', () => {
+    expect(validateStorefrontParts({ ...good, dineIn: true })?.dineIn).toBe(true);
+  });
+  it('dineIn=false / 未設定 (テイクアウト) はフィールドを持たない (round-trip 最小化)', () => {
+    expect('dineIn' in (validateStorefrontParts({ ...good, dineIn: false }) ?? {})).toBe(false);
+    expect('dineIn' in (validateStorefrontParts(good) ?? {})).toBe(false);
+  });
+  it('validateOrderConfig が dineIn を config に載せ・往復一致', () => {
+    const c = validateOrderConfig({ ...baseConfig(), dineIn: true })!;
+    expect(c.dineIn).toBe(true);
+    expect(decodeOrderConfig(encodeOrderConfig(c))?.dineIn).toBe(true);
+  });
+  it('dineIn 未設定の config は dineIn を持たない (既定 テイクアウト)', () => {
+    expect('dineIn' in (validateOrderConfig(baseConfig()) ?? {})).toBe(false);
+  });
+});
+
 describe('mobileOrder: chains (受取チェーン複数選択)', () => {
   const good = {
     chain: 'polygon',
