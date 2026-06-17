@@ -862,6 +862,7 @@
   "SuccessOverlay": {
     "title": "Payment complete",
     "amountLabel": "Amount paid",
+    "orderNoLabel": "Order no.",
     "timeLabel": "Completed at",
     "txHashLabel": "Tx Hash",
     "userOpHashLabel": "UserOp Hash",

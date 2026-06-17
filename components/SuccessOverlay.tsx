@@ -26,6 +26,7 @@ export function SuccessOverlay({
   blockNumber,
   explorerBase,
   merchantAddress,
+  orderNo,
   onDismiss,
 }: {
   amountDisplay: string;
@@ -39,6 +40,8 @@ export function SuccessOverlay({
    * 追加で描画し「他に何件着金しているか」を顧客 / 店主が即座に検証できるようにする。
    */
   merchantAddress?: string;
+  /** 受注番号 (受け渡し照合用)。checkout で order_id があるときのみ・無ければ表示しない。 */
+  orderNo?: string;
   onDismiss: () => void;
 }) {
   const t = useTranslations('SuccessOverlay');
@@ -132,6 +135,19 @@ export function SuccessOverlay({
           {amountDisplay}
         </p>
       </div>
+
+      {/* 受注番号 (受け渡し照合用)。店主が遠くから読める大きさ・受け渡し時に「この番号の方」で照合。
+          checkout で order_id があるときのみ (QR/チップ等の単発決済では出ない)。 */}
+      {orderNo && (
+        <div className="text-center">
+          <p className="text-xs uppercase tracking-wider opacity-80">
+            {t('orderNoLabel')}
+          </p>
+          <p className="mt-1 font-mono text-4xl font-black tracking-widest sm:text-5xl">
+            {orderNo}
+          </p>
+        </div>
+      )}
 
       {/* 完了時刻 (HH:MM:SS、毎秒更新) */}
       <div className="text-center">

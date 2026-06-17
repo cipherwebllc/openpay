@@ -862,6 +862,7 @@
   "SuccessOverlay": {
     "title": "決済完了",
     "amountLabel": "支払金額",
+    "orderNoLabel": "受注番号",
     "timeLabel": "完了時刻",
     "txHashLabel": "Tx Hash",
     "userOpHashLabel": "UserOp Hash",

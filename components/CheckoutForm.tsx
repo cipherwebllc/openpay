@@ -705,6 +705,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           blockNumber: gasless.data.blockNumber,
           explorerBase,
           merchantAddress: params.to,
+          orderNo: params.orderId, // 受注番号 (受け渡し照合用・order_id があるときのみ表示)
         }
       : useRelay && relay.data?.success && relay.data.txHash
         ? {
@@ -712,6 +713,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             txHash: relay.data.txHash,
             explorerBase,
             merchantAddress: params.to,
+            orderNo: params.orderId,
           }
         : isStandard && standard.data
           ? {
@@ -720,6 +722,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               blockNumber: standard.data.blockNumber,
               explorerBase,
               merchantAddress: params.to,
+              orderNo: params.orderId,
             }
           : null;
 

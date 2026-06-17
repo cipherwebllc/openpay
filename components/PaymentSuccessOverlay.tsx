@@ -37,6 +37,8 @@ export type PaymentSuccessOverlayPayload = {
   blockNumber?: bigint;
   explorerBase?: string;
   merchantAddress?: string;
+  /** 受注番号 (受け渡し照合用)。checkout で order_id があるときのみ。無ければ行を省く。 */
+  orderNo?: string;
 };
 
 export function PaymentSuccessOverlay({
@@ -59,6 +61,7 @@ export function PaymentSuccessOverlay({
       blockNumber={payload.blockNumber}
       explorerBase={payload.explorerBase}
       merchantAddress={payload.merchantAddress}
+      orderNo={payload.orderNo}
       onDismiss={onDismiss}
     />
   );

@@ -212,6 +212,32 @@ describe('SuccessOverlay', () => {
     expect(screen.queryByText('UserOp Hash')).toBeNull();
   });
 
+  it('orderNo 指定 → 受注番号ラベル + コードを表示 (受け渡し照合用)', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        blockNumber={1n}
+        orderNo="7K3Q"
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(screen.getByText('受注番号')).toBeInTheDocument();
+    expect(screen.getByText('7K3Q')).toBeInTheDocument();
+  });
+
+  it('orderNo なし → 受注番号は描画しない (QR/チップ等の単発決済)', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="100 USDC"
+        txHash={TX_HASH}
+        blockNumber={1n}
+        onDismiss={() => undefined}
+      />,
+    );
+    expect(screen.queryByText('受注番号')).toBeNull();
+  });
+
   it('a11y: role="dialog" + aria-modal + aria-live=assertive', () => {
     render(
       <SuccessOverlay
