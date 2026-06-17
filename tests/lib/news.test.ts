@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NEWS_ITEMS, sortedNews, latestNewsId } from '@/lib/news';
-import { DISCLOSED_RECOVER_FEE } from '@/lib/legal';
+import { DISCLOSED_RECOVER_FEE, DISCLOSED_MOBILE_ORDER_FEE } from '@/lib/legal';
 
 describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
   it('id が重複しない', () => {
@@ -75,9 +75,9 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(NEWS_ITEMS.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('最新の pricing 文面が legal.ts の開示と矛盾しない (決済1件ごと / 1% / 最低2JPYC / 7月)', () => {
-    // 最新 (date 降順先頭) の pricing が現行の料金 SOT。2026-06-12 改定 = per-tx 利用料。
-    const pricing = sortedNews().find((n) => n.category === 'pricing');
+  it('gas-recovery per-tx 利用料の pricing 文面が legal.ts の開示と矛盾しない (決済1件ごと / 1% / 最低2JPYC / 7月)', () => {
+    // gas-recovery 利用料の SOT は id 固定で取得 (pricing 項目は複数あり得るため「最新」では特定しない)。
+    const pricing = NEWS_ITEMS.find((n) => n.id === 'per-tx-fee-2026-06-12');
     expect(pricing).toBeDefined();
     expect(pricing!.body.ja).toMatch(/決済\s*1\s*件ごと/);
     expect(pricing!.body.ja).toContain('1%');
@@ -97,10 +97,10 @@ describe('lib/news: sortedNews / latestNewsId', () => {
 
   // L4: 最新 pricing 本文の数値を lib/legal.ts の DISCLOSED_RECOVER_FEE 定数に結びつける。
   // 定数だけ・本文だけの片側変更で fail する (お知らせが env/法務開示と黙って乖離するのを防ぐ)。
-  it('最新 pricing 本文が定数由来の数値 (約/最低 N JPYC・M%) を ja/en で含む (L4 フェンス)', () => {
+  it('gas-recovery 利用料の本文が定数由来の数値 (約/最低 N JPYC・M%) を ja/en で含む (L4 フェンス)', () => {
     const floorJpyc = DISCLOSED_RECOVER_FEE.floorJpyc; // 2
     const percentFromJuly = DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100; // 1 (%)
-    const pricing = sortedNews().find((n) => n.category === 'pricing');
+    const pricing = NEWS_ITEMS.find((n) => n.id === 'per-tx-fee-2026-06-12');
     expect(pricing).toBeDefined();
     expect(pricing!.body.ja).toContain(`約 ${floorJpyc} JPYC`);
     expect(pricing!.body.ja).toContain(`最低 ${floorJpyc} JPYC`);
@@ -108,6 +108,24 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     // en も同じ数値 (about N JPYC / N JPYC minimum / M%)。
     expect(pricing!.body.en).toContain(`${floorJpyc} JPYC`);
     expect(pricing!.body.en).toContain(`${percentFromJuly}%`);
+  });
+
+  // モバイル注文システム利用料のお知らせ (別 SOT = DISCLOSED_MOBILE_ORDER_FEE)。本文が定数由来の
+  // 料率 (店頭 N% / 事前 M%) を ja/en で含むことをフェンス (定数だけ・本文だけの片側変更で fail)。
+  it('モバイル注文 fee のお知らせが DISCLOSED_MOBILE_ORDER_FEE の料率 (1% / 3%) を ja/en で含む (L4 フェンス)', () => {
+    const storefront = DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100; // 1 (%)
+    const preorder = DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100; // 3 (%)
+    const mo = NEWS_ITEMS.find((n) => n.id === 'mobile-order-fee-2026-06-18');
+    expect(mo).toBeDefined();
+    expect(mo!.category).toBe('pricing');
+    expect(mo!.body.ja).toContain(`${storefront}%`); // 店頭・券売機 1%
+    expect(mo!.body.ja).toContain(`${preorder}%`); // 事前モバイルオーダー 3%
+    expect(mo!.body.en).toContain(`${storefront}%`);
+    expect(mo!.body.en).toContain(`${preorder}%`);
+    // 経路非依存 + gas-recovery とは別物 + 対象外 (/pay・チップ・通常リンク) を明記。
+    expect(mo!.body.ja).toMatch(/経路を問わず|通常決済/);
+    expect(mo!.body.ja).toMatch(/別物/);
+    expect(mo!.body.ja).toMatch(/対象外/);
   });
 
   it('置き換え済みの旧 pricing/feature お知らせは superseded 注記を持つ (黙った書き換え禁止)', () => {

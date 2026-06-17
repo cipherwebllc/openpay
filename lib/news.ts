@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'mobile-order-fee-2026-06-18',
+    date: '2026-06-18',
+    category: 'pricing',
+    title: {
+      ja: 'モバイル注文を公開しました（システム利用料: 店頭 1%／事前 3%）',
+      en: 'Mobile ordering is live (system fee: 1% in-store / 3% pre-order)',
+    },
+    body: {
+      ja: 'スマホから注文できるモバイル注文機能を公開しました。モバイル注文をご利用の場合は、別途「モバイル注文システム利用料」を申し受けます: 店頭・券売機は決済額の 1%、事前モバイルオーダーは決済額の 3% です。これは店舗ページ・メニュー・注文管理・受注リレーを含むモバイル注文システムの対価で、ガスを肩代わりする JPYC ガスレス決済の利用料（決済 1 件ごとの利用料）とは別物です。決済経路を問わず（通常決済モードでも）申し受けます。事前モバイルオーダーは店舗の選択で【店舗負担】（受取から差し引き・お客様は原価のみお支払い）または【顧客上乗せ】（お客様が原価に 3% を加えてお支払い）。商品代金本体は引き続き店舗のウォレットへ直接着金し（当社は売上を預かりません）、利用料部分のみ決済と同じ取引内で当社指定ウォレットへ分割されます。\n決済QR（/pay）・クリエイターへのチップ・通常の決済リンクは本利用料の対象外です。\n詳しくは利用規約・特定商取引法に基づく表記をご確認ください。',
+      en: 'Mobile ordering (order from your phone) is now live. When you use mobile ordering, a separate "mobile-order system fee" applies: 1% of the payment for in-store / kiosk, and 3% for pre-order mobile ordering. This is consideration for the mobile-order system (shop page, menu, order management, order relay) and is separate from the per-payment fee on gas-sponsored JPYC gasless payments. It applies regardless of the payment path (including standard / gas-on mode). For pre-order, the store chooses store-borne (deducted from the receipt; the customer pays the price only) or customer-added (the customer pays the price plus 3%). The principal price still settles directly to the store wallet (we do not custody sales); only the fee portion is split to the OpenPay wallet within the same transaction.\nPayment QR (/pay), creator tips, and ordinary checkout links are not subject to this fee.\nSee the Terms of Service and the Specified Commercial Transactions Act notice for details.',
+    },
+    link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
+  },
+  {
     id: 'per-tx-fee-2026-06-12',
     date: '2026-06-12',
     category: 'pricing',
