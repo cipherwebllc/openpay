@@ -212,9 +212,10 @@ export const DISCLOSED_MOBILE_ORDER_FEE = {
 } as const;
 
 // 実装の料率 (lib/mobileOrderFee.ts) が開示済みの数値 (DISCLOSED_MOBILE_ORDER_FEE) と乖離していないかを
-// 判定する純関数。乖離していれば人間可読な理由文字列、一致していれば null。flag (点灯/inert) に依らず率の
-// 定数同士を突き合わせる: 率は静的定数なので、いつ点灯しても開示と一致することを保証する (relay route の
-// 起動時診断が呼び、非 null なら logger.warn で Sentry に上げる — throw はしない)。
+// 判定する純関数。乖離していれば人間可読な理由文字列、一致していれば null。率は静的定数 (env 非依存) の
+// ため、フェンステスト (tests/lib/mobileOrderFeeDisclosure.test.ts) が CI で乖離を検出すれば十分で、
+// runtime 診断は持たない (env を読む gas-recovery の feeDisclosureDivergence は deploy 時 env ドリフトを
+// 捕捉する必要があるため runtime でも呼ぶが、本関数は静的なので CI フェンスで足りる)。
 export function mobileOrderFeeDisclosureDivergence(): string | null {
   const issues: string[] = [];
   if (STOREFRONT_FEE_BPS !== DISCLOSED_MOBILE_ORDER_FEE.storefrontBps) {

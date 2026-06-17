@@ -72,10 +72,7 @@ import {
   anonymizeIp,
   makeRespond,
 } from '@/lib/relay/relayRoute';
-import {
-  feeDisclosureDivergence,
-  mobileOrderFeeDisclosureDivergence,
-} from '@/lib/legal';
+import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
@@ -244,22 +241,6 @@ if (env.enableUsageFee) {
         '(lib/legal.ts DISCLOSED_RECOVER_FEE); changing fees requires revising the legal text ' +
         '(new 改定 entry). Either revert the env or revise the disclosure.',
       detail: divergence,
-    });
-  }
-}
-
-// L4 (モバイル注文): 実装の料率 (lib/mobileOrderFee.ts) が開示済みの数値 (DISCLOSED_MOBILE_ORDER_FEE)
-// と乖離していれば起動時に warn (率を変えたのに開示本文を改めていない等)。flag に依らず静的定数同士を
-// 突き合わせるため点灯前から検出できる (throw はしない・決済は止めない)。
-{
-  const moDivergence = mobileOrderFeeDisclosureDivergence();
-  if (moDivergence) {
-    logger.warn('relay.jpyc.mobile_order_fee_disclosure_divergence', {
-      reason:
-        'mobile-order system fee rate (lib/mobileOrderFee.ts) diverges from the disclosed numbers ' +
-        '(lib/legal.ts DISCLOSED_MOBILE_ORDER_FEE / Terms/Disclaimer/Tokutei/news); changing the rate ' +
-        'requires revising the legal text (new 改定 entry).',
-      detail: moDivergence,
     });
   }
 }
