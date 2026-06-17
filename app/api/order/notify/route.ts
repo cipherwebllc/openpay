@@ -139,6 +139,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     chainId,
     from: typeof o.from === 'string' && isAddress(o.from) ? getAddress(o.from) : '',
     ts: Date.now(),
+    fulfilled: false,
   };
 
   if (isKvConfigured()) {

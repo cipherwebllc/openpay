@@ -29,6 +29,7 @@ export type StoredOrder = {
   chainId: number;
   from: string; // 支払元 (オンチェーン公開情報)
   ts: number; // 受信時刻 (ms)
+  fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
 };
 
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
@@ -106,5 +107,6 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
     chainId: o.chainId,
     from: typeof o.from === 'string' ? o.from : '',
     ts: typeof o.ts === 'number' && Number.isFinite(o.ts) ? o.ts : 0,
+    fulfilled: o.fulfilled === true,
   };
 }

@@ -1758,7 +1758,10 @@
     "empty": "まだ受注はありません。",
     "claimedNote": "商品・テーブルは顧客申告です。金額はオンチェーンで検証済み（実着金額）。",
     "viewTx": "取引を表示",
+    "orderNo": "受注番号",
     "markFulfilled": "対応済みにする",
+    "unfulfill": "未対応に戻す",
+    "fulfilledHeading": "対応済み",
     "disclosure": "受注は決済時に OpenPay サーバへ一時保存され、一定期間後に自動削除されます（顧客の個人情報は保存しません）。"
   }
 }

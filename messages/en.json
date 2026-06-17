@@ -1758,7 +1758,10 @@
     "empty": "No orders yet.",
     "claimedNote": "Items and table are customer-declared. The amount is verified on-chain (actual received).",
     "viewTx": "View transaction",
+    "orderNo": "Order no.",
     "markFulfilled": "Mark as done",
+    "unfulfill": "Mark as not done",
+    "fulfilledHeading": "Completed",
     "disclosure": "Orders are temporarily stored on the OpenPay server at payment time and auto-deleted after a period (no customer personal data is stored)."
   }
 }

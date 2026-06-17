@@ -27,6 +27,7 @@ function order(over: Partial<StoredOrder> = {}): StoredOrder {
     chainId: 137,
     from: '0x1111111111111111111111111111111111111111',
     ts: 1_700_000_000_000,
+    fulfilled: false,
     ...over,
   };
 }
@@ -116,5 +117,12 @@ describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', (
     const parsed = parseStoredOrder(JSON.stringify({ ...order(), items: 'oops' }));
     expect(parsed).not.toBeNull();
     expect(parsed?.items).toEqual([]);
+  });
+  it('fulfilled は true のみ true・それ以外/欠落は false', () => {
+    expect(parseStoredOrder(serializeOrder(order({ fulfilled: true })))?.fulfilled).toBe(true);
+    expect(parseStoredOrder(JSON.stringify({ ...order(), fulfilled: 'yes' }))?.fulfilled).toBe(false);
+    const noField = JSON.parse(serializeOrder(order())) as Record<string, unknown>;
+    delete noField.fulfilled;
+    expect(parseStoredOrder(JSON.stringify(noField))?.fulfilled).toBe(false);
   });
 });

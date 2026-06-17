@@ -38,6 +38,7 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
 
 const lrangeSpy = vi.hoisted(() => vi.fn());
 const lremSpy = vi.hoisted(() => vi.fn());
+const lpushSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
   kvLrange: (...a: unknown[]) => {
@@ -46,6 +47,10 @@ vi.mock('@/lib/kv', () => ({
   },
   kvLrem: (...a: unknown[]) => {
     lremSpy(...a);
+    return Promise.resolve({ ok: true, value: 1 });
+  },
+  kvLpush: (...a: unknown[]) => {
+    lpushSpy(...a);
     return Promise.resolve({ ok: true, value: 1 });
   },
 }));
@@ -63,6 +68,7 @@ function order(over: Partial<StoredOrder>): StoredOrder {
     chainId: 137,
     from: '',
     ts: 1,
+    fulfilled: false,
     ...over,
   };
 }
@@ -81,6 +87,7 @@ beforeEach(() => {
   hold.lrange = { ok: true, value: [] };
   lrangeSpy.mockClear();
   lremSpy.mockClear();
+  lpushSpy.mockClear();
 });
 
 describe('GET /api/order/feed', () => {
@@ -126,27 +133,48 @@ describe('GET /api/order/feed', () => {
   });
 });
 
-describe('POST /api/order/feed (fulfill)', () => {
+describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)', () => {
+  const TXA = `0x${'a'.repeat(64)}`;
+
   it('flag OFF → 404', async () => {
     hold.enableOrderRelay = false;
-    expect((await POST(postReq({ orderId: 'x' }))).status).toBe(404);
+    expect((await POST(postReq({ txHash: TXA }))).status).toBe(404);
   });
 
   it('未ログイン → 401', async () => {
     hold.session = { ok: false };
-    expect((await POST(postReq({ orderId: 'x' }))).status).toBe(401);
+    expect((await POST(postReq({ txHash: TXA }))).status).toBe(401);
   });
 
-  it('orderId 無し → 400', async () => {
+  it('txHash 無し → 400', async () => {
     expect((await POST(postReq({}))).status).toBe(400);
   });
 
-  it('該当 orderId の生エントリを kvLrem で削除', async () => {
-    const raw = serializeOrder(order({ orderId: 'target' }));
-    hold.lrange = { ok: true, value: [raw, serializeOrder(order({ orderId: 'keep' }))] };
-    const res = await POST(postReq({ orderId: 'target' }));
+  it('対応済み: 該当 txHash を fulfilled=true で書き換え (LREM 旧 → LPUSH 新)', async () => {
+    const raw = serializeOrder(order({ txHash: TXA, fulfilled: false }));
+    hold.lrange = { ok: true, value: [raw, serializeOrder(order({ txHash: `0x${'c'.repeat(64)}` }))] };
+    const res = await POST(postReq({ txHash: TXA }));
     expect(res.status).toBe(200);
     expect(lremSpy).toHaveBeenCalledWith(`order:list:${SESSION.toLowerCase()}`, raw);
-    expect(await res.json()).toMatchObject({ ok: true, removed: 1 });
+    const [, pushedRaw] = lpushSpy.mock.calls[0] as [string, string];
+    expect(JSON.parse(pushedRaw).fulfilled).toBe(true); // 新エントリは対応済み
+    expect(await res.json()).toMatchObject({ ok: true, updated: 1 });
+  });
+
+  it('未対応に戻す: fulfilled=false 指定で書き換え (誤操作の復旧)', async () => {
+    const raw = serializeOrder(order({ txHash: TXA, fulfilled: true }));
+    hold.lrange = { ok: true, value: [raw] };
+    const res = await POST(postReq({ txHash: TXA, fulfilled: false }));
+    expect(res.status).toBe(200);
+    const [, pushedRaw] = lpushSpy.mock.calls[0] as [string, string];
+    expect(JSON.parse(pushedRaw).fulfilled).toBe(false);
+  });
+
+  it('既に同状態なら no-op (LPUSH しない)', async () => {
+    hold.lrange = { ok: true, value: [serializeOrder(order({ txHash: TXA, fulfilled: true }))] };
+    const res = await POST(postReq({ txHash: TXA, fulfilled: true }));
+    expect(res.status).toBe(200);
+    expect(lpushSpy).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ ok: true, updated: 0 });
   });
 });

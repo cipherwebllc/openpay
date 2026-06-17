@@ -37,6 +37,23 @@ import {
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
 
+// 受け渡し照合用の短い受注番号 (客の完了画面 + 店主の受注カードの双方に表示)。混同しやすい
+// 0/1/O/I/L を除いた 31 文字 × 4 桁 ≈ 92万通り (店舗の 72h 窓では実用上ぶつからない)。
+const ORDER_CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+function generateOrderCode(): string {
+  const n = 4;
+  let out = '';
+  try {
+    const buf = new Uint32Array(n);
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < n; i++) out += ORDER_CODE_CHARS[buf[i] % ORDER_CODE_CHARS.length];
+  } catch {
+    for (let i = 0; i < n; i++)
+      out += ORDER_CODE_CHARS[Math.floor(Math.random() * ORDER_CODE_CHARS.length)];
+  }
+  return out;
+}
+
 // アバター読込失敗/未設定時のフォールバック頭文字 (@handle と同じくコードポイント単位)。
 function initialOf(name: string): string {
   const n = name.trim();
@@ -64,15 +81,9 @@ export function MobileOrderView({
   const [cartOpen, setCartOpen] = useState(false);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
-  // 受注リレー (flag ON) 用の安定 orderId。この注文ページ訪問で一意・店主の受注画面の参照キー。
-  // crypto.randomUUID 不在環境 (一部 jsdom) では時刻+乱数へフォールバック。
-  const [orderId] = useState(() => {
-    try {
-      return crypto.randomUUID();
-    } catch {
-      return `o-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
-    }
-  });
+  // 受注リレー (flag ON) 用の短い受注番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
+  // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
+  const [orderId] = useState(generateOrderCode);
 
   // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
   // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。

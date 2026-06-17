@@ -63,7 +63,7 @@ function render() {
 }
 
 const order = {
-  orderId: 'oid-1',
+  orderId: '7K3Q',
   items: [{ name: '水', qty: 2, price: '100' }],
   table: 'テーブル 3',
   amount: '1000000000000000000', // 1 JPYC
@@ -71,6 +71,7 @@ const order = {
   chainId: 137,
   from: ADDR,
   ts: 1,
+  fulfilled: false,
 };
 
 describe('OrderFeedPanel', () => {
@@ -104,10 +105,28 @@ describe('OrderFeedPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('「対応済みにする」→ POST /api/order/feed (fulfill)', async () => {
+  it('受注番号 (受け渡し照合用) を表示', async () => {
+    h.orders = [order];
+    render();
+    expect(await screen.findByText(/7K3Q/)).toBeInTheDocument();
+  });
+
+  it('「対応済みにする」→ POST {txHash, fulfilled:true}', async () => {
     h.orders = [order];
     render();
     fireEvent.click(await screen.findByRole('button', { name: '対応済みにする' }));
     await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const body = JSON.parse((postSpy.mock.calls[0][0] as { body: string }).body);
+    expect(body.txHash).toBe(order.txHash);
+    expect(body.fulfilled).toBe(true);
+  });
+
+  it('対応済みの注文は「対応済み」セクション + 「未対応に戻す」(削除でなく復旧可能)', async () => {
+    h.orders = [{ ...order, fulfilled: true }];
+    render();
+    // 未対応リストは空 → 空表示。対応済みは折りたたみセクションに入り「未対応に戻す」が出る。
+    expect(await screen.findByText('まだ受注はありません。')).toBeInTheDocument();
+    expect(screen.getByText(/対応済み/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '未対応に戻す' })).toBeInTheDocument();
   });
 });

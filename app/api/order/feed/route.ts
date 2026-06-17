@@ -6,10 +6,12 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
-import { kvLrange, kvLrem, isKvConfigured } from '@/lib/kv';
+import { kvLrange, kvLrem, kvLpush, isKvConfigured } from '@/lib/kv';
 import {
   orderListKey,
   parseStoredOrder,
+  serializeOrder,
+  isTxHashLike,
   ORDER_LIST_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
@@ -55,10 +57,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
-  const orderId = (body as { orderId?: unknown })?.orderId;
-  if (typeof orderId !== 'string' || orderId.length === 0) {
-    return NextResponse.json({ ok: false, error: 'order_id_required' }, { status: 400 });
+  const o = (body ?? {}) as { txHash?: unknown; fulfilled?: unknown };
+  // 対象は **txHash** で指定 (orderId は人間向け短縮番号で衝突しうるため・txHash は一意)。
+  if (!isTxHashLike(o.txHash)) {
+    return NextResponse.json({ ok: false, error: 'tx_required' }, { status: 400 });
   }
+  // 既定は「対応済み」(true)。明示的に false で「未対応に戻す」(誤操作の復旧)。
+  const fulfilled = o.fulfilled !== false;
   if (!isKvConfigured()) {
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
@@ -67,14 +72,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   const res = await kvLrange(key, 0, ORDER_LIST_MAX - 1);
   if (!res.ok) return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
 
-  // 該当 orderId の生エントリを LREM (保存した正確な文字列一致で削除)。自分のリストのみ操作。
-  let removed = 0;
+  // 該当 txHash の生エントリを fulfilled フラグ付けで書き換え (削除でなくフラグ化 → 復旧可能)。
+  // KV リストは ts でソートして返すので、LREM→LPUSH の並び替えは表示に影響しない。自分のリストのみ操作。
+  let updated = 0;
   for (const raw of res.value ?? []) {
     const parsed = parseStoredOrder(raw);
-    if (parsed && parsed.orderId === orderId) {
+    if (parsed && parsed.txHash.toLowerCase() === o.txHash.toLowerCase()) {
+      if (parsed.fulfilled === fulfilled) continue; // 既に同状態なら no-op
       const del = await kvLrem(key, raw);
-      if (del.ok) removed += del.value;
+      if (del.ok && del.value > 0) {
+        await kvLpush(key, serializeOrder({ ...parsed, fulfilled }));
+        updated += 1;
+      }
     }
   }
-  return NextResponse.json({ ok: true, removed });
+  return NextResponse.json({ ok: true, updated });
 }
