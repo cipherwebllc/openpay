@@ -154,7 +154,12 @@ export function MobileOrderView({
           items: cartItems,
           description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
           // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
-          ...(orderRelayWebhook ? { webhook: orderRelayWebhook, orderId } : {}),
+          // orderId = webhook→店主の受注フィード + 完了画面の見出し。
+          // receiptNo = 同じ受注番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
+          //   → 完了画面を閉じても「レシート番号」として受注番号を再確認できる (受け渡し照合用)。
+          ...(orderRelayWebhook
+            ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
+            : {}),
         })
       : '';
   // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。

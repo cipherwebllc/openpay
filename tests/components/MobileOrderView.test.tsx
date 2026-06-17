@@ -341,7 +341,11 @@ describe('MobileOrderView', () => {
     const webhook = u.searchParams.get('webhook');
     expect(webhook).toContain('/api/order/notify');
     expect(webhook).toContain('h=alice');
-    expect(u.searchParams.get('order_id')).toBeTruthy();
+    const orderId = u.searchParams.get('order_id');
+    expect(orderId).toBeTruthy();
+    // 受注番号は receiptNo (URL では rcpt) としても渡り、顧客の控え (/scan) に残る
+    // (完了画面を閉じても「レシート番号」として再確認可)。
+    expect(u.searchParams.get('rcpt')).toBe(orderId);
   });
 
   it('受注リレー flag OFF (既定): webhook/order_id を付けない (inert)', () => {
