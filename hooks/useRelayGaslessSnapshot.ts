@@ -12,13 +12,17 @@ import { useMemo } from 'react';
 import type { Hex } from 'viem';
 import type { GasMode } from '@/lib/fee';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import {
+  mobileOrderFeeValue,
+  type MobileOrderFeeKind,
+} from '@/lib/mobileOrderFee';
 import type { GaslessSnapshot } from './usePaymentHistory';
 
 // 利用する relay mutation の最小構造 (useJpycEip3009Payment の戻りに構造的に適合)。
 type RelayMutationLike = {
   data?: { txHash: Hex | null; success: boolean; pending?: boolean };
   error: Error | null;
-  variables?: { value: bigint; gasMode?: GasMode };
+  variables?: { value: bigint; gasMode?: GasMode; feeKind?: MobileOrderFeeKind };
 };
 
 export function useRelayGaslessSnapshot(
@@ -33,7 +37,18 @@ export function useRelayGaslessSnapshot(
     // netFee/merchant 着金が実 settle と乖離する。chainId は決済対象チェーン (deployment.chainId)
     // を渡す。gasMode 不明 (旧 variables) は customer に倒す (hook 既定と一致)。
     const gasMode: GasMode = v?.gasMode ?? 'customer';
-    const fee = useRecover && v ? recoverFeeValue(v.value, gasMode, chainId) : 0n;
+    // モバイル注文システム利用料 (feeKind present + recover 経路): 経路非依存の一律 %。会計上は
+    // **システム利用料 (feeAmount)** として記帳する (gas ではない → networkFeeEquivalent には載せない)。
+    // それ以外の recover は従来どおり gas-recovery を networkFeeEquivalent に記帳。free 経路は分割が
+    // 無いので fee=0 (feeKind があっても recover でなければ徴収されない → 実 on-chain と一致)。
+    const isMobile = useRecover && !!v?.feeKind;
+    const fee = v
+      ? useRecover
+        ? v.feeKind
+          ? mobileOrderFeeValue(v.value, v.feeKind)
+          : recoverFeeValue(v.value, gasMode, chainId)
+        : 0n
+      : 0n;
     const merchantAmount = v
       ? useRecover && gasMode === 'merchant'
         ? v.value - fee
@@ -53,9 +68,12 @@ export function useRelayGaslessSnapshot(
       variables: v
         ? {
             merchantAmount,
-            feeAmount: 0n,
+            // モバイル注文 = システム利用料 (feeAmount)・gas-recovery = ネットワーク手数料相当額。
+            feeAmount: isMobile ? fee : 0n,
             saleAmount: v.value,
-            networkFeeEquivalent: fee,
+            // モバイル注文は gas ではなくシステム利用料 → ネットワーク手数料相当額は「該当なし」(null)。
+            // CheckoutForm の historyCtx.networkFeeEquivalent (mobile=null) と形を揃える。
+            networkFeeEquivalent: isMobile ? null : fee,
           }
         : undefined,
     };

@@ -20,6 +20,10 @@ import {
 import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import {
+  mobileOrderFeeValue,
+  type MobileOrderFeeKind,
+} from '@/lib/mobileOrderFee';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { isUserRejection } from '@/lib/walletErrors';
@@ -31,6 +35,10 @@ export type JpycEip3009Params = {
   value: bigint; // 請求額 (bill amount)
   // recover モードで gas 相当額を顧客上乗せ(customer) / 店主吸収(merchant) のどちらにするか。
   gasMode?: GasMode;
+  // モバイル注文システム利用料の種別 (present のとき feeValue は recoverFeeValue ではなく
+  // mobileOrderFeeValue(value, feeKind) で算出する)。CheckoutForm が flag ON + モバイル注文の
+  // ときだけ渡す。不在 = 従来の gas-recovery 料金 (/pay・/checkout・チップ)。
+  feeKind?: MobileOrderFeeKind;
 };
 // success=false は「relay は成立したが tx が on-chain で revert」(B2 と同じ表示方針)。
 // pending=true は「broadcast 済だが未確定」(receipt timeout / authorizationState 既使用)。
@@ -55,7 +63,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const { address, chainId } = useAccount();
 
   return useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
-    mutationFn: async ({ merchant, value, gasMode = 'customer' }) => {
+    mutationFn: async ({ merchant, value, gasMode = 'customer', feeKind }) => {
       if (!walletClient || !address || chainId === undefined) {
         throw new Error('wallet_not_connected');
       }
@@ -107,7 +115,13 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         // bps=0 (既定) ではいずれもフロア (= 固定 2 JPYC) になり従来挙動と一致。server も同じ
         // payload gasMode で同式再計算し一致を強制する (nonce にコミットされるため client/server
         // がずれると署名検証が失敗する)。
-        const feeValue = recoverFeeValue(value, gasMode, chainId);
+        // モバイル注文システム利用料 (feeKind present) は経路非依存の一律 % (mobileOrderFeeValue)。
+        // それ以外 (/pay・/checkout・チップ) は従来の gas-recovery (recoverFeeValue)。server も
+        // 同じ feeKind 有無で同式再計算し feeValue 一致を強制する (nonce にコミットされるため
+        // client/server が決定論的に一致する必要がある → KV/handle 非依存の純関数で算出)。
+        const feeValue = feeKind
+          ? mobileOrderFeeValue(value, feeKind)
+          : recoverFeeValue(value, gasMode, chainId);
         const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
         if (merchantValue <= 0n) throw new Error('amount_too_small');
         const params: ForwarderSettleParams = {
@@ -148,6 +162,10 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           // expectedFee を求めるための検証ヒント (署名対象ではない)。誤った gasMode は
           // expectedFee が署名済 feeValue と食い違い fee_value_mismatch で安全に弾かれる。
           gasMode,
+          // feeKind present のとき server は recoverFeeValue ではなく mobileOrderFeeValue で
+          // expectedFee を再計算する (定数表から → client 申告の率は信用しない)。署名対象では
+          // ないが、誤りは expectedFee 不一致で安全に弾かれる。
+          ...(feeKind ? { feeKind } : {}),
           validAfter: '0',
           validBefore: validBefore.toString(),
           intentSalt: params.intentSalt,
@@ -155,6 +173,12 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         };
       } else {
         // free: 直接 transferWithAuthorization。OpenPay がガス負担 (回収しない)。
+        // ⚠️ モバイル注文システム利用料 (feeKind) は free 経路では分割できない (単一 transfer・fee 機構
+        // 無し)。ここで素通りさせると「ガスレスなら手数料無料」の穴になる (経路非依存に反する) ため、
+        // feeKind があるのに forwarder 未設定の chain では明示的に失敗させ、呼出側 (CheckoutForm) が
+        // standard 経路 (2-tx で手数料を分割可能) へ fallback できるようにする。本番のモバイル注文
+        // 対象 chain は全て forwarder 設定済なので、これは構成漏れ chain 専用のセーフティネット。
+        if (feeKind) throw new Error('mobile_fee_requires_recover');
         const auth = {
           from,
           to: merchant,

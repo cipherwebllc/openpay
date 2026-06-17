@@ -39,6 +39,7 @@ import {
   isCircleRoute,
 } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import { mobileOrderBreakdown, mobileOrderGasMode } from '@/lib/mobileOrderFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
@@ -136,7 +137,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
   // user-approved)。recover 以外は URL の gas をそのまま使う (USDC の負担者トグルは不変)。
   // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
-  const effectiveGas: GasMode = effectiveGasMode(route, params.gas);
+  // モバイル注文システム利用料 (flag ON + checkout が feeKind を運ぶときのみ)。経路非依存に
+  // 1%(店頭)/3%(事前) を分割する。負担者 (店舗負担=merchant / 顧客上乗せ=customer) は mode/feePayer
+  // から確定し effectiveGasMode を上書きする (顧客上乗せ preorder では recover でも customer が必要)。
+  // feeKind を持たない通常 checkout・/pay・/tip は isMobileFee=false で従来動作のまま (一切不変)。
+  const isMobileFee = env.enableMobileOrderFee && !!params.feeKind;
+  const mobileGasMode: GasMode | undefined =
+    isMobileFee && params.feeKind
+      ? mobileOrderGasMode(params.feeKind, params.feePayer)
+      : undefined;
+  const effectiveGas: GasMode = effectiveGasMode(
+    route,
+    params.gas,
+    mobileGasMode,
+  );
   const isMerchantGas = isMerchantGasAbsorb(route, effectiveGas);
 
   // Smart Account / Pimlico 経路は gasless のみ必要 — standard / relay では skip。
@@ -162,9 +176,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // recoverFeeValue(billAmount, effectiveGas) を使う。billAmount は relay.mutate に渡す totalWei、
   // effectiveGas は recover で強制される 'merchant'。bps=0 では floor (= 2 JPYC) になり従来挙動と
   // 完全一致。free (非 recover) は 0n。
-  const relayGasEquiv = useRecover
-    ? recoverFeeValue(totalWei, effectiveGas, deployment.chainId)
-    : 0n;
+  // モバイル注文料金は gas 項ではなく breakdown.feeAmount (システム利用料) に載せるため、gas 相当額
+  // としては 0 にする (会計ラベルを gas でなく利用料へ倒す)。非モバイルは従来 recoverFeeValue/0。
+  const relayGasEquiv = isMobileFee
+    ? 0n
+    : useRecover
+      ? recoverFeeValue(totalWei, effectiveGas, deployment.chainId)
+      : 0n;
 
   // standard mode では gasQuote 不要 (顧客 wallet が gas を自前で算定)。
   const gasAmount = !isStandard ? activeQuote.data?.gasAmount : undefined;
@@ -178,21 +196,35 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // JPYC recover (控除分を feeReceiver へ送って立替者を補償) と等価。
   // gasMode の約束 (店主吸収: 顧客は請求額のみ・店主は amount−gas) は USDC でも成立。
   // 残る差は gas 見積と実 pull 額の僅差のみ (standard tier で有界)。
-  const effectiveGasAmount: bigint | undefined = deriveEffectiveGasAmount(
-    route,
-    { isJpyc, relayGasEquiv, gasAmount },
-  );
+  const effectiveGasAmount: bigint | undefined = isMobileFee
+    ? 0n
+    : deriveEffectiveGasAmount(route, { isJpyc, relayGasEquiv, gasAmount });
   const effectiveMode = effectivePayMode(route, params.mode);
+  // モバイル注文は経路非依存の mobileOrderBreakdown で分割を確定する (relay/standard 同一・
+  // feeAmount=システム利用料)。lib/fee.calcBreakdown は standard で gas 項を無視する設計のため、
+  // システム利用料を gas 項に載せると standard で消える → 専用 breakdown で **置換** する。
+  // 非モバイルは従来 paymentBreakdown (byte 不変)。両者とも {customerPays/merchantReceives/feeAmount}。
   const breakdown = useMemo(
     () =>
-      paymentBreakdown({
-        totalWei,
-        token: params.token,
-        payMode: effectiveMode,
-        gasMode: effectiveGas,
-        effectiveGasAmount,
-      }),
-    [totalWei, params.token, effectiveMode, effectiveGas, effectiveGasAmount],
+      isMobileFee && params.feeKind
+        ? mobileOrderBreakdown(totalWei, params.feeKind, params.feePayer)
+        : paymentBreakdown({
+            totalWei,
+            token: params.token,
+            payMode: effectiveMode,
+            gasMode: effectiveGas,
+            effectiveGasAmount,
+          }),
+    [
+      isMobileFee,
+      params.feeKind,
+      params.feePayer,
+      totalWei,
+      params.token,
+      effectiveMode,
+      effectiveGas,
+      effectiveGasAmount,
+    ],
   );
 
   const totalCustomerOutflow = breakdown.customerPays;
@@ -207,10 +239,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。非 circle の
   // gasless 経路は gas 見積を計上 (JPYC relay=回収額/0 or sponsorship=立替回収 / USDC erc20=
   // paymaster 徴収分)。circle は receipt 由来の circlePaymasterNetUsdc を使うため null、standard は null。
-  const networkFeeEquivalent = networkFeeEquivalentValue(
-    route,
-    effectiveGasAmount,
-  );
+  // モバイル注文料金はシステム利用料 (breakdown.feeAmount) として記帳するため、ネットワーク手数料
+  // 相当額には計上しない (二重計上回避・gas ではなくサービス利用料)。非モバイルは従来どおり。
+  const networkFeeEquivalent = isMobileFee
+    ? null
+    : networkFeeEquivalentValue(route, effectiveGasAmount);
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   // ネイティブガストークン symbol を viem chain 経由で取得 (chain-aware)。
@@ -656,12 +689,21 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         feeReceiver: env.feeReceiver,
         feeAmount: breakdown.feeAmount,
         chainId: deployment.chainId,
+        // 売上総額 = 商品小計 (totalWei)。顧客上乗せ時に merchant+fee で gross を over しないよう、
+        // 履歴 snapshot に正しい gross を運ぶ (非モバイルは fee=0 で merchantAmount に一致)。
+        saleAmount: totalWei,
       });
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
       // submit。fee=0・gas は OpenPay 肩代わり (free) or JPYC 回収 (recover・hook 内で分割)。
       // 全額 (totalWei) をそのまま relay に渡す (recover の控除は hook 側)。
-      relay.mutate({ merchant: params.to, value: totalWei, gasMode: effectiveGas });
+      relay.mutate({
+        merchant: params.to,
+        value: totalWei,
+        gasMode: effectiveGas,
+        // モバイル注文のときだけ feeKind を載せる (server が定数表から % を再計算・on-chain 強制)。
+        ...(isMobileFee && params.feeKind ? { feeKind: params.feeKind } : {}),
+      });
     } else {
       gasless.mutate({
         tokenAddress: deployment.address,

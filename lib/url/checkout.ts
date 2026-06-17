@@ -29,6 +29,11 @@ import { getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import type { ChainSlug } from '../chains';
 import type { GasMode, PayMode } from '../fee';
+import {
+  isMobileOrderFeeKind,
+  type FeePayer,
+  type MobileOrderFeeKind,
+} from '../mobileOrderFee';
 import { stripControlChars, truncateSafe } from '../sanitize';
 import {
   parseTaxCategoryParam,
@@ -84,6 +89,13 @@ export type CheckoutParams = {
   taxRate?: number;
   taxCategory?: TaxCategory;
   receiptNo?: string;
+  // --- モバイル注文システム利用料 (任意・MobileOrderView のみが設定)。 ---
+  // feeKind が present のとき CheckoutForm が経路非依存 (relay/standard 両方) に 1%(店頭)/3%(事前)
+  // を分割する (実際の発火は flag env.enableMobileOrderFee と AND)。不在 = 従来動作 (手数料ゼロ・
+  // /pay QR や通常 checkout リンクは feeKind を持たないので一切影響しない)。
+  // feePayer は preorder のときのみ意味を持つ (merchant=店舗負担 / customer=顧客上乗せ)。
+  feeKind?: MobileOrderFeeKind;
+  feePayer?: FeePayer;
 };
 
 export const CHECKOUT_MAX_ITEMS = 10;
@@ -199,6 +211,14 @@ export function buildCheckoutPath(params: CheckoutParams): string {
   if (effectiveMode === 'standard') {
     sp.set('mode', 'standard');
   }
+  // モバイル注文システム利用料の種別/負担者 (present のときだけ・MobileOrderView が設定)。
+  // feePayer は preorder のときのみ有意 (storefront は常に店舗負担なので出力しない)。
+  if (params.feeKind) {
+    sp.set('fee_kind', params.feeKind);
+    if (params.feeKind === 'preorder' && params.feePayer) {
+      sp.set('fee_payer', params.feePayer);
+    }
+  }
   if (params.orderId) {
     const v = sanitizeText(params.orderId, CHECKOUT_ORDER_ID_MAX);
     if (v) sp.set('order_id', v);
@@ -263,6 +283,8 @@ export function parseCheckoutParams(
   const taxRaw = searchParams.get('tax');
   const taxcatRaw = searchParams.get('taxcat');
   const rcptRaw = searchParams.get('rcpt');
+  const feeKindRaw = searchParams.get('fee_kind');
+  const feePayerRaw = searchParams.get('fee_payer');
 
   if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
   if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
@@ -333,6 +355,14 @@ export function parseCheckoutParams(
       taxRate: parseTaxRateParam(taxRaw),
       taxCategory: parseTaxCategoryParam(taxcatRaw),
       receiptNo: rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined,
+      // モバイル注文システム利用料 (strict 検証・不正値は undefined = 従来動作)。feePayer は
+      // 有効な feeKind があるときのみ採用 (feeKind 無しの孤立 feePayer は無視)。
+      feeKind: isMobileOrderFeeKind(feeKindRaw) ? feeKindRaw : undefined,
+      feePayer:
+        isMobileOrderFeeKind(feeKindRaw) &&
+        (feePayerRaw === 'merchant' || feePayerRaw === 'customer')
+          ? feePayerRaw
+          : undefined,
     },
   };
 }

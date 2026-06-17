@@ -26,6 +26,11 @@ type StandardPaymentParams = {
   feeReceiver: Address;
   feeAmount: bigint;
   chainId: number;
+  // 売上総額 (商品小計・gross)。tx には使わず履歴 snapshot 用にのみ運ぶ (任意)。モバイル注文の
+  // 顧客上乗せでは merchantAmount=満額・fee は客が上乗せのため merchantAmount+feeAmount では
+  // gross を over する → 呼出側が正しい商品小計を渡せるようにする。未指定なら usePaymentHistory が
+  // merchantAmount+feeAmount で復元 (手数料=0 の従来経路と一致)。
+  saleAmount?: bigint;
 };
 
 type StandardPaymentResult = {

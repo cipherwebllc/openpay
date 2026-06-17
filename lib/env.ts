@@ -464,6 +464,15 @@ export const env = {
   // /api/order/* は 404 → 本番完全 inert。決済コア/手数料(0%)/USDC は無改変。注文メタは
   // KV に TTL 72h で一時保存 (資金は不触=ノンカストディ不変・PII 非保存)。計画: plans/swift-puzzling-sky.md。
   enableOrderRelay: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY),
+  // モバイル注文システム利用料 (店頭1% / 事前3%) の有効化フラグ (client 露出)。**既定 OFF** =
+  // モバイル注文は手数料ゼロ・客への表示は原価のみ・relay は従来 recoverFee → 本番完全 inert。
+  // gas-recovery 料金 (recoverFeeBps・7月から1%) とは別物で、モバイル注文という付加価値システムの
+  // 利用料を経路非依存 (relay/standard 両方) で頂く。点灯は開示更新 (lib/legal.ts に施行日 + 条項) と
+  // 同一リリース + ユーザ最終承認後。/pay QR・/tip・通常 checkout リンクは対象外 (この flag に無関係)。
+  // 計画: plans/swift-puzzling-sky.md。
+  enableMobileOrderFee: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

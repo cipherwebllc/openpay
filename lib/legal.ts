@@ -14,6 +14,7 @@
 
 import { polygon, kaia, avalanche } from 'viem/chains';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { STOREFRONT_FEE_BPS, PREORDER_FEE_BPS } from '@/lib/mobileOrderFee';
 import { env } from '@/lib/env';
 
 export const LEGAL_ENTITY = {
@@ -89,10 +90,26 @@ export const LEGAL_ENTITY = {
   //   して負担する (チップは固定額のガス相当のみで、bps の 1% は乗せない)。通常決済（ガスあり）および
   //   顧客が自ら gas を負担する USDC 経路 (Circle / ERC20 Paymaster) の carve-out (無料) は不変。
   //   民法 548 条の 4 に基づき施行日 (2026-06-13) 以降の利用に適用。Privacy は据置。⚠️ 弁護士 review 前 draft。
+  // 2026-06-17 改定 (モバイル注文システム利用料の新設・flag 裏 staged): モバイル注文 (店頭/券売機・
+  //   事前モバイルオーダー) 機能をご利用の場合に申し受ける「モバイル注文システム利用料」を新設。これは
+  //   gas 肩代わりの対価 (上記 per-tx 利用料) とは **別** で、店舗ページ・メニュー・注文管理・受注リレー
+  //   等を含むモバイル注文システム提供の対価であり、決済経路 (ガスレス relay / 通常決済) に **依存せず一律**
+  //   に申し受ける (gas を肩代わりしない通常決済でも対象)。料率は 店頭/券売機=決済額の 1%、事前モバイル
+  //   オーダー=決済額の 3% とし、事前モバイルオーダーは店舗の選択で【店舗負担】(店舗の受取から差引) /
+  //   【顧客上乗せ】(お客様が商品代金に加えてお支払い) のいずれか。商品代金本体は引き続き店舗のウォレット
+  //   へ直接着金し (当社は売上を受領/保管/精算しない)、当該利用料部分のみ決済と同一取引内で当社指定ウォレット
+  //   へ分割される (ノンカストディ不変)。/pay QR・チップ (/tip)・通常の決済リンクは本利用料の **対象外**
+  //   (従来どおり)。本機能は現在 flag 裏で未提供 (NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE 既定 OFF) で、提供開始
+  //   (点灯) は本開示と同一リリース + 別途明示の承認後。新規・任意の付加機能ゆえ既存取引には遡及しない
+  //   (相当性・必要性を充足)。⚠️ 弁護士 review 前 draft。
   termsEffectiveDate: '2026-06-13',
   privacyEffectiveDate: '2026-06-08',
   disclaimerEffectiveDate: '2026-06-13',
   tokuteiEffectiveDate: '2026-06-13',
+  // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記
+  // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
+  // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
+  mobileOrderFeeEffectiveDate: '2026-06-17',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,
@@ -178,6 +195,40 @@ export function feeDisclosureDivergence(now: Date = new Date()): string | null {
       `recoverFeeBps=${bps} != date-aware expected ${expectedBps} ` +
         `(${now.getTime() >= PERCENT_EFFECTIVE_FROM ? '2026-07-01 以降は percentFromJulyBps を適用' : '2026-07-01 より前はフロアのみ bps=0 が開示済み'}; ` +
         `NEXT_PUBLIC_RECOVER_FEE_BPS vs DISCLOSED_RECOVER_FEE.percentFromJulyBps=${DISCLOSED_RECOVER_FEE.percentFromJulyBps})`,
+    );
+  }
+  return issues.length > 0 ? issues.join('; ') : null;
+}
+
+// 開示済みの「モバイル注文システム利用料」料率 (SOT)。Terms/Disclaimer/特商法/お知らせ の本文に書かれた
+// 数値そのもので、これらの文書はこの定数と矛盾してはならない。店頭/券売機=1% (100bps)・事前モバイル
+// オーダー=3% (300bps)。実装の率は lib/mobileOrderFee.ts (STOREFRONT_FEE_BPS / PREORDER_FEE_BPS) で、
+// 本定数と一致しなければならない。gas-recovery 料金 (DISCLOSED_RECOVER_FEE) とは独立 (別の対価)。
+// ⚠️ 重要: これらは法務文書で利用者に約束した数値。変更する = 開示の変更ゆえ、必ず本文改定 (新「改定」
+//   エントリ + フェンステスト更新) を伴わなければならない。下の guard が実装の率と本定数の乖離を検出する。
+export const DISCLOSED_MOBILE_ORDER_FEE = {
+  storefrontBps: 100, // 店頭/券売機 1%
+  preorderBps: 300, // 事前モバイルオーダー 3%
+} as const;
+
+// 実装の料率 (lib/mobileOrderFee.ts) が開示済みの数値 (DISCLOSED_MOBILE_ORDER_FEE) と乖離していないかを
+// 判定する純関数。乖離していれば人間可読な理由文字列、一致していれば null。flag (点灯/inert) に依らず率の
+// 定数同士を突き合わせる: 率は静的定数なので、いつ点灯しても開示と一致することを保証する (relay route の
+// 起動時診断が呼び、非 null なら logger.warn で Sentry に上げる — throw はしない)。
+export function mobileOrderFeeDisclosureDivergence(): string | null {
+  const issues: string[] = [];
+  if (STOREFRONT_FEE_BPS !== DISCLOSED_MOBILE_ORDER_FEE.storefrontBps) {
+    issues.push(
+      `STOREFRONT_FEE_BPS=${STOREFRONT_FEE_BPS} != disclosed storefrontBps ` +
+        `${DISCLOSED_MOBILE_ORDER_FEE.storefrontBps} ` +
+        `(lib/mobileOrderFee.ts vs lib/legal.ts DISCLOSED_MOBILE_ORDER_FEE)`,
+    );
+  }
+  if (PREORDER_FEE_BPS !== DISCLOSED_MOBILE_ORDER_FEE.preorderBps) {
+    issues.push(
+      `PREORDER_FEE_BPS=${PREORDER_FEE_BPS} != disclosed preorderBps ` +
+        `${DISCLOSED_MOBILE_ORDER_FEE.preorderBps} ` +
+        `(lib/mobileOrderFee.ts vs lib/legal.ts DISCLOSED_MOBILE_ORDER_FEE)`,
     );
   }
   return issues.length > 0 ? issues.join('; ') : null;

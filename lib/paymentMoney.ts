@@ -47,7 +47,13 @@ import type { TokenSymbol } from './tokens';
 export function effectiveGasMode(
   route: PaymentRoute,
   paramsGas: GasMode | undefined,
+  // モバイル注文システム利用料が有効なときに mode/feePayer から確定した gasMode
+  // (店頭/店舗負担=merchant・顧客上乗せ=customer)。指定時はこれを優先する — recover の
+  // 店舗吸収固定 (下記) も含めて上書きする (顧客上乗せ preorder では recover でも customer が
+  // 必要なため)。非モバイル (未指定) は従来式と byte 一致 (truth-table 既存行不変)。
+  mobileGasMode?: GasMode,
 ): GasMode {
+  if (mobileGasMode) return mobileGasMode;
   return isRecoverRoute(route) ? 'merchant' : (paramsGas ?? 'customer');
 }
 

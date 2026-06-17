@@ -33,6 +33,11 @@ import {
   JPYC_CHAIN_LABEL,
   type MobileOrderConfig,
 } from '@/lib/mobileOrder';
+import {
+  mobileOrderFeeBps,
+  mobileOrderFeeValue,
+  mobileOrderGasMode,
+} from '@/lib/mobileOrderFee';
 
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
@@ -126,10 +131,21 @@ export function MobileOrderView({
 
   // /checkout は 1〜10 品まで。超過時は支払いを止めて明示 (URL を組んでも parse 側で弾かれるため)。
   const tooMany = cartItems.length > CHECKOUT_MAX_ITEMS;
-  const totalHuman =
+  // 商品小計 (税込・システム利用料を含まない)。
+  const orderWei =
     cartItems.length > 0 && !tooMany
-      ? formatUnits(calcCheckoutTotal(cartItems, decimals), decimals)
-      : '0';
+      ? calcCheckoutTotal(cartItems, decimals)
+      : 0n;
+  // モバイル注文システム利用料 (flag ON のときのみ)。顧客上乗せ (preorder + feePayer=customer) では
+  // 客の表示総額に上乗せする (店頭/店舗負担は原価のみ表示・店舗が受取から吸収するので客には出さない)。
+  // 料率は店舗モード (config.mode) 由来。flag OFF は 0n = 従来どおり原価のみ表示。
+  const feeUpcharge =
+    env.enableMobileOrderFee &&
+    mobileOrderGasMode(config.mode, config.feePayer) === 'customer'
+      ? mobileOrderFeeValue(orderWei, config.mode)
+      : 0n;
+  const totalHuman =
+    orderWei > 0n ? formatUnits(orderWei + feeUpcharge, decimals) : '0';
   // カートマークのバッジ点数 (合計数量)。
   const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
   // 店内 (dineIn) 時: テーブル番号を /checkout の description (→ 控え/履歴 memo) に載せ、
@@ -153,6 +169,11 @@ export function MobileOrderView({
           gas: 'customer',
           items: cartItems,
           description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
+          // モバイル注文システム利用料 (flag ON のときだけ)。CheckoutForm/relay が feeKind/feePayer
+          // から経路非依存に 1%(店頭)/3%(事前) を分割する。flag OFF では付かず従来動作 (inert)。
+          ...(env.enableMobileOrderFee
+            ? { feeKind: config.mode, feePayer: config.feePayer }
+            : {}),
           // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
           // orderId = webhook→店主の受注フィード + 完了画面の見出し。
           // receiptNo = 同じ受注番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
@@ -474,6 +495,14 @@ export function MobileOrderView({
               </span>
               <span className="text-base font-semibold text-slate-900">{totalHuman} JPYC</span>
             </button>
+            {feeUpcharge > 0n && (
+              <p className="text-xs text-slate-500">
+                {t('feeIncludedNote', {
+                  fee: formatUnits(feeUpcharge, decimals),
+                  percent: mobileOrderFeeBps(config.mode) / 100,
+                })}
+              </p>
+            )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
             {needsTable ? (
               // テーブル番号 未入力 (店内): 支払いを止める。入力すればリンクへ切り替わる。

@@ -57,6 +57,10 @@ import {
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import {
+  isMobileOrderFeeKind,
+  mobileOrderFeeValue,
+} from '@/lib/mobileOrderFee';
+import {
   checkRateLimit,
   checkGasBudget,
   refundGasBudget,
@@ -68,7 +72,10 @@ import {
   anonymizeIp,
   makeRespond,
 } from '@/lib/relay/relayRoute';
-import { feeDisclosureDivergence } from '@/lib/legal';
+import {
+  feeDisclosureDivergence,
+  mobileOrderFeeDisclosureDivergence,
+} from '@/lib/legal';
 import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
@@ -237,6 +244,22 @@ if (env.enableUsageFee) {
         '(lib/legal.ts DISCLOSED_RECOVER_FEE); changing fees requires revising the legal text ' +
         '(new 改定 entry). Either revert the env or revise the disclosure.',
       detail: divergence,
+    });
+  }
+}
+
+// L4 (モバイル注文): 実装の料率 (lib/mobileOrderFee.ts) が開示済みの数値 (DISCLOSED_MOBILE_ORDER_FEE)
+// と乖離していれば起動時に warn (率を変えたのに開示本文を改めていない等)。flag に依らず静的定数同士を
+// 突き合わせるため点灯前から検出できる (throw はしない・決済は止めない)。
+{
+  const moDivergence = mobileOrderFeeDisclosureDivergence();
+  if (moDivergence) {
+    logger.warn('relay.jpyc.mobile_order_fee_disclosure_divergence', {
+      reason:
+        'mobile-order system fee rate (lib/mobileOrderFee.ts) diverges from the disclosed numbers ' +
+        '(lib/legal.ts DISCLOSED_MOBILE_ORDER_FEE / Terms/Disclaimer/Tokutei/news); changing the rate ' +
+        'requires revising the legal text (new 改定 entry).',
+      detail: moDivergence,
     });
   }
 }
@@ -500,13 +523,23 @@ async function handleRecover(
     gasMode === 'merchant'
       ? params.merchantValue + params.feeValue
       : params.merchantValue;
-  // server 権威の per-tx 手数料。料金スケジュールは gasMode で選択される (確定モデル):
-  //   merchant (決済): max(ガスフロア, billAmount × bps/10000)。
-  //   customer (チップ): フロアのみ (bps 無視)。
-  // client と **同じ payload gasMode** で同式 (recoverFeeValue) 算出し、forwarderRecover が
-  // feeValue === expectedFeeValue を強制する。gasMode の偽造は有界 (customer 主張でも最低
-  // フロアを払い、署名済の分割は nonce で固定される)。
-  const expectedFee = recoverFeeValue(billAmount, gasMode, chainId);
+  // server 権威の per-tx 手数料。
+  //   モバイル注文 (feeKind present + flag ON): 経路非依存のシステム利用料 = 一律 % を **定数表から
+  //     再計算** する (mobileOrderFeeValue)。client 申告の率は信用せず server が定数から導くため率を
+  //     下げられない (残余は「安い feeKind を申告」=過少徴収のみ・資金毀損なし)。flag OFF では
+  //     feeKind を無視 (= 従来の gas-recovery に倒す)。
+  //   それ以外 (/pay・/checkout・チップ): 従来の gas-recovery (recoverFeeValue・gasMode 選択):
+  //     merchant=max(ガスフロア, billAmount × bps/10000)・customer=フロアのみ。
+  // いずれも client と **同式** で算出し、forwarderRecover が feeValue === expectedFeeValue を強制
+  // する (feeValue は nonce にコミットされるため client/server がずれると署名検証が落ちる → KV/handle
+  // 非依存の純関数で算出する)。
+  const feeKind =
+    env.enableMobileOrderFee && isMobileOrderFeeKind(raw.feeKind)
+      ? raw.feeKind
+      : undefined;
+  const expectedFee = feeKind
+    ? mobileOrderFeeValue(billAmount, feeKind)
+    : recoverFeeValue(billAmount, gasMode, chainId);
   const io = selfHostIoFor(chainId);
   // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
   const jpyc = jpycAddressFor(chainId);
