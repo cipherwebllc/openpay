@@ -6,6 +6,7 @@ import {
   mobileOrderFeeValue,
   mobileOrderGasMode,
   mobileOrderBreakdown,
+  feeSplit,
   isMobileOrderFeeKind,
 } from '@/lib/mobileOrderFee';
 
@@ -105,5 +106,33 @@ describe('mobileOrderBreakdown (path-independent split)', () => {
     const b = mobileOrderBreakdown(order, 'storefront', 'customer');
     expect(b.customerPays).toBe(order);
     expect(b.merchantReceives).toBe(990n * ONE);
+  });
+});
+
+describe('feeSplit (shared split — used by mobile-order AND register fee)', () => {
+  const order = 1000n * ONE;
+
+  it('merchant (店舗負担): customer pays order, merchant absorbs fee', () => {
+    const b = feeSplit(order, 10n * ONE, 'merchant');
+    expect(b.customerPays).toBe(order);
+    expect(b.merchantReceives).toBe(990n * ONE);
+    expect(b.feeAmount).toBe(10n * ONE);
+    expect(b.merchantReceives + b.feeAmount).toBe(b.customerPays);
+  });
+
+  it('customer (顧客上乗せ): customer pays order+fee, merchant gets full order', () => {
+    const b = feeSplit(order, 10n * ONE, 'customer');
+    expect(b.customerPays).toBe(1010n * ONE);
+    expect(b.merchantReceives).toBe(order);
+    expect(b.feeAmount).toBe(10n * ONE);
+    expect(b.merchantReceives + b.feeAmount).toBe(b.customerPays);
+  });
+
+  it('merchant underflow guard: fee >= order clamps merchantReceives to 0 (never negative)', () => {
+    // 利用料が注文額以上 (異常入力) でも店舗受取は負にならず 0 に張り付く。
+    expect(feeSplit(5n, 5n, 'merchant').merchantReceives).toBe(0n);
+    expect(feeSplit(5n, 9n, 'merchant').merchantReceives).toBe(0n);
+    // feeAmount はそのまま (会計の忠実性)。
+    expect(feeSplit(5n, 9n, 'merchant').feeAmount).toBe(9n);
   });
 });

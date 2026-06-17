@@ -40,6 +40,7 @@ import {
 } from '@/lib/paymentRoute';
 import { recoverFeeValue, recoverPercentValue } from '@/lib/relay/recoverFee';
 import {
+  feeSplit,
   mobileOrderBreakdown,
   mobileOrderGasMode,
   type MobileOrderFeeKind,
@@ -199,9 +200,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 完全一致。free (非 recover) は 0n。
   // モバイル注文料金は gas 項ではなく breakdown.feeAmount (システム利用料) に載せるため、gas 相当額
   // としては 0 にする (会計ラベルを gas でなく利用料へ倒す)。非モバイルは従来 recoverFeeValue/0。
-  const relayGasEquiv = isMobileFee
-    ? 0n
-    : useRecover
+  const relayGasEquiv =
+    !isMobileFee && useRecover
       ? recoverFeeValue(totalWei, effectiveGas, deployment.chainId)
       : 0n;
 
@@ -230,14 +230,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       mobileFeeKind
         ? mobileOrderBreakdown(totalWei, mobileFeeKind, params.feePayer)
         : isRegisterStandardFee
-          ? {
-              // レジ standard: 店舗負担 (顧客は表示額・店舗が利用料を受取から吸収)。利用料は別 tx で
-              // feeReceiver へ (useStandardPayment の 2-tx 分割)。会計は feeAmount (システム利用料)。
-              customerPays: totalWei,
-              merchantReceives:
-                totalWei > registerFee ? totalWei - registerFee : 0n,
-              feeAmount: registerFee,
-            }
+          ? // レジ standard: 店舗負担 (顧客は表示額・店舗が利用料を受取から吸収)。利用料は別 tx で
+            // feeReceiver へ (useStandardPayment の 2-tx 分割)。会計は feeAmount (システム利用料)。
+            // モバイル注文の店舗負担と同一の分割なので feeSplit を共有する (下限ガードの単一情報源)。
+            feeSplit(totalWei, registerFee, 'merchant')
           : paymentBreakdown({
               totalWei,
               token: params.token,

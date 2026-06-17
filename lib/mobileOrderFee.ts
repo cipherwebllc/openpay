@@ -75,10 +75,30 @@ export type MobileOrderBreakdown = {
 };
 
 /**
+ * 注文額・利用料・負担者 (gasMode) から経路非依存の breakdown を確定する純関数。fee の出所
+ * (モバイル注文の % / レジの recover %) に依らず **分割だけ** を担う単一情報源 → 下限ガード付きの
+ * 同一式を各所で複製せず、CheckoutForm のモバイル注文/レジ両分岐がここを共有する。
+ *   店舗負担 (merchant):   客=order,     店舗=order-fee (下限 0), fee=fee
+ *   顧客上乗せ (customer): 客=order+fee, 店舗=order,             fee=fee
+ */
+export function feeSplit(
+  orderWei: bigint,
+  fee: bigint,
+  gasMode: GasMode,
+): MobileOrderBreakdown {
+  if (gasMode === 'customer') {
+    return { customerPays: orderWei + fee, merchantReceives: orderWei, feeAmount: fee };
+  }
+  return {
+    customerPays: orderWei,
+    merchantReceives: orderWei > fee ? orderWei - fee : 0n,
+    feeAmount: fee,
+  };
+}
+
+/**
  * 経路非依存の breakdown。relay でも standard でも **同一の分割**。feeAmount はシステム利用料
  * (gas ではない) として返す → 履歴/CSV/控えで会計ラベルが自然に正しくなる。
- *   店舗負担 (merchant): 客=order,      店舗=order-fee, fee=fee
- *   顧客上乗せ (customer): 客=order+fee, 店舗=order,     fee=fee
  *
  * 注: lib/fee.calcBreakdown は standard モードで gasAmount を無視する設計のため、システム利用料を
  * gas 項に載せると standard で消える。よってモバイル注文は本関数で経路非依存に分割を確定し、
@@ -89,18 +109,9 @@ export function mobileOrderBreakdown(
   kind: MobileOrderFeeKind,
   feePayer: FeePayer | undefined,
 ): MobileOrderBreakdown {
-  const fee = mobileOrderFeeValue(orderWei, kind);
-  const gasMode = mobileOrderGasMode(kind, feePayer);
-  if (gasMode === 'customer') {
-    return {
-      customerPays: orderWei + fee,
-      merchantReceives: orderWei,
-      feeAmount: fee,
-    };
-  }
-  return {
-    customerPays: orderWei,
-    merchantReceives: orderWei > fee ? orderWei - fee : 0n,
-    feeAmount: fee,
-  };
+  return feeSplit(
+    orderWei,
+    mobileOrderFeeValue(orderWei, kind),
+    mobileOrderGasMode(kind, feePayer),
+  );
 }

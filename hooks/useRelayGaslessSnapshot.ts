@@ -42,13 +42,14 @@ export function useRelayGaslessSnapshot(
     // それ以外の recover は従来どおり gas-recovery を networkFeeEquivalent に記帳。free 経路は分割が
     // 無いので fee=0 (feeKind があっても recover でなければ徴収されない → 実 on-chain と一致)。
     const isMobile = useRecover && !!v?.feeKind;
-    const fee = v
-      ? useRecover
-        ? v.feeKind
-          ? mobileOrderFeeValue(v.value, v.feeKind)
-          : recoverFeeValue(v.value, gasMode, chainId)
-        : 0n
-      : 0n;
+    // 手数料が発生するのは recover 経路のみ (free は分割無し → 0)。recover のうち feeKind あり=
+    // モバイル注文の一律 %、無し=従来の gas-recovery。
+    let fee = 0n;
+    if (v && useRecover) {
+      fee = v.feeKind
+        ? mobileOrderFeeValue(v.value, v.feeKind)
+        : recoverFeeValue(v.value, gasMode, chainId);
+    }
     const merchantAmount = v
       ? useRecover && gasMode === 'merchant'
         ? v.value - fee
