@@ -69,6 +69,14 @@ export type CheckoutItem = {
   memo?: string;
 };
 
+// /checkout の手数料種別。mobile-order の storefront/preorder に加え、レジ (店頭POS) 由来を示す
+// 'register' を持つ。register は CheckoutForm が **standard 経路で** recover の OpenPay利用料 % を
+// 課金する合図 (RegisterMode のみ設定・relay 経路は既存 recover が処理するので合図不要)。
+export type CheckoutFeeKind = MobileOrderFeeKind | 'register';
+function isCheckoutFeeKind(v: unknown): v is CheckoutFeeKind {
+  return isMobileOrderFeeKind(v) || v === 'register';
+}
+
 export type CheckoutParams = {
   to: Address;
   token: TokenSymbol;
@@ -94,7 +102,9 @@ export type CheckoutParams = {
   // を分割する (実際の発火は flag env.enableMobileOrderFee と AND)。不在 = 従来動作 (手数料ゼロ・
   // /pay QR や通常 checkout リンクは feeKind を持たないので一切影響しない)。
   // feePayer は preorder のときのみ意味を持つ (merchant=店舗負担 / customer=顧客上乗せ)。
-  feeKind?: MobileOrderFeeKind;
+  // 'register' (レジ・RegisterMode 由来) は standard 経路で recover の OpenPay利用料 % を店舗負担で
+  // 課金する合図 (feePayer は無関係)。
+  feeKind?: CheckoutFeeKind;
   feePayer?: FeePayer;
 };
 
@@ -357,7 +367,7 @@ export function parseCheckoutParams(
       receiptNo: rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined,
       // モバイル注文システム利用料 (strict 検証・不正値は undefined = 従来動作)。feePayer は
       // 有効な feeKind があるときのみ採用 (feeKind 無しの孤立 feePayer は無視)。
-      feeKind: isMobileOrderFeeKind(feeKindRaw) ? feeKindRaw : undefined,
+      feeKind: isCheckoutFeeKind(feeKindRaw) ? feeKindRaw : undefined,
       feePayer:
         isMobileOrderFeeKind(feeKindRaw) &&
         (feePayerRaw === 'merchant' || feePayerRaw === 'customer')

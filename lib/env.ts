@@ -473,6 +473,12 @@ export const env = {
   enableMobileOrderFee: parseBoolFlag(
     process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE,
   ),
+  // レジ (店頭POS・RegisterMode→/checkout) の OpenPay利用料を経路非依存化するフラグ (client 露出)。
+  // **既定 OFF** = レジの通常決済(standard)は従来どおり無料 → 本番完全 inert。ON のとき レジ経由の
+  // JPYC standard 決済にも既存 recover の OpenPay利用料 (recoverFeeBps・7月から1%・フロア無し) を
+  // 店舗負担で課金する (relay 経路は既存 recover が徴収済で不変)。USDC は無料据置・決済QR(/pay)・
+  // チップ・手動 checkout リンクは対象外。点灯は 7月 (recoverFeeBps=100) + 開示更新と同一リリース。
+  enableRegisterFee: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

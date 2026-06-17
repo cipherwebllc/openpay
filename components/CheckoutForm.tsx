@@ -38,8 +38,12 @@ import {
   isRecoverRoute,
   isCircleRoute,
 } from '@/lib/paymentRoute';
-import { recoverFeeValue } from '@/lib/relay/recoverFee';
-import { mobileOrderBreakdown, mobileOrderGasMode } from '@/lib/mobileOrderFee';
+import { recoverFeeValue, recoverPercentValue } from '@/lib/relay/recoverFee';
+import {
+  mobileOrderBreakdown,
+  mobileOrderGasMode,
+  type MobileOrderFeeKind,
+} from '@/lib/mobileOrderFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
@@ -137,15 +141,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
   // user-approved)。recover 以外は URL の gas をそのまま使う (USDC の負担者トグルは不変)。
   // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
-  // モバイル注文システム利用料 (flag ON + checkout が feeKind を運ぶときのみ)。経路非依存に
-  // 1%(店頭)/3%(事前) を分割する。負担者 (店舗負担=merchant / 顧客上乗せ=customer) は mode/feePayer
-  // から確定し effectiveGasMode を上書きする (顧客上乗せ preorder では recover でも customer が必要)。
-  // feeKind を持たない通常 checkout・/pay・/tip は isMobileFee=false で従来動作のまま (一切不変)。
-  const isMobileFee = env.enableMobileOrderFee && !!params.feeKind;
-  const mobileGasMode: GasMode | undefined =
-    isMobileFee && params.feeKind
-      ? mobileOrderGasMode(params.feeKind, params.feePayer)
-      : undefined;
+  // モバイル注文システム利用料 (storefront/preorder)。flag ON + feeKind が storefront/preorder の
+  // ときだけ経路非依存に 1%(店頭)/3%(事前) を分割する。負担者 (店舗負担=merchant / 顧客上乗せ=
+  // customer) は mode/feePayer から確定し effectiveGasMode を上書きする (顧客上乗せ preorder では
+  // recover でも customer が必要)。'register' (レジ) は下記 isRegisterStandardFee で別扱い (standard
+  // のみ)。feeKind 無し・/pay・/tip・通常 checkout は従来動作のまま (一切不変)。
+  const mobileFeeKind: MobileOrderFeeKind | null =
+    env.enableMobileOrderFee &&
+    (params.feeKind === 'storefront' || params.feeKind === 'preorder')
+      ? params.feeKind
+      : null;
+  const isMobileFee = mobileFeeKind !== null;
+  const mobileGasMode: GasMode | undefined = mobileFeeKind
+    ? mobileOrderGasMode(mobileFeeKind, params.feePayer)
+    : undefined;
   const effectiveGas: GasMode = effectiveGasMode(
     route,
     params.gas,
@@ -171,6 +180,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     () => calcCheckoutTotal(params.items, deployment.decimals),
     [params.items, deployment.decimals],
   );
+
+  // レジ (店頭POS) システム利用料: standard 経路 (JPYC) で recover の OpenPay利用料 % を店舗負担で
+  // 課金する (relay 経路は既存 recover が徴収するので register は standard のみ追加)。7月前
+  // (recoverFeeBps=0) は 0 = 無料・flag OFF も 0 = 完全 inert。USDC は対象外 (無料据置)。
+  const isRegisterStandardFee =
+    env.enableRegisterFee &&
+    params.feeKind === 'register' &&
+    isStandard &&
+    isJpyc;
+  const registerFee = isRegisterStandardFee
+    ? recoverPercentValue(totalWei)
+    : 0n;
 
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
   // recoverFeeValue(billAmount, effectiveGas) を使う。billAmount は relay.mutate に渡す totalWei、
@@ -206,19 +227,29 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 非モバイルは従来 paymentBreakdown (byte 不変)。両者とも {customerPays/merchantReceives/feeAmount}。
   const breakdown = useMemo(
     () =>
-      isMobileFee && params.feeKind
-        ? mobileOrderBreakdown(totalWei, params.feeKind, params.feePayer)
-        : paymentBreakdown({
-            totalWei,
-            token: params.token,
-            payMode: effectiveMode,
-            gasMode: effectiveGas,
-            effectiveGasAmount,
-          }),
+      mobileFeeKind
+        ? mobileOrderBreakdown(totalWei, mobileFeeKind, params.feePayer)
+        : isRegisterStandardFee
+          ? {
+              // レジ standard: 店舗負担 (顧客は表示額・店舗が利用料を受取から吸収)。利用料は別 tx で
+              // feeReceiver へ (useStandardPayment の 2-tx 分割)。会計は feeAmount (システム利用料)。
+              customerPays: totalWei,
+              merchantReceives:
+                totalWei > registerFee ? totalWei - registerFee : 0n,
+              feeAmount: registerFee,
+            }
+          : paymentBreakdown({
+              totalWei,
+              token: params.token,
+              payMode: effectiveMode,
+              gasMode: effectiveGas,
+              effectiveGasAmount,
+            }),
     [
-      isMobileFee,
-      params.feeKind,
+      mobileFeeKind,
       params.feePayer,
+      isRegisterStandardFee,
+      registerFee,
       totalWei,
       params.token,
       effectiveMode,
@@ -701,8 +732,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         merchant: params.to,
         value: totalWei,
         gasMode: effectiveGas,
-        // モバイル注文のときだけ feeKind を載せる (server が定数表から % を再計算・on-chain 強制)。
-        ...(isMobileFee && params.feeKind ? { feeKind: params.feeKind } : {}),
+        // モバイル注文 (storefront/preorder) のときだけ feeKind を載せる (server が定数表から % を
+        // 再計算・on-chain 強制)。register(レジ) は relay では既存 recover が徴収するので渡さない。
+        ...(mobileFeeKind ? { feeKind: mobileFeeKind } : {}),
       });
     } else {
       gasless.mutate({

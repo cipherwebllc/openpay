@@ -79,6 +79,17 @@ describe('checkout feeKind / feePayer round-trip', () => {
     }
   });
 
+  it('register (レジ) round-trips; feePayer is N/A (always store-borne)', () => {
+    const { path, parsed } = roundTrip({ ...base, feeKind: 'register' });
+    expect(path).toContain('fee_kind=register');
+    expect(path).not.toContain('fee_payer');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.feeKind).toBe('register');
+      expect(parsed.params.feePayer).toBeUndefined();
+    }
+  });
+
   it('invalid fee_kind is ignored (strict validation → undefined)', () => {
     const parsed = parseCheckoutParams(
       new URLSearchParams(

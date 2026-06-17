@@ -34,6 +34,7 @@ import { paymentPolicyKey } from '@/lib/paymentPolicy';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { chainForSlug } from '@/lib/chains';
+import { env } from '@/lib/env';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
@@ -276,6 +277,10 @@ export function RegisterMode({
           mode: settings.payMode,
           items: validItems,
           receiptNo: receiptNo || undefined,
+          // レジ システム利用料 (flag ON のときだけ)。CheckoutForm が standard 経路の JPYC 決済に
+          // recover の OpenPay利用料 % を店舗負担で課金する合図。USDC/relay/7月前は実質無料・flag
+          // OFF では付かず従来動作 (inert)。
+          ...(env.enableRegisterFee ? { feeKind: 'register' as const } : {}),
         })
       : '';
 

@@ -37,6 +37,15 @@ export function recoverFeeBps(): number {
   return env.recoverFeeBps;
 }
 
+// レジ (店頭POS) の通常決済(standard)経路で使う OpenPay利用料の **フロア無し** % 計算。
+// = billWei × recoverFeeBps()/10000 (7月前 bps=0 → 0・7月 bps=100 → 1%)。standard は顧客が自分で
+// gas を払い relayer は介在しないため、ガス相当のフロア (relayGasFeeValue) は適用しない (recover の
+// recoverFeeValue とは別物・あちらは relay 経路でフロアあり)。client の 2-tx 分割でのみ使用 (サーバ非経由)。
+export function recoverPercentValue(billWei: bigint): bigint {
+  if (billWei <= 0n) return 0n;
+  return (billWei * BigInt(recoverFeeBps())) / 10000n;
+}
+
 // per-tx recover 手数料。gasMode で料金スケジュールを、chainId でガスフロアを選ぶ (client & server が
 // 同 gasMode + 同 chainId で同式算出する = nonce 一致の必須条件。chainId は EIP-3009 署名にも焼き込まれ、
 // relay payload で送受される単一値なので両者がずれない)。BigInt の floor 除算 (端数切り捨て)。

@@ -43,3 +43,25 @@ describe('mobile-order fee disclosure fence', () => {
     expect(en).toContain('regardless of the payment path');
   });
 });
+
+// レジ (店頭POS) の OpenPay利用料 経路非依存化の carve-in が「standard=無料」の各クローズに入っているか。
+describe('register (レジ) standard fee disclosure carve-in', () => {
+  it('ja: レジ standard が 7月から1% の対象である旨を 3 つの load-bearing 文書に carve-in', () => {
+    const ja = JSON.stringify(jaMessages);
+    expect(ja).toContain('レジ (店頭POS) 機能を用いてお会計した JPYC の決済');
+    expect(ja).toContain('通常決済 (ガスあり) モードであっても');
+    expect(ja).toContain('2026 年 7 月のご利用分から');
+    // Terms 第5条 / 免責 §7 / 特商法 役務の対価 の 3 箇所に入っている。
+    const count = (
+      ja.match(/レジ \(店頭POS\) 機能を用いてお会計した JPYC の決済/g) || []
+    ).length;
+    expect(count).toBeGreaterThanOrEqual(3);
+  });
+
+  it('en: register standard carve-in present (even in Standard mode, from July)', () => {
+    const en = JSON.stringify(enMessages);
+    expect(en).toContain('register (in-store POS) feature');
+    expect(en).toContain('even in Standard (with-gas) mode');
+    expect(en).toContain('from the July 2026 usage period');
+  });
+});
