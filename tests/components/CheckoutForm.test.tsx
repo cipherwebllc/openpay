@@ -82,6 +82,43 @@ vi.mock('@/lib/pimlico', async () => {
 vi.mock('@/components/ConnectButton', async () => ({
   ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
 }));
+// モバイル注文 / レジ 利用料 flag を切替可能に (既定 OFF = 既存テストの挙動不変・完全 inert)。
+const feeFlags = vi.hoisted(() => ({
+  enableMobileOrderFee: false,
+  enableRegisterFee: false,
+}));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableMobileOrderFee() {
+        return feeFlags.enableMobileOrderFee;
+      },
+      get enableRegisterFee() {
+        return feeFlags.enableRegisterFee;
+      },
+    },
+  };
+});
+// レジ standard の利用料 % (recoverPercentValue) のみ差し替え可能に。null=実物 (既定 bps=0 → 0 で
+// 既存テスト不変)。register money-flow テストで percentBps=100 (1%) を立てて実額の流れを検証する。
+// recoverFeeValue / recoverFeeBps は実物のまま (relay recover の floor=2 JPYC テストに影響しない)。
+const feeRate = vi.hoisted(() => ({ percentBps: null as number | null }));
+vi.mock('@/lib/relay/recoverFee', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/relay/recoverFee')>();
+  return {
+    ...actual,
+    recoverPercentValue: (billWei: bigint) =>
+      feeRate.percentBps === null
+        ? actual.recoverPercentValue(billWei)
+        : billWei <= 0n
+          ? 0n
+          : (billWei * BigInt(feeRate.percentBps)) / 10000n,
+  };
+});
 
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -385,6 +422,10 @@ beforeEach(() => {
   vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
   // 既定 relayer 健全 (non-degraded)。preflight banner テストでのみ degraded へ override。
   vi.mocked(useRelayHealth).mockReturnValue({ degraded: false });
+  // fee flag / rate は毎テスト OFF・実物起点 (fee テストが個別に立てる)。
+  feeFlags.enableMobileOrderFee = false;
+  feeFlags.enableRegisterFee = false;
+  feeRate.percentBps = null;
 });
 
 const USDC_PARAMS: CheckoutParams = {
@@ -1932,5 +1973,135 @@ describe('CheckoutForm — 署名安心パネル (SignReassurance・P2)', () => 
     expect(screen.queryByText(/利用許可 \(Spending cap\)/)).toBeNull();
     expect(screen.queryByText(/通常の送金確認が表示されます/)).toBeNull();
     expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// モバイル注文 / レジ システム利用料 (flag ON): CheckoutForm が経路に応じて feeKind/fee を
+// 正しく mutate へ渡すか (relay へ feeKind / standard へ saleAmount+feeAmount) を実 render で検証。
+// flag OFF は feeKind を一切渡さず従来動作 (完全 inert)。
+// ---------------------------------------------------------------------------
+describe('CheckoutForm — モバイル注文 / レジ システム利用料 (flag-ON 経路)', () => {
+  const JPYC_TOTAL = 3000n * 10n ** 18n; // チケット 3000 JPYC
+
+  function setupJpycRelay() {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    setSmartAccount(false);
+  }
+  function setupJpycStandard() {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    setSmartAccount(false);
+  }
+
+  it('モバイル storefront (relay): relayMutate に feeKind=storefront + gasMode=merchant (店舗負担固定)', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycRelay();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, feeKind: 'storefront' }} />);
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    expect(relayMutate).toHaveBeenCalledWith({
+      merchant: MERCHANT,
+      value: JPYC_TOTAL,
+      gasMode: 'merchant', // storefront は常に店舗負担
+      feeKind: 'storefront',
+    });
+    expect(standardMutate).not.toHaveBeenCalled();
+  });
+
+  it('モバイル preorder + 顧客上乗せ (relay): 顧客の表示総額=原価+3% (3090)・relayMutate に feeKind=preorder + gasMode=customer + value=gross', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycRelay();
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, feeKind: 'preorder', feePayer: 'customer' }}
+      />,
+    );
+    // 顧客上乗せ: ボタンの表示総額は 原価 3000 + 3% (90) = 3090 JPYC (上乗せが客に見える)。
+    await user.click(screen.getByRole('button', { name: /3090 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledWith({
+      merchant: MERCHANT,
+      value: JPYC_TOTAL, // relay へ渡すのは gross (3000)。分割は hook 側 (顧客が +fee 署名)。
+      gasMode: 'customer', // 顧客上乗せ → recover でも customer に上書き
+      feeKind: 'preorder',
+    });
+  });
+
+  it('flag OFF (既定): feeKind=storefront でも relayMutate に feeKind を載せない (完全 inert)', async () => {
+    const user = userEvent.setup();
+    // feeFlags.enableMobileOrderFee は beforeEach で false。
+    setupJpycRelay();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, feeKind: 'storefront' }} />);
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    const arg = relayMutate.mock.calls[0][0];
+    expect(arg.feeKind).toBeUndefined(); // flag OFF → feeKind を渡さない
+    expect(arg.gasMode).toBe('customer'); // mobileGasMode 上書き無し (free relay の既定)
+  });
+
+  it('レジ register + JPYC standard (bps=100 相当): standardMutate に 1% feeAmount + saleAmount=gross・店舗負担・relay 不使用', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableRegisterFee = true;
+    feeRate.percentBps = 100; // 7 月相当 (1%)
+    setupJpycStandard();
+    render(
+      <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
+    );
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    const call = standardMutate.mock.calls[0][0];
+    const fee = 30n * 10n ** 18n; // 1% of 3000 = 30 JPYC (フロア無し)
+    expect(call.feeAmount).toBe(fee);
+    expect(call.merchantAmount).toBe(JPYC_TOTAL - fee); // 店舗負担: 受取 = 総額 − 利用料
+    expect(call.saleAmount).toBe(JPYC_TOTAL); // gross は商品小計 (顧客支払額)
+    expect(relayMutate).not.toHaveBeenCalled(); // register は relay へ行かない (standard のみ)
+  });
+
+  it('レジ register + JPYC standard だが bps=0 (7 月前): feeAmount=0 (早期課金しない・saleAmount は gross)', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableRegisterFee = true;
+    feeRate.percentBps = 0; // 7 月前 = 0%
+    setupJpycStandard();
+    render(
+      <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
+    );
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    const call = standardMutate.mock.calls[0][0];
+    expect(call.feeAmount).toBe(0n); // 7 月前は徴収ゼロ
+    expect(call.merchantAmount).toBe(JPYC_TOTAL); // 満額着金
+    expect(call.saleAmount).toBe(JPYC_TOTAL);
+  });
+
+  it('レジ register + USDC standard (bps=100): USDC は対象外 → feeAmount=0 (JPYC のみ課金)', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableRegisterFee = true;
+    feeRate.percentBps = 100;
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(false);
+    render(
+      <CheckoutForm params={{ ...STANDARD_USDC_PARAMS, feeKind: 'register' }} />,
+    );
+    await user.click(screen.getByRole('button', { name: /55 USDC を支払う/ }));
+    const call = standardMutate.mock.calls[0][0];
+    expect(call.feeAmount).toBe(0n); // USDC は register 利用料の対象外
+    expect(call.merchantAmount).toBe(55_000_000n); // 満額
+  });
+
+  it('flag OFF (既定): register feeKind でも standard は従来どおり fee=0 (inert)', async () => {
+    const user = userEvent.setup();
+    feeRate.percentBps = 100; // rate はあるが flag OFF なので無視されるべき
+    setupJpycStandard();
+    render(
+      <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
+    );
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    const call = standardMutate.mock.calls[0][0];
+    expect(call.feeAmount).toBe(0n); // flag OFF → 課金しない
+    expect(call.merchantAmount).toBe(JPYC_TOTAL);
   });
 });

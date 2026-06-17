@@ -74,6 +74,49 @@ describe('effectiveGasMode — recover は merchant 強制 / 他は URL gas (省
   });
 });
 
+// 第3引数 mobileGasMode (モバイル注文システム利用料が確定した負担者) は **常に優先** し、
+// recover の merchant 強制も free の URL 尊重も上書きする。未指定なら従来式と byte 一致。
+describe('effectiveGasMode — mobileGasMode 上書き (顧客上乗せ preorder で recover でも customer に)', () => {
+  for (const [name, route] of ALL_ROUTES) {
+    for (const paramsGas of [undefined, 'customer', 'merchant'] as const) {
+      for (const mobileGasMode of GAS_MODES) {
+        it(`route=${name} paramsGas=${paramsGas ?? 'undefined'} mobileGasMode=${mobileGasMode} → 上書きで mobileGasMode`, () => {
+          // mobileGasMode が指定されたら route/paramsGas に関わらずそれを返す。
+          expect(effectiveGasMode(route, paramsGas, mobileGasMode)).toBe(
+            mobileGasMode,
+          );
+        });
+      }
+    }
+  }
+
+  it('顧客上乗せ preorder: recover 経路でも customer に倒す (merchant 強制を上書き)', () => {
+    // 通常 recover は customer を無視して merchant にするが、mobileGasMode=customer が勝つ。
+    expect(effectiveGasMode(ROUTES.relayRecover, 'customer', 'customer')).toBe(
+      'customer',
+    );
+    expect(effectiveGasMode(ROUTES.relayRecover, undefined, 'customer')).toBe(
+      'customer',
+    );
+  });
+
+  it('店舗負担: free 経路でも merchant に倒す (URL gas=customer を上書き)', () => {
+    expect(effectiveGasMode(ROUTES.relayFree, 'customer', 'merchant')).toBe(
+      'merchant',
+    );
+  });
+
+  it('mobileGasMode 未指定 (undefined) は従来式と byte 一致 (非モバイルは不変)', () => {
+    for (const [, route] of ALL_ROUTES) {
+      for (const paramsGas of [undefined, 'customer', 'merchant'] as const) {
+        expect(effectiveGasMode(route, paramsGas, undefined)).toBe(
+          effectiveGasMode(route, paramsGas),
+        );
+      }
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // isMerchantGasAbsorb: 非 standard かつ gasMode==='merchant'。
 // 現行: `!isStandard && effectiveGas === 'merchant'`

@@ -4,6 +4,10 @@ import type { Hex } from 'viem';
 import { polygon } from 'viem/chains';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import {
+  mobileOrderFeeValue,
+  type MobileOrderFeeKind,
+} from '@/lib/mobileOrderFee';
 import type { GasMode } from '@/lib/fee';
 
 // 実依存をそのまま使う (mock しない)。per-chain 未設定の代表 chain で既定 2 JPYC = 2e18。
@@ -13,7 +17,7 @@ const FEE = relayGasFeeValue(CHAIN);
 type Relay = {
   data?: { txHash: Hex | null; success: boolean; pending?: boolean };
   error: Error | null;
-  variables?: { value: bigint; gasMode?: GasMode };
+  variables?: { value: bigint; gasMode?: GasMode; feeKind?: MobileOrderFeeKind };
 };
 
 function relayObj(over: Partial<Relay> = {}): Relay {
@@ -160,5 +164,66 @@ describe('useRelayGaslessSnapshot', () => {
     rerender({ u: true });
     expect(result.current.variables?.networkFeeEquivalent).toBe(FEE);
     expect(result.current.variables?.merchantAmount).toBe(100n * 10n ** 18n - FEE);
+  });
+});
+
+// モバイル注文 (feeKind present + recover): 会計上は **システム利用料 (feeAmount)** として記帳し
+// (gas ではない)、networkFeeEquivalent には載せない (null)。料率は実 mobileOrderFeeValue。
+describe('useRelayGaslessSnapshot — モバイル注文 feeKind (feeAmount=システム利用料 / netFee=null)', () => {
+  const value = 1000n * 10n ** 18n;
+
+  it('recover + feeKind=storefront (店舗負担/merchant): feeAmount=実 1%・netFee=null・着金=value−fee', () => {
+    const fee = mobileOrderFeeValue(value, 'storefront'); // 1% = 10 JPYC
+    const { result } = renderHook(() =>
+      useRelayGaslessSnapshot(
+        relayObj({ variables: { value, gasMode: 'merchant', feeKind: 'storefront' } }),
+        true,
+        CHAIN,
+      ),
+    );
+    expect(result.current.variables).toEqual({
+      merchantAmount: value - fee, // 店舗が利用料を吸収
+      feeAmount: fee, // システム利用料として記帳 (≠ 0)
+      saleAmount: value, // gross は商品小計
+      networkFeeEquivalent: null, // gas ではないので「該当なし」
+    });
+    // gas-recovery のフロア (FEE=2 JPYC) ではなく実 1% (10 JPYC) であることを厳密に要求。
+    expect(fee).toBe(10n * 10n ** 18n);
+    expect(fee).not.toBe(FEE);
+  });
+
+  it('recover + feeKind=preorder (顧客上乗せ/customer): feeAmount=実 3%・着金=value (満額)・netFee=null', () => {
+    const fee = mobileOrderFeeValue(value, 'preorder'); // 3% = 30 JPYC
+    const { result } = renderHook(() =>
+      useRelayGaslessSnapshot(
+        relayObj({ variables: { value, gasMode: 'customer', feeKind: 'preorder' } }),
+        true,
+        CHAIN,
+      ),
+    );
+    expect(result.current.variables).toEqual({
+      merchantAmount: value, // 顧客上乗せ: 店舗は満額受領
+      feeAmount: fee,
+      saleAmount: value,
+      networkFeeEquivalent: null,
+    });
+    expect(fee).toBe(30n * 10n ** 18n); // 1% (10) と区別
+  });
+
+  it('free 経路 (useRecover=false) + feeKind: 利用料は発生しない (fee=0・netFee=0・着金=満額)', () => {
+    // free は分割が無いので feeKind があっても徴収ゼロ (実 on-chain と一致)。isMobile=false。
+    const { result } = renderHook(() =>
+      useRelayGaslessSnapshot(
+        relayObj({ variables: { value, gasMode: 'merchant', feeKind: 'storefront' } }),
+        false,
+        CHAIN,
+      ),
+    );
+    expect(result.current.variables).toEqual({
+      merchantAmount: value,
+      feeAmount: 0n,
+      saleAmount: value,
+      networkFeeEquivalent: 0n, // free は mobile 扱いしない → null ではなく 0
+    });
   });
 });

@@ -22,6 +22,20 @@ vi.mock('@/hooks/useMarketRates', () => ({
     refetch: vi.fn(),
   }),
 }));
+// レジ利用料 flag を切替え可能に (既定 OFF = レジ standard 無料 = 既存テストの挙動不変)。
+const envHold = vi.hoisted(() => ({ enableRegisterFee: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableRegisterFee() {
+        return envHold.enableRegisterFee;
+      },
+    },
+  };
+});
 
 import { RegisterMode } from '@/components/RegisterMode';
 import { parseCheckoutParams } from '@/lib/url';
@@ -49,6 +63,7 @@ async function parsedCheckout() {
 describe('RegisterMode', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    envHold.enableRegisterFee = false; // 毎テスト OFF 起点 (flag-ON テストが個別に立てる)
   });
 
   it('初期サンプルプリセットが表示される (コーヒー/Tシャツ/イベント参加費/Tip)', async () => {
@@ -383,5 +398,30 @@ describe('RegisterMode', () => {
     );
     // サンプルプリセット (コーヒー等) は出ない。
     expect(screen.queryByRole('button', { name: /コーヒー/ })).toBeNull();
+  });
+
+  // レジ システム利用料: flag ON のとき /checkout に feeKind='register' を付け、CheckoutForm が
+  // standard 経路の JPYC 決済に recover の OpenPay利用料 % を課金する合図にする。
+  it('flag ON: レジの /checkout URL に fee_kind=register が付く (standard 課金の合図)', async () => {
+    envHold.enableRegisterFee = true;
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    const r = await parsedCheckout();
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.feeKind).toBe('register');
+  });
+
+  it('flag OFF (既定): レジの /checkout URL に feeKind を付けない (完全 inert・現状維持)', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    const r = await parsedCheckout();
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.feeKind).toBeUndefined();
   });
 });

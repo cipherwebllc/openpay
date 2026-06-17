@@ -104,3 +104,52 @@ describe('checkout feeKind / feePayer round-trip', () => {
     }
   });
 });
+
+// 手書き URL / 改竄に対する parse の堅牢性 (strict validation の境界)。
+describe('checkout feeKind / feePayer parse edge cases (hand-crafted / tampered URLs)', () => {
+  const ITEMS = `${encodeURIComponent('A')}%3A1%3A500`; // A:1:500
+  function parseQs(extra: string) {
+    return parseCheckoutParams(
+      new URLSearchParams(`to=${TO}&token=jpyc&items=${ITEMS}&${extra}`),
+    );
+  }
+
+  it('orphan fee_payer (no fee_kind) → feePayer undefined (孤立した負担者は無視)', () => {
+    const parsed = parseQs('fee_payer=customer');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.feeKind).toBeUndefined();
+      expect(parsed.params.feePayer).toBeUndefined();
+    }
+  });
+
+  it("register + fee_payer=customer → feeKind='register' だが feePayer は undefined (register は mobile kind ではない)", () => {
+    const parsed = parseQs('fee_kind=register&fee_payer=customer');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.feeKind).toBe('register');
+      // register は常に店舗負担で feePayer 概念が無い → 手書きされても採用しない。
+      expect(parsed.params.feePayer).toBeUndefined();
+    }
+  });
+
+  it('preorder + invalid fee_payer (bogus) → feePayer undefined (feeKind は保持)', () => {
+    const parsed = parseQs('fee_kind=preorder&fee_payer=bogus');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.feeKind).toBe('preorder');
+      expect(parsed.params.feePayer).toBeUndefined();
+    }
+  });
+
+  it('storefront + 手書き fee_payer=customer は parse が採用するが downstream で無害 (storefront は常に店舗負担)', () => {
+    // build は storefront に fee_payer を出さないが、parse は mobile kind なら受理する非対称。
+    // mobileOrderGasMode('storefront', *) は常に 'merchant' なので、この feePayer は inert。
+    const parsed = parseQs('fee_kind=storefront&fee_payer=customer');
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.feeKind).toBe('storefront');
+      expect(parsed.params.feePayer).toBe('customer'); // 採用されるが下流で無視される
+    }
+  });
+});

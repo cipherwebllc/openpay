@@ -52,6 +52,9 @@ import { logger } from '@/lib/logger';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
+// mobileOrderFee は **実物** (未モック)。feeKind 分岐で hook が実 mobileOrderFeeValue へ委譲し、
+// gas-recovery (recoverFeeMock) を呼ばないことを金額 + 未呼出で証明する。
+import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const jpycDep = defaultDeploymentForSymbol('jpyc');
@@ -284,6 +287,94 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe('amount_too_small');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+// モバイル注文 feeKind 分岐: feeKind present のとき feeValue は recoverFeeValue ではなく **実**
+// mobileOrderFeeValue(value, feeKind) で求める (経路非依存の一律 %)。recoverFeeMock が呼ばれない
+// ことで「mobile 分岐に入り gas-recovery に委譲していない」ことを証明する。
+describe('useJpycEip3009Payment — モバイル注文 feeKind (recover=実 mobileOrderFeeValue / free=throw)', () => {
+  const FORWARDER = getAddress('0x0F4560a777415580F0680F8B56a79B0022C6B848');
+
+  function lastPostBody(): Record<string, unknown> {
+    const call = fetchSpy.mock.calls.at(-1)!;
+    return JSON.parse((call[1] as RequestInit).body as string);
+  }
+
+  beforeEach(() => {
+    (jpycForwarderFor as ReturnType<typeof vi.fn>).mockReturnValue(FORWARDER);
+    recoverFeeMock.mockClear();
+  });
+
+  it('feeKind=storefront (店舗負担/merchant): feeValue=実 1%・merchantValue=value−fee・payload に feeKind・recoverFeeValue 不呼出', async () => {
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    const value = 1_000n * 10n ** 18n;
+    const fee = mobileOrderFeeValue(value, 'storefront'); // 実 1% = 10 JPYC
+    result.current.mutate({
+      merchant: MERCHANT,
+      value,
+      gasMode: 'merchant',
+      feeKind: 'storefront',
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const body = lastPostBody();
+    // 実 mobileOrderFeeValue で feeValue を組む (定数表 1%)。
+    expect(body.feeValue).toBe(fee.toString());
+    // 店舗負担: merchantValue = value − fee。
+    expect(body.merchantValue).toBe((value - fee).toString());
+    // server へ feeKind を渡す (定数表 再計算のヒント)。
+    expect(body.feeKind).toBe('storefront');
+    // gas-recovery (recoverFeeValue) には委譲しない。
+    expect(recoverFeeMock).not.toHaveBeenCalled();
+  });
+
+  it('feeKind=preorder (顧客上乗せ/customer): feeValue=実 3% (1% ではない)・merchantValue=value (満額)', async () => {
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    const value = 1_000n * 10n ** 18n;
+    const fee = mobileOrderFeeValue(value, 'preorder'); // 実 3% = 30 JPYC
+    expect(fee).toBe(30n * 10n ** 18n); // recover の 1% (10) と区別できる
+    result.current.mutate({
+      merchant: MERCHANT,
+      value,
+      gasMode: 'customer',
+      feeKind: 'preorder',
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const body = lastPostBody();
+    expect(body.feeValue).toBe(fee.toString());
+    // 顧客上乗せ: 店舗は満額受領 (merchantValue == value)。
+    expect(body.merchantValue).toBe(value.toString());
+    expect(body.feeKind).toBe('preorder');
+    expect(recoverFeeMock).not.toHaveBeenCalled();
+  });
+
+  it('free 経路 (forwarder 未設定) + feeKind: mobile_fee_requires_recover で throw・POST しない (ガスレス素通り穴を塞ぐ)', async () => {
+    // この chain だけ forwarder=null (= free) に倒す。free は単一 transfer で fee 分割不可。
+    (jpycForwarderFor as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    result.current.mutate({
+      merchant: MERCHANT,
+      value: 1_000n * 10n ** 18n,
+      gasMode: 'merchant',
+      feeKind: 'storefront',
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    // 明示エラーで呼出側 (CheckoutForm) が standard 経路へ fallback できる。
+    expect(result.current.error?.message).toBe('mobile_fee_requires_recover');
+    // 手数料を取りこぼす free transfer は実行しない。
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

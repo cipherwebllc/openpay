@@ -5,8 +5,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 
-// 受注リレー flag を切替え可能に (既定 OFF=既存テストの挙動不変)。
-const envHold = vi.hoisted(() => ({ enableOrderRelay: false }));
+// 受注リレー / モバイル注文利用料 flag を切替え可能に (既定 OFF=既存テストの挙動不変)。
+const envHold = vi.hoisted(() => ({
+  enableOrderRelay: false,
+  enableMobileOrderFee: false,
+}));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -15,6 +18,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       get enableOrderRelay() {
         return envHold.enableOrderRelay;
+      },
+      get enableMobileOrderFee() {
+        return envHold.enableMobileOrderFee;
       },
     },
   };
@@ -40,6 +46,7 @@ const config: MobileOrderConfig = {
 
 afterEach(() => {
   envHold.enableOrderRelay = false; // 受注リレー flag を毎回 OFF に戻す
+  envHold.enableMobileOrderFee = false; // モバイル注文利用料 flag も毎回 OFF に戻す
 });
 
 describe('MobileOrderView', () => {
@@ -392,5 +399,60 @@ describe('MobileOrderView', () => {
     expect(container.querySelector('[href^="javascript:"]')).toBeNull();
     expect(container.querySelector('[src^="data:"]')).toBeNull();
     expect(screen.getByText('罠')).toBeInTheDocument();
+  });
+});
+
+// モバイル注文システム利用料 (flag ON): 顧客上乗せ (preorder + customer) では客の表示総額に上乗せし
+// feeIncludedNote を出す。店頭/店舗負担は原価のみ (上乗せ無し)。flag OFF は完全 inert。
+describe('MobileOrderView — モバイル注文システム利用料 (feeUpcharge / feeIncludedNote)', () => {
+  // ブレンド 500 JPYC を 1 点。preorder=3% → 上乗せ 15 JPYC → 総額 515 JPYC。
+  function addBlend() {
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+  }
+  function payUrl() {
+    return new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+  }
+
+  it('flag ON + preorder + 顧客上乗せ: 総額=原価+3% (515 JPYC) 表示・feeIncludedNote・URL に fee_kind/fee_payer', () => {
+    envHold.enableMobileOrderFee = true;
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, mode: 'preorder', feePayer: 'customer' }} />,
+    );
+    addBlend();
+    // 客の表示総額に 3% (15 JPYC) を上乗せ。
+    expect(screen.getByText('515 JPYC')).toBeInTheDocument();
+    // 内訳の注記 (システム利用料 15 JPYC（3%）を含みます)。
+    expect(screen.getByText(/システム利用料 15 JPYC/)).toBeInTheDocument();
+    // /checkout へ feeKind=preorder + fee_payer=customer を伝播 (CheckoutForm/relay が分割)。
+    const url = payUrl();
+    expect(url.searchParams.get('fee_kind')).toBe('preorder');
+    expect(url.searchParams.get('fee_payer')).toBe('customer');
+  });
+
+  it('flag ON + storefront (店舗負担): 上乗せ無し (原価 500 JPYC のみ)・note 無し・URL は fee_kind=storefront のみ', () => {
+    envHold.enableMobileOrderFee = true;
+    renderWithIntl(<MobileOrderView config={{ ...config, mode: 'storefront' }} />);
+    addBlend();
+    // 店頭は店舗負担 → 客には原価のみ表示 (上乗せしない)。
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    expect(screen.queryByText(/システム利用料/)).toBeNull();
+    const url = payUrl();
+    // feeKind は載る (server/CheckoutForm が分割する合図) が、storefront は fee_payer を出さない。
+    expect(url.searchParams.get('fee_kind')).toBe('storefront');
+    expect(url.searchParams.get('fee_payer')).toBeNull();
+  });
+
+  it('flag OFF (既定): preorder+customer でも上乗せ無し・note 無し・URL に fee_kind 無し (完全 inert)', () => {
+    // envHold.enableMobileOrderFee は afterEach で false (既定)。
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, mode: 'preorder', feePayer: 'customer' }} />,
+    );
+    addBlend();
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    expect(screen.queryByText(/システム利用料/)).toBeNull();
+    expect(payUrl().searchParams.get('fee_kind')).toBeNull();
   });
 });
