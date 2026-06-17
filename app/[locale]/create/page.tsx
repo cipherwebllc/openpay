@@ -16,12 +16,13 @@ import { RegisterMode } from '@/components/RegisterMode';
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
 import { MobileOrderBuilder } from '@/components/MobileOrderBuilder';
+import { OrderFeedPanel } from '@/components/OrderFeedPanel';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 
-type Tab = 'qr' | 'register' | 'tip' | 'profile' | 'mobileOrder';
+type Tab = 'qr' | 'register' | 'tip' | 'profile' | 'mobileOrder' | 'orders';
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
@@ -46,6 +47,10 @@ export default function CreatePage() {
             // 「モバイルオーダー」は flag ON のときだけ露出 (レジとチップの間・既定 OFF=本番非表示)。
             ...(env.enableMobileOrder
               ? ([['mobileOrder', t('tabs.mobileOrder')]] as const)
+              : []),
+            // 「受注」(受注リレー) は flag ON のときだけ露出 (既定 OFF=本番非表示)。
+            ...(env.enableOrderRelay
+              ? ([['orders', t('tabs.orders')]] as const)
               : []),
             ['tip', t('tabs.tip')],
             // 「プロフ」(@handle link-in-bio) は flag ON のときだけ露出。
@@ -99,6 +104,7 @@ export default function CreatePage() {
           onGetHandle={() => setTab('profile')}
         />
       )}
+      {tab === 'orders' && env.enableOrderRelay && <OrderFeedPanel />}
 
       <MiniHistoryRecent />
 

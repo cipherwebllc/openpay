@@ -3,6 +3,8 @@ import type { Hex } from 'viem';
 import {
   verifyJpycFeeTransfer,
   verifyJpycFeeOnChain,
+  verifyJpycTransferTo,
+  verifyJpycTransferToOnChain,
   type FeeReceiptLog,
 } from '@/lib/feeVerify';
 
@@ -259,5 +261,93 @@ describe('verifyJpycFeeOnChain', () => {
       ok: false,
       reason: 'rpc_error',
     });
+  });
+});
+
+const FORWARDER = '0x2222222222222222222222222222222222222222';
+const toExpected = { token: TOKEN, to: TO, minValue: MIN } as const;
+
+describe('verifyJpycTransferTo (from 非依存・受注リレー用)', () => {
+  it('free 経路 (customer→merchant) を to 一致で拾う → ok', () => {
+    const r = verifyJpycTransferTo({
+      logs: [transferLog({ from: FROM, to: TO })],
+      expected: toExpected,
+    });
+    expect(r).toEqual({ ok: true, value: MIN });
+  });
+
+  it('recover(forwarder) 分割ログ: merchant 着金のみ合算 (feeReceiver 宛は除外) → ok', () => {
+    // customer→merchant ログは存在しない。merchant 宛は forwarder からの 1 本のみ。
+    const merchantLeg = transferLog({ from: FORWARDER, to: TO, value: MIN });
+    const feeLeg = transferLog({ from: FORWARDER, to: OTHER, value: 2n * 10n ** 18n });
+    const r = verifyJpycTransferTo({ logs: [merchantLeg, feeLeg], expected: toExpected });
+    expect(r).toEqual({ ok: true, value: MIN }); // merchant 宛のみ・feeReceiver 宛は除外
+  });
+
+  it('from が誰でも to=merchant なら拾う (verifyJpycFeeTransfer との違い)', () => {
+    const r = verifyJpycTransferTo({
+      logs: [transferLog({ from: FORWARDER, to: TO })],
+      expected: toExpected,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('to が merchant 以外のログは除外 → no_matching_transfer', () => {
+    const r = verifyJpycTransferTo({
+      logs: [transferLog({ from: FORWARDER, to: OTHER })],
+      expected: toExpected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('merchant 宛合計が minValue 未満 → amount_too_low', () => {
+    const r = verifyJpycTransferTo({
+      logs: [transferLog({ to: TO, value: MIN - 1n })],
+      expected: toExpected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'amount_too_low' });
+  });
+
+  it('別トークンの to=merchant Transfer は無視 → no_matching_transfer', () => {
+    const r = verifyJpycTransferTo({
+      logs: [transferLog({ token: OTHER, to: TO })],
+      expected: toExpected,
+    });
+    expect(r).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('複数の merchant 着金は合算', () => {
+    const r = verifyJpycTransferTo({
+      logs: [
+        transferLog({ from: FROM, to: TO, value: 100n * 10n ** 18n }),
+        transferLog({ from: FORWARDER, to: TO, value: 200n * 10n ** 18n }),
+      ],
+      expected: toExpected,
+    });
+    expect(r).toEqual({ ok: true, value: MIN });
+  });
+});
+
+describe('verifyJpycTransferToOnChain', () => {
+  const txHash = `0x${'2'.repeat(64)}` as Hex;
+  it('status=success → 実着金合計 value + blockNumber を返す', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({ from: FORWARDER, to: TO, value: MIN })],
+        blockNumber: 7n,
+      }),
+    };
+    const r = await verifyJpycTransferToOnChain({ publicClient, txHash, expected: toExpected });
+    expect(r).toEqual({ ok: true, value: MIN, blockNumber: 7n });
+  });
+
+  it('status=reverted → tx_reverted', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'reverted', logs: [] }),
+    };
+    expect(
+      await verifyJpycTransferToOnChain({ publicClient, txHash, expected: toExpected }),
+    ).toEqual({ ok: false, reason: 'tx_reverted' });
   });
 });

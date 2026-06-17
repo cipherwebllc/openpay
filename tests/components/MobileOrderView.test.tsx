@@ -1,9 +1,25 @@
 // 顧客向け注文ページの読み取り専用ビュー (MobileOrderView) を実描画で検証。
 // 店舗名 / メニュー (名前・価格・絵文字・画像) / SNS / 「準備中」表示が出ること。
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
+
+// 受注リレー flag を切替え可能に (既定 OFF=既存テストの挙動不変)。
+const envHold = vi.hoisted(() => ({ enableOrderRelay: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableOrderRelay() {
+        return envHold.enableOrderRelay;
+      },
+    },
+  };
+});
+
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
@@ -21,6 +37,10 @@ const config: MobileOrderConfig = {
     { id: 'c', name: '水', price: '100' },
   ],
 };
+
+afterEach(() => {
+  envHold.enableOrderRelay = false; // 受注リレー flag を毎回 OFF に戻す
+});
 
 describe('MobileOrderView', () => {
   it('店舗名 + 受取チェーン + メニュー (名前/価格) を描画', () => {
@@ -308,6 +328,42 @@ describe('MobileOrderView', () => {
       expect(parsed.params.items[0].taxRate).toBe(10);
       expect(parsed.params.items[0].taxCategory).toBe('taxable_10');
     }
+  });
+
+  it('受注リレー flag ON + handle: /checkout に webhook(/api/order/notify?h=) + order_id が付く', () => {
+    envHold.enableOrderRelay = true;
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    const webhook = u.searchParams.get('webhook');
+    expect(webhook).toContain('/api/order/notify');
+    expect(webhook).toContain('h=alice');
+    expect(u.searchParams.get('order_id')).toBeTruthy();
+  });
+
+  it('受注リレー flag OFF (既定): webhook/order_id を付けない (inert)', () => {
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    expect(u.searchParams.get('webhook')).toBeNull();
+    expect(u.searchParams.get('order_id')).toBeNull();
+  });
+
+  it('受注リレー flag ON だが handle 無し (bare ?s=): webhook を付けない', () => {
+    envHold.enableOrderRelay = true;
+    renderWithIntl(<MobileOrderView config={config} />); // handle 無し
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    expect(u.searchParams.get('webhook')).toBeNull();
   });
 
   // 二重防御: 通常 config は validateOrderConfig で https のみに検証済みだが、検証を

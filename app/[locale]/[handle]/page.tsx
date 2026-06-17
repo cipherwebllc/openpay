@@ -164,6 +164,7 @@ export default async function HandlePage({
           config={storefront}
           backHref={`/${locale}/@${normalized}`}
           backLabel={storefront.shopName}
+          handle={normalized}
         />
       ) : (
         <>

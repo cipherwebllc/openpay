@@ -167,7 +167,8 @@
       "tip": "チップ",
       "register": "レジ",
       "profile": "プロフ",
-      "mobileOrder": "モバイル注文"
+      "mobileOrder": "モバイル注文",
+      "orders": "受注"
     },
     "tabDesc": {
       "qr": "店舗向け: レジ掲示用の決済 QR を作成します。"
@@ -1741,5 +1742,23 @@
     "tablePlaceholder": "例: 12",
     "tableRequired": "テーブル番号を入力してください",
     "tableDescPrefix": "テーブル {table}"
+  },
+  "OrderRelay": {
+    "heading": "受注",
+    "subheading": "店内・事前注文の着金済み注文をここで確認します（受取ウォレットでサインイン）。",
+    "signInPrompt": "受注を見るには、受取ウォレットでサインインしてください。",
+    "signInStatement": "OpenPay の受注を表示するためにサインインします",
+    "signIn": "受取ウォレットでサインイン",
+    "signingIn": "サインイン中…",
+    "signInError": "サインインに失敗しました。もう一度お試しください。",
+    "autoRefresh": "約12秒ごとに自動更新",
+    "refresh": "更新",
+    "loadError": "受注を取得できませんでした。時間をおいて再試行してください。",
+    "loading": "読み込み中…",
+    "empty": "まだ受注はありません。",
+    "claimedNote": "商品・テーブルは顧客申告です。金額はオンチェーンで検証済み（実着金額）。",
+    "viewTx": "取引を表示",
+    "markFulfilled": "対応済みにする",
+    "disclosure": "受注は決済時に OpenPay サーバへ一時保存され、一定期間後に自動削除されます（顧客の個人情報は保存しません）。"
   }
 }

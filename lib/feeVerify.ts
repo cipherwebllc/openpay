@@ -135,3 +135,91 @@ export async function verifyJpycFeeOnChain(args: {
   }
   return result;
 }
+
+// ===========================================================================
+// from 非依存の「to への着金」検証 (受注リレー用)。
+// verifyJpycFeeTransfer は from 厳格 (billing/settle が依存) なので**触らず**、別関数として追加。
+// ===========================================================================
+
+export type JpycTransferToExpected = {
+  token: Address; // 該当 chain の JPYC
+  to: Address; // 受取先 (merchant)。from は問わない。
+  minValue: bigint; // 最低着金額 (JPYC minor units)。受注リレーは dust フロアを使う。
+};
+
+/**
+ * 純関数 (from 非依存): receipt logs から token の Transfer(* → to) を**全て合算**し minValue 以上か判定。
+ * `verifyJpycFeeTransfer` と違い **from を問わない**。理由 (CRITICAL): forwarder(recover) 経路は
+ * `customer→forwarder` のあと forwarder が `forwarder→merchant` + `forwarder→feeReceiver` に分割するため、
+ * 「customer→merchant」ログが存在しない。from 厳格だと正当な着金を全取りこぼす。free 経路
+ * (customer→merchant) も to 一致で拾える。受注リレーの「merchant への実着金確認」専用 (billing 不使用)。
+ */
+export function verifyJpycTransferTo(args: {
+  logs: readonly FeeReceiptLog[];
+  expected: JpycTransferToExpected;
+}): FeeVerifyResult {
+  const token = getAddress(args.expected.token);
+  const to = getAddress(args.expected.to);
+
+  let total = 0n;
+  let matched = false;
+  for (const log of args.logs) {
+    let logToken: Address;
+    try {
+      logToken = getAddress(log.address);
+    } catch {
+      continue;
+    }
+    if (logToken !== token) continue;
+    if (log.topics.length < 3) continue;
+    if (log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
+
+    let logTo: Address;
+    try {
+      logTo = topicToAddress(log.topics[2]); // topics[1]=from は無視
+    } catch {
+      continue;
+    }
+    if (logTo !== to) continue;
+
+    let value: bigint;
+    try {
+      value = BigInt(log.data);
+    } catch {
+      continue;
+    }
+    total += value;
+    matched = true;
+  }
+
+  if (!matched) return { ok: false, reason: 'no_matching_transfer' };
+  if (total < args.expected.minValue) {
+    return { ok: false, reason: 'amount_too_low' };
+  }
+  return { ok: true, value: total };
+}
+
+/** on-chain (from 非依存): receipt 取得 → status 確認 → verifyJpycTransferTo で照合。
+ *  成功時は **実着金合計 (value)** と blockNumber を返す (受注の権威額 + 決定論的 ts 用)。 */
+export async function verifyJpycTransferToOnChain(args: {
+  publicClient: ReceiptReader;
+  txHash: Hex;
+  expected: JpycTransferToExpected;
+}): Promise<FeeVerifyResult> {
+  let receipt: Awaited<ReturnType<ReceiptReader['getTransactionReceipt']>>;
+  try {
+    receipt = await args.publicClient.getTransactionReceipt({ hash: args.txHash });
+  } catch (e) {
+    const name = (e as { name?: unknown })?.name;
+    if (name === 'TransactionReceiptNotFoundError') {
+      return { ok: false, reason: 'tx_not_found' };
+    }
+    return { ok: false, reason: 'rpc_error' };
+  }
+  if (receipt.status !== 'success') return { ok: false, reason: 'tx_reverted' };
+  const result = verifyJpycTransferTo({ logs: receipt.logs, expected: args.expected });
+  if (result.ok && receipt.blockNumber !== undefined) {
+    return { ...result, blockNumber: receipt.blockNumber };
+  }
+  return result;
+}

@@ -458,6 +458,12 @@ export const env = {
   // (client 露出)。**既定 OFF** = 注文ページ/設定UI/ダッシュボードは非表示・本番完全 inert。
   // 点灯は開示更新 (店頭1%/モバイル3%) + 弁護士/FSA 確認後。計画: plans/mobile-order-nostr.md。
   enableMobileOrder: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER),
+  // モバイル注文の「受注リレー」(顧客の決済成功 → /api/order/notify が txHash を
+  // on-chain 検証 → 店主の KV 受注リストへ → 店主が SIWE で受注画面に表示) の有効化フラグ
+  // (client 露出)。**既定 OFF** = MobileOrderView は webhook を付けず・受注タブ非表示・
+  // /api/order/* は 404 → 本番完全 inert。決済コア/手数料(0%)/USDC は無改変。注文メタは
+  // KV に TTL 72h で一時保存 (資金は不触=ノンカストディ不変・PII 非保存)。計画: plans/swift-puzzling-sky.md。
+  enableOrderRelay: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

@@ -14,6 +14,7 @@ import { useTranslations } from 'next-intl';
 import { formatUnits, parseUnits } from 'viem';
 import { ChevronDown, ChevronUp, Clock, MapPin, Phone, ShoppingCart, UtensilsCrossed } from 'lucide-react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
+import { env } from '@/lib/env';
 import { useOrigin } from '@/hooks/useOrigin';
 import { deploymentForSlug } from '@/lib/tokens';
 import type { JpycChainSlug } from '@/lib/chains';
@@ -46,12 +47,15 @@ export function MobileOrderView({
   config,
   backHref,
   backLabel,
+  handle,
 }: {
   config: MobileOrderConfig;
   /** 「支払いへ進む」後の /checkout から戻る店舗ページのパス (同一オリジン)。@handle 公開時に渡る。 */
   backHref?: string;
   /** 戻りリンクのラベル (店名)。 */
   backLabel?: string;
+  /** 公開元の @handle (正規化済み・@ 無し)。受注リレー (flag ON 時) の webhook 束縛に使う。 */
+  handle?: string;
 }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
@@ -60,6 +64,15 @@ export function MobileOrderView({
   const [cartOpen, setCartOpen] = useState(false);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
+  // 受注リレー (flag ON) 用の安定 orderId。この注文ページ訪問で一意・店主の受注画面の参照キー。
+  // crypto.randomUUID 不在環境 (一部 jsdom) では時刻+乱数へフォールバック。
+  const [orderId] = useState(() => {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      return `o-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+    }
+  });
 
   // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
   // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。
@@ -114,6 +127,12 @@ export function MobileOrderView({
   const orderDescription = tableNum ? t('tableDescPrefix', { table: tableNum }) : undefined;
   // 店内なのにテーブル番号が未入力なら支払いを止める (どのテーブルか不明な注文を防ぐ)。
   const needsTable = Boolean(config.dineIn) && tableNum.length === 0;
+  // 受注リレー (flag ON + @handle 公開時のみ): 決済成功 webhook を /api/order/notify?h= へ向け、
+  // 店主の受注画面に届くようにする (CheckoutForm 無改変・既存 webhook 機構を流用)。OFF/handle 無しは付けない。
+  const orderRelayWebhook =
+    env.enableOrderRelay && handle && origin
+      ? `${origin}/api/order/notify?h=${encodeURIComponent(handle)}`
+      : undefined;
   const baseCheckoutUrl =
     origin && cartItems.length > 0 && !tooMany
       ? buildCheckoutUrl(origin, {
@@ -123,6 +142,8 @@ export function MobileOrderView({
           gas: 'customer',
           items: cartItems,
           description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
+          // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
+          ...(orderRelayWebhook ? { webhook: orderRelayWebhook, orderId } : {}),
         })
       : '';
   // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。

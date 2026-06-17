@@ -167,7 +167,8 @@
       "tip": "Tip",
       "register": "Register",
       "profile": "Profile",
-      "mobileOrder": "Mobile order"
+      "mobileOrder": "Mobile order",
+      "orders": "Orders"
     },
     "tabDesc": {
       "qr": "For merchants: create a payment QR to display at the register."
@@ -1741,5 +1742,23 @@
     "tablePlaceholder": "e.g. 12",
     "tableRequired": "Please enter your table number",
     "tableDescPrefix": "Table {table}"
+  },
+  "OrderRelay": {
+    "heading": "Orders",
+    "subheading": "See paid dine-in / pre-orders here (sign in with your receiving wallet).",
+    "signInPrompt": "Sign in with your receiving wallet to see your orders.",
+    "signInStatement": "Sign in to view your OpenPay orders",
+    "signIn": "Sign in with receiving wallet",
+    "signingIn": "Signing in…",
+    "signInError": "Sign-in failed. Please try again.",
+    "autoRefresh": "Auto-refreshes about every 12s",
+    "refresh": "Refresh",
+    "loadError": "Couldn't load orders. Please try again shortly.",
+    "loading": "Loading…",
+    "empty": "No orders yet.",
+    "claimedNote": "Items and table are customer-declared. The amount is verified on-chain (actual received).",
+    "viewTx": "View transaction",
+    "markFulfilled": "Mark as done",
+    "disclosure": "Orders are temporarily stored on the OpenPay server at payment time and auto-deleted after a period (no customer personal data is stored)."
   }
 }
