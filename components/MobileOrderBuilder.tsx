@@ -194,6 +194,7 @@ export function MobileOrderBuilder({
               </button>
             </div>
             <p className="mt-1 text-xs text-slate-400">{t('acceptingHint')}</p>
+            <p className="mt-1 text-xs text-amber-700">{t('acceptingRepublishNote')}</p>
           </div>
 
           {/* ① 受取先 (店舗ウォレット) + 受取チェーン (JPYC・複数選択可) */}

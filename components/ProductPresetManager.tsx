@@ -279,6 +279,7 @@ export function ProductPresetManager({
             {t('addButton')}
           </button>
         </div>
+        <p className="mt-2 text-xs text-slate-400">{t('imageHint')}</p>
       </div>
     </div>
   );
