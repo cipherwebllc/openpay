@@ -309,6 +309,40 @@ describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せ
   });
 });
 
+describe('mobileOrder: chains (受取チェーン複数選択)', () => {
+  const good = {
+    chain: 'polygon',
+    mode: 'storefront',
+    feePayer: 'merchant',
+    menu: [{ id: 'a', name: 'A', price: '500' }],
+  };
+  it('chains 複数を保持 (chain を含め重複除去)', () => {
+    expect(validateStorefrontParts({ ...good, chains: ['polygon', 'kaia'] })?.chains).toEqual([
+      'polygon',
+      'kaia',
+    ]);
+  });
+  it('chain (primary) が chains に無ければ先頭へ補完', () => {
+    expect(
+      validateStorefrontParts({ ...good, chain: 'polygon', chains: ['kaia'] })?.chains,
+    ).toEqual(['polygon', 'kaia']);
+  });
+  it('重複・不正チェーンは除去', () => {
+    expect(
+      validateStorefrontParts({ ...good, chains: ['polygon', 'polygon', 'nope', 'kaia'] })?.chains,
+    ).toEqual(['polygon', 'kaia']);
+  });
+  it('1 件のみ / chains 無し (旧 schema) は chains を持たない (単一扱い)', () => {
+    expect('chains' in (validateStorefrontParts({ ...good, chains: ['polygon'] }) ?? {})).toBe(false);
+    expect('chains' in (validateStorefrontParts(good) ?? {})).toBe(false);
+  });
+  it('validateOrderConfig が chains を config に載せ・往復一致', () => {
+    const c = validateOrderConfig({ ...baseConfig(), chain: 'polygon', chains: ['polygon', 'kaia'] })!;
+    expect(c.chains).toEqual(['polygon', 'kaia']);
+    expect(decodeOrderConfig(encodeOrderConfig(c))?.chains).toEqual(['polygon', 'kaia']);
+  });
+});
+
 describe('mobileOrder: telHref / mapSearchHref (公開ページの電話/地図リンク)', () => {
   it('telHref は数字と先頭 + のみ残す', () => {
     expect(telHref('03-1234-5678')).toBe('tel:0312345678');

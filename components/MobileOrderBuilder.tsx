@@ -21,10 +21,11 @@ import { useMobileOrderDraft, presetsToMenu } from '@/hooks/useMobileOrderDraft'
 import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 import { useQrSettings } from '@/hooks/useQrSettings';
-import { JPYC_CHAINS, type JpycChainSlug } from '@/lib/chains';
+import { type JpycChainSlug } from '@/lib/chains';
 import {
   safeHttpUrl,
   JPYC_CHAIN_LABEL,
+  MOBILE_ORDER_CHAINS,
   SHOP_NAME_MAX,
   SOCIALS_MAX,
   ADDRESS_MAX,
@@ -103,7 +104,8 @@ export function MobileOrderBuilder({
   // メニュー未充足なら null (公開不可)。
   const storefrontParts = hasMenu
     ? {
-        chain: draft.chain,
+        chain: draft.chains[0], // 既定 (先頭)
+        chains: draft.chains, // 顧客が選べる集合 (validateStorefrontParts が 2 件以上で採用)
         mode: draft.mode,
         feePayer: draft.feePayer,
         shopName: draft.shopName.trim() || undefined,
@@ -118,6 +120,13 @@ export function MobileOrderBuilder({
     : null;
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
+
+  // 受取チェーンの複数選択トグル。最低 1 件は維持 (空選択は不可)。
+  const toggleChain = (slug: JpycChainSlug) => {
+    const has = draft.chains.includes(slug);
+    const next = has ? draft.chains.filter((c) => c !== slug) : [...draft.chains, slug];
+    if (next.length > 0) update({ chains: next });
+  };
 
   // SNS の並べ替え (@handle プロフと同型: ドラッグ + ▲▼ ボタンの 2 系統)。
   const dragIndex = useRef<number | null>(null);
@@ -196,19 +205,31 @@ export function MobileOrderBuilder({
                 </div>
               </Field>
 
+              {/* 受取チェーンは複数選択可 (顧客が注文ページで選ぶ)。最低 1 件。受取先は全チェーン共通。 */}
               <Field label={t('chainLabel')} hint={t('chainHint')}>
-                <select
-                  value={draft.chain}
-                  onChange={(e) => update({ chain: e.target.value as JpycChainSlug })}
-                  className={inputClass}
-                  aria-label={t('chainLabel')}
-                >
-                  {JPYC_CHAINS.map((slug) => (
-                    <option key={slug} value={slug}>
-                      {JPYC_CHAIN_LABEL[slug]}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  {MOBILE_ORDER_CHAINS.map((slug) => {
+                    const checked = draft.chains.includes(slug);
+                    return (
+                      <label
+                        key={slug}
+                        className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition ${
+                          checked
+                            ? 'border-brand bg-brand/5 font-medium text-brand-dark'
+                            : 'border-slate-300 text-slate-600 hover:border-slate-400'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleChain(slug)}
+                          aria-label={`JPYC (${JPYC_CHAIN_LABEL[slug]})`}
+                        />
+                        JPYC ({JPYC_CHAIN_LABEL[slug]})
+                      </label>
+                    );
+                  })}
+                </div>
               </Field>
             </div>
           </StepCard>

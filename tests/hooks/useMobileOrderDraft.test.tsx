@@ -40,7 +40,7 @@ describe('useMobileOrderDraft: 既定 + 永続', () => {
     expect(result.current.hydrated).toBe(true);
     expect(result.current.settings.mode).toBe('storefront');
     expect(result.current.settings.feePayer).toBe('merchant');
-    expect(result.current.settings.chain).toBe('polygon');
+    expect(result.current.settings.chains).toEqual(['polygon']);
     expect('menu' in result.current.settings).toBe(false);
   });
 
@@ -109,7 +109,7 @@ function baseDraft(): MobileOrderDraft {
   return {
     receiver: '',
     receiverSource: 'auto',
-    chain: 'polygon',
+    chains: ['polygon'],
     shopName: '珈琲スタンド',
     avatar: '  https://img.example/icon.png  ', // trim 検証用
     mode: 'storefront',

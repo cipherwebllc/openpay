@@ -16,6 +16,7 @@ import { ChevronDown, ChevronUp, Clock, MapPin, Phone, ShoppingCart, UtensilsCro
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { useOrigin } from '@/hooks/useOrigin';
 import { deploymentForSlug } from '@/lib/tokens';
+import type { JpycChainSlug } from '@/lib/chains';
 import {
   buildCheckoutUrl,
   calcCheckoutTotal,
@@ -69,7 +70,13 @@ export function MobileOrderView({
     .map((u) => safeHttpUrl(u))
     .filter((u): u is string => Boolean(u));
 
-  const decimals = deploymentForSlug('jpyc', config.chain).decimals;
+  // 受取チェーン: chains が 2 件以上なら顧客が選べる (既定は先頭)。1 件なら従来どおり固定。
+  const offeredChains = config.chains && config.chains.length > 0 ? config.chains : [config.chain];
+  const [selectedChain, setSelectedChain] = useState<JpycChainSlug>(offeredChains[0]);
+  // 選択がオファー外 (config 差し替え時の stale) なら先頭へフォールバック。
+  const chain = offeredChains.includes(selectedChain) ? selectedChain : offeredChains[0];
+
+  const decimals = deploymentForSlug('jpyc', chain).decimals;
   const setItemQty = (id: string, n: number) =>
     setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) }));
 
@@ -101,7 +108,7 @@ export function MobileOrderView({
       ? buildCheckoutUrl(origin, {
           to: config.receiver,
           token: 'jpyc',
-          chain: config.chain,
+          chain, // 顧客が選んだ受取チェーン (単一なら config.chain)
           gas: 'customer',
           items: cartItems,
         })
@@ -149,9 +156,33 @@ export function MobileOrderView({
           )}
         </div>
         <h1 className="mt-3 text-xl font-bold text-slate-900">{config.shopName}</h1>
-        <p className="mt-1 text-xs text-slate-500">
-          {t('viewChainBadge', { chain: JPYC_CHAIN_LABEL[config.chain] })}
-        </p>
+        {offeredChains.length > 1 ? (
+          // 複数チェーン: 顧客が支払うチェーンを選ぶ (受取先は全チェーン共通の 1 アドレス)。
+          <div className="mt-2">
+            <p className="text-xs text-slate-500">{t('viewChainPick')}</p>
+            <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+              {offeredChains.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setSelectedChain(c)}
+                  aria-pressed={c === chain}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    c === chain
+                      ? 'border-brand bg-brand text-white'
+                      : 'border-slate-300 text-slate-600 hover:border-brand'
+                  }`}
+                >
+                  JPYC ({JPYC_CHAIN_LABEL[c]})
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500">
+            {t('viewChainBadge', { chain: JPYC_CHAIN_LABEL[config.chain] })}
+          </p>
+        )}
         {socialUrls.length > 0 && (
           <div className="mt-3">
             <SocialIconLinks urls={socialUrls} />

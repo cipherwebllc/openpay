@@ -22,6 +22,7 @@ import {
   ADDRESS_MAX,
   HOURS_MAX,
   PHONE_MAX,
+  MOBILE_ORDER_CHAINS,
   type MobileOrderConfig,
   type MobileOrderMode,
   type MenuItem,
@@ -34,7 +35,7 @@ import { useLocalStorageSettings } from './useLocalStorageSettings';
 export interface MobileOrderDraft {
   receiver: string; // 生入力 (アドレス/ENS)・URL 生成時に解決
   receiverSource: ReceiverSource; // 接続ウォレット追従の可否 (useReceiverAutofill 用)
-  chain: JpycChainSlug; // 受取チェーン (JPYC・単一)
+  chains: JpycChainSlug[]; // 受取チェーン集合 (JPYC・1 件以上)。複数なら注文ページで顧客が選ぶ。
   shopName: string;
   avatar: string; // 店舗アイコン画像 URL (生入力・https 検証は URL 生成時・@handle と同型)
   mode: MobileOrderMode; // 'storefront' (店頭/券売機) | 'preorder' (事前モバイルオーダー)
@@ -57,7 +58,7 @@ function clampStr(v: unknown, max: number): string {
 export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   receiver: '',
   receiverSource: 'auto',
-  chain: 'polygon', // JPYC の既定チェーン (店主が変更可)
+  chains: ['polygon'], // JPYC の既定チェーン (店主が複数選択可)
   shopName: '',
   avatar: '',
   mode: 'storefront', // 最も安全な経路 (その場払いその場受取) を既定に
@@ -74,8 +75,21 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
   return {
     receiver: typeof loaded.receiver === 'string' ? loaded.receiver : '',
     receiverSource: loaded.receiverSource === 'manual' ? 'manual' : 'auto',
-    chain:
-      typeof loaded.chain === 'string' && isJpycChainSlug(loaded.chain) ? loaded.chain : 'polygon',
+    chains: (() => {
+      // 旧 schema (単一 chain) を後方互換で配列化。有効な JPYC チェーンのみ・重複除去・1 件以上。
+      const legacyChain = (loaded as { chain?: unknown }).chain;
+      const src: unknown[] = Array.isArray(loaded.chains)
+        ? loaded.chains
+        : typeof legacyChain === 'string'
+          ? [legacyChain]
+          : [];
+      const valid = src.filter(
+        (c): c is JpycChainSlug =>
+          typeof c === 'string' && isJpycChainSlug(c) && MOBILE_ORDER_CHAINS.includes(c),
+      );
+      const uniq = [...new Set(valid)];
+      return uniq.length > 0 ? uniq : ['polygon'];
+    })(),
     shopName: clampStr(loaded.shopName, SHOP_NAME_MAX),
     avatar: clampStr(loaded.avatar, URL_FIELD_MAX), // https 検証は URL 生成時。length だけ clamp。
     mode: loaded.mode === 'preorder' ? 'preorder' : 'storefront',
@@ -137,7 +151,9 @@ export function draftToConfig(
 ): MobileOrderConfig | null {
   return validateOrderConfig({
     receiver: effectiveReceiver ?? '',
-    chain: draft.chain,
+    // chain = 既定 (先頭)、chains = 顧客が選べる集合 (validateOrderConfig が 2 件以上で採用)。
+    chain: draft.chains[0] ?? 'polygon',
+    chains: draft.chains,
     shopName: draft.shopName.trim(),
     // trim のみ。https 検証 + 空/不正の除外は validateOrderConfig が行う。
     avatar: draft.avatar.trim(),

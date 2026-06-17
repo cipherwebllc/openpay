@@ -489,6 +489,14 @@ describe('handleStorefrontConfig', () => {
     expect(config?.phone).toBe('03-1234-5678');
     expect(config?.acceptingOrders).toBe(false);
   });
+
+  it('storefront の chains (複数受取チェーン) を MobileOrderConfig へ載せる', () => {
+    const multi: HandleRecord = {
+      ...base,
+      storefront: { ...base.storefront!, chain: 'kaia', chains: ['kaia', 'polygon'] },
+    };
+    expect(handleStorefrontConfig(multi, 'shop')?.chains).toEqual(['kaia', 'polygon']);
+  });
 });
 
 describe('MAX_HANDLES_PER_WALLET', () => {

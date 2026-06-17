@@ -10,7 +10,7 @@
 //   本モジュールは P1.1 = 設定/メニュー/URL のみ (本番 inert・money-path 非該当)。
 
 import { isAddress, type Address } from 'viem';
-import { isJpycChainSlug, type JpycChainSlug } from './chains';
+import { isJpycChainSlug, JPYC_CHAINS, type JpycChainSlug } from './chains';
 import { isTaxCategory, type TaxCategory } from './tax';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
@@ -40,7 +40,10 @@ export const SOCIALS_MAX = 6; // SNS リンク上限 (@handle と同数)
 
 export type MobileOrderConfig = {
   receiver: Address; // 店舗ウォレット (着金先)・全 EVM チェーン共通
-  chain: JpycChainSlug; // 受取チェーン (JPYC のみ・単一)。顧客はこのチェーンで支払う (P2)。
+  chain: JpycChainSlug; // 既定/単一の受取チェーン。chains 未指定 or 1 件のときはこれを使う。
+  // 顧客が選べる受取チェーン集合 (chain を含む)。2 件以上のとき注文ページに選択 UI を出す。
+  // 受取先 (receiver) は全 EVM チェーン共通の 1 アドレスなのでチェーンだけ切り替える。
+  chains?: JpycChainSlug[];
   shopName: string;
   avatar?: string; // 店舗アイコン画像 URL (https のみ・任意・@handle のアバターと同型)
   mode: MobileOrderMode;
@@ -62,7 +65,8 @@ export type MobileOrderConfig = {
  * (open-pay.jp/@shop = 固定店舗 URL。lib/handle.handleStorefrontConfig が両者を合成する)。
  */
 export type StorefrontParts = {
-  chain: JpycChainSlug;
+  chain: JpycChainSlug; // 既定/単一の受取チェーン
+  chains?: JpycChainSlug[]; // 顧客が選べる受取チェーン集合 (chain を含む・2 件以上で選択 UI)
   mode: MobileOrderMode;
   feePayer: FeePayer;
   // 店舗のブランディング (ビルダー由来)。公開ページはこれを優先し、無ければ @handle 側の
@@ -86,6 +90,13 @@ export const URL_FIELD_MAX = 512; // SNS / 画像 URL の上限
 export const ADDRESS_MAX = 120; // 住所 (建物名込みを許容)
 export const HOURS_MAX = 120; // 営業時間 (自由記入・例 "11:00〜22:00 (水曜定休)")
 export const PHONE_MAX = 32; // 電話番号 (国番号/内線/区切り込み)
+
+// モバイルオーダーで顧客に提示できる受取チェーン (JPYC・ガスレス可)。Ethereum L1 は標準モード
+// (顧客が ETH ガスを負担) で体験が大きく異なるため除外。flag で有効な JPYC チェーンに自動追従
+// (本番では Polygon/Kaia + Avalanche)。builder の複数選択肢の単一情報源。
+export const MOBILE_ORDER_CHAINS: readonly JpycChainSlug[] = JPYC_CHAINS.filter(
+  (c) => c !== 'ethereum',
+);
 
 /** 受取チェーンの表示名 (ブランド名・非翻訳)。builder の選択肢 + 注文ページのバッジで共有。 */
 export const JPYC_CHAIN_LABEL: Record<JpycChainSlug, string> = {
@@ -281,6 +292,16 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
     menu.push(item);
   }
   const parts: StorefrontParts = { chain: o.chain, mode: o.mode, feePayer: o.feePayer, menu };
+  // 受取チェーン集合 (任意)。有効な JPYC チェーンのみ・重複除去・chain を必ず含める。
+  // 2 件以上のときだけ持つ (1 件は単一扱いで chain と同義)。
+  if (Array.isArray(o.chains)) {
+    const cs: JpycChainSlug[] = [];
+    for (const c of o.chains) {
+      if (typeof c === 'string' && isJpycChainSlug(c) && !cs.includes(c)) cs.push(c);
+    }
+    if (!cs.includes(parts.chain)) cs.unshift(parts.chain);
+    if (cs.length > 1) parts.chains = cs;
+  }
   // 任意のブランディング (不正は黙って除外・注文は壊さない)。avatar/socials は https のみ。
   if (isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) parts.shopName = o.shopName.trim();
   if (isHttpsUrl(o.avatar)) parts.avatar = o.avatar;
@@ -326,6 +347,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     menu: parts.menu,
   };
   if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
+  if (parts.chains) config.chains = parts.chains; // 受取チェーン集合 (2 件以上のときのみ)
   // 店舗情報は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。
   if (parts.address) config.address = parts.address;
   if (parts.hours) config.hours = parts.hours;

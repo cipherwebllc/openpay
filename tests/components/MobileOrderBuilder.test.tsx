@@ -2,7 +2,7 @@
 // 料率 (1%・3% 等) を UI に露出しない (P1.2 は設定/URL のみ・課金は P2/P0 ゲート後)。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, within } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -70,12 +70,19 @@ describe('MobileOrderBuilder', () => {
     expect(screen.getByText(/固定の店舗 URL/)).toBeInTheDocument();
   });
 
-  it('受取チェーン select (JPYC) を描画 — 既定 Polygon + Kaia', () => {
+  it('受取チェーンは複数選択 (チェックボックス)・既定 Polygon・最低1件を維持', () => {
     renderWithIntl(<MobileOrderBuilder />);
-    const chainSelect = screen.getByRole('combobox', { name: '受取チェーン' }) as HTMLSelectElement;
-    expect(chainSelect.value).toBe('polygon'); // 既定
-    expect(within(chainSelect).getByRole('option', { name: 'Polygon' })).toBeInTheDocument();
-    expect(within(chainSelect).getByRole('option', { name: 'Kaia' })).toBeInTheDocument();
+    const polygon = screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }) as HTMLInputElement;
+    const kaia = screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }) as HTMLInputElement;
+    expect(polygon.checked).toBe(true); // 既定
+    expect(kaia.checked).toBe(false);
+    fireEvent.click(kaia); // Kaia 追加 → 両方
+    expect(kaia.checked).toBe(true);
+    expect(polygon.checked).toBe(true);
+    fireEvent.click(polygon); // Polygon 解除 (Kaia 残る)
+    expect(polygon.checked).toBe(false);
+    fireEvent.click(kaia); // 最後の1件は外せない (最低1件維持)
+    expect(kaia.checked).toBe(true);
   });
 
   it('受取先 + 店名を入力しても ?s= 注文 URL は前面に出さない (@handle 公開のみ)', () => {

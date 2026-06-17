@@ -186,6 +186,7 @@ export function handleStorefrontConfig(
   return validateOrderConfig({
     receiver: record.config.to,
     chain: sf.chain,
+    chains: sf.chains, // 受取チェーン集合 (2 件以上で注文ページに選択 UI)
     shopName: sf.shopName || record.config.name?.trim() || `@${handle}`,
     avatar: sf.avatar ?? record.profile?.avatar,
     mode: sf.mode,

@@ -176,6 +176,35 @@ describe('MobileOrderView', () => {
     expect(url.searchParams.get('chain')).toBe('kaia');
   });
 
+  it('chains 複数なら支払いチェーン選択を出し、選択が /checkout の chain に反映', () => {
+    const multiChain: MobileOrderConfig = { ...config, chain: 'polygon', chains: ['polygon', 'kaia'] };
+    renderWithIntl(<MobileOrderView config={multiChain} />);
+    const polygonBtn = screen.getByRole('button', { name: 'JPYC (Polygon)' });
+    const kaiaBtn = screen.getByRole('button', { name: 'JPYC (Kaia)' });
+    expect(polygonBtn).toHaveAttribute('aria-pressed', 'true'); // 既定=先頭
+    expect(kaiaBtn).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    // chain は parseCheckoutParams で解決 (既定 polygon は URL から省略されるため)。
+    const chainOf = () => {
+      const u = new URL(
+        screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+        'http://localhost',
+      );
+      const p = parseCheckoutParams(u.searchParams);
+      return p.ok ? p.params.chain : null;
+    };
+    expect(chainOf()).toBe('polygon'); // 既定 (先頭)
+    fireEvent.click(kaiaBtn); // Kaia に切替
+    expect(kaiaBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(chainOf()).toBe('kaia'); // 切替が /checkout の chain に反映
+  });
+
+  it('chains 単一/未指定なら選択を出さず受取バッジを表示 (従来どおり)', () => {
+    renderWithIntl(<MobileOrderView config={config} />); // config は chain のみ (polygon)
+    expect(screen.queryByRole('button', { name: 'JPYC (Polygon)' })).toBeNull();
+    expect(screen.getByText('Polygon で JPYC を受け取り')).toBeInTheDocument();
+  });
+
   it('店舗情報 (住所=地図リンク / 営業時間 / 電話=tel リンク) を入力時のみ描画', () => {
     const withInfo: MobileOrderConfig = {
       ...config,
