@@ -31,7 +31,22 @@ if (dsn) {
     // ナブルなノイズ (同族に Outlook SafeLink の "Object Not Found Matching Id" 等) なので、
     // この family をまとめて drop してアラートを汚さない。自前コードは例外を必ず Error で
     // 投げる (throw new Error(...)) ため、実シグナルの取りこぼしリスクは実質ゼロ。
-    ignoreErrors: [/Non-Error promise rejection captured/],
+    ignoreErrors: [
+      /Non-Error promise rejection captured/,
+      // ウォレット拡張/SDK の接続・再接続失敗 (MetaMask 等)。ページ読込時の自動再接続
+      // (wagmi reconnectOnMount=true) や、ロック中/権限未付与/接続キャンセルのウォレットで
+      // 日常的に発生する。スタックはウォレット拡張内 (chrome-extension://…/inpage.js) を指し
+      // 自前コードのバグではない。接続エラーは UI (ConnectButton) が表示・回復させるため、
+      // Sentry のアラートとしては非アクショナブルなノイズ。実ユーザ報告 (2026-06-17 mainnet・
+      // 東京 Win/Chrome) で "Error restoring session: Failed to connect to MetaMask" が上がるため drop。
+      /MetaMask extension not found/i,
+      /Failed to connect to MetaMask/i,
+      /Error restoring session/i,
+    ],
+    // ブラウザ拡張 (ウォレット/広告ブロッカー/パスワードマネージャ等) が注入したスクリプト由来の
+    // エラーは自前アプリのバグではない。スタック該当フレームの URL が拡張スキームのイベントを drop。
+    // 自前バンドル (https://…/_next/…) は対象外なので実シグナルは落とさない。
+    denyUrls: [/^chrome-extension:\/\//i, /^moz-extension:\/\//i, /^safari-(web-)?extension:\/\//i],
     tracesSampleRate: parseSampleRate(
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
       1.0,
