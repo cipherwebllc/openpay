@@ -28,13 +28,14 @@ describe('MobileOrderView', () => {
     expect(screen.getByText('テスト珈琲店')).toBeInTheDocument();
     expect(screen.getByText('Polygon で JPYC を受け取り')).toBeInTheDocument();
     expect(screen.getByText('ブレンド')).toBeInTheDocument();
-    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    // 価格は数値(大) と JPYC(小) を別 span で描画するので数値で検証。
+    expect(screen.getByText('500')).toBeInTheDocument();
     expect(screen.getByText('チーズケーキ')).toBeInTheDocument();
-    expect(screen.getByText('650 JPYC')).toBeInTheDocument();
-    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('650')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
   });
 
-  it('カテゴリーがあれば見出し別にグループ化して描画 (2カラムカード)', () => {
+  it('カテゴリーがあれば 上部カテゴリーナビ (アンカー) + 見出し別 2 カラムを描画', () => {
     const categorized: MobileOrderConfig = {
       ...config,
       menu: [
@@ -43,17 +44,36 @@ describe('MobileOrderView', () => {
         { id: 'c', name: 'カフェラテ', price: '600', category: 'ドリンク' },
       ],
     };
-    renderWithIntl(<MobileOrderView config={categorized} />);
-    expect(screen.getByText('ドリンク')).toBeInTheDocument();
-    expect(screen.getByText('フード')).toBeInTheDocument();
-    expect(screen.getByText('ブレンド')).toBeInTheDocument();
+    const { container } = renderWithIntl(<MobileOrderView config={categorized} />);
+    // 上部ナビ: カテゴリー出現順に #mo-cat-0=ドリンク / #mo-cat-1=フード のアンカーリンク。
+    expect(container.querySelector('a[href="#mo-cat-0"]')?.textContent).toBe('ドリンク');
+    expect(container.querySelector('a[href="#mo-cat-1"]')?.textContent).toBe('フード');
+    // セクションに対応する id アンカー。
+    expect(container.querySelector('#mo-cat-0')).not.toBeNull();
+    expect(container.querySelector('#mo-cat-1')).not.toBeNull();
+    // 見出しは nav + h3 の 2 箇所に「ドリンク」が出る。商品も描画。
+    expect(screen.getAllByText('ドリンク').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('カフェラテ')).toBeInTheDocument();
   });
 
-  it('カテゴリーが無ければ見出し (その他) を出さない', () => {
-    // base config の menu は category 無し → 単一グリッド・見出しなし。
-    renderWithIntl(<MobileOrderView config={config} />);
+  it('カテゴリーが 1 種以下なら 上部ナビ (アンカー) を出さない', () => {
+    // base config の menu は category 無し → 単一グリッド・ナビ無し・「その他」見出しも無し。
+    const { container } = renderWithIntl(<MobileOrderView config={config} />);
     expect(screen.queryByText('その他')).toBeNull();
+    expect(container.querySelector('a[href^="#mo-cat-"]')).toBeNull();
+  });
+
+  it('価格は数値を大きく (text-base) JPYC を小さく (text-[10px]) 別 span で描画', () => {
+    const { container } = renderWithIntl(<MobileOrderView config={config} />);
+    // 数値だけの独立 span が大きい (text-base font-bold)。
+    const price = screen.getByText('500');
+    expect(price.className).toContain('text-base');
+    expect(price.className).toContain('font-bold');
+    // JPYC は小さい別 span (各商品行に 1 つずつ)。
+    const jpycSmall = Array.from(container.querySelectorAll('span')).filter(
+      (s) => s.textContent === 'JPYC' && s.className.includes('text-[10px]'),
+    );
+    expect(jpycSmall.length).toBeGreaterThanOrEqual(1);
   });
 
   it('絵文字はテキスト・画像は <img> で描画', () => {
