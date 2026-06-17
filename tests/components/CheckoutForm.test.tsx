@@ -93,6 +93,10 @@ vi.mock('@/lib/env', async (importOriginal) => {
     ...actual,
     env: {
       ...actual.env,
+      // hermetic: ambient NEXT_PUBLIC_RECOVER_FEE_BPS に依存させず 0 に固定する。register bps=0 test は
+      // 実 recoverPercentValue を呼び env.recoverFeeBps を読むため、shell/CI で本変数が非ゼロだと予期せず
+      // fee>0 で fail しうる (Codex P3)。recover floor 系テストも bps=0 (フロアのみ) を前提とするので一致。
+      recoverFeeBps: 0,
       get enableMobileOrderFee() {
         return feeFlags.enableMobileOrderFee;
       },
