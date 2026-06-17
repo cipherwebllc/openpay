@@ -191,6 +191,24 @@ describe('MobileOrderView', () => {
     expect(screen.queryByText('ただいま注文を受け付けていません')).toBeNull();
   });
 
+  it('カート要約: 🛒+点数トグルで明細を開閉し、明細の −/+ で増減できる (合計の上)', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    // ブレンド(500) を +2。
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const toggle = screen.getByRole('button', { name: 'ご注文内容' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false'); // 既定は明細を畳む
+    expect(screen.getByText('1000 JPYC')).toBeInTheDocument(); // 500×2 (トグルの総額)
+    // タップで明細を開く → 数量ステッパが menu(3) + カート(1=ブレンド) = 4 に増える。
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByRole('button', { name: '数量を増やす' }).length).toBe(4);
+    // カート明細の − (DOM 末尾) で減らすと合計が下がる (1000 → 500)。
+    const dec = screen.getAllByRole('button', { name: '数量を減らす' });
+    fireEvent.click(dec[dec.length - 1]);
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+  });
+
   it('税率付き商品はカート→/checkout の items に税率/税区分が伝播する (レシート小計/うち税額)', () => {
     const taxed: MobileOrderConfig = {
       ...config,

@@ -10,8 +10,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { formatUnits } from 'viem';
-import { Clock, MapPin, Phone, UtensilsCrossed } from 'lucide-react';
+import { formatUnits, parseUnits } from 'viem';
+import { ChevronDown, ChevronUp, Clock, MapPin, Phone, ShoppingCart, UtensilsCrossed } from 'lucide-react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { useOrigin } from '@/hooks/useOrigin';
 import { deploymentForSlug } from '@/lib/tokens';
@@ -41,6 +41,8 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
   const [qty, setQty] = useState<Record<string, number>>({});
+  // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。
+  const [cartOpen, setCartOpen] = useState(false);
 
   // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
   // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。
@@ -81,6 +83,8 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
     cartItems.length > 0 && !tooMany
       ? formatUnits(calcCheckoutTotal(cartItems, decimals), decimals)
       : '0';
+  // カートマークのバッジ点数 (合計数量)。
+  const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
   const checkoutUrl =
     origin && cartItems.length > 0 && !tooMany
       ? buildCheckoutUrl(origin, {
@@ -291,10 +295,67 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
           </p>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-base font-semibold text-slate-900">
-              <span>{t('orderTotal')}</span>
-              <span>{totalHuman} JPYC</span>
-            </div>
+            {/* ご注文内容 (合計の上)。カートマーク+点数のタップで明細を開閉。明細では −n+ で増減。 */}
+            {cartOpen && (
+              <ul className="space-y-2 border-b border-slate-100 pb-3">
+                {config.menu
+                  .filter((m) => (qty[m.id] ?? 0) > 0)
+                  .map((m) => {
+                    const n = qty[m.id] ?? 0;
+                    return (
+                      <li key={m.id} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate text-slate-700">{m.name}</span>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setItemQty(m.id, n - 1)}
+                            aria-label={t('qtyDecrease')}
+                            className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                          >
+                            −
+                          </button>
+                          <span className="w-5 text-center text-sm font-semibold tabular-nums">{n}</span>
+                          <button
+                            type="button"
+                            onClick={() => setItemQty(m.id, n + 1)}
+                            aria-label={t('qtyIncrease')}
+                            className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                          >
+                            ＋
+                          </button>
+                        </span>
+                        <span className="w-16 shrink-0 text-right tabular-nums text-slate-600">
+                          {formatUnits(parseUnits(m.price, decimals) * BigInt(n), decimals)}
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
+            {/* 合計 = カートマーク + 点数 (タップで上の明細を開閉) + 総額 */}
+            <button
+              type="button"
+              onClick={() => setCartOpen((o) => !o)}
+              aria-expanded={cartOpen}
+              aria-label={t('orderItemsToggle')}
+              className="flex w-full items-center justify-between gap-2"
+            >
+              <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                <span className="relative inline-flex">
+                  <ShoppingCart className="h-5 w-5 text-slate-600" aria-hidden />
+                  <span className="absolute -right-2 -top-2 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold leading-none text-white">
+                    {cartCount}
+                  </span>
+                </span>
+                {t('orderItemsToggle')}
+                {cartOpen ? (
+                  <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />
+                ) : (
+                  <ChevronUp className="h-4 w-4 text-slate-400" aria-hidden />
+                )}
+              </span>
+              <span className="text-base font-semibold text-slate-900">{totalHuman} JPYC</span>
+            </button>
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
             <a
               href={checkoutUrl}

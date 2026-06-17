@@ -1711,7 +1711,7 @@
     "qrClose": "閉じる",
     "viewMenuHeading": "メニュー",
     "uncategorized": "その他",
-    "orderTotal": "合計",
+    "orderItemsToggle": "ご注文内容",
     "payButton": "支払いへ進む",
     "cartEmpty": "商品を選ぶと合計が表示されます",
     "qtyDecrease": "数量を減らす",

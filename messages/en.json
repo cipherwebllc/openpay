@@ -1711,7 +1711,7 @@
     "qrClose": "Close",
     "viewMenuHeading": "Menu",
     "uncategorized": "Other",
-    "orderTotal": "Total",
+    "orderItemsToggle": "Order",
     "payButton": "Proceed to pay",
     "cartEmpty": "Select items to see the total",
     "qtyDecrease": "Decrease quantity",
