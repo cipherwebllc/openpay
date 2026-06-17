@@ -172,6 +172,44 @@ describe('relay route — モバイル注文 feeKind enforcement (server 権威�
     expect(recoverFeeMock).not.toHaveBeenCalled();
   });
 
+  it('改竄 feeValue: client が嘘の feeValue を送っても server は billAmount から再計算 (サーバ権威・client 値は無視)', async () => {
+    // customer モード: billAmount = merchantValue (= 注文額) で feeValue に依存しない。よって client が
+    // 利用料を過少/過大に申告しても、server は mobileOrderFeeValue(billAmount, feeKind) を **独立に**
+    // 再計算して expectedFee に据える。raw.feeValue を信用する実装ならここで client 値が出て fail する。
+    // 実際の拒否 (feeValue === expectedFeeValue の不一致) は forwarderRecover が強制し
+    // (forwarderRecover.test が担保)、本テストは「route が再計算値を expectedFee にする = 拒否の根拠」を証明。
+    const real = mobileOrderFeeValue(ORDER, 'preorder'); // 30 JPYC (真値)
+
+    // 過少申告 (5 JPYC) — 利用料を踏み倒そうとするケース。
+    const deflated = 5n * JPYC;
+    await POST(
+      payload({
+        gasMode: 'customer',
+        merchantValue: ORDER.toString(),
+        feeValue: deflated.toString(),
+        feeKind: 'preorder',
+      }),
+    );
+    expect(capturedExpectedFee).toBe(real); // client の 5 ではなく再計算の 30
+    expect(capturedExpectedFee).not.toBe(deflated);
+
+    // 過大申告 (999 JPYC) — 対称に、route は client 値でなく再計算値を据える。
+    capturedExpectedFee = undefined;
+    const inflated = 999n * JPYC;
+    await POST(
+      payload({
+        gasMode: 'customer',
+        merchantValue: ORDER.toString(),
+        feeValue: inflated.toString(),
+        feeKind: 'preorder',
+      }),
+    );
+    expect(capturedExpectedFee).toBe(real);
+    expect(capturedExpectedFee).not.toBe(inflated);
+    // gas-recovery には委譲しない (mobile 分岐)。
+    expect(recoverFeeMock).not.toHaveBeenCalled();
+  });
+
   it('flag ON + feeKind=preorder 小口: 3% がフロアを下回っても 一律 % (floor に張り付かない)', async () => {
     const small = 50n * JPYC; // 3% = 1.5 JPYC < floor 2 JPYC
     const fee = mobileOrderFeeValue(small, 'preorder');

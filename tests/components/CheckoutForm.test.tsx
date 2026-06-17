@@ -1986,6 +1986,12 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
 
   function setupJpycRelay() {
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    // モバイル注文利用料は recover (forwarder 設定) 経路でのみ成立する。free 経路 (forwarder=null) +
+    // feeKind は実 useJpycEip3009Payment が mobile_fee_requires_recover で throw する (TST-B が担保)。
+    // よってここは forwarder を設定し、実際に成立する recover 経路で CheckoutForm の配線を検証する。
+    vi.mocked(jpycForwarderFor).mockReturnValue(
+      '0x1111111111111111111111111111111111111111',
+    );
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(10_000n * 10n ** 18n);
     setSmartAccount(false);
@@ -2040,7 +2046,8 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(relayMutate).toHaveBeenCalledOnce();
     const arg = relayMutate.mock.calls[0][0];
     expect(arg.feeKind).toBeUndefined(); // flag OFF → feeKind を渡さない
-    expect(arg.gasMode).toBe('customer'); // mobileGasMode 上書き無し (free relay の既定)
+    // mobileGasMode 上書き無し → recover 経路は merchant 強制 (従来どおりの gas-recovery)。
+    expect(arg.gasMode).toBe('merchant');
   });
 
   it('レジ register + JPYC standard (bps=100 相当): standardMutate に 1% feeAmount + saleAmount=gross・店舗負担・relay 不使用', async () => {
@@ -2061,10 +2068,12 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(relayMutate).not.toHaveBeenCalled(); // register は relay へ行かない (standard のみ)
   });
 
-  it('レジ register + JPYC standard だが bps=0 (7 月前): feeAmount=0 (早期課金しない・saleAmount は gross)', async () => {
+  it('レジ register + JPYC standard・実 recoverPercentValue (env bps=0 → 7 月前): feeAmount=0 (早期課金しない)', async () => {
     const user = userEvent.setup();
     feeFlags.enableRegisterFee = true;
-    feeRate.percentBps = 0; // 7 月前 = 0%
+    // percentBps=null → CheckoutForm は **実** recoverPercentValue を呼ぶ (env.recoverFeeBps=0 を読み 0)。
+    // = 実 env→bps→recoverPercentValue 経路を CheckoutForm 経由で1度実行する (mock 上書きしない)。
+    feeRate.percentBps = null;
     setupJpycStandard();
     render(
       <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
