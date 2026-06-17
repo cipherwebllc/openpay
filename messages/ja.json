@@ -1681,6 +1681,7 @@
     "menuEmptyNote": "「レジ」タブで JPYC 商品を追加すると、ここに表示されます。",
     "manageInRegister": "レジで商品を管理",
     "menuItemsCount": "{count} 品",
+    "menuToggleLabel": "登録中のメニュー",
     "publishHeading": "@handle で固定店舗URLにする",
     "publishIntro": "メニューと店舗情報を @handle に公開すると、open-pay.jp/@(あなたのhandle) が固定の店舗ページになります。受取先は @handle の設定が使われます。",
     "publishSignIn": "サインインして公開",

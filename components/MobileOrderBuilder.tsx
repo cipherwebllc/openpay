@@ -10,7 +10,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Eye, GripVertical, Store, UtensilsCrossed, Wallet } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, GripVertical, Store, UtensilsCrossed, Wallet } from 'lucide-react';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
@@ -69,6 +69,8 @@ export function MobileOrderBuilder({
   const { settings: qrSettings } = useQrSettings();
   const qrReceiver = qrSettings.receiver.trim();
   const [resolved, setResolved] = useState<Address | null>(null);
+  // ③メニュー (レジ管理の読み取り専用一覧) の開閉。多いと長くなるので既定は閉じる。
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // 受取先: 生 0x は入力値を最優先 (ENS 名のときだけ AddressInput の解決値を使う)。
   const effectiveReceiver = useMemo<Address | null>(() => {
@@ -438,43 +440,53 @@ export function MobileOrderBuilder({
               {hydrated && menuItems.length === 0 ? (
                 <p className="text-xs text-amber-700">{t('menuEmptyNote')}</p>
               ) : (
-                <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-                  {menuItems.map((item) => {
-                    const imgUrl =
-                      item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
-                    return (
-                      <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
-                        <span className="flex min-w-0 items-center gap-2">
-                          {imgUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={imgUrl} alt="" className="h-7 w-7 rounded object-cover" />
-                          )}
-                          <span className="truncate text-slate-800">{item.name}</span>
-                        </span>
-                        <span className="shrink-0 font-medium text-slate-900">{item.price} JPYC</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              <div className="flex items-center justify-between">
-                {onManageProducts ? (
+                <>
+                  {/* メニューは「レジ」で管理する読み取り専用一覧。多いと長くなるので折りたたみ (既定=閉)。 */}
                   <button
                     type="button"
-                    onClick={onManageProducts}
-                    className="text-sm font-medium text-brand hover:underline"
+                    onClick={() => setMenuOpen((o) => !o)}
+                    aria-expanded={menuOpen}
+                    aria-label={t('menuToggleLabel')}
+                    className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:border-brand"
                   >
-                    {t('manageInRegister')}
+                    <span>{t('menuItemsCount', { count: menuItems.length })}</span>
+                    {menuOpen ? (
+                      <ChevronUp className="h-4 w-4 text-slate-400" aria-hidden />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />
+                    )}
                   </button>
-                ) : (
-                  <span />
-                )}
-                {menuItems.length > 0 && (
-                  <span className="text-xs text-slate-400">
-                    {t('menuItemsCount', { count: menuItems.length })}
-                  </span>
-                )}
-              </div>
+                  {menuOpen && (
+                    <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                      {menuItems.map((item) => {
+                        const imgUrl =
+                          item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
+                        return (
+                          <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                            <span className="flex min-w-0 items-center gap-2">
+                              {imgUrl && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={imgUrl} alt="" className="h-7 w-7 rounded object-cover" />
+                              )}
+                              <span className="truncate text-slate-800">{item.name}</span>
+                            </span>
+                            <span className="shrink-0 font-medium text-slate-900">{item.price} JPYC</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
+              )}
+              {onManageProducts && (
+                <button
+                  type="button"
+                  onClick={onManageProducts}
+                  className="text-sm font-medium text-brand hover:underline"
+                >
+                  {t('manageInRegister')}
+                </button>
+              )}
             </div>
           </StepCard>
 

@@ -1681,6 +1681,7 @@
     "menuEmptyNote": "Add JPYC products in the Register tab and they will appear here.",
     "manageInRegister": "Manage products in Register",
     "menuItemsCount": "{count} items",
+    "menuToggleLabel": "Registered menu",
     "publishHeading": "Publish as a fixed shop URL (@handle)",
     "publishIntro": "Publishing your menu and store info to @handle makes open-pay.jp/@yourhandle your fixed shop page. The payout address comes from your @handle settings.",
     "publishSignIn": "Sign in to publish",

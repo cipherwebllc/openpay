@@ -104,6 +104,17 @@ describe('MobileOrderBuilder', () => {
     expect(sw).toHaveTextContent('停止中');
   });
 
+  it('③メニュー一覧は既定で折りたたみ、トグルで開閉できる (レジ管理・長くなる対策)', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    const toggle = screen.getByRole('button', { name: '登録中のメニュー' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false'); // 既定は閉
+    // 一覧の「価格 JPYC」行は閉じている間は出ない (プレビューは価格のみで "JPYC" を付けない)。
+    expect(screen.queryByText(/ JPYC$/)).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByText(/ JPYC$/).length).toBeGreaterThanOrEqual(1);
+  });
+
   it('SNS リンクを 追加・入力・▼で並び替え・×で削除 できる (@handle と同型)', () => {
     renderWithIntl(<MobileOrderBuilder />);
     // 既定は SNS ゼロ → 「SNS リンクを追加」ボタンから行を増やす (Field の label 内ゆえ
