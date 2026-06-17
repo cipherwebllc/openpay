@@ -57,7 +57,7 @@ describe('MobileOrderBuilder', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('flag ON で見出し + レジ商品由来メニュー + 未充足チェックリストを描画', () => {
+  it('flag ON で見出し + レジ商品由来メニューを描画 (?s= 注文URLは前面に出さない)', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.getByText('モバイルオーダーを作成')).toBeInTheDocument();
     // メニューはレジの有効な JPYC 商品 (useProductPresets の seed: コーヒー等) を読み取り表示。
@@ -65,11 +65,9 @@ describe('MobileOrderBuilder', () => {
       screen.getByText('メニューは「レジ」タブの有効な JPYC 商品です（画像・税率も共有）。'),
     ).toBeInTheDocument();
     expect(screen.getAllByText('コーヒー').length).toBeGreaterThanOrEqual(1); // 一覧 + プレビュー
-    // 受取先/店名 未入力 → URL は出ず必要項目リスト (menu は seed 済みなので needMenu は出ない)。
-    const box = screen.getByText('注文ページ URL の発行に必要:').closest('div')!;
-    expect(within(box).getByText('受取ウォレットアドレス')).toBeInTheDocument();
-    expect(within(box).getByText('店名')).toBeInTheDocument();
-    expect(within(box).queryByText('有効な JPYC 商品（レジで管理）を 1 件以上')).toBeNull();
+    // 共有は @handle 公開のみ。長い ?s= 注文 URL は前面に出さない。
+    expect(screen.queryByText(/\/order\?s=/)).toBeNull();
+    expect(screen.getByText(/固定の店舗 URL/)).toBeInTheDocument();
   });
 
   it('受取チェーン select (JPYC) を描画 — 既定 Polygon + Kaia', () => {
@@ -80,15 +78,30 @@ describe('MobileOrderBuilder', () => {
     expect(within(chainSelect).getByRole('option', { name: 'Kaia' })).toBeInTheDocument();
   });
 
-  it('受取先 + 店名を入力すると注文ページ URL (/order?s=) が生成される', () => {
+  it('受取先 + 店名を入力しても ?s= 注文 URL は前面に出さない (@handle 公開のみ)', () => {
     renderWithIntl(<MobileOrderBuilder />);
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
     fireEvent.change(screen.getByPlaceholderText(/珈琲スタンド/), {
       target: { value: 'テスト店舗' },
     });
-    // メニュー = レジ商品 seed (有効) なので、受取先 + 店名で config 成立 → URL 表示。
-    expect(screen.getByText(/\/order\?s=/)).toBeInTheDocument();
-    expect(screen.getByText('コピー')).toBeInTheDocument();
+    expect(screen.queryByText(/\/order\?s=/)).toBeNull();
+  });
+
+  it('店舗情報 (住所/営業時間/電話) の入力欄を描画する', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    expect(screen.getByPlaceholderText(/東京都渋谷区/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/水曜定休/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('例: 03-1234-5678')).toBeInTheDocument();
+  });
+
+  it('受付トグルを切替えると aria-checked と表示が変わる (既定=受付中)', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    const sw = screen.getByRole('switch', { name: '注文の受付' });
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    expect(sw).toHaveTextContent('受付中');
+    fireEvent.click(sw);
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    expect(sw).toHaveTextContent('停止中');
   });
 
   it('SNS リンクを 追加・入力・▼で並び替え・×で削除 できる (@handle と同型)', () => {

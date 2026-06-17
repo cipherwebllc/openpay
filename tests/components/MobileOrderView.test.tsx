@@ -154,6 +154,43 @@ describe('MobileOrderView', () => {
     expect(url.searchParams.get('chain')).toBe('kaia');
   });
 
+  it('店舗情報 (住所=地図リンク / 営業時間 / 電話=tel リンク) を入力時のみ描画', () => {
+    const withInfo: MobileOrderConfig = {
+      ...config,
+      address: '東京都渋谷区テスト 1-2-3',
+      hours: '11:00〜22:00（水曜定休）',
+      phone: '03-1234-5678',
+    };
+    const { container } = renderWithIntl(<MobileOrderView config={withInfo} />);
+    expect(screen.getByText('11:00〜22:00（水曜定休）')).toBeInTheDocument();
+    const map = container.querySelector('a[href^="https://www.google.com/maps/search/"]');
+    expect(map?.textContent).toBe('東京都渋谷区テスト 1-2-3');
+    const tel = container.querySelector('a[href="tel:0312345678"]');
+    expect(tel?.textContent).toBe('03-1234-5678');
+  });
+
+  it('店舗情報が無ければ地図/電話リンクを描画しない', () => {
+    const { container } = renderWithIntl(<MobileOrderView config={config} />);
+    expect(container.querySelector('a[href^="https://www.google.com/maps/search/"]')).toBeNull();
+    expect(container.querySelector('a[href^="tel:"]')).toBeNull();
+  });
+
+  it('受付停止中 (acceptingOrders=false) は告知を出し、商品があっても支払いを出さない', () => {
+    const closed: MobileOrderConfig = { ...config, acceptingOrders: false };
+    renderWithIntl(<MobileOrderView config={closed} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+    // 告知は上部バナー + 支払い欄の 2 箇所に出る。
+    expect(screen.getAllByText('ただいま注文を受け付けていません').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('acceptingOrders=true (既定/未設定) は通常どおり支払いを出す', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
+    expect(screen.queryByText('ただいま注文を受け付けていません')).toBeNull();
+  });
+
   it('税率付き商品はカート→/checkout の items に税率/税区分が伝播する (レシート小計/うち税額)', () => {
     const taxed: MobileOrderConfig = {
       ...config,

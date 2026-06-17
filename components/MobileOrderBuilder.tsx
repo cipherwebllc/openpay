@@ -15,27 +15,22 @@ import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { StepCard } from '@/components/StepCard';
-import { LinkQrModal } from '@/components/LinkQrModal';
 import { SocialIcon } from '@/components/SocialIconLinks';
 import { StorefrontPublishPanel } from '@/components/StorefrontPublishPanel';
-import { useMobileOrderDraft, draftToConfig, presetsToMenu } from '@/hooks/useMobileOrderDraft';
+import { useMobileOrderDraft, presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
-import { useOrigin } from '@/hooks/useOrigin';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useQrSettings } from '@/hooks/useQrSettings';
 import { JPYC_CHAINS, type JpycChainSlug } from '@/lib/chains';
 import {
-  buildOrderUrl,
   safeHttpUrl,
   JPYC_CHAIN_LABEL,
   SHOP_NAME_MAX,
   SOCIALS_MAX,
+  ADDRESS_MAX,
+  HOURS_MAX,
+  PHONE_MAX,
 } from '@/lib/mobileOrder';
-
-// QR を描く URL の上限長 (qrcode.react は長大入力で throw する)。超過時は QR を省略し
-// リンク/コピーのみ提供する (TipEmbedGenerator と同方針)。メニューが多いと URL が伸びる。
-const QR_MAX_URL_LEN = 1200;
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
@@ -70,13 +65,10 @@ export function MobileOrderBuilder({
   const t = useTranslations('MobileOrder');
   const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft();
   const { presets } = useProductPresets();
-  const origin = useOrigin();
-  const linkCopy = useCopyToClipboard();
   // 決済QR タブの受取先 (レジと同じく「引き継ぐ」ショートカット用)。
   const { settings: qrSettings } = useQrSettings();
   const qrReceiver = qrSettings.receiver.trim();
   const [resolved, setResolved] = useState<Address | null>(null);
-  const [showQr, setShowQr] = useState(false);
 
   // 受取先: 生 0x は入力値を最優先 (ENS 名のときだけ AddressInput の解決値を使う)。
   const effectiveReceiver = useMemo<Address | null>(() => {
@@ -97,15 +89,7 @@ export function MobileOrderBuilder({
   // メニュー = レジの有効な JPYC 商品 (単一カタログ)。
   const menuItems = useMemo(() => presetsToMenu(presets), [presets]);
 
-  const config = useMemo(
-    () => (hydrated ? draftToConfig(draft, effectiveReceiver, presets) : null),
-    [hydrated, draft, effectiveReceiver, presets],
-  );
-  const orderUrl = config && origin ? buildOrderUrl(origin, config) : '';
-
-  // URL が組めない理由 (右カラムのチェックリスト)。core 3 条件で導く。
-  const hasReceiver = effectiveReceiver !== null;
-  const hasShopName = draft.shopName.trim().length > 0;
+  // 公開可否は「有効なメニューがあるか」で決まる (受取先/店名は @handle 側が権威)。
   const hasMenu = menuItems.length > 0;
 
   // 店舗アイコンのプレビュー (https のみ・読込前検証)。無ければ店名の頭文字を円に表示。
@@ -123,6 +107,10 @@ export function MobileOrderBuilder({
         shopName: draft.shopName.trim() || undefined,
         avatar: draft.avatar.trim() || undefined,
         socials: draft.socials.map((s) => s.trim()).filter(Boolean),
+        address: draft.address.trim() || undefined,
+        hours: draft.hours.trim() || undefined,
+        phone: draft.phone.trim() || undefined,
+        acceptingOrders: draft.acceptingOrders,
         menu: menuItems,
       }
     : null;
@@ -258,6 +246,40 @@ export function MobileOrderBuilder({
                 </div>
               </Field>
 
+              {/* 店舗情報 (任意)。入力された項目だけ公開ページに表示される。 */}
+              <Field label={t('addressLabel')} hint={t('addressHint')}>
+                <input
+                  type="text"
+                  value={draft.address}
+                  maxLength={ADDRESS_MAX}
+                  placeholder={t('addressPlaceholder')}
+                  onChange={(e) => update({ address: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label={t('hoursLabel')} hint={t('hoursHint')}>
+                <input
+                  type="text"
+                  value={draft.hours}
+                  maxLength={HOURS_MAX}
+                  placeholder={t('hoursPlaceholder')}
+                  onChange={(e) => update({ hours: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label={t('phoneLabel')} hint={t('phoneHint')}>
+                <input
+                  type="tel"
+                  value={draft.phone}
+                  maxLength={PHONE_MAX}
+                  placeholder={t('phonePlaceholder')}
+                  onChange={(e) => update({ phone: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+
               <fieldset>
                 <legend className="text-sm font-medium text-slate-700">{t('modeLabel')}</legend>
                 <div className="mt-1 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
@@ -384,6 +406,28 @@ export function MobileOrderBuilder({
                   )}
                 </div>
               </Field>
+
+              {/* 注文の受付トグル。停止中は公開ページの支払いを止める (不可逆決済の事故防止)。 */}
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={draft.acceptingOrders}
+                    aria-label={t('acceptingLabel')}
+                    onClick={() => update({ acceptingOrders: !draft.acceptingOrders })}
+                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition ${
+                      draft.acceptingOrders
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-200 text-slate-500'
+                    }`}
+                  >
+                    {draft.acceptingOrders ? t('acceptingOn') : t('acceptingOff')}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-400">{t('acceptingHint')}</p>
+              </div>
             </div>
           </StepCard>
 
@@ -483,65 +527,12 @@ export function MobileOrderBuilder({
               </div>
             )}
 
-            <div className="mt-4">
-              <p className="text-sm font-semibold text-slate-700">{t('orderUrlTitle')}</p>
-              {orderUrl ? (
-                <div className="mt-2 space-y-2">
-                  <p className="break-all rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{orderUrl}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void linkCopy.copy(orderUrl)}
-                      className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
-                    >
-                      {linkCopy.copied ? t('copied') : t('copy')}
-                    </button>
-                    <a
-                      href={orderUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
-                    >
-                      {t('open')}
-                    </a>
-                    {orderUrl.length <= QR_MAX_URL_LEN ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowQr(true)}
-                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
-                      >
-                        {t('showQr')}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-slate-400">{t('qrTooLong')}</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400">{t('orderUrlHint')}</p>
-                  <p className="text-xs text-amber-700">{t('shareAgainHint')}</p>
-                </div>
-              ) : (
-                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  <p className="font-medium">{t('needLabel')}</p>
-                  <ul className="mt-1 list-inside list-disc space-y-0.5">
-                    {!hasReceiver && <li>{t('needReceiver')}</li>}
-                    {!hasShopName && <li>{t('needShopName')}</li>}
-                    {!hasMenu && <li>{t('needMenu')}</li>}
-                    {hasReceiver && hasShopName && hasMenu && <li>{t('needValid')}</li>}
-                  </ul>
-                </div>
-              )}
-            </div>
+            {/* 共有は「@handle に公開」(左) で固定店舗 URL (open-pay.jp/@…) を発行する。
+                長く生成時固定の ?s= 直リンクは前面に出さない (受付トグル等も再公開で更新可)。 */}
+            <p className="mt-3 text-xs text-slate-400">{t('previewPublishHint')}</p>
           </StepCard>
         </aside>
       </div>
-
-      <LinkQrModal
-        open={showQr && orderUrl !== ''}
-        value={orderUrl}
-        title={draft.shopName.trim() || t('builderHeading')}
-        closeLabel={t('qrClose')}
-        onClose={() => setShowQr(false)}
-      />
     </div>
   );
 }

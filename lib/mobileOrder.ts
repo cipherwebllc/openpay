@@ -47,6 +47,13 @@ export type MobileOrderConfig = {
   feePayer: FeePayer;
   socials: string[]; // SNS URL 配列 (https のみ・表示順保持・SocialIconLinks がドメイン自動判定)
   menu: MenuItem[];
+  // 店舗情報 (任意・表示専用)。住所/営業時間/電話は入力時のみ公開ページに描画。
+  address?: string;
+  hours?: string;
+  phone?: string;
+  // 注文受付の可否。false のとき公開ページは支払いを止める (不可逆決済の事故防止)。
+  // 既定 (未設定) は受付中。
+  acceptingOrders?: boolean;
 };
 
 /**
@@ -64,6 +71,11 @@ export type StorefrontParts = {
   avatar?: string; // https のみ
   socials?: string[]; // https のみ・表示順
   menu: MenuItem[];
+  // 店舗情報 (任意・公開ページの表示/受付制御。identity ではない)。
+  address?: string;
+  hours?: string;
+  phone?: string;
+  acceptingOrders?: boolean;
 };
 
 export const SHOP_NAME_MAX = 48;
@@ -71,6 +83,9 @@ export const MENU_NAME_MAX = 80;
 export const MENU_MAX = 60;
 export const EMOJI_MAX = 8; // JS 文字長 (絵文字は 2+ code unit ゆえ実質 2〜4 絵文字)
 export const URL_FIELD_MAX = 512; // SNS / 画像 URL の上限
+export const ADDRESS_MAX = 120; // 住所 (建物名込みを許容)
+export const HOURS_MAX = 120; // 営業時間 (自由記入・例 "11:00〜22:00 (水曜定休)")
+export const PHONE_MAX = 32; // 電話番号 (国番号/内線/区切り込み)
 
 /** 受取チェーンの表示名 (ブランド名・非翻訳)。builder の選択肢 + 注文ページのバッジで共有。 */
 export const JPYC_CHAIN_LABEL: Record<JpycChainSlug, string> = {
@@ -207,6 +222,24 @@ export function safeHttpUrl(u: string | undefined): string | undefined {
 }
 
 /**
+ * 電話番号を `tel:` リンク用に正規化 (数字と先頭 + のみ)。組めない (数字なし) なら undefined。
+ * 表示は検証済みの生テキスト、href だけこの正規化値を使う (属性/scheme インジェクション回避)。
+ */
+export function telHref(phone: string | undefined): string | undefined {
+  if (!phone) return undefined;
+  // 数字と + 以外を除去 → 先頭以外の + も除去 (国番号の先頭 + のみ残す)。
+  const norm = phone.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+  return /\d/.test(norm) ? `tel:${norm}` : undefined;
+}
+
+/** 住所を地図検索リンク (Google Maps・https) へ。空なら undefined。 */
+export function mapSearchHref(address: string | undefined): string | undefined {
+  const a = address?.trim();
+  if (!a) return undefined;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+}
+
+/**
  * 注文ページ URL のトークンを検証付きでデコード。untrusted 入力ゆえ全項目を検証し、
  * 一つでも不正なら **null** を返す (例外は投げない)。
  */
@@ -255,6 +288,12 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
     const socials = o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX);
     if (socials.length > 0) parts.socials = socials;
   }
+  // 店舗情報 (任意・不正は黙って除外・注文は壊さない)。
+  if (isNonEmptyStr(o.address, ADDRESS_MAX)) parts.address = o.address.trim();
+  if (isNonEmptyStr(o.hours, HOURS_MAX)) parts.hours = o.hours.trim();
+  if (isNonEmptyStr(o.phone, PHONE_MAX)) parts.phone = o.phone.trim();
+  // 既定 (受付中) は「フィールド無し」で表し、停止時のみ false を保持 (round-trip 最小化)。
+  if (o.acceptingOrders === false) parts.acceptingOrders = false;
   return parts;
 }
 
@@ -287,5 +326,10 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     menu: parts.menu,
   };
   if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
+  // 店舗情報は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。
+  if (parts.address) config.address = parts.address;
+  if (parts.hours) config.hours = parts.hours;
+  if (parts.phone) config.phone = parts.phone;
+  if (parts.acceptingOrders === false) config.acceptingOrders = false;
   return config;
 }

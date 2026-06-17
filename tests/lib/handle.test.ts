@@ -471,6 +471,24 @@ describe('handleStorefrontConfig', () => {
     expect(config?.avatar).toBe('https://img.example/builder.png'); // profile.avatar ではなく
     expect(config?.socials).toEqual(['https://x.com/builder']); // profile.socials ではなく
   });
+
+  it('storefront の店舗情報 (住所/営業時間/電話/受付停止) を MobileOrderConfig へ載せる', () => {
+    const withInfo: HandleRecord = {
+      ...base,
+      storefront: {
+        ...base.storefront!,
+        address: '東京都〇〇 1-2-3',
+        hours: '11:00-22:00',
+        phone: '03-1234-5678',
+        acceptingOrders: false,
+      },
+    };
+    const config = handleStorefrontConfig(withInfo, 'shop');
+    expect(config?.address).toBe('東京都〇〇 1-2-3');
+    expect(config?.hours).toBe('11:00-22:00');
+    expect(config?.phone).toBe('03-1234-5678');
+    expect(config?.acceptingOrders).toBe(false);
+  });
 });
 
 describe('MAX_HANDLES_PER_WALLET', () => {

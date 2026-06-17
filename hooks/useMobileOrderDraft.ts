@@ -19,6 +19,9 @@ import {
   SHOP_NAME_MAX,
   SOCIALS_MAX,
   URL_FIELD_MAX,
+  ADDRESS_MAX,
+  HOURS_MAX,
+  PHONE_MAX,
   type MobileOrderConfig,
   type MobileOrderMode,
   type MenuItem,
@@ -37,6 +40,10 @@ export interface MobileOrderDraft {
   mode: MobileOrderMode; // 'storefront' (店頭/券売機) | 'preorder' (事前モバイルオーダー)
   feePayer: FeePayer; // 手数料の負担者 (preorder 時のみ意味を持つ)
   socials: string[]; // SNS URL の配列 (生入力・並び替え可・https 検証は URL 生成時)
+  address: string; // 住所 (任意・生入力)
+  hours: string; // 営業時間 (任意・自由記入)
+  phone: string; // 電話番号 (任意・生入力)
+  acceptingOrders: boolean; // 注文受付 (既定 true)。false で公開ページの支払いを止める。
 }
 
 const STORAGE_KEY = 'openpay:mobile-order-draft:v1';
@@ -56,6 +63,10 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   mode: 'storefront', // 最も安全な経路 (その場払いその場受取) を既定に
   feePayer: 'merchant',
   socials: [],
+  address: '',
+  hours: '',
+  phone: '',
+  acceptingOrders: true, // 既定は受付中
 };
 
 // 旧 schema (menu フィールド) は無視される — メニューは presets が単一情報源になったため。
@@ -76,6 +87,11 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
           .map((s) => clampStr(s, URL_FIELD_MAX))
           .slice(0, SOCIALS_MAX)
       : [],
+    address: clampStr(loaded.address, ADDRESS_MAX),
+    hours: clampStr(loaded.hours, HOURS_MAX),
+    phone: clampStr(loaded.phone, PHONE_MAX),
+    // 既定は受付中 (true)。明示的に false のときだけ停止として復元。
+    acceptingOrders: loaded.acceptingOrders === false ? false : true,
   };
 }
 
@@ -130,6 +146,12 @@ export function draftToConfig(
     // trim のみ。https 検証 + 件数 slice は validateOrderConfig が行う。
     socials: draft.socials.map((s) => s.trim()),
     menu: presetsToMenu(presets),
+    // 店舗情報 (trim のみ・空/不正の除外は validateOrderConfig)。acceptingOrders は
+    // 停止時のみ false として保存される (true は載らない・round-trip 最小化)。
+    address: draft.address.trim(),
+    hours: draft.hours.trim(),
+    phone: draft.phone.trim(),
+    acceptingOrders: draft.acceptingOrders,
   });
 }
 

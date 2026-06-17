@@ -115,6 +115,21 @@ describe('StorefrontPublishPanel', () => {
     expect(screen.getByText(/公開済み/)).toBeInTheDocument();
   });
 
+  it('公開済み handle は固定 URL + コピー/開く/QR を再公開せずに提示 (@handle が唯一の共有導線)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    renderPanel({ storefront: STORE });
+    expect(await screen.findByText('公開中の店舗 URL')).toBeInTheDocument();
+    expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'QR を表示' })).toBeInTheDocument();
+  });
+
   it('メニュー未充足 (storefront=null) は公開ボタンを無効化し注記', async () => {
     vi.stubGlobal(
       'fetch',

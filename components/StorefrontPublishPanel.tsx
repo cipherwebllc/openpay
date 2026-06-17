@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
+import { LinkQrModal } from '@/components/LinkQrModal';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -51,6 +52,7 @@ export function StorefrontPublishPanel({
   const linkCopy = useCopyToClipboard();
   const qc = useQueryClient();
   const [selected, setSelected] = useState('');
+  const [showQr, setShowQr] = useState(false);
 
   const mine = useQuery({
     // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ (HandleClaim と同流儀)。
@@ -183,9 +185,13 @@ export function StorefrontPublishPanel({
           </button>
           {!storefront && <p className="text-xs text-amber-700">{t('publishNeedMenu')}</p>}
           {publish.isError && <p className="text-xs text-red-600">{t('publishError')}</p>}
-          {publish.isSuccess && shopUrl && (
+          {/* 公開済み (今 publish した or 既に storefront あり) なら固定店舗 URL を常に提示
+              (コピー/開く/QR)。@handle が唯一の共有導線なので、再公開せずとも取り出せるように。 */}
+          {(publish.isSuccess || selectedHandle?.storefront) && shopUrl && (
             <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-              <p className="font-semibold">{t('published')}</p>
+              <p className="font-semibold">
+                {publish.isSuccess ? t('published') : t('publishedAlready')}
+              </p>
               <p className="mt-1 break-all">{shopUrl}</p>
               <div className="mt-1 flex gap-3">
                 <button
@@ -203,11 +209,25 @@ export function StorefrontPublishPanel({
                 >
                   {t('openShop')}
                 </a>
+                <button
+                  type="button"
+                  onClick={() => setShowQr(true)}
+                  className="font-medium text-emerald-700 hover:underline"
+                >
+                  {t('showQr')}
+                </button>
               </div>
             </div>
           )}
         </div>
       )}
+      <LinkQrModal
+        open={showQr && shopUrl !== ''}
+        value={shopUrl}
+        title={selectedHandle ? `@${selectedHandle.handle}` : t('publishHeading')}
+        closeLabel={t('qrClose')}
+        onClose={() => setShowQr(false)}
+      />
     </div>
   );
 }

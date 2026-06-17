@@ -11,6 +11,8 @@ import {
   buildOrderUrl,
   type MenuItem,
   safeHttpUrl,
+  telHref,
+  mapSearchHref,
   ORDER_PATH,
   MENU_MAX,
   SHOP_NAME_MAX,
@@ -260,6 +262,71 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     expect(r).not.toBeNull();
     expect(r?.avatar).toBeUndefined();
     expect(r?.socials).toBeUndefined();
+  });
+  it('店舗情報 (address/hours/phone) を trim 保持・acceptingOrders は false のみ保持', () => {
+    const r = validateStorefrontParts({
+      ...good,
+      address: '  東京都〇〇 1-2-3  ',
+      hours: '  11:00-22:00  ',
+      phone: '  03-1234-5678  ',
+      acceptingOrders: false,
+    });
+    expect(r?.address).toBe('東京都〇〇 1-2-3');
+    expect(r?.hours).toBe('11:00-22:00');
+    expect(r?.phone).toBe('03-1234-5678');
+    expect(r?.acceptingOrders).toBe(false);
+  });
+  it('acceptingOrders=true (既定) はフィールドを持たない (round-trip 最小化)', () => {
+    const r = validateStorefrontParts({ ...good, acceptingOrders: true });
+    expect(r).not.toBeNull();
+    expect('acceptingOrders' in (r ?? {})).toBe(false);
+  });
+  it('空 / 長すぎる店舗情報は黙って除外 (注文は壊さない)', () => {
+    const r = validateStorefrontParts({ ...good, address: '', phone: 'x'.repeat(200) });
+    expect(r).not.toBeNull();
+    expect(r?.address).toBeUndefined();
+    expect(r?.phone).toBeUndefined();
+  });
+});
+
+describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せる', () => {
+  it('address/hours/phone/acceptingOrders=false を config に載せる', () => {
+    const c = validateOrderConfig({
+      ...baseConfig(),
+      address: '東京都〇〇',
+      hours: '11:00-22:00',
+      phone: '03-1234-5678',
+      acceptingOrders: false,
+    });
+    expect(c?.address).toBe('東京都〇〇');
+    expect(c?.hours).toBe('11:00-22:00');
+    expect(c?.phone).toBe('03-1234-5678');
+    expect(c?.acceptingOrders).toBe(false);
+  });
+  it('店舗情報込みで encode→decode が往復一致', () => {
+    const c = validateOrderConfig({ ...baseConfig(), address: '東京都〇〇', acceptingOrders: false })!;
+    expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
+  });
+});
+
+describe('mobileOrder: telHref / mapSearchHref (公開ページの電話/地図リンク)', () => {
+  it('telHref は数字と先頭 + のみ残す', () => {
+    expect(telHref('03-1234-5678')).toBe('tel:0312345678');
+    expect(telHref('+81 (3) 1234-5678')).toBe('tel:+81312345678');
+  });
+  it('telHref は数字無し / undefined / 空 → undefined', () => {
+    expect(telHref('お電話で')).toBeUndefined();
+    expect(telHref(undefined)).toBeUndefined();
+    expect(telHref('')).toBeUndefined();
+  });
+  it('mapSearchHref は https の Google Maps 検索 URL (encode 済み)', () => {
+    const h = mapSearchHref('東京都 渋谷');
+    expect(h?.startsWith('https://www.google.com/maps/search/?api=1&query=')).toBe(true);
+    expect(h).toContain(encodeURIComponent('東京都 渋谷'));
+  });
+  it('mapSearchHref は空白のみ / undefined → undefined', () => {
+    expect(mapSearchHref('   ')).toBeUndefined();
+    expect(mapSearchHref(undefined)).toBeUndefined();
   });
 });
 

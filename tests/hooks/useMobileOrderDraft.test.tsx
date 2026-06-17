@@ -115,6 +115,10 @@ function baseDraft(): MobileOrderDraft {
     mode: 'storefront',
     feePayer: 'merchant',
     socials: ['  https://x.com/shop  '], // trim 検証用
+    address: '',
+    hours: '',
+    phone: '',
+    acceptingOrders: true,
   };
 }
 
@@ -146,5 +150,31 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
     expect(draftToConfig(baseDraft(), null, presets)).toBeNull();
     expect(draftToConfig(baseDraft(), ADDR, [])).toBeNull();
     expect(draftToConfig(baseDraft(), ADDR, [preset({ enabled: false })])).toBeNull();
+  });
+
+  it('店舗情報 (住所/営業時間/電話) を trim して載せ、acceptingOrders=false を伝播', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    const cfg = draftToConfig(
+      {
+        ...baseDraft(),
+        address: '  東京都〇〇 1-2-3  ',
+        hours: '  11:00-22:00  ',
+        phone: '  03-1234-5678  ',
+        acceptingOrders: false,
+      },
+      ADDR,
+      presets,
+    );
+    expect(cfg?.address).toBe('東京都〇〇 1-2-3');
+    expect(cfg?.hours).toBe('11:00-22:00');
+    expect(cfg?.phone).toBe('03-1234-5678');
+    expect(cfg?.acceptingOrders).toBe(false);
+  });
+
+  it('acceptingOrders=true (既定) は config に載せない (round-trip 最小化)', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    const cfg = draftToConfig({ ...baseDraft(), acceptingOrders: true }, ADDR, presets);
+    expect(cfg).not.toBeNull();
+    expect('acceptingOrders' in (cfg ?? {})).toBe(false);
   });
 });

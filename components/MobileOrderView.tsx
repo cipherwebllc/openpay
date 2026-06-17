@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
-import { UtensilsCrossed } from 'lucide-react';
+import { Clock, MapPin, Phone, UtensilsCrossed } from 'lucide-react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { useOrigin } from '@/hooks/useOrigin';
 import { deploymentForSlug } from '@/lib/tokens';
@@ -24,6 +24,8 @@ import {
 } from '@/lib/url';
 import {
   safeHttpUrl,
+  telHref,
+  mapSearchHref,
   groupMenuByCategory,
   JPYC_CHAIN_LABEL,
   type MobileOrderConfig,
@@ -99,6 +101,12 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
   const showCategoryNav = menuGroups.length > 1;
   const sectionId = (i: number) => `mo-cat-${i}`;
 
+  // 店舗情報 + 受付可否。acceptingOrders===false のとき支払いを止める (不可逆決済の事故防止)。
+  const accepting = config.acceptingOrders !== false;
+  const tel = telHref(config.phone);
+  const mapHref = mapSearchHref(config.address);
+  const hasStoreInfo = !!(config.address || config.hours || config.phone);
+
   return (
     <div className="space-y-5">
       <header className="text-center">
@@ -128,6 +136,54 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
           </div>
         )}
       </header>
+
+      {/* 受付停止中バナー (acceptingOrders===false)。客が払う前に最上部で告知。 */}
+      {!accepting && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-800">
+          {t('viewClosedNotice')}
+        </div>
+      )}
+
+      {/* 店舗情報 (任意・入力された項目だけ描画)。住所は地図リンク、電話は tel: リンク。 */}
+      {hasStoreInfo && (
+        <section className="space-y-1.5 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+          {config.hours && (
+            <p className="flex items-start gap-2">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewHoursLabel')} />
+              <span>{config.hours}</span>
+            </p>
+          )}
+          {config.address && (
+            <p className="flex items-start gap-2">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewAddressLabel')} />
+              {mapHref ? (
+                <a
+                  href={mapHref}
+                  target="_blank"
+                  rel="noopener noreferrer nofollow"
+                  className="text-brand hover:underline"
+                >
+                  {config.address}
+                </a>
+              ) : (
+                <span>{config.address}</span>
+              )}
+            </p>
+          )}
+          {config.phone && (
+            <p className="flex items-start gap-2">
+              <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewPhoneLabel')} />
+              {tel ? (
+                <a href={tel} className="text-brand hover:underline">
+                  {config.phone}
+                </a>
+              ) : (
+                <span>{config.phone}</span>
+              )}
+            </p>
+          )}
+        </section>
+      )}
 
       <section>
         <h2 className="mb-2 text-sm font-semibold text-slate-700">{t('viewMenuHeading')}</h2>
@@ -224,7 +280,10 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
 
       {/* 注文サマリ + 支払い (既存 /checkout へ・手数料0) */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
-        {cartItems.length === 0 ? (
+        {!accepting ? (
+          // 受付停止中は支払いを止める (不可逆決済の事故防止)。メニュー閲覧は可能。
+          <p className="text-center text-sm font-semibold text-amber-700">{t('viewClosedNotice')}</p>
+        ) : cartItems.length === 0 ? (
           <p className="text-center text-sm text-slate-400">{t('cartEmpty')}</p>
         ) : tooMany ? (
           <p className="text-center text-sm text-red-600">

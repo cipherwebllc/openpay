@@ -192,6 +192,11 @@ export function handleStorefrontConfig(
     feePayer: sf.feePayer,
     socials: sf.socials ?? record.profile?.socials ?? [],
     menu: sf.menu,
+    // 店舗情報 (任意)。storefront に保存された値をそのまま公開ページへ (validateOrderConfig が再検証)。
+    address: sf.address,
+    hours: sf.hours,
+    phone: sf.phone,
+    acceptingOrders: sf.acceptingOrders,
   });
 }
 
