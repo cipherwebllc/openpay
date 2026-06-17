@@ -38,6 +38,7 @@ import {
   JPYC_CHAIN_LABEL,
   MOBILE_ORDER_CHAINS,
   SHOP_NAME_MAX,
+  TAGLINE_MAX,
   SOCIALS_MAX,
   ADDRESS_MAX,
   HOURS_MAX,
@@ -124,6 +125,7 @@ export function MobileOrderBuilder({
         mode: draft.mode,
         feePayer: draft.feePayer,
         shopName: draft.shopName.trim() || undefined,
+        tagline: draft.tagline.trim() || undefined,
         avatar: draft.avatar.trim() || undefined,
         socials: draft.socials.map((s) => s.trim()).filter(Boolean),
         address: draft.address.trim() || undefined,
@@ -284,6 +286,18 @@ export function MobileOrderBuilder({
                   maxLength={SHOP_NAME_MAX}
                   placeholder={t('shopNamePlaceholder')}
                   onChange={(e) => update({ shopName: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+
+              {/* 店名の下に出すひとこと (任意・キャッチコピー)。 */}
+              <Field label={t('taglineLabel')}>
+                <input
+                  type="text"
+                  value={draft.tagline}
+                  maxLength={TAGLINE_MAX}
+                  placeholder={t('taglinePlaceholder')}
+                  onChange={(e) => update({ tagline: e.target.value })}
                   className={inputClass}
                 />
               </Field>
@@ -588,6 +602,11 @@ export function MobileOrderBuilder({
                     <p className="mt-2 text-base font-bold text-slate-900">
                       {draft.shopName.trim() || t('previewShopPlaceholder')}
                     </p>
+                    {draft.tagline.trim() && (
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {draft.tagline.trim()}
+                      </p>
+                    )}
                     {/* チェーン: 単一は受取バッジ・複数は選択ピル (公開ページと同じ見せ方)。 */}
                     {draft.chains.length > 1 ? (
                       <div className="mt-1">

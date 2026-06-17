@@ -226,6 +226,9 @@ export function MobileOrderView({
           )}
         </div>
         <h1 className="mt-3 text-xl font-bold text-slate-900">{config.shopName}</h1>
+        {config.tagline && (
+          <p className="mt-1 text-sm text-slate-500">{config.tagline}</p>
+        )}
         {offeredChains.length > 1 ? (
           // 複数チェーン: 顧客が支払うチェーンを選ぶ (受取先は全チェーン共通の 1 アドレス)。
           <div className="mt-2">

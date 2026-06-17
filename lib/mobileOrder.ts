@@ -45,6 +45,7 @@ export type MobileOrderConfig = {
   // 受取先 (receiver) は全 EVM チェーン共通の 1 アドレスなのでチェーンだけ切り替える。
   chains?: JpycChainSlug[];
   shopName: string;
+  tagline?: string; // 店名の下に出す短いひとこと (任意・キャッチコピー・表示専用)
   avatar?: string; // 店舗アイコン画像 URL (https のみ・任意・@handle のアバターと同型)
   mode: MobileOrderMode;
   feePayer: FeePayer;
@@ -74,6 +75,7 @@ export type StorefrontParts = {
   // 店舗のブランディング (ビルダー由来)。公開ページはこれを優先し、無ければ @handle 側の
   // 名前/アバター/SNS にフォールバックする (handleStorefrontConfig)。受取先は @handle が権威。
   shopName?: string;
+  tagline?: string; // 店名の下の短いひとこと (任意・表示専用)
   avatar?: string; // https のみ
   socials?: string[]; // https のみ・表示順
   menu: MenuItem[];
@@ -86,6 +88,7 @@ export type StorefrontParts = {
 };
 
 export const SHOP_NAME_MAX = 48;
+export const TAGLINE_MAX = 60; // 店名下のひとこと (短いキャッチコピーを想定)
 export const MENU_NAME_MAX = 80;
 export const MENU_MAX = 60;
 export const EMOJI_MAX = 8; // JS 文字長 (絵文字は 2+ code unit ゆえ実質 2〜4 絵文字)
@@ -307,6 +310,7 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   }
   // 任意のブランディング (不正は黙って除外・注文は壊さない)。avatar/socials は https のみ。
   if (isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) parts.shopName = o.shopName.trim();
+  if (isNonEmptyStr(o.tagline, TAGLINE_MAX)) parts.tagline = o.tagline.trim();
   if (isHttpsUrl(o.avatar)) parts.avatar = o.avatar;
   if (Array.isArray(o.socials)) {
     const socials = o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX);
@@ -352,6 +356,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     menu: parts.menu,
   };
   if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
+  if (parts.tagline) config.tagline = parts.tagline; // 店名下のひとこと (任意)
   if (parts.chains) config.chains = parts.chains; // 受取チェーン集合 (2 件以上のときのみ)
   // 店舗情報は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。
   if (parts.address) config.address = parts.address;

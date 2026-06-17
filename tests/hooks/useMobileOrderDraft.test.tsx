@@ -121,6 +121,7 @@ function baseDraft(): MobileOrderDraft {
     receiverSource: 'auto',
     chains: ['polygon'],
     shopName: '珈琲スタンド',
+    tagline: '',
     avatar: '  https://img.example/icon.png  ', // trim 検証用
     mode: 'storefront',
     feePayer: 'merchant',
@@ -146,6 +147,17 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
       socials: ['https://x.com/shop'],
       menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
     });
+  });
+
+  it('tagline は trim して config に載る・空なら載らない (任意)', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    expect(
+      draftToConfig({ ...baseDraft(), tagline: '  自家焙煎の一杯を  ' }, ADDR, presets)
+        ?.tagline,
+    ).toBe('自家焙煎の一杯を');
+    expect(
+      draftToConfig({ ...baseDraft(), tagline: '' }, ADDR, presets)?.tagline,
+    ).toBeUndefined();
   });
 
   it('avatar が空/非 https のときは config に載らない (任意フィールド)', () => {

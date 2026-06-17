@@ -16,6 +16,7 @@ import {
   ORDER_PATH,
   MENU_MAX,
   SHOP_NAME_MAX,
+  TAGLINE_MAX,
   EMOJI_MAX,
   SOCIALS_MAX,
   type MobileOrderConfig,
@@ -191,6 +192,29 @@ describe('mobileOrder: decode は untrusted 入力を全検証 (不正は null)'
   it('valid な avatar (https) は往復で保持される', () => {
     const c = baseConfig();
     expect(decodeOrderConfig(encodeOrderConfig(c))?.avatar).toBe(c.avatar);
+  });
+
+  it('tagline (店名下のひとこと) は往復で保持される', () => {
+    const c = { ...baseConfig(), tagline: '自家焙煎の一杯をあなたに' };
+    expect(decodeOrderConfig(encodeOrderConfig(c))?.tagline).toBe(c.tagline);
+  });
+
+  it('tagline 未設定は config に載らない (任意・round-trip 最小形)', () => {
+    expect(
+      decodeOrderConfig(encodeOrderConfig(baseConfig()))?.tagline,
+    ).toBeUndefined();
+  });
+
+  it('tagline が長すぎ → 黙って除外し config は null にしない', () => {
+    const c = { ...baseConfig(), tagline: 'あ'.repeat(TAGLINE_MAX + 1) };
+    const d = decodeOrderConfig(encodeOrderConfig(c));
+    expect(d).not.toBeNull();
+    expect(d?.tagline).toBeUndefined();
+  });
+
+  it('validateStorefrontParts も tagline を trim して載せる', () => {
+    const parts = validateStorefrontParts({ ...baseConfig(), tagline: '  ひとこと  ' });
+    expect(parts?.tagline).toBe('ひとこと');
   });
 });
 

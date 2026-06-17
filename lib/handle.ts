@@ -188,6 +188,7 @@ export function handleStorefrontConfig(
     chain: sf.chain,
     chains: sf.chains, // 受取チェーン集合 (2 件以上で注文ページに選択 UI)
     shopName: sf.shopName || record.config.name?.trim() || `@${handle}`,
+    tagline: sf.tagline, // 店名下のひとこと (ビルダー由来のみ・任意・validateOrderConfig が再検証)
     avatar: sf.avatar ?? record.profile?.avatar,
     mode: sf.mode,
     feePayer: sf.feePayer,

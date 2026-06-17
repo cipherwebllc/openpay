@@ -1648,6 +1648,8 @@
     "stepShopTitle": "店舗設定",
     "shopNameLabel": "店名",
     "shopNamePlaceholder": "例: 珈琲スタンド OpenPay",
+    "taglineLabel": "ひとこと（任意）",
+    "taglinePlaceholder": "例: 自家焙煎の一杯をあなたに",
     "avatarLabel": "店舗アイコン画像（任意）",
     "avatarHint": "画像はサーバー（例: imgur.com）にアップロードした https:// の URL を貼り付けてください。注文ページの先頭に丸く表示されます。",
     "addressLabel": "住所（任意）",

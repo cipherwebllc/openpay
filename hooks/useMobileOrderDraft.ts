@@ -17,6 +17,7 @@ import { isJpycChainSlug, type JpycChainSlug } from '@/lib/chains';
 import {
   validateOrderConfig,
   SHOP_NAME_MAX,
+  TAGLINE_MAX,
   SOCIALS_MAX,
   URL_FIELD_MAX,
   ADDRESS_MAX,
@@ -37,6 +38,7 @@ export interface MobileOrderDraft {
   receiverSource: ReceiverSource; // 接続ウォレット追従の可否 (useReceiverAutofill 用)
   chains: JpycChainSlug[]; // 受取チェーン集合 (JPYC・1 件以上)。複数なら注文ページで顧客が選ぶ。
   shopName: string;
+  tagline: string; // 店名の下のひとこと (任意・生入力)
   avatar: string; // 店舗アイコン画像 URL (生入力・https 検証は URL 生成時・@handle と同型)
   mode: MobileOrderMode; // 'storefront' (店頭/券売機) | 'preorder' (事前モバイルオーダー)
   feePayer: FeePayer; // 手数料の負担者 (preorder 時のみ意味を持つ)
@@ -61,6 +63,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   receiverSource: 'auto',
   chains: ['polygon'], // JPYC の既定チェーン (店主が複数選択可)
   shopName: '',
+  tagline: '',
   avatar: '',
   mode: 'storefront', // 最も安全な経路 (その場払いその場受取) を既定に
   feePayer: 'merchant',
@@ -93,6 +96,7 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
       return uniq.length > 0 ? uniq : ['polygon'];
     })(),
     shopName: clampStr(loaded.shopName, SHOP_NAME_MAX),
+    tagline: clampStr(loaded.tagline, TAGLINE_MAX),
     avatar: clampStr(loaded.avatar, URL_FIELD_MAX), // https 検証は URL 生成時。length だけ clamp。
     mode: loaded.mode === 'preorder' ? 'preorder' : 'storefront',
     feePayer: loaded.feePayer === 'customer' ? 'customer' : 'merchant',
@@ -159,6 +163,7 @@ export function draftToConfig(
     chain: draft.chains[0] ?? 'polygon',
     chains: draft.chains,
     shopName: draft.shopName.trim(),
+    tagline: draft.tagline.trim(), // 空/length 超過の除外は validateOrderConfig が行う。
     // trim のみ。https 検証 + 空/不正の除外は validateOrderConfig が行う。
     avatar: draft.avatar.trim(),
     mode: draft.mode,

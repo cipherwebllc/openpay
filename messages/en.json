@@ -1648,6 +1648,8 @@
     "stepShopTitle": "Shop settings",
     "shopNameLabel": "Shop name",
     "shopNamePlaceholder": "e.g. OpenPay Coffee Stand",
+    "taglineLabel": "Tagline (optional)",
+    "taglinePlaceholder": "e.g. Freshly roasted, just for you",
     "avatarLabel": "Shop icon image (optional)",
     "avatarHint": "Paste an https:// URL of an image uploaded to a host (e.g. imgur.com). Shown as a circle at the top of the order page.",
     "addressLabel": "Address (optional)",

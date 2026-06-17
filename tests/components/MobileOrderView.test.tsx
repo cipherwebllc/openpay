@@ -62,6 +62,18 @@ describe('MobileOrderView', () => {
     expect(screen.getByText('100')).toBeInTheDocument();
   });
 
+  it('店名の下に tagline (ひとこと) を表示する', () => {
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, tagline: '自家焙煎の一杯をあなたに' }} />,
+    );
+    expect(screen.getByText('自家焙煎の一杯をあなたに')).toBeInTheDocument();
+  });
+
+  it('tagline 未設定なら ひとこと 行を出さない (base config)', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    expect(screen.queryByText('自家焙煎の一杯をあなたに')).toBeNull();
+  });
+
   it('カテゴリーがあれば 上部カテゴリーナビ (アンカー) + 見出し別 2 カラムを描画', () => {
     const categorized: MobileOrderConfig = {
       ...config,
