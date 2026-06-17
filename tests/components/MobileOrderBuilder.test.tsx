@@ -64,10 +64,12 @@ describe('MobileOrderBuilder', () => {
     expect(
       screen.getByText('メニューは「レジ」タブの有効な JPYC 商品です（画像・税率も共有）。'),
     ).toBeInTheDocument();
-    expect(screen.getAllByText('コーヒー').length).toBeGreaterThanOrEqual(1); // 一覧 + プレビュー
-    // 共有は @handle 公開のみ。長い ?s= 注文 URL は前面に出さない。
+    // メニュー一覧は折りたたみ → トグルを開いて商品名 (seed: コーヒー) を確認。
+    fireEvent.click(screen.getByRole('button', { name: '登録中のメニュー' }));
+    expect(screen.getAllByText('コーヒー').length).toBeGreaterThanOrEqual(1);
+    // 共有は @handle 公開のみ。長い ?s= 注文 URL は出さず、プレビューは「店舗ページを開く」へ誘導。
     expect(screen.queryByText(/\/order\?s=/)).toBeNull();
-    expect(screen.getByText(/固定の店舗 URL/)).toBeInTheDocument();
+    expect(screen.getByText(/店舗ページを開く/)).toBeInTheDocument();
   });
 
   it('受取チェーンは複数選択 (チェックボックス)・既定 Polygon・最低1件を維持', () => {

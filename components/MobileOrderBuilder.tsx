@@ -173,7 +173,30 @@ export function MobileOrderBuilder({
 
       <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
         <div className="min-w-0 space-y-5">
-          {/* ① 受取先 (店舗ウォレット) + 受取チェーン (JPYC・単一) */}
+          {/* 注文の受付トグル (開店=受付中 / 閉店=停止中 を都度切替)。最上部に置きクリックしやすく。
+              停止中は公開ページの支払いを止める (不可逆決済の事故防止)。 */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={draft.acceptingOrders}
+                aria-label={t('acceptingLabel')}
+                onClick={() => update({ acceptingOrders: !draft.acceptingOrders })}
+                className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  draft.acceptingOrders
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-slate-200 text-slate-500'
+                }`}
+              >
+                {draft.acceptingOrders ? t('acceptingOn') : t('acceptingOff')}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">{t('acceptingHint')}</p>
+          </div>
+
+          {/* ① 受取先 (店舗ウォレット) + 受取チェーン (JPYC・複数選択可) */}
           <StepCard step={1} icon={Wallet} title={t('stepReceiverTitle')}>
             <div className="space-y-4">
               <Field label={t('receiverLabel')} hint={t('receiverHint')}>
@@ -429,28 +452,6 @@ export function MobileOrderBuilder({
                   )}
                 </div>
               </Field>
-
-              {/* 注文の受付トグル。停止中は公開ページの支払いを止める (不可逆決済の事故防止)。 */}
-              <div className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={draft.acceptingOrders}
-                    aria-label={t('acceptingLabel')}
-                    onClick={() => update({ acceptingOrders: !draft.acceptingOrders })}
-                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                      draft.acceptingOrders
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-slate-200 text-slate-500'
-                    }`}
-                  >
-                    {draft.acceptingOrders ? t('acceptingOn') : t('acceptingOff')}
-                  </button>
-                </div>
-                <p className="mt-1 text-xs text-slate-400">{t('acceptingHint')}</p>
-              </div>
             </div>
           </StepCard>
 
@@ -511,15 +512,15 @@ export function MobileOrderBuilder({
             </div>
           </StepCard>
 
+        </div>
+
+        {/* 右カラム: @handle 公開 (上) + ④ プレビュー (desktop は sticky) */}
+        <aside className="mt-6 min-w-0 space-y-5 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           {/* レジ商品を @handle に公開して固定店舗 URL にする (handles ON のときだけマウント:
-              react-query を使うため OFF 環境/テストで QueryClient を要求しない)。 */}
+              react-query を使うため OFF 環境/テストで QueryClient を要求しない)。④ プレビューの上。 */}
           {env.enableHandles && (
             <StorefrontPublishPanel storefront={storefrontParts} onGetHandle={onGetHandle} />
           )}
-        </div>
-
-        {/* 右カラム: ④ プレビュー + 注文 URL (desktop は sticky) */}
-        <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {hydrated && (
               <div className="rounded-xl bg-slate-50 p-4">
@@ -535,34 +536,25 @@ export function MobileOrderBuilder({
                   <p className="text-center text-base font-semibold text-slate-800">
                     {draft.shopName.trim() || t('previewShopPlaceholder')}
                   </p>
-                  <ul className="mt-3 space-y-1.5">
-                    {menuItems.map((item) => {
-                      const imgUrl =
-                        item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
-                      return (
-                        <li key={item.id} className="flex items-center justify-between gap-2 text-sm">
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            {imgUrl && (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={imgUrl} alt="" className="h-5 w-5 rounded object-cover" />
-                            )}
-                            <span className="truncate text-slate-700">{item.name}</span>
-                          </span>
-                          <span className="shrink-0 font-medium text-slate-900">{item.price}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {menuItems.length === 0 && (
-                    <p className="mt-2 text-center text-xs text-slate-400">{t('previewNoMenu')}</p>
+                  {/* 受取チェーン (複数なら "+N")。プレビューは店舗情報まで・メニューは出さない。 */}
+                  <p className="mt-0.5 text-center text-xs text-slate-500">
+                    JPYC ({JPYC_CHAIN_LABEL[draft.chains[0]]}
+                    {draft.chains.length > 1 ? ` +${draft.chains.length - 1}` : ''})
+                  </p>
+                  {(draft.hours.trim() || draft.address.trim() || draft.phone.trim()) && (
+                    <div className="mt-2 space-y-0.5 text-xs text-slate-500">
+                      {draft.hours.trim() && <p className="truncate">{draft.hours.trim()}</p>}
+                      {draft.address.trim() && <p className="truncate">{draft.address.trim()}</p>}
+                      {draft.phone.trim() && <p className="truncate">{draft.phone.trim()}</p>}
+                    </div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* 共有は「@handle に公開」(左) で固定店舗 URL (open-pay.jp/@…) を発行する。
-                長く生成時固定の ?s= 直リンクは前面に出さない (受付トグル等も再公開で更新可)。 */}
-            <p className="mt-3 text-xs text-slate-400">{t('previewPublishHint')}</p>
+            {/* プレビューは店舗情報まで (メニュー手前)。メニューを含む実際の見え方は、上の
+                「@handle に公開」→「店舗ページを開く」で確認してもらう。 */}
+            <p className="mt-3 text-xs text-slate-400">{t('previewOpenHint')}</p>
           </StepCard>
         </aside>
       </div>
