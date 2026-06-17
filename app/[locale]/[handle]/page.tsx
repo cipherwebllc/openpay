@@ -159,7 +159,12 @@ export default async function HandlePage({
       </div>
       {storefront ? (
         // 店舗公開時: /@shop = 店そのもの (メニュー + カート + 支払い)。
-        <MobileOrderView config={storefront} />
+        // /checkout の「←」がこの店舗ページへ戻れるよう自ページのパス + 店名を渡す。
+        <MobileOrderView
+          config={storefront}
+          backHref={`/${locale}/@${normalized}`}
+          backLabel={storefront.shopName}
+        />
       ) : (
         <>
           {hasProfile && (

@@ -12,6 +12,7 @@ import {
   DEFAULT_TIP_PRESETS,
   searchParamsFromNext,
   exceedsTokenPrecision,
+  safeInternalPath,
 } from '@/lib/url';
 
 // USDC (Base) のアドレスは checksum 既知のため、テストの roundtrip が安定する。
@@ -1940,5 +1941,27 @@ describe('checkout surrogate-safe (name/memo 境界絵文字)', () => {
     expect(result.items).not.toBeNull();
     const parsedName = result.items?.[0]?.name ?? '';
     expect(/[\uD800-\uDFFF]/.test(parsedName)).toBe(false);
+  });
+});
+
+describe('safeInternalPath (戻り先リンクの open-redirect 防止)', () => {
+  it('同一オリジンの内部パスは通す', () => {
+    expect(safeInternalPath('/ja/@shop')).toBe('/ja/@shop');
+    expect(safeInternalPath('/checkout?to=0x1')).toBe('/checkout?to=0x1');
+  });
+  it('絶対 URL / scheme / protocol-relative は拒否 (null)', () => {
+    expect(safeInternalPath('https://evil.com')).toBeNull();
+    expect(safeInternalPath('//evil.com')).toBeNull();
+    expect(safeInternalPath('javascript:alert(1)')).toBeNull();
+    expect(safeInternalPath('/\\evil.com')).toBeNull();
+  });
+  it('相対パス / 非文字列 / 空 / 過長 / 制御文字は拒否 (null)', () => {
+    expect(safeInternalPath('order')).toBeNull();
+    expect(safeInternalPath('./x')).toBeNull();
+    expect(safeInternalPath('')).toBeNull();
+    expect(safeInternalPath(undefined)).toBeNull();
+    expect(safeInternalPath(123)).toBeNull();
+    expect(safeInternalPath('/' + 'a'.repeat(300))).toBeNull();
+    expect(safeInternalPath('/a	b')).toBeNull();
   });
 });

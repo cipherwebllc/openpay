@@ -1718,7 +1718,7 @@
     "qtyIncrease": "Increase quantity",
     "irreversibleNote": "Payment is a direct transfer to the shop wallet and cannot be reversed. Make sure you trust the shop.",
     "tooManyItems": "Up to {max} items per order",
-    "poweredBy": "This store receives payments with OpenPay",
+    "poweredBy": "This store receives payments with <link>OpenPay</link>",
     "invalidTitle": "Invalid link",
     "invalidBody": "This order-page link is incorrect or corrupted. Please check with the store.",
     "chainLabel": "Receiving chain",

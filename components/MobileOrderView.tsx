@@ -9,6 +9,7 @@
 // モバイルオーダー固有の % 手数料は P0 (開示更新) 後の別増分で、ここには無い。
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatUnits, parseUnits } from 'viem';
 import { ChevronDown, ChevronUp, Clock, MapPin, Phone, ShoppingCart, UtensilsCrossed } from 'lucide-react';
@@ -37,7 +38,17 @@ function initialOf(name: string): string {
   return n ? ([...n][0] ?? '').toUpperCase() : '🏪';
 }
 
-export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
+export function MobileOrderView({
+  config,
+  backHref,
+  backLabel,
+}: {
+  config: MobileOrderConfig;
+  /** 「支払いへ進む」後の /checkout から戻る店舗ページのパス (同一オリジン)。@handle 公開時に渡る。 */
+  backHref?: string;
+  /** 戻りリンクのラベル (店名)。 */
+  backLabel?: string;
+}) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
   const [qty, setQty] = useState<Record<string, number>>({});
@@ -85,7 +96,7 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
       : '0';
   // カートマークのバッジ点数 (合計数量)。
   const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
-  const checkoutUrl =
+  const baseCheckoutUrl =
     origin && cartItems.length > 0 && !tooMany
       ? buildCheckoutUrl(origin, {
           to: config.receiver,
@@ -95,6 +106,13 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
           items: cartItems,
         })
       : '';
+  // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
+  // buildCheckoutUrl は常に query を含むので & 連結で安全。値は encode 済み。
+  const checkoutUrl =
+    baseCheckoutUrl && backHref
+      ? `${baseCheckoutUrl}&back=${encodeURIComponent(backHref)}` +
+        (backLabel ? `&backName=${encodeURIComponent(backLabel)}` : '')
+      : baseCheckoutUrl;
 
   // メニューをカテゴリー別にグループ化 (出現順)。カテゴリーが1つも無ければ見出しを出さず単一グリッド。
   const menuGroups = useMemo(() => groupMenuByCategory(config.menu), [config.menu]);
@@ -367,7 +385,15 @@ export function MobileOrderView({ config }: { config: MobileOrderConfig }) {
         )}
       </section>
 
-      <p className="text-center text-xs text-slate-400">{t('poweredBy')}</p>
+      <p className="text-center text-xs text-slate-400">
+        {t.rich('poweredBy', {
+          link: (chunks) => (
+            <Link href="/" prefetch={false} className="underline hover:text-slate-600">
+              {chunks}
+            </Link>
+          ),
+        })}
+      </p>
     </div>
   );
 }

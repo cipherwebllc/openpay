@@ -101,7 +101,8 @@ describe('MobileOrderView', () => {
       socials: ['https://instagram.com/shop', 'https://x.com/shop', 'https://youtube.com/@shop'],
     };
     const { container } = renderWithIntl(<MobileOrderView config={multi} />);
-    const hrefs = Array.from(container.querySelectorAll('a[href]')).map((a) =>
+    // poweredBy の OpenPay リンク (href="/") は除外し、SNS (https) のみ順序検証。
+    const hrefs = Array.from(container.querySelectorAll('a[href^="https://"]')).map((a) =>
       a.getAttribute('href'),
     );
     expect(hrefs).toEqual([
@@ -132,11 +133,32 @@ describe('MobileOrderView', () => {
     expect(screen.getByText('テ')).toBeInTheDocument();
   });
 
-  it('カート空では合計/支払いを出さず案内 (poweredBy は出る)', () => {
+  it('カート空では合計/支払いを出さず案内 (poweredBy の OpenPay はトップへのリンク)', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     expect(screen.getByText('商品を選ぶと合計が表示されます')).toBeInTheDocument();
     expect(screen.queryByText('支払いへ進む')).toBeNull();
-    expect(screen.getByText('このお店は OpenPay で受け取っています')).toBeInTheDocument();
+    // 「このお店は OpenPay で受け取っています」の OpenPay をテキストリンク化 (→ トップ)。
+    const op = screen.getByRole('link', { name: 'OpenPay' });
+    expect(op).toHaveAttribute('href', '/');
+  });
+
+  it('backHref/backLabel を渡すと /checkout に back + backName が付く (店舗へ戻る導線)', () => {
+    renderWithIntl(
+      <MobileOrderView config={config} backHref="/ja/@shop" backLabel="テスト珈琲店" />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const url = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
+    expect(url.searchParams.get('back')).toBe('/ja/@shop');
+    expect(url.searchParams.get('backName')).toBe('テスト珈琲店');
+  });
+
+  it('backHref 未指定なら /checkout に back を付けない (直接 /order 等)', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const url = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
+    expect(url.searchParams.get('back')).toBeNull();
   });
 
   it('数量を選ぶと合計 + /checkout への支払いリンク (手数料0・既存決済流用・chain伝播)', () => {
@@ -239,8 +261,10 @@ describe('MobileOrderView', () => {
       menu: [{ id: 'a', name: '罠', price: '1', visual: { kind: 'image', url: 'data:image/svg+xml,x' } }],
     };
     const { container } = renderWithIntl(<MobileOrderView config={hostile} />);
-    // SNS は https でないので 1 件も描画されない → アンカー自体ゼロ。
-    expect(container.querySelectorAll('a')).toHaveLength(0);
+    // SNS は https でないので 1 件も描画されない (残るのは poweredBy の OpenPay リンクのみ)。
+    const anchors = Array.from(container.querySelectorAll('a'));
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]).toHaveAttribute('href', '/');
     // 危険スキームを持つ要素は一切無い。商品名は残る (画像だけ落ちる)。
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('[href^="javascript:"]')).toBeNull();

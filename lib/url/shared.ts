@@ -76,6 +76,18 @@ export function sanitizeUrl(raw: string): string | undefined {
   return parsed.toString();
 }
 
+// 同一オリジンの内部パス (例: `/ja/@shop`) だけを許可する。`back=` のような
+// 「戻り先」クエリは attacker-controllable なので、そのまま <Link href> に渡すと
+// open-redirect / scheme インジェクションになり得る。`/` 始まりの相対パスのみ通し、
+// protocol-relative (`//`) / バックスラッシュ / 制御文字 / 過長は拒否 (不正は null)。
+export function safeInternalPath(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256) return null;
+  if (!value.startsWith('/')) return null; // 絶対 URL・相対 (./ や handle) は拒否
+  if (value.startsWith('//') || value.startsWith('/\\')) return null; // protocol-relative 等
+  if ([...value].some((c) => c.charCodeAt(0) < 0x20)) return null; // 制御文字
+  return value;
+}
+
 export function sanitizeText(value: string, max: number): string | undefined {
   // 空文字は省略扱い、上限超は切詰。制御文字 strip は lib/sanitize.ts に集約。
   const cleaned = stripControlChars(value);

@@ -9,6 +9,7 @@ import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { env } from '@/lib/env';
 import {
   parseCheckoutParams,
+  safeInternalPath,
   searchParamsFromNext,
   type RouteSearch,
 } from '@/lib/url';
@@ -34,11 +35,22 @@ export default async function CheckoutPage({
   const parsed = parseCheckoutParams(searchParamsFromNext(raw));
   const t = await getTranslations('CheckoutForm');
 
+  // 戻り先リンク: モバイルオーダー店舗から来た場合は ?back=/…&backName=店名 が付く。
+  // back は attacker-controllable なので同一オリジンの内部パスのみ許可 (open-redirect 防止)。
+  // 無い/不正なら従来どおり OpenPay トップへ戻る。
+  const backRaw = Array.isArray(raw.back) ? raw.back[0] : raw.back;
+  const backNameRaw = Array.isArray(raw.backName) ? raw.backName[0] : raw.backName;
+  const backPath = safeInternalPath(backRaw);
+  const backName =
+    backPath && typeof backNameRaw === 'string' && backNameRaw.trim()
+      ? backNameRaw.trim().slice(0, 48) // 店名上限 (SHOP_NAME_MAX 相当)
+      : null;
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-md px-4 py-6 sm:py-8">
       <header className="mb-4 flex items-center justify-between gap-2 text-xs text-slate-500">
-        <Link href="/" className="hover:text-slate-700" prefetch={false}>
-          ← OpenPay
+        <Link href={backPath ?? '/'} className="hover:text-slate-700" prefetch={false}>
+          ← {backName ?? 'OpenPay'}
         </Link>
         <div className="flex items-center gap-2">
           <LocaleSwitcher />
