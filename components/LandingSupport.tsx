@@ -48,7 +48,9 @@ export async function LandingSupport() {
         <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
           {t('supportTitle')}
         </h2>
-        <p className="mt-3 text-sm leading-relaxed text-slate-600">
+        {/* 利用料の早見表。\n 区切りを whitespace-pre-line で改行表示。中央寄せセクション
+            内で箇条書きが読みやすいよう本文だけ左寄せのブロック (mx-auto で中央配置)。 */}
+        <p className="mx-auto mt-3 max-w-xl whitespace-pre-line text-left text-sm leading-relaxed text-slate-600">
           {t('supportBody')}
         </p>
         <p className="mt-2 text-sm font-medium leading-relaxed text-slate-700">

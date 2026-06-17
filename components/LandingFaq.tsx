@@ -11,8 +11,8 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 
-type FaqKey = 'faqQ1' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5' | 'faqQ6';
-type FaqAnswerKey = 'faqA1' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5' | 'faqA6';
+type FaqKey = 'faqQ1' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5';
+type FaqAnswerKey = 'faqA1' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5';
 
 const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
   { q: 'faqQ1', a: 'faqA1' },
@@ -20,7 +20,6 @@ const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
   { q: 'faqQ3', a: 'faqA3' },
   { q: 'faqQ4', a: 'faqA4' },
   { q: 'faqQ5', a: 'faqA5' },
-  { q: 'faqQ6', a: 'faqA6' }, // 利用料の早見表 (\n 区切りを whitespace-pre-line で改行表示)
 ];
 
 export async function LandingFaq() {
@@ -73,7 +72,7 @@ export async function LandingFaq() {
                   aria-hidden
                 />
               </summary>
-              <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-600">
+              <p className="mt-3 text-sm leading-relaxed text-slate-600">
                 {renderAnswer(a)}
               </p>
             </details>
