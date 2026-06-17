@@ -60,6 +60,49 @@ describe('RegisterMode', () => {
     expect(screen.getByRole('button', { name: /Tip/ })).toBeInTheDocument();
   });
 
+  it('プリセットに画像URL(https)があればレジのカードにサムネ表示・無ければ出ない', async () => {
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          {
+            id: 'p1',
+            name: '限定グッズ',
+            unitPrice: '1200',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            image: 'https://example.com/item.png',
+            sortOrder: 0,
+            enabled: true,
+          },
+          {
+            id: 'p2',
+            name: '画像なし商品',
+            unitPrice: '300',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            sortOrder: 1,
+            enabled: true,
+          },
+        ],
+        receipt: { day: '', n: 0 },
+      }),
+    );
+    render(<RegisterMode />);
+    const withImg = await screen.findByRole('button', { name: /限定グッズ/ });
+    expect(withImg.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://example.com/item.png',
+    );
+    // 画像なしプリセットのカードには img を出さない (条件描画)。
+    const noImg = screen.getByRole('button', { name: /画像なし商品/ });
+    expect(noImg.querySelector('img')).toBeNull();
+  });
+
   it('プリセット選択で商品名・単価がレジ入力欄に反映される', async () => {
     const user = userEvent.setup();
     render(<RegisterMode />);

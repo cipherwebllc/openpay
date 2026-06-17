@@ -35,6 +35,7 @@ import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
+import { safeHttpUrl } from '@/lib/mobileOrder';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
@@ -337,23 +338,42 @@ export function RegisterMode({
               {t('presetsLabel')}
             </p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {presetStore.enabledPresets.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => addFromPreset(p)}
-                  className="flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
-                >
-                  <div className="truncate text-sm font-semibold text-slate-800">
-                    {p.name}
-                  </div>
-                  <div className="font-mono text-xs text-slate-500">
-                    {p.unitPrice}{' '}
-                    {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
-                      .displaySymbol}
-                  </div>
-                </button>
-              ))}
+              {presetStore.enabledPresets.map((p) => {
+                // 商品画像 (https のみ・任意)。管理で入れた image をプリセットのカードにもサムネ表示する
+                // (モバイルオーダーのメニュー画像と同じ image を共有)。https 以外は描画しない (二重防御)。
+                // 読込失敗は onError で隠し、名前+価格のテキスト表示へフォールバック (グリッドを壊さない)。
+                const presetImg = safeHttpUrl(p.image);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => addFromPreset(p)}
+                    className="flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
+                  >
+                    {presetImg && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={presetImg}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                        className="mb-2 h-16 w-full rounded-lg object-cover"
+                      />
+                    )}
+                    <div className="truncate text-sm font-semibold text-slate-800">
+                      {p.name}
+                    </div>
+                    <div className="font-mono text-xs text-slate-500">
+                      {p.unitPrice}{' '}
+                      {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
+                        .displaySymbol}
+                    </div>
+                  </button>
+                );
+              })}
               {/* カスタム追加 (空行) — プリセットと同サイズの末尾セル。 */}
               <button
                 type="button"
