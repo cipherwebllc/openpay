@@ -17,6 +17,8 @@ const hold = vi.hoisted(() => ({
   kvConfigured: true,
   lrange: { ok: true, value: [] as string[] } as { ok: true; value: string[] } | { ok: false; reason: string },
   evalResult: 1 as number, // REPLACE_ELEM CAS の戻り (1=置換成功 / 0=競合)
+  evalQueue: null as number[] | null, // 指定時は呼び出し毎に shift (CAS 競合→再試行を再現)
+  evalOk: true, // false で kvEval 自体が失敗 (KV 障害) を再現
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -52,7 +54,9 @@ vi.mock('@/lib/kv', () => ({
   // POST は REPLACE_ELEM (LPOS+LSET = 位置/TTL 保持の原子置換) を kvEval で実行する。
   kvEval: (...a: unknown[]) => {
     evalSpy(...a);
-    return Promise.resolve({ ok: true, value: hold.evalResult });
+    if (!hold.evalOk) return Promise.resolve({ ok: false, reason: 'network_error' });
+    const v = hold.evalQueue && hold.evalQueue.length > 0 ? hold.evalQueue.shift()! : hold.evalResult;
+    return Promise.resolve({ ok: true, value: v });
   },
 }));
 
@@ -88,6 +92,8 @@ beforeEach(() => {
   hold.kvConfigured = true;
   hold.lrange = { ok: true, value: [] };
   hold.evalResult = 1;
+  hold.evalQueue = null;
+  hold.evalOk = true;
   lrangeSpy.mockClear();
   evalSpy.mockClear();
 });
@@ -240,5 +246,63 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     hold.evalResult = 0; // 毎回競合
     const res = await POST(postReq({ txHash: TXA }));
     expect(res.status).toBe(409);
+  });
+
+  it('op: kitchenDone で厨房の中間フラグを更新 (fulfilled は不変)', async () => {
+    const raw = serializeOrder(order({ txHash: TXA, fulfilled: false }));
+    hold.lrange = { ok: true, value: [raw] };
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'kitchenDone', value: true } }));
+    expect(res.status).toBe(200);
+    const [, , args] = evalSpy.mock.calls[0] as [string, string[], string[]];
+    const next = JSON.parse(args[1]);
+    expect(next.kitchenDone).toBe(true);
+    expect(next.fulfilled).toBe(false); // 調理済みは対応済みに昇格しない
+  });
+
+  it('op: itemServed で配膳ステータスを更新', async () => {
+    const raw = serializeOrder(order({ txHash: TXA, items: [{ name: 'A', qty: 1, price: '100' }] }));
+    hold.lrange = { ok: true, value: [raw] };
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'itemServed', index: 0, value: true } }));
+    expect(res.status).toBe(200);
+    const [, , args] = evalSpy.mock.calls[0] as [string, string[], string[]];
+    expect(JSON.parse(args[1]).items[0].served).toBe(true);
+  });
+
+  it('壊れた JSON body → 400 (invalid_json)', async () => {
+    const req = new Request('http://localhost/api/order/feed', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{ this is not json',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_json' });
+    expect(evalSpy).not.toHaveBeenCalled();
+  });
+
+  it('KV 未設定 → 503 (有効な op でも書けない)', async () => {
+    hold.kvConfigured = false;
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'fulfill', value: true } }));
+    expect(res.status).toBe(503);
+    expect(evalSpy).not.toHaveBeenCalled();
+  });
+
+  it('kvEval 自体が失敗 → 503 (CAS の KV 障害を黙殺しない)', async () => {
+    hold.lrange = { ok: true, value: [serializeOrder(order({ txHash: TXA, fulfilled: false }))] };
+    hold.evalOk = false;
+    const res = await POST(postReq({ txHash: TXA }));
+    expect(res.status).toBe(503);
+  });
+
+  it('並行更新: CAS が一度競合 (0) → 再読込して再試行し成功 (1) で updated:1', async () => {
+    // 厨房 cooked × ホール served の同時更新を模す。1 回目 LPOS が旧 raw を見つけられず 0、
+    // 2 回目の read→apply→CAS で成功。読み込みは 2 回・eval も 2 回呼ばれる。
+    hold.lrange = { ok: true, value: [serializeOrder(order({ txHash: TXA, fulfilled: false }))] };
+    hold.evalQueue = [0, 1];
+    const res = await POST(postReq({ txHash: TXA }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, updated: 1 });
+    expect(lrangeSpy).toHaveBeenCalledTimes(2); // 競合で再読込
+    expect(evalSpy).toHaveBeenCalledTimes(2);
   });
 });

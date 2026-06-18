@@ -14,6 +14,7 @@ import {
   applyOrderOp,
   ORDER_ITEMS_MAX,
   ORDER_ITEM_NAME_MAX,
+  ORDER_TABLE_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
 
@@ -161,5 +162,145 @@ describe('orderRelay: 厨房の調理済み op (kitchenDone) — 配膳済みは
     const h = applyOrderOp(k, { kind: 'fulfill', value: true });
     expect(h.kitchenDone).toBe(true); // 厨房側は維持
     expect(h.fulfilled).toBe(true); // 配膳済み=対応済み
+  });
+});
+
+describe('orderRelay: parseStoredOrder の pickupAt / 進捗フラグ復元 (KV untrusted)', () => {
+  it('pickupAt は正の有限数のみ復元 (0/負/非数/欠落は undefined)', () => {
+    expect(parseStoredOrder(serializeOrder(order({ pickupAt: 1_700_000_500_000 })))?.pickupAt).toBe(
+      1_700_000_500_000,
+    );
+    // 0 は「未指定 (即時/店頭)」と区別できないので除外 (手動 pickup_at=0 混入もここで弾く)。
+    expect(parseStoredOrder(JSON.stringify({ ...order(), pickupAt: 0 }))?.pickupAt).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), pickupAt: -5 }))?.pickupAt).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), pickupAt: 'soon' }))?.pickupAt).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.pickupAt).toBeUndefined(); // 欠落
+  });
+
+  it('進捗フラグ (cooked/served) は **保存データからのみ** 復元・webhook 申告では落とす (改竄注入防止)', () => {
+    // parseStoredOrder は preserveStatus:true → 保存済みの cooked/served を復元。
+    const stored = parseStoredOrder(
+      JSON.stringify({
+        ...order(),
+        items: [{ name: 'A', qty: 1, price: '100', cooked: true, served: true }],
+      }),
+    );
+    expect(stored?.items[0]).toEqual({ name: 'A', qty: 1, price: '100', cooked: true, served: true });
+    // sanitizeOrderItems の既定 (= webhook/顧客申告経路) は cooked/served を **無視** する。
+    expect(sanitizeOrderItems([{ name: 'A', qty: 1, price: '100', cooked: true, served: true }])).toEqual([
+      { name: 'A', qty: 1, price: '100' },
+    ]);
+  });
+
+  it('ts は有限数のみ・非数/非有限は 0 (sentinel)', () => {
+    expect(parseStoredOrder(serializeOrder(order({ ts: 1_700_000_000_000 })))?.ts).toBe(1_700_000_000_000);
+    expect(parseStoredOrder(JSON.stringify({ ...order(), ts: 'x' }))?.ts).toBe(0);
+  });
+});
+
+describe('orderRelay: parseOrderFeedOp (untrusted POST body・全 op 網羅)', () => {
+  it('不正な body は null (null / 非 object / txHash 欠落 / txHash 不正)', () => {
+    expect(parseOrderFeedOp(null)).toBeNull();
+    expect(parseOrderFeedOp('x')).toBeNull();
+    expect(parseOrderFeedOp(123)).toBeNull();
+    expect(parseOrderFeedOp({})).toBeNull();
+    expect(parseOrderFeedOp({ txHash: '0xnope' })).toBeNull();
+  });
+
+  it('旧 schema {fulfilled} (op 無し): 既定 true・false 明示は false', () => {
+    expect(parseOrderFeedOp({ txHash: TX })).toEqual({ txHash: TX, op: { kind: 'fulfill', value: true } });
+    expect(parseOrderFeedOp({ txHash: TX, fulfilled: false })).toEqual({
+      txHash: TX,
+      op: { kind: 'fulfill', value: false },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, fulfilled: true })).toEqual({
+      txHash: TX,
+      op: { kind: 'fulfill', value: true },
+    });
+  });
+
+  it('fulfill op: boolean のみ・非 boolean は null', () => {
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'fulfill', value: false } })).toEqual({
+      txHash: TX,
+      op: { kind: 'fulfill', value: false },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'fulfill', value: 1 } })).toBeNull();
+  });
+
+  it('itemCooked / itemServed: index は [0, MAX) の整数・value は boolean', () => {
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'itemCooked', index: 0, value: true } })).toEqual({
+      txHash: TX,
+      op: { kind: 'itemCooked', index: 0, value: true },
+    });
+    expect(
+      parseOrderFeedOp({ txHash: TX, op: { kind: 'itemServed', index: ORDER_ITEMS_MAX - 1, value: false } }),
+    ).toEqual({ txHash: TX, op: { kind: 'itemServed', index: ORDER_ITEMS_MAX - 1, value: false } });
+    // 境界: ORDER_ITEMS_MAX は範囲外 (0-indexed)。
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'itemCooked', index: ORDER_ITEMS_MAX, value: true } })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'itemCooked', index: -1, value: true } })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'itemCooked', index: 1.5, value: true } })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'itemCooked', value: true } })).toBeNull(); // index 欠落
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'itemServed', index: 0, value: 'x' } })).toBeNull();
+  });
+
+  it('setTable: string は trim+clamp(MAX)・null 受理・非 string/null は null・欠落は null', () => {
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'setTable', table: '  B2  ' } })).toEqual({
+      txHash: TX,
+      op: { kind: 'setTable', table: 'B2' },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'setTable', table: null } })).toEqual({
+      txHash: TX,
+      op: { kind: 'setTable', table: null },
+    });
+    const long = parseOrderFeedOp({ txHash: TX, op: { kind: 'setTable', table: 'x'.repeat(100) } });
+    expect((long?.op as { kind: 'setTable'; table: string }).table.length).toBe(ORDER_TABLE_MAX);
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'setTable', table: 42 } })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'setTable' } })).toBeNull(); // 誤入力でテーブルを黙ってクリアしない
+  });
+
+  it('未知の kind / op 不正は null', () => {
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'explode', value: true } })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: {} })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: 'nope' })).toBeNull();
+  });
+});
+
+describe('orderRelay: applyOrderOp (純粋・不変・範囲外 no-op・データ検査)', () => {
+  const base = () =>
+    order({
+      items: [
+        { name: 'A', qty: 1, price: '100' },
+        { name: 'B', qty: 2, price: '200' },
+      ],
+    });
+
+  it('itemCooked/itemServed: 対象 index のみ更新・非対象は同一参照・元は不変', () => {
+    const b = base();
+    const out = applyOrderOp(b, { kind: 'itemCooked', index: 0, value: true });
+    expect(out).not.toBe(b); // 新オブジェクト
+    expect(out.items[0]).toEqual({ name: 'A', qty: 1, price: '100', cooked: true });
+    expect(out.items[1]).toBe(b.items[1]); // 非対象 item は同一参照 (不要な再生成なし)
+    expect(b.items[0].cooked).toBeUndefined(); // 元は不変
+    const served = applyOrderOp(b, { kind: 'itemServed', index: 1, value: true });
+    expect(served.items[1]).toEqual({ name: 'B', qty: 2, price: '200', served: true });
+    expect(served.items[0]).toBe(b.items[0]);
+  });
+
+  it('範囲外 index は no-op (同一オブジェクトを返す)', () => {
+    const b = base();
+    // items.length(2) <= index(5) → 変更なし。route は parseOrderFeedOp で <MAX に制限するが
+    // items.length 未満の保証はないため applyOrderOp 側でも範囲外を弾く。
+    expect(applyOrderOp(b, { kind: 'itemCooked', index: 5, value: true })).toBe(b);
+    expect(applyOrderOp(b, { kind: 'itemServed', index: 2, value: true })).toBe(b); // index==length も範囲外
+  });
+
+  it('fulfill / kitchenDone / setTable は該当フィールドのみ変更 (元は不変)', () => {
+    const b = base();
+    expect(applyOrderOp(b, { kind: 'fulfill', value: true })).toMatchObject({ fulfilled: true });
+    expect(applyOrderOp(b, { kind: 'kitchenDone', value: true })).toMatchObject({ kitchenDone: true });
+    expect(applyOrderOp(b, { kind: 'setTable', table: 'Z9' })).toMatchObject({ table: 'Z9' });
+    expect(applyOrderOp(b, { kind: 'setTable', table: null })).toMatchObject({ table: null });
+    expect(b.fulfilled).toBe(false); // 元は不変
+    expect(b.kitchenDone).toBeUndefined();
   });
 });

@@ -85,4 +85,21 @@ describe('lib/successChime', () => {
     const { playSuccessChime } = await import('@/lib/successChime');
     expect(() => playSuccessChime()).not.toThrow();
   });
+
+  it('playNewOrderChime は 4 音 (ピンポン×2) を生成 = 完了音 (3) と区別', async () => {
+    const createOscillator = vi.fn(() => makeNode());
+    const createGain = vi.fn(() => makeNode());
+    w.AudioContext = makeMockAC({ state: 'running', createOscillator, createGain });
+    const { playNewOrderChime } = await import('@/lib/successChime');
+    playNewOrderChime();
+    expect(createOscillator).toHaveBeenCalledTimes(4);
+    expect(createGain).toHaveBeenCalledTimes(4);
+  });
+
+  it('playNewOrderChime も AudioContext 非対応では throw せず no-op', async () => {
+    w.AudioContext = undefined;
+    w.webkitAudioContext = undefined;
+    const { playNewOrderChime } = await import('@/lib/successChime');
+    expect(() => playNewOrderChime()).not.toThrow();
+  });
 });
