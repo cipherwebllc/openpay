@@ -39,9 +39,22 @@ vi.mock('@/hooks/useOrderFeed', () => ({
   }),
 }));
 
+// 新着アラート音 (Web Audio) + 設定 pref を spy 化 (jsdom は AudioContext 無し)。
+const chime = vi.hoisted(() => ({ play: vi.fn(), prime: vi.fn() }));
+vi.mock('@/lib/successChime', () => ({
+  playNewOrderChime: () => chime.play(),
+  primeChimeAudio: () => chime.prime(),
+}));
+const soundHold = vi.hoisted(() => ({ enabled: false, set: vi.fn() }));
+vi.mock('@/lib/soundPref', () => ({
+  isOrderAlertSoundEnabled: () => soundHold.enabled,
+  setOrderAlertSoundEnabled: (v: boolean) => soundHold.set(v),
+}));
+
 import { OrderFulfillmentBoard } from '@/components/OrderFulfillmentBoard';
 
 const TX = `0x${'a'.repeat(64)}`;
+const TX2 = `0x${'b'.repeat(64)}`;
 function order(over: Partial<StoredOrder> = {}): StoredOrder {
   return {
     orderId: 'A1',
@@ -51,7 +64,7 @@ function order(over: Partial<StoredOrder> = {}): StoredOrder {
     txHash: TX,
     chainId: 137,
     from: '',
-    ts: 1,
+    ts: Date.now(), // 既定は「いま」= 経過時間バッジを出さない (個別テストで過去に上書き)
     fulfilled: false,
     ...over,
   };
@@ -62,6 +75,10 @@ beforeEach(() => {
   feedHold.data = [order()];
   mutateSpy.mockClear();
   envHold.enablePreorderTime = false; // Phase 4 flag 既定 OFF
+  soundHold.enabled = false; // 新着アラート音 既定 OFF
+  soundHold.set.mockClear();
+  chime.play.mockClear();
+  chime.prime.mockClear();
 });
 
 describe('OrderFulfillmentBoard', () => {
@@ -211,5 +228,77 @@ describe('OrderFulfillmentBoard', () => {
     feedHold.data = [order({ items: [] })];
     renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
     expect(screen.queryByText('配膳準備OK')).toBeNull();
+  });
+
+  // ── UX-4: ヘッダ KPI 件数 ───────────────────────────────────────────────
+  it('ヘッダ KPI: 厨房は「調理待ち N」を表示 (active 件数)', () => {
+    feedHold.data = [order({ orderId: 'A1', txHash: TX }), order({ orderId: 'A2', txHash: TX2 })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('調理待ち 2')).toBeInTheDocument();
+  });
+  it('ヘッダ KPI: ホールは「配膳待ち N」を表示', () => {
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText('配膳待ち 1')).toBeInTheDocument();
+  });
+
+  // ── UX-2: 経過時間バッジ ────────────────────────────────────────────────
+  it('経過時間: 受信から約15分なら「15分経過」を表示', () => {
+    feedHold.data = [order({ ts: Date.now() - (15 * 60_000 + 5_000) })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('15分経過')).toBeInTheDocument();
+  });
+  it('経過時間: ts 不明 (0) はバッジを出さない', () => {
+    feedHold.data = [order({ ts: 0 })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.queryByText(/分経過/)).toBeNull();
+  });
+
+  // ── UX-3: ホールで配膳準備OK を先頭に ─────────────────────────────────────
+  it('ホール: 全品調理済み (配膳準備OK) の注文を先頭にソート', () => {
+    feedHold.data = [
+      order({ orderId: 'PLAIN2', txHash: TX, items: [{ name: '牛丼', qty: 1, price: '500' }] }),
+      order({
+        orderId: 'READY1',
+        txHash: TX2,
+        items: [{ name: '牛丼', qty: 1, price: '500', cooked: true }],
+      }),
+    ];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    const cards = screen.getAllByText(/受注番号/);
+    expect(cards[0].textContent).toContain('READY1'); // 配膳準備OK が先頭
+    expect(cards[1].textContent).toContain('PLAIN2');
+  });
+
+  // ── UX-1: 新着アラート (音トグル + 点滅) ──────────────────────────────────
+  it('通知音トグル: ON で設定保存 + AudioContext 解錠 + テスト音', () => {
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    fireEvent.click(screen.getByRole('button', { name: /通知音/ }));
+    expect(soundHold.set).toHaveBeenCalledWith(true);
+    expect(chime.prime).toHaveBeenCalled(); // user gesture 中に解錠
+    expect(chime.play).toHaveBeenCalled(); // 有効化の確認音
+  });
+
+  it('新着注文: 初回ロード分は鳴らさず、後続の新 txHash で「新着」+ 音 (音ON時)', () => {
+    soundHold.enabled = true; // mount 時に音 ON
+    feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.queryByText('新着')).toBeNull(); // 初回は新着扱いしない
+    chime.play.mockClear();
+    // 新しい注文がポーリングで届く (新しい配列参照で effect 再走)。
+    feedHold.data = [order({ orderId: 'A1', txHash: TX }), order({ orderId: 'A2', txHash: TX2 })];
+    rerender(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('新着')).toBeInTheDocument();
+    expect(chime.play).toHaveBeenCalled();
+  });
+
+  it('新着注文: 音 OFF なら点滅のみで音は鳴らさない', () => {
+    soundHold.enabled = false;
+    feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    chime.play.mockClear();
+    feedHold.data = [order({ orderId: 'A1', txHash: TX }), order({ orderId: 'A2', txHash: TX2 })];
+    rerender(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('新着')).toBeInTheDocument(); // 点滅は出る
+    expect(chime.play).not.toHaveBeenCalled(); // 音は鳴らない
   });
 });

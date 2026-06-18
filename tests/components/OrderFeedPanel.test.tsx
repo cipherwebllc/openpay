@@ -2,7 +2,7 @@
 // 明細/実着金額) / 空 / KV エラー / 「対応済み」で POST。useSiweSession と fetch をモック・QueryClient 注入。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -164,7 +164,8 @@ describe('OrderFeedPanel', () => {
     render();
     // 未対応リストは空 → 空表示。対応済みは折りたたみセクションに入り「未対応に戻す」が出る。
     expect(await screen.findByText('まだ受注はありません。')).toBeInTheDocument();
-    expect(screen.getByText(/対応済み/)).toBeInTheDocument();
+    // 折りたたみ見出しは「対応済み (件数)」。完了ヒント文 (同じく「対応済み」を含む) と区別するため件数で照合。
+    expect(screen.getByText(/対応済み \(\d+\)/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '未対応に戻す' })).toBeInTheDocument();
   });
 
@@ -183,6 +184,18 @@ describe('OrderFeedPanel', () => {
     expect(
       screen.getByRole('link', { name: /ホール配膳/ }).getAttribute('href'),
     ).toContain('/orders/hall');
+  });
+
+  it('完了フローのヒント: fulfillment OFF=物販向け / ON=飲食(配膳済み=対応済み)', async () => {
+    // OFF (物販): このページで対応済み。
+    render();
+    expect(await screen.findByText(/お渡ししたら「対応済み」/)).toBeInTheDocument();
+    expect(screen.queryByText(/配膳済み.*対応済み/)).toBeNull();
+    cleanup();
+    // ON (飲食): ホールで配膳済み=対応済み の案内。
+    envHold.enableOrderFulfillment = true;
+    render();
+    expect(await screen.findByText(/「配膳済み」にすると自動で「対応済み」/)).toBeInTheDocument();
   });
 
   it('enableShopLive ON + 公開店舗 → 営業中の操作 (折りたたみ) を表示', async () => {

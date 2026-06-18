@@ -81,3 +81,44 @@ export function playSuccessChime(): void {
     /* noop: チャイム失敗で決済完了 UI を壊さない */
   }
 }
+
+/**
+ * 新着注文アラート (ピンポン♪)。受注フルフィルメント (厨房/ホール) のボードに新しい
+ * 注文が届いたときに鳴らす。完了チャイムより**注意喚起寄り**(2 音ペアを2回=ドアベル風・
+ * やや大きめ)。完了チャイムと同じ AudioContext を共有 (primeChimeAudio で解錠)。
+ * 何があっても throw しない (ボード UI を壊さない)。
+ */
+export function playNewOrderChime(): void {
+  try {
+    const c = getCtx();
+    if (!c) return;
+    if (c.state === 'suspended') void c.resume().catch(() => undefined);
+
+    const now = c.currentTime;
+    // 「ピン・ポン」を 2 回。G5→C6 の下降ペア (呼び鈴に近い)。
+    const notes: ReadonlyArray<{ freq: number; at: number }> = [
+      { freq: 1046.5, at: 0 }, // C6 (ピン)
+      { freq: 784.0, at: 0.16 }, // G5 (ポン)
+      { freq: 1046.5, at: 0.42 }, // C6 (ピン)
+      { freq: 784.0, at: 0.58 }, // G5 (ポン)
+    ];
+    const peak = 0.24; // 完了音 (0.18) より少し大きめ = 厨房で気付きやすく
+    const dur = 0.22;
+
+    for (const n of notes) {
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = n.freq;
+      const start = now + n.at;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(gain).connect(c.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    }
+  } catch {
+    /* noop: アラート失敗でボード UI を壊さない */
+  }
+}

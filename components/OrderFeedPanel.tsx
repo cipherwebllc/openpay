@@ -181,6 +181,10 @@ export function OrderFeedPanel() {
         <div>
           <h2 className="text-lg font-semibold text-slate-800">{t('heading')}</h2>
           <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
+          {/* 完了フローのヒント。飲食 (厨房/ホール) を使う場合は配膳済み=対応済みを案内。 */}
+          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            {env.enableOrderFulfillment ? t('completionHintRestaurant') : t('completionHintRetail')}
+          </p>
         </div>
       )}
 
