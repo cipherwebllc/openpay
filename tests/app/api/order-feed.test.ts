@@ -119,9 +119,10 @@ describe('GET /api/order/feed', () => {
     expect((await GET()).status).toBe(401);
   });
 
-  it('KV 未設定 → 503', async () => {
+  it('KV 未設定 → 503 + logger.warn(kv_unavailable) で env 欠落を観測', async () => {
     hold.kvConfigured = false;
     expect((await GET()).status).toBe(503);
+    expect(logWarn).toHaveBeenCalledWith('order.feed.kv_unavailable', { op: 'get' });
   });
 
   it('KV 障害 → 503 (空リストと区別・黙殺しない)', async () => {
@@ -292,11 +293,12 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     expect(evalSpy).not.toHaveBeenCalled();
   });
 
-  it('KV 未設定 → 503 (有効な op でも書けない)', async () => {
+  it('KV 未設定 → 503 (有効な op でも書けない) + logger.warn(kv_unavailable)', async () => {
     hold.kvConfigured = false;
     const res = await POST(postReq({ txHash: TXA, op: { kind: 'fulfill', value: true } }));
     expect(res.status).toBe(503);
     expect(evalSpy).not.toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith('order.feed.kv_unavailable', { op: 'post' });
   });
 
   it('kvEval 自体が失敗 → 503 + logger.warn(op:cas) で観測 (黙殺しない)', async () => {
@@ -304,7 +306,10 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     hold.evalOk = false;
     const res = await POST(postReq({ txHash: TXA }));
     expect(res.status).toBe(503);
-    expect(logWarn).toHaveBeenCalledWith('order.feed.kv_error', expect.objectContaining({ op: 'cas' }));
+    expect(logWarn).toHaveBeenCalledWith(
+      'order.feed.kv_error',
+      expect.objectContaining({ op: 'cas', reason: 'network_error' }),
+    );
   });
 
   it('POST の read 失敗 → 503 + logger.warn(op:post_read)', async () => {

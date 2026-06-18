@@ -5,6 +5,9 @@
 // 削除でなくフラグ化し誤操作を復旧可能に。旧 {fulfilled} (base relay) は enableOrderRelay のみ、構造化
 // {op:...} は Phase 3 ゆえ enableOrderFulfillment も要求 (kitchen/hall ルートと同じ二重ゲート)。
 // flag OFF は 404。KV 障害は 503 で正直に返す (黙って空リストにしない)。設計: plans/swift-puzzling-sky.md。
+// 観測性: KV/競合の失敗 (503/409) は logger.warn → Sentry event 化 (**本番 Sentry DSN 設定時のみ
+// アラート化**・未設定なら console のみ)。400 (invalid_json/invalid_op) は client error ゆえ意図的に
+// 無ログ (scanner/abuse でのノイズを避ける)。
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
@@ -34,6 +37,7 @@ export async function GET(): Promise<NextResponse> {
   if (!session.ok) return session.response;
 
   if (!isKvConfigured()) {
+    logger.warn('order.feed.kv_unavailable', { op: 'get' }); // KV env 欠落デプロイを無音にしない
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
   const res = await kvLrange(orderListKey(session.address), 0, ORDER_LIST_MAX - 1);
@@ -87,6 +91,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_op' }, { status: 400 });
   }
   if (!isKvConfigured()) {
+    logger.warn('order.feed.kv_unavailable', { op: 'post' }); // KV env 欠落デプロイを無音にしない
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
 
