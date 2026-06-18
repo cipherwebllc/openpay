@@ -62,6 +62,12 @@ vi.mock('@/lib/kv', () => ({
   },
 }));
 
+// logger.warn は Sentry へ event 化する (観測性)。spy して POST 失敗の計装を実証。
+const logWarn = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logger', () => ({
+  logger: { warn: logWarn, info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 import { GET, POST } from '@/app/api/order/feed/route';
 
 const TX = `0x${'b'.repeat(64)}`;
@@ -99,6 +105,7 @@ beforeEach(() => {
   hold.evalOk = true;
   lrangeSpy.mockClear();
   evalSpy.mockClear();
+  logWarn.mockClear();
 });
 
 describe('GET /api/order/feed', () => {
@@ -249,6 +256,8 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     hold.evalResult = 0; // 毎回競合
     const res = await POST(postReq({ txHash: TXA }));
     expect(res.status).toBe(409);
+    // contention シグナルを監視/アラート用に記録 (Sentry event 化)。
+    expect(logWarn).toHaveBeenCalledWith('order.feed.conflict', expect.objectContaining({ attempts: 3 }));
   });
 
   it('op: kitchenDone で厨房の中間フラグを更新 (fulfilled は不変)', async () => {
@@ -290,11 +299,22 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     expect(evalSpy).not.toHaveBeenCalled();
   });
 
-  it('kvEval 自体が失敗 → 503 (CAS の KV 障害を黙殺しない)', async () => {
+  it('kvEval 自体が失敗 → 503 + logger.warn(op:cas) で観測 (黙殺しない)', async () => {
     hold.lrange = { ok: true, value: [serializeOrder(order({ txHash: TXA, fulfilled: false }))] };
     hold.evalOk = false;
     const res = await POST(postReq({ txHash: TXA }));
     expect(res.status).toBe(503);
+    expect(logWarn).toHaveBeenCalledWith('order.feed.kv_error', expect.objectContaining({ op: 'cas' }));
+  });
+
+  it('POST の read 失敗 → 503 + logger.warn(op:post_read)', async () => {
+    hold.lrange = { ok: false, reason: 'network_error' };
+    const res = await POST(postReq({ txHash: TXA }));
+    expect(res.status).toBe(503);
+    expect(logWarn).toHaveBeenCalledWith(
+      'order.feed.kv_error',
+      expect.objectContaining({ op: 'post_read', reason: 'network_error' }),
+    );
   });
 
   it('並行更新: CAS が一度競合 (0) → 再読込して再試行し成功 (1) で updated:1', async () => {

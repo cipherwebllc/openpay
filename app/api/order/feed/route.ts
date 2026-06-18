@@ -96,7 +96,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   // read→apply→CAS-replace を最大 FEED_MAX_RETRY 回 (同時更新で旧 raw が消えていれば再読込)。
   for (let attempt = 0; attempt < FEED_MAX_RETRY; attempt++) {
     const res = await kvLrange(key, 0, ORDER_LIST_MAX - 1);
-    if (!res.ok) return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+    if (!res.ok) {
+      logger.warn('order.feed.kv_error', { reason: res.reason, op: 'post_read' });
+      return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+    }
 
     let oldRaw: string | null = null;
     let order: StoredOrder | null = null;
@@ -114,9 +117,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (newRaw === oldRaw) return NextResponse.json({ ok: true, updated: 0 }); // 変化なし (no-op)
 
     const cas = await kvEval<number>(REPLACE_ELEM, [key], [oldRaw, newRaw]);
-    if (!cas.ok) return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+    if (!cas.ok) {
+      logger.warn('order.feed.kv_error', { reason: cas.reason, op: 'cas' });
+      return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+    }
     if (cas.value === 1) return NextResponse.json({ ok: true, updated: 1 });
     // cas.value === 0: 旧 raw が同時更新で消えた → 再読込してリトライ。
   }
+  // FEED_MAX_RETRY 回連続で CAS 競合 = 高頻度の同時更新 (contention)。監視/アラート用に記録。
+  logger.warn('order.feed.conflict', { attempts: FEED_MAX_RETRY });
   return NextResponse.json({ ok: false, error: 'conflict' }, { status: 409 });
 }
