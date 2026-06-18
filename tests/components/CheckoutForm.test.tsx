@@ -2022,6 +2022,48 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(standardMutate).not.toHaveBeenCalled();
   });
 
+  it('モバイル storefront (recover) 表示: ガス行/RecoverFeeNotice(店舗受取) を出さず、利用料行 + モバイル用ヒントのみ', () => {
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycRelay();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, feeKind: 'storefront' }} />);
+    // 利用料行 (= 1%・システム利用料/gas 込み) は表示する。storefront は店舗負担なので補足付き。
+    expect(screen.getByText('OpenPay 利用手数料 (店舗負担)')).toBeInTheDocument();
+    // 別建ての「ネットワーク手数料見積 0 JPYC」行は出さない (利用料に含まれ紛らわしい)。
+    expect(screen.queryByText(/ネットワーク手数料見積/)).toBeNull();
+    // recover の gas 額を算出する RecoverFeeNotice は出さない: 店舗受取が「決済額 − 1%」でなく
+    // 「決済額 − gas 相当 (約 2 JPYC)」になり不正確で、お客様には店舗受取の内訳も不要なため。
+    expect(screen.queryByText(/決済手数料:/)).toBeNull();
+    expect(screen.queryByText(/店舗受取/)).toBeNull();
+    expect(screen.queryByText(/手数料は店舗負担/)).toBeNull();
+    // モバイル用ヒント (ネイティブトークン不要・署名のみ) を表示する。
+    expect(screen.getByText(/ネイティブトークン \(ガス\) は不要/)).toBeInTheDocument();
+  });
+
+  it('モバイル storefront + mode=standard (顧客がウォレットで gas 負担): 標準ガス行を出し「ガス不要」とは言わない (P2 回帰)', () => {
+    // isMobileFee でも standard 経路は顧客が自分のウォレットで gas を払う。流用ガードが
+    // isStandard を取りこぼして gas 行を隠し「ガス不要」と誤表示しないことを固定する。
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    render(
+      <CheckoutForm params={{ ...JPYC_PARAMS, feeKind: 'storefront', mode: 'standard' }} />,
+    );
+    // standard の gas 行 (ウォレットで支払い) は表示する。
+    expect(screen.getByText('ウォレットで支払い')).toBeInTheDocument();
+    // モバイル用「ガス不要・署名のみ」ヒントは出さない (standard はガスが必要)。
+    expect(screen.queryByText(/ネイティブトークン \(ガス\) は不要/)).toBeNull();
+  });
+
+  it('モバイル preorder + 顧客上乗せ: 利用料行は「(店舗負担)」を付けない (顧客負担)', () => {
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycRelay();
+    render(
+      <CheckoutForm params={{ ...JPYC_PARAMS, feeKind: 'preorder', feePayer: 'customer' }} />,
+    );
+    // 顧客上乗せ → 利用料は顧客負担 → 補足なしの「OpenPay 利用手数料」。
+    expect(screen.getByText('OpenPay 利用手数料')).toBeInTheDocument();
+    expect(screen.queryByText('OpenPay 利用手数料 (店舗負担)')).toBeNull();
+  });
+
   it('モバイル preorder + 顧客上乗せ (relay): 顧客の表示総額=原価+3% (3090)・relayMutate に feeKind=preorder + gasMode=customer + value=gross', async () => {
     const user = userEvent.setup();
     feeFlags.enableMobileOrderFee = true;

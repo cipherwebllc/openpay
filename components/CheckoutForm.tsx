@@ -900,12 +900,26 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <div className="mt-3 border-t border-slate-200 pt-3">
           <dl className="space-y-1.5">
             <Row label={t('subtotalRow')} value={fmt(totalWei)} />
-            {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。 */}
+            {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
+                店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
+                顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。 */}
             {breakdown.feeAmount > 0n && (
-              <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
+              <Row
+                label={
+                  breakdown.merchantReceives < totalWei
+                    ? t('feeRowMerchant')
+                    : t('feeRow')
+                }
+                value={fmt(breakdown.feeAmount)}
+              />
             )}
             {isStandard ? (
               <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
+            ) : isMobileFee ? (
+              /* モバイル注文 (gasless): ネットワーク手数料は利用料 (feeRow) に含むため別行を出さない
+                 (relayGasEquiv=0 で「0 JPYC」表示になり紛らわしい)。standard 経路は上の分岐で
+                 顧客がウォレットで gas を払うので従来どおり gas 行を表示する (ここには来ない)。 */
+              null
             ) : useRecover ? (
               <Row
                 label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
@@ -957,13 +971,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {isStandard
             ? t('standardHint', { nativeToken })
-            : useRecover
-              ? t('gaslessHintJpycRecover')
-              : useRelay || isJpyc
-                ? t('gaslessHintJpycRelay')
-                : isErc20Paymaster
-                  ? t('gaslessHintUsdc')
-                  : t('gaslessHintJpyc')}
+            : isMobileFee
+              ? t('gaslessHintMobile')
+              : useRecover
+                ? t('gaslessHintJpycRecover')
+                : useRelay || isJpyc
+                  ? t('gaslessHintJpycRelay')
+                  : isErc20Paymaster
+                    ? t('gaslessHintUsdc')
+                    : t('gaslessHintJpyc')}
         </p>
         {approvalCheckUrl && (
           <p className="mt-2 text-[11px]">
@@ -1047,8 +1063,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
       {/* Recover モードの手数料開示 (支払いボタン直上)。free モード / 非 recover では
           RecoverFeeNotice が null を返して何も描画しない。JPYC recover は店舗吸収固定
-          (effectiveGas=merchant)。 */}
-      {!completed && (
+          (effectiveGas=merchant)。
+          モバイル注文 (システム利用料) では出さない: recover の gas 額を算出してしまい
+          店舗受取が「決済額 − 1%」でなく「決済額 − gas 相当 (約 2 JPYC)」になり不正確で、
+          かつお客様には店舗受取の内訳は不要なため (利用料は上の feeRow が表示済み)。 */}
+      {!completed && !isMobileFee && (
         <RecoverFeeNotice
           billAmount={useRecover && totalWei > 0n ? totalWei : null}
           chainId={deployment.chainId}
