@@ -137,6 +137,8 @@ function presetToMenuItem(p: ProductPreset): MenuItem | null {
   // 公開ページのカテゴリー見出し用。trim して揃える (updatePreset は sanitize を通らないため・
   // 「ドリンク」と「ドリンク 」を別グループにしない)。空は付けない。
   if (p.category && p.category.trim()) item.category = p.category.trim();
+  // おすすめ (公開ページ先頭の「おすすめ」セクション用)。true のときだけ載せる。
+  if (p.recommended) item.recommended = true;
   return item;
 }
 
@@ -200,6 +202,7 @@ export function menuToPresets(menu: MenuItem[]): ProductPreset[] {
     memo: null,
     image: m.visual?.kind === 'image' ? m.visual.url : undefined,
     category: m.category,
+    recommended: m.recommended ? true : undefined,
     sortOrder: i,
     enabled: true,
   }));

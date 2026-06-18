@@ -2,6 +2,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
+
+// Phase 1 flag (おすすめチェックボックスのゲート)。既定 OFF=非表示。
+const envHold = vi.hoisted(() => ({ enableShopLive: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableShopLive() {
+        return envHold.enableShopLive;
+      },
+    },
+  };
+});
+
 import { ProductPresetManager } from '@/components/ProductPresetManager';
 import type { ProductPreset } from '@/hooks/useProductPresets';
 
@@ -32,7 +48,10 @@ function setup(presets: ProductPreset[]) {
 }
 
 describe('ProductPresetManager', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    envHold.enableShopLive = false; // 既定 OFF (おすすめチェックボックス非表示)
+  });
 
   it('プリセット一覧を表示する', () => {
     setup([preset({ id: 'a', name: 'コーヒー' }), preset({ id: 'b', name: 'Tシャツ', unitPrice: '3000' })]);
@@ -50,8 +69,15 @@ describe('ProductPresetManager', () => {
 
   it('表示チェックボックスで enabled を更新', () => {
     const fns = setup([preset({ id: 'a', enabled: true })]);
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByLabelText('表示'));
     expect(fns.updatePreset).toHaveBeenCalledWith('a', { enabled: false });
+  });
+
+  it('おすすめチェックボックスで recommended を更新 (true のみ保持)', () => {
+    envHold.enableShopLive = true; // おすすめチェックボックスは Phase 1 flag 裏
+    const fns = setup([preset({ id: 'a' })]);
+    fireEvent.click(screen.getByLabelText('おすすめ'));
+    expect(fns.updatePreset).toHaveBeenCalledWith('a', { recommended: true });
   });
 
   it('削除ボタン (確認 OK) で removePreset を呼ぶ', async () => {

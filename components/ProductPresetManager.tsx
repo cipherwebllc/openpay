@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { Field } from './Field';
+import { env } from '@/lib/env';
 import type { ProductPreset } from '@/hooks/useProductPresets';
 import { TAX_OPTIONS, defaultRateForCategory, type TaxCategory } from '@/lib/tax';
 import { TOKEN_SYMBOLS, defaultDeploymentForSymbol, type TokenSymbol } from '@/lib/tokens';
@@ -124,6 +125,18 @@ export function ProductPresetManager({
                 />
                 {t('enabledLabel')}
               </label>
+              {env.enableShopLive && (
+                <label className="flex items-center gap-1 text-xs text-slate-500">
+                  <input
+                    type="checkbox"
+                    checked={p.recommended ?? false}
+                    onChange={(e) =>
+                      updatePreset(p.id, { recommended: e.target.checked || undefined })
+                    }
+                  />
+                  {t('recommendedLabel')}
+                </label>
+              )}
               <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"

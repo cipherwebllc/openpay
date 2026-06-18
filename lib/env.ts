@@ -479,6 +479,16 @@ export const env = {
   // 店舗負担で課金する (relay 経路は既存 recover が徴収済で不変)。USDC は無料据置・決済QR(/pay)・
   // チップ・手動 checkout リンクは対象外。点灯は 7月 (recoverFeeBps=100) + 開示更新と同一リリース。
   enableRegisterFee: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE),
+  // 実店舗向け Phase 1 強化のマスターフラグ (client 露出)。**既定 OFF で完全 inert** (merge して
+  // も本番の挙動は不変)。gate 対象:
+  //   - ライブ運用状態 (売り切れ / 受付一時停止): /api/shop/live (OFF=404)・店主のライブ操作
+  //     パネル・公開ページの live 反映 (advisory: UI で注文導線を抑止)。静的 storefront とは別の
+  //     小さな KV レコード (shop:live:<handle>) で高頻度トグルに対応。
+  //   - カタログ表示強化: 公開ページの「おすすめ」セクション + レジのカテゴリー絞り込み /
+  //     商品画像 ON-OFF / おすすめバッジ + プリセット管理の「おすすめ」チェックボックス。
+  // (recommended フィールドの保存/写像など data 層は常時有効=表示しないので inert。)
+  // 要 KV + NEXT_PUBLIC_ENABLE_HANDLES + NEXT_PUBLIC_ENABLE_MOBILE_ORDER。計画: plans/restaurant-pos-roadmap.md。
+  enableShopLive: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_SHOP_LIVE),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

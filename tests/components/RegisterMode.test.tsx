@@ -23,7 +23,7 @@ vi.mock('@/hooks/useMarketRates', () => ({
   }),
 }));
 // レジ利用料 flag を切替え可能に (既定 OFF = レジ standard 無料 = 既存テストの挙動不変)。
-const envHold = vi.hoisted(() => ({ enableRegisterFee: false }));
+const envHold = vi.hoisted(() => ({ enableRegisterFee: false, enableShopLive: false }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -32,6 +32,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       get enableRegisterFee() {
         return envHold.enableRegisterFee;
+      },
+      get enableShopLive() {
+        return envHold.enableShopLive;
       },
     },
   };
@@ -64,6 +67,7 @@ describe('RegisterMode', () => {
   beforeEach(() => {
     window.localStorage.clear();
     envHold.enableRegisterFee = false; // 毎テスト OFF 起点 (flag-ON テストが個別に立てる)
+    envHold.enableShopLive = false; // Phase 1 flag も OFF 起点
   });
 
   it('初期サンプルプリセットが表示される (コーヒー/Tシャツ/イベント参加費/Tip)', async () => {
@@ -116,6 +120,85 @@ describe('RegisterMode', () => {
     // 画像なしプリセットのカードには img を出さない (条件描画)。
     const noImg = screen.getByRole('button', { name: /画像なし商品/ });
     expect(noImg.querySelector('img')).toBeNull();
+  });
+
+  it('商品画像表示 ON/OFF トグルで画像を出し分け (既定 ON)', async () => {
+    envHold.enableShopLive = true; // 画像トグルは Phase 1 flag 裏
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          {
+            id: 'p1',
+            name: '限定グッズ',
+            unitPrice: '1200',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            image: 'https://example.com/item.png',
+            sortOrder: 0,
+            enabled: true,
+          },
+        ],
+        receipt: { day: '', n: 0 },
+      }),
+    );
+    render(<RegisterMode />);
+    const card = await screen.findByRole('button', { name: /限定グッズ/ });
+    expect(card.querySelector('img')).not.toBeNull(); // 既定 ON
+    await user.click(screen.getByLabelText('商品画像を表示'));
+    // OFF にするとカードは残るが画像は出ない。
+    expect(
+      (await screen.findByRole('button', { name: /限定グッズ/ })).querySelector('img'),
+    ).toBeNull();
+  });
+
+  it('カテゴリー絞り込みチップで該当カテゴリーの商品だけ表示', async () => {
+    envHold.enableShopLive = true; // カテゴリー絞り込みは Phase 1 flag 裏
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          {
+            id: 'd1',
+            name: 'コーラ',
+            unitPrice: '200',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            category: 'ドリンク',
+            sortOrder: 0,
+            enabled: true,
+          },
+          {
+            id: 'f1',
+            name: 'ポテト',
+            unitPrice: '300',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            category: 'フード',
+            sortOrder: 1,
+            enabled: true,
+          },
+        ],
+        receipt: { day: '', n: 0 },
+      }),
+    );
+    render(<RegisterMode />);
+    await screen.findByRole('button', { name: /コーラ/ });
+    // チップ: ドリンク / フード が出る。
+    expect(screen.getByRole('button', { name: 'ドリンク' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'フード' })).toBeInTheDocument();
+    // 「フード」で絞ると コーラ (ドリンク) はグリッドから消え、ポテトは残る。
+    await user.click(screen.getByRole('button', { name: 'フード' }));
+    expect(screen.queryByRole('button', { name: /コーラ/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /ポテト/ })).toBeInTheDocument();
   });
 
   it('プリセット選択で商品名・単価がレジ入力欄に反映される', async () => {

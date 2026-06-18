@@ -278,6 +278,21 @@ describe('menuToPresets: MenuItem[] → ProductPreset[] (presetsToMenu の逆・
     ];
     expect(presetsToMenu(menuToPresets(menu))).toEqual(menu);
   });
+
+  it('recommended を双方向に保つ (presetsToMenu / menuToPresets)', () => {
+    const menu = presetsToMenu([
+      { id: 'a', name: 'A', unitPrice: '500', token: 'jpyc', taxRate: null, taxCategory: null, memo: null, recommended: true, sortOrder: 0, enabled: true },
+      { id: 'b', name: 'B', unitPrice: '300', token: 'jpyc', taxRate: null, taxCategory: null, memo: null, sortOrder: 1, enabled: true },
+    ]);
+    expect(menu.find((m) => m.id === 'a')?.recommended).toBe(true);
+    expect(menu.find((m) => m.id === 'b')?.recommended).toBeUndefined();
+    const presets = menuToPresets([
+      { id: 'a', name: 'A', price: '500', recommended: true },
+      { id: 'b', name: 'B', price: '300' },
+    ]);
+    expect(presets.find((p) => p.id === 'a')?.recommended).toBe(true);
+    expect(presets.find((p) => p.id === 'b')?.recommended).toBeUndefined();
+  });
 });
 
 describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (別端末編集の復元)', () => {

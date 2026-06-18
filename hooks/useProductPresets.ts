@@ -30,6 +30,8 @@ export type ProductPreset = {
   image?: string;
   /** カテゴリー名 (任意・自由入力)。モバイルオーダー公開ページで見出し別にグループ化。 */
   category?: string;
+  /** おすすめ (任意)。レジ/モバイルオーダーで「おすすめ」として強調表示する。 */
+  recommended?: boolean;
   /** 表示順 (= 配列 index をミラー)。 */
   sortOrder: number;
   enabled: boolean;
@@ -104,6 +106,7 @@ function sanitizePreset(raw: unknown, index: number): ProductPreset | null {
     memo: typeof o.memo === 'string' ? clampStr(o.memo, PRESET_MEMO_MAX) || null : null,
     image: sanitizeImage(o.image),
     category: clampStr(o.category, PRESET_CATEGORY_MAX) || undefined,
+    recommended: o.recommended === true ? true : undefined, // round-trip 最小化 (true のみ保持)
     sortOrder: index,
     enabled: o.enabled !== false, // 既定 true
   };

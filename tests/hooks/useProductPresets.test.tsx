@@ -86,6 +86,43 @@ describe('useProductPresets', () => {
     );
   });
 
+  it('recommended は true のみ保持 (addPreset + 再 load sanitize)', () => {
+    const { result, unmount } = renderHook(() => useProductPresets());
+    act(() => {
+      result.current.addPreset({
+        name: 'おすすめ商品',
+        unitPrice: '500',
+        token: 'jpyc',
+        taxRate: null,
+        taxCategory: null,
+        memo: null,
+        enabled: true,
+        recommended: true,
+      });
+      result.current.addPreset({
+        name: '通常商品',
+        unitPrice: '300',
+        token: 'jpyc',
+        taxRate: null,
+        taxCategory: null,
+        memo: null,
+        enabled: true,
+      });
+    });
+    expect(
+      result.current.presets.find((p) => p.name === 'おすすめ商品')?.recommended,
+    ).toBe(true);
+    expect(
+      result.current.presets.find((p) => p.name === '通常商品')?.recommended,
+    ).toBeUndefined();
+    unmount();
+    // 再 load 時の sanitize でも recommended (true) が残る。
+    const second = renderHook(() => useProductPresets());
+    expect(
+      second.result.current.presets.find((p) => p.name === 'おすすめ商品')?.recommended,
+    ).toBe(true);
+  });
+
   it('全削除後の再マウントで seed は復活しない (削除を尊重)', () => {
     const first = renderHook(() => useProductPresets());
     act(() => {

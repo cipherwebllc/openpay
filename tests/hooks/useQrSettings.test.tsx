@@ -22,6 +22,7 @@ describe('useQrSettings', () => {
       splits: [],
       storeName: '',
       posterNote: '',
+      showPresetImages: true,
       quickAmounts: {
         jpyc: ['500', '1000', '1500', '3000'],
         usdc: ['5', '10', '20', '50'],
@@ -218,6 +219,7 @@ describe('useQrSettings', () => {
         splits: [{ address: '0xb1', percent: '40' }],
         storeName: 'Coffee Stand',
         posterNote: 'Scan to pay',
+        showPresetImages: true,
         quickAmounts: {
           jpyc: ['300', '750', '1200'],
           usdc: ['5', '10', '20', '50'],

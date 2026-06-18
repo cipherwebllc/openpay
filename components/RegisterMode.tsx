@@ -13,10 +13,10 @@
 // - 本格 POS ではなくイベント販売・少量販売向け。値引/在庫/カテゴリ/レシート印刷/日報は対象外。
 //   税額は税込金額からの内税の目安 (記帳補助)。最終的な会計処理は会計ソフト・税理士側で確認。
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
-import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Trash2 } from 'lucide-react';
+import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Star, Trash2 } from 'lucide-react';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { Field } from './Field';
@@ -144,6 +144,29 @@ export function RegisterMode({
       ? 'merchant'
       : settings.gasMode;
   const taxDec = taxDisplayDecimals(settings.token);
+
+  // レジ表示設定 (Phase 1・flag 裏)。flag OFF では従来どおり = 画像常時表示・絞り込みなし。
+  const showImages = !env.enableShopLive || settings.showPresetImages !== false;
+  const [catFilter, setCatFilter] = useState<string | null>(null);
+  const presetCategories = useMemo(() => {
+    const out: string[] = [];
+    for (const p of presetStore.enabledPresets) {
+      const c = p.category?.trim();
+      if (c && !out.includes(c)) out.push(c);
+    }
+    return out;
+  }, [presetStore.enabledPresets]);
+  // 絞り込み中のカテゴリーが (編集で) 消えたら「すべて」に戻す (空グリッドで取り残さない)。
+  // flag OFF では絞り込み UI を出さないので常に null (= 全件表示)。
+  const effectiveCatFilter =
+    env.enableShopLive && catFilter && presetCategories.includes(catFilter)
+      ? catFilter
+      : null;
+  const visiblePresets = effectiveCatFilter
+    ? presetStore.enabledPresets.filter(
+        (p) => (p.category?.trim() ?? '') === effectiveCatFilter,
+      )
+    : presetStore.enabledPresets;
 
   function addFromPreset(p: ProductPreset) {
     // 異通貨プリセットはカート非空時に警告 (同一カート単一通貨)。空なら通貨を切替。
@@ -334,11 +357,55 @@ export function RegisterMode({
         <div className="min-w-0 space-y-5">
           {/* 商品プリセット (常時描画・末尾に ＋カスタム追加 を同サイズで統合) */}
           <div>
-            <p className="mb-2 text-xs font-semibold text-slate-500">
-              {t('presetsLabel')}
-            </p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-slate-500">{t('presetsLabel')}</p>
+              {env.enableShopLive && (
+                <label className="flex shrink-0 items-center gap-1 text-[11px] text-slate-500">
+                  <input
+                    type="checkbox"
+                    checked={showImages}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, showPresetImages: e.target.checked }))
+                    }
+                  />
+                  {t('showImagesLabel')}
+                </label>
+              )}
+            </div>
+            {/* カテゴリー絞り込み (flag 裏・カテゴリーを 1 つ以上付けた店舗のみ表示)。 */}
+            {env.enableShopLive && presetCategories.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setCatFilter(null)}
+                  aria-pressed={effectiveCatFilter === null}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                    effectiveCatFilter === null
+                      ? 'border-brand bg-brand text-white'
+                      : 'border-slate-300 text-slate-600 hover:border-brand'
+                  }`}
+                >
+                  {t('filterAll')}
+                </button>
+                {presetCategories.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setCatFilter(c)}
+                    aria-pressed={effectiveCatFilter === c}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                      effectiveCatFilter === c
+                        ? 'border-brand bg-brand text-white'
+                        : 'border-slate-300 text-slate-600 hover:border-brand'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {presetStore.enabledPresets.map((p) => {
+              {visiblePresets.map((p) => {
                 // 商品画像 (https のみ・任意)。管理で入れた image をプリセットのカードにもサムネ表示する
                 // (モバイルオーダーのメニュー画像と同じ image を共有)。https 以外は描画しない (二重防御)。
                 // 読込失敗は onError で隠し、名前+価格のテキスト表示へフォールバック (グリッドを壊さない)。
@@ -348,9 +415,18 @@ export function RegisterMode({
                     key={p.id}
                     type="button"
                     onClick={() => addFromPreset(p)}
-                    className="flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
+                    className="relative flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
                   >
-                    {presetImg && (
+                    {env.enableShopLive && p.recommended && (
+                      <span
+                        className="absolute right-1.5 top-1.5 inline-flex items-center rounded-full bg-amber-100 px-1 py-0.5"
+                        title={t('recommendedBadge')}
+                        aria-label={t('recommendedBadge')}
+                      >
+                        <Star className="h-3 w-3 fill-amber-400 text-amber-400" aria-hidden />
+                      </span>
+                    )}
+                    {showImages && presetImg && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={presetImg}

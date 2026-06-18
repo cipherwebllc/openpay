@@ -32,6 +32,8 @@ export type MenuItem = {
   taxCategory?: TaxCategory;
   /** カテゴリー名 (任意・presets 由来)。公開ページで見出し別にグループ化して表示。 */
   category?: string;
+  /** おすすめ (任意・presets 由来)。true のとき公開ページ先頭の「おすすめ」セクションに出す。 */
+  recommended?: boolean;
 };
 
 export const CATEGORY_MAX = 24; // カテゴリー名の上限 (短い分類名を想定)
@@ -177,6 +179,8 @@ function validMenuItem(v: unknown): MenuItem | null {
   if (isNonEmptyStr(o.category, CATEGORY_MAX)) {
     item.category = o.category.trim();
   }
+  // おすすめ (任意)。round-trip 最小化のため true のときだけ保持。
+  if (o.recommended === true) item.recommended = true;
   return item;
 }
 

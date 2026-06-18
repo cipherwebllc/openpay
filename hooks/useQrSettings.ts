@@ -36,6 +36,9 @@ export type QrSettings = {
   // 店舗向け表示。DB を持たず、端末ローカルのレジ/印刷設定として保存する。
   storeName: string;
   posterNote: string;
+  // レジの商品プリセットグリッドに商品画像を出すか (既定 true)。店主が画像オフで
+  // 文字主体の高速レジ表示にできる (顧客メニュー側の表示には影響しない・端末ローカル設定)。
+  showPresetImages: boolean;
   // レジ用クイック金額。token ごとに独立 (JPYC=円・USDC=ドルで桁が異なるため、
   // 単一リストを共有すると JPYC の 1000 が USDC では $1000 になってしまう)。
   quickAmounts: Record<TokenSymbol, string[]>;
@@ -83,6 +86,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   splits: [],
   storeName: '',
   posterNote: '',
+  showPresetImages: true,
   quickAmounts: {
     jpyc: [...DEFAULT_QUICK_AMOUNTS.jpyc],
     usdc: [...DEFAULT_QUICK_AMOUNTS.usdc],
@@ -232,6 +236,8 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),
+    // 既定 true (旧 schema・未指定は画像表示)。明示的に false のときだけ非表示。
+    showPresetImages: loaded.showPresetImages !== false,
     quickAmounts: sanitizeQuickAmounts(loaded.quickAmounts, token),
     // boolean を厳密 check。旧 schema (crossChain 未定義) は true に倒す (default ON)。
     crossChain:

@@ -23,6 +23,7 @@ import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
+import { readShopLive } from '@/lib/shopLiveStore';
 import {
   buildTipMeta,
   buildStorefrontMeta,
@@ -149,6 +150,9 @@ export default async function HandlePage({
   const storefront = env.enableMobileOrder
     ? handleStorefrontConfig(record, normalized)
     : null;
+  // ライブ運用状態 (売り切れ / 受付一時停止) を同リクエストでサーバ読取し MobileOrderView へ渡す。
+  // flag OFF / storefront 非公開では読まず undefined (= 制限なし・従来どおり)。fail-open。
+  const live = storefront && env.enableShopLive ? await readShopLive(normalized) : undefined;
   const t = await getTranslations({ locale, namespace: 'HandleProfile' });
 
   return (
@@ -177,6 +181,7 @@ export default async function HandlePage({
           backHref={`/${locale}/@${normalized}`}
           backLabel={storefront.shopName}
           handle={normalized}
+          live={live}
         />
       ) : (
         <>

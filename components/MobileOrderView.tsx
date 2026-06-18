@@ -32,7 +32,9 @@ import {
   groupMenuByCategory,
   JPYC_CHAIN_LABEL,
   type MobileOrderConfig,
+  type MenuItem,
 } from '@/lib/mobileOrder';
+import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
 import {
   mobileOrderFeeBps,
   mobileOrderFeeValue,
@@ -70,6 +72,7 @@ export function MobileOrderView({
   backHref,
   backLabel,
   handle,
+  live,
 }: {
   config: MobileOrderConfig;
   /** 「支払いへ進む」後の /checkout から戻る店舗ページのパス (同一オリジン)。@handle 公開時に渡る。 */
@@ -78,6 +81,8 @@ export function MobileOrderView({
   backLabel?: string;
   /** 公開元の @handle (正規化済み・@ 無し)。受注リレー (flag ON 時) の webhook 束縛に使う。 */
   handle?: string;
+  /** ライブ運用状態 (売り切れ / 受付一時停止)。flag OFF / ?s= 経路では未指定 = 制限なし。 */
+  live?: ShopLiveState;
 }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
@@ -114,19 +119,25 @@ export function MobileOrderView({
   const setItemQty = (id: string, n: number) =>
     setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) }));
 
+  // ライブ運用状態 (売り切れ / 受付一時停止)。未指定 (flag OFF / ?s= 経路) は制限なし (EMPTY)。
+  const liveState = live ?? EMPTY_SHOP_LIVE;
+  const soldOutSet = useMemo(() => new Set(liveState.soldOut), [liveState.soldOut]);
+  const paused = liveState.paused;
+
   // qty>0 の行を CheckoutItem[] へ (表示順維持)。決済額は /checkout が items から再計算する。
   // 税率/税区分 (presets 由来) も渡し、/checkout のレシート・履歴・freee に 小計/うち税額 を反映。
   const cartItems = useMemo<CheckoutItem[]>(
     () =>
       config.menu
-        .filter((m) => (qty[m.id] ?? 0) > 0)
+        // 売り切れ品は (UI でステッパを隠すので qty>0 になり得ないが) 念のためカートから除外。
+        .filter((m) => (qty[m.id] ?? 0) > 0 && !soldOutSet.has(m.id))
         .map((m) => {
           const item: CheckoutItem = { name: m.name, qty: qty[m.id], price: m.price };
           if (typeof m.taxRate === 'number') item.taxRate = m.taxRate;
           if (m.taxCategory) item.taxCategory = m.taxCategory;
           return item;
         }),
-    [config.menu, qty],
+    [config.menu, qty, soldOutSet],
   );
 
   // /checkout は 1〜10 品まで。超過時は支払いを止めて明示 (URL を組んでも parse 側で弾かれるため)。
@@ -200,8 +211,84 @@ export function MobileOrderView({
   const showCategoryNav = menuGroups.length > 1;
   const sectionId = (i: number) => `mo-cat-${i}`;
 
-  // 店舗情報 + 受付可否。acceptingOrders===false のとき支払いを止める (不可逆決済の事故防止)。
-  const accepting = config.acceptingOrders !== false;
+  // 商品カード (おすすめセクション + カテゴリーグリッドで共用)。売り切れ品はステッパを隠し、
+  // 写真上に「売り切れ」を重ねて注文不可を明示する (qty も増やせない)。
+  const renderItemCard = (item: MenuItem) => {
+    const n = qty[item.id] ?? 0;
+    const imgUrl = item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
+    const isSoldOut = soldOutSet.has(item.id);
+    return (
+      <li
+        key={item.id}
+        className={`flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white ${
+          isSoldOut ? 'opacity-60' : ''
+        }`}
+      >
+        {/* 写真 (大きく・正方形)。画像が無ければ絵文字、それも無ければアイコン。売り切れは重ね表示。 */}
+        <div className="relative flex aspect-square w-full items-center justify-center bg-slate-50">
+          {imgUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imgUrl} alt="" className="h-full w-full object-cover" />
+          ) : item.visual?.kind === 'emoji' ? (
+            <span className="text-5xl" aria-hidden>
+              {item.visual.value}
+            </span>
+          ) : (
+            <UtensilsCrossed className="h-8 w-8 text-slate-300" aria-hidden />
+          )}
+          {isSoldOut && (
+            <span className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm font-bold text-slate-600">
+              {t('viewSoldOut')}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-1 flex-col gap-2 p-3">
+          <span className="line-clamp-2 text-sm font-medium text-slate-800">{item.name}</span>
+          {/* 価格の横に − n + ステッパ (売り切れ時はステッパを出さない) */}
+          <div className="mt-auto flex items-center justify-between gap-1">
+            <span className="min-w-0">
+              <span className="text-base font-bold text-slate-900">{item.price}</span>{' '}
+              <span className="text-[10px] font-medium text-slate-400">JPYC</span>
+            </span>
+            {!isSoldOut && (
+              <span className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setItemQty(item.id, n - 1)}
+                  disabled={n === 0}
+                  aria-label={t('qtyDecrease')}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600 disabled:opacity-30"
+                >
+                  −
+                </button>
+                <span className="w-5 text-center text-sm font-semibold tabular-nums">{n}</span>
+                <button
+                  type="button"
+                  onClick={() => setItemQty(item.id, n + 1)}
+                  aria-label={t('qtyIncrease')}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                >
+                  ＋
+                </button>
+              </span>
+            )}
+          </div>
+        </div>
+      </li>
+    );
+  };
+
+  // おすすめ (公開ページ先頭で訴求)。売り切れ品は除外。
+  const recommendedItems = useMemo(
+    () => config.menu.filter((m) => m.recommended && !soldOutSet.has(m.id)),
+    [config.menu, soldOutSet],
+  );
+
+  // 店舗情報 + 受付可否。静的 acceptingOrders===false か ライブ paused のとき支払いを止める
+  // (不可逆決済の事故防止)。停止メッセージは静的「終了」を優先し、ライブ一時停止のみは「一時停止」。
+  const accepting = config.acceptingOrders !== false && !paused;
+  const closedNoticeKey =
+    config.acceptingOrders === false ? 'viewClosedNotice' : 'viewPausedNotice';
   const tel = telHref(config.phone);
   const mapHref = mapSearchHref(config.address);
   const hasStoreInfo = !!(config.address || config.hours || config.phone);
@@ -266,7 +353,7 @@ export function MobileOrderView({
       {/* 受付停止中バナー (acceptingOrders===false)。客が払う前に最上部で告知。 */}
       {!accepting && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-800">
-          {t('viewClosedNotice')}
+          {t(closedNoticeKey)}
         </div>
       )}
 
@@ -313,6 +400,15 @@ export function MobileOrderView({
 
       <section>
         <h2 className="mb-2 text-sm font-semibold text-slate-700">{t('viewMenuHeading')}</h2>
+        {/* おすすめ (最初に目にする位置で一押しを訴求)。売り切れ品は除外済。flag 裏 (既定 OFF=非表示)。 */}
+        {env.enableShopLive && recommendedItems.length > 0 && (
+          <div className="mb-5">
+            <h3 className="mb-2 border-b border-amber-200 pb-1 text-sm font-bold text-amber-700">
+              {t('viewRecommendedHeading')}
+            </h3>
+            <ul className="grid grid-cols-2 gap-3">{recommendedItems.map(renderItemCard)}</ul>
+          </div>
+        )}
         {/* カテゴリーメニュー (上部・横スクロール・タップで該当カテゴリーへジャンプ)。 */}
         {showCategoryNav && (
           <nav className="sticky top-0 z-10 -mx-3 mb-3 flex gap-2 overflow-x-auto bg-white/95 px-3 py-2 backdrop-blur">
@@ -339,67 +435,7 @@ export function MobileOrderView({
                 {group.category ?? t('uncategorized')}
               </h3>
             )}
-            <ul className="grid grid-cols-2 gap-3">
-              {group.items.map((item) => {
-                const n = qty[item.id] ?? 0;
-                const imgUrl =
-                  item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
-                return (
-                  <li
-                    key={item.id}
-                    className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white"
-                  >
-                    {/* 写真 (大きく・正方形)。画像が無ければ絵文字、それも無ければアイコン。 */}
-                    <div className="flex aspect-square w-full items-center justify-center bg-slate-50">
-                      {imgUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={imgUrl} alt="" className="h-full w-full object-cover" />
-                      ) : item.visual?.kind === 'emoji' ? (
-                        <span className="text-5xl" aria-hidden>
-                          {item.visual.value}
-                        </span>
-                      ) : (
-                        <UtensilsCrossed className="h-8 w-8 text-slate-300" aria-hidden />
-                      )}
-                    </div>
-                    <div className="flex flex-1 flex-col gap-2 p-3">
-                      <span className="line-clamp-2 text-sm font-medium text-slate-800">
-                        {item.name}
-                      </span>
-                      {/* 価格の横に − n + ステッパ */}
-                      <div className="mt-auto flex items-center justify-between gap-1">
-                        <span className="min-w-0">
-                          <span className="text-base font-bold text-slate-900">{item.price}</span>{' '}
-                          <span className="text-[10px] font-medium text-slate-400">JPYC</span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setItemQty(item.id, n - 1)}
-                            disabled={n === 0}
-                            aria-label={t('qtyDecrease')}
-                            className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600 disabled:opacity-30"
-                          >
-                            −
-                          </button>
-                          <span className="w-5 text-center text-sm font-semibold tabular-nums">
-                            {n}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setItemQty(item.id, n + 1)}
-                            aria-label={t('qtyIncrease')}
-                            className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600"
-                          >
-                            ＋
-                          </button>
-                        </span>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <ul className="grid grid-cols-2 gap-3">{group.items.map(renderItemCard)}</ul>
           </div>
         ))}
       </section>
@@ -408,7 +444,7 @@ export function MobileOrderView({
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         {!accepting ? (
           // 受付停止中は支払いを止める (不可逆決済の事故防止)。メニュー閲覧は可能。
-          <p className="text-center text-sm font-semibold text-amber-700">{t('viewClosedNotice')}</p>
+          <p className="text-center text-sm font-semibold text-amber-700">{t(closedNoticeKey)}</p>
         ) : cartItems.length === 0 ? (
           <p className="text-center text-sm text-slate-400">{t('cartEmpty')}</p>
         ) : tooMany ? (

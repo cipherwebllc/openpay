@@ -13,6 +13,7 @@ import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
 import { MobileOrderPlacardModal } from '@/components/MobileOrderPlacardModal';
+import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -277,6 +278,15 @@ export function StorefrontPublishPanel({
                 </button>
               </div>
             </div>
+          )}
+
+          {/* 営業中の操作 (売り切れ / 受付一時停止)。公開済み店舗 + flag ON のときだけ。
+              公開メニュー (selectedHandle.storefront.menu) の id で売り切れをトグルする。 */}
+          {env.enableShopLive && selectedHandle?.storefront && (
+            <ShopLivePanel
+              handle={effectiveSelected}
+              menu={selectedHandle.storefront.menu}
+            />
           )}
         </div>
       )}

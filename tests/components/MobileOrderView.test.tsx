@@ -9,6 +9,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 const envHold = vi.hoisted(() => ({
   enableOrderRelay: false,
   enableMobileOrderFee: false,
+  enableShopLive: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -21,6 +22,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableMobileOrderFee() {
         return envHold.enableMobileOrderFee;
+      },
+      get enableShopLive() {
+        return envHold.enableShopLive;
       },
     },
   };
@@ -47,6 +51,7 @@ const config: MobileOrderConfig = {
 afterEach(() => {
   envHold.enableOrderRelay = false; // 受注リレー flag を毎回 OFF に戻す
   envHold.enableMobileOrderFee = false; // モバイル注文利用料 flag も毎回 OFF に戻す
+  envHold.enableShopLive = false; // Phase 1 flag も毎回 OFF に戻す
 });
 
 describe('MobileOrderView', () => {
@@ -466,5 +471,46 @@ describe('MobileOrderView — モバイル注文システム利用料 (feeUpchar
     expect(screen.getByText('500 JPYC')).toBeInTheDocument();
     expect(screen.queryByText(/システム利用料/)).toBeNull();
     expect(payUrl().searchParams.get('fee_kind')).toBeNull();
+  });
+});
+
+describe('MobileOrderView ライブ運用状態 (live)', () => {
+  it('売り切れ品は「売り切れ」表示 + ステッパ非表示 (注文不可)', () => {
+    renderWithIntl(
+      <MobileOrderView config={config} live={{ soldOut: ['a'], paused: false, updatedAt: 0 }} />,
+    );
+    expect(screen.getByText('売り切れ')).toBeInTheDocument();
+    // 売り切れ 1 品はステッパを出さない → 3 品中 2 品ぶんの「数量を増やす」のみ。
+    expect(screen.getAllByRole('button', { name: '数量を増やす' })).toHaveLength(2);
+  });
+
+  it('live 未指定なら売り切れ表示なし (全品注文可)', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    expect(screen.queryByText('売り切れ')).toBeNull();
+    expect(screen.getAllByRole('button', { name: '数量を増やす' })).toHaveLength(3);
+  });
+
+  it('paused → 一時停止の告知 + 支払い導線を止める', () => {
+    renderWithIntl(
+      <MobileOrderView config={config} live={{ soldOut: [], paused: true, updatedAt: 0 }} />,
+    );
+    expect(
+      screen.getAllByText('ただいま注文の受付を一時停止しています').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('おすすめ品があれば「おすすめ」セクションを先頭に出す (本体グリッドにも残る)', () => {
+    envHold.enableShopLive = true; // おすすめ表示は Phase 1 flag 裏
+    const rec: MobileOrderConfig = {
+      ...config,
+      menu: [
+        { id: 'a', name: 'ブレンド', price: '500', recommended: true },
+        { id: 'b', name: '水', price: '100' },
+      ],
+    };
+    renderWithIntl(<MobileOrderView config={rec} />);
+    expect(screen.getByText('おすすめ')).toBeInTheDocument();
+    // おすすめ品はセクション + 通常グリッドの 2 箇所に出る。
+    expect(screen.getAllByText('ブレンド').length).toBeGreaterThanOrEqual(2);
   });
 });
