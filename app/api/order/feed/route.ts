@@ -1,17 +1,20 @@
 // 店主の受注フィード (SIWE 必須)。read authz は厳格に **session.address === 受取アドレス**
 // (= 注文リストの KV キー)。店主は受取ウォレットでサインインして自分宛の受注のみ見られる
 // (@handle owner 経由は owner≠config.to のなりすまし穴ゆえ不採用)。
-// GET = 受注一覧 (新しい順)。POST = 該当 orderId を「対応済み」= リストから削除。
+// GET = 受注一覧 (新しい順)。POST = 該当 txHash の状態更新 (op: fulfill/itemCooked/itemServed/setTable)。
+// 削除でなくフラグ化し誤操作を復旧可能に。旧 {fulfilled} (base relay) は enableOrderRelay のみ、構造化
+// {op:...} は Phase 3 ゆえ enableOrderFulfillment も要求 (kitchen/hall ルートと同じ二重ゲート)。
 // flag OFF は 404。KV 障害は 503 で正直に返す (黙って空リストにしない)。設計: plans/swift-puzzling-sky.md。
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
-import { kvLrange, kvLrem, kvLpush, isKvConfigured } from '@/lib/kv';
+import { kvLrange, kvEval, isKvConfigured } from '@/lib/kv';
 import {
   orderListKey,
   parseStoredOrder,
   serializeOrder,
-  isTxHashLike,
+  parseOrderFeedOp,
+  applyOrderOp,
   ORDER_LIST_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
@@ -46,6 +49,16 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json({ ok: true, orders });
 }
 
+// 対象要素を **位置維持 + キー TTL 保持** で原子置換する Lua: LPOS で旧 raw の index を引き、LSET で
+// 同位置を新 raw に置換。LREM+LPUSH と違いリストを空にしないので、単一要素の更新でもキー (と 72h
+// TTL) を消さない (= 受注の自然失効が壊れない)。旧 raw が同時更新で既に消えていれば LPOS が nil →
+// return 0 → 呼出側が再読込してリトライ (CAS 相当・厨房 cooked × ホール served の同時更新も安全)。
+const REPLACE_ELEM =
+  "local idx=redis.call('LPOS',KEYS[1],ARGV[1]); " +
+  'if not idx then return 0 end; ' +
+  "redis.call('LSET',KEYS[1],idx,ARGV[2]); return 1";
+const FEED_MAX_RETRY = 3;
+
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderRelay) return notFound();
   const session = await requireSession();
@@ -57,34 +70,53 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
-  const o = (body ?? {}) as { txHash?: unknown; fulfilled?: unknown };
-  // 対象は **txHash** で指定 (orderId は人間向け短縮番号で衝突しうるため・txHash は一意)。
-  if (!isTxHashLike(o.txHash)) {
-    return NextResponse.json({ ok: false, error: 'tx_required' }, { status: 400 });
+  // 構造化 {op:...} は Phase 3 (受注フルフィルメント) のオペレーション。enableOrderFulfillment が
+  // OFF のときは受け付けない = kitchen/hall ルート (両フラグ必須) と同じ二重ゲートで完全 inert に。
+  // 旧 {txHash, fulfilled} (base relay の OrderFeedPanel) は op を持たず enableOrderRelay のみで不変。
+  if (
+    !env.enableOrderFulfillment &&
+    body !== null &&
+    typeof body === 'object' &&
+    (body as Record<string, unknown>).op !== undefined
+  ) {
+    return notFound();
   }
-  // 既定は「対応済み」(true)。明示的に false で「未対応に戻す」(誤操作の復旧)。
-  const fulfilled = o.fulfilled !== false;
+  // 新 {txHash, op} と旧 {txHash, fulfilled} の両方を受理 (orderRelay.parseOrderFeedOp)。
+  const parsedOp = parseOrderFeedOp(body);
+  if (!parsedOp) {
+    return NextResponse.json({ ok: false, error: 'invalid_op' }, { status: 400 });
+  }
   if (!isKvConfigured()) {
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
 
   const key = orderListKey(session.address);
-  const res = await kvLrange(key, 0, ORDER_LIST_MAX - 1);
-  if (!res.ok) return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+  const txLower = parsedOp.txHash.toLowerCase();
 
-  // 該当 txHash の生エントリを fulfilled フラグ付けで書き換え (削除でなくフラグ化 → 復旧可能)。
-  // KV リストは ts でソートして返すので、LREM→LPUSH の並び替えは表示に影響しない。自分のリストのみ操作。
-  let updated = 0;
-  for (const raw of res.value ?? []) {
-    const parsed = parseStoredOrder(raw);
-    if (parsed && parsed.txHash.toLowerCase() === o.txHash.toLowerCase()) {
-      if (parsed.fulfilled === fulfilled) continue; // 既に同状態なら no-op
-      const del = await kvLrem(key, raw);
-      if (del.ok && del.value > 0) {
-        await kvLpush(key, serializeOrder({ ...parsed, fulfilled }));
-        updated += 1;
+  // read→apply→CAS-replace を最大 FEED_MAX_RETRY 回 (同時更新で旧 raw が消えていれば再読込)。
+  for (let attempt = 0; attempt < FEED_MAX_RETRY; attempt++) {
+    const res = await kvLrange(key, 0, ORDER_LIST_MAX - 1);
+    if (!res.ok) return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+
+    let oldRaw: string | null = null;
+    let order: StoredOrder | null = null;
+    for (const raw of res.value ?? []) {
+      const p = parseStoredOrder(raw);
+      if (p && p.txHash.toLowerCase() === txLower) {
+        oldRaw = raw;
+        order = p;
+        break;
       }
     }
+    if (!oldRaw || !order) return NextResponse.json({ ok: true, updated: 0 }); // 対象なし
+
+    const newRaw = serializeOrder(applyOrderOp(order, parsedOp.op));
+    if (newRaw === oldRaw) return NextResponse.json({ ok: true, updated: 0 }); // 変化なし (no-op)
+
+    const cas = await kvEval<number>(REPLACE_ELEM, [key], [oldRaw, newRaw]);
+    if (!cas.ok) return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+    if (cas.value === 1) return NextResponse.json({ ok: true, updated: 1 });
+    // cas.value === 0: 旧 raw が同時更新で消えた → 再読込してリトライ。
   }
-  return NextResponse.json({ ok: true, updated });
+  return NextResponse.json({ ok: false, error: 'conflict' }, { status: 409 });
 }

@@ -18,7 +18,15 @@ export const ORDER_ITEM_NAME_MAX = 80;
 export const ORDER_TABLE_MAX = 64; // テーブル番号ラベル (checkout description 由来) の上限
 export const ORDER_ID_MAX = 64;
 
-export type StoredOrderItem = { name: string; qty: number; price: string };
+export type StoredOrderItem = {
+  name: string;
+  qty: number;
+  price: string;
+  // 受注フルフィルメント (Phase 3・flag ENABLE_ORDER_FULFILLMENT)。商品別の進捗。保存時は常に未設定
+  // (false 相当)、店主操作でのみ true 化。配列 index が安定キー (ops は index で対象を指定する)。
+  cooked?: boolean; // 調理済み (キッチン)
+  served?: boolean; // 配膳済み (ホール)
+};
 
 export type StoredOrder = {
   orderId: string;
@@ -54,7 +62,10 @@ export function isTxHashLike(v: unknown): v is string {
  * 申告明細をサニタイズ (webhook payload は顧客側で改ざん可能 → 表示用に最小整形・上限 clamp)。
  * 名前必須・正の整数 qty 必須・price は正の十進文字列のみ (不正は空文字)。件数は ORDER_ITEMS_MAX で打切。
  */
-export function sanitizeOrderItems(raw: unknown): StoredOrderItem[] {
+export function sanitizeOrderItems(
+  raw: unknown,
+  opts: { preserveStatus?: boolean } = {},
+): StoredOrderItem[] {
   if (!Array.isArray(raw)) return [];
   const out: StoredOrderItem[] = [];
   for (const it of raw) {
@@ -68,7 +79,14 @@ export function sanitizeOrderItems(raw: unknown): StoredOrderItem[] {
     if (qty <= 0) continue;
     const price =
       typeof o.price === 'string' && POSITIVE_DECIMAL.test(o.price) ? o.price : '';
-    out.push({ name, qty, price });
+    const item: StoredOrderItem = { name, qty, price };
+    // 進捗フラグ (cooked/served) は **保存データ (parseStoredOrder) からのみ** 復元する。webhook
+    // (顧客申告) からは受け取らない = 顧客が調理済み/配膳済みを偽装注入できない。
+    if (opts.preserveStatus) {
+      if (o.cooked === true) item.cooked = true;
+      if (o.served === true) item.served = true;
+    }
+    out.push(item);
   }
   return out;
 }
@@ -100,7 +118,7 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   if (typeof o.chainId !== 'number' || !Number.isInteger(o.chainId)) return null;
   return {
     orderId: o.orderId.slice(0, ORDER_ID_MAX),
-    items: sanitizeOrderItems(o.items),
+    items: sanitizeOrderItems(o.items, { preserveStatus: true }),
     table: sanitizeTable(o.table),
     amount: o.amount,
     txHash: o.txHash,
@@ -109,4 +127,74 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
     ts: typeof o.ts === 'number' && Number.isFinite(o.ts) ? o.ts : 0,
     fulfilled: o.fulfilled === true,
   };
+}
+
+// ── 受注フィードの状態更新オペレーション (Phase 3・/api/order/feed POST)。txHash で対象注文を
+//    指定し、op で何を変えるかを表す。旧 { txHash, fulfilled } も受理 (後方互換)。 ──
+export type OrderFeedOp =
+  | { kind: 'fulfill'; value: boolean } // 注文「対応済み」(削除でなくフラグ)
+  | { kind: 'itemCooked'; index: number; value: boolean } // 商品別「調理済み」(キッチン)
+  | { kind: 'itemServed'; index: number; value: boolean } // 商品別「配膳済み」(ホール)
+  | { kind: 'setTable'; table: string | null }; // テーブル訂正
+
+function isItemIndex(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < ORDER_ITEMS_MAX;
+}
+
+/** untrusted な POST body → { txHash, op } | null。新 {op:...} と旧 {fulfilled} の両方を受理。 */
+export function parseOrderFeedOp(body: unknown): { txHash: string; op: OrderFeedOp } | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  if (!isTxHashLike(b.txHash)) return null;
+  const txHash = b.txHash;
+  const raw = b.op;
+  // 旧 schema: { txHash, fulfilled? } (op 無し) → fulfill op (既定 true)。
+  if (raw === undefined) {
+    return { txHash, op: { kind: 'fulfill', value: b.fulfilled !== false } };
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  switch (o.kind) {
+    case 'fulfill':
+      return typeof o.value === 'boolean'
+        ? { txHash, op: { kind: 'fulfill', value: o.value } }
+        : null;
+    case 'itemCooked':
+      return isItemIndex(o.index) && typeof o.value === 'boolean'
+        ? { txHash, op: { kind: 'itemCooked', index: o.index, value: o.value } }
+        : null;
+    case 'itemServed':
+      return isItemIndex(o.index) && typeof o.value === 'boolean'
+        ? { txHash, op: { kind: 'itemServed', index: o.index, value: o.value } }
+        : null;
+    case 'setTable':
+      // table は **明示的に string か null のみ** 受理 (未指定/数値等の誤入力で既存テーブルを
+      // 黙ってクリアしない)。null は意図的なクリア (テイクアウト化)。
+      if (o.table !== null && typeof o.table !== 'string') return null;
+      return { txHash, op: { kind: 'setTable', table: sanitizeTable(o.table) } };
+    default:
+      return null;
+  }
+}
+
+/** op を純粋適用した新しい StoredOrder を返す (元は不変・変化が無ければ同等値)。 */
+export function applyOrderOp(order: StoredOrder, op: OrderFeedOp): StoredOrder {
+  switch (op.kind) {
+    case 'fulfill':
+      return { ...order, fulfilled: op.value };
+    case 'setTable':
+      return { ...order, table: op.table };
+    case 'itemCooked':
+    case 'itemServed': {
+      if (op.index >= order.items.length) return order; // 範囲外は no-op
+      const items = order.items.map((it, i) =>
+        i !== op.index
+          ? it
+          : op.kind === 'itemCooked'
+            ? { ...it, cooked: op.value }
+            : { ...it, served: op.value },
+      );
+      return { ...order, items };
+    }
+  }
 }

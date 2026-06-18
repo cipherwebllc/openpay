@@ -496,6 +496,13 @@ export const env = {
   // lib/menuOptions の非対称設計)。recommended 等と同様 data 層 (検証/写像/保存) は常時有効だが表示しない
   // ので inert。計画: plans/restaurant-pos-roadmap.md Phase 2。
   enableMenuOptions: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MENU_OPTIONS),
+  // 受注フルフィルメント (厨房モニター + ホール配膳・商品別ステータス) の有効化フラグ (client 露出)。
+  // **既定 OFF で完全 inert** = /orders/kitchen・/orders/hall ルートは 404・受注フィードの商品別操作 UI
+  // 非表示・既存の受注パネル ({fulfilled} 対応済みトグル) は不変。ON のとき店主が受取ウォレットで
+  // サインインし、厨房 (商品別「調理済み」) / ホール (調理済=青・商品別「配膳済み」) の 2 画面で受注を
+  // 進捗管理できる。受注の状態更新 (/api/order/feed POST) は op 化 + kvEval 原子更新で多端末の同時
+  // トグルを安全化。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY (受注リレー本体)。計画: plans/restaurant-pos-roadmap.md Phase 3。
+  enableOrderFulfillment: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
