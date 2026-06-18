@@ -140,8 +140,10 @@ export function MobileOrderPlacardModal({
   if (!open) return null;
 
   // ポスター本体 (画面のモーダルと印刷 portal で共有する単一の描画)。
+  // 印刷時は幅を広げる (print:max-w-lg)。max-w-sm のままだと末尾 URL が break-all で
+  // 1〜2 文字だけ折り返し、その分の高さで 2 ページ目に溢れるため。
   const poster = (
-    <div className="mx-auto flex max-w-sm flex-col items-center text-center">
+    <div className="mx-auto flex max-w-sm flex-col items-center text-center print:max-w-lg">
       {/* ブランド見出し: OpenPay モバイルオーダー (両側に細い罫線) */}
       <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand print:gap-4 print:text-lg">
         <span aria-hidden className="h-px w-6 bg-brand/40 print:w-12" />
@@ -241,8 +243,10 @@ export function MobileOrderPlacardModal({
           印刷時に body 直下の他要素を display:none にするので、これだけが 1 枚で印刷される)。 */}
       {printing &&
         typeof document !== 'undefined' &&
+        // print:min-h-screen は付けない。100vh は印刷余白を引いた印刷可能領域より背が高く
+        // なりがちで、末尾 (URL) が 2 ページ目へ押し出されるため。内容なりの高さで 1 枚に収める。
         createPortal(
-          <div className="placard-print-root hidden print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:p-10">
+          <div className="placard-print-root hidden print:flex print:flex-col print:items-center print:p-10">
             {poster}
           </div>,
           document.body,
