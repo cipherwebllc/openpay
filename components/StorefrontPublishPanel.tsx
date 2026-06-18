@@ -12,17 +12,20 @@ import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
-import { LinkQrModal } from '@/components/LinkQrModal';
+import { MobileOrderPlacardModal } from '@/components/MobileOrderPlacardModal';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import type { HandleTipConfig } from '@/lib/handle';
-import type { StorefrontParts } from '@/lib/mobileOrder';
+import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
+import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
 
 // GET /api/handle が返す所有 handle (storefront 公開済みかの判定に storefront も読む)。
+// profile はプラカードのアバター fallback に使う (公開ページ handleStorefrontConfig と同じく
+// storefront.avatar が無ければ profile.avatar を使うため)。
 type OwnedHandle = {
   handle: string;
   config: HandleTipConfig;
+  profile?: HandleProfile;
   storefront?: StorefrontParts;
 };
 // ⚠️ queryKey `['handle-mine', …]` と**この返り値の形** `{handles, max}` は HandleClaimPanel と
@@ -110,6 +113,18 @@ export function StorefrontPublishPanel({
   if (!env.enableHandles) return null;
 
   const shopUrl = origin && effectiveSelected ? `${origin}/@${effectiveSelected}` : '';
+
+  // 卓上プラカード (印刷用 QR) の表示情報。公開ページ (handleStorefrontConfig) と同じ優先順で
+  // 解決する: builder 由来の storefront → 公開済み storefront → @handle config 名 → @handle。
+  // チェーンは表示ラベル (Polygon/Kaia…) へ変換。受取先・着金は @handle 側が権威 (ここは表示専用)。
+  const placardParts = storefront ?? selectedHandle?.storefront ?? null;
+  const placardShopName =
+    placardParts?.shopName?.trim() ||
+    selectedHandle?.config?.name?.trim() ||
+    (effectiveSelected ? `@${effectiveSelected}` : '');
+  const placardChains = (
+    placardParts?.chains ?? (placardParts?.chain ? [placardParts.chain] : [])
+  ).map((c) => JPYC_CHAIN_LABEL[c]);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -221,12 +236,28 @@ export function StorefrontPublishPanel({
           )}
         </div>
       )}
-      <LinkQrModal
+      <MobileOrderPlacardModal
         open={showQr && shopUrl !== ''}
-        value={shopUrl}
-        title={selectedHandle ? `@${selectedHandle.handle}` : t('publishHeading')}
-        closeLabel={t('qrClose')}
         onClose={() => setShowQr(false)}
+        url={shopUrl}
+        shopName={placardShopName}
+        tagline={placardParts?.tagline}
+        avatar={placardParts?.avatar ?? selectedHandle?.profile?.avatar}
+        chains={placardChains}
+        copied={linkCopy.copied}
+        onCopy={() => void linkCopy.copy(shopUrl)}
+        labels={{
+          dialogTitle: t('placardTitle'),
+          eyebrow: t('placardEyebrow'),
+          subtitle: t('placardSubtitle'),
+          scanNote: t('placardScan'),
+          payNote: t('placardPay'),
+          chainsLabel: t('placardChains'),
+          print: t('placardPrint'),
+          copy: t('copy'),
+          copied: t('copied'),
+          close: t('qrClose'),
+        }}
       />
     </div>
   );

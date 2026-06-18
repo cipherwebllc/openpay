@@ -45,3 +45,23 @@ body {
     border: none;
   }
 }
+
+/* モバイルオーダーの卓上プラカード (MobileOrderPlacardModal) の「印刷」: 受取レシートと同型。
+   印刷時はポスター 1 枚だけを残し他要素を隠す (長い builder ページが裏で複数ページに溢れるのを
+   防ぐ)。print ボタン押下で body に openpay-printing-placard を付与し、afterprint / モーダル
+   クローズで解除する。display:none ではなく visibility:hidden で layout を保ち絶対配置で出す。 */
+@media print {
+  body.openpay-printing-placard * {
+    visibility: hidden;
+  }
+  body.openpay-printing-placard [data-placard-printing],
+  body.openpay-printing-placard [data-placard-printing] * {
+    visibility: visible;
+  }
+  body.openpay-printing-placard [data-placard-printing] {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    border: none;
+  }
+}

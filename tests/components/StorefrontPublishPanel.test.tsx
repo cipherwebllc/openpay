@@ -130,6 +130,29 @@ describe('StorefrontPublishPanel', () => {
     expect(screen.getByRole('button', { name: 'QR を表示' })).toBeInTheDocument();
   });
 
+  it('QR を表示 → プラカードを開き 店名 (config.name fallback) と受取チェーンを描画', async () => {
+    // STORE は shopName 未設定 → placard は config.name へ fallback。chain='polygon' → 'Polygon'。
+    const cfgNamed = { ...CFG, name: 'ヤマダ珈琲' };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: cfgNamed, storefront: STORE }] }),
+      }),
+    );
+    renderPanel({ storefront: STORE });
+    fireEvent.click(await screen.findByRole('button', { name: 'QR を表示' }));
+    // プラカード (dialog) が開く。
+    const dialog = await screen.findByRole('dialog', { name: '卓上プラカード (印刷用)' });
+    expect(dialog).toBeInTheDocument();
+    // 店名は storefront.shopName 無 → config.name にフォールバック。
+    expect(screen.getByRole('heading', { name: 'ヤマダ珈琲' })).toBeInTheDocument();
+    // 対応ネットワークは単一 chain='polygon' → ラベル 'Polygon'。お支払いは JPYC のみを明示。
+    expect(screen.getByText('お支払いは JPYC のみ')).toBeInTheDocument();
+    expect(screen.getByText('対応ネットワーク：Polygon')).toBeInTheDocument();
+  });
+
   it('メニュー未充足 (storefront=null) は公開ボタンを無効化し注記', async () => {
     vi.stubGlobal(
       'fetch',
