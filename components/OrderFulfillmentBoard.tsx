@@ -1,8 +1,10 @@
 'use client';
 
 // 受注フルフィルメントの全画面ボード (Phase 3)。mode で 厨房 (調理) / ホール (配膳) を切替。
-// - 厨房: 商品別「調理済み」トグル + 注文「対応済み」。
-// - ホール: 調理済みは **青** (配膳待ちが一目で分かる) + 商品別「配膳済み」トグル + 注文「対応済み」。
+// - 厨房: 商品別「調理済み」トグル + 注文「調理済み」(中間 kitchenDone・厨房側だけ折りたたむ)。
+// - ホール: 調理済み品は **青** (配膳待ちが一目) + 商品別「配膳済み」トグル + 注文「配膳済み」
+//   (= fulfilled = 対応済み。受注ページからも消える)。全品調理済みは「配膳準備OK」で先頭に並ぶ。
+// 稼働 UX: 新着アラート (音/点滅)・経過時間バッジ・未完了件数 KPI。
 // 受取ウォレットで SIWE サインイン → useOrderFeed (8s ポーリング・状態更新は op POST + kvEval 原子)。
 // ルート (app/[locale]/orders/{kitchen,hall}) が env.enableOrderFulfillment でゲートしてマウントする。
 
@@ -25,6 +27,8 @@ const JPYC_DECIMALS = 18;
 const ELAPSED_WARN_MIN = 10; // これ以上で黄
 const ELAPSED_LATE_MIN = 20; // これ以上で赤
 const FLASH_MS = 6_000; // 新着カードの点滅持続
+// 受注カードのレスポンシブグリッド (active / 折りたたみ done で共有 = 列数を一致させる)。
+const CARD_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3';
 
 function chainLabel(chainId: number): string {
   const slug = slugForChain(chainId);
@@ -127,7 +131,7 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
   //    (調理済みでもオーダーは未対応のまま = ホールが配膳するまで残る)。
   //  - ホール: 「配膳済み」= **対応済み (fulfilled)**。全件を対象に fulfilled で active/done を分ける
   //    (配膳=客に提供=取引完了。受注ページの対応済みと同一・受注からも消える)。
-  const all = feed.data ?? [];
+  const all = feedData ?? []; // feedData = feed.data (上で取得済み)
   const orders = mode === 'kitchen' ? all.filter((o) => !o.fulfilled) : all;
   const isStationDone = (o: StoredOrder) =>
     mode === 'kitchen' ? o.kitchenDone === true : o.fulfilled;
@@ -419,9 +423,7 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
               {t('allStationDone')}
             </p>
           ) : (
-            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {sortedActive.map((o) => renderCard(o, false))}
-            </ul>
+            <ul className={CARD_GRID}>{sortedActive.map((o) => renderCard(o, false))}</ul>
           )}
           {/* 調理済み/配膳済み: 削除でなく折りたたみで保持 (戻すで復帰)。受注ページの対応済みと同流儀。 */}
           {doneOrders.length > 0 && (
@@ -429,9 +431,7 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
               <summary className="cursor-pointer text-sm font-medium text-slate-600">
                 {doneSectionLabel} ({doneOrders.length})
               </summary>
-              <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {doneOrders.map((o) => renderCard(o, true))}
-              </ul>
+              <ul className={`mt-3 ${CARD_GRID}`}>{doneOrders.map((o) => renderCard(o, true))}</ul>
             </details>
           )}
         </>

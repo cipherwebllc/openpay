@@ -1829,7 +1829,6 @@
     "allStationDone": "No pending orders.",
     "noItems": "No items",
     "orderNo": "Order",
-    "markDone": "Done",
     "cookedDoneBtn": "Cooked",
     "servedDoneBtn": "Served",
     "cookedUndo": "Mark not cooked",
@@ -1849,7 +1848,6 @@
     "backToCreate": "Back to create",
     "tableLabel": "Table number",
     "tableSave": "Save",
-    "tableUnset": "Set table",
     "tableEdit": "Edit",
     "cancel": "Cancel"
   },

@@ -1829,7 +1829,6 @@
     "allStationDone": "未完了の受注はありません。",
     "noItems": "明細なし",
     "orderNo": "受注番号",
-    "markDone": "対応済み",
     "cookedDoneBtn": "調理済み",
     "servedDoneBtn": "配膳済み",
     "cookedUndo": "未調理に戻す",
@@ -1849,7 +1848,6 @@
     "backToCreate": "作成画面に戻る",
     "tableLabel": "テーブル番号",
     "tableSave": "保存",
-    "tableUnset": "テーブル未設定",
     "tableEdit": "訂正",
     "cancel": "キャンセル"
   },
