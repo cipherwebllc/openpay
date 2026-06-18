@@ -71,7 +71,7 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
   // 永続値で soundOn を復元したページは AudioContext が未解錠 (gesture 無し) → モバイルで
   // 「ON 表示なのに鳴らない」を避けるため、ON のときは最初の任意タップで一度だけ解錠する。
   useEffect(() => {
-    if (!soundOn || typeof window === 'undefined') return;
+    if (!soundOn) return; // useEffect は client のみ → window 存在は自明 (prime も内部でガード)
     const prime = () => primeChimeAudio();
     window.addEventListener('pointerdown', prime, { once: true });
     return () => window.removeEventListener('pointerdown', prime);
@@ -131,7 +131,7 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
   //    (調理済みでもオーダーは未対応のまま = ホールが配膳するまで残る)。
   //  - ホール: 「配膳済み」= **対応済み (fulfilled)**。全件を対象に fulfilled で active/done を分ける
   //    (配膳=客に提供=取引完了。受注ページの対応済みと同一・受注からも消える)。
-  const all = feedData ?? []; // feedData = feed.data (上で取得済み)
+  const all = feedData ?? [];
   const orders = mode === 'kitchen' ? all.filter((o) => !o.fulfilled) : all;
   const isStationDone = (o: StoredOrder) =>
     mode === 'kitchen' ? o.kitchenDone === true : o.fulfilled;
