@@ -16,6 +16,7 @@ const hold = vi.hoisted(() => ({
     | { ok: false },
   kvConfigured: true,
   lrange: { ok: true, value: [] as string[] } as { ok: true; value: string[] } | { ok: false; reason: string },
+  lrangeQueue: null as Array<{ ok: true; value: string[] } | { ok: false; reason: string }> | null, // 指定時は read 毎に shift (再読込で別データを返す=他端末の並行更新を模す)
   evalResult: 1 as number, // REPLACE_ELEM CAS の戻り (1=置換成功 / 0=競合)
   evalQueue: null as number[] | null, // 指定時は呼び出し毎に shift (CAS 競合→再試行を再現)
   evalOk: true, // false で kvEval 自体が失敗 (KV 障害) を再現
@@ -49,6 +50,7 @@ vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
   kvLrange: (...a: unknown[]) => {
     lrangeSpy(...a);
+    if (hold.lrangeQueue && hold.lrangeQueue.length > 0) return Promise.resolve(hold.lrangeQueue.shift()!);
     return Promise.resolve(hold.lrange);
   },
   // POST は REPLACE_ELEM (LPOS+LSET = 位置/TTL 保持の原子置換) を kvEval で実行する。
@@ -91,6 +93,7 @@ beforeEach(() => {
   hold.session = { ok: true, address: SESSION };
   hold.kvConfigured = true;
   hold.lrange = { ok: true, value: [] };
+  hold.lrangeQueue = null;
   hold.evalResult = 1;
   hold.evalQueue = null;
   hold.evalOk = true;
@@ -304,5 +307,33 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     expect(await res.json()).toMatchObject({ ok: true, updated: 1 });
     expect(lrangeSpy).toHaveBeenCalledTimes(2); // 競合で再読込
     expect(evalSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('並行更新: 再読込で他端末の更新を取り込み **マージ**する (ロスト更新なし)', async () => {
+    // items[0]=厨房が cooked にしたい / items[1]=その間にホールが served を入れた。
+    const items = [
+      { name: 'A', qty: 1, price: '100' },
+      { name: 'B', qty: 2, price: '200' },
+    ];
+    const v1 = serializeOrder(order({ txHash: TXA, items })); // 1回目 read = 素
+    const v2 = serializeOrder(
+      order({ txHash: TXA, items: [items[0], { ...items[1], served: true }] }),
+    ); // 2回目 read = ホールが served[1] を入れた後
+    hold.lrangeQueue = [
+      { ok: true, value: [v1] },
+      { ok: true, value: [v2] },
+    ];
+    hold.evalQueue = [0, 1]; // 1回目 CAS 競合 (旧 raw 消滅) → 再読込 → 2回目成功
+
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'itemCooked', index: 0, value: true } }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, updated: 1 });
+
+    // 成功した 2 回目 CAS の newRaw (ARGV[2]) は v2 (served[1]) に 厨房の cooked[0] を足したもの。
+    const secondCall = evalSpy.mock.calls[1] as [string, string[], string[]];
+    expect(secondCall[2][0]).toBe(v2); // LPOS の対象は再読込後の v2
+    const merged = JSON.parse(secondCall[2][1]);
+    expect(merged.items[0].cooked).toBe(true); // 厨房の更新が入る
+    expect(merged.items[1].served).toBe(true); // ホールの並行更新が消えていない (= ロスト更新なし)
   });
 });

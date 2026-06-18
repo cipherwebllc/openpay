@@ -1,7 +1,7 @@
 // 受注フルフィルメントボード (厨房/ホール) を実描画で検証。useSiweSession / useOrderFeed は mock
 // (react-query/fetch を介さず、描画 + op 発火を直接検証)。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { StoredOrder } from '@/lib/orderRelay';
 
@@ -19,11 +19,14 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
-const siwe = vi.hoisted(() => ({ isSignedIn: true }));
+const siwe = vi.hoisted(() => ({
+  isSignedIn: true,
+  sessionAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+}));
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: siwe.isSignedIn,
-    sessionAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    sessionAddress: siwe.sessionAddress,
     signIn: vi.fn(),
     isSigningIn: false,
     signInError: null,
@@ -72,6 +75,7 @@ function order(over: Partial<StoredOrder> = {}): StoredOrder {
 
 beforeEach(() => {
   siwe.isSignedIn = true;
+  siwe.sessionAddress = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81'; // wallet テストで変えるので毎回戻す
   feedHold.data = [order()];
   mutateSpy.mockClear();
   envHold.enablePreorderTime = false; // Phase 4 flag 既定 OFF
@@ -300,5 +304,83 @@ describe('OrderFulfillmentBoard', () => {
     rerender(<OrderFulfillmentBoard mode="kitchen" />);
     expect(screen.getByText('新着')).toBeInTheDocument(); // 点滅は出る
     expect(chime.play).not.toHaveBeenCalled(); // 音は鳴らない
+  });
+
+  // ── LARP-2: 永続ON復元時の prime-on-first-gesture (Codex P2 修正の実証) ──────
+  it('音 ON 復元時: 最初の pointerdown で AudioContext を一度だけ解錠 (永続ONでも鳴る経路)', () => {
+    soundHold.enabled = true; // 永続値 ON で復元 (トグル操作なし → この時点では prime されない)
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(chime.prime).not.toHaveBeenCalled(); // gesture 前は未解錠
+    act(() => void window.dispatchEvent(new Event('pointerdown')));
+    expect(chime.prime).toHaveBeenCalledTimes(1); // 最初のタップで解錠
+    act(() => void window.dispatchEvent(new Event('pointerdown')));
+    expect(chime.prime).toHaveBeenCalledTimes(1); // once = 二度目以降は張り直さない
+  });
+
+  it('音 OFF のときは pointerdown で解錠しない (リスナを張らない)', () => {
+    soundHold.enabled = false;
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    act(() => void window.dispatchEvent(new Event('pointerdown')));
+    expect(chime.prime).not.toHaveBeenCalled();
+  });
+
+  // ── LARP-3: 検出の不変条件 (誤アラートしない) ─────────────────────────────
+  it('状態更新 (同一 txHash) では再アラートしない (txHash 安定が根拠)', () => {
+    soundHold.enabled = true;
+    feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    chime.play.mockClear();
+    // 同一 txHash のまま kitchenDone を立てる (= 店主操作の状態更新)。新着でも音でもない。
+    feedHold.data = [order({ orderId: 'A1', txHash: TX, kitchenDone: true })];
+    rerender(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(chime.play).not.toHaveBeenCalled();
+    expect(screen.queryByText('新着')).toBeNull();
+  });
+
+  it('wallet 変更: 別店舗の既存注文を新着扱いしない (sessionAddress 変更で検出リセット)', () => {
+    soundHold.enabled = true;
+    siwe.sessionAddress = '0xaaa0000000000000000000000000000000000000';
+    feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    chime.play.mockClear();
+    // 別 wallet に切替 + その wallet の既存注文 (別 txHash) が表示される。
+    siwe.sessionAddress = '0xbbb0000000000000000000000000000000000000';
+    feedHold.data = [order({ orderId: 'B2', txHash: TX2 })];
+    rerender(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(chime.play).not.toHaveBeenCalled(); // 切替直後の初期スナップショットは鳴らさない
+    expect(screen.queryByText('新着')).toBeNull();
+  });
+
+  // ── LARP-4: タイマー経路を fake timers で実発火 ───────────────────────────
+  it('新着バッジは FLASH_MS 経過で自動消灯する (setTimeout 経路)', () => {
+    vi.useFakeTimers();
+    try {
+      feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+      const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+      feedHold.data = [order({ orderId: 'A1', txHash: TX }), order({ orderId: 'A2', txHash: TX2 })];
+      act(() => rerender(<OrderFulfillmentBoard mode="kitchen" />));
+      expect(screen.getByText('新着')).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(6_000)); // FLASH_MS
+      expect(screen.queryByText('新着')).toBeNull(); // 自動消灯
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('経過時間は 30s tick で更新される (setInterval 経路・10分跨ぎ)', () => {
+    vi.useFakeTimers();
+    try {
+      const t0 = Date.now();
+      // 受信から 9分30秒 → マウント時は「9分経過」。
+      feedHold.data = [order({ orderId: 'A1', txHash: TX, ts: t0 - (9 * 60_000 + 30_000) })];
+      renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+      expect(screen.getByText('9分経過')).toBeInTheDocument();
+      // 60s 進める → interval が now を更新 → 10分30秒 → 「10分経過」。
+      act(() => void vi.advanceTimersByTime(60_000));
+      expect(screen.getByText('10分経過')).toBeInTheDocument();
+      expect(screen.queryByText('9分経過')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
