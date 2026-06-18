@@ -39,7 +39,11 @@ const STORE: StorefrontParts = {
 const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
 
 function renderPanel(
-  props: Partial<{ storefront: StorefrontParts | null; onGetHandle: () => void }> = {},
+  props: Partial<{
+    storefront: StorefrontParts | null;
+    onGetHandle: () => void;
+    onLoadStorefront: (parts: StorefrontParts, receiver: string) => void;
+  }> = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
@@ -47,6 +51,7 @@ function renderPanel(
       <StorefrontPublishPanel
         storefront={props.storefront === undefined ? STORE : props.storefront}
         onGetHandle={props.onGetHandle}
+        onLoadStorefront={props.onLoadStorefront}
       />
     </QueryClientProvider>,
   );
@@ -197,5 +202,38 @@ describe('StorefrontPublishPanel', () => {
     );
     renderPanel();
     expect(await screen.findByText(/読み込みに失敗/)).toBeInTheDocument();
+  });
+
+  it('公開済み handle は「編集（読み込む）」→確認→onLoadStorefront(parts, receiver) を呼ぶ', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    const onLoadStorefront = vi.fn();
+    renderPanel({ storefront: STORE, onLoadStorefront });
+    fireEvent.click(await screen.findByRole('button', { name: '編集（公開中の内容を読み込む）' }));
+    // 確認 → 読み込む。
+    fireEvent.click(screen.getByRole('button', { name: '読み込む' }));
+    expect(onLoadStorefront).toHaveBeenCalledWith(STORE, CFG.to);
+  });
+
+  it('未公開 handle は編集（読み込む）ボタンを出さない', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }),
+      }),
+    );
+    renderPanel({ storefront: STORE, onLoadStorefront: vi.fn() });
+    await screen.findByRole('button', { name: 'この @handle に公開' });
+    expect(
+      screen.queryByRole('button', { name: '編集（公開中の内容を読み込む）' }),
+    ).not.toBeInTheDocument();
   });
 });

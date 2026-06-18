@@ -209,6 +209,19 @@ export function useProductPresets() {
     [setSettings],
   );
 
+  // 商品カタログを丸ごと置き換える (例: 別端末で公開中の @handle を編集するため、公開済み
+  // storefront のメニューをこの端末へ読み込む)。配列順で sortOrder を再採番し PRESET_MAX で truncate。
+  // ⚠️ 既存カタログ (レジと共有) を破壊的に上書きするため、呼び出し側で確認を取ること。
+  const replaceAll = useCallback(
+    (next: ProductPreset[]) => {
+      setSettings((s) => ({
+        ...s,
+        presets: next.slice(0, PRESET_MAX).map((p, i) => ({ ...p, sortOrder: i })),
+      }));
+    },
+    [setSettings],
+  );
+
   // 管理番号の日次連番採番 (R-YYYYMMDD-NNN)。返り値は同期計算・カウンタは bump。
   const nextReceiptNo = useCallback((): string => {
     const day = dayKey(new Date());
@@ -229,6 +242,7 @@ export function useProductPresets() {
     updatePreset,
     removePreset,
     movePreset,
+    replaceAll,
     nextReceiptNo,
   };
 }

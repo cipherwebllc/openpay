@@ -8,7 +8,7 @@
 //
 // ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P0/P2 ゲート後。
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   ChevronDown,
@@ -28,7 +28,12 @@ import { AddressInput } from '@/components/AddressInput';
 import { StepCard } from '@/components/StepCard';
 import { SocialIcon, SocialIconLinks } from '@/components/SocialIconLinks';
 import { StorefrontPublishPanel } from '@/components/StorefrontPublishPanel';
-import { useMobileOrderDraft, presetsToMenu } from '@/hooks/useMobileOrderDraft';
+import {
+  useMobileOrderDraft,
+  presetsToMenu,
+  menuToPresets,
+  storefrontPartsToDraft,
+} from '@/hooks/useMobileOrderDraft';
 import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 import { useQrSettings } from '@/hooks/useQrSettings';
@@ -43,6 +48,7 @@ import {
   ADDRESS_MAX,
   HOURS_MAX,
   PHONE_MAX,
+  type StorefrontParts,
 } from '@/lib/mobileOrder';
 
 const inputClass =
@@ -77,7 +83,7 @@ export function MobileOrderBuilder({
 } = {}) {
   const t = useTranslations('MobileOrder');
   const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft();
-  const { presets } = useProductPresets();
+  const { presets, replaceAll } = useProductPresets();
   // 決済QR タブの受取先 (レジと同じく「引き継ぐ」ショートカット用)。
   const { settings: qrSettings } = useQrSettings();
   const qrReceiver = qrSettings.receiver.trim();
@@ -138,6 +144,17 @@ export function MobileOrderBuilder({
     : null;
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
+
+  // 別端末で公開中の @handle を「読み込んで編集」する。公開済み storefront → 下書き (店舗設定) +
+  // 商品カタログ (レジ共有・menu を復元) をこの端末へ復元する。受取先は @handle が権威 (config.to)。
+  // ⚠️ 既存の下書き/カタログを破壊的に上書きするため、呼び出し側 (StorefrontPublishPanel) が確認を取る。
+  const loadFromStorefront = useCallback(
+    (parts: StorefrontParts, receiver: string) => {
+      setSettings(() => storefrontPartsToDraft(parts, receiver));
+      replaceAll(menuToPresets(parts.menu));
+    },
+    [setSettings, replaceAll],
+  );
 
   // 受取チェーンの複数選択トグル。最低 1 件は維持 (空選択は不可)。
   const toggleChain = (slug: JpycChainSlug) => {
@@ -580,7 +597,11 @@ export function MobileOrderBuilder({
           {/* レジ商品を @handle に公開して固定店舗 URL にする (handles ON のときだけマウント:
               react-query を使うため OFF 環境/テストで QueryClient を要求しない)。④ プレビューの上。 */}
           {env.enableHandles && (
-            <StorefrontPublishPanel storefront={storefrontParts} onGetHandle={onGetHandle} />
+            <StorefrontPublishPanel
+              storefront={storefrontParts}
+              onGetHandle={onGetHandle}
+              onLoadStorefront={loadFromStorefront}
+            />
           )}
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {/* 実際の店舗ページ (MobileOrderView) と同じ構成・順序で見せる:

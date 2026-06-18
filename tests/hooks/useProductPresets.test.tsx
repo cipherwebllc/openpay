@@ -150,4 +150,20 @@ describe('useProductPresets', () => {
     expect(added.name.length).toBe(80);
     expect(added.unitPrice).toBe('1200'); // ¥ と , を除去 → "1200"
   });
+
+  it('replaceAll でカタログを丸ごと置き換え sortOrder を再採番し永続する (別端末編集の復元)', () => {
+    const { result } = renderHook(() => useProductPresets());
+    act(() =>
+      result.current.replaceAll([
+        { id: 'x', name: 'A', unitPrice: '100', token: 'jpyc', taxRate: null, taxCategory: null, memo: null, sortOrder: 9, enabled: true },
+        { id: 'y', name: 'B', unitPrice: '200', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 9, enabled: true },
+      ]),
+    );
+    expect(result.current.presets.map((p) => p.name)).toEqual(['A', 'B']);
+    expect(result.current.presets.map((p) => p.sortOrder)).toEqual([0, 1]);
+    // 再 mount しても残る (LS 永続)。
+    expect(
+      renderHook(() => useProductPresets()).result.current.presets.map((p) => p.name),
+    ).toEqual(['A', 'B']);
+  });
 });

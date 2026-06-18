@@ -43,11 +43,15 @@ async function fetchJson(url: string, init?: RequestInit) {
 export function StorefrontPublishPanel({
   storefront,
   onGetHandle,
+  onLoadStorefront,
 }: {
   /** 公開する店舗固有部分。メニュー未充足など公開不可なら null (公開ボタンを無効化)。 */
   storefront: StorefrontParts | null;
   /** 「@handle を取得」導線 (create が profile タブへ切替)。 */
   onGetHandle?: () => void;
+  /** 公開済み storefront をビルダー (下書き + 商品カタログ) へ読み込む (別端末での編集用)。
+   *  受取先は @handle config.to を渡す。破壊的なので本パネルが確認を取ってから呼ぶ。 */
+  onLoadStorefront?: (parts: StorefrontParts, receiver: string) => void;
 }) {
   const t = useTranslations('MobileOrder');
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } = useSiweSession();
@@ -56,6 +60,8 @@ export function StorefrontPublishPanel({
   const qc = useQueryClient();
   const [selected, setSelected] = useState('');
   const [showQr, setShowQr] = useState(false);
+  // 公開中の @handle をビルダーへ読み込む前の確認 (下書き + 商品カタログを破壊的に上書きするため)。
+  const [confirmLoad, setConfirmLoad] = useState(false);
 
   const mine = useQuery({
     // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ (HandleClaim と同流儀)。
@@ -185,6 +191,44 @@ export function StorefrontPublishPanel({
               {selectedHandle?.storefront ? ` ${t('publishAlready')}` : ''}
             </p>
           )}
+
+          {/* 別端末で編集するための「読み込み」: 公開中の @handle の店舗設定 + メニューを
+              ビルダーへ復元する。破壊的 (この端末の下書き/商品カタログを上書き) なので確認を挟む。 */}
+          {selectedHandle?.storefront &&
+            onLoadStorefront &&
+            (confirmLoad ? (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p>{t('editLoadConfirm')}</p>
+                <div className="mt-1 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedHandle?.storefront) return;
+                      onLoadStorefront(selectedHandle.storefront, selectedHandle.config.to);
+                      setConfirmLoad(false);
+                    }}
+                    className="font-semibold text-amber-900 hover:underline"
+                  >
+                    {t('editLoadConfirmYes')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmLoad(false)}
+                    className="text-amber-700 hover:underline"
+                  >
+                    {t('editLoadCancel')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmLoad(true)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+              >
+                {t('editLoadButton')}
+              </button>
+            ))}
 
           <button
             type="button"

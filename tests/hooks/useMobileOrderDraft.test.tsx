@@ -7,9 +7,12 @@ import {
   useMobileOrderDraft,
   draftToConfig,
   presetsToMenu,
+  menuToPresets,
+  storefrontPartsToDraft,
   type MobileOrderDraft,
 } from '@/hooks/useMobileOrderDraft';
 import type { ProductPreset } from '@/hooks/useProductPresets';
+import type { MenuItem, StorefrontParts } from '@/lib/mobileOrder';
 
 const STORAGE_KEY = 'openpay:mobile-order-draft:v1';
 const ADDR = '0x1111111111111111111111111111111111111111' as const;
@@ -206,5 +209,126 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
     expect(draftToConfig({ ...baseDraft(), dineIn: true }, ADDR, presets)?.dineIn).toBe(true);
     const takeout = draftToConfig({ ...baseDraft(), dineIn: false }, ADDR, presets);
     expect('dineIn' in (takeout ?? {})).toBe(false);
+  });
+});
+
+describe('menuToPresets: MenuItem[] → ProductPreset[] (presetsToMenu の逆・別端末編集の復元)', () => {
+  it('id/name/price/税/画像/カテゴリを保ち token=jpyc・enabled=true・sortOrder 採番', () => {
+    const menu: MenuItem[] = [
+      {
+        id: 'a',
+        name: 'コーヒー',
+        price: '500',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        category: 'ドリンク',
+        visual: { kind: 'image', url: 'https://img/c.png' },
+      },
+      { id: 'b', name: 'ケーキ', price: '600' },
+    ];
+    expect(menuToPresets(menu)).toEqual([
+      {
+        id: 'a',
+        name: 'コーヒー',
+        unitPrice: '500',
+        token: 'jpyc',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        memo: null,
+        image: 'https://img/c.png',
+        category: 'ドリンク',
+        sortOrder: 0,
+        enabled: true,
+      },
+      {
+        id: 'b',
+        name: 'ケーキ',
+        unitPrice: '600',
+        token: 'jpyc',
+        taxRate: null,
+        taxCategory: null,
+        memo: null,
+        image: undefined,
+        category: undefined,
+        sortOrder: 1,
+        enabled: true,
+      },
+    ]);
+  });
+
+  it('emoji visual は image にならない (presets は画像 URL のみ)', () => {
+    const menu: MenuItem[] = [
+      { id: 'e', name: '絵文字', price: '100', visual: { kind: 'emoji', value: '🍰' } },
+    ];
+    expect(menuToPresets(menu)[0].image).toBeUndefined();
+  });
+
+  it('presetsToMenu(menuToPresets(menu)) は menu を保つ (round-trip)', () => {
+    const menu: MenuItem[] = [
+      {
+        id: 'a',
+        name: 'コーヒー',
+        price: '500',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        category: 'ドリンク',
+        visual: { kind: 'image', url: 'https://img/c.png' },
+      },
+      { id: 'b', name: 'ケーキ', price: '600' },
+    ];
+    expect(presetsToMenu(menuToPresets(menu))).toEqual(menu);
+  });
+});
+
+describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (別端末編集の復元)', () => {
+  it('全フィールドを写し receiverSource=manual', () => {
+    const parts: StorefrontParts = {
+      chain: 'polygon',
+      chains: ['polygon', 'kaia'],
+      mode: 'preorder',
+      feePayer: 'customer',
+      shopName: '山田カフェ',
+      tagline: 'こだわり珈琲',
+      avatar: 'https://img/a.png',
+      socials: ['https://x.com/y'],
+      address: '東京',
+      hours: '10-18',
+      phone: '03',
+      acceptingOrders: false,
+      dineIn: true,
+      menu: [{ id: 'a', name: 'c', price: '500' }],
+    };
+    expect(storefrontPartsToDraft(parts, ADDR)).toEqual({
+      receiver: ADDR,
+      receiverSource: 'manual',
+      chains: ['polygon', 'kaia'],
+      shopName: '山田カフェ',
+      tagline: 'こだわり珈琲',
+      avatar: 'https://img/a.png',
+      mode: 'preorder',
+      feePayer: 'customer',
+      socials: ['https://x.com/y'],
+      address: '東京',
+      hours: '10-18',
+      phone: '03',
+      acceptingOrders: false,
+      dineIn: true,
+    });
+  });
+
+  it('省略フィールドは既定 (chains は単一 chain から・acceptingOrders=true・dineIn=false・socials=[])', () => {
+    const parts: StorefrontParts = {
+      chain: 'kaia',
+      mode: 'storefront',
+      feePayer: 'merchant',
+      menu: [{ id: 'a', name: 'c', price: '500' }],
+    };
+    const d = storefrontPartsToDraft(parts, ADDR);
+    expect(d.chains).toEqual(['kaia']);
+    expect(d.shopName).toBe('');
+    expect(d.socials).toEqual([]);
+    expect(d.acceptingOrders).toBe(true);
+    expect(d.dineIn).toBe(false);
+    expect(d.receiverSource).toBe('manual');
   });
 });

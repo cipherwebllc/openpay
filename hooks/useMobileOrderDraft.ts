@@ -28,6 +28,7 @@ import {
   type MobileOrderMode,
   type MenuItem,
   type FeePayer,
+  type StorefrontParts,
 } from '@/lib/mobileOrder';
 import type { ProductPreset } from './useProductPresets';
 import type { ReceiverSource } from './useReceiverAutofill';
@@ -180,6 +181,59 @@ export function draftToConfig(
     // 店内のときだけ true が保存される (validateOrderConfig が round-trip 最小化)。
     dineIn: draft.dineIn,
   });
+}
+
+/**
+ * MenuItem[] → ProductPreset[] (presetsToMenu の逆写像)。別端末で公開中の @handle を編集する
+ * ため、公開済みメニューを商品カタログ (レジと共有) へ復元する。メニューは「有効な JPYC 商品」
+ * だけで構成されるため token は jpyc 固定・enabled=true。memo はメニューに無いので null、画像は
+ * image visual のみ復元 (emoji visual は presets が持てないので落ちる)。表示順は配列順で採番。
+ */
+export function menuToPresets(menu: MenuItem[]): ProductPreset[] {
+  return menu.map((m, i) => ({
+    id: m.id,
+    name: m.name,
+    unitPrice: m.price,
+    token: 'jpyc',
+    taxRate: typeof m.taxRate === 'number' ? m.taxRate : null,
+    taxCategory: m.taxCategory ?? null,
+    memo: null,
+    image: m.visual?.kind === 'image' ? m.visual.url : undefined,
+    category: m.category,
+    sortOrder: i,
+    enabled: true,
+  }));
+}
+
+/**
+ * 公開済み StorefrontParts + 受取先 (= @handle config.to) → 下書き (MobileOrderDraft)。
+ * 別端末で公開中の @handle を「読み込んで編集」するための復元写像。受取先は @handle が権威
+ * なので manual 固定 (接続ウォレットに追従させない)。メニューは別途 menuToPresets で復元する
+ * (本写像は店舗設定のみ)。値は公開時に validateStorefrontParts 済みなので上限内。
+ */
+export function storefrontPartsToDraft(
+  parts: StorefrontParts,
+  receiver: string,
+): MobileOrderDraft {
+  const rawChains =
+    parts.chains && parts.chains.length > 0 ? parts.chains : [parts.chain];
+  const chains = rawChains.filter((c) => MOBILE_ORDER_CHAINS.includes(c));
+  return {
+    receiver,
+    receiverSource: 'manual',
+    chains: chains.length > 0 ? chains : ['polygon'],
+    shopName: parts.shopName ?? '',
+    tagline: parts.tagline ?? '',
+    avatar: parts.avatar ?? '',
+    mode: parts.mode,
+    feePayer: parts.feePayer,
+    socials: parts.socials ?? [],
+    address: parts.address ?? '',
+    hours: parts.hours ?? '',
+    phone: parts.phone ?? '',
+    acceptingOrders: parts.acceptingOrders ?? true,
+    dineIn: parts.dineIn ?? false,
+  };
 }
 
 export function useMobileOrderDraft() {
