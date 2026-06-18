@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ComponentProps } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MobileOrderPlacardModal } from '@/components/MobileOrderPlacardModal';
 
 const LABELS = {
@@ -77,8 +77,6 @@ describe('MobileOrderPlacardModal', () => {
     expect(screen.getByText('https://open-pay.jp/@yamada')).toBeInTheDocument();
     // QR は qrcode.react が size=240 の <svg> を描画する (アイコンの svg と区別して特定)。
     expect(container.querySelector('svg[height="240"]')).toBeTruthy();
-    // ポスターは印刷対象マーカーを持つ。
-    expect(container.querySelector('[data-placard-printing]')).toBeTruthy();
     expect(screen.getByRole('dialog', { name: 'プラカード' })).toBeInTheDocument();
   });
 

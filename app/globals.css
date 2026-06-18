@@ -46,22 +46,16 @@ body {
   }
 }
 
-/* モバイルオーダーの卓上プラカード (MobileOrderPlacardModal) の「印刷」: 受取レシートと同型。
-   印刷時はポスター 1 枚だけを残し他要素を隠す (長い builder ページが裏で複数ページに溢れるのを
-   防ぐ)。print ボタン押下で body に openpay-printing-placard を付与し、afterprint / モーダル
-   クローズで解除する。display:none ではなく visibility:hidden で layout を保ち絶対配置で出す。 */
+/* モバイルオーダーの卓上プラカード (MobileOrderPlacardModal) の「印刷」。
+   印刷ポスターは modal が body 直下へ portal する .placard-print-root (Tailwind hidden print:flex で
+   印刷時のみ表示)。印刷時 (body.openpay-printing-placard・印刷ボタン押下〜afterprint の間だけ付与)
+   は body 直下の他要素 (= アプリ本体・fixed モーダル) を display:none にし、背景ページの高さや
+   fixed 要素のページ毎繰り返しを排除して、ポスター 1 枚だけを印刷する。body クラスは印刷時のみ
+   付くので通常印刷には影響しない。
+   注: 受取レシートと違い visibility:hidden 方式は使わない (fixed モーダル + 長い背景だと背景の
+   高さが残って同じポスターが複数ページに複製されたため・実機で確認)。display:none で背景ごと畳む。 */
 @media print {
-  body.openpay-printing-placard * {
-    visibility: hidden;
-  }
-  body.openpay-printing-placard [data-placard-printing],
-  body.openpay-printing-placard [data-placard-printing] * {
-    visibility: visible;
-  }
-  body.openpay-printing-placard [data-placard-printing] {
-    position: absolute;
-    inset: 0;
-    margin: 0;
-    border: none;
+  body.openpay-printing-placard > *:not(.placard-print-root) {
+    display: none !important;
   }
 }
