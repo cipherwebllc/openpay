@@ -23,7 +23,11 @@ vi.mock('@/hooks/useMarketRates', () => ({
   }),
 }));
 // レジ利用料 flag を切替え可能に (既定 OFF = レジ standard 無料 = 既存テストの挙動不変)。
-const envHold = vi.hoisted(() => ({ enableRegisterFee: false, enableShopLive: false }));
+const envHold = vi.hoisted(() => ({
+  enableRegisterFee: false,
+  enableShopLive: false,
+  enableMenuOptions: false,
+}));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -35,6 +39,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableShopLive() {
         return envHold.enableShopLive;
+      },
+      get enableMenuOptions() {
+        return envHold.enableMenuOptions;
       },
     },
   };
@@ -68,6 +75,7 @@ describe('RegisterMode', () => {
     window.localStorage.clear();
     envHold.enableRegisterFee = false; // 毎テスト OFF 起点 (flag-ON テストが個別に立てる)
     envHold.enableShopLive = false; // Phase 1 flag も OFF 起点
+    envHold.enableMenuOptions = false; // Phase 2 flag も OFF 起点
   });
 
   it('初期サンプルプリセットが表示される (コーヒー/Tシャツ/イベント参加費/Tip)', async () => {
@@ -199,6 +207,57 @@ describe('RegisterMode', () => {
     await user.click(screen.getByRole('button', { name: 'フード' }));
     expect(screen.queryByRole('button', { name: /コーラ/ })).toBeNull();
     expect(screen.getByRole('button', { name: /ポテト/ })).toBeInTheDocument();
+  });
+
+  it('オプション付き preset: 選択モーダル → 実効単価(850) + サフィックス名で行追加', async () => {
+    envHold.enableMenuOptions = true;
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          {
+            id: 'gy',
+            name: '牛丼',
+            unitPrice: '500',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            sortOrder: 0,
+            enabled: true,
+            options: [
+              {
+                id: 'g1',
+                name: 'サイズ',
+                type: 'single',
+                required: true,
+                choices: [
+                  { id: 's', label: '小盛り', priceDelta: '0' },
+                  { id: 'l', label: '大盛り', priceDelta: '200' },
+                ],
+              },
+              {
+                id: 'g2',
+                name: 'トッピング',
+                type: 'multi',
+                choices: [{ id: 'ebi', label: 'えび', priceDelta: '150' }],
+              },
+            ],
+          },
+        ],
+        receipt: { day: '', n: 0 },
+      }),
+    );
+    render(<RegisterMode />);
+    // options 付き preset をタップ → 即追加でなくモーダル。
+    await user.click(await screen.findByRole('button', { name: /牛丼/ }));
+    await user.click(screen.getByRole('radio', { name: /大盛り/ }));
+    await user.click(screen.getByRole('checkbox', { name: /えび/ }));
+    await user.click(screen.getByRole('button', { name: 'カートに追加' }));
+    // カート行: サフィックス名 + 実効単価 850 が入力欄に反映 (行は編集可)。
+    expect(screen.getByDisplayValue('牛丼（大盛り・えび）')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('850')).toBeInTheDocument();
   });
 
   it('プリセット選択で商品名・単価がレジ入力欄に反映される', async () => {

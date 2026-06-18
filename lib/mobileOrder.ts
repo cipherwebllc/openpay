@@ -12,6 +12,7 @@
 import { isAddress, type Address } from 'viem';
 import { isJpycChainSlug, JPYC_CHAINS, type JpycChainSlug } from './chains';
 import { isTaxCategory, type TaxCategory } from './tax';
+import { validOptionGroups, type OptionGroup } from './menuOptions';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
 export type FeePayer = 'merchant' | 'customer'; // 3% を店舗負担 | 顧客上乗せ (preorder 時のみ意味を持つ)
@@ -34,6 +35,8 @@ export type MenuItem = {
   category?: string;
   /** おすすめ (任意・presets 由来)。true のとき公開ページ先頭の「おすすめ」セクションに出す。 */
   recommended?: boolean;
+  /** オプション (任意・presets 由来)。サイズ/トッピング。選択で実効単価+名前サフィックス化 (lib/menuOptions)。 */
+  options?: OptionGroup[];
 };
 
 export const CATEGORY_MAX = 24; // カテゴリー名の上限 (短い分類名を想定)
@@ -181,6 +184,9 @@ function validMenuItem(v: unknown): MenuItem | null {
   }
   // おすすめ (任意)。round-trip 最小化のため true のときだけ保持。
   if (o.recommended === true) item.recommended = true;
+  // オプション (任意・untrusted)。不正な group/choice は drop し有効分のみ・全 drop なら付けない。
+  const options = validOptionGroups(o.options);
+  if (options) item.options = options;
   return item;
 }
 

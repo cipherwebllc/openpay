@@ -13,6 +13,7 @@ import { useCallback, useMemo } from 'react';
 import { pad } from '@/lib/pad';
 import { randomId } from '@/lib/id';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
+import { validOptionGroups, type OptionGroup } from '@/lib/menuOptions';
 import { sanitizeTokenSymbol } from '@/hooks/useQrSettings';
 import { type TokenSymbol } from '@/lib/tokens';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
@@ -32,6 +33,8 @@ export type ProductPreset = {
   category?: string;
   /** おすすめ (任意)。レジ/モバイルオーダーで「おすすめ」として強調表示する。 */
   recommended?: boolean;
+  /** オプション (任意)。サイズ/トッピング (lib/menuOptions)。モバイルオーダー/レジで選択 → 実効単価。 */
+  options?: OptionGroup[];
   /** 表示順 (= 配列 index をミラー)。 */
   sortOrder: number;
   enabled: boolean;
@@ -107,6 +110,7 @@ function sanitizePreset(raw: unknown, index: number): ProductPreset | null {
     image: sanitizeImage(o.image),
     category: clampStr(o.category, PRESET_CATEGORY_MAX) || undefined,
     recommended: o.recommended === true ? true : undefined, // round-trip 最小化 (true のみ保持)
+    options: validOptionGroups(o.options), // 不正は drop・無ければ undefined
     sortOrder: index,
     enabled: o.enabled !== false, // 既定 true
   };

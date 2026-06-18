@@ -36,6 +36,8 @@ import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
+import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
+import { OptionSelectModal } from './OptionSelectModal';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
@@ -79,6 +81,8 @@ export function RegisterMode({
   const [currencyWarning, setCurrencyWarning] = useState(false);
   // レジの QR も即時表示せず「QRコードを表示する」→ 全画面モーダルで提示。
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  // オプション付き preset をタップしたとき表示する選択モーダル (flag 裏)。
+  const [optionModalPreset, setOptionModalPreset] = useState<ProductPreset | null>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const totalBarRef = useRef<HTMLDivElement>(null);
 
@@ -197,6 +201,49 @@ export function RegisterMode({
           id: randomId(),
           name: p.name,
           unitPrice: p.unitPrice,
+          quantity: 1,
+          taxRate: p.taxRate,
+          taxCategory: p.taxCategory,
+          memo: p.memo ?? '',
+          presetId: p.id,
+        },
+      ];
+    });
+  }
+
+  const hasPresetOptions = (p: ProductPreset) =>
+    env.enableMenuOptions && (p.options?.length ?? 0) > 0;
+
+  // オプション付き preset: モーダルで選択 → 実効単価 + サフィックス名で新規行を追加 (option 行は dedup せず・
+  // 行は通常どおり編集可)。通貨ガードは addFromPreset と同じ。
+  function addOptionLine(p: ProductPreset, choices: OptionChoice[]) {
+    setOptionModalPreset(null);
+    if (cart.length > 0 && p.token !== settings.token) {
+      setCurrencyWarning(true);
+      return;
+    }
+    setCurrencyWarning(false);
+    if (cart.length === 0 && p.token !== settings.token) {
+      setSettings((s) => ({ ...s, token: p.token, chain: DEFAULT_CHAIN_FOR_SYMBOL[p.token] }));
+    }
+    const name = composeLineName(p.name, choices);
+    const unitPrice = effectiveUnitPrice(p.unitPrice, choices);
+    setCart((c) => {
+      // 同一 preset + 同一オプション (= 同一表示名) の行は qty+1 にまとめる (10 行上限の浪費防止)。
+      // 行をリネーム済なら一致せず新規行になる (許容)。
+      const existing = c.find((l) => l.presetId === p.id && l.name === name);
+      if (existing) {
+        return c.map((l) =>
+          l.id === existing.id ? { ...l, quantity: Math.min(999, l.quantity + 1) } : l,
+        );
+      }
+      if (c.length >= CHECKOUT_MAX_ITEMS) return c;
+      return [
+        ...c,
+        {
+          id: randomId(),
+          name,
+          unitPrice,
           quantity: 1,
           taxRate: p.taxRate,
           taxCategory: p.taxCategory,
@@ -414,7 +461,7 @@ export function RegisterMode({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => addFromPreset(p)}
+                    onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
                     className="relative flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
                   >
                     {env.enableShopLive && p.recommended && (
@@ -748,6 +795,24 @@ export function RegisterMode({
           receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
           copied={copied}
           onCopy={() => copy(checkoutUrl)}
+        />
+      )}
+
+      {/* オプション選択モーダル (flag ON + options 付き preset をタップ)。確定で実効単価の行を追加。 */}
+      {optionModalPreset && (
+        <OptionSelectModal
+          open
+          itemName={optionModalPreset.name}
+          basePrice={optionModalPreset.unitPrice}
+          options={optionModalPreset.options ?? []}
+          symbol={
+            deploymentForSlug(
+              optionModalPreset.token,
+              DEFAULT_CHAIN_FOR_SYMBOL[optionModalPreset.token],
+            ).displaySymbol
+          }
+          onConfirm={(choices) => addOptionLine(optionModalPreset, choices)}
+          onClose={() => setOptionModalPreset(null)}
         />
       )}
     </div>

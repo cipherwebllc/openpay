@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { Field } from './Field';
+import { ProductOptionEditor } from './ProductOptionEditor';
 import { env } from '@/lib/env';
 import type { ProductPreset } from '@/hooks/useProductPresets';
 import { TAX_OPTIONS, defaultRateForCategory, type TaxCategory } from '@/lib/tax';
@@ -200,6 +201,21 @@ export function ProductPresetManager({
                   />
                 </label>
               </div>
+              {/* オプション (サイズ/トッピング)・flag 裏。空でも折りたたみで提示。 */}
+              {env.enableMenuOptions && (
+                <details className="w-full rounded-lg border border-slate-100 bg-white px-2 py-1">
+                  <summary className="cursor-pointer list-none text-xs font-medium text-slate-500">
+                    {t('optionsTitle')}
+                    {p.options && p.options.length > 0 ? ` (${p.options.length})` : ''}
+                  </summary>
+                  <div className="mt-2">
+                    <ProductOptionEditor
+                      options={p.options}
+                      onChange={(opts) => updatePreset(p.id, { options: opts })}
+                    />
+                  </div>
+                </details>
+              )}
             </li>
           ))}
         </ul>

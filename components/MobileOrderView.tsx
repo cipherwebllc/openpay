@@ -40,6 +40,25 @@ import {
   mobileOrderFeeValue,
   mobileOrderGasMode,
 } from '@/lib/mobileOrderFee';
+import {
+  composeLineName,
+  effectiveUnitPrice,
+  selectionKey,
+  type OptionChoice,
+} from '@/lib/menuOptions';
+import { OptionSelectModal } from '@/components/OptionSelectModal';
+
+// カート行 (オプション無し=menu+qty / オプション有り=optionEntries) の統合ビュー型。
+type OptionCartEntry = {
+  key: string; // selectionKey (itemId#group:choice,...)
+  itemId: string;
+  name: string; // composeLineName 済 (オプションをサフィックス化)
+  price: string; // effectiveUnitPrice 済 (base + Σdelta)
+  qty: number;
+  taxRate?: number;
+  taxCategory?: MenuItem['taxCategory'];
+};
+type CartLineView = OptionCartEntry & { isOption: boolean };
 
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
@@ -124,20 +143,83 @@ export function MobileOrderView({
   const soldOutSet = useMemo(() => new Set(liveState.soldOut), [liveState.soldOut]);
   const paused = liveState.paused;
 
-  // qty>0 の行を CheckoutItem[] へ (表示順維持)。決済額は /checkout が items から再計算する。
-  // 税率/税区分 (presets 由来) も渡し、/checkout のレシート・履歴・freee に 小計/うち税額 を反映。
+  // メニューオプション (サイズ/トッピング)・flag 裏。OFF では options を無視し従来の数量ステッパのみ
+  // (オプション無し商品は常に従来の qty マップを使う = 既存挙動不変)。
+  const optionsEnabled = env.enableMenuOptions;
+  const hasOptions = (m: MenuItem) => optionsEnabled && (m.options?.length ?? 0) > 0;
+  // オプション選択で確定した行 (selectionKey で識別・同一商品の別オプションは別行)。
+  const [optionEntries, setOptionEntries] = useState<OptionCartEntry[]>([]);
+  const [optionModalItem, setOptionModalItem] = useState<MenuItem | null>(null);
+  const optionCount = (itemId: string) =>
+    optionEntries.filter((e) => e.itemId === itemId).reduce((s, e) => s + e.qty, 0);
+
+  const addOptionEntry = (
+    item: MenuItem,
+    choices: OptionChoice[],
+    selections: { groupId: string; choiceId: string }[],
+  ) => {
+    const key = selectionKey(item.id, selections);
+    setOptionEntries((list) => {
+      const idx = list.findIndex((e) => e.key === key);
+      if (idx >= 0) {
+        const next = [...list];
+        next[idx] = { ...next[idx], qty: Math.min(CHECKOUT_QTY_MAX, next[idx].qty + 1) };
+        return next;
+      }
+      return [
+        ...list,
+        {
+          key,
+          itemId: item.id,
+          name: composeLineName(item.name, choices),
+          price: effectiveUnitPrice(item.price, choices),
+          qty: 1,
+          taxRate: item.taxRate,
+          taxCategory: item.taxCategory,
+        },
+      ];
+    });
+    setOptionModalItem(null);
+  };
+  const setOptionEntryQty = (key: string, n: number) =>
+    setOptionEntries((list) =>
+      n <= 0
+        ? list.filter((e) => e.key !== key)
+        : list.map((e) => (e.key === key ? { ...e, qty: Math.min(CHECKOUT_QTY_MAX, n) } : e)),
+    );
+
+  // カート行を統合 (明細表示 + 決済 items の単一情報源・売り切れは除外)。
+  const cartLines = useMemo<CartLineView[]>(() => {
+    const base: CartLineView[] = config.menu
+      .filter((m) => !hasOptions(m) && (qty[m.id] ?? 0) > 0 && !soldOutSet.has(m.id))
+      .map((m) => ({
+        key: m.id,
+        itemId: m.id,
+        name: m.name,
+        price: m.price,
+        qty: qty[m.id],
+        taxRate: m.taxRate,
+        taxCategory: m.taxCategory,
+        isOption: false,
+      }));
+    const opt: CartLineView[] = optionEntries
+      .filter((e) => e.qty > 0 && !soldOutSet.has(e.itemId))
+      .map((e) => ({ ...e, isOption: true }));
+    return [...base, ...opt];
+    // hasOptions は optionsEnabled に依存 (deps に含める)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.menu, qty, soldOutSet, optionEntries, optionsEnabled]);
+
+  // cartLines → CheckoutItem[] (決済額は /checkout が items から再計算)。税率/税区分も引き継ぐ。
   const cartItems = useMemo<CheckoutItem[]>(
     () =>
-      config.menu
-        // 売り切れ品は (UI でステッパを隠すので qty>0 になり得ないが) 念のためカートから除外。
-        .filter((m) => (qty[m.id] ?? 0) > 0 && !soldOutSet.has(m.id))
-        .map((m) => {
-          const item: CheckoutItem = { name: m.name, qty: qty[m.id], price: m.price };
-          if (typeof m.taxRate === 'number') item.taxRate = m.taxRate;
-          if (m.taxCategory) item.taxCategory = m.taxCategory;
-          return item;
-        }),
-    [config.menu, qty, soldOutSet],
+      cartLines.map((l) => {
+        const item: CheckoutItem = { name: l.name, qty: l.qty, price: l.price };
+        if (typeof l.taxRate === 'number') item.taxRate = l.taxRate;
+        if (l.taxCategory) item.taxCategory = l.taxCategory;
+        return item;
+      }),
+    [cartLines],
   );
 
   // /checkout は 1〜10 品まで。超過時は支払いを止めて明示 (URL を組んでも parse 側で弾かれるため)。
@@ -250,28 +332,39 @@ export function MobileOrderView({
               <span className="text-base font-bold text-slate-900">{item.price}</span>{' '}
               <span className="text-[10px] font-medium text-slate-400">JPYC</span>
             </span>
-            {!isSoldOut && (
-              <span className="flex shrink-0 items-center gap-1">
+            {!isSoldOut &&
+              (hasOptions(item) ? (
+                // オプション有り: タップで選択モーダル → カートへ。既に追加済の点数を併記。
                 <button
                   type="button"
-                  onClick={() => setItemQty(item.id, n - 1)}
-                  disabled={n === 0}
-                  aria-label={t('qtyDecrease')}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600 disabled:opacity-30"
+                  onClick={() => setOptionModalItem(item)}
+                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
                 >
-                  −
+                  {t('viewChooseOptions')}
+                  {optionCount(item.id) > 0 ? ` (${optionCount(item.id)})` : ''}
                 </button>
-                <span className="w-5 text-center text-sm font-semibold tabular-nums">{n}</span>
-                <button
-                  type="button"
-                  onClick={() => setItemQty(item.id, n + 1)}
-                  aria-label={t('qtyIncrease')}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600"
-                >
-                  ＋
-                </button>
-              </span>
-            )}
+              ) : (
+                <span className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setItemQty(item.id, n - 1)}
+                    disabled={n === 0}
+                    aria-label={t('qtyDecrease')}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600 disabled:opacity-30"
+                  >
+                    −
+                  </button>
+                  <span className="w-5 text-center text-sm font-semibold tabular-nums">{n}</span>
+                  <button
+                    type="button"
+                    onClick={() => setItemQty(item.id, n + 1)}
+                    aria-label={t('qtyIncrease')}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                  >
+                    ＋
+                  </button>
+                </span>
+              ))}
           </div>
         </div>
       </li>
@@ -476,38 +569,37 @@ export function MobileOrderView({
             {/* ご注文内容 (合計の上)。カートマーク+点数のタップで明細を開閉。明細では −n+ で増減。 */}
             {cartOpen && (
               <ul className="space-y-2 border-b border-slate-100 pb-3">
-                {config.menu
-                  .filter((m) => (qty[m.id] ?? 0) > 0)
-                  .map((m) => {
-                    const n = qty[m.id] ?? 0;
-                    return (
-                      <li key={m.id} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="min-w-0 flex-1 truncate text-slate-700">{m.name}</span>
-                        <span className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setItemQty(m.id, n - 1)}
-                            aria-label={t('qtyDecrease')}
-                            className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
-                          >
-                            −
-                          </button>
-                          <span className="w-5 text-center text-sm font-semibold tabular-nums">{n}</span>
-                          <button
-                            type="button"
-                            onClick={() => setItemQty(m.id, n + 1)}
-                            aria-label={t('qtyIncrease')}
-                            className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
-                          >
-                            ＋
-                          </button>
-                        </span>
-                        <span className="w-16 shrink-0 text-right tabular-nums text-slate-600">
-                          {formatUnits(parseUnits(m.price, decimals) * BigInt(n), decimals)}
-                        </span>
-                      </li>
-                    );
-                  })}
+                {cartLines.map((l) => {
+                  const adjust = (n: number) =>
+                    l.isOption ? setOptionEntryQty(l.key, n) : setItemQty(l.itemId, n);
+                  return (
+                    <li key={l.key} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate text-slate-700">{l.name}</span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => adjust(l.qty - 1)}
+                          aria-label={t('qtyDecrease')}
+                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                        >
+                          −
+                        </button>
+                        <span className="w-5 text-center text-sm font-semibold tabular-nums">{l.qty}</span>
+                        <button
+                          type="button"
+                          onClick={() => adjust(l.qty + 1)}
+                          aria-label={t('qtyIncrease')}
+                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                        >
+                          ＋
+                        </button>
+                      </span>
+                      <span className="w-16 shrink-0 text-right tabular-nums text-slate-600">
+                        {formatUnits(parseUnits(l.price, decimals) * BigInt(l.qty), decimals)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {/* 合計 = カートマーク + 点数 (タップで上の明細を開閉) + 総額 */}
@@ -573,6 +665,21 @@ export function MobileOrderView({
           ),
         })}
       </p>
+
+      {/* オプション選択モーダル (flag ON + options 有り商品をタップしたとき)。確定で optionEntries へ。 */}
+      {optionModalItem && (
+        <OptionSelectModal
+          open
+          itemName={optionModalItem.name}
+          basePrice={optionModalItem.price}
+          options={optionModalItem.options ?? []}
+          symbol="JPYC"
+          onConfirm={(choices, selections) =>
+            addOptionEntry(optionModalItem, choices, selections)
+          }
+          onClose={() => setOptionModalItem(null)}
+        />
+      )}
     </div>
   );
 }

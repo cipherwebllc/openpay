@@ -4,7 +4,7 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
 // Phase 1 flag (おすすめチェックボックスのゲート)。既定 OFF=非表示。
-const envHold = vi.hoisted(() => ({ enableShopLive: false }));
+const envHold = vi.hoisted(() => ({ enableShopLive: false, enableMenuOptions: false }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -13,6 +13,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       get enableShopLive() {
         return envHold.enableShopLive;
+      },
+      get enableMenuOptions() {
+        return envHold.enableMenuOptions;
       },
     },
   };
@@ -51,6 +54,7 @@ describe('ProductPresetManager', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     envHold.enableShopLive = false; // 既定 OFF (おすすめチェックボックス非表示)
+    envHold.enableMenuOptions = false; // 既定 OFF (オプション編集非表示)
   });
 
   it('プリセット一覧を表示する', () => {
@@ -147,5 +151,21 @@ describe('ProductPresetManager', () => {
     expect(
       screen.getByText('プリセットがありません。下のフォームから追加できます。'),
     ).toBeInTheDocument();
+  });
+
+  it('オプション編集: flag ON で表示・「オプションを追加」で updatePreset(options)', () => {
+    envHold.enableMenuOptions = true;
+    const fns = setup([preset({ id: 'a' })]);
+    expect(screen.getByText('オプション（サイズ/トッピング）')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'オプションを追加' }));
+    expect(fns.updatePreset).toHaveBeenCalledWith(
+      'a',
+      expect.objectContaining({ options: expect.any(Array) }),
+    );
+  });
+
+  it('オプション編集: flag OFF では非表示', () => {
+    setup([preset({ id: 'a' })]);
+    expect(screen.queryByText('オプション（サイズ/トッピング）')).toBeNull();
   });
 });

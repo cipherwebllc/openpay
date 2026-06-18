@@ -489,6 +489,13 @@ export const env = {
   // (recommended フィールドの保存/写像など data 層は常時有効=表示しないので inert。)
   // 要 KV + NEXT_PUBLIC_ENABLE_HANDLES + NEXT_PUBLIC_ENABLE_MOBILE_ORDER。計画: plans/restaurant-pos-roadmap.md。
   enableShopLive: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_SHOP_LIVE),
+  // メニューオプション (サイズ/トッピング) の有効化フラグ (client 露出)。**既定 OFF で完全 inert** =
+  // オプション編集 UI 非表示・顧客/レジは options を読まず従来の数量ステッパ直追加・既存メニュー(options
+  // 無)は不変。ON のとき商品に OptionGroup[](single=サイズ / multi=トッピング・非負 priceDelta)を定義でき、
+  // 選択で cart line の実効単価=base+Σdelta + 表示名サフィックス化する (URL/order スキーマは無改変=
+  // lib/menuOptions の非対称設計)。recommended 等と同様 data 層 (検証/写像/保存) は常時有効だが表示しない
+  // ので inert。計画: plans/restaurant-pos-roadmap.md Phase 2。
+  enableMenuOptions: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MENU_OPTIONS),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

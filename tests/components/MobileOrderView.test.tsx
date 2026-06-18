@@ -10,6 +10,7 @@ const envHold = vi.hoisted(() => ({
   enableOrderRelay: false,
   enableMobileOrderFee: false,
   enableShopLive: false,
+  enableMenuOptions: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -25,6 +26,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableShopLive() {
         return envHold.enableShopLive;
+      },
+      get enableMenuOptions() {
+        return envHold.enableMenuOptions;
       },
     },
   };
@@ -52,6 +56,7 @@ afterEach(() => {
   envHold.enableOrderRelay = false; // 受注リレー flag を毎回 OFF に戻す
   envHold.enableMobileOrderFee = false; // モバイル注文利用料 flag も毎回 OFF に戻す
   envHold.enableShopLive = false; // Phase 1 flag も毎回 OFF に戻す
+  envHold.enableMenuOptions = false; // Phase 2 flag も毎回 OFF に戻す
 });
 
 describe('MobileOrderView', () => {
@@ -512,5 +517,66 @@ describe('MobileOrderView ライブ運用状態 (live)', () => {
     expect(screen.getByText('おすすめ')).toBeInTheDocument();
     // おすすめ品はセクション + 通常グリッドの 2 箇所に出る。
     expect(screen.getAllByText('ブレンド').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('MobileOrderView オプション (options)', () => {
+  const sizeTopping: MobileOrderConfig = {
+    ...config,
+    menu: [
+      {
+        id: 'gyudon',
+        name: '牛丼',
+        price: '500',
+        options: [
+          {
+            id: 'g1',
+            name: 'サイズ',
+            type: 'single',
+            required: true,
+            choices: [
+              { id: 's', label: '小盛り', priceDelta: '0' },
+              { id: 'l', label: '大盛り', priceDelta: '200' },
+            ],
+          },
+          {
+            id: 'g2',
+            name: 'トッピング',
+            type: 'multi',
+            choices: [{ id: 'ebi', label: 'えび', priceDelta: '150' }],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('flag OFF: options 商品でも従来の数量ステッパ (モーダル無し)', () => {
+    renderWithIntl(<MobileOrderView config={sizeTopping} />);
+    expect(screen.getByRole('button', { name: '数量を増やす' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /選ぶ/ })).toBeNull();
+  });
+
+  it('flag ON: 選ぶ→選択→実効単価(850)+サフィックス名でカート追加', () => {
+    envHold.enableMenuOptions = true;
+    renderWithIntl(<MobileOrderView config={sizeTopping} />);
+    // options 商品はステッパでなく「選ぶ」ボタン。
+    expect(screen.queryByRole('button', { name: '数量を増やす' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /選ぶ/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /大盛り/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /えび/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'カートに追加' }));
+    // 合計 = 500 + 200 + 150 = 850 JPYC (利用料 flag OFF)。
+    expect(screen.getByText('850 JPYC')).toBeInTheDocument();
+    // 明細を開くとサフィックス名。
+    fireEvent.click(screen.getByRole('button', { name: /ご注文内容/ }));
+    expect(screen.getByText('牛丼（大盛り・えび）')).toBeInTheDocument();
+  });
+
+  it('flag ON: 既定 (single 先頭=小盛り) で確定 → 500 で追加', () => {
+    envHold.enableMenuOptions = true;
+    renderWithIntl(<MobileOrderView config={sizeTopping} />);
+    fireEvent.click(screen.getByRole('button', { name: /選ぶ/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'カートに追加' }));
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
   });
 });

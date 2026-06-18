@@ -139,6 +139,8 @@ function presetToMenuItem(p: ProductPreset): MenuItem | null {
   if (p.category && p.category.trim()) item.category = p.category.trim();
   // おすすめ (公開ページ先頭の「おすすめ」セクション用)。true のときだけ載せる。
   if (p.recommended) item.recommended = true;
+  // オプション (サイズ/トッピング)。最終検証は validateOrderConfig→validMenuItem が行う。
+  if (p.options && p.options.length > 0) item.options = p.options;
   return item;
 }
 
@@ -203,6 +205,7 @@ export function menuToPresets(menu: MenuItem[]): ProductPreset[] {
     image: m.visual?.kind === 'image' ? m.visual.url : undefined,
     category: m.category,
     recommended: m.recommended ? true : undefined,
+    options: m.options,
     sortOrder: i,
     enabled: true,
   }));
