@@ -40,11 +40,11 @@ export type StoredOrder = {
   fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
   // 受取予定時刻 (ms・Phase 4・preorder で顧客が選んだスロット)。未指定=即時/店頭。表示用 (advisory)。
   pickupAt?: number;
-  // 厨房/ホールの **店舗別「完了」フラグ** (店主操作・厨房モニター=調理済み / ホール配膳=配膳済み)。
-  // fulfilled (受注の対応済み) とも互いとも独立 (厨房で調理済みにしてもホールには影響しない)。
-  // 各ボードは自分のフラグで active/done を分け、done は折りたたみへ。保存時は true のときだけ持つ。
+  // 厨房モニターの **中間「調理済み」フラグ** (店主操作・調理が終わった合図)。fulfilled (対応済み) とは
+  // 独立 = 調理済みにしてもオーダーは未対応のまま (ホールが配膳=対応済みにするまで残る)。厨房ボードは
+  // これで active/done を分け done は折りたたみへ。保存時は true のときだけ持つ。
+  // ※ ホールの「配膳済み」は別フラグを持たず **fulfilled (対応済み) そのもの** (配膳済み=対応済み)。
   kitchenDone?: boolean;
-  hallDone?: boolean;
 };
 
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
@@ -138,9 +138,8 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt) && o.pickupAt > 0) {
     order.pickupAt = o.pickupAt;
   }
-  // 店舗別完了フラグ (true のときだけ保持・旧データは未設定=未完了)。
+  // 厨房の調理済み (true のときだけ保持・旧データは未設定=未完了)。
   if (o.kitchenDone === true) order.kitchenDone = true;
-  if (o.hallDone === true) order.hallDone = true;
   return order;
 }
 
@@ -150,9 +149,9 @@ export type OrderFeedOp =
   | { kind: 'fulfill'; value: boolean } // 注文「対応済み」(削除でなくフラグ)
   | { kind: 'itemCooked'; index: number; value: boolean } // 商品別「調理済み」(キッチン)
   | { kind: 'itemServed'; index: number; value: boolean } // 商品別「配膳済み」(ホール)
-  | { kind: 'kitchenDone'; value: boolean } // 注文単位「調理済み」(厨房モニター・折りたたみへ)
-  | { kind: 'hallDone'; value: boolean } // 注文単位「配膳済み」(ホール配膳・折りたたみへ)
+  | { kind: 'kitchenDone'; value: boolean } // 注文単位「調理済み」(厨房モニター・中間・折りたたみへ)
   | { kind: 'setTable'; table: string | null }; // テーブル訂正
+// ※ ホールの「配膳済み」は専用 op を持たず fulfill (対応済み) を使う (配膳済み=対応済み)。
 
 function isItemIndex(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < ORDER_ITEMS_MAX;
@@ -188,10 +187,6 @@ export function parseOrderFeedOp(body: unknown): { txHash: string; op: OrderFeed
       return typeof o.value === 'boolean'
         ? { txHash, op: { kind: 'kitchenDone', value: o.value } }
         : null;
-    case 'hallDone':
-      return typeof o.value === 'boolean'
-        ? { txHash, op: { kind: 'hallDone', value: o.value } }
-        : null;
     case 'setTable':
       // table は **明示的に string か null のみ** 受理 (未指定/数値等の誤入力で既存テーブルを
       // 黙ってクリアしない)。null は意図的なクリア (テイクアウト化)。
@@ -209,8 +204,6 @@ export function applyOrderOp(order: StoredOrder, op: OrderFeedOp): StoredOrder {
       return { ...order, fulfilled: op.value };
     case 'kitchenDone':
       return { ...order, kitchenDone: op.value };
-    case 'hallDone':
-      return { ...order, hallDone: op.value };
     case 'setTable':
       return { ...order, table: op.table };
     case 'itemCooked':

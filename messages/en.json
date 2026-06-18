@@ -1836,6 +1836,7 @@
     "servedUndo": "Mark not served",
     "cookedSection": "Cooked",
     "servedSection": "Served",
+    "readyToServe": "Ready to serve",
     "claimedNote": "Items and table are customer-declared (amount is verified on-chain).",
     "updateError": "Couldn't apply the change. Please try again.",
     "pickupAt": "Pickup {time}",

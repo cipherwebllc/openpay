@@ -128,38 +128,38 @@ describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', (
     expect(parseStoredOrder(JSON.stringify(noField))?.fulfilled).toBe(false);
   });
 
-  it('kitchenDone / hallDone は true のときだけ復元 (旧データ=未設定)', () => {
+  it('kitchenDone は true のときだけ復元 (旧データ=未設定)', () => {
     const k = parseStoredOrder(serializeOrder(order({ kitchenDone: true })));
     expect(k?.kitchenDone).toBe(true);
-    expect(k?.hallDone).toBeUndefined();
     // 非 true / 欠落は undefined。
-    expect(parseStoredOrder(JSON.stringify({ ...order(), hallDone: 'yes' }))?.hallDone).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), kitchenDone: 'yes' }))?.kitchenDone).toBeUndefined();
     expect(parseStoredOrder(serializeOrder(order()))?.kitchenDone).toBeUndefined();
   });
 });
 
-describe('orderRelay: 店舗別完了 op (kitchenDone / hallDone)', () => {
+describe('orderRelay: 厨房の調理済み op (kitchenDone) — 配膳済みは fulfill を使う', () => {
   it('parseOrderFeedOp: boolean のみ受理・非 boolean は null', () => {
     expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'kitchenDone', value: true } })).toEqual({
       txHash: TX,
       op: { kind: 'kitchenDone', value: true },
     });
-    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'hallDone', value: false } })).toEqual({
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'kitchenDone', value: false } })).toEqual({
       txHash: TX,
-      op: { kind: 'hallDone', value: false },
+      op: { kind: 'kitchenDone', value: false },
     });
     expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'kitchenDone', value: 'x' } })).toBeNull();
+    // hallDone op は廃止 (ホール配膳済み=fulfill)。未知の kind は null。
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'hallDone', value: true } })).toBeNull();
   });
 
-  it('applyOrderOp: 各フラグを独立に設定 (kitchenDone は hallDone に影響しない)', () => {
+  it('applyOrderOp: kitchenDone は fulfilled (対応済み) に影響しない (中間フラグ)', () => {
     const o = order();
     const k = applyOrderOp(o, { kind: 'kitchenDone', value: true });
     expect(k.kitchenDone).toBe(true);
-    expect(k.hallDone).toBeUndefined();
-    const h = applyOrderOp(k, { kind: 'hallDone', value: true });
+    expect(k.fulfilled).toBe(false); // 調理済みにしても未対応のまま (ホール配膳で対応済みに)
+    // ホールの配膳済み = fulfill op = 対応済み。kitchenDone は維持。
+    const h = applyOrderOp(k, { kind: 'fulfill', value: true });
     expect(h.kitchenDone).toBe(true); // 厨房側は維持
-    expect(h.hallDone).toBe(true);
-    // fulfilled には触れない。
-    expect(h.fulfilled).toBe(false);
+    expect(h.fulfilled).toBe(true); // 配膳済み=対応済み
   });
 });

@@ -34,12 +34,15 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
   const [editTx, setEditTx] = useState<string | null>(null);
   const [tableDraft, setTableDraft] = useState('');
 
-  // 受注 (OrderFeedPanel) で「対応済み」(fulfilled) 済みは両ボードから除外。残りをこのボードの
-  // **店舗別完了フラグ** (kitchen=kitchenDone / hall=hallDone) で active/done に分ける。互いに独立 =
-  // 厨房で「調理済み」にしてもホール配膳には影響しない (最終的な対応済みは受注で行う)。
-  const orders = (feed.data ?? []).filter((o) => !o.fulfilled);
+  // active/done の分け方は mode で異なる:
+  //  - 厨房: 「調理済み」(kitchenDone) は **中間**。fulfilled 済みは除外し、kitchenDone で折りたたむ
+  //    (調理済みでもオーダーは未対応のまま = ホールが配膳するまで残る)。
+  //  - ホール: 「配膳済み」= **対応済み (fulfilled)**。全件を対象に fulfilled で active/done を分ける
+  //    (配膳=客に提供=取引完了。受注ページの対応済みと同一・受注からも消える)。
+  const all = feed.data ?? [];
+  const orders = mode === 'kitchen' ? all.filter((o) => !o.fulfilled) : all;
   const isStationDone = (o: StoredOrder) =>
-    (mode === 'kitchen' ? o.kitchenDone : o.hallDone) === true;
+    mode === 'kitchen' ? o.kitchenDone === true : o.fulfilled;
   const activeOrders = orders.filter((o) => !isStationDone(o));
   const doneOrders = orders.filter((o) => isStationDone(o));
 
@@ -51,11 +54,12 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
           ? { kind: 'itemCooked', index, value: !on }
           : { kind: 'itemServed', index, value: !on },
     });
-  // 注文単位の「調理済み」/「配膳済み」(店舗別の完了)。クリックで done 化し折りたたみへ・戻すで復帰。
+  // 注文単位の完了。厨房=「調理済み」(中間 kitchenDone)・ホール=「配膳済み」= 対応済み (fulfill)。
+  // クリックで done 化し折りたたみへ・戻すで復帰。
   const setStationDone = (o: StoredOrder, value: boolean) =>
     update.mutate({
       txHash: o.txHash,
-      op: mode === 'kitchen' ? { kind: 'kitchenDone', value } : { kind: 'hallDone', value },
+      op: mode === 'kitchen' ? { kind: 'kitchenDone', value } : { kind: 'fulfill', value },
     });
   const doneBtnLabel = mode === 'kitchen' ? t('cookedDoneBtn') : t('servedDoneBtn');
   const undoBtnLabel = mode === 'kitchen' ? t('cookedUndo') : t('servedUndo');
@@ -119,6 +123,15 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
           ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+          {/* ホール: 全品 調理済み = 厨房完了 → 「配膳準備OK」(配膳待ちが一目で分かる)。 */}
+          {mode === 'hall' &&
+          !inDone &&
+          o.items.length > 0 &&
+          o.items.every((it) => it.cooked === true) ? (
+            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-bold text-emerald-700">
+              {t('readyToServe')}
+            </span>
+          ) : null}
           <span className="text-xs text-slate-400">{chainLabel(o.chainId)}</span>
           {/* 受取予定時刻 (Phase 4・preorder のみ・flag ON かつ あるとき)。Asia/Tokyo HH:mm。 */}
           {env.enablePreorderTime && o.pickupAt ? (

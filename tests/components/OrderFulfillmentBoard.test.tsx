@@ -149,10 +149,10 @@ describe('OrderFulfillmentBoard', () => {
     expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'kitchenDone', value: true } });
   });
 
-  it('ホール: 注文単位「配膳済み」→ hallDone op を発火', () => {
+  it('ホール: 注文単位「配膳済み」→ fulfill op を発火 (配膳済み=対応済み)', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
     fireEvent.click(screen.getByRole('button', { name: '配膳済み' }));
-    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'hallDone', value: true } });
+    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'fulfill', value: true } });
   });
 
   it('厨房: kitchenDone 済みは active から消え「調理済み」折りたたみへ + 未調理に戻す', () => {
@@ -164,10 +164,52 @@ describe('OrderFulfillmentBoard', () => {
     expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'kitchenDone', value: false } });
   });
 
-  it('独立性: kitchenDone 済みでも ホール配膳では active のまま (hallDone とは別)', () => {
+  it('ホール: fulfilled (配膳済み) は active から消え「配膳済み」折りたたみへ + 未配膳に戻す', () => {
+    feedHold.data = [order({ fulfilled: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText('未完了の受注はありません。')).toBeInTheDocument(); // active 空
+    expect(screen.getByText(/配膳済み \(1\)/)).toBeInTheDocument(); // 折りたたみセクション
+    fireEvent.click(screen.getByRole('button', { name: '未配膳に戻す' }));
+    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'fulfill', value: false } });
+  });
+
+  it('厨房: fulfilled (ホール配膳済み=対応済み) は厨房から完全に消える', () => {
+    feedHold.data = [order({ fulfilled: true, kitchenDone: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    // 厨房は !fulfilled のみ対象 → 対応済みは active にも折りたたみにも出ない (受注で確定済み)。
+    expect(screen.getByText('未対応の受注はありません。')).toBeInTheDocument();
+    expect(screen.queryByText(/牛丼/)).toBeNull();
+  });
+
+  it('独立性: kitchenDone 済みでも ホール配膳では active のまま (調理済み≠対応済み)', () => {
     feedHold.data = [order({ kitchenDone: true })];
     renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
     expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument(); // active カード
     expect(screen.queryByText('未完了の受注はありません。')).toBeNull();
+  });
+
+  it('ホール: 全品 調理済み (cooked) なら「配膳準備OK」バッジを表示', () => {
+    feedHold.data = [order({ items: [{ name: '牛丼', qty: 1, price: '500', cooked: true }] })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText('配膳準備OK')).toBeInTheDocument();
+  });
+
+  it('ホール: 一部未調理なら「配膳準備OK」バッジは出さない', () => {
+    feedHold.data = [
+      order({
+        items: [
+          { name: '牛丼', qty: 1, price: '500', cooked: true },
+          { name: '味噌汁', qty: 1, price: '100' },
+        ],
+      }),
+    ];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.queryByText('配膳準備OK')).toBeNull();
+  });
+
+  it('ホール: 明細が空なら「配膳準備OK」は出さない (every() の空配列 true を items.length>0 で防ぐ)', () => {
+    feedHold.data = [order({ items: [] })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.queryByText('配膳準備OK')).toBeNull();
   });
 });

@@ -1836,6 +1836,7 @@
     "servedUndo": "未配膳に戻す",
     "cookedSection": "調理済み",
     "servedSection": "配膳済み",
+    "readyToServe": "配膳準備OK",
     "claimedNote": "明細・テーブルは顧客申告です（金額はオンチェーン検証済み）。",
     "updateError": "操作を反映できませんでした。もう一度お試しください。",
     "pickupAt": "受取 {time}",
