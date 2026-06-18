@@ -18,6 +18,7 @@ vi.mock('next/og', () => ({
 
 const h = vi.hoisted(() => ({
   enableHandles: true,
+  enableMobileOrder: false,
   record: null as unknown,
   resolveOk: true,
 }));
@@ -29,6 +30,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       get enableHandles() {
         return h.enableHandles;
+      },
+      get enableMobileOrder() {
+        return h.enableMobileOrder;
       },
     },
   };
@@ -86,8 +90,31 @@ const RECORD = {
   updatedAt: 2,
 };
 
+// storefront 公開済みレコード (handleStorefrontConfig が MobileOrderConfig を返せる形)。
+const STORE_RECORD = {
+  owner: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+  config: {
+    to: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    name: '山田太郎',
+    methods: [{ token: 'jpyc', chain: 'polygon' }],
+  },
+  profile: { avatar: 'https://cdn.example.com/p.png' },
+  storefront: {
+    chain: 'polygon',
+    mode: 'storefront',
+    feePayer: 'merchant',
+    shopName: '山田カフェ',
+    tagline: 'こだわり珈琲とケーキ',
+    avatar: 'https://cdn.example.com/shop.png',
+    menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
+  },
+  createdAt: 1,
+  updatedAt: 2,
+};
+
 beforeEach(() => {
   h.enableHandles = true;
+  h.enableMobileOrder = false;
   h.resolveOk = true;
   h.record = RECORD;
 });
@@ -212,5 +239,78 @@ describe('GET /api/og/handle', () => {
     h.enableHandles = true;
     const second = await callGet('h=!!&locale=ja');
     expect(collectText(second.element).join(' ')).toContain('チップを送る');
+  });
+
+  it('storefront 公開 + enableMobileOrder ON: モバイルオーダー店舗カード (店名/ひとこと/JPYC + 店舗アバター)', async () => {
+    h.enableMobileOrder = true;
+    h.record = STORE_RECORD;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
+    const { element } = await callGet('h=yamada&locale=ja');
+    const text = collectText(element).join(' ');
+    expect(text).toContain('山田カフェ'); // 店名 (プロフ名 '山田太郎' ではない)
+    expect(text).not.toContain('山田太郎');
+    expect(text).toContain('@yamada');
+    expect(text).toContain('こだわり珈琲とケーキ'); // tagline = bio 行
+    expect(text).toContain('スマホで注文');
+    expect(text).toContain('JPYC で支払い');
+    expect(text).not.toContain('JPYC で応援'); // プロフピルは出ない
+    // 店舗アバターが data URL の img として描かれる。
+    const srcs = collectImgSrcs(element);
+    expect(srcs.some((s) => s.startsWith('data:image/png;base64,'))).toBe(true);
+  });
+
+  it('storefront あっても enableMobileOrder OFF はプロフカード (inert)', async () => {
+    h.enableMobileOrder = false;
+    h.record = STORE_RECORD;
+    // プロフ経路の avatar fetch は非画像で null (実ネットワークを使わない)。
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('x', { status: 200, headers: { 'content-type': 'text/html' } }),
+      ),
+    );
+    const { element } = await callGet('h=yamada&locale=ja');
+    const text = collectText(element).join(' ');
+    expect(text).toContain('山田太郎'); // プロフ名
+    expect(text).toContain('JPYC で応援'); // プロフピル
+    expect(text).not.toContain('スマホで注文');
+  });
+
+  it('enableMobileOrder ON でも storefront 未公開ならプロフカード (else 分岐)', async () => {
+    h.enableMobileOrder = true;
+    h.record = RECORD; // storefront フィールド無し → handleStorefrontConfig は null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('x', { status: 200, headers: { 'content-type': 'text/html' } }),
+      ),
+    );
+    const { element } = await callGet('h=masia&locale=ja');
+    const text = collectText(element).join(' ');
+    expect(text).toContain('山田太郎'); // プロフ名
+    expect(text).toContain('JPYC で応援');
+    expect(text).not.toContain('スマホで注文');
+  });
+
+  it('storefront アバターが localhost は SSRF ガードで弾かれイニシャルへ', async () => {
+    h.enableMobileOrder = true;
+    h.record = {
+      ...STORE_RECORD,
+      storefront: { ...STORE_RECORD.storefront, avatar: 'https://localhost/shop.png' },
+    };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const { element } = await callGet('h=yamada&locale=ja');
+    expect(fetchSpy).not.toHaveBeenCalled(); // ブロックホストは fetch せず弾く
+    expect(collectImgSrcs(element)).toHaveLength(1); // ブランドアイコンのみ (店舗アバターは弾かれた)
+    expect(collectText(element).join(' ')).toContain('山'); // 店名イニシャル fallback
   });
 });

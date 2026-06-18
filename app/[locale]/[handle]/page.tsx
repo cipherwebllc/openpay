@@ -25,6 +25,7 @@ import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/
 import { resolveHandle } from '@/lib/handleStore';
 import {
   buildTipMeta,
+  buildStorefrontMeta,
   buildHandleOgImageUrl,
   tokenLabelFor,
   type TipCardFacts,
@@ -58,9 +59,37 @@ export async function generateMetadata({
     const generic = buildTipMeta(null, ogLocale);
     return { title: generic.title, description: generic.description };
   }
-  const c = resolved.record.config;
+  const record = resolved.record;
+  const c = record.config;
   const normalized = normalizeHandle(segment);
-  // タイトルは link-in-bio らしく「名前 (@handle)」。説明は bio があれば bio を優先。
+  // OGP 画像 (/api/og/handle) は同じ KV レコードから storefront を検出し、店舗カード or
+  // プロフカードを描き分ける (URL は共通なのでここでは渡し分け不要)。
+  const ogImage = buildHandleOgImageUrl(normalized, ogLocale);
+  const toMeta = (title: string, description: string): Metadata => ({
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: 'website',
+      images: [{ url: ogImage, width: 1200, height: 630, alt: title }],
+    },
+    twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
+  });
+
+  // storefront 公開時はモバイルオーダー訴求の meta にする (プロフ link-in-bio ではなく)。
+  const storefront = env.enableMobileOrder
+    ? handleStorefrontConfig(record, normalized)
+    : null;
+  if (storefront) {
+    const meta = buildStorefrontMeta(
+      { handle: normalized, shopName: storefront.shopName, tagline: storefront.tagline },
+      ogLocale,
+    );
+    return toMeta(meta.title, meta.description);
+  }
+
+  // プロフ (link-in-bio) の meta。タイトルは「名前 (@handle)」・説明は bio があれば優先。
   const title = c.name
     ? `${c.name} (@${normalized}) — OpenPay`
     : `@${normalized} — OpenPay`;
@@ -70,31 +99,14 @@ export async function generateMetadata({
     tokenLabel: tokenLabelFor(primary.token),
     gasless: true,
   };
-  const bio = resolved.record.profile?.bio?.trim();
+  const bio = record.profile?.bio?.trim();
   const description =
     bio && bio.length > 0
       ? bio.length > 90
         ? `${bio.slice(0, 90)}…`
         : bio
       : buildTipMeta(facts, ogLocale).description;
-  // OGP 画像はプロフ専用カード (KV からアバター/名前/bio を解決して描画)。
-  const ogImage = buildHandleOgImageUrl(normalized, ogLocale);
-  return {
-    title,
-    description,
-    openGraph: {
-      title,
-      description,
-      type: 'website',
-      images: [{ url: ogImage, width: 1200, height: 630, alt: title }],
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title,
-      description,
-      images: [ogImage],
-    },
-  };
+  return toMeta(title, description);
 }
 
 export default async function HandlePage({

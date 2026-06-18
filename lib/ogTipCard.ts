@@ -304,3 +304,66 @@ export function buildHandleOgImageUrl(
   q.set('locale', locale);
   return `/api/og/handle?${q.toString()}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// モバイルオーダー店舗カード (storefront 公開 @handle 用)。
+// 店舗ページ (open-pay.jp/@shop) を SNS に貼ったとき、link-in-bio のプロフカードではなく
+// 「スマホでメニューを見て JPYC で注文」を訴求する店舗カードを出す。page.tsx の
+// generateMetadata と /api/og/handle が storefront 公開時にこちらへ分岐する。
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StorefrontOgInput {
+  handle: string; // normalize 済み ('yamada')
+  shopName?: string;
+  tagline?: string; // 店名の下のひとこと (任意)
+  locale: TipOgLocale;
+}
+
+/** storefront 公開 @handle の OG カード描画モデル (純関数・単体テスト対象)。 */
+export function buildStorefrontOgModel(input: StorefrontOgInput): OgCardModel {
+  const ja = input.locale === 'ja';
+  const name = displayName(input.shopName) ?? `@${input.handle}`;
+  const tagClean = input.tagline ? stripControlChars(input.tagline).trim() : '';
+  const bio =
+    tagClean.length === 0 ? undefined : truncateGraphemes(tagClean, OG_BIO_DISPLAY_MAX);
+  return {
+    accent: OG_DEFAULT_COLOR,
+    heading: name,
+    handleLine: `@${input.handle}`,
+    bio,
+    chips: ja
+      ? ['スマホで注文', 'JPYC で支払い']
+      : ['Order on your phone', 'Pay in JPYC'],
+    initial: firstGrapheme(input.shopName ?? input.handle).toUpperCase(),
+    footer: ja ? 'メニューを見てそのまま注文' : 'Browse the menu and order',
+    url: 'open-pay.jp',
+    brand: 'OpenPay',
+  };
+}
+
+export interface StorefrontMetaFacts {
+  handle: string; // normalize 済み ('yamada')。shopName 欠落時の表示フォールバック。
+  shopName?: string;
+  tagline?: string;
+}
+
+/** storefront 公開 @handle の generateMetadata 用 title / description (locale 別)。
+ *  shopName 欠落時は OG カード (buildStorefrontOgModel) と同じく @handle へフォールバックし、
+ *  カードと meta の見出しを一致させる。 */
+export function buildStorefrontMeta(
+  facts: StorefrontMetaFacts,
+  locale: TipOgLocale,
+): { title: string; description: string } {
+  const ja = locale === 'ja';
+  const name = displayName(facts.shopName) ?? `@${facts.handle}`;
+  const tagClean = facts.tagline ? stripControlChars(facts.tagline).trim() : '';
+  const tag = tagClean.length > 0 ? truncateGraphemes(tagClean, 60) : '';
+  if (ja) {
+    const title = `${name} のモバイルオーダー — OpenPay`;
+    const base = `${name} はスマホでメニューを見て注文・JPYC で決済できます。`;
+    return { title, description: tag ? `${tag}｜${base}` : base };
+  }
+  const title = `${name} — Mobile Order on OpenPay`;
+  const base = `Browse ${name}'s menu and order from your phone, paying in JPYC.`;
+  return { title, description: tag ? `${tag} — ${base}` : base };
+}

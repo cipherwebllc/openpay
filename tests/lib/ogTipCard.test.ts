@@ -3,6 +3,8 @@ import {
   buildTipOgModel,
   buildTipOgImageUrl,
   buildTipMeta,
+  buildStorefrontOgModel,
+  buildStorefrontMeta,
   OG_DEFAULT_COLOR,
 } from '@/lib/ogTipCard';
 
@@ -291,5 +293,87 @@ describe('buildHandleOgModel / buildHandleOgImageUrl', () => {
   it('og:image URL は /api/og/handle?h=&locale=', async () => {
     const { buildHandleOgImageUrl } = await import('@/lib/ogTipCard');
     expect(buildHandleOgImageUrl('masia', 'ja')).toBe('/api/og/handle?h=masia&locale=ja');
+  });
+});
+
+describe('buildStorefrontOgModel (モバイルオーダー店舗カード)', () => {
+  it('ja: 店名・@handle・tagline(bio)・店舗ピル・イニシャル', () => {
+    const m = buildStorefrontOgModel({
+      handle: 'yamada',
+      shopName: '山田カフェ',
+      tagline: 'こだわり珈琲',
+      locale: 'ja',
+    });
+    expect(m.heading).toBe('山田カフェ');
+    expect(m.handleLine).toBe('@yamada');
+    expect(m.bio).toBe('こだわり珈琲');
+    expect(m.chips).toEqual(['スマホで注文', 'JPYC で支払い']);
+    expect(m.initial).toBe('山');
+    expect(m.accent).toBe(OG_DEFAULT_COLOR);
+    expect(m.brand).toBe('OpenPay');
+  });
+
+  it('en: English のピル・tagline 無しは bio undefined', () => {
+    const m = buildStorefrontOgModel({ handle: 'yamada', shopName: 'Yamada Cafe', locale: 'en' });
+    expect(m.chips).toEqual(['Order on your phone', 'Pay in JPYC']);
+    expect(m.bio).toBeUndefined();
+    expect(m.initial).toBe('Y');
+  });
+
+  it('shopName 無しは @handle を heading・先頭文字を大文字イニシャルに', () => {
+    const m = buildStorefrontOgModel({ handle: 'yamada', locale: 'ja' });
+    expect(m.heading).toBe('@yamada');
+    expect(m.initial).toBe('Y');
+  });
+
+  it('制御文字を含む tagline は除去される', () => {
+    const tagline = `a${String.fromCharCode(0)}b`; // 制御文字 (NUL) 入り
+    const m = buildStorefrontOgModel({ handle: 'x', shopName: 'S', tagline, locale: 'ja' });
+    expect(m.bio).toBe('ab');
+  });
+
+  it('長い tagline は OG_BIO_DISPLAY_MAX (48) で … 付き truncate', () => {
+    const m = buildStorefrontOgModel({
+      handle: 'x',
+      shopName: 'S',
+      tagline: 'あ'.repeat(60),
+      locale: 'ja',
+    });
+    expect(m.bio).toBe(`${'あ'.repeat(48)}…`);
+  });
+});
+
+describe('buildStorefrontMeta', () => {
+  it('ja: 店名つき title + tagline を description 先頭に', () => {
+    const m = buildStorefrontMeta({ handle: 'yamada', shopName: '山田カフェ', tagline: 'こだわり珈琲' }, 'ja');
+    expect(m.title).toBe('山田カフェ のモバイルオーダー — OpenPay');
+    expect(m.description.startsWith('こだわり珈琲｜')).toBe(true);
+    expect(m.description).toContain('JPYC');
+  });
+
+  it('ja: tagline 無しは汎用 description (区切り無し)', () => {
+    const m = buildStorefrontMeta({ handle: 'yamada', shopName: '山田カフェ' }, 'ja');
+    expect(m.title).toBe('山田カフェ のモバイルオーダー — OpenPay');
+    expect(m.description).not.toContain('｜');
+    expect(m.description).toContain('JPYC');
+  });
+
+  it('en: 店名つき title/description', () => {
+    const m = buildStorefrontMeta(
+      { handle: 'yamada', shopName: 'Yamada Cafe', tagline: 'Specialty coffee' },
+      'en',
+    );
+    expect(m.title).toBe('Yamada Cafe — Mobile Order on OpenPay');
+    expect(m.description).toContain('Specialty coffee');
+    expect(m.description).toContain('JPYC');
+  });
+
+  it('shopName 無しは @handle にフォールバック (カードと一致・ja/en)', () => {
+    expect(buildStorefrontMeta({ handle: 'yamada' }, 'ja').title).toBe(
+      '@yamada のモバイルオーダー — OpenPay',
+    );
+    expect(buildStorefrontMeta({ handle: 'yamada' }, 'en').title).toBe(
+      '@yamada — Mobile Order on OpenPay',
+    );
   });
 });

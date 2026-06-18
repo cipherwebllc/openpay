@@ -11,6 +11,7 @@ import { env } from '@/lib/env';
 import {
   normalizeHandle,
   isValidHandleFormat,
+  handleStorefrontConfig,
   type HandleRecord,
 } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
@@ -19,6 +20,7 @@ import {
   buildTipOgModel,
   tipModelToCard,
   buildHandleOgModel,
+  buildStorefrontOgModel,
   type TipOgLocale,
 } from '@/lib/ogTipCard';
 import { ogCardElement, OG_FONTS, OG_WIDTH, OG_HEIGHT } from '../_card';
@@ -146,6 +148,32 @@ export async function GET(req: Request): Promise<ImageResponse> {
   if (!resolved.ok) return genericCard(locale, true);
   if (!resolved.record) return genericCard(locale);
   const record = resolved.record;
+
+  // storefront 公開時はモバイルオーダー店舗カードを描く (プロフ link-in-bio カードではなく)。
+  // 店名/ひとこと/アバターは KV レコードからサーバ権威で解決 (page.tsx と同じ単一情報源)。
+  const storefront = env.enableMobileOrder
+    ? handleStorefrontConfig(record, handle)
+    : null;
+  if (storefront) {
+    const storeCard = buildStorefrontOgModel({
+      handle,
+      shopName: storefront.shopName,
+      tagline: storefront.tagline,
+      locale,
+    });
+    const storeAvatar = storefront.avatar
+      ? await fetchAvatarDataUrl(storefront.avatar)
+      : null;
+    return new ImageResponse(ogCardElement(storeCard, storeAvatar), {
+      width: OG_WIDTH,
+      height: OG_HEIGHT,
+      fonts: OG_FONTS,
+      headers: {
+        'cache-control':
+          'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+      },
+    });
+  }
 
   const card = buildHandleOgModel({
     handle,
