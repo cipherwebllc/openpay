@@ -10,6 +10,8 @@ import {
   sanitizeTable,
   serializeOrder,
   parseStoredOrder,
+  parseOrderFeedOp,
+  applyOrderOp,
   ORDER_ITEMS_MAX,
   ORDER_ITEM_NAME_MAX,
   type StoredOrder,
@@ -124,5 +126,40 @@ describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', (
     const noField = JSON.parse(serializeOrder(order())) as Record<string, unknown>;
     delete noField.fulfilled;
     expect(parseStoredOrder(JSON.stringify(noField))?.fulfilled).toBe(false);
+  });
+
+  it('kitchenDone / hallDone は true のときだけ復元 (旧データ=未設定)', () => {
+    const k = parseStoredOrder(serializeOrder(order({ kitchenDone: true })));
+    expect(k?.kitchenDone).toBe(true);
+    expect(k?.hallDone).toBeUndefined();
+    // 非 true / 欠落は undefined。
+    expect(parseStoredOrder(JSON.stringify({ ...order(), hallDone: 'yes' }))?.hallDone).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.kitchenDone).toBeUndefined();
+  });
+});
+
+describe('orderRelay: 店舗別完了 op (kitchenDone / hallDone)', () => {
+  it('parseOrderFeedOp: boolean のみ受理・非 boolean は null', () => {
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'kitchenDone', value: true } })).toEqual({
+      txHash: TX,
+      op: { kind: 'kitchenDone', value: true },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'hallDone', value: false } })).toEqual({
+      txHash: TX,
+      op: { kind: 'hallDone', value: false },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'kitchenDone', value: 'x' } })).toBeNull();
+  });
+
+  it('applyOrderOp: 各フラグを独立に設定 (kitchenDone は hallDone に影響しない)', () => {
+    const o = order();
+    const k = applyOrderOp(o, { kind: 'kitchenDone', value: true });
+    expect(k.kitchenDone).toBe(true);
+    expect(k.hallDone).toBeUndefined();
+    const h = applyOrderOp(k, { kind: 'hallDone', value: true });
+    expect(h.kitchenDone).toBe(true); // 厨房側は維持
+    expect(h.hallDone).toBe(true);
+    // fulfilled には触れない。
+    expect(h.fulfilled).toBe(false);
   });
 });

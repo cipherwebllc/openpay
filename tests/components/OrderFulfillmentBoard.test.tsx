@@ -142,4 +142,32 @@ describe('OrderFulfillmentBoard', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
     expect(screen.queryByText(/受取 \d/)).toBeNull();
   });
+
+  it('厨房: 注文単位「調理済み」→ kitchenDone op を発火', () => {
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    fireEvent.click(screen.getByRole('button', { name: '調理済み' }));
+    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'kitchenDone', value: true } });
+  });
+
+  it('ホール: 注文単位「配膳済み」→ hallDone op を発火', () => {
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    fireEvent.click(screen.getByRole('button', { name: '配膳済み' }));
+    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'hallDone', value: true } });
+  });
+
+  it('厨房: kitchenDone 済みは active から消え「調理済み」折りたたみへ + 未調理に戻す', () => {
+    feedHold.data = [order({ kitchenDone: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('未完了の受注はありません。')).toBeInTheDocument(); // active 空
+    expect(screen.getByText(/調理済み \(1\)/)).toBeInTheDocument(); // 折りたたみセクション
+    fireEvent.click(screen.getByRole('button', { name: '未調理に戻す' }));
+    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'kitchenDone', value: false } });
+  });
+
+  it('独立性: kitchenDone 済みでも ホール配膳では active のまま (hallDone とは別)', () => {
+    feedHold.data = [order({ kitchenDone: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument(); // active カード
+    expect(screen.queryByText('未完了の受注はありません。')).toBeNull();
+  });
 });
