@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
-import { CheckCircle2, RefreshCw, UtensilsCrossed } from 'lucide-react';
+import { CheckCircle2, RefreshCw } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrderFeed } from '@/hooks/useOrderFeed';
@@ -44,8 +44,8 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
           ? { kind: 'itemCooked', index, value: !active }
           : { kind: 'itemServed', index, value: !active },
     });
-  const markDone = (o: StoredOrder) =>
-    update.mutate({ txHash: o.txHash, op: { kind: 'fulfill', value: true } });
+  // 注文「対応済み」(fulfill) は受注 (OrderFeedPanel) に集約。厨房/ホールは商品別の調理済み/配膳済み
+  // だけを扱い、対応済み (= 両画面から消える) は受注で行う (厨房で押すとホールからも消える事故を回避)。
 
   if (!isSignedIn) {
     return (
@@ -105,7 +105,9 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
                   <p className="text-xs font-medium text-slate-400">
                     {t('orderNo')} #{o.orderId}
                   </p>
-                  {editTx === o.txHash ? (
+                  {/* テーブル表示/訂正は店内 (table あり) のみ。テイクアウト (table 空) は非表示。 */}
+                  {o.table ? (
+                    editTx === o.txHash ? (
                     <div className="mt-0.5 flex items-center gap-1">
                       <input
                         value={tableDraft}
@@ -143,12 +145,11 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
                       }}
                       className="mt-0.5 flex items-center gap-1 text-left"
                     >
-                      <span className="text-lg font-bold text-slate-900">
-                        {o.table || t('tableUnset')}
-                      </span>
+                      <span className="text-lg font-bold text-slate-900">{o.table}</span>
                       <span className="text-[10px] text-slate-400">{t('tableEdit')}</span>
                     </button>
-                  )}
+                    )
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
                   <span className="text-xs text-slate-400">{chainLabel(o.chainId)}</span>
@@ -200,18 +201,10 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
                 })}
               </ul>
 
-              <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="mt-3">
                 <span className="text-xs text-slate-400">
                   {formatUnits(BigInt(o.amount), JPYC_DECIMALS)} JPYC
                 </span>
-                <button
-                  type="button"
-                  onClick={() => markDone(o)}
-                  disabled={update.isPending}
-                  className="flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-                >
-                  <UtensilsCrossed className="h-4 w-4" aria-hidden /> {t('markDone')}
-                </button>
               </div>
             </li>
           ))}

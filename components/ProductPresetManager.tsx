@@ -80,7 +80,7 @@ export function ProductPresetManager({
                 value={p.name}
                 aria-label={t('nameLabel')}
                 onChange={(e) => updatePreset(p.id, { name: e.target.value })}
-                className="min-w-0 flex-[2] rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                className="min-w-0 flex-[3] rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
                 maxLength={80}
               />
               <input
@@ -118,26 +118,6 @@ export function ProductPresetManager({
                   </option>
                 ))}
               </select>
-              <label className="flex items-center gap-1 text-xs text-slate-500">
-                <input
-                  type="checkbox"
-                  checked={p.enabled}
-                  onChange={(e) => updatePreset(p.id, { enabled: e.target.checked })}
-                />
-                {t('enabledLabel')}
-              </label>
-              {env.enableShopLive && (
-                <label className="flex items-center gap-1 text-xs text-slate-500">
-                  <input
-                    type="checkbox"
-                    checked={p.recommended ?? false}
-                    onChange={(e) =>
-                      updatePreset(p.id, { recommended: e.target.checked || undefined })
-                    }
-                  />
-                  {t('recommendedLabel')}
-                </label>
-              )}
               <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"
@@ -170,8 +150,8 @@ export function ProductPresetManager({
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
               </div>
-              {/* 専用の全幅行へ (商品名欄を潰さない)。画像 (サムネ + URL) を隣接させ、
-                  カテゴリーはラベル付きの別グループに分離 (間に挟まず分かりやすく)。 */}
+              {/* 専用の全幅行へ (商品名欄を潰さない)。画像 URL は短めにし、その横へ 表示/おすすめ
+                  チェックボックスを移動 (主行は商品名を広く取る)。カテゴリーは別グループに分離。 */}
               <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   {p.image && (
@@ -189,6 +169,27 @@ export function ProductPresetManager({
                     className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
                   />
                 </div>
+                {/* 表示 (有効) + おすすめ (主行から移動・商品名を広く取るため)。 */}
+                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => updatePreset(p.id, { enabled: e.target.checked })}
+                  />
+                  {t('enabledLabel')}
+                </label>
+                {env.enableShopLive && (
+                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={p.recommended ?? false}
+                      onChange={(e) =>
+                        updatePreset(p.id, { recommended: e.target.checked || undefined })
+                      }
+                    />
+                    {t('recommendedLabel')}
+                  </label>
+                )}
                 <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
                   {t('categoryLabel')}
                   <input

@@ -89,13 +89,12 @@ describe('OrderFulfillmentBoard', () => {
     });
   });
 
-  it('「対応済み」で fulfill op を発火', () => {
+  it('対応済み(fulfill)ボタンは出さない (受注で確定・厨房→ホール連動消失を回避)', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
-    fireEvent.click(screen.getByRole('button', { name: '対応済み' }));
-    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'fulfill', value: true } });
+    expect(screen.queryByRole('button', { name: '対応済み' })).toBeNull();
   });
 
-  it('テーブル訂正: 編集→保存で setTable op を発火', () => {
+  it('テーブル訂正: 編集→保存で setTable op を発火 (店内・table あり)', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
     fireEvent.click(screen.getByRole('button', { name: /T1/ })); // テーブル編集を開く
     fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: 'B2' } });
@@ -104,6 +103,15 @@ describe('OrderFulfillmentBoard', () => {
       txHash: TX,
       op: { kind: 'setTable', table: 'B2' },
     });
+  });
+
+  it('テイクアウト (table 空) はテーブル未設定/訂正を出さない', () => {
+    feedHold.data = [order({ table: null })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.queryByText('テーブル未設定')).toBeNull();
+    expect(screen.queryByText('訂正')).toBeNull();
+    // 商品 (調理対象) は出る (テイクアウトでも厨房は調理する)。
+    expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument();
   });
 
   it('対応済みの注文は表示しない (未対応のみ)', () => {

@@ -15,7 +15,16 @@ async function fetchJson(url: string, init?: RequestInit) {
   return { ok: res.ok, json };
 }
 
-export function ShopLivePanel({ handle, menu }: { handle: string; menu: MenuItem[] }) {
+export function ShopLivePanel({
+  handle,
+  menu,
+  hideHeading,
+}: {
+  handle: string;
+  menu: MenuItem[];
+  /** 親 (受注の details 等) が見出しを担うとき内部 h4 を省く (重複回避)。 */
+  hideHeading?: boolean;
+}) {
   const t = useTranslations('ShopLive');
   const qc = useQueryClient();
 
@@ -49,7 +58,7 @@ export function ShopLivePanel({ handle, menu }: { handle: string; menu: MenuItem
 
   return (
     <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <h4 className="text-xs font-semibold text-slate-700">{t('heading')}</h4>
+      {!hideHeading && <h4 className="text-xs font-semibold text-slate-700">{t('heading')}</h4>}
       <p className="mt-0.5 text-[11px] text-slate-500">{t('intro')}</p>
       {live.isLoading ? (
         <p className="mt-2 text-xs text-slate-400">{t('loading')}</p>

@@ -48,8 +48,9 @@ export default function CreatePage() {
             ...(env.enableMobileOrder
               ? ([['mobileOrder', t('tabs.mobileOrder')]] as const)
               : []),
-            // 「受注」(受注リレー) は flag ON のときだけ露出 (既定 OFF=本番非表示)。
-            ...(env.enableOrderRelay
+            // 「受注」は 受注リレー or 営業中の操作 (shop-live) のどちらかが ON なら露出
+            // (既定 OFF=本番非表示)。営業中の操作 はこのタブに移設したので shop-live 単独でも開けるように。
+            ...(env.enableOrderRelay || env.enableShopLive
               ? ([['orders', t('tabs.orders')]] as const)
               : []),
             ['tip', t('tabs.tip')],
@@ -104,7 +105,7 @@ export default function CreatePage() {
           onGetHandle={() => setTab('profile')}
         />
       )}
-      {tab === 'orders' && env.enableOrderRelay && <OrderFeedPanel />}
+      {tab === 'orders' && (env.enableOrderRelay || env.enableShopLive) && <OrderFeedPanel />}
 
       <MiniHistoryRecent />
 

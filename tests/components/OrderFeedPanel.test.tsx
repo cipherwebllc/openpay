@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   feedOk: true,
   orders: [] as unknown[],
   feedStatus: 200,
+  handles: [] as unknown[], // GET /api/handle (営業中の操作 用所有 handle)
 }));
 
 vi.mock('@/hooks/useSiweSession', () => ({
@@ -27,6 +28,35 @@ vi.mock('@/hooks/useSiweSession', () => ({
   }),
 }));
 
+// 受注の導線/営業中の操作は flag 裏。既定 OFF=従来挙動 (既存テスト不変)。
+const envHold = vi.hoisted(() => ({
+  enableOrderRelay: true, // 受注フィード本体 (既定 ON=既存テストはフィードを描画)
+  enableOrderFulfillment: false,
+  enableShopLive: false,
+  enableHandles: false,
+}));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableOrderRelay() {
+        return envHold.enableOrderRelay;
+      },
+      get enableOrderFulfillment() {
+        return envHold.enableOrderFulfillment;
+      },
+      get enableShopLive() {
+        return envHold.enableShopLive;
+      },
+      get enableHandles() {
+        return envHold.enableHandles;
+      },
+    },
+  };
+});
+
 import { OrderFeedPanel } from '@/components/OrderFeedPanel';
 
 const postSpy = vi.fn();
@@ -40,12 +70,20 @@ beforeEach(() => {
   h.feedOk = true;
   h.orders = [];
   h.feedStatus = 200;
+  h.handles = [];
+  envHold.enableOrderFulfillment = false;
+  envHold.enableShopLive = false;
+  envHold.enableHandles = false;
   postSpy.mockClear();
-  global.fetch = vi.fn(async (_url: unknown, init?: { method?: string }) => {
+  global.fetch = vi.fn(async (url: unknown, init?: { method?: string }) => {
     if (init?.method === 'POST') {
       postSpy(init);
       return jsonRes({ ok: true, removed: 1 });
     }
+    const u = String(url);
+    if (u.includes('/api/handle')) return jsonRes({ ok: true, handles: h.handles, max: 3 });
+    if (u.includes('/api/shop/live'))
+      return jsonRes({ ok: true, live: { soldOut: [], paused: false, updatedAt: 0 } });
     return jsonRes(
       h.feedOk ? { ok: true, orders: h.orders } : { ok: false, error: 'kv_error' },
       h.feedStatus,
@@ -128,5 +166,63 @@ describe('OrderFeedPanel', () => {
     expect(await screen.findByText('まだ受注はありません。')).toBeInTheDocument();
     expect(screen.getByText(/対応済み/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '未対応に戻す' })).toBeInTheDocument();
+  });
+
+  it('flag OFF (既定): 厨房/ホール導線も営業中の操作も出さない', async () => {
+    render();
+    await screen.findByText('まだ受注はありません。');
+    expect(screen.queryByRole('link', { name: /厨房モニター/ })).toBeNull();
+    expect(screen.queryByText('営業中の操作')).toBeNull();
+  });
+
+  it('enableOrderFulfillment ON → 厨房/ホールへの導線リンク', async () => {
+    envHold.enableOrderFulfillment = true;
+    render();
+    const kitchen = await screen.findByRole('link', { name: /厨房モニター/ });
+    expect(kitchen.getAttribute('href')).toContain('/orders/kitchen');
+    expect(
+      screen.getByRole('link', { name: /ホール配膳/ }).getAttribute('href'),
+    ).toContain('/orders/hall');
+  });
+
+  it('enableShopLive ON + 公開店舗 → 営業中の操作 (折りたたみ) を表示', async () => {
+    envHold.enableShopLive = true;
+    envHold.enableHandles = true;
+    h.handles = [
+      {
+        handle: 'shop',
+        config: { to: ADDR, name: 'X' },
+        storefront: {
+          chain: 'polygon',
+          mode: 'storefront',
+          feePayer: 'merchant',
+          menu: [{ id: 'a', name: '水', price: '100' }],
+        },
+      },
+    ];
+    render();
+    expect(await screen.findByText('営業中の操作')).toBeInTheDocument();
+  });
+
+  it('enableOrderRelay OFF + enableShopLive ON → 受注フィードは出さず営業中の操作のみ (relay 非依存)', async () => {
+    envHold.enableOrderRelay = false; // 受注リレー無し (shop-live だけ点灯)
+    envHold.enableShopLive = true;
+    envHold.enableHandles = true;
+    h.handles = [
+      {
+        handle: 'shop',
+        config: { to: ADDR, name: 'X' },
+        storefront: {
+          chain: 'polygon',
+          mode: 'storefront',
+          feePayer: 'merchant',
+          menu: [{ id: 'a', name: '水', price: '100' }],
+        },
+      },
+    ];
+    render();
+    expect(await screen.findByText('営業中の操作')).toBeInTheDocument();
+    // 受注フィード (見出し/空表示) は出ない。
+    expect(screen.queryByText('まだ受注はありません。')).toBeNull();
   });
 });

@@ -7,14 +7,27 @@
 // react-query を使うため、親 (create ページ) は env.enableOrderRelay でこのパネルの**マウント自体**を
 // ゲートする (OFF の単体テストで QueryClient を要求しない)。設計: plans/swift-puzzling-sky.md。
 
-import { useTranslations } from 'next-intl';
+import { useMemo, useState } from 'react';
+import { useTranslations, useLocale } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatUnits } from 'viem';
-import { CheckCircle2, RefreshCw, RotateCcw } from 'lucide-react';
+import { CheckCircle2, ChefHat, RefreshCw, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { isJpycChainSlug, slugForChain, txExplorerUrl } from '@/lib/chains';
-import { JPYC_CHAIN_LABEL } from '@/lib/mobileOrder';
+import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
+import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 import type { StoredOrder } from '@/lib/orderRelay';
+
+// /api/handle が返す所有 handle (StorefrontPublishPanel と同形・同 cache キーを共有)。
+// 営業中の操作 (ShopLivePanel) は公開済み店舗 (storefront あり) の handle に紐づく。
+type OwnedHandle = {
+  handle: string;
+  config: HandleTipConfig;
+  profile?: HandleProfile;
+  storefront?: StorefrontParts;
+};
 
 // JPYC は全チェーン 18 decimals。保存 amount は minor units の十進文字列 (parseStoredOrder で検証済み)。
 const JPYC_DECIMALS = 18;
@@ -34,13 +47,44 @@ function chainLabel(chainId: number): string {
 
 export function OrderFeedPanel() {
   const t = useTranslations('OrderRelay');
+  const tF = useTranslations('OrderFulfillment'); // 厨房/ホール導線ラベル
+  const tLive = useTranslations('ShopLive'); // 営業中の操作 見出し
+  const locale = useLocale();
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } = useSiweSession();
   const qc = useQueryClient();
 
+  // 営業中の操作 (ShopLivePanel) 用の所有 handle (公開済み店舗のみ)。enableShopLive のときだけ取得。
+  // queryKey は StorefrontPublishPanel / HandleClaimPanel と共有 (同 cache・返り値の形 {handles,max} 一致必須)。
+  const mine = useQuery({
+    queryKey: ['handle-mine', sessionAddress],
+    enabled: env.enableHandles && env.enableShopLive && isSignedIn,
+    queryFn: async (): Promise<{ handles: OwnedHandle[]; max: number }> => {
+      const res = await fetch('/api/handle');
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${res.status}`);
+      const list = Array.isArray(json.handles)
+        ? (json.handles as unknown[]).filter(
+            (h): h is OwnedHandle =>
+              !!h && typeof h === 'object' && typeof (h as OwnedHandle).handle === 'string' && !!(h as OwnedHandle).config,
+          )
+        : [];
+      return { handles: list, max: typeof json.max === 'number' ? json.max : list.length };
+    },
+  });
+  // 公開済み店舗 (storefront あり) の handle のみが営業中の操作の対象。
+  const liveHandles = useMemo(
+    () => (mine.data?.handles ?? []).filter((h) => h.storefront),
+    [mine.data],
+  );
+  const [liveSel, setLiveSel] = useState('');
+  const liveSelected =
+    (liveSel && liveHandles.find((h) => h.handle === liveSel)) || liveHandles[0] || null;
+
   const feed = useQuery({
     // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ。
+    // enableOrderRelay OFF (営業中の操作 だけ shop-live で開いている) では受注フィードを引かない。
     queryKey: ['order-feed', sessionAddress],
-    enabled: isSignedIn,
+    enabled: isSignedIn && env.enableOrderRelay,
     refetchInterval: 12_000, // ~12s ポーリング (serverless 親和・タブレット常時表示向け)
     queryFn: fetchFeed,
   });
@@ -132,10 +176,13 @@ export function OrderFeedPanel() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-800">{t('heading')}</h2>
-        <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
-      </div>
+      {/* 受注フィードの見出しは enableOrderRelay のときだけ (shop-live 単独では営業中の操作のみ)。 */}
+      {env.enableOrderRelay && (
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">{t('heading')}</h2>
+          <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
+        </div>
+      )}
 
       {!isSignedIn ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center">
@@ -152,6 +199,55 @@ export function OrderFeedPanel() {
         </div>
       ) : (
         <div className="space-y-3">
+          {/* 飲食店向け: 厨房モニター / ホール配膳 への導線 (enableOrderFulfillment 時のみ・別端末でも開ける)。 */}
+          {env.enableOrderFulfillment && (
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={`/${locale}/orders/kitchen`}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+              >
+                <ChefHat className="h-4 w-4" aria-hidden /> {tF('kitchenTitle')}
+              </a>
+              <a
+                href={`/${locale}/orders/hall`}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+              >
+                <UtensilsCrossed className="h-4 w-4" aria-hidden /> {tF('hallTitle')}
+              </a>
+            </div>
+          )}
+          {/* 営業中の操作 (売り切れ / 受付一時停止)。頻度が低いので通常は閉じる (details)。 */}
+          {env.enableShopLive && liveSelected?.storefront && (
+            <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                {tLive('heading')}
+              </summary>
+              <div className="mt-2">
+                {liveHandles.length > 1 && (
+                  <select
+                    value={liveSelected.handle}
+                    onChange={(e) => setLiveSel(e.target.value)}
+                    aria-label={tLive('heading')}
+                    className="mb-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    {liveHandles.map((hh) => (
+                      <option key={hh.handle} value={hh.handle}>
+                        @{hh.handle}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <ShopLivePanel
+                  handle={liveSelected.handle}
+                  menu={liveSelected.storefront.menu}
+                  hideHeading
+                />
+              </div>
+            </details>
+          )}
+          {/* 受注フィード本体は enableOrderRelay のときだけ描画 (shop-live 単独では営業中の操作のみ)。 */}
+          {env.enableOrderRelay && (
+            <>
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-400">{t('autoRefresh')}</p>
             <button
@@ -190,10 +286,14 @@ export function OrderFeedPanel() {
               )}
             </>
           )}
+            </>
+          )}
         </div>
       )}
 
-      <p className="text-xs text-slate-400">{t('disclosure')}</p>
+      {env.enableOrderRelay && (
+        <p className="text-xs text-slate-400">{t('disclosure')}</p>
+      )}
     </div>
   );
 }
