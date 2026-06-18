@@ -1800,7 +1800,18 @@
     "tableLabel": "Table number",
     "tablePlaceholder": "e.g. 12",
     "tableRequired": "Please enter your table number",
-    "tableDescPrefix": "Table {table}"
+    "tableDescPrefix": "Table {table}",
+    "timeLabel": "Hours & pickup",
+    "lastOrderLabel": "Last order",
+    "lastOrderHint": "Order intake stops after this time (optional, Japan time).",
+    "minLeadLabel": "Min. lead time (minutes)",
+    "minLeadHint": "Shortest time from order to pickup. It anchors the pre-order pickup slots.",
+    "minLeadPlaceholder": "e.g. 20",
+    "viewLastOrderNotice": "Today's last order has passed",
+    "lastOrderNote": "Last order {time}",
+    "pickupLabel": "Pickup time",
+    "pickupAsap": "Soonest (unspecified)",
+    "pickupNone": "No pickup times available today"
   },
   "OrderFulfillment": {
     "kitchenTitle": "Kitchen monitor",
@@ -1820,6 +1831,7 @@
     "markDone": "Done",
     "claimedNote": "Items and table are customer-declared (amount is verified on-chain).",
     "updateError": "Couldn't apply the change. Please try again.",
+    "pickupAt": "Pickup {time}",
     "backToCreate": "Back to create",
     "tableLabel": "Table number",
     "tableSave": "Save",

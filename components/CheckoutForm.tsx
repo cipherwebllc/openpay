@@ -514,6 +514,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         customerPays: snapshot.customerPays.toString(),
         orderId: params.orderId,
         description: params.description,
+        // 受取予定時刻 (任意・Phase 4・preorder)。受注に素通し保存され厨房/ホールが表示 (advisory)。
+        ...(params.pickupAt !== undefined ? { pickupAt: params.pickupAt } : {}),
         // URL 仕様 (lib/url.ts) で customerEmail は prefill 専用・クライアントから送信しない、
         // と明記しているため payload に含めない (orderId で突合可能)。
         ...completion.hashFields,

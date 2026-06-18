@@ -1800,7 +1800,18 @@
     "tableLabel": "テーブル番号",
     "tablePlaceholder": "例: 12",
     "tableRequired": "テーブル番号を入力してください",
-    "tableDescPrefix": "テーブル {table}"
+    "tableDescPrefix": "テーブル {table}",
+    "timeLabel": "受付・受取時間",
+    "lastOrderLabel": "ラストオーダー",
+    "lastOrderHint": "この時刻を過ぎると受付を停止します（任意・日本時間）。",
+    "minLeadLabel": "最短受け渡し（分）",
+    "minLeadHint": "注文から受け取りまでの最短時間。事前注文の受取スロットの起点になります。",
+    "minLeadPlaceholder": "例: 20",
+    "viewLastOrderNotice": "本日のラストオーダーを過ぎました",
+    "lastOrderNote": "ラストオーダー {time}",
+    "pickupLabel": "受取時間",
+    "pickupAsap": "最短（指定なし）",
+    "pickupNone": "本日受け取れる時間がありません"
   },
   "OrderFulfillment": {
     "kitchenTitle": "厨房モニター",
@@ -1820,6 +1831,7 @@
     "markDone": "対応済み",
     "claimedNote": "明細・テーブルは顧客申告です（金額はオンチェーン検証済み）。",
     "updateError": "操作を反映できませんでした。もう一度お試しください。",
+    "pickupAt": "受取 {time}",
     "backToCreate": "作成画面に戻る",
     "tableLabel": "テーブル番号",
     "tableSave": "保存",

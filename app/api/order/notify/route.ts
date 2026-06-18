@@ -141,6 +141,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     ts: Date.now(),
     fulfilled: false,
   };
+  // 受取予定時刻 (任意・preorder・顧客申告=advisory 表示用・items/table と同じ寛容さ)。正の有限数かつ
+  // **near-future 窓内** (now-1h 〜 now+14d) のみ保存。スロット/lastOrder との厳密照合はしない (advisory)
+  // が、年 9999 等の極端値で受注ボードの表示を汚さないよう sane 窓外は drop する (clock skew に -1h)。
+  if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt)) {
+    const at = Math.floor(o.pickupAt);
+    const nowMs = Date.now();
+    if (at > nowMs - 60 * 60 * 1000 && at < nowMs + 14 * 24 * 60 * 60 * 1000) {
+      order.pickupAt = at;
+    }
+  }
 
   if (isKvConfigured()) {
     const key = orderListKey(merchant);

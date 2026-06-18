@@ -106,6 +106,9 @@ export type CheckoutParams = {
   // 課金する合図 (feePayer は無関係)。
   feeKind?: CheckoutFeeKind;
   feePayer?: FeePayer;
+  // --- 受取予定時刻 (任意・Phase 4・preorder のスロット選択・MobileOrderView のみが設定)。 ---
+  // 絶対 ms。webhook payload へ素通しされ受注に保存・厨房/ホールが表示する (advisory・money-path 非該当)。
+  pickupAt?: number;
 };
 
 export const CHECKOUT_MAX_ITEMS = 10;
@@ -264,6 +267,14 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeText(params.receiptNo, PAY_RECEIPT_NO_MAX);
     if (v) sp.set('rcpt', v);
   }
+  // 受取予定時刻 (在るときだけ・正の安全整数 ms)。preorder のスロット選択。
+  if (
+    typeof params.pickupAt === 'number' &&
+    Number.isSafeInteger(params.pickupAt) &&
+    params.pickupAt > 0
+  ) {
+    sp.set('pickup_at', String(params.pickupAt));
+  }
   return `/checkout?${sp.toString()}`;
 }
 
@@ -295,6 +306,7 @@ export function parseCheckoutParams(
   const rcptRaw = searchParams.get('rcpt');
   const feeKindRaw = searchParams.get('fee_kind');
   const feePayerRaw = searchParams.get('fee_payer');
+  const pickupAtRaw = searchParams.get('pickup_at');
 
   if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
   if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
@@ -372,6 +384,14 @@ export function parseCheckoutParams(
         isMobileOrderFeeKind(feeKindRaw) &&
         (feePayerRaw === 'merchant' || feePayerRaw === 'customer')
           ? feePayerRaw
+          : undefined,
+      // 受取予定時刻 (任意・正の安全整数 ms のみ・0/不正は undefined = serialize の > 0 と対称)。
+      pickupAt:
+        pickupAtRaw &&
+        /^\d+$/.test(pickupAtRaw) &&
+        Number.isSafeInteger(Number(pickupAtRaw)) &&
+        Number(pickupAtRaw) > 0
+          ? Number(pickupAtRaw)
           : undefined,
     },
   };

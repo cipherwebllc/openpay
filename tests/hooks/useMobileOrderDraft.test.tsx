@@ -134,6 +134,8 @@ function baseDraft(): MobileOrderDraft {
     phone: '',
     acceptingOrders: true,
     dineIn: false,
+    lastOrder: '',
+    minLeadMinutes: '',
   };
 }
 
@@ -209,6 +211,29 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
     expect(draftToConfig({ ...baseDraft(), dineIn: true }, ADDR, presets)?.dineIn).toBe(true);
     const takeout = draftToConfig({ ...baseDraft(), dineIn: false }, ADDR, presets);
     expect('dineIn' in (takeout ?? {})).toBe(false);
+  });
+
+  it('時間系 (lastOrder/minLeadMinutes): 有効値を伝播・空/不正は載せない (Phase 4)', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    const cfg = draftToConfig(
+      { ...baseDraft(), lastOrder: '21:30', minLeadMinutes: '20' },
+      ADDR,
+      presets,
+    );
+    expect(cfg?.lastOrder).toBe('21:30');
+    expect(cfg?.minLeadMinutes).toBe(20); // 数値化
+    // 空は未設定 (round-trip 最小化)。
+    const none = draftToConfig(baseDraft(), ADDR, presets);
+    expect('lastOrder' in (none ?? {})).toBe(false);
+    expect('minLeadMinutes' in (none ?? {})).toBe(false);
+    // 不正 (HH:mm でない / 非整数) は黙って drop。
+    const bad = draftToConfig(
+      { ...baseDraft(), lastOrder: '25:99', minLeadMinutes: 'abc' },
+      ADDR,
+      presets,
+    );
+    expect('lastOrder' in (bad ?? {})).toBe(false);
+    expect('minLeadMinutes' in (bad ?? {})).toBe(false);
   });
 });
 
@@ -311,6 +336,8 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       phone: '03',
       acceptingOrders: false,
       dineIn: true,
+      lastOrder: '21:30',
+      minLeadMinutes: 20,
       menu: [{ id: 'a', name: 'c', price: '500' }],
     };
     expect(storefrontPartsToDraft(parts, ADDR)).toEqual({
@@ -328,6 +355,8 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       phone: '03',
       acceptingOrders: false,
       dineIn: true,
+      lastOrder: '21:30', // 時間系も復元 (Phase 4)
+      minLeadMinutes: '20', // 数値 → 生入力文字列へ
     });
   });
 

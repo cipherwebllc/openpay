@@ -35,6 +35,7 @@ import {
   type MenuItem,
 } from '@/lib/mobileOrder';
 import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
+import { isPastLastOrder, pickupSlots, tokyoHHMM } from '@/lib/shopTime';
 import {
   mobileOrderFeeBps,
   mobileOrderFeeValue,
@@ -142,6 +143,32 @@ export function MobileOrderView({
   const liveState = live ?? EMPTY_SHOP_LIVE;
   const soldOutSet = useMemo(() => new Set(liveState.soldOut), [liveState.soldOut]);
   const paused = liveState.paused;
+
+  // 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。OFF では一切評価しない (inert)。
+  // Asia/Tokyo 固定。ラストオーダー超過で受付停止、preorder は受取スロットを選んで pickupAt を付与。
+  const timeEnabled = env.enablePreorderTime;
+  const isPreorder = config.mode === 'preorder';
+  // ラストオーダー停止判定とスロット候補のため現在時刻を保持 (15分グリッドなので 30s 更新で十分)。
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!timeEnabled) return;
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [timeEnabled]);
+  // preorder の受取スロット候補 (絶対 ms・昇順)。storefront/flag OFF は空。
+  const pickupSlotList = useMemo(
+    () =>
+      timeEnabled && isPreorder
+        ? pickupSlots(now, config.minLeadMinutes, config.lastOrder)
+        : [],
+    [timeEnabled, isPreorder, now, config.minLeadMinutes, config.lastOrder],
+  );
+  const [pickupAt, setPickupAt] = useState<number | null>(null);
+  // 時間経過で選択スロットが候補外 (過去) になったら解除 (過去の受取時刻を送らない)。スロットは
+  // 15分グリッド固定ゆえ、まだ未来の選択は候補に残り続け、過去落ちしたときだけ false になる。
+  useEffect(() => {
+    if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) setPickupAt(null);
+  }, [pickupAt, pickupSlotList]);
 
   // メニューオプション (サイズ/トッピング)・flag 裏。OFF では options を無視し従来の数量ステッパのみ
   // (オプション無し商品は常に従来の qty マップを使う = 既存挙動不変)。
@@ -274,6 +301,8 @@ export function MobileOrderView({
           ...(orderRelayWebhook
             ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
             : {}),
+          // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
+          ...(timeEnabled && isPreorder && pickupAt ? { pickupAt } : {}),
         })
       : '';
   // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
@@ -377,11 +406,16 @@ export function MobileOrderView({
     [config.menu, soldOutSet],
   );
 
-  // 店舗情報 + 受付可否。静的 acceptingOrders===false か ライブ paused のとき支払いを止める
-  // (不可逆決済の事故防止)。停止メッセージは静的「終了」を優先し、ライブ一時停止のみは「一時停止」。
-  const accepting = config.acceptingOrders !== false && !paused;
+  // 店舗情報 + 受付可否。静的 acceptingOrders===false / ライブ paused / ラストオーダー超過 のとき
+  // 支払いを止める (不可逆決済の事故防止)。メッセージは 終了 > 一時停止 > ラストオーダー の優先。
+  const pastLastOrder = timeEnabled && isPastLastOrder(now, config.lastOrder);
+  const accepting = config.acceptingOrders !== false && !paused && !pastLastOrder;
   const closedNoticeKey =
-    config.acceptingOrders === false ? 'viewClosedNotice' : 'viewPausedNotice';
+    config.acceptingOrders === false
+      ? 'viewClosedNotice'
+      : paused
+        ? 'viewPausedNotice'
+        : 'viewLastOrderNotice';
   const tel = telHref(config.phone);
   const mapHref = mapSearchHref(config.address);
   const hasStoreInfo = !!(config.address || config.hours || config.phone);
@@ -566,6 +600,31 @@ export function MobileOrderView({
                 {needsTable && <p className="mt-1 text-xs text-amber-700">{t('tableRequired')}</p>}
               </div>
             )}
+            {/* 受取時間 (Phase 4・preorder のみ・flag ON)。15分刻みのスロットから選ぶ (未選択=最短)。 */}
+            {timeEnabled && isPreorder && (
+              <div>
+                <label htmlFor="mo-pickup" className="block text-sm font-medium text-slate-700">
+                  {t('pickupLabel')}
+                </label>
+                {pickupSlotList.length === 0 ? (
+                  <p className="mt-1 text-xs text-amber-700">{t('pickupNone')}</p>
+                ) : (
+                  <select
+                    id="mo-pickup"
+                    value={pickupAt ?? ''}
+                    onChange={(e) => setPickupAt(e.target.value ? Number(e.target.value) : null)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  >
+                    <option value="">{t('pickupAsap')}</option>
+                    {pickupSlotList.map((ms) => (
+                      <option key={ms} value={ms}>
+                        {tokyoHHMM(ms)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
             {/* ご注文内容 (合計の上)。カートマーク+点数のタップで明細を開閉。明細では −n+ で増減。 */}
             {cartOpen && (
               <ul className="space-y-2 border-b border-slate-100 pb-3">
@@ -632,6 +691,12 @@ export function MobileOrderView({
                   fee: formatUnits(feeUpcharge, decimals),
                   percent: mobileOrderFeeBps(config.mode) / 100,
                 })}
+              </p>
+            )}
+            {/* ラストオーダー時刻の事前告知 (受付中のみ・超過後は上のバナーへ切替)。 */}
+            {timeEnabled && config.lastOrder && (
+              <p className="text-xs text-slate-500">
+                {t('lastOrderNote', { time: config.lastOrder })}
               </p>
             )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>

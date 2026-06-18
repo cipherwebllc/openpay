@@ -50,6 +50,7 @@ import {
   PHONE_MAX,
   type StorefrontParts,
 } from '@/lib/mobileOrder';
+import { MIN_LEAD_MAX } from '@/lib/shopTime';
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
@@ -432,6 +433,40 @@ export function MobileOrderBuilder({
                   {draft.dineIn ? t('serviceHintDineIn') : t('serviceHintTakeout')}
                 </p>
               </fieldset>
+
+              {/* 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。OFF=非表示=inert。
+                  ラストオーダー=両モード (超過で受付停止)、最短受け渡し=preorder のみ。Asia/Tokyo 固定。 */}
+              {env.enablePreorderTime && (
+                <fieldset className="space-y-3">
+                  <legend className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                    <Clock className="h-4 w-4 text-slate-400" aria-hidden /> {t('timeLabel')}
+                  </legend>
+                  <Field label={t('lastOrderLabel')} hint={t('lastOrderHint')}>
+                    <input
+                      type="time"
+                      value={draft.lastOrder}
+                      onChange={(e) => update({ lastOrder: e.target.value })}
+                      className={inputClass}
+                    />
+                  </Field>
+                  {draft.mode === 'preorder' && (
+                    <Field label={t('minLeadLabel')} hint={t('minLeadHint')}>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={MIN_LEAD_MAX}
+                        value={draft.minLeadMinutes}
+                        onChange={(e) =>
+                          update({ minLeadMinutes: e.target.value.replace(/[^\d]/g, '').slice(0, 4) })
+                        }
+                        placeholder={t('minLeadPlaceholder')}
+                        className={inputClass}
+                      />
+                    </Field>
+                  )}
+                </fieldset>
+              )}
 
               {/* 手数料の負担者は事前モバイルオーダー時のみ意味を持つ (店頭は運営負担)。
                   ⚠️ 料率はここでは表示しない (P0/P2 ゲート)。 */}

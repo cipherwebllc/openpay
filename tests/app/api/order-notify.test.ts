@@ -194,6 +194,25 @@ describe('POST /api/order/notify', () => {
     expect(stored.items).toEqual([{ name: 'ブレンド', qty: 2, price: '500' }]);
   });
 
+  it('pickupAt (preorder・near-future ms) を保存・窓外/不正は除外 (Phase 4)', async () => {
+    const at = Date.now() + 30 * 60 * 1000; // 30 分後 (near-future 窓内)
+    await POST(req(goodBody({ pickupAt: at })));
+    const stored = JSON.parse(lpushSpy.mock.calls[0][1] as string);
+    expect(stored.pickupAt).toBe(at);
+    // 負値は除外。
+    lpushSpy.mockClear();
+    setSpy.mockClear();
+    await POST(req(goodBody({ txHash: `0x${'d'.repeat(64)}`, pickupAt: -5 })));
+    expect('pickupAt' in JSON.parse(lpushSpy.mock.calls[0][1] as string)).toBe(false);
+    // 窓外 (1年後) も除外 (極端値で受注表示を汚さない)。
+    lpushSpy.mockClear();
+    setSpy.mockClear();
+    await POST(
+      req(goodBody({ txHash: `0x${'e'.repeat(64)}`, pickupAt: Date.now() + 365 * 24 * 3600 * 1000 })),
+    );
+    expect('pickupAt' in JSON.parse(lpushSpy.mock.calls[0][1] as string)).toBe(false);
+  });
+
   it('standard mode (merchantTxHash) も txHash として受理', async () => {
     const body = goodBody();
     delete (body as Record<string, unknown>).txHash;

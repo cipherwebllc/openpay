@@ -13,6 +13,7 @@ import { isAddress, type Address } from 'viem';
 import { isJpycChainSlug, JPYC_CHAINS, type JpycChainSlug } from './chains';
 import { isTaxCategory, type TaxCategory } from './tax';
 import { validOptionGroups, type OptionGroup } from './menuOptions';
+import { parseHHMM, sanitizeMinLead } from './shopTime';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
 export type FeePayer = 'merchant' | 'customer'; // 3% を店舗負担 | 顧客上乗せ (preorder 時のみ意味を持つ)
@@ -65,6 +66,9 @@ export type MobileOrderConfig = {
   acceptingOrders?: boolean;
   // 提供形態。true=店内 (注文時に顧客がテーブル番号を入力)、false/未設定=テイクアウト・店頭受け渡し。
   dineIn?: boolean;
+  // 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。タイムゾーンは Asia/Tokyo 固定。
+  lastOrder?: string; // ラストオーダー "HH:mm" (超過で受付停止・同日セマンティクス・lib/shopTime)
+  minLeadMinutes?: number; // 最短受け渡しまでの分 (preorder のスロット起点・1..MIN_LEAD_MAX)
 };
 
 /**
@@ -90,6 +94,8 @@ export type StorefrontParts = {
   phone?: string;
   acceptingOrders?: boolean;
   dineIn?: boolean; // true=店内 (テーブル番号入力)、false/未設定=テイクアウト・店頭受け渡し
+  lastOrder?: string; // ラストオーダー "HH:mm" (Phase 4・Asia/Tokyo・超過で受付停止)
+  minLeadMinutes?: number; // 最短受け渡し分 (Phase 4・preorder のスロット起点)
 };
 
 export const SHOP_NAME_MAX = 48;
@@ -334,6 +340,10 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (o.acceptingOrders === false) parts.acceptingOrders = false;
   // 提供形態: 既定 (テイクアウト) は「フィールド無し」、店内のときのみ true を保持。
   if (o.dineIn === true) parts.dineIn = true;
+  // 時間系 (任意・不正は黙って除外・注文は壊さない)。lastOrder は "HH:mm"・minLeadMinutes は 1..上限。
+  if (parseHHMM(o.lastOrder) !== null) parts.lastOrder = o.lastOrder as string;
+  const minLead = sanitizeMinLead(o.minLeadMinutes);
+  if (minLead !== null) parts.minLeadMinutes = minLead;
   return parts;
 }
 
@@ -374,5 +384,8 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (parts.phone) config.phone = parts.phone;
   if (parts.acceptingOrders === false) config.acceptingOrders = false;
   if (parts.dineIn) config.dineIn = true;
+  // 時間系は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。
+  if (parts.lastOrder) config.lastOrder = parts.lastOrder;
+  if (parts.minLeadMinutes) config.minLeadMinutes = parts.minLeadMinutes;
   return config;
 }

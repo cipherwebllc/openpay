@@ -10,10 +10,12 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { CheckCircle2, RefreshCw, UtensilsCrossed } from 'lucide-react';
+import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrderFeed } from '@/hooks/useOrderFeed';
 import { isJpycChainSlug, slugForChain } from '@/lib/chains';
 import { JPYC_CHAIN_LABEL } from '@/lib/mobileOrder';
+import { tokyoHHMM } from '@/lib/shopTime';
 import type { StoredOrder } from '@/lib/orderRelay';
 
 const JPYC_DECIMALS = 18;
@@ -148,7 +150,16 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
                     </button>
                   )}
                 </div>
-                <span className="shrink-0 text-right text-xs text-slate-400">{chainLabel(o.chainId)}</span>
+                <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+                  <span className="text-xs text-slate-400">{chainLabel(o.chainId)}</span>
+                  {/* 受取予定時刻 (Phase 4・preorder のみ・flag ON かつ あるとき)。Asia/Tokyo HH:mm。
+                      flag OFF では表示しない (= 手動 pickup_at が混入しても観測上 inert)。 */}
+                  {env.enablePreorderTime && o.pickupAt ? (
+                    <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs font-semibold text-sky-700">
+                      {t('pickupAt', { time: tokyoHHMM(o.pickupAt) })}
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               <ul className="mt-2 flex-1 space-y-1">

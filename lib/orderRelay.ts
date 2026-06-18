@@ -38,6 +38,8 @@ export type StoredOrder = {
   from: string; // 支払元 (オンチェーン公開情報)
   ts: number; // 受信時刻 (ms)
   fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
+  // 受取予定時刻 (ms・Phase 4・preorder で顧客が選んだスロット)。未指定=即時/店頭。表示用 (advisory)。
+  pickupAt?: number;
 };
 
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
@@ -116,7 +118,7 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   if (typeof o.amount !== 'string' || !DECIMAL_INT.test(o.amount)) return null;
   if (!isTxHashLike(o.txHash)) return null;
   if (typeof o.chainId !== 'number' || !Number.isInteger(o.chainId)) return null;
-  return {
+  const order: StoredOrder = {
     orderId: o.orderId.slice(0, ORDER_ID_MAX),
     items: sanitizeOrderItems(o.items, { preserveStatus: true }),
     table: sanitizeTable(o.table),
@@ -127,6 +129,11 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
     ts: typeof o.ts === 'number' && Number.isFinite(o.ts) ? o.ts : 0,
     fulfilled: o.fulfilled === true,
   };
+  // 受取予定時刻 (任意・正の有限数のみ・preorder)。不正は黙って除外 (旧データは未設定=即時)。
+  if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt) && o.pickupAt > 0) {
+    order.pickupAt = o.pickupAt;
+  }
+  return order;
 }
 
 // ── 受注フィードの状態更新オペレーション (Phase 3・/api/order/feed POST)。txHash で対象注文を

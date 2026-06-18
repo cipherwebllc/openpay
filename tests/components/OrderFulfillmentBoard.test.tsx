@@ -5,6 +5,20 @@ import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { StoredOrder } from '@/lib/orderRelay';
 
+const envHold = vi.hoisted(() => ({ enablePreorderTime: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enablePreorderTime() {
+        return envHold.enablePreorderTime;
+      },
+    },
+  };
+});
+
 const siwe = vi.hoisted(() => ({ isSignedIn: true }));
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
@@ -47,6 +61,7 @@ beforeEach(() => {
   siwe.isSignedIn = true;
   feedHold.data = [order()];
   mutateSpy.mockClear();
+  envHold.enablePreorderTime = false; // Phase 4 flag 既定 OFF
 });
 
 describe('OrderFulfillmentBoard', () => {
@@ -96,5 +111,27 @@ describe('OrderFulfillmentBoard', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
     expect(screen.queryByText(/牛丼/)).toBeNull();
     expect(screen.getByText('未対応の受注はありません。')).toBeInTheDocument();
+  });
+
+  it('flag ON + pickupAt → 受取予定時刻バッジを Tokyo HH:mm で表示 (Phase 4)', () => {
+    envHold.enablePreorderTime = true;
+    // Date.UTC(2024,0,15,4,30) = Tokyo 13:30。tokyoHHMM は純関数 (Date.now 非依存)。
+    feedHold.data = [order({ pickupAt: Date.UTC(2024, 0, 15, 4, 30) })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText('受取 13:30')).toBeInTheDocument();
+  });
+
+  it('flag OFF: pickupAt があってもバッジを出さない (inert)', () => {
+    // flag OFF (既定) + pickupAt 有り → 手動 pickup_at 混入でも観測上 inert。
+    feedHold.data = [order({ pickupAt: Date.UTC(2024, 0, 15, 4, 30) })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.queryByText(/受取 \d/)).toBeNull();
+  });
+
+  it('pickupAt が無ければバッジを出さない', () => {
+    envHold.enablePreorderTime = true;
+    feedHold.data = [order()]; // pickupAt 無し
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.queryByText(/受取 \d/)).toBeNull();
   });
 });

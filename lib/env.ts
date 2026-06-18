@@ -503,6 +503,15 @@ export const env = {
   // 進捗管理できる。受注の状態更新 (/api/order/feed POST) は op 化 + kvEval 原子更新で多端末の同時
   // トグルを安全化。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY (受注リレー本体)。計画: plans/restaurant-pos-roadmap.md Phase 3。
   enableOrderFulfillment: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT),
+  // モバイル注文の時間系 (ラストオーダー自動停止 / 最短受け渡し / 時間指定事前注文) の有効化フラグ
+  // (client 露出)。**既定 OFF で完全 inert** = builder の lastOrder/minLeadMinutes 入力 非表示・公開
+  // ページはラストオーダー停止/最短受取/スロット選択を出さず従来どおり・受注に pickupAt が付かない。
+  // ON のとき店舗は「ラストオーダー HH:mm」(超過で受付停止=Phase1 停止経路を再利用) と「最短受け渡し
+  // 分数」を設定でき、preorder では顧客が受取スロット (15分刻み) を選んで pickupAt を注文へ付与、厨房/
+  // ホールが受取予定時刻を表示する。タイムゾーンは Asia/Tokyo 固定 (JPYC=国内市場・lib/shopTime)。
+  // lastOrder/minLeadMinutes の保存/検証など data 層は常時有効だが表示しないので inert。
+  // 計画: plans/restaurant-pos-roadmap.md Phase 4。
+  enablePreorderTime: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_PREORDER_TIME),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

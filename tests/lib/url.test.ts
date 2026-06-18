@@ -1708,6 +1708,39 @@ describe('CheckoutParams mode 同期', () => {
     expect(path).toContain('mode=standard');
   });
 
+  it('checkout pickup_at: 正の安全整数 ms は round-trip・不正は除外 (Phase 4)', async () => {
+    const { buildCheckoutPath, parseCheckoutParams } = await import('@/lib/url');
+    const at = Date.UTC(2024, 0, 15, 4, 30);
+    const path = buildCheckoutPath({
+      to: MERCHANT_LOC,
+      token: 'jpyc',
+      gas: 'customer',
+      items: [{ name: 'A', qty: 1, price: '10' }],
+      pickupAt: at,
+    });
+    expect(path).toContain(`pickup_at=${at}`);
+    const r = parseCheckoutParams(new URLSearchParams(path.split('?')[1]));
+    expect(r.ok && r.params.pickupAt).toBe(at);
+    // 不正 (0 / 非整数文字) は URL に出ず、parse でも undefined。
+    const path0 = buildCheckoutPath({
+      to: MERCHANT_LOC,
+      token: 'jpyc',
+      gas: 'customer',
+      items: [{ name: 'A', qty: 1, price: '10' }],
+      pickupAt: 0,
+    });
+    expect(path0).not.toContain('pickup_at=');
+    const bad = parseCheckoutParams(
+      new URLSearchParams(`to=${MERCHANT_LOC}&token=jpyc&items=A:1:10&pickup_at=abc`),
+    );
+    expect(bad.ok && bad.params.pickupAt).toBeUndefined();
+    // 0 は serialize の > 0 と対称に parse でも除外。
+    const zero = parseCheckoutParams(
+      new URLSearchParams(`to=${MERCHANT_LOC}&token=jpyc&items=A:1:10&pickup_at=0`),
+    );
+    expect(zero.ok && zero.params.pickupAt).toBeUndefined();
+  });
+
   it('checkout parse: mode=direct は legacy alias で standard に正規化', async () => {
     const { parseCheckoutParams } = await import('@/lib/url');
     const r = parseCheckoutParams(

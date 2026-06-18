@@ -1,8 +1,8 @@
 // 顧客向け注文ページの読み取り専用ビュー (MobileOrderView) を実描画で検証。
 // 店舗名 / メニュー (名前・価格・絵文字・画像) / SNS / 「準備中」表示が出ること。
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { screen, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 
 // 受注リレー / モバイル注文利用料 flag を切替え可能に (既定 OFF=既存テストの挙動不変)。
@@ -11,6 +11,7 @@ const envHold = vi.hoisted(() => ({
   enableMobileOrderFee: false,
   enableShopLive: false,
   enableMenuOptions: false,
+  enablePreorderTime: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -29,6 +30,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableMenuOptions() {
         return envHold.enableMenuOptions;
+      },
+      get enablePreorderTime() {
+        return envHold.enablePreorderTime;
       },
     },
   };
@@ -57,6 +61,7 @@ afterEach(() => {
   envHold.enableMobileOrderFee = false; // モバイル注文利用料 flag も毎回 OFF に戻す
   envHold.enableShopLive = false; // Phase 1 flag も毎回 OFF に戻す
   envHold.enableMenuOptions = false; // Phase 2 flag も毎回 OFF に戻す
+  envHold.enablePreorderTime = false; // Phase 4 flag も毎回 OFF に戻す
 });
 
 describe('MobileOrderView', () => {
@@ -578,5 +583,76 @@ describe('MobileOrderView オプション (options)', () => {
     fireEvent.click(screen.getByRole('button', { name: /選ぶ/ }));
     fireEvent.click(screen.getByRole('button', { name: 'カートに追加' }));
     expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+  });
+});
+
+describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => {
+  // Tokyo 2024-01-15 12:00 (UTC 03:00・15分グリッド境界) に固定し、スロット/ラストオーダーを決定論化。
+  const TOKYO_NOON = Date.UTC(2024, 0, 15, 3, 0);
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(TOKYO_NOON);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const preorder = (over: Partial<MobileOrderConfig> = {}): MobileOrderConfig => ({
+    ...config,
+    mode: 'preorder',
+    ...over,
+  });
+
+  it('flag OFF: lastOrder があっても停止せず受取スロットも出さない (inert)', () => {
+    renderWithIntl(<MobileOrderView config={preorder({ lastOrder: '00:00' })} />);
+    // 00:00 は常に「過ぎている」が flag OFF ゆえ評価されない → 支払い導線は生きている。
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('受取時間')).toBeNull();
+  });
+
+  it('flag ON: ラストオーダー超過 (00:00) で受付停止バナー + 支払い導線を出さない', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(<MobileOrderView config={preorder({ lastOrder: '00:00' })} />);
+    // バナーは上部 + 会計セクションの 2 箇所に出る (既存の停止表示と同じ)。
+    expect(screen.getAllByText('本日のラストオーダーを過ぎました').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('flag ON: preorder で受取スロット選択を出し、選ぶと /checkout に pickup_at が乗る', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(<MobileOrderView config={preorder({ minLeadMinutes: 30 })} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const select = screen.getByLabelText('受取時間') as HTMLSelectElement;
+    // 12:00 + 30m = 12:30 が最初のスロット (Tokyo)。
+    const opt = within(select).getByRole('option', { name: '12:30' }) as HTMLOptionElement;
+    fireEvent.change(select, { target: { value: opt.value } });
+    const url = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    expect(url.searchParams.get('pickup_at')).toBe(opt.value);
+    expect(Number(opt.value)).toBe(Date.UTC(2024, 0, 15, 3, 30)); // Tokyo 12:30 の絶対 ms
+  });
+
+  it('flag ON: 未選択 (最短) なら pickup_at を付けない', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(<MobileOrderView config={preorder({ minLeadMinutes: 30 })} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const url = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    expect(url.searchParams.get('pickup_at')).toBeNull();
+  });
+
+  it('flag ON: storefront モードは受取スロットを出さない (preorder 限定)', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, mode: 'storefront', minLeadMinutes: 30 }} />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByLabelText('受取時間')).toBeNull();
   });
 });
