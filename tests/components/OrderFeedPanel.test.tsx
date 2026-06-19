@@ -34,6 +34,7 @@ const envHold = vi.hoisted(() => ({
   enableOrderFulfillment: false,
   enableShopLive: false,
   enableHandles: false,
+  enableOrderToken: false, // 受注閲覧トークン (ON で店員リンクパネル・厨房/ホール直リンクは抑止)
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -52,6 +53,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableHandles() {
         return envHold.enableHandles;
+      },
+      get enableOrderToken() {
+        return envHold.enableOrderToken;
       },
     },
   };
@@ -74,6 +78,7 @@ beforeEach(() => {
   envHold.enableOrderFulfillment = false;
   envHold.enableShopLive = false;
   envHold.enableHandles = false;
+  envHold.enableOrderToken = false;
   postSpy.mockClear();
   global.fetch = vi.fn(async (url: unknown, init?: { method?: string }) => {
     if (init?.method === 'POST') {
@@ -184,6 +189,18 @@ describe('OrderFeedPanel', () => {
     expect(
       screen.getByRole('link', { name: /ホール配膳/ }).getAttribute('href'),
     ).toContain('/orders/hall');
+  });
+
+  it('enableOrderToken ON: 厨房/ホール直リンクは出さず店員用リンク (受注閲覧トークン) パネルに集約', async () => {
+    envHold.enableOrderFulfillment = true;
+    envHold.enableOrderToken = true;
+    render();
+    await screen.findByText('まだ受注はありません。');
+    // 直リンクは出さない (店員はトークンリンクで厨房/ホールへ・オーナーもそこから開く)。
+    expect(screen.queryByRole('link', { name: /厨房モニター/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /ホール配膳/ })).toBeNull();
+    // 代わりに店員用リンク発行パネルを出す。
+    expect(screen.getByText(/店員用リンク/)).toBeInTheDocument();
   });
 
   it('完了フローのヒント: fulfillment OFF=物販向け / ON=飲食(配膳済み=対応済み)', async () => {

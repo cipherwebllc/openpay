@@ -107,8 +107,10 @@ export default function CreatePage() {
       )}
       {tab === 'orders' && (env.enableOrderRelay || env.enableShopLive) && <OrderFeedPanel />}
 
-      <MiniHistoryRecent />
+      {/* 受注タブでは下部の参照系 (最近の取引 / 換金) を隠して受注に集中。他タブでは従来どおり表示。 */}
+      {tab !== 'orders' && <MiniHistoryRecent />}
 
+      {tab !== 'orders' && (
       <section
         aria-labelledby="offramp-heading"
         className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:hidden"
@@ -180,6 +182,7 @@ export default function CreatePage() {
           </p>
         </details>
       </section>
+      )}
     </AppShell>
   );
 }

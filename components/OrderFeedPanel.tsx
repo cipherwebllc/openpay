@@ -204,8 +204,9 @@ export function OrderFeedPanel() {
         </div>
       ) : (
         <div className="space-y-3">
-          {/* 飲食店向け: 厨房モニター / ホール配膳 への導線 (enableOrderFulfillment 時のみ・別端末でも開ける)。 */}
-          {env.enableOrderFulfillment && (
+          {/* 飲食店向け: 厨房モニター / ホール配膳 への直接導線。店員用リンク (受注閲覧トークン) を配る
+              運用では不要なので、enableOrderToken OFF のときだけ出す (token ON ではトークンパネルが導線)。 */}
+          {env.enableOrderFulfillment && !env.enableOrderToken && (
             <div className="flex flex-wrap gap-2">
               <a
                 href={`/${locale}/orders/kitchen`}
@@ -223,35 +224,6 @@ export function OrderFeedPanel() {
           )}
           {/* 店員用リンク (受注閲覧トークン)。オーナーが発行し、店員端末は資金鍵なしで厨房/ホールへ。 */}
           {env.enableOrderToken && <OrderOperatorTokenPanel sessionAddress={sessionAddress} />}
-          {/* 営業中の操作 (売り切れ / 受付一時停止)。頻度が低いので通常は閉じる (details)。 */}
-          {env.enableShopLive && liveSelected?.storefront && (
-            <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-              <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                {tLive('heading')}
-              </summary>
-              <div className="mt-2">
-                {liveHandles.length > 1 && (
-                  <select
-                    value={liveSelected.handle}
-                    onChange={(e) => setLiveSel(e.target.value)}
-                    aria-label={tLive('heading')}
-                    className="mb-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                  >
-                    {liveHandles.map((hh) => (
-                      <option key={hh.handle} value={hh.handle}>
-                        @{hh.handle}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <ShopLivePanel
-                  handle={liveSelected.handle}
-                  menu={liveSelected.storefront.menu}
-                  hideHeading
-                />
-              </div>
-            </details>
-          )}
           {/* 受注フィード本体は enableOrderRelay のときだけ描画 (shop-live 単独では営業中の操作のみ)。 */}
           {env.enableOrderRelay && (
             <>
@@ -294,6 +266,35 @@ export function OrderFeedPanel() {
             </>
           )}
             </>
+          )}
+          {/* 営業中の操作 (売り切れ / 受付一時停止) は受注リストの下へ。頻度が低いので通常は閉じる (details)。 */}
+          {env.enableShopLive && liveSelected?.storefront && (
+            <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                {tLive('heading')}
+              </summary>
+              <div className="mt-2">
+                {liveHandles.length > 1 && (
+                  <select
+                    value={liveSelected.handle}
+                    onChange={(e) => setLiveSel(e.target.value)}
+                    aria-label={tLive('heading')}
+                    className="mb-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    {liveHandles.map((hh) => (
+                      <option key={hh.handle} value={hh.handle}>
+                        @{hh.handle}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <ShopLivePanel
+                  handle={liveSelected.handle}
+                  menu={liveSelected.storefront.menu}
+                  hideHeading
+                />
+              </div>
+            </details>
           )}
         </div>
       )}
