@@ -20,6 +20,7 @@ import { JPYC_CHAIN_LABEL } from '@/lib/mobileOrder';
 import { tokyoHHMM } from '@/lib/shopTime';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
+import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
 import type { StoredOrder } from '@/lib/orderRelay';
 
 const JPYC_DECIMALS = 18;
@@ -35,11 +36,41 @@ function chainLabel(chainId: number): string {
   return slug && isJpycChainSlug(slug) ? JPYC_CHAIN_LABEL[slug] : `chain ${chainId}`;
 }
 
-export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
+export function OrderFulfillmentBoard({
+  mode,
+  initialToken,
+}: {
+  mode: 'kitchen' | 'hall';
+  initialToken?: string;
+}) {
   const t = useTranslations('OrderFulfillment');
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } = useSiweSession();
-  // 稼働画面なので少し短めの 8s ポーリング。
-  const { feed, update } = useOrderFeed(sessionAddress, isSignedIn, 8_000);
+  // 受注閲覧トークン (店員端末・enableOrderToken 時のみ)。?t= を一度開けば localStorage に保持し、
+  // 以降は SIWE 無し (資金鍵不要) で受注を閲覧/操作できる。
+  const [token, setToken] = useState<string | null>(null);
+  useEffect(() => {
+    if (!env.enableOrderToken) return;
+    if (initialToken) {
+      setStoredOrderToken(initialToken);
+      setToken(initialToken);
+    } else {
+      setToken(getStoredOrderToken());
+    }
+  }, [initialToken]);
+  // token モード = 店員端末 (未サインイン)。**サインイン済みなら SIWE を優先**: 別店舗の保存トークンが
+  // 残っていても、署名済みオーナーは常に自分の受取アドレスの受注を見る (取り違え防止)。
+  const tokenMode = env.enableOrderToken && Boolean(token) && !isSignedIn;
+  // 稼働画面なので少し短めの 8s ポーリング。token があれば SIWE 不要でそのトークンの受注を読む。
+  const { feed, update } = useOrderFeed(sessionAddress, isSignedIn, 8_000, tokenMode ? token : null);
+  // 失効トークン (rotate/revoke 済み) は feed が 401 invalid_token を返す → 保存を破棄し token モードを
+  // 抜ける (サインイン要求へ)。失効リンクで 401 を繰り返さない。KV 障害 (503) では消さない (再試行で復帰)。
+  useEffect(() => {
+    if (!tokenMode) return;
+    if (feed.isError && feed.error instanceof Error && feed.error.message === 'invalid_token') {
+      clearStoredOrderToken();
+      setToken(null);
+    }
+  }, [tokenMode, feed.isError, feed.error]);
   // テーブル訂正 (setTable op)。編集中の注文 txHash + 入力ドラフト。
   const [editTx, setEditTx] = useState<string | null>(null);
   const [tableDraft, setTableDraft] = useState('');
@@ -86,19 +117,24 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
   const flashTimers = useRef<Set<number>>(new Set());
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   useEffect(() => () => flashTimers.current.forEach((id) => clearTimeout(id)), []);
-  // 受取ウォレットが変わったら検出を初期化 (別店舗の既存注文を新着扱いしない)。
+  // 検出の主体 = feed のスコープ (token モードなら token・それ以外は受取アドレス)。signed-in 中は token を
+  // 主体にしない: 署名済み端末に別店舗トークンが残り token state が載っても、それで検出をリセットすると
+  // signed-in の次の新着を初回スナップショット扱いで取りこぼす (feed 自体は sessionAddress を読んでいる)。
+  const feedSubject = tokenMode ? token : sessionAddress;
+  // 主体が変わったら検出を初期化 (別店舗/別端末の既存注文を新着扱いしない)。
   useEffect(() => {
     seenRef.current = new Set();
     initRef.current = false;
     setFlashing(new Set());
-  }, [sessionAddress]);
+  }, [feedSubject]);
   const feedData = feed.data;
   const feedLoading = feed.isLoading;
   const feedError = feed.isError;
   useEffect(() => {
-    // 認証済み + 成功スナップショットのみ対象。未サインイン/ロード中/エラー時は seed もしない
-    // (disabled query は非ロードかつ data 無しになりうる → 空 seed → サインイン後に全件誤アラート)。
-    if (!isSignedIn || feedLoading || feedError) return;
+    // feed が有効 (SIWE サインイン or token モード) かつ成功スナップショットのみ対象。無効/ロード中/
+    // エラー時は seed もしない (disabled query は非ロードかつ data 無しになりうる → 空 seed → 有効化後に
+    // 全件誤アラート)。token モードの店員端末でも新着アラートが要る (= isSignedIn だけで絞らない)。
+    if ((!isSignedIn && !tokenMode) || feedLoading || feedError) return;
     const ids = (feedData ?? []).map((o) => o.txHash);
     const idSet = new Set(ids);
     if (!initRef.current) {
@@ -124,7 +160,7 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
       });
     }, FLASH_MS);
     flashTimers.current.add(timer);
-  }, [feedData, feedLoading, feedError, isSignedIn]);
+  }, [feedData, feedLoading, feedError, isSignedIn, tokenMode]);
 
   // active/done の分け方は mode で異なる:
   //  - 厨房: 「調理済み」(kitchenDone) は **中間**。fulfilled 済みは除外し、kitchenDone で折りたたむ
@@ -339,7 +375,8 @@ export function OrderFulfillmentBoard({ mode }: { mode: 'kitchen' | 'hall' }) {
     );
   };
 
-  if (!isSignedIn) {
+  // token モード (店員端末) は SIWE 不要。それ以外は受取ウォレットのサインインを促す。
+  if (!tokenMode && !isSignedIn) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center">
         <p className="text-sm text-slate-600">{t('signInPrompt')}</p>

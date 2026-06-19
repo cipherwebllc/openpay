@@ -8,8 +8,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { OrderFeedOp, StoredOrder } from '@/lib/orderRelay';
 
-async function fetchFeed(): Promise<StoredOrder[]> {
-  const res = await fetch('/api/order/feed');
+// token があれば x-order-token ヘッダで送る (店員端末の閲覧トークン)。SIWE cookie とは独立。
+async function fetchFeed(token?: string): Promise<StoredOrder[]> {
+  const res = await fetch('/api/order/feed', token ? { headers: { 'x-order-token': token } } : undefined);
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   // KV 障害 (503) を「受注ゼロ」と偽装しない (isError でエラー表示)。
   if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${res.status}`);
@@ -20,25 +21,28 @@ export function useOrderFeed(
   sessionAddress: string | null | undefined,
   isSignedIn: boolean,
   refetchMs = 12_000,
+  // 受注閲覧トークン (店員端末)。指定時は SIWE 不要でこのトークンの受取アドレスの受注を読む。
+  token?: string | null,
 ) {
   const qc = useQueryClient();
+  // token / wallet 切替で前主体の cache を流用しないようキーをスコープ (token 優先)。
+  const scope = token ?? sessionAddress;
   const feed = useQuery({
-    // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ。
-    queryKey: ['order-feed', sessionAddress],
-    enabled: isSignedIn,
+    queryKey: ['order-feed', scope],
+    enabled: Boolean(token) || isSignedIn,
     refetchInterval: refetchMs,
-    queryFn: fetchFeed,
+    queryFn: () => fetchFeed(token ?? undefined),
   });
   const update = useMutation({
     mutationFn: async (vars: { txHash: string; op: OrderFeedOp }) => {
       const res = await fetch('/api/order/feed', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'x-order-token': token } : {}) },
         body: JSON.stringify(vars),
       });
       if (!res.ok) throw new Error(`http_${res.status}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['order-feed', sessionAddress] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['order-feed', scope] }),
   });
   return { feed, update };
 }

@@ -16,6 +16,7 @@ const hold = vi.hoisted(() => ({
   kvConfigured: true,
   store: {} as Record<string, string | null>,
   kvOk: true, // false で全 KV 操作を失敗させる
+  failSetKey: null as string | null, // この key への kvSet だけ失敗させる (部分失敗テスト用)
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -46,7 +47,7 @@ vi.mock('@/lib/kv', () => ({
         : { ok: false, reason: 'network_error' },
     ),
   kvSet: (key: string, value: string) => {
-    if (!hold.kvOk) return Promise.resolve({ ok: false, reason: 'network_error' });
+    if (!hold.kvOk || key === hold.failSetKey) return Promise.resolve({ ok: false, reason: 'network_error' });
     hold.store[key] = value;
     return Promise.resolve({ ok: true, value: 'OK' });
   },
@@ -70,6 +71,7 @@ beforeEach(() => {
   hold.kvConfigured = true;
   hold.store = {};
   hold.kvOk = true;
+  hold.failSetKey = null;
   delSpy.mockClear();
 });
 
@@ -132,6 +134,18 @@ describe('POST /api/order/token (発行 / 再発行)', () => {
   it('KV 障害 → 503', async () => {
     hold.kvOk = false;
     expect((await POST()).status).toBe(503);
+  });
+
+  it('部分失敗 fail-safe: pointer 書込だけ失敗 → 503 かつ旧トークンは生存 (rev 先行ゆえロックアウトしない)', async () => {
+    const old = 'o'.repeat(43);
+    hold.store[orderTokenKey(SESSION)] = old;
+    hold.store[orderTokenRevKey(old)] = SESSION;
+    hold.failSetKey = orderTokenKey(SESSION); // pointer への SET だけ失敗 (rev は先に成功)
+    const res = await POST();
+    expect(res.status).toBe(503);
+    // pointer は旧トークンのまま = 旧トークンは feed の現行一致検証を通る (= 失効していない・運用継続可)。
+    expect(hold.store[orderTokenKey(SESSION)]).toBe(old);
+    expect(hold.store[orderTokenRevKey(old)]).toBe(SESSION); // 旧 rev も健在
   });
 });
 

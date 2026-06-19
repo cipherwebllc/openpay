@@ -5,7 +5,7 @@ import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { StoredOrder } from '@/lib/orderRelay';
 
-const envHold = vi.hoisted(() => ({ enablePreorderTime: false }));
+const envHold = vi.hoisted(() => ({ enablePreorderTime: false, enableOrderToken: false }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -15,9 +15,24 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enablePreorderTime() {
         return envHold.enablePreorderTime;
       },
+      get enableOrderToken() {
+        return envHold.enableOrderToken;
+      },
     },
   };
 });
+
+// 受注閲覧トークンの localStorage (店員端末)。token モードのテストで制御する。
+const tokenHold = vi.hoisted(() => ({ stored: null as string | null }));
+vi.mock('@/lib/orderTokenClient', () => ({
+  getStoredOrderToken: () => tokenHold.stored,
+  setStoredOrderToken: (t: string) => {
+    tokenHold.stored = t;
+  },
+  clearStoredOrderToken: () => {
+    tokenHold.stored = null;
+  },
+}));
 
 const siwe = vi.hoisted(() => ({
   isSignedIn: true,
@@ -34,12 +49,20 @@ vi.mock('@/hooks/useSiweSession', () => ({
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
-const feedHold = vi.hoisted(() => ({ data: [] as StoredOrder[] }));
+const feedHold = vi.hoisted(() => ({
+  data: [] as StoredOrder[],
+  isError: false,
+  error: null as Error | null,
+  lastTokenArg: undefined as string | null | undefined, // board が useOrderFeed に渡した token 引数
+}));
 vi.mock('@/hooks/useOrderFeed', () => ({
-  useOrderFeed: () => ({
-    feed: { data: feedHold.data, isError: false, isLoading: false, refetch: vi.fn() },
-    update: { mutate: mutateSpy, isPending: false },
-  }),
+  useOrderFeed: (_addr: unknown, _signed: unknown, _ms: unknown, token: string | null | undefined) => {
+    feedHold.lastTokenArg = token;
+    return {
+      feed: { data: feedHold.data, isError: feedHold.isError, error: feedHold.error, isLoading: false, refetch: vi.fn() },
+      update: { mutate: mutateSpy, isPending: false },
+    };
+  },
 }));
 
 // 新着アラート音 (Web Audio) + 設定 pref を spy 化 (jsdom は AudioContext 無し)。
@@ -77,8 +100,13 @@ beforeEach(() => {
   siwe.isSignedIn = true;
   siwe.sessionAddress = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81'; // wallet テストで変えるので毎回戻す
   feedHold.data = [order()];
+  feedHold.isError = false;
+  feedHold.error = null;
+  feedHold.lastTokenArg = undefined;
   mutateSpy.mockClear();
   envHold.enablePreorderTime = false; // Phase 4 flag 既定 OFF
+  envHold.enableOrderToken = false; // Phase 5 flag 既定 OFF
+  tokenHold.stored = null;
   soundHold.enabled = false; // 新着アラート音 既定 OFF
   soundHold.set.mockClear();
   chime.play.mockClear();
@@ -382,5 +410,87 @@ describe('OrderFulfillmentBoard', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ── OT-5: token モード (店員端末・資金鍵なし) ─────────────────────────────
+  it('token モード: enableOrderToken + initialToken なら SIWE 無し (未サインイン) でも board 描画', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = false; // 店員端末はウォレット未接続
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" initialToken={'a'.repeat(43)} />);
+    // サインインを促さず受注 (牛丼) を表示。
+    expect(screen.queryByRole('button', { name: 'サインイン' })).toBeNull();
+    expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument();
+    expect(tokenHold.stored).toBe('a'.repeat(43)); // localStorage に保持
+  });
+
+  it('token モード: 保存済みトークンを ?t= 無しでも復元 (再訪)', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = false;
+    tokenHold.stored = 'b'.repeat(43); // 前回保存
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.queryByRole('button', { name: 'サインイン' })).toBeNull();
+    expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument();
+  });
+
+  it('enableOrderToken OFF: initialToken があっても token 無視 → 未サインインはサインイン要求', () => {
+    envHold.enableOrderToken = false;
+    siwe.isSignedIn = false;
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" initialToken={'a'.repeat(43)} />);
+    expect(screen.getByRole('button', { name: 'サインイン' })).toBeInTheDocument(); // token 無効 → SIWE 専用
+  });
+
+  it('token モード: 未サインインの店員端末でも新着アラート (点滅) が出る', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = false; // 店員端末 (ウォレット未接続)
+    feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" initialToken={'a'.repeat(43)} />);
+    expect(screen.queryByText('新着')).toBeNull(); // 初回スナップショットは新着扱いしない
+    feedHold.data = [order({ orderId: 'A1', txHash: TX }), order({ orderId: 'A2', txHash: TX2 })];
+    act(() => rerender(<OrderFulfillmentBoard mode="kitchen" initialToken={'a'.repeat(43)} />));
+    expect(screen.getByText('新着')).toBeInTheDocument(); // token モードでも検出が動く
+  });
+
+  it('サインイン済みは保存トークンより SIWE を優先 (別店舗トークンの取り違え防止)', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = true; // オーナーがサインイン済み
+    tokenHold.stored = 'c'.repeat(43); // 端末に別トークンが残っている
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(feedHold.lastTokenArg).toBeNull(); // token は使わず SIWE で読む
+    expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument();
+  });
+
+  it('サインイン済み + 保存トークンあり: token state 読込で新着検出が初期化されず取りこぼさない', () => {
+    // signed-in 中に localStorage の別トークンが token state に載っても、検出主体は受取アドレスのまま
+    // (feedSubject)。token 載りで initRef がリセットされ次の新着を初回扱いで握り潰す回帰のガード。
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = true;
+    tokenHold.stored = 'c'.repeat(43);
+    feedHold.data = [order({ orderId: 'A1', txHash: TX })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.queryByText('新着')).toBeNull(); // 初回スナップショット
+    feedHold.data = [order({ orderId: 'A1', txHash: TX }), order({ orderId: 'A2', txHash: TX2 })];
+    act(() => rerender(<OrderFulfillmentBoard mode="kitchen" />));
+    expect(screen.getByText('新着')).toBeInTheDocument(); // signed-in でも新着を検出する
+  });
+
+  it('失効トークン: feed が 401 invalid_token → 保存を破棄して token モードを抜ける', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = false;
+    tokenHold.stored = 'd'.repeat(43);
+    feedHold.isError = true;
+    feedHold.error = new Error('invalid_token');
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(tokenHold.stored).toBeNull(); // localStorage の失効トークンを破棄
+    expect(screen.getByRole('button', { name: 'サインイン' })).toBeInTheDocument(); // SIWE 要求へ
+  });
+
+  it('KV 障害 (401 以外) では保存トークンを消さない (再試行で復帰)', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = false;
+    tokenHold.stored = 'e'.repeat(43);
+    feedHold.isError = true;
+    feedHold.error = new Error('kv_error'); // 一時障害
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(tokenHold.stored).toBe('e'.repeat(43)); // 保持 (失効ではない)
   });
 });

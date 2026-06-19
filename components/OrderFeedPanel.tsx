@@ -15,6 +15,7 @@ import { CheckCircle2, ChefHat, RefreshCw, RotateCcw, UtensilsCrossed } from 'lu
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
+import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
 import { isJpycChainSlug, slugForChain, txExplorerUrl } from '@/lib/chains';
 import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
@@ -220,6 +221,8 @@ export function OrderFeedPanel() {
               </a>
             </div>
           )}
+          {/* 店員用リンク (受注閲覧トークン)。オーナーが発行し、店員端末は資金鍵なしで厨房/ホールへ。 */}
+          {env.enableOrderToken && <OrderOperatorTokenPanel sessionAddress={sessionAddress} />}
           {/* 営業中の操作 (売り切れ / 受付一時停止)。頻度が低いので通常は閉じる (details)。 */}
           {env.enableShopLive && liveSelected?.storefront && (
             <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">

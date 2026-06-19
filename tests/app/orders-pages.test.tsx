@@ -7,7 +7,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-const flags = vi.hoisted(() => ({ enableOrderFulfillment: true, enableOrderRelay: true }));
+const flags = vi.hoisted(() => ({
+  enableOrderFulfillment: true,
+  enableOrderRelay: true,
+  enableOrderToken: false,
+}));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -19,6 +23,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderRelay() {
         return flags.enableOrderRelay;
+      },
+      get enableOrderToken() {
+        return flags.enableOrderToken;
       },
     },
   };
@@ -41,7 +48,11 @@ vi.mock('next-intl/server', () => ({
 
 // board / 周辺 UI は別テストで担保済み → ここでは描画されたか + mode だけ確認する stub。
 vi.mock('@/components/OrderFulfillmentBoard', () => ({
-  OrderFulfillmentBoard: ({ mode }: { mode: string }) => <div data-testid="board">{mode}</div>,
+  OrderFulfillmentBoard: ({ mode, initialToken }: { mode: string; initialToken?: string }) => (
+    <div data-testid="board" data-token={initialToken ?? ''}>
+      {mode}
+    </div>
+  ),
 }));
 vi.mock('@/components/LocaleSwitcher', () => ({ LocaleSwitcher: () => <div data-testid="locale-switcher" /> }));
 vi.mock('next/link', () => ({
@@ -59,13 +70,14 @@ const PAGES = [
 beforeEach(() => {
   flags.enableOrderFulfillment = true;
   flags.enableOrderRelay = true;
+  flags.enableOrderToken = false;
   notFoundSpy.mockClear();
   setRequestLocaleSpy.mockClear();
 });
 
 describe.each(PAGES)('orders/$name page (inert 境界)', ({ Page, mode }) => {
   it('両フラグ ON + 有効 locale → board を mode 付きで描画', async () => {
-    const ui = await Page({ params: Promise.resolve({ locale: 'ja' }) });
+    const ui = await Page({ params: Promise.resolve({ locale: 'ja' }), searchParams: Promise.resolve({}) });
     render(ui);
     expect(screen.getByTestId('board')).toHaveTextContent(mode);
     expect(notFoundSpy).not.toHaveBeenCalled();
@@ -74,26 +86,48 @@ describe.each(PAGES)('orders/$name page (inert 境界)', ({ Page, mode }) => {
 
   it('enableOrderFulfillment OFF → notFound (ページ非存在)', async () => {
     flags.enableOrderFulfillment = false;
-    await expect(Page({ params: Promise.resolve({ locale: 'ja' }) })).rejects.toThrow('NEXT_NOT_FOUND');
+    await expect(Page({ params: Promise.resolve({ locale: 'ja' }), searchParams: Promise.resolve({}) })).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFoundSpy).toHaveBeenCalled();
   });
 
   it('enableOrderRelay OFF → notFound (受注リレー無しでは存在しない)', async () => {
     flags.enableOrderRelay = false;
-    await expect(Page({ params: Promise.resolve({ locale: 'ja' }) })).rejects.toThrow('NEXT_NOT_FOUND');
+    await expect(Page({ params: Promise.resolve({ locale: 'ja' }), searchParams: Promise.resolve({}) })).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFoundSpy).toHaveBeenCalled();
   });
 
   it('両フラグ OFF (本番既定) → notFound', async () => {
     flags.enableOrderFulfillment = false;
     flags.enableOrderRelay = false;
-    await expect(Page({ params: Promise.resolve({ locale: 'ja' }) })).rejects.toThrow('NEXT_NOT_FOUND');
+    await expect(Page({ params: Promise.resolve({ locale: 'ja' }), searchParams: Promise.resolve({}) })).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFoundSpy).toHaveBeenCalled();
   });
 
   it('無効 locale → notFound (フラグ判定より前にロケール検証)', async () => {
-    await expect(Page({ params: Promise.resolve({ locale: 'xx' }) })).rejects.toThrow('NEXT_NOT_FOUND');
+    await expect(
+      Page({ params: Promise.resolve({ locale: 'xx' }), searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFoundSpy).toHaveBeenCalled();
     expect(setRequestLocaleSpy).not.toHaveBeenCalled(); // locale 不正なら setRequestLocale まで進まない
+  });
+
+  it('enableOrderToken ON + ?t= → initialToken を board に渡す (店員リンク)', async () => {
+    flags.enableOrderToken = true;
+    const ui = await Page({
+      params: Promise.resolve({ locale: 'ja' }),
+      searchParams: Promise.resolve({ t: 'a'.repeat(43) }),
+    });
+    render(ui);
+    expect(screen.getByTestId('board').getAttribute('data-token')).toBe('a'.repeat(43));
+  });
+
+  it('enableOrderToken OFF だと ?t= があっても board に渡さない (inert)', async () => {
+    flags.enableOrderToken = false;
+    const ui = await Page({
+      params: Promise.resolve({ locale: 'ja' }),
+      searchParams: Promise.resolve({ t: 'a'.repeat(43) }),
+    });
+    render(ui);
+    expect(screen.getByTestId('board').getAttribute('data-token')).toBe(''); // 渡らない
   });
 });

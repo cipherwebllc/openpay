@@ -63,7 +63,7 @@ describe('useOrderFeed', () => {
     const { result } = renderHook(() => useOrderFeed('0xabc', true, 999_999), { wrapper: wrap(qc) });
     await waitFor(() => expect(result.current.feed.isSuccess).toBe(true));
     expect(result.current.feed.data).toEqual([ORDER]);
-    expect(fetchSpy).toHaveBeenCalledWith('/api/order/feed');
+    expect(fetchSpy).toHaveBeenCalledWith('/api/order/feed', undefined); // token 無し = init 無し
   });
 
   it('未サインイン: query 無効で fetch しない (enabled=false)', async () => {
@@ -135,5 +135,26 @@ describe('useOrderFeed', () => {
     fetchHold.get = jsonRes(true, { ok: true, orders: [ORDER2] });
     rerender({ addr: '0xbbb' });
     await waitFor(() => expect(result.current.feed.data).toEqual([ORDER2]));
+  });
+
+  it('token モード: SIWE 無し (isSignedIn=false) でも有効・x-order-token ヘッダで取得', async () => {
+    const TOKEN = 'a'.repeat(43);
+    const qc = makeClient();
+    const { result } = renderHook(() => useOrderFeed(null, false, 999_999, TOKEN), { wrapper: wrap(qc) });
+    await waitFor(() => expect(result.current.feed.isSuccess).toBe(true));
+    expect(result.current.feed.data).toEqual([ORDER]);
+    const getCall = fetchSpy.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === undefined);
+    expect((getCall![1] as { headers?: Record<string, string> }).headers?.['x-order-token']).toBe(TOKEN);
+  });
+
+  it('token モード: mutation も x-order-token を送る', async () => {
+    const TOKEN = 'a'.repeat(43);
+    const qc = makeClient();
+    const { result } = renderHook(() => useOrderFeed(null, false, 999_999, TOKEN), { wrapper: wrap(qc) });
+    await waitFor(() => expect(result.current.feed.isSuccess).toBe(true));
+    result.current.update.mutate({ txHash: TX, op: { kind: 'fulfill', value: true } });
+    await waitFor(() => expect(result.current.update.isSuccess).toBe(true));
+    const postCall = fetchSpy.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'POST');
+    expect((postCall![1] as { headers: Record<string, string> }).headers['x-order-token']).toBe(TOKEN);
   });
 });

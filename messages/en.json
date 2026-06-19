@@ -1873,5 +1873,19 @@
     "unfulfill": "Mark as not done",
     "fulfilledHeading": "Completed",
     "disclosure": "Orders are temporarily stored on the OpenPay server at payment time and auto-deleted after a period (no customer personal data is stored)."
+  },
+  "OrderToken": {
+    "heading": "Staff links (order view token)",
+    "description": "Links that connect staff devices to the kitchen / hall without a wallet. They allow only viewing and status updates — no transfers or receiver changes (funds stay safe).",
+    "kitchen": "Kitchen",
+    "hall": "Hall",
+    "copy": "Copy",
+    "issue": "Create links",
+    "issuing": "Creating…",
+    "rotate": "Reissue (revokes old)",
+    "revoke": "Revoke",
+    "shareWarning": "Anyone with this link can view and update orders. Use only on in-store devices, and reissue if it leaks.",
+    "loadError": "Couldn't load the token.",
+    "opError": "Operation failed. Please try again."
   }
 }

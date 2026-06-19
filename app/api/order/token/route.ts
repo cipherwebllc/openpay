@@ -3,6 +3,11 @@
 // トークンは **受注の閲覧 + 進捗操作のみ** を店員端末に許す bearer 資格情報 (送金・受取先変更は不可)。
 // 失効はトークン削除/再発行で行う。セキュリティの要は feed 側の「現行トークン一致」検証で、ここでの
 // 旧 rev 削除は hygiene (失敗しても旧トークンは feed の一致検証で弾かれる)。
+// 同時実行: rotate と revoke を **同時** に投げると、各操作は複数の KV コマンド (rotate=rev/pointer 書込,
+//   revoke=pointer/rev 削除) ゆえコマンド単位で交錯しうる → revoke が 200 を返しても、割り込んだ rotate の
+//   新トークンが pointer に残り有効なままになりうる (厳密な last-writer-wins ではない)。ただし両操作とも
+//   オーナーの SIWE 必須の **単一所有者 self-race** で、再 revoke で必ず確定でき、第三者は誘発できないため
+//   許容する (この自己競合のために分散ロックは導入しない)。通常運用では rotate/revoke は択一。
 // flag NEXT_PUBLIC_ENABLE_ORDER_TOKEN 既定 OFF → 404 (完全 inert)。設計: plans/restaurant-pos-roadmap.md Phase 5。
 import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -55,15 +60,18 @@ export async function POST(): Promise<NextResponse> {
   }
 
   const token = randomBytes(ORDER_TOKEN_BYTES).toString('base64url');
-  // pointer/再表示用 (受取アドレス→現行トークン) と lookup 用 (トークン→受取アドレス) を両方書く。
-  const setKey = await kvSet(orderTokenKey(merchant), token);
-  if (!setKey.ok) {
-    logger.warn('order.token.kv_error', { reason: setKey.reason, op: 'rotate_setkey' });
-    return kvError();
-  }
+  // lookup 用 (トークン→受取アドレス) を **先に**、pointer/再表示用 (受取アドレス→現行トークン) を後に書く。
+  // pointer が「現行トークン」の権威なので最後に確定させる: 片方だけ成功して 503 になっても、pointer 未更新
+  // なら旧 pointer/rev が健在 → 旧トークンが生き続ける (新 rev は孤児だが現行一致検証で弾かれ無害) =
+  // 部分失敗が fail-safe (オーナーがロックアウトされない)。逆順だと pointer だけ進んで両トークン失効しうる。
   const setRev = await kvSet(orderTokenRevKey(token), merchant);
   if (!setRev.ok) {
     logger.warn('order.token.kv_error', { reason: setRev.reason, op: 'rotate_setrev' });
+    return kvError();
+  }
+  const setKey = await kvSet(orderTokenKey(merchant), token);
+  if (!setKey.ok) {
+    logger.warn('order.token.kv_error', { reason: setKey.reason, op: 'rotate_setkey' });
     return kvError();
   }
   // 旧 rev の掃除 (best-effort)。失敗しても旧トークンは feed の現行一致検証で弾かれるので安全。

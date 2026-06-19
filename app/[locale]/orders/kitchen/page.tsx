@@ -14,12 +14,21 @@ import { env } from '@/lib/env';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export default async function KitchenPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function KitchenPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ t?: string | string[] }>;
+}) {
   const { locale } = await params;
   if (!hasLocale(LOCALES, locale)) notFound();
   setRequestLocale(locale);
   if (!env.enableOrderFulfillment || !env.enableOrderRelay) notFound();
   const t = await getTranslations('OrderFulfillment');
+  // ?t=<token> = 店員リンク (enableOrderToken 時)。board が localStorage に保持し SIWE 無しで閲覧/操作。
+  const sp = await searchParams;
+  const initialToken = env.enableOrderToken && typeof sp.t === 'string' ? sp.t : undefined;
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-3 py-4">
@@ -33,7 +42,7 @@ export default async function KitchenPage({ params }: { params: Promise<{ locale
         </Link>
         <LocaleSwitcher />
       </div>
-      <OrderFulfillmentBoard mode="kitchen" />
+      <OrderFulfillmentBoard mode="kitchen" initialToken={initialToken} />
     </main>
   );
 }
