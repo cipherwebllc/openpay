@@ -512,6 +512,14 @@ export const env = {
   // lastOrder/minLeadMinutes の保存/検証など data 層は常時有効だが表示しないので inert。
   // 計画: plans/restaurant-pos-roadmap.md Phase 4。
   enablePreorderTime: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_PREORDER_TIME),
+  // 受注閲覧トークン (店員端末を資金鍵なしで厨房/ホールに繋ぐ) の有効化フラグ (client 露出)。
+  // **既定 OFF で完全 inert** = /api/order/token は 404・オーナーUIの発行パネル非表示・feed は
+  // x-order-token を無視 (SIWE 専用)。ON のとき受取ウォレットのオーナーが「受注閲覧トークン」を
+  // 発行し、店員端末は /orders/{kitchen,hall}?t=<token> を開くだけ (ウォレット不要) で受注の閲覧+
+  // 進捗操作ができる。トークンは **閲覧/操作のみ・送金や受取先変更は不可** (資金鍵を持たない) =
+  // 店員による売上スキミングを構造的に防ぐ。再発行で旧トークン即失効。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY。
+  // 計画: plans/restaurant-pos-roadmap.md Phase 5。
+  enableOrderToken: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_TOKEN),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

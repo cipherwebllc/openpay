@@ -1,17 +1,19 @@
-// 店主の受注フィード (SIWE 必須)。read authz は厳格に **session.address === 受取アドレス**
-// (= 注文リストの KV キー)。店主は受取ウォレットでサインインして自分宛の受注のみ見られる
-// (@handle owner 経由は owner≠config.to のなりすまし穴ゆえ不採用)。
+// 店主の受注フィード。認可は2系統: (1) **SIWE セッション** (オーナー本人=受取アドレス) または
+// (2) **受注閲覧トークン** (x-order-token・enableOrderToken 時)。どちらも `merchant`(受取アドレス)を
+// 解決し、`order:list:<merchant>` のみを読む。トークンは資金鍵なしの店員端末向けで、**閲覧+進捗操作
+// のみ** (送金・受取先変更は不可・このルート以外は受理しない) = 店員の売上スキミングを構造的に防ぐ。
 // GET = 受注一覧 (新しい順)。POST = 該当 txHash の状態更新 (op: fulfill/itemCooked/itemServed/setTable)。
 // 削除でなくフラグ化し誤操作を復旧可能に。旧 {fulfilled} (base relay) は enableOrderRelay のみ、構造化
 // {op:...} は Phase 3 ゆえ enableOrderFulfillment も要求 (kitchen/hall ルートと同じ二重ゲート)。
 // flag OFF は 404。KV 障害は 503 で正直に返す (黙って空リストにしない)。設計: plans/swift-puzzling-sky.md。
 // 観測性: KV/競合の失敗 (503/409) は logger.warn → Sentry event 化 (**本番 Sentry DSN 設定時のみ
-// アラート化**・未設定なら console のみ)。400 (invalid_json/invalid_op) は client error ゆえ意図的に
-// 無ログ (scanner/abuse でのノイズを避ける)。
+// アラート化**・未設定なら console のみ)。400 (invalid_json/invalid_op/invalid_token) は client error ゆえ
+// 意図的に無ログ (scanner/abuse でのノイズを避ける)。
 import { NextResponse } from 'next/server';
+import { isAddress, getAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
-import { kvLrange, kvEval, isKvConfigured } from '@/lib/kv';
+import { kvLrange, kvEval, kvGet, isKvConfigured } from '@/lib/kv';
 import {
   orderListKey,
   parseStoredOrder,
@@ -21,6 +23,7 @@ import {
   ORDER_LIST_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
+import { isOrderTokenLike, orderTokenKey, orderTokenRevKey } from '@/lib/orderToken';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -30,17 +33,55 @@ export const maxDuration = 15;
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
 }
+function invalidToken() {
+  return NextResponse.json({ ok: false, error: 'invalid_token' }, { status: 401 });
+}
+function kvError() {
+  return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
+}
 
-export async function GET(): Promise<NextResponse> {
-  if (!env.enableOrderRelay) return notFound();
+type Actor = { merchant: Address } | { response: NextResponse };
+
+// 認可解決。トークン経路は KV 参照するため **呼び出し前に isKvConfigured() 済み**であること。
+// 優先順: 受注閲覧トークン (あれば) → SIWE セッション。トークンは「現行トークン一致」検証で
+// rotate/revoke 済みの旧トークンを確実に失効させる (セキュリティの要)。
+async function resolveMerchant(req: Request): Promise<Actor> {
+  if (env.enableOrderToken) {
+    const token = req.headers.get('x-order-token');
+    if (token) {
+      if (!isOrderTokenLike(token)) return { response: invalidToken() };
+      const rev = await kvGet(orderTokenRevKey(token));
+      if (!rev.ok) {
+        logger.warn('order.feed.kv_error', { reason: rev.reason, op: 'token_lookup' });
+        return { response: kvError() };
+      }
+      if (!rev.value || !isAddress(rev.value)) return { response: invalidToken() };
+      const merchant = getAddress(rev.value);
+      const cur = await kvGet(orderTokenKey(merchant));
+      if (!cur.ok) {
+        logger.warn('order.feed.kv_error', { reason: cur.reason, op: 'token_current' });
+        return { response: kvError() };
+      }
+      if (cur.value !== token) return { response: invalidToken() }; // 失効済み (rotate/revoke)
+      return { merchant };
+    }
+  }
   const session = await requireSession();
-  if (!session.ok) return session.response;
+  if (!session.ok) return { response: session.response };
+  return { merchant: session.address };
+}
 
+export async function GET(req: Request): Promise<NextResponse> {
+  if (!env.enableOrderRelay) return notFound();
+  // KV 検査を認可より前に (トークン経路の resolveMerchant が KV を参照するため)。
   if (!isKvConfigured()) {
     logger.warn('order.feed.kv_unavailable', { op: 'get' }); // KV env 欠落デプロイを無音にしない
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
-  const res = await kvLrange(orderListKey(session.address), 0, ORDER_LIST_MAX - 1);
+  const actor = await resolveMerchant(req);
+  if ('response' in actor) return actor.response;
+
+  const res = await kvLrange(orderListKey(actor.merchant), 0, ORDER_LIST_MAX - 1);
   if (!res.ok) {
     // KV 障害を黙殺しない (空リストと区別 → UI は「一時的に取得不可」を出せる)。
     logger.warn('order.feed.kv_error', { reason: res.reason });
@@ -65,8 +106,13 @@ const FEED_MAX_RETRY = 3;
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderRelay) return notFound();
-  const session = await requireSession();
-  if (!session.ok) return session.response;
+  // KV 検査を認可より前に (トークン経路の resolveMerchant が KV を参照するため)。
+  if (!isKvConfigured()) {
+    logger.warn('order.feed.kv_unavailable', { op: 'post' }); // KV env 欠落デプロイを無音にしない
+    return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
+  }
+  const actor = await resolveMerchant(req);
+  if ('response' in actor) return actor.response;
 
   let body: unknown;
   try {
@@ -90,12 +136,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!parsedOp) {
     return NextResponse.json({ ok: false, error: 'invalid_op' }, { status: 400 });
   }
-  if (!isKvConfigured()) {
-    logger.warn('order.feed.kv_unavailable', { op: 'post' }); // KV env 欠落デプロイを無音にしない
-    return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
-  }
 
-  const key = orderListKey(session.address);
+  const key = orderListKey(actor.merchant);
   const txLower = parsedOp.txHash.toLowerCase();
 
   // read→apply→CAS-replace を最大 FEED_MAX_RETRY 回 (同時更新で旧 raw が消えていれば再読込)。

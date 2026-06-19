@@ -5,16 +5,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextResponse } from 'next/server';
 import { serializeOrder, type StoredOrder } from '@/lib/orderRelay';
+import { orderTokenKey, orderTokenRevKey } from '@/lib/orderToken';
 
 const SESSION = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
 const hold = vi.hoisted(() => ({
   enableOrderRelay: true,
   enableOrderFulfillment: true, // Phase 3 op ({op:...}) のゲート
+  enableOrderToken: false, // Phase 5 受注閲覧トークン (token 経路)
   session: { ok: true, address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' } as
     | { ok: true; address: string }
     | { ok: false },
   kvConfigured: true,
+  kvStore: {} as Record<string, string | null>, // kvGet(token rev/current) のバッキング
+  kvGetOk: true, // false で kvGet 障害を再現
   lrange: { ok: true, value: [] as string[] } as { ok: true; value: string[] } | { ok: false; reason: string },
   lrangeQueue: null as Array<{ ok: true; value: string[] } | { ok: false; reason: string }> | null, // 指定時は read 毎に shift (再読込で別データを返す=他端末の並行更新を模す)
   evalResult: 1 as number, // REPLACE_ELEM CAS の戻り (1=置換成功 / 0=競合)
@@ -34,6 +38,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableOrderFulfillment() {
         return hold.enableOrderFulfillment;
       },
+      get enableOrderToken() {
+        return hold.enableOrderToken;
+      },
     },
   };
 });
@@ -48,6 +55,13 @@ const lrangeSpy = vi.hoisted(() => vi.fn());
 const evalSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
+  // token 認可解決 (resolveMerchant) が rev/current を引く。
+  kvGet: (key: string) =>
+    Promise.resolve(
+      hold.kvGetOk
+        ? { ok: true, value: key in hold.kvStore ? hold.kvStore[key] : null }
+        : { ok: false, reason: 'network_error' },
+    ),
   kvLrange: (...a: unknown[]) => {
     lrangeSpy(...a);
     if (hold.lrangeQueue && hold.lrangeQueue.length > 0) return Promise.resolve(hold.lrangeQueue.shift()!);
@@ -85,19 +99,25 @@ function order(over: Partial<StoredOrder>): StoredOrder {
     ...over,
   };
 }
-function postReq(body: unknown): Request {
+function postReq(body: unknown, headers?: Record<string, string>): Request {
   return new Request('http://localhost/api/order/feed', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
+}
+function getReq(headers?: Record<string, string>): Request {
+  return new Request('http://localhost/api/order/feed', { headers });
 }
 
 beforeEach(() => {
   hold.enableOrderRelay = true;
   hold.enableOrderFulfillment = true;
+  hold.enableOrderToken = false;
   hold.session = { ok: true, address: SESSION };
   hold.kvConfigured = true;
+  hold.kvStore = {};
+  hold.kvGetOk = true;
   hold.lrange = { ok: true, value: [] };
   hold.lrangeQueue = null;
   hold.evalResult = 1;
@@ -111,28 +131,28 @@ beforeEach(() => {
 describe('GET /api/order/feed', () => {
   it('flag OFF → 404', async () => {
     hold.enableOrderRelay = false;
-    expect((await GET()).status).toBe(404);
+    expect((await GET(getReq())).status).toBe(404);
   });
 
   it('未ログイン → 401', async () => {
     hold.session = { ok: false };
-    expect((await GET()).status).toBe(401);
+    expect((await GET(getReq())).status).toBe(401);
   });
 
   it('KV 未設定 → 503 + logger.warn(kv_unavailable) で env 欠落を観測', async () => {
     hold.kvConfigured = false;
-    expect((await GET()).status).toBe(503);
+    expect((await GET(getReq())).status).toBe(503);
     expect(logWarn).toHaveBeenCalledWith('order.feed.kv_unavailable', { op: 'get' });
   });
 
   it('KV 障害 → 503 (空リストと区別・黙殺しない)', async () => {
     hold.lrange = { ok: false, reason: 'network_error' };
-    const res = await GET();
+    const res = await GET(getReq());
     expect(res.status).toBe(503);
   });
 
   it('read authz: session.address のリストのみ読む (小文字キー)', async () => {
-    await GET();
+    await GET(getReq());
     expect(lrangeSpy).toHaveBeenCalledWith(`order:list:${SESSION.toLowerCase()}`, 0, expect.any(Number));
   });
 
@@ -145,7 +165,7 @@ describe('GET /api/order/feed', () => {
         serializeOrder(order({ orderId: 'new', ts: 200 })),
       ],
     };
-    const res = await GET();
+    const res = await GET(getReq());
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.orders.map((o: StoredOrder) => o.orderId)).toEqual(['new', 'old']); // ts 降順
@@ -360,5 +380,85 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     const merged = JSON.parse(secondCall[2][1]);
     expect(merged.items[0].cooked).toBe(true); // 厨房の更新が入る
     expect(merged.items[1].served).toBe(true); // ホールの並行更新が消えていない (= ロスト更新なし)
+  });
+});
+
+describe('受注閲覧トークン認可 (x-order-token・資金鍵なしの店員端末)', () => {
+  const TOKEN = 'a'.repeat(43); // base64url 43 文字 = 有効形式
+  const MERCHANT = '0x1111111111111111111111111111111111111111'; // session とは別アドレス
+  // トークンを有効化 (rev:token→merchant・key:merchant→token=現行一致)。
+  function armToken(token = TOKEN, merchant = MERCHANT, current = token) {
+    hold.enableOrderToken = true;
+    hold.session = { ok: false }; // SIWE 無しでも通ることを示す
+    hold.kvStore[orderTokenRevKey(token)] = merchant;
+    hold.kvStore[orderTokenKey(merchant)] = current;
+  }
+
+  it('GET: 有効トークンで SIWE 無しでも **そのトークンの受取アドレス**の受注を読む', async () => {
+    armToken();
+    hold.lrange = { ok: true, value: [serializeOrder(order({ orderId: 'x' }))] };
+    const res = await GET(getReq({ 'x-order-token': TOKEN }));
+    expect(res.status).toBe(200);
+    // session ではなく **トークンの merchant** のリストを読む。
+    expect(lrangeSpy).toHaveBeenCalledWith(`order:list:${MERCHANT.toLowerCase()}`, 0, expect.any(Number));
+  });
+
+  it('GET: enableOrderToken OFF だとトークンは無視され SIWE 専用 (未ログイン→401)', async () => {
+    hold.enableOrderToken = false;
+    hold.session = { ok: false };
+    hold.kvStore[orderTokenRevKey(TOKEN)] = MERCHANT;
+    hold.kvStore[orderTokenKey(MERCHANT)] = TOKEN;
+    const res = await GET(getReq({ 'x-order-token': TOKEN }));
+    expect(res.status).toBe(401); // token 無視 → SIWE → 未ログイン
+  });
+
+  it('GET: 不正な形式のトークン → 401 (KV を引かない)', async () => {
+    hold.enableOrderToken = true;
+    hold.session = { ok: false };
+    const res = await GET(getReq({ 'x-order-token': 'short' }));
+    expect(res.status).toBe(401);
+  });
+
+  it('GET: 未知トークン (rev 無し) → 401', async () => {
+    hold.enableOrderToken = true;
+    hold.session = { ok: false };
+    const res = await GET(getReq({ 'x-order-token': TOKEN }));
+    expect(res.status).toBe(401);
+  });
+
+  it('GET: 失効トークン (現行トークンと不一致) → 401 (rotate/revoke 済みを弾く)', async () => {
+    armToken(TOKEN, MERCHANT, 'b'.repeat(43)); // 現行は別トークン
+    const res = await GET(getReq({ 'x-order-token': TOKEN }));
+    expect(res.status).toBe(401);
+  });
+
+  it('GET: トークン経路で KV 障害 → 503', async () => {
+    armToken();
+    hold.kvGetOk = false;
+    const res = await GET(getReq({ 'x-order-token': TOKEN }));
+    expect(res.status).toBe(503);
+  });
+
+  it('POST: 有効トークンで **そのトークンの受取アドレス**の受注を操作 (送金不可・閲覧操作のみ)', async () => {
+    armToken();
+    const txa = `0x${'c'.repeat(64)}`;
+    hold.lrange = {
+      ok: true,
+      value: [serializeOrder(order({ txHash: txa, items: [{ name: 'A', qty: 1, price: '100' }] }))],
+    };
+    const res = await POST(
+      postReq({ txHash: txa, op: { kind: 'itemCooked', index: 0, value: true } }, { 'x-order-token': TOKEN }),
+    );
+    expect(res.status).toBe(200);
+    expect(lrangeSpy).toHaveBeenCalledWith(`order:list:${MERCHANT.toLowerCase()}`, 0, expect.any(Number));
+    const [, , args] = evalSpy.mock.calls[0] as [string, string[], string[]];
+    expect(JSON.parse(args[1]).items[0].cooked).toBe(true);
+  });
+
+  it('POST: 失効トークン → 401 (操作させない)', async () => {
+    armToken(TOKEN, MERCHANT, 'b'.repeat(43));
+    const res = await POST(postReq({ txHash: TX, fulfilled: true }, { 'x-order-token': TOKEN }));
+    expect(res.status).toBe(401);
+    expect(evalSpy).not.toHaveBeenCalled();
   });
 });
