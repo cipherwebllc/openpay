@@ -111,6 +111,7 @@ beforeEach(() => {
   soundHold.set.mockClear();
   chime.play.mockClear();
   chime.prime.mockClear();
+  window.history.replaceState(null, '', '/'); // URL を初期化 (?t= strip テストの相互汚染防止)
 });
 
 describe('OrderFulfillmentBoard', () => {
@@ -421,6 +422,16 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.queryByRole('button', { name: 'サインイン' })).toBeNull();
     expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument();
     expect(tokenHold.stored).toBe('a'.repeat(43)); // localStorage に保持
+  });
+
+  it('token モード: ?t= 取り込み後に URL からトークンを除去 (露出低減・localStorage で継続)', () => {
+    envHold.enableOrderToken = true;
+    siwe.isSignedIn = false;
+    window.history.replaceState(null, '', `/ja/orders/kitchen?t=${'a'.repeat(43)}`);
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" initialToken={'a'.repeat(43)} />);
+    expect(window.location.search).not.toContain('t='); // URL から除去された
+    expect(tokenHold.stored).toBe('a'.repeat(43)); // localStorage には保持 (再読込でも機能継続)
+    expect(screen.getByRole('button', { name: /牛丼/ })).toBeInTheDocument(); // 受注は表示されたまま
   });
 
   it('token モード: 保存済みトークンを ?t= 無しでも復元 (再訪)', () => {

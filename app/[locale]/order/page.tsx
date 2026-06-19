@@ -19,7 +19,7 @@ import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 
 export const metadata: Metadata = {
   title: 'OpenPay Order',
-  description: 'Mobile order — view the shop menu (prepay coming soon).',
+  description: 'Mobile order — view the shop menu and pay in JPYC.',
 };
 
 export default async function OrderPage({

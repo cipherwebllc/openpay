@@ -53,6 +53,19 @@ export function OrderFulfillmentBoard({
     if (initialToken) {
       setStoredOrderToken(initialToken);
       setToken(initialToken);
+      // 取り込んだら URL から ?t= を除去 (履歴/スクショ/肩越しでのトークン露出を減らす)。localStorage に
+      // 保持済みなので再読込・再訪でも機能継続。sandboxed iframe 等で history 不可なら無視 (機能影響なし)。
+      // 取り込んだら URL から ?t= を除去 (履歴/スクショ/肩越しでのトークン露出を減らす)。localStorage に
+      // 保持済みなので再読込・再訪でも機能継続。sandboxed iframe 等で history 不可なら無視 (機能影響なし)。
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('t')) {
+          url.searchParams.delete('t');
+          window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+        }
+      } catch {
+        /* history/URL API 不可環境はそのまま (トークンは localStorage で機能継続) */
+      }
     } else {
       setToken(getStoredOrderToken());
     }
