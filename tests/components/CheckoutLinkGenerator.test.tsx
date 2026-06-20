@@ -37,9 +37,8 @@ describe('CheckoutLinkGenerator', () => {
   });
 
   it('USDC トークンの chain hint: 表示 count と列挙チェーン数がともに USDC_CHAINS.length と一致 (count↔列挙ドリフト検知)', async () => {
-    // 実 i18n + 実 USDC_CHAINS + 実 component を描画し、実出力 (hint テキスト) を検査する。
-    // 以前は count=USDC_CHAINS.length(6) なのに列挙が 5 チェーン (Avalanche 欠落) で不整合だった
-    // ため、この invariant が将来の count↔列挙ドリフトを両方向で捕捉する。
+    // 以前 count=USDC_CHAINS.length(6) なのに列挙が 5 チェーン (Avalanche 欠落) で不整合だった。
+    // 実出力 (hint) をパースし count↔列挙ドリフトを両方向で捕捉する。
     render(<CheckoutLinkGenerator />);
     await waitFor(() => screen.getByRole('button', { name: /USDC/ }));
     const usdcBtn = screen.getByRole('button', { name: /USDC/ });
@@ -52,11 +51,8 @@ describe('CheckoutLinkGenerator', () => {
       .split(' / ')
       .map((s) => s.trim())
       .filter(Boolean);
-    // (1) 表示 count = 実際の USDC 受取チェーン数。
     expect(count).toBe(USDC_CHAINS.length);
-    // (2) 列挙チェーン数も一致 (count と列挙が乖離しないことを保証)。
-    expect(listed).toHaveLength(USDC_CHAINS.length);
-    // (3) Avalanche が列挙に含まれる (USDC_CHAINS に avalanche があるため)。
+    expect(listed).toHaveLength(USDC_CHAINS.length); // count と列挙が乖離しない
     expect(listed).toContain('Avalanche');
   });
 

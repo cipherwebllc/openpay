@@ -156,13 +156,11 @@ describe('HandleProfileBuilder', () => {
   it('enableJpycAvalanche ON + avalanche method を持つ既存設定を編集ロード → トグル ON 復元 + 受取方法も描画 (load 経路)', () => {
     h.enableJpycAvalanche = true;
     renderWithIntl(<HandleProfileBuilder />);
-    // 既存の avalanche 入り設定 (to + [jpyc/polygon, jpyc/avalanche]) を編集ロード。
     fireEvent.click(screen.getByTestId('edit-avalanche'));
-    // config.methods から draft.jpycAvalanche が復元 → checkbox が checked。
+    // config.methods から draft.jpycAvalanche を復元 → checkbox checked + 受取方法も描画。
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' }),
     ).toBeChecked();
-    // method 伝播 → 受取方法サマリ/プレビューに実描画 (load→draft→methods→描画の実出力検証)。
     expect(
       screen.getAllByText('JPYC (Avalanche) で応援').length,
     ).toBeGreaterThan(0);
@@ -174,11 +172,10 @@ describe('HandleProfileBuilder', () => {
     // (option ゲートとは別の method ゲートの provably-inert を実証)。
     renderWithIntl(<HandleProfileBuilder />); // h.enableJpycAvalanche=false (beforeEach)
     fireEvent.click(screen.getByTestId('edit-avalanche'));
-    // option (checkbox) は flag OFF で非表示。
+    // checkbox (option) も 受取方法 (method) も flag OFF では出ない。
     expect(
       screen.queryByRole('checkbox', { name: 'JPYC (Avalanche)' }),
     ).not.toBeInTheDocument();
-    // method (受取方法) も flag OFF で構築されない (draft に値があっても載らない)。
     expect(
       screen.queryByText('JPYC (Avalanche) で応援'),
     ).not.toBeInTheDocument();

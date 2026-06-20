@@ -298,12 +298,10 @@ describe('relayMaxGasCostWei — per-chain gas 上限 (AVAX は native 価値が
   });
 });
 
-// tip widget / @handle の JPYC chain chooser が描画する「受取可能チェーン集合」と同一の選択
-// ロジック (RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter(isGaslessSupported)) を実モジュールで固定。
-// tip は gasless 固定ゆえ「JPYC_CHAINS にあっても gasless 不成立なら chooser に出さない」。
-// → recover-required の Avalanche は forwarder 未設定だと chooser に現れない (= 安全側)。
-// 「chooser がチェーン毎にボタンを描画する」描画側は TipEmbedGenerator.test の Polygon/Kaia
-// テストで実証済なので、本テストで集合の中身を実コードで固定すれば合成として全経路を覆う。
+// chain chooser が描画する「受取可能チェーン集合」と同一の選択ロジック
+// (RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter(isGaslessSupported)) を実モジュールで固定。
+// tip は gasless 固定ゆえ「JPYC_CHAINS にあっても gasless 不成立なら chooser に出さない」=
+// recover-required の Avalanche は forwarder 未設定だと出ない (安全側)。
 describe('受取可能 JPYC チェーン集合 (chain chooser の RECEIVABLE_JPYC_CHAINS と同一ロジック)', () => {
   it('flag OFF: [polygon, kaia] のみ (avalanche は集合外)', async () => {
     const { chains, tokens } = await loadWith({

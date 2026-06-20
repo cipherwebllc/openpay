@@ -1,14 +1,7 @@
 // TipEmbedGenerator の chain chooser が flag ON (Avalanche enable + Fuji forwarder) で
-// 「Avalanche チップを実際に描画」し、選択すると URL に chain=avalanche が乗ることを、
-// 実 component + 実 chains/tokens (fake data mock 無し) で実行する。
-//
-// なぜ別ファイル + resetModules か:
-//   RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter(isGaslessSupported) は TipEmbedGenerator の
-//   module-load 時に確定する。よって env を立ててから resetModules → React/RTL/intl/component
-//   を「すべて動的 import」して同一モジュールグラフで取り直す (dual-React を回避)。env は
-//   afterEach で削除し他ファイルへ漏らさない。
-// 既存 TipEmbedGenerator.test (flag OFF) の「Polygon / Kaia 2 ボタン」と対照で、flag OFF だと
-// Avalanche チップが出ないこと (= 本テストが非空虚であること) も同ファイルで実証する。
+// Avalanche チップを描画し、選択で URL に chain=avalanche が乗ることを実 component で実行する。
+// RECEIVABLE_JPYC_CHAINS は module-load 時に確定するため、env を立ててから resetModules →
+// 全モジュールを動的 import して flag を効かせる (fake data mock は使わない)。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 
@@ -17,8 +10,7 @@ const KEYS = [
   'NEXT_PUBLIC_NETWORK_ENV',
   'NEXT_PUBLIC_JPYC_FORWARDER_FUJI',
 ] as const;
-// 有効な checksummed アドレス (jpycAvalanche.test と同一)。configuredJpycForwarderFor は
-// viem isAddress (strict checksum) で検証するため checksum が正しい必要がある。
+// Fuji forwarder (checksummed・viem isAddress の strict 検証を通す必要がある)。
 const FUJI_FORWARDER = '0x0F4560a777415580F0680F8B56a79B0022C6B848';
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -39,7 +31,6 @@ afterEach(() => {
   vi.resetModules();
 });
 
-// env を立て resetModules → 全モジュールを動的 import し実 component を描画する。
 async function renderTip(envVars: Partial<Record<(typeof KEYS)[number], string>>) {
   for (const k of KEYS) delete process.env[k];
   Object.assign(process.env, envVars);
@@ -52,9 +43,8 @@ async function renderTip(envVars: Partial<Record<(typeof KEYS)[number], string>>
   const { chainForSlug } = await import('@/lib/chains');
 
   const avaxId = chainForSlug('avalanche').id; // testnet → Fuji (43113)
-  // JSX (静的 jsx-runtime) は要素記述子を作るだけ。描画は「動的 import した fresh
-  // react-dom (rtl.render)」が行い、component も fresh なので hooks/context は同一
-  // インスタンスで一貫する (dual-React = invalid hook call を回避)。
+  // 描画は動的 import した fresh react-dom + fresh component なので hooks/context が同一
+  // インスタンスで一貫する (dual-React = invalid hook call を回避)。JSX は記述子生成のみ。
   rtl.render(
     <NextIntlClientProvider locale="ja" messages={messages}>
       <TipEmbedGenerator />
@@ -72,7 +62,6 @@ describe('TipEmbedGenerator — Avalanche chain chip (flag ON・実 component �
       NEXT_PUBLIC_JPYC_FORWARDER_FUJI: FUJI_FORWARDER,
     });
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    // RECEIVABLE_JPYC_CHAINS に avalanche が入り、chooser が chain id ボタンを描画する。
     expect(
       screen.getByRole('button', { name: new RegExp(`id:\\s*${avaxId}\\b`) }),
     ).toBeInTheDocument();
