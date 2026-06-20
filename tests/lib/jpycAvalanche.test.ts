@@ -297,3 +297,47 @@ describe('relayMaxGasCostWei — per-chain gas 上限 (AVAX は native 価値が
     expect(relayProvider.relayMaxGasCostWei(avalanche.id)).toBe(0n);
   });
 });
+
+// tip widget / @handle の JPYC chain chooser が描画する「受取可能チェーン集合」と同一の選択
+// ロジック (RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter(isGaslessSupported)) を実モジュールで固定。
+// tip は gasless 固定ゆえ「JPYC_CHAINS にあっても gasless 不成立なら chooser に出さない」。
+// → recover-required の Avalanche は forwarder 未設定だと chooser に現れない (= 安全側)。
+// 「chooser がチェーン毎にボタンを描画する」描画側は TipEmbedGenerator.test の Polygon/Kaia
+// テストで実証済なので、本テストで集合の中身を実コードで固定すれば合成として全経路を覆う。
+describe('受取可能 JPYC チェーン集合 (chain chooser の RECEIVABLE_JPYC_CHAINS と同一ロジック)', () => {
+  it('flag OFF: [polygon, kaia] のみ (avalanche は集合外)', async () => {
+    const { chains, tokens } = await loadWith({
+      NEXT_PUBLIC_NETWORK_ENV: 'testnet',
+    });
+    const receivable = chains.JPYC_CHAINS.filter((s) =>
+      tokens.isGaslessSupported(tokens.deploymentForSlug('jpyc', s)),
+    );
+    expect(receivable).toEqual(['polygon', 'kaia']);
+  });
+
+  it('flag ON + forwarder 設定済: avalanche も受取可能 (chooser に Avalanche チップが出る)', async () => {
+    const { chains, tokens } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'testnet',
+      NEXT_PUBLIC_JPYC_FORWARDER_FUJI: FUJI_FORWARDER,
+    });
+    const receivable = chains.JPYC_CHAINS.filter((s) =>
+      tokens.isGaslessSupported(tokens.deploymentForSlug('jpyc', s)),
+    );
+    expect(receivable).toEqual(['polygon', 'kaia', 'avalanche']);
+  });
+
+  it('flag ON + forwarder 未設定: avalanche は gasless 不成立で集合外 (chooser に出さない=recover-required 安全側)', async () => {
+    const { chains, tokens } = await loadWith({
+      NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE: '1',
+      NEXT_PUBLIC_NETWORK_ENV: 'testnet',
+      // Fuji forwarder 未設定 → avalanche は paymasterMode='unavailable'。
+    });
+    // JPYC_CHAINS には avalanche が居る (flag ON) が、gasless 不成立なので chooser からは除外。
+    expect(chains.JPYC_CHAINS).toContain('avalanche');
+    const receivable = chains.JPYC_CHAINS.filter((s) =>
+      tokens.isGaslessSupported(tokens.deploymentForSlug('jpyc', s)),
+    );
+    expect(receivable).toEqual(['polygon', 'kaia']);
+  });
+});

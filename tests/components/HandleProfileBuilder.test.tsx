@@ -73,6 +73,19 @@ vi.mock('@/components/HandleClaimPanel', () => ({
       />
       <button
         type="button"
+        data-testid="edit-avalanche"
+        onClick={() =>
+          onEdit?.('alice', {
+            to: ADDR,
+            methods: [
+              { token: 'jpyc', chain: 'polygon' },
+              { token: 'jpyc', chain: 'avalanche' },
+            ],
+          })
+        }
+      />
+      <button
+        type="button"
         data-testid="publish-mock"
         onClick={() => onPublished?.('alice')}
       />
@@ -137,6 +150,41 @@ describe('HandleProfileBuilder', () => {
     // 伝播していることを実出力で検証 (LARP: トグルが効いて method が描画されることの実証)。
     expect(
       screen.getAllByText('JPYC (Avalanche) で応援').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('enableJpycAvalanche ON + avalanche method を持つ既存設定を編集ロード → トグル ON 復元 + 受取方法も描画 (load 経路)', () => {
+    h.enableJpycAvalanche = true;
+    renderWithIntl(<HandleProfileBuilder />);
+    // 既存の avalanche 入り設定 (to + [jpyc/polygon, jpyc/avalanche]) を編集ロード。
+    fireEvent.click(screen.getByTestId('edit-avalanche'));
+    // config.methods から draft.jpycAvalanche が復元 → checkbox が checked。
+    expect(
+      screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' }),
+    ).toBeChecked();
+    // method 伝播 → 受取方法サマリ/プレビューに実描画 (load→draft→methods→描画の実出力検証)。
+    expect(
+      screen.getAllByText('JPYC (Avalanche) で応援').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('enableJpycAvalanche OFF + avalanche method を持つ設定を編集ロード → method 非載・UI 非表示 (draft 値があっても flag OFF で inert)', () => {
+    // flag OFF。古い/他環境由来の設定が jpyc/avalanche を持ち draft.jpycAvalanche=true に
+    // なっても、methods 構築を env.enableJpycAvalanche でゲートするため受取方法に載らない
+    // (option ゲートとは別の method ゲートの provably-inert を実証)。
+    renderWithIntl(<HandleProfileBuilder />); // h.enableJpycAvalanche=false (beforeEach)
+    fireEvent.click(screen.getByTestId('edit-avalanche'));
+    // option (checkbox) は flag OFF で非表示。
+    expect(
+      screen.queryByRole('checkbox', { name: 'JPYC (Avalanche)' }),
+    ).not.toBeInTheDocument();
+    // method (受取方法) も flag OFF で構築されない (draft に値があっても載らない)。
+    expect(
+      screen.queryByText('JPYC (Avalanche) で応援'),
+    ).not.toBeInTheDocument();
+    // 対照: 同じ設定の polygon は通常どおり載る (avalanche だけが inert)。
+    expect(
+      screen.getAllByText('JPYC (Polygon) で応援').length,
     ).toBeGreaterThan(0);
   });
 

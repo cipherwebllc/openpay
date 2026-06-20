@@ -25,6 +25,7 @@ vi.mock('@/lib/jpycGaslessProvider', async (importOriginal) => {
 
 import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { USDC_CHAINS } from '@/lib/chains';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const STORAGE_KEY = 'openpay:checkout-settings:v1';
@@ -33,6 +34,30 @@ describe('CheckoutLinkGenerator', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+  });
+
+  it('USDC トークンの chain hint: 表示 count と列挙チェーン数がともに USDC_CHAINS.length と一致 (count↔列挙ドリフト検知)', async () => {
+    // 実 i18n + 実 USDC_CHAINS + 実 component を描画し、実出力 (hint テキスト) を検査する。
+    // 以前は count=USDC_CHAINS.length(6) なのに列挙が 5 チェーン (Avalanche 欠落) で不整合だった
+    // ため、この invariant が将来の count↔列挙ドリフトを両方向で捕捉する。
+    render(<CheckoutLinkGenerator />);
+    await waitFor(() => screen.getByRole('button', { name: /USDC/ }));
+    const usdcBtn = screen.getByRole('button', { name: /USDC/ });
+    const hint = usdcBtn.textContent ?? '';
+    // "… {count} chain 対応 (A / B / C / …)" (ja) / "… {count} chains supported (…)" (en)
+    const m = hint.match(/([0-9]+)\s*(?:chain 対応|chains? supported) \(([^)]+)\)/);
+    expect(m, `USDC chain hint をパースできない: "${hint}"`).not.toBeNull();
+    const count = Number(m![1]);
+    const listed = m![2]
+      .split(' / ')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // (1) 表示 count = 実際の USDC 受取チェーン数。
+    expect(count).toBe(USDC_CHAINS.length);
+    // (2) 列挙チェーン数も一致 (count と列挙が乖離しないことを保証)。
+    expect(listed).toHaveLength(USDC_CHAINS.length);
+    // (3) Avalanche が列挙に含まれる (USDC_CHAINS に avalanche があるため)。
+    expect(listed).toContain('Avalanche');
   });
 
   it('JPYC free 経路 (relay・forwarder 未設定): 負担者トグル非表示・gas=customer 固定', async () => {
