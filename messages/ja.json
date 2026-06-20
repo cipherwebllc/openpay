@@ -1728,6 +1728,7 @@
     "serviceDineIn": "店内",
     "serviceHintTakeout": "店頭での受け渡し。注文時のテーブル番号入力はありません。",
     "serviceHintDineIn": "店内のテーブルで飲食。注文時に顧客がテーブル番号を入力します。",
+    "serviceTakeoutOnlyNote": "事前モバイルオーダーはテイクアウトのみです（来店前の注文のため、テーブルの予約はできません）。",
     "feePayerLabel": "手数料の負担",
     "feePayerMerchant": "店舗が負担する",
     "feePayerCustomer": "顧客価格に上乗せする",

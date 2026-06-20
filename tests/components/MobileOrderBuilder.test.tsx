@@ -173,6 +173,25 @@ describe('MobileOrderBuilder', () => {
     expect(takeout).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('事前モバイルオーダー: 提供形態トグルを隠しテイクアウト固定 (店内選択も解除)', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    // まず店内 (dineIn=true) を選択。
+    fireEvent.click(screen.getByRole('button', { name: '店内' }));
+    expect(screen.getByRole('button', { name: '店内' })).toHaveAttribute('aria-pressed', 'true');
+    // 事前モバイルオーダーへ切替 → 来店前ゆえテーブル予約不可。toggle は消え、テイクアウト注記のみ。
+    fireEvent.click(screen.getByRole('button', { name: '事前モバイルオーダー' }));
+    expect(screen.queryByRole('button', { name: '店内' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'テイクアウト' })).toBeNull();
+    expect(screen.getByText(/事前モバイルオーダーはテイクアウトのみ/)).toBeInTheDocument();
+    // 店頭へ戻すと toggle が復活し、dineIn は解除済み (テイクアウトが選択状態)。
+    fireEvent.click(screen.getByRole('button', { name: '店頭・券売機' }));
+    expect(screen.getByRole('button', { name: 'テイクアウト' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: '店内' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('プレビュー: SNS は店舗情報より前 (公開ページと同じヘッダー位置)', () => {
     const { container } = renderWithIntl(<MobileOrderBuilder />);
     // 営業時間 (店舗情報) + SNS を 1 件ずつ入力。

@@ -65,6 +65,7 @@ export type MobileOrderConfig = {
   // 既定 (未設定) は受付中。
   acceptingOrders?: boolean;
   // 提供形態。true=店内 (注文時に顧客がテーブル番号を入力)、false/未設定=テイクアウト・店頭受け渡し。
+  // **storefront のときのみ有効** — preorder (事前注文) は来店前ゆえテーブル予約不可で常にテイクアウト。
   dineIn?: boolean;
   // 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。タイムゾーンは Asia/Tokyo 固定。
   lastOrder?: string; // ラストオーダー "HH:mm" (超過で受付停止・同日セマンティクス・lib/shopTime)
@@ -93,7 +94,7 @@ export type StorefrontParts = {
   hours?: string;
   phone?: string;
   acceptingOrders?: boolean;
-  dineIn?: boolean; // true=店内 (テーブル番号入力)、false/未設定=テイクアウト・店頭受け渡し
+  dineIn?: boolean; // true=店内 (テーブル番号入力)、false/未設定=テイクアウト。storefront のみ (preorder は常にテイクアウト)
   lastOrder?: string; // ラストオーダー "HH:mm" (Phase 4・Asia/Tokyo・超過で受付停止)
   minLeadMinutes?: number; // 最短受け渡し分 (Phase 4・preorder のスロット起点)
 };
@@ -339,7 +340,9 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   // 既定 (受付中) は「フィールド無し」で表し、停止時のみ false を保持 (round-trip 最小化)。
   if (o.acceptingOrders === false) parts.acceptingOrders = false;
   // 提供形態: 既定 (テイクアウト) は「フィールド無し」、店内のときのみ true を保持。
-  if (o.dineIn === true) parts.dineIn = true;
+  // ただし事前モバイルオーダー (preorder) は来店前注文ゆえテーブル予約が不可能 → 常にテイクアウト。
+  // 店内は storefront のときだけ採用する (decode/builder/@handle 公開の単一情報源でこの不変条件を保証)。
+  if (o.dineIn === true && parts.mode === 'storefront') parts.dineIn = true;
   // 時間系 (任意・不正は黙って除外・注文は壊さない)。lastOrder は "HH:mm"・minLeadMinutes は 1..上限。
   if (parseHHMM(o.lastOrder) !== null) parts.lastOrder = o.lastOrder as string;
   const minLead = sanitizeMinLead(o.minLeadMinutes);

@@ -387,7 +387,10 @@ export function MobileOrderBuilder({
                     <button
                       key={value}
                       type="button"
-                      onClick={() => update({ mode: value })}
+                      onClick={() =>
+                        // preorder は来店前注文ゆえテーブル予約不可 → 提供形態をテイクアウトに戻す。
+                        update(value === 'preorder' ? { mode: value, dineIn: false } : { mode: value })
+                      }
                       aria-pressed={draft.mode === value}
                       className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                         draft.mode === value
@@ -404,34 +407,41 @@ export function MobileOrderBuilder({
                 </p>
               </fieldset>
 
-              {/* 提供形態 (テイクアウト / 店内)。店内なら公開ページで注文時にテーブル番号を入力させる。 */}
+              {/* 提供形態 (テイクアウト / 店内)。店内なら公開ページで注文時にテーブル番号を入力させる。
+                  preorder (事前注文) は来店前ゆえテーブル予約不可 → テイクアウト固定で toggle を出さない。 */}
               <fieldset>
                 <legend className="text-sm font-medium text-slate-700">{t('serviceLabel')}</legend>
-                <div className="mt-1 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
-                  {(
-                    [
-                      [false, t('serviceTakeout')],
-                      [true, t('serviceDineIn')],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={String(value)}
-                      type="button"
-                      onClick={() => update({ dineIn: value })}
-                      aria-pressed={draft.dineIn === value}
-                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                        draft.dineIn === value
-                          ? 'bg-white text-brand-dark shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1 text-xs text-slate-400">
-                  {draft.dineIn ? t('serviceHintDineIn') : t('serviceHintTakeout')}
-                </p>
+                {draft.mode === 'storefront' ? (
+                  <>
+                    <div className="mt-1 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+                      {(
+                        [
+                          [false, t('serviceTakeout')],
+                          [true, t('serviceDineIn')],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={String(value)}
+                          type="button"
+                          onClick={() => update({ dineIn: value })}
+                          aria-pressed={draft.dineIn === value}
+                          className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                            draft.dineIn === value
+                              ? 'bg-white text-brand-dark shadow-sm'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {draft.dineIn ? t('serviceHintDineIn') : t('serviceHintTakeout')}
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">{t('serviceTakeoutOnlyNote')}</p>
+                )}
               </fieldset>
 
               {/* 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。OFF=非表示=inert。

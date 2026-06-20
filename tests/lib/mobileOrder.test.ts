@@ -347,13 +347,26 @@ describe('mobileOrder: dineIn (提供形態・店内のテーブル番号)', () 
     expect('dineIn' in (validateStorefrontParts({ ...good, dineIn: false }) ?? {})).toBe(false);
     expect('dineIn' in (validateStorefrontParts(good) ?? {})).toBe(false);
   });
-  it('validateOrderConfig が dineIn を config に載せ・往復一致', () => {
-    const c = validateOrderConfig({ ...baseConfig(), dineIn: true })!;
+  it('validateOrderConfig が dineIn を config に載せ・往復一致 (storefront)', () => {
+    // dineIn は storefront のときのみ採用 (preorder は来店前ゆえテーブル予約不可)。
+    const c = validateOrderConfig({ ...baseConfig(), mode: 'storefront', dineIn: true })!;
     expect(c.dineIn).toBe(true);
     expect(decodeOrderConfig(encodeOrderConfig(c))?.dineIn).toBe(true);
   });
   it('dineIn 未設定の config は dineIn を持たない (既定 テイクアウト)', () => {
     expect('dineIn' in (validateOrderConfig(baseConfig()) ?? {})).toBe(false);
+  });
+  // 不変条件: preorder (事前注文) は来店前ゆえテーブル予約不可 → dineIn は採用しない (常にテイクアウト)。
+  it('preorder + dineIn=true は dineIn を捨てる (テイクアウト固定・storefront のみ店内可)', () => {
+    const parts = validateStorefrontParts({ ...good, mode: 'preorder', dineIn: true });
+    expect(parts?.mode).toBe('preorder');
+    expect('dineIn' in (parts ?? {})).toBe(false);
+  });
+  it('validateOrderConfig も preorder では dineIn を載せない (decode 単一情報源)', () => {
+    const c = validateOrderConfig({ ...baseConfig(), mode: 'preorder', dineIn: true })!;
+    expect(c.mode).toBe('preorder');
+    expect('dineIn' in c).toBe(false);
+    expect('dineIn' in (decodeOrderConfig(encodeOrderConfig(c)) ?? {})).toBe(false);
   });
 });
 

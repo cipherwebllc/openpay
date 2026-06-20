@@ -1728,6 +1728,7 @@
     "serviceDineIn": "Dine-in",
     "serviceHintTakeout": "Pickup at the counter. No table number is collected at order time.",
     "serviceHintDineIn": "Dining at an in-store table. Customers enter their table number at order time.",
+    "serviceTakeoutOnlyNote": "Mobile pre-orders are takeout only (tables can't be reserved before arrival).",
     "feePayerLabel": "Who pays the fee",
     "feePayerMerchant": "Shop absorbs it",
     "feePayerCustomer": "Add on top of customer price",
