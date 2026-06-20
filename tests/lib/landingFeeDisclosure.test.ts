@@ -16,17 +16,21 @@ const floorJpyc = DISCLOSED_RECOVER_FEE.floorJpyc; // 2 (JPYC)
 const storefrontPct = DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100; // 1 (%)
 const preorderPct = DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100; // 3 (%)
 
-describe('LandingSupport supportBody ↔ DISCLOSED 料率 (drift フェンス)', () => {
+describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェンス)', () => {
   for (const [loc, msgs] of [
     ['ja', ja],
     ['en', en],
   ] as const) {
     it(`${loc}: 決済QR/レジ ${recoverPct}%・最低 ${floorJpyc} JPYC、モバイル注文 ${storefrontPct}%/${preorderPct}%`, () => {
-      const body = msgs.Landing.supportBody;
-      expect(body).toContain(`${recoverPct}%`); // 決済QR・レジ = 決済額の 1%
-      expect(body).toContain(`${floorJpyc} JPYC`); // 最低 2 JPYC / チップのガス相当 約 2 JPYC
-      expect(body).toContain(`${storefrontPct}%`); // モバイル注文 店頭・券売機 1%
-      expect(body).toContain(`${preorderPct}%`); // モバイル注文 事前 3%
+      const L = msgs.Landing;
+      // 決済QR カード = 決済額の 1%・最低 2 JPYC
+      expect(L.supportFeePayBody).toContain(`${recoverPct}%`);
+      expect(L.supportFeePayBody).toContain(`${floorJpyc} JPYC`);
+      // モバイル注文カード = 店頭・券売機 1% / 事前 3%
+      expect(L.supportFeeMobileBody).toContain(`${storefrontPct}%`);
+      expect(L.supportFeeMobileBody).toContain(`${preorderPct}%`);
+      // チップカード = ガス相当 約 2 JPYC (送るお客様が負担)
+      expect(L.supportFeeTipBody).toContain(`${floorJpyc} JPYC`);
     });
   }
 });
