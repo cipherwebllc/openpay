@@ -11,11 +11,13 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 
-type FaqKey = 'faqQ1' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5';
-type FaqAnswerKey = 'faqA1' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5';
+type FaqKey = 'faqQ1' | 'faqQ7' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5';
+type FaqAnswerKey = 'faqA1' | 'faqA7' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5';
 
 const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
   { q: 'faqQ1', a: 'faqA1' },
+  // 「JPYC・USDC とは」= 基礎説明。「どちらを受け取るか (faqQ2)」の直前に置く。
+  { q: 'faqQ7', a: 'faqA7' },
   { q: 'faqQ2', a: 'faqA2' },
   { q: 'faqQ3', a: 'faqA3' },
   { q: 'faqQ4', a: 'faqA4' },
