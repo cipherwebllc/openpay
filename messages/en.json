@@ -14,9 +14,9 @@
     "signInError": "Sign-in failed"
   },
   "Landing": {
-    "tagline": "Start with just one wallet address",
-    "heroLeadline": "JPYC / USDC QR payments",
-    "heroBody": "Smooth wallet payments for stores. The merchant shows a QR with the amount baked in, and the customer just scans and signs. Cross-chain USDC payments arrive automatically too.",
+    "tagline": "No setup cost",
+    "heroLeadline": "JPYC QR payments",
+    "heroBody": "1% fee · instant settlement · no contract. Start with just one wallet address.",
     "heroVisualAlt": "Illustration of a customer paying by scanning a QR code at a shop counter while the merchant tablet shows payment received",
     "ctaScanTitle": "📱 Pay (Scan)",
     "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",

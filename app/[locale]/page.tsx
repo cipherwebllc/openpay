@@ -1,6 +1,6 @@
 // トップページ = 紹介 LP。Server Component (LCP / SEO 優先)。
 // AppShell (Client) の中に Server-rendered の各 Landing* セクションを並べる。
-// Phase 5 で Hero と Features の間に MarketRates strip を挿入する。
+// Phase 5 で Hero と本文セクションの間に MarketRates strip を挿入する。
 
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
@@ -28,10 +28,10 @@ export default async function HomePage({
       <div className="mt-6">
         <MarketRates />
       </div>
-      <LandingFeatures />
       <LandingBenefits />
-      <LandingUseCases />
       <LandingHowItWorks />
+      <LandingFeatures />
+      <LandingUseCases />
       <LandingFaq />
       <LandingSupport />
       <LandingTrust />

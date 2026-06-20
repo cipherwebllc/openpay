@@ -14,9 +14,9 @@
     "signInError": "ログインに失敗しました"
   },
   "Landing": {
-    "tagline": "ウォレットアドレス 1 つで始める",
-    "heroLeadline": "JPYC / USDC QR決済",
-    "heroBody": "ウォレット送金をスムーズに。店舗が金額入りの決済 QR を提示し、お客様は読み取って署名するだけ。別チェーンからの USDC 支払いも自動で受け取れます。",
+    "tagline": "導入費用0円",
+    "heroLeadline": "JPYC QR決済",
+    "heroBody": "手数料1%・即時着金・契約不要。ウォレットアドレスひとつで始められます。",
     "heroVisualAlt": "店舗カウンターで顧客がスマホで QR 決済し、店舗端末に受取完了が表示されているイラスト",
     "ctaScanTitle": "📱 支払う (スキャン)",
     "ctaScanBody": "ウォレットを接続して、店舗の QR を読み取り即決済。",
