@@ -235,3 +235,39 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
   }
   return issues.length > 0 ? issues.join('; ') : null;
 }
+
+// 開示済みの「x402 ファシリテーター利用料」料率 (SOT)。Terms/Disclaimer/特商法/お知らせ/README の本文に
+// 書かれた数値そのもので、これらの文書はこの定数と矛盾してはならない。決済額の 1% (100bps)・下限 2 JPYC・
+// **買い手上乗せ** (seller は表示額をそのまま受領)。実装は lib/x402/facilitatorConfig.ts
+// (X402_FEE_BPS / X402_FEE_FLOOR_JPYC) で、既定は本定数と一致する。gas-recovery (DISCLOSED_RECOVER_FEE) /
+// モバイル注文 (DISCLOSED_MOBILE_ORDER_FEE) とは独立の別対価 (managed x402 facilitator の運用対価)。
+// ⚠️ 変更する = 開示の変更ゆえ、必ず本文改定 (新「改定」エントリ) + フェンス更新を伴わなければならない。
+export const DISCLOSED_X402_FEE = {
+  bps: 100, // 1%
+  floorJpyc: 2, // 下限 2 JPYC
+} as const;
+
+// 実 x402 料率 (env 由来・lib/x402/facilitatorConfig.ts) が開示済みの数値 (DISCLOSED_X402_FEE) と乖離して
+// いないかを判定する純関数。legal.ts を x402 runtime config へ結合させないため live 値を引数で受け取る
+// (呼出側 = facilitator route が x402FacilitatorConfig.feeBps / feeFloorWei を渡す)。乖離なら人間可読な
+// 理由文字列、一致していれば null。deploy 時の env ドリフトを runtime warn で可視化する用途。
+export function x402FeeDisclosureDivergence(
+  feeBps: number,
+  feeFloorWei: bigint,
+): string | null {
+  const issues: string[] = [];
+  if (feeBps !== DISCLOSED_X402_FEE.bps) {
+    issues.push(
+      `X402_FEE_BPS=${feeBps} != disclosed bps ${DISCLOSED_X402_FEE.bps} ` +
+        `(lib/x402/facilitatorConfig.ts vs lib/legal.ts DISCLOSED_X402_FEE)`,
+    );
+  }
+  const floorExpected = BigInt(DISCLOSED_X402_FEE.floorJpyc) * 10n ** 18n;
+  if (feeFloorWei !== floorExpected) {
+    issues.push(
+      `X402_FEE_FLOOR_JPYC(wei)=${feeFloorWei} != disclosed floor ${floorExpected} ` +
+        `(DISCLOSED_X402_FEE.floorJpyc=${DISCLOSED_X402_FEE.floorJpyc})`,
+    );
+  }
+  return issues.length > 0 ? issues.join('; ') : null;
+}
