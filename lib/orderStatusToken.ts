@@ -9,7 +9,9 @@ import { ORDER_TOKEN_BYTES } from '@/lib/orderToken';
 export function generateStatusToken(): string {
   const bytes = new Uint8Array(ORDER_TOKEN_BYTES);
   crypto.getRandomValues(bytes);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  // base64url (padding 無し): + → -, / → _, = 除去。32 byte ゆえ spread は安全。
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }

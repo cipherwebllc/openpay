@@ -24,26 +24,13 @@ import type { OrderPickupState } from '@/lib/orderRelay';
 
 type Tone = 'active' | 'ready' | 'done' | 'error' | 'muted';
 
-const CARD_TONE: Record<Tone, string> = {
-  active: 'border-slate-200 bg-white',
-  ready: 'border-emerald-300 bg-emerald-50',
-  done: 'border-slate-200 bg-white',
-  error: 'border-amber-300 bg-amber-50',
-  muted: 'border-slate-200 bg-white',
-};
-const ICON_TONE: Record<Tone, string> = {
-  active: 'text-brand',
-  ready: 'text-emerald-600',
-  done: 'text-emerald-600',
-  error: 'text-amber-500',
-  muted: 'text-slate-400',
-};
-const TITLE_TONE: Record<Tone, string> = {
-  active: 'text-slate-900',
-  ready: 'text-emerald-900',
-  done: 'text-slate-800',
-  error: 'text-amber-900',
-  muted: 'text-slate-500',
+// tone ごとの配色 (カード枠/背景・アイコン・見出し) を 1 箇所に集約。
+const TONE: Record<Tone, { card: string; icon: string; title: string }> = {
+  active: { card: 'border-slate-200 bg-white', icon: 'text-brand', title: 'text-slate-900' },
+  ready: { card: 'border-emerald-300 bg-emerald-50', icon: 'text-emerald-600', title: 'text-emerald-900' },
+  done: { card: 'border-slate-200 bg-white', icon: 'text-emerald-600', title: 'text-slate-800' },
+  error: { card: 'border-amber-300 bg-amber-50', icon: 'text-amber-500', title: 'text-amber-900' },
+  muted: { card: 'border-slate-200 bg-white', icon: 'text-slate-400', title: 'text-slate-500' },
 };
 
 function StatusCard({
@@ -65,16 +52,17 @@ function StatusCard({
   orderNoLabel?: string;
   children?: ReactNode;
 }) {
+  const c = TONE[tone];
   return (
     <div
-      className={`flex flex-col items-center rounded-3xl border px-6 py-10 text-center shadow-card ${CARD_TONE[tone]}`}
+      className={`flex flex-col items-center rounded-3xl border px-6 py-10 text-center shadow-card ${c.card}`}
     >
       <span
-        className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-black/[0.03] ${ICON_TONE[tone]}`}
+        className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-black/[0.03] ${c.icon}`}
       >
         <Icon className={`h-8 w-8 ${spin ? 'animate-spin' : ''}`} aria-hidden />
       </span>
-      <h2 className={`mt-4 text-xl font-bold ${TITLE_TONE[tone]}`}>{title}</h2>
+      <h2 className={`mt-4 text-xl font-bold ${c.title}`}>{title}</h2>
       {hint && <p className="mt-2 max-w-xs text-sm leading-relaxed text-slate-500">{hint}</p>}
       {orderNo && (
         <p className="mt-4 rounded-xl bg-slate-100 px-4 py-2 text-sm text-slate-500">
@@ -103,9 +91,8 @@ export function OrderStatusView({ token }: { token: string | null }) {
     prevState.current = state;
     if (state === 'ready' && prev !== undefined && prev !== 'ready') {
       playNewOrderChime();
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        navigator.vibrate([200, 100, 200]);
-      }
+      // 一部ブラウザ (iOS Safari) は vibrate 非対応 → 実行時に存在確認 (型上は常在だが runtime は別)。
+      if (typeof navigator.vibrate === 'function') navigator.vibrate([200, 100, 200]);
     }
   }, [state]);
 
@@ -120,9 +107,9 @@ export function OrderStatusView({ token }: { token: string | null }) {
   // 受取待ち (received / preparing) の間だけ画面スリープを抑止 (対応ブラウザのみ) + フォアグラウンド
   // 復帰で即再取得。ready 到達でチャイム済 = 通知目的を達したので解放 (done も解放・plan §6.7)。
   // Wake Lock 非対応/拒否は keep-open 文言で代替する (機能影響なし)。
-  const active = state === 'received' || state === 'preparing';
+  const isWaiting = state === 'received' || state === 'preparing';
   useEffect(() => {
-    if (!active) return;
+    if (!isWaiting) return;
     let sentinel: WakeLockSentinel | null = null;
     let cancelled = false;
     const acquire = async () => {
@@ -137,14 +124,14 @@ export function OrderStatusView({ token }: { token: string | null }) {
       void refetch(); // バックグラウンド中に準備完了していても復帰で即検知
       if (!sentinel) void acquire();
     };
-    if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) void acquire();
+    if ('wakeLock' in navigator) void acquire();
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisible);
       void sentinel?.release().catch(() => {});
     };
-  }, [active, refetch]);
+  }, [isWaiting, refetch]);
 
   if (!token) {
     return (
