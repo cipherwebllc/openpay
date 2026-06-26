@@ -29,7 +29,6 @@ export default async function OrderStatusPage({
   const { locale } = await params;
   if (!hasLocale(LOCALES, locale)) notFound();
   setRequestLocale(locale);
-  // flag OFF では注文状況ページを存在させない (本番 inert)。
   if (!env.enableOrderPickup) notFound();
 
   const raw = await searchParams;

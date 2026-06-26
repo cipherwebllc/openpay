@@ -24,7 +24,6 @@ import type { OrderPickupState } from '@/lib/orderRelay';
 
 type Tone = 'active' | 'ready' | 'done' | 'error' | 'muted';
 
-// tone ごとの配色 (カード枠/背景・アイコン・見出し) を 1 箇所に集約。
 const TONE: Record<Tone, { card: string; icon: string; title: string }> = {
   active: { card: 'border-slate-200 bg-white', icon: 'text-brand', title: 'text-slate-900' },
   ready: { card: 'border-emerald-300 bg-emerald-50', icon: 'text-emerald-600', title: 'text-emerald-900' },

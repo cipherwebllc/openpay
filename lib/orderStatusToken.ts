@@ -9,7 +9,7 @@ import { ORDER_TOKEN_BYTES } from '@/lib/orderToken';
 export function generateStatusToken(): string {
   const bytes = new Uint8Array(ORDER_TOKEN_BYTES);
   crypto.getRandomValues(bytes);
-  // base64url (padding 無し): + → -, / → _, = 除去。32 byte ゆえ spread は安全。
+  // 32 byte ゆえ String.fromCharCode(...) の spread は安全 (引数上限に達しない)。base64url 化 + padding 除去。
   return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
