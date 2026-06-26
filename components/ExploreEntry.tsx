@@ -31,7 +31,7 @@ export function ExploreEntryCard({ entry }: { entry: Entry }) {
           ? 'sponsored nofollow noopener noreferrer'
           : 'noopener noreferrer'
       }
-      className="group flex h-full flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand/40 hover:shadow"
+      className="group flex h-full flex-col gap-2 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-card-hover"
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900 group-hover:text-brand-dark">

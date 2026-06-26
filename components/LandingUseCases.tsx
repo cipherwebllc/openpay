@@ -62,7 +62,7 @@ export async function LandingUseCases() {
         {USE_CASES.map((useCase) => (
           <li
             key={useCase.id}
-            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card"
           >
             <Image
               src={useCase.image}
