@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
@@ -46,6 +47,7 @@ import {
   type MobileOrderFeeKind,
 } from '@/lib/mobileOrderFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
+import { generateStatusToken } from '@/lib/orderStatusToken';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
 import {
@@ -86,6 +88,10 @@ const SUCCESS_REDIRECT_DELAY_MS = 3000;
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
   const locale = useLocale();
+  // 顧客向け「注文状況」トークン (お渡し準備完了通知・flag ENABLE_ORDER_PICKUP)。決済成功時に
+  // 1 度だけ生成し、webhook payload (notify がポインタ保存) と完了画面の「注文状況を見る」リンクで
+  // 使う。flag OFF では生成せず null = payload 無変化・リンク非表示 (byte-identical)。
+  const [statusToken, setStatusToken] = useState<string | null>(null);
   const router = useRouter();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
 
@@ -496,6 +502,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
     // webhook 失敗 (CORS 等) は logger.warn のみ。決済自体は成立しているため UI には出さない。
     if (params.webhook) {
+      // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): status トークンを 1 度だけ生成し payload に同梱。
+      // notify が order:sv:<token> ポインタを保存し、顧客の /order/status?t= がそれを逆引きする。
+      const statusTokenForOrder = env.enableOrderPickup ? generateStatusToken() : null;
+      if (statusTokenForOrder) setStatusToken(statusTokenForOrder);
       const payload = {
         type: 'openpay.checkout.success',
         mode: completion.mode,
@@ -514,6 +524,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         customerPays: snapshot.customerPays.toString(),
         orderId: params.orderId,
         description: params.description,
+        // status トークン (flag ON 時のみ)。notify がポインタ保存に使う。flag OFF では key ごと不在。
+        ...(statusTokenForOrder ? { statusToken: statusTokenForOrder } : {}),
         // 受取予定時刻 (任意・Phase 4・preorder)。受注に素通し保存され厨房/ホールが表示 (advisory)。
         ...(params.pickupAt !== undefined ? { pickupAt: params.pickupAt } : {}),
         // URL 仕様 (lib/url.ts) で customerEmail は prefill 専用・クライアントから送信しない、
@@ -1207,6 +1219,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               <ResultRow label={t('orderIdLabel')} value={params.orderId} />
             )}
           </dl>
+
+          {/* お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。
+              click は user gesture ＝ ここで AudioContext を解錠 (iOS 自動再生対策)。flag OFF / 非
+              mobile-order (webhook 無) では statusToken が null ゆえ非表示。 */}
+          {env.enableOrderPickup && statusToken && (
+            <Link
+              href={`/${locale}/order/status?t=${statusToken}`}
+              prefetch={false}
+              onClick={() => primeChimeAudio()}
+              className="mt-4 flex items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm font-semibold text-brand transition hover:bg-brand/10"
+            >
+              {t('viewOrderStatus')}
+            </Link>
+          )}
 
           {/* 顧客向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
           <div className="mt-4">

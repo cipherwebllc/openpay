@@ -804,6 +804,7 @@
     "successTx": "トランザクション",
     "successBlock": "ブロック番号",
     "orderIdLabel": "受注番号",
+    "viewOrderStatus": "注文状況を見る",
     "redirectingIn": "{sec} 秒後に確認ページへ移動します",
     "redirectingNow": "確認ページへ移動しています…",
     "redirectNowButton": "今すぐ確認ページへ",

@@ -804,6 +804,7 @@
     "successTx": "Transaction",
     "successBlock": "Block number",
     "orderIdLabel": "Order no.",
+    "viewOrderStatus": "View order status",
     "redirectingIn": "Redirecting to confirmation in {sec}s",
     "redirectingNow": "Redirecting to confirmation…",
     "redirectNowButton": "Go to confirmation",
