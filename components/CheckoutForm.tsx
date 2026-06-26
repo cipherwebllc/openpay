@@ -504,10 +504,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     if (params.webhook) {
       // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): status トークンを 1 度だけ生成し payload に同梱。
       // notify が order:sv:<token> ポインタを保存し、顧客の /order/status?t= がそれを逆引きする。
-      // webhook が OpenPay の受注 notify (= モバイル注文・MobileOrderView が `/api/order/notify?h=` を
-      // 指す) のときだけ生成する。第三者 webhook の通常 checkout では生成せず、ポインタが保存されない
-      // = 壊れた status リンクを顧客に出さない (Codex #1)。
-      const isOrderNotifyWebhook = params.webhook.includes('/api/order/notify');
+      // webhook が OpenPay 自身の受注 notify (= モバイル注文・MobileOrderView が同一 origin の
+      // `/api/order/notify?h=` を指す) のときだけ生成する。URL を parse し **same-origin かつ pathname
+      // 完全一致**で判定する: substring 一致だと第三者 URL (`https://shop/hook?next=/api/order/notify`
+      // 等) に statusToken を漏らしうる (Codex)。不正 URL は false。
+      let isOrderNotifyWebhook = false;
+      try {
+        const wh = new URL(params.webhook);
+        isOrderNotifyWebhook =
+          wh.origin === window.location.origin && wh.pathname === '/api/order/notify';
+      } catch {
+        isOrderNotifyWebhook = false; // 不正 URL = notify ではない
+      }
       const statusTokenForOrder =
         env.enableOrderPickup && isOrderNotifyWebhook ? generateStatusToken() : null;
       if (statusTokenForOrder) setStatusToken(statusTokenForOrder);

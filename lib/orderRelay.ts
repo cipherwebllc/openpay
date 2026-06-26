@@ -261,12 +261,13 @@ export function applyOrderOp(
     case 'kitchenDone':
       return { ...order, kitchenDone: op.value };
     case 'markReady':
-      // ready=true で readyAt を server 時刻 (nowMs) で刻む。**既に ready なら readyAt を再スタンプ
-      // せず order をそのまま返す = 冪等** (準備完了時刻は最初の 1 回で確定・再適用/再クリックは no-op で
-      // CAS も走らない)。false で両方クリア (受取待ち解除)。nowMs 未指定なら既存 readyAt を保つ
-      // (readyAt は表示用 advisory・route は常に Date.now() を渡す)。
+      // ready=true で readyAt を server 時刻 (nowMs) で刻む。**既に ready または fulfilled 済なら order を
+      // そのまま返す = 冪等/no-op**: ①再クリックで readyAt を再スタンプしない (準備完了時刻は初回確定・
+      // CAS も走らない) ②受け渡し済 (fulfilled) を ready に逆行させない — CAS で fulfill が先に勝った後の
+      // markReady が ready を立て、後で un-fulfill すると stale な準備完了通知に regress するのを防ぐ
+      // (Codex)。false で両方クリア (受取待ち解除)。nowMs 未指定なら既存 readyAt を保つ (表示用 advisory)。
       return op.value
-        ? order.ready
+        ? order.ready || order.fulfilled
           ? order
           : { ...order, ready: true, readyAt: nowMs !== undefined ? nowMs : order.readyAt }
         : { ...order, ready: false, readyAt: undefined };

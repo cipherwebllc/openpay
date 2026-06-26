@@ -353,6 +353,13 @@ describe('orderRelay: お渡し準備完了 (markReady / ready / readyAt・flag 
     expect(r.readyAt).toBe(NOW); // 準備完了時刻は最初の 1 回で確定 (再クリックで動かない)
   });
 
+  it('applyOrderOp: fulfilled 済 order への markReady(true) は no-op (受け渡し済を ready に逆行させない・Codex)', () => {
+    const ful = order({ fulfilled: true });
+    const r = applyOrderOp(ful, { kind: 'markReady', value: true }, NOW);
+    expect(r).toBe(ful); // 不変返し
+    expect(r.ready).toBeUndefined(); // ready を立てない
+  });
+
   it('markReady と fulfill は独立 (準備完了 → 受け渡し済 の遷移で両立)', () => {
     const r = applyOrderOp(order(), { kind: 'markReady', value: true }, NOW);
     const f = applyOrderOp(r, { kind: 'fulfill', value: true });

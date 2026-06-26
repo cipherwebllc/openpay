@@ -38,9 +38,7 @@ function err(error: string, status: number): NextResponse {
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
-  if (!env.enableOrderPickup) {
-    return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
-  }
+  if (!env.enableOrderPickup) return err('not_found', 404); // err は no-store 付き (CDN に stale 404 を残さない)
   if (!isKvConfigured()) {
     logger.warn('order.status.kv_unavailable'); // KV env 欠落デプロイを無音にしない
     return err('kv_unavailable', 503);
@@ -79,7 +77,8 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   for (const raw of list.value ?? []) {
     const order = parseStoredOrder(raw);
-    if (order && order.txHash.toLowerCase() === txLower) {
+    // txHash + chainId 両方一致 (冪等は chainId+txHash モデル・pointer の chainId も照合し KV 不整合に堅牢)。
+    if (order && order.txHash.toLowerCase() === txLower && order.chainId === loc.chainId) {
       return NextResponse.json(
         {
           ok: true,

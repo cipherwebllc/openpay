@@ -809,10 +809,11 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
-    // webhook が OpenPay 受注 notify (= モバイル注文) のときだけ statusToken を生成する (Codex #1)。
+    // webhook が同一 origin の OpenPay 受注 notify (= モバイル注文) のときだけ statusToken を生成 (Codex)。
+    // MobileOrderView と同様 window.location.origin 由来 (テスト環境の origin) で組み立てる。
     const makeUi = () => (
       <CheckoutForm
-        params={{ ...USDC_PARAMS, webhook: 'https://open-pay.jp/api/order/notify?h=alice' }}
+        params={{ ...USDC_PARAMS, webhook: `${window.location.origin}/api/order/notify?h=alice` }}
       />
     );
     const { rerender } = render(makeUi());
@@ -840,6 +841,30 @@ describe('CheckoutForm — 成功時の挙動', () => {
     // 第三者 webhook (= 通常 checkout)。OpenPay 受注 notify ではないので statusToken は生成しない。
     const makeUi = () => (
       <CheckoutForm params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook' }} />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect('statusToken' in payload).toBe(false);
+    expect(screen.queryByRole('link', { name: '注文状況を見る' })).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('お渡し準備完了 ON + 別 origin で substring を含む webhook → statusToken 無し (URL 厳密判定・Codex)', async () => {
+    feeFlags.enableOrderPickup = true;
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    // 第三者 origin が path/query に '/api/order/notify' を仕込んでも same-origin でないので token を出さない。
+    const makeUi = () => (
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook?next=/api/order/notify' }}
+      />
     );
     const { rerender } = render(makeUi());
     await submitGaslessThenSucceed(user, rerender, makeUi);

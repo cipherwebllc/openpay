@@ -93,9 +93,11 @@ beforeEach(() => {
 });
 
 describe('GET /api/order/status', () => {
-  it('flag OFF → 404', async () => {
+  it('flag OFF → 404 + no-store (CDN に stale 404 を残さない・Codex)', async () => {
     hold.enableOrderPickup = false;
-    expect((await GET(getReq(TOKEN))).status).toBe(404);
+    const res = await GET(getReq(TOKEN));
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('KV 未設定 → 503 + warn (deploy 観測性)', async () => {
@@ -147,6 +149,12 @@ describe('GET /api/order/status', () => {
 
   it('pointer あるが受注がリストに無い (押し出し/失効) → 404', async () => {
     hold.list = { ok: true, value: [serializeOrder(order({ txHash: `0x${'b'.repeat(64)}` }))] };
+    expect((await GET(getReq(TOKEN))).status).toBe(404);
+  });
+
+  it('pointer の chainId が受注と不一致 → 404 (txHash 一致でも chainId 照合・Codex)', async () => {
+    hold.pointer = { ok: true, value: pointer(MERCHANT, TX, 999) }; // pointer chainId=999
+    hold.list = { ok: true, value: [serializeOrder(order({ chainId: 137 }))] }; // 受注 chainId=137
     expect((await GET(getReq(TOKEN))).status).toBe(404);
   });
 

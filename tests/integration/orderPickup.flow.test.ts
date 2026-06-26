@@ -231,6 +231,19 @@ describe('order pickup 統合フロー (実 orderRelay + in-memory KV・status�
     expect(await res.json()).toEqual({ ok: false, error: 'conflict' });
   });
 
+  it('fulfill 後の markReady は ready を立てない (受け渡し済を逆行させない・Codex)', async () => {
+    seed([order()]);
+    expect(
+      await (await feedPOST(feedReq({ txHash: TX, op: { kind: 'fulfill', value: true } }))).json(),
+    ).toEqual({ ok: true, updated: 1 });
+    // 受け渡し済の後に markReady → no-op (updated:0)・ready は立たない。
+    expect(
+      await (await feedPOST(feedReq({ txHash: TX, op: { kind: 'markReady', value: true } }))).json(),
+    ).toEqual({ ok: true, updated: 0 });
+    expect(storedOrder().ready).toBeUndefined();
+    expect((await (await statusGET(statusReq(TOKEN))).json()).state).toBe('done');
+  });
+
   it('未知トークンの status は 404 (他注文に到達しない)・存在する注文には影響しない', async () => {
     seed([order()]);
     expect((await statusGET(statusReq('z'.repeat(43)))).status).toBe(404);
