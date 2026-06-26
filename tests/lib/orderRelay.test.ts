@@ -346,6 +346,13 @@ describe('orderRelay: お渡し準備完了 (markReady / ready / readyAt・flag 
     ).toBe(NOW);
   });
 
+  it('applyOrderOp: 既に ready な order への markReady(true) は冪等 (別 nowMs でも再スタンプせず不変)', () => {
+    const ready = order({ ready: true, readyAt: NOW });
+    const r = applyOrderOp(ready, { kind: 'markReady', value: true }, NOW + 5000);
+    expect(r).toBe(ready); // 同一参照 = no-op (feed の CAS が走らない・readyAt 不変)
+    expect(r.readyAt).toBe(NOW); // 準備完了時刻は最初の 1 回で確定 (再クリックで動かない)
+  });
+
   it('markReady と fulfill は独立 (準備完了 → 受け渡し済 の遷移で両立)', () => {
     const r = applyOrderOp(order(), { kind: 'markReady', value: true }, NOW);
     const f = applyOrderOp(r, { kind: 'fulfill', value: true });

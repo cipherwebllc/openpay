@@ -2,7 +2,7 @@
 // mock し、状態ごとの描画 + ready 遷移時のチャイム発火 (1回・初回ロードは抑止) を直接確認する。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { OrderStatusData } from '@/hooks/useOrderStatus';
 
@@ -94,5 +94,44 @@ describe('OrderStatusView', () => {
     hold.error = new Error('kv_error');
     renderWithIntl(<OrderStatusView token="t" />);
     expect(screen.getByText('状況を取得できませんでした')).toBeInTheDocument();
+  });
+
+  it('受取待ち → Wake Lock 取得・visibility 復帰で refetch・unmount で release (対応ブラウザ)', async () => {
+    const nav = navigator as unknown as { wakeLock?: unknown };
+    const releaseSpy = vi.fn().mockResolvedValue(undefined);
+    const requestSpy = vi.fn().mockResolvedValue({ release: releaseSpy });
+    Object.defineProperty(navigator, 'wakeLock', { value: { request: requestSpy }, configurable: true });
+    try {
+      hold.data = status({ state: 'received' });
+      const { unmount } = renderWithIntl(<OrderStatusView token="t" />);
+      // 受取待ち = screen wake lock を取得 (request('screen'))。
+      await waitFor(() => expect(requestSpy).toHaveBeenCalledWith('screen'));
+      await act(async () => {}); // acquire の await を解決し sentinel を確定。
+      // フォアグラウンド復帰 → 即 refetch (バックグラウンド中の ready 化を取りこぼさない)。
+      refetch.mockClear();
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(refetch).toHaveBeenCalled();
+      // unmount → 取得済み sentinel を release。
+      unmount();
+      await waitFor(() => expect(releaseSpy).toHaveBeenCalled());
+    } finally {
+      delete nav.wakeLock;
+    }
+  });
+
+  it('done では Wake Lock を取得しない (受取完了後はスリープ抑止対象外)', async () => {
+    const nav = navigator as unknown as { wakeLock?: unknown };
+    const requestSpy = vi.fn().mockResolvedValue({ release: vi.fn() });
+    Object.defineProperty(navigator, 'wakeLock', { value: { request: requestSpy }, configurable: true });
+    try {
+      hold.data = status({ state: 'done' });
+      renderWithIntl(<OrderStatusView token="t" />);
+      await act(async () => {});
+      expect(requestSpy).not.toHaveBeenCalled(); // isWaiting=false → 取得しない
+    } finally {
+      delete nav.wakeLock;
+    }
   });
 });

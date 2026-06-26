@@ -23,6 +23,7 @@ const hold = vi.hoisted(() => ({
   rateAllowed: true,
   kvConfigured: true,
   claimValue: 'OK' as 'OK' | null, // kvSet nx: 'OK'=first, null=duplicate
+  pointerSetFails: false, // true で order:sv: の kvSet が ok:false を返す (ポインタ保存失敗の emulate)
   verify: { ok: true, value: 10n ** 18n } as
     | { ok: true; value: bigint }
     | { ok: false; reason: string },
@@ -60,10 +61,14 @@ vi.mock('@/lib/relay/relayRoute', () => ({ anonymizeIp: () => 'ip-1' }));
 const lpushSpy = vi.hoisted(() => vi.fn());
 const delSpy = vi.hoisted(() => vi.fn());
 const setSpy = vi.hoisted(() => vi.fn());
+const warnSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
   kvSet: (...a: unknown[]) => {
     setSpy(...a);
+    if (hold.pointerSetFails && String(a[0]).startsWith('order:sv:')) {
+      return Promise.resolve({ ok: false, reason: 'network_error' });
+    }
     return Promise.resolve({ ok: true, value: hold.claimValue });
   },
   kvDel: (...a: unknown[]) => {
@@ -76,6 +81,9 @@ vi.mock('@/lib/kv', () => ({
   },
   kvLtrim: () => Promise.resolve({ ok: true, value: 'OK' }),
   kvExpire: () => Promise.resolve({ ok: true, value: 1 }),
+}));
+vi.mock('@/lib/logger', () => ({
+  logger: { info: vi.fn(), warn: warnSpy, error: vi.fn(), debug: vi.fn() },
 }));
 
 import { POST } from '@/app/api/order/notify/route';
@@ -110,10 +118,12 @@ beforeEach(() => {
   hold.rateAllowed = true;
   hold.kvConfigured = true;
   hold.claimValue = 'OK';
+  hold.pointerSetFails = false;
   hold.verify = { ok: true, value: JPYC };
   lpushSpy.mockClear();
   delSpy.mockClear();
   setSpy.mockClear();
+  warnSpy.mockClear();
 });
 
 describe('POST /api/order/notify', () => {
@@ -238,6 +248,22 @@ describe('POST /api/order/notify', () => {
       txHash: TXHASH,
     });
     expect(svCall![2]).toMatchObject({ nx: true });
+  });
+
+  it('ポインタ保存が KV 失敗 → 受注は 200 (fail-quiet) だが warn で surface (silent failure 防止・LARP #3)', async () => {
+    hold.pointerSetFails = true;
+    const res = await POST(req(goodBody({ statusToken: STATUS_TOKEN })));
+    expect(res.status).toBe(200); // 受注/決済は止めない
+    expect((await res.json()).ok).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'order.notify.pointer_failed',
+      expect.objectContaining({ reason: 'network_error', merchant: MERCHANT }),
+    );
+  });
+
+  it('ポインタ保存が成功 → pointer_failed の warn は出さない', async () => {
+    await POST(req(goodBody({ statusToken: STATUS_TOKEN })));
+    expect(warnSpy.mock.calls.some((c) => c[0] === 'order.notify.pointer_failed')).toBe(false);
   });
 
   it('enableOrderPickup OFF → statusToken があってもポインタを保存しない (完全 inert)', async () => {

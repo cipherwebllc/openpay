@@ -171,11 +171,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     // nx で重複保存を避ける (1 token 1 注文)。flag OFF / token 無し / 不正形式では何もしない (inert)。
     const statusToken = o.statusToken;
     if (env.enableOrderPickup && isOrderTokenLike(statusToken)) {
-      await kvSet(
+      const ptr = await kvSet(
         orderStatusPointerKey(statusToken),
         JSON.stringify({ merchant, chainId, txHash }),
         { ttlSec: ORDER_LIST_TTL_SEC, nx: true },
       );
+      // 付帯処理ゆえ受注/決済は止めない (fail-quiet) が、失敗は黙殺しない: ポインタ未保存だと顧客の
+      // /api/order/status が 404 (status リンクが無言で機能しない) になるため observable にする。
+      // nx 衝突 (既存 token) は ok:true (value:null) で warn しない — 1 token 1 注文の正常系。
+      if (!ptr.ok) {
+        logger.warn('order.notify.pointer_failed', { reason: ptr.reason, chainId, merchant });
+      }
     }
   }
 
