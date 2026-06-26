@@ -298,7 +298,57 @@ viem@2.50.3 → ws@8.18.0  ← affected (脆弱性 fix は ws>=8.20.1)
 - OpenPay が ws を server mode で利用する機能を追加 (= webhook server 等)
 - GHSA-58qx-3vcg-4xpx に client-side exploit PoC 公開
 
-### 7.5 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
+### 7.5 HIGH: `ws` (GHSA-96hv-2xvq-fx4p)
+
+**Root advisory**: [GHSA-96hv-2xvq-fx4p](https://github.com/advisories/GHSA-96hv-2xvq-fx4p)
+— "ws: Memory exhaustion DoS from tiny fragments and data chunks"
+（§7.4 の旧 ws advisory GHSA-58qx・RESOLVED とは**別物**。2026-06 時点で **upstream に
+修正版が無く**、最新 8.21.0 も影響範囲のため override での upgrade では解消できない。）
+
+**Propagation chain**:
+```
+@reown/appkit / @walletconnect/* / viem → ws (websocket client)
+```
+
+**Exploit mechanism**: ws を **server** として動作させた時、攻撃者が極小 fragment /
+data chunk を大量送信してメモリを枯渇させる DoS。
+
+**Reachability for OpenPay**:
+- OpenPay の ws は WalletConnect リレー / RPC subscription の websocket **client**
+- server mode は本 codebase で一切起動しない → DoS の攻撃面が存在しない
+- 修正版が無いため accepted risk (client 用途・低到達性) として gate を通す
+
+**Reassess triggers**:
+- ws が本 advisory の patched 版をリリース (8.21.0 超で fix 済) → override で bump し allowlist 削除
+- OpenPay が ws を server mode で利用する機能を追加 (webhook server 等)
+- GHSA-96hv-2xvq-fx4p に client-side exploit PoC 公開
+
+### 7.6 MODERATE: `@opentelemetry/core` (GHSA-8988-4f7v-96qf)
+
+**Root advisory**: [GHSA-8988-4f7v-96qf](https://github.com/advisories/GHSA-8988-4f7v-96qf)
+— "OpenTelemetry Core: Unbounded memory allocation in W3C Baggage propagation"
+
+**Propagation chain**:
+```
+@sentry/nextjs → @sentry/node → @opentelemetry/instrumentation-http → @opentelemetry/core (<2.8.0)
+```
+
+**Exploit mechanism**: 信頼できない W3C Baggage ヘッダを大量処理した際の非有界
+メモリ確保 (DoS)。
+
+**Reachability for OpenPay**:
+- @opentelemetry/core は @sentry/nextjs (サーバ側エラー/トレース計測) の transitive dep
+- OpenPay は外部からの Baggage 伝播を計測対象にしておらず (Sentry 既定計装のみ)、
+  攻撃者制御の Baggage が core に流れる実運用経路はない
+- clean な単独修正は @sentry/opentelemetry チェーンの広範な再解決 (≈90 package churn) を
+  要し、MODERATE・低到達性に対しリスク不相応 → accepted risk
+
+**Reassess triggers**:
+- @sentry/nextjs が patched @opentelemetry/core (>=2.8.0) を含む版へ更新 → npm update で解消し allowlist 削除
+- OpenPay が外部 W3C Baggage ヘッダを計測/伝播する機能を追加
+- GHSA-8988-4f7v-96qf に高到達性の exploit PoC 公開
+
+### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
 本 script は `npm audit --omit=dev --json` を parse し、**MODERATE / HIGH /
@@ -312,10 +362,12 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 両ファイルの diff で残す)。現在 allowlist:
 | GHSA ID | Pkg | Sev | docRef |
 |---|---|---|---|
-| GHSA-qjx8-664m-686j | js-cookie | HIGH | §7.1 |
 | GHSA-qx2v-qp2m-jg93 | postcss | MODERATE | §7.2 |
 | GHSA-w5hq-g745-h8pq | uuid | MODERATE | §7.3 |
-| GHSA-58qx-3vcg-4xpx | ws | MODERATE | §7.4 |
+| GHSA-96hv-2xvq-fx4p | ws | HIGH | §7.5 |
+| GHSA-8988-4f7v-96qf | @opentelemetry/core | MODERATE | §7.6 |
+
+(§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕は upstream fix 済で allowlist から削除済 = 上表は現行の実体。)
 
 (2026-05-22 から moderate も gate 対象に昇格、warning-only count threshold は廃止)
 
@@ -327,7 +379,7 @@ audit-gate: MODERATE+ advisories detected: 4 (accepted: 4, unaccepted: 0, stale-
 audit-gate: OK
 ```
 
-### 7.6 再評価手順
+### 7.8 再評価手順
 
 ```bash
 # MODERATE+ advisory の root を全部列挙 (期待値: §7.1-7.4 の 4 件)
