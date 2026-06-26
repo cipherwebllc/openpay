@@ -14,42 +14,19 @@
 // (分岐は unit test で担保)。
 
 import { NextResponse } from 'next/server';
-import {
-  createPublicClient,
-  parseAbi,
-  isAddress,
-  isHex,
-  getAddress,
-  type Address,
-  type Hex,
-} from 'viem';
+import { isAddress, isHex, getAddress, type Hex } from 'viem';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { recordRelayedVolume } from '@/lib/billingMeter';
 import { isGaslessRelayBlocked } from '@/lib/feeGate';
 import {
   PROVIDER,
-  MAX_VALUE,
   MAINNET_CHAINS,
   relayMaxGasCostWei,
-  RELAY_LOW_BALANCE_ALERT_WEI,
   SUPPORTED_CHAINS,
-  transportFor,
-  jpycAddressFor,
-  getBalance,
-  readAuthorizationUsed,
-  selfHostIoFor,
   relayFreeAuthorization,
 } from '@/lib/relay/relayProvider';
-import { submitSelfHost, pollSelfHost } from '@/lib/relay/selfHostRelayer';
-import {
-  recoverViaForwarder,
-  type ForwarderRecoverDeps,
-} from '@/lib/relay/forwarderRecover';
-import {
-  buildForwarderNonce,
-  type ForwarderSettleParams,
-} from '@/lib/relay/forwarderIntent';
+import { type ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
 import {
   jpycForwarderFor,
   configuredJpycForwarderFor,
@@ -57,15 +34,13 @@ import {
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import {
+  settleViaForwarder,
+  feeReceiverFor,
+} from '@/lib/relay/forwarderSettleService';
+import {
   isMobileOrderFeeKind,
   mobileOrderFeeValue,
 } from '@/lib/mobileOrderFee';
-import {
-  checkRateLimit,
-  checkGasBudget,
-  refundGasBudget,
-  makeIdempotency,
-} from '@/lib/relay/relayGuards';
 import {
   MAX_BODY_BYTES,
   isDec,
@@ -80,108 +55,13 @@ export const runtime = 'nodejs';
 // MAX_BODY_BYTES / isDec / anonymizeIp / respond は共有 relayRoute へ集約 (CSV パス relay と同形)。
 // respond は logger イベント prefix を 'relay.jpyc' で束ね、現行のイベント名を完全再現する。
 
-// CDX-1: forwarder の immutable getter (Eip3009Forwarder.token / feeReceiver)。健全性チェックで読む。
-const FORWARDER_GETTERS_ABI = parseAbi([
-  'function token() view returns (address)',
-  'function feeReceiver() view returns (address)',
-]);
-
-// CDX-1: chain 別 forwarder 健全性チェックの判定キャッシュ (process lifetime)。'valid' (肯定的に検証済み)
-// と DETERMINISTIC 無効 (no-code / token mismatch / feeReceiver mismatch・恒久) のみキャッシュする。
-// 検証不能 (RPC throw 等) はキャッシュせず毎リクエストで再試行する (自己回復)。値: 'valid' = 健全,
-// 文字列(理由) = 恒久的に無効。
-const forwarderVerdictCache = new Map<number, 'valid' | string>();
-// 設計 (Codex 4 round の最終形): 「**肯定的に検証できた時だけ submit**」。
-// getBytecode/getter の throw (RPC flake でも別コントラクトの revert でも) は理由を問わず
-// 「今回は検証不能」とし submit しない (= 非 null を返す) が **キャッシュしない** → 次リクエストで再試行し
-// 自己回復する。これにより:
-//   (a) false-success (EOA / 別コントラクトの settle no-op) を完全に塞ぐ (検証成功時のみ先へ進むため)。
-//   (b) 一時的 RPC flake で chain を恒久 503 キャッシュしない (throw は非キャッシュ)。
-//   (c) エラー文字列を transport/contract に分類する fragile なロジックが不要になる。
-// 代償は「RPC flake 中の初回 recover が standard へ落ちる」だけ (安全・自己回復・利用者は支払える)。
-// 返り値: null = 肯定的に検証済み (submit 可) / 非 null = 503 relay_not_configured に倒す理由。
-async function verifyRecoverForwarder(
-  chainId: number,
-  forwarder: Address,
-  jpyc: Address,
-  feeReceiver: Address,
-): Promise<string | null> {
-  const cached = forwarderVerdictCache.get(chainId);
-  if (cached !== undefined) return cached === 'valid' ? null : cached;
-
-  const client = createPublicClient({
-    chain: SUPPORTED_CHAINS[chainId].chain,
-    transport: transportFor(chainId),
-  });
-
-  // STEP 1: bytecode。no-code (EOA/未デプロイ) は DETERMINISTIC 無効 → キャッシュ + 503。
-  //         throw は検証不能 → 非キャッシュで 503 (次回再試行)。
-  let code: Hex | undefined;
-  try {
-    code = await client.getBytecode({ address: forwarder });
-  } catch (e) {
-    logger.warn('relay.jpyc.forwarder_unverified', {
-      chainId,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return 'forwarder_unverified'; // 非キャッシュ: 次リクエストで再試行
-  }
-  if (!code || code === '0x') {
-    forwarderVerdictCache.set(chainId, 'no_bytecode');
-    logger.error('relay.jpyc.forwarder_invalid', { chainId, forwarder, reason: 'no_bytecode' });
-    return 'no_bytecode';
-  }
-
-  // STEP 2: immutable getter を **肯定的に** 読む。throw は理由を問わず検証不能 → 非キャッシュ 503。
-  //         token()/feeReceiver() を持たない別コントラクトも、RPC flake も、ここで一律に submit しない
-  //         (= false-success を構造的に排除)。値が取れた時だけ不一致判定へ進む。
-  let token: Address;
-  let onChainFeeReceiver: Address;
-  try {
-    token = await client.readContract({
-      address: forwarder,
-      abi: FORWARDER_GETTERS_ABI,
-      functionName: 'token',
-    });
-    onChainFeeReceiver = await client.readContract({
-      address: forwarder,
-      abi: FORWARDER_GETTERS_ABI,
-      functionName: 'feeReceiver',
-    });
-  } catch (e) {
-    logger.warn('relay.jpyc.forwarder_unverified', {
-      chainId,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return 'forwarder_unverified'; // 非キャッシュ: getter が取れない限り submit しない
-  }
-
-  // 値が取れた → DETERMINISTIC 不一致判定 (恒久・キャッシュする)。
-  let reason: string | null = null;
-  if (getAddress(token) !== getAddress(jpyc)) {
-    reason = `token_mismatch(${token} != ${jpyc})`;
-  } else if (getAddress(onChainFeeReceiver) !== getAddress(feeReceiver)) {
-    reason = `fee_receiver_mismatch(${onChainFeeReceiver} != ${feeReceiver})`;
-  }
-
-  if (reason) {
-    forwarderVerdictCache.set(chainId, reason);
-    logger.error('relay.jpyc.forwarder_invalid', { chainId, forwarder, reason });
-    return reason;
-  }
-
-  forwarderVerdictCache.set(chainId, 'valid');
-  return null;
-}
+// forwarder 健全性チェック (verifyForwarderHealth) は lib/relay/forwarderHealth へ、settle
+// オーケストレーション (検証 + broadcast) と feeReceiverFor / MAX_VALIDITY_WINDOW_SEC は
+// lib/relay/forwarderSettleService へ抽出した (x402 facilitator と共有・挙動不変)。
 
 // recover モード config は client/server 共有 (lib/relay/forwarderConfig)。forwarder アドレスが
 // chain に設定されていれば recover モード (= 立替+回収)、無ければ free (Phase A 直接 transfer)。
 const forwarderFor = jpycForwarderFor;
-// forwarder の immutable feeReceiver と一致させる回収先 (= OpenPay fee receiver)。
-function feeReceiverFor(_chainId: number): Address | null {
-  return isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
-}
-const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
 
 // recover (forwarder 設定) は self-host relayer 前提 (recover 経路は forwarder.settle を自前 EOA で
 // submit する)。client は PROVIDER を見えないため forwarder 設定だけで recover payload を送る。
@@ -245,12 +125,8 @@ if (env.enableUsageFee) {
   }
 }
 
-// 冪等性ヘルパは共有 relayGuards から prefix 指定で生成する。決済 relay は従来の prefix
-// (relay:idem:) を維持し挙動を不変に保つ (rate-limit / 日次予算は共有キーで両 route 共通)。
-// recover 経路 (handleRecover) でこの helper を inject する (free 経路は relayFreeAuthorization が
-// 同 prefix で内製する)。
-const { claimIdempotency, recordRelayHash, releaseIdempotency } =
-  makeIdempotency('relay:idem:');
+// 冪等性ヘルパ (prefix 'relay:idem:') は settleViaForwarder が recover 経路で内製する。free 経路は
+// relayFreeAuthorization が同 prefix で内製。rate-limit / 日次予算は relayGuards 内で両 route 共有キー。
 
 // 結果 → HTTP 応答 (free / recover 共通)。共有 makeRespond に prefix 'relay.jpyc' を束ねて、
 // 従来のイベント名 (relay.jpyc.reverted / .pending / .relay_error) と応答 body/status を完全再現する。
@@ -521,72 +397,18 @@ async function handleRecover(
   const expectedFee = feeKind
     ? mobileOrderFeeValue(billAmount, feeKind)
     : recoverFeeValue(billAmount, gasMode, chainId);
-  const io = selfHostIoFor(chainId);
-  // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
-  const jpyc = jpycAddressFor(chainId);
-  const forwarder = forwarderFor(chainId);
-
-  // CDX-1: submit 前に forwarder を on-chain で **肯定的に** 検証する。env の forwarder が EOA や
-  // 別コントラクト/別 token/別 feeReceiver だと settle() が no-op SUCCESS して「API 成功・着金ゼロ・
-  // authorization 未消費」になる。検証成功 (null) のときだけ submit へ進み、無効 or 検証不能 (非 null) は
-  // 503 relay_not_configured に倒す (client が standard へ綺麗にフォールバック)。RPC flake 中の検証不能は
-  // キャッシュされないので RPC 回復後に自動で recover へ戻る (verifyRecoverForwarder の説明参照)。
-  if (jpyc && forwarder) {
-    const invalid = await verifyRecoverForwarder(chainId, forwarder, jpyc, feeReceiver);
-    if (invalid) {
-      return NextResponse.json(
-        { ok: false, error: 'relay_not_configured' },
-        { status: 503 },
-      );
-    }
-  }
-
-  const isAuthorizationUsed =
-    jpyc && forwarder
-      ? () =>
-          readAuthorizationUsed(
-            chainId,
-            jpyc,
-            params.from,
-            buildForwarderNonce(params, chainId, forwarder),
-          )
-      : undefined;
-  const deps: ForwarderRecoverDeps = {
-    nowSec: () => Math.floor(Date.now() / 1000),
+  // 検証 (server 権威 feeValue 照合 / 署名 recover / 残高 / nonce 未使用 / 冪等 / 日次予算) +
+  // forwarder 健全性 + submit/poll は共有 settleViaForwarder に集約 (x402 facilitator と同一コア)。
+  // recover 固有値だけ渡す: expectedFeeValue = 上で算出した recover 料率 / forwarderFor = a1-aware /
+  // idemPrefix = 'relay:idem:' (従来の冪等名前空間を維持)。
+  const result = await settleViaForwarder({
+    chainId,
+    params,
+    signature: raw.signature as Hex,
+    rateLimitKeys: [params.from, ipPrefix],
     expectedFeeValue: expectedFee,
-    maxValue: MAX_VALUE,
-    maxValidityWindowSec: MAX_VALIDITY_WINDOW_SEC,
-    jpycAddressFor,
     forwarderFor,
-    feeReceiverFor,
-    getBalance,
-    checkRateLimit,
-    // refund (未 broadcast 失敗の予算返却) を recover 経路にも配線。recover は本番標準経路に昇格した
-    // ため、free 経路 (jpycRelay) と同一セマンティクスで日次予算を回収する: checkGasBudget で INCR 消費
-    // した枠を、tx が 1 件も broadcast されなかったことが確実な失敗 (submit throw / poll 'error') でのみ
-    // DECR で 1 戻す (RPC 不安定日に正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。fail-quiet。
-    checkGasBudget,
-    refundGasBudget,
-    checkAuthorizationUsed: readAuthorizationUsed,
-    claimIdempotency,
-    recordRelayHash,
-    releaseIdempotency,
-    submit: (_c, target, data) =>
-      submitSelfHost(io, target, data, {
-        maxGasCostWei: relayMaxGasCostWei(chainId),
-        isAuthorizationUsed,
-        lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
-        onLowBalance: (b) =>
-          logger.warn('relay.relayer.balance_low', {
-            chainId,
-            balanceWei: b.toString(),
-          }),
-      }),
-    pollTask: (taskId) => pollSelfHost(io, taskId),
-  };
-  const result = await recoverViaForwarder(
-    { chainId, params, signature: raw.signature as Hex, rateLimitKeys: [params.from, ipPrefix] },
-    deps,
-  );
+    idemPrefix: 'relay:idem:',
+  });
   return respond(result, chainId);
 }

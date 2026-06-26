@@ -34,6 +34,19 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'x402-facilitator-2026-06-24',
+    date: '2026-06-24',
+    category: 'notice',
+    title: {
+      ja: '【予告】AI エージェント向け JPYC 都度課金（x402 ファシリテーター）を準備中',
+      en: '[Heads-up] Preparing a JPYC per-request facilitator for AI agents (x402)',
+    },
+    body: {
+      ja: 'AI エージェントや開発者が、日本の有料 API・コンテンツに JPYC 建てで都度課金できる「x402 ファシリテーター」を準備しています（提供開始時に改めて告知します）。提供時は、決済額の 1%（最低 2 JPYC）を OpenPay 利用料として申し受けます。この利用料はお支払いになる側（買い手）の上乗せで、出品者は表示額をそのまま受け取ります（ノンカストディ・当社は売上を預かりません）。各決済には OpenPay 署名の受領証明を発行します。\n本機能は現在は既定で無効（準備中）で、決済QR・レジ・チップ・モバイル注文などの既存機能には影響しません。提供開始の時期・条件は本サービス内で改めてお知らせします。',
+      en: 'We are preparing an "x402 facilitator" that lets AI agents and developers pay Japanese paid APIs and content per request in JPYC (we will announce again when it launches). At launch, OpenPay will charge a 1% facilitator fee (2 JPYC minimum), added on the buyer\'s side — the seller receives the listed amount in full, non-custodially (we do not custody sales). Each settlement is issued an OpenPay-signed receipt.\nThis feature is disabled by default for now (in preparation) and does not affect existing features (payment QR, register, tips, mobile ordering). We will announce the launch timing and terms within the service.',
+    },
+  },
+  {
     id: 'mobile-order-fee-2026-06-18',
     date: '2026-06-18',
     category: 'pricing',

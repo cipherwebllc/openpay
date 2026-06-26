@@ -520,6 +520,17 @@ export const env = {
   // 店員による売上スキミングを構造的に防ぐ。再発行で旧トークン即失効。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY。
   // 計画: plans/restaurant-pos-roadmap.md Phase 5。
   enableOrderToken: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_TOKEN),
+  // x402 JPYC facilitator (managed facilitator + discovery: AI エージェント/開発者が
+  // 日本事業者の有料 API/コンテンツに JPYC 建てで都度課金 = x402、settlement の 1% を
+  // 手数料徴収) の有効化フラグ (client 露出: 登録/discovery UI のゲートに使う)。
+  // **既定 OFF で完全 inert** = /api/facilitator/* と /api/discovery は 404・/discovery と
+  // 登録 UI は非表示。settlement は既存 forwarder (receiveWithAuthorization 分割) を再利用し
+  // ノンカストディ (relayer はガスのみ・JPYC 不触)。手数料率/floor/受領証明鍵は server-only
+  // (lib/x402/facilitatorConfig.ts) で client bundle に出さない。点灯は testnet(Amoy) E2E +
+  // 開示更新と同一リリース。計画: plans/x402-jpyc-facilitator.md。'1' / 'true' で ON。
+  enableX402Facilitator: parseBoolFlag(
+    process.env.NEXT_PUBLIC_ENABLE_X402_FACILITATOR,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

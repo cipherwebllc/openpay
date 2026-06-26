@@ -7,6 +7,11 @@
 //
 // gasEquiv (feeValue) は server 権威の固定額 (開示バッファ)。client 値は信用せず一致を要求する
 // (Codex review: client が feeValue=0 や任意 feeReceiver を要求するのを防ぐ)。
+//
+// 検証 (broadcast 前の純チェック) は verifyForwarderSettle に分離し、recover relay (recoverViaForwarder
+// → /settle) と x402 facilitator (/verify) が **同一の検証実装** を共用する (money-path 検証の二重実装を
+// 避ける)。broadcast 側 (rate-limit / authState / idempotency / budget / submit / poll) は
+// recoverViaForwarder の責務。
 
 import { getAddress, type Address, type Hex } from 'viem';
 import {
@@ -80,60 +85,91 @@ export type ForwarderRecoverDeps = {
   pollTask: (taskId: string) => Promise<RelayTaskOutcome>;
 };
 
+// verifyForwarderSettle が必要とする deps の部分集合 (broadcast/guard 系を含まない純検証用)。
+// recover relay は full ForwarderRecoverDeps を渡し (= これを満たす)、x402 facilitator /verify は
+// この軽量サブセットだけ組んで呼ぶ。
+export type ForwarderVerifyDeps = Pick<
+  ForwarderRecoverDeps,
+  | 'nowSec'
+  | 'expectedFeeValue'
+  | 'maxValue'
+  | 'maxValidityWindowSec'
+  | 'jpycAddressFor'
+  | 'forwarderFor'
+  | 'feeReceiverFor'
+  | 'getBalance'
+>;
+
+export type ForwarderVerifyResult =
+  | { ok: false; result: RelayResult }
+  | { ok: true; jpyc: Address; forwarder: Address; nonce: Hex };
+
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as Hex;
 
 function rejected(httpStatus: number, reason: string): RelayResult {
   return { kind: 'rejected', httpStatus, reason };
 }
 
-export async function recoverViaForwarder(
+// broadcast 前の **純検証** (server 権威 feeValue 照合 / 各種境界 / 署名 recover==from / 残高)。
+// 副作用は getBalance / 署名 recover の read のみ (rate-limit / authState / idempotency / budget /
+// broadcast は呼び元 = recoverViaForwarder の責務)。返り値: ok=false なら rejected RelayResult、
+// ok=true なら解決済の jpyc/forwarder/nonce (broadcast 可)。
+export async function verifyForwarderSettle(
   input: ForwarderRecoverInput,
-  deps: ForwarderRecoverDeps,
-): Promise<RelayResult> {
+  deps: ForwarderVerifyDeps,
+): Promise<ForwarderVerifyResult> {
   const { chainId, params, signature } = input;
 
   const jpyc = deps.jpycAddressFor(chainId);
   const forwarder = deps.forwarderFor(chainId);
   const feeReceiver = deps.feeReceiverFor(chainId);
   if (!jpyc || !forwarder || !feeReceiver) {
-    return rejected(400, 'unsupported_chain');
+    return { ok: false, result: rejected(400, 'unsupported_chain') };
   }
 
   // server 権威の値検証 (client を信用しない)。
   if (getAddress(params.feeReceiver) !== getAddress(feeReceiver)) {
-    return rejected(400, 'fee_receiver_mismatch');
+    return { ok: false, result: rejected(400, 'fee_receiver_mismatch') };
   }
   if (params.feeValue !== deps.expectedFeeValue) {
-    return rejected(400, 'fee_value_mismatch');
+    return { ok: false, result: rejected(400, 'fee_value_mismatch') };
   }
   // 防御層 (CDX-2): expectedFeeValue が 0 の構成 (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC=0 等の誤設定) は、
   // Eip3009Forwarder.settle が feeValue==0 で ZeroValue revert するため、broadcast すれば必ず revert
   // する tx を出して relayer の gas を捨てる (false flow)。submit 前に弾く。フロアは relayGasFeeValue が
   // 1 wei 以上を保証する (forwarderConfig) ため通常は到達しないが、二重に塞ぐ。
   if (deps.expectedFeeValue === 0n) {
-    return rejected(400, 'fee_misconfigured');
+    return { ok: false, result: rejected(400, 'fee_misconfigured') };
   }
-  if (params.merchantValue <= 0n) return rejected(400, 'invalid_merchant_value');
+  if (params.merchantValue <= 0n) {
+    return { ok: false, result: rejected(400, 'invalid_merchant_value') };
+  }
   if (getAddress(params.merchant) === getAddress(feeReceiver)) {
-    return rejected(400, 'merchant_is_fee_receiver');
+    return { ok: false, result: rejected(400, 'merchant_is_fee_receiver') };
   }
   // merchant == forwarder は merchantValue を contract に閉じ込める (回収不能・Codex P2)。
   // 契約側にもガードがあるが、既 deploy 済 forwarder (Amoy) 保護 + defense-in-depth で server も弾く。
   if (getAddress(params.merchant) === getAddress(forwarder)) {
-    return rejected(400, 'merchant_is_forwarder');
+    return { ok: false, result: rejected(400, 'merchant_is_forwarder') };
   }
   if (params.intentSalt.toLowerCase() === ZERO_BYTES32) {
-    return rejected(400, 'zero_salt');
+    return { ok: false, result: rejected(400, 'zero_salt') };
   }
   const total = params.merchantValue + params.feeValue;
-  if (total > deps.maxValue) return rejected(400, 'value_exceeds_max');
+  if (total > deps.maxValue) {
+    return { ok: false, result: rejected(400, 'value_exceeds_max') };
+  }
 
   // 期限・有効窓。
   const now = BigInt(deps.nowSec());
-  if (params.validAfter > now) return rejected(400, 'not_yet_valid');
-  if (params.validBefore <= now) return rejected(400, 'expired');
+  if (params.validAfter > now) {
+    return { ok: false, result: rejected(400, 'not_yet_valid') };
+  }
+  if (params.validBefore <= now) {
+    return { ok: false, result: rejected(400, 'expired') };
+  }
   if (params.validBefore - now > BigInt(deps.maxValidityWindowSec)) {
-    return rejected(400, 'validity_too_far');
+    return { ok: false, result: rejected(400, 'validity_too_far') };
   }
 
   // 署名 recover == from。
@@ -147,17 +183,34 @@ export async function recoverViaForwarder(
       signature,
     );
   } catch {
-    return rejected(400, 'signature_invalid');
+    return { ok: false, result: rejected(400, 'signature_invalid') };
   }
   if (getAddress(signer) !== getAddress(params.from)) {
-    return rejected(400, 'signature_mismatch');
+    return { ok: false, result: rejected(400, 'signature_mismatch') };
   }
 
   // 残高 ≥ total (revert する tx を relay しない)。
   const balance = await deps.getBalance(chainId, jpyc, params.from);
-  if (balance < total) return rejected(400, 'insufficient_balance');
+  if (balance < total) {
+    return { ok: false, result: rejected(400, 'insufficient_balance') };
+  }
 
-  // rate-limit。
+  // nonce (forwarder commitment = EIP-3009 nonce)。authState / idempotency が使う。
+  const nonce = buildForwarderNonce(params, chainId, forwarder);
+  return { ok: true, jpyc, forwarder, nonce };
+}
+
+export async function recoverViaForwarder(
+  input: ForwarderRecoverInput,
+  deps: ForwarderRecoverDeps,
+): Promise<RelayResult> {
+  // 純検証 (server 権威 feeValue 照合 / 境界 / 署名 / 残高) は共有 verifyForwarderSettle に委譲。
+  const verified = await verifyForwarderSettle(input, deps);
+  if (!verified.ok) return verified.result;
+  const { jpyc, forwarder, nonce } = verified;
+  const { chainId, params, signature } = input;
+
+  // rate-limit (副作用: KV sliding-window)。検証通過後・submit 前に置く。
   if (!(await deps.checkRateLimit(input.rateLimitKeys))) {
     return rejected(429, 'rate_limited');
   }
@@ -165,7 +218,6 @@ export async function recoverViaForwarder(
   // authorizationState 既使用 → pending (guaranteed-revert 回避 + 二重支払い防止)。
   // + 冪等性: 同一 authorization の重複 POST も pending (再 broadcast せず gas 浪費防止)。
   // nonce は両者共通 (forwarder commitment = EIP-3009 nonce)。
-  const nonce = buildForwarderNonce(params, chainId, forwarder);
   if (deps.checkAuthorizationUsed) {
     if (await deps.checkAuthorizationUsed(chainId, jpyc, params.from, nonce)) {
       return { kind: 'pending' };

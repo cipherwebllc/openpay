@@ -1900,5 +1900,32 @@
     "shareWarning": "Anyone with this link can view and update orders. Use only on in-store devices, and reissue if it leaks.",
     "loadError": "Couldn't load the token.",
     "opError": "Operation failed. Please try again."
+  },
+  "Facilitator": {
+    "title": "x402 Facilitator (JPYC)",
+    "subtitle": "AI agents and developers can pay Japanese paid APIs and content per request in JPYC (x402). OpenPay charges a 1% facilitator fee on the settled amount.",
+    "registerTitle": "Register a resource",
+    "registerSubtitle": "Register your paid API/content so agents can discover and pay in JPYC. Settlement is non-custodial (paid directly to you).",
+    "connectPrompt": "Connect your wallet (top of the page) to register.",
+    "signInStatement": "Sign in to the OpenPay x402 Facilitator.",
+    "signInCta": "Sign in with wallet",
+    "signingIn": "Signing in…",
+    "signedInAs": "Signed in as {address}",
+    "formUrl": "Resource URL (e.g. https://api.example.jp/paid/…)",
+    "formDescription": "Description (what you provide)",
+    "formPrice": "Price (JPYC, integer)",
+    "formCategory": "Category (e.g. api / data / mcp)",
+    "formPayTo": "Receive address (defaults to connected wallet)",
+    "formPayToHint": "The listed amount is paid directly to this address. OpenPay charges a separate 1% fee.",
+    "submitCta": "Register",
+    "submitting": "Registering…",
+    "created": "Registered.",
+    "snippetTitle": "Example of returning 402 from your server:",
+    "errorGeneric": "Registration failed ({reason}).",
+    "catalogTitle": "Public catalog",
+    "catalogSubtitle": "Registered paid resources. Agents can enumerate them via /api/discovery.",
+    "loading": "Loading…",
+    "catalogEmpty": "No resources registered yet.",
+    "feeNote": "(+{fee} JPYC fee)"
   }
 }
