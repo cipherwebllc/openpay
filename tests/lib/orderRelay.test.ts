@@ -12,6 +12,8 @@ import {
   parseStoredOrder,
   parseOrderFeedOp,
   applyOrderOp,
+  orderPickupState,
+  parseOrderStatusPointer,
   ORDER_ITEMS_MAX,
   ORDER_ITEM_NAME_MAX,
   ORDER_TABLE_MAX,
@@ -302,5 +304,110 @@ describe('orderRelay: applyOrderOp (純粋・不変・範囲外 no-op・デー�
     expect(applyOrderOp(b, { kind: 'setTable', table: null })).toMatchObject({ table: null });
     expect(b.fulfilled).toBe(false); // 元は不変
     expect(b.kitchenDone).toBeUndefined();
+  });
+});
+
+describe('orderRelay: お渡し準備完了 (markReady / ready / readyAt・flag ENABLE_ORDER_PICKUP)', () => {
+  const NOW = 1_700_000_900_000;
+
+  it('parseOrderFeedOp: markReady は boolean のみ受理・非 boolean / 欠落は null', () => {
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'markReady', value: true } })).toEqual({
+      txHash: TX,
+      op: { kind: 'markReady', value: true },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'markReady', value: false } })).toEqual({
+      txHash: TX,
+      op: { kind: 'markReady', value: false },
+    });
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'markReady', value: 'x' } })).toBeNull();
+    expect(parseOrderFeedOp({ txHash: TX, op: { kind: 'markReady' } })).toBeNull();
+  });
+
+  it('applyOrderOp: markReady(true) は ready+readyAt(nowMs) を立て fulfilled は不変・元は不変', () => {
+    const o = order();
+    const r = applyOrderOp(o, { kind: 'markReady', value: true }, NOW);
+    expect(r.ready).toBe(true);
+    expect(r.readyAt).toBe(NOW);
+    expect(r.fulfilled).toBe(false); // 準備完了 ≠ 受け渡し済 (独立状態)
+    expect(o.ready).toBeUndefined(); // 元は不変
+    expect(o.readyAt).toBeUndefined();
+  });
+
+  it('applyOrderOp: markReady(false) は ready=false + readyAt クリア (受取待ち解除)', () => {
+    const r = applyOrderOp(order({ ready: true, readyAt: NOW }), { kind: 'markReady', value: false }, NOW);
+    expect(r.ready).toBe(false);
+    expect(r.readyAt).toBeUndefined();
+  });
+
+  it('applyOrderOp: markReady(true) で nowMs 未指定なら既存 readyAt を保つ', () => {
+    expect(applyOrderOp(order(), { kind: 'markReady', value: true }).readyAt).toBeUndefined();
+    expect(
+      applyOrderOp(order({ ready: true, readyAt: NOW }), { kind: 'markReady', value: true }).readyAt,
+    ).toBe(NOW);
+  });
+
+  it('markReady と fulfill は独立 (準備完了 → 受け渡し済 の遷移で両立)', () => {
+    const r = applyOrderOp(order(), { kind: 'markReady', value: true }, NOW);
+    const f = applyOrderOp(r, { kind: 'fulfill', value: true });
+    expect(f.ready).toBe(true); // 準備完了は維持
+    expect(f.fulfilled).toBe(true); // 受け渡し済
+  });
+
+  it('parseStoredOrder: ready は true のみ復元・readyAt は ready かつ正の有限数のみ', () => {
+    const ok = parseStoredOrder(serializeOrder(order({ ready: true, readyAt: NOW })));
+    expect(ok?.ready).toBe(true);
+    expect(ok?.readyAt).toBe(NOW);
+    // ready=false / 欠落 → undefined。
+    expect(parseStoredOrder(serializeOrder(order()))?.ready).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), ready: 'yes' }))?.ready).toBeUndefined();
+    // ready 無しの readyAt は無意味 → 落とす。
+    expect(parseStoredOrder(JSON.stringify({ ...order(), readyAt: NOW }))?.readyAt).toBeUndefined();
+    // ready=true でも readyAt が 0/負/非数なら undefined。
+    expect(parseStoredOrder(JSON.stringify({ ...order(), ready: true, readyAt: 0 }))?.readyAt).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), ready: true, readyAt: 'soon' }))?.readyAt).toBeUndefined();
+    // ready=true・readyAt 無しは ready のみ。
+    const noAt = parseStoredOrder(JSON.stringify({ ...order(), ready: true }));
+    expect(noAt?.ready).toBe(true);
+    expect(noAt?.readyAt).toBeUndefined();
+  });
+});
+
+describe('orderRelay: orderPickupState (顧客向け状態導出・優先順)', () => {
+  it('fulfilled > ready > preparing > received の優先順', () => {
+    expect(orderPickupState(order())).toBe('received');
+    expect(
+      orderPickupState(order({ items: [{ name: 'A', qty: 1, price: '1', cooked: true }] })),
+    ).toBe('preparing');
+    expect(orderPickupState(order({ kitchenDone: true }))).toBe('preparing');
+    expect(orderPickupState(order({ ready: true }))).toBe('ready');
+    // fulfilled (受け渡し済) は ready/preparing より優先 = done。
+    expect(orderPickupState(order({ ready: true, fulfilled: true }))).toBe('done');
+    expect(orderPickupState(order({ kitchenDone: true, fulfilled: true }))).toBe('done');
+  });
+  it('一部だけ cooked でも preparing (全品である必要はない)', () => {
+    expect(
+      orderPickupState(
+        order({
+          items: [
+            { name: 'A', qty: 1, price: '1', cooked: true },
+            { name: 'B', qty: 1, price: '1' },
+          ],
+        }),
+      ),
+    ).toBe('preparing');
+  });
+});
+
+describe('orderRelay: parseOrderStatusPointer (order:sv 値・KV untrusted)', () => {
+  it('valid round-trip', () => {
+    const raw = JSON.stringify({ merchant: '0xabc', chainId: 137, txHash: TX });
+    expect(parseOrderStatusPointer(raw)).toEqual({ merchant: '0xabc', chainId: 137, txHash: TX });
+  });
+  it('不正は null (非JSON / 非object / merchant空 / chainId非整数 / txHash不正)', () => {
+    expect(parseOrderStatusPointer('nope')).toBeNull();
+    expect(parseOrderStatusPointer('42')).toBeNull();
+    expect(parseOrderStatusPointer(JSON.stringify({ merchant: '', chainId: 137, txHash: TX }))).toBeNull();
+    expect(parseOrderStatusPointer(JSON.stringify({ merchant: '0xabc', chainId: 1.5, txHash: TX }))).toBeNull();
+    expect(parseOrderStatusPointer(JSON.stringify({ merchant: '0xabc', chainId: 137, txHash: '0xnope' }))).toBeNull();
   });
 });

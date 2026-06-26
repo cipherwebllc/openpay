@@ -520,6 +520,14 @@ export const env = {
   // 店員による売上スキミングを構造的に防ぐ。再発行で旧トークン即失効。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY。
   // 計画: plans/restaurant-pos-roadmap.md Phase 5。
   enableOrderToken: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_TOKEN),
+  // 顧客向け「お渡し準備完了」通知 (モバイル注文・受取来店パターン) の有効化フラグ (client 露出)。
+  // **既定 OFF で完全 inert** = /order/status・/api/order/status は 404・CheckoutForm は status トークンを
+  // 生成せず webhook payload/完了画面リンクとも不変・ホールの「準備完了」ボタン非表示・feed は markReady op を
+  // 拒否。ON のとき ホールが「準備完了(通知)」を押すと受注に ready/readyAt が立ち、顧客は決済完了画面のリンク
+  // から /order/status?t=<token> を開いて待つと準備完了でチャイム+表示 (フォアグラウンド・要 KV・画面を開いた
+  // まま待つ前提=Web Push は使わない)。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY (+ホール操作は ENABLE_ORDER_FULFILLMENT)。
+  // 計画: plans/order-pickup-notify.md。
+  enableOrderPickup: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_PICKUP),
   // x402 JPYC facilitator (managed facilitator + discovery: AI エージェント/開発者が
   // 日本事業者の有料 API/コンテンツに JPYC 建てで都度課金 = x402、settlement の 1% を
   // 手数料徴収) の有効化フラグ (client 露出: 登録/discovery UI のゲートに使う)。

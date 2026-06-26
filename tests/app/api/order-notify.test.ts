@@ -9,11 +9,13 @@ const MERCHANT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const OTHER = '0x1111111111111111111111111111111111111111';
 const CUSTOMER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const TXHASH = `0x${'a'.repeat(64)}`;
+const STATUS_TOKEN = 'p'.repeat(43); // 顧客生成の status トークン (43 文字 base64url = 有効形式)
 
 // 注意: vi.hoisted は top-level const より先に走るため、ここで MERCHANT/JPYC を参照すると TDZ。
 // 初期値は安全なリテラル/null にし、実値は beforeEach で設定する。
 const hold = vi.hoisted(() => ({
   enableOrderRelay: true,
+  enableOrderPickup: true, // 顧客向け注文状況の逆引きポインタ保存のゲート
   isMainnet: false,
   handle: { ok: true, record: null } as
     | { ok: true; record: { config: { to: string }; storefront?: unknown } | null }
@@ -37,6 +39,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       get enableOrderRelay() {
         return hold.enableOrderRelay;
+      },
+      get enableOrderPickup() {
+        return hold.enableOrderPickup;
       },
     },
   };
@@ -99,6 +104,7 @@ function goodBody(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   hold.enableOrderRelay = true;
+  hold.enableOrderPickup = true;
   hold.isMainnet = false;
   hold.handle = { ok: true, record: { config: { to: MERCHANT }, storefront: {} } };
   hold.rateAllowed = true;
@@ -218,5 +224,35 @@ describe('POST /api/order/notify', () => {
     delete (body as Record<string, unknown>).txHash;
     (body as Record<string, unknown>).merchantTxHash = TXHASH;
     expect((await POST(req(body))).status).toBe(200);
+  });
+
+  it('statusToken あり + enableOrderPickup ON → 注文状況の逆引きポインタ保存 (order:sv:<token>=所在・nx)', async () => {
+    const res = await POST(req(goodBody({ statusToken: STATUS_TOKEN })));
+    expect(res.status).toBe(200);
+    const svCall = setSpy.mock.calls.find((c) => String(c[0]).startsWith('order:sv:'));
+    expect(svCall).toBeDefined();
+    expect(svCall![0]).toBe(`order:sv:${STATUS_TOKEN}`);
+    expect(JSON.parse(svCall![1] as string)).toEqual({
+      merchant: MERCHANT,
+      chainId: 80002,
+      txHash: TXHASH,
+    });
+    expect(svCall![2]).toMatchObject({ nx: true });
+  });
+
+  it('enableOrderPickup OFF → statusToken があってもポインタを保存しない (完全 inert)', async () => {
+    hold.enableOrderPickup = false;
+    expect((await POST(req(goodBody({ statusToken: STATUS_TOKEN })))).status).toBe(200);
+    expect(setSpy.mock.calls.some((c) => String(c[0]).startsWith('order:sv:'))).toBe(false);
+  });
+
+  it('statusToken が不正形式 → ポインタを保存しない (受注は成立)', async () => {
+    expect((await POST(req(goodBody({ statusToken: 'too-short' })))).status).toBe(200);
+    expect(setSpy.mock.calls.some((c) => String(c[0]).startsWith('order:sv:'))).toBe(false);
+  });
+
+  it('statusToken 無し (通常注文) → ポインタ無し (既存挙動不変)', async () => {
+    await POST(req(goodBody()));
+    expect(setSpy.mock.calls.some((c) => String(c[0]).startsWith('order:sv:'))).toBe(false);
   });
 });

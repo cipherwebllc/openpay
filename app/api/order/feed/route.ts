@@ -136,6 +136,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!parsedOp) {
     return NextResponse.json({ ok: false, error: 'invalid_op' }, { status: 400 });
   }
+  // markReady (お渡し準備完了) は顧客通知 (pickup) 機能のオペレーション。enableOrderFulfillment の
+  // 構造化 op ゲートに加え、enableOrderPickup OFF のときは受理しない (= pickup 機能を切れば markReady も
+  // 完全 inert。ホールの「準備完了」ボタンも同フラグで非表示なので、UI/route が一致する)。
+  if (parsedOp.op.kind === 'markReady' && !env.enableOrderPickup) return notFound();
 
   const key = orderListKey(actor.merchant);
   const txLower = parsedOp.txHash.toLowerCase();
@@ -160,7 +164,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
     if (!oldRaw || !order) return NextResponse.json({ ok: true, updated: 0 }); // 対象なし
 
-    const newRaw = serializeOrder(applyOrderOp(order, parsedOp.op));
+    // markReady の readyAt は server 時刻で刻む (applyOrderOp に Date.now() を注入・他 op は無視)。
+    const newRaw = serializeOrder(applyOrderOp(order, parsedOp.op, Date.now()));
     if (newRaw === oldRaw) return NextResponse.json({ ok: true, updated: 0 }); // 変化なし (no-op)
 
     const cas = await kvEval<number>(REPLACE_ELEM, [key], [oldRaw, newRaw]);

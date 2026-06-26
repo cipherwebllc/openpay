@@ -13,6 +13,7 @@ const hold = vi.hoisted(() => ({
   enableOrderRelay: true,
   enableOrderFulfillment: true, // Phase 3 op ({op:...}) のゲート
   enableOrderToken: false, // Phase 5 受注閲覧トークン (token 経路)
+  enableOrderPickup: true, // お渡し準備完了 (markReady op) のゲート
   session: { ok: true, address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' } as
     | { ok: true; address: string }
     | { ok: false },
@@ -40,6 +41,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderToken() {
         return hold.enableOrderToken;
+      },
+      get enableOrderPickup() {
+        return hold.enableOrderPickup;
       },
     },
   };
@@ -114,6 +118,7 @@ beforeEach(() => {
   hold.enableOrderRelay = true;
   hold.enableOrderFulfillment = true;
   hold.enableOrderToken = false;
+  hold.enableOrderPickup = true;
   hold.session = { ok: true, address: SESSION };
   hold.kvConfigured = true;
   hold.kvStore = {};
@@ -299,6 +304,38 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     expect(res.status).toBe(200);
     const [, , args] = evalSpy.mock.calls[0] as [string, string[], string[]];
     expect(JSON.parse(args[1]).items[0].served).toBe(true);
+  });
+
+  it('op: markReady で お渡し準備完了 (ready=true + readyAt 刻印・fulfilled は不変)', async () => {
+    const raw = serializeOrder(order({ txHash: TXA, fulfilled: false }));
+    hold.lrange = { ok: true, value: [raw] };
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'markReady', value: true } }));
+    expect(res.status).toBe(200);
+    const [, , args] = evalSpy.mock.calls[0] as [string, string[], string[]];
+    const next = JSON.parse(args[1]);
+    expect(next.ready).toBe(true);
+    expect(typeof next.readyAt).toBe('number'); // server 時刻 (Date.now) で刻印
+    expect(next.readyAt).toBeGreaterThan(0);
+    expect(next.fulfilled).toBe(false); // 準備完了 ≠ 受け渡し済
+  });
+
+  it('op: markReady(false) で受取待ち解除 (ready=false・readyAt クリア)', async () => {
+    const raw = serializeOrder(order({ txHash: TXA, ready: true, readyAt: 1_700_000_000_000 }));
+    hold.lrange = { ok: true, value: [raw] };
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'markReady', value: false } }));
+    expect(res.status).toBe(200);
+    const [, , args] = evalSpy.mock.calls[0] as [string, string[], string[]];
+    const next = JSON.parse(args[1]);
+    expect(next.ready).toBe(false);
+    expect(next.readyAt).toBeUndefined();
+  });
+
+  it('enableOrderPickup OFF: markReady は 404 (enableOrderFulfillment ON でも・pickup の二重ゲート)', async () => {
+    hold.enableOrderPickup = false; // fulfillment は既定 true のまま
+    hold.lrange = { ok: true, value: [serializeOrder(order({ txHash: TXA }))] };
+    const res = await POST(postReq({ txHash: TXA, op: { kind: 'markReady', value: true } }));
+    expect(res.status).toBe(404);
+    expect(evalSpy).not.toHaveBeenCalled();
   });
 
   it('壊れた JSON body → 400 (invalid_json)', async () => {
