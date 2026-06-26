@@ -47,6 +47,12 @@ vi.mock('@/lib/kv', () => ({
   },
 }));
 
+// IP 固定窓レート制限 (route が pointer 参照前に呼ぶ)。既定は許可・上限超過テストでのみ false。
+const rateHold = vi.hoisted(() => ({ allowed: true }));
+vi.mock('@/lib/relay/relayGuards', () => ({
+  checkReadRateLimit: () => Promise.resolve(rateHold.allowed),
+}));
+
 import { GET } from '@/app/api/order/status/route';
 
 function order(over: Partial<StoredOrder>): StoredOrder {
@@ -77,6 +83,7 @@ beforeEach(() => {
   hold.list = { ok: true, value: [serializeOrder(order({}))] };
   getSpy.mockClear();
   lrangeSpy.mockClear();
+  rateHold.allowed = true;
 });
 
 describe('GET /api/order/status', () => {
@@ -93,6 +100,12 @@ describe('GET /api/order/status', () => {
   it('不正トークン形式 / t= 無し → 400 (KV を引かない)', async () => {
     expect((await GET(getReq('short'))).status).toBe(400);
     expect((await GET(getReq())).status).toBe(400);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  it('レート上限超過 → 429 (pointer を引かない)', async () => {
+    rateHold.allowed = false;
+    expect((await GET(getReq(TOKEN))).status).toBe(429);
     expect(getSpy).not.toHaveBeenCalled();
   });
 

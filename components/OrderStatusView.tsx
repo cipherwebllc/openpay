@@ -117,9 +117,10 @@ export function OrderStatusView({ token }: { token: string | null }) {
     return () => window.removeEventListener('pointerdown', prime);
   }, []);
 
-  // 受取待ち中は画面スリープを抑止 (対応ブラウザのみ) + フォアグラウンド復帰で即再取得。
-  // done では解放。Wake Lock 非対応/拒否は keep-open 文言で代替する (機能影響なし)。
-  const active = state !== undefined && state !== 'done';
+  // 受取待ち (received / preparing) の間だけ画面スリープを抑止 (対応ブラウザのみ) + フォアグラウンド
+  // 復帰で即再取得。ready 到達でチャイム済 = 通知目的を達したので解放 (done も解放・plan §6.7)。
+  // Wake Lock 非対応/拒否は keep-open 文言で代替する (機能影響なし)。
+  const active = state === 'received' || state === 'preparing';
   useEffect(() => {
     if (!active) return;
     let sentinel: WakeLockSentinel | null = null;

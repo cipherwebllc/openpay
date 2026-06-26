@@ -504,7 +504,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     if (params.webhook) {
       // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): status トークンを 1 度だけ生成し payload に同梱。
       // notify が order:sv:<token> ポインタを保存し、顧客の /order/status?t= がそれを逆引きする。
-      const statusTokenForOrder = env.enableOrderPickup ? generateStatusToken() : null;
+      // webhook が OpenPay の受注 notify (= モバイル注文・MobileOrderView が `/api/order/notify?h=` を
+      // 指す) のときだけ生成する。第三者 webhook の通常 checkout では生成せず、ポインタが保存されない
+      // = 壊れた status リンクを顧客に出さない (Codex #1)。
+      const isOrderNotifyWebhook = params.webhook.includes('/api/order/notify');
+      const statusTokenForOrder =
+        env.enableOrderPickup && isOrderNotifyWebhook ? generateStatusToken() : null;
       if (statusTokenForOrder) setStatusToken(statusTokenForOrder);
       const payload = {
         type: 'openpay.checkout.success',

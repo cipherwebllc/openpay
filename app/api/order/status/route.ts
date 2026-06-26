@@ -6,9 +6,9 @@
 // 返さない = トークンが万一漏れてもプライバシー被害を最小化する。書込・送金は一切しない (read only)。
 // flag OFF=404・KV 未設定/障害=503・不正トークン=400・未知/失効/受注消滅=404。設計: plans/order-pickup-notify.md。
 //
-// rate-limit は付けない: トークンは 256-bit の秘密 (列挙不可) で、無効トークンは pointer kvGet が null →
-// list 走査前に 404 で返す安価経路。正当トークンの顧客は 8s ポーリングで自分の 1 注文を読むだけ。
-// 書込系 (notify/feed) と違い不要な防御で正当なポーリングを阻害しない方針。
+// rate-limit: IP 単位の固定窓 (120/分・checkReadRateLimit) を pointer 参照の前に置く。秘密トークン
+// ゆえ列挙はできないが、公開・無認証の read ゆえ単一 IP の volumetric flood による KV read 圧力を
+// 上限で抑える。8s ポーリング (≒8/分・複数タブ/復帰再取得を含めても上限の遥か下) は阻害しない。
 
 import { NextResponse } from 'next/server';
 import { isAddress } from 'viem';
@@ -23,6 +23,8 @@ import {
   ORDER_LIST_MAX,
 } from '@/lib/orderRelay';
 import { isOrderTokenLike } from '@/lib/orderToken';
+import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { anonymizeIp } from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +44,14 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const token = new URL(req.url).searchParams.get('t') ?? '';
   if (!isOrderTokenLike(token)) return err('invalid_token', 400);
+
+  // IP 固定窓 (公開・無認証 read の volumetric flood 抑制)。正当な 8s ポーリングの遥か上の寛容な上限。
+  const ipPrefix = anonymizeIp(
+    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+  );
+  if (!(await checkReadRateLimit(`orderstatus:${ipPrefix}`, 120, 60))) {
+    return err('rate_limited', 429);
+  }
 
   // token → 受注の所在。未知/失効 (72h TTL 切れ) は pointer が null。
   const ptr = await kvGet(orderStatusPointerKey(token));

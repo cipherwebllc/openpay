@@ -67,6 +67,7 @@ vi.mock('@/lib/logger', () => ({
 
 import {
   checkRateLimit,
+  checkReadRateLimit,
   checkGasBudget,
   refundGasBudget,
   makeIdempotency,
@@ -97,6 +98,24 @@ describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
     expect(await checkRateLimit([FROM])).toBe(false);
     // KV キーが relay:rl: prefix (= 決済 relay と同一名前空間)。
     expect([...store.lists.keys()].some((k) => k === `relay:rl:${FROM}`)).toBe(true);
+  });
+});
+
+describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
+  it('窓内 max 回までは許可・超過で deny。初回のみ TTL=窓×2・キーは rl:read: 名前空間', async () => {
+    const KEY = 'orderstatus:1.2.3';
+    for (let i = 0; i < 5; i++) {
+      expect(await checkReadRateLimit(KEY, 5, 60)).toBe(true);
+    }
+    // 6 回目 (count=6 > max=5) で deny。
+    expect(await checkReadRateLimit(KEY, 5, 60)).toBe(false);
+    // 初回 (count=1) のみ TTL を窓 2 つ分 (=120s) で設定。
+    const ttlCalls = store.expireCalls.filter((c) => c.key.startsWith('rl:read:orderstatus:1.2.3'));
+    expect(ttlCalls).toHaveLength(1);
+    expect(ttlCalls[0].ttlSec).toBe(120);
+    // キーは rl:read: prefix (relay:rl: の sliding-window とは別系統)。
+    const k = [...store.counters.keys()].find((key) => key.includes('orderstatus:1.2.3'));
+    expect(k?.startsWith('rl:read:')).toBe(true);
   });
 });
 
