@@ -531,12 +531,12 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     page,
   }) => {
     await page.goto('/ja/create');
-    // default 状態 (gasless + 店舗負担) の closed summary は手数料% を含まず日本語文のみ。
-    // f7eecc0 (手数料モデル確定: 決済=店舗負担固定) で「手数料：店舗負担（お客様は表示額のみ）」へ。
+    // Phase 1: default 状態 (gasless + customer) の closed summary は手数料% を
+    // 含まず「ガスレス決済 / ガス代：お客様負担」のみ。
     const toggle = page.getByRole('button', { name: /高度な設定/ });
     await expect(toggle).toBeVisible();
     await expect(
-      toggle.getByText(/ガスレス決済 \/ 手数料：店舗負担（お客様は表示額のみ）/),
+      toggle.getByText(/ガスレス決済 \/ ガス代：お客様負担/),
     ).toBeVisible();
     // 旧 mono サマリ + Phase 1 で撤去した手数料% (1.0%/0.5%) は DOM 全体に存在しない
     const bodyText = await page.locator('body').innerText();
