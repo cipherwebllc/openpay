@@ -45,6 +45,12 @@ export type StoredOrder = {
   // これで active/done を分け done は折りたたみへ。保存時は true のときだけ持つ。
   // ※ ホールの「配膳済み」は別フラグを持たず **fulfilled (対応済み) そのもの** (配膳済み=対応済み)。
   kitchenDone?: boolean;
+  // お渡し準備完了 (ホール操作・flag ENABLE_ORDER_PICKUP)。fulfilled (受け渡し済=対応済み) の **手前** の
+  // 独立状態 = 「準備できた・受取待ち」。顧客の注文状況ページに「お渡しする準備ができました」を出すトリガ。
+  // 受け渡し (fulfill) で対応済みになる。保存時は true のときだけ持つ。
+  ready?: boolean;
+  // ready=true にした時刻 (ms・表示用 advisory)。「HH:mm 準備完了」表示に使う。
+  readyAt?: number;
 };
 
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
@@ -55,6 +61,38 @@ export function orderListKey(merchant: string): string {
 /** txHash 冪等鍵 (1 決済 1 注文)。merchant や items は鍵に含めない。 */
 export function orderUsedKey(chainId: number, txHash: string): string {
   return `order:used:${chainId}:${txHash.toLowerCase()}`;
+}
+
+/** 顧客向け「注文状況」の逆引きポインタ KV キー (status トークン → 受注の所在)。flag ENABLE_ORDER_PICKUP。
+ *  token は顧客端末が生成する不可推測の秘密 (43 文字 base64url) = 列挙不可。値は {merchant, chainId, txHash}。
+ *  これにより顧客は自分の token でのみ自分の 1 注文の状態を読める (受注リストは受取アドレスでスコープ)。 */
+export function orderStatusPointerKey(token: string): string {
+  return `order:sv:${token}`;
+}
+
+/** order:sv:<token> の値 (JSON) を検証付きで復元。不正/壊れは null (KV は untrusted 扱い)。
+ *  merchant の 0x 妥当性は呼出側 (route・viem) が見る (本 lib は viem 非依存を保つ)。 */
+export function parseOrderStatusPointer(
+  raw: string,
+): { merchant: string; chainId: number; txHash: string } | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o.merchant !== 'string' ||
+    o.merchant.length === 0 ||
+    typeof o.chainId !== 'number' ||
+    !Number.isInteger(o.chainId) ||
+    !isTxHashLike(o.txHash)
+  ) {
+    return null;
+  }
+  return { merchant: o.merchant, chainId: o.chainId, txHash: o.txHash };
 }
 
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
@@ -140,6 +178,14 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   }
   // 厨房の調理済み (true のときだけ保持・旧データは未設定=未完了)。
   if (o.kitchenDone === true) order.kitchenDone = true;
+  // お渡し準備完了 (true のときだけ保持・旧データは未設定)。readyAt は ready=true かつ正の有限数のみ
+  // (表示用 advisory・ready 無しの readyAt は無意味なので落とす)。
+  if (o.ready === true) {
+    order.ready = true;
+    if (typeof o.readyAt === 'number' && Number.isFinite(o.readyAt) && o.readyAt > 0) {
+      order.readyAt = o.readyAt;
+    }
+  }
   return order;
 }
 
@@ -150,6 +196,7 @@ export type OrderFeedOp =
   | { kind: 'itemCooked'; index: number; value: boolean } // 商品別「調理済み」(キッチン)
   | { kind: 'itemServed'; index: number; value: boolean } // 商品別「配膳済み」(ホール)
   | { kind: 'kitchenDone'; value: boolean } // 注文単位「調理済み」(厨房モニター・中間・折りたたみへ)
+  | { kind: 'markReady'; value: boolean } // お渡し準備完了 (ホール・顧客通知トリガ・flag ENABLE_ORDER_PICKUP)
   | { kind: 'setTable'; table: string | null }; // テーブル訂正
 // ※ ホールの「配膳済み」は専用 op を持たず fulfill (対応済み) を使う (配膳済み=対応済み)。
 
@@ -187,6 +234,10 @@ export function parseOrderFeedOp(body: unknown): { txHash: string; op: OrderFeed
       return typeof o.value === 'boolean'
         ? { txHash, op: { kind: 'kitchenDone', value: o.value } }
         : null;
+    case 'markReady':
+      return typeof o.value === 'boolean'
+        ? { txHash, op: { kind: 'markReady', value: o.value } }
+        : null;
     case 'setTable':
       // table は **明示的に string か null のみ** 受理 (未指定/数値等の誤入力で既存テーブルを
       // 黙ってクリアしない)。null は意図的なクリア (テイクアウト化)。
@@ -197,13 +248,24 @@ export function parseOrderFeedOp(body: unknown): { txHash: string; op: OrderFeed
   }
 }
 
-/** op を純粋適用した新しい StoredOrder を返す (元は不変・変化が無ければ同等値)。 */
-export function applyOrderOp(order: StoredOrder, op: OrderFeedOp): StoredOrder {
+/** op を純粋適用した新しい StoredOrder を返す (元は不変・変化が無ければ同等値)。nowMs は markReady の
+ *  readyAt を刻む server 時刻 (route が Date.now() を注入・純粋性のため引数で受ける)。 */
+export function applyOrderOp(
+  order: StoredOrder,
+  op: OrderFeedOp,
+  nowMs?: number,
+): StoredOrder {
   switch (op.kind) {
     case 'fulfill':
       return { ...order, fulfilled: op.value };
     case 'kitchenDone':
       return { ...order, kitchenDone: op.value };
+    case 'markReady':
+      // ready=true で readyAt を server 時刻 (nowMs) で刻む。false で両方クリア (受取待ち解除)。
+      // nowMs 未指定なら既存 readyAt を保つ (readyAt は表示用 advisory・route は常に Date.now() を渡す)。
+      return op.value
+        ? { ...order, ready: true, readyAt: nowMs !== undefined ? nowMs : order.readyAt }
+        : { ...order, ready: false, readyAt: undefined };
     case 'setTable':
       return { ...order, table: op.table };
     case 'itemCooked':
@@ -219,4 +281,19 @@ export function applyOrderOp(order: StoredOrder, op: OrderFeedOp): StoredOrder {
       return { ...order, items };
     }
   }
+}
+
+// ── 顧客向け「お渡し準備通知」の状態 (flag ENABLE_ORDER_PICKUP)。/api/order/status が返す coarse な
+//    state で、顧客の注文状況ページが「受付済み/調理中/お渡し準備完了/受け渡し済」を出し分ける。 ──
+export type OrderPickupState = 'received' | 'preparing' | 'ready' | 'done';
+
+/** 受注の顧客向け状態を導出。優先順: 受け渡し済 (fulfilled) > お渡し準備完了 (ready) > 調理中
+ *  (kitchenDone または一部 cooked) > 受付済み。fulfilled が ready より優先 = 受け渡し後は done 表示。 */
+export function orderPickupState(order: StoredOrder): OrderPickupState {
+  if (order.fulfilled) return 'done';
+  if (order.ready) return 'ready';
+  if (order.kitchenDone === true || order.items.some((it) => it.cooked === true)) {
+    return 'preparing';
+  }
+  return 'received';
 }

@@ -52,6 +52,24 @@ export async function checkRateLimit(keys: string[]): Promise<boolean> {
   return true;
 }
 
+// 固定窓 IP レート制限 (read endpoint 用・O(1) kvIncr)。sliding-window の checkRateLimit は list が
+// max*4 まで伸び、高頻度ポーリング (例: 注文状況 8s) を寛容な上限で守るには重い (毎回 max*4 件の
+// list 読み)。read poll 向けに INCR ベースの固定窓で近似する。allowed = 窓内カウント ≤ max。
+// fail-open: KV 未設定/障害は許可 (可用性優先・checkRateLimit と同方針)。
+export async function checkReadRateLimit(
+  key: string,
+  max: number,
+  windowSec: number,
+): Promise<boolean> {
+  if (!isKvConfigured()) return true;
+  const bucket = Math.floor(Date.now() / (windowSec * 1000));
+  const k = `rl:read:${key}:${bucket}`;
+  const r = await kvIncr(k);
+  if (!r.ok) return true; // KV 障害は通す (fail-open)
+  if (r.value === 1) await kvExpire(k, windowSec * 2); // 初回のみ TTL (窓 2 つ分で確実に失効)
+  return r.value <= max;
+}
+
 // 日次予算カウンタのキー導出 (INCR で消費・DECR で refund する側でキーを完全一致させるため
 // 関数に括り出して共有する)。YYYYMMDD は UTC。**両 route 共有キー**。
 export const gasBudgetKey = (chainId: number) =>

@@ -25,6 +25,7 @@ import { normalizeHandle } from '@/lib/handle';
 import {
   orderListKey,
   orderUsedKey,
+  orderStatusPointerKey,
   serializeOrder,
   sanitizeOrderItems,
   sanitizeTable,
@@ -36,6 +37,7 @@ import {
   ORDER_ID_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
+import { isOrderTokenLike } from '@/lib/orderToken';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -161,6 +163,20 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
     await kvLtrim(key, 0, ORDER_LIST_MAX - 1); // 上限 200 (古いものから押し出し)
     await kvExpire(key, ORDER_LIST_TTL_SEC); // LTRIM は TTL を更新しないので毎回張り直す
+
+    // 顧客向け「注文状況」の逆引きポインタ (flag ENABLE_ORDER_PICKUP)。顧客端末が生成した不可推測の
+    // status トークン (43 文字 base64url) → 受注の所在 {merchant, chainId, txHash} を保存し、顧客が
+    // /api/order/status?t=<token> で **自分の 1 注文の状態だけ** を読めるようにする (token は秘密=列挙不可)。
+    // 受注本体は上で保存済 = ここは付帯処理。失敗しても受注/決済は成立するため握り (fail-quiet)、
+    // nx で重複保存を避ける (1 token 1 注文)。flag OFF / token 無し / 不正形式では何もしない (inert)。
+    const statusToken = o.statusToken;
+    if (env.enableOrderPickup && isOrderTokenLike(statusToken)) {
+      await kvSet(
+        orderStatusPointerKey(statusToken),
+        JSON.stringify({ merchant, chainId, txHash }),
+        { ttlSec: ORDER_LIST_TTL_SEC, nx: true },
+      );
+    }
   }
 
   logger.info('order.notify.stored', { chainId, merchant, amount: order.amount });

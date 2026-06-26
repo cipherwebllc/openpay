@@ -5,7 +5,11 @@ import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { StoredOrder } from '@/lib/orderRelay';
 
-const envHold = vi.hoisted(() => ({ enablePreorderTime: false, enableOrderToken: false }));
+const envHold = vi.hoisted(() => ({
+  enablePreorderTime: false,
+  enableOrderToken: false,
+  enableOrderPickup: false,
+}));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -17,6 +21,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderToken() {
         return envHold.enableOrderToken;
+      },
+      get enableOrderPickup() {
+        return envHold.enableOrderPickup;
       },
     },
   };
@@ -106,6 +113,7 @@ beforeEach(() => {
   mutateSpy.mockClear();
   envHold.enablePreorderTime = false; // Phase 4 flag 既定 OFF
   envHold.enableOrderToken = false; // Phase 5 flag 既定 OFF
+  envHold.enableOrderPickup = false; // お渡し準備完了通知 flag 既定 OFF
   tokenHold.stored = null;
   soundHold.enabled = false; // 新着アラート音 既定 OFF
   soundHold.set.mockClear();
@@ -137,6 +145,42 @@ describe('OrderFulfillmentBoard', () => {
       txHash: TX,
       op: { kind: 'itemServed', index: 0, value: true },
     });
+  });
+
+  it('ホール + 準備完了通知 ON + ready 前 → 「お渡し準備完了（通知）」で markReady op を発火', () => {
+    envHold.enableOrderPickup = true;
+    feedHold.data = [order({ table: null })]; // テイクアウト
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    fireEvent.click(screen.getByRole('button', { name: /お渡し準備完了/ }));
+    expect(mutateSpy).toHaveBeenCalledWith({
+      txHash: TX,
+      op: { kind: 'markReady', value: true },
+    });
+  });
+
+  it('ホール + 準備完了通知 ON + ready 済 → 「通知済み・受取待ち」バッジ + 受け渡しボタン (準備完了ボタンは消える)', () => {
+    envHold.enableOrderPickup = true;
+    feedHold.data = [order({ ready: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText('通知済み・受取待ち')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /お渡し準備完了/ })).toBeNull();
+    // 通知後は受け渡し (fulfill) へ進む 2 段目。
+    fireEvent.click(screen.getByRole('button', { name: '配膳済み' }));
+    expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'fulfill', value: true } });
+  });
+
+  it('ホール + 準備完了通知 OFF → 準備完了ボタン/バッジ無し (従来どおり配膳済みのみ・inert)', () => {
+    feedHold.data = [order({ ready: true })]; // 保存に ready があっても OFF では無視
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.queryByRole('button', { name: /お渡し準備完了/ })).toBeNull();
+    expect(screen.queryByText('通知済み・受取待ち')).toBeNull();
+    expect(screen.getByRole('button', { name: '配膳済み' })).toBeInTheDocument();
+  });
+
+  it('厨房 + 準備完了通知 ON → 準備完了ボタンは出さない (ホール専用)', () => {
+    envHold.enableOrderPickup = true;
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.queryByRole('button', { name: /お渡し準備完了/ })).toBeNull();
   });
 
   it('対応済み(fulfill)ボタンは出さない (受注で確定・厨房→ホール連動消失を回避)', () => {

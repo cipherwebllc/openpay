@@ -5,6 +5,7 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
 import type { Address } from 'viem';
+import { isOrderTokenLike } from '@/lib/orderToken';
 
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(),
@@ -86,6 +87,7 @@ vi.mock('@/components/ConnectButton', async () => ({
 const feeFlags = vi.hoisted(() => ({
   enableMobileOrderFee: false,
   enableRegisterFee: false,
+  enableOrderPickup: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -102,6 +104,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableRegisterFee() {
         return feeFlags.enableRegisterFee;
+      },
+      get enableOrderPickup() {
+        return feeFlags.enableOrderPickup;
       },
     },
   };
@@ -429,6 +434,7 @@ beforeEach(() => {
   // fee flag / rate は毎テスト OFF・実物起点 (fee テストが個別に立てる)。
   feeFlags.enableMobileOrderFee = false;
   feeFlags.enableRegisterFee = false;
+  feeFlags.enableOrderPickup = false;
   feeRate.percentBps = null;
 });
 
@@ -789,6 +795,58 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(payload.txHash).toBe(`0x${'b'.repeat(64)}`);
     // URL 仕様で customerEmail は prefill 専用・クライアントから送信しない → payload に不在。
     expect('customerEmail' in payload).toBe(false);
+    // お渡し準備完了 flag OFF (既定) → statusToken は payload に不在 (完全 inert)。
+    expect('statusToken' in payload).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('お渡し準備完了通知 ON → payload に statusToken 同梱 + 完了画面に「注文状況を見る」リンク', async () => {
+    feeFlags.enableOrderPickup = true;
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    // webhook が OpenPay 受注 notify (= モバイル注文) のときだけ statusToken を生成する (Codex #1)。
+    const makeUi = () => (
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, webhook: 'https://open-pay.jp/api/order/notify?h=alice' }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    // payload に 43字 base64url の statusToken が同梱される (notify がポインタ保存に使う)。
+    expect(isOrderTokenLike(payload.statusToken)).toBe(true);
+    // 完了画面に「注文状況を見る」リンク。href = /{locale}/order/status?t=<同じ token>。
+    const link = screen.getByRole('link', { name: '注文状況を見る' });
+    expect(link).toHaveAttribute('href', `/ja/order/status?t=${payload.statusToken}`);
+    vi.unstubAllGlobals();
+  });
+
+  it('お渡し準備完了 ON + 非 notify webhook (第三者) → statusToken 無し・リンク無し (Codex #1)', async () => {
+    feeFlags.enableOrderPickup = true;
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    // 第三者 webhook (= 通常 checkout)。OpenPay 受注 notify ではないので statusToken は生成しない。
+    const makeUi = () => (
+      <CheckoutForm params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook' }} />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect('statusToken' in payload).toBe(false);
+    expect(screen.queryByRole('link', { name: '注文状況を見る' })).toBeNull();
     vi.unstubAllGlobals();
   });
 
