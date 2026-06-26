@@ -24,7 +24,7 @@ export function AppHeader() {
   const locale = useLocale() as Locale;
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur print:hidden">
+    <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/80 backdrop-blur-md supports-[backdrop-filter]:bg-white/70 print:hidden">
       {/* モバイル (iPhone 等の狭幅) では右側クラスタ (接続バッジ + 🔔 + 言語切替) が
           増えて溢れたため、padding/gap/ロゴ高を base で詰め sm+ で従来値へ戻す。
           ロゴは min-w-0 + flex-shrink で最終手段の圧縮を許し、言語切替が画面外へ

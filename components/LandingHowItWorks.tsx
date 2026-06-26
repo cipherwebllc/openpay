@@ -73,7 +73,7 @@ export async function LandingHowItWorks() {
           <figure key={d.src} className="flex flex-col items-center">
             {/* 動画は 330x560 で白パディング済み・3 本とも同寸。枠は白カードで
                 グレー余白を出さない (overflow-hidden で角丸クリップ)。 */}
-            <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-card">
               <video
                 className="block h-auto w-[200px]"
                 autoPlay
@@ -95,7 +95,7 @@ export async function LandingHowItWorks() {
       </div>
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
-        <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+        <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-card">
           <h3 className="text-base font-semibold text-emerald-900">
             {t('howItWorksMerchantTitle')}
           </h3>
@@ -111,7 +111,7 @@ export async function LandingHowItWorks() {
           </ol>
         </article>
 
-        <article className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
+        <article className="rounded-2xl border border-blue-200 bg-white p-5 shadow-card">
           <h3 className="text-base font-semibold text-blue-900">
             {t('howItWorksCustomerTitle')}
           </h3>

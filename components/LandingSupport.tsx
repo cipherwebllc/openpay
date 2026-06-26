@@ -67,7 +67,7 @@ export async function LandingSupport() {
         {FEE_CARDS.map(({ id, Icon }) => (
           <li
             key={id}
-            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
           >
             <Icon className="h-5 w-5 text-brand" aria-hidden />
             <p className="mt-4 whitespace-nowrap break-keep text-3xl font-extrabold leading-none text-brand sm:text-4xl">
