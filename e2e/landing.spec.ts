@@ -11,14 +11,14 @@ test.describe('landing / (LP)', () => {
     // AppHeader: logo は alt='OpenPay' の h1
     await expect(page.getByRole('heading', { name: 'OpenPay' }).first()).toBeVisible();
 
-    // Hero leadline (h2) — 「JPYC / USDC QR決済」体言止め
+    // Hero leadline (h2) — 「JPYC QR決済」体言止め
     await expect(
-      page.getByRole('heading', { name: /JPYC \/ USDC QR決済/ }),
+      page.getByRole('heading', { name: /JPYC QR決済/ }),
     ).toBeVisible();
 
     // 2 大 CTA
-    const scanCta = page.getByRole('link', { name: /📱 支払う/ });
-    const createCta = page.getByRole('link', { name: /🏪 受け取る/ });
+    const scanCta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
+    const createCta = page.getByRole('link', { name: /受け取る \(決済 QR を作る\)/ });
     await expect(scanCta).toBeVisible();
     await expect(createCta).toBeVisible();
     await expect(scanCta).toHaveAttribute('href', '/ja/scan');
@@ -213,9 +213,7 @@ test.describe('landing / (LP)', () => {
     // 利用料ポリシーの説明 (recover ピボット後: JPYC ガスレスは利用料あり / 通常決済・顧客 gas 負担の
     // USDC は対象外=無料) + Tip 依頼文。
     await expect(
-      support.getByText(
-        /通常決済（ガスあり）および顧客が自らガスを負担する USDC 経路は対象外/,
-      ),
+      support.getByText(/当社は売上を預かりません/),
     ).toBeVisible();
     await expect(support.getByText(/Tip を頂けると幸いです/)).toBeVisible();
     // 応援 link button 5 つ (新規タブで本番 /tip を開く): JPYC Polygon/Kaia, USDC cross-chain,

@@ -146,7 +146,7 @@ test.describe('/scan: home (LP) からの導線', () => {
     await page.goto('/ja');
     // 旧 demand-gating banner ("レジ前で素早く決済") は Phase 1 で LP の
     // 2 大 CTA に置換された。新 CTA を辿る。
-    const cta = page.getByRole('link', { name: /📱 支払う/ });
+    const cta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
     await expect(cta).toBeVisible();
     await cta.click();
     await expect(page).toHaveURL(/\/ja\/scan/);
