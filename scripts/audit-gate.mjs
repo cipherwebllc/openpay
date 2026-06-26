@@ -56,6 +56,35 @@ const ALLOWED_ADVISORIES = {
       'GHSA-w5hq-g745-h8pq に v4 API も含む拡張 advisory 出現',
     ],
   },
+  'GHSA-96hv-2xvq-fx4p': {
+    pkg: 'ws',
+    summary:
+      'ws: Memory exhaustion DoS from tiny fragments and data chunks (fix 未リリース・ws@8.21.0 最新も影響範囲)',
+    chain: '@reown/appkit / @walletconnect/* / viem → ws (websocket client)',
+    reason:
+      'ws は OpenPay では WalletConnect リレー / RPC subscription の websocket **client** として動作し、ws **server** は本 codebase で一切起動しない。本 advisory の DoS は ws を server として動かし攻撃者が極小 fragment / data chunk を送りつけメモリを枯渇させる経路で、client 用途では到達しない。加えて 2026-06 時点で upstream に修正版が無く (最新 8.21.0 も影響範囲)、override での upgrade では解消できないため accepted risk とする。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.5',
+    reviewTriggers: [
+      'ws が本 advisory の patched 版をリリース (8.21.0 超で fix 済) → override で bump',
+      'OpenPay が ws を server mode で利用する機能を追加 (webhook server 等)',
+      'GHSA-96hv-2xvq-fx4p に client-side exploit PoC 公開',
+    ],
+  },
+  'GHSA-8988-4f7v-96qf': {
+    pkg: '@opentelemetry/core',
+    summary:
+      'OpenTelemetry Core: Unbounded memory allocation in W3C Baggage propagation (@opentelemetry/core<2.8.0)',
+    chain:
+      '@sentry/nextjs → @sentry/node → @opentelemetry/instrumentation-http → @opentelemetry/core',
+    reason:
+      '@opentelemetry/core は @sentry/nextjs (サーバ側エラー/トレース計測) の transitive dep。脆弱性は信頼できない W3C Baggage ヘッダを大量処理した際の非有界メモリ確保。OpenPay は外部からの Baggage 伝播を計測対象にしておらず (Sentry 既定計装のみ)、攻撃者制御の Baggage が core に流れる経路は実運用上ない。clean な単独修正には @sentry/opentelemetry チェーンの広範な再解決 (≈90 package churn) が必要で、MODERATE・低到達性に対しリスク不相応のため accepted risk とする。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.6',
+    reviewTriggers: [
+      '@sentry/nextjs が patched @opentelemetry/core (>=2.8.0) を含む版へ更新 → 通常の npm update で解消',
+      'OpenPay が外部 W3C Baggage ヘッダを計測/伝播する機能を追加',
+      'GHSA-8988-4f7v-96qf に高到達性の exploit PoC 公開',
+    ],
+  },
 };
 
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。
