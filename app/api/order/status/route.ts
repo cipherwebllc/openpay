@@ -25,6 +25,7 @@ import {
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,7 +41,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!env.enableOrderPickup) {
     return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
   }
-  if (!isKvConfigured()) return err('kv_unavailable', 503);
+  if (!isKvConfigured()) {
+    logger.warn('order.status.kv_unavailable'); // KV env 欠落デプロイを無音にしない
+    return err('kv_unavailable', 503);
+  }
 
   const token = new URL(req.url).searchParams.get('t') ?? '';
   if (!isOrderTokenLike(token)) return err('invalid_token', 400);
@@ -55,7 +59,10 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   // token → 受注の所在。未知/失効 (72h TTL 切れ) は pointer が null。
   const ptr = await kvGet(orderStatusPointerKey(token));
-  if (!ptr.ok) return err('kv_error', 503);
+  if (!ptr.ok) {
+    logger.warn('order.status.kv_error', { reason: ptr.reason, op: 'pointer' });
+    return err('kv_error', 503);
+  }
   if (ptr.value === null) return err('not_found', 404);
 
   const loc = parseOrderStatusPointer(ptr.value);
@@ -65,7 +72,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   // 受取アドレスの受注リストから当該 txHash を探す。token はその注文固有の秘密ゆえ、顧客は
   // 自分の 1 注文の状態だけに到達する (他注文/他店舗は読めない)。
   const list = await kvLrange(orderListKey(loc.merchant), 0, ORDER_LIST_MAX - 1);
-  if (!list.ok) return err('kv_error', 503);
+  if (!list.ok) {
+    logger.warn('order.status.kv_error', { reason: list.reason, op: 'list' });
+    return err('kv_error', 503);
+  }
 
   for (const raw of list.value ?? []) {
     const order = parseStoredOrder(raw);

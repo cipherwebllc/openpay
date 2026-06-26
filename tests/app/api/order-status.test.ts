@@ -53,6 +53,11 @@ vi.mock('@/lib/relay/relayGuards', () => ({
   checkReadRateLimit: () => Promise.resolve(rateHold.allowed),
 }));
 
+const warnSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logger', () => ({
+  logger: { info: vi.fn(), warn: warnSpy, error: vi.fn(), debug: vi.fn() },
+}));
+
 import { GET } from '@/app/api/order/status/route';
 
 function order(over: Partial<StoredOrder>): StoredOrder {
@@ -84,6 +89,7 @@ beforeEach(() => {
   getSpy.mockClear();
   lrangeSpy.mockClear();
   rateHold.allowed = true;
+  warnSpy.mockClear();
 });
 
 describe('GET /api/order/status', () => {
@@ -92,9 +98,10 @@ describe('GET /api/order/status', () => {
     expect((await GET(getReq(TOKEN))).status).toBe(404);
   });
 
-  it('KV 未設定 → 503', async () => {
+  it('KV 未設定 → 503 + warn (deploy 観測性)', async () => {
     hold.kvConfigured = false;
     expect((await GET(getReq(TOKEN))).status).toBe(503);
+    expect(warnSpy).toHaveBeenCalledWith('order.status.kv_unavailable');
   });
 
   it('不正トークン形式 / t= 無し → 400 (KV を引かない)', async () => {
@@ -115,9 +122,13 @@ describe('GET /api/order/status', () => {
     expect(lrangeSpy).not.toHaveBeenCalled();
   });
 
-  it('pointer kvGet 障害 → 503', async () => {
+  it('pointer kvGet 障害 → 503 + warn (op:pointer・KV 障害を Sentry へ)', async () => {
     hold.pointer = { ok: false, reason: 'network_error' };
     expect((await GET(getReq(TOKEN))).status).toBe(503);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'order.status.kv_error',
+      expect.objectContaining({ reason: 'network_error', op: 'pointer' }),
+    );
   });
 
   it('壊れた pointer (非JSON) → 404', async () => {
@@ -125,9 +136,13 @@ describe('GET /api/order/status', () => {
     expect((await GET(getReq(TOKEN))).status).toBe(404);
   });
 
-  it('list kvLrange 障害 → 503', async () => {
+  it('list kvLrange 障害 → 503 + warn (op:list)', async () => {
     hold.list = { ok: false, reason: 'network_error' };
     expect((await GET(getReq(TOKEN))).status).toBe(503);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'order.status.kv_error',
+      expect.objectContaining({ reason: 'network_error', op: 'list' }),
+    );
   });
 
   it('pointer あるが受注がリストに無い (押し出し/失効) → 404', async () => {
