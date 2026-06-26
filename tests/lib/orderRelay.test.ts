@@ -411,3 +411,35 @@ describe('orderRelay: parseOrderStatusPointer (order:sv 値・KV untrusted)', ()
     expect(parseOrderStatusPointer(JSON.stringify({ merchant: '0xabc', chainId: 137, txHash: '0xnope' }))).toBeNull();
   });
 });
+
+describe('orderRelay: parseStoredOrder ready/readyAt 境界 (KV untrusted・正の有限数のみ復元)', () => {
+  it('readyAt が 0/負/NaN/Infinity/文字列/null → 復元しない (ready は true でも readyAt は undefined)', () => {
+    for (const bad of [0, -5, NaN, Infinity, '123', null]) {
+      const o = parseStoredOrder(JSON.stringify({ ...order(), ready: true, readyAt: bad }));
+      expect(o?.ready).toBe(true);
+      expect(o?.readyAt).toBeUndefined();
+    }
+  });
+  it('ready が === true 以外 (false/文字列/欠落) → ready を復元しない', () => {
+    expect(parseStoredOrder(JSON.stringify({ ...order(), ready: false, readyAt: 999 }))?.ready).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), ready: 'true' }))?.ready).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify(order()))?.ready).toBeUndefined();
+  });
+  it('ready が false なら readyAt も復元しない (孤児 readyAt を作らない)', () => {
+    const o = parseStoredOrder(JSON.stringify({ ...order(), ready: false, readyAt: 1_700_000_000_000 }));
+    expect(o?.ready).toBeUndefined();
+    expect(o?.readyAt).toBeUndefined();
+  });
+});
+
+describe('orderPickupState: items 空 / 境界', () => {
+  it('items 空 + フラグ無 → received', () => {
+    expect(orderPickupState(order({ items: [] }))).toBe('received');
+  });
+  it('items 空 + kitchenDone → preparing (cooked 走査に依存せず判定)', () => {
+    expect(orderPickupState(order({ items: [], kitchenDone: true }))).toBe('preparing');
+  });
+  it('ready + fulfilled 同時 → done (fulfilled が最優先)', () => {
+    expect(orderPickupState(order({ ready: true, fulfilled: true, kitchenDone: true }))).toBe('done');
+  });
+});

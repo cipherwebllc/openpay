@@ -15,8 +15,10 @@ const { kvMod, store } = vi.hoisted(() => {
     opts: { nx?: boolean; ttlSec?: number };
   }> = [];
   const expireCalls: Array<{ key: string; ttlSec: number }> = [];
+  // fail-open テスト用トグル (既定は健全・beforeEach でリセット)。既存テストは触らない。
+  const flags = { kvConfigured: true, incrOk: true };
   const kvMod = {
-    isKvConfigured: () => true,
+    isKvConfigured: () => flags.kvConfigured,
     kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
     kvSet: async (
       k: string,
@@ -30,6 +32,7 @@ const { kvMod, store } = vi.hoisted(() => {
     },
     kvDel: async (k: string) => ({ ok: true as const, value: vals.delete(k) ? 1 : 0 }),
     kvIncr: async (k: string) => {
+      if (!flags.incrOk) return { ok: false as const, reason: 'network_error' as const };
       const n = (counters.get(k) ?? 0) + 1;
       counters.set(k, n);
       return { ok: true as const, value: n };
@@ -58,7 +61,7 @@ const { kvMod, store } = vi.hoisted(() => {
       return { ok: true as const, value: 1 };
     },
   };
-  return { kvMod, store: { vals, lists, counters, setCalls, expireCalls } };
+  return { kvMod, store: { vals, lists, counters, setCalls, expireCalls, flags } };
 });
 vi.mock('@/lib/kv', () => kvMod);
 vi.mock('@/lib/logger', () => ({
@@ -86,6 +89,8 @@ beforeEach(() => {
   store.counters.clear();
   store.setCalls.length = 0;
   store.expireCalls.length = 0;
+  store.flags.kvConfigured = true;
+  store.flags.incrOk = true;
 });
 
 describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
@@ -116,6 +121,17 @@ describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
     // キーは rl:read: prefix (relay:rl: の sliding-window とは別系統)。
     const k = [...store.counters.keys()].find((key) => key.includes('orderstatus:1.2.3'));
     expect(k?.startsWith('rl:read:')).toBe(true);
+  });
+
+  it('KV 未設定 → fail-open (許可・KV を一切引かない)', async () => {
+    store.flags.kvConfigured = false;
+    expect(await checkReadRateLimit('orderstatus:9.9.9', 1, 60)).toBe(true);
+    expect([...store.counters.keys()].some((key) => key.includes('9.9.9'))).toBe(false);
+  });
+
+  it('kvIncr 障害 → fail-open (許可・1 件の KV blip で read を止めない)', async () => {
+    store.flags.incrOk = false;
+    expect(await checkReadRateLimit('orderstatus:8.8.8', 1, 60)).toBe(true);
   });
 });
 
