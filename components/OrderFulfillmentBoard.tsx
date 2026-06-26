@@ -219,6 +219,10 @@ export function OrderFulfillmentBoard({
       txHash: o.txHash,
       op: mode === 'kitchen' ? { kind: 'kitchenDone', value } : { kind: 'fulfill', value },
     });
+  // お渡し準備完了通知 (ホール・flag ENABLE_ORDER_PICKUP)。顧客の /order/status が次のポーリングで
+  // 'ready' を検知しチャイム + 「お渡しする準備ができました」を表示する。
+  const markReady = (o: StoredOrder, value: boolean) =>
+    update.mutate({ txHash: o.txHash, op: { kind: 'markReady', value } });
   const doneBtnLabel = mode === 'kitchen' ? t('cookedDoneBtn') : t('servedDoneBtn');
   const undoBtnLabel = mode === 'kitchen' ? t('cookedUndo') : t('servedUndo');
   const doneSectionLabel = mode === 'kitchen' ? t('cookedSection') : t('servedSection');
@@ -227,6 +231,10 @@ export function OrderFulfillmentBoard({
   const renderCard = (o: StoredOrder, inDone: boolean) => {
     const isNew = !inDone && flashing.has(o.txHash); // 新着 (点滅) — 折りたたみ側は対象外
     const ageMin = elapsedMin(o); // 受信からの経過分 (null=不明)
+    // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP・ホールのみ)。ready 前は「準備完了(通知)」ボタン、
+    // ready 後 (active) は「通知済み・受取待ち」バッジ + 既存「受け渡し済」へ進む 2 段階。
+    const hallReady = mode === 'hall' && env.enableOrderPickup && o.ready === true;
+    const showMarkReady = mode === 'hall' && env.enableOrderPickup && !inDone && !o.ready;
     return (
     <li
       key={o.txHash}
@@ -306,8 +314,14 @@ export function OrderFulfillmentBoard({
               <Clock className="h-3 w-3" aria-hidden /> {t('elapsed', { m: ageMin })}
             </span>
           ) : null}
-          {/* ホール: 全品 調理済み = 厨房完了 → 「配膳準備OK」(配膳待ちが一目で分かる)。 */}
-          {mode === 'hall' && !inDone && allCooked(o) ? (
+          {/* お渡し準備完了通知済み = 顧客に通知し受取待ち (受け渡し前の独立状態)。readyToServe より優先。 */}
+          {hallReady && !inDone ? (
+            <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-xs font-bold text-white">
+              {t('notifiedAwaitingPickup')}
+            </span>
+          ) : null}
+          {/* ホール: 全品 調理済み = 厨房完了 → 「配膳準備OK」(配膳待ちが一目で分かる)。通知済みなら出さない。 */}
+          {mode === 'hall' && !inDone && allCooked(o) && !hallReady ? (
             <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-bold text-emerald-700">
               {t('readyToServe')}
             </span>
@@ -362,27 +376,39 @@ export function OrderFulfillmentBoard({
         <span className="text-xs text-slate-400">
           {formatUnits(BigInt(o.amount), JPYC_DECIMALS)} JPYC
         </span>
-        {/* 注文単位の完了/戻す。done 側は淡いセカンダリ、active 側は brand。 */}
-        <button
-          type="button"
-          onClick={() => setStationDone(o, !inDone)}
-          disabled={update.isPending}
-          className={
-            inDone
-              ? 'flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand disabled:opacity-50'
-              : 'flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-50'
-          }
-        >
-          {inDone ? (
-            <>
-              <RotateCcw className="h-4 w-4" aria-hidden /> {undoBtnLabel}
-            </>
-          ) : (
-            <>
-              <CheckCircle2 className="h-4 w-4" aria-hidden /> {doneBtnLabel}
-            </>
-          )}
-        </button>
+        {/* お渡し準備完了通知 (ホール・flag ON・ready 前): 顧客に「準備完了」を通知する 1 段目。 */}
+        {showMarkReady ? (
+          <button
+            type="button"
+            onClick={() => markReady(o, true)}
+            disabled={update.isPending}
+            className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <Bell className="h-4 w-4" aria-hidden /> {t('markReadyBtn')}
+          </button>
+        ) : (
+          /* 注文単位の完了/戻す。done 側は淡いセカンダリ、active 側は brand。通知済み active は「受け渡し済」。 */
+          <button
+            type="button"
+            onClick={() => setStationDone(o, !inDone)}
+            disabled={update.isPending}
+            className={
+              inDone
+                ? 'flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand disabled:opacity-50'
+                : 'flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-50'
+            }
+          >
+            {inDone ? (
+              <>
+                <RotateCcw className="h-4 w-4" aria-hidden /> {undoBtnLabel}
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-4 w-4" aria-hidden /> {doneBtnLabel}
+              </>
+            )}
+          </button>
+        )}
       </div>
     </li>
     );

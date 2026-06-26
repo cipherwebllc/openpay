@@ -1850,6 +1850,8 @@
     "cookedSection": "Cooked",
     "servedSection": "Served",
     "readyToServe": "Ready to serve",
+    "markReadyBtn": "Mark ready (notify)",
+    "notifiedAwaitingPickup": "Notified · awaiting pickup",
     "newBadge": "New",
     "elapsed": "{m} min",
     "pendingCountKitchen": "{n} to cook",

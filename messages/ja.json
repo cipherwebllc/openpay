@@ -1850,6 +1850,8 @@
     "cookedSection": "調理済み",
     "servedSection": "配膳済み",
     "readyToServe": "配膳準備OK",
+    "markReadyBtn": "お渡し準備完了（通知）",
+    "notifiedAwaitingPickup": "通知済み・受取待ち",
     "newBadge": "新着",
     "elapsed": "{m}分経過",
     "pendingCountKitchen": "調理待ち {n}",
