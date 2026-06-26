@@ -784,7 +784,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   return (
     <div className="space-y-6">
-      <header className="rounded-2xl bg-gradient-to-br from-brand to-brand-dark p-6 text-white">
+      <header className="rounded-3xl bg-gradient-to-br from-brand to-brand-dark p-6 text-white shadow-lift">
         <p className="text-sm uppercase tracking-wider opacity-80">
           {t('title')}
         </p>
@@ -792,7 +792,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <div className="mt-4">
           <p className="text-xs opacity-80">{t('amountHeader')}</p>
           {isFixed ? (
-            <p className="mt-1 text-3xl font-bold">
+            <p className="mt-1 text-4xl font-bold tracking-tight">
               {fixedAmount} {deployment.displaySymbol}
             </p>
           ) : (
@@ -881,7 +881,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         />
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-card">
         <h2 className="text-sm font-semibold text-slate-700">
           {t('breakdownTitle')}
         </h2>

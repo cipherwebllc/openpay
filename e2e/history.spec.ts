@@ -17,11 +17,15 @@ test.describe('/history (browser-level smoke)', () => {
     await expect(
       page.getByRole('heading', { name: '取引履歴について', level: 2 }),
     ).toBeVisible();
-    // empty state (HistoryEmptyState): 説明文 + ヒント + 「OpenPay →」CTA。
+    // empty state (HistoryEmptyState): 説明文 + ヒント + ホームへの CTA。
+    // CTA ラベルはアイコン付き ("OpenPay" + 矢印アイコン) なので、empty state 内の
+    // link を scope して assert する (logo の "OpenPay" h1 link と区別)。
     await expect(page.getByText(/履歴はまだありません/)).toBeVisible();
-    await expect(
-      page.getByRole('link', { name: 'OpenPay →' }),
-    ).toBeVisible();
+    const emptyState = page
+      .locator('div')
+      .filter({ hasText: '履歴はまだありません' })
+      .last();
+    await expect(emptyState.getByRole('link')).toBeVisible();
     // 履歴ゼロのときは toolbar 自体を描画しないので CSV / 全削除ボタンは存在しない
     // (旧 UX は disabled ボタンを出していたが、空状態は専用 EmptyState に置換済み)。
     await expect(

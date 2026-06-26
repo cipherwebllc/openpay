@@ -11,6 +11,17 @@ body {
   height: 100%;
 }
 
+/* モバイルのタップ時ハイライト矩形を消す (ネイティブアプリらしい押下感の前提)。 */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
   @apply bg-slate-50 text-slate-900;
   font-family:
@@ -24,6 +35,11 @@ body {
     'Hiragino Sans',
     'Yu Gothic UI',
     sans-serif;
+  /* 日本語の字面を引き締める (詰め組 palt) + 高精細レンダリング。世界水準の和文タイポの土台。 */
+  font-feature-settings: 'palt' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 /* 電子レシート (PayerReceiptDetail) の「印刷」: 印刷時は対象レシート 1 枚だけを
