@@ -18,15 +18,14 @@ test.describe('/tip/[address] (creator tip widget)', () => {
       .locator('div.justify-between')
       .filter({ has: page.getByText('クリエイター受取', { exact: true }) });
     await expect(creatorRow).toContainText('300 JPYC');
-    await expect(page.getByText('あなたの支払額')).toBeVisible();
+    await expect(page.getByText('あなたの支払額', { exact: true })).toBeVisible();
     // fee 行 (feeRow) は feeAmount=0 で hide されている (Phase 1 regression fence)
     await expect(page.getByText('OpenPay 利用手数料')).toHaveCount(0);
-    // JPYC ガスレス (testnet・forwarder 未設定 = free モード) は OpenPay がガスを全額負担する
-    // ため、ネットワーク手数料行は Pimlico fetch 待ちの「見積取得中…」も「最大 N」見積も出さず、
-    // 確定文言「無料 (OpenPay が負担)」を即表示する。creator は preset 満額 (300)、ファンの
-    // 支払いも preset 満額 (gas 上乗せなし) になる。
+    // JPYC tip は f7eecc0「チップ=ガス相当のみ顧客負担」以降、ネットワーク手数料見積 (約 2 JPYC・
+    // ガス相当) を顧客が負担。見積は即確定するため pending「見積取得中…」は出ない。creator は
+    // preset 満額 (300)、ファンの支払いは 300 + ガス相当 (= あなたの支払額 302)。
     await expect(page.getByText('見積取得中…')).toHaveCount(0);
-    await expect(page.getByText('無料 (OpenPay が負担)')).toBeVisible();
+    await expect(page.getByText('ネットワーク手数料見積')).toBeVisible();
     // 未接続なので submit ボタンは t('btnConnect') = 「ウォレットを接続」
     // (isConnected=false のとき btnConnect に倒れる)
     await expect(
@@ -98,11 +97,11 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '1000 JPYC' })).toBeVisible();
     await expect(page.getByRole('button', { name: '3000 JPYC' })).toBeVisible();
-    await expect(page.getByText('あなたの支払額')).toBeVisible();
-    // Kaia 系も JPYC ガスレス free モード (testnet・forwarder 未設定) → OpenPay 全額負担で
-    // 「無料 (OpenPay が負担)」を即表示 (pending なし)。
+    await expect(page.getByText('あなたの支払額', { exact: true })).toBeVisible();
+    // Kaia 系も JPYC tip は f7eecc0「チップ=ガス相当のみ顧客負担」→ ネットワーク手数料見積
+    // (ガス相当) を顧客が負担。見積は即確定 (pending「見積取得中…」なし)。
     await expect(page.getByText('見積取得中…')).toHaveCount(0);
-    await expect(page.getByText('無料 (OpenPay が負担)')).toBeVisible();
+    await expect(page.getByText('ネットワーク手数料見積')).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'ウォレットを接続' }),
     ).toBeVisible();
@@ -175,8 +174,8 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     // <title>OpenPay Tip</title> も match するため main 配下に scope する
     await expect(page.locator('main').getByText('OpenPay Tip')).toBeVisible();
     await expect(page.getByText('Send a tip to the creator')).toBeVisible();
-    // 英語版 breakdown: customerRow = "You pay"
-    await expect(page.getByText('You pay')).toBeVisible();
+    // 英語版 breakdown: customerRow = "You pay" (手数料開示 "You pay: …" と二重一致しないよう exact)
+    await expect(page.getByText('You pay', { exact: true })).toBeVisible();
     // 未接続 → submit ボタンは "Connect a wallet"
     await expect(
       page.getByRole('button', { name: 'Connect a wallet' }),
