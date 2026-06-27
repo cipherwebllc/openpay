@@ -331,7 +331,7 @@ export function MobileOrderView({
     return (
       <li
         key={item.id}
-        className={`flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white ${
+        className={`flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_2px_10px_-4px_rgba(15,23,42,0.1)] transition-shadow duration-200 hover:shadow-[0_12px_28px_-12px_rgba(15,23,42,0.22)] ${
           isSoldOut ? 'opacity-60' : ''
         }`}
       >
@@ -354,8 +354,8 @@ export function MobileOrderView({
           )}
         </div>
         <div className="flex flex-1 flex-col gap-2 p-3">
-          <span className="line-clamp-2 text-sm font-medium text-slate-800">{item.name}</span>
-          {/* 価格の横に − n + ステッパ (売り切れ時はステッパを出さない) */}
+          <span className="line-clamp-2 text-sm font-semibold text-slate-800">{item.name}</span>
+          {/* 価格 + アクション (未追加=＋ボタン / 追加後=−n+ ピル)。売り切れはどちらも出さない。 */}
           <div className="mt-auto flex items-center justify-between gap-1">
             <span className="min-w-0">
               <span className="text-base font-bold text-slate-900">{item.price}</span>{' '}
@@ -367,28 +367,38 @@ export function MobileOrderView({
                 <button
                   type="button"
                   onClick={() => setOptionModalItem(item)}
-                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark"
                 >
                   {t('viewChooseOptions')}
                   {optionCount(item.id) > 0 ? ` (${optionCount(item.id)})` : ''}
                 </button>
+              ) : n === 0 ? (
+                // 未追加: 単一の ＋ (アプリ風の "追加" アフォーダンス)。タップで数量 1。
+                <button
+                  type="button"
+                  onClick={() => setItemQty(item.id, 1)}
+                  aria-label={t('qtyIncrease')}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-lg leading-none text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.5)] transition hover:bg-brand-dark active:scale-90"
+                >
+                  ＋
+                </button>
               ) : (
-                <span className="flex shrink-0 items-center gap-1">
+                // 追加後: − n + のピル型ステッパ。
+                <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 p-0.5">
                   <button
                     type="button"
                     onClick={() => setItemQty(item.id, n - 1)}
-                    disabled={n === 0}
                     aria-label={t('qtyDecrease')}
-                    className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600 disabled:opacity-30"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm transition active:scale-90"
                   >
                     −
                   </button>
-                  <span className="w-5 text-center text-sm font-semibold tabular-nums">{n}</span>
+                  <span className="w-5 text-center text-sm font-bold tabular-nums text-slate-900">{n}</span>
                   <button
                     type="button"
                     onClick={() => setItemQty(item.id, n + 1)}
                     aria-label={t('qtyIncrease')}
-                    className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-white shadow-sm transition hover:bg-brand-dark active:scale-90"
                   >
                     ＋
                   </button>
@@ -423,7 +433,7 @@ export function MobileOrderView({
   return (
     <div className="space-y-5">
       <header className="text-center">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-brand text-2xl font-bold text-white">
+        <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-brand text-3xl font-bold text-white shadow-[0_12px_30px_-10px_rgba(37,99,235,0.55)] ring-1 ring-black/5">
           {showAvatar ? (
             // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
             // eslint-disable-next-line @next/next/no-img-element
@@ -439,9 +449,9 @@ export function MobileOrderView({
             <span aria-hidden>{initialOf(config.shopName)}</span>
           )}
         </div>
-        <h1 className="mt-3 text-xl font-bold text-slate-900">{config.shopName}</h1>
+        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{config.shopName}</h1>
         {config.tagline && (
-          <p className="mt-1 text-sm text-slate-500">{config.tagline}</p>
+          <p className="mt-1.5 text-sm text-slate-500">{config.tagline}</p>
         )}
         {offeredChains.length > 1 ? (
           // 複数チェーン: 顧客が支払うチェーンを選ぶ (受取先は全チェーン共通の 1 アドレス)。
@@ -567,19 +577,18 @@ export function MobileOrderView({
         ))}
       </section>
 
-      {/* 注文サマリ + 支払い (既存 /checkout へ・手数料0) */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4">
-        {!accepting ? (
-          // 受付停止中は支払いを止める (不可逆決済の事故防止)。メニュー閲覧は可能。
-          <p className="text-center text-sm font-semibold text-amber-700">{t(closedNoticeKey)}</p>
-        ) : cartItems.length === 0 ? (
-          <p className="text-center text-sm text-slate-400">{t('cartEmpty')}</p>
-        ) : tooMany ? (
-          <p className="text-center text-sm text-red-600">
-            {t('tooManyItems', { max: CHECKOUT_MAX_ITEMS })}
-          </p>
-        ) : (
-          <div className="space-y-3">
+      {/* 注文サマリ + 支払い — 商品があれば画面下部に浮く (sticky) アプリ風カートバー。
+          メニューをスクロール中も常に見え、最下部ではフッターの上に収まる (通常フロー=重ならない)。
+          空 / 受付停止では出さない (受付停止は上部バナーで告知済み)。決済は既存 /checkout へ。 */}
+      {accepting && cartItems.length > 0 && (
+        <div className="sticky bottom-3 z-30">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_-1px_3px_rgba(15,23,42,0.04),0_18px_44px_-14px_rgba(15,23,42,0.35)] supports-[backdrop-filter]:bg-white/85 supports-[backdrop-filter]:backdrop-blur">
+            {tooMany ? (
+              <p className="text-center text-sm text-red-600">
+                {t('tooManyItems', { max: CHECKOUT_MAX_ITEMS })}
+              </p>
+            ) : (
+              <div className="space-y-3">
             {/* 店内 (dineIn): テーブル番号 (必須)。未入力なら支払いボタンを無効化。 */}
             {config.dineIn && (
               <div>
@@ -627,7 +636,7 @@ export function MobileOrderView({
             )}
             {/* ご注文内容 (合計の上)。カートマーク+点数のタップで明細を開閉。明細では −n+ で増減。 */}
             {cartOpen && (
-              <ul className="space-y-2 border-b border-slate-100 pb-3">
+              <ul className="max-h-[42vh] space-y-2 overflow-y-auto border-b border-slate-100 pb-3">
                 {cartLines.map((l) => {
                   const adjust = (n: number) =>
                     l.isOption ? setOptionEntryQty(l.key, n) : setItemQty(l.itemId, n);
@@ -717,9 +726,11 @@ export function MobileOrderView({
                 {t('payButton')}
               </a>
             )}
-          </div>
-        )}
-      </section>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
 
       <p className="text-center text-xs text-slate-400">
         {t.rich('poweredBy', {

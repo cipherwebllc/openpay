@@ -187,10 +187,11 @@ describe('MobileOrderView', () => {
     expect(screen.getByText('テ')).toBeInTheDocument();
   });
 
-  it('カート空では合計/支払いを出さず案内 (poweredBy の OpenPay はトップへのリンク)', () => {
+  it('カート空では下部カートバー (合計/支払い) を出さない (poweredBy の OpenPay はトップへのリンク)', () => {
     renderWithIntl(<MobileOrderView config={config} />);
-    expect(screen.getByText('商品を選ぶと合計が表示されます')).toBeInTheDocument();
+    // 空のときは sticky カートバー自体を描画しない (メニューが主役・アプリ風)。
     expect(screen.queryByText('支払いへ進む')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'ご注文内容' })).toBeNull();
     // 「このお店は OpenPay で受け取っています」の OpenPay をテキストリンク化 (→ トップ)。
     const op = screen.getByRole('link', { name: 'OpenPay' });
     expect(op).toHaveAttribute('href', '/');
