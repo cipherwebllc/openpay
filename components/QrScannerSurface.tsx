@@ -47,10 +47,10 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
   return (
     <div className="space-y-3">
       <div
-        className={`relative overflow-hidden rounded-2xl border ${
+        className={`relative overflow-hidden rounded-3xl border ${
           isScanning
-            ? 'border-slate-300 bg-slate-900'
-            : 'border-dashed border-slate-300 bg-slate-50'
+            ? 'border-slate-800 bg-slate-900'
+            : 'border-slate-200 bg-gradient-to-b from-white to-slate-50 shadow-card'
         }`}
       >
         {/* video は常に mount する。idle / fallback では h-0 で論理的に隠す
@@ -64,9 +64,14 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
           playsInline
           muted
         />
+        {/* ビューファインダーの四隅フレーム (QR を「ここに合わせる」アフォーダンス)。
+            scanning 中は映像上で白、idle ではブランド色で枠を示す。 */}
+        <CornerFrame scanning={isScanning} />
         {!isScanning && (
-          <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-            <CameraIcon />
+          <div className="flex min-h-[17rem] flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand/10">
+              <CameraIcon />
+            </span>
             <p className="text-sm text-slate-600">{t('cameraIdleHint')}</p>
             {state.status === 'idle' && (
               <button
@@ -191,6 +196,20 @@ function StatusBox({
   );
 }
 
+// QR スキャナのビューファインダー四隅フレーム (4 つの L 字)。idle=ブランド色 / scanning=白。
+function CornerFrame({ scanning }: { scanning: boolean }) {
+  const color = scanning ? 'border-white/85' : 'border-brand/70';
+  const base = 'pointer-events-none absolute h-7 w-7';
+  return (
+    <>
+      <span className={`${base} left-3 top-3 rounded-tl-xl border-l-[3px] border-t-[3px] ${color}`} aria-hidden />
+      <span className={`${base} right-3 top-3 rounded-tr-xl border-r-[3px] border-t-[3px] ${color}`} aria-hidden />
+      <span className={`${base} bottom-3 left-3 rounded-bl-xl border-b-[3px] border-l-[3px] ${color}`} aria-hidden />
+      <span className={`${base} bottom-3 right-3 rounded-br-xl border-b-[3px] border-r-[3px] ${color}`} aria-hidden />
+    </>
+  );
+}
+
 function CameraIcon() {
   return (
     <svg
@@ -202,7 +221,7 @@ function CameraIcon() {
       strokeWidth="1.6"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="text-slate-400"
+      className="text-brand"
       aria-hidden
     >
       <rect x="3" y="6" width="18" height="13" rx="2" />
