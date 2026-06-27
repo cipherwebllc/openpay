@@ -327,6 +327,12 @@ describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せ
     expect(c?.phone).toBe('03-1234-5678');
     expect(c?.acceptingOrders).toBe(false);
   });
+  it('accent (テーマ色) は有効な #rrggbb のみ載せ、不正/未設定は落とす', () => {
+    expect(validateOrderConfig({ ...baseConfig(), accent: '#9a3412' })?.accent).toBe('#9a3412');
+    expect('accent' in (validateOrderConfig({ ...baseConfig(), accent: 'red' }) ?? {})).toBe(false);
+    expect('accent' in (validateOrderConfig({ ...baseConfig(), accent: '#abc' }) ?? {})).toBe(false);
+    expect('accent' in (validateOrderConfig(baseConfig()) ?? {})).toBe(false);
+  });
   it('店舗情報込みで encode→decode が往復一致', () => {
     const c = validateOrderConfig({ ...baseConfig(), address: '東京都〇〇', acceptingOrders: false })!;
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
