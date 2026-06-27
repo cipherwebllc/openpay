@@ -703,10 +703,12 @@ export function MobileOrderBuilder({
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {/* 客のスマホでの見え方を、実際の店舗ページ (MobileOrderView) を下書きで描いて
                 WYSIWYG 表示 (カバー/ヘッダー/メニュー/テーマ/カートバーまで実物どおり)。
-                スマホフレーム内に収め、スクロールで全体を確認できる。 */}
+                スマホフレーム内に収め、スクロールで全体を確認できる。高さは控えめにして
+                (max-h-[46vh])、ページ/サイド列のスクロールバーと内側バーが隣り合って二重に
+                見えるのを避ける。 */}
             {hydrated && (
               <div className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5">
-                <div className="max-h-[72vh] overflow-y-auto px-4 py-4">
+                <div className="max-h-[46vh] overflow-y-auto px-4 py-4">
                   <MobileOrderView config={previewConfig} />
                 </div>
               </div>
