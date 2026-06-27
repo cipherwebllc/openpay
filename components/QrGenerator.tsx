@@ -483,6 +483,19 @@ export function QrGenerator() {
     ? displaySymbolFor(convert.anchorSymbol)
     : convertTargetDisplay;
 
+  // 金額入力の真下に出す参考円換算 (店員が即座に「いくら相当か」を掴むため)。
+  // JPYC は ¥ ペッグ (=入力額そのもの) ゆえ冗長なので非表示。USDC のときのみ
+  // CoinGecko レート (sane 検証済) で概算円を表示。あくまで参考値・QR が encode する
+  // 額は入力した USDC のまま (convert とは別経路で、ここでは額を一切書き換えない)。
+  const fiatHint = useMemo(() => {
+    if (mode !== 'amount' || settings.token !== 'usdc') return null;
+    if (!marketRates || !rateIsSane(marketRates.usdcJpy)) return null;
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    const yen = Math.round(value * marketRates.usdcJpy);
+    return t('fiatApprox', { yen: yen.toLocaleString('en-US') });
+  }, [mode, settings.token, marketRates, amount, t]);
+
   // クイック金額は token (JPYC=円 / USDC=ドル) ごとに独立。エディタ・適用とも
   // 現在の token のサブリストだけを操作する。
   const tokenQuickAmounts = settings.quickAmounts[settings.token];
@@ -583,18 +596,38 @@ export function QrGenerator() {
                 </div>
                 {mode === 'amount' ? (
                   <div className="space-y-3">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={amount}
-                      onChange={(e) => {
-                        setAmount(truncateAmount(e.target.value, deployment.decimals));
-                        resetConvert();
-                      }}
-                      placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-3xl font-bold focus:border-brand focus:outline-none"
-                      autoFocus
-                    />
+                    {/* 金額ヒーロー: 入力欄を「表示器」化して数字を主役に。通貨記号は控えめな
+                        接尾、その真下に参考円 (USDC のみ・JPYC は ¥ ペッグで冗長ゆえ非表示)。
+                        枠線は container 側に寄せ、focus で brand + 浮き影。 */}
+                    <div className="rounded-2xl border-2 border-slate-200 bg-gradient-to-br from-white to-brand/[0.03] px-5 py-4 transition focus-within:border-brand focus-within:shadow-card">
+                      <div className="flex items-baseline gap-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={amount}
+                          onChange={(e) => {
+                            setAmount(
+                              truncateAmount(e.target.value, deployment.decimals),
+                            );
+                            resetConvert();
+                          }}
+                          placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
+                          aria-label={t('amountLabel', {
+                            symbol: deployment.displaySymbol,
+                          })}
+                          className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
+                          autoFocus
+                        />
+                        <span className="shrink-0 text-xl font-semibold text-slate-400">
+                          {deployment.displaySymbol}
+                        </span>
+                      </div>
+                      {fiatHint && (
+                        <div className="mt-1 text-right text-sm font-medium text-slate-400">
+                          {fiatHint}
+                        </div>
+                      )}
+                    </div>
                     {activeQuickAmounts.length > 0 && (
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                         {activeQuickAmounts.map((q) => (
@@ -605,7 +638,7 @@ export function QrGenerator() {
                               setAmount(q);
                               resetConvert();
                             }}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                            className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-brand hover:text-brand-dark hover:shadow-card active:translate-y-0"
                           >
                             {q} {deployment.displaySymbol}
                           </button>
@@ -954,7 +987,7 @@ export function QrGenerator() {
                 <button
                   type="button"
                   onClick={() => setQrModalOpen(true)}
-                  className="hidden w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark lg:inline-flex"
+                  className="hidden w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 lg:inline-flex"
                 >
                   <QrCodeIcon className="h-5 w-5" aria-hidden />
                   {t('showQr')}
@@ -1092,25 +1125,32 @@ export function QrGenerator() {
       {payUrl && (
         <div
           ref={bottomBarRef}
-          className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.04)] md:bottom-0 lg:hidden print:hidden"
+          className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_-6px_rgba(15,23,42,0.14)] backdrop-blur md:bottom-0 lg:hidden print:hidden"
         >
           <div className="min-w-0 flex-1">
             <div className="text-[11px] text-slate-400">
               {t('bottomAmountLabel')}
             </div>
-            <div className="truncate font-mono text-lg font-bold text-slate-900">
-              {mode === 'amount'
-                ? t('posterFixedAmount', {
-                    amount,
-                    symbol: deployment.displaySymbol,
-                  })
-                : t('posterOpenAmount', { symbol: deployment.displaySymbol })}
+            <div className="flex items-baseline gap-2">
+              <span className="truncate font-mono text-lg font-bold text-slate-900">
+                {mode === 'amount'
+                  ? t('posterFixedAmount', {
+                      amount,
+                      symbol: deployment.displaySymbol,
+                    })
+                  : t('posterOpenAmount', { symbol: deployment.displaySymbol })}
+              </span>
+              {fiatHint && (
+                <span className="shrink-0 text-xs font-medium text-slate-400">
+                  {fiatHint}
+                </span>
+              )}
             </div>
           </div>
           <button
             type="button"
             onClick={() => setQrModalOpen(true)}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0"
           >
             <QrCodeIcon className="h-5 w-5" aria-hidden />
             {t('showQr')}
