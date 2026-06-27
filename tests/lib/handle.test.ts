@@ -456,6 +456,13 @@ describe('handleStorefrontConfig', () => {
     expect(handleStorefrontConfig(badTo, 'shop')).toBeNull();
   });
 
+  it('プロフィールのテーマ色 (config.color) を accent に流す (店舗ページの配色)', () => {
+    const colored: HandleRecord = { ...base, config: { ...base.config, color: '#9a3412' } };
+    expect(handleStorefrontConfig(colored, 'shop')?.accent).toBe('#9a3412');
+    // 色未設定なら accent は載らない (注文ページは既定色になる)
+    expect('accent' in (handleStorefrontConfig(base, 'shop') ?? {})).toBe(false);
+  });
+
   it('storefront のブランディング (店名/アイコン/SNS) を @handle より優先 (ビルダー由来)', () => {
     const withBrand: HandleRecord = {
       ...base,

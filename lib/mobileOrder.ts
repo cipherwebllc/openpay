@@ -52,6 +52,7 @@ export type MobileOrderConfig = {
   chains?: JpycChainSlug[];
   shopName: string;
   tagline?: string; // 店名の下に出す短いひとこと (任意・キャッチコピー・表示専用)
+  accent?: string; // テーマ色 #rrggbb (@handle の config.color 由来)。注文ページのアクセントに使用。未設定はブランド既定。
   avatar?: string; // 店舗アイコン画像 URL (https のみ・任意・@handle のアバターと同型)
   mode: MobileOrderMode;
   feePayer: FeePayer;
@@ -364,6 +365,12 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   // avatar (任意・https のみ)。不正/空は黙って除外 (注文は壊さない・socials と同じ寛容さ)。
   const avatar = isHttpsUrl(o.avatar) ? o.avatar : undefined;
 
+  // accent (任意・テーマ色 #rrggbb)。@handle の config.color 由来。不正は黙って除外 (既定色になる)。
+  const accent =
+    typeof o.accent === 'string' && /^#[0-9a-fA-F]{6}$/.test(o.accent)
+      ? o.accent
+      : undefined;
+
   // socials (任意・https のみ・≤ SOCIALS_MAX・表示順保持)。不正 URL は黙って除外 (注文は壊さない)。
   const socials = Array.isArray(o.socials)
     ? o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX)
@@ -379,6 +386,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     menu: parts.menu,
   };
   if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
+  if (accent) config.accent = accent; // テーマ色 (任意・有効 #rrggbb のみ)
   if (parts.tagline) config.tagline = parts.tagline; // 店名下のひとこと (任意)
   if (parts.chains) config.chains = parts.chains; // 受取チェーン集合 (2 件以上のときのみ)
   // 店舗情報は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。

@@ -87,6 +87,38 @@ function initialOf(name: string): string {
   return n ? ([...n][0] ?? '').toUpperCase() : '🏪';
 }
 
+// テーマ色 (config.accent) 未設定時のブランド既定 (= tailwind brand.DEFAULT)。
+const DEFAULT_ACCENT = '#1e40af';
+
+// 任意のアクセント色の上に「白」と「濃色」どちらの文字が読めるかを相対輝度 (WCAG 近似) で判定。
+// 淡い色 (黄/水色 等) を選んだ店でも「支払いへ進む」等の塗り潰しボタンが読めるようにする。
+function readableInk(hex: string): string {
+  const ch = (i: number) => parseInt(hex.slice(i, i + 2), 16) / 255;
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const L = 0.2126 * lin(ch(1)) + 0.7152 * lin(ch(3)) + 0.0722 * lin(ch(5));
+  return L > 0.45 ? '#0f172a' : '#ffffff'; // 明るい背景 → slate-900 / 暗い背景 → 白
+}
+
+// 白背景で「文字色/枠色」として読めるアクセント。淡い色 (黄等) はそのままだと白地で読めないので
+// 輝度が下がるまで暗くする (塗り潰しは readableInk で担保・こちらは text/border 用)。
+function accentOnWhite(hex: string): string {
+  let r = parseInt(hex.slice(1, 3), 16);
+  let g = parseInt(hex.slice(3, 5), 16);
+  let b = parseInt(hex.slice(5, 7), 16);
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = () => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  for (let i = 0; i < 20 && lum() > 0.3; i++) {
+    r = Math.round(r * 0.85);
+    g = Math.round(g * 0.85);
+    b = Math.round(b * 0.85);
+  }
+  const h = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
 export function MobileOrderView({
   config,
   backHref,
@@ -106,6 +138,15 @@ export function MobileOrderView({
 }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
+  // 店舗のテーマ色 (@handle のプロフィール色 config.color 由来)。未設定/不正はブランド既定。
+  // アクセント (カートバー/＋/チェーン/ヘッダー) を CSS 変数で配り、塗り潰しの文字色は輝度から
+  // 自動選択してコントラストを担保する。
+  const accent =
+    config.accent && /^#[0-9a-fA-F]{6}$/.test(config.accent)
+      ? config.accent
+      : DEFAULT_ACCENT;
+  const accentInk = readableInk(accent); // 塗り潰し背景の上の文字色
+  const accentText = accentOnWhite(accent); // 白地での文字色/枠色 (淡色は暗くして可読性確保)
   const [qty, setQty] = useState<Record<string, number>>({});
   // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。
   const [cartOpen, setCartOpen] = useState(false);
@@ -367,7 +408,7 @@ export function MobileOrderView({
                 <button
                   type="button"
                   onClick={() => setOptionModalItem(item)}
-                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark"
+                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-[var(--mo-accent-text)] hover:text-[var(--mo-accent-text)]"
                 >
                   {t('viewChooseOptions')}
                   {optionCount(item.id) > 0 ? ` (${optionCount(item.id)})` : ''}
@@ -378,7 +419,7 @@ export function MobileOrderView({
                   type="button"
                   onClick={() => setItemQty(item.id, 1)}
                   aria-label={t('qtyIncrease')}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-lg leading-none text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.5)] transition hover:bg-brand-dark active:scale-90"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--mo-accent)] text-lg leading-none text-[var(--mo-accent-ink)] shadow-sm transition hover:brightness-95 active:scale-90"
                 >
                   ＋
                 </button>
@@ -398,7 +439,7 @@ export function MobileOrderView({
                     type="button"
                     onClick={() => setItemQty(item.id, n + 1)}
                     aria-label={t('qtyIncrease')}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-white shadow-sm transition hover:bg-brand-dark active:scale-90"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--mo-accent)] text-[var(--mo-accent-ink)] shadow-sm transition hover:brightness-95 active:scale-90"
                   >
                     ＋
                   </button>
@@ -431,9 +472,18 @@ export function MobileOrderView({
   const hasStoreInfo = !!(config.address || config.hours || config.phone);
 
   return (
-    <div className="space-y-5">
+    <div
+      className="space-y-5"
+      style={
+        {
+          '--mo-accent': accent,
+          '--mo-accent-ink': accentInk,
+          '--mo-accent-text': accentText,
+        } as React.CSSProperties
+      }
+    >
       <header className="text-center">
-        <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-brand text-3xl font-bold text-white shadow-[0_12px_30px_-10px_rgba(37,99,235,0.55)] ring-1 ring-black/5">
+        <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[var(--mo-accent)] text-3xl font-bold text-[var(--mo-accent-ink)] shadow-[0_12px_30px_-10px_rgba(15,23,42,0.28)] ring-1 ring-black/5">
           {showAvatar ? (
             // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
             // eslint-disable-next-line @next/next/no-img-element
@@ -466,8 +516,8 @@ export function MobileOrderView({
                   aria-pressed={c === chain}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                     c === chain
-                      ? 'border-brand bg-brand text-white'
-                      : 'border-slate-300 text-slate-600 hover:border-brand'
+                      ? 'border-[var(--mo-accent)] bg-[var(--mo-accent)] text-[var(--mo-accent-ink)]'
+                      : 'border-slate-300 text-slate-600 hover:border-[var(--mo-accent-text)]'
                   }`}
                 >
                   JPYC ({JPYC_CHAIN_LABEL[c]})
@@ -511,7 +561,7 @@ export function MobileOrderView({
                   href={mapHref}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
-                  className="text-brand hover:underline"
+                  className="text-[var(--mo-accent-text)] hover:underline"
                 >
                   {config.address}
                 </a>
@@ -524,7 +574,7 @@ export function MobileOrderView({
             <p className="flex items-start gap-2">
               <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewPhoneLabel')} />
               {tel ? (
-                <a href={tel} className="text-brand hover:underline">
+                <a href={tel} className="text-[var(--mo-accent-text)] hover:underline">
                   {config.phone}
                 </a>
               ) : (
@@ -553,7 +603,7 @@ export function MobileOrderView({
               <a
                 key={sectionId(i)}
                 href={`#${sectionId(i)}`}
-                className="shrink-0 rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand"
+                className="shrink-0 rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:border-[var(--mo-accent-text)] hover:text-[var(--mo-accent-text)]"
               >
                 {group.category ?? t('uncategorized')}
               </a>
@@ -604,7 +654,7 @@ export function MobileOrderView({
                   placeholder={t('tablePlaceholder')}
                   aria-required="true"
                   aria-invalid={needsTable}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
                 />
                 {needsTable && <p className="mt-1 text-xs text-amber-700">{t('tableRequired')}</p>}
               </div>
@@ -622,7 +672,7 @@ export function MobileOrderView({
                     id="mo-pickup"
                     value={pickupAt ?? ''}
                     onChange={(e) => setPickupAt(e.target.value ? Number(e.target.value) : null)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
                   >
                     <option value="">{t('pickupAsap')}</option>
                     {pickupSlotList.map((ms) => (
@@ -681,7 +731,7 @@ export function MobileOrderView({
               <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
                 <span className="relative inline-flex">
                   <ShoppingCart className="h-5 w-5 text-slate-600" aria-hidden />
-                  <span className="absolute -right-2 -top-2 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold leading-none text-white">
+                  <span className="absolute -right-2 -top-2 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--mo-accent)] px-1 text-[10px] font-bold leading-none text-[var(--mo-accent-ink)]">
                     {cartCount}
                   </span>
                 </span>
@@ -721,7 +771,7 @@ export function MobileOrderView({
             ) : (
               <a
                 href={checkoutUrl}
-                className="block rounded-xl bg-brand px-4 py-3 text-center text-sm font-semibold text-white hover:bg-brand-dark"
+                className="block rounded-xl bg-[var(--mo-accent)] px-4 py-3 text-center text-sm font-semibold text-[var(--mo-accent-ink)] hover:brightness-95"
               >
                 {t('payButton')}
               </a>

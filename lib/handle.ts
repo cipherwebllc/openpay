@@ -189,6 +189,7 @@ export function handleStorefrontConfig(
     chains: sf.chains, // 受取チェーン集合 (2 件以上で注文ページに選択 UI)
     shopName: sf.shopName || record.config.name?.trim() || `@${handle}`,
     tagline: sf.tagline, // 店名下のひとこと (ビルダー由来のみ・任意・validateOrderConfig が再検証)
+    accent: record.config.color, // テーマ色 = @handle のプロフィール色を店舗ページにも適用 (validateOrderConfig が再検証)
     avatar: sf.avatar ?? record.profile?.avatar,
     mode: sf.mode,
     feePayer: sf.feePayer,
