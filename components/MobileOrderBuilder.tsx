@@ -16,8 +16,6 @@ import {
   Clock,
   Eye,
   GripVertical,
-  MapPin,
-  Phone,
   Store,
   UtensilsCrossed,
   Wallet,
@@ -49,7 +47,9 @@ import {
   HOURS_MAX,
   PHONE_MAX,
   type StorefrontParts,
+  type MobileOrderConfig,
 } from '@/lib/mobileOrder';
+import { MobileOrderView } from '@/components/MobileOrderView';
 import { MIN_LEAD_MAX } from '@/lib/shopTime';
 
 const inputClass =
@@ -146,6 +146,34 @@ export function MobileOrderBuilder({
         menu: menuItems,
       }
     : null;
+
+  // ④ プレビュー用の MobileOrderConfig。下書きから生成し、必須欠落 (受取先/店名) はプレースホルダで
+  // 埋めて作成途中でも実際の店舗ページ (MobileOrderView) をそのまま WYSIWYG 描画する。受取先未確定でも
+  // 描けるようダミーアドレスで代用 (プレビュー専用・公開検証は storefrontParts/validateOrderConfig 側)。
+  const previewConfig: MobileOrderConfig = {
+    receiver: (/^0x[0-9a-fA-F]{40}$/.test(draft.receiver.trim())
+      ? getAddress(draft.receiver.trim())
+      : '0x0000000000000000000000000000000000000000') as Address,
+    chain: draft.chains[0],
+    ...(draft.chains.length > 1 ? { chains: draft.chains } : {}),
+    shopName: draft.shopName.trim() || t('previewShopPlaceholder'),
+    ...(draft.tagline.trim() ? { tagline: draft.tagline.trim() } : {}),
+    ...(avatarPreview ? { avatar: avatarPreview } : {}),
+    ...(coverPreview ? { cover: coverPreview } : {}),
+    mode: draft.mode,
+    feePayer: draft.feePayer,
+    socials: socialPreview,
+    menu: menuItems,
+    ...(draft.address.trim() ? { address: draft.address.trim() } : {}),
+    ...(draft.hours.trim() ? { hours: draft.hours.trim() } : {}),
+    ...(draft.phone.trim() ? { phone: draft.phone.trim() } : {}),
+    ...(draft.acceptingOrders ? {} : { acceptingOrders: false }),
+    ...(draft.dineIn ? { dineIn: true } : {}),
+    ...(draft.lastOrder.trim() ? { lastOrder: draft.lastOrder.trim() } : {}),
+    ...(draft.minLeadMinutes.trim()
+      ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
+      : {}),
+  };
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
 
@@ -673,98 +701,17 @@ export function MobileOrderBuilder({
             />
           )}
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
-            {/* 実際の店舗ページ (MobileOrderView) と同じ構成・順序で見せる:
-                ヘッダー (アバター→店名→チェーン→SNS) → 受付停止バナー → 店舗情報カード。
-                メニューは出さず店舗情報まで (実際の見え方は「店舗ページを開く」で確認)。 */}
+            {/* 客のスマホでの見え方を、実際の店舗ページ (MobileOrderView) を下書きで描いて
+                WYSIWYG 表示 (カバー/ヘッダー/メニュー/テーマ/カートバーまで実物どおり)。
+                スマホフレーム内に収め、スクロールで全体を確認できる。 */}
             {hydrated && (
-              <div className="rounded-xl bg-slate-50 p-4">
-                <div className="mx-auto max-w-xs space-y-3 rounded-xl bg-white p-4 shadow-sm">
-                  {/* ヘッダー (公開ページと同じ順序: SNS は店名/チェーンの直下) */}
-                  <div className="text-center">
-                    <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-brand text-lg font-bold text-white">
-                      {avatarPreview ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <span aria-hidden>{previewInitial}</span>
-                      )}
-                    </div>
-                    <p className="mt-2 text-base font-bold text-slate-900">
-                      {draft.shopName.trim() || t('previewShopPlaceholder')}
-                    </p>
-                    {draft.tagline.trim() && (
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {draft.tagline.trim()}
-                      </p>
-                    )}
-                    {/* チェーン: 単一は受取バッジ・複数は選択ピル (公開ページと同じ見せ方)。 */}
-                    {draft.chains.length > 1 ? (
-                      <div className="mt-1">
-                        <p className="text-[10px] text-slate-500">{t('viewChainPick')}</p>
-                        <div className="mt-1 flex flex-wrap justify-center gap-1">
-                          {draft.chains.map((c, i) => (
-                            <span
-                              key={c}
-                              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-                                i === 0
-                                  ? 'border-brand bg-brand text-white'
-                                  : 'border-slate-300 text-slate-600'
-                              }`}
-                            >
-                              JPYC ({JPYC_CHAIN_LABEL[c]})
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="mt-1 text-xs text-slate-500">
-                        {t('viewChainBadge', { chain: JPYC_CHAIN_LABEL[draft.chains[0]] })}
-                      </p>
-                    )}
-                    {/* SNS アイコン行 (公開ページと同じくヘッダー内・店名/チェーンの直下)。 */}
-                    {socialPreview.length > 0 && (
-                      <div className="mt-2 flex justify-center">
-                        <SocialIconLinks urls={socialPreview} />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 受付停止中バナー (受付トグル OFF を公開ページと同じく反映)。 */}
-                  {!draft.acceptingOrders && (
-                    <p className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-center text-[11px] font-semibold text-amber-800">
-                      {t('viewClosedNotice')}
-                    </p>
-                  )}
-
-                  {/* 店舗情報カード (公開ページと同じアイコン付き: 営業時間/住所/電話)。 */}
-                  {(draft.hours.trim() || draft.address.trim() || draft.phone.trim()) && (
-                    <div className="space-y-1 rounded-lg border border-slate-200 p-2.5 text-xs text-slate-600">
-                      {draft.hours.trim() && (
-                        <p className="flex items-start gap-1.5">
-                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                          <span className="min-w-0 truncate">{draft.hours.trim()}</span>
-                        </p>
-                      )}
-                      {draft.address.trim() && (
-                        <p className="flex items-start gap-1.5">
-                          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                          <span className="min-w-0 truncate">{draft.address.trim()}</span>
-                        </p>
-                      )}
-                      {draft.phone.trim() && (
-                        <p className="flex items-start gap-1.5">
-                          <Phone className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                          <span className="min-w-0 truncate">{draft.phone.trim()}</span>
-                        </p>
-                      )}
-                    </div>
-                  )}
+              <div className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5">
+                <div className="max-h-[72vh] overflow-y-auto px-4 py-4">
+                  <MobileOrderView config={previewConfig} />
                 </div>
               </div>
             )}
 
-            {/* プレビューは店舗情報まで (メニュー手前)。メニューを含む実際の見え方は、上の
-                「@handle に公開」→「店舗ページを開く」で確認してもらう。 */}
             <p className="mt-3 text-xs text-slate-400">{t('previewOpenHint')}</p>
           </StepCard>
         </aside>

@@ -1779,7 +1779,7 @@
     "openShop": "店舗ページを開く",
     "stepPreviewTitle": "プレビュー",
     "previewShopPlaceholder": "（店名未設定）",
-    "previewOpenHint": "プレビューは店舗情報までです。メニューを含む実際の見え方は「@handle に公開」→「店舗ページを開く」で確認できます。",
+    "previewOpenHint": "お客様のスマホでの実際の見え方です（メニュー含む）。下書きの変更が即反映されます。「@handle に公開」すると固定の店舗 URL になります。",
     "copy": "コピー",
     "copied": "コピーしました",
     "showQr": "QR を表示",

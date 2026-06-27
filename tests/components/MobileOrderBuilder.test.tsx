@@ -67,9 +67,9 @@ describe('MobileOrderBuilder', () => {
     // メニュー一覧は折りたたみ → トグルを開いて商品名 (seed: コーヒー) を確認。
     fireEvent.click(screen.getByRole('button', { name: '登録中のメニュー' }));
     expect(screen.getAllByText('コーヒー').length).toBeGreaterThanOrEqual(1);
-    // 共有は @handle 公開のみ。長い ?s= 注文 URL は出さず、プレビューは「店舗ページを開く」へ誘導。
+    // 共有は @handle 公開のみ。長い ?s= 注文 URL は出さず、プレビューは実際の店舗ページ (WYSIWYG)。
     expect(screen.queryByText(/\/order\?s=/)).toBeNull();
-    expect(screen.getByText(/店舗ページを開く/)).toBeInTheDocument();
+    expect(screen.getByText(/実際の見え方/)).toBeInTheDocument();
   });
 
   it('受取チェーンは複数選択 (チェックボックス)・既定 Polygon・最低1件を維持', () => {
