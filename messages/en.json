@@ -1779,7 +1779,7 @@
     "openShop": "Open shop page",
     "stepPreviewTitle": "Preview",
     "previewShopPlaceholder": "(no shop name)",
-    "previewOpenHint": "The preview shows up to store info. Publish to @handle, then use “Open shop page” to see the actual page (including the menu).",
+    "previewOpenHint": "Exactly how the page looks on a customer's phone (including the menu). Draft changes update it instantly. Publish to @handle for a permanent shop URL.",
     "copy": "Copy",
     "copied": "Copied",
     "showQr": "Show QR",
