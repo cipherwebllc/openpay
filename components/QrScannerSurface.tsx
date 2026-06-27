@@ -67,6 +67,15 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
         {/* ビューファインダーの四隅フレーム (QR を「ここに合わせる」アフォーダンス)。
             scanning 中は映像上で白、idle ではブランド色で枠を示す。 */}
         <CornerFrame scanning={isScanning} />
+        {/* スキャンライン (読み取り中のみ・映像上を上下に往復する光の線)。
+            prefers-reduced-motion では非表示にする。 */}
+        {isScanning && (
+          <span
+            aria-hidden
+            data-testid="scan-line"
+            className="animate-scanline pointer-events-none absolute inset-x-4 h-[2px] -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-white/90 to-transparent shadow-[0_0_8px_2px_rgba(255,255,255,0.45)] motion-reduce:hidden"
+          />
+        )}
         {!isScanning && (
           <div className="flex min-h-[17rem] flex-col items-center justify-center gap-3 px-6 py-8 text-center">
             <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand/10">

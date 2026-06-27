@@ -63,6 +63,14 @@ describe('QrScannerSurface', () => {
     });
   });
 
+  it('スキャン中はスキャンライン演出を表示し、idle では出さない', async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<QrScannerSurface onScanned={() => {}} />);
+    expect(screen.queryByTestId('scan-line')).toBeNull(); // idle では出さない
+    await user.click(screen.getByRole('button', { name: 'カメラを起動' }));
+    await waitFor(() => expect(screen.getByTestId('scan-line')).toBeInTheDocument());
+  });
+
   it('decode 成功 → onScanned に raw data が渡る', async () => {
     const onScanned = vi.fn();
     const user = userEvent.setup();
