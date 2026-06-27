@@ -1568,6 +1568,7 @@
     "showImagesLabel": "Show product images",
     "filterAll": "All",
     "recommendedBadge": "Recommended",
+    "presetInCart": "{name} ({count} in cart)",
     "productNameLabel": "Product name",
     "productNamePlaceholder": "e.g. Coffee",
     "unitPriceLabel": "Unit price ({symbol})",
