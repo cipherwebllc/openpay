@@ -682,7 +682,8 @@
     "releaseModalCancel": "Cancel"
   },
   "HandleProfile": {
-    "supportHeading": "Choose how to support",
+    "supportHeading": "Support",
+    "supportSubtext": "The full amount goes directly to the creator.",
     "supportWith": "Support with {label}",
     "crossChain": "cross-chain",
     "builderHeading": "Profile page (@handle)",
@@ -710,6 +711,9 @@
     "insecureDropped": "Non-https links / images will not be saved.",
     "previewHeading": "Preview",
     "backToTop": "Go to OpenPay home",
+    "footerSafety": "On-chain transfers can't be reversed — try a small amount first.",
+    "footerSafetyMore": "Learn more",
+    "poweredBy": "Powered by OpenPay",
     "dragToReorder": "Drag to reorder",
     "moveUp": "Move up",
     "moveDown": "Move down",

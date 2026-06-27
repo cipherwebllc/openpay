@@ -9,15 +9,22 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
+import { isHandlePagePath } from '@/lib/handlePath';
 
 const DISMISS_KEY = 'openpay:alphaNoticeDismissed:v1';
 
 export function AlphaNotice() {
   const t = useTranslations('AlphaNotice');
   const locale = useLocale();
+  // @handle (クリエイターの link-in-bio / 店舗) は本人が主役の入口ページ。共通の amber バナーは
+  // 世界観を削ぐので出さず、取消不可の開示はページ側フッターに簡潔に再掲する (開示自体は不変)。
+  // pathname=null (router provider 無し=テスト等) は通常ページ扱いで従来どおり表示。
+  const pathname = usePathname();
+  const onHandlePage = isHandlePagePath(pathname);
   // 既定は表示 (SSR / 初回ペイント / テストで開示が必ず出る)。過去に閉じた利用者のみ mount 後に隠す。
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
@@ -28,7 +35,7 @@ export function AlphaNotice() {
     }
   }, []);
 
-  if (dismissed) return null;
+  if (onHandlePage || dismissed) return null;
 
   return (
     <div

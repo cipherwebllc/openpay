@@ -154,9 +154,25 @@ export default async function HandlePage({
   // flag OFF / storefront 非公開では読まず undefined (= 制限なし・従来どおり)。fail-open。
   const live = storefront && env.enableShopLive ? await readShopLive(normalized) : undefined;
   const t = await getTranslations({ locale, namespace: 'HandleProfile' });
+  // クリエイターのアクセント色 (config.color)。link-in-bio の背景ウォッシュに薄く効かせ、
+  // 各ページに固有の質感を与える (足し算)。不正値は既定ブルー。
+  const accent =
+    record.config.color && /^#[0-9a-fA-F]{6}$/.test(record.config.color)
+      ? record.config.color
+      : '#2563eb';
 
   return (
-    <main className="mx-auto w-full max-w-md px-3 py-4">
+    <main className="mx-auto w-full max-w-md px-4 pb-12 pt-5">
+      {/* link-in-bio のみアクセントの背景ウォッシュ (storefront は独自の意匠なので付けない) */}
+      {!storefront && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-96"
+          style={{
+            background: `radial-gradient(125% 70% at 50% 0%, ${accent}29 0%, ${accent}0d 32%, transparent 68%)`,
+          }}
+        />
+      )}
       <div className="mb-3 flex items-center justify-between gap-2">
         {/* 店舗ページは入口として開かれるので OpenPay への戻り導線を上部に出す
             (link-in-bio はフッターのアイコンが主導線なので左は空) */}
@@ -186,32 +202,50 @@ export default async function HandlePage({
       ) : (
         <>
           {hasProfile && (
-            <div className="mb-6">
-              <HandleProfileView config={record.config} profile={profile} />
+            <div className="mb-7">
+              <HandleProfileView
+                config={record.config}
+                profile={profile}
+                handle={normalized}
+              />
             </div>
           )}
           {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
           <ReceiveMethodPicker config={record.config} />
         </>
       )}
-      {/* このページは共有先から直接開かれる入口 — OpenPay 本体への戻り導線を常設する。
-          文言でなく OpenPay のアイコンマークで控えめに (link-in-bio の主役はクリエイター)。 */}
-      <footer className="mt-10 flex justify-center pb-2">
-        <Link
-          href={`/${locale}`}
-          aria-label={t('backToTop')}
-          title={t('backToTop')}
-          className="opacity-50 transition hover:opacity-100"
-        >
-          <NextImage
-            src="/icon-512.png"
-            alt="OpenPay"
-            width={32}
-            height={32}
-            className="h-8 w-8 rounded-lg"
-          />
-        </Link>
-      </footer>
+      {/* link-in-bio フッター: (1) 取消不可の開示を簡潔に再掲 (共通 AlphaNotice はこのページでは
+          出さないため・本体は /disclaimer)、(2) "Powered by OpenPay" で OpenPay 本体への導線 +
+          発見性 (link-in-bio の成長ループ)。主役はクリエイターなので控えめに。
+          storefront では出さない (MobileOrderView が独自に戻り導線を持つ)。 */}
+      {!storefront && (
+        <footer className="mt-12 flex flex-col items-center gap-3 pb-2 text-center">
+          <p className="max-w-xs text-[11px] leading-relaxed text-slate-400">
+            {t('footerSafety')}{' '}
+            <Link
+              href={`/${locale}/disclaimer`}
+              prefetch={false}
+              className="underline underline-offset-2 hover:text-slate-600"
+            >
+              {t('footerSafetyMore')}
+            </Link>
+          </p>
+          <Link
+            href={`/${locale}`}
+            aria-label={t('backToTop')}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 transition hover:text-slate-700"
+          >
+            <NextImage
+              src="/icon-512.png"
+              alt=""
+              width={20}
+              height={20}
+              className="h-5 w-5 rounded-md"
+            />
+            {t('poweredBy')}
+          </Link>
+        </footer>
+      )}
     </main>
   );
 }
