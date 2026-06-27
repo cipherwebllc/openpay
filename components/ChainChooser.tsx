@@ -30,10 +30,10 @@ export function ChainChooser({
             key={slug}
             type="button"
             onClick={() => onSelect(slug)}
-            className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+            className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-all duration-200 ${
               active
-                ? 'border-brand bg-brand/5 text-brand-dark'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                ? 'border-brand bg-brand/5 text-brand-dark ring-2 ring-brand/15'
+                : 'border-slate-200 bg-white text-slate-600 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card'
             }`}
           >
             <ChainLogo slug={slug} size={20} className="h-5 w-5 shrink-0" />

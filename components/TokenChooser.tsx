@@ -27,10 +27,10 @@ export function TokenChooser({
             key={tok}
             type="button"
             onClick={() => onSelect(tok)}
-            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-3 text-sm font-semibold transition ${
+            className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-semibold transition-all duration-200 ${
               active
-                ? 'border-brand bg-brand/5 text-brand-dark'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                ? 'border-brand bg-brand/5 text-brand-dark ring-2 ring-brand/15'
+                : 'border-slate-200 bg-white text-slate-600 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card'
             }`}
           >
             <TokenLogo symbol={tok} size={24} className="h-6 w-6 shrink-0" />

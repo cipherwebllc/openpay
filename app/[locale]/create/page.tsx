@@ -64,10 +64,10 @@ export default function CreatePage() {
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200 ${
+            className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-all duration-200 ${
               tab === id
-                ? 'bg-white text-brand-dark shadow-card ring-1 ring-slate-200/60'
-                : 'text-slate-500 hover:text-slate-800'
+                ? 'bg-white font-semibold text-brand-dark shadow-card ring-1 ring-slate-200/60'
+                : 'font-medium text-slate-500 hover:text-slate-800'
             }`}
           >
             {label}

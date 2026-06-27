@@ -107,7 +107,7 @@ describe('StepCard', () => {
       expect(section.className).toMatch(/border-brand\/40/);
       expect(section.className).toMatch(/ring-1/);
       expect(section.className).toMatch(/ring-brand\/15/);
-      expect(section.className).toMatch(/shadow-sm/);
+      expect(section.className).toMatch(/shadow-card/);
       // qr-prominent では slate-200 border を付けない
       expect(section.className).not.toMatch(/border-slate-200/);
     });
