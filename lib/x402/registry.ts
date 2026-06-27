@@ -11,7 +11,7 @@
 // resource は公開カタログ (誰でも GET /api/discovery で列挙)。登録は SIWE 認証で owner=接続ウォレット。
 
 import { isAddress, getAddress } from 'viem';
-import { kvGet, kvSet, kvLpush, kvLrange } from '@/lib/kv';
+import { kvGet, kvSet, kvLpush, kvLrange, kvEval } from '@/lib/kv';
 import { caip2ForChainId } from './network';
 import { x402FacilitatorConfig } from './facilitatorConfig';
 
@@ -165,13 +165,107 @@ async function resolveIds(ids: string[]): Promise<X402Resource[]> {
   return out;
 }
 
-// owner の resource 一覧 (登録 UI 用)。
+// owner の resource 一覧 (登録 UI 用)。active のみ — deactivate (soft-delete) 済は owner 画面からも
+// 隠す (データは KV に残す: settlement が resourceId を参照・監査)。index には id が残るが filter で除外。
+// **KV エラー (index 読取 or 各 record 取得) は null** を返し「空」と区別する (handleStore と同流儀)。
+// outage 中に owner へ「登録ゼロ」と誤表示して重複登録や削除誤認を招かないため。malformed/欠落 record
+// は黙ってスキップ (self-heal は別 op)。呼出側 (GET) は null で 503。
 export async function listResourcesForMerchant(
   wallet: string,
-): Promise<X402Resource[]> {
+): Promise<X402Resource[] | null> {
   const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP);
-  if (!r.ok) return [];
-  return resolveIds(r.value);
+  if (!r.ok) return null;
+  const out: X402Resource[] = [];
+  for (const id of r.value) {
+    const got = await kvGet(resourceKey(id));
+    if (!got.ok) return null; // 取得失敗を「空」と誤認しない
+    const res = safeParse<X402Resource>(got.value);
+    if (res && res.active) out.push(res); // malformed/欠落は skip
+  }
+  return out;
+}
+
+// owner の登録総数 (active + soft-deleted)。登録上限 (濫用ガード) 判定用。index は deactivate でも
+// 縮めないので「これまで作成した総数」になり、create→delete の反復で KV を無制限に増やさせない。
+// **KV エラーは null** を返し「0 件」と誤認させない (上限 bypass を防ぐ・handleStore と同流儀)。
+export async function countMerchantResources(wallet: string): Promise<number | null> {
+  const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP);
+  if (!r.ok) return null;
+  return r.value.length;
+}
+
+// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/payTo) を更新する CAS。
+// read→write を atomic にし (handleStore と同流儀)、特に soft-delete (active:false) との競合で
+// 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
+// soft-delete 済 (active:false) は編集不可 (-3) = 保持した監査データ (settlement が参照する当時の
+// payTo/価格) を後から書き換えさせない。
+// 戻り: 更新後 JSON 文字列=成功 / -1=未存在 / -2=malformed / -3=削除済 / 0=owner 不一致。
+const CAS_UPDATE =
+  "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
+  'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
+  "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
+  'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ' +
+  'if o.active==false then return -3 end; ' +
+  'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
+  "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
+
+// owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
+// 戻り: 1=無効化 / 2=既に無効 / -1=未存在 / -2=malformed / 0=owner 不一致。
+const CAS_DEACTIVATE =
+  "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
+  'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
+  "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
+  'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ' +
+  'if o.active==false then return 2 end; ' +
+  "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); return 1";
+
+export type UpdateResourceResult =
+  | { ok: true; resource: X402Resource }
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'storage' };
+
+// owner 限定で編集可能フィールド (url/description/priceJpyc/category/payTo) を更新する。
+// id/merchant/network/createdAt/active は不変。**merchant !== owner は forbidden** = 他人の掲載や
+// payTo (送金先) を書き換えさせない (認可の要)。owner 確認と書込を CAS で原子化し、KV エラー/破損は
+// not_found ではなく storage に倒す (outage を「未存在」と誤魔化さない)。input は検証済を渡す。
+export async function updateResource(
+  id: string,
+  owner: string,
+  input: X402ResourceInput,
+): Promise<UpdateResourceResult> {
+  const cas = await kvEval<number | string>(CAS_UPDATE, [resourceKey(id)], [
+    getAddress(owner),
+    input.url,
+    input.description,
+    input.priceJpyc,
+    input.category,
+    input.payTo,
+  ]);
+  if (!cas.ok) return { ok: false, reason: 'storage' };
+  // -1=未存在 / -3=削除済 → どちらも「編集可能な resource は無い」= not_found。
+  if (cas.value === -1 || cas.value === -3) return { ok: false, reason: 'not_found' };
+  if (cas.value === 0) return { ok: false, reason: 'forbidden' };
+  if (typeof cas.value !== 'string') return { ok: false, reason: 'storage' }; // -2 (破損 JSON) 等
+  const updated = safeParse<X402Resource>(cas.value);
+  if (!updated) return { ok: false, reason: 'storage' };
+  return { ok: true, resource: updated };
+}
+
+export type DeactivateResourceResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'storage' };
+
+// owner 限定で soft-delete (active:false)。公開カタログ + owner 一覧から消えるがデータは KV 保持
+// (settlement の resourceId 参照・監査のため)。owner 確認と書込を CAS で原子化。既に無効なら冪等に ok。
+export async function deactivateResource(
+  id: string,
+  owner: string,
+): Promise<DeactivateResourceResult> {
+  const cas = await kvEval<number>(CAS_DEACTIVATE, [resourceKey(id)], [getAddress(owner)]);
+  if (!cas.ok) return { ok: false, reason: 'storage' };
+  if (cas.value === -1) return { ok: false, reason: 'not_found' };
+  if (cas.value === -2) return { ok: false, reason: 'storage' }; // 破損 JSON
+  if (cas.value === 0) return { ok: false, reason: 'forbidden' };
+  return { ok: true }; // 1 (無効化) / 2 (既に無効・冪等)
 }
 
 // 公開カタログ (discovery)。active のみ。新しい順 (LPUSH なので index は新しい順)。
