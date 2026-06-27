@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
+import { CheckCircle2 } from 'lucide-react';
 import { PwaInstallHint } from './PwaInstallHint';
 import { QrScannerSurface } from './QrScannerSurface';
 import { WalletBalances } from './WalletBalances';
@@ -90,8 +91,8 @@ export function ScanShell() {
           // 強調 (emerald badge) と保有残高だけを表示する。
           <>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
-                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden />
                 {shortAddress(address)}
                 {chain && (
                   <span className="text-emerald-600/70">/ {chain.name}</span>

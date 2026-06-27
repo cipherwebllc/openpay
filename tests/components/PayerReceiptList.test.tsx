@@ -112,10 +112,10 @@ describe('PayerReceiptList', () => {
     ).toBeTruthy();
   });
 
-  it('status ごとに色ドットを出し分け (pending=sky)', () => {
+  it('status ごとに色チップを出し分け (pending=sky)', () => {
     seed({ txHash: '0xpend', userOpHash: '0xuo', status: 'pending', merchantName: 'Pending Shop' });
     const { container } = render(<PayerReceiptList />);
-    expect(container.querySelector('.bg-sky-500')).toBeTruthy();
+    expect(container.querySelector('.bg-sky-100')).toBeTruthy();
   });
 
   it('削除: confirm=true で該当控えを除去し再描画 (実 removePayerReceipt)', () => {

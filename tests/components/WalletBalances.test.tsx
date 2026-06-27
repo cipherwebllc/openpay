@@ -44,10 +44,10 @@ beforeEach(() => {
 });
 
 describe('WalletBalances', () => {
-  it('ローディング中は確認中メッセージ', () => {
+  it('ローディング中はスケルトン (role=status・確認中ラベル)', () => {
     useWalletTokenBalances.mockReturnValue({ data: undefined, isLoading: true });
     renderWithIntl(<WalletBalances />);
-    expect(screen.getByText('残高を確認中…')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveAttribute('aria-label', '残高を確認中…');
   });
 
   it('data 未取得 (非ローディング) は何も描画しない', () => {
