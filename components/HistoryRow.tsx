@@ -4,6 +4,7 @@
 
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
+import { ChevronDown } from 'lucide-react';
 import {
   addressExplorerUrl,
   chainNameForId,
@@ -134,79 +135,98 @@ export function HistoryRow({
     onRemove(entry.id);
   }
 
+  const gasModeLabel =
+    entry.gasMode === null
+      ? t('gasModeNotApplicable')
+      : entry.gasMode === 'customer'
+        ? t('gasModeCustomer')
+        : t('gasModeMerchant');
+
   return (
-    <li className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span
-            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_BADGE_CLASS[entry.status]}`}
-            title={
-              entry.status === 'reverted'
-                ? t('statusRevertedTooltip')
-                : undefined
-            }
-          >
-            {t(STATUS_I18N_KEY[entry.status])}
-          </span>
-          <span className="text-[11px] text-slate-500">
-            {t(FLOW_KIND_I18N_KEY[entry.flow])}
-          </span>
-        </div>
-        <time className="font-mono text-xs text-slate-500">
-          {formatHistoryTimestamp(entry.ts)}
-        </time>
-      </div>
+    <li className="list-none">
+      <details className="group overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-card transition-shadow open:shadow-card-hover">
+        <summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden">
+          <div className="min-w-0 flex-1">
+            {/* メタ行: 受取バッジ + 状態 + 種別 / 右に日時 */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                {t('directionInBadge')}
+              </span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_BADGE_CLASS[entry.status]}`}
+                title={
+                  entry.status === 'reverted'
+                    ? t('statusRevertedTooltip')
+                    : undefined
+                }
+              >
+                {t(STATUS_I18N_KEY[entry.status])}
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {t(FLOW_KIND_I18N_KEY[entry.flow])}
+              </span>
+              <time className="ml-auto shrink-0 font-mono text-[11px] text-slate-400">
+                {formatHistoryTimestamp(entry.ts)}
+              </time>
+            </div>
 
-      {repName && (
-        <p className="mt-2 break-words text-sm font-semibold text-slate-800">
-          {repName}
-          {items.length === 1 && items[0].quantity > 1 && (
-            <span className="ml-1 font-normal text-slate-400">
-              ×{items[0].quantity}
-            </span>
-          )}
-          {items.length > 1 && (
-            <span className="ml-1 font-normal text-slate-400">
-              {t('itemCountMore', { count: items.length - 1 })}
-            </span>
-          )}
-        </p>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <TokenLogo
-            symbol={entry.asset}
-            size={22}
-            className="h-[22px] w-[22px] shrink-0 self-center"
-          />
-          <span className="text-2xl font-bold text-slate-900">
-            {fmt(entry.merchantAmount, entry.asset)}
-          </span>
-          {(() => {
-            const slug = slugForChain(entry.chainId);
-            return slug ? (
-              <ChainLogo
-                slug={slug}
-                size={16}
-                alt={chainNameForId(entry.chainId) ?? slug}
-                className="h-4 w-4 shrink-0 self-center opacity-80"
+            {/* 金額行: token + 大きな金額 + chain */}
+            <div className="mt-2 flex items-center gap-2">
+              <TokenLogo
+                symbol={entry.asset}
+                size={22}
+                className="h-[22px] w-[22px] shrink-0"
               />
-            ) : null;
-          })()}
-        </div>
-        <div className="text-[11px] text-slate-500">
-          {entry.payMode === 'gasless' ? t('modeGasless') : t('modeStandard')}
-          {' · '}
-          {entry.gasMode === null
-            ? t('gasModeNotApplicable')
-            : entry.gasMode === 'customer'
-              ? t('gasModeCustomer')
-              : t('gasModeMerchant')}
-        </div>
-      </div>
+              <span className="text-2xl font-bold text-slate-900">
+                {fmt(entry.merchantAmount, entry.asset)}
+              </span>
+              {(() => {
+                const slug = slugForChain(entry.chainId);
+                return slug ? (
+                  <ChainLogo
+                    slug={slug}
+                    size={16}
+                    alt={chainNameForId(entry.chainId) ?? slug}
+                    className="h-4 w-4 shrink-0 opacity-80"
+                  />
+                ) : null;
+              })()}
+            </div>
 
-      <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-slate-600 sm:grid-cols-2">
+            {/* 商品名 (あれば) */}
+            {repName && (
+              <p className="mt-1 break-words text-sm font-medium text-slate-600">
+                {repName}
+                {items.length === 1 && items[0].quantity > 1 && (
+                  <span className="text-slate-400"> ×{items[0].quantity}</span>
+                )}
+                {items.length > 1 && (
+                  <span className="text-slate-400">
+                    {' '}
+                    {t('itemCountMore', { count: items.length - 1 })}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+          <ChevronDown
+            className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+            aria-hidden
+          />
+        </summary>
+
+        <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-xs text-slate-600 sm:grid-cols-2">
+        <div>
+          <dt className="text-slate-400">{t('columnMode')}</dt>
+          <dd>
+            {entry.payMode === 'gasless'
+              ? t('modeGasless')
+              : t('modeStandard')}
+            {' · '}
+            {gasModeLabel}
+          </dd>
+        </div>
         <div>
           <dt className="text-slate-400">{t('columnMerchant')}</dt>
           <dd className="font-mono">
@@ -369,6 +389,8 @@ export function HistoryRow({
           {t('removeRow')}
         </button>
       </div>
+        </div>
+      </details>
     </li>
   );
 }

@@ -1123,6 +1123,7 @@
     "accountingNoRows": "No sales (successful income) to export.",
     "accountingTooManyRows": "Can't export more than {max} rows. Please narrow by period.",
     "summaryTitle": "Summary",
+    "summaryGmvLabel": "Volume (JPY)",
     "summaryCountsLine": "{total} total (success {success} / reverted {reverted} / error {error} / pending {pending})",
     "summaryGmv": "GMV ≈ ¥{amount}",
     "gmvApproxChip": "incl. estimate",

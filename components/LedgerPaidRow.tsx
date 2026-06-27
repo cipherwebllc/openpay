@@ -2,12 +2,15 @@
 
 // /history の「支払い (out)」行。受取行 (HistoryRow) と型が違うため、支払い控え
 // (PayerReceipt) は専用行で描画する。/scan と同じく <details> アコーディオンで
-// PayerReceiptDetail を展開し、受取/支払いは direction バッジで視覚的に区別する。
+// PayerReceiptDetail を展開し、受取行と同じカード様式 (rounded-2xl + shadow-card +
+// chevron) に揃えて一覧のリズムを統一する。受取/支払いは direction バッジで区別。
 // 削除は per-item (removePayerReceipt) — /scan が最新 3 件に縮小されたため /history から
 // 古い控えを消せるようにする。
 
 import { useLocale, useTranslations } from 'next-intl';
+import { ChevronDown } from 'lucide-react';
 import { PayerReceiptDetail } from './PayerReceiptDetail';
+import { TokenLogo } from './AssetLogo';
 import {
   formatReceiptDateTime,
   removePayerReceipt,
@@ -31,36 +34,57 @@ export function LedgerPaidRow({ receipt }: { receipt: PayerReceipt }) {
     if (window.confirm(tp('removeConfirm'))) removePayerReceipt(receiptId);
   }
 
+  // tokenSymbol は表示文字列 ('JPYC'/'USDC' 等)。jpyc/usdc のときだけ公式ロゴを出す。
+  const sym = receipt.tokenSymbol?.toLowerCase();
+  const tokenSlug = sym === 'jpyc' || sym === 'usdc' ? sym : null;
+
   return (
     <li className="list-none">
-    <details className="group rounded-xl border border-slate-200 bg-white">
-      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
-        <span className="flex min-w-0 items-center gap-2">
-          {/* 支払い (out) バッジ — 受取と一目で区別。 */}
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-            {t('directionOutBadge')}
-          </span>
-          <span
+      <details className="group overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-card transition-shadow open:shadow-card-hover">
+        <summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden">
+          <div className="min-w-0 flex-1">
+            {/* メタ行: 支払いバッジ + 状態ドット / 右に日時 */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                {t('directionOutBadge')}
+              </span>
+              <span
+                aria-hidden
+                className={`inline-block h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_CLASS[receipt.status]}`}
+              />
+              <time className="ml-auto shrink-0 font-mono text-[11px] text-slate-400">
+                {formatReceiptDateTime(receipt.paidAt ?? receipt.createdAt, locale)}
+              </time>
+            </div>
+
+            {/* 金額行: token + 大きな金額 */}
+            <div className="mt-2 flex items-center gap-2">
+              {tokenSlug && (
+                <TokenLogo
+                  symbol={tokenSlug}
+                  size={22}
+                  className="h-[22px] w-[22px] shrink-0"
+                />
+              )}
+              <span className="text-2xl font-bold text-slate-900">
+                {receipt.totalAmount ?? receipt.amount} {receipt.currency}
+              </span>
+            </div>
+
+            {/* 店舗名 */}
+            <p className="mt-1 truncate text-sm font-medium text-slate-600">
+              {receipt.merchantName || tp('merchantFallback')}
+            </p>
+          </div>
+          <ChevronDown
+            className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
             aria-hidden
-            className={`inline-block h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_CLASS[receipt.status]}`}
           />
-          <span className="truncate text-slate-700">
-            {receipt.merchantName || tp('merchantFallback')}
-          </span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span className="font-mono text-slate-900">
-            {receipt.totalAmount ?? receipt.amount} {receipt.currency}
-          </span>
-          <span className="text-[11px] text-slate-400">
-            {formatReceiptDateTime(receipt.paidAt ?? receipt.createdAt, locale)}
-          </span>
-        </span>
-      </summary>
-      <div className="border-t border-slate-100 p-2">
-        <PayerReceiptDetail receipt={receipt} onRemove={handleRemove} />
-      </div>
-    </details>
+        </summary>
+        <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+          <PayerReceiptDetail receipt={receipt} onRemove={handleRemove} />
+        </div>
+      </details>
     </li>
   );
 }
