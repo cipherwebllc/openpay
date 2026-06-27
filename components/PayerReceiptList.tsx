@@ -8,23 +8,20 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { ReceiptText } from 'lucide-react';
 import { usePayerReceipts } from '@/hooks/usePayerReceipts';
-import { PayerReceiptDetail } from './PayerReceiptDetail';
+import {
+  PayerReceiptDetail,
+  STATUS_BADGE_CLASS,
+  STATUS_I18N_KEY,
+} from './PayerReceiptDetail';
 import {
   clearPayerReceipts,
   formatReceiptDateTime,
   removePayerReceipt,
-  type PayerReceiptStatus,
 } from '@/lib/payerReceipt';
 
 const RECENT_LIMIT = 3;
-
-const STATUS_DOT_CLASS = {
-  confirmed: 'bg-emerald-500',
-  pending: 'bg-sky-500',
-  failed: 'bg-red-500',
-  unknown: 'bg-slate-400',
-} as const satisfies Record<PayerReceiptStatus, string>;
 
 export function PayerReceiptList() {
   const t = useTranslations('PayerReceipt');
@@ -65,8 +62,9 @@ export function PayerReceiptList() {
       <p className="mt-1 text-xs text-slate-500">{t('sectionDescription')}</p>
 
       {recent.length === 0 ? (
-        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-4 text-center">
-          <p className="text-sm text-slate-500">{t('empty')}</p>
+        <div className="mt-3 flex flex-col items-center rounded-xl bg-slate-50 px-3 py-6 text-center">
+          <ReceiptText className="h-8 w-8 text-slate-300" aria-hidden />
+          <p className="mt-2 text-sm text-slate-500">{t('empty')}</p>
           <p className="mt-1 text-xs text-slate-400">{t('emptyHint')}</p>
         </div>
       ) : (
@@ -74,18 +72,21 @@ export function PayerReceiptList() {
           {recent.map((r) => (
             <li key={r.receiptId}>
               <details className="group rounded-xl border border-slate-200 bg-white">
-                <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
-                  <span className="flex min-w-0 items-center gap-2">
+                <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5">
+                  {/* 左: ステータスチップ + 店名。状態 (確認済/保留/失敗) を一目で。 */}
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
                     <span
-                      aria-hidden
-                      className={`inline-block h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_CLASS[r.status]}`}
-                    />
-                    <span className="truncate text-slate-700">
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${STATUS_BADGE_CLASS[r.status]}`}
+                    >
+                      {t(STATUS_I18N_KEY[r.status])}
+                    </span>
+                    <span className="truncate text-sm text-slate-700">
                       {r.merchantName || t('merchantFallback')}
                     </span>
                   </span>
-                  <span className="flex items-center gap-2">
-                    <span className="font-mono text-slate-900">
+                  {/* 右: 金額を主役 (大きく太字) + 日時を下に小さく。 */}
+                  <span className="flex shrink-0 flex-col items-end leading-tight">
+                    <span className="text-base font-bold tabular-nums text-slate-900">
                       {r.totalAmount ?? r.amount} {r.currency}
                     </span>
                     <span className="text-[11px] text-slate-400">
