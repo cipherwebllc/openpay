@@ -1568,6 +1568,7 @@
     "showImagesLabel": "商品画像を表示",
     "filterAll": "すべて",
     "recommendedBadge": "おすすめ",
+    "presetInCart": "{name}（カートに {count} 点）",
     "productNameLabel": "商品名",
     "productNamePlaceholder": "例: コーヒー",
     "unitPriceLabel": "単価 ({symbol})",

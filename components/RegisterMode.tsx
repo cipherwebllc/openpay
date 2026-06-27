@@ -284,6 +284,16 @@ export function RegisterMode({
     updateLine(id, { quantity: Math.max(1, Math.min(999, qty)) });
   }
 
+  // プリセット → カート投入数の合計 (POS タイルのバッジ用)。オプション付きで複数行に
+  // 分かれても presetId 単位で合算し、そのプリセットが「今いくつ入っているか」を1目で示す。
+  const presetQty = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of cart) {
+      if (l.presetId) m.set(l.presetId, (m.get(l.presetId) ?? 0) + l.quantity);
+    }
+    return m;
+  }, [cart]);
+
   // 各行を検証・金額/税額を算出。
   const lines = cart.map((l) => {
     const priceValid =
@@ -457,16 +467,33 @@ export function RegisterMode({
                 // (モバイルオーダーのメニュー画像と同じ image を共有)。https 以外は描画しない (二重防御)。
                 // 読込失敗は onError で隠し、名前+価格のテキスト表示へフォールバック (グリッドを壊さない)。
                 const presetImg = safeHttpUrl(p.image);
+                // このプリセットが今カートにいくつ入っているか (0 = 未投入)。
+                const qty = presetQty.get(p.id) ?? 0;
+                const inCart = qty > 0;
                 return (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
-                    className="relative flex min-h-[72px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition hover:border-brand hover:shadow active:scale-[0.98] active:bg-brand/5"
+                    aria-label={inCart ? t('presetInCart', { name: p.name, count: qty }) : p.name}
+                    className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] active:bg-brand/5 ${
+                      inCart
+                        ? 'border-brand ring-2 ring-brand/15'
+                        : 'border-slate-200'
+                    }`}
                   >
+                    {/* カート投入数バッジ (POS の要・右上)。タップごとに +1 され、何個入れたかを一目で。 */}
+                    {inCart && (
+                      <span
+                        className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-brand px-1.5 text-xs font-bold tabular-nums text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.6)]"
+                        aria-hidden
+                      >
+                        {qty}
+                      </span>
+                    )}
                     {env.enableShopLive && p.recommended && (
                       <span
-                        className="absolute right-1.5 top-1.5 inline-flex items-center rounded-full bg-amber-100 px-1 py-0.5"
+                        className="absolute left-1.5 top-1.5 z-10 inline-flex items-center rounded-full bg-amber-100 px-1 py-0.5"
                         title={t('recommendedBadge')}
                         aria-label={t('recommendedBadge')}
                       >
@@ -739,7 +766,7 @@ export function RegisterMode({
                 type="button"
                 onClick={() => setQrModalOpen(true)}
                 disabled={!checkoutUrl}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
               >
                 <QrCodeIcon className="h-5 w-5" aria-hidden />
                 {t('showQr')}
@@ -754,7 +781,7 @@ export function RegisterMode({
           < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。 */}
       <div
         ref={totalBarRef}
-        className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.04)] md:bottom-0 lg:hidden"
+        className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_-6px_rgba(15,23,42,0.14)] backdrop-blur md:bottom-0 lg:hidden"
       >
         <div className="min-w-0 flex-1">
           <div className="text-[11px] text-slate-400">{t('total')}</div>
@@ -766,7 +793,7 @@ export function RegisterMode({
           type="button"
           onClick={() => setQrModalOpen(true)}
           disabled={!checkoutUrl}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
         >
           <QrCodeIcon className="h-5 w-5" aria-hidden />
           {t('showQr')}
