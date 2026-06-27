@@ -23,6 +23,16 @@ const config: Config = {
           '0 6px 16px -6px rgb(15 23 42 / 0.12), 0 2px 6px -2px rgb(15 23 42 / 0.06)',
         lift: '0 14px 40px -12px rgb(15 23 42 / 0.18)',
       },
+      // QR スキャナのスキャンライン (読み取り中に上下へ往復する光の線)。
+      keyframes: {
+        scanline: {
+          '0%, 100%': { top: '8%' },
+          '50%': { top: '92%' },
+        },
+      },
+      animation: {
+        scanline: 'scanline 2.4s ease-in-out infinite',
+      },
     },
   },
   plugins: [],
