@@ -11,6 +11,7 @@ import {
   parseResourceInput,
   createResource,
   listResourcesForMerchant,
+  countMerchantResources,
   MAX_RESOURCES_PER_MERCHANT,
 } from '@/lib/x402/registry';
 
@@ -24,6 +25,10 @@ export async function GET(): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
   const resources = await listResourcesForMerchant(session.address);
+  if (resources === null) {
+    logger.warn('x402.facilitator.resource_list_failed', { merchant: session.address });
+    return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
+  }
   return NextResponse.json({ resources });
 }
 
@@ -45,9 +50,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: parsed.reason }, { status: 400 });
   }
 
-  // owner ごとの登録数 soft cap (濫用ガード)。
-  const existing = await listResourcesForMerchant(session.address);
-  if (existing.length >= MAX_RESOURCES_PER_MERCHANT) {
+  // owner ごとの登録数 soft cap (濫用ガード)。soft-delete 済も数える (create→delete 反復で KV を
+  // 無制限に増やさせない)。KV エラーは null → 0 件と誤認して cap を bypass させず 503。
+  const count = await countMerchantResources(session.address);
+  if (count === null) {
+    logger.warn('x402.facilitator.resource_count_failed', { merchant: session.address });
+    return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
+  }
+  if (count >= MAX_RESOURCES_PER_MERCHANT) {
     return NextResponse.json({ error: 'too_many_resources' }, { status: 429 });
   }
 
