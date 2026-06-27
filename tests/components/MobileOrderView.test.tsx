@@ -175,6 +175,20 @@ describe('MobileOrderView', () => {
     expect(imgs[0]).toHaveAttribute('referrerpolicy', 'no-referrer');
   });
 
+  it('cover (カバー画像・https) をヘッダー背景に <img> で描画 (no-referrer)', () => {
+    const withCover: MobileOrderConfig = { ...config, cover: 'https://img.example/cover.jpg' };
+    const { container } = renderWithIntl(<MobileOrderView config={withCover} />);
+    const cover = container.querySelector('img[src="https://img.example/cover.jpg"]');
+    expect(cover).not.toBeNull();
+    expect(cover).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('cover が javascript: は描画しない (XSS 防御)', () => {
+    const hostile: MobileOrderConfig = { ...config, cover: 'javascript:alert(1)' };
+    const { container } = renderWithIntl(<MobileOrderView config={hostile} />);
+    expect(container.querySelector('[src^="javascript:"]')).toBeNull();
+  });
+
   it('avatar 未設定なら店名の頭文字を表示 (img でなく @handle と同型のイニシャル)', () => {
     renderWithIntl(<MobileOrderView config={config} />); // config は avatar 無し
     expect(screen.getByText('テ')).toBeInTheDocument(); // 'テスト珈琲店' の先頭

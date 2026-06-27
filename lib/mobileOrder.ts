@@ -54,6 +54,7 @@ export type MobileOrderConfig = {
   tagline?: string; // 店名の下に出す短いひとこと (任意・キャッチコピー・表示専用)
   accent?: string; // テーマ色 #rrggbb (@handle の config.color 由来)。注文ページのアクセントに使用。未設定はブランド既定。
   avatar?: string; // 店舗アイコン画像 URL (https のみ・任意・@handle のアバターと同型)
+  cover?: string; // 店舗カバー(ヘッダー背景)画像 URL (https のみ・任意・アバターの背後に敷く)
   mode: MobileOrderMode;
   feePayer: FeePayer;
   socials: string[]; // SNS URL 配列 (https のみ・表示順保持・SocialIconLinks がドメイン自動判定)
@@ -88,6 +89,7 @@ export type StorefrontParts = {
   shopName?: string;
   tagline?: string; // 店名の下の短いひとこと (任意・表示専用)
   avatar?: string; // https のみ
+  cover?: string; // カバー(ヘッダー背景)画像・https のみ
   socials?: string[]; // https のみ・表示順
   menu: MenuItem[];
   // 店舗情報 (任意・公開ページの表示/受付制御。identity ではない)。
@@ -330,6 +332,7 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (isNonEmptyStr(o.shopName, SHOP_NAME_MAX)) parts.shopName = o.shopName.trim();
   if (isNonEmptyStr(o.tagline, TAGLINE_MAX)) parts.tagline = o.tagline.trim();
   if (isHttpsUrl(o.avatar)) parts.avatar = o.avatar;
+  if (isHttpsUrl(o.cover)) parts.cover = o.cover;
   if (Array.isArray(o.socials)) {
     const socials = o.socials.filter((s): s is string => isHttpsUrl(s)).slice(0, SOCIALS_MAX);
     if (socials.length > 0) parts.socials = socials;
@@ -362,8 +365,9 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   const parts = validateStorefrontParts(o);
   if (!parts) return null;
 
-  // avatar (任意・https のみ)。不正/空は黙って除外 (注文は壊さない・socials と同じ寛容さ)。
+  // avatar/cover (任意・https のみ)。不正/空は黙って除外 (注文は壊さない・socials と同じ寛容さ)。
   const avatar = isHttpsUrl(o.avatar) ? o.avatar : undefined;
+  const cover = isHttpsUrl(o.cover) ? o.cover : undefined;
 
   // accent (任意・テーマ色 #rrggbb)。@handle の config.color 由来。不正は黙って除外 (既定色になる)。
   const accent =
@@ -386,6 +390,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
     menu: parts.menu,
   };
   if (avatar) config.avatar = avatar; // 任意・有効時のみ載せる (round-trip を最小形に保つ)
+  if (cover) config.cover = cover; // カバー画像 (任意・https のみ)
   if (accent) config.accent = accent; // テーマ色 (任意・有効 #rrggbb のみ)
   if (parts.tagline) config.tagline = parts.tagline; // 店名下のひとこと (任意)
   if (parts.chains) config.chains = parts.chains; // 受取チェーン集合 (2 件以上のときのみ)

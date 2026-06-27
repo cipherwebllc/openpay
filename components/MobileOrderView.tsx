@@ -163,6 +163,12 @@ export function MobileOrderView({
   useEffect(() => setAvatarFailed(false), [config.avatar]);
   const showAvatar = !!avatarUrl && !avatarFailed;
 
+  // 店舗カバー (ヘッダー背景画像)。avatar と同型: https 限定 + 読込失敗で非表示に fallback。
+  const [coverFailed, setCoverFailed] = useState(false);
+  const coverUrl = safeHttpUrl(config.cover);
+  useEffect(() => setCoverFailed(false), [config.cover]);
+  const showCover = !!coverUrl && !coverFailed;
+
   // 二重防御: config は https のみへ検証済みだが、注文トークンは attacker-controllable な
   // ので href/src へ描画する直前にも scheme を再確認 (javascript:/data: を排除)。
   // プロフ(@handle) と同じ SocialIconLinks でアイコン行として描画 (表示順保持・ドメイン自動判定)。
@@ -483,7 +489,28 @@ export function MobileOrderView({
       }
     >
       <header className="text-center">
-        <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[var(--mo-accent)] text-3xl font-bold text-[var(--mo-accent-ink)] shadow-[0_12px_30px_-10px_rgba(15,23,42,0.28)] ring-1 ring-black/5">
+        {/* 店舗カバー (任意・https のみ)。横幅いっぱい (px-4 を打ち消し) のヒーロー背景に、
+            アバターを下端へ重ねる定番の店舗ヘッダー。読込失敗でカバーは消えアバターのみに。 */}
+        {showCover && (
+          <div className="relative -mx-4 h-36 overflow-hidden rounded-b-3xl bg-slate-100">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={coverUrl}
+              alt=""
+              referrerPolicy="no-referrer"
+              loading="lazy"
+              className="h-full w-full object-cover"
+              onError={() => setCoverFailed(true)}
+            />
+          </div>
+        )}
+        <div
+          className={`mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[var(--mo-accent)] text-3xl font-bold text-[var(--mo-accent-ink)] ${
+            showCover
+              ? 'relative -mt-12 shadow-lg ring-4 ring-white'
+              : 'shadow-[0_12px_30px_-10px_rgba(15,23,42,0.28)] ring-1 ring-black/5'
+          }`}
+        >
           {showAvatar ? (
             // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
             // eslint-disable-next-line @next/next/no-img-element

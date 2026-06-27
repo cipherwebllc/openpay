@@ -191,6 +191,7 @@ export function handleStorefrontConfig(
     tagline: sf.tagline, // 店名下のひとこと (ビルダー由来のみ・任意・validateOrderConfig が再検証)
     accent: record.config.color, // テーマ色 = @handle のプロフィール色を店舗ページにも適用 (validateOrderConfig が再検証)
     avatar: sf.avatar ?? record.profile?.avatar,
+    cover: sf.cover, // 店舗カバー画像 (storefront 専用・validateOrderConfig が再検証)
     mode: sf.mode,
     feePayer: sf.feePayer,
     socials: sf.socials ?? record.profile?.socials ?? [],

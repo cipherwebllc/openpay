@@ -41,6 +41,7 @@ export interface MobileOrderDraft {
   shopName: string;
   tagline: string; // 店名の下のひとこと (任意・生入力)
   avatar: string; // 店舗アイコン画像 URL (生入力・https 検証は URL 生成時・@handle と同型)
+  cover: string; // 店舗カバー(ヘッダー背景)画像 URL (生入力・https 検証は URL 生成時)
   mode: MobileOrderMode; // 'storefront' (店頭/券売機) | 'preorder' (事前モバイルオーダー)
   feePayer: FeePayer; // 手数料の負担者 (preorder 時のみ意味を持つ)
   socials: string[]; // SNS URL の配列 (生入力・並び替え可・https 検証は URL 生成時)
@@ -69,6 +70,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   shopName: '',
   tagline: '',
   avatar: '',
+  cover: '',
   mode: 'storefront', // 最も安全な経路 (その場払いその場受取) を既定に
   feePayer: 'merchant',
   socials: [],
@@ -104,6 +106,7 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     shopName: clampStr(loaded.shopName, SHOP_NAME_MAX),
     tagline: clampStr(loaded.tagline, TAGLINE_MAX),
     avatar: clampStr(loaded.avatar, URL_FIELD_MAX), // https 検証は URL 生成時。length だけ clamp。
+    cover: clampStr(loaded.cover, URL_FIELD_MAX),
     mode: loaded.mode === 'preorder' ? 'preorder' : 'storefront',
     feePayer: loaded.feePayer === 'customer' ? 'customer' : 'merchant',
     // SNS は入力途中の値も下書きとして保持 (https 検証は URL 生成時)。length と件数だけ clamp。
@@ -179,6 +182,7 @@ export function draftToConfig(
     tagline: draft.tagline.trim(), // 空/length 超過の除外は validateOrderConfig が行う。
     // trim のみ。https 検証 + 空/不正の除外は validateOrderConfig が行う。
     avatar: draft.avatar.trim(),
+    cover: draft.cover.trim(),
     mode: draft.mode,
     feePayer: draft.feePayer,
     // trim のみ。https 検証 + 件数 slice は validateOrderConfig が行う。
@@ -243,6 +247,7 @@ export function storefrontPartsToDraft(
     shopName: parts.shopName ?? '',
     tagline: parts.tagline ?? '',
     avatar: parts.avatar ?? '',
+    cover: parts.cover ?? '',
     mode: parts.mode,
     feePayer: parts.feePayer,
     socials: parts.socials ?? [],
