@@ -543,11 +543,13 @@ export function QrGenerator() {
     [tokenQuickAmounts, deployment.decimals],
   );
 
-  // grid-cols-1 (= minmax(0,1fr)) を明示しないと、モバイルの単一列が auto track となり
-  // 下部固定バー (nowrap の「QRコードを表示する」+ 金額) の max-content まで広がって横はみ出す。
-  // min-width:0 を持つ 1fr に固定して列幅をコンテナ内に収める。
+  // モバイル: grid-cols-1 (= minmax(0,1fr)) を明示しないと単一列が auto track となり、下部固定バー
+  // (nowrap の「QRコードを表示する」+ 金額) の max-content まで広がって横はみ出す。
+  // デスクトップ: 左列も raw 1fr だと minmax(auto,1fr) で content の min-content まで伸び、金額指定
+  // モードで金額入力欄等が左列を広げ右の QR 列を min(300px) まで圧迫する (据え置きでは起きない)。
+  // 両軸とも minmax(0,1fr) (min-width:0) に固定し、列幅をコンテナ内で安定させる。
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start print:block print:gap-0">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-start print:block print:gap-0">
       <div className="space-y-5 print:hidden">
         {/* ① 金額: 通貨 / 受取チェーン / 請求金額。店員が毎回触る金額を先頭に置く
             (受取先は初期設定後あまり変えないため ② へ・折りたたみ)。 */}
