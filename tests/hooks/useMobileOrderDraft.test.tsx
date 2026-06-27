@@ -126,6 +126,7 @@ function baseDraft(): MobileOrderDraft {
     shopName: '珈琲スタンド',
     tagline: '',
     avatar: '  https://img.example/icon.png  ', // trim 検証用
+    cover: '',
     mode: 'storefront',
     feePayer: 'merchant',
     socials: ['  https://x.com/shop  '], // trim 検証用
@@ -347,6 +348,7 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       shopName: '山田カフェ',
       tagline: 'こだわり珈琲',
       avatar: 'https://img/a.png',
+      cover: '',
       mode: 'preorder',
       feePayer: 'customer',
       socials: ['https://x.com/y'],

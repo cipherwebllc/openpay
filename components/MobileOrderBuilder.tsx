@@ -116,6 +116,8 @@ export function MobileOrderBuilder({
 
   // 店舗アイコンのプレビュー (https のみ・読込前検証)。無ければ店名の頭文字を円に表示。
   const avatarPreview = safeHttpUrl(draft.avatar.trim());
+  // 店舗カバー(ヘッダー背景)のプレビュー (https のみ)。
+  const coverPreview = safeHttpUrl(draft.cover.trim());
   const previewInitial = ([...draft.shopName.trim()][0] ?? '').toUpperCase();
   // プレビュー用の SNS (https のみ・公開ページ MobileOrderView と同じ SocialIconLinks で描画)。
   const socialPreview = draft.socials
@@ -134,6 +136,7 @@ export function MobileOrderBuilder({
         shopName: draft.shopName.trim() || undefined,
         tagline: draft.tagline.trim() || undefined,
         avatar: draft.avatar.trim() || undefined,
+        cover: draft.cover.trim() || undefined,
         socials: draft.socials.map((s) => s.trim()).filter(Boolean),
         address: draft.address.trim() || undefined,
         hours: draft.hours.trim() || undefined,
@@ -336,6 +339,27 @@ export function MobileOrderBuilder({
                     value={draft.avatar}
                     placeholder="https://"
                     onChange={(e) => update({ avatar: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+              </Field>
+
+              {/* 店舗カバー (ヘッダー背景画像・https URL・任意)。横長プレビュー。 */}
+              <Field label={t('coverLabel')} hint={t('coverHint')}>
+                <div className="space-y-2">
+                  {coverPreview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={coverPreview}
+                      alt=""
+                      className="h-24 w-full rounded-lg object-cover"
+                    />
+                  )}
+                  <input
+                    type="url"
+                    value={draft.cover}
+                    placeholder="https://"
+                    onChange={(e) => update({ cover: e.target.value })}
                     className={inputClass}
                   />
                 </div>

@@ -152,8 +152,9 @@ describe('MobileOrderBuilder', () => {
 
   it('店舗アイコン URL を入力するとプレビュー (円形 img) に反映される', () => {
     const { container } = renderWithIntl(<MobileOrderBuilder />);
-    // アバター入力は placeholder 'https://' (SNS は 'https://x.com/yourshop' で別物)。
-    const avatarInput = screen.getByPlaceholderText('https://') as HTMLInputElement;
+    // アバター/カバー入力は placeholder 'https://' (SNS は 'https://x.com/yourshop' で別物)。
+    // アバターが先頭 (カバーはその次) なので [0] を取る。
+    const avatarInput = screen.getAllByPlaceholderText('https://')[0] as HTMLInputElement;
     fireEvent.change(avatarInput, { target: { value: 'https://img.example/icon.png' } });
     const matched = Array.from(container.querySelectorAll('img')).filter(
       (i) => i.getAttribute('src') === 'https://img.example/icon.png',

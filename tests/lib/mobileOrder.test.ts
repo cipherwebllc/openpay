@@ -333,6 +333,18 @@ describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せ
     expect('accent' in (validateOrderConfig({ ...baseConfig(), accent: '#abc' }) ?? {})).toBe(false);
     expect('accent' in (validateOrderConfig(baseConfig()) ?? {})).toBe(false);
   });
+  it('cover (カバー画像) は https のみ載せ、非 https/未設定は落とす', () => {
+    expect(validateOrderConfig({ ...baseConfig(), cover: 'https://img/c.jpg' })?.cover).toBe(
+      'https://img/c.jpg',
+    );
+    expect('cover' in (validateOrderConfig({ ...baseConfig(), cover: 'http://x/c.jpg' }) ?? {})).toBe(
+      false,
+    );
+    expect('cover' in (validateOrderConfig(baseConfig()) ?? {})).toBe(false);
+    // storefront parts 経由でも cover が round-trip する。
+    const c = validateOrderConfig({ ...baseConfig(), cover: 'https://img/c.jpg' })!;
+    expect(decodeOrderConfig(encodeOrderConfig(c))!.cover).toBe('https://img/c.jpg');
+  });
   it('店舗情報込みで encode→decode が往復一致', () => {
     const c = validateOrderConfig({ ...baseConfig(), address: '東京都〇〇', acceptingOrders: false })!;
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);

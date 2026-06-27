@@ -1709,6 +1709,8 @@
     "taglinePlaceholder": "例: 自家焙煎の一杯をあなたに",
     "avatarLabel": "店舗アイコン画像（任意）",
     "avatarHint": "画像はサーバー（例: imgur.com）にアップロードした https:// の URL を貼り付けてください。注文ページの先頭に丸く表示されます。",
+    "coverLabel": "カバー画像（任意）",
+    "coverHint": "https:// の横長画像 URL。注文ページのヘッダー背景（アイコンの背後）に表示され、お店の雰囲気が一目で伝わります。",
     "addressLabel": "住所（任意）",
     "addressHint": "公開ページに地図リンク付きで表示されます。",
     "addressPlaceholder": "例: 東京都渋谷区〇〇 1-2-3",

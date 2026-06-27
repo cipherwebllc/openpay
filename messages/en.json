@@ -1709,6 +1709,8 @@
     "taglinePlaceholder": "e.g. Freshly roasted, just for you",
     "avatarLabel": "Shop icon image (optional)",
     "avatarHint": "Paste an https:// URL of an image uploaded to a host (e.g. imgur.com). Shown as a circle at the top of the order page.",
+    "coverLabel": "Cover image (optional)",
+    "coverHint": "An https:// URL of a wide image. Shown as the order page header background (behind the icon) to convey your shop's vibe at a glance.",
     "addressLabel": "Address (optional)",
     "addressHint": "Shown on the public page with a map link.",
     "addressPlaceholder": "e.g. 1-2-3 Shibuya, Tokyo",

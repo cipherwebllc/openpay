@@ -463,6 +463,15 @@ describe('handleStorefrontConfig', () => {
     expect('accent' in (handleStorefrontConfig(base, 'shop') ?? {})).toBe(false);
   });
 
+  it('storefront の cover (カバー画像・https) を config.cover に流す', () => {
+    const withCover: HandleRecord = {
+      ...base,
+      storefront: { ...base.storefront!, cover: 'https://img.example/cover.jpg' },
+    };
+    expect(handleStorefrontConfig(withCover, 'shop')?.cover).toBe('https://img.example/cover.jpg');
+    expect('cover' in (handleStorefrontConfig(base, 'shop') ?? {})).toBe(false);
+  });
+
   it('storefront のブランディング (店名/アイコン/SNS) を @handle より優先 (ビルダー由来)', () => {
     const withBrand: HandleRecord = {
       ...base,
