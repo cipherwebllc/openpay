@@ -218,6 +218,7 @@
     "modeAmount": "Fixed amount",
     "modeStatic": "Open amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
+    "fiatApprox": "≈ ¥{yen}",
     "advancedSettings": "Advanced settings",
     "advancedSummary": {
       "standard": "Standard (customer pays gas)",
