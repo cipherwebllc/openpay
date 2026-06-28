@@ -144,6 +144,7 @@
   "Explore": {
     "pageTitle": "Explore",
     "pageDescription": "Curated external services, exchanges, dApps and bridges where JPYC / USDC can be used. Links open external sites.",
+    "filterAll": "All",
     "categoryExchange": "Exchanges (CEX)",
     "categoryExchangeDescription": "Centralized exchanges that trade fiat for crypto. Focused on on/off-ramp for Japan residents.",
     "categoryDex": "DEX (decentralized)",
