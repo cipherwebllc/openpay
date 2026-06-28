@@ -138,13 +138,29 @@ function safeParse<T>(raw: string | null): T | null {
   }
 }
 
+// cap 判定 + 保存 + 両 index 登録を 1 script で原子化する。LLEN(merchant index) >= cap なら -2
+// (作成しない = 並列 POST が cap を擦り抜けるレースを塞ぐ)。それ以外は SET(resource) + LPUSH(discovery
+// index) + LPUSH(merchant index) を実行 (Redis Lua は原子的なので「SET 成功・LPUSH 失敗」の orphan も
+// 起きない)。戻り: 1=作成 / -2=cap 超過。
+const CAS_CREATE =
+  'local cap=tonumber(ARGV[3]); ' +
+  "if redis.call('LLEN',KEYS[3])>=cap then return -2 end; " +
+  "redis.call('SET',KEYS[1],ARGV[1]); " +
+  "redis.call('LPUSH',KEYS[2],ARGV[2]); " +
+  "redis.call('LPUSH',KEYS[3],ARGV[2]); return 1";
+
+export type CreateResourceResult =
+  | { ok: true; resource: X402Resource }
+  | { ok: false; reason: 'too_many' | 'storage' };
+
 // resource を作成して KV に保存する。id は採番 (uuid)。network は facilitator の対象 chain。
-// KV 書込失敗時は null (route が 503 を返す)。nowMs を引数化して testable に。
+// cap 判定・保存・両 index 登録を CAS_CREATE で原子化する (cap race / orphan を防ぐ)。nowMs を引数化
+// して testable に。戻り: too_many=登録上限 (429) / storage=KV エラー (503) / ok=作成。
 export async function createResource(
   input: X402ResourceInput,
   id: string,
   nowMs: number,
-): Promise<X402Resource | null> {
+): Promise<CreateResourceResult> {
   const resource: X402Resource = {
     id,
     merchant: input.merchant,
@@ -157,13 +173,15 @@ export async function createResource(
     active: true,
     createdAt: nowMs,
   };
-  const set = await kvSet(resourceKey(id), JSON.stringify(resource));
-  if (!set.ok) return null;
-  // index への push は best-effort (resource 本体は保存済)。失敗しても resource は引けるが
-  // 列挙に出ない → warn は呼び元 route で。ここでは push 結果を見て resource は返す。
-  await kvLpush(RESOURCES_INDEX, id);
-  await kvLpush(merchantResourcesKey(input.merchant), id);
-  return resource;
+  const cas = await kvEval<number>(
+    CAS_CREATE,
+    [resourceKey(id), RESOURCES_INDEX, merchantResourcesKey(input.merchant)],
+    [JSON.stringify(resource), id, String(MAX_RESOURCES_PER_MERCHANT)],
+  );
+  if (!cas.ok) return { ok: false, reason: 'storage' };
+  if (cas.value === -2) return { ok: false, reason: 'too_many' };
+  if (cas.value !== 1) return { ok: false, reason: 'storage' };
+  return { ok: true, resource };
 }
 
 export async function getResource(id: string): Promise<X402Resource | null> {
@@ -177,16 +195,22 @@ export async function getResource(id: string): Promise<X402Resource | null> {
 // 失敗 → null 除外でカタログ項目が無言で欠落しうる。バッチ単位で並列化して同時数を抑える。
 const RESOLVE_CONCURRENCY = 25;
 
-// id 群を resource に解決する (discovery hot path)。直列 N+1 を避けつつ同時数を RESOLVE_CONCURRENCY
-// に制限する。バッチは順次・バッチ内は並列なので index の新しい順 (LPUSH) は維持し、malformed/欠落
-// (null) は除外する。
-async function resolveIds(ids: string[]): Promise<X402Resource[]> {
+// index の id 群を chunk 並列で active resource に解決する。直列 N+1 を避けつつ同時数を
+// RESOLVE_CONCURRENCY に制限する (Upstash バースト回避)。バッチは順次・バッチ内は並列なので index の
+// 新しい順 (LPUSH) は維持。**1 件でも KV 取得失敗なら null** (outage を「空」と誤認させない・呼び元は
+// 503)。malformed/欠落/inactive は黙ってスキップ (self-heal は別 op)。公開カタログ (listActiveResources)
+// と owner 一覧 (listResourcesForMerchant) で共有する。
+async function resolveActiveByIds(ids: string[]): Promise<X402Resource[] | null> {
   const out: X402Resource[] = [];
   for (let i = 0; i < ids.length; i += RESOLVE_CONCURRENCY) {
     const batch = await Promise.all(
-      ids.slice(i, i + RESOLVE_CONCURRENCY).map((id) => getResource(id)),
+      ids.slice(i, i + RESOLVE_CONCURRENCY).map((id) => kvGet(resourceKey(id))),
     );
-    for (const r of batch) if (r !== null) out.push(r);
+    for (const got of batch) {
+      if (!got.ok) return null; // 取得失敗を「空」と誤認しない
+      const res = safeParse<X402Resource>(got.value);
+      if (res && res.active) out.push(res); // malformed/欠落/inactive は skip
+    }
   }
   return out;
 }
@@ -194,34 +218,20 @@ async function resolveIds(ids: string[]): Promise<X402Resource[]> {
 // owner の resource 一覧 (登録 UI 用)。active のみ — deactivate (soft-delete) 済は owner 画面からも
 // 隠す (データは KV に残す: settlement が resourceId を参照・監査)。index には id が残るが filter で除外。
 // **KV エラー (index 読取 or 各 record 取得) は null** を返し「空」と区別する (handleStore と同流儀)。
-// outage 中に owner へ「登録ゼロ」と誤表示して重複登録や削除誤認を招かないため。malformed/欠落 record
-// は黙ってスキップ (self-heal は別 op)。呼出側 (GET) は null で 503。
+// outage 中に owner へ「登録ゼロ」と誤表示して重複登録や削除誤認を招かないため。呼出側 (GET) は null で 503。
 export async function listResourcesForMerchant(
   wallet: string,
 ): Promise<X402Resource[] | null> {
-  const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP);
+  const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP - 1);
   if (!r.ok) return null;
-  const out: X402Resource[] = [];
-  // resolveIds と同じ有界並列 (最大 LIST_FETCH_CAP 件)。ただし owner 一覧は **1 件でも取得失敗なら
-  // null** (空と誤認させない) が要件なので、バッチごとに ok を確認してから集約する。
-  for (let i = 0; i < r.value.length; i += RESOLVE_CONCURRENCY) {
-    const batch = await Promise.all(
-      r.value.slice(i, i + RESOLVE_CONCURRENCY).map((id) => kvGet(resourceKey(id))),
-    );
-    for (const got of batch) {
-      if (!got.ok) return null; // 取得失敗を「空」と誤認しない
-      const res = safeParse<X402Resource>(got.value);
-      if (res && res.active) out.push(res); // malformed/欠落は skip
-    }
-  }
-  return out;
+  return resolveActiveByIds(r.value);
 }
 
 // owner の登録総数 (active + soft-deleted)。登録上限 (濫用ガード) 判定用。index は deactivate でも
 // 縮めないので「これまで作成した総数」になり、create→delete の反復で KV を無制限に増やさせない。
 // **KV エラーは null** を返し「0 件」と誤認させない (上限 bypass を防ぐ・handleStore と同流儀)。
 export async function countMerchantResources(wallet: string): Promise<number | null> {
-  const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP);
+  const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP - 1);
   if (!r.ok) return null;
   return r.value.length;
 }
@@ -303,12 +313,12 @@ export async function deactivateResource(
   return { ok: true }; // 1 (無効化) / 2 (既に無効・冪等)
 }
 
-// 公開カタログ (discovery)。active のみ。新しい順 (LPUSH なので index は新しい順)。
-export async function listActiveResources(): Promise<X402Resource[]> {
-  const r = await kvLrange(RESOURCES_INDEX, 0, LIST_FETCH_CAP);
-  if (!r.ok) return [];
-  const all = await resolveIds(r.value);
-  return all.filter((x) => x.active);
+// 公開カタログ (discovery)。active のみ・新しい順 (LPUSH なので index は新しい順)。**KV エラーは null**
+// (呼び元 discovery は 503 を返し、空カタログと誤認・キャッシュさせない)。
+export async function listActiveResources(): Promise<X402Resource[] | null> {
+  const r = await kvLrange(RESOURCES_INDEX, 0, LIST_FETCH_CAP - 1);
+  if (!r.ok) return null;
+  return resolveActiveByIds(r.value);
 }
 
 // settle 成功の settlement を記録 (会計用)。fail-quiet (money-path を壊さない・bool を返す)。

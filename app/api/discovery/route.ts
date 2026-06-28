@@ -18,6 +18,12 @@ export async function GET(): Promise<NextResponse> {
   }
 
   const resources = await listActiveResources();
+  // KV エラーは null。空カタログ ([]) と区別し、503 を **無キャッシュ** で返す (transient outage の
+  // 空応答を edge に焼き付けない・空と誤認させない)。
+  if (resources === null) {
+    logger.warn('x402.discovery.list_failed', {});
+    return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
+  }
   const items = resources.map((r) => {
     // priceJpyc (human 整数) → atomic。accepts は facilitator 未準備 (forwarder/feeReceiver 欠落) や
     // 不正 price では生成不能なので per-item で握りつぶし [] にする (カタログ自体は出す)。

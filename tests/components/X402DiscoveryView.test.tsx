@@ -281,6 +281,28 @@ describe('X402DiscoveryView', () => {
     expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
   });
 
+  it('カタログ: 端数のある手数料を小数で表示 (整数除算で切り捨てない)', async () => {
+    // price 250・手数料 2.5 JPYC (atomic 2.5e18)。整数除算だと "2" と誤表示する。
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        x402Version: 1,
+        items: [
+          {
+            resource: 'https://api.example.jp/paid/frac',
+            description: '端数手数料 API',
+            category: 'api',
+            priceJpyc: '250',
+            accepts: [{ extra: { openpay: { feeValue: (2500000000000000000n).toString() } } }],
+          },
+        ],
+      }),
+    })) as unknown as typeof fetch;
+    renderWithIntl(<X402DiscoveryView />);
+    expect(await screen.findByText(/手数料 2\.5 JPYC/)).toBeInTheDocument();
+    expect(screen.getByText('支払い計 252.5 JPYC')).toBeInTheDocument();
+  });
+
   it('空カタログ: catalogEmpty を表示', async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,

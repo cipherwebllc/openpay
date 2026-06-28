@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
+import { formatUnits } from 'viem';
 import {
   Boxes,
   Check,
@@ -59,11 +60,11 @@ type OwnedResource = {
 
 const EMPTY_FORM = { url: '', description: '', priceJpyc: '', category: '', payTo: '' };
 
-function feeJpycOf(item: DiscoveryItem): string | null {
+function feeAtomicOf(item: DiscoveryItem): bigint | null {
   const fv = item.accepts[0]?.extra?.openpay?.feeValue;
   if (!fv) return null;
   try {
-    return (BigInt(fv) / 10n ** 18n).toString();
+    return BigInt(fv);
   } catch {
     return null;
   }
@@ -544,12 +545,17 @@ export function X402DiscoveryView() {
         ) : (
           <ul className="mt-4 space-y-3">
             {items.map((item) => {
-              const fee = feeJpycOf(item);
+              const feeAtomic = feeAtomicOf(item);
+              // atomic JPYC → 表示 (小数あり)。1% 手数料は price/100 で端数が出るため、整数除算だと
+              // 切り捨てて誤表示する → formatUnits で小数を保つ。合計も atomic で加算してから整形する。
+              const fee = feeAtomic === null ? null : formatUnits(feeAtomic, 18);
               let total: string | null = null;
-              try {
-                if (fee) total = (BigInt(item.priceJpyc) + BigInt(fee)).toString();
-              } catch {
-                total = null;
+              if (feeAtomic !== null) {
+                try {
+                  total = formatUnits(BigInt(item.priceJpyc) * 10n ** 18n + feeAtomic, 18);
+                } catch {
+                  total = null;
+                }
               }
               return (
                 <li
