@@ -64,6 +64,18 @@ describe('lib/x402/moderation isFreelyAccessible', () => {
       await isFreelyAccessible('https://x.test', { fetchImpl: fetchWith(200), lookup: lookupThrows }),
     ).toBe(false);
   });
+
+  it('実 node:dns (lookup 非注入)・localhost → 127.0.0.1 に解決し fetch せず false', async () => {
+    // 既定 lookup (node:dns/promises) を実際に走らせる統合パス。localhost は常に loopback に解決され、
+    // isPrivateHost が真 → probe (fetch) せず false。fetch が呼ばれたら SSRF ガード破れなので spy で検証。
+    let fetched = false;
+    const fetchSpy = (async () => {
+      fetched = true;
+      return { status: 200 } as Response;
+    }) as unknown as typeof fetch;
+    expect(await isFreelyAccessible('http://localhost', { fetchImpl: fetchSpy })).toBe(false);
+    expect(fetched).toBe(false); // 解決先 127.0.0.1 が private → fetch しない
+  });
 });
 
 describe('lib/x402/moderation isPrivateHost', () => {

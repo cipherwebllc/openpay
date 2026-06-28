@@ -5,7 +5,7 @@
 // (buildReceiveWithAuthorizationTypedData = hook/facilitator と同式)。submit/poll は selfHostRelayer を
 // モックして success に倒す。Amoy(80002・testnet) を使い MAINNET_CHAINS の KV/gas-ceiling 前提を回避。
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi, type Mock } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Hex } from 'viem';
 import {
@@ -94,13 +94,14 @@ type Handlers = {
 async function loadFacilitator(opts?: {
   flag?: string;
   relayerKey?: string;
+  forwarder?: string; // '' で forwarder 未設定 (not-ready 枝の検証用)
 }): Promise<Handlers> {
   vi.stubEnv(
     'NEXT_PUBLIC_ENABLE_X402_FACILITATOR',
     opts?.flag === undefined ? '1' : opts.flag,
   );
   vi.stubEnv('RELAYER_PRIVATE_KEY', opts?.relayerKey ?? RELAYER_PK);
-  vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', FORWARDER);
+  vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', opts?.forwarder ?? FORWARDER);
   vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', FEE_RECEIVER);
   vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '');
   vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY);
@@ -301,6 +302,30 @@ describe('x402 facilitator /verify', () => {
       invalidReason: 'unsupported_network',
     });
   });
+
+  it('不正 JSON → 400 invalid_json', async () => {
+    const { verify } = await loadFacilitator();
+    const bad = new Request('http://x/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    const res = await verify(bad);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ isValid: false, invalidReason: 'invalid_json' });
+  });
+
+  it('facilitator 未準備 (forwarder 未設定) → 503 forwarder_unconfigured', async () => {
+    const { verify } = await loadFacilitator({ forwarder: '' });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await verify(reqOf('http://x/verify', facilitatorBody(params, sig)));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      isValid: false,
+      invalidReason: 'forwarder_unconfigured',
+    });
+  });
 });
 
 describe('x402 facilitator /settle', () => {
@@ -318,6 +343,30 @@ describe('x402 facilitator /settle', () => {
       success: false,
       errorReason: 'relay_not_configured',
     });
+  });
+
+  it('不正 JSON → 400 invalid_json', async () => {
+    const { settle } = await loadFacilitator();
+    const bad = new Request('http://x/settle', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    });
+    const res = await settle(bad);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ success: false, errorReason: 'invalid_json' });
+  });
+
+  it('巨大ボディ (>4KB) → 413 payload_too_large', async () => {
+    const { settle } = await loadFacilitator();
+    const big = new Request('http://x/settle', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pad: 'a'.repeat(5000) }), // MAX_BODY_BYTES=4096 超
+    });
+    const res = await settle(big);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ success: false, errorReason: 'payload_too_large' });
   });
 
   it('正しい署名 + 正しい fee → success + receipt 発行 → verify-receipt が valid', async () => {
@@ -387,5 +436,188 @@ describe('x402 facilitator /settle', () => {
       success: false,
       errorReason: 'fee_receiver_mismatch',
     });
+  });
+
+  it('構造不正ボディ → 400 invalid_body (broadcast しない)', async () => {
+    const { settle } = await loadFacilitator();
+    const res = await settle(reqOf('http://x/settle', { paymentPayload: 'nope' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ success: false, errorReason: 'invalid_body' });
+  });
+
+  it('facilitator 未準備 (forwarder 未設定) → 503 forwarder_unconfigured', async () => {
+    const { settle } = await loadFacilitator({ forwarder: '' });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      success: false,
+      errorReason: 'forwarder_unconfigured',
+    });
+  });
+
+  // on-chain 確定が revert: broadcast 済 tx を添えて success:false (再送不可) を 200 で返す。
+  it('settle が reverted → 200 success:false errorReason:reverted + transaction', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.pollSelfHost as unknown as Mock).mockResolvedValueOnce({
+      state: 'reverted',
+      txHash: TX_HASH,
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      success: false,
+      errorReason: 'reverted',
+      transaction: TX_HASH,
+      network: 'eip155:80002',
+      payer: CUSTOMER,
+    });
+  });
+
+  // broadcast 済だが未確定 → 202 (client は再送してはならない = 二重支払い防止)。
+  it('settle が pending → 202 success:false errorReason:pending', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.pollSelfHost as unknown as Mock).mockResolvedValueOnce({
+      state: 'pending',
+      txHash: TX_HASH,
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({
+      success: false,
+      errorReason: 'pending',
+      transaction: TX_HASH,
+    });
+  });
+
+  // poll が確実な失敗 (未送信) → 502 relay_error。
+  it('settle の poll が error → 502 relay_error', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.pollSelfHost as unknown as Mock).mockResolvedValueOnce({
+      state: 'error',
+      detail: 'rpc_unavailable',
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ success: false, errorReason: 'relay_error' });
+  });
+
+  // submit (broadcast) 自体が throw → broadcast 前失敗 → 502 relay_error。
+  it('settle の submit が throw → 502 relay_error (broadcast 前失敗)', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.submitSelfHost as unknown as Mock).mockRejectedValueOnce(
+      new Error('rpc down'),
+    );
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ success: false, errorReason: 'relay_error' });
+  });
+});
+
+// verify-receipt の正常系 (valid:true round-trip) は /settle テストで担保。ここは入力検証の枝。
+describe('x402 facilitator /verify-receipt (入力検証)', () => {
+  // parseReceipt が受理する最小の正当な receipt 形 (署名検証前の形チェック用)。
+  const VALID_RECEIPT = {
+    txHash: TX_HASH,
+    payer: CUSTOMER,
+    payTo: MERCHANT,
+    amount: (1000n * JPYC).toString(),
+    fee: (10n * JPYC).toString(),
+    asset: JPYC_AMOY,
+    chainId: AMOY,
+    timestamp: 1_700_000_000,
+    nonce: SALT,
+  };
+
+  it('flag OFF → 404', async () => {
+    const { verifyReceipt } = await loadFacilitator({ flag: '' });
+    const res = await verifyReceipt(reqOf('http://x/verify-receipt', {}));
+    expect(res.status).toBe(404);
+  });
+
+  it('不正 JSON → 400 invalid_json', async () => {
+    const { verifyReceipt } = await loadFacilitator();
+    const bad = new Request('http://x/verify-receipt', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    const res = await verifyReceipt(bad);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ valid: false, error: 'invalid_json' });
+  });
+
+  it('object でない body (JSON number) → {valid:false, signer:null}', async () => {
+    const { verifyReceipt } = await loadFacilitator();
+    const req = new Request('http://x/verify-receipt', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '5',
+    });
+    const res = await verifyReceipt(req);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ valid: false, signer: null });
+  });
+
+  it('receipt 欠落/不正形 → {valid:false, signer:null}', async () => {
+    const { verifyReceipt } = await loadFacilitator();
+    const res = await verifyReceipt(
+      reqOf('http://x/verify-receipt', { receipt: { bogus: 1 }, signature: `0x${'11'.repeat(65)}` }),
+    );
+    expect(await res.json()).toEqual({ valid: false, signer: null });
+  });
+
+  it('signature が hex でない → {valid:false, signer:null}', async () => {
+    const { verifyReceipt } = await loadFacilitator();
+    const res = await verifyReceipt(
+      reqOf('http://x/verify-receipt', { receipt: VALID_RECEIPT, signature: 'not-hex' }),
+    );
+    expect(await res.json()).toEqual({ valid: false, signer: null });
+  });
+
+  it('壊れた署名 (recover 不能) → {valid:false, signer:null} (例外を握る)', async () => {
+    const { verifyReceipt } = await loadFacilitator();
+    // hex だが復元不能な署名 (r=s=0)。verifyReceipt の recover が throw → catch。
+    const res = await verifyReceipt(
+      reqOf('http://x/verify-receipt', {
+        receipt: VALID_RECEIPT,
+        signature: `0x${'00'.repeat(65)}`,
+      }),
+    );
+    expect(await res.json()).toEqual({ valid: false, signer: null });
+  });
+
+  it('正当 receipt + 別 receipt の本物署名 → valid:false (中身と署名が不整合)', async () => {
+    const { settle, verifyReceipt } = await loadFacilitator();
+    // settle 成功で発行された本物 receipt を 2 つ作り、receipt 本体と署名を入れ替える。
+    // 署名は本物 (facilitator 鍵) だが対象 receipt が違う → 復元 signer は別アドレス → valid:false。
+    const params = goodParams();
+    const settled = (await (
+      await settle(reqOf('http://x/settle', facilitatorBody(params, await signReceive(params))))
+    ).json()) as { receipt: Record<string, unknown> };
+    const other = { ...goodParams(), intentSalt: `0x${'33'.repeat(32)}` as Hex };
+    const otherSettled = (await (
+      await settle(reqOf('http://x/settle', facilitatorBody(other, await signReceive(other))))
+    ).json()) as { receipt: { signature: string } };
+    const res = await verifyReceipt(
+      reqOf('http://x/verify-receipt', {
+        receipt: settled.receipt, // 中身は 1 つ目の receipt
+        signature: otherSettled.receipt.signature, // 署名は 2 つ目の receipt のもの
+      }),
+    );
+    expect(((await res.json()) as { valid: boolean }).valid).toBe(false);
   });
 });

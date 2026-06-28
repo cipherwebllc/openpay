@@ -187,4 +187,108 @@ describe('X402DiscoveryView', () => {
       expect.objectContaining({ method: 'DELETE' }),
     );
   });
+
+  it('登録: 表明チェック → POST /resources (attested:true + 入力値) → 「登録しました」+ スニペット', async () => {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    const fetchFn = installRoutingFetch([]); // owned 空 = 登録フォームのみ
+    renderWithIntl(<X402DiscoveryView />);
+
+    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+      target: { value: 'https://api.example.jp/paid/new' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+      target: { value: '新しい有料 API' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+      target: { value: '500' },
+    });
+
+    // 境界: 表明前は登録ボタン disabled・案内文を表示。
+    const submit = screen.getByRole('button', { name: '登録する' });
+    expect(submit).toBeDisabled();
+    expect(screen.getByText('登録には上記の表明への同意が必要です。')).toBeInTheDocument();
+    // 表明にチェック → 有効化。
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(submit).toBeEnabled();
+
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(fetchFn).toHaveBeenCalledWith(
+        '/api/facilitator/resources',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    // 実出力の検査: 送信 body に attested:true + 入力値が乗る。
+    const postCall = fetchFn.mock.calls.find(
+      ([u, init]) =>
+        u === '/api/facilitator/resources' &&
+        (init as RequestInit | undefined)?.method === 'POST',
+    );
+    const sentBody = JSON.parse(String((postCall![1] as RequestInit).body));
+    expect(sentBody).toMatchObject({
+      url: 'https://api.example.jp/paid/new',
+      description: '新しい有料 API',
+      priceJpyc: '500',
+      attested: true,
+    });
+    // 成功表示 + 402 スニペット。
+    expect(await screen.findByText('登録しました。')).toBeInTheDocument();
+    expect(screen.getByText('あなたのサーバで 402 を返す例:')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['resource_not_gated', /この URL は無料で公開されているため登録できません/],
+    ['attestation_required', /正当な権利があり、支払いゲートを実装している/],
+    ['too_many_resources', '操作に失敗しました (too_many_resources)。'],
+  ])('登録エラー %s → 対応文言を表示', async (errCode, expected) => {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      if (u === '/api/facilitator/resources' && method === 'POST') {
+        return { ok: false, json: async () => ({ error: errCode }) };
+      }
+      if (u === '/api/facilitator/resources') return { ok: true, json: async () => ({ resources: [] }) };
+      return { ok: true, json: async () => ({ items: [] }) };
+    }) as unknown as typeof fetch;
+    renderWithIntl(<X402DiscoveryView />);
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+
+  it('コピー: カタログ URL のコピーボタンで clipboard に書き込み「コピーしました」に変化', async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    renderWithIntl(<X402DiscoveryView />);
+    await screen.findByText('JP→EN 翻訳 API です');
+    fireEvent.click(screen.getByLabelText('コピー'));
+    // 実出力: clipboard にカタログ URL が渡る。
+    expect(writeText).toHaveBeenCalledWith(ITEM.resource);
+    // フィードバック: ラベルが「コピーしました」に変わる。
+    expect(await screen.findByLabelText('コピーしました')).toBeInTheDocument();
+  });
+
+  it('カタログ: 支払い計 (価格 1000 + 手数料 10 = 1010 JPYC) を表示', async () => {
+    renderWithIntl(<X402DiscoveryView />);
+    expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
+  });
+
+  it('空カタログ: catalogEmpty を表示', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ x402Version: 1, items: [] }),
+    })) as unknown as typeof fetch;
+    renderWithIntl(<X402DiscoveryView />);
+    expect(
+      await screen.findByText('まだ登録されたリソースはありません。'),
+    ).toBeInTheDocument();
+  });
 });
