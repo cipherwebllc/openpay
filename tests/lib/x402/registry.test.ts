@@ -33,6 +33,19 @@ vi.mock('@/lib/kv', () => ({
   // CAS_UPDATE / CAS_DEACTIVATE の Lua セマンティクスを in-memory で再現 (script で分岐)。
   kvEval: async (script: string, keys: string[], args: string[]) => {
     if (store.failEval) return { ok: false as const, reason: 'kv_error' };
+    // CAS_CREATE: LLEN(merchant index) cap 判定 + SET(resource) + LPUSH(discovery/merchant index)。
+    if (script.includes("redis.call('LLEN'")) {
+      const cap = Number(args[2]);
+      const merchantList = store.lists.get(keys[2]) ?? [];
+      if (merchantList.length >= cap) return { ok: true as const, value: -2 };
+      store.kv.set(keys[0], args[0]);
+      const idx = store.lists.get(keys[1]) ?? [];
+      idx.unshift(args[1]);
+      store.lists.set(keys[1], idx);
+      merchantList.unshift(args[1]);
+      store.lists.set(keys[2], merchantList);
+      return { ok: true as const, value: 1 };
+    }
     const raw = store.kv.get(keys[0]);
     if (raw === undefined) return { ok: true as const, value: -1 };
     let o: Record<string, unknown>;
@@ -76,7 +89,9 @@ import {
   deactivateResource,
   recordSettlement,
   resourceKey,
+  merchantResourcesKey,
   RESOURCES_INDEX,
+  MAX_RESOURCES_PER_MERCHANT,
   type X402Resource,
   type X402ResourceInput,
 } from '@/lib/x402/registry';
@@ -171,12 +186,32 @@ describe('lib/x402/registry store', () => {
       'id1',
       1000,
     );
-    expect(res).not.toBeNull();
-    expect(res!.network).toBe('eip155:80002'); // testnet → Amoy CAIP-2
-    expect(res!.active).toBe(true);
-    expect(await getResource('id1')).toEqual(res);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.resource.network).toBe('eip155:80002'); // testnet → Amoy CAIP-2
+    expect(res.resource.active).toBe(true);
+    expect(await getResource('id1')).toEqual(res.resource);
     expect((await listResourcesForMerchant(OWNER))!.map((r) => r.id)).toContain('id1');
-    expect((await listActiveResources()).map((r) => r.id)).toContain('id1');
+    expect((await listActiveResources())!.map((r) => r.id)).toContain('id1');
+  });
+
+  it('createResource: cap 到達なら too_many (原子的 cap・並列でも擦り抜けない)', async () => {
+    // merchant index を cap (100) ぶん埋める → CAS_CREATE の LLEN 判定で -2 (作成しない)。
+    store.lists.set(merchantResourcesKey(OWNER), Array(MAX_RESOURCES_PER_MERCHANT).fill('x'));
+    const r = await createResource(input(), 'over', 1);
+    expect(r).toEqual({ ok: false, reason: 'too_many' });
+    expect(await getResource('over')).toBeNull(); // 保存もされない (原子的)
+  });
+
+  it('createResource: cap-1 件なら作成できる (境界)', async () => {
+    store.lists.set(merchantResourcesKey(OWNER), Array(MAX_RESOURCES_PER_MERCHANT - 1).fill('x'));
+    const r = await createResource(input(), 'last', 1);
+    expect(r.ok).toBe(true);
+  });
+
+  it('createResource: KV エラー → storage (route は 503)', async () => {
+    store.failEval = true;
+    expect(await createResource(input(), 'x', 1)).toEqual({ ok: false, reason: 'storage' });
   });
 
   it('listActiveResources は inactive を除外', async () => {
@@ -199,7 +234,7 @@ describe('lib/x402/registry store', () => {
     };
     store.kv.set(resourceKey('ina'), JSON.stringify(inactive));
     store.lists.set(RESOURCES_INDEX, ['ina', 'act']);
-    const ids = (await listActiveResources()).map((r) => r.id);
+    const ids = (await listActiveResources())!.map((r) => r.id);
     expect(ids).toContain('act');
     expect(ids).not.toContain('ina');
   });
@@ -257,7 +292,7 @@ describe('lib/x402/registry updateResource (owner 編集)', () => {
 
   it('更新は公開カタログ・owner 一覧に反映される', async () => {
     await updateResource('id1', OWNER, input({ priceJpyc: '777' }));
-    expect((await listActiveResources())[0].priceJpyc).toBe('777');
+    expect((await listActiveResources())![0].priceJpyc).toBe('777');
     expect((await listResourcesForMerchant(OWNER))![0].priceJpyc).toBe('777');
   });
 
@@ -301,7 +336,7 @@ describe('lib/x402/registry deactivateResource (owner soft-delete)', () => {
     const r = await deactivateResource('id1', OWNER);
     expect(r).toEqual({ ok: true });
     expect((await getResource('id1'))!.active).toBe(false); // データは残る (監査)
-    expect((await listActiveResources()).map((x) => x.id)).not.toContain('id1');
+    expect((await listActiveResources())!.map((x) => x.id)).not.toContain('id1');
     expect((await listResourcesForMerchant(OWNER))!.map((x) => x.id)).not.toContain('id1');
   });
 

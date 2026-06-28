@@ -91,7 +91,14 @@ describe('lib/x402/moderation isPrivateHost', () => {
     '100.64.0.1', // CGNAT 100.64.0.0/10
     '100.127.255.255',
     '::1',
-    '::ffff:127.0.0.1', // IPv4-mapped IPv6
+    '::', // unspecified
+    '[::1]', // bracketed (URL hostname 形)
+    '::ffff:127.0.0.1', // IPv4-mapped IPv6 (dotted)
+    '::ffff:7f00:1', // IPv4-mapped IPv6 (hex 圧縮形) = 127.0.0.1 — 旧 regex の取りこぼし
+    '0:0:0:0:0:ffff:7f00:1', // mapped 完全表記 = 127.0.0.1
+    '::ffff:a9fe:a9fe', // mapped 169.254.169.254 (cloud metadata)
+    '::ffff:c0a8:101', // mapped 192.168.1.1
+    '::ffff:0a00:1', // mapped 10.0.0.1
     'fe80::1', // link-local
     'fc00::1', // ULA
     'fd12::34',
@@ -111,6 +118,8 @@ describe('lib/x402/moderation isPrivateHost', () => {
     '100.63.0.1', // CGNAT 下限の直前
     '100.128.0.1', // CGNAT 上限の直後
     '2606:4700::1111', // 公開 IPv6 (Cloudflare)
+    '::ffff:808:808', // mapped 8.8.8.8 (公開・mapped でも内側が公開なら通す)
+    '::ffff:0808:0808', // 同 (zero-padded)
   ])('public %s → false', (host) => {
     expect(isPrivateHost(host)).toBe(false);
   });

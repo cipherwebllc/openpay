@@ -43,9 +43,22 @@ vi.mock('@/lib/kv', () => ({
     const end = stop < 0 ? a.length : stop + 1;
     return { ok: true as const, value: a.slice(start, end) };
   },
-  // CAS_UPDATE / CAS_DEACTIVATE (registry) の Lua セマンティクスを in-memory で再現 (script で分岐)。
+  // CAS_CREATE / CAS_UPDATE / CAS_DEACTIVATE (registry) の Lua セマンティクスを in-memory で再現。
   kvEval: async (script: string, keys: string[], args: string[]) => {
     if (store.failEval) return { ok: false as const, reason: 'kv_error' };
+    // CAS_CREATE: LLEN(merchant index) cap 判定 + SET(resource) + LPUSH(discovery/merchant index)。
+    if (script.includes("redis.call('LLEN'")) {
+      const cap = Number(args[2]);
+      const merchantList = store.lists.get(keys[2]) ?? [];
+      if (merchantList.length >= cap) return { ok: true as const, value: -2 };
+      store.kv.set(keys[0], args[0]);
+      const idx = store.lists.get(keys[1]) ?? [];
+      idx.unshift(args[1]);
+      store.lists.set(keys[1], idx);
+      merchantList.unshift(args[1]);
+      store.lists.set(keys[2], merchantList);
+      return { ok: true as const, value: 1 };
+    }
     const raw = store.kv.get(keys[0]);
     if (raw === undefined) return { ok: true as const, value: -1 };
     let o: Record<string, unknown>;
@@ -297,10 +310,10 @@ describe('x402 facilitator /resources', () => {
     expect((await resources.POST(postReq(validBody))).status).toBe(201);
   });
 
-  it('KV 保存失敗 (createResource null) → 503 storage_unavailable', async () => {
+  it('KV 保存失敗 (createResource storage) → 503 storage_unavailable', async () => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
-    store.failSet = true;
+    store.failEval = true; // createResource は CAS_CREATE (kvEval) で原子保存する
     const res = await resources.POST(postReq(validBody));
     expect(res.status).toBe(503);
     expect((await res.json()).error).toBe('storage_unavailable');
@@ -401,6 +414,18 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     expect((await res.json()).error).toBe('resource_not_gated');
   });
 
+  it('非 owner の PATCH は moderation probe を実行しない (SSRF 踏み台化防止)', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    mockFreelyAccessible.mockClear();
+    mockRequireSession.mockResolvedValue({ ok: true, address: STRANGER });
+    mockFreelyAccessible.mockResolvedValue(true); // 呼ばれたら probe された証拠
+    const res = await idRoute.PATCH(patchReq(validBody), ctx(id));
+    expect(res.status).toBe(403); // owner-auth が probe より先に弾く
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
+  });
+
   it('編集の CAS が KV エラー → 503 storage_unavailable (未存在と誤魔化さない)', async () => {
     const { resources, idRoute } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
@@ -475,6 +500,15 @@ describe('x402 /discovery', () => {
   it('flag OFF → 404', async () => {
     const { discovery } = await load('');
     expect((await discovery()).status).toBe(404);
+  });
+
+  it('KV エラー → 503 (空カタログと誤認/キャッシュさせない・無 Cache-Control)', async () => {
+    const { discovery } = await load();
+    store.failLrange = true; // index 読取が失敗
+    const res = await discovery();
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('storage_unavailable');
+    expect(res.headers.get('cache-control')).toBeNull(); // 503 は edge に焼き付けない
   });
 
   it('登録済 resource を accepts (fee 込み PaymentRequirements) 付きで列挙', async () => {

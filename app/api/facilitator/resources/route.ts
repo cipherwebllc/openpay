@@ -74,11 +74,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const id = crypto.randomUUID();
-  const resource = await createResource(parsed.input, id, Date.now());
-  if (!resource) {
+  const created = await createResource(parsed.input, id, Date.now());
+  if (!created.ok) {
+    // 上の soft cap pre-check 通過後に並列 POST が cap に達したレースは createResource (原子的 cap) が
+    // too_many で弾く。それ以外は KV エラー。
+    if (created.reason === 'too_many') {
+      return NextResponse.json({ error: 'too_many_resources' }, { status: 429 });
+    }
     logger.warn('x402.facilitator.resource_create_failed', { merchant: session.address });
     return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
   }
+  const resource = created.resource;
 
   // paywall スニペット例 (resource server が 402 で返す accepts の作り方)。
   const amount = (BigInt(resource.priceJpyc) * 10n ** 18n).toString();
