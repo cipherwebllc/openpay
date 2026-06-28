@@ -210,6 +210,15 @@ export async function countMerchantResources(wallet: string): Promise<number | n
   return r.value.length;
 }
 
+// owner 認可つき CAS の共通前段: 取得 → decode → 形検査 → owner 一致確認。一致時は decoded table を
+// ローカル o に残し、続く本処理 (更新 / 無効化) が o を書き換える。途中脱出の戻り値は両 CAS で共通:
+// -1=未存在 / -2=malformed / 0=owner 不一致。
+const CAS_OWNER_GUARD =
+  "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
+  'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
+  "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
+  'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ';
+
 // owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/payTo) を更新する CAS。
 // read→write を atomic にし (handleStore と同流儀)、特に soft-delete (active:false) との競合で
 // 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
@@ -217,10 +226,7 @@ export async function countMerchantResources(wallet: string): Promise<number | n
 // payTo/価格) を後から書き換えさせない。
 // 戻り: 更新後 JSON 文字列=成功 / -1=未存在 / -2=malformed / -3=削除済 / 0=owner 不一致。
 const CAS_UPDATE =
-  "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
-  'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
-  "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
-  'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ' +
+  CAS_OWNER_GUARD +
   'if o.active==false then return -3 end; ' +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
@@ -228,10 +234,7 @@ const CAS_UPDATE =
 // owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
 // 戻り: 1=無効化 / 2=既に無効 / -1=未存在 / -2=malformed / 0=owner 不一致。
 const CAS_DEACTIVATE =
-  "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
-  'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
-  "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
-  'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ' +
+  CAS_OWNER_GUARD +
   'if o.active==false then return 2 end; ' +
   "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); return 1";
 

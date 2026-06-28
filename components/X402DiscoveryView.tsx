@@ -5,7 +5,7 @@
 // /api/facilitator/resources で管理する (GET=一覧 / POST=登録 / [id] PATCH=編集 / [id] DELETE=無効化)。
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import {
@@ -263,6 +263,38 @@ export function X402DiscoveryView() {
     </button>
   );
 
+  // resource カード共通の頭部 (アイコン + カテゴリ + 価格 + 説明 + URL/コピー)。owned 一覧と公開カタログで
+  // 共有する。priceNode は右肩の価格表示 (owned=価格のみ / catalog=価格+手数料+合計) を呼び元が差し込む。
+  const cardHead = (opts: {
+    category: string;
+    priceNode: ReactNode;
+    description: string;
+    url: string;
+    copyKey: string;
+  }) => {
+    const Icon = categoryIcon(opts.category);
+    return (
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/5 text-brand">
+          <Icon className="h-5 w-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+              {opts.category}
+            </span>
+            {opts.priceNode}
+          </div>
+          <p className="mt-0.5 text-sm font-medium text-slate-800">{opts.description}</p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="min-w-0 truncate font-mono text-xs text-slate-400">{opts.url}</span>
+            {copyBtn(opts.copyKey, opts.url)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* 出品: 加盟店登録 / 編集 */}
@@ -430,79 +462,65 @@ export function X402DiscoveryView() {
           <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
           <p className="mt-1 text-sm text-slate-500">{t('yourResourcesSubtitle')}</p>
           <ul className="mt-4 space-y-3">
-            {owned.map((r) => {
-              const Icon = categoryIcon(r.category);
-              return (
-                <li
-                  key={r.id}
-                  className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/5 text-brand">
-                      <Icon className="h-5 w-5" aria-hidden />
+            {owned.map((r) => (
+              <li
+                key={r.id}
+                className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card"
+              >
+                {cardHead({
+                  category: r.category,
+                  priceNode: (
+                    <span className="shrink-0 text-sm font-bold text-slate-900">
+                      {r.priceJpyc} JPYC
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                          {r.category}
-                        </span>
-                        <span className="shrink-0 text-sm font-bold text-slate-900">
-                          {r.priceJpyc} JPYC
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-sm font-medium text-slate-800">{r.description}</p>
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <span className="min-w-0 truncate font-mono text-xs text-slate-400">
-                          {r.url}
-                        </span>
-                        {copyBtn(`owned-${r.id}`, r.url)}
-                      </div>
-                    </div>
+                  ),
+                  description: r.description,
+                  url: r.url,
+                  copyKey: `owned-${r.id}`,
+                })}
+                {confirmDeleteId === r.id ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+                    <span className="text-sm text-slate-600">{t('deleteConfirm')}</span>
+                    <button
+                      type="button"
+                      onClick={() => void onDelete(r.id)}
+                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+                    >
+                      {t('deleteConfirmCta')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="text-xs font-medium text-slate-500 hover:underline"
+                    >
+                      {t('keepCta')}
+                    </button>
                   </div>
-                  {confirmDeleteId === r.id ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-                      <span className="text-sm text-slate-600">{t('deleteConfirm')}</span>
-                      <button
-                        type="button"
-                        onClick={() => void onDelete(r.id)}
-                        className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
-                      >
-                        {t('deleteConfirmCta')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteId(null)}
-                        className="text-xs font-medium text-slate-500 hover:underline"
-                      >
-                        {t('keepCta')}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
-                      <button
-                        type="button"
-                        onClick={() => onEdit(r)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand-dark"
-                      >
-                        <Pencil className="h-3 w-3" aria-hidden />
-                        {t('editCta')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfirmDeleteId(r.id);
-                          setNotice(null);
-                        }}
-                        className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:border-red-400"
-                      >
-                        <Trash2 className="h-3 w-3" aria-hidden />
-                        {t('deleteCta')}
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+                ) : (
+                  <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => onEdit(r)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand-dark"
+                    >
+                      <Pencil className="h-3 w-3" aria-hidden />
+                      {t('editCta')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmDeleteId(r.id);
+                        setNotice(null);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:border-red-400"
+                    >
+                      <Trash2 className="h-3 w-3" aria-hidden />
+                      {t('deleteCta')}
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
           </ul>
         </section>
       )}
@@ -527,7 +545,6 @@ export function X402DiscoveryView() {
           <ul className="mt-4 space-y-3">
             {items.map((item) => {
               const fee = feeJpycOf(item);
-              const Icon = categoryIcon(item.category);
               let total: string | null = null;
               try {
                 if (fee) total = (BigInt(item.priceJpyc) + BigInt(fee)).toString();
@@ -539,42 +556,29 @@ export function X402DiscoveryView() {
                   key={item.resource}
                   className="group rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-hover"
                 >
-                  <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/5 text-brand">
-                      <Icon className="h-5 w-5" aria-hidden />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                          {item.category}
-                        </span>
-                        <div className="shrink-0 text-right">
-                          <div className="text-sm font-bold text-slate-900">
-                            {item.priceJpyc} JPYC
-                            {fee && (
-                              <span className="ml-1 text-[11px] font-normal text-slate-400">
-                                {t('feeNote', { fee })}
-                              </span>
-                            )}
-                          </div>
-                          {total && (
-                            <div className="text-[11px] text-slate-400">
-                              {t('payTotal', { total })}
-                            </div>
+                  {cardHead({
+                    category: item.category,
+                    priceNode: (
+                      <div className="shrink-0 text-right">
+                        <div className="text-sm font-bold text-slate-900">
+                          {item.priceJpyc} JPYC
+                          {fee && (
+                            <span className="ml-1 text-[11px] font-normal text-slate-400">
+                              {t('feeNote', { fee })}
+                            </span>
                           )}
                         </div>
+                        {total && (
+                          <div className="text-[11px] text-slate-400">
+                            {t('payTotal', { total })}
+                          </div>
+                        )}
                       </div>
-                      <p className="mt-0.5 text-sm font-medium text-slate-800">
-                        {item.description}
-                      </p>
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <span className="min-w-0 truncate font-mono text-xs text-slate-400">
-                          {item.resource}
-                        </span>
-                        {copyBtn(`cat-${item.resource}`, item.resource)}
-                      </div>
-                    </div>
-                  </div>
+                    ),
+                    description: item.description,
+                    url: item.resource,
+                    copyKey: `cat-${item.resource}`,
+                  })}
                 </li>
               );
             })}
