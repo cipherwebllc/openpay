@@ -10,6 +10,7 @@ import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { logger } from '@/lib/logger';
 import { parseResourceInput, updateResource, deactivateResource } from '@/lib/x402/registry';
+import { isFreelyAccessible } from '@/lib/x402/moderation';
 
 export const runtime = 'nodejs';
 export const maxDuration = 15;
@@ -38,6 +39,16 @@ export async function PATCH(
   }
   const parsed = parseResourceInput(raw, session.address);
   if (!parsed.ok) return NextResponse.json({ error: parsed.reason }, { status: 400 });
+
+  // 編集で URL を無料公開のものに差し替える濫用も弾く (POST と同じモデレーション)。
+  if (await isFreelyAccessible(parsed.input.url)) {
+    logger.warn('x402.facilitator.resource_not_gated', {
+      id,
+      merchant: session.address,
+      url: parsed.input.url,
+    });
+    return NextResponse.json({ error: 'resource_not_gated' }, { status: 400 });
+  }
 
   const result = await updateResource(id, session.address, parsed.input);
   if (!result.ok) {

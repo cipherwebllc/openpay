@@ -14,6 +14,7 @@ import { isAddress, getAddress } from 'viem';
 import { kvGet, kvSet, kvLpush, kvLrange, kvEval } from '@/lib/kv';
 import { caip2ForChainId } from './network';
 import { x402FacilitatorConfig } from './facilitatorConfig';
+import { isPrivateHost } from './moderation';
 
 export const RESOURCES_INDEX = 'x402:resources:index';
 export const SETTLEMENTS_INDEX = 'x402:settlements:index';
@@ -79,13 +80,28 @@ export type ParseResourceResult =
 export function parseResourceInput(
   raw: unknown,
   owner: string,
+  opts: { requireAttestation?: boolean } = {},
 ): ParseResourceResult {
   if (typeof raw !== 'object' || raw === null) {
     return { ok: false, reason: 'invalid_body' };
   }
   const r = raw as Record<string, unknown>;
+  // 出品の正当性表明: 登録者が当該リソースを提供・課金する正当な権利を有し、支払いゲート
+  // (HTTP 402 等) を実装していることの表明。新規登録 (POST・requireAttestation) でのみ必須。
+  if (opts.requireAttestation && r.attested !== true) {
+    return { ok: false, reason: 'attestation_required' };
+  }
   const url = typeof r.url === 'string' ? r.url.trim() : '';
   if (!/^https?:\/\//.test(url) || url.length > MAX_URL) {
+    return { ok: false, reason: 'invalid_url' };
+  }
+  // SSRF ガード: private/loopback/link-local 宛は登録不可 (モデレーション probe 先を public host に
+  // 限定する + そもそも公開 API ではない)。URL パース不能も弾く。
+  try {
+    if (isPrivateHost(new URL(url).hostname)) {
+      return { ok: false, reason: 'invalid_url' };
+    }
+  } catch {
     return { ok: false, reason: 'invalid_url' };
   }
   const description = typeof r.description === 'string' ? r.description.trim() : '';
