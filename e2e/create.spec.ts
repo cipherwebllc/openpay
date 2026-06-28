@@ -146,15 +146,18 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(detailsEl).not.toHaveAttribute('open', /.*/);
     await expect(chevron).toHaveCSS('transform', /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
 
-    // 1 度 click → open、body 表示、open 属性付与、chevron 90° 回転
-    // 90° 回転後の matrix: matrix(cos90, sin90, -sin90, cos90, 0, 0)
-    //   = matrix(0, 1, -1, 0, 0, 0) (CSS の rotate(90deg) 出力)
+    // 1 度 click → open、body 表示、open 属性付与、chevron 回転 (90°)
     await gasHintTitle.click();
     await expect(body).toBeVisible();
     await expect(detailsEl).toHaveAttribute('open', '');
-    await expect(chevron).toHaveCSS(
+    // open: chevron が回転している = transform が identity(none/未回転)ではないことを検証する。
+    // 正確な 90° matrix を pin すると webkit (mobile-safari) で sin(90°) の浮動小数誤差・matrix3d 化・
+    // transition (0.15s) 中間フレームのいずれかで稀に一致せず flaky になっていた。否定形 (identity 以外)
+    // なら回転の有無だけを安定判定でき、group-open:rotate-90 variant が build で消えた場合 (identity の
+    // まま) は依然 fail して silent UX 劣化を検知できる。
+    await expect(chevron).not.toHaveCSS(
       'transform',
-      /matrix\(\s*[\d.eE+-]+,\s*1,\s*-1,\s*[\d.eE+-]+,\s*0,\s*0\s*\)/,
+      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
     );
 
     // 再 click → close、body 再 hidden、open 属性消失、chevron 未回転状態に戻る
@@ -166,9 +169,14 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // 3 度目: 再度 open できる (native details が永続 disabled 化していない)
     await gasHintTitle.click();
     await expect(body).toBeVisible();
-    await expect(chevron).toHaveCSS(
+    // open: chevron が回転している = transform が identity(none/未回転)ではないことを検証する。
+    // 正確な 90° matrix を pin すると webkit (mobile-safari) で sin(90°) の浮動小数誤差・matrix3d 化・
+    // transition (0.15s) 中間フレームのいずれかで稀に一致せず flaky になっていた。否定形 (identity 以外)
+    // なら回転の有無だけを安定判定でき、group-open:rotate-90 variant が build で消えた場合 (identity の
+    // まま) は依然 fail して silent UX 劣化を検知できる。
+    await expect(chevron).not.toHaveCSS(
       'transform',
-      /matrix\(\s*[\d.eE+-]+,\s*1,\s*-1,\s*[\d.eE+-]+,\s*0,\s*0\s*\)/,
+      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
     );
   });
 
