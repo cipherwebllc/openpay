@@ -16,9 +16,13 @@ function summary(o: Partial<Summary> = {}): Summary {
 }
 
 describe('HistorySummary', () => {
-  it('件数行・トークン別合計・円換算 GMV を表示', () => {
+  it('ステータスチップ (非ゼロのみ)・トークン別合計・円換算 GMV を表示', () => {
     render(<HistorySummary summary={summary()} />);
-    expect(screen.getByText(/総数 3 件/)).toBeInTheDocument();
+    // 非ゼロのステータスのみチップ表示 (成功 2 / 差し戻し 1)、ゼロ (エラー / 確認待ち) は出さない
+    expect(screen.getByText('成功 2')).toBeInTheDocument();
+    expect(screen.getByText('差し戻し 1')).toBeInTheDocument();
+    expect(screen.queryByText(/エラー/)).toBeNull();
+    expect(screen.queryByText(/確認待ち/)).toBeNull();
     expect(screen.getByText('1000 JPYC')).toBeInTheDocument(); // jpyc 合計
     expect(screen.getByText('6.4 USDC')).toBeInTheDocument(); // usdc 合計
     expect(screen.getByText(/¥2,500/)).toBeInTheDocument(); // GMV
