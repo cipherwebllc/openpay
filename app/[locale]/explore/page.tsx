@@ -5,6 +5,7 @@
 
 import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
+import { Compass } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
 import { ExploreList } from '@/components/ExploreList';
 
@@ -34,10 +35,20 @@ export default async function ExplorePage({
   return (
     <AppShell>
       <header className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-          {t('pageTitle')}
-        </h1>
-        <p className="mt-2 text-sm text-slate-600">{t('pageDescription')}</p>
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-brand"
+          >
+            <Compass className="h-6 w-6" />
+          </span>
+          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+            {t('pageTitle')}
+          </h1>
+        </div>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">
+          {t('pageDescription')}
+        </p>
       </header>
       <ExploreList />
     </AppShell>

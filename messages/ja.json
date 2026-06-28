@@ -144,6 +144,7 @@
   "Explore": {
     "pageTitle": "探す",
     "pageDescription": "JPYC / USDC が使える外部サービス・取引所・dApp・bridge をカテゴリ別にまとめました。リンクは外部サイトに飛びます。",
+    "filterAll": "すべて",
     "categoryExchange": "取引所 (CEX)",
     "categoryExchangeDescription": "法定通貨と暗号資産を売買する取引所。日本居住者向け on/off-ramp 中心。",
     "categoryDex": "DEX (分散型取引所)",
