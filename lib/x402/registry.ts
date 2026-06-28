@@ -172,13 +172,12 @@ export async function getResource(id: string): Promise<X402Resource | null> {
   return safeParse<X402Resource>(r.value);
 }
 
+// id 群を resource に解決する。公開カタログ (discovery) の hot path なので並列取得する
+// (handleStore と同流儀)。Promise.all は配列順を保つので index の新しい順 (LPUSH) は維持され、
+// malformed/欠落 (null) は除外する。
 async function resolveIds(ids: string[]): Promise<X402Resource[]> {
-  const out: X402Resource[] = [];
-  for (const id of ids) {
-    const r = await getResource(id);
-    if (r) out.push(r);
-  }
-  return out;
+  const resolved = await Promise.all(ids.map((id) => getResource(id)));
+  return resolved.filter((r): r is X402Resource => r !== null);
 }
 
 // owner の resource 一覧 (登録 UI 用)。active のみ — deactivate (soft-delete) 済は owner 画面からも
