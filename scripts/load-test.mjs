@@ -14,6 +14,8 @@
 //   - market rates (/api/market/rates) : 動的 API (CoinGecko + 5分キャッシュ)。
 //                                        キャッシュ層と外部依存の負荷耐性を見る
 //   - payment page (/ja/pay?...)       : SSR + URL parse、決済導線
+//   - x402 discovery (/api/discovery)  : facilitator 公開カタログ (KV ファンアウト + edge キャッシュ)。
+//                                        flag ON の preview でのみ実カタログを返す (OFF は 404)
 //
 // 終了コード: エラー率 > --max-error-rate (既定 1%) or p99 > --max-p99-ms
 //   (既定 制限なし) で 1 を返し CI/gate で fail させられる。
@@ -65,6 +67,10 @@ function buildScenarios(opts) {
       weight: 2,
       path: `/ja/pay?to=${opts.payTo}&token=usdc&amount=10`,
     },
+    // x402 公開カタログ (facilitator)。AI エージェントがポーリングする read-only API。
+    // flag OFF の環境では 404 (= 計測上の応答)。flag ON の preview で実カタログ負荷 (KV ファンアウト +
+    // edge キャッシュ) を測る。
+    { name: 'x402-discovery', weight: 2, path: '/api/discovery' },
   ];
 }
 

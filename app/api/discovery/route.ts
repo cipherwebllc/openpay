@@ -47,5 +47,12 @@ export async function GET(): Promise<NextResponse> {
     };
   });
 
-  return NextResponse.json({ x402Version: 1, items });
+  // 公開カタログは AI エージェントがポーリングする read-only エンドポイント。edge (Vercel CDN) で
+  // 短期キャッシュし、ポーリング毎の KV ファンアウトを抑える。s-maxage=10 = 最大 10 秒の鮮度
+  // (新規登録/無効化はこの範囲で反映)、stale-while-revalidate=30 = revalidate 中も即応 (古い値を返す)。
+  // 認証なしの公開データのみなので edge 共有キャッシュは安全 (owner 専用一覧は別 route で無キャッシュ)。
+  return NextResponse.json(
+    { x402Version: 1, items },
+    { headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30' } },
+  );
 }

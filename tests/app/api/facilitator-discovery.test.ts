@@ -572,4 +572,20 @@ describe('x402 /discovery', () => {
       Array.from({ length: N }, (_, i) => `https://api.example.jp/paid/r${N - 1 - i}`),
     );
   });
+
+  it('200 応答は edge キャッシュ可能 (Cache-Control s-maxage)', async () => {
+    const { discovery } = await load();
+    const res = await discovery();
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe(
+      'public, s-maxage=10, stale-while-revalidate=30',
+    );
+  });
+
+  it('flag OFF (404) は Cache-Control を付けない', async () => {
+    const { discovery } = await load('');
+    const res = await discovery();
+    expect(res.status).toBe(404);
+    expect(res.headers.get('cache-control')).toBeNull();
+  });
 });

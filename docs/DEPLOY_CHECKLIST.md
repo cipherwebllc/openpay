@@ -1177,3 +1177,80 @@ forwarderRecover を mock しているため、**実 on-chain 分割の実証は
 - 決済QR (`/pay`)・チップ (`/tip`)・USDC・手動 checkout リンクは**対象外** (本機能で不変)。
 - 料金性質の弁護士確認は不要 (memory:project_fsa_clearance: % 連動でも資金決済法上の登録不要)・
   税務は別 (税理士)。特商法 / 景表法の開示は条件付き本文 (施行日 2026-06-17) でマージ済。
+
+## §14 x402 facilitator (JPYC 都度課金) go-live SOP
+
+AI エージェント向け x402 (HTTP 402) ファシリテーター + 公開カタログ (discovery)。買い手上乗せ手数料
+max(2 JPYC, 1%) を**非カストディ**に forwarder 分割 (seller = 表示額・feeReceiver = 手数料)。settle は LIVE の
+recover (`lib/relay/forwarderSettleService`) と同一コアを再利用。詳細は memory:project_x402_facilitator。
+料率の真実点は `lib/x402/facilitatorConfig.ts` (legal `DISCLOSED_X402_FEE` フェンス)。対象 chain は
+Polygon (mainnet) / Amoy (testnet)。
+
+### §14.1 既定 (現状 = inert・ロールバック先)
+- `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` 既定 **OFF**。OFF では全 route (`/api/facilitator/{supported,
+  verify,settle,verify-receipt,resources,resources/[id]}` + `/api/discovery`) が **404 = 完全 inert**。
+  X402DiscoveryView もマウントされない。
+- **この OFF が安全状態であり、ロールバック先**。
+
+### §14.2 go-live 手順 (順序厳守)
+1. **先に testnet 実機 E2E (必須・§14.4)**。通すまで mainnet 点灯しない。
+2. **開示の同梱**: `lib/news.ts` の x402 ファシリテーター手数料お知らせ (施行日 2026-06-28・
+   `DISCLOSED_X402_FEE` bps=100 / floor=2 JPYC) がリリースに含まれること。env 料率を変えるなら起動時
+   `x402.facilitator.fee_disclosure_divergence` warn が出ないよう本文も改定する。
+3. `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定済 (mainnet 未設定は build throw)。手数料の受領先。
+4. `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON` 設定済 (未設定は readiness 503 `forwarder_unconfigured`)。
+5. **専用 receipt 署名鍵**: `X402_RECEIPT_SIGNING_KEY` (server-only・relayer 鍵とは**別の専用鍵**) を投入。
+   未設定でも settle は成立するが receipt は null (オフライン検証を提供しない)。公開 signer は
+   `/api/facilitator/supported` の `receiptSigner` で配布。
+6. **mainnet hardening の前提** (settle は self-host relayer で broadcast するため):
+   - `RELAYER_PRIVATE_KEY` 設定済 (未設定は `PROVIDER!=self-host` → settle 503 `relay_not_configured`)。
+   - `RELAY_MAX_GAS_COST_WEI` (Polygon native gas 上限・wei) 設定済。未設定 (=0) は settle 503
+     `gas_ceiling_required` で**意図的に止まる** (赤字 broadcast 防止)。値は §9.5 同様の実測ベースで調整。
+   - KV (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) 設定済。未設定は settle 503 `kv_required`
+     (冪等が fail-open になると二重 submit しうるため mainnet は KV 必須)。
+7. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
+   `NEXT_PUBLIC_ENABLE_X402_FACILITATOR=1`。必要なら運営自身の resource を SIWE で seed 登録 (空カタログ回避)。
+
+### §14.3 ロールバック (安全状態へ即復帰)
+- **最速 (全停止)**: `NEXT_PUBLIC_ENABLE_X402_FACILITATOR=0` + 再デプロイ → 全 route 404 = 完全 inert。
+- **settle だけ止める (登録/閲覧は残す)**: `RELAYER_PRIVATE_KEY` を外す → settle 503 `relay_not_configured`
+  (verify / discovery / resources は生存)。
+- **コード巻き戻し**: x402 facilitator の commit を `git revert` (PR 列は memory:project_x402_facilitator)。
+- ※ NEXT_PUBLIC_* は build-time inline のため env 変更には再デプロイが要る (Vercel)。
+
+### §14.4 testnet 実機 E2E (リリース前必須・未自動化の唯一の経路)
+flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テストは settleViaForwarder を実コアで
+回すが (poll/submit を mock)、**実 on-chain broadcast はこの手順のみ**:
+1. **登録**: SIWE サインイン → `/discovery` で resource 登録 (POST /api/facilitator/resources) → 201 +
+   paywallSnippet。公開カタログ (`/api/discovery`) に accepts (fee 込み) 付きで現れる。
+2. **verify**: 正しい署名 → `isValid:true`。改竄 feeValue → `fee_value_mismatch` (broadcast せず)。
+3. **settle**: 実 settle → 成功 tx を explorer で確認。merchant = 表示額・`FEE_RECEIVER` = 手数料
+   (max(2,1%)) が同一 tx で着金。`recordSettlement` が会計記録。
+4. **receipt**: settle 応答の receipt を `/api/facilitator/verify-receipt` で検証 → `valid:true`・
+   signer = `/supported` の receiptSigner。
+5. **モデレーション**: 無料公開 URL を登録 → 400 `resource_not_gated`。正当性表明なし → `attestation_required`。
+6. **owner-auth**: 他人の resource を PATCH/DELETE → 403。
+   ※ Amoy 1 周は本リリース準備中に実施済 (register→discover→settle→receipt verify)。点灯前に再確認。
+
+### §14.5 監視
+- settle / 登録系の障害は `x402.facilitator.*` (16 イベント: `gas_ceiling_required` / `kv_required` /
+  `reverted` / `pending` / `relay_error` / `settlement_record_failed` / `resource_{list,count,create,
+  update,deactivate}_failed` / `resource_not_gated` 等) として logger 経由で Sentry へ。discovery は
+  `x402.discovery.requirements_failed`。Sentry alert rule を §11.3 に追加すること。
+- 起動時 `x402.facilitator.fee_disclosure_divergence` (env 料率 ↔ 開示乖離) を Sentry で監視。
+- 点灯直後は `FEE_RECEIVER` の着金 + settle tx + 上記イベントを目視。
+- 負荷: `/api/discovery` は §11.6 load-test mix に含む (`x402-discovery` シナリオ)。discovery は edge キャッシュ
+  (`Cache-Control: s-maxage=10, stale-while-revalidate=30`) + `resolveIds` 有界並列 (同時 25) のため、
+  カタログ増でも 1 リクエスト当たりの KV ファンアウトは有界。
+
+### §14.6 既知の前提 / 制約 (accepted)
+- **resource server は加盟店が自前で 402 ゲートする前提**。facilitator はリソースを proxy / ゲートしない
+  (verify / settle / discovery のみ)。登録時に正当性表明 (権利 + ゲート実装) を必須化し、無料公開 URL を
+  probe で弾く (moderation・SSRF 多層防御済) が、ゲート実装の最終責任は登録者。
+- **手数料は買い手上乗せ**ゆえ seller は表示額を満額受領。料率 (bps/floor) の変更は開示済数値の変更 →
+  legal フェンス (`DISCLOSED_X402_FEE`) 確認 + 本文改定が必須。
+- discovery は edge キャッシュで最大 ~10 秒の鮮度ラグ (新規登録 / 無効化の反映遅延)。soft-delete 済 resource が
+  最大 TTL 間カタログに残りうるが、settle は `resource.active` に依存しない (支払い自体は有効) ため資金毀損なし。
+- `listResourcesForMerchant` (owner 一覧) は有界並列 (同時 25) で取得。1 件でも KV 取得失敗なら null →
+  GET 503 (outage 中に「登録ゼロ」と誤表示して重複登録させない)。
+- 料金性質の登録不要は memory:project_fsa_clearance (金融庁回答)・税務は別 (税理士)。

@@ -7,9 +7,13 @@ const store = vi.hoisted(() => ({
   lists: new Map<string, string[]>(),
   failEval: false, // true で kvEval(CAS) を fail させ storage エラー枝を検証
   failLrange: false, // true で kvLrange を fail させ count の KV エラー枝を検証
+  failGet: false, // true で kvGet を fail させ record 単体取得失敗 → null 枝を検証
 }));
 vi.mock('@/lib/kv', () => ({
-  kvGet: async (k: string) => ({ ok: true as const, value: store.kv.get(k) ?? null }),
+  kvGet: async (k: string) =>
+    store.failGet
+      ? ({ ok: false as const, reason: 'kv_error' })
+      : ({ ok: true as const, value: store.kv.get(k) ?? null }),
   kvSet: async (k: string, v: string) => {
     store.kv.set(k, v);
     return { ok: true as const, value: 'OK' as const };
@@ -98,6 +102,7 @@ beforeEach(() => {
   store.lists.clear();
   store.failEval = false;
   store.failLrange = false;
+  store.failGet = false;
 });
 
 describe('lib/x402/registry parseResourceInput', () => {
@@ -335,8 +340,15 @@ describe('lib/x402/registry listResourcesForMerchant (active のみ)', () => {
     expect(ids).not.toContain('gone');
   });
 
-  it('KV エラー → null ([] と誤認させない・outage 中の誤表示防止)', async () => {
+  it('KV エラー (index 読取) → null ([] と誤認させない・outage 中の誤表示防止)', async () => {
     store.failLrange = true;
+    expect(await listResourcesForMerchant(OWNER)).toBeNull();
+  });
+
+  it('KV エラー (record 単体取得) → null (有界並列でも 1 件でも失敗で null)', async () => {
+    await createResource(input(), 'r1', 1);
+    await createResource(input({ url: 'https://a.jp/b' }), 'r2', 2);
+    store.failGet = true; // index は引けるが各 record の取得が失敗
     expect(await listResourcesForMerchant(OWNER)).toBeNull();
   });
 });
