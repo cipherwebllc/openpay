@@ -1,15 +1,17 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
-// hydration race 対策: 低速な webkit (mobile-safari) では controlled input への fill が
-// React hydration より前に走ると値が捨てられ、settings 更新 → localStorage 書込が起きず
-// 後続の waitForFunction/summary が 30s timeout する。fill 後に値の定着を確認し、消えていれば
-// hydration 完了後に再 fill する (toPass で retry)。test-only の安定化 (本番コード非変更)。
+// hydration race 対策: 低速な webkit (mobile-safari) や負荷の高い CI runner では controlled input
+// への fill が React hydration より前に走ると値が捨てられ、settings 更新 → localStorage 書込が起きず
+// 後続の waitForFunction/summary が 30s timeout する。fill 後に値の定着を確認し、消えていれば再 fill
+// する (toPass の retry ループ自体が hydration 待ちを兼ねる)。test-only の安定化 (本番コード非変更)。
+// timeout は 15s: /create は複数ビルダー (QR/レジ/モバイル注文/プロフ) を静的 import するため初期
+// hydration が重く、負荷時に 8s を超えて稀に flaky だった (値が定着するまで窓を広げて吸収)。
 async function fillStable(locator: Locator, value: string) {
   await expect(locator).toBeVisible();
   await expect(async () => {
     if ((await locator.inputValue()) !== value) await locator.fill(value);
     expect(await locator.inputValue()).toBe(value);
-  }).toPass({ timeout: 8000 });
+  }).toPass({ timeout: 15000 });
 }
 
 // 受取先入力欄を hydration-safe に埋める shorthand。
@@ -120,15 +122,18 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(mmSwapLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: offramp gasHint details の toggle が両方向で機能 (open → close → open) + ChevronIcon 実 rotation', async ({
+  test('ja: offramp gasHint details の toggle が両方向で機能 (open → close → open) + ChevronIcon rotation', async ({
     page,
+    browserName,
   }) => {
-    // <details> の native toggle が両方向で動くこと + ChevronIcon の回転
-    // (group-open:rotate-90) が details[open] と同期して実 computed transform
-    // を変えることを確認。close (再 click) で body が再 hide する path は
-    // regression が出やすい (例: onClick で setState + preventDefault すると
-    // native toggle が壊れる)。chevron transform も assert することで Tailwind の
-    // group-open: variant が build で消えた場合の silent UX 劣化を検知。
+    // <details> の native toggle が両方向で動くこと (open / close / 再 open) を両ブラウザで検証。
+    // close (再 click) で body が再 hide する path は regression が出やすい (例: onClick で
+    // setState + preventDefault すると native toggle が壊れる)。
+    //
+    // ChevronIcon の回転 (group-open:rotate-90) は computed transform で検証するが **chromium のみ**。
+    // WebKit (mobile-safari) は inline SVG の getComputedStyle().transform が適用済みでも "none" を返す
+    // ことがある既知の非互換で、値が不安定なため (旧テストの flaky 真因)。回転 variant が build で
+    // purge された場合の silent UX 劣化検知は chromium 側で担保する (機能=開閉自体は両ブラウザで担保)。
     await page.goto('/ja/create');
     const gasHintTitle = page.getByText(
       /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,
@@ -138,46 +143,30 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // ChevronIcon = summary 内で transition-transform クラスを持つ唯一の SVG。
     // 同 summary 内の GasPumpIcon (width=18) と区別するため class で選択。
     const chevron = detailsEl.locator('summary svg.transition-transform');
+    const IDENTITY = /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/;
+    const onChromium = browserName === 'chromium';
 
-    // 初期: closed。chevron は未回転 ("none" もしくは identity matrix)。
-    // toHaveCSS は auto-retry でtransform property の安定値を待つため、
-    // transition-transform (0.15s) の race を吸収する。
+    // 初期: closed (chevron 未回転 = identity)。
     await expect(body).toBeHidden();
     await expect(detailsEl).not.toHaveAttribute('open', /.*/);
-    await expect(chevron).toHaveCSS('transform', /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
+    if (onChromium) await expect(chevron).toHaveCSS('transform', IDENTITY);
 
-    // 1 度 click → open、body 表示、open 属性付与、chevron 回転 (90°)
+    // 1 度 click → open、body 表示、open 属性付与、chevron 回転 (identity 以外)。
     await gasHintTitle.click();
     await expect(body).toBeVisible();
     await expect(detailsEl).toHaveAttribute('open', '');
-    // open: chevron が回転している = transform が identity(none/未回転)ではないことを検証する。
-    // 正確な 90° matrix を pin すると webkit (mobile-safari) で sin(90°) の浮動小数誤差・matrix3d 化・
-    // transition (0.15s) 中間フレームのいずれかで稀に一致せず flaky になっていた。否定形 (identity 以外)
-    // なら回転の有無だけを安定判定でき、group-open:rotate-90 variant が build で消えた場合 (identity の
-    // まま) は依然 fail して silent UX 劣化を検知できる。
-    await expect(chevron).not.toHaveCSS(
-      'transform',
-      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
-    );
+    if (onChromium) await expect(chevron).not.toHaveCSS('transform', IDENTITY);
 
-    // 再 click → close、body 再 hidden、open 属性消失、chevron 未回転状態に戻る
+    // 再 click → close、body 再 hidden、open 属性消失、chevron 未回転へ戻る。
     await gasHintTitle.click();
     await expect(body).toBeHidden();
     await expect(detailsEl).not.toHaveAttribute('open', /.*/);
-    await expect(chevron).toHaveCSS('transform', /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
+    if (onChromium) await expect(chevron).toHaveCSS('transform', IDENTITY);
 
-    // 3 度目: 再度 open できる (native details が永続 disabled 化していない)
+    // 3 度目: 再度 open できる (native details が永続 disabled 化していない)。
     await gasHintTitle.click();
     await expect(body).toBeVisible();
-    // open: chevron が回転している = transform が identity(none/未回転)ではないことを検証する。
-    // 正確な 90° matrix を pin すると webkit (mobile-safari) で sin(90°) の浮動小数誤差・matrix3d 化・
-    // transition (0.15s) 中間フレームのいずれかで稀に一致せず flaky になっていた。否定形 (identity 以外)
-    // なら回転の有無だけを安定判定でき、group-open:rotate-90 variant が build で消えた場合 (identity の
-    // まま) は依然 fail して silent UX 劣化を検知できる。
-    await expect(chevron).not.toHaveCSS(
-      'transform',
-      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
-    );
+    if (onChromium) await expect(chevron).not.toHaveCSS('transform', IDENTITY);
   });
 
   test('ja: offramp の TokenIcon が JPYC と USDC 両 row に SVG として描画される', async ({
