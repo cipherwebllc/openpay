@@ -130,8 +130,32 @@ describe('lib/x402/registry parseResourceInput', () => {
     ['invalid_price', { url: 'https://a', description: 'd', priceJpyc: '1.5', category: 'c' }],
     ['invalid_category', { url: 'https://a', description: 'd', priceJpyc: '1', category: '' }],
     ['invalid_pay_to', { url: 'https://a', description: 'd', priceJpyc: '1', category: 'c', payTo: '0xzzz' }],
+    // SSRF ガード: private / loopback / link-local 宛は invalid_url。
+    ['invalid_url', { url: 'https://localhost/x', description: 'd', priceJpyc: '1', category: 'c' }],
+    ['invalid_url', { url: 'http://127.0.0.1/x', description: 'd', priceJpyc: '1', category: 'c' }],
+    ['invalid_url', { url: 'http://10.0.0.5/x', description: 'd', priceJpyc: '1', category: 'c' }],
+    ['invalid_url', { url: 'http://169.254.169.254/latest', description: 'd', priceJpyc: '1', category: 'c' }],
+    ['invalid_url', { url: 'http://192.168.1.1/x', description: 'd', priceJpyc: '1', category: 'c' }],
   ])('reject %s', (reason, body) => {
     expect(parseResourceInput(body, OWNER)).toEqual({ ok: false, reason });
+  });
+
+  it('requireAttestation: attested 無しは attestation_required', () => {
+    const body = { url: 'https://a.jp/x', description: 'd', priceJpyc: '1', category: 'api' };
+    expect(parseResourceInput(body, OWNER, { requireAttestation: true })).toEqual({
+      ok: false,
+      reason: 'attestation_required',
+    });
+    // attested:true なら通る。
+    const ok = parseResourceInput({ ...body, attested: true }, OWNER, {
+      requireAttestation: true,
+    });
+    expect(ok.ok).toBe(true);
+  });
+
+  it('requireAttestation 未指定 (編集) は attested 不要', () => {
+    const body = { url: 'https://a.jp/x', description: 'd', priceJpyc: '1', category: 'api' };
+    expect(parseResourceInput(body, OWNER).ok).toBe(true);
   });
 });
 

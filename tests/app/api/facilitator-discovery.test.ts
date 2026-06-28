@@ -76,6 +76,16 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
   requireSession: mockRequireSession,
 }));
 
+// モデレーション probe をモック (実 fetch を避ける)。既定 false = ゲート済扱いで通す。
+// isPrivateHost は parseResourceInput が使うため false (テスト URL は public 扱い) を返す。
+const { mockFreelyAccessible } = vi.hoisted(() => ({
+  mockFreelyAccessible: vi.fn(async () => false),
+}));
+vi.mock('@/lib/x402/moderation', () => ({
+  isFreelyAccessible: mockFreelyAccessible,
+  isPrivateHost: () => false,
+}));
+
 type ResourcesMod = {
   GET: () => Promise<Response>;
   POST: (req: Request) => Promise<Response>;
@@ -142,6 +152,7 @@ const validBody = {
   description: 'JP→EN 翻訳 API',
   priceJpyc: '1000',
   category: 'api',
+  attested: true, // 新規登録は正当性表明が必須
 };
 
 beforeEach(() => {
@@ -149,6 +160,8 @@ beforeEach(() => {
   store.lists.clear();
   store.failLrange = false;
   mockRequireSession.mockReset();
+  mockFreelyAccessible.mockReset();
+  mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -185,6 +198,25 @@ describe('x402 facilitator /resources', () => {
     expect(body.resource.priceJpyc).toBe('1000');
     expect(body.resource.active).toBe(true);
     expect(body.paywallSnippet).toContain('createJpycPaymentRequirements');
+  });
+
+  it('無料公開 URL (probe が 200) → 400 resource_not_gated', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockFreelyAccessible.mockResolvedValue(true); // 誰でも無料取得できる = 拒否対象
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('resource_not_gated');
+  });
+
+  it('正当性表明なし (attested 欠如) → 400 attestation_required', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const { attested: _omit, ...noAttest } = validBody;
+    void _omit;
+    const res = await resources.POST(postReq(noAttest));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('attestation_required');
   });
 
   it('認証 + 不正 url → 400 invalid_url', async () => {

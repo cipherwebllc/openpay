@@ -8,7 +8,29 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
+import {
+  Boxes,
+  Check,
+  Code2,
+  Copy,
+  Database,
+  FileText,
+  Pencil,
+  Plus,
+  Trash2,
+  Wallet,
+  CheckCircle2,
+} from 'lucide-react';
 import { useSiweSession } from '@/hooks/useSiweSession';
+
+// カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
+function categoryIcon(category: string) {
+  const c = category.toLowerCase();
+  if (c.includes('data')) return Database;
+  if (c.includes('mcp')) return Boxes;
+  if (c.includes('content') || c.includes('doc') || c.includes('text')) return FileText;
+  return Code2;
+}
 
 type DiscoveryItem = {
   resource: string;
@@ -66,6 +88,19 @@ export function X402DiscoveryView() {
   const [notice, setNotice] = useState<'updated' | 'deleted' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // 出品の正当性表明 (新規登録のみ必須・編集では不要)。送信成功でリセット。
+  const [attested, setAttested] = useState(false);
+  // コピー済みフィードバック (key 単位・1.5s でリセット)。
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyText = useCallback((key: string, text: string) => {
+    try {
+      void navigator.clipboard?.writeText(text);
+    } catch {
+      /* clipboard 不可環境は無視 */
+    }
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+  }, []);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -112,6 +147,8 @@ export function X402DiscoveryView() {
         priceJpyc: form.priceJpyc,
         category: form.category,
         ...(form.payTo ? { payTo: form.payTo } : {}),
+        // 新規登録のみ正当性表明を送る (サーバは POST でのみ必須・編集では無視)。
+        ...(editId ? {} : { attested }),
       };
       const res = editId
         ? await fetch(`/api/facilitator/resources/${editId}`, {
@@ -144,6 +181,7 @@ export function X402DiscoveryView() {
       }
       setForm(EMPTY_FORM);
       setEditId(null);
+      setAttested(false);
       void loadCatalog();
       void loadOwned();
     } catch {
@@ -151,7 +189,7 @@ export function X402DiscoveryView() {
     } finally {
       setSubmitting(false);
     }
-  }, [form, editId, loadCatalog, loadOwned]);
+  }, [form, editId, attested, loadCatalog, loadOwned]);
 
   const onEdit = useCallback((r: OwnedResource) => {
     setEditId(r.id);
@@ -195,31 +233,73 @@ export function X402DiscoveryView() {
   );
 
   const inputCls =
-    'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none';
+    'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15';
+
+  // エラー key → 親切な文言 (モデレーション / 表明は専用文言、他は汎用)。
+  const errorMsg =
+    error === 'resource_not_gated'
+      ? t('errorNotGated')
+      : error === 'attestation_required'
+        ? t('errorAttestationRequired')
+        : error
+          ? t('errorGeneric', { reason: error })
+          : null;
+
+  // コピーボタン (URL / スニペット)。key 単位でコピー済みフィードバック。component ではなく関数で
+  // 返すことで no-unstable-nested-components を避ける。
+  const copyBtn = (k: string, text: string) => (
+    <button
+      type="button"
+      onClick={() => copyText(k, text)}
+      aria-label={copiedKey === k ? t('copied') : t('copy')}
+      title={copiedKey === k ? t('copied') : t('copy')}
+      className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+    >
+      {copiedKey === k ? (
+        <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+      )}
+    </button>
+  );
 
   return (
-    <div className="space-y-8">
-      {/* 加盟店登録 / 編集 */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h3 className="text-base font-bold text-slate-900">
-          {editId ? t('editTitle') : t('registerTitle')}
-        </h3>
-        <p className="mt-1 text-sm text-slate-500">{t('registerSubtitle')}</p>
+    <div className="space-y-6">
+      {/* 出品: 加盟店登録 / 編集 */}
+      <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-card sm:p-6">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
+            <Plus className="h-5 w-5" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-slate-900">
+              {editId ? t('editTitle') : t('registerTitle')}
+            </h3>
+            <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
+              {t('registerSubtitle')}
+            </p>
+          </div>
+        </div>
 
         {!isConnected ? (
-          <p className="mt-3 text-sm text-amber-700">{t('connectPrompt')}</p>
+          <div className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+            <Wallet className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{t('connectPrompt')}</span>
+          </div>
         ) : !isSignedIn ? (
           <button
             type="button"
             onClick={() => void signIn(t('signInStatement'))}
             disabled={isSigningIn}
-            className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0"
           >
+            <Wallet className="h-4 w-4" aria-hidden />
             {isSigningIn ? t('signingIn') : t('signInCta')}
           </button>
         ) : (
           <div className="mt-4 space-y-3">
-            <p className="text-xs text-slate-500">
+            <p className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-500">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
               {t('signedInAs', { address: address ?? '' })}
             </p>
             <input
@@ -255,13 +335,27 @@ export function X402DiscoveryView() {
               value={form.payTo}
               onChange={(e) => setForm((f) => ({ ...f, payTo: e.target.value }))}
             />
-            <p className="text-xs text-slate-400">{t('formPayToHint')}</p>
-            <div className="flex items-center gap-3">
+            <p className="text-xs leading-relaxed text-slate-400">{t('formPayToHint')}</p>
+
+            {/* 出品の正当性表明 (新規登録のみ・必須)。サーバ側でも attested を強制する。 */}
+            {!editId && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={attested}
+                  onChange={(e) => setAttested(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30"
+                />
+                <span className="text-xs leading-relaxed text-slate-600">{t('attestLabel')}</span>
+              </label>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
               <button
                 type="button"
                 onClick={() => void onSubmit()}
-                disabled={submitting}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                disabled={submitting || (!editId && !attested)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               >
                 {submitting
                   ? editId
@@ -276,22 +370,54 @@ export function X402DiscoveryView() {
                   type="button"
                   onClick={onCancelEdit}
                   disabled={submitting}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:border-slate-400 disabled:opacity-50"
+                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50"
                 >
                   {t('cancelCta')}
                 </button>
               )}
             </div>
-            {error && <p className="text-sm text-red-600">{t('errorGeneric', { reason: error })}</p>}
-            {notice === 'updated' && <p className="text-sm text-emerald-700">{t('updated')}</p>}
-            {notice === 'deleted' && <p className="text-sm text-emerald-700">{t('deleted')}</p>}
+            {!editId && !attested && !submitting && (
+              <p className="text-[11px] text-slate-400">{t('attestRequired')}</p>
+            )}
+            {errorMsg && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{errorMsg}</p>
+            )}
+            {notice === 'updated' && (
+              <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" aria-hidden />
+                {t('updated')}
+              </p>
+            )}
+            {notice === 'deleted' && (
+              <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" aria-hidden />
+                {t('deleted')}
+              </p>
+            )}
             {created && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                <p className="text-sm font-medium text-emerald-800">{t('created')}</p>
-                <p className="mt-1 text-xs text-slate-500">{t('snippetTitle')}</p>
-                <pre className="mt-1 overflow-x-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
-                  {created.paywallSnippet}
-                </pre>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-800">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden />
+                  {t('created')}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">{t('snippetTitle')}</p>
+                <div className="relative mt-1">
+                  <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 pr-10 text-xs leading-relaxed text-slate-100">
+                    {created.paywallSnippet}
+                  </pre>
+                  <button
+                    type="button"
+                    onClick={() => copyText('snippet', created.paywallSnippet)}
+                    aria-label={copiedKey === 'snippet' ? t('copied') : t('copy')}
+                    className="absolute right-2 top-2 rounded-md bg-slate-800 p-1.5 text-slate-300 transition hover:bg-slate-700 hover:text-white"
+                  >
+                    {copiedKey === 'snippet' ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -304,57 +430,79 @@ export function X402DiscoveryView() {
           <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
           <p className="mt-1 text-sm text-slate-500">{t('yourResourcesSubtitle')}</p>
           <ul className="mt-4 space-y-3">
-            {owned.map((r) => (
-              <li key={r.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                    {r.category}
-                  </span>
-                  <span className="text-sm font-bold text-slate-900">{r.priceJpyc} JPYC</span>
-                </div>
-                <p className="mt-2 text-sm text-slate-700">{r.description}</p>
-                <p className="mt-1 break-all font-mono text-xs text-slate-400">{r.url}</p>
-                {confirmDeleteId === r.id ? (
-                  <div className="mt-3 flex items-center gap-3">
-                    <span className="text-sm text-slate-600">{t('deleteConfirm')}</span>
-                    <button
-                      type="button"
-                      onClick={() => void onDelete(r.id)}
-                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
-                    >
-                      {t('deleteConfirmCta')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteId(null)}
-                      className="text-xs font-medium text-slate-500 hover:underline"
-                    >
-                      {t('keepCta')}
-                    </button>
+            {owned.map((r) => {
+              const Icon = categoryIcon(r.category);
+              return (
+                <li
+                  key={r.id}
+                  className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/5 text-brand">
+                      <Icon className="h-5 w-5" aria-hidden />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                          {r.category}
+                        </span>
+                        <span className="shrink-0 text-sm font-bold text-slate-900">
+                          {r.priceJpyc} JPYC
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-sm font-medium text-slate-800">{r.description}</p>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <span className="min-w-0 truncate font-mono text-xs text-slate-400">
+                          {r.url}
+                        </span>
+                        {copyBtn(`owned-${r.id}`, r.url)}
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div className="mt-3 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => onEdit(r)}
-                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-500"
-                    >
-                      {t('editCta')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConfirmDeleteId(r.id);
-                        setNotice(null);
-                      }}
-                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:border-red-400"
-                    >
-                      {t('deleteCta')}
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
+                  {confirmDeleteId === r.id ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+                      <span className="text-sm text-slate-600">{t('deleteConfirm')}</span>
+                      <button
+                        type="button"
+                        onClick={() => void onDelete(r.id)}
+                        className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+                      >
+                        {t('deleteConfirmCta')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="text-xs font-medium text-slate-500 hover:underline"
+                      >
+                        {t('keepCta')}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => onEdit(r)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand-dark"
+                      >
+                        <Pencil className="h-3 w-3" aria-hidden />
+                        {t('editCta')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDeleteId(r.id);
+                          setNotice(null);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:border-red-400"
+                      >
+                        <Trash2 className="h-3 w-3" aria-hidden />
+                        {t('deleteCta')}
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -364,35 +512,69 @@ export function X402DiscoveryView() {
         <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
         <p className="mt-1 text-sm text-slate-500">{t('catalogSubtitle')}</p>
         {loading ? (
-          <p className="mt-4 text-sm text-slate-400">{t('loading')}</p>
+          <div className="mt-4 space-y-3" aria-hidden>
+            <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+            <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+          </div>
         ) : items.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-400">{t('catalogEmpty')}</p>
+          <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/5 text-brand">
+              <Boxes className="h-6 w-6" aria-hidden />
+            </span>
+            <p className="mt-1 text-sm text-slate-500">{t('catalogEmpty')}</p>
+          </div>
         ) : (
           <ul className="mt-4 space-y-3">
             {items.map((item) => {
               const fee = feeJpycOf(item);
+              const Icon = categoryIcon(item.category);
+              let total: string | null = null;
+              try {
+                if (fee) total = (BigInt(item.priceJpyc) + BigInt(fee)).toString();
+              } catch {
+                total = null;
+              }
               return (
                 <li
                   key={item.resource}
-                  className="rounded-xl border border-slate-200 bg-white p-4"
+                  className="group rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-hover"
                 >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                      {item.category}
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/5 text-brand">
+                      <Icon className="h-5 w-5" aria-hidden />
                     </span>
-                    <span className="text-sm font-bold text-slate-900">
-                      {item.priceJpyc} JPYC
-                      {fee && (
-                        <span className="ml-1 text-xs font-normal text-slate-400">
-                          {t('feeNote', { fee })}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                          {item.category}
                         </span>
-                      )}
-                    </span>
+                        <div className="shrink-0 text-right">
+                          <div className="text-sm font-bold text-slate-900">
+                            {item.priceJpyc} JPYC
+                            {fee && (
+                              <span className="ml-1 text-[11px] font-normal text-slate-400">
+                                {t('feeNote', { fee })}
+                              </span>
+                            )}
+                          </div>
+                          {total && (
+                            <div className="text-[11px] text-slate-400">
+                              {t('payTotal', { total })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mt-0.5 text-sm font-medium text-slate-800">
+                        {item.description}
+                      </p>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <span className="min-w-0 truncate font-mono text-xs text-slate-400">
+                          {item.resource}
+                        </span>
+                        {copyBtn(`cat-${item.resource}`, item.resource)}
+                      </div>
+                    </div>
                   </div>
-                  <p className="mt-2 text-sm text-slate-700">{item.description}</p>
-                  <p className="mt-1 break-all font-mono text-xs text-slate-400">
-                    {item.resource}
-                  </p>
                 </li>
               );
             })}

@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { logger } from '@/lib/logger';
+import { isFreelyAccessible } from '@/lib/x402/moderation';
 import {
   parseResourceInput,
   createResource,
@@ -45,7 +46,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
-  const parsed = parseResourceInput(raw, session.address);
+  // 新規登録は出品の正当性表明 (attested:true) を必須にする (権利 + 支払いゲートの実装)。
+  const parsed = parseResourceInput(raw, session.address, { requireAttestation: true });
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.reason }, { status: 400 });
   }
@@ -59,6 +61,16 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (count >= MAX_RESOURCES_PER_MERCHANT) {
     return NextResponse.json({ error: 'too_many_resources' }, { status: 429 });
+  }
+
+  // モデレーション: 無料で公開されている URL の価格付き登録を弾く (probe で 200 を確認したら拒否)。
+  // 402/401/403/エラー/タイムアウトは通す (fail-open)。private/loopback は parseResourceInput で既に排除。
+  if (await isFreelyAccessible(parsed.input.url)) {
+    logger.warn('x402.facilitator.resource_not_gated', {
+      merchant: session.address,
+      url: parsed.input.url,
+    });
+    return NextResponse.json({ error: 'resource_not_gated' }, { status: 400 });
   }
 
   const id = crypto.randomUUID();
