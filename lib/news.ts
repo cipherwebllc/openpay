@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'x402-facilitator-launch-2026-06-28',
+    date: '2026-06-28',
+    category: 'pricing',
+    title: {
+      ja: 'x402 ファシリテーター（AI エージェント向け JPYC 都度課金）を公開しました',
+      en: 'x402 facilitator (JPYC per-request billing for AI agents) is live',
+    },
+    body: {
+      ja: 'AI エージェントや開発者が、有料 API・コンテンツに JPYC 建てで都度課金できる x402 ファシリテーターを公開しました。登録したリソースは公開カタログ（/discovery・/api/discovery）から発見でき、エージェントはそのまま JPYC で支払えます。\nx402 ファシリテーター利用料は決済額の 1%・最低 2 JPYC で、お支払いになる側（買い手）が表示価格に上乗せします（出品者は表示額をそのまま受け取ります）。商品代金本体は出品者のウォレットへ直接着金し、当社は売上を預かりません（ノンカストディ）。当社が肩代わりするガス代も本利用料に含まれ、各決済には OpenPay 署名の受領証明を発行します。本利用料は既存の OpenPay 利用料・モバイル注文システム利用料とは別個で、x402 経由の決済にのみ適用します。\n詳しくは利用規約・特定商取引法に基づく表記をご確認ください。',
+      en: 'The x402 facilitator — letting AI agents and developers pay paid APIs and content per request in JPYC — is now live. Registered resources are discoverable from the public catalog (/discovery, /api/discovery), and agents can pay directly in JPYC.\nThe x402 facilitator fee is 1% of the payment (2 JPYC minimum), added on the buyer side (the seller receives the listed amount in full). The principal settles directly to the seller wallet; we do not custody sales (non-custodial). Gas we sponsor is included in this fee, and each settlement is issued an OpenPay-signed receipt. This fee is separate from the existing OpenPay usage fee and the mobile-ordering system fee, and applies only to x402 payments.\nSee the Terms of Service and the Specified Commercial Transactions Act notice for details.',
+    },
+    link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
+  },
+  {
     id: 'x402-facilitator-2026-06-24',
     date: '2026-06-24',
     category: 'notice',
@@ -42,8 +56,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: '[Heads-up] Preparing a JPYC per-request facilitator for AI agents (x402)',
     },
     body: {
-      ja: 'AI エージェントや開発者が、日本の有料 API・コンテンツに JPYC 建てで都度課金できる「x402 ファシリテーター」を準備しています（提供開始時に改めて告知します）。提供時は、決済額の 1%（最低 2 JPYC）を OpenPay 利用料として申し受けます。この利用料はお支払いになる側（買い手）の上乗せで、出品者は表示額をそのまま受け取ります（ノンカストディ・当社は売上を預かりません）。各決済には OpenPay 署名の受領証明を発行します。\n本機能は現在は既定で無効（準備中）で、決済QR・レジ・チップ・モバイル注文などの既存機能には影響しません。提供開始の時期・条件は本サービス内で改めてお知らせします。',
-      en: 'We are preparing an "x402 facilitator" that lets AI agents and developers pay Japanese paid APIs and content per request in JPYC (we will announce again when it launches). At launch, OpenPay will charge a 1% facilitator fee (2 JPYC minimum), added on the buyer\'s side — the seller receives the listed amount in full, non-custodially (we do not custody sales). Each settlement is issued an OpenPay-signed receipt.\nThis feature is disabled by default for now (in preparation) and does not affect existing features (payment QR, register, tips, mobile ordering). We will announce the launch timing and terms within the service.',
+      ja: 'AI エージェントや開発者が、日本の有料 API・コンテンツに JPYC 建てで都度課金できる「x402 ファシリテーター」を準備しています（提供開始時に改めて告知します）。提供時は、決済額の 1%（最低 2 JPYC）を OpenPay 利用料として申し受けます。この利用料はお支払いになる側（買い手）の上乗せで、出品者は表示額をそのまま受け取ります（ノンカストディ・当社は売上を預かりません）。各決済には OpenPay 署名の受領証明を発行します。\n本機能は現在は既定で無効（準備中）で、決済QR・レジ・チップ・モバイル注文などの既存機能には影響しません。提供開始の時期・条件は本サービス内で改めてお知らせします。\n※ 2026-06-28 に提供を開始しました（最新のお知らせ・利用規約をご覧ください）。',
+      en: 'We are preparing an "x402 facilitator" that lets AI agents and developers pay Japanese paid APIs and content per request in JPYC (we will announce again when it launches). At launch, OpenPay will charge a 1% facilitator fee (2 JPYC minimum), added on the buyer\'s side — the seller receives the listed amount in full, non-custodially (we do not custody sales). Each settlement is issued an OpenPay-signed receipt.\nThis feature is disabled by default for now (in preparation) and does not affect existing features (payment QR, register, tips, mobile ordering). We will announce the launch timing and terms within the service.\nNote: launched on 2026-06-28 — see the latest announcement and the Terms of Service.',
     },
   },
   {

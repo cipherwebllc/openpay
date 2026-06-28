@@ -103,6 +103,14 @@ export const LEGAL_ENTITY = {
   //   (従来どおり)。本機能は現在 flag 裏で未提供 (NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE 既定 OFF) で、提供開始
   //   (点灯) は本開示と同一リリース + 別途明示の承認後。新規・任意の付加機能ゆえ既存取引には遡及しない
   //   (相当性・必要性を充足)。⚠️ 弁護士 review 前 draft。
+  // 2026-06-28 改定 (x402 ファシリテーター利用料の新設・3 文書 Terms/特商法/お知らせ追記): AI エージェント
+  //   向け managed x402 都度課金ファシリテーターの運用対価を新設。決済額の 1%・最低 2 JPYC・**買い手上乗せ**
+  //   (売り手=リソース登録者は表示額をそのまま受領)・ノンカストディ (当社は売上を預からず、利用料部分のみ
+  //   決済と同一 tx 内で当社指定ウォレットへ分割)。当社が肩代わりする gas は本利用料に含む。OpenPay 利用料
+  //   (relay) / モバイル注文システム利用料とは独立の別対価で、x402 経由の決済には重複適用しない。SOT は
+  //   DISCLOSED_X402_FEE (= 100bps / 2 JPYC) と一致。施行日は x402FacilitatorFeeEffectiveDate (2026-06-28)
+  //   で別管理し、機能提供開始 (NEXT_PUBLIC_ENABLE_X402_FACILITATOR 点灯) まで実際の徴収は発生しない (新規・
+  //   任意の付加機能ゆえ既存取引に遡及しない)。
   termsEffectiveDate: '2026-06-13',
   privacyEffectiveDate: '2026-06-08',
   disclaimerEffectiveDate: '2026-06-13',
@@ -111,6 +119,11 @@ export const LEGAL_ENTITY = {
   // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
   // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
   mobileOrderFeeEffectiveDate: '2026-06-17',
+  // x402 ファシリテーター利用料の施行日 (本利用料を新設した開示の公表日)。mobileOrderFeeEffectiveDate と
+  // 同様に doc 全体の施行日 (2026-06-13) とは別管理 — 新規・任意の付加機能 (AI エージェント向け x402
+  // 都度課金ファシリテーター) に対する個別条項で、機能の提供開始 (NEXT_PUBLIC_ENABLE_X402_FACILITATOR
+  // 点灯) まで実際の徴収は発生しない。Terms 第5条(9)/特商法 役務の対価/お知らせ本文は本日付を記載する。
+  x402FacilitatorFeeEffectiveDate: '2026-06-28',
 
   // copyright 起点年。表記は <year>-<currentYear> で動的描画。
   copyrightStartYear: 2026,
