@@ -68,12 +68,14 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
     name: 'bitbank',
     url: 'https://bitbank.cc/',
     category: 'exchange',
+    // 取扱ステーブルコインは DAI (DAI/JPY)。USDC / JPYC は未取扱。public.bitbank.cc で確認
+    // (2026-06): dai_jpy=success / usdc_jpy・usdc_usdt・jpyc_jpy=404。USDC は SBI VC トレード等。
+    // DAI は TokenSymbol (jpyc/usdc) 外のため token chip は付けない。
     description: {
-      ja: 'Polygon ネットワークの USDC を扱う国内取引所。出庫対応チェーンは事前確認推奨。',
-      en: 'A Japanese exchange supporting USDC on Polygon. Confirm supported withdrawal chains before use.',
+      ja: '国内大手の暗号資産取引所。日本円で多数の銘柄を売買でき、ステーブルコインは DAI (DAI/JPY) を取扱 (USDC は未取扱)。',
+      en: 'A major Japanese exchange with JPY trading for many assets. Lists the DAI stablecoin (DAI/JPY); USDC is not listed.',
     },
     badges: ['jp-only'],
-    tokens: ['usdc'],
   },
   {
     id: 'coincheck',
