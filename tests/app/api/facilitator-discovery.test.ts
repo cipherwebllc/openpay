@@ -4,6 +4,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 import { getAddress, type Hex } from 'viem';
+import {
+  merchantResourcesKey,
+  resourceKey,
+  MAX_RESOURCES_PER_MERCHANT,
+} from '@/lib/x402/registry';
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const STRANGER = getAddress('0x9999999999999999999999999999999999999999');
@@ -15,11 +20,14 @@ const store = vi.hoisted(() => ({
   kv: new Map<string, string>(),
   lists: new Map<string, string[]>(),
   failLrange: false, // true で kvLrange を fail させ登録数カウントの KV エラー枝を検証
+  failSet: false, // true で kvSet を fail させ createResource の保存失敗 (503) を検証
+  failEval: false, // true で kvEval を fail させ update/deactivate の storage エラー (503) を検証
 }));
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
   kvGet: async (k: string) => ({ ok: true as const, value: store.kv.get(k) ?? null }),
   kvSet: async (k: string, v: string) => {
+    if (store.failSet) return { ok: false as const, reason: 'kv_error' };
     store.kv.set(k, v);
     return { ok: true as const, value: 'OK' as const };
   },
@@ -37,6 +45,7 @@ vi.mock('@/lib/kv', () => ({
   },
   // CAS_UPDATE / CAS_DEACTIVATE (registry) の Lua セマンティクスを in-memory で再現 (script で分岐)。
   kvEval: async (script: string, keys: string[], args: string[]) => {
+    if (store.failEval) return { ok: false as const, reason: 'kv_error' };
     const raw = store.kv.get(keys[0]);
     if (raw === undefined) return { ok: true as const, value: -1 };
     let o: Record<string, unknown>;
@@ -159,6 +168,8 @@ beforeEach(() => {
   store.kv.clear();
   store.lists.clear();
   store.failLrange = false;
+  store.failSet = false;
+  store.failEval = false;
   mockRequireSession.mockReset();
   mockFreelyAccessible.mockReset();
   mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
@@ -249,6 +260,51 @@ describe('x402 facilitator /resources', () => {
     store.failLrange = true;
     expect((await resources.GET()).status).toBe(503);
   });
+
+  it('不正 JSON → 400 invalid_json', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const bad = new Request('http://x/resources', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    const res = await resources.POST(bad);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid_json');
+  });
+
+  it('登録上限到達 → 429 too_many_resources', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    // owner の登録 index を上限ぶん埋める (countMerchantResources が上限を返す)。
+    store.lists.set(
+      merchantResourcesKey(OWNER),
+      Array(MAX_RESOURCES_PER_MERCHANT).fill('x'),
+    );
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe('too_many_resources');
+  });
+
+  it('境界: 上限 -1 件なら登録できる (201)', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    store.lists.set(
+      merchantResourcesKey(OWNER),
+      Array(MAX_RESOURCES_PER_MERCHANT - 1).fill('x'),
+    );
+    expect((await resources.POST(postReq(validBody))).status).toBe(201);
+  });
+
+  it('KV 保存失敗 (createResource null) → 503 storage_unavailable', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    store.failSet = true;
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('storage_unavailable');
+  });
 });
 
 describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
@@ -334,6 +390,26 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     const res = await idRoute.PATCH(patchReq({ ...validBody, priceJpyc: '9999' }), ctx(id));
     expect(res.status).toBe(404);
   });
+
+  it('編集で無料公開 URL に差し替え → 400 resource_not_gated', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    mockFreelyAccessible.mockResolvedValue(true); // 差し替え先が誰でも無料取得できる
+    const res = await idRoute.PATCH(patchReq(validBody), ctx(id));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('resource_not_gated');
+  });
+
+  it('編集の CAS が KV エラー → 503 storage_unavailable (未存在と誤魔化さない)', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    store.failEval = true;
+    const res = await idRoute.PATCH(patchReq({ ...validBody, priceJpyc: '2000' }), ctx(id));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('storage_unavailable');
+  });
 });
 
 describe('x402 facilitator /resources/[id] DELETE (無効化)', () => {
@@ -383,6 +459,16 @@ describe('x402 facilitator /resources/[id] DELETE (無効化)', () => {
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     expect((await idRoute.DELETE(new Request('http://x'), ctx('nope'))).status).toBe(404);
   });
+
+  it('無効化の CAS が KV エラー → 503 storage_unavailable', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    store.failEval = true;
+    const res = await idRoute.DELETE(new Request('http://x'), ctx(id));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('storage_unavailable');
+  });
 });
 
 describe('x402 /discovery', () => {
@@ -422,5 +508,49 @@ describe('x402 /discovery', () => {
     expect(pr.extra.openpay.merchantValue).toBe((1000n * 10n ** 18n).toString());
     expect(pr.extra.openpay.feeValue).toBe((10n * 10n ** 18n).toString());
     expect(pr.maxAmountRequired).toBe((1010n * 10n ** 18n).toString());
+  });
+
+  it('不正 priceJpyc の resource → accepts=[] で列挙 (カタログ自体は出す)', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    // 保存済 record の priceJpyc を壊す: BigInt('abc') が throw → route の catch → accepts=[]。
+    const rec = JSON.parse(store.kv.get(resourceKey(id))!) as { priceJpyc: string };
+    rec.priceJpyc = 'abc';
+    store.kv.set(resourceKey(id), JSON.stringify(rec));
+    const body = (await (await discovery()).json()) as {
+      items: Array<{ priceJpyc: string; accepts: unknown[] }>;
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].priceJpyc).toBe('abc');
+    expect(body.items[0].accepts).toEqual([]); // 不正 price は accepts 生成不能 → 空
+  });
+
+  it('空カタログ → x402Version + items=[]', async () => {
+    const { discovery } = await load();
+    const body = (await (await discovery()).json()) as {
+      x402Version: number;
+      items: unknown[];
+    };
+    expect(body.x402Version).toBe(1);
+    expect(body.items).toEqual([]);
+  });
+
+  it('複数登録は新しい順 (LPUSH) で列挙される', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    await resources.POST(
+      postReq({ ...validBody, url: 'https://api.example.jp/paid/first', description: '1番目' }),
+    );
+    await resources.POST(
+      postReq({ ...validBody, url: 'https://api.example.jp/paid/second', description: '2番目' }),
+    );
+    const body = (await (await discovery()).json()) as {
+      items: Array<{ resource: string }>;
+    };
+    expect(body.items.map((i) => i.resource)).toEqual([
+      'https://api.example.jp/paid/second',
+      'https://api.example.jp/paid/first',
+    ]);
   });
 });
