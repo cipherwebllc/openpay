@@ -553,4 +553,23 @@ describe('x402 /discovery', () => {
       'https://api.example.jp/paid/first',
     ]);
   });
+
+  it('多数登録 (>RESOLVE_CONCURRENCY) でもバッチ跨ぎで新しい順を完全維持', async () => {
+    // resolveIds は同時数を 25 に制限するチャンク並列。境界 (25) を跨いでも index の新しい順
+    // (LPUSH) が保たれることを 30 件で検証する (バッチ並列で順序が壊れない回帰ガード)。
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const N = 30;
+    for (let i = 0; i < N; i++) {
+      await resources.POST(
+        postReq({ ...validBody, url: `https://api.example.jp/paid/r${i}`, description: `r${i}` }),
+      );
+    }
+    const body = (await (await discovery()).json()) as { items: Array<{ resource: string }> };
+    expect(body.items).toHaveLength(N);
+    // 完全な逆順 (最後に登録した r29 が先頭・r0 が末尾)。
+    expect(body.items.map((i) => i.resource)).toEqual(
+      Array.from({ length: N }, (_, i) => `https://api.example.jp/paid/r${N - 1 - i}`),
+    );
+  });
 });
