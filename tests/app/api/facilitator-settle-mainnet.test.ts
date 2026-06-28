@@ -16,11 +16,6 @@ const JPYC_POLY = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
 vi.mock('@/lib/logger', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-// hardening 枝は createPublicClient を使う前に return するが、誤って実 RPC を叩かないよう最小 stub。
-vi.mock('viem', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('viem')>();
-  return { ...actual, createPublicClient: () => ({}) };
-});
 
 // Polygon(137) 宛の構造的に正当な settle ボディ (署名はダミー: 枝はその手前)。
 function body137(): Record<string, unknown> {
