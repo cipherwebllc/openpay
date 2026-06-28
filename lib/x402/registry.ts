@@ -172,12 +172,23 @@ export async function getResource(id: string): Promise<X402Resource | null> {
   return safeParse<X402Resource>(r.value);
 }
 
-// id 群を resource に解決する。公開カタログ (discovery) の hot path なので並列取得する
-// (handleStore と同流儀)。Promise.all は配列順を保つので index の新しい順 (LPUSH) は維持され、
-// malformed/欠落 (null) は除外する。
+// 同時 KV GET 上限。公開カタログ (discovery) は最大 LIST_FETCH_CAP(500) 件を解決しうるため、
+// 無制限 Promise.all で 500 並列を一度に発射すると Upstash のバースト制限に当たり getResource が
+// 失敗 → null 除外でカタログ項目が無言で欠落しうる。バッチ単位で並列化して同時数を抑える。
+const RESOLVE_CONCURRENCY = 25;
+
+// id 群を resource に解決する (discovery hot path)。直列 N+1 を避けつつ同時数を RESOLVE_CONCURRENCY
+// に制限する。バッチは順次・バッチ内は並列なので index の新しい順 (LPUSH) は維持し、malformed/欠落
+// (null) は除外する。
 async function resolveIds(ids: string[]): Promise<X402Resource[]> {
-  const resolved = await Promise.all(ids.map((id) => getResource(id)));
-  return resolved.filter((r): r is X402Resource => r !== null);
+  const out: X402Resource[] = [];
+  for (let i = 0; i < ids.length; i += RESOLVE_CONCURRENCY) {
+    const batch = await Promise.all(
+      ids.slice(i, i + RESOLVE_CONCURRENCY).map((id) => getResource(id)),
+    );
+    for (const r of batch) if (r !== null) out.push(r);
+  }
+  return out;
 }
 
 // owner の resource 一覧 (登録 UI 用)。active のみ — deactivate (soft-delete) 済は owner 画面からも
