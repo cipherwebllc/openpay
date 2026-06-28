@@ -202,11 +202,17 @@ export async function listResourcesForMerchant(
   const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP);
   if (!r.ok) return null;
   const out: X402Resource[] = [];
-  for (const id of r.value) {
-    const got = await kvGet(resourceKey(id));
-    if (!got.ok) return null; // 取得失敗を「空」と誤認しない
-    const res = safeParse<X402Resource>(got.value);
-    if (res && res.active) out.push(res); // malformed/欠落は skip
+  // resolveIds と同じ有界並列 (最大 LIST_FETCH_CAP 件)。ただし owner 一覧は **1 件でも取得失敗なら
+  // null** (空と誤認させない) が要件なので、バッチごとに ok を確認してから集約する。
+  for (let i = 0; i < r.value.length; i += RESOLVE_CONCURRENCY) {
+    const batch = await Promise.all(
+      r.value.slice(i, i + RESOLVE_CONCURRENCY).map((id) => kvGet(resourceKey(id))),
+    );
+    for (const got of batch) {
+      if (!got.ok) return null; // 取得失敗を「空」と誤認しない
+      const res = safeParse<X402Resource>(got.value);
+      if (res && res.active) out.push(res); // malformed/欠落は skip
+    }
   }
   return out;
 }
