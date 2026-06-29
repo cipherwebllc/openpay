@@ -202,7 +202,7 @@ test.describe('landing / (LP)', () => {
     await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: OpenPay 利用料 セクション — 説明 + Tip 応援 link button 5 つ (JPYC Polygon/Kaia/USDC + POL/KAIA)', async ({
+  test('ja: OpenPay 利用料 セクション — 説明 + 応援プロフカード (@openpay_jp へ 1 link に集約)', async ({
     page,
   }) => {
     await page.goto('/ja');
@@ -211,29 +211,25 @@ test.describe('landing / (LP)', () => {
       .filter({ has: page.getByRole('heading', { name: 'OpenPay 利用料について' }) });
     await expect(support).toBeVisible();
     // 利用料ポリシーの説明 (recover ピボット後: JPYC ガスレスは利用料あり / 通常決済・顧客 gas 負担の
-    // USDC は対象外=無料) + Tip 依頼文。
+    // USDC は対象外=無料) + 応援依頼文。
+    await expect(support.getByText(/当社は売上を預かりません/)).toBeVisible();
     await expect(
-      support.getByText(/当社は売上を預かりません/),
+      support.getByText(/応援いただけると励みになります/),
     ).toBeVisible();
-    await expect(support.getByText(/Tip を頂けると幸いです/)).toBeVisible();
-    // 応援 link button 5 つ (新規タブで本番 /tip を開く): JPYC Polygon/Kaia, USDC cross-chain,
-    // および native POL / KAIA。
-    const tipLinks = support.getByRole('link', { name: /で応援$/ });
-    await expect(tipLinks).toHaveCount(5);
-    // 先頭ボタン (JPYC Polygon) の href / target / rel
-    const first = support.getByRole('link', { name: 'JPYC (Polygon) で応援' });
-    await expect(first).toHaveAttribute(
+    // 応援は単一の「応援プロフカード」に集約 (旧トークン別 5 ボタンを撤去)。カード全体が
+    // @openpay_jp プロフ (link-in-bio) への 1 link。a11y 名は内側の可視テキストから導出される
+    // (aria-label は付けない — label-content-name-mismatch を避けるため)。
+    const tipLinks = support.getByRole('link', { name: /応援/ });
+    await expect(tipLinks).toHaveCount(1);
+    const card = support.getByRole('link', { name: /@openpay_jp/ });
+    await expect(card).toHaveAttribute(
       'href',
-      /open-pay\.jp\/tip\/0x428483FbA62eDCef1E3a100d3799F6d71759c560\?token=jpyc/,
+      'https://open-pay.jp/@openpay_jp',
     );
-    await expect(first).toHaveAttribute('target', '_blank');
-    await expect(first).toHaveAttribute('rel', 'noopener noreferrer');
-    // 3 種の token/chain を網羅
-    await expect(
-      support.getByRole('link', { name: 'JPYC (Kaia) で応援' }),
-    ).toHaveAttribute('href', /token=jpyc&chain=kaia/);
-    await expect(
-      support.getByRole('link', { name: 'USDC (cross-chain) で応援' }),
-    ).toHaveAttribute('href', /token=usdc/);
+    await expect(card).toHaveAttribute('target', '_blank');
+    await expect(card).toHaveAttribute('rel', 'noopener noreferrer');
+    // カード内に @handle と CTA が見える (プロフ訴求 + 応援動線)
+    await expect(card).toContainText('@openpay_jp');
+    await expect(card).toContainText('応援する');
   });
 });

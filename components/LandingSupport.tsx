@@ -1,18 +1,30 @@
-// OpenPay 利用料の早見カード (決済QR / レジ / モバイル注文 / チップ) + 運営応援 (Tip) リンク。
+// OpenPay 利用料の早見カード (決済QR / レジ / モバイル注文 / チップ) + 運営応援カード。
 // Server Component。FAQ の下に置く。
 //
 // 料率カードは LandingBenefits と同じビッグナンバー様式で 4 方法の OpenPay 利用料を簡潔に提示する
 // (文言は lib/legal.ts の DISCLOSED 定数と整合・drift は tests/lib/landingFeeDisclosure.test.ts で固定)。
-// Tip は /tip ページへの link button で提示し (iframe 3 連は縦に長く見映えが悪いため)、新規タブで
-// 開いて応援できる。link href は canonical な本番 URL (open-pay.jp) を指す (運営の固定受取アドレス
-// への寄付なので preview/local でも本番ページへ遷移する)。
+// 応援は単一の「応援プロフカード」に集約し、運営の @openpay_jp プロフ (link-in-bio) へ新規タブで誘導する。
+// トークン別 5 ボタンの「選択肢の壁」を引き算しつつ、応援動線をそのまま @handle プロフの実例デモにする
+// (dogfooding)。href は canonical な本番 URL (open-pay.jp) を指す (運営の固定プロフなので preview/local
+// でも本番ページへ遷移する)。トークン/チェーン選択はプロフ側 (JPYC Polygon/Kaia + USDC) が担う。
 
+import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
-import { Heart, QrCode, Calculator, Smartphone, Coins } from 'lucide-react';
+import {
+  Heart,
+  QrCode,
+  Calculator,
+  Smartphone,
+  Coins,
+  ExternalLink,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 const TIP_ORIGIN = 'https://open-pay.jp';
-const TIP_ADDRESS = '0x428483FbA62eDCef1E3a100d3799F6d71759c560';
+// 運営の恒久プロフィール (link-in-bio + JPYC/USDC 応援)。会社 @handle は FEE_RECEIVER ウォレットで
+// 運用 (利用料対象外) のため、応援は全額そのまま運営へ届く。
+const PROFILE_HANDLE = '@openpay_jp';
+const PROFILE_URL = `${TIP_ORIGIN}/${PROFILE_HANDLE}`;
 
 // 利用料カード。id から `supportFee${id}{Focal,Title,Body}` の 3 key を派生 (LandingBenefits と同型)。
 type FeeId = 'Pay' | 'Register' | 'Mobile' | 'Tip';
@@ -22,32 +34,6 @@ const FEE_CARDS: readonly { id: FeeId; Icon: LucideIcon }[] = [
   { id: 'Mobile', Icon: Smartphone },
   { id: 'Tip', Icon: Coins },
 ];
-
-// 応援先。ERC20 (JPYC Polygon / JPYC Kaia / USDC cross-chain) + ネイティブ
-// (POL / KAIA)。message は Tip ページ見出しに出る説明文 (URL encode 済)、labelKey は
-// button ラベル用。native=polygon|kaia は NativeTipForm (素のネイティブ送金) へ遷移する。
-const TIP_LINKS = [
-  {
-    labelKey: 'supportTipJpycPolygon',
-    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?token=jpyc&name=OpenPay&message=JPYC+Polygon%E3%81%AF%E3%81%93%E3%81%A1%E3%82%89&color=%232563eb`,
-  },
-  {
-    labelKey: 'supportTipJpycKaia',
-    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?token=jpyc&chain=kaia&name=OpenPay&message=JPYC+Kaia%E3%81%AF%E3%81%93%E3%81%A1%E3%82%89&color=%232563eb`,
-  },
-  {
-    labelKey: 'supportTipUsdc',
-    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?token=usdc&name=OpenPay&message=USDC%E3%82%AF%E3%83%AD%E3%82%B9%E3%83%81%E3%82%A7%E3%83%BC%E3%83%B3Tip&color=%232563eb`,
-  },
-  {
-    labelKey: 'supportTipPol',
-    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?native=polygon&name=OpenPay&color=%232563eb`,
-  },
-  {
-    labelKey: 'supportTipKaia',
-    href: `${TIP_ORIGIN}/tip/${TIP_ADDRESS}?native=kaia&name=OpenPay&color=%232563eb`,
-  },
-] as const;
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
@@ -87,29 +73,62 @@ export async function LandingSupport() {
         {t('supportFeeNote')}
       </p>
 
-      <div className="mx-auto mt-10 max-w-3xl text-center">
+      <div className="mx-auto mt-10 max-w-xl text-center">
         <p className="text-sm font-medium leading-relaxed text-slate-700">
           {t('supportTipRequest')}
         </p>
 
-        {/* 応援 link button。mobile は縦積み (full width)、sm+ で横並び。 */}
-        <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center sm:flex-wrap">
-          {TIP_LINKS.map(({ labelKey, href }) => {
-            const label = t(labelKey);
-            return (
-              <a
-                key={labelKey}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand/30 bg-brand/5 px-5 py-3 text-sm font-semibold text-brand-dark transition hover:border-brand hover:bg-brand/10"
-              >
-                <Heart className="h-4 w-4 flex-none" aria-hidden />
-                {t('supportTipButton', { label })}
-              </a>
-            );
-          })}
-        </div>
+        {/* 応援プロフカード: 5 ボタンを 1 つに集約。カード全体が @openpay_jp プロフへの 1 link
+            (入れ子の interactive 要素を避けるため CTA は span)。a11y 名は内側の可視テキストから導出する。
+            aria-label は付けない: 可視テキストを含まない aria-label は label-content-name-mismatch
+            (WCAG 2.5.3 Label in Name) となり Lighthouse a11y が落ちる。 */}
+        <a
+          href={PROFILE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group mt-6 flex items-center gap-4 rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/5 to-brand/10 p-4 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover sm:p-5"
+        >
+          {/* avatar (装飾): OpenPay ブランドマーク。@handle プロフの「顔」を見せて実例感を出す。 */}
+          <span
+            aria-hidden
+            className="shrink-0 overflow-hidden rounded-2xl ring-1 ring-slate-200/70"
+          >
+            <Image
+              src="/icon-512.png"
+              alt=""
+              width={56}
+              height={56}
+              className="h-12 w-12 sm:h-14 sm:w-14"
+            />
+          </span>
+
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className="text-sm font-bold text-slate-900 sm:text-base">
+                OpenPay
+              </span>
+              <span className="truncate font-mono text-xs font-medium text-slate-400">
+                {PROFILE_HANDLE}
+              </span>
+              <ExternalLink
+                aria-hidden
+                className="h-3.5 w-3.5 shrink-0 text-slate-300 transition-colors group-hover:text-brand"
+              />
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-slate-500 sm:text-sm">
+              {t('supportProfileTagline')}
+            </span>
+          </span>
+
+          {/* CTA pill (装飾・aria-hidden)。 */}
+          <span
+            aria-hidden
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors group-hover:bg-brand-dark"
+          >
+            <Heart className="h-4 w-4" />
+            {t('supportProfileCta')}
+          </span>
+        </a>
       </div>
     </section>
   );
