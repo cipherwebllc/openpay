@@ -79,12 +79,13 @@ export async function LandingSupport() {
         </p>
 
         {/* 応援プロフカード: 5 ボタンを 1 つに集約。カード全体が @openpay_jp プロフへの 1 link
-            (入れ子の interactive 要素を避けるため CTA は span)。link の a11y 名は aria-label が担う。 */}
+            (入れ子の interactive 要素を避けるため CTA は span)。a11y 名は内側の可視テキストから導出する。
+            aria-label は付けない: 可視テキストを含まない aria-label は label-content-name-mismatch
+            (WCAG 2.5.3 Label in Name) となり Lighthouse a11y が落ちる。 */}
         <a
           href={PROFILE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={t('supportProfileAria')}
           className="group mt-6 flex items-center gap-4 rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/5 to-brand/10 p-4 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover sm:p-5"
         >
           {/* avatar (装飾): OpenPay ブランドマーク。@handle プロフの「顔」を見せて実例感を出す。 */}

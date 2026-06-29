@@ -217,12 +217,11 @@ test.describe('landing / (LP)', () => {
       support.getByText(/応援いただけると励みになります/),
     ).toBeVisible();
     // 応援は単一の「応援プロフカード」に集約 (旧トークン別 5 ボタンを撤去)。カード全体が
-    // @openpay_jp プロフ (link-in-bio) への 1 link。a11y 名は aria-label。
+    // @openpay_jp プロフ (link-in-bio) への 1 link。a11y 名は内側の可視テキストから導出される
+    // (aria-label は付けない — label-content-name-mismatch を避けるため)。
     const tipLinks = support.getByRole('link', { name: /応援/ });
     await expect(tipLinks).toHaveCount(1);
-    const card = support.getByRole('link', {
-      name: 'OpenPay (@openpay_jp) のプロフィールを開いて応援する',
-    });
+    const card = support.getByRole('link', { name: /@openpay_jp/ });
     await expect(card).toHaveAttribute(
       'href',
       'https://open-pay.jp/@openpay_jp',
