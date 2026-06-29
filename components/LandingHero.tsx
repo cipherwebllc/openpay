@@ -36,7 +36,7 @@ export async function LandingHero() {
             src="/landing/hero-qr-payment.avif"
             alt={t('heroVisualAlt')}
             width={1400}
-            height={788}
+            height={787}
             priority
             sizes="(min-width: 1024px) 1024px, calc(100vw - 2rem)"
             className="h-auto w-full object-cover"
