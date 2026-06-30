@@ -4,7 +4,7 @@
 // 旧 / の中身 (QR / Tip タブ + offramp section) を AppShell の下に移行。
 // AppShell が logo + nav + wallet badge を担うため、ここでは個別 header を持たない。
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
@@ -21,13 +21,28 @@ import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
-
-type Tab = 'qr' | 'register' | 'tip' | 'profile' | 'mobileOrder' | 'orders';
+import { resolveCreateTab, type CreateTab as Tab } from '@/lib/createTab';
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
   const t = useTranslations('Create');
   const locale = useLocale() as Locale;
+
+  // `/create?tab=mobileOrder` 等の deep-link で初期タブを切替える (LP のバナー CTA 用)。
+  // useSearchParams は Suspense 必須化を招くため使わず、マウント後に window から1回だけ読む
+  // (SSR とハイドレーションは既定 'qr' で一致 → mismatch 無し)。flag OFF/未知値は resolveCreateTab
+  // が 'qr' に落とす。?tab= が無いときは何もしない。
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (!requested) return;
+    setTab(
+      resolveCreateTab(requested, {
+        mobileOrder: env.enableMobileOrder,
+        ordersFeed: env.enableOrderRelay || env.enableShopLive,
+        handles: env.enableHandles,
+      }),
+    );
+  }, []);
 
   return (
     <AppShell>

@@ -232,4 +232,27 @@ test.describe('landing / (LP)', () => {
     await expect(card).toContainText('@openpay_jp');
     await expect(card).toContainText('応援する');
   });
+
+  test('ja: モバイルオーダー訴求バナー — 画像 + 主CTA(/create?tab=mobileOrder) + note 解説リンク', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    // バナーは mobileorder 画像で一意に特定 (見出し名でのスコープは他節と競合し得るため)。
+    const banner = page
+      .locator('section')
+      .filter({ has: page.locator('img[src*="mobileorder"]') });
+    await expect(banner).toBeVisible();
+    await expect(banner.locator('img[src*="mobileorder"]')).toBeVisible();
+    // 主CTA → /create?tab=mobileOrder (flag に依らず href は固定)。
+    const cta = banner.getByRole('link', { name: 'モバイルオーダーを作る' });
+    await expect(cta).toHaveAttribute('href', '/ja/create?tab=mobileOrder');
+    // 解説記事 (note) は外部・別タブ。
+    const note = banner.getByRole('link', { name: '詳しい使い方を見る' });
+    await expect(note).toHaveAttribute(
+      'href',
+      'https://note.com/masia02/n/nf19e91b84ef4',
+    );
+    await expect(note).toHaveAttribute('target', '_blank');
+    await expect(note).toHaveAttribute('rel', 'noopener noreferrer');
+  });
 });
