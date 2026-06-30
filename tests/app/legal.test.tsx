@@ -339,17 +339,18 @@ describe('Legal pages', () => {
       ).toBeInTheDocument();
     });
 
-    it('役務の対価: per-tx OpenPay 利用料 (約2 JPYC / 7月から決済額の1%・最低2 JPYC / JPYC ガスレス限定 / 6月まで無料0% / 負担者は店主選択)、旧 % 都度手数料 (1.0%/0.5%) と旧 最低 5 JPYC 文の不在 (regression guard)', () => {
+    it('役務の対価: per-tx OpenPay 利用料 (決済額の 1%・最低 2 JPYC / JPYC ガスレス限定 / 負担者は店主選択)、旧 % 都度手数料 (1.0%/0.5%) と旧 最低 5 JPYC 文の不在 (regression guard)', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
-      // per-tx: OpenPay 利用料 (決済 1 件ごと・当面 約 2 JPYC・2026年7月から決済額の1%・最低 2 JPYC) を正面で assert
+      // per-tx: OpenPay 利用料 (決済 1 件ごと・決済額の 1%・最低 2 JPYC) を正面で assert。2026 年 7 月で
+      // 1% 発効済みのため recover の経過措置 (当面 約 2 JPYC / 6 月まで 0%) は撤去し present-tense 化。
+      // /約 2 JPYC/ はチップのガス相当額、/2026 年 7 月/ はレジ利用料の発効時期 (いずれも別条項) で残る。
       expect(main.textContent).toMatch(/OpenPay 利用料/);
       expect(main.textContent).toMatch(/決済 1 件ごと/);
       expect(main.textContent).toMatch(/約 2 JPYC/);
       expect(main.textContent).toMatch(/1%/);
       expect(main.textContent).toMatch(/最低 2 JPYC/);
       expect(main.textContent).toMatch(/2026 年 7 月/);
-      expect(main.textContent).toMatch(/0%/);
       // 各決済の実行時 (オンチェーン精算時) に同一取引内で申し受ける (per-tx・決済時)。月次後払い文言は撤回。
       expect(main.textContent).toMatch(/各決済の実行時/);
       expect(main.textContent).not.toMatch(/後払い/);
@@ -519,7 +520,6 @@ describe('Legal pages', () => {
       expect(body?.textContent).not.toMatch(/Merchant chooses who bears/i);
       // 課金トリガー = JPYC ガスレスのみ
       expect(body?.textContent).toMatch(/JPYC gasless/i);
-      expect(body?.textContent).toMatch(/0%/);
       expect(body?.textContent).not.toMatch(/1\.0%/);
       expect(body?.textContent).not.toMatch(/0\.5%/);
       // 無料化ピボットの絶対主張は撤回: "bears that Network Fee in full" は JPYC について消える。
@@ -532,12 +532,11 @@ describe('Legal pages', () => {
       expect(body?.textContent).not.toMatch(/as recovery of the advanced gas/i);
     });
 
-    it('ja Tokutei 役務の対価 は OpenPay 利用料 1% (6月まで無料0%)、両モード記載で旧 % 都度手数料は不在', () => {
+    it('ja Tokutei 役務の対価 は OpenPay 利用料 1% (present-tense)、両モード記載で旧 % 都度手数料は不在', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');
       expect(main.textContent).toMatch(/OpenPay 利用料/);
       expect(main.textContent).toMatch(/1%/);
-      expect(main.textContent).toMatch(/0%/);
       expect(main.textContent).not.toMatch(/1\.0%/);
       expect(main.textContent).not.toMatch(/0\.5%/);
       expect(main.textContent).toMatch(/ガスレス決済/);
