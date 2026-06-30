@@ -138,12 +138,12 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
-  test('ja: Benefits セクション — Fee「1%」(7 月〜) + 4 focal + 店舗 3 / 顧客 1', async ({
+  test('ja: Benefits セクション — Fee「1%」 + 4 focal + 店舗 3 / 顧客 1', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // recover 課金ピボット (2026-06-12): Fee カードは「利用料 1%（7 月〜）」訴求に再構成
-    // (旧「永久 0% / 決済手数料ゼロ」から変更)。Cost / Settlement / NoSignup と合わせ 4 cards。
+    // recover 課金ピボット: Fee カードは「利用料 1%」訴求に再構成 (旧「永久 0% / 決済手数料ゼロ」から変更)。
+    // 2026 年 7 月で 1% 発効済みのため「（7 月〜）」表記は撤去。Cost / Settlement / NoSignup と合わせ 4 cards。
     const benefits = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
@@ -156,9 +156,10 @@ test.describe('landing / (LP)', () => {
     // 旧 % 訴求「0.5%」と旧「0%」永続コミット文脈は撤去済 (regression fence)
     expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
     expect(await benefits.getByText('0%', { exact: true }).count()).toBe(0);
-    // 4 title (新 Fee カードは title=「利用料 1%（7 月〜）」、旧「決済手数料ゼロ/手数料が安い」は消えている)
+    // 4 title (Fee カードは title=「利用料 1%」= 7 月で 1% 発効済みのため「（7 月〜）」は撤去、
+    // 旧「決済手数料ゼロ/手数料が安い」は消えている)
     await expect(
-      benefits.getByRole('heading', { name: '利用料 1%（7 月〜）' }),
+      benefits.getByRole('heading', { name: '利用料 1%' }),
     ).toBeVisible();
     await expect(
       benefits.getByRole('heading', { name: '導入コスト 0 円' }),

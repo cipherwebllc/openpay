@@ -231,16 +231,16 @@ describe('POS_GUIDE: 文言フェンス (回帰防止)', () => {
     expect(enJson).not.toMatch(/pricing page/i);
   });
 
-  it('feeNote が手数料の額・割合・時期を開示と整合して述べる', () => {
+  it('feeNote が手数料の額・割合を開示と整合して述べる (present-tense: 決済額の 1%・最低 2 JPYC)', () => {
+    // 2026 年 7 月で 1% が発効済みのため、feeNote は経過措置 (「2026 年 7 月のご利用分から」) を
+    // 撤去し現在形で料率を述べる。額 (2 JPYC) / 率 (1%) / 純着金 (差し引) は引き続き固定する。
     const ja = POS_GUIDE.ja.feeNote;
     expect(ja).toContain('2 JPYC'); // 最低額
     expect(ja).toContain('1%'); // 料率
-    expect(ja).toMatch(/2026\s*年\s*7\s*月/); // 1% 開始時期
     expect(ja).toContain('差し引'); // 純着金 (差し引かれる)
     const en = POS_GUIDE.en.feeNote;
     expect(en).toContain('2 JPYC');
     expect(en).toContain('1%');
-    expect(en).toMatch(/July\s*2026/);
     expect(en).toMatch(/deducted/i);
   });
 
