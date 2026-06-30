@@ -9,8 +9,9 @@
 //   3. ConnectionStatus (+ WalletBalances) — wallet 未接続/接続済 + JPYC/USDC 保有残高
 //   4. ScanResultBanner — 「外部 URL」「未知 QR」「EIP-681」branch の警告 UI
 //
-// decode 成功 (kind: pay/tip/checkout) は即 router.push、success 後の戻る動線は
-// 通常 router.back に頼る (history 1 つ前が /scan)。
+// decode 成功 (kind: pay/tip/checkout/handle/order) は即 router.push、success 後の戻る動線は
+// 通常 router.back に頼る (history 1 つ前が /scan)。handle/order は自オリジンの既知 OpenPay
+// ページ (固定店舗/プロフ・モバイル注文) で、flag は env から parseScannedUrl に渡して判定する。
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -25,6 +26,7 @@ import { parseScannedUrl, type ScanAction } from '@/lib/scan/parseScannedUrl';
 import { useOrigin } from '@/hooks/useOrigin';
 import { shortAddress } from '@/lib/format';
 import type { Locale } from '@/i18n';
+import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 
 export function ScanShell() {
@@ -43,13 +45,18 @@ export function ScanShell() {
       logger.warn('scan.before_hydrate', { rawLength: raw.length });
       return;
     }
-    const action = parseScannedUrl(raw, origin, locale);
+    const action = parseScannedUrl(raw, origin, locale, {
+      enableHandles: env.enableHandles,
+      enableMobileOrder: env.enableMobileOrder,
+    });
     setLastResult(action);
 
     switch (action.kind) {
       case 'pay':
       case 'tip':
       case 'checkout':
+      case 'handle':
+      case 'order':
         // raw URL は送らず route 種別のみ (受取アドレス / 金額は集約しない方針)。
         logger.info('scan.deeplink', { kind: action.kind });
         router.push(action.href);
@@ -136,7 +143,9 @@ function ScanResultBanner({
   if (
     result.kind === 'pay' ||
     result.kind === 'tip' ||
-    result.kind === 'checkout'
+    result.kind === 'checkout' ||
+    result.kind === 'handle' ||
+    result.kind === 'order'
   ) {
     return null;
   }

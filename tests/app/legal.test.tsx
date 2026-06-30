@@ -1060,6 +1060,9 @@ describe('Legal pages', () => {
       const en = (await import('@/messages/en.json')).default;
       expect(ja.Privacy.section2.body).toContain('マスク');
       expect(en.Privacy.section2.body).toMatch(/deletion or masking/i);
+      // scan 種別 handle/order も Sentry breadcrumb に送るため開示種別へ含める (実装↔開示の linkage)。
+      expect(ja.Privacy.section2.body).toContain('handle / order');
+      expect(en.Privacy.section2.body).toContain('handle / order');
     });
 
     it('D3: SC アップグレード/移行免責が ja/en の Disclaimer section1 に', async () => {

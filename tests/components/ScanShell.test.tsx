@@ -46,6 +46,16 @@ vi.mock('@/lib/logger', () => ({
 }));
 import { logger } from '@/lib/logger';
 
+// env を mock — handle/order の flag gate を ON にして遷移配線を検証する (flag OFF=unknown は
+// parseScannedUrl の unit test 側で網羅)。他の env フィールドは実値を温存。
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: { ...actual.env, enableHandles: true, enableMobileOrder: true },
+  };
+});
+
 // qr-scanner mock (decode を ScanShell まで通すための shape)
 const ctorCalls: { onDecode: (r: { data: string }) => void }[] = [];
 const startMock = vi.fn().mockResolvedValue(undefined);
@@ -61,10 +71,21 @@ class MockQrScanner {
 vi.mock('qr-scanner', () => ({ default: MockQrScanner }));
 
 import { ScanShell } from '@/components/ScanShell';
+import { encodeOrderConfig, type MobileOrderConfig } from '@/lib/mobileOrder';
 
 const ORIGIN = 'https://test.local'; // jsdom default URL とアラインさせる
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR_OTHER = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+// /order?s=… の遷移検証用 valid トークン (decodeOrderConfig を通る最小構成)。
+const ORDER_TOKEN = encodeOrderConfig({
+  receiver: ADDR,
+  chain: 'polygon',
+  shopName: 'Test Shop',
+  mode: 'storefront',
+  feePayer: 'merchant',
+  socials: [],
+  menu: [{ id: 'a1', name: 'Coffee', price: '500' }],
+} satisfies MobileOrderConfig);
 
 function mockConnected(
   connected: boolean,
@@ -212,6 +233,30 @@ describe('ScanShell: decode → router.push + logger.info', () => {
     expect(logger.info).toHaveBeenCalledWith('scan.deeplink', {
       kind: 'checkout',
     });
+  });
+
+  it('同 origin /@handle URL → push(/ja/@shop) + logger.info kind:handle', async () => {
+    mockConnected(true);
+    renderWithIntl(<ScanShell />);
+    await startCamera();
+    decode(`${ORIGIN}/@openpay_test`);
+    expect(push).toHaveBeenCalledWith('/ja/@openpay_test');
+    expect(logger.info).toHaveBeenCalledWith('scan.deeplink', {
+      kind: 'handle',
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('同 origin /order?s=… URL → push(/ja/order?s=…) + logger.info kind:order', async () => {
+    mockConnected(true);
+    renderWithIntl(<ScanShell />);
+    await startCamera();
+    decode(`${ORIGIN}/order?s=${ORDER_TOKEN}`);
+    expect(push).toHaveBeenCalledWith(`/ja/order?s=${ORDER_TOKEN}`);
+    expect(logger.info).toHaveBeenCalledWith('scan.deeplink', {
+      kind: 'order',
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
 

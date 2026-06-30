@@ -8,6 +8,7 @@ import {
   parseTipParams,
   parseCheckoutParams,
 } from '@/lib/url';
+import { encodeOrderConfig, type MobileOrderConfig } from '@/lib/mobileOrder';
 
 const ORIGIN = 'https://open-pay.jp';
 const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -724,5 +725,135 @@ describe('parseScannedUrl: 実 parser data の data 等価性', () => {
     expect(direct.ok).toBe(true);
     if (!direct.ok) throw new Error();
     expect(direct.params).toEqual(r.params);
+  });
+});
+
+// ── @handle (固定店舗 / プロフ) ─────────────────────────────────────────
+// enableHandles ON のとき同 origin /@handle を handle として遷移可能にする。形式/予約語は
+// decomposePath で検証 (存在確認はしない=純関数)。flag OFF は unknown (404 遷移回避)。
+const HANDLES_ON = { enableHandles: true } as const;
+
+describe('parseScannedUrl: @handle route', () => {
+  it('/@shop (flag ON) → kind:handle + /{currentLocale}/@shop', () => {
+    const r = parseScannedUrl(`${ORIGIN}/@openpay_test`, ORIGIN, 'ja', HANDLES_ON);
+    expect(r.kind).toBe('handle');
+    if (r.kind !== 'handle') throw new Error();
+    expect(r.href).toBe('/ja/@openpay_test');
+    expect(r.handle).toBe('openpay_test');
+  });
+
+  it('locale prefix 付き /ja/@shop → currentLocale=en で href は en に正規化', () => {
+    const r = parseScannedUrl(`${ORIGIN}/ja/@shop`, ORIGIN, 'en', HANDLES_ON);
+    expect(r.kind).toBe('handle');
+    if (r.kind !== 'handle') throw new Error();
+    expect(r.href).toBe('/en/@shop');
+  });
+
+  it('%40 エンコード /%40shop も handle として受理', () => {
+    const r = parseScannedUrl(`${ORIGIN}/%40shop`, ORIGIN, 'ja', HANDLES_ON);
+    expect(r.kind).toBe('handle');
+    if (r.kind !== 'handle') throw new Error();
+    expect(r.href).toBe('/ja/@shop');
+  });
+
+  it('trailing slash /@shop/ も受理', () => {
+    const r = parseScannedUrl(`${ORIGIN}/@shop/`, ORIGIN, 'ja', HANDLES_ON);
+    expect(r.kind).toBe('handle');
+  });
+
+  it('大文字は normalize で小文字化されて受理 (/@Shop → handle shop)', () => {
+    const r = parseScannedUrl(`${ORIGIN}/@Shop`, ORIGIN, 'ja', HANDLES_ON);
+    expect(r.kind).toBe('handle');
+    if (r.kind !== 'handle') throw new Error();
+    expect(r.handle).toBe('shop');
+  });
+
+  it('形式不正 (短すぎ /@ab・ハイフン /@bad-handle) → unknown', () => {
+    expect(parseScannedUrl(`${ORIGIN}/@ab`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+    expect(parseScannedUrl(`${ORIGIN}/@bad-handle`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+  });
+
+  it('予約語 = 全 route 名 (/@pay・/@admin・/@order・/@orders) → unknown (route shadow / 成りすまし防御)', () => {
+    expect(parseScannedUrl(`${ORIGIN}/@pay`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+    expect(parseScannedUrl(`${ORIGIN}/@admin`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+    // /order route と同名の handle は予約済 (route を shadow させない)。
+    expect(parseScannedUrl(`${ORIGIN}/@order`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+    expect(parseScannedUrl(`${ORIGIN}/@orders`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+  });
+
+  it('余分 segment /@shop/extra → unknown', () => {
+    expect(parseScannedUrl(`${ORIGIN}/@shop/extra`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+  });
+
+  it('空 handle /@ → unknown', () => {
+    expect(parseScannedUrl(`${ORIGIN}/@`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+  });
+
+  it('flag OFF (既定 / 明示 false) → unknown (404 遷移回避)', () => {
+    expect(parseScannedUrl(`${ORIGIN}/@shop`, ORIGIN, 'ja').kind).toBe('unknown');
+    expect(
+      parseScannedUrl(`${ORIGIN}/@shop`, ORIGIN, 'ja', { enableHandles: false }).kind,
+    ).toBe('unknown');
+  });
+
+  it('別オリジンの /@shop は external (handle 化しない)', () => {
+    const r = parseScannedUrl('https://evil.example/@shop', ORIGIN, 'ja', HANDLES_ON);
+    expect(r.kind).toBe('external');
+  });
+});
+
+// ── /order?s=… (モバイル注文) ───────────────────────────────────────────
+// enableMobileOrder ON かつ s トークンが decodeOrderConfig を通る (= 全項目 valid) ときだけ
+// order。token は attacker-controllable ゆえスキャン時点で厳格 decode する。
+const ORDER_ON = { enableMobileOrder: true } as const;
+const ORDER_CONFIG: MobileOrderConfig = {
+  receiver: TO,
+  chain: 'polygon',
+  shopName: 'Test Shop',
+  mode: 'storefront',
+  feePayer: 'merchant',
+  socials: [],
+  menu: [{ id: 'a1', name: 'Coffee', price: '500' }],
+};
+const ORDER_TOKEN = encodeOrderConfig(ORDER_CONFIG);
+
+describe('parseScannedUrl: /order route', () => {
+  it('/order?s=<valid> (flag ON) → kind:order + /{currentLocale}/order?s=…', () => {
+    const r = parseScannedUrl(`${ORIGIN}/order?s=${ORDER_TOKEN}`, ORIGIN, 'ja', ORDER_ON);
+    expect(r.kind).toBe('order');
+    if (r.kind !== 'order') throw new Error();
+    expect(r.href).toBe(`/ja/order?s=${ORDER_TOKEN}`);
+  });
+
+  it('locale prefix 付き /en/order?s=… → currentLocale=ja で href は ja に正規化', () => {
+    const r = parseScannedUrl(`${ORIGIN}/en/order?s=${ORDER_TOKEN}`, ORIGIN, 'ja', ORDER_ON);
+    expect(r.kind).toBe('order');
+    if (r.kind !== 'order') throw new Error();
+    expect(r.href).toBe(`/ja/order?s=${ORDER_TOKEN}`);
+  });
+
+  it('trailing slash /order/?s=<valid> も受理', () => {
+    const r = parseScannedUrl(`${ORIGIN}/order/?s=${ORDER_TOKEN}`, ORIGIN, 'ja', ORDER_ON);
+    expect(r.kind).toBe('order');
+  });
+
+  it('壊れた s トークン → unknown (decodeOrderConfig=null)', () => {
+    expect(parseScannedUrl(`${ORIGIN}/order?s=not-a-valid-token`, ORIGIN, 'ja', ORDER_ON).kind).toBe('unknown');
+  });
+
+  it('s 欠落 /order → unknown', () => {
+    expect(parseScannedUrl(`${ORIGIN}/order`, ORIGIN, 'ja', ORDER_ON).kind).toBe('unknown');
+  });
+
+  it('flag OFF (既定) → unknown', () => {
+    expect(parseScannedUrl(`${ORIGIN}/order?s=${ORDER_TOKEN}`, ORIGIN, 'ja').kind).toBe('unknown');
+  });
+
+  it('/order/status?t=… は対象外 (2 segment) → unknown', () => {
+    expect(
+      parseScannedUrl(`${ORIGIN}/order/status?t=abc`, ORIGIN, 'ja', {
+        enableMobileOrder: true,
+      }).kind,
+    ).toBe('unknown');
   });
 });
