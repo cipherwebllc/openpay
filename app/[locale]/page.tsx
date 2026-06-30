@@ -9,6 +9,7 @@ import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
+import { LandingMobileOrder } from '@/components/LandingMobileOrder';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
@@ -30,6 +31,7 @@ export default async function HomePage({
       </div>
       <LandingBenefits />
       <LandingHowItWorks />
+      <LandingMobileOrder />
       <LandingFeatures />
       <LandingUseCases />
       <LandingFaq />
