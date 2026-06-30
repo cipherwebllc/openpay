@@ -4,6 +4,11 @@
 //   - 同 origin /pay /tip /checkout は既存 parser (lib/url.ts) に通し、params が
 //     valid なときだけ pay/tip/checkout を返す。「URL 形は正しいが to/amount が
 //     壊れている」状態は unknown に落として「後段で赤エラー」UX を排除。
+//   - 同 origin /@handle (固定店舗 / プロフ) は形式・予約語が valid かつ enableHandles の
+//     ときだけ handle。存在確認はしない (= 純関数を維持)。未登録 handle は遷移先 [handle]
+//     ページが notFound を出す。enableHandles OFF のときは unknown (404 への遷移を防ぐ)。
+//   - 同 origin /order?s=… (モバイル注文) は decodeOrderConfig が通り enableMobileOrder の
+//     ときだけ order。s トークンは attacker-controllable ゆえ厳格 decode が必須 (遷移先も再検証)。
 //   - ethereum: (EIP-681) は Phase 1 では reject (Phase 2 で in-wallet 遷移検討)。
 //   - 外部 origin の http(s) は external — UI 側に二段確認させる。
 //   - それ以外 (URL でない / 同 origin だが route 未知) は unknown で raw 提示。
@@ -18,20 +23,38 @@ import {
   type PayParams,
   type TipParams,
 } from '@/lib/url';
+import {
+  decodeHandleSegment,
+  normalizeHandle,
+  isValidHandleFormat,
+  isReserved,
+} from '@/lib/handle';
+import { decodeOrderConfig } from '@/lib/mobileOrder';
 
 export type ScanAction =
   | { kind: 'pay'; href: string; params: PayParams }
   | { kind: 'tip'; href: string; params: TipParams }
   | { kind: 'checkout'; href: string; params: CheckoutParams }
+  | { kind: 'handle'; href: string; handle: string }
+  | { kind: 'order'; href: string }
   | { kind: 'external'; href: string; host: string }
   | { kind: 'eip681'; raw: string }
   | { kind: 'unknown'; raw: string };
 
+// route 種別ごとの追加情報を持つフラグ判定の入力。flag は呼出側 (ScanShell) が env から渡す
+// (parseScannedUrl の純粋性・テスト容易性を保つため env を直接読まない)。未指定は fail-closed。
+export type ScanOptions = {
+  enableHandles?: boolean;
+  enableMobileOrder?: boolean;
+};
+
 type DecomposedPath =
   | { route: 'pay' | 'checkout' }
-  | { route: 'tip'; tipAddress: string };
+  | { route: 'tip'; tipAddress: string }
+  | { route: 'handle'; handle: string }
+  | { route: 'order' };
 
-// /(ja|en)?/(pay|checkout|tip/0x...) のみ受理。trailing slash 許容。
+// /(ja|en)?/(pay|checkout|order|@handle|tip/0x...) のみ受理。trailing slash 許容。
 // 部分一致は禁止 (URL の末端まで route 文字列と一致しなければ null)。
 function decomposePath(pathname: string): DecomposedPath | null {
   const trimmed = pathname.replace(/\/+$/, '');
@@ -47,8 +70,25 @@ function decomposePath(pathname: string): DecomposedPath | null {
   if ((head === 'pay' || head === 'checkout') && rest === 1) {
     return { route: head };
   }
+  // /order?s=… (モバイル注文)。s トークンの検証は呼出側 (decodeOrderConfig)。
+  if (head === 'order' && rest === 1) {
+    return { route: 'order' };
+  }
   if (head === 'tip' && rest === 2 && isAddress(segments[start + 1]!)) {
     return { route: 'tip', tipAddress: segments[start + 1]! };
+  }
+  // /@handle (固定店舗 / プロフ)。生 `@` も `%40` も受ける (Next は dynamic param を
+  // 自動デコードしない)。単一 segment のみ。decode→正規化→形式/予約語を満たすときだけ
+  // handle。`@` 始まりだが形式/予約語 NG は null (= unknown)。
+  if (rest === 1 && head !== undefined) {
+    const decoded = decodeHandleSegment(head);
+    if (decoded.startsWith('@')) {
+      const handle = normalizeHandle(decoded);
+      if (isValidHandleFormat(handle) && !isReserved(handle)) {
+        return { route: 'handle', handle };
+      }
+      return null;
+    }
   }
   return null;
 }
@@ -69,6 +109,7 @@ export function parseScannedUrl(
   text: string,
   origin: string,
   currentLocale: Locale,
+  opts: ScanOptions = {},
 ): ScanAction {
   const trimmed = text.trim();
   if (trimmed.length === 0) return { kind: 'unknown', raw: text };
@@ -124,6 +165,22 @@ export function parseScannedUrl(
         href: buildHref('tip', currentLocale, r.params.to, url.search),
         params: r.params,
       };
+    }
+    case 'handle': {
+      // 形式/予約語は decomposePath で検証済。flag OFF (本番未点灯) は unknown=404 回避。
+      if (!opts.enableHandles) return { kind: 'unknown', raw: text };
+      return {
+        kind: 'handle',
+        href: `/${currentLocale}/@${decomposed.handle}`,
+        handle: decomposed.handle,
+      };
+    }
+    case 'order': {
+      if (!opts.enableMobileOrder) return { kind: 'unknown', raw: text };
+      // s トークンは untrusted。decodeOrderConfig が通る (= 全項目 valid) ときだけ order。
+      const s = sp.get('s');
+      if (!s || decodeOrderConfig(s) === null) return { kind: 'unknown', raw: text };
+      return { kind: 'order', href: `/${currentLocale}/order${url.search}` };
     }
   }
 }

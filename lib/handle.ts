@@ -44,10 +44,11 @@ export const HANDLE_PATTERN = /^[a-z0-9_]{3,30}$/;
 // 予約語: 既存ルート名 + locale + ブランド/紛らわしい語。handle namespace は `@` 接頭辞で
 // static route と分離されるため衝突防止というより成りすまし/混同の一次防御。
 export const RESERVED_HANDLES: ReadonlySet<string> = new Set<string>([
-  // 既存ルート / 特殊パス
+  // 既存ルート / 特殊パス (全 top-level route 名を網羅 = handle が route を shadow しない)
   'api', 'og', '_next', 'admin', 'billing', 'checkout', 'create',
-  'disclaimer', 'experimental', 'explore', 'history', 'pay', 'privacy',
-  'scan', 'terms', 'tip', 'tokutei',
+  'disclaimer', 'discovery', 'experimental', 'explore', 'guide', 'history',
+  'news', 'order', 'orders', 'pay', 'privacy', 'scan', 'terms', 'tip',
+  'tokutei',
   // locale
   'ja', 'en',
   // ブランド / 役割 (成りすまし防止)
