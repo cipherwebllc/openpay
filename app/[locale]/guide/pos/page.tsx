@@ -157,6 +157,30 @@ export default async function GuidePosPage({
               </li>
             ))}
           </ul>
+          {/* POS アフィリエイト (承認済)。景表法 (ステマ規制) 対応で affiliateAdLabel「広告」を
+              併記し、rel="sponsored nofollow" + target=_blank で開く (lib/explore.ts と同思想)。 */}
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                {c.affiliateAdLabel}
+              </span>
+              <span className="text-sm font-semibold text-slate-900">
+                {c.posAffiliate.name}
+              </span>
+            </div>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700">
+              {c.posAffiliate.blurb}
+            </p>
+            <a
+              href={c.posAffiliate.href}
+              target="_blank"
+              rel="sponsored nofollow noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+            >
+              {c.posAffiliate.cta}
+              <span aria-hidden>→</span>
+            </a>
+          </div>
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.posCaveat}
           </p>

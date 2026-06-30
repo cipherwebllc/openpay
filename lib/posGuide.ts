@@ -65,6 +65,13 @@ export type GuideContent = {
   readonly posCaveat: string;
   /** 景表法「広告」開示ラベル。アフィリエイトリンク設置時に表示する。 */
   readonly affiliateAdLabel: string;
+  /** POS アフィリエイト (承認済)。景表法対応で affiliateAdLabel「広告」を併記し rel=sponsored で描画。 */
+  readonly posAffiliate: {
+    readonly name: string;
+    readonly href: string;
+    readonly blurb: string;
+    readonly cta: string;
+  };
 
   readonly costTitle: string;
   readonly costColCard: string;
@@ -84,6 +91,12 @@ export type GuideContent = {
 
   readonly backHome: string;
 };
+
+// スマレジ (クラウド POS) の A8.net アフィリエイトリンク。ja/en 共通。クリック計測は a8mat 付き
+// リンクで成立する。impression beacon (0.gif の 1x1 pixel) は外部 pixel を読まない privacy 方針ゆえ
+// 意図的に貼らない (クリック計測は維持される)。
+const SMAREGI_AFFILIATE_URL =
+  'https://px.a8.net/svt/ejp?a8mat=4B5X8A+18NQ3E+4Z10+NVWSI';
 
 const ja: GuideContent = {
   metaTitle: '今お使いのPOSレジでJPYC（円ステーブルコイン）を受け取る運用ガイド',
@@ -184,6 +197,13 @@ const ja: GuideContent = {
   posCaveat:
     '※各POSの無料プランの有無・条件・手数料は変わることがあります。導入前に各社の最新の公式情報をご確認ください。',
   affiliateAdLabel: '広告',
+  posAffiliate: {
+    name: 'スマレジ',
+    href: SMAREGI_AFFILIATE_URL,
+    blurb:
+      '国内で広く使われるクラウド POS レジ。いつものレジ会計はスマレジ、JPYC（円ステーブルコイン）の受け取りは OpenPay、という2台持ちで無理なく始められます。これから POS を選ぶ・見直すなら候補のひとつです。',
+    cta: 'スマレジを見る',
+  },
 
   costTitle: 'コストのイメージ',
   costColCard: '一般的なカード決済',
@@ -330,6 +350,13 @@ const en: GuideContent = {
   posCaveat:
     '* Free plans, terms, and fees of each POS can change. Please check each provider’s latest official information before adopting.',
   affiliateAdLabel: 'Ad',
+  posAffiliate: {
+    name: 'Smaregi',
+    href: SMAREGI_AFFILIATE_URL,
+    blurb:
+      'A widely used cloud POS in Japan. Keep your everyday checkout on Smaregi and accept JPYC (the yen stablecoin) with OpenPay — an easy two-device combo. Worth a look if you are choosing or rethinking your POS.',
+    cta: 'See Smaregi',
+  },
 
   costTitle: 'Cost at a glance',
   costColCard: 'Typical card payment',
