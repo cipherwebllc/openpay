@@ -246,14 +246,14 @@ describe('Legal pages', () => {
       expect(body?.textContent).toMatch(/取消.*返金.*修正/);
     });
 
-    it('section 8 (アルファ版) の本文に少額テスト送信の指示', () => {
+    it('section 8 (ベータ版) の本文に少額テスト送信の指示', () => {
       renderWithIntl(<DisclaimerPage />, { locale: 'ja' });
       const section8Heading = screen.getByRole('heading', {
         level: 2,
         name: /^8\./,
       });
       const body = section8Heading.nextElementSibling;
-      expect(body?.textContent).toMatch(/アルファ版/);
+      expect(body?.textContent).toMatch(/ベータ版/);
       expect(body?.textContent).toMatch(/少額.*テスト送信/);
     });
 
@@ -281,7 +281,7 @@ describe('Legal pages', () => {
         name: /^8\./,
       });
       expect(section7.textContent).toMatch(/OpenPay Usage Fee|Gas Sponsorship/);
-      expect(section8.textContent).toMatch(/Alpha/);
+      expect(section8.textContent).toMatch(/Beta/);
     });
   });
 
