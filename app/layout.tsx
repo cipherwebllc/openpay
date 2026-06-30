@@ -5,7 +5,7 @@ const SITE_URL = 'https://open-pay.jp';
 const OG_TITLE =
   'OpenPay — ウォレットアドレス 1 つで始める、店舗向けガスレス決済 QR';
 const OG_DESCRIPTION =
-  'JPYC・USDC 対応の QR 決済を、かんたんに導入。実店舗・イベントから AI エージェントの課金まで、オープンな決済インフラを提供します。';
+  'JPYC・USDC 対応の QR 決済・モバイルオーダーを、かんたんに導入。実店舗・イベントから AI エージェントの課金まで、オープンな決済インフラを提供します。';
 
 // Root layout は <html lang> を [locale]/layout に委譲する。ここでは
 // メタデータと viewport だけ持ち、html/body は子で render させる。
