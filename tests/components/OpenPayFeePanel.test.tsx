@@ -124,10 +124,10 @@ beforeEach(() => {
 });
 
 describe('OpenPayFeePanel', () => {
-  it('billing OFF (アルファ) → 無料表示・請求 UI を出さない', () => {
+  it('billing OFF → per-tx 1% 表示・月次請求 UI を出さない', () => {
     h.enableBilling = false;
     renderPanel();
-    expect(screen.getByText(/アルファ期間中は無料/)).toBeInTheDocument();
+    expect(screen.getByText(/決済額の 1%・最低 2 JPYC を決済時に申し受け/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /支払う/ })).toBeNull();
   });
 
