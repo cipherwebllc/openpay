@@ -4,7 +4,7 @@ OpenPay is a **non-custodial QR payment tool** that turns JPYC / USDC wallet tra
 
 OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向け QR 決済体験に変えるノンカストディ型 OSS 決済ツールです。
 
-**Demo**: <https://open-pay.jp> · **Status**: Alpha · **License**: MIT
+**Demo**: <https://open-pay.jp> · **Status**: Beta · **License**: MIT
 
 ![OpenPay screenshot](./public/og-image.png)
 
@@ -26,6 +26,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 - **Local transaction history** — per-browser LocalStorage history at `/history`, with filters (period / status / search), a JPY-converted GMV summary, CSV export, and a "latest 3" strip on the QR builder.
 - **Accounting integration** — `/history` exports income CSV in **freee**, **Money Forward**, and **Yayoi** formats (Yayoi-native in Shift_JIS), and — opt-in via `NEXT_PUBLIC_ENABLE_FREEE_SYNC` — connects to **freee over OAuth** to push income transactions in one click. Gated behind **SIWE wallet login** (no password/account) with an idempotent "sync to freee" batch (re-clicking never double-books).
 - **Sales line items & simple register** — the QR builder has an optional **accounting fields** section (product/purpose name, memo, tax rate & category, receipt no.), and `/create` adds a mobile-friendly **simple register**: add **multiple products to a cart** (from presets or typed), set per-line quantity / unit price / tax rate, and generate an itemized `/checkout` QR for the cart total. The line items travel with the payment and are recorded in `/history` as a **sales detail** (per-line product, quantity, unit price, tax rate, in-tax amount, total, receipt no.). They flow into the accounting CSVs (tax category + an item summary like “Coffee x2 / T-shirt x1” in the description), a dedicated **line-item CSV** (one row per product), and freee’s memo (one deal per transaction, items summarised — idempotent, never double-booked). One cart is a single currency. Register mode and product presets are stored locally (LocalStorage; no server DB). These are **bookkeeping aids for CSV import** — OpenPay is not a POS or accounting product, and final accounting (tax treatment, mixed-rate carts, etc.) should be confirmed in your accounting software / by a tax advisor. JPYC is treated as ¥1; tax is computed in the token’s own units (no forced JPY conversion for USDC).
+- **Mobile order & `@handle` storefronts** *(live in production)* — a store can publish a menu at `open-pay.jp/@handle` (or share a `/order` link); customers browse, add to a cart, and pay by QR, with the receiving wallet shared with the profile/tip page. Optional flag-gated layers add order relay to the merchant, kitchen / hall fulfillment boards, live sold-out toggles, pre-order time slots, and a pickup-ready customer notification (see the env table).
 - **Reference market rate** — a lightweight strip on `/` and `/create` shows `1 USDC = ¥X.XX` via a 5-min server-cached CoinGecko proxy; `1 JPYC = ¥1.00 (peg)` is fixed.
 - **Experimental x402 / agent payment** support for per-request paid APIs — with both USDC and **JPYC** assets (most x402 servers are USDC-only).
 - **OSS, self-hostable** under MIT.
@@ -50,15 +51,15 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
 ## Fees
 
-In **gasless** mode for **JPYC** (recover configuration), each payment carries a **per-transaction OpenPay usage fee**: for now about **2 JPYC** per payment, and from the **July 2026** usage period **1% of the payment with a 2 JPYC minimum** (`max(2 JPYC, 1%)`). The fee is deducted at settlement and split to the OpenPay fee-receiver atomically in the same transaction. The fee-bearer is **fixed, not a per-QR choice**: for **payments** (`/pay`, `/checkout`, the register) the **merchant always absorbs the fee** and the **customer pays exactly the displayed price** (the merchant's net = price − fee). OpenPay never takes custody: the principal price of goods still moves customer→merchant directly on-chain, and only the usage-fee portion is split out.
+In **gasless** mode for **JPYC** (recover configuration), each payment carries a **per-transaction OpenPay usage fee** — **1% of the payment with a 2 JPYC minimum** (`max(2 JPYC, 1%)`). The fee is deducted at settlement and split to the OpenPay fee-receiver atomically in the same transaction. The fee-bearer is **fixed, not a per-QR choice**: for **payments** (`/pay`, `/checkout`, the register) the **merchant always absorbs the fee** and the **customer pays exactly the displayed price** (the merchant's net = price − fee). OpenPay never takes custody: the principal price of goods still moves customer→merchant directly on-chain, and only the usage-fee portion is split out.
 
-For **tips** (`/tip`, `@handle` tip pages) the **tipper pays a flat gas-equivalent floor (about 2 JPYC)** on top of the tip — the **1% does not apply to tips** even after the July rate change (tips stay at the flat floor).
+For **tips** (`/tip`, `@handle` tip pages) the **tipper pays a flat gas-equivalent floor (about 2 JPYC)** on top of the tip — the **1% does not apply to tips** (tips stay at the flat floor).
 
 There are **no fees** on receiving a payment itself, on **standard** (with-gas) mode (the customer pays their own gas, OpenPay does not touch it), or on the **USDC** paths (gas is paid by the customer directly in USDC via the Pimlico / Circle paymaster; OpenPay collects 0). The usage fee applies only to JPYC gasless (recover) payments and tips.
 
 **Mobile-order system fee (flag-gated; default off).** When `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` is on, payments made through a mobile-order storefront (`@handle` / `/order`) carry the OpenPay usage fee at a **mobile-order rate** (the **mobile-order system fee**) — consideration for the mobile-order *system* (shop page, menu, order management, order relay). It is **not charged in addition to** the gasless per-tx usage fee: on a mobile order only this rate applies, and the gas OpenPay sponsors is included in it (no separate gasless fee on top). It is **path-independent**: it applies whether the payment goes through the gasless relay **or** standard (with-gas) mode, so a gasless-by-other-means or standard payment does not escape it. The rate is **1%** for in-store / kiosk (`storefront`) and **3%** for pre-order mobile ordering (`preorder`) — a flat percent (no floor). For pre-order a per-store toggle picks **store-borne** (deducted from the merchant's receipt; customer sees the price only) or **customer-added** (the customer pays price + 3%). On the relay path it is enforced server-side — the relay route recomputes the rate from a code constant keyed by the order kind, so the client cannot lower it — and split to the same fee-receiver in the same transaction. It is booked as a **system fee** (not a network/gas cost) in history / CSV. `/pay`, tips, and ordinary checkout links are unaffected. Rates live in `lib/mobileOrderFee.ts`, fenced against the disclosed numbers in `lib/legal.ts` (`DISCLOSED_MOBILE_ORDER_FEE`).
 
-**Register (POS) path-independence (flag-gated, default off — not yet live).** The existing OpenPay usage fee is, historically, gas-recovery-framed and so only fires on the gasless **relay** path; a register sale paid via the **standard** (with-gas) path escaped it. When `NEXT_PUBLIC_ENABLE_REGISTER_FEE` is on, JPYC payments checked out via the **register** (`RegisterMode` → `/checkout`) also carry the usage fee on the **standard** path — `billWei × RECOVER_FEE_BPS / 10000` (no gas floor, store-borne, split as a separate transfer), reframed as consideration for use of the service (the register), not gas sponsorship. The rate follows the recover schedule (`RECOVER_FEE_BPS`: **0 until July 2026 → 1%**), so it is **inert until July even with the flag on**. The relay path is unchanged (recover already charges it). USDC, payment QR (`/pay`), tips, and manually created checkout links are out of scope.
+**Register (POS) path-independence (flag-gated, default off — not yet live).** The existing OpenPay usage fee is, historically, gas-recovery-framed and so only fires on the gasless **relay** path; a register sale paid via the **standard** (with-gas) path escaped it. When `NEXT_PUBLIC_ENABLE_REGISTER_FEE` is on, JPYC payments checked out via the **register** (`RegisterMode` → `/checkout`) also carry the usage fee on the **standard** path — `billWei × NEXT_PUBLIC_RECOVER_FEE_BPS / 10000` (no gas floor, store-borne, split as a separate transfer), reframed as consideration for use of the service (the register), not gas sponsorship. The rate follows the recover schedule (`NEXT_PUBLIC_RECOVER_FEE_BPS`, **now 1%**), so with the flag on it charges the current recover rate. The relay path is unchanged (recover already charges it). USDC, payment QR (`/pay`), tips, and manually created checkout links are out of scope.
 
 This pricing is **not a percentage skim of arbitrary size**: it is a small, capped, per-transaction service fee for the gas-sponsored JPYC relay. OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 
@@ -102,7 +103,7 @@ The widget is gasless-only — fans only need the tip token, no native gas (for 
 
 **Sharing & social preview** — the tip builder (`/create` → tip) outputs the link with one-tap copy, a **link QR** (for print / in-person; omitted automatically if the URL is too long for a scannable code), and a **“Share on X”** button, plus two embeds: the full **`<iframe>`** widget and a paste-anywhere **“Tip” button** snippet (note / Linktree / blog). Tip links shared on X / Discord / LINE unfurl into a **dynamic OG card** (`/api/og/tip`, 1200×630) with the creator’s name + token + brand (Japanese names rendered via a bundled Noto Sans JP). The card stays accurate per mode — gasless JPYC/USDC say “no gas”, native POL/KAIA tips don’t (the sender pays their own gas). The OG endpoint only honours the creator name for a valid tip link (`to` + token/native); arbitrary direct hits fall back to a generic branded card.
 
-**Permanent links (`@handle`)** — a creator can reserve a memorable handle (`open-pay.jp/@alice`) that resolves to their tip page (same `TipForm` + OG card) no matter how often they change receiver or amounts. Reservation is self-service: sign in with **SIWE** (proves wallet ownership), pick a handle (lowercase `[a-z0-9_]`, 3–30 chars; reserved/brand words blocked), and publish the current tip settings; owners can update or release their handles (up to 3 per wallet). Records live in KV — name uniqueness is an atomic `SET NX` claim and owner-scoped update/delete use a compare-and-set. Gated behind `NEXT_PUBLIC_ENABLE_HANDLES` (default off), rolled out after testnet verification and moderation tooling.
+**Permanent links (`@handle`)** — a creator can reserve a memorable handle (`open-pay.jp/@alice`) that resolves to their tip page (same `TipForm` + OG card) no matter how often they change receiver or amounts. Reservation is self-service: sign in with **SIWE** (proves wallet ownership), pick a handle (lowercase `[a-z0-9_]`, 3–30 chars; reserved/brand words blocked), and publish the current tip settings; owners can update or release their handles (up to 3 per wallet). Records live in KV — name uniqueness is an atomic `SET NX` claim and owner-scoped update/delete use a compare-and-set. Gated behind `NEXT_PUBLIC_ENABLE_HANDLES` — **live on mainnet** (production sets `1`); code default off.
 
 ## Non-custodial design
 
@@ -116,7 +117,7 @@ OpenPay **never holds** merchant funds. Customer payments are sent **directly to
 |---|---|
 | `/` | Landing page — hero with two CTAs (📱 pay / 🏪 receive), benefits, how-it-works, FAQ |
 | `/create` | Merchant QR builder + Tip widget builder + offramp links + latest-3 history strip |
-| `/scan` | Customer scan-to-pay surface (QR scanner + connected-wallet balances + saved payment receipts) |
+| `/scan` | Customer scan-to-pay surface (QR scanner + connected-wallet balances + saved payment receipts); accepts payment / tip / `@handle` storefront / `/order` QRs |
 | `/history` | Local-only transaction history with CSV export |
 | `/explore` | Curated directory of external stablecoin services (exchanges / DEX / dApps / bridges / explorers) |
 | `/pay`, `/checkout`, `/tip/[address]` | Transactional leaf surfaces — kept focused (no app-shell chrome) |
@@ -148,9 +149,9 @@ When a payment completes (`/pay`, `/checkout`, `/tip`), OpenPay saves an **elect
 - It **cannot be recovered** after changing devices, clearing browser data, or in private/incognito mode — print or save it to keep a copy. On `/scan` each receipt can be **deleted** individually and all receipts **cleared** at once (useful on a shared device).
 - This is **not a formal receipt, tax document, or invoice.** Final treatment should be confirmed with your organization, accounting rules, or tax advisor.
 
-## Alpha notice
+## Beta notice
 
-OpenPay is **alpha software**. Test with small amounts first. Blockchain transactions are **irreversible** — there is no chargeback. Always verify recipient address, token, chain, amount, and final receipt. Merchants should verify actual receipt in their wallet or on a block explorer, even after the completion screen is shown.
+OpenPay is **beta software**. Test with small amounts first. Blockchain transactions are **irreversible** — there is no chargeback. Always verify recipient address, token, chain, amount, and final receipt. Merchants should verify actual receipt in their wallet or on a block explorer, even after the completion screen is shown.
 
 ## Quick start
 
@@ -197,9 +198,9 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Operator receiver wallet that the per-transaction OpenPay usage fee is split to. **Required on mainnet** (the env guard rejects the placeholder). It is used when the EIP-3009 forwarder (recover) mode is configured (forwarder address set per chain); with no forwarder configured a chain runs in free mode and no fee is split. | **mainnet** |
-| `RECOVER_FEE_BPS` | Per-transaction OpenPay usage-fee rate in basis points, **shared** by `/pay`, `/checkout`, and the register's relay path. **`0` until July 2026 → `100` (1%)**; the floor (`max(2 JPYC, …)`) applies on the relay path. Changing it changes a *disclosed* number — the legal-text fence (`DISCLOSED_RECOVER_FEE`) and the relay-route startup divergence guard flag any drift. | optional (fee) |
+| `NEXT_PUBLIC_RECOVER_FEE_BPS` | Per-transaction OpenPay usage-fee rate in basis points, **shared** by `/pay`, `/checkout`, and the register's relay path. **`100` (1%) — live in production** as of the July 2026 usage period (code default `0`); the floor (`max(2 JPYC, …)`) applies on the relay path. Changing it changes a *disclosed* number — the legal-text fence (`DISCLOSED_RECOVER_FEE`) and the relay-route startup divergence guard flag any drift. | optional (fee) |
 | `NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE` | Adds **Avalanche C-Chain** (Fuji on testnet) as a JPYC receiving chain — **live on mainnet** (production sets `1`). Code default **off** keeps JPYC on Polygon + Kaia only. Avalanche is **recover-required**: gasless needs a forwarder (`NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE` + relayer AVAX) or it falls back to standard payment (so the relayer never spends AVAX in free mode). | optional |
-| `NEXT_PUBLIC_ENABLE_MOBILE_ORDER` | Mobile-order storefront feature (`@handle` shop page / `/order`). Default **off**. | optional |
+| `NEXT_PUBLIC_ENABLE_MOBILE_ORDER` | Mobile-order storefront feature (`@handle` shop page / `/order`) — **live on mainnet** (production sets `1`); code default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_ORDER_RELAY` | Order relay — delivers the paid order (items + table + settled amount) to the merchant via KV + on-chain verification. Needed for mobile ordering to be usable; requires KV configured. Default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_SHOP_LIVE` | Live shop status for `@handle` storefronts — per-item sold-out / accepting-orders toggles, recommended items, and a register category filter & image toggle. High-frequency `shop:live:<handle>` KV record (advisory; on-chain stays authoritative). Requires KV + `…ENABLE_HANDLES` + `…ENABLE_MOBILE_ORDER`. Default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_MENU_OPTIONS` | Menu options (size / topping groups) on products. Definitions are structured; a selection is carried as the **effective unit price** (`base + Σ delta`) + a name suffix, so the checkout URL / order schema stay unchanged. Default **off**. | optional |
@@ -208,7 +209,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_ENABLE_ORDER_TOKEN` | Order **view token** — lets staff terminals view/operate the kitchen/hall boards via a link (`/orders/{kitchen,hall}?t=…`) **without holding the receiving wallet's key**: the token authorizes feed read + status ops only (never any money-path / no fund access), so staff cannot skim sales. Revoked by re-issue/delete (the feed enforces a current-token match). Requires KV + `…ENABLE_ORDER_RELAY` (and `…ENABLE_ORDER_FULFILLMENT` for the boards). Default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_ORDER_PICKUP` | **Pickup-ready customer notification** — the hall board gains a "ready for pickup (notify)" step (`markReady`) before "handed over", surfacing on the customer's status page (`/order/status?t=…`): it polls a **read-only** `GET /api/order/status` every 8s and shows received → preparing → **ready (chime + Screen Wake Lock + "keep this screen open")** → done. Foreground-only (no Web Push / Service Worker). The status token is **client-generated** (256-bit, no server key) and reverse-mapped server-side (`order:sv:<token>` → `{merchant,chainId,txHash}`, 72h TTL); the endpoint returns the **coarse state only** (no items / amount / payer — safe even if the token leaks) and is IP rate-limited. Requires KV + `…ENABLE_ORDER_RELAY` + `…ENABLE_ORDER_FULFILLMENT`. Default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` | Mobile-order **system fee** (storefront 1% / pre-order 3%, path-independent — see [Fees](#fees)). Default **off** = mobile orders are fee-free. Light-up pairs with the disclosure (`lib/news.ts` announcement) in the same release, and mobile-order chains must have a forwarder configured (the fee requires the recover path). See `docs/DEPLOY_CHECKLIST.md §13`. | optional |
-| `NEXT_PUBLIC_ENABLE_REGISTER_FEE` | Extends the OpenPay usage fee to the register's **standard** (with-gas) JPYC path (see [Fees](#fees)). Default **off**; inert until `RECOVER_FEE_BPS ≥ 1` (July 2026) even when on. | optional |
+| `NEXT_PUBLIC_ENABLE_REGISTER_FEE` | Extends the OpenPay usage fee to the register's **standard** (with-gas) JPYC path (see [Fees](#fees)). Default **off**; when on it charges the current recover rate (`NEXT_PUBLIC_RECOVER_FEE_BPS`, now 1%). | optional |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect projectId (<https://cloud.reown.com>) | optional |
 | `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain | recommended on prod |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |
@@ -217,7 +218,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_ENABLE_FREEE_SYNC` | Show the freee sync panel on `/history` (default **off** — dark ship) | freee only |
 | `FREEE_CLIENT_ID` / `FREEE_CLIENT_SECRET` / `FREEE_REDIRECT_URI` | freee OAuth app (server-only secret; callback `…/api/freee/callback`) | freee only |
 | `SIWE_ALLOWED_DOMAINS` | Extra SIWE-login domains beyond the canonical host (localhost auto-allowed in dev) | optional |
-| `ALPHA_ENTITLEMENT_BYPASS` | Open all paid features during alpha (default on; `0`/`false` to require an entitlement) | optional |
+| `ALPHA_ENTITLEMENT_BYPASS` | Open all paid features during the beta (default on; `0`/`false` to require an entitlement) | optional |
 | `NEXT_PUBLIC_ENABLE_USAGE_FEE` | **(Shelved — kept for possible future reuse, NOT the current model.)** An alternative *monthly per-account* usage-fee design (meters JPYC gasless-relay volume + an overdue soft-gate on `/history`). The **live** monetization is the **per-transaction** fee in [Fees](#fees) (`max(2 JPYC, 1%)`, deducted at settlement) — not this. Default **off**; left in place for future features. | optional |
 | `NEXT_PUBLIC_ENABLE_CSV_PASS` / `NEXT_PUBLIC_ENABLE_PRO` | Optional **accounting-CSV-download paywall** (independent of the usage fee): a per-use **24-hour CSV pass (100 JPYC)** and/or the **¥500/mo OpenPay Pro** subscription (Pro ⊇ CSV pass), paid in JPYC to the receiver wallet and auto-granted after on-chain verification of the self-submitted txHash. Default **off** — CSV export stays free; go-live pairs with `ALPHA_ENTITLEMENT_BYPASS=0`. | optional |
 | `X402_*` | x402 paid-API config | x402 only |
@@ -236,7 +237,7 @@ OpenPay includes **experimental** x402 protocol support for per-request paid API
 |---|---|---|
 | `base` | USDC (Circle native) | mainnet |
 | `base-sepolia` | USDC (Circle native testnet) | testnet (default) |
-| `polygon` | JPYC v3 | mainnet (alpha-verified) |
+| `polygon` | JPYC v3 | mainnet (verified) |
 | `polygon-amoy` | JPYC v3 (testnet) | testnet |
 
 **Scope notes (different from the human checkout flow).** A paid route is pinned to **one (network, asset)** pair — agents must hold the token on that exact chain. The human checkout's Circle CCTP V2 / Gateway cross-chain bridging is **not** part of the x402 path (bridge overhead exceeds typical per-request micropayment value). Choose the network per route via `X402_NETWORK`.
@@ -256,7 +257,7 @@ Gasless payments depend on a funded Pimlico Paymaster deposit. A GitHub Actions 
 
 ## Limitations
 
-- **Alpha software** — test with small amounts first.
+- **Beta software** — test with small amounts first.
 - **Not all wallets are guaranteed** to display every chain / token correctly.
 - **Gasless depends on third-party infrastructure** (Pimlico, x402 facilitator). Outages can affect availability.
 - **Network-fee estimates may differ from actual gas costs.**
