@@ -6,8 +6,10 @@ import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { StorefrontParts } from '@/lib/mobileOrder';
+import type { Address } from 'viem';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+const ADDR2 = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
 const h = vi.hoisted(() => ({ isSignedIn: true }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -41,6 +43,7 @@ const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
 function renderPanel(
   props: Partial<{
     storefront: StorefrontParts | null;
+    receiver: Address | null;
     onGetHandle: () => void;
     onLoadStorefront: (parts: StorefrontParts, receiver: string) => void;
   }> = {},
@@ -50,6 +53,7 @@ function renderPanel(
     <QueryClientProvider client={qc}>
       <StorefrontPublishPanel
         storefront={props.storefront === undefined ? STORE : props.storefront}
+        receiver={props.receiver ?? null}
         onGetHandle={props.onGetHandle}
         onLoadStorefront={props.onLoadStorefront}
       />
@@ -104,6 +108,54 @@ describe('StorefrontPublishPanel', () => {
     expect(body.storefront).toEqual(STORE);
     // 固定店舗 URL。
     expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
+  });
+
+  it('ビルダーの受取先が現 config.to と異なる → config.to を新受取先に更新して POST (他 config は保持) + 差分注記', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
+        : {
+            ok: true,
+            status: 200,
+            json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }),
+          },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE, receiver: ADDR2 });
+    const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
+    // 現 config.to (ADDR) と異なるので「X→Y に更新」注記が出る。
+    expect(screen.getByText(/更新して公開します/)).toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
+    const post = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    const body = JSON.parse((post![1] as RequestInit).body as string);
+    expect(body.config.to).toBe(ADDR2); // 受取先が更新される
+    expect(body.config.methods).toEqual(CFG.methods); // 他フィールドは保持
+    expect(body.storefront).toEqual(STORE);
+  });
+
+  it('ビルダーの受取先が現 config.to と同一 → config を変更せず維持 (config.to 温存)', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
+        : {
+            ok: true,
+            status: 200,
+            json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }),
+          },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE, receiver: ADDR }); // = 現 config.to と同一
+    const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
+    const post = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    const body = JSON.parse((post![1] as RequestInit).body as string);
+    expect(body.config).toEqual(CFG);
   });
 
   it('公開済み handle は「公開を更新」+ (公開済み) を出す', async () => {
@@ -188,7 +240,7 @@ describe('StorefrontPublishPanel', () => {
     );
     renderWithIntl(
       <QueryClientProvider client={qc}>
-        <StorefrontPublishPanel storefront={STORE} />
+        <StorefrontPublishPanel storefront={STORE} receiver={null} />
       </QueryClientProvider>,
     );
     // クラッシュせず公開ボタンが出る (handles は配列として読まれる)。
