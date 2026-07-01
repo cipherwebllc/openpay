@@ -696,6 +696,7 @@ export function MobileOrderBuilder({
           {env.enableHandles && (
             <StorefrontPublishPanel
               storefront={storefrontParts}
+              receiver={effectiveReceiver}
               onGetHandle={onGetHandle}
               onLoadStorefront={loadFromStorefront}
             />

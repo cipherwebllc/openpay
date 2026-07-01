@@ -1772,6 +1772,8 @@
     "publishAlready": "(published)",
     "publishButton": "Publish to this @handle",
     "publishUpdateButton": "Update published shop",
+    "publishReceiverShared": "The receive address is shared across this @handle (same as your profile/tips). Updating the shop syncs it to the builder's receive address.",
+    "publishReceiverWillChange": "Publishing will update the receive address from {from} to {to} (the @handle-wide receive address changes).",
     "editLoadButton": "Edit (load published content)",
     "editLoadConfirm": "This replaces this device's store settings and product catalog (shared with Register) with the published @handle content. Continue?",
     "editLoadConfirmYes": "Load",

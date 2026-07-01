@@ -18,6 +18,8 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
+import { shortAddress } from '@/lib/format';
+import type { Address } from 'viem';
 
 // GET /api/handle が返す所有 handle (storefront 公開済みかの判定に storefront も読む)。
 // profile はプラカードのアバター fallback に使う (公開ページ handleStorefrontConfig と同じく
@@ -42,11 +44,16 @@ async function fetchJson(url: string, init?: RequestInit) {
 
 export function StorefrontPublishPanel({
   storefront,
+  receiver,
   onGetHandle,
   onLoadStorefront,
 }: {
   /** 公開する店舗固有部分。メニュー未充足など公開不可なら null (公開ボタンを無効化)。 */
   storefront: StorefrontParts | null;
+  /** ビルダーの受取先 (検証済み Address・未確定なら null)。「公開を更新」時にこれが現 @handle の
+   *  受取先 (config.to) と異なれば config.to を上書き更新する = ビルダーの受取先を権威化する。
+   *  受取先は @handle 共通 (プロフのチップ等と同一アドレス) なので、更新は @handle 全体に及ぶ。 */
+  receiver: Address | null;
   /** 「@handle を取得」導線 (create が profile タブへ切替)。 */
   onGetHandle?: () => void;
   /** 公開済み storefront をビルダー (下書き + 商品カタログ) へ読み込む (別端末での編集用)。
@@ -97,14 +104,21 @@ export function StorefrontPublishPanel({
   const publish = useMutation({
     mutationFn: async () => {
       if (!selectedHandle || !storefront) throw new Error('not_ready');
-      // config は GET 由来の既存値をそのまま再送 (API は config 必須・round-trip で再検証される)。
-      // identity は handle 側を使うため storefront には載せない。
+      // 受取先の権威化: ビルダーの受取先 (receiver) が有効かつ現 @handle の受取先 (config.to) と
+      // 異なれば config.to を上書きして送る (= ビルダーで変更 → 公開更新でそのまま反映)。無効/空/同一
+      // なら既存 config をそのまま維持し config.to を消さない。config は @handle 共通の単一受取
+      // アドレスなので、この更新はチップ等を含む @handle 全体に及ぶ (UI で明示)。API 側で再検証。
+      const nextConfig: HandleTipConfig =
+        receiver &&
+        receiver.toLowerCase() !== selectedHandle.config.to.toLowerCase()
+          ? { ...selectedHandle.config, to: receiver }
+          : selectedHandle.config;
       const { ok, status, json } = await fetchJson('/api/handle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           handle: selectedHandle.handle,
-          config: selectedHandle.config,
+          config: nextConfig,
           storefront,
         }),
       });
@@ -230,6 +244,23 @@ export function StorefrontPublishPanel({
               </button>
             ))}
 
+          {/* 受取先は @handle 共通 (config.to)。公開更新でビルダーの受取先に同期する旨を明示し、
+              現受取先と異なるときは「X→Y に更新」を目立たせる (誤送金トラップの回避)。 */}
+          {selectedHandle && (
+            <p className="text-[11px] leading-snug text-slate-500">
+              {t('publishReceiverShared')}
+            </p>
+          )}
+          {receiver &&
+            selectedHandle &&
+            receiver.toLowerCase() !== selectedHandle.config.to.toLowerCase() && (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {t('publishReceiverWillChange', {
+                  from: shortAddress(selectedHandle.config.to),
+                  to: shortAddress(receiver),
+                })}
+              </p>
+            )}
           <button
             type="button"
             disabled={!storefront || !selectedHandle || publish.isPending}
