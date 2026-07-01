@@ -16,7 +16,7 @@
   "Landing": {
     "tagline": "No setup cost",
     "heroLeadline": "JPYC QR payments",
-    "heroBody": "1% fee · instant settlement · no contract. Start with just one wallet address.",
+    "heroBody": "0% fee on standard payments where the customer pays gas; just 1% even on JPYC payments where we cover the gas (register, mobile order & more). Instant settlement · no contract. Start with just one wallet address.",
     "heroVisualAlt": "Illustration of a customer paying by scanning a QR code at a shop counter while the merchant tablet shows payment received",
     "ctaScanTitle": "Pay (Scan)",
     "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",
