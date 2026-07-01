@@ -27,7 +27,9 @@ export async function LandingHero() {
             {t('heroLeadline')}
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-slate-600 sm:text-base">
-            {t('heroBody')}
+            {t.rich('heroBody', {
+              b: (chunks) => <strong className="font-bold text-slate-900">{chunks}</strong>,
+            })}
           </p>
         </div>
 
