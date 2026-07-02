@@ -11,7 +11,7 @@
 // flag OFF で何も描画しない。
 
 import { useMemo, useRef, useState } from 'react';
-import { AtSign, Eye, GripVertical, UserRound, Wallet } from 'lucide-react';
+import { AtSign, Eye, UserRound, Wallet } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
@@ -20,6 +20,7 @@ import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { HandleProfileView } from '@/components/HandleProfile';
 import { LinkQrModal } from '@/components/LinkQrModal';
+import { ReorderableRow } from '@/components/ReorderableRow';
 import { SocialIcon } from '@/components/SocialIconLinks';
 import { StepCard } from '@/components/StepCard';
 import { methodLabel } from '@/components/ReceiveMethodPicker';
@@ -29,6 +30,7 @@ import {
 } from '@/hooks/useHandleProfileDraft';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useDragReorderList } from '@/hooks/useDragReorderList';
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import {
   MAX_BIO_LEN,
@@ -89,9 +91,13 @@ export function HandleProfileBuilder() {
   // 上書きで作業が消えるのを防ぐ。新規作成モード (editingHandle===null) の間だけ撮る。
   const preEditDraftRef = useRef<typeof draft | null>(null);
   const headingRef = useRef<HTMLDivElement>(null);
-  // SNS / リンクのドラッグ並べ替え (HTML5 DnD)。どのリストの何番目を掴んでいるかを保持。
-  const dragRef = useRef<{ list: 'socials' | 'links'; index: number } | null>(
-    null,
+  // SNS / リンクのドラッグ並べ替え (HTML5 DnD)。list ごとに 1 インスタンス — 各々が独自の
+  // dragIndex を持つため drag はそのリスト内へ自然にスコープされる (別リストへは落とせない)。
+  const socialsReorder = useDragReorderList(draft.socials, (socials) =>
+    setSettings((s) => ({ ...s, socials })),
+  );
+  const linksReorder = useDragReorderList(draft.links, (links) =>
+    setSettings((s) => ({ ...s, links })),
   );
 
   const colorValid = COLOR_PATTERN.test(draft.color);
@@ -120,45 +126,6 @@ export function HandleProfileBuilder() {
   if (env.enableJpycAvalanche) {
     methodOptions.push(['jpycAvalanche', { token: 'jpyc', chain: 'avalanche' }]);
   }
-
-  // ドラッグ並べ替え: from の要素を抜いて to へ挿入した新配列を返す。
-  const moveItem = <T,>(arr: T[], from: number, to: number): T[] => {
-    const next = [...arr];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    return next;
-  };
-
-  // ▲▼ 移動ボタン。HTML5 drag イベントを発火しないモバイルブラウザ/キーボード操作の
-  // ための並べ替え手段 (ドラッグハンドルと併設)。境界では disabled。
-  const renderMoveButtons = (
-    index: number,
-    length: number,
-    onMove: (from: number, to: number) => void,
-  ) => (
-    <span className="flex shrink-0 flex-col">
-      <button
-        type="button"
-        onClick={() => onMove(index, index - 1)}
-        disabled={index === 0}
-        aria-label={t('moveUp')}
-        title={t('moveUp')}
-        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
-      >
-        ▲
-      </button>
-      <button
-        type="button"
-        onClick={() => onMove(index, index + 1)}
-        disabled={index >= length - 1}
-        aria-label={t('moveDown')}
-        title={t('moveDown')}
-        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
-      >
-        ▼
-      </button>
-    </span>
-  );
 
   // 入力中の有効プリセット (strict)。空欄や不正値は URL/保存に出さない。
   const validPresets = (list: string[]) =>
@@ -233,6 +200,13 @@ export function HandleProfileBuilder() {
 
   const update = (patch: Partial<typeof draft>) =>
     setSettings((s) => ({ ...s, ...patch }));
+
+  // 並べ替えハンドル/▲▼ の i18n ラベル (socials/links 共通・既存キーを流用)。
+  const reorderLabels = {
+    dragToReorder: t('dragToReorder'),
+    moveUp: t('moveUp'),
+    moveDown: t('moveDown'),
+  };
 
   const onUseConnected = () => {
     if (connected && isAddress(connected)) {
@@ -442,114 +416,56 @@ export function HandleProfileBuilder() {
               <Field label={t('socialsLabel')} hint={t('socialsHint')}>
                 <div className="space-y-2">
                   {draft.socials.map((s, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2"
-                onDragOver={(e) => {
-                  if (dragRef.current?.list === 'socials') e.preventDefault();
-                }}
-                onDrop={(e) => {
-                  const d = dragRef.current;
-                  if (d?.list !== 'socials') return;
-                  e.preventDefault();
-                  if (d.index !== i) {
-                    update({ socials: moveItem(draft.socials, d.index, i) });
-                  }
-                  dragRef.current = null;
-                }}
-              >
-                <span
-                  draggable
-                  onDragStart={() => {
-                    dragRef.current = { list: 'socials', index: i };
-                  }}
-                  onDragEnd={() => {
-                    dragRef.current = null;
-                  }}
-                  role="button"
-                  aria-label={t('dragToReorder')}
-                  title={t('dragToReorder')}
-                  className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
-                >
-                  <GripVertical className="h-4 w-4" />
-                </span>
-                {renderMoveButtons(i, draft.socials.length, (from, to) =>
-                  update({ socials: moveItem(draft.socials, from, to) }),
-                )}
-                <span className="shrink-0 text-slate-400">
-                  <SocialIcon url={s.trim()} className="h-5 w-5" />
-                </span>
-                <input
-                  type="url"
-                  value={s}
-                  placeholder="https://x.com/yourname"
-                  onChange={(e) => {
-                    const next = [...draft.socials];
-                    next[i] = e.target.value;
-                    update({ socials: next });
-                  }}
-                  className={inputClass}
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    update({ socials: draft.socials.filter((_, j) => j !== i) })
-                  }
-                  className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
-                  aria-label={t('removeSocial')}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            {draft.socials.length < MAX_SOCIAL_LINKS && (
-              <button
-                type="button"
-                onClick={() => update({ socials: [...draft.socials, ''] })}
-                className="text-xs font-medium text-brand hover:underline"
-              >
-                ＋ {t('addSocial')}
-              </button>
-            )}
-                  </div>
+                    <ReorderableRow
+                      key={i}
+                      {...socialsReorder.rowProps(i, draft.socials.length)}
+                      labels={reorderLabels}
+                    >
+                      <span className="shrink-0 text-slate-400">
+                        <SocialIcon url={s.trim()} className="h-5 w-5" />
+                      </span>
+                      <input
+                        type="url"
+                        value={s}
+                        placeholder="https://x.com/yourname"
+                        onChange={(e) => {
+                          const next = [...draft.socials];
+                          next[i] = e.target.value;
+                          update({ socials: next });
+                        }}
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update({ socials: draft.socials.filter((_, j) => j !== i) })
+                        }
+                        className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                        aria-label={t('removeSocial')}
+                      >
+                        ×
+                      </button>
+                    </ReorderableRow>
+                  ))}
+                  {draft.socials.length < MAX_SOCIAL_LINKS && (
+                    <button
+                      type="button"
+                      onClick={() => update({ socials: [...draft.socials, ''] })}
+                      className="text-xs font-medium text-brand hover:underline"
+                    >
+                      ＋ {t('addSocial')}
+                    </button>
+                  )}
+                </div>
                 </Field>
                 <Field label={t('linksLabel')} hint={t('httpsOnlyHint')}>
                   <div className="space-y-2">
                     {draft.links.map((l, i) => (
-                      <div
+                      <ReorderableRow
                         key={i}
-                        className="flex items-center gap-2"
-                        onDragOver={(e) => {
-                          if (dragRef.current?.list === 'links') e.preventDefault();
-                        }}
-                        onDrop={(e) => {
-                          const d = dragRef.current;
-                          if (d?.list !== 'links') return;
-                          e.preventDefault();
-                          if (d.index !== i) {
-                            update({ links: moveItem(draft.links, d.index, i) });
-                          }
-                          dragRef.current = null;
-                        }}
+                        {...linksReorder.rowProps(i, draft.links.length)}
+                        labels={reorderLabels}
                       >
-                        <span
-                          draggable
-                          onDragStart={() => {
-                            dragRef.current = { list: 'links', index: i };
-                          }}
-                          onDragEnd={() => {
-                            dragRef.current = null;
-                          }}
-                          role="button"
-                          aria-label={t('dragToReorder')}
-                          title={t('dragToReorder')}
-                          className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
-                        >
-                          <GripVertical className="h-4 w-4" />
-                        </span>
-                        {renderMoveButtons(i, draft.links.length, (from, to) =>
-                          update({ links: moveItem(draft.links, from, to) }),
-                        )}
                         <input
                           type="text"
                           value={l.label}
@@ -581,7 +497,7 @@ export function HandleProfileBuilder() {
                         >
                           ×
                         </button>
-                      </div>
+                      </ReorderableRow>
                     ))}
                     {draft.links.length < MAX_PROFILE_LINKS && (
                       <button

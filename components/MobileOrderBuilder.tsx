@@ -8,14 +8,13 @@
 //
 // ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P0/P2 ゲート後。
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   ChevronDown,
   ChevronUp,
   Clock,
   Eye,
-  GripVertical,
   Store,
   UtensilsCrossed,
   Wallet,
@@ -23,6 +22,7 @@ import {
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
+import { ReorderableRow } from '@/components/ReorderableRow';
 import { StepCard } from '@/components/StepCard';
 import { SocialIcon, SocialIconLinks } from '@/components/SocialIconLinks';
 import { StorefrontPublishPanel } from '@/components/StorefrontPublishPanel';
@@ -35,6 +35,7 @@ import {
 import { useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 import { useQrSettings } from '@/hooks/useQrSettings';
+import { useDragReorderList } from '@/hooks/useDragReorderList';
 import { type JpycChainSlug } from '@/lib/chains';
 import {
   safeHttpUrl,
@@ -195,39 +196,16 @@ export function MobileOrderBuilder({
     if (next.length > 0) update({ chains: next });
   };
 
-  // SNS の並べ替え (@handle プロフと同型: ドラッグ + ▲▼ ボタンの 2 系統)。
-  const dragIndex = useRef<number | null>(null);
-  const moveItem = <T,>(arr: T[], from: number, to: number): T[] => {
-    const next = [...arr];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    return next;
-  };
-  // ▲▼ ボタン。drag を発火しないモバイル/キーボード操作のための並べ替え手段。境界では disabled。
-  const renderMoveButtons = (index: number, length: number) => (
-    <span className="flex shrink-0 flex-col">
-      <button
-        type="button"
-        onClick={() => update({ socials: moveItem(draft.socials, index, index - 1) })}
-        disabled={index === 0}
-        aria-label={t('moveUp')}
-        title={t('moveUp')}
-        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
-      >
-        ▲
-      </button>
-      <button
-        type="button"
-        onClick={() => update({ socials: moveItem(draft.socials, index, index + 1) })}
-        disabled={index >= length - 1}
-        aria-label={t('moveDown')}
-        title={t('moveDown')}
-        className="leading-none text-slate-300 hover:text-slate-600 disabled:opacity-30"
-      >
-        ▼
-      </button>
-    </span>
+  // SNS の並べ替え (@handle プロフと同型: ドラッグ + ▲▼ ボタンの 2 系統)。挙動は
+  // useDragReorderList、見た目/ラベルは ReorderableRow が担う (list ごとに 1 インスタンス)。
+  const socialsReorder = useDragReorderList(draft.socials, (socials) =>
+    update({ socials }),
   );
+  const reorderLabels = {
+    dragToReorder: t('dragToReorder'),
+    moveUp: t('moveUp'),
+    moveDown: t('moveDown'),
+  };
 
   if (!env.enableMobileOrder) return null;
 
@@ -560,36 +538,11 @@ export function MobileOrderBuilder({
               <Field label={t('socialsLabel')} hint={t('socialsHint')}>
                 <div className="space-y-2">
                   {draft.socials.map((s, i) => (
-                    <div
+                    <ReorderableRow
                       key={i}
-                      className="flex items-center gap-2"
-                      onDragOver={(e) => {
-                        if (dragIndex.current !== null) e.preventDefault();
-                      }}
-                      onDrop={(e) => {
-                        const from = dragIndex.current;
-                        if (from === null) return;
-                        e.preventDefault();
-                        if (from !== i) update({ socials: moveItem(draft.socials, from, i) });
-                        dragIndex.current = null;
-                      }}
+                      {...socialsReorder.rowProps(i, draft.socials.length)}
+                      labels={reorderLabels}
                     >
-                      <span
-                        draggable
-                        onDragStart={() => {
-                          dragIndex.current = i;
-                        }}
-                        onDragEnd={() => {
-                          dragIndex.current = null;
-                        }}
-                        role="button"
-                        aria-label={t('dragToReorder')}
-                        title={t('dragToReorder')}
-                        className="shrink-0 cursor-grab select-none text-slate-300 hover:text-slate-500"
-                      >
-                        <GripVertical className="h-4 w-4" />
-                      </span>
-                      {renderMoveButtons(i, draft.socials.length)}
                       <span className="shrink-0 text-slate-400">
                         <SocialIcon url={s.trim()} className="h-5 w-5" />
                       </span>
@@ -614,7 +567,7 @@ export function MobileOrderBuilder({
                       >
                         ×
                       </button>
-                    </div>
+                    </ReorderableRow>
                   ))}
                   {draft.socials.length < SOCIALS_MAX && (
                     <button
