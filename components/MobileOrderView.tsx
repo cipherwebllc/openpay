@@ -8,11 +8,11 @@
 // /checkout へ deep-link するだけ。実際の送金/relay/控えは CheckoutForm 側 (既存)。
 // モバイルオーダー固有の % 手数料は P0 (開示更新) 後の別増分で、ここには無い。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { formatUnits, parseUnits } from 'viem';
-import { ChevronDown, ChevronUp, Clock, MapPin, Phone, ShoppingCart, UtensilsCrossed } from 'lucide-react';
+import { formatUnits } from 'viem';
+import { Clock, MapPin, Phone } from 'lucide-react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { env } from '@/lib/env';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -35,7 +35,7 @@ import {
   type MenuItem,
 } from '@/lib/mobileOrder';
 import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
-import { isPastLastOrder, pickupSlots, tokyoHHMM } from '@/lib/shopTime';
+import { isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 import {
   mobileOrderFeeBps,
   mobileOrderFeeValue,
@@ -48,6 +48,8 @@ import {
   type OptionChoice,
 } from '@/lib/menuOptions';
 import { OptionSelectModal } from '@/components/OptionSelectModal';
+import { MenuItemCard } from '@/components/MenuItemCard';
+import { MobileOrderCartBar } from '@/components/MobileOrderCartBar';
 
 // カート行 (オプション無し=menu+qty / オプション有り=optionEntries) の統合ビュー型。
 type OptionCartEntry = {
@@ -59,7 +61,7 @@ type OptionCartEntry = {
   taxRate?: number;
   taxCategory?: MenuItem['taxCategory'];
 };
-type CartLineView = OptionCartEntry & { isOption: boolean };
+export type CartLineView = OptionCartEntry & { isOption: boolean };
 
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
@@ -183,8 +185,12 @@ export function MobileOrderView({
   const chain = offeredChains.includes(selectedChain) ? selectedChain : offeredChains[0];
 
   const decimals = deploymentForSlug('jpyc', chain).decimals;
-  const setItemQty = (id: string, n: number) =>
-    setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) }));
+  // MenuItemCard へ安定参照で渡す (memo が効くよう useCallback 化)。setQty は不変・定数のみ参照。
+  const setItemQty = useCallback(
+    (id: string, n: number) =>
+      setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) })),
+    [],
+  );
 
   // ライブ運用状態 (売り切れ / 受付一時停止)。未指定 (flag OFF / ?s= 経路) は制限なし (EMPTY)。
   const liveState = live ?? EMPTY_SHOP_LIVE;
@@ -369,93 +375,21 @@ export function MobileOrderView({
   const showCategoryNav = menuGroups.length > 1;
   const sectionId = (i: number) => `mo-cat-${i}`;
 
-  // 商品カード (おすすめセクション + カテゴリーグリッドで共用)。売り切れ品はステッパを隠し、
-  // 写真上に「売り切れ」を重ねて注文不可を明示する (qty も増やせない)。
-  const renderItemCard = (item: MenuItem) => {
-    const n = qty[item.id] ?? 0;
-    const imgUrl = item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
-    const isSoldOut = soldOutSet.has(item.id);
-    return (
-      <li
-        key={item.id}
-        className={`flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_2px_10px_-4px_rgba(15,23,42,0.1)] transition-shadow duration-200 hover:shadow-[0_12px_28px_-12px_rgba(15,23,42,0.22)] ${
-          isSoldOut ? 'opacity-60' : ''
-        }`}
-      >
-        {/* 写真 (大きく・正方形)。画像が無ければ絵文字、それも無ければアイコン。売り切れは重ね表示。 */}
-        <div className="relative flex aspect-square w-full items-center justify-center bg-slate-50">
-          {imgUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imgUrl} alt="" className="h-full w-full object-cover" />
-          ) : item.visual?.kind === 'emoji' ? (
-            <span className="text-5xl" aria-hidden>
-              {item.visual.value}
-            </span>
-          ) : (
-            <UtensilsCrossed className="h-8 w-8 text-slate-300" aria-hidden />
-          )}
-          {isSoldOut && (
-            <span className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm font-bold text-slate-600">
-              {t('viewSoldOut')}
-            </span>
-          )}
-        </div>
-        <div className="flex flex-1 flex-col gap-2 p-3">
-          <span className="line-clamp-2 text-sm font-semibold text-slate-800">{item.name}</span>
-          {/* 価格 + アクション (未追加=＋ボタン / 追加後=−n+ ピル)。売り切れはどちらも出さない。 */}
-          <div className="mt-auto flex items-center justify-between gap-1">
-            <span className="min-w-0">
-              <span className="text-base font-bold text-slate-900">{item.price}</span>{' '}
-              <span className="text-[10px] font-medium text-slate-400">JPYC</span>
-            </span>
-            {!isSoldOut &&
-              (hasOptions(item) ? (
-                // オプション有り: タップで選択モーダル → カートへ。既に追加済の点数を併記。
-                <button
-                  type="button"
-                  onClick={() => setOptionModalItem(item)}
-                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-[var(--mo-accent-text)] hover:text-[var(--mo-accent-text)]"
-                >
-                  {t('viewChooseOptions')}
-                  {optionCount(item.id) > 0 ? ` (${optionCount(item.id)})` : ''}
-                </button>
-              ) : n === 0 ? (
-                // 未追加: 単一の ＋ (アプリ風の "追加" アフォーダンス)。タップで数量 1。
-                <button
-                  type="button"
-                  onClick={() => setItemQty(item.id, 1)}
-                  aria-label={t('qtyIncrease')}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--mo-accent)] text-lg leading-none text-[var(--mo-accent-ink)] shadow-sm transition hover:brightness-95 active:scale-90"
-                >
-                  ＋
-                </button>
-              ) : (
-                // 追加後: − n + のピル型ステッパ。
-                <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setItemQty(item.id, n - 1)}
-                    aria-label={t('qtyDecrease')}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm transition active:scale-90"
-                  >
-                    −
-                  </button>
-                  <span className="w-5 text-center text-sm font-bold tabular-nums text-slate-900">{n}</span>
-                  <button
-                    type="button"
-                    onClick={() => setItemQty(item.id, n + 1)}
-                    aria-label={t('qtyIncrease')}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--mo-accent)] text-[var(--mo-accent-ink)] shadow-sm transition hover:brightness-95 active:scale-90"
-                  >
-                    ＋
-                  </button>
-                </span>
-              ))}
-          </div>
-        </div>
-      </li>
-    );
-  };
+  // 商品カード (おすすめセクション + カテゴリーグリッドで共用)。この品の派生値 (qty / 売り切れ /
+  // オプション数) + 安定コールバックだけを React.memo 化した MenuItemCard に渡し、変化していない品を
+  // 再描画しない (売り切れ品のステッパ非表示・写真上の「売り切れ」重ねは MenuItemCard 内で描画)。
+  const renderItemCard = (item: MenuItem) => (
+    <MenuItemCard
+      key={item.id}
+      item={item}
+      qty={qty[item.id] ?? 0}
+      isSoldOut={soldOutSet.has(item.id)}
+      hasOptions={hasOptions(item)}
+      optionCount={optionCount(item.id)}
+      onQtyChange={setItemQty}
+      onOpenOptions={setOptionModalItem}
+    />
+  );
 
   // おすすめ (公開ページ先頭で訴求)。売り切れ品は除外。
   const recommendedItems = useMemo(
@@ -658,155 +592,33 @@ export function MobileOrderView({
           メニューをスクロール中も常に見え、最下部ではフッターの上に収まる (通常フロー=重ならない)。
           空 / 受付停止では出さない (受付停止は上部バナーで告知済み)。決済は既存 /checkout へ。 */}
       {accepting && cartItems.length > 0 && (
-        <div className="sticky bottom-3 z-30">
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_-1px_3px_rgba(15,23,42,0.04),0_18px_44px_-14px_rgba(15,23,42,0.35)] supports-[backdrop-filter]:bg-white/85 supports-[backdrop-filter]:backdrop-blur">
-            {tooMany ? (
-              <p className="text-center text-sm text-red-600">
-                {t('tooManyItems', { max: CHECKOUT_MAX_ITEMS })}
-              </p>
-            ) : (
-              <div className="space-y-3">
-            {/* 店内 (dineIn): テーブル番号 (必須)。未入力なら支払いボタンを無効化。 */}
-            {config.dineIn && (
-              <div>
-                <label htmlFor="mo-table" className="block text-sm font-medium text-slate-700">
-                  {t('tableLabel')}
-                </label>
-                <input
-                  id="mo-table"
-                  type="text"
-                  inputMode="numeric"
-                  value={tableNumber}
-                  onChange={(e) => setTableNumber(e.target.value.slice(0, TABLE_NUMBER_MAX))}
-                  placeholder={t('tablePlaceholder')}
-                  aria-required="true"
-                  aria-invalid={needsTable}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
-                />
-                {needsTable && <p className="mt-1 text-xs text-amber-700">{t('tableRequired')}</p>}
-              </div>
-            )}
-            {/* 受取時間 (Phase 4・preorder のみ・flag ON)。15分刻みのスロットから選ぶ (未選択=最短)。 */}
-            {timeEnabled && isPreorder && (
-              <div>
-                <label htmlFor="mo-pickup" className="block text-sm font-medium text-slate-700">
-                  {t('pickupLabel')}
-                </label>
-                {pickupSlotList.length === 0 ? (
-                  <p className="mt-1 text-xs text-amber-700">{t('pickupNone')}</p>
-                ) : (
-                  <select
-                    id="mo-pickup"
-                    value={pickupAt ?? ''}
-                    onChange={(e) => setPickupAt(e.target.value ? Number(e.target.value) : null)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
-                  >
-                    <option value="">{t('pickupAsap')}</option>
-                    {pickupSlotList.map((ms) => (
-                      <option key={ms} value={ms}>
-                        {tokyoHHMM(ms)}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
-            {/* ご注文内容 (合計の上)。カートマーク+点数のタップで明細を開閉。明細では −n+ で増減。 */}
-            {cartOpen && (
-              <ul className="max-h-[42vh] space-y-2 overflow-y-auto border-b border-slate-100 pb-3">
-                {cartLines.map((l) => {
-                  const adjust = (n: number) =>
-                    l.isOption ? setOptionEntryQty(l.key, n) : setItemQty(l.itemId, n);
-                  return (
-                    <li key={l.key} className="flex items-center justify-between gap-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate text-slate-700">{l.name}</span>
-                      <span className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => adjust(l.qty - 1)}
-                          aria-label={t('qtyDecrease')}
-                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
-                        >
-                          −
-                        </button>
-                        <span className="w-5 text-center text-sm font-semibold tabular-nums">{l.qty}</span>
-                        <button
-                          type="button"
-                          onClick={() => adjust(l.qty + 1)}
-                          aria-label={t('qtyIncrease')}
-                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
-                        >
-                          ＋
-                        </button>
-                      </span>
-                      <span className="w-16 shrink-0 text-right tabular-nums text-slate-600">
-                        {formatUnits(parseUnits(l.price, decimals) * BigInt(l.qty), decimals)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {/* 合計 = カートマーク + 点数 (タップで上の明細を開閉) + 総額 */}
-            <button
-              type="button"
-              onClick={() => setCartOpen((o) => !o)}
-              aria-expanded={cartOpen}
-              aria-label={t('orderItemsToggle')}
-              className="flex w-full items-center justify-between gap-2"
-            >
-              <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                <span className="relative inline-flex">
-                  <ShoppingCart className="h-5 w-5 text-slate-600" aria-hidden />
-                  <span className="absolute -right-2 -top-2 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--mo-accent)] px-1 text-[10px] font-bold leading-none text-[var(--mo-accent-ink)]">
-                    {cartCount}
-                  </span>
-                </span>
-                {t('orderItemsToggle')}
-                {cartOpen ? (
-                  <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />
-                ) : (
-                  <ChevronUp className="h-4 w-4 text-slate-400" aria-hidden />
-                )}
-              </span>
-              <span className="text-base font-semibold text-slate-900">{totalHuman} JPYC</span>
-            </button>
-            {feeUpcharge > 0n && (
-              <p className="text-xs text-slate-500">
-                {t('feeIncludedNote', {
-                  fee: formatUnits(feeUpcharge, decimals),
-                  percent: mobileOrderFeeBps(config.mode) / 100,
-                })}
-              </p>
-            )}
-            {/* ラストオーダー時刻の事前告知 (受付中のみ・超過後は上のバナーへ切替)。 */}
-            {timeEnabled && config.lastOrder && (
-              <p className="text-xs text-slate-500">
-                {t('lastOrderNote', { time: config.lastOrder })}
-              </p>
-            )}
-            <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
-            {needsTable ? (
-              // テーブル番号 未入力 (店内): 支払いを止める。入力すればリンクへ切り替わる。
-              <button
-                type="button"
-                disabled
-                className="block w-full cursor-not-allowed rounded-xl bg-slate-300 px-4 py-3 text-center text-sm font-semibold text-white"
-              >
-                {t('payButton')}
-              </button>
-            ) : (
-              <a
-                href={checkoutUrl}
-                className="block rounded-xl bg-[var(--mo-accent)] px-4 py-3 text-center text-sm font-semibold text-[var(--mo-accent-ink)] hover:brightness-95"
-              >
-                {t('payButton')}
-              </a>
-            )}
-              </div>
-            )}
-          </section>
-        </div>
+        <MobileOrderCartBar
+          tooMany={tooMany}
+          dineIn={config.dineIn}
+          tableNumber={tableNumber}
+          onTableNumberChange={(v) => setTableNumber(v.slice(0, TABLE_NUMBER_MAX))}
+          needsTable={needsTable}
+          pickup={{
+            show: timeEnabled && isPreorder,
+            slots: pickupSlotList,
+            value: pickupAt,
+            onChange: setPickupAt,
+          }}
+          cart={{
+            open: cartOpen,
+            onToggle: () => setCartOpen((o) => !o),
+            lines: cartLines,
+            decimals,
+            count: cartCount,
+            totalHuman,
+            feeUpcharge,
+            feeBps: mobileOrderFeeBps(config.mode),
+            onItemQtyChange: setItemQty,
+            onOptionQtyChange: setOptionEntryQty,
+          }}
+          lastOrder={timeEnabled ? config.lastOrder : undefined}
+          checkoutUrl={checkoutUrl}
+        />
       )}
 
       <p className="text-center text-xs text-slate-400">
