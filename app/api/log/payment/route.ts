@@ -6,6 +6,7 @@ import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { kvLpush, kvLtrim } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import type { ClientReportedCircleVerification } from '@/lib/paymentLog';
+import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 
 export const runtime = 'nodejs';
 
@@ -217,12 +218,21 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
 
+  const ipPrefix = anonymizeIp(
+    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+  );
+  try {
+    if (!(await checkReadRateLimit(`logpay:${ipPrefix}`, 60, 60))) {
+      return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
+    }
+  } catch {
+    // Telemetry is best-effort; KV/rate-limit errors must not break payment logging.
+  }
+
   const entry = {
     serverTs: new Date().toISOString(),
     // 短期トラブルシュート用に subnet 粒度 (IPv4 /24 / IPv6 /64) で保管。
-    ipPrefix: anonymizeIp(
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-    ),
+    ipPrefix,
     userAgent: (req.headers.get('user-agent') ?? '').slice(0, 200),
     ...payload,
   };

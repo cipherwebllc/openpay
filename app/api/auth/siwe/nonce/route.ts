@@ -2,9 +2,8 @@
 // nonce は KV に SET NX EX で 1 回限り予約し、verify 時に DEL で atomic 消費 → replay 防止。
 // KV 未設定なら replay 防御が成立しないため 503 (auth 機能を degrade)。
 import { NextResponse } from 'next/server';
-import { generateSiweNonce } from 'viem/siwe';
 import { isKvConfigured, kvSet } from '@/lib/kv';
-import { nonceKey, NONCE_TTL_SEC } from '@/lib/siwe';
+import { nonceKey, NONCE_TTL_SEC, newSiweNonce } from '@/lib/siwe';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -17,7 +16,7 @@ export async function POST(): Promise<NextResponse> {
       { status: 503 },
     );
   }
-  const nonce = generateSiweNonce();
+  const nonce = newSiweNonce();
   const res = await kvSet(nonceKey(nonce), '1', { nx: true, ttlSec: NONCE_TTL_SEC });
   if (!res.ok || res.value !== 'OK') {
     // NX 衝突 (天文学的に稀) や KV エラー。安全側に倒して発行失敗を返す。

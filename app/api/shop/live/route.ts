@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import { resolveHandle } from '@/lib/handleStore';
-import { normalizeHandle } from '@/lib/handle';
+import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { parseShopLivePatch } from '@/lib/shopLive';
 import { readShopLive, applyShopLive } from '@/lib/shopLiveStore';
 import { logger } from '@/lib/logger';
@@ -29,6 +29,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!env.enableShopLive) return notFound();
   const handle = handleFromReq(req);
   if (!handle) return NextResponse.json({ ok: false, error: 'handle_required' }, { status: 400 });
+  if (!isValidHandleFormat(handle)) {
+    return NextResponse.json({ ok: false, error: 'invalid_handle' }, { status: 400 });
+  }
   // 読取は fail-open (readShopLive が KV 障害時 EMPTY を返す)。公開情報なので認証不要。
   const live = await readShopLive(handle);
   return NextResponse.json({ ok: true, live });
@@ -40,6 +43,9 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   if (!session.ok) return session.response;
   const handle = handleFromReq(req);
   if (!handle) return NextResponse.json({ ok: false, error: 'handle_required' }, { status: 400 });
+  if (!isValidHandleFormat(handle)) {
+    return NextResponse.json({ ok: false, error: 'invalid_handle' }, { status: 400 });
+  }
 
   let body: unknown;
   try {

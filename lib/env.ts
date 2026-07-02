@@ -93,8 +93,22 @@ function parseBoundedNonNegativeInt(
  *  バイト等価: trim/小文字化はしない)。複数 flag 定義の重複を単一情報源化する (§8.3)。
  *  ※ 意図的に別実装で残す例外: billingMeter ('1' のみ) / x402 ('true' のみ) /
  *    entitlement.entitlementBypass (trim+小文字化 + '1/true/yes/on'・既定ON・fail-closed)。 */
-export function parseBoolFlag(raw: string | undefined): boolean {
-  return raw === '1' || raw === 'true';
+export function parseBoolFlag(raw: string | undefined): boolean;
+export function parseBoolFlag(name: string, raw: string | undefined): boolean;
+export function parseBoolFlag(
+  nameOrRaw: string | undefined,
+  maybeRaw?: string,
+): boolean {
+  const named = arguments.length === 2;
+  const name = named ? nameOrRaw : 'boolean env flag';
+  const raw = named ? maybeRaw : nameOrRaw;
+  if (raw === '1' || raw === 'true') return true;
+  if (raw && raw !== '0' && raw !== 'false') {
+    console.warn(
+      `[OpenPay] ${name} has an unrecognized boolean value ("${raw}"); treating as false.`,
+    );
+  }
+  return false;
 }
 
 const networkEnvRaw = nonEmpty(process.env.NEXT_PUBLIC_NETWORK_ENV) ?? 'testnet';
@@ -371,12 +385,16 @@ export const env = {
   // HashPort wallet など EOA が MAv2 へ 7702 委任済のケースで動かす。
   // Pimlico bundler が MAv2 sender を accept するか実機で確認するまでは
   // 既定 OFF。'1' / 'true' で ON。
-  enableMav2: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MAV2),
+  enableMav2: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_MAV2',
+    process.env.NEXT_PUBLIC_ENABLE_MAV2,
+  ),
   // MetaMask Smart Account (Stateless7702) ガスレス経路の有効化フラグ。**既定 OFF**。
   // 現在 viem 2.50 の ERC-7739 same-address ガードと delegation-toolkit 0.13.0 の
   // 非互換で署名が全件失敗するため無効化し standard mode に倒している
   // (hooks/useSmartAccount.ts)。upstream 互換修正 + 実機再検証後に '1'/'true' で再有効化。
   enableMetaMaskSmartAccount: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT',
     process.env.NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT,
   ),
   // Circle Paymaster (USDC ガスレスを Pimlico erc20 → Circle 公式 paymaster に
@@ -386,6 +404,7 @@ export const env = {
   // hardcode allowlist が SoT で env override は持たせない (permit spender =
   // 信頼境界のため、任意 override は顧客 USDC 流出に直結する)。
   enableCirclePaymaster: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER',
     process.env.NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER,
   ),
   // JPYC ガスレスを EIP-3009 (transferWithAuthorization + Gelato relayer) で行う経路の
@@ -394,6 +413,7 @@ export const env = {
   // 従来通り Pimlico/7702 sponsorship。委任不要で injected wallet でも動くため到達が広い
   // (memory:jpyc-eip3009)。'1' / 'true' で ON。
   enableJpycEip3009: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_JPYC_EIP3009',
     process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009,
   ),
   // JPYC を Avalanche (本番) / Avalanche Fuji (testnet) でも提供するかのフラグ。**既定 OFF**。
@@ -403,6 +423,7 @@ export const env = {
   // モードで OpenPay relayer が AVAX を持ち出す赤字を構造的に防ぐ (lib/jpycGaslessProvider)。
   // 点灯 = '1'/'true' + 該当 chain の forwarder (NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE/_FUJI) 設定。
   enableJpycAvalanche: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE',
     process.env.NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE,
   ),
   // JPYC を Ethereum L1 (mainnet) で受取可能にするフラグ (既定 OFF)。L1 ガスは高変動で gasless recover が
@@ -410,13 +431,17 @@ export const env = {
   // 設けない設計で paymasterMode='unavailable')。JPYC は L1 mainnet のみ (Sepolia 未 deploy) なので
   // chains.ts で isMainnet ゲートも併用。点灯 = '1'/'true' + NETWORK_ENV=mainnet。
   enableJpycEthereum: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM',
     process.env.NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM,
   ),
   // freee 自動連携パネル (/history の SIWE ログイン + 「freee に同期」) の有効化フラグ。
   // **既定 OFF (dark ship)**。会計 API の req/resp 形が実プラン freee で未検証のため、
   // 検証が済むまで本番では出さない。kill-switch も兼ねる (問題時に OFF でパネル即非表示)。
   // OFF でも CSV 書き出し (履歴) は従来通り使える。'1' / 'true' で ON。
-  enableFreeeSync: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC),
+  enableFreeeSync: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_FREEE_SYNC',
+    process.env.NEXT_PUBLIC_ENABLE_FREEE_SYNC,
+  ),
   // a1 OpenPay 利用料 (月次・出来高 1%・gasless relay 関所ゲート + 利用料清算 + /history 延滞ぼかし/
   // CSV ロック) の有効化フラグ。**既定 OFF**。OFF の間は relay 関所も /api/billing/* も OpenPayFeePanel も
   // /history ゲートも inert (メーター記録は BILLING_METER_DISABLED で別管理・既定 ON)。
@@ -425,7 +450,10 @@ export const env = {
   // 計量モデルは使わない。将来の新機能への転用用に flag/実装を温存する。
   // (点灯する場合は flag ON + ALPHA_ENTITLEMENT_BYPASS=0 + OPENPAY_USAGE_FEE_START_PERIOD 設定。)
   // 注: 旧 NEXT_PUBLIC_ENABLE_BILLING (¥4,980/年 CSV tier) は a1 への一本化で退役済 (2026-06-09)。
-  enableUsageFee: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE),
+  enableUsageFee: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_USAGE_FEE',
+    process.env.NEXT_PUBLIC_ENABLE_USAGE_FEE,
+  ),
   // recover (forwarder) モードの per-tx サービス手数料率 (basis points)。**既定 0 (= inert)**。
   // recover の徴収額は lib/relay/recoverFee.ts の recoverFeeValue で
   // max(ガス回収フロア, billAmount × bps/10000) として計算する。0 のときは常にフロア
@@ -441,29 +469,44 @@ export const env = {
   // @handle 恒久クリエイターリンク (open-pay.jp/@alice) の有効化フラグ。**既定 OFF**。
   // OFF の間は /@handle ページ・/api/handle/* ・dashboard の claim UI すべて inert
   // (404/非表示)。staged rollout 用 (testnet + モデレーション体制確認後に点灯)。要 KV。
-  enableHandles: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_HANDLES),
+  enableHandles: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_HANDLES',
+    process.env.NEXT_PUBLIC_ENABLE_HANDLES,
+  ),
   // OpenPay Pro (月額固定 ¥500=500 JPYC の前払いサブスク・ゲート対象 = CSV ダウンロードのみ) の
   // 有効化フラグ (client 露出)。**既定 OFF**。OFF の間は /api/pro/* は 404・ProPaywall 非表示・
   // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
   // per-tx の recover 手数料 (NEXT_PUBLIC_RECOVER_FEE_BPS) / a1 利用料とは別系統の収益で両立する。
   // 設計: plans/pro-plan.md。'1' / 'true' で ON。
-  enablePro: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_PRO),
+  enablePro: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_PRO',
+    process.env.NEXT_PUBLIC_ENABLE_PRO,
+  ),
   // CSV 24時間パス (都度 100 JPYC・ゲート対象 = 会計CSVダウンロードのみ) の有効化フラグ
   // (client 露出)。**既定 OFF**。OFF の間は /api/csv-pass/* は 404・CsvPassPaywall 非表示・
   // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
   // Pro (月額固定) とは別系統 (CSV ゲートは都度パスへ置換・Pro は温存して将来傘へ)・recover 手数料 /
   // a1 利用料とも両立する。Pro ⊃ CSV (有効な pro:exp はパス無しでも CSV を解放)。設計: plans/csv-pass.md。
-  enableCsvPass: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_CSV_PASS),
+  enableCsvPass: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_CSV_PASS',
+    process.env.NEXT_PUBLIC_ENABLE_CSV_PASS,
+  ),
   // モバイルオーダー (事前決済 + 店頭/券売機 + Nostr 通知 + QR 照合) の有効化フラグ
   // (client 露出)。**既定 OFF** = 注文ページ/設定UI/ダッシュボードは非表示・本番完全 inert。
   // 点灯は開示更新 (店頭1%/モバイル3%) + 弁護士/FSA 確認後。計画: plans/mobile-order-nostr.md。
-  enableMobileOrder: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER),
+  enableMobileOrder: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_MOBILE_ORDER',
+    process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER,
+  ),
   // モバイル注文の「受注リレー」(顧客の決済成功 → /api/order/notify が txHash を
   // on-chain 検証 → 店主の KV 受注リストへ → 店主が SIWE で受注画面に表示) の有効化フラグ
   // (client 露出)。**既定 OFF** = MobileOrderView は webhook を付けず・受注タブ非表示・
   // /api/order/* は 404 → 本番完全 inert。決済コア/手数料(0%)/USDC は無改変。注文メタは
   // KV に TTL 72h で一時保存 (資金は不触=ノンカストディ不変・PII 非保存)。計画: plans/swift-puzzling-sky.md。
-  enableOrderRelay: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY),
+  enableOrderRelay: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_ORDER_RELAY',
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY,
+  ),
   // モバイル注文システム利用料 (店頭1% / 事前3%) の有効化フラグ (client 露出)。**既定 OFF** =
   // モバイル注文は手数料ゼロ・客への表示は原価のみ・relay は従来 recoverFee → 本番完全 inert。
   // gas-recovery 料金 (recoverFeeBps・7月から1%) とは別物で、モバイル注文という付加価値システムの
@@ -471,6 +514,7 @@ export const env = {
   // 同一リリース + ユーザ最終承認後。/pay QR・/tip・通常 checkout リンクは対象外 (この flag に無関係)。
   // 計画: plans/swift-puzzling-sky.md。
   enableMobileOrderFee: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE',
     process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE,
   ),
   // レジ (店頭POS・RegisterMode→/checkout) の OpenPay利用料を経路非依存化するフラグ (client 露出)。
@@ -478,7 +522,10 @@ export const env = {
   // JPYC standard 決済にも既存 recover の OpenPay利用料 (recoverFeeBps・7月から1%・フロア無し) を
   // 店舗負担で課金する (relay 経路は既存 recover が徴収済で不変)。USDC は無料据置・決済QR(/pay)・
   // チップ・手動 checkout リンクは対象外。点灯は 7月 (recoverFeeBps=100) + 開示更新と同一リリース。
-  enableRegisterFee: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE),
+  enableRegisterFee: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_REGISTER_FEE',
+    process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE,
+  ),
   // 実店舗向け Phase 1 強化のマスターフラグ (client 露出)。**既定 OFF で完全 inert** (merge して
   // も本番の挙動は不変)。gate 対象:
   //   - ライブ運用状態 (売り切れ / 受付一時停止): /api/shop/live (OFF=404)・店主のライブ操作
@@ -488,21 +535,30 @@ export const env = {
   //     商品画像 ON-OFF / おすすめバッジ + プリセット管理の「おすすめ」チェックボックス。
   // (recommended フィールドの保存/写像など data 層は常時有効=表示しないので inert。)
   // 要 KV + NEXT_PUBLIC_ENABLE_HANDLES + NEXT_PUBLIC_ENABLE_MOBILE_ORDER。計画: plans/restaurant-pos-roadmap.md。
-  enableShopLive: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_SHOP_LIVE),
+  enableShopLive: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_SHOP_LIVE',
+    process.env.NEXT_PUBLIC_ENABLE_SHOP_LIVE,
+  ),
   // メニューオプション (サイズ/トッピング) の有効化フラグ (client 露出)。**既定 OFF で完全 inert** =
   // オプション編集 UI 非表示・顧客/レジは options を読まず従来の数量ステッパ直追加・既存メニュー(options
   // 無)は不変。ON のとき商品に OptionGroup[](single=サイズ / multi=トッピング・非負 priceDelta)を定義でき、
   // 選択で cart line の実効単価=base+Σdelta + 表示名サフィックス化する (URL/order スキーマは無改変=
   // lib/menuOptions の非対称設計)。recommended 等と同様 data 層 (検証/写像/保存) は常時有効だが表示しない
   // ので inert。計画: plans/restaurant-pos-roadmap.md Phase 2。
-  enableMenuOptions: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_MENU_OPTIONS),
+  enableMenuOptions: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_MENU_OPTIONS',
+    process.env.NEXT_PUBLIC_ENABLE_MENU_OPTIONS,
+  ),
   // 受注フルフィルメント (厨房モニター + ホール配膳・商品別ステータス) の有効化フラグ (client 露出)。
   // **既定 OFF で完全 inert** = /orders/kitchen・/orders/hall ルートは 404・受注フィードの商品別操作 UI
   // 非表示・既存の受注パネル ({fulfilled} 対応済みトグル) は不変。ON のとき店主が受取ウォレットで
   // サインインし、厨房 (商品別「調理済み」) / ホール (調理済=青・商品別「配膳済み」) の 2 画面で受注を
   // 進捗管理できる。受注の状態更新 (/api/order/feed POST) は op 化 + kvEval 原子更新で多端末の同時
   // トグルを安全化。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY (受注リレー本体)。計画: plans/restaurant-pos-roadmap.md Phase 3。
-  enableOrderFulfillment: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT),
+  enableOrderFulfillment: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT',
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT,
+  ),
   // モバイル注文の時間系 (ラストオーダー自動停止 / 最短受け渡し / 時間指定事前注文) の有効化フラグ
   // (client 露出)。**既定 OFF で完全 inert** = builder の lastOrder/minLeadMinutes 入力 非表示・公開
   // ページはラストオーダー停止/最短受取/スロット選択を出さず従来どおり・受注に pickupAt が付かない。
@@ -511,7 +567,10 @@ export const env = {
   // ホールが受取予定時刻を表示する。タイムゾーンは Asia/Tokyo 固定 (JPYC=国内市場・lib/shopTime)。
   // lastOrder/minLeadMinutes の保存/検証など data 層は常時有効だが表示しないので inert。
   // 計画: plans/restaurant-pos-roadmap.md Phase 4。
-  enablePreorderTime: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_PREORDER_TIME),
+  enablePreorderTime: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_PREORDER_TIME',
+    process.env.NEXT_PUBLIC_ENABLE_PREORDER_TIME,
+  ),
   // 受注閲覧トークン (店員端末を資金鍵なしで厨房/ホールに繋ぐ) の有効化フラグ (client 露出)。
   // **既定 OFF で完全 inert** = /api/order/token は 404・オーナーUIの発行パネル非表示・feed は
   // x-order-token を無視 (SIWE 専用)。ON のとき受取ウォレットのオーナーが「受注閲覧トークン」を
@@ -519,7 +578,10 @@ export const env = {
   // 進捗操作ができる。トークンは **閲覧/操作のみ・送金や受取先変更は不可** (資金鍵を持たない) =
   // 店員による売上スキミングを構造的に防ぐ。再発行で旧トークン即失効。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY。
   // 計画: plans/restaurant-pos-roadmap.md Phase 5。
-  enableOrderToken: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_TOKEN),
+  enableOrderToken: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_ORDER_TOKEN',
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_TOKEN,
+  ),
   // 顧客向け「お渡し準備完了」通知 (モバイル注文・受取来店パターン) の有効化フラグ (client 露出)。
   // **既定 OFF で完全 inert** = /order/status・/api/order/status は 404・CheckoutForm は status トークンを
   // 生成せず webhook payload/完了画面リンクとも不変・ホールの「準備完了」ボタン非表示・feed は markReady op を
@@ -527,7 +589,10 @@ export const env = {
   // から /order/status?t=<token> を開いて待つと準備完了でチャイム+表示 (フォアグラウンド・要 KV・画面を開いた
   // まま待つ前提=Web Push は使わない)。要 NEXT_PUBLIC_ENABLE_ORDER_RELAY (+ホール操作は ENABLE_ORDER_FULFILLMENT)。
   // 計画: plans/order-pickup-notify.md。
-  enableOrderPickup: parseBoolFlag(process.env.NEXT_PUBLIC_ENABLE_ORDER_PICKUP),
+  enableOrderPickup: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_ORDER_PICKUP',
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_PICKUP,
+  ),
   // x402 JPYC facilitator (managed facilitator + discovery: AI エージェント/開発者が
   // 日本事業者の有料 API/コンテンツに JPYC 建てで都度課金 = x402、settlement の 1% を
   // 手数料徴収) の有効化フラグ (client 露出: 登録/discovery UI のゲートに使う)。
@@ -537,6 +602,7 @@ export const env = {
   // (lib/x402/facilitatorConfig.ts) で client bundle に出さない。点灯は testnet(Amoy) E2E +
   // 開示更新と同一リリース。計画: plans/x402-jpyc-facilitator.md。'1' / 'true' で ON。
   enableX402Facilitator: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_X402_FACILITATOR',
     process.env.NEXT_PUBLIC_ENABLE_X402_FACILITATOR,
   ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に

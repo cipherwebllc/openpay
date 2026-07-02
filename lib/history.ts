@@ -37,6 +37,7 @@ import {
   taxDisplayDecimals,
   type TaxCategory,
 } from './tax';
+import { stripControlChars } from './sanitize';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
 export const HISTORY_CHANGED_EVENT = 'openpay:history-changed';
@@ -579,7 +580,11 @@ export type BuildHistoryBase = {
 // 自由入力の length cap (LocalStorage 肥大化 / 悪意 URL 対策)。空文字は null に畳む。
 function cappedOrNull(value: string | null | undefined, max: number): string | null {
   if (!value) return null;
-  return value.length > max ? value.slice(0, max) : value;
+  const stripped = stripControlChars(value);
+  if (!stripped) return null;
+  const capped = stripped.length > max ? stripped.slice(0, max) : stripped;
+  const clean = stripControlChars(capped);
+  return clean || null;
 }
 
 // 売上明細を sanitize: 件数 cap・各文字列 cap・quantity を正整数へ。空配列は null。
@@ -601,11 +606,13 @@ function sanitizeLineItems(
       memo: cappedOrNull(it.memo, HISTORY_NOTE_MAX_LENGTH),
     };
     // 任意フィールドは在るときだけ保存 (undefined を JSON に残さない)。
-    if (it.id) out.id = it.id.slice(0, 64);
+    const id = cappedOrNull(it.id, 64);
+    if (id) out.id = id;
     if (it.currency === 'jpyc' || it.currency === 'usdc') out.currency = it.currency;
     const ta = cappedOrNull(it.taxAmount, HISTORY_UNIT_AMOUNT_MAX);
     if (ta) out.taxAmount = ta;
-    if (it.presetId) out.presetId = it.presetId.slice(0, 64);
+    const presetId = cappedOrNull(it.presetId, 64);
+    if (presetId) out.presetId = presetId;
     return out;
   });
 }

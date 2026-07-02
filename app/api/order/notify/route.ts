@@ -21,7 +21,7 @@ import {
 import { checkRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { resolveHandle } from '@/lib/handleStore';
-import { normalizeHandle } from '@/lib/handle';
+import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import {
   orderListKey,
   orderUsedKey,
@@ -57,6 +57,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // CheckoutForm は payload を POST するだけ (CheckoutForm 無改変)。
   const handle = normalizeHandle(new URL(req.url).searchParams.get('h') ?? '');
   if (!handle) return fail('handle_required', 400);
+  if (!isValidHandleFormat(handle)) return fail('invalid_handle', 400);
 
   let body: unknown;
   try {
@@ -112,79 +113,89 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (claim.value === null) return NextResponse.json({ ok: true, duplicate: true });
   }
 
-  // on-chain 検証 (from 非依存・to=merchant への実着金合計 ≥ dust フロア)。
-  const publicClient = createPublicClient({ chain, transport: transportForChain(chainId) });
-  const result = await verifyJpycTransferToOnChain({
-    publicClient,
-    txHash,
-    expected: { token: deployment.address, to: merchant, minValue: ORDER_DUST_FLOOR_WEI },
-  });
+  try {
+    // on-chain 検証 (from 非依存・to=merchant への実着金合計 ≥ dust フロア)。
+    const publicClient = createPublicClient({ chain, transport: transportForChain(chainId) });
+    const result = await verifyJpycTransferToOnChain({
+      publicClient,
+      txHash,
+      expected: { token: deployment.address, to: merchant, minValue: ORDER_DUST_FLOOR_WEI },
+    });
 
-  if (!result.ok) {
-    // 検証不成立 → クレーム解放。rpc_error は retryable(503)・それ以外は顧客起因(422)。
-    await kvDel(usedKey);
-    logger.warn('order.notify.verify_failed', { reason: result.reason, chainId, merchant });
-    return fail(result.reason, result.reason === 'rpc_error' ? 503 : 422);
-  }
-
-  const orderId =
-    typeof o.orderId === 'string' && o.orderId.length > 0
-      ? o.orderId.slice(0, ORDER_ID_MAX)
-      : txHash; // orderId 無し時は txHash で代替 (一意)
-
-  const order: StoredOrder = {
-    orderId,
-    items: sanitizeOrderItems(o.items),
-    table: sanitizeTable(o.description), // checkout description = テーブル番号ラベル (店内のみ)
-    amount: result.value.toString(), // **実着金 (権威)** — recover は total−fee, free は total
-    txHash,
-    chainId,
-    from: typeof o.from === 'string' && isAddress(o.from) ? getAddress(o.from) : '',
-    ts: Date.now(),
-    fulfilled: false,
-  };
-  // 受取予定時刻 (任意・preorder・顧客申告=advisory 表示用・items/table と同じ寛容さ)。正の有限数かつ
-  // **near-future 窓内** (now-1h 〜 now+14d) のみ保存。スロット/lastOrder との厳密照合はしない (advisory)
-  // が、年 9999 等の極端値で受注ボードの表示を汚さないよう sane 窓外は drop する (clock skew に -1h)。
-  if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt)) {
-    const at = Math.floor(o.pickupAt);
-    const nowMs = Date.now();
-    if (at > nowMs - 60 * 60 * 1000 && at < nowMs + 14 * 24 * 60 * 60 * 1000) {
-      order.pickupAt = at;
+    if (!result.ok) {
+      // 検証不成立 → クレーム解放。rpc_error は retryable(503)・それ以外は顧客起因(422)。
+      await kvDel(usedKey);
+      logger.warn('order.notify.verify_failed', { reason: result.reason, chainId, merchant });
+      return fail(result.reason, result.reason === 'rpc_error' ? 503 : 422);
     }
-  }
 
-  if (isKvConfigured()) {
-    const key = orderListKey(merchant);
-    const push = await kvLpush(key, serializeOrder(order));
-    if (!push.ok) {
-      await kvDel(usedKey); // 保存できなければクレームも戻す (リトライで再投入可能に)
-      return fail('kv_error', 503);
-    }
-    await kvLtrim(key, 0, ORDER_LIST_MAX - 1); // 上限 200 (古いものから押し出し)
-    await kvExpire(key, ORDER_LIST_TTL_SEC); // LTRIM は TTL を更新しないので毎回張り直す
+    const orderId =
+      typeof o.orderId === 'string' && o.orderId.length > 0
+        ? o.orderId.slice(0, ORDER_ID_MAX)
+        : txHash; // orderId 無し時は txHash で代替 (一意)
 
-    // 顧客向け「注文状況」の逆引きポインタ (flag ENABLE_ORDER_PICKUP)。顧客端末が生成した不可推測の
-    // status トークン (43 文字 base64url) → 受注の所在 {merchant, chainId, txHash} を保存し、顧客が
-    // /api/order/status?t=<token> で **自分の 1 注文の状態だけ** を読めるようにする (token は秘密=列挙不可)。
-    // 受注本体は上で保存済 = ここは付帯処理。失敗しても受注/決済は成立するため握り (fail-quiet)、
-    // nx で重複保存を避ける (1 token 1 注文)。flag OFF / token 無し / 不正形式では何もしない (inert)。
-    const statusToken = o.statusToken;
-    if (env.enableOrderPickup && isOrderTokenLike(statusToken)) {
-      const ptr = await kvSet(
-        orderStatusPointerKey(statusToken),
-        JSON.stringify({ merchant, chainId, txHash }),
-        { ttlSec: ORDER_LIST_TTL_SEC, nx: true },
-      );
-      // 付帯処理ゆえ受注/決済は止めない (fail-quiet) が、失敗は黙殺しない: ポインタ未保存だと顧客の
-      // /api/order/status が 404 (status リンクが無言で機能しない) になるため observable にする。
-      // nx 衝突 (既存 token) は ok:true (value:null) で warn しない — 1 token 1 注文の正常系。
-      if (!ptr.ok) {
-        logger.warn('order.notify.pointer_failed', { reason: ptr.reason, chainId, merchant });
+    const order: StoredOrder = {
+      orderId,
+      items: sanitizeOrderItems(o.items),
+      table: sanitizeTable(o.description), // checkout description = テーブル番号ラベル (店内のみ)
+      amount: result.value.toString(), // **実着金 (権威)** — recover は total−fee, free は total
+      txHash,
+      chainId,
+      from: typeof o.from === 'string' && isAddress(o.from) ? getAddress(o.from) : '',
+      ts: Date.now(),
+      fulfilled: false,
+    };
+    // 受取予定時刻 (任意・preorder・顧客申告=advisory 表示用・items/table と同じ寛容さ)。正の有限数かつ
+    // **near-future 窓内** (now-1h 〜 now+14d) のみ保存。スロット/lastOrder との厳密照合はしない (advisory)
+    // が、年 9999 等の極端値で受注ボードの表示を汚さないよう sane 窓外は drop する (clock skew に -1h)。
+    if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt)) {
+      const at = Math.floor(o.pickupAt);
+      const nowMs = Date.now();
+      if (at > nowMs - 60 * 60 * 1000 && at < nowMs + 14 * 24 * 60 * 60 * 1000) {
+        order.pickupAt = at;
       }
     }
-  }
 
-  logger.info('order.notify.stored', { chainId, merchant, amount: order.amount });
-  return NextResponse.json({ ok: true, orderId });
+    if (isKvConfigured()) {
+      const key = orderListKey(merchant);
+      const push = await kvLpush(key, serializeOrder(order));
+      if (!push.ok) {
+        await kvDel(usedKey); // 保存できなければクレームも戻す (リトライで再投入可能に)
+        return fail('kv_error', 503);
+      }
+      await kvLtrim(key, 0, ORDER_LIST_MAX - 1); // 上限 200 (古いものから押し出し)
+      await kvExpire(key, ORDER_LIST_TTL_SEC); // LTRIM は TTL を更新しないので毎回張り直す
+
+      // 顧客向け「注文状況」の逆引きポインタ (flag ENABLE_ORDER_PICKUP)。顧客端末が生成した不可推測の
+      // status トークン (43 文字 base64url) → 受注の所在 {merchant, chainId, txHash} を保存し、顧客が
+      // /api/order/status?t=<token> で **自分の 1 注文の状態だけ** を読めるようにする (token は秘密=列挙不可)。
+      // 受注本体は上で保存済 = ここは付帯処理。失敗しても受注/決済は成立するため握り (fail-quiet)、
+      // nx で重複保存を避ける (1 token 1 注文)。flag OFF / token 無し / 不正形式では何もしない (inert)。
+      const statusToken = o.statusToken;
+      if (env.enableOrderPickup && isOrderTokenLike(statusToken)) {
+        const ptr = await kvSet(
+          orderStatusPointerKey(statusToken),
+          JSON.stringify({ merchant, chainId, txHash }),
+          { ttlSec: ORDER_LIST_TTL_SEC, nx: true },
+        );
+        // 付帯処理ゆえ受注/決済は止めない (fail-quiet) が、失敗は黙殺しない: ポインタ未保存だと顧客の
+        // /api/order/status が 404 (status リンクが無言で機能しない) になるため observable にする。
+        // nx 衝突 (既存 token) は ok:true (value:null) で warn しない — 1 token 1 注文の正常系。
+        if (!ptr.ok) {
+          logger.warn('order.notify.pointer_failed', { reason: ptr.reason, chainId, merchant });
+        }
+      }
+    }
+
+    logger.info('order.notify.stored', { chainId, merchant, amount: order.amount });
+    return NextResponse.json({ ok: true, orderId });
+  } catch (e) {
+    await kvDel(usedKey);
+    logger.error('order.notify.unexpected', {
+      reason: e instanceof Error ? e.message : String(e),
+      chainId,
+      merchant,
+    });
+    return fail('internal_error', 503);
+  }
 }
