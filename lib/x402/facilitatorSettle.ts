@@ -22,9 +22,8 @@ import {
 } from '@/lib/relay/forwarderSettleService';
 import type { ForwarderVerifyDeps } from '@/lib/relay/forwarderRecover';
 import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
+import { isDec } from '@/lib/relay/relayRoute';
 
-const isDec = (v: unknown): v is string =>
-  typeof v === 'string' && /^[0-9]+$/.test(v);
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null;
 const MAX_CHAIN_ID_DIGITS = 16; // Number.isSafeInteger の範囲を超える巨大 eip155 chainId を弾く。

@@ -12,7 +12,7 @@
 
 import type { Address } from 'viem';
 import { kvGet } from './kv';
-import { entitlementBypass } from './entitlement';
+import { entitlementBypass } from './alphaBypass';
 import { grantTimedMax, parseExpiresAt } from './timedGrant';
 import { logger } from './logger';
 

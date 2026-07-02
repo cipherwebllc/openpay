@@ -15,7 +15,7 @@
 
 import { type Address } from 'viem';
 import { env } from './env';
-import { entitlementBypass } from './entitlement';
+import { entitlementBypass } from './alphaBypass';
 import { isFeeCurrent, getFeeStatus, getUnpaidPeriods } from './feeCurrent';
 import { getMeteredCount } from './billingMeter';
 import { resolveUsageFeeBps, usageFeeConfig } from './usageFee';

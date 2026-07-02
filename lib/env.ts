@@ -92,7 +92,7 @@ function parseBoundedNonNegativeInt(
 /** boolean env flag のパース。'1' または 'true' のみ真 (現行の `=== '1' || === 'true'` と
  *  バイト等価: trim/小文字化はしない)。複数 flag 定義の重複を単一情報源化する (§8.3)。
  *  ※ 意図的に別実装で残す例外: billingMeter ('1' のみ) / x402 ('true' のみ) /
- *    entitlement.entitlementBypass (trim+小文字化 + '1/true/yes/on'・既定ON・fail-closed)。 */
+ *    alphaBypass.entitlementBypass (trim+小文字化 + '1/true/yes/on'・既定ON・fail-closed)。 */
 export function parseBoolFlag(raw: string | undefined): boolean;
 export function parseBoolFlag(name: string, raw: string | undefined): boolean;
 export function parseBoolFlag(

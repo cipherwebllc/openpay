@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// csvPass は kvGet/kvEval (lib/kv・timedGrant 経由) と entitlementBypass (lib/entitlement) に依存する。
+// csvPass は kvGet/kvEval (lib/kv・timedGrant 経由) と entitlementBypass (lib/alphaBypass) に依存する。
 // kvEval は GRANT_MAX_SCRIPT (Lua) を実行する想定なので、テストでは「Upstash の Lua 実行」を JS で
 // 忠実にエミュレートする in-memory store を立て、atomic max + TTL 計算を実際に走らせる
 // (proPlan.test と同方針)。status は csvpass:exp と pro:exp の両方を読む (Pro ⊃ CSV) ので両 key を持つ。
@@ -15,7 +15,7 @@ const hold = vi.hoisted(() => ({
   getFailKeys: new Set<string>(),
 }));
 
-vi.mock('@/lib/entitlement', () => ({
+vi.mock('@/lib/alphaBypass', () => ({
   entitlementBypass: () => hold.bypass,
 }));
 

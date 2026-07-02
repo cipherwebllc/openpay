@@ -15,7 +15,7 @@ describe('entitlementBypass (アルファ全開放スイッチ)', () => {
   });
 
   async function bypass(): Promise<boolean> {
-    const mod = await import('@/lib/entitlement');
+    const mod = await import('@/lib/alphaBypass');
     return mod.entitlementBypass();
   }
 
@@ -54,7 +54,7 @@ describe('entitlementBypass (アルファ全開放スイッチ)', () => {
     const warnSpy = vi.spyOn(loggerMod.logger, 'warn');
 
     process.env.ALPHA_ENTITLEMENT_BYPASS = 'garbage';
-    const mod = await import('@/lib/entitlement');
+    const mod = await import('@/lib/alphaBypass');
     expect(mod.entitlementBypass()).toBe(false);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith('billing.bypass.unrecognized', { value: 'garbage' });
@@ -67,7 +67,7 @@ describe('entitlementBypass (アルファ全開放スイッチ)', () => {
     const warnSpy = vi.spyOn(loggerMod.logger, 'warn');
 
     process.env.ALPHA_ENTITLEMENT_BYPASS = '2';
-    const mod = await import('@/lib/entitlement');
+    const mod = await import('@/lib/alphaBypass');
     expect(mod.entitlementBypass()).toBe(false);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith('billing.bypass.unrecognized', { value: '2' });
@@ -80,7 +80,7 @@ describe('entitlementBypass (アルファ全開放スイッチ)', () => {
     const warnSpy = vi.spyOn(loggerMod.logger, 'warn');
 
     process.env.ALPHA_ENTITLEMENT_BYPASS = 'garbage';
-    const mod = await import('@/lib/entitlement');
+    const mod = await import('@/lib/alphaBypass');
     mod.entitlementBypass(); // 1 回目
     mod.entitlementBypass(); // 2 回目
     expect(warnSpy).toHaveBeenCalledTimes(1);

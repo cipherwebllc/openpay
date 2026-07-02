@@ -3,14 +3,14 @@
 // **支払い tx の block timestamp + 30日** を Pro 期限として付与する。ゲート対象は CSV ダウンロードのみ
 // (lib/feeCurrent の a1 利用料とは別系統・両立する)。設計: plans/pro-plan.md。
 //
-// bypass: アルファ全開放 (entitlement と共有の ALPHA_ENTITLEMENT_BYPASS スイッチ) 中は常に pro=true
+// bypass: アルファ全開放 (alphaBypass と共有の ALPHA_ENTITLEMENT_BYPASS スイッチ) 中は常に pro=true
 // = 課金しない。本番点灯 = NEXT_PUBLIC_ENABLE_PRO=1 + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
 // 値 = expiresAt(ms) の素の数値文字列 (例 "1750000000000")・KV TTL = ceil((expiresAt-now)/1000) で
 // 自然失効 (固定 30d ではない・早期更新で 60日 expiry を持つ key が 30日で消える不整合を防ぐ)。
 
 import type { Address } from 'viem';
 import { kvGet } from './kv';
-import { entitlementBypass } from './entitlement';
+import { entitlementBypass } from './alphaBypass';
 import { grantTimedMax, parseExpiresAt } from './timedGrant';
 
 // ¥500 / 月 (= 500 JPYC・18 decimals)。overpayment は受理するが付与は常に 30日 1 期間のみ。
