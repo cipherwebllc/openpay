@@ -33,6 +33,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { TokenDeployment } from '@/lib/tokens';
 import { env } from '@/lib/env';
 import { EIP3009_RELAY_CHAINS } from '@/lib/jpycGaslessProvider';
+import { useLocalStorageRecord } from '@/hooks/useLocalStorageRecord';
 
 export type EntitlementPayPhase =
   | 'idle'
@@ -60,6 +61,44 @@ export type GaslessSignResult = {
   nonce: Hex;
   signature: Hex;
 };
+
+// pending 記録 (ガスあり broadcast 済 tx) の型ガード。txHash=64桁hex / chainId=整数 / wallet=文字列 を
+// すべて満たすときだけ有効。**二重支払い防止 resume の検証層**なので loadPending 由来の shape を厳密に見る。
+// (旧 loadPending の inline 検証をそのまま切り出したもの — 判定内容を変えないこと。)
+function isPendingPayment(o: unknown): o is PendingPayment {
+  if (typeof o !== 'object' || o === null) return false;
+  const p = o as Partial<PendingPayment>;
+  return (
+    typeof p.txHash === 'string' &&
+    /^0x[0-9a-fA-F]{64}$/.test(p.txHash) &&
+    typeof p.chainId === 'number' &&
+    Number.isInteger(p.chainId) &&
+    typeof p.wallet === 'string'
+  );
+}
+
+// pending 署名 (txHash 未解決の EIP-3009 authorization) の型ガード。payload の各 field と nonce/signature
+// の hex 形式まで検証する。pending 記録とは **別 key / 別 validator** で、取り違えると resume-safety が壊れる。
+// (旧 loadPendingSig の inline 検証をそのまま切り出したもの — 判定内容を変えないこと。)
+function isPendingGaslessSignature(o: unknown): o is PendingGaslessSignature {
+  if (typeof o !== 'object' || o === null) return false;
+  const rec = o as Partial<PendingGaslessSignature>;
+  const p = rec.payload as Partial<GaslessSignResult> | undefined;
+  return (
+    !!p &&
+    typeof p.from === 'string' &&
+    typeof p.value === 'string' &&
+    typeof p.validAfter === 'string' &&
+    typeof p.validBefore === 'string' &&
+    typeof p.nonce === 'string' &&
+    /^0x[0-9a-fA-F]{64}$/.test(p.nonce) &&
+    typeof p.signature === 'string' &&
+    /^0x[0-9a-fA-F]+$/.test(p.signature) &&
+    typeof p.chainId === 'number' &&
+    Number.isInteger(p.chainId) &&
+    typeof rec.wallet === 'string'
+  );
+}
 
 export type JpycEntitlementPayConfig = {
   /** tier 額 (JPYC minor units・例 proPriceWei / csvPassPriceWei)。FEE_RECEIVER へ送る額。 */
@@ -145,93 +184,25 @@ export function useJpycEntitlementPay(
     env.feeReceiverConfigured;
 
   // localStorage はブロック環境で throw しうる (SNS アプリ内ブラウザ等)。耐久化は best-effort で
-  // 包み、失敗しても hook 本体 (送金/subscribe) は動かす。
-  const loadPending = useCallback((): PendingPayment | null => {
-    try {
-      const raw = window.localStorage.getItem(pendingStorageKey);
-      if (!raw) return null;
-      const o = JSON.parse(raw) as Partial<PendingPayment>;
-      if (
-        typeof o.txHash === 'string' &&
-        /^0x[0-9a-fA-F]{64}$/.test(o.txHash) &&
-        typeof o.chainId === 'number' &&
-        Number.isInteger(o.chainId) &&
-        typeof o.wallet === 'string'
-      ) {
-        return { txHash: o.txHash as Hex, chainId: o.chainId, wallet: o.wallet };
-      }
-    } catch {
-      /* storage 利用不可 / 不正値 */
-    }
-    return null;
-  }, [pendingStorageKey]);
-  const savePending = useCallback(
-    (rec: PendingPayment): void => {
-      try {
-        window.localStorage.setItem(pendingStorageKey, JSON.stringify(rec));
-      } catch {
-        /* 永続化を諦める (subscribe は今回のメモリ上で続行) */
-      }
-    },
-    [pendingStorageKey],
-  );
-  const clearPending = useCallback((): void => {
-    try {
-      window.localStorage.removeItem(pendingStorageKey);
-    } catch {
-      /* noop */
-    }
-  }, [pendingStorageKey]);
+  // 包み (useLocalStorageRecord)、失敗しても hook 本体 (送金/subscribe) は動かす。pending 記録
+  // (broadcast 済 tx) は isPendingPayment で検証する。
+  const {
+    load: loadPending,
+    save: savePending,
+    clear: clearPending,
+  } = useLocalStorageRecord<PendingPayment>(pendingStorageKey, isPendingPayment);
 
-  // txHash 未解決の署名済 authorization は別 key に保存する。txHash pending と混ぜず、同一 nonce の
-  // 再 POST だけを許可することで、modal close / reload 後の再署名による二重支払いを防ぐ。
-  const loadPendingSig = useCallback((): PendingGaslessSignature | null => {
-    try {
-      const raw = window.localStorage.getItem(sigStorageKey);
-      if (!raw) return null;
-      const o = JSON.parse(raw) as Partial<PendingGaslessSignature>;
-      const p = o.payload as Partial<GaslessSignResult> | undefined;
-      if (
-        p &&
-        typeof p.from === 'string' &&
-        typeof p.value === 'string' &&
-        typeof p.validAfter === 'string' &&
-        typeof p.validBefore === 'string' &&
-        typeof p.nonce === 'string' &&
-        /^0x[0-9a-fA-F]{64}$/.test(p.nonce) &&
-        typeof p.signature === 'string' &&
-        /^0x[0-9a-fA-F]+$/.test(p.signature) &&
-        typeof p.chainId === 'number' &&
-        Number.isInteger(p.chainId) &&
-        typeof o.wallet === 'string'
-      ) {
-        return {
-          payload: p as GaslessSignResult,
-          wallet: o.wallet,
-        };
-      }
-    } catch {
-      /* storage 利用不可 / 不正値 */
-    }
-    return null;
-  }, [sigStorageKey]);
-  const savePendingSig = useCallback(
-    (rec: PendingGaslessSignature): void => {
-      try {
-        window.localStorage.setItem(sigStorageKey, JSON.stringify(rec));
-      } catch {
-        /* 永続化を諦める (今回のメモリ上では同一 payload を保持する) */
-      }
-    },
-    [sigStorageKey],
+  // txHash 未解決の署名済 authorization は **別 key** (sigStorageKey) に保存する。txHash pending と
+  // 混ぜず、isPendingGaslessSignature で payload/nonce/signature まで検証して同一 nonce の再 POST
+  // だけを許可することで、modal close / reload 後の再署名による二重支払いを防ぐ。
+  const {
+    load: loadPendingSig,
+    save: savePendingSig,
+    clear: clearPendingSig,
+  } = useLocalStorageRecord<PendingGaslessSignature>(
+    sigStorageKey,
+    isPendingGaslessSignature,
   );
-  const clearPendingSig = useCallback((): void => {
-    try {
-      window.localStorage.removeItem(sigStorageKey);
-    } catch {
-      /* noop */
-    }
-  }, [sigStorageKey]);
 
   const payWrite = useWriteContract();
   const payReceipt = useWaitForTransactionReceipt({

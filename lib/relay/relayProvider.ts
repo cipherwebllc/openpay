@@ -24,6 +24,7 @@ import {
   type Address,
   type Chain,
   type Hex,
+  type PublicClient,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
@@ -156,6 +157,23 @@ export function transportFor(chainId: number) {
   return http(cfg.rpc ?? cfg.chain.rpcUrls.default.http[0]);
 }
 
+// per-chain の PublicClient を module-level で memo 化する。getBalance / readAuthorizationUsed /
+// selfHostIoFor が呼ばれるたびに同一 config の client を作り直していた 3 箇所を 1 度に集約する
+// (viem の PublicClient は request に対して stateless ゆえ、キャッシュしても挙動不変)。key は chainId で、
+// **別 chain の client を絶対に返さない** ことが唯一の不変条件 (money-path)。build する config は 3 箇所と
+// 完全に同一 ({ chain: SUPPORTED_CHAINS[chainId].chain, transport: transportFor(chainId) })。
+const publicClientCache = new Map<number, PublicClient>();
+function publicClientFor(chainId: number): PublicClient {
+  const cached = publicClientCache.get(chainId);
+  if (cached) return cached;
+  const client = createPublicClient({
+    chain: SUPPORTED_CHAINS[chainId].chain,
+    transport: transportFor(chainId),
+  });
+  publicClientCache.set(chainId, client);
+  return client;
+}
+
 export function jpycAddressFor(chainId: number): Address | null {
   if (!(chainId in SUPPORTED_CHAINS)) return null;
   const d = resolveDeployment('jpyc', chainId);
@@ -167,10 +185,7 @@ export async function getBalance(
   token: Address,
   owner: Address,
 ): Promise<bigint> {
-  const client = createPublicClient({
-    chain: SUPPORTED_CHAINS[chainId].chain,
-    transport: transportFor(chainId),
-  });
+  const client = publicClientFor(chainId);
   return client.readContract({
     address: token,
     abi: erc20Abi,
@@ -185,10 +200,7 @@ export async function readAuthorizationUsed(
   from: Address,
   nonce: Hex,
 ): Promise<boolean> {
-  const client = createPublicClient({
-    chain: SUPPORTED_CHAINS[chainId].chain,
-    transport: transportFor(chainId),
-  });
+  const client = publicClientFor(chainId);
   return client.readContract({
     address: token,
     abi: AUTHORIZATION_STATE_ABI,
@@ -202,7 +214,7 @@ export function selfHostIoFor(chainId: number): SelfHostIo {
   const cfg = SUPPORTED_CHAINS[chainId];
   const transport = transportFor(chainId);
   const account = RELAYER_ACCOUNT as Account;
-  const publicClient = createPublicClient({ chain: cfg.chain, transport });
+  const publicClient = publicClientFor(chainId);
   const walletClient = createWalletClient({ account, chain: cfg.chain, transport });
   return {
     getBalance: () => publicClient.getBalance({ address: account.address }),
