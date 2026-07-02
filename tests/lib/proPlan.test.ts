@@ -165,10 +165,11 @@ describe('getProStatus / isPro', () => {
     expect(await isPro(WALLET, NOW)).toBe(true);
   });
 
-  it('KV 読み失敗 → pro=false (fail-closed・課金 gate なので締める)', async () => {
+  it('KV 読み失敗 → pro=true (fail-open・障害中は既 Pro を締め出さない)', async () => {
     hold.getOk = false;
     const st = await getProStatus(WALLET, NOW);
-    expect(st).toEqual({ pro: false, expiresAt: null, bypass: false });
+    expect(st).toEqual({ pro: true, expiresAt: null, bypass: false });
+    expect(await isPro(WALLET, NOW)).toBe(true);
   });
 
   it('malformed な格納値 → pro=false', async () => {

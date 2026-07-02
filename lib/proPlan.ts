@@ -45,7 +45,14 @@ export async function grantPro(
   return grantTimedMax(proKey(wallet), targetExpiresAtMs, nowMs);
 }
 
-/** KV から Pro 状態を読む。bypass 中は KV を読まず常に pro=true (expiresAt=null)。 */
+/**
+ * KV から Pro 状態を読む。bypass 中は KV を読まず常に pro=true (expiresAt=null)。
+ *
+ * KV 読み**失敗** (障害・ok:false) は「未付与 (ok:true で value 無し)」と峻別し、KV 自体が
+ * 使えないときは **fail-open (pro=true・expiresAt=null)** に倒す (getCsvPassStatus と同方針・
+ * 障害中に既 Pro 加入者を締め出さない)。真の未付与 (読み成功・key 無し) と malformed 値は
+ * 従来どおり非 Pro のまま (fail-open しない)。
+ */
 export async function getProStatus(
   wallet: string,
   nowMs: number = Date.now(),
@@ -54,7 +61,11 @@ export async function getProStatus(
     return { pro: true, expiresAt: null, bypass: true };
   }
   const res = await kvGet(proKey(wallet));
-  if (!res.ok || !res.value) {
+  // KV 読み失敗 (到達不能等) → fail-open。missing key (ok:true & value 無し) は非 Pro。
+  if (!res.ok) {
+    return { pro: true, expiresAt: null, bypass: false };
+  }
+  if (!res.value) {
     return { pro: false, expiresAt: null, bypass: false };
   }
   const expiresAt = parseExpiresAt(res.value);
