@@ -198,6 +198,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Operator receiver wallet that the per-transaction OpenPay usage fee is split to. **Required on mainnet** (the env guard rejects the placeholder). It is used when the EIP-3009 forwarder (recover) mode is configured (forwarder address set per chain); with no forwarder configured a chain runs in free mode and no fee is split. | **mainnet** |
+| `RELAYER_PRIVATE_KEY` | Private key of OpenPay's self-hosted **EIP-3009 relayer** (JPYC gasless). Holds only native gas (POL / KAIA / AVAX) to submit `receiveWithAuthorization` / `transferWithAuthorization` on-chain — it **never touches customer funds** (non-custodial). Server-only. | gasless (JPYC) |
 | `NEXT_PUBLIC_RECOVER_FEE_BPS` | Per-transaction OpenPay usage-fee rate in basis points, **shared** by `/pay`, `/checkout`, and the register's relay path. **`100` (1%) — live in production** as of the July 2026 usage period (code default `0`); the floor (`max(2 JPYC, …)`) applies on the relay path. Changing it changes a *disclosed* number — the legal-text fence (`DISCLOSED_RECOVER_FEE`) and the relay-route startup divergence guard flag any drift. | optional (fee) |
 | `NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE` | Adds **Avalanche C-Chain** (Fuji on testnet) as a JPYC receiving chain — **live on mainnet** (production sets `1`). Code default **off** keeps JPYC on Polygon + Kaia only. Avalanche is **recover-required**: gasless needs a forwarder (`NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE` + relayer AVAX) or it falls back to standard payment (so the relayer never spends AVAX in free mode). | optional |
 | `NEXT_PUBLIC_ENABLE_MOBILE_ORDER` | Mobile-order storefront feature (`@handle` shop page / `/order`) — **live on mainnet** (production sets `1`); code default **off**. | optional |
@@ -213,10 +214,12 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect projectId (<https://cloud.reown.com>) | optional |
 | `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain | recommended on prod |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel KV — payment log **and** SIWE sessions / freee tokens / entitlements | optional (required for SIWE + freee sync) |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel KV — payment log **and** SIWE sessions / **encrypted** freee tokens / entitlements | optional (required for SIWE + freee sync) |
 | `PAYMENT_LOG_ADMIN_TOKEN` | Bearer for `/api/log/payment/export` + `/stats` | optional |
+| `ADMIN_WALLETS` | Comma-separated wallet addresses allowed to read `/api/admin/billing/revenue` (requires a valid SIWE session **and** the wallet in this allowlist). Empty/unset ⇒ admin endpoints are closed (fail-closed). | optional |
 | `NEXT_PUBLIC_ENABLE_FREEE_SYNC` | Show the freee sync panel on `/history` (default **off** — dark ship) | freee only |
 | `FREEE_CLIENT_ID` / `FREEE_CLIENT_SECRET` / `FREEE_REDIRECT_URI` | freee OAuth app (server-only secret; callback `…/api/freee/callback`) | freee only |
+| `FREEE_TOKEN_ENC_KEY` | AES-256-GCM key (32 bytes as 64-char hex or base64) that encrypts freee OAuth access/refresh tokens **at rest in KV**. **Required when `NEXT_PUBLIC_ENABLE_FREEE_SYNC` is on** (an undecryptable/legacy token is treated as unusable → forces reconnect). | freee only |
 | `SIWE_ALLOWED_DOMAINS` | Extra SIWE-login domains beyond the canonical host (localhost auto-allowed in dev) | optional |
 | `ALPHA_ENTITLEMENT_BYPASS` | Open all paid features during the beta (default on; `0`/`false` to require an entitlement) | optional |
 | `NEXT_PUBLIC_ENABLE_USAGE_FEE` | **(Shelved — kept for possible future reuse, NOT the current model.)** An alternative *monthly per-account* usage-fee design (meters JPYC gasless-relay volume + an overdue soft-gate on `/history`). The **live** monetization is the **per-transaction** fee in [Fees](#fees) (`max(2 JPYC, 1%)`, deducted at settlement) — not this. Default **off**; left in place for future features. | optional |
