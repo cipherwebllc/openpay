@@ -15,6 +15,7 @@
 //   - createDeal の `{deal:{id}}` レスポンス形・`type:'income'` payload
 // プラン有効な freee で実取込検証するまで、これらは「動くはず」止まり (memory:freee-oauth-siwe-entitlement)。
 
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { FreeeDealBody } from './freeeSync';
 
 const AUTHORIZE_URL = 'https://accounts.secure.freee.co.jp/public_api/authorize';
@@ -43,6 +44,117 @@ export type StoredToken = {
   expiresAt: number; // ms epoch
   companyId: number | null;
 };
+
+export type FreeeTokenEnvelope = {
+  v: 1;
+  alg: 'A256GCM';
+  iv: string;
+  tag: string;
+  ct: string;
+};
+
+function freeeTokenEncryptionKey(): Buffer {
+  const raw = process.env.FREEE_TOKEN_ENC_KEY;
+  if (!raw) {
+    throw new Error(
+      'FREEE_TOKEN_ENC_KEY missing: set a 32-byte hex or base64 key for freee token encryption',
+    );
+  }
+  const key = /^[0-9a-fA-F]{64}$/.test(raw)
+    ? Buffer.from(raw, 'hex')
+    : Buffer.from(raw, 'base64');
+  if (key.length !== 32) {
+    throw new Error(
+      'FREEE_TOKEN_ENC_KEY invalid: must decode to exactly 32 bytes (64-char hex or base64)',
+    );
+  }
+  return key;
+}
+
+function tokenAad(walletLower: string): Buffer {
+  return Buffer.from(`freee:tok:${walletLower}:v1`, 'utf8');
+}
+
+function isTokenEnvelope(value: unknown): value is FreeeTokenEnvelope {
+  const o = value as Partial<FreeeTokenEnvelope>;
+  return (
+    !!o &&
+    o.v === 1 &&
+    o.alg === 'A256GCM' &&
+    typeof o.iv === 'string' &&
+    typeof o.tag === 'string' &&
+    typeof o.ct === 'string'
+  );
+}
+
+function parseStoredToken(value: string): StoredToken | null {
+  try {
+    const o = JSON.parse(value) as Partial<StoredToken>;
+    if (
+      typeof o.access === 'string' &&
+      typeof o.refresh === 'string' &&
+      typeof o.expiresAt === 'number' &&
+      Number.isFinite(o.expiresAt) &&
+      (typeof o.companyId === 'number' || o.companyId === null)
+    ) {
+      return {
+        access: o.access,
+        refresh: o.refresh,
+        expiresAt: o.expiresAt,
+        companyId: o.companyId,
+      };
+    }
+  } catch {
+    /* unusable token */
+  }
+  return null;
+}
+
+export function encryptStoredToken(wallet: string, token: StoredToken): string {
+  const walletLower = wallet.toLowerCase();
+  const key = freeeTokenEncryptionKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(tokenAad(walletLower));
+  const ct = Buffer.concat([
+    cipher.update(JSON.stringify(token), 'utf8'),
+    cipher.final(),
+  ]);
+  const envelope: FreeeTokenEnvelope = {
+    v: 1,
+    alg: 'A256GCM',
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    ct: ct.toString('base64'),
+  };
+  return JSON.stringify(envelope);
+}
+
+export function decryptStoredToken(wallet: string, value: string): StoredToken | null {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!isTokenEnvelope(envelope)) return null;
+
+  const key = freeeTokenEncryptionKey();
+  try {
+    const walletLower = wallet.toLowerCase();
+    const iv = Buffer.from(envelope.iv, 'base64');
+    const tag = Buffer.from(envelope.tag, 'base64');
+    const ct = Buffer.from(envelope.ct, 'base64');
+    if (iv.length !== 12 || tag.length !== 16 || ct.length === 0) return null;
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAAD(tokenAad(walletLower));
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+    return parseStoredToken(plaintext);
+  } catch {
+    return null;
+  }
+}
 
 export function buildAuthorizeUrl(env: FreeeEnv, state: string): string {
   const u = new URL(AUTHORIZE_URL);

@@ -9,6 +9,8 @@ import {
   getAccountItems,
   getTaxCodes,
   createDeal,
+  encryptStoredToken,
+  decryptStoredToken,
   type StoredToken,
   type FreeeEnv,
 } from '@/lib/freee';
@@ -29,8 +31,33 @@ const ENV: FreeeEnv = {
   clientSecret: 'sec',
   redirectUri: 'https://app.example/api/freee/callback',
 };
+const ENC_KEY = '00'.repeat(32);
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('freee token encryption', () => {
+  it('encryptStoredToken/decryptStoredToken: round-trip equals original token', () => {
+    const old = process.env.FREEE_TOKEN_ENC_KEY;
+    process.env.FREEE_TOKEN_ENC_KEY = ENC_KEY;
+    try {
+      const token: StoredToken = {
+        access: 'AT',
+        refresh: 'RT',
+        expiresAt: 123_456,
+        companyId: 7,
+      };
+      const encrypted = encryptStoredToken('0xABCDEF', token);
+      expect(JSON.parse(encrypted)).toMatchObject({ v: 1, alg: 'A256GCM' });
+      expect(decryptStoredToken('0xabcdef', encrypted)).toEqual(token);
+    } finally {
+      if (old === undefined) {
+        delete process.env.FREEE_TOKEN_ENC_KEY;
+      } else {
+        process.env.FREEE_TOKEN_ENC_KEY = old;
+      }
+    }
+  });
+});
 
 describe('tokenNeedsRefresh', () => {
   const now = 1_000_000;

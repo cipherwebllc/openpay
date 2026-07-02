@@ -76,6 +76,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       enabled: env.enablePro,
       feeReceiverConfigured: env.feeReceiverConfigured,
       usedKeyPrefix: 'pro:used:',
+      tier: 'pro',
       priceWei: proPriceWei, // 500 JPYC 以上 (超過は受理するが付与は 30日 1 期間のみ)
       grantMs: PRO_GRANT_MS, // block timestamp + 30日
       grant: (wallet, target) => grantPro(wallet, target),

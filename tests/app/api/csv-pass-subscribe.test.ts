@@ -112,6 +112,7 @@ vi.mock('@/lib/csvPassRevenue', () => ({
 const kvSetSpy = vi.hoisted(() => vi.fn());
 const kvDelSpy = vi.hoisted(() => vi.fn());
 const kvGetSpy = vi.hoisted(() => vi.fn());
+const kvEvalSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   kvSet: (...args: unknown[]) => {
     kvSetSpy(...args);
@@ -129,6 +130,10 @@ vi.mock('@/lib/kv', () => ({
   },
   kvDel: (...args: unknown[]) => {
     kvDelSpy(...args);
+    return Promise.resolve({ ok: true, value: 1 });
+  },
+  kvEval: (...args: unknown[]) => {
+    kvEvalSpy(...args);
     return Promise.resolve({ ok: true, value: 1 });
   },
 }));
@@ -166,6 +171,7 @@ beforeEach(() => {
   kvSetSpy.mockClear();
   kvGetSpy.mockClear();
   kvDelSpy.mockClear();
+  kvEvalSpy.mockClear();
 });
 
 describe('POST /api/csv-pass/subscribe', () => {
@@ -321,7 +327,9 @@ describe('POST /api/csv-pass/subscribe', () => {
     // grant は atomic max で冪等なので決済は壊さず 200 を返す (settle 同型・engine の promote-failed 分岐)。
     hold.kvSetResults = [
       { ok: true, value: 'OK' }, // claim
-      { ok: false, reason: 'network_error' }, // promote 失敗
+      { ok: true, value: 'OK' }, // cross-tier claim
+      { ok: true, value: 'OK' }, // cross-tier promote
+      { ok: false, reason: 'network_error' }, // per-tier promote 失敗
     ];
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY }));
     expect(res.status).toBe(200);

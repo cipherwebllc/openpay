@@ -1,10 +1,11 @@
 // 「freee に同期」batch push の核。SIWE 必須 + freee 連携/マッピング済が前提 (利用権ゲートなし=無料)。
-// クライアントが income-sale entries を送る → サーバで再検証 + 円換算 + 冪等 createDeal。
+// クライアントが income-sale entries を送る → サーバで advisory filter + 円換算 + 冪等 createDeal。
 // 冪等性 (SET NX claim) により再クリックしても取引を重複作成しない。
 import { NextResponse } from 'next/server';
 import type { HistoryEntry } from '@/lib/history';
 import { freeeEnv, getValidAccessToken, createDeal } from '@/lib/freee';
 import { runFreeeSync } from '@/lib/freeeSync';
+import { rateIsSane } from '@/lib/fx';
 import { logger } from '@/lib/logger';
 import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
@@ -87,7 +88,10 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const summary = await runFreeeSync(entries, {
     wallet: session.address,
-    usdcJpy: typeof body.usdcJpy === 'number' ? body.usdcJpy : undefined,
+    usdcJpy:
+      typeof body.usdcJpy === 'number' && rateIsSane(body.usdcJpy)
+        ? body.usdcJpy
+        : undefined,
     mapping,
     claim: claimSync,
     createDeal: (deal) => createDeal(access, deal),
