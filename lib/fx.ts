@@ -96,6 +96,56 @@ export function convertAnchorAmount(args: ConvertAnchorArgs): ConvertAnchorResul
   return { ok: true, amount: formatUnits(targetAtomic, targetDecimals) };
 }
 
+// ---------------------------------------------------------------------------
+// last-known-good (LKG) レート急変検知 (F8・defense-in-depth)
+// ---------------------------------------------------------------------------
+//
+// CoinGecko の障害 / MITM が ~300s のキャッシュ窓内で歪んだレートを返し、それが動的 QR に
+// 焼き込まれる事故を「警告」で捕まえる (hard-reject はしない — 実際の >20% 相場変動で正当な
+// マーチャントを止めないため)。FX_RATE_MIN/MAX の sanity band はそのまま維持し、その内側で
+// 前回良好値 (LKG) から ±20% を超える跳ねだけを検知する。DOM/localStorage には依存しない
+// 純関数 (呼出側の hook が LKG の永続化を担う)。
+
+// LKG の鮮度上限。これより古い LKG は「無し」扱い (bootstrap・警告しない)。
+export const FX_LKG_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
+// LKG から新レートへの許容乖離 (±20%)。これを超えると警告。
+export const FX_DEVIATION_THRESHOLD = 0.2;
+
+export type FxLkg = { rate: number; ts: number };
+
+export type FxDeviationResult =
+  | { warn: false }
+  | { warn: true; lkgRate: number; newRate: number; deviation: number };
+
+// LKG (前回良好レート) と新レートを比較し、警告すべきかを返す純関数。
+//   - LKG が無い / 不正 / stale (24h 超) / 未来 ts → bootstrap 扱いで warn=false
+//     (呼出側は新レートを LKG として silently 採用する)。
+//   - 鮮度 OK かつ乖離 > ±20% → warn=true (呼出側は開示 + acknowledge を要求するが生成は止めない)。
+//   - 鮮度 OK かつ乖離 ≤ ±20% → warn=false (silently 採用)。
+export function fxRateDeviationWarning(
+  lkg: FxLkg | null,
+  newRate: number,
+  nowMs: number,
+): FxDeviationResult {
+  if (
+    !lkg ||
+    !Number.isFinite(lkg.rate) ||
+    lkg.rate <= 0 ||
+    !Number.isFinite(newRate) ||
+    newRate <= 0 ||
+    !Number.isFinite(lkg.ts) ||
+    lkg.ts > nowMs || // 未来 ts = 不整合 → bootstrap 扱い
+    nowMs - lkg.ts > FX_LKG_MAX_AGE_MS // stale
+  ) {
+    return { warn: false };
+  }
+  const deviation = Math.abs(newRate - lkg.rate) / lkg.rate;
+  if (deviation > FX_DEVIATION_THRESHOLD) {
+    return { warn: true, lkgRate: lkg.rate, newRate, deviation };
+  }
+  return { warn: false };
+}
+
 // 有効期限 (unix 秒) を過ぎているか。expUnixSec が未定義なら期限なし扱い (false)。
 export function isExpired(
   expUnixSec: number | undefined,

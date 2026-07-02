@@ -13,6 +13,7 @@ import {
   searchParamsFromNext,
   exceedsTokenPrecision,
   safeInternalPath,
+  offOriginCallbackHosts,
 } from '@/lib/url';
 
 // USDC (Base) のアドレスは checksum 既知のため、テストの roundtrip が安定する。
@@ -1996,5 +1997,50 @@ describe('safeInternalPath (戻り先リンクの open-redirect 防止)', () => 
     expect(safeInternalPath(123)).toBeNull();
     expect(safeInternalPath('/' + 'a'.repeat(300))).toBeNull();
     expect(safeInternalPath('/a	b')).toBeNull();
+  });
+});
+
+describe('offOriginCallbackHosts (F7・off-origin callback 開示ヘルパ)', () => {
+  const ORIGIN_HOST = 'open-pay.jp';
+
+  it('同一 host のみ → 空配列', () => {
+    expect(
+      offOriginCallbackHosts(
+        ['https://open-pay.jp/api/order/notify', 'https://open-pay.jp/thanks'],
+        ORIGIN_HOST,
+      ),
+    ).toEqual([]);
+  });
+
+  it('第三者 host を重複なしで返す (host 比較・大小無視)', () => {
+    expect(
+      offOriginCallbackHosts(
+        [
+          'https://shop.example.com/hook',
+          'https://SHOP.EXAMPLE.COM/thanks', // 同 host (大小無視) → 1 件に集約
+          'https://open-pay.jp/cancel', // 同 origin → 除外
+          'https://discord.gg/xyz',
+        ],
+        ORIGIN_HOST,
+      ),
+    ).toEqual(['shop.example.com', 'discord.gg']);
+  });
+
+  it('空 / null / undefined / 不正 URL は無視', () => {
+    expect(
+      offOriginCallbackHosts(
+        [undefined, null, '', 'not a url', 'https://evil.example/hook'],
+        ORIGIN_HOST,
+      ),
+    ).toEqual(['evil.example']);
+  });
+
+  it('port 違いは別 host 扱い (host は port を含む)', () => {
+    expect(
+      offOriginCallbackHosts(
+        ['http://localhost:4000/hook'],
+        'localhost:3000',
+      ),
+    ).toEqual(['localhost:4000']);
   });
 });

@@ -16,6 +16,7 @@
 import { isAddress } from 'viem';
 import { isLocale, type Locale } from '@/i18n';
 import {
+  offOriginCallbackHosts,
   parseCheckoutParams,
   parsePayParams,
   parseTipParams,
@@ -33,8 +34,16 @@ import { decodeOrderConfig } from '@/lib/mobileOrder';
 
 export type ScanAction =
   | { kind: 'pay'; href: string; params: PayParams }
-  | { kind: 'tip'; href: string; params: TipParams }
-  | { kind: 'checkout'; href: string; params: CheckoutParams }
+  // offOriginHosts: webhook/thanksUrl (tip) / webhook/success_url/cancel_url (checkout) のうち
+  // origin と host が異なる第三者ホスト一覧。空でなければ ScanShell は自動遷移せず amber
+  // interstitial + 明示 continue を挟む (外部 URL と同じ二段確認)。
+  | { kind: 'tip'; href: string; params: TipParams; offOriginHosts: string[] }
+  | {
+      kind: 'checkout';
+      href: string;
+      params: CheckoutParams;
+      offOriginHosts: string[];
+    }
   | { kind: 'handle'; href: string; handle: string }
   | { kind: 'order'; href: string }
   | { kind: 'external'; href: string; host: string }
@@ -153,6 +162,12 @@ export function parseScannedUrl(
         kind: 'checkout',
         href: buildHref('checkout', currentLocale, '', url.search),
         params: r.params,
+        // 同 origin checkout でも callback (webhook/success/cancel) が第三者ホストなら
+        // 自動遷移させず interstitial へ (ScanShell が offOriginHosts で分岐)。
+        offOriginHosts: offOriginCallbackHosts(
+          [r.params.webhook, r.params.successUrl, r.params.cancelUrl],
+          url.host,
+        ),
       };
     }
     case 'tip': {
@@ -164,6 +179,11 @@ export function parseScannedUrl(
         kind: 'tip',
         href: buildHref('tip', currentLocale, r.params.to, url.search),
         params: r.params,
+        // 同 origin tip でも callback (webhook/thanksUrl) が第三者ホストなら interstitial へ。
+        offOriginHosts: offOriginCallbackHosts(
+          [r.params.webhook, r.params.thanksUrl],
+          url.host,
+        ),
       };
     }
     case 'handle': {

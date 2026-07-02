@@ -248,6 +248,10 @@ describe('i18n: Scan keys (ja/en parity)', () => {
     'externalQrTitle',
     'externalQrBody',
     'externalQrOpen',
+    // F7: 同 origin checkout/tip でも callback が第三者ホストのときの interstitial 文言。
+    'callbackWarnTitle',
+    'callbackWarnBody',
+    'callbackWarnContinue',
     'eip681Title',
     'eip681Body',
     'unknownQrTitle',
@@ -948,6 +952,10 @@ describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
     'convertRecalc',
     'convertRevert',
     'convertCrossChainNote',
+    // F8: レート急変 (LKG から ±20% 超) 警告の文言。
+    'fxWarnTitle',
+    'fxWarnDetail',
+    'fxWarnAck',
   ] as const;
   // PaymentForm の FX 文脈 + 有効期限 keys。
   const PAY_FX_KEYS = [
@@ -987,6 +995,7 @@ describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
       ['QrGenerator', 'convertRate', ['{rate}']],
       ['QrGenerator', 'convertRemaining', ['{time}']],
       ['QrGenerator', 'convertRevert', ['{symbol}']],
+      ['QrGenerator', 'fxWarnDetail', ['{lkg}', '{current}']],
       ['PaymentForm', 'fxAnchorLine', ['{refAmt}', '{anchorSymbol}', '{amount}', '{symbol}']],
       ['PaymentForm', 'fxRateLine', ['{rate}']],
       ['PaymentForm', 'fxRemaining', ['{time}']],
@@ -998,6 +1007,28 @@ describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
       }
     }
   });
+});
+
+describe('i18n: F7 off-origin callback 開示 keys (ja/en parity)', () => {
+  // CheckoutForm / TipForm の payer 向け開示 (webhook/redirect が第三者ホストのとき)。
+  // Scan interstitial は上の Scan describe で fence 済 (callbackWarn*)。
+  for (const loc of [
+    { name: 'ja', m: ja },
+    { name: 'en', m: en },
+  ] as const) {
+    for (const ns of ['CheckoutForm', 'TipForm'] as const) {
+      it(`${loc.name}.${ns}.offOriginCallbackNote は非空文字列 + {host} を含む`, () => {
+        const v = (loc.m[ns] as Record<string, unknown>).offOriginCallbackNote;
+        expect(typeof v).toBe('string');
+        expect(v).not.toBe('');
+        expect(v as string).toContain('{host}');
+      });
+    }
+    it(`${loc.name}.Scan.callbackWarnBody は {host} を含む`, () => {
+      const v = (loc.m.Scan as Record<string, unknown>).callbackWarnBody as string;
+      expect(v).toContain('{host}');
+    });
+  }
 });
 
 describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () => {

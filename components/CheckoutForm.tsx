@@ -73,8 +73,10 @@ import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   calcCheckoutTotal,
+  offOriginCallbackHosts,
   type CheckoutParams,
 } from '@/lib/url';
+import { useOrigin } from '@/hooks/useOrigin';
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 import {
@@ -105,6 +107,22 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
+
+  // F7: webhook / success_url / cancel_url のうち、現在の origin と host が異なる第三者ホスト。
+  // これらは決済者データの POST 先 / 決済後の遷移先になり得るため、支払い前に payer へ明示開示する
+  // (block はしない — 正当な off-origin マーチャント webhook / redirect が存在する)。origin 未確定
+  // (SSR / hydrate 前) は空配列 = 開示なし (false-positive 防止)。
+  const origin = useOrigin();
+  const offOriginHosts = useMemo(
+    () =>
+      origin
+        ? offOriginCallbackHosts(
+            [params.webhook, params.successUrl, params.cancelUrl],
+            new URL(origin).host,
+          )
+        : [],
+    [origin, params.webhook, params.successUrl, params.cancelUrl],
+  );
 
   // 決済経路の単一情報源 (Phase 1.1)。散在していた isStandard / useRelay / useRecover / isCircle を
   // この 1 値から導出する。引数は現行どおりに算出した解決済み値で、判定の優先順位・短絡は
@@ -1021,6 +1039,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           </p>
         )}
       </section>
+
+      {/* F7: off-origin コールバック開示 (支払い前・payer 向け)。webhook/success_url/cancel_url が
+          第三者ホストを指すとき、決済後に通知/遷移する先を明示する (情報提供のみ・決済は妨げない)。 */}
+      {!completed && offOriginHosts.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+          <p>{t('offOriginCallbackNote', { host: offOriginHosts.join('、') })}</p>
+        </div>
+      )}
 
       {saFallback && (
         <SmartAccountFallbackBanner

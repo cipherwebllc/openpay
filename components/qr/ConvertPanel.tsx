@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { formatRemaining } from '@/lib/fx';
-import type { ConvertState } from '@/hooks/useFxConvert';
+import type { ConvertState, FxRateWarning } from '@/hooks/useFxConvert';
 
 export function ConvertPanel({
   canShowConvert,
@@ -18,6 +18,8 @@ export function ConvertPanel({
   onApply,
   onRecalc,
   onRevert,
+  fxWarning,
+  onAcknowledgeFxWarning,
 }: {
   canShowConvert: boolean;
   rateOk: boolean;
@@ -32,10 +34,34 @@ export function ConvertPanel({
   onApply: () => void;
   onRecalc: () => void;
   onRevert: () => void;
+  fxWarning: FxRateWarning | null;
+  onAcknowledgeFxWarning: () => void;
 }) {
   const t = useTranslations('QrGenerator');
   return (
     <>
+      {/* レート急変警告 (F8・defense-in-depth)。前回良好レート (LKG) から ±20% を超えて
+          跳ねたときだけ表示。生成は止めず、両レートを見せて確認を促す。 */}
+      {fxWarning && (
+        <div className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3">
+          <p className="text-sm font-semibold text-amber-800">
+            {t('fxWarnTitle')}
+          </p>
+          <p className="text-xs text-amber-700">
+            {t('fxWarnDetail', {
+              lkg: String(fxWarning.lkgRate),
+              current: String(fxWarning.newRate),
+            })}
+          </p>
+          <button
+            type="button"
+            onClick={onAcknowledgeFxWarning}
+            className="mt-1 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            {t('fxWarnAck')}
+          </button>
+        </div>
+      )}
       {/* 他トークン建てで受け取る (FX 換算・有効期限付き動的 QR)。
           例: JPYC 1000 入力 → USDC 建てで受け取る → 現レートで USDC 額を確定し
           3 分間有効な QR を生成。スワップ無し (顧客が払った USDC をそのまま受領)。 */}

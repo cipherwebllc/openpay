@@ -94,3 +94,28 @@ export function sanitizeText(value: string, max: number): string | undefined {
   if (cleaned.length === 0) return undefined;
   return truncateSafe(cleaned, max);
 }
+
+// checkout/tip の callback URL (webhook / success_url / cancel_url / thanksUrl) のうち、
+// 現在の origin と host が異なる「第三者ホスト」の重複なし一覧を返す。攻撃者が仕込んだ
+// off-origin コールバックは (a) 決済者データを第三者へ POST し (b) 決済後に第三者ページへ
+// 遷移し得るため、CheckoutForm/TipForm の payer 向け開示と /scan の interstitial 判定で
+// この 1 実装を共有する (SoT)。host 比較は new URL でパースし小文字化・大小無視。空/不正/
+// 同一 host は無視する。originHost は "example.com:3000" のような host (protocol/path なし)。
+export function offOriginCallbackHosts(
+  urls: ReadonlyArray<string | undefined | null>,
+  originHost: string,
+): string[] {
+  const normOrigin = originHost.trim().toLowerCase();
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of urls) {
+    if (!raw) continue;
+    if (!URL.canParse(raw)) continue;
+    const host = new URL(raw).host.toLowerCase();
+    if (host.length === 0 || host === normOrigin) continue;
+    if (seen.has(host)) continue;
+    seen.add(host);
+    result.push(host);
+  }
+  return result;
+}

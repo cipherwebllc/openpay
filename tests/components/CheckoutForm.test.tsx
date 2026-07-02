@@ -2243,3 +2243,50 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(call.merchantAmount).toBe(JPYC_TOTAL);
   });
 });
+
+describe('CheckoutForm — F7 off-origin callback 開示', () => {
+  it('第三者 host の webhook/success_url → 開示ノートに host を表示', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+          successUrl: 'https://thanks.evil.test/done',
+        }}
+      />,
+    );
+    const note = screen.getByText(/に通知・遷移します/);
+    expect(note).toBeInTheDocument();
+    expect(note.textContent).toContain('shop.example.com');
+    expect(note.textContent).toContain('thanks.evil.test');
+  });
+
+  it('callback が無ければ開示ノートは出さない', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(<CheckoutForm params={USDC_PARAMS} />);
+    expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+  });
+
+  it('同一 origin の callback のみ → 開示ノートは出さない', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: `${window.location.origin}/api/order/notify`,
+        }}
+      />,
+    );
+    expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+  });
+});

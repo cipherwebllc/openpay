@@ -857,3 +857,63 @@ describe('parseScannedUrl: /order route', () => {
     ).toBe('unknown');
   });
 });
+
+describe('parseScannedUrl: F7 off-origin callback 分類', () => {
+  const items = encodeURIComponent('Coffee') + ':2:5.00';
+
+  it('checkout: callback なし → offOriginHosts 空 (即遷移対象)', () => {
+    const r = parseScannedUrl(
+      `${ORIGIN}/checkout?to=${TO}&token=usdc&items=${items}`,
+      ORIGIN,
+      'ja',
+    );
+    expect(r.kind).toBe('checkout');
+    if (r.kind !== 'checkout') throw new Error();
+    expect(r.offOriginHosts).toEqual([]);
+  });
+
+  it('checkout: 同 origin webhook → offOriginHosts 空', () => {
+    const wh = encodeURIComponent(`${ORIGIN}/api/order/notify`);
+    const r = parseScannedUrl(
+      `${ORIGIN}/checkout?to=${TO}&token=usdc&items=${items}&webhook=${wh}`,
+      ORIGIN,
+      'ja',
+    );
+    if (r.kind !== 'checkout') throw new Error();
+    expect(r.offOriginHosts).toEqual([]);
+  });
+
+  it('checkout: 第三者 webhook + success_url → interstitial 対象 (host を列挙)', () => {
+    const wh = encodeURIComponent('https://shop.example.com/hook');
+    const su = encodeURIComponent('https://thanks.evil.test/done');
+    const r = parseScannedUrl(
+      `${ORIGIN}/checkout?to=${TO}&token=usdc&items=${items}&webhook=${wh}&success_url=${su}`,
+      ORIGIN,
+      'ja',
+    );
+    if (r.kind !== 'checkout') throw new Error();
+    expect(r.offOriginHosts).toEqual(['shop.example.com', 'thanks.evil.test']);
+  });
+
+  it('tip: 第三者 thanksUrl → interstitial 対象', () => {
+    const tu = encodeURIComponent('https://discord.gg/xyz');
+    const r = parseScannedUrl(
+      `${ORIGIN}/tip/${TO}?token=jpyc&thanksUrl=${tu}`,
+      ORIGIN,
+      'ja',
+    );
+    expect(r.kind).toBe('tip');
+    if (r.kind !== 'tip') throw new Error();
+    expect(r.offOriginHosts).toEqual(['discord.gg']);
+  });
+
+  it('tip: callback なし → offOriginHosts 空', () => {
+    const r = parseScannedUrl(
+      `${ORIGIN}/tip/${TO}?token=jpyc`,
+      ORIGIN,
+      'ja',
+    );
+    if (r.kind !== 'tip') throw new Error();
+    expect(r.offOriginHosts).toEqual([]);
+  });
+});
