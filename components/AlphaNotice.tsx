@@ -53,7 +53,10 @@ export function AlphaNotice() {
           <span className="mr-1.5 inline-block rounded bg-amber-200/70 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wider text-amber-900">
             {t('badge')}
           </span>
-          {t('body')}{' '}
+          {/* モバイルは 1 行に収まる簡潔版 (取消不可の要点を保持)、sm+ は従来の全文。
+              全文開示は moreLink → /disclaimer に不変で残る。 */}
+          <span className="sm:hidden">{t('bodyShort')}</span>
+          <span className="hidden sm:inline">{t('body')}</span>{' '}
           <Link
             href="/disclaimer"
             prefetch={false}

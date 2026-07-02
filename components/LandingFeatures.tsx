@@ -73,7 +73,7 @@ export async function LandingFeatures() {
           return (
             <li
               key={titleKey}
-              className={`flex flex-col gap-2 rounded-2xl border ${c.border} ${c.bg} p-5 shadow-card`}
+              className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
             >
               <Icon className={`h-6 w-6 ${c.ink}`} aria-hidden />
               <h3 className="text-base font-semibold text-slate-900">

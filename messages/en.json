@@ -1018,6 +1018,7 @@
     "label": "Service status",
     "badge": "Beta",
     "body": "This service is in beta. If you use it for real transactions, you must start with small test amounts. Blockchain transactions are, in principle, irreversible.",
+    "bodyShort": "Beta — blockchain transfers are, in principle, irreversible.",
     "moreLink": "Details"
   },
   "Footer": {
