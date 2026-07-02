@@ -4,8 +4,19 @@
 // import 方向: shared は外部依存 (viem / chains / tokens / sanitize) のみに依存し、
 // pay/tip/checkout からは決して import しない (循環回避)。
 import { isValidChainSlug, type ChainSlug } from '../chains';
+import type { GasMode, PayMode } from '../fee';
 import { stripControlChars, truncateSafe } from '../sanitize';
-import { DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '../tokens';
+import {
+  parseTaxCategoryParam,
+  parseTaxRateParam,
+  type TaxCategory,
+} from '../tax';
+import {
+  DEFAULT_CHAIN_FOR_SYMBOL,
+  deploymentForSlug,
+  isGaslessSupported,
+  type TokenSymbol,
+} from '../tokens';
 
 /** URLSearchParams / Next の ReadonlyURLSearchParams どちらも構造的に受け取れる */
 export type SearchParamsLike = { get(name: string): string | null };
@@ -41,6 +52,39 @@ export function resolveChainSlugParam(
     error:
       'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
   };
+}
+
+// gas パラメタ解決: merchant のみ明示認識、それ以外 (customer / 不明値 / 未指定 / 旧 fee=)
+// は customer 扱い。pay/checkout 双方の parser で同一ロジックなので集約する。
+export function parseGasParam(gasRaw: string | null): GasMode {
+  return gasRaw === 'merchant' ? 'merchant' : 'customer';
+}
+
+// mode の legacy alias 解決: 旧名 "direct" は "standard" に正規化。standard/direct 以外
+// (未指定 / 不明値含む) は既定 gasless。pay/checkout で同一の最終 ternary を共有する。
+// ⚠️ pay.ts は本 ternary の前段で不明 mode を error で弾く別ゲートを持つ (checkout は持たない)。
+// その検証差はここでは吸収しない — 呼出側が各々処理する。
+export function resolveModeAlias(modeRaw: string | null): PayMode {
+  return modeRaw === 'standard' || modeRaw === 'direct' ? 'standard' : 'gasless';
+}
+
+// (token, chain) が gasless mode を提供できない (Pimlico paymaster 未対応) 場合の
+// エラーメッセージを返す (gasless 要求かつ非対応のときだけ message、それ以外は null)。
+// standard mode 要求は常に通す。pay/checkout で条件・文言が同一。
+// ⚠️ 呼出側の返却シェイプは異なる (pay は errorKind:'invalid' を持つ) ため、本 helper は
+// string|null のみ返し、各呼出側が自分の返却形へ包む。
+export function gaslessSupportError(
+  token: TokenSymbol,
+  chainSlug: ChainSlug,
+  mode: PayMode,
+): string | null {
+  if (
+    mode === 'gasless' &&
+    !isGaslessSupported(deploymentForSlug(token, chainSlug))
+  ) {
+    return `${token} on ${chainSlug} は gasless mode 非対応です (mode=standard を指定してください)`;
+  }
+  return null;
 }
 
 export const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
@@ -93,6 +137,40 @@ export function sanitizeText(value: string, max: number): string | undefined {
   const cleaned = stripControlChars(value);
   if (cleaned.length === 0) return undefined;
   return truncateSafe(cleaned, max);
+}
+
+// 記帳補助メタ (税率 / 税区分 / レシート番号) を URL に追記する。pay/checkout の build で同一。
+// taxRate は 0 (非課税/対象外) もあるため undefined 判定。receiptNo は sanitize + cap。
+export function appendTaxReceiptParams(
+  sp: URLSearchParams,
+  meta: { taxRate?: number; taxCategory?: TaxCategory; receiptNo?: string },
+): void {
+  if (meta.taxRate !== undefined) {
+    sp.set('tax', String(meta.taxRate));
+  }
+  if (meta.taxCategory) {
+    sp.set('taxcat', meta.taxCategory);
+  }
+  if (meta.receiptNo) {
+    const v = sanitizeText(meta.receiptNo, PAY_RECEIPT_NO_MAX);
+    if (v) sp.set('rcpt', v);
+  }
+}
+
+// 記帳補助メタ (税率 / 税区分 / レシート番号) を URL から parse する。pay/checkout の parser で同一。
+export function parseTaxReceiptParams(searchParams: SearchParamsLike): {
+  taxRate: number | undefined;
+  taxCategory: TaxCategory | undefined;
+  receiptNo: string | undefined;
+} {
+  const rcptRaw = searchParams.get('rcpt');
+  const taxRaw = searchParams.get('tax');
+  const taxcatRaw = searchParams.get('taxcat');
+  return {
+    taxRate: parseTaxRateParam(taxRaw),
+    taxCategory: parseTaxCategoryParam(taxcatRaw),
+    receiptNo: rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined,
+  };
 }
 
 // checkout/tip の callback URL (webhook / success_url / cancel_url / thanksUrl) のうち、
