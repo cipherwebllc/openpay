@@ -14,6 +14,7 @@ export const ORDER_LIST_MAX = 200; // 1 merchant あたり保持上限 (kvLtrim)
 // minValue はあくまで「正の着金があったか」のフロア (申告額には依存しない・advisory 原則)。
 export const ORDER_DUST_FLOOR_WEI = 1_000_000_000_000_000_000n;
 export const ORDER_ITEMS_MAX = 20; // 申告明細の件数上限
+export const ORDER_ITEM_QTY_MAX = 999;
 export const ORDER_ITEM_NAME_MAX = 80;
 export const ORDER_TABLE_MAX = 64; // テーブル番号ラベル (checkout description 由来) の上限
 export const ORDER_ID_MAX = 64;
@@ -51,6 +52,9 @@ export type StoredOrder = {
   ready?: boolean;
   // ready=true にした時刻 (ms・表示用 advisory)。「HH:mm 準備完了」表示に使う。
   readyAt?: number;
+  // 金額突合の advisory フラグ。true のときだけ保存し、false/欠落は同一扱い。
+  amountMismatch?: boolean;
+  amountUnchecked?: boolean;
 };
 
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
@@ -98,6 +102,8 @@ export function parseOrderStatusPointer(
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
 const POSITIVE_DECIMAL = /^\d+(\.\d+)?$/;
 const DECIMAL_INT = /^\d+$/;
+const ORDER_ITEM_PRICE_MAX = 80;
+const ORDER_ITEM_DECIMALS_MAX = 36;
 
 export function isTxHashLike(v: unknown): v is string {
   return typeof v === 'string' && HEX64.test(v);
@@ -120,7 +126,10 @@ export function sanitizeOrderItems(
     const name = typeof o.name === 'string' ? o.name.trim().slice(0, ORDER_ITEM_NAME_MAX) : '';
     if (!name) continue;
     const qtyNum = typeof o.qty === 'number' ? o.qty : Number(o.qty);
-    const qty = Number.isFinite(qtyNum) && qtyNum > 0 ? Math.floor(qtyNum) : 0;
+    const qty =
+      Number.isFinite(qtyNum) && qtyNum > 0
+        ? Math.min(Math.floor(qtyNum), ORDER_ITEM_QTY_MAX)
+        : 0;
     if (qty <= 0) continue;
     const price =
       typeof o.price === 'string' && POSITIVE_DECIMAL.test(o.price) ? o.price : '';
@@ -134,6 +143,66 @@ export function sanitizeOrderItems(
     out.push(item);
   }
   return out;
+}
+
+/** 申告明細の合計を token minor units に厳密変換する。変換不能なら null (= 突合不可)。 */
+export function declaredItemsTotalMinor(
+  items: StoredOrderItem[],
+  decimals: number,
+): bigint | null {
+  if (
+    !Number.isInteger(decimals) ||
+    decimals < 0 ||
+    decimals > ORDER_ITEM_DECIMALS_MAX
+  ) {
+    return null;
+  }
+
+  let total = 0n;
+  for (const item of items) {
+    if (
+      !Number.isInteger(item.qty) ||
+      item.qty < 1 ||
+      item.qty > ORDER_ITEM_QTY_MAX
+    ) {
+      return null;
+    }
+    if (typeof item.price !== 'string') return null;
+    const price = item.price;
+    if (
+      price.length === 0 ||
+      price.length > ORDER_ITEM_PRICE_MAX ||
+      !POSITIVE_DECIMAL.test(price)
+    ) {
+      return null;
+    }
+
+    const [integerPart, fractionPart = ''] = price.split('.');
+    if (fractionPart.length > decimals) return null;
+    const paddedFraction = fractionPart.padEnd(decimals, '0');
+    const minorText = paddedFraction.length > 0
+      ? `${integerPart}${paddedFraction}`
+      : integerPart;
+    total += BigInt(minorText) * BigInt(item.qty);
+  }
+  return total;
+}
+
+export function evaluateOrderAmount(
+  declaredMinor: bigint | null,
+  receiptMinor: bigint,
+  floorMinor: bigint,
+  bpsCap: number,
+): { mismatch: boolean; unchecked: boolean } {
+  if (declaredMinor === null) return { mismatch: false, unchecked: true };
+
+  const safeFloor = floorMinor > 0n ? floorMinor : 0n;
+  const safeBps = Number.isFinite(bpsCap) && bpsCap > 0 ? Math.floor(bpsCap) : 0;
+  const bpsAllowance = (declaredMinor * BigInt(safeBps)) / 10000n;
+  const allowance = safeFloor > bpsAllowance ? safeFloor : bpsAllowance;
+  const expectedMinNetRaw = declaredMinor - allowance;
+  const expectedMinNet = expectedMinNetRaw > 0n ? expectedMinNetRaw : 0n;
+  return { mismatch: receiptMinor < expectedMinNet, unchecked: false };
 }
 
 /** テーブル番号ラベル (checkout description) のサニタイズ。空/非文字列は null。 */
@@ -186,6 +255,8 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
       order.readyAt = o.readyAt;
     }
   }
+  if (o.amountMismatch === true) order.amountMismatch = true;
+  if (o.amountUnchecked === true) order.amountUnchecked = true;
   return order;
 }
 

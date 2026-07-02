@@ -192,6 +192,7 @@ describe('POST /api/order/notify', () => {
   });
 
   it('正常: 検証成功 → 実着金額を権威保存 (kvLpush)・冪等鍵は txHash のみ', async () => {
+    hold.verify = { ok: true, value: 1000n * JPYC };
     const res = await POST(req(goodBody()));
     expect(res.status).toBe(200);
     // 冪等クレームは txHash のみ (merchant/items を含めない)。
@@ -205,9 +206,23 @@ describe('POST /api/order/notify', () => {
     const [listKey, raw] = lpushSpy.mock.calls[0] as [string, string];
     expect(listKey).toBe(`order:list:${MERCHANT.toLowerCase()}`);
     const stored = JSON.parse(raw);
-    expect(stored.amount).toBe(JPYC.toString()); // 実着金 (権威)
+    expect(stored.amount).toBe((1000n * JPYC).toString()); // 実着金 (権威)
     expect(stored.table).toBe('テーブル 5');
     expect(stored.items).toEqual([{ name: 'ブレンド', qty: 2, price: '500' }]);
+    expect('amountMismatch' in stored).toBe(false);
+    expect('amountUnchecked' in stored).toBe(false);
+  });
+
+  it('金額不一致 advisory: dust receipt でも拒否せず ok:true で保存し amountMismatch を立てる', async () => {
+    hold.verify = { ok: true, value: JPYC }; // declared=1000 JPYC, receipt=1 JPYC
+    const res = await POST(req(goodBody()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, orderId: 'oid-1' });
+    expect(lpushSpy).toHaveBeenCalledTimes(1);
+    const stored = JSON.parse(lpushSpy.mock.calls[0][1] as string);
+    expect(stored.amount).toBe(JPYC.toString());
+    expect(stored.amountMismatch).toBe(true);
+    expect('amountUnchecked' in stored).toBe(false);
   });
 
   it('pickupAt (preorder・near-future ms) を保存・窓外/不正は除外 (Phase 4)', async () => {

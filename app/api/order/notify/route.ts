@@ -19,6 +19,7 @@ import {
   isKvConfigured,
 } from '@/lib/kv';
 import { checkRateLimit } from '@/lib/relay/relayGuards';
+import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { resolveHandle } from '@/lib/handleStore';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
@@ -29,6 +30,8 @@ import {
   serializeOrder,
   sanitizeOrderItems,
   sanitizeTable,
+  declaredItemsTotalMinor,
+  evaluateOrderAmount,
   isTxHashLike,
   ORDER_DUST_FLOOR_WEI,
   ORDER_LIST_MAX,
@@ -45,6 +48,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
 
 const USED_LOCK_MARKER = 'pending';
+const AMOUNT_ADVISORY_BPS_CAP = 300;
 
 function fail(error: string, status: number) {
   return NextResponse.json({ ok: false, error }, { status });
@@ -133,10 +137,18 @@ export async function POST(req: Request): Promise<NextResponse> {
       typeof o.orderId === 'string' && o.orderId.length > 0
         ? o.orderId.slice(0, ORDER_ID_MAX)
         : txHash; // orderId 無し時は txHash で代替 (一意)
+    const items = sanitizeOrderItems(o.items);
+    const declaredMinor = declaredItemsTotalMinor(items, deployment.decimals);
+    const amountAdvisory = evaluateOrderAmount(
+      declaredMinor,
+      result.value,
+      relayGasFeeValue(chainId),
+      AMOUNT_ADVISORY_BPS_CAP,
+    );
 
     const order: StoredOrder = {
       orderId,
-      items: sanitizeOrderItems(o.items),
+      items,
       table: sanitizeTable(o.description), // checkout description = テーブル番号ラベル (店内のみ)
       amount: result.value.toString(), // **実着金 (権威)** — recover は total−fee, free は total
       txHash,
@@ -145,6 +157,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       ts: Date.now(),
       fulfilled: false,
     };
+    if (amountAdvisory.mismatch) order.amountMismatch = true;
+    if (amountAdvisory.unchecked) order.amountUnchecked = true;
     // 受取予定時刻 (任意・preorder・顧客申告=advisory 表示用・items/table と同じ寛容さ)。正の有限数かつ
     // **near-future 窓内** (now-1h 〜 now+14d) のみ保存。スロット/lastOrder との厳密照合はしない (advisory)
     // が、年 9999 等の極端値で受注ボードの表示を汚さないよう sane 窓外は drop する (clock skew に -1h)。

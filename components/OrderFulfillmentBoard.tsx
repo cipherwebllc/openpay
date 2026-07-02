@@ -21,7 +21,7 @@ import { tokyoHHMM } from '@/lib/shopTime';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
-import type { StoredOrder } from '@/lib/orderRelay';
+import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
 
 const JPYC_DECIMALS = 18;
 // 経過時間バッジの色しきい値 (分)。受信からの経過でホール/厨房が遅れを察知する。
@@ -235,6 +235,20 @@ export function OrderFulfillmentBoard({
     // ready 後 (active) は「通知済み・受取待ち」バッジ + 既存「受け渡し済」へ進む 2 段階。
     const hallReady = mode === 'hall' && env.enableOrderPickup && o.ready === true;
     const showMarkReady = mode === 'hall' && env.enableOrderPickup && !inDone && !o.ready;
+    const amountWarning = o.amountMismatch
+      ? t('amountMismatchBadge')
+      : o.amountUnchecked
+        ? t('amountUncheckedBadge')
+        : null;
+    const amountWarningClass = o.amountMismatch
+      ? 'bg-red-600 text-white'
+      : 'border border-amber-300 bg-amber-50 text-amber-800';
+    const formattedAmount = formatUnits(BigInt(o.amount), JPYC_DECIMALS);
+    const declaredAmount = o.amountMismatch
+      ? declaredItemsTotalMinor(o.items, JPYC_DECIMALS)
+      : null;
+    const formattedDeclaredAmount =
+      declaredAmount !== null ? formatUnits(declaredAmount, JPYC_DECIMALS) : null;
     return (
     <li
       key={o.txHash}
@@ -298,6 +312,11 @@ export function OrderFulfillmentBoard({
           {isNew ? (
             <span className="rounded bg-amber-400 px-1.5 py-0.5 text-xs font-bold text-white">
               {t('newBadge')}
+            </span>
+          ) : null}
+          {amountWarning ? (
+            <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${amountWarningClass}`}>
+              {amountWarning}
             </span>
           ) : null}
           {/* 受信からの経過時間。10分で黄・20分で赤 (遅れを察知)。折りたたみ側は出さない。 */}
@@ -373,8 +392,26 @@ export function OrderFulfillmentBoard({
       </ul>
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="text-xs text-slate-400">
-          {formatUnits(BigInt(o.amount), JPYC_DECIMALS)} JPYC
+        <span
+          className={
+            amountWarning
+              ? 'rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-right'
+              : 'text-xs text-slate-400'
+          }
+        >
+          {amountWarning ? (
+            <span className="block text-[10px] font-semibold text-slate-500">
+              {t('onChainAmount')}
+            </span>
+          ) : null}
+          <span className={amountWarning ? 'text-sm font-bold text-slate-900' : ''}>
+            {formattedAmount} JPYC
+          </span>
+          {formattedDeclaredAmount !== null ? (
+            <span className="block text-[10px] font-semibold text-slate-500">
+              {t('declaredAmount')}: {formattedDeclaredAmount} JPYC
+            </span>
+          ) : null}
         </span>
         {/* お渡し準備完了通知 (ホール・flag ON・ready 前): 顧客に「準備完了」を通知する 1 段目。 */}
         {showMarkReady ? (
