@@ -20,6 +20,7 @@ import {
   CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
   CCTP_V2_TOKEN_MESSENGER_ADDRESS,
 } from '@/lib/crossChain/cctp';
+import { __resetContractDeployedCacheForTest } from '@/lib/crossChain/deploycheck';
 
 // execute.ts は wagmi 非依存で walletClient / publicClient を引数で受ける純粋
 // 関数。本テストは vitest mock objects を渡して call sequence + 戻り値を検証。
@@ -37,6 +38,7 @@ const DEST_TOKEN = getAddress('0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582');
 let mockChainId = 0;
 beforeEach(() => {
   mockChainId = 0;
+  __resetContractDeployedCacheForTest();
 });
 
 // switchChainAsync の mock。呼ばれた chainId を mockChainId に反映し、後続の
@@ -78,6 +80,8 @@ function makePublicClient(opts: { blockNumber?: bigint } = {}) {
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
     // resume の landed 検証 (txAlreadySucceeded) 用。default は成功扱い。
     getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    // assertContractDeployed (CCTP/Gateway 存在確認) 用。default は deploy 済扱い。
+    getCode: vi.fn(async () => '0x60016000' as Hex),
   };
 }
 
@@ -489,6 +493,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         throw new Error('rpc connection refused');
       }),
       waitForTransactionReceipt: vi.fn(),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const destPublic = makePublicClient();
     const mockFetch = vi.fn();
@@ -606,6 +611,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
       waitForTransactionReceipt: vi.fn(async () => {
         throw new Error('Transaction reverted: insufficient gas');
       }),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
       async () =>
@@ -1504,6 +1510,7 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
     const destPublic = {
       getBlockNumber: vi.fn(),
       waitForTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
       async () =>
@@ -1546,6 +1553,7 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
         call += 1;
         return { status: call === 1 ? 'success' : 'reverted' };
       }),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const destPublic = makePublicClient();
     const mockFetch = vi.fn();
@@ -1591,6 +1599,7 @@ describe('lib/crossChain/execute: burn hash を receipt 待ち前に永続化 (�
           return { status: 'success' };
         },
       ),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const destPublic = makePublicClient();
     const steps: Array<Record<string, unknown>> = [];
@@ -1638,6 +1647,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
       waitForTransactionReceipt: vi.fn(async () => {
         throw new Error('rpc lost during mint');
       }),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
       async () =>
@@ -1684,6 +1694,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
       // 前回 broadcast した mint は revert 済 → landed=false → 再 mint されるべき。
       getTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
       waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
       async () =>
@@ -1812,6 +1823,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
         throw notFoundError();
       }),
       waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
       async () =>

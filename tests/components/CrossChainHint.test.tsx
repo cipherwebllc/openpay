@@ -148,6 +148,8 @@ function makePublicClient() {
   return {
     getBlockNumber: vi.fn(async () => 1000n),
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    // assertContractDeployed (CCTP/Gateway 存在確認) 用。deploy 済扱い。
+    getCode: vi.fn(async () => '0x60016000'),
   };
 }
 

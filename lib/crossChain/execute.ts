@@ -33,7 +33,8 @@ import {
   type BuildDepositForBurnOverrides,
   type PollIrisAttestationOptions,
 } from './cctp';
-import { GATEWAY_MINTER_ADDRESS } from './config';
+import { GATEWAY_MINTER_ADDRESS, GATEWAY_WALLET_ADDRESS } from './config';
+import { assertContractDeployed } from './deploycheck';
 import {
   buildBurnIntent,
   encodeGatewayMintCalldata,
@@ -316,6 +317,13 @@ export async function executeGatewayTransfer(
       args.switchChainAsync,
       args.sourceChainId,
     );
+    // burn intent は GATEWAY_WALLET に預けた資金に対して発行される。source chain 側の
+    // Gateway wallet が実 deploy 済かを署名前に確認する (存在確認のみ・codehash pin しない)。
+    await assertContractDeployed(
+      args.sourcePublicClient,
+      GATEWAY_WALLET_ADDRESS,
+      args.sourceChainId,
+    );
     const currentBlockHeight = await args.sourcePublicClient.getBlockNumber();
 
     // 1 件分の burn intent を sign + attest する closure。phase で progress の
@@ -394,6 +402,12 @@ export async function executeGatewayTransfer(
   await ensureWalletChain(
     args.walletClient,
     args.switchChainAsync,
+    args.destChainId,
+  );
+  // mint 送信先 (dest chain の Gateway minter) が実 deploy 済かを送信前に確認する。
+  await assertContractDeployed(
+    args.destPublicClient,
+    GATEWAY_MINTER_ADDRESS,
     args.destChainId,
   );
 
@@ -546,6 +560,14 @@ export async function executeCctpTransfer(
     await ensureWalletChain(
       args.walletClient,
       args.switchChainAsync,
+      args.sourceChainId,
+    );
+
+    // 顧客が実 USDC を approve する送信先 (source chain の CCTP TokenMessenger) が
+    // 実 deploy 済かを approve/burn 前に確認する (存在確認のみ・codehash pin しない)。
+    await assertContractDeployed(
+      args.sourcePublicClient,
+      CCTP_V2_TOKEN_MESSENGER_ADDRESS,
       args.sourceChainId,
     );
 
@@ -715,6 +737,13 @@ export async function executeCctpTransfer(
     await ensureWalletChain(
       args.walletClient,
       args.switchChainAsync,
+      args.destChainId,
+    );
+    // receiveMessage (mint) 送信先 (dest chain の CCTP MessageTransmitter) が実 deploy
+    // 済かを送信前に確認する。
+    await assertContractDeployed(
+      args.destPublicClient,
+      CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
       args.destChainId,
     );
 
