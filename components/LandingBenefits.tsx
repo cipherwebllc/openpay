@@ -115,7 +115,7 @@ export async function LandingBenefits() {
           {t('benefitsWhyLead')}
         </p>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-card">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
             <h4 className="text-sm font-semibold text-slate-900 sm:text-base">
               {t('benefitsWhyPoint1Title')}
             </h4>
@@ -123,7 +123,7 @@ export async function LandingBenefits() {
               {t('benefitsWhyPoint1Body')}
             </p>
           </div>
-          <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-card">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
             <h4 className="text-sm font-semibold text-slate-900 sm:text-base">
               {t('benefitsWhyPoint2Title')}
             </h4>
