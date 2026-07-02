@@ -210,11 +210,6 @@ export async function recoverViaForwarder(
   const { jpyc, forwarder, nonce } = verified;
   const { chainId, params, signature } = input;
 
-  // rate-limit (副作用: KV sliding-window)。検証通過後・submit 前に置く。
-  if (!(await deps.checkRateLimit(input.rateLimitKeys))) {
-    return rejected(429, 'rate_limited');
-  }
-
   // authorizationState 既使用 → pending (guaranteed-revert 回避 + 二重支払い防止)。
   // + 冪等性: 同一 authorization の重複 POST も pending (再 broadcast せず gas 浪費防止)。
   // nonce は両者共通 (forwarder commitment = EIP-3009 nonce)。
@@ -237,6 +232,13 @@ export async function recoverViaForwarder(
   const recordHash = async (txHash: Hex) => {
     if (idemClaimed) await deps.recordRelayHash?.(chainId, params.from, nonce, txHash);
   };
+
+  // rate-limit (副作用: KV sliding-window)。重複ガードの後に置くことで retry / double-click の
+  // 正当な重複 POST を pending で吸収し、rate-limit 枠を浪費しない。reject 時は claim を解放。
+  if (!(await deps.checkRateLimit(input.rateLimitKeys))) {
+    await releaseClaim();
+    return rejected(429, 'rate_limited');
+  }
 
   // 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
   // (replay/duplicate が予算枠を消費する DoS を防ぐ・Codex P1)。超過は submit せず reject。
