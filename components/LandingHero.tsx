@@ -19,21 +19,22 @@ export async function LandingHero() {
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -top-16 -z-10 mx-auto h-72 max-w-3xl bg-[radial-gradient(60%_60%_at_50%_0%,rgba(59,130,246,0.16),transparent_72%)]"
         />
-        <div className="mx-auto max-w-3xl pt-3 text-center sm:pt-8">
-          <p className="inline-flex items-center rounded-full border border-blue-200/70 bg-blue-50 px-3 py-1 text-xs font-semibold tracking-wide text-brand">
+        <div className="mx-auto max-w-3xl pt-4 text-center sm:pt-10">
+          <p className="inline-flex items-center gap-1.5 rounded-full border border-blue-200/70 bg-blue-50/90 px-3 py-1 text-xs font-semibold tracking-wide text-brand">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand" />
             {t('tagline')}
           </p>
-          <h2 className="mt-4 text-[2rem] font-bold leading-[1.08] tracking-tight text-slate-900 sm:text-5xl">
+          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.05] tracking-[-0.02em] text-slate-900 sm:text-[3.5rem]">
             {t('heroLeadline')}
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-slate-600 sm:text-base">
+          <p className="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-slate-500 sm:text-base">
             {t.rich('heroBody', {
               b: (chunks) => <strong className="font-bold text-slate-900">{chunks}</strong>,
             })}
           </p>
         </div>
 
-        <div className="mx-auto mt-7 max-w-3xl overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60 sm:mt-9">
+        <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60 sm:mt-11">
           <Image
             src="/landing/hero-qr-payment.avif"
             alt={t('heroVisualAlt')}
