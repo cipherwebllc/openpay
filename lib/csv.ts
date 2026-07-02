@@ -10,7 +10,7 @@
 export const CSV_BOM = '﻿';
 export const CSV_NEWLINE = '\r\n';
 
-const INJECTION_PREFIX = /^[=+\-@]/;
+const INJECTION_PREFIX = /^[=+\-@\t\r]/;
 
 export function escapeCsvCell(value: string): string {
   const defanged = INJECTION_PREFIX.test(value) ? `'${value}` : value;

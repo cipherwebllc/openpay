@@ -54,11 +54,21 @@ export function isAllowedSiweDomain(domain: string): boolean {
 /** KV セッション値の JSON 形。address は保存時に checksum 化済。 */
 export type SessionRecord = { address: Address };
 
-/** 暗号学的乱数の 64hex セッショントークン (Web Crypto・runtime 非依存)。 */
-export function newSessionToken(): string {
+/** 暗号学的乱数 32 bytes の 64hex (Web Crypto・runtime 非依存)。 */
+function randomHex32(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 暗号学的乱数の 64hex セッショントークン。 */
+export function newSessionToken(): string {
+  return randomHex32();
+}
+
+/** SIWE nonce 用の CSPRNG 64hex。EIP-4361 の英数字 8 文字以上を満たす。 */
+export function newSiweNonce(): string {
+  return randomHex32();
 }
 
 /** KV から読んだ生 JSON を SessionRecord に。壊れていれば null。 */
