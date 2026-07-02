@@ -58,10 +58,12 @@ vi.mock('next/headers', () => ({
 import { POST as syncPOST } from '@/app/api/freee/sync/route';
 import { GET as mappingGET, POST as mappingPOST } from '@/app/api/freee/mapping/route';
 import { GET as callbackGET } from '@/app/api/freee/callback/route';
+import { encryptStoredToken, type StoredToken } from '@/lib/freee';
 
 const MERCHANT = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const TOKEN = 'sess-token-abc';
 const FAR_FUTURE = 9_999_999_999_999;
+const ENC_KEY = '00'.repeat(32);
 
 function json(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -96,10 +98,10 @@ function seedSession() {
   h.cookieToken.value = TOKEN;
 }
 function seedFreeeConnected() {
-  h.store.set(
-    `freee:tok:${MERCHANT.toLowerCase()}`,
-    JSON.stringify({ access: 'AT', refresh: 'RT', expiresAt: FAR_FUTURE, companyId: 7 }),
-  );
+  seedFreeeToken({ access: 'AT', refresh: 'RT', expiresAt: FAR_FUTURE, companyId: 7 });
+}
+function seedFreeeToken(token: StoredToken) {
+  h.store.set(`freee:tok:${MERCHANT.toLowerCase()}`, encryptStoredToken(MERCHANT, token));
 }
 function seedMapping() {
   h.store.set(
@@ -167,6 +169,7 @@ beforeEach(() => {
   process.env.FREEE_CLIENT_ID = 'cid';
   process.env.FREEE_CLIENT_SECRET = 'sec';
   process.env.FREEE_REDIRECT_URI = 'http://localhost:3000/api/freee/callback';
+  process.env.FREEE_TOKEN_ENC_KEY = ENC_KEY;
   delete process.env.ALPHA_ENTITLEMENT_BYPASS; // bypass ON (entitled)
 });
 
@@ -174,6 +177,7 @@ afterAll(() => {
   delete process.env.FREEE_CLIENT_ID;
   delete process.env.FREEE_CLIENT_SECRET;
   delete process.env.FREEE_REDIRECT_URI;
+  delete process.env.FREEE_TOKEN_ENC_KEY;
 });
 
 describe('POST /api/freee/sync (実グルー: session→entitlement→token→runFreeeSync→createDeal)', () => {
@@ -219,6 +223,40 @@ describe('POST /api/freee/sync (実グルー: session→entitlement→token→ru
     expect(totalDealCalls).toBe(1);
   });
 
+  it('body.usdcJpy が sanity band 外 → undefined 扱いで USDC anchor 無しは rate-unavailable', async () => {
+    seedSession();
+    seedFreeeConnected();
+    seedMapping();
+    const fetchSpy = mockFreeeFetch();
+
+    const res = await syncPOST(
+      req('http://localhost/api/freee/sync', {
+        entries: [
+          income({
+            id: 'usdc-no-anchor',
+            asset: 'usdc',
+            merchantAmount: '6400000',
+            saleAmount: '6400000',
+            anchorAmount: null,
+            anchorSymbol: null,
+          }),
+        ],
+        usdcJpy: 1,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.rateUnavailable).toBe(1);
+    expect(j.items[0]).toMatchObject({
+      id: 'usdc-no-anchor',
+      status: 'rate-unavailable',
+    });
+    const dealCalls = fetchSpy.mock.calls.filter((c) =>
+      String(c[0]).includes('/deals'),
+    ).length;
+    expect(dealCalls).toBe(0);
+  });
+
   it('未連携 → 409 not_connected (entitlement は通過するが token 無し)', async () => {
     seedSession(); // session あり・freee 未連携
     const res = await syncPOST(req('http://localhost/api/freee/sync', { entries: [income()] }));
@@ -251,10 +289,7 @@ describe('POST /api/freee/sync (実グルー: session→entitlement→token→ru
   it('refresh token 失効 (token endpoint 4xx) → token 破棄 + 502 (再連携導線)', async () => {
     seedSession();
     // 期限切れ token → getValidAccessToken が refresh を試みる
-    h.store.set(
-      `freee:tok:${MERCHANT.toLowerCase()}`,
-      JSON.stringify({ access: 'old', refresh: 'expiredR', expiresAt: 1, companyId: 7 }),
-    );
+    seedFreeeToken({ access: 'old', refresh: 'expiredR', expiresAt: 1, companyId: 7 });
     seedMapping();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(json({ error: 'invalid_grant' }, 400));
     const res = await syncPOST(req('http://localhost/api/freee/sync', { entries: [income()] }));
@@ -266,10 +301,7 @@ describe('POST /api/freee/sync (実グルー: session→entitlement→token→ru
 
   it('refresh が transient 5xx → token は破棄しない (再試行可能に残す)', async () => {
     seedSession();
-    h.store.set(
-      `freee:tok:${MERCHANT.toLowerCase()}`,
-      JSON.stringify({ access: 'old', refresh: 'R', expiresAt: 1, companyId: 7 }),
-    );
+    seedFreeeToken({ access: 'old', refresh: 'R', expiresAt: 1, companyId: 7 });
     seedMapping();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(json({ error: 'server' }, 503));
     const res = await syncPOST(req('http://localhost/api/freee/sync', { entries: [income()] }));

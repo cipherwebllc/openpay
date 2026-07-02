@@ -75,6 +75,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       enabled: env.enableCsvPass,
       feeReceiverConfigured: env.feeReceiverConfigured,
       usedKeyPrefix: 'csvpass:used:',
+      tier: 'csvpass',
       priceWei: csvPassPriceWei, // 100 JPYC 以上 (超過は受理するが付与は 24時間 1 期間のみ)
       grantMs: CSV_PASS_GRANT_MS, // block timestamp + 24時間
       grant: (wallet, target) => grantCsvPass(wallet, target),

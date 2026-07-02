@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // KV 境界のみ mock。_store の冪等 claim 状態機械 / JSON 直列化を本物のまま実行する。
 const kv = vi.hoisted(() => ({
@@ -25,16 +25,29 @@ import {
   setState,
   consumeState,
 } from '@/app/api/freee/_store';
-import type { StoredToken } from '@/lib/freee';
+import { encryptStoredToken, type StoredToken } from '@/lib/freee';
 
 const KEY = 'freee:synced:0xabc:0xtx';
+const ENC_KEY = '00'.repeat(32);
+const OTHER_ENC_KEY = '11'.repeat(32);
+let oldEncKey: string | undefined;
 
 beforeEach(() => {
+  oldEncKey = process.env.FREEE_TOKEN_ENC_KEY;
+  process.env.FREEE_TOKEN_ENC_KEY = ENC_KEY;
   kv.get.mockReset();
   kv.set.mockReset();
   kv.del.mockReset();
   kv.getdel.mockReset();
   kv.setNxGet.mockReset();
+});
+
+afterEach(() => {
+  if (oldEncKey === undefined) {
+    delete process.env.FREEE_TOKEN_ENC_KEY;
+  } else {
+    process.env.FREEE_TOKEN_ENC_KEY = oldEncKey;
+  }
 });
 
 // REM-21: claimSync は kvSetNxGet (SET NX GET 原子化) を使う。
@@ -97,12 +110,15 @@ describe('token / state JSON 直列化 (wallet 名前空間)', () => {
     companyId: 7,
   };
 
-  it('setToken/getToken: wallet 小文字キーで round-trip', async () => {
+  it('setToken/getToken: wallet 小文字キーで encrypted envelope round-trip', async () => {
     kv.set.mockResolvedValue({ ok: true, value: 'OK' });
     await setToken('0xABCDEF', TOKEN);
-    expect(kv.set).toHaveBeenCalledWith('freee:tok:0xabcdef', JSON.stringify(TOKEN));
+    expect(kv.set).toHaveBeenCalledWith('freee:tok:0xabcdef', expect.any(String));
+    const saved = kv.set.mock.calls[0][1] as string;
+    expect(saved).not.toBe(JSON.stringify(TOKEN));
+    expect(JSON.parse(saved)).toMatchObject({ v: 1, alg: 'A256GCM' });
 
-    kv.get.mockResolvedValue({ ok: true, value: JSON.stringify(TOKEN) });
+    kv.get.mockResolvedValue({ ok: true, value: saved });
     expect(await getToken('0xABCDEF')).toEqual(TOKEN);
     expect(kv.get).toHaveBeenCalledWith('freee:tok:0xabcdef');
   });
@@ -112,11 +128,30 @@ describe('token / state JSON 直列化 (wallet 名前空間)', () => {
     await expect(setToken('0xabc', TOKEN)).rejects.toThrow('freee_token_persist_failed');
   });
 
-  it('getToken: 未存在 → null・壊れた JSON → null', async () => {
+  it('getToken: 未存在 → null・壊れた/legacy JSON → null and delete', async () => {
     kv.get.mockResolvedValue({ ok: true, value: null });
     expect(await getToken('0xabc')).toBeNull();
     kv.get.mockResolvedValue({ ok: true, value: '{not json' });
     expect(await getToken('0xabc')).toBeNull();
+    kv.get.mockResolvedValue({ ok: true, value: JSON.stringify(TOKEN) });
+    expect(await getToken('0xabc')).toBeNull();
+    expect(kv.del).toHaveBeenCalledWith('freee:tok:0xabc');
+  });
+
+  it('getToken: tampered ct/tag → decrypt fails → null and delete', async () => {
+    const envelope = JSON.parse(encryptStoredToken('0xabc', TOKEN)) as { ct: string };
+    envelope.ct = Buffer.from('tampered').toString('base64');
+    kv.get.mockResolvedValue({ ok: true, value: JSON.stringify(envelope) });
+    expect(await getToken('0xabc')).toBeNull();
+    expect(kv.del).toHaveBeenCalledWith('freee:tok:0xabc');
+  });
+
+  it('getToken: wrong encryption key → null and delete', async () => {
+    const saved = encryptStoredToken('0xabc', TOKEN);
+    process.env.FREEE_TOKEN_ENC_KEY = OTHER_ENC_KEY;
+    kv.get.mockResolvedValue({ ok: true, value: saved });
+    expect(await getToken('0xabc')).toBeNull();
+    expect(kv.del).toHaveBeenCalledWith('freee:tok:0xabc');
   });
 
   it('setState: NX 成功で true・衝突で false', async () => {

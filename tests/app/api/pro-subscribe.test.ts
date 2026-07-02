@@ -109,6 +109,7 @@ vi.mock('@/lib/proRevenue', () => ({
 const kvSetSpy = vi.hoisted(() => vi.fn());
 const kvDelSpy = vi.hoisted(() => vi.fn());
 const kvGetSpy = vi.hoisted(() => vi.fn());
+const kvEvalSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   kvSet: (...args: unknown[]) => {
     kvSetSpy(...args);
@@ -124,6 +125,10 @@ vi.mock('@/lib/kv', () => ({
   },
   kvDel: (...args: unknown[]) => {
     kvDelSpy(...args);
+    return Promise.resolve({ ok: true, value: 1 });
+  },
+  kvEval: (...args: unknown[]) => {
+    kvEvalSpy(...args);
     return Promise.resolve({ ok: true, value: 1 });
   },
 }));
@@ -160,6 +165,7 @@ beforeEach(() => {
   kvSetSpy.mockClear();
   kvGetSpy.mockClear();
   kvDelSpy.mockClear();
+  kvEvalSpy.mockClear();
 });
 
 describe('POST /api/pro/subscribe', () => {

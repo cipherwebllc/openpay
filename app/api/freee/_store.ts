@@ -1,12 +1,16 @@
 // freee 連携の per-merchant KV ストア (`_` prefix で route 探索対象外)。
 // すべて wallet (SIWE 検証済 checksum アドレス) で名前空間を切る。
-//   freee:tok:{wallet}     → StoredToken (access/refresh/expiresAt/companyId)
+//   freee:tok:{wallet}     → encrypted StoredToken envelope (access/refresh/expiresAt/companyId)
 //   freee:meta:{wallet}    → { companyId, companyName }
 //   freee:map:{wallet}     → FreeeMapping (companyId/accountItemId/taxCode)
 //   freee:state:{state}    → OAuth state (JSON {wallet, returnTo}・TTL 10分)
 //   freee:synced:{wallet}:{txOrId} → 同期済 deal id (冪等・runFreeeSync が claim/finalize)
 import { kvGet, kvSet, kvDel, kvGetDel, kvSetNxGet } from '@/lib/kv';
-import type { StoredToken } from '@/lib/freee';
+import {
+  decryptStoredToken,
+  encryptStoredToken,
+  type StoredToken,
+} from '@/lib/freee';
 import type { FreeeMapping, ClaimState } from '@/lib/freeeSync';
 
 const STATE_TTL_SEC = 600;
@@ -26,14 +30,24 @@ async function getJson<T>(k: string): Promise<T | null> {
   }
 }
 
-export function getToken(wallet: string): Promise<StoredToken | null> {
-  return getJson<StoredToken>(key('tok', wallet.toLowerCase()));
+export async function getToken(wallet: string): Promise<StoredToken | null> {
+  const walletLower = wallet.toLowerCase();
+  const k = key('tok', walletLower);
+  const res = await kvGet(k);
+  if (!res.ok || !res.value) return null;
+  const token = decryptStoredToken(walletLower, res.value);
+  if (!token) {
+    await kvDel(k);
+    return null;
+  }
+  return token;
 }
 
 export async function setToken(wallet: string, token: StoredToken): Promise<void> {
   // 永続化失敗を飲み込むと、refresh ローテーションで新 refresh token を保存し損ねて
   // 次回失効=連携断になる。失敗は throw して caller (502 / errorRedirect) に伝える。
-  const res = await kvSet(key('tok', wallet.toLowerCase()), JSON.stringify(token));
+  const walletLower = wallet.toLowerCase();
+  const res = await kvSet(key('tok', walletLower), encryptStoredToken(walletLower, token));
   if (!res.ok) throw new Error(`freee_token_persist_failed:${res.reason}`);
 }
 

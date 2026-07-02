@@ -1,8 +1,8 @@
 // freee「取引(収入)」一括同期の純粋コア (HTTP/KV を注入する DI 設計)。
 //
-// 履歴は localStorage 側なのでクライアントが income-sale entries を送る → サーバは
-// ここで isIncomeSaleEntry を**再検証** (改竄・幽霊売上を弾く) + 円換算 + freee deals
-// payload へ写像し、冪等キーで二重計上を防ぎつつ createDeal する。
+// 履歴は localStorage 側なので entries はクライアント申告の記帳補助データ。サーバは
+// isIncomeSaleEntry などの形状/成功売上フィルタ + 円換算 + freee deals payload への写像を行うが、
+// txHash/on-chain 再構成による tamper verification はここでは行わない。
 //
 // 冪等性: entry ごとに安定キー (wallet + txHash||id) を SET NX で claim。
 //   fresh    → createDeal → finalize(key, dealId)。失敗時は release(key) で claim 解放 (再試行可)。
@@ -149,7 +149,7 @@ export async function runFreeeSync(
   const items: FreeeSyncItem[] = [];
 
   for (const e of entries) {
-    // サーバ側 re-validation: 成功売上のみ (失敗/revert/手数料 leg/改竄を弾く)。
+    // クライアント申告履歴の advisory filter: 成功売上のみ (失敗/revert/手数料 leg を除外)。
     if (!isIncomeSaleEntry(e)) {
       items.push({ id: e.id, status: 'not-income' });
       continue;

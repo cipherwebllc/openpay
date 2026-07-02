@@ -8,12 +8,13 @@
 // を加入支払いと**絶対に誤認しない**。各 tier の差分 (flag / used-key prefix / 価格 / 付与期間 / grant /
 // revenue / logger prefix) は config で受け取り、core ロジック (ロック→検証→付与→昇格→収益) は共有する。
 import { NextResponse } from 'next/server';
+import { randomBytes } from 'node:crypto';
 import { createPublicClient, type Address, type Hex } from 'viem';
 import { env } from '@/lib/env';
 import { verifyJpycFeeOnChain } from '@/lib/feeVerify';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
-import { kvSet, kvGet, kvDel } from '@/lib/kv';
+import { kvSet, kvGet, kvDel, kvEval } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 
 // idempotency は billing/settle と同方針: 短い処理ロック (nx) → 付与確定後に結果へ昇格。
@@ -21,8 +22,11 @@ const LOCK_TTL_SEC = 120;
 const RESULT_TTL_SEC = 400 * 86_400;
 const LOCK_MARKER = 'pending';
 const RESULT_PREFIX = 'r:';
+const CLAIMED_KEY_PREFIX = 'payment:claimed:';
+const CLAIM_PENDING_PREFIX = 'p:';
 
 type EntitlementResult = { wallet: string; expiresAt: number };
+export type EntitlementTier = 'pro' | 'csvpass';
 
 // 認証済みセッション (requireSession の成功形)。route が requireSession を呼び address を渡す。
 export type EntitlementSession = { address: Address };
@@ -34,6 +38,8 @@ export type EntitlementPaymentConfig = {
   feeReceiverConfigured: boolean;
   /** idempotency ロック/結果 key の prefix (例 'pro:used:' / 'csvpass:used:')。tier 間で非共有。 */
   usedKeyPrefix: string;
+  /** cross-tier txHash claim に保存する tier 名。 */
+  tier: EntitlementTier;
   /** tier の最低額 (JPYC minor units・超過は受理するが付与は 1 期間のみ)。 */
   priceWei: bigint;
   /** 1 支払いで付与する時間 (ms)。target = blockTs*1000 + grantMs。 */
@@ -75,6 +81,29 @@ function parseResult(value: string | null): EntitlementResult | null {
   return null;
 }
 
+function claimKey(chainId: number, txHash: string): string {
+  return `${CLAIMED_KEY_PREFIX}${chainId}:${txHash.toLowerCase()}`;
+}
+
+function claimPendingValue(tier: EntitlementTier, owner: string): string {
+  return `${CLAIM_PENDING_PREFIX}${JSON.stringify({ tier, owner })}`;
+}
+
+function parseClaimedTier(value: string | null): EntitlementTier | null {
+  if (!value) return null;
+  if (value === `${RESULT_PREFIX}pro`) return 'pro';
+  if (value === `${RESULT_PREFIX}csvpass`) return 'csvpass';
+  if (!value.startsWith(CLAIM_PENDING_PREFIX)) return null;
+  try {
+    const o = JSON.parse(value.slice(CLAIM_PENDING_PREFIX.length)) as {
+      tier?: unknown;
+    };
+    return o.tier === 'pro' || o.tier === 'csvpass' ? o.tier : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 加入処理の core。route 側は (1) body をパースし txHash/chainId を抽出、(2) requireSession を済ませて
  * から本関数を呼ぶ。flag-off (404) / feeReceiver 未設定 (503) も認証前ゲートとして本関数が扱う
@@ -106,6 +135,28 @@ export async function processEntitlementPayment(args: {
         reason: del.reason,
       });
     }
+  }
+
+  let claimedKey = '';
+  let claimedPending = '';
+  let claimedThisRequest = false;
+  let grantMade = false;
+
+  async function releaseCrossTierClaim(cause: string): Promise<void> {
+    if (!claimedThisRequest || grantMade) return;
+    const del = await kvEval<number>(
+      'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end',
+      [claimedKey],
+      [claimedPending],
+    );
+    if (!del.ok) {
+      logger.error(`${config.logPrefix}.claim-release-failed`, {
+        claimedKey,
+        cause,
+        reason: del.reason,
+      });
+    }
+    claimedThisRequest = false;
   }
 
   // 処理ロックを nx で取得 (chainId × txHash 単位)。取れなければ確定結果 (replay) か処理中 (409)。
@@ -240,9 +291,66 @@ export async function processEntitlementPayment(args: {
     }
     const targetExpiresAtMs = blockTimestampMs + config.grantMs;
 
+    claimedKey = claimKey(chainId, txHash);
+    const owner = randomBytes(16).toString('base64url');
+    claimedPending = claimPendingValue(config.tier, owner);
+    const claimed = await kvSet(claimedKey, claimedPending, {
+      nx: true,
+      ttlSec: LOCK_TTL_SEC,
+    });
+    if (!claimed.ok) {
+      await releaseClaim(usedKey, 'claimed-marker-unavailable');
+      logger.error(`${config.logPrefix}.claim-failed`, {
+        claimedKey,
+        reason: claimed.reason,
+      });
+      return NextResponse.json(
+        { ok: false, error: 'kv_unavailable' },
+        { status: 503 },
+      );
+    }
+    if (claimed.value !== 'OK') {
+      const existing = await kvGet(claimedKey);
+      if (!existing.ok) {
+        await releaseClaim(usedKey, 'claimed-marker-read-failed');
+        logger.error(`${config.logPrefix}.claim-read-failed`, {
+          claimedKey,
+          reason: existing.reason,
+        });
+        return NextResponse.json(
+          { ok: false, error: 'kv_unavailable' },
+          { status: 503 },
+        );
+      }
+      const claimedTier = parseClaimedTier(existing.value);
+      if (claimedTier === config.tier) {
+        // Same-tier marker: allow the existing per-tier replay/crash-repair path to continue.
+      } else if (claimedTier) {
+        await releaseClaim(usedKey, 'used-by-other-tier');
+        logger.warn(`${config.logPrefix}.used-by-other-tier`, {
+          wallet: session.address,
+          chainId,
+          claimedTier,
+        });
+        return NextResponse.json(
+          { ok: false, error: 'used_by_other_tier' },
+          { status: 400 },
+        );
+      } else {
+        await releaseClaim(usedKey, 'claimed-marker-unparseable');
+        return NextResponse.json(
+          { ok: false, error: 'already_processed' },
+          { status: 409 },
+        );
+      }
+    } else {
+      claimedThisRequest = true;
+    }
+
     const granted = await config.grant(session.address, targetExpiresAtMs);
     if (!granted.ok) {
       await releaseClaim(usedKey, 'grant-write-failed');
+      await releaseCrossTierClaim('grant-write-failed');
       logger.error(`${config.logPrefix}.grant-failed`, {
         wallet: session.address,
         chainId,
@@ -252,6 +360,17 @@ export async function processEntitlementPayment(args: {
         { ok: false, error: 'grant_failed' },
         { status: 503 },
       );
+    }
+    grantMade = true;
+
+    if (claimedThisRequest) {
+      const claimPromote = await kvSet(claimedKey, `${RESULT_PREFIX}${config.tier}`);
+      if (!claimPromote.ok) {
+        logger.warn(`${config.logPrefix}.claim-promote-failed`, {
+          claimedKey,
+          reason: claimPromote.reason,
+        });
+      }
     }
 
     // 付与確定 → ロックを結果へ昇格 (恒久 TTL・grant 先 wallet を保持して cross-wallet replay を拒否)。
@@ -292,7 +411,10 @@ export async function processEntitlementPayment(args: {
       expiresAt: granted.expiresAt,
     });
   } catch (e) {
-    await releaseClaim(usedKey, 'unexpected-error');
+    if (!grantMade) {
+      await releaseClaim(usedKey, 'unexpected-error');
+      await releaseCrossTierClaim('unexpected-error');
+    }
     logger.error(`${config.logPrefix}.unexpected`, {
       wallet: session.address,
       chainId,
