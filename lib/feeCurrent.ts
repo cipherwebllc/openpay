@@ -1,15 +1,15 @@
 // OpenPay 利用料 (a1) の「支払い済み状態」を店主 wallet 別に持つ (server 専用・KV TTL)。
-// 利用権 tier (lib/entitlement.ts = basic/pro) とは **別系統**。月次利用料を払うと fee-current が
+// 利用権 tier (basic/pro・退役済) とは **別系統** (残る alpha-bypass フラグは lib/alphaBypass.ts)。月次利用料を払うと fee-current が
 // 延長され、relay 関所ゲート (S5) が「current な店主だけガスレス中継する」判定材料にする。
 // 設計: docs/plans/merchant-gasless-fee-a1.md (S3)。
 //
-// bypass: アルファ全開放 (entitlement と同じ ALPHA_ENTITLEMENT_BYPASS スイッチ) 中は常に current
+// bypass: アルファ全開放 (alphaBypass と同じ ALPHA_ENTITLEMENT_BYPASS スイッチ) 中は常に current
 // = 徴収しない。点灯は flag ON + ALPHA_ENTITLEMENT_BYPASS=0。
 // 値 = JSON {expiresAt, lastPaidPeriod?, lastTxHash?}・KV TTL で自然失効。
 
 import { type Address } from 'viem';
 import { kvGet, kvSet } from './kv';
-import { entitlementBypass } from './entitlement';
+import { entitlementBypass } from './alphaBypass';
 import { logger } from './logger';
 
 export type FeeStatus = {

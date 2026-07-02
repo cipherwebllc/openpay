@@ -18,6 +18,7 @@ import {
   buildForwarderNonce,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
+import { isDec } from '@/lib/relay/relayRoute';
 
 // off-chain attestation 用の EIP-712 domain (verifyingContract/chainId は持たず、chainId は message の
 // フィールドに入れる)。署名・検証で完全一致させる。
@@ -139,9 +140,6 @@ export async function verifyReceipt(
   const recovered = getAddress(signer);
   return { valid: recovered === expected, signer: recovered };
 }
-
-const isDec = (v: unknown): v is string =>
-  typeof v === 'string' && /^[0-9]+$/.test(v);
 
 // 任意 JSON から X402Receipt を検証付きで取り出す (verify-receipt route 用)。不正は null。
 export function parseReceipt(raw: unknown): X402Receipt | null {

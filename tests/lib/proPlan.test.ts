@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// proPlan は kvGet/kvEval (lib/kv) と entitlementBypass (lib/entitlement) に依存する。
+// proPlan は kvGet/kvEval (lib/kv) と entitlementBypass (lib/alphaBypass) に依存する。
 // kvEval は GRANT_MAX_SCRIPT (Lua) を実行する想定なので、テストでは「Upstash の Lua 実行」を
 // JS で忠実にエミュレートする in-memory store を立て、atomic max + TTL 計算を実際に走らせる。
 
@@ -12,7 +12,7 @@ const hold = vi.hoisted(() => ({
   getOk: true,
 }));
 
-vi.mock('@/lib/entitlement', () => ({
+vi.mock('@/lib/alphaBypass', () => ({
   entitlementBypass: () => hold.bypass,
 }));
 
