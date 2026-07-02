@@ -43,16 +43,18 @@ import {
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
-  deploymentForSlug,
-  isGaslessSupported,
   isValidTokenSymbol,
   symbolHasDeployment,
   type TokenSymbol,
 } from '../tokens';
 import {
+  appendTaxReceiptParams,
   DECIMAL_PATTERN,
-  PAY_RECEIPT_NO_MAX,
+  gaslessSupportError,
+  parseGasParam,
+  parseTaxReceiptParams,
   resolveChainSlugParam,
+  resolveModeAlias,
   sanitizeText,
   sanitizeUrl,
   type SearchParamsLike,
@@ -256,17 +258,8 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeUrl(params.webhook);
     if (v) sp.set('webhook', v);
   }
-  // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。
-  if (params.taxRate !== undefined) {
-    sp.set('tax', String(params.taxRate));
-  }
-  if (params.taxCategory) {
-    sp.set('taxcat', params.taxCategory);
-  }
-  if (params.receiptNo) {
-    const v = sanitizeText(params.receiptNo, PAY_RECEIPT_NO_MAX);
-    if (v) sp.set('rcpt', v);
-  }
+  // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。pay と共通の shared helper で追記。
+  appendTaxReceiptParams(sp, params);
   // 受取予定時刻 (在るときだけ・正の安全整数 ms)。preorder のスロット選択。
   if (
     typeof params.pickupAt === 'number' &&
@@ -301,9 +294,6 @@ export function parseCheckoutParams(
   const successUrl = searchParams.get('success_url');
   const cancelUrl = searchParams.get('cancel_url');
   const webhook = searchParams.get('webhook');
-  const taxRaw = searchParams.get('tax');
-  const taxcatRaw = searchParams.get('taxcat');
-  const rcptRaw = searchParams.get('rcpt');
   const feeKindRaw = searchParams.get('fee_kind');
   const feePayerRaw = searchParams.get('fee_payer');
   const pickupAtRaw = searchParams.get('pickup_at');
@@ -340,20 +330,21 @@ export function parseCheckoutParams(
     };
   }
 
-  const gas: GasMode = gasRaw === 'merchant' ? 'merchant' : 'customer';
+  const gas: GasMode = parseGasParam(gasRaw);
   // mode は /pay と同じ legacy alias (direct → standard) を適用。それ以外の不明値は
   // checkout では default の gasless に倒す (請求書文脈では UI を壊さない方が大事)。
-  const mode: PayMode =
-    modeRaw === 'standard' || modeRaw === 'direct' ? 'standard' : 'gasless';
+  // ⚠️ pay.ts と違い不明 mode を error で弾くゲートは持たない (silently gasless)。
+  const mode: PayMode = resolveModeAlias(modeRaw);
 
   // (token, chain) が gasless mode を提供できない場合は gasless 要求を reject。
-  // /pay と同じく、standard mode 要求は通す。
-  if (mode === 'gasless' && !isGaslessSupported(deploymentForSlug(token, chainSlug))) {
-    return {
-      ok: false,
-      error: `${token} on ${chainSlug} は gasless mode 非対応です (mode=standard を指定してください)`,
-    };
+  // /pay と同じく、standard mode 要求は通す。条件/文言は pay と共通 helper。
+  const gaslessErr = gaslessSupportError(token, chainSlug, mode);
+  if (gaslessErr) {
+    return { ok: false, error: gaslessErr };
   }
+
+  // 記帳補助メタ (税率/税区分/レシート番号) は pay と共通の shared helper で parse。
+  const { taxRate, taxCategory, receiptNo } = parseTaxReceiptParams(searchParams);
 
   return {
     ok: true,
@@ -374,9 +365,9 @@ export function parseCheckoutParams(
       successUrl: successUrl ? sanitizeUrl(successUrl) : undefined,
       cancelUrl: cancelUrl ? sanitizeUrl(cancelUrl) : undefined,
       webhook: webhook ? sanitizeUrl(webhook) : undefined,
-      taxRate: parseTaxRateParam(taxRaw),
-      taxCategory: parseTaxCategoryParam(taxcatRaw),
-      receiptNo: rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined,
+      taxRate,
+      taxCategory,
+      receiptNo,
       // モバイル注文システム利用料 (strict 検証・不正値は undefined = 従来動作)。feePayer は
       // 有効な feeKind があるときのみ採用 (feeKind 無しの孤立 feePayer は無視)。
       feeKind: isCheckoutFeeKind(feeKindRaw) ? feeKindRaw : undefined,

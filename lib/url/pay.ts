@@ -23,23 +23,21 @@ import type { Address } from 'viem';
 import type { ChainSlug } from '../chains';
 import type { GasMode, PayMode } from '../fee';
 import { rateIsSane } from '../fx';
-import {
-  parseTaxCategoryParam,
-  parseTaxRateParam,
-  type TaxCategory,
-} from '../tax';
+import { type TaxCategory } from '../tax';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
-  deploymentForSlug,
-  isGaslessSupported,
   isValidTokenSymbol,
   symbolHasDeployment,
   type TokenSymbol,
 } from '../tokens';
 import {
+  appendTaxReceiptParams,
   DECIMAL_PATTERN,
-  PAY_RECEIPT_NO_MAX,
+  gaslessSupportError,
+  parseGasParam,
+  parseTaxReceiptParams,
   resolveChainSlugParam,
+  resolveModeAlias,
   sanitizeText,
   type SearchParamsLike,
 } from './shared';
@@ -245,17 +243,8 @@ export function buildPayPath(params: PayParams): string {
     const v = sanitizeText(params.memo, PAY_MEMO_MAX);
     if (v) sp.set('memo', v);
   }
-  // taxRate は 0 (非課税/対象外) もあるため undefined 判定。
-  if (params.taxRate !== undefined) {
-    sp.set('tax', String(params.taxRate));
-  }
-  if (params.taxCategory) {
-    sp.set('taxcat', params.taxCategory);
-  }
-  if (params.receiptNo) {
-    const v = sanitizeText(params.receiptNo, PAY_RECEIPT_NO_MAX);
-    if (v) sp.set('rcpt', v);
-  }
+  // 記帳補助メタ (税率/税区分/レシート番号) は checkout と共通の shared helper で追記。
+  appendTaxReceiptParams(sp, params);
   return `/pay?${sp.toString()}`;
 }
 
@@ -304,9 +293,6 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const storeRaw = searchParams.get('store');
   const pnameRaw = searchParams.get('pname');
   const memoRaw = searchParams.get('memo');
-  const rcptRaw = searchParams.get('rcpt');
-  const taxRaw = searchParams.get('tax');
-  const taxcatRaw = searchParams.get('taxcat');
 
   if (!to) {
     // bare /pay (search 空) と「to なし + 他 param あり」を区別する。
@@ -364,7 +350,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   }
 
   // gas は merchant のみ明示認識、それ以外 (customer / 不明値 / 未指定 / 旧 fee=) は customer 扱い。
-  const gas: GasMode = gasRaw === 'merchant' ? 'merchant' : 'customer';
+  const gas: GasMode = parseGasParam(gasRaw);
   let parsedSplit: SplitEntry[] | undefined = undefined;
   if (split !== null && split.length > 0) {
     const r = parseSplitParam(split);
@@ -388,20 +374,15 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     parsedSplit = r;
   }
 
-  const normalizedMode: PayMode =
-    mode === 'standard' || mode === 'direct' ? 'standard' : 'gasless';
+  const normalizedMode: PayMode = resolveModeAlias(mode);
 
   // (token, chain) が gasless mode を提供できない (Pimlico paymaster 未対応) なら
-  // gasless 要求を reject。standard mode 要求は通す。
+  // gasless 要求を reject。standard mode 要求は通す。条件/文言は checkout と共通 helper。
   // 2026-05 時点で全 USDC chain が ERC20 paymaster 対応のため、現状ここで弾かれる
   // ケースは buyer-only chain のみ。
-  const deployment = deploymentForSlug(token, chainSlug);
-  if (normalizedMode === 'gasless' && !isGaslessSupported(deployment)) {
-    return {
-      ok: false,
-      errorKind: 'invalid',
-      error: `${token} on ${chainSlug} は gasless mode 非対応です (mode=standard を指定してください)`,
-    };
+  const gaslessErr = gaslessSupportError(token, chainSlug, normalizedMode);
+  if (gaslessErr) {
+    return { ok: false, errorKind: 'invalid', error: gaslessErr };
   }
 
   // crossChain は明示的 "false" のみ false、それ以外 (未指定 / "true" / 不明値)
@@ -429,9 +410,8 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     ? sanitizeText(pnameRaw, PAY_PRODUCT_NAME_MAX)
     : undefined;
   const memo = memoRaw ? sanitizeText(memoRaw, PAY_MEMO_MAX) : undefined;
-  const receiptNo = rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined;
-  const taxRate = parseTaxRateParam(taxRaw);
-  const taxCategory = parseTaxCategoryParam(taxcatRaw);
+  // 記帳補助メタ (税率/税区分/レシート番号) は checkout と共通の shared helper で parse。
+  const { taxRate, taxCategory, receiptNo } = parseTaxReceiptParams(searchParams);
 
   return {
     ok: true,
