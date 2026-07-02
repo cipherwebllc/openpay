@@ -182,10 +182,33 @@ describe('recoverViaForwarder', () => {
     expect(res).toMatchObject({ kind: 'rejected', reason: 'rate_limited', httpStatus: 429 });
   });
 
+  it('rate-limit 超過は claim 後に判定され、429 では claim を release する', async () => {
+    const releaseIdempotency = vi.fn(async () => {});
+    const refundGasBudget = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      checkRateLimit: vi.fn(async () => false),
+      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      releaseIdempotency,
+      refundGasBudget,
+    });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res).toMatchObject({ kind: 'rejected', reason: 'rate_limited', httpStatus: 429 });
+    expect(deps.claimIdempotency).toHaveBeenCalledOnce();
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
+    expect(deps.checkGasBudget).not.toHaveBeenCalled();
+    expect(deps.submit).not.toHaveBeenCalled();
+    expect(refundGasBudget).not.toHaveBeenCalled();
+  });
+
   it('authorizationState 既使用 → pending (submit せず・二重支払い防止)', async () => {
-    const deps = makeDeps({ checkAuthorizationUsed: vi.fn(async () => true) });
+    const deps = makeDeps({
+      checkAuthorizationUsed: vi.fn(async () => true),
+      checkRateLimit: vi.fn(async () => false),
+    });
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res.kind).toBe('pending');
+    expect(deps.checkRateLimit).not.toHaveBeenCalled();
     expect(deps.submit).not.toHaveBeenCalled();
   });
 
@@ -228,6 +251,7 @@ describe('recoverViaForwarder', () => {
     const deps = makeDeps({ claimIdempotency });
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res).toMatchObject({ kind: 'pending', txHash: dupHash });
+    expect(deps.checkRateLimit).not.toHaveBeenCalled();
     expect(deps.submit).not.toHaveBeenCalled();
     const [, from, nonce] = claimIdempotency.mock.calls[0];
     expect(getAddress(from)).toBe(getAddress(account.address));
