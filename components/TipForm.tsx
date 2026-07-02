@@ -62,7 +62,12 @@ import {
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
-import { DEFAULT_TIP_PRESETS, type TipParams } from '@/lib/url';
+import {
+  DEFAULT_TIP_PRESETS,
+  offOriginCallbackHosts,
+  type TipParams,
+} from '@/lib/url';
+import { useOrigin } from '@/hooks/useOrigin';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 import {
@@ -98,6 +103,21 @@ export function TipForm({ params }: { params: TipParams }) {
 
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
+
+  // F7: webhook / thanksUrl のうち、現在の origin と host が異なる第三者ホスト。決済者データの
+  // POST 先 / 送信成功後に開くリンク先になり得るため、送信前に payer (ファン) へ明示開示する
+  // (block はしない — Discord/Patreon 等の正当な off-origin リンクが存在する)。origin 未確定は空配列。
+  const origin = useOrigin();
+  const offOriginHosts = useMemo(
+    () =>
+      origin
+        ? offOriginCallbackHosts(
+            [params.webhook, params.thanksUrl],
+            new URL(origin).host,
+          )
+        : [],
+    [origin, params.webhook, params.thanksUrl],
+  );
 
   // 決済経路の単一情報源 (Phase 1.1)。散在していた useRelay / useRecover / isCircle を
   // この 1 値から導出する。引数は現行どおりに算出した解決済み値で、判定の優先順位・短絡は
@@ -768,6 +788,14 @@ export function TipForm({ params }: { params: TipParams }) {
           />
         )}
       </section>
+
+      {/* F7: off-origin コールバック開示 (送信前・payer 向け)。webhook/thanksUrl が第三者ホストを
+          指すとき、送信後に通知/遷移する先を明示する (情報提供のみ・送信は妨げない)。 */}
+      {!flowSuccess && offOriginHosts.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+          <p>{t('offOriginCallbackNote', { host: offOriginHosts.join('、') })}</p>
+        </div>
+      )}
 
       {/* 署名安心パネル/ヒント (送信ボタン直上)。relay free=フルパネル / Circle USDC=usdc-permit。
           recover/Pimlico 7702 はスコープ外で出さない。署名/確認待ち中は待機表示に置換する。

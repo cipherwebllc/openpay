@@ -52,9 +52,22 @@ export function ScanShell() {
     setLastResult(action);
 
     switch (action.kind) {
-      case 'pay':
       case 'tip':
       case 'checkout':
+        // 同 origin だが callback (webhook/redirect) が第三者ホストを指す場合は、外部 URL と
+        // 同じ amber interstitial + 明示 continue を挟む (自動遷移で silent に第三者へ payer
+        // データを送る / phishing 遷移するのを防ぐ)。off-origin が無ければ従来どおり即遷移。
+        if (action.offOriginHosts.length > 0) {
+          logger.warn('scan.callback_offorigin', {
+            kind: action.kind,
+            hosts: action.offOriginHosts,
+          });
+          return;
+        }
+        logger.info('scan.deeplink', { kind: action.kind });
+        router.push(action.href);
+        return;
+      case 'pay':
       case 'handle':
       case 'order':
         // raw URL は送らず route 種別のみ (受取アドレス / 金額は集約しない方針)。
@@ -123,7 +136,13 @@ export function ScanShell() {
       <PayerReceiptList />
 
       {lastResult && (
-        <ScanResultBanner result={lastResult} onDismiss={() => setLastResult(null)} />
+        <ScanResultBanner
+          result={lastResult}
+          onDismiss={() => setLastResult(null)}
+          onContinue={() => {
+            if ('href' in lastResult) router.push(lastResult.href);
+          }}
+        />
       )}
     </div>
   );
@@ -132,11 +151,45 @@ export function ScanShell() {
 function ScanResultBanner({
   result,
   onDismiss,
+  onContinue,
 }: {
   result: ScanAction;
   onDismiss: () => void;
+  onContinue: () => void;
 }) {
   const t = useTranslations('Scan');
+
+  // F7: 同 origin checkout/tip でも callback が第三者ホストなら、自動遷移させず amber
+  // interstitial + 明示 continue を出す (外部 URL と同型の二段確認)。
+  if (
+    (result.kind === 'checkout' || result.kind === 'tip') &&
+    result.offOriginHosts.length > 0
+  ) {
+    return (
+      <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900">
+        <p className="text-sm font-semibold">{t('callbackWarnTitle')}</p>
+        <p className="mt-2 text-xs">
+          {t('callbackWarnBody', { host: result.offOriginHosts.join('、') })}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onContinue}
+            className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+          >
+            {t('callbackWarnContinue')}
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            {t('dismissResult')}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // pay / tip / checkout は即 router.push されるため、本 banner は表示し続けない。
   // 観測中に visual flash する程度の transient 表示のため、UI として描画はしない。

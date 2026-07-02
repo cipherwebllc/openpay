@@ -11,10 +11,12 @@ import {
 } from '@/lib/tokens';
 import {
   convertAnchorAmount,
+  fxRateDeviationWarning,
   isExpired,
   QR_EXPIRY_SECONDS,
   rateIsSane,
   secondsRemaining,
+  type FxLkg,
 } from '@/lib/fx';
 import type { ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
@@ -35,6 +37,38 @@ export type ConvertState = {
   expiresAt: number; // unix 秒
 };
 
+// LKG (前回良好 USDC/JPY レート) の localStorage キー。ページを跨いで保持し、次回の
+// レート取得時に急変検知の基準にする。DOM 依存のため純関数 fx.ts ではなくここに置く。
+const FX_LKG_KEY = 'openpay:fxLkg:usdcjpy';
+
+function readFxLkg(): FxLkg | null {
+  try {
+    const raw = localStorage.getItem(FX_LKG_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<FxLkg>;
+    if (
+      typeof parsed.rate !== 'number' ||
+      typeof parsed.ts !== 'number'
+    ) {
+      return null;
+    }
+    return { rate: parsed.rate, ts: parsed.ts };
+  } catch {
+    return null;
+  }
+}
+
+function writeFxLkg(rate: number, ts: number): void {
+  try {
+    localStorage.setItem(FX_LKG_KEY, JSON.stringify({ rate, ts }));
+  } catch {
+    // localStorage 不可 (Safari private 等) は黙って無視 (警告は fail-open)。
+  }
+}
+
+// レート急変警告の表示状態 (LKG と新レートの両方を保持し ConvertPanel に両方を見せる)。
+export type FxRateWarning = { lkgRate: number; newRate: number };
+
 export function useFxConvert(params: {
   settings: QrSettings; // reads settings.token / settings.chain / settings.payMode
   amount: string;
@@ -49,6 +83,8 @@ export function useFxConvert(params: {
   recalcConvert: () => void;
   revertConvert: () => void;
   resetConvert: () => void;
+  fxWarning: FxRateWarning | null;
+  acknowledgeFxWarning: () => void;
 } {
   const { settings, amount, marketRates, setSettings, setAmount } = params;
 
@@ -56,6 +92,35 @@ export function useFxConvert(params: {
   const [convert, setConvert] = useState<ConvertState | null>(null);
   // convert 中のみ 1 秒刻みで進める now (カウントダウン用)。convert null では更新しない。
   const [convertNowMs, setConvertNowMs] = useState(0);
+  // レート急変警告 (F8)。新レートが LKG から ±20% を超えて跳ねたときだけ非 null。生成は
+  // 止めず、ConvertPanel で目立つ警告 + acknowledge を出す。
+  const [fxWarning, setFxWarning] = useState<FxRateWarning | null>(null);
+
+  // 新しいレートを取得したら LKG と比較する (F8・defense-in-depth)。fresh な LKG から
+  // ±20% 超なら警告を立て、LKG は更新しない (merchant の acknowledge / 再取得を待つ)。
+  // 範囲内 / LKG 無し / stale なら silently に LKG を更新し警告を消す (bootstrap)。
+  useEffect(() => {
+    if (!marketRates || !rateIsSane(marketRates.usdcJpy)) return;
+    const nowMs = Date.now();
+    const res = fxRateDeviationWarning(readFxLkg(), marketRates.usdcJpy, nowMs);
+    if (res.warn) {
+      setFxWarning({ lkgRate: res.lkgRate, newRate: res.newRate });
+    } else {
+      setFxWarning(null);
+      writeFxLkg(marketRates.usdcJpy, nowMs);
+    }
+    // usdcJpy の値変化だけを trigger にする (marketRates オブジェクト参照は毎回変わりうる)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketRates?.usdcJpy]);
+
+  // merchant が急変を確認 (acknowledge): 新レートを LKG として採用し警告を消す。以後この
+  // レートが基準になる (次の急変で再度警告)。
+  const acknowledgeFxWarning = useCallback(() => {
+    if (marketRates && rateIsSane(marketRates.usdcJpy)) {
+      writeFxLkg(marketRates.usdcJpy, Date.now());
+    }
+    setFxWarning(null);
+  }, [marketRates]);
 
   useEffect(() => {
     if (!convert) return;
@@ -148,5 +213,7 @@ export function useFxConvert(params: {
     recalcConvert,
     revertConvert,
     resetConvert,
+    fxWarning,
+    acknowledgeFxWarning,
   };
 }

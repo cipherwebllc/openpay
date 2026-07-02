@@ -1359,3 +1359,34 @@ describe('TipForm — 署名安心パネル (SignReassurance・P2)', () => {
     expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
   });
 });
+
+describe('TipForm — F7 off-origin callback 開示', () => {
+  it('第三者 host の webhook/thanksUrl → 開示ノートに host を表示', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(200_000_000_000_000_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(
+      <TipForm
+        params={{
+          ...JPYC_PARAMS,
+          webhook: 'https://shop.example.com/hook',
+          thanksUrl: 'https://discord.gg/xyz',
+        }}
+      />,
+    );
+    const note = screen.getByText(/に通知・遷移します/);
+    expect(note).toBeInTheDocument();
+    expect(note.textContent).toContain('shop.example.com');
+    expect(note.textContent).toContain('discord.gg');
+  });
+
+  it('callback が無ければ開示ノートは出さない', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(200_000_000_000_000_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+  });
+});

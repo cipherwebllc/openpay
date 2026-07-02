@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   FX_RATE_MIN,
   FX_RATE_MAX,
+  FX_LKG_MAX_AGE_MS,
+  FX_DEVIATION_THRESHOLD,
   QR_EXPIRY_SECONDS,
   rateIsSane,
   convertAnchorAmount,
+  fxRateDeviationWarning,
   isExpired,
   secondsRemaining,
 } from '@/lib/fx';
@@ -157,5 +160,66 @@ describe('secondsRemaining', () => {
 describe('QR_EXPIRY_SECONDS', () => {
   it('既定 3 分 (180 秒)', () => {
     expect(QR_EXPIRY_SECONDS).toBe(180);
+  });
+});
+
+describe('fxRateDeviationWarning (F8・LKG 急変検知)', () => {
+  const NOW = 1_700_000_000_000;
+  const fresh = (rate: number) => ({ rate, ts: NOW - 60_000 }); // 1 分前 = fresh
+
+  it('LKG 無し (null) → bootstrap・warn=false', () => {
+    expect(fxRateDeviationWarning(null, 150, NOW)).toEqual({ warn: false });
+  });
+
+  it('fresh LKG から ±20% 以内 → warn=false', () => {
+    // 150 → 170 は +13.3% (閾値 20% 以内)
+    expect(fxRateDeviationWarning(fresh(150), 170, NOW)).toEqual({
+      warn: false,
+    });
+  });
+
+  it('境界: ちょうど +20% は warn しない (> 判定)', () => {
+    // 150 → 180 = ちょうど +20%
+    expect(fxRateDeviationWarning(fresh(150), 180, NOW)).toEqual({
+      warn: false,
+    });
+  });
+
+  it('fresh LKG から +20% 超 → warn=true (両レートと乖離を返す)', () => {
+    // 150 → 200 = +33.3%
+    const res = fxRateDeviationWarning(fresh(150), 200, NOW);
+    expect(res.warn).toBe(true);
+    if (!res.warn) throw new Error('expected warn');
+    expect(res.lkgRate).toBe(150);
+    expect(res.newRate).toBe(200);
+    expect(res.deviation).toBeCloseTo(0.3333, 3);
+  });
+
+  it('fresh LKG から -20% 超 (急落) → warn=true', () => {
+    // 150 → 100 = -33.3%
+    expect(fxRateDeviationWarning(fresh(150), 100, NOW).warn).toBe(true);
+  });
+
+  it('stale LKG (24h 超) → bootstrap 扱い・warn=false', () => {
+    const stale = { rate: 150, ts: NOW - FX_LKG_MAX_AGE_MS - 1 };
+    expect(fxRateDeviationWarning(stale, 300, NOW)).toEqual({ warn: false });
+  });
+
+  it('未来 ts の LKG → bootstrap 扱い・warn=false', () => {
+    const future = { rate: 150, ts: NOW + 60_000 };
+    expect(fxRateDeviationWarning(future, 300, NOW)).toEqual({ warn: false });
+  });
+
+  it('不正 LKG (rate<=0 / 非有限) → warn=false', () => {
+    expect(fxRateDeviationWarning({ rate: 0, ts: NOW }, 150, NOW).warn).toBe(
+      false,
+    );
+    expect(
+      fxRateDeviationWarning({ rate: Number.NaN, ts: NOW }, 150, NOW).warn,
+    ).toBe(false);
+  });
+
+  it('FX_DEVIATION_THRESHOLD は 0.2 (±20%)', () => {
+    expect(FX_DEVIATION_THRESHOLD).toBe(0.2);
   });
 });

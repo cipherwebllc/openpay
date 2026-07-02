@@ -159,6 +159,8 @@ export function QrGenerator() {
     recalcConvert,
     revertConvert,
     resetConvert,
+    fxWarning,
+    acknowledgeFxWarning,
   } = useFxConvert({
     settings,
     amount,
@@ -685,6 +687,8 @@ export function QrGenerator() {
               onApply={applyConvert}
               onRecalc={recalcConvert}
               onRevert={revertConvert}
+              fxWarning={fxWarning}
+              onAcknowledgeFxWarning={acknowledgeFxWarning}
             />
           </div>
           <RecoverFeeNotice
