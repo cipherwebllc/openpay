@@ -258,11 +258,13 @@ const CAS_UPDATE =
   "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
 
 // owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
+// discovery index は active 一覧用なので LREM で掃除する。merchant index は登録総数 cap 用に残す。
 // 戻り: 1=無効化 / 2=既に無効 / -1=未存在 / -2=malformed / 0=owner 不一致。
 const CAS_DEACTIVATE =
   CAS_OWNER_GUARD +
-  'if o.active==false then return 2 end; ' +
-  "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); return 1";
+  "if o.active==false then redis.call('LREM',KEYS[2],0,ARGV[2]); return 2 end; " +
+  "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); " +
+  "redis.call('LREM',KEYS[2],0,ARGV[2]); return 1";
 
 export type UpdateResourceResult =
   | { ok: true; resource: X402Resource }
@@ -305,7 +307,11 @@ export async function deactivateResource(
   id: string,
   owner: string,
 ): Promise<DeactivateResourceResult> {
-  const cas = await kvEval<number>(CAS_DEACTIVATE, [resourceKey(id)], [getAddress(owner)]);
+  const cas = await kvEval<number>(
+    CAS_DEACTIVATE,
+    [resourceKey(id), RESOURCES_INDEX],
+    [getAddress(owner), id],
+  );
   if (!cas.ok) return { ok: false, reason: 'storage' };
   if (cas.value === -1) return { ok: false, reason: 'not_found' };
   if (cas.value === -2) return { ok: false, reason: 'storage' }; // 破損 JSON

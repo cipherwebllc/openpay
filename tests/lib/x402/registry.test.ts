@@ -71,9 +71,18 @@ vi.mock('@/lib/kv', () => ({
       store.kv.set(keys[0], enc);
       return { ok: true as const, value: enc };
     }
-    if (o.active === false) return { ok: true as const, value: 2 };
+    const removeFromDiscovery = () => {
+      const id = args[1];
+      const idx = store.lists.get(keys[1]) ?? [];
+      store.lists.set(keys[1], idx.filter((x) => x !== id));
+    };
+    if (o.active === false) {
+      removeFromDiscovery();
+      return { ok: true as const, value: 2 };
+    }
     o.active = false;
     store.kv.set(keys[0], JSON.stringify(o));
+    removeFromDiscovery();
     return { ok: true as const, value: 1 };
   },
 }));
@@ -98,6 +107,21 @@ import {
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const STRANGER = getAddress('0x9999999999999999999999999999999999999999');
+
+function resource(id: string, owner = OWNER): X402Resource {
+  return {
+    id,
+    merchant: owner,
+    url: `https://a.jp/${id}`,
+    description: 'd',
+    priceJpyc: '1',
+    category: 'api',
+    payTo: owner,
+    network: 'eip155:80002',
+    active: true,
+    createdAt: 1,
+  };
+}
 
 // 編集入力 (parseResourceInput 済の形)。owner=merchant・payTo は呼び側で差し替え可。
 function input(over: Partial<X402ResourceInput> = {}): X402ResourceInput {
@@ -336,8 +360,26 @@ describe('lib/x402/registry deactivateResource (owner soft-delete)', () => {
     const r = await deactivateResource('id1', OWNER);
     expect(r).toEqual({ ok: true });
     expect((await getResource('id1'))!.active).toBe(false); // データは残る (監査)
+    expect(store.lists.get(RESOURCES_INDEX)).not.toContain('id1');
     expect((await listActiveResources())!.map((x) => x.id)).not.toContain('id1');
     expect((await listResourcesForMerchant(OWNER))!.map((x) => x.id)).not.toContain('id1');
+  });
+
+  it('無効化 id を discovery index から除去し、500 件 cap の奥にいた active を復帰させる', async () => {
+    const fillerIds = Array.from({ length: 499 }, (_, i) => `f${i}`);
+    const ids = ['gone', ...fillerIds, 'edge'];
+    for (const id of ids) {
+      store.kv.set(resourceKey(id), JSON.stringify(resource(id)));
+    }
+    store.lists.set(RESOURCES_INDEX, ids);
+
+    expect((await listActiveResources())!.map((x) => x.id)).not.toContain('edge');
+    expect(await deactivateResource('gone', OWNER)).toEqual({ ok: true });
+
+    const index = store.lists.get(RESOURCES_INDEX) ?? [];
+    expect(index).not.toContain('gone');
+    expect(index).toHaveLength(500);
+    expect((await listActiveResources())!.map((x) => x.id)).toContain('edge');
   });
 
   it('既に無効 → 冪等に ok', async () => {
