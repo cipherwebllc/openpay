@@ -10,31 +10,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { formatUnits } from 'viem';
-import { Bell, BellOff, CheckCircle2, Clock, RefreshCw, RotateCcw } from 'lucide-react';
+import { Bell, BellOff, RefreshCw } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrderFeed } from '@/hooks/useOrderFeed';
-import { isJpycChainSlug, slugForChain } from '@/lib/chains';
-import { JPYC_CHAIN_LABEL } from '@/lib/mobileOrder';
-import { tokyoHHMM } from '@/lib/shopTime';
+import { useNewOrderFlash } from '@/hooks/useNewOrderFlash';
+import { OrderCard } from '@/components/OrderCard';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
-import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
+import { type StoredOrder } from '@/lib/orderRelay';
 
-const JPYC_DECIMALS = 18;
-// 経過時間バッジの色しきい値 (分)。受信からの経過でホール/厨房が遅れを察知する。
-const ELAPSED_WARN_MIN = 10; // これ以上で黄
-const ELAPSED_LATE_MIN = 20; // これ以上で赤
-const FLASH_MS = 6_000; // 新着カードの点滅持続
 // 受注カードのレスポンシブグリッド (active / 折りたたみ done で共有 = 列数を一致させる)。
 const CARD_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3';
-
-function chainLabel(chainId: number): string {
-  const slug = slugForChain(chainId);
-  return slug && isJpycChainSlug(slug) ? JPYC_CHAIN_LABEL[slug] : `chain ${chainId}`;
-}
 
 export function OrderFulfillmentBoard({
   mode,
@@ -121,66 +109,32 @@ export function OrderFulfillmentBoard({
     return () => window.removeEventListener('pointerdown', prime);
   }, [soundOn]);
 
-  // 新着検出: 初回スナップショットの注文は鳴らさず seen に積むだけ。以降の新 txHash を「新着」
-  // として点滅 + (有効なら) 音。txHash は決済単位で安定 (調理済み等の状態更新では変わらない) ので
-  // 状態トグルでは再アラートしない。seen は **毎回 現フィード全件 (done 含む)** で作り直す
-  // = 対応済み⇄戻すの往復で誤アラートせず、かつ古い txHash を溜め込まない (メモリ上限=フィード件数)。
-  const seenRef = useRef<Set<string>>(new Set());
-  const initRef = useRef(false);
-  const flashTimers = useRef<Set<number>>(new Set());
-  const [flashing, setFlashing] = useState<Set<string>>(new Set());
-  useEffect(() => () => flashTimers.current.forEach((id) => clearTimeout(id)), []);
-  // 検出の主体 = feed のスコープ (token モードなら token・それ以外は受取アドレス)。signed-in 中は token を
+  // 新着注文の点滅記帳は useNewOrderFlash に委譲 (初回スナップショットは鳴らさず seen に積む・以降の
+  // 新 txHash を点滅・タイマー掃除・主体変化での初期化)。音/チャイムは **ここに残す**: 新着検出時に
+  // onNewOrders 経由で soundOnRef の最新トグル状態を見て鳴らす。
+  // 検出主体 = feed のスコープ (token モードなら token・それ以外は受取アドレス)。signed-in 中は token を
   // 主体にしない: 署名済み端末に別店舗トークンが残り token state が載っても、それで検出をリセットすると
   // signed-in の次の新着を初回スナップショット扱いで取りこぼす (feed 自体は sessionAddress を読んでいる)。
   const feedSubject = tokenMode ? token : sessionAddress;
-  // 主体が変わったら検出を初期化 (別店舗/別端末の既存注文を新着扱いしない)。
-  useEffect(() => {
-    seenRef.current = new Set();
-    initRef.current = false;
-    setFlashing(new Set());
-  }, [feedSubject]);
-  const feedData = feed.data;
-  const feedLoading = feed.isLoading;
-  const feedError = feed.isError;
-  useEffect(() => {
-    // feed が有効 (SIWE サインイン or token モード) かつ成功スナップショットのみ対象。無効/ロード中/
-    // エラー時は seed もしない (disabled query は非ロードかつ data 無しになりうる → 空 seed → 有効化後に
-    // 全件誤アラート)。token モードの店員端末でも新着アラートが要る (= isSignedIn だけで絞らない)。
-    if ((!isSignedIn && !tokenMode) || feedLoading || feedError) return;
-    const ids = (feedData ?? []).map((o) => o.txHash);
-    const idSet = new Set(ids);
-    if (!initRef.current) {
-      seenRef.current = idSet; // 初回スナップショット = 既知 (鳴らさない)
-      initRef.current = true;
-      return;
-    }
-    const fresh = ids.filter((id) => !seenRef.current.has(id));
-    seenRef.current = idSet; // 毎回作り直し = prune (古い txHash を溜めない)
-    if (fresh.length === 0) return;
-    setFlashing((prev) => {
-      const nextSet = new Set(prev);
-      fresh.forEach((id) => nextSet.add(id));
-      return nextSet;
-    });
-    if (soundOnRef.current) playNewOrderChime();
-    const timer = window.setTimeout(() => {
-      flashTimers.current.delete(timer); // 発火済み id を破棄 (溜め込み防止)
-      setFlashing((prev) => {
-        const nextSet = new Set(prev);
-        fresh.forEach((id) => nextSet.delete(id));
-        return nextSet;
-      });
-    }, FLASH_MS);
-    flashTimers.current.add(timer);
-  }, [feedData, feedLoading, feedError, isSignedIn, tokenMode]);
+  // feed が有効 (SIWE サインイン or token モード) かつ成功スナップショットのみ検出対象。token モードの
+  // 店員端末でも新着アラートが要る (= isSignedIn だけで絞らない)。無効/ロード中/エラーでは seed もしない。
+  const flashing = useNewOrderFlash(
+    (feed.data ?? []).map((o) => o.txHash),
+    feedSubject,
+    {
+      enabled: (isSignedIn || tokenMode) && !feed.isLoading && !feed.isError,
+      onNewOrders: () => {
+        if (soundOnRef.current) playNewOrderChime();
+      },
+    },
+  );
 
   // active/done の分け方は mode で異なる:
   //  - 厨房: 「調理済み」(kitchenDone) は **中間**。fulfilled 済みは除外し、kitchenDone で折りたたむ
   //    (調理済みでもオーダーは未対応のまま = ホールが配膳するまで残る)。
   //  - ホール: 「配膳済み」= **対応済み (fulfilled)**。全件を対象に fulfilled で active/done を分ける
   //    (配膳=客に提供=取引完了。受注ページの対応済みと同一・受注からも消える)。
-  const all = feedData ?? [];
+  const all = feed.data ?? [];
   const orders = mode === 'kitchen' ? all.filter((o) => !o.fulfilled) : all;
   const isStationDone = (o: StoredOrder) =>
     mode === 'kitchen' ? o.kitchenDone === true : o.fulfilled;
@@ -223,231 +177,47 @@ export function OrderFulfillmentBoard({
   // 'ready' を検知しチャイム + 「お渡しする準備ができました」を表示する。
   const markReady = (o: StoredOrder, value: boolean) =>
     update.mutate({ txHash: o.txHash, op: { kind: 'markReady', value } });
-  const doneBtnLabel = mode === 'kitchen' ? t('cookedDoneBtn') : t('servedDoneBtn');
-  const undoBtnLabel = mode === 'kitchen' ? t('cookedUndo') : t('servedUndo');
   const doneSectionLabel = mode === 'kitchen' ? t('cookedSection') : t('servedSection');
 
   // 受注カード。inDone=true は折りたたみ「調理済み/配膳済み」セクション側 (淡色・ボタンは「戻す」)。
+  // 表示は OrderCard に委譲し、ここでは now/flashing/編集状態に依存する派生プロップだけ算出する
+  // (OrderCard は memo され raw now では再レンダーしない — ageMin など算出済みの値だけ渡す)。
   const renderCard = (o: StoredOrder, inDone: boolean) => {
-    const isNew = !inDone && flashing.has(o.txHash); // 新着 (点滅) — 折りたたみ側は対象外
-    const ageMin = elapsedMin(o); // 受信からの経過分 (null=不明)
     // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP・ホールのみ)。ready 前は「準備完了(通知)」ボタン、
     // ready 後 (active) は「通知済み・受取待ち」バッジ + 既存「受け渡し済」へ進む 2 段階。
     const hallReady = mode === 'hall' && env.enableOrderPickup && o.ready === true;
     const showMarkReady = mode === 'hall' && env.enableOrderPickup && !inDone && !o.ready;
-    const amountWarning = o.amountMismatch
-      ? t('amountMismatchBadge')
-      : o.amountUnchecked
-        ? t('amountUncheckedBadge')
-        : null;
-    const amountWarningClass = o.amountMismatch
-      ? 'bg-red-600 text-white'
-      : 'border border-amber-300 bg-amber-50 text-amber-800';
-    const formattedAmount = formatUnits(BigInt(o.amount), JPYC_DECIMALS);
-    const declaredAmount = o.amountMismatch
-      ? declaredItemsTotalMinor(o.items, JPYC_DECIMALS)
-      : null;
-    const formattedDeclaredAmount =
-      declaredAmount !== null ? formatUnits(declaredAmount, JPYC_DECIMALS) : null;
     return (
-    <li
-      key={o.txHash}
-      className={`flex flex-col rounded-2xl border bg-white p-3 transition ${
-        isNew ? 'animate-pulse border-amber-400 ring-2 ring-amber-300' : 'border-slate-200'
-      } ${inDone ? 'opacity-70' : ''}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-slate-400">
-            {t('orderNo')} #{o.orderId}
-          </p>
-          {/* テーブル表示/訂正は店内 (table あり) のみ。テイクアウト (table 空) は非表示。 */}
-          {o.table ? (
-            editTx === o.txHash ? (
-              <div className="mt-0.5 flex items-center gap-1">
-                <input
-                  value={tableDraft}
-                  onChange={(e) => setTableDraft(e.target.value.slice(0, 64))}
-                  aria-label={t('tableLabel')}
-                  className="w-24 rounded border border-slate-300 px-2 py-0.5 text-sm focus:border-brand focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    update.mutate({
-                      txHash: o.txHash,
-                      op: { kind: 'setTable', table: tableDraft.trim() || null },
-                    });
-                    setEditTx(null);
-                  }}
-                  className="text-xs font-medium text-brand hover:underline"
-                >
-                  {t('tableSave')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditTx(null)}
-                  className="text-xs text-slate-400 hover:underline"
-                >
-                  {t('cancel')}
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setEditTx(o.txHash);
-                  setTableDraft(o.table ?? '');
-                }}
-                className="mt-0.5 flex items-center gap-1 text-left"
-              >
-                <span className="text-lg font-bold text-slate-900">{o.table}</span>
-                <span className="text-[10px] text-slate-400">{t('tableEdit')}</span>
-              </button>
-            )
-          ) : null}
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-          {/* 新着 (ポーリングで届いた直後・点滅中)。 */}
-          {isNew ? (
-            <span className="rounded bg-amber-400 px-1.5 py-0.5 text-xs font-bold text-white">
-              {t('newBadge')}
-            </span>
-          ) : null}
-          {amountWarning ? (
-            <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${amountWarningClass}`}>
-              {amountWarning}
-            </span>
-          ) : null}
-          {/* 受信からの経過時間。10分で黄・20分で赤 (遅れを察知)。折りたたみ側は出さない。 */}
-          {!inDone && ageMin !== null && ageMin >= 1 ? (
-            <span
-              className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold ${
-                ageMin >= ELAPSED_LATE_MIN
-                  ? 'bg-red-100 text-red-700'
-                  : ageMin >= ELAPSED_WARN_MIN
-                    ? 'bg-amber-100 text-amber-700'
-                    : 'bg-slate-100 text-slate-500'
-              }`}
-            >
-              <Clock className="h-3 w-3" aria-hidden /> {t('elapsed', { m: ageMin })}
-            </span>
-          ) : null}
-          {/* お渡し準備完了通知済み = 顧客に通知し受取待ち (受け渡し前の独立状態)。readyToServe より優先。 */}
-          {hallReady && !inDone ? (
-            <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-xs font-bold text-white">
-              {t('notifiedAwaitingPickup')}
-            </span>
-          ) : null}
-          {/* ホール: 全品 調理済み = 厨房完了 → 「配膳準備OK」(配膳待ちが一目で分かる)。通知済みなら出さない。 */}
-          {mode === 'hall' && !inDone && allCooked(o) && !hallReady ? (
-            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-bold text-emerald-700">
-              {t('readyToServe')}
-            </span>
-          ) : null}
-          <span className="text-xs text-slate-400">{chainLabel(o.chainId)}</span>
-          {/* 受取予定時刻 (Phase 4・preorder のみ・flag ON かつ あるとき)。Asia/Tokyo HH:mm。 */}
-          {env.enablePreorderTime && o.pickupAt ? (
-            <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs font-semibold text-sky-700">
-              {t('pickupAt', { time: tokyoHHMM(o.pickupAt) })}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      <ul className="mt-2 flex-1 space-y-1">
-        {o.items.length === 0 && <li className="text-sm text-slate-400">{t('noItems')}</li>}
-        {o.items.map((it, i) => {
-          const cooked = it.cooked === true;
-          const served = it.served === true;
-          const itemDone = mode === 'kitchen' ? cooked : served;
-          // ホール: 調理済み (配膳待ち) は青で強調。配膳済みは done 表示。
-          const cls =
-            mode === 'hall'
-              ? served
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 line-through'
-                : cooked
-                  ? 'border-sky-300 bg-sky-50 text-sky-700'
-                  : 'border-slate-200 text-slate-400'
-              : cooked
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 line-through'
-                : 'border-slate-300 text-slate-700';
-          return (
-            <li key={i}>
-              <button
-                type="button"
-                onClick={() => toggleItem(o, i, itemDone)}
-                disabled={update.isPending}
-                aria-pressed={itemDone}
-                className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${cls}`}
-              >
-                <span className="min-w-0 flex-1 truncate">
-                  {it.name} × {it.qty}
-                </span>
-                {itemDone && <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <span
-          className={
-            amountWarning
-              ? 'rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-right'
-              : 'text-xs text-slate-400'
-          }
-        >
-          {amountWarning ? (
-            <span className="block text-[10px] font-semibold text-slate-500">
-              {t('onChainAmount')}
-            </span>
-          ) : null}
-          <span className={amountWarning ? 'text-sm font-bold text-slate-900' : ''}>
-            {formattedAmount} JPYC
-          </span>
-          {formattedDeclaredAmount !== null ? (
-            <span className="block text-[10px] font-semibold text-slate-500">
-              {t('declaredAmount')}: {formattedDeclaredAmount} JPYC
-            </span>
-          ) : null}
-        </span>
-        {/* お渡し準備完了通知 (ホール・flag ON・ready 前): 顧客に「準備完了」を通知する 1 段目。 */}
-        {showMarkReady ? (
-          <button
-            type="button"
-            onClick={() => markReady(o, true)}
-            disabled={update.isPending}
-            className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            <Bell className="h-4 w-4" aria-hidden /> {t('markReadyBtn')}
-          </button>
-        ) : (
-          /* 注文単位の完了/戻す。done 側は淡いセカンダリ、active 側は brand。通知済み active は「受け渡し済」。 */
-          <button
-            type="button"
-            onClick={() => setStationDone(o, !inDone)}
-            disabled={update.isPending}
-            className={
-              inDone
-                ? 'flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand disabled:opacity-50'
-                : 'flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-50'
-            }
-          >
-            {inDone ? (
-              <>
-                <RotateCcw className="h-4 w-4" aria-hidden /> {undoBtnLabel}
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="h-4 w-4" aria-hidden /> {doneBtnLabel}
-              </>
-            )}
-          </button>
-        )}
-      </div>
-    </li>
+      <OrderCard
+        key={o.txHash}
+        order={o}
+        mode={mode}
+        inDone={inDone}
+        isNew={!inDone && flashing.has(o.txHash)} // 新着 (点滅) — 折りたたみ側は対象外
+        ageMin={elapsedMin(o)} // 受信からの経過分 (null=不明)
+        hallReady={hallReady}
+        showMarkReady={showMarkReady}
+        readyToServe={allCooked(o)} // 全品 調理済み (= 配膳準備OK・ホール)
+        isPending={update.isPending}
+        isEditingTable={editTx === o.txHash}
+        tableDraft={tableDraft}
+        onToggleItem={(index, on) => toggleItem(o, index, on)}
+        onSetStationDone={(value) => setStationDone(o, value)}
+        onMarkReady={(value) => markReady(o, value)}
+        onStartEditTable={() => {
+          setEditTx(o.txHash);
+          setTableDraft(o.table ?? '');
+        }}
+        onTableDraftChange={setTableDraft}
+        onSaveTable={() => {
+          update.mutate({
+            txHash: o.txHash,
+            op: { kind: 'setTable', table: tableDraft.trim() || null },
+          });
+          setEditTx(null);
+        }}
+        onCancelEditTable={() => setEditTx(null)}
+      />
     );
   };
 
