@@ -105,6 +105,7 @@ export type ForwarderVerifyResult =
   | { ok: true; jpyc: Address; forwarder: Address; nonce: Hex };
 
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as Hex;
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
 
 function rejected(httpStatus: number, reason: string): RelayResult {
   return { kind: 'rejected', httpStatus, reason };
@@ -143,6 +144,9 @@ export async function verifyForwarderSettle(
   }
   if (params.merchantValue <= 0n) {
     return { ok: false, result: rejected(400, 'invalid_merchant_value') };
+  }
+  if (getAddress(params.merchant) === ZERO_ADDRESS) {
+    return { ok: false, result: rejected(400, 'zero_merchant') };
   }
   if (getAddress(params.merchant) === getAddress(feeReceiver)) {
     return { ok: false, result: rejected(400, 'merchant_is_fee_receiver') };

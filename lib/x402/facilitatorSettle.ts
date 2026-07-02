@@ -27,6 +27,13 @@ const isDec = (v: unknown): v is string =>
   typeof v === 'string' && /^[0-9]+$/.test(v);
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null;
+const MAX_CHAIN_ID_DIGITS = 16; // Number.isSafeInteger の範囲を超える巨大 eip155 chainId を弾く。
+const MAX_UINT256_DEC_DIGITS = 78; // 2^256-1 は 78 桁。BigInt parse の入力を uint256 相当に bound。
+const CAIP2_EIP155 = /^eip155:(\d+)$/;
+
+function isDecWithin(v: unknown, maxDigits: number): v is string {
+  return isDec(v) && v.length <= maxDigits;
+}
 
 export type ParsedFacilitatorRequest = {
   chainId: number;
@@ -49,6 +56,10 @@ export function parseFacilitatorRequest(raw: unknown): ParseResult {
   if (payload.scheme !== 'exact') return { ok: false, reason: 'unsupported_scheme' };
 
   const network = typeof payload.network === 'string' ? payload.network : '';
+  const chainMatch = CAIP2_EIP155.exec(network);
+  if (!chainMatch || chainMatch[1].length > MAX_CHAIN_ID_DIGITS) {
+    return { ok: false, reason: 'invalid_network' };
+  }
   const chainId = chainIdFromCaip2(network);
   if (chainId === null) return { ok: false, reason: 'invalid_network' };
   if (chainId !== x402FacilitatorConfig.chainId) {
@@ -71,8 +82,8 @@ export function parseFacilitatorRequest(raw: unknown): ParseResult {
   // buyer 選択フィールド (paymentPayload.payload.authorization)。
   if (
     !isAddress(auth.from as string) ||
-    !isDec(auth.validAfter) ||
-    !isDec(auth.validBefore) ||
+    !isDecWithin(auth.validAfter, MAX_UINT256_DEC_DIGITS) ||
+    !isDecWithin(auth.validBefore, MAX_UINT256_DEC_DIGITS) ||
     typeof auth.intentSalt !== 'string' ||
     !/^0x[0-9a-fA-F]{64}$/.test(auth.intentSalt)
   ) {
@@ -81,9 +92,9 @@ export function parseFacilitatorRequest(raw: unknown): ParseResult {
   // 分割フィールド (paymentRequirements.extra.openpay)。
   if (
     !isAddress(openpay.merchant as string) ||
-    !isDec(openpay.merchantValue) ||
+    !isDecWithin(openpay.merchantValue, MAX_UINT256_DEC_DIGITS) ||
     !isAddress(openpay.feeReceiver as string) ||
-    !isDec(openpay.feeValue)
+    !isDecWithin(openpay.feeValue, MAX_UINT256_DEC_DIGITS)
   ) {
     return { ok: false, reason: 'invalid_requirements' };
   }
