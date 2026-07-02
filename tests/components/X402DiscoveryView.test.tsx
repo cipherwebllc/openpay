@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
 // wagmi / SIWE を最小モック (実 wallet グラフを描画せず OOM を避ける)。
@@ -83,19 +84,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// X402DiscoveryView は useQuery/useMutation を使うため QueryClientProvider が要る。
+// テスト毎に新しい QueryClient を作りキャッシュを分離する (retry:false で失敗を即時に反映)。
+function renderView(): ReturnType<typeof renderWithIntl> {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithIntl(
+    <QueryClientProvider client={qc}>
+      <X402DiscoveryView />
+    </QueryClientProvider>,
+  );
+}
+
 // owner サインイン状態で描画する共通ヘルパ。
 function renderAsOwner(owned: Array<typeof OWNED> = [OWNED]): ReturnType<typeof vi.fn> {
   state.connected = true;
   state.address = OWNED.payTo;
   state.signedIn = true;
   const fetchFn = installRoutingFetch(owned);
-  renderWithIntl(<X402DiscoveryView />);
+  renderView();
   return fetchFn;
 }
 
 describe('X402DiscoveryView', () => {
   it('未接続: connectPrompt を表示し、カタログを /api/discovery から列挙', async () => {
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     // カタログ (公開・wallet 不要) が描画される。
     expect(await screen.findByText('JP→EN 翻訳 API です')).toBeInTheDocument();
     expect(screen.getByText(ITEM.resource)).toBeInTheDocument();
@@ -112,7 +124,7 @@ describe('X402DiscoveryView', () => {
     state.connected = true;
     state.address = '0x1111111111111111111111111111111111111111';
     state.signedIn = true;
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     await waitFor(() =>
       expect(
         screen.getByPlaceholderText(/リソース URL/),
@@ -193,7 +205,7 @@ describe('X402DiscoveryView', () => {
     state.address = '0x2222222222222222222222222222222222222222';
     state.signedIn = true;
     const fetchFn = installRoutingFetch([]); // owned 空 = 登録フォームのみ
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
 
     fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
       target: { value: 'https://api.example.jp/paid/new' },
@@ -255,7 +267,7 @@ describe('X402DiscoveryView', () => {
       if (u === '/api/facilitator/resources') return { ok: true, json: async () => ({ resources: [] }) };
       return { ok: true, json: async () => ({ items: [] }) };
     }) as unknown as typeof fetch;
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     fireEvent.click(await screen.findByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '登録する' }));
     expect(await screen.findByText(expected)).toBeInTheDocument();
@@ -267,7 +279,7 @@ describe('X402DiscoveryView', () => {
       value: { writeText },
       configurable: true,
     });
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     await screen.findByText('JP→EN 翻訳 API です');
     fireEvent.click(screen.getByLabelText('コピー'));
     // 実出力: clipboard にカタログ URL が渡る。
@@ -277,7 +289,7 @@ describe('X402DiscoveryView', () => {
   });
 
   it('カタログ: 支払い計 (価格 1000 + 手数料 10 = 1010 JPYC) を表示', async () => {
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
   });
 
@@ -298,7 +310,7 @@ describe('X402DiscoveryView', () => {
         ],
       }),
     })) as unknown as typeof fetch;
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     expect(await screen.findByText(/手数料 2\.5 JPYC/)).toBeInTheDocument();
     expect(screen.getByText('支払い計 252.5 JPYC')).toBeInTheDocument();
   });
@@ -308,7 +320,7 @@ describe('X402DiscoveryView', () => {
       ok: true,
       json: async () => ({ x402Version: 1, items: [] }),
     })) as unknown as typeof fetch;
-    renderWithIntl(<X402DiscoveryView />);
+    renderView();
     expect(
       await screen.findByText('まだ登録されたリソースはありません。'),
     ).toBeInTheDocument();

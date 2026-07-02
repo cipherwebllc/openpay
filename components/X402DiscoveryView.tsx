@@ -5,10 +5,11 @@
 // /api/facilitator/resources で管理する (GET=一覧 / POST=登録 / [id] PATCH=編集 / [id] DELETE=無効化)。
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { formatUnits } from 'viem';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Boxes,
   Check,
@@ -75,13 +76,8 @@ export function X402DiscoveryView() {
   const { address, isConnected } = useAccount();
   const { isSignedIn, signIn, isSigningIn } = useSiweSession();
 
-  const [items, setItems] = useState<DiscoveryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [owned, setOwned] = useState<OwnedResource[]>([]);
-
   const [form, setForm] = useState(EMPTY_FORM);
   const [editId, setEditId] = useState<string | null>(null); // 非 null = 編集中 (PATCH)
-  const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<{
     resource: RegisteredResource;
     paywallSnippet: string;
@@ -103,94 +99,38 @@ export function X402DiscoveryView() {
     window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
   }, []);
 
-  const loadCatalog = useCallback(async () => {
-    setLoading(true);
-    try {
+  const queryClient = useQueryClient();
+
+  // 公開カタログ (誰でも閲覧)。/api/discovery を react-query で取得。loading には isFetching を使い、
+  // 初回だけでなく mutation 後の invalidate による再取得中もスケルトンを出す (従来 loadCatalog が毎回
+  // setLoading(true) していた挙動を保持)。!ok は throw して直前の data を保持する (従来 setItems しない挙動)。
+  const catalogQuery = useQuery({
+    queryKey: ['x402', 'discovery'],
+    queryFn: async () => {
       const res = await fetch('/api/discovery', { cache: 'no-store' });
-      if (res.ok) {
-        const body = (await res.json()) as { items?: DiscoveryItem[] };
-        setItems(body.items ?? []);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      if (!res.ok) throw new Error(`http_${res.status}`);
+      const body = (await res.json()) as { items?: DiscoveryItem[] };
+      return body.items ?? [];
+    },
+    retry: false,
+  });
 
-  // owner の登録一覧 (SIWE 時のみ・編集/削除の対象)。未サインインは空。
-  const loadOwned = useCallback(async () => {
-    if (!isSignedIn) {
-      setOwned([]);
-      return;
-    }
-    const res = await fetch('/api/facilitator/resources', { cache: 'no-store' });
-    if (res.ok) {
+  // owner の登録一覧 (SIWE 時のみ・編集/削除の対象)。未サインインは enabled:false で取得せず owned は空。
+  const ownedQuery = useQuery({
+    queryKey: ['x402', 'owned', address],
+    enabled: isSignedIn,
+    queryFn: async () => {
+      const res = await fetch('/api/facilitator/resources', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`http_${res.status}`);
       const body = (await res.json()) as { resources?: OwnedResource[] };
-      setOwned(body.resources ?? []);
-    }
-  }, [isSignedIn]);
+      return body.resources ?? [];
+    },
+    retry: false,
+  });
 
-  useEffect(() => {
-    void loadCatalog();
-  }, [loadCatalog]);
-  useEffect(() => {
-    void loadOwned();
-  }, [loadOwned]);
-
-  // 登録 (editId 無し → POST) / 編集 (editId 有り → PATCH) を出し分ける。
-  const onSubmit = useCallback(async () => {
-    setError(null);
-    setNotice(null);
-    setSubmitting(true);
-    try {
-      const payload = {
-        url: form.url,
-        description: form.description,
-        priceJpyc: form.priceJpyc,
-        category: form.category,
-        ...(form.payTo ? { payTo: form.payTo } : {}),
-        // 新規登録のみ正当性表明を送る (サーバは POST でのみ必須・編集では無視)。
-        ...(editId ? {} : { attested }),
-      };
-      const res = editId
-        ? await fetch(`/api/facilitator/resources/${editId}`, {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-        : await fetch('/api/facilitator/resources', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-      const body = (await res.json().catch(() => ({}))) as {
-        resource?: RegisteredResource;
-        paywallSnippet?: string;
-        error?: string;
-      };
-      if (!res.ok || !body.resource) {
-        setError(body.error ?? 'error');
-        return;
-      }
-      if (editId) {
-        setNotice('updated');
-        setCreated(null);
-      } else {
-        setCreated({
-          resource: body.resource,
-          paywallSnippet: body.paywallSnippet ?? '',
-        });
-      }
-      setForm(EMPTY_FORM);
-      setEditId(null);
-      setAttested(false);
-      void loadCatalog();
-      void loadOwned();
-    } catch {
-      setError('error');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [form, editId, attested, loadCatalog, loadOwned]);
+  const items = catalogQuery.data ?? [];
+  const loading = catalogQuery.isFetching;
+  const owned = ownedQuery.data ?? [];
 
   const onEdit = useCallback((r: OwnedResource) => {
     setEditId(r.id);
@@ -214,24 +154,107 @@ export function X402DiscoveryView() {
     setError(null);
   }, []);
 
-  const onDelete = useCallback(
-    async (id: string) => {
+  // 登録 (editId 無し → POST) / 編集 (editId 有り → PATCH) を出し分ける。成功後は catalog / owned を
+  // invalidate して再取得する (従来の void loadCatalog(); void loadOwned(); の置換)。fetch/parse の
+  // 例外・!ok・resource 欠落はいずれも {ok:false} を返し、従来と同じエラー文言 (error コード) を出す。
+  const submitMutation = useMutation({
+    mutationFn: async (): Promise<
+      | { ok: true; wasEdit: boolean; resource: RegisteredResource; paywallSnippet: string }
+      | { ok: false; error: string }
+    > => {
+      const payload = {
+        url: form.url,
+        description: form.description,
+        priceJpyc: form.priceJpyc,
+        category: form.category,
+        ...(form.payTo ? { payTo: form.payTo } : {}),
+        // 新規登録のみ正当性表明を送る (サーバは POST でのみ必須・編集では無視)。
+        ...(editId ? {} : { attested }),
+      };
+      try {
+        const res = editId
+          ? await fetch(`/api/facilitator/resources/${editId}`, {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload),
+            })
+          : await fetch('/api/facilitator/resources', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+        const body = (await res.json().catch(() => ({}))) as {
+          resource?: RegisteredResource;
+          paywallSnippet?: string;
+          error?: string;
+        };
+        if (!res.ok || !body.resource) {
+          return { ok: false, error: body.error ?? 'error' };
+        }
+        return {
+          ok: true,
+          wasEdit: Boolean(editId),
+          resource: body.resource,
+          paywallSnippet: body.paywallSnippet ?? '',
+        };
+      } catch {
+        return { ok: false, error: 'error' };
+      }
+    },
+    onMutate: () => {
       setError(null);
       setNotice(null);
+    },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (result.wasEdit) {
+        setNotice('updated');
+        setCreated(null);
+      } else {
+        setCreated({
+          resource: result.resource,
+          paywallSnippet: result.paywallSnippet,
+        });
+      }
+      setForm(EMPTY_FORM);
+      setEditId(null);
+      setAttested(false);
+      void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
+      void queryClient.invalidateQueries({ queryKey: ['x402', 'owned'] });
+    },
+  });
+  const submitting = submitMutation.isPending;
+
+  // 無効化 (DELETE)。!ok は {ok:false} を返しエラー文言を出す。fetch 例外は従来どおり握らず
+  // (エラー表示なし・確認 UI も維持)。成功後は catalog / owned を invalidate して再取得する。
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string): Promise<{ ok: boolean; error?: string }> => {
       const res = await fetch(`/api/facilitator/resources/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(body.error ?? 'error');
+        return { ok: false, error: body.error ?? 'error' };
+      }
+      return { ok: true };
+    },
+    onMutate: () => {
+      setError(null);
+      setNotice(null);
+    },
+    onSuccess: (result, id) => {
+      if (!result.ok) {
+        setError(result.error ?? 'error');
         return;
       }
       setConfirmDeleteId(null);
       if (editId === id) onCancelEdit(); // 編集中の掲載を消したらフォームも閉じる
       setNotice('deleted');
-      void loadCatalog();
-      void loadOwned();
+      void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
+      void queryClient.invalidateQueries({ queryKey: ['x402', 'owned'] });
     },
-    [editId, onCancelEdit, loadCatalog, loadOwned],
-  );
+  });
 
   const inputCls =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15';
@@ -386,7 +409,7 @@ export function X402DiscoveryView() {
             <div className="flex items-center gap-3 pt-1">
               <button
                 type="button"
-                onClick={() => void onSubmit()}
+                onClick={() => submitMutation.mutate()}
                 disabled={submitting || (!editId && !attested)}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               >
@@ -484,7 +507,7 @@ export function X402DiscoveryView() {
                     <span className="text-sm text-slate-600">{t('deleteConfirm')}</span>
                     <button
                       type="button"
-                      onClick={() => void onDelete(r.id)}
+                      onClick={() => deleteMutation.mutate(r.id)}
                       className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
                     >
                       {t('deleteConfirmCta')}
