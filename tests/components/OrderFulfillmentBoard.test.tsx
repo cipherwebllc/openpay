@@ -177,6 +177,20 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.getByRole('button', { name: '配膳済み' })).toBeInTheDocument();
   });
 
+  it('amountUnchecked → 警告バッジと実着金額ラベルを表示', () => {
+    feedHold.data = [order({ amountUnchecked: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('⚠ 金額未確認')).toBeInTheDocument();
+    expect(screen.getByText('実着金額')).toBeInTheDocument();
+  });
+
+  it('amountMismatch → 申告合計も表示', () => {
+    feedHold.data = [order({ amountMismatch: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('⚠ 金額不一致・要確認')).toBeInTheDocument();
+    expect(screen.getByText('申告合計: 500 JPYC')).toBeInTheDocument();
+  });
+
   it('厨房 + 準備完了通知 ON → 準備完了ボタンは出さない (ホール専用)', () => {
     envHold.enableOrderPickup = true;
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);

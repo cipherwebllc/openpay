@@ -15,12 +15,16 @@ import {
   orderPickupState,
   parseOrderStatusPointer,
   ORDER_ITEMS_MAX,
+  ORDER_ITEM_QTY_MAX,
   ORDER_ITEM_NAME_MAX,
   ORDER_TABLE_MAX,
+  declaredItemsTotalMinor,
+  evaluateOrderAmount,
   type StoredOrder,
 } from '@/lib/orderRelay';
 
 const TX = `0x${'a'.repeat(64)}`;
+const JPYC = 10n ** 18n;
 
 function order(over: Partial<StoredOrder> = {}): StoredOrder {
   return {
@@ -75,6 +79,11 @@ describe('orderRelay: sanitizeOrderItems (申告明細・改ざん耐性)', () =
   it('qty は floor (小数は切り捨て)', () => {
     expect(sanitizeOrderItems([{ name: 'x', qty: 2.9, price: '1' }])[0].qty).toBe(2);
   });
+  it('qty は ORDER_ITEM_QTY_MAX に clamp', () => {
+    expect(sanitizeOrderItems([{ name: 'x', qty: ORDER_ITEM_QTY_MAX + 1, price: '1' }])[0].qty).toBe(
+      ORDER_ITEM_QTY_MAX,
+    );
+  });
   it('非配列は空配列', () => {
     expect(sanitizeOrderItems('x')).toEqual([]);
     expect(sanitizeOrderItems(null)).toEqual([]);
@@ -85,6 +94,66 @@ describe('orderRelay: sanitizeOrderItems (申告明細・改ざん耐性)', () =
     expect(sanitizeOrderItems(many)).toHaveLength(ORDER_ITEMS_MAX);
     const long = sanitizeOrderItems([{ name: 'あ'.repeat(ORDER_ITEM_NAME_MAX + 10), qty: 1, price: '1' }]);
     expect(long[0].name.length).toBe(ORDER_ITEM_NAME_MAX);
+  });
+});
+
+describe('orderRelay: declaredItemsTotalMinor', () => {
+  it('major-unit decimal price を minor units へ厳密変換して qty 分を合算', () => {
+    expect(
+      declaredItemsTotalMinor(
+        [
+          { name: 'A', qty: 2, price: '500.5' },
+          { name: 'B', qty: 1, price: '0.25' },
+        ],
+        18,
+      ),
+    ).toBe(1001n * JPYC + JPYC / 4n);
+  });
+
+  it('price 空/不正は null', () => {
+    expect(declaredItemsTotalMinor([{ name: 'A', qty: 1, price: '' }], 18)).toBeNull();
+    expect(declaredItemsTotalMinor([{ name: 'A', qty: 1, price: '1e3' }], 18)).toBeNull();
+  });
+
+  it('fraction が decimals を超える場合は truncate せず null', () => {
+    expect(declaredItemsTotalMinor([{ name: 'A', qty: 1, price: '1.1234567' }], 6)).toBeNull();
+  });
+
+  it('sanitize 後の clamp qty で合計でき、範囲外 qty は null', () => {
+    const sanitized = sanitizeOrderItems([
+      { name: 'A', qty: ORDER_ITEM_QTY_MAX + 100, price: '1' },
+    ]);
+    expect(sanitized[0].qty).toBe(ORDER_ITEM_QTY_MAX);
+    expect(declaredItemsTotalMinor(sanitized, 18)).toBe(BigInt(ORDER_ITEM_QTY_MAX) * JPYC);
+    expect(
+      declaredItemsTotalMinor(
+        [{ name: 'A', qty: ORDER_ITEM_QTY_MAX + 1, price: '1' }],
+        18,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('orderRelay: evaluateOrderAmount', () => {
+  it('小口 floor ケース: declared=3 JPYC / receipt=1 JPYC / floor=2 JPYC は mismatch ではない', () => {
+    expect(evaluateOrderAmount(3n * JPYC, 1n * JPYC, 2n * JPYC, 300)).toEqual({
+      mismatch: false,
+      unchecked: false,
+    });
+  });
+
+  it('大型申告に dust receipt は mismatch', () => {
+    expect(evaluateOrderAmount(10_000n * JPYC, 1n * JPYC, 2n * JPYC, 300)).toEqual({
+      mismatch: true,
+      unchecked: false,
+    });
+  });
+
+  it('declaredMinor null は reject せず unchecked', () => {
+    expect(evaluateOrderAmount(null, 1n * JPYC, 2n * JPYC, 300)).toEqual({
+      mismatch: false,
+      unchecked: true,
+    });
   });
 });
 
@@ -137,6 +206,15 @@ describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', (
     // 非 true / 欠落は undefined。
     expect(parseStoredOrder(JSON.stringify({ ...order(), kitchenDone: 'yes' }))?.kitchenDone).toBeUndefined();
     expect(parseStoredOrder(serializeOrder(order()))?.kitchenDone).toBeUndefined();
+  });
+
+  it('amountMismatch / amountUnchecked は true のときだけ復元', () => {
+    expect(parseStoredOrder(serializeOrder(order({ amountMismatch: true })))?.amountMismatch).toBe(true);
+    expect(parseStoredOrder(serializeOrder(order({ amountUnchecked: true })))?.amountUnchecked).toBe(true);
+    expect(parseStoredOrder(JSON.stringify({ ...order(), amountMismatch: false }))?.amountMismatch).toBeUndefined();
+    expect(parseStoredOrder(JSON.stringify({ ...order(), amountUnchecked: 'yes' }))?.amountUnchecked).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.amountMismatch).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.amountUnchecked).toBeUndefined();
   });
 });
 

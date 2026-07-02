@@ -19,7 +19,7 @@ import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
 import { isJpycChainSlug, slugForChain, txExplorerUrl } from '@/lib/chains';
 import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
-import type { StoredOrder } from '@/lib/orderRelay';
+import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
 
 // /api/handle が返す所有 handle (StorefrontPublishPanel と同形・同 cache キーを共有)。
 // 営業中の操作 (ShopLivePanel) は公開済み店舗 (storefront あり) の handle に紐づく。
@@ -105,6 +105,20 @@ export function OrderFeedPanel() {
 
   const renderCard = (o: StoredOrder, done: boolean) => {
     const explorer = txExplorerUrl(o.chainId, o.txHash);
+    const amountWarning = o.amountMismatch
+      ? t('amountMismatchBadge')
+      : o.amountUnchecked
+        ? t('amountUncheckedBadge')
+        : null;
+    const amountWarningClass = o.amountMismatch
+      ? 'bg-red-600 text-white'
+      : 'border border-amber-300 bg-amber-50 text-amber-800';
+    const formattedAmount = formatUnits(BigInt(o.amount), JPYC_DECIMALS);
+    const declaredAmount = o.amountMismatch
+      ? declaredItemsTotalMinor(o.items, JPYC_DECIMALS)
+      : null;
+    const formattedDeclaredAmount =
+      declaredAmount !== null ? formatUnits(declaredAmount, JPYC_DECIMALS) : null;
     return (
       <li
         key={o.txHash}
@@ -119,13 +133,34 @@ export function OrderFeedPanel() {
             {o.table && <p className="text-base font-bold text-slate-900">{o.table}</p>}
             <p className="text-xs text-slate-400">{chainLabel(o.chainId)}</p>
           </div>
-          <span className="shrink-0 text-right">
+          <span
+            className={`shrink-0 text-right ${
+              amountWarning ? 'rounded-lg border border-amber-300 bg-amber-50 px-2 py-1' : ''
+            }`}
+          >
+            {amountWarning ? (
+              <span className="block text-[10px] font-semibold text-slate-500">
+                {t('onChainAmount')}
+              </span>
+            ) : null}
             <span className="text-base font-bold text-slate-900">
-              {formatUnits(BigInt(o.amount), JPYC_DECIMALS)}
+              {formattedAmount}
             </span>{' '}
             <span className="text-[10px] font-medium text-slate-400">JPYC</span>
           </span>
         </div>
+        {amountWarning ? (
+          <div className="mt-2">
+            <span className={`inline-flex rounded-md px-2 py-1 text-xs font-bold ${amountWarningClass}`}>
+              {amountWarning}
+            </span>
+            {formattedDeclaredAmount !== null ? (
+              <span className="mt-1 block text-xs font-semibold text-slate-600">
+                {t('declaredAmount')}: {formattedDeclaredAmount} JPYC
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {o.items.length > 0 && (
           <ul className="mt-2 space-y-0.5 text-sm text-slate-600">
             {o.items.map((it, i) => (

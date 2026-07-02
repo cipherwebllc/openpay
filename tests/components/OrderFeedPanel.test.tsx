@@ -133,6 +133,14 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByRole('button', { name: '対応済みにする' })).toBeInTheDocument();
   });
 
+  it('amountMismatch → 警告バッジと実着金額ラベルを表示', async () => {
+    h.orders = [{ ...order, amountMismatch: true }];
+    render();
+    expect(await screen.findByText('⚠ 金額不一致・要確認')).toBeInTheDocument();
+    expect(screen.getByText('実着金額')).toBeInTheDocument();
+    expect(screen.getByText('申告合計: 200 JPYC')).toBeInTheDocument();
+  });
+
   it('受注ゼロ → 空表示', async () => {
     h.orders = [];
     render();
