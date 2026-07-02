@@ -10,7 +10,7 @@
 //   本モジュールは P1.1 = 設定/メニュー/URL のみ (本番 inert・money-path 非該当)。
 
 import { isAddress, type Address } from 'viem';
-import { isJpycChainSlug, JPYC_CHAINS, type JpycChainSlug } from './chains';
+import { isJpycChainSlug, JPYC_CHAINS, slugForChain, type JpycChainSlug } from './chains';
 import { isTaxCategory, type TaxCategory } from './tax';
 import { validOptionGroups, type OptionGroup } from './menuOptions';
 import { parseHHMM, sanitizeMinLead } from './shopTime';
@@ -126,6 +126,17 @@ export const JPYC_CHAIN_LABEL: Record<JpycChainSlug, string> = {
   avalanche: 'Avalanche',
   ethereum: 'Ethereum',
 };
+
+/**
+ * chainId → JPYC チェーンの bare ブランド名 ("Polygon" / "Kaia" 等)。JPYC チェーンでなければ null
+ * (呼出側が `chain ${id}` 等の fallback を付ける)。**表示フォーマットは呼出側が決める** —
+ * OrderFulfillmentBoard は bare ("Polygon")、OrderFeedPanel は "JPYC (Polygon)" と付け方が異なるため、
+ * ここでは slug→bare label の解決だけを共有する (フォーマットは統一しない)。
+ */
+export function jpycChainLabel(chainId: number): string | null {
+  const slug = slugForChain(chainId);
+  return slug && isJpycChainSlug(slug) ? JPYC_CHAIN_LABEL[slug] : null;
+}
 
 // ── base64url(utf8) コーデック (browser / jsdom / Node 共通: btoa/atob + TextEncoder) ──
 function toBase64Url(json: string): string {

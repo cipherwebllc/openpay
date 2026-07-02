@@ -16,8 +16,8 @@ import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
-import { isJpycChainSlug, slugForChain, txExplorerUrl } from '@/lib/chains';
-import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
+import { txExplorerUrl } from '@/lib/chains';
+import { jpycChainLabel, type StorefrontParts } from '@/lib/mobileOrder';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
 
@@ -41,9 +41,11 @@ async function fetchFeed(): Promise<StoredOrder[]> {
   return Array.isArray(json.orders) ? (json.orders as StoredOrder[]) : [];
 }
 
+// OrderFeedPanel は "JPYC (Polygon)" 形式 (OrderFulfillmentBoard は bare "Polygon")。slug→bare label の
+// 解決だけ jpycChainLabel で共有し、フォーマット (プレフィックス) は各呼出側が付ける。
 function chainLabel(chainId: number): string {
-  const slug = slugForChain(chainId);
-  return slug && isJpycChainSlug(slug) ? `JPYC (${JPYC_CHAIN_LABEL[slug]})` : `chain ${chainId}`;
+  const label = jpycChainLabel(chainId);
+  return label ? `JPYC (${label})` : `chain ${chainId}`;
 }
 
 export function OrderFeedPanel() {
