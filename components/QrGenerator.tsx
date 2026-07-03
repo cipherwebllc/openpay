@@ -1119,6 +1119,10 @@ export function QrGenerator() {
             downloadSvg: t('downloadSvg'),
             downloadPng: t('downloadPng'),
             localGenNote: t('localGenNote'),
+            pegPill: t('posterPegPill'),
+            step1: t('posterStepScan'),
+            step2: t('posterStepConfirm'),
+            step3: t('posterStepDone'),
           }}
           qrValue={payUrl}
           qrRef={qrRef}
@@ -1138,6 +1142,13 @@ export function QrGenerator() {
           receiverShort={
             effectiveReceiver ? shortAddress(effectiveReceiver) : ''
           }
+          // ポスターを「読まずに分かる」形にする token/chain 情報 (labels-as-props)。
+          // chainSlug は public/chains/{slug}.svg と一致 (settings.chain = ChainSlug)。
+          asset={{
+            tokenSymbol: settings.token,
+            chainSlug: settings.chain,
+            chainLabel: chain.name,
+          }}
           copied={copied}
           onCopy={() => copy(payUrl)}
           onPrint={() => window.print()}

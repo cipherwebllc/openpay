@@ -10,7 +10,11 @@
 
 import { useEffect, useRef, type RefObject } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { CircleCheck, Printer, X } from 'lucide-react';
+import { CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
+import NextImage from 'next/image';
+import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
+import type { TokenSymbol } from '@/lib/tokens';
+import type { ChainSlug } from '@/lib/chains';
 
 export type QrPreviewModalLabels = {
   title: string;
@@ -25,6 +29,22 @@ export type QrPreviewModalLabels = {
   /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
    *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
   localGenNote?: string;
+  /** JPYC の視覚アンカー pill 文言 (例: 「1 JPYC = ¥1」)。asset=jpyc 時のみ使用。 */
+  pegPill?: string;
+  /** ポスター読者 (顧客) 向け 3 ステップ行の文言 (①スキャン ②確認 ③完了)。
+   *  asset 指定 + 3 つ揃ったときのみポスターに描画 (印刷でも表示)。 */
+  step1?: string;
+  step2?: string;
+  step3?: string;
+};
+
+// トークン / チェーンをポスターで「読まずに分かる」形で見せるための情報
+// (labels-as-props 流儀)。省略時はポスターは従来表示 (chain は mono テキスト) のまま
+// = 他の呼び出し元 (レジ) 非破壊。chainSlug は public/chains/{slug}.svg と一致させる。
+export type QrPreviewAsset = {
+  tokenSymbol: TokenSymbol;
+  chainSlug: string;
+  chainLabel: string;
 };
 
 // 店員が QR を提示している間の「着金検知ヒント」表示 (任意)。watching=監視中、
@@ -58,6 +78,7 @@ export function QrPreviewModal({
   note,
   chainText,
   receiverShort,
+  asset,
   copied,
   onCopy,
   onPrint,
@@ -77,6 +98,7 @@ export function QrPreviewModal({
   note?: string;
   chainText: string;
   receiverShort?: string;
+  asset?: QrPreviewAsset;
   copied: boolean;
   onCopy: () => void;
   onPrint?: () => void;
@@ -129,18 +151,42 @@ export function QrPreviewModal({
           </button>
         </div>
 
-        {/* ポスター調プレビュー (印刷対象。print: で全画面に展開) */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10">
+        {/* ポスター調プレビュー (印刷対象。print: で全画面に展開)。
+            print-color-adjust:exact でブランド色 / バッジが白抜けせず印刷される。 */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 [print-color-adjust:exact] print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10 print:[print-color-adjust:exact]">
           <div className="mx-auto flex max-w-sm flex-col items-center text-center">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 print:text-base">
               {labels.eyebrow}
             </p>
-            <h3 className="mt-2 text-2xl font-bold text-slate-900 print:text-5xl">
+            {/* break-keep: 「お支払いはこちら」等の 1 字孤立折返しを防ぐ。print はトークン行/
+                3ステップ追加後も A4 1 枚に収まるサイズに抑える (5xl だと上下が溢れて欠ける)。 */}
+            <h3 className="mt-2 break-keep text-2xl font-bold text-slate-900 print:text-4xl">
               {storeName}
             </h3>
             <p className="mt-2 text-sm text-slate-500 print:text-xl">
               {amountText}
             </p>
+            {/* トークン識別行 (asset 指定時): 大きめの token ロゴ + トークン名。
+                JPYC は「1 JPYC = ¥1」pill を視覚アンカーとして添える。白黒印刷でも
+                高コントラストで成立させる (色に意味を依存させない)。 */}
+            {asset && (
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <TokenLogo
+                  symbol={asset.tokenSymbol}
+                  size={28}
+                  alt=""
+                  className="h-7 w-7 shrink-0 print:h-10 print:w-10"
+                />
+                <span className="text-lg font-bold text-slate-900 print:text-3xl">
+                  {asset.tokenSymbol.toUpperCase()}
+                </span>
+                {asset.tokenSymbol === 'jpyc' && labels.pegPill && (
+                  <span className="rounded-full border border-slate-900 px-2 py-0.5 text-xs font-semibold text-slate-900 print:px-3 print:py-1 print:text-lg">
+                    {labels.pegPill}
+                  </span>
+                )}
+              </div>
+            )}
             {payModeBadge && (
               <p
                 className={`mt-3 inline-block rounded-full border px-3 py-1 text-xs font-semibold print:px-4 print:py-1.5 print:text-base ${
@@ -154,7 +200,7 @@ export function QrPreviewModal({
             )}
             <div
               ref={qrRef}
-              className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-10 print:p-8"
+              className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-6 print:p-6"
             >
               <QRCodeSVG value={qrValue} size={260} includeMargin level="M" />
             </div>
@@ -163,9 +209,50 @@ export function QrPreviewModal({
                 {note}
               </p>
             )}
-            <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
-              {chainText}
-            </p>
+            {/* チェーン表示: asset 指定時は chain ロゴ + ラベルの pill (顧客が
+                一目で分かる)。asset 未指定は従来の mono テキストを維持 (レジ非破壊)。 */}
+            {asset ? (
+              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 print:px-4 print:py-1.5 print:text-lg">
+                <ChainLogo
+                  slug={asset.chainSlug as ChainSlug}
+                  size={16}
+                  alt=""
+                  className="h-4 w-4 shrink-0 print:h-6 print:w-6"
+                />
+                {asset.chainLabel}
+              </span>
+            ) : (
+              <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
+                {chainText}
+              </p>
+            )}
+            {/* 3 ステップ行 (asset + step 文言が揃ったとき・印刷でも表示)。
+                ポスターの読者 = 顧客が初見で操作を理解できるように番号 + アイコン + 短文。 */}
+            {asset && labels.step1 && labels.step2 && labels.step3 && (
+              <ol className="mt-5 flex w-full max-w-xs flex-col gap-2 text-left print:mt-6 print:max-w-md">
+                {[
+                  { n: 1, Icon: ScanLine, text: labels.step1 },
+                  { n: 2, Icon: Eye, text: labels.step2 },
+                  { n: 3, Icon: CircleCheck, text: labels.step3 },
+                ].map(({ n, Icon, text }) => (
+                  <li
+                    key={n}
+                    className="flex items-center gap-2.5 print:gap-3"
+                  >
+                    <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full border border-slate-900 text-xs font-bold text-slate-900 print:h-8 print:w-8 print:text-base">
+                      {n}
+                    </span>
+                    <Icon
+                      className="h-4 w-4 flex-none text-slate-500 print:h-5 print:w-5"
+                      aria-hidden
+                    />
+                    <span className="text-sm font-medium text-slate-700 print:text-lg">
+                      {text}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
             {receiverShort && (
               <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">
                 {receiverShort}
@@ -203,6 +290,16 @@ export function QrPreviewModal({
                   {paymentStatus.text}
                 </p>
               ))}
+            {/* フッター OpenPay ロゴ (asset 指定時のみ・ブランド信頼)。印刷でも残す。 */}
+            {asset && (
+              <NextImage
+                src="/logo.svg"
+                alt="OpenPay"
+                width={205}
+                height={48}
+                className="mt-6 h-4 w-auto opacity-70 print:mt-10 print:h-7"
+              />
+            )}
           </div>
         </section>
 

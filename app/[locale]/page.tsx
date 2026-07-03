@@ -7,6 +7,7 @@ import { AppShell } from '@/components/AppShell';
 import { LandingHero } from '@/components/LandingHero';
 import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingBenefits } from '@/components/LandingBenefits';
+import { LandingCashComparison } from '@/components/LandingCashComparison';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingMobileOrder } from '@/components/LandingMobileOrder';
@@ -34,6 +35,7 @@ export default async function HomePage({
         <MarketRates />
       </div>
       <LandingBenefits />
+      <LandingCashComparison />
       <LandingHowItWorks />
       <LandingMobileOrder />
       <LandingFeatures />
