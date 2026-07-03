@@ -38,6 +38,7 @@ import { LedgerPaidRow } from './LedgerPaidRow';
 import { HistoryToolbar } from './HistoryToolbar';
 import { HistorySummary } from './HistorySummary';
 import { FreeeSyncPanel } from './FreeeSyncPanel';
+import { PushNotifyPanel } from './PushNotifyPanel';
 import { AccountingAffiliates } from './AccountingAffiliates';
 import { PwaInstallHint } from './PwaInstallHint';
 
@@ -238,6 +239,10 @@ export function HistoryView() {
         {hydrated && hasEntries && env.enableFreeeSync && (
           <FreeeSyncPanel entries={receivedFiltered} usdcJpy={usdcJpy} />
         )}
+
+        {/* Web Push 着金通知 (flag OFF / 未サインイン / 非対応は panel 内で自動 inert)。
+            hydrate 後にだけ mount (SSR skeleton のチラつき回避)。 */}
+        {hydrated && <PushNotifyPanel />}
 
         <AccountingAffiliates />
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shortAddress } from '@/lib/format';
+import { shortAddress, formatJpycYenLabel } from '@/lib/format';
 
 describe('shortAddress', () => {
   it('42 文字の checksum address を 0x123456…1234 形式へ短縮', () => {
@@ -20,5 +20,18 @@ describe('shortAddress', () => {
 
   it('空文字はそのまま返す', () => {
     expect(shortAddress('')).toBe('');
+  });
+});
+
+describe('formatJpycYenLabel', () => {
+  it('JPYC atomic (18 decimals) を ¥ + 3 桁区切り整数円へ', () => {
+    expect(formatJpycYenLabel(1_000_000_000_000_000_000n)).toBe('¥1');
+    expect(formatJpycYenLabel(1234n * 10n ** 18n)).toBe('¥1,234');
+    expect(formatJpycYenLabel(0n)).toBe('¥0');
+  });
+
+  it('1 JPYC 未満の端数は切り捨てる', () => {
+    // 1.9 JPYC → ¥1
+    expect(formatJpycYenLabel(1_900_000_000_000_000_000n)).toBe('¥1');
   });
 });

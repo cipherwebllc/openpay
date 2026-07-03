@@ -83,6 +83,29 @@ const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const pendingKey = pushNotifyPendingKey(WALLET);
 const coalesceKey = pushNotifyCoalesceKey(WALLET);
 
+type Sub = {
+  endpointHash: string;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  locale: 'ja' | 'en';
+  vapidKeyId: string;
+  includeAmount?: boolean;
+  createdAt: number;
+};
+type Resolver = (locale: 'ja' | 'en', sub: Sub) => { title: string };
+
+function sub(includeAmount = false, locale: 'ja' | 'en' = 'ja'): Sub {
+  return {
+    endpointHash: 'a'.repeat(64),
+    endpoint: 'https://push.example/sub',
+    keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) },
+    locale,
+    vapidKeyId: '12345678',
+    includeAmount,
+    createdAt: 1,
+  };
+}
+
 beforeEach(() => {
   hold.enablePushNotify = true;
   hold.data.clear();
@@ -121,12 +144,9 @@ describe('notifyPaymentReceived', () => {
     expect(hold.data.has(pendingKey)).toBe(false);
 
     expect(hold.send).toHaveBeenCalledTimes(1);
-    const [, payload] = hold.send.mock.calls[0] as [
-      string,
-      (locale: 'ja' | 'en') => { title: string },
-    ];
-    expect(payload('ja')).toEqual({ title: '着金がありました' });
-    expect(payload('en')).toEqual({ title: 'Payment received' });
+    const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
+    expect(payload('ja', sub())).toEqual({ title: '着金がありました' });
+    expect(payload('en', sub(false, 'en'))).toEqual({ title: 'Payment received' });
   });
 
   it('NX 不取得時は pending count だけ増やして送信しない', async () => {
@@ -146,23 +166,21 @@ describe('notifyPaymentReceived', () => {
 
     expect(hold.data.has(pendingKey)).toBe(false);
     expect(hold.send).toHaveBeenCalledTimes(1);
-    const [, payload] = hold.send.mock.calls[0] as [
-      string,
-      (locale: 'ja' | 'en') => { title: string },
-    ];
-    expect(payload('ja')).toEqual({ title: '新着 3 件の着金があります' });
-    expect(payload('en')).toEqual({ title: '3 new payments received' });
+    const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
+    expect(payload('ja', sub())).toEqual({ title: '新着 3 件の着金があります' });
+    expect(payload('en', sub(false, 'en'))).toEqual({
+      title: '3 new payments received',
+    });
   });
 
   it('注文通知は指定の locale 別文言を使う', async () => {
     await notifyPaymentReceived(WALLET, 'order');
 
-    const [, payload] = hold.send.mock.calls[0] as [
-      string,
-      (locale: 'ja' | 'en') => { title: string },
-    ];
-    expect(payload('ja')).toEqual({ title: '新しい注文があります' });
-    expect(payload('en')).toEqual({ title: 'New order received' });
+    const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
+    expect(payload('ja', sub())).toEqual({ title: '新しい注文があります' });
+    expect(payload('en', sub(false, 'en'))).toEqual({
+      title: 'New order received',
+    });
   });
 
   it('注文通知も複数件は count だけを集約して通知する', async () => {
@@ -170,11 +188,39 @@ describe('notifyPaymentReceived', () => {
 
     await notifyPaymentReceived(WALLET, 'order');
 
-    const [, payload] = hold.send.mock.calls[0] as [
-      string,
-      (locale: 'ja' | 'en') => { title: string },
-    ];
-    expect(payload('ja')).toEqual({ title: '新着 5 件の注文があります' });
-    expect(payload('en')).toEqual({ title: '5 new orders received' });
+    const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
+    expect(payload('ja', sub())).toEqual({ title: '新着 5 件の注文があります' });
+    expect(payload('en', sub(false, 'en'))).toEqual({
+      title: '5 new orders received',
+    });
+  });
+
+  it('単一 payment は opt-in 購読 (includeAmount) にだけ金額を出す', async () => {
+    await notifyPaymentReceived(WALLET, 'payment', '¥1,234');
+
+    const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
+    // opt-in 購読は金額入り。
+    expect(payload('ja', sub(true))).toEqual({
+      title: '¥1,234 の着金がありました',
+    });
+    expect(payload('en', sub(true, 'en'))).toEqual({
+      title: 'Payment received: ¥1,234',
+    });
+    // 非 opt-in 購読は金額なし (同一送信内でも購読ごとに出し分け)。
+    expect(payload('ja', sub(false))).toEqual({ title: '着金がありました' });
+  });
+
+  it('複数件 (n>=2) は opt-in でも件数のみ・金額は出さない', async () => {
+    hold.data.set(pendingKey, '2');
+
+    await notifyPaymentReceived(WALLET, 'payment', '¥5,000');
+
+    const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
+    expect(payload('ja', sub(true))).toEqual({
+      title: '新着 3 件の着金があります',
+    });
+    expect(payload('en', sub(true, 'en'))).toEqual({
+      title: '3 new payments received',
+    });
   });
 });

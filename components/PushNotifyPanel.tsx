@@ -1,0 +1,253 @@
+'use client';
+
+// /history の Web Push 着金通知パネル。SIWE ゲート (FreeeSyncPanel と同型) の下で
+// Service Worker を登録し push を購読する。状態に応じて出し分ける:
+//   flag OFF / VAPID 公開鍵なし → null (完全 inert)
+//   未サインイン                → ウォレットログイン案内
+//   iOS Safari 通常タブ (非 PWA) → 購読 UI を出さず A2HS hint (iOS は A2HS 済 PWA のみ push 可)
+//   未対応ブラウザ               → 非対応メッセージ
+//   permission denied           → ブロック中メッセージ
+//   購読中/未購読                → 有効化/無効化トグル + 金額 opt-in
+//
+// SSR/hydration 安全: platform / 対応判定 / 購読状態は useEffect で mount 後に解決する
+// (useState(detect) の lazy init は SSR='other'→client 実 UA で React #418 を踏む・PwaInstallHint と同型)。
+
+import { useEffect, useState } from 'react';
+import { useTranslations, useLocale } from 'next-intl';
+import { env } from '@/lib/env';
+import { useSiweSession } from '@/hooks/useSiweSession';
+import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
+import { detectMobilePlatform, type MobilePlatform } from '@/lib/walletDeepLink';
+import { PwaInstallHint } from './PwaInstallHint';
+
+// 金額 opt-in の選好を面/再訪をまたいで保持する (購読の真実点はサーバだが、UI の
+// トグル初期値をユーザの直近選択に合わせるため)。
+const INCLUDE_AMOUNT_KEY = 'openpay:pushIncludeAmount:v1';
+
+// VAPID base64url 公開鍵を pushManager.subscribe が要求する Uint8Array に変換する。
+function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const normalized = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(normalized);
+  const out = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function pushSupported(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    typeof window.PushManager !== 'undefined' &&
+    'Notification' in window
+  );
+}
+
+export function PushNotifyPanel() {
+  const t = useTranslations('PushNotify');
+  const locale = useLocale();
+  const pushLocale = locale === 'en' ? 'en' : 'ja';
+  const { isSignedIn } = useSiweSession();
+  const { isStandalone } = usePwaDisplayMode();
+
+  const [mounted, setMounted] = useState(false);
+  const [platform, setPlatform] = useState<MobilePlatform>('other');
+  const [supported, setSupported] = useState(false);
+  const [permission, setPermission] =
+    useState<NotificationPermission>('default');
+  const [subscribed, setSubscribed] = useState(false);
+  const [includeAmount, setIncludeAmount] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setPlatform(detectMobilePlatform());
+    const ok = pushSupported();
+    setSupported(ok);
+    if (!ok) return;
+    setPermission(Notification.permission);
+    try {
+      if (localStorage.getItem(INCLUDE_AMOUNT_KEY) === '1') setIncludeAmount(true);
+    } catch {
+      /* localStorage 不可環境では既定 false */
+    }
+    // 既存購読があれば「有効」状態から始める (別端末では未購読=既定 false)。
+    void navigator.serviceWorker
+      .getRegistration()
+      .then((reg) => reg?.pushManager.getSubscription())
+      .then((sub) => setSubscribed(!!sub))
+      .catch(() => undefined);
+  }, []);
+
+  // flag OFF / 公開鍵なしは完全 inert (SSR/client 同一で null → hydration 安全)。
+  if (!env.enablePushNotify || !env.pushVapidPublicKey) return null;
+
+  async function enable() {
+    setBusy(true);
+    setError(false);
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+      if (perm !== 'granted') {
+        setBusy(false);
+        return;
+      }
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(env.pushVapidPublicKey),
+      });
+      const res = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          subscription: sub.toJSON(),
+          locale: pushLocale,
+          includeAmount,
+        }),
+      });
+      if (!res.ok) throw new Error('subscribe_failed');
+      setSubscribed(true);
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setBusy(true);
+    setError(false);
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) {
+        await fetch('/api/push/subscribe', {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
+      }
+      setSubscribed(false);
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 金額 opt-in の変更。購読中なら同 endpoint へ再 POST (upsert で上書き)。
+  async function changeIncludeAmount(next: boolean) {
+    setIncludeAmount(next);
+    try {
+      localStorage.setItem(INCLUDE_AMOUNT_KEY, next ? '1' : '0');
+    } catch {
+      /* noop */
+    }
+    if (!subscribed) return;
+    setBusy(true);
+    setError(false);
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) {
+        const res = await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            subscription: sub.toJSON(),
+            locale: pushLocale,
+            includeAmount: next,
+          }),
+        });
+        if (!res.ok) throw new Error('subscribe_failed');
+      }
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4">
+      <h3 className="text-sm font-bold text-slate-900">{t('title')}</h3>
+      <p className="mt-1 text-xs text-slate-500">{t('description')}</p>
+      {renderBody()}
+    </section>
+  );
+
+  function renderBody() {
+    if (!isSignedIn) {
+      return <p className="mt-2 text-xs text-slate-500">{t('signInRequired')}</p>;
+    }
+    // mount 前は platform/対応判定が未確定なので何も出さない (SSR/client 一致)。
+    if (!mounted) return null;
+    // iOS Safari 通常タブ: A2HS 済 PWA でないと push 不可 → 購読 UI でなく hint を出す。
+    if (platform === 'ios' && !isStandalone) {
+      return (
+        <div className="mt-2">
+          <PwaInstallHint
+            title={t('iosInstallHintTitle')}
+            iosStep3={t('iosInstallHintStep3')}
+          />
+        </div>
+      );
+    }
+    if (!supported) {
+      return <p className="mt-2 text-xs text-slate-500">{t('unsupported')}</p>;
+    }
+    if (permission === 'denied') {
+      return <p className="mt-2 text-xs text-amber-700">{t('denied')}</p>;
+    }
+
+    return (
+      <div className="mt-3 space-y-3">
+        {subscribed ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-medium text-emerald-700">
+              {t('enabledStatus')}
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void disable()}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
+            >
+              {t('disableCta')}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void enable()}
+            className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('enableCta')}
+          </button>
+        )}
+
+        <label className="flex items-start gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={includeAmount}
+            disabled={busy}
+            onChange={(e) => void changeIncludeAmount(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            {t('includeAmountLabel')}
+            <span className="mt-0.5 block text-[11px] text-slate-400">
+              {t('includeAmountNote')}
+            </span>
+          </span>
+        </label>
+
+        {error && <p className="text-[11px] text-red-600">{t('error')}</p>}
+      </div>
+    );
+  }
+}

@@ -1390,6 +1390,21 @@
     "contact": "For inquiries regarding these Terms, please contact {email}.",
     "legalNote": "The Japanese version of these Terms prevails. This English version is provided for reference only."
   },
+  "PushNotify": {
+    "title": "Payment push notifications",
+    "description": "Get a notification on this device when you receive a payment. Works even from the app added to your home screen.",
+    "signInRequired": "Sign in with your wallet to enable notifications.",
+    "unsupported": "This browser does not support Web Push.",
+    "denied": "Notifications are blocked. Allow notifications for this site in your browser settings.",
+    "enableCta": "Enable notifications",
+    "disableCta": "Disable notifications",
+    "enabledStatus": "Notifications are on",
+    "includeAmountLabel": "Include the amount in notifications",
+    "includeAmountNote": "The sale amount will appear on your lock screen. Leave this off if others may see your screen.",
+    "iosInstallHintTitle": "Add to home screen to receive notifications",
+    "iosInstallHintStep3": "Open it from the added icon to enable notifications",
+    "error": "Could not update notifications. Please try again in a moment."
+  },
   "Privacy": {
     "title": "Privacy Policy",
     "effectiveDate": "Effective: {date}",
@@ -1410,20 +1425,24 @@
       "title": "4. Retention Period",
       "body": "We retain collected information only for the period necessary to fulfill the purposes of use. Server logs are deleted in sequence 90 days after collection. Inquiry records are deleted 3 years after the last correspondence. On-chain transaction records, by their nature, are permanently public outside our control, and we cannot delete them."
     },
+    "sectionPush": {
+      "title": "5. Web Push Notifications (optional)",
+      "body": "Users may optionally enable push notifications for received payments. Only if enabled, the Company stores in its KV storage the mapping between the user's wallet address and the push subscription endpoint (endpoint and encryption keys) issued by the browser. Up to 5 devices are stored per wallet, the mapping automatically expires after 90 days, and users can delete it at any time by disabling notifications. Notifications are delivered via the push service operated by the browser vendor (such as Apple, Google, or Mozilla). Whether the sale amount is included in the notification body is an optional user setting (off by default); only when turned on does the amount appear on the lock screen and similar surfaces. In logs, the subscription endpoint is recorded as a hash rather than retained in the clear."
+    },
     "sectionSecurity": {
-      "title": "5. Security Measures for Personal Information",
+      "title": "6. Security Measures for Personal Information",
       "body": "To prevent the leakage, loss, or damage of acquired personal information and otherwise ensure its safe management, the Company implements necessary and appropriate security measures, including encryption of communications via SSL/TLS, management of access privileges, measures against unauthorized access, and necessary and appropriate supervision of service providers."
     },
     "section5": {
-      "title": "6. Requests for Disclosure, Correction, and Suspension of Use",
-      "body": "Users may request disclosure, correction, addition, deletion, suspension of use, erasure, or suspension of third-party provision of their personal information held by us, pursuant to APPI Articles 33 through 35. For request procedures and fees, please contact us at the address shown in Section 7. We may require identity verification before responding."
+      "title": "7. Requests for Disclosure, Correction, and Suspension of Use",
+      "body": "Users may request disclosure, correction, addition, deletion, suspension of use, erasure, or suspension of third-party provision of their personal information held by us, pursuant to APPI Articles 33 through 35. For request procedures and fees, please contact us at the address shown in Section 8. We may require identity verification before responding."
     },
     "section6": {
-      "title": "7. Contact",
+      "title": "8. Contact",
       "body": "For inquiries regarding this Policy or requests under APPI: Operator: {company}. Address: {address}. Personal Information Manager: {representative}. Email: {email}."
     },
     "section7": {
-      "title": "8. Amendments to this Policy",
+      "title": "9. Amendments to this Policy",
       "body": "We may amend this Policy in response to changes in law, changes to the Service, or other necessary reasons. Amended Policies take effect when posted on the Service."
     },
     "legalNote": "The Japanese version of this Policy prevails. This English version is provided for reference only."

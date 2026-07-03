@@ -29,11 +29,16 @@ export function pushNotifyCoalesceKey(wallet: Address | string): string {
 export async function notifyPaymentReceived(
   wallet: Address | string,
   kind: PaymentNotificationKind,
+  // ロック画面に出す金額ラベル (例 `¥1,234`)。opt-in 購読 (sub.includeAmount) かつ
+  // 単一イベント (count===1) の payment 通知でのみ使う。⚠️ これは coalesce の NX 勝者
+  // イベント自身の金額であり、pending にコアレスされた後続イベントの金額は加算/蓄積しない
+  // (n>=2 は件数のみ)。pending 側に金額を貯めない設計なので合算漏れ/取り違えが起きない。
+  amountLabel?: string,
 ): Promise<void> {
   if (!env.enablePushNotify) return;
 
   try {
-    await notifyPaymentReceivedInner(wallet, kind);
+    await notifyPaymentReceivedInner(wallet, kind, amountLabel);
   } catch (e) {
     logger.warn('push.notify_failed', {
       wallet: wallet.toLowerCase(),
@@ -46,6 +51,7 @@ export async function notifyPaymentReceived(
 async function notifyPaymentReceivedInner(
   wallet: Address | string,
   kind: PaymentNotificationKind,
+  amountLabel: string | undefined,
 ): Promise<void> {
   const pendingKey = pushNotifyPendingKey(wallet);
   const coalesceKey = pushNotifyCoalesceKey(wallet);
@@ -98,7 +104,10 @@ async function notifyPaymentReceivedInner(
   }
 
   const count = parsePendingCount(pending.value, incremented.value);
-  await sendPushToWallet(wallet, (locale) => copyFor(kind, locale, count));
+  // resolver は購読ごとに評価される。金額は opt-in (sub.includeAmount) 購読にだけ出す。
+  await sendPushToWallet(wallet, (locale, sub) =>
+    copyFor(kind, locale, count, sub.includeAmount ? amountLabel : undefined),
+  );
 }
 
 function parsePendingCount(raw: string | null, fallback: number): number {
@@ -111,6 +120,7 @@ function copyFor(
   kind: PaymentNotificationKind,
   locale: PushLocale,
   count: number,
+  amountLabel: string | undefined,
 ): PushPayload {
   if (kind === 'order') {
     if (count >= 2) {
@@ -133,6 +143,16 @@ function copyFor(
         locale === 'ja'
           ? `新着 ${count} 件の着金があります`
           : `${count} new payments received`,
+    };
+  }
+
+  // 単一 payment かつ opt-in 購読 (amountLabel present) のときだけ金額を出す。
+  if (amountLabel) {
+    return {
+      title:
+        locale === 'ja'
+          ? `${amountLabel} の着金がありました`
+          : `Payment received: ${amountLabel}`,
     };
   }
 

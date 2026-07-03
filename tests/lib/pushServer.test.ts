@@ -13,6 +13,7 @@ const hold = vi.hoisted(() => ({
     keys: { p256dh: string; auth: string };
     locale: 'ja' | 'en';
     vapidKeyId: string;
+    includeAmount?: boolean;
     createdAt: number;
   }>,
 }));
@@ -154,6 +155,42 @@ describe('sendPushToWallet', () => {
     expect(store.refresh).toHaveBeenCalledWith(WALLET);
     expect(store.remove).toHaveBeenCalledWith(WALLET, {
       endpointHash: 'b'.repeat(64),
+    });
+  });
+
+  it('関数 resolver は (locale, sub) を受け購読ごとに payload を出し分ける', async () => {
+    hold.subscriptions = [
+      {
+        endpointHash: 'a'.repeat(64),
+        endpoint: 'https://push.example/opt-in',
+        keys,
+        locale: 'ja',
+        vapidKeyId: '12345678',
+        includeAmount: true,
+        createdAt: 1,
+      },
+      {
+        endpointHash: 'b'.repeat(64),
+        endpoint: 'https://push.example/opt-out',
+        keys,
+        locale: 'ja',
+        vapidKeyId: '12345678',
+        includeAmount: false,
+        createdAt: 2,
+      },
+    ];
+    webPush.sendNotification.mockResolvedValue(undefined);
+
+    await sendPushToWallet(WALLET, (locale, sub) => ({
+      title:
+        sub.includeAmount && locale === 'ja' ? '¥1 の着金' : '着金がありました',
+    }));
+
+    expect(JSON.parse(webPush.sendNotification.mock.calls[0][1])).toMatchObject({
+      title: '¥1 の着金',
+    });
+    expect(JSON.parse(webPush.sendNotification.mock.calls[1][1])).toMatchObject({
+      title: '着金がありました',
     });
   });
 

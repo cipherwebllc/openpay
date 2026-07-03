@@ -58,7 +58,7 @@ describe('Legal pages', () => {
   });
 
   describe('Privacy (プライバシーポリシー)', () => {
-    it('ja: h1 と 7 section の title が render される', () => {
+    it('ja: h1 と 9 section の title が render される', () => {
       renderWithIntl(<PrivacyPage />, { locale: 'ja' });
       expect(
         screen.getByRole('heading', {
@@ -66,7 +66,7 @@ describe('Legal pages', () => {
           name: 'プライバシーポリシー',
         }),
       ).toBeInTheDocument();
-      for (let n = 1; n <= 7; n++) {
+      for (let n = 1; n <= 9; n++) {
         expect(
           screen.getByRole('heading', {
             level: 2,
@@ -83,7 +83,7 @@ describe('Legal pages', () => {
       ).toBeInTheDocument();
     });
 
-    it('section 6 (お問い合わせ窓口) に連絡先 email が含まれる', () => {
+    it('section 8 (お問い合わせ窓口) に連絡先 email が含まれる', () => {
       renderWithIntl(<PrivacyPage />, { locale: 'ja' });
       // text node 全体に email が含まれる
       expect(
@@ -153,25 +153,39 @@ describe('Legal pages', () => {
       expect(en.Privacy.sectionSecurity.body).toMatch(/SSL\/TLS/);
     });
 
-    it('安全管理措置節 挿入で開示請求=6/問い合わせ=7/改定=8 に繰下げ済 (ja)', async () => {
+    it('安全管理措置=6/開示請求=7/問い合わせ=8/改定=9 に繰下げ済 (Web Push 5 節挿入・ja)', async () => {
       const ja = (await import('@/messages/ja.json')).default;
-      expect(ja.Privacy.sectionSecurity.title).toMatch(/^5\./);
-      expect(ja.Privacy.section5.title).toMatch(/^6\./);
-      expect(ja.Privacy.section6.title).toMatch(/^7\./);
-      expect(ja.Privacy.section7.title).toMatch(/^8\./);
-      // section5 本文の相互参照 (お問い合わせ窓口) が renumber 後の「第7項」に追従
-      // (旧「第6項」のまま残ると参照ずれ・Codex 指摘)
-      expect(ja.Privacy.section5.body).toContain('第 7 項');
-      expect(ja.Privacy.section5.body).not.toContain('第 6 項');
+      expect(ja.Privacy.sectionPush.title).toMatch(/^5\./);
+      expect(ja.Privacy.sectionSecurity.title).toMatch(/^6\./);
+      expect(ja.Privacy.section5.title).toMatch(/^7\./);
+      expect(ja.Privacy.section6.title).toMatch(/^8\./);
+      expect(ja.Privacy.section7.title).toMatch(/^9\./);
+      // section5 本文の相互参照 (お問い合わせ窓口) が renumber 後の「第8項」に追従
+      // (旧番号のまま残ると参照ずれ・Codex 指摘)
+      expect(ja.Privacy.section5.body).toContain('第 8 項');
+      expect(ja.Privacy.section5.body).not.toContain('第 7 項');
     });
 
-    it('en: section5 本文の相互参照が Section 7 に追従 (Section 6 は残らない)', async () => {
+    it('en: section5 本文の相互参照が Section 8 に追従 (Section 7 は残らない)', async () => {
       const en = (await import('@/messages/en.json')).default;
-      expect(en.Privacy.section5.body).toMatch(/Section 7/);
-      expect(en.Privacy.section5.body).not.toMatch(/Section 6/);
+      expect(en.Privacy.section5.body).toMatch(/Section 8/);
+      expect(en.Privacy.section5.body).not.toMatch(/Section 7/);
     });
 
-    it('安全管理措置の節が実際に描画される (ja, 見出し「5.」)', () => {
+    it('Web Push 通知 (任意) の節 (sectionPush) が ja/en に存在し 90日/5台/endpoint/opt-in を開示', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      expect(ja.Privacy.sectionPush.title).toContain('Web Push');
+      expect(ja.Privacy.sectionPush.body).toContain('90 日');
+      expect(ja.Privacy.sectionPush.body).toContain('5 台');
+      expect(ja.Privacy.sectionPush.body).toContain('endpoint');
+      expect(en.Privacy.sectionPush.title).toMatch(/Web Push/i);
+      expect(en.Privacy.sectionPush.body).toMatch(/90 days/i);
+      expect(en.Privacy.sectionPush.body).toMatch(/5 devices/i);
+      expect(en.Privacy.sectionPush.body).toMatch(/endpoint/i);
+    });
+
+    it('安全管理措置の節が実際に描画される (ja, 見出し「6.」)', () => {
       renderWithIntl(<PrivacyPage />, { locale: 'ja' });
       expect(
         screen.getByRole('heading', { level: 2, name: /個人情報の安全管理措置/ }),

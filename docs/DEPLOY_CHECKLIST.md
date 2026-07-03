@@ -1254,3 +1254,54 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - `listResourcesForMerchant` (owner 一覧) は有界並列 (同時 25) で取得。1 件でも KV 取得失敗なら null →
   GET 503 (outage 中に「登録ゼロ」と誤表示して重複登録させない)。
 - 料金性質の登録不要は memory:project_fsa_clearance (金融庁回答)・税務は別 (税理士)。
+
+## §15 Web Push 着金通知 go-live SOP
+
+決済/受注の成功を店主端末に Web Push で届ける (`/history` の PushNotifyPanel + 素の `public/sw.js`)。
+VAPID 秘密鍵/subject は `lib/push/server.ts` (server-only) に閉じ、client には公開鍵と flag のみ。金額は
+opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory:project は A2HS ロードマップ。
+
+### §15.1 既定 (現状 = inert・ロールバック先)
+- `NEXT_PUBLIC_ENABLE_PUSH_NOTIFY` 既定 **OFF**。OFF では `/api/push/subscribe` が **404**・PushNotifyPanel は
+  **null (完全 inert)**・relay/order の `after()` push トリガも張られない。
+- **この OFF が安全状態であり、ロールバック先**。
+
+### §15.2 go-live 手順 (順序厳守)
+1. **VAPID 鍵ペア生成**: `npx web-push generate-vapid-keys`。公開鍵 (base64url) / 秘密鍵 (base64url) を得る。
+2. env 4 つを設定 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
+   - `NEXT_PUBLIC_PUSH_VAPID_PUBLIC_KEY` = 公開鍵 (client bundle に出る・購読 applicationServerKey)。
+   - `PUSH_VAPID_PRIVATE_KEY` = 秘密鍵 (**server-only**・絶対に NEXT_PUBLIC を付けない)。
+   - `PUSH_VAPID_SUBJECT` = `mailto:ops@…` 等の連絡先 (VAPID 仕様の subject)。
+   - `NEXT_PUBLIC_ENABLE_PUSH_NOTIFY=1` (最後に点灯)。
+   - ⚠️ **公開鍵/秘密鍵は同一ペア**であること。ずれると全 endpoint が送信失敗 → prune される。
+3. KV (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) 設定済 (購読は `push:subs:{wallet}` に保存)。
+4. **iOS は A2HS 済 PWA のみ push 可**。iOS Safari 通常タブでは PushNotifyPanel は購読 UI を出さず A2HS
+   hint に誘導する (仕様どおり・要ホーム画面追加)。
+5. `.env.local.example` 同期を確認 (ドリフト厳禁)。
+
+### §15.3 ロールバック (安全状態へ即復帰)
+- **最速 (全停止)**: `NEXT_PUBLIC_ENABLE_PUSH_NOTIFY=0` + 再デプロイ → `/api/push/*` 404・panel 非表示・
+  トリガ不発。既存購読レコードは KV TTL (90 日) で自然失効 (手動 flush 不要)。
+- ※ NEXT_PUBLIC_* は build-time inline のため env 変更には再デプロイが要る (Vercel)。
+
+### §15.4 VAPID 鍵ローテ手順
+1. 新 VAPID ペアを生成し `NEXT_PUBLIC_PUSH_VAPID_PUBLIC_KEY` / `PUSH_VAPID_PRIVATE_KEY` を差替え → 再デプロイ。
+2. 旧鍵で暗号化された既存購読 (`vapidKeyId` が旧公開鍵ハッシュ) への送信は **失敗 → 404/410 で自動 prune**
+   される (`lib/push/server.ts` の pruned 経路)。運営側の手動削除は不要。
+3. 利用者は `/history` で **再購読が必要** (旧 subscription は無効化されるため)。panel の「通知を有効にする」を
+   再度押すと新鍵で購読し直す。移行期間中の二重運用 (旧鍵での送信継続) はしない設計。
+
+### §15.5 監視
+- 送信/購読/設定の障害は logger 経由で Sentry へ:
+  - `push.send_failed` (endpoint 個別の送信失敗・endpoint は hash のみ)・`push.notify_failed`
+    (トリガ処理の例外)・`push.vapid_misconfigured` (鍵/subject 未設定で送信 skip)。
+  - 補助: `push.subscriptions_read_failed` / `push.notify_*` (pending/coalesce の KV 障害)。
+- 点灯直後は実 payment を 1 件流し、店主端末で通知が届くこと + 上記イベントが無出力なことを目視。
+- **push 失敗は決済/受注を rollback しない** (契約)。通知が届かなくても着金・受注は成立する。
+
+### §15.6 既知の前提 / 制約 (accepted)
+- payload 既定は「着金がありました」(金額なし)。金額表示は購読ごとの opt-in (`includeAmount`) で、ON の
+  購読にだけロック画面に売上額を出す。payer / wallet / txHash / 注文 items は payload に入れない。
+- wallet 単位 coalescing (1 分 1 通 + 「新着 n 件」集約)。金額ラベルは coalesce の NX 勝者 (単一 count===1)
+  イベントのみ表示 — n>=2 は件数のみで金額は合算しない。
+- 購読は 1 wallet 最大 5 台 (oldest prune)・TTL 90 日 (送信成功で更新)・404/410 で即削除。

@@ -49,6 +49,7 @@ import {
 } from '@/lib/relay/relayRoute';
 import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
+import { formatJpycYenLabel } from '@/lib/format';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 
 export const runtime = 'nodejs';
@@ -327,7 +328,10 @@ async function handleFree(
         });
       }
       if (env.enablePushNotify) {
-        after(() => notifyPaymentReceived(auth.to, 'payment'));
+        // free 経路の店主受取額 = auth.value (JPYC 18 decimals・1 JPYC=¥1)。金額は
+        // opt-in 購読にだけ notify 側で出す (label はここで整形して透過)。
+        const amountLabel = formatJpycYenLabel(auth.value);
+        after(() => notifyPaymentReceived(auth.to, 'payment', amountLabel));
       }
     }
   }
@@ -416,7 +420,10 @@ async function handleRecover(
   });
   const isFeePayment = params.merchant.toLowerCase() === feeReceiver.toLowerCase();
   if (result.kind === 'success' && !isFeePayment && env.enablePushNotify) {
-    after(() => notifyPaymentReceived(params.merchant, 'payment'));
+    // recover 経路の店主実受取額 = 検証済み params.merchantValue (forwarder.settle が店舗へ
+    // 送る額・署名対象で settleViaForwarder が照合済み)。gas 回収分 (feeValue) は含めない。
+    const amountLabel = formatJpycYenLabel(params.merchantValue);
+    after(() => notifyPaymentReceived(params.merchant, 'payment', amountLabel));
   }
   return respond(result, chainId);
 }

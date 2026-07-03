@@ -31,7 +31,7 @@ vi.mock('@/lib/kv', () => ({
   kvEval: (_script: string, keys: string[], args: string[]) => {
     kv.evalSpy(_script, keys, args);
     const key = keys[0];
-    if (args.length === 9) {
+    if (args.length === 10) {
       const [
         endpointHash,
         endpoint,
@@ -42,6 +42,7 @@ vi.mock('@/lib/kv', () => ({
         createdAtRaw,
         ttlRaw,
         capRaw,
+        includeAmountRaw,
       ] = args;
       const list = JSON.parse(kv.data.get(key) ?? '[]') as Array<{
         endpointHash: string;
@@ -49,6 +50,7 @@ vi.mock('@/lib/kv', () => ({
         keys: { p256dh: string; auth: string };
         locale: string;
         vapidKeyId: string;
+        includeAmount: boolean;
         createdAt: number;
       }>;
       const next = {
@@ -57,6 +59,7 @@ vi.mock('@/lib/kv', () => ({
         keys: { p256dh, auth },
         locale,
         vapidKeyId,
+        includeAmount: includeAmountRaw === '1',
         createdAt: Number(createdAtRaw),
       };
       const idx = list.findIndex((item) => item.endpointHash === endpointHash);
@@ -218,5 +221,79 @@ describe('push subscription store', () => {
 
     await expect(refreshPushSubscriptionsTtl(WALLET)).resolves.toBe(true);
     expect(kv.expireSpy).toHaveBeenCalledWith(key, PUSH_SUBSCRIPTION_TTL_SEC);
+  });
+
+  it('includeAmount opt-in を保存し round-trip する (既定は false)', async () => {
+    await upsertPushSubscription(WALLET, {
+      endpoint: 'https://push.example/sub/off',
+      keys,
+      locale: 'ja',
+      nowMs: 1,
+    });
+    await upsertPushSubscription(WALLET, {
+      endpoint: 'https://push.example/sub/on',
+      keys,
+      locale: 'en',
+      includeAmount: true,
+      nowMs: 2,
+    });
+
+    const listed = await listPushSubscriptions(WALLET);
+    expect(listed.ok).toBe(true);
+    const byEndpoint = Object.fromEntries(
+      (listed.ok ? listed.value : []).map((s) => [s.endpoint, s.includeAmount]),
+    );
+    expect(byEndpoint['https://push.example/sub/off']).toBe(false);
+    expect(byEndpoint['https://push.example/sub/on']).toBe(true);
+    // ARGV[10] に includeAmount フラグを渡している。
+    const args = kv.evalSpy.mock.calls[1][2] as string[];
+    expect(args[9]).toBe('1');
+  });
+});
+
+// validator (isStoredPushSubscription・listPushSubscriptions 経由) の後方互換。
+// 2a 保存済みレコードは includeAmount を持たない → reject してはならない。boolean 以外は reject。
+describe('push subscription validator: includeAmount 後方互換', () => {
+  it('includeAmount 欠落レコードを受理する (undefined→後段で false 扱い)', async () => {
+    kv.data.set(
+      key,
+      JSON.stringify([
+        {
+          endpointHash: 'a'.repeat(64),
+          endpoint: 'https://push.example/legacy',
+          keys,
+          locale: 'ja',
+          vapidKeyId: '12345678',
+          createdAt: 1,
+          // includeAmount 欠落 (2a レコード)
+        },
+      ]),
+    );
+
+    const listed = await listPushSubscriptions(WALLET);
+    expect(listed.ok).toBe(true);
+    expect(listed.ok && listed.value).toHaveLength(1);
+    expect(listed.ok && listed.value[0].includeAmount).toBeUndefined();
+  });
+
+  it('includeAmount が boolean でないレコードは reject (parse_error)', async () => {
+    kv.data.set(
+      key,
+      JSON.stringify([
+        {
+          endpointHash: 'a'.repeat(64),
+          endpoint: 'https://push.example/bad',
+          keys,
+          locale: 'ja',
+          vapidKeyId: '12345678',
+          createdAt: 1,
+          includeAmount: 'yes',
+        },
+      ]),
+    );
+
+    const listed = await listPushSubscriptions(WALLET);
+    expect(listed.ok).toBe(false);
+    expect(!listed.ok && listed.reason).toBe('parse_error');
   });
 });

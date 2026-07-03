@@ -17,9 +17,12 @@ export type PushPayload = {
   body?: string;
 };
 
+// resolver は locale に加え購読レコード (sub) も受ける。sub.includeAmount 等の
+// 購読ごとの opt-in を見て文言を出し分けるため (後方互換: 既定の {title,body}
+// オブジェクトも引き続き受ける)。
 export type PushPayloadInput =
   | PushPayload
-  | ((locale: PushLocale) => PushPayload);
+  | ((locale: PushLocale, sub: StoredPushSubscription) => PushPayload);
 
 export type SendPushSummary = {
   attempted: number;
@@ -90,7 +93,7 @@ async function sendOne(
   sub: StoredPushSubscription,
   payloadInput: PushPayloadInput,
 ): Promise<'sent' | 'pruned' | 'failed'> {
-  const payload = resolvePushPayload(payloadInput, sub.locale);
+  const payload = resolvePushPayload(payloadInput, sub);
   try {
     await withTimeout(
       webPush.sendNotification(
@@ -125,9 +128,9 @@ async function sendOne(
 
 function resolvePushPayload(
   payload: PushPayloadInput,
-  locale: PushLocale,
+  sub: StoredPushSubscription,
 ): PushPayload {
-  return typeof payload === 'function' ? payload(locale) : payload;
+  return typeof payload === 'function' ? payload(sub.locale, sub) : payload;
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
