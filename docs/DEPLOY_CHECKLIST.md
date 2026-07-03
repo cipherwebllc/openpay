@@ -1305,8 +1305,14 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 - wallet 単位 coalescing (1 分 1 通 + 「新着 n 件」集約)。金額ラベルは coalesce の NX 勝者 (単一 count===1)
   イベントのみ表示 — n>=2 は件数のみで金額は合算しない。
 - 購読は 1 wallet 最大 5 台 (oldest prune)・TTL 90 日 (送信成功で更新)・404/410 で即削除。
-
-### §15.7 オフライン受け取り QR (Phase 4・同一 `public/sw.js` 上の別機能)
+- **ブラウザ内の FCM 購読→受信は自動 E2E 不可** (2026-07-03 testnet E2E で確定): Playwright 同梱
+  Chromium は FCM API キー非搭載、自動化起動の実 Chrome (`channel:'chrome'`) も push service 登録を
+  `AbortError: Registration failed - permission denied` で拒否する (permissions granted でも)。
+  自動検証済みの範囲 = SIWE 認証チェーン・実 Amoy recover 決済 (成功ブランチ=after() トリガ通過・
+  tx 0x507fe0…84ad)・fee 権威 mismatch 拒否・購読パネル全ゲート実描画・購読 API/store/送信/prune/
+  coalesce (unit+API 38 件)。**残る最終リンク (購読→通知受信) は点灯後に実機 smoke で確認する**:
+  スマホ Chrome (or A2HS 済み PWA) で /history → SIWE サインイン → 通知を有効にする → 別端末から
+  少額テスト着金 → 通知受信 (~5 分)。iOS は A2HS 済み PWA のみ受信可の点も同時に確認。
 
 圏外の屋台/イベント/地下で、店主が「前回の受け取り QR」を提示できる (お支払いは顧客側の回線で行う・
 店側は提示のみ)。SW の fetch 拡張は **enable マーカー方式**で gating し、push だけ使う利用者・flag OFF には
