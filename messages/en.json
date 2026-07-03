@@ -1411,6 +1411,12 @@
     "iosInstallHintStep3": "Open it from the added icon to enable notifications",
     "error": "Could not update notifications. Please try again in a moment."
   },
+  "OfflineLastQr": {
+    "title": "You are offline — your last receive QR",
+    "description": "This QR is saved on this device and shown without a connection. Please double-check the amount and the saved time.",
+    "savedAt": "Saved: {time}",
+    "paymentOfflineNote": "Paying (scanning / sending) does not work offline — the customer pays over their own connection."
+  },
   "Privacy": {
     "title": "Privacy Policy",
     "effectiveDate": "Effective: {date}",

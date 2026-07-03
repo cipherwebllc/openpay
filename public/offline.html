@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>圏外です / You are offline — OpenPay</title>
+    <style>
+      /* チャンク非依存の完全に自己完結した静的ページ (offline 時に precache から提示)。 */
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: #f8fafc;
+        color: #0f172a;
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Hiragino Kaku Gothic ProN',
+          'Noto Sans JP', sans-serif;
+        line-height: 1.7;
+      }
+      .card {
+        max-width: 30rem;
+        width: 100%;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 1rem;
+        box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.18);
+        padding: 28px 24px;
+      }
+      .icon {
+        font-size: 34px;
+        line-height: 1;
+      }
+      h1 {
+        font-size: 1.05rem;
+        margin: 12px 0 4px;
+      }
+      p {
+        margin: 8px 0;
+        font-size: 0.9rem;
+        color: #334155;
+      }
+      .sub {
+        color: #64748b;
+        font-size: 0.82rem;
+      }
+      .note {
+        margin-top: 16px;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 0.6rem;
+        padding: 10px 12px;
+        font-size: 0.78rem;
+        color: #92400e;
+      }
+      .cta {
+        display: inline-block;
+        margin-top: 18px;
+        background: #2563eb;
+        color: #ffffff;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 0.9rem;
+        padding: 11px 18px;
+        border-radius: 0.7rem;
+      }
+      .divider {
+        margin: 20px 0;
+        border: none;
+        border-top: 1px solid #e2e8f0;
+      }
+      .lang {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="icon" aria-hidden="true">📶</div>
+
+      <p class="lang">日本語</p>
+      <h1>圏外です</h1>
+      <p>
+        一度オンラインで受け取り画面を開くと、圏外でも前回の受け取り QR
+        を表示できます。
+      </p>
+      <p class="note">
+        お支払い (スキャン・送金) はオフラインではできません。お客様側の通信で
+        お支払いいただく必要があります。店側は受け取り QR の提示のみ可能です。
+      </p>
+      <a class="cta" href="/ja/create">受け取り画面をひらく</a>
+
+      <hr class="divider" />
+
+      <p class="lang">English</p>
+      <h1>You are offline</h1>
+      <p>
+        Open the receive screen once while online, and you can then show your
+        last receive QR even without a connection.
+      </p>
+      <p class="note">
+        Paying (scanning / sending) does not work offline — the customer pays
+        over their own connection. The store can only present a receive QR.
+      </p>
+      <a class="cta" href="/en/create">Open the receive screen</a>
+    </main>
+  </body>
+</html>

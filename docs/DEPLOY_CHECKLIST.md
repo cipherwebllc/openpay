@@ -1305,3 +1305,25 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 - wallet 単位 coalescing (1 分 1 通 + 「新着 n 件」集約)。金額ラベルは coalesce の NX 勝者 (単一 count===1)
   イベントのみ表示 — n>=2 は件数のみで金額は合算しない。
 - 購読は 1 wallet 最大 5 台 (oldest prune)・TTL 90 日 (送信成功で更新)・404/410 で即削除。
+
+### §15.7 オフライン受け取り QR (Phase 4・同一 `public/sw.js` 上の別機能)
+
+圏外の屋台/イベント/地下で、店主が「前回の受け取り QR」を提示できる (お支払いは顧客側の回線で行う・
+店側は提示のみ)。SW の fetch 拡張は **enable マーカー方式**で gating し、push だけ使う利用者・flag OFF には
+一切介入しない (計画 plans/a2hs-retention-roadmap.md Phase 4)。
+
+- **既定 (現状 = inert・ロールバック先)**: `NEXT_PUBLIC_ENABLE_OFFLINE_QR` 既定 **OFF**。OFF では
+  Cache Storage に enable マーカーが無く SW の fetch handler は **全リクエストを素通し** (respondWith しない)・
+  `OfflineLastQr` は描画されず・`offline.html` も使われない。**この OFF が安全状態でありロールバック先**。
+- **fetch 介入は 3 パターンのみ** (それ以外は絶対に respondWith しない): ①同一オリジン `GET /_next/static/*`
+  = cache-first (immutable・上限 60 entries)・②`mode==='navigate'` かつ `/{ja|en}/create` = network-first→cache→
+  `offline.html`・③②のフォールバック `public/offline.html` (install 時 precache・ja/en 併記)。**API/POST/
+  クロスオリジン・`/pay`・`/scan`・`/checkout` 等の決済経路には一切触れない** (narrow 規則の SoT は
+  `lib/offlineSwRoutes.ts`・`tests/lib/offlineSwRoutes.test.ts` が担保)。
+- **go-live 手順**: (1) 本番 flag ON でデプロイ。(2) `next build && start` (flag ON) で /create を prime →
+  `context.setOffline(true)` → reload で cached /create または offline.html が出て、OfflineLastQr に前回 QR が
+  端末内描画されることを実機確認 (この検証は呼び出し元 Fable が prod build で行う。CI e2e は flag OFF 環境ゆえ
+  対象外)。(3) `/pay`・`/scan`・`/checkout` を圏外で開いても **決済系には介入しない** (ブラウザ既定エラー) ことを確認。
+- **ロールバック**: flag を **OFF** に戻す → 次の /create 訪問で `openpay:offline-disable` メッセージが marker を
+  削除し fetch 介入が即停止する。SW を更新デプロイすれば fetch handler は marker 不在で恒久的に no-op 化する。
+  push 購読 (§15.1–§15.6) はこの flag と独立で影響を受けない (同一 `sw.js` だが push/notificationclick は不変)。

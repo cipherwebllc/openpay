@@ -18,6 +18,7 @@ import { ReceiverWalletChip } from './ReceiverWalletChip';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { PwaInstallHint } from './PwaInstallHint';
+import { OfflineLastQr } from './OfflineLastQr';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
@@ -37,6 +38,9 @@ import {
 } from '@/hooks/useReceiverAutofill';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useLocalStorageRecord } from '@/hooks/useLocalStorageRecord';
+import { useOfflineQrServiceWorker } from '@/hooks/useOfflineQrServiceWorker';
+import { isLastQrRecord, LAST_QR_KEY } from '@/lib/offlineQr';
 import {
   buildPayUrl,
   DECIMAL_PATTERN,
@@ -131,6 +135,10 @@ export function QrGenerator() {
   const origin = useOrigin();
   const { copied, copy } = useCopyToClipboard();
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
+  // オフライン受け取り QR: flag ON なら SW を登録し enable marker を書く (flag OFF は既存
+  // 登録があれば disable・無ければ no-op)。lastQr は modal を開いた時点で保存する。
+  useOfflineQrServiceWorker();
+  const { save: saveLastQr } = useLocalStorageRecord(LAST_QR_KEY, isLastQrRecord);
   const qrRef = useRef<HTMLDivElement>(null);
   const bottomBarRef = useRef<HTMLDivElement>(null);
   // 高度な設定 (payMode / gas / split) は default 閉じる。
@@ -351,6 +359,37 @@ export function QrGenerator() {
   const deployment = deploymentForSlug(settings.token, settings.chain);
   const chain = chainForSlug(settings.chain);
 
+  // ポスター / モーダル / オフライン QR で共有する表示ラベル (単一情報源)。
+  const amountLabelText =
+    mode === 'amount'
+      ? t('posterFixedAmount', { amount, symbol: deployment.displaySymbol })
+      : t('posterOpenAmount', { symbol: deployment.displaySymbol });
+  const tokenChainLabelText = `${deployment.displaySymbol} · ${
+    settings.token === 'usdc' && settings.crossChain
+      ? buyerUsdcChainNames().join(' / ')
+      : chain.name
+  }`;
+
+  // QrPreviewModal を開いた時点 (qrValue=payUrl 確定) で「前回の受け取り QR」を保存。
+  // 圏外時に OfflineLastQr が端末内で再描画する。flag OFF でも保存は無害 (読む側が inert)。
+  useEffect(() => {
+    if (!qrModalOpen || !payUrl) return;
+    saveLastQr({
+      payUrl,
+      amountLabel: amountLabelText,
+      tokenChainLabel: tokenChainLabelText,
+      storeName: settings.storeName.trim() || undefined,
+      ts: Date.now(),
+    });
+  }, [
+    qrModalOpen,
+    payUrl,
+    amountLabelText,
+    tokenChainLabelText,
+    settings.storeName,
+    saveLastQr,
+  ]);
+
   // 固定額 QR が表す金額 (wei)。着金検知ヒント (useIncomingPaymentWatch) と同じ
   // parseUnits(deployment.decimals) で、QR が encode する amount と整合させる
   // (RecoverFeeNotice と同じ解釈・新たな parse は導入しない)。amount 無効や
@@ -558,8 +597,13 @@ export function QrGenerator() {
   // モードで金額入力欄等が左列を広げ右の QR 列を min(300px) まで圧迫する (据え置きでは起きない)。
   // 両軸とも minmax(0,1fr) (min-width:0) に固定し、列幅をコンテナ内で安定させる。
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-start print:block print:gap-0">
-      <div className="space-y-5 print:hidden">
+    <>
+      {/* 圏外時のみ描画される「前回の受け取り QR」(オンライン時は null)。ページ最上部に置く。 */}
+      <div className="mb-4 print:hidden">
+        <OfflineLastQr />
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-start print:block print:gap-0">
+        <div className="space-y-5 print:hidden">
         {/* ① 金額: 通貨 / 受取チェーン / 請求金額。店員が毎回触る金額を先頭に置く
             (受取先は初期設定後あまり変えないため ② へ・折りたたみ)。 */}
         <StepCard step={1} icon={Coins} title={t('steps.amount')}>
@@ -1079,14 +1123,7 @@ export function QrGenerator() {
           qrValue={payUrl}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('posterDefaultStoreName')}
-          amountText={
-            mode === 'amount'
-              ? t('posterFixedAmount', {
-                  amount,
-                  symbol: deployment.displaySymbol,
-                })
-              : t('posterOpenAmount', { symbol: deployment.displaySymbol })
-          }
+          amountText={amountLabelText}
           payModeBadge={{
             text:
               payMode === 'gasless'
@@ -1097,11 +1134,7 @@ export function QrGenerator() {
             tone: payMode === 'gasless' ? 'gasless' : 'standard',
           }}
           note={settings.posterNote.trim() || t('posterDefaultNote')}
-          chainText={`${deployment.displaySymbol} · ${
-            settings.token === 'usdc' && settings.crossChain
-              ? buyerUsdcChainNames().join(' / ')
-              : chain.name
-          }`}
+          chainText={tokenChainLabelText}
           receiverShort={
             effectiveReceiver ? shortAddress(effectiveReceiver) : ''
           }
@@ -1158,12 +1191,7 @@ export function QrGenerator() {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="truncate font-mono text-lg font-bold text-slate-900">
-                {mode === 'amount'
-                  ? t('posterFixedAmount', {
-                      amount,
-                      symbol: deployment.displaySymbol,
-                    })
-                  : t('posterOpenAmount', { symbol: deployment.displaySymbol })}
+                {amountLabelText}
               </span>
               {fiatHint && (
                 <span className="shrink-0 text-xs font-medium text-slate-400">
@@ -1182,7 +1210,8 @@ export function QrGenerator() {
           </button>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 
