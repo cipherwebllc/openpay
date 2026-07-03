@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
+import { useAccount } from 'wagmi';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
@@ -47,7 +48,13 @@ export function PushNotifyPanel() {
   const t = useTranslations('PushNotify');
   const locale = useLocale();
   const pushLocale = locale === 'en' ? 'en' : 'ja';
-  const { isSignedIn } = useSiweSession();
+  // signIn をパネル内蔵にする: ヘッダの SIWE ボタンは他 flag (freee/a1/Pro/CSV パス) 依存で
+  // 出ない構成があり、「サインインしてください」だけ出して導線が無い不到達 (CsvPassPaywall の
+  // 教訓と同型) になるため、ここで完結させる。文言は WalletBadge と同じ Nav.siweStatement。
+  const { isSignedIn, signIn, isSigningIn } = useSiweSession();
+  const { isConnected } = useAccount();
+  const tNav = useTranslations('Nav');
+  const [signInFailed, setSignInFailed] = useState(false);
   const { isStandalone } = usePwaDisplayMode();
 
   const [mounted, setMounted] = useState(false);
@@ -181,7 +188,31 @@ export function PushNotifyPanel() {
 
   function renderBody() {
     if (!isSignedIn) {
-      return <p className="mt-2 text-xs text-slate-500">{t('signInRequired')}</p>;
+      return (
+        <div className="mt-2">
+          <p className="text-xs text-slate-500">{t('signInRequired')}</p>
+          {/* 接続済みならその場で SIWE サインイン (未接続はヘッダの「接続」から)。
+              user reject 等の失敗は握りつぶして再試行可能なエラー行のみ出す。 */}
+          {isConnected && (
+            <button
+              type="button"
+              disabled={isSigningIn}
+              onClick={() => {
+                setSignInFailed(false);
+                void signIn(tNav('siweStatement')).catch(() =>
+                  setSignInFailed(true),
+                );
+              }}
+              className="mt-2 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+            >
+              {t('signInCta')}
+            </button>
+          )}
+          {signInFailed && (
+            <p className="mt-2 text-xs text-red-600">{t('error')}</p>
+          )}
+        </div>
+      );
     }
     // mount 前は platform/対応判定が未確定なので何も出さない (SSR/client 一致)。
     if (!mounted) return null;

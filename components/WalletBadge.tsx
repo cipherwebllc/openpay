@@ -28,15 +28,17 @@ export function WalletBadge() {
   const visible = useVisibleConnectors(connectors);
   const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut } =
     useSiweSession();
-  // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料 / Pro 加入 / CSV パス購入) が有効な
-  // ときだけログイン UI を出す。すべて OFF (現状の本番) では「繋ぐ/切る」だけ表示し、無意味なログイン
-  // 導線を出さない。enableCsvPass が含まれていないとヘッダーからサインインできず、CSV パスゲート
-  // (CsvPassPaywall) が不到達になる (前回の不到達バグの教訓)。
+  // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料 / Pro 加入 / CSV パス購入 /
+  // 着金プッシュ通知) が有効なときだけログイン UI を出す。すべて OFF では「繋ぐ/切る」だけ表示し、
+  // 無意味なログイン導線を出さない。⚠️ SIWE を要する flag をここに足し忘れるとヘッダーから
+  // サインインできず該当機能が不到達になる (CsvPassPaywall・PushNotifyPanel で実際に起きた教訓。
+  // PushNotifyPanel は自前の sign-in ボタンも持つが、ヘッダ導線も一致させておく)。
   const siweEnabled =
     env.enableFreeeSync ||
     env.enableUsageFee ||
     env.enablePro ||
-    env.enableCsvPass;
+    env.enableCsvPass ||
+    env.enablePushNotify;
 
   // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。
   const handleSignIn = () => {

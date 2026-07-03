@@ -33,6 +33,7 @@ const flags = vi.hoisted(() => ({
   enableBilling: false,
   enablePro: false,
   enableCsvPass: false,
+  enablePushNotify: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -51,6 +52,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableCsvPass() {
         return flags.enableCsvPass;
+      },
+      get enablePushNotify() {
+        return flags.enablePushNotify;
       },
     },
   };
@@ -268,11 +272,12 @@ describe('WalletBadge: SIWE サインイン', () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('SIWE 機能 (freee/利用権/Pro/CSVパス) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
+  it('SIWE 機能 (freee/利用権/Pro/CSVパス/push通知) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
     flags.enableFreeeSync = false;
     flags.enableBilling = false;
     flags.enablePro = false;
     flags.enableCsvPass = false;
+    flags.enablePushNotify = false;
     setConnected();
     setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
     renderWithIntl(<WalletBadge />);
@@ -285,6 +290,23 @@ describe('WalletBadge: SIWE サインイン', () => {
     // 切断は常に出る
     expect(
       within(details).getByRole('menuitem', { name: '切断' }),
+    ).toBeInTheDocument();
+  });
+
+  it('着金プッシュ通知のみ ON → ログイン UI を出す (購読にサインインが要る)', () => {
+    // 回帰防止: siweEnabled に enablePushNotify を含めないと、push 単独構成でヘッダーから
+    // サインインできず PushNotifyPanel が不到達になる (CsvPassPaywall と同型の教訓)。
+    flags.enableFreeeSync = false;
+    flags.enableBilling = false;
+    flags.enablePro = false;
+    flags.enableCsvPass = false;
+    flags.enablePushNotify = true;
+    setConnected();
+    setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: 'ログイン (署名)' }),
     ).toBeInTheDocument();
   });
 

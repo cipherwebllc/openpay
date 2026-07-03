@@ -7,6 +7,13 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 // (overlay に支払い導線) + 会計CSV をロックすることを実 HistoryView で確認する。
 // (delinquent 判定そのものは server 権威 = billing-integration.test で検証済。)
 
+// PushNotifyPanel が useAccount を直接引くようになったため、Provider 無しの jsdom では
+// wagmi を部分 mock する (useAccount のみ上書き・他 export は実物維持)。
+vi.mock('wagmi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('wagmi')>()),
+  useAccount: () => ({ isConnected: false }),
+}));
+
 vi.mock('@/hooks/useMarketRates', () => ({
   useMarketRates: () => ({
     data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },
