@@ -603,6 +603,18 @@ export const env = {
   ),
   pushVapidPublicKey:
     nonEmpty(process.env.NEXT_PUBLIC_PUSH_VAPID_PUBLIC_KEY) ?? '',
+  // オフライン受け取り QR (圏外でも /create で前回の受け取り QR を提示 + 圏外フォールバック
+  // ページ) の有効化フラグ (client 露出)。**既定 OFF で完全 inert** = Service Worker は
+  // fetch を一切 intercept せず (enable マーカー不在 = 素通し)・OfflineLastQr は描画されず・
+  // offline.html は使われない。ON のとき /create 訪問で '/sw.js' を登録し (push と同一 script)
+  // 専用 Cache Storage に enable マーカーを置き、SW が narrow なパターン (同一オリジン GET の
+  // /_next/static/* と /create への full navigation のみ) に限って cache-first / network-first で
+  // 応答する。API/POST/クロスオリジン・/pay・/scan・/checkout 等の決済経路には一切介入しない。
+  // 計画: plans/a2hs-retention-roadmap.md Phase 4。'1' / 'true' で ON。
+  enableOfflineQr: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_OFFLINE_QR',
+    process.env.NEXT_PUBLIC_ENABLE_OFFLINE_QR,
+  ),
   // x402 JPYC facilitator (managed facilitator + discovery: AI エージェント/開発者が
   // 日本事業者の有料 API/コンテンツに JPYC 建てで都度課金 = x402、settlement の 1% を
   // 手数料徴収) の有効化フラグ (client 露出: 登録/discovery UI のゲートに使う)。
