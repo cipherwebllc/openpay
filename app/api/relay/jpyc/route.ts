@@ -13,7 +13,7 @@
 // 実依存 (viem / Gelato fetch / KV rate-limit) を inject して lib/relay/jpycRelay の純コアに委譲
 // (分岐は unit test で担保)。
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { isAddress, isHex, getAddress, type Hex } from 'viem';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
@@ -49,6 +49,7 @@ import {
 } from '@/lib/relay/relayRoute';
 import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
+import { notifyPaymentReceived } from '@/lib/push/notify';
 
 export const runtime = 'nodejs';
 
@@ -325,6 +326,9 @@ async function handleFree(
           error: e instanceof Error ? e.message : String(e),
         });
       }
+      if (env.enablePushNotify) {
+        after(() => notifyPaymentReceived(auth.to, 'payment'));
+      }
     }
   }
   return respond(result, chainId);
@@ -410,5 +414,9 @@ async function handleRecover(
     forwarderFor,
     idemPrefix: 'relay:idem:',
   });
+  const isFeePayment = params.merchant.toLowerCase() === feeReceiver.toLowerCase();
+  if (result.kind === 'success' && !isFeePayment && env.enablePushNotify) {
+    after(() => notifyPaymentReceived(params.merchant, 'payment'));
+  }
   return respond(result, chainId);
 }

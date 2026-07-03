@@ -16,6 +16,7 @@ const STATUS_TOKEN = 'p'.repeat(43); // 顧客生成の status トークン (43 
 const hold = vi.hoisted(() => ({
   enableOrderRelay: true,
   enableOrderPickup: true, // 顧客向け注文状況の逆引きポインタ保存のゲート
+  enablePushNotify: true,
   isMainnet: false,
   handle: { ok: true, record: null } as
     | { ok: true; record: { config: { to: string }; storefront?: unknown } | null }
@@ -27,6 +28,30 @@ const hold = vi.hoisted(() => ({
   verify: { ok: true, value: 10n ** 18n } as
     | { ok: true; value: bigint }
     | { ok: false; reason: string },
+}));
+
+const pushNotify = vi.hoisted(() => ({
+  after: vi.fn(),
+  afterTasks: [] as Promise<unknown>[],
+  notify: vi.fn(),
+}));
+
+vi.mock('next/server', () => ({
+  NextResponse: {
+    json: (body: unknown, init: ResponseInit = {}) =>
+      new Response(JSON.stringify(body), {
+        ...init,
+        headers: { 'content-type': 'application/json', ...init.headers },
+      }),
+  },
+  after: (cb: () => unknown) => {
+    pushNotify.after(cb);
+    try {
+      pushNotify.afterTasks.push(Promise.resolve(cb()));
+    } catch (e) {
+      pushNotify.afterTasks.push(Promise.reject(e));
+    }
+  },
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -43,6 +68,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderPickup() {
         return hold.enableOrderPickup;
+      },
+      get enablePushNotify() {
+        return hold.enablePushNotify;
       },
     },
   };
@@ -85,6 +113,9 @@ vi.mock('@/lib/kv', () => ({
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: warnSpy, error: vi.fn(), debug: vi.fn() },
 }));
+vi.mock('@/lib/push/notify', () => ({
+  notifyPaymentReceived: (...args: unknown[]) => pushNotify.notify(...args),
+}));
 
 import { POST } from '@/app/api/order/notify/route';
 
@@ -110,9 +141,14 @@ function goodBody(over: Record<string, unknown> = {}) {
   };
 }
 
+async function flushAfterTasks() {
+  await Promise.all(pushNotify.afterTasks);
+}
+
 beforeEach(() => {
   hold.enableOrderRelay = true;
   hold.enableOrderPickup = true;
+  hold.enablePushNotify = true;
   hold.isMainnet = false;
   hold.handle = { ok: true, record: { config: { to: MERCHANT }, storefront: {} } };
   hold.rateAllowed = true;
@@ -124,6 +160,10 @@ beforeEach(() => {
   delSpy.mockClear();
   setSpy.mockClear();
   warnSpy.mockClear();
+  pushNotify.after.mockClear();
+  pushNotify.afterTasks = [];
+  pushNotify.notify.mockReset();
+  pushNotify.notify.mockResolvedValue(undefined);
 });
 
 describe('POST /api/order/notify', () => {
@@ -173,9 +213,12 @@ describe('POST /api/order/notify', () => {
   it('重複 txHash (nx クレーム失敗) → 200 duplicate・再追加しない', async () => {
     hold.claimValue = null; // 既存キー
     const res = await POST(req(goodBody()));
+    await flushAfterTasks();
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, duplicate: true });
     expect(lpushSpy).not.toHaveBeenCalled();
+    expect(pushNotify.after).not.toHaveBeenCalled();
+    expect(pushNotify.notify).not.toHaveBeenCalled();
   });
 
   it('on-chain 検証 失敗 (amount_too_low) → 422・クレーム解放・未保存', async () => {
@@ -194,6 +237,7 @@ describe('POST /api/order/notify', () => {
   it('正常: 検証成功 → 実着金額を権威保存 (kvLpush)・冪等鍵は txHash のみ', async () => {
     hold.verify = { ok: true, value: 1000n * JPYC };
     const res = await POST(req(goodBody()));
+    await flushAfterTasks();
     expect(res.status).toBe(200);
     // 冪等クレームは txHash のみ (merchant/items を含めない)。
     expect(setSpy).toHaveBeenCalledWith(
@@ -211,6 +255,8 @@ describe('POST /api/order/notify', () => {
     expect(stored.items).toEqual([{ name: 'ブレンド', qty: 2, price: '500' }]);
     expect('amountMismatch' in stored).toBe(false);
     expect('amountUnchecked' in stored).toBe(false);
+    expect(pushNotify.after).toHaveBeenCalledTimes(1);
+    expect(pushNotify.notify).toHaveBeenCalledWith(MERCHANT, 'order');
   });
 
   it('金額不一致 advisory: dust receipt でも拒否せず ok:true で保存し amountMismatch を立てる', async () => {

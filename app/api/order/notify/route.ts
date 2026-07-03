@@ -4,7 +4,7 @@
 // (3) on-chain 検証 (from 非依存・to=merchant への実着金)、(4) txHash 冪等 (1 決済 1 注文) で守る。
 // 受注は **advisory**: 実着金額を権威保存・商品/テーブルは顧客申告。flag OFF は 404 (本番 inert)。
 // 設計: plans/swift-puzzling-sky.md。
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createPublicClient, getAddress, isAddress, type Address, type Hex } from 'viem';
 import { env, isMainnet } from '@/lib/env';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
@@ -42,6 +42,7 @@ import {
 } from '@/lib/orderRelay';
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { logger } from '@/lib/logger';
+import { notifyPaymentReceived } from '@/lib/push/notify';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -170,6 +171,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       }
     }
 
+    let orderStored = false;
     if (isKvConfigured()) {
       const key = orderListKey(merchant);
       const push = await kvLpush(key, serializeOrder(order));
@@ -179,6 +181,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       }
       await kvLtrim(key, 0, ORDER_LIST_MAX - 1); // 上限 200 (古いものから押し出し)
       await kvExpire(key, ORDER_LIST_TTL_SEC); // LTRIM は TTL を更新しないので毎回張り直す
+      orderStored = true;
 
       // 顧客向け「注文状況」の逆引きポインタ (flag ENABLE_ORDER_PICKUP)。顧客端末が生成した不可推測の
       // status トークン (43 文字 base64url) → 受注の所在 {merchant, chainId, txHash} を保存し、顧客が
@@ -199,6 +202,10 @@ export async function POST(req: Request): Promise<NextResponse> {
           logger.warn('order.notify.pointer_failed', { reason: ptr.reason, chainId, merchant });
         }
       }
+    }
+
+    if (orderStored && env.enablePushNotify) {
+      after(() => notifyPaymentReceived(merchant, 'order'));
     }
 
     logger.info('order.notify.stored', { chainId, merchant, amount: order.amount });

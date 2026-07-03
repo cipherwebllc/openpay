@@ -8,6 +8,7 @@ import {
   listPushSubscriptions,
   refreshPushSubscriptionsTtl,
   removePushSubscription,
+  type PushLocale,
   type StoredPushSubscription,
 } from '@/lib/push/store';
 
@@ -15,6 +16,10 @@ export type PushPayload = {
   title: string;
   body?: string;
 };
+
+export type PushPayloadInput =
+  | PushPayload
+  | ((locale: PushLocale) => PushPayload);
 
 export type SendPushSummary = {
   attempted: number;
@@ -27,7 +32,7 @@ const SEND_TIMEOUT_MS = 3_500;
 
 export async function sendPushToWallet(
   wallet: Address | string,
-  payload: PushPayload,
+  payload: PushPayloadInput,
 ): Promise<SendPushSummary> {
   const summary: SendPushSummary = { attempted: 0, sent: 0, pruned: 0, failed: 0 };
   if (!env.enablePushNotify) return summary;
@@ -83,8 +88,9 @@ function configureVapid(): boolean {
 async function sendOne(
   wallet: Address | string,
   sub: StoredPushSubscription,
-  payload: PushPayload,
+  payloadInput: PushPayloadInput,
 ): Promise<'sent' | 'pruned' | 'failed'> {
+  const payload = resolvePushPayload(payloadInput, sub.locale);
   try {
     await withTimeout(
       webPush.sendNotification(
@@ -115,6 +121,13 @@ async function sendOne(
     });
     return 'failed';
   }
+}
+
+function resolvePushPayload(
+  payload: PushPayloadInput,
+  locale: PushLocale,
+): PushPayload {
+  return typeof payload === 'function' ? payload(locale) : payload;
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
