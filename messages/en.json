@@ -144,7 +144,7 @@
     "cashFlowBuy": "Buy",
     "cashFlowRedeem": "Redeem 1:1",
     "cashFlowBackYen": "Yen",
-    "cashFlowNote": "JPYC is a yen-denominated stablecoin at 1 JPYC = ¥1.00 (peg 1:1). JPYC you receive redeems 1:1 back to yen at JPYC EX.",
+    "cashFlowNote": "JPYC is a yen-denominated stablecoin at 1 JPYC = ¥1.00 (peg 1:1). JPYC you receive redeems 1:1 back to yen at <jpycEx>JPYC EX</jpycEx>.",
     "cashSimTitle": "How much do you keep?",
     "cashSimMonthlyLabel": "Monthly sales",
     "cashSimManValue": "¥{yen}",

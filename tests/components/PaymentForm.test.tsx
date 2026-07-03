@@ -537,7 +537,7 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     expect(onramp).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('残高不足 (JPYC) → onramp link が JPYC 公式 になる (token prop の wiring 確認)', () => {
+  it('残高不足 (JPYC) → onramp link が JPYC EX になる (token prop の wiring 確認)', () => {
     setURL(`to=${MERCHANT}&token=jpyc&amount=100`);
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(0n); // 0 JPYC、必要 100 JPYC
@@ -546,7 +546,7 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     render(<PaymentForm />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     const onramp = screen.getByRole('link', {
-      name: /JPYC 公式 で JPYC を購入/,
+      name: /JPYC EX で JPYC を購入/,
     });
     expect(onramp).toHaveAttribute('href', 'https://jpyc.co.jp/');
   });

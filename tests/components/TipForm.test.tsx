@@ -377,7 +377,7 @@ describe('TipForm — 接続状態', () => {
     expect(onramp).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('残高不足 (JPYC) → onramp link が JPYC 公式 (token prop の wiring 確認)', () => {
+  it('残高不足 (JPYC) → onramp link が JPYC EX (token prop の wiring 確認)', () => {
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(0n);
     setSmartAccount(true);
@@ -385,7 +385,7 @@ describe('TipForm — 接続状態', () => {
     render(<TipForm params={JPYC_PARAMS} />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
     const onramp = screen.getByRole('link', {
-      name: /JPYC 公式 で JPYC を購入/,
+      name: /JPYC EX で JPYC を購入/,
     });
     expect(onramp).toHaveAttribute('href', 'https://jpyc.co.jp/');
   });

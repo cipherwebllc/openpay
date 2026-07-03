@@ -1,7 +1,7 @@
 // FAQ アコーディオン。<details> ベースで JS 不要 (Server Component)。
 //
 // faqA4 は t.rich() で 2 つの inline link を埋め込む:
-//   - <jpycEx>: JPYC 公式 (https://jpyc.co.jp/) — JPYC EX label
+//   - <jpycEx>: JPYC EX (https://jpyc.co.jp/・サイト全体で統一表記)
 //   - <create>: 受け取るページ (/[locale]/create)
 // 「/create」path 直接表記は一般読み手に分かりにくいため、ラベル「受け取る」で
 // 内部 Link に置き換える。

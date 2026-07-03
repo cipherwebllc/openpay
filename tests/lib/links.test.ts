@@ -3,18 +3,18 @@ import { getExchangeLink } from '@/lib/links';
 
 describe('getExchangeLink', () => {
   describe('JPYC', () => {
-    it('ja → JPYC 公式 (jpyc.co.jp)、注記なし', () => {
+    it('ja → JPYC EX (jpyc.co.jp)、注記なし', () => {
       const link = getExchangeLink('jpyc', 'ja');
       expect(link.url).toBe('https://jpyc.co.jp/');
-      expect(link.label).toBe('JPYC 公式');
+      expect(link.label).toBe('JPYC EX');
       expect(link.jaResidentsOnly).toBeUndefined();
       expect(link.blocksJapaneseResidents).toBeUndefined();
     });
 
-    it('en → JPYC official (jpyc.co.jp)、jaResidentsOnly = true', () => {
+    it('en → JPYC EX (jpyc.co.jp)、jaResidentsOnly = true', () => {
       const link = getExchangeLink('jpyc', 'en');
       expect(link.url).toBe('https://jpyc.co.jp/');
-      expect(link.label).toBe('JPYC official');
+      expect(link.label).toBe('JPYC EX');
       expect(link.jaResidentsOnly).toBe(true);
       expect(link.blocksJapaneseResidents).toBeUndefined();
     });
@@ -48,7 +48,7 @@ describe('getExchangeLink', () => {
       }
     });
 
-    it('jpyc は ja/en で同じ URL (JPYC 公式 1 拠点)', () => {
+    it('jpyc は ja/en で同じ URL (JPYC EX 1 拠点)', () => {
       expect(getExchangeLink('jpyc', 'ja').url).toBe(
         getExchangeLink('jpyc', 'en').url,
       );

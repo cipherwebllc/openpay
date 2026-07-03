@@ -144,7 +144,7 @@
     "cashFlowBuy": "購入",
     "cashFlowRedeem": "1:1 で換金",
     "cashFlowBackYen": "円",
-    "cashFlowNote": "JPYC は 1 JPYC = ¥1.00（peg 1:1）の円建てステーブルコイン。受け取った JPYC は JPYC EX で 1:1 で円に換金できます。",
+    "cashFlowNote": "JPYC は 1 JPYC = ¥1.00（peg 1:1）の円建てステーブルコイン。受け取った JPYC は <jpycEx>JPYC EX</jpycEx> で 1:1 で円に換金できます。",
     "cashSimTitle": "いくら手元に残る？",
     "cashSimMonthlyLabel": "月商",
     "cashSimManValue": "{man}万円",

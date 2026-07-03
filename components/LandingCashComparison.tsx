@@ -139,7 +139,19 @@ export async function LandingCashComparison() {
           </div>
         </div>
         <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
-          {t('cashFlowNote')}
+          {/* JPYC EX はテキストリンク (新規タブ)。href/描画は LandingFaq の <jpycEx> と同一パターン。 */}
+          {t.rich('cashFlowNote', {
+            jpycEx: (chunks) => (
+              <a
+                href="https://jpyc.co.jp/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+              >
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
       </div>
 

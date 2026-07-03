@@ -41,7 +41,7 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
   // ─── exchange (JP off-ramp 中心、global 取引所も含む) ───────────────
   {
     id: 'jpyc-official',
-    name: 'JPYC 公式',
+    name: 'JPYC EX',
     url: 'https://jpyc.co.jp/',
     category: 'exchange',
     description: {
