@@ -213,4 +213,37 @@ describe('PushNotifyPanel', () => {
     const body = JSON.parse(init.body as string);
     expect(body.includeAmount).toBe(true);
   });
+
+  it('購読済み → 「テスト通知を送る」で /api/push/test に POST・成功文言を出す', async () => {
+    installBrowserPush({ existingSub: true });
+    fetchFn.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, attempted: 1, sent: 1 }),
+    });
+    renderWithIntl(<PushNotifyPanel />);
+    expect(await screen.findByText('通知は有効です')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'テスト通知を送る' }));
+    await waitFor(() =>
+      expect(screen.getByText(/テスト通知を送りました/)).toBeInTheDocument(),
+    );
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/push/test');
+    expect(init.method).toBe('POST');
+  });
+
+  it('テスト通知が rate limit (429) → 失敗文言 (再試行誘導)', async () => {
+    installBrowserPush({ existingSub: true });
+    fetchFn.mockResolvedValue({
+      ok: false,
+      json: async () => ({ ok: false, error: 'rate_limited' }),
+    });
+    renderWithIntl(<PushNotifyPanel />);
+    expect(await screen.findByText('通知は有効です')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'テスト通知を送る' }));
+    await waitFor(() =>
+      expect(screen.getByText(/テスト通知を送れませんでした/)).toBeInTheDocument(),
+    );
+  });
 });
