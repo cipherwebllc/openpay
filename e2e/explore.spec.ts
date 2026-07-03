@@ -22,11 +22,11 @@ test.describe('/explore (Web3 サービス directory)', () => {
     ).toBeVisible();
   });
 
-  test('ja: 代表エントリ (JPYC 公式 / Uniswap / Circle CCTP) が target=_blank で出る', async ({
+  test('ja: 代表エントリ (JPYC EX / Uniswap / Circle CCTP) が target=_blank で出る', async ({
     page,
   }) => {
     await page.goto('/ja/explore');
-    const jpyc = page.getByRole('link', { name: /JPYC 公式/ });
+    const jpyc = page.getByRole('link', { name: /JPYC EX/ });
     await expect(jpyc).toBeVisible();
     await expect(jpyc).toHaveAttribute('href', 'https://jpyc.co.jp/');
     await expect(jpyc).toHaveAttribute('target', '_blank');
@@ -58,7 +58,7 @@ test.describe('/explore (Web3 サービス directory)', () => {
 
   test('ja: badge (日本居住者 / Global) が複数 entry に出る', async ({ page }) => {
     await page.goto('/ja/explore');
-    // 「日本居住者」 badge は JPYC 公式 / SBI VC 等の jp-only 系で複数件
+    // 「日本居住者」 badge は JPYC EX / SBI VC 等の jp-only 系で複数件
     expect(await page.getByText('日本居住者').count()).toBeGreaterThan(2);
     expect(await page.getByText('Global', { exact: true }).count()).toBeGreaterThan(2);
   });

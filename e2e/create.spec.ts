@@ -81,7 +81,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     ).toBeVisible();
   });
 
-  test('ja: offramp セクションに JPYC 公式 / SBI VC トレード のリンクが正しい href で描画される', async ({
+  test('ja: offramp セクションに JPYC EX / SBI VC トレード のリンクが正しい href で描画される', async ({
     page,
   }) => {
     await page.goto('/ja/create');
@@ -89,7 +89,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       name: '受け取った通貨を換金',
     });
     await expect(offrampHeading).toBeVisible();
-    const jpycLink = page.getByRole('link', { name: /JPYC 公式/ });
+    const jpycLink = page.getByRole('link', { name: /JPYC EX/ });
     await expect(jpycLink).toHaveAttribute('href', 'https://jpyc.co.jp/');
     await expect(jpycLink).toHaveAttribute('target', '_blank');
     await expect(jpycLink).toHaveAttribute('rel', 'noopener noreferrer');
