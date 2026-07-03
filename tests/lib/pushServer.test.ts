@@ -147,10 +147,10 @@ describe('sendPushToWallet', () => {
     expect(JSON.parse(webPush.sendNotification.mock.calls[0][1])).toMatchObject({
       title: '着金がありました',
       body: '売上を確認できます',
-      url: '/ja/history',
+      url: '/ja/history?from=push',
     });
     expect(JSON.parse(webPush.sendNotification.mock.calls[1][1])).toMatchObject({
-      url: '/en/history',
+      url: '/en/history?from=push',
     });
     expect(store.refresh).toHaveBeenCalledWith(WALLET);
     expect(store.remove).toHaveBeenCalledWith(WALLET, {

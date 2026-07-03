@@ -80,9 +80,12 @@ const CIRCLE_VERIF_HELP_KEY = {
 export function HistoryRow({
   entry,
   onRemove,
+  flash = false,
 }: {
   entry: HistoryEntry;
   onRemove: (id: string) => void;
+  /** push 通知タップ着地の一時ハイライト (~3.5s)。解除は transition でフェード。 */
+  flash?: boolean;
 }) {
   const t = useTranslations('History');
   // anchor 行は PaymentForm の fxAnchorLine/fxRateLine を再利用 (文言を一元化)。
@@ -144,7 +147,13 @@ export function HistoryRow({
 
   return (
     <li className="list-none">
-      <details className="group overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-card transition-shadow open:shadow-card-hover">
+      <details
+        className={`group overflow-hidden rounded-2xl border bg-white shadow-card transition-all duration-700 open:shadow-card-hover ${
+          flash
+            ? 'border-emerald-300 ring-2 ring-emerald-200 bg-emerald-50/50'
+            : 'border-slate-200/70'
+        }`}
+      >
         <summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden">
           <div className="min-w-0 flex-1">
             {/* メタ行: 受取バッジ + 状態 + 種別 / 右に日時 */}

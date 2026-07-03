@@ -212,8 +212,25 @@ self.addEventListener('notificationclick', (event) => {
         includeUncontrolled: true,
       });
       for (const client of windows) {
-        if (client.url === targetUrl.href && 'focus' in client) {
-          return client.focus();
+        // pathname 一致で既存タブを再利用する (?from=push 等の着地クエリが付いても
+        // 別窓を増やさない)。focus 後に navigate してクエリ付き URL へ着地させる
+        // (ハイライトを発火させるため。navigate 不可の環境は focus のみ)。
+        let clientPath = null;
+        try {
+          clientPath = new URL(client.url).pathname;
+        } catch {
+          clientPath = null;
+        }
+        if (clientPath === targetUrl.pathname && 'focus' in client) {
+          const focused = await client.focus();
+          if (client.url !== targetUrl.href && 'navigate' in client) {
+            try {
+              await client.navigate(targetUrl.href);
+            } catch {
+              /* navigate 不可 (クロスオリジン遷移後等) は focus のみで十分 */
+            }
+          }
+          return focused;
         }
       }
       if (self.clients.openWindow) {

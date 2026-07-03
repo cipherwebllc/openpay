@@ -128,6 +128,22 @@ describe('HistoryView', () => {
     ).toBeEnabled();
   });
 
+  it('?from=push 着地 → 最新の受取エントリを一時ハイライトし query を除去 (通知タップの着地)', async () => {
+    appendHistory(entry({ id: 'newest', asset: 'jpyc' }));
+    window.history.replaceState(null, '', '/ja/history?from=push');
+    try {
+      const { container } = render(<HistoryView />);
+      // flash 中は details に emerald ring が付く
+      await waitFor(() =>
+        expect(container.querySelector('details.ring-2')).toBeTruthy(),
+      );
+      // 読了後に query は除去 (リロード再発火と SW の既存タブ一致のため)
+      expect(window.location.search).toBe('');
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
   it('受取 + 支払いを統合表示・種別フィルタで切替・集計/CSV は受取基準で固定', async () => {
     const user = userEvent.setup();
     // 受取 1 件 (JPYC) + 支払い控え 1 件 (別ストア)。
