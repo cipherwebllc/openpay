@@ -281,14 +281,14 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   });
 
-  test('en: offramp セクションは Coinbase + JPYC official、注記/ヒントが両方出る', async ({
+  test('en: offramp セクションは Coinbase + JPYC EX、注記/ヒントが両方出る', async ({
     page,
   }) => {
     await page.goto('/en/create');
     await expect(
       page.getByRole('heading', { name: 'Off-ramp received tokens' }),
     ).toBeVisible();
-    const jpycLink = page.getByRole('link', { name: /JPYC official/ });
+    const jpycLink = page.getByRole('link', { name: /JPYC EX/ });
     await expect(jpycLink).toHaveAttribute('href', 'https://jpyc.co.jp/');
     await expect(page.getByText('(Japan residents only)')).toBeVisible();
     const coinbaseLink = page.getByRole('link', { name: /Coinbase/ });
