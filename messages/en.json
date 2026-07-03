@@ -100,7 +100,7 @@
     "benefitsAudienceCustomer": "Customer",
     "benefitsFeeFocal": "1%",
     "benefitsFeeTitle": "1% fee",
-    "benefitsFeeBody": "OpenPay's per-transaction usage fee on JPYC gasless payments. It is 1% of the payment with a 2 JPYC minimum, deducted at settlement. That's lower than credit cards (~3%) or typical QR payment services (1.5–3.25%).",
+    "benefitsFeeBody": "OpenPay's per-transaction usage fee on JPYC gasless payments. It is 1% of the payment with a 2 JPYC minimum, deducted at settlement. That's lower than typical credit-card (3.24%) or code-payment (1.98%) rates (representative examples).",
     "benefitsCostFocal": "¥0",
     "benefitsCostTitle": "Zero setup cost",
     "benefitsCostBody": "No POS terminal, no contracts, no upfront fees. Just one wallet address — go from start to a printed QR the same day.",

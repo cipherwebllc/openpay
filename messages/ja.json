@@ -100,7 +100,7 @@
     "benefitsAudienceCustomer": "顧客",
     "benefitsFeeFocal": "1%",
     "benefitsFeeTitle": "利用料 1%",
-    "benefitsFeeBody": "JPYC のガスレス決済 1 件ごとの OpenPay 利用料です。決済額の 1%・最低 2 JPYC を決済時に申し受けます。クレジットカード (約 3%) や一般的な QR 決済 (1.5–3.25%) より低率です。",
+    "benefitsFeeBody": "JPYC のガスレス決済 1 件ごとの OpenPay 利用料です。決済額の 1%・最低 2 JPYC を決済時に申し受けます。クレジットカード (3.24%) や一般的なコード決済 (1.98%) より低率です (料率は一般的な例)。",
     "benefitsCostFocal": "¥0",
     "benefitsCostTitle": "導入コスト 0 円",
     "benefitsCostBody": "POS 端末・契約書・初期費用は不要。ウォレットアドレス 1 つ用意するだけで、今日 QR 印刷まで完了できます。",
