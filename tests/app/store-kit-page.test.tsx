@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
-import StoreKitPage, {
-  generateMetadata,
+import StoreKitPage, { generateMetadata } from '@/app/[locale]/kit/page';
+import {
   StoreKitMaterials,
   type StoreKitLabels,
-} from '@/app/[locale]/kit/page';
+} from '@/components/StoreKitMaterials';
 
 const setRequestLocaleSpy = vi.hoisted(() => vi.fn());
 
