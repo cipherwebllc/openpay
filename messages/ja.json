@@ -139,6 +139,7 @@
     "cashCellLockCard": "あり",
     "cashCellLockOpenPay": "なし",
     "cashTableFootnote": "※ カード 3.24%・コード決済 1.98% は一般的な料率の例です。実際の料率は契約により異なります。",
+    "cashStoreKitCta": "店頭キットを印刷する (無料)",
     "cashFlowTitle": "円と JPYC は 1:1",
     "cashFlowYen": "円",
     "cashFlowBuy": "購入",
@@ -218,6 +219,20 @@
     "bellAria": "お知らせを開く",
     "unreadAria": "お知らせ ({count} 件の未読)",
     "empty": "現在お知らせはありません。"
+  },
+  "StoreKit": {
+    "pageTitle": "店頭告知キット",
+    "pageDescription": "印刷してレジ横・ドアに",
+    "printAll": "2ページまとめて印刷",
+    "a6Title": "A6 POP (4面付け)",
+    "a6Description": "A4 1枚に4つ並べます。切ってレジ横スタンドに入れられます。",
+    "doorTitle": "ドア用ステッカー風",
+    "doorDescription": "A4 1枚に大きく1面。角丸の枠線を切り取り線として使えます。",
+    "cashOpenPayAccepted": "現金・OpenPay 使えます",
+    "openPayAccepted": "OpenPay 使えます",
+    "cashLabel": "現金",
+    "jpycAccepted": "JPYC 対応",
+    "siteUrl": "open-pay.jp"
   },
   "Create": {
     "title": "OpenPay",

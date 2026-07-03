@@ -7,7 +7,8 @@
 // (text-2xl sm:text-3xl・中央)。手数料の数字は hero / 開示と整合させ、
 // OpenPay は「0%〜1%」framing。カード 3.24% / コード 1.98% は「一般的な料率の例」と脚注。
 
-import { getTranslations } from 'next-intl/server';
+import Link from 'next/link';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight } from 'lucide-react';
 import { TokenLogo } from '@/components/AssetLogo';
 import { SavingsSimulator } from '@/components/SavingsSimulator';
@@ -22,6 +23,7 @@ const ROWS: readonly { id: RowId; labelKey: string }[] = [
 ];
 
 export async function LandingCashComparison() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
 
   return (
@@ -86,6 +88,15 @@ export async function LandingCashComparison() {
       <p className="mx-auto mt-3 max-w-3xl text-[11px] leading-relaxed text-slate-400">
         {t('cashTableFootnote')}
       </p>
+      <div className="mx-auto mt-4 flex max-w-3xl justify-center">
+        <Link
+          href={`/${locale}/kit`}
+          prefetch={false}
+          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-card hover:border-brand hover:text-brand-dark"
+        >
+          {t('cashStoreKitCta')}
+        </Link>
+      </div>
 
       {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。
           既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。 */}
