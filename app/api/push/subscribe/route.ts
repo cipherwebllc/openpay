@@ -45,6 +45,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   const subscription = parseSubscription(
     objectValue(raw.value, 'subscription') ?? raw.value,
   );
+  // includeAmount は任意 boolean (既定 false)。指定があるのに boolean でなければ拒否する。
+  const includeAmountRaw = objectValue(raw.value, 'includeAmount');
+  if (includeAmountRaw !== undefined && typeof includeAmountRaw !== 'boolean') {
+    return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
+  }
   if (!locale || !subscription) {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
@@ -53,6 +58,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     endpoint: subscription.endpoint,
     keys: subscription.keys,
     locale,
+    includeAmount: includeAmountRaw === true,
   });
   if (!saved.ok) {
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });

@@ -166,7 +166,8 @@ describe('POST /api/relay/jpyc push trigger', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, txHash: TX_HASH });
     expect(hold.after).toHaveBeenCalledTimes(1);
-    expect(hold.notify).toHaveBeenCalledWith(getAddress(MERCHANT), 'payment');
+    // value 1 JPYC (1e18) → ¥1 の金額ラベルを透過する (opt-in 購読でのみ notify 側で表示)。
+    expect(hold.notify).toHaveBeenCalledWith(getAddress(MERCHANT), 'payment', '¥1');
   });
 
   it('relay 結果が success でなければ通知しない', async () => {
@@ -215,7 +216,8 @@ describe('POST /api/relay/jpyc push trigger', () => {
     expect(hold.relay).not.toHaveBeenCalled();
     expect(hold.settle).toHaveBeenCalledTimes(1);
     expect(hold.after).toHaveBeenCalledTimes(1);
-    expect(hold.notify).toHaveBeenCalledWith(getAddress(MERCHANT), 'payment');
+    // merchantValue 1 JPYC (1e18) → ¥1 の金額ラベルを透過する。
+    expect(hold.notify).toHaveBeenCalledWith(getAddress(MERCHANT), 'payment', '¥1');
   });
 
   it('recover relay でも merchant が FEE_RECEIVER なら通知しない', async () => {

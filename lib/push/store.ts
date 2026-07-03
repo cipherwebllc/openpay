@@ -16,6 +16,9 @@ export type StoredPushSubscription = {
   };
   locale: PushLocale;
   vapidKeyId: string;
+  // ロック画面に売上額を出す opt-in (既定 false)。2a 保存済みレコードは本フィールドを
+  // 持たない → 後方互換で欠落は false 扱い (validator は欠落を reject しない・boolean 以外のみ reject)。
+  includeAmount?: boolean;
   createdAt: number;
 };
 
@@ -26,6 +29,7 @@ export type PushSubscriptionInput = {
     auth: string;
   };
   locale: PushLocale;
+  includeAmount?: boolean;
   nowMs?: number;
 };
 
@@ -47,6 +51,7 @@ local vapidKeyId = ARGV[6]
 local createdAt = tonumber(ARGV[7])
 local ttl = tonumber(ARGV[8])
 local cap = tonumber(ARGV[9])
+local includeAmount = ARGV[10] == '1'
 
 local raw = redis.call('GET', key)
 local list = {}
@@ -67,6 +72,7 @@ local next = {
   keys = { p256dh = p256dh, auth = auth },
   locale = locale,
   vapidKeyId = vapidKeyId,
+  includeAmount = includeAmount,
   createdAt = createdAt
 }
 
@@ -157,6 +163,7 @@ export async function upsertPushSubscription(
     keys: input.keys,
     locale: input.locale,
     vapidKeyId: pushVapidKeyId(),
+    includeAmount: input.includeAmount === true,
     createdAt: input.nowMs ?? Date.now(),
   };
   const res = await kvEval<string>(
@@ -172,6 +179,7 @@ export async function upsertPushSubscription(
       String(record.createdAt),
       String(PUSH_SUBSCRIPTION_TTL_SEC),
       String(PUSH_SUBSCRIPTION_CAP),
+      record.includeAmount ? '1' : '0',
     ],
   );
   if (!res.ok) return { ok: false, reason: 'kv_error' };
@@ -227,6 +235,10 @@ function isStoredPushSubscription(v: unknown): v is StoredPushSubscription {
   if (typeof r.endpoint !== 'string') return false;
   if (r.locale !== 'ja' && r.locale !== 'en') return false;
   if (typeof r.vapidKeyId !== 'string' || !/^[0-9a-f]{8}$/.test(r.vapidKeyId))
+    return false;
+  // includeAmount は後方互換フィールド (2a 保存済みレコードは持たない)。欠落 (undefined) は
+  // 許容し、後段で false 扱いにする。存在する場合は boolean 以外を reject。
+  if (r.includeAmount !== undefined && typeof r.includeAmount !== 'boolean')
     return false;
   if (
     typeof r.createdAt !== 'number' ||

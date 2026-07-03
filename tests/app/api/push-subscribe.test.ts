@@ -157,7 +157,32 @@ describe('/api/push/subscribe', () => {
       endpoint: subscription.endpoint,
       keys: subscription.keys,
       locale: 'en',
+      includeAmount: false,
     });
+  });
+
+  it('includeAmount:true を透過して upsert する', async () => {
+    const res = await POST(
+      req('POST', { subscription, locale: 'ja', includeAmount: true }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(storeSpy.upsert).toHaveBeenCalledWith(SESSION_ADDR, {
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+      locale: 'ja',
+      includeAmount: true,
+    });
+  });
+
+  it('includeAmount が boolean でなければ 400 (保存へ進まない)', async () => {
+    const res = await POST(
+      req('POST', { subscription, locale: 'ja', includeAmount: 'yes' }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_payload' });
+    expect(storeSpy.upsert).not.toHaveBeenCalled();
   });
 
   it('DELETE は endpoint を SIWE address の購読から削除する', async () => {
