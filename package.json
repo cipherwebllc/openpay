@@ -45,9 +45,11 @@
     "qrcode.react": "^4.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "server-only": "^0.0.1",
     "undici": "^6.27.0",
     "viem": "^2.45.0",
     "wagmi": "^2.13.0",
+    "web-push": "^3.6.7",
     "x402-fetch": "^1.2.0",
     "x402-next": "^1.2.0"
   },

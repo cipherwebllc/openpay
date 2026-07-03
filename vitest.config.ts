@@ -5,7 +5,11 @@ import { resolve } from 'node:path';
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { '@': resolve(__dirname, '.') },
+    alias: {
+      '@': resolve(__dirname, '.'),
+      'server-only': resolve(__dirname, 'tests/mocks/server-only.ts'),
+      'web-push': resolve(__dirname, 'tests/mocks/web-push.ts'),
+    },
   },
   test: {
     environment: 'jsdom',
