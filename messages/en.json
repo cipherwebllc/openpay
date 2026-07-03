@@ -139,6 +139,7 @@
     "cashCellLockCard": "Yes",
     "cashCellLockOpenPay": "None",
     "cashTableFootnote": "Card 3.24% / QR pay 1.98% are examples of typical rates. Actual rates vary by contract.",
+    "cashStoreKitCta": "Print the in-store kit (free)",
     "cashFlowTitle": "Yen and JPYC are 1:1",
     "cashFlowYen": "Yen",
     "cashFlowBuy": "Buy",
@@ -218,6 +219,20 @@
     "bellAria": "Open announcements",
     "unreadAria": "Announcements ({count} unread)",
     "empty": "No announcements right now."
+  },
+  "StoreKit": {
+    "pageTitle": "In-store notice kit",
+    "pageDescription": "Print for the register or door",
+    "printAll": "Print both pages",
+    "a6Title": "A6 counter POP (4-up)",
+    "a6Description": "Four copies on one A4 sheet. Cut them out for a counter stand.",
+    "doorTitle": "Door sticker style",
+    "doorDescription": "One large square on A4. The rounded border doubles as a trim line.",
+    "cashOpenPayAccepted": "Cash & OpenPay accepted",
+    "openPayAccepted": "OpenPay accepted",
+    "cashLabel": "Cash",
+    "jpycAccepted": "JPYC accepted",
+    "siteUrl": "open-pay.jp"
   },
   "Create": {
     "title": "OpenPay",

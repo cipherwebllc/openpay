@@ -6,6 +6,7 @@ import { LandingCashComparison } from '@/components/LandingCashComparison';
 // 実 ja コピーで assertion したいので getTranslations を Landing 実辞書引きに mock。
 // t.rich は <tag>…</tag> を tag renderer に通す最小実装 (cashFlowNote の jpycEx リンク用)。
 vi.mock('next-intl/server', () => ({
+  getLocale: async () => 'ja',
   getTranslations: async () => {
     const dict = ja.Landing as Record<string, string>;
     const t = (k: string) => dict[k] ?? k;
@@ -63,6 +64,9 @@ describe('LandingCashComparison', () => {
     expect(
       screen.getByText(/カード 3.24%・コード決済 1.98% は一般的な料率の例/),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: '店頭キットを印刷する (無料)' }),
+    ).toHaveAttribute('href', '/ja/kit');
   });
 
   it('円⇄JPYC の 1:1 図解とシミュレータ (client 子) を描画', async () => {
