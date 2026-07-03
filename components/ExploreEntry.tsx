@@ -29,7 +29,7 @@ export const CATEGORY_ACCENT: Record<ExploreCategory, string> = {
   resource: 'bg-slate-100 text-slate-600',
 };
 
-// 表示名の先頭の英数字を monogram に。"1inch"→"1" / "JPYC 公式"→"J" / "GMOコイン"→"G"。
+// 表示名の先頭の英数字を monogram に。"1inch"→"1" / "JPYC EX"→"J" / "GMOコイン"→"G"。
 function monogram(name: string): string {
   const m = name.match(/[A-Za-z0-9]/);
   return (m ? m[0] : name.charAt(0)).toUpperCase();

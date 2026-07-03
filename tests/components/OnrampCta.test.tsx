@@ -5,12 +5,12 @@ import { OnrampCta } from '@/components/OnrampCta';
 
 describe('OnrampCta', () => {
   describe('ja locale', () => {
-    it('jpyc: JPYC 公式 リンクと購入文言を出す、注記なし', () => {
+    it('jpyc: JPYC EX リンクと購入文言を出す、注記なし', () => {
       render(<OnrampCta token="jpyc" namespace="PaymentForm" />, {
         locale: 'ja',
       });
       const link = screen.getByRole('link', {
-        name: /JPYC 公式 で JPYC を購入/,
+        name: /JPYC EX で JPYC を購入/,
       });
       expect(link).toHaveAttribute('href', 'https://jpyc.co.jp/');
       expect(link).toHaveAttribute('target', '_blank');
@@ -33,12 +33,12 @@ describe('OnrampCta', () => {
   });
 
   describe('en locale', () => {
-    it('jpyc: JPYC official + Japan residents only 注記', () => {
+    it('jpyc: JPYC EX + Japan residents only 注記', () => {
       render(<OnrampCta token="jpyc" namespace="PaymentForm" />, {
         locale: 'en',
       });
       const link = screen.getByRole('link', {
-        name: /Buy JPYC on JPYC official/,
+        name: /Buy JPYC on JPYC EX/,
       });
       expect(link).toHaveAttribute('href', 'https://jpyc.co.jp/');
       expect(screen.getByText(/Japan residents only/)).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe('OnrampCta', () => {
     it('TipForm namespace でも同じ文言が引ける', () => {
       render(<OnrampCta token="jpyc" namespace="TipForm" />, { locale: 'ja' });
       expect(
-        screen.getByRole('link', { name: /JPYC 公式 で JPYC を購入/ }),
+        screen.getByRole('link', { name: /JPYC EX で JPYC を購入/ }),
       ).toBeInTheDocument();
     });
 

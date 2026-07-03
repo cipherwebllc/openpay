@@ -4,9 +4,30 @@ import ja from '../../messages/ja.json';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 
 // 実 ja コピーで assertion したいので getTranslations を Landing 実辞書引きに mock。
+// t.rich は <tag>…</tag> を tag renderer に通す最小実装 (cashFlowNote の jpycEx リンク用)。
 vi.mock('next-intl/server', () => ({
-  getTranslations: async () => (k: string) =>
-    (ja.Landing as Record<string, string>)[k] ?? k,
+  getTranslations: async () => {
+    const dict = ja.Landing as Record<string, string>;
+    const t = (k: string) => dict[k] ?? k;
+    t.rich = (
+      k: string,
+      tags: Record<string, (chunks: React.ReactNode) => React.ReactNode>,
+    ) => {
+      const raw = dict[k] ?? k;
+      const m = raw.match(/^(.*)<(\w+)>(.*?)<\/\2>(.*)$/s);
+      if (!m) return raw;
+      const [, before, tag, inner, after] = m;
+      const renderer = tags[tag];
+      return (
+        <>
+          {before}
+          {renderer ? renderer(inner) : inner}
+          {after}
+        </>
+      );
+    };
+    return t;
+  },
 }));
 
 // client 子 (useTranslations/useLocale) は intl provider が要るため mock (境界分離)。

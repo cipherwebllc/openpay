@@ -18,11 +18,11 @@ const EXCHANGE_LINKS = {
   jpyc: {
     ja: {
       url: 'https://jpyc.co.jp/',
-      label: 'JPYC 公式',
+      label: 'JPYC EX',
     },
     en: {
       url: 'https://jpyc.co.jp/',
-      label: 'JPYC official',
+      label: 'JPYC EX',
       jaResidentsOnly: true,
     },
   },
