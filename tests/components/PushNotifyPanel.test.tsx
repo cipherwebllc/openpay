@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   enablePushNotify: true,
   pushVapidPublicKey: 'BPublicKeyBase64Url',
   isSignedIn: true,
+  isConnected: true,
+  signIn: undefined as ReturnType<typeof vi.fn> | undefined,
   isStandalone: false,
   platform: 'other' as 'ios' | 'android' | 'other',
 }));
@@ -25,7 +27,16 @@ vi.mock('@/lib/env', () => ({
 }));
 
 vi.mock('@/hooks/useSiweSession', () => ({
-  useSiweSession: () => ({ isSignedIn: h.isSignedIn }),
+  useSiweSession: () => ({
+    isSignedIn: h.isSignedIn,
+    signIn: h.signIn,
+    isSigningIn: false,
+  }),
+}));
+
+// パネル内蔵 sign-in の接続判定 (未接続はヘッダの「接続」誘導・接続済はその場で署名)。
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ isConnected: h.isConnected }),
 }));
 
 vi.mock('@/hooks/usePwaDisplayMode', () => ({
@@ -91,6 +102,8 @@ beforeEach(() => {
   h.enablePushNotify = true;
   h.pushVapidPublicKey = 'BPublicKeyBase64Url';
   h.isSignedIn = true;
+  h.isConnected = true;
+  h.signIn = vi.fn().mockResolvedValue(undefined);
   h.isStandalone = false;
   h.platform = 'other';
   installBrowserPush();
@@ -123,6 +136,25 @@ describe('PushNotifyPanel', () => {
     ).toBeInTheDocument();
     // 有効化ボタンは出さない。
     expect(screen.queryByText('通知を有効にする')).not.toBeInTheDocument();
+  });
+
+  it('未サインイン + 接続済み → パネル内蔵の sign-in ボタン。押下で SIWE signIn を呼ぶ', () => {
+    h.isSignedIn = false;
+    h.isConnected = true;
+    renderWithIntl(<PushNotifyPanel />);
+    const cta = screen.getByRole('button', { name: 'サインインして通知を設定' });
+    fireEvent.click(cta);
+    // 文言は WalletBadge と同じ Nav.siweStatement (署名プロンプトの一貫性)。
+    expect(h.signIn).toHaveBeenCalledWith('OpenPay にこのウォレットでログインします。');
+  });
+
+  it('未サインイン + 未接続 → sign-in ボタンは出さない (ヘッダの「接続」誘導に委ねる)', () => {
+    h.isSignedIn = false;
+    h.isConnected = false;
+    renderWithIntl(<PushNotifyPanel />);
+    expect(
+      screen.queryByRole('button', { name: 'サインインして通知を設定' }),
+    ).not.toBeInTheDocument();
   });
 
   it('iOS Safari 通常タブ (非 standalone) → 購読 UI でなく A2HS hint', async () => {

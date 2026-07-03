@@ -9,6 +9,13 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 // 各状態 (両 off / a1 のみ / パスのみ / 保持済 / 両方 / 未サインイン / 読込中) で CSV ロックを確認し、
 // パスゲートでは履歴閲覧を **ぼかさない** (a1 の blur とは別系統) ことを実 HistoryView で確認する。
 
+// PushNotifyPanel が useAccount を直接引くようになったため、Provider 無しの jsdom では
+// wagmi を部分 mock する (useAccount のみ上書き・他 export は実物維持)。
+vi.mock('wagmi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('wagmi')>()),
+  useAccount: () => ({ isConnected: false }),
+}));
+
 vi.mock('@/hooks/useMarketRates', () => ({
   useMarketRates: () => ({
     data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },

@@ -1444,6 +1444,7 @@
     "title": "Payment push notifications",
     "description": "Get a notification on this device when you receive a payment. Works even from the app added to your home screen.",
     "signInRequired": "Sign in with your wallet to enable notifications.",
+    "signInCta": "Sign in to set up notifications",
     "unsupported": "This browser does not support Web Push.",
     "denied": "Notifications are blocked. Allow notifications for this site in your browser settings.",
     "enableCta": "Enable notifications",

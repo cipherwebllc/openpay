@@ -22,6 +22,13 @@ vi.mock('@/components/FreeeSyncPanel', () => ({
 // a1 延滞ゲート (履歴ぼかし + CSV ロック) は既定 OFF/未ログインで inert だが、HistoryView が
 // siwe / useBillingInvoice (React Query) を呼ぶため boundary mock。未ログイン → feeGated=false で
 // 閲覧フル開放。延滞時のぼかし挙動は OpenPayFeePanel / billing-integration 専用 test で検証。
+// PushNotifyPanel が useAccount を直接引くようになったため、Provider 無しの jsdom では
+// wagmi を部分 mock する (useAccount のみ上書き・他 export は実物維持)。
+vi.mock('wagmi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('wagmi')>()),
+  useAccount: () => ({ isConnected: false }),
+}));
+
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({ isSignedIn: false, mismatch: false }),
 }));
