@@ -56,6 +56,13 @@ export function PwaInstallHint({ title, iosStep3 }: PwaInstallHintProps = {}) {
     function onInstalled() {
       // install 完了で hint を畳む (display-mode change の hook 経由でも畳まれるが、
       // PWA が manifest を再 fetch する前に local state を倒すための保険)。
+      // インストール済みならどの面でも再提示不要なので localStorage にも永続化する
+      // (ブラウザタブ側は standalone にならず isStandalone では消えないため)。
+      try {
+        localStorage.setItem(DISMISS_KEY, '1');
+      } catch {
+        /* noop */
+      }
       setDismissed(true);
     }
     window.addEventListener('beforeinstallprompt', onBeforeInstall);

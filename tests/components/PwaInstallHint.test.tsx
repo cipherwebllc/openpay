@@ -169,6 +169,8 @@ describe('PwaInstallHint', () => {
       window.dispatchEvent(new Event('appinstalled'));
     });
     expect(container).toBeEmptyDOMElement();
+    // インストール済みは全面で再提示不要 → localStorage にも永続化される。
+    expect(window.localStorage.getItem('openpay:pwaInstallHint:v1')).toBe('1');
   });
 
   it('UA がデスクトップ Chrome → other hint を出す', async () => {
