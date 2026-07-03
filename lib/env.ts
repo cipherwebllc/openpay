@@ -593,6 +593,16 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_ORDER_PICKUP',
     process.env.NEXT_PUBLIC_ENABLE_ORDER_PICKUP,
   ),
+  // Web Push 着金通知の有効化フラグ (client 露出)。**既定 OFF で完全 inert** =
+  // Service Worker 登録 UI は出さず、/api/push/* は 404。VAPID 秘密鍵/subject は
+  // lib/push/server.ts の server-only module に閉じ、ここには公開鍵と flag だけを置く。
+  // 計画: plans/a2hs-retention-roadmap.md Phase 2a。
+  enablePushNotify: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_PUSH_NOTIFY',
+    process.env.NEXT_PUBLIC_ENABLE_PUSH_NOTIFY,
+  ),
+  pushVapidPublicKey:
+    nonEmpty(process.env.NEXT_PUBLIC_PUSH_VAPID_PUBLIC_KEY) ?? '',
   // x402 JPYC facilitator (managed facilitator + discovery: AI エージェント/開発者が
   // 日本事業者の有料 API/コンテンツに JPYC 建てで都度課金 = x402、settlement の 1% を
   // 手数料徴収) の有効化フラグ (client 露出: 登録/discovery UI のゲートに使う)。
