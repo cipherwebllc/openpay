@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import ja from '@/messages/ja.json';
@@ -169,6 +169,8 @@ describe('PwaInstallHint', () => {
       window.dispatchEvent(new Event('appinstalled'));
     });
     expect(container).toBeEmptyDOMElement();
+    // インストール済みは全面で再提示不要 → localStorage にも永続化される。
+    expect(window.localStorage.getItem('openpay:pwaInstallHint:v1')).toBe('1');
   });
 
   it('UA がデスクトップ Chrome → other hint を出す', async () => {
@@ -279,6 +281,47 @@ describe('PwaInstallHint', () => {
       window.dispatchEvent(new Event('appinstalled'));
     });
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('localStorage に永続 dismiss ("1") がある場合、mount 後に非描画になる', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (iPhone)');
+    window.localStorage.setItem('openpay:pwaInstallHint:v1', '1');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    const { container } = render(withIntl(<PwaInstallHint />));
+    // useEffect (mount 後) が localStorage を読み dismissed=true に倒す。
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it('title / iosStep3 prop で文言を上書きできる (省略時は Scan 文言)', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    render(
+      withIntl(
+        <PwaInstallHint
+          title="この QR を毎日使うなら、ホーム画面に追加"
+          iosStep3="次回からはアイコンタップだけで開けます"
+        />,
+      ),
+    );
+    expect(
+      screen.getByText('この QR を毎日使うなら、ホーム画面に追加'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('次回からはアイコンタップだけで開けます'),
+    ).toBeInTheDocument();
+    // Scan 既定の title は出ない (override されている)
+    expect(screen.queryByText(/ホーム画面に追加すると/)).toBeNull();
+  });
+
+  it('× 押下で localStorage に永続 dismiss ("1") が書かれる', async () => {
+    setupMatchMedia(false);
+    setUserAgent('Mozilla/5.0 (iPhone)');
+    const { PwaInstallHint } = await import('@/components/PwaInstallHint');
+    render(withIntl(<PwaInstallHint />));
+    fireEvent.click(screen.getByRole('button', { name: 'ヒントを閉じる' }));
+    expect(window.localStorage.getItem('openpay:pwaInstallHint:v1')).toBe('1');
   });
 
   it('standalone モード遷移中の race: dismissed と isStandalone が同時 true でも安全に null 返却', async () => {

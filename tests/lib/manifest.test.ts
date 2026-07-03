@@ -37,6 +37,27 @@ describe('app/manifest.ts (PWA manifest)', () => {
     expect(m.categories).toContain('finance');
   });
 
+  it('display_override は standalone 第一希望 + minimal-ui フォールバック', () => {
+    expect(m.display_override).toEqual(['standalone', 'minimal-ui']);
+  });
+
+  it('screenshots に narrow/wide の PNG (Android リッチインストール UI 用)', () => {
+    expect(m.screenshots).toHaveLength(2);
+    const byForm = new Map(m.screenshots!.map((s) => [s.form_factor, s]));
+    const narrow = byForm.get('narrow');
+    const wide = byForm.get('wide');
+    expect(narrow).toBeDefined();
+    expect(wide).toBeDefined();
+    for (const s of [narrow!, wide!]) {
+      expect(s.type).toBe('image/png');
+      expect(s.src).toMatch(/^\/screenshot-.*\.png$/);
+      // sizes は public/ の実 PNG と一致させる (撮影時に検証済みの実寸)。
+      expect(s.sizes).toMatch(/^\d+x\d+$/);
+    }
+    expect(narrow!.sizes).toBe('780x1688');
+    expect(wide!.sizes).toBe('2560x1720');
+  });
+
   it('shortcuts に /ja/scan へのエントリ (Android Chrome long-press 用)', () => {
     expect(m.shortcuts).toBeDefined();
     const scan = m.shortcuts!.find((s) => s.url === '/ja/scan');

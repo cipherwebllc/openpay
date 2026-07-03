@@ -210,6 +210,8 @@
     }
   },
   "QrGenerator": {
+    "installHintTitle": "Use this QR every day? Add OpenPay to your home screen",
+    "installHintIosStep3": "Next time, one tap on the icon opens it",
     "steps": {
       "amount": "Amount",
       "receiver": "Recipient",
@@ -1038,6 +1040,8 @@
     "noteLink": "note (OpenPay Magazine)"
   },
   "History": {
+    "installHintTitle": "Check sales in one tap — add to home screen",
+    "installHintIosStep3": "Next time, one tap on the icon opens it",
     "pageTitle": "Transaction history",
     "pageDescription": "Local-only record of OpenPay payments processed in this browser",
     "back": "← OpenPay",

@@ -17,6 +17,7 @@ import { AddressInput } from './AddressInput';
 import { ReceiverWalletChip } from './ReceiverWalletChip';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
+import { PwaInstallHint } from './PwaInstallHint';
 import { ChainChooser } from './ChainChooser';
 import { TokenChooser } from './TokenChooser';
 import { Field } from './Field';
@@ -141,6 +142,12 @@ export function QrGenerator() {
   const [step2Initialized, setStep2Initialized] = useState(false);
   // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  // 初回に QR モーダルを開いた「ピークモーメント」を latch。以降 A2HS hint を出す
+  // (毎日この QR を使う店主に、ホーム画面への追加を提案する)。閉じても latch は保持。
+  const [hasOpenedQr, setHasOpenedQr] = useState(false);
+  useEffect(() => {
+    if (qrModalOpen) setHasOpenedQr(true);
+  }, [qrModalOpen]);
 
   const t = useTranslations('QrGenerator');
   const tFee = useTranslations('UsageFee');
@@ -974,6 +981,15 @@ export function QrGenerator() {
 
               {/* fee=0 のため徴収先 section は撤去 (Phase 1 alpha)。 */}
             </SettingsAccordion>
+
+        {/* A2HS 導線: 初回 QR モーダルを開いた後 (ピークモーメント) にだけ出す。
+            standalone / dismiss 済では PwaInstallHint 側で自動非表示。 */}
+        {hasOpenedQr && (
+          <PwaInstallHint
+            title={t('installHintTitle')}
+            iosStep3={t('installHintIosStep3')}
+          />
+        )}
       </div>
 
       <div className="space-y-4 print:hidden lg:sticky lg:top-20">

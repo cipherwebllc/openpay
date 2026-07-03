@@ -17,7 +17,18 @@ type BeforeInstallPromptEvent = Event & {
 
 type Platform = MobilePlatform;
 
-export function PwaInstallHint() {
+// dismiss を全面 (/scan・/create・/history) で共有する localStorage キー。一度閉じたら
+// どの面でも再表示しない (訪問毎の再提示スパムを解消)。AlphaNotice の DISMISS_KEY と同型。
+const DISMISS_KEY = 'openpay:pwaInstallHint:v1';
+
+type PwaInstallHintProps = {
+  // 面ごとに文言を差し替えるための任意 override。省略時は Scan namespace の
+  // 現行文言 (= /scan 挙動不変)。
+  title?: string;
+  iosStep3?: string;
+};
+
+export function PwaInstallHint({ title, iosStep3 }: PwaInstallHintProps = {}) {
   const t = useTranslations('Scan');
   const { isStandalone } = usePwaDisplayMode();
   // SSR / 初回 client render では 'other' に倒し、useEffect で真の platform に
@@ -31,6 +42,12 @@ export function PwaInstallHint() {
 
   useEffect(() => {
     setPlatform(detectMobilePlatform());
+    // 過去に閉じた利用者は mount 後に隠す (SSR/初回 render は表示に倒し hydration 安全)。
+    try {
+      if (localStorage.getItem(DISMISS_KEY) === '1') setDismissed(true);
+    } catch {
+      /* localStorage 不可環境では表示のまま */
+    }
     function onBeforeInstall(e: Event) {
       // Chrome の自動 prompt を抑制し、ユーザのボタン操作に紐付ける。
       e.preventDefault();
@@ -39,6 +56,13 @@ export function PwaInstallHint() {
     function onInstalled() {
       // install 完了で hint を畳む (display-mode change の hook 経由でも畳まれるが、
       // PWA が manifest を再 fetch する前に local state を倒すための保険)。
+      // インストール済みならどの面でも再提示不要なので localStorage にも永続化する
+      // (ブラウザタブ側は standalone にならず isStandalone では消えないため)。
+      try {
+        localStorage.setItem(DISMISS_KEY, '1');
+      } catch {
+        /* noop */
+      }
       setDismissed(true);
     }
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
@@ -51,6 +75,15 @@ export function PwaInstallHint() {
 
   if (isStandalone || dismissed) return null;
 
+  function persistDismiss() {
+    try {
+      localStorage.setItem(DISMISS_KEY, '1');
+    } catch {
+      /* noop */
+    }
+    setDismissed(true);
+  }
+
   async function handleAndroidInstall() {
     // button は {platform === 'android' && deferredPrompt} の guard 配下でのみ描画
     // されるため、本関数は必ず非 null state で呼ばれる。non-null 断言は閉路の不変条件。
@@ -59,19 +92,19 @@ export function PwaInstallHint() {
     const choice = await prompt.userChoice;
     // 受諾でも拒否でも prompt は 1 度しか使えない仕様。消費後は null に戻す。
     setDeferredPrompt(null);
-    if (choice.outcome === 'accepted') setDismissed(true);
+    if (choice.outcome === 'accepted') persistDismiss();
   }
 
   return (
     <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
-          <p className="font-semibold">{t('installHintTitle')}</p>
+          <p className="font-semibold">{title ?? t('installHintTitle')}</p>
           {platform === 'ios' && (
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs leading-relaxed">
               <li>{t('installHintIosStep1')}</li>
               <li>{t('installHintIosStep2')}</li>
-              <li>{t('installHintIosStep3')}</li>
+              <li>{iosStep3 ?? t('installHintIosStep3')}</li>
             </ol>
           )}
           {platform === 'android' && (
@@ -87,7 +120,7 @@ export function PwaInstallHint() {
         </div>
         <button
           type="button"
-          onClick={() => setDismissed(true)}
+          onClick={persistDismiss}
           aria-label={t('installHintDismiss')}
           className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
         >

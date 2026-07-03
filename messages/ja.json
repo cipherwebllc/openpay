@@ -210,6 +210,8 @@
     }
   },
   "QrGenerator": {
+    "installHintTitle": "この QR を毎日使うなら、ホーム画面に追加",
+    "installHintIosStep3": "次回からはアイコンタップだけで開けます",
     "steps": {
       "amount": "金額",
       "receiver": "受取先",
@@ -1038,6 +1040,8 @@
     "noteLink": "note (OpenPay マガジン)"
   },
   "History": {
+    "installHintTitle": "売上確認をワンタップで — ホーム画面に追加",
+    "installHintIosStep3": "次回からはアイコンタップだけで開けます",
     "pageTitle": "取引履歴",
     "pageDescription": "このブラウザで処理した OpenPay 決済の控え (ローカルのみ保存)",
     "back": "← OpenPay",
