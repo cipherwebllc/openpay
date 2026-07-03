@@ -64,6 +64,24 @@ export function PushNotifyPanel() {
     useState<NotificationPermission>('default');
   const [subscribed, setSubscribed] = useState(false);
   const [includeAmount, setIncludeAmount] = useState(false);
+  // テスト通知の送信状態 (idle/sending/sent/failed)。rate limit (429) も failed 表示に倒す。
+  const [testState, setTestState] = useState<
+    'idle' | 'sending' | 'sent' | 'failed'
+  >('idle');
+
+  async function sendTest() {
+    setTestState('sending');
+    try {
+      const res = await fetch('/api/push/test', { method: 'POST' });
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        sent?: number;
+      } | null;
+      setTestState(res.ok && json?.ok && (json.sent ?? 0) > 0 ? 'sent' : 'failed');
+    } catch {
+      setTestState('failed');
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
 
@@ -237,18 +255,35 @@ export function PushNotifyPanel() {
     return (
       <div className="mt-3 space-y-3">
         {subscribed ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-medium text-emerald-700">
-              {t('enabledStatus')}
-            </span>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void disable()}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
-            >
-              {t('disableCta')}
-            </button>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-medium text-emerald-700">
+                {t('enabledStatus')}
+              </span>
+              {/* テスト通知: 着金なしで「この端末に届く」を確認できる (server 側 1 分 1 回)。 */}
+              <button
+                type="button"
+                disabled={busy || testState === 'sending'}
+                onClick={() => void sendTest()}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
+              >
+                {t('testCta')}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void disable()}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
+              >
+                {t('disableCta')}
+              </button>
+            </div>
+            {testState === 'sent' && (
+              <p className="text-[11px] text-emerald-700">{t('testSent')}</p>
+            )}
+            {testState === 'failed' && (
+              <p className="text-[11px] text-red-600">{t('testFailed')}</p>
+            )}
           </div>
         ) : (
           <button
