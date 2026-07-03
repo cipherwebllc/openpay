@@ -6,7 +6,7 @@
 // 全フィルタ状態 (通貨/状態/検索/期間) をここに集約 → applyHistoryFilters で単一の
 // filtered を導出 → list・summary・toolbar(両 CSV) に渡す ("見えるもの = 書き出すもの")。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
 import { env } from '@/lib/env';
@@ -54,6 +54,25 @@ export function HistoryView() {
   // CSV パス購入モーダルの開閉 (W1)。CSV ボタン押下 (pass ロック時) で開く。購入成功で passLocked が
   // flip しても自動で閉じない (中の success 表示を見せる・閉じるのは利用者の close 操作のみ)。
   const [passModalOpen, setPassModalOpen] = useState(false);
+  // push 通知タップの着地 (?from=push): 最新の受取エントリを短時間ハイライトして
+  // 「鳴った→開いた→この着金」を 1 動作で閉じる。query は読了後に除去 (リロード再発火と
+  // SW の既存タブ focus 一致を素の URL に戻すため)。useSearchParams は Suspense 境界を
+  // 要求するため使わず、mount 後に window から 1 回読む (SSR/hydration 安全)。
+  const [flashFromPush, setFlashFromPush] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('from') !== 'push') return;
+    setFlashFromPush(true);
+    params.delete('from');
+    const rest = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + (rest ? `?${rest}` : ''),
+    );
+    const timer = setTimeout(() => setFlashFromPush(false), 3500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // 受取 (HistoryEntry) + 支払い (PayerReceipt) を時系列統合した ledger。方向は保存元で確定。
   const ledger = useMemo(() => buildLedger(entries, receipts), [entries, receipts]);
@@ -139,6 +158,11 @@ export function HistoryView() {
                 key={it.id}
                 entry={it.received}
                 onRemove={removeHistoryEntry}
+                flash={
+                  flashFromPush &&
+                  it.id ===
+                    visible.find((v) => v.direction === 'in' && v.received)?.id
+                }
               />
             ) : it.paid ? (
               <LedgerPaidRow key={it.id} receipt={it.paid} />

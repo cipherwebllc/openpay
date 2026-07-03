@@ -104,7 +104,8 @@ async function sendOne(
         JSON.stringify({
           title: payload.title,
           body: payload.body ?? '',
-          url: `/${sub.locale}/history`,
+          // ?from=push: /history 側で最新の受取エントリを一時ハイライトする着地マーカー。
+          url: `/${sub.locale}/history?from=push`,
         }),
       ),
       SEND_TIMEOUT_MS,
