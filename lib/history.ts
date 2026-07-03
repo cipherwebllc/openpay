@@ -41,6 +41,10 @@ import { stripControlChars } from './sanitize';
 
 export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
 export const HISTORY_CHANGED_EVENT = 'openpay:history-changed';
+// 「今日のお店」ダッシュボード用の小さな派生 summary key。LP はこの 1 key だけを
+// 読み、履歴本体 (最大 1000 件) を parse しない。真実点はあくまで履歴本体で、これは
+// キャッシュ (appendHistory 時に前方合算していく)。詳細は addEntryToTodaySummary。
+export const TODAY_SUMMARY_KEY = 'openpay:todaySummary:v1';
 export const HISTORY_MAX_ENTRIES = 1000;
 // 自由入力 (CheckoutForm の params.description 経由) を 1000 文字で truncate。
 // 1000 件 × 1000 文字 ≒ 1 MB 上限 (UTF-8 換算で max ~3 MB)、LocalStorage 5 MB に
@@ -506,6 +510,8 @@ export function appendHistory(entry: HistoryEntry): void {
       ? next.slice(0, HISTORY_MAX_ENTRIES)
       : next;
   safeSet(HISTORY_STORAGE_KEY, trimmed);
+  // 「今日のお店」summary を前方合算 (dedupe を通過した genuine な新規 entry のみ)。
+  updateTodaySummary(entry);
   broadcastChange();
 }
 
@@ -796,4 +802,114 @@ export function entryTotals(entry: HistoryEntry): {
 export function formatHistoryTimestamp(ts: number): string {
   const d = new Date(ts);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// ============================================================================
+// 「今日のお店」ダッシュボード用 summary (LP を毎朝開く理由)。
+//
+// LP は Server Component のまま、Hero 直下の小さな client カードがこの派生 summary
+// だけを読む (履歴本体 1000 件を parse しない)。appendHistory の度に当日分を前方合算
+// し、日付が変われば rollover して作り直す。金額は raw atomic (wei) を BigInt で厳密
+// 加算する (float 厳禁・端数誤差ゼロ)。真実点は履歴本体で、これはあくまでキャッシュ。
+// ============================================================================
+
+/** merchant (受取ウォレット) 単位の当日集計。金額は raw atomic (bigint 文字列)。 */
+export type TodayMerchantSummary = {
+  /** 当日の成約件数 (success の売上 leg のみ)。 */
+  count: number;
+  /** JPYC 着金合計 (raw atomic・18 decimals)。 */
+  jpycAtomic: string;
+  /** USDC 着金合計 (raw atomic・6 decimals)。 */
+  usdcAtomic: string;
+  /** 最終着金の timestamp (Date.now())。 */
+  lastTs: number;
+};
+
+/** 当日の売上 summary。date はローカル TZ の YYYY-MM-DD。 */
+export type TodaySummary = {
+  date: string;
+  byMerchant: Record<string, TodayMerchantSummary>;
+};
+
+/** ローカル TZ の YYYY-MM-DD キー (UTC ではなく端末ローカル日付で 1 日を区切る)。 */
+export function localDateKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// raw atomic (10進整数文字列) を BigInt で安全に加算。非数値は 0 とみなす (float 不使用)。
+function addAtomic(a: string, b: string): string {
+  const av = /^\d+$/.test(a) ? BigInt(a) : 0n;
+  const bv = /^\d+$/.test(b) ? BigInt(b) : 0n;
+  return (av + bv).toString();
+}
+
+// 当日 summary に載せるべき entry か。success の売上 leg のみ (OpenPay 利用手数料の
+// 独立 tx = standard-fee は「店主の売上」ではないので除外。pending/error/reverted も除外)。
+function isTodaySaleEntry(entry: HistoryEntry): boolean {
+  return entry.status === 'success' && entry.flow !== 'standard-fee';
+}
+
+/** 保存済 summary の shape を軽く検証 (corrupt / 旧版データで card を壊さない)。 */
+export function isValidTodaySummary(value: unknown): value is TodaySummary {
+  if (value === null || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.date !== 'string') return false;
+  if (v.byMerchant === null || typeof v.byMerchant !== 'object') return false;
+  return true;
+}
+
+/**
+ * 純関数: 直前の summary に 1 entry を合算した新しい summary を返す (副作用なし)。
+ *   - entry のローカル日付が prev.date と異なる (or prev=null) → その日付で新規作成 (rollover)。
+ *   - 売上 leg でない entry (非 success / standard-fee) は件数・金額に加算しない
+ *     (rollover だけは反映するため base を返す)。
+ *   - merchant キーは小文字化して他端末/大文字揺れを吸収。
+ */
+export function addEntryToTodaySummary(
+  prev: TodaySummary | null,
+  entry: HistoryEntry,
+): TodaySummary {
+  const date = localDateKey(entry.ts);
+  const base: TodaySummary =
+    prev && prev.date === date
+      ? { date, byMerchant: { ...prev.byMerchant } }
+      : { date, byMerchant: {} };
+  if (!isTodaySaleEntry(entry)) return base;
+  const key = entry.merchant.toLowerCase();
+  const cur = base.byMerchant[key] ?? {
+    count: 0,
+    jpycAtomic: '0',
+    usdcAtomic: '0',
+    lastTs: 0,
+  };
+  const isJpyc = entry.asset === 'jpyc';
+  base.byMerchant[key] = {
+    count: cur.count + 1,
+    jpycAtomic: isJpyc
+      ? addAtomic(cur.jpycAtomic, entry.merchantAmount)
+      : cur.jpycAtomic,
+    usdcAtomic: isJpyc
+      ? cur.usdcAtomic
+      : addAtomic(cur.usdcAtomic, entry.merchantAmount),
+    lastTs: Math.max(cur.lastTs, entry.ts),
+  };
+  return base;
+}
+
+/** LocalStorage から当日 summary を読む (shape 不一致 / 別日でも生データを返す。
+ * 「今日か」の判定と merchant 突合は呼出側 = TodayCard の責務)。 */
+export function readTodaySummary(): TodaySummary | null {
+  const raw = safeGet<unknown>(TODAY_SUMMARY_KEY, null);
+  return isValidTodaySummary(raw) ? raw : null;
+}
+
+// appendHistory から呼ぶ副作用版。LocalStorage 失敗は握りつぶす (summary はキャッシュ)。
+function updateTodaySummary(entry: HistoryEntry): void {
+  try {
+    const prev = readTodaySummary();
+    safeSet(TODAY_SUMMARY_KEY, addEntryToTodaySummary(prev, entry));
+  } catch (error) {
+    logger.warn('history.todaySummary.update failed', { error });
+  }
 }
