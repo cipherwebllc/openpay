@@ -178,4 +178,51 @@ describe('QrPreviewModal', () => {
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('着金を確認しました ✓（+1000 JPYC 受信）');
   });
+
+  const ASSET_LABELS = {
+    ...LABELS,
+    pegPill: '1 JPYC = ¥1',
+    step1: 'スマホでスキャン',
+    step2: '金額を確認',
+    step3: 'お支払い完了',
+  };
+
+  it('asset (jpyc) 指定でトークン識別行 / peg pill / chain バッジ / 3 ステップ / ロゴを描画し mono chainText は出さない', () => {
+    renderModal({
+      labels: ASSET_LABELS,
+      asset: { tokenSymbol: 'jpyc', chainSlug: 'polygon', chainLabel: 'Polygon' },
+    });
+    // トークン識別行 (トークン名 + peg pill)
+    expect(screen.getByText('JPYC')).toBeInTheDocument();
+    expect(screen.getByText('1 JPYC = ¥1')).toBeInTheDocument();
+    // chain バッジ (ラベル) — mono の "JPYC · Polygon" は出さない
+    expect(screen.getByText('Polygon')).toBeInTheDocument();
+    expect(screen.queryByText('JPYC · Polygon')).toBeNull();
+    // 3 ステップ
+    expect(screen.getByText('スマホでスキャン')).toBeInTheDocument();
+    expect(screen.getByText('金額を確認')).toBeInTheDocument();
+    expect(screen.getByText('お支払い完了')).toBeInTheDocument();
+    // フッター OpenPay ロゴ
+    expect(screen.getByAltText('OpenPay')).toBeInTheDocument();
+  });
+
+  it('asset (usdc) では peg pill を出さない (JPYC 限定) がトークン名 / chain バッジは出す', () => {
+    renderModal({
+      labels: ASSET_LABELS,
+      chainText: 'USDC · Base',
+      asset: { tokenSymbol: 'usdc', chainSlug: 'base', chainLabel: 'Base' },
+    });
+    expect(screen.getByText('USDC')).toBeInTheDocument();
+    expect(screen.queryByText('1 JPYC = ¥1')).toBeNull();
+    expect(screen.getByText('Base')).toBeInTheDocument();
+    expect(screen.queryByText('USDC · Base')).toBeNull();
+  });
+
+  it('asset 未指定では従来の mono chainText を維持し peg pill / 3 ステップ / ロゴを出さない (レジ非破壊)', () => {
+    renderModal();
+    expect(screen.getByText('JPYC · Polygon')).toBeInTheDocument();
+    expect(screen.queryByText('1 JPYC = ¥1')).toBeNull();
+    expect(screen.queryByText('スマホでスキャン')).toBeNull();
+    expect(screen.queryByAltText('OpenPay')).toBeNull();
+  });
 });

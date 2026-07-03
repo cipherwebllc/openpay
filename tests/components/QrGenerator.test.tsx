@@ -2043,31 +2043,14 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // poster はモーダル内。
       await openQrModal(user);
-      // crossChain default=true (USDC は他 chain からも受信可能)、poster は
-      // buyerUsdcChainNames() の対応 chain (merchant 受信 6: Base / Arbitrum /
-      // Optimism / Polygon / Ethereum / Avalanche + buyer-only 5: Unichain /
-      // World Chain / Sonic / Sei / HyperEVM) を全列挙する (お客向け = どの chain で
-      // 持っていれば払えるか明示)。
-      // 2026-05-27: Ethereum L1 を merchant-and-buyer に復帰 (戻し忘れ修正、commit
-      // 2f0c53f) したため poster にも Ethereum (testnet env では viem .name =
-      // "Sepolia") が出る。
+      // asset prop 導入後: poster の chain 表示は「選択中の受取 chain」を単一
+      // バッジ (token ロゴ + chain ロゴ + chain 名) で示す。crossChain の buyer-source
+      // chain 列挙は poster から外れ (顧客向けの視覚は受取 chain に集約)、token 名と
+      // 受取 chain (Arbitrum 系) が伝播していることを確認する。
       await waitFor(() => {
-        const el = screen.getByText(/USDC ·/);
-        expect(el.textContent).toMatch(/Base/);
-        expect(el.textContent).toMatch(/Arbitrum/);
-        expect(el.textContent).toMatch(/(Optimism|OP Mainnet|OP Sepolia)/);
-        expect(el.textContent).toMatch(/Polygon/);
-        // Ethereum L1 (testnet env では .name = "Sepolia" 単独) も含まれる。
-        // "Base Sepolia" / "OP Sepolia" / "Unichain Sepolia" は別物なので chain 名
-        // list を split で正確に切り出して検査する。
-        const usdcLine = el.textContent ?? '';
-        const chainsPart = usdcLine.split('·')[1] ?? '';
-        const chainTokens = chainsPart.split('/').map((s) => s.trim());
-        expect(chainTokens).toContain('Sepolia');
-        // phase 4b-1 buyer-only chains — testnet env では "Avalanche Fuji" /
-        // "Unichain Sepolia"
-        expect(el.textContent).toMatch(/(Avalanche|Fuji)/);
-        expect(el.textContent).toMatch(/Unichain/);
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText('USDC')).toBeInTheDocument();
+        expect(dialog.getByText(/Arbitrum/)).toBeInTheDocument();
       });
     });
 
@@ -2088,12 +2071,12 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // poster はモーダル内。
       await openQrModal(user);
-      // crossChain OFF → 単一 chain 名 (Arbitrum 系) のみ表示、他 chain 名は出ない
+      // crossChain OFF → 単一 chain バッジ (Arbitrum 系) のみ・他 chain 名は出ない
       await waitFor(() => {
-        const el = screen.getByText(/USDC ·/);
-        expect(el.textContent).toMatch(/Arbitrum/);
-        expect(el.textContent).not.toMatch(/Base/);
-        expect(el.textContent).not.toMatch(/Polygon/);
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText(/Arbitrum/)).toBeInTheDocument();
+        expect(dialog.queryByText(/Base/)).toBeNull();
+        expect(dialog.queryByText(/Polygon/)).toBeNull();
       });
     });
 
@@ -2106,10 +2089,11 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '500');
       // poster はモーダル内。
       await openQrModal(user);
+      // JPYC は単一 chain バッジ (Polygon)・token 名 JPYC が伝播
       await waitFor(() => {
-        const el = screen.getByText(/JPYC ·/);
-        // JPYC は 1 chain のみ ("·" の右側に / は出ない)
-        expect(el.textContent).not.toMatch(/\//);
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText('JPYC')).toBeInTheDocument();
+        expect(dialog.getByText(/Polygon/)).toBeInTheDocument();
       });
     });
 
@@ -2135,10 +2119,12 @@ describe('QrGenerator', () => {
         expect(urlBox.textContent).toContain('token=jpyc');
         expect(urlBox.textContent).toContain('amount=500');
       });
-      // poster preview の chain 表示は "JPYC · Kairos Testnet" (testnet env)
-      // または "JPYC · Kaia" (mainnet env)、どちらも JPYC · Kai... で始まる
+      // poster の chain バッジは "Kairos Testnet" (testnet env) または "Kaia"
+      // (mainnet env)、どちらも Kai... で始まる。token 名 JPYC も伝播。
       await waitFor(() => {
-        expect(screen.getByText(/JPYC · Kai/)).toBeInTheDocument();
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText('JPYC')).toBeInTheDocument();
+        expect(dialog.getByText(/Kai/)).toBeInTheDocument();
       });
     });
 
@@ -2252,13 +2238,17 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1000'), '100');
       // poster preview はモーダル内。開いたまま token を切替 (背後の chooser は操作可)。
       await openQrModal(user);
-      await waitFor(() =>
-        expect(screen.getByText(/JPYC · Polygon/)).toBeInTheDocument(),
-      );
+      await waitFor(() => {
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText('JPYC')).toBeInTheDocument();
+        expect(dialog.getByText(/Polygon/)).toBeInTheDocument();
+      });
       await user.click(screen.getByRole('button', { name: /^USDC$/ }));
-      await waitFor(() =>
-        expect(screen.getByText(/USDC · Base/)).toBeInTheDocument(),
-      );
+      await waitFor(() => {
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText('USDC')).toBeInTheDocument();
+        expect(dialog.getByText(/Base/)).toBeInTheDocument();
+      });
     });
 
     it('Phase 1: 手数料徴収先アドレスセクションは撤去されている (default + advanced 開いた状態の両方)', async () => {
