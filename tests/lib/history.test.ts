@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  addEntryToTodaySummary,
   appendHistory,
   buildHistoryEntry,
   clearHistory,
@@ -9,14 +10,19 @@ import {
   HISTORY_CHANGED_EVENT,
   HISTORY_MAX_ENTRIES,
   HISTORY_STORAGE_KEY,
+  isValidTodaySummary,
   LATEST_SCHEMA_VERSION,
   loadHistory,
+  localDateKey,
   migrateToLatest,
   MIGRATIONS,
+  readTodaySummary,
   removeHistoryEntry,
+  TODAY_SUMMARY_KEY,
   type BuildHistoryBase,
   type HistoryEntry,
   type MigrationFn,
+  type TodaySummary,
 } from '@/lib/history';
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
@@ -1291,6 +1297,199 @@ describe('history (LocalStorage)', () => {
       vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59, 999));
       const out = formatHistoryTimestamp(Date.now());
       expect(out).toBe('2026-12-31 23:59:59');
+    });
+  });
+
+  describe('todaySummary (「今日のお店」派生集計)', () => {
+    const day1 = new Date(2026, 5, 1, 10, 0, 0).getTime(); // 2026-06-01 10:00
+    const day1Key = localDateKey(day1);
+
+    it('localDateKey はローカル TZ の YYYY-MM-DD', () => {
+      expect(localDateKey(new Date(2026, 0, 5, 9, 0, 0).getTime())).toBe(
+        '2026-01-05',
+      );
+    });
+
+    it('prev=null から success 売上を 1 件合算 (JPYC を atomic 加算)', () => {
+      const s = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAbc', asset: 'jpyc', merchantAmount: '1000' }),
+      );
+      expect(s.date).toBe(day1Key);
+      expect(s.byMerchant['0xabc']).toEqual({
+        count: 1,
+        jpycAtomic: '1000',
+        usdcAtomic: '0',
+        lastTs: day1,
+      });
+    });
+
+    it('同日同 merchant の複数 entry を BigInt で厳密加算 (float 誤差なし)', () => {
+      let s: TodaySummary | null = null;
+      // 18 decimals の巨大 atomic でも桁落ちしない値を選ぶ。
+      s = addEntryToTodaySummary(
+        s,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: '1000000000000000001' }),
+      );
+      s = addEntryToTodaySummary(
+        s,
+        entry({
+          ts: day1 + 60_000,
+          merchant: '0xAbc',
+          merchantAmount: '2000000000000000002',
+        }),
+      );
+      expect(s.byMerchant['0xabc'].count).toBe(2);
+      expect(s.byMerchant['0xabc'].jpycAtomic).toBe('3000000000000000003');
+      expect(s.byMerchant['0xabc'].lastTs).toBe(day1 + 60_000);
+    });
+
+    it('merchant 突合は小文字化 (大文字揺れ / 別端末を吸収)', () => {
+      let s = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xABC', merchantAmount: '10' }),
+      );
+      s = addEntryToTodaySummary(
+        s,
+        entry({ ts: day1, merchant: '0xabc', merchantAmount: '5' }),
+      );
+      expect(Object.keys(s.byMerchant)).toEqual(['0xabc']);
+      expect(s.byMerchant['0xabc'].jpycAtomic).toBe('15');
+      expect(s.byMerchant['0xabc'].count).toBe(2);
+    });
+
+    it('複数 merchant を別バケットに集計', () => {
+      let s = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAaa', merchantAmount: '100' }),
+      );
+      s = addEntryToTodaySummary(
+        s,
+        entry({ ts: day1, merchant: '0xBbb', asset: 'usdc', merchantAmount: '250000' }),
+      );
+      expect(s.byMerchant['0xaaa']).toMatchObject({ jpycAtomic: '100', usdcAtomic: '0' });
+      expect(s.byMerchant['0xbbb']).toMatchObject({ jpycAtomic: '0', usdcAtomic: '250000' });
+    });
+
+    it('JPYC / USDC を通貨別に分けて合算', () => {
+      let s = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAbc', asset: 'jpyc', merchantAmount: '1000' }),
+      );
+      s = addEntryToTodaySummary(
+        s,
+        entry({ ts: day1, merchant: '0xAbc', asset: 'usdc', merchantAmount: '500000' }),
+      );
+      expect(s.byMerchant['0xabc']).toMatchObject({
+        count: 2,
+        jpycAtomic: '1000',
+        usdcAtomic: '500000',
+      });
+    });
+
+    it('日付が変われば rollover して作り直す (前日分は破棄)', () => {
+      const prev = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: '999' }),
+      );
+      const day2 = new Date(2026, 5, 2, 8, 0, 0).getTime();
+      const s = addEntryToTodaySummary(
+        prev,
+        entry({ ts: day2, merchant: '0xAbc', merchantAmount: '1' }),
+      );
+      expect(s.date).toBe(localDateKey(day2));
+      expect(s.byMerchant['0xabc']).toMatchObject({ count: 1, jpycAtomic: '1' });
+    });
+
+    it('非 success (error/pending/reverted) は件数・金額に加算しない', () => {
+      let s: TodaySummary | null = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: '10' }),
+      );
+      for (const status of ['error', 'pending', 'reverted'] as const) {
+        s = addEntryToTodaySummary(
+          s,
+          entry({ ts: day1, merchant: '0xAbc', status, merchantAmount: '999' }),
+        );
+      }
+      expect(s.byMerchant['0xabc']).toMatchObject({ count: 1, jpycAtomic: '10' });
+    });
+
+    it('standard-fee leg (利用手数料 tx) は売上に含めない', () => {
+      const s = addEntryToTodaySummary(
+        null,
+        entry({
+          ts: day1,
+          merchant: '0xFee',
+          flow: 'standard-fee',
+          merchantAmount: '5',
+        }),
+      );
+      expect(s.byMerchant['0xfee']).toBeUndefined();
+    });
+
+    it('不正な merchantAmount は 0 として扱い他 entry を壊さない', () => {
+      let s = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: 'not-a-number' }),
+      );
+      s = addEntryToTodaySummary(
+        s,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: '7' }),
+      );
+      expect(s.byMerchant['0xabc']).toMatchObject({ count: 2, jpycAtomic: '7' });
+    });
+
+    it('rollover 元 (prev) を破壊的に変更しない (純関数)', () => {
+      const prev = addEntryToTodaySummary(
+        null,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: '100' }),
+      );
+      const snapshot = JSON.parse(JSON.stringify(prev));
+      addEntryToTodaySummary(
+        prev,
+        entry({ ts: day1, merchant: '0xAbc', merchantAmount: '50' }),
+      );
+      expect(prev).toEqual(snapshot);
+    });
+
+    it('isValidTodaySummary は corrupt / 型不一致を弾く', () => {
+      expect(isValidTodaySummary(null)).toBe(false);
+      expect(isValidTodaySummary('x')).toBe(false);
+      expect(isValidTodaySummary({ date: 1, byMerchant: {} })).toBe(false);
+      expect(isValidTodaySummary({ date: '2026-06-01', byMerchant: null })).toBe(false);
+      expect(isValidTodaySummary({ date: '2026-06-01', byMerchant: {} })).toBe(true);
+    });
+
+    it('appendHistory は summary key を更新する', () => {
+      window.localStorage.clear();
+      appendHistory(
+        entry({
+          id: 'tx-1',
+          ts: day1,
+          merchant: '0xShop',
+          merchantAmount: '1000',
+        }),
+      );
+      const s = readTodaySummary();
+      expect(s?.date).toBe(day1Key);
+      expect(s?.byMerchant['0xshop']).toMatchObject({ count: 1, jpycAtomic: '1000' });
+    });
+
+    it('appendHistory の dedupe (同一 id 再送) は summary を二重計上しない', () => {
+      window.localStorage.clear();
+      const e = entry({ id: 'tx-dup', ts: day1, merchant: '0xShop', merchantAmount: '1000' });
+      appendHistory(e);
+      appendHistory(e);
+      expect(readTodaySummary()?.byMerchant['0xshop']).toMatchObject({
+        count: 1,
+        jpycAtomic: '1000',
+      });
+    });
+
+    it('readTodaySummary は corrupt な保存値に対して null', () => {
+      window.localStorage.setItem(TODAY_SUMMARY_KEY, 'not-json{{{');
+      expect(readTodaySummary()).toBeNull();
     });
   });
 });

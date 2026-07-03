@@ -142,6 +142,12 @@
     "referenceNote": "via CoinGecko · 5-min cache · reference only",
     "unavailable": "USDC rate is unavailable right now"
   },
+  "Today": {
+    "title": "Today's sales",
+    "count": "{count} tx",
+    "usdc": "${amount} USDC",
+    "lastReceived": "Last received {time}"
+  },
   "Explore": {
     "pageTitle": "Explore",
     "pageDescription": "Curated external services, exchanges, dApps and bridges where JPYC / USDC can be used. Links open external sites.",

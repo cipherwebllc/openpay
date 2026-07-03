@@ -14,6 +14,7 @@ import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
 import { MarketRates } from '@/components/MarketRates';
+import { TodayCard } from '@/components/TodayCard';
 
 export default async function HomePage({
   params,
@@ -26,6 +27,9 @@ export default async function HomePage({
   return (
     <AppShell>
       <LandingHero />
+      {/* 接続済み店主のみ mount 後に描画 (未接続/当日データなしは null = LP 不変)。
+          Hero 直下・MarketRates の前に置き、Hero を押し下げない (CLS/LCP 保護)。 */}
+      <TodayCard />
       <div className="mt-6">
         <MarketRates />
       </div>
