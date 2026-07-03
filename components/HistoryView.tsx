@@ -39,6 +39,7 @@ import { HistoryToolbar } from './HistoryToolbar';
 import { HistorySummary } from './HistorySummary';
 import { FreeeSyncPanel } from './FreeeSyncPanel';
 import { AccountingAffiliates } from './AccountingAffiliates';
+import { PwaInstallHint } from './PwaInstallHint';
 
 export function HistoryView() {
   const t = useTranslations('History');
@@ -239,6 +240,16 @@ export function HistoryView() {
         )}
 
         <AccountingAffiliates />
+
+        {/* A2HS 導線: 売上確認を毎日開く店主に、ホーム画面への追加を提案する。
+            hydrate 後にだけ出す (loading skeleton のチラつきを避ける)。standalone /
+            dismiss 済は PwaInstallHint 側で自動非表示。 */}
+        {hydrated && (
+          <PwaInstallHint
+            title={t('installHintTitle')}
+            iosStep3={t('installHintIosStep3')}
+          />
+        )}
       </section>
 
       {/* CSV パス購入モーダル (W1)。CSV ボタン押下 (pass ロック時) で開く。購入成功で passLocked が

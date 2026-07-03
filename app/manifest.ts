@@ -9,6 +9,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     scope: '/',
     display: 'standalone',
+    // standalone を第一希望に、非対応環境は minimal-ui へ段階フォールバックする。
+    display_override: ['standalone', 'minimal-ui'],
     orientation: 'portrait',
     background_color: '#ffffff',
     theme_color: '#1e3a8a',
@@ -28,6 +30,22 @@ export default function manifest(): MetadataRoute.Manifest {
       },
     ],
     categories: ['finance', 'business', 'productivity'],
+    // Android のリッチインストール UI (スクリーンショット付きプロンプト) 用。narrow=
+    // モバイル / wide=デスクトップ。PNG は public/ に別途配置する (未配置でも manifest 自体は valid)。
+    screenshots: [
+      {
+        src: '/screenshot-narrow.png',
+        sizes: '780x1688',
+        type: 'image/png',
+        form_factor: 'narrow',
+      },
+      {
+        src: '/screenshot-wide.png',
+        sizes: '2560x1720',
+        type: 'image/png',
+        form_factor: 'wide',
+      },
+    ],
     // PWA shortcuts: icon long-press / context menu から /scan へ直行できる。
     // 仕様上 Android Chrome は反映、iOS Safari は無視 (Safari は icon コンテキスト
     // メニューに shortcut を出さない)。ja を default url にしているのは next-intl
