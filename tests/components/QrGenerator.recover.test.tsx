@@ -165,7 +165,7 @@ describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merch
     expect(screen.queryByText('店主が gas 相当額を吸収')).toBeNull();
     // 代わりに「店舗負担固定」ヒントを出す。
     expect(
-      screen.getByText(/OpenPay 利用料は店舗が負担します/),
+      screen.getByText(/max\(2 JPYC, 1%\) は店舗負担/),
     ).toBeInTheDocument();
   });
 
