@@ -1,4 +1,3 @@
-import { privateKeyToAccount } from 'viem/accounts';
 import {
   buildTypedDataFromPaymentRequirements,
   createAuthorization,
@@ -14,6 +13,7 @@ import {
   recordSuccessfulPayment,
   safeErrorMessage,
 } from './guards.mjs';
+import { createSigner, SIGNER_MODES } from './signer.mjs';
 
 export const TOOLS = [
   {
@@ -155,6 +155,19 @@ export function createToolRuntime({
 } = {}) {
   const config = readRuntimeConfig(env);
   const session = createPaymentSession();
+  const sessionSigner =
+    config.signerMode === SIGNER_MODES.steward
+      ? createSigner(env, { fetchImpl })
+      : null;
+
+  function signerAvailable() {
+    if (config.signerMode === SIGNER_MODES.steward) return sessionSigner !== null;
+    return config.buyerPrivateKey !== null;
+  }
+
+  function paymentSigner() {
+    return sessionSigner ?? createSigner(env, { fetchImpl });
+  }
 
   async function discoverySearch(args) {
     const input = requireArgsObject(args);
@@ -224,19 +237,20 @@ export function createToolRuntime({
       sessionSpentAtomic: session.spentAtomic,
       maxTotalJpyc: input.maxTotalJpyc,
       requireMaxTotal: true,
-      requirePrivateKey: true,
+      requireSigner: true,
+      signerAvailable: signerAvailable(),
     });
     if (!guard.ok) return quoteShape(input.url, res.status, guard);
 
-    const account = privateKeyToAccount(config.buyerPrivateKey);
+    const signer = paymentSigner();
     const authorization = createAuthorization(
-      account.address,
+      signer.address,
       guard.accept.maxTimeoutSeconds,
       nowSec(),
     );
     const { accept: normalizedAccept, typedData } =
       buildTypedDataFromPaymentRequirements(accept, authorization);
-    const signature = await account.signTypedData(typedData);
+    const signature = await signer.signTypedData(typedData);
     const paymentPayload = paymentPayloadFor(
       normalizedAccept,
       authorization,

@@ -1,5 +1,6 @@
 import { formatUnits, isHex } from 'viem';
 import { normalizePaymentRequirements } from './payment.mjs';
+import { readSignerMode, SIGNER_MODES } from './signer.mjs';
 
 export const JPYC_DECIMALS = 18;
 export const DEFAULT_MAX_PER_CALL_JPYC = '10';
@@ -24,6 +25,7 @@ export const REASONS = {
   perCallLimitExceeded: 'per_call_limit_exceeded',
   sessionLimitExceeded: 'session_limit_exceeded',
   buyerPrivateKeyMissing: 'buyer_private_key_missing',
+  stewardSignerUnconfigured: 'steward_signer_unconfigured',
 };
 
 export const SUPPORTED_NETWORKS = new Set([
@@ -113,7 +115,10 @@ function requireHttpUrl(raw, label) {
 
 export function readMoneyConfig(env = process.env) {
   return {
+    signerMode: readSignerMode(env),
     buyerPrivateKey: parseOptionalPrivateKey(env.BUYER_PRIVATE_KEY),
+    stewardApiKey: nonEmpty(env.STEWARD_API_KEY) ?? null,
+    stewardSignerSecret: nonEmpty(env.STEWARD_SIGNER_SECRET) ?? null,
     maxPerCallAtomic: parseJpycToAtomic(
       nonEmpty(env.MAX_PER_CALL_JPYC) ?? DEFAULT_MAX_PER_CALL_JPYC,
       'MAX_PER_CALL_JPYC',
@@ -260,6 +265,8 @@ export function evaluatePaymentGuards({
   maxTotalJpyc,
   requireMaxTotal = false,
   requirePrivateKey = false,
+  requireSigner = false,
+  signerAvailable = false,
 }) {
   const reasons = [];
   const parsedUrl = parseHttpUrl(url, 'url');
@@ -293,8 +300,12 @@ export function evaluatePaymentGuards({
     }
   }
 
-  if (requirePrivateKey && config.buyerPrivateKey === null) {
-    reasons.push(REASONS.buyerPrivateKeyMissing);
+  if (requirePrivateKey || requireSigner) {
+    if (config.signerMode === SIGNER_MODES.steward) {
+      if (!signerAvailable) reasons.push(REASONS.stewardSignerUnconfigured);
+    } else if (config.buyerPrivateKey === null) {
+      reasons.push(REASONS.buyerPrivateKeyMissing);
+    }
   }
 
   return {
@@ -317,5 +328,9 @@ export function redactSensitiveText(text, secrets = []) {
 
 export function safeErrorMessage(error, config = {}) {
   const message = error instanceof Error ? error.message : String(error);
-  return redactSensitiveText(message, [config.buyerPrivateKey]);
+  return redactSensitiveText(message, [
+    config.buyerPrivateKey,
+    config.stewardApiKey,
+    config.stewardSignerSecret,
+  ]);
 }
