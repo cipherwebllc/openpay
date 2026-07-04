@@ -104,9 +104,9 @@ const ja: GuideContent = {
     'システム連携なしで今日から。既存の無料POSレジに「OpenPay」決済を足して、JPYC（円ステーブルコイン）で受け取る2台持ち運用の手順。',
   title: '今お使いのPOSレジで、JPYC（円ステーブルコイン）を受け取る',
   subtitle: 'システム連携なしで“今日から”始める「2台持ち」運用ガイド',
-  lead: 'いま使っているPOSレジはそのままに、OpenPay を“横に置くだけ”でJPYC（円ステーブルコイン）を受け取れるようにする手順です。アプリ開発もシステム連携も不要。設定は一度だけ、慣れれば会計は約10秒です。',
+  lead: 'いまのPOSレジはそのまま、OpenPay を“横に置くだけ”。開発も連携も不要。設定は一度だけ、慣れれば会計は約10秒です。',
   audience:
-    '対象：小売・飲食・サロン・ポップアップ・物販など、すでにPOSレジ（無料アプリでOK）を使っている／使い始められる店舗オーナーさん。',
+    '対象：POSレジ（無料アプリ可）を使っている／これから使う店舗オーナーさん（小売・飲食・サロン・ポップアップなど）。',
   heroImage: { file: 'hero.svg', alt: '店頭でタブレットのQRを客がスマホでスキャンする様子' },
 
   canDoTitle: 'できること',
@@ -132,7 +132,7 @@ const ja: GuideContent = {
 
   overviewTitle: '仕組み（全体像）',
   overviewBody:
-    'レジは「いくら売れたか」を記録する係、OpenPayは「JPYCを受け取る」係。2つは別々に動き、閉店後にあなたが突き合わせるだけ。シンプルです。',
+    'レジは「売上の記録」係、OpenPayは「JPYCの受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
   overviewImage: { file: 'overview-flow.svg', alt: 'POSレジ→OpenPay→突合 の3ステップ全体像' },
 
   setupTitle: 'STEP 0 ― 最初の一度だけの準備（約5分）',
@@ -140,12 +140,12 @@ const ja: GuideContent = {
     {
       n: 1,
       title: 'OpenPay で受取先を設定',
-      body: 'open-pay.jp を開き受取ウォレットを接続。「決済QR」で受取先アドレスと通貨（JPYC）を確認。よく使う金額はレジ機能のプリセットに登録すると毎回が速いです。',
+      body: 'open-pay.jp で受取ウォレットを接続し、「決済QR」で受取先と通貨（JPYC）を確認。よく使う金額はプリセット登録が速いです。',
     },
     {
       n: 2,
       title: 'POSレジに「OpenPay」決済ボタンを追加',
-      body: 'お使いのレジの「その他決済」「独自決済」などの設定で、名称「OpenPay」（または「JPYC」「デジタル通貨」）のボタンを1つ作ります。ほとんどの無料POSに現金・カード以外の“その他”支払い枠があります。これでレジ側に「OpenPayでいくら売れたか」が残ります。',
+      body: 'レジの「その他決済」枠に名称「OpenPay」のボタンを1つ追加します（ほとんどの無料POSにあります）。これでレジ側に売上が残ります。',
     },
   ],
   setupImage: { file: 'pos-add-method.svg', alt: 'POSレジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
@@ -160,7 +160,7 @@ const ja: GuideContent = {
     {
       n: 2,
       title: 'OpenPay で同じ金額のQRを表示',
-      body: '別端末（またはレジ端末）でOpenPayを開き、同じ金額を入力して決済QRを表示。厳密に帳簿を合わせたい場合は、レジのレシート番号をOpenPayの「メモ」欄に入れておくと後の突合がラクです（任意）。',
+      body: '別端末（またはレジ端末）でOpenPayに同じ金額を入力してQRを表示。厳密に合わせたい場合はレシート番号を「メモ」へ（任意）。',
     },
     {
       n: 3,
@@ -170,13 +170,13 @@ const ja: GuideContent = {
     {
       n: 4,
       title: '着金を確認してからレジを締める',
-      body: 'QR画面に「着金を確認しました ✓」が出たら、商品をお渡し・レジを締めます。これは残高の増加を検知する目安表示なので、混雑時など確実を期すときは、お客様の完了画面や取引履歴／ブロックチェーン Explorer でもご確認ください。',
+      body: 'QR画面に「着金を確認しました ✓」が出たら、商品をお渡し・レジを締めます。これは目安表示のため、確実を期すときは取引履歴やブロックチェーン Explorer でもご確認を。',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: '会計→QR表示→スキャン→完了確認 の4ステップ' },
   successImage: { file: 'payment-success.svg', alt: 'お客様のスマホに表示される支払い完了画面' },
   successCaption:
-    '※これはお客様のスマホに表示される完了画面の例です。店舗側はQR画面に「着金を確認しました ✓」が表示されます。',
+    '※お客様側の完了画面の例です。店舗側はQR画面に「着金を確認しました ✓」が出ます。',
   safetyNote:
     '重要：着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
 
@@ -184,15 +184,15 @@ const ja: GuideContent = {
   reconcileBody:
     'レジの「OpenPay決済」合計と、OpenPayの着金記録を突き合わせます。',
   reconcileBullets: [
-    '基本（かんたん）：POS の売上額（お客様の支払額）と時刻で照合（例：14:32 の ¥1,200 の売上）。※ウォレットの着金額はご利用料（約 1%・最低 約 2 JPYC）を差し引いた純額になります',
+    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。※着金額はご利用料（約 1%・最低 約 2 JPYC）差引後の純額です',
     '厳密：会計時にメモへ入れたレシート番号で1対1照合',
-    'まとめて：OpenPayの「履歴」からCSVを出力して、レジの「その他決済」明細と突き合わせ。CSVは主要な会計ソフト（freee／マネーフォワード／弥生）の取込形式に対応しています',
+    'まとめて：「履歴」のCSVをレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
   ],
   reconcileImage: { file: 'history-reconcile.svg', alt: 'POSの明細とOpenPayの履歴/CSVを金額・番号で突き合わせる図' },
 
   posTitle: 'どのPOSレジを使えばいい？（無料で始められるレジ）',
   posBody:
-    'すでにお使いのレジがあればそのままでOK。これから選ぶなら、無料で始められるPOSレジアプリとの相性が抜群です（「その他決済」枠があるものを選んでください）。',
+    'いまのレジのままでOK。これから選ぶなら、「その他決済」枠のある無料POSアプリと相性抜群です。',
   posExamples: ['Square POS', 'Airレジ', 'スマレジ', 'ユビレジ'],
   posCaveat:
     '※各POSの無料プランの有無・条件・手数料は変わることがあります。導入前に各社の最新の公式情報をご確認ください。',
@@ -201,7 +201,7 @@ const ja: GuideContent = {
     name: 'スマレジ',
     href: SMAREGI_AFFILIATE_URL,
     blurb:
-      '国内で広く使われるクラウド POS レジ。いつものレジ会計はスマレジ、JPYC（円ステーブルコイン）の受け取りは OpenPay、という2台持ちで無理なく始められます。これから POS を選ぶ・見直すなら候補のひとつです。',
+      '国内で広く使われるクラウド POS。レジ会計はスマレジ、JPYC の受け取りは OpenPay の2台持ちで、無理なく始められます。',
     cta: 'スマレジを見る',
   },
 
@@ -209,25 +209,25 @@ const ja: GuideContent = {
   costColCard: '一般的なカード決済',
   costColOpenpay: '無料POS × OpenPay',
   costRows: [
-    { label: '決済手数料', card: '約3%程度（例）', openpay: 'ご利用料 約1%（最低 約2 JPYC）。着金から自動で差し引き（最新は利用規約参照）' },
+    { label: '決済手数料', card: '約3%程度（例）', openpay: 'ご利用料 約1%（最低 約2 JPYC）・着金から自動差引（最新は利用規約参照）' },
     { label: '入金', card: '数日後・締めあり', openpay: '即時・直接あなたのウォレットへ' },
     { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ（誰も預からない）' },
   ],
   costNote:
     '※手数料の最新・正確な条件は OpenPay の利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例であり、契約条件により異なります。',
   feeNote:
-    '着金額について：OpenPay のガスレス決済では、決済時に OpenPay のご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれ、残りがあなたのウォレットに着金します（例：¥1,200 の売上なら約 ¥1,188 が着金）。POS レジに記録されるのは売上額（お客様の支払額）なので、ウォレットの着金額はそれより少なくなります。正確な料率は利用規約・特定商取引法に基づく表記をご確認ください。',
+    '着金額について：ガスレス決済ではご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれ、残りが着金します（例：¥1,200 → 約 ¥1,188）。POS に記録されるのは売上額のため、着金額はそれより少なくなります。正確な料率は利用規約・特定商取引法に基づく表記をご確認ください。',
   costImage: { file: 'cost-compare.svg', alt: 'カード決済と無料POS×OpenPayのコスト比較イメージ' },
 
   faqTitle: 'よくある質問',
   faqs: [
     {
       q: 'レジとOpenPayが自動でつながらないのは面倒では？',
-      a: '金額の再入力という一手間はありますが、その代わり開発も審査も待ち時間もゼロで今日から始められます。利用が増えてきたら、将来的なシステム連携も検討できます。',
+      a: '金額の再入力という一手間の代わりに、開発も審査も待ち時間もゼロで今日から。利用が増えたらシステム連携も検討できます。',
     },
     {
       q: 'お客様にウォレットがないと使えない？',
-      a: 'はい。まずは暗号資産に慣れた常連さんや、JPYCを使いたいお客様から。少しずつ「ここはJPYCで払える店」を広げていくのがおすすめです。',
+      a: 'はい。まずは暗号資産に慣れた常連さんから。「JPYCで払える店」を少しずつ広げていくのがおすすめです。',
     },
     {
       q: '二重に売上が記録されない？',
@@ -257,9 +257,9 @@ const en: GuideContent = {
     'Start today, no system integration. Add an “OpenPay” tender to your existing free POS and receive JPYC (a JPY stablecoin) with a simple two-device workflow.',
   title: 'Accept JPYC payments with the POS register you already use',
   subtitle: 'A “two-device” workflow you can start today — no system integration',
-  lead: 'Keep the POS register you already use, and simply place OpenPay beside it to accept JPYC payments (a JPY stablecoin). No app development, no system integration. Set it up once; checkout takes about 10 seconds once you are used to it.',
+  lead: 'Keep your current POS and simply place OpenPay beside it. No development, no integration. Set up once — checkout takes about 10 seconds with practice.',
   audience:
-    'For shop owners — retail, food, salons, pop-ups, merch — who already use (or can start using) a POS register (a free app is fine).',
+    'For shop owners who use (or can start using) a POS register (a free app is fine) — retail, food, salons, pop-ups.',
   heroImage: { file: 'hero.svg', alt: 'A customer scanning a QR on a counter tablet with their phone' },
 
   canDoTitle: 'What you can do',
@@ -285,7 +285,7 @@ const en: GuideContent = {
 
   overviewTitle: 'How it works',
   overviewBody:
-    'The POS records “how much was sold”; OpenPay handles “receiving JPYC”. The two run separately, and you just reconcile them after closing. Simple.',
+    'The POS records the sale; OpenPay receives the JPYC. They run separately — you just reconcile after closing.',
   overviewImage: { file: 'overview-flow.svg', alt: 'Overview: POS register → OpenPay → reconcile' },
 
   setupTitle: 'STEP 0 — One-time setup (about 5 minutes)',
@@ -293,12 +293,12 @@ const en: GuideContent = {
     {
       n: 1,
       title: 'Set your receiving wallet in OpenPay',
-      body: 'Open open-pay.jp and connect your receiving wallet. In “Payment QR”, confirm the receiving address and currency (JPYC). Saving common amounts as presets speeds up every checkout.',
+      body: 'Connect your receiving wallet at open-pay.jp and confirm the address and currency (JPYC) in “Payment QR”. Preset common amounts to speed up checkout.',
     },
     {
       n: 2,
       title: 'Add an “OpenPay” tender to your POS',
-      body: 'In your POS settings for “other payment”/“custom payment”, create one button named “OpenPay” (or “JPYC”, “digital currency”). Almost every free POS has an “other” tender slot besides cash and card. This keeps “how much was sold via OpenPay” in your POS records.',
+      body: 'Add one “OpenPay” button in your POS “other payment” slot (almost every free POS has one). Sales stay recorded on the POS side.',
     },
   ],
   setupImage: { file: 'pos-add-method.svg', alt: 'A POS settings mockup adding an “OpenPay” payment method' },
@@ -313,7 +313,7 @@ const en: GuideContent = {
     {
       n: 2,
       title: 'Show the same amount as an OpenPay QR',
-      body: 'On a separate device (or the POS device), open OpenPay, enter the same amount, and show the payment QR. To reconcile books precisely, you can put the POS receipt number in OpenPay’s “memo” field (optional).',
+      body: 'On a separate device (or the POS device), enter the same amount in OpenPay and show the QR. For precise books, put the receipt number in “memo” (optional).',
     },
     {
       n: 3,
@@ -323,13 +323,13 @@ const en: GuideContent = {
     {
       n: 4,
       title: 'Confirm the payment, then close',
-      body: 'When “Payment received ✓” appears on the QR screen, hand over the goods and close the sale. This is an approximate hint (it detects a balance increase), so when you need certainty (e.g. during a rush), also confirm via the customer’s completion screen or your transaction history / a blockchain explorer.',
+      body: 'When “Payment received ✓” appears, hand over the goods and close the sale. It is an approximate hint — for certainty, also check your history or a blockchain explorer.',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: 'Four steps: ring up → show QR → scan → confirm' },
   successImage: { file: 'payment-success.svg', alt: 'The payment-complete screen shown on the customer’s phone' },
   successCaption:
-    '* This is an example of the completion screen on the customer’s phone. On the store side, the QR screen shows “Payment received ✓”.',
+    '* Example of the customer’s completion screen. Your side shows “Payment received ✓” on the QR screen.',
   safetyNote:
     'Important: do not hand over goods before confirming receipt. Conversely, a completed payment cannot be reversed (it has settled directly to your wallet).',
 
@@ -337,15 +337,15 @@ const en: GuideContent = {
   reconcileBody:
     'Match your POS “OpenPay” total against OpenPay’s received records.',
   reconcileBullets: [
-    'Basic: match by the POS sale amount (what the customer pays) and time (e.g. a ¥1,200 sale at 14:32). Note your wallet receives the net amount after the usage fee (~1%, min ~2 JPYC)',
+    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). Your wallet receives the net after the usage fee (~1%, min ~2 JPYC)',
     'Precise: one-to-one match by the receipt number you put in the memo',
-    'In bulk: export CSV from OpenPay “History” and match against your POS “other payment” entries. The CSV supports the import formats of major accounting software (freee / Money Forward / Yayoi)',
+    'In bulk: export CSV from “History” and match against POS “other payment” entries. Supports freee / Money Forward / Yayoi import formats',
   ],
   reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with OpenPay history/CSV by amount and number' },
 
   posTitle: 'Which POS should you use? (POS apps you can start free)',
   posBody:
-    'If you already have a POS, keep it. If you are choosing one, free-to-start POS apps pair well (pick one with an “other payment” slot).',
+    'Keep your current POS if you have one. Choosing new? Free POS apps with an “other payment” slot pair best.',
   posExamples: ['Square POS', 'Airレジ', 'スマレジ (Smaregi)', 'ユビレジ (Ubiregi)'],
   posCaveat:
     '* Free plans, terms, and fees of each POS can change. Please check each provider’s latest official information before adopting.',
@@ -354,7 +354,7 @@ const en: GuideContent = {
     name: 'Smaregi',
     href: SMAREGI_AFFILIATE_URL,
     blurb:
-      'A widely used cloud POS in Japan. Keep your everyday checkout on Smaregi and accept JPYC (the yen stablecoin) with OpenPay — an easy two-device combo. Worth a look if you are choosing or rethinking your POS.',
+      'A widely used cloud POS in Japan. Checkout on Smaregi, JPYC on OpenPay — an easy two-device combo.',
     cta: 'See Smaregi',
   },
 
@@ -362,25 +362,25 @@ const en: GuideContent = {
   costColCard: 'Typical card payment',
   costColOpenpay: 'Free POS × OpenPay',
   costRows: [
-    { label: 'Payment fee', card: 'about 3% (example)', openpay: 'Usage fee ~1% (min ~2 JPYC), auto-deducted from the amount received (see Terms)' },
+    { label: 'Payment fee', card: 'about 3% (example)', openpay: 'Usage fee ~1% (min ~2 JPYC), auto-deducted (see Terms)' },
     { label: 'Settlement', card: 'days later, with cutoffs', openpay: 'instant, directly to your wallet' },
     { label: 'Custody', card: 'the processor holds funds first', openpay: 'non-custodial (no one holds funds)' },
   ],
   costNote:
     '* For the latest, exact fee terms, see OpenPay’s Terms / legal notice. The comparison is a general example and varies by contract.',
   feeNote:
-    'About the amount received: with OpenPay’s gasless payments, OpenPay’s usage fee (about 1% of the amount, minimum about 2 JPYC) is automatically deducted at settlement, and the remainder arrives in your wallet (e.g. a ¥1,200 sale → about ¥1,188 received). Your POS records the sale amount (what the customer pays), so your wallet receipt is slightly less. See the Terms / legal notice for the exact rate.',
+    'About the amount received: the usage fee (about 1%, minimum about 2 JPYC) is auto-deducted at settlement and the rest settles to your wallet (e.g. ¥1,200 → about ¥1,188). Your POS records the sale amount, so the wallet receipt is slightly less. See the Terms / legal notice for exact rates.',
   costImage: { file: 'cost-compare.svg', alt: 'Cost comparison: card payment vs free POS × OpenPay' },
 
   faqTitle: 'FAQ',
   faqs: [
     {
       q: 'Isn’t it inconvenient that the POS and OpenPay aren’t auto-connected?',
-      a: 'There is the small step of re-entering the amount, but in exchange you can start today with zero development, zero review, and zero waiting. As usage grows, a future system integration can be considered.',
+      a: 'You re-enter the amount — in exchange, zero development, zero review, zero waiting. As usage grows, an integration can be considered.',
     },
     {
       q: 'Can it be used if the customer has no wallet?',
-      a: 'No. Start with crypto-savvy regulars and customers who want to use JPYC, and gradually grow “this shop accepts JPYC”.',
+      a: 'No. Start with crypto-savvy regulars, and gradually grow “this shop accepts JPYC”.',
     },
     {
       q: 'Won’t sales be double-counted?',
