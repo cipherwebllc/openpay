@@ -177,4 +177,15 @@ describe('first-party paid x402 routes', () => {
     });
     expect(body.items[0].description).toBeUndefined();
   });
+
+  it('402 チャレンジの accepts は x402scan v1 payable-index 用 outputSchema を含む (verify body は不変)', async () => {
+    const { demo } = await load();
+    const res = await demo.GET(new Request('https://open-pay.jp/api/paid/demo'));
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as {
+      accepts: Array<{ outputSchema?: { input?: { type: string; method: string; discoverable: boolean } } }>;
+    };
+    const schema = body.accepts[0]?.outputSchema;
+    expect(schema?.input).toEqual({ type: 'http', method: 'GET', discoverable: true });
+  });
 });
