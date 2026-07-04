@@ -50,11 +50,11 @@ describe('PayerReceiptList', () => {
     render(<PayerReceiptList />);
     expect(screen.getByText('電子レシート / 支払い控え')).toBeTruthy();
     expect(
-      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.getByText('まだ控えはありません。'),
     ).toBeTruthy();
-    expect(screen.getByText(/支払いを完了するとここに表示されます/)).toBeTruthy();
+    expect(screen.getByText(/支払いが完了すると、ここに残ります/)).toBeTruthy();
     // 保存場所の注意は空でも常時出す。
-    expect(screen.getByText(/お使いの端末のブラウザにのみ保存/)).toBeTruthy();
+    expect(screen.getByText(/この端末のブラウザにだけ保存/)).toBeTruthy();
   });
 
   it('レシートあり: 店舗名 + 合計を summary に表示し、展開すると明細/txHash が出る', () => {
@@ -68,7 +68,7 @@ describe('PayerReceiptList', () => {
     expect(screen.getByText(`0x${'a'.repeat(64)}`)).toBeTruthy();
     // 空状態文言は出ない
     expect(
-      screen.queryByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.queryByText('まだ控えはありません。'),
     ).toBeNull();
   });
 
@@ -88,7 +88,7 @@ describe('PayerReceiptList', () => {
   it('描画後に append (CHANGED_EVENT) → 空状態から一覧へ即時反映', () => {
     render(<PayerReceiptList />);
     expect(
-      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.getByText('まだ控えはありません。'),
     ).toBeTruthy();
     act(() => {
       appendPayerReceipt(
@@ -100,7 +100,7 @@ describe('PayerReceiptList', () => {
     });
     expect(screen.getAllByText('Live Shop').length).toBeGreaterThan(0);
     expect(
-      screen.queryByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.queryByText('まだ控えはありません。'),
     ).toBeNull();
   });
 
@@ -108,7 +108,7 @@ describe('PayerReceiptList', () => {
     window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, '{ this is not json');
     expect(() => render(<PayerReceiptList />)).not.toThrow();
     expect(
-      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.getByText('まだ控えはありません。'),
     ).toBeTruthy();
   });
 
@@ -126,7 +126,7 @@ describe('PayerReceiptList', () => {
     fireEvent.click(screen.getByRole('button', { name: '削除' }));
     expect(screen.queryByText('Del Shop')).toBeNull();
     expect(
-      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.getByText('まだ控えはありません。'),
     ).toBeTruthy();
   });
 
@@ -145,7 +145,7 @@ describe('PayerReceiptList', () => {
     render(<PayerReceiptList />);
     fireEvent.click(screen.getByRole('button', { name: 'すべて消去' }));
     expect(
-      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.getByText('まだ控えはありません。'),
     ).toBeTruthy();
   });
 

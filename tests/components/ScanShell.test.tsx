@@ -150,7 +150,7 @@ describe('ScanShell: 接続状態表示', () => {
   it('未接続 → connectionPreHint (右上の接続ボタンから...) を表示、inline ConnectButton は無い', () => {
     mockConnected(false);
     renderWithIntl(<ScanShell />);
-    expect(screen.getByText(/右上の「接続」ボタンから/)).toBeInTheDocument();
+    expect(screen.getByText(/右上の「接続」を済ませておくと/)).toBeInTheDocument();
     // Connect/Disconnect は AppHeader 担当 → ScanShell には inline button が無い
     expect(screen.queryByRole('button', { name: 'MetaMask' })).toBeNull();
   });
@@ -194,7 +194,7 @@ describe('ScanShell: 接続状態表示', () => {
     renderWithIntl(<ScanShell />);
     expect(screen.getByText('電子レシート / 支払い控え')).toBeTruthy();
     expect(
-      screen.getByText('このブラウザに保存された電子レシートはまだありません。'),
+      screen.getByText('まだ控えはありません。'),
     ).toBeTruthy();
   });
 });
