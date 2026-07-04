@@ -15,10 +15,10 @@ export type StoreKitLabels = {
   a6Description: string;
   doorTitle: string;
   doorDescription: string;
-  cashOpenPayAccepted: string;
-  openPayAccepted: string;
+  cashJpycAccepted: string;
+  jpycAcceptedHeadline: string;
   cashLabel: string;
-  jpycAccepted: string;
+  pegPill: string;
   siteUrl: string;
 };
 
@@ -34,7 +34,7 @@ function A6Pop({ labels }: { labels: StoreKitLabels }) {
           className="mx-auto h-6 w-auto print:h-[9mm]"
         />
         <p className="mt-6 break-keep text-3xl font-black leading-tight text-slate-950 print:mt-[14mm] print:text-[25pt]">
-          {labels.cashOpenPayAccepted}
+          {labels.cashJpycAccepted}
         </p>
       </div>
 
@@ -114,7 +114,7 @@ function DoorStickerSheet({ labels }: { labels: StoreKitLabels }) {
 
         <div>
           <p className="break-keep text-5xl font-black leading-tight text-slate-950 print:text-[42pt]">
-            {labels.openPayAccepted}
+            {labels.jpycAcceptedHeadline}
           </p>
           <div className="mx-auto mt-6 inline-flex items-center gap-3 rounded-full border-2 border-slate-950 px-5 py-2 text-base font-black text-slate-950 print:mt-[14mm] print:gap-[5mm] print:border-[0.8mm] print:px-[8mm] print:py-[3mm] print:text-[18pt]">
             <TokenLogo
@@ -123,7 +123,7 @@ function DoorStickerSheet({ labels }: { labels: StoreKitLabels }) {
               alt=""
               className="h-9 w-9 shrink-0 print:h-[13mm] print:w-[13mm]"
             />
-            {labels.jpycAccepted}
+            {labels.pegPill}
           </div>
         </div>
 
