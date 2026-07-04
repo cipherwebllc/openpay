@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img" aria-label="POSの明細とOpenPayの履歴/CSVを金額・番号で突き合わせる図">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img" aria-label="POSの明細とOpenPayの履歴を時刻・番号で突き合わせる図（履歴一覧は利用料差引後の純額表示）">
   <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
   <rect width="1000" height="420" fill="#ffffff"/>
   <!-- center match label -->
-  <rect x="350" y="30" width="300" height="40" rx="20" fill="#f1f5f9"/>
-  <text x="500" y="56" font-size="16" font-weight="700" fill="#334155" text-anchor="middle">金額・レシート番号で一致</text>
+  <rect x="320" y="30" width="360" height="40" rx="20" fill="#f1f5f9"/>
+  <text x="500" y="56" font-size="15" font-weight="700" fill="#334155" text-anchor="middle">時刻・レシート番号で一致（履歴は純額表示）</text>
   <!-- left card: POS -->
   <rect x="40" y="100" width="380" height="280" rx="16" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
   <text x="68" y="142" font-size="19" font-weight="700" fill="#1e40af">POS：その他決済</text>
@@ -33,19 +33,19 @@
   <g>
     <rect x="608" y="178" width="324" height="50" rx="8" fill="#ecfdf5"/>
     <text x="626" y="209" font-size="16" fill="#334155">14:32</text>
-    <text x="766" y="209" font-size="16" font-weight="700" fill="#047857">¥1,200</text>
+    <text x="845" y="209" font-size="16" font-weight="700" fill="#047857" text-anchor="end">1,188 JPYC</text>
     <text x="860" y="209" font-size="15" fill="#64748b">No.001</text>
   </g>
   <g>
     <rect x="608" y="240" width="324" height="50" rx="8" fill="#ecfdf5"/>
     <text x="626" y="271" font-size="16" fill="#334155">15:10</text>
-    <text x="778" y="271" font-size="16" font-weight="700" fill="#047857">¥800</text>
+    <text x="845" y="271" font-size="16" font-weight="700" fill="#047857" text-anchor="end">792 JPYC</text>
     <text x="860" y="271" font-size="15" fill="#64748b">No.002</text>
   </g>
   <g>
     <rect x="608" y="302" width="324" height="50" rx="8" fill="#ecfdf5"/>
     <text x="626" y="333" font-size="16" fill="#334155">16:48</text>
-    <text x="766" y="333" font-size="16" font-weight="700" fill="#047857">¥3,500</text>
+    <text x="845" y="333" font-size="16" font-weight="700" fill="#047857" text-anchor="end">3,465 JPYC</text>
     <text x="860" y="333" font-size="15" fill="#64748b">No.003</text>
   </g>
   <!-- match arrows -->

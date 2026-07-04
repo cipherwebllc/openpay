@@ -188,7 +188,7 @@ const ja: GuideContent = {
     '厳密：会計時にメモへ入れたレシート番号で1対1照合',
     'まとめて：「履歴」のCSVをレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
   ],
-  reconcileImage: { file: 'history-reconcile.svg', alt: 'POSの明細とOpenPayの履歴/CSVを金額・番号で突き合わせる図' },
+  reconcileImage: { file: 'history-reconcile.svg', alt: 'POSの明細とOpenPayの履歴を時刻・番号で突き合わせる図（履歴一覧は純額表示）' },
 
   posTitle: 'どのPOSレジを使えばいい？（無料で始められるレジ）',
   posBody:
@@ -341,7 +341,7 @@ const en: GuideContent = {
     'Precise: one-to-one match by the receipt number you put in the memo',
     'In bulk: export CSV from “History” and match against POS “other payment” entries. Supports freee / Money Forward / Yayoi import formats',
   ],
-  reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with OpenPay history/CSV by amount and number' },
+  reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with OpenPay history by time and receipt number (history lists the net amount)' },
 
   posTitle: 'Which POS should you use? (POS apps you can start free)',
   posBody:
