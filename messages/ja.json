@@ -2079,7 +2079,14 @@
     "errorAttestationRequired": "登録には『正当な権利があり、支払いゲートを実装している』ことへの同意 (チェック) が必要です。",
     "payTotal": "支払い計 {total} JPYC",
     "copy": "コピー",
-    "copied": "コピーしました"
+    "copied": "コピーしました",
+    "tryTitle": "3円で試す (5分)",
+    "trySubtitle": "first-party demo は 1 JPYC + 手数料 2 JPYC で、402 から解錠までをそのまま確認できます。",
+    "tryStep1": "まず 402 と accepts を見る",
+    "tryStep2": "自己完結 Node スクリプトで署名して再リクエストする",
+    "tryStep3": "1 JPYC + 手数料 2 JPYC、合計 3 JPYC で JSON が解錠されます。",
+    "tryCurlLabel": "402 チャレンジ",
+    "tryRawLink": "buyer script raw"
   },
   "OrderStatus": {
     "title": "注文状況",

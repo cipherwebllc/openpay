@@ -2079,7 +2079,14 @@
     "errorAttestationRequired": "Registration requires agreeing (checking the box) that you have the right and that the resource is gated behind payment.",
     "payTotal": "Total: {total} JPYC",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "tryTitle": "Try it for ¥3 (5 minutes)",
+    "trySubtitle": "The first-party demo lets you go from 402 to unlock for 1 JPYC plus a 2 JPYC fee.",
+    "tryStep1": "Inspect the 402 response and accepts array",
+    "tryStep2": "Sign and retry with the self-contained Node script",
+    "tryStep3": "The JSON unlocks for 1 JPYC plus a 2 JPYC fee, 3 JPYC total.",
+    "tryCurlLabel": "402 challenge",
+    "tryRawLink": "buyer script raw"
   },
   "OrderStatus": {
     "title": "Order status",
