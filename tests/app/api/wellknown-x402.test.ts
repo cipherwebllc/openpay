@@ -33,6 +33,14 @@ describe('GET /.well-known/x402', () => {
     expect(body.resources).toEqual([]);
   });
 
+  it('payTo == feeReceiver → resources 空 (forwarder が拒否する構成を広告しない)', async () => {
+    vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', SELLER);
+    const get = await load('1', SELLER);
+    const res = await get();
+    const body = (await res.json()) as { resources: string[] };
+    expect(body.resources).toEqual([]);
+  });
+
   it('payTo 設定済み → first-party 2 本を x402scan 互換形式で返す + edge キャッシュ可', async () => {
     const get = await load('1', SELLER);
     const res = await get();
