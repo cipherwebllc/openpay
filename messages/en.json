@@ -228,10 +228,10 @@
     "a6Description": "Four copies on one A4 sheet. Cut them out for a counter stand.",
     "doorTitle": "Door sticker style",
     "doorDescription": "One large square on A4. The rounded border doubles as a trim line.",
-    "cashOpenPayAccepted": "Cash & OpenPay accepted",
-    "openPayAccepted": "OpenPay accepted",
+    "cashJpycAccepted": "Cash & JPYC accepted",
+    "jpycAcceptedHeadline": "JPYC accepted",
     "cashLabel": "Cash",
-    "jpycAccepted": "JPYC accepted",
+    "pegPill": "1 JPYC = ¥1",
     "siteUrl": "open-pay.jp"
   },
   "Create": {

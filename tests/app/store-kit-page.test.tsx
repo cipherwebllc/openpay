@@ -44,8 +44,8 @@ describe('StoreKitPage', () => {
     expect(
       screen.getByRole('button', { name: '2ページまとめて印刷' }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText('現金・OpenPay 使えます')).toHaveLength(4);
-    expect(screen.getByText('OpenPay 使えます')).toBeInTheDocument();
+    expect(screen.getAllByText('現金・JPYC 使えます')).toHaveLength(4);
+    expect(screen.getByText('JPYC 使えます')).toBeInTheDocument();
     expect(setRequestLocaleSpy).toHaveBeenCalledWith('ja');
   });
 
@@ -68,8 +68,8 @@ describe('StoreKitMaterials', () => {
     expect(
       screen.getByRole('heading', { name: 'ドア用ステッカー風' }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText('現金・OpenPay 使えます')).toHaveLength(4);
-    expect(screen.getByText('OpenPay 使えます')).toBeInTheDocument();
+    expect(screen.getAllByText('現金・JPYC 使えます')).toHaveLength(4);
+    expect(screen.getByText('JPYC 使えます')).toBeInTheDocument();
     expect(screen.getAllByText('open-pay.jp')).toHaveLength(5);
   });
 

@@ -43,10 +43,10 @@ export default async function StoreKitPage({
     a6Description: t('a6Description'),
     doorTitle: t('doorTitle'),
     doorDescription: t('doorDescription'),
-    cashOpenPayAccepted: t('cashOpenPayAccepted'),
-    openPayAccepted: t('openPayAccepted'),
+    cashJpycAccepted: t('cashJpycAccepted'),
+    jpycAcceptedHeadline: t('jpycAcceptedHeadline'),
     cashLabel: t('cashLabel'),
-    jpycAccepted: t('jpycAccepted'),
+    pegPill: t('pegPill'),
     siteUrl: t('siteUrl'),
   };
 

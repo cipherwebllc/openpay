@@ -228,10 +228,10 @@
     "a6Description": "A4 1枚に4つ並べます。切ってレジ横スタンドに入れられます。",
     "doorTitle": "ドア用ステッカー風",
     "doorDescription": "A4 1枚に大きく1面。角丸の枠線を切り取り線として使えます。",
-    "cashOpenPayAccepted": "現金・OpenPay 使えます",
-    "openPayAccepted": "OpenPay 使えます",
+    "cashJpycAccepted": "現金・JPYC 使えます",
+    "jpycAcceptedHeadline": "JPYC 使えます",
     "cashLabel": "現金",
-    "jpycAccepted": "JPYC 対応",
+    "pegPill": "1 JPYC = ¥1",
     "siteUrl": "open-pay.jp"
   },
   "Create": {
