@@ -29,6 +29,7 @@ node scripts/dev-shot.mjs     # dev/prod サーバの実機スクショ (mobile/
 10. **commitlint: subject は 100 字以内**（詳細は body へ・body の行長制限なし）。
 11. **開発サーバでの検証はポートを明示**（`next start -p XXXX`）し、**そのポートの URL で readiness を確認してから**テストする。port 3000 が占有済みだと next は無言で 3001 に逃げ、古いサーバを検証して誤診断する（push E2E で実害）。
 12. **money-path（relay/settle/fee/order 検証）への変更は「追加のみ」を原則**とし、既存の制御フロー・応答・エラー処理を変えない。post-response 処理は `after()`（next/server）を使う（unawaited promise は serverless で凍結・応答内 await は latency 悪化）。
+13. **防御的プログラミングの基準**（2026-07-04 user 確定）: **意味のない防御は禁止・障害を隣に波及させないための意図的な防御は必須**。禁止 = 起こり得ない状態への保険、エラー握りつぶしによる偽成功（cookie は出すがセッション保存失敗、等）、仕様を曖昧にする fallback。必須 = 付帯処理が本体を巻き込まない隔離 — 例: push/通知/メーターは no-throw で決済本体に波及させない・localStorage/ブラウザ API は既存パターンの try-catch・rate limit ストレージ障害で本体機能を止めない fail-open。防御を書くときは**「何の波及を断つための防御か」をコメントで示す**（示せないならその防御は不要の疑い）。
 
 ## PR / 検証の型
 
