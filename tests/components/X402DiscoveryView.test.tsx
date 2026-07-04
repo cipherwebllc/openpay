@@ -293,7 +293,7 @@ describe('X402DiscoveryView', () => {
     expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
   });
 
-  it('1円 demo セクション: curl と buyer script コマンドをコピーできる', async () => {
+  it('3円 demo セクション: curl と buyer script コマンドをコピーできる', async () => {
     const writeText = vi.fn();
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -302,10 +302,25 @@ describe('X402DiscoveryView', () => {
     renderView();
     fireEvent.click(await screen.findByText('3円で試す (5分)'));
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
-    fireEvent.click(copyButtons[copyButtons.length - 1]);
-    expect(writeText).toHaveBeenCalledWith(
-      expect.stringContaining('BUYER_PRIVATE_KEY=0x...'),
-    );
+    for (const button of copyButtons) fireEvent.click(button);
+    const copied = writeText.mock.calls.map((call) => String(call[0]));
+    expect(copied.some((text) => text.includes('BUYER_PRIVATE_KEY=0x...'))).toBe(true);
+  });
+
+  it('MCP セクション: 設定 JSON (openpay-x402-mcp) をコピーできる', async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    renderView();
+    fireEvent.click(await screen.findByText('エージェントから払う (MCP)'));
+    const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
+    for (const button of copyButtons) fireEvent.click(button);
+    const copied = writeText.mock.calls.map((call) => String(call[0]));
+    expect(copied.some((text) => text.includes('openpay-x402-mcp'))).toBe(true);
+    // 既定ガードの注記が表示される。
+    expect(screen.getByText(/1 回 10 JPYC・累計 100 JPYC/)).toBeInTheDocument();
   });
 
   it('カタログ: 端数のある手数料を小数で表示 (整数除算で切り捨てない)', async () => {
