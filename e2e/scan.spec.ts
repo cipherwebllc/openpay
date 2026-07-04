@@ -28,7 +28,7 @@ test.describe('/scan: ページ構造', () => {
     ).toBeVisible();
     // 未接続時の connectionPreHint は「右上の接続ボタンから」案内に変更済
     // (Connect ボタン本体は AppHeader 右上の WalletBadge に集約)
-    await expect(page.getByText(/右上の「接続」ボタンから/)).toBeVisible();
+    await expect(page.getByText(/右上の「接続」を済ませておくと/)).toBeVisible();
   });
 
   test('/en/scan も 200 + 英語 UI に切替', async ({ page }) => {
