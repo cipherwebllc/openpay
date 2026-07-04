@@ -911,7 +911,7 @@ describe('QrGenerator', () => {
 
       // Phase 1: 通常決済モードの説明 (hint) が表示される (手数料% 表記なし)
       expect(
-        screen.getByText(/OpenPay は gas を肩代わりしません/),
+        screen.getByText(/自分のウォレットでガス/),
       ).toBeInTheDocument();
 
       // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
@@ -1825,14 +1825,14 @@ describe('QrGenerator', () => {
       ).toBeNull();
     });
 
-    it('Web3 用語の和らげ: gasless desc に「お客様はガス代を用意せず」が含まれる', async () => {
+    it('Web3 用語の和らげ: gasless desc に「お客様はガス代なしで」が含まれる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await openAdvanced(user);
       const gaslessBtn = await screen.findByRole('button', {
         name: /ガス代不要/,
       });
-      expect(gaslessBtn.textContent).toMatch(/お客様はガス代を用意せず/);
+      expect(gaslessBtn.textContent).toMatch(/お客様はガス代なしで/);
       // 旧 Web3 ジャーゴンの先頭文 (「OpenPay がガスを肩代わり。」を単独で言い切る形) は消え、
       // 顧客便益を先頭に据えている。なお per-tx 利用料化に伴い、肩代わりの語は利用料開示の
       // 文脈内で出現する (full-stop で言い切る旧形ではない) ため、そこは許容する。
@@ -1851,9 +1851,9 @@ describe('QrGenerator', () => {
       expect(
         await screen.findByText(/売上の自動分配/),
       ).toBeInTheDocument();
-      // split desc にも「スタッフ・共同運営者・クリエイター」が含まれる
+      // split desc にも「自動で % 分配」が含まれる
       expect(
-        screen.getByText(/スタッフ・共同運営者・クリエイター/),
+        screen.getByText(/自動で % 分配/),
       ).toBeInTheDocument();
       // 旧の「UserOperation でバッチ送金」表現は消えている
       expect(screen.queryByText(/UserOperation/)).toBeNull();

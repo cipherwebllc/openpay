@@ -346,7 +346,7 @@ describe('HandleProfileBuilder', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     expect(
-      screen.getByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+      screen.getByText(/プロフでの USDC 提供は終了しました/),
     ).toBeInTheDocument();
     // ビルダーが組む methods には usdc が含まれない (JPYC のみで config 完成)
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
@@ -384,12 +384,12 @@ describe('HandleProfileBuilder', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     expect(
-      screen.getByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+      screen.getByText(/プロフでの USDC 提供は終了しました/),
     ).toBeInTheDocument();
     // 更新/取得が成功 → 公開後のレコードに usdc は無いので通知は stale
     fireEvent.click(screen.getByTestId('publish-mock'));
     expect(
-      screen.queryByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+      screen.queryByText(/プロフでの USDC 提供は終了しました/),
     ).not.toBeInTheDocument();
     // 編集モード自体は継続 (公開した handle を編集中)
     expect(screen.getByText('「@alice」を編集中')).toBeInTheDocument();
@@ -404,7 +404,7 @@ describe('HandleProfileBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
     expect(screen.queryByText('「@alice」を編集中')).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/USDC \(cross-chain\) のプロフでの提供は終了しました/),
+      screen.queryByText(/プロフでの USDC 提供は終了しました/),
     ).not.toBeInTheDocument();
   });
 
