@@ -76,7 +76,16 @@ function paymentChallenge(
       chainId: x402FacilitatorConfig.chainId,
       mimeType: 'application/json',
     });
-    return NextResponse.json({ x402Version: 1, accepts, error }, { status });
+    // outputSchema は x402scan の payable-index 用の発見メタ。チャレンジ応答のみに添付し、
+    // verify/settle に渡す requirements (paymentBody) には含めない (facilitator parse を汚さない)。
+    const discoverable = accepts.map((accept) => ({
+      ...accept,
+      outputSchema: resource.outputSchema,
+    }));
+    return NextResponse.json(
+      { x402Version: 1, accepts: discoverable, error },
+      { status },
+    );
   } catch (e) {
     // Misconfigured requirements must not leak a malformed 402 challenge to buyers.
     return NextResponse.json(
