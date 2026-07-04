@@ -213,7 +213,7 @@ test.describe('landing / (LP)', () => {
     await expect(support).toBeVisible();
     // 利用料ポリシーの説明 (recover ピボット後: JPYC ガスレスは利用料あり / 通常決済・顧客 gas 負担の
     // USDC は対象外=無料) + 応援依頼文。
-    await expect(support.getByText(/当社は売上を預かりません/)).toBeVisible();
+    await expect(support.getByText(/売上は預かりません/)).toBeVisible();
     await expect(
       support.getByText(/応援いただけると励みになります/),
     ).toBeVisible();
