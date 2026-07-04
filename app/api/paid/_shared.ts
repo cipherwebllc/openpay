@@ -10,6 +10,14 @@ import {
 } from '@/lib/x402/firstParty';
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
 import { POST as settlePayment } from '@/app/api/facilitator/settle/route';
+import {
+  buildPaymentRequiredV2,
+  decodePaymentSignatureHeaderValue,
+  encodePaymentRequiredHeaderValue,
+  encodePaymentResponseHeaderValue,
+  toV2Accept,
+  v2PayloadToV1Body,
+} from '@/lib/x402/v2';
 
 type VerifyBody = {
   isValid?: boolean;
@@ -24,6 +32,10 @@ type SettleBody = {
 };
 
 type PaidContent = (ctx: { payer?: string }) => Promise<NextResponse> | NextResponse;
+type PreparedPayment = {
+  body: unknown;
+  accepts: ReturnType<typeof createJpycPaymentRequirements>;
+};
 
 function encodeJsonBase64(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
@@ -62,6 +74,24 @@ function paymentBody(resource: FirstPartyResource, paymentPayload: unknown) {
   };
 }
 
+function setPaymentRequiredV2Header(
+  res: NextResponse,
+  resource: FirstPartyResource,
+  accepts: ReturnType<typeof createJpycPaymentRequirements>,
+  error: string,
+): NextResponse {
+  const paymentRequired = buildPaymentRequiredV2({
+    url: firstPartyResourceUrl(resource),
+    description: resource.description,
+    mimeType: 'application/json',
+    accepts: accepts.map(toV2Accept),
+    bazaarInfo: resource.outputSchema,
+    error,
+  });
+  res.headers.set('PAYMENT-REQUIRED', encodePaymentRequiredHeaderValue(paymentRequired));
+  return res;
+}
+
 function paymentChallenge(
   resource: FirstPartyResource,
   error: string,
@@ -82,9 +112,14 @@ function paymentChallenge(
       ...accept,
       outputSchema: resource.outputSchema,
     }));
-    return NextResponse.json(
-      { x402Version: 1, accepts: discoverable, error },
-      { status },
+    return setPaymentRequiredV2Header(
+      NextResponse.json(
+        { x402Version: 1, accepts: discoverable, error },
+        { status },
+      ),
+      resource,
+      accepts,
+      error,
     );
   } catch (e) {
     // Misconfigured requirements must not leak a malformed 402 challenge to buyers.
@@ -108,31 +143,59 @@ export async function handleFirstPartyPaidGet(
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
+  const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
   const paymentHeader = req.headers.get('x-payment');
-  if (!paymentHeader) {
+  if (!paymentSignatureHeader && !paymentHeader) {
     return paymentChallenge(resource, 'payment_required');
   }
 
-  let paymentPayload: unknown;
-  try {
-    paymentPayload = decodePaymentHeader(paymentHeader);
-  } catch {
-    return paymentChallenge(resource, 'invalid_payment_payload');
-  }
+  let prepared: PreparedPayment;
+  if (paymentSignatureHeader) {
+    let paymentPayloadV2: unknown;
+    try {
+      paymentPayloadV2 = decodePaymentSignatureHeaderValue(paymentSignatureHeader);
+    } catch {
+      return paymentChallenge(resource, 'invalid_payment_payload');
+    }
+    try {
+      prepared = paymentBody(resource, paymentPayloadV2);
+    } catch (e) {
+      // Misconfigured requirements must not pass an unverifiable body into verify/settle.
+      return NextResponse.json(
+        {
+          x402Version: 1,
+          error: 'payment_facility_unavailable',
+          message: e instanceof Error ? e.message : String(e),
+        },
+        { status: 503 },
+      );
+    }
+    const v1Body = v2PayloadToV1Body(paymentPayloadV2, prepared.accepts);
+    if (!v1Body) {
+      return paymentChallenge(resource, 'invalid_payment_payload');
+    }
+    prepared = { ...prepared, body: v1Body };
+  } else {
+    let paymentPayload: unknown;
+    try {
+      paymentPayload = decodePaymentHeader(paymentHeader!);
+    } catch {
+      return paymentChallenge(resource, 'invalid_payment_payload');
+    }
 
-  let prepared: ReturnType<typeof paymentBody>;
-  try {
-    prepared = paymentBody(resource, paymentPayload);
-  } catch (e) {
-    // Misconfigured requirements must not pass an unverifiable body into verify/settle.
-    return NextResponse.json(
-      {
-        x402Version: 1,
-        error: 'payment_facility_unavailable',
-        message: e instanceof Error ? e.message : String(e),
-      },
-      { status: 503 },
-    );
+    try {
+      prepared = paymentBody(resource, paymentPayload);
+    } catch (e) {
+      // Misconfigured requirements must not pass an unverifiable body into verify/settle.
+      return NextResponse.json(
+        {
+          x402Version: 1,
+          error: 'payment_facility_unavailable',
+          message: e instanceof Error ? e.message : String(e),
+        },
+        { status: 503 },
+      );
+    }
   }
 
   const bodyText = JSON.stringify(prepared.body);
@@ -148,13 +211,19 @@ export async function handleFirstPartyPaidGet(
     return NextResponse.json(verifyBody, { status: verifyRes.status });
   }
   if (verifyBody.isValid !== true) {
-    return NextResponse.json(
-      {
-        x402Version: 1,
-        accepts: prepared.accepts,
-        error: verifyBody.invalidReason ?? 'payment_invalid',
-      },
-      { status: 402 },
+    const error = verifyBody.invalidReason ?? 'payment_invalid';
+    return setPaymentRequiredV2Header(
+      NextResponse.json(
+        {
+          x402Version: 1,
+          accepts: prepared.accepts,
+          error,
+        },
+        { status: 402 },
+      ),
+      resource,
+      prepared.accepts,
+      error,
     );
   }
 
@@ -168,13 +237,19 @@ export async function handleFirstPartyPaidGet(
   const settleBody = (await settleRes.json()) as SettleBody;
   if (settleRes.status !== 200 || settleBody.success !== true) {
     if (settleRes.status === 200) {
-      return NextResponse.json(
-        {
-          x402Version: 1,
-          accepts: prepared.accepts,
-          error: settleBody.errorReason ?? 'settlement_failed',
-        },
-        { status: 402 },
+      const error = settleBody.errorReason ?? 'settlement_failed';
+      return setPaymentRequiredV2Header(
+        NextResponse.json(
+          {
+            x402Version: 1,
+            accepts: prepared.accepts,
+            error,
+          },
+          { status: 402 },
+        ),
+        resource,
+        prepared.accepts,
+        error,
       );
     }
     return NextResponse.json(settleBody, { status: settleRes.status });
@@ -182,5 +257,6 @@ export async function handleFirstPartyPaidGet(
 
   const res = await content({ payer: settleBody.payer ?? verifyBody.payer });
   res.headers.set('X-PAYMENT-RESPONSE', encodeJsonBase64(settleBody));
+  res.headers.set('PAYMENT-RESPONSE', encodePaymentResponseHeaderValue(settleBody));
   return res;
 }
