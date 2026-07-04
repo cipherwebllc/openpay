@@ -180,7 +180,7 @@ describe('PwaInstallHint', () => {
     );
     const { PwaInstallHint } = await import('@/components/PwaInstallHint');
     render(withIntl(<PwaInstallHint />));
-    expect(screen.getByText(/対応モバイル端末/)).toBeInTheDocument();
+    expect(screen.getByText(/ホーム画面に追加できます/)).toBeInTheDocument();
   });
 
   it('× ボタンで手動 dismiss → 完全に非描画', async () => {
@@ -201,7 +201,7 @@ describe('PwaInstallHint', () => {
     setMaxTouchPoints(0);
     const { PwaInstallHint } = await import('@/components/PwaInstallHint');
     render(withIntl(<PwaInstallHint />));
-    expect(screen.getByText(/対応モバイル端末/)).toBeInTheDocument();
+    expect(screen.getByText(/ホーム画面に追加できます/)).toBeInTheDocument();
     expect(screen.queryByText(/Safari の共有メニュー/)).toBeNull();
   });
 
@@ -215,7 +215,7 @@ describe('PwaInstallHint', () => {
     setMaxTouchPoints(1);
     const { PwaInstallHint } = await import('@/components/PwaInstallHint');
     render(withIntl(<PwaInstallHint />));
-    expect(screen.getByText(/対応モバイル端末/)).toBeInTheDocument();
+    expect(screen.getByText(/ホーム画面に追加できます/)).toBeInTheDocument();
   });
 
   it('beforeinstallprompt が 2 度発火 → 後で来た event が現在の prompt として置換', async () => {
