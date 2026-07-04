@@ -64,6 +64,20 @@ const DEMO_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
 const DEMO_CURL = `curl -i ${DEMO_RESOURCE_URL}`;
+const MCP_CONFIG_SNIPPET = JSON.stringify(
+  {
+    mcpServers: {
+      'openpay-x402': {
+        command: 'npx',
+        args: ['-y', 'openpay-x402-mcp'],
+        env: { BUYER_PRIVATE_KEY: '0x...' },
+      },
+    },
+  },
+  null,
+  2,
+);
+
 const BUYER_SCRIPT_COMMAND = [
   `curl -fsSL ${BUYER_SCRIPT_URL} -o x402-buyer-example.mjs`,
   `BUYER_PRIVATE_KEY=0x... RESOURCE_URL=${DEMO_RESOURCE_URL} node x402-buyer-example.mjs`,
@@ -709,6 +723,45 @@ export function X402DiscoveryView() {
                 </p>
               </li>
             </ol>
+          </div>
+        </details>
+      </section>
+
+      {/* エージェント導線: npm 公開済みの買い手 MCP (openpay-x402-mcp)。設定 JSON を貼るだけ。 */}
+      <section>
+        <details className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card">
+          <summary className="flex cursor-pointer list-none items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+              <Boxes className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-base font-bold text-slate-900">
+                {t('mcpTitle')}
+              </span>
+              <span className="mt-0.5 block text-sm leading-relaxed text-slate-500">
+                {t('mcpSubtitle')}
+              </span>
+            </span>
+          </summary>
+
+          <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+            <div className="rounded-xl bg-slate-950 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <a
+                  href="https://www.npmjs.com/package/openpay-x402-mcp"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 truncate text-xs font-medium text-sky-300 hover:text-sky-200"
+                >
+                  openpay-x402-mcp
+                </a>
+                {copyCodeBtn('mcp-config', MCP_CONFIG_SNIPPET)}
+              </div>
+              <pre className="overflow-x-auto text-xs leading-relaxed text-slate-100">
+                {MCP_CONFIG_SNIPPET}
+              </pre>
+            </div>
+            <p className="text-xs leading-relaxed text-slate-500">{t('mcpNote')}</p>
           </div>
         </details>
       </section>
