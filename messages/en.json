@@ -314,7 +314,6 @@
     "gasMerchantTitle": "Merchant absorbs gas equivalent",
     "gasCustomerDesc": "The estimated network fee is added on top of the bill and paid by the customer (your take is stable across gas spikes).",
     "gasMerchantDesc": "You absorb the estimated network fee; customer pays only the displayed amount (gas variability is your risk).",
-    "gasMerchantFixedHint": "The fee — max(2 JPYC, 1%) — is borne by the store; customers pay only the displayed amount.",
     "quickAmountsLabel": "Edit quick amounts",
     "quickAmountPlaceholder": "e.g. 1000",
     "quickAmountAdd": "+ Add amount",

@@ -151,7 +151,7 @@ describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merch
     await user.click(adv);
   }
 
-  it('JPYC recover: gas 負担者トグルは出ない (gasCustomerTitle/gasMerchantTitle が無い) + 固定ヒントが出る', async () => {
+  it('JPYC recover: gas 負担者トグルも固定ヒントも出ない (開示は payModeGaslessDesc が担う)', async () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     const user = userEvent.setup();
     render(<QrGenerator />);
@@ -163,10 +163,10 @@ describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merch
     // 負担者トグル (顧客が gas 相当額を上乗せ / 店主が gas 相当額を吸収) は描画されない。
     expect(screen.queryByText('顧客が gas 相当額を上乗せ')).toBeNull();
     expect(screen.queryByText('店主が gas 相当額を吸収')).toBeNull();
-    // 代わりに「店舗負担固定」ヒントを出す。
-    expect(
-      screen.getByText(/max\(2 JPYC, 1%\) は店舗負担/),
-    ).toBeInTheDocument();
+    // 固定ヒントは 2026-07 に撤去 (利用料開示は payModeGaslessDesc に一本化)。
+    expect(screen.queryByText(/は店舗負担。お客様は表示額のみ/)).toBeNull();
+    // 開示そのものは gasless モード説明に残っている。
+    expect(screen.getByText(/OpenPay 利用料 1%・最低 2 JPYC/)).toBeInTheDocument();
   });
 
   it('JPYC recover: 生成 URL に gas=merchant が焼き込まれる', async () => {

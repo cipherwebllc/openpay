@@ -314,7 +314,6 @@
     "gasMerchantTitle": "店主が gas 相当額を吸収",
     "gasCustomerDesc": "請求金額にネットワーク手数料見積を上乗せして顧客が支払う (gas spike 時も店主の取り分は安定)",
     "gasMerchantDesc": "店主がネットワーク手数料見積も吸収、顧客は請求金額のみ支払う (顧客 UX 重視、店主は gas 変動を被る)",
-    "gasMerchantFixedHint": "利用料 max(2 JPYC, 1%) は店舗負担。お客様は表示額のみ支払います。",
     "quickAmountsLabel": "クイック金額を編集",
     "quickAmountPlaceholder": "例: 1000",
     "quickAmountAdd": "+ 金額を追加",
