@@ -942,10 +942,9 @@ export function QrGenerator() {
                 </div>
               ) : isJpycRecover ? (
                 // JPYC recover は店舗が手数料を吸収する固定モデル (per-QR トグル撤去)。
-                // トグルの代わりに固定であることを 1 行で明示する。
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                  {t('gasMerchantFixedHint')}
-                </div>
+                // 利用料の開示は直上 payModeGaslessDesc が担うため固定ヒントは出さない
+                // (2026-07 user 指示で撤去)。gas トグルを出さない分岐だけ維持する。
+                null
               ) : !hideGasMode ? (
                 <Field label={t('gasLabel')}>
                   <div className="grid grid-cols-2 gap-2">
