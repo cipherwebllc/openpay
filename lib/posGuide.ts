@@ -184,7 +184,7 @@ const ja: GuideContent = {
   reconcileBody:
     'レジの「OpenPay決済」合計と、OpenPayの着金記録を突き合わせます。',
   reconcileBullets: [
-    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。※着金額はご利用料（約 1%・最低 約 2 JPYC）差引後の純額です',
+    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。※履歴の表示はご利用料（約 1%・最低 約 2 JPYC）差引後の純額（例：1,188 JPYC）。行を開くと売上総額（1,200 JPYC）を確認できます',
     '厳密：会計時にメモへ入れたレシート番号で1対1照合',
     'まとめて：「履歴」のCSVをレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
   ],
@@ -337,7 +337,7 @@ const en: GuideContent = {
   reconcileBody:
     'Match your POS “OpenPay” total against OpenPay’s received records.',
   reconcileBullets: [
-    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). Your wallet receives the net after the usage fee (~1%, min ~2 JPYC)',
+    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). History shows the net after the usage fee (~1%, min ~2 JPYC) — e.g. 1,188 JPYC. Open the entry to see the gross sale amount (1,200 JPYC)',
     'Precise: one-to-one match by the receipt number you put in the memo',
     'In bulk: export CSV from “History” and match against POS “other payment” entries. Supports freee / Money Forward / Yayoi import formats',
   ],
