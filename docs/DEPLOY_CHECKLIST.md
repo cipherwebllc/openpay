@@ -1188,7 +1188,7 @@ Polygon (mainnet) / Amoy (testnet)。
 
 ### §14.1 既定 (現状 = inert・ロールバック先)
 - `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` 既定 **OFF**。OFF では全 route (`/api/facilitator/{supported,
-  verify,settle,verify-receipt,resources,resources/[id]}` + `/api/discovery`) が **404 = 完全 inert**。
+  verify,settle,verify-receipt,resources,resources/[id]}` + `/api/discovery` + `/api/paid/{demo,stores}`) が **404 = 完全 inert**。
   X402DiscoveryView もマウントされない。
 - **この OFF が安全状態であり、ロールバック先**。
 
@@ -1198,17 +1198,18 @@ Polygon (mainnet) / Amoy (testnet)。
    `DISCLOSED_X402_FEE` bps=100 / floor=2 JPYC) がリリースに含まれること。env 料率を変えるなら起動時
    `x402.facilitator.fee_disclosure_divergence` warn が出ないよう本文も改定する。
 3. `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定済 (mainnet 未設定は build throw)。手数料の受領先。
-4. `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON` 設定済 (未設定は readiness 503 `forwarder_unconfigured`)。
-5. **専用 receipt 署名鍵**: `X402_RECEIPT_SIGNING_KEY` (server-only・relayer 鍵とは**別の専用鍵**) を投入。
+4. `X402_PAY_TO_ADDRESS` 設定済。first-party resource (`/api/paid/demo`, `/api/paid/stores`) の seller 受領先。
+5. `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON` 設定済 (未設定は readiness 503 `forwarder_unconfigured`)。
+6. **専用 receipt 署名鍵**: `X402_RECEIPT_SIGNING_KEY` (server-only・relayer 鍵とは**別の専用鍵**) を投入。
    未設定でも settle は成立するが receipt は null (オフライン検証を提供しない)。公開 signer は
    `/api/facilitator/supported` の `receiptSigner` で配布。
-6. **mainnet hardening の前提** (settle は self-host relayer で broadcast するため):
+7. **mainnet hardening の前提** (settle は self-host relayer で broadcast するため):
    - `RELAYER_PRIVATE_KEY` 設定済 (未設定は `PROVIDER!=self-host` → settle 503 `relay_not_configured`)。
    - `RELAY_MAX_GAS_COST_WEI` (Polygon native gas 上限・wei) 設定済。未設定 (=0) は settle 503
      `gas_ceiling_required` で**意図的に止まる** (赤字 broadcast 防止)。値は §9.5 同様の実測ベースで調整。
    - KV (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) 設定済。未設定は settle 503 `kv_required`
      (冪等が fail-open になると二重 submit しうるため mainnet は KV 必須)。
-7. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
+8. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
    `NEXT_PUBLIC_ENABLE_X402_FACILITATOR=1`。必要なら運営自身の resource を SIWE で seed 登録 (空カタログ回避)。
 
 ### §14.3 ロールバック (安全状態へ即復帰)
@@ -1223,13 +1224,16 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 回すが (poll/submit を mock)、**実 on-chain broadcast はこの手順のみ**:
 1. **登録**: SIWE サインイン → `/discovery` で resource 登録 (POST /api/facilitator/resources) → 201 +
    paywallSnippet。公開カタログ (`/api/discovery`) に accepts (fee 込み) 付きで現れる。
+   first-party resource (`/api/paid/demo`, `/api/paid/stores`) が `/api/discovery` の先頭に並ぶことも確認。
 2. **verify**: 正しい署名 → `isValid:true`。改竄 feeValue → `fee_value_mismatch` (broadcast せず)。
 3. **settle**: 実 settle → 成功 tx を explorer で確認。merchant = 表示額・`FEE_RECEIVER` = 手数料
    (max(2,1%)) が同一 tx で着金。`recordSettlement` が会計記録。
 4. **receipt**: settle 応答の receipt を `/api/facilitator/verify-receipt` で検証 → `valid:true`・
    signer = `/supported` の receiptSigner。
-5. **モデレーション**: 無料公開 URL を登録 → 400 `resource_not_gated`。正当性表明なし → `attestation_required`。
-6. **owner-auth**: 他人の resource を PATCH/DELETE → 403。
+5. **first-party demo**: `scripts/x402-buyer-example.mjs` を `BUYER_PRIVATE_KEY=... RESOURCE_URL=https://open-pay.jp/api/paid/demo node ...`
+   で実行し、1 JPYC + 手数料 2 JPYC の unlock と `X-PAYMENT-RESPONSE` を確認。
+6. **モデレーション**: 無料公開 URL を登録 → 400 `resource_not_gated`。正当性表明なし → `attestation_required`。
+7. **owner-auth**: 他人の resource を PATCH/DELETE → 403。
    ※ Amoy 1 周は本リリース準備中に実施済 (register→discover→settle→receipt verify)。点灯前に再確認。
 
 ### §14.5 監視

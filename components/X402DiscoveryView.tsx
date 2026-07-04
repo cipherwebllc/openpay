@@ -60,6 +60,14 @@ type OwnedResource = {
 };
 
 const EMPTY_FORM = { url: '', description: '', priceJpyc: '', category: '', payTo: '' };
+const DEMO_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
+const BUYER_SCRIPT_URL =
+  'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
+const DEMO_CURL = `curl -i ${DEMO_RESOURCE_URL}`;
+const BUYER_SCRIPT_COMMAND = [
+  `curl -fsSL ${BUYER_SCRIPT_URL} -o x402-buyer-example.mjs`,
+  `BUYER_PRIVATE_KEY=0x... RESOURCE_URL=${DEMO_RESOURCE_URL} node x402-buyer-example.mjs`,
+].join('\n');
 
 function feeAtomicOf(item: DiscoveryItem): bigint | null {
   const fv = item.accepts[0]?.extra?.openpay?.feeValue;
@@ -284,6 +292,21 @@ export function X402DiscoveryView() {
       ) : (
         <Copy className="h-3.5 w-3.5" aria-hidden />
       )}
+    </button>
+  );
+
+  const copyCodeBtn = (k: string, text: string) => (
+    <button
+      type="button"
+      onClick={() => copyText(k, text)}
+      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-100 transition hover:bg-slate-700"
+    >
+      {copiedKey === k ? (
+        <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+      )}
+      <span>{copiedKey === k ? t('copied') : t('copy')}</span>
     </button>
   );
 
@@ -613,6 +636,81 @@ export function X402DiscoveryView() {
             })}
           </ul>
         )}
+      </section>
+
+      {/* 1 JPYC の first-party demo。長い buyer script は raw を参照し、ページには最小コマンドだけ載せる。 */}
+      <section>
+        <details className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card">
+          <summary className="flex cursor-pointer list-none items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+              <Code2 className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-base font-bold text-slate-900">
+                {t('tryTitle')}
+              </span>
+              <span className="mt-0.5 block text-sm leading-relaxed text-slate-500">
+                {t('trySubtitle')}
+              </span>
+            </span>
+          </summary>
+
+          <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+            <ol className="space-y-3">
+              <li className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                  1
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800">{t('tryStep1')}</p>
+                  <div className="mt-2 rounded-xl bg-slate-950 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <span className="text-xs font-medium text-slate-400">
+                        {t('tryCurlLabel')}
+                      </span>
+                      {copyCodeBtn('try-curl', DEMO_CURL)}
+                    </div>
+                    <pre className="overflow-x-auto text-xs leading-relaxed text-slate-100">
+                      {DEMO_CURL}
+                    </pre>
+                  </div>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                  2
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800">{t('tryStep2')}</p>
+                  <div className="mt-2 rounded-xl bg-slate-950 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <a
+                        href={BUYER_SCRIPT_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-w-0 truncate text-xs font-medium text-sky-300 hover:text-sky-200"
+                      >
+                        {t('tryRawLink')}
+                      </a>
+                      {copyCodeBtn('try-script', BUYER_SCRIPT_COMMAND)}
+                    </div>
+                    <pre className="overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-slate-100">
+                      {BUYER_SCRIPT_COMMAND}
+                    </pre>
+                  </div>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                  3
+                </span>
+                <p className="min-w-0 text-sm font-semibold leading-relaxed text-slate-800">
+                  {t('tryStep3')}
+                </p>
+              </li>
+            </ol>
+          </div>
+        </details>
       </section>
     </div>
   );

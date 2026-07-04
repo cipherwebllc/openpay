@@ -15,6 +15,7 @@ const STRANGER = getAddress('0x9999999999999999999999999999999999999999');
 const FORWARDER = getAddress('0x752b7aad0089286eb7b553d84d05233d80c9fcb4');
 const FEE_RECEIVER = getAddress('0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e');
 const JPYC_AMOY = getAddress('0x00000000000000000000000000000000000Ca11a');
+const FIRST_PARTY_SELLER = getAddress('0x1234567890123456789012345678901234567890');
 
 const store = vi.hoisted(() => ({
   kv: new Map<string, string>(),
@@ -135,6 +136,7 @@ async function load(flag = '1'): Promise<{
   vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY);
   vi.stubEnv('X402_FEE_BPS', '100');
   vi.stubEnv('X402_FEE_FLOOR_JPYC', '2');
+  vi.stubEnv('X402_PAY_TO_ADDRESS', FIRST_PARTY_SELLER);
   vi.resetModules();
   const resources = (await import(
     '@/app/api/facilitator/resources/route'
@@ -355,8 +357,10 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     const id = await seedOne(resources);
     await idRoute.PATCH(patchReq({ ...validBody, priceJpyc: '3000' }), ctx(id));
-    const body = (await (await discovery()).json()) as { items: Array<{ priceJpyc: string }> };
-    expect(body.items[0].priceJpyc).toBe('3000');
+    const body = (await (await discovery()).json()) as {
+      items: Array<{ resource: string; priceJpyc: string }>;
+    };
+    expect(body.items.find((i) => i.resource === validBody.url)?.priceJpyc).toBe('3000');
   });
 
   it('他人の掲載 → 403 (owner-auth)', async () => {
@@ -459,8 +463,8 @@ describe('x402 facilitator /resources/[id] DELETE (無効化)', () => {
     const res = await idRoute.DELETE(new Request('http://x'), ctx(id));
     expect(res.status).toBe(200);
     expect((await res.json()).ok).toBe(true);
-    const body = (await (await discovery()).json()) as { items: unknown[] };
-    expect(body.items).toHaveLength(0);
+    const body = (await (await discovery()).json()) as { items: Array<{ resource: string }> };
+    expect(body.items.map((i) => i.resource)).not.toContain(validBody.url);
   });
 
   it('冪等: 2 回目も 200', async () => {
@@ -531,8 +535,10 @@ describe('x402 /discovery', () => {
         }>;
       }>;
     };
-    expect(body.items).toHaveLength(1);
-    const item = body.items[0];
+    expect(body.items).toHaveLength(3);
+    const item = body.items.find((i) => i.resource === validBody.url);
+    expect(item).toBeTruthy();
+    if (!item) return;
     expect(item.resource).toBe(validBody.url);
     expect(item.accepts).toHaveLength(1);
     const pr = item.accepts[0];
@@ -555,18 +561,52 @@ describe('x402 /discovery', () => {
     const body = (await (await discovery()).json()) as {
       items: Array<{ priceJpyc: string; accepts: unknown[] }>;
     };
-    expect(body.items).toHaveLength(1);
-    expect(body.items[0].priceJpyc).toBe('abc');
-    expect(body.items[0].accepts).toEqual([]); // 不正 price は accepts 生成不能 → 空
+    expect(body.items).toHaveLength(3);
+    const item = body.items.find((i) => i.priceJpyc === 'abc');
+    expect(item).toBeTruthy();
+    expect(item?.accepts).toEqual([]); // 不正 price は accepts 生成不能 → 空
   });
 
-  it('空カタログ → x402Version + items=[]', async () => {
+  it('KV 空でも first-party resource 2 件を先頭に返す', async () => {
     const { discovery } = await load();
     const body = (await (await discovery()).json()) as {
       x402Version: number;
-      items: unknown[];
+      items: Array<{
+        resource: string;
+        priceJpyc: string;
+        accepts: Array<{ extra: { openpay: { merchant: string; merchantValue: string; feeValue: string } } }>;
+      }>;
     };
     expect(body.x402Version).toBe(1);
+    expect(body.items.map((i) => i.resource)).toEqual([
+      'https://open-pay.jp/api/paid/demo',
+      'https://open-pay.jp/api/paid/stores',
+    ]);
+    expect(body.items[0].priceJpyc).toBe('1');
+    expect(body.items[0].accepts[0].extra.openpay.merchant).toBe(FIRST_PARTY_SELLER);
+    expect(body.items[0].accepts[0].extra.openpay.merchantValue).toBe(
+      (1n * 10n ** 18n).toString(),
+    );
+    expect(body.items[0].accepts[0].extra.openpay.feeValue).toBe(
+      (2n * 10n ** 18n).toString(),
+    );
+  });
+
+  it('X402_PAY_TO_ADDRESS 未設定 → first-party は非掲載 (壊れた accepts を並べない)・KV 分は不変', async () => {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', FORWARDER);
+    vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', FEE_RECEIVER);
+    vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY);
+    vi.stubEnv('X402_FEE_BPS', '100');
+    vi.stubEnv('X402_FEE_FLOOR_JPYC', '2');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', '');
+    vi.resetModules();
+    const discovery = await import('@/app/api/discovery/route');
+    const body = (await (await (discovery.GET as () => Promise<Response>)()).json()) as {
+      items: Array<{ resource: string }>;
+    };
+    // 直前の it は同一 KV 空状態 + payTo 設定ありで first-party 2 件を検証している。
+    // payTo 未設定では 0 件 = 非掲載が成立する。
     expect(body.items).toEqual([]);
   });
 
@@ -583,6 +623,8 @@ describe('x402 /discovery', () => {
       items: Array<{ resource: string }>;
     };
     expect(body.items.map((i) => i.resource)).toEqual([
+      'https://open-pay.jp/api/paid/demo',
+      'https://open-pay.jp/api/paid/stores',
       'https://api.example.jp/paid/second',
       'https://api.example.jp/paid/first',
     ]);
@@ -600,9 +642,9 @@ describe('x402 /discovery', () => {
       );
     }
     const body = (await (await discovery()).json()) as { items: Array<{ resource: string }> };
-    expect(body.items).toHaveLength(N);
+    expect(body.items).toHaveLength(N + 2);
     // 完全な逆順 (最後に登録した r29 が先頭・r0 が末尾)。
-    expect(body.items.map((i) => i.resource)).toEqual(
+    expect(body.items.slice(2).map((i) => i.resource)).toEqual(
       Array.from({ length: N }, (_, i) => `https://api.example.jp/paid/r${N - 1 - i}`),
     );
   });

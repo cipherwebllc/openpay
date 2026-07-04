@@ -293,6 +293,21 @@ describe('X402DiscoveryView', () => {
     expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
   });
 
+  it('1円 demo セクション: curl と buyer script コマンドをコピーできる', async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    renderView();
+    fireEvent.click(await screen.findByText('3円で試す (5分)'));
+    const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
+    fireEvent.click(copyButtons[copyButtons.length - 1]);
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining('BUYER_PRIVATE_KEY=0x...'),
+    );
+  });
+
   it('カタログ: 端数のある手数料を小数で表示 (整数除算で切り捨てない)', async () => {
     // price 250・手数料 2.5 JPYC (atomic 2.5e18)。整数除算だと "2" と誤表示する。
     global.fetch = vi.fn(async () => ({
