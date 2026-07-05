@@ -2087,6 +2087,7 @@
     "tryStep3": "1 JPYC + 手数料 1 JPYC、合計 2 JPYC で JSON が解錠されます。",
     "tryCurlLabel": "402 チャレンジ",
     "tryRawLink": "buyer script raw",
+    "showSnippet": "スニペット",
     "mcpTitle": "エージェントから払う (MCP)",
     "mcpSubtitle": "Claude 等に買い手 MCP を追加すると、検索→見積り→JPYC 支払いまで自律実行できます。",
     "mcpNote": "既定ガード: 1 回 10 JPYC・累計 100 JPYC・支払い先は open-pay.jp のみ。鍵は少額専用ウォレットを推奨 (SIGNER_MODE=steward でプロセス外にも)。"

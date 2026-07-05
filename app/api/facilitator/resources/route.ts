@@ -31,7 +31,11 @@ export async function GET(): Promise<NextResponse> {
     logger.warn('x402.facilitator.resource_list_failed', { merchant: session.address });
     return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
   }
-  return NextResponse.json({ resources });
+  // スニペットは URL から決定的に再生成できる。登録時 1 回きりだった表示を owner 一覧から
+  // いつでも再取得できるようにする (加盟店の実組み込みで「もう一度見たい」が発生)。
+  return NextResponse.json({
+    resources: resources.map((r) => ({ ...r, paywallSnippet: buildPaywallSnippet(r.url) })),
+  });
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
