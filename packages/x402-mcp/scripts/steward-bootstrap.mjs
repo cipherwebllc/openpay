@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // steward-bootstrap — self-host Steward を openpay-x402-mcp の署名バックエンドにするための
-// 自動セットアップ。tenant 作成 → self-join open → owner の SIWE ログイン → owner 昇格 →
-// agent (ウォレット) 作成 → JPYC typed-data ポリシー付与、までを 1 コマンドで行い、
-// 最後に MCP 用の env ブロックを出力する。
+// 完全自動セットアップ。tenant 作成 → self-join open → owner の SIWE ログイン → owner 昇格 →
+// agent (ウォレット) 作成 → JPYC typed-data ポリシー付与 → owner の TOTP (MFA) 登録 →
+// MFA セッションで signer 資格情報を発行、までを 1 コマンドで行い、完成した MCP env
+// ブロックを出力する。
 //
-// signer 資格情報の発行 (STEWARD_SIGNER_ID / SECRET) だけは Steward が意図的に
-// 「管理者の MFA 付き human セッション」に限定しているため、このスクリプトは
-// signer 発行の直前で停止し、続きの正確な手順を表示する (設計を尊重し、人手ゲートを
-// スクリプトで無理に迂回しない)。
+// MFA について: Steward は signer 発行を MFA 済みセッションに限定する。本スクリプトは
+// 操作者 (owner) の TOTP を登録してシークレットを操作者に引き渡す (認証アプリに登録して
+// 以後の管理操作に使う)。MFA を迂回するのではなく、登録を代行して factor を手渡す設計。
+// 注意: Steward はロール昇格/MFA 有効化のたびに既存セッションを失効させ、失効境界が
+// 秒粒度のため、各段階の間に短い待機を挟む (実測に基づく)。全体で 1 分弱かかる。
 //
 // 依存: viem のみ。実行:
 //   OWNER_PRIVATE_KEY=0x... STEWARD_PLATFORM_KEY=... node steward-bootstrap.mjs
@@ -25,9 +27,47 @@
 //   CHAIN_ID               137
 //   MAX_SIGN_JPYC          3   (1 署名あたりの value 上限・整数 JPYC)
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 import { isHex } from 'viem';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// RFC 6238 TOTP (SHA-1 / 30s / 6 桁) — Steward の既定と一致。
+function base32Decode(input) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const ch of input.toUpperCase()) {
+    const v = alphabet.indexOf(ch);
+    if (v < 0) continue;
+    bits += v.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(bytes);
+}
+
+function totpCode(secret, time = Date.now()) {
+  const counter = Math.floor(time / 1000 / 30);
+  const buf = Buffer.alloc(8);
+  buf.writeUInt32BE(Math.floor(counter / 2 ** 32), 0);
+  buf.writeUInt32BE(counter >>> 0, 4);
+  const digest = createHmac('sha1', base32Decode(secret)).update(buf).digest();
+  const offset = digest[digest.length - 1] & 0xf;
+  const code =
+    ((digest[offset] & 0x7f) << 24) |
+    ((digest[offset + 1] & 0xff) << 16) |
+    ((digest[offset + 2] & 0xff) << 8) |
+    (digest[offset + 3] & 0xff);
+  return String(code % 1e6).padStart(6, '0');
+}
+
+// TOTP は同一コードの再利用が拒否されるため、直前に使ったコードと別の時間窓を待つ。
+async function nextTotpWindow() {
+  const msIntoStep = Date.now() % 30_000;
+  await sleep(30_000 - msIntoStep + 1_000);
+}
 
 const env = process.env;
 const URL_BASE = (env.STEWARD_URL || 'http://localhost:3900').replace(/\/+$/, '');
@@ -99,8 +139,11 @@ async function siweLogin(account) {
   const v = await jsonOrThrow(verifyRes, 'SIWE verify');
   const token = v.token ?? v.data?.token;
   const userId = v.userId ?? v.data?.userId ?? v.data?.user?.id;
-  if (!token || !userId) throw new Error('SIWE verify returned no token/userId');
-  return { token, userId };
+  const mfaChallengeId = v.mfa?.challengeId ?? null;
+  if (!mfaChallengeId && (!token || !userId)) {
+    throw new Error('SIWE verify returned no token/userId');
+  }
+  return { token, userId, mfaChallengeId };
 }
 
 async function main() {
@@ -148,6 +191,8 @@ async function main() {
     'promote owner',
   );
   console.log(`✓ owner promoted (userId ${first.userId})`);
+  // 昇格は既存セッションを失効させる (失効境界が秒粒度)。境界を跨いでから次の操作へ。
+  await sleep(2_000);
 
   // 5. agent (ウォレット)
   if (!apiKey) {
@@ -214,9 +259,71 @@ async function main() {
     throw new Error(`policy set failed (${policyRes.status}): ${JSON.stringify(policyBody).slice(0, 200)}`);
   }
 
-  // 7. env ブロック出力 + signer 発行の残手順
+  // 7. owner の TOTP (MFA) を登録 — signer 発行の前提。シークレットは操作者に引き渡す。
+  let sessionToken = (await siweLogin(owner)).token;
+  console.log('→ enrolling TOTP (MFA) for the owner…');
+  const enrollBody = await jsonOrThrow(
+    await fetch(`${URL_BASE}/auth/mfa/totp/enroll`, {
+      method: 'POST',
+      headers: tenantHeaders({ Authorization: `Bearer ${sessionToken}` }),
+      body: '{}',
+    }),
+    'TOTP enroll',
+  );
+  const totpSecret = enrollBody.secret ?? enrollBody.data?.secret;
+  if (!totpSecret) throw new Error('TOTP enroll returned no secret');
+  await jsonOrThrow(
+    await fetch(`${URL_BASE}/auth/mfa/totp/verify`, {
+      method: 'POST',
+      headers: tenantHeaders({ Authorization: `Bearer ${sessionToken}` }),
+      body: JSON.stringify({ code: totpCode(totpSecret) }),
+    }),
+    'TOTP verify',
+  );
+  console.log('✓ TOTP enabled for the owner');
+  // MFA 有効化も既存セッションを失効させる。境界を跨いで MFA チャレンジ付き再ログイン。
+  await sleep(2_000);
+  const mfaLogin = await siweLogin(owner);
+  if (!mfaLogin.mfaChallengeId) throw new Error('expected an MFA challenge on re-login');
+  // verify で直前の TOTP コードを消費済みのため、次の 30 秒窓まで待つ。
+  console.log('→ waiting for the next TOTP window (≤ 31s)…');
+  await nextTotpWindow();
+  const completeBody = await jsonOrThrow(
+    await fetch(`${URL_BASE}/auth/mfa/totp/complete`, {
+      method: 'POST',
+      headers: tenantHeaders({ Origin: URL_BASE }),
+      body: JSON.stringify({ challengeId: mfaLogin.mfaChallengeId, code: totpCode(totpSecret) }),
+    }),
+    'TOTP complete',
+  );
+  const mfaToken = completeBody.token ?? completeBody.data?.token;
+  if (!mfaToken) throw new Error('TOTP complete returned no session token');
+  console.log('✓ MFA session established');
+
+  // 8. signer 資格情報を発行 (secret はサーバー生成・この 1 回だけ返る)
+  const signerBody = await jsonOrThrow(
+    await fetch(`${URL_BASE}/agents/${agent.id}/signers`, {
+      method: 'POST',
+      headers: tenantHeaders({ Authorization: `Bearer ${mfaToken}` }),
+      body: JSON.stringify({
+        name: 'openpay-x402-mcp',
+        signerType: 'service',
+        subjectType: 'api_key',
+        subjectId: 'openpay-x402-mcp',
+        permissions: ['sign_typed_data'],
+        issueCredential: true,
+      }),
+    }),
+    'signer issuance',
+  );
+  const signerId = signerBody.data?.id;
+  const signerSecret = signerBody.data?.credentialSecret ?? signerBody.data?.secret;
+  if (!signerId || !signerSecret) throw new Error('signer issuance returned no id/secret');
+  console.log('✓ signer issued (permissions: sign_typed_data)');
+
+  // 9. 完成 env 出力
   console.log('\n────────────────────────────────────────────────────────');
-  console.log('MCP env (signer 以外は埋まっています):\n');
+  console.log('完成した MCP env (mcpServers の env にそのまま貼れます):\n');
   console.log(JSON.stringify(
     {
       SIGNER_MODE: 'steward',
@@ -225,20 +332,16 @@ async function main() {
       STEWARD_API_KEY: apiKey,
       STEWARD_AGENT_ID: agent.id,
       STEWARD_AGENT_ADDRESS: agentAddress,
-      STEWARD_SIGNER_ID: '<下記 8 で発行>',
-      STEWARD_SIGNER_SECRET: '<下記 8 で発行>',
+      STEWARD_SIGNER_ID: signerId,
+      STEWARD_SIGNER_SECRET: signerSecret,
     },
     null,
     2,
   ));
-  console.log('\n8. signer の発行 (Steward が意図的に human MFA を要求する唯一の手順):');
-  console.log('   - steward.fi ホスト版ダッシュボードを使う場合はそこで発行するのが最短です。');
-  console.log('   - self-host のみの場合は、owner アカウントで MFA (TOTP/passkey) を有効化した');
-  console.log('     セッションで次を実行します:');
-  console.log(`       POST ${URL_BASE}/agents/${agent.id}/signers`);
-  console.log('       Authorization: Bearer <MFA 済み session token>  X-Steward-Tenant: ' + TENANT_ID);
-  console.log('       { "name": "mcp", "permissions": ["sign_typed_data"] }');
-  console.log('   発行された signerId / signerSecret を上の env に入れれば MCP 配線完了です。');
+  console.log('\n⚠ 必ず保存するもの (どちらも二度と表示されません):');
+  console.log('  - 上の STEWARD_API_KEY / STEWARD_SIGNER_SECRET');
+  console.log('  - owner の TOTP シークレット (認証アプリに登録。以後の管理操作の MFA に使用):');
+  console.log('      ' + totpSecret);
   console.log('\n入金: agent ウォレット ' + agentAddress + ' に JPYC を入れてください。');
   console.log('確認: MCP から x402_quote → totalJpyc が返れば配線 OK。\n');
 }

@@ -100,10 +100,12 @@ After the first Steward signature in a process session, the MCP verifies it loca
 
 ### One-command bootstrap (recommended)
 
-`scripts/steward-bootstrap.mjs` provisions everything up to (but not including) the
-signer credential in one command: it creates the tenant, opens self-join, logs the
-owner in via SIWE, promotes them to owner, creates the buyer agent, applies the JPYC
-typed-data policy, and prints the MCP env block.
+`scripts/steward-bootstrap.mjs` provisions the entire steward backend in one command:
+it creates the tenant, opens self-join, logs the owner in via SIWE, promotes them to
+owner, creates the buyer agent, applies the JPYC typed-data policy, enrolls the
+owner's TOTP (MFA), establishes an MFA session, issues the signer credential, and
+prints the completed MCP env block. Takes about a minute (it must wait out Steward's
+session-revocation boundaries and one TOTP window).
 
 ```bash
 OWNER_PRIVATE_KEY=0x... \
@@ -115,11 +117,11 @@ The owner key is used only to sign the SIWE login in-process — it is never sen
 stored. Start Steward with `SIWE_ALLOWED_DOMAINS` including your `STEWARD_URL` host so
 the SIWE nonce is accepted.
 
-Signer issuance (`STEWARD_SIGNER_ID` / `STEWARD_SIGNER_SECRET`) is deliberately gated
-by Steward behind an MFA-verified human session, so the script stops there and prints
-the exact remaining step (issue it from the steward.fi dashboard, or from an
-MFA-enabled owner session). This is intentional — the script does not bypass that
-control.
+Steward gates signer issuance behind an MFA-verified session. The script does not
+bypass this: it enrolls a TOTP factor on the owner's behalf and **hands the TOTP
+secret to you** at the end — add it to your authenticator app and keep it with the
+other secrets; you will need it for any future admin operation. The signer secret and
+tenant API key are printed exactly once.
 
 ### Manual setup
 
