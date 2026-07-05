@@ -98,6 +98,33 @@ After the first Steward signature in a process session, the MCP verifies it loca
 
 ## Steward Setup
 
+### One-command bootstrap (recommended)
+
+`scripts/steward-bootstrap.mjs` provisions everything up to (but not including) the
+signer credential in one command: it creates the tenant, opens self-join, logs the
+owner in via SIWE, promotes them to owner, creates the buyer agent, applies the JPYC
+typed-data policy, and prints the MCP env block.
+
+```bash
+OWNER_PRIVATE_KEY=0x... \
+STEWARD_PLATFORM_KEY=<one of the server STEWARD_PLATFORM_KEYS> \
+node scripts/steward-bootstrap.mjs
+```
+
+The owner key is used only to sign the SIWE login in-process — it is never sent or
+stored. Start Steward with `SIWE_ALLOWED_DOMAINS` including your `STEWARD_URL` host so
+the SIWE nonce is accepted.
+
+Signer issuance (`STEWARD_SIGNER_ID` / `STEWARD_SIGNER_SECRET`) is deliberately gated
+by Steward behind an MFA-verified human session, so the script stops there and prints
+the exact remaining step (issue it from the steward.fi dashboard, or from an
+MFA-enabled owner session). This is intentional — the script does not bypass that
+control.
+
+### Manual setup
+
+
+
 Run Steward yourself and provide its normal local startup secrets, including `STEWARD_MASTER_PASSWORD`, `STEWARD_AUDIT_HMAC_KEY`, `STEWARD_PLATFORM_KEYS`, and `STEWARD_PLATFORM_KEY_SCOPES`. Then create a tenant, create an agent vault, and issue the scoped signer from the Steward dashboard; signer issuance requires an administrator session.
 
 Recommended typed-data policy shape for this MCP:
