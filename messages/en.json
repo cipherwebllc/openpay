@@ -4,6 +4,7 @@
     "create": "Receive",
     "history": "History",
     "explore": "Explore",
+    "discovery": "AI Store",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "signIn": "Sign in (signature)",
@@ -1096,7 +1097,8 @@
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",
       "disclaimer": "Disclaimer",
-      "tokutei": "Business Disclosure"
+      "tokutei": "Business Disclosure",
+      "discovery": "AI Store"
     },
     "sourceLink": "Source on GitHub",
     "xLink": "OpenPay on X",

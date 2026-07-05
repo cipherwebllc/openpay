@@ -4,6 +4,7 @@
     "create": "受取る",
     "history": "履歴",
     "explore": "探す",
+    "discovery": "AIストア",
     "connect": "接続",
     "disconnect": "切断",
     "signIn": "ログイン (署名)",
@@ -1096,7 +1097,8 @@
       "terms": "利用規約",
       "privacy": "プライバシーポリシー",
       "disclaimer": "免責事項",
-      "tokutei": "特商法表記"
+      "tokutei": "特商法表記",
+      "discovery": "AIストア"
     },
     "sourceLink": "ソースコード (GitHub)",
     "xLink": "OpenPay の X (旧 Twitter)",

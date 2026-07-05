@@ -4,10 +4,10 @@
 // item.key は messages の Nav 名前空間内の i18n key として使う。
 
 import type { LucideIcon } from 'lucide-react';
-import { ScanLine, QrCode, History, Compass } from 'lucide-react';
+import { ScanLine, QrCode, History, Compass, Bot } from 'lucide-react';
 
 export type NavItem = {
-  key: 'scan' | 'create' | 'history' | 'explore';
+  key: 'scan' | 'create' | 'history' | 'explore' | 'discovery';
   /** locale prefix を含まない path */
   href: string;
   icon: LucideIcon;
@@ -20,6 +20,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { key: 'create', href: '/create', icon: QrCode },
   { key: 'history', href: '/history', icon: History },
   { key: 'explore', href: '/explore', icon: Compass },
+];
+
+// PC (TopNav) 専用の拡張ナビ。モバイル BottomNav は 4 枠が操作性の上限のため NAV_ITEMS のまま
+// (AIストア = /discovery は開発者/エージェント運用者向けで、店頭のモバイル主動線には出さない)。
+export const DESKTOP_NAV_ITEMS: readonly NavItem[] = [
+  ...NAV_ITEMS,
+  { key: 'discovery', href: '/discovery', icon: Bot },
 ];
 
 /** pathname (例 "/ja/create") から locale prefix を取り除き、rest ("/create") を返す。 */

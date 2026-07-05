@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_ITEMS, pathMatches, pathRestForLocale } from '@/components/navItems';
+import {
+  NAV_ITEMS,
+  DESKTOP_NAV_ITEMS,
+  pathMatches,
+  pathRestForLocale,
+} from '@/components/navItems';
 
 describe('navItems: NAV_ITEMS shape (regression fence)', () => {
   it('4 items が宣言されている (ホームは Nav から外す確定済)', () => {
@@ -135,5 +140,14 @@ describe('NAV_ITEMS active state (integration: pathRestForLocale → pathMatches
         (active as Record<string, boolean>)[item.key],
       );
     }
+  });
+});
+
+describe('navItems: DESKTOP_NAV_ITEMS (PC 専用拡張)', () => {
+  it('モバイル NAV_ITEMS は 4 枠のまま・PC は +AIストア (/discovery) の 5 枠', () => {
+    expect(NAV_ITEMS).toHaveLength(4);
+    expect(DESKTOP_NAV_ITEMS).toHaveLength(5);
+    expect(DESKTOP_NAV_ITEMS.slice(0, 4)).toEqual(NAV_ITEMS);
+    expect(DESKTOP_NAV_ITEMS[4]).toMatchObject({ key: 'discovery', href: '/discovery' });
   });
 });

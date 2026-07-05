@@ -49,6 +49,13 @@ export function SiteFooter() {
         >
           {t('links.tokutei')}
         </Link>
+        <Link
+          href="/discovery"
+          className="hover:text-slate-700 hover:underline"
+          prefetch={false}
+        >
+          {t('links.discovery')}
+        </Link>
       </nav>
       <p className="mt-3 text-slate-400">
         {t('copyright', {

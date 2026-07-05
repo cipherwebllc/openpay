@@ -78,15 +78,21 @@ describe('AppHeader: ブランド / ナビ / 右側コントロール', () => {
     ).toBeInTheDocument();
   });
 
-  it('TopNav に 4 link (スキャン / 受け取る / 履歴 / 探す) が出る', () => {
+  it('TopNav に 5 link (スキャン / 受け取る / 履歴 / 探す / AIストア) が出る', () => {
     renderWithIntl(<AppHeader />);
     const nav = screen.getByRole('navigation', { name: 'primary navigation' });
-    expect(nav.querySelectorAll('a').length).toBe(4);
+    expect(nav.querySelectorAll('a').length).toBe(5);
     // 各 link href が /ja prefix で正しい
     const hrefs = Array.from(nav.querySelectorAll('a')).map((a) =>
       a.getAttribute('href'),
     );
-    expect(hrefs).toEqual(['/ja/scan', '/ja/create', '/ja/history', '/ja/explore']);
+    expect(hrefs).toEqual([
+      '/ja/scan',
+      '/ja/create',
+      '/ja/history',
+      '/ja/explore',
+      '/ja/discovery',
+    ]);
   });
 
   it('右側に LocaleSwitcher (ja/en) + env pill (testnet) が出る', () => {
