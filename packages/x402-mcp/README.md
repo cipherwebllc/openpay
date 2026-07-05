@@ -63,6 +63,10 @@ node src/index.mjs
 | `discovery_search` | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
 | `x402_quote` | No | Fetch a 402 challenge and report whether local guards would allow payment. |
 | `x402_pay` | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
+| `order_menu` | No | Read an OpenPay `@handle` shop's public mobile-order menu (`{handle}`): item ids, names, prices, and `hasOptions`. |
+| `order_quote` | No | Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and fetch its x402 challenge (price, fee, total, guard reasons). Returns the canonical pay `url`; pay it with `x402_pay`. |
+
+Ordering flow: `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`. A shop total is usually well above the default `MAX_PER_CALL_JPYC` of `10` JPYC, so raise `MAX_PER_CALL_JPYC` (and `MAX_SESSION_JPYC`) to your intended order ceiling or `x402_pay` will refuse with `max_total_above_per_call_limit` / `total_exceeds_max_total`. The shop must have `ENABLE_AGENT_ORDER` (+ `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY`) enabled server-side, otherwise the endpoints return 404.
 
 ## Environment
 

@@ -627,6 +627,17 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_X402_FACILITATOR',
     process.env.NEXT_PUBLIC_ENABLE_X402_FACILITATOR,
   ),
+  // エージェント注文 (Claude Desktop/Code の openpay-x402-mcp から @handle 店舗のモバイルオーダーを
+  // x402 で支払い、既存の受注リレーへ届ける) の有効化フラグ。**server-only** (NEXT_PUBLIC を付けない =
+  // client bundle に出さない・/api/agent-order/* のみが参照。client 側は常に undefined→false で無害)。
+  // **既定 OFF で完全 inert** = /api/agent-order/{menu,pay} は 404。enableX402Facilitator +
+  // enableOrderRelay と AND でゲートするため、どれか一つでも OFF なら全 route 404。既存の決済/受注
+  // レールは無改変 (追加のみ)。点灯は自店舗 testnet/mainnet 実注文 E2E 後。計画: plans/agent-order-x402.md。
+  // '1' / 'true' で ON。
+  enableAgentOrder: parseBoolFlag(
+    'ENABLE_AGENT_ORDER',
+    process.env.ENABLE_AGENT_ORDER,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

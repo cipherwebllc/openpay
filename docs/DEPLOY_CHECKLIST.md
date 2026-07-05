@@ -1259,6 +1259,20 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   GET 503 (outage 中に「登録ゼロ」と誤表示して重複登録させない)。
 - 料金性質の登録不要は memory:project_fsa_clearance (金融庁回答)・税務は別 (税理士)。
 
+### §14.7 エージェント注文 (agent-order) の運用注記
+- **範囲**: `@handle` 店舗のモバイルオーダーを openpay-x402-mcp から x402 で支払う。新レールは作らず、
+  支払いは §14 の facilitator (forwarder-split・買い手上乗せ 1%)、受注登録は §15.x の受注リレー
+  (`/api/order/notify`・on-chain 検証込み) を **そのまま再利用** する (`/api/agent-order/{menu,pay}`)。計画: `plans/agent-order-x402.md`。
+- **フラグ (server-only・AND ゲート)**: `ENABLE_AGENT_ORDER` (NEXT_PUBLIC を付けない) + `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`
+  + `NEXT_PUBLIC_ENABLE_ORDER_RELAY` の 3 つが全 ON でなければ全 route 404。**既定 OFF = 完全 inert がロールバック先**。
+  点灯順序は先に facilitator (§14) + 受注リレー (§15.x) を go-live 済みにしてから最後に `ENABLE_AGENT_ORDER=1`。
+- **権威**: 金額は **サーバーが menu から再計算** (顧客申告額は使わない)・受取先は `record.config.to` (@handle 権威)・
+  対象 chain は storefront.chain の deployment (forwarder 未設定チェーンは 422 `unsupported_chain`)。options 付き商品は v1 非対応 (`item_has_options`)。
+- **隔離 (掟13)**: settle 成功後の受注登録 (notify) 失敗は決済成功を巻き込まない → 200 + `orderRegistered:false` + `txHash` を返す
+  (店主は履歴/txHash で追える)。notify は txHash 冪等ゆえ二重登録は既存機構で防がれる。
+- **go-live 前 E2E**: 自店舗 (@handle・storefront 設定済み) に対し testnet で `order_menu` → `order_quote` → `x402_pay` を実行し、
+  店主の受注画面に注文が届くことを確認する。MCP の `MAX_PER_CALL_JPYC` は既定 10 JPYC で注文合計を超えやすいので引き上げる。
+
 ## §15 Web Push 着金通知 go-live SOP
 
 決済/受注の成功を店主端末に Web Push で届ける (`/history` の PushNotifyPanel + 素の `public/sw.js`)。
