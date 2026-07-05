@@ -24,16 +24,16 @@ describe('x402 開示フェンス', () => {
     ).toBeNull();
   });
 
-  it('開示値 (1% / 最低 2 JPYC) が実 x402FeeValue の挙動と一致', () => {
+  it('開示値 (1% / 最低 1 JPYC) が実 x402FeeValue の挙動と一致', () => {
     expect(DISCLOSED_X402_FEE.bps).toBe(100);
-    expect(DISCLOSED_X402_FEE.floorJpyc).toBe(2);
+    expect(DISCLOSED_X402_FEE.floorJpyc).toBe(1);
     expect(x402FeeValue(JPYC(1000n))).toBe(JPYC(10n)); // 1%
-    expect(x402FeeValue(JPYC(1n))).toBe(JPYC(2n)); // 下限 2 JPYC
+    expect(x402FeeValue(JPYC(1n))).toBe(JPYC(1n)); // 下限 1 JPYC
   });
 
   it('乖離検知: bps / floor がずれると理由を返す', () => {
-    expect(x402FeeDisclosureDivergence(50, JPYC(2n))).toMatch(/X402_FEE_BPS/);
+    expect(x402FeeDisclosureDivergence(50, JPYC(1n))).toMatch(/X402_FEE_BPS/);
     expect(x402FeeDisclosureDivergence(100, JPYC(5n))).toMatch(/floor/);
-    expect(x402FeeDisclosureDivergence(100, JPYC(2n))).toBeNull();
+    expect(x402FeeDisclosureDivergence(100, JPYC(1n))).toBeNull();
   });
 });

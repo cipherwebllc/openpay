@@ -5,7 +5,7 @@
 // 設計判断 (plans/x402-jpyc-facilitator.md):
 //   - 手数料 = max(feeFloorWei, price × feeBps/10000)・**買い手上乗せ**。seller は表示額(price)を
 //     そのまま受領し、agent は price+fee を署名する (lib/x402/fee.ts)。
-//   - floor 既定 2 JPYC (ユーザ確定 2026-06-24)。Eip3009Forwarder.settle は feeValue==0 を
+//   - floor 既定 1 JPYC (2026-07-05 ユーザ確定で 2→1 に改定。DISCLOSED_X402_FEE と同時変更)。Eip3009Forwarder.settle は feeValue==0 を
 //     ZeroValue で revert するため floor は常に 1 wei 以上を保証する (0/不正は既定 2 へ倒す)。
 //   - feeBps 既定 100 (= 1%)。facilitator 自体が flag でゲートされるため、点灯時は意図どおり
 //     1% を既定にする (recover の bps 既定 0 = inert とは方針が異なる)。fat-finger 防止に上限 10%。
@@ -19,7 +19,7 @@ import { resolveDeployment } from '@/lib/tokens';
 
 const DEFAULT_FEE_BPS = 100; // 1%
 const MAX_FEE_BPS = 1000; // 10% — fat-finger ceiling (recover と同方針)
-const DEFAULT_FLOOR_HUMAN = 2n; // 2 JPYC (ユーザ確定)
+const DEFAULT_FLOOR_HUMAN = 1n; // 1 JPYC (2026-07-05 ユーザ確定・実測 settle ガス ~0.5 円の 2 倍)
 const JPYC_DECIMALS = 18;
 
 function nonEmpty(raw: string | undefined): string | undefined {

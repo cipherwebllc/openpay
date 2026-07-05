@@ -80,7 +80,7 @@ describe('lib/x402/requirements', () => {
     expect(o.commitVersion).toBe(FORWARDER_COMMIT_VERSION);
   });
 
-  it('小口は floor (2 JPYC) が手数料になる', async () => {
+  it('小口は floor (1 JPYC) が手数料になる', async () => {
     process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY = FORWARDER_RAW;
     const { createJpycPaymentRequirements } = await import(
       '@/lib/x402/requirements'
@@ -92,8 +92,8 @@ describe('lib/x402/requirements', () => {
       description: 'hello',
     })[0];
     expect(pr.extra.openpay.merchantValue).toBe(JPYC(1n).toString());
-    expect(pr.extra.openpay.feeValue).toBe(JPYC(2n).toString()); // floor
-    expect(pr.maxAmountRequired).toBe(JPYC(3n).toString()); // 1 + 2
+    expect(pr.extra.openpay.feeValue).toBe(JPYC(1n).toString()); // floor
+    expect(pr.maxAmountRequired).toBe(JPYC(2n).toString()); // 1 + 1
   });
 
   it('amount <= 0 は throw', async () => {
