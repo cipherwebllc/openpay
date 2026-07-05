@@ -107,24 +107,85 @@ describe('computeAgentOrder', () => {
     expect(res).toEqual({ ok: false, reason: 'unknown_item' });
   });
 
-  it('options 付き item は item_has_options で拒否', () => {
-    const menu: MenuItem[] = [
-      {
-        id: 'ramen',
-        name: 'ラーメン',
-        price: '900',
-        options: [
-          {
-            id: 'size',
-            name: 'サイズ',
-            type: 'single',
-            choices: [{ id: 'reg', label: '並', priceDelta: '0' }],
-          },
-        ],
-      },
+  // options 対応 (checkout と同一算術 = lib/menuOptions が単一情報源)
+  const OPTION_MENU: MenuItem[] = [
+    {
+      id: 'ramen',
+      name: 'ラーメン',
+      price: '900',
+      options: [
+        {
+          id: 'size',
+          name: 'サイズ',
+          type: 'single',
+          required: true,
+          choices: [
+            { id: 'reg', label: '並', priceDelta: '0' },
+            { id: 'big', label: '大盛り', priceDelta: '100' },
+          ],
+        },
+        {
+          id: 'top',
+          name: 'トッピング',
+          type: 'multi',
+          choices: [
+            { id: 'egg', label: '味玉', priceDelta: '120' },
+            { id: 'nori', label: 'のり', priceDelta: '80' },
+          ],
+        },
+      ],
+    },
+  ];
+
+  it('options: 選択で実効単価 (base+Σdelta) と表示名「name（選択・選択）」を確定する', () => {
+    const res = computeAgentOrder(
+      storefront(OPTION_MENU),
+      [{ id: 'ramen', qty: 2, options: { size: 'big', top: ['egg', 'nori'] } }],
+      18,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // (900 + 100 + 120 + 80) × 2 = 2400 JPYC
+    expect(res.totalMinor).toBe(2400n * 10n ** 18n);
+    expect(res.items[0]).toEqual({
+      name: 'ラーメン（大盛り・味玉・のり）',
+      qty: 2,
+      price: '1200',
+    });
+  });
+
+  it('options: required グループ未指定は missing_required_option', () => {
+    const res = computeAgentOrder(
+      storefront(OPTION_MENU),
+      [{ id: 'ramen', qty: 1 }],
+      18,
+    );
+    expect(res).toEqual({ ok: false, reason: 'missing_required_option' });
+  });
+
+  it('options: 実在しない group / choice id は unknown_option (黙殺しない)', () => {
+    expect(
+      computeAgentOrder(
+        storefront(OPTION_MENU),
+        [{ id: 'ramen', qty: 1, options: { size: 'reg', nope: 'x' } }],
+        18,
+      ),
+    ).toEqual({ ok: false, reason: 'unknown_option' });
+    expect(
+      computeAgentOrder(
+        storefront(OPTION_MENU),
+        [{ id: 'ramen', qty: 1, options: { size: 'xl' } }],
+        18,
+      ),
+    ).toEqual({ ok: false, reason: 'unknown_option' });
+  });
+
+  it('options: cart codec が options を往復させる', () => {
+    const cart = [
+      { id: 'ramen', qty: 1, options: { size: 'reg', top: ['egg'] } },
     ];
-    const res = computeAgentOrder(storefront(menu), [{ id: 'ramen', qty: 1 }], 18);
-    expect(res).toEqual({ ok: false, reason: 'item_has_options' });
+    const decoded = decodeAgentCart(encodeAgentCart(cart));
+    expect(decoded).toEqual(cart);
   });
 
   it('空カートは empty_cart', () => {

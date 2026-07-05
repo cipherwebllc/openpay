@@ -48,8 +48,24 @@ export async function GET(req: Request): Promise<NextResponse> {
     price: m.price,
     ...(m.category ? { category: m.category } : {}),
     ...(m.recommended ? { recommended: true } : {}),
-    // options 付き item は order_quote で拒否されるため、エージェントが事前に避けられるよう明示する。
+    // options はエージェントが選択を組めるよう全構造を公開する (id/label/priceDelta/required)。
+    // hasOptions は初期 client (0.4.0) との互換で残す。
     hasOptions: Boolean(m.options && m.options.length > 0),
+    ...(m.options && m.options.length > 0
+      ? {
+          options: m.options.map((g) => ({
+            id: g.id,
+            name: g.name,
+            type: g.type,
+            ...(g.required ? { required: true } : {}),
+            choices: g.choices.map((c) => ({
+              id: c.id,
+              label: c.label,
+              priceDelta: c.priceDelta,
+            })),
+          })),
+        }
+      : {}),
   }));
 
   return NextResponse.json({
