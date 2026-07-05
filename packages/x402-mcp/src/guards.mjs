@@ -6,6 +6,11 @@ export const JPYC_DECIMALS = 18;
 export const DEFAULT_MAX_PER_CALL_JPYC = '10';
 export const DEFAULT_MAX_SESSION_JPYC = '100';
 export const DEFAULT_ALLOWED_HOSTS = 'open-pay.jp';
+// カタログ信頼 (既定 ON): OpenPay の審査済みカタログ (/api/discovery) に載っている URL への
+// 支払いを、ALLOWED_HOSTS への手動追加なしで許可する。掲載は 402 ゲート実在 + OpenPay 方式
+// (forwarder-split) の検証を通過したものだけで、金額の防御 (per-call/session/maxTotalJpyc) は
+// 本設定と無関係に常に効く。CATALOG_TRUST=false で無効化できる。
+export const DEFAULT_CATALOG_TRUST = true;
 export const DEFAULT_DISCOVERY_URL = 'https://open-pay.jp/api/discovery';
 
 export const REASONS = {
@@ -128,6 +133,10 @@ export function readMoneyConfig(env = process.env) {
       'MAX_SESSION_JPYC',
     ),
     allowedHosts: parseAllowedHosts(env.ALLOWED_HOSTS),
+    catalogTrust:
+      env.CATALOG_TRUST === undefined || env.CATALOG_TRUST === ''
+        ? DEFAULT_CATALOG_TRUST
+        : env.CATALOG_TRUST === 'true',
   };
 }
 
@@ -267,13 +276,20 @@ export function evaluatePaymentGuards({
   requirePrivateKey = false,
   requireSigner = false,
   signerAvailable = false,
+  catalogUrls = null, // Set<string> | null。カタログ信頼用に呼び出し側が解決した掲載 URL 集合。
 }) {
   const reasons = [];
   const parsedUrl = parseHttpUrl(url, 'url');
   if (parsedUrl === null) {
     reasons.push(REASONS.invalidUrl);
-  } else if (!config.allowedHosts.includes(parsedUrl.hostname.toLowerCase())) {
-    reasons.push(REASONS.hostNotAllowed);
+  } else {
+    const hostAllowed = config.allowedHosts.includes(parsedUrl.hostname.toLowerCase());
+    // カタログ信頼はホストでなく **URL 完全一致** — allowlist より狭い単位で許可する。
+    const catalogListed =
+      config.catalogTrust && catalogUrls instanceof Set && catalogUrls.has(parsedUrl.toString());
+    if (!hostAllowed && !catalogListed) {
+      reasons.push(REASONS.hostNotAllowed);
+    }
   }
 
   const acceptValidation = validateAcceptForPayment(accept, url);
