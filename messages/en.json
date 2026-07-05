@@ -2087,6 +2087,7 @@
     "tryStep3": "The JSON unlocks for 1 JPYC plus a 1 JPYC fee, 2 JPYC total.",
     "tryCurlLabel": "402 challenge",
     "tryRawLink": "buyer script raw",
+    "showSnippet": "Snippet",
     "mcpTitle": "Pay from an agent (MCP)",
     "mcpSubtitle": "Add the buyer MCP to Claude etc. — it searches, quotes, and pays in JPYC autonomously.",
     "mcpNote": "Default guards: 10 JPYC per call, 100 JPYC per session, open-pay.jp only. Use a small dedicated wallet (or SIGNER_MODE=steward to keep the key out of the process)."

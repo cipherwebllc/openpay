@@ -57,6 +57,7 @@ type OwnedResource = {
   priceJpyc: string;
   category: string;
   payTo: string;
+  paywallSnippet?: string;
 };
 
 const EMPTY_FORM = { url: '', description: '', priceJpyc: '', category: '', payTo: '' };
@@ -107,6 +108,8 @@ export function X402DiscoveryView() {
   const [notice, setNotice] = useState<'updated' | 'deleted' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // 登録時 1 回きりだったスニペット表示を owner 一覧から再表示するためのトグル。
+  const [snippetOpenId, setSnippetOpenId] = useState<string | null>(null);
   // 出品の正当性表明 (新規登録のみ必須・編集では不要)。送信成功でリセット。
   const [attested, setAttested] = useState(false);
   // コピー済みフィードバック (key 単位・1.5s でリセット)。
@@ -539,6 +542,25 @@ export function X402DiscoveryView() {
                   url: r.url,
                   copyKey: `owned-${r.id}`,
                 })}
+                {snippetOpenId === r.id && r.paywallSnippet ? (
+                  <div className="relative mt-3 border-t border-slate-100 pt-3">
+                    <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 pr-10 text-xs leading-relaxed text-slate-100">
+                      {r.paywallSnippet}
+                    </pre>
+                    <button
+                      type="button"
+                      onClick={() => copyText(`owned-snippet-${r.id}`, r.paywallSnippet ?? '')}
+                      className="absolute right-2 top-5 rounded-md bg-slate-700 p-1.5 text-slate-200 hover:bg-slate-600"
+                      aria-label={copiedKey === `owned-snippet-${r.id}` ? t('copied') : t('copy')}
+                    >
+                      {copiedKey === `owned-snippet-${r.id}` ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" aria-hidden />
+                      )}
+                    </button>
+                  </div>
+                ) : null}
                 {confirmDeleteId === r.id ? (
                   <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
                     <span className="text-sm text-slate-600">{t('deleteConfirm')}</span>
@@ -559,6 +581,13 @@ export function X402DiscoveryView() {
                   </div>
                 ) : (
                   <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setSnippetOpenId(snippetOpenId === r.id ? null : r.id)}
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t('showSnippet')}
+                    </button>
                     <button
                       type="button"
                       onClick={() => onEdit(r)}
