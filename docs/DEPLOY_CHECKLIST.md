@@ -1181,7 +1181,7 @@ forwarderRecover を mock しているため、**実 on-chain 分割の実証は
 ## §14 x402 facilitator (JPYC 都度課金) go-live SOP
 
 AI エージェント向け x402 (HTTP 402) ファシリテーター + 公開カタログ (discovery)。買い手上乗せ手数料
-max(2 JPYC, 1%) を**非カストディ**に forwarder 分割 (seller = 表示額・feeReceiver = 手数料)。settle は LIVE の
+max(1 JPYC, 1%) を**非カストディ**に forwarder 分割 (seller = 表示額・feeReceiver = 手数料)。settle は LIVE の
 recover (`lib/relay/forwarderSettleService`) と同一コアを再利用。詳細は memory:project_x402_facilitator。
 料率の真実点は `lib/x402/facilitatorConfig.ts` (legal `DISCLOSED_X402_FEE` フェンス)。対象 chain は
 Polygon (mainnet) / Amoy (testnet)。
@@ -1195,7 +1195,7 @@ Polygon (mainnet) / Amoy (testnet)。
 ### §14.2 go-live 手順 (順序厳守)
 1. **先に testnet 実機 E2E (必須・§14.4)**。通すまで mainnet 点灯しない。
 2. **開示の同梱**: `lib/news.ts` の x402 ファシリテーター手数料お知らせ (施行日 2026-06-28・
-   `DISCLOSED_X402_FEE` bps=100 / floor=2 JPYC) がリリースに含まれること。env 料率を変えるなら起動時
+   `DISCLOSED_X402_FEE` bps=100 / floor=1 JPYC) がリリースに含まれること。env 料率を変えるなら起動時
    `x402.facilitator.fee_disclosure_divergence` warn が出ないよう本文も改定する。
 3. `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` 設定済 (mainnet 未設定は build throw)。手数料の受領先。
 4. `X402_PAY_TO_ADDRESS` 設定済。first-party resource (`/api/paid/demo`, `/api/paid/stores`) の seller 受領先。
@@ -1231,7 +1231,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 4. **receipt**: settle 応答の receipt を `/api/facilitator/verify-receipt` で検証 → `valid:true`・
    signer = `/supported` の receiptSigner。
 5. **first-party demo**: `scripts/x402-buyer-example.mjs` を `BUYER_PRIVATE_KEY=... RESOURCE_URL=https://open-pay.jp/api/paid/demo node ...`
-   で実行し、1 JPYC + 手数料 2 JPYC の unlock と `X-PAYMENT-RESPONSE` を確認。
+   で実行し、1 JPYC + 手数料 1 JPYC の unlock と `X-PAYMENT-RESPONSE` を確認。
 6. **モデレーション**: 無料公開 URL を登録 → 400 `resource_not_gated`。正当性表明なし → `attestation_required`。
 7. **owner-auth**: 他人の resource を PATCH/DELETE → 403。
    ※ Amoy 1 周は本リリース準備中に実施済 (register→discover→settle→receipt verify)。点灯前に再確認。

@@ -23,13 +23,13 @@ afterEach(() => {
 });
 
 describe('lib/x402/fee', () => {
-  it('既定 (bps=100 / floor=2 JPYC): 小口は floor 支配・大口は 1%', async () => {
+  it('既定 (bps=100 / floor=1 JPYC): 小口は floor 支配・大口は 1%', async () => {
     const { x402FeeValue } = await import('@/lib/x402/fee');
     expect(x402FeeValue(0n)).toBe(0n); // price<=0 は 0
     expect(x402FeeValue(-5n)).toBe(0n);
-    expect(x402FeeValue(JPYC(1n))).toBe(JPYC(2n)); // 1% of ¥1 < floor → 2 JPYC
-    expect(x402FeeValue(JPYC(200n))).toBe(JPYC(2n)); // 1% of ¥200 = 2 = floor (境界)
-    expect(x402FeeValue(JPYC(201n))).toBe(2010000000000000000n); // 201×1% = 2.01 JPYC > floor
+    expect(x402FeeValue(JPYC(1n))).toBe(JPYC(1n)); // 1% of ¥1 < floor → 1 JPYC
+    expect(x402FeeValue(JPYC(100n))).toBe(JPYC(1n)); // 1% of ¥100 = 1 = floor (境界)
+    expect(x402FeeValue(JPYC(101n))).toBe(1010000000000000000n); // 101×1% = 1.01 JPYC > floor
     expect(x402FeeValue(JPYC(1000n))).toBe(JPYC(10n)); // 1% of ¥1000 = 10 JPYC
   });
 
@@ -44,14 +44,14 @@ describe('lib/x402/fee', () => {
   it('bps=0 でも floor は徴収する (max(floor, 0))', async () => {
     process.env.X402_FEE_BPS = '0';
     const { x402FeeValue } = await import('@/lib/x402/fee');
-    expect(x402FeeValue(JPYC(1000n))).toBe(JPYC(2n));
+    expect(x402FeeValue(JPYC(1000n))).toBe(JPYC(1n));
   });
 
-  it('floor=0/不正は既定 2 JPYC に倒れ feeValue==0 を防ぐ', async () => {
+  it('floor=0/不正は既定 1 JPYC に倒れ feeValue==0 を防ぐ', async () => {
     process.env.X402_FEE_FLOOR_JPYC = '0';
     process.env.X402_FEE_BPS = '0';
     const { x402FeeValue } = await import('@/lib/x402/fee');
-    expect(x402FeeValue(JPYC(1n))).toBe(JPYC(2n));
+    expect(x402FeeValue(JPYC(1n))).toBe(JPYC(1n));
     expect(x402FeeValue(JPYC(1n)) > 0n).toBe(true);
   });
 

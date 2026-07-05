@@ -300,7 +300,7 @@ describe('X402DiscoveryView', () => {
       configurable: true,
     });
     renderView();
-    fireEvent.click(await screen.findByText('3円で試す (5分)'));
+    fireEvent.click(await screen.findByText('2円で試す (5分)'));
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
     const copied = writeText.mock.calls.map((call) => String(call[0]));

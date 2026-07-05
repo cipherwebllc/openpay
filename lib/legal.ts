@@ -108,7 +108,7 @@ export const LEGAL_ENTITY = {
   //   (売り手=リソース登録者は表示額をそのまま受領)・ノンカストディ (当社は売上を預からず、利用料部分のみ
   //   決済と同一 tx 内で当社指定ウォレットへ分割)。当社が肩代わりする gas は本利用料に含む。OpenPay 利用料
   //   (relay) / モバイル注文システム利用料とは独立の別対価で、x402 経由の決済には重複適用しない。SOT は
-  //   DISCLOSED_X402_FEE (= 100bps / 2 JPYC) と一致。施行日は x402FacilitatorFeeEffectiveDate (2026-06-28)
+  //   DISCLOSED_X402_FEE (= 100bps / 1 JPYC。2026-07-05 改定で下限 2→1 JPYC) と一致。施行日は x402FacilitatorFeeEffectiveDate (2026-06-28)
   //   で別管理し、機能提供開始 (NEXT_PUBLIC_ENABLE_X402_FACILITATOR 点灯) まで実際の徴収は発生しない (新規・
   //   任意の付加機能ゆえ既存取引に遡及しない)。
   termsEffectiveDate: '2026-06-13',
@@ -257,7 +257,7 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
 // ⚠️ 変更する = 開示の変更ゆえ、必ず本文改定 (新「改定」エントリ) + フェンス更新を伴わなければならない。
 export const DISCLOSED_X402_FEE = {
   bps: 100, // 1%
-  floorJpyc: 2, // 下限 2 JPYC
+  floorJpyc: 1, // 下限 1 JPYC (2026-07-05 改定で 2→1。実測 settle ガス ~0.5 円の 2 倍を確保しつつマイクロ決済の割高感を低減)
 } as const;
 
 // 実 x402 料率 (env 由来・lib/x402/facilitatorConfig.ts) が開示済みの数値 (DISCLOSED_X402_FEE) と乖離して

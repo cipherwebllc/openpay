@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'x402-fee-floor-2026-07-05',
+    date: '2026-07-05',
+    category: 'pricing',
+    title: {
+      ja: 'x402 ファシリテーター利用料の下限を 2 JPYC から 1 JPYC に引き下げました',
+      en: 'x402 facilitator fee minimum lowered from 2 JPYC to 1 JPYC',
+    },
+    body: {
+      ja: 'x402 ファシリテーター利用料 (決済額の 1%・下限あり) の下限を、2 JPYC から 1 JPYC に引き下げました。2026-07-05 以降の決済に適用します (お客様有利の改定のため即日適用)。料率 1% と、買い手が表示価格に上乗せしてお支払いになる方式は変わりません。\n下限は、当社がオンチェーン精算のガス代を実費負担するために設けているもので、実測コストに基づいて見直しました。\n詳しくは利用規約・特定商取引法に基づく表記をご確認ください。',
+      en: 'The minimum of the x402 facilitator fee (1% of the payment, with a floor) has been lowered from 2 JPYC to 1 JPYC, effective for payments on and after 2026-07-05 (applied immediately as the revision favors payers). The 1% rate and the buyer-side surcharge model are unchanged.\nThe floor exists because we bear the actual on-chain settlement gas; it has been revised based on measured cost.\nSee the Terms of Service and the Specified Commercial Transactions Act notice for details.',
+    },
+    link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
+  },
+  {
     id: 'x402-facilitator-launch-2026-06-28',
     date: '2026-06-28',
     category: 'pricing',
@@ -42,8 +56,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: 'x402 facilitator (JPYC per-request billing for AI agents) is live',
     },
     body: {
-      ja: 'AI エージェントや開発者が、有料 API・コンテンツに JPYC 建てで都度課金できる x402 ファシリテーターを公開しました。登録したリソースは公開カタログ（/discovery・/api/discovery）から発見でき、エージェントはそのまま JPYC で支払えます。\nx402 ファシリテーター利用料は決済額の 1%・最低 2 JPYC で、お支払いになる側（買い手）が表示価格に上乗せします（出品者は表示額をそのまま受け取ります）。商品代金本体は出品者のウォレットへ直接着金し、当社は売上を預かりません（ノンカストディ）。当社が肩代わりするガス代も本利用料に含まれ、各決済には OpenPay 署名の受領証明を発行します。本利用料は既存の OpenPay 利用料・モバイル注文システム利用料とは別個で、x402 経由の決済にのみ適用します。\n詳しくは利用規約・特定商取引法に基づく表記をご確認ください。',
-      en: 'The x402 facilitator — letting AI agents and developers pay paid APIs and content per request in JPYC — is now live. Registered resources are discoverable from the public catalog (/discovery, /api/discovery), and agents can pay directly in JPYC.\nThe x402 facilitator fee is 1% of the payment (2 JPYC minimum), added on the buyer side (the seller receives the listed amount in full). The principal settles directly to the seller wallet; we do not custody sales (non-custodial). Gas we sponsor is included in this fee, and each settlement is issued an OpenPay-signed receipt. This fee is separate from the existing OpenPay usage fee and the mobile-ordering system fee, and applies only to x402 payments.\nSee the Terms of Service and the Specified Commercial Transactions Act notice for details.',
+      ja: 'AI エージェントや開発者が、有料 API・コンテンツに JPYC 建てで都度課金できる x402 ファシリテーターを公開しました。登録したリソースは公開カタログ（/discovery・/api/discovery）から発見でき、エージェントはそのまま JPYC で支払えます。\nx402 ファシリテーター利用料は決済額の 1%・最低 2 JPYC で、お支払いになる側（買い手）が表示価格に上乗せします（出品者は表示額をそのまま受け取ります）。商品代金本体は出品者のウォレットへ直接着金し、当社は売上を預かりません（ノンカストディ）。当社が肩代わりするガス代も本利用料に含まれ、各決済には OpenPay 署名の受領証明を発行します。本利用料は既存の OpenPay 利用料・モバイル注文システム利用料とは別個で、x402 経由の決済にのみ適用します。\n※ 2026-07-05 の改定により、下限は 2 JPYC から 1 JPYC に引き下げられました。最新のお知らせ・利用規約をご確認ください。\n詳しくは利用規約・特定商取引法に基づく表記をご確認ください。',
+      en: 'The x402 facilitator — letting AI agents and developers pay paid APIs and content per request in JPYC — is now live. Registered resources are discoverable from the public catalog (/discovery, /api/discovery), and agents can pay directly in JPYC.\nThe x402 facilitator fee is 1% of the payment (2 JPYC minimum), added on the buyer side (the seller receives the listed amount in full). The principal settles directly to the seller wallet; we do not custody sales (non-custodial). Gas we sponsor is included in this fee, and each settlement is issued an OpenPay-signed receipt. This fee is separate from the existing OpenPay usage fee and the mobile-ordering system fee, and applies only to x402 payments.\nNote: the minimum was lowered from 2 JPYC to 1 JPYC in the 2026-07-05 revision — see the latest news and Terms.\nSee the Terms of Service and the Specified Commercial Transactions Act notice for details.',
     },
     link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
   },
