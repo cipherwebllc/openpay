@@ -35,6 +35,7 @@ type Guards = {
     maxTotalJpyc?: string | number;
     requireMaxTotal?: boolean;
     requirePrivateKey?: boolean;
+    catalogUrls?: Set<string> | null;
   }) => GuardResult;
   safeErrorMessage: (
     error: unknown,
@@ -345,5 +346,54 @@ describe('packages/x402-mcp guards', () => {
     expect(message).not.toContain(RAW_SIGNATURE);
     expect(message).toContain('[redacted_private_key]');
     expect(message).toContain('[redacted_signature]');
+  });
+
+  describe('catalog trust (カタログ掲載 URL の支払い許可)', () => {
+    const LISTED = 'https://aegis-ai.xyz/api/d2a/briefing-jpyc';
+
+    it('カタログ掲載 URL (完全一致) は ALLOWED_HOSTS 外でも host_not_allowed にならない', async () => {
+      const guards = await loadGuards();
+      const r = guards.evaluatePaymentGuards({
+        url: LISTED,
+        accept: accept({ resource: LISTED }),
+        config: guards.readMoneyConfig(baseEnv()),
+        catalogUrls: new Set([LISTED]),
+      });
+      expect(r.reasons).not.toContain(guards.REASONS.hostNotAllowed);
+    });
+
+    it('掲載はホスト単位でなく URL 単位 — 同ホストの別パスは拒否', async () => {
+      const guards = await loadGuards();
+      const other = 'https://aegis-ai.xyz/api/other';
+      const r = guards.evaluatePaymentGuards({
+        url: other,
+        accept: accept({ resource: other }),
+        config: guards.readMoneyConfig(baseEnv()),
+        catalogUrls: new Set([LISTED]),
+      });
+      expect(r.reasons).toContain(guards.REASONS.hostNotAllowed);
+    });
+
+    it('catalogUrls=null (カタログ取得失敗) は従来どおり ALLOWED_HOSTS のみ = fail-close', async () => {
+      const guards = await loadGuards();
+      const r = guards.evaluatePaymentGuards({
+        url: LISTED,
+        accept: accept({ resource: LISTED }),
+        config: guards.readMoneyConfig(baseEnv()),
+        catalogUrls: null,
+      });
+      expect(r.reasons).toContain(guards.REASONS.hostNotAllowed);
+    });
+
+    it('CATALOG_TRUST=false で無効化 (掲載されていても拒否)', async () => {
+      const guards = await loadGuards();
+      const r = guards.evaluatePaymentGuards({
+        url: LISTED,
+        accept: accept({ resource: LISTED }),
+        config: guards.readMoneyConfig(baseEnv({ CATALOG_TRUST: 'false' })),
+        catalogUrls: new Set([LISTED]),
+      });
+      expect(r.reasons).toContain(guards.REASONS.hostNotAllowed);
+    });
   });
 });
