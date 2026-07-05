@@ -55,6 +55,46 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'order_menu',
+    description:
+      "Read an OpenPay @handle shop's public mobile-order menu (item ids, names, prices). No payment.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string' },
+      },
+      required: ['handle'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'order_quote',
+    description:
+      'Build an agent-order for an OpenPay @handle shop and fetch its x402 challenge (price, fee, total, guard reasons). This does not pay — pay the returned url with x402_pay. Note: an order total often exceeds the default MAX_PER_CALL_JPYC (10 JPYC); raise it to allow payment.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              qty: { type: 'number' },
+            },
+            required: ['id', 'qty'],
+            additionalProperties: false,
+          },
+        },
+        table: { type: 'string' },
+        pickupAt: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+      },
+      required: ['handle', 'items'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function isObject(value) {
@@ -198,6 +238,79 @@ export function createToolRuntime({
     }
   }
 
+  // agent-order は discovery と同一 origin (config.discoveryUrl の origin) に対して menu/pay を叩く。
+  function baseOrigin() {
+    return new URL(config.discoveryUrl).origin;
+  }
+
+  // カート [{id,qty}] → base64url(JSON)。server の lib/agentOrder.decodeAgentCart と同形 (単一情報源で
+  // ないため両者を base64url(JSON [{id,qty}]) 契約で揃える)。@handle は正規化 (server が normalizeHandle
+  // でストリップ・小文字化するため、resource 照合を通すには MCP も同じ形で送る)。
+  function encodeCart(items) {
+    const json = JSON.stringify(items.map((i) => ({ id: i.id, qty: i.qty })));
+    return Buffer.from(json, 'utf8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+
+  function normalizeHandle(raw) {
+    return String(raw).trim().replace(/^@+/, '').toLowerCase();
+  }
+
+  // 正規順 (h, cart, table, pickupAt) の pay URL。server の canonicalResourceUrl と同順・同エンコード
+  // (URLSearchParams) で組み、accepts.resource === この url を成立させる (guard の resourceMismatch 回避)。
+  function buildOrderPayUrl(handle, items, table, pickupAt) {
+    const params = new URLSearchParams();
+    params.set('h', handle);
+    params.set('cart', encodeCart(items));
+    if (typeof table === 'string' && table.length > 0) params.set('table', table);
+    if (pickupAt !== undefined && pickupAt !== null && String(pickupAt).length > 0) {
+      params.set('pickupAt', String(pickupAt));
+    }
+    return `${baseOrigin()}/api/agent-order/pay?${params.toString()}`;
+  }
+
+  async function orderMenu(args) {
+    const input = requireArgsObject(args);
+    if (typeof input.handle !== 'string' || input.handle.length === 0) {
+      throw new Error('handle is required');
+    }
+    const handle = normalizeHandle(input.handle);
+    const url = `${baseOrigin()}/api/agent-order/menu?h=${encodeURIComponent(handle)}`;
+    const res = await fetchImpl(url, { headers: { accept: 'application/json' } });
+    const body = await readJson(res);
+    if (!res.ok || !isObject(body) || !Array.isArray(body.items)) {
+      return { ok: false, status: res.status, error: 'menu_unavailable' };
+    }
+    return { ok: true, ...body };
+  }
+
+  async function orderQuote(args) {
+    const input = requireArgsObject(args);
+    if (typeof input.handle !== 'string' || input.handle.length === 0) {
+      throw new Error('handle is required');
+    }
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+      throw new Error('items must be a non-empty array');
+    }
+    const items = input.items.map((it) => {
+      if (!isObject(it) || typeof it.id !== 'string' || it.id.length === 0) {
+        throw new Error('each item needs a string id');
+      }
+      const qty = Number(it.qty);
+      if (!Number.isInteger(qty) || qty < 1) {
+        throw new Error('each item needs an integer qty >= 1');
+      }
+      return { id: it.id, qty };
+    });
+    const handle = normalizeHandle(input.handle);
+    const url = buildOrderPayUrl(handle, items, input.table, input.pickupAt);
+    // 支払いは既存 x402_pay {url, maxTotalJpyc} で行う (ガード/カタログ信頼/Steward 署名はそのまま)。
+    return x402Quote({ url });
+  }
+
   async function discoverySearch(args) {
     const input = requireArgsObject(args);
     const query = typeof input.query === 'string' ? input.query.toLowerCase() : '';
@@ -310,6 +423,8 @@ export function createToolRuntime({
       if (name === 'discovery_search') return textResult(await discoverySearch(args));
       if (name === 'x402_quote') return textResult(await x402Quote(args));
       if (name === 'x402_pay') return textResult(await x402Pay(args));
+      if (name === 'order_menu') return textResult(await orderMenu(args));
+      if (name === 'order_quote') return textResult(await orderQuote(args));
       return textResult({ ok: false, error: `unknown tool: ${name}` }, true);
     } catch (error) {
       return textResult(
@@ -327,5 +442,7 @@ export function createToolRuntime({
     discoverySearch,
     x402Quote,
     x402Pay,
+    orderMenu,
+    orderQuote,
   };
 }
