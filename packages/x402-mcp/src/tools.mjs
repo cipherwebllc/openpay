@@ -71,7 +71,7 @@ export const TOOLS = [
   {
     name: 'order_quote',
     description:
-      'Build an agent-order for an OpenPay @handle shop and fetch its x402 challenge (price, fee, total, guard reasons). This does not pay — pay the returned url with x402_pay. Note: an order total often exceeds the default MAX_PER_CALL_JPYC (10 JPYC); raise it to allow payment.',
+      'Build an agent-order for an OpenPay @handle shop and fetch its x402 challenge (price, fee, total, guard reasons). Items with options: pass items[].options (ids from order_menu; required groups mandatory). This does not pay — pay the returned url with x402_pay. Note: an order total often exceeds the default MAX_PER_CALL_JPYC (10 JPYC); raise it to allow payment.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -83,6 +83,17 @@ export const TOOLS = [
             properties: {
               id: { type: 'string' },
               qty: { type: 'number' },
+              options: {
+                description:
+                  'Option selections: {groupId: choiceId} (single) / {groupId: [choiceIds]} (multi). Ids from order_menu; required groups mandatory.',
+                type: 'object',
+                additionalProperties: {
+                  oneOf: [
+                    { type: 'string' },
+                    { type: 'array', items: { type: 'string' } },
+                  ],
+                },
+              },
             },
             required: ['id', 'qty'],
             additionalProperties: false,
@@ -247,7 +258,13 @@ export function createToolRuntime({
   // ないため両者を base64url(JSON [{id,qty}]) 契約で揃える)。@handle は正規化 (server が normalizeHandle
   // でストリップ・小文字化するため、resource 照合を通すには MCP も同じ形で送る)。
   function encodeCart(items) {
-    const json = JSON.stringify(items.map((i) => ({ id: i.id, qty: i.qty })));
+    const json = JSON.stringify(
+      items.map((i) => ({
+        id: i.id,
+        qty: i.qty,
+        ...(i.options && typeof i.options === 'object' ? { options: i.options } : {}),
+      })),
+    );
     return Buffer.from(json, 'utf8')
       .toString('base64')
       .replace(/\+/g, '-')
