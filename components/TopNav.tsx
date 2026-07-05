@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import type { Locale } from '@/i18n';
-import { NAV_ITEMS, pathMatches, pathRestForLocale } from './navItems';
+import { DESKTOP_NAV_ITEMS, pathMatches, pathRestForLocale } from './navItems';
 
 export function TopNav() {
   const pathname = usePathname();
@@ -20,7 +20,7 @@ export function TopNav() {
       aria-label="primary navigation"
       className="hidden items-center gap-1 text-sm font-medium md:flex"
     >
-      {NAV_ITEMS.map((item) => {
+      {DESKTOP_NAV_ITEMS.map((item) => {
         const active = pathMatches(rest, item.href);
         return (
           <Link
