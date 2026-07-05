@@ -101,11 +101,15 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
 
 // モデレーション probe をモック (実 fetch を避ける)。既定 false = ゲート済扱いで通す。
 // isPrivateHost は parseResourceInput が使うため false (テスト URL は public 扱い) を返す。
-const { mockFreelyAccessible } = vi.hoisted(() => ({
+const { mockFreelyAccessible, mockProbeGate } = vi.hoisted(() => ({
   mockFreelyAccessible: vi.fn(async () => false),
+  mockProbeGate: vi.fn(
+    async (): Promise<'openpay' | 'foreign' | 'unknown'> => 'unknown',
+  ),
 }));
 vi.mock('@/lib/x402/moderation', () => ({
   isFreelyAccessible: mockFreelyAccessible,
+  probeGate: mockProbeGate,
   isPrivateHost: () => false,
 }));
 
@@ -188,6 +192,8 @@ beforeEach(() => {
   mockRequireSession.mockReset();
   mockFreelyAccessible.mockReset();
   mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
+  mockProbeGate.mockReset();
+  mockProbeGate.mockResolvedValue('unknown'); // 既定: 判定不能 = fail-open (通す)
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -223,7 +229,10 @@ describe('x402 facilitator /resources', () => {
     expect(body.resource.url).toBe(validBody.url);
     expect(body.resource.priceJpyc).toBe('1000');
     expect(body.resource.active).toBe(true);
-    expect(body.paywallSnippet).toContain('createJpycPaymentRequirements');
+    // 自己完結ゲート: リポ内 import を含まず、verify/settle 転送を含む
+    expect(body.paywallSnippet).not.toContain('@/lib');
+    expect(body.paywallSnippet).toContain("'verify'");
+    expect(body.paywallSnippet).toContain(validBody.url);
   });
 
   it('無料公開 URL (probe が 200) → 400 resource_not_gated', async () => {
@@ -565,6 +574,19 @@ describe('x402 /discovery', () => {
     const item = body.items.find((i) => i.priceJpyc === 'abc');
     expect(item).toBeTruthy();
     expect(item?.accepts).toEqual([]); // 不正 price は accepts 生成不能 → 空
+  });
+
+  it('foreign ゲート (USDC 等の 402) の URL は 422 gate_not_openpay + スニペット同梱で拒否', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockProbeGate.mockResolvedValueOnce('foreign');
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; paywallSnippet?: string };
+    expect(body.error).toBe('gate_not_openpay');
+    // 鶏卵解決: 拒否応答にコピペで動くゲートを同梱する
+    expect(body.paywallSnippet).toContain(validBody.url);
+    expect(body.paywallSnippet).toContain("'verify'");
   });
 
   it('KV 空でも first-party resource 2 件を先頭に返す', async () => {

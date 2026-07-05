@@ -7,7 +7,8 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { logger } from '@/lib/logger';
-import { isFreelyAccessible } from '@/lib/x402/moderation';
+import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
+import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
 import {
   parseResourceInput,
   createResource,
@@ -73,6 +74,20 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'resource_not_gated' }, { status: 400 });
   }
 
+  // ゲート方式の検証: 402 は返すが accepts が OpenPay (forwarder-split/JPYC) でない URL は、
+  // 「JPYC で払える」というカタログの約束を守れないため掲載しない (他 facilitator ゲートの
+  // ミスマッチ掲載を防ぐ・実加盟店の USDC ゲート登録で発覚)。スニペットを同梱して返すので、
+  // 設置 → 再登録で解決できる (判定不能 'unknown' は従来どおり fail-open)。
+  if ((await probeGate(parsed.input.url)) === 'foreign') {
+    return NextResponse.json(
+      {
+        error: 'gate_not_openpay',
+        paywallSnippet: buildPaywallSnippet(parsed.input.url),
+      },
+      { status: 422 },
+    );
+  }
+
   const id = crypto.randomUUID();
   const created = await createResource(parsed.input, id, Date.now());
   if (!created.ok) {
@@ -86,19 +101,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const resource = created.resource;
 
-  // paywall スニペット例 (resource server が 402 で返す accepts の作り方)。
-  const amount = (BigInt(resource.priceJpyc) * 10n ** 18n).toString();
-  const paywallSnippet = [
-    '// OpenPay x402 paywall (例): 未払いリクエストに 402 + 下記 accepts を返し、',
-    '// X-PAYMENT を /api/facilitator/{verify,settle} へ転送する。',
-    "import { createJpycPaymentRequirements } from '@/lib/x402/requirements';",
-    'const accepts = createJpycPaymentRequirements({',
-    `  amount: ${amount}n, // ${resource.priceJpyc} JPYC`,
-    `  payTo: '${resource.payTo}',`,
-    `  resource: '${resource.url}',`,
-    `  description: ${JSON.stringify(resource.description)},`,
-    '});',
-  ].join('\n');
+  // paywall スニペット: 外部サーバーがコピペで動く自己完結ゲート (旧: リポ内 import 前提の
+  // 骨子例 → 実加盟店で動かず差し替え)。
+  const paywallSnippet = buildPaywallSnippet(resource.url);
 
   return NextResponse.json({ resource, paywallSnippet }, { status: 201 });
 }

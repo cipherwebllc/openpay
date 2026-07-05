@@ -15,7 +15,8 @@ import {
   deactivateResource,
   getResource,
 } from '@/lib/x402/registry';
-import { isFreelyAccessible } from '@/lib/x402/moderation';
+import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
+import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
 
 export const runtime = 'nodejs';
 export const maxDuration = 15;
@@ -61,6 +62,17 @@ export async function PATCH(
       url: parsed.input.url,
     });
     return NextResponse.json({ error: 'resource_not_gated' }, { status: 400 });
+  }
+
+  // 新規登録と同じゲート方式検証 (URL を他 facilitator ゲートへ差し替えるミスマッチを防ぐ)。
+  if (existing && (await probeGate(parsed.input.url)) === 'foreign') {
+    return NextResponse.json(
+      {
+        error: 'gate_not_openpay',
+        paywallSnippet: buildPaywallSnippet(parsed.input.url),
+      },
+      { status: 422 },
+    );
   }
 
   const result = await updateResource(id, session.address, parsed.input);
