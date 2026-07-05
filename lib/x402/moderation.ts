@@ -101,6 +101,83 @@ export async function isFreelyAccessible(
   }
 }
 
+// 登録 URL のゲートが「OpenPay の JPYC accepts を返す」実装かを判定する。
+//   'openpay' = 402 の accepts に extra.openpay.mode === 'forwarder-split' がある (掲載可)
+//   'foreign' = 402 は返すが accepts が他 facilitator (USDC/Base 等)・または解釈不能 (掲載拒否 —
+//               「JPYC で払える」というカタログの約束を守れないため)
+//   'unknown' = 200/402 以外・ネットワーク失敗・private 解決など判定不能 (fail-open で掲載可 —
+//               サーバー到達性は保証しない従来意味論を維持)
+// v1 (JSON body) と v2 (PAYMENT-REQUIRED ヘッダ) の両輸送を見る。
+export type GateProbeResult = 'openpay' | 'foreign' | 'unknown';
+
+function acceptsLookLikeOpenPay(accepts: unknown): boolean {
+  if (!Array.isArray(accepts)) return false;
+  return accepts.some((a) => {
+    if (typeof a !== 'object' || a === null) return false;
+    const extra = (a as { extra?: unknown }).extra;
+    if (typeof extra !== 'object' || extra === null) return false;
+    const openpay = (extra as { openpay?: unknown }).openpay;
+    return (
+      typeof openpay === 'object' &&
+      openpay !== null &&
+      (openpay as { mode?: unknown }).mode === 'forwarder-split'
+    );
+  });
+}
+
+export async function probeGate(
+  url: string,
+  opts: { fetchImpl?: typeof fetch; lookup?: LookupFn } = {},
+): Promise<GateProbeResult> {
+  const fetchImpl = opts.fetchImpl ?? (defaultFetch as unknown as typeof fetch);
+  const lookup = opts.lookup ?? defaultLookup;
+
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return 'unknown';
+  }
+  try {
+    const addrs = await lookup(hostname);
+    if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+
+  try {
+    const res = await fetchImpl(url, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      headers: { 'user-agent': 'OpenPay-x402-facilitator-moderation/1.0' },
+    });
+    if (res.status !== 402) return 'unknown';
+    // v2: PAYMENT-REQUIRED ヘッダ (base64 JSON)
+    const v2Header = res.headers?.get?.('payment-required');
+    if (v2Header) {
+      try {
+        const decoded = JSON.parse(Buffer.from(v2Header, 'base64').toString('utf8')) as {
+          accepts?: unknown;
+        };
+        if (acceptsLookLikeOpenPay(decoded.accepts)) return 'openpay';
+      } catch {
+        /* v2 ヘッダが読めなければ body 判定へ */
+      }
+    }
+    // v1: JSON body
+    try {
+      const body = (await res.json()) as { accepts?: unknown };
+      if (acceptsLookLikeOpenPay(body.accepts)) return 'openpay';
+    } catch {
+      /* body が JSON でない → foreign 扱い (下) */
+    }
+    return 'foreign';
+  } catch {
+    return 'unknown';
+  }
+}
+
 // IPv4 の先頭 2 オクテットで private/loopback/link-local/CGNAT/this-host を判定 (範囲は先頭 2 octet で確定)。
 function isPrivateIpv4(a: number, b: number): boolean {
   if (a === 0 || a === 127 || a === 10) return true; // this-host / loopback / private
