@@ -13,6 +13,7 @@ npm run e2e:local        # Playwright (ローカル環境依存 → 下記「e2e
 npm run build            # next build (page export 検査を含む・下記参照)
 node scripts/audit-gate.mjs   # CI と同一の npm audit 判定
 node scripts/dev-shot.mjs     # dev/prod サーバの実機スクショ (mobile/desktop・print 対応)
+node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--once/--timeout 分)
 ```
 
 ## 不変ルール（違反すると壊れる順）
@@ -31,6 +32,28 @@ node scripts/dev-shot.mjs     # dev/prod サーバの実機スクショ (mobile/
 12. **money-path（relay/settle/fee/order 検証）への変更は「追加のみ」を原則**とし、既存の制御フロー・応答・エラー処理を変えない。post-response 処理は `after()`（next/server）を使う（unawaited promise は serverless で凍結・応答内 await は latency 悪化）。
 13. **防御的プログラミングの基準**（2026-07-04 user 確定）: **意味のない防御は禁止・障害を隣に波及させないための意図的な防御は必須**。禁止 = 起こり得ない状態への保険、エラー握りつぶしによる偽成功（cookie は出すがセッション保存失敗、等）、仕様を曖昧にする fallback。必須 = 付帯処理が本体を巻き込まない隔離 — 例: push/通知/メーターは no-throw で決済本体に波及させない・localStorage/ブラウザ API は既存パターンの try-catch・rate limit ストレージ障害で本体機能を止めない fail-open。防御を書くときは**「何の波及を断つための防御か」をコメントで示す**（示せないならその防御は不要の疑い）。
 14. **手数料・チェーン対応・課金条件を変えたら「開示 3 点セット」を同期**（2026-07-07 user 確定）: ①LP（`messages/` の `Landing.benefitsFee*`/`supportFee*`/FAQ）②法務文書（`lib/legal.ts` の `DISCLOSED_*` 定数 + Terms/免責/特商法）③**`public/llms.txt`**。①②は `tests/app/legal.test.tsx` 等のフェンスが CI で検出するが、**③は静的ファイルでテストフェンスが無い**ため変更時に必ず目視/grep で同期する（放置すると AI 検索・AI エージェントが古い料率を引用し続ける）。
+
+## 自律運転の型（全モデル共通・Fable/Opus/Sonnet/Codex）
+
+**確認なしで進めてよい**（止まると逆に遅い）:
+
+- ブランチ作成・commit・push・PR 作成・CI 監視・検証一式（typecheck/lint/vitest/build/実機スクショ）
+- CI 失敗の真因調査と、意図が変わらない範囲の修正 → 再 push
+- 既知 flaky（掟 2）の diff 無関係確認 → rerun
+- scratchpad への一時ファイル・調査・grep・メモリ更新
+
+**必ず user の明示承認を待つ**（一言でよい）:
+
+- 公開文言の確定（LP・法務・README・llms.txt）— 案は出してよいが merge 前に承認
+- merge の実行（「merge して」を待つ。CI green でも先走らない）
+- flag 点灯・env 変更・deploy・npm publish・外部サービスへの申請/投稿
+- money-path の仕様変更（掟 12 の範囲を超えるもの）
+
+**作業の型**（モデルの記憶力に頼らない）:
+
+- git/gh の状態確認は `コマンド > ファイル` → Read で読む。**自分の記憶や「成功したはず」を根拠にしない**（Fable ですら幻覚した実績あり・2026-07-06）
+- CI 待ちは `node scripts/ci-wait.mjs <PR番号>`（settle まで待って conclusion 一覧を出す・全 SUCCESS で exit 0）→ 出力ファイルを Read → **HEAD 一致と nonSUCCESS=0 を確認してから** merge
+- 迷ったら「最小の可逆な一歩」を選び、不可逆な一歩の前でだけ止まる
 
 ## PR / 検証の型
 
