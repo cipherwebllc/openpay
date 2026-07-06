@@ -254,6 +254,27 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     expect(validateStorefrontParts({ ...good, mode: 'delivery' })).toBeNull();
     expect(validateStorefrontParts({ ...good, feePayer: 'platform' })).toBeNull();
   });
+  it('P2-M: menu item id の重複 → null (qty/cart が id キーゆえ連動して壊れる)', () => {
+    expect(
+      validateStorefrontParts({
+        ...good,
+        menu: [
+          { id: 'a', name: 'A', price: '500' },
+          { id: 'a', name: 'B', price: '800' }, // 同一 id・別名別価格
+        ],
+      }),
+    ).toBeNull();
+    // 別 id なら通る (回帰防止)。
+    expect(
+      validateStorefrontParts({
+        ...good,
+        menu: [
+          { id: 'a', name: 'A', price: '500' },
+          { id: 'b', name: 'B', price: '800' },
+        ],
+      }),
+    ).not.toBeNull();
+  });
   it('menu が空 / 上限超過 → null', () => {
     expect(validateStorefrontParts({ ...good, menu: [] })).toBeNull();
     expect(

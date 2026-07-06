@@ -15,6 +15,10 @@
 //   - createDeal の `{deal:{id}}` レスポンス形・`type:'income'` payload
 // プラン有効な freee で実取込検証するまで、これらは「動くはず」止まり (memory:freee-oauth-siwe-entitlement)。
 
+// P2-P: server 専用モジュール (FREEE_CLIENT_SECRET / FREEE_TOKEN_ENC_KEY を扱う)。'use client' から
+// 誤って import されると build で気づけるよう、他の secret モジュール (lib/push/server 等) と同様に
+// server-only で閉じる。
+import 'server-only';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { FreeeDealBody } from './freeeSync';
 
