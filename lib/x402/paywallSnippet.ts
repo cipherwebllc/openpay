@@ -13,8 +13,8 @@ export function buildPaywallSnippet(resourceUrl: string): string {
 // 使い方: 課金したいハンドラの先頭で await jpycGate(req) を呼び、
 //   - 戻り値が Response ならそれをそのまま返す (未払い 402 / 検証失敗)
 //   - null なら支払い済み — 本来の処理を続行し、レスポンスに receipt ヘッダを付ける
-const OPENPAY = '${ORIGIN}';
-const MY_RESOURCE_URL = '${resourceUrl}'; // /discovery に登録した URL と完全一致させること
+const OPENPAY = ${JSON.stringify(ORIGIN)};
+const MY_RESOURCE_URL = ${JSON.stringify(resourceUrl)}; // /discovery に登録した URL と完全一致させること
 
 let acceptsCache = null;
 let acceptsCachedAt = 0;
