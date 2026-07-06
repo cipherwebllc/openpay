@@ -154,6 +154,30 @@ describe('computeAgentOrder', () => {
     });
   });
 
+  it('options: multi グループに string を渡しても課金・表示される (無音ドロップ回帰・P1-B)', () => {
+    // top は本来 ['egg'] だが string 'egg' を渡す。旧実装は存在確認を通過後 resolveSelection の
+    // picked が [] になり味玉が課金も表示もされず ok:true で静かに成立していた。
+    const res = computeAgentOrder(
+      storefront(OPTION_MENU),
+      [{ id: 'ramen', qty: 1, options: { size: 'reg', top: 'egg' } }],
+      18,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // 900 + 0(reg) + 120(egg) = 1020 JPYC (味玉が正しく課金される)
+    expect(res.totalMinor).toBe(1020n * 10n ** 18n);
+    expect(res.items[0].name).toBe('ラーメン（並・味玉）');
+  });
+
+  it('options: 入力 cartItems を破壊しない (再計算副作用の防止・P1-B 付随)', () => {
+    const cart = [
+      { id: 'ramen', qty: 1, options: { size: ['big'] as string[] } },
+    ];
+    const before = JSON.stringify(cart);
+    computeAgentOrder(storefront(OPTION_MENU), cart, 18);
+    expect(JSON.stringify(cart)).toBe(before); // options が正規化で書き換わっていない
+  });
+
   it('options: required グループ未指定は missing_required_option', () => {
     const res = computeAgentOrder(
       storefront(OPTION_MENU),

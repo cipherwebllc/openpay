@@ -399,7 +399,24 @@ export function createToolRuntime({
     return quoteShape(input.url, res.status, guard);
   }
 
+  // 並行 x402_pay の TOCTOU を塞ぐ: read(session.spentAtomic)→署名→fetch→record の間に await が
+  // 複数あり、複数の pay を同時発火すると各々が更新前の累計を見て MAX_SESSION_JPYC を超過できる。
+  // セッション単位で直列化し、各 pay が直前の pay の record 後に走る (常に最新の累計を見る) ようにする。
+  let payChain = Promise.resolve();
   async function x402Pay(args) {
+    const run = payChain.then(
+      () => x402PayImpl(args),
+      () => x402PayImpl(args),
+    );
+    // 直前の失敗を次の pay に波及させない (結果は run が保持・チェーンは順序保証のみ)。
+    payChain = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  async function x402PayImpl(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
     const res = await fetchImpl(input.url, {

@@ -166,7 +166,8 @@ export function computeAgentOrder(
     // エージェント API は **strict**: 存在しない group/choice id は黙殺せずエラーにする
     // (resolveSelection は UI 向けに不正 id を無視するが、無視すると「トッピングを頼んだつもりで
     // 実は付かず安く払う」不一致が起きる。支払う側が機械なので明示的に弾く)。
-    const sel = cart.options ?? {};
+    // 入力オブジェクトは破壊しない (呼び出し元 cartItems を書き換えると再計算時に副作用が出る)。
+    const sel: OptionSelection = { ...(cart.options ?? {}) };
     for (const [gid, v] of Object.entries(sel)) {
       const group = groups.find((g) => g.id === gid);
       if (!group) return { ok: false, reason: 'unknown_option' };
@@ -176,11 +177,19 @@ export function computeAgentOrder(
           return { ok: false, reason: 'unknown_option' };
         }
       }
-      if (group.type === 'single' && Array.isArray(v) && v.length > 1) {
-        return { ok: false, reason: 'unknown_option' }; // single に複数指定
+      // 型正規化: resolveSelection は single=string / multi=array を期待する。unknown_option 検証は
+      // string を [v] に包んで存在確認するため、**multi グループに string を渡すと存在確認は通るのに
+      // resolveSelection の picked が array 判定で [] になり、選択が課金も表示もされず無音ドロップ**
+      // していた (掟13: strict を謳いながら曖昧に握りつぶす fallback)。検証の chosen 解釈と
+      // resolveSelection の picked 解釈を一致させ、無音ドロップを除去する。
+      if (group.type === 'single') {
+        if (Array.isArray(v)) {
+          if (v.length > 1) return { ok: false, reason: 'unknown_option' }; // single に複数指定
+          sel[gid] = v[0]; // [x] -> x
+        }
+      } else if (typeof v === 'string') {
+        sel[gid] = [v]; // multi に string -> [string] (無音ドロップ防止)
       }
-      // single グループに配列 1 件は string へ正規化 (resolveSelection は single=string を期待)
-      if (group.type === 'single' && Array.isArray(v)) sel[gid] = v[0];
     }
     // required 検証 + 定義順の choice 解決 (checkout UI と同一関数 = 単一情報源)
     const resolved = resolveSelection(groups, sel);
