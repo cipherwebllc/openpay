@@ -4,6 +4,7 @@
 
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { StructuredData } from '@/components/StructuredData';
 import { LandingHero } from '@/components/LandingHero';
 import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingBenefits } from '@/components/LandingBenefits';
@@ -27,6 +28,8 @@ export default async function HomePage({
 
   return (
     <AppShell>
+      {/* SEO/AIEO: SoftwareApplication + FAQPage の JSON-LD (表示 UI なし) */}
+      <StructuredData />
       <LandingHero />
       {/* 接続済み店主のみ mount 後に描画 (未接続/当日データなしは null = LP 不変)。
           Hero 直下・MarketRates の前に置き、Hero を押し下げない (CLS/LCP 保護)。 */}
