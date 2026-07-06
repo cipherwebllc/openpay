@@ -74,7 +74,7 @@ export async function isFreelyAccessible(
 
   let hostname: string;
   try {
-    hostname = new URL(url).hostname;
+    hostname = normalizeHost(new URL(url).hostname); // [ipv6]/末尾ドットを剥がして lookup の fail-open を防ぐ
   } catch {
     return false;
   }
@@ -134,7 +134,7 @@ export async function probeGate(
 
   let hostname: string;
   try {
-    hostname = new URL(url).hostname;
+    hostname = normalizeHost(new URL(url).hostname); // [ipv6]/末尾ドットを剥がして lookup の fail-open を防ぐ
   } catch {
     return 'unknown';
   }
@@ -215,10 +215,21 @@ function expandIpv6(h: string): number[] | null {
   return nums.some((n) => n < 0) ? null : nums;
 }
 
+// URL hostname を lookup / private 判定へ渡す前に正規化する (両 probe 関数と isPrivateHost で一貫)。
+//   - IPv6 リテラルの角括弧を除去 ([::1] → ::1): 角括弧付きのまま lookup すると必ず ENOTFOUND →
+//     probe 関数の catch で fail-open となり、モデレーション層 (無料転売禁止 / foreign ゲート拒否) が
+//     IPv6 ホストで丸ごと無効化される。判定前に必ず剥がす。
+//   - 末尾ドット (FQDN root ラベル。localhost. / 127.0.0.1.) を除去: 剥がさないと isPrivateHost の
+//     localhost/.local/.internal・IPv4 リテラル判定を末尾ドットで素通りでき、private URL 登録ガードを
+//     バイパスできる。実接続は undici Agent の DNS 再検証で止まるが anti-abuse 判定はここで塞ぐ。
+function normalizeHost(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+}
+
 // hostname / IP リテラルが private / loopback / link-local / CGNAT / ULA かを判定 (SSRF ガード)。
 // registry.parseResourceInput (literal 事前ガード)・isFreelyAccessible (早期拒否 + connect 時検証) で使う。
 export function isPrivateHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ''); // [::1] → ::1
+  const h = normalizeHost(hostname.toLowerCase()); // [::1] → ::1 / localhost. → localhost
   if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
 
   // IPv6 リテラル (':' を含む)。展開して mapped-IPv4 / loopback / unspecified / ULA / link-local を判定。

@@ -77,4 +77,13 @@ describe('lib/x402/receipt', () => {
     expect(parseReceipt({ ...baseReceipt, txHash: '0x123' })).toBeNull();
     expect(parseReceipt(null)).toBeNull();
   });
+
+  it('parseReceipt: amount/fee に uint256 桁上限 (78) を課す (過大 BigInt parse を弾く)', async () => {
+    const { parseReceipt } = await import('@/lib/x402/receipt');
+    const over = '1'.repeat(79); // 79 桁 > MAX_UINT256_DEC_DIGITS(78)
+    expect(parseReceipt({ ...baseReceipt, amount: over })).toBeNull();
+    expect(parseReceipt({ ...baseReceipt, fee: over })).toBeNull();
+    const atLimit = '9'.repeat(78); // 78 桁は形式上通す (署名検証は別レイヤ・facilitatorSettle と同一意味論)
+    expect(parseReceipt({ ...baseReceipt, amount: atLimit, fee: atLimit })).not.toBeNull();
+  });
 });
