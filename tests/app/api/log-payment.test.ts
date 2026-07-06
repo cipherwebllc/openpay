@@ -230,10 +230,12 @@ describe('POST /api/log/payment', () => {
     expect(entry.ipPrefix).toBe('198.51.100.0/24');
   });
 
-  it('IP header が完全に欠落していても空文字に degrade', async () => {
+  it('IP header が完全に欠落していても degrade する (P3: 単一 anonymizeIp の fallback = unknown)', async () => {
     await POST(req(validBody));
     const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
-    expect(entry.ipPrefix).toBe('');
+    // P3: relayRoute の anonymizeIp に単一情報源化。不正/欠落 IP の fallback は '' から 'unknown' へ
+    // (空文字バケツ相乗りを避ける明示値)。
+    expect(entry.ipPrefix).toBe('unknown');
   });
 
   it('userAgent は 200 文字で truncate', async () => {

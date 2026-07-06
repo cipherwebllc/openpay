@@ -47,7 +47,7 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set<string>([
   // 既存ルート / 特殊パス (全 top-level route 名を網羅 = handle が route を shadow しない)
   'api', 'og', '_next', 'admin', 'billing', 'checkout', 'create',
   'disclaimer', 'discovery', 'experimental', 'explore', 'guide', 'history',
-  'news', 'order', 'orders', 'pay', 'privacy', 'scan', 'terms', 'tip',
+  'kit', 'news', 'order', 'orders', 'pay', 'privacy', 'scan', 'terms', 'tip',
   'tokutei',
   // locale
   'ja', 'en',
