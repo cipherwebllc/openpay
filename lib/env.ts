@@ -491,9 +491,10 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_CSV_PASS',
     process.env.NEXT_PUBLIC_ENABLE_CSV_PASS,
   ),
-  // モバイルオーダー (事前決済 + 店頭/券売機 + Nostr 通知 + QR 照合) の有効化フラグ
-  // (client 露出)。**既定 OFF** = 注文ページ/設定UI/ダッシュボードは非表示・本番完全 inert。
-  // 点灯は開示更新 (店頭1%/モバイル3%) + 弁護士/FSA 確認後。計画: plans/mobile-order-nostr.md。
+  // モバイルオーダー (事前決済 + 店頭/券売機 + QR 照合) の有効化フラグ
+  // (client 露出)。**既定 OFF** = 注文ページ/設定UI/ダッシュボードは非表示・inert。
+  // 本番は点灯済 (開示=LP/法務/llms.txt 整備済・FSA 登録不要回答 2026-06-08 で法的前提クリア)。
+  // 計画: plans/mobile-order-nostr.md (ファイル名は歴史的経緯・Nostr 実装は無い)。
   enableMobileOrder: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_MOBILE_ORDER',
     process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER,
