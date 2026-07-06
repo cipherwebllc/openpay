@@ -322,6 +322,11 @@ export function relayFreeAuthorization(
     maxValue: MAX_VALUE,
     jpycAddressFor,
     getBalance,
+    // 既使用 authorization は submit せず pending を返す jpycRelay の guard (5.5)。両 provider
+    // 経路 (self-host / gelato) で発火させるため common に置く。以前は self-host 分岐だけが持ち、
+    // Gelato/null 経路ではガードが抜けて revert 確実な tx にスポンサー予算を浪費し "reverted"
+    // 誤表示になっていた (P1-H)。
+    checkAuthorizationUsed: readAuthorizationUsed,
     checkRateLimit,
     checkGasBudget,
     refundGasBudget,
@@ -338,7 +343,6 @@ export function relayFreeAuthorization(
       jpyc ? () => readAuthorizationUsed(chainId, jpyc, auth.from, auth.nonce) : undefined;
     deps = {
       ...common,
-      checkAuthorizationUsed: readAuthorizationUsed,
       submitSponsoredCall: (_c, target, data) =>
         submitSelfHost(io!, target, data, {
           maxGasCostWei: relayMaxGasCostWei(chainId),
