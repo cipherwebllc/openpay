@@ -320,7 +320,25 @@ export function createToolRuntime({
       if (!Number.isInteger(qty) || qty < 1) {
         throw new Error('each item needs an integer qty >= 1');
       }
-      return { id: it.id, qty };
+      // options はここで **落とさず** そのまま cart へ運ぶ (0.5.0 でスキーマだけ足して
+      // この正規化が {id, qty} を組み直すせいで脱落していた実バグの修正)。値の妥当性
+      // (group/choice の実在・required) はサーバーが権威検証する。
+      let options;
+      if (it.options !== undefined) {
+        if (!isObject(it.options) || Array.isArray(it.options)) {
+          throw new Error('item options must be an object of {groupId: choiceId | choiceId[]}');
+        }
+        for (const v of Object.values(it.options)) {
+          const okValue =
+            typeof v === 'string' ||
+            (Array.isArray(v) && v.every((c) => typeof c === 'string'));
+          if (!okValue) {
+            throw new Error('item options values must be a string or an array of strings');
+          }
+        }
+        options = it.options;
+      }
+      return { id: it.id, qty, ...(options ? { options } : {}) };
     });
     const handle = normalizeHandle(input.handle);
     const url = buildOrderPayUrl(handle, items, input.table, input.pickupAt);
