@@ -304,4 +304,40 @@ describe('packages/x402-mcp steward signer', () => {
     expect(message).not.toContain(STEWARD_SIGNER_SECRET);
     expect(message).toContain('[redacted_private_key]');
   });
+
+  it('並行 x402_pay を直列化し session 累計上限の超過を防ぐ (P1-G TOCTOU)', async () => {
+    const { createToolRuntime } = await loadTools();
+    // accept() は 5+2=7 JPYC。MAX_SESSION=10 ゆえ 2 本 (14) は上限超過。直列化が無いと両方が
+    // 更新前の spent(0) を見て両方成立し 14 JPYC 払ってしまう (TOCTOU)。直列化で 1 本のみ成功。
+    const fetchImpl = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url !== RESOURCE) throw new Error(`unexpected fetch: ${url}`);
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        if ('X-PAYMENT' in headers) return jsonResponse({ ok: true }, 200);
+        return jsonResponse({ accepts: [accept()] }, 402);
+      },
+    );
+    const runtime = createToolRuntime({
+      env: {
+        BUYER_PRIVATE_KEY,
+        ALLOWED_HOSTS: 'open-pay.jp',
+        MAX_PER_CALL_JPYC: '10',
+        MAX_SESSION_JPYC: '10',
+      },
+      fetchImpl,
+      nowSec: () => 1_000_000_000,
+    });
+
+    const results = (await Promise.all([
+      runtime.x402Pay({ url: RESOURCE, maxTotalJpyc: '7' }),
+      runtime.x402Pay({ url: RESOURCE, maxTotalJpyc: '7' }),
+    ])) as Array<Record<string, unknown>>;
+
+    // 成功は { status:200, body, receipt } (reasons 無し)、guard 拒否は { ok:false, reasons }。
+    const succeeded = results.filter((r) => r.status === 200 && !('reasons' in r));
+    const rejected = results.find((r) => Array.isArray(r.reasons));
+    expect(succeeded).toHaveLength(1); // 直列化が無ければ 2 本とも成功してしまう
+    expect(rejected?.reasons).toContain('session_limit_exceeded');
+  });
 });
