@@ -220,30 +220,37 @@ export function createToolRuntime({
     return sessionSigner ?? createSigner(env, { fetchImpl });
   }
 
-  // カタログ信頼: 掲載 URL の Set を 5 分キャッシュで解決する。取得失敗は null (= 信頼拡張なし・
-  // ALLOWED_HOSTS のみ) に倒し、支払いを誤って広げない。
+  // カタログ信頼: 掲載「URL → 掲載 accept[0] (OpenPay サーバー生成の権威値)」の Map を 5 分
+  // キャッシュで解決する。取得失敗は null (= 信頼拡張なし・ALLOWED_HOSTS のみ) に倒し、支払いを
+  // 誤って広げない。掲載 accept は guard がライブ accept と照合し、第三者ドメインの bait-and-switch
+  // (別 forwarder/asset で buyer に攻撃者宛署名を作らせる) を拒否するために使う。
   let catalogUrlsCache = null;
   let catalogUrlsCachedAt = 0;
-  async function resolveCatalogUrls() {
+  async function resolveCatalogListings() {
     if (!config.catalogTrust) return null;
     if (catalogUrlsCache && Date.now() - catalogUrlsCachedAt < 5 * 60_000) return catalogUrlsCache;
     try {
       const res = await fetchImpl(config.discoveryUrl, { headers: { accept: 'application/json' } });
       const body = await readJson(res);
       if (!res.ok || !isObject(body) || !Array.isArray(body.items)) return null;
-      const urls = new Set();
+      const listings = new Map();
       for (const item of body.items) {
-        if (isObject(item) && typeof item.resource === 'string') {
+        if (
+          isObject(item) &&
+          typeof item.resource === 'string' &&
+          Array.isArray(item.accepts) &&
+          item.accepts.length > 0
+        ) {
           try {
-            urls.add(new URL(item.resource).toString());
+            listings.set(new URL(item.resource).toString(), item.accepts[0]);
           } catch {
             /* 不正 URL はスキップ */
           }
         }
       }
-      catalogUrlsCache = urls;
+      catalogUrlsCache = listings;
       catalogUrlsCachedAt = Date.now();
-      return urls;
+      return listings;
     } catch {
       return null;
     }
@@ -387,7 +394,7 @@ export function createToolRuntime({
       accept,
       config,
       sessionSpentAtomic: session.spentAtomic,
-      catalogUrls: await resolveCatalogUrls(),
+      catalogListings: await resolveCatalogListings(),
     });
     return quoteShape(input.url, res.status, guard);
   }
@@ -417,7 +424,7 @@ export function createToolRuntime({
       requireMaxTotal: true,
       requireSigner: true,
       signerAvailable: signerAvailable(),
-      catalogUrls: await resolveCatalogUrls(),
+      catalogListings: await resolveCatalogListings(),
     });
     if (!guard.ok) return quoteShape(input.url, res.status, guard);
 
