@@ -129,16 +129,32 @@ describe('submitSelfHost', () => {
     expect(io.sendRawTransaction).toHaveBeenCalledOnce(); // 再試行しない
   });
 
-  it('nonce 衝突が全リトライで尽きる → throw せず pending (P0・fallback で二重送金しない)', async () => {
+  it('nonce 衝突が全リトライで尽きる + 最後まで authState 未使用 → throw (P1-I・unused 証明済みゆえ relay_error で fallback・二重送金しない)', async () => {
     const io = makeIo({
       sendRawTransaction: vi.fn(async () => {
         throw new Error('nonce too low');
       }),
     });
-    const res = await submitSelfHost(io, TARGET, DATA, {
-      isAuthorizationUsed: vi.fn(async () => false),
+    // checker が毎回 unused を返す = 各 collision 試行で on-chain 未執行を確認済み。全リトライ枯渇時は
+    // 未 broadcast が証明済みゆえ relay_error (throw) → client は standard へ安全に fallback。
+    await expect(
+      submitSelfHost(io, TARGET, DATA, {
+        isAuthorizationUsed: vi.fn(async () => false),
+      }),
+    ).rejects.toThrow();
+    expect(io.sendRawTransaction).toHaveBeenCalledTimes(RELAYER_NONCE_RETRIES + 1);
+  });
+
+  it('nonce 衝突が全リトライで尽きる + checker 未提供 → throw せず pending (証明が無いので保守的に fallback しない)', async () => {
+    const io = makeIo({
+      sendRawTransaction: vi.fn(async () => {
+        throw new Error('nonce too low');
+      }),
     });
-    expect(res.taskId).toBe(SIGNED_HASH); // 保守的に pending
+    // checker 無し = on-chain の unused 証明が取れない (並行 duplicate が同一 authorization を執行した
+    // 可能性を排除できない)。relay_error に倒さず保守的に canonical hash を poll → pending。
+    const res = await submitSelfHost(io, TARGET, DATA);
+    expect(res.taskId).toBe(SIGNED_HASH);
     expect(io.sendRawTransaction).toHaveBeenCalledTimes(RELAYER_NONCE_RETRIES + 1);
   });
 

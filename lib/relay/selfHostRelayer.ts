@@ -199,8 +199,19 @@ export async function submitSelfHost(
       return { taskId: hash };
     }
   }
-  // 全リトライが collision (= 各試行は mempool 未到達)。証明なしに relay_error→fallback すると
-  // 万一の二重送金リスクがあるため、保守的に canonical hash を poll → pending に倒す (P0)。
+  // 全リトライが collision で尽きた。collision は send が「nonce too low / replacement
+  // underpriced」で拒否された = 自 tx (この nonce) は mempool 未到達。かつ collision 分岐は
+  // authState() === 'unused' を確認できたときだけ continue しているため、ここに到達した =
+  // 最後の試行まで on-chain で「この authorization は未執行」を確認済み。未 broadcast が証明済み
+  // ゆえ relay_error を throw し client を standard へ fallback させても二重送金しない (掟13:
+  // unused 証明済みを pending で握り潰す「意味のない防御」をやめる)。throw ゆえ caller (jpycRelay)
+  // は taskId を受け取らず、未 broadcast hash を recordRelayHash に書かない。
+  //   checker 未提供時 (opts.isAuthorizationUsed 無し) は authState() が既定 'unused' を返すだけで
+  //   on-chain の証明が無い (並行 duplicate が同一 authorization を執行した可能性を排除できない)
+  //   → 従来どおり保守的に canonical hash を poll → pending に倒す (二重送金を断つための防御)。
+  if (opts.isAuthorizationUsed) {
+    throw new Error('nonce_collision_retries_exhausted');
+  }
   return { taskId: (lastHash ?? `0x${'0'.repeat(64)}`) as Hex };
 }
 
