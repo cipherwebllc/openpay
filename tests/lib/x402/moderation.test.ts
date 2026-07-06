@@ -104,6 +104,14 @@ describe('lib/x402/moderation isPrivateHost', () => {
     'fd12::34',
     'svc.local',
     'db.internal',
+    // 末尾ドット (FQDN root ラベル) を剥がして判定する — 旧実装は末尾ドットで localhost/IPv4 判定を素通り。
+    'localhost.',
+    'svc.local.',
+    'db.internal.',
+    '127.0.0.1.',
+    '10.0.0.1.',
+    '192.168.1.1.',
+    '169.254.169.254.', // cloud metadata + 末尾ドット
   ])('private/loopback %s → true', (host) => {
     expect(isPrivateHost(host)).toBe(true);
   });
@@ -120,7 +128,42 @@ describe('lib/x402/moderation isPrivateHost', () => {
     '2606:4700::1111', // 公開 IPv6 (Cloudflare)
     '::ffff:808:808', // mapped 8.8.8.8 (公開・mapped でも内側が公開なら通す)
     '::ffff:0808:0808', // 同 (zero-padded)
+    'example.com.', // 公開 FQDN + 末尾ドット (正規化しても private にはしない)
+    '8.8.8.8.', // 公開 IPv4 + 末尾ドット
   ])('public %s → false', (host) => {
     expect(isPrivateHost(host)).toBe(false);
+  });
+});
+
+describe('lib/x402/moderation IPv6 リテラル / 末尾ドット正規化 (fail-open バイパス封鎖)', () => {
+  // 実 dns.lookup は角括弧付きホスト ([2606:..]) で ENOTFOUND を投げる。正規化しないと probe 関数の
+  // catch で fail-open し、IPv6 リテラルで登録した URL のモデレーション (無料転売検出) が丸ごと無効化。
+  const lookupBracketAware = async (h: string) => {
+    if (h.startsWith('[') || h.endsWith(']')) throw new Error('ENOTFOUND');
+    return [{ address: '2606:4700:4700::1111' }]; // 公開 IPv6 に解決
+  };
+
+  it('公開 IPv6 リテラル URL: 角括弧を剥がして解決 → 200 を検出 (旧実装は fail-open で false)', async () => {
+    expect(
+      await isFreelyAccessible('https://[2606:4700:4700::1111]/paid', {
+        fetchImpl: fetchWith(200),
+        lookup: lookupBracketAware,
+      }),
+    ).toBe(true); // moderation が実際に働き「無料公開 → 登録拒否対象」を返す
+  });
+
+  it('IPv6 リテラル [::1] (loopback): 正規化して private 判定 → probe せず false', async () => {
+    let fetched = false;
+    const fetchSpy = (async () => {
+      fetched = true;
+      return { status: 200 } as Response;
+    }) as unknown as typeof fetch;
+    // lookup は渡された (正規化済) hostname をそのまま IP として返す = 実 dns.lookup(リテラル) 相当。
+    const r = await isFreelyAccessible('https://[::1]/', {
+      fetchImpl: fetchSpy,
+      lookup: async (h: string) => [{ address: h }],
+    });
+    expect(fetched).toBe(false); // 内部宛 fetch しない
+    expect(r).toBe(false);
   });
 });

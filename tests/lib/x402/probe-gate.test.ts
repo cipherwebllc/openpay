@@ -56,6 +56,21 @@ describe('lib/x402/moderation probeGate', () => {
     expect(await probeGate('https://x.test/paid', { fetchImpl, lookup: lookupPublic })).toBe('openpay');
   });
 
+  it('公開 IPv6 リテラル URL: 角括弧を剥がして probe → openpay (旧実装は fail-open で unknown)', async () => {
+    // 実 dns.lookup は角括弧付きで ENOTFOUND → 正規化しないと catch で 'unknown' (fail-open) となり
+    // foreign ゲート拒否も openpay 判定も IPv6 ホストで無効化される。正規化後は解決して 402 を判定できる。
+    const lookupBracketAware = async (h: string) => {
+      if (h.startsWith('[') || h.endsWith(']')) throw new Error('ENOTFOUND');
+      return [{ address: '2606:4700:4700::1111', family: 6 }];
+    };
+    expect(
+      await probeGate('https://[2606:4700:4700::1111]/paid', {
+        fetchImpl: res402(openpayBody) as never,
+        lookup: lookupBracketAware,
+      }),
+    ).toBe('openpay');
+  });
+
   it('402 以外 (200/500) / ネットワーク失敗 / private 解決 → unknown (fail-open)', async () => {
     const ok200 = (async () => ({ status: 200, headers: { get: () => null }, json: async () => ({}) }) as unknown as Response) as never;
     expect(await probeGate('https://x.test/paid', { fetchImpl: ok200, lookup: lookupPublic })).toBe('unknown');

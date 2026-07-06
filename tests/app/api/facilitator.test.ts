@@ -560,6 +560,42 @@ describe('x402 facilitator /verify-receipt (入力検証)', () => {
     expect(await res.json()).toEqual({ valid: false, error: 'invalid_json' });
   });
 
+  // DoS ガード (兄弟 verify/settle と同型): 無認証 route なので body 上限を前段で強制する。
+  it('巨大ボディ (>4KB) → 413 payload_too_large', async () => {
+    const { verifyReceipt } = await loadFacilitator();
+    const big = new Request('http://x/verify-receipt', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pad: 'a'.repeat(5000) }), // MAX_BODY_BYTES=4096 超
+    });
+    const res = await verifyReceipt(big);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ valid: false, error: 'payload_too_large' });
+  });
+
+  // レート制限が route に配線され、超過時に 429 で弾く (KV 未設定の平常時は fail-open で通過 —
+  // 正常系は他の verify-receipt テストが 200 応答で担保)。checkReadRateLimit を false に固定して発火させる。
+  it('rate limit 超過 → 429 rate_limited', async () => {
+    vi.doMock('@/lib/relay/relayGuards', async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import('@/lib/relay/relayGuards')>();
+      return { ...actual, checkReadRateLimit: async () => false };
+    });
+    try {
+      const { verifyReceipt } = await loadFacilitator();
+      const res = await verifyReceipt(
+        reqOf('http://x/verify-receipt', {
+          receipt: VALID_RECEIPT,
+          signature: `0x${'11'.repeat(65)}`,
+        }),
+      );
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ valid: false, error: 'rate_limited' });
+    } finally {
+      vi.doUnmock('@/lib/relay/relayGuards');
+    }
+  });
+
   it('object でない body (JSON number) → {valid:false, signer:null}', async () => {
     const { verifyReceipt } = await loadFacilitator();
     const req = new Request('http://x/verify-receipt', {

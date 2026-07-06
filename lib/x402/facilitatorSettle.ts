@@ -22,17 +22,12 @@ import {
 } from '@/lib/relay/forwarderSettleService';
 import type { ForwarderVerifyDeps } from '@/lib/relay/forwarderRecover';
 import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
-import { isDec } from '@/lib/relay/relayRoute';
+import { isDecWithin, MAX_UINT256_DEC_DIGITS } from '@/lib/relay/relayRoute';
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null;
 const MAX_CHAIN_ID_DIGITS = 16; // Number.isSafeInteger の範囲を超える巨大 eip155 chainId を弾く。
-const MAX_UINT256_DEC_DIGITS = 78; // 2^256-1 は 78 桁。BigInt parse の入力を uint256 相当に bound。
 const CAIP2_EIP155 = /^eip155:(\d+)$/;
-
-function isDecWithin(v: unknown, maxDigits: number): v is string {
-  return isDec(v) && v.length <= maxDigits;
-}
 
 export type ParsedFacilitatorRequest = {
   chainId: number;

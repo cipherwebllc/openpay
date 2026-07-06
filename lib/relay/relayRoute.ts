@@ -17,6 +17,15 @@ export function isDec(v: unknown): v is string {
   return typeof v === 'string' && /^[0-9]+$/.test(v);
 }
 
+// uint256 相当の桁上限 (2^256-1 は 78 桁)。10進文字列を BigInt parse する前に長さで bound し、過大入力を
+// 弾く。facilitator の authorization/split 検証 (facilitatorSettle) と receipt (parseReceipt) の amount/fee で
+// 同一上限を共有する単一情報源。
+export const MAX_UINT256_DEC_DIGITS = 78;
+
+export function isDecWithin(v: unknown, maxDigits: number): v is string {
+  return isDec(v) && v.length <= maxDigits;
+}
+
 export function anonymizeIp(ip: string): string {
   const first = ip.split(',')[0].trim();
   if (first.includes(':')) return first.split(':').slice(0, 4).join(':') + '::/64';

@@ -18,7 +18,7 @@ import {
   buildForwarderNonce,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
-import { isDec } from '@/lib/relay/relayRoute';
+import { isDecWithin, MAX_UINT256_DEC_DIGITS } from '@/lib/relay/relayRoute';
 
 // off-chain attestation 用の EIP-712 domain (verifyingContract/chainId は持たず、chainId は message の
 // フィールドに入れる)。署名・検証で完全一致させる。
@@ -150,8 +150,9 @@ export function parseReceipt(raw: unknown): X402Receipt | null {
     !/^0x[0-9a-fA-F]{64}$/.test(r.txHash) ||
     !isAddress(r.payer as string) ||
     !isAddress(r.payTo as string) ||
-    !isDec(r.amount) ||
-    !isDec(r.fee) ||
+    // amount/fee は uint256 相当の桁上限を課す (facilitatorSettle と同一・過大 BigInt parse を弾く)。
+    !isDecWithin(r.amount, MAX_UINT256_DEC_DIGITS) ||
+    !isDecWithin(r.fee, MAX_UINT256_DEC_DIGITS) ||
     !isAddress(r.asset as string) ||
     typeof r.chainId !== 'number' ||
     !Number.isInteger(r.chainId) ||
