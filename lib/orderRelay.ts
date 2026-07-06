@@ -7,8 +7,18 @@
 //   - 冪等は **txHash のみ** (1 決済 1 注文)。
 //   - 注文メタは TTL 72h・上限 200 件・資金は不触 (ノンカストディ不変)・顧客 PII は保存しない。
 
-export const ORDER_LIST_TTL_SEC = 72 * 60 * 60; // 受注リストの寿命 (72h)
-export const ORDER_USED_TTL_SEC = 72 * 60 * 60; // txHash 冪等鍵の寿命 (リストと同期)
+export const ORDER_LIST_TTL_SEC = 72 * 60 * 60; // 受注リストの寿命 (72h・表示用 advisory)
+// txHash 冪等マーカーの **二段ロック** (P1-E/P1-F)。表示リスト (ORDER_LIST_TTL_SEC=72h) とは
+// 寿命を完全に分離する:
+//   - pending = 検証中の **短命クレーム** (ORDER_PENDING_TTL_SEC で自然失効)。maxDuration タイムアウトで
+//     done 昇格前にプロセスが強制終了しても pending は自動失効する = 正規注文が最大 72h ロックされ消失する
+//     事故 (P1-F) を断ち、短時間後の同一 txHash 再 POST で復旧できる。
+//   - done = 検証 + 保存が完了した **恒久ブロック** (TTL 無し)。同一 txHash の **無期限リプレイを永久拒否** し
+//     「1 決済 1 注文」を恒久保証する (P1-E)。72h 失効で過去着金 tx を再送する偽注文流入を塞ぐ。
+// 昇格は route が保存確定後に kvSet(usedKey, ORDER_MARK_DONE) で値と TTL を上書き (pending→done・EX を落とす)。
+export const ORDER_MARK_PENDING = 'pending';
+export const ORDER_MARK_DONE = 'done';
+export const ORDER_PENDING_TTL_SEC = 120; // pending クレームの寿命 (秒)。検証 + 保存の想定所要 << 120s。
 export const ORDER_LIST_MAX = 200; // 1 merchant あたり保持上限 (kvLtrim)
 // 最低着金フロア = 1 JPYC (decimals 18)。dust/誤検出を弾く最小値。**権威額は実着金合計**で、
 // minValue はあくまで「正の着金があったか」のフロア (申告額には依存しない・advisory 原則)。
@@ -36,7 +46,8 @@ export type StoredOrder = {
   amount: string; // **実着金 (オンチェーン検証済み・権威)** — JPYC minor units 文字列
   txHash: string;
   chainId: number;
-  from: string; // 支払元 (オンチェーン公開情報)
+  from: string; // 顧客申告の支払元 (**未検証・表示専用**)。feeVerify は from を返さず route も照合しない
+                // (forwarder-split では merchant への Transfer の from は forwarder であり顧客ではない)。P1-D
   ts: number; // 受信時刻 (ms)
   fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
   // 受取予定時刻 (ms・Phase 4・preorder で顧客が選んだスロット)。未指定=即時/店頭。表示用 (advisory)。

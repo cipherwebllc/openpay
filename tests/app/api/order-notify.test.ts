@@ -23,7 +23,8 @@ const hold = vi.hoisted(() => ({
     | { ok: false },
   rateAllowed: true,
   kvConfigured: true,
-  claimValue: 'OK' as 'OK' | null, // kvSet nx: 'OK'=first, null=duplicate
+  claimValue: 'OK' as 'OK' | null, // pending nx クレーム: 'OK'=fresh, null=衝突 (既存マーカーあり)
+  usedMarker: 'done' as 'pending' | 'done' | null, // 衝突時に kvGet(usedKey) が返す既存マーカー
   pointerSetFails: false, // true で order:sv: の kvSet が ok:false を返す (ポインタ保存失敗の emulate)
   verify: { ok: true, value: 10n ** 18n } as
     | { ok: true; value: bigint }
@@ -89,6 +90,7 @@ vi.mock('@/lib/relay/relayRoute', () => ({ anonymizeIp: () => 'ip-1' }));
 const lpushSpy = vi.hoisted(() => vi.fn());
 const delSpy = vi.hoisted(() => vi.fn());
 const setSpy = vi.hoisted(() => vi.fn());
+const getSpy = vi.hoisted(() => vi.fn());
 const warnSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
@@ -97,7 +99,20 @@ vi.mock('@/lib/kv', () => ({
     if (hold.pointerSetFails && String(a[0]).startsWith('order:sv:')) {
       return Promise.resolve({ ok: false, reason: 'network_error' });
     }
+    // done 昇格 (order:used:*, 値 'done'・ttl なし) は常に成功させる。pending nx クレーム / pointer は
+    // hold.claimValue に従う (nx: 'OK'=fresh / null=衝突)。
+    if (String(a[0]).startsWith('order:used:') && a[1] === 'done') {
+      return Promise.resolve({ ok: true, value: 'OK' });
+    }
     return Promise.resolve({ ok: true, value: hold.claimValue });
+  },
+  // 衝突時 (nx 失敗) の既存マーカー読取り。used キーは hold.usedMarker を返す。
+  kvGet: (...a: unknown[]) => {
+    getSpy(...a);
+    if (String(a[0]).startsWith('order:used:')) {
+      return Promise.resolve({ ok: true, value: hold.usedMarker });
+    }
+    return Promise.resolve({ ok: true, value: null });
   },
   kvDel: (...a: unknown[]) => {
     delSpy(...a);
@@ -154,11 +169,13 @@ beforeEach(() => {
   hold.rateAllowed = true;
   hold.kvConfigured = true;
   hold.claimValue = 'OK';
+  hold.usedMarker = 'done';
   hold.pointerSetFails = false;
   hold.verify = { ok: true, value: JPYC };
   lpushSpy.mockClear();
   delSpy.mockClear();
   setSpy.mockClear();
+  getSpy.mockClear();
   warnSpy.mockClear();
   pushNotify.after.mockClear();
   pushNotify.afterTasks = [];
@@ -210,15 +227,40 @@ describe('POST /api/order/notify', () => {
     expect(lpushSpy).not.toHaveBeenCalled();
   });
 
-  it('重複 txHash (nx クレーム失敗) → 200 duplicate・再追加しない', async () => {
-    hold.claimValue = null; // 既存キー
+  it('二段ロック: 昇格済 (done) マーカーで衝突 → 200 duplicate・再追加しない (P1-E: 無期限リプレイ拒否)', async () => {
+    hold.claimValue = null; // pending nx クレーム衝突 (既存マーカーあり)
+    hold.usedMarker = 'done'; // 検証+保存済の恒久ブロック
     const res = await POST(req(goodBody()));
     await flushAfterTasks();
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, duplicate: true });
+    expect(getSpy).toHaveBeenCalledWith(`order:used:80002:${TXHASH}`); // done/pending 読み分け
     expect(lpushSpy).not.toHaveBeenCalled();
     expect(pushNotify.after).not.toHaveBeenCalled();
     expect(pushNotify.notify).not.toHaveBeenCalled();
+  });
+
+  it('二段ロック: pending 中の重複 POST → 409 processing・偽 duplicate を返さない (P2)', async () => {
+    hold.claimValue = null; // pending nx クレーム衝突
+    hold.usedMarker = 'pending'; // まだ検証中 (done へ未昇格)
+    const res = await POST(req(goodBody()));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json).toMatchObject({ ok: false, error: 'processing' });
+    expect(json.duplicate).toBeUndefined(); // 検証成功前に duplicate を偽装しない
+    expect(lpushSpy).not.toHaveBeenCalled();
+  });
+
+  it('二段ロック: pending 失効後 (used キー不在) の再 POST は fresh クレームされ保存される (P1-F: 復旧可能)', async () => {
+    // maxDuration タイムアウトで pending が自然失効した後の再送を emulate: nx クレームが再び成功する。
+    hold.claimValue = 'OK'; // pending 失効済 = キー不在 → 新規クレーム成立
+    hold.verify = { ok: true, value: 1000n * JPYC };
+    const res = await POST(req(goodBody()));
+    await flushAfterTasks();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, orderId: 'oid-1' });
+    expect(getSpy).not.toHaveBeenCalled(); // fresh クレームゆえ done/pending 読み分けに入らない
+    expect(lpushSpy).toHaveBeenCalledTimes(1); // 正規注文が保存される (72h 消失しない)
   });
 
   it('on-chain 検証 失敗 (amount_too_low) → 422・クレーム解放・未保存', async () => {
@@ -239,12 +281,19 @@ describe('POST /api/order/notify', () => {
     const res = await POST(req(goodBody()));
     await flushAfterTasks();
     expect(res.status).toBe(200);
-    // 冪等クレームは txHash のみ (merchant/items を含めない)。
+    // ステージ1: pending クレームは txHash のみ (merchant/items を含めない) + **短 TTL** (自然失効で P1-F 復旧)。
     expect(setSpy).toHaveBeenCalledWith(
       `order:used:80002:${TXHASH}`,
-      expect.any(String),
-      expect.objectContaining({ nx: true }),
+      'pending',
+      { nx: true, ttlSec: 120 },
     );
+    // ステージ2: 保存確定後に done へ昇格。**ttl 引数なし = 恒久** (P1-E: 無期限リプレイを永久拒否)。
+    const promote = setSpy.mock.calls.find(
+      (c) => String(c[0]).startsWith('order:used:') && c[1] === 'done',
+    );
+    expect(promote).toBeDefined();
+    expect(promote![0]).toBe(`order:used:80002:${TXHASH}`);
+    expect(promote![2]).toBeUndefined(); // TTL 無し = 恒久ブロック
     // 受注を merchant のリストへ。保存値は実着金 (verify.value)・table は description 由来。
     expect(lpushSpy).toHaveBeenCalledTimes(1);
     const [listKey, raw] = lpushSpy.mock.calls[0] as [string, string];

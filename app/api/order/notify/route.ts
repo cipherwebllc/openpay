@@ -12,6 +12,7 @@ import { resolveDeployment } from '@/lib/tokens';
 import { verifyJpycTransferToOnChain } from '@/lib/feeVerify';
 import {
   kvSet,
+  kvGet,
   kvDel,
   kvLpush,
   kvLtrim,
@@ -36,7 +37,9 @@ import {
   ORDER_DUST_FLOOR_WEI,
   ORDER_LIST_MAX,
   ORDER_LIST_TTL_SEC,
-  ORDER_USED_TTL_SEC,
+  ORDER_MARK_PENDING,
+  ORDER_MARK_DONE,
+  ORDER_PENDING_TTL_SEC,
   ORDER_ID_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
@@ -48,7 +51,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
 
-const USED_LOCK_MARKER = 'pending';
 const AMOUNT_ADVISORY_BPS_CAP = 300;
 
 function fail(error: string, status: number) {
@@ -110,13 +112,33 @@ export async function POST(req: Request): Promise<NextResponse> {
   // mainnet は KV 必須 (fail-open で未検証/未保存のまま素通りさせない)。
   if (isMainnet && !isKvConfigured()) return fail('kv_required', 503);
 
-  // 冪等クレーム: **txHash のみ** (1 決済 1 注文)。重複 POST は no-op (再追加しない)。
+  // 冪等クレーム: **txHash のみ** (1 決済 1 注文)。**二段ロック** (P1-E/P1-F)。
+  // ステージ1 = pending クレーム (短 TTL)。検証中に maxDuration タイムアウトで done 昇格前に強制終了しても
+  // pending は ORDER_PENDING_TTL_SEC で自然失効する → 正規注文が最大 72h ロックされ消失する事故 (P1-F) を断つ。
   const usedKey = orderUsedKey(chainId, txHash);
   if (isKvConfigured()) {
-    const claim = await kvSet(usedKey, USED_LOCK_MARKER, { nx: true, ttlSec: ORDER_USED_TTL_SEC });
+    const claim = await kvSet(usedKey, ORDER_MARK_PENDING, {
+      nx: true,
+      ttlSec: ORDER_PENDING_TTL_SEC,
+    });
     if (!claim.ok) return fail('kv_error', 503);
-    if (claim.value === null) return NextResponse.json({ ok: true, duplicate: true });
+    if (claim.value === null) {
+      // nx 失敗 = 既存マーカーあり。done (恒久) と pending (検証中) を読み分ける。
+      const existing = await kvGet(usedKey);
+      if (!existing.ok) return fail('kv_error', 503);
+      // done = 検証 + 保存済の恒久ブロック → 同一 txHash の無期限リプレイを永久拒否 (P1-E)。1 決済 1 注文。
+      if (existing.value === ORDER_MARK_DONE) {
+        return NextResponse.json({ ok: true, duplicate: true });
+      }
+      // pending 中 (または直前に失効/解放) = **まだ done でない** → 検証成功前の**偽 duplicate を返さない** (P2)。
+      // 別 POST が検証中/リトライ可能な「処理中」を表す (client は pending 失効後に同一 txHash を再送可能)。
+      return fail('processing', 409);
+    }
   }
+
+  // 受注保存の確定フラグ (kvLpush 成功で true)。catch の解放判定に使う: 保存確定後は pending/done を
+  // 消さない (done 昇格済を消すと同一 tx が二重注文になり得るため・下記 catch 参照)。
+  let orderStored = false;
 
   try {
     // on-chain 検証 (from 非依存・to=merchant への実着金合計 ≥ dust フロア)。
@@ -154,6 +176,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       amount: result.value.toString(), // **実着金 (権威)** — recover は total−fee, free は total
       txHash,
       chainId,
+      // **オンチェーン検証していない顧客申告値** (feeVerify は from を返さない・表示専用)。形式のみ検証。P1-D
       from: typeof o.from === 'string' && isAddress(o.from) ? getAddress(o.from) : '',
       ts: Date.now(),
       fulfilled: false,
@@ -171,17 +194,25 @@ export async function POST(req: Request): Promise<NextResponse> {
       }
     }
 
-    let orderStored = false;
     if (isKvConfigured()) {
       const key = orderListKey(merchant);
       const push = await kvLpush(key, serializeOrder(order));
       if (!push.ok) {
-        await kvDel(usedKey); // 保存できなければクレームも戻す (リトライで再投入可能に)
+        await kvDel(usedKey); // 保存できなければ pending クレームも戻す (リトライで再投入可能に)
         return fail('kv_error', 503);
+      }
+      orderStored = true; // 受注は KV に確定。以降 pending クレームは消さない (下記 catch 参照)。
+      // ステージ2 = pending → done 昇格 (恒久・TTL 上書きで EX を落とす)。**保存確定の後**に昇格するのが肝:
+      // 逆順 (昇格→保存) だと昇格後に保存失敗した tx が恒久ブロックのまま永久喪失する (P1-F を悪化)。
+      // 保存→昇格の順なら最悪でも「未昇格 pending の自然失効 → 再 POST で復旧」に倒れる (喪失より二重が安全)。
+      const promote = await kvSet(usedKey, ORDER_MARK_DONE); // ttl 無し = 恒久ブロック (無期限リプレイ拒否)
+      if (!promote.ok) {
+        // finalize 失敗。受注は保存済ゆえ本体は止めない (fail-quiet) が、昇格漏れは pending 失効後の
+        // 再 POST を許し二重注文になり得るため observable にする (掟13: 波及は断つが黙殺はしない)。
+        logger.warn('order.notify.promote_failed', { reason: promote.reason, chainId, merchant });
       }
       await kvLtrim(key, 0, ORDER_LIST_MAX - 1); // 上限 200 (古いものから押し出し)
       await kvExpire(key, ORDER_LIST_TTL_SEC); // LTRIM は TTL を更新しないので毎回張り直す
-      orderStored = true;
 
       // 顧客向け「注文状況」の逆引きポインタ (flag ENABLE_ORDER_PICKUP)。顧客端末が生成した不可推測の
       // status トークン (43 文字 base64url) → 受注の所在 {merchant, chainId, txHash} を保存し、顧客が
@@ -211,7 +242,10 @@ export async function POST(req: Request): Promise<NextResponse> {
     logger.info('order.notify.stored', { chainId, merchant, amount: order.amount });
     return NextResponse.json({ ok: true, orderId });
   } catch (e) {
-    await kvDel(usedKey);
+    // 検証/保存の途中で予期せぬ例外 → pending クレームを解放しリトライ可能に戻す。ただし **保存確定後
+    // (orderStored) は解放しない**: done 昇格済の恒久ブロックを消すと同一 tx の二重注文を招くため
+    // (掟13: 断つべき波及=検証失敗時のクレーム居座りのみ・保存済の冪等は保つ)。
+    if (!orderStored) await kvDel(usedKey);
     logger.error('order.notify.unexpected', {
       reason: e instanceof Error ? e.message : String(e),
       chainId,
