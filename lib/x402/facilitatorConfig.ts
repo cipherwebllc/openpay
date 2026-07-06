@@ -6,7 +6,7 @@
 //   - 手数料 = max(feeFloorWei, price × feeBps/10000)・**買い手上乗せ**。seller は表示額(price)を
 //     そのまま受領し、agent は price+fee を署名する (lib/x402/fee.ts)。
 //   - floor 既定 1 JPYC (2026-07-05 ユーザ確定で 2→1 に改定。DISCLOSED_X402_FEE と同時変更)。Eip3009Forwarder.settle は feeValue==0 を
-//     ZeroValue で revert するため floor は常に 1 wei 以上を保証する (0/不正は既定 2 へ倒す)。
+//     ZeroValue で revert するため floor は常に 1 wei 以上を保証する (0/不正は既定 1 へ倒す)。
 //   - feeBps 既定 100 (= 1%)。facilitator 自体が flag でゲートされるため、点灯時は意図どおり
 //     1% を既定にする (recover の bps 既定 0 = inert とは方針が異なる)。fat-finger 防止に上限 10%。
 //   - settlement は既存 forwarder (lib/relay) を再利用するため、ノンカストディ性 / relayer 鍵 /
@@ -35,7 +35,7 @@ function parseFeeBps(raw: string | undefined): number {
   return n > MAX_FEE_BPS ? MAX_FEE_BPS : n;
 }
 
-// human JPYC (整数) → atomic (18 decimals)。0 / 非数値 / 未設定は既定 2 JPYC へ倒す
+// human JPYC (整数) → atomic (18 decimals)。0 / 非数値 / 未設定は既定 1 JPYC (DEFAULT_FLOOR_HUMAN) へ倒す
 // (feeValue==0 = ZeroValue revert を構造的に防ぐ)。
 function parseFloorWei(raw: string | undefined): bigint {
   const v = nonEmpty(raw);

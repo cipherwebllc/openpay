@@ -7,6 +7,9 @@ import { kvLpush, kvLtrim } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import type { ClientReportedCircleVerification } from '@/lib/paymentLog';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+// P3: anonymizeIp を単一情報源化 (旧 local 実装は fallback が '' で relayRoute の 'unknown' と乖離し、
+// 不正形式 IP が同一空文字バケツを共有する rate-limit 相乗りの恐れがあった)。
+import { anonymizeIp } from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
 
@@ -253,12 +256,3 @@ export async function POST(req: Request): Promise<NextResponse> {
   return NextResponse.json({ ok: true });
 }
 
-function anonymizeIp(ip: string): string {
-  const first = ip.split(',')[0].trim();
-  if (first.includes(':')) {
-    return first.split(':').slice(0, 4).join(':') + '::/64';
-  }
-  const parts = first.split('.');
-  if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
-  return '';
-}

@@ -57,6 +57,38 @@ describe('freee token encryption', () => {
       }
     }
   });
+
+  it('P3: 別 wallet の AAD では復号できない (AAD 束縛)', () => {
+    const old = process.env.FREEE_TOKEN_ENC_KEY;
+    process.env.FREEE_TOKEN_ENC_KEY = ENC_KEY;
+    try {
+      const token: StoredToken = { access: 'AT', refresh: 'RT', expiresAt: 1, companyId: 7 };
+      const encrypted = encryptStoredToken('0xaaaa', token);
+      // AAD (wallet) が違うと GCM 認証に失敗し null (別 wallet が他人の token を復号できない)。
+      expect(decryptStoredToken('0xbbbb', encrypted)).toBeNull();
+    } finally {
+      if (old === undefined) delete process.env.FREEE_TOKEN_ENC_KEY;
+      else process.env.FREEE_TOKEN_ENC_KEY = old;
+    }
+  });
+
+  it('P3: ciphertext 改竄で GCM 認証失敗 (tag 検証)', () => {
+    const old = process.env.FREEE_TOKEN_ENC_KEY;
+    process.env.FREEE_TOKEN_ENC_KEY = ENC_KEY;
+    try {
+      const token: StoredToken = { access: 'AT', refresh: 'RT', expiresAt: 1, companyId: 7 };
+      const encrypted = encryptStoredToken('0xaaaa', token);
+      const env = JSON.parse(encrypted) as Record<string, string>;
+      // ct (ciphertext) の 1 文字を差し替えて改竄。GCM の authTag 検証で復号が throw する。
+      const ct = env.ct;
+      env.ct = (ct[0] === 'a' ? 'b' : 'a') + ct.slice(1);
+      // GCM の authTag 検証で復号が失敗し null を返す (改竄検知)。
+      expect(decryptStoredToken('0xaaaa', JSON.stringify(env))).toBeNull();
+    } finally {
+      if (old === undefined) delete process.env.FREEE_TOKEN_ENC_KEY;
+      else process.env.FREEE_TOKEN_ENC_KEY = old;
+    }
+  });
 });
 
 describe('tokenNeedsRefresh', () => {
