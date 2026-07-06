@@ -26,6 +26,7 @@
         "categories:accessibility": ["error", { "minScore": 0.9 }],
         "categories:best-practices": ["warn", { "minScore": 0.85 }],
         "categories:seo": ["warn", { "minScore": 0.9 }],
+        "is-crawlable": "warn",
         "uses-text-compression": "warn",
         "uses-responsive-images": "warn",
         "uses-rel-preconnect": "off",
