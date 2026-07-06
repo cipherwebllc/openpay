@@ -1,4 +1,9 @@
 {
+  "Meta": {
+    "title": "OpenPay — JPYC Stablecoin Payments & Mobile Ordering for Stores (0–1% fees)",
+    "description": "OpenPay is an open-source, non-custodial payment layer for the Japanese yen stablecoin JPYC and USDC. QR payments, mobile ordering, order relay, receipts, accounting, and AI-agent checkout — 0–1% fees, sales settle directly to your wallet.",
+    "ogImageAlt": "OpenPay — Run your whole store on JPYC. QR payments and mobile ordering for stores"
+  },
   "Nav": {
     "scan": "Scan",
     "create": "Receive",
