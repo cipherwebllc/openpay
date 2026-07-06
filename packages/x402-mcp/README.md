@@ -83,7 +83,7 @@ Ordering flow: `order_menu` → pick items → `order_quote` → `x402_pay {url,
 | `STEWARD_SIGNER_SECRET` | unset | Required when `SIGNER_MODE=steward`; scoped signer secret. Treated as a secret. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
 | `MAX_SESSION_JPYC` | `100` | Process-lifetime cumulative cap for successful `x402_pay` calls. Restarting the process resets it. |
-| `CATALOG_TRUST` | `true` | When true, URLs listed (exact match) in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. The catalog is moderated (payment-gate + OpenPay-scheme verified); money caps still apply. Set `false` for strict manual allowlisting. |
+| `CATALOG_TRUST` | `true` | When true, URLs listed (exact match) in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 

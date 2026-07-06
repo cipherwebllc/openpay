@@ -35,7 +35,7 @@ type Guards = {
     maxTotalJpyc?: string | number;
     requireMaxTotal?: boolean;
     requirePrivateKey?: boolean;
-    catalogUrls?: Set<string> | null;
+    catalogListings?: Map<string, unknown> | null;
   }) => GuardResult;
   safeErrorMessage: (
     error: unknown,
@@ -350,16 +350,55 @@ describe('packages/x402-mcp guards', () => {
 
   describe('catalog trust (カタログ掲載 URL の支払い許可)', () => {
     const LISTED = 'https://aegis-ai.xyz/api/d2a/briefing-jpyc';
+    // 掲載 accept (discovery=OpenPay サーバー生成の権威値) と、支払い時のライブ accept を分けて渡す。
+    const listings = (rawAccept: Record<string, unknown> = accept({ resource: LISTED })) =>
+      new Map<string, unknown>([[LISTED, rawAccept]]);
 
-    it('カタログ掲載 URL (完全一致) は ALLOWED_HOSTS 外でも host_not_allowed にならない', async () => {
+    it('カタログ掲載 URL + ライブ accept が掲載 accept と一致 → host_not_allowed も mismatch も無し', async () => {
       const guards = await loadGuards();
       const r = guards.evaluatePaymentGuards({
         url: LISTED,
         accept: accept({ resource: LISTED }),
         config: guards.readMoneyConfig(baseEnv()),
-        catalogUrls: new Set([LISTED]),
+        catalogListings: listings(),
       });
       expect(r.reasons).not.toContain(guards.REASONS.hostNotAllowed);
+      expect(r.reasons).not.toContain(guards.REASONS.catalogAcceptMismatch);
+    });
+
+    it('bait-and-switch: ライブ accept の forwarder が掲載と違う → catalog_accept_mismatch で拒否 (P0)', async () => {
+      const guards = await loadGuards();
+      const ATTACKER = '0x9999999999999999999999999999999999999999';
+      // 掲載は正規 forwarder。支払い時に攻撃者ドメインが forwarder=payTo=攻撃者EOA を返す。
+      const liveEvil = withExtra(
+        {},
+        { forwarder: ATTACKER },
+      );
+      (liveEvil as { payTo: string }).payTo = ATTACKER;
+      (liveEvil as { resource: string }).resource = LISTED;
+      const r = guards.evaluatePaymentGuards({
+        url: LISTED,
+        accept: liveEvil,
+        config: guards.readMoneyConfig(baseEnv()),
+        catalogListings: listings(),
+      });
+      expect(r.reasons).toContain(guards.REASONS.catalogAcceptMismatch);
+      expect(r.ok).toBe(false);
+    });
+
+    it('bait-and-switch: ライブ accept の asset が掲載と違う → catalog_accept_mismatch (P0)', async () => {
+      const guards = await loadGuards();
+      const liveEvil = accept({
+        resource: LISTED,
+        asset: '0x1111111111111111111111111111111111111111',
+      });
+      const r = guards.evaluatePaymentGuards({
+        url: LISTED,
+        accept: liveEvil,
+        config: guards.readMoneyConfig(baseEnv()),
+        catalogListings: listings(),
+      });
+      expect(r.reasons).toContain(guards.REASONS.catalogAcceptMismatch);
     });
 
     it('掲載はホスト単位でなく URL 単位 — 同ホストの別パスは拒否', async () => {
@@ -369,18 +408,18 @@ describe('packages/x402-mcp guards', () => {
         url: other,
         accept: accept({ resource: other }),
         config: guards.readMoneyConfig(baseEnv()),
-        catalogUrls: new Set([LISTED]),
+        catalogListings: listings(),
       });
       expect(r.reasons).toContain(guards.REASONS.hostNotAllowed);
     });
 
-    it('catalogUrls=null (カタログ取得失敗) は従来どおり ALLOWED_HOSTS のみ = fail-close', async () => {
+    it('catalogListings=null (カタログ取得失敗) は従来どおり ALLOWED_HOSTS のみ = fail-close', async () => {
       const guards = await loadGuards();
       const r = guards.evaluatePaymentGuards({
         url: LISTED,
         accept: accept({ resource: LISTED }),
         config: guards.readMoneyConfig(baseEnv()),
-        catalogUrls: null,
+        catalogListings: null,
       });
       expect(r.reasons).toContain(guards.REASONS.hostNotAllowed);
     });
@@ -391,7 +430,7 @@ describe('packages/x402-mcp guards', () => {
         url: LISTED,
         accept: accept({ resource: LISTED }),
         config: guards.readMoneyConfig(baseEnv({ CATALOG_TRUST: 'false' })),
-        catalogUrls: new Set([LISTED]),
+        catalogListings: listings(),
       });
       expect(r.reasons).toContain(guards.REASONS.hostNotAllowed);
     });

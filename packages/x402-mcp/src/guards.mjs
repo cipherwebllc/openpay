@@ -31,6 +31,9 @@ export const REASONS = {
   sessionLimitExceeded: 'session_limit_exceeded',
   buyerPrivateKeyMissing: 'buyer_private_key_missing',
   stewardSignerUnconfigured: 'steward_signer_unconfigured',
+  // catalog trust 経由 (第三者ドメイン) の URL で、支払い時にライブ fetch した accept が
+  // discovery 掲載 accept (OpenPay サーバー生成の権威値) と食い違う = bait-and-switch。
+  catalogAcceptMismatch: 'catalog_accept_mismatch',
 };
 
 export const SUPPORTED_NETWORKS = new Set([
@@ -253,6 +256,29 @@ export function validateAcceptForPayment(rawAccept, requestUrl) {
   };
 }
 
+// catalog trust の掲載 accept (discovery = OpenPay サーバー権威) とライブ accept が、金銭に効く
+// 全フィールド (asset/forwarder/受取先/各金額/commit) まで一致するかを照合する。第三者ドメインが
+// 掲載時と別の forwarder/asset を bait-and-switch して buyer に攻撃者宛の署名を作らせる P0 を塞ぐ。
+// どちらかが正規化不能なら不一致 (fail-close)。
+function catalogAcceptConsistent(liveRawAccept, listedRawAccept) {
+  try {
+    const a = normalizePaymentRequirements(liveRawAccept);
+    const b = normalizePaymentRequirements(listedRawAccept);
+    return (
+      a.network === b.network &&
+      a.asset === b.asset &&
+      a.extra.openpay.forwarder === b.extra.openpay.forwarder &&
+      a.extra.openpay.merchant === b.extra.openpay.merchant &&
+      a.extra.openpay.merchantValue === b.extra.openpay.merchantValue &&
+      a.extra.openpay.feeReceiver === b.extra.openpay.feeReceiver &&
+      a.extra.openpay.feeValue === b.extra.openpay.feeValue &&
+      a.extra.openpay.commitVersion === b.extra.openpay.commitVersion
+    );
+  } catch {
+    return false;
+  }
+}
+
 function parseMaxTotalArg(value, reasons) {
   if (value === undefined || value === null) {
     reasons.push(REASONS.maxTotalRequired);
@@ -276,7 +302,9 @@ export function evaluatePaymentGuards({
   requirePrivateKey = false,
   requireSigner = false,
   signerAvailable = false,
-  catalogUrls = null, // Set<string> | null。カタログ信頼用に呼び出し側が解決した掲載 URL 集合。
+  // Map<string, rawAccept> | null。カタログ信頼用に呼び出し側が解決した「掲載 URL → 掲載 accept
+  // (OpenPay サーバー生成の権威値)」。URL 一致で支払いを許可し、accept を bait-and-switch 照合に使う。
+  catalogListings = null,
 }) {
   const reasons = [];
   const parsedUrl = parseHttpUrl(url, 'url');
@@ -285,10 +313,19 @@ export function evaluatePaymentGuards({
   } else {
     const hostAllowed = config.allowedHosts.includes(parsedUrl.hostname.toLowerCase());
     // カタログ信頼はホストでなく **URL 完全一致** — allowlist より狭い単位で許可する。
-    const catalogListed =
-      config.catalogTrust && catalogUrls instanceof Set && catalogUrls.has(parsedUrl.toString());
+    const listedAccept =
+      config.catalogTrust && catalogListings instanceof Map
+        ? catalogListings.get(parsedUrl.toString())
+        : undefined;
+    const catalogListed = listedAccept !== undefined;
     if (!hostAllowed && !catalogListed) {
       reasons.push(REASONS.hostNotAllowed);
+    } else if (!hostAllowed && catalogListed) {
+      // ALLOWED_HOSTS 直 (open-pay.jp) はサーバー権威ゆえ照合不要。catalog trust 経由 (第三者
+      // ドメイン) でのみ、ライブ accept が掲載 accept と金銭フィールドまで一致するか照合する。
+      if (!catalogAcceptConsistent(accept, listedAccept)) {
+        reasons.push(REASONS.catalogAcceptMismatch);
+      }
     }
   }
 
