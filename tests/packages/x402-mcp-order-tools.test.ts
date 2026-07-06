@@ -162,4 +162,45 @@ describe('MCP agent-order tools', () => {
     const runtime = createToolRuntime({ env: ENV });
     await expect(runtime.orderQuote({ handle: 'shop', items: [] })).rejects.toThrow();
   });
+
+  it('order_quote: items[].options が cart param まで脱落せず届く (0.5.0 実バグの回帰)', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      return response(402, {
+        x402Version: 1,
+        accepts: [payAccept(url)],
+        error: 'payment_required',
+      });
+    }) as unknown as typeof fetch;
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl });
+    await runtime.orderQuote({
+      handle: 'shop',
+      items: [{ id: 'oj', qty: 1, options: { size: 'm', top: ['nori', 'egg'] } }],
+    });
+    const payUrl = calls.find((u) => u.includes('/api/agent-order/pay'));
+    expect(payUrl).toBeDefined();
+    const cartParam = new URL(payUrl as string).searchParams.get('cart') as string;
+    // server の encodeAgentCart と byte 一致 (= decodeAgentCart が options ごと読める)
+    expect(cartParam).toBe(
+      encodeAgentCart([{ id: 'oj', qty: 1, options: { size: 'm', top: ['nori', 'egg'] } }]),
+    );
+  });
+
+  it('order_quote: 不正な options (配列/非文字列値) は throw', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl: (async () => {
+      throw new Error('should not fetch');
+    }) as unknown as typeof fetch });
+    await expect(
+      runtime.orderQuote({ handle: 'shop', items: [{ id: 'oj', qty: 1, options: [] }] }),
+    ).rejects.toThrow(/options/);
+    await expect(
+      runtime.orderQuote({
+        handle: 'shop',
+        items: [{ id: 'oj', qty: 1, options: { size: 5 } }],
+      }),
+    ).rejects.toThrow(/options/);
+  });
 });
