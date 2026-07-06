@@ -148,8 +148,8 @@ test.describe('landing / (LP)', () => {
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
     await expect(benefits).toBeVisible();
-    // 4 focal text (ビッグナンバー) — Benefits section 内に scope (benefitsFeeFocal="1%")
-    await expect(benefits.getByText('1%', { exact: true })).toBeVisible();
+    // 4 focal text (ビッグナンバー) — Benefits section 内に scope (benefitsFeeFocal="0〜1%")
+    await expect(benefits.getByText('0〜1%', { exact: true })).toBeVisible();
     await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
     expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);

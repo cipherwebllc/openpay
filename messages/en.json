@@ -99,7 +99,7 @@
     "benefitsSubtitle": "Real value for merchants, simplicity for customers.",
     "benefitsAudienceMerchant": "Merchant",
     "benefitsAudienceCustomer": "Customer",
-    "benefitsFeeFocal": "1%",
+    "benefitsFeeFocal": "0–1%",
     "benefitsFeeTitle": "0–1% fee",
     "benefitsFeeBody": "The payment QR: 1% per gasless payment (min 2 JPYC) — lower than typical card (3.24%) or code-payment (1.98%) rates.",
     "benefitsCostFocal": "¥0",
