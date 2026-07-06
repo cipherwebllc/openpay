@@ -52,7 +52,16 @@ function isDirectInvocation() {
 
 if (isDirectInvocation()) {
   main().catch((error) => {
-    console.error(safeErrorMessage(error));
+    // P2-Q: 起動失敗時の redaction を無力化させない。config 無しだと safeErrorMessage は署名 hex の
+    // 正規表現置換しか効かず、秘密値 (BUYER_PRIVATE_KEY / STEWARD_API_KEY / STEWARD_SIGNER_SECRET) の
+    // 文字列置換が no-op になる。process.env から best-effort に redaction 対象を渡す。
+    console.error(
+      safeErrorMessage(error, {
+        buyerPrivateKey: process.env.BUYER_PRIVATE_KEY ?? null,
+        stewardApiKey: process.env.STEWARD_API_KEY ?? null,
+        stewardSignerSecret: process.env.STEWARD_SIGNER_SECRET ?? null,
+      }),
+    );
     process.exitCode = 1;
   });
 }

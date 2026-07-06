@@ -323,9 +323,15 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
     return null;
   }
   const menu: MenuItem[] = [];
+  const seenIds = new Set<string>(); // P2-M: menu item id の一意性 (validOptionGroups と同じ dedup 方針)
   for (const m of o.menu) {
     const item = validMenuItem(m);
     if (!item) return null;
+    // id 重複は不正: MobileOrderView の qty state / cartLines / agent-order は item.id をキーにするため、
+    // 同一 id が 2 件あると別価格でも数量が連動し注文が壊れる。builder(preset)は一意 id を振るが、
+    // POST /api/handle に直接 JSON を送れば作れてしまう untrusted 経路ゆえ検証で弾く。
+    if (seenIds.has(item.id)) return null;
+    seenIds.add(item.id);
     menu.push(item);
   }
   const parts: StorefrontParts = { chain: o.chain, mode: o.mode, feePayer: o.feePayer, menu };
