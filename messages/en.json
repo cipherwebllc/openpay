@@ -17,7 +17,7 @@
   "Landing": {
     "tagline": "No setup cost · instant settlement · no contract · open source",
     "heroLeadline": "Run your whole store on JPYC.",
-    "heroBody": "The payment QR is 0–1% — from there, <b>mobile ordering, order relay, receipts, and accounting</b> all run on JPYC. Sales settle straight to your wallet.",
+    "heroBody": "From payments to <b>mobile ordering, order relay, receipts, and accounting</b> — all on JPYC. Sales settle straight to your wallet. Fees are 0–1%.",
     "heroVisualAlt": "Illustration of a customer paying by scanning a QR code at a shop counter while the merchant tablet shows payment received",
     "ctaScanTitle": "Pay (Scan)",
     "ctaScanBody": "Connect a wallet, scan a merchant QR, and pay instantly.",
