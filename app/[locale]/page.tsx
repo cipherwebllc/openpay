@@ -34,10 +34,12 @@ export default async function HomePage({
       <div className="mt-6">
         <MarketRates />
       </div>
+      {/* 決済 QR はコモディティ化 (競合も 0% JPYC QR)。差別化はその先の店舗オペレーション =
+          モバイル注文を Hero 直下へ昇格し「決済だけでない深さ」を最初に見せる (定番/インフラ positioning)。 */}
+      <LandingMobileOrder />
       <LandingBenefits />
       <LandingCashComparison />
       <LandingHowItWorks />
-      <LandingMobileOrder />
       <LandingFeatures />
       <LandingUseCases />
       <LandingFaq />

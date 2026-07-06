@@ -11,9 +11,9 @@ test.describe('landing / (LP)', () => {
     // AppHeader: logo は alt='OpenPay' の h1
     await expect(page.getByRole('heading', { name: 'OpenPay' }).first()).toBeVisible();
 
-    // Hero leadline (h2) — 「JPYC QR決済」体言止め
+    // Hero leadline (h2) — 「JPYCで、店舗まるごと。」(店舗レイヤー positioning)
     await expect(
-      page.getByRole('heading', { name: /JPYC QR決済/ }),
+      page.getByRole('heading', { name: /JPYCで、店舗まるごと/ }),
     ).toBeVisible();
 
     // 2 大 CTA
