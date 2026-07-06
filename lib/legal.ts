@@ -263,7 +263,12 @@ export const DISCLOSED_X402_FEE = {
 // 実 x402 料率 (env 由来・lib/x402/facilitatorConfig.ts) が開示済みの数値 (DISCLOSED_X402_FEE) と乖離して
 // いないかを判定する純関数。legal.ts を x402 runtime config へ結合させないため live 値を引数で受け取る
 // (呼出側 = facilitator route が x402FacilitatorConfig.feeBps / feeFloorWei を渡す)。乖離なら人間可読な
-// 理由文字列、一致していれば null。deploy 時の env ドリフトを runtime warn で可視化する用途。
+// 理由文字列、一致していれば null。
+// ⚠️ これは **release gate ではなく best-effort な runtime 監視** (呼出側は throw せず warn/Sentry する
+// のみ・呼ばれた route が最初にヒットするまで評価されない = P2-L)。開示の**静的**な数値
+// (DISCLOSED_X402_FEE.bps=100 / floorJpyc=1) 自体の不意の改変は tests/lib/x402/disclosure.test.ts が
+// CI で assert して止める。env 由来の**動的**な乖離 (X402_FEE_BPS を開示と別値でデプロイ) は静的検査
+// 不能ゆえ本関数の runtime warn で拾う (人間のフォロー前提)。
 export function x402FeeDisclosureDivergence(
   feeBps: number,
   feeFloorWei: bigint,
