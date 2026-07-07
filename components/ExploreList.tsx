@@ -44,8 +44,10 @@ export function ExploreList() {
 
   return (
     <div className="space-y-8">
-      {/* category フィルタ (件数つき chip)。既定「すべて」= 全表示。 */}
-      <div className="flex flex-wrap gap-2">
+      {/* category フィルタ (件数つき chip)。既定「すべて」= 全表示。32+ エントリの長い
+          directory なので sticky で追従させる (top はヘッダ実高 57px・下を潜る entry は
+          backdrop-blur で霞ませる)。-mx-4/px-4 で main の余白いっぱいに帯を広げる。 */}
+      <div className="sticky top-[57px] z-20 -mx-4 flex flex-wrap gap-2 bg-slate-50/90 px-4 py-3 backdrop-blur-md print:hidden">
         <FilterChip
           active={active === 'all'}
           onClick={() => setActive('all')}
