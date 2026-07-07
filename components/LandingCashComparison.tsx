@@ -27,12 +27,12 @@ export async function LandingCashComparison() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('cashTitle')}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">{t('cashSubtitle')}</p>
+        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('cashSubtitle')}</p>
       </div>
 
       {/* 比較表: モバイルでも 3 列が 1 画面に収まるよう圧縮 (結論の OpenPay 列を隠さない)。overflow-x-auto は保険。

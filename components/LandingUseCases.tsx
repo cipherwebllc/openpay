@@ -47,22 +47,22 @@ export async function LandingUseCases() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('useCasesTitle')}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">{t('useCasesSubtitle')}</p>
+        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('useCasesSubtitle')}</p>
       </div>
 
       {/* 5 件 grid。mobile 1 col / sm 2 col / lg 3 col。5 件目は 3 col 行では
           独立して左寄せになる (素直な flow)。デザイン上 6 件目で揃えるよりも
           5 件を本気で並べる方が「内容が薄められない」感を出せる。 */}
-      <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="mt-10 flex flex-wrap justify-center gap-4">
         {USE_CASES.map((useCase) => (
           <li
             key={useCase.id}
-            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card"
+            className="w-full overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] lg:w-[calc((100%-2rem)/3)]"
           >
             <Image
               src={useCase.image}

@@ -70,7 +70,7 @@ export function TodayCard() {
     <Link
       href={`/${locale}/history`}
       prefetch={false}
-      className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-card transition-colors hover:border-slate-300 print:hidden"
+      className="group mt-6 flex items-center justify-between gap-4 rounded-2xl bg-gradient-to-br from-blue-50/80 via-white to-white px-4 py-4 shadow-card ring-1 ring-brand/15 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover hover:ring-brand/30 print:hidden sm:px-5"
     >
       <div className="min-w-0">
         <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
@@ -80,7 +80,7 @@ export function TodayCard() {
           <span className="text-slate-500">{t('count', { count: today.count })}</span>
         </p>
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-2xl font-bold tracking-tight text-slate-900">
+          <span className="text-[1.75rem] font-bold leading-none tracking-tight text-slate-900 sm:text-3xl">
             ¥{yen.toLocaleString('en-US')}
           </span>
           {hasUsdc && (
@@ -93,7 +93,12 @@ export function TodayCard() {
           {t('lastReceived', { time: formatClock(today.lastTs) })}
         </p>
       </div>
-      <ArrowRight className="h-4 w-4 flex-shrink-0 text-slate-400" aria-hidden />
+      <span
+        aria-hidden
+        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand transition-all duration-200 group-hover:translate-x-0.5 group-hover:bg-brand group-hover:text-white"
+      >
+        <ArrowRight className="h-4 w-4" />
+      </span>
     </Link>
   );
 }

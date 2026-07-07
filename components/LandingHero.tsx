@@ -24,10 +24,10 @@ export async function LandingHero() {
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand" />
             {t('tagline')}
           </p>
-          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.05] tracking-[-0.02em] text-slate-900 sm:text-[3.5rem]">
+          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.05] tracking-[-0.02em] text-slate-900 sm:text-6xl">
             {t('heroLeadline')}
           </h2>
-          <p className="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-slate-500 sm:text-base">
+          <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-500 sm:text-base">
             {t.rich('heroBody', {
               b: (chunks) => <strong className="font-bold text-slate-900">{chunks}</strong>,
             })}

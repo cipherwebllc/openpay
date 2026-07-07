@@ -37,14 +37,12 @@ const CARDS: readonly BenefitCard[] = [
 // 固定なので card className に直接置く (TONE には残さない)。
 const TONE = {
   merchant: {
-    border: 'border-emerald-200',
     focal: 'text-emerald-600',
     pillBg: 'bg-emerald-100',
     pillInk: 'text-emerald-800',
     iconInk: 'text-emerald-500',
   },
   customer: {
-    border: 'border-blue-200',
     focal: 'text-blue-600',
     pillBg: 'bg-blue-100',
     pillInk: 'text-blue-800',
@@ -61,12 +59,12 @@ export async function LandingBenefits() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('benefitsTitle')}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">{t('benefitsSubtitle')}</p>
+        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('benefitsSubtitle')}</p>
       </div>
 
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -75,7 +73,7 @@ export async function LandingBenefits() {
           return (
             <li
               key={id}
-              className={`flex flex-col rounded-2xl border bg-white ${c.border} p-5 shadow-card`}
+              className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"
             >
               <div className="flex items-center justify-between">
                 <span
@@ -115,7 +113,7 @@ export async function LandingBenefits() {
           {t('benefitsWhyLead')}
         </p>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
             <h4 className="text-sm font-semibold text-slate-900 sm:text-base">
               {t('benefitsWhyPoint1Title')}
             </h4>
@@ -123,7 +121,7 @@ export async function LandingBenefits() {
               {t('benefitsWhyPoint1Body')}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
             <h4 className="text-sm font-semibold text-slate-900 sm:text-base">
               {t('benefitsWhyPoint2Title')}
             </h4>
