@@ -20,51 +20,56 @@ export async function LandingMobileOrder() {
   const createHref = `/${locale}/create?tab=mobileOrder`;
 
   return (
-    <section className="mt-14">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-          {t('mobileOrderBannerTitle')}
-        </h2>
-        <p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-          {t('mobileOrderBannerLead')}
-        </p>
-      </div>
+    <section className="mt-16 sm:mt-20">
+      {/* 差別化の主役 = フィーチャーステージ。emerald の淡い帯で LP 内の「章」として独立させ、
+          desktop はテキスト+CTA (左) × 実画面バナー (右) の 2 カラム、mobile は縦積み。 */}
+      <div className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/40 ring-1 ring-emerald-200/50">
+        <div className="grid items-center gap-8 p-6 sm:p-10 lg:grid-cols-[5fr,6fr] lg:gap-12 lg:p-12">
+          <div className="text-center lg:text-left">
+            <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+              {t('mobileOrderBannerTitle')}
+            </h2>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:text-base lg:mx-0">
+              {t('mobileOrderBannerLead')}
+            </p>
+            <div className="mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center lg:justify-start">
+              <Link
+                href={createHref}
+                prefetch={false}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+              >
+                {t('mobileOrderBannerCta')}
+                <ArrowRight className="h-4 w-4" aria-hidden />
+              </Link>
+              <a
+                href={NOTE_ARTICLE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/80 px-6 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
+              >
+                {t('mobileOrderBannerLearnMore')}
+                <ExternalLink className="h-4 w-4" aria-hidden />
+              </a>
+            </div>
+          </div>
 
-      {/* バナー画像はそのまま主 CTA への大きなクリック領域にする (画像内の擬似ボタンを実リンク化)。
-          link の a11y 名は画像 alt が担う (内側に競合する可視テキストは無いので不一致は起きない)。 */}
-      <Link
-        href={createHref}
-        prefetch={false}
-        className="group mx-auto mt-6 block max-w-3xl overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-inset ring-slate-200/60 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift hover:ring-brand/30"
-      >
-        <Image
-          src="/landing/mobileorder.webp"
-          alt={t('mobileOrderBannerAlt')}
-          width={1280}
-          height={670}
-          sizes="(min-width: 768px) 768px, calc(100vw - 2rem)"
-          className="h-auto w-full"
-        />
-      </Link>
-
-      <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
-        <Link
-          href={createHref}
-          prefetch={false}
-          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
-        >
-          {t('mobileOrderBannerCta')}
-          <ArrowRight className="h-4 w-4" aria-hidden />
-        </Link>
-        <a
-          href={NOTE_ARTICLE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition-colors hover:border-brand/40 hover:text-brand-dark"
-        >
-          {t('mobileOrderBannerLearnMore')}
-          <ExternalLink className="h-4 w-4" aria-hidden />
-        </a>
+          {/* バナー画像はそのまま主 CTA への大きなクリック領域にする (画像内の擬似ボタンを実リンク化)。
+              link の a11y 名は画像 alt が担う (内側に競合する可視テキストは無いので不一致は起きない)。 */}
+          <Link
+            href={createHref}
+            prefetch={false}
+            className="group block overflow-hidden rounded-2xl bg-white shadow-lift ring-1 ring-inset ring-emerald-900/10 transition-all duration-200 hover:-translate-y-1 hover:ring-emerald-500/30"
+          >
+            <Image
+              src="/landing/mobileorder.webp"
+              alt={t('mobileOrderBannerAlt')}
+              width={1280}
+              height={670}
+              sizes="(min-width: 1024px) 560px, (min-width: 640px) 640px, calc(100vw - 3rem)"
+              className="h-auto w-full transition-transform duration-300 group-hover:scale-[1.015]"
+            />
+          </Link>
+        </div>
       </div>
     </section>
   );

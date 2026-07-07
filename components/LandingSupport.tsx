@@ -39,12 +39,12 @@ export async function LandingSupport() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('supportTitle')}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">{t('supportSubtitle')}</p>
+        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('supportSubtitle')}</p>
       </div>
 
       {/* 4 方法の利用料カード (導入メリットと同じビッグナンバー様式)。focal は "1% / 3%" が
@@ -53,7 +53,7 @@ export async function LandingSupport() {
         {FEE_CARDS.map(({ id, Icon }) => (
           <li
             key={id}
-            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
+            className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"
           >
             <Icon className="h-5 w-5 text-brand" aria-hidden />
             <p className="mt-4 whitespace-nowrap break-keep text-3xl font-extrabold leading-none text-brand sm:text-4xl">
@@ -103,11 +103,11 @@ export async function LandingSupport() {
           </span>
 
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
+            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               <span className="text-sm font-bold text-slate-900 sm:text-base">
                 OpenPay
               </span>
-              <span className="truncate font-mono text-xs font-medium text-slate-400">
+              <span className="font-mono text-xs font-medium text-slate-400">
                 {PROFILE_HANDLE}
               </span>
               <ExternalLink
@@ -123,7 +123,7 @@ export async function LandingSupport() {
           {/* CTA pill (装飾・aria-hidden)。 */}
           <span
             aria-hidden
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors group-hover:bg-brand-dark"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-brand-dark sm:px-4 sm:py-2.5 sm:text-sm"
           >
             <Heart className="h-4 w-4" />
             {t('supportProfileCta')}

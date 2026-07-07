@@ -56,21 +56,21 @@ export async function LandingFaq() {
   }
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('faqTitle')}
         </h2>
       </div>
 
-      <ul className="mx-auto mt-6 max-w-3xl space-y-2">
+      <ul className="mx-auto mt-8 max-w-3xl divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
         {QA.map(({ q, a }) => (
           <li key={q}>
-            <details className="group rounded-2xl border border-slate-200 bg-white px-5 py-4 open:shadow-sm">
-              <summary className="flex cursor-pointer list-none items-start gap-2 text-left text-sm font-semibold text-slate-800">
+            <details className="group px-5 py-4 transition-colors open:bg-slate-50/60 sm:px-6 sm:py-5">
+              <summary className="flex cursor-pointer list-none items-start gap-3 text-left text-sm font-semibold text-slate-800 sm:text-[15px]">
                 <span className="flex-1">{t(q)}</span>
                 <ChevronDown
-                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180 group-open:text-brand"
                   aria-hidden
                 />
               </summary>

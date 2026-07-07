@@ -69,12 +69,12 @@ export async function LandingFeatures() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('featuresTitle')}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">{t('featuresSubtitle')}</p>
+        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('featuresSubtitle')}</p>
       </div>
 
       {/* 開発者向けの技術詳細は最下部 Trust「オープン技術と透明性」の技術スタックに
@@ -86,7 +86,7 @@ export async function LandingFeatures() {
           return (
             <li
               key={titleKey}
-              className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
+              className="flex flex-col gap-2 rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70"
             >
               <Icon className={`h-6 w-6 ${c.ink}`} aria-hidden />
               <h3 className="text-base font-semibold text-slate-900">

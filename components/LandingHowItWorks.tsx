@@ -34,12 +34,12 @@ export async function LandingHowItWorks() {
   ];
 
   return (
-    <section className="mt-14">
+    <section className="mt-24 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('howItWorksTitle')}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">{t('howItWorksSubtitle')}</p>
+        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('howItWorksSubtitle')}</p>
       </div>
 
       {/* 実機 (iPhone) で撮った実際の操作デモ 3 本。静止画の図より「本当に動く」が
@@ -95,7 +95,7 @@ export async function LandingHowItWorks() {
       </div>
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
-        <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-card">
+        <article className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
           <h3 className="text-base font-semibold text-emerald-900">
             {t('howItWorksMerchantTitle')}
           </h3>
@@ -111,7 +111,7 @@ export async function LandingHowItWorks() {
           </ol>
         </article>
 
-        <article className="rounded-2xl border border-blue-200 bg-white p-5 shadow-card">
+        <article className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
           <h3 className="text-base font-semibold text-blue-900">
             {t('howItWorksCustomerTitle')}
           </h3>

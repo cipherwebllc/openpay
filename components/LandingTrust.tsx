@@ -7,26 +7,31 @@ export async function LandingTrust() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-14 rounded-3xl border border-slate-200 bg-slate-50 p-6 sm:p-8">
+    <section className="relative mt-24 overflow-hidden rounded-[2rem] bg-slate-900 p-8 sm:mt-28 sm:p-12">
+      {/* 装飾: 上部の淡いブランドグロー (ダーク面の奥行き)。 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 -top-24 mx-auto h-64 max-w-2xl bg-[radial-gradient(60%_60%_at_50%_0%,rgba(59,130,246,0.25),transparent_70%)]"
+      />
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-xl font-bold text-slate-900 sm:text-2xl">
+        <h2 className="text-[1.5rem] font-bold leading-tight tracking-tight text-white sm:text-3xl">
           {t('trustTitle')}
         </h2>
-        <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">
+        <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
           {t('trustBody')}
         </p>
         <a
           href="https://github.com/cipherwebllc/openpay"
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-400 hover:bg-slate-100"
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover"
         >
           <GithubIcon />
           {t('trustGithubLabel')} ↗
         </a>
         {/* 技術スタックは開発者向け補足として小さく出す (一般読者には trustBody
             だけで充足、開発者は具体技術名で OpenPay の構成を検証できる)。 */}
-        <p className="mx-auto mt-4 max-w-2xl text-[11px] leading-relaxed text-slate-400">
+        <p className="mx-auto mt-6 max-w-2xl text-[11px] leading-relaxed text-slate-500">
           {t('trustTechStack')}
         </p>
       </div>
