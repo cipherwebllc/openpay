@@ -192,7 +192,7 @@ export function HistoryToolbar({
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card">
+    <div className="space-y-3 rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
       {/* 種別フィルタ (受取/支払い)。受取控え + 支払い控えの統合一覧を絞り込む。 */}
       <div
         role="group"

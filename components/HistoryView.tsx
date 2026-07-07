@@ -147,7 +147,7 @@ export function HistoryView() {
         </p>
       )}
       {visible.length === 0 ? (
-        <p className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+        <p className="rounded-xl bg-white px-4 py-8 text-center text-sm text-slate-500 shadow-card ring-1 ring-slate-200/70">
           {t('filterEmpty')}
         </p>
       ) : (
