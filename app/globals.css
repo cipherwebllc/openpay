@@ -6,9 +6,15 @@
   color-scheme: light;
 }
 
-html,
-body {
+/* body は height 固定にしない (min-height): height:100% だと body の箱が 1 画面分に
+   固定され、position:sticky (AppHeader 等) が最初の 1 viewport を超えて追従できない
+   (sticky は親ボックスの範囲内でしか粘れない)。全ページで h-full の % 連鎖には未依存
+   (フルハイトは各ページが min-h-screen で自前確保)。 */
+html {
   height: 100%;
+}
+body {
+  min-height: 100%;
 }
 
 /* モバイルのタップ時ハイライト矩形を消す (ネイティブアプリらしい押下感の前提)。 */
