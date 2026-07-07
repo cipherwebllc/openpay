@@ -47,11 +47,7 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
   return (
     <div className="space-y-3">
       <div
-        className={`relative overflow-hidden rounded-3xl border ${
-          isScanning
-            ? 'border-slate-800 bg-slate-900'
-            : 'border-slate-200 bg-gradient-to-b from-white to-slate-50 shadow-card'
-        }`}
+        className="relative overflow-hidden rounded-3xl bg-slate-900 shadow-lift ring-1 ring-slate-800"
       >
         {/* video は常に mount する。idle / fallback では h-0 で論理的に隠す
             (display:none だと iOS Safari で getUserMedia が失敗する既知 quirk)。 */}
@@ -78,23 +74,23 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
         )}
         {!isScanning && (
           <div className="flex min-h-[17rem] flex-col items-center justify-center gap-3 px-6 py-8 text-center">
-            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand/10">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
               <CameraIcon />
             </span>
-            <p className="text-sm text-slate-600">{t('cameraIdleHint')}</p>
+            <p className="max-w-[16rem] text-balance text-sm leading-relaxed text-slate-300">{t('cameraIdleHint')}</p>
             {state.status === 'idle' && (
               <button
                 type="button"
                 onClick={() => {
                   void start();
                 }}
-                className="rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark focus:outline-none focus:ring-2 focus:ring-brand"
+                className="rounded-xl bg-white px-6 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover focus:outline-none focus:ring-2 focus:ring-white/60 active:translate-y-0"
               >
                 {t('startCameraButton')}
               </button>
             )}
             {state.status === 'starting' && (
-              <p className="text-xs text-slate-500">{t('cameraStarting')}</p>
+              <p className="text-xs text-slate-400">{t('cameraStarting')}</p>
             )}
             {state.status === 'permission-denied' && (
               <StatusBox
@@ -125,16 +121,16 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
       {/* URL 手入力 fallback — fallback active 時は強調表示、scanning 時も
           畳まれた状態で残しておく (慣れたユーザが click だけで URL を試せる動線) */}
       <details
-        className={`rounded-xl border bg-white text-sm ${
+        className={`rounded-xl text-sm ring-1 ${
           fallbackActive
-            ? 'border-amber-300 shadow-sm'
-            : 'border-dashed border-slate-300'
+            ? 'bg-white ring-amber-300 shadow-sm'
+            : 'bg-slate-100/70 ring-slate-200/60'
         }`}
         open={fallbackActive}
       >
         <summary
           className={`cursor-pointer px-4 py-2.5 font-medium ${
-            fallbackActive ? 'text-amber-900' : 'text-slate-600'
+            fallbackActive ? 'text-amber-900' : 'text-slate-500'
           }`}
         >
           {t('manualUrlSummary')}
@@ -207,7 +203,7 @@ function StatusBox({
 
 // QR スキャナのビューファインダー四隅フレーム (4 つの L 字)。idle=ブランド色 / scanning=白。
 function CornerFrame({ scanning }: { scanning: boolean }) {
-  const color = scanning ? 'border-white/85' : 'border-brand/70';
+  const color = scanning ? 'border-white/85' : 'border-white/45';
   const base = 'pointer-events-none absolute h-7 w-7';
   return (
     <>
@@ -230,7 +226,7 @@ function CameraIcon() {
       strokeWidth="1.6"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="text-brand"
+      className="text-white/90"
       aria-hidden
     >
       <rect x="3" y="6" width="18" height="13" rx="2" />

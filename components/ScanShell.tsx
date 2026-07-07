@@ -90,7 +90,7 @@ export function ScanShell() {
     <div className="space-y-5">
       <PwaInstallHint />
 
-      <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-card">
+      <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
         <h2 className="text-sm font-semibold text-slate-700">
           {t('scannerTitle')}
         </h2>
@@ -102,7 +102,7 @@ export function ScanShell() {
 
       {/* ウォレットの状態はスキャナの下に置く。接続済みなら保有残高 (JPYC/USDC を
           チェーン別に) も表示する — リストが伸びてもスキャナは上に固定されたまま。 */}
-      <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-card">
+      <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
         <h2 className="text-sm font-semibold text-slate-700">
           {t('connectionTitle')}
         </h2>

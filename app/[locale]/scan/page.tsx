@@ -10,7 +10,7 @@ export default function ScanPage() {
     <AppShell>
       <div className="mx-auto w-full max-w-md">
         <div className="mb-5">
-          <h2 className="text-xl font-bold text-slate-900">{t('pageTitle')}</h2>
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">{t('pageTitle')}</h2>
           <p className="mt-1 text-sm text-slate-500">{t('pageSubtitle')}</p>
         </div>
         <ScanShell />

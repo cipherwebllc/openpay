@@ -96,7 +96,7 @@ export function PwaInstallHint({ title, iosStep3 }: PwaInstallHintProps = {}) {
   }
 
   return (
-    <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+    <div className="rounded-2xl bg-blue-50/70 px-4 py-3 text-sm text-blue-900 ring-1 ring-blue-200/60">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
           <p className="font-semibold">{title ?? t('installHintTitle')}</p>
@@ -122,7 +122,7 @@ export function PwaInstallHint({ title, iosStep3 }: PwaInstallHintProps = {}) {
           type="button"
           onClick={persistDismiss}
           aria-label={t('installHintDismiss')}
-          className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          className="rounded-md bg-white/80 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200/60 hover:bg-white"
         >
           ×
         </button>

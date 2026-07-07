@@ -44,7 +44,7 @@ export function PayerReceiptList() {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+    <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-700">
           {t('sectionTitle')}
