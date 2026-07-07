@@ -315,7 +315,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     const step3 = page.locator('section[aria-labelledby="step-3-heading"]');
     await expect(step3).toBeVisible();
     const className = await step3.getAttribute('class');
-    expect(className).toMatch(/border-brand\/40/);
+    expect(className).toMatch(/ring-brand\/25/);
     expect(className).toMatch(/ring-1/);
   });
 

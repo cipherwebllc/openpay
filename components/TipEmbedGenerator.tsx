@@ -398,7 +398,7 @@ export function TipEmbedGenerator() {
 
         {/* ▸ 高度な設定 (任意): チップは設計上常にガスレス固定 (読み取り表示) +
             crossChain (USDC のみ)。3 モードの IA を揃えるため折りたたみで集約。 */}
-        <div className="rounded-2xl border border-slate-200 bg-white">
+        <div className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
           <button
             type="button"
             onClick={() => setAdvancedOpen((o) => !o)}
@@ -660,7 +660,7 @@ export function TipEmbedGenerator() {
             単一チップの生成に専念する。 */}
 
         {/* 開発者向け設定 (折りたたみ、default 閉): 成功画面 + webhook */}
-        <div className="rounded-2xl border border-slate-200 bg-white">
+        <div className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
           <button
             type="button"
             onClick={() => setDevOpen((o) => !o)}

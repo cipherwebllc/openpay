@@ -66,7 +66,7 @@ export function MiniHistoryRecent() {
   return (
     <section
       aria-labelledby="mini-history-heading"
-      className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 print:hidden"
+      className="mt-6 rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
     >
       <h2
         id="mini-history-heading"
