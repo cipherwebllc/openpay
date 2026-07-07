@@ -7,7 +7,7 @@ import { Receipt, ArrowRight } from 'lucide-react';
 export function HistoryEmptyState() {
   const t = useTranslations('History');
   return (
-    <div className="flex flex-col items-center rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-card">
+    <div className="flex flex-col items-center rounded-3xl bg-white px-6 py-12 text-center shadow-card ring-1 ring-slate-200/70">
       <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/5 text-brand">
         <Receipt className="h-7 w-7" aria-hidden />
       </span>

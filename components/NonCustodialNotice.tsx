@@ -42,7 +42,7 @@ export function NonCustodialNotice({
     <aside
       role="note"
       className={[
-        'rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700',
+        'rounded-xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 ring-1 ring-slate-200/70',
         className ?? '',
       ]
         .filter(Boolean)

@@ -34,7 +34,7 @@ export function HistorySummary({ summary }: { summary: Summary }) {
   return (
     <section
       aria-label={t('summaryTitle')}
-      className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-card"
+      className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70"
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
         {/* GMV を主役に: 小さなラベル + 大きな円金額。 */}

@@ -148,10 +148,10 @@ export function HistoryRow({
   return (
     <li className="list-none">
       <details
-        className={`group overflow-hidden rounded-2xl border bg-white shadow-card transition-all duration-700 open:shadow-card-hover ${
+        className={`group overflow-hidden rounded-2xl bg-white shadow-card transition-all duration-700 open:shadow-card-hover ${
           flash
-            ? 'border-emerald-300 ring-2 ring-emerald-200 bg-emerald-50/50'
-            : 'border-slate-200/70'
+            ? 'ring-2 ring-emerald-300 bg-emerald-50/50'
+            : 'ring-1 ring-slate-200/70'
         }`}
       >
         <summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden">
