@@ -362,7 +362,7 @@ export function X402DiscoveryView() {
   return (
     <div className="space-y-6">
       {/* 出品: 加盟店登録 / 編集 */}
-      <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-card sm:p-6">
+      <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
         <div className="flex items-start gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
             <Plus className="h-5 w-5" aria-hidden />
@@ -529,7 +529,7 @@ export function X402DiscoveryView() {
             {owned.map((r) => (
               <li
                 key={r.id}
-                className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card"
+                className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70"
               >
                 {cardHead({
                   category: r.category,
@@ -625,7 +625,7 @@ export function X402DiscoveryView() {
             <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
           </div>
         ) : items.length === 0 ? (
-          <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+          <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl bg-white px-6 py-10 text-center shadow-card ring-1 ring-slate-200/70">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/5 text-brand">
               <Boxes className="h-6 w-6" aria-hidden />
             </span>
@@ -649,7 +649,7 @@ export function X402DiscoveryView() {
               return (
                 <li
                   key={item.resource}
-                  className="group rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-hover"
+                  className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-card-hover"
                 >
                   {cardHead({
                     category: item.category,
@@ -683,7 +683,7 @@ export function X402DiscoveryView() {
 
       {/* 1 JPYC の first-party demo。長い buyer script は raw を参照し、ページには最小コマンドだけ載せる。 */}
       <section>
-        <details className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card">
+        <details className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
           <summary className="flex cursor-pointer list-none items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
               <Code2 className="h-5 w-5" aria-hidden />
@@ -758,7 +758,7 @@ export function X402DiscoveryView() {
 
       {/* エージェント導線: npm 公開済みの買い手 MCP (openpay-x402-mcp)。設定 JSON を貼るだけ。 */}
       <section>
-        <details className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-card">
+        <details className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
           <summary className="flex cursor-pointer list-none items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
               <Boxes className="h-5 w-5" aria-hidden />
