@@ -65,7 +65,7 @@ export default async function GuidePosPage({
 
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
-          <section className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
             <h2 className="text-base font-semibold text-emerald-900">
               {c.canDoTitle}
             </h2>
@@ -76,7 +76,7 @@ export default async function GuidePosPage({
             />
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
             <h2 className="text-base font-semibold text-slate-900">
               {c.cannotTitle}
             </h2>
@@ -117,7 +117,7 @@ export default async function GuidePosPage({
             badgeClassName="bg-emerald-600 text-white"
           />
           <GuideFigure image={c.flowImage} />
-          <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
+          <p className="rounded-xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200">
             {c.safetyNote}
           </p>
           <GuideFigure
@@ -151,7 +151,7 @@ export default async function GuidePosPage({
             {c.posExamples.map((name) => (
               <li
                 key={name}
-                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700"
+                className="rounded-full bg-white px-3 py-1 text-sm text-slate-700 shadow-card ring-1 ring-slate-200/70"
               >
                 {name}
               </li>
@@ -159,7 +159,7 @@ export default async function GuidePosPage({
           </ul>
           {/* POS アフィリエイト (承認済)。景表法 (ステマ規制) 対応で affiliateAdLabel「広告」を
               併記し、rel="sponsored nofollow" + target=_blank で開く (lib/explore.ts と同思想)。 */}
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+          <div className="mt-4 rounded-xl bg-emerald-50/60 p-4 ring-1 ring-emerald-200/70">
             <div className="flex items-center gap-2">
               <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                 {c.affiliateAdLabel}
@@ -223,7 +223,7 @@ export default async function GuidePosPage({
               </tbody>
             </table>
           </div>
-          <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-900">
+          <p className="mt-4 rounded-xl bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-900 ring-1 ring-emerald-200/70">
             {c.feeNote}
           </p>
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
@@ -246,14 +246,14 @@ export default async function GuidePosPage({
         </Section>
 
         {/* CTA */}
-        <section className="mt-12 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
           <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-4 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
+            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
           >
             {c.ctaButton}
           </Link>

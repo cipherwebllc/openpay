@@ -18,20 +18,20 @@ import { POS_GUIDE } from '@/lib/posGuide';
 describe('GuideFigure', () => {
   it('img を /guide/<file> + FIGURE_DIMS の width/height + alt + lazy で描画', () => {
     const { container } = render(
-      <GuideFigure image={{ file: 'hero.svg', alt: 'ヒーロー図' }} />,
+      <GuideFigure image={{ file: 'hero.webp', alt: 'ヒーロー図' }} />,
     );
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
-    expect(img).toHaveAttribute('src', '/guide/hero.svg');
+    expect(img).toHaveAttribute('src', '/guide/hero.webp');
     expect(img).toHaveAttribute('alt', 'ヒーロー図');
-    expect(img).toHaveAttribute('width', String(FIGURE_DIMS['hero.svg'].w));
-    expect(img).toHaveAttribute('height', String(FIGURE_DIMS['hero.svg'].h));
+    expect(img).toHaveAttribute('width', String(FIGURE_DIMS['hero.webp'].w));
+    expect(img).toHaveAttribute('height', String(FIGURE_DIMS['hero.webp'].h));
     expect(img).toHaveAttribute('loading', 'lazy');
   });
 
   it('caption 無し → figcaption を描画しない', () => {
     const { container } = render(
-      <GuideFigure image={{ file: 'hero.svg', alt: 'a' }} />,
+      <GuideFigure image={{ file: 'hero.webp', alt: 'a' }} />,
     );
     expect(container.querySelector('figcaption')).toBeNull();
   });
@@ -39,7 +39,7 @@ describe('GuideFigure', () => {
   it('caption 有り → figcaption に文言を描画', () => {
     render(
       <GuideFigure
-        image={{ file: 'hero.svg', alt: 'a' }}
+        image={{ file: 'hero.webp', alt: 'a' }}
         caption="これは例です"
       />,
     );
@@ -49,12 +49,12 @@ describe('GuideFigure', () => {
 
   it('className 既定は my-6 / 指定で上書き', () => {
     const { container, rerender } = render(
-      <GuideFigure image={{ file: 'hero.svg', alt: 'a' }} />,
+      <GuideFigure image={{ file: 'hero.webp', alt: 'a' }} />,
     );
     expect(container.querySelector('figure')).toHaveClass('my-6');
     rerender(
       <GuideFigure
-        image={{ file: 'hero.svg', alt: 'a' }}
+        image={{ file: 'hero.webp', alt: 'a' }}
         className="mx-auto max-w-[260px]"
       />,
     );

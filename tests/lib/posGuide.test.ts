@@ -140,8 +140,8 @@ describe('POS_GUIDE: 形式不変条件 (描画前提)', () => {
     expect(POS_GUIDE[loc].ctaButtonHref.startsWith('/')).toBe(true);
   });
 
-  it('参照する図版 file はすべて .svg', () => {
-    for (const f of referencedFiles()) expect(f).toMatch(/\.svg$/);
+  it('参照する図版 file はすべて .svg か .webp (hero は実 UI 撮影の webp)', () => {
+    for (const f of referencedFiles()) expect(f).toMatch(/\.(svg|webp)$/);
   });
 
   it.each(LOCALES)('%s: setupSteps / flowSteps の n は 1 起点の連番', (loc) => {
@@ -167,7 +167,7 @@ describe('POS_GUIDE: 形式不変条件 (描画前提)', () => {
 // ── (4) 図版ファイルの実在/整合 (実 FS) ───────────────────────────
 describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防止)', () => {
   const filesOnDisk = new Set(
-    readdirSync(GUIDE_DIR).filter((f) => f.endsWith('.svg')),
+    readdirSync(GUIDE_DIR).filter((f) => f.endsWith('.svg') || f.endsWith('.webp')),
   );
   const referenced = referencedFiles();
 
@@ -185,7 +185,7 @@ describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防
 
   it('7 枚の想定図版がすべて存在する', () => {
     const expected = [
-      'hero.svg',
+      'hero.webp',
       'overview-flow.svg',
       'pos-add-method.svg',
       'four-steps.svg',
@@ -201,7 +201,7 @@ describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防
     // トークン有無でなく実パース。壊れた XML (タグ不整合等) は parsererror か
     // root 要素の不一致で検出する (jsdom の DOMParser を使用)。
     const parser = new DOMParser();
-    for (const f of referenced) {
+    for (const f of [...referenced].filter((n) => n.endsWith('.svg'))) {
       const svg = readFileSync(join(GUIDE_DIR, f), 'utf8');
       expect(svg.length, `${f} が空`).toBeGreaterThan(0);
       const doc = parser.parseFromString(svg, 'image/svg+xml');
