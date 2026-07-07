@@ -6,7 +6,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 
 主要な事実（LP・法務文書と同期）:
 
-- 対応チェーン: JPYC は Polygon / Kaia / Avalanche、USDC は 6 チェーン（クロスチェーン支払い自動対応）
+- 対応チェーン: JPYC は Polygon / Kaia / Avalanche / Ethereum の 4 チェーン（Ethereum は通常決済のみ・ガスレス非対応）、USDC は 6 チェーン（クロスチェーン支払い自動対応）
 - OpenPay 利用料: 決済QRは JPYC ガスレス決済が対象で決済額の 1%・最低 2 JPYC（通常決済・USDC は無料）。レジ（POS）は JPYC 決済の 1%。モバイル注文は店内 1%・時間指定の事前注文 3%。チップは受け取り手数料なし
 - ノンカストディ: 売上を預からない。決済と同一取引内で分割され、商品代金は店舗のウォレットへ直接・即時に着金
 - 導入: 費用0円・契約不要・専用端末不要。ウォレットアドレス1つで決済QRを発行できる
