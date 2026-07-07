@@ -107,7 +107,7 @@ const ja: GuideContent = {
   lead: 'いまのPOSレジはそのまま、OpenPay を“横に置くだけ”。開発も連携も不要。設定は一度だけ、慣れれば会計は約10秒です。',
   audience:
     '対象：POSレジ（無料アプリ可）を使っている／これから使う店舗オーナーさん（小売・飲食・サロン・ポップアップなど）。',
-  heroImage: { file: 'hero.svg', alt: '店頭でタブレットのQRを客がスマホでスキャンする様子' },
+  heroImage: { file: 'hero.webp', alt: 'OpenPay のレジ画面と、店名・金額入りの会計 QR コード (スマホ 2 台の実画面)' },
 
   canDoTitle: 'できること',
   canDo: [
@@ -260,7 +260,7 @@ const en: GuideContent = {
   lead: 'Keep your current POS and simply place OpenPay beside it. No development, no integration. Set up once — checkout takes about 10 seconds with practice.',
   audience:
     'For shop owners who use (or can start using) a POS register (a free app is fine) — retail, food, salons, pop-ups.',
-  heroImage: { file: 'hero.svg', alt: 'A customer scanning a QR on a counter tablet with their phone' },
+  heroImage: { file: 'hero.webp', alt: 'OpenPay register screen and a checkout QR code with shop name and amount (two real phone screens)' },
 
   canDoTitle: 'What you can do',
   canDo: [

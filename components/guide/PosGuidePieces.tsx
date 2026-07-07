@@ -11,7 +11,7 @@ import type { GuideImage, GuideStep } from '@/lib/posGuide';
 // POS_GUIDE が参照する全 file がここに entry を持つことを test で強制する
 // (未登録だと下の ?? フォールバックで誤比率描画になるため・黙殺防止)。
 export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
-  'hero.svg': { w: 1200, h: 675 },
+  'hero.webp': { w: 1280, h: 640 },
   'overview-flow.svg': { w: 1000, h: 320 },
   'pos-add-method.svg': { w: 760, h: 480 },
   'four-steps.svg': { w: 1100, h: 280 },
@@ -112,7 +112,7 @@ export function GuideFigure({
         width={dims.w}
         height={dims.h}
         loading="lazy"
-        className="h-auto w-full rounded-2xl border border-slate-200 bg-white"
+        className="h-auto w-full rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70"
       />
       {caption ? (
         <figcaption className="mt-2 text-center text-xs leading-relaxed text-slate-500">
