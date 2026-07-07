@@ -7,6 +7,7 @@ import type { Address } from 'viem';
 import { parseUnits } from 'viem';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 import {
+  ChevronDown,
   Coins,
   Fuel,
   QrCode as QrCodeIcon,
@@ -1313,7 +1314,7 @@ function SettingsAccordion({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white">
+    <div className="rounded-xl bg-white shadow-card ring-1 ring-slate-200/70">
       <button
         type="button"
         onClick={onToggle}
@@ -1328,9 +1329,12 @@ function SettingsAccordion({
             <span className="mt-0.5 text-xs text-slate-600">{summary}</span>
           )}
         </div>
-        <span className="text-slate-400" aria-hidden>
-          {open ? '▲' : '▼'}
-        </span>
+        <ChevronDown
+          className={`h-4 w-4 flex-none text-slate-400 transition-transform duration-200 ${
+            open ? 'rotate-180' : ''
+          }`}
+          aria-hidden
+        />
       </button>
       {open && (
         <div className="space-y-4 border-t border-slate-200 px-4 py-4">

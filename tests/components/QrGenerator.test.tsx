@@ -1730,7 +1730,7 @@ describe('QrGenerator', () => {
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       const step3 = container.querySelector('[aria-labelledby="step-3-heading"]')!;
-      expect(step3.className).toMatch(/border-brand\/40/);
+      expect(step3.className).toMatch(/ring-brand\/25/);
       expect(step3.className).toMatch(/ring-1/);
     });
 

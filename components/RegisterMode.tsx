@@ -552,7 +552,7 @@ export function RegisterMode({
               {lines.map(({ l, amountHuman, valid }) => (
                 <li
                   key={l.id}
-                  className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3"
+                  className="space-y-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200/70"
                 >
                   <div className="flex items-start gap-2">
                     <input
@@ -670,7 +670,7 @@ export function RegisterMode({
 
           {/* 商品プリセット管理 (折りたたみ) */}
           <details
-            className="group rounded-2xl border border-slate-200 bg-white p-4"
+            className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70"
             open={managerOpen}
           >
             <summary
@@ -700,7 +700,7 @@ export function RegisterMode({
 
         {/* ── RIGHT: 会計サマリ (lg で sticky 追従・モバイルは in-flow) ── */}
         <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)]">
-          <div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:max-h-[calc(100vh-6rem)]">
+          <div className="flex flex-col overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 lg:max-h-[calc(100vh-6rem)]">
             <div className="border-b border-slate-100 px-4 py-3">
               <p className="text-sm font-semibold text-slate-700">
                 {t('orderSummaryTitle')}

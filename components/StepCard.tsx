@@ -46,8 +46,8 @@ export function StepCard({
   // 面の浮き (shadow-card) で奥行きを出し、境界線への依存を減らす (tailwind の影トークン方針)。
   const borderClass =
     variant === 'qr-prominent'
-      ? 'border-brand/40 ring-1 ring-brand/15 shadow-card'
-      : 'border-slate-200/70 shadow-card';
+      ? 'ring-1 ring-brand/25 shadow-card'
+      : 'ring-1 ring-slate-200/70 shadow-card';
   // collapsible mode は onToggle が必要。onToggle を渡さずに collapsible=true
   // だけ立てると user が永遠に開けない broken state になるため、その場合は
   // 非 collapsible として扱い children を常時 mount で fall-through する
@@ -83,7 +83,7 @@ export function StepCard({
   return (
     <section
       aria-labelledby={headingId}
-      className={`rounded-2xl border bg-white p-5 sm:p-6 print:rounded-none print:border-0 print:p-0 print:shadow-none ${borderClass}`}
+      className={`rounded-2xl bg-white p-5 sm:p-6 print:rounded-none print:p-0 print:shadow-none print:ring-0 ${borderClass}`}
     >
       {/* heading は h2 (semantic) で囲む。collapsible のときは h2 の中に button
           を置き、その button が aria-expanded を expose する形式 (W3C ARIA

@@ -54,7 +54,7 @@ export default function CreatePage() {
       {/* タブバー: inline-flex のまま (flex にすると desktop で全幅に伸びる)。flex-nowrap +
           overflow-x-auto + 各ボタン whitespace-nowrap/shrink-0 で、ラベル短縮済みでもスマホ
           (360–390px) で 1 行を保ち、将来タブが増えても横スクロールで崩れない。 */}
-      <div className="mb-2 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl border border-slate-200/70 bg-slate-100/80 p-1 print:hidden">
+      <div className="mb-2 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/60 print:hidden">
         {(
           [
             ['qr', t('tabs.qr')],
@@ -128,7 +128,7 @@ export default function CreatePage() {
       {tab !== 'orders' && (
       <section
         aria-labelledby="offramp-heading"
-        className="mt-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-card sm:p-8 print:hidden"
+        className="mt-6 rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
       >
         <h2
           id="offramp-heading"

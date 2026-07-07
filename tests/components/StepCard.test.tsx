@@ -85,31 +85,31 @@ describe('StepCard', () => {
   });
 
   describe('variant prop', () => {
-    it("variant='default' は slate border のみ", () => {
+    it("variant='default' は slate ring のみ (border 非依存の面)", () => {
       const { container } = render(
         <StepCard step={1} icon={Coins} title="x">
           <div>x</div>
         </StepCard>,
       );
       const section = container.querySelector('section')!;
-      expect(section.className).toMatch(/border-slate-200/);
-      expect(section.className).not.toMatch(/border-brand\/40/);
-      expect(section.className).not.toMatch(/ring-/);
+      expect(section.className).toMatch(/ring-slate-200\/70/);
+      expect(section.className).toMatch(/shadow-card/);
+      expect(section.className).not.toMatch(/ring-brand/);
+      expect(section.className).not.toMatch(/border /);
     });
 
-    it("variant='qr-prominent' で brand border + ring", () => {
+    it("variant='qr-prominent' で brand ring (強調面)", () => {
       const { container } = render(
         <StepCard step={3} icon={QrCode} title="QR" variant="qr-prominent">
           <div>x</div>
         </StepCard>,
       );
       const section = container.querySelector('section')!;
-      expect(section.className).toMatch(/border-brand\/40/);
       expect(section.className).toMatch(/ring-1/);
-      expect(section.className).toMatch(/ring-brand\/15/);
+      expect(section.className).toMatch(/ring-brand\/25/);
       expect(section.className).toMatch(/shadow-card/);
-      // qr-prominent では slate-200 border を付けない
-      expect(section.className).not.toMatch(/border-slate-200/);
+      // qr-prominent では slate ring を付けない
+      expect(section.className).not.toMatch(/ring-slate-200/);
     });
   });
 
@@ -341,7 +341,7 @@ describe('StepCard', () => {
       );
       const section = container.querySelector('section')!;
       expect(section.className).toMatch(/print:rounded-none/);
-      expect(section.className).toMatch(/print:border-0/);
+      expect(section.className).toMatch(/print:ring-0/);
       expect(section.className).toMatch(/print:p-0/);
       expect(section.className).toMatch(/print:shadow-none/);
     });
