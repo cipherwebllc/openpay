@@ -23,6 +23,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 ## AI エージェント向け
 
 - [AIストア（x402 カタログ）](https://open-pay.jp/ja/discovery): x402 プロトコルで支払い可能なリソースの公開カタログ
+- [AI で注文するガイド](https://open-pay.jp/ja/guide/agent): 訪日客が自分の AI（Claude 等）に母国語で相談し、OpenPay モバイルオーダー対応店に注文して自分のウォレットで JPYC 決済する手順（MCP 設定・JPYC 入手）
 - MCP パッケージ: [openpay-x402-mcp](https://www.npmjs.com/package/openpay-x402-mcp) (npm) — Claude 等の AI エージェントからカタログ検索・JPYC 支払い・モバイルオーダー注文が可能
 
 ## Optional

@@ -16,6 +16,7 @@ const PUBLIC_ROUTES = [
   '/kit',
   '/discovery',
   '/guide/pos',
+  '/guide/agent',
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
