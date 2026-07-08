@@ -11,6 +11,8 @@
 // (7) 掟 4 回帰: 撤去済み表記「JPYC 公式」を含まない。
 
 import { describe, it, expect } from 'vitest';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   AGENT_GUIDE,
   JPYC_CONTRACT_ADDRESS,
@@ -164,6 +166,29 @@ describe('AGENT_GUIDE: JPYC コントラクトアドレス整合', () => {
 
   it.each(LOCALES)('%s: レガシー v1 (0x431d…) を回避せよと注意喚起している', (loc) => {
     expect(AGENT_GUIDE[loc].jpycLegacyWarning).toContain('0x431d');
+  });
+});
+
+// ── (4b) ヒーロー画像: 実在・言語非依存の同一画像 (リンク切れ防止) ────
+describe('AGENT_GUIDE: ヒーロー画像', () => {
+  it.each(LOCALES)('%s: heroImage.src は /guide-agent/ 配下の .webp・寸法は正の数', (loc) => {
+    const h = AGENT_GUIDE[loc].heroImage;
+    expect(h.src).toMatch(/^\/guide-agent\/.+\.webp$/);
+    expect(h.width).toBeGreaterThan(0);
+    expect(h.height).toBeGreaterThan(0);
+    expect(h.alt.trim().length).toBeGreaterThan(0);
+  });
+
+  it('ja/en は同一画像 (src・寸法が一致・言語非依存)', () => {
+    expect(AGENT_GUIDE.ja.heroImage.src).toBe(AGENT_GUIDE.en.heroImage.src);
+    expect(AGENT_GUIDE.ja.heroImage.width).toBe(AGENT_GUIDE.en.heroImage.width);
+    expect(AGENT_GUIDE.ja.heroImage.height).toBe(AGENT_GUIDE.en.heroImage.height);
+  });
+
+  it('画像ファイルが public 配下に実在し非空 (公開時のリンク切れ防止)', () => {
+    const rel = AGENT_GUIDE.ja.heroImage.src.replace(/^\//, '');
+    const st = statSync(join(process.cwd(), 'public', rel));
+    expect(st.size).toBeGreaterThan(0);
   });
 });
 

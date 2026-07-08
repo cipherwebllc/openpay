@@ -5,7 +5,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { AddressCallout, CodeBlock } from '@/components/guide/AgentGuidePieces';
+import {
+  AddressCallout,
+  CodeBlock,
+  GuideHero,
+} from '@/components/guide/AgentGuidePieces';
 import { AGENT_GUIDE } from '@/lib/agentGuide';
 
 describe('CodeBlock', () => {
@@ -42,6 +46,25 @@ describe('AddressCallout', () => {
     expect(screen.getByText('旧 v1 に注意')).toBeInTheDocument();
     // 装飾のみの div ではなくテキストが実在すること
     expect(container.textContent).toContain('0xE7C3D8C9');
+  });
+});
+
+describe('GuideHero', () => {
+  it('src/alt/width/height を持つ img を描画する (CLS 防止の寸法明示)', () => {
+    render(
+      <GuideHero
+        image={{ src: '/guide-agent/hero.webp', alt: '3 画面の流れ', width: 1600, height: 840 }}
+      />,
+    );
+    const img = screen.getByAltText('3 画面の流れ') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/guide-agent/hero.webp');
+    expect(img.getAttribute('width')).toBe('1600');
+    expect(img.getAttribute('height')).toBe('840');
+  });
+
+  it('実 AGENT_GUIDE.heroImage で描画でき alt が非空', () => {
+    render(<GuideHero image={AGENT_GUIDE.ja.heroImage} />);
+    expect(screen.getByAltText(AGENT_GUIDE.ja.heroImage.alt)).toBeInTheDocument();
   });
 });
 

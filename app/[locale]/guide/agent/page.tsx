@@ -17,7 +17,11 @@ import {
   Section,
   StepList,
 } from '@/components/guide/PosGuidePieces';
-import { AddressCallout, CodeBlock } from '@/components/guide/AgentGuidePieces';
+import {
+  AddressCallout,
+  CodeBlock,
+  GuideHero,
+} from '@/components/guide/AgentGuidePieces';
 import { agentGuideContentFor, guideAgentMetadata } from '@/lib/agentGuide';
 
 export async function generateMetadata({
@@ -62,6 +66,8 @@ export default async function GuideAgentPage({
             {c.audience}
           </p>
         </header>
+
+        <GuideHero image={c.heroImage} />
 
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
