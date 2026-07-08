@@ -146,6 +146,9 @@ export default async function GuideAgentPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.jpycGasNote}
           </p>
+          <p className="mt-2 rounded-xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-200/70">
+            {c.jpycNoGasNote}
+          </p>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
             {c.jpycLiquidityNote}
           </p>

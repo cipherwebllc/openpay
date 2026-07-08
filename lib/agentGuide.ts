@@ -93,6 +93,7 @@ export type AgentGuideContent = {
   readonly jpycAddressChainNote: string;
   readonly jpycLegacyWarning: string;
   readonly jpycGasNote: string;
+  readonly jpycNoGasNote: string;
   readonly jpycLiquidityNote: string;
 
   readonly disclosuresTitle: string;
@@ -229,6 +230,8 @@ const ja: AgentGuideContent = {
   jpycLegacyWarning:
     '注意：旧プリペイド型の JPYC v1（0x431d… で始まる別トークン）と間違えないでください。スワップ先は必ず上記 v3 アドレスに。',
   jpycGasNote: 'スワップの実行には、少量の POL（ガス代）が必要です。',
+  jpycNoGasNote:
+    'ガス代（POL）が無いとき：MetaMask の「Gas Station（ガス込みスワップ）」を使うと、Polygon では POL を持っていなくても、手持ちの USDC などからガス代を払って USDC→JPYC のスワップができます（Base / Arbitrum も対応・スマートアカウントへの自動アップグレードが必要／Optimism 等は非対応で少量の ETH が別途必要）。※この機能は MetaMask が提供するもので、OpenPay は関与しません。対応チェーン・トークンや混雑状況により成立しない場合があります。',
   jpycLiquidityNote:
     'DEX の流動性・レート・プールは変動します。スワップ実行時に最新の状況をご確認ください。',
 
@@ -394,6 +397,8 @@ const en: AgentGuideContent = {
   jpycLegacyWarning:
     'Note: do not confuse it with the legacy prepaid JPYC v1 (a different token starting 0x431d…). Always swap into the v3 address above.',
   jpycGasNote: 'Running the swap needs a little POL (gas).',
+  jpycNoGasNote:
+    "No POL for gas? With MetaMask's “Gas Station” (gas-included swaps), on Polygon you can swap USDC→JPYC paying the fee from your USDC even without holding POL (Base / Arbitrum are supported too, and your account is auto-upgraded to a smart account; Optimism and others are not supported and need a little ETH separately). Note: this is a MetaMask feature — OpenPay is not involved — and a swap may not go through depending on the chain, tokens, or network congestion.",
   jpycLiquidityNote:
     'DEX liquidity, rates, and pools change over time. Please check the latest conditions when you swap.',
 

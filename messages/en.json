@@ -47,6 +47,7 @@
     "mobileOrderBannerAlt": "Place-and-go mobile order — the JPYC order and payment flow you can start with OpenPay.",
     "mobileOrderBannerCta": "Create your mobile order",
     "mobileOrderBannerLearnMore": "See how it works",
+    "mobileOrderBannerAgentGuide": "For customers: how to order with AI",
     "howItWorksVisualAlt": "Diagram showing a merchant creating a payment QR, a customer scanning it, and funds arriving in the merchant wallet",
     "howItWorksDemoCaption": "Real interactions (mobile)",
     "howItWorksDemoCreate": "1. Receive (payment QR)",
