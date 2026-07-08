@@ -1,6 +1,6 @@
 {
   "name": "openpay-x402-mcp",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "description": "Local MCP buyer for OpenPay x402 JPYC resources",
   "type": "module",
   "bin": {

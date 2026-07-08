@@ -106,6 +106,44 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'createOrderLink',
+    description:
+      "Build a human-facing checkout link for an OpenPay @handle shop's mobile order. No wallet or key needed: this only assembles a URL — the traveler opens it on their phone and pays from their own wallet. Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`. The shop's receiving address and prices are re-resolved server-side from the @handle record (never carried in the link), so menu text cannot change the destination or amount. Use this for the \"my AI plans the order, I pay by hand\" handoff; use order_quote + x402_pay only when the agent itself holds a funded key.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              qty: { type: 'number' },
+              options: {
+                description:
+                  'Option selections: {groupId: choiceId} (single) / {groupId: [choiceIds]} (multi). Ids from order_menu; required groups mandatory.',
+                type: 'object',
+                additionalProperties: {
+                  oneOf: [
+                    { type: 'string' },
+                    { type: 'array', items: { type: 'string' } },
+                  ],
+                },
+              },
+            },
+            required: ['id', 'qty'],
+            additionalProperties: false,
+          },
+        },
+        table: { type: 'string' },
+        pickupAt: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+      },
+      required: ['handle', 'items'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function isObject(value) {
@@ -197,6 +235,39 @@ function quoteShape(url, status, guard) {
 function requireArgsObject(args) {
   if (!isObject(args)) throw new Error('tool arguments must be an object');
   return args;
+}
+
+// カート入力 [{id, qty, options?}] を検証・正規化する (order_quote / createOrderLink 共通)。
+// options はここで **落とさず** そのまま運ぶ (0.5.0 で {id, qty} を組み直して options が脱落した
+// 実バグの再発防止)。値の妥当性 (group/choice の実在・required) はサーバーが権威検証する。
+function normalizeCartItems(rawItems) {
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    throw new Error('items must be a non-empty array');
+  }
+  return rawItems.map((it) => {
+    if (!isObject(it) || typeof it.id !== 'string' || it.id.length === 0) {
+      throw new Error('each item needs a string id');
+    }
+    const qty = Number(it.qty);
+    if (!Number.isInteger(qty) || qty < 1) {
+      throw new Error('each item needs an integer qty >= 1');
+    }
+    let options;
+    if (it.options !== undefined) {
+      if (!isObject(it.options) || Array.isArray(it.options)) {
+        throw new Error('item options must be an object of {groupId: choiceId | choiceId[]}');
+      }
+      for (const v of Object.values(it.options)) {
+        const okValue =
+          typeof v === 'string' || (Array.isArray(v) && v.every((c) => typeof c === 'string'));
+        if (!okValue) {
+          throw new Error('item options values must be a string or an array of strings');
+        }
+      }
+      options = it.options;
+    }
+    return { id: it.id, qty, ...(options ? { options } : {}) };
+  });
 }
 
 export function createToolRuntime({
@@ -316,41 +387,38 @@ export function createToolRuntime({
     if (typeof input.handle !== 'string' || input.handle.length === 0) {
       throw new Error('handle is required');
     }
-    if (!Array.isArray(input.items) || input.items.length === 0) {
-      throw new Error('items must be a non-empty array');
-    }
-    const items = input.items.map((it) => {
-      if (!isObject(it) || typeof it.id !== 'string' || it.id.length === 0) {
-        throw new Error('each item needs a string id');
-      }
-      const qty = Number(it.qty);
-      if (!Number.isInteger(qty) || qty < 1) {
-        throw new Error('each item needs an integer qty >= 1');
-      }
-      // options はここで **落とさず** そのまま cart へ運ぶ (0.5.0 でスキーマだけ足して
-      // この正規化が {id, qty} を組み直すせいで脱落していた実バグの修正)。値の妥当性
-      // (group/choice の実在・required) はサーバーが権威検証する。
-      let options;
-      if (it.options !== undefined) {
-        if (!isObject(it.options) || Array.isArray(it.options)) {
-          throw new Error('item options must be an object of {groupId: choiceId | choiceId[]}');
-        }
-        for (const v of Object.values(it.options)) {
-          const okValue =
-            typeof v === 'string' ||
-            (Array.isArray(v) && v.every((c) => typeof c === 'string'));
-          if (!okValue) {
-            throw new Error('item options values must be a string or an array of strings');
-          }
-        }
-        options = it.options;
-      }
-      return { id: it.id, qty, ...(options ? { options } : {}) };
-    });
+    const items = normalizeCartItems(input.items);
     const handle = normalizeHandle(input.handle);
     const url = buildOrderPayUrl(handle, items, input.table, input.pickupAt);
     // 支払いは既存 x402_pay {url, maxTotalJpyc} で行う (ガード/カタログ信頼/Steward 署名はそのまま)。
     return x402Quote({ url });
+  }
+
+  // 人間が開く事前充填リンク: `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`。
+  // **鍵不要・非カストディ** — URL を組むだけで署名も送金もしない (客が自分のウォレットで払う)。
+  // 受取先・価格は URL に載せず (cart は {id, qty, options} のみ)、server が @handle の KV レコードから
+  // 再解決する (メニュー文字列が受取先/金額に影響しない・receiver スプーフィング不成立: plans §2 M2/C1)。
+  // cart 直列化は order_quote と同じ encodeCart = server の lib/agentOrder.encodeAgentCart と同形式。
+  function buildOrderLinkUrl(handle, items, table, pickupAt) {
+    const params = new URLSearchParams();
+    params.set('cart', encodeCart(items));
+    if (typeof table === 'string' && table.length > 0) params.set('table', table);
+    if (pickupAt !== undefined && pickupAt !== null && String(pickupAt).length > 0) {
+      params.set('pickupAt', String(pickupAt));
+    }
+    // handle は正規化済み (英数字想定) だが、想定外文字も server が decode できるよう path で encode。
+    return `${baseOrigin()}/@${encodeURIComponent(handle)}?${params.toString()}`;
+  }
+
+  async function createOrderLink(args) {
+    const input = requireArgsObject(args);
+    if (typeof input.handle !== 'string' || input.handle.length === 0) {
+      throw new Error('handle is required');
+    }
+    const items = normalizeCartItems(input.items);
+    const handle = normalizeHandle(input.handle);
+    const url = buildOrderLinkUrl(handle, items, input.table, input.pickupAt);
+    return { ok: true, handle, itemCount: items.length, url };
   }
 
   async function discoverySearch(args) {
@@ -484,6 +552,7 @@ export function createToolRuntime({
       if (name === 'x402_pay') return textResult(await x402Pay(args));
       if (name === 'order_menu') return textResult(await orderMenu(args));
       if (name === 'order_quote') return textResult(await orderQuote(args));
+      if (name === 'createOrderLink') return textResult(await createOrderLink(args));
       return textResult({ ok: false, error: `unknown tool: ${name}` }, true);
     } catch (error) {
       return textResult(
@@ -503,5 +572,6 @@ export function createToolRuntime({
     x402Pay,
     orderMenu,
     orderQuote,
+    createOrderLink,
   };
 }

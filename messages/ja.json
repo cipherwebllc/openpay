@@ -1911,6 +1911,7 @@
     "placardPay": "お支払いは JPYC のみ",
     "placardChains": "対応ネットワーク",
     "placardPrint": "印刷",
+    "prefillNotice": "AI が選んだご注文を読み込みました。内容をご確認のうえお支払いください。",
     "viewMenuHeading": "メニュー",
     "uncategorized": "その他",
     "orderItemsToggle": "ご注文内容",

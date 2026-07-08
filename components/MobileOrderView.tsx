@@ -47,6 +47,8 @@ import {
   selectionKey,
   type OptionChoice,
 } from '@/lib/menuOptions';
+import { resolvePrefillCart } from '@/lib/prefillCart';
+import type { AgentCartItem } from '@/lib/agentOrder';
 import { OptionSelectModal } from '@/components/OptionSelectModal';
 import { MenuItemCard } from '@/components/MenuItemCard';
 import { MobileOrderCartBar } from '@/components/MobileOrderCartBar';
@@ -127,6 +129,7 @@ export function MobileOrderView({
   backLabel,
   handle,
   live,
+  initialCart,
 }: {
   config: MobileOrderConfig;
   /** 「支払いへ進む」後の /checkout から戻る店舗ページのパス (同一オリジン)。@handle 公開時に渡る。 */
@@ -137,6 +140,12 @@ export function MobileOrderView({
   handle?: string;
   /** ライブ運用状態 (売り切れ / 受付一時停止)。flag OFF / ?s= 経路では未指定 = 制限なし。 */
   live?: ShopLiveState;
+  /**
+   * 事前充填カート (@handle ?cart= 経路のみ)。server で decodeAgentCart 済みの **検証済み** カート。
+   * マウント時に menu と突合して初期カート状態にする (価格・受取先は menu/KV 由来で再計算 = 改ざん無害化)。
+   * 未指定 (bare @handle / ?s= 経路) では従来挙動と完全同一 (構造的 inert)。
+   */
+  initialCart?: AgentCartItem[] | null;
 }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
@@ -149,9 +158,22 @@ export function MobileOrderView({
       : DEFAULT_ACCENT;
   const accentInk = readableInk(accent); // 塗り潰し背景の上の文字色
   const accentText = accentOnWhite(accent); // 白地での文字色/枠色 (淡色は暗くして可読性確保)
-  const [qty, setQty] = useState<Record<string, number>>({});
-  // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。
-  const [cartOpen, setCartOpen] = useState(false);
+  // 事前充填 (?cart=)。@handle 店舗ページが server で decodeAgentCart 済みの検証済みカートを渡す。
+  // マウント時に一度だけ menu と突合して初期カートを解決する (未知 id / オプション不整合は該当行を
+  // drop・価格は menu 由来で再計算 = 改ざん無害化)。cart 不在では空 = 従来挙動と完全同一 (inert)。
+  const initialPrefill = useMemo(
+    () => resolvePrefillCart(config.menu, initialCart ?? null, env.enableMenuOptions),
+    // 初期状態の解決はマウント時のみ (deps 空)。以後 config 差し替えでもユーザが編集したカートを
+    // 上書きしない (再充填しない)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const prefilled =
+    Object.keys(initialPrefill.qty).length > 0 || initialPrefill.optionEntries.length > 0;
+  const [qty, setQty] = useState<Record<string, number>>(initialPrefill.qty);
+  // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。事前充填時は AI が選んだ明細を
+  // 人が確認してから支払えるよう既定で開く (M2 の「人間の最終確認面」)。
+  const [cartOpen, setCartOpen] = useState(prefilled);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
   // 受注リレー (flag ON) 用の短い受注番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
@@ -228,7 +250,9 @@ export function MobileOrderView({
   const optionsEnabled = env.enableMenuOptions;
   const hasOptions = (m: MenuItem) => optionsEnabled && (m.options?.length ?? 0) > 0;
   // オプション選択で確定した行 (selectionKey で識別・同一商品の別オプションは別行)。
-  const [optionEntries, setOptionEntries] = useState<OptionCartEntry[]>([]);
+  // 事前充填 (?cart=) 時はマウント時に解決したオプション行を初期値にする。
+  const [optionEntries, setOptionEntries] =
+    useState<OptionCartEntry[]>(initialPrefill.optionEntries);
   const [optionModalItem, setOptionModalItem] = useState<MenuItem | null>(null);
   const optionCount = (itemId: string) =>
     optionEntries.filter((e) => e.itemId === itemId).reduce((s, e) => s + e.qty, 0);
@@ -497,6 +521,15 @@ export function MobileOrderView({
           </div>
         )}
       </header>
+
+      {/* 事前充填 (?cart=) の通知。AI/リンク経由で選ばれた注文であることを客に伝え、明細と合計を
+          確認のうえ支払うよう促す (M2 の「人間の最終確認面」の砦・下部カートバーは既定で開いて出す)。
+          可視テキストのみ (aria-label 単独付与なし・掟8)。cart 不在では出ない (inert)。 */}
+      {prefilled && (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-medium text-blue-800">
+          {t('prefillNotice')}
+        </div>
+      )}
 
       {/* 受付停止中バナー (acceptingOrders===false)。客が払う前に最上部で告知。 */}
       {!accepting && (
