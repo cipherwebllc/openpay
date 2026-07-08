@@ -17,6 +17,7 @@ const FEE_RECEIVER = getAddress('0x3333333333333333333333333333333333333333');
 type ToolRuntime = {
   orderMenu: (args: unknown) => Promise<Record<string, unknown>>;
   orderQuote: (args: unknown) => Promise<Record<string, unknown>>;
+  orderSummary: (args: unknown) => Promise<Record<string, unknown>>;
   createOrderLink: (args: unknown) => Promise<Record<string, unknown>>;
   tools: Array<{ name: string }>;
 };
@@ -85,6 +86,23 @@ const MENU_BODY = {
   ],
 };
 
+// 人払い (order_summary) の store-borne 内訳: 客は小計ちょうど・店が ~1% を吸収 (feeBearer='merchant')。
+// x402 の買い手上乗せ (order_quote: totalJpyc 1616) と別物であることを示す (customerPaysJpyc=1600)。
+const SUMMARY_BODY = {
+  handle: 'shop',
+  shopName: '居酒屋テスト',
+  chain: 'polygon',
+  currency: 'JPYC',
+  items: [
+    { name: '唐揚げ', qty: 2, unitPriceJpyc: '500', lineJpyc: '1000' },
+    { name: 'ビール', qty: 1, unitPriceJpyc: '600', lineJpyc: '600' },
+  ],
+  subtotalJpyc: '1600',
+  feeJpyc: '16',
+  feeBearer: 'merchant',
+  customerPaysJpyc: '1600',
+};
+
 const ENV = {
   DISCOVERY_URL: 'https://open-pay.jp/api/discovery',
   ALLOWED_HOSTS: 'open-pay.jp',
@@ -94,12 +112,13 @@ const ENV = {
 };
 
 describe('MCP agent-order tools', () => {
-  it('order_menu / order_quote を登録している', async () => {
+  it('order_menu / order_quote / order_summary を登録している', async () => {
     const { createToolRuntime } = await loadTools();
     const runtime = createToolRuntime({ env: ENV });
     const names = runtime.tools.map((t) => t.name);
     expect(names).toContain('order_menu');
     expect(names).toContain('order_quote');
+    expect(names).toContain('order_summary');
   });
 
   it('order_menu は @handle を正規化して menu を取得する', async () => {
@@ -203,6 +222,63 @@ describe('MCP agent-order tools', () => {
         items: [{ id: 'oj', qty: 1, options: { size: 5 } }],
       }),
     ).rejects.toThrow(/options/);
+  });
+});
+
+// order_summary: 人払い (createOrderLink) の実額を読む読み取り専用ツール。summary エンドポイントを
+// 叩き store-borne 内訳を返す (x402 の買い手上乗せ order_quote とは別物 = 混同解消の核心)。
+describe('MCP order_summary', () => {
+  it('正規順 (h,cart,table,pickupAt) の summary URL を組み store-borne 内訳を返す', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      return response(200, SUMMARY_BODY);
+    }) as unknown as typeof fetch;
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl });
+    const out = await runtime.orderSummary({
+      handle: '@Shop',
+      items: [
+        { id: 'karaage', qty: 2 },
+        { id: 'beer', qty: 1 },
+      ],
+      table: 'A5',
+      pickupAt: '1700000000000',
+    });
+
+    const params = new URLSearchParams();
+    params.set('h', 'shop');
+    params.set('cart', encodeAgentCart([
+      { id: 'karaage', qty: 2 },
+      { id: 'beer', qty: 1 },
+    ]));
+    params.set('table', 'A5');
+    params.set('pickupAt', '1700000000000');
+    expect(calls[0]).toBe(
+      `https://open-pay.jp/api/agent-order/summary?${params.toString()}`,
+    );
+    // store-borne: 客は小計ちょうど (1600) / 店が手数料 (16) を吸収 / 買い手上乗せの 1616 ではない。
+    expect(out).toMatchObject({
+      ok: true,
+      customerPaysJpyc: '1600',
+      subtotalJpyc: '1600',
+      feeJpyc: '16',
+      feeBearer: 'merchant',
+    });
+  });
+
+  it('items 空を拒否する (createOrderLink と同じ normalizeCartItems)', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV });
+    await expect(runtime.orderSummary({ handle: 'shop', items: [] })).rejects.toThrow();
+  });
+
+  it('summary 取得失敗 (非 200) は ok:false に倒す', async () => {
+    const fetchImpl = (async () => response(404, { error: 'no_storefront' })) as unknown as typeof fetch;
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl });
+    const out = await runtime.orderSummary({ handle: 'shop', items: [{ id: 'karaage', qty: 1 }] });
+    expect(out).toMatchObject({ ok: false, status: 404 });
   });
 });
 

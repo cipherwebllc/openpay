@@ -32,9 +32,10 @@ try {
       2,
     ),
   );
-  // P2-Q: ツールは discovery_search / x402_quote / x402_pay / order_menu / order_quote の 5 個
-  // (order 系追加後も 3 のままで常に fail していた陳腐化した canary を是正)。
-  if (result.tools.length !== 5) {
+  // P2-Q: ツールは discovery_search / x402_quote / x402_pay / order_menu / order_quote /
+  // order_summary / createOrderLink の 7 個 (order 系追加後も 3 のままで常に fail していた陳腐化した
+  // canary を是正・0.7.0 で order_summary を追加)。
+  if (result.tools.length !== 7) {
     process.exitCode = 1;
   }
 } finally {

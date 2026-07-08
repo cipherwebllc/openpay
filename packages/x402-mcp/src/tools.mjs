@@ -42,7 +42,8 @@ export const TOOLS = [
   },
   {
     name: 'x402_pay',
-    description: 'Pay an OpenPay forwarder-split x402 URL after all local money guards pass.',
+    description:
+      'Pay an OpenPay forwarder-split x402 URL after all local money guards pass. Only when the agent itself holds a funded key and auto-pays (x402, buyer covers the ~1% fee). For human-pays, use order_summary + createOrderLink instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -58,7 +59,7 @@ export const TOOLS = [
   {
     name: 'order_menu',
     description:
-      "Read an OpenPay @handle shop's public mobile-order menu (item ids, names, prices). No payment.",
+      "Read an OpenPay @handle shop's public mobile-order menu (item ids, names, prices). No payment, no key needed.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -71,7 +72,45 @@ export const TOOLS = [
   {
     name: 'order_quote',
     description:
-      'Build an agent-order for an OpenPay @handle shop and fetch its x402 challenge (price, fee, total, guard reasons). Items with options: pass items[].options (ids from order_menu; required groups mandatory). This does not pay — pay the returned url with x402_pay. Note: an order total often exceeds the default MAX_PER_CALL_JPYC (10 JPYC); raise it to allow payment.',
+      'Build an agent-order for an OpenPay @handle shop and fetch its x402 challenge (price, fee, total, guard reasons). Only when the agent itself holds a funded key and auto-pays (x402, buyer covers the ~1% fee); for human-pays, use order_summary + createOrderLink instead. Items with options: pass items[].options (ids from order_menu; required groups mandatory). This does not pay — pay the returned url with x402_pay. Note: an order total often exceeds the default MAX_PER_CALL_JPYC (10 JPYC); raise it to allow payment.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              qty: { type: 'number' },
+              options: {
+                description:
+                  'Option selections: {groupId: choiceId} (single) / {groupId: [choiceIds]} (multi). Ids from order_menu; required groups mandatory.',
+                type: 'object',
+                additionalProperties: {
+                  oneOf: [
+                    { type: 'string' },
+                    { type: 'array', items: { type: 'string' } },
+                  ],
+                },
+              },
+            },
+            required: ['id', 'qty'],
+            additionalProperties: false,
+          },
+        },
+        table: { type: 'string' },
+        pickupAt: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+      },
+      required: ['handle', 'items'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'order_summary',
+    description:
+      "For the human-pays flow (customer pays from their own wallet). Returns the amount the customer actually pays (subtotal; the shop covers the ~1% service fee). Use this + createOrderLink for 'my AI plans the order, I pay by hand'. No key needed.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -109,7 +148,7 @@ export const TOOLS = [
   {
     name: 'createOrderLink',
     description:
-      "Build a human-facing checkout link for an OpenPay @handle shop's mobile order. No wallet or key needed: this only assembles a URL — the traveler opens it on their phone and pays from their own wallet. Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`. The shop's receiving address and prices are re-resolved server-side from the @handle record (never carried in the link), so menu text cannot change the destination or amount. Use this for the \"my AI plans the order, I pay by hand\" handoff; use order_quote + x402_pay only when the agent itself holds a funded key.",
+      "Build a human-facing checkout link for an OpenPay @handle shop's mobile order. No wallet or key needed: this only assembles a URL — the traveler opens it on their phone and pays from their own wallet. Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`. The shop's receiving address and prices are re-resolved server-side from the @handle record (never carried in the link), so menu text cannot change the destination or amount. Use this for the \"my AI plans the order, I pay by hand\" handoff (pair with order_summary to tell the customer the exact amount they pay); use order_quote + x402_pay only when the agent itself holds a funded key and auto-pays.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -394,6 +433,38 @@ export function createToolRuntime({
     return x402Quote({ url });
   }
 
+  // 人払い (createOrderLink → @handle?cart= checkout) の実額を読む読み取り専用の summary URL。
+  // 正規順 (h, cart, table, pickupAt) で組む (order_quote の pay URL と同順・同エンコード)。
+  function buildOrderSummaryUrl(handle, items, table, pickupAt) {
+    const params = new URLSearchParams();
+    params.set('h', handle);
+    params.set('cart', encodeCart(items));
+    if (typeof table === 'string' && table.length > 0) params.set('table', table);
+    if (pickupAt !== undefined && pickupAt !== null && String(pickupAt).length > 0) {
+      params.set('pickupAt', String(pickupAt));
+    }
+    return `${baseOrigin()}/api/agent-order/summary?${params.toString()}`;
+  }
+
+  // 人払いの内訳を返す (鍵不要・**支払いは発生しない**)。/api/agent-order/summary は store-borne
+  // (customerPaysJpyc = 小計・feeBearer='merchant' = 店が ~1% を吸収) を返す。x402 の買い手上乗せ
+  // (order_quote) とは別物 — 人が自分のウォレットで払う額を order_quote と混同させないための経路。
+  async function orderSummary(args) {
+    const input = requireArgsObject(args);
+    if (typeof input.handle !== 'string' || input.handle.length === 0) {
+      throw new Error('handle is required');
+    }
+    const items = normalizeCartItems(input.items);
+    const handle = normalizeHandle(input.handle);
+    const url = buildOrderSummaryUrl(handle, items, input.table, input.pickupAt);
+    const res = await fetchImpl(url, { headers: { accept: 'application/json' } });
+    const body = await readJson(res);
+    if (!res.ok || !isObject(body)) {
+      return { ok: false, status: res.status, error: 'summary_unavailable' };
+    }
+    return { ok: true, ...body };
+  }
+
   // 人間が開く事前充填リンク: `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`。
   // **鍵不要・非カストディ** — URL を組むだけで署名も送金もしない (客が自分のウォレットで払う)。
   // 受取先・価格は URL に載せず (cart は {id, qty, options} のみ)、server が @handle の KV レコードから
@@ -552,6 +623,7 @@ export function createToolRuntime({
       if (name === 'x402_pay') return textResult(await x402Pay(args));
       if (name === 'order_menu') return textResult(await orderMenu(args));
       if (name === 'order_quote') return textResult(await orderQuote(args));
+      if (name === 'order_summary') return textResult(await orderSummary(args));
       if (name === 'createOrderLink') return textResult(await createOrderLink(args));
       return textResult({ ok: false, error: `unknown tool: ${name}` }, true);
     } catch (error) {
@@ -572,6 +644,7 @@ export function createToolRuntime({
     x402Pay,
     orderMenu,
     orderQuote,
+    orderSummary,
     createOrderLink,
   };
 }

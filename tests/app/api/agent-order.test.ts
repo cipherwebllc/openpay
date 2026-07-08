@@ -69,10 +69,11 @@ const JPYC = 10n ** 18n;
 
 type MenuRoute = { GET: (req: Request) => Promise<Response> };
 type PayRoute = { GET: (req: Request) => Promise<Response> };
+type SummaryRoute = { GET: (req: Request) => Promise<Response> };
 
 async function load(
   flags: { facilitator?: string; relay?: string; agent?: string } = {},
-): Promise<{ menu: MenuRoute; pay: PayRoute }> {
+): Promise<{ menu: MenuRoute; pay: PayRoute; summary: SummaryRoute }> {
   vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', flags.facilitator ?? '1');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', flags.relay ?? '1');
   vi.stubEnv('ENABLE_AGENT_ORDER', flags.agent ?? '1');
@@ -85,11 +86,18 @@ async function load(
   vi.resetModules();
   const menu = (await import('@/app/api/agent-order/menu/route')) as MenuRoute;
   const pay = (await import('@/app/api/agent-order/pay/route')) as PayRoute;
-  return { menu, pay };
+  const summary = (await import(
+    '@/app/api/agent-order/summary/route'
+  )) as SummaryRoute;
+  return { menu, pay, summary };
 }
 
 function menuReq(query: string): Request {
   return new Request(`https://open-pay.jp/api/agent-order/menu?${query}`);
+}
+
+function summaryReq(query: string): Request {
+  return new Request(`https://open-pay.jp/api/agent-order/summary?${query}`);
 }
 
 function payReq(query: string, headers?: Record<string, string>): Request {
@@ -136,9 +144,12 @@ describe('agent-order flag gating', () => {
       { relay: '' },
       { agent: '' },
     ]) {
-      const { menu, pay } = await load(flags);
+      const { menu, pay, summary } = await load(flags);
       expect((await menu.GET(menuReq('h=shop'))).status).toBe(404);
       expect((await pay.GET(payReq(`h=shop&cart=${CART}`))).status).toBe(404);
+      expect(
+        (await summary.GET(summaryReq(`h=shop&cart=${CART}`))).status,
+      ).toBe(404);
     }
   });
 });
@@ -171,6 +182,85 @@ describe('agent-order menu route', () => {
     store.record = record({ storefront: undefined });
     const { menu } = await load();
     expect((await menu.GET(menuReq('h=shop'))).status).toBe(404);
+  });
+});
+
+describe('agent-order summary route (人払い store-borne)', () => {
+  it('store-borne 内訳を返す (customerPays=小計・fee=1%・feeBearer=merchant)', async () => {
+    const { summary } = await load();
+    const res = await summary.GET(summaryReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      handle: string;
+      shopName: string;
+      chain: string;
+      currency: string;
+      items: Array<{
+        name: string;
+        qty: number;
+        unitPriceJpyc: string;
+        lineJpyc: string;
+      }>;
+      subtotalJpyc: string;
+      feeJpyc: string;
+      feeBearer: string;
+      customerPaysJpyc: string;
+    };
+    expect(body).toMatchObject({
+      handle: 'shop',
+      shopName: '居酒屋テスト',
+      chain: 'polygon',
+      currency: 'JPYC',
+      // 小計 1600 / fee = 1600*1% = 16 (フロア無し) / 客は小計ちょうど (store-borne)。
+      subtotalJpyc: '1600',
+      feeJpyc: '16',
+      feeBearer: 'merchant',
+      customerPaysJpyc: '1600',
+    });
+    expect(body.items).toEqual([
+      { name: '唐揚げ', qty: 2, unitPriceJpyc: '500', lineJpyc: '1000' },
+      { name: 'ビール', qty: 1, unitPriceJpyc: '600', lineJpyc: '600' },
+    ]);
+  });
+
+  it('手数料は mobileOrderFee (1%・フロア無し) — x402 の floor (2 JPYC) は効かない', async () => {
+    // 100 JPYC の注文: mobileOrderFee 1% = 1 JPYC (フロア無し)。x402FeeValue を誤用すると
+    // max(2,1)=2 になる。summary が人払い checkout の実額 (フロア無し) に一致する証明。
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [{ id: 'tea', name: 'お茶', price: '100' }],
+      },
+    } as Partial<HandleRecord>);
+    const cart = encodeAgentCart([{ id: 'tea', qty: 1 }]);
+    const { summary } = await load();
+    const res = await summary.GET(summaryReq(`h=shop&cart=${cart}`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      feeJpyc: string;
+      customerPaysJpyc: string;
+      feeBearer: string;
+    };
+    expect(body.feeJpyc).toBe('1'); // 1% フロア無し (x402FeeValue の 2 ではない)
+    expect(body.customerPaysJpyc).toBe('100'); // store-borne = 小計ちょうど
+    expect(body.feeBearer).toBe('merchant');
+  });
+
+  it('cart 不正は 422', async () => {
+    const { summary } = await load();
+    const res = await summary.GET(summaryReq('h=shop&cart=%21%21%21bad'));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('invalid_cart');
+  });
+
+  it('storefront 無しは 404', async () => {
+    store.record = record({ storefront: undefined });
+    const { summary } = await load();
+    const res = await summary.GET(summaryReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('no_storefront');
   });
 });
 
