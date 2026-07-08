@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0
+
+- Add `order_summary` tool: for the **human-pays** flow (the customer pays from
+  their own wallet), return the amount the customer actually pays — the subtotal,
+  with the shop covering the ~1% service fee (store-borne). No key needed.
+  - Pair it with `createOrderLink` for the "my AI plans the order, I pay by hand"
+    (BYOW) handoff: `order_menu` → pick items → `order_summary` (tell the customer
+    the exact amount) → `createOrderLink` (the link they open and pay).
+  - Reads a new read-only server endpoint `GET /api/agent-order/summary`. **No
+    payment is ever made.** Unlike `order_quote` (x402, buyer covers the fee on top
+    of the subtotal, with a 1 JPYC floor), `order_summary` reports the store-borne
+    checkout amount (no floor) so the human-pays and auto-pays models are no longer
+    conflated.
+- Clarify tool descriptions: `order_quote` / `x402_pay` are **only** for when the
+  agent itself holds a funded key and auto-pays (x402); for human-pays, use
+  `order_summary` + `createOrderLink`. `order_menu` / `order_summary` /
+  `createOrderLink` need no key.
+
 ## 0.6.0
 
 - Add `createOrderLink` tool: build a human-facing checkout link
