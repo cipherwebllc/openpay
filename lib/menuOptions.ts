@@ -209,3 +209,52 @@ export function resolveSelection(
   }
   return { ok: true, choices, selections };
 }
+
+export type StrictSelectionResult =
+  | {
+      ok: true;
+      choices: OptionChoice[];
+      selections: { groupId: string; choiceId: string }[];
+    }
+  | { ok: false; reason: 'unknown_option' | 'missing_required_option' };
+
+/**
+ * エージェント経路 (agent-order URL / MCP / @handle ?cart= 事前充填) の **strict** なオプション解決。
+ * UI 向け `resolveSelection` が「実在しない group/choice を黙って無視」するのに対し、支払う側が機械の
+ * 経路では黙殺すると「トッピングを頼んだつもりで実は付かず安く払う」不一致になるため明示的に弾く:
+ *   - 実在しない group / choice → `unknown_option`
+ *   - required グループ未選択 → `missing_required_option`
+ * single/multi の型ゆらぎ (single に配列 / multi に文字列) を正規化し、`resolveSelection` の picked 判定
+ * との解釈ズレによる無音ドロップ (掟13) を防ぐ。**computeAgentOrder (server 権威注文) と
+ * resolvePrefillCart (URL 事前充填) の単一情報源** — 同じ strict ロジックを 2 か所に複製しない。
+ * 入力 `selection` は破壊しない (呼出側が再計算で使い回す)。
+ */
+export function resolveStrictSelection(
+  groups: OptionGroup[],
+  selection: OptionSelection | undefined,
+): StrictSelectionResult {
+  const sel: OptionSelection = { ...(selection ?? {}) };
+  for (const [gid, v] of Object.entries(sel)) {
+    const group = groups.find((g) => g.id === gid);
+    if (!group) return { ok: false, reason: 'unknown_option' };
+    const chosen = typeof v === 'string' ? [v] : v;
+    for (const cid of chosen) {
+      if (!group.choices.some((c) => c.id === cid)) {
+        return { ok: false, reason: 'unknown_option' };
+      }
+    }
+    // 型正規化: single に配列 → 単一値 / multi に文字列 → 配列。resolveSelection の picked 判定は
+    // single=string・multi=array を前提とするため、ここで揃えないと選択が無音ドロップされる。
+    if (group.type === 'single') {
+      if (Array.isArray(v)) {
+        if (v.length > 1) return { ok: false, reason: 'unknown_option' }; // single に複数指定
+        sel[gid] = v[0];
+      }
+    } else if (typeof v === 'string') {
+      sel[gid] = [v];
+    }
+  }
+  const resolved = resolveSelection(groups, sel);
+  if (!resolved.ok) return { ok: false, reason: 'missing_required_option' };
+  return { ok: true, choices: resolved.choices, selections: resolved.selections };
+}

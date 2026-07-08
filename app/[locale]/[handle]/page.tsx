@@ -24,6 +24,8 @@ import { logger } from '@/lib/logger';
 import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import { readShopLive } from '@/lib/shopLiveStore';
+import { decodeAgentCart } from '@/lib/agentOrder';
+import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 import {
   buildTipMeta,
   buildStorefrontMeta,
@@ -112,8 +114,10 @@ export async function generateMetadata({
 
 export default async function HandlePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; handle: string }>;
+  searchParams: Promise<RouteSearch>;
 }) {
   if (!env.enableHandles) notFound();
   const { locale, handle: rawSegment } = await params;
@@ -153,6 +157,13 @@ export default async function HandlePage({
   // ライブ運用状態 (売り切れ / 受付一時停止) を同リクエストでサーバ読取し MobileOrderView へ渡す。
   // flag OFF / storefront 非公開では読まず undefined (= 制限なし・従来どおり)。fail-open。
   const live = storefront && env.enableShopLive ? await readShopLive(normalized) : undefined;
+  // インバウンド・エージェント注文 (plans/inbound-agent-order.md §2): 旅行者の AI が組んだ注文を
+  // `?cart=<base64url>` で受け、MobileOrderView に事前充填する。**self-contained ?s= トークンは使わず
+  // @handle 経路に限定** (受取先・価格は KV 権威の handle レコードから再解決 = receiver スプーフィング
+  // 不成立・C1)。cart は untrusted ゆえ decodeAgentCart が全項目検証し不正は null (= 事前充填なし)。
+  // menu との突合・グレース劣化・改ざん無害化は MobileOrderView (resolvePrefillCart) が担う。
+  const cartParam = storefront ? searchParamsFromNext(await searchParams).get('cart') : null;
+  const initialCart = cartParam ? decodeAgentCart(cartParam) : null;
   const t = await getTranslations({ locale, namespace: 'HandleProfile' });
   // クリエイターのアクセント色 (config.color)。link-in-bio の背景ウォッシュに薄く効かせ、
   // 各ページに固有の質感を与える (足し算)。不正値は既定ブルー。
@@ -198,6 +209,7 @@ export default async function HandlePage({
           backLabel={storefront.shopName}
           handle={normalized}
           live={live}
+          initialCart={initialCart}
         />
       ) : (
         <>

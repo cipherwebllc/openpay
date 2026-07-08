@@ -20,7 +20,7 @@ import {
 } from './orderRelay';
 import type { StorefrontParts } from './mobileOrder';
 import {
-  resolveSelection,
+  resolveStrictSelection,
   effectiveUnitPrice,
   composeLineName,
   type OptionSelection,
@@ -163,37 +163,12 @@ export function computeAgentOrder(
     const menuItem = byId.get(cart.id);
     if (!menuItem) return { ok: false, reason: 'unknown_item' };
     const groups = menuItem.options ?? [];
-    // エージェント API は **strict**: 存在しない group/choice id は黙殺せずエラーにする
+    // エージェント API は **strict**: 存在しない group/choice / required 未選択は黙殺せずエラーにする
     // (resolveSelection は UI 向けに不正 id を無視するが、無視すると「トッピングを頼んだつもりで
-    // 実は付かず安く払う」不一致が起きる。支払う側が機械なので明示的に弾く)。
-    // 入力オブジェクトは破壊しない (呼び出し元 cartItems を書き換えると再計算時に副作用が出る)。
-    const sel: OptionSelection = { ...(cart.options ?? {}) };
-    for (const [gid, v] of Object.entries(sel)) {
-      const group = groups.find((g) => g.id === gid);
-      if (!group) return { ok: false, reason: 'unknown_option' };
-      const chosen = typeof v === 'string' ? [v] : v;
-      for (const cid of chosen) {
-        if (!group.choices.some((c) => c.id === cid)) {
-          return { ok: false, reason: 'unknown_option' };
-        }
-      }
-      // 型正規化: resolveSelection は single=string / multi=array を期待する。unknown_option 検証は
-      // string を [v] に包んで存在確認するため、**multi グループに string を渡すと存在確認は通るのに
-      // resolveSelection の picked が array 判定で [] になり、選択が課金も表示もされず無音ドロップ**
-      // していた (掟13: strict を謳いながら曖昧に握りつぶす fallback)。検証の chosen 解釈と
-      // resolveSelection の picked 解釈を一致させ、無音ドロップを除去する。
-      if (group.type === 'single') {
-        if (Array.isArray(v)) {
-          if (v.length > 1) return { ok: false, reason: 'unknown_option' }; // single に複数指定
-          sel[gid] = v[0]; // [x] -> x
-        }
-      } else if (typeof v === 'string') {
-        sel[gid] = [v]; // multi に string -> [string] (無音ドロップ防止)
-      }
-    }
-    // required 検証 + 定義順の choice 解決 (checkout UI と同一関数 = 単一情報源)
-    const resolved = resolveSelection(groups, sel);
-    if (!resolved.ok) return { ok: false, reason: 'missing_required_option' };
+    // 実は付かず安く払う」不一致が起きる。支払う側が機械なので明示的に弾く)。strict 解決は
+    // resolveStrictSelection に集約 (@handle ?cart= 事前充填 = resolvePrefillCart と単一情報源)。
+    const resolved = resolveStrictSelection(groups, cart.options);
+    if (!resolved.ok) return { ok: false, reason: resolved.reason };
     // 実効単価 = base + Σdelta・表示名 = 「name（選択・選択）」— checkout / 受注 / レシートと同形
     const price = effectiveUnitPrice(menuItem.price, resolved.choices);
     const name = composeLineName(menuItem.name, resolved.choices);

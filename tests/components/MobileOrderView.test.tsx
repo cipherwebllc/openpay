@@ -41,6 +41,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
+import type { AgentCartItem } from '@/lib/agentOrder';
 
 const config: MobileOrderConfig = {
   receiver: '0x1111111111111111111111111111111111111111',
@@ -496,6 +497,159 @@ describe('MobileOrderView — モバイル注文システム利用料 (feeUpchar
     expect(screen.getByText('500 JPYC')).toBeInTheDocument();
     expect(screen.queryByText(/システム利用料/)).toBeNull();
     expect(payUrl().searchParams.get('fee_kind')).toBeNull();
+  });
+});
+
+// 事前充填 (?cart=)。@handle 店舗ページが server で decodeAgentCart 済みの検証済みカートを
+// initialCart で渡す。qty/optionEntries を初期充填し、明細を既定で開き、通知バナーを出す。
+// 改ざん (未知 id) は該当行 drop・価格は menu 由来で再計算 (改ざん無害化)。cart 不在は従来挙動。
+describe('MobileOrderView 事前充填 (initialCart / ?cart=)', () => {
+  it('cart 不在 (initialCart 未指定): 従来どおり空カート・通知バナー無し (inert)', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    expect(screen.queryByText(/AI が選んだご注文を読み込みました/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'ご注文内容' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('数量ステッパ商品を充填 → 合計表示 + 通知バナー + 明細を既定で開く + /checkout に items', () => {
+    const initialCart: AgentCartItem[] = [
+      { id: 'a', qty: 2 }, // ブレンド 500 ×2
+      { id: 'c', qty: 1 }, // 水 100 ×1
+    ];
+    renderWithIntl(
+      <MobileOrderView config={config} handle="shop" initialCart={initialCart} />,
+    );
+    // 通知バナー (M2 の人間確認面)。
+    expect(screen.getByText(/AI が選んだご注文を読み込みました/)).toBeInTheDocument();
+    // 合計 = 500×2 + 100 = 1100 JPYC。
+    expect(screen.getByText('1100 JPYC')).toBeInTheDocument();
+    // 事前充填時は明細を既定で開く (人が確認してから払える)。
+    expect(screen.getByRole('button', { name: 'ご注文内容' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    // /checkout に品目が乗る。
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const parsed = parseCheckoutParams(
+      new URL(pay.getAttribute('href') ?? '', 'http://localhost').searchParams,
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      const names = parsed.params.items.map((i) => i.name).sort();
+      expect(names).toEqual(['ブレンド', '水']);
+    }
+  });
+
+  it('改ざんカート: 未知 id は drop・既知品のみ反映 (価格は menu 由来で再計算)', () => {
+    const tampered: AgentCartItem[] = [
+      { id: 'a', qty: 1 }, // 実在 (ブレンド 500)
+      { id: 'HACK', qty: 99 }, // menu に無い → 無視
+    ];
+    renderWithIntl(<MobileOrderView config={config} initialCart={tampered} />);
+    // 500 のみ (未知 id は反映されない)。
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const parsed = parseCheckoutParams(
+      new URL(pay.getAttribute('href') ?? '', 'http://localhost').searchParams,
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.items).toHaveLength(1);
+      expect(parsed.params.items[0].name).toBe('ブレンド');
+      expect(parsed.params.items[0].price).toBe('500'); // menu 由来
+    }
+  });
+
+  it('全行が未知 id なら空カート・通知バナー無し (解決分ゼロ)', () => {
+    renderWithIntl(
+      <MobileOrderView config={config} initialCart={[{ id: 'nope', qty: 1 }]} />,
+    );
+    expect(screen.queryByText(/AI が選んだご注文を読み込みました/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('options 商品を充填 (flag ON): 実効単価 + サフィックス名でカート追加', () => {
+    envHold.enableMenuOptions = true;
+    const optCfg: MobileOrderConfig = {
+      ...config,
+      menu: [
+        {
+          id: 'gyudon',
+          name: '牛丼',
+          price: '500',
+          options: [
+            {
+              id: 'g1',
+              name: 'サイズ',
+              type: 'single',
+              required: true,
+              choices: [
+                { id: 's', label: '小盛り', priceDelta: '0' },
+                { id: 'l', label: '大盛り', priceDelta: '200' },
+              ],
+            },
+            {
+              id: 'g2',
+              name: 'トッピング',
+              type: 'multi',
+              choices: [{ id: 'ebi', label: 'えび', priceDelta: '150' }],
+            },
+          ],
+        },
+      ],
+    };
+    renderWithIntl(
+      <MobileOrderView
+        config={optCfg}
+        initialCart={[{ id: 'gyudon', qty: 1, options: { g1: 'l', g2: ['ebi'] } }]}
+      />,
+    );
+    // 合計 = 500 + 200 + 150 = 850 JPYC。明細は既定で開くのでサフィックス名も見える。
+    expect(screen.getByText('850 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('牛丼（大盛り・えび）')).toBeInTheDocument();
+  });
+
+  it('グレース劣化 (flag ON): required 未選択の行は drop・有効行のみ反映', () => {
+    envHold.enableMenuOptions = true;
+    const optCfg: MobileOrderConfig = {
+      ...config,
+      menu: [
+        {
+          id: 'gyudon',
+          name: '牛丼',
+          price: '500',
+          options: [
+            {
+              id: 'g1',
+              name: 'サイズ',
+              type: 'single',
+              required: true,
+              choices: [{ id: 's', label: '小盛り', priceDelta: '0' }],
+            },
+          ],
+        },
+        { id: 'water', name: '水', price: '100' },
+      ],
+    };
+    renderWithIntl(
+      <MobileOrderView
+        config={optCfg}
+        initialCart={[
+          { id: 'gyudon', qty: 1 }, // required (g1) 未選択 → drop
+          { id: 'water', qty: 2 }, // 反映
+        ]}
+      />,
+    );
+    // 水 100×2 = 200 のみ (牛丼は required 未選択で drop)。牛丼はメニューには残る (カートに入らない)。
+    expect(screen.getByText('200 JPYC')).toBeInTheDocument();
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const parsed = parseCheckoutParams(
+      new URL(pay.getAttribute('href') ?? '', 'http://localhost').searchParams,
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.items.map((i) => i.name)).toEqual(['水']);
+    }
   });
 });
 

@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { getAddress } from 'viem';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
-import { encodeAgentCart } from '@/lib/agentOrder';
+import { encodeAgentCart, decodeAgentCart, type AgentCartItem } from '@/lib/agentOrder';
 
 const JPYC = 10n ** 18n;
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
@@ -17,6 +17,7 @@ const FEE_RECEIVER = getAddress('0x3333333333333333333333333333333333333333');
 type ToolRuntime = {
   orderMenu: (args: unknown) => Promise<Record<string, unknown>>;
   orderQuote: (args: unknown) => Promise<Record<string, unknown>>;
+  createOrderLink: (args: unknown) => Promise<Record<string, unknown>>;
   tools: Array<{ name: string }>;
 };
 
@@ -202,5 +203,116 @@ describe('MCP agent-order tools', () => {
         items: [{ id: 'oj', qty: 1, options: { size: 5 } }],
       }),
     ).rejects.toThrow(/options/);
+  });
+});
+
+// createOrderLink: 人間が開く事前充填リンク (@handle?cart=)。鍵不要・fetch なし。
+describe('MCP createOrderLink', () => {
+  // fetch は絶対に呼ばれない (署名も送金もしない・URL 組立のみ)。呼ばれたら失敗させる。
+  const noFetch = (async () => {
+    throw new Error('createOrderLink must not fetch');
+  }) as unknown as typeof fetch;
+
+  it('createOrderLink を登録している', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV });
+    expect(runtime.tools.map((t) => t.name)).toContain('createOrderLink');
+  });
+
+  it('鍵なし env でも動く (wallet-optional) — /@handle?cart= リンクを返す', async () => {
+    const { createToolRuntime } = await loadTools();
+    // BUYER_PRIVATE_KEY / STEWARD_* を一切持たない env。
+    const runtime = createToolRuntime({ env: ENV, fetchImpl: noFetch });
+    const out = await runtime.createOrderLink({
+      handle: '@Shop',
+      items: [
+        { id: 'karaage', qty: 2 },
+        { id: 'beer', qty: 1 },
+      ],
+      table: 'A5',
+      pickupAt: '1700000000000',
+    });
+    expect(out).toMatchObject({ ok: true, handle: 'shop', itemCount: 2 });
+    const url = new URL(out.url as string);
+    // 受取先/価格を URL に載せない — path は @handle・query は cart/table/pickupAt のみ。
+    expect(url.origin).toBe('https://open-pay.jp');
+    expect(url.pathname).toBe('/@shop'); // handle 正規化 (@ 除去・小文字化)
+    // cart は server の encodeAgentCart と byte 一致 (= @handle ページの decodeAgentCart が読める)。
+    expect(url.searchParams.get('cart')).toBe(
+      encodeAgentCart([
+        { id: 'karaage', qty: 2 },
+        { id: 'beer', qty: 1 },
+      ]),
+    );
+    expect(url.searchParams.get('table')).toBe('A5');
+    expect(url.searchParams.get('pickupAt')).toBe('1700000000000');
+    // 決済トークン (?s=) は絶対に生成しない (C1: receiver スプーフィング回避)。
+    expect(url.searchParams.get('s')).toBeNull();
+    expect(url.pathname).not.toContain('/order');
+  });
+
+  it('table/pickupAt 未指定なら cart だけの最小リンク', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl: noFetch });
+    const out = await runtime.createOrderLink({ handle: 'shop', items: [{ id: 'karaage', qty: 1 }] });
+    const url = new URL(out.url as string);
+    expect([...url.searchParams.keys()]).toEqual(['cart']);
+  });
+
+  it('options 付きカートも options ごと cart に載る (脱落しない)', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl: noFetch });
+    const cart: AgentCartItem[] = [{ id: 'oj', qty: 1, options: { size: 'm', top: ['nori', 'egg'] } }];
+    const out = await runtime.createOrderLink({ handle: 'shop', items: cart });
+    const cartParam = new URL(out.url as string).searchParams.get('cart') as string;
+    expect(cartParam).toBe(encodeAgentCart(cart));
+  });
+
+  it('空 items / 不正 options は throw (order_quote と同じ normalizeCartItems)', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl: noFetch });
+    await expect(runtime.createOrderLink({ handle: 'shop', items: [] })).rejects.toThrow();
+    await expect(runtime.createOrderLink({ handle: 'shop' })).rejects.toThrow();
+    await expect(
+      runtime.createOrderLink({ handle: 'shop', items: [{ id: 'oj', qty: 1, options: { size: 5 } }] }),
+    ).rejects.toThrow(/options/);
+  });
+});
+
+// フォーマット互換フェンス (drift 防止): MCP の cart 直列化 (encodeCart・createOrderLink 経由) と
+// server の lib/agentOrder.encodeAgentCart / decodeAgentCart が **同一フォーマット** であることを
+// 複数のカート形で保証する。ここが割れると事前充填・agent-order の cart が読めなくなる。
+describe('MCP ⇄ server cart フォーマット互換フェンス', () => {
+  const CARTS: AgentCartItem[][] = [
+    [{ id: 'a', qty: 1 }],
+    [
+      { id: 'karaage', qty: 2 },
+      { id: 'beer', qty: 1 },
+    ],
+    [{ id: 'oj', qty: 3, options: { size: 'm' } }],
+    [{ id: 'oj', qty: 1, options: { size: 'l', top: ['nori', 'egg'] } }],
+    [
+      { id: 'x', qty: 1, options: { g: ['c1', 'c2'] } },
+      { id: 'y', qty: 5 },
+    ],
+    [{ id: '日本語id', qty: 1, options: { サイズ: '大' } }], // 非 ASCII (UTF-8 経路)
+  ];
+
+  it('MCP createOrderLink の cart param が server encodeAgentCart と byte 一致し、decodeAgentCart で往復する', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({
+      env: ENV,
+      fetchImpl: (async () => {
+        throw new Error('must not fetch');
+      }) as unknown as typeof fetch,
+    });
+    for (const cart of CARTS) {
+      const out = await runtime.createOrderLink({ handle: 'shop', items: cart });
+      const cartParam = new URL(out.url as string).searchParams.get('cart') as string;
+      // 1) MCP 直列化 === server 直列化 (byte 一致)。
+      expect(cartParam).toBe(encodeAgentCart(cart));
+      // 2) server の untrusted decode が MCP 出力を検証付きで往復できる (フォーマット契約の両端)。
+      expect(decodeAgentCart(cartParam)).toEqual(cart);
+    }
   });
 });

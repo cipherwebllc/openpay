@@ -1911,6 +1911,7 @@
     "placardPay": "JPYC payments only",
     "placardChains": "Networks",
     "placardPrint": "Print",
+    "prefillNotice": "Loaded the order your assistant selected. Please review the items and total before paying.",
     "viewMenuHeading": "Menu",
     "uncategorized": "Other",
     "orderItemsToggle": "Order",

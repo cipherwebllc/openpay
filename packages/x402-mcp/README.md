@@ -65,8 +65,14 @@ node src/index.mjs
 | `x402_pay` | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
 | `order_menu` | No | Read an OpenPay `@handle` shop's public mobile-order menu (`{handle}`): item ids, names, prices, and `hasOptions`. |
 | `order_quote` | No | Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and fetch its x402 challenge (price, fee, total, guard reasons). Returns the canonical pay `url`; pay it with `x402_pay`. |
+| `createOrderLink` | No | Build a **human-facing** checkout link for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`). Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`; the traveler opens it and pays from their own wallet. **No key needed.** |
 
-Ordering flow: `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`. Items with option groups (size/toppings — `options` in `order_menu`): pass `items[].options` = `{groupId: choiceId}` (single) / `{groupId: [choiceIds]}` (multi); required groups are mandatory (`missing_required_option` otherwise), unknown ids are rejected (`unknown_option`). A shop total is usually well above the default `MAX_PER_CALL_JPYC` of `10` JPYC, so raise `MAX_PER_CALL_JPYC` (and `MAX_SESSION_JPYC`) to your intended order ceiling or `x402_pay` will refuse with `max_total_above_per_call_limit` / `total_exceeds_max_total`. The shop must have `ENABLE_AGENT_ORDER` (+ `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY`) enabled server-side, otherwise the endpoints return 404.
+Two ways to order:
+
+- **Agent holds a funded key** (autonomous pay): `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`.
+- **Human pays by hand** (BYOW handoff — no wallet in the agent): `order_menu` → pick items → `createOrderLink` → the traveler opens the returned `@handle` link on their phone and pays with their own wallet. The shop's receiving address and prices are re-resolved server-side from the `@handle` record, so the cart link only carries `{id, qty, options}` — menu text can never change the destination or amount.
+
+Ordering flow (autonomous): `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`. Items with option groups (size/toppings — `options` in `order_menu`): pass `items[].options` = `{groupId: choiceId}` (single) / `{groupId: [choiceIds]}` (multi); required groups are mandatory (`missing_required_option` otherwise), unknown ids are rejected (`unknown_option`). A shop total is usually well above the default `MAX_PER_CALL_JPYC` of `10` JPYC, so raise `MAX_PER_CALL_JPYC` (and `MAX_SESSION_JPYC`) to your intended order ceiling or `x402_pay` will refuse with `max_total_above_per_call_limit` / `total_exceeds_max_total`. The shop must have `ENABLE_AGENT_ORDER` (+ `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY`) enabled server-side, otherwise the endpoints return 404.
 
 ## Environment
 
