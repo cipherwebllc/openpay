@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2
+
+- Docs: add a "Quickstart: buy a JPYC resource" section — a concrete
+  `discovery_search` → `x402_quote` → `x402_pay` walkthrough for the headline
+  "local MCP buyer for JPYC resources" use case, using the live catalog `demo`
+  resource. No code change.
+
 ## 0.7.1
 
 - Strengthen tool-selection steering (descriptions only; no behavior change):
