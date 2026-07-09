@@ -72,7 +72,7 @@ export const TOOLS = [
   {
     name: 'order_quote',
     description:
-      'Build an agent-order for an OpenPay @handle shop and fetch its x402 challenge (price, fee, total, guard reasons). Only when the agent itself holds a funded key and auto-pays (x402, buyer covers the ~1% fee); for human-pays, use order_summary + createOrderLink instead. Items with options: pass items[].options (ids from order_menu; required groups mandatory). This does not pay — pay the returned url with x402_pay. Note: an order total often exceeds the default MAX_PER_CALL_JPYC (10 JPYC); raise it to allow payment.',
+      "⚠️ Do NOT use this to estimate/quote what a PERSON pays — for a human paying by hand (the normal case, incl. any 'how much / quote / 見積もり' question) use order_summary + createOrderLink. order_quote is ONLY for the rare case where the AGENT ITSELF holds a funded key and auto-pays via x402: it fetches the x402 challenge where the BUYER pays the ~1% fee on top (total = price + fee) and is subject to MAX_PER_CALL_JPYC / session guards. Builds an agent-order for an OpenPay @handle shop; does not pay — pay the returned url with x402_pay. Items with options: pass items[].options (ids from order_menu; required groups mandatory).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -110,7 +110,7 @@ export const TOOLS = [
   {
     name: 'order_summary',
     description:
-      "For the human-pays flow (customer pays from their own wallet). Returns the amount the customer actually pays (subtotal; the shop covers the ~1% service fee). Use this + createOrderLink for 'my AI plans the order, I pay by hand'. No key needed.",
+      "DEFAULT for a mobile order a PERSON will pay — use this for any 'how much will I pay / quote / estimate / 見積もり' question. Returns the exact amount the customer pays from their own wallet: the subtotal (the shop absorbs the ~1% service fee, so the customer is charged NO extra — e.g. a 1700 order shows 1700, not 1717). Pair with createOrderLink to hand the person a checkout link. No key, no buyer fee upcharge, no payment-limit guards. (Do NOT use order_quote for a person's estimate — that is the agent-auto-pay path and adds the fee to the buyer.)",
     inputSchema: {
       type: 'object',
       properties: {

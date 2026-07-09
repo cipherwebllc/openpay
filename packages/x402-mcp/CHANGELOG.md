@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+- Strengthen tool-selection steering (descriptions only; no behavior change):
+  make `order_summary` the explicit DEFAULT for any "how much / quote / estimate /
+  見積もり" question about a mobile order a **person** will pay (returns the subtotal
+  the customer actually pays — no buyer upcharge), and make `order_quote` lead with
+  a ⚠️ "do NOT use to estimate what a person pays" and clarify it is only for the
+  rare agent-auto-pay (x402, buyer covers the fee, subject to guards). Fixes AI
+  clients defaulting to `order_quote` (x402 buyer-upcharge + MAX_PER_CALL guards)
+  when a human simply wants a quote.
+
 ## 0.7.0
 
 - Add `order_summary` tool: for the **human-pays** flow (the customer pays from
