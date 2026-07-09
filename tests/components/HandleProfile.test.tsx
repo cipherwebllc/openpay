@@ -80,6 +80,74 @@ describe('HandleProfileView', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer nofollow');
   });
 
+  it('clean (default) renders links with the exact current className and no inline style (pixel parity)', () => {
+    const links = [{ label: 'My X', url: 'https://x.com/alice' }];
+    const { unmount } = renderWithIntl(
+      <HandleProfileView config={multiConfig} profile={{ links }} />,
+    );
+    const noTheme = screen.getByRole('link', { name: 'My X' });
+    const cleanClass = noTheme.getAttribute('class');
+    // theme 無しのリンクは inline style を持たない (現行と一致)。
+    expect(noTheme.getAttribute('style')).toBeNull();
+    unmount();
+    // 明示 theme:'clean' でも同一 className + inline style 無し。
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{ links, theme: 'clean' }}
+      />,
+    );
+    const cleanExplicit = screen.getByRole('link', { name: 'My X' });
+    expect(cleanExplicit.getAttribute('class')).toBe(cleanClass);
+    expect(cleanExplicit.getAttribute('style')).toBeNull();
+  });
+
+  it('renders a link emoji as aria-hidden text (accessible name stays the label)', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{ links: [{ label: 'Site', url: 'https://x.com/a', emoji: '🌐' }] }}
+      />,
+    );
+    // a11y 名は label のみ (絵文字は混ざらない)。
+    const link = screen.getByRole('link', { name: 'Site' });
+    expect(link).toHaveTextContent('🌐');
+    expect(link.querySelector('[aria-hidden="true"]')?.textContent).toBe('🌐');
+  });
+
+  it('featured link gets an inline style even under the clean theme (emphasis)', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            { label: 'Plain', url: 'https://x.com/a' },
+            { label: 'Star', url: 'https://x.com/b', featured: true },
+          ],
+        }}
+      />,
+    );
+    const plain = screen.getByRole('link', { name: 'Plain' });
+    const star = screen.getByRole('link', { name: 'Star' });
+    // 通常リンクは clean の class-only、featured は inline style で強調。
+    expect(plain.getAttribute('style')).toBeNull();
+    expect(star.getAttribute('style')).toContain('outline');
+  });
+
+  it('night theme uses light ink for the name (readability on dark bg)', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{ bio: 'hi', theme: 'night' }}
+        handle="alice"
+      />,
+    );
+    const name = screen.getByText('Alice');
+    // ダーク背景で可読な明色 (#f8fafc)。text-slate-900 は付かない。
+    expect(name.getAttribute('style')).toContain('rgb(248, 250, 252)');
+    expect(name.className).not.toContain('text-slate-900');
+  });
+
   it('renders social icon links (brand label for known, hostname for unknown)', () => {
     renderWithIntl(
       <HandleProfileView

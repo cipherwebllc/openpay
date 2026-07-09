@@ -23,6 +23,7 @@ import {
   type StorefrontParts,
   type MobileOrderConfig,
 } from '@/lib/mobileOrder';
+import { isHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 
 // 1 wallet が保有できる handle の上限 (squatting 抑制・D2)。
 export const MAX_HANDLES_PER_WALLET = 3;
@@ -124,6 +125,10 @@ export interface HandleReceiveMethod {
 export interface HandleLink {
   label: string;
   url: string;
+  // 先頭に表示する絵文字 (任意・最大 2 code points)。テキストとして描画 (HTML 解釈なし)。
+  emoji?: string;
+  // 「注目」= 少し大きく強調するリンク (プロフィール全体で最大 1 本・保存時に enforce)。
+  featured?: boolean;
 }
 
 // @handle プロフィール (link-in-bio)。tip パラメータではないので config の sibling。
@@ -134,6 +139,19 @@ export interface HandleProfile {
   // (lib/socialLinks)。platform は保存しない (判定更新で既存データも追従)。
   socials?: string[];
   links?: HandleLink[];
+  // 着せ替えテーマ (enum のみ・自由 CSS/画像アップロードなし)。未設定/不正は clean 扱い。
+  theme?: HandleTheme;
+}
+
+// 絵文字入力の正規化: trim + 最大 2 code points。空/超過は undefined (link 自体は残す)。
+// code point 単位で数える (絵文字 ZWJ 連結や補助面文字を割らない)。
+function sanitizeEmoji(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const cps = [...trimmed];
+  if (cps.length > 2) return undefined;
+  return trimmed;
 }
 
 // @handle 専用の保存 tip 設定。PublishableTipConfig (単一 token+chain) を
@@ -455,6 +473,9 @@ export function validateProfile(raw: unknown): ValidatedProfile {
       return { ok: false, error: 'too many links' };
     }
     const links: HandleLink[] = [];
+    // featured はプロフィール全体で最大 1 本。最初に featured=true を付けた 1 本だけを採用し、
+    // 以降は無視する (サーバ検証でも enforce = クライアントを信用しない)。
+    let featuredTaken = false;
     for (const l of r.links) {
       if (typeof l !== 'object' || l === null) {
         return { ok: false, error: 'invalid link' };
@@ -475,10 +496,21 @@ export function validateProfile(raw: unknown): ValidatedProfile {
       if (!isHttpsUrl(url)) {
         return { ok: false, error: 'link url must be https' };
       }
-      links.push({ label, url });
+      const link: HandleLink = { label, url };
+      // 絵文字は不正 (>2 code points 等) でも link 自体は残す (label/url を落とさない)。
+      const emoji = sanitizeEmoji(ll.emoji);
+      if (emoji) link.emoji = emoji;
+      if (ll.featured === true && !featuredTaken) {
+        link.featured = true;
+        featuredTaken = true;
+      }
+      links.push(link);
     }
     if (links.length > 0) profile.links = links;
   }
+
+  // 着せ替えテーマ (enum のみ)。未知/不正は黙って落とす (= clean 扱い・エラーにしない)。
+  if (isHandleTheme(r.theme)) profile.theme = r.theme;
 
   return { ok: true, profile };
 }
@@ -620,6 +652,7 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
   }
   if (Array.isArray(r.links)) {
     const links: HandleLink[] = [];
+    let featuredTaken = false;
     for (const l of r.links) {
       if (links.length >= MAX_PROFILE_LINKS) break;
       if (typeof l !== 'object' || l === null) continue;
@@ -628,10 +661,20 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
       const label = ll.label.trim();
       const url = ll.url.trim();
       if (!label || url.length > MAX_LINK_URL_LEN || !isHttpsUrl(url)) continue;
-      links.push({ label: label.slice(0, MAX_LINK_LABEL_LEN), url });
+      const link: HandleLink = { label: label.slice(0, MAX_LINK_LABEL_LEN), url };
+      const emoji = sanitizeEmoji(ll.emoji);
+      if (emoji) link.emoji = emoji;
+      // featured は最大 1 本 (書込側で enforce 済みだが読込側も冪等に守る)。
+      if (ll.featured === true && !featuredTaken) {
+        link.featured = true;
+        featuredTaken = true;
+      }
+      links.push(link);
     }
     if (links.length > 0) profile.links = links;
   }
+  // 着せ替えテーマ (enum のみ)。未知は落とす (clean 扱い)。
+  if (isHandleTheme(r.theme)) profile.theme = r.theme;
   return Object.keys(profile).length > 0 ? profile : undefined;
 }
 

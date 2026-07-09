@@ -271,6 +271,57 @@ describe('validateProfile', () => {
     }
     expect(validateProfile({ socials: [] })).toEqual({ ok: true, profile: {} });
   });
+  it('accepts a known theme and drops unknown/invalid theme (no error, clean-treated)', () => {
+    const ok = validateProfile({ bio: 'hi', theme: 'night' });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.profile.theme).toBe('night');
+    // 未知値はエラーにせず theme を落とす (= clean 扱い)。
+    const unknown = validateProfile({ bio: 'hi', theme: 'neon' });
+    expect(unknown.ok).toBe(true);
+    if (unknown.ok) expect(unknown.profile.theme).toBeUndefined();
+    // 非 string でもエラーにしない。
+    const nonStr = validateProfile({ bio: 'hi', theme: 42 });
+    expect(nonStr.ok).toBe(true);
+    if (nonStr.ok) expect(nonStr.profile.theme).toBeUndefined();
+  });
+
+  it('carries link emoji (≤2 code points) and drops an over-long emoji but keeps label/url', () => {
+    const res = validateProfile({
+      links: [
+        { label: 'X', url: 'https://x.com/a', emoji: ' 🌐 ' },
+        { label: 'Multi', url: 'https://x.com/b', emoji: '👨‍👩‍👧' }, // ZWJ = 1 grapheme but >2 code points → drop
+        { label: 'Two', url: 'https://x.com/c', emoji: '⚡🔥' }, // 2 code points → keep
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.profile.links?.[0]).toEqual({
+        label: 'X',
+        url: 'https://x.com/a',
+        emoji: '🌐',
+      });
+      // emoji が drop されても link 自体は残る (label/url を落とさない)。
+      expect(res.profile.links?.[1]).toEqual({ label: 'Multi', url: 'https://x.com/b' });
+      expect(res.profile.links?.[2].emoji).toBe('⚡🔥');
+    }
+  });
+
+  it('enforces at most one featured link (first wins, rest dropped)', () => {
+    const res = validateProfile({
+      links: [
+        { label: 'A', url: 'https://x.com/a', featured: true },
+        { label: 'B', url: 'https://x.com/b', featured: true },
+        { label: 'C', url: 'https://x.com/c' },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.profile.links?.[0].featured).toBe(true);
+      expect(res.profile.links?.[1].featured).toBeUndefined();
+      expect(res.profile.links?.[2].featured).toBeUndefined();
+    }
+  });
+
   it('rejects invalid socials (non-https / non-string / empty / too many / too long)', () => {
     expect(validateProfile({ socials: ['http://x.com/a'] }).ok).toBe(false);
     expect(validateProfile({ socials: ['javascript:alert(1)'] }).ok).toBe(false);
@@ -370,6 +421,36 @@ describe('parseHandleRecord', () => {
     expect(parsed?.profile?.socials).toEqual(['https://x.com/good']);
     expect(parsed?.profile?.links).toEqual([{ label: 'good', url: 'https://x.com' }]);
   });
+  it('round-trips theme + link emoji/featured and enforces single featured on read', () => {
+    const themed: HandleRecord = {
+      ...good,
+      profile: {
+        bio: 'hi',
+        theme: 'gradient',
+        links: [
+          { label: 'A', url: 'https://x.com/a', emoji: '⚡', featured: true },
+          { label: 'B', url: 'https://x.com/b' },
+        ],
+      },
+    };
+    expect(parseHandleRecord(serializeHandleRecord(themed))).toEqual(themed);
+    // 破損: 複数 featured / 未知 theme が来ても読込側で健全化 (先頭のみ featured・theme 落とす)。
+    const messy = {
+      ...good,
+      profile: {
+        theme: 'neon',
+        links: [
+          { label: 'A', url: 'https://x.com/a', featured: true },
+          { label: 'B', url: 'https://x.com/b', featured: true },
+        ],
+      },
+    };
+    const parsed = parseHandleRecord(JSON.stringify(messy));
+    expect(parsed?.profile?.theme).toBeUndefined();
+    expect(parsed?.profile?.links?.[0].featured).toBe(true);
+    expect(parsed?.profile?.links?.[1].featured).toBeUndefined();
+  });
+
   it('parses + round-trips a storefront (menu/chain/mode)', () => {
     const withStore: HandleRecord = {
       ...good,

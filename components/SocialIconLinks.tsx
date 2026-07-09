@@ -26,7 +26,20 @@ export function SocialIcon({
   );
 }
 
-export function SocialIconLinks({ urls }: { urls: string[] }) {
+// variant='dark' は night テーマ用 (暗い地色でもアイコンが読めるガラス調)。既定は現行のまま。
+const SOCIAL_PILL_CLASS: Record<'default' | 'dark', string> = {
+  default:
+    'flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-800',
+  dark: 'flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-slate-200 transition hover:bg-white/20 hover:text-white',
+};
+
+export function SocialIconLinks({
+  urls,
+  variant = 'default',
+}: {
+  urls: string[];
+  variant?: 'default' | 'dark';
+}) {
   if (urls.length === 0) return null;
   return (
     <ul className="flex flex-wrap items-center justify-center gap-2">
@@ -40,7 +53,7 @@ export function SocialIconLinks({ urls }: { urls: string[] }) {
               rel="noopener noreferrer nofollow"
               aria-label={label}
               title={label}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
+              className={SOCIAL_PILL_CLASS[variant]}
             >
               <SocialIcon url={url} className="h-5 w-5" />
             </a>

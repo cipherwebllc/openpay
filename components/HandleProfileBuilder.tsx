@@ -28,6 +28,12 @@ import {
   useHandleProfileDraft,
   DEFAULT_PROFILE_DRAFT,
 } from '@/hooks/useHandleProfileDraft';
+import {
+  HANDLE_THEMES,
+  handlePreviewBackground,
+  handleViewTheme,
+  type HandleTheme,
+} from '@/lib/handleTheme';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
@@ -39,6 +45,7 @@ import {
   type HandleReceiveMethod,
   type HandleTipConfig,
   type HandleProfile,
+  type HandleLink,
 } from '@/lib/handle';
 
 function isHttpsUrl(value: string): boolean {
@@ -71,6 +78,16 @@ function Field({
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+
+// テーマ名は固有名詞なので翻訳しない (周辺ラベルのみ i18n)。
+const THEME_NAMES: Record<HandleTheme, string> = {
+  clean: 'Clean',
+  gradient: 'Gradient',
+  bold: 'Bold',
+  outline: 'Outline',
+  night: 'Night',
+  soft: 'Soft',
+};
 
 export function HandleProfileBuilder() {
   const t = useTranslations('HandleProfile');
@@ -172,10 +189,25 @@ export function HandleProfileBuilder() {
     profile: HandleProfile;
     hasInsecure: boolean;
   }>(() => {
-    const trimmedLinks = draft.links
-      .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
-      .filter((l) => l.label && isHttpsUrl(l.url))
-      .slice(0, MAX_PROFILE_LINKS);
+    // 有効リンク (label 非空 + https) へ emoji/featured を carry。featured は最大 1 本 (UI でも
+    // 単一 enforce しているが、ここでも最初の有効 featured だけ残す)。サーバの validateProfile が
+    // 最終権威で再 enforce する。
+    let featuredTaken = false;
+    const trimmedLinks: HandleLink[] = [];
+    for (const l of draft.links) {
+      if (trimmedLinks.length >= MAX_PROFILE_LINKS) break;
+      const label = l.label.trim();
+      const url = l.url.trim();
+      if (!label || !isHttpsUrl(url)) continue;
+      const link: HandleLink = { label, url };
+      const emoji = l.emoji?.trim();
+      if (emoji) link.emoji = emoji; // validateProfile が >2 code points を drop
+      if (l.featured && !featuredTaken) {
+        link.featured = true;
+        featuredTaken = true;
+      }
+      trimmedLinks.push(link);
+    }
     const validSocials = draft.socials
       .map((s) => s.trim())
       .filter((s) => isHttpsUrl(s))
@@ -188,18 +220,31 @@ export function HandleProfileBuilder() {
         avatar: avatarValid ? avatar : undefined,
         socials: validSocials.length > 0 ? validSocials : undefined,
         links: trimmedLinks.length > 0 ? trimmedLinks : undefined,
+        theme: draft.theme,
       },
       hasInsecure:
         (!!avatar && !avatarValid) ||
         draft.socials.some((s) => s.trim() && !isHttpsUrl(s.trim())) ||
         draft.links.some((l) => l.url.trim() && !isHttpsUrl(l.url.trim())),
     };
-  }, [draft.links, draft.socials, draft.avatar, draft.bio]);
+  }, [draft.links, draft.socials, draft.avatar, draft.bio, draft.theme]);
 
   if (!env.enableHandles) return null;
 
   const update = (patch: Partial<typeof draft>) =>
     setSettings((s) => ({ ...s, ...patch }));
+
+  // 「注目」は最大 1 本。ある行を ON にしたら他行は自動 OFF (単一 enforce)。同じ行の再クリックで OFF。
+  const setFeatured = (index: number, on: boolean) =>
+    update({
+      links: draft.links.map((l, j) => ({ ...l, featured: on && j === index })),
+    });
+
+  // テーマピッカーのミニプレビュー用アクセント (無効色は既定ブルー)。
+  const pickerAccent = colorValid ? draft.color : '#2563eb';
+  // ライブプレビューカードの地色 (clean は undefined = 従来の白)。night は暗背景。
+  const previewBg = handlePreviewBackground(pickerAccent, draft.theme);
+  const previewDark = draft.theme === 'night';
 
   // 並べ替えハンドル/▲▼ の i18n ラベル (socials/links 共通・既存キーを流用)。
   const reorderLabels = {
@@ -265,6 +310,7 @@ export function HandleProfileBuilder() {
       avatar: p?.avatar ?? '',
       socials: p?.socials ?? [],
       links: p?.links ?? [],
+      theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
     }));
   };
 
@@ -374,6 +420,61 @@ export function HandleProfileBuilder() {
                   className={inputClass}
                 />
               </Field>
+              {/* テーマピッカーは interactive なタイル群なので Field (=<label>) では包まない
+                  (label で包むとタイルのアクセシブル名が汚染される)。 */}
+              <div>
+                <span className="text-sm font-medium text-slate-700">
+                  {t('themeLabel')}
+                </span>
+                <div className="mt-1 grid grid-cols-3 gap-2">
+                  {HANDLE_THEMES.map((th) => {
+                    const active = draft.theme === th;
+                    const swatchBg =
+                      handlePreviewBackground(pickerAccent, th) ?? '#f8fafc';
+                    // ミニプレビューのリンク片 (テーマの通常リンク配色)。clean は白ピル。
+                    const chip = handleViewTheme(pickerAccent, th).linkStyle ?? {
+                      backgroundColor: '#ffffff',
+                      boxShadow: '0 1px 3px rgba(15,23,42,0.12)',
+                    };
+                    return (
+                      <button
+                        key={th}
+                        type="button"
+                        onClick={() => update({ theme: th })}
+                        aria-pressed={active}
+                        className={`flex flex-col items-center gap-1 rounded-lg border p-1.5 transition ${
+                          active
+                            ? 'border-brand ring-2 ring-brand/40'
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <span
+                          className="flex h-9 w-full items-center justify-center rounded-md"
+                          style={{ background: swatchBg }}
+                          aria-hidden
+                        >
+                          <span
+                            className="h-2.5 w-3/4 rounded-full"
+                            style={{
+                              backgroundColor: chip.backgroundColor,
+                              boxShadow: chip.boxShadow,
+                              outline: chip.outline,
+                            }}
+                          />
+                        </span>
+                        <span
+                          className={`text-xs font-medium ${
+                            active ? 'text-brand' : 'text-slate-600'
+                          }`}
+                        >
+                          {THEME_NAMES[th]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-xs text-slate-400">{t('themeHint')}</p>
+              </div>
               <Field label={t('colorLabel')}>
                 <div className="flex items-center gap-2">
                   <input
@@ -466,37 +567,64 @@ export function HandleProfileBuilder() {
                         {...linksReorder.rowProps(i, draft.links.length)}
                         labels={reorderLabels}
                       >
-                        <input
-                          type="text"
-                          value={l.label}
-                          placeholder={t('linkLabelPlaceholder')}
-                          maxLength={40}
-                          onChange={(e) => {
-                            const next = [...draft.links];
-                            next[i] = { ...next[i], label: e.target.value };
-                            update({ links: next });
-                          }}
-                          className={`${inputClass} flex-[2]`}
-                        />
-                        <input
-                          type="url"
-                          value={l.url}
-                          placeholder="https://"
-                          onChange={(e) => {
-                            const next = [...draft.links];
-                            next[i] = { ...next[i], url: e.target.value };
-                            update({ links: next });
-                          }}
-                          className={`${inputClass} flex-[3]`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
-                          className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
-                          aria-label={t('removeLink')}
-                        >
-                          ×
-                        </button>
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            value={l.emoji ?? ''}
+                            placeholder="🌐"
+                            aria-label={t('emojiAria')}
+                            maxLength={8}
+                            onChange={(e) => {
+                              const next = [...draft.links];
+                              next[i] = { ...next[i], emoji: e.target.value };
+                              update({ links: next });
+                            }}
+                            className="w-12 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+                          />
+                          <input
+                            type="text"
+                            value={l.label}
+                            placeholder={t('linkLabelPlaceholder')}
+                            maxLength={40}
+                            onChange={(e) => {
+                              const next = [...draft.links];
+                              next[i] = { ...next[i], label: e.target.value };
+                              update({ links: next });
+                            }}
+                            className={`${inputClass} min-w-[6rem] flex-[2]`}
+                          />
+                          <input
+                            type="url"
+                            value={l.url}
+                            placeholder="https://"
+                            onChange={(e) => {
+                              const next = [...draft.links];
+                              next[i] = { ...next[i], url: e.target.value };
+                              update({ links: next });
+                            }}
+                            className={`${inputClass} min-w-[8rem] flex-[3]`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setFeatured(i, !l.featured)}
+                            aria-pressed={!!l.featured}
+                            className={`shrink-0 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                              l.featured
+                                ? 'border-brand bg-brand/10 text-brand'
+                                : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            {l.featured ? '★' : '☆'} {t('featuredToggle')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
+                            className="shrink-0 rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                            aria-label={t('removeLink')}
+                          >
+                            ×
+                          </button>
+                        </div>
                       </ReorderableRow>
                     ))}
                     {draft.links.length < MAX_PROFILE_LINKS && (
@@ -522,14 +650,24 @@ export function HandleProfileBuilder() {
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {hydrated && (
               <div className="rounded-xl bg-slate-50 p-4">
-                <div className="mx-auto max-w-xs rounded-xl bg-white p-4 shadow-sm">
+                {/* テーマの地色をプレビューにも反映 (clean は従来の白のまま)。 */}
+                <div
+                  className={`mx-auto max-w-xs rounded-xl p-4 shadow-sm ${
+                    previewBg ? '' : 'bg-white'
+                  }`}
+                  style={previewBg ? { background: previewBg } : undefined}
+                >
                   <HandleProfileView config={previewConfig} profile={profile} />
                   {methods.length > 0 && (
                     <div className="mt-4 flex flex-col gap-2">
                       {methods.map((m, i) => (
                         <span
                           key={i}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600"
+                          className={`rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
+                            previewDark
+                              ? 'border-white/15 text-slate-200'
+                              : 'border-slate-200 text-slate-600'
+                          }`}
                         >
                           {t('supportWith', { label: methodLabel(m, t('crossChain')) })}
                         </span>

@@ -800,7 +800,11 @@
     "stepHandleTitle": "恒久リンク (@handle)",
     "stepReceiverTitle": "受取先",
     "stepProfileTitle": "プロフィール",
-    "stepPreviewTitle": "プレビュー"
+    "stepPreviewTitle": "プレビュー",
+    "themeLabel": "テーマ",
+    "themeHint": "1 タップで着せ替え。テーマ色とは自由に組み合わせられます。",
+    "emojiAria": "絵文字 (任意)",
+    "featuredToggle": "注目"
   },
   "CheckoutForm": {
     "header": "ご注文のお支払い",
