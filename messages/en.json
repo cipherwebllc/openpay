@@ -800,7 +800,11 @@
     "stepHandleTitle": "Permanent link (@handle)",
     "stepReceiverTitle": "Receiver",
     "stepProfileTitle": "Profile",
-    "stepPreviewTitle": "Preview"
+    "stepPreviewTitle": "Preview",
+    "themeLabel": "Theme",
+    "themeHint": "Swap the look in one tap. Mixes with any accent color.",
+    "emojiAria": "Emoji (optional)",
+    "featuredToggle": "Featured"
   },
   "CheckoutForm": {
     "header": "Order checkout",

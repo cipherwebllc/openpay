@@ -19,6 +19,7 @@ import {
 import { parseTipParams } from '@/lib/url';
 import { displaySymbolFor } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
+import { resolveHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 
 const CHAIN_LABEL: Record<ChainSlug, string> = {
   base: 'Base',
@@ -91,7 +92,15 @@ function MethodForm({
 
 const DEFAULT_ACCENT = '#2563eb';
 
-export function ReceiveMethodPicker({ config }: { config: HandleTipConfig }) {
+export function ReceiveMethodPicker({
+  config,
+  theme,
+}: {
+  config: HandleTipConfig;
+  // 着せ替えテーマ (任意)。既定 (未指定/clean) は現行の見た目で完全に不変。決済動作には一切
+  // 影響しない — night のときだけ見出し/説明文の色を暗背景でも読める明色に切替える (掟12: 追加のみ)。
+  theme?: HandleTheme;
+}) {
   const t = useTranslations('HandleProfile');
   // null = どれも未展開 (初期状態はスッキリ表示)
   const [selected, setSelected] = useState<number | null>(null);
@@ -100,6 +109,7 @@ export function ReceiveMethodPicker({ config }: { config: HandleTipConfig }) {
     config.color && /^#[0-9a-fA-F]{6}$/.test(config.color)
       ? config.color
       : DEFAULT_ACCENT;
+  const dark = resolveHandleTheme(theme) === 'night';
 
   return (
     // 応援 (= OpenPay の核) はアクセントの専用カードで他のリンクと差別化し、ページの主役にする。
@@ -109,9 +119,15 @@ export function ReceiveMethodPicker({ config }: { config: HandleTipConfig }) {
     >
       <div className="flex items-center justify-center gap-1.5">
         <Heart className="h-[1.05rem] w-[1.05rem]" style={{ color: accent }} aria-hidden />
-        <h2 className="text-base font-bold text-slate-900">{t('supportHeading')}</h2>
+        <h2 className={`text-base font-bold ${dark ? 'text-slate-100' : 'text-slate-900'}`}>
+          {t('supportHeading')}
+        </h2>
       </div>
-      <p className="mt-1 text-center text-xs leading-relaxed text-slate-500">
+      <p
+        className={`mt-1 text-center text-xs leading-relaxed ${
+          dark ? 'text-slate-300' : 'text-slate-500'
+        }`}
+      >
         {t('supportSubtext')}
       </p>
       <div className="mt-4 flex flex-col gap-2.5">

@@ -421,4 +421,57 @@ describe('HandleProfileBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
     expect(screen.getByLabelText(/ひとこと/)).toHaveValue('未公開のメモ');
   });
+
+  it('テーマピッカーが 6 タイルを描画し、既定は Clean が選択 (aria-pressed)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    for (const name of ['Clean', 'Gradient', 'Bold', 'Outline', 'Night', 'Soft']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(screen.getByRole('button', { name: 'Clean' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Night' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('テーマタイルをクリックすると選択が切り替わる (Night → 選択)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByRole('button', { name: 'Night' }));
+    expect(screen.getByRole('button', { name: 'Night' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Clean' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('リンク行の絵文字入力が保持される (controlled)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const emoji = screen.getByLabelText('絵文字 (任意)');
+    fireEvent.change(emoji, { target: { value: '🌐' } });
+    expect(screen.getByLabelText('絵文字 (任意)')).toHaveValue('🌐');
+  });
+
+  it('「注目」トグルは 1 本だけ ON (別行を ON にすると前行は自動 OFF)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const toggles = screen.getAllByRole('button', { name: /注目/ });
+    expect(toggles).toHaveLength(2);
+    // 1 行目を注目に。
+    fireEvent.click(toggles[0]);
+    expect(toggles[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(toggles[1]).toHaveAttribute('aria-pressed', 'false');
+    // 2 行目を注目に → 1 行目は自動 OFF (単一 enforce)。
+    fireEvent.click(screen.getAllByRole('button', { name: /注目/ })[1]);
+    const after = screen.getAllByRole('button', { name: /注目/ });
+    expect(after[0]).toHaveAttribute('aria-pressed', 'false');
+    expect(after[1]).toHaveAttribute('aria-pressed', 'true');
+  });
 });

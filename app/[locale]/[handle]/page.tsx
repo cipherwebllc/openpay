@@ -22,6 +22,7 @@ import { MobileOrderView } from '@/components/MobileOrderView';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/lib/handle';
+import { resolveHandleTheme, handlePageTheme } from '@/lib/handleTheme';
 import { resolveHandle } from '@/lib/handleStore';
 import { readShopLive } from '@/lib/shopLiveStore';
 import { decodeAgentCart } from '@/lib/agentOrder';
@@ -171,17 +172,23 @@ export default async function HandlePage({
     record.config.color && /^#[0-9a-fA-F]{6}$/.test(record.config.color)
       ? record.config.color
       : '#2563eb';
+  // 着せ替えテーマ (profile.theme)。clean(既定) は従来の淡いウォッシュ + 明色フッターのまま。
+  // night はページ全体をダーク化するためフッター等の可読色を明色系へ切替える (掟8: コントラスト確保)。
+  const theme = resolveHandleTheme(record.profile?.theme);
+  const pageTheme = handlePageTheme(accent, theme);
+  const darkFooter = !storefront && pageTheme.dark;
 
   return (
     <main className="mx-auto w-full max-w-md px-4 pb-12 pt-5">
-      {/* link-in-bio のみアクセントの背景ウォッシュ (storefront は独自の意匠なので付けない) */}
+      {/* link-in-bio のみアクセントの背景ウォッシュ (storefront は独自の意匠なので付けない)。
+          clean = 現行どおり上部 h-96 の淡いウォッシュ。他テーマは全画面 (inset-0) を覆う地色。 */}
       {!storefront && (
         <div
           aria-hidden
-          className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-96"
-          style={{
-            background: `radial-gradient(125% 70% at 50% 0%, ${accent}29 0%, ${accent}0d 32%, transparent 68%)`,
-          }}
+          className={`pointer-events-none fixed -z-10 ${
+            pageTheme.full ? 'inset-0' : 'inset-x-0 top-0 h-96'
+          }`}
+          style={{ background: pageTheme.background }}
         />
       )}
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -222,8 +229,9 @@ export default async function HandlePage({
               />
             </div>
           )}
-          {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。 */}
-          <ReceiveMethodPicker config={record.config} />
+          {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。
+              theme は見出し/説明の可読色のみ調整 (night)・決済動作は不変 (掟12)。 */}
+          <ReceiveMethodPicker config={record.config} theme={theme} />
         </>
       )}
       {/* link-in-bio フッター: (1) 取消不可の開示を簡潔に再掲 (共通 AlphaNotice はこのページでは
@@ -232,12 +240,18 @@ export default async function HandlePage({
           storefront では出さない (MobileOrderView が独自に戻り導線を持つ)。 */}
       {!storefront && (
         <footer className="mt-12 flex flex-col items-center gap-3 pb-2 text-center">
-          <p className="max-w-xs text-[11px] leading-relaxed text-slate-400">
+          <p
+            className={`max-w-xs text-[11px] leading-relaxed ${
+              darkFooter ? 'text-slate-300' : 'text-slate-400'
+            }`}
+          >
             {t('footerSafety')}{' '}
             <Link
               href={`/${locale}/disclaimer`}
               prefetch={false}
-              className="underline underline-offset-2 hover:text-slate-600"
+              className={`underline underline-offset-2 ${
+                darkFooter ? 'hover:text-white' : 'hover:text-slate-600'
+              }`}
             >
               {t('footerSafetyMore')}
             </Link>
@@ -245,7 +259,11 @@ export default async function HandlePage({
           <Link
             href={`/${locale}`}
             aria-label={t('backToTop')}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 transition hover:text-slate-700"
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold transition ${
+              darkFooter
+                ? 'text-slate-300 hover:text-white'
+                : 'text-slate-400 hover:text-slate-700'
+            }`}
           >
             <NextImage
               src="/icon-512.png"

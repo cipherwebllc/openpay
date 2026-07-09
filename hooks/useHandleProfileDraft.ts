@@ -7,7 +7,16 @@
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import { DEFAULT_TIP_PRESETS } from '@/lib/url';
 import { MAX_PROFILE_LINKS, MAX_SOCIAL_LINKS } from '@/lib/handle';
+import { resolveHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
+
+// ビルダーの下書きリンク (公開前の生入力)。emoji/featured は Phase 1 の表現力追加。
+export interface DraftLink {
+  label: string;
+  url: string;
+  emoji?: string;
+  featured?: boolean;
+}
 
 // 受取方法は JPYC Polygon / JPYC Kaia の ON/OFF (+ env.enableJpycAvalanche=ON で JPYC Avalanche)。
 // USDC (cross-chain) は着金チェーンを選べず Base 固定になるためビルダーから提供終了
@@ -24,7 +33,9 @@ export interface HandleProfileDraft {
   bio: string;
   avatar: string;
   socials: string[]; // SNS プロフィール URL (アイコンはドメイン自動判定)
-  links: { label: string; url: string }[];
+  links: DraftLink[];
+  // 着せ替えテーマ (clean 既定)。公開ページ/プレビューの見た目を切替える。
+  theme: HandleTheme;
 }
 
 const STORAGE_KEY = 'openpay:handle-profile-draft:v1';
@@ -45,6 +56,7 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   avatar: '',
   socials: [],
   links: [],
+  theme: 'clean',
 };
 
 function sanitizePresetList(loaded: unknown, fallback: string[]): string[] {
@@ -63,18 +75,24 @@ function sanitizePresetList(loaded: unknown, fallback: string[]): string[] {
   return out;
 }
 
-function sanitizeLinks(
-  loaded: unknown,
-): { label: string; url: string }[] {
+function sanitizeLinks(loaded: unknown): DraftLink[] {
   if (!Array.isArray(loaded)) return [];
-  const out: { label: string; url: string }[] = [];
+  const out: DraftLink[] = [];
+  // featured は最大 1 本。localStorage が破損して複数 true でも先頭 1 本だけ残す。
+  let featuredTaken = false;
   for (const l of loaded) {
     if (!l || typeof l !== 'object') continue;
     const ll = l as Record<string, unknown>;
-    out.push({
+    const link: DraftLink = {
       label: typeof ll.label === 'string' ? ll.label : '',
       url: typeof ll.url === 'string' ? ll.url : '',
-    });
+    };
+    if (typeof ll.emoji === 'string' && ll.emoji.trim()) link.emoji = ll.emoji;
+    if (ll.featured === true && !featuredTaken) {
+      link.featured = true;
+      featuredTaken = true;
+    }
+    out.push(link);
     if (out.length >= MAX_PROFILE_LINKS) break;
   }
   return out;
@@ -110,6 +128,7 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     avatar: str(loaded.avatar, ''),
     socials: sanitizeSocials(loaded.socials),
     links: sanitizeLinks(loaded.links),
+    theme: resolveHandleTheme(loaded.theme),
   };
 }
 
