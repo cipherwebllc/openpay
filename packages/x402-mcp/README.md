@@ -56,6 +56,21 @@ node src/index.mjs
 }
 ```
 
+## Quickstart: buy a JPYC resource
+
+With a funded buyer key configured (see the Claude Desktop block above), the agent finds and pays for a JPYC-priced x402 resource in three steps. Example: the catalog's `demo` resource (1 JPYC).
+
+1. **Find** — `discovery_search { "query": "demo" }`
+   → catalog resources with their `resource` URL, `category`, `priceJpyc` — e.g. `https://open-pay.jp/api/paid/demo` (1 JPYC).
+2. **Quote** (no payment; checks local guards) — `x402_quote { "url": "https://open-pay.jp/api/paid/demo" }`
+   → reports `price / fee / total` (JPYC) and whether your guards allow it.
+3. **Pay** (signs + retries with `X-PAYMENT` only after every guard passes) — `x402_pay { "url": "https://open-pay.jp/api/paid/demo", "maxTotalJpyc": "2" }`
+   → returns the paid resource content on success.
+
+The buyer pays the resource price **plus the ~1% x402 fee** (`total = price + fee`; the fee floors at 1 JPYC, so the 1-JPYC demo is ~1 fee → total ~2). Set `MAX_PER_CALL_JPYC` ≥ your `maxTotalJpyc`, and use a dedicated low-balance wallet.
+
+> Paying an OpenPay `@handle` **shop** (mobile order) is a different flow — the customer usually pays by hand and the shop absorbs the fee. See "Two ways to order" below (`order_summary` + `createOrderLink`).
+
 ## Tools
 
 | Tool | Pays? | Purpose |
