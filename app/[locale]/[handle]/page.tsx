@@ -18,6 +18,7 @@ import { env } from '@/lib/env';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { HandleProfileView } from '@/components/HandleProfile';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
+import { HandleShareButton } from '@/components/HandleShareButton';
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
@@ -203,7 +204,11 @@ export default async function HandlePage({
             ← OpenPay
           </Link>
         ) : (
-          <span />
+          <HandleShareButton
+            handle={normalized}
+            name={record.config.name}
+            dark={darkFooter}
+          />
         )}
         <LocaleSwitcher />
       </div>

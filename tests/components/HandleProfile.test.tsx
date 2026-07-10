@@ -181,14 +181,15 @@ describe('ReceiveMethodPicker', () => {
     renderWithIntl(<ReceiveMethodPicker config={multiConfig} />);
     // 3 つの方法ボタンが表示される
     expect(
-      screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }),
+      screen.getByRole('button', { name: 'JPYC · Polygon' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'JPYC (Kaia) で応援' }),
+      screen.getByRole('button', { name: 'JPYC · Kaia' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }),
+      screen.getByRole('button', { name: 'USDC · cross-chain' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('通貨・チェーンを選ぶ')).toBeInTheDocument();
     // 初期状態では TipForm は描画しない
     expect(screen.queryByTestId('tipform')).not.toBeInTheDocument();
     // 全ボタンが aria-expanded=false
@@ -205,8 +206,11 @@ describe('ReceiveMethodPicker', () => {
     };
     renderWithIntl(<ReceiveMethodPicker config={single} />);
     expect(
-      screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }),
+      screen.getByRole('button', { name: '♡ 応援する USDC · cross-chain' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('♡ 応援する')).toBeInTheDocument();
+    expect(screen.getByText('USDC · cross-chain')).toBeInTheDocument();
+    expect(screen.queryByText('通貨・チェーンを選ぶ')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tipform')).not.toBeInTheDocument();
   });
 
@@ -214,7 +218,7 @@ describe('ReceiveMethodPicker', () => {
 
   it('expands TipForm below the clicked button (accordion open)', () => {
     renderWithIntl(<ReceiveMethodPicker config={multiConfig} />);
-    const polyBtn = screen.getByRole('button', { name: 'JPYC (Polygon) で応援' });
+    const polyBtn = screen.getByRole('button', { name: 'JPYC · Polygon' });
     fireEvent.click(polyBtn);
     // TipForm が JPYC Polygon の params で mount される
     expect(screen.getByTestId('tipform')).toHaveTextContent('jpyc:polygon');
@@ -222,7 +226,7 @@ describe('ReceiveMethodPicker', () => {
     expect(polyBtn).toHaveAttribute('aria-expanded', 'true');
     // 他のボタンは aria-expanded=false のまま
     expect(
-      screen.getByRole('button', { name: 'JPYC (Kaia) で応援' }),
+      screen.getByRole('button', { name: 'JPYC · Kaia' }),
     ).toHaveAttribute('aria-expanded', 'false');
   });
 
@@ -232,7 +236,7 @@ describe('ReceiveMethodPicker', () => {
       methods: [{ token: 'usdc', chain: 'base', crossChain: true }],
     };
     renderWithIntl(<ReceiveMethodPicker config={single} />);
-    fireEvent.click(screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }));
+    fireEvent.click(screen.getByRole('button', { name: '♡ 応援する USDC · cross-chain' }));
     expect(screen.getByTestId('tipform')).toHaveTextContent('usdc:base');
   });
 
@@ -240,7 +244,7 @@ describe('ReceiveMethodPicker', () => {
 
   it('collapses the TipForm when the same button is clicked again (toggle)', () => {
     renderWithIntl(<ReceiveMethodPicker config={multiConfig} />);
-    const polyBtn = screen.getByRole('button', { name: 'JPYC (Polygon) で応援' });
+    const polyBtn = screen.getByRole('button', { name: 'JPYC · Polygon' });
     // 1 回目: 展開
     fireEvent.click(polyBtn);
     expect(screen.getByTestId('tipform')).toBeInTheDocument();
@@ -256,17 +260,17 @@ describe('ReceiveMethodPicker', () => {
   it('switches the expanded TipForm when a different button is clicked', () => {
     renderWithIntl(<ReceiveMethodPicker config={multiConfig} />);
     // JPYC Polygon を展開
-    fireEvent.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
+    fireEvent.click(screen.getByRole('button', { name: 'JPYC · Polygon' }));
     expect(screen.getByTestId('tipform')).toHaveTextContent('jpyc:polygon');
     // JPYC Kaia に切り替え
-    fireEvent.click(screen.getByRole('button', { name: 'JPYC (Kaia) で応援' }));
+    fireEvent.click(screen.getByRole('button', { name: 'JPYC · Kaia' }));
     expect(screen.getByTestId('tipform')).toHaveTextContent('jpyc:kaia');
     // Polygon ボタンは折りたたまれる
     expect(
-      screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }),
+      screen.getByRole('button', { name: 'JPYC · Polygon' }),
     ).toHaveAttribute('aria-expanded', 'false');
     expect(
-      screen.getByRole('button', { name: 'JPYC (Kaia) で応援' }),
+      screen.getByRole('button', { name: 'JPYC · Kaia' }),
     ).toHaveAttribute('aria-expanded', 'true');
     // TipForm は 1 つだけ mount (同時 mount なし)
     expect(screen.getAllByTestId('tipform')).toHaveLength(1);

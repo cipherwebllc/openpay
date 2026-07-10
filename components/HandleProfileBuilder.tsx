@@ -23,7 +23,7 @@ import { LinkQrModal } from '@/components/LinkQrModal';
 import { ReorderableRow } from '@/components/ReorderableRow';
 import { SocialIcon } from '@/components/SocialIconLinks';
 import { StepCard } from '@/components/StepCard';
-import { methodLabel } from '@/components/ReceiveMethodPicker';
+import { methodLabel, methodMetaLabel } from '@/components/ReceiveMethodPicker';
 import {
   useHandleProfileDraft,
   DEFAULT_PROFILE_DRAFT,
@@ -660,16 +660,38 @@ export function HandleProfileBuilder() {
                   <HandleProfileView config={previewConfig} profile={profile} />
                   {methods.length > 0 && (
                     <div className="mt-4 flex flex-col gap-2">
+                      {methods.length > 1 && (
+                        <p
+                          className={`text-center text-xs font-semibold ${
+                            previewDark ? 'text-slate-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {t('selectCurrencyChain')}
+                        </p>
+                      )}
                       {methods.map((m, i) => (
                         <span
                           key={i}
-                          className={`rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
+                          className={`flex flex-col items-center rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
                             previewDark
                               ? 'border-white/15 text-slate-200'
                               : 'border-slate-200 text-slate-600'
                           }`}
                         >
-                          {t('supportWith', { label: methodLabel(m, t('crossChain')) })}
+                          {methods.length > 1 ? (
+                            methodMetaLabel(m, t('crossChain'))
+                          ) : (
+                            <>
+                              <span>♡ {t('supportHeading')}</span>
+                              <span
+                                className={`text-xs font-medium ${
+                                  previewDark ? 'text-slate-300' : 'text-slate-500'
+                                }`}
+                              >
+                                {methodMetaLabel(m, t('crossChain'))}
+                              </span>
+                            </>
+                          )}
                         </span>
                       ))}
                     </div>
