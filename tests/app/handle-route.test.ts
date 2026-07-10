@@ -50,6 +50,12 @@ import { GET as availGET, DELETE } from '@/app/api/handle/[handle]/route';
 const ADDR = OWNER;
 // 新スキーマの最小有効 config (マルチ方法)。
 const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
+const savedRecord = (updatedAt: number) => ({
+  owner: OWNER,
+  config: CFG,
+  createdAt: 1,
+  updatedAt,
+});
 // 最小有効 storefront (店舗固有部分のみ・identity は handle 由来)。
 const STORE = {
   chain: 'polygon',
@@ -88,17 +94,28 @@ describe('POST /api/handle', () => {
   });
 
   it('reserve success → 201 with owner from session', async () => {
-    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'created' });
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'created',
+      record: savedRecord(101),
+    });
     const res = await POST(postReq({ handle: '@Alice', config: CFG }));
     expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      status: 'created',
+      updatedAt: 101,
+    });
     const call = store.reserveOrUpdateHandle.mock.calls[0][0];
     expect(call.handle).toBe('alice'); // normalized
     expect(call.owner).toBe(OWNER);
     expect(call.config.methods[0].token).toBe('jpyc');
+    expect(call.expectedUpdatedAt).toBeUndefined();
   });
 
   it('passes a validated profile through to the store', async () => {
-    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'created' });
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'created',
+      record: savedRecord(101),
+    });
     await POST(
       postReq({
         handle: 'alice',
@@ -127,21 +144,68 @@ describe('POST /api/handle', () => {
   });
 
   it('passes a validated storefront through to the store (店舗公開)', async () => {
-    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated' });
-    await POST(postReq({ handle: 'alice', config: CFG, storefront: STORE }));
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'updated',
+      record: savedRecord(201),
+    });
+    await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        storefront: STORE,
+        expectedUpdatedAt: 200,
+      }),
+    );
     expect(store.reserveOrUpdateHandle.mock.calls[0][0].storefront).toEqual(STORE);
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].expectedUpdatedAt).toBe(200);
   });
 
   it('storefront:null → null (clear) を store へ渡す (店舗取り下げ)', async () => {
-    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated' });
-    await POST(postReq({ handle: 'alice', config: CFG, storefront: null }));
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'updated',
+      record: savedRecord(201),
+    });
+    await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        storefront: null,
+        expectedUpdatedAt: 200,
+      }),
+    );
     expect(store.reserveOrUpdateHandle.mock.calls[0][0].storefront).toBeNull();
   });
 
   it('storefront 省略 → undefined を渡す (既存保持)', async () => {
-    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated' });
-    await POST(postReq({ handle: 'alice', config: CFG }));
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'updated',
+      record: savedRecord(201),
+    });
+    const res = await POST(
+      postReq({ handle: 'alice', config: CFG, expectedUpdatedAt: 200 }),
+    );
     expect(store.reserveOrUpdateHandle.mock.calls[0][0].storefront).toBeUndefined();
+    expect(await res.json()).toMatchObject({
+      status: 'updated',
+      updatedAt: 201,
+    });
+  });
+
+  it('既存更新の expectedUpdatedAt 欠落/不一致 → 409 conflict', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'conflict' });
+    const missing = await POST(postReq({ handle: 'alice', config: CFG }));
+    expect(missing.status).toBe(409);
+    expect(await missing.json()).toEqual({ ok: false, error: 'conflict' });
+    expect(
+      store.reserveOrUpdateHandle.mock.calls[0][0].expectedUpdatedAt,
+    ).toBeUndefined();
+
+    const stale = await POST(
+      postReq({ handle: 'alice', config: CFG, expectedUpdatedAt: 199 }),
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ ok: false, error: 'conflict' });
+    expect(store.reserveOrUpdateHandle.mock.calls[1][0].expectedUpdatedAt).toBe(199);
   });
 
   it('invalid storefront (JPYC でない chain) → 400 invalid_storefront, no store hit', async () => {

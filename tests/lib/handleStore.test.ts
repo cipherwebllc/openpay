@@ -36,12 +36,12 @@ const STORE: StorefrontParts = {
   feePayer: 'merchant',
   menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
 };
-const recJson = (owner: string, createdAt = 1) =>
+const recJson = (owner: string, createdAt = 1, updatedAt = createdAt) =>
   JSON.stringify({
     owner,
     config: CONFIG,
     createdAt,
-    updatedAt: createdAt,
+    updatedAt,
   });
 
 beforeEach(() => {
@@ -104,11 +104,41 @@ describe('reserveOrUpdateHandle', () => {
 
   it('既存 & 同 owner → CAS で updated (createdAt 保持・nx claim は使わない)', async () => {
     kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42) });
-    const res = await reserveOrUpdateHandle(base);
+    const res = await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 42 });
     expect(res.status).toBe('updated');
     expect(res.record?.createdAt).toBe(42);
-    expect(kv.kvEval).toHaveBeenCalled(); // owner-conditional CAS で置換
+    expect(kv.kvEval.mock.calls[0][2][1]).toBe('42');
     expect(kv.kvSet).not.toHaveBeenCalled(); // nx claim は新規のみ
+  });
+
+  it('update の updatedAt は既存値より必ず単調増加して serialize される', async () => {
+    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42, 100) });
+    const res = await reserveOrUpdateHandle({
+      ...base,
+      nowMs: 99,
+      expectedUpdatedAt: 100,
+    });
+    expect(res.status).toBe('updated');
+    expect(res.record?.updatedAt).toBe(101);
+    const stored = JSON.parse(kv.kvEval.mock.calls[0][2][2] as string);
+    expect(stored.updatedAt).toBe(101);
+  });
+
+  it('既存 & 同 owner でも expectedUpdatedAt 欠落/不一致 → conflict (CAS 不発)', async () => {
+    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42, 50) });
+    expect((await reserveOrUpdateHandle(base)).status).toBe('conflict');
+    expect(
+      (await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 49 })).status,
+    ).toBe('conflict');
+    expect(kv.kvEval).not.toHaveBeenCalled();
+  });
+
+  it('読込後に別更新が勝ち CAS -3 → conflict', async () => {
+    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42, 50) });
+    kv.kvEval.mockResolvedValue({ ok: true, value: -3 });
+    expect(
+      (await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 50 })).status,
+    ).toBe('conflict');
   });
 
   it('update は builder 非管理の tip メタ (message/webhook) を既存から保持', async () => {
@@ -125,7 +155,7 @@ describe('reserveOrUpdateHandle', () => {
     });
     kv.kvGet.mockResolvedValue({ ok: true, value: existing });
     // base.config は message/webhook を持たない (builder が送らない) → 既存値を保持。
-    const res = await reserveOrUpdateHandle(base);
+    const res = await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 5 });
     expect(res.status).toBe('updated');
     expect(res.record?.config.message).toBe('thx');
     expect(res.record?.config.webhook).toBe('https://hook.example');
@@ -140,7 +170,10 @@ describe('reserveOrUpdateHandle', () => {
       updatedAt: 5,
     });
     kv.kvGet.mockResolvedValue({ ok: true, value: existing });
-    const res = await reserveOrUpdateHandle(base); // base に profile 無し (undefined)
+    const res = await reserveOrUpdateHandle({
+      ...base,
+      expectedUpdatedAt: 5,
+    }); // base に profile 無し (undefined)
     expect(res.status).toBe('updated');
     expect(res.record?.profile).toEqual({ bio: 'keep me' });
   });
@@ -154,7 +187,11 @@ describe('reserveOrUpdateHandle', () => {
       updatedAt: 5,
     });
     kv.kvGet.mockResolvedValue({ ok: true, value: existing });
-    const res = await reserveOrUpdateHandle({ ...base, profile: {} });
+    const res = await reserveOrUpdateHandle({
+      ...base,
+      profile: {},
+      expectedUpdatedAt: 5,
+    });
     expect(res.status).toBe('updated');
     expect(res.record?.profile).toBeUndefined();
   });
@@ -162,7 +199,9 @@ describe('reserveOrUpdateHandle', () => {
   it('既存 & 同 owner だが CAS で owner 変化 (value!=1) → taken', async () => {
     kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42) });
     kv.kvEval.mockResolvedValue({ ok: true, value: 0 });
-    expect((await reserveOrUpdateHandle(base)).status).toBe('taken');
+    expect(
+      (await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 42 })).status,
+    ).toBe('taken');
   });
 
   it('新規だが所有 index 読み取りエラー → kv_error (claim しない)', async () => {
@@ -236,7 +275,10 @@ describe('reserveOrUpdateHandle', () => {
       updatedAt: 5,
     });
     kv.kvGet.mockResolvedValue({ ok: true, value: existing });
-    const res = await reserveOrUpdateHandle(base); // base に storefront 無し (undefined)
+    const res = await reserveOrUpdateHandle({
+      ...base,
+      expectedUpdatedAt: 5,
+    }); // base に storefront 無し (undefined)
     expect(res.status).toBe('updated');
     expect(res.record?.storefront).toEqual(STORE);
   });
@@ -250,7 +292,11 @@ describe('reserveOrUpdateHandle', () => {
       updatedAt: 5,
     });
     kv.kvGet.mockResolvedValue({ ok: true, value: existing });
-    const res = await reserveOrUpdateHandle({ ...base, storefront: null });
+    const res = await reserveOrUpdateHandle({
+      ...base,
+      storefront: null,
+      expectedUpdatedAt: 5,
+    });
     expect(res.status).toBe('updated');
     expect(res.record?.storefront).toBeUndefined();
   });
@@ -265,7 +311,11 @@ describe('reserveOrUpdateHandle', () => {
     });
     kv.kvGet.mockResolvedValue({ ok: true, value: existing });
     const next: StorefrontParts = { ...STORE, chain: 'kaia' };
-    const res = await reserveOrUpdateHandle({ ...base, storefront: next });
+    const res = await reserveOrUpdateHandle({
+      ...base,
+      storefront: next,
+      expectedUpdatedAt: 5,
+    });
     expect(res.record?.storefront).toEqual(next);
   });
 });

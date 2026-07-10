@@ -752,6 +752,8 @@
     "copyAsNewHint": "“@{editing}” stays as is — a new handle “@{name}” will be claimed with the same content.",
     "publishedCreated": "Claimed “@{handle}”! You can keep editing and updating it.",
     "publishedUpdated": "Updated “@{handle}”.",
+    "conflictError": "This handle was updated on another device. Reload the latest version.",
+    "reload": "Reload",
     "mineError": "Could not load your handles.",
     "retry": "Retry",
     "availabilityUnknown": "Could not check availability. Please try again later.",

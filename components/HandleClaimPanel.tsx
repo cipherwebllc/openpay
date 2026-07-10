@@ -139,6 +139,29 @@ type OwnedHandle = {
   updatedAt?: number;
 };
 type MineResponse = { handles: OwnedHandle[]; max: number };
+type PublishMutationSnapshot = {
+  handle: string;
+  payload: HandlePublishPayload;
+  expectedUpdatedAt?: number;
+};
+
+class HandlePublishError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+    this.name = 'HandlePublishError';
+  }
+}
+
+function isConflictError(error: unknown): boolean {
+  return (
+    error instanceof HandlePublishError &&
+    error.status === 409 &&
+    error.code === 'conflict'
+  );
+}
 
 async function fetchJson(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
@@ -150,6 +173,7 @@ export function HandleClaimPanel({
   payload,
   onEdit,
   editingHandle = null,
+  expectedUpdatedAt,
   isDirty = false,
   onStopEditing,
   onPublished,
@@ -163,6 +187,8 @@ export function HandleClaimPanel({
   ) => void;
   /** 親 (builder) が保持する編集モード。null = 新規取得モード。 */
   editingHandle?: string | null;
+  /** 現在編集中 handle の読込/直近保存 baseline。新規取得・別名取得では送らない。 */
+  expectedUpdatedAt?: number;
   /** 読込/送信 snapshot と現在の canonical payload が異なる。 */
   isDirty?: boolean;
   onStopEditing?: () => void;
@@ -242,14 +268,27 @@ export function HandleClaimPanel({
   });
 
   const publish = useMutation({
-    mutationFn: async (snapshot: PublishedHandleSnapshot) => {
+    mutationFn: async (snapshot: PublishMutationSnapshot) => {
       const { ok, status, json } = await fetchJson('/api/handle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ handle: snapshot.handle, ...snapshot.payload }),
+        body: JSON.stringify({
+          handle: snapshot.handle,
+          ...snapshot.payload,
+          expectedUpdatedAt: snapshot.expectedUpdatedAt,
+        }),
       });
-      if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
-      return json;
+      if (!ok) {
+        const code = typeof json.error === 'string' ? json.error : `http_${status}`;
+        throw new HandlePublishError(status, code);
+      }
+      if (typeof json.updatedAt !== 'number' || !Number.isFinite(json.updatedAt)) {
+        throw new Error('invalid_response');
+      }
+      return {
+        status: json.status === 'created' ? ('created' as const) : ('updated' as const),
+        updatedAt: json.updatedAt,
+      };
     },
     onSuccess: (json, snapshot) => {
       qc.invalidateQueries({ queryKey: ['handle-mine'] });
@@ -257,9 +296,20 @@ export function HandleClaimPanel({
       // 入力は消さず「いま @handle を編集している」状態に遷移する (続けて微調整できる)。
       setPublished({
         handle: snapshot.handle,
-        status: json.status === 'created' ? 'created' : 'updated',
+        status: json.status,
       });
-      onPublished?.(snapshot);
+      onPublished?.({
+        handle: snapshot.handle,
+        payload: snapshot.payload,
+        updatedAt: json.updatedAt,
+      });
+    },
+    onError: async (error) => {
+      if (!isConflictError(error)) return;
+      setPublished(null);
+      // editor の baseline は進めず、一覧だけ最新 record へ更新する。ユーザが明示的に
+      // 「再読込」を押したときだけ未保存 draft を置換する。
+      await mine.refetch();
     },
   });
 
@@ -285,6 +335,25 @@ export function HandleClaimPanel({
       }
     },
   });
+
+  const reloadConflictedHandle = async () => {
+    const refreshed = await mine.refetch();
+    if (!refreshed.isSuccess) return;
+    const conflictedHandle = publish.variables?.handle;
+    const latest = refreshed.data?.handles.find(
+      (ownedHandle) => ownedHandle.handle === conflictedHandle,
+    );
+    if (!latest || !onEdit) return;
+    setInput(latest.handle);
+    setPublished(null);
+    onEdit(
+      latest.handle,
+      latest.config,
+      latest.profile,
+      latest.updatedAt,
+    );
+    publish.reset();
+  };
 
   if (!env.enableHandles) return null;
 
@@ -484,7 +553,8 @@ export function HandleClaimPanel({
                 publish.mutate({
                   handle: normalized,
                   payload,
-                  updatedAt: Date.now(),
+                  expectedUpdatedAt:
+                    normalized === editingHandle ? expectedUpdatedAt : undefined,
                 })
               }
               disabled={
@@ -518,9 +588,24 @@ export function HandleClaimPanel({
               <p className="mt-2 text-xs text-amber-700">{t('limitReached', { max })}</p>
             )}
             {publish.isError && (
-              <p className="mt-2 text-xs text-red-600">
-                {t('claimError', { error: (publish.error as Error).message })}
-              </p>
+              isConflictError(publish.error) ? (
+                <div className="mt-2 text-xs text-red-600">
+                  <span>{t('conflictError')}</span>{' '}
+                  {onEdit && (
+                    <button
+                      type="button"
+                      onClick={() => void reloadConflictedHandle()}
+                      className="font-semibold underline hover:text-red-800"
+                    >
+                      {t('reload')}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-red-600">
+                  {t('claimError', { error: (publish.error as Error).message })}
+                </p>
+              )
             )}
           </div>
         </div>

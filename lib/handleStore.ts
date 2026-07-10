@@ -38,16 +38,18 @@ function sameOwner(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
-// 所有者一致時のみ record を置換する compare-and-set (更新)。read→write の隙に別 owner が
-// 取り直した場合の上書きを防ぐ。戻り: 1=更新 / 0=owner 不一致 / -1=消失 / -2=malformed。
+// 所有者と読込時 updatedAt が一致するときだけ record を置換する compare-and-set (更新)。
+// 戻り: 1=更新 / 0=owner 不一致 / -1=消失 / -2=malformed / -3=updatedAt 競合。
 const CAS_UPDATE =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
   "if string.lower(o.owner)~=string.lower(ARGV[1]) then return 0 end; " +
-  "redis.call('SET',KEYS[1],ARGV[2]); return 1";
+  "if type(o.updatedAt)~='number' or o.updatedAt~=tonumber(ARGV[2]) then return -3 end; " +
+  "redis.call('SET',KEYS[1],ARGV[3]); return 1";
 
 // 所有者一致時のみ削除する compare-and-set (解放)。同 owner の同時 DELETE + 別 owner の
-// 取り直しが交錯しても、新 owner のレコードを消さない。戻り: 1/0/-1/-2 は CAS_UPDATE と同義。
+// 取り直しが交錯しても、新 owner のレコードを消さない。戻り: 1=削除 / 0=owner 不一致 /
+// -1=消失 / -2=malformed。
 const CAS_DELETE =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
@@ -119,19 +121,23 @@ export async function listHandleRecordsForOwner(
 export type ReserveStatus =
   | 'created'
   | 'updated'
+  | 'conflict'
   | 'taken'
   | 'limit'
   | 'kv_unavailable'
   | 'kv_error';
 
-export interface ReserveResult {
-  status: ReserveStatus;
-  record?: HandleRecord;
-}
+export type ReserveResult =
+  | { status: 'created' | 'updated'; record: HandleRecord }
+  | {
+      status: Exclude<ReserveStatus, 'created' | 'updated'>;
+      record?: never;
+    };
 
 /**
  * handle を予約 (新規) または更新 (所有者のみ)。
- * - 既存 & 別 owner → 'taken' / 既存 & 同 owner → 設定更新 ('updated'・createdAt 保持)。
+ * - 既存 & 別 owner → 'taken' / 既存 & 同 owner + updatedAt 一致 → 設定更新。
+ * - 既存 & 同 owner でも expectedUpdatedAt 欠落/不一致 → 'conflict'。
  * - 新規 → 所有一覧の読み取り (null=KV エラーは中断) → 上限チェック → nx で atomic claim →
  *   LPUSH で index 原子追記。LPUSH 失敗時は claim を rollback (orphan 防止)。
  */
@@ -143,10 +149,20 @@ export async function reserveOrUpdateHandle(input: {
   // storefront の三状態: undefined = 変更しない / null = 削除 / object = 置換。
   // (StorefrontParts は menu≥1 ゆえ「空オブジェクトでクリア」が表現できないため null を使う。)
   storefront?: StorefrontParts | null;
+  // 既存更新の読込 baseline。新規 claim では不要 (SET NX が名前の一意性を守る)。
+  expectedUpdatedAt?: number;
   nowMs: number;
 }): Promise<ReserveResult> {
   if (!isKvConfigured()) return { status: 'kv_unavailable' };
-  const { handle, owner, config, profile, storefront, nowMs } = input;
+  const {
+    handle,
+    owner,
+    config,
+    profile,
+    storefront,
+    expectedUpdatedAt,
+    nowMs,
+  } = input;
   const key = handleKey(handle);
   // profile の三状態: undefined = 「変更しない」(update は既存を保持・新規は無し)、
   // object = 置換 (空 {} は明示クリア)。config だけ更新する client が link-in-bio を
@@ -162,6 +178,9 @@ export async function reserveOrUpdateHandle(input: {
 
   if (existing) {
     if (!sameOwner(existing.owner, owner)) return { status: 'taken' };
+    // 古い client の expectedUpdatedAt 欠落も安全側で拒否する。初回 GET と CAS の二段で
+    // stale write を止め、config.to を含む全置換 payload の巻き戻りを防ぐ。
+    if (expectedUpdatedAt !== existing.updatedAt) return { status: 'conflict' };
     // 高度 tip メタ (message/thanks/thanksUrl/webhook) は現行 UI が管理しない。新 config が
     // 省略していれば既存値を保持する (旧 Tip タブ / API 由来の設定を update で消さない)。
     // builder が明示送信した値があればそれを優先 (= 将来 UI を足したときに上書き可能)。
@@ -182,16 +201,18 @@ export async function reserveOrUpdateHandle(input: {
       ...(nextProfile ? { profile: nextProfile } : {}),
       ...(nextStorefront ? { storefront: nextStorefront } : {}),
       createdAt: existing.createdAt,
-      updatedAt: nowMs,
+      updatedAt: Math.max(nowMs, existing.updatedAt + 1),
     };
-    // 所有者一致を atomic に再確認してから置換 (read→write の隙に別 owner が取り直した
-    // 場合の上書きを防ぐ)。
+    // 所有者 + baseline を atomic に再確認してから置換。updatedAt は serialize 前に確定し、
+    // 成功時に同じ値を次の baseline として呼出側へ返す。
     const cas = await kvEval<number>(CAS_UPDATE, [key], [
       owner,
+      String(expectedUpdatedAt),
       serializeHandleRecord(record),
     ]);
     if (!cas.ok) return { status: 'kv_error' };
     if (cas.value === 1) return { status: 'updated', record };
+    if (cas.value === -3) return { status: 'conflict' };
     return { status: 'taken' }; // 0/-1/-2: read 後に owner が変わった/消えた
   }
 

@@ -133,7 +133,8 @@ export function hasDroppedProfileUrl(draft: HandleProfileDraft): boolean {
 export interface PublishedHandleSnapshot {
   handle: string;
   payload: HandlePublishPayload;
-  updatedAt?: number;
+  /** GET/POST /api/handle が返した保存済み record の版。client clock で生成しない。 */
+  updatedAt: number;
 }
 
 export interface HandlePublishBaselineState {
