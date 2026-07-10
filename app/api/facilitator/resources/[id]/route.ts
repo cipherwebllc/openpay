@@ -8,7 +8,9 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
+import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import {
   parseResourceInput,
   updateResource,
@@ -17,6 +19,11 @@ import {
 } from '@/lib/x402/registry';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
+import {
+  checkResourceWalletRateLimit,
+  RESOURCE_BODY_MAX_BYTES,
+  RESOURCE_RATE_LIMIT_WINDOW_SEC,
+} from '@/lib/x402/resourceRequestGuards';
 
 export const runtime = 'nodejs';
 export const maxDuration = 15;
@@ -37,15 +44,6 @@ export async function PATCH(
   if (!session.ok) return session.response;
   const { id } = await params;
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
-  const parsed = parseResourceInput(raw, session.address);
-  if (!parsed.ok) return NextResponse.json({ error: parsed.reason }, { status: 400 });
-
   // **owner 認可を moderation probe より先に行う**: 他人の id を知る SIWE ユーザに、任意 URL を
   // OpenPay 経由で server-side probe させない (SSRF 踏み台化を防ぐ)。merchant は不変なので事前 read で
   // 判定でき、最終的に updateResource の CAS が再検証する (TOCTOU 無し)。
@@ -53,13 +51,36 @@ export async function PATCH(
   if (existing && existing.merchant.toLowerCase() !== session.address.toLowerCase()) {
     return forbidden();
   }
+
+  if (!(await checkResourceWalletRateLimit(session.address))) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(RESOURCE_RATE_LIMIT_WINDOW_SEC) },
+      },
+    );
+  }
+
+  const body = await readJsonBodyCapped(req, RESOURCE_BODY_MAX_BYTES);
+  if (!body.ok) {
+    if (body.reason === 'too_large') {
+      return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
+  }
+  const parsed = parseResourceInput(body.value, session.address);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.reason }, { status: 400 });
+
   // 差し替え URL の moderation は **owner かつ resource 存在時のみ** 実行 (probe を owner に限定)。
   // existing=null (未存在/outage) は probe せず updateResource の判定 (not_found/storage) に委ねる。
   if (existing && (await isFreelyAccessible(parsed.input.url))) {
+    const redacted = await redactUrlForTelemetry(parsed.input.url);
     logger.warn('x402.facilitator.resource_not_gated', {
       id,
       merchant: session.address,
-      url: parsed.input.url,
+      resourceOrigin: redacted.origin,
+      resourceHash: redacted.hash,
     });
     return NextResponse.json({ error: 'resource_not_gated' }, { status: 400 });
   }

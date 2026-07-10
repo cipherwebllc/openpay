@@ -99,6 +99,27 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
   requireSession: mockRequireSession,
 }));
 
+const resourceRate = vi.hoisted(() => ({
+  allowed: true,
+  check: vi.fn(),
+}));
+vi.mock('@/lib/relay/relayGuards', () => ({
+  checkReadRateLimit: (...args: unknown[]) => {
+    resourceRate.check(...args);
+    return Promise.resolve(resourceRate.allowed);
+  },
+}));
+
+const mockLoggerWarn = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: mockLoggerWarn,
+    error: vi.fn(),
+  },
+}));
+
 // モデレーション probe をモック (実 fetch を避ける)。既定 false = ゲート済扱いで通す。
 // isPrivateHost は parseResourceInput が使うため false (テスト URL は public 扱い) を返す。
 const { mockFreelyAccessible, mockProbeGate } = vi.hoisted(() => ({
@@ -190,6 +211,9 @@ beforeEach(() => {
   store.failSet = false;
   store.failEval = false;
   mockRequireSession.mockReset();
+  resourceRate.allowed = true;
+  resourceRate.check.mockReset();
+  mockLoggerWarn.mockReset();
   mockFreelyAccessible.mockReset();
   mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
   mockProbeGate.mockReset();
@@ -239,9 +263,39 @@ describe('x402 facilitator /resources', () => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     mockFreelyAccessible.mockResolvedValue(true); // 誰でも無料取得できる = 拒否対象
-    const res = await resources.POST(postReq(validBody));
+    const secret = 'Bearer-should-not-leak';
+    const url = `https://hooks.example.com/api/webhooks/${secret}?token=${secret}`;
+    const res = await resources.POST(postReq({ ...validBody, url }));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe('resource_not_gated');
+    const [, fields] = mockLoggerWarn.mock.calls.find(
+      ([event]) => event === 'x402.facilitator.resource_not_gated',
+    )!;
+    expect(fields).toMatchObject({
+      resourceOrigin: 'https://hooks.example.com',
+      resourceHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+    });
+    expect(JSON.stringify(fields)).not.toContain(secret);
+    expect(fields).not.toHaveProperty('url');
+  });
+
+  it('wallet rate limit → probe/body parse 前に 429 + Retry-After', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    resourceRate.allowed = false;
+
+    const res = await resources.POST(postReq(validBody));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(resourceRate.check).toHaveBeenCalledWith(
+      `x402res:${OWNER.toLowerCase()}`,
+      10,
+      60,
+    );
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
+    expect(mockProbeGate).not.toHaveBeenCalled();
   });
 
   it('正当性表明なし (attested 欠如) → 400 attestation_required', async () => {
@@ -296,6 +350,18 @@ describe('x402 facilitator /resources', () => {
     const res = await resources.POST(bad);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('invalid_json');
+  });
+
+  it('8KiB 超 body → 413 payload_too_large (rate limit 後・parse 前)', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const res = await resources.POST(
+      postReq({ ...validBody, padding: 'x'.repeat(9 * 1024) }),
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(resourceRate.check).toHaveBeenCalledOnce();
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
   });
 
   it('登録上限到達 → 429 too_many_resources', async () => {
@@ -377,7 +443,9 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     const id = await seedOne(resources);
     mockRequireSession.mockResolvedValue({ ok: true, address: STRANGER });
+    resourceRate.check.mockClear();
     expect((await idRoute.PATCH(patchReq(validBody), ctx(id))).status).toBe(403);
+    expect(resourceRate.check).not.toHaveBeenCalled();
   });
 
   it('存在しない id → 404', async () => {
@@ -408,6 +476,22 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     expect((await res.json()).error).toBe('invalid_json');
   });
 
+  it('owner の 8KiB 超 PATCH body → 413 (probe 前)', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    resourceRate.check.mockClear();
+    mockFreelyAccessible.mockClear();
+    const res = await idRoute.PATCH(
+      patchReq({ ...validBody, padding: 'x'.repeat(9 * 1024) }),
+      ctx(id),
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(resourceRate.check).toHaveBeenCalledOnce();
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
+  });
+
   it('soft-delete 済の編集 → 404 (監査データ保護)', async () => {
     const { resources, idRoute } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
@@ -425,6 +509,28 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     const res = await idRoute.PATCH(patchReq(validBody), ctx(id));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('resource_not_gated');
+  });
+
+  it('owner の PATCH wallet rate limit → probe 前に 429 + Retry-After', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    resourceRate.check.mockClear();
+    mockFreelyAccessible.mockClear();
+    mockProbeGate.mockClear();
+    resourceRate.allowed = false;
+
+    const res = await idRoute.PATCH(patchReq(validBody), ctx(id));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect(resourceRate.check).toHaveBeenCalledWith(
+      `x402res:${OWNER.toLowerCase()}`,
+      10,
+      60,
+    );
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
+    expect(mockProbeGate).not.toHaveBeenCalled();
   });
 
   it('非 owner の PATCH は moderation probe を実行しない (SSRF 踏み台化防止)', async () => {

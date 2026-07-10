@@ -18,11 +18,10 @@ const usdcBody = {
 
 function res402(body: unknown, headers: Record<string, string> = {}) {
   return async () =>
-    ({
+    new Response(JSON.stringify(body), {
       status: 402,
-      headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
-      json: async () => body,
-    }) as unknown as Response;
+      headers,
+    });
 }
 
 describe('lib/x402/moderation probeGate', () => {
@@ -40,14 +39,19 @@ describe('lib/x402/moderation probeGate', () => {
 
   it('402 + JSON でない body → foreign (解釈不能なゲートは約束できない)', async () => {
     const fetchImpl = (async () =>
-      ({
-        status: 402,
-        headers: { get: () => null },
-        json: async () => {
-          throw new Error('not json');
-        },
-      }) as unknown as Response) as never;
+      new Response('not json', { status: 402 })) as never;
     expect(await probeGate('https://x.test/paid', { fetchImpl, lookup: lookupPublic })).toBe('foreign');
+  });
+
+  it('402 + 64KiB 超 body → stream を cap で打ち切り foreign', async () => {
+    const fetchImpl = (async () =>
+      new Response('x'.repeat(64 * 1024 + 1), { status: 402 })) as never;
+    expect(
+      await probeGate('https://x.test/paid', {
+        fetchImpl,
+        lookup: lookupPublic,
+      }),
+    ).toBe('foreign');
   });
 
   it('v2: PAYMENT-REQUIRED ヘッダに openpay accepts → openpay', async () => {
@@ -72,7 +76,7 @@ describe('lib/x402/moderation probeGate', () => {
   });
 
   it('402 以外 (200/500) / ネットワーク失敗 / private 解決 → unknown (fail-open)', async () => {
-    const ok200 = (async () => ({ status: 200, headers: { get: () => null }, json: async () => ({}) }) as unknown as Response) as never;
+    const ok200 = (async () => new Response('{}', { status: 200 })) as never;
     expect(await probeGate('https://x.test/paid', { fetchImpl: ok200, lookup: lookupPublic })).toBe('unknown');
     const boom = (async () => {
       throw new Error('network');

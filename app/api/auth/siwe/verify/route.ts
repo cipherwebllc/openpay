@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import { createPublicClient } from 'viem';
 import { verifySiweMessage } from 'viem/siwe';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { isKvConfigured, kvDel, kvSet } from '@/lib/kv';
 import { chainObjectForId, isSupportedChainId, transportForChain } from '@/lib/chains';
 import { logger } from '@/lib/logger';
@@ -23,6 +24,8 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const SIWE_VERIFY_BODY_MAX_BYTES = 8 * 1024;
+
 export async function POST(req: Request): Promise<NextResponse> {
   if (!isKvConfigured()) {
     return NextResponse.json(
@@ -31,12 +34,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  let body: { message?: unknown; signature?: unknown };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
+  const cappedBody = await readJsonBodyCapped(req, SIWE_VERIFY_BODY_MAX_BYTES);
+  if (!cappedBody.ok) {
+    if (cappedBody.reason === 'too_large') {
+      return NextResponse.json(
+        { ok: false, error: 'payload_too_large' },
+        { status: 413 },
+      );
+    }
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
+  const body = cappedBody.value as { message?: unknown; signature?: unknown };
 
   // domain 束縛はサーバ制御の許可リストで判定する (Host ヘッダは偽装可能なので使わない —
   // phishing replay 防止のため comparand をリクエスト由来にしない)。

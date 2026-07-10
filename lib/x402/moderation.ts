@@ -1,3 +1,5 @@
+import 'server-only';
+
 // x402 facilitator の出品モデレーション: 「無料で公開されている URL を価格付きで登録する」濫用を弾く。
 //
 // x402 は本来「リソース提供者が自分の API を支払いでゲート (HTTP 402 等) し、支払った相手にだけ
@@ -14,9 +16,15 @@
 //      使わない TOCTOU を解消)。
 //   4. redirect: 'manual' でリダイレクト追跡を止める (公開 URL→内部 URL への 3xx 誘導を防ぐ)。3xx は
 //      「200 ではない」ので拒否対象外 (= 通す)。
-//   5. body は読まず status のみ参照・短いタイムアウト。
+//   5. gate 判定に読む body は 64KiB で打ち切り、短いタイムアウトを併用する。
+
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
+import { isPrivateHost, normalizeHost } from '@/lib/net/privateHost';
+
+export { isPrivateHost } from '@/lib/net/privateHost';
 
 const PROBE_TIMEOUT_MS = 5000;
+const GATE_BODY_MAX_BYTES = 64 * 1024;
 
 type ResolvedAddr = { address: string };
 type LookupFn = (hostname: string) => Promise<ResolvedAddr[]>;
@@ -165,91 +173,19 @@ export async function probeGate(
         /* v2 ヘッダが読めなければ body 判定へ */
       }
     }
-    // v1: JSON body
-    try {
-      const body = (await res.json()) as { accepts?: unknown };
-      if (acceptsLookLikeOpenPay(body.accepts)) return 'openpay';
-    } catch {
-      /* body が JSON でない → foreign 扱い (下) */
+    // v1: JSON body。巨大・stream failure・非 UTF-8・非 JSON は「JPYC で払える」と解釈できないため
+    // unknown へ fail-open せず foreign として掲載を拒否する。
+    const body = await readJsonBodyCapped(res, GATE_BODY_MAX_BYTES);
+    if (
+      body.ok &&
+      typeof body.value === 'object' &&
+      body.value !== null &&
+      acceptsLookLikeOpenPay((body.value as { accepts?: unknown }).accepts)
+    ) {
+      return 'openpay';
     }
     return 'foreign';
   } catch {
     return 'unknown';
   }
-}
-
-// IPv4 の先頭 2 オクテットで private/loopback/link-local/CGNAT/this-host を判定 (範囲は先頭 2 octet で確定)。
-function isPrivateIpv4(a: number, b: number): boolean {
-  if (a === 0 || a === 127 || a === 10) return true; // this-host / loopback / private
-  if (a === 169 && b === 254) return true; // link-local (cloud metadata 169.254.169.254 等)
-  if (a === 192 && b === 168) return true; // private
-  if (a === 172 && b >= 16 && b <= 31) return true; // private
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
-  return false;
-}
-
-// IPv6 リテラルを 8 グループ (各 16bit) に展開する。:: を 0 で埋め、末尾の埋め込み IPv4 (a.b.c.d) は
-// 2 グループの hex に正規化する。不正な形は null (呼び元が安全側に倒す)。
-function expandIpv6(h: string): number[] | null {
-  let s = h;
-  const embeddedV4 = s.match(/^(.*:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (embeddedV4) {
-    const o = embeddedV4[2].split('.').map(Number);
-    if (o.some((n) => n > 255)) return null;
-    s = `${embeddedV4[1]}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
-  }
-  const halves = s.split('::');
-  if (halves.length > 2) return null;
-  const head = halves[0] ? halves[0].split(':') : [];
-  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : null;
-  let groups: string[];
-  if (tail === null) {
-    groups = head; // :: 無し (完全表記)
-  } else {
-    const fill = 8 - head.length - tail.length;
-    if (fill < 0) return null;
-    groups = [...head, ...Array<string>(fill).fill('0'), ...tail];
-  }
-  if (groups.length !== 8) return null;
-  const nums = groups.map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : -1));
-  return nums.some((n) => n < 0) ? null : nums;
-}
-
-// URL hostname を lookup / private 判定へ渡す前に正規化する (両 probe 関数と isPrivateHost で一貫)。
-//   - IPv6 リテラルの角括弧を除去 ([::1] → ::1): 角括弧付きのまま lookup すると必ず ENOTFOUND →
-//     probe 関数の catch で fail-open となり、モデレーション層 (無料転売禁止 / foreign ゲート拒否) が
-//     IPv6 ホストで丸ごと無効化される。判定前に必ず剥がす。
-//   - 末尾ドット (FQDN root ラベル。localhost. / 127.0.0.1.) を除去: 剥がさないと isPrivateHost の
-//     localhost/.local/.internal・IPv4 リテラル判定を末尾ドットで素通りでき、private URL 登録ガードを
-//     バイパスできる。実接続は undici Agent の DNS 再検証で止まるが anti-abuse 判定はここで塞ぐ。
-function normalizeHost(hostname: string): string {
-  return hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
-}
-
-// hostname / IP リテラルが private / loopback / link-local / CGNAT / ULA かを判定 (SSRF ガード)。
-// registry.parseResourceInput (literal 事前ガード)・isFreelyAccessible (早期拒否 + connect 時検証) で使う。
-export function isPrivateHost(hostname: string): boolean {
-  const h = normalizeHost(hostname.toLowerCase()); // [::1] → ::1 / localhost. → localhost
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
-
-  // IPv6 リテラル (':' を含む)。展開して mapped-IPv4 / loopback / unspecified / ULA / link-local を判定。
-  // 圧縮形 (::ffff:7f00:1) や完全表記も canonical 化するため regex だけの取りこぼしを防ぐ。
-  if (h.includes(':')) {
-    const g = expandIpv6(h);
-    if (g === null) return true; // 解析不能な IPv6 リテラルは安全側で private 扱い
-    if (g.every((x) => x === 0)) return true; // :: (unspecified)
-    if (g.slice(0, 7).every((x) => x === 0) && g[7] === 1) return true; // ::1 (loopback)
-    // IPv4-mapped (::ffff:a.b.c.d) / IPv4-compatible (::a.b.c.d): 先頭 80bit=0 かつ次 16bit が ffff or 0。
-    if (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0xffff || g[5] === 0)) {
-      return isPrivateIpv4((g[6] >> 8) & 0xff, g[6] & 0xff);
-    }
-    if (g[0] >= 0xfc00 && g[0] <= 0xfdff) return true; // ULA fc00::/7
-    if (g[0] >= 0xfe80 && g[0] <= 0xfebf) return true; // link-local fe80::/10
-    return false; // 公開 IPv6
-  }
-
-  // IPv4 リテラル。
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) return isPrivateIpv4(Number(m[1]), Number(m[2]));
-  return false;
 }

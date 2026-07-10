@@ -24,6 +24,15 @@ vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useStandardPayment', () => ({ useStandardPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+const loggerWarn = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: loggerWarn,
+    error: vi.fn(),
+  },
+}));
 // B1 Layer B: relayer 事前健全性プローブ。既定 non-degraded (= 既存テストに影響しない)。
 // preflight banner テストでのみ degraded:true に差し替える。
 vi.mock('@/hooks/useRelayHealth', () => ({
@@ -1052,19 +1061,69 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
+    const secret = 'Bearer-checkout-failed-secret';
+    const webhook = `https://user:${secret}@shop.example.com/hook/${secret}?token=${secret}`;
     const makeUi = () => (
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
+          webhook,
         }}
       />
     );
     const { rerender } = render(makeUi());
     await submitGaslessThenSucceed(user, rerender, makeUi);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(loggerWarn).toHaveBeenCalledWith(
+        'checkout.webhook.failed',
+        expect.objectContaining({
+          webhookOrigin: 'https://shop.example.com',
+          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+        }),
+      ),
+    );
+    const fields = loggerWarn.mock.calls.find(
+      ([event]) => event === 'checkout.webhook.failed',
+    )?.[1];
+    expect(JSON.stringify(fields)).not.toContain(secret);
+    expect(fields).not.toHaveProperty('url');
     // 成功 UI は影響を受けない
     expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('webhook non-OK → origin + hash のみ記録し bearer を残さない', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response('failed', { status: 500 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const secret = 'Bearer-checkout-non-ok-secret';
+    const webhook = `https://shop.example.com/hook/${secret}?token=${secret}`;
+    const makeUi = () => (
+      <CheckoutForm params={{ ...USDC_PARAMS, webhook }} />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+
+    await waitFor(() =>
+      expect(loggerWarn).toHaveBeenCalledWith(
+        'checkout.webhook.non_ok',
+        expect.objectContaining({
+          webhookOrigin: 'https://shop.example.com',
+          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+        }),
+      ),
+    );
+    const fields = loggerWarn.mock.calls.find(
+      ([event]) => event === 'checkout.webhook.non_ok',
+    )?.[1];
+    expect(JSON.stringify(fields)).not.toContain(secret);
+    expect(fields).not.toHaveProperty('url');
     vi.unstubAllGlobals();
   });
 

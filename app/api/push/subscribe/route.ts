@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
+import { isPrivateHost } from '@/lib/net/privateHost';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
 import {
@@ -80,7 +81,7 @@ export async function DELETE(req: Request): Promise<NextResponse> {
   const raw = await readJsonBody(req);
   if (!raw.ok) return raw.response;
 
-  const endpoint = parseEndpoint(
+  const endpoint = parseEndpointLoose(
     objectValue(raw.value, 'endpoint') ??
       objectValue(objectValue(raw.value, 'subscription'), 'endpoint'),
   );
@@ -150,7 +151,7 @@ function parseLocale(raw: unknown): PushLocale | null {
 }
 
 function parseSubscription(raw: unknown): ParsedSubscription | null {
-  const endpoint = parseEndpoint(objectValue(raw, 'endpoint'));
+  const endpoint = parseEndpointStrict(objectValue(raw, 'endpoint'));
   const keys = objectValue(raw, 'keys');
   const p256dh = parseBase64UrlKey(objectValue(keys, 'p256dh'));
   const auth = parseBase64UrlKey(objectValue(keys, 'auth'));
@@ -158,7 +159,7 @@ function parseSubscription(raw: unknown): ParsedSubscription | null {
   return { endpoint, keys: { p256dh, auth } };
 }
 
-function parseEndpoint(raw: unknown): string | null {
+function parseEndpointLoose(raw: unknown): string | null {
   if (
     typeof raw !== 'string' ||
     raw.length === 0 ||
@@ -172,6 +173,12 @@ function parseEndpoint(raw: unknown): string | null {
     return null;
   }
   return url.protocol === 'https:' ? raw : null;
+}
+
+function parseEndpointStrict(raw: unknown): string | null {
+  const endpoint = parseEndpointLoose(raw);
+  if (!endpoint) return null;
+  return isPrivateHost(new URL(endpoint).hostname) ? null : endpoint;
 }
 
 function parseBase64UrlKey(raw: unknown): string | null {

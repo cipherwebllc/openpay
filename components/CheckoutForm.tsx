@@ -66,6 +66,7 @@ import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
+import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
@@ -520,6 +521,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
     // webhook 失敗 (CORS 等) は logger.warn のみ。決済自体は成立しているため UI には出さない。
     if (params.webhook) {
+      // hash は fetch と並行に開始し、失敗 telemetry が必要な場合だけ await する。
+      const webhookTelemetry = redactUrlForTelemetry(params.webhook);
       // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): status トークンを 1 度だけ生成し payload に同梱。
       // notify が order:sv:<token> ポインタを保存し、顧客の /order/status?t= がそれを逆引きする。
       // webhook が OpenPay 自身の受注 notify (= モバイル注文・MobileOrderView が同一 origin の
@@ -576,21 +579,25 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         mode: 'cors',
         keepalive: true,
       })
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) {
+            const redacted = await webhookTelemetry;
             logger.warn('checkout.webhook.non_ok', {
               status: res.status,
               statusText: res.statusText,
-              url: params.webhook,
+              webhookOrigin: redacted.origin,
+              webhookHash: redacted.hash,
             });
           }
         })
-        .catch((err) =>
+        .catch(async (err) => {
+          const redacted = await webhookTelemetry;
           logger.warn('checkout.webhook.failed', {
             error: err,
-            url: params.webhook,
-          }),
-        );
+            webhookOrigin: redacted.origin,
+            webhookHash: redacted.hash,
+          });
+        });
     }
 
     if (params.successUrl) {
@@ -1381,4 +1388,3 @@ function checkoutPhaseLabel(
       return t('btnSending');
   }
 }
-

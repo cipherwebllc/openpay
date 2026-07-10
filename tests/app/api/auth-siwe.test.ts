@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
   cookieToken: undefined as string | undefined,
+  kvConfigured: false,
   kvDel: vi.fn(),
 }));
 
 // KV を境界 mock: 未設定状態を固定し env-gate (503) と「cookie 無し」分岐を決定的に検証。
 // 署名検証フローの全分岐は lib/siwe (siwe.test) で担保。ここは route のアダプタ薄層を確認。
 vi.mock('@/lib/kv', () => ({
-  isKvConfigured: () => false,
+  isKvConfigured: () => h.kvConfigured,
   kvGet: vi.fn(async () => ({ ok: false, reason: 'unconfigured' })),
   kvSet: vi.fn(async () => ({ ok: false, reason: 'unconfigured' })),
   kvDel: h.kvDel,
@@ -30,6 +31,7 @@ import { POST as logoutPOST } from '@/app/api/auth/siwe/logout/route';
 describe('SIWE routes', () => {
   beforeEach(() => {
     h.cookieToken = undefined;
+    h.kvConfigured = false;
     h.kvDel.mockReset();
     h.kvDel.mockResolvedValue({ ok: true, value: 0 });
   });
@@ -49,6 +51,21 @@ describe('SIWE routes', () => {
     const res = await verifyPOST(req);
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ ok: false, error: 'kv_not_configured' });
+  });
+
+  it('verify: KV 設定時の 8KiB 超 body → JSON/署名検証前に 413', async () => {
+    h.kvConfigured = true;
+    const req = new Request('http://localhost/api/auth/siwe/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'x'.repeat(9 * 1024), signature: '0x1' }),
+    });
+    const res = await verifyPOST(req);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'payload_too_large',
+    });
   });
 
   it('me: cookie 無し → 200 address:null (未ログインも正常状態)', async () => {
