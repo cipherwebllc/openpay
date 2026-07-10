@@ -80,8 +80,10 @@ import {
 } from '@/lib/push/notify';
 
 const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
-const pendingKey = pushNotifyPendingKey(WALLET);
-const coalesceKey = pushNotifyCoalesceKey(WALLET);
+const paymentPendingKey = pushNotifyPendingKey(WALLET, 'payment');
+const paymentCoalesceKey = pushNotifyCoalesceKey(WALLET, 'payment');
+const orderPendingKey = pushNotifyPendingKey(WALLET, 'order');
+const orderCoalesceKey = pushNotifyCoalesceKey(WALLET, 'order');
 
 type Sub = {
   endpointHash: string;
@@ -119,15 +121,26 @@ beforeEach(() => {
 });
 
 describe('notifyPaymentReceived', () => {
+  it('pending と coalesce のキーを wallet と kind ごとに分離する', () => {
+    const normalizedWallet = WALLET.toLowerCase();
+
+    expect(paymentPendingKey).toBe(`push:pending:${normalizedWallet}:payment`);
+    expect(orderPendingKey).toBe(`push:pending:${normalizedWallet}:order`);
+    expect(paymentCoalesceKey).toBe(
+      `push:coalesce:${normalizedWallet}:payment`,
+    );
+    expect(orderCoalesceKey).toBe(`push:coalesce:${normalizedWallet}:order`);
+  });
+
   it('NX 取得時だけ pending を GETDEL して locale 別文言で送信する', async () => {
     await notifyPaymentReceived(WALLET, 'payment');
 
-    expect(hold.incr).toHaveBeenCalledWith(pendingKey);
+    expect(hold.incr).toHaveBeenCalledWith(paymentPendingKey);
     expect(hold.expire).toHaveBeenCalledWith(
-      pendingKey,
+      paymentPendingKey,
       PUSH_NOTIFY_PENDING_TTL_SEC,
     );
-    expect(hold.set).toHaveBeenCalledWith(coalesceKey, '1', {
+    expect(hold.set).toHaveBeenCalledWith(paymentCoalesceKey, '1', {
       nx: true,
       ttlSec: PUSH_NOTIFY_COALESCE_TTL_SEC,
     });
@@ -139,9 +152,9 @@ describe('notifyPaymentReceived', () => {
     ];
     expect(script).toContain("redis.call('GET', KEYS[1])");
     expect(script).toContain("redis.call('DEL', KEYS[1])");
-    expect(keys).toEqual([pendingKey]);
+    expect(keys).toEqual([paymentPendingKey]);
     expect(args).toEqual([]);
-    expect(hold.data.has(pendingKey)).toBe(false);
+    expect(hold.data.has(paymentPendingKey)).toBe(false);
 
     expect(hold.send).toHaveBeenCalledTimes(1);
     const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
@@ -150,21 +163,56 @@ describe('notifyPaymentReceived', () => {
   });
 
   it('NX 不取得時は pending count だけ増やして送信しない', async () => {
-    hold.data.set(coalesceKey, '1');
+    hold.data.set(paymentCoalesceKey, '1');
 
     await notifyPaymentReceived(WALLET, 'payment');
 
-    expect(hold.data.get(pendingKey)).toBe('1');
+    expect(hold.data.get(paymentPendingKey)).toBe('1');
     expect(hold.eval).not.toHaveBeenCalled();
     expect(hold.send).not.toHaveBeenCalled();
   });
 
+  it('同一 kind の連続通知は従来どおり coalesce する', async () => {
+    await notifyPaymentReceived(WALLET, 'payment');
+    await notifyPaymentReceived(WALLET, 'payment');
+
+    expect(hold.send).toHaveBeenCalledTimes(1);
+    expect(hold.eval).toHaveBeenCalledTimes(1);
+    expect(hold.data.get(paymentPendingKey)).toBe('1');
+  });
+
+  it('payment の pending を order が回収せず kind ごとに通知する', async () => {
+    hold.data.set(paymentCoalesceKey, '1');
+
+    await notifyPaymentReceived(WALLET, 'payment');
+    await notifyPaymentReceived(WALLET, 'order');
+
+    expect(hold.data.get(paymentPendingKey)).toBe('1');
+    expect(hold.data.has(orderPendingKey)).toBe(false);
+    expect(hold.eval).toHaveBeenCalledTimes(1);
+    expect(hold.eval.mock.calls[0]?.[1]).toEqual([orderPendingKey]);
+    expect(hold.send).toHaveBeenCalledTimes(1);
+    const [, orderPayload] = hold.send.mock.calls[0] as [string, Resolver];
+    expect(orderPayload('ja', sub())).toEqual({
+      title: '新しい注文があります',
+    });
+
+    hold.data.delete(paymentCoalesceKey);
+    await notifyPaymentReceived(WALLET, 'payment');
+
+    expect(hold.send).toHaveBeenCalledTimes(2);
+    const [, paymentPayload] = hold.send.mock.calls[1] as [string, Resolver];
+    expect(paymentPayload('ja', sub())).toEqual({
+      title: '新着 2 件の着金があります',
+    });
+  });
+
   it('次の NX 取得時に pending を atomic GETDEL し n 件文言で集約する', async () => {
-    hold.data.set(pendingKey, '2');
+    hold.data.set(paymentPendingKey, '2');
 
     await notifyPaymentReceived(WALLET, 'payment');
 
-    expect(hold.data.has(pendingKey)).toBe(false);
+    expect(hold.data.has(paymentPendingKey)).toBe(false);
     expect(hold.send).toHaveBeenCalledTimes(1);
     const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
     expect(payload('ja', sub())).toEqual({ title: '新着 3 件の着金があります' });
@@ -184,7 +232,7 @@ describe('notifyPaymentReceived', () => {
   });
 
   it('注文通知も複数件は count だけを集約して通知する', async () => {
-    hold.data.set(pendingKey, '4');
+    hold.data.set(orderPendingKey, '4');
 
     await notifyPaymentReceived(WALLET, 'order');
 
@@ -211,7 +259,7 @@ describe('notifyPaymentReceived', () => {
   });
 
   it('複数件 (n>=2) は opt-in でも件数のみ・金額は出さない', async () => {
-    hold.data.set(pendingKey, '2');
+    hold.data.set(paymentPendingKey, '2');
 
     await notifyPaymentReceived(WALLET, 'payment', '¥5,000');
 

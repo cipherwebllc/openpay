@@ -18,12 +18,18 @@ redis.call('DEL', KEYS[1])
 return raw
 `;
 
-export function pushNotifyPendingKey(wallet: Address | string): string {
-  return `push:pending:${wallet.toLowerCase()}`;
+export function pushNotifyPendingKey(
+  wallet: Address | string,
+  kind: PaymentNotificationKind,
+): string {
+  return `push:pending:${wallet.toLowerCase()}:${kind}`;
 }
 
-export function pushNotifyCoalesceKey(wallet: Address | string): string {
-  return `push:coalesce:${wallet.toLowerCase()}`;
+export function pushNotifyCoalesceKey(
+  wallet: Address | string,
+  kind: PaymentNotificationKind,
+): string {
+  return `push:coalesce:${wallet.toLowerCase()}:${kind}`;
 }
 
 export async function notifyPaymentReceived(
@@ -53,8 +59,9 @@ async function notifyPaymentReceivedInner(
   kind: PaymentNotificationKind,
   amountLabel: string | undefined,
 ): Promise<void> {
-  const pendingKey = pushNotifyPendingKey(wallet);
-  const coalesceKey = pushNotifyCoalesceKey(wallet);
+  // kind ごとに窓と件数を分離し、同一モバイル注文では着金と注文の 2 通知を許容する。
+  const pendingKey = pushNotifyPendingKey(wallet, kind);
+  const coalesceKey = pushNotifyCoalesceKey(wallet, kind);
 
   const incremented = await kvIncr(pendingKey);
   if (!incremented.ok) {
