@@ -62,6 +62,10 @@ import {
 } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
+import {
+  isFallbackSafeRelayError,
+  isRelayResponseUnknownError,
+} from '@/lib/relay/relayResponseError';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   DEFAULT_TIP_PRESETS,
@@ -246,7 +250,10 @@ export function TipForm({ params }: { params: TipParams }) {
   );
 
   // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
-  const flowPending = useRelay ? relay.isPending : gasless.isPending;
+  const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
+  const flowPending = useRelay
+    ? relay.isPending || relayResponseUnknown
+    : gasless.isPending;
   const flowSuccess = useRelay
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
@@ -264,7 +271,9 @@ export function TipForm({ params }: { params: TipParams }) {
   // (CheckoutForm/PaymentForm と同一防御。TipForm は standard 経路を持たないため gasless/relay のみ)。
   const settledNoRetry =
     (!useRelay && !!gasless.data?.success) ||
-    (useRelay && !!relay.data && (relay.data.success || !!relay.data.pending));
+    (useRelay &&
+      (relayResponseUnknown ||
+        (!!relay.data && (relay.data.success || !!relay.data.pending))));
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
@@ -295,7 +304,7 @@ export function TipForm({ params }: { params: TipParams }) {
   // relay の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
   const flowError = useRelay ? relay.error : gasless.error;
   const flowErrorMessage = useRelay
-    ? flowError
+    ? isFallbackSafeRelayError(flowError)
       ? t(relayErrorKey(flowError))
       : undefined
     : flowError?.message;
@@ -843,6 +852,18 @@ export function TipForm({ params }: { params: TipParams }) {
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
           <p className="font-semibold">{t('errorTitle')}</p>
           <p className="mt-1 break-words">{error}</p>
+        </div>
+      )}
+
+      {/* Tip には standard fallback が無い。response-unknown は pending 相当に Pay を封鎖し、
+          新署名を作らず履歴/ステータス確認だけを案内する。 */}
+      {relayResponseUnknown && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="flex items-center gap-1.5 font-semibold">
+            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {t('responseUnknownTitle')}
+          </p>
+          <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
         </div>
       )}
 

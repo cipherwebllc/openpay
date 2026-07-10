@@ -52,6 +52,10 @@ import { logger } from '@/lib/logger';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import {
+  isFallbackSafeRelayError,
+  isRelayResponseUnknownError,
+} from '@/lib/relay/relayResponseError';
 // mobileOrderFee は **実物** (未モック)。feeKind 分岐で hook が実 mobileOrderFeeValue へ委譲し、
 // gas-recovery (recoverFeeMock) を呼ばないことを金額 + 未呼出で証明する。
 import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
@@ -190,6 +194,127 @@ describe('useJpycEip3009Payment — 署名計測 (sign_requested / completed / r
     expect(result.current.error?.message).toMatch(/disabled/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+});
+
+describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
+  function submit() {
+    mount();
+    const rendered = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    rendered.result.current.mutate({
+      merchant: MERCHANT,
+      value: 300n * 10n ** 18n,
+    });
+    return rendered.result;
+  }
+
+  it('fetch reject → response-unknown (fallback-safe ではない)', async () => {
+    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
+    expect(result.current.error?.message).toBe('response-unknown');
+    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+  });
+
+  it('body read reject → response-unknown', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response('not-json', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      }),
+    );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
+    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+  });
+
+  it.each([
+    ['object envelope incomplete', { ok: true }],
+    ['body schema invalid', []],
+  ])('2xx malformed (%s) → response-unknown', async (_label, body) => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
+    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+  });
+
+  it('非構造化 500 → response-unknown', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('Internal Server Error', { status: 500 }));
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
+    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+  });
+
+  it('正常 202 pending → 現行どおり pending result', async () => {
+    const txHash = `0x${'c'.repeat(64)}`;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, pending: true, txHash }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({
+      txHash,
+      success: false,
+      pending: true,
+    });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('正常 reverted envelope → 現行どおり success:false result', async () => {
+    const txHash = `0x${'d'.repeat(64)}`;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, reverted: true, txHash }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({ txHash, success: false });
+    expect(result.current.error).toBeNull();
+  });
+
+  it.each([
+    [400, 'invalid_payload'],
+    [429, 'rate_limited'],
+    [502, 'relay_error'],
+    [503, 'relay_not_configured'],
+  ])(
+    '有効な %i {error:string} → fallback-safe server error',
+    async (status, error) => {
+      fetchSpy.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error }), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      const result = submit();
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error?.message).toBe(error);
+      expect(isFallbackSafeRelayError(result.current.error)).toBe(true);
+      expect(isRelayResponseUnknownError(result.current.error)).toBe(false);
+    },
+  );
 });
 
 // recover 分岐: forwarder が設定された chain では feeValue = recoverFeeValue(value) を使い、
@@ -374,6 +499,7 @@ describe('useJpycEip3009Payment — モバイル注文 feeKind (recover=実 mobi
     await waitFor(() => expect(result.current.isError).toBe(true));
     // 明示エラーで呼出側 (CheckoutForm) が standard 経路へ fallback できる。
     expect(result.current.error?.message).toBe('mobile_fee_requires_recover');
+    expect(isFallbackSafeRelayError(result.current.error)).toBe(true);
     // 手数料を取りこぼす free transfer は実行しない。
     expect(fetchSpy).not.toHaveBeenCalled();
   });

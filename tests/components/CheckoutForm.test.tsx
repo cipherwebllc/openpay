@@ -155,6 +155,7 @@ import { CheckoutForm } from '@/components/CheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x2222222222222222222222222222222222222222';
@@ -216,6 +217,7 @@ function setRelayPayment(
     | 'success'
     | 'reverted'
     | 'broadcast-pending'
+    | 'response-unknown'
     | 'error',
   opts?: {
     txHash?: `0x${string}`;
@@ -237,7 +239,12 @@ function setRelayPayment(
     mutate: relayMutate,
     isPending: state === 'pending-flow',
     data,
-    error: state === 'error' ? new Error(opts?.errMsg ?? 'rate_limited') : null,
+    error:
+      state === 'error'
+        ? new Error(opts?.errMsg ?? 'rate_limited')
+        : state === 'response-unknown'
+          ? new RelayResponseUnknownError()
+          : null,
     variables: opts?.variables,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
@@ -1743,6 +1750,27 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       ).toBeInTheDocument();
     },
   );
+
+  it('response-unknown → standard fallback 非表示・Pay 封鎖・中間表示', async () => {
+    const user = userEvent.setup();
+    setupRelayReady();
+    setRelayPayment('response-unknown');
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(
+      screen.getByText(/送信済みの可能性があります。取引履歴\/ステータス/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeNull();
+    const payButton = screen.getByRole('button', { name: /送信中/ });
+    expect(payButton).toBeDisabled();
+    await user.click(payButton);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
 
   // --- B1 Layer B: relayer preflight degraded (署名前の先回り banner) ---
   it('preflight degraded + error なし + 未 submit → preflight 文言 + 通常決済へ切替 banner', () => {

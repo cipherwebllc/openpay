@@ -16,6 +16,7 @@ import {
   mobileOrderFeeValue,
   type MobileOrderFeeKind,
 } from '@/lib/mobileOrderFee';
+import { isRelayResponseUnknownError } from '@/lib/relay/relayResponseError';
 import type { GaslessSnapshot } from './usePaymentHistory';
 
 // 利用する relay mutation の最小構造 (useJpycEip3009Payment の戻りに構造的に適合)。
@@ -32,6 +33,7 @@ export function useRelayGaslessSnapshot(
 ): GaslessSnapshot {
   return useMemo(() => {
     const v = relay.variables;
+    const responseUnknown = isRelayResponseUnknownError(relay.error);
     // 実際に hook/server が回収する手数料と一致させる (gasMode で料金スケジュールが変わる:
     // merchant=max(floor,bps) / customer=floor。floor は chainId 別)。これがずれると履歴の
     // netFee/merchant 着金が実 settle と乖離する。chainId は決済対象チェーン (deployment.chainId)
@@ -64,8 +66,18 @@ export function useRelayGaslessSnapshot(
             success: relay.data.success,
             pending: relay.data.pending,
           }
-        : undefined,
-      error: relay.error,
+        : responseUnknown
+          ? {
+              txHash: null,
+              userOpHash: null,
+              blockNumber: null,
+              success: false,
+              pending: true,
+            }
+          : undefined,
+      // response-unknown を通常 error として履歴へ誤記録すると「未送信確定」に見えるため、
+      // pending snapshot に正規化する。txHash 不明の pending は履歴側が重複 append しない。
+      error: responseUnknown ? null : relay.error,
       variables: v
         ? {
             merchantAmount,

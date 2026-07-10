@@ -102,6 +102,7 @@ import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 import type { TipParams } from '@/lib/url';
+import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const CREATOR: Address = '0x2222222222222222222222222222222222222222';
@@ -153,7 +154,15 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
 }
 
 let relayMutate: ReturnType<typeof vi.fn>;
-function setRelay(state: 'idle' | 'pending' | 'success' | 'error' | 'pendingResult') {
+function setRelay(
+  state:
+    | 'idle'
+    | 'pending'
+    | 'success'
+    | 'error'
+    | 'pendingResult'
+    | 'response-unknown',
+) {
   relayMutate = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
@@ -164,7 +173,12 @@ function setRelay(state: 'idle' | 'pending' | 'success' | 'error' | 'pendingResu
         : state === 'pendingResult'
           ? { txHash: `0x${'d'.repeat(64)}`, success: false, pending: true }
           : undefined,
-    error: state === 'error' ? new Error('rate_limited') : null,
+    error:
+      state === 'error'
+        ? new Error('rate_limited')
+        : state === 'response-unknown'
+          ? new RelayResponseUnknownError()
+          : null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -1228,6 +1242,21 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     render(<TipForm params={JPYC_PARAMS} />);
     expect(screen.getByText(/送信済み・確認待ち/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Explorer で確認/ })).toBeNull();
+  });
+
+  it('response-unknown → Pay 封鎖・中間表示・通常エラー非表示', async () => {
+    const user = userEvent.setup();
+    setRelay('response-unknown');
+    render(<TipForm params={JPYC_PARAMS} />);
+
+    expect(
+      screen.getByText(/送信済みの可能性があります。取引履歴\/ステータス/),
+    ).toBeInTheDocument();
+    const payButton = screen.getByRole('button', { name: /送信中/ });
+    expect(payButton).toBeDisabled();
+    await user.click(payButton);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
   });
 });
 
