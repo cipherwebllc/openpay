@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
@@ -78,6 +78,7 @@ import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
+import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import {
   counterpartSymbol,
@@ -209,6 +210,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const amountStr = isFixed ? fixedAmount : inputAmount;
   // 成功時の大型 overlay (PayPay 風) を 1 度ユーザが閉じたら以降は inline panel のみ
   const [overlayDismissed, setOverlayDismissed] = useState(false);
+  const [crossChainLocked, setCrossChainLocked] = useState(false);
+  const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
+  const crossChainAttemptAmountRef = useRef<bigint | null>(null);
 
   // 動的 QR の有効期限。exp 付き QR (FX 換算で生成) のみカウントダウン + 期限切れ block。
   // exp 無し (通常 QR) では nowMs=0 のまま・expired=false で従来挙動。
@@ -394,20 +398,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
   // response-unknown の再送封鎖を外さないため current route とは独立に判定する。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
-  const flowPending = relayResponseUnknown
+  const directFlowPending = relayResponseUnknown
     ? true
     : isStandard
       ? standard.isPending
       : useRelay
         ? relay.isPending
         : gasless.isPending;
+  const flowPending = directFlowPending || crossChainLocked;
   // relay は gas quote も smart account も不要なので readiness は常に満たす。
   const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一
   // 受取人へ 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全
   // なので再試行を許す。standard の fee-error は merchant transfer が確定済なので
   // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する。
-  const settledNoRetry =
+  const directSettledNoRetry =
     relayResponseUnknown ||
     (!isStandard && !useRelay && !!gasless.data?.success) ||
     (useRelay &&
@@ -417,6 +422,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
     : standard.merchantTxHash;
+  const settledNoRetry = directSettledNoRetry || !!crossChainResult;
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -639,6 +645,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
     standard,
   );
 
+  const onCrossChainAttemptStart = useCallback((attemptAmount: bigint) => {
+    crossChainAttemptAmountRef.current = attemptAmount;
+    setCrossChainLocked(true);
+  }, []);
+  const onCrossChainExecutingChange = useCallback((executing: boolean) => {
+    setCrossChainLocked(executing);
+  }, []);
+  const onCrossChainSuccess = useCallback((result: ExecuteResult) => {
+    setCrossChainResult(result);
+    setCrossChainLocked(false);
+  }, []);
+
   function onSubmit() {
     if (!canSubmit) return;
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
@@ -778,7 +796,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 省く = undefined)。amountDisplay=fmt(totalCustomerOutflow)・merchantAddress=params.to・explorerBase
   // は全経路共通で従来どおり。いずれの経路でもない (未成功) ときは null で overlay 非表示。
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
-    !isStandard && !useRelay && gasless.data && gasless.data.success
+    crossChainResult
+      ? {
+          amountDisplay: fmt(crossChainAttemptAmountRef.current ?? amountWei),
+          txHash: crossChainResult.mintTxHash,
+          explorerBase: blockExplorerUrl(crossChainResult.destChainId),
+          merchantAddress: params.to,
+        }
+      : !isStandard && !useRelay && gasless.data && gasless.data.success
       ? {
           amountDisplay: fmt(totalCustomerOutflow),
           txHash: gasless.data.txHash,
@@ -1086,6 +1111,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
             // 構築済 (saData あり)」時のみ。pristine/未対応の fallback、init 失敗、
             // 取得中はいずれも gasless 不可なので chooser でも「ガス代要」と表示する。
             directIsGasless={!isStandard && !!saData}
+            executionDisabled={directFlowPending || directSettledNoRetry}
+            onAttemptStart={onCrossChainAttemptStart}
+            onExecutingChange={onCrossChainExecutingChange}
+            onSuccess={onCrossChainSuccess}
           />
         )}
       </section>
@@ -1216,6 +1245,19 @@ function PaymentDetails({ params }: { params: PayParams }) {
           </p>
           <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
         </div>
+      )}
+
+      {crossChainResult && (
+        <ResultPanel
+          title={t('successTitle')}
+          rows={[
+            {
+              label: t('successTx'),
+              value: crossChainResult.mintTxHash,
+              copyable: true,
+            },
+          ]}
+        />
       )}
 
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (

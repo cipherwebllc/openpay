@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
@@ -73,8 +73,10 @@ import {
   type TipParams,
 } from '@/lib/url';
 import { useOrigin } from '@/hooks/useOrigin';
+import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
+import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
@@ -183,6 +185,8 @@ export function TipForm({ params }: { params: TipParams }) {
   } = useTipAmount({ presets, decimals: deployment.decimals });
   // PayPay 風 大型成功 overlay (dismiss するまで全画面)
   const [overlayDismissed, setOverlayDismissed] = useState(false);
+  const [crossChainLocked, setCrossChainLocked] = useState(false);
+  const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
 
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
   // recoverFeeValue を使う。チップは gasMode=customer 固定で、recoverFeeValue は customer に bps を
@@ -251,17 +255,26 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
-  const flowPending = useRelay
+  const directFlowPending = useRelay
     ? relay.isPending || relayResponseUnknown
     : gasless.isPending;
-  const flowSuccess = useRelay
+  const directFlowSuccess = useRelay
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
-  const flowTxHash = useRelay ? relay.data?.txHash : gasless.data?.txHash;
-  const flowUserOpHash = useRelay ? undefined : gasless.data?.userOpHash;
+  const directFlowTxHash = useRelay ? relay.data?.txHash : gasless.data?.txHash;
+  const flowPending = directFlowPending || crossChainLocked;
+  const flowSuccess = directFlowSuccess || !!crossChainResult;
+  const flowTxHash = crossChainResult?.mintTxHash ?? directFlowTxHash;
+  const flowUserOpHash = crossChainResult
+    ? undefined
+    : useRelay
+      ? undefined
+      : gasless.data?.userOpHash;
   const flowBlockNumber: bigint | undefined = useRelay
     ? undefined
-    : gasless.data?.blockNumber;
+    : crossChainResult
+      ? undefined
+      : gasless.data?.blockNumber;
 
   // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
   // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。
@@ -269,11 +282,12 @@ export function TipForm({ params }: { params: TipParams }) {
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一受取人へ
   // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
   // (CheckoutForm/PaymentForm と同一防御。TipForm は standard 経路を持たないため gasless/relay のみ)。
-  const settledNoRetry =
+  const directSettledNoRetry =
     (!useRelay && !!gasless.data?.success) ||
     (useRelay &&
       (relayResponseUnknown ||
         (!!relay.data && (relay.data.success || !!relay.data.pending))));
+  const settledNoRetry = directSettledNoRetry || !!crossChainResult;
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
@@ -351,6 +365,37 @@ export function TipForm({ params }: { params: TipParams }) {
   // ぶれないように・Codex P2)。onSubmit で fmt(totalCustomerOutflow) を保存。
   const submittedAmountDisplayRef = useRef<string | null>(null);
 
+  const onCrossChainAttemptStart = useCallback(
+    (attemptAmount: bigint) => {
+      const { bridgedAmount, feeAmount } = computeCrossChainFeeSplit(
+        attemptAmount,
+        'usdc',
+        'standard',
+      );
+      // cross-chain の network gas は native token の別払い。webhook / 控えには
+      // execute 開始時点の USDC 額を固定し、後続の preset 変更から切り離す。
+      submittedRef.current = {
+        amount: formatUnits(attemptAmount, deployment.decimals),
+        merchantAmount: bridgedAmount.toString(),
+        feeAmount: feeAmount.toString(),
+        customerPays: attemptAmount.toString(),
+      };
+      submittedAmountDisplayRef.current = formatTokenAmount(
+        attemptAmount,
+        deployment,
+      );
+      setCrossChainLocked(true);
+    },
+    [deployment],
+  );
+  const onCrossChainExecutingChange = useCallback((executing: boolean) => {
+    setCrossChainLocked(executing);
+  }, []);
+  const onCrossChainSuccess = useCallback((result: ExecuteResult) => {
+    setCrossChainResult(result);
+    setCrossChainLocked(false);
+  }, []);
+
   useEffect(() => {
     // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
     if (!flowSuccess || !flowTxHash) return;
@@ -366,7 +411,7 @@ export function TipForm({ params }: { params: TipParams }) {
       customerPays: breakdown.customerPays.toString(),
     };
     logger.info('tip.success', {
-      mode: useRelay ? 'relay' : 'gasless',
+      mode: crossChainResult ? 'cross-chain' : useRelay ? 'relay' : 'gasless',
       userOpHash: flowUserOpHash,
       txHash: flowTxHash,
       creator: params.to,
@@ -379,14 +424,14 @@ export function TipForm({ params }: { params: TipParams }) {
       buildPayerReceipt({
         txHash: flowTxHash,
         userOpHash: flowUserOpHash ?? null,
-        chainId: deployment.chainId,
+        chainId: crossChainResult?.destChainId ?? deployment.chainId,
         asset: params.token,
         tokenAddress: deployment.address,
         amount: sent.amount,
         merchantAddress: params.to,
         merchantName: params.name ?? null,
         payerAddress: address,
-        paymentMode: 'gasless',
+        paymentMode: crossChainResult ? 'cross-chain' : 'gasless',
         gasMode: 'customer',
         memo: params.message ?? null,
         sourceRoute: '/tip',
@@ -451,6 +496,7 @@ export function TipForm({ params }: { params: TipParams }) {
     flowUserOpHash,
     flowBlockNumber,
     useRelay,
+    crossChainResult,
     params.to,
     params.token,
     params.name,
@@ -801,6 +847,10 @@ export function TipForm({ params }: { params: TipParams }) {
             // 実際に構築済 (saData あり) の時のみ。pristine/未対応 fallback・init 失敗・
             // 取得中は gasless 不可なので「ガス代要」表示にする。
             directIsGasless={!!saData}
+            executionDisabled={directFlowPending || directSettledNoRetry}
+            onAttemptStart={onCrossChainAttemptStart}
+            onExecutingChange={onCrossChainExecutingChange}
+            onSuccess={onCrossChainSuccess}
           />
         )}
       </section>

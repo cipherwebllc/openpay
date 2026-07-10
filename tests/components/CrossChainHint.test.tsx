@@ -190,6 +190,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   logPostMock.mockClear();
   mockWalletChainId = baseSepoliaId;
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -454,6 +455,9 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
 describe('CrossChainHint: execute click → success / error flow', () => {
   it('Gateway path Pay click → execute 成功 → success panel + paymentLog POST', async () => {
     const user = userEvent.setup();
+    const onAttemptStart = vi.fn();
+    const onExecutingChange = vi.fn();
+    const onSuccess = vi.fn();
     setAllChainsBalance(0n);
     const walletClient = makeWalletClient();
     setupConnected({ walletClient });
@@ -481,12 +485,23 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint
+          {...baseProps}
+          onAttemptStart={onAttemptStart}
+          onExecutingChange={onExecutingChange}
+          onSuccess={onSuccess}
+        />,
+      ),
+    );
 
     const payBtn = await screen.findByRole('button', {
       name: /選択したチェーンで支払う/,
     });
     await user.click(payBtn);
+    expect(onAttemptStart).toHaveBeenCalledOnce();
+    expect(onAttemptStart).toHaveBeenCalledWith(5_000_000n);
 
     // success panel が出る (formatUnits(5_000_000, 6) = "5")
     await waitFor(() => {
@@ -513,6 +528,171 @@ describe('CrossChainHint: execute click → success / error flow', () => {
       'cross-chain.execute.success',
       expect.objectContaining({ bridge: 'gateway' }),
     );
+    expect(onSuccess).toHaveBeenCalledOnce();
+    expect(onSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: 'gateway',
+        mintTxHash: expect.any(String),
+        destChainId: baseSepoliaId,
+      }),
+    );
+    expect(onExecutingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('親決済が pending/success の間は cross-chain execute を開始しない', async () => {
+    const user = userEvent.setup();
+    const onAttemptStart = vi.fn();
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    setupConnected();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+      ),
+    );
+
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint
+          {...baseProps}
+          executionDisabled
+          onAttemptStart={onAttemptStart}
+        />,
+      ),
+    );
+    const payBtn = await screen.findByRole('button', {
+      name: /選択したチェーンで支払う/,
+    });
+    expect(payBtn).toBeDisabled();
+    await user.click(payBtn);
+    expect(onAttemptStart).not.toHaveBeenCalled();
+  });
+
+  it('CCTP approve-only 失敗は親 lock を解除する', async () => {
+    const user = userEvent.setup();
+    const onExecutingChange = vi.fn();
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    const walletClient = makeWalletClient();
+    walletClient.writeContract.mockRejectedValueOnce(new Error('approve rejected'));
+    setupConnected({ walletClient });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+      ),
+    );
+
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint
+          {...baseProps}
+          onExecutingChange={onExecutingChange}
+        />,
+      ),
+    );
+    await user.click(
+      await screen.findByRole('button', {
+        name: /選択したチェーンで支払う/,
+      }),
+    );
+    await screen.findByText(/approve rejected/);
+    expect(onExecutingChange).toHaveBeenCalledWith(true);
+    expect(onExecutingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('CCTP burnTxHash 保存後の失敗は親 lock を解除しない', async () => {
+    const user = userEvent.setup();
+    const onExecutingChange = vi.fn();
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    const publicClient = makePublicClient();
+    publicClient.waitForTransactionReceipt
+      .mockResolvedValueOnce({ status: 'success' })
+      .mockRejectedValueOnce(new Error('burn receipt unavailable'));
+    setupConnected({ publicClient });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+      ),
+    );
+
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint
+          {...baseProps}
+          onExecutingChange={onExecutingChange}
+        />,
+      ),
+    );
+    await user.click(
+      await screen.findByRole('button', {
+        name: /選択したチェーンで支払う/,
+      }),
+    );
+    await screen.findByText(/burn receipt unavailable/);
+    expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it('Gateway merchantAttestation 保存後の失敗は親 lock を解除しない', async () => {
+    const user = userEvent.setup();
+    const onExecutingChange = vi.fn();
+    setAllChainsBalance(0n);
+    const walletClient = makeWalletClient();
+    walletClient.sendTransaction.mockRejectedValueOnce(
+      new Error('mint broadcast unavailable'),
+    );
+    setupConnected({ walletClient });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/v1/balances')) {
+          return new Response(
+            JSON.stringify({
+              balances: [{ domain: 7, balance: '10000000' }],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({ attestation: '0xattestation', signature: '0xsig' }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint
+          {...baseProps}
+          onExecutingChange={onExecutingChange}
+        />,
+      ),
+    );
+    await user.click(
+      await screen.findByRole('button', {
+        name: /選択したチェーンで支払う/,
+      }),
+    );
+    await screen.findByText(/mint broadcast unavailable/);
+    expect(onExecutingChange).toHaveBeenLastCalledWith(true);
   });
 
   it('execute 中 fetch 失敗 → error 表示 + Sentry error log', async () => {

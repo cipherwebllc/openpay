@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { arbitrumSepolia, baseSepolia, polygonAmoy } from 'viem/chains';
@@ -1007,6 +1007,112 @@ describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', ()
     await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
     const props = crossChainHintSpy.mock.calls[0]![0] as { enabled: boolean };
     expect(props.enabled).toBe(false);
+  });
+
+  it.each(['pending', 'success'] as const)(
+    '親の通常決済が %s の間は cross-chain execute を無効化',
+    async (state) => {
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      setBatchPayment(state);
+
+      render(<TipForm params={USDC_PARAMS} />);
+
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      const props = crossChainHintSpy.mock.lastCall![0] as {
+        executionDisabled: boolean;
+      };
+      expect(props.executionDisabled).toBe(true);
+    },
+  );
+
+  it('cross-chain 実行中は親 Send を止める', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<TipForm params={USDC_PARAMS} />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall![0] as {
+      onAttemptStart: (amount: bigint) => void;
+      onExecutingChange: (executing: boolean) => void;
+    };
+    const sendBtn = screen.getByRole('button', { name: /1 USDC を送る/ });
+    expect(sendBtn).toBeEnabled();
+
+    act(() => {
+      props.onAttemptStart(1_000_000n);
+      props.onExecutingChange(true);
+    });
+    expect(sendBtn).toBeDisabled();
+
+    act(() => props.onExecutingChange(false));
+    expect(sendBtn).toBeEnabled();
+  });
+
+  it('cross-chain 成功を親 overlay/webhook/控えへ1回だけ流し、開始時金額を固定する', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const mintTxHash = `0x${'e'.repeat(64)}` as const;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+
+    render(
+      <TipForm
+        params={{ ...USDC_PARAMS, webhook: 'https://example.com/tip-hook' }}
+      />,
+    );
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall![0] as {
+      onAttemptStart: (amount: bigint) => void;
+      onSuccess: (result: {
+        path: 'cctp-v2';
+        approveTxHash: `0x${string}`;
+        burnTxHash: `0x${string}`;
+        mintTxHash: `0x${string}`;
+        destChainId: number;
+      }) => void;
+    };
+    act(() => {
+      props.onAttemptStart(1_000_000n);
+      props.onSuccess({
+        path: 'cctp-v2',
+        approveTxHash: '0xapprove',
+        burnTxHash: '0xburn',
+        mintTxHash,
+        destChainId: baseSepolia.id,
+      });
+    });
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(
+      screen.getAllByText(/チップを送信しました|決済完了/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(mintTxHash).length).toBeGreaterThan(0);
+
+    // 成功後に preset を変えて effect deps が再評価されても、通知/控えは再発火せず
+    // onAttemptStart 時点の 1 USDC が維持される。
+    await user.click(screen.getByRole('button', { name: '5 USDC' }));
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(loadPayerReceipts()).toHaveLength(1);
+    });
+    const webhookBody = JSON.parse(
+      (fetchSpy.mock.calls[0]![1] as RequestInit).body as string,
+    );
+    expect(webhookBody.amount).toBe('1');
+    expect(webhookBody.txHash).toBe(mintTxHash);
+    expect(loadPayerReceipts()[0]?.amount).toBe('1');
+    fetchSpy.mockRestore();
   });
 
   it('preset 切替で requiredAtomic prop が再計算される', async () => {

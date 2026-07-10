@@ -66,6 +66,8 @@ export interface UseCrossChainPaymentReturn {
   pathOptions: PathOption[];
   progress: CrossChainProgress | undefined;
   isExecuting: boolean;
+  /** merchant 送金が不可逆境界を越えたか。同一 mount 中の親 UI 排他用。 */
+  isCommitted: boolean;
   result: ExecuteResult | undefined;
   error: Error | undefined;
   refetchBalances: () => Promise<unknown>;
@@ -94,6 +96,7 @@ export function useCrossChainPayment(
 
   const [progress, setProgress] = useState<CrossChainProgress | undefined>();
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isCommitted, setIsCommitted] = useState(false);
   const [result, setResult] = useState<ExecuteResult | undefined>();
   const [error, setError] = useState<Error | undefined>();
 
@@ -192,7 +195,22 @@ export function useCrossChainPayment(
         valueAtomic: bridgedAmount,
         feeAtomic: feeAmount,
       };
-      const onStep = (s: ResumeState) => saveResumeState(sessionKey, s);
+      const onStep = (s: ResumeState) => {
+        // D4a: 親子 UI の同一 mount 排他は storage 成否より先に確定する。CCTP は
+        // merchant burn hash、Gateway は merchant attestation が送金の不可逆境界。
+        // approveTxHash だけでは資金移動前なので committed にせず、失敗時の通常 Pay を許す。
+        if (
+          (core.kind === 'cctp-v2' && 'burnTxHash' in s && !!s.burnTxHash) ||
+          (core.kind === 'gateway' &&
+            'merchantAttestation' in s &&
+            !!s.merchantAttestation)
+        ) {
+          setIsCommitted(true);
+        }
+        // D4b は見送り: resume 保存は best-effort のまま。保存失敗後に reload すると
+        // committed state を復元できず、同一 mount 外の二重送金窓が残る。
+        saveResumeState(sessionKey, s);
+      };
 
       // merchant mint 確定時に会計ログ (KV) を発火する。cross-chain は買い手の端末で実行され
       // localStorage は買い手の控えにしかならないため、店舗向けの会計記録は KV ログが本筋。
@@ -228,6 +246,8 @@ export function useCrossChainPayment(
       };
 
       if (core.kind === 'gateway') {
+        const resume = loadResumeState<GatewayResumeState>(sessionKey);
+        if (resume?.merchantAttestation) setIsCommitted(true);
         const gatewayArgs: ExecuteGatewayTransferArgs = {
           walletClient,
           sourcePublicClient,
@@ -244,7 +264,7 @@ export function useCrossChainPayment(
           valueAtomic: bridgedAmount,
           feeReceiver: args.feeReceiver,
           feeAmount,
-          resume: loadResumeState<GatewayResumeState>(sessionKey),
+          resume,
           onStep,
           onProgress: reportProgress,
           onMerchantMint,
@@ -254,6 +274,8 @@ export function useCrossChainPayment(
         return result;
       }
       // cctp-v2
+      const resume = loadResumeState<CctpResumeState>(sessionKey);
+      if (resume?.burnTxHash) setIsCommitted(true);
       const cctpArgs: ExecuteCctpTransferArgs = {
         walletClient,
         sourcePublicClient,
@@ -269,7 +291,7 @@ export function useCrossChainPayment(
         valueAtomic: bridgedAmount,
         feeReceiver: args.feeReceiver,
         feeAmount,
-        resume: loadResumeState<CctpResumeState>(sessionKey),
+        resume,
         onStep,
         onProgress: reportProgress,
         onMerchantMint,
@@ -295,6 +317,7 @@ export function useCrossChainPayment(
     setError(undefined);
     setResult(undefined);
     setProgress(undefined);
+    setIsCommitted(false);
 
     if (!decision) return null;
     if (decision.path === 'direct' || decision.path === 'onramp') {
@@ -336,6 +359,7 @@ export function useCrossChainPayment(
       setError(undefined);
       setResult(undefined);
       setProgress(undefined);
+      setIsCommitted(false);
 
       // direct option は既存 path (useBatchPayment / useStandardPayment) に委譲。
       // user-selected であっても本 hook は touch しない。
@@ -419,6 +443,7 @@ export function useCrossChainPayment(
     pathOptions,
     progress,
     isExecuting,
+    isCommitted,
     result,
     error,
     refetchBalances: balancesQuery.refetch,
