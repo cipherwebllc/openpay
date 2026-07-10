@@ -21,7 +21,6 @@
 
 import { safeGet, safeRemove, safeSet } from './storage';
 import { logger } from './logger';
-import { isIncomeSaleEntry } from './historyFilters';
 import type { GasMode, PayMode } from './fee';
 import type {
   CircleVerificationStatus,
@@ -855,6 +854,20 @@ export function isValidTodaySummary(value: unknown): value is TodaySummary {
   if (typeof v.date !== 'string') return false;
   if (v.byMerchant === null || typeof v.byMerchant !== 'object') return false;
   return true;
+}
+
+// 収入(売上)行の判定。**historyFilters.isIncomeSaleEntry と同一条件**の純 predicate をここに複製する。
+// 理由: historyFilters は entryYenValue(重い換算チェーン: historyYen→tokens/fx) を import するため、
+// 当日 summary (LP の TodayCard が history.ts を読む) から historyFilters を引くと LP バンドルが肥大する
+// (/[locale] が予算 320kB を超過)。条件は status/flow のみで pure ゆえ複製が安全。
+// ⚠️ historyFilters.isIncomeSaleEntry と flow allowlist を必ず揃えること。
+function isIncomeSaleEntry(entry: HistoryEntry): boolean {
+  return (
+    entry.status === 'success' &&
+    (entry.flow === 'batch' ||
+      entry.flow === 'direct' ||
+      entry.flow === 'standard-merchant')
+  );
 }
 
 /**
