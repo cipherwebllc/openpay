@@ -9,6 +9,7 @@ import {
   type MobileOrderFeeKind,
 } from '@/lib/mobileOrderFee';
 import type { GasMode } from '@/lib/fee';
+import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
 
 // 実依存をそのまま使う (mock しない)。per-chain 未設定の代表 chain で既定 2 JPYC = 2e18。
 const CHAIN = polygon.id;
@@ -140,6 +141,24 @@ describe('useRelayGaslessSnapshot', () => {
       useRelayGaslessSnapshot(relayObj({ error: err }), false, CHAIN),
     );
     expect(result.current.error).toBe(err);
+  });
+
+  it('response-unknown → pending 相当に正規化し通常 error として履歴へ渡さない', () => {
+    const { result } = renderHook(() =>
+      useRelayGaslessSnapshot(
+        relayObj({ error: new RelayResponseUnknownError() }),
+        false,
+        CHAIN,
+      ),
+    );
+    expect(result.current.data).toEqual({
+      txHash: null,
+      userOpHash: null,
+      blockNumber: null,
+      success: false,
+      pending: true,
+    });
+    expect(result.current.error).toBeNull();
   });
 
   it('memoize: 同一 relay 参照 + 同一 useRecover で再 render → 同一参照 (deps 安定)', () => {

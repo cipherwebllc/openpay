@@ -52,6 +52,10 @@ import {
 } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
+import {
+  isFallbackSafeRelayError,
+  isRelayResponseUnknownError,
+} from '@/lib/relay/relayResponseError';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
 import {
@@ -387,11 +391,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
     totalCustomerOutflow,
   );
 
-  const flowPending = isStandard
-    ? standard.isPending
-    : useRelay
-      ? relay.isPending
-      : gasless.isPending;
+  // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
+  // response-unknown の再送封鎖を外さないため current route とは独立に判定する。
+  const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
+  const flowPending = relayResponseUnknown
+    ? true
+    : isStandard
+      ? standard.isPending
+      : useRelay
+        ? relay.isPending
+        : gasless.isPending;
   // relay は gas quote も smart account も不要なので readiness は常に満たす。
   const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一
@@ -399,8 +408,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // なので再試行を許す。standard の fee-error は merchant transfer が確定済なので
   // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する。
   const settledNoRetry =
+    relayResponseUnknown ||
     (!isStandard && !useRelay && !!gasless.data?.success) ||
-    (useRelay && !!relay.data && (relay.data.success || !!relay.data.pending)) ||
+    (useRelay &&
+      !!relay.data &&
+      (relay.data.success || !!relay.data.pending)) ||
     (isStandard && (!!standard.data || standard.isFeeError));
   const canSubmit =
     isConnected &&
@@ -447,7 +459,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       !standard.error);
   // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
   const flowErrorMessage = useRelay
-    ? flowError
+    ? isFallbackSafeRelayError(flowError)
       ? t(relayErrorKey(flowError))
       : undefined
     : flowError?.message;
@@ -466,10 +478,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   // B1 graceful degradation (Layer A): relay が API レベルで失敗 (rate_limited 等の error code) した
   // とき、ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
-  // (relay.data.success===false) は別経路 (revertedNoFeedback) で扱うため、ここでは relay.error
-  // (= API 失敗) のみを条件にする。banner の中で friendly 文言を 1 度だけ出し、下の汎用 error
-  // ブロックでは重複表示しない (relayFallbackActive で抑止)。
-  const relayFallbackActive = useRelay && !!relay.error;
+  // (relay.data.success===false) は別経路 (revertedNoFeedback)、response-unknown は再送封鎖で
+  // 扱うため、ここでは fallback-safe error のみを条件にする。banner の中で friendly 文言を
+  // 1 度だけ出し、下の汎用 error ブロックでは重複表示しない。
+  const relayFallbackActive =
+    useRelay && isFallbackSafeRelayError(relay.error);
   // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
   // (relay.error なし・relay.data なし) ときに、署名 *前* に「通常決済へ切替」を先回りで促す。
   // Layer A (relay.error) とは独立に評価する (両方 true にはならない・!relay.error が排他)。
@@ -477,7 +490,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
     useRelay && relayHealth.degraded && !relay.error && !relay.data;
   // Layer A の banner 文言 (per-error friendly)。Layer A は汎用 error box を「置換」する (同じ relay
   // error が二重表示になるのを防ぐ) が、Layer B は「additive」に出す (汎用 error box を抑止しない)。
-  const relayFallbackMessage = relay.error ? t(relayErrorKey(relay.error)) : '';
+  const relayFallbackMessage = isFallbackSafeRelayError(relay.error)
+    ? t(relayErrorKey(relay.error))
+    : '';
 
   useEffect(() => {
     if (gasless.error) logger.error('payment.failed', { error: gasless.error });
@@ -1147,6 +1162,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
           nativeToken={nativeToken}
           onSwitchToStandard={() => setModeOverride('standard')}
         />
+      )}
+
+      {/* relay response-unknown: POST は届いて broadcast 済みの可能性がある。standard fallback と
+          新署名を封鎖し、履歴/ステータス確認だけを案内する。 */}
+      {relayResponseUnknown && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="flex items-center gap-1.5 font-semibold">
+            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {t('responseUnknownTitle')}
+          </p>
+          <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
+        </div>
       )}
 
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (

@@ -29,6 +29,7 @@ import { logger } from '@/lib/logger';
 import { isUserRejection } from '@/lib/walletErrors';
 import type { GasMode } from '@/lib/fee';
 import type { TokenDeployment } from '@/lib/tokens';
+import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
 
 export type JpycEip3009Params = {
   merchant: Address;
@@ -57,6 +58,14 @@ type RelayResponse = {
   pending?: boolean;
   error?: string;
 };
+
+function isRelayResponse(value: unknown): value is RelayResponse {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isTxHash(value: unknown): value is Hex {
+  return typeof value === 'string' && value.length > 0;
+}
 
 export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const { data: walletClient } = useWalletClient();
@@ -211,33 +220,51 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         };
       }
 
-      const res = await fetch('/api/relay/jpyc', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      let body: RelayResponse = {};
+      let res: Response;
       try {
-        body = (await res.json()) as RelayResponse;
+        res = await fetch('/api/relay/jpyc', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
       } catch {
-        /* non-JSON response */
+        // POST が server に届いた後で応答だけ失われた可能性がある。通常エラーへ倒すと
+        // standard fallback / 新署名が二重送金へ波及するため、専用の曖昧状態にする。
+        throw new RelayResponseUnknownError();
       }
 
-      if (res.ok && body.ok && body.txHash) {
+      let parsedBody: unknown;
+      try {
+        parsedBody = await res.json();
+      } catch {
+        // body 読取失敗も broadcast 前を証明できないため、再送可能な server error にしない。
+        throw new RelayResponseUnknownError();
+      }
+      if (!isRelayResponse(parsedBody)) throw new RelayResponseUnknownError();
+      const body = parsedBody;
+
+      if (res.ok && body.ok === true && isTxHash(body.txHash)) {
         return { txHash: body.txHash, success: true };
       }
       // relay は成立したが tx が revert (残高変動等)。success:false で記録/表示 (B2 方針)。
-      if (body.reverted && body.txHash) {
+      if (body.reverted === true && isTxHash(body.txHash)) {
         return { txHash: body.txHash, success: false };
       }
       // 202: broadcast 済だが未確定。throw せず pending を返す (form は standard へ fallback
       // してはならない = 二重支払い防止)。txHash は既使用ケースで null になりうる。
-      if (res.status === 202 && body.pending) {
+      if (
+        res.status === 202 &&
+        body.pending === true &&
+        (body.txHash === undefined ||
+          body.txHash === null ||
+          isTxHash(body.txHash))
+      ) {
         return { txHash: body.txHash ?? null, success: false, pending: true };
       }
-      // それ以外は失敗。error code を message に載せ、form 側で i18n にマップする。
-      throw new Error(body.error ?? `http_${res.status}`);
+      // non-2xx + 構造化 {error:string} は server が broadcast 前に確定させた従来の
+      // fallback-safe error。2xx 不完全 envelope / 非構造化 non-2xx は未送信を証明できない。
+      if (!res.ok && typeof body.error === 'string') throw new Error(body.error);
+      throw new RelayResponseUnknownError();
     },
   });
 }

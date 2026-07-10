@@ -124,6 +124,7 @@ import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { PaymentForm } from '@/components/PaymentForm';
 import { logger } from '@/lib/logger';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
@@ -198,7 +199,13 @@ function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error
 // relay (useJpycEip3009Payment) の状態を制御する helper。CheckoutForm.test と同型。
 let relayMutate: ReturnType<typeof vi.fn>;
 function setRelay(
-  state: 'idle' | 'pending-flow' | 'success' | 'broadcast-pending' | 'error',
+  state:
+    | 'idle'
+    | 'pending-flow'
+    | 'success'
+    | 'broadcast-pending'
+    | 'response-unknown'
+    | 'error',
   opts?: {
     txHash?: `0x${string}`;
     errMsg?: string;
@@ -221,7 +228,12 @@ function setRelay(
     mutate: relayMutate,
     isPending: state === 'pending-flow',
     data,
-    error: state === 'error' ? new Error(opts?.errMsg ?? 'rate_limited') : null,
+    error:
+      state === 'error'
+        ? new Error(opts?.errMsg ?? 'rate_limited')
+        : state === 'response-unknown'
+          ? new RelayResponseUnknownError()
+          : null,
     variables: opts?.variables,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
@@ -1798,6 +1810,27 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
       ).toBeInTheDocument();
     },
   );
+
+  it('response-unknown → standard fallback 非表示・再署名封鎖・中間表示', async () => {
+    const user = userEvent.setup();
+    setupRelayError();
+    setRelay('response-unknown');
+    render(<PaymentForm />);
+
+    expect(
+      screen.getByText(/送信済みの可能性があります。取引履歴\/ステータス/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeNull();
+    const payButton = screen.getByRole('button', { name: /送信中/ });
+    expect(payButton).toBeDisabled();
+    await user.click(payButton);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
 
   it('relay の on-chain revert (data.success=false・error なし) は banner を出さない (別経路)', () => {
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
