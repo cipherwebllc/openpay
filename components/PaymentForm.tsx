@@ -413,7 +413,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
     (useRelay &&
       !!relay.data &&
       (relay.data.success || !!relay.data.pending)) ||
-    (isStandard && (!!standard.data || standard.isFeeError));
+    (isStandard && (!!standard.data || standard.isFeeError || standard.isUnknown));
+  const standardUnknownTxHash = standard.isFeeUnknown
+    ? standard.feeTxHash
+    : standard.merchantTxHash;
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -439,7 +442,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
   const flowError = isStandard
-    ? standard.error
+    ? standard.isUnknown
+      ? null
+      : standard.error
     : useRelay
       ? relay.error
       : gasless.error;
@@ -1115,6 +1120,43 @@ function PaymentDetails({ params }: { params: PayParams }) {
                     ? t('btnEnterAmount')
                     : t('btnPay', { amount: fmt(totalCustomerOutflow) })}
       </button>
+
+      {/* standard receipt RPC が読めない間は broadcast 済み tx の成否が不明。
+          main Pay / fee retry は出さず、同じ hash の receipt 再照会のみ許可する。 */}
+      {isStandard && standard.isUnknown && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="flex items-center gap-1.5 font-semibold">
+            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {t('standardUnknownTitle')}
+          </p>
+          <p className="mt-1 break-words">{t('standardUnknownBody')}</p>
+          {standardUnknownTxHash && (
+            <p className="mt-2 break-all font-mono text-xs">
+              {standardUnknownTxHash}
+              {explorerBase && (
+                <>
+                  {' · '}
+                  <a
+                    href={`${explorerBase}/tx/${standardUnknownTxHash}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="font-sans underline hover:text-sky-900"
+                  >
+                    {t('pendingExplorerLink')} ↗
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => standard.retryReceipt()}
+            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+          >
+            {t('standardReceiptRetryButton')}
+          </button>
+        </div>
+      )}
 
       {/* standard mode: merchant 確定 + fee 失敗のときに retry 用 button を表示。
            merchant への送金は確定済なので顧客に明示的に "あと 1 件 (手数料)" の再送を依頼。 */}

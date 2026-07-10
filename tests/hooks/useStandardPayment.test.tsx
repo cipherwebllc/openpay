@@ -27,6 +27,7 @@ const useWaitMockState = {
     error: null as Error | null,
     isSuccess: false,
     isError: false,
+    refetch: vi.fn(),
   },
   b: {
     data: undefined as
@@ -35,6 +36,7 @@ const useWaitMockState = {
     error: null as Error | null,
     isSuccess: false,
     isError: false,
+    refetch: vi.fn(),
   },
 };
 // useWriteContract は 2 回呼ばれる (merchant / fee 用)。順序で振り分け。
@@ -67,6 +69,7 @@ vi.mock('wagmi', () => ({
       error: null,
       isSuccess: false,
       isError: false,
+      refetch: vi.fn(),
     };
   },
 }));
@@ -103,10 +106,12 @@ function resetMocks() {
   useWaitMockState.a.error = null;
   useWaitMockState.a.isSuccess = false;
   useWaitMockState.a.isError = false;
+  useWaitMockState.a.refetch.mockReset();
   useWaitMockState.b.data = undefined;
   useWaitMockState.b.error = null;
   useWaitMockState.b.isSuccess = false;
   useWaitMockState.b.isError = false;
+  useWaitMockState.b.refetch.mockReset();
   logPaymentEventMock.mockReset();
   useAccountMock.mockReturnValue({ address: CUSTOMER });
 }
@@ -287,6 +292,92 @@ describe('useStandardPayment', () => {
       expect(result.current.phase).toBe('merchant-error');
     });
     // fee tx は発火しない (merchant が revert したので)
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('merchant receipt RPC エラー: merchant-unknown で新規送金を封鎖し、receipt 再照会後の success でのみ fee を開始', async () => {
+    const { result, rerender } = renderHook(() => useStandardPayment());
+    const params = {
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantAmount: 9_950_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 50_000n,
+      chainId: 84532,
+    };
+    act(() => result.current.mutate(params));
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.error = new Error('merchant receipt rpc timeout');
+      useWaitMockState.a.isError = true;
+    });
+    rerender();
+
+    await waitFor(() => expect(result.current.phase).toBe('merchant-unknown'));
+    expect(result.current.isUnknown).toBe(true);
+    expect(result.current.isMerchantUnknown).toBe(true);
+    expect(result.current.isError).toBe(false);
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+
+    // unknown 中は hook 直呼びでも main Pay 相当の mutate を再送しない。
+    act(() => result.current.mutate(params));
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledOnce();
+
+    act(() => result.current.retryReceipt());
+    expect(useWaitMockState.a.refetch).toHaveBeenCalledOnce();
+
+    act(() => {
+      useWaitMockState.a.error = null;
+      useWaitMockState.a.isError = false;
+      useWaitMockState.a.data = { status: 'success', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() =>
+      expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce(),
+    );
+    expect(result.current.phase).toBe('fee-sending');
+
+    // unknown telemetry を先に記録しても、同じ hash の終端 success は消えない。
+    const merchantLogs = logPaymentEventMock.mock.calls
+      .map((call) => call[0])
+      .filter((event) => event?.flow === 'standard-merchant');
+    expect(merchantLogs.some((event) => event?.result === 'error')).toBe(true);
+    expect(
+      merchantLogs.some(
+        (event) => event?.result === 'success' && event?.txHash === MERCHANT_TX,
+      ),
+    ).toBe(true);
+  });
+
+  it('merchant-unknown の receipt 再照会が reverted に到達: merchant-error へ移り fee は送信しない', async () => {
+    const { result, rerender } = renderHook(() => useStandardPayment());
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.error = new Error('merchant receipt rpc timeout');
+      useWaitMockState.a.isError = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('merchant-unknown'));
+
+    act(() => result.current.retryReceipt());
+    act(() => {
+      useWaitMockState.a.error = null;
+      useWaitMockState.a.isError = false;
+      useWaitMockState.a.data = { status: 'reverted', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
+    expect(result.current.isMerchantError).toBe(true);
     expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
   });
 
@@ -721,7 +812,7 @@ describe('useStandardPayment', () => {
     expect(result.current.phase).toBe('fee-mining');
   });
 
-  it('fee receipt RPC エラー: phase=fee-error、wallet エラーとは別経路で記録', async () => {
+  it('fee receipt RPC エラー: fee-unknown で main Pay/retryFee を封鎖し、fee receipt 再照会で success へ移る', async () => {
     const { result, rerender } = renderHook(() => useStandardPayment());
     act(() => {
       result.current.mutate({
@@ -749,9 +840,41 @@ describe('useStandardPayment', () => {
       useWaitMockState.b.isError = true;
     });
     rerender();
-    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
-    // error はそのまま伝播
+    await waitFor(() => expect(result.current.phase).toBe('fee-unknown'));
+    expect(result.current.isUnknown).toBe(true);
+    expect(result.current.isFeeUnknown).toBe(true);
+    expect(result.current.isError).toBe(false);
     expect(result.current.error?.message).toContain('rpc receipt fetch');
+
+    // fee-unknown では fee の新規 tx も merchant の新規 tx も送らない。
+    act(() => result.current.retryFee());
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledOnce();
+
+    act(() => result.current.retryReceipt());
+    expect(useWaitMockState.b.refetch).toHaveBeenCalledOnce();
+    expect(useWaitMockState.a.refetch).not.toHaveBeenCalled();
+
+    act(() => {
+      useWaitMockState.b.error = null;
+      useWaitMockState.b.isError = false;
+      useWaitMockState.b.data = { status: 'success', blockNumber: 101n };
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    expect(result.current.data?.feeTxHash).toBe(FEE_TX);
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
   });
 
   it('merchant 失敗時に paymentLog で result=error が記録される (errorMessage 含む)', async () => {

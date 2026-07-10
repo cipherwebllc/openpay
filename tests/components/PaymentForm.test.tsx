@@ -173,6 +173,7 @@ function setSmartAccount(ready: boolean, error?: Error) {
 let mutate: ReturnType<typeof vi.fn>;
 let standardMutate: ReturnType<typeof vi.fn>;
 let standardRetryFee: ReturnType<typeof vi.fn>;
+let standardRetryReceipt: ReturnType<typeof vi.fn>;
 function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error) {
   mutate = vi.fn();
   mockHook(useBatchPayment, {
@@ -252,10 +253,13 @@ function setStandardPayment(
     | 'success'
     | 'success-no-fee'
     | 'merchant-error'
-    | 'fee-error',
+    | 'fee-error'
+    | 'merchant-unknown'
+    | 'fee-unknown',
 ) {
   standardMutate = vi.fn();
   standardRetryFee = vi.fn();
+  standardRetryReceipt = vi.fn();
   const phase: ReturnType<typeof useStandardPayment>['phase'] =
     state === 'success-no-fee' ? 'success' : state === 'idle' ? 'idle' : state;
   const isPending =
@@ -266,12 +270,16 @@ function setStandardPayment(
   mockHook(useStandardPayment, {
     mutate: standardMutate,
     retryFee: standardRetryFee,
+    retryReceipt: standardRetryReceipt,
     phase,
     isPending,
     isSuccess: state === 'success' || state === 'success-no-fee',
     isError: state === 'merchant-error' || state === 'fee-error',
     isFeeError: state === 'fee-error',
     isMerchantError: state === 'merchant-error',
+    isUnknown: state === 'merchant-unknown' || state === 'fee-unknown',
+    isMerchantUnknown: state === 'merchant-unknown',
+    isFeeUnknown: state === 'fee-unknown',
     data:
       state === 'success'
         ? {
@@ -291,9 +299,14 @@ function setStandardPayment(
         ? new Error('user rejected request')
         : state === 'fee-error'
           ? new Error('fee tx reverted')
+          : state === 'merchant-unknown' || state === 'fee-unknown'
+            ? new Error('receipt rpc failed')
           : null,
-    merchantTxHash: undefined,
-    feeTxHash: undefined,
+    merchantTxHash:
+      state === 'merchant-unknown' || state === 'fee-unknown'
+        ? `0x${'c'.repeat(64)}`
+        : undefined,
+    feeTxHash: state === 'fee-unknown' ? `0x${'d'.repeat(64)}` : undefined,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -947,6 +960,34 @@ describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=s
     await user.click(retryBtn);
     expect(standardRetryFee).toHaveBeenCalledOnce();
   });
+
+  it.each(['merchant-unknown', 'fee-unknown'] as const)(
+    '%s: 送信結果の中間表示 + settledNoRetry で main Pay を封鎖し、receipt 再照会のみ許可',
+    async (phase) => {
+      const user = userEvent.setup();
+      setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setStandardPayment(phase);
+      render(<PaymentForm />);
+
+      expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
+      expect(screen.getByText(/receipt を取得できず/)).toBeInTheDocument();
+      expect(screen.queryByText('receipt rpc failed')).toBeNull();
+      const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+      expect(payBtn).toBeDisabled();
+      await user.click(payBtn);
+      expect(standardMutate).not.toHaveBeenCalled();
+
+      // fee-unknown を含め、手数料の新規再送 UI は出さない。
+      expect(
+        screen.queryByRole('button', { name: /手数料の送信を再試行/ }),
+      ).toBeNull();
+      await user.click(screen.getByRole('button', { name: /receipt を再照会/ }));
+      expect(standardRetryReceipt).toHaveBeenCalledOnce();
+      expect(standardRetryFee).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['merchant-sending' as const, /店舗送金を承認してください/],
