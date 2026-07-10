@@ -3,7 +3,12 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, fireEvent, within } from '@testing-library/react';
+import { act } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
 import { renderWithIntl } from '../_helpers/i18n';
+import messages from '../../messages/ja.json';
 
 // 受注リレー / モバイル注文利用料 flag を切替え可能に (既定 OFF=既存テストの挙動不変)。
 const envHold = vi.hoisted(() => ({
@@ -13,6 +18,7 @@ const envHold = vi.hoisted(() => ({
   enableMenuOptions: false,
   enablePreorderTime: false,
 }));
+const originHold = vi.hoisted(() => ({ value: 'https://test.local' }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -37,6 +43,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
+vi.mock('@/hooks/useOrigin', () => ({
+  useOrigin: () => originHold.value,
+}));
 
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { parseCheckoutParams } from '@/lib/url';
@@ -63,6 +72,7 @@ afterEach(() => {
   envHold.enableShopLive = false; // Phase 1 flag も毎回 OFF に戻す
   envHold.enableMenuOptions = false; // Phase 2 flag も毎回 OFF に戻す
   envHold.enablePreorderTime = false; // Phase 4 flag も毎回 OFF に戻す
+  originHold.value = 'https://test.local';
 });
 
 describe('MobileOrderView', () => {
@@ -392,10 +402,93 @@ describe('MobileOrderView', () => {
     expect(webhook).toContain('/api/order/notify');
     expect(webhook).toContain('h=alice');
     const orderId = u.searchParams.get('order_id');
-    expect(orderId).toBeTruthy();
+    expect(orderId).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
     // 受注番号は receiptNo (URL では rcpt) としても渡り、顧客の控え (/scan) に残る
     // (完了画面を閉じても「レシート番号」として再確認可)。
     expect(u.searchParams.get('rcpt')).toBe(orderId);
+  });
+
+  it('受注番号は同一 mount の再描画・チェーン切替でも不変', () => {
+    envHold.enableOrderRelay = true;
+    const multiChain: MobileOrderConfig = {
+      ...config,
+      chains: ['polygon', 'kaia'],
+    };
+    const view = renderWithIntl(<MobileOrderView config={multiChain} handle="alice" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const orderId = () =>
+      new URL(
+        screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+        'https://test.local',
+      ).searchParams.get('order_id');
+    const initial = orderId();
+
+    view.rerender(<MobileOrderView config={multiChain} handle="alice" />);
+    fireEvent.click(screen.getByRole('button', { name: 'JPYC (Kaia)' }));
+
+    expect(orderId()).toBe(initial);
+    expect(initial).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
+  });
+
+  it('受注リレー有効でも to/items/chain/gas/fee は従来値のまま', () => {
+    envHold.enableOrderRelay = true;
+    envHold.enableMobileOrderFee = true;
+    renderWithIntl(
+      <MobileOrderView
+        config={{ ...config, chain: 'kaia', mode: 'preorder', feePayer: 'customer' }}
+        handle="alice"
+      />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'https://test.local',
+    );
+
+    expect(u.searchParams.get('to')?.toLowerCase()).toBe(config.receiver.toLowerCase());
+    expect(u.searchParams.get('chain')).toBe('kaia');
+    expect(u.searchParams.get('gas')).toBeNull();
+    expect(u.searchParams.get('fee_kind')).toBe('preorder');
+    expect(u.searchParams.get('fee_payer')).toBe('customer');
+    const parsed = parseCheckoutParams(u.searchParams);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.items).toEqual([{ name: 'ブレンド', qty: 1, price: '500' }]);
+    }
+  });
+
+  it('SSR は受注番号を初回 HTML に出さず、生成前は checkout link 無効・hydrate mismatch 無し', async () => {
+    envHold.enableOrderRelay = true;
+    const ui = (
+      <NextIntlClientProvider locale="ja" messages={messages}>
+        <MobileOrderView
+          config={config}
+          handle="alice"
+          initialCart={[{ id: 'a', qty: 1 }]}
+        />
+      </NextIntlClientProvider>
+    );
+    const serverHtml = renderToString(ui);
+    expect(serverHtml).not.toContain('order_id=');
+    expect(serverHtml).not.toContain('href="/checkout');
+    expect(serverHtml).toContain('disabled=""');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    container.innerHTML = serverHtml;
+    const onRecoverableError = vi.fn();
+    let root!: ReturnType<typeof hydrateRoot>;
+    await act(async () => {
+      root = hydrateRoot(container, ui, { onRecoverableError });
+    });
+
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    const href = container.querySelector('a[href*="/checkout"]')?.getAttribute('href') ?? '';
+    expect(new URL(href, 'https://test.local').searchParams.get('order_id')).toMatch(
+      /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/,
+    );
+    act(() => root.unmount());
+    container.remove();
   });
 
   it('受注リレー flag OFF (既定): webhook/order_id を付けない (inert)', () => {

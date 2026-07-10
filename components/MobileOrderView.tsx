@@ -8,7 +8,7 @@
 // /checkout へ deep-link するだけ。実際の送金/relay/控えは CheckoutForm 側 (既存)。
 // モバイルオーダー固有の % 手数料は P0 (開示更新) 後の別増分で、ここには無い。
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
@@ -69,16 +69,18 @@ export type CartLineView = OptionCartEntry & { isOption: boolean };
 const TABLE_NUMBER_MAX = 16;
 
 // 受け渡し照合用の短い受注番号 (客の完了画面 + 店主の受注カードの双方に表示)。混同しやすい
-// 0/1/O/I/L を除いた 31 文字 × 4 桁 ≈ 92万通り (店舗の 72h 窓では実用上ぶつからない)。
+// 0/1/O/I/L を除いた 31 文字 × 6 桁 ≈ 8.87 億通り。
 const ORDER_CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 function generateOrderCode(): string {
-  const n = 4;
+  const n = 6;
   let out = '';
   try {
     const buf = new Uint32Array(n);
     crypto.getRandomValues(buf);
     for (let i = 0; i < n; i++) out += ORDER_CODE_CHARS[buf[i] % ORDER_CODE_CHARS.length];
   } catch {
+    // CSPRNG when available。これは表示用 ID なので、利用不能環境では可用性を優先して
+    // Math.random へ fallback する (決済・署名・冪等性の安全性には使用しない)。
     for (let i = 0; i < n; i++)
       out += ORDER_CODE_CHARS[Math.floor(Math.random() * ORDER_CODE_CHARS.length)];
   }
@@ -178,7 +180,14 @@ export function MobileOrderView({
   const [tableNumber, setTableNumber] = useState('');
   // 受注リレー (flag ON) 用の短い受注番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
-  const [orderId] = useState(generateOrderCode);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const orderIdGenerated = useRef(false);
+  useEffect(() => {
+    // SSR/client の初回 HTML を一致させ、StrictMode の effect 再実行でも同一 mount 中は再生成しない。
+    if (orderIdGenerated.current) return;
+    orderIdGenerated.current = true;
+    setOrderId(generateOrderCode());
+  }, []);
 
   // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
   // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。
@@ -357,8 +366,9 @@ export function MobileOrderView({
     env.enableOrderRelay && handle && origin
       ? `${origin}/api/order/notify?h=${encodeURIComponent(handle)}`
       : undefined;
+  const awaitsOrderId = env.enableOrderRelay && Boolean(handle) && orderId === null;
   const baseCheckoutUrl =
-    origin && cartItems.length > 0 && !tooMany
+    origin && cartItems.length > 0 && !tooMany && !awaitsOrderId
       ? buildCheckoutUrl(origin, {
           to: config.receiver,
           token: 'jpyc',
@@ -375,7 +385,7 @@ export function MobileOrderView({
           // orderId = webhook→店主の受注フィード + 完了画面の見出し。
           // receiptNo = 同じ受注番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
           //   → 完了画面を閉じても「レシート番号」として受注番号を再確認できる (受け渡し照合用)。
-          ...(orderRelayWebhook
+          ...(orderRelayWebhook && orderId
             ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
             : {}),
           // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
@@ -651,6 +661,7 @@ export function MobileOrderView({
           }}
           lastOrder={timeEnabled ? config.lastOrder : undefined}
           checkoutUrl={checkoutUrl}
+          checkoutPending={awaitsOrderId}
         />
       )}
 

@@ -19,7 +19,7 @@
 // - corrupt JSON / schema mismatch:
 //     load 時に valid entries のみ復元、不正値は静かに脱落 (UI 全滅より部分復元)。
 
-import { safeGet, safeSet } from './storage';
+import { safeGet, safeRemove, safeSet } from './storage';
 import { logger } from './logger';
 import type { GasMode, PayMode } from './fee';
 import type {
@@ -43,7 +43,7 @@ export const HISTORY_STORAGE_KEY = 'openpay:history:v1';
 export const HISTORY_CHANGED_EVENT = 'openpay:history-changed';
 // 「今日のお店」ダッシュボード用の小さな派生 summary key。LP はこの 1 key だけを
 // 読み、履歴本体 (最大 1000 件) を parse しない。真実点はあくまで履歴本体で、これは
-// キャッシュ (appendHistory 時に前方合算していく)。詳細は addEntryToTodaySummary。
+// キャッシュ (履歴変更時に当日分から再構築)。詳細は buildTodaySummary。
 export const TODAY_SUMMARY_KEY = 'openpay:todaySummary:v1';
 export const HISTORY_MAX_ENTRIES = 1000;
 // 自由入力 (CheckoutForm の params.description 経由) を 1000 文字で truncate。
@@ -510,8 +510,9 @@ export function appendHistory(entry: HistoryEntry): void {
       ? next.slice(0, HISTORY_MAX_ENTRIES)
       : next;
   safeSet(HISTORY_STORAGE_KEY, trimmed);
-  // 「今日のお店」summary を前方合算 (dedupe を通過した genuine な新規 entry のみ)。
-  updateTodaySummary(entry);
+  // 履歴本体を真実点として再構築する。1000 件 cap で当日 entry が落ちた場合も
+  // 過去の加算値を summary に残さない。
+  updateTodaySummary(trimmed, Date.now());
   broadcastChange();
 }
 
@@ -521,12 +522,14 @@ export function removeHistoryEntry(id: string): void {
   const next = current.filter((e) => e.id !== id);
   if (next.length === current.length) return;
   safeSet(HISTORY_STORAGE_KEY, next);
+  updateTodaySummary(next, Date.now());
   broadcastChange();
 }
 
 export function clearHistory(): void {
   if (typeof window === 'undefined') return;
-  safeSet(HISTORY_STORAGE_KEY, []);
+  safeRemove(HISTORY_STORAGE_KEY);
+  safeRemove(TODAY_SUMMARY_KEY);
   broadcastChange();
 }
 
@@ -808,8 +811,8 @@ export function formatHistoryTimestamp(ts: number): string {
 // 「今日のお店」ダッシュボード用 summary (LP を毎朝開く理由)。
 //
 // LP は Server Component のまま、Hero 直下の小さな client カードがこの派生 summary
-// だけを読む (履歴本体 1000 件を parse しない)。appendHistory の度に当日分を前方合算
-// し、日付が変われば rollover して作り直す。金額は raw atomic (wei) を BigInt で厳密
+// だけを読む (履歴本体 1000 件を parse しない)。履歴変更時に当日分だけを再構築する。
+// 金額は raw atomic (wei) を BigInt で厳密
 // 加算する (float 厳禁・端数誤差ゼロ)。真実点は履歴本体で、これはあくまでキャッシュ。
 // ============================================================================
 
@@ -844,12 +847,6 @@ function addAtomic(a: string, b: string): string {
   return (av + bv).toString();
 }
 
-// 当日 summary に載せるべき entry か。success の売上 leg のみ (OpenPay 利用手数料の
-// 独立 tx = standard-fee は「店主の売上」ではないので除外。pending/error/reverted も除外)。
-function isTodaySaleEntry(entry: HistoryEntry): boolean {
-  return entry.status === 'success' && entry.flow !== 'standard-fee';
-}
-
 /** 保存済 summary の shape を軽く検証 (corrupt / 旧版データで card を壊さない)。 */
 export function isValidTodaySummary(value: unknown): value is TodaySummary {
   if (value === null || typeof value !== 'object') return false;
@@ -857,6 +854,20 @@ export function isValidTodaySummary(value: unknown): value is TodaySummary {
   if (typeof v.date !== 'string') return false;
   if (v.byMerchant === null || typeof v.byMerchant !== 'object') return false;
   return true;
+}
+
+// 収入(売上)行の判定。**historyFilters.isIncomeSaleEntry と同一条件**の純 predicate をここに複製する。
+// 理由: historyFilters は entryYenValue(重い換算チェーン: historyYen→tokens/fx) を import するため、
+// 当日 summary (LP の TodayCard が history.ts を読む) から historyFilters を引くと LP バンドルが肥大する
+// (/[locale] が予算 320kB を超過)。条件は status/flow のみで pure ゆえ複製が安全。
+// ⚠️ historyFilters.isIncomeSaleEntry と flow allowlist を必ず揃えること。
+function isIncomeSaleEntry(entry: HistoryEntry): boolean {
+  return (
+    entry.status === 'success' &&
+    (entry.flow === 'batch' ||
+      entry.flow === 'direct' ||
+      entry.flow === 'standard-merchant')
+  );
 }
 
 /**
@@ -875,7 +886,7 @@ export function addEntryToTodaySummary(
     prev && prev.date === date
       ? { date, byMerchant: { ...prev.byMerchant } }
       : { date, byMerchant: {} };
-  if (!isTodaySaleEntry(entry)) return base;
+  if (!isIncomeSaleEntry(entry)) return base;
   const key = entry.merchant.toLowerCase();
   const cur = base.byMerchant[key] ?? {
     count: 0,
@@ -897,6 +908,23 @@ export function addEntryToTodaySummary(
   return base;
 }
 
+/**
+ * 純関数: nowMs のローカル日付と同日の収入売上だけから summary を再構築する。
+ * 履歴配列の順序には依存せず、対象が 0 件ならキャッシュ削除を表す null を返す。
+ */
+export function buildTodaySummary(
+  entries: ReadonlyArray<HistoryEntry>,
+  nowMs: number,
+): TodaySummary | null {
+  const targetDate = localDateKey(nowMs);
+  let summary: TodaySummary | null = null;
+  for (const entry of entries) {
+    if (localDateKey(entry.ts) !== targetDate || !isIncomeSaleEntry(entry)) continue;
+    summary = addEntryToTodaySummary(summary, entry);
+  }
+  return summary;
+}
+
 /** LocalStorage から当日 summary を読む (shape 不一致 / 別日でも生データを返す。
  * 「今日か」の判定と merchant 突合は呼出側 = TodayCard の責務)。 */
 export function readTodaySummary(): TodaySummary | null {
@@ -904,11 +932,12 @@ export function readTodaySummary(): TodaySummary | null {
   return isValidTodaySummary(raw) ? raw : null;
 }
 
-// appendHistory から呼ぶ副作用版。LocalStorage 失敗は握りつぶす (summary はキャッシュ)。
-function updateTodaySummary(entry: HistoryEntry): void {
+// 履歴変更から呼ぶ副作用版。LocalStorage 障害を履歴 UI へ波及させない (summary はキャッシュ)。
+function updateTodaySummary(entries: ReadonlyArray<HistoryEntry>, nowMs: number): void {
   try {
-    const prev = readTodaySummary();
-    safeSet(TODAY_SUMMARY_KEY, addEntryToTodaySummary(prev, entry));
+    const summary = buildTodaySummary(entries, nowMs);
+    if (summary) safeSet(TODAY_SUMMARY_KEY, summary);
+    else safeRemove(TODAY_SUMMARY_KEY);
   } catch (error) {
     logger.warn('history.todaySummary.update failed', { error });
   }

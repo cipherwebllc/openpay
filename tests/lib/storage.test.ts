@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { safeGet, safeSet } from '@/lib/storage';
+import { safeGet, safeRemove, safeSet } from '@/lib/storage';
 
 describe('safeGet / safeSet', () => {
   beforeEach(() => {
@@ -103,7 +103,29 @@ describe('safeGet / safeSet', () => {
     expect(safeGet('b', null)).toEqual({ v: 2 });
   });
 
-  it('SSR (typeof window === "undefined"): safeGet は fallback を返し、safeSet は no-op', () => {
+  it('safeRemove は保存済み key を削除する', () => {
+    safeSet('remove-me', { v: 1 });
+    safeRemove('remove-me');
+    expect(window.localStorage.getItem('remove-me')).toBeNull();
+  });
+
+  it('safeRemove が throw する状況でも例外漏れなし', () => {
+    let observedThrow = false;
+    withFailingStorage(
+      {
+        removeItem: () => {
+          observedThrow = true;
+          throw new DOMException('blocked', 'SecurityError');
+        },
+      },
+      () => {
+        expect(() => safeRemove('blocked')).not.toThrow();
+      },
+    );
+    expect(observedThrow).toBe(true);
+  });
+
+  it('SSR (typeof window === "undefined"): safeGet は fallback、safeSet/safeRemove は no-op', () => {
     const originalWindow = globalThis.window;
     // window 全体を undefined 化して SSR 環境を再現。
     Object.defineProperty(globalThis, 'window', {
@@ -114,6 +136,7 @@ describe('safeGet / safeSet', () => {
       expect(safeGet('any-key', { ssr: 'fallback' })).toEqual({ ssr: 'fallback' });
       // safeSet は no-op (例外も値の変化も無し)
       expect(() => safeSet('any-key', { ignored: true })).not.toThrow();
+      expect(() => safeRemove('any-key')).not.toThrow();
     } finally {
       Object.defineProperty(globalThis, 'window', {
         configurable: true,

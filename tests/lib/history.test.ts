@@ -3,6 +3,7 @@ import {
   addEntryToTodaySummary,
   appendHistory,
   buildHistoryEntry,
+  buildTodaySummary,
   clearHistory,
   entryLineItems,
   entryTotals,
@@ -1304,10 +1305,65 @@ describe('history (LocalStorage)', () => {
     const day1 = new Date(2026, 5, 1, 10, 0, 0).getTime(); // 2026-06-01 10:00
     const day1Key = localDateKey(day1);
 
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(day1);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('localDateKey はローカル TZ の YYYY-MM-DD', () => {
       expect(localDateKey(new Date(2026, 0, 5, 9, 0, 0).getTime())).toBe(
         '2026-01-05',
       );
+    });
+
+    it('buildTodaySummary は targetDate の収入売上だけを merchant/token 別に再構築', () => {
+      const previousDay = new Date(2026, 4, 31, 23, 59, 0).getTime();
+      const s = buildTodaySummary(
+        [
+          entry({ id: 'j1', ts: day1, merchant: '0xA', merchantAmount: '10' }),
+          entry({ id: 'j2', ts: day1 + 1, merchant: '0xA', merchantAmount: '20' }),
+          entry({
+            id: 'u1',
+            ts: day1 + 2,
+            merchant: '0xB',
+            asset: 'usdc',
+            merchantAmount: '300',
+          }),
+          entry({
+            id: 'fee',
+            ts: day1 + 3,
+            flow: 'standard-fee',
+            merchantAmount: '999',
+          }),
+          entry({ id: 'pending', ts: day1 + 4, status: 'pending', merchantAmount: '999' }),
+          entry({ id: 'old', ts: previousDay, merchantAmount: '999' }),
+        ],
+        day1,
+      );
+
+      expect(s).toEqual({
+        date: day1Key,
+        byMerchant: {
+          '0xa': { count: 2, jpycAtomic: '30', usdcAtomic: '0', lastTs: day1 + 1 },
+          '0xb': { count: 1, jpycAtomic: '0', usdcAtomic: '300', lastTs: day1 + 2 },
+        },
+      });
+    });
+
+    it('buildTodaySummary は対象日の収入売上が 0 件なら null', () => {
+      expect(
+        buildTodaySummary(
+          [
+            entry({ ts: day1, status: 'pending' }),
+            entry({ ts: day1, flow: 'standard-fee' }),
+          ],
+          day1,
+        ),
+      ).toBeNull();
     });
 
     it('prev=null から success 売上を 1 件合算 (JPYC を atomic 加算)', () => {
@@ -1485,6 +1541,101 @@ describe('history (LocalStorage)', () => {
         count: 1,
         jpycAtomic: '1000',
       });
+    });
+
+    it('当日 2 件から 1 件を削除すると残存履歴から summary を更新する', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(day1);
+      try {
+        appendHistory(entry({ id: 'keep-today', ts: day1, merchantAmount: '100' }));
+        appendHistory(entry({ id: 'drop-today', ts: day1 + 1, merchantAmount: '200' }));
+
+        removeHistoryEntry('drop-today');
+
+        expect(readTodaySummary()?.byMerchant['0xmerchant']).toEqual({
+          count: 1,
+          jpycAtomic: '100',
+          usdcAtomic: '0',
+          lastTs: day1,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('当日最後の 1 件を削除し前日だけ残ると summary key を削除する', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(day1);
+      try {
+        const previousDay = new Date(2026, 4, 31, 10, 0, 0).getTime();
+        appendHistory(entry({ id: 'old', ts: previousDay, merchantAmount: '900' }));
+        appendHistory(entry({ id: 'today', ts: day1, merchantAmount: '100' }));
+
+        removeHistoryEntry('today');
+
+        expect(loadHistory().map((e) => e.id)).toEqual(['old']);
+        expect(window.localStorage.getItem(TODAY_SUMMARY_KEY)).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('前日の entry を削除しても当日 summary は不変', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(day1);
+      try {
+        const previousDay = new Date(2026, 4, 31, 10, 0, 0).getTime();
+        appendHistory(entry({ id: 'old', ts: previousDay, merchantAmount: '900' }));
+        appendHistory(entry({ id: 'today', ts: day1, merchantAmount: '100' }));
+        const before = readTodaySummary();
+
+        removeHistoryEntry('old');
+
+        expect(readTodaySummary()).toEqual(before);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('clearHistory は履歴 key と summary key の双方を削除する', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(day1);
+      try {
+        appendHistory(entry({ id: 'today', ts: day1 }));
+        clearHistory();
+        expect(window.localStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull();
+        expect(window.localStorage.getItem(TODAY_SUMMARY_KEY)).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('1000 件 cap で当日売上が trim された場合も summary を残存履歴から再計算', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(day1);
+      try {
+        const seed = Array.from({ length: HISTORY_MAX_ENTRIES }, (_, i) =>
+          entry({
+            id: `seed-${i}`,
+            ts: day1 + i,
+            status: i === HISTORY_MAX_ENTRIES - 1 ? 'success' : 'pending',
+            merchantAmount: i === HISTORY_MAX_ENTRIES - 1 ? '500' : '0',
+          }),
+        );
+        window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(seed));
+        window.localStorage.setItem(
+          TODAY_SUMMARY_KEY,
+          JSON.stringify(buildTodaySummary(seed, day1)),
+        );
+
+        appendHistory(entry({ id: 'new-pending', ts: day1, status: 'pending' }));
+
+        expect(loadHistory()).toHaveLength(HISTORY_MAX_ENTRIES);
+        expect(loadHistory().some((e) => e.id === `seed-${HISTORY_MAX_ENTRIES - 1}`)).toBe(false);
+        expect(window.localStorage.getItem(TODAY_SUMMARY_KEY)).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('readTodaySummary は corrupt な保存値に対して null', () => {
