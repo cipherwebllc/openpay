@@ -831,6 +831,7 @@ describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=s
     // fee=0: merchant = amount = 10
     expect(arg.merchantAmount).toBe(10_000_000n);
     expect(arg.feeAmount).toBe(0n);
+    expect(arg.saleAmount).toBe(10_000_000n);
     expect(arg.merchant.toLowerCase()).toBe(MERCHANT.toLowerCase());
     expect(arg.tokenAddress.toLowerCase()).toBe(
       '0x036cbd53842c5426634e7929541ec2318f3dcf7e',

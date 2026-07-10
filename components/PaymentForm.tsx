@@ -633,6 +633,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
         feeReceiver: env.feeReceiver,
         feeAmount: breakdown.feeAmount,
         chainId: deployment.chainId,
+        // 店舗売上 gross は商品小計。顧客上乗せ手数料を merchantAmount に加算しない。
+        saleAmount: amountWei,
       });
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。

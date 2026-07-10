@@ -43,7 +43,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
-    saleAmount: '1000000000000000000000',
+    saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
     anchorAmount: null,
@@ -117,6 +117,31 @@ describe('freee 純粋ヘルパ', () => {
 });
 
 describe('runFreeeSync', () => {
+  it('店舗負担手数料は saleAmount (gross) で同期し standard-fee leg は除外', async () => {
+    const createDeal = vi.fn(async (_body: FreeeDealBody) => 9001);
+    const d = deps({ createDeal });
+    const r = await runFreeeSync(
+      [
+        entry({
+          id: 'gross-sale',
+          merchantAmount: '990000000000000000000',
+          saleAmount: '1000000000000000000000',
+        }),
+        entry({
+          id: 'fee-leg',
+          flow: 'standard-fee',
+          merchantAmount: '10000000000000000000',
+          saleAmount: null,
+        }),
+      ],
+      d,
+    );
+    expect(r.synced).toBe(1);
+    expect(r.items.find((i) => i.id === 'fee-leg')?.status).toBe('not-income');
+    expect(createDeal).toHaveBeenCalledOnce();
+    expect(createDeal.mock.calls[0][0].details[0].amount).toBe(1000);
+  });
+
   it('income 以外 (revert/error/手数料) は not-income で除外', async () => {
     const d = deps();
     const r = await runFreeeSync(

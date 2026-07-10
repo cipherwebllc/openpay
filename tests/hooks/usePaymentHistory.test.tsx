@@ -375,7 +375,7 @@ describe('usePaymentHistory', () => {
     expect(entry.feeAmount).toBe('5');
   });
 
-  it('standard success: lastSubmittedParams が ctx より優先される (merchant + fee)', () => {
+  it('standard success: saleAmount 未送信の旧 snapshot は merchant + fee で復元', () => {
     renderHook(() =>
       usePaymentHistory(
         { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
@@ -400,9 +400,37 @@ describe('usePaymentHistory', () => {
     const fee = loaded.find((e) => e.flow === 'standard-fee')!;
     expect(merchant.merchantAmount).toBe('2000');
     expect(merchant.feeAmount).toBe('20');
+    expect(merchant.saleAmount).toBe('2020');
     // standard-fee 行の merchantAmount は feeAmount を映す慣行 (会計 export の互換)
     expect(fee.merchantAmount).toBe('20');
     expect(fee.feeAmount).toBe('20');
+  });
+
+  it('顧客上乗せ standard は saleAmount (商品小計) を優先し手数料を gross に足さない', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: {
+          merchantTxHash: '0xMtxGross',
+          feeTxHash: '0xFtxGross',
+          blockNumber: 11n,
+        },
+        phase: 'success',
+        merchantTxHash: '0xMtxGross',
+        feeTxHash: '0xFtxGross',
+        error: null,
+        lastSubmittedParams: {
+          merchantAmount: 2000n,
+          feeAmount: 20n,
+          saleAmount: 2000n,
+        },
+      }),
+    );
+    const merchant = loadHistory().find(
+      (e) => e.flow === 'standard-merchant',
+    )!;
+    expect(merchant.merchantAmount).toBe('2000');
+    expect(merchant.feeAmount).toBe('20');
+    expect(merchant.saleAmount).toBe('2000');
   });
 
   it('standard fee-error: lastSubmittedParams が補完 merchant 行にも適用される', () => {

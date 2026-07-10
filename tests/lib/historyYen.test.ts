@@ -30,7 +30,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
-    saleAmount: '1000000000000000000000',
+    saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
     anchorAmount: null,
@@ -68,11 +68,24 @@ describe('entryYenValue', () => {
     expect(r).toEqual({ kind: 'exact', yen: 1000 });
   });
 
+  it('(a) JPYC は saleAmount (gross) を merchantAmount (net) より優先', () => {
+    expect(
+      entryYenValue(
+        entry({
+          merchantAmount: '990000000000000000000',
+          saleAmount: '1000000000000000000000',
+        }),
+        undefined,
+      ),
+    ).toEqual({ kind: 'exact', yen: 1000 });
+  });
+
   it('(b) USDC + JPYC anchor は anchorAmount で exact・レート非依存', () => {
     const r = entryYenValue(
       entry({
         asset: 'usdc',
         merchantAmount: '6400000', // 6.4 USDC (受領額)
+        saleAmount: '7000000', // path(b) では token gross と二重適用しない
         anchorAmount: '1500',
         anchorSymbol: 'jpyc',
       }),
@@ -88,6 +101,31 @@ describe('entryYenValue', () => {
     );
     // 6.4 * 156.32 = 1000.448 → round 1000
     expect(r).toEqual({ kind: 'approx', yen: 1000, rate: 156.32 });
+  });
+
+  it('(c) USDC・anchor 無しは saleAmount (gross) を現レート換算', () => {
+    const r = entryYenValue(
+      entry({
+        asset: 'usdc',
+        merchantAmount: '6400000',
+        saleAmount: '7000000',
+        anchorAmount: null,
+      }),
+      156.32,
+    );
+    expect(r).toEqual({ kind: 'approx', yen: 1094, rate: 156.32 });
+  });
+
+  it('saleAmount=null の legacy は merchantAmount fallback で値不変', () => {
+    expect(
+      entryYenValue(
+        entry({
+          merchantAmount: '1234000000000000000000',
+          saleAmount: null,
+        }),
+        undefined,
+      ),
+    ).toEqual({ kind: 'exact', yen: 1234 });
   });
 
   it('(c′) USDC・anchor 無し + レート無 → unavailable', () => {

@@ -22,6 +22,7 @@ import {
   HISTORY_ASSET_DISPLAY,
   networkFeeEquivalentOf,
 } from './history';
+import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
 import { taxAmountYen, taxCategoryShortLabel } from './tax';
 
@@ -151,7 +152,7 @@ function breakdownVersionLabel(e: HistoryEntry): string {
 // v5 税額(円): 内税を円換算値 (entryYenValue) と taxRate から算出。円換算不能 (USDC レート無) /
 // 税率未指定は空 (USDC を無理に税JPY変換しない方針)。
 function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
-  if (e.taxRate == null) return '';
+  if (!isIncomeSaleEntry(e) || e.taxRate == null) return '';
   const yv = entryYenValue(e, usdcJpy);
   if (yv.kind === 'unavailable') return '';
   const amt = taxAmountYen(yv.yen, e.taxRate);
