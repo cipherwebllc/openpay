@@ -102,7 +102,10 @@ import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 import type { TipParams } from '@/lib/url';
-import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
+import {
+  RelayIpRateLimitedError,
+  RelayResponseUnknownError,
+} from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const CREATOR: Address = '0x2222222222222222222222222222222222222222';
@@ -154,6 +157,7 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
 }
 
 let relayMutate: ReturnType<typeof vi.fn>;
+let relayRetryRelay: ReturnType<typeof vi.fn>;
 function setRelay(
   state:
     | 'idle'
@@ -161,9 +165,11 @@ function setRelay(
     | 'success'
     | 'error'
     | 'pendingResult'
-    | 'response-unknown',
+    | 'response-unknown'
+    | 'ip-rate-limited',
 ) {
   relayMutate = vi.fn();
+  relayRetryRelay = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
     isPending: state === 'pending',
@@ -178,7 +184,10 @@ function setRelay(
         ? new Error('rate_limited')
         : state === 'response-unknown'
           ? new RelayResponseUnknownError()
-          : null,
+          : state === 'ip-rate-limited'
+            ? new RelayIpRateLimitedError(45)
+            : null,
+    retryRelay: relayRetryRelay,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -1361,6 +1370,26 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     const payButton = screen.getByRole('button', { name: /送信中/ });
     expect(payButton).toBeDisabled();
     await user.click(payButton);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
+
+  it('ip_rate_limited → Pay 封鎖・同一 payload 再試行のみ・通常エラー非表示', async () => {
+    const user = userEvent.setup();
+    setRelay('ip-rate-limited');
+    render(<TipForm params={JPYC_PARAMS} />);
+
+    expect(
+      screen.getByText(/45秒ほど待ってから、同じ内容でもう一度/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /100 JPYC を送る/ }),
+    ).toBeDisabled();
+
+    await user.click(
+      screen.getByRole('button', { name: /同じ内容で再試行/ }),
+    );
+    expect(relayRetryRelay).toHaveBeenCalledOnce();
     expect(relayMutate).not.toHaveBeenCalled();
     expect(screen.queryByText('エラー')).toBeNull();
   });

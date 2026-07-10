@@ -9,6 +9,7 @@
 // flag/relay 未構成時は呼び出し元が resolveJpycGaslessProvider で 7702 経路を選ぶ。詳細は
 // memory:jpyc-eip3009 / gasless-legal-jp。
 
+import { useCallback, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useAccount, useWalletClient } from 'wagmi';
 import type { Address, Hex } from 'viem';
@@ -29,7 +30,11 @@ import { logger } from '@/lib/logger';
 import { isUserRejection } from '@/lib/walletErrors';
 import type { GasMode } from '@/lib/fee';
 import type { TokenDeployment } from '@/lib/tokens';
-import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
+import {
+  isRelayIpRateLimitedError,
+  RelayIpRateLimitedError,
+  RelayResponseUnknownError,
+} from '@/lib/relay/relayResponseError';
 
 export type JpycEip3009Params = {
   merchant: Address;
@@ -57,6 +62,7 @@ type RelayResponse = {
   reverted?: boolean;
   pending?: boolean;
   error?: string;
+  retryAfter?: number;
 };
 
 function isRelayResponse(value: unknown): value is RelayResponse {
@@ -67,12 +73,92 @@ function isTxHash(value: unknown): value is Hex {
   return typeof value === 'string' && value.length > 0;
 }
 
+function retryAfterSeconds(res: Response, body: RelayResponse): number | null {
+  const raw = body.retryAfter ?? res.headers.get('retry-after');
+  if (raw === null || raw === undefined || raw === '') return null;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
+}
+
+async function postRelayPayload(
+  payload: Record<string, unknown>,
+): Promise<JpycEip3009Result> {
+  let res: Response;
+  try {
+    res = await fetch('/api/relay/jpyc', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // POST が server に届いた後で応答だけ失われた可能性がある。通常エラーへ倒すと
+    // standard fallback / 新署名が二重送金へ波及するため、専用の曖昧状態にする。
+    throw new RelayResponseUnknownError();
+  }
+
+  let parsedBody: unknown;
+  try {
+    parsedBody = await res.json();
+  } catch {
+    // body 読取失敗も broadcast 前を証明できないため、再送可能な server error にしない。
+    throw new RelayResponseUnknownError();
+  }
+  if (!isRelayResponse(parsedBody)) throw new RelayResponseUnknownError();
+  const body = parsedBody;
+
+  if (res.ok && body.ok === true && isTxHash(body.txHash)) {
+    return { txHash: body.txHash, success: true };
+  }
+  // relay は成立したが tx が revert (残高変動等)。success:false で記録/表示 (B2 方針)。
+  if (body.reverted === true && isTxHash(body.txHash)) {
+    return { txHash: body.txHash, success: false };
+  }
+  // 202: broadcast 済だが未確定。throw せず pending を返す (form は standard へ fallback
+  // してはならない = 二重支払い防止)。txHash は既使用ケースで null になりうる。
+  if (
+    res.status === 202 &&
+    body.pending === true &&
+    (body.txHash === undefined || body.txHash === null || isTxHash(body.txHash))
+  ) {
+    return { txHash: body.txHash ?? null, success: false, pending: true };
+  }
+  // 早期 IP limiter は冪等チェックより前に返る。同じ authorization の応答喪失後再送も
+  // 429 になりうるため、通常の構造化 error より先に専用状態へ分類する。
+  if (!res.ok && res.status === 429 && body.error === 'ip_rate_limited') {
+    throw new RelayIpRateLimitedError(retryAfterSeconds(res, body));
+  }
+  // その他の non-2xx + 構造化 {error:string} は server が broadcast 前に確定させた従来の
+  // fallback-safe error。2xx 不完全 envelope / 非構造化 non-2xx は未送信を証明できない。
+  if (!res.ok && typeof body.error === 'string') throw new Error(body.error);
+  throw new RelayResponseUnknownError();
+}
+
 export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const { data: walletClient } = useWalletClient();
   const { address, chainId } = useAccount();
 
-  return useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
+  // ip_rate_limited の間だけ署名済 payload を保持する。mutation variables は金額等の入力値しか
+  // 持たないため、この ref が無いと retry 時に新 nonce で再署名して D1 の二重送金防止を破る。
+  const ipRateLimitedPayloadRef = useRef<Record<string, unknown> | null>(null);
+
+  const mutation = useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
     mutationFn: async ({ merchant, value, gasMode = 'customer', feeKind }) => {
+      // 専用 retry だけでなく、呼出側が誤って通常 mutate を再度呼んでも、未解決 payload が
+      // ある間は必ず同一 payload を再 POST して再署名を構造的に封鎖する。
+      const retainedPayload = ipRateLimitedPayloadRef.current;
+      if (retainedPayload) {
+        try {
+          const result = await postRelayPayload(retainedPayload);
+          ipRateLimitedPayloadRef.current = null;
+          return result;
+        } catch (error) {
+          if (!isRelayIpRateLimitedError(error)) {
+            ipRateLimitedPayloadRef.current = null;
+          }
+          throw error;
+        }
+      }
+
       if (!walletClient || !address || chainId === undefined) {
         throw new Error('wallet_not_connected');
       }
@@ -220,51 +306,27 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         };
       }
 
-      let res: Response;
       try {
-        res = await fetch('/api/relay/jpyc', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        // POST が server に届いた後で応答だけ失われた可能性がある。通常エラーへ倒すと
-        // standard fallback / 新署名が二重送金へ波及するため、専用の曖昧状態にする。
-        throw new RelayResponseUnknownError();
+        return await postRelayPayload(payload);
+      } catch (error) {
+        ipRateLimitedPayloadRef.current = isRelayIpRateLimitedError(error)
+          ? payload
+          : null;
+        throw error;
       }
-
-      let parsedBody: unknown;
-      try {
-        parsedBody = await res.json();
-      } catch {
-        // body 読取失敗も broadcast 前を証明できないため、再送可能な server error にしない。
-        throw new RelayResponseUnknownError();
-      }
-      if (!isRelayResponse(parsedBody)) throw new RelayResponseUnknownError();
-      const body = parsedBody;
-
-      if (res.ok && body.ok === true && isTxHash(body.txHash)) {
-        return { txHash: body.txHash, success: true };
-      }
-      // relay は成立したが tx が revert (残高変動等)。success:false で記録/表示 (B2 方針)。
-      if (body.reverted === true && isTxHash(body.txHash)) {
-        return { txHash: body.txHash, success: false };
-      }
-      // 202: broadcast 済だが未確定。throw せず pending を返す (form は standard へ fallback
-      // してはならない = 二重支払い防止)。txHash は既使用ケースで null になりうる。
-      if (
-        res.status === 202 &&
-        body.pending === true &&
-        (body.txHash === undefined ||
-          body.txHash === null ||
-          isTxHash(body.txHash))
-      ) {
-        return { txHash: body.txHash ?? null, success: false, pending: true };
-      }
-      // non-2xx + 構造化 {error:string} は server が broadcast 前に確定させた従来の
-      // fallback-safe error。2xx 不完全 envelope / 非構造化 non-2xx は未送信を証明できない。
-      if (!res.ok && typeof body.error === 'string') throw new Error(body.error);
-      throw new RelayResponseUnknownError();
     },
   });
+
+  const retryRelay = useCallback(() => {
+    if (
+      !ipRateLimitedPayloadRef.current ||
+      !mutation.variables ||
+      mutation.isPending
+    ) {
+      return;
+    }
+    mutation.mutate(mutation.variables);
+  }, [mutation.isPending, mutation.mutate, mutation.variables]);
+
+  return { ...mutation, retryRelay };
 }

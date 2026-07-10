@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getAddress, type Address, type Hex } from 'viem';
 import { polygon } from 'viem/chains';
@@ -54,6 +54,7 @@ import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import {
   isFallbackSafeRelayError,
+  isRelayIpRateLimitedError,
   isRelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 // mobileOrderFee は **実物** (未モック)。feeKind 分岐で hook が実 mobileOrderFeeValue へ委譲し、
@@ -257,6 +258,39 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
     expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+  });
+
+  it('429 ip_rate_limited → 専用エラー + 同一 payload 再 POST（再署名なし）', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after': '45',
+        },
+      }),
+    );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isRelayIpRateLimitedError(result.current.error)).toBe(true);
+    if (!isRelayIpRateLimitedError(result.current.error)) {
+      throw new Error('expected RelayIpRateLimitedError');
+    }
+    expect(result.current.error.retryAfterSeconds).toBe(45);
+    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(false);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
+
+    await act(async () => {
+      result.current.retryRelay();
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
   });
 
   it('正常 202 pending → 現行どおり pending result', async () => {

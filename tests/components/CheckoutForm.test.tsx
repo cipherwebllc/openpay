@@ -155,7 +155,10 @@ import { CheckoutForm } from '@/components/CheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
-import { RelayResponseUnknownError } from '@/lib/relay/relayResponseError';
+import {
+  RelayIpRateLimitedError,
+  RelayResponseUnknownError,
+} from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const MERCHANT: Address = '0x2222222222222222222222222222222222222222';
@@ -210,6 +213,7 @@ function setBatchPayment(
 }
 
 let relayMutate: ReturnType<typeof vi.fn>;
+let relayRetryRelay: ReturnType<typeof vi.fn>;
 function setRelayPayment(
   state:
     | 'idle'
@@ -218,14 +222,17 @@ function setRelayPayment(
     | 'reverted'
     | 'broadcast-pending'
     | 'response-unknown'
+    | 'ip-rate-limited'
     | 'error',
   opts?: {
     txHash?: `0x${string}`;
     errMsg?: string;
+    retryAfterSeconds?: number | null;
     variables?: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
   },
 ) {
   relayMutate = vi.fn();
+  relayRetryRelay = vi.fn();
   const txHash = opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`);
   const data =
     state === 'success'
@@ -244,7 +251,10 @@ function setRelayPayment(
         ? new Error(opts?.errMsg ?? 'rate_limited')
         : state === 'response-unknown'
           ? new RelayResponseUnknownError()
-          : null,
+          : state === 'ip-rate-limited'
+            ? new RelayIpRateLimitedError(opts?.retryAfterSeconds ?? 45)
+            : null,
+    retryRelay: relayRetryRelay,
     variables: opts?.variables,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
@@ -1812,6 +1822,32 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     const payButton = screen.getByRole('button', { name: /送信中/ });
     expect(payButton).toBeDisabled();
     await user.click(payButton);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
+
+  it('ip_rate_limited → fallback 非表示・Pay 封鎖・同一 payload 再試行のみ', async () => {
+    const user = userEvent.setup();
+    setupRelayReady();
+    setRelayPayment('ip-rate-limited', { retryAfterSeconds: 45 });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(
+      screen.getByText(/45秒ほど待ってから、同じ内容でもう一度/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /3000 JPYC を支払う/ }),
+    ).toBeDisabled();
+
+    await user.click(
+      screen.getByRole('button', { name: /同じ内容で再試行/ }),
+    );
+    expect(relayRetryRelay).toHaveBeenCalledOnce();
     expect(relayMutate).not.toHaveBeenCalled();
     expect(screen.queryByText('エラー')).toBeNull();
   });
