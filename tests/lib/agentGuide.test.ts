@@ -198,11 +198,12 @@ describe('AGENT_GUIDE: MCP 設定スニペット', () => {
     expect(AGENT_GUIDE.ja.configCode).toBe(AGENT_GUIDE.en.configCode);
   });
 
-  it.each(LOCALES)('%s: mcpServers / npx / bin(openpay-x402-mcp) を含む', (loc) => {
+  it.each(LOCALES)('%s: mcpServers / npx / package / order bin を含む', (loc) => {
     const code = AGENT_GUIDE[loc].configCode;
     expect(code).toContain('mcpServers');
     expect(code).toContain('"npx"');
     expect(code).toContain('openpay-x402-mcp');
+    expect(code).toContain('openpay-order-mcp');
   });
 
   it.each(LOCALES)('%s: 秘密鍵・署名モードを含めない (AI は財布を持たない handoff 経路)', (loc) => {
@@ -212,10 +213,15 @@ describe('AGENT_GUIDE: MCP 設定スニペット', () => {
     expect(code).not.toMatch(/private[_ ]?key/i);
   });
 
-  it.each(LOCALES)('%s: config は妥当な JSON としてパースでき mcpServers.openpay-x402 を持つ', (loc) => {
+  it.each(LOCALES)('%s: config は妥当な JSON としてパースでき mcpServers.openpay-order を持つ', (loc) => {
     const parsed = JSON.parse(AGENT_GUIDE[loc].configCode);
-    expect(parsed.mcpServers['openpay-x402'].command).toBe('npx');
-    expect(parsed.mcpServers['openpay-x402'].args).toEqual(['openpay-x402-mcp']);
+    expect(parsed.mcpServers['openpay-order'].command).toBe('npx');
+    expect(parsed.mcpServers['openpay-order'].args).toEqual([
+      '--yes',
+      '--package=openpay-x402-mcp',
+      '--',
+      'openpay-order-mcp',
+    ]);
   });
 });
 

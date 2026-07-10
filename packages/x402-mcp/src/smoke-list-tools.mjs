@@ -3,14 +3,24 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
+const profile = process.argv[2] ?? 'x402';
+const profiles = {
+  order: { entry: 'src/order.mjs', expectedToolCount: 3 },
+  x402: { entry: 'src/index.mjs', expectedToolCount: 7 },
+};
+const selected = profiles[profile];
+if (!selected) {
+  throw new Error(`invalid profile: ${profile}`);
+}
+
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: ['src/index.mjs'],
+  args: [selected.entry],
   env: process.env,
 });
 
 const client = new Client(
-  { name: 'openpay-x402-mcp-smoke', version: '0.1.0' },
+  { name: `openpay-${profile}-mcp-smoke`, version: '0.8.0' },
   { capabilities: {} },
 );
 
@@ -20,6 +30,7 @@ try {
   console.log(
     JSON.stringify(
       {
+        profile,
         method: 'tools/list',
         toolCount: result.tools.length,
         toolNames: result.tools.map((tool) => tool.name),
@@ -32,10 +43,8 @@ try {
       2,
     ),
   );
-  // P2-Q: ツールは discovery_search / x402_quote / x402_pay / order_menu / order_quote /
-  // order_summary / createOrderLink の 7 個 (order 系追加後も 3 のままで常に fail していた陳腐化した
-  // canary を是正・0.7.0 で order_summary を追加)。
-  if (result.tools.length !== 7) {
+  // x402 は後方互換の 7 ツール、order は鍵なし人払いの 3 ツールを公開する。
+  if (result.tools.length !== selected.expectedToolCount) {
     process.exitCode = 1;
   }
 } finally {

@@ -15,9 +15,10 @@ import {
 } from './guards.mjs';
 import { createSigner, SIGNER_MODES } from './signer.mjs';
 
-export const TOOLS = [
+const TOOL_DEFINITIONS = [
   {
     name: 'discovery_search',
+    profiles: ['x402'],
     description: 'Search OpenPay x402 JPYC resources without paying.',
     inputSchema: {
       type: 'object',
@@ -30,6 +31,7 @@ export const TOOLS = [
   },
   {
     name: 'x402_quote',
+    profiles: ['x402'],
     description: 'Fetch an x402 payment challenge and report price, fee, total and guard reasons. This does not pay.',
     inputSchema: {
       type: 'object',
@@ -42,6 +44,7 @@ export const TOOLS = [
   },
   {
     name: 'x402_pay',
+    profiles: ['x402'],
     description:
       'Pay an OpenPay forwarder-split x402 URL after all local money guards pass. Only when the agent itself holds a funded key and auto-pays (x402, buyer covers the ~1% fee). For human-pays, use order_summary + createOrderLink instead.',
     inputSchema: {
@@ -58,6 +61,7 @@ export const TOOLS = [
   },
   {
     name: 'order_menu',
+    profiles: ['order', 'x402'],
     description:
       "Read an OpenPay @handle shop's public mobile-order menu (item ids, names, prices). No payment, no key needed.",
     inputSchema: {
@@ -71,6 +75,7 @@ export const TOOLS = [
   },
   {
     name: 'order_quote',
+    profiles: ['x402'],
     description:
       "⚠️ Do NOT use this to estimate/quote what a PERSON pays — for a human paying by hand (the normal case, incl. any 'how much / quote / 見積もり' question) use order_summary + createOrderLink. order_quote is ONLY for the rare case where the AGENT ITSELF holds a funded key and auto-pays via x402: it fetches the x402 challenge where the BUYER pays the ~1% fee on top (total = price + fee) and is subject to MAX_PER_CALL_JPYC / session guards. Builds an agent-order for an OpenPay @handle shop; does not pay — pay the returned url with x402_pay. Items with options: pass items[].options (ids from order_menu; required groups mandatory).",
     inputSchema: {
@@ -109,6 +114,7 @@ export const TOOLS = [
   },
   {
     name: 'order_summary',
+    profiles: ['order', 'x402'],
     description:
       "DEFAULT for a mobile order a PERSON will pay — use this for any 'how much will I pay / quote / estimate / 見積もり' question. Returns the exact amount the customer pays from their own wallet: the subtotal (the shop absorbs the ~1% service fee, so the customer is charged NO extra — e.g. a 1700 order shows 1700, not 1717). Pair with createOrderLink to hand the person a checkout link. No key, no buyer fee upcharge, no payment-limit guards. (Do NOT use order_quote for a person's estimate — that is the agent-auto-pay path and adds the fee to the buyer.)",
     inputSchema: {
@@ -147,6 +153,7 @@ export const TOOLS = [
   },
   {
     name: 'createOrderLink',
+    profiles: ['order', 'x402'],
     description:
       "Build a human-facing checkout link for an OpenPay @handle shop's mobile order. No wallet or key needed: this only assembles a URL — the traveler opens it on their phone and pays from their own wallet. Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`. The shop's receiving address and prices are re-resolved server-side from the @handle record (never carried in the link), so menu text cannot change the destination or amount. Use this for the \"my AI plans the order, I pay by hand\" handoff (pair with order_summary to tell the customer the exact amount they pay); use order_quote + x402_pay only when the agent itself holds a funded key and auto-pays.",
     inputSchema: {
@@ -184,6 +191,12 @@ export const TOOLS = [
     },
   },
 ];
+
+function publicTool({ profiles: _profiles, ...tool }) {
+  return tool;
+}
+
+export const TOOLS = TOOL_DEFINITIONS.map(publicTool);
 
 function isObject(value) {
   return typeof value === 'object' && value !== null;
@@ -310,10 +323,20 @@ function normalizeCartItems(rawItems) {
 }
 
 export function createToolRuntime({
+  profile = 'x402',
   env = process.env,
   fetchImpl = fetch,
   nowSec = () => Math.floor(Date.now() / 1000),
 } = {}) {
+  if (profile !== 'order' && profile !== 'x402') {
+    throw new Error(`invalid profile: ${profile}`);
+  }
+  const profileDefinitions = TOOL_DEFINITIONS.filter((tool) =>
+    tool.profiles.includes(profile),
+  );
+  const tools = profileDefinitions.map(publicTool);
+  const allowedToolNames = new Set(profileDefinitions.map((tool) => tool.name));
+  const knownToolNames = new Set(TOOL_DEFINITIONS.map((tool) => tool.name));
   const config = readRuntimeConfig(env);
   const session = createPaymentSession();
   const sessionSigner =
@@ -617,6 +640,9 @@ export function createToolRuntime({
   }
 
   async function callTool(name, args) {
+    if (knownToolNames.has(name) && !allowedToolNames.has(name)) {
+      return textResult({ ok: false, error: 'tool_not_in_profile' }, true);
+    }
     try {
       if (name === 'discovery_search') return textResult(await discoverySearch(args));
       if (name === 'x402_quote') return textResult(await x402Quote(args));
@@ -637,7 +663,7 @@ export function createToolRuntime({
   return {
     config,
     session,
-    tools: TOOLS,
+    tools,
     callTool,
     discoverySearch,
     x402Quote,

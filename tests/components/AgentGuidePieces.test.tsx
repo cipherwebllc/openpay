@@ -89,6 +89,6 @@ describe('AgentGuidePieces × 実 AGENT_GUIDE データ', () => {
       <CodeBlock label={c.configLabel} code={c.configCode} />,
     );
     expect(container.querySelector('code')?.textContent).toBe(c.configCode);
-    expect(container.textContent).toContain('openpay-x402-mcp');
+    expect(container.textContent).toContain('openpay-order-mcp');
   });
 });

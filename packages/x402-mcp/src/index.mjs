@@ -14,27 +14,52 @@ import { safeErrorMessage } from './guards.mjs';
 
 const pkg = createRequire(import.meta.url)('../package.json');
 
-export function createServer(runtime = createToolRuntime()) {
+function serverNameForProfile(profile) {
+  if (profile === 'x402') return 'openpay-x402-mcp';
+  if (profile === 'order') return 'openpay-order-mcp';
+  throw new Error(`invalid profile: ${profile}`);
+}
+
+export function createServer(profile = 'x402', runtime) {
+  const activeRuntime = runtime ?? createToolRuntime({ profile });
   const server = new Server(
-    { name: 'openpay-x402-mcp', version: pkg.version },
+    { name: serverNameForProfile(profile), version: pkg.version },
     { capabilities: { tools: {} } },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: runtime.tools,
+    tools: activeRuntime.tools,
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    runtime.callTool(request.params.name, request.params.arguments ?? {}),
+    activeRuntime.callTool(request.params.name, request.params.arguments ?? {}),
   );
 
   return server;
 }
 
-export async function main() {
-  const server = createServer();
+export async function main(profile = 'x402') {
+  const server = createServer(profile);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+export async function run(profile = 'x402') {
+  try {
+    await main(profile);
+  } catch (error) {
+    // P2-Q: 起動失敗時の redaction を無力化させない。config 無しだと safeErrorMessage は署名 hex の
+    // 正規表現置換しか効かず、秘密値 (BUYER_PRIVATE_KEY / STEWARD_API_KEY / STEWARD_SIGNER_SECRET) の
+    // 文字列置換が no-op になる。process.env から best-effort に redaction 対象を渡す。
+    console.error(
+      safeErrorMessage(error, {
+        buyerPrivateKey: process.env.BUYER_PRIVATE_KEY ?? null,
+        stewardApiKey: process.env.STEWARD_API_KEY ?? null,
+        stewardSignerSecret: process.env.STEWARD_SIGNER_SECRET ?? null,
+      }),
+    );
+    process.exitCode = 1;
+  }
 }
 
 // npm/npx の bin はシンボリックリンク経由で起動されるため、argv[1] (リンクのパス) と
@@ -51,17 +76,5 @@ function isDirectInvocation() {
 }
 
 if (isDirectInvocation()) {
-  main().catch((error) => {
-    // P2-Q: 起動失敗時の redaction を無力化させない。config 無しだと safeErrorMessage は署名 hex の
-    // 正規表現置換しか効かず、秘密値 (BUYER_PRIVATE_KEY / STEWARD_API_KEY / STEWARD_SIGNER_SECRET) の
-    // 文字列置換が no-op になる。process.env から best-effort に redaction 対象を渡す。
-    console.error(
-      safeErrorMessage(error, {
-        buyerPrivateKey: process.env.BUYER_PRIVATE_KEY ?? null,
-        stewardApiKey: process.env.STEWARD_API_KEY ?? null,
-        stewardSignerSecret: process.env.STEWARD_SIGNER_SECRET ?? null,
-      }),
-    );
-    process.exitCode = 1;
-  });
+  run();
 }

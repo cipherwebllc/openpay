@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0
+
+- Add an `openpay-order-mcp` binary for the keyless, human-pays order profile. It
+  exposes only `order_menu`, `order_summary`, and `createOrderLink`.
+- Keep `openpay-x402-mcp` as the backward-compatible full seven-tool profile,
+  with unchanged tool order, descriptions, schemas, payment guards, and signing
+  behavior.
+- Reject calls to known tools outside the active profile before fetching or
+  signing (`tool_not_in_profile`).
+
 ## 0.7.2
 
 - Docs: add a "Quickstart: buy a JPYC resource" section — a concrete
