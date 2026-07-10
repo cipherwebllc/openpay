@@ -1,3 +1,5 @@
+import 'server-only';
+
 // x402 facilitator の受領証明 (receipt)。settle 成功時に OpenPay 専用鍵 (X402_RECEIPT_SIGNING_KEY・
 // server-only・relayer 鍵とは分離) で settlement を EIP-712 署名し、オフライン検証可能な証明を発行する。
 // 鍵未設定なら receipt は発行されない (settle 自体は成立する)。検証は recoverTypedDataAddress で署名者を

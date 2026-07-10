@@ -1,3 +1,5 @@
+import 'server-only';
+
 // JPYC EIP-3009 relay の **provider 解決 + free モード deps 構築** を両 route で共有する層。
 // 決済 relay (/api/relay/jpyc handleFree) と CSV パス購入 relay (/api/csv-pass/relay) は、同じ
 // relayer ウォレット・同じ submit/poll・同じ chain client を使う。違うのは「何を検証して何宛に送るか」

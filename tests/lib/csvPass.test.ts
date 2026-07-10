@@ -54,6 +54,7 @@ import {
   CSV_PASS_GRANT_HOURS,
   CSV_PASS_GRANT_MS,
 } from '@/lib/csvPass';
+import * as csvPassConstants from '@/lib/csvPassConstants';
 
 const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const PASS_KEY = 'csvpass:exp:' + WALLET.toLowerCase();
@@ -74,6 +75,12 @@ describe('csvPass 定数', () => {
     expect(CSV_PASS_GRANT_HOURS).toBe(24);
     expect(CSV_PASS_GRANT_MS).toBe(24 * HOUR);
     expect(CSV_PASS_GRANT_MS).toBe(86_400_000);
+    expect(csvPassConstants).toMatchObject({
+      CSV_PASS_PRICE_JPYC,
+      csvPassPriceWei,
+      CSV_PASS_GRANT_HOURS,
+      CSV_PASS_GRANT_MS,
+    });
   });
 });
 

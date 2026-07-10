@@ -1,3 +1,5 @@
+import 'server-only';
+
 // Upstash Redis REST への薄い fetch wrapper。env (KV_REST_API_URL /
 // KV_REST_API_TOKEN) 未設定時は ok:false / unconfigured を返し、呼出側で
 // 「server log のみ」に degrade させる前提。

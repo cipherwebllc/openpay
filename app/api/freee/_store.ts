@@ -70,13 +70,19 @@ export function getMapping(wallet: string): Promise<FreeeMapping | null> {
   return getJson<FreeeMapping>(key('map', wallet.toLowerCase()));
 }
 
-export async function setMapping(wallet: string, mapping: FreeeMapping): Promise<void> {
-  await kvSet(key('map', wallet.toLowerCase()), JSON.stringify(mapping));
+export async function setMapping(
+  wallet: string,
+  mapping: FreeeMapping,
+): Promise<boolean> {
+  const res = await kvSet(key('map', wallet.toLowerCase()), JSON.stringify(mapping));
+  return res.ok && res.value === 'OK';
 }
 
 /** 会社(事業所)切替時など、旧会社の ID を指す mapping を無効化する。 */
-export async function delMapping(wallet: string): Promise<void> {
-  await kvDel(key('map', wallet.toLowerCase()));
+export async function delMapping(wallet: string): Promise<boolean> {
+  const res = await kvDel(key('map', wallet.toLowerCase()));
+  // value=0 は既に mapping が無い正常系。削除コマンドが成功したことだけを要求する。
+  return res.ok;
 }
 
 export async function setState(

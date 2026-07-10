@@ -22,6 +22,8 @@ import {
   releaseSync,
   getToken,
   setToken,
+  setMapping,
+  delMapping,
   setState,
   consumeState,
 } from '@/app/api/freee/_store';
@@ -171,5 +173,27 @@ describe('token / state JSON 直列化 (wallet 名前空間)', () => {
   it('consumeState: 未存在 → null', async () => {
     kv.getdel.mockResolvedValue({ ok: true, value: null });
     expect(await consumeState('x')).toBeNull();
+  });
+});
+
+describe('mapping 永続化結果', () => {
+  const MAPPING = { companyId: 7, accountItemId: 101, taxCode: 21 };
+
+  it('setMapping: KV 保存成功時のみ true', async () => {
+    kv.set.mockResolvedValueOnce({ ok: true, value: 'OK' });
+    await expect(setMapping('0xABC', MAPPING)).resolves.toBe(true);
+    expect(kv.set).toHaveBeenCalledWith('freee:map:0xabc', JSON.stringify(MAPPING));
+
+    kv.set.mockResolvedValueOnce({ ok: false, reason: 'network_error' });
+    await expect(setMapping('0xABC', MAPPING)).resolves.toBe(false);
+  });
+
+  it('delMapping: DEL=0 も成功・KV 失敗時のみ false', async () => {
+    kv.del.mockResolvedValueOnce({ ok: true, value: 0 });
+    await expect(delMapping('0xABC')).resolves.toBe(true);
+    expect(kv.del).toHaveBeenCalledWith('freee:map:0xabc');
+
+    kv.del.mockResolvedValueOnce({ ok: false, reason: 'http_error' });
+    await expect(delMapping('0xABC')).resolves.toBe(false);
   });
 });

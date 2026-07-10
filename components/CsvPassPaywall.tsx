@@ -19,7 +19,10 @@ import {
   resolveDeployment,
   defaultDeploymentForSymbol,
 } from '@/lib/tokens';
-import { CSV_PASS_PRICE_JPYC, CSV_PASS_GRANT_HOURS } from '@/lib/csvPass';
+import {
+  CSV_PASS_PRICE_JPYC,
+  CSV_PASS_GRANT_HOURS,
+} from '@/lib/csvPassConstants';
 import {
   EntitlementPaywall,
   type EntitlementPaywallConfig,
