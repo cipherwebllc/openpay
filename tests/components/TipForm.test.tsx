@@ -1258,16 +1258,16 @@ describe('ReceiveMethodPicker × 実 TipForm — 切替で金額がリセット�
     const user = userEvent.setup();
     render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
     // アコーディオン化により初期は全折りたたみ → まず JPYC の方法ボタンで展開する
-    await user.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
+    await user.click(screen.getByRole('button', { name: 'JPYC · Polygon' }));
     await user.click(screen.getByRole('button', { name: '500 JPYC' }));
     expectBreakdownRow('クリエイター受取', '500 JPYC');
     // USDC へ切替 → 再マウントで USDC の最初の preset (1 USDC) が選択される。
     // 500 が USDC として持ち越されないことが本題。
-    await user.click(screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }));
+    await user.click(screen.getByRole('button', { name: 'USDC · cross-chain' }));
     expectBreakdownRow('クリエイター受取', '1 USDC');
     expect(screen.queryByText('500 USDC')).not.toBeInTheDocument();
     // JPYC へ戻しても 500 ではなく JPYC の最初の preset (100) から
-    await user.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
+    await user.click(screen.getByRole('button', { name: 'JPYC · Polygon' }));
     expectBreakdownRow('クリエイター受取', '100 JPYC');
   });
 
@@ -1275,10 +1275,10 @@ describe('ReceiveMethodPicker × 実 TipForm — 切替で金額がリセット�
     const user = userEvent.setup();
     render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
     // アコーディオン化により初期は全折りたたみ → まず JPYC の方法ボタンで展開する
-    await user.click(screen.getByRole('button', { name: 'JPYC (Polygon) で応援' }));
+    await user.click(screen.getByRole('button', { name: 'JPYC · Polygon' }));
     await user.type(screen.getByPlaceholderText('例: 2500'), '7777');
     expectBreakdownRow('クリエイター受取', '7777 JPYC');
-    await user.click(screen.getByRole('button', { name: 'USDC (cross-chain) で応援' }));
+    await user.click(screen.getByRole('button', { name: 'USDC · cross-chain' }));
     expectBreakdownRow('クリエイター受取', '1 USDC');
     // USDC 側のカスタム入力欄は空 (JPYC の 7777 が残らない)
     expect(screen.getByPlaceholderText('例: 7.50')).toHaveValue('');

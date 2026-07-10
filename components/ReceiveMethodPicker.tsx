@@ -31,16 +31,32 @@ const CHAIN_LABEL: Record<ChainSlug, string> = {
   avalanche: 'Avalanche',
 };
 
+function methodParts(
+  method: HandleReceiveMethod,
+  crossChainText: string,
+): { token: string; chain: string } {
+  const token = displaySymbolFor(method.token);
+  const chain =
+    method.token === 'usdc' && method.crossChain
+      ? crossChainText
+      : (CHAIN_LABEL[method.chain] ?? method.chain);
+  return { token, chain };
+}
+
 export function methodLabel(
   method: HandleReceiveMethod,
   crossChainText: string,
 ): string {
-  const token = displaySymbolFor(method.token);
-  const chainPart =
-    method.token === 'usdc' && method.crossChain
-      ? crossChainText
-      : (CHAIN_LABEL[method.chain] ?? method.chain);
-  return `${token} (${chainPart})`;
+  const { token, chain } = methodParts(method, crossChainText);
+  return `${token} (${chain})`;
+}
+
+export function methodMetaLabel(
+  method: HandleReceiveMethod,
+  crossChainText: string,
+): string {
+  const { token, chain } = methodParts(method, crossChainText);
+  return `${token} · ${chain}`;
 }
 
 // 展開アニメ: mount 直後は grid-rows-[0fr] で挿入し、次フレームで grid-rows-[1fr] へ遷移。
@@ -110,6 +126,7 @@ export function ReceiveMethodPicker({
       ? config.color
       : DEFAULT_ACCENT;
   const dark = resolveHandleTheme(theme) === 'night';
+  const multipleMethods = methods.length > 1;
 
   return (
     // 応援 (= OpenPay の核) はアクセントの専用カードで他のリンクと差別化し、ページの主役にする。
@@ -130,9 +147,18 @@ export function ReceiveMethodPicker({
       >
         {t('supportSubtext')}
       </p>
+      {multipleMethods && (
+        <h3
+          className={`mt-4 text-center text-xs font-semibold ${
+            dark ? 'text-slate-300' : 'text-slate-500'
+          }`}
+        >
+          {t('selectCurrencyChain')}
+        </h3>
+      )}
       <div className="mt-4 flex flex-col gap-2.5">
         {methods.map((m, i) => {
-          const label = methodLabel(m, t('crossChain'));
+          const label = methodMetaLabel(m, t('crossChain'));
           const isActive = i === selected;
 
           return (
@@ -152,7 +178,20 @@ export function ReceiveMethodPicker({
                     : 'bg-white hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]'
                 }`}
               >
-                {t('supportWith', { label })}
+                {multipleMethods ? (
+                  <span>{label}</span>
+                ) : (
+                  <span className="flex flex-col items-center gap-0.5">
+                    <span>♡ {t('supportHeading')}</span>
+                    <span
+                      className={`text-xs font-medium ${
+                        dark ? 'text-slate-300' : 'text-slate-500'
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </span>
+                )}
               </button>
               {isActive && (
                 <ExpandOnMount>

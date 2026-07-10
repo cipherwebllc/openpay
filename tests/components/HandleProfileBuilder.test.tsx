@@ -140,7 +140,7 @@ describe('HandleProfileBuilder', () => {
     expect(avax).not.toBeChecked(); // opt-in (flag ON でも既定 OFF)
     // 初期は avalanche 受取方法が描画されていない (checkbox→methods→描画の伝播を実証する前提条件)。
     expect(
-      screen.queryByText('JPYC (Avalanche) で応援'),
+      screen.queryByText('JPYC · Avalanche'),
     ).not.toBeInTheDocument();
     // 受取先解決 + Avalanche を ON。
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
@@ -149,7 +149,7 @@ describe('HandleProfileBuilder', () => {
     // checkbox 状態だけでなく、config.methods への反映 → 受取方法サマリ/プレビュー描画まで実際に
     // 伝播していることを実出力で検証 (LARP: トグルが効いて method が描画されることの実証)。
     expect(
-      screen.getAllByText('JPYC (Avalanche) で応援').length,
+      screen.getAllByText('JPYC · Avalanche').length,
     ).toBeGreaterThan(0);
   });
 
@@ -162,7 +162,7 @@ describe('HandleProfileBuilder', () => {
       screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' }),
     ).toBeChecked();
     expect(
-      screen.getAllByText('JPYC (Avalanche) で応援').length,
+      screen.getAllByText('JPYC · Avalanche').length,
     ).toBeGreaterThan(0);
   });
 
@@ -177,11 +177,11 @@ describe('HandleProfileBuilder', () => {
       screen.queryByRole('checkbox', { name: 'JPYC (Avalanche)' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText('JPYC (Avalanche) で応援'),
+      screen.queryByText('JPYC · Avalanche'),
     ).not.toBeInTheDocument();
     // 対照: 同じ設定の polygon は通常どおり載る (avalanche だけが inert)。
     expect(
-      screen.getAllByText('JPYC (Polygon) で応援').length,
+      screen.getAllByText('JPYC · Polygon').length,
     ).toBeGreaterThan(0);
   });
 
