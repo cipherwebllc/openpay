@@ -15,6 +15,7 @@ import {
   type HandleRecord,
 } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
+import { readBodyCapped } from '@/lib/httpBodyCap';
 import { displaySymbolFor } from '@/lib/tokens';
 import {
   buildTipOgModel,
@@ -50,37 +51,6 @@ function isBlockedHost(host: string): boolean {
     return true;
   }
   return /^[0-9.:[\]]+$/.test(h); // IPv4 / IPv6 リテラル
-}
-
-// body を逐次読みし、累積が cap を超えたら即中断して null。Content-Length 詐称/欠落でも
-// メモリ確保を cap で頭打ちにする (全量 arrayBuffer() を避ける)。
-async function readBodyCapped(
-  res: Response,
-  cap: number,
-): Promise<Uint8Array | null> {
-  const reader = res.body?.getReader();
-  if (!reader) return null;
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      total += value.byteLength;
-      if (total > cap) {
-        await reader.cancel();
-        return null;
-      }
-      chunks.push(value);
-    }
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.byteLength;
-  }
-  return out;
 }
 
 // 外部アバター → data URL。失敗は null (イニシャル円へフォールバック)。

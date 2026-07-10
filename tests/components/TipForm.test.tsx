@@ -21,6 +21,15 @@ vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+const loggerWarn = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: loggerWarn,
+    error: vi.fn(),
+  },
+}));
 // Circle quote は default flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。
 // circle テスト block で 'circle' に override + permitAmount を返す。
 vi.mock('@/hooks/useGasQuoteCircle', () => ({ useGasQuoteCircle: vi.fn() }));
@@ -641,20 +650,34 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     setBalance(20_000_000n);
     setSmartAccount(true);
     setBatchPayment('success');
+    const secret = 'Bearer-tip-non-ok-secret';
+    const webhook = `https://user:${secret}@example.com/hook/${secret}?token=${secret}`;
     render(
       <TipForm
-        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
+        params={{ ...USDC_PARAMS, webhook }}
       />,
     );
 
-    // fetch は呼ばれた (引数を確認)
-    expect(fetchSpy).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(loggerWarn).toHaveBeenCalledWith(
+        'tip.webhook.non_ok',
+        expect.objectContaining({
+          webhookOrigin: 'https://example.com',
+          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+        }),
+      ),
+    );
+    const fields = loggerWarn.mock.calls.find(
+      ([event]) => event === 'tip.webhook.non_ok',
+    )?.[1];
+    expect(JSON.stringify(fields)).not.toContain(secret);
+    expect(fields).not.toHaveProperty('url');
     // 完了 UI は影響を受けず通常表示
     expect(screen.getAllByText(/UserOp/).length).toBeGreaterThan(0);
     fetchSpy.mockRestore();
   });
 
-  it('成功 + webhook が CORS エラー (reject) → catch 経路、UI に影響なし', () => {
+  it('成功 + webhook が CORS エラー (reject) → catch 経路、UI に影響なし', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('CORS blocked by browser'));
@@ -663,13 +686,28 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     setBalance(20_000_000n);
     setSmartAccount(true);
     setBatchPayment('success');
+    const secret = 'Bearer-tip-failed-secret';
+    const webhook = `https://discord.com/api/webhooks/${secret}?token=${secret}`;
     render(
       <TipForm
-        params={{ ...USDC_PARAMS, webhook: 'https://discord.com/api/webhooks/x' }}
+        params={{ ...USDC_PARAMS, webhook }}
       />,
     );
 
-    expect(fetchSpy).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(loggerWarn).toHaveBeenCalledWith(
+        'tip.webhook.failed',
+        expect.objectContaining({
+          webhookOrigin: 'https://discord.com',
+          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+        }),
+      ),
+    );
+    const fields = loggerWarn.mock.calls.find(
+      ([event]) => event === 'tip.webhook.failed',
+    )?.[1];
+    expect(JSON.stringify(fields)).not.toContain(secret);
+    expect(fields).not.toHaveProperty('url');
     // 完了 UI は影響を受けない
     expect(screen.getAllByText(/UserOp/).length).toBeGreaterThan(0);
     fetchSpy.mockRestore();

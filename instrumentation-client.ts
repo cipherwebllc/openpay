@@ -1,6 +1,10 @@
 // Sentry クライアント側初期化。Next.js 15.3+ の instrumentation-client.ts として
 // ブラウザバンドルの最初に実行される。DSN が未設定なら何もしない (no-op)。
 import * as Sentry from '@sentry/nextjs';
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryTransaction,
+} from '@/lib/telemetryRedaction';
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -51,6 +55,10 @@ if (dsn) {
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
       1.0,
     ),
+    // fetch/xhr/navigation breadcrumb と BrowserTracing span の URL は origin だけを残す。
+    // webhook token 等が path/query/userinfo に含まれても Sentry へ送らない。
+    beforeBreadcrumb: scrubSentryBreadcrumb,
+    beforeSendTransaction: scrubSentryTransaction,
     // PII (IP / ユーザ ID) は送らない。但しウォレットアドレスは breadcrumb
     // に出る可能性があるので、本当に厳格にしたい場合は beforeSend で scrub。
     sendDefaultPii: false,

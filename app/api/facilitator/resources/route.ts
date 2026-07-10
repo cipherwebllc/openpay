@@ -6,9 +6,16 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
+import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
+import {
+  checkResourceWalletRateLimit,
+  RESOURCE_BODY_MAX_BYTES,
+  RESOURCE_RATE_LIMIT_WINDOW_SEC,
+} from '@/lib/x402/resourceRequestGuards';
 import {
   parseResourceInput,
   createResource,
@@ -45,14 +52,27 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
+  if (!(await checkResourceWalletRateLimit(session.address))) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(RESOURCE_RATE_LIMIT_WINDOW_SEC) },
+      },
+    );
+  }
+
+  const body = await readJsonBodyCapped(req, RESOURCE_BODY_MAX_BYTES);
+  if (!body.ok) {
+    if (body.reason === 'too_large') {
+      return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
+    }
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
   // 新規登録は出品の正当性表明 (attested:true) を必須にする (権利 + 支払いゲートの実装)。
-  const parsed = parseResourceInput(raw, session.address, { requireAttestation: true });
+  const parsed = parseResourceInput(body.value, session.address, {
+    requireAttestation: true,
+  });
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.reason }, { status: 400 });
   }
@@ -71,9 +91,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   // モデレーション: 無料で公開されている URL の価格付き登録を弾く (probe で 200 を確認したら拒否)。
   // 402/401/403/エラー/タイムアウトは通す (fail-open)。private/loopback は parseResourceInput で既に排除。
   if (await isFreelyAccessible(parsed.input.url)) {
+    const redacted = await redactUrlForTelemetry(parsed.input.url);
     logger.warn('x402.facilitator.resource_not_gated', {
       merchant: session.address,
-      url: parsed.input.url,
+      resourceOrigin: redacted.origin,
+      resourceHash: redacted.hash,
     });
     return NextResponse.json({ error: 'resource_not_gated' }, { status: 400 });
   }

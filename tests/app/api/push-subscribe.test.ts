@@ -137,6 +137,23 @@ describe('/api/push/subscribe', () => {
     expect(storeSpy.upsert).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'https://127.0.0.1/push',
+    'https://[::1]/push',
+    'https://push.local/sub/1',
+    'https://push.internal/sub/1',
+  ])('POST は private/loopback endpoint を保存しない: %s', async (endpoint) => {
+    const res = await POST(
+      req('POST', {
+        subscription: { ...subscription, endpoint },
+        locale: 'ja',
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_payload' });
+    expect(storeSpy.upsert).not.toHaveBeenCalled();
+  });
+
   it('正常 POST は body の wallet を無視し SIWE address で upsert する', async () => {
     const res = await POST(
       req('POST', {
@@ -192,5 +209,13 @@ describe('/api/push/subscribe', () => {
     expect(storeSpy.remove).toHaveBeenCalledWith(SESSION_ADDR, {
       endpoint: subscription.endpoint,
     });
+  });
+
+  it('DELETE は保存済み private endpoint も loose parse で解除できる', async () => {
+    const endpoint = 'https://127.0.0.1/legacy-push';
+    const res = await DELETE(req('DELETE', { endpoint }));
+
+    expect(res.status).toBe(200);
+    expect(storeSpy.remove).toHaveBeenCalledWith(SESSION_ADDR, { endpoint });
   });
 });

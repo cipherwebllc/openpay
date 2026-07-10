@@ -49,6 +49,7 @@ import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
+import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
@@ -386,6 +387,8 @@ export function TipForm({ params }: { params: TipParams }) {
     // webhook 失敗 (CORS / non-2xx) は logger.warn のみ。tip は成立しているため UI には出さない。
     // fetch の Promise は HTTP non-2xx でも resolve するため res.ok を明示確認。
     if (params.webhook) {
+      // hash は fetch と並行に開始し、失敗 telemetry が必要な場合だけ await する。
+      const webhookTelemetry = redactUrlForTelemetry(params.webhook);
       const payload = {
         type: 'openpay.tip.success',
         creator: params.to,
@@ -413,21 +416,25 @@ export function TipForm({ params }: { params: TipParams }) {
         mode: 'cors',
         keepalive: true,
       })
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) {
+            const redacted = await webhookTelemetry;
             logger.warn('tip.webhook.non_ok', {
               status: res.status,
               statusText: res.statusText,
-              url: params.webhook,
+              webhookOrigin: redacted.origin,
+              webhookHash: redacted.hash,
             });
           }
         })
-        .catch((err) =>
+        .catch(async (err) => {
+          const redacted = await webhookTelemetry;
           logger.warn('tip.webhook.failed', {
             error: err,
-            url: params.webhook,
-          }),
-        );
+            webhookOrigin: redacted.origin,
+            webhookHash: redacted.hash,
+          });
+        });
     }
   }, [
     flowSuccess,
@@ -936,4 +943,3 @@ export function TipForm({ params }: { params: TipParams }) {
     </div>
   );
 }
-

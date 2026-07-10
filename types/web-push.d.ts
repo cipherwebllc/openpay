@@ -16,6 +16,10 @@ declare module 'web-push' {
   export function sendNotification(
     subscription: PushSubscription,
     payload?: string | Buffer,
+    options?: {
+      agent?: import('node:https').Agent;
+      timeout?: number;
+    },
   ): Promise<unknown>;
 
   const webPush: {

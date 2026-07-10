@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { LookupAddress, LookupAllOptions } from 'node:dns';
+import { Agent as HttpsAgent } from 'node:https';
 
 vi.mock('server-only', () => ({}));
 
@@ -69,9 +71,29 @@ vi.mock('@/lib/push/store', () => ({
   },
 }));
 
-import { sendPushToWallet } from '@/lib/push/server';
+import { createPushHttpsAgent, sendPushToWallet } from '@/lib/push/server';
 
 const keys = { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) };
+
+type LookupAll = (
+  hostname: string,
+  options: LookupAllOptions,
+  callback: (
+    error: NodeJS.ErrnoException | null,
+    addresses: LookupAddress[],
+  ) => void,
+) => void;
+
+async function agentLookup(agent: HttpsAgent, hostname: string): Promise<unknown> {
+  const lookup = agent.options.lookup;
+  if (!lookup) throw new Error('lookup hook missing');
+  return new Promise((resolve, reject) => {
+    lookup(hostname, { all: true }, (error, addresses) => {
+      if (error) reject(error);
+      else resolve(addresses);
+    });
+  });
+}
 
 beforeEach(() => {
   hold.enablePushNotify = true;
@@ -144,6 +166,10 @@ describe('sendPushToWallet', () => {
       'private-key',
     );
     expect(webPush.sendNotification).toHaveBeenCalledTimes(3);
+    expect(webPush.sendNotification.mock.calls[0][2]).toEqual({
+      agent: expect.any(HttpsAgent),
+      timeout: 3_500,
+    });
     expect(JSON.parse(webPush.sendNotification.mock.calls[0][1])).toMatchObject({
       title: '着金がありました',
       body: '売上を確認できます',
@@ -203,5 +229,63 @@ describe('sendPushToWallet', () => {
 
     expect(summary).toEqual({ attempted: 0, sent: 0, pruned: 0, failed: 0 });
     expect(webPush.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('保存済み literal private endpoint は sink で再拒否し、購読は削除しない', async () => {
+    hold.subscriptions = [
+      {
+        endpointHash: 'a'.repeat(64),
+        endpoint: 'https://127.0.0.1/push',
+        keys,
+        locale: 'ja',
+        vapidKeyId: '12345678',
+        createdAt: 1,
+      },
+    ];
+
+    await expect(
+      sendPushToWallet(WALLET, { title: '着金がありました' }),
+    ).resolves.toEqual({ attempted: 1, sent: 0, pruned: 0, failed: 1 });
+    expect(webPush.sendNotification).not.toHaveBeenCalled();
+    expect(store.remove).not.toHaveBeenCalled();
+  });
+
+  it('connect-time lookup は A/AAAA に private が 1 件でも混ざれば拒否する', async () => {
+    const lookupAll: LookupAll = (_hostname, _options, callback) => {
+      callback(null, [
+        { address: '93.184.216.34', family: 4 },
+        { address: '169.254.169.254', family: 4 },
+      ]);
+    };
+    const agent = createPushHttpsAgent(lookupAll);
+
+    await expect(agentLookup(agent, 'push.example')).rejects.toThrow(
+      'push_blocked_private_address',
+    );
+  });
+
+  it.each(['empty', 'dns-error'] as const)(
+    'connect-time lookup は %s を fail-closed にする',
+    async (mode) => {
+      const lookupAll: LookupAll = (_hostname, _options, callback) => {
+        if (mode === 'empty') callback(null, []);
+        else callback(new Error('ENOTFOUND'), []);
+      };
+      const agent = createPushHttpsAgent(lookupAll);
+      await expect(agentLookup(agent, 'push.example')).rejects.toThrow();
+    },
+  );
+
+  it('connect-time lookup は全件 public の A/AAAA だけを返す', async () => {
+    const addresses = [
+      { address: '93.184.216.34', family: 4 },
+      { address: '2606:4700:4700::1111', family: 6 },
+    ];
+    const lookupAll: LookupAll = (_hostname, _options, callback) => {
+      callback(null, addresses);
+    };
+    const agent = createPushHttpsAgent(lookupAll);
+
+    await expect(agentLookup(agent, 'push.example')).resolves.toEqual(addresses);
   });
 });

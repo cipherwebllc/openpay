@@ -1,9 +1,16 @@
 import 'server-only';
 
+import { lookup as dnsLookup } from 'node:dns';
+import type {
+  LookupAddress,
+  LookupAllOptions,
+} from 'node:dns';
+import { Agent as HttpsAgent } from 'node:https';
 import webPush from 'web-push';
 import type { Address } from 'viem';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { isPrivateHost } from '@/lib/net/privateHost';
 import {
   listPushSubscriptions,
   refreshPushSubscriptionsTtl,
@@ -32,6 +39,63 @@ export type SendPushSummary = {
 };
 
 const SEND_TIMEOUT_MS = 3_500;
+
+type LookupAll = (
+  hostname: string,
+  options: LookupAllOptions,
+  callback: (
+    error: NodeJS.ErrnoException | null,
+    addresses: LookupAddress[],
+  ) => void,
+) => void;
+
+function blockedAddressError(): NodeJS.ErrnoException {
+  const error = new Error('push_blocked_private_address') as NodeJS.ErrnoException;
+  error.code = 'EACCES';
+  return error;
+}
+
+// send ごとに新しい Agent を作り、socket reuse で lookup が省略されないようにする。lookup は A/AAAA
+// を全件取得し、1 件でも private・空・解決失敗なら https.request の接続前に callback error で止める。
+export function createPushHttpsAgent(
+  lookupAll: LookupAll = dnsLookup,
+): HttpsAgent {
+  return new HttpsAgent({
+    keepAlive: false,
+    lookup: (hostname, options, callback) => {
+      try {
+        lookupAll(
+          hostname,
+          { ...options, all: true, verbatim: true },
+          (error, addresses) => {
+            if (error) {
+              callback(error, '', 0);
+              return;
+            }
+            if (
+              addresses.length === 0 ||
+              addresses.some((address) => isPrivateHost(address.address))
+            ) {
+              callback(blockedAddressError(), '', 0);
+              return;
+            }
+            if (options.all) {
+              callback(null, addresses);
+              return;
+            }
+            callback(null, addresses[0].address, addresses[0].family);
+          },
+        );
+      } catch (error) {
+        callback(
+          error instanceof Error ? error : new Error('push_dns_lookup_failed'),
+          '',
+          0,
+        );
+      }
+    },
+  });
+}
 
 export async function sendPushToWallet(
   wallet: Address | string,
@@ -95,6 +159,14 @@ async function sendOne(
 ): Promise<'sent' | 'pruned' | 'failed'> {
   const payload = resolvePushPayload(payloadInput, sub);
   try {
+    const endpoint = new URL(sub.endpoint);
+    if (endpoint.protocol !== 'https:' || isPrivateHost(endpoint.hostname)) {
+      logger.warn('push.send_blocked_private_endpoint', {
+        endpointHash: sub.endpointHash,
+      });
+      return 'failed';
+    }
+    const agent = createPushHttpsAgent();
     await withTimeout(
       webPush.sendNotification(
         {
@@ -107,6 +179,7 @@ async function sendOne(
           // ?from=push: /history 側で最新の受取エントリを一時ハイライトする着地マーカー。
           url: `/${sub.locale}/history?from=push`,
         }),
+        { agent, timeout: SEND_TIMEOUT_MS },
       ),
       SEND_TIMEOUT_MS,
     );
