@@ -28,17 +28,16 @@ export type AgentGuideLocale = 'ja' | 'en';
 // 単一情報源にすることで、万一 tokens.ts 側が更新されても表示が自動追従し drift を防ぐ (test でも同値照合)。
 export const JPYC_CONTRACT_ADDRESS = defaultDeploymentForSymbol('jpyc').address;
 
-// MCP 設定スニペット (ja/en 共通・言語非依存)。**鍵不要** の handoff 経路向け:
-// createOrderLink / order_menu / order_quote は BUYER_PRIVATE_KEY なしで動く (README「Tools」表 + guards.mjs
-// の buyerPrivateKey optional)。x402_pay だけが鍵を要するが、本ガイドの経路 (人が自分のウォレットで払う)
-// では使わないため、あえて鍵を含めない = 「AI に財布を持たせない」原則をそのまま設定に反映する。
-// command/args は packages/x402-mcp の bin (`openpay-x402-mcp`) と README の npx 呼び出しに一致。
+// MCP 設定スニペット (ja/en 共通・言語非依存)。**鍵不要** の order profile 向け:
+// order_menu / order_summary / createOrderLink の 3 ツールだけを公開し、BUYER_PRIVATE_KEY は不要。
+// x402_pay / order_quote は profile 自体に存在しないため、「AI に財布を持たせない」原則を設定面で固定する。
+// command/args は packages/x402-mcp の副 bin (`openpay-order-mcp`) と README の npx 呼び出しに一致。
 const MCP_CONFIG_JSON = [
   '{',
   '  "mcpServers": {',
-  '    "openpay-x402": {',
+  '    "openpay-order": {',
   '      "command": "npx",',
-  '      "args": ["openpay-x402-mcp"]',
+  '      "args": ["--yes", "--package=openpay-x402-mcp", "--", "openpay-order-mcp"]',
   '    }',
   '  }',
   '}',
@@ -156,7 +155,7 @@ const ja: AgentGuideContent = {
 
   setupTitle: 'セットアップ（AI に MCP を追加）',
   setupIntro:
-    'openpay-x402-mcp は、お店のメニュー取得・注文の組み立て・決済リンク作成を AI から使えるようにする MCP サーバーです。この経路では支払いは AI ではなくあなたが行うため、ウォレットの鍵は設定に含めません。',
+    'openpay-x402-mcp の order profile（openpay-order-mcp）は、お店のメニュー取得・支払額の確認・決済リンク作成だけを AI から使えるようにする MCP サーバーです。AI が自動決済するツールは含まれず、ウォレットの鍵も設定に含めません。',
   setupSteps: [
     {
       n: 1,
@@ -166,7 +165,7 @@ const ja: AgentGuideContent = {
     {
       n: 2,
       title: '下記の設定を追加して再起動',
-      body: '次のブロックを mcpServers に追加して保存し、クライアントを再起動します。npx が openpay-x402-mcp を取得して起動します（Node.js 20 以上が必要）。',
+      body: '次のブロックを mcpServers に追加して保存し、クライアントを再起動します。npx が openpay-x402-mcp パッケージを取得し、鍵なしの openpay-order-mcp を起動します（Node.js 20 以上が必要）。',
     },
     {
       n: 3,
@@ -275,7 +274,7 @@ const ja: AgentGuideContent = {
 
   ctaTitle: 'AIストアを見てみる',
   ctaBody:
-    'openpay-x402-mcp を AI に追加すれば、今日から母国語で日本のお店に注文できます。支払いに対応したリソースは「AIストア」で確認できます。',
+    'openpay-order-mcp を AI に追加すれば、鍵を渡さずに母国語で日本のお店への注文を組み立てられます。支払いに対応したリソースは「AIストア」で確認できます。',
   ctaButton: 'AIストアを見る',
   ctaButtonHref: '/discovery',
 
@@ -323,7 +322,7 @@ const en: AgentGuideContent = {
 
   setupTitle: 'Setup (add the MCP to your AI)',
   setupIntro:
-    'openpay-x402-mcp lets your AI read a shop menu, build an order, and create a checkout link. On this path you (not the AI) pay, so no wallet key goes into the config.',
+    'The order profile in openpay-x402-mcp (openpay-order-mcp) lets your AI read a shop menu, check the amount, and create a checkout link. It includes no autonomous-payment tools, so no wallet key goes into the config.',
   setupSteps: [
     {
       n: 1,
@@ -333,7 +332,7 @@ const en: AgentGuideContent = {
     {
       n: 2,
       title: 'Add the config below and restart',
-      body: 'Add the block below to mcpServers, save, and restart the client. npx fetches and starts openpay-x402-mcp (Node.js 20+ required).',
+      body: 'Add the block below to mcpServers, save, and restart the client. npx fetches the openpay-x402-mcp package and starts the keyless openpay-order-mcp profile (Node.js 20+ required).',
     },
     {
       n: 3,
@@ -441,7 +440,7 @@ const en: AgentGuideContent = {
 
   ctaTitle: 'Explore the AI store',
   ctaBody:
-    'Add openpay-x402-mcp to your AI and you can order at Japanese shops in your own language today. Payable resources are listed in the “AI store”.',
+    'Add openpay-order-mcp to your AI and build orders at Japanese shops in your own language without handing it a key. Payable resources are listed in the “AI store”.',
   ctaButton: 'Open the AI store',
   ctaButtonHref: '/discovery',
 

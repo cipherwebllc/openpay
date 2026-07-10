@@ -1,11 +1,96 @@
 # openpay-x402-mcp
 
-Local MCP buyer for OpenPay x402 JPYC resources. It runs on your machine, signs with either a local buyer key or a remote Steward signer, and applies local spend guards before any payment is sent.
+One package with two explicit MCP profiles:
 
-## Install
+- `openpay-order-mcp`: keyless, human-pays mobile ordering. The AI reads the
+  menu, summarizes the total, and creates a checkout link; the person pays from
+  their own wallet.
+- `openpay-x402-mcp`: the backward-compatible full profile for x402 discovery,
+  quotes, guarded autonomous payment, and mobile ordering.
+
+## Order profile (keyless, human pays)
+
+### Install / run
+
+```bash
+npx --yes --package=openpay-x402-mcp -- openpay-order-mcp
+```
+
+### Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "openpay-order": {
+      "command": "npx",
+      "args": ["--yes", "--package=openpay-x402-mcp", "--", "openpay-order-mcp"]
+    }
+  }
+}
+```
+
+### Claude Code
+
+```json
+{
+  "mcpServers": {
+    "openpay-order": {
+      "command": "npx",
+      "args": ["--yes", "--package=openpay-x402-mcp", "--", "openpay-order-mcp"]
+    }
+  }
+}
+```
+
+This profile needs no `BUYER_PRIVATE_KEY`. It exposes only `order_menu`,
+`order_summary`, and `createOrderLink`.
+
+## x402 profile (full, autonomous payment)
+
+### Install / run
 
 ```bash
 npx openpay-x402-mcp
+```
+
+### Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "openpay-x402": {
+      "command": "npx",
+      "args": ["openpay-x402-mcp"],
+      "env": {
+        "SIGNER_MODE": "env-key",
+        "BUYER_PRIVATE_KEY": "0x...",
+        "MAX_PER_CALL_JPYC": "10",
+        "MAX_SESSION_JPYC": "100",
+        "ALLOWED_HOSTS": "open-pay.jp"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+```json
+{
+  "mcpServers": {
+    "openpay-x402": {
+      "command": "npx",
+      "args": ["openpay-x402-mcp"],
+      "env": {
+        "SIGNER_MODE": "env-key",
+        "BUYER_PRIVATE_KEY": "0x...",
+        "MAX_PER_CALL_JPYC": "10",
+        "MAX_SESSION_JPYC": "100",
+        "ALLOWED_HOSTS": "open-pay.jp"
+      }
+    }
+  }
+}
 ```
 
 During local development from this repository:
@@ -13,47 +98,8 @@ During local development from this repository:
 ```bash
 cd packages/x402-mcp
 npm i
-node src/index.mjs
-```
-
-## Claude Desktop
-
-```json
-{
-  "mcpServers": {
-    "openpay-x402": {
-      "command": "npx",
-      "args": ["openpay-x402-mcp"],
-      "env": {
-        "SIGNER_MODE": "env-key",
-        "BUYER_PRIVATE_KEY": "0x...",
-        "MAX_PER_CALL_JPYC": "10",
-        "MAX_SESSION_JPYC": "100",
-        "ALLOWED_HOSTS": "open-pay.jp"
-      }
-    }
-  }
-}
-```
-
-## Claude Code
-
-```json
-{
-  "mcpServers": {
-    "openpay-x402": {
-      "command": "npx",
-      "args": ["openpay-x402-mcp"],
-      "env": {
-        "SIGNER_MODE": "env-key",
-        "BUYER_PRIVATE_KEY": "0x...",
-        "MAX_PER_CALL_JPYC": "10",
-        "MAX_SESSION_JPYC": "100",
-        "ALLOWED_HOSTS": "open-pay.jp"
-      }
-    }
-  }
-}
+node src/index.mjs       # x402 profile
+node src/order.mjs       # order profile
 ```
 
 ## Quickstart: buy a JPYC resource
@@ -73,15 +119,15 @@ The buyer pays the resource price **plus the ~1% x402 fee** (`total = price + fe
 
 ## Tools
 
-| Tool | Pays? | Purpose |
-|---|---:|---|
-| `discovery_search` | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
-| `x402_quote` | No | Fetch a 402 challenge and report whether local guards would allow payment. |
-| `x402_pay` | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
-| `order_menu` | No | Read an OpenPay `@handle` shop's public mobile-order menu (`{handle}`): item ids, names, prices, and `hasOptions`. No key needed. |
-| `order_quote` | No | **Auto-pay only** (the agent itself holds a funded key). Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and fetch its x402 challenge (price, fee, total, guard reasons — the buyer covers the ~1% fee on top of the subtotal). Returns the canonical pay `url`; pay it with `x402_pay`. For human-pays, use `order_summary` + `createOrderLink`. |
-| `order_summary` | No | **Human-pays** (the customer pays from their own wallet). Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and return the amount the customer actually pays — the subtotal; the shop covers the ~1% service fee (store-borne, no floor). No key needed. Pair with `createOrderLink`. |
-| `createOrderLink` | No | Build a **human-facing** checkout link for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`). Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`; the traveler opens it and pays from their own wallet. **No key needed.** Pair with `order_summary` to state the exact amount. |
+| Tool | Profile | Pays? | Purpose |
+|---|---|---:|---|
+| `discovery_search` | x402 | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
+| `x402_quote` | x402 | No | Fetch a 402 challenge and report whether local guards would allow payment. |
+| `x402_pay` | x402 | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
+| `order_menu` | order, x402 | No | Read an OpenPay `@handle` shop's public mobile-order menu (`{handle}`): item ids, names, prices, and `hasOptions`. No key needed. |
+| `order_quote` | x402 | No | **Auto-pay only** (the agent itself holds a funded key). Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and fetch its x402 challenge (price, fee, total, guard reasons — the buyer covers the ~1% fee on top of the subtotal). Returns the canonical pay `url`; pay it with `x402_pay`. For human-pays, use `order_summary` + `createOrderLink`. |
+| `order_summary` | order, x402 | No | **Human-pays** (the customer pays from their own wallet). Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and return the amount the customer actually pays — the subtotal; the shop covers the ~1% service fee (store-borne, no floor). No key needed. Pair with `createOrderLink`. |
+| `createOrderLink` | order, x402 | No | Build a **human-facing** checkout link for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`). Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`; the traveler opens it and pays from their own wallet. **No key needed.** Pair with `order_summary` to state the exact amount. |
 
 Two ways to order:
 
