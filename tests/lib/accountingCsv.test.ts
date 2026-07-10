@@ -41,7 +41,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
-    saleAmount: '1000000000000000000000',
+    saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
     anchorAmount: null,
@@ -69,6 +69,7 @@ const JPYC = entry({ asset: 'jpyc', merchantAmount: '1000000000000000000000' });
 const USDC_ANCHOR = entry({
   asset: 'usdc',
   merchantAmount: '6400000',
+  saleAmount: '7000000', // anchor 円額と二重適用しないことを既存期待値で固定
   anchorAmount: '1500',
   anchorSymbol: 'jpyc',
   fxRateUsdcJpy: '156.32',
@@ -83,6 +84,26 @@ const FEE_LEG = entry({ flow: 'standard-fee', status: 'success' });
 const ERRORED = entry({ status: 'error' });
 
 describe('toAccountingCsv: freee 形式', () => {
+  it('店舗負担手数料は saleAmount (gross) で出力し standard-fee leg は除外', () => {
+    const grossSale = entry({
+      merchantAmount: '990000000000000000000',
+      saleAmount: '1000000000000000000000',
+    });
+    const feeLeg = entry({
+      flow: 'standard-fee',
+      merchantAmount: '10000000000000000000',
+      saleAmount: null,
+    });
+    const r = toAccountingCsv([grossSale, feeLeg], {
+      format: 'freee',
+      usdcJpy: undefined,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.rowCount).toBe(1);
+    expect(parseRows(r.csv)[1][4]).toBe('1000');
+  });
+
   it('ヘッダ + income-success のみ (status フィルタ非依存で revert/error/手数料を除外)', () => {
     const r = toAccountingCsv(
       [JPYC, USDC_ANCHOR, USDC_PLAIN, REVERTED, FEE_LEG, ERRORED],

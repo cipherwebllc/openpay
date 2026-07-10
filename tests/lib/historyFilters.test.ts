@@ -41,7 +41,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     circlePaymasterAddress: null,
     circlePaymasterNetUsdc: null,
     circleVerification: null,
-    saleAmount: '1000000000000000000000',
+    saleAmount: null,
     networkFeeEquivalent: null,
     feeBreakdownVersion: 1,
     anchorAmount: null,
@@ -110,6 +110,21 @@ describe('isIncomeSaleEntry', () => {
 });
 
 describe('summarizeHistory', () => {
+  it('店舗負担手数料の JPYC 売上は saleAmount (gross)、standard-fee leg は GMV 除外', () => {
+    const sale = entry({
+      merchantAmount: '990000000000000000000',
+      saleAmount: '1000000000000000000000',
+    });
+    const fee = entry({
+      flow: 'standard-fee',
+      merchantAmount: '10000000000000000000',
+      saleAmount: null,
+    });
+    const s = summarizeHistory([sale, fee], undefined);
+    expect(s.gmvYen).toBe(1000);
+    expect(s.tokenTotals.jpyc).toBe('990000000000000000000');
+  });
+
   it('counts は全体・tokenTotals/GMV は income-sale のみ', () => {
     const entries = [
       entry({ asset: 'jpyc', status: 'success', merchantAmount: '1000000000000000000000' }), // +1000円

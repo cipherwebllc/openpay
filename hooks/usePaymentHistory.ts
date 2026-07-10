@@ -89,7 +89,8 @@ function saveReceiptFor(entry: HistoryEntry, ctx: AppendPaymentHistoryCtx): void
 type SubmittedAmounts = {
   merchantAmount: bigint;
   feeAmount: bigint;
-  // gasless の submit snapshot のみ設定する (standard は未設定 → ctx fallback / 導出)。
+  // standard / gasless とも、呼出側が商品小計 (gross) を確定できる経路では設定する。
+  // 未設定の旧呼出側は standard なら merchantAmount+feeAmount、gasless なら ctx へ fallback。
   saleAmount?: bigint | null;
   networkFeeEquivalent?: bigint | null;
 };
@@ -168,13 +169,15 @@ export function usePaymentHistory(
     standardSubmittedParams?.merchantAmount ?? ctx.merchantAmount;
   const standardFeeAmount =
     standardSubmittedParams?.feeAmount ?? ctx.feeAmount;
-  // standard は gas 概念が無い。売上総額は submit snapshot (merchant 着金 + 手数料) から
-  // 復元して drift を避ける (手数料 = 0 の現状は merchantAmount に一致)。snapshot 不在の
-  // 旧 test 互換では ctx.saleAmount に fallback。
+  // standard は gas 概念が無い。売上総額は submit snapshot の saleAmount (商品小計) を最優先。
+  // 顧客上乗せモバイル注文では merchantAmount=商品小計・feeAmount=顧客負担手数料なので、
+  // merchantAmount+feeAmount は店舗売上を過大にする。saleAmount 未送信の旧呼出側だけ従来式、
+  // snapshot 自体が無い旧 test は ctx.saleAmount へ fallback する。
   const standardSaleAmount =
-    standardSubmittedParams != null
+    standardSubmittedParams?.saleAmount ??
+    (standardSubmittedParams
       ? standardSubmittedParams.merchantAmount + standardSubmittedParams.feeAmount
-      : ctx.saleAmount;
+      : ctx.saleAmount);
 
   // 異通貨建ての anchor (ctx.anchor*) は各 sale leg の buildHistoryEntry で直接読む
   // (手数料徴収 leg = standard-fee は sale ではないため付けない)。

@@ -597,6 +597,33 @@ describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で�
     expect(at('明細')).toBe('コーヒー×2@550');
   });
 
+  it('店舗負担手数料の JPYC 税額は saleAmount (gross) から算出', () => {
+    const csv = toCsv([
+      entry({
+        merchantAmount: '990000000000000000000', // net なら内税 90
+        saleAmount: '1100000000000000000000', // gross 1100 なら内税 100
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+      }),
+    ]);
+    expect(cellsByHeader(csv)('税額(円)')).toBe('100');
+  });
+
+  it('standard-fee leg は taxRate があっても税額セルを空にする', () => {
+    const csv = toCsv([
+      entry({
+        flow: 'standard-fee',
+        merchantAmount: '11000000000000000000',
+        saleAmount: null,
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+      }),
+    ]);
+    const at = cellsByHeader(csv);
+    expect(at('税率(%)')).toBe('10');
+    expect(at('税額(円)')).toBe('');
+  });
+
   it('USDC anchor 付き: 税額は anchor 円から算出 (rate 非依存)', () => {
     const csv = toCsv([
       entry({
