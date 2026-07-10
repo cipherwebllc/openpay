@@ -32,10 +32,11 @@ import {
 } from '@/lib/relay/relayProvider';
 import { isRecoverRequiredChain } from '@/lib/relay/forwarderConfig';
 import { isKvConfigured } from '@/lib/kv';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import {
   MAX_BODY_BYTES,
   isDec,
-  anonymizeIp,
   makeRespond,
 } from '@/lib/relay/relayRoute';
 
@@ -43,7 +44,7 @@ export const runtime = 'nodejs';
 
 const CSV_PASS_RELAY_MAX_MULTIPLE = 10n;
 
-// MAX_BODY_BYTES / isDec / anonymizeIp / respond は共有 relayRoute へ集約 (決済 relay と同形)。
+// MAX_BODY_BYTES / isDec / respond は共有 relayRoute へ集約 (決済 relay と同形)。
 // respond は logger イベント prefix を 'csvpass.relay' で束ね、現行のイベント名を完全再現する
 // (応答 body/status は決済 relay と同形)。
 const respond = makeRespond('csvpass.relay');
@@ -70,6 +71,20 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json(
       { ok: false, error: 'relay_not_configured' },
       { status: 503 },
+    );
+  }
+  if (
+    !(await checkIpRateLimit(
+      'relay-admission',
+      hashIp(clientIp(req)),
+      120,
+      60,
+    ))
+  ) {
+    // IP 単位の濫用を認証/署名検証/RPC 前で止め、relayer 資源と daily budget への波及を断つ。
+    return NextResponse.json(
+      { error: 'ip_rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
     );
   }
 
@@ -174,10 +189,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     nonce: raw.nonce as Hex,
   };
 
-  const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-  );
-
   logger.info('csvpass.relay.submit', { chainId, from });
 
   // 共通 free relay (self-host/Gelato submit・poll・rate-limit・日次予算・idempotency)。idem は
@@ -186,7 +197,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     chainId,
     auth,
     raw.signature as Hex,
-    [auth.from, ipPrefix],
+    [auth.from],
     { idemPrefix: 'csvpassrelay:idem:' },
   );
   return respond(result, chainId);

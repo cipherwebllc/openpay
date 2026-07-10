@@ -2,7 +2,7 @@
 // relayGuards → self-host submit/poll を実走させ、KV key の名前空間を endpoint 入口から固定する。
 // 外すのは KV と on-chain I/O のみで、relayProvider / relayGuards / jpycRelay はモックしない。
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -126,9 +126,12 @@ vi.mock('@/lib/kv', () => ({
   },
 }));
 
-const session = vi.hoisted(() => ({ address: '' }));
+const session = vi.hoisted(() => ({ address: '', calls: 0 }));
 vi.mock('../../../app/api/auth/siwe/_session', () => ({
-  requireSession: async () => ({ ok: true, address: session.address }),
+  requireSession: async () => {
+    session.calls += 1;
+    return { ok: true, address: session.address };
+  },
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -151,6 +154,7 @@ vi.mock('@/lib/logger', () => ({
 import { POST } from '@/app/api/csv-pass/relay/route';
 import { csvPassPriceWei } from '@/lib/csvPass';
 import { buildTransferWithAuthorizationTypedData } from '@/lib/jpycEip3009';
+import { hashIp } from '@/lib/net/ipHash';
 import { gasBudgetKey, IDEM_TTL_SEC } from '@/lib/relay/relayGuards';
 
 const customer = privateKeyToAccount(CUSTOMER_PK);
@@ -158,6 +162,7 @@ const customer = privateKeyToAccount(CUSTOMER_PK);
 beforeEach(() => {
   expect(process.env.RELAYER_PRIVATE_KEY).toBe(RELAYER_PK);
   session.address = customer.address;
+  session.calls = 0;
   kv.values.clear();
   kv.lists.clear();
   kv.counters.clear();
@@ -166,6 +171,10 @@ beforeEach(() => {
   kv.expireCalls.length = 0;
   io.readFunctions.length = 0;
   io.sentRaw.length = 0;
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('POST /api/csv-pass/relay 実 provider 配線', () => {
@@ -211,16 +220,46 @@ describe('POST /api/csv-pass/relay 実 provider 配線', () => {
     });
     expect(kv.setCalls.some((call) => call.key.startsWith('relay:idem:'))).toBe(false);
 
-    expect(kv.lists.has(`relay:rl:${customer.address}`)).toBe(true);
-    expect(kv.lists.has('relay:rl:203.0.113.0/24')).toBe(true);
-    expect([...kv.lists.keys()].every((key) => key.startsWith('relay:rl:'))).toBe(true);
+    expect([...kv.lists.keys()]).toEqual([`relay:rl:${customer.address}`]);
+    expect(kv.lists.has('relay:rl:203.0.113.0/24')).toBe(false);
 
     const budgetKey = gasBudgetKey(AMOY);
     expect(kv.incrKeys).toEqual([budgetKey]);
+    expect(kv.incrKeys.some((key) => key.startsWith('iprl:v1:'))).toBe(false);
     expect(budgetKey.startsWith(`relay:budget:${AMOY}:`)).toBe(true);
     expect(io.readFunctions).toEqual(
       expect.arrayContaining(['balanceOf', 'authorizationState']),
     );
     expect(io.sentRaw).toEqual(['0x1234']);
+  });
+
+  it('IP_HASH_SECRET 設定時は 121 回目を session/署名/RPC/daily budget 前に 429 で止める', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    const ip = '203.0.113.42';
+    const hashedIp = hashIp(ip);
+    expect(hashedIp).not.toBeNull();
+    const ipKey = `iprl:v1:relay-admission:${hashedIp}`;
+    kv.counters.set(ipKey, 120);
+
+    const res = await POST(
+      new Request('http://localhost/api/csv-pass/relay', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': ip,
+        },
+        body: '{body must not be read',
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'ip_rate_limited' });
+    expect(res.headers.get('Retry-After')).toBe('60');
+    expect(session.calls).toBe(0);
+    expect(kv.incrKeys).toEqual([ipKey]);
+    expect(kv.incrKeys).not.toContain(gasBudgetKey(AMOY));
+    expect(kv.lists.size).toBe(0);
+    expect(io.readFunctions).toHaveLength(0);
+    expect(io.sentRaw).toHaveLength(0);
   });
 });
