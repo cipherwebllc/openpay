@@ -64,6 +64,7 @@ import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import {
   isFallbackSafeRelayError,
+  isRelayIpRateLimitedError,
   isRelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -255,6 +256,9 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
+  const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
+    ? relay.error
+    : null;
   const directFlowPending = useRelay
     ? relay.isPending || relayResponseUnknown
     : gasless.isPending;
@@ -286,6 +290,7 @@ export function TipForm({ params }: { params: TipParams }) {
     (!useRelay && !!gasless.data?.success) ||
     (useRelay &&
       (relayResponseUnknown ||
+        !!relayIpRateLimited ||
         (!!relay.data && (relay.data.success || !!relay.data.pending))));
   const settledNoRetry = directSettledNoRetry || !!crossChainResult;
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
@@ -914,6 +919,29 @@ export function TipForm({ params }: { params: TipParams }) {
             {t('responseUnknownTitle')}
           </p>
           <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
+        </div>
+      )}
+
+      {/* relay IP rate limit: idem 確認前の 429 なので main Pay / 再署名を封鎖し、保持済みの
+          同一署名 payload の再 POST だけを許可する。 */}
+      {relayIpRateLimited && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
+          <p className="mt-1 break-words">
+            {relayIpRateLimited.retryAfterSeconds === null
+              ? t('ipRateLimitedBody')
+              : t('ipRateLimitedBodyWithRetryAfter', {
+                  seconds: relayIpRateLimited.retryAfterSeconds,
+                })}
+          </p>
+          <button
+            type="button"
+            disabled={relay.isPending}
+            onClick={relay.retryRelay}
+            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('ipRateLimitedRetryButton')}
+          </button>
         </div>
       )}
 

@@ -54,6 +54,7 @@ import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import {
   isFallbackSafeRelayError,
+  isRelayIpRateLimitedError,
   isRelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
@@ -396,8 +397,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
 
   // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
-  // response-unknown の再送封鎖を外さないため current route とは独立に判定する。
+  // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
+  const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
+    ? relay.error
+    : null;
   const directFlowPending = relayResponseUnknown
     ? true
     : isStandard
@@ -414,6 +418,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する。
   const directSettledNoRetry =
     relayResponseUnknown ||
+    !!relayIpRateLimited ||
     (!isStandard && !useRelay && !!gasless.data?.success) ||
     (useRelay &&
       !!relay.data &&
@@ -1244,6 +1249,29 @@ function PaymentDetails({ params }: { params: PayParams }) {
             {t('responseUnknownTitle')}
           </p>
           <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
+        </div>
+      )}
+
+      {/* relay IP rate limit: idem 確認前の 429 なので main Pay / standard fallback / 再署名を
+          封鎖し、保持済みの同一署名 payload の再 POST だけを許可する。 */}
+      {relayIpRateLimited && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+          <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
+          <p className="mt-1 break-words">
+            {relayIpRateLimited.retryAfterSeconds === null
+              ? t('ipRateLimitedBody')
+              : t('ipRateLimitedBodyWithRetryAfter', {
+                  seconds: relayIpRateLimited.retryAfterSeconds,
+                })}
+          </p>
+          <button
+            type="button"
+            disabled={relay.isPending}
+            onClick={relay.retryRelay}
+            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('ipRateLimitedRetryButton')}
+          </button>
         </div>
       )}
 

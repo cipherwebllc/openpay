@@ -34,6 +34,7 @@ import type { TokenDeployment } from '@/lib/tokens';
 import { env } from '@/lib/env';
 import { EIP3009_RELAY_CHAINS } from '@/lib/jpycGaslessProvider';
 import { useLocalStorageRecord } from '@/hooks/useLocalStorageRecord';
+import { RelayIpRateLimitedError } from '@/lib/relay/relayResponseError';
 
 export type EntitlementPayPhase =
   | 'idle'
@@ -146,7 +147,15 @@ type RelayResponse = {
   reverted?: boolean;
   pending?: boolean;
   error?: string;
+  retryAfter?: number;
 };
+
+function retryAfterSeconds(res: Response, body: RelayResponse): number | null {
+  const raw = body.retryAfter ?? res.headers.get('retry-after');
+  if (raw === null || raw === undefined || raw === '') return null;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
+}
 
 export function useJpycEntitlementPay(
   deployment: TokenDeployment,
@@ -166,6 +175,9 @@ export function useJpycEntitlementPay(
   const [phase, setPhase] = useState<EntitlementPayPhase>('idle');
   // relay 未構成 (503/relay_not_configured) を検知したら true。UI はガスあり fallback を提示する。
   const [gaslessUnavailable, setGaslessUnavailable] = useState(false);
+  // 署名済 payload の同一再 POST だけを許可する relay 契約エラー。通常の送金/subscribe error と
+  // 分離し、CSV pass UI が生の payWrite error と取り違えないようにする。
+  const [relayError, setRelayError] = useState<Error | null>(null);
   // 送金確定後の txHash / その chain を保持し、subscribe 失敗時はこの hash で subscribe だけ再試行する。
   const payTxRef = useRef<Hex | null>(null);
   const payChainIdRef = useRef<number | null>(null);
@@ -244,6 +256,7 @@ export function useJpycEntitlementPay(
   // relay は決済 relay (broadcast 後) と同じ扱い: {ok|pending,txHash} は savePending→subscribe へ。
   const postGaslessRelay = useCallback(
     async (payload: GaslessSignResult, signerWallet: Address): Promise<void> => {
+      setRelayError(null);
       let res: Response;
       try {
         res = await fetch(relayEndpoint as string, {
@@ -266,6 +279,17 @@ export function useJpycEntitlementPay(
         body = (await res.json()) as RelayResponse;
       } catch {
         /* non-JSON */
+      }
+
+      // 早期 IP limiter は idem/authorizationState 確認より前に返る。初回 POST の応答だけが
+      // 失われていた可能性を排除できないため、署名済 payload を保持して同一再 POST のみに倒す。
+      if (res.status === 429 && body.error === 'ip_rate_limited') {
+        const error = new RelayIpRateLimitedError(retryAfterSeconds(res, body));
+        gaslessPayloadRef.current = payload;
+        savePendingSig({ payload, wallet: signerWallet });
+        setRelayError(error);
+        setPhase('pay-error');
+        return;
       }
 
       // relay 未構成/不可 (503) → ガスあり fallback を UI に出す (自動フォールバックはしない)。
@@ -321,7 +345,7 @@ export function useJpycEntitlementPay(
         return;
       }
 
-      // その他のエラー = 確定的な事前拒否 (4xx rejected: 検証不一致/期限切れ/rate-limit 等) または
+      // その他のエラー = 確定的な事前拒否 (4xx rejected: 検証不一致/期限切れ等) または
       // relay_error (502 = submit 層の throw・relay の確立済み不変条件で「fallback safe = 未送信扱い」)。
       // いずれも broadcast されていないので payload を**破棄**する — 保持すると壊れた payload の
       // 無限リプレイに閉じ込め、再署名もガスあり購入もできなくなる (Codex P2)。ユーザは通常 CTA から
@@ -585,6 +609,7 @@ export function useJpycEntitlementPay(
     payTxHash: payWrite.data ?? payTxRef.current ?? null,
     expiresAt: subscribe.data?.expiresAt ?? null,
     error:
+      relayError ??
       payWrite.error ??
       payReceipt.error ??
       (subscribe.error as Error | null) ??

@@ -80,6 +80,7 @@ const SIGNATURE = ('0x' + 'b'.repeat(130)) as `0x${string}`;
 
 import { useCsvPassSubscribe } from '@/hooks/useCsvPassSubscribe';
 import { csvPassPriceWei } from '@/lib/csvPassConstants';
+import { isRelayIpRateLimitedError } from '@/lib/relay/relayResponseError';
 
 const deployment = { address: DEPLOYMENT_ADDRESS } as never;
 
@@ -321,6 +322,63 @@ describe('useCsvPassSubscribe ガスレス購入 (relay 経路)', () => {
       (c, i) => c[0] === '/api/csv-pass/relay' && i > 0,
     )!;
     expect((secondRelayCall[1] as RequestInit).body).toEqual(firstRelayBody);
+  });
+
+  it('429 ip_rate_limited → payload 保持 + 同一 payload 再 POST のみ（再署名なし）', async () => {
+    let allowRelaySuccess = false;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url: RequestInfo | URL) => {
+        const u = String(url);
+        if (u === '/api/csv-pass/relay') {
+          if (!allowRelaySuccess) {
+            return new Response(
+              JSON.stringify({ ok: false, error: 'ip_rate_limited' }),
+              { status: 429, headers: { 'retry-after': '30' } },
+            );
+          }
+          return new Response(JSON.stringify({ ok: true, txHash: TX }), {
+            status: 200,
+          });
+        }
+        return new Response(
+          JSON.stringify({ ok: true, wallet: WALLET, expiresAt: 1 }),
+          { status: 200 },
+        );
+      });
+    const { result } = renderHook(() => useCsvPassSubscribe(deployment), {
+      wrapper,
+    });
+
+    await act(async () => {
+      result.current.start();
+    });
+    await waitFor(() => expect(result.current.isPayError).toBe(true));
+    expect(result.current.canRetryRelay).toBe(true);
+    expect(isRelayIpRateLimitedError(result.current.error)).toBe(true);
+    if (!isRelayIpRateLimitedError(result.current.error)) {
+      throw new Error('expected RelayIpRateLimitedError');
+    }
+    expect(result.current.error.retryAfterSeconds).toBe(30);
+    expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).not.toBeNull();
+    expect(signTypedDataMock).toHaveBeenCalledTimes(1);
+    const beforeRetryBodies = fetchSpy.mock.calls
+      .filter((c) => c[0] === '/api/csv-pass/relay')
+      .map((c) => (c[1] as RequestInit).body);
+    expect(beforeRetryBodies.length).toBeGreaterThan(0);
+
+    allowRelaySuccess = true;
+    await act(async () => {
+      result.current.retryRelay();
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const relayBodies = fetchSpy.mock.calls
+      .filter((c) => c[0] === '/api/csv-pass/relay')
+      .map((c) => (c[1] as RequestInit).body);
+    expect(relayBodies.every((body) => body === relayBodies[0])).toBe(true);
+    expect(signTypedDataMock).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
   });
 
   it('pending(txHash 無し) を localStorage から remount resume し同一 payload を再 POST', async () => {
