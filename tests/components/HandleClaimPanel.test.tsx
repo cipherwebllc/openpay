@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
-import type { HandleTipConfig } from '@/lib/handle';
+import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 
 // env フラグ / SIWE 状態を制御する hoisted state。
 const h = vi.hoisted(() => ({ enableHandles: true, isSignedIn: false }));
@@ -45,13 +45,23 @@ function renderPanel(
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
     <QueryClientProvider client={qc}>
-      <HandleClaimPanel config={config} {...extra} />
+      <HandleClaimPanel
+        payload={config ? { config, profile: {} } : null}
+        {...extra}
+      />
     </QueryClientProvider>,
   );
 }
 
 // サインイン済みフロー用: GET /api/handle (mine) を所有1件で応答する fetch スタブ。
-function stubMine(handles: { handle: string; config: HandleTipConfig }[]) {
+function stubMine(
+  handles: {
+    handle: string;
+    config: HandleTipConfig;
+    profile?: HandleProfile;
+    updatedAt?: number;
+  }[],
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: RequestInfo | URL) => {
@@ -126,7 +136,7 @@ describe('HandleClaimPanel', () => {
       expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
     // バナーは一覧側 (該当行) とフォーム側の両方に出る
-    expect(screen.getAllByText('「@alice」を編集中').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('公開中 @alice').length).toBeGreaterThan(0);
     // 別名を入力すると「同内容の複製になる」事前警告
     fireEvent.change(screen.getByPlaceholderText('alice'), {
       target: { value: 'bob' },
@@ -165,7 +175,7 @@ describe('HandleClaimPanel', () => {
     vi.stubGlobal('fetch', fetchMock);
     const onPublished = vi.fn();
     renderPanel(CONFIG, {
-      profile: { bio: 'hi' },
+      payload: { config: CONFIG, profile: { bio: 'hi' } },
       onPublished,
     });
     fireEvent.change(screen.getByPlaceholderText('alice'), {
@@ -177,7 +187,11 @@ describe('HandleClaimPanel', () => {
         screen.getByText('「@bob」を取得しました！続けてこのまま編集・更新できます。'),
       ).toBeInTheDocument(),
     );
-    expect(onPublished).toHaveBeenCalledWith('bob');
+    expect(onPublished).toHaveBeenCalledWith({
+      handle: 'bob',
+      payload: { config: CONFIG, profile: { bio: 'hi' } },
+      updatedAt: expect.any(Number),
+    });
     // POST body が現在の config/profile をそのまま運ぶこと (机上でなく実検証)
     const post = fetchMock.mock.calls.find(
       (c) => (c[1] as RequestInit | undefined)?.method === 'POST',
@@ -217,7 +231,7 @@ describe('HandleClaimPanel', () => {
         });
       }),
     );
-    renderPanel(CONFIG);
+    renderPanel(CONFIG, { editingHandle: 'alice', isDirty: true });
     await waitFor(() =>
       expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
@@ -225,7 +239,9 @@ describe('HandleClaimPanel', () => {
       target: { value: 'alice' },
     });
     // 自分の所有 handle は「使用済み」でも更新ボタンが有効
-    fireEvent.click(screen.getByRole('button', { name: '設定を更新' }));
+    const update = screen.getByRole('button', { name: '設定を更新' });
+    expect(update.className).toContain('ring-2');
+    fireEvent.click(update);
     await waitFor(() =>
       expect(screen.getByText('「@alice」を更新しました。')).toBeInTheDocument(),
     );

@@ -180,7 +180,10 @@ export default async function HandlePage({
   const darkFooter = !storefront && pageTheme.dark;
 
   return (
-    <main className="mx-auto w-full max-w-md px-4 pb-12 pt-5">
+    <main
+      className="mx-auto w-full max-w-md px-4 pb-12 pt-5"
+      data-handle-theme={darkFooter ? 'night' : undefined}
+    >
       {/* link-in-bio のみアクセントの背景ウォッシュ (storefront は独自の意匠なので付けない)。
           clean = 現行どおり上部 h-96 の淡いウォッシュ。他テーマは全画面 (inset-0) を覆う地色。 */}
       {!storefront && (

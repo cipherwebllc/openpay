@@ -10,9 +10,9 @@
 // (lg で sticky 追従)。下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。
 // flag OFF で何も描画しない。
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useReducer, useRef, useState } from 'react';
 import { AtSign, Eye, UserRound, Wallet } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
@@ -37,7 +37,7 @@ import {
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
-import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
+import { COLOR_PATTERN } from '@/lib/url';
 import {
   MAX_BIO_LEN,
   MAX_PROFILE_LINKS,
@@ -45,18 +45,18 @@ import {
   type HandleReceiveMethod,
   type HandleTipConfig,
   type HandleProfile,
-  type HandleLink,
 } from '@/lib/handle';
-
-function isHttpsUrl(value: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(value);
-  } catch {
-    return false;
-  }
-  return u.protocol === 'https:';
-}
+import {
+  buildPublishMethods,
+  buildPublishPayload,
+  buildPublishProfile,
+  EMPTY_HANDLE_PUBLISH_BASELINE,
+  formatPublishedRelativeTime,
+  handlePublishBaselineReducer,
+  hasDroppedProfileUrl,
+  hasUnpublishedHandleChanges,
+  type PublishedHandleSnapshot,
+} from '@/lib/handlePublish';
 
 function Field({
   label,
@@ -92,6 +92,7 @@ const THEME_NAMES: Record<HandleTheme, string> = {
 export function HandleProfileBuilder() {
   const t = useTranslations('HandleProfile');
   const tc = useTranslations('HandleClaim');
+  const locale = useLocale();
   const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
   const { address: connected } = useAccount();
   const origin = useOrigin();
@@ -108,6 +109,10 @@ export function HandleProfileBuilder() {
   // 上書きで作業が消えるのを防ぐ。新規作成モード (editingHandle===null) の間だけ撮る。
   const preEditDraftRef = useRef<typeof draft | null>(null);
   const headingRef = useRef<HTMLDivElement>(null);
+  const [publishBaseline, dispatchPublishBaseline] = useReducer(
+    handlePublishBaselineReducer,
+    EMPTY_HANDLE_PUBLISH_BASELINE,
+  );
   // SNS / リンクのドラッグ並べ替え (HTML5 DnD)。list ごとに 1 インスタンス — 各々が独自の
   // dragIndex を持つため drag はそのリスト内へ自然にスコープされる (別リストへは落とせない)。
   const socialsReorder = useDragReorderList(draft.socials, (socials) =>
@@ -119,17 +124,10 @@ export function HandleProfileBuilder() {
 
   const colorValid = COLOR_PATTERN.test(draft.color);
 
-  const methods = useMemo<HandleReceiveMethod[]>(() => {
-    const m: HandleReceiveMethod[] = [];
-    if (draft.jpycPolygon) m.push({ token: 'jpyc', chain: 'polygon' });
-    if (draft.jpycKaia) m.push({ token: 'jpyc', chain: 'kaia' });
-    // Avalanche は env.enableJpycAvalanche=ON のときだけ (Phase 2・既定 OFF=inert)。
-    // flag OFF で古い draft が jpycAvalanche=true でも method には載せない (provably inert)。
-    if (env.enableJpycAvalanche && draft.jpycAvalanche) {
-      m.push({ token: 'jpyc', chain: 'avalanche' });
-    }
-    return m;
-  }, [draft.jpycPolygon, draft.jpycKaia, draft.jpycAvalanche]);
+  const methods = useMemo(
+    () => buildPublishMethods(draft, env.enableJpycAvalanche),
+    [draft],
+  );
 
   // 受取方法トグルの選択肢。Avalanche はチップの JPYC_CHAINS と同思想で
   // env.enableJpycAvalanche=ON のときだけ表示 (既定 OFF=非表示で完全 inert)。実際に受取可能か
@@ -144,13 +142,6 @@ export function HandleProfileBuilder() {
     methodOptions.push(['jpycAvalanche', { token: 'jpyc', chain: 'avalanche' }]);
   }
 
-  // 入力中の有効プリセット (strict)。空欄や不正値は URL/保存に出さない。
-  const validPresets = (list: string[]) =>
-    list
-      .map((p) => p.trim())
-      .filter((p) => DECIMAL_PATTERN.test(p) && Number(p) > 0)
-      .slice(0, TIP_PRESET_MAX);
-
   // 受取先: 生 0x アドレスは**入力値を最優先**で採用する。AddressInput は ENS 名以外で
   // onResolved を再発火しないため、「接続ウォレットを使う」/編集 prefill で resolved に入った
   // 旧アドレスが、その後に手入力した別アドレスを上書きしてしまう (誤送金) のを防ぐ。
@@ -161,73 +152,33 @@ export function HandleProfileBuilder() {
     return resolved;
   }, [draft.to, resolved]);
 
-  const config = useMemo<HandleTipConfig | null>(() => {
-    if (!effectiveReceiver || methods.length === 0) return null;
-    // builder が管理するのは to/name/color/methods/presets のみ。message/thanks/thanksUrl/
-    // webhook (UI 非露出の高度 tip メタ) は **送らない** — 既存レコードのそれらは update 時に
-    // サーバ側 (reserveOrUpdateHandle) が保持する。draft に carry すると別 handle へ漏れるため。
-    return {
-      to: effectiveReceiver,
-      name: draft.name.trim() || undefined,
-      color: colorValid ? draft.color : undefined,
-      methods,
-      presets: { jpyc: validPresets(draft.presetsJpyc) },
-    };
-  }, [
-    effectiveReceiver,
-    methods,
-    draft.name,
-    draft.color,
-    colorValid,
-    draft.presetsJpyc,
-  ]);
-
-  // 送信する profile (https/非空のみ) と insecure 警告を 1 パスで導出し useMemo 化する。
-  // 入力 1 打鍵ごとに ~13 URL へ isHttpsUrl(new URL) を二重適用するのを避け、profile の
-  // identity も draft 不変時は安定させる (他の methods/config と規約を揃える)。
-  const { profile, hasInsecure } = useMemo<{
-    profile: HandleProfile;
-    hasInsecure: boolean;
-  }>(() => {
-    // 有効リンク (label 非空 + https) へ emoji/featured を carry。featured は最大 1 本 (UI でも
-    // 単一 enforce しているが、ここでも最初の有効 featured だけ残す)。サーバの validateProfile が
-    // 最終権威で再 enforce する。
-    let featuredTaken = false;
-    const trimmedLinks: HandleLink[] = [];
-    for (const l of draft.links) {
-      if (trimmedLinks.length >= MAX_PROFILE_LINKS) break;
-      const label = l.label.trim();
-      const url = l.url.trim();
-      if (!label || !isHttpsUrl(url)) continue;
-      const link: HandleLink = { label, url };
-      const emoji = l.emoji?.trim();
-      if (emoji) link.emoji = emoji; // validateProfile が >2 code points を drop
-      if (l.featured && !featuredTaken) {
-        link.featured = true;
-        featuredTaken = true;
-      }
-      trimmedLinks.push(link);
-    }
-    const validSocials = draft.socials
-      .map((s) => s.trim())
-      .filter((s) => isHttpsUrl(s))
-      .slice(0, MAX_SOCIAL_LINKS);
-    const avatar = draft.avatar.trim();
-    const avatarValid = !!avatar && isHttpsUrl(avatar);
-    return {
-      profile: {
-        bio: draft.bio.trim() || undefined,
-        avatar: avatarValid ? avatar : undefined,
-        socials: validSocials.length > 0 ? validSocials : undefined,
-        links: trimmedLinks.length > 0 ? trimmedLinks : undefined,
-        theme: draft.theme,
-      },
-      hasInsecure:
-        (!!avatar && !avatarValid) ||
-        draft.socials.some((s) => s.trim() && !isHttpsUrl(s.trim())) ||
-        draft.links.some((l) => l.url.trim() && !isHttpsUrl(l.url.trim())),
-    };
-  }, [draft.links, draft.socials, draft.avatar, draft.bio, draft.theme]);
+  // publish 送信と dirty 比較の単一情報源。旧 Builder のインライン trim/filter は
+  // lib/handlePublish.ts へ移し、request body の形とキー順を保っている。
+  const publishPayload = useMemo(
+    () =>
+      buildPublishPayload(draft, {
+        receiver: effectiveReceiver,
+        enableJpycAvalanche: env.enableJpycAvalanche,
+      }),
+    [draft, effectiveReceiver],
+  );
+  const config = publishPayload?.config ?? null;
+  // 受取先が未確定でも profile preview は描画するため、profile だけは同じ canonical helper で作る。
+  const profile = useMemo(() => buildPublishProfile(draft), [draft]);
+  const hasInsecure = useMemo(() => hasDroppedProfileUrl(draft), [draft]);
+  const isDirty = hasUnpublishedHandleChanges(
+    publishBaseline,
+    editingHandle,
+    publishPayload,
+  );
+  const activeBaseline =
+    publishBaseline.baseline?.handle === editingHandle
+      ? publishBaseline.baseline
+      : null;
+  const relativeUpdatedAt = formatPublishedRelativeTime(
+    activeBaseline?.updatedAt,
+    locale,
+  );
 
   if (!env.enableHandles) return null;
 
@@ -265,6 +216,7 @@ export function HandleProfileBuilder() {
   const onStopEditing = () => {
     setEditingHandle(null);
     setEditedHadUsdc(false);
+    dispatchPublishBaseline({ type: 'discarded' });
     const snapshot = preEditDraftRef.current;
     preEditDraftRef.current = null;
     if (snapshot) {
@@ -279,6 +231,7 @@ export function HandleProfileBuilder() {
     handle: string,
     c: HandleTipConfig,
     p?: HandleProfile,
+    updatedAt?: number,
   ) => {
     // 新規作成モードから編集に入る初回のみ、現在の下書きを退避 (編集→別編集の連続では
     // 退避済みの「編集前」を保ったまま上書きしない)。
@@ -287,13 +240,14 @@ export function HandleProfileBuilder() {
     // パネル (右カラム/モバイルは下部) から押すとフォームの書き換わりが見えないため、
     // フォーム先頭へスクロールして「いま編集している」ことを視覚的に伝える。
     headingRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-    setResolved(isAddress(c.to) ? getAddress(c.to) : null);
+    const loadedReceiver = isAddress(c.to) ? getAddress(c.to) : null;
+    setResolved(loadedReceiver);
     // 旧レコードの USDC method はビルダーで編集できない → 更新で外れることを明示する。
     setEditedHadUsdc(c.methods.some((m) => m.token === 'usdc'));
     // 編集対象レコードに無いフィールドは「前の下書き値」(s.*) ではなく **builder 既定**へ戻す。
     // でないと別プロフィールの色/プリセットが update 時にこの handle へ混入する。
-    setSettings((s) => ({
-      ...s,
+    const loadedDraft: typeof draft = {
+      ...draft,
       to: c.to,
       name: c.name ?? '',
       color:
@@ -311,7 +265,20 @@ export function HandleProfileBuilder() {
       socials: p?.socials ?? [],
       links: p?.links ?? [],
       theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
-    }));
+    };
+    setSettings(() => loadedDraft);
+    const loadedPayload = buildPublishPayload(loadedDraft, {
+      receiver: loadedReceiver,
+      enableJpycAvalanche: env.enableJpycAvalanche,
+    });
+    if (loadedPayload) {
+      dispatchPublishBaseline({
+        type: 'loaded',
+        snapshot: { handle, payload: loadedPayload, updatedAt },
+      });
+    } else {
+      dispatchPublishBaseline({ type: 'discarded' });
+    }
   };
 
   // プレビューは受取先が未確定でも常時表示 (config が組めない間は draft から見た目だけ組む)。
@@ -321,6 +288,21 @@ export function HandleProfileBuilder() {
     color: colorValid ? draft.color : undefined,
     methods,
   };
+  const publicHandleUrl = editingHandle
+    ? origin
+      ? `${origin}/@${editingHandle}`
+      : `/@${editingHandle}`
+    : '';
+  const publishedName = activeBaseline?.payload.config.name;
+  const xShareText = editingHandle
+    ? publishedName
+      ? t('shareTextNamed', { name: publishedName, handle: editingHandle })
+      : t('shareTextGeneric', { handle: editingHandle })
+    : '';
+  const xShareHref =
+    editingHandle && publicHandleUrl
+      ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(xShareText)}&url=${encodeURIComponent(publicHandleUrl)}`
+      : '';
 
   return (
     <div className="space-y-6">
@@ -328,12 +310,31 @@ export function HandleProfileBuilder() {
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-lg font-semibold text-slate-800">{t('builderHeading')}</h2>
           {editingHandle && (
-            <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-              {tc('editingBanner', { handle: editingHandle })}
+            <span
+              data-testid="published-status"
+              className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+            >
+              <span>{tc('publishedStatus', { handle: editingHandle })}</span>
+              <span aria-hidden>・</span>
+              {relativeUpdatedAt ? (
+                <span>
+                  {tc('lastUpdated')}{' '}
+                  <time dateTime={relativeUpdatedAt.dateTime}>
+                    {relativeUpdatedAt.label}
+                  </time>
+                </span>
+              ) : (
+                <span>{tc('lastUpdatedUnknown')}</span>
+              )}
+              {isDirty && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 ring-1 ring-amber-200">
+                  {tc('unpublishedChanges')}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={onStopEditing}
-                className="underline hover:text-amber-950"
+                className="text-emerald-700 underline hover:text-emerald-950"
               >
                 {tc('stopEditing')}
               </button>
@@ -350,13 +351,14 @@ export function HandleProfileBuilder() {
           {/* ① 恒久リンク (@handle) */}
           <StepCard step={1} icon={AtSign} title={t('stepHandleTitle')}>
             <HandleClaimPanel
-              config={config}
-              profile={profile}
+              payload={publishPayload}
               onEdit={onEditExisting}
               editingHandle={editingHandle}
+              isDirty={isDirty}
               onStopEditing={onStopEditing}
-              onPublished={(h) => {
-                setEditingHandle(h);
+              onPublished={(snapshot: PublishedHandleSnapshot) => {
+                setEditingHandle(snapshot.handle);
+                dispatchPublishBaseline({ type: 'published', snapshot });
                 // 公開後のレコードは builder 製 = USDC method を含まないため、旧レコード由来の
                 // 「USDC 提供終了」通知は以後 stale (更新で外れる、はもう外れた後)。
                 setEditedHadUsdc(false);
@@ -645,57 +647,69 @@ export function HandleProfileBuilder() {
           </StepCard>
         </div>
 
-        {/* 右カラム: ④ ライブプレビュー (常時) + 編集中 handle の 開く/コピー/QR。desktop は sticky。 */}
+        {/* 右カラム: ④ ライブプレビュー (常時) + 編集中 handle の 開く/コピー/QR/X。desktop は sticky。 */}
         <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {hydrated && (
-              <div className="rounded-xl bg-slate-50 p-4">
-                {/* テーマの地色をプレビューにも反映 (clean は従来の白のまま)。 */}
+              <div
+                data-testid="handle-preview-frame"
+                className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5"
+              >
+                {/* MobileOrderBuilder と同じ枠内スクロール契約。長いリンク集でもアクション行は
+                    フレーム外に残り、プレビューだけを max-height 内で操作できる。 */}
                 <div
-                  className={`mx-auto max-w-xs rounded-xl p-4 shadow-sm ${
-                    previewBg ? '' : 'bg-white'
+                  data-testid="handle-preview-scroll"
+                  className={`max-h-[46vh] overflow-y-auto p-4 ${
+                    previewBg ? '' : 'bg-slate-50'
                   }`}
                   style={previewBg ? { background: previewBg } : undefined}
                 >
-                  <HandleProfileView config={previewConfig} profile={profile} />
-                  {methods.length > 0 && (
-                    <div className="mt-4 flex flex-col gap-2">
-                      {methods.length > 1 && (
-                        <p
-                          className={`text-center text-xs font-semibold ${
-                            previewDark ? 'text-slate-300' : 'text-slate-500'
-                          }`}
-                        >
-                          {t('selectCurrencyChain')}
-                        </p>
-                      )}
-                      {methods.map((m, i) => (
-                        <span
-                          key={i}
-                          className={`flex flex-col items-center rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
-                            previewDark
-                              ? 'border-white/15 text-slate-200'
-                              : 'border-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {methods.length > 1 ? (
-                            methodMetaLabel(m, t('crossChain'))
-                          ) : (
-                            <>
-                              <span>♡ {t('supportHeading')}</span>
-                              <span
-                                className={`text-xs font-medium ${
-                                  previewDark ? 'text-slate-300' : 'text-slate-500'
-                                }`}
-                              >
-                                {methodMetaLabel(m, t('crossChain'))}
-                              </span>
-                            </>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <div
+                    className={`mx-auto max-w-xs rounded-xl p-4 shadow-sm ${
+                      previewBg ? '' : 'bg-white'
+                    }`}
+                    style={previewBg ? { background: previewBg } : undefined}
+                  >
+                    <HandleProfileView config={previewConfig} profile={profile} />
+                    {methods.length > 0 && (
+                      <div className="mt-4 flex flex-col gap-2">
+                        {methods.length > 1 && (
+                          <p
+                            className={`text-center text-xs font-semibold ${
+                              previewDark ? 'text-slate-300' : 'text-slate-500'
+                            }`}
+                          >
+                            {t('selectCurrencyChain')}
+                          </p>
+                        )}
+                        {methods.map((m, i) => (
+                          <span
+                            key={i}
+                            className={`flex flex-col items-center rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
+                              previewDark
+                                ? 'border-white/15 text-slate-200'
+                                : 'border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {methods.length > 1 ? (
+                              methodMetaLabel(m, t('crossChain'))
+                            ) : (
+                              <>
+                                <span>♡ {t('supportHeading')}</span>
+                                <span
+                                  className={`text-xs font-medium ${
+                                    previewDark ? 'text-slate-300' : 'text-slate-500'
+                                  }`}
+                                >
+                                  {methodMetaLabel(m, t('crossChain'))}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -704,7 +718,7 @@ export function HandleProfileBuilder() {
             {editingHandle && (
               <div className="mt-4 flex flex-wrap gap-1.5">
                 <a
-                  href={origin ? `${origin}/@${editingHandle}` : `/@${editingHandle}`}
+                  href={publicHandleUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
@@ -714,9 +728,7 @@ export function HandleProfileBuilder() {
                 <button
                   type="button"
                   onClick={() =>
-                    void linkCopy.copy(
-                      origin ? `${origin}/@${editingHandle}` : `/@${editingHandle}`,
-                    )
+                    void linkCopy.copy(publicHandleUrl)
                   }
                   className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
                 >
@@ -729,6 +741,14 @@ export function HandleProfileBuilder() {
                 >
                   {tc('showQr')}
                 </button>
+                <a
+                  href={xShareHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                >
+                  {t('shareOnX')}
+                </a>
               </div>
             )}
           </StepCard>
