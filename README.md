@@ -220,6 +220,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain | recommended on prod |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel KV — payment log **and** SIWE sessions / **encrypted** freee tokens / entitlements | optional (required for SIWE + freee sync) |
+| `IP_HASH_SECRET` | Server-only HMAC secret for best-effort IP rate limits on auth and resource-write endpoints. Generate with `openssl rand -base64 32`; unset or shorter than 32 bytes makes the IP limiter inert. Self-hosted deployments must use a trusted proxy that overwrites client-supplied `X-Forwarded-For`. | optional (recommended on prod) |
 | `PAYMENT_LOG_ADMIN_TOKEN` | Bearer for `/api/log/payment/export` + `/stats` | optional |
 | `ADMIN_WALLETS` | Comma-separated wallet addresses allowed to read `/api/admin/billing/revenue` (requires a valid SIWE session **and** the wallet in this allowlist). Empty/unset ⇒ admin endpoints are closed (fail-closed). | optional |
 | `NEXT_PUBLIC_ENABLE_FREEE_SYNC` | Show the freee sync panel on `/history` (default **off** — dark ship) | freee only |
@@ -276,7 +277,7 @@ Gasless payments depend on a funded Pimlico Paymaster deposit. A GitHub Actions 
 - **Network-fee estimates may differ from actual gas costs.**
 - **Blockchain transactions are irreversible** — there is no chargeback.
 - **USDC balances are chain-specific.** The payment page chain chooser (Circle Gateway / CCTP V2) bridges them when the customer's source chain differs from the merchant's, but the chain abstraction itself has Circle as a dependency — outages on Circle's attestation API will disable cross-chain paths while same-chain direct transfers keep working. See `docs/DEPLOY_CHECKLIST.md §10` for the operator-verification status and kill-switch.
-- **No rate limiting / bot mitigation** — front paid endpoints with Vercel BotID or similar.
+- **Best-effort application rate limits are built in**, but they do not mitigate volumetric DoS — production deployments still need Vercel Firewall/WAF or an equivalent edge control.
 - OpenPay is **not** a wallet, exchange, custodian, or redemption provider.
 
 ## Legal / disclaimer

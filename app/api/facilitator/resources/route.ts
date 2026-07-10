@@ -8,6 +8,8 @@ import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
@@ -48,6 +50,19 @@ export async function GET(): Promise<NextResponse> {
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+  if (
+    !(await checkIpRateLimit(
+      'x402-resource-write',
+      hashIp(clientIp(req)),
+      30,
+      60,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
+    );
   }
   const session = await requireSession();
   if (!session.ok) return session.response;

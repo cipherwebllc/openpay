@@ -10,6 +10,8 @@ import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import {
   parseResourceInput,
@@ -40,6 +42,19 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   if (!env.enableX402Facilitator) return notFound();
+  if (
+    !(await checkIpRateLimit(
+      'x402-resource-write',
+      hashIp(clientIp(req)),
+      30,
+      60,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
+    );
+  }
   const session = await requireSession();
   if (!session.ok) return session.response;
   const { id } = await params;

@@ -11,6 +11,8 @@ import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { isKvConfigured, kvDel, kvSet } from '@/lib/kv';
 import { chainObjectForId, isSupportedChainId, transportForChain } from '@/lib/chains';
 import { logger } from '@/lib/logger';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import {
   SESSION_COOKIE,
   SESSION_TTL_SEC,
@@ -31,6 +33,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json(
       { ok: false, error: 'kv_not_configured' },
       { status: 503 },
+    );
+  }
+  if (!(await checkIpRateLimit('siwe-verify', hashIp(clientIp(req)), 30, 60))) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
     );
   }
 

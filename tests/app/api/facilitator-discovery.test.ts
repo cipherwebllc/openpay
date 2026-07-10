@@ -103,11 +103,22 @@ const resourceRate = vi.hoisted(() => ({
   allowed: true,
   check: vi.fn(),
 }));
+const ipRate = vi.hoisted(() => {
+  const state = { allowed: true };
+  return {
+    state,
+    check: vi.fn(
+      async (_scope: string, hashedIp: string | null) =>
+        hashedIp === null || state.allowed,
+    ),
+  };
+});
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkReadRateLimit: (...args: unknown[]) => {
     resourceRate.check(...args);
     return Promise.resolve(resourceRate.allowed);
   },
+  checkIpRateLimit: ipRate.check,
 }));
 
 const mockLoggerWarn = vi.hoisted(() => vi.fn());
@@ -173,18 +184,24 @@ async function load(flag = '1'): Promise<{
   return { resources, idRoute, discovery: discovery.GET as () => Promise<Response> };
 }
 
-function postReq(body: Record<string, unknown>): Request {
+function postReq(body: Record<string, unknown>, ip?: string): Request {
   return new Request('http://x/resources', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(ip ? { 'x-vercel-forwarded-for': ip } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
 
-function patchReq(body: Record<string, unknown>): Request {
+function patchReq(body: Record<string, unknown>, ip?: string): Request {
   return new Request('http://x/resources/id', {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(ip ? { 'x-vercel-forwarded-for': ip } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
@@ -213,6 +230,8 @@ beforeEach(() => {
   mockRequireSession.mockReset();
   resourceRate.allowed = true;
   resourceRate.check.mockReset();
+  ipRate.state.allowed = true;
+  ipRate.check.mockClear();
   mockLoggerWarn.mockReset();
   mockFreelyAccessible.mockReset();
   mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
@@ -229,6 +248,26 @@ describe('x402 facilitator /resources', () => {
     const { resources } = await load('');
     expect((await resources.POST(postReq(validBody))).status).toBe(404);
     expect((await resources.GET()).status).toBe(404);
+    expect(ipRate.check).not.toHaveBeenCalled();
+  });
+
+  it('IP rate limit → session lookup 前に 429 + Retry-After', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    const { resources } = await load();
+    ipRate.state.allowed = false;
+
+    const res = await resources.POST(postReq(validBody, '203.0.113.20'));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(ipRate.check).toHaveBeenCalledWith(
+      'x402-resource-write',
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+      30,
+      60,
+    );
+    expect(mockRequireSession).not.toHaveBeenCalled();
   });
 
   it('未認証 → 401 (requireSession)', async () => {
@@ -402,6 +441,28 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     const { idRoute } = await load('');
     const res = await idRoute.PATCH(patchReq(validBody), ctx('id1'));
     expect(res.status).toBe(404);
+  });
+
+  it('IP rate limit → session/owner lookup 前に 429 + Retry-After', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    const { idRoute } = await load();
+    ipRate.state.allowed = false;
+
+    const res = await idRoute.PATCH(
+      patchReq(validBody, '203.0.113.21'),
+      ctx('id1'),
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(ipRate.check).toHaveBeenCalledWith(
+      'x402-resource-write',
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+      30,
+      60,
+    );
+    expect(mockRequireSession).not.toHaveBeenCalled();
   });
 
   it('未認証 → 401', async () => {
