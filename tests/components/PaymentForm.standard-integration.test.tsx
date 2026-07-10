@@ -38,6 +38,7 @@ const receiptMocks = {
       error: Error | null;
       isSuccess: boolean;
       isError: boolean;
+      refetch: ReturnType<typeof vi.fn>;
     }
   >(),
 };
@@ -65,7 +66,13 @@ vi.mock('wagmi', () => ({
   },
   useWaitForTransactionReceipt: ({ hash }: { hash: Hex | undefined }) => {
     if (hash === undefined) {
-      return { data: undefined, error: null, isSuccess: false, isError: false };
+      return {
+        data: undefined,
+        error: null,
+        isSuccess: false,
+        isError: false,
+        refetch: vi.fn(),
+      };
     }
     return (
       receiptMocks.byHash.get(hash) ?? {
@@ -73,6 +80,7 @@ vi.mock('wagmi', () => ({
         error: null,
         isSuccess: false,
         isError: false,
+        refetch: vi.fn(),
       }
     );
   },
@@ -216,6 +224,7 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
         error: null,
         isSuccess: false,
         isError: false,
+        refetch: vi.fn(),
       });
     });
     rerender(<PaymentForm />);
@@ -231,6 +240,7 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
         error: null,
         isSuccess: true,
         isError: false,
+        refetch: vi.fn(),
       });
     });
     rerender(<PaymentForm />);
@@ -260,6 +270,7 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
         error: null,
         isSuccess: true,
         isError: false,
+        refetch: vi.fn(),
       });
     });
     rerender(<PaymentForm />);

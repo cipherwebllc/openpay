@@ -288,20 +288,26 @@ function setCircleQuote(
 
 let standardMutate: ReturnType<typeof vi.fn>;
 let standardRetryFee: ReturnType<typeof vi.fn>;
+let standardRetryReceipt: ReturnType<typeof vi.fn>;
 function setStandardPaymentDefault() {
   // CheckoutForm は useStandardPayment を必ず call する (条件付きフック禁止)。
   // gasless 系テストは standard side が idle のままで動くため、共通 default を提供。
   standardMutate = vi.fn();
   standardRetryFee = vi.fn();
+  standardRetryReceipt = vi.fn();
   mockHook(useStandardPayment, {
     mutate: standardMutate,
     retryFee: standardRetryFee,
+    retryReceipt: standardRetryReceipt,
     phase: 'idle',
     isPending: false,
     isSuccess: false,
     isError: false,
     isFeeError: false,
     isMerchantError: false,
+    isUnknown: false,
+    isMerchantUnknown: false,
+    isFeeUnknown: false,
     data: undefined,
     error: null,
     merchantTxHash: undefined,
@@ -320,10 +326,13 @@ function setStandardPayment(
     | 'success'
     | 'success-no-fee'
     | 'merchant-error'
-    | 'fee-error',
+    | 'fee-error'
+    | 'merchant-unknown'
+    | 'fee-unknown',
 ) {
   standardMutate = vi.fn();
   standardRetryFee = vi.fn();
+  standardRetryReceipt = vi.fn();
   const phase: ReturnType<typeof useStandardPayment>['phase'] =
     state === 'success-no-fee' ? 'success' : state === 'idle' ? 'idle' : state;
   const isPending =
@@ -334,12 +343,16 @@ function setStandardPayment(
   mockHook(useStandardPayment, {
     mutate: standardMutate,
     retryFee: standardRetryFee,
+    retryReceipt: standardRetryReceipt,
     phase,
     isPending,
     isSuccess: state === 'success' || state === 'success-no-fee',
     isError: state === 'merchant-error' || state === 'fee-error',
     isFeeError: state === 'fee-error',
     isMerchantError: state === 'merchant-error',
+    isUnknown: state === 'merchant-unknown' || state === 'fee-unknown',
+    isMerchantUnknown: state === 'merchant-unknown',
+    isFeeUnknown: state === 'fee-unknown',
     data:
       state === 'success'
         ? {
@@ -359,9 +372,14 @@ function setStandardPayment(
         ? new Error('user rejected request')
         : state === 'fee-error'
           ? new Error('fee tx reverted')
+          : state === 'merchant-unknown' || state === 'fee-unknown'
+            ? new Error('receipt rpc failed')
           : null,
-    merchantTxHash: undefined,
-    feeTxHash: undefined,
+    merchantTxHash:
+      state === 'merchant-unknown' || state === 'fee-unknown'
+        ? `0x${'c'.repeat(64)}`
+        : undefined,
+    feeTxHash: state === 'fee-unknown' ? `0x${'d'.repeat(64)}` : undefined,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -1508,6 +1526,32 @@ describe('CheckoutForm — mode=standard 統合', () => {
     );
     expect(standardRetryFee).toHaveBeenCalledOnce();
   });
+
+  it.each(['merchant-unknown', 'fee-unknown'] as const)(
+    'mode=standard %s: 送信結果の中間表示 + settledNoRetry で main Pay を封鎖し、receipt 再照会のみ許可',
+    async (phase) => {
+      const user = userEvent.setup();
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setStandardPayment(phase);
+      render(<CheckoutForm params={STANDARD_USDC_PARAMS} />);
+
+      expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
+      expect(screen.getByText(/receipt を取得できず/)).toBeInTheDocument();
+      expect(screen.queryByText('receipt rpc failed')).toBeNull();
+      const payBtn = screen.getByRole('button', { name: /55 USDC を支払う/ });
+      expect(payBtn).toBeDisabled();
+      await user.click(payBtn);
+      expect(standardMutate).not.toHaveBeenCalled();
+
+      expect(
+        screen.queryByRole('button', { name: /手数料の送信を再試行/ }),
+      ).toBeNull();
+      await user.click(screen.getByRole('button', { name: /receipt を再照会/ }));
+      expect(standardRetryReceipt).toHaveBeenCalledOnce();
+      expect(standardRetryFee).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['merchant-sending' as const, /店舗送金を承認してください/],

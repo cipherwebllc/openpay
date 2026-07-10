@@ -47,6 +47,8 @@ type StandardPaymentResult = {
 //     → success                                        (fee = 0)
 //     → merchant-error                                 (merchant tx 失敗、fee 未送信)
 //     → fee-error                                      (merchant 確定済、fee tx 失敗、retry 可能)
+//     → merchant-unknown                               (merchant hash あり、receipt 不明・再送禁止)
+//     → fee-unknown                                    (fee hash あり、receipt 不明・再送禁止)
 export type StandardPhase =
   | 'idle'
   | 'merchant-sending'
@@ -55,7 +57,9 @@ export type StandardPhase =
   | 'fee-mining'
   | 'success'
   | 'merchant-error'
-  | 'fee-error';
+  | 'fee-error'
+  | 'merchant-unknown'
+  | 'fee-unknown';
 
 const ERROR_SENTINEL = '0xerror' as const;
 
@@ -64,9 +68,12 @@ export function useStandardPayment() {
   const [externalError, setExternalError] = useState<Error | null>(null);
   const [phase, setPhase] = useState<StandardPhase>('idle');
   const lastParamsRef = useRef<StandardPaymentParams | null>(null);
-  // 各 tx に対し log 発火を 1 度だけに絞る guard (key = tx hash)
-  const merchantLoggedKeyRef = useRef<string | null>(null);
-  const feeLoggedKeyRef = useRef<string | null>(null);
+  // receipt RPC error (未確定) と、後で取得できた終端 success/reverted の
+  // dedupe を分離。unknown の観測済み hash で終端 log を抑止しない。
+  const merchantErrorLoggedKeyRef = useRef<string | null>(null);
+  const merchantReceiptLoggedKeyRef = useRef<string | null>(null);
+  const feeErrorLoggedKeyRef = useRef<string | null>(null);
+  const feeReceiptLoggedKeyRef = useRef<string | null>(null);
   // merchant 成功時の自動 fee 起動を「1 度だけ」にする gate。
   // useEffect の dep 変化で重複発火しないよう、merchant 成功した直後にのみ true 化。
   const feeStartedRef = useRef(false);
@@ -83,6 +90,8 @@ export function useStandardPayment() {
     hash: feeWrite.data,
     chainId,
   });
+  const refetchMerchantReceipt = merchantReceipt.refetch;
+  const refetchFeeReceipt = feeReceipt.refetch;
 
   const submitFee = useCallback(
     (params: StandardPaymentParams) => {
@@ -99,14 +108,19 @@ export function useStandardPayment() {
   );
 
   function mutate(params: StandardPaymentParams): void {
+    // R: hash ありの receipt 不明中は、同じ送金が成功済みの可能性がある。
+    //    receipt 再照会以外の新規 merchant transfer を禁止し、二重送金を防ぐ。
+    if (phase === 'merchant-unknown' || phase === 'fee-unknown') return;
     setExternalError(null);
     if (params.merchantAmount <= 0n) {
       setExternalError(new Error('店舗への送金額が 0 のため送金できません'));
       return;
     }
     lastParamsRef.current = params;
-    merchantLoggedKeyRef.current = null;
-    feeLoggedKeyRef.current = null;
+    merchantErrorLoggedKeyRef.current = null;
+    merchantReceiptLoggedKeyRef.current = null;
+    feeErrorLoggedKeyRef.current = null;
+    feeReceiptLoggedKeyRef.current = null;
     feeStartedRef.current = false;
     setChainId(params.chainId);
     setPhase('merchant-sending');
@@ -125,12 +139,31 @@ export function useStandardPayment() {
 
   const retryFee = useCallback(() => {
     const params = lastParamsRef.current;
-    if (!params || params.feeAmount <= 0n) return;
-    feeLoggedKeyRef.current = null;
+    // R: fee hash ありの receipt 不明は、fee 着金済みの可能性がある。
+    //    status='reverted' 確定前の fee 再送を禁止する。
+    if (
+      phase === 'merchant-unknown' ||
+      phase === 'fee-unknown' ||
+      !params ||
+      params.feeAmount <= 0n
+    ) {
+      return;
+    }
+    feeErrorLoggedKeyRef.current = null;
+    feeReceiptLoggedKeyRef.current = null;
     feeWrite.reset();
     setExternalError(null);
     submitFee(params);
-  }, [feeWrite, submitFee]);
+  }, [phase, feeWrite, submitFee]);
+
+  const retryReceipt = useCallback(() => {
+    // unknown で許可する操作は、broadcast 済み hash の receipt 再照会のみ。
+    if (phase === 'merchant-unknown') {
+      void refetchMerchantReceipt();
+    } else if (phase === 'fee-unknown') {
+      void refetchFeeReceipt();
+    }
+  }, [phase, refetchMerchantReceipt, refetchFeeReceipt]);
 
   useEffect(() => {
     const params = lastParamsRef.current;
@@ -145,7 +178,9 @@ export function useStandardPayment() {
       return;
     }
     if (merchantReceipt.error) {
-      setPhase('merchant-error');
+      // useWaitForTransactionReceipt は hash ありのときだけ有効。RPC error は
+      // tx 自体の revert ではないため、確定失敗には倒さない。
+      if (merchantWrite.data) setPhase('merchant-unknown');
       return;
     }
     if (merchantReceipt.isSuccess && merchantReceipt.data?.status === 'success') {
@@ -187,7 +222,8 @@ export function useStandardPayment() {
       return;
     }
     if (feeReceipt.error) {
-      setPhase('fee-error');
+      // merchant 側と同様、receipt RPC error は fee tx の確定失敗ではない。
+      if (feeWrite.data) setPhase('fee-unknown');
       return;
     }
     if (feeReceipt.isSuccess && feeReceipt.data?.status === 'success') {
@@ -226,7 +262,8 @@ export function useStandardPayment() {
     emitLog(
       { data: mwData, error: mwError },
       { data: mrData, error: mrError, isSuccess: mrIsSuccess },
-      merchantLoggedKeyRef,
+      merchantErrorLoggedKeyRef,
+      merchantReceiptLoggedKeyRef,
       {
         flow: 'standard-merchant',
         chainId: params.chainId,
@@ -240,7 +277,8 @@ export function useStandardPayment() {
       emitLog(
         { data: fwData, error: fwError },
         { data: frData, error: frError, isSuccess: frIsSuccess },
-        feeLoggedKeyRef,
+        feeErrorLoggedKeyRef,
+        feeReceiptLoggedKeyRef,
         {
           flow: 'standard-fee',
           chainId: params.chainId,
@@ -295,6 +333,7 @@ export function useStandardPayment() {
   return {
     mutate,
     retryFee,
+    retryReceipt,
     phase,
     isPending,
     isSuccess,
@@ -304,6 +343,9 @@ export function useStandardPayment() {
     // "merchant 確定済 / fee 失敗" を UI で識別するための個別 flag (retry button gate)。
     isFeeError: phase === 'fee-error',
     isMerchantError: phase === 'merchant-error',
+    isUnknown: phase === 'merchant-unknown' || phase === 'fee-unknown',
+    isMerchantUnknown: phase === 'merchant-unknown',
+    isFeeUnknown: phase === 'fee-unknown',
     merchantTxHash: merchantWrite.data,
     feeTxHash: feeWrite.data,
     // R: fee-error 時にも merchant 着金記録を残せるよう、phase に依らず merchant
@@ -320,8 +362,8 @@ export function useStandardPayment() {
   };
 }
 
-// tx hash 単位で 1 度だけ paymentLog を発火 (retry で hash が変われば再発火、同一 hash の
-// 再 render では skip)。
+// tx hash 単位で paymentLog を dedupe。error (receipt 未確定を含む) と終端
+// success/reverted は別 ref で記録し、unknown 後の終端 log も必ず発火させる。
 function emitLog(
   write: { data: Hex | undefined; error: Error | null },
   receipt: {
@@ -329,28 +371,35 @@ function emitLog(
     error: Error | null;
     isSuccess: boolean;
   },
-  seenRef: { current: string | null },
+  errorSeenRef: { current: string | null },
+  receiptSeenRef: { current: string | null },
   ctx: PaymentLogContext,
 ): void {
-  const err = write.error ?? receipt.error;
   const ready = receipt.isSuccess && receipt.data && write.data;
-  if (!err && !ready) return;
+  if (ready) {
+    const key = write.data!;
+    if (receiptSeenRef.current === key) return;
+    receiptSeenRef.current = key;
+    void logPaymentEvent(
+      buildPaymentLogEvent(ctx, {
+        result: receipt.data!.status === 'success' ? 'success' : 'reverted',
+        txHash: write.data!,
+        blockNumber: receipt.data!.blockNumber,
+      }),
+    );
+    return;
+  }
 
+  const err = write.error ?? receipt.error;
+  if (!err) return;
   const key = write.data ?? ERROR_SENTINEL;
-  if (seenRef.current === key) return;
-  seenRef.current = key;
-
+  if (errorSeenRef.current === key) return;
+  errorSeenRef.current = key;
   void logPaymentEvent(
-    err
-      ? buildPaymentLogEvent(ctx, {
-          result: 'error',
-          errorMessage: err.message,
-          txHash: write.data,
-        })
-      : buildPaymentLogEvent(ctx, {
-          result: receipt.data!.status === 'success' ? 'success' : 'reverted',
-          txHash: write.data!,
-          blockNumber: receipt.data!.blockNumber,
-        }),
+    buildPaymentLogEvent(ctx, {
+      result: 'error',
+      errorMessage: err.message,
+      txHash: write.data,
+    }),
   );
 }
