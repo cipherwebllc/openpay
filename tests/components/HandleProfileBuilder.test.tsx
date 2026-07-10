@@ -51,6 +51,7 @@ vi.mock('@/components/HandleClaimPanel', () => ({
     payload,
     onEdit,
     onPublished,
+    expectedUpdatedAt,
   }: {
     payload: { config: { to: string }; profile: unknown } | null;
     onEdit?: (
@@ -64,8 +65,12 @@ vi.mock('@/components/HandleClaimPanel', () => ({
       payload: { config: { to: string }; profile: unknown };
       updatedAt: number;
     }) => void;
+    expectedUpdatedAt?: number;
   }) => (
-    <div data-testid="claim">
+    <div
+      data-testid="claim"
+      data-expected-updated-at={expectedUpdatedAt ?? ''}
+    >
       {payload ? `config-ready:${payload.config.to}` : 'no-config'}
       <button
         type="button"
@@ -397,6 +402,10 @@ describe('HandleProfileBuilder', () => {
     const time = screen.getByTestId('published-status').querySelector('time');
     expect(time).not.toBeNull();
     expect(time).toHaveAttribute('datetime', '2026-07-10T10:00:00.000Z');
+    expect(screen.getByTestId('claim')).toHaveAttribute(
+      'data-expected-updated-at',
+      String(Date.UTC(2026, 6, 10, 10, 0, 0)),
+    );
 
     unmount();
     renderWithIntl(<HandleProfileBuilder />);

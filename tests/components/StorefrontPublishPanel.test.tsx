@@ -92,7 +92,7 @@ describe('StorefrontPublishPanel', () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
       init?.method === 'POST'
         ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
-        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }) },
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
     );
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE });
@@ -106,6 +106,7 @@ describe('StorefrontPublishPanel', () => {
     expect(body.handle).toBe('shop');
     expect(body.config).toEqual(CFG);
     expect(body.storefront).toEqual(STORE);
+    expect(body.expectedUpdatedAt).toBe(100);
     // 固定店舗 URL。
     expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
   });
@@ -117,7 +118,7 @@ describe('StorefrontPublishPanel', () => {
         : {
             ok: true,
             status: 200,
-            json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }),
+            json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }),
           },
     );
     vi.stubGlobal('fetch', fetchMock);
@@ -143,7 +144,7 @@ describe('StorefrontPublishPanel', () => {
         : {
             ok: true,
             status: 200,
-            json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }),
+            json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }),
           },
     );
     vi.stubGlobal('fetch', fetchMock);

@@ -29,6 +29,7 @@ type OwnedHandle = {
   config: HandleTipConfig;
   profile?: HandleProfile;
   storefront?: StorefrontParts;
+  updatedAt?: number;
 };
 // ⚠️ queryKey `['handle-mine', …]` と**この返り値の形** `{handles, max}` は HandleClaimPanel と
 // 共有する (同一 endpoint・同一 cache)。HandleClaim が先に profile タブで cache を `{handles, max}`
@@ -120,6 +121,7 @@ export function StorefrontPublishPanel({
           handle: selectedHandle.handle,
           config: nextConfig,
           storefront,
+          expectedUpdatedAt: selectedHandle.updatedAt,
         }),
       });
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);

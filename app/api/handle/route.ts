@@ -1,6 +1,7 @@
 // @handle 予約/更新 + 所有一覧 API (SIWE 必須)。NEXT_PUBLIC_ENABLE_HANDLES OFF で 404 (inert)。
 //
-// POST /api/handle { handle, config, profile? }  → 予約 (新規) or 所有者による設定更新
+// POST /api/handle { handle, config, profile?, expectedUpdatedAt? }
+//   → 予約 (新規) or 所有者による version 付き設定更新
 // GET  /api/handle  → 自分が保有する handle を**レコード込み**で返す (編集 UI の prefill 用)
 
 import { NextResponse } from 'next/server';
@@ -68,6 +69,7 @@ export async function POST(req: Request) {
     config: rawConfig,
     profile: rawProfile,
     storefront: rawStorefront,
+    expectedUpdatedAt: rawExpectedUpdatedAt,
   } = body as Record<string, unknown>;
   if (typeof rawHandle !== 'string') {
     return NextResponse.json({ ok: false, error: 'handle_required' }, { status: 400 });
@@ -87,6 +89,20 @@ export async function POST(req: Request) {
       { ok: false, error: 'invalid_config', detail: config.error },
       { status: 400 },
     );
+  }
+
+  let expectedUpdatedAt: number | undefined;
+  if (rawExpectedUpdatedAt !== undefined) {
+    if (
+      typeof rawExpectedUpdatedAt !== 'number' ||
+      !Number.isFinite(rawExpectedUpdatedAt)
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'invalid_expected_updated_at' },
+        { status: 400 },
+      );
+    }
+    expectedUpdatedAt = rawExpectedUpdatedAt;
   }
 
   // profile が body に無ければ undefined を渡す (= update で既存 profile を保持)。
@@ -121,17 +137,30 @@ export async function POST(req: Request) {
     config: config.config,
     profile: profileArg,
     storefront: storefrontArg,
+    expectedUpdatedAt,
     nowMs: Date.now(),
   });
 
   switch (result.status) {
     case 'created':
       return NextResponse.json(
-        { ok: true, handle: validated.handle, status: 'created' },
+        {
+          ok: true,
+          handle: validated.handle,
+          status: 'created',
+          updatedAt: result.record.updatedAt,
+        },
         { status: 201 },
       );
     case 'updated':
-      return NextResponse.json({ ok: true, handle: validated.handle, status: 'updated' });
+      return NextResponse.json({
+        ok: true,
+        handle: validated.handle,
+        status: 'updated',
+        updatedAt: result.record.updatedAt,
+      });
+    case 'conflict':
+      return NextResponse.json({ ok: false, error: 'conflict' }, { status: 409 });
     case 'taken':
       return NextResponse.json({ ok: false, error: 'taken' }, { status: 409 });
     case 'limit':

@@ -99,7 +99,7 @@ describe('handle publish baseline state machine', () => {
     const loaded = buildPublishPayload(draft({ name: 'Alice' }), OPTIONS)!;
     let state = handlePublishBaselineReducer(EMPTY_HANDLE_PUBLISH_BASELINE, {
       type: 'loaded',
-      snapshot: { handle: 'alice', payload: loaded },
+      snapshot: { handle: 'alice', payload: loaded, updatedAt: 100 },
     });
     const sent = buildPublishPayload(draft({ name: 'Sent name' }), OPTIONS)!;
     expect(hasUnpublishedHandleChanges(state, 'alice', sent)).toBe(true);
@@ -110,6 +110,7 @@ describe('handle publish baseline state machine', () => {
       type: 'published',
       snapshot: { handle: 'alice', payload: sent, updatedAt: 200 },
     });
+    expect(state.baseline?.updatedAt).toBe(200);
     expect(hasUnpublishedHandleChanges(state, 'alice', sent)).toBe(false);
     const editedAfterSend = buildPublishPayload(
       draft({ name: 'Edited after send' }),
@@ -123,11 +124,11 @@ describe('handle publish baseline state machine', () => {
     const bob = buildPublishPayload(draft({ name: 'Bob' }), OPTIONS)!;
     let state = handlePublishBaselineReducer(EMPTY_HANDLE_PUBLISH_BASELINE, {
       type: 'loaded',
-      snapshot: { handle: 'alice', payload: alice },
+      snapshot: { handle: 'alice', payload: alice, updatedAt: 100 },
     });
     state = handlePublishBaselineReducer(state, {
       type: 'loaded',
-      snapshot: { handle: 'bob', payload: bob },
+      snapshot: { handle: 'bob', payload: bob, updatedAt: 110 },
     });
     expect(state.baseline?.handle).toBe('bob');
     expect(hasUnpublishedHandleChanges(state, 'alice', alice)).toBe(false);

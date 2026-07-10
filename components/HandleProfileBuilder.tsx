@@ -271,7 +271,7 @@ export function HandleProfileBuilder() {
       receiver: loadedReceiver,
       enableJpycAvalanche: env.enableJpycAvalanche,
     });
-    if (loadedPayload) {
+    if (loadedPayload && typeof updatedAt === 'number') {
       dispatchPublishBaseline({
         type: 'loaded',
         snapshot: { handle, payload: loadedPayload, updatedAt },
@@ -354,6 +354,7 @@ export function HandleProfileBuilder() {
               payload={publishPayload}
               onEdit={onEditExisting}
               editingHandle={editingHandle}
+              expectedUpdatedAt={activeBaseline?.updatedAt}
               isDirty={isDirty}
               onStopEditing={onStopEditing}
               onPublished={(snapshot: PublishedHandleSnapshot) => {

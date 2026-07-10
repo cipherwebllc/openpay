@@ -752,6 +752,8 @@
     "copyAsNewHint": "「@{editing}」はそのまま残し、同じ内容で新しいハンドル「@{name}」を取得します。",
     "publishedCreated": "「@{handle}」を取得しました！続けてこのまま編集・更新できます。",
     "publishedUpdated": "「@{handle}」を更新しました。",
+    "conflictError": "別の端末で更新されました。再読込してください。",
+    "reload": "再読込",
     "mineError": "取得済みハンドルの一覧を読み込めませんでした。",
     "retry": "再試行",
     "availabilityUnknown": "空き状況を確認できませんでした。時間をおいて再度お試しください。",
