@@ -1,26 +1,19 @@
 // @handle の KV 永続化 (server 専用)。lib/handle.ts の純関数を使い、handle 予約/更新/解放/
-// 解決/所有一覧を提供する。名前の確保は kvSet(nx) で atomic (entitlement / fee verify と同じ流儀)。
+// 解決/所有一覧を提供する。名前の確保と wallet 上限は単一 EVAL で atomic に判定する。
 //
 // KV キー:
 //   handle:{handle}            → serialized HandleRecord
 //   wallet:handles:{owner}     → Redis list (所有 handle・上限管理 + "mine" 一覧)
 //
-// 所有 index は Redis list で持ち、追記は LPUSH・削除は LREM の**原子操作**にする
-// (read-modify-write は同時 claim で取りこぼすため)。読み取りエラーは [] と区別して null を
-// 返し、呼出側が中断する (上限チェックの bypass / index 破壊を防ぐ)。
-// per-wallet 上限は count→claim の TOCTOU が残るが best-effort (handle 名の一意性は nx が権威)。
+// 所有 index は Redis list で持ち、claim/release Lua 内の LPUSH/LREM で handle record と一緒に
+// 更新する。読み取りエラーは [] と区別して null を返し、呼出側が中断する。
 
 import {
   kvGet,
-  kvSet,
-  kvDel,
-  kvLpush,
   kvLrange,
-  kvLrem,
   kvEval,
   isKvConfigured,
 } from '@/lib/kv';
-import { logger } from '@/lib/logger';
 import {
   parseHandleRecord,
   serializeHandleRecord,
@@ -30,6 +23,7 @@ import {
   type HandleProfile,
 } from '@/lib/handle';
 import type { StorefrontParts } from '@/lib/mobileOrder';
+import { shopLiveKey } from '@/lib/shopLive';
 
 const handleKey = (handle: string) => `handle:${handle}`;
 const ownerIndexKey = (owner: string) => `wallet:handles:${owner.toLowerCase()}`;
@@ -47,14 +41,25 @@ const CAS_UPDATE =
   "if type(o.updatedAt)~='number' or o.updatedAt~=tonumber(ARGV[2]) then return -3 end; " +
   "redis.call('SET',KEYS[1],ARGV[3]); return 1";
 
-// 所有者一致時のみ削除する compare-and-set (解放)。同 owner の同時 DELETE + 別 owner の
-// 取り直しが交錯しても、新 owner のレコードを消さない。戻り: 1=削除 / 0=owner 不一致 /
-// -1=消失 / -2=malformed。
-const CAS_DELETE =
+// 新規 claim の存在確認・所有数上限・保存・index 追記・旧 live 状態の失効を単一 EVAL にする。
+// 戻り: 1=作成 / 0=既存 handle / -2=所有数上限。
+const CLAIM_HANDLE =
+  "if redis.call('GET',KEYS[1]) then return 0 end; " +
+  "if redis.call('LLEN',KEYS[2])>=tonumber(ARGV[3]) then return -2 end; " +
+  "redis.call('SET',KEYS[1],ARGV[1]); " +
+  "redis.call('LPUSH',KEYS[2],ARGV[2]); " +
+  "redis.call('DEL',KEYS[3]); return 1";
+
+// 所有者一致時のみ handle・所有 index・live 状態をまとめて削除する compare-and-delete。
+// 同 owner の同時 DELETE + 別 owner の取り直しが交錯しても、新 owner のレコードを消さない。
+// 戻り: 1=削除 / 0=owner 不一致 / -1=消失 / -2=malformed。
+const RELEASE_HANDLE =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
+  "if type(o)~='table' or type(o.owner)~='string' then return -2 end; " +
   "if string.lower(o.owner)~=string.lower(ARGV[1]) then return 0 end; " +
-  "redis.call('DEL',KEYS[1]); return 1";
+  "redis.call('DEL',KEYS[1]); redis.call('LREM',KEYS[2],0,ARGV[2]); " +
+  "redis.call('DEL',KEYS[3]); return 1";
 
 // handle 解決の結果。KV エラー (ok:false) を「未存在」(ok:true, record:null) と区別する。
 // outage 中に @handle ページが 404 / availability が「空き」と誤答するのを防ぐため。
@@ -111,8 +116,8 @@ export async function listHandleRecordsForOwner(
     const res = results[i];
     if (!res.ok) return null; // 取得失敗は「空」と誤認しない
     const record = parseHandleRecord(res.value);
-    // owner を再確認: stale index (LREM 失敗後に別 wallet が再取得) で他人の record を
-    // 編集対象として返さない (release の index cleanup 失敗時の安全策)。
+    // owner を再確認: 過去の stale index が別 wallet の record を指しても他人の handle を
+    // 編集対象として返さない。
     if (record && sameOwner(record.owner, owner)) out.push({ handle: names[i], record });
   }
   return out;
@@ -138,8 +143,7 @@ export type ReserveResult =
  * handle を予約 (新規) または更新 (所有者のみ)。
  * - 既存 & 別 owner → 'taken' / 既存 & 同 owner + updatedAt 一致 → 設定更新。
  * - 既存 & 同 owner でも expectedUpdatedAt 欠落/不一致 → 'conflict'。
- * - 新規 → 所有一覧の読み取り (null=KV エラーは中断) → 上限チェック → nx で atomic claim →
- *   LPUSH で index 原子追記。LPUSH 失敗時は claim を rollback (orphan 防止)。
+ * - 新規 → EVAL で存在確認・所有数上限・保存・index 追記・旧 live 状態失効を atomic に行う。
  */
 export async function reserveOrUpdateHandle(input: {
   handle: string;
@@ -149,7 +153,7 @@ export async function reserveOrUpdateHandle(input: {
   // storefront の三状態: undefined = 変更しない / null = 削除 / object = 置換。
   // (StorefrontParts は menu≥1 ゆえ「空オブジェクトでクリア」が表現できないため null を使う。)
   storefront?: StorefrontParts | null;
-  // 既存更新の読込 baseline。新規 claim では不要 (SET NX が名前の一意性を守る)。
+  // 既存更新の読込 baseline。新規 claim では不要 (claim Lua が名前の一意性を守る)。
   expectedUpdatedAt?: number;
   nowMs: number;
 }): Promise<ReserveResult> {
@@ -216,10 +220,6 @@ export async function reserveOrUpdateHandle(input: {
     return { status: 'taken' }; // 0/-1/-2: read 後に owner が変わった/消えた
   }
 
-  const owned = await listHandlesForOwner(owner);
-  if (owned === null) return { status: 'kv_error' }; // 読み取り失敗を「空」と誤認しない
-  if (owned.length >= MAX_HANDLES_PER_WALLET) return { status: 'limit' };
-
   const record: HandleRecord = {
     owner,
     config,
@@ -228,19 +228,20 @@ export async function reserveOrUpdateHandle(input: {
     createdAt: nowMs,
     updatedAt: nowMs,
   };
-  const claim = await kvSet(key, serializeHandleRecord(record), { nx: true });
+  const claim = await kvEval<number>(
+    CLAIM_HANDLE,
+    [key, ownerIndexKey(owner), shopLiveKey(handle)],
+    [serializeHandleRecord(record), handle, String(MAX_HANDLES_PER_WALLET)],
+  );
   if (!claim.ok) return { status: 'kv_error' };
-  if (claim.value !== 'OK') return { status: 'taken' }; // nx 競合負け
-
-  const idx = await kvLpush(ownerIndexKey(owner), handle);
-  if (!idx.ok) {
-    // claim を rollback。LPUSH が timeout-after-success だった場合に備え index からも
-    // LREM (冪等: 未挿入なら 0 件削除)。stale entry が limit/一覧に残らないようにする。
-    await kvDel(key);
-    await kvLrem(ownerIndexKey(owner), handle);
-    return { status: 'kv_error' };
+  if (claim.value === 1) return { status: 'created', record };
+  if (claim.value === -2) {
+    // Lua の上限判定は raw LLEN。過去に残った stale/重複は Set dedup する
+    // listHandlesForOwner より多く数え、実一覧が上限未満でも limit になり得る。既存分の
+    // lazy repair は別途とし、今後の stale は release Lua の LREM で増やさない。
+    return { status: 'limit' };
   }
-  return { status: 'created', record };
+  return { status: 'taken' }; // 0: EVAL 前に別 claim が確保
 }
 
 export type ReleaseStatus =
@@ -250,7 +251,7 @@ export type ReleaseStatus =
   | 'kv_unavailable'
   | 'kv_error';
 
-/** handle を解放 (所有者のみ)。所有者一致を atomic に確認して削除し、index から LREM で除去。 */
+/** handle を解放 (所有者のみ)。所有者確認と handle/index/live の削除を atomic に行う。 */
 export async function releaseHandle(input: {
   handle: string;
   owner: string;
@@ -258,18 +259,16 @@ export async function releaseHandle(input: {
   if (!isKvConfigured()) return 'kv_unavailable';
   const { handle, owner } = input;
 
-  // 所有者一致を atomic に確認して削除 (同 owner の二重 DELETE + 別 owner の取り直しが
-  // 交錯しても新 owner のレコードを消さない)。1=削除 / 0=owner 不一致 / -1,-2=未存在。
-  const cas = await kvEval<number>(CAS_DELETE, [handleKey(handle)], [owner]);
+  // 解放直前の shop:live PATCH が release 後の retry で live key を再作成する狭い race は残る。
+  // 完全に閉じるには不変の所有世代 claimId が必要だが、schema 追加は今回の E1 では見送る。
+  // 所有者一致を atomic に確認し、handle・index・live をまとめて削除する。
+  const cas = await kvEval<number>(
+    RELEASE_HANDLE,
+    [handleKey(handle), ownerIndexKey(owner), shopLiveKey(handle)],
+    [owner, handle],
+  );
   if (!cas.ok) return 'kv_error';
   if (cas.value === 0) return 'forbidden';
   if (cas.value !== 1) return 'not_found';
-
-  // handle は解放済み。index 除去は LREM (原子)。失敗しても released を返し、stale entry は
-  // ログのみ (上限を over-count = 安全側 / 次回 op で自己修復)。
-  const rem = await kvLrem(ownerIndexKey(owner), handle);
-  if (!rem.ok) {
-    logger.warn('handle.release.index_cleanup_failed', { handle });
-  }
   return 'released';
 }
