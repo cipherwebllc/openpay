@@ -5,15 +5,23 @@ import { NextResponse } from 'next/server';
 import { isKvConfigured, kvSet } from '@/lib/kv';
 import { nonceKey, NONCE_TTL_SEC, newSiweNonce } from '@/lib/siwe';
 import { logger } from '@/lib/logger';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
   if (!isKvConfigured()) {
     return NextResponse.json(
       { ok: false, error: 'kv_not_configured' },
       { status: 503 },
+    );
+  }
+  if (!(await checkIpRateLimit('siwe-nonce', hashIp(clientIp(req)), 60, 60))) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
     );
   }
   const nonce = newSiweNonce();

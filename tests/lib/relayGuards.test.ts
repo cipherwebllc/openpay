@@ -71,6 +71,7 @@ vi.mock('@/lib/logger', () => ({
 import {
   checkRateLimit,
   checkReadRateLimit,
+  checkIpRateLimit,
   checkGasBudget,
   refundGasBudget,
   makeIdempotency,
@@ -132,6 +133,39 @@ describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
   it('kvIncr 障害 → fail-open (許可・1 件の KV blip で read を止めない)', async () => {
     store.flags.incrOk = false;
     expect(await checkReadRateLimit('orderstatus:8.8.8', 1, 60)).toBe(true);
+  });
+});
+
+describe('relayGuards checkIpRateLimit (HMAC IP・scope 分離)', () => {
+  const HASHED_IP = 'a'.repeat(64);
+
+  it('scope ごとに bucket を分離し、各 key の初回だけ window TTL を設定する', async () => {
+    expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(true);
+    expect(await checkIpRateLimit('siwe-verify', HASHED_IP, 1, 60)).toBe(true);
+    expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(false);
+
+    const nonceKey = `iprl:v1:siwe-nonce:${HASHED_IP}`;
+    const verifyKey = `iprl:v1:siwe-verify:${HASHED_IP}`;
+    expect(store.counters.get(nonceKey)).toBe(2);
+    expect(store.counters.get(verifyKey)).toBe(1);
+    expect(store.expireCalls).toContainEqual({ key: nonceKey, ttlSec: 60 });
+    expect(store.expireCalls).toContainEqual({ key: verifyKey, ttlSec: 60 });
+  });
+
+  it('hashedIp null は limiter を skip し KV に触らない', async () => {
+    expect(await checkIpRateLimit('siwe-nonce', null, 1, 60)).toBe(true);
+    expect(store.counters.size).toBe(0);
+    expect(store.expireCalls).toHaveLength(0);
+  });
+
+  it('KV 未設定・INCR 障害は fail-open', async () => {
+    store.flags.kvConfigured = false;
+    expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(true);
+    expect(store.counters.size).toBe(0);
+
+    store.flags.kvConfigured = true;
+    store.flags.incrOk = false;
+    expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(true);
   });
 });
 

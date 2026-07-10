@@ -70,6 +70,29 @@ export async function checkReadRateLimit(
   return r.value <= max;
 }
 
+// 生 IP を保存しない write/auth endpoint 用の固定窓 limiter。呼出側で HMAC 済み IP を渡し、
+// scope ごとに bucket を分離する。IP hash 無しは共有 unknown bucket に寄せず skip する。
+export async function checkIpRateLimit(
+  scope: string,
+  hashedIp: string | null,
+  max: number,
+  windowSec: number,
+): Promise<boolean> {
+  if (hashedIp === null) return true;
+
+  try {
+    if (!isKvConfigured()) return true;
+    const key = `iprl:v1:${scope}:${hashedIp}`;
+    const r = await kvIncr(key);
+    if (!r.ok) return true;
+    if (r.value === 1) await kvExpire(key, windowSec);
+    return r.value <= max;
+  } catch {
+    // rate-limit storage の障害を auth/resource 管理本体へ波及させない (fail-open)。
+    return true;
+  }
+}
+
 // 日次予算カウンタのキー導出 (INCR で消費・DECR で refund する側でキーを完全一致させるため
 // 関数に括り出して共有する)。YYYYMMDD は UTC。**両 route 共有キー**。
 export const gasBudgetKey = (chainId: number) =>
