@@ -48,16 +48,25 @@ vi.mock('@/components/AddressInput', () => ({
 // edit-legacy-usdc: 旧 USDC method 持ちレコードの「編集」を模擬し onEdit を発火する。
 vi.mock('@/components/HandleClaimPanel', () => ({
   HandleClaimPanel: ({
-    config,
+    payload,
     onEdit,
     onPublished,
   }: {
-    config: unknown;
-    onEdit?: (handle: string, config: unknown, profile?: unknown) => void;
-    onPublished?: (handle: string) => void;
+    payload: { config: { to: string }; profile: unknown } | null;
+    onEdit?: (
+      handle: string,
+      config: unknown,
+      profile?: unknown,
+      updatedAt?: number,
+    ) => void;
+    onPublished?: (snapshot: {
+      handle: string;
+      payload: { config: { to: string }; profile: unknown };
+      updatedAt: number;
+    }) => void;
   }) => (
     <div data-testid="claim">
-      {config ? `config-ready:${(config as { to: string }).to}` : 'no-config'}
+      {payload ? `config-ready:${payload.config.to}` : 'no-config'}
       <button
         type="button"
         data-testid="edit-legacy-usdc"
@@ -68,7 +77,7 @@ vi.mock('@/components/HandleClaimPanel', () => ({
               { token: 'jpyc', chain: 'polygon' },
               { token: 'usdc', chain: 'base', crossChain: true },
             ],
-          })
+          }, undefined, Date.UTC(2026, 6, 10, 10, 0, 0))
         }
       />
       <button
@@ -86,8 +95,41 @@ vi.mock('@/components/HandleClaimPanel', () => ({
       />
       <button
         type="button"
+        data-testid="edit-named"
+        onClick={() =>
+          onEdit?.(
+            'alice',
+            {
+              to: ADDR,
+              name: 'Published Alice',
+              methods: [{ token: 'jpyc', chain: 'polygon' }],
+            },
+            { bio: 'Published bio', theme: 'clean' },
+            Date.UTC(2026, 6, 10, 10, 0, 0),
+          )
+        }
+      />
+      <button
+        type="button"
+        data-testid="edit-missing-updated-at"
+        onClick={() =>
+          onEdit?.('alice', {
+            to: ADDR,
+            methods: [{ token: 'jpyc', chain: 'polygon' }],
+          })
+        }
+      />
+      <button
+        type="button"
         data-testid="publish-mock"
-        onClick={() => onPublished?.('alice')}
+        onClick={() =>
+          payload &&
+          onPublished?.({
+            handle: 'alice',
+            payload,
+            updatedAt: Date.UTC(2026, 6, 10, 12, 0, 0),
+          })
+        }
       />
     </div>
   ),
@@ -304,14 +346,15 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
   });
 
-  it('④ プレビュー下: 新規 (未公開) では 開く/コピー/QR を出さない', () => {
+  it('④ プレビュー下: 新規 (未公開) では 開く/コピー/QR/X を出さない', () => {
     renderWithIntl(<HandleProfileBuilder />);
     expect(screen.queryByRole('link', { name: '開く' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'コピー' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'QRコード' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'X でシェア' })).not.toBeInTheDocument();
   });
 
-  it('④ プレビュー下: 編集中 (editingHandle) に 開く/コピー/QR を出す', () => {
+  it('④ プレビュー下: 編集中 (editingHandle) に 開く/コピー/QR/X を出す', () => {
     renderWithIntl(<HandleProfileBuilder />);
     // mock の edit ボタンが onEdit('alice', ...) を発火 → editingHandle='alice'
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
@@ -320,6 +363,65 @@ describe('HandleProfileBuilder', () => {
     expect(open).toHaveAttribute('target', '_blank');
     expect(screen.getByRole('button', { name: 'コピー' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'QRコード' })).toBeInTheDocument();
+    const share = screen.getByRole('link', { name: 'X でシェア' });
+    expect(share).toHaveAttribute(
+      'href',
+      expect.stringContaining('twitter.com/intent/tweet'),
+    );
+    expect(new URL(share.getAttribute('href')!).searchParams.get('text')).toBe(
+      '@alice をシェア',
+    );
+  });
+
+  it('公開 snapshot の名前で X 文言を作り、dirty 中の未公開名を混ぜない', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-named'));
+    const share = screen.getByRole('link', { name: 'X でシェア' });
+    expect(new URL(share.getAttribute('href')!).searchParams.get('text')).toBe(
+      '「Published Alice (@alice)」をシェア',
+    );
+
+    fireEvent.change(screen.getByLabelText('表示名'), {
+      target: { value: 'Draft Alice' },
+    });
+    expect(screen.getByText('未公開の変更があります')).toBeInTheDocument();
+    expect(new URL(share.getAttribute('href')!).searchParams.get('text')).toBe(
+      '「Published Alice (@alice)」をシェア',
+    );
+  });
+
+  it('公開ステータスは updatedAt を <time dateTime> で表示し、欠損時は fallback', () => {
+    const { unmount } = renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-named'));
+    expect(screen.getByText('公開中 @alice')).toBeInTheDocument();
+    const time = screen.getByTestId('published-status').querySelector('time');
+    expect(time).not.toBeNull();
+    expect(time).toHaveAttribute('datetime', '2026-07-10T10:00:00.000Z');
+
+    unmount();
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-missing-updated-at'));
+    expect(screen.getByText('最終更新時刻は不明')).toBeInTheDocument();
+    expect(screen.getByTestId('published-status').querySelector('time')).toBeNull();
+  });
+
+  it('MobileOrderBuilder 方式のスマホフレーム + 枠内スクロールで、実プレビュー props とアクション行を分離', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByLabelText('表示名'), {
+      target: { value: 'Preview Alice' },
+    });
+    const frame = screen.getByTestId('handle-preview-frame');
+    const scroll = screen.getByTestId('handle-preview-scroll');
+    expect(frame.className).toContain('rounded-[2rem]');
+    expect(frame.className).toContain('border-[6px]');
+    expect(scroll.className).toContain('max-h-[46vh]');
+    expect(scroll.className).toContain('overflow-y-auto');
+    expect(within(frame).getByText('Preview Alice')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('edit-named'));
+    expect(frame).not.toContainElement(
+      screen.getByRole('link', { name: 'X でシェア' }),
+    );
   });
 
   it('④ QR ボタンで LinkQrModal が開き 編集中 handle のフル URL を提示', () => {
@@ -392,17 +494,17 @@ describe('HandleProfileBuilder', () => {
       screen.queryByText(/プロフでの USDC 提供は終了しました/),
     ).not.toBeInTheDocument();
     // 編集モード自体は継続 (公開した handle を編集中)
-    expect(screen.getByText('「@alice」を編集中')).toBeInTheDocument();
+    expect(screen.getByText('公開中 @alice')).toBeInTheDocument();
   });
 
   it('編集開始でヘッダに「編集中」バッジ・「編集をやめる」でフォームを既定へ戻す', () => {
     renderWithIntl(<HandleProfileBuilder />);
-    expect(screen.queryByText('「@alice」を編集中')).not.toBeInTheDocument();
+    expect(screen.queryByText('公開中 @alice')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
-    expect(screen.getByText('「@alice」を編集中')).toBeInTheDocument();
+    expect(screen.getByText('公開中 @alice')).toBeInTheDocument();
     // やめる → バッジと USDC 通知が消え、新規作成モードへ
     fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
-    expect(screen.queryByText('「@alice」を編集中')).not.toBeInTheDocument();
+    expect(screen.queryByText('公開中 @alice')).not.toBeInTheDocument();
     expect(
       screen.queryByText(/プロフでの USDC 提供は終了しました/),
     ).not.toBeInTheDocument();

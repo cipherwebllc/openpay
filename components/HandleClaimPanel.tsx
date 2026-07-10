@@ -3,9 +3,9 @@
 // @handle 恒久リンクの取得 UI。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
 // StepCard ① の中身として描画される (枠と見出しは StepCard が提供)。
 // SIWE サインイン → 取得済み一覧 (編集/削除) → handle 入力 + 空き確認 →
-// 現在のプロフィール設定 (config+profile) を publish。設定は親 (HandleProfileBuilder) から
-// HandleTipConfig + HandleProfile として受け取る (受取先/方法 未確定なら config=null)。
-// 開く/コピー/QR は ④ プレビュー下 (builder 側) に集約したのでここには持たない。
+// 現在のプロフィール設定を publish。親 (HandleProfileBuilder) が純関数で canonical 化した
+// payload (config+profile) を受け取る (受取先/方法 未確定なら payload=null)。
+// 開く/コピー/QR/X は ④ プレビュー下 (builder 側) に集約したのでここには持たない。
 //
 // 編集モードは親が所有 (editingHandle)。「編集」でフォームに prefill + モード開始、
 // バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
@@ -23,6 +23,10 @@ import {
   type HandleTipConfig,
   type HandleProfile,
 } from '@/lib/handle';
+import type {
+  HandlePublishPayload,
+  PublishedHandleSnapshot,
+} from '@/lib/handlePublish';
 
 // 削除確認の danger モーダル。LinkQrModal と同じ a11y パターン: 開いたら確定ボタンへ
 // フォーカス・Tab は背後へ抜けないようトラップ・閉じたら元の要素へ復元・ESC/背景で閉じる。
@@ -143,25 +147,27 @@ async function fetchJson(url: string, init?: RequestInit) {
 }
 
 export function HandleClaimPanel({
-  config,
-  profile,
+  payload,
   onEdit,
   editingHandle = null,
+  isDirty = false,
   onStopEditing,
   onPublished,
 }: {
-  config: HandleTipConfig | null;
-  profile?: HandleProfile;
+  payload: HandlePublishPayload | null;
   onEdit?: (
     handle: string,
     config: HandleTipConfig,
     profile?: HandleProfile,
+    updatedAt?: number,
   ) => void;
   /** 親 (builder) が保持する編集モード。null = 新規取得モード。 */
   editingHandle?: string | null;
+  /** 読込/送信 snapshot と現在の canonical payload が異なる。 */
+  isDirty?: boolean;
   onStopEditing?: () => void;
-  /** 公開成功 (created/updated) 後に親へ通知 — 以後その handle の編集モードに入る。 */
-  onPublished?: (handle: string) => void;
+  /** 公開成功後、mutation 変数の送信 snapshot を親の baseline にする。 */
+  onPublished?: (snapshot: PublishedHandleSnapshot) => void;
 }) {
   const t = useTranslations('HandleClaim');
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
@@ -177,7 +183,7 @@ export function HandleClaimPanel({
   } | null>(null);
   // 削除確認モーダルの対象 handle (null = 閉)。window.confirm を置き換える danger 確認。
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null);
-
+  const config = payload?.config ?? null;
 
   // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
   useEffect(() => {
@@ -236,24 +242,24 @@ export function HandleClaimPanel({
   });
 
   const publish = useMutation({
-    mutationFn: async (handle: string) => {
+    mutationFn: async (snapshot: PublishedHandleSnapshot) => {
       const { ok, status, json } = await fetchJson('/api/handle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ handle, config, profile }),
+        body: JSON.stringify({ handle: snapshot.handle, ...snapshot.payload }),
       });
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
       return json;
     },
-    onSuccess: (json, handle) => {
+    onSuccess: (json, snapshot) => {
       qc.invalidateQueries({ queryKey: ['handle-mine'] });
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
       // 入力は消さず「いま @handle を編集している」状態に遷移する (続けて微調整できる)。
       setPublished({
-        handle,
+        handle: snapshot.handle,
         status: json.status === 'created' ? 'created' : 'updated',
       });
-      onPublished?.(handle);
+      onPublished?.(snapshot);
     },
   });
 
@@ -286,6 +292,10 @@ export function HandleClaimPanel({
   const owned = mine.data?.handles ?? [];
   const ownedNames = owned.map((o) => o.handle);
   const atLimit = owned.length >= max;
+  const emphasizeUpdate =
+    isDirty &&
+    normalized === editingHandle &&
+    ownedNames.includes(normalized);
 
   return (
     <div>
@@ -335,7 +345,9 @@ export function HandleClaimPanel({
                     <li
                       key={h}
                       className={`rounded-lg p-3 ${
-                        isEditing ? 'bg-amber-50 ring-1 ring-amber-300' : 'bg-slate-50'
+                        isEditing
+                          ? 'bg-emerald-50 ring-1 ring-emerald-200'
+                          : 'bg-slate-50'
                       }`}
                     >
                       {/* 1段目: ハンドル名のみ (URL 全文は詰まって読めないため出さない —
@@ -352,7 +364,7 @@ export function HandleClaimPanel({
                                 // 狙うため)。同時に親へ config/profile の prefill を通知。
                                 setInput(o.handle);
                                 setPublished(null);
-                                onEdit(o.handle, o.config, o.profile);
+                                onEdit(o.handle, o.config, o.profile, o.updatedAt);
                               }}
                               className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
                             >
@@ -368,8 +380,8 @@ export function HandleClaimPanel({
                           </button>
                       </div>
                       {isEditing && (
-                        <p className="mt-1.5 text-xs font-medium text-amber-700">
-                          {t('editingBanner', { handle: h })}
+                        <p className="mt-1.5 text-xs font-medium text-emerald-700">
+                          {t('publishedStatus', { handle: h })}
                         </p>
                       )}
                     </li>
@@ -389,15 +401,15 @@ export function HandleClaimPanel({
           <div className={owned.length > 0 ? 'border-t border-slate-100 pt-3' : ''}>
             {editingHandle ? (
               // 編集モードを明示 (黙ってフォームが書き換わるのが最大の混乱源)。
-              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2">
-                <span className="text-xs font-medium text-amber-800">
-                  {t('editingBanner', { handle: editingHandle })}
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2">
+                <span className="text-xs font-medium text-emerald-800">
+                  {t('publishedStatus', { handle: editingHandle })}
                 </span>
                 {onStopEditing && (
                   <button
                     type="button"
                     onClick={onStopEditing}
-                    className="flex-none text-xs font-semibold text-amber-700 underline hover:text-amber-900"
+                    className="flex-none text-xs font-semibold text-emerald-700 underline hover:text-emerald-900"
                   >
                     {t('stopEditing')}
                   </button>
@@ -466,7 +478,15 @@ export function HandleClaimPanel({
 
             <button
               type="button"
-              onClick={() => normalized && config && publish.mutate(normalized)}
+              onClick={() =>
+                normalized &&
+                payload &&
+                publish.mutate({
+                  handle: normalized,
+                  payload,
+                  updatedAt: Date.now(),
+                })
+              }
               disabled={
                 !config || // 受取先/方法 未確定では取得/更新できない
                 !validation.ok ||
@@ -476,7 +496,9 @@ export function HandleClaimPanel({
                   !ownedNames.includes(normalized)) ||
                 (atLimit && !ownedNames.includes(normalized))
               }
-              className="mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40"
+              className={`mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40 ${
+                emphasizeUpdate ? 'ring-2 ring-amber-300 ring-offset-2' : ''
+              }`}
             >
               {publish.isPending
                 ? t('claiming')

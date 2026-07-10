@@ -81,3 +81,20 @@ body {
     display: none !important;
   }
 }
+
+/* @handle の Night だけ、body と layout 直下のグローバル footer を同じ暗色へつなぐ。
+   marker が無い他テーマ/他ページでは :has が不成立なので既存 footer の computed style は不変。 */
+body:has([data-handle-theme='night']) {
+  background-color: rgb(2 6 23);
+}
+body:has([data-handle-theme='night']) > footer {
+  background-color: rgb(2 6 23);
+  color: rgb(203 213 225);
+}
+body:has([data-handle-theme='night']) > footer * {
+  color: rgb(203 213 225);
+}
+body:has([data-handle-theme='night']) > footer a:hover,
+body:has([data-handle-theme='night']) > footer summary:hover {
+  color: rgb(248 250 252);
+}
