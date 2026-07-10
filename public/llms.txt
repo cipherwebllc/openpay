@@ -1,6 +1,6 @@
 # OpenPay
 
-> OpenPayは、日本円ステーブルコインJPYC・USDC対応の店舗向け決済インフラ。QR決済・モバイルオーダー・受注・電子レシート・会計・AIエージェント決済までを手数料0〜1%で提供。売上は店舗のウォレットへ直接着金（ノンカストディ・導入費0円・契約不要・オープンソース）。
+> OpenPayは、日本円ステーブルコインJPYC・USDC対応の店舗向け決済インフラ。QR決済・モバイルオーダー・受注・電子レシート・会計・AIエージェント決済までを手数料0〜1%（時間指定の事前モバイルオーダーのみ3%）で提供。売上は店舗のウォレットへ直接着金（ノンカストディ・導入費0円・契約不要・オープンソース）。
 
 OpenPay is an open-source, non-custodial payment layer for the Japanese yen stablecoin JPYC and USDC — QR payments, mobile ordering, receipts, accounting, and AI-agent checkout for stores.
 

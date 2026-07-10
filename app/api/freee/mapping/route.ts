@@ -77,10 +77,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_mapping' }, { status: 400 });
   }
 
-  await setMapping(session.address, {
+  const saved = await setMapping(session.address, {
     companyId: token.companyId,
     accountItemId: body.accountItemId,
     taxCode: body.taxCode,
   });
+  if (!saved) {
+    return NextResponse.json(
+      { ok: false, error: 'mapping_save_failed' },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({ ok: true });
 }

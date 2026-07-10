@@ -16,7 +16,7 @@
 import { useCallback } from 'react';
 import { useWalletClient } from 'wagmi';
 import type { Address, Hex } from 'viem';
-import { csvPassPriceWei } from '@/lib/csvPass';
+import { csvPassPriceWei } from '@/lib/csvPassConstants';
 import type { TokenDeployment } from '@/lib/tokens';
 import {
   AUTHORIZATION_VALIDITY_WINDOW_SEC,

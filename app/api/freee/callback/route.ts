@@ -54,7 +54,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     // 再マッピングを促す (status.mappingSet=false に倒れパネルが mapping editor を出す)。
     const prevMeta = await getMeta(stateValue.wallet);
     if (prevMeta && prevMeta.companyId !== companyId) {
-      await delMapping(stateValue.wallet);
+      const deleted = await delMapping(stateValue.wallet);
+      if (!deleted) {
+        logger.warn('freee.callback.mapping_delete_failed', {
+          wallet: stateValue.wallet,
+        });
+        return errorRedirect(req, 'mapping_delete_failed');
+      }
     }
 
     if (companyId == null) {

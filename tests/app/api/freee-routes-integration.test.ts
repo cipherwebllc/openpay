@@ -9,6 +9,8 @@ import type { HistoryEntry } from '@/lib/history';
 const h = vi.hoisted(() => ({
   store: new Map<string, string>(),
   cookieToken: { value: undefined as string | undefined },
+  failSetKeys: new Set<string>(),
+  failDelKeys: new Set<string>(),
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -26,6 +28,7 @@ vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
   kvGet: async (k: string) => ({ ok: true, value: h.store.has(k) ? h.store.get(k) : null }),
   kvSet: async (k: string, v: string, opts: { nx?: boolean } = {}) => {
+    if (h.failSetKeys.has(k)) return { ok: false, reason: 'network_error' };
     if (opts.nx && h.store.has(k)) return { ok: true, value: null };
     h.store.set(k, v);
     return { ok: true, value: 'OK' };
@@ -37,6 +40,7 @@ vi.mock('@/lib/kv', () => ({
     return { ok: true, value: null };
   },
   kvDel: async (k: string) => {
+    if (h.failDelKeys.has(k)) return { ok: false, reason: 'network_error' };
     const had = h.store.has(k);
     h.store.delete(k);
     return { ok: true, value: had ? 1 : 0 };
@@ -165,6 +169,8 @@ function req(url: string, body?: unknown): Request {
 beforeEach(() => {
   h.store.clear();
   h.cookieToken.value = undefined;
+  h.failSetKeys.clear();
+  h.failDelKeys.clear();
   vi.restoreAllMocks();
   process.env.FREEE_CLIENT_ID = 'cid';
   process.env.FREEE_CLIENT_SECRET = 'sec';
@@ -335,6 +341,19 @@ describe('GET/POST /api/freee/mapping (実グルー)', () => {
     expect(saved).toEqual({ companyId: 7, accountItemId: 555, taxCode: 21 });
   });
 
+  it('POST: mapping の KV 保存失敗 → 503 (保存成功と偽らない)', async () => {
+    seedSession();
+    seedFreeeConnected();
+    const mappingKey = `freee:map:${MERCHANT.toLowerCase()}`;
+    h.failSetKeys.add(mappingKey);
+    const res = await mappingPOST(
+      req('http://localhost/api/freee/mapping', { accountItemId: 555, taxCode: 21 }),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'mapping_save_failed' });
+    expect(h.store.has(mappingKey)).toBe(false);
+  });
+
   it('POST: 不正 body → 400 invalid_mapping', async () => {
     seedSession();
     seedFreeeConnected();
@@ -428,6 +447,31 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
     await callbackGET(new Request('http://localhost/api/freee/callback?code=C&state=STATE6'));
     expect(h.store.has(`freee:map:${MERCHANT.toLowerCase()}`)).toBe(false); // 旧 mapping 破棄
     expect(JSON.parse(h.store.get(`freee:meta:${MERCHANT.toLowerCase()}`)!).companyId).toBe(99);
+  });
+
+  it('別会社で再連携時の mapping 削除失敗 → connected と偽らない', async () => {
+    seedSession();
+    h.store.set('freee:state:STATE8', JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
+    h.store.set(
+      `freee:meta:${MERCHANT.toLowerCase()}`,
+      JSON.stringify({ companyId: 7, companyName: '旧商店' }),
+    );
+    const mappingKey = `freee:map:${MERCHANT.toLowerCase()}`;
+    h.store.set(
+      mappingKey,
+      JSON.stringify({ companyId: 7, accountItemId: 101, taxCode: 21 }),
+    );
+    h.failDelKeys.add(mappingKey);
+    mockFreeeFetch({
+      token: { access_token: 'AT', refresh_token: 'RT', expires_in: 21_600, company_id: 99 },
+      companies: { companies: [{ id: 99, display_name: '新商店' }] },
+    });
+    const res = await callbackGET(
+      new Request('http://localhost/api/freee/callback?code=C&state=STATE8'),
+    );
+    expect(res.headers.get('location') ?? '').toContain('reason=mapping_delete_failed');
+    expect(h.store.has(mappingKey)).toBe(true);
+    expect(JSON.parse(h.store.get(`freee:meta:${MERCHANT.toLowerCase()}`)!).companyId).toBe(7);
   });
 
   it('同一会社で再連携 → mapping は保持', async () => {

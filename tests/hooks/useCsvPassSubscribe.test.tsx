@@ -79,7 +79,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 const SIGNATURE = ('0x' + 'b'.repeat(130)) as `0x${string}`;
 
 import { useCsvPassSubscribe } from '@/hooks/useCsvPassSubscribe';
-import { csvPassPriceWei } from '@/lib/csvPass';
+import { csvPassPriceWei } from '@/lib/csvPassConstants';
 
 const deployment = { address: DEPLOYMENT_ADDRESS } as never;
 
