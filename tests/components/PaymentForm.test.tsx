@@ -1547,6 +1547,78 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
     // store が opt-out した状態は enabled=false で hint へ伝播
     expect(props.enabled).toBe(false);
   });
+
+  it.each(['pending', 'success'] as const)(
+    '親の通常決済が %s の間は cross-chain execute を無効化',
+    async (state) => {
+      setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      setPayment(state);
+
+      render(<PaymentForm />);
+
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      const props = crossChainHintSpy.mock.lastCall?.[0] as {
+        executionDisabled: boolean;
+      };
+      expect(props.executionDisabled).toBe(true);
+    },
+  );
+
+  it('cross-chain 実行中は親 Pay を止め、成功を親 panel/overlay に表示する', async () => {
+    const mintTxHash = `0x${'f'.repeat(64)}` as const;
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setPayment('idle');
+
+    render(<PaymentForm />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall?.[0] as {
+      onAttemptStart: (amount: bigint) => void;
+      onExecutingChange: (executing: boolean) => void;
+      onSuccess: (result: {
+        path: 'gateway';
+        attestation: `0x${string}`;
+        attestationSignature: `0x${string}`;
+        mintTxHash: `0x${string}`;
+        destChainId: number;
+      }) => void;
+    };
+    const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    expect(payBtn).toBeEnabled();
+
+    act(() => {
+      props.onAttemptStart(10_000_000n);
+      props.onExecutingChange(true);
+    });
+    expect(payBtn).toBeDisabled();
+
+    act(() => props.onExecutingChange(false));
+    expect(payBtn).toBeEnabled();
+
+    act(() => {
+      props.onAttemptStart(10_000_000n);
+      props.onSuccess({
+        path: 'gateway',
+        attestation: '0xattestation',
+        attestationSignature: '0xsignature',
+        mintTxHash,
+        destChainId: baseSepolia.id,
+      });
+    });
+    expect(payBtn).toBeDisabled();
+    expect(
+      screen.getAllByText(/決済が完了しました|決済完了/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(mintTxHash).length).toBeGreaterThan(0);
+  });
 });
 
 describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {

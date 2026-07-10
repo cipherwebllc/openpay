@@ -11,10 +11,11 @@
 // chooser に含めるが、既存の direct 経路 (useBatchPayment / useStandardPayment)
 // に委譲するため execute は no-op (= 既存 Pay button が処理する)。
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
+import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
@@ -46,6 +47,14 @@ export interface CrossChainHintProps {
    *  cross-chain=ガス代要」を出し分けるために使う。standard モードや paymaster 無効時は
    *  false (直接送金もガス顧客負担)。 */
   directIsGasless: boolean;
+  /** 親の通常決済が pending / unknown / success の間、cross-chain execute だけを止める。 */
+  executionDisabled?: boolean;
+  /** 実行中または不可逆境界到達後の親 Pay 排他状態を通知する。 */
+  onExecutingChange?: (executing: boolean) => void;
+  /** cross-chain 完了結果を親の成功 UI へ伝える。 */
+  onSuccess?: (result: ExecuteResult) => void;
+  /** execute 開始時点の請求額を親に snapshot させる。 */
+  onAttemptStart?: (amount: bigint) => void;
 }
 
 export function CrossChainHint(props: CrossChainHintProps) {
@@ -63,7 +72,17 @@ export function CrossChainHint(props: CrossChainHintProps) {
       props.enabled &&
       props.requiredAtomic > 0n,
   });
-  const { decision, pathOptions, progress, isExecuting, result, error } = hook;
+  const {
+    decision,
+    pathOptions,
+    progress,
+    isExecuting,
+    isCommitted,
+    result,
+    error,
+  } = hook;
+  const attemptedAtomicRef = useRef<bigint | null>(null);
+  const successNotifiedHashRef = useRef<string | null>(null);
   // user 選択 state。default = options[0] (auto-best、enumerator は direct →
   // gateway → cctp-v2 / balance 降順で sort 済)。options 変化に追従するため
   // useEffect で再同期。
@@ -91,10 +110,22 @@ export function CrossChainHint(props: CrossChainHintProps) {
         destChainId: result.destChainId,
         mintTxHash: result.mintTxHash,
         recipient: props.recipient,
-        valueAtomic: props.requiredAtomic.toString(),
+        valueAtomic: (
+          attemptedAtomicRef.current ?? props.requiredAtomic
+        ).toString(),
       });
+      if (successNotifiedHashRef.current !== result.mintTxHash) {
+        successNotifiedHashRef.current = result.mintTxHash;
+        props.onSuccess?.(result);
+      }
     }
-  }, [result, props.recipient, props.requiredAtomic]);
+  }, [result, props.recipient, props.requiredAtomic, props.onSuccess]);
+
+  useEffect(() => {
+    // 成功は onSuccess 側の settled lock に引き継ぐ。失敗時は不可逆境界前だけ false に
+    // 戻し、burn / attestation 後は親の通常 Pay を同一 mount 中ずっと封鎖する。
+    props.onExecutingChange?.(result ? false : isExecuting || isCommitted);
+  }, [isCommitted, isExecuting, result, props.onExecutingChange]);
 
   useEffect(() => {
     if (error) {
@@ -132,7 +163,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
       <SuccessPanel
         bridge={result.path}
         recipient={props.recipient}
-        valueAtomic={props.requiredAtomic}
+        valueAtomic={attemptedAtomicRef.current ?? props.requiredAtomic}
         displayDecimals={props.displayDecimals}
         destChainId={result.destChainId}
         mintTxHash={result.mintTxHash}
@@ -161,7 +192,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   if (!hasCrossChain) return null;
 
   async function onPay() {
-    if (!selectedOption) return;
+    if (!selectedOption || props.executionDisabled) return;
     // direct option は既存 Pay button に委譲 (UX 上 chooser からも実行できる
     // 方が一貫性あるが、execute path が違う = useBatchPayment / useStandardPayment
     // を経由する必要があるため、本 panel では NOTE 表示 + 親 Pay button に
@@ -172,6 +203,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
       // ここでは何もしない (= no-op、panel 残る)。
       return;
     }
+    attemptedAtomicRef.current = props.requiredAtomic;
+    props.onAttemptStart?.(props.requiredAtomic);
     try {
       // 会計ログ (KV) は useCrossChainPayment の onMerchantMint が merchant mint 確定時
       // (fee mint より前) に発火する。fee mint 失敗でも merchant 着金を取りこぼさず、売上総額
@@ -184,13 +217,20 @@ export function CrossChainHint(props: CrossChainHintProps) {
   }
 
   const isDirectSelected = selectedOption?.kind === 'direct';
-  const payButtonDisabled = isExecuting || !selectedOption || isDirectSelected;
   // 中断再開: 選択中 option に保存済みの途中 state があれば、再 Pay で続きから
   // 再開できる (送金済みは再送しない)。UI で明示して二重支払いの不安を消す。
   const resumable =
     !isDirectSelected &&
     selectedOption !== null &&
     hook.isOptionResumable(selectedOption);
+  const payButtonDisabled =
+    isExecuting ||
+    !!props.executionDisabled ||
+    // 同一 mount で committed を観測したのに resume 保存が無い場合、再 execute は
+    // 二重 burn/debit になり得る。D4b は行わず、この mount の子ボタンだけ fail-closed。
+    (isCommitted && !resumable) ||
+    !selectedOption ||
+    isDirectSelected;
 
   return (
     <div className="space-y-3">
