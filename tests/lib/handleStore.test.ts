@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// KV を完全モックして handleStore の分岐 (null-on-error / atomic LPUSH+rollback / LREM 解放 /
-// 上限 / owner ゲート) を検証する。
+// handleStore が渡す Lua を共有 in-memory KV 上で実行し、claim/release の複数 key 更新を
+// canned result ではなく EVAL の原子操作として検証する (x402/registry.test.ts と同型)。
+const store = vi.hoisted(() => ({
+  values: new Map<string, string>(),
+  lists: new Map<string, string[]>(),
+}));
 const kv = vi.hoisted(() => ({
   isKvConfigured: vi.fn(() => true),
   kvGet: vi.fn(),
-  kvSet: vi.fn(),
-  kvDel: vi.fn(),
-  kvLpush: vi.fn(),
   kvLrange: vi.fn(),
-  kvLrem: vi.fn(),
   kvEval: vi.fn(),
 }));
 vi.mock('@/lib/kv', () => kv);
@@ -44,16 +44,72 @@ const recJson = (owner: string, createdAt = 1, updatedAt = createdAt) =>
     updatedAt,
   });
 
+async function emulateEval(script: string, keys: string[], args: string[]) {
+  // CLAIM_HANDLE: GET → LLEN cap → SET + LPUSH + DEL shop:live。
+  if (script.includes("redis.call('LLEN'")) {
+    if (store.values.has(keys[0])) return { ok: true as const, value: 0 };
+    const index = store.lists.get(keys[1]) ?? [];
+    if (index.length >= Number(args[2])) return { ok: true as const, value: -2 };
+    store.values.set(keys[0], args[0]);
+    index.unshift(args[1]);
+    store.lists.set(keys[1], index);
+    store.values.delete(keys[2]);
+    return { ok: true as const, value: 1 };
+  }
+
+  const raw = store.values.get(keys[0]);
+  if (raw === undefined) return { ok: true as const, value: -1 };
+  let record: Record<string, unknown>;
+  try {
+    record = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { ok: true as const, value: -2 };
+  }
+  if (typeof record.owner !== 'string') return { ok: true as const, value: -2 };
+  if (record.owner.toLowerCase() !== args[0].toLowerCase()) {
+    return { ok: true as const, value: 0 };
+  }
+
+  // RELEASE_HANDLE: owner 一致時に handle/index/shop:live を同時削除。
+  if (script.includes("redis.call('LREM'")) {
+    store.values.delete(keys[0]);
+    const index = store.lists.get(keys[1]) ?? [];
+    store.lists.set(
+      keys[1],
+      index.filter((value) => value !== args[1]),
+    );
+    store.values.delete(keys[2]);
+    return { ok: true as const, value: 1 };
+  }
+
+  // CAS_UPDATE: owner と updatedAt の baseline が一致するときだけ record を置換。
+  if (typeof record.updatedAt !== 'number' || record.updatedAt !== Number(args[1])) {
+    return { ok: true as const, value: -3 };
+  }
+  store.values.set(keys[0], args[2]);
+  return { ok: true as const, value: 1 };
+}
+
+function setExisting(raw: string, handle = 'alice') {
+  store.values.set(`handle:${handle}`, raw);
+  kv.kvGet.mockResolvedValue({ ok: true, value: raw });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  store.values.clear();
+  store.lists.clear();
   kv.isKvConfigured.mockReturnValue(true);
-  kv.kvGet.mockResolvedValue({ ok: true, value: null });
-  kv.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
-  kv.kvDel.mockResolvedValue({ ok: true, value: 1 });
-  kv.kvLpush.mockResolvedValue({ ok: true, value: 1 });
-  kv.kvLrange.mockResolvedValue({ ok: true, value: [] });
-  kv.kvLrem.mockResolvedValue({ ok: true, value: 1 });
-  kv.kvEval.mockResolvedValue({ ok: true, value: 1 }); // CAS: 既定は成功 (1)
+  kv.kvGet.mockImplementation(async (key: string) => ({
+    ok: true as const,
+    value: store.values.get(key) ?? null,
+  }));
+  kv.kvLrange.mockImplementation(async (key: string, start: number, stop: number) => {
+    const list = store.lists.get(key) ?? [];
+    const end = stop < 0 ? list.length : stop + 1;
+    return { ok: true as const, value: list.slice(start, end) };
+  });
+  kv.kvEval.mockImplementation(emulateEval);
 });
 
 describe('listHandlesForOwner', () => {
@@ -98,21 +154,21 @@ describe('reserveOrUpdateHandle', () => {
   });
 
   it('既存 & 別 owner → taken', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OTHER) });
+    setExisting(recJson(OTHER));
     expect((await reserveOrUpdateHandle(base)).status).toBe('taken');
   });
 
-  it('既存 & 同 owner → CAS で updated (createdAt 保持・nx claim は使わない)', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42) });
+  it('既存 & 同 owner → CAS で updated (createdAt 保持・claim Lua は使わない)', async () => {
+    setExisting(recJson(OWNER, 42));
     const res = await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 42 });
     expect(res.status).toBe('updated');
     expect(res.record?.createdAt).toBe(42);
     expect(kv.kvEval.mock.calls[0][2][1]).toBe('42');
-    expect(kv.kvSet).not.toHaveBeenCalled(); // nx claim は新規のみ
+    expect(kv.kvEval.mock.calls[0][0]).not.toContain("redis.call('LLEN'");
   });
 
   it('update の updatedAt は既存値より必ず単調増加して serialize される', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42, 100) });
+    setExisting(recJson(OWNER, 42, 100));
     const res = await reserveOrUpdateHandle({
       ...base,
       nowMs: 99,
@@ -125,7 +181,7 @@ describe('reserveOrUpdateHandle', () => {
   });
 
   it('既存 & 同 owner でも expectedUpdatedAt 欠落/不一致 → conflict (CAS 不発)', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42, 50) });
+    setExisting(recJson(OWNER, 42, 50));
     expect((await reserveOrUpdateHandle(base)).status).toBe('conflict');
     expect(
       (await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 49 })).status,
@@ -134,7 +190,7 @@ describe('reserveOrUpdateHandle', () => {
   });
 
   it('読込後に別更新が勝ち CAS -3 → conflict', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42, 50) });
+    setExisting(recJson(OWNER, 42, 50));
     kv.kvEval.mockResolvedValue({ ok: true, value: -3 });
     expect(
       (await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 50 })).status,
@@ -153,7 +209,7 @@ describe('reserveOrUpdateHandle', () => {
       createdAt: 5,
       updatedAt: 5,
     });
-    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    setExisting(existing);
     // base.config は message/webhook を持たない (builder が送らない) → 既存値を保持。
     const res = await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 5 });
     expect(res.status).toBe('updated');
@@ -169,7 +225,7 @@ describe('reserveOrUpdateHandle', () => {
       createdAt: 5,
       updatedAt: 5,
     });
-    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    setExisting(existing);
     const res = await reserveOrUpdateHandle({
       ...base,
       expectedUpdatedAt: 5,
@@ -186,7 +242,7 @@ describe('reserveOrUpdateHandle', () => {
       createdAt: 5,
       updatedAt: 5,
     });
-    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    setExisting(existing);
     const res = await reserveOrUpdateHandle({
       ...base,
       profile: {},
@@ -197,48 +253,66 @@ describe('reserveOrUpdateHandle', () => {
   });
 
   it('既存 & 同 owner だが CAS で owner 変化 (value!=1) → taken', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: recJson(OWNER, 42) });
+    setExisting(recJson(OWNER, 42));
     kv.kvEval.mockResolvedValue({ ok: true, value: 0 });
     expect(
       (await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 42 })).status,
     ).toBe('taken');
   });
 
-  it('新規だが所有 index 読み取りエラー → kv_error (claim しない)', async () => {
-    kv.kvGet.mockResolvedValue({ ok: true, value: null });
-    kv.kvLrange.mockResolvedValue({ ok: false });
+  it('claim EVAL 失敗 → kv_error (偽成功せず rollback も行わない)', async () => {
+    kv.kvEval.mockResolvedValue({ ok: false });
     const res = await reserveOrUpdateHandle(base);
     expect(res.status).toBe('kv_error');
-    expect(kv.kvSet).not.toHaveBeenCalled(); // nx claim へ進まない
+    expect(store.values.has('handle:alice')).toBe(false);
+    expect(store.lists.get('wallet:handles:' + OWNER.toLowerCase())).toBeUndefined();
   });
 
-  it('上限到達 → limit', async () => {
-    kv.kvLrange.mockResolvedValue({ ok: true, value: ['a', 'b', 'c'] });
+  it('claim Lua: raw LLEN が上限到達 → limit', async () => {
+    store.lists.set('wallet:handles:' + OWNER.toLowerCase(), ['a', 'b', 'c']);
     expect((await reserveOrUpdateHandle(base)).status).toBe('limit');
+    expect(store.values.has('handle:alice')).toBe(false);
   });
 
-  it('新規成功 → created (nx claim + LPUSH)', async () => {
+  it('claim Lua: 新規成功 → handle 保存 + owner index LPUSH', async () => {
     const res = await reserveOrUpdateHandle(base);
     expect(res.status).toBe('created');
-    expect(kv.kvSet).toHaveBeenCalledWith(expect.any(String), expect.any(String), { nx: true });
-    expect(kv.kvLpush).toHaveBeenCalledWith('wallet:handles:' + OWNER.toLowerCase(), 'alice');
-  });
-
-  it('nx 競合負け (value !== OK) → taken', async () => {
-    kv.kvSet.mockResolvedValue({ ok: true, value: null });
-    expect((await reserveOrUpdateHandle(base)).status).toBe('taken');
-  });
-
-  it('LPUSH 失敗 → claim rollback (kvDel) + index も LREM で掃除 + kv_error', async () => {
-    kv.kvLpush.mockResolvedValue({ ok: false });
-    const res = await reserveOrUpdateHandle(base);
-    expect(res.status).toBe('kv_error');
-    expect(kv.kvDel).toHaveBeenCalledWith('handle:alice');
-    // timeout-after-success に備え index からも除去 (stale entry 防止)。
-    expect(kv.kvLrem).toHaveBeenCalledWith(
+    const [, keys, args] = kv.kvEval.mock.calls[0];
+    expect(keys).toEqual([
+      'handle:alice',
       'wallet:handles:' + OWNER.toLowerCase(),
-      'alice',
+      'shop:live:alice',
+    ]);
+    expect(args.slice(1)).toEqual(['alice', '3']);
+    expect(JSON.parse(store.values.get('handle:alice') ?? '{}').owner).toBe(OWNER);
+    expect(store.lists.get('wallet:handles:' + OWNER.toLowerCase())).toEqual(['alice']);
+  });
+
+  it('claim Lua: 初回 GET 後に別 claim が確保 → taken', async () => {
+    store.values.set('handle:alice', recJson(OTHER));
+    kv.kvGet.mockResolvedValueOnce({ ok: true, value: null });
+    expect((await reserveOrUpdateHandle(base)).status).toBe('taken');
+    expect(JSON.parse(store.values.get('handle:alice') ?? '{}').owner).toBe(OTHER);
+  });
+
+  it('同一 owner の同時 claim が上限 3 を超えない', async () => {
+    const results = await Promise.all(
+      ['alice', 'bob', 'carol', 'dave'].map((handle) =>
+        reserveOrUpdateHandle({ ...base, handle }),
+      ),
     );
+    expect(results.filter((result) => result.status === 'created')).toHaveLength(3);
+    expect(results.filter((result) => result.status === 'limit')).toHaveLength(1);
+    expect(store.lists.get('wallet:handles:' + OWNER.toLowerCase())).toHaveLength(3);
+  });
+
+  it('claim 成功時に旧 owner の shop:live を削除', async () => {
+    store.values.set(
+      'shop:live:alice',
+      JSON.stringify({ soldOut: ['a'], paused: true, updatedAt: 10 }),
+    );
+    expect((await reserveOrUpdateHandle(base)).status).toBe('created');
+    expect(store.values.has('shop:live:alice')).toBe(false);
   });
 
   it('profile 付きで created → record に profile を含み serialize される', async () => {
@@ -246,7 +320,7 @@ describe('reserveOrUpdateHandle', () => {
     const res = await reserveOrUpdateHandle({ ...base, profile });
     expect(res.status).toBe('created');
     expect(res.record?.profile).toEqual(profile);
-    const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
+    const stored = JSON.parse(store.values.get('handle:alice') ?? '{}');
     expect(stored.profile).toEqual(profile);
   });
 
@@ -254,7 +328,7 @@ describe('reserveOrUpdateHandle', () => {
     const res = await reserveOrUpdateHandle({ ...base, profile: {} });
     expect(res.status).toBe('created');
     expect(res.record?.profile).toBeUndefined();
-    const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
+    const stored = JSON.parse(store.values.get('handle:alice') ?? '{}');
     expect(stored.profile).toBeUndefined();
   });
 
@@ -262,7 +336,7 @@ describe('reserveOrUpdateHandle', () => {
     const res = await reserveOrUpdateHandle({ ...base, storefront: STORE });
     expect(res.status).toBe('created');
     expect(res.record?.storefront).toEqual(STORE);
-    const stored = JSON.parse(kv.kvSet.mock.calls[0][1] as string);
+    const stored = JSON.parse(store.values.get('handle:alice') ?? '{}');
     expect(stored.storefront).toEqual(STORE);
   });
 
@@ -274,7 +348,7 @@ describe('reserveOrUpdateHandle', () => {
       createdAt: 5,
       updatedAt: 5,
     });
-    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    setExisting(existing);
     const res = await reserveOrUpdateHandle({
       ...base,
       expectedUpdatedAt: 5,
@@ -291,7 +365,7 @@ describe('reserveOrUpdateHandle', () => {
       createdAt: 5,
       updatedAt: 5,
     });
-    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    setExisting(existing);
     const res = await reserveOrUpdateHandle({
       ...base,
       storefront: null,
@@ -309,7 +383,7 @@ describe('reserveOrUpdateHandle', () => {
       createdAt: 5,
       updatedAt: 5,
     });
-    kv.kvGet.mockResolvedValue({ ok: true, value: existing });
+    setExisting(existing);
     const next: StorefrontParts = { ...STORE, chain: 'kaia' };
     const res = await reserveOrUpdateHandle({
       ...base,
@@ -351,33 +425,61 @@ describe('listHandleRecordsForOwner', () => {
   });
 });
 
-describe('releaseHandle (owner-conditional CAS)', () => {
+describe('releaseHandle (owner-conditional atomic cleanup)', () => {
   const base = { handle: 'alice', owner: OWNER };
 
-  it('CAS -1 (未存在) → not_found', async () => {
-    kv.kvEval.mockResolvedValue({ ok: true, value: -1 });
+  it('release Lua: handle 未存在 → not_found', async () => {
     expect(await releaseHandle(base)).toBe('not_found');
   });
-  it('CAS 0 (別 owner) → forbidden', async () => {
-    kv.kvEval.mockResolvedValue({ ok: true, value: 0 });
+
+  it('release Lua: owner 不一致 → forbidden、どの key も変更しない', async () => {
+    store.values.set('handle:alice', recJson(OTHER));
+    store.lists.set('wallet:handles:' + OWNER.toLowerCase(), ['alice']);
+    store.values.set('shop:live:alice', '{"paused":true}');
     expect(await releaseHandle(base)).toBe('forbidden');
+    expect(store.values.has('handle:alice')).toBe(true);
+    expect(store.lists.get('wallet:handles:' + OWNER.toLowerCase())).toEqual(['alice']);
+    expect(store.values.has('shop:live:alice')).toBe(true);
   });
-  it('CAS 1 → released (kvEval + LREM)', async () => {
-    kv.kvEval.mockResolvedValue({ ok: true, value: 1 });
-    expect(await releaseHandle(base)).toBe('released');
-    expect(kv.kvEval).toHaveBeenCalled();
-    expect(kv.kvLrem).toHaveBeenCalledWith(
-      'wallet:handles:' + OWNER.toLowerCase(),
+
+  it('release Lua: handle・owner index 全重複・shop:live をまとめて削除', async () => {
+    store.values.set('handle:alice', recJson(OWNER));
+    store.lists.set('wallet:handles:' + OWNER.toLowerCase(), [
+      'bob',
       'alice',
-    );
+      'alice',
+    ]);
+    store.values.set('shop:live:alice', '{"paused":true}');
+    expect(await releaseHandle(base)).toBe('released');
+    expect(kv.kvEval.mock.calls[0][1]).toEqual([
+      'handle:alice',
+      'wallet:handles:' + OWNER.toLowerCase(),
+      'shop:live:alice',
+    ]);
+    expect(kv.kvEval.mock.calls[0][2]).toEqual([OWNER, 'alice']);
+    expect(store.values.has('handle:alice')).toBe(false);
+    expect(store.lists.get('wallet:handles:' + OWNER.toLowerCase())).toEqual([
+      'bob',
+    ]);
+    expect(store.values.has('shop:live:alice')).toBe(false);
   });
-  it('CAS の KV エラー → kv_error', async () => {
+
+  it('release Lua: malformed record → not_found (現行戻り値体系)', async () => {
+    store.values.set('handle:alice', '{}');
+    expect(await releaseHandle(base)).toBe('not_found');
+    expect(store.values.has('handle:alice')).toBe(true);
+  });
+
+  it('release EVAL の KV エラー → kv_error・偽成功しない', async () => {
+    store.values.set('handle:alice', recJson(OWNER));
+    store.lists.set('wallet:handles:' + OWNER.toLowerCase(), ['alice']);
+    store.values.set('shop:live:alice', '{"paused":true}');
     kv.kvEval.mockResolvedValue({ ok: false });
     expect(await releaseHandle(base)).toBe('kv_error');
-  });
-  it('LREM 失敗でも released (handle は解放済み・index は best-effort)', async () => {
-    kv.kvEval.mockResolvedValue({ ok: true, value: 1 });
-    kv.kvLrem.mockResolvedValue({ ok: false });
-    expect(await releaseHandle(base)).toBe('released');
+    expect(store.values.has('handle:alice')).toBe(true);
+    expect(store.lists.get('wallet:handles:' + OWNER.toLowerCase())).toEqual([
+      'alice',
+    ]);
+    expect(store.values.has('shop:live:alice')).toBe(true);
   });
 });
