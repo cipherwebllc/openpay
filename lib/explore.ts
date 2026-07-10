@@ -317,6 +317,18 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
     tokens: ['usdc'],
   },
   {
+    id: 'circle-usdc-bridge',
+    name: 'USDC Bridge',
+    url: 'https://bridge.usdc.com/',
+    category: 'bridge',
+    description: {
+      ja: 'Circle 公式の USDC ブリッジ。CCTP を使ってネイティブ USDC をチェーン間で移動できる。',
+      en: "Circle's official USDC bridge — move native USDC across chains via CCTP.",
+    },
+    badges: ['global'],
+    tokens: ['usdc'],
+  },
+  {
     id: 'across',
     name: 'Across',
     url: 'https://across.to/',
