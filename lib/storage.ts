@@ -22,3 +22,12 @@ export function safeSet<T>(key: string, value: T): void {
     logger.warn('localStorage.set failed', { key, error });
   }
 }
+
+export function safeRemove(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch (error) {
+    logger.warn('localStorage.remove failed', { key, error });
+  }
+}

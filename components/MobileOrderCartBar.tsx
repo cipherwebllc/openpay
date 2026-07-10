@@ -25,6 +25,7 @@ export function MobileOrderCartBar({
   cart,
   lastOrder,
   checkoutUrl,
+  checkoutPending,
 }: {
   /** /checkout の上限 (10 品) 超過。true で明細/支払いを止めて明示する。 */
   tooMany: boolean;
@@ -59,6 +60,8 @@ export function MobileOrderCartBar({
   lastOrder?: string;
   /** 親が組み立てた /checkout への deep-link (byte-identical にそのまま href へ)。 */
   checkoutUrl: string;
+  /** 受注番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
+  checkoutPending: boolean;
 }) {
   const t = useTranslations('MobileOrder');
   return (
@@ -190,8 +193,8 @@ export function MobileOrderCartBar({
               </p>
             )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
-            {needsTable ? (
-              // テーブル番号 未入力 (店内): 支払いを止める。入力すればリンクへ切り替わる。
+            {needsTable || checkoutPending ? (
+              // テーブル番号 未入力、または受注番号の生成前は支払いを止める。
               <button
                 type="button"
                 disabled
