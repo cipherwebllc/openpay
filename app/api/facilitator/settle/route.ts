@@ -19,7 +19,9 @@ import {
 } from '@/lib/relay/relayProvider';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { settleViaForwarder } from '@/lib/relay/forwarderSettleService';
-import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
 import { x402FacilitatorReady } from '@/lib/x402/facilitatorConfig';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { caip2ForChainId } from '@/lib/x402/network';
@@ -42,6 +44,20 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json(
       { success: false, errorReason: 'relay_not_configured' },
       { status: 503 },
+    );
+  }
+  if (
+    !(await checkIpRateLimit(
+      'relay-admission',
+      hashIp(clientIp(req)),
+      120,
+      60,
+    ))
+  ) {
+    // IP 単位の濫用を署名検証/RPC 前で止め、relayer 資源と daily budget への波及を断つ。
+    return NextResponse.json(
+      { error: 'ip_rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
     );
   }
 
@@ -108,17 +124,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-  );
-
   // 検証 (server 権威 feeValue 照合 / 署名 / 残高 / nonce 未使用 / 冪等 / 日次予算) + forwarder 健全性 +
   // submit/poll は共有 settleViaForwarder。forwarderFor は raw (a1 非依存)・idempotency は専用名前空間。
   const result = await settleViaForwarder({
     chainId,
     params,
     signature,
-    rateLimitKeys: [params.from, ipPrefix],
+    rateLimitKeys: [params.from],
     expectedFeeValue,
     forwarderFor: configuredJpycForwarderFor,
     idemPrefix: 'x402fac:idem:',

@@ -44,17 +44,18 @@ import {
 import {
   MAX_BODY_BYTES,
   isDec,
-  anonymizeIp,
   makeRespond,
 } from '@/lib/relay/relayRoute';
 import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
 import { formatJpycYenLabel } from '@/lib/format';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { notifyPaymentReceived } from '@/lib/push/notify';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 
 export const runtime = 'nodejs';
 
-// MAX_BODY_BYTES / isDec / anonymizeIp / respond は共有 relayRoute へ集約 (CSV パス relay と同形)。
+// MAX_BODY_BYTES / isDec / respond は共有 relayRoute へ集約 (CSV パス relay と同形)。
 // respond は logger イベント prefix を 'relay.jpyc' で束ね、現行のイベント名を完全再現する。
 
 // forwarder 健全性チェック (verifyForwarderHealth) は lib/relay/forwarderHealth へ、settle
@@ -142,6 +143,20 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
+  if (
+    !(await checkIpRateLimit(
+      'relay-admission',
+      hashIp(clientIp(req)),
+      120,
+      60,
+    ))
+  ) {
+    // IP 単位の濫用を署名検証/RPC 前で止め、relayer 資源と daily budget への波及を断つ。
+    return NextResponse.json(
+      { error: 'ip_rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
+    );
+  }
 
   let bodyText: string;
   try {
@@ -198,10 +213,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
   }
 
-  const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-  );
-
   // L5: forwarder を設定した chain なのに self-host relayer 鍵が無い (PROVIDER!=='self-host') 構成は、
   // client が recover payload (merchant/merchantValue/feeValue/intentSalt) を送ってくるのに handleFree が
   // それを invalid_payload (400) として弾く → 全 JPYC 決済が汎用エラーで死ぬ。これを明示の
@@ -254,15 +265,14 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   return recoverMode
-    ? handleRecover(raw, chainId, ipPrefix)
-    : handleFree(raw, chainId, ipPrefix);
+    ? handleRecover(raw, chainId)
+    : handleFree(raw, chainId);
 }
 
 // free モード: 直接 transferWithAuthorization (Phase A)。relayer が token に直接 submit。
 async function handleFree(
   raw: Record<string, unknown>,
   chainId: number,
-  ipPrefix: string,
 ): Promise<NextResponse> {
   if (
     !isAddress(raw.from as string) ||
@@ -304,7 +314,7 @@ async function handleFree(
     chainId,
     auth,
     raw.signature as Hex,
-    [auth.from, ipPrefix],
+    [auth.from],
     { idemPrefix: 'relay:idem:' },
   );
   // OpenPay 利用料メーター (S1): 中継成功した gasless 決済の店主別出来高をサーバ権威で記録する
@@ -343,7 +353,6 @@ async function handleFree(
 async function handleRecover(
   raw: Record<string, unknown>,
   chainId: number,
-  ipPrefix: string,
 ): Promise<NextResponse> {
   if (
     !isAddress(raw.from as string) ||
@@ -413,7 +422,7 @@ async function handleRecover(
     chainId,
     params,
     signature: raw.signature as Hex,
-    rateLimitKeys: [params.from, ipPrefix],
+    rateLimitKeys: [params.from],
     expectedFeeValue: expectedFee,
     forwarderFor,
     idemPrefix: 'relay:idem:',

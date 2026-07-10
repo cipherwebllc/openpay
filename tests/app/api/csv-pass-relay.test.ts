@@ -268,8 +268,9 @@ describe('POST /api/csv-pass/relay — relay 結果の応答整形 + guards 配�
     // prefix を渡す (決済 relay と名前空間を分ける)。rate-limit/budget は relayGuards 内で共有キー。
     const [, , , rateLimitKeys, opts] = relayFreeAuthorization.mock.calls[0];
     expect(opts.idemPrefix).toBe('csvpassrelay:idem:');
-    // rate-limit キーに from を含む (relayer 資源の濫用ガード)。
-    expect(rateLimitKeys[0].toLowerCase()).toBe(WALLET.toLowerCase());
+    // post-verify 5/分は wallet-only。NAT 共有 /24 で別 wallet を巻き込まない。
+    // key は checksum 表記 (getAddress(auth.from)) だが同一 wallet で決定的なので bucket は一意。
+    expect(rateLimitKeys.map((k: string) => k.toLowerCase())).toEqual([WALLET]);
   });
 
   it('reverted → 200 {reverted,txHash} passthrough', async () => {
