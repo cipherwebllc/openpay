@@ -39,17 +39,19 @@ describe('@handle night global footer CSS', () => {
       '[data-testid="profile-footer"]',
     )!;
     const globalLink = globalFooter.querySelector('a')!;
-    expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(2, 6, 23)');
-    expect(getComputedStyle(globalFooter).backgroundColor).toBe('rgb(2, 6, 23)');
+    // body はウォッシュ基調 #0f172a (overscroll 連続)。footer は不透明に塗らず transparent —
+    // ページの fixed ウォッシュを透過で見せ、暗色同士の段差 (ほぼ黒 vs 紺) を作らない。
+    expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(15, 23, 42)');
+    expect(getComputedStyle(globalFooter).backgroundColor).toBe('rgba(0, 0, 0, 0)');
     expect(getComputedStyle(globalLink).color).toBe('rgb(203, 213, 225)');
     expect(getComputedStyle(profileFooter).backgroundColor).toBe(
       'rgba(0, 0, 0, 0)',
     );
 
-    // night 以外のページを再現。:has が不成立になり、footer の computed style は既定へ戻る。
+    // night 以外のページを再現。:has が不成立になり、body/footer の computed style は既定へ戻る。
     document.querySelector('main')!.removeAttribute('data-handle-theme');
-    expect(getComputedStyle(globalFooter).backgroundColor).toBe(
-      'rgba(0, 0, 0, 0)',
+    expect(getComputedStyle(document.body).backgroundColor).not.toBe(
+      'rgb(15, 23, 42)',
     );
     expect(getComputedStyle(globalLink).color).not.toBe('rgb(203, 213, 225)');
   });

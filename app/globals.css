@@ -83,12 +83,15 @@ body {
 }
 
 /* @handle の Night だけ、body と layout 直下のグローバル footer を同じ暗色へつなぐ。
-   marker が無い他テーマ/他ページでは :has が不成立なので既存 footer の computed style は不変。 */
+   marker が無い他テーマ/他ページでは :has が不成立なので既存 footer の computed style は不変。
+   footer は不透明に塗らず transparent — ページ側の fixed inset-0 ウォッシュ (#0f172a+グロー) を
+   そのまま透過で見せ、暗色同士の段差 (rgb(2,6,23) vs #0f172a) を作らない。body はウォッシュと
+   同基調 #0f172a (overscroll 連続用)。 */
 body:has([data-handle-theme='night']) {
-  background-color: rgb(2 6 23);
+  background-color: rgb(15 23 42);
 }
 body:has([data-handle-theme='night']) > footer {
-  background-color: rgb(2 6 23);
+  background-color: transparent;
   color: rgb(203 213 225);
 }
 body:has([data-handle-theme='night']) > footer * {
