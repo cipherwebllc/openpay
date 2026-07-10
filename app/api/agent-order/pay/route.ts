@@ -20,6 +20,8 @@ import { resolveHandle } from '@/lib/handleStore';
 import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { readShopLive } from '@/lib/shopLiveStore';
+import { isPastLastOrder } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
@@ -175,6 +177,30 @@ export async function GET(req: Request): Promise<NextResponse> {
   );
   if (!order.ok) {
     return NextResponse.json({ error: order.reason }, { status: 422 });
+  }
+
+  // 不可逆な支払い challenge を作る前に、人間経路と同じ店舗受付状態を検証する。
+  // 静的停止は live flag 非依存。live 読取の KV 障害は readShopLive が EMPTY へ fail-open し、
+  // 付帯状態ストアの障害が決済本体へ波及するのを防ぐ (掟13)。
+  if (record.storefront.acceptingOrders === false) {
+    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+  }
+  let soldOut: Set<string> | null = null;
+  if (env.enableShopLive) {
+    const live = await readShopLive(handle);
+    if (live.paused) {
+      return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+    }
+    soldOut = new Set(live.soldOut);
+  }
+  if (
+    env.enablePreorderTime &&
+    isPastLastOrder(Date.now(), record.storefront.lastOrder)
+  ) {
+    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+  }
+  if (soldOut && cartItems.some((item) => soldOut.has(item.id))) {
+    return NextResponse.json({ error: 'item_sold_out' }, { status: 409 });
   }
 
   const shopName =

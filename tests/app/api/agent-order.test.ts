@@ -28,6 +28,16 @@ vi.mock('@/lib/handleStore', () => ({
       : { ok: false as const },
 }));
 
+const shopLiveMocks = vi.hoisted(() => ({
+  configured: false,
+  kvGet: vi.fn(),
+}));
+vi.mock('@/lib/kv', () => ({
+  isKvConfigured: () => shopLiveMocks.configured,
+  kvGet: shopLiveMocks.kvGet,
+  kvEval: vi.fn(),
+}));
+
 const routeMocks = vi.hoisted(() => ({
   verify: vi.fn(),
   settle: vi.fn(),
@@ -72,11 +82,19 @@ type PayRoute = { GET: (req: Request) => Promise<Response> };
 type SummaryRoute = { GET: (req: Request) => Promise<Response> };
 
 async function load(
-  flags: { facilitator?: string; relay?: string; agent?: string } = {},
+  flags: {
+    facilitator?: string;
+    relay?: string;
+    agent?: string;
+    shopLive?: string;
+    preorderTime?: string;
+  } = {},
 ): Promise<{ menu: MenuRoute; pay: PayRoute; summary: SummaryRoute }> {
   vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', flags.facilitator ?? '1');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', flags.relay ?? '1');
   vi.stubEnv('ENABLE_AGENT_ORDER', flags.agent ?? '1');
+  vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOP_LIVE', flags.shopLive ?? '');
+  vi.stubEnv('NEXT_PUBLIC_ENABLE_PREORDER_TIME', flags.preorderTime ?? '');
   vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', FORWARDER);
   vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', FEE_RECEIVER);
   vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '');
@@ -127,12 +145,16 @@ function paymentHeader(): string {
 beforeEach(() => {
   store.record = record();
   store.ok = true;
+  shopLiveMocks.configured = false;
+  shopLiveMocks.kvGet.mockReset();
+  shopLiveMocks.kvGet.mockResolvedValue({ ok: true, value: null });
   routeMocks.verify.mockReset();
   routeMocks.settle.mockReset();
   routeMocks.notify.mockReset();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.resetModules();
 });
@@ -299,6 +321,138 @@ describe('agent-order pay route', () => {
     expect(pr.resource).toBe(
       `https://open-pay.jp/api/agent-order/pay?${params.toString()}`,
     );
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('acceptingOrders=false は shop-live flag OFF でも plain 409 で停止', async () => {
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [
+          { id: 'karaage', name: '唐揚げ', price: '500' },
+          { id: 'beer', name: 'ビール', price: '600' },
+        ],
+        acceptingOrders: false,
+      },
+    } as Partial<HandleRecord>);
+    const { pay } = await load({ shopLive: '' });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'store_not_accepting' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(shopLiveMocks.kvGet).not.toHaveBeenCalled();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('shop-live ON で paused は plain 409 store_not_accepting', async () => {
+    shopLiveMocks.configured = true;
+    shopLiveMocks.kvGet.mockResolvedValue({
+      ok: true,
+      value: JSON.stringify({ soldOut: [], paused: true, updatedAt: 1 }),
+    });
+    const { pay } = await load({ shopLive: '1' });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'store_not_accepting' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('shop-live ON で cart に soldOut 商品を含むと全注文を plain 409 で拒否', async () => {
+    shopLiveMocks.configured = true;
+    shopLiveMocks.kvGet.mockResolvedValue({
+      ok: true,
+      value: JSON.stringify({ soldOut: ['beer'], paused: false, updatedAt: 1 }),
+    });
+    const { pay } = await load({ shopLive: '1' });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'item_sold_out' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('preorder-time ON で lastOrder 超過なら mode によらず plain 409', async () => {
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [
+          { id: 'karaage', name: '唐揚げ', price: '500' },
+          { id: 'beer', name: 'ビール', price: '600' },
+        ],
+        lastOrder: '00:00',
+      },
+    } as Partial<HandleRecord>);
+    const { pay } = await load({ preorderTime: '1' });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'store_not_accepting' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('受付中・在庫あり・lastOrder 前なら各 flag ON でも従来の 402 challenge', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [
+          { id: 'karaage', name: '唐揚げ', price: '500' },
+          { id: 'beer', name: 'ビール', price: '600' },
+        ],
+        lastOrder: '23:00',
+      },
+    } as Partial<HandleRecord>);
+    shopLiveMocks.configured = true;
+    shopLiveMocks.kvGet.mockResolvedValue({
+      ok: true,
+      value: JSON.stringify({ soldOut: [], paused: false, updatedAt: 1 }),
+    });
+    const { pay } = await load({ shopLive: '1', preorderTime: '1' });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toBe('payment_required');
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('shop-live KV 障害は EMPTY へ fail-open し、静的 acceptingOrders は維持', async () => {
+    shopLiveMocks.configured = true;
+    shopLiveMocks.kvGet.mockResolvedValue({ ok: false, reason: 'network_error' });
+    const { pay } = await load({ shopLive: '1' });
+
+    const openRes = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(openRes.status).toBe(402);
+    expect((await openRes.json()).error).toBe('payment_required');
+
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [
+          { id: 'karaage', name: '唐揚げ', price: '500' },
+          { id: 'beer', name: 'ビール', price: '600' },
+        ],
+        acceptingOrders: false,
+      },
+    } as Partial<HandleRecord>);
+    const closedRes = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(closedRes.status).toBe(409);
+    expect(await closedRes.json()).toEqual({ error: 'store_not_accepting' });
+    expect(shopLiveMocks.kvGet).toHaveBeenCalledTimes(1);
     expect(routeMocks.verify).not.toHaveBeenCalled();
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
