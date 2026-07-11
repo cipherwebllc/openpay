@@ -22,6 +22,14 @@ const OFFRAMP_KEYS = [
   'japaneseUserHint',
 ] as const;
 
+describe('i18n: Landing namespace の全キー parity', () => {
+  it('ja.Landing と en.Landing のキー集合が完全一致', () => {
+    expect(Object.keys(ja.Landing).sort()).toEqual(
+      Object.keys(en.Landing).sort(),
+    );
+  });
+});
+
 describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)', () => {
   // useSmartAccount の router が IncompatibleSmartAccountError を投げる時の
   // i18n key 2 種。HashPort などの MAv2 委任 EOA 対策で導入。
