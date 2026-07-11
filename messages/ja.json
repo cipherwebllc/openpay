@@ -28,7 +28,7 @@
     "ctaScanBody": "店舗 QR をスキャンして即決済。",
     "ctaScanButton": "スキャンして支払う",
     "ctaCreateTitle": "受け取る (決済 QR を作る)",
-    "ctaCreateBody": "受取先と金額だけで、印刷用 QR を生成。",
+    "ctaCreateBody": "受取先と金額だけで、QR を生成。",
     "ctaCreateButton": "QR を作成する",
     "wipNote": "機能紹介・市場情報・取引履歴・外部サービスへの導線は順次拡充予定です。",
     "featuresTitle": "OpenPay の特長",
