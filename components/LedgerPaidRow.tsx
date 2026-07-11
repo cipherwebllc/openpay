@@ -8,7 +8,7 @@
 // 古い控えを消せるようにする。
 
 import { useLocale, useTranslations } from 'next-intl';
-import { ChevronDown } from 'lucide-react';
+import { ArrowUp, ChevronDown } from 'lucide-react';
 import { PayerReceiptDetail } from './PayerReceiptDetail';
 import { TokenLogo } from './AssetLogo';
 import {
@@ -57,8 +57,14 @@ export function LedgerPaidRow({ receipt }: { receipt: PayerReceipt }) {
               </time>
             </div>
 
-            {/* 金額行: token + 大きな金額 */}
+            {/* 金額行: 方向矢印 + token + 大きな金額。矢印は装飾 (方向は上の
+                支払いバッジが伝達済み)・支払い=↑ を badge と同じ amber で。 */}
             <div className="mt-2 flex items-center gap-2">
+              <ArrowUp
+                className="h-5 w-5 shrink-0 text-amber-600"
+                strokeWidth={2.5}
+                aria-hidden
+              />
               {tokenSlug && (
                 <TokenLogo
                   symbol={tokenSlug}
