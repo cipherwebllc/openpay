@@ -21,6 +21,9 @@ test.describe('landing / (LP)', () => {
     await expect(
       page.getByRole('heading', { name: '人だけじゃない。AIも支払う時代へ。' }),
     ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '人にも、AIにも。オープンな決済を。' }),
+    ).toBeVisible();
 
     // 2 大 CTA
     const scanCta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
@@ -38,6 +41,11 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'Not just people. AI pays now, too.' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        name: 'Open payments — for people and AI.',
+      }),
     ).toBeVisible();
     await expect(page.getByRole('link', { name: /Pay \(Scan\)/ })).toBeVisible();
     await expect(
@@ -197,12 +205,17 @@ test.describe('landing / (LP)', () => {
     page,
   }) => {
     await page.goto('/ja');
-    // SiteFooter にも同名 GitHub link があるため、Trust section (= LP <main> 内) に
-    // scope する。LandingTrust の link は icon + label + ↗ で SVG inline を含む。
+    // SiteFooter にも同名 GitHub link があるため、Trust兼Closing section に scope する。
+    // LandingTrust の link は icon + label + ↗ で SVG inline を含む。
     const trust = page
       .locator('section')
-      .filter({ has: page.getByRole('heading', { name: 'オープン技術と透明性' }) });
+      .filter({
+        has: page.getByRole('heading', {
+          name: '人にも、AIにも。オープンな決済を。',
+        }),
+      });
     await expect(trust).toBeVisible();
+    await expect(trust.getByText('オープン技術と透明性')).toBeVisible();
     const github = trust.getByRole('link', {
       name: /ソースコード \(GitHub\)/,
     });

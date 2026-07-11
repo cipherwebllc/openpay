@@ -1,10 +1,14 @@
-// 技術スタック + GitHub link。Server Component。SiteFooter とは別の切り口
-// (こちらは LP 内で透明性を訴求、SiteFooter は legal nav 中心)。
+// ブランドメッセージで締めつつ、技術スタックと GitHub link で信頼性を開示する。
+// Server Component。SiteFooter は legal nav 中心のため、別の切り口を維持する。
 
-import { getTranslations } from 'next-intl/server';
+import Link from 'next/link';
+import { getLocale, getTranslations } from 'next-intl/server';
 
 export async function LandingTrust() {
-  const t = await getTranslations('Landing');
+  const [locale, t] = await Promise.all([
+    getLocale(),
+    getTranslations('Landing'),
+  ]);
 
   return (
     <section className="relative mt-24 overflow-hidden rounded-[2rem] bg-slate-900 p-8 sm:mt-28 sm:p-12">
@@ -14,21 +18,39 @@ export async function LandingTrust() {
         className="pointer-events-none absolute inset-x-0 -top-24 mx-auto h-64 max-w-2xl bg-[radial-gradient(60%_60%_at_50%_0%,rgba(59,130,246,0.25),transparent_70%)]"
       />
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.5rem] font-bold leading-tight tracking-tight text-white sm:text-3xl">
-          {t('trustTitle')}
+        <h2 className="text-2xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
+          {t('closingTitle')}
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
-          {t('trustBody')}
+          {t('closingBody')}
         </p>
-        <a
-          href="https://github.com/cipherwebllc/openpay"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover"
-        >
-          <GithubIcon />
-          {t('trustGithubLabel')} ↗
-        </a>
+        <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <Link
+            href={`/${locale}/create`}
+            prefetch={false}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
+          >
+            {t('closingCtaStart')}
+          </Link>
+          <a
+            href="https://github.com/cipherwebllc/openpay"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
+          >
+            <GithubIcon />
+            {t('trustGithubLabel')} ↗
+          </a>
+        </div>
+
+        <div className="mt-10 border-t border-slate-700/80 pt-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+            {t('trustTitle')}
+          </p>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
+            {t('trustBody')}
+          </p>
+        </div>
         {/* 技術スタックは開発者向け補足として小さく出す (一般読者には trustBody
             だけで充足、開発者は具体技術名で OpenPay の構成を検証できる)。 */}
         <p className="mx-auto mt-6 max-w-2xl text-[11px] leading-relaxed text-slate-500">
