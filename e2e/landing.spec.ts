@@ -18,6 +18,9 @@ test.describe('landing / (LP)', () => {
     await expect(
       page.getByRole('heading', { name: '売上を待たない。' }),
     ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '人だけじゃない。AIも支払う時代へ。' }),
+    ).toBeVisible();
 
     // 2 大 CTA
     const scanCta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
@@ -32,6 +35,9 @@ test.describe('landing / (LP)', () => {
     await page.goto('/en');
     await expect(
       page.getByRole('heading', { name: 'Never wait for your sales.' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Not just people. AI pays now, too.' }),
     ).toBeVisible();
     await expect(page.getByRole('link', { name: /Pay \(Scan\)/ })).toBeVisible();
     await expect(
