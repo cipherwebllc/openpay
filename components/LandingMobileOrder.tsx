@@ -1,4 +1,4 @@
-// 「使い方」直下のモバイルオーダー訴求バナー (Server Component)。
+// Hero 直下へ昇格したモバイルオーダー訴求バナー (Server Component)。
 //
 // 画像 public/landing/mobileorder.webp (1280x670) が見出し / 注文フロー / 価値訴求を内包した
 // 完成バナーのため、ここでは SEO / a11y 用に読めるテキスト (見出し + リード文 + 画像 alt) と、

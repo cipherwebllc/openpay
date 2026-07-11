@@ -12,6 +12,7 @@ import { LandingCashComparison } from '@/components/LandingCashComparison';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingMobileOrder } from '@/components/LandingMobileOrder';
+import { LandingPayoutStatement } from '@/components/LandingPayoutStatement';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
@@ -40,6 +41,8 @@ export default async function HomePage({
       {/* 決済 QR はコモディティ化 (競合も 0% JPYC QR)。差別化はその先の店舗オペレーション =
           モバイル注文を Hero 直下へ昇格し「決済だけでない深さ」を最初に見せる (定番/インフラ positioning)。 */}
       <LandingMobileOrder />
+      {/* モバイル注文昇格の直後に「売上を待たない」の一枚で、即時着金の価値を一文で刻む。 */}
+      <LandingPayoutStatement />
       <LandingBenefits />
       <LandingCashComparison />
       <LandingHowItWorks />

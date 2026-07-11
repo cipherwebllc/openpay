@@ -48,6 +48,8 @@
     "mobileOrderBannerCta": "モバイルオーダーを作る",
     "mobileOrderBannerLearnMore": "詳しい使い方を見る",
     "mobileOrderBannerAgentGuide": "お客様向け：AI で注文するガイド",
+    "payoutStatementTitle": "売上を待たない。",
+    "payoutStatementBody": "支払い完了と同時に、売上はあなたのウォレットへ直接届きます。締め日も、入金待ちもありません。",
     "howItWorksVisualAlt": "店舗が決済 QR を作り、顧客がスマホで読み取り、店舗ウォレットへ売上が届く流れの図",
     "howItWorksDemoCaption": "実際の操作（モバイル）",
     "howItWorksDemoCreate": "① 受取（決済QR）",

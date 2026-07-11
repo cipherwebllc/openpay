@@ -15,6 +15,9 @@ test.describe('landing / (LP)', () => {
     await expect(
       page.getByRole('heading', { name: /JPYCで、店舗まるごと/ }),
     ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '売上を待たない。' }),
+    ).toBeVisible();
 
     // 2 大 CTA
     const scanCta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
@@ -27,6 +30,9 @@ test.describe('landing / (LP)', () => {
 
   test('en: Hero の 2 CTA は英語表記で描画される', async ({ page }) => {
     await page.goto('/en');
+    await expect(
+      page.getByRole('heading', { name: 'Never wait for your sales.' }),
+    ).toBeVisible();
     await expect(page.getByRole('link', { name: /Pay \(Scan\)/ })).toBeVisible();
     await expect(
       page.getByRole('link', { name: /Receive \(Create payment QR\)/ }),
