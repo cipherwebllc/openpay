@@ -7,6 +7,7 @@ import { AppShell } from '@/components/AppShell';
 import { StructuredData } from '@/components/StructuredData';
 import { LandingHero } from '@/components/LandingHero';
 import { LandingFeatures } from '@/components/LandingFeatures';
+import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 import { LandingUseCases } from '@/components/LandingUseCases';
@@ -47,6 +48,9 @@ export default async function HomePage({
       <LandingCashComparison />
       <LandingHowItWorks />
       <LandingFeatures />
+      {/* 人の決済に加え、AI エージェント決済 (x402) と AI が注文を組む
+          エージェント注文という将来面も LP のナラティブとして伝える。 */}
+      <LandingAiAgents />
       <LandingUseCases />
       <LandingFaq />
       <LandingSupport />
