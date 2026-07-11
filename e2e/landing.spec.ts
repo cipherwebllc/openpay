@@ -98,11 +98,11 @@ test.describe('landing / (LP)', () => {
     await expect(howItWorks.getByText('受取ウォレットアドレスを入力')).toBeVisible();
     // step3: 印刷 or スマホ提示 の両パターン
     await expect(
-      howItWorks.getByText(/QR を印刷.*スマホ.*タブレット/),
+      howItWorks.getByText(/QR を印刷して掲示.*スマホ・タブレットで提示/),
     ).toBeVisible();
     // customer 3 step
     await expect(
-      howItWorks.getByText('右上の「接続」からウォレットを接続'),
+      howItWorks.getByText('右上の「接続」でウォレット接続'),
     ).toBeVisible();
     // step 2: 「スキャン」テキストリンクが /scan を指す (HowItWorks 内に scope して
     // TopNav / Hero CTA の同名 link との strict mode 衝突を回避)

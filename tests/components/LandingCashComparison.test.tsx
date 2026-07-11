@@ -44,7 +44,7 @@ describe('LandingCashComparison', () => {
     // 見出し + サブ
     expect(screen.getByText('現金に戻したお店へ')).toBeInTheDocument();
     expect(
-      screen.getByText('その判断のまま、損ゼロで置ける選択肢があります。'),
+      screen.getByText('そのまま追加できる選択肢です。'),
     ).toBeInTheDocument();
 
     // 比較表の 4 行ラベル
