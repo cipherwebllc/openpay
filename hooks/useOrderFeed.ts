@@ -8,8 +8,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { OrderFeedOp, StoredOrder } from '@/lib/orderRelay';
 
+export function orderFeedQueryKey(scope: string | null | undefined) {
+  return ['order-feed', scope] as const;
+}
+
 // token があれば x-order-token ヘッダで送る (店員端末の閲覧トークン)。SIWE cookie とは独立。
-async function fetchFeed(token?: string): Promise<StoredOrder[]> {
+export async function fetchOrderFeed(token?: string): Promise<StoredOrder[]> {
   const res = await fetch('/api/order/feed', token ? { headers: { 'x-order-token': token } } : undefined);
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   // KV 障害 (503) を「受注ゼロ」と偽装しない (isError でエラー表示)。
@@ -28,10 +32,10 @@ export function useOrderFeed(
   // token / wallet 切替で前主体の cache を流用しないようキーをスコープ (token 優先)。
   const scope = token ?? sessionAddress;
   const feed = useQuery({
-    queryKey: ['order-feed', scope],
+    queryKey: orderFeedQueryKey(scope),
     enabled: Boolean(token) || isSignedIn,
     refetchInterval: refetchMs,
-    queryFn: () => fetchFeed(token ?? undefined),
+    queryFn: () => fetchOrderFeed(token ?? undefined),
   });
   const update = useMutation({
     mutationFn: async (vars: { txHash: string; op: OrderFeedOp }) => {
@@ -42,7 +46,7 @@ export function useOrderFeed(
       });
       if (!res.ok) throw new Error(`http_${res.status}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['order-feed', scope] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: orderFeedQueryKey(scope) }),
   });
   return { feed, update };
 }

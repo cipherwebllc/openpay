@@ -17,6 +17,8 @@ import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
 import { MobileOrderBuilder } from '@/components/MobileOrderBuilder';
 import { OrderFeedPanel } from '@/components/OrderFeedPanel';
+import { OrdersTabBadge } from '@/components/OrdersTabBadge';
+import { TodayCard } from '@/components/TodayCard';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
@@ -86,6 +88,7 @@ export default function CreatePage() {
             }`}
           >
             {label}
+            {id === 'orders' ? <OrdersTabBadge /> : null}
           </button>
         ))}
       </div>
@@ -98,7 +101,10 @@ export default function CreatePage() {
 
       {tab === 'qr' && <QrGenerator />}
       {tab === 'register' && (
-        <RegisterMode onEditCurrency={() => setTab('qr')} />
+        <div className="space-y-5">
+          <TodayCard />
+          <RegisterMode onEditCurrency={() => setTab('qr')} />
+        </div>
       )}
       {tab === 'tip' && (
         <div className="space-y-5">
