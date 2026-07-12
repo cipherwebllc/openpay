@@ -28,7 +28,7 @@
     "ctaScanBody": "Scan the merchant QR and pay.",
     "ctaScanButton": "Scan to pay",
     "ctaCreateTitle": "Receive (Create payment QR)",
-    "ctaCreateBody": "Enter a recipient and amount; print the QR.",
+    "ctaCreateBody": "Enter a recipient and amount to generate the QR.",
     "ctaCreateButton": "Create a QR",
     "wipNote": "Feature highlights, market info, transaction history, and external services will be added in upcoming updates.",
     "featuresTitle": "Why OpenPay",
