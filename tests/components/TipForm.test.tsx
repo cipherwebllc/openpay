@@ -163,18 +163,22 @@ function setRelay(
   state:
     | 'idle'
     | 'pending'
+    | 'auto'
     | 'success'
     | 'error'
     | 'pendingResult'
     | 'response-unknown'
     | 'ip-rate-limited',
+  opts?: {
+    variables?: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
+  },
 ) {
   relayMutate = vi.fn();
   relayRetryRelay = vi.fn();
   relayRetrySamePayload = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
-    isPending: state === 'pending',
+    isPending: state === 'pending' || state === 'auto',
     data:
       state === 'success'
         ? { txHash: `0x${'c'.repeat(64)}`, success: true }
@@ -191,7 +195,13 @@ function setRelay(
             : null,
     retryRelay: relayRetryRelay,
     retrySamePayload: relayRetrySamePayload,
-    recoveryState: state === 'response-unknown' ? 'exhausted' : null,
+    recoveryState:
+      state === 'auto'
+        ? 'auto'
+        : state === 'response-unknown'
+          ? 'exhausted'
+          : null,
+    variables: opts?.variables,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -1312,6 +1322,32 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
     // relay は userOpHash / blockNumber を持たない (gasless mock の 99 は出ない)。
     expect(screen.queryByText('99')).toBeNull();
+  });
+
+  it('auto recovery→成功で既存の成功描画/webhook/控えを各 1 回だけ確定する', async () => {
+    window.localStorage.clear();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    const value = 100n * 10n ** 18n;
+    const variables = { merchant: CREATOR, value, gasMode: 'customer' as const };
+    const params = { ...JPYC_PARAMS, webhook: 'https://creator.example/hook' };
+    const user = userEvent.setup();
+    const rendered = render(<TipForm params={params} />);
+
+    await user.click(screen.getByRole('button', { name: /100 JPYC を送る/ }));
+    setRelay('auto', { variables });
+    rendered.rerender(<TipForm params={params} />);
+    expect(screen.getByText(/支払い結果を確認しています/)).toBeInTheDocument();
+
+    setRelay('success', { variables });
+    rendered.rerender(<TipForm params={params} />);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    rendered.rerender(<TipForm params={params} />);
+
+    const txHash = `0x${'c'.repeat(64)}`;
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
   });
 
   it('relay error → friendly な i18n メッセージ (rate_limited)', () => {

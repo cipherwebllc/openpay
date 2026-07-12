@@ -16,10 +16,13 @@ const { kvMod, store } = vi.hoisted(() => {
   }> = [];
   const expireCalls: Array<{ key: string; ttlSec: number }> = [];
   // fail-open テスト用トグル (既定は健全・beforeEach でリセット)。既存テストは触らない。
-  const flags = { kvConfigured: true, incrOk: true };
+  const flags = { kvConfigured: true, incrOk: true, getOk: true };
   const kvMod = {
     isKvConfigured: () => flags.kvConfigured,
-    kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
+    kvGet: async (k: string) =>
+      flags.getOk
+        ? { ok: true as const, value: vals.has(k) ? vals.get(k)! : null }
+        : { ok: false as const, reason: 'network_error' as const },
     kvSet: async (
       k: string,
       v: string,
@@ -75,6 +78,7 @@ import {
   checkGasBudget,
   refundGasBudget,
   makeIdempotency,
+  readIdempotency,
   gasBudgetKey,
   RL_MAX,
   IDEM_TTL_SEC,
@@ -92,6 +96,7 @@ beforeEach(() => {
   store.expireCalls.length = 0;
   store.flags.kvConfigured = true;
   store.flags.incrOk = true;
+  store.flags.getOk = true;
 });
 
 describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
@@ -184,6 +189,24 @@ describe('relayGuards 日次予算 (共有キー relay:budget:)', () => {
 });
 
 describe('relayGuards idempotency (prefix 名前空間分離)', () => {
+  it('status read は同じ key の hash/missing/KV 障害を副作用なしで区別する', async () => {
+    const key = `relay:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+    expect(await readIdempotency('relay:idem:', 137, FROM, NONCE)).toEqual({
+      state: 'missing',
+    });
+    const txHash = (`0x${'e'.repeat(64)}`) as Hex;
+    store.vals.set(key, txHash);
+    expect(await readIdempotency('relay:idem:', 137, FROM, NONCE)).toEqual({
+      state: 'hash',
+      txHash,
+    });
+    store.flags.getOk = false;
+    expect(await readIdempotency('relay:idem:', 137, FROM, NONCE)).toEqual({
+      state: 'indeterminate',
+    });
+    expect(store.setCalls).toHaveLength(0);
+  });
+
   it('別 prefix の同 (chain,from,nonce) は衝突しない (決済 relay と CSV パス relay の独立)', async () => {
     const pay = makeIdempotency('relay:idem:');
     const pass = makeIdempotency('csvpassrelay:idem:');

@@ -123,6 +123,7 @@ import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { PaymentForm } from '@/components/PaymentForm';
 import { logger } from '@/lib/logger';
+import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 import {
   RelayIpRateLimitedError,
@@ -1874,6 +1875,33 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     setBalance(10_000n * 10n ** 18n);
     setRelay('error', { errMsg });
   }
+
+  it('auto recovery→成功で成功描画/控え/履歴を各 1 回だけ確定する', async () => {
+    window.localStorage.clear();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const value = 300n * 10n ** 18n;
+    const variables = { merchant: MERCHANT, value, gasMode: 'merchant' as const };
+    const user = userEvent.setup();
+    const rendered = render(<PaymentForm />);
+
+    await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
+    setRelay('pending-flow', { recoveryState: 'auto', variables });
+    rendered.rerender(<PaymentForm />);
+    expect(screen.getByText(/支払い結果を確認しています/)).toBeInTheDocument();
+
+    const txHash = `0x${'e'.repeat(64)}` as `0x${string}`;
+    setRelay('success', { txHash, variables });
+    rendered.rerender(<PaymentForm />);
+    expect(screen.getAllByText(/決済が完了しました|決済完了/).length).toBeGreaterThan(0);
+    rendered.rerender(<PaymentForm />);
+
+    expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
+    expect(loadHistory().filter((e) => e.txHash === txHash)).toHaveLength(1);
+  });
 
   it('relay error (rate_limited): friendly 文言 + 通常決済へ切替 banner (生コードは非表示)', () => {
     setupRelayError('rate_limited');

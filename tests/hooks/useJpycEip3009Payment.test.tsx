@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 // wagmi は境界モック。signTypedData の spy で署名要求/解決/拒否/失敗を制御する。
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(),
+  usePublicClient: vi.fn(),
   useWalletClient: vi.fn(),
 }));
 // logger は境界モック (計測イベントの発火を assert するため)。
@@ -47,7 +48,7 @@ vi.mock('@/lib/relay/recoverFee', () => ({
   recoverFeeBps: () => 100,
 }));
 
-import { useAccount, useWalletClient } from 'wagmi';
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { logger } from '@/lib/logger';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
@@ -81,6 +82,7 @@ function makeWrapper() {
 
 let signTypedData: ReturnType<typeof vi.fn>;
 let fetchSpy: ReturnType<typeof vi.fn>;
+let waitForTransactionReceipt: ReturnType<typeof vi.fn>;
 
 function mount(opts?: { signImpl?: () => Promise<Hex> }) {
   signTypedData =
@@ -89,6 +91,8 @@ function mount(opts?: { signImpl?: () => Promise<Hex> }) {
       : vi.fn().mockResolvedValue(`0x${'a'.repeat(130)}` as Hex);
   mockHook(useWalletClient, { data: { signTypedData } });
   mockHook(useAccount, { address: CUSTOMER, chainId: polygon.id });
+  waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+  mockHook(usePublicClient, { waitForTransactionReceipt });
 }
 
 beforeEach(() => {
@@ -210,182 +214,166 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     return rendered.result;
   }
 
-  it('fetch reject → response-unknown (fallback-safe ではない)', async () => {
-    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    const result = submit();
-
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
-    expect(result.current.error?.message).toBe('response-unknown');
-    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
-    expect(result.current.recoveryState).toBe('exhausted');
-  });
-
-  it('unknown→insufficient_balance でも ambiguity latch と同一 payload を保持する', async () => {
+  it('unknown→auto→settled txHash→receipt success を通常成功形へ正規化する', async () => {
+    vi.useFakeTimers();
+    const txHash = `0x${'d'.repeat(64)}` as Hex;
     fetchSpy
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ ok: false, error: 'insufficient_balance' }),
-          { status: 400, headers: { 'content-type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ ok: true, state: 'settled', txHash })),
       );
     const result = submit();
 
-    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
-    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
-    await act(async () => result.current.retrySamePayload());
-    await waitFor(() =>
-      expect(result.current.error?.message).toBe('insufficient_balance'),
-    );
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(result.current.recoveryState).toBe('auto');
+    expect(result.current.isPending).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
 
-    expect(result.current.recoveryState).toBe('exhausted');
-    expect(signTypedData).toHaveBeenCalledOnce();
-    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
-  });
-
-  it('unknown 後に通常 mutate を再度呼んでも新署名せず同一 payload を再送する', async () => {
-    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    const result = submit();
-
-    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
-    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
-    act(() => {
-      result.current.mutate({ merchant: MERCHANT, value: 999n * 10n ** 18n });
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(signTypedData).toHaveBeenCalledOnce();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
+    expect(result.current.data).toEqual({ txHash, success: true });
     expect(result.current.recoveryState).toBeNull();
-  });
-
-  it('retrySamePayload は unknown 時の request body を完全一致で再 POST する', async () => {
-    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    const result = submit();
-
-    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
-    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
-    await act(async () => result.current.retrySamePayload());
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(signTypedData).toHaveBeenCalledOnce();
-    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
-  });
-
-  it('unknown→pending は ambiguity latch を解除しない', async () => {
-    fetchSpy
-      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: false, pending: true, txHash: null }), {
-          status: 202,
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
-    const result = submit();
-
-    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
-    await act(async () => result.current.retrySamePayload());
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data).toEqual({
-      txHash: null,
-      success: false,
-      pending: true,
+    expect(waitForTransactionReceipt).toHaveBeenCalledWith({
+      hash: txHash,
+      confirmations: 1,
+      timeout: expect.any(Number),
     });
-    expect(result.current.recoveryState).toBe('exhausted');
     expect(signTypedData).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
-  it('unknown→429 ip_rate_limited でも ambiguity latch を解除しない', async () => {
+  it('settled txHash の receipt reverted は通常 reverted 形へ正規化して latch を解除する', async () => {
+    vi.useFakeTimers();
+    const txHash = `0x${'e'.repeat(64)}` as Hex;
     fetchSpy
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ ok: false, error: 'ip_rate_limited' }),
-          {
-            status: 429,
-            headers: {
-              'content-type': 'application/json',
-              'retry-after': '45',
-            },
-          },
-        ),
+        new Response(JSON.stringify({ ok: true, state: 'settled', txHash })),
       );
     const result = submit();
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'reverted' });
 
-    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
-    await act(async () => result.current.retrySamePayload());
-    await waitFor(() =>
-      expect(isRelayIpRateLimitedError(result.current.error)).toBe(true),
-    );
-
-    expect(result.current.recoveryState).toBe('exhausted');
-    expect(signTypedData).toHaveBeenCalledOnce();
-    act(() => result.current.retryRelay());
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it('unknown→構造化 reverted は on-chain 失敗証明として latch を解除する', async () => {
-    const txHash = `0x${'d'.repeat(64)}`;
-    fetchSpy
-      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: false, reverted: true, txHash }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
-    const result = submit();
-
-    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
-    await act(async () => result.current.retrySamePayload());
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
     expect(result.current.data).toEqual({ txHash, success: false });
     expect(result.current.recoveryState).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('settled txHash:null は indeterminate と同様に次の status まで継続する', async () => {
+    vi.useFakeTimers();
+    const txHash = `0x${'f'.repeat(64)}` as Hex;
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ok: true, state: 'settled', txHash: null }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, state: 'settled', txHash })),
+      );
+    const result = submit();
+
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    expect(result.current.recoveryState).toBe('auto');
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(6_000));
+    expect(result.current.data).toEqual({ txHash, success: true });
+    vi.useRealTimers();
+  });
+
+  it('失効前の unused は継続し、deadline で exhausted + latch 維持', async () => {
+    vi.useFakeTimers();
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, state: 'unused' })),
+      );
+    const result = submit();
+
+    await act(async () => vi.advanceTimersByTimeAsync(90_001));
+    expect(result.current.recoveryState).toBe('exhausted');
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
     expect(signTypedData).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
-  it('body read reject → response-unknown', async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response('not-json', {
-        status: 200,
-        headers: { 'content-type': 'text/plain' },
-      }),
+  it('exhausted 後の手動再確認は status を再照会し、失効後 unused が安定すれば latch を解除する', async () => {
+    vi.useFakeTimers();
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+      );
+    const result = submit();
+    await act(async () => vi.advanceTimersByTimeAsync(90_001));
+    expect(result.current.recoveryState).toBe('exhausted');
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(result.current.isError).toBe(true);
+
+    const signedPayload = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as { validBefore: string };
+    vi.setSystemTime((Number(signedPayload.validBefore) + 1) * 1000);
+    fetchSpy.mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true, state: 'unused' })),
     );
-    const result = submit();
+    act(() => result.current.retrySamePayload());
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(result.current.recoveryState).toBe('auto');
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    await act(async () => vi.advanceTimersByTimeAsync(6_000));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
-    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+    expect(result.current.error?.message).toBe('relay_unused');
+    expect(result.current.recoveryState).toBeNull();
+    expect(
+      fetchSpy.mock.calls.slice(1).every(([url]) => url === '/api/relay/jpyc/status'),
+    ).toBe(true);
+    expect(signTypedData).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
-  it.each([
-    ['object envelope incomplete', { ok: true }],
-    ['body schema invalid', []],
-  ])('2xx malformed (%s) → response-unknown', async (_label, body) => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
+  it('status fetch hang は 10s AbortController timeout 後も次の backoff へ進む', async () => {
+    vi.useFakeTimers();
+    let aborted = false;
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockImplementationOnce((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            aborted = true;
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+      );
     const result = submit();
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
-    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+    await act(async () => vi.advanceTimersByTimeAsync(13_000));
+    expect(aborted).toBe(true);
+    expect(result.current.recoveryState).toBe('auto');
+    await act(async () => vi.advanceTimersByTimeAsync(6_000));
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
   });
 
-  it('非構造化 500 → response-unknown', async () => {
-    fetchSpy.mockResolvedValueOnce(new Response('Internal Server Error', { status: 500 }));
-    const result = submit();
-
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
-    expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+  it('unmount で sleep timer を cleanup し status fetch を開始しない', async () => {
+    vi.useFakeTimers();
+    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    mount();
+    const rendered = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    rendered.result.current.mutate({
+      merchant: MERCHANT,
+      value: 300n * 10n ** 18n,
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    rendered.unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(90_001));
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
   it('429 ip_rate_limited → 専用エラー + 同一 payload 再 POST（再署名なし）', async () => {
