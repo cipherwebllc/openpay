@@ -6,6 +6,7 @@ import {
   tokyoMinutesOfDay,
   tokyoHHMM,
   tokyoTimeOfDayToMs,
+  isBeforeOpen,
   isPastLastOrder,
   earliestPickup,
   pickupSlots,
@@ -74,6 +75,20 @@ describe('isPastLastOrder (同日セマンティクス)', () => {
   it('未設定/不正は制限なし (false)', () => {
     expect(isPastLastOrder(TOKYO_NOON, undefined)).toBe(false);
     expect(isPastLastOrder(TOKYO_NOON, 'bad')).toBe(false);
+  });
+});
+
+describe('isBeforeOpen (同日セマンティクス)', () => {
+  it('受付開始の直前は true / ちょうど・直後は false', () => {
+    const tokyo1159 = Date.UTC(2024, 0, 15, 2, 59);
+    const tokyo1201 = Date.UTC(2024, 0, 15, 3, 1);
+    expect(isBeforeOpen(tokyo1159, '12:00')).toBe(true);
+    expect(isBeforeOpen(TOKYO_NOON, '12:00')).toBe(false);
+    expect(isBeforeOpen(tokyo1201, '12:00')).toBe(false);
+  });
+  it('未設定/不正は制限なし (false)', () => {
+    expect(isBeforeOpen(TOKYO_NOON, undefined)).toBe(false);
+    expect(isBeforeOpen(TOKYO_NOON, 'bad')).toBe(false);
   });
 });
 

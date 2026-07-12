@@ -87,6 +87,15 @@ describe('mobileOrder: storefrontPartsEquivalent', () => {
     const publishedRecord = JSON.parse(JSON.stringify(STOREFRONT_PARTS)) as unknown;
     expect(storefrontPartsEquivalent(STOREFRONT_PARTS, publishedRecord)).toBe(true);
   });
+
+  it('openFrom の差分は not equal (validateStorefrontParts 経由)', () => {
+    expect(
+      storefrontPartsEquivalent(
+        { ...STOREFRONT_PARTS, openFrom: '09:00' },
+        { ...STOREFRONT_PARTS, openFrom: '10:00' },
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('mobileOrder: encode/decode round-trip', () => {
@@ -106,6 +115,11 @@ describe('mobileOrder: encode/decode round-trip', () => {
       socials: [],
       menu: [{ id: 'x', name: 'A', price: '100' }],
     };
+    expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
+  });
+
+  it('openFrom を encode/decode で round-trip する', () => {
+    const c: MobileOrderConfig = { ...baseConfig(), openFrom: '09:30' };
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(c);
   });
 
@@ -380,6 +394,13 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     expect(r?.address).toBeUndefined();
     expect(r?.phone).toBeUndefined();
   });
+  it('openFrom は有効な HH:mm のみ保持し、不正/欠落は載せない', () => {
+    expect(validateStorefrontParts({ ...good, openFrom: '09:30' })?.openFrom).toBe('09:30');
+    expect('openFrom' in (validateStorefrontParts({ ...good, openFrom: '9:30' }) ?? {})).toBe(
+      false,
+    );
+    expect('openFrom' in (validateStorefrontParts(good) ?? {})).toBe(false);
+  });
 });
 
 describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せる', () => {
@@ -395,6 +416,9 @@ describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せ
     expect(c?.hours).toBe('11:00-22:00');
     expect(c?.phone).toBe('03-1234-5678');
     expect(c?.acceptingOrders).toBe(false);
+  });
+  it('openFrom を parts から config に載せる', () => {
+    expect(validateOrderConfig({ ...baseConfig(), openFrom: '09:30' })?.openFrom).toBe('09:30');
   });
   it('accent (テーマ色) は有効な #rrggbb のみ載せ、不正/未設定は落とす', () => {
     expect(validateOrderConfig({ ...baseConfig(), accent: '#9a3412' })?.accent).toBe('#9a3412');

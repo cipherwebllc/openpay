@@ -873,6 +873,28 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
     expect(screen.queryByLabelText('受取時間')).toBeNull();
   });
 
+  it('flag OFF: openFrom が未来でも評価せず受付可能 (inert)', () => {
+    renderWithIntl(<MobileOrderView config={preorder({ openFrom: '13:00' })} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
+    expect(screen.queryByText('本日の受付は 13:00 に開始します。')).toBeNull();
+  });
+
+  it('flag ON: openFrom が未来なら時刻入り受付停止バナー + 支払い導線を出さない', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(<MobileOrderView config={preorder({ openFrom: '13:00' })} />);
+    expect(screen.getByText('本日の受付は 13:00 に開始します。')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('flag ON: openFrom が過去なら受付可能', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(<MobileOrderView config={preorder({ openFrom: '11:00' })} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
+  });
+
   it('flag ON: ラストオーダー超過 (00:00) で受付停止バナー + 支払い導線を出さない', () => {
     envHold.enablePreorderTime = true;
     renderWithIntl(<MobileOrderView config={preorder({ lastOrder: '00:00' })} />);
