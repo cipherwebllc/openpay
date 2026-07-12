@@ -11,6 +11,7 @@ import { Field } from './Field';
 import { ProductOptionEditor } from './ProductOptionEditor';
 import { env } from '@/lib/env';
 import type { ProductPreset } from '@/hooks/useProductPresets';
+import type { ShopLiveState } from '@/lib/shopLive';
 import { TAX_OPTIONS, defaultRateForCategory, type TaxCategory } from '@/lib/tax';
 import { TOKEN_SYMBOLS, defaultDeploymentForSymbol, type TokenSymbol } from '@/lib/tokens';
 
@@ -23,6 +24,11 @@ type Props = {
   ) => void;
   removePreset: (id: string) => void;
   movePreset: (id: string, dir: 'up' | 'down') => void;
+  shopLive?: {
+    state: ShopLiveState;
+    toggleSoldOut: (itemId: string, value: boolean) => void;
+    isPending: boolean;
+  };
 };
 
 const EMPTY_DRAFT = {
@@ -40,6 +46,7 @@ export function ProductPresetManager({
   updatePreset,
   removePreset,
   movePreset,
+  shopLive,
 }: Props) {
   const t = useTranslations('ProductPresetManager');
   const tTax = useTranslations('Tax');
@@ -188,6 +195,17 @@ export function ProductPresetManager({
                       }
                     />
                     {t('recommendedLabel')}
+                  </label>
+                )}
+                {shopLive && (
+                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={shopLive.state.soldOut.includes(p.id)}
+                      disabled={shopLive.isPending}
+                      onChange={(e) => shopLive.toggleSoldOut(p.id, e.target.checked)}
+                    />
+                    {t('soldOutToggle')}
                   </label>
                 )}
                 <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">

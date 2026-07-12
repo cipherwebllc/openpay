@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { renderWithIntl as render } from '../_helpers/i18n';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
+import { renderWithIntl } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/hooks/useResolveAddress', () => ({
@@ -22,10 +24,26 @@ vi.mock('@/hooks/useMarketRates', () => ({
     refetch: vi.fn(),
   }),
 }));
+const sessionHold = vi.hoisted(() => ({ isSignedIn: false }));
+vi.mock('@/hooks/useSiweSession', () => ({
+  useSiweSession: () => ({
+    isSignedIn: sessionHold.isSignedIn,
+    sessionAddress: sessionHold.isSignedIn
+      ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+      : null,
+    mismatch: false,
+    isLoading: false,
+    signIn: vi.fn(),
+    isSigningIn: false,
+    signInError: null,
+    signOut: vi.fn(),
+  }),
+}));
 // レジ利用料 flag を切替え可能に (既定 OFF = レジ standard 無料 = 既存テストの挙動不変)。
 const envHold = vi.hoisted(() => ({
   enableRegisterFee: false,
   enableShopLive: false,
+  enableHandles: false,
   enableMenuOptions: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -40,6 +58,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableShopLive() {
         return envHold.enableShopLive;
       },
+      get enableHandles() {
+        return envHold.enableHandles;
+      },
       get enableMenuOptions() {
         return envHold.enableMenuOptions;
       },
@@ -52,6 +73,17 @@ import { parseCheckoutParams } from '@/lib/url';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const QR_KEY = 'openpay:qr-settings:v2';
+
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithIntl(
+    <QueryClientProvider client={qc}>{ui}</QueryClientProvider>,
+  );
+}
+
+function jsonRes(body: unknown, status = 200) {
+  return { ok: status < 400, status, json: async () => body } as Response;
+}
 
 function seedReceiver() {
   window.localStorage.setItem(
@@ -75,7 +107,10 @@ describe('RegisterMode', () => {
     window.localStorage.clear();
     envHold.enableRegisterFee = false; // 毎テスト OFF 起点 (flag-ON テストが個別に立てる)
     envHold.enableShopLive = false; // Phase 1 flag も OFF 起点
+    envHold.enableHandles = false;
     envHold.enableMenuOptions = false; // Phase 2 flag も OFF 起点
+    sessionHold.isSignedIn = false;
+    global.fetch = vi.fn(async () => jsonRes({ ok: false }, 404)) as unknown as typeof fetch;
   });
 
   it('初期サンプルプリセットが表示される (コーヒー/Tシャツ/イベント参加費/Tip)', async () => {
@@ -203,10 +238,121 @@ describe('RegisterMode', () => {
     // チップ: ドリンク / フード が出る。
     expect(screen.getByRole('button', { name: 'ドリンク' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'フード' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ドリンク' }).querySelector('.h-2')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /コーラ/ })).toHaveClass('border-l-4');
     // 「フード」で絞ると コーラ (ドリンク) はグリッドから消え、ポテトは残る。
     await user.click(screen.getByRole('button', { name: 'フード' }));
     expect(screen.queryByRole('button', { name: /コーラ/ })).toBeNull();
     expect(screen.getByRole('button', { name: /ポテト/ })).toBeInTheDocument();
+  });
+
+  it('公開店舗の live soldOut に含まれる商品へバッジと grayscale を表示し、販売操作は塞がない', async () => {
+    envHold.enableShopLive = true;
+    envHold.enableHandles = true;
+    sessionHold.isSignedIn = true;
+    const patchBodies: unknown[] = [];
+    global.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (String(url) === '/api/handle') {
+        return jsonRes({
+          handles: [
+            {
+              handle: 'shop',
+              config: { to: VALID, name: 'Shop' },
+              storefront: { chain: 'polygon', mode: 'storefront', feePayer: 'merchant', menu: [] },
+            },
+          ],
+          max: 3,
+        });
+      }
+      if (String(url).startsWith('/api/shop/live')) {
+        if (init?.method === 'PATCH') {
+          patchBodies.push(JSON.parse(String(init.body)));
+          return jsonRes({ live: { soldOut: [], paused: false, updatedAt: 2 } });
+        }
+        return jsonRes({ live: { soldOut: ['p1'], paused: false, updatedAt: 1 } });
+      }
+      return jsonRes({}, 404);
+    }) as unknown as typeof fetch;
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          {
+            id: 'p1',
+            name: '限定グッズ',
+            unitPrice: '1200',
+            token: 'jpyc',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+            image: 'https://example.com/item.png',
+            sortOrder: 0,
+            enabled: true,
+          },
+        ],
+      }),
+    );
+
+    render(<RegisterMode />);
+
+    expect(await screen.findAllByText('売り切れ')).toHaveLength(2);
+    const productButton = screen.getByRole('button', { name: '限定グッズ' });
+    expect(productButton).not.toBeDisabled();
+    expect(productButton.querySelector('img')).toHaveClass('grayscale');
+    const toggle = screen.getByRole('checkbox', { name: '売り切れ' });
+    expect(toggle).toBeChecked();
+    await userEvent.setup().click(toggle);
+    await waitFor(() =>
+      expect(patchBodies).toContainEqual({ op: 'soldOut', itemId: 'p1', value: false }),
+    );
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(screen.getAllByText('売り切れ')).toHaveLength(1);
+  });
+
+  it('shop-live flag OFF ではサインイン済みでも売り切れ UI を出さない', async () => {
+    sessionHold.isSignedIn = true;
+    render(<RegisterMode />);
+    await screen.findByRole('button', { name: /コーヒー/ });
+    expect(screen.queryByText('売り切れ')).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('shop-live flag ON でも未サインインなら売り切れ UI を出さない', async () => {
+    envHold.enableShopLive = true;
+    envHold.enableHandles = true;
+    render(<RegisterMode />);
+    await screen.findByRole('button', { name: /コーヒー/ });
+    expect(screen.queryByText('売り切れ')).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('shop-live の取得失敗は売り切れ UI を出さずレジ本体へ波及させない', async () => {
+    envHold.enableShopLive = true;
+    envHold.enableHandles = true;
+    sessionHold.isSignedIn = true;
+    global.fetch = vi.fn(async (url: unknown) => {
+      if (String(url) === '/api/handle') {
+        return jsonRes({
+          handles: [
+            {
+              handle: 'shop',
+              config: { to: VALID, name: 'Shop' },
+              storefront: { chain: 'polygon', mode: 'storefront', feePayer: 'merchant', menu: [] },
+            },
+          ],
+          max: 3,
+        });
+      }
+      return jsonRes({ error: 'kv_error' }, 503);
+    }) as unknown as typeof fetch;
+
+    render(<RegisterMode />);
+
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith('/api/shop/live?h=shop', undefined),
+    );
+    expect(screen.queryByText('売り切れ')).toBeNull();
+    expect(screen.getByRole('button', { name: /コーヒー/ })).toBeEnabled();
   });
 
   it('オプション付き preset: 選択モーダル → 実効単価(850) + サフィックス名で行追加', async () => {
