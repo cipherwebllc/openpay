@@ -1824,6 +1824,37 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(e?.blockNumber).toBeNull();
   });
 
+  it('auto recovery→成功で成功描画/webhook/控え/履歴を各 1 回だけ確定する', async () => {
+    window.localStorage.clear();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setupRelayReady();
+    const txHash = `0x${'7'.repeat(64)}` as `0x${string}`;
+    const variables = {
+      merchant: MERCHANT,
+      value: JPYC_TOTAL,
+      gasMode: 'customer' as const,
+    };
+    const params = { ...JPYC_PARAMS, webhook: 'https://shop.example/hook' };
+    const user = userEvent.setup();
+    const rendered = render(<CheckoutForm params={params} />);
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    setRelayPayment('pending-flow', { recoveryState: 'auto', variables });
+    rendered.rerender(<CheckoutForm params={params} />);
+    expect(screen.getByText(/支払い結果を確認しています/)).toBeInTheDocument();
+
+    setRelayPayment('success', { txHash, variables });
+    rendered.rerender(<CheckoutForm params={params} />);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+    rendered.rerender(<CheckoutForm params={params} />);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
+    expect(loadHistory().filter((e) => e.txHash === txHash)).toHaveLength(1);
+  });
+
   it('relay recover (forwarder 設定 + gas=merchant): gas 行に回収額 + 履歴 merchantAmount=value−fee', () => {
     window.localStorage.clear();
     vi.mocked(jpycForwarderFor).mockReturnValue(

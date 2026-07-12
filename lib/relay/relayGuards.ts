@@ -155,6 +155,32 @@ export type IdempotencyHelpers = {
   ) => Promise<void>;
 };
 
+export type IdempotencyLookup =
+  | { state: 'missing' }
+  | { state: 'hash'; txHash: Hex }
+  | { state: 'indeterminate' };
+
+// status route 専用の read-only lookup。claim/TTL 更新は一切行わない。
+// KV 未構成は on-chain 判定へ進めるため missing、構成済み KV の read 障害は、記録済 hash を
+// 「無い」と誤認して RPC 側へ倒さないよう indeterminate として区別する。
+export async function readIdempotency(
+  prefix: string,
+  chainId: number,
+  from: Address,
+  nonce: Hex,
+): Promise<IdempotencyLookup> {
+  if (!isKvConfigured()) return { state: 'missing' };
+  const key = `${prefix}${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
+  const result = await kvGet(key);
+  if (!result.ok) return { state: 'indeterminate' };
+  const value = result.value;
+  if (value === null || value === '1') return { state: 'missing' };
+  if (/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    return { state: 'hash', txHash: value as Hex };
+  }
+  return { state: 'indeterminate' };
+}
+
 // 指定 prefix で idempotency 3 関数を生成する。挙動は抽出元 (relay route) と完全に同一。
 export function makeIdempotency(prefix: string): IdempotencyHelpers {
   const idemKey = (chainId: number, from: Address, nonce: Hex) =>

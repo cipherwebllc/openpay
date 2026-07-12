@@ -9,9 +9,9 @@
 // flag/relay 未構成時は呼び出し元が resolveJpycGaslessProvider で 7702 経路を選ぶ。詳細は
 // memory:jpyc-eip3009 / gasless-legal-jp。
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useAccount, useWalletClient } from 'wagmi';
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import type { Address, Hex } from 'viem';
 import {
   AUTHORIZATION_VALIDITY_WINDOW_SEC,
@@ -74,12 +74,36 @@ type RelayResponse = {
   retryAfter?: number;
 };
 
+type RelayStatusResponse =
+  | { ok: true; state: 'settled'; txHash: Hex | null }
+  | { ok: true; state: 'unused' }
+  | { ok: true; state: 'indeterminate' };
+
+const RECOVERY_BACKOFF_MS = [3_000, 6_000, 12_000, 24_000, 45_000] as const;
+const RECOVERY_FETCH_TIMEOUT_MS = 10_000;
+const RECOVERY_DEADLINE_MS = 90_000;
+
 function isRelayResponse(value: unknown): value is RelayResponse {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isTxHash(value: unknown): value is Hex {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isStrictTxHash(value: unknown): value is Hex {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function isRelayStatusResponse(value: unknown): value is RelayStatusResponse {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const body = value as Record<string, unknown>;
+  if (body.ok !== true) return false;
+  if (body.state === 'unused' || body.state === 'indeterminate') return true;
+  return (
+    body.state === 'settled' &&
+    (body.txHash === null || isStrictTxHash(body.txHash))
+  );
 }
 
 function retryAfterSeconds(res: Response, body: RelayResponse): number | null {
@@ -145,6 +169,7 @@ async function postRelayPayload(
 export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const { data: walletClient } = useWalletClient();
   const { address, chainId } = useAccount();
+  const publicClient = usePublicClient({ chainId: deployment.chainId });
 
   // mutation variables は金額等の入力値しか持たないため、署名済 payload と ambiguity latch を
   // 単一 ref で保持する。一度 ambiguous になった payload は on-chain success/revert が証明されるまで
@@ -152,6 +177,136 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const retainedPayloadRef = useRef<RetainedRelayPayload | null>(null);
   const [recoveryState, setRecoveryState] =
     useState<JpycRelayRecoveryState>(null);
+  const mountedRef = useRef(true);
+  const recoveryPromiseRef = useRef<Promise<JpycEip3009Result> | null>(null);
+  const recoverySleepRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recoveryWakeRef = useRef<(() => void) | null>(null);
+  const recoveryFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const recoveryAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (recoverySleepRef.current !== null) {
+        clearTimeout(recoverySleepRef.current);
+      }
+      recoveryWakeRef.current?.();
+      recoveryWakeRef.current = null;
+      if (recoveryFetchTimeoutRef.current !== null) {
+        clearTimeout(recoveryFetchTimeoutRef.current);
+      }
+      recoveryAbortRef.current?.abort();
+    };
+  }, []);
+
+  const setRecoveryStateIfMounted = (state: JpycRelayRecoveryState) => {
+    if (mountedRef.current) setRecoveryState(state);
+  };
+
+  const resolveAmbiguousPayload = (
+    retained: RetainedRelayPayload,
+  ): Promise<JpycEip3009Result> => {
+    const existing = recoveryPromiseRef.current;
+    if (existing) return existing;
+
+    const run = (async (): Promise<JpycEip3009Result> => {
+      setRecoveryStateIfMounted('auto');
+      const deadline = Date.now() + RECOVERY_DEADLINE_MS;
+      let consecutiveUnused = 0;
+
+      for (const delayMs of RECOVERY_BACKOFF_MS) {
+        await new Promise<void>((resolve, reject) => {
+          recoveryWakeRef.current = resolve;
+          recoverySleepRef.current = setTimeout(() => {
+            recoverySleepRef.current = null;
+            recoveryWakeRef.current = null;
+            if (mountedRef.current) resolve();
+            else reject(new RelayResponseUnknownError());
+          }, delayMs);
+        });
+        if (!mountedRef.current) throw new RelayResponseUnknownError();
+        if (Date.now() > deadline) break;
+
+        const controller = new AbortController();
+        recoveryAbortRef.current = controller;
+        const remainingMs = Math.max(1, deadline - Date.now());
+        recoveryFetchTimeoutRef.current = setTimeout(
+          () => controller.abort(),
+          Math.min(RECOVERY_FETCH_TIMEOUT_MS, remainingMs),
+        );
+
+        let status: RelayStatusResponse | null = null;
+        try {
+          const response = await fetch('/api/relay/jpyc/status', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(retained.payload),
+            signal: controller.signal,
+          });
+          const body: unknown = await response.json();
+          if (response.ok && isRelayStatusResponse(body)) status = body;
+        } catch {
+          // status の fetch/RPC/KV 障害は送金結果を変えない。deadline まで同じ intent の read を続ける。
+        } finally {
+          if (recoveryFetchTimeoutRef.current !== null) {
+            clearTimeout(recoveryFetchTimeoutRef.current);
+            recoveryFetchTimeoutRef.current = null;
+          }
+          recoveryAbortRef.current = null;
+        }
+
+        if (!mountedRef.current) throw new RelayResponseUnknownError();
+        if (!status || status.state === 'indeterminate') {
+          consecutiveUnused = 0;
+          continue;
+        }
+        if (status.state === 'unused') {
+          consecutiveUnused++;
+          const validBefore = Number(retained.payload.validBefore);
+          if (
+            consecutiveUnused >= 2 &&
+            Number.isFinite(validBefore) &&
+            Math.floor(Date.now() / 1000) >= validBefore
+          ) {
+            retainedPayloadRef.current = null;
+            setRecoveryStateIfMounted(null);
+            throw new Error('relay_unused');
+          }
+          continue;
+        }
+
+        consecutiveUnused = 0;
+        if (status.txHash === null || !publicClient) continue;
+        try {
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash: status.txHash,
+            confirmations: 1,
+            timeout: Math.max(1, Math.min(RECOVERY_FETCH_TIMEOUT_MS, deadline - Date.now())),
+          });
+          retainedPayloadRef.current = null;
+          setRecoveryStateIfMounted(null);
+          return {
+            txHash: status.txHash,
+            success: receipt.status === 'success',
+          };
+        } catch {
+          // txHash は確定していても receipt RPC が一時的に読めない場合がある。deadline まで再照会する。
+        }
+      }
+
+      setRecoveryStateIfMounted('exhausted');
+      throw new RelayResponseUnknownError();
+    })();
+
+    recoveryPromiseRef.current = run;
+    void run.finally(() => {
+      if (recoveryPromiseRef.current === run) recoveryPromiseRef.current = null;
+    }).catch(() => undefined);
+    return run;
+  };
 
   const mutation = useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
     mutationFn: async ({ merchant, value, gasMode = 'customer', feeKind }) => {
@@ -159,13 +314,9 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       // ある間は必ず同一 payload を再 POST して再署名を構造的に封鎖する。
       const retained = retainedPayloadRef.current;
       if (retained) {
+        if (retained.ambiguous) return resolveAmbiguousPayload(retained);
         try {
           const result = await postRelayPayload(retained.payload);
-          if (retained.ambiguous && result.pending) {
-            // pending は送金済み/未送金を証明しない。曖昧性を維持して同一 payload のみ再確認可能にする。
-            setRecoveryState('exhausted');
-            return result;
-          }
           // txHash 付き success / reverted は on-chain の確定結果。非 ambiguous な D1 retry の
           // pending も従来どおり保持を終える。
           retainedPayloadRef.current = null;
@@ -338,9 +489,9 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         return await postRelayPayload(payload);
       } catch (error) {
         if (isRelayResponseUnknownError(error)) {
-          retainedPayloadRef.current = { payload, ambiguous: true };
-          // PR-A は自動解決を行わない。型の auto は PR-B 用に先行公開し、unknown は即 exhausted。
-          setRecoveryState('exhausted');
+          const retained = { payload, ambiguous: true };
+          retainedPayloadRef.current = retained;
+          return resolveAmbiguousPayload(retained);
         } else if (isRelayIpRateLimitedError(error)) {
           retainedPayloadRef.current = { payload, ambiguous: false };
         } else {

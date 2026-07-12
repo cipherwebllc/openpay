@@ -153,6 +153,10 @@ export const MAINNET_CHAINS: ReadonlySet<number> = new Set([
 const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
 ]);
+const AUTHORIZATION_USED_EVENT = parseAbi([
+  'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
+])[0];
+const STATUS_LOG_LOOKBACK_BLOCKS = 10_000n;
 
 export function transportFor(chainId: number) {
   const cfg = SUPPORTED_CHAINS[chainId];
@@ -209,6 +213,31 @@ export async function readAuthorizationUsed(
     functionName: 'authorizationState',
     args: [from, nonce],
   });
+}
+
+// authorizationState=true だが KV に hash が残っていない場合の read-only recovery。
+// EIP-3009 の AuthorizationUsed(authorizer,nonce) は両値 indexed なので、対象 intent のログだけを
+// RPC 側で絞る。走査は署名の通常有効窓を十分上回る直近 10,000 block に限定する。
+export async function findAuthorizationUsedTransactionHash(
+  chainId: number,
+  token: Address,
+  from: Address,
+  nonce: Hex,
+): Promise<Hex | null> {
+  const client = publicClientFor(chainId);
+  const latest = await client.getBlockNumber();
+  const fromBlock =
+    latest > STATUS_LOG_LOOKBACK_BLOCKS
+      ? latest - STATUS_LOG_LOOKBACK_BLOCKS
+      : 0n;
+  const logs = await client.getLogs({
+    address: token,
+    event: AUTHORIZATION_USED_EVENT,
+    args: { authorizer: from, nonce },
+    fromBlock,
+    toBlock: latest,
+  });
+  return logs.at(-1)?.transactionHash ?? null;
 }
 
 // self-host: relayer EOA / chain client から SelfHostIo を組む (chainId は対応済前提)。
