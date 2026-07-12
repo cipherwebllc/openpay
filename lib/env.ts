@@ -560,13 +560,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT',
     process.env.NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT,
   ),
-  // モバイル注文の時間系 (ラストオーダー自動停止 / 最短受け渡し / 時間指定事前注文) の有効化フラグ
-  // (client 露出)。**既定 OFF で完全 inert** = builder の lastOrder/minLeadMinutes 入力 非表示・公開
-  // ページはラストオーダー停止/最短受取/スロット選択を出さず従来どおり・受注に pickupAt が付かない。
-  // ON のとき店舗は「ラストオーダー HH:mm」(超過で受付停止=Phase1 停止経路を再利用) と「最短受け渡し
-  // 分数」を設定でき、preorder では顧客が受取スロット (15分刻み) を選んで pickupAt を注文へ付与、厨房/
-  // ホールが受取予定時刻を表示する。タイムゾーンは Asia/Tokyo 固定 (JPYC=国内市場・lib/shopTime)。
-  // lastOrder/minLeadMinutes の保存/検証など data 層は常時有効だが表示しないので inert。
+  // モバイル注文の時間系 (受付開始/ラストオーダー自動停止 / 最短受け渡し / 時間指定事前注文) の flag
+  // (client 露出)。**既定 OFF で完全 inert** = builder の openFrom/lastOrder/minLeadMinutes 入力 非表示・
+  // 公開ページは時刻による受付停止/最短受取/スロット選択を出さず従来どおり・受注に pickupAt が付かない。
+  // ON のとき店舗は「受付開始/ラストオーダー HH:mm」(時間外は Phase1 停止経路を再利用) と「最短
+  // 受け渡し分数」を設定でき、preorder では顧客が受取スロット (15分刻み) を選んで pickupAt を注文へ
+  // 付与、厨房/ホールが受取予定時刻を表示する。タイムゾーンは Asia/Tokyo 固定 (lib/shopTime)。
+  // openFrom/lastOrder/minLeadMinutes の保存/検証など data 層は常時有効だが表示しないので inert。
   // 計画: plans/restaurant-pos-roadmap.md Phase 4。
   enablePreorderTime: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_PREORDER_TIME',

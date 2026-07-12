@@ -51,6 +51,7 @@ export interface MobileOrderDraft {
   acceptingOrders: boolean; // 注文受付 (既定 true)。false で公開ページの支払いを止める。
   dineIn: boolean; // 提供形態 (既定 false=テイクアウト)。true=店内 (注文時にテーブル番号を入力)。
   // 時間系 (Phase 4・生入力)。検証 (HH:mm / 数値範囲) は draftToConfig→validateOrderConfig が行う。
+  openFrom: string; // 受付開始 "HH:mm" (空=制限なし)
   lastOrder: string; // ラストオーダー "HH:mm" (空=無制限)
   minLeadMinutes: string; // 最短受け渡し分 (数値文字列・空=即時)
 }
@@ -79,6 +80,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   phone: '',
   acceptingOrders: true, // 既定は受付中
   dineIn: false, // 既定はテイクアウト・店頭受け渡し (テーブル番号入力なし)
+  openFrom: '', // 既定は制限なし (受付開始指定なし)
   lastOrder: '', // 既定は無制限 (ラストオーダーなし)
   minLeadMinutes: '', // 既定は即時 (最短受け渡し指定なし)
 };
@@ -124,6 +126,7 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     // 既定はテイクアウト (false)。明示的に true のときだけ店内 (テーブル番号) として復元。
     dineIn: loaded.dineIn === true,
     // 時間系 (生入力)。length だけ clamp (HH:mm=5・分は最大 4 桁=1440)。検証は draftToConfig。
+    openFrom: clampStr(loaded.openFrom, 5),
     lastOrder: clampStr(loaded.lastOrder, 5),
     minLeadMinutes: clampStr(loaded.minLeadMinutes, 4),
   };
@@ -196,8 +199,9 @@ export function draftToConfig(
     acceptingOrders: draft.acceptingOrders,
     // 店内のときだけ true が保存される (validateOrderConfig が round-trip 最小化)。
     dineIn: draft.dineIn,
-    // 時間系: lastOrder は "HH:mm" 検証、minLeadMinutes は数値化 (空/不正は undefined=未設定)。
+    // 時間系: 時刻は "HH:mm" 検証、minLeadMinutes は数値化 (空/不正は undefined=未設定)。
     // 検証/範囲 clamp は validateOrderConfig (parseHHMM / sanitizeMinLead) に委譲。
+    openFrom: draft.openFrom.trim(),
     lastOrder: draft.lastOrder.trim(),
     minLeadMinutes: draft.minLeadMinutes.trim() ? Number(draft.minLeadMinutes.trim()) : undefined,
   });
@@ -256,6 +260,7 @@ export function storefrontPartsToDraft(
     phone: parts.phone ?? '',
     acceptingOrders: parts.acceptingOrders ?? true,
     dineIn: parts.dineIn ?? false,
+    openFrom: parts.openFrom ?? '',
     lastOrder: parts.lastOrder ?? '',
     minLeadMinutes: parts.minLeadMinutes != null ? String(parts.minLeadMinutes) : '',
   };

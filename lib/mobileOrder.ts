@@ -70,6 +70,7 @@ export type MobileOrderConfig = {
   // **storefront のときのみ有効** — preorder (事前注文) は来店前ゆえテーブル予約不可で常にテイクアウト。
   dineIn?: boolean;
   // 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。タイムゾーンは Asia/Tokyo 固定。
+  openFrom?: string; // 受付開始 "HH:mm" (開始前は受付停止・同日セマンティクス・lib/shopTime)
   lastOrder?: string; // ラストオーダー "HH:mm" (超過で受付停止・同日セマンティクス・lib/shopTime)
   minLeadMinutes?: number; // 最短受け渡しまでの分 (preorder のスロット起点・1..MIN_LEAD_MAX)
 };
@@ -98,6 +99,7 @@ export type StorefrontParts = {
   phone?: string;
   acceptingOrders?: boolean;
   dineIn?: boolean; // true=店内 (テーブル番号入力)、false/未設定=テイクアウト。storefront のみ (preorder は常にテイクアウト)
+  openFrom?: string; // 受付開始 "HH:mm" (Phase 4・Asia/Tokyo・開始前は受付停止)
   lastOrder?: string; // ラストオーダー "HH:mm" (Phase 4・Asia/Tokyo・超過で受付停止)
   minLeadMinutes?: number; // 最短受け渡し分 (Phase 4・preorder のスロット起点)
 };
@@ -364,7 +366,8 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   // ただし事前モバイルオーダー (preorder) は来店前注文ゆえテーブル予約が不可能 → 常にテイクアウト。
   // 店内は storefront のときだけ採用する (decode/builder/@handle 公開の単一情報源でこの不変条件を保証)。
   if (o.dineIn === true && parts.mode === 'storefront') parts.dineIn = true;
-  // 時間系 (任意・不正は黙って除外・注文は壊さない)。lastOrder は "HH:mm"・minLeadMinutes は 1..上限。
+  // 時間系 (任意・不正は黙って除外・注文は壊さない)。時刻は "HH:mm"・minLeadMinutes は 1..上限。
+  if (parseHHMM(o.openFrom) !== null) parts.openFrom = o.openFrom as string;
   if (parseHHMM(o.lastOrder) !== null) parts.lastOrder = o.lastOrder as string;
   const minLead = sanitizeMinLead(o.minLeadMinutes);
   if (minLead !== null) parts.minLeadMinutes = minLead;
@@ -467,6 +470,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (parts.acceptingOrders === false) config.acceptingOrders = false;
   if (parts.dineIn) config.dineIn = true;
   // 時間系は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。
+  if (parts.openFrom) config.openFrom = parts.openFrom;
   if (parts.lastOrder) config.lastOrder = parts.lastOrder;
   if (parts.minLeadMinutes) config.minLeadMinutes = parts.minLeadMinutes;
   return config;

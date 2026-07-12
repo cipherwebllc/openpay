@@ -35,7 +35,7 @@ import {
   type MenuItem,
 } from '@/lib/mobileOrder';
 import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
-import { isPastLastOrder, pickupSlots } from '@/lib/shopTime';
+import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 import {
   mobileOrderFeeBps,
   mobileOrderFeeValue,
@@ -229,7 +229,7 @@ export function MobileOrderView({
   const paused = liveState.paused;
 
   // 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。OFF では一切評価しない (inert)。
-  // Asia/Tokyo 固定。ラストオーダー超過で受付停止、preorder は受取スロットを選んで pickupAt を付与。
+  // Asia/Tokyo 固定。受付開始前/ラストオーダー超過で停止、preorder はスロットを選んで pickupAt を付与。
   const timeEnabled = env.enablePreorderTime;
   const isPreorder = config.mode === 'preorder';
   // ラストオーダー停止判定とスロット候補のため現在時刻を保持 (15分グリッドなので 30s 更新で十分)。
@@ -431,16 +431,19 @@ export function MobileOrderView({
     [config.menu, soldOutSet],
   );
 
-  // 店舗情報 + 受付可否。静的 acceptingOrders===false / ライブ paused / ラストオーダー超過 のとき
-  // 支払いを止める (不可逆決済の事故防止)。メッセージは 終了 > 一時停止 > ラストオーダー の優先。
+  // 店舗情報 + 受付可否。静的 acceptingOrders===false / ライブ paused / 受付開始前 /
+  // ラストオーダー超過のとき支払いを止める。メッセージは 終了 > 一時停止 > 開始前 > LO の優先。
+  const beforeOpen = timeEnabled && isBeforeOpen(now, config.openFrom);
   const pastLastOrder = timeEnabled && isPastLastOrder(now, config.lastOrder);
-  const accepting = config.acceptingOrders !== false && !paused && !pastLastOrder;
+  const accepting = config.acceptingOrders !== false && !paused && !beforeOpen && !pastLastOrder;
   const closedNoticeKey =
     config.acceptingOrders === false
       ? 'viewClosedNotice'
       : paused
         ? 'viewPausedNotice'
-        : 'viewLastOrderNotice';
+        : beforeOpen
+          ? 'viewBeforeOpenNotice'
+          : 'viewLastOrderNotice';
   const tel = telHref(config.phone);
   const mapHref = mapSearchHref(config.address);
   const hasStoreInfo = !!(config.address || config.hours || config.phone);
@@ -544,7 +547,9 @@ export function MobileOrderView({
       {/* 受付停止中バナー (acceptingOrders===false)。客が払う前に最上部で告知。 */}
       {!accepting && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-800">
-          {t(closedNoticeKey)}
+          {closedNoticeKey === 'viewBeforeOpenNotice'
+            ? t(closedNoticeKey, { time: config.openFrom ?? '' })
+            : t(closedNoticeKey)}
         </div>
       )}
 

@@ -144,6 +144,7 @@ export function MobileOrderBuilder({
         phone: draft.phone.trim() || undefined,
         acceptingOrders: draft.acceptingOrders,
         dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
+        openFrom: draft.openFrom.trim() || undefined,
         menu: menuItems,
       }
     : null;
@@ -170,6 +171,7 @@ export function MobileOrderBuilder({
     ...(draft.phone.trim() ? { phone: draft.phone.trim() } : {}),
     ...(draft.acceptingOrders ? {} : { acceptingOrders: false }),
     ...(draft.dineIn ? { dineIn: true } : {}),
+    ...(draft.openFrom.trim() ? { openFrom: draft.openFrom.trim() } : {}),
     ...(draft.lastOrder.trim() ? { lastOrder: draft.lastOrder.trim() } : {}),
     ...(draft.minLeadMinutes.trim()
       ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
@@ -475,12 +477,20 @@ export function MobileOrderBuilder({
               </fieldset>
 
               {/* 時間系 (Phase 4・flag NEXT_PUBLIC_ENABLE_PREORDER_TIME)。OFF=非表示=inert。
-                  ラストオーダー=両モード (超過で受付停止)、最短受け渡し=preorder のみ。Asia/Tokyo 固定。 */}
+                  受付開始/ラストオーダー=両モード、最短受け渡し=preorder のみ。Asia/Tokyo 固定。 */}
               {env.enablePreorderTime && (
                 <fieldset className="space-y-3">
                   <legend className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
                     <Clock className="h-4 w-4 text-slate-400" aria-hidden /> {t('timeLabel')}
                   </legend>
+                  <Field label={t('openFromLabel')} hint={t('openFromHint')}>
+                    <input
+                      type="time"
+                      value={draft.openFrom}
+                      onChange={(e) => update({ openFrom: e.target.value })}
+                      className={inputClass}
+                    />
+                  </Field>
                   <Field label={t('lastOrderLabel')} hint={t('lastOrderHint')}>
                     <input
                       type="time"

@@ -66,6 +66,17 @@ export function isPastLastOrder(nowMs: number, lastOrder: string | undefined): b
 }
 
 /**
+ * 受付開始前か (同日 Tokyo 時刻ベース)。openFrom 未設定/不正は false (=制限なし)。
+ * **同日セマンティクス**: `tokyoMinutesOfDay(now) < openFrom` で before 判定。日跨ぎ営業は
+ * isPastLastOrder と同様に非対応で、advisory な公開ページの受付可否表示にだけ使用する。
+ */
+export function isBeforeOpen(nowMs: number, openFrom: string | undefined): boolean {
+  const open = parseHHMM(openFrom);
+  if (open === null) return false;
+  return tokyoMinutesOfDay(nowMs) < open;
+}
+
+/**
  * 最短受け渡し時刻 (ms)。`now + minLeadMinutes` を 15 分スロット境界へ切り上げ (Tokyo の
  * :00/:15/:30/:45 に整列)。minLeadMinutes 未設定/不正/負は 0 = now を次スロット境界へ切り上げ。
  */
