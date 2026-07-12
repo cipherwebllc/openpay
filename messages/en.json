@@ -2039,6 +2039,7 @@
     "notifiedAwaitingPickup": "Notified · awaiting pickup",
     "newBadge": "New",
     "elapsed": "{m} min",
+    "uncookedTotalsLabel": "To cook (total)",
     "pendingCountKitchen": "{n} to cook",
     "pendingCountHall": "{n} to serve",
     "alertSoundOn": "Sound on",

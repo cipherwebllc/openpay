@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatUnits } from 'viem';
-import { CheckCircle2, ChefHat, RefreshCw, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import { CheckCircle2, ChefHat, Clock, RefreshCw, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
@@ -20,6 +20,7 @@ import { txExplorerUrl } from '@/lib/chains';
 import { jpycChainLabel, type StorefrontParts } from '@/lib/mobileOrder';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
+import { ELAPSED_LATE_MIN, ELAPSED_WARN_MIN } from '@/components/OrderCard';
 
 // /api/handle が返す所有 handle (StorefrontPublishPanel と同形・同 cache キーを共有)。
 // 営業中の操作 (ShopLivePanel) は公開済み店舗 (storefront あり) の handle に紐づく。
@@ -107,6 +108,10 @@ export function OrderFeedPanel() {
 
   const renderCard = (o: StoredOrder, done: boolean) => {
     const explorer = txExplorerUrl(o.chainId, o.txHash);
+    // 12s ポーリングの再レンダー時に更新すれば十分。経過表示専用の interval は増やさない。
+    const ageMin = !done && o.ts > 0
+      ? Math.max(0, Math.floor((Date.now() - o.ts) / 60_000))
+      : null;
     const amountWarning = o.amountMismatch
       ? t('amountMismatchBadge')
       : o.amountUnchecked
@@ -124,7 +129,15 @@ export function OrderFeedPanel() {
     return (
       <li
         key={o.txHash}
-        className={`rounded-2xl border border-slate-200 p-4 ${done ? 'bg-slate-50 opacity-70' : 'bg-white'}`}
+        className={`rounded-2xl border p-4 ${
+          done
+            ? 'border-slate-200 bg-slate-50 opacity-70'
+            : ageMin !== null && ageMin >= ELAPSED_LATE_MIN
+              ? 'border-red-400 bg-red-50/60'
+              : ageMin !== null && ageMin >= ELAPSED_WARN_MIN
+                ? 'border-amber-400 bg-amber-50/70'
+                : 'border-slate-200 bg-white'
+        }`}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -135,21 +148,38 @@ export function OrderFeedPanel() {
             {o.table && <p className="text-base font-bold text-slate-900">{o.table}</p>}
             <p className="text-xs text-slate-400">{chainLabel(o.chainId)}</p>
           </div>
-          <span
-            className={`shrink-0 text-right ${
-              amountWarning ? 'rounded-lg border border-amber-300 bg-amber-50 px-2 py-1' : ''
-            }`}
-          >
-            {amountWarning ? (
-              <span className="block text-[10px] font-semibold text-slate-500">
-                {t('onChainAmount')}
+          <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+            {ageMin !== null && ageMin >= 1 ? (
+              <span
+                className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold ${
+                  ageMin >= ELAPSED_LATE_MIN
+                    ? 'bg-red-100 text-red-700'
+                    : ageMin >= ELAPSED_WARN_MIN
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                <Clock className="h-3 w-3" aria-hidden /> {tF('elapsed', { m: ageMin })}
               </span>
             ) : null}
-            <span className="text-base font-bold text-slate-900">
-              {formattedAmount}
-            </span>{' '}
-            <span className="text-[10px] font-medium text-slate-400">JPYC</span>
-          </span>
+            <span
+              className={
+                amountWarning
+                  ? 'rounded-lg border border-amber-300 bg-amber-50 px-2 py-1'
+                  : ''
+              }
+            >
+              {amountWarning ? (
+                <span className="block text-[10px] font-semibold text-slate-500">
+                  {t('onChainAmount')}
+                </span>
+              ) : null}
+              <span className="text-base font-bold text-slate-900">
+                {formattedAmount}
+              </span>{' '}
+              <span className="text-[10px] font-medium text-slate-400">JPYC</span>
+            </span>
+          </div>
         </div>
         {amountWarning ? (
           <div className="mt-2">

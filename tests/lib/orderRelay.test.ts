@@ -20,6 +20,7 @@ import {
   ORDER_TABLE_MAX,
   declaredItemsTotalMinor,
   evaluateOrderAmount,
+  uncookedItemTotals,
   type StoredOrder,
 } from '@/lib/orderRelay';
 
@@ -49,6 +50,52 @@ describe('orderRelay: KV キー', () => {
   });
   it('orderUsedKey は chainId + txHash 小文字 (merchant/items は含めない=1決済1注文)', () => {
     expect(orderUsedKey(137, `0x${'A'.repeat(64)}`)).toBe(`order:used:137:0x${'a'.repeat(64)}`);
+  });
+});
+
+describe('orderRelay: uncookedItemTotals', () => {
+  it('注文が空なら空配列', () => {
+    expect(uncookedItemTotals([])).toEqual([]);
+  });
+
+  it('複数注文の未調理品を name ごとに合算し、調理済みを除外', () => {
+    const orders = [
+      order({
+        items: [
+          { name: '唐揚げ', qty: 2, price: '300' },
+          { name: '味噌汁', qty: 4, price: '100', cooked: true },
+        ],
+      }),
+      order({
+        items: [
+          { name: '唐揚げ', qty: 3, price: '300' },
+          { name: '味噌汁', qty: 1, price: '100' },
+        ],
+      }),
+    ];
+
+    expect(uncookedItemTotals(orders)).toEqual([
+      { name: '唐揚げ', qty: 5 },
+      { name: '味噌汁', qty: 1 },
+    ]);
+  });
+
+  it('qty 降順、同数なら name 昇順で並べる', () => {
+    const totals = uncookedItemTotals([
+      order({
+        items: [
+          { name: 'B', qty: 2, price: '1' },
+          { name: 'C', qty: 3, price: '1' },
+          { name: 'A', qty: 2, price: '1' },
+        ],
+      }),
+    ]);
+
+    expect(totals).toEqual([
+      { name: 'C', qty: 3 },
+      { name: 'A', qty: 2 },
+      { name: 'B', qty: 2 },
+    ]);
   });
 });
 

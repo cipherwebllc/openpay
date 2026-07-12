@@ -17,8 +17,8 @@ import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
 
 const JPYC_DECIMALS = 18;
 // 経過時間バッジの色しきい値 (分)。受信からの経過でホール/厨房が遅れを察知する。
-const ELAPSED_WARN_MIN = 10; // これ以上で黄
-const ELAPSED_LATE_MIN = 20; // これ以上で赤
+export const ELAPSED_WARN_MIN = 10; // これ以上で黄
+export const ELAPSED_LATE_MIN = 20; // これ以上で赤
 
 // 受取チェーンの表示名 (bare "Polygon")。OrderFeedPanel は "JPYC (...)" 形式で別 (jpycChainLabel を共有)。
 function chainLabel(chainId: number): string {
@@ -86,9 +86,17 @@ function OrderCardInner({
     declaredAmount !== null ? formatUnits(declaredAmount, JPYC_DECIMALS) : null;
   return (
     <li
-      className={`flex flex-col rounded-2xl border bg-white p-3 transition ${
-        isNew ? 'animate-pulse border-amber-400 ring-2 ring-amber-300' : 'border-slate-200'
-      } ${inDone ? 'opacity-70' : ''}`}
+      className={`flex flex-col rounded-2xl border p-3 transition ${
+        isNew
+          ? 'animate-pulse border-amber-400 bg-white ring-2 ring-amber-300'
+          : inDone
+            ? 'border-slate-200 bg-white opacity-70'
+            : ageMin !== null && ageMin >= ELAPSED_LATE_MIN
+              ? 'border-red-400 bg-red-50/60'
+              : ageMin !== null && ageMin >= ELAPSED_WARN_MIN
+                ? 'border-amber-400 bg-amber-50/70'
+                : 'border-slate-200 bg-white'
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">

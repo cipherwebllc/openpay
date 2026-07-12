@@ -2039,6 +2039,7 @@
     "notifiedAwaitingPickup": "通知済み・受取待ち",
     "newBadge": "新着",
     "elapsed": "{m}分経過",
+    "uncookedTotalsLabel": "未調理の合計",
     "pendingCountKitchen": "調理待ち {n}",
     "pendingCountHall": "配膳待ち {n}",
     "alertSoundOn": "通知音 ON",

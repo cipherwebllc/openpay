@@ -113,7 +113,7 @@ const order = {
   txHash: `0x${'b'.repeat(64)}`,
   chainId: 137,
   from: ADDR,
-  ts: 1,
+  ts: Date.now(),
   fulfilled: false,
 };
 
@@ -131,6 +131,13 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByText('水 × 2')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument(); // 実着金 1 JPYC (formatUnits)
     expect(screen.getByRole('button', { name: '対応済みにする' })).toBeInTheDocument();
+  });
+
+  it('未対応の遅延注文は経過バッジと赤いカード面を表示', async () => {
+    h.orders = [{ ...order, ts: Date.now() - (25 * 60_000 + 5_000) }];
+    render();
+    const card = (await screen.findByText('25分経過')).closest('li');
+    expect(card).toHaveClass('border-red-400', 'bg-red-50/60');
   });
 
   it('amountMismatch → 警告バッジと実着金額ラベルを表示', async () => {
