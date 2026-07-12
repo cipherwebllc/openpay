@@ -298,6 +298,50 @@ describe('TipForm — レンダリング', () => {
     expect(screen.getByRole('button', { name: '50 USDC' })).toBeInTheDocument();
   });
 
+  it('ラベル付き preset pill は上段ラベル + 下段金額の 2 行表示', () => {
+    render(
+      <TipForm
+        params={{ ...JPYC_PARAMS, presets: ['300|☕ コーヒー1杯', '1000'] }}
+      />,
+    );
+    const pill = screen.getByRole('button', {
+      name: '☕ コーヒー1杯 300 JPYC',
+    });
+    expect(within(pill).getByText('☕ コーヒー1杯')).toHaveClass('text-xs');
+    expect(within(pill).getByText('300 JPYC')).toHaveClass('leading-tight');
+    expect(pill).toHaveClass('py-2');
+  });
+
+  it('ラベル無し preset pill は従来 class と子テキストを維持', () => {
+    render(<TipForm params={JPYC_PARAMS} />);
+    const pill = screen.getByRole('button', { name: '100 JPYC' });
+    expect(pill.className).toBe(
+      'rounded-xl border px-2 py-3 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 border-transparent text-white shadow-sm',
+    );
+    expect(pill.innerHTML).toBe('100 JPYC');
+  });
+
+  it('ラベル付き pill に night theme の active/inactive 配色を併用', () => {
+    render(
+      <TipForm
+        params={{
+          ...JPYC_PARAMS,
+          theme: 'night',
+          presets: ['300|☕ コーヒー1杯', '1000|🍰 ケーキ'],
+        }}
+      />,
+    );
+    const active = screen.getByRole('button', {
+      name: '☕ コーヒー1杯 300 JPYC',
+    });
+    const inactive = screen.getByRole('button', {
+      name: '🍰 ケーキ 1000 JPYC',
+    });
+    expect(active.style.backgroundColor).not.toBe('');
+    expect(inactive.className).toContain('bg-slate-950');
+    expect(inactive.className).toContain('text-slate-200');
+  });
+
   it('color パラメータがヘッダの背景色に適用される', () => {
     render(<TipForm params={JPYC_PARAMS} />);
     const header = screen.getByText('OpenPay Tip').parentElement!;

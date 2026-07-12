@@ -71,6 +71,7 @@ import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   DEFAULT_TIP_PRESETS,
   offOriginCallbackHosts,
+  parseTipPreset,
   type TipParams,
 } from '@/lib/url';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -108,10 +109,24 @@ export function TipForm({
   // ネイティブガストークン symbol (Polygon=POL / Kaia=KAIA / Base etc=ETH)。
   // gasInfoJpyc / gasInfoUsdc tooltip の {nativeToken} で使用。
   const nativeToken = requiredChain.nativeCurrency.symbol;
-  const presets =
+  const rawPresets =
     params.presets && params.presets.length > 0
       ? params.presets
       : DEFAULT_TIP_PRESETS[params.token];
+  // URL preset の構文解釈は lib/url/tip.ts の単一パーサへ委譲する。決済額 state には
+  // amount だけを渡すため、ラベル追加は金額計算・内訳・送信ロジックへ波及しない。
+  const parsedPresets = useMemo(
+    () =>
+      rawPresets.flatMap((preset) => {
+        const parsed = parseTipPreset(preset);
+        return parsed ? [parsed] : [];
+      }),
+    [rawPresets],
+  );
+  const presetAmounts = useMemo(
+    () => parsedPresets.map((preset) => preset.amount),
+    [parsedPresets],
+  );
   const themeColor = params.color ?? DEFAULT_THEME_COLOR;
   const themed = params.theme
     ? tipFormTheme(themeColor, params.theme)
@@ -200,7 +215,7 @@ export function TipForm({
     selectPreset,
     selectCustom,
     changeCustomAmount,
-  } = useTipAmount({ presets, decimals: deployment.decimals });
+  } = useTipAmount({ presets: presetAmounts, decimals: deployment.decimals });
   // PayPay 風 大型成功 overlay (dismiss するまで全画面)
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [crossChainLocked, setCrossChainLocked] = useState(false);
@@ -707,16 +722,25 @@ export function TipForm({
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {t('amountTitle')}
         </p>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {presets.map((p) => {
-            const active = !customSelected && selectedPreset === p;
+        <div
+          className={`mt-3 grid gap-2 ${
+            // ラベル付き preset は 12 字までありモバイル 3 列だとほぼ必ず truncate する。
+            // ラベルを使うときだけ 2 列で表示幅を確保 (ラベル無しは現行 3 列を完全維持)。
+            parsedPresets.some((p) => p.label) ? 'grid-cols-2' : 'grid-cols-3'
+          }`}
+        >
+          {parsedPresets.map((preset) => {
+            const active =
+              !customSelected && selectedPreset === preset.amount;
             return (
               <button
-                key={p}
+                key={preset.amount}
                 type="button"
-                onClick={() => selectPreset(p)}
+                onClick={() => selectPreset(preset.amount)}
                 disabled={flowPending}
-                className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`rounded-xl border ${
+                  preset.label ? 'px-2 py-2' : 'px-2 py-3'
+                } text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
                     ? 'border-transparent text-white shadow-sm'
                     : `border-slate-200 bg-white text-slate-700 hover:border-slate-300 ${
@@ -729,7 +753,20 @@ export function TipForm({
                     : undefined
                 }
               >
-                {p} {deployment.displaySymbol}
+                {preset.label ? (
+                  <span className="flex flex-col items-center gap-0.5">
+                    <span className="max-w-full truncate text-xs font-normal leading-tight opacity-80">
+                      {preset.label}
+                    </span>
+                    <span className="leading-tight">
+                      {preset.amount} {deployment.displaySymbol}
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    {preset.amount} {deployment.displaySymbol}
+                  </>
+                )}
               </button>
             );
           })}

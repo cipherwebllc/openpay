@@ -73,7 +73,7 @@ export function StepCard({
       <Icon className="h-4 w-4 flex-none text-brand" aria-hidden />
       <span>{title}</span>
       {effectivelyCollapsible && !open && collapsedSummary && (
-        <span className="ml-2 truncate text-xs font-normal text-slate-500">
+        <span className="ml-2 min-w-0 flex-1 text-xs font-normal text-slate-500">
           {collapsedSummary}
         </span>
       )}

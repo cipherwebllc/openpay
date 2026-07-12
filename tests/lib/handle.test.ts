@@ -373,6 +373,20 @@ describe('methodToPublishableConfig', () => {
     expect(pc.name).toBe('Alice');
     expect(pc.theme).toBe('soft');
   });
+
+  it('tip URL 専用の presetLabels が混入しても handle 変換では黙って落とす', () => {
+    const config = {
+      to: ADDR,
+      methods: [{ token: 'jpyc' as const, chain: 'polygon' as const }],
+      presets: { jpyc: ['300'] },
+      presetLabels: { jpyc: ['☕ コーヒー1杯'] },
+    } satisfies HandleTipConfig & {
+      presetLabels: { jpyc: string[] };
+    };
+    const pc = methodToPublishableConfig(config, config.methods[0]);
+    expect(pc.presets).toEqual(['300']);
+    expect(pc).not.toHaveProperty('presetLabels');
+  });
 });
 
 describe('parseHandleRecord', () => {

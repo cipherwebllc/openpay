@@ -14,6 +14,7 @@ import {
   exceedsTokenPrecision,
   safeInternalPath,
   offOriginCallbackHosts,
+  QR_MAX_URL_LEN,
 } from '@/lib/url';
 
 // USDC (Base) のアドレスは checksum 既知のため、テストの roundtrip が安定する。
@@ -637,6 +638,60 @@ describe('buildTipPath', () => {
     });
     const sp = new URLSearchParams(path.split('?')[1]);
     expect(sp.get('preset')).toBe('500,1500,3000');
+  });
+
+  it('旧形式 preset URL の build バイト列は不変', () => {
+    expect(
+      buildTipPath({
+        to: VALID_TO,
+        token: 'jpyc',
+        presets: ['300', '1000', '3000'],
+      }),
+    ).toBe(`/tip/${VALID_TO}?token=jpyc&preset=300%2C1000%2C3000`);
+  });
+
+  it('金額|ラベルを build → parse で round-trip', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      presets: ['300|☕ コーヒー1杯', '1000|🍰 ケーキ', '3000'],
+    });
+    const parsed = parseTipParams(
+      VALID_TO,
+      new URLSearchParams(path.split('?')[1]),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.presets).toEqual([
+        '300|☕ コーヒー1杯',
+        '1000|🍰 ケーキ',
+        '3000',
+      ]);
+    }
+  });
+
+  it('preset ラベルは制御文字を除去し 12 code point で切り詰める', () => {
+    const label = `${'☕'.repeat(6)}\u0000${'🍰'.repeat(7)}`;
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      presets: [`300|${label}`],
+    });
+    const preset = new URLSearchParams(path.split('?')[1]).get('preset');
+    expect(preset).toBe(`300|${'☕'.repeat(6)}${'🍰'.repeat(6)}`);
+    expect([...(preset?.split('|')[1] ?? '')]).toHaveLength(12);
+  });
+
+  it('ラベル 6 件 × 12 code point の最大 encode 長でも共有 QR ガード内', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      presets: Array.from(
+        { length: 6 },
+        (_, index) => `${index + 1}|${'☕'.repeat(12)}`,
+      ),
+    });
+    expect(path.length).toBeLessThanOrEqual(QR_MAX_URL_LEN);
   });
 
   it('name / message が長すぎたら切詰める', () => {

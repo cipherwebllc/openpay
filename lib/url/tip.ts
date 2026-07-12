@@ -4,11 +4,12 @@
 //   name    (任意, 表示名 60 文字まで切詰)
 //   message (任意, 説明文 200 文字まで切詰)
 //   color   (任意, "#rrggbb" 形式)
-//   preset  (任意, "100,500,1000" カンマ区切り decimal、最大 6 件)
+//   preset  (任意, "100|☕ コーヒー1杯,500,1000|🍰 ケーキ" カンマ区切り、最大 6 件)
 //
 // Tip widget は gas=customer 固定 (preset セマンティクス: クリエイターが preset 額から運営手数料控除後を受け取る、ファンが gas を上乗せ支払い)。
 import { getAddress, isAddress } from 'viem';
 import type { Address } from 'viem';
+import { removeControlChars } from '../sanitize';
 import { isHandleTheme, type HandleTheme } from '../handleThemeKey';
 import {
   isJpycChainSlug,
@@ -65,24 +66,76 @@ const TIP_THANKS_MAX = 200;
 // preset の最大件数。URL builder/parser と generator UI / settings hook の
 // 単一 source of truth (重複定義を避ける)。
 export const TIP_PRESET_MAX = 6;
+// preset ラベルは Unicode コードポイント単位で最大 12 文字。絵文字の surrogate pair を
+// 途中で切らず、URL builder/parser と generator settings が同じ上限を参照する。
+export const TIP_PRESET_LABEL_MAX = 12;
+// qrcode.react が長い URL で throw しないための Tip 共有 QR 上限。generator と URL 長
+// フェンステストで共有し、ラベル追加後もガード内に収まることを固定する。
+export const QR_MAX_URL_LEN = 1200;
 export const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+export type ParsedTipPreset = {
+  amount: string;
+  label?: string;
+};
+
+export function sanitizeTipPresetLabel(
+  raw: string,
+  options: { trim?: boolean } = {},
+): string | undefined {
+  // `|` は構文 delimiter のためラベル本文から除去。sanitizeText と同じ制御文字除去・trim
+  // を通した後、要件どおり UTF-16 code unit ではなく Unicode code point で切り詰める。
+  const withoutDelimiter = raw.replace(/\|/g, '');
+  const cleaned =
+    options.trim === false
+      ? removeControlChars(withoutDelimiter)
+      : sanitizeText(withoutDelimiter, withoutDelimiter.length);
+  if (!cleaned) return undefined;
+  return [...cleaned].slice(0, TIP_PRESET_LABEL_MAX).join('') || undefined;
+}
+
+// preset 要素の唯一の構文パーサ。`金額` と additive な `金額|ラベル` を同じ入口で
+// 正規化し、TipForm / URL builder / URL parser の解釈ずれを防ぐ。
+export function parseTipPreset(
+  raw: string,
+  options: { trimAmount?: boolean } = {},
+): ParsedTipPreset | undefined {
+  const separator = raw.indexOf('|');
+  const amountRaw = separator === -1 ? raw : raw.slice(0, separator);
+  // URL parser は従来どおり前後空白を許容する。builder は trimAmount=false を渡し、
+  // 旧 builder が空白付き金額を reject していた挙動を維持する。
+  const amount = options.trimAmount === false ? amountRaw : amountRaw.trim();
+  if (!DECIMAL_PATTERN.test(amount) || Number(amount) <= 0) return undefined;
+  const label =
+    separator === -1
+      ? undefined
+      : sanitizeTipPresetLabel(raw.slice(separator + 1));
+  return label ? { amount, label } : { amount };
+}
+
+export function formatTipPreset(preset: ParsedTipPreset): string {
+  return preset.label ? `${preset.amount}|${preset.label}` : preset.amount;
+}
+
+function normalizePresets(
+  values: readonly string[],
+  options: { trimAmount?: boolean } = {},
+): string[] | undefined {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const parsed = parseTipPreset(value, options);
+    if (!parsed || seen.has(parsed.amount)) continue;
+    seen.add(parsed.amount);
+    normalized.push(formatTipPreset(parsed));
+    if (normalized.length >= TIP_PRESET_MAX) break;
+  }
+  return normalized.length > 0 ? normalized : undefined;
+}
 
 function sanitizePresets(raw: string): string[] | undefined {
   // カンマ区切り。空白を許容、不正トークンは捨て、上限件数で切る。
-  const seen = new Set<string>();
-  const tokens = raw
-    .split(',')
-    .map((t) => t.trim())
-    .filter((t) => {
-      if (t.length === 0 || !DECIMAL_PATTERN.test(t) || Number(t) <= 0) {
-        return false;
-      }
-      if (seen.has(t)) return false;
-      seen.add(t);
-      return true;
-    });
-  if (tokens.length === 0) return undefined;
-  return tokens.slice(0, TIP_PRESET_MAX);
+  return normalizePresets(raw.split(','));
 }
 
 export function buildTipPath(params: TipParams): string {
@@ -108,16 +161,8 @@ export function buildTipPath(params: TipParams): string {
     sp.set('theme', params.theme);
   }
   if (params.presets && params.presets.length > 0) {
-    const seen = new Set<string>();
-    const valid = params.presets
-      .filter((p) => {
-        if (!DECIMAL_PATTERN.test(p) || Number(p) <= 0) return false;
-        if (seen.has(p)) return false;
-        seen.add(p);
-        return true;
-      })
-      .slice(0, TIP_PRESET_MAX);
-    if (valid.length > 0) sp.set('preset', valid.join(','));
+    const valid = normalizePresets(params.presets, { trimAmount: false });
+    if (valid) sp.set('preset', valid.join(','));
   }
   if (params.thanks) {
     const v = sanitizeText(params.thanks, TIP_THANKS_MAX);
@@ -262,6 +307,9 @@ export function parseNativeTipParams(
   const message = searchParams.get('message');
   const color = searchParams.get('color');
   const preset = searchParams.get('preset');
+  const nativePresets = preset
+    ? sanitizePresets(preset)?.map((entry) => parseTipPreset(entry)!.amount)
+    : undefined;
   const sanitizedColor =
     color && COLOR_PATTERN.test(color) ? color.toLowerCase() : undefined;
   return {
@@ -272,7 +320,8 @@ export function parseNativeTipParams(
       name: name ? sanitizeText(name, TIP_NAME_MAX) : undefined,
       message: message ? sanitizeText(message, TIP_MESSAGE_MAX) : undefined,
       color: sanitizedColor,
-      presets: preset ? sanitizePresets(preset) : undefined,
+      // ラベル UI は ERC20 TipForm 専用。native は従来の金額配列へ明示的に落とす。
+      presets: nativePresets,
     },
   };
 }
