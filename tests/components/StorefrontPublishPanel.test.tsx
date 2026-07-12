@@ -2,7 +2,7 @@
 // 固定URL 表示 / 公開済み表示 / メニュー未充足の無効化。env/useSiweSession/useOrigin/fetch をモック。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { StorefrontParts } from '@/lib/mobileOrder';
@@ -102,7 +102,11 @@ describe('StorefrontPublishPanel', () => {
     // POST body: handle + 既存 config 再送 + storefront。
     const post = fetchMock.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'POST');
     expect(post).toBeTruthy();
-    const body = JSON.parse((post![1] as RequestInit).body as string);
+    const rawBody = (post![1] as RequestInit).body as string;
+    expect(rawBody).toBe(
+      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}]},"expectedUpdatedAt":100}`,
+    );
+    const body = JSON.parse(rawBody);
     expect(body.handle).toBe('shop');
     expect(body.config).toEqual(CFG);
     expect(body.storefront).toEqual(STORE);
@@ -171,6 +175,129 @@ describe('StorefrontPublishPanel', () => {
     renderPanel({ storefront: STORE });
     expect(await screen.findByRole('button', { name: '公開を更新' })).toBeInTheDocument();
     expect(screen.getByText(/公開済み/)).toBeInTheDocument();
+  });
+
+  it('公開済み + 下書き同値 → 公開中チップのみ (正規化後の偽差分なし)', async () => {
+    const updatedAt = Date.now() - 2 * 60 * 60 * 1_000;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [{ handle: 'shop', config: CFG, storefront: STORE, updatedAt }],
+        }),
+      }),
+    );
+    renderPanel({ storefront: { ...STORE, tagline: undefined } });
+    const status = await screen.findByTestId('storefront-publish-status');
+    expect(within(status).getByText('公開中')).toBeInTheDocument();
+    expect(within(status).getByText('2 時間前')).toBeInTheDocument();
+    expect(within(status).queryByText('未公開の変更があります')).not.toBeInTheDocument();
+  });
+
+  it('公開済み + storefront 下書き変更 → 未公開の変更があります', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [{ handle: 'shop', config: CFG, storefront: STORE, updatedAt: Date.now() }],
+        }),
+      }),
+    );
+    renderPanel({
+      storefront: { ...STORE, menu: [{ ...STORE.menu[0], price: '550' }] },
+    });
+    const status = await screen.findByTestId('storefront-publish-status');
+    expect(within(status).getByText('公開中')).toBeInTheDocument();
+    expect(within(status).getByText('未公開の変更があります')).toBeInTheDocument();
+  });
+
+  it('公開済み + 受取先変更 → 既存警告とステータスの両方に未公開差分を出す', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [{ handle: 'shop', config: CFG, storefront: STORE, updatedAt: Date.now() }],
+        }),
+      }),
+    );
+    renderPanel({ storefront: STORE, receiver: ADDR2 });
+    const status = await screen.findByTestId('storefront-publish-status');
+    expect(within(status).getByText('未公開の変更があります')).toBeInTheDocument();
+    expect(screen.getByText(/更新して公開します/)).toBeInTheDocument();
+  });
+
+  it('storefront 無し → 未公開チップ', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: Date.now() }] }),
+      }),
+    );
+    renderPanel({ storefront: STORE });
+    const status = await screen.findByTestId('storefront-publish-status');
+    expect(within(status).getByText('未公開')).toBeInTheDocument();
+    expect(within(status).queryByText('未公開の変更があります')).not.toBeInTheDocument();
+  });
+
+  it('currentParts=null は受取先が異なっても差分判定せず、公開中チップのみ', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [{ handle: 'shop', config: CFG, storefront: STORE, updatedAt: Date.now() }],
+        }),
+      }),
+    );
+    renderPanel({ storefront: null, receiver: ADDR2 });
+    const status = await screen.findByTestId('storefront-publish-status');
+    expect(within(status).getByText('公開中')).toBeInTheDocument();
+    expect(within(status).queryByText('未公開の変更があります')).not.toBeInTheDocument();
+  });
+
+  it('公開成功後 → 公開中 · たった今 + 変更なしへ遷移', async () => {
+    let published = false;
+    const updatedAt = Date.now();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        published = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, status: 'updated', updatedAt }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [
+            {
+              handle: 'shop',
+              config: CFG,
+              storefront: published ? STORE : undefined,
+              updatedAt: published ? updatedAt : 100,
+            },
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE });
+    fireEvent.click(await screen.findByRole('button', { name: 'この @handle に公開' }));
+    const status = await screen.findByTestId('storefront-publish-status');
+    await waitFor(() => expect(within(status).getByText('公開中')).toBeInTheDocument());
+    expect(within(status).getByText('たった今')).toBeInTheDocument();
+    expect(within(status).queryByText('未公開の変更があります')).not.toBeInTheDocument();
   });
 
   it('公開済み handle は固定 URL + コピー/開く/QR を再公開せずに提示 (@handle が唯一の共有導線)', async () => {

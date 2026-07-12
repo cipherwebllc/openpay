@@ -371,6 +371,55 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   return parts;
 }
 
+type StableStorefrontValue =
+  | null
+  | boolean
+  | number
+  | string
+  | StableStorefrontValue[]
+  | { [key: string]: StableStorefrontValue };
+
+/**
+ * Object key 順と optional undefined に左右されない比較用射影。
+ * 配列順は公開メニューの意味なので保持する。
+ */
+function stableStorefrontProjection(value: unknown): StableStorefrontValue | undefined {
+  if (value === undefined) return undefined;
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'number' ||
+    typeof value === 'string'
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableStorefrontProjection(entry) ?? null);
+  }
+  if (typeof value !== 'object') return undefined;
+
+  const projected: { [key: string]: StableStorefrontValue } = {};
+  for (const key of Object.keys(value).sort()) {
+    const entry = stableStorefrontProjection((value as Record<string, unknown>)[key]);
+    if (entry !== undefined) projected[key] = entry;
+  }
+  return projected;
+}
+
+/**
+ * Builder 下書きと公開済み record を API 書込みと同じ validateStorefrontParts へ通して比較する。
+ * 不正値同士を同一扱いにはせず、両辺が公開可能なときだけ実質同値を返す。
+ */
+export function storefrontPartsEquivalent(left: unknown, right: unknown): boolean {
+  const normalizedLeft = validateStorefrontParts(left);
+  const normalizedRight = validateStorefrontParts(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return (
+    JSON.stringify(stableStorefrontProjection(normalizedLeft)) ===
+    JSON.stringify(stableStorefrontProjection(normalizedRight))
+  );
+}
+
 export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;

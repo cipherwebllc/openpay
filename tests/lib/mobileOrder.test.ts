@@ -7,6 +7,7 @@ import {
   decodeOrderConfig,
   validateOrderConfig,
   validateStorefrontParts,
+  storefrontPartsEquivalent,
   groupMenuByCategory,
   buildOrderUrl,
   type MenuItem,
@@ -24,6 +25,17 @@ import {
 
 const RECEIVER = '0x1111111111111111111111111111111111111111' as const;
 
+const STOREFRONT_PARTS = {
+  chain: 'polygon',
+  mode: 'storefront',
+  feePayer: 'merchant',
+  shopName: '珈琲スタンド OpenPay',
+  menu: [
+    { id: 'coffee', name: 'ブレンド', price: '500' },
+    { id: 'cake', name: 'ケーキ', price: '650' },
+  ],
+} as const;
+
 function baseConfig(): MobileOrderConfig {
   return {
     receiver: RECEIVER,
@@ -40,6 +52,42 @@ function baseConfig(): MobileOrderConfig {
     ],
   };
 }
+
+describe('mobileOrder: storefrontPartsEquivalent', () => {
+  it('同じ内容は object のキー順が違っても equal', () => {
+    const reorderedKeys = {
+      menu: STOREFRONT_PARTS.menu,
+      shopName: STOREFRONT_PARTS.shopName,
+      feePayer: STOREFRONT_PARTS.feePayer,
+      mode: STOREFRONT_PARTS.mode,
+      chain: STOREFRONT_PARTS.chain,
+    };
+    expect(storefrontPartsEquivalent(STOREFRONT_PARTS, reorderedKeys)).toBe(true);
+  });
+
+  it('menu の順変更は not equal', () => {
+    expect(
+      storefrontPartsEquivalent(STOREFRONT_PARTS, {
+        ...STOREFRONT_PARTS,
+        menu: [...STOREFRONT_PARTS.menu].reverse(),
+      }),
+    ).toBe(false);
+  });
+
+  it('undefined とキー欠落は API 正規化後に equal', () => {
+    expect(
+      storefrontPartsEquivalent(
+        { ...STOREFRONT_PARTS, tagline: undefined },
+        STOREFRONT_PARTS,
+      ),
+    ).toBe(true);
+  });
+
+  it('公開済みレコードの JSON round-trip と equal', () => {
+    const publishedRecord = JSON.parse(JSON.stringify(STOREFRONT_PARTS)) as unknown;
+    expect(storefrontPartsEquivalent(STOREFRONT_PARTS, publishedRecord)).toBe(true);
+  });
+});
 
 describe('mobileOrder: encode/decode round-trip', () => {
   it('完全な設定 (絵文字/画像/SNS/日本語/小数) が往復で一致', () => {
