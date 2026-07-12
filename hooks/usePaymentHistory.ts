@@ -65,6 +65,8 @@ export type AppendPaymentHistoryCtx = {
   taxRate?: number | null;
   taxCategory?: TaxCategory | null;
   receiptNo?: string | null;
+  /** 顧客控えだけに保存する注文束縛キー。店舗履歴の receiptNo とは独立。 */
+  orderId?: string;
   lineItems?: HistoryLineItem[] | null;
   /** 顧客向け電子レシート (PayerReceipt) を保存する際の発生元 route / locale。
    *  sale 成功 leg のみで使用。store 側 HistoryEntry には影響しない (受領控え専用)。 */
@@ -79,6 +81,7 @@ function saveReceiptFor(entry: HistoryEntry, ctx: AppendPaymentHistoryCtx): void
     payerReceiptFromHistoryEntry(entry, {
       sourceRoute: ctx.sourceRoute,
       locale: ctx.locale,
+      orderId: ctx.orderId,
     }),
   );
 }

@@ -35,8 +35,8 @@ export function MobileOrderCallButton({
     const age = Date.now() - paidAt;
     return (
       candidate.status === 'confirmed' &&
-      typeof candidate.receiptNo === 'string' &&
-      candidate.receiptNo.length > 0 &&
+      typeof candidate.orderId === 'string' &&
+      candidate.orderId.length > 0 &&
       typeof candidate.txHash === 'string' &&
       candidate.txHash.length > 0 &&
       candidate.merchantAddress.toLowerCase() === merchant.toLowerCase() &&
@@ -46,7 +46,7 @@ export function MobileOrderCallButton({
     );
   });
 
-  if (!hydrated || !receipt?.receiptNo || !receipt.txHash) return null;
+  if (!hydrated || !receipt?.orderId || !receipt.txHash) return null;
 
   const callStaff = async () => {
     setSending(true);
@@ -58,7 +58,7 @@ export function MobileOrderCallButton({
         body: JSON.stringify({
           h: handle,
           table,
-          orderId: receipt.receiptNo,
+          orderId: receipt.orderId,
           txHash: receipt.txHash,
         }),
       });

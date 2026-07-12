@@ -152,6 +152,7 @@ import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { CheckoutForm } from '@/components/CheckoutForm';
+import { MobileOrderCallButton } from '@/components/MobileOrderCallButton';
 import type { CheckoutParams } from '@/lib/url';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
@@ -722,7 +723,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(screen.getByText('ord-42')).toBeInTheDocument();
   });
 
-  it('成功 → 顧客向け電子レシート控えを保存し完了画面に埋め込む (/checkout・明細付き)', () => {
+  it('orderId あり・receiptNo なしの checkout 成功 → 控えからスタッフ呼び出しボタンまで到達', () => {
     window.localStorage.clear();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -735,6 +736,8 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(receipts).toHaveLength(1);
     expect(receipts[0].sourceRoute).toBe('/checkout');
     expect(receipts[0].receiptId).toBe(`0x${'b'.repeat(64)}`); // = txHash
+    expect(receipts[0].orderId).toBe('ord-42');
+    expect(receipts[0].receiptNo).toBeUndefined();
     expect(receipts[0].lineItems?.map((li) => li.name)).toEqual(['Tシャツ', 'マグ']);
     // (b) 完了画面に控え詳細 (PayerReceiptDetail) + 明細 + /scan 導線が描画される。
     expect(screen.getByText('OpenPay 電子レシート')).toBeInTheDocument();
@@ -742,6 +745,9 @@ describe('CheckoutForm — 成功時の挙動', () => {
       'href',
       '/scan',
     );
+    // 手書き控えではなく CheckoutForm → usePaymentHistory の実生成データで gating を通す。
+    render(<MobileOrderCallButton handle="coffee" table="12" merchant={MERCHANT} />);
+    expect(screen.getByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeInTheDocument();
   });
 
   it('success_url 指定時: 「今すぐ確認ページへ」ボタンが表示される', () => {
