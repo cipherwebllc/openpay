@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import {
   ChevronDown,
   Code2,
+  ExternalLink,
   QrCode,
   Share2,
   Sparkles,
@@ -31,17 +32,22 @@ import {
   type TokenSymbol,
 } from '@/lib/tokens';
 import {
+  chainForSlug,
   JPYC_CHAINS,
   USDC_CHAINS,
   type ChainSlug,
 } from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
-import { pickEffectiveAddress } from '@/lib/format';
+import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 import { normalizeAmountList, truncateAmount } from '@/lib/amount';
 import {
   buildTipUrl,
   COLOR_PATTERN,
   DEFAULT_TIP_PRESETS,
+  formatTipPreset,
+  parseTipPreset,
+  QR_MAX_URL_LEN,
+  sanitizeTipPresetLabel,
   TIP_PRESET_MAX,
   type TipParams,
 } from '@/lib/url';
@@ -56,7 +62,6 @@ const IFRAME_HEIGHT = 640;
 // QR を描く tipUrl の上限長。これを超えると qrcode.react が「Data too long」で throw し
 // share タブが落ちる (長い webhook/thanksUrl/preset で URL が肥大した場合)。容量に余裕を
 // 持たせた閾値で、超過時は QR を省略する (リンク/X シェアは長い URL でも機能する)。
-const QR_MAX_URL_LEN = 1200;
 // color 入力が不正 (COLOR_PATTERN 不一致) のときのプレビュー/プレースホルダ既定色。
 const DEFAULT_PREVIEW_COLOR = '#2563eb';
 const PREVIEW_RECEIVER =
@@ -91,6 +96,10 @@ export function TipEmbedGenerator() {
   const [devOpen, setDevOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // QR generator の returning-user pattern と同じく、hydrate 後に一度だけ
+  // 「受取先未確定なら開く / 確定済みなら閉じる」を決める。以後は手動操作を尊重する。
+  const [step1Open, setStep1Open] = useState(true);
+  const [step1Initialized, setStep1Initialized] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
   const tProfile = useTranslations('HandleProfile');
 
@@ -112,20 +121,55 @@ export function TipEmbedGenerator() {
     setReceiver,
   });
 
+  useEffect(() => {
+    if (!hydrated || step1Initialized) return;
+    // 空欄 + 接続ウォレットは useReceiverAutofill が直後に自動補完するので、その確定を待つ。
+    if (settings.receiver.trim() === '' && autofill.connected) return;
+    // 保存済み ENS / Base 名は解決結果を待つ。失敗時は初期値 true のままなので入力を失わない。
+    if (isLikelyName(settings.receiver) && !effectiveReceiver) return;
+    setStep1Open(effectiveReceiver === null);
+    setStep1Initialized(true);
+  }, [
+    hydrated,
+    step1Initialized,
+    settings.receiver,
+    autofill.connected,
+    effectiveReceiver,
+  ]);
+
   const colorValid = COLOR_PATTERN.test(settings.color);
   const deployment = deploymentForSlug(settings.token, settings.chain);
 
   // 現在 token のプリセットリスト (token ごと独立)。エディタ・適用ともこのリストだけ操作。
   const tokenPresets = settings.presets[settings.token];
+  const tokenPresetLabels = settings.presetLabels[settings.token];
 
   // 表示・URL 生成に使う有効プリセット: decimals に丸め → 0/不正/重複を除外。
   // 空 (全削除 or 全不正) なら token 別 default に fallback。
   const activePresets = useMemo(() => {
-    const normalized = normalizeAmountList(tokenPresets, deployment.decimals);
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    tokenPresets.forEach((amount, index) => {
+      const normalizedAmount = normalizeAmountList(
+        [amount],
+        deployment.decimals,
+      )[0];
+      if (!normalizedAmount || seen.has(normalizedAmount)) return;
+      seen.add(normalizedAmount);
+      const parsed = parseTipPreset(
+        `${normalizedAmount}|${tokenPresetLabels[index] ?? ''}`,
+      );
+      if (parsed) normalized.push(formatTipPreset(parsed));
+    });
     return normalized.length > 0
       ? normalized
       : DEFAULT_TIP_PRESETS[settings.token];
-  }, [tokenPresets, deployment.decimals, settings.token]);
+  }, [
+    tokenPresets,
+    tokenPresetLabels,
+    deployment.decimals,
+    settings.token,
+  ]);
 
   // URL の preset は default と値が異なる時のみ送る (default ちょうどなら省略し URL を簡潔に)。
   const presetsForUrl = useMemo(
@@ -269,19 +313,43 @@ export function TipEmbedGenerator() {
     }));
   }
 
+  function updatePresetLabel(idx: number, value: string) {
+    // live 入力時点から URL と同じ単一パーサを通し、制御文字・`|`・12 code point 上限を
+    // 保つ。HTML maxLength は UTF-16 単位なので絵文字を誤って短く数えるため使わない。
+    const label = sanitizeTipPresetLabel(value, { trim: false }) ?? '';
+    setSettings((s) => ({
+      ...s,
+      presetLabels: {
+        ...s.presetLabels,
+        [s.token]: s.presetLabels[s.token].map((current, i) =>
+          i === idx ? label : current,
+        ),
+      },
+    }));
+  }
+
   function addPreset() {
     setSettings((s) => ({
       ...s,
       presets: { ...s.presets, [s.token]: [...s.presets[s.token], ''] },
+      presetLabels: {
+        ...s.presetLabels,
+        [s.token]: [...s.presetLabels[s.token], ''],
+      },
     }));
   }
 
   function removePreset(idx: number) {
     setSettings((s) => {
       const next = s.presets[s.token].filter((_, i) => i !== idx);
+      const nextLabels = s.presetLabels[s.token].filter((_, i) => i !== idx);
       return {
         ...s,
         presets: { ...s.presets, [s.token]: next.length > 0 ? next : [''] },
+        presetLabels: {
+          ...s.presetLabels,
+          [s.token]: next.length > 0 ? nextLabels : [''],
+        },
       };
     });
   }
@@ -292,7 +360,29 @@ export function TipEmbedGenerator() {
     <div className="grid grid-cols-1 gap-5 lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
       {/* 左カラム: 入力 (Step 1 受取先 / Step 2 カスタマイズ) */}
       <div className="contents min-w-0 lg:block lg:space-y-5 [&>section:first-child]:order-1 [&>section:nth-child(2)]:order-2">
-        <StepCard step={1} icon={Wallet} title={t('step1Title')}>
+        <StepCard
+          step={1}
+          icon={Wallet}
+          title={t('step1Title')}
+          collapsible
+          open={step1Open}
+          onToggle={() => setStep1Open((open) => !open)}
+          collapsedSummary={
+            effectiveReceiver ? (
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="truncate font-mono">
+                  {shortAddress(effectiveReceiver)}
+                </span>
+                <span className="whitespace-nowrap text-slate-400">
+                  {deployment.displaySymbol} / {chainForSlug(settings.chain).name}
+                </span>
+                <span className="ml-auto whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-brand-dark shadow-sm">
+                  {t('changeButton')}
+                </span>
+              </span>
+            ) : undefined
+          }
+        >
           <div className="space-y-4">
             <ReceiverBlock
               receiver={settings.receiver}
@@ -405,23 +495,32 @@ export function TipEmbedGenerator() {
             <Field label={t('presetsLabel')}>
               <div className="space-y-2">
                 {tokenPresets.map((p, i) => (
-                  <div key={i} className="flex gap-2">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={p}
-                      onChange={(e) => updatePreset(i, e.target.value)}
-                      placeholder={t('presetAmountPlaceholder')}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                    />
-                    <span className="flex items-center px-1 text-xs text-slate-400">
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={p}
+                        onChange={(e) => updatePreset(i, e.target.value)}
+                        placeholder={t('presetAmountPlaceholder')}
+                        className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={tokenPresetLabels[i] ?? ''}
+                        onChange={(e) => updatePresetLabel(i, e.target.value)}
+                        placeholder={t('presetLabelPlaceholder')}
+                        className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                      />
+                    </div>
+                    <span className="flex h-10 items-center px-1 text-xs text-slate-400">
                       {deployment.displaySymbol}
                     </span>
                     <button
                       type="button"
                       onClick={() => removePreset(i)}
                       aria-label={t('presetRemoveLabel', { n: i + 1 })}
-                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+                      className="h-10 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
                     >
                       ×
                     </button>
@@ -548,61 +647,40 @@ export function TipEmbedGenerator() {
 
           {publishMode === 'share' ? (
             <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('tipUrlTitle')}
-                </h4>
-                <button
-                  type="button"
-                  onClick={() => urlCopy.copy(tipUrl)}
-                  disabled={!tipUrl}
-                  className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {urlCopy.copied ? t('copied') : t('copy')}
-                </button>
-              </div>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('tipUrlTitle')}
+              </h4>
               <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
                 {tipUrl || (
                   <span className="text-slate-400">{t('urlPlaceholder')}</span>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => urlCopy.copy(tipUrl)}
+                disabled={!tipUrl}
+                data-testid="tip-copy-primary"
+                className="mt-3 w-full rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-dark active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {urlCopy.copied ? t('copied') : t('copyLinkButton')}
+              </button>
               {tipUrl && (
-                <a
-                  href={tipUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-block text-xs text-brand hover:underline"
+                <div
+                  data-testid="tip-share-secondary"
+                  className="mt-3 flex flex-wrap gap-2"
                 >
-                  {t('openInNewTab')}
-                </a>
-              )}
-              {tipUrl && (
-                <div className="mt-3 space-y-3">
-                  {/* X (Twitter) シェア: 貼ると P1 の動的 OG カードが unfurl される。 */}
-                  <a
-                    href={xShareUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400"
-                  >
-                    <Share2 className="h-3.5 w-3.5" aria-hidden />
-                    {t('shareXButton')}
-                  </a>
-                  {/* リンクの QR: 常時表示せずボタン → ポップアップ (プロフの所有一覧と同じ作法)。
-                      URL が QR 容量を超える長さだと qrcode.react が throw するため、閾値以下のみ提示。 */}
+                  {/* リンクの QR: URL が容量を超えると qrcode.react が throw するため、
+                      共有の上限定数以下だけ提示する。 */}
                   {tipUrl.length <= QR_MAX_URL_LEN && (
-                    <div>
+                    <>
                       <button
                         type="button"
                         onClick={() => setQrOpen(true)}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400"
+                        className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 active:translate-y-px"
                       >
                         <QrCode className="h-3.5 w-3.5" aria-hidden />
-                        {t('qrTitle')}
+                        {t('qrButton')}
                       </button>
-                      <p className="mt-1.5 text-xs text-slate-400">
-                        {t('qrHint')}
-                      </p>
                       <LinkQrModal
                         open={qrOpen}
                         value={tipUrl}
@@ -610,8 +688,27 @@ export function TipEmbedGenerator() {
                         closeLabel={t('qrClose')}
                         onClose={() => setQrOpen(false)}
                       />
-                    </div>
+                    </>
                   )}
+                  {/* X (Twitter) シェア: 貼ると動的 OG カードが unfurl される。 */}
+                  <a
+                    href={xShareUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 active:translate-y-px"
+                  >
+                    <Share2 className="h-3.5 w-3.5" aria-hidden />
+                    {t('shareXButton')}
+                  </a>
+                  <a
+                    href={tipUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 active:translate-y-px"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                    {t('openInNewTab')}
+                  </a>
                 </div>
               )}
             </div>

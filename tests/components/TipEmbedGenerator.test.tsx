@@ -48,11 +48,19 @@ vi.mock('@/components/TipForm', () => ({
       >
         {params.name && <p>{params.name}</p>}
         {params.message && <p>{params.message}</p>}
-        {presets.map((preset) => (
-          <button key={preset} type="button">
-            {preset} {params.token.toUpperCase()}
-          </button>
-        ))}
+        {presets.map((preset) => {
+          const separator = preset.indexOf('|');
+          const amount = separator === -1 ? preset : preset.slice(0, separator);
+          const label = separator === -1 ? '' : preset.slice(separator + 1);
+          return (
+            <button key={preset} type="button">
+              {label && <span>{label}</span>}
+              <span>
+                {amount} {params.token.toUpperCase()}
+              </span>
+            </button>
+          );
+        })}
       </div>
     );
   },
@@ -60,6 +68,7 @@ vi.mock('@/components/TipForm', () => ({
 
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { chainForSlug } from '@/lib/chains';
+import { useAccount } from 'wagmi';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const KEY = 'openpay:tip-settings:v2';
@@ -71,6 +80,10 @@ const KAIA_ID = chainForSlug('kaia').id;
 beforeEach(() => {
   window.localStorage.clear();
   tipFormPreviewSpy.mockClear();
+  vi.mocked(useAccount).mockReturnValue({
+    address: undefined,
+    isConnected: false,
+  } as ReturnType<typeof useAccount>);
 });
 
 // URL は share タブ (default) の URL 表示に出る。iframe snippet は embed タブ。
@@ -228,6 +241,25 @@ describe('TipEmbedGenerator — チップ金額プリセット (ボタン編集 
     await waitFor(() => expectInUrl(/preset=500%2C1500%2C5000/));
   });
 
+  it('ラベル入力 → プレビューと URL に即時反映し localStorage に additive 保存', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+    const labelInputs = screen.getAllByPlaceholderText('☕ コーヒー1杯');
+    await user.type(labelInputs[0], '☕ コーヒー1杯');
+
+    expect(await screen.findByText('☕ コーヒー1杯')).toBeInTheDocument();
+    expect(screen.getByText('300 JPYC')).toBeInTheDocument();
+    await waitFor(() => expectInUrl(/preset=300%7C/));
+    await waitFor(() => {
+      const saved = JSON.parse(window.localStorage.getItem(KEY)!);
+      expect(saved.presets.jpyc[0]).toBe('300');
+      expect(saved.presetLabels.jpyc[0]).toBe('☕ コーヒー1杯');
+    });
+  });
+
   it('+ 金額を追加 / × 削除 で chip 数が増減する', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
@@ -299,10 +331,11 @@ describe('TipEmbedGenerator — チップ金額プリセット (ボタン編集 
       }),
     );
     render(<TipEmbedGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
     // プレビュー: 高精度 2 件は 0.123456 に潰れて 1 個 + 5 USDC
-    expect(screen.getAllByText('0.123456 USDC')).toHaveLength(1);
+    await waitFor(() =>
+      expect(screen.getAllByText('0.123456 USDC')).toHaveLength(1),
+    );
     expect(screen.getByText('5 USDC')).toBeInTheDocument();
     // URL: 丸め後の値 (default と異なるので preset 出力)
     await waitFor(() => expectInUrl(/preset=0\.123456%2C5/));
@@ -383,7 +416,7 @@ describe('TipEmbedGenerator — コピーボタン', () => {
       expectInUrl(new RegExp(`https://test\\.local/tip/${VALID}`)),
     );
 
-    await user.click(screen.getByRole('button', { name: 'コピー' }));
+    await user.click(screen.getByRole('button', { name: 'リンクをコピー' }));
 
     expect(writeText).toHaveBeenCalledOnce();
     expect(writeText.mock.calls[0][0]).toContain(`/tip/${VALID}`);
@@ -413,20 +446,20 @@ describe('TipEmbedGenerator — コピーボタン', () => {
 });
 
 describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め込み)', () => {
-  it('share タブ: アドレス入力で「X でシェア」と QR ボタン → ポップアップ表示', async () => {
+  it('share タブ: アドレス入力で「X シェア」と QR ボタン → ポップアップ表示', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
 
-    const xLink = await screen.findByRole('link', { name: 'X でシェア' });
+    const xLink = await screen.findByRole('link', { name: 'X シェア' });
     const href = xLink.getAttribute('href') ?? '';
     expect(href).toContain('twitter.com/intent/tweet');
     expect(href).toContain(VALID); // url= に tipUrl が含まれる
 
     // QR は常時表示せずボタン → ポップアップ (dialog 内に svg + フル URL)
     expect(screen.queryByRole('dialog')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'リンクの QR コード' }));
+    await user.click(screen.getByRole('button', { name: /^QR$/ }));
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
     expect(dialog.querySelector('svg')).not.toBeNull();
@@ -439,7 +472,7 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
   it('share タブ: アドレス未入力なら X シェア / QR は出ない', async () => {
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    expect(screen.queryByRole('link', { name: 'X でシェア' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'X シェア' })).toBeNull();
     expect(screen.queryByText('リンクの QR コード')).toBeNull();
   });
 
@@ -497,14 +530,64 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
       }),
     );
     render(<TipEmbedGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
     // X シェアは長い URL でも出る (crash していない)
     expect(
-      await screen.findByRole('link', { name: 'X でシェア' }),
+      await screen.findByRole('link', { name: 'X シェア' }),
     ).toBeInTheDocument();
     // QR は容量超過のため省略される
     expect(screen.queryByText('リンクの QR コード')).toBeNull();
+  });
+
+  it('share タブは brand 主 CTA + QR/X/新規タブの同格セカンダリ行', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+    const primary = screen.getByTestId('tip-copy-primary');
+    expect(primary).toHaveTextContent('リンクをコピー');
+    expect(primary).toHaveClass('w-full', 'bg-brand', 'py-3');
+    const secondary = screen.getByTestId('tip-share-secondary');
+    expect(within(secondary).getByRole('button', { name: /^QR$/ })).toBeInTheDocument();
+    expect(within(secondary).getByRole('link', { name: /^X シェア$/ })).toBeInTheDocument();
+    expect(within(secondary).getByRole('link', { name: /^新しいタブ$/ })).toBeInTheDocument();
+  });
+});
+
+describe('TipEmbedGenerator — Step 1 returning-user 折りたたみ', () => {
+  it('初回訪問は展開、保存済み有効アドレスは要約表示し「変更」で再展開', async () => {
+    const first = render(<TipEmbedGenerator />);
+    const initialToggle = await screen.findByRole('button', { name: /^受取先/ });
+    expect(initialToggle).toHaveAttribute('aria-expanded', 'true');
+    first.unmount();
+
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', chain: 'polygon', receiver: VALID }),
+    );
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    const toggle = await screen.findByRole('button', { name: /受取先.*変更/ });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    expect(toggle).toHaveTextContent('0x8335…2913');
+    expect(toggle).toHaveTextContent(/JPYC \/ Polygon/);
+    expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByPlaceholderText(/0x\.\.\./)).toHaveValue(VALID);
+  });
+
+  it('接続ウォレット自動初期化後も折りたたむ', async () => {
+    vi.mocked(useAccount).mockReturnValue({
+      address: VALID,
+      isConnected: true,
+    } as unknown as ReturnType<typeof useAccount>);
+    render(<TipEmbedGenerator />);
+    const toggle = await screen.findByRole('button', { name: /受取先.*変更/ });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    expect(toggle).toHaveTextContent('0x8335…2913');
   });
 });
 
@@ -547,7 +630,6 @@ describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => 
       }),
     );
     render(<TipEmbedGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
     expect(
       screen.getByRole('button', { name: /開発者向け設定/ }),
@@ -688,7 +770,6 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
       }),
     );
     render(<TipEmbedGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
     // 高度な設定は閉じたまま = crossChain チェックボックスは DOM 不在。
     expect(
@@ -754,7 +835,11 @@ describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorag
 
     unmount();
     render(<TipEmbedGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /受取先.*変更/ }),
+      ).toHaveAttribute('aria-expanded', 'false'),
+    );
     await openAdvanced(user);
     const restored = screen.getByRole('checkbox', {
       name: /他チェーンからの tip を許可/,
@@ -779,7 +864,6 @@ describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorag
 
     unmount();
     render(<TipEmbedGenerator />);
-    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     await waitFor(() => expectInUrl(/chain=kaia/));
   });
 

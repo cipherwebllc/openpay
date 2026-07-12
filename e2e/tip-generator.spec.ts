@@ -59,9 +59,69 @@ test.describe('Tip widget generator (creator UX)', () => {
     await presetInputs.nth(0).fill('777');
     await expect(page.getByText(/preset=777/).first()).toBeVisible();
 
+    const labelInputs = page.getByPlaceholder('☕ コーヒー1杯');
+    await expect(labelInputs).toHaveCount(3);
+    await labelInputs.nth(0).fill('☕ コーヒー1杯');
+    await expect(page.getByText(/preset=777%7C/).first()).toBeVisible();
+    await expect(
+      page.getByRole('button', {
+        name: '☕ コーヒー1杯 777 JPYC',
+        exact: true,
+      }),
+    ).toBeVisible();
+
     // USDC に切替 → プリセット chip が USDC 既定 (5/20/50) に変わる (JPYC と連動しない)
     await page.getByRole('button', { name: /^USDC/ }).click();
     await expect(page.getByPlaceholder('例: 1000').nth(0)).toHaveValue('5');
+  });
+
+  test('受取先入力 → reload で Step1 折りたたみ、変更で入力値を保ったまま展開', async ({
+    page,
+  }) => {
+    await openTipTab(page);
+    const receiver = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
+    await receiver.fill(TO);
+    await page.waitForFunction(() => {
+      const raw = window.localStorage.getItem('openpay:tip-settings:v2');
+      return raw !== null && JSON.parse(raw).receiver.length > 0;
+    });
+
+    await page.reload();
+    await page.getByRole('button', { name: 'チップ' }).click();
+    // toggle の accessible name は折りたたみ中のみ summary (アドレス+変更) を含む。
+    // 展開すると「受取先」だけに戻るため、両状態で一致する ^受取先 で特定する。
+    const toggle = page.getByRole('button', { name: /^受取先/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toContainText('0x52d4…cA81');
+    await expect(toggle).toContainText('変更');
+    await expect(receiver).toHaveCount(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(
+      page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/),
+    ).toHaveValue(TO);
+  });
+
+  test('リンク共有はコピー主 CTA + QR/X/新しいタブのセカンダリ行', async ({
+    page,
+  }) => {
+    await openTipTab(page);
+    await page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/).fill(TO);
+
+    const primary = page.getByTestId('tip-copy-primary');
+    await expect(primary).toHaveText('リンクをコピー');
+    await expect(primary).toHaveClass(/bg-brand/);
+    const secondary = page.getByTestId('tip-share-secondary');
+    await expect(
+      secondary.getByRole('button', { name: 'QR', exact: true }),
+    ).toBeVisible();
+    await expect(
+      secondary.getByRole('link', { name: 'X シェア', exact: true }),
+    ).toBeVisible();
+    await expect(
+      secondary.getByRole('link', { name: '新しいタブ', exact: true }),
+    ).toBeVisible();
   });
 
   test('プレビューがクリエイター向けに表示される (見出し + 既定プリセット)', async ({

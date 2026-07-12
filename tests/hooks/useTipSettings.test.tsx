@@ -22,6 +22,7 @@ describe('useTipSettings', () => {
       color: '#2563eb',
       theme: 'clean',
       presets: { jpyc: ['300', '1000', '3000'], usdc: ['5', '20', '50'] },
+      presetLabels: { jpyc: ['', '', ''], usdc: ['', '', ''] },
       thanks: '',
       thanksUrl: '',
       webhook: '',
@@ -61,6 +62,7 @@ describe('useTipSettings', () => {
       theme: 'clean',
       // 旧 CSV '1,5' は最後の token (usdc) のリストへ migrate、jpyc は既定。
       presets: { jpyc: ['300', '1000', '3000'], usdc: ['1', '5'] },
+      presetLabels: { jpyc: ['', '', ''], usdc: ['', ''] },
       thanks: '',
       thanksUrl: '',
       webhook: '',
@@ -122,6 +124,10 @@ describe('useTipSettings', () => {
     await waitFor(() => expect(result.current.hydrated).toBe(true));
 
     const presets = { jpyc: ['300', '1000', '3000'], usdc: ['2', '4', '8'] };
+    const presetLabels = {
+      jpyc: ['☕ コーヒー1杯', '', ''],
+      usdc: ['', '', ''],
+    };
     act(() => {
       result.current.setSettings({
         receiver: '0xdef',
@@ -132,6 +138,7 @@ describe('useTipSettings', () => {
         message: 'thx',
         color: '#112233',
         presets,
+        presetLabels,
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
         webhook: 'https://example.com/hook',
@@ -152,6 +159,7 @@ describe('useTipSettings', () => {
         message: 'thx',
         color: '#112233',
         presets,
+        presetLabels,
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
         webhook: 'https://example.com/hook',
@@ -336,6 +344,50 @@ describe('useTipSettings', () => {
     expect(result.current.settings.presets.usdc).toEqual(['5']);
   });
 
+  it('presetLabels は additive に復元し、旧データは空ラベル補完・制御文字と 12 code point を正規化', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        presets: { jpyc: ['300', '1000'], usdc: ['5'] },
+        presetLabels: {
+          jpyc: ['☕\u0000 コーヒー1杯とケーキ追加', '🍰|ケーキ'],
+          usdc: ['Thanks'],
+        },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect([...result.current.settings.presetLabels.jpyc[0]]).toHaveLength(12);
+    expect(result.current.settings.presetLabels.jpyc[0]).not.toContain('\u0000');
+    expect(result.current.settings.presetLabels.jpyc[1]).toBe('🍰ケーキ');
+    expect(result.current.settings.presetLabels.usdc).toEqual(['Thanks']);
+  });
+
+  it('空/不正/重複金額を除外しても presetLabels は元の有効金額 index に追従', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        token: 'jpyc',
+        presets: {
+          jpyc: ['', 'bad', '300', '300', '1000'],
+          usdc: ['5'],
+        },
+        presetLabels: {
+          jpyc: ['空', '不正', 'コーヒー', '重複', 'ケーキ'],
+          usdc: ['Coffee'],
+        },
+      }),
+    );
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.presets.jpyc).toEqual(['300', '1000']);
+    expect(result.current.settings.presetLabels.jpyc).toEqual([
+      'コーヒー',
+      'ケーキ',
+    ]);
+  });
+
   it('新 object schema: 非配列の token 値 (string/number) は既定に倒す', async () => {
     window.localStorage.setItem(
       KEY,
@@ -458,7 +510,11 @@ describe('useTipSettings', () => {
     window.localStorage.setItem(KEY, JSON.stringify(persisted));
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings).toEqual({ ...persisted, theme: 'clean' });
+    expect(result.current.settings).toEqual({
+      ...persisted,
+      theme: 'clean',
+      presetLabels: { jpyc: ['', ''], usdc: ['', '', ''] },
+    });
   });
 
   it('setSettings → localStorage 書込 → 新 instance の hydration で復元 (remount 永続化)', async () => {

@@ -11,11 +11,14 @@ const CONTROL_CHAR_REGEX = /[\x00-\x1f\x7f]/g;
 const UNPAIRED_SURROGATE_REGEX =
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
-export function stripControlChars(value: string): string {
+export function removeControlChars(value: string): string {
   return value
     .replace(CONTROL_CHAR_REGEX, '')
-    .replace(UNPAIRED_SURROGATE_REGEX, '')
-    .trim();
+    .replace(UNPAIRED_SURROGATE_REGEX, '');
+}
+
+export function stripControlChars(value: string): string {
+  return removeControlChars(value).trim();
 }
 
 // 文字列を UTF-16 コードユニット単位で max 以内に切詰める。

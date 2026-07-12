@@ -46,6 +46,22 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '800 JPYC' })).toBeVisible();
   });
 
+  test('ラベル付き preset → pill の上段ラベル + 下段金額を表示', async ({ page }) => {
+    const preset = encodeURIComponent('300|☕ コーヒー1杯,1000|🍰 ケーキ');
+    await page.goto(`/ja/tip/${TO}?token=jpyc&preset=${preset}&theme=night`);
+
+    const coffee = page.getByRole('button', {
+      name: '☕ コーヒー1杯 300 JPYC',
+      exact: true,
+    });
+    await expect(coffee).toBeVisible();
+    await expect(coffee.getByText('☕ コーヒー1杯', { exact: true })).toHaveClass(
+      /text-xs/,
+    );
+    await expect(coffee.getByText('300 JPYC', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-tip-theme="night"]')).toBeVisible();
+  });
+
   test('theme=night → TipForm の night 配色を適用', async ({ page }) => {
     await page.goto(`/ja/tip/${TO}?token=jpyc&theme=night&color=%232563eb`);
     const form = page.locator('[data-tip-theme="night"]');

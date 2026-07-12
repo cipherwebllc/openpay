@@ -70,6 +70,14 @@ describe('buildPublishPayload', () => {
       ),
     ).toBeNull();
   });
+
+  it('@handle publish はラベル付き tip URL preset を解釈せず黙って落とす', () => {
+    const payload = buildPublishPayload(
+      draft({ presetsJpyc: ['300|☕ コーヒー1杯', '1000'] }),
+      OPTIONS,
+    );
+    expect(payload?.config.presets).toEqual({ jpyc: ['1000'] });
+  });
 });
 
 describe('handle publish baseline state machine', () => {

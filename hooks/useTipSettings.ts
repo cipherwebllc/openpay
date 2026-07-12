@@ -7,6 +7,7 @@ import {
   COLOR_PATTERN,
   DECIMAL_PATTERN,
   DEFAULT_TIP_PRESETS,
+  parseTipPreset,
   TIP_PRESET_MAX,
 } from '@/lib/url';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
@@ -31,6 +32,9 @@ type TipSettings = {
   // 共有すると JPYC の 300 が USDC では $300 になってしまうため。空リストの token は
   // 表示・URL 生成時に DEFAULT_TIP_PRESETS[token] へ fallback する。
   presets: Record<TokenSymbol, string[]>;
+  // preset の任意ラベル。金額配列とは別の additive field にすることで、旧保存データと
+  // @handle の金額配列を不変に保つ。index は同 token の presets と対応する。
+  presetLabels: Record<TokenSymbol, string[]>;
   thanks: string;
   thanksUrl: string;
   webhook: string;
@@ -50,6 +54,17 @@ function defaultTipPresets(): Record<TokenSymbol, string[]> {
   };
 }
 
+function emptyPresetLabels(
+  presets: Record<TokenSymbol, string[]>,
+): Record<TokenSymbol, string[]> {
+  return {
+    jpyc: presets.jpyc.map(() => ''),
+    usdc: presets.usdc.map(() => ''),
+  };
+}
+
+const defaultPresets = defaultTipPresets();
+
 const DEFAULT_SETTINGS: TipSettings = {
   receiver: '',
   receiverSource: 'manual',
@@ -59,7 +74,8 @@ const DEFAULT_SETTINGS: TipSettings = {
   message: '',
   color: '#2563eb',
   theme: 'clean',
-  presets: defaultTipPresets(),
+  presets: defaultPresets,
+  presetLabels: emptyPresetLabels(defaultPresets),
   thanks: '',
   thanksUrl: '',
   webhook: '',
@@ -113,6 +129,50 @@ function sanitizeTipPresets(
   return defaultTipPresets();
 }
 
+function sanitizeTipPresetLabels(
+  loaded: unknown,
+  presets: Record<TokenSymbol, string[]>,
+  loadedPresets: unknown,
+): Record<TokenSymbol, string[]> {
+  const fallback = emptyPresetLabels(presets);
+  if (
+    !loaded ||
+    typeof loaded !== 'object' ||
+    Array.isArray(loaded) ||
+    !loadedPresets ||
+    typeof loadedPresets !== 'object' ||
+    Array.isArray(loadedPresets)
+  ) {
+    return fallback;
+  }
+  const source = loaded as Record<string, unknown>;
+  const presetSource = loadedPresets as Record<string, unknown>;
+  for (const token of ['jpyc', 'usdc'] as const) {
+    const labels = source[token];
+    const amounts = presetSource[token];
+    if (!Array.isArray(labels) || !Array.isArray(amounts)) continue;
+    // sanitizeTipPresetList が採用する「trim 済み正金額の最初の index」を再現し、空/不正/
+    // 重複金額を落とした後もラベルが別金額へずれないようにする。
+    const indexByAmount = new Map<string, number>();
+    amounts.forEach((entry, index) => {
+      if (typeof entry !== 'string') return;
+      const amount = entry.trim();
+      if (!DECIMAL_PATTERN.test(amount) || Number(amount) <= 0) return;
+      if (!indexByAmount.has(amount)) indexByAmount.set(amount, index);
+    });
+    fallback[token] = presets[token].map((amount) => {
+      const index = indexByAmount.get(amount);
+      if (index === undefined) return '';
+      const raw = labels[index];
+      if (typeof raw !== 'string') return '';
+      // label の制御文字除去・`|` 除去・12 code point 上限は URL 構文の単一
+      // パーサに委譲する。仮の正金額はラベルだけを検証するためのもの。
+      return parseTipPreset(`1|${raw}`)?.label ?? '';
+    });
+  }
+  return fallback;
+}
+
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
   // tip widget は gasless 必須。gasless 非対応 chain (例: buyer-only chain の Unichain)
@@ -122,6 +182,7 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
   const chain = isGaslessSupported(deploymentForSlug(token, normalized))
     ? normalized
     : normalizeChainForToken(token, undefined);
+  const presets = sanitizeTipPresets(loaded.presets, token);
   return {
     receiver:
       typeof loaded.receiver === 'string'
@@ -142,7 +203,12 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
         ? loaded.color.toLowerCase()
         : DEFAULT_SETTINGS.color,
     theme: isHandleTheme(loaded.theme) ? loaded.theme : DEFAULT_SETTINGS.theme,
-    presets: sanitizeTipPresets(loaded.presets, token),
+    presets,
+    presetLabels: sanitizeTipPresetLabels(
+      loaded.presetLabels,
+      presets,
+      loaded.presets,
+    ),
     thanks:
       typeof loaded.thanks === 'string'
         ? loaded.thanks
