@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   orders: [] as unknown[],
   feedStatus: 200,
   handles: [] as unknown[], // GET /api/handle (営業中の操作 用所有 handle)
+  calls: [] as unknown[],
 }));
 
 vi.mock('@/hooks/useSiweSession', () => ({
@@ -35,6 +36,7 @@ const envHold = vi.hoisted(() => ({
   enableShopLive: false,
   enableHandles: false,
   enableOrderToken: false, // 受注閲覧トークン (ON で店員リンクパネル・厨房/ホール直リンクは抑止)
+  enableOrderCall: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -57,6 +59,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableOrderToken() {
         return envHold.enableOrderToken;
       },
+      get enableOrderCall() {
+        return envHold.enableOrderCall;
+      },
     },
   };
 });
@@ -75,10 +80,12 @@ beforeEach(() => {
   h.orders = [];
   h.feedStatus = 200;
   h.handles = [];
+  h.calls = [];
   envHold.enableOrderFulfillment = false;
   envHold.enableShopLive = false;
   envHold.enableHandles = false;
   envHold.enableOrderToken = false;
+  envHold.enableOrderCall = false;
   postSpy.mockClear();
   global.fetch = vi.fn(async (url: unknown, init?: { method?: string }) => {
     if (init?.method === 'POST') {
@@ -89,6 +96,7 @@ beforeEach(() => {
     if (u.includes('/api/handle')) return jsonRes({ ok: true, handles: h.handles, max: 3 });
     if (u.includes('/api/shop/live'))
       return jsonRes({ ok: true, live: { soldOut: [], paused: false, updatedAt: 0 } });
+    if (u.includes('/api/order/calls')) return jsonRes({ ok: true, calls: h.calls });
     return jsonRes(
       h.feedOk ? { ok: true, orders: h.orders } : { ok: false, error: 'kv_error' },
       h.feedStatus,
@@ -131,6 +139,19 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByText('水 × 2')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument(); // 実着金 1 JPYC (formatUnits)
     expect(screen.getByRole('button', { name: '対応済みにする' })).toBeInTheDocument();
+  });
+
+  it('呼び出しを受注一覧の先頭セクションに表示し「対応した」を POST', async () => {
+    envHold.enableOrderCall = true;
+    h.calls = [{ id: 'call-1', handle: 'coffee', table: '8', ts: Date.now() }];
+    render();
+    expect(await screen.findByText('🔔 テーブル 8')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '対応した' }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const call = postSpy.mock.calls.find(([init]) =>
+      String((init as { body?: string }).body).includes('call-1'),
+    );
+    expect(call).toBeTruthy();
   });
 
   it('customerMemo を申告ラベル付き amber 枠の plain text で表示', async () => {

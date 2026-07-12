@@ -139,6 +139,10 @@ const enableOrderMemoRequested = parseBoolFlag(
   'NEXT_PUBLIC_ENABLE_ORDER_MEMO',
   process.env.NEXT_PUBLIC_ENABLE_ORDER_MEMO,
 );
+const enableOrderCallRequested = parseBoolFlag(
+  'NEXT_PUBLIC_ENABLE_ORDER_CALL',
+  process.env.NEXT_PUBLIC_ENABLE_ORDER_CALL,
+);
 
 export const env = {
   networkEnv: networkEnvRaw,
@@ -517,6 +521,9 @@ export const env = {
   // 注文メモは受注 notify だけが受信面。relay 無しの単独点灯で入力だけを見せないよう、ここで AND を
   // 導出して全 client/server consumer に同じ構造的ゲートを強制する。
   enableOrderMemo: enableOrderRelay && enableOrderMemoRequested,
+  // スタッフ呼び出しは受注リストへの注文束縛と店側受信面を必要とするため、relay 無しの単独点灯を
+  // 構造的に禁止する。Web Push には接続せず、受注画面内の poll/chime だけで通知する。
+  enableOrderCall: enableOrderRelay && enableOrderCallRequested,
   // モバイル注文システム利用料 (店頭1% / 事前3%) の有効化フラグ (client 露出)。**既定 OFF** =
   // モバイル注文は手数料ゼロ・客への表示は原価のみ・relay は従来 recoverFee → 本番完全 inert。
   // gas-recovery 料金 (recoverFeeBps・7月から1%) とは別物で、モバイル注文という付加価値システムの

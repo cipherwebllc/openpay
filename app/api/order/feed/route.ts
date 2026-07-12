@@ -10,10 +10,8 @@
 // アラート化**・未設定なら console のみ)。400 (invalid_json/invalid_op/invalid_token) は client error ゆえ
 // 意図的に無ログ (scanner/abuse でのノイズを避ける)。
 import { NextResponse } from 'next/server';
-import { isAddress, getAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
-import { requireSession } from '../../auth/siwe/_session';
-import { kvLrange, kvEval, kvGet, isKvConfigured } from '@/lib/kv';
+import { kvLrange, kvEval, isKvConfigured } from '@/lib/kv';
 import {
   orderListKey,
   parseStoredOrder,
@@ -23,8 +21,8 @@ import {
   ORDER_LIST_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
-import { isOrderTokenLike, orderTokenKey, orderTokenRevKey } from '@/lib/orderToken';
 import { logger } from '@/lib/logger';
+import { resolveOrderFeedMerchant } from '@/lib/orderFeedAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,44 +31,6 @@ export const maxDuration = 15;
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
 }
-function invalidToken() {
-  return NextResponse.json({ ok: false, error: 'invalid_token' }, { status: 401 });
-}
-function kvError() {
-  return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 });
-}
-
-type Actor = { merchant: Address } | { response: NextResponse };
-
-// 認可解決。トークン経路は KV 参照するため **呼び出し前に isKvConfigured() 済み**であること。
-// 優先順: 受注閲覧トークン (あれば) → SIWE セッション。トークンは「現行トークン一致」検証で
-// rotate/revoke 済みの旧トークンを確実に失効させる (セキュリティの要)。
-async function resolveMerchant(req: Request): Promise<Actor> {
-  if (env.enableOrderToken) {
-    const token = req.headers.get('x-order-token');
-    if (token) {
-      if (!isOrderTokenLike(token)) return { response: invalidToken() };
-      const rev = await kvGet(orderTokenRevKey(token));
-      if (!rev.ok) {
-        logger.warn('order.feed.kv_error', { reason: rev.reason, op: 'token_lookup' });
-        return { response: kvError() };
-      }
-      if (!rev.value || !isAddress(rev.value)) return { response: invalidToken() };
-      const merchant = getAddress(rev.value);
-      const cur = await kvGet(orderTokenKey(merchant));
-      if (!cur.ok) {
-        logger.warn('order.feed.kv_error', { reason: cur.reason, op: 'token_current' });
-        return { response: kvError() };
-      }
-      if (cur.value !== token) return { response: invalidToken() }; // 失効済み (rotate/revoke)
-      return { merchant };
-    }
-  }
-  const session = await requireSession();
-  if (!session.ok) return { response: session.response };
-  return { merchant: session.address };
-}
-
 export async function GET(req: Request): Promise<NextResponse> {
   if (!env.enableOrderRelay) return notFound();
   // KV 検査を認可より前に (トークン経路の resolveMerchant が KV を参照するため)。
@@ -78,7 +38,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     logger.warn('order.feed.kv_unavailable', { op: 'get' }); // KV env 欠落デプロイを無音にしない
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
-  const actor = await resolveMerchant(req);
+  const actor = await resolveOrderFeedMerchant(req);
   if ('response' in actor) return actor.response;
 
   const res = await kvLrange(orderListKey(actor.merchant), 0, ORDER_LIST_MAX - 1);
@@ -111,7 +71,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     logger.warn('order.feed.kv_unavailable', { op: 'post' }); // KV env 欠落デプロイを無音にしない
     return NextResponse.json({ ok: false, error: 'kv_unavailable' }, { status: 503 });
   }
-  const actor = await resolveMerchant(req);
+  const actor = await resolveOrderFeedMerchant(req);
   if ('response' in actor) return actor.response;
 
   let body: unknown;

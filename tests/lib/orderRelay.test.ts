@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   orderListKey,
+  callListKey,
   orderUsedKey,
   isTxHashLike,
   sanitizeOrderItems,
@@ -11,6 +12,7 @@ import {
   sanitizeTable,
   serializeOrder,
   parseStoredOrder,
+  parseStoredCall,
   parseOrderFeedOp,
   applyOrderOp,
   orderPickupState,
@@ -53,6 +55,23 @@ describe('orderRelay: KV キー', () => {
   });
   it('orderUsedKey は chainId + txHash 小文字 (merchant/items は含めない=1決済1注文)', () => {
     expect(orderUsedKey(137, `0x${'A'.repeat(64)}`)).toBe(`order:used:137:0x${'a'.repeat(64)}`);
+  });
+  it('callListKey は受取アドレスを小文字化', () => {
+    expect(callListKey('0xABCdef0000000000000000000000000000000000')).toBe(
+      'order:call:0xabcdef0000000000000000000000000000000000',
+    );
+  });
+});
+
+describe('orderRelay: staff call sanitize', () => {
+  it('StoredCall を allowlist 復元し table に既存 sanitizeTable を適用', () => {
+    expect(
+      parseStoredCall(
+        JSON.stringify({ id: 'c1', handle: 'coffee', table: '  12  ', ts: 123 }),
+      ),
+    ).toEqual({ id: 'c1', handle: 'coffee', table: '12', ts: 123 });
+    expect(parseStoredCall('{bad')).toBeNull();
+    expect(parseStoredCall(JSON.stringify({ id: 'c1', handle: 'coffee', table: '', ts: 123 }))).toBeNull();
   });
 });
 

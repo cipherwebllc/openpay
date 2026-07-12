@@ -18,6 +18,7 @@ const envHold = vi.hoisted(() => ({
   enableMenuOptions: false,
   enablePreorderTime: false,
   enableOrderMemo: false,
+  enableOrderCall: false,
 }));
 const originHold = vi.hoisted(() => ({ value: 'https://test.local' }));
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -43,6 +44,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderMemo() {
         return envHold.enableOrderMemo;
+      },
+      get enableOrderCall() {
+        return envHold.enableOrderCall;
       },
     },
   };
@@ -77,8 +81,10 @@ afterEach(() => {
   envHold.enableMenuOptions = false; // Phase 2 flag も毎回 OFF に戻す
   envHold.enablePreorderTime = false; // Phase 4 flag も毎回 OFF に戻す
   envHold.enableOrderMemo = false;
+  envHold.enableOrderCall = false;
   originHold.value = 'https://test.local';
   window.sessionStorage.clear();
+  window.localStorage.clear();
 });
 
 describe('MobileOrderView', () => {
@@ -971,5 +977,65 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
     );
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
     expect(screen.queryByLabelText('受取時間')).toBeNull();
+  });
+
+  describe('スタッフ呼び出しボタン gating', () => {
+    const callTx = `0x${'d'.repeat(64)}`;
+    const paidReceipt = () => ({
+      schemaVersion: 1,
+      receiptId: callTx,
+      receiptNo: 'ORDER1',
+      createdAt: new Date().toISOString(),
+      paidAt: new Date().toISOString(),
+      direction: 'paid',
+      kind: 'payment_receipt',
+      status: 'confirmed',
+      txHash: callTx,
+      tokenSymbol: 'JPYC',
+      amount: '500',
+      currency: 'JPYC',
+      merchantAddress: config.receiver,
+    });
+    const dineIn = { ...config, dineIn: true };
+    const prepare = (props: { enabled?: boolean; withReceipt?: boolean; handle?: string } = {}) => {
+      envHold.enableOrderCall = props.enabled ?? true;
+      if (props.withReceipt ?? true) {
+        window.localStorage.setItem('openpay:payerReceipts:v1', JSON.stringify([paidReceipt()]));
+      }
+      renderWithIntl(<MobileOrderView config={dineIn} handle={props.handle ?? 'coffee'} />);
+      fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    };
+
+    it('flag/dineIn/handle/テーブル/2h控えが揃ったときだけ表示', () => {
+      prepare();
+      expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
+      fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
+      expect(screen.getByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeInTheDocument();
+    });
+
+    it('flag OFF では出さない', () => {
+      prepare({ enabled: false });
+      fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
+      expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
+    });
+
+    it('dineIn でなければ出さない', () => {
+      envHold.enableOrderCall = true;
+      window.localStorage.setItem('openpay:payerReceipts:v1', JSON.stringify([paidReceipt()]));
+      renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+      expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
+    });
+
+    it('handle 無しでは出さない', () => {
+      prepare({ handle: '' });
+      fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
+      expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
+    });
+
+    it('該当店舗の2h以内の支払い控えが無ければ出さない', () => {
+      prepare({ withReceipt: false });
+      fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
+      expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
+    });
   });
 });
