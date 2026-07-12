@@ -93,6 +93,7 @@ import {
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
+const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
@@ -566,6 +567,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       const statusTokenForOrder =
         env.enableOrderPickup && isOrderNotifyWebhook ? generateStatusToken() : null;
       if (statusTokenForOrder) setStatusToken(statusTokenForOrder);
+      let customerMemo: string | undefined;
+      if (isOrderNotifyWebhook && params.orderId) {
+        try {
+          customerMemo =
+            window.sessionStorage.getItem(
+              `${ORDER_MEMO_STORAGE_PREFIX}${params.orderId}`,
+            ) || undefined;
+        } catch {
+          // sessionStorage 障害を webhook/決済完了処理へ波及させない (メモは advisory)。
+        }
+      }
       const payload = {
         type: 'openpay.checkout.success',
         mode: completion.mode,
@@ -588,6 +600,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         ...(statusTokenForOrder ? { statusToken: statusTokenForOrder } : {}),
         // 受取予定時刻 (任意・Phase 4・preorder)。受注に素通し保存され厨房/ホールが表示 (advisory)。
         ...(params.pickupAt !== undefined ? { pickupAt: params.pickupAt } : {}),
+        // 同一 origin の受注 notify に限り、URL に載せず sessionStorage から任意メモを渡す。
+        ...(customerMemo ? { customerMemo } : {}),
         // URL 仕様 (lib/url.ts) で customerEmail は prefill 専用・クライアントから送信しない、
         // と明記しているため payload に含めない (orderId で突合可能)。
         ...completion.hashFields,
@@ -624,6 +638,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             webhookHash: redacted.hash,
           });
         });
+      if (customerMemo && params.orderId) {
+        try {
+          window.sessionStorage.removeItem(
+            `${ORDER_MEMO_STORAGE_PREFIX}${params.orderId}`,
+          );
+        } catch {
+          // 送信済みメモの後片付け失敗を決済完了処理へ波及させない。
+        }
+      }
     }
 
     if (params.successUrl) {

@@ -480,6 +480,7 @@ beforeEach(() => {
   feeFlags.enableRegisterFee = false;
   feeFlags.enableOrderPickup = false;
   feeRate.percentBps = null;
+  window.sessionStorage.clear();
 });
 
 const USDC_PARAMS: CheckoutParams = {
@@ -841,6 +842,94 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect('customerEmail' in payload).toBe(false);
     // お渡し準備完了 flag OFF (既定) → statusToken は payload に不在 (完全 inert)。
     expect('statusToken' in payload).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('注文メモ不在時は notify webhook payload が byte-for-byte 既存値のまま', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
+        }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+
+    const expectedPayload = [
+      '{"type":"openpay.checkout.success","mode":"gasless",',
+      '"merchant":"0x2222222222222222222222222222222222222222",',
+      '"from":"0x9999999999999999999999999999999999999999",',
+      '"token":"usdc","chain":"base","chainId":84532,"amount":"55",',
+      '"items":[{"name":"Tシャツ","qty":1,"price":"25.00"},',
+      '{"name":"マグ","qty":2,"price":"15.00"}],',
+      '"merchantAmount":"55000000","feeAmount":"0","customerPays":"55100000",',
+      '"orderId":"ord-42","description":"Summer sale",',
+      '"txHash":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",',
+      '"userOpHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",',
+      '"blockNumber":"99","ts":1700000000000}',
+    ].join('');
+    expect(fetchSpy.mock.calls[0][1].body).toBe(expectedPayload);
+    nowSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('注文メモあり時は同一 origin notify payload に含め、送信後 sessionStorage から削除', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    window.sessionStorage.setItem('openpay:order-memo:ord-42', '卵なし');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
+        }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).customerMemo).toBe('卵なし');
+    expect(window.sessionStorage.getItem('openpay:order-memo:ord-42')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('第三者 webhook には sessionStorage の注文メモを含めず、削除もしない', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    window.sessionStorage.setItem('openpay:order-memo:ord-42', '卵なし');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook' }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+
+    expect('customerMemo' in JSON.parse(fetchSpy.mock.calls[0][1].body)).toBe(false);
+    expect(window.sessionStorage.getItem('openpay:order-memo:ord-42')).toBe('卵なし');
     vi.unstubAllGlobals();
   });
 

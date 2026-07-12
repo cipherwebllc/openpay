@@ -7,6 +7,7 @@ import {
   orderUsedKey,
   isTxHashLike,
   sanitizeOrderItems,
+  sanitizeOrderMemo,
   sanitizeTable,
   serializeOrder,
   parseStoredOrder,
@@ -18,6 +19,7 @@ import {
   ORDER_ITEM_QTY_MAX,
   ORDER_ITEM_NAME_MAX,
   ORDER_TABLE_MAX,
+  ORDER_MEMO_MAX,
   declaredItemsTotalMinor,
   evaluateOrderAmount,
   orderDeadlineKey,
@@ -242,10 +244,35 @@ describe('orderRelay: sanitizeTable', () => {
   });
 });
 
+describe('orderRelay: sanitizeOrderMemo', () => {
+  it('trim・制御文字除去・120 字 cap', () => {
+    expect(sanitizeOrderMemo('  卵\u0000\nなし\t  ')).toBe('卵なし');
+    expect(sanitizeOrderMemo('あ'.repeat(ORDER_MEMO_MAX + 1))).toBe(
+      'あ'.repeat(ORDER_MEMO_MAX),
+    );
+  });
+
+  it('空・制御文字のみ・非文字列は undefined', () => {
+    expect(sanitizeOrderMemo('   ')).toBeUndefined();
+    expect(sanitizeOrderMemo('\u0000\n\t')).toBeUndefined();
+    expect(sanitizeOrderMemo(42)).toBeUndefined();
+  });
+});
+
 describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', () => {
   it('round-trip 一致', () => {
     const o = order();
     expect(parseStoredOrder(serializeOrder(o))).toEqual(o);
+  });
+  it('customerMemo を allowlist 復元し、不正値/空値は除外', () => {
+    const withMemo = order({ customerMemo: ' 卵\u0000なし ' });
+    expect(parseStoredOrder(serializeOrder(withMemo))?.customerMemo).toBe('卵なし');
+    expect(
+      parseStoredOrder(JSON.stringify({ ...order(), customerMemo: 42 }))?.customerMemo,
+    ).toBeUndefined();
+    expect(
+      parseStoredOrder(JSON.stringify({ ...order(), customerMemo: ' \u0000 ' }))?.customerMemo,
+    ).toBeUndefined();
   });
   it('非 JSON / 非オブジェクトは null', () => {
     expect(parseStoredOrder('not json')).toBeNull();

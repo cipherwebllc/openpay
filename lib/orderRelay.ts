@@ -28,6 +28,7 @@ export const ORDER_ITEM_QTY_MAX = 999;
 export const ORDER_ITEM_NAME_MAX = 80;
 export const ORDER_TABLE_MAX = 64; // テーブル番号ラベル (checkout description 由来) の上限
 export const ORDER_ID_MAX = 64;
+export const ORDER_MEMO_MAX = 120;
 
 export type StoredOrderItem = {
   name: string;
@@ -52,6 +53,8 @@ export type StoredOrder = {
   fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
   // 受取予定時刻 (ms・Phase 4・preorder で顧客が選んだスロット)。未指定=即時/店頭。表示用 (advisory)。
   pickupAt?: number;
+  // 顧客申告の注文メモ。CheckoutItem.memo / HistoryEntry.memo とは分離し、受注面だけに保存・表示する。
+  customerMemo?: string;
   // 厨房モニターの **中間「調理済み」フラグ** (店主操作・調理が終わった合図)。fulfilled (対応済み) とは
   // 独立 = 調理済みにしてもオーダーは未対応のまま (ホールが配膳=対応済みにするまで残る)。厨房ボードは
   // これで active/done を分け done は折りたたみへ。保存時は true のときだけ持つ。
@@ -245,6 +248,17 @@ export function sanitizeTable(raw: unknown): string | null {
   return t.length > 0 ? t : null;
 }
 
+/** 顧客申告の注文メモ。空/非文字列は除外し、制御文字を落として最大 120 コードポイントに制限する。 */
+export function sanitizeOrderMemo(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const chars = [...raw.trim()].filter((ch) => {
+    const code = ch.charCodeAt(0);
+    return !((code >= 0 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f));
+  });
+  const memo = chars.slice(0, ORDER_MEMO_MAX).join('');
+  return memo.length > 0 ? memo : undefined;
+}
+
 export function serializeOrder(o: StoredOrder): string {
   return JSON.stringify(o);
 }
@@ -278,6 +292,8 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt) && o.pickupAt > 0) {
     order.pickupAt = o.pickupAt;
   }
+  const customerMemo = sanitizeOrderMemo(o.customerMemo);
+  if (customerMemo) order.customerMemo = customerMemo;
   // 厨房の調理済み (true のときだけ保持・旧データは未設定=未完了)。
   if (o.kitchenDone === true) order.kitchenDone = true;
   // お渡し準備完了 (true のときだけ保持・旧データは未設定)。readyAt は ready=true かつ正の有限数のみ
