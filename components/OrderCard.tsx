@@ -32,6 +32,7 @@ export type OrderCardProps = {
   inDone: boolean;
   isNew: boolean; // 新着 (点滅) — 折りたたみ側は対象外 (親が算出)
   ageMin: number | null; // 受信からの経過分 (null=不明)。親が now から算出 (memo のため raw now は渡さない)。
+  pickupUrgency: 'normal' | 'soon' | 'late'; // 受取時刻の緊急度。親が now から算出 (raw now は渡さない)。
   hallReady: boolean; // お渡し準備完了通知済み (ホール・flag ENABLE_ORDER_PICKUP)
   showMarkReady: boolean; // 「準備完了(通知)」ボタンを出す (ホール・ready 前)
   readyToServe: boolean; // 全品 調理済み (= 配膳準備OK の素材)
@@ -53,6 +54,7 @@ function OrderCardInner({
   inDone,
   isNew,
   ageMin,
+  pickupUrgency,
   hallReady,
   showMarkReady,
   readyToServe,
@@ -181,7 +183,15 @@ function OrderCardInner({
           <span className="text-xs text-slate-400">{chainLabel(o.chainId)}</span>
           {/* 受取予定時刻 (Phase 4・preorder のみ・flag ON かつ あるとき)。Asia/Tokyo HH:mm。 */}
           {env.enablePreorderTime && o.pickupAt ? (
-            <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs font-semibold text-sky-700">
+            <span
+              className={`rounded px-1.5 py-0.5 text-xs font-semibold ${
+                pickupUrgency === 'late'
+                  ? 'bg-red-100 text-red-700'
+                  : pickupUrgency === 'soon'
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-sky-100 text-sky-700'
+              }`}
+            >
               {t('pickupAt', { time: tokyoHHMM(o.pickupAt) })}
             </span>
           ) : null}
@@ -294,6 +304,7 @@ function cardPropsEqual(a: OrderCardProps, b: OrderCardProps): boolean {
     a.inDone === b.inDone &&
     a.isNew === b.isNew &&
     a.ageMin === b.ageMin &&
+    a.pickupUrgency === b.pickupUrgency &&
     a.hallReady === b.hallReady &&
     a.showMarkReady === b.showMarkReady &&
     a.readyToServe === b.readyToServe &&

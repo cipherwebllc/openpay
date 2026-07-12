@@ -2061,6 +2061,7 @@
     "declaredAmount": "Declared total",
     "updateError": "Couldn't apply the change. Please try again.",
     "pickupAt": "Pickup {time}",
+    "pickupSortNote": "Sorted by pickup time.",
     "backToCreate": "Back to create",
     "tableLabel": "Table number",
     "tableSave": "Save",

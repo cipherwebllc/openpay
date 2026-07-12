@@ -19,10 +19,11 @@ import { OrderCard } from '@/components/OrderCard';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
-import { type StoredOrder, uncookedItemTotals } from '@/lib/orderRelay';
+import { orderDeadlineKey, type StoredOrder, uncookedItemTotals } from '@/lib/orderRelay';
 
 // 受注カードのレスポンシブグリッド (active / 折りたたみ done で共有 = 列数を一致させる)。
 const CARD_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3';
+const PICKUP_SOON_MS = 15 * 60_000;
 
 export function OrderFulfillmentBoard({
   mode,
@@ -146,18 +147,34 @@ export function OrderFulfillmentBoard({
   const allCooked = (o: StoredOrder): boolean =>
     o.items.length > 0 && o.items.every((it) => it.cooked === true);
   // ホールは **配膳準備OK を先頭**へ (いま出せる注文を上に)・同群は受信が古い順 (FIFO)。
-  // ts 不明 (0) は最後に回す (sentinel を最古扱いして先頭に来るのを防ぐ)。厨房は受信順のまま。
+  // ts 不明 (0) は最後に回す (sentinel を最古扱いして先頭に来るのを防ぐ)。
   const tsKey = (o: StoredOrder): number => (o.ts > 0 ? o.ts : Number.MAX_SAFE_INTEGER);
+  // 厨房の締切順は preorder flag ON かつ active に受取予定注文がある場合だけ有効化する。
+  // それ以外は activeOrders をそのまま返し、従来の受信順を完全に維持する。
+  const pickupSortEnabled =
+    mode === 'kitchen' &&
+    env.enablePreorderTime &&
+    activeOrders.some((o) => o.pickupAt !== undefined);
   const sortedActive =
     mode === 'hall'
       ? [...activeOrders].sort(
           (a, b) => Number(allCooked(b)) - Number(allCooked(a)) || tsKey(a) - tsKey(b),
         )
-      : activeOrders;
+      : pickupSortEnabled
+        ? [...activeOrders].sort(
+            (a, b) => orderDeadlineKey(a) - orderDeadlineKey(b) || tsKey(a) - tsKey(b),
+          )
+        : activeOrders;
 
   // 受信からの経過分 (ts 不明=0 は null)。色しきい値で遅れを可視化。
   const elapsedMin = (o: StoredOrder): number | null =>
     o.ts > 0 ? Math.max(0, Math.floor((now - o.ts) / 60_000)) : null;
+  const pickupUrgencyFor = (o: StoredOrder): 'normal' | 'soon' | 'late' => {
+    if (!env.enablePreorderTime || !o.pickupAt) return 'normal';
+    const remainingMs = o.pickupAt - now;
+    if (remainingMs < 0) return 'late';
+    return remainingMs <= PICKUP_SOON_MS ? 'soon' : 'normal';
+  };
 
   const toggleItem = (o: StoredOrder, index: number, on: boolean) =>
     update.mutate({
@@ -196,6 +213,7 @@ export function OrderFulfillmentBoard({
         inDone={inDone}
         isNew={!inDone && flashing.has(o.txHash)} // 新着 (点滅) — 折りたたみ側は対象外
         ageMin={elapsedMin(o)} // 受信からの経過分 (null=不明)
+        pickupUrgency={pickupUrgencyFor(o)} // 受取予定まで 15 分以内 / 超過 (親の 30s tick で更新)
         hallReady={hallReady}
         showMarkReady={showMarkReady}
         readyToServe={allCooked(o)} // 全品 調理済み (= 配膳準備OK・ホール)
@@ -283,6 +301,9 @@ export function OrderFulfillmentBoard({
         </div>
       </div>
       <p className="text-xs text-slate-400">{t('autoRefresh')}</p>
+      {pickupSortEnabled ? (
+        <p className="text-xs text-slate-500">{t('pickupSortNote')}</p>
+      ) : null}
       {/* 状態更新 (op POST) の失敗 (409 競合枯渇 / KV / ネットワーク) を黙殺せず告知。 */}
       {update.isError && (
         <p className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">

@@ -251,6 +251,31 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.queryByText(/受取 \d/)).toBeNull();
   });
 
+  it.each([
+    ['normal', 16 * 60_000, ['bg-sky-100', 'text-sky-700']],
+    ['soon', 15 * 60_000, ['bg-amber-100', 'text-amber-700']],
+    ['late', -1, ['bg-red-100', 'text-red-700']],
+  ] as const)('pickupAt 緊急度 %s の色を表示', (_urgency, offsetMs, classes) => {
+    envHold.enablePreorderTime = true;
+    feedHold.data = [order({ pickupAt: Date.now() + offsetMs })];
+    renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText(/受取 \d/)).toHaveClass(...classes);
+  });
+
+  it('pickupAt 緊急度は親の 30s tick で soon から late に更新する', () => {
+    vi.useFakeTimers();
+    try {
+      envHold.enablePreorderTime = true;
+      feedHold.data = [order({ pickupAt: Date.now() + 20_000 })];
+      renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+      expect(screen.getByText(/受取 \d/)).toHaveClass('bg-amber-100', 'text-amber-700');
+      act(() => void vi.advanceTimersByTime(30_000));
+      expect(screen.getByText(/受取 \d/)).toHaveClass('bg-red-100', 'text-red-700');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('厨房: 注文単位「調理済み」→ kitchenDone op を発火', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
     fireEvent.click(screen.getByRole('button', { name: '調理済み' }));
@@ -394,6 +419,63 @@ describe('OrderFulfillmentBoard', () => {
     const cards = screen.getAllByText(/受注番号/);
     expect(cards[0].textContent).toContain('READY1'); // 配膳準備OK が先頭
     expect(cards[1].textContent).toContain('PLAIN2');
+  });
+
+  // ── P2-7: 厨房の受取締切順 ────────────────────────────────────────────────
+  it('厨房: flag OFF は pickupAt があっても受信順と note 非表示を維持 (inert 回帰フェンス)', () => {
+    feedHold.data = [
+      order({ orderId: 'FIRST', txHash: TX, pickupAt: 2_000_000_000_000 }),
+      order({ orderId: 'SECOND', txHash: TX2, pickupAt: 1_900_000_000_000 }),
+    ];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    const cards = screen.getAllByText(/受注番号/);
+    expect(cards[0]).toHaveTextContent('FIRST');
+    expect(cards[1]).toHaveTextContent('SECOND');
+    expect(screen.queryByText('受取時刻順に並んでいます')).toBeNull();
+  });
+
+  it('厨房: flag ON でも active に pickupAt が無ければ受信順と note 非表示を維持', () => {
+    envHold.enablePreorderTime = true;
+    feedHold.data = [
+      order({ orderId: 'FIRST', txHash: TX, ts: 2_000_000_000_000 }),
+      order({ orderId: 'SECOND', txHash: TX2, ts: 1_900_000_000_000 }),
+    ];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    const cards = screen.getAllByText(/受注番号/);
+    expect(cards[0]).toHaveTextContent('FIRST');
+    expect(cards[1]).toHaveTextContent('SECOND');
+    expect(screen.queryByText('受取時刻順に並んでいます')).toBeNull();
+  });
+
+  it('厨房: flag ON + pickupAt ありなら締切キー順、同キーは ts 昇順にし note を表示', () => {
+    envHold.enablePreorderTime = true;
+    const sharedPickupAt = 2_000_000_000_000;
+    feedHold.data = [
+      order({
+        orderId: 'SAME-LATE-TS',
+        txHash: TX,
+        ts: 1_800_000_200_000,
+        pickupAt: sharedPickupAt,
+      }),
+      order({
+        orderId: 'EARLIEST',
+        txHash: TX2,
+        ts: 1_800_000_300_000,
+        pickupAt: 1_900_000_000_000,
+      }),
+      order({
+        orderId: 'SAME-EARLY-TS',
+        txHash: `0x${'c'.repeat(64)}`,
+        ts: 1_800_000_100_000,
+        pickupAt: sharedPickupAt,
+      }),
+    ];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    const cards = screen.getAllByText(/受注番号/);
+    expect(cards[0]).toHaveTextContent('EARLIEST');
+    expect(cards[1]).toHaveTextContent('SAME-EARLY-TS');
+    expect(cards[2]).toHaveTextContent('SAME-LATE-TS');
+    expect(screen.getByText('受取時刻順に並んでいます')).toHaveClass('text-xs');
   });
 
   // ── UX-1: 新着アラート (音トグル + 点滅) ──────────────────────────────────

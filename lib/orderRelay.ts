@@ -68,6 +68,14 @@ export type StoredOrder = {
   amountUnchecked?: boolean;
 };
 
+/**
+ * 厨房向けの「調理の締切」近似キー。preorder は受取予定時刻、店頭注文は受信時刻を使う。
+ * 受信時刻が不明な店頭注文は、既知時刻の注文より後ろへ送る。
+ */
+export function orderDeadlineKey(o: StoredOrder): number {
+  return o.pickupAt ?? (o.ts > 0 ? o.ts : Number.MAX_SAFE_INTEGER);
+}
+
 /** 厨房向け: 未調理 (cooked !== true) の品目数を注文横断で商品名ごとに集計する。 */
 export function uncookedItemTotals(orders: StoredOrder[]): { name: string; qty: number }[] {
   const totals = new Map<string, number>();
