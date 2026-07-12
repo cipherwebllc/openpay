@@ -4,7 +4,7 @@
 
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
-import { ChevronDown } from 'lucide-react';
+import { ArrowDown, ChevronDown } from 'lucide-react';
 import {
   addressExplorerUrl,
   chainNameForId,
@@ -179,8 +179,14 @@ export function HistoryRow({
               </time>
             </div>
 
-            {/* 金額行: token + 大きな金額 + chain */}
+            {/* 金額行: 方向矢印 + token + 大きな金額 + chain。矢印は装飾 (方向は上の
+                受取バッジが伝達済み)・受取=↓ を badge と同じ emerald で。 */}
             <div className="mt-2 flex items-center gap-2">
+              <ArrowDown
+                className="h-5 w-5 shrink-0 text-emerald-600"
+                strokeWidth={2.5}
+                aria-hidden
+              />
               <TokenLogo
                 symbol={entry.asset}
                 size={22}
