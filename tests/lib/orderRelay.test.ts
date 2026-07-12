@@ -20,6 +20,7 @@ import {
   ORDER_TABLE_MAX,
   declaredItemsTotalMinor,
   evaluateOrderAmount,
+  orderDeadlineKey,
   uncookedItemTotals,
   type StoredOrder,
 } from '@/lib/orderRelay';
@@ -96,6 +97,34 @@ describe('orderRelay: uncookedItemTotals', () => {
       { name: 'A', qty: 2 },
       { name: 'B', qty: 2 },
     ]);
+  });
+});
+
+describe('orderRelay: orderDeadlineKey', () => {
+  it('pickupAt があれば受取予定時刻を返す', () => {
+    expect(orderDeadlineKey(order({ ts: 1_700_000_000_000, pickupAt: 1_700_003_600_000 }))).toBe(
+      1_700_003_600_000,
+    );
+  });
+
+  it('pickupAt がなければ受信時刻を返し、ts 不明は最後尾キーにする', () => {
+    expect(orderDeadlineKey(order({ ts: 1_700_000_000_000 }))).toBe(1_700_000_000_000);
+    expect(orderDeadlineKey(order({ ts: 0 }))).toBe(Number.MAX_SAFE_INTEGER);
+    expect(orderDeadlineKey(order({ ts: -1 }))).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('店頭/事前注文の混在を締切順にし、同キーの入力順は安定して維持する', () => {
+    const sameDeadline = 1_700_003_600_000;
+    const orders = [
+      order({ orderId: 'PREORDER-A', ts: 1_700_000_100_000, pickupAt: sameDeadline }),
+      order({ orderId: 'UNKNOWN', ts: 0 }),
+      order({ orderId: 'WALK-IN', ts: 1_700_000_000_000 }),
+      order({ orderId: 'PREORDER-B', ts: 1_700_000_200_000, pickupAt: sameDeadline }),
+    ];
+
+    expect(
+      [...orders].sort((a, b) => orderDeadlineKey(a) - orderDeadlineKey(b)).map((o) => o.orderId),
+    ).toEqual(['WALK-IN', 'PREORDER-A', 'PREORDER-B', 'UNKNOWN']);
   });
 });
 

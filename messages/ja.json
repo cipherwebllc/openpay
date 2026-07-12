@@ -2061,6 +2061,7 @@
     "declaredAmount": "申告合計",
     "updateError": "操作を反映できませんでした。もう一度お試しください。",
     "pickupAt": "受取 {time}",
+    "pickupSortNote": "受取時刻順に並んでいます",
     "backToCreate": "作成画面に戻る",
     "tableLabel": "テーブル番号",
     "tableSave": "保存",
