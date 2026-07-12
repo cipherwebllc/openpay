@@ -70,8 +70,12 @@ test.describe('Tip widget generator (creator UX)', () => {
     await openTipTab(page);
     await expect(page.getByText('プレビュー')).toBeVisible();
     // プレビュー (実 TipForm) 内に既定プリセット (300 JPYC) が金額 pill として表示。
-    // 実 TipForm 化で明細 dd にも同文言が出るため、pill の button role に scope する。
-    await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
+    // 実 TipForm 化で明細 dd にも同文言が出るため button role に scope し、さらに
+    // exact 指定にする — role name は部分一致のため送信ボタン「300 JPYC を送る」にも当たる
+    // (CI 最小 env はガス無料でラベルが 300 のまま・ローカル recover ON は 302 になる env 差)。
+    await expect(
+      page.getByRole('button', { name: '300 JPYC', exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByText(/チップの受け取りに手数料はかかりません/),
     ).toBeVisible();
