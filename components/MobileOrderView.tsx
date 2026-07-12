@@ -68,6 +68,7 @@ export type CartLineView = OptionCartEntry & { isOption: boolean };
 
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
+const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -181,6 +182,30 @@ export function MobileOrderView({
   const [cartOpen, setCartOpen] = useState(prefilled);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
+  useEffect(() => {
+    if (!handle || config.dineIn !== true) return;
+    try {
+      const stored = window.sessionStorage.getItem(`${ORDER_TABLE_STORAGE_PREFIX}${handle}`);
+      if (stored !== null) setTableNumber(stored.slice(0, TABLE_NUMBER_MAX));
+    } catch {
+      // sessionStorage の拒否を店舗ページ全体へ波及させず、テーブル番号の復元だけを諦める。
+    }
+  }, [config.dineIn, handle]);
+  const updateTableNumber = useCallback(
+    (value: string) => {
+      const next = value.slice(0, TABLE_NUMBER_MAX);
+      setTableNumber(next);
+      if (!handle) return;
+      try {
+        const key = `${ORDER_TABLE_STORAGE_PREFIX}${handle}`;
+        if (next) window.sessionStorage.setItem(key, next);
+        else window.sessionStorage.removeItem(key);
+      } catch {
+        // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
+      }
+    },
+    [handle],
+  );
   // 受注リレー (flag ON) 用の短い受注番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -684,7 +709,7 @@ export function MobileOrderView({
           tooMany={tooMany}
           dineIn={config.dineIn}
           tableNumber={tableNumber}
-          onTableNumberChange={(v) => setTableNumber(v.slice(0, TABLE_NUMBER_MAX))}
+          onTableNumberChange={updateTableNumber}
           needsTable={needsTable}
           pickup={{
             show: timeEnabled && isPreorder,

@@ -36,6 +36,8 @@ export type PayerReceipt = {
   /** dedupe 鍵。txHash > userOpHash > ランダム。 */
   receiptId: string;
   receiptNo?: string;
+  /** モバイル注文の StoredOrder 束縛キー。receiptNo とは別物。 */
+  orderId?: string;
   /** ISO 文字列。 */
   createdAt: string;
   paidAt?: string;
@@ -90,6 +92,7 @@ export type BuildPayerReceiptInput = {
   totalAmount?: string;
   memo?: string | null;
   receiptNo?: string | null;
+  orderId?: string | null;
   status?: PayerReceiptStatus;
   /** 異通貨建ての元価格 (請求建て金額 / 表示シンボル / レート)。通常決済は省略。 */
   anchorAmount?: string | null;
@@ -132,6 +135,7 @@ export function buildPayerReceipt(
     schemaVersion: PAYER_RECEIPT_SCHEMA_VERSION,
     receiptId: txHash || input.userOpHash || randomId(),
     receiptNo: input.receiptNo ?? undefined,
+    orderId: input.orderId ?? undefined,
     createdAt: iso,
     paidAt: txHash ? iso : undefined,
     direction: 'paid',
@@ -167,7 +171,7 @@ export function buildPayerReceipt(
 /** 店舗側 HistoryEntry (sale 成功 leg) → 顧客向け PayerReceipt 写像。 */
 export function payerReceiptFromHistoryEntry(
   entry: HistoryEntry,
-  opts: { sourceRoute?: string; locale?: string; now?: Date } = {},
+  opts: { sourceRoute?: string; locale?: string; orderId?: string; now?: Date } = {},
 ): PayerReceipt {
   const totals = entryTotals(entry);
   // 顧客控えの総額は「商品の請求額 (gross sale)」を使う。店主が gas を吸収する gasMode では
@@ -202,6 +206,7 @@ export function payerReceiptFromHistoryEntry(
       totalAmount: grossTotal,
       memo: entry.memo,
       receiptNo: entry.receiptNo,
+      orderId: opts.orderId,
       status,
       // 異通貨建ては元価格 (anchor) を顧客控えにも反映 (HistoryRow と同じ表示資産)。
       anchorAmount: entry.anchorAmount,
@@ -254,6 +259,7 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
   if (typeof r.tokenSymbol !== 'string') return false;
   if (typeof r.amount !== 'string') return false;
   if (typeof r.merchantAddress !== 'string') return false;
+  if (r.orderId !== undefined && typeof r.orderId !== 'string') return false;
   if (r.lineItems !== undefined && !isValidLineItems(r.lineItems)) return false;
   return true;
 }

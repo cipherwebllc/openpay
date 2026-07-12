@@ -56,6 +56,7 @@ vi.mock('@/hooks/useOrigin', () => ({
 }));
 
 import { MobileOrderView } from '@/components/MobileOrderView';
+import { buildPayerReceipt, type PayerReceipt } from '@/lib/payerReceipt';
 import { parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
 import type { AgentCartItem } from '@/lib/agentOrder';
@@ -346,6 +347,7 @@ describe('MobileOrderView', () => {
     fireEvent.change(input, { target: { value: '12' } });
     expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
     expect(screen.queryByText('テーブル番号を入力してください')).toBeNull();
+    expect(window.sessionStorage.length).toBe(0); // handle 無しページでは永続化しない
   });
 
   it('dineIn: テーブル番号を /checkout の description に載せる', () => {
@@ -355,6 +357,20 @@ describe('MobileOrderView', () => {
     const pay = screen.getByRole('link', { name: '支払いへ進む' });
     const u = new URL(pay.getAttribute('href') ?? '', 'http://localhost');
     expect(u.searchParams.get('description')).toBe('テーブル 7');
+  });
+
+  it('dineIn + handle: テーブル番号を sessionStorage へ write-through し、再 mount で復元', () => {
+    const dineIn = { ...config, dineIn: true };
+    const first = renderWithIntl(<MobileOrderView config={dineIn} handle="coffee" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
+    expect(window.sessionStorage.getItem('openpay:order-table:coffee')).toBe('12');
+
+    first.unmount();
+    renderWithIntl(<MobileOrderView config={dineIn} handle="coffee" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.getByLabelText('テーブル番号')).toHaveValue('12');
+    expect(screen.getByRole('link', { name: '支払いへ進む' })).toBeInTheDocument();
   });
 
   it('テイクアウト (dineIn 未設定) はテーブル番号入力を出さず即支払い可', () => {
@@ -981,26 +997,32 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
 
   describe('スタッフ呼び出しボタン gating', () => {
     const callTx = `0x${'d'.repeat(64)}`;
-    const paidReceipt = () => ({
-      schemaVersion: 1,
-      receiptId: callTx,
-      receiptNo: 'ORDER1',
-      createdAt: new Date().toISOString(),
-      paidAt: new Date().toISOString(),
-      direction: 'paid',
-      kind: 'payment_receipt',
-      status: 'confirmed',
-      txHash: callTx,
-      tokenSymbol: 'JPYC',
-      amount: '500',
-      currency: 'JPYC',
-      merchantAddress: config.receiver,
-    });
+    const paidReceipt = (
+      over: Partial<Parameters<typeof buildPayerReceipt>[0]> = {},
+    ): PayerReceipt =>
+      buildPayerReceipt({
+        asset: 'jpyc',
+        amount: '500',
+        merchantAddress: config.receiver,
+        txHash: callTx,
+        orderId: 'ORDER1',
+        ...over,
+      });
     const dineIn = { ...config, dineIn: true };
-    const prepare = (props: { enabled?: boolean; withReceipt?: boolean; handle?: string } = {}) => {
+    const prepare = (
+      props: {
+        enabled?: boolean;
+        withReceipt?: boolean;
+        handle?: string;
+        receipt?: PayerReceipt;
+      } = {},
+    ) => {
       envHold.enableOrderCall = props.enabled ?? true;
       if (props.withReceipt ?? true) {
-        window.localStorage.setItem('openpay:payerReceipts:v1', JSON.stringify([paidReceipt()]));
+        window.localStorage.setItem(
+          'openpay:payerReceipts:v1',
+          JSON.stringify([props.receipt ?? paidReceipt()]),
+        );
       }
       renderWithIntl(<MobileOrderView config={dineIn} handle={props.handle ?? 'coffee'} />);
       fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
@@ -1034,6 +1056,12 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
 
     it('該当店舗の2h以内の支払い控えが無ければ出さない', () => {
       prepare({ withReceipt: false });
+      fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
+      expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
+    });
+
+    it('receiptNo だけの旧控えは orderId が無いため出さない', () => {
+      prepare({ receipt: paidReceipt({ orderId: undefined, receiptNo: 'ORDER1' }) });
       fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '12' } });
       expect(screen.queryByRole('button', { name: '🔔 スタッフを呼ぶ' })).toBeNull();
     });

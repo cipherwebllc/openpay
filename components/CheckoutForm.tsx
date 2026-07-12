@@ -695,6 +695,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       taxRate: params.taxRate ?? null,
       taxCategory: params.taxCategory ?? null,
       receiptNo: params.receiptNo ?? null,
+      ...(params.orderId ? { orderId: params.orderId } : {}),
       lineItems: params.items.map((it, i) => {
         // amount = price × qty を人間可読 decimal で (raw wei ではない)。
         const amount = formatUnits(

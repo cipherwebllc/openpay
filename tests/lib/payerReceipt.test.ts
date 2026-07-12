@@ -73,6 +73,7 @@ describe('buildPayerReceipt', () => {
           { name: 'コーヒー', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
         ],
         totalTaxAmount: '364',
+        orderId: 'ORDER-42',
         sourceRoute: '/checkout',
         locale: 'ja',
       },
@@ -88,6 +89,7 @@ describe('buildPayerReceipt', () => {
     expect(r.explorerUrl).toContain(TX);
     expect(r.lineItems).toHaveLength(1);
     expect(r.totalTaxAmount).toBe('364');
+    expect(r.orderId).toBe('ORDER-42');
     expect(r.createdAt).toBe(NOW.toISOString());
     expect(r.paidAt).toBe(NOW.toISOString());
   });
@@ -122,7 +124,12 @@ describe('buildPayerReceipt', () => {
 
 describe('payerReceiptFromHistoryEntry', () => {
   it('HistoryEntry (sale 成功) → 顧客レシートへ写像 (明細/合計/店舗/顧客/status)', () => {
-    const r = payerReceiptFromHistoryEntry(saleEntry(), { sourceRoute: '/checkout', locale: 'ja', now: NOW });
+    const r = payerReceiptFromHistoryEntry(saleEntry(), {
+      sourceRoute: '/checkout',
+      locale: 'ja',
+      orderId: 'ORDER-42',
+      now: NOW,
+    });
     expect(r.amount).toBe('4000'); // entryTotals.total
     expect(r.totalAmount).toBe('4000');
     expect(r.lineItems).toHaveLength(2);
@@ -130,6 +137,7 @@ describe('payerReceiptFromHistoryEntry', () => {
     expect(r.merchantAddress).toBe('0xMerchantWallet');
     expect(r.payerAddress).toBe('0xPayerWallet');
     expect(r.receiptNo).toBe('OP-20260604-001');
+    expect(r.orderId).toBe('ORDER-42');
     expect(r.status).toBe('confirmed');
     expect(r.sourceRoute).toBe('/checkout');
   });
@@ -159,7 +167,11 @@ describe('payerReceiptFromHistoryEntry', () => {
 });
 
 describe('copy / JSON / CSV 出力', () => {
-  const r = payerReceiptFromHistoryEntry(saleEntry(), { locale: 'ja', now: NOW });
+  const r = payerReceiptFromHistoryEntry(saleEntry(), {
+    locale: 'ja',
+    orderId: 'ORDER-42',
+    now: NOW,
+  });
 
   it('copyText に主要項目 (レシート番号/明細/合計/txHash/両ウォレット)', () => {
     const t = payerReceiptCopyText(r, 'ja');
@@ -175,6 +187,7 @@ describe('copy / JSON / CSV 出力', () => {
   it('JSON は round-trip (秘密情報なし・receipt そのまま)', () => {
     const parsed = JSON.parse(payerReceiptToJson(r)) as PayerReceipt;
     expect(parsed.receiptId).toBe(r.receiptId);
+    expect(parsed.orderId).toBe('ORDER-42');
     expect(parsed.lineItems).toHaveLength(2);
     // 秘密情報 (private key 等) は構造上持たない
     expect(JSON.stringify(parsed)).not.toMatch(/privateKey|mnemonic|seed/i);
@@ -193,11 +206,15 @@ describe('ストア (LocalStorage)', () => {
   beforeEach(() => window.localStorage.clear());
 
   it('append → load (dedupe by receiptId)', () => {
-    const r = payerReceiptFromHistoryEntry(saleEntry(), { now: NOW });
+    const r = payerReceiptFromHistoryEntry(saleEntry(), {
+      orderId: 'ORDER-42',
+      now: NOW,
+    });
     appendPayerReceipt(r);
     appendPayerReceipt(r); // 同一 receiptId → no-op
     expect(loadPayerReceipts()).toHaveLength(1);
     expect(loadPayerReceipts()[0].receiptId).toBe(TX);
+    expect(loadPayerReceipts()[0].orderId).toBe('ORDER-42');
   });
 
   it('新しい順 (新規が先頭)', () => {
@@ -276,6 +293,16 @@ describe('ストア (LocalStorage)', () => {
       PAYER_RECEIPTS_STORAGE_KEY,
       JSON.stringify([
         { schemaVersion: 1, receiptId: 'bad-li', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', lineItems: 'not-array' },
+      ]),
+    );
+    expect(loadPayerReceipts()).toEqual([]);
+  });
+
+  it('orderId が文字列以外の破損レシートは drop', () => {
+    window.localStorage.setItem(
+      PAYER_RECEIPTS_STORAGE_KEY,
+      JSON.stringify([
+        { schemaVersion: 1, receiptId: 'bad-order', direction: 'paid', kind: 'payment_receipt', status: 'confirmed', createdAt: 'x', tokenSymbol: 'JPYC', amount: '1', merchantAddress: '0xM', orderId: 42 },
       ]),
     );
     expect(loadPayerReceipts()).toEqual([]);
