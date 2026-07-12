@@ -203,6 +203,7 @@ function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error
 // relay (useJpycEip3009Payment) の状態を制御する helper。CheckoutForm.test と同型。
 let relayMutate: ReturnType<typeof vi.fn>;
 let relayRetryRelay: ReturnType<typeof vi.fn>;
+let relayRetrySamePayload: ReturnType<typeof vi.fn>;
 function setRelay(
   state:
     | 'idle'
@@ -216,6 +217,7 @@ function setRelay(
     txHash?: `0x${string}`;
     errMsg?: string;
     retryAfterSeconds?: number | null;
+    recoveryState?: 'auto' | 'exhausted' | null;
     variables?: {
       merchant: Address;
       value: bigint;
@@ -225,6 +227,7 @@ function setRelay(
 ) {
   relayMutate = vi.fn();
   relayRetryRelay = vi.fn();
+  relayRetrySamePayload = vi.fn();
   const txHash = opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`);
   const data =
     state === 'success'
@@ -245,6 +248,10 @@ function setRelay(
             ? new RelayIpRateLimitedError(opts?.retryAfterSeconds ?? 45)
             : null,
     retryRelay: relayRetryRelay,
+    retrySamePayload: relayRetrySamePayload,
+    recoveryState:
+      opts?.recoveryState ??
+      (state === 'response-unknown' ? 'exhausted' : null),
     variables: opts?.variables,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
@@ -1940,9 +1947,14 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     setRelay('response-unknown');
     render(<PaymentForm />);
 
+    expect(screen.getByText(/送信済みかを判定できません/)).toBeInTheDocument();
     expect(
-      screen.getByText(/送信済みの可能性があります。取引履歴\/ステータス/),
+      screen.getByRole('button', { name: /同じ送信内容を再確認/ }),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: /同じ送信内容を再確認/ }),
+    );
+    expect(relayRetrySamePayload).toHaveBeenCalledOnce();
     expect(
       screen.queryByRole('button', {
         name: /通常支払い（自分でガスを払う）に切り替える/,
@@ -1952,6 +1964,23 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     expect(payButton).toBeDisabled();
     await user.click(payButton);
     expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
+
+  it('unknown 後の 400 系 error でも fallback banner を出さず exhausted を維持', () => {
+    setupRelayError();
+    setRelay('error', {
+      errMsg: 'insufficient_balance',
+      recoveryState: 'exhausted',
+    });
+    render(<PaymentForm />);
+
+    expect(screen.getByText(/送信済みかを判定できません/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeNull();
     expect(screen.queryByText('エラー')).toBeNull();
   });
 
@@ -2079,6 +2108,19 @@ describe('PaymentForm — relayer preflight degraded (B1 Layer B)', () => {
     render(<PaymentForm />);
     expect(
       screen.queryByText(/ガスレス決済が一時的に利用できません/),
+    ).toBeNull();
+  });
+
+  it('relay.isPending 中は degraded でも standard 切替を表示しない', () => {
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setRelay('pending-flow');
+    render(<PaymentForm />);
+
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
     ).toBeNull();
   });
 

@@ -158,6 +158,7 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
 
 let relayMutate: ReturnType<typeof vi.fn>;
 let relayRetryRelay: ReturnType<typeof vi.fn>;
+let relayRetrySamePayload: ReturnType<typeof vi.fn>;
 function setRelay(
   state:
     | 'idle'
@@ -170,6 +171,7 @@ function setRelay(
 ) {
   relayMutate = vi.fn();
   relayRetryRelay = vi.fn();
+  relayRetrySamePayload = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
     isPending: state === 'pending',
@@ -188,6 +190,8 @@ function setRelay(
             ? new RelayIpRateLimitedError(45)
             : null,
     retryRelay: relayRetryRelay,
+    retrySamePayload: relayRetrySamePayload,
+    recoveryState: state === 'response-unknown' ? 'exhausted' : null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -1364,9 +1368,11 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     setRelay('response-unknown');
     render(<TipForm params={JPYC_PARAMS} />);
 
-    expect(
-      screen.getByText(/送信済みの可能性があります。取引履歴\/ステータス/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/送信済みかを判定できません/)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: /同じ送信内容を再確認/ }),
+    );
+    expect(relayRetrySamePayload).toHaveBeenCalledOnce();
     const payButton = screen.getByRole('button', { name: /送信中/ });
     expect(payButton).toBeDisabled();
     await user.click(payButton);

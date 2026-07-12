@@ -215,6 +215,7 @@ function setBatchPayment(
 
 let relayMutate: ReturnType<typeof vi.fn>;
 let relayRetryRelay: ReturnType<typeof vi.fn>;
+let relayRetrySamePayload: ReturnType<typeof vi.fn>;
 function setRelayPayment(
   state:
     | 'idle'
@@ -229,11 +230,13 @@ function setRelayPayment(
     txHash?: `0x${string}`;
     errMsg?: string;
     retryAfterSeconds?: number | null;
+    recoveryState?: 'auto' | 'exhausted' | null;
     variables?: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
   },
 ) {
   relayMutate = vi.fn();
   relayRetryRelay = vi.fn();
+  relayRetrySamePayload = vi.fn();
   const txHash = opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`);
   const data =
     state === 'success'
@@ -256,6 +259,10 @@ function setRelayPayment(
             ? new RelayIpRateLimitedError(opts?.retryAfterSeconds ?? 45)
             : null,
     retryRelay: relayRetryRelay,
+    retrySamePayload: relayRetrySamePayload,
+    recoveryState:
+      opts?.recoveryState ??
+      (state === 'response-unknown' ? 'exhausted' : null),
     variables: opts?.variables,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
@@ -1906,9 +1913,11 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     setRelayPayment('response-unknown');
     render(<CheckoutForm params={JPYC_PARAMS} />);
 
-    expect(
-      screen.getByText(/送信済みの可能性があります。取引履歴\/ステータス/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/送信済みかを判定できません/)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: /同じ送信内容を再確認/ }),
+    );
+    expect(relayRetrySamePayload).toHaveBeenCalledOnce();
     expect(
       screen.queryByRole('button', {
         name: /通常支払い（自分でガスを払う）に切り替える/,
@@ -1918,6 +1927,23 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(payButton).toBeDisabled();
     await user.click(payButton);
     expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('エラー')).toBeNull();
+  });
+
+  it('unknown 後の 400 系 error でも fallback banner を出さず exhausted を維持', () => {
+    setupRelayReady();
+    setRelayPayment('error', {
+      errMsg: 'relay_not_configured',
+      recoveryState: 'exhausted',
+    });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(screen.getByText(/送信済みかを判定できません/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
+    ).toBeNull();
     expect(screen.queryByText('エラー')).toBeNull();
   });
 
@@ -2004,6 +2030,19 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     render(<CheckoutForm params={JPYC_PARAMS} />);
     expect(
       screen.queryByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeNull();
+  });
+
+  it('relay.isPending 中は degraded でも standard 切替を表示しない', () => {
+    setupRelayReady();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setRelayPayment('pending-flow');
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(
+      screen.queryByRole('button', {
+        name: /通常支払い（自分でガスを払う）に切り替える/,
+      }),
     ).toBeNull();
   });
 
