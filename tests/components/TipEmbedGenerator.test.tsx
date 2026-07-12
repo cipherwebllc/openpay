@@ -19,6 +19,45 @@ vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
 }));
 
+const tipFormPreviewSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/components/TipForm', () => ({
+  TipForm: ({
+    params,
+    preview,
+  }: {
+    params: {
+      token: 'jpyc' | 'usdc';
+      presets?: string[];
+      name?: string;
+      message?: string;
+      theme?: string;
+      color?: string;
+    };
+    preview?: boolean;
+  }) => {
+    tipFormPreviewSpy(params, preview);
+    const presets =
+      params.presets ??
+      (params.token === 'jpyc' ? ['300', '1000', '3000'] : ['5', '20', '50']);
+    return (
+      <div
+        data-testid="mock-tip-form"
+        data-theme={params.theme}
+        data-color={params.color}
+        data-preview={preview || undefined}
+      >
+        {params.name && <p>{params.name}</p>}
+        {params.message && <p>{params.message}</p>}
+        {presets.map((preset) => (
+          <button key={preset} type="button">
+            {preset} {params.token.toUpperCase()}
+          </button>
+        ))}
+      </div>
+    );
+  },
+}));
+
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
 import { chainForSlug } from '@/lib/chains';
 
@@ -31,6 +70,7 @@ const KAIA_ID = chainForSlug('kaia').id;
 
 beforeEach(() => {
   window.localStorage.clear();
+  tipFormPreviewSpy.mockClear();
 });
 
 // URL は share タブ (default) の URL 表示に出る。iframe snippet は embed タブ。
@@ -141,6 +181,25 @@ describe('TipEmbedGenerator — URL / snippet 生成', () => {
     await waitFor(() => {
       expect(screen.getByText(/#rrggbb 形式/)).toBeInTheDocument();
     });
+  });
+
+  it('テーマピッカー操作 → 実フォーム用 params と Tip URL に即時反映', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+
+    await user.click(screen.getByRole('button', { name: 'Night' }));
+
+    await waitFor(() => expectInUrl(/theme=night/));
+    expect(screen.getByTestId('mock-tip-form')).toHaveAttribute(
+      'data-theme',
+      'night',
+    );
+    expect(tipFormPreviewSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ theme: 'night' }),
+      true,
+    );
   });
 });
 

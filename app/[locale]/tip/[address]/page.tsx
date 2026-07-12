@@ -72,6 +72,7 @@ export async function generateMetadata({
           token: parsed.params.token,
           name: parsed.params.name,
           color: parsed.params.color,
+          theme: parsed.params.theme,
         },
         ogLocale,
       );

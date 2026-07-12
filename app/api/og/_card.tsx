@@ -44,6 +44,7 @@ export function ogCardElement(
   const glowTop = hexToRgba(m.accent, 0.45);
   const glowBottom = hexToRgba(m.accent, 0.25);
   const chipBg = hexToRgba(m.accent, 0.14);
+  const theme = m.themeStyle;
   return (
     <div
       style={{
@@ -54,8 +55,10 @@ export function ogCardElement(
         padding: 52,
         gap: 28,
         fontFamily: 'NotoSansJP',
-        backgroundColor: '#0b1220',
-        backgroundImage: `radial-gradient(circle at 88% -12%, ${glowTop} 0%, rgba(0,0,0,0) 52%), radial-gradient(circle at -8% 112%, ${glowBottom} 0%, rgba(0,0,0,0) 46%)`,
+        backgroundColor: theme?.backgroundColor ?? '#0b1220',
+        backgroundImage:
+          theme?.backgroundImage ??
+          `radial-gradient(circle at 88% -12%, ${glowTop} 0%, rgba(0,0,0,0) 52%), radial-gradient(circle at -8% 112%, ${glowBottom} 0%, rgba(0,0,0,0) 46%)`,
       }}
     >
       {/* 白パネル (主役) */}
@@ -65,7 +68,8 @@ export function ogCardElement(
           display: 'flex',
           alignItems: 'center',
           gap: 56,
-          backgroundColor: 'rgba(255,255,255,0.97)',
+          backgroundColor:
+            theme?.panelBackgroundColor ?? 'rgba(255,255,255,0.97)',
           borderRadius: 40,
           padding: '48px 64px',
           boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
@@ -122,7 +126,7 @@ export function ogCardElement(
               display: 'flex',
               fontSize: 68,
               fontWeight: 700,
-              color: '#0f172a',
+              color: theme?.headingColor ?? '#0f172a',
               lineHeight: 1.1,
             }}
           >
@@ -146,7 +150,7 @@ export function ogCardElement(
                 display: 'flex',
                 fontSize: 28,
                 fontWeight: 700,
-                color: '#475569',
+                color: theme?.secondaryTextColor ?? '#475569',
               }}
             >
               {m.bio}
@@ -160,8 +164,8 @@ export function ogCardElement(
                   display: 'flex',
                   fontSize: 26,
                   fontWeight: 700,
-                  color: m.accent,
-                  backgroundColor: chipBg,
+                  color: theme?.chipTextColor ?? m.accent,
+                  backgroundColor: theme?.chipBackgroundColor ?? chipBg,
                   borderRadius: 9999,
                   padding: '10px 26px',
                 }}
@@ -195,7 +199,7 @@ export function ogCardElement(
               display: 'flex',
               fontSize: 34,
               fontWeight: 700,
-              color: '#ffffff',
+              color: theme?.brandTextColor ?? '#ffffff',
               letterSpacing: -1,
             }}
           >
@@ -208,7 +212,7 @@ export function ogCardElement(
               display: 'flex',
               fontSize: 26,
               fontWeight: 700,
-              color: '#94a3b8',
+              color: theme?.footerTextColor ?? '#94a3b8',
             }}
           >
             {m.footer}
@@ -218,7 +222,7 @@ export function ogCardElement(
               display: 'flex',
               fontSize: 28,
               fontWeight: 700,
-              color: '#ffffff',
+              color: theme?.urlTextColor ?? '#ffffff',
             }}
           >
             {m.url}

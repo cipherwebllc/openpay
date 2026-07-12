@@ -108,6 +108,7 @@ export function buildPublishPayload(
       to: getAddress(options.receiver),
       name: draft.name.trim() || undefined,
       color: COLOR_PATTERN.test(draft.color) ? draft.color : undefined,
+      theme: draft.theme,
       methods,
       presets: { jpyc: presets },
     },

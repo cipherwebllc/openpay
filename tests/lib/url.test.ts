@@ -553,6 +553,36 @@ describe('buildTipPath', () => {
     expect(path).toBe(`/tip/${VALID_TO}?token=jpyc`);
   });
 
+  it('theme 無し URL は導入前のバイト列を維持', () => {
+    expect(
+      buildTipPath({
+        to: VALID_TO,
+        token: 'jpyc',
+        name: 'Alice',
+        color: '#2563eb',
+      }),
+    ).toBe(
+      `/tip/${VALID_TO}?token=jpyc&name=Alice&color=%232563eb`,
+    );
+  });
+
+  it('allowlist theme のみ URL に出し、不正値は省略', () => {
+    const themed = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      theme: 'night',
+    });
+    expect(new URLSearchParams(themed.split('?')[1]).get('theme')).toBe(
+      'night',
+    );
+    const invalid = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      theme: 'neon' as 'night',
+    });
+    expect(invalid).toBe(`/tip/${VALID_TO}?token=jpyc`);
+  });
+
   it('name / message / color / presets を全部含める', () => {
     const path = buildTipPath({
       to: VALID_TO,
@@ -771,7 +801,33 @@ describe('parseTipParams', () => {
       expect(r.params.token).toBe('jpyc');
       expect(r.params.name).toBeUndefined();
       expect(r.params.presets).toBeUndefined();
+      expect(r.params.theme).toBeUndefined();
     }
+  });
+
+  it('theme あり/なし/不正を allowlist で round-trip', () => {
+    const path = buildTipPath({
+      to: VALID_TO,
+      token: 'jpyc',
+      theme: 'soft',
+    });
+    const parsed = parseTipParams(
+      VALID_TO,
+      new URLSearchParams(path.split('?')[1]),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.params.theme).toBe('soft');
+
+    const missing = parseTipParams(VALID_TO, search('token=jpyc'));
+    expect(missing.ok).toBe(true);
+    if (missing.ok) expect(missing.params.theme).toBeUndefined();
+
+    const invalid = parseTipParams(
+      VALID_TO,
+      search('token=jpyc&theme=neon'),
+    );
+    expect(invalid.ok).toBe(true);
+    if (invalid.ok) expect(invalid.params.theme).toBeUndefined();
   });
 
   it('全パラメータパース', () => {

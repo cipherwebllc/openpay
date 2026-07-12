@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { type Address } from 'viem';
 import {
@@ -15,6 +16,7 @@ import { LinkQrModal } from './LinkQrModal';
 import { ReceiverBlock } from './ReceiverBlock';
 import { Field } from './Field';
 import { StepCard } from './StepCard';
+import { HandleThemePicker } from './HandleThemePicker';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import {
   useReceiverAutofill,
@@ -44,6 +46,11 @@ import {
   type TipParams,
 } from '@/lib/url';
 
+const TipFormPreview = dynamic(
+  () => import('./TipForm').then((mod) => mod.TipForm),
+  { ssr: false },
+);
+
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 // QR を描く tipUrl の上限長。これを超えると qrcode.react が「Data too long」で throw し
@@ -52,6 +59,8 @@ const IFRAME_HEIGHT = 640;
 const QR_MAX_URL_LEN = 1200;
 // color 入力が不正 (COLOR_PATTERN 不一致) のときのプレビュー/プレースホルダ既定色。
 const DEFAULT_PREVIEW_COLOR = '#2563eb';
+const PREVIEW_RECEIVER =
+  '0x0000000000000000000000000000000000000001' as Address;
 
 // Tip widget は gasless 固定なので、受信可能な chain は gasless 対応のものだけ。
 // USDC は全 mainnet chain (Ethereum L1 含む) で ERC20 paymaster 対応、JPYC は
@@ -83,7 +92,7 @@ export function TipEmbedGenerator() {
   const [qrOpen, setQrOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
-  const tHeader = useTranslations('TipForm');
+  const tProfile = useTranslations('HandleProfile');
 
   const effectiveReceiver = useMemo(
     () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
@@ -136,6 +145,7 @@ export function TipEmbedGenerator() {
       name: settings.name || undefined,
       message: settings.message || undefined,
       color: colorValid ? settings.color : undefined,
+      theme: settings.theme ?? 'clean',
       presets: presetsForUrl,
       thanks: settings.thanks || undefined,
       thanksUrl: settings.thanksUrl || undefined,
@@ -155,6 +165,7 @@ export function TipEmbedGenerator() {
     settings.name,
     settings.message,
     settings.color,
+    settings.theme,
     colorValid,
     presetsForUrl,
     settings.thanks,
@@ -205,6 +216,33 @@ export function TipEmbedGenerator() {
 
   // embed タブで実際に表示/コピーするスニペット (iframe / button の切替)。
   const activeSnippet = embedFormat === 'iframe' ? iframeSnippet : buttonSnippet;
+
+  const previewParams = useMemo<TipParams>(
+    () => ({
+      to: effectiveReceiver ?? PREVIEW_RECEIVER,
+      token: settings.token,
+      chain: settings.chain,
+      name: settings.name || undefined,
+      message: settings.message || undefined,
+      color: colorValid ? settings.color : undefined,
+      theme: settings.theme ?? 'clean',
+      presets: activePresets,
+      crossChain:
+        settings.token === 'usdc' ? settings.crossChain : undefined,
+    }),
+    [
+      effectiveReceiver,
+      settings.token,
+      settings.chain,
+      settings.name,
+      settings.message,
+      settings.color,
+      settings.theme,
+      settings.crossChain,
+      colorValid,
+      activePresets,
+    ],
+  );
 
   function selectToken(tok: TokenSymbol) {
     setSettings((s) => ({
@@ -328,6 +366,16 @@ export function TipEmbedGenerator() {
               </p>
             </Field>
 
+            <HandleThemePicker
+              accent={colorValid ? settings.color : DEFAULT_PREVIEW_COLOR}
+              selected={settings.theme ?? 'clean'}
+              onSelect={(theme) =>
+                setSettings((current) => ({ ...current, theme }))
+              }
+              label={tProfile('themeLabel')}
+              hint={tProfile('themeHint')}
+            />
+
             <Field label={t('colorLabel')}>
               <div className="flex items-center gap-3">
                 <input
@@ -447,37 +495,24 @@ export function TipEmbedGenerator() {
 
       {/* mobile は contents + order で preview を高度な設定より前へ。desktop は従来の sticky 右カラム。 */}
       <aside className="contents min-w-0 self-start lg:sticky lg:top-4 lg:block lg:max-h-[calc(100vh-2rem)] lg:space-y-4 lg:overflow-y-auto [&>section]:order-5">
-        {/* プレビュー hero */}
+        {/* 実 TipForm を MobileOrderBuilder / プロフと同じスマホ枠で描く。 */}
         <div className="order-3 rounded-2xl border border-brand/30 bg-white p-4 shadow-sm ring-1 ring-brand/10">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
             {t('previewTitle')}
           </h3>
           <div
-            className="rounded-2xl p-4 text-white shadow-sm"
-            style={{ backgroundColor: colorValid ? settings.color : DEFAULT_PREVIEW_COLOR }}
+            data-testid="tip-preview-frame"
+            className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5"
           >
-            <p className="text-xs uppercase tracking-wider opacity-80">
-              {tHeader('header')}
-            </p>
-            <p className="mt-2 text-lg font-bold">
-              {settings.name
-                ? tHeader('headerNamed', { name: settings.name })
-                : tHeader('headerGeneric')}
-            </p>
-            {settings.message && (
-              <p className="mt-2 whitespace-pre-wrap text-sm opacity-90">
-                {settings.message}
-              </p>
-            )}
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {activePresets.map((p) => (
-                <span
-                  key={p}
-                  className="rounded-md bg-white/20 px-2 py-1 font-mono text-xs"
-                >
-                  {p} {deployment.displaySymbol}
-                </span>
-              ))}
+            <div
+              data-testid="tip-preview-scroll"
+              className="max-h-[56vh] overflow-y-auto bg-slate-50 p-3"
+            >
+              <TipFormPreview
+                key={`${settings.token}:${settings.chain}:${activePresets.join(',')}`}
+                params={previewParams}
+                preview
+              />
             </div>
           </div>
         </div>

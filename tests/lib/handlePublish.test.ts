@@ -23,7 +23,7 @@ function draft(patch: Partial<HandleProfileDraft> = {}): HandleProfileDraft {
 }
 
 describe('buildPublishPayload', () => {
-  it('旧 Builder と同じ trim/filter/キー順で publish body のバイト列を固定する', () => {
+  it('trim/filter/キー順 + config/profile theme を publish body で固定する', () => {
     const payload = buildPublishPayload(
       draft({
         name: '  Alice  ',
@@ -57,7 +57,7 @@ describe('buildPublishPayload', () => {
     expect(payload).not.toBeNull();
     const body = JSON.stringify({ handle: 'alice', ...payload });
     expect(body).toBe(
-      `{"handle":"alice","config":{"to":"${ADDR}","name":"Alice","color":"#12ab34","methods":[{"token":"jpyc","chain":"polygon"},{"token":"jpyc","chain":"kaia"}],"presets":{"jpyc":["300","5"]}},"profile":{"bio":"hello","avatar":"https://cdn.example/avatar.png","socials":["https://x.com/alice"],"links":[{"label":"Site","url":"https://example.com","emoji":"🌐","featured":true}],"theme":"night"}}`,
+      `{"handle":"alice","config":{"to":"${ADDR}","name":"Alice","color":"#12ab34","theme":"night","methods":[{"token":"jpyc","chain":"polygon"},{"token":"jpyc","chain":"kaia"}],"presets":{"jpyc":["300","5"]}},"profile":{"bio":"hello","avatar":"https://cdn.example/avatar.png","socials":["https://x.com/alice"],"links":[{"label":"Site","url":"https://example.com","emoji":"🌐","featured":true}],"theme":"night"}}`,
     );
   });
 
