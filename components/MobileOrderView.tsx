@@ -67,6 +67,8 @@ export type CartLineView = OptionCartEntry & { isOption: boolean };
 
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
+const ORDER_MEMO_MAX = 120;
+const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
 // 受け渡し照合用の短い受注番号 (客の完了画面 + 店主の受注カードの双方に表示)。混同しやすい
 // 0/1/O/I/L を除いた 31 文字 × 6 桁 ≈ 8.87 億通り。
@@ -188,6 +190,19 @@ export function MobileOrderView({
     orderIdGenerated.current = true;
     setOrderId(generateOrderCode());
   }, []);
+  const [customerMemo, setCustomerMemo] = useState('');
+  const updateCustomerMemo = (value: string) => {
+    const next = value.slice(0, ORDER_MEMO_MAX);
+    setCustomerMemo(next);
+    if (!orderId) return;
+    try {
+      const key = `${ORDER_MEMO_STORAGE_PREFIX}${orderId}`;
+      if (next) window.sessionStorage.setItem(key, next);
+      else window.sessionStorage.removeItem(key);
+    } catch {
+      // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (メモは advisory)。
+    }
+  };
 
   // 店舗アイコン: 注文トークンは attacker-controllable なので safeHttpUrl で https に限定し、
   // 読込失敗 (onError) は頭文字へ fallback (@handle のアバターと同型)。URL 変更で失敗状態リセット。
@@ -635,6 +650,26 @@ export function MobileOrderView({
           </div>
         ))}
       </section>
+
+      {env.enableOrderMemo && cartItems.length > 0 ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+          <label
+            htmlFor="order-customer-memo"
+            className="block text-sm font-semibold text-slate-700"
+          >
+            {t('customerMemoLabel')}
+          </label>
+          <textarea
+            id="order-customer-memo"
+            value={customerMemo}
+            onChange={(e) => updateCustomerMemo(e.target.value)}
+            maxLength={ORDER_MEMO_MAX}
+            rows={3}
+            placeholder={t('customerMemoPlaceholder')}
+            className="mt-2 w-full resize-y rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none"
+          />
+        </div>
+      ) : null}
 
       {/* 注文サマリ + 支払い — 商品があれば画面下部に浮く (sticky) アプリ風カートバー。
           メニューをスクロール中も常に見え、最下部ではフッターの上に収まる (通常フロー=重ならない)。

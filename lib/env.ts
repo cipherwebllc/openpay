@@ -131,6 +131,15 @@ const feeReceiverConfigured = !isAddressEqual(
   PLACEHOLDER_FEE_RECEIVER,
 );
 
+const enableOrderRelay = parseBoolFlag(
+  'NEXT_PUBLIC_ENABLE_ORDER_RELAY',
+  process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY,
+);
+const enableOrderMemoRequested = parseBoolFlag(
+  'NEXT_PUBLIC_ENABLE_ORDER_MEMO',
+  process.env.NEXT_PUBLIC_ENABLE_ORDER_MEMO,
+);
+
 export const env = {
   networkEnv: networkEnvRaw,
   pimlicoApiKey: nonEmpty(process.env.NEXT_PUBLIC_PIMLICO_API_KEY) ?? '',
@@ -504,10 +513,10 @@ export const env = {
   // (client 露出)。**既定 OFF** = MobileOrderView は webhook を付けず・受注タブ非表示・
   // /api/order/* は 404 → 本番完全 inert。決済コア/手数料(0%)/USDC は無改変。注文メタは
   // KV に TTL 72h で一時保存 (資金は不触=ノンカストディ不変・PII 非保存)。計画: plans/swift-puzzling-sky.md。
-  enableOrderRelay: parseBoolFlag(
-    'NEXT_PUBLIC_ENABLE_ORDER_RELAY',
-    process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY,
-  ),
+  enableOrderRelay,
+  // 注文メモは受注 notify だけが受信面。relay 無しの単独点灯で入力だけを見せないよう、ここで AND を
+  // 導出して全 client/server consumer に同じ構造的ゲートを強制する。
+  enableOrderMemo: enableOrderRelay && enableOrderMemoRequested,
   // モバイル注文システム利用料 (店頭1% / 事前3%) の有効化フラグ (client 露出)。**既定 OFF** =
   // モバイル注文は手数料ゼロ・客への表示は原価のみ・relay は従来 recoverFee → 本番完全 inert。
   // gas-recovery 料金 (recoverFeeBps・7月から1%) とは別物で、モバイル注文という付加価値システムの

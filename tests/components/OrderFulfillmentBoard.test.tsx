@@ -237,6 +237,16 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.getByText('受取 13:30')).toBeInTheDocument();
   });
 
+  it('customerMemo を厨房/ホール共通カードへ申告ラベル付きで表示', () => {
+    feedHold.data = [order({ customerMemo: 'ねぎ抜き' })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('📝 お客様メモ（申告）')).toBeInTheDocument();
+    expect(screen.getByText('ねぎ抜き').closest('div')).toHaveClass(
+      'border-amber-200',
+      'bg-amber-50',
+    );
+  });
+
   it('flag OFF: pickupAt があってもバッジを出さない (inert)', () => {
     // flag OFF (既定) + pickupAt 有り → 手動 pickup_at 混入でも観測上 inert。
     feedHold.data = [order({ pickupAt: Date.UTC(2024, 0, 15, 4, 30) })];

@@ -339,6 +339,26 @@ describe('POST /api/order/notify', () => {
     expect('pickupAt' in JSON.parse(lpushSpy.mock.calls[0][1] as string)).toBe(false);
   });
 
+  it('customerMemo を sanitize して保存し、超過は 120 字に切り詰め・不正値は除外', async () => {
+    await POST(req(goodBody({ customerMemo: '  卵\u0000\nなし  ' })));
+    let stored = JSON.parse(lpushSpy.mock.calls[0][1] as string);
+    expect(stored.customerMemo).toBe('卵なし');
+
+    lpushSpy.mockClear();
+    setSpy.mockClear();
+    await POST(
+      req(goodBody({ txHash: `0x${'d'.repeat(64)}`, customerMemo: 'あ'.repeat(130) })),
+    );
+    stored = JSON.parse(lpushSpy.mock.calls[0][1] as string);
+    expect(stored.customerMemo).toBe('あ'.repeat(120));
+
+    lpushSpy.mockClear();
+    setSpy.mockClear();
+    await POST(req(goodBody({ txHash: `0x${'e'.repeat(64)}`, customerMemo: 42 })));
+    stored = JSON.parse(lpushSpy.mock.calls[0][1] as string);
+    expect('customerMemo' in stored).toBe(false);
+  });
+
   it('standard mode (merchantTxHash) も txHash として受理', async () => {
     const body = goodBody();
     delete (body as Record<string, unknown>).txHash;

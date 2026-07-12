@@ -30,6 +30,7 @@ import {
   orderStatusPointerKey,
   serializeOrder,
   sanitizeOrderItems,
+  sanitizeOrderMemo,
   sanitizeTable,
   declaredItemsTotalMinor,
   evaluateOrderAmount,
@@ -193,6 +194,8 @@ export async function POST(req: Request): Promise<NextResponse> {
         order.pickupAt = at;
       }
     }
+    const customerMemo = sanitizeOrderMemo(o.customerMemo);
+    if (customerMemo) order.customerMemo = customerMemo;
 
     if (isKvConfigured()) {
       const key = orderListKey(merchant);

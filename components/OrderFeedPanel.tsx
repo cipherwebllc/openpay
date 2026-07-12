@@ -195,6 +195,14 @@ export function OrderFeedPanel() {
             ))}
           </ul>
         )}
+        {o.customerMemo ? (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="text-xs font-semibold text-amber-800">{t('customerMemoLabel')}</p>
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">
+              {o.customerMemo}
+            </p>
+          </div>
+        ) : null}
         {/* 明細/テーブルは顧客申告・金額はオンチェーン検証済み (advisory 原則の明示)。 */}
         <p className="mt-1 text-[11px] text-slate-400">{t('claimedNote')}</p>
         <div className="mt-3 flex items-center justify-between gap-2">

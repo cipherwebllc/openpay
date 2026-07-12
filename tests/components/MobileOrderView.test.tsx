@@ -17,6 +17,7 @@ const envHold = vi.hoisted(() => ({
   enableShopLive: false,
   enableMenuOptions: false,
   enablePreorderTime: false,
+  enableOrderMemo: false,
 }));
 const originHold = vi.hoisted(() => ({ value: 'https://test.local' }));
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -39,6 +40,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enablePreorderTime() {
         return envHold.enablePreorderTime;
+      },
+      get enableOrderMemo() {
+        return envHold.enableOrderMemo;
       },
     },
   };
@@ -72,7 +76,9 @@ afterEach(() => {
   envHold.enableShopLive = false; // Phase 1 flag も毎回 OFF に戻す
   envHold.enableMenuOptions = false; // Phase 2 flag も毎回 OFF に戻す
   envHold.enablePreorderTime = false; // Phase 4 flag も毎回 OFF に戻す
+  envHold.enableOrderMemo = false;
   originHold.value = 'https://test.local';
+  window.sessionStorage.clear();
 });
 
 describe('MobileOrderView', () => {
@@ -406,6 +412,33 @@ describe('MobileOrderView', () => {
     // 受注番号は receiptNo (URL では rcpt) としても渡り、顧客の控え (/scan) に残る
     // (完了画面を閉じても「レシート番号」として再確認可)。
     expect(u.searchParams.get('rcpt')).toBe(orderId);
+  });
+
+  it('注文メモは flag ON + カートありでだけ表示し、orderId keyed sessionStorage へ保存 (URL 不載)', () => {
+    envHold.enableOrderRelay = true;
+    envHold.enableOrderMemo = true;
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    expect(screen.queryByPlaceholderText('アレルギー・要望など（任意）')).toBeNull();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const memo = screen.getByPlaceholderText('アレルギー・要望など（任意）');
+    fireEvent.change(memo, { target: { value: '卵なし' } });
+
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'https://test.local',
+    );
+    const orderId = u.searchParams.get('order_id');
+    expect(orderId).toBeTruthy();
+    expect(window.sessionStorage.getItem(`openpay:order-memo:${orderId}`)).toBe('卵なし');
+    expect(u.searchParams.has('memo')).toBe(false);
+    expect(u.searchParams.has('customerMemo')).toBe(false);
+  });
+
+  it('注文メモ flag OFF はカートがあっても入力を表示しない', () => {
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByPlaceholderText('アレルギー・要望など（任意）')).toBeNull();
   });
 
   it('受注番号は同一 mount の再描画・チェーン切替でも不変', () => {

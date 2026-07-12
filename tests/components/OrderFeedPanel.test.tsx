@@ -133,6 +133,15 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByRole('button', { name: '対応済みにする' })).toBeInTheDocument();
   });
 
+  it('customerMemo を申告ラベル付き amber 枠の plain text で表示', async () => {
+    h.orders = [{ ...order, customerMemo: '<a href="https://evil.test">卵なし</a>' }];
+    const { container } = render();
+    expect(await screen.findByText('📝 お客様メモ（申告）')).toBeInTheDocument();
+    const memo = screen.getByText('<a href="https://evil.test">卵なし</a>');
+    expect(memo.closest('div')).toHaveClass('border-amber-200', 'bg-amber-50');
+    expect(container.querySelector('a[href="https://evil.test"]')).toBeNull();
+  });
+
   it('未対応の遅延注文は経過バッジと赤いカード面を表示', async () => {
     h.orders = [{ ...order, ts: Date.now() - (25 * 60_000 + 5_000) }];
     render();
