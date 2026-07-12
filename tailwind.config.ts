@@ -5,6 +5,9 @@ const config: Config = {
     './app/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
     './hooks/**/*.{ts,tsx}',
+    // lib/ にも表示用クラス定数がある (lib/categoryColor.ts のカテゴリ色パレット等)。
+    // content に無いと JIT が emit せず「class は付くが CSS が無い」不可視バグになる。
+    './lib/**/*.{ts,tsx}',
   ],
   theme: {
     extend: {

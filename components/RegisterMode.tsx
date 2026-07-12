@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { useQuery } from '@tanstack/react-query';
 import { formatUnits, type Address } from 'viem';
 import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Star, Trash2 } from 'lucide-react';
 import { AccountingSection } from './AccountingSection';
@@ -25,6 +26,8 @@ import { useQrSettings } from '@/hooks/useQrSettings';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
+import { useShopLive } from '@/hooks/useShopLive';
+import { useSiweSession } from '@/hooks/useSiweSession';
 import { randomId } from '@/lib/id';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -36,6 +39,7 @@ import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
+import type { StorefrontParts } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
 import { OptionSelectModal } from './OptionSelectModal';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -50,6 +54,9 @@ import {
 import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from '@/lib/tax';
 import { TaxCategorySelect } from './TaxCategorySelect';
 import { TokenLogo, ChainLogo } from './AssetLogo';
+import { categoryColorClasses } from '@/lib/categoryColor';
+import type { HandleTipConfig } from '@/lib/handle';
+import type { ShopLiveState } from '@/lib/shopLive';
 
 type CartLine = {
   id: string;
@@ -62,12 +69,77 @@ type CartLine = {
   presetId?: string;
 };
 
-export function RegisterMode({
-  onEditCurrency,
-}: {
+type RegisterModeProps = {
   /** 通貨/チェーンを変更する導線 (page が QR タブへ切替える)。レジは読み取り専用表示。 */
   onEditCurrency?: () => void;
-}) {
+};
+
+type OwnedHandle = {
+  handle: string;
+  config: HandleTipConfig;
+  storefront?: StorefrontParts;
+};
+
+type RegisterShopLive = {
+  state: ShopLiveState;
+  toggleSoldOut: (itemId: string, value: boolean) => void;
+  isPending: boolean;
+};
+
+export function RegisterMode(props: RegisterModeProps) {
+  // flag OFF では SIWE / handle / live の query を一切起動せず、従来のレジ依存境界を保つ。
+  return env.enableShopLive ? (
+    <RegisterModeWithShopLive {...props} />
+  ) : (
+    <RegisterModeContent {...props} />
+  );
+}
+
+function RegisterModeWithShopLive(props: RegisterModeProps) {
+  const { isSignedIn, sessionAddress } = useSiweSession();
+  const mine = useQuery({
+    // OrderFeedPanel / StorefrontPublishPanel と同一 cache キー・同一 `{handles,max}` 形を共有する。
+    queryKey: ['handle-mine', sessionAddress],
+    enabled: env.enableHandles && env.enableShopLive && isSignedIn,
+    queryFn: async (): Promise<{ handles: OwnedHandle[]; max: number }> => {
+      const res = await fetch('/api/handle');
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        throw new Error(typeof json.error === 'string' ? json.error : `http_${res.status}`);
+      }
+      const list = Array.isArray(json.handles)
+        ? (json.handles as unknown[]).filter(
+            (h): h is OwnedHandle =>
+              !!h &&
+              typeof h === 'object' &&
+              typeof (h as OwnedHandle).handle === 'string' &&
+              !!(h as OwnedHandle).config,
+          )
+        : [];
+      return { handles: list, max: typeof json.max === 'number' ? json.max : list.length };
+    },
+  });
+  const liveHandle = mine.data?.handles.find((h) => h.storefront)?.handle ?? '';
+  const { live, patch } = useShopLive(liveHandle);
+
+  // handle/live の障害をレジ本来の会計・商品選択 UI へ波及させないため、取得成功時だけ付加 UI を渡す。
+  const shopLive: RegisterShopLive | undefined =
+    isSignedIn && mine.isSuccess && liveHandle && live.isSuccess && !patch.isError
+      ? {
+          state: live.data,
+          toggleSoldOut: (itemId, value) =>
+            patch.mutate({ op: 'soldOut', itemId, value }),
+          isPending: patch.isPending,
+        }
+      : undefined;
+
+  return <RegisterModeContent {...props} shopLive={shopLive} />;
+}
+
+function RegisterModeContent({
+  onEditCurrency,
+  shopLive,
+}: RegisterModeProps & { shopLive?: RegisterShopLive }) {
   const t = useTranslations('RegisterMode');
   const { settings, setSettings, hydrated } = useQrSettings();
   const presetStore = useProductPresets();
@@ -171,6 +243,10 @@ export function RegisterMode({
         (p) => (p.category?.trim() ?? '') === effectiveCatFilter,
       )
     : presetStore.enabledPresets;
+  const soldOut = useMemo(
+    () => new Set(shopLive?.state.soldOut ?? []),
+    [shopLive?.state.soldOut],
+  );
 
   function addFromPreset(p: ProductPreset) {
     // 異通貨プリセットはカート非空時に警告 (同一カート単一通貨)。空なら通貨を切替。
@@ -444,21 +520,28 @@ export function RegisterMode({
                 >
                   {t('filterAll')}
                 </button>
-                {presetCategories.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setCatFilter(c)}
-                    aria-pressed={effectiveCatFilter === c}
-                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
-                      effectiveCatFilter === c
-                        ? 'border-brand bg-brand text-white'
-                        : 'border-slate-300 text-slate-600 hover:border-brand'
-                    }`}
-                  >
-                    {c}
-                  </button>
-                ))}
+                {presetCategories.map((c) => {
+                  const colors = categoryColorClasses(c);
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setCatFilter(c)}
+                      aria-pressed={effectiveCatFilter === c}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                        effectiveCatFilter === c
+                          ? 'border-brand bg-brand text-white'
+                          : 'border-slate-300 text-slate-600 hover:border-brand'
+                      }`}
+                    >
+                      <span
+                        className={`h-2 w-2 rounded-full ${colors.dot}`}
+                        aria-hidden
+                      />
+                      {c}
+                    </button>
+                  );
+                })}
               </div>
             )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -467,6 +550,9 @@ export function RegisterMode({
                 // (モバイルオーダーのメニュー画像と同じ image を共有)。https 以外は描画しない (二重防御)。
                 // 読込失敗は onError で隠し、名前+価格のテキスト表示へフォールバック (グリッドを壊さない)。
                 const presetImg = safeHttpUrl(p.image);
+                const category = p.category?.trim() ?? '';
+                const categoryColors = category ? categoryColorClasses(category) : null;
+                const isSoldOut = soldOut.has(p.id);
                 // このプリセットが今カートにいくつ入っているか (0 = 未投入)。
                 const qty = presetQty.get(p.id) ?? 0;
                 const inCart = qty > 0;
@@ -476,7 +562,7 @@ export function RegisterMode({
                     type="button"
                     onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
                     aria-label={inCart ? t('presetInCart', { name: p.name, count: qty }) : p.name}
-                    className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] active:bg-brand/5 ${
+                    className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] active:bg-brand/5 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
                       inCart
                         ? 'border-brand ring-2 ring-brand/15'
                         : 'border-slate-200'
@@ -500,6 +586,11 @@ export function RegisterMode({
                         <Star className="h-3 w-3 fill-amber-400 text-amber-400" aria-hidden />
                       </span>
                     )}
+                    {isSoldOut && (
+                      <span className="mb-1 inline-flex w-fit rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                        {t('soldOutBadge')}
+                      </span>
+                    )}
                     {showImages && presetImg && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -510,7 +601,7 @@ export function RegisterMode({
                         onError={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}
-                        className="mb-2 h-16 w-full rounded-lg object-cover"
+                        className={`mb-2 h-16 w-full rounded-lg object-cover ${isSoldOut ? 'grayscale' : ''}`}
                       />
                     )}
                     <div className="truncate text-sm font-semibold text-slate-800">
@@ -693,6 +784,7 @@ export function RegisterMode({
                 updatePreset={presetStore.updatePreset}
                 removePreset={presetStore.removePreset}
                 movePreset={presetStore.movePreset}
+                shopLive={shopLive}
               />
             </div>
           </details>

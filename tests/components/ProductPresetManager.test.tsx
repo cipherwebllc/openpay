@@ -84,6 +84,31 @@ describe('ProductPresetManager', () => {
     expect(fns.updatePreset).toHaveBeenCalledWith('a', { recommended: true });
   });
 
+  it('shopLive props があると可視ラベル付き売り切れトグルを表示して更新する', () => {
+    const toggleSoldOut = vi.fn();
+    const fns = {
+      addPreset: vi.fn(),
+      updatePreset: vi.fn(),
+      removePreset: vi.fn(),
+      movePreset: vi.fn(),
+    };
+    render(
+      <ProductPresetManager
+        presets={[preset({ id: 'a' })]}
+        {...fns}
+        shopLive={{
+          state: { soldOut: ['a'], paused: false, updatedAt: 1 },
+          toggleSoldOut,
+          isPending: false,
+        }}
+      />,
+    );
+    const toggle = screen.getByRole('checkbox', { name: '売り切れ' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggleSoldOut).toHaveBeenCalledWith('a', false);
+  });
+
   it('削除ボタン (確認 OK) で removePreset を呼ぶ', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = userEvent.setup();
