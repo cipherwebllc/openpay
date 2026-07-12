@@ -14,6 +14,7 @@ import { formatUnits } from 'viem';
 import { CheckCircle2, ChefHat, Clock, RefreshCw, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import { env } from '@/lib/env';
 import { fetchOrderFeed, orderFeedQueryKey } from '@/hooks/useOrderFeed';
+import { useOrderCalls } from '@/hooks/useOrderCalls';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
@@ -22,6 +23,9 @@ import { jpycChainLabel, type StorefrontParts } from '@/lib/mobileOrder';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
 import { ELAPSED_LATE_MIN, ELAPSED_WARN_MIN } from '@/components/OrderCard';
+import { OrderCallSection } from '@/components/OrderCallSection';
+import { isOrderAlertSoundEnabled } from '@/lib/soundPref';
+import { playNewOrderChime } from '@/lib/successChime';
 
 // /api/handle が返す所有 handle (StorefrontPublishPanel と同形・同 cache キーを共有)。
 // 営業中の操作 (ShopLivePanel) は公開済み店舗 (storefront あり) の handle に紐づく。
@@ -85,6 +89,7 @@ export function OrderFeedPanel() {
     refetchInterval: 12_000, // ~12s ポーリング (serverless 親和・タブレット常時表示向け)
     queryFn: () => fetchOrderFeed(),
   });
+  const callFeed = useOrderCalls(sessionAddress, isSignedIn, 12_000);
 
   // 対応済み = 削除でなくフラグ化。対象は txHash で指定 (受注番号は短縮で衝突しうるため)。
   const fulfill = useMutation({
@@ -295,11 +300,28 @@ export function OrderFeedPanel() {
           {/* 受注フィード本体は enableOrderRelay のときだけ描画 (shop-live 単独では営業中の操作のみ)。 */}
           {env.enableOrderRelay && (
             <>
+          {env.enableOrderCall ? (
+            <OrderCallSection
+              calls={callFeed.calls.data ?? []}
+              subject={sessionAddress}
+              enabled={isSignedIn && !callFeed.calls.isLoading && !callFeed.calls.isError}
+              isLoading={callFeed.calls.isLoading}
+              isError={callFeed.calls.isError || callFeed.resolve.isError}
+              isPending={callFeed.resolve.isPending}
+              onResolve={(id) => callFeed.resolve.mutate(id)}
+              onNewCalls={() => {
+                if (isOrderAlertSoundEnabled()) playNewOrderChime();
+              }}
+            />
+          ) : null}
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-400">{t('autoRefresh')}</p>
             <button
               type="button"
-              onClick={() => feed.refetch()}
+              onClick={() => {
+                void feed.refetch();
+                if (env.enableOrderCall) void callFeed.calls.refetch();
+              }}
               className="flex items-center gap-1 text-xs font-medium text-brand hover:underline"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden /> {t('refresh')}

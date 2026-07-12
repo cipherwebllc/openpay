@@ -2009,6 +2009,9 @@
     "tableDescPrefix": "Table {table}",
     "customerMemoLabel": "Order memo (optional)",
     "customerMemoPlaceholder": "Allergies or requests (optional)",
+    "callStaff": "🔔 Call staff",
+    "callSent": "Staff called (you can send again in {s}s)",
+    "callFailed": "Couldn't send the call. Please wait a moment and try again.",
     "timeLabel": "Hours & pickup",
     "openFromLabel": "Orders open (HH:mm)",
     "openFromHint": "Public-page orders stay closed until this time (Asia/Tokyo, same day).",
@@ -2070,6 +2073,15 @@
     "tableSave": "Save",
     "tableEdit": "Edit",
     "cancel": "Cancel"
+  },
+  "OrderCall": {
+    "heading": "🔔 Calls",
+    "table": "Table {table}",
+    "minutesAgo": "{m} min ago",
+    "done": "Handled",
+    "loading": "Loading…",
+    "empty": "No active calls.",
+    "loadError": "Couldn't load calls."
   },
   "OrderRelay": {
     "heading": "Orders",

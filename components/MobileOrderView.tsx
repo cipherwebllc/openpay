@@ -52,6 +52,7 @@ import type { AgentCartItem } from '@/lib/agentOrder';
 import { OptionSelectModal } from '@/components/OptionSelectModal';
 import { MenuItemCard } from '@/components/MenuItemCard';
 import { MobileOrderCartBar } from '@/components/MobileOrderCartBar';
+import { MobileOrderCallButton } from '@/components/MobileOrderCallButton';
 
 // カート行 (オプション無し=menu+qty / オプション有り=optionEntries) の統合ビュー型。
 type OptionCartEntry = {
@@ -669,6 +670,10 @@ export function MobileOrderView({
             className="mt-2 w-full resize-y rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none"
           />
         </div>
+      ) : null}
+
+      {env.enableOrderCall && config.dineIn === true && handle && tableNum ? (
+        <MobileOrderCallButton handle={handle} table={tableNum} merchant={config.receiver} />
       ) : null}
 
       {/* 注文サマリ + 支払い — 商品があれば画面下部に浮く (sticky) アプリ風カートバー。

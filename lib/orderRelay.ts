@@ -29,6 +29,16 @@ export const ORDER_ITEM_NAME_MAX = 80;
 export const ORDER_TABLE_MAX = 64; // テーブル番号ラベル (checkout description 由来) の上限
 export const ORDER_ID_MAX = 64;
 export const ORDER_MEMO_MAX = 120;
+export const ORDER_CALL_LIST_MAX = 30;
+export const ORDER_CALL_LIST_TTL_SEC = 30 * 60;
+export const ORDER_CALL_VISIBLE_MS = 15 * 60 * 1000;
+
+export type StoredCall = {
+  id: string;
+  handle: string;
+  table: string;
+  ts: number;
+};
 
 export type StoredOrderItem = {
   name: string;
@@ -96,6 +106,11 @@ export function uncookedItemTotals(orders: StoredOrder[]): { name: string; qty: 
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
 export function orderListKey(merchant: string): string {
   return `order:list:${merchant.toLowerCase()}`;
+}
+
+/** 店主 (受取アドレス) ごとの未対応スタッフ呼び出しリスト。 */
+export function callListKey(merchant: string): string {
+  return `order:call:${merchant.toLowerCase()}`;
 }
 
 /** txHash 冪等鍵 (1 決済 1 注文)。merchant や items は鍵に含めない。 */
@@ -246,6 +261,37 @@ export function sanitizeTable(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const t = raw.trim().slice(0, ORDER_TABLE_MAX);
   return t.length > 0 ? t : null;
+}
+
+/** KV の呼び出し entry を allowlist 復元する。table は注文と同じ sanitizeTable を共有する。 */
+export function parseStoredCall(raw: string): StoredCall | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const o = value as Record<string, unknown>;
+  const table = sanitizeTable(o.table);
+  if (
+    typeof o.id !== 'string' ||
+    o.id.length === 0 ||
+    typeof o.handle !== 'string' ||
+    o.handle.length === 0 ||
+    !table ||
+    typeof o.ts !== 'number' ||
+    !Number.isFinite(o.ts) ||
+    o.ts <= 0
+  ) {
+    return null;
+  }
+  return {
+    id: o.id.slice(0, 128),
+    handle: o.handle.slice(0, 30),
+    table,
+    ts: Math.floor(o.ts),
+  };
 }
 
 /** 顧客申告の注文メモ。空/非文字列は除外し、制御文字を落として最大 120 コードポイントに制限する。 */

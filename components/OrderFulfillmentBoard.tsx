@@ -14,12 +14,14 @@ import { Bell, BellOff, RefreshCw } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrderFeed } from '@/hooks/useOrderFeed';
+import { useOrderCalls } from '@/hooks/useOrderCalls';
 import { useNewOrderFlash } from '@/hooks/useNewOrderFlash';
 import { OrderCard } from '@/components/OrderCard';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
 import { orderDeadlineKey, type StoredOrder, uncookedItemTotals } from '@/lib/orderRelay';
+import { OrderCallSection } from '@/components/OrderCallSection';
 
 // 受注カードのレスポンシブグリッド (active / 折りたたみ done で共有 = 列数を一致させる)。
 const CARD_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3';
@@ -64,15 +66,27 @@ export function OrderFulfillmentBoard({
   const tokenMode = env.enableOrderToken && Boolean(token) && !isSignedIn;
   // 稼働画面なので少し短めの 8s ポーリング。token があれば SIWE 不要でそのトークンの受注を読む。
   const { feed, update } = useOrderFeed(sessionAddress, isSignedIn, 8_000, tokenMode ? token : null);
+  const callFeed = useOrderCalls(
+    sessionAddress,
+    isSignedIn,
+    8_000,
+    tokenMode ? token : null,
+  );
   // 失効トークン (rotate/revoke 済み) は feed が 401 invalid_token を返す → 保存を破棄し token モードを
   // 抜ける (サインイン要求へ)。失効リンクで 401 を繰り返さない。KV 障害 (503) では消さない (再試行で復帰)。
   useEffect(() => {
     if (!tokenMode) return;
-    if (feed.isError && feed.error instanceof Error && feed.error.message === 'invalid_token') {
+    const feedExpired =
+      feed.isError && feed.error instanceof Error && feed.error.message === 'invalid_token';
+    const callsExpired =
+      callFeed.calls.isError &&
+      callFeed.calls.error instanceof Error &&
+      callFeed.calls.error.message === 'invalid_token';
+    if (feedExpired || callsExpired) {
       clearStoredOrderToken();
       setToken(null);
     }
-  }, [tokenMode, feed.isError, feed.error]);
+  }, [tokenMode, feed.isError, feed.error, callFeed.calls.isError, callFeed.calls.error]);
   // テーブル訂正 (setTable op)。編集中の注文 txHash + 入力ドラフト。
   const [editTx, setEditTx] = useState<string | null>(null);
   const [tableDraft, setTableDraft] = useState('');
@@ -293,7 +307,10 @@ export function OrderFulfillmentBoard({
           </button>
           <button
             type="button"
-            onClick={() => feed.refetch()}
+            onClick={() => {
+              void feed.refetch();
+              if (env.enableOrderCall) void callFeed.calls.refetch();
+            }}
             className="flex items-center gap-1 text-xs font-medium text-brand hover:underline"
           >
             <RefreshCw className="h-3.5 w-3.5" aria-hidden /> {t('refresh')}
@@ -301,6 +318,24 @@ export function OrderFulfillmentBoard({
         </div>
       </div>
       <p className="text-xs text-slate-400">{t('autoRefresh')}</p>
+      {env.enableOrderCall && mode === 'hall' ? (
+        <OrderCallSection
+          calls={callFeed.calls.data ?? []}
+          subject={feedSubject}
+          enabled={
+            (isSignedIn || tokenMode) &&
+            !callFeed.calls.isLoading &&
+            !callFeed.calls.isError
+          }
+          isLoading={callFeed.calls.isLoading}
+          isError={callFeed.calls.isError || callFeed.resolve.isError}
+          isPending={callFeed.resolve.isPending}
+          onResolve={(id) => callFeed.resolve.mutate(id)}
+          onNewCalls={() => {
+            if (soundOnRef.current) playNewOrderChime();
+          }}
+        />
+      ) : null}
       {pickupSortEnabled ? (
         <p className="text-xs text-slate-500">{t('pickupSortNote')}</p>
       ) : null}

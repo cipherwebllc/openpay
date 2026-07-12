@@ -58,6 +58,19 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.enableOrderMemo).toBe(true);
   });
 
+  it('スタッフ呼び出しは自身の flag と ORDER_RELAY の両方が ON のときだけ有効', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_CALL = '1';
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY = '0';
+    let mod = await import('@/lib/env');
+    expect(mod.env.enableOrderCall).toBe(false);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_ORDER_RELAY = 'true';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableOrderCall).toBe(true);
+  });
+
   it('FEE_RECEIVER_ADDRESS 未設定なら 0x...dEaD にフォールバック', async () => {
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS;

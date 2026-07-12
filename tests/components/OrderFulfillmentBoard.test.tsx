@@ -9,6 +9,7 @@ const envHold = vi.hoisted(() => ({
   enablePreorderTime: false,
   enableOrderToken: false,
   enableOrderPickup: false,
+  enableOrderCall: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -24,6 +25,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderPickup() {
         return envHold.enableOrderPickup;
+      },
+      get enableOrderCall() {
+        return envHold.enableOrderCall;
       },
     },
   };
@@ -56,6 +60,7 @@ vi.mock('@/hooks/useSiweSession', () => ({
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
+const resolveCallSpy = vi.hoisted(() => vi.fn());
 const feedHold = vi.hoisted(() => ({
   data: [] as StoredOrder[],
   isError: false,
@@ -70,6 +75,21 @@ vi.mock('@/hooks/useOrderFeed', () => ({
       update: { mutate: mutateSpy, isPending: false },
     };
   },
+}));
+const callHold = vi.hoisted(() => ({
+  data: [] as Array<{ id: string; handle: string; table: string; ts: number }>,
+}));
+vi.mock('@/hooks/useOrderCalls', () => ({
+  useOrderCalls: () => ({
+    calls: {
+      data: callHold.data,
+      isError: false,
+      error: null,
+      isLoading: false,
+      refetch: vi.fn(),
+    },
+    resolve: { mutate: resolveCallSpy, isPending: false, isError: false },
+  }),
 }));
 
 // 新着アラート音 (Web Audio) + 設定 pref を spy 化 (jsdom は AudioContext 無し)。
@@ -114,6 +134,9 @@ beforeEach(() => {
   envHold.enablePreorderTime = false; // Phase 4 flag 既定 OFF
   envHold.enableOrderToken = false; // Phase 5 flag 既定 OFF
   envHold.enableOrderPickup = false; // お渡し準備完了通知 flag 既定 OFF
+  envHold.enableOrderCall = false;
+  callHold.data = [];
+  resolveCallSpy.mockClear();
   tokenHold.stored = null;
   soundHold.enabled = false; // 新着アラート音 既定 OFF
   soundHold.set.mockClear();
@@ -145,6 +168,33 @@ describe('OrderFulfillmentBoard', () => {
       txHash: TX,
       op: { kind: 'itemServed', index: 0, value: true },
     });
+  });
+
+  it('ホール先頭に呼び出しカードを表示し「対応した」で resolve、厨房には出さない', () => {
+    envHold.enableOrderCall = true;
+    callHold.data = [{ id: 'call-1', handle: 'coffee', table: '12', ts: Date.now() - 60_000 }];
+    const { unmount } = renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(screen.getByText('🔔 呼び出し')).toBeInTheDocument();
+    expect(screen.getByText('🔔 テーブル 12')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '対応した' }));
+    expect(resolveCallSpy).toHaveBeenCalledWith('call-1');
+    unmount();
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.queryByText('🔔 呼び出し')).toBeNull();
+  });
+
+  it('呼び出しチャイムは初回 snapshot では鳴らさず、音ONの後続新規だけ鳴らす', () => {
+    envHold.enableOrderCall = true;
+    soundHold.enabled = true;
+    callHold.data = [{ id: 'call-1', handle: 'coffee', table: '1', ts: Date.now() }];
+    const view = renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
+    expect(chime.play).not.toHaveBeenCalled();
+    callHold.data = [
+      { id: 'call-2', handle: 'coffee', table: '2', ts: Date.now() },
+      ...callHold.data,
+    ];
+    view.rerender(<OrderFulfillmentBoard mode="hall" />);
+    expect(chime.play).toHaveBeenCalledTimes(1);
   });
 
   it('ホール + 準備完了通知 ON + ready 前 → 「お渡し準備完了（通知）」で markReady op を発火', () => {

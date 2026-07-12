@@ -2009,6 +2009,9 @@
     "tableDescPrefix": "テーブル {table}",
     "customerMemoLabel": "注文メモ（任意）",
     "customerMemoPlaceholder": "アレルギー・要望など（任意）",
+    "callStaff": "🔔 スタッフを呼ぶ",
+    "callSent": "呼び出しました（{s} 秒後に再送可）",
+    "callFailed": "呼び出しを送れませんでした。少し待ってからお試しください。",
     "timeLabel": "受付・受取時間",
     "openFromLabel": "受付開始 (HH:mm)",
     "openFromHint": "この時刻まで公開ページの注文を停止します (Asia/Tokyo・同日)",
@@ -2070,6 +2073,15 @@
     "tableSave": "保存",
     "tableEdit": "訂正",
     "cancel": "キャンセル"
+  },
+  "OrderCall": {
+    "heading": "🔔 呼び出し",
+    "table": "テーブル {table}",
+    "minutesAgo": "{m} 分前",
+    "done": "対応した",
+    "loading": "読み込み中…",
+    "empty": "現在の呼び出しはありません。",
+    "loadError": "呼び出しを取得できませんでした。"
   },
   "OrderRelay": {
     "heading": "受注",
