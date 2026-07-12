@@ -268,6 +268,9 @@ describe('OrderFulfillmentBoard', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
     expect(screen.getByText('未完了の受注はありません。')).toBeInTheDocument(); // active 空
     expect(screen.getByText(/調理済み \(1\)/)).toBeInTheDocument(); // 折りたたみセクション
+    const doneCard = screen.getByText(/受注番号 #A1/).closest('li');
+    expect(doneCard).toHaveClass('border-slate-200', 'bg-white', 'opacity-70');
+    expect(doneCard).not.toHaveClass('bg-red-50/60', 'bg-amber-50/70');
     fireEvent.click(screen.getByRole('button', { name: '未調理に戻す' }));
     expect(mutateSpy).toHaveBeenCalledWith({ txHash: TX, op: { kind: 'kitchenDone', value: false } });
   });
@@ -332,11 +335,44 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.getByText('配膳待ち 1')).toBeInTheDocument();
   });
 
+  it('厨房: active 注文の未調理品を合算したストリップを表示', () => {
+    feedHold.data = [
+      order({
+        orderId: 'A1',
+        txHash: TX,
+        items: [
+          { name: '牛丼', qty: 2, price: '500' },
+          { name: '味噌汁', qty: 4, price: '100', cooked: true },
+        ],
+      }),
+      order({
+        orderId: 'A2',
+        txHash: TX2,
+        items: [
+          { name: '牛丼', qty: 3, price: '500' },
+          { name: 'プリン', qty: 1, price: '200' },
+        ],
+      }),
+    ];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    const strip = screen.getByText('未調理の合計').parentElement;
+    expect(strip).toHaveTextContent('牛丼 ×5');
+    expect(strip).toHaveTextContent('プリン ×1');
+    expect(strip).not.toHaveTextContent('味噌汁 ×4');
+  });
+
   // ── UX-2: 経過時間バッジ ────────────────────────────────────────────────
   it('経過時間: 受信から約15分なら「15分経過」を表示', () => {
     feedHold.data = [order({ ts: Date.now() - (15 * 60_000 + 5_000) })];
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
-    expect(screen.getByText('15分経過')).toBeInTheDocument();
+    const card = screen.getByText('15分経過').closest('li');
+    expect(card).toHaveClass('border-amber-400', 'bg-amber-50/70');
+  });
+  it('経過時間: 受信から約25分ならカード面を赤くする', () => {
+    feedHold.data = [order({ ts: Date.now() - (25 * 60_000 + 5_000) })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    const card = screen.getByText('25分経過').closest('li');
+    expect(card).toHaveClass('border-red-400', 'bg-red-50/60');
   });
   it('経過時間: ts 不明 (0) はバッジを出さない', () => {
     feedHold.data = [order({ ts: 0 })];
@@ -391,6 +427,20 @@ describe('OrderFulfillmentBoard', () => {
     rerender(<OrderFulfillmentBoard mode="kitchen" />);
     expect(screen.getByText('新着')).toBeInTheDocument(); // 点滅は出る
     expect(chime.play).not.toHaveBeenCalled(); // 音は鳴らない
+  });
+
+  it('新着注文: 遅延済みでも点滅・amber ring をカード面の遅延色より優先', () => {
+    const oldTs = Date.now() - 25 * 60_000;
+    feedHold.data = [order({ orderId: 'A1', txHash: TX, ts: oldTs })];
+    const { rerender } = renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    feedHold.data = [
+      order({ orderId: 'A1', txHash: TX, ts: oldTs }),
+      order({ orderId: 'A2', txHash: TX2, ts: oldTs }),
+    ];
+    rerender(<OrderFulfillmentBoard mode="kitchen" />);
+    const newCard = screen.getByText(/受注番号 #A2/).closest('li');
+    expect(newCard).toHaveClass('animate-pulse', 'border-amber-400', 'bg-white', 'ring-2');
+    expect(newCard).not.toHaveClass('bg-red-50/60');
   });
 
   // ── LARP-2: 永続ON復元時の prime-on-first-gesture (Codex P2 修正の実証) ──────

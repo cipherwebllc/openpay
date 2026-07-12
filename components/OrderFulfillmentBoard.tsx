@@ -19,7 +19,7 @@ import { OrderCard } from '@/components/OrderCard';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
-import { type StoredOrder } from '@/lib/orderRelay';
+import { type StoredOrder, uncookedItemTotals } from '@/lib/orderRelay';
 
 // 受注カードのレスポンシブグリッド (active / 折りたたみ done で共有 = 列数を一致させる)。
 const CARD_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3';
@@ -140,6 +140,7 @@ export function OrderFulfillmentBoard({
     mode === 'kitchen' ? o.kitchenDone === true : o.fulfilled;
   const activeOrders = orders.filter((o) => !isStationDone(o));
   const doneOrders = orders.filter((o) => isStationDone(o));
+  const uncookedTotals = mode === 'kitchen' ? uncookedItemTotals(activeOrders) : [];
 
   // ホールの「配膳準備OK」= 全品 調理済み (厨房完了)。バッジ + 並べ替えの両方で使う。
   const allCooked = (o: StoredOrder): boolean =>
@@ -301,6 +302,28 @@ export function OrderFulfillmentBoard({
         </p>
       ) : (
         <>
+          {mode === 'kitchen' && activeOrders.length > 0 && uncookedTotals.length > 0 ? (
+            <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <p className="mb-1.5 text-[11px] font-semibold text-slate-500">
+                {t('uncookedTotalsLabel')}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {uncookedTotals.slice(0, 12).map((item) => (
+                  <span
+                    key={item.name}
+                    className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
+                  >
+                    {item.name} ×{item.qty}
+                  </span>
+                ))}
+                {uncookedTotals.length > 12 ? (
+                  <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    +{uncookedTotals.length - 12}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {activeOrders.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-400">
               {t('allStationDone')}

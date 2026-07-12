@@ -68,6 +68,20 @@ export type StoredOrder = {
   amountUnchecked?: boolean;
 };
 
+/** 厨房向け: 未調理 (cooked !== true) の品目数を注文横断で商品名ごとに集計する。 */
+export function uncookedItemTotals(orders: StoredOrder[]): { name: string; qty: number }[] {
+  const totals = new Map<string, number>();
+  for (const order of orders) {
+    for (const item of order.items) {
+      if (item.cooked === true) continue;
+      totals.set(item.name, (totals.get(item.name) ?? 0) + item.qty);
+    }
+  }
+  return [...totals].map(([name, qty]) => ({ name, qty })).sort(
+    (a, b) => b.qty - a.qty || a.name.localeCompare(b.name),
+  );
+}
+
 /** 店主 (受取アドレス) ごとの受注リスト KV キー。受取アドレスでスコープ (read は受取ウォレット SIWE)。 */
 export function orderListKey(merchant: string): string {
   return `order:list:${merchant.toLowerCase()}`;
