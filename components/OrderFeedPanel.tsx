@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatUnits } from 'viem';
 import { CheckCircle2, ChefHat, Clock, RefreshCw, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import { env } from '@/lib/env';
+import { fetchOrderFeed, orderFeedQueryKey } from '@/hooks/useOrderFeed';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
@@ -33,14 +34,6 @@ type OwnedHandle = {
 
 // JPYC は全チェーン 18 decimals。保存 amount は minor units の十進文字列 (parseStoredOrder で検証済み)。
 const JPYC_DECIMALS = 18;
-
-async function fetchFeed(): Promise<StoredOrder[]> {
-  const res = await fetch('/api/order/feed');
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  // KV 障害 (503) を「受注ゼロ」と偽装しない (isError でエラー表示 + 再試行)。
-  if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${res.status}`);
-  return Array.isArray(json.orders) ? (json.orders as StoredOrder[]) : [];
-}
 
 // OrderFeedPanel は "JPYC (Polygon)" 形式 (OrderFulfillmentBoard は bare "Polygon")。slug→bare label の
 // 解決だけ jpycChainLabel で共有し、フォーマット (プレフィックス) は各呼出側が付ける。
@@ -87,10 +80,10 @@ export function OrderFeedPanel() {
   const feed = useQuery({
     // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ。
     // enableOrderRelay OFF (営業中の操作 だけ shop-live で開いている) では受注フィードを引かない。
-    queryKey: ['order-feed', sessionAddress],
+    queryKey: orderFeedQueryKey(sessionAddress),
     enabled: isSignedIn && env.enableOrderRelay,
     refetchInterval: 12_000, // ~12s ポーリング (serverless 親和・タブレット常時表示向け)
-    queryFn: fetchFeed,
+    queryFn: () => fetchOrderFeed(),
   });
 
   // 対応済み = 削除でなくフラグ化。対象は txHash で指定 (受注番号は短縮で衝突しうるため)。
@@ -103,7 +96,7 @@ export function OrderFeedPanel() {
       });
       if (!res.ok) throw new Error(`http_${res.status}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['order-feed', sessionAddress] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: orderFeedQueryKey(sessionAddress) }),
   });
 
   const renderCard = (o: StoredOrder, done: boolean) => {
