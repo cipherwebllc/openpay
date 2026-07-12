@@ -9,7 +9,7 @@
 // をゲートする (handles OFF の単体テストで QueryClient を要求しないため)。
 
 import { useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
 import { MobileOrderPlacardModal } from '@/components/MobileOrderPlacardModal';
@@ -17,7 +17,12 @@ import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
-import { JPYC_CHAIN_LABEL, type StorefrontParts } from '@/lib/mobileOrder';
+import {
+  JPYC_CHAIN_LABEL,
+  storefrontPartsEquivalent,
+  type StorefrontParts,
+} from '@/lib/mobileOrder';
+import { formatPublishedRelativeTime } from '@/lib/handlePublish';
 import { shortAddress } from '@/lib/format';
 import type { Address } from 'viem';
 
@@ -62,6 +67,7 @@ export function StorefrontPublishPanel({
   onLoadStorefront?: (parts: StorefrontParts, receiver: string) => void;
 }) {
   const t = useTranslations('MobileOrder');
+  const locale = useLocale();
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } = useSiweSession();
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
@@ -101,6 +107,32 @@ export function StorefrontPublishPanel({
       ? selected
       : (handles.find((hh) => hh.storefront)?.handle ?? handles[0]?.handle ?? '');
   const selectedHandle = handles.find((hh) => hh.handle === effectiveSelected) ?? null;
+  const receiverWillChange =
+    !!receiver &&
+    !!selectedHandle &&
+    receiver.toLowerCase() !== selectedHandle.config.to.toLowerCase();
+  // currentParts が公開可能なときだけ、API と同じ正規化を通した storefront + 既存警告と
+  // 同条件の受取先差分を dirty とみなす。未公開 handle には比較 baseline が無いので付けない。
+  const hasUnpublishedChanges = useMemo(
+    () =>
+      storefront !== null &&
+      !!selectedHandle?.storefront &&
+      (!storefrontPartsEquivalent(storefront, selectedHandle.storefront) ||
+        receiverWillChange),
+    [receiverWillChange, selectedHandle?.storefront, storefront],
+  );
+  const statusNow = Date.now();
+  const relativePublishedAt = formatPublishedRelativeTime(
+    selectedHandle?.updatedAt,
+    locale,
+    statusNow,
+  );
+  const relativePublishedLabel =
+    relativePublishedAt &&
+    typeof selectedHandle?.updatedAt === 'number' &&
+    Math.abs(statusNow - selectedHandle.updatedAt) < 60_000
+      ? t('publishStatusJustNow')
+      : relativePublishedAt?.label;
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -125,9 +157,34 @@ export function StorefrontPublishPanel({
         }),
       });
       if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
-      return json;
+      return {
+        json,
+        publishedHandle: selectedHandle.handle,
+        publishedConfig: nextConfig,
+        publishedStorefront: storefront,
+      };
     },
-    onSuccess: () => {
+    onSuccess: ({ json, publishedHandle, publishedConfig, publishedStorefront }) => {
+      // POST が返した server timestamp と、実際に送った snapshot を同一 cache へ即反映する。
+      // invalidate 後の GET でも同じ record に収束し、送信中に下書きを変えた場合は dirty が残る。
+      const updatedAt = typeof json.updatedAt === 'number' ? json.updatedAt : undefined;
+      qc.setQueryData<MineResponse>(['handle-mine', sessionAddress], (current) =>
+        current
+          ? {
+              ...current,
+              handles: current.handles.map((handle) =>
+                handle.handle === publishedHandle
+                  ? {
+                      ...handle,
+                      config: publishedConfig,
+                      storefront: publishedStorefront,
+                      updatedAt: updatedAt ?? handle.updatedAt,
+                    }
+                  : handle,
+              ),
+            }
+          : current,
+      );
       qc.invalidateQueries({ queryKey: ['handle-mine'] });
     },
   });
@@ -208,6 +265,33 @@ export function StorefrontPublishPanel({
             </p>
           )}
 
+          <div
+            data-testid="storefront-publish-status"
+            className="flex flex-wrap items-center gap-2"
+          >
+            {selectedHandle?.storefront ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span>{t('publishStatusLive')}</span>
+                <span aria-hidden>·</span>
+                {relativePublishedAt && relativePublishedLabel ? (
+                  <time dateTime={relativePublishedAt.dateTime}>{relativePublishedLabel}</time>
+                ) : (
+                  <span>{t('publishStatusUpdatedUnknown')}</span>
+                )}
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                {t('publishStatusUnpublished')}
+              </span>
+            )}
+            {hasUnpublishedChanges && (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                {t('publishStatusUnpublishedChanges')}
+              </span>
+            )}
+          </div>
+
           {/* 別端末で編集するための「読み込み」: 公開中の @handle の店舗設定 + メニューを
               ビルダーへ復元する。破壊的 (この端末の下書き/商品カタログを上書き) なので確認を挟む。 */}
           {selectedHandle?.storefront &&
@@ -253,16 +337,14 @@ export function StorefrontPublishPanel({
               {t('publishReceiverShared')}
             </p>
           )}
-          {receiver &&
-            selectedHandle &&
-            receiver.toLowerCase() !== selectedHandle.config.to.toLowerCase() && (
-              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {t('publishReceiverWillChange', {
-                  from: shortAddress(selectedHandle.config.to),
-                  to: shortAddress(receiver),
-                })}
-              </p>
-            )}
+          {receiverWillChange && receiver && selectedHandle && (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {t('publishReceiverWillChange', {
+                from: shortAddress(selectedHandle.config.to),
+                to: shortAddress(receiver),
+              })}
+            </p>
+          )}
           <button
             type="button"
             disabled={!storefront || !selectedHandle || publish.isPending}
