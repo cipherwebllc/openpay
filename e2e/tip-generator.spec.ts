@@ -69,8 +69,9 @@ test.describe('Tip widget generator (creator UX)', () => {
   }) => {
     await openTipTab(page);
     await expect(page.getByText('プレビュー')).toBeVisible();
-    // プレビュー内に既定プリセット (300 JPYC) が chip 表示
-    await expect(page.getByText('300 JPYC')).toBeVisible();
+    // プレビュー (実 TipForm) 内に既定プリセット (300 JPYC) が金額 pill として表示。
+    // 実 TipForm 化で明細 dd にも同文言が出るため、pill の button role に scope する。
+    await expect(page.getByRole('button', { name: '300 JPYC' })).toBeVisible();
     await expect(
       page.getByText(/チップの受け取りに手数料はかかりません/),
     ).toBeVisible();
