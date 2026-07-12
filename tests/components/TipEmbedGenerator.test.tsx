@@ -44,8 +44,8 @@ async function openEmbedTab(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('tab', { name: 'サイトに埋め込む' }));
 }
 
-// 「高度な設定」は折りたたみ (default 閉・button+条件描画)。中身 (決済方法表示 /
-// crossChain toggle) にアクセスするテストは先に開く。
+// 「高度な設定」は USDC のみで表示する折りたたみ (default 閉・button+条件描画)。
+// crossChain toggle にアクセスするテストは先に USDC を選択してから開く。
 async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: /高度な設定/ }));
 }
@@ -596,28 +596,24 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
     await waitFor(() => expectInUrl(/crossChain=false/));
   });
 
-  it('JPYC 選択時は cross-chain toggle 非表示 (USDC 専用機能)', async () => {
-    const user = userEvent.setup();
+  it('JPYC 選択時は空の「高度な設定」自体を表示しない', async () => {
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    // 高度な設定を開いても JPYC では crossChain toggle は出ない (token gate)。
-    await openAdvanced(user);
+    expect(screen.queryByRole('button', { name: /高度な設定/ })).toBeNull();
     expect(
       screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
     ).toBeNull();
   });
 
-  it('高度な設定に「決済方法: ガスレス」が読み取り表示される (チップは常にガスレス固定)', async () => {
+  it('USDC の高度な設定は cross-chain だけを表示し、固定の決済方法表示は出さない', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    // 折りたたみ「高度な設定」見出し + 読み取りのガスレス決済方法 (選択 UI は無い)。
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
     expect(screen.getByText('高度な設定 (任意)')).toBeInTheDocument();
     await openAdvanced(user);
-    expect(screen.getByText('決済方法')).toBeInTheDocument();
-    expect(
-      screen.getByText(/ファンはガス代を用意せず投げ銭できます/),
-    ).toBeInTheDocument();
+    expect(screen.getByText('別チェーンからの受取 (USDC のみ)')).toBeInTheDocument();
+    expect(screen.queryByText('決済方法')).toBeNull();
   });
 
   it('高度な設定を開かなくても (折りたたみのまま) crossChain=false が URL に直列化される', async () => {
@@ -756,17 +752,27 @@ describe('TipEmbedGenerator — レイアウト (mobile overflow / preview 位�
     expect(right?.className).toMatch(/\bmin-w-0\b/);
   });
 
-  it('DOM 順は 左カラム (Step1/2) → 右カラム aside (プレビュー/公開)', async () => {
+  it('mobile の表示順は Step1 → Step2 → プレビュー → 高度な設定 → Step3', async () => {
+    const user = userEvent.setup();
     const { container } = render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.click(screen.getByRole('button', { name: /USDC/ }));
     const grid = container.querySelector('div.lg\\:grid')!;
     const children = Array.from(grid.children);
-    // mobile (1 カラム) では DOM 順がそのまま視覚順。プレビュー (aside 内) が
-    // カスタマイズ設定 (左 div) の直後に来る。
     expect(children[0].tagName).toBe('DIV');
     expect(children[1].tagName).toBe('ASIDE');
-    // プレビューは右 aside 内
+    expect(children[0]).toHaveClass('contents');
+    expect(children[1]).toHaveClass('contents');
+
+    const left = children[0] as HTMLElement;
     const aside = children[1] as HTMLElement;
-    expect(within(aside).getByText('プレビュー')).toBeInTheDocument();
+    expect(left.className).toContain('[&>section:first-child]:order-1');
+    expect(left.className).toContain('[&>section:nth-child(2)]:order-2');
+    expect(within(aside).getByText('プレビュー').closest('.order-3')).not.toBeNull();
+    expect(
+      within(left).getByText('高度な設定 (任意)').closest('.order-4'),
+    ).not.toBeNull();
+    expect(aside.className).toContain('[&>section]:order-5');
+    expect(within(aside).getByText('公開する')).toBeInTheDocument();
   });
 });

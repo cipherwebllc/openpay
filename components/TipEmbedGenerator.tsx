@@ -251,9 +251,9 @@ export function TipEmbedGenerator() {
   const defaultPresetsList = DEFAULT_TIP_PRESETS[settings.token].join(', ');
 
   return (
-    <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
+    <div className="grid grid-cols-1 gap-5 lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
       {/* 左カラム: 入力 (Step 1 受取先 / Step 2 カスタマイズ) */}
-      <div className="min-w-0 space-y-5">
+      <div className="contents min-w-0 lg:block lg:space-y-5 [&>section:first-child]:order-1 [&>section:nth-child(2)]:order-2">
         <StepCard step={1} icon={Wallet} title={t('step1Title')}>
           <div className="space-y-4">
             <ReceiverBlock
@@ -396,71 +396,59 @@ export function TipEmbedGenerator() {
           </div>
         </StepCard>
 
-        {/* ▸ 高度な設定 (任意): チップは設計上常にガスレス固定 (読み取り表示) +
-            crossChain (USDC のみ)。3 モードの IA を揃えるため折りたたみで集約。 */}
-        <div className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((o) => !o)}
-            aria-expanded={advancedOpen}
-            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium text-slate-700"
-          >
-            <span>{t('advancedTitle')}</span>
-            <ChevronDown
-              className={`h-4 w-4 flex-none text-slate-400 transition-transform ${
-                advancedOpen ? 'rotate-180' : ''
-              }`}
-              aria-hidden
-            />
-          </button>
-          {advancedOpen && (
-            <div className="space-y-4 border-t border-slate-200 px-4 py-4">
-            {/* 決済方法 (読み取り): チップは常にガスレス固定 (ファンはガス代不要)。 */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                {t('paymentMethodLabel')}
-              </p>
-              <p className="mt-1 text-sm text-slate-700">
-                {t('paymentMethodGasless')}
-              </p>
-            </div>
-
-            {/* Cross-chain 受信許可 toggle (USDC のみ意味あり)。Default ON。OFF で
-                creator が指定 chain での同一 chain 送金のみ受け付ける。 */}
-            {settings.token === 'usdc' && (
-              <Field label={t('crossChainHeading')}>
-                <label className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={settings.crossChain}
-                    onChange={(e) =>
-                      setSettings((s) => ({
-                        ...s,
-                        crossChain: e.target.checked,
-                      }))
-                    }
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                  />
-                  <span className="text-xs">
-                    <span className="font-semibold text-slate-700">
-                      {t('crossChainToggleLabel')}
+        {/* 高度な設定は変更可能な cross-chain 設定がある USDC でのみ表示する。 */}
+        {settings.token === 'usdc' && (
+          <div className="order-4 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              aria-expanded={advancedOpen}
+              className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium text-slate-700"
+            >
+              <span>{t('advancedTitle')}</span>
+              <ChevronDown
+                className={`h-4 w-4 flex-none text-slate-400 transition-transform ${
+                  advancedOpen ? 'rotate-180' : ''
+                }`}
+                aria-hidden
+              />
+            </button>
+            {advancedOpen && (
+              <div className="border-t border-slate-200 px-4 py-4">
+                {/* Default ON。OFF で creator が指定 chain での同一 chain 送金のみ受け付ける。 */}
+                <Field label={t('crossChainHeading')}>
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={settings.crossChain}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          crossChain: e.target.checked,
+                        }))
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span className="text-xs">
+                      <span className="font-semibold text-slate-700">
+                        {t('crossChainToggleLabel')}
+                      </span>
+                      <span className="block text-slate-500">
+                        {t('crossChainToggleDescription')}
+                      </span>
                     </span>
-                    <span className="block text-slate-500">
-                      {t('crossChainToggleDescription')}
-                    </span>
-                  </span>
-                </label>
-              </Field>
+                  </label>
+                </Field>
+              </div>
             )}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      {/* 右カラム: プレビュー (主役) + 公開 + 開発者向け設定。desktop は sticky。 */}
-      <aside className="mt-6 min-w-0 space-y-4 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+      {/* mobile は contents + order で preview を高度な設定より前へ。desktop は従来の sticky 右カラム。 */}
+      <aside className="contents min-w-0 self-start lg:sticky lg:top-4 lg:block lg:max-h-[calc(100vh-2rem)] lg:space-y-4 lg:overflow-y-auto [&>section]:order-5">
         {/* プレビュー hero */}
-        <div className="rounded-2xl border border-brand/30 bg-white p-4 shadow-sm ring-1 ring-brand/10">
+        <div className="order-3 rounded-2xl border border-brand/30 bg-white p-4 shadow-sm ring-1 ring-brand/10">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
             {t('previewTitle')}
           </h3>
@@ -660,7 +648,7 @@ export function TipEmbedGenerator() {
             単一チップの生成に専念する。 */}
 
         {/* 開発者向け設定 (折りたたみ、default 閉): 成功画面 + webhook */}
-        <div className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+        <div className="order-6 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
           <button
             type="button"
             onClick={() => setDevOpen((o) => !o)}

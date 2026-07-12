@@ -33,4 +33,20 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
       expect(L.supportFeeTipBody).toContain(`${floorJpyc} JPYC`);
     });
   }
+
+  it('TipEmbedGenerator: 受取無料・送る側が約 2 JPYC 負担・1% 不適用を ja/en で固定する', () => {
+    // チップ専用の DISCLOSED 定数はないため、共通の開示フロア数値と
+    // 「1% 不適用・送る側負担」というチップ固有の意味をコピー側で固定する。
+    const jaNote = ja.TipEmbedGenerator.feeNote;
+    expect(jaNote).toContain('チップの受け取りに手数料はかかりません');
+    expect(jaNote).toContain('決済額の 1% は適用されません');
+    expect(jaNote).toContain('送る方');
+    expect(jaNote).toContain(`約 ${floorJpyc} JPYC`);
+
+    const enNote = en.TipEmbedGenerator.feeNote;
+    expect(enNote).toContain('Receiving tips is free');
+    expect(enNote).toContain('the 1% fee does not apply');
+    expect(enNote).toContain('The sender covers');
+    expect(enNote).toContain(`about ${floorJpyc} JPYC`);
+  });
 });

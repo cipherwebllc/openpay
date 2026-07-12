@@ -71,5 +71,39 @@ test.describe('Tip widget generator (creator UX)', () => {
     await expect(page.getByText('プレビュー')).toBeVisible();
     // プレビュー内に既定プリセット (300 JPYC) が chip 表示
     await expect(page.getByText('300 JPYC')).toBeVisible();
+    await expect(
+      page.getByText(/チップの受け取りに手数料はかかりません/),
+    ).toBeVisible();
+  });
+
+  test('mobile は Step1 → Step2 → プレビュー → 高度な設定 → Step3、設定は USDC のみ', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openTipTab(page);
+
+    await expect(
+      page.getByRole('button', { name: /高度な設定/ }),
+    ).toHaveCount(0);
+    await page.getByRole('button', { name: /^USDC/ }).click();
+
+    const items = [
+      page.getByRole('heading', { name: '受取先' }),
+      page.getByRole('heading', { name: '表示をカスタマイズ' }),
+      page.getByRole('heading', { name: 'プレビュー' }),
+      page.getByRole('button', { name: /高度な設定/ }),
+      page.getByRole('heading', { name: '公開する' }),
+    ];
+    const positions = await Promise.all(
+      items.map(async (item) => (await item.boundingBox())?.y ?? -1),
+    );
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+
+    await items[3].click();
+    await expect(page.getByText('決済方法')).toHaveCount(0);
+    await expect(
+      page.getByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
+    ).toBeVisible();
   });
 });
