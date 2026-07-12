@@ -19,6 +19,11 @@ import { isValidTokenSymbol, type TokenSymbol } from '@/lib/tokens';
 import { isJpycChainSlug, type JpycChainSlug } from '@/lib/chains';
 import { COLOR_PATTERN } from '@/lib/url';
 import { stripControlChars } from '@/lib/sanitize';
+import {
+  handlePageTheme,
+  isHandleTheme,
+  type HandleTheme,
+} from '@/lib/handleTheme';
 
 export type TipOgLocale = 'ja' | 'en';
 
@@ -82,6 +87,7 @@ export interface TipOgModel {
   sub: string;
   footer: string;
   url: string;
+  theme?: HandleTheme;
 }
 
 // route から渡される URLSearchParams (または .get を持つ任意) から描画モデルを作る。
@@ -134,6 +140,9 @@ export function buildTipOgModel(sp: {
         : `Support with ${tokenLabel}`,
     footer: ja ? 'ウォレットで直接受け取り' : 'Straight to your wallet',
     url: 'open-pay.jp',
+    ...(isHandleTheme(sp.get('theme'))
+      ? { theme: sp.get('theme') as HandleTheme }
+      : {}),
   };
 }
 
@@ -147,6 +156,7 @@ export function buildTipOgImageUrl(
     native?: JpycChainSlug;
     name?: string;
     color?: string;
+    theme?: HandleTheme;
   },
   locale: TipOgLocale,
 ): string {
@@ -156,6 +166,7 @@ export function buildTipOgImageUrl(
   else if (params.token) q.set('token', params.token);
   if (params.name) q.set('name', params.name);
   if (params.color) q.set('color', params.color);
+  if (isHandleTheme(params.theme)) q.set('theme', params.theme);
   q.set('locale', locale);
   return `/api/og/tip?${q.toString()}`;
 }
@@ -230,6 +241,109 @@ export interface OgCardModel {
   footer: string;
   url: string; // 'open-pay.jp'
   brand: string; // 'OpenPay'
+  themeStyle?: OgCardThemeStyle;
+}
+
+export interface OgCardThemeStyle {
+  backgroundColor: string;
+  backgroundImage: string;
+  panelBackgroundColor: string;
+  headingColor: string;
+  secondaryTextColor: string;
+  chipTextColor: string;
+  chipBackgroundColor: string;
+  brandTextColor: string;
+  footerTextColor: string;
+  urlTextColor: string;
+}
+
+function tipOgThemeStyle(
+  accent: string,
+  theme: HandleTheme,
+): OgCardThemeStyle {
+  const page = handlePageTheme(accent, theme);
+  const defaultGlow = `radial-gradient(circle at 88% -12%, ${hexToRgba(accent, 0.45)} 0%, rgba(0,0,0,0) 52%), radial-gradient(circle at -8% 112%, ${hexToRgba(accent, 0.25)} 0%, rgba(0,0,0,0) 46%)`;
+  switch (theme) {
+    case 'gradient':
+      return {
+        backgroundColor: '#ffffff',
+        backgroundImage: page.background,
+        panelBackgroundColor: 'rgba(255,255,255,0.92)',
+        headingColor: '#0f172a',
+        secondaryTextColor: '#475569',
+        chipTextColor: accent,
+        chipBackgroundColor: hexToRgba(accent, 0.14),
+        brandTextColor: '#0f172a',
+        footerTextColor: '#475569',
+        urlTextColor: accent,
+      };
+    case 'bold':
+      return {
+        backgroundColor: accent,
+        backgroundImage: `linear-gradient(135deg, ${accent} 0%, #0f172a 145%)`,
+        panelBackgroundColor: '#ffffff',
+        headingColor: '#0f172a',
+        secondaryTextColor: '#334155',
+        chipTextColor: accent,
+        chipBackgroundColor: hexToRgba(accent, 0.14),
+        brandTextColor: '#ffffff',
+        footerTextColor: '#e2e8f0',
+        urlTextColor: '#ffffff',
+      };
+    case 'outline':
+      return {
+        backgroundColor: '#fcfdff',
+        backgroundImage: `linear-gradient(135deg, ${hexToRgba(accent, 0.08)}, rgba(255,255,255,0) 65%)`,
+        panelBackgroundColor: '#ffffff',
+        headingColor: '#0f172a',
+        secondaryTextColor: '#475569',
+        chipTextColor: accent,
+        chipBackgroundColor: hexToRgba(accent, 0.08),
+        brandTextColor: accent,
+        footerTextColor: '#475569',
+        urlTextColor: accent,
+      };
+    case 'night':
+      return {
+        backgroundColor: '#0f172a',
+        backgroundImage: page.background,
+        panelBackgroundColor: 'rgba(15,23,42,0.94)',
+        headingColor: '#f8fafc',
+        secondaryTextColor: '#cbd5e1',
+        chipTextColor: '#93c5fd',
+        chipBackgroundColor: 'rgba(255,255,255,0.10)',
+        brandTextColor: '#ffffff',
+        footerTextColor: '#cbd5e1',
+        urlTextColor: '#ffffff',
+      };
+    case 'soft':
+      return {
+        backgroundColor: '#eef4fe',
+        backgroundImage: `radial-gradient(circle at 90% 0%, ${hexToRgba(accent, 0.18)} 0%, rgba(255,255,255,0) 55%)`,
+        panelBackgroundColor: 'rgba(255,255,255,0.94)',
+        headingColor: '#1e293b',
+        secondaryTextColor: '#5b6b84',
+        chipTextColor: accent,
+        chipBackgroundColor: hexToRgba(accent, 0.1),
+        brandTextColor: '#1e293b',
+        footerTextColor: '#5b6b84',
+        urlTextColor: accent,
+      };
+    case 'clean':
+    default:
+      return {
+        backgroundColor: '#0b1220',
+        backgroundImage: defaultGlow,
+        panelBackgroundColor: 'rgba(255,255,255,0.97)',
+        headingColor: '#0f172a',
+        secondaryTextColor: '#475569',
+        chipTextColor: accent,
+        chipBackgroundColor: hexToRgba(accent, 0.14),
+        brandTextColor: '#ffffff',
+        footerTextColor: '#94a3b8',
+        urlTextColor: '#ffffff',
+      };
+  }
 }
 
 /** TipOgModel → 共有カードモデル。チップカードは TIP 円 + 見出し + ピル。 */
@@ -251,6 +365,7 @@ export function tipModelToCard(m: TipOgModel): OgCardModel {
     footer: m.footer,
     url: m.url,
     brand: m.brand,
+    ...(m.theme ? { themeStyle: tipOgThemeStyle(m.color, m.theme) } : {}),
   };
 }
 

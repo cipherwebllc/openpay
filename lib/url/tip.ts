@@ -9,6 +9,7 @@
 // Tip widget は gas=customer 固定 (preset セマンティクス: クリエイターが preset 額から運営手数料控除後を受け取る、ファンが gas を上乗せ支払い)。
 import { getAddress, isAddress } from 'viem';
 import type { Address } from 'viem';
+import { isHandleTheme, type HandleTheme } from '../handleThemeKey';
 import {
   isJpycChainSlug,
   type ChainSlug,
@@ -42,6 +43,7 @@ export type TipParams = {
   name?: string;
   message?: string;
   color?: string;
+  theme?: HandleTheme;
   presets?: string[];
   // 送信成功時に表示するサンキューメッセージ (200 文字まで)
   thanks?: string;
@@ -99,6 +101,11 @@ export function buildTipPath(params: TipParams): string {
   }
   if (params.color && COLOR_PATTERN.test(params.color)) {
     sp.set('color', params.color.toLowerCase());
+  }
+  // clean は「テーマ無し=従来描画と完全一致」(lib/handleTheme 設計原則) のため URL には
+  // 載せない = 生成 URL を正準・最短に保ち、テーマ導入前の URL と同一形を維持する。
+  if (isHandleTheme(params.theme) && params.theme !== 'clean') {
+    sp.set('theme', params.theme);
   }
   if (params.presets && params.presets.length > 0) {
     const seen = new Set<string>();
@@ -178,6 +185,7 @@ export function parseTipParams(
   const name = searchParams.get('name');
   const message = searchParams.get('message');
   const color = searchParams.get('color');
+  const theme = searchParams.get('theme');
   const preset = searchParams.get('preset');
   const thanks = searchParams.get('thanks');
   const thanksUrl = searchParams.get('thanksUrl');
@@ -200,6 +208,7 @@ export function parseTipParams(
       name: name ? sanitizeText(name, TIP_NAME_MAX) : undefined,
       message: message ? sanitizeText(message, TIP_MESSAGE_MAX) : undefined,
       color: sanitizedColor,
+      ...(isHandleTheme(theme) ? { theme } : {}),
       presets: preset ? sanitizePresets(preset) : undefined,
       thanks: thanks ? sanitizeText(thanks, TIP_THANKS_MAX) : undefined,
       thanksUrl: thanksUrl ? sanitizeUrl(thanksUrl) : undefined,

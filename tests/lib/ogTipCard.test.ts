@@ -98,6 +98,16 @@ describe('buildTipOgModel', () => {
     expect(buildTipOgModel(sp('color=%23xyz')).color).toBe(OG_DEFAULT_COLOR);
   });
 
+  it('allowlist theme のみモデルへ載せ、不正/欠落は従来モデルのまま', () => {
+    expect(
+      buildTipOgModel(sp(`to=${ADDR}&token=jpyc&theme=night`)).theme,
+    ).toBe('night');
+    expect(
+      buildTipOgModel(sp(`to=${ADDR}&token=jpyc&theme=neon`)).theme,
+    ).toBeUndefined();
+    expect(buildTipOgModel(sp(`to=${ADDR}&token=jpyc`)).theme).toBeUndefined();
+  });
+
   it('invalid token falls back to the JPYC / USDC label', () => {
     expect(buildTipOgModel(sp(`to=${ADDR}&token=eth`)).sub).toBe(
       'JPYC / USDCで応援 · ガス不要',
@@ -119,6 +129,18 @@ describe('buildTipOgImageUrl', () => {
     expect(q.get('name')).toBe('Alice');
     expect(q.get('color')).toBe('#ff8800');
     expect(q.get('locale')).toBe('ja');
+  });
+
+  it('theme 無し URL は従来バイト列、theme ありだけ additive に出力', () => {
+    expect(buildTipOgImageUrl(ADDR, { token: 'jpyc' }, 'ja')).toBe(
+      `/api/og/tip?to=${ADDR}&token=jpyc&locale=ja`,
+    );
+    const themed = buildTipOgImageUrl(
+      ADDR,
+      { token: 'jpyc', theme: 'soft' },
+      'ja',
+    );
+    expect(new URLSearchParams(themed.split('?')[1]).get('theme')).toBe('soft');
   });
 
   it('omits name/color when not provided', () => {
@@ -245,6 +267,24 @@ describe('tipModelToCard', () => {
     const card = tipModelToCard(buildTipOgModel(new URLSearchParams({ locale: 'ja' })));
     expect(card.initial).toBe('TIP');
     expect(card.heading).toBe('チップを送る');
+  });
+  it('theme ありは OG 背景/文字トークンを反映し、無しは追加しない', async () => {
+    const { buildTipOgModel, tipModelToCard } = await import('@/lib/ogTipCard');
+    const themed = tipModelToCard(
+      buildTipOgModel(
+        new URLSearchParams({
+          to: ADDR,
+          token: 'jpyc',
+          theme: 'night',
+        }),
+      ),
+    );
+    expect(themed.themeStyle?.backgroundColor).toBe('#0f172a');
+    expect(themed.themeStyle?.headingColor).toBe('#f8fafc');
+    const legacy = tipModelToCard(
+      buildTipOgModel(new URLSearchParams({ to: ADDR, token: 'jpyc' })),
+    );
+    expect(legacy.themeStyle).toBeUndefined();
   });
 });
 

@@ -76,6 +76,17 @@ test.describe('Tip widget generator (creator UX)', () => {
     ).toBeVisible();
   });
 
+  test('テーマ選択が実 TipForm プレビューと URL に即時反映', async ({ page }) => {
+    await openTipTab(page);
+    await page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/).fill(TO);
+    await page.getByRole('button', { name: 'Night' }).click();
+
+    const frame = page.getByTestId('tip-preview-frame');
+    await expect(frame.locator('[data-tip-preview="true"]')).toBeVisible();
+    await expect(frame.locator('[data-tip-theme="night"]')).toBeVisible();
+    await expect(page.getByText(/theme=night/).first()).toBeVisible();
+  });
+
   test('mobile は Step1 → Step2 → プレビュー → 高度な設定 → Step3、設定は USDC のみ', async ({
     page,
   }) => {

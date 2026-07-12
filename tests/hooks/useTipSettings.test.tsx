@@ -20,6 +20,7 @@ describe('useTipSettings', () => {
       name: '',
       message: '',
       color: '#2563eb',
+      theme: 'clean',
       presets: { jpyc: ['300', '1000', '3000'], usdc: ['5', '20', '50'] },
       thanks: '',
       thanksUrl: '',
@@ -57,6 +58,7 @@ describe('useTipSettings', () => {
       name: 'Alice',
       message: 'hi',
       color: '#ff00ff',
+      theme: 'clean',
       // 旧 CSV '1,5' は最後の token (usdc) のリストへ migrate、jpyc は既定。
       presets: { jpyc: ['300', '1000', '3000'], usdc: ['1', '5'] },
       thanks: '',
@@ -84,6 +86,25 @@ describe('useTipSettings', () => {
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.color).toBe('#abcdef');
+  });
+
+  it('theme は allowlist のみ復元し、旧保存値/不正値は clean に倒す', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', theme: 'night' }),
+    );
+    const themed = renderHook(() => useTipSettings());
+    await waitFor(() => expect(themed.result.current.hydrated).toBe(true));
+    expect(themed.result.current.settings.theme).toBe('night');
+    themed.unmount();
+
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ token: 'jpyc', theme: 'neon' }),
+    );
+    const invalid = renderHook(() => useTipSettings());
+    await waitFor(() => expect(invalid.result.current.hydrated).toBe(true));
+    expect(invalid.result.current.settings.theme).toBe('clean');
   });
 
   it('token が unsupported → default jpyc に置換', async () => {
@@ -437,7 +458,7 @@ describe('useTipSettings', () => {
     window.localStorage.setItem(KEY, JSON.stringify(persisted));
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
-    expect(result.current.settings).toEqual(persisted);
+    expect(result.current.settings).toEqual({ ...persisted, theme: 'clean' });
   });
 
   it('setSettings → localStorage 書込 → 新 instance の hydration で復元 (remount 永続化)', async () => {

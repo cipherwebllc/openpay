@@ -23,7 +23,7 @@ import {
   type StorefrontParts,
   type MobileOrderConfig,
 } from '@/lib/mobileOrder';
-import { isHandleTheme, type HandleTheme } from '@/lib/handleTheme';
+import { isHandleTheme, type HandleTheme } from '@/lib/handleThemeKey';
 
 // 1 wallet が保有できる handle の上限 (squatting 抑制・D2)。
 export const MAX_HANDLES_PER_WALLET = 3;
@@ -105,6 +105,7 @@ export interface PublishableTipConfig {
   name?: string;
   message?: string;
   color?: string;
+  theme?: HandleTheme;
   presets?: string[];
   thanks?: string;
   thanksUrl?: string;
@@ -161,6 +162,7 @@ export interface HandleTipConfig {
   name?: string;
   message?: string;
   color?: string;
+  theme?: HandleTheme;
   thanks?: string;
   thanksUrl?: string;
   webhook?: string;
@@ -267,6 +269,7 @@ export function validateTipConfig(raw: unknown): ValidatedConfig {
     name: str(r.name),
     message: str(r.message),
     color: str(r.color),
+    theme: isHandleTheme(r.theme) ? r.theme : undefined,
     presets: Array.isArray(r.presets)
       ? r.presets.filter((p): p is string => typeof p === 'string')
       : undefined,
@@ -294,6 +297,7 @@ export function methodToPublishableConfig(
     name: config.name,
     message: config.message,
     color: config.color,
+    ...(config.theme ? { theme: config.theme } : {}),
     presets: config.presets?.[method.token],
     thanks: config.thanks,
     thanksUrl: config.thanksUrl,
@@ -334,6 +338,7 @@ export function validateHandleTipConfig(raw: unknown): ValidatedHandleConfig {
     name: str(r.name),
     message: str(r.message),
     color: str(r.color),
+    theme: isHandleTheme(r.theme) ? r.theme : undefined,
     thanks: str(r.thanks),
     thanksUrl: str(r.thanksUrl),
     webhook: str(r.webhook),
@@ -386,6 +391,7 @@ export function validateHandleTipConfig(raw: unknown): ValidatedHandleConfig {
     name: canonical.name,
     message: canonical.message,
     color: canonical.color,
+    ...(canonical.theme ? { theme: canonical.theme } : {}),
     thanks: canonical.thanks,
     thanksUrl: canonical.thanksUrl,
     webhook: canonical.webhook,
@@ -612,6 +618,7 @@ function normalizeStoredConfig(raw: unknown): HandleTipConfig | null {
     name: c.name as string | undefined,
     message: c.message as string | undefined,
     color: c.color as string | undefined,
+    ...(isHandleTheme(c.theme) ? { theme: c.theme } : {}),
     thanks: c.thanks as string | undefined,
     thanksUrl: c.thanksUrl as string | undefined,
     webhook: c.webhook as string | undefined,

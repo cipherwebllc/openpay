@@ -83,10 +83,17 @@ import {
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
+import { tipFormTheme } from '@/lib/handleTheme';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 
-export function TipForm({ params }: { params: TipParams }) {
+export function TipForm({
+  params,
+  preview = false,
+}: {
+  params: TipParams;
+  preview?: boolean;
+}) {
   const t = useTranslations('TipForm');
   const locale = useLocale();
   // parseTipParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
@@ -106,6 +113,9 @@ export function TipForm({ params }: { params: TipParams }) {
       ? params.presets
       : DEFAULT_TIP_PRESETS[params.token];
   const themeColor = params.color ?? DEFAULT_THEME_COLOR;
+  const themed = params.theme
+    ? tipFormTheme(themeColor, params.theme)
+    : undefined;
   const creatorName = params.name ?? '';
   const creatorMessage = params.message ?? '';
 
@@ -161,12 +171,19 @@ export function TipForm({ params }: { params: TipParams }) {
   const useRecover = isRecoverRoute(route);
 
   // relay 時は smart account / batch / gas quote とも skip (enabled=!useRelay)。
-  const { data: saData, error: saError } = useSmartAccount(deployment, !useRelay);
-  const gasless = useBatchPayment(deployment, !useRelay);
-  const gasQuote = useGasQuote(deployment, !useRelay);
+  const paymentEnabled = !preview && !useRelay;
+  const { data: saData, error: saError } = useSmartAccount(
+    deployment,
+    paymentEnabled,
+  );
+  const gasless = useBatchPayment(deployment, paymentEnabled);
+  const gasQuote = useGasQuote(deployment, paymentEnabled);
   // USDC ガスレスが Circle に解決される場合は Circle Paymaster (route 由来)。
   const isCircle = isCircleRoute(route);
-  const circleQuote = useGasQuoteCircle(deployment, !useRelay && isCircle);
+  const circleQuote = useGasQuoteCircle(
+    deployment,
+    paymentEnabled && isCircle,
+  );
   // 表示・readiness・error は circle のときは circleQuote を本線にする。
   const activeQuote = isCircle ? circleQuote : gasQuote;
   const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
@@ -299,6 +316,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const relayPending =
     useRelay && !!relay.data && !relay.data.success && !!relay.data.pending;
   const canSubmit =
+    !preview &&
     isConnected &&
     !wrongChain &&
     (useRelay || !!saData) &&
@@ -524,7 +542,7 @@ export function TipForm({ params }: { params: TipParams }) {
   ]);
 
   function onSubmit() {
-    if (!canSubmit) return;
+    if (preview || !canSubmit) return;
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     primeChimeAudio();
     // 送信時点の値を固定 (webhook はこのスナップショットを使い、後続の編集 / gasQuote
@@ -640,10 +658,23 @@ export function TipForm({ params }: { params: TipParams }) {
       : null;
 
   return (
-    <div className="space-y-4">
+    <div
+      className={
+        themed
+          ? `space-y-4 ${themed.rootClassName}`
+          : 'space-y-4'
+      }
+      style={themed?.rootStyle}
+      data-tip-theme={params.theme}
+      data-tip-preview={preview || undefined}
+    >
       <header
-        className="rounded-2xl p-5 text-white shadow-sm"
-        style={{ backgroundColor: themeColor }}
+        className={
+          themed
+            ? `rounded-2xl p-5 text-white shadow-sm ${themed.headerClassName}`
+            : 'rounded-2xl p-5 text-white shadow-sm'
+        }
+        style={themed?.headerStyle ?? { backgroundColor: themeColor }}
       >
         <p className="text-xs uppercase tracking-wider opacity-80">
           {t('header')}
@@ -663,7 +694,16 @@ export function TipForm({ params }: { params: TipParams }) {
         </p>
       </header>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4">
+      <section
+        className={
+          themed
+            ? `rounded-2xl border border-slate-200 bg-white p-4 ${themed.amountClassName}`
+            : 'rounded-2xl border border-slate-200 bg-white p-4'
+        }
+        // night 等の地色は inline style で確実に適用する (bg-white との Tailwind クラス競合は
+        // stylesheet 順に依存し、負けると淡ラベルだけ残るコントラスト破綻になる)。
+        style={themed?.amountStyle}
+      >
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {t('amountTitle')}
         </p>
@@ -679,9 +719,15 @@ export function TipForm({ params }: { params: TipParams }) {
                 className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
                     ? 'border-transparent text-white shadow-sm'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    : `border-slate-200 bg-white text-slate-700 hover:border-slate-300 ${
+                        themed?.inactivePillClassName ?? ''
+                      }`
                 }`}
-                style={active ? { backgroundColor: themeColor } : undefined}
+                style={
+                  active
+                    ? themed?.activePillStyle ?? { backgroundColor: themeColor }
+                    : undefined
+                }
               >
                 {p} {deployment.displaySymbol}
               </button>
@@ -843,7 +889,7 @@ export function TipForm({ params }: { params: TipParams }) {
             だが他 chain / Gateway に balance がある時、Circle Gateway / CCTP V2
             経由の代替 path を提示する。JPYC は Gateway 非対応のため自動 skip
             (token guard で early return)。PaymentForm と同型実装。 */}
-        {params.token === 'usdc' && address && (
+        {!preview && params.token === 'usdc' && address && (
           <CrossChainHint
             token={params.token}
             enabled={params.crossChain !== false}
@@ -890,10 +936,16 @@ export function TipForm({ params }: { params: TipParams }) {
         type="button"
         onClick={onSubmit}
         disabled={!canSubmit}
-        className="w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
-        style={{ backgroundColor: themeColor }}
+        className={
+          themed
+            ? `w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${themed.submitClassName}`
+            : 'w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50'
+        }
+        style={themed?.submitStyle ?? { backgroundColor: themeColor }}
       >
-        {flowPending || relayPending
+        {preview
+          ? t('btnSend', { amount: fmt(totalCustomerOutflow) })
+          : flowPending || relayPending
           ? t('btnSending')
           : !isConnected
             ? t('btnConnect')

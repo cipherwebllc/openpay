@@ -123,6 +123,7 @@ describe('configToSearchParams', () => {
       token: 'usdc',
       chain: 'base',
       name: 'Alice',
+      theme: 'gradient',
       crossChain: false,
     };
     const parsed = parseTipParams(config.to, configToSearchParams(config));
@@ -131,6 +132,7 @@ describe('configToSearchParams', () => {
       expect(parsed.params.token).toBe('usdc');
       expect(parsed.params.chain).toBe('base');
       expect(parsed.params.name).toBe('Alice');
+      expect(parsed.params.theme).toBe('gradient');
       expect(parsed.params.crossChain).toBe(false);
     }
   });
@@ -211,6 +213,23 @@ describe('validateHandleTipConfig', () => {
       expect(res.config.presets?.jpyc).toEqual(['300', '500']);
       expect(res.config.presets?.usdc).toEqual(['5']);
     }
+  });
+  it('theme を TipParams と同じ allowlist で保持し、不正値は落とす', () => {
+    const valid = validateHandleTipConfig({
+      to: ADDR,
+      theme: 'night',
+      methods: [{ token: 'jpyc', chain: 'polygon' }],
+    });
+    expect(valid.ok).toBe(true);
+    if (valid.ok) expect(valid.config.theme).toBe('night');
+
+    const invalid = validateHandleTipConfig({
+      to: ADDR,
+      theme: 'neon',
+      methods: [{ token: 'jpyc', chain: 'polygon' }],
+    });
+    expect(invalid.ok).toBe(true);
+    if (invalid.ok) expect(invalid.config.theme).toBeUndefined();
   });
 });
 
@@ -341,6 +360,7 @@ describe('methodToPublishableConfig', () => {
       to: ADDR,
       name: 'Alice',
       color: '#2563eb',
+      theme: 'soft',
       methods: [{ token: 'usdc', chain: 'base', crossChain: true }],
       presets: { jpyc: ['300'], usdc: ['5'] },
     };
@@ -351,6 +371,7 @@ describe('methodToPublishableConfig', () => {
     expect(pc.crossChain).toBe(true);
     expect(pc.presets).toEqual(['5']); // usdc 用 preset を選ぶ
     expect(pc.name).toBe('Alice');
+    expect(pc.theme).toBe('soft');
   });
 });
 

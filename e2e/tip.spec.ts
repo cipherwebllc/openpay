@@ -46,6 +46,16 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     await expect(page.getByRole('button', { name: '800 JPYC' })).toBeVisible();
   });
 
+  test('theme=night → TipForm の night 配色を適用', async ({ page }) => {
+    await page.goto(`/ja/tip/${TO}?token=jpyc&theme=night&color=%232563eb`);
+    const form = page.locator('[data-tip-theme="night"]');
+    await expect(form).toBeVisible();
+    await expect(form).toHaveClass(/bg-slate-950/);
+    await expect(form.getByText('OpenPay Tip').locator('..')).toHaveClass(
+      /ring-white\/15/,
+    );
+  });
+
   test('USDC + 既定 preset (5/20/50)', async ({ page }) => {
     await page.goto(`/ja/tip/${TO}?token=usdc`);
     await expect(page.getByRole('button', { name: '5 USDC' })).toBeVisible();

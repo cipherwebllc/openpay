@@ -303,6 +303,54 @@ describe('TipForm — レンダリング', () => {
     const header = screen.getByText('OpenPay Tip').parentElement!;
     expect(header.style.backgroundColor).toBe('rgb(30, 58, 138)'); // #1e3a8a
   });
+
+  it('theme 未指定は導入前の class 出力を固定', () => {
+    render(<TipForm params={JPYC_PARAMS} />);
+    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const root = header.parentElement!;
+    const amountSection = screen.getByText('金額を選択').parentElement!;
+    const submit = Array.from(document.querySelectorAll('button')).find((el) =>
+      el.className.includes('text-base'),
+    )!;
+
+    expect(root.className).toBe('space-y-4');
+    expect(header.className).toBe(
+      'rounded-2xl p-5 text-white shadow-sm',
+    );
+    expect(amountSection.className).toBe(
+      'rounded-2xl border border-slate-200 bg-white p-4',
+    );
+    expect(submit.className).toBe(
+      'w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50',
+    );
+  });
+
+  it.each([
+    ['clean', 'ring-1', 'ring-black/5'],
+    ['gradient', 'ring-slate-200/70', 'ring-white/30'],
+    ['bold', 'ring-4', 'shadow-[6px_6px_0_#0f172a]'],
+    ['outline', 'p-3', 'shadow-none'],
+    ['night', 'bg-slate-950', 'ring-white/15'],
+    ['soft', 'rounded-[2rem]', 'rounded-[1.5rem]'],
+  ] as const)('%s theme の class をフォームへ適用', (theme, rootClass, headerClass) => {
+    render(<TipForm params={{ ...JPYC_PARAMS, theme }} />);
+    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const root = header.parentElement!;
+    expect(root).toHaveAttribute('data-tip-theme', theme);
+    expect(root.className).toContain(rootClass);
+    expect(header.className).toContain(headerClass);
+  });
+
+  it('night はヘッダ/ボタンの文字コントラストを明示し、preview は送信不可', () => {
+    render(<TipForm params={{ ...JPYC_PARAMS, theme: 'night' }} preview />);
+    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const submit = Array.from(document.querySelectorAll('button')).find((el) =>
+      el.className.includes('text-base'),
+    ) as HTMLButtonElement;
+    expect(header.style.color).toBe('rgb(248, 250, 252)');
+    expect(submit.disabled).toBe(true);
+    expect(submit.style.color).not.toBe('');
+  });
 });
 
 // 明細行は dt/dd ペア (label + value) 構造。同じ金額が preset ボタンにも出るので、

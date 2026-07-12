@@ -1,6 +1,7 @@
 'use client';
 
 import type { ChainSlug } from '@/lib/chains';
+import { isHandleTheme, type HandleTheme } from '@/lib/handleThemeKey';
 import { deploymentForSlug, isGaslessSupported, type TokenSymbol } from '@/lib/tokens';
 import {
   COLOR_PATTERN,
@@ -23,6 +24,9 @@ type TipSettings = {
   name: string;
   message: string;
   color: string;
+  // optional は旧 caller の完全オブジェクト更新との型互換用。hydrate 後は sanitize が
+  // 必ず clean を補うため、保存スキーマ上の実値は常に allowlist 内。
+  theme?: HandleTheme;
   // チップ金額プリセットは token (JPYC=円 / USDC=ドル) ごとに独立。単一リストを
   // 共有すると JPYC の 300 が USDC では $300 になってしまうため。空リストの token は
   // 表示・URL 生成時に DEFAULT_TIP_PRESETS[token] へ fallback する。
@@ -54,6 +58,7 @@ const DEFAULT_SETTINGS: TipSettings = {
   name: '',
   message: '',
   color: '#2563eb',
+  theme: 'clean',
   presets: defaultTipPresets(),
   thanks: '',
   thanksUrl: '',
@@ -136,6 +141,7 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
       typeof loaded.color === 'string' && COLOR_PATTERN.test(loaded.color)
         ? loaded.color.toLowerCase()
         : DEFAULT_SETTINGS.color,
+    theme: isHandleTheme(loaded.theme) ? loaded.theme : DEFAULT_SETTINGS.theme,
     presets: sanitizeTipPresets(loaded.presets, token),
     thanks:
       typeof loaded.thanks === 'string'
