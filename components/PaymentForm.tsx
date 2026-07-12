@@ -49,6 +49,7 @@ import {
   isRelayRoute,
   isRecoverRoute,
   isCircleRoute,
+  type PaymentRoute,
 } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
@@ -125,6 +126,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const t = useTranslations('PaymentForm');
   const locale = useLocale();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
+  const attemptRouteRef = useRef<PaymentRoute | null>(null);
   // parsePayParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const deployment = deploymentForSlug(params.token, chainSlug);
@@ -149,7 +151,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
-  const route = resolvePaymentRoute({
+  const resolvedRoute = resolvePaymentRoute({
     isStandard: params.mode === 'standard' || modeOverride === 'standard',
     jpycGaslessProvider: resolveJpycGaslessProvider(
       deployment,
@@ -162,6 +164,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
     hasJpycForwarder: jpycForwarderFor(chainId ?? deployment.chainId) !== null,
     disableRelay: hasSplit,
   });
+  // submit gesture で選ばれた経路を attempt 単位で固定する。relay POST と degraded banner の
+  // click が競合しても、進行中 attempt が standard へ差し替わる窓を作らない。
+  const route = attemptRouteRef.current ?? resolvedRoute;
   const isStandard = isStandardRoute(route);
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const useRelay = isRelayRoute(route);
@@ -399,10 +404,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
   // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
+  const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const directFlowPending = relayResponseUnknown
+  const directFlowPending = relayAmbiguous
     ? true
     : isStandard
       ? standard.isPending
@@ -417,7 +423,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // なので再試行を許す。standard の fee-error は merchant transfer が確定済なので
   // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する。
   const directSettledNoRetry =
-    relayResponseUnknown ||
+    relayAmbiguous ||
     !!relayIpRateLimited ||
     (!isStandard && !useRelay && !!gasless.data?.success) ||
     (useRelay &&
@@ -452,7 +458,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 差し替え (standard モードは paymaster を経由しないため対象外)。
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
-  const flowError = isStandard
+  const flowError = relayAmbiguous
+    ? null
+    : isStandard
     ? standard.isUnknown
       ? null
       : standard.error
@@ -498,12 +506,20 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 扱うため、ここでは fallback-safe error のみを条件にする。banner の中で friendly 文言を
   // 1 度だけ出し、下の汎用 error ブロックでは重複表示しない。
   const relayFallbackActive =
-    useRelay && isFallbackSafeRelayError(relay.error);
+    useRelay &&
+    !relay.isPending &&
+    !relayAmbiguous &&
+    isFallbackSafeRelayError(relay.error);
   // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
   // (relay.error なし・relay.data なし) ときに、署名 *前* に「通常決済へ切替」を先回りで促す。
   // Layer A (relay.error) とは独立に評価する (両方 true にはならない・!relay.error が排他)。
   const relayPreflightActive =
-    useRelay && relayHealth.degraded && !relay.error && !relay.data;
+    useRelay &&
+    relayHealth.degraded &&
+    !relay.isPending &&
+    !relayAmbiguous &&
+    !relay.error &&
+    !relay.data;
   // Layer A の banner 文言 (per-error friendly)。Layer A は汎用 error box を「置換」する (同じ relay
   // error が二重表示になるのを防ぐ) が、Layer B は「additive」に出す (汎用 error box を抑止しない)。
   const relayFallbackMessage = isFallbackSafeRelayError(relay.error)
@@ -664,6 +680,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   function onSubmit() {
     if (!canSubmit) return;
+    attemptRouteRef.current = route;
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     primeChimeAudio();
     if (isStandard) {
@@ -711,6 +728,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
         circlePermitAmount,
       });
     }
+  }
+
+  function switchToStandard() {
+    // 進行中/曖昧な relay attempt から standard へ切り替わると二重払いになりうる。
+    // fallback-safe な pre-broadcast error のときだけ固定を解き、従来の切替を許可する。
+    if (
+      relay.isPending ||
+      relayAmbiguous ||
+      (attemptRouteRef.current?.kind === 'relay' &&
+        !isFallbackSafeRelayError(relay.error))
+    ) {
+      return;
+    }
+    attemptRouteRef.current = null;
+    setModeOverride('standard');
   }
 
   // ネイティブガストークンの symbol を viem chain 経由で取得 (chain-aware)。
@@ -929,7 +961,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
               : 'incompatible'
           }
           canFallbackToStandard
-          onSwitchToStandard={() => setModeOverride('standard')}
+          onSwitchToStandard={switchToStandard}
         />
       )}
 
@@ -1215,7 +1247,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <RelayFallbackBanner
           message={relayFallbackMessage}
           nativeToken={nativeToken}
-          onSwitchToStandard={() => setModeOverride('standard')}
+          onSwitchToStandard={switchToStandard}
         />
       ) : (
         error && (
@@ -1236,25 +1268,40 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <RelayFallbackBanner
           message={t('relayDegradedPreflight')}
           nativeToken={nativeToken}
-          onSwitchToStandard={() => setModeOverride('standard')}
+          onSwitchToStandard={switchToStandard}
         />
       )}
 
-      {/* relay response-unknown: POST は届いて broadcast 済みの可能性がある。standard fallback と
-          新署名を封鎖し、履歴/ステータス確認だけを案内する。 */}
-      {relayResponseUnknown && (
+      {/* ambiguity latch 中は同一 payload の再確認だけを許可し、standard fallback / 新署名を封鎖。 */}
+      {relayAmbiguous && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="flex items-center gap-1.5 font-semibold">
-            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {relay.recoveryState === 'auto' && (
+              <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            )}
             {t('responseUnknownTitle')}
           </p>
-          <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
+          <p className="mt-1 break-words">
+            {relay.recoveryState === 'auto'
+              ? t('responseUnknownAutoBody')
+              : t('responseUnknownBody')}
+          </p>
+          {relay.recoveryState !== 'auto' && (
+            <button
+              type="button"
+              disabled={relay.isPending}
+              onClick={relay.retrySamePayload}
+              className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t('responseUnknownRetryButton')}
+            </button>
+          )}
         </div>
       )}
 
       {/* relay IP rate limit: idem 確認前の 429 なので main Pay / standard fallback / 再署名を
           封鎖し、保持済みの同一署名 payload の再 POST だけを許可する。 */}
-      {relayIpRateLimited && (
+      {relayIpRateLimited && !relayAmbiguous && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
           <p className="mt-1 break-words">
@@ -1317,7 +1364,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
           (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
-      {useRelay && relay.data?.pending && (
+      {useRelay && !relayAmbiguous && relay.data?.pending && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="flex items-center gap-1.5 font-semibold">
             <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />

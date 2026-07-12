@@ -256,11 +256,12 @@ export function TipForm({ params }: { params: TipParams }) {
 
   // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
+  const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
   const directFlowPending = useRelay
-    ? relay.isPending || relayResponseUnknown
+    ? relay.isPending || relayAmbiguous
     : gasless.isPending;
   const directFlowSuccess = useRelay
     ? !!(relay.data?.success && relay.data.txHash)
@@ -289,7 +290,7 @@ export function TipForm({ params }: { params: TipParams }) {
   const directSettledNoRetry =
     (!useRelay && !!gasless.data?.success) ||
     (useRelay &&
-      (relayResponseUnknown ||
+      (relayAmbiguous ||
         !!relayIpRateLimited ||
         (!!relay.data && (relay.data.success || !!relay.data.pending))));
   const settledNoRetry = directSettledNoRetry || !!crossChainResult;
@@ -321,7 +322,11 @@ export function TipForm({ params }: { params: TipParams }) {
     (!useRelay && !!gasless.data && !gasless.data.success) ||
     (useRelay && !!relay.data && !relay.data.success && !relay.data.pending);
   // relay の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
-  const flowError = useRelay ? relay.error : gasless.error;
+  const flowError = relayAmbiguous
+    ? null
+    : useRelay
+      ? relay.error
+      : gasless.error;
   const flowErrorMessage = useRelay
     ? isFallbackSafeRelayError(flowError)
       ? t(relayErrorKey(flowError))
@@ -910,21 +915,37 @@ export function TipForm({ params }: { params: TipParams }) {
         </div>
       )}
 
-      {/* Tip には standard fallback が無い。response-unknown は pending 相当に Pay を封鎖し、
-          新署名を作らず履歴/ステータス確認だけを案内する。 */}
-      {relayResponseUnknown && (
+      {/* Tip には standard fallback が無い。ambiguity latch 中は Pay を封鎖し、同一 payload の
+          再確認だけを許可する。 */}
+      {relayAmbiguous && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="flex items-center gap-1.5 font-semibold">
-            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            {relay.recoveryState === 'auto' && (
+              <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
+            )}
             {t('responseUnknownTitle')}
           </p>
-          <p className="mt-1 break-words">{t('responseUnknownBody')}</p>
+          <p className="mt-1 break-words">
+            {relay.recoveryState === 'auto'
+              ? t('responseUnknownAutoBody')
+              : t('responseUnknownBody')}
+          </p>
+          {relay.recoveryState !== 'auto' && (
+            <button
+              type="button"
+              disabled={relay.isPending}
+              onClick={relay.retrySamePayload}
+              className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t('responseUnknownRetryButton')}
+            </button>
+          )}
         </div>
       )}
 
       {/* relay IP rate limit: idem 確認前の 429 なので main Pay / 再署名を封鎖し、保持済みの
           同一署名 payload の再 POST だけを許可する。 */}
-      {relayIpRateLimited && (
+      {relayIpRateLimited && !relayAmbiguous && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
           <p className="mt-1 break-words">
@@ -947,7 +968,7 @@ export function TipForm({ params }: { params: TipParams }) {
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
           (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
-      {useRelay && relay.data?.pending && (
+      {useRelay && !relayAmbiguous && relay.data?.pending && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
           <p className="flex items-center gap-1.5 font-semibold">
             <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />

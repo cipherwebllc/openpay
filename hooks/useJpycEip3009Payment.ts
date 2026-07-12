@@ -9,7 +9,7 @@
 // flag/relay 未構成時は呼び出し元が resolveJpycGaslessProvider で 7702 経路を選ぶ。詳細は
 // memory:jpyc-eip3009 / gasless-legal-jp。
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useAccount, useWalletClient } from 'wagmi';
 import type { Address, Hex } from 'viem';
@@ -32,6 +32,7 @@ import type { GasMode } from '@/lib/fee';
 import type { TokenDeployment } from '@/lib/tokens';
 import {
   isRelayIpRateLimitedError,
+  isRelayResponseUnknownError,
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
@@ -54,6 +55,14 @@ export type JpycEip3009Result = {
   txHash: Hex | null;
   success: boolean;
   pending?: boolean;
+};
+
+export type JpycRelayRecoveryState = 'auto' | 'exhausted' | null;
+
+type RetainedRelayPayload = {
+  payload: Record<string, unknown>;
+  // false→true のみ許す単調 latch。on-chain success/revert が証明されたときだけ ref ごと破棄する。
+  ambiguous: boolean;
 };
 
 type RelayResponse = {
@@ -137,23 +146,42 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const { data: walletClient } = useWalletClient();
   const { address, chainId } = useAccount();
 
-  // ip_rate_limited の間だけ署名済 payload を保持する。mutation variables は金額等の入力値しか
-  // 持たないため、この ref が無いと retry 時に新 nonce で再署名して D1 の二重送金防止を破る。
-  const ipRateLimitedPayloadRef = useRef<Record<string, unknown> | null>(null);
+  // mutation variables は金額等の入力値しか持たないため、署名済 payload と ambiguity latch を
+  // 単一 ref で保持する。一度 ambiguous になった payload は on-chain success/revert が証明されるまで
+  // 破棄せず、通常 mutate の再呼出でも同じ payload だけを POST して新署名を構造的に封鎖する。
+  const retainedPayloadRef = useRef<RetainedRelayPayload | null>(null);
+  const [recoveryState, setRecoveryState] =
+    useState<JpycRelayRecoveryState>(null);
 
   const mutation = useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
     mutationFn: async ({ merchant, value, gasMode = 'customer', feeKind }) => {
       // 専用 retry だけでなく、呼出側が誤って通常 mutate を再度呼んでも、未解決 payload が
       // ある間は必ず同一 payload を再 POST して再署名を構造的に封鎖する。
-      const retainedPayload = ipRateLimitedPayloadRef.current;
-      if (retainedPayload) {
+      const retained = retainedPayloadRef.current;
+      if (retained) {
         try {
-          const result = await postRelayPayload(retainedPayload);
-          ipRateLimitedPayloadRef.current = null;
+          const result = await postRelayPayload(retained.payload);
+          if (retained.ambiguous && result.pending) {
+            // pending は送金済み/未送金を証明しない。曖昧性を維持して同一 payload のみ再確認可能にする。
+            setRecoveryState('exhausted');
+            return result;
+          }
+          // txHash 付き success / reverted は on-chain の確定結果。非 ambiguous な D1 retry の
+          // pending も従来どおり保持を終える。
+          retainedPayloadRef.current = null;
+          setRecoveryState(null);
           return result;
         } catch (error) {
-          if (!isRelayIpRateLimitedError(error)) {
-            ipRateLimitedPayloadRef.current = null;
+          if (retained.ambiguous || isRelayResponseUnknownError(error)) {
+            // ambiguity は単調 latch。後続 400/429/再 unknown で解除すると、着金済みなのに
+            // standard fallback / 新署名へ流れて二重払いになるため、同一 payload を保持し続ける。
+            retainedPayloadRef.current = {
+              payload: retained.payload,
+              ambiguous: true,
+            };
+            setRecoveryState('exhausted');
+          } else if (!isRelayIpRateLimitedError(error)) {
+            retainedPayloadRef.current = null;
           }
           throw error;
         }
@@ -309,24 +337,46 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       try {
         return await postRelayPayload(payload);
       } catch (error) {
-        ipRateLimitedPayloadRef.current = isRelayIpRateLimitedError(error)
-          ? payload
-          : null;
+        if (isRelayResponseUnknownError(error)) {
+          retainedPayloadRef.current = { payload, ambiguous: true };
+          // PR-A は自動解決を行わない。型の auto は PR-B 用に先行公開し、unknown は即 exhausted。
+          setRecoveryState('exhausted');
+        } else if (isRelayIpRateLimitedError(error)) {
+          retainedPayloadRef.current = { payload, ambiguous: false };
+        } else {
+          retainedPayloadRef.current = null;
+        }
         throw error;
       }
     },
   });
 
+  const mutationIsPending = mutation.isPending;
+  const mutationVariables = mutation.variables;
+  const mutate = mutation.mutate;
+
   const retryRelay = useCallback(() => {
     if (
-      !ipRateLimitedPayloadRef.current ||
-      !mutation.variables ||
-      mutation.isPending
+      !retainedPayloadRef.current ||
+      retainedPayloadRef.current.ambiguous ||
+      !mutationVariables ||
+      mutationIsPending
     ) {
       return;
     }
-    mutation.mutate(mutation.variables);
-  }, [mutation.isPending, mutation.mutate, mutation.variables]);
+    mutate(mutationVariables);
+  }, [mutate, mutationIsPending, mutationVariables]);
 
-  return { ...mutation, retryRelay };
+  const retrySamePayload = useCallback(() => {
+    if (
+      !retainedPayloadRef.current?.ambiguous ||
+      !mutationVariables ||
+      mutationIsPending
+    ) {
+      return;
+    }
+    mutate(mutationVariables);
+  }, [mutate, mutationIsPending, mutationVariables]);
+
+  return { ...mutation, recoveryState, retryRelay, retrySamePayload };
 }

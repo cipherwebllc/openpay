@@ -218,6 +218,134 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
     expect(result.current.error?.message).toBe('response-unknown');
     expect(isFallbackSafeRelayError(result.current.error)).toBe(false);
+    expect(result.current.recoveryState).toBe('exhausted');
+  });
+
+  it('unknown→insufficient_balance でも ambiguity latch と同一 payload を保持する', async () => {
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ok: false, error: 'insufficient_balance' }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
+    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
+    await act(async () => result.current.retrySamePayload());
+    await waitFor(() =>
+      expect(result.current.error?.message).toBe('insufficient_balance'),
+    );
+
+    expect(result.current.recoveryState).toBe('exhausted');
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
+  });
+
+  it('unknown 後に通常 mutate を再度呼んでも新署名せず同一 payload を再送する', async () => {
+    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const result = submit();
+
+    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
+    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
+    act(() => {
+      result.current.mutate({ merchant: MERCHANT, value: 999n * 10n ** 18n });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
+    expect(result.current.recoveryState).toBeNull();
+  });
+
+  it('retrySamePayload は unknown 時の request body を完全一致で再 POST する', async () => {
+    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const result = submit();
+
+    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
+    const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
+    await act(async () => result.current.retrySamePayload());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
+  });
+
+  it('unknown→pending は ambiguity latch を解除しない', async () => {
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, pending: true, txHash: null }), {
+          status: 202,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
+    await act(async () => result.current.retrySamePayload());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data).toEqual({
+      txHash: null,
+      success: false,
+      pending: true,
+    });
+    expect(result.current.recoveryState).toBe('exhausted');
+    expect(signTypedData).toHaveBeenCalledOnce();
+  });
+
+  it('unknown→429 ip_rate_limited でも ambiguity latch を解除しない', async () => {
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ok: false, error: 'ip_rate_limited' }),
+          {
+            status: 429,
+            headers: {
+              'content-type': 'application/json',
+              'retry-after': '45',
+            },
+          },
+        ),
+      );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
+    await act(async () => result.current.retrySamePayload());
+    await waitFor(() =>
+      expect(isRelayIpRateLimitedError(result.current.error)).toBe(true),
+    );
+
+    expect(result.current.recoveryState).toBe('exhausted');
+    expect(signTypedData).toHaveBeenCalledOnce();
+    act(() => result.current.retryRelay());
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('unknown→構造化 reverted は on-chain 失敗証明として latch を解除する', async () => {
+    const txHash = `0x${'d'.repeat(64)}`;
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, reverted: true, txHash }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    const result = submit();
+
+    await waitFor(() => expect(result.current.recoveryState).toBe('exhausted'));
+    await act(async () => result.current.retrySamePayload());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data).toEqual({ txHash, success: false });
+    expect(result.current.recoveryState).toBeNull();
+    expect(signTypedData).toHaveBeenCalledOnce();
   });
 
   it('body read reject → response-unknown', async () => {
