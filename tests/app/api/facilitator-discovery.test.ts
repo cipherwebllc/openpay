@@ -81,6 +81,11 @@ vi.mock('@/lib/kv', () => ({
       o.priceJpyc = args[3];
       o.category = args[4];
       o.payTo = args[5];
+      if (args[6]) o.docsUrl = args[6];
+      else delete o.docsUrl;
+      if (args[7]) o.license = args[7];
+      else delete o.license;
+      o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
       return { ok: true as const, value: enc };
@@ -218,6 +223,8 @@ const validBody = {
   description: 'JP→EN 翻訳 API',
   priceJpyc: '1000',
   category: 'api',
+  docsUrl: 'https://docs.example.jp/openapi.json',
+  license: 'Commercial use with attribution.',
   attested: true, // 新規登録は正当性表明が必須
 };
 
@@ -285,12 +292,23 @@ describe('x402 facilitator /resources', () => {
     const res = await resources.POST(postReq(validBody));
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
-      resource: { merchant: string; url: string; priceJpyc: string; active: boolean };
+      resource: {
+        merchant: string;
+        url: string;
+        priceJpyc: string;
+        docsUrl?: string;
+        license?: string;
+        updatedAt?: number;
+        active: boolean;
+      };
       paywallSnippet: string;
     };
     expect(getAddress(body.resource.merchant)).toBe(OWNER);
     expect(body.resource.url).toBe(validBody.url);
     expect(body.resource.priceJpyc).toBe('1000');
+    expect(body.resource.docsUrl).toBe(validBody.docsUrl);
+    expect(body.resource.license).toBe(validBody.license);
+    expect(body.resource.updatedAt).toEqual(expect.any(Number));
     expect(body.resource.active).toBe(true);
     // 自己完結ゲート: リポ内 import を含まず、verify/settle 転送を含む
     expect(body.paywallSnippet).not.toContain('@/lib');
@@ -703,6 +721,9 @@ describe('x402 /discovery', () => {
       items: Array<{
         resource: string;
         priceJpyc: string;
+        docsUrl?: string;
+        license?: string;
+        updatedAt?: string;
         accepts: Array<{
           scheme: string;
           network: string;
@@ -716,6 +737,9 @@ describe('x402 /discovery', () => {
     expect(item).toBeTruthy();
     if (!item) return;
     expect(item.resource).toBe(validBody.url);
+    expect(item.docsUrl).toBe(validBody.docsUrl);
+    expect(item.license).toBe(validBody.license);
+    expect(item.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(item.accepts).toHaveLength(1);
     const pr = item.accepts[0];
     expect(pr.scheme).toBe('exact');
@@ -724,6 +748,26 @@ describe('x402 /discovery', () => {
     expect(pr.extra.openpay.merchantValue).toBe((1000n * 10n ** 18n).toString());
     expect(pr.extra.openpay.feeValue).toBe((10n * 10n ** 18n).toString());
     expect(pr.maxAmountRequired).toBe((1010n * 10n ** 18n).toString());
+  });
+
+  it('旧 record に比較メタデータが無ければ discovery item でも省略する', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    const saved = JSON.parse(store.kv.get(resourceKey(id))!) as Record<string, unknown>;
+    delete saved.docsUrl;
+    delete saved.license;
+    delete saved.updatedAt;
+    store.kv.set(resourceKey(id), JSON.stringify(saved));
+
+    const body = (await (await discovery()).json()) as {
+      items: Array<Record<string, unknown>>;
+    };
+    const item = body.items.find((candidate) => candidate.resource === validBody.url);
+    expect(item).toBeTruthy();
+    expect(item).not.toHaveProperty('docsUrl');
+    expect(item).not.toHaveProperty('license');
+    expect(item).not.toHaveProperty('updatedAt');
   });
 
   it('不正 priceJpyc の resource → accepts=[] で列挙 (カタログ自体は出す)', async () => {
@@ -763,6 +807,8 @@ describe('x402 /discovery', () => {
       items: Array<{
         resource: string;
         priceJpyc: string;
+        docsUrl: string;
+        license: string;
         accepts: Array<{ extra: { openpay: { merchant: string; merchantValue: string; feeValue: string } } }>;
       }>;
     };
@@ -772,6 +818,8 @@ describe('x402 /discovery', () => {
       'https://open-pay.jp/api/paid/stores',
     ]);
     expect(body.items[0].priceJpyc).toBe('1');
+    expect(body.items.every((item) => item.docsUrl === 'https://open-pay.jp/api/openapi.json')).toBe(true);
+    expect(body.items.every((item) => item.license.length > 0 && item.license.length <= 60)).toBe(true);
     expect(body.items[0].accepts[0].extra.openpay.merchant).toBe(FIRST_PARTY_SELLER);
     expect(body.items[0].accepts[0].extra.openpay.merchantValue).toBe(
       (1n * 10n ** 18n).toString(),
@@ -928,5 +976,30 @@ describe('x402 /discovery', () => {
     const res = await discovery();
     expect(res.status).toBe(404);
     expect(res.headers.get('cache-control')).toBeNull();
+  });
+
+  it('OpenAPI は discovery item の比較フィールドを optional schema として定義する', async () => {
+    await load();
+    const openapi = await import('@/app/api/openapi.json/route');
+    const res = await openapi.GET();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      paths: Record<string, unknown>;
+      components: {
+        schemas: Record<
+          string,
+          { required?: string[]; properties?: Record<string, Record<string, unknown>> }
+        >;
+      };
+    };
+    expect(body.paths).toHaveProperty('/api/discovery');
+    const schema = body.components.schemas.DiscoveryItem;
+    expect(schema.properties).toMatchObject({
+      docsUrl: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 512 },
+      license: { type: 'string', maxLength: 60 },
+      updatedAt: { type: 'string', format: 'date-time' },
+      verifiedAt: { type: ['string', 'null'], format: 'date-time' },
+    });
+    expect(schema.required).not.toEqual(expect.arrayContaining(['docsUrl', 'license', 'updatedAt']));
   });
 });

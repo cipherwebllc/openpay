@@ -12,6 +12,7 @@
 
 import { isAddress, getAddress } from 'viem';
 import { kvGet, kvSet, kvLpush, kvLrange, kvEval } from '@/lib/kv';
+import { stripControlChars, truncateSafe } from '@/lib/sanitize';
 import { caip2ForChainId } from './network';
 import { x402FacilitatorConfig } from './facilitatorConfig';
 import { isPrivateHost } from './moderation';
@@ -46,10 +47,13 @@ export type X402Resource = {
   description: string;
   priceJpyc: string; // human JPYC 整数 (表示価格・seller 受領額)
   category: string;
+  docsUrl?: string;
+  license?: string;
   payTo: string; // seller 受取先 (既定 = merchant)
   network: string; // CAIP-2 (facilitator の対象 chain)
   active: boolean;
   createdAt: number;
+  updatedAt?: number;
   verification?: X402Verification;
   hidden?: boolean;
 };
@@ -60,6 +64,8 @@ export type X402ResourceInput = {
   description: string;
   priceJpyc: string;
   category: string;
+  docsUrl?: string;
+  license?: string;
   payTo: string;
 };
 
@@ -79,6 +85,8 @@ export type X402Settlement = {
 const MAX_URL = 2048;
 const MAX_DESC = 280;
 const MAX_CATEGORY = 40;
+export const MAX_RESOURCE_DOCS_URL = 512;
+export const MAX_RESOURCE_LICENSE = 60;
 const MAX_PRICE_DIGITS = 9; // ≤ 999,999,999 JPYC (fat-finger 上限)
 
 export type ParseResourceResult =
@@ -126,6 +134,32 @@ export function parseResourceInput(
   if (category.length < 1 || category.length > MAX_CATEGORY) {
     return { ok: false, reason: 'invalid_category' };
   }
+  let docsUrl: string | undefined;
+  if (r.docsUrl !== undefined && r.docsUrl !== '') {
+    if (typeof r.docsUrl !== 'string') {
+      return { ok: false, reason: 'invalid_docs_url' };
+    }
+    const cleaned = stripControlChars(r.docsUrl);
+    if (
+      cleaned.length === 0 ||
+      cleaned.length > MAX_RESOURCE_DOCS_URL ||
+      !URL.canParse(cleaned) ||
+      new URL(cleaned).protocol !== 'https:'
+    ) {
+      return { ok: false, reason: 'invalid_docs_url' };
+    }
+    docsUrl = cleaned;
+  }
+  let license: string | undefined;
+  if (r.license !== undefined && r.license !== '') {
+    if (typeof r.license !== 'string') {
+      return { ok: false, reason: 'invalid_license' };
+    }
+    const cleaned = stripControlChars(r.license);
+    if (cleaned.length > 0) {
+      license = truncateSafe(cleaned, MAX_RESOURCE_LICENSE);
+    }
+  }
   let payTo = getAddress(owner);
   if (r.payTo !== undefined && r.payTo !== '') {
     if (!isAddress(r.payTo as string)) {
@@ -135,7 +169,16 @@ export function parseResourceInput(
   }
   return {
     ok: true,
-    input: { merchant: getAddress(owner), url, description, priceJpyc, category, payTo },
+    input: {
+      merchant: getAddress(owner),
+      url,
+      description,
+      priceJpyc,
+      category,
+      docsUrl,
+      license,
+      payTo,
+    },
   };
 }
 
@@ -178,10 +221,13 @@ export async function createResource(
     description: input.description,
     priceJpyc: input.priceJpyc,
     category: input.category,
+    ...(input.docsUrl ? { docsUrl: input.docsUrl } : {}),
+    ...(input.license ? { license: input.license } : {}),
     payTo: input.payTo,
     network: caip2ForChainId(x402FacilitatorConfig.chainId),
     active: true,
     createdAt: nowMs,
+    updatedAt: nowMs,
   };
   const cas = await kvEval<number>(
     CAS_CREATE,
@@ -260,7 +306,7 @@ const CAS_OWNER_GUARD =
   "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
   'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ';
 
-// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/payTo) を更新する CAS。
+// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo) を更新する CAS。
 // read→write を atomic にし (handleStore と同流儀)、特に soft-delete (active:false) との競合で
 // 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
 // soft-delete 済 (active:false) は編集不可 (-3) = 保持した監査データ (settlement が参照する当時の
@@ -271,6 +317,9 @@ const CAS_UPDATE =
   'if o.active==false then return -3 end; ' +
   'if o.url~=ARGV[2] then o.verification=nil; o.hidden=nil end; ' +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
+  "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
+  "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
+  'o.updatedAt=tonumber(ARGV[9]); ' +
   "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
 
 // owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
@@ -286,7 +335,7 @@ export type UpdateResourceResult =
   | { ok: true; resource: X402Resource }
   | { ok: false; reason: 'not_found' | 'forbidden' | 'storage' };
 
-// owner 限定で編集可能フィールド (url/description/priceJpyc/category/payTo) を更新する。
+// owner 限定で編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo) を更新する。
 // id/merchant/network/createdAt/active は不変。**merchant !== owner は forbidden** = 他人の掲載や
 // payTo (送金先) を書き換えさせない (認可の要)。owner 確認と書込を CAS で原子化し、KV エラー/破損は
 // not_found ではなく storage に倒す (outage を「未存在」と誤魔化さない)。input は検証済を渡す。
@@ -294,6 +343,7 @@ export async function updateResource(
   id: string,
   owner: string,
   input: X402ResourceInput,
+  nowMs = Date.now(),
 ): Promise<UpdateResourceResult> {
   const cas = await kvEval<number | string>(CAS_UPDATE, [resourceKey(id)], [
     getAddress(owner),
@@ -302,6 +352,9 @@ export async function updateResource(
     input.priceJpyc,
     input.category,
     input.payTo,
+    input.docsUrl ?? '',
+    input.license ?? '',
+    String(nowMs),
   ]);
   if (!cas.ok) return { ok: false, reason: 'storage' };
   // -1=未存在 / -3=削除済 → どちらも「編集可能な resource は無い」= not_found。

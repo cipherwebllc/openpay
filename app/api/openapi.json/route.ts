@@ -106,6 +106,73 @@ const DIRECTORY_QUERY_PARAMETERS = [
   { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 1000 } },
 ] as const;
 
+const DISCOVERY_OPENAPI_PATHS = {
+  '/api/discovery': {
+    get: {
+      tags: ['x402 Catalog'],
+      summary: 'List payable x402 resources for agent comparison',
+      responses: {
+        '200': {
+          description: 'First-party and registered resources with payable requirements',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/DiscoveryEnvelope' },
+            },
+          },
+        },
+        '404': { description: 'The x402 facilitator is disabled.' },
+        '503': { description: 'The resource catalog is temporarily unavailable.' },
+      },
+    },
+  },
+} as const;
+
+const DISCOVERY_OPENAPI_SCHEMAS = {
+  DiscoveryItem: {
+    type: 'object',
+    required: [
+      'resource',
+      'description',
+      'category',
+      'priceJpyc',
+      'network',
+      'accepts',
+      'verifiedAt',
+    ],
+    properties: {
+      resource: { type: 'string', format: 'uri' },
+      description: { type: 'string' },
+      category: { type: 'string' },
+      priceJpyc: { type: 'string', pattern: '^[1-9][0-9]*$' },
+      docsUrl: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 512 },
+      license: { type: 'string', maxLength: 60 },
+      updatedAt: { type: 'string', format: 'date-time' },
+      network: { type: 'string', description: 'CAIP-2 network identifier' },
+      accepts: {
+        type: 'array',
+        description: 'Payable x402 requirements including the OpenPay fee extension.',
+        items: { type: 'object' },
+      },
+      verifiedAt: {
+        type: ['string', 'null'],
+        format: 'date-time',
+        description: 'Last successful OpenPay gate verification, or null when not yet verified.',
+      },
+    },
+  },
+  DiscoveryEnvelope: {
+    type: 'object',
+    required: ['x402Version', 'items'],
+    properties: {
+      x402Version: { type: 'integer', const: 1 },
+      items: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/DiscoveryItem' },
+      },
+    },
+  },
+} as const;
+
 const ERROR_RESPONSES = {
   '400': { $ref: '#/components/responses/InvalidQuery' },
   '404': { $ref: '#/components/responses/NotFound' },
@@ -767,7 +834,8 @@ const OPENAPI_DOCUMENT = {
 
 export async function GET(): Promise<NextResponse> {
   const shopsEnabled = shopsApiEnabled();
-  if (!env.enableWeb3Directory && !shopsEnabled) {
+  const facilitatorEnabled = env.enableX402Facilitator;
+  if (!env.enableWeb3Directory && !shopsEnabled && !facilitatorEnabled) {
     return NextResponse.json(
       { ok: false, error: 'not_found' },
       { status: 404 },
@@ -777,25 +845,28 @@ export async function GET(): Promise<NextResponse> {
     ...OPENAPI_DOCUMENT,
     info: {
       ...OPENAPI_DOCUMENT.info,
-      title: 'OpenPay Directory and Shops APIs',
+      title: 'OpenPay Discovery, Directory and Shops APIs',
       description:
-        'Structured Japan Web3 directory data and opt-in JPYC shop discovery. Paid routes use x402 with JPYC.',
+        'Payable x402 resources, structured Japan Web3 directory data, and opt-in JPYC shop discovery.',
     },
     tags: [
       ...(env.enableWeb3Directory ? OPENAPI_DOCUMENT.tags : []),
       ...(shopsEnabled
         ? [{ name: 'Shops Free' }, { name: 'Shops Paid' }]
         : []),
+      ...(facilitatorEnabled ? [{ name: 'x402 Catalog' }] : []),
     ],
     paths: {
       ...(env.enableWeb3Directory ? OPENAPI_DOCUMENT.paths : {}),
       ...(shopsEnabled ? SHOPS_OPENAPI_PATHS : {}),
+      ...(facilitatorEnabled ? DISCOVERY_OPENAPI_PATHS : {}),
     },
     components: {
       ...OPENAPI_DOCUMENT.components,
       schemas: {
         ...OPENAPI_DOCUMENT.components.schemas,
         ...SHOPS_OPENAPI_SCHEMAS,
+        ...(facilitatorEnabled ? DISCOVERY_OPENAPI_SCHEMAS : {}),
       },
       responses: {
         ...OPENAPI_DOCUMENT.components.responses,

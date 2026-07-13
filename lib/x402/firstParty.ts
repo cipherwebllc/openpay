@@ -29,6 +29,8 @@ export type FirstPartyResource = {
   priceJpyc: string;
   category: 'api' | 'data';
   description: string;
+  docsUrl: string;
+  license: string;
   outputSchema: FirstPartyOutputSchema;
 };
 
@@ -38,6 +40,8 @@ export const FIRST_PARTY_RESOURCES = [
     priceJpyc: '1',
     category: 'api',
     description: 'OpenPay x402 demo — pay 1 JPYC and unlock a signed hello.',
+    docsUrl: 'https://open-pay.jp/api/openapi.json',
+    license: 'OpenPay original; reuse permitted with attribution.',
     outputSchema: {
       input: { type: 'http', method: 'GET', discoverable: true },
       output: {
@@ -57,6 +61,8 @@ export const FIRST_PARTY_RESOURCES = [
     category: 'data',
     description:
       'Directory of JPYC-accepting exchanges, dApps and bridges (curated JSON).',
+    docsUrl: 'https://open-pay.jp/api/openapi.json',
+    license: 'Attributed metadata; source rights remain with owners.',
     outputSchema: {
       input: { type: 'http', method: 'GET', discoverable: true },
       output: {

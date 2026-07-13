@@ -44,6 +44,10 @@ type DiscoveryItem = {
   description: string;
   category: string;
   priceJpyc: string;
+  docsUrl?: string;
+  license?: string;
+  updatedAt?: string;
+  verifiedAt?: string | null;
   accepts: Array<{ extra?: { openpay?: { feeValue?: string } } }>;
 };
 
@@ -54,6 +58,8 @@ type RegisteredResource = {
   description: string;
   priceJpyc: string;
   category: string;
+  docsUrl?: string;
+  license?: string;
 };
 
 // owner 一覧 (GET /api/facilitator/resources) の要素。編集に id + payTo が要る。
@@ -64,11 +70,24 @@ type OwnedResource = {
   priceJpyc: string;
   category: string;
   payTo: string;
+  docsUrl?: string;
+  license?: string;
   paywallSnippet?: string;
   hidden?: boolean;
 };
 
-const EMPTY_FORM = { url: '', description: '', priceJpyc: '', category: '', payTo: '' };
+const EMPTY_FORM = {
+  url: '',
+  description: '',
+  priceJpyc: '',
+  category: '',
+  payTo: '',
+  docsUrl: '',
+  license: '',
+};
+const RESOURCE_DOCS_URL_MAX = 512;
+const RESOURCE_LICENSE_MAX = 60;
+const DAY_MS = 24 * 60 * 60 * 1_000;
 const DEMO_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
 const CATALOG_CATEGORIES = ['api', 'data', 'mcp', 'content'] as const;
 type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
@@ -107,6 +126,19 @@ function isHttpsUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isoDate(value: string | undefined): string | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : null;
+}
+
+function verifiedDaysAgo(value: string | null | undefined, now: number): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  return Math.max(0, Math.floor((now - timestamp) / DAY_MS));
 }
 
 function feeAtomicOf(item: DiscoveryItem): bigint | null {
@@ -272,6 +304,8 @@ export function X402DiscoveryView({
       priceJpyc: r.priceJpyc,
       category: r.category,
       payTo: r.payTo,
+      docsUrl: r.docsUrl ?? '',
+      license: r.license ?? '',
     });
     setCreated(null);
     setNotice(null);
@@ -302,6 +336,8 @@ export function X402DiscoveryView({
         priceJpyc: form.priceJpyc,
         category: form.category,
         ...(form.payTo ? { payTo: form.payTo } : {}),
+        ...(form.docsUrl ? { docsUrl: form.docsUrl } : {}),
+        ...(form.license ? { license: form.license } : {}),
         // 新規登録のみ正当性表明を送る (サーバは POST でのみ必須・編集では無視)。
         ...(editId ? {} : { attested }),
       };
@@ -517,6 +553,9 @@ export function X402DiscoveryView({
             <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
               {t('registerSubtitle')}
             </p>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              {t('listingPolicySummary')}
+            </p>
           </div>
         </div>
 
@@ -576,6 +615,31 @@ export function X402DiscoveryView({
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
+            </Field>
+            <Field label={t('formDocsUrlLabel')}>
+              <input
+                type="url"
+                className={inputCls}
+                placeholder={t('formDocsUrl')}
+                maxLength={RESOURCE_DOCS_URL_MAX}
+                value={form.docsUrl}
+                onChange={(e) => setForm((f) => ({ ...f, docsUrl: e.target.value }))}
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                {t('formDocsUrlHint')}
+              </p>
+            </Field>
+            <Field label={t('formLicenseLabel')}>
+              <input
+                className={inputCls}
+                placeholder={t('formLicense')}
+                maxLength={RESOURCE_LICENSE_MAX}
+                value={form.license}
+                onChange={(e) => setForm((f) => ({ ...f, license: e.target.value }))}
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                {t('formLicenseHint')}
+              </p>
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('formPriceLabel')}>
@@ -928,6 +992,11 @@ export function X402DiscoveryView({
           <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {visibleItems.map((item) => {
               const feeAtomic = feeAtomicOf(item);
+              const verifiedDays = verifiedDaysAgo(item.verifiedAt, Date.now());
+              const updatedDate = isoDate(item.updatedAt);
+              const docsUrl = item.docsUrl && isHttpsUrl(item.docsUrl) ? item.docsUrl : null;
+              const hasComparisonMeta =
+                verifiedDays !== null || updatedDate !== null || Boolean(item.license) || docsUrl !== null;
               // atomic JPYC → 表示 (小数あり)。1% 手数料は price/100 で端数が出るため、整数除算だと
               // 切り捨てて誤表示する → formatUnits で小数を保つ。合計も atomic で加算してから整形する。
               const fee = feeAtomic === null ? null : formatUnits(feeAtomic, 18);
@@ -968,6 +1037,33 @@ export function X402DiscoveryView({
                     copyKey: `cat-${item.resource}`,
                     official: FIRST_PARTY_RESOURCE_URLS.has(item.resource),
                   })}
+                  {hasComparisonMeta && (
+                    <div className="mt-2 flex items-center divide-x divide-slate-200 overflow-x-auto whitespace-nowrap text-[11px] text-slate-500">
+                      {verifiedDays !== null && (
+                        <time dateTime={item.verifiedAt ?? undefined} className="pr-2">
+                          {t('verifiedMeta', { days: verifiedDays })}
+                        </time>
+                      )}
+                      {updatedDate !== null && (
+                        <time dateTime={item.updatedAt} className="px-2">
+                          {t('updatedMeta', { date: updatedDate })}
+                        </time>
+                      )}
+                      {item.license && (
+                        <span className="px-2">{t('licenseMeta', { license: item.license })}</span>
+                      )}
+                      {docsUrl && (
+                        <a
+                          href={docsUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="px-2 font-medium text-brand hover:text-brand-dark hover:underline"
+                        >
+                          {t('docsLink')}
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </li>
               );
             })}
