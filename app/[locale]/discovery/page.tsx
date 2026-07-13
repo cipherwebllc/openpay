@@ -9,6 +9,7 @@ import { LOCALES } from '@/i18n';
 import { AppShell } from '@/components/AppShell';
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
 import { env } from '@/lib/env';
+import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
 
 export const runtime = 'nodejs';
 
@@ -27,7 +28,12 @@ export default async function DiscoveryPage({
     <AppShell>
       <div className="mx-auto w-full max-w-2xl">
         <div className="mb-5">
-          <h2 className="text-xl font-bold text-slate-900">{t('title')}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-900">{t('title')}</h2>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+              {t('facilitatorLabel')}
+            </span>
+          </div>
           <p className="mt-1 text-sm text-slate-500">{t('subtitle')}</p>
           {/* x402 の 1 往復を 3 チップで視覚化 (アクセス → 402 価格提示 → 支払いで解錠)。 */}
           <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 text-xs font-medium text-slate-600">
@@ -47,7 +53,7 @@ export default async function DiscoveryPage({
             </span>
           </div>
         </div>
-        <X402DiscoveryView />
+        <X402DiscoveryView maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT} />
       </div>
     </AppShell>
   );

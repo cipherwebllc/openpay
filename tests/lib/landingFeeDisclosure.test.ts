@@ -7,7 +7,11 @@
 // component (描画テストの慣習対象外) なので、内容の正しさはこの drift フェンスで担保する。
 
 import { describe, it, expect } from 'vitest';
-import { DISCLOSED_RECOVER_FEE, DISCLOSED_MOBILE_ORDER_FEE } from '@/lib/legal';
+import {
+  DISCLOSED_RECOVER_FEE,
+  DISCLOSED_MOBILE_ORDER_FEE,
+  DISCLOSED_X402_FEE,
+} from '@/lib/legal';
 import ja from '../../messages/ja.json';
 import en from '../../messages/en.json';
 
@@ -15,6 +19,8 @@ const recoverPct = DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100; // 1 (%)
 const floorJpyc = DISCLOSED_RECOVER_FEE.floorJpyc; // 2 (JPYC)
 const storefrontPct = DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100; // 1 (%)
 const preorderPct = DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100; // 3 (%)
+const x402Pct = DISCLOSED_X402_FEE.bps / 100; // 1 (%)
+const x402FloorJpyc = DISCLOSED_X402_FEE.floorJpyc; // 1 (JPYC)
 
 describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェンス)', () => {
   for (const [loc, msgs] of [
@@ -48,5 +54,17 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
     expect(enNote).toContain('the 1% fee does not apply');
     expect(enNote).toContain('The sender covers');
     expect(enNote).toContain(`about ${floorJpyc} JPYC`);
+  });
+
+  it('AIストア: x402 利用料率・最低額・支払う側の上乗せを ja/en で固定する', () => {
+    const jaSubtitle = ja.Facilitator.subtitle;
+    expect(jaSubtitle).toContain(`${x402Pct}%`);
+    expect(jaSubtitle).toContain(`最低 ${x402FloorJpyc} JPYC`);
+    expect(jaSubtitle).toContain('支払う側の上乗せ');
+
+    const enSubtitle = en.Facilitator.subtitle;
+    expect(enSubtitle).toContain(`${x402Pct}%`);
+    expect(enSubtitle).toContain(`minimum ${x402FloorJpyc} JPYC`);
+    expect(enSubtitle).toContain("added on the payer's side");
   });
 });
