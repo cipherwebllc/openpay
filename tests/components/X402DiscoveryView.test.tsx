@@ -44,9 +44,10 @@ const OWNED = {
   category: 'api',
   payTo: '0x1111111111111111111111111111111111111111',
 };
+type OwnedFixture = typeof OWNED & { hidden?: boolean; paywallSnippet?: string };
 
 // URL+method でルーティングする fetch モック (編集/削除の呼び出しを検証)。
-function installRoutingFetch(owned: Array<typeof OWNED>): ReturnType<typeof vi.fn> {
+function installRoutingFetch(owned: OwnedFixture[]): ReturnType<typeof vi.fn> {
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url);
     const method = init?.method ?? 'GET';
@@ -100,7 +101,7 @@ function renderView(): ReturnType<typeof renderWithIntl> {
 }
 
 // owner サインイン状態で描画する共通ヘルパ。
-function renderAsOwner(owned: Array<typeof OWNED> = [OWNED]): ReturnType<typeof vi.fn> {
+function renderAsOwner(owned: OwnedFixture[] = [OWNED]): ReturnType<typeof vi.fn> {
   state.connected = true;
   state.address = OWNED.payTo;
   state.signedIn = true;
@@ -265,6 +266,17 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByRole('button', { name: 'スニペット' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '編集' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '削除' })).toBeInTheDocument();
+  });
+
+  it('owner: hidden の自リソースに要対応バッジとゲートスニペットを再掲', async () => {
+    const repairSnippet = 'export async function GET() { return new Response(null, { status: 402 }); }';
+    renderAsOwner([{ ...OWNED, hidden: true, paywallSnippet: repairSnippet }]);
+
+    expect(await screen.findByText('要対応')).toBeInTheDocument();
+    expect(
+      screen.getByText(/公開カタログから一時的に非表示/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(repairSnippet)).toBeInTheDocument();
   });
 
   it('登録上限: N/100 を amber 表示し、警告とともに新規登録を事前 disable', async () => {

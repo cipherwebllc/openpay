@@ -5,11 +5,34 @@ const ENVELOPE_OUTPUT = {
   properties: {
     schemaVersion: { type: 'string' },
     query: { type: 'object' },
-    items: { type: 'array', items: { type: 'object' } },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          sourceCheckedAt: { type: ['string', 'null'], format: 'date-time' },
+          sourceOk: {
+            type: ['boolean', 'null'],
+            description:
+              'Source URL reachability only; it does not establish whether the information is true. null means not yet checked.',
+          },
+        },
+        required: ['sourceCheckedAt', 'sourceOk'],
+      },
+    },
     total: { type: 'integer' },
     generatedAt: { type: 'string' },
-    dataFreshness: { type: 'object' },
-    licenseNotice: { type: 'string' },
+    dataFreshness: {
+      type: 'object',
+      properties: {
+        oldestSourceCheckedAt: { type: ['string', 'null'], format: 'date-time' },
+      },
+    },
+    licenseNotice: {
+      type: 'string',
+      description:
+        'sourceOk reports source URL reachability only, not whether the information is true.',
+    },
     attribution: { type: 'array', items: { type: 'string' } },
   },
   required: [

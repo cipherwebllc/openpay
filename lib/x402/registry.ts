@@ -31,6 +31,14 @@ export function settlementKey(id: string): string {
   return `x402:settlement:${id}`;
 }
 
+export type X402Verification = {
+  lastOkAt?: string;
+  lastCheckedAt: string;
+  failures: number;
+  lastRunId: string;
+  probedUrl: string;
+};
+
 export type X402Resource = {
   id: string;
   merchant: string; // owner wallet (SIWE・checksum)
@@ -42,6 +50,8 @@ export type X402Resource = {
   network: string; // CAIP-2 (facilitator の対象 chain)
   active: boolean;
   createdAt: number;
+  verification?: X402Verification;
+  hidden?: boolean;
 };
 
 export type X402ResourceInput = {
@@ -200,7 +210,10 @@ const RESOLVE_CONCURRENCY = 25;
 // 新しい順 (LPUSH) は維持。**1 件でも KV 取得失敗なら null** (outage を「空」と誤認させない・呼び元は
 // 503)。malformed/欠落/inactive は黙ってスキップ (self-heal は別 op)。公開カタログ (listActiveResources)
 // と owner 一覧 (listResourcesForMerchant) で共有する。
-async function resolveActiveByIds(ids: string[]): Promise<X402Resource[] | null> {
+async function resolveActiveByIds(
+  ids: string[],
+  opts: { includeHidden: boolean },
+): Promise<X402Resource[] | null> {
   const out: X402Resource[] = [];
   for (let i = 0; i < ids.length; i += RESOLVE_CONCURRENCY) {
     const batch = await Promise.all(
@@ -209,7 +222,9 @@ async function resolveActiveByIds(ids: string[]): Promise<X402Resource[] | null>
     for (const got of batch) {
       if (!got.ok) return null; // 取得失敗を「空」と誤認しない
       const res = safeParse<X402Resource>(got.value);
-      if (res && res.active) out.push(res); // malformed/欠落/inactive は skip
+      if (res && res.active && (opts.includeHidden || res.hidden !== true)) {
+        out.push(res);
+      }
     }
   }
   return out;
@@ -224,7 +239,7 @@ export async function listResourcesForMerchant(
 ): Promise<X402Resource[] | null> {
   const r = await kvLrange(merchantResourcesKey(wallet), 0, LIST_FETCH_CAP - 1);
   if (!r.ok) return null;
-  return resolveActiveByIds(r.value);
+  return resolveActiveByIds(r.value, { includeHidden: true });
 }
 
 // owner の登録総数 (active + soft-deleted)。登録上限 (濫用ガード) 判定用。index は deactivate でも
@@ -254,6 +269,7 @@ const CAS_OWNER_GUARD =
 const CAS_UPDATE =
   CAS_OWNER_GUARD +
   'if o.active==false then return -3 end; ' +
+  'if o.url~=ARGV[2] then o.verification=nil; o.hidden=nil end; ' +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
 
@@ -319,12 +335,13 @@ export async function deactivateResource(
   return { ok: true }; // 1 (無効化) / 2 (既に無効・冪等)
 }
 
-// 公開カタログ (discovery)。active のみ・新しい順 (LPUSH なので index は新しい順)。**KV エラーは null**
+// 公開カタログ (discovery)。active かつ hidden でないもののみ・新しい順。hidden record は index に
+// 残して cron の成功 probe で自動復帰できるようにする。**KV エラーは null**
 // (呼び元 discovery は 503 を返し、空カタログと誤認・キャッシュさせない)。
 export async function listActiveResources(): Promise<X402Resource[] | null> {
   const r = await kvLrange(RESOURCES_INDEX, 0, LIST_FETCH_CAP - 1);
   if (!r.ok) return null;
-  return resolveActiveByIds(r.value);
+  return resolveActiveByIds(r.value, { includeHidden: false });
 }
 
 // settle 成功の settlement を記録 (会計用)。fail-quiet (money-path を壊さない・bool を返す)。

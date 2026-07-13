@@ -6,6 +6,7 @@ import {
   queryDirectory,
   validateDirectoryQuery,
 } from '@/lib/directory/query';
+import { readDirectoryVerificationSnapshot } from '@/lib/directory/verification';
 import {
   DIRECTORY_CACHE_CONTROL,
   directoryError,
@@ -22,9 +23,18 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!parsed.ok) return directoryError(parsed.error, 400);
 
   const query = capDirectoryLimit(parsed.value, 5);
+  const verificationSnapshot = await readDirectoryVerificationSnapshot();
+  if (verificationSnapshot === null) {
+    return directoryError('storage_unavailable', 503);
+  }
   const result = queryDirectory(DIRECTORY_ENTRIES, query);
   return NextResponse.json(
-    createDirectoryEnvelope(query, result, new Date().toISOString()),
+    createDirectoryEnvelope(
+      query,
+      result,
+      new Date().toISOString(),
+      verificationSnapshot,
+    ),
     { headers: { 'Cache-Control': DIRECTORY_CACHE_CONTROL } },
   );
 }

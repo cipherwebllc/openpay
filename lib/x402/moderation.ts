@@ -24,10 +24,10 @@ import { isPrivateHost, normalizeHost } from '@/lib/net/privateHost';
 export { isPrivateHost } from '@/lib/net/privateHost';
 
 const PROBE_TIMEOUT_MS = 5000;
-const GATE_BODY_MAX_BYTES = 64 * 1024;
+export const GATE_BODY_MAX_BYTES = 64 * 1024;
 
 type ResolvedAddr = { address: string };
-type LookupFn = (hostname: string) => Promise<ResolvedAddr[]>;
+export type LookupFn = (hostname: string) => Promise<ResolvedAddr[]>;
 
 // 既定 DNS 解決 (node:dns)。動的 import で node:dns をモジュール静的グラフから外し、isPrivateHost を
 // 別文脈で import しても node 依存を持ち込まない。test は opts.lookup で差し替える。
@@ -71,42 +71,58 @@ const defaultFetch = async (url: string, init: RequestInit): Promise<{ status: n
   return fetch(url, { ...init, dispatcher } as Parameters<typeof fetch>[1]);
 };
 
+export type SsrfSafeFetchOptions = {
+  fetchImpl?: typeof fetch;
+  lookup?: LookupFn;
+  timeoutMs?: number;
+  userAgent?: string;
+};
+
+// moderation / 定期再検証で共有する SSRF-safe GET。URL parse・DNS precheck・connect-time
+// private-IP guard・manual redirect・timeout を一箇所に固定し、呼び元は HTTP/body の意味だけを判定する。
+// null は URL/DNS/private 解決/fetch failure のいずれかで、外部状態を確定できなかったことを表す。
+export async function fetchSsrfSafe(
+  url: string,
+  opts: SsrfSafeFetchOptions = {},
+): Promise<Response | null> {
+  const fetchImpl = opts.fetchImpl ?? (defaultFetch as unknown as typeof fetch);
+  const lookup = opts.lookup ?? defaultLookup;
+
+  let hostname: string;
+  try {
+    hostname = normalizeHost(new URL(url).hostname);
+  } catch {
+    return null;
+  }
+  try {
+    const addrs = await lookup(hostname);
+    if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) return null;
+  } catch {
+    return null;
+  }
+
+  try {
+    return await fetchImpl(url, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(opts.timeoutMs ?? PROBE_TIMEOUT_MS),
+      headers: {
+        'user-agent': opts.userAgent ?? 'OpenPay-x402-facilitator-moderation/1.0',
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 // URL が「無料で誰でも取得できる (= status 200)」かを判定する。true なら有料登録は不当 → 拒否。
 // opts.fetchImpl / opts.lookup は test 注入用。例外/非 200/private 解決は false (= 弾かない・fail-open)。
 export async function isFreelyAccessible(
   url: string,
   opts: { fetchImpl?: typeof fetch; lookup?: LookupFn } = {},
 ): Promise<boolean> {
-  const fetchImpl = opts.fetchImpl ?? (defaultFetch as unknown as typeof fetch);
-  const lookup = opts.lookup ?? defaultLookup;
-
-  let hostname: string;
-  try {
-    hostname = normalizeHost(new URL(url).hostname); // [ipv6]/末尾ドットを剥がして lookup の fail-open を防ぐ
-  } catch {
-    return false;
-  }
-
-  // 早期拒否: 解決先 IP のいずれかが private 系なら probe しない (connect-time guard の前段 + テスト用)。
-  // 解決不能・空も probe しない (fail-open)。
-  try {
-    const addrs = await lookup(hostname);
-    if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) return false;
-  } catch {
-    return false;
-  }
-
-  try {
-    const res = await fetchImpl(url, {
-      method: 'GET',
-      redirect: 'manual', // リダイレクト追跡で private へ飛ばす SSRF を防ぐ (3xx は 200 でないので通す)
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      headers: { 'user-agent': 'OpenPay-x402-facilitator-moderation/1.0' },
-    });
-    return res.status === 200;
-  } catch {
-    return false;
-  }
+  const res = await fetchSsrfSafe(url, opts);
+  return res?.status === 200;
 }
 
 // 登録 URL のゲートが「OpenPay の JPYC accepts を返す」実装かを判定する。
@@ -118,7 +134,7 @@ export async function isFreelyAccessible(
 // v1 (JSON body) と v2 (PAYMENT-REQUIRED ヘッダ) の両輸送を見る。
 export type GateProbeResult = 'openpay' | 'foreign' | 'unknown';
 
-function acceptsLookLikeOpenPay(accepts: unknown): boolean {
+export function acceptsLookLikeOpenPay(accepts: unknown): boolean {
   if (!Array.isArray(accepts)) return false;
   return accepts.some((a) => {
     if (typeof a !== 'object' || a === null) return false;
@@ -137,29 +153,9 @@ export async function probeGate(
   url: string,
   opts: { fetchImpl?: typeof fetch; lookup?: LookupFn } = {},
 ): Promise<GateProbeResult> {
-  const fetchImpl = opts.fetchImpl ?? (defaultFetch as unknown as typeof fetch);
-  const lookup = opts.lookup ?? defaultLookup;
-
-  let hostname: string;
   try {
-    hostname = normalizeHost(new URL(url).hostname); // [ipv6]/末尾ドットを剥がして lookup の fail-open を防ぐ
-  } catch {
-    return 'unknown';
-  }
-  try {
-    const addrs = await lookup(hostname);
-    if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) return 'unknown';
-  } catch {
-    return 'unknown';
-  }
-
-  try {
-    const res = await fetchImpl(url, {
-      method: 'GET',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      headers: { 'user-agent': 'OpenPay-x402-facilitator-moderation/1.0' },
-    });
+    const res = await fetchSsrfSafe(url, opts);
+    if (!res) return 'unknown';
     if (res.status !== 402) return 'unknown';
     // v2: PAYMENT-REQUIRED ヘッダ (base64 JSON)
     const v2Header = res.headers?.get?.('payment-required');

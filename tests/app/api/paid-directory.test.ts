@@ -7,6 +7,18 @@ const routeMocks = vi.hoisted(() => ({
   settle: vi.fn(),
 }));
 
+const verificationMocks = vi.hoisted(() => ({
+  snapshot: {} as Record<string, { checkedAt: string; ok: boolean; sourceUrl: string }> | null,
+  read: vi.fn(),
+}));
+
+vi.mock('@/lib/directory/verification', () => ({
+  readDirectoryVerificationSnapshot: async () => {
+    verificationMocks.read();
+    return verificationMocks.snapshot;
+  },
+}));
+
 vi.mock('@/app/api/facilitator/verify/route', () => ({
   POST: routeMocks.verify,
 }));
@@ -88,6 +100,8 @@ function detailCtx(slug: string) {
 beforeEach(() => {
   routeMocks.verify.mockReset();
   routeMocks.settle.mockReset();
+  verificationMocks.snapshot = {};
+  verificationMocks.read.mockClear();
 });
 
 afterEach(() => {
@@ -129,6 +143,7 @@ describe('paid Japan Web3 Directory APIs', () => {
     expect([listRes.status, searchRes.status, detailRes.status]).toEqual([
       402, 402, 402,
     ]);
+    expect(verificationMocks.read).not.toHaveBeenCalled();
 
     const listBody = (await listRes.json()) as {
       accepts: Array<{
@@ -198,6 +213,8 @@ describe('paid Japan Web3 Directory APIs', () => {
         slug: string;
         sourceUrl: string;
         attribution: string;
+        sourceCheckedAt: string | null;
+        sourceOk: boolean | null;
       }>;
       total: number;
     };
@@ -210,8 +227,20 @@ describe('paid Japan Web3 Directory APIs', () => {
     expect(
       body.items.every((item) => item.sourceUrl && item.attribution),
     ).toBe(true);
+    expect(body.items.every((item) => item.sourceOk === null)).toBe(true);
     expect(routeMocks.verify).toHaveBeenCalledTimes(1);
     expect(routeMocks.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it('KV snapshot 障害は verify/settle 前に未課金503', async () => {
+    verificationMocks.snapshot = null;
+    const { list } = await load();
+    const res = await list.GET(req('/api/paid/japan-web3-directory', true));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
   it('検索と詳細も支払い後に共通封筒を解錠する', async () => {

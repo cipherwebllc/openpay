@@ -5,6 +5,18 @@ const rateLimitMocks = vi.hoisted(() => ({
   check: vi.fn(async () => rateLimitMocks.allowed),
 }));
 
+const verificationMocks = vi.hoisted(() => ({
+  snapshot: {} as Record<string, { checkedAt: string; ok: boolean; sourceUrl: string }> | null,
+  read: vi.fn(),
+}));
+
+vi.mock('@/lib/directory/verification', () => ({
+  readDirectoryVerificationSnapshot: async () => {
+    verificationMocks.read();
+    return verificationMocks.snapshot;
+  },
+}));
+
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: vi.fn(() => '203.0.113.10'),
   hashIp: vi.fn(() => null),
@@ -40,6 +52,8 @@ function req(path: string): Request {
 beforeEach(() => {
   rateLimitMocks.allowed = true;
   rateLimitMocks.check.mockClear();
+  verificationMocks.snapshot = {};
+  verificationMocks.read.mockClear();
 });
 
 afterEach(() => {
@@ -73,10 +87,16 @@ describe('free Japan Web3 Directory APIs', () => {
         attribution: string;
         facts: { description: string };
         editorial: { summaryJa: string; summaryEn: string };
+        sourceCheckedAt: string | null;
+        sourceOk: boolean | null;
       }>;
       total: number;
       generatedAt: string;
-      dataFreshness: { oldest: string; newestVerifiedAt: string };
+      dataFreshness: {
+        oldest: string;
+        newestVerifiedAt: string;
+        oldestSourceCheckedAt: string | null;
+      };
       licenseNotice: string;
       attribution: string[];
     };
@@ -88,9 +108,11 @@ describe('free Japan Web3 Directory APIs', () => {
     expect(body.dataFreshness).toEqual({
       oldest: '2026-07-13',
       newestVerifiedAt: '2026-07-13',
+      oldestSourceCheckedAt: null,
     });
     expect(body.licenseNotice).toBeTruthy();
     expect(new Set(body.attribution).size).toBe(body.attribution.length);
+    expect(body.items.every((item) => item.sourceOk === null && item.sourceCheckedAt === null)).toBe(true);
     expect(
       body.items.every(
         (item) =>
@@ -108,6 +130,29 @@ describe('free Japan Web3 Directory APIs', () => {
       30,
       60,
     );
+  });
+
+  it('current sourceUrl の snapshot だけを sourceOk に反映し、KV 障害は503', async () => {
+    verificationMocks.snapshot = {
+      metamask: {
+        checkedAt: '2026-07-14T00:00:00.000Z',
+        ok: false,
+        sourceUrl: 'https://stale.example/metamask',
+      },
+    };
+    const { directory } = await load();
+    const staleBody = await (
+      await directory.GET(req('/api/directory?keyword=MetaMask'))
+    ).json();
+    expect(staleBody.items[0]).toMatchObject({
+      sourceCheckedAt: null,
+      sourceOk: null,
+    });
+
+    verificationMocks.snapshot = null;
+    const failed = await directory.GET(req('/api/directory'));
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ ok: false, error: 'storage_unavailable' });
   });
 
   it('keyword / category / JPYC filter / offset を共通 validator で処理する', async () => {

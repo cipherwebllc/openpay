@@ -8,6 +8,7 @@ import {
   queryDirectory,
 } from '@/lib/directory/query';
 import type { DirectoryQuery } from '@/lib/directory/types';
+import { readDirectoryVerificationSnapshot } from '@/lib/directory/verification';
 import { guardPaidDirectoryApi } from './_shared';
 
 export const runtime = 'nodejs';
@@ -18,14 +19,37 @@ const LIST_QUERY: DirectoryQuery = {
   offset: 0,
 };
 
+function paymentHeaderPresent(req: Request): boolean {
+  return Boolean(
+    req.headers.get('PAYMENT-SIGNATURE') || req.headers.get('x-payment'),
+  );
+}
+
 export async function GET(req: Request): Promise<NextResponse> {
   const guarded = guardPaidDirectoryApi();
   if (guarded) return guarded;
 
-  return handleFirstPartyPaidGet(req, DIRECTORY_LIST_RESOURCE, () => {
-    const result = queryDirectory(DIRECTORY_ENTRIES, LIST_QUERY);
-    return NextResponse.json(
-      createDirectoryEnvelope(LIST_QUERY, result, new Date().toISOString()),
+  if (!paymentHeaderPresent(req)) {
+    return handleFirstPartyPaidGet(req, DIRECTORY_LIST_RESOURCE, () =>
+      NextResponse.json({ error: 'snapshot_required' }, { status: 503 }),
     );
-  });
+  }
+
+  const verificationSnapshot = await readDirectoryVerificationSnapshot();
+  if (verificationSnapshot === null) {
+    return NextResponse.json(
+      { ok: false, error: 'storage_unavailable' },
+      { status: 503 },
+    );
+  }
+  const result = queryDirectory(DIRECTORY_ENTRIES, LIST_QUERY);
+  const envelope = createDirectoryEnvelope(
+    LIST_QUERY,
+    result,
+    new Date().toISOString(),
+    verificationSnapshot,
+  );
+  return handleFirstPartyPaidGet(req, DIRECTORY_LIST_RESOURCE, () =>
+    NextResponse.json(envelope),
+  );
 }

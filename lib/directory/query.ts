@@ -12,6 +12,7 @@ import {
   type DirectoryQuery,
   type DirectoryStatus,
   type DirectoryToken,
+  type DirectoryVerificationSnapshot,
 } from '@/lib/directory/types';
 
 export const DIRECTORY_DEFAULT_LIMIT = 20;
@@ -19,7 +20,7 @@ export const DIRECTORY_MAX_LIMIT = 50;
 export const DIRECTORY_MAX_OFFSET = 1000;
 export const DIRECTORY_MAX_KEYWORD_LENGTH = 100;
 export const DIRECTORY_LICENSE_NOTICE =
-  'Directory metadata is provided for informational purposes. Verify current details with each cited source before use.';
+  'Directory metadata is provided for informational purposes. Verify current details with each cited source before use. sourceOk reports source URL reachability only, not whether the information is true.';
 
 const QUERY_KEYS = new Set([
   'keyword',
@@ -232,12 +233,29 @@ export function createDirectoryEnvelope<TQuery>(
   query: TQuery,
   result: { items: readonly DirectoryEntry[]; total: number },
   generatedAt: string,
+  verificationSnapshot: DirectoryVerificationSnapshot,
 ): DirectoryEnvelope<TQuery> {
   let oldest: string | null = null;
   let newestVerifiedAt: string | null = null;
+  let oldestSourceCheckedAt: string | null = null;
   const attribution = new Set<string>();
+  const items = result.items.map((entry) => {
+    const candidate = verificationSnapshot[entry.slug];
+    const source = candidate?.sourceUrl === entry.sourceUrl ? candidate : null;
+    if (
+      source &&
+      (oldestSourceCheckedAt === null || source.checkedAt < oldestSourceCheckedAt)
+    ) {
+      oldestSourceCheckedAt = source.checkedAt;
+    }
+    return {
+      ...entry,
+      sourceCheckedAt: source?.checkedAt ?? null,
+      sourceOk: source?.ok ?? null,
+    };
+  });
 
-  for (const entry of result.items) {
+  for (const entry of items) {
     if (oldest === null || entry.verifiedAt < oldest) oldest = entry.verifiedAt;
     if (newestVerifiedAt === null || entry.verifiedAt > newestVerifiedAt) {
       newestVerifiedAt = entry.verifiedAt;
@@ -248,10 +266,10 @@ export function createDirectoryEnvelope<TQuery>(
   return {
     schemaVersion: '1.0',
     query,
-    items: result.items,
+    items,
     total: result.total,
     generatedAt,
-    dataFreshness: { oldest, newestVerifiedAt },
+    dataFreshness: { oldest, newestVerifiedAt, oldestSourceCheckedAt },
     licenseNotice: DIRECTORY_LICENSE_NOTICE,
     attribution: [...attribution],
   };

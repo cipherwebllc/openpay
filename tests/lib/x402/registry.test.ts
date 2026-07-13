@@ -62,6 +62,10 @@ vi.mock('@/lib/kv', () => ({
     }
     if (script.includes('o.url=ARGV[2]')) {
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
+      if (o.url !== args[1]) {
+        delete o.verification;
+        delete o.hidden;
+      }
       o.url = args[1];
       o.description = args[2];
       o.priceJpyc = args[3];
@@ -263,6 +267,16 @@ describe('lib/x402/registry store', () => {
     expect(ids).not.toContain('ina');
   });
 
+  it('hidden は index と owner 一覧に残し、公開 listActiveResources だけから除外', async () => {
+    await createResource(input(), 'hidden', 1);
+    const current = (await getResource('hidden'))!;
+    store.kv.set(resourceKey('hidden'), JSON.stringify({ ...current, hidden: true }));
+
+    expect(store.lists.get(RESOURCES_INDEX)).toContain('hidden');
+    expect((await listActiveResources())!.map((r) => r.id)).not.toContain('hidden');
+    expect((await listResourcesForMerchant(OWNER))!.map((r) => r.id)).toContain('hidden');
+  });
+
   it('recordSettlement 保存 (会計記録)', async () => {
     const ok = await recordSettlement({
       id: 's1',
@@ -318,6 +332,37 @@ describe('lib/x402/registry updateResource (owner 編集)', () => {
     await updateResource('id1', OWNER, input({ priceJpyc: '777' }));
     expect((await listActiveResources())![0].priceJpyc).toBe('777');
     expect((await listResourcesForMerchant(OWNER))![0].priceJpyc).toBe('777');
+  });
+
+  it('URL 変更時だけ verification/hidden をリセットする', async () => {
+    const current = (await getResource('id1'))!;
+    store.kv.set(
+      resourceKey('id1'),
+      JSON.stringify({
+        ...current,
+        hidden: true,
+        verification: {
+          lastCheckedAt: '2026-07-14T00:00:00.000Z',
+          failures: 3,
+          lastRunId: '2026071400',
+          probedUrl: current.url,
+        },
+      }),
+    );
+    await updateResource('id1', OWNER, input({ priceJpyc: '2' }));
+    expect(await getResource('id1')).toMatchObject({
+      hidden: true,
+      verification: { failures: 3 },
+    });
+
+    await updateResource(
+      'id1',
+      OWNER,
+      input({ url: 'https://a.jp/new-paid', priceJpyc: '3' }),
+    );
+    const changed = await getResource('id1');
+    expect(changed).not.toHaveProperty('hidden');
+    expect(changed).not.toHaveProperty('verification');
   });
 
   it('他人 (merchant !== owner) → forbidden で更新させない', async () => {

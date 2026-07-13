@@ -139,6 +139,7 @@ describe('directory query pure functions', () => {
       DEFAULT_QUERY,
       result,
       '2026-07-13T00:00:00.000Z',
+      {},
     );
     expect(envelope).toMatchObject({
       schemaVersion: '1.0',
@@ -148,6 +149,7 @@ describe('directory query pure functions', () => {
       dataFreshness: {
         oldest: '2026-07-13',
         newestVerifiedAt: '2026-07-13',
+        oldestSourceCheckedAt: null,
       },
     });
     expect(new Set(envelope.attribution).size).toBe(
@@ -156,6 +158,37 @@ describe('directory query pure functions', () => {
     expect(
       envelope.items.every((entry) => entry.sourceUrl && entry.attribution),
     ).toBe(true);
+  });
+
+  it('封筒は sourceUrl 一致 snapshot を merge し、不一致は unknown=null', () => {
+    const result = queryDirectory(DIRECTORY_ENTRIES, {
+      ...DEFAULT_QUERY,
+      keyword: 'MetaMask',
+    });
+    const entry = result.items[0];
+    const checkedAt = '2026-07-14T00:00:00.000Z';
+    const current = createDirectoryEnvelope(
+      DEFAULT_QUERY,
+      result,
+      checkedAt,
+      {
+        [entry.slug]: { checkedAt, ok: false, sourceUrl: entry.sourceUrl },
+      },
+    );
+    expect(current.items[0]).toMatchObject({
+      sourceCheckedAt: checkedAt,
+      sourceOk: false,
+    });
+    expect(current.dataFreshness.oldestSourceCheckedAt).toBe(checkedAt);
+
+    const stale = createDirectoryEnvelope(DEFAULT_QUERY, result, checkedAt, {
+      [entry.slug]: { checkedAt, ok: true, sourceUrl: 'https://old.example/source' },
+    });
+    expect(stale.items[0]).toMatchObject({
+      sourceCheckedAt: null,
+      sourceOk: null,
+    });
+    expect(stale.dataFreshness.oldestSourceCheckedAt).toBeNull();
   });
 
   it('カテゴリとタグの件数にも draft を含めない', () => {
