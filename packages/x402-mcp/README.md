@@ -2,9 +2,9 @@
 
 One package with two explicit MCP profiles:
 
-- `openpay-order-mcp`: keyless, human-pays mobile ordering. The AI reads the
-  menu, summarizes the total, and creates a checkout link; the person pays from
-  their own wallet.
+- `openpay-order-mcp`: keyless, human-pays mobile ordering. The AI finds a shop
+  for free, reads the menu, summarizes the total, and creates a checkout link;
+  the person pays from their own wallet.
 - `openpay-x402-mcp`: the backward-compatible full profile for x402 discovery,
   quotes, guarded autonomous payment, and mobile ordering.
 
@@ -42,8 +42,8 @@ npx --yes --package=openpay-x402-mcp -- openpay-order-mcp
 }
 ```
 
-This profile needs no `BUYER_PRIVATE_KEY`. It exposes only `order_menu`,
-`order_summary`, and `createOrderLink`.
+This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
+`order_menu`, `order_summary`, and `createOrderLink`.
 
 ## x402 profile (full, autonomous payment)
 
@@ -128,15 +128,33 @@ The buyer pays the resource price **plus the ~1% x402 fee** (`total = price + fe
 | `order_quote` | x402 | No | **Auto-pay only** (the agent itself holds a funded key). Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and fetch its x402 challenge (price, fee, total, guard reasons — the buyer covers the ~1% fee on top of the subtotal). Returns the canonical pay `url`; pay it with `x402_pay`. For human-pays, use `order_summary` + `createOrderLink`. |
 | `order_summary` | order, x402 | No | **Human-pays** (the customer pays from their own wallet). Build a cart for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`) and return the amount the customer actually pays — the subtotal; the shop covers the ~1% service fee (store-borne, no floor). No key needed. Pair with `createOrderLink`. |
 | `createOrderLink` | order, x402 | No | Build a **human-facing** checkout link for a `@handle` shop (`{handle, items:[{id,qty}], table?, pickupAt?}`). Returns `${origin}/@<handle>?cart=<base64url>[&table][&pickupAt]`; the traveler opens it and pays from their own wallet. **No key needed.** Pair with `order_summary` to state the exact amount. |
+| `find_shops` | order, x402 | No | Find shops by optional name fragment (`{q?, limit?}`) for free. Returns only `handle`, `name`, `mode`, and three-valued `acceptingNow`, plus the next-step reminder to call `order_menu(handle)` and then `createOrderLink`. No key needed. |
+| `search_shops` | x402 | Yes | Search detailed shop data (`{q?, mode?, dineIn?, acceptingNow?, limit?, offset?, maxTotalJpyc}`) for 2 JPYC plus the x402 fee. Delegates to the existing `x402_pay` guard/sign/retry path; `maxTotalJpyc` is required. |
+
+### Find shops for free (`find_shops`)
+
+Use `find_shops { "q": "cafe", "limit": 10 }` before `order_menu` when the
+user does not already know an OpenPay `@handle`. Discovery needs no key and no
+payment. The response deliberately omits addresses, hours, menu summaries,
+dine-in filtering, and live-state details; those remain paid data.
+
+### Search detailed shop data (`search_shops`)
+
+The x402 profile can call `search_shops { "q": "cafe", "acceptingNow": true,
+"limit": 10, "maxTotalJpyc": "3" }`. The tool builds the first-party
+`/api/paid/jpyc-shops/search` URL and passes it to the same internal payment flow
+as `x402_pay`: challenge, local guards, signing/payment, then unlocked retry.
+The dataset price is 2 JPYC and the disclosed fee is added on the buyer side;
+`maxTotalJpyc`, `MAX_PER_CALL_JPYC`, and `MAX_SESSION_JPYC` all still apply.
 
 Two ways to order:
 
-- **Agent holds a funded key** (autonomous pay): `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`.
-- **Human pays by hand** (BYOW handoff — no wallet in the agent): `order_menu` → pick items → `order_summary` (tell the customer the exact amount they pay — the subtotal, with the shop covering the ~1% fee) → `createOrderLink` → the traveler opens the returned `@handle` link on their phone and pays with their own wallet. The shop's receiving address and prices are re-resolved server-side from the `@handle` record, so the cart link only carries `{id, qty, options}` — menu text can never change the destination or amount.
+- **Agent holds a funded key** (autonomous pay): `find_shops` → `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`.
+- **Human pays by hand** (BYOW handoff — no wallet in the agent): `find_shops` → `order_menu` → pick items → `order_summary` (tell the customer the exact amount they pay — the subtotal, with the shop covering the ~1% fee) → `createOrderLink` → the traveler opens the returned `@handle` link on their phone and pays with their own wallet. The shop's receiving address and prices are re-resolved server-side from the `@handle` record, so the cart link only carries `{id, qty, options}` — menu text can never change the destination or amount.
 
 The two flows differ on the ~1% service fee: with `order_quote` / `x402_pay` (auto-pay) the **buyer** pays it on top of the subtotal; with `order_summary` / `createOrderLink` (human-pays) the **shop** absorbs it, so the customer pays exactly the subtotal. Use `order_summary` (not `order_quote`) whenever a human will pay by hand — `order_quote` reports the x402 total and pulls in the auto-pay spend guards (`MAX_PER_CALL_JPYC` / `MAX_SESSION_JPYC`), which do not apply to a wallet the agent never touches.
 
-Ordering flow (autonomous): `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`. Items with option groups (size/toppings — `options` in `order_menu`): pass `items[].options` = `{groupId: choiceId}` (single) / `{groupId: [choiceIds]}` (multi); required groups are mandatory (`missing_required_option` otherwise), unknown ids are rejected (`unknown_option`). A shop total is usually well above the default `MAX_PER_CALL_JPYC` of `10` JPYC, so raise `MAX_PER_CALL_JPYC` (and `MAX_SESSION_JPYC`) to your intended order ceiling or `x402_pay` will refuse with `max_total_above_per_call_limit` / `total_exceeds_max_total`. The shop must have `ENABLE_AGENT_ORDER` (+ `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY`) enabled server-side, otherwise the endpoints return 404.
+Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `order_quote` → `x402_pay {url, maxTotalJpyc}`. Items with option groups (size/toppings — `options` in `order_menu`): pass `items[].options` = `{groupId: choiceId}` (single) / `{groupId: [choiceIds]}` (multi); required groups are mandatory (`missing_required_option` otherwise), unknown ids are rejected (`unknown_option`). A shop total is usually well above the default `MAX_PER_CALL_JPYC` of `10` JPYC, so raise `MAX_PER_CALL_JPYC` (and `MAX_SESSION_JPYC`) to your intended order ceiling or `x402_pay` will refuse with `max_total_above_per_call_limit` / `total_exceeds_max_total`. The shop must have `ENABLE_AGENT_ORDER` (+ `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY`) enabled server-side, otherwise the endpoints return 404.
 
 ## Environment
 

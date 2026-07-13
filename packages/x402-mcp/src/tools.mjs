@@ -190,6 +190,42 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'find_shops',
+    profiles: ['order', 'x402'],
+    description:
+      'Find OpenPay mobile-order shops by name for free. Returns handle, name, mode, and acceptingNow; no wallet key needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', maxLength: 100 },
+        limit: { type: 'integer', minimum: 1, maximum: 10 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_shops',
+    profiles: ['x402'],
+    description:
+      'Search detailed OpenPay shop data for 2 JPYC plus the x402 fee. Reuses x402_pay and requires maxTotalJpyc so all local money guards run before payment.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', maxLength: 100 },
+        mode: { type: 'string', enum: ['storefront', 'preorder'] },
+        dineIn: { type: 'boolean' },
+        acceptingNow: { type: 'boolean' },
+        limit: { type: 'integer', minimum: 1, maximum: 20 },
+        offset: { type: 'integer', minimum: 0, maximum: 1000 },
+        maxTotalJpyc: {
+          oneOf: [{ type: 'string' }, { type: 'number' }],
+        },
+      },
+      required: ['maxTotalJpyc'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function publicTool({ profiles: _profiles, ...tool }) {
@@ -392,6 +428,69 @@ export function createToolRuntime({
   // agent-order は discovery と同一 origin (config.discoveryUrl の origin) に対して menu/pay を叩く。
   function baseOrigin() {
     return new URL(config.discoveryUrl).origin;
+  }
+
+  function appendOptionalString(params, input, key) {
+    const value = input[key];
+    if (value === undefined) return;
+    if (typeof value !== 'string') throw new Error(`${key} must be a string`);
+    if (value.length > 0) params.set(key, value);
+  }
+
+  function appendOptionalBoolean(params, input, key) {
+    const value = input[key];
+    if (value === undefined) return;
+    if (typeof value !== 'boolean') throw new Error(`${key} must be a boolean`);
+    params.set(key, String(value));
+  }
+
+  function appendOptionalInteger(params, input, key, minimum) {
+    const value = input[key];
+    if (value === undefined) return;
+    if (!Number.isSafeInteger(value) || value < minimum) {
+      throw new Error(`${key} must be an integer >= ${minimum}`);
+    }
+    params.set(key, String(value));
+  }
+
+  async function findShops(args) {
+    const input = requireArgsObject(args);
+    const params = new URLSearchParams();
+    appendOptionalString(params, input, 'q');
+    appendOptionalInteger(params, input, 'limit', 1);
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    const url = `${baseOrigin()}/api/shops/find${query}`;
+    const res = await fetchImpl(url, { headers: { accept: 'application/json' } });
+    const body = await readJson(res);
+    if (!res.ok || !isObject(body) || !Array.isArray(body.items)) {
+      return { ok: false, status: res.status, error: 'shops_find_unavailable' };
+    }
+    return {
+      ok: true,
+      ...body,
+      nextStep:
+        'Next: call order_menu(handle) to get the menu, then createOrderLink after choosing items.',
+    };
+  }
+
+  async function searchShops(args) {
+    const input = requireArgsObject(args);
+    const params = new URLSearchParams();
+    appendOptionalString(params, input, 'q');
+    if (input.mode !== undefined) {
+      if (input.mode !== 'storefront' && input.mode !== 'preorder') {
+        throw new Error('mode must be storefront or preorder');
+      }
+      params.set('mode', input.mode);
+    }
+    appendOptionalBoolean(params, input, 'dineIn');
+    appendOptionalBoolean(params, input, 'acceptingNow');
+    appendOptionalInteger(params, input, 'limit', 1);
+    appendOptionalInteger(params, input, 'offset', 0);
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    const url = `${baseOrigin()}/api/paid/jpyc-shops/search${query}`;
+    // quote → guard →署名/支払い→解錠は既存 x402_pay の直列化を含む実装へ委譲する。
+    return x402Pay({ url, maxTotalJpyc: input.maxTotalJpyc });
   }
 
   // カート [{id,qty}] → base64url(JSON)。server の lib/agentOrder.decodeAgentCart と同形 (単一情報源で
@@ -651,6 +750,8 @@ export function createToolRuntime({
       if (name === 'order_quote') return textResult(await orderQuote(args));
       if (name === 'order_summary') return textResult(await orderSummary(args));
       if (name === 'createOrderLink') return textResult(await createOrderLink(args));
+      if (name === 'find_shops') return textResult(await findShops(args));
+      if (name === 'search_shops') return textResult(await searchShops(args));
       return textResult({ ok: false, error: `unknown tool: ${name}` }, true);
     } catch (error) {
       return textResult(
@@ -672,5 +773,7 @@ export function createToolRuntime({
     orderQuote,
     orderSummary,
     createOrderLink,
+    findShops,
+    searchShops,
   };
 }

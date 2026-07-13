@@ -5,8 +5,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const profile = process.argv[2] ?? 'x402';
 const profiles = {
-  order: { entry: 'src/order.mjs', expectedToolCount: 3 },
-  x402: { entry: 'src/index.mjs', expectedToolCount: 7 },
+  order: { entry: 'src/order.mjs', expectedToolCount: 4 },
+  x402: { entry: 'src/index.mjs', expectedToolCount: 9 },
 };
 const selected = profiles[profile];
 if (!selected) {
@@ -20,7 +20,7 @@ const transport = new StdioClientTransport({
 });
 
 const client = new Client(
-  { name: `openpay-${profile}-mcp-smoke`, version: '0.8.0' },
+  { name: `openpay-${profile}-mcp-smoke`, version: '0.9.0' },
   { capabilities: {} },
 );
 
@@ -43,7 +43,7 @@ try {
       2,
     ),
   );
-  // x402 は後方互換の 7 ツール、order は鍵なし人払いの 3 ツールを公開する。
+  // x402 は既存 7 + Shops 2 の 9 ツール、order は鍵なし人払い + find の 4 ツールを公開する。
   if (result.tools.length !== selected.expectedToolCount) {
     process.exitCode = 1;
   }

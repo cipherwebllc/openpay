@@ -29,7 +29,7 @@ export type AgentGuideLocale = 'ja' | 'en';
 export const JPYC_CONTRACT_ADDRESS = defaultDeploymentForSymbol('jpyc').address;
 
 // MCP 設定スニペット (ja/en 共通・言語非依存)。**鍵不要** の order profile 向け:
-// order_menu / order_summary / createOrderLink の 3 ツールだけを公開し、BUYER_PRIVATE_KEY は不要。
+// find_shops / order_menu / order_summary / createOrderLink の 4 ツールだけを公開し、BUYER_PRIVATE_KEY は不要。
 // x402_pay / order_quote は profile 自体に存在しないため、「AI に財布を持たせない」原則を設定面で固定する。
 // command/args は packages/x402-mcp の副 bin (`openpay-order-mcp`) と README の npx 呼び出しに一致。
 const MCP_CONFIG_JSON = [
@@ -155,7 +155,7 @@ const ja: AgentGuideContent = {
 
   setupTitle: 'セットアップ（AI に MCP を追加）',
   setupIntro:
-    'openpay-x402-mcp の order profile（openpay-order-mcp）は、お店のメニュー取得・支払額の確認・決済リンク作成だけを AI から使えるようにする MCP サーバーです。AI が自動決済するツールは含まれず、ウォレットの鍵も設定に含めません。',
+    'openpay-x402-mcp の order profile（openpay-order-mcp）は、無料のお店発見（find_shops）・メニュー取得・支払額の確認・決済リンク作成だけを AI から使えるようにする MCP サーバーです。AI が自動決済するツールは含まれず、ウォレットの鍵も設定に含めません。',
   setupSteps: [
     {
       n: 1,
@@ -170,7 +170,7 @@ const ja: AgentGuideContent = {
     {
       n: 3,
       title: 'AI に頼んでみる',
-      body: '「@（店舗ハンドル）のメニューを見せて」と母国語で頼めば、AI がメニューを読み込みます（鍵は不要です）。',
+      body: '店名を伝えてお店を探すよう頼めば、AI が find_shops で店舗ハンドルを見つけ、order_menu でメニューを読み込みます（鍵は不要です）。',
     },
   ],
   configLabel: '設定例（支払い用の鍵は不要）',
@@ -322,7 +322,7 @@ const en: AgentGuideContent = {
 
   setupTitle: 'Setup (add the MCP to your AI)',
   setupIntro:
-    'The order profile in openpay-x402-mcp (openpay-order-mcp) lets your AI read a shop menu, check the amount, and create a checkout link. It includes no autonomous-payment tools, so no wallet key goes into the config.',
+    'The order profile in openpay-x402-mcp (openpay-order-mcp) lets your AI find a shop for free with find_shops, read its menu, check the amount, and create a checkout link. It includes no autonomous-payment tools, so no wallet key goes into the config.',
   setupSteps: [
     {
       n: 1,
@@ -337,7 +337,7 @@ const en: AgentGuideContent = {
     {
       n: 3,
       title: 'Ask your AI',
-      body: 'Ask “show me the menu for @(shop handle)” in your language and the AI reads the menu (no key needed).',
+      body: 'Ask the AI to find a shop by name. It uses find_shops to get the handle, then order_menu to read the menu (no key needed).',
     },
   ],
   configLabel: 'Example config (no payment key needed)',

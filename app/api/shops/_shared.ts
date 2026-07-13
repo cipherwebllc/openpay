@@ -4,7 +4,7 @@ import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 
 export const SHOPS_CACHE_CONTROL =
-  'public, s-maxage=60, stale-while-revalidate=120';
+  'public, s-maxage=30, stale-while-revalidate=60';
 
 export function shopsError(
   error: string,
