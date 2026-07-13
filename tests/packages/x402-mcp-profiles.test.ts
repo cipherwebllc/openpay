@@ -37,17 +37,34 @@ const X402_TOOL_NAMES = [
   'order_quote',
   'order_summary',
   'createOrderLink',
+  'find_shops',
+  'search_shops',
 ];
-const ORDER_TOOL_NAMES = ['order_menu', 'order_summary', 'createOrderLink'];
+const ORDER_TOOL_NAMES = [
+  'order_menu',
+  'order_summary',
+  'createOrderLink',
+  'find_shops',
+];
 const X402_ONLY_TOOL_NAMES = [
   'x402_pay',
   'order_quote',
   'discovery_search',
   'x402_quote',
+  'search_shops',
 ];
-// 0.7.2 の公開 TOOLS (順序/name/description/inputSchema) の wire fingerprint。
-const X402_TOOLS_WIRE_SHA256 =
-  'e46247d2655dbda8d7e51d3acadd5cfb3f153d1d9f3fe2cb2962af8a2461c7e7';
+// 0.8.0 の既存 7 ツールは個別 JSON byte を固定し、0.9.0 はその末尾へ 2 ツールだけを追加する。
+const V080_TOOL_WIRE_SHA256_BY_NAME: Record<string, string> = {
+  discovery_search: '1ce53ff7e79c852648523c001bd24d80f058ba301f8447929fbb0a6efdb4bc2c',
+  x402_quote: 'bb80a4c7bdaa1751437ad8d7cd86268091a23becac5a06001cbaa6fcd149c6f4',
+  x402_pay: 'a2c601b6c390236a99b21d8282bb1fcdbbb0655aabe6d2fcb5a05d1d349fe59e',
+  order_menu: '673539c538de4eeba81d58b515bbbcf370b56b8fad26b036c4a0cfd2495a23bb',
+  order_quote: 'a0f961d3da2f0eaea6b6c52716eacd4203d27da74663617321315826a25e6c00',
+  order_summary: '7059d06856221798c0038c359db74bc63682ad306f11d72b602bcb3527b7d6b1',
+  createOrderLink: 'b11cc5e7b90aa7454c5c98863f328aec1751bdc116cab6ff4d3b3911cb5d3747',
+};
+const X402_V090_TOOLS_WIRE_SHA256 =
+  'f4f7c69c2a150e55d5dc4f2e31cf83b0e17c4c34989317f3f03a1a3b2fc34de4';
 
 async function loadTools(): Promise<ToolsModule> {
   return (await import(
@@ -60,7 +77,7 @@ function parsedText(result: ToolResult): unknown {
 }
 
 describe('x402-mcp tool profiles', () => {
-  it('profile 未指定 / x402 は旧 7 ツールを同順・同 wire 形状で公開する', async () => {
+  it('profile 未指定 / x402 は既存7 byte不変の末尾に2ツールを追加する', async () => {
     const { TOOLS, createToolRuntime } = await loadTools();
     const implicit = createToolRuntime({ env: {} });
     const explicit = createToolRuntime({ profile: 'x402', env: {} });
@@ -70,13 +87,18 @@ describe('x402-mcp tool profiles', () => {
     expect(implicit.tools).toEqual(TOOLS);
     expect(
       createHash('sha256').update(JSON.stringify(implicit.tools)).digest('hex'),
-    ).toBe(X402_TOOLS_WIRE_SHA256);
+    ).toBe(X402_V090_TOOLS_WIRE_SHA256);
+    for (const tool of implicit.tools.slice(0, 7)) {
+      expect(
+        createHash('sha256').update(JSON.stringify(tool)).digest('hex'),
+      ).toBe(V080_TOOL_WIRE_SHA256_BY_NAME[tool.name]);
+    }
     for (const tool of [...TOOLS, ...implicit.tools, ...explicit.tools]) {
       expect(tool).not.toHaveProperty('profiles');
     }
   });
 
-  it('order は鍵なしで起動し、人払い 3 ツールだけを同順で公開する', async () => {
+  it('order は鍵なしで起動し、find を末尾追加した4ツールを同順で公開する', async () => {
     const { createToolRuntime } = await loadTools();
     const runtime = createToolRuntime({ profile: 'order', env: {} });
 

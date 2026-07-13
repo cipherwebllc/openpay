@@ -33,13 +33,20 @@ const PROFILES = [
       'order_quote',
       'order_summary',
       'createOrderLink',
+      'find_shops',
+      'search_shops',
     ],
   },
   {
     profile: 'order',
     bin: 'openpay-order-mcp',
     entry: resolve(PACKAGE_DIR, 'src/order.mjs'),
-    toolNames: ['order_menu', 'order_summary', 'createOrderLink'],
+    toolNames: [
+      'order_menu',
+      'order_summary',
+      'createOrderLink',
+      'find_shops',
+    ],
   },
 ] as const;
 

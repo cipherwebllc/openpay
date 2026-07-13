@@ -34,6 +34,20 @@ const SHOPS_QUERY_PARAMETERS = [
   },
 ] as const;
 
+const SHOPS_FIND_QUERY_PARAMETERS = [
+  {
+    name: 'q',
+    in: 'query',
+    description: 'Case-insensitive partial match against the shop name only.',
+    schema: { type: 'string', maxLength: 100 },
+  },
+  {
+    name: 'limit',
+    in: 'query',
+    schema: { type: 'integer', minimum: 1, maximum: 10, default: 10 },
+  },
+] as const;
+
 const DIRECTORY_QUERY_PARAMETERS = [
   {
     name: 'keyword',
@@ -125,6 +139,29 @@ const SHOPS_OPENAPI_PATHS = {
       },
     },
   },
+  '/api/shops/find': {
+    get: {
+      tags: ['Shops Free'],
+      summary: 'Find opt-in shops by name without payment',
+      description:
+        'Returns handle, name, mode, and three-valued acceptingNow only. Address, hours, menu summary, dine-in filters, and live details remain in the paid search.',
+      parameters: SHOPS_FIND_QUERY_PARAMETERS,
+      responses: {
+        '200': {
+          description: 'Free shop discovery envelope',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ShopsFindEnvelope' },
+            },
+          },
+        },
+        '400': { $ref: '#/components/responses/InvalidQuery' },
+        '404': { $ref: '#/components/responses/NotFound' },
+        '429': { $ref: '#/components/responses/RateLimited' },
+        '503': { $ref: '#/components/responses/StorageUnavailable' },
+      },
+    },
+  },
   '/api/paid/jpyc-shops/search': {
     get: {
       tags: ['Shops Paid'],
@@ -163,6 +200,21 @@ const SHOPS_OPENAPI_SCHEMAS = {
     properties: {
       name: { type: 'string' },
       mode: { type: 'string', enum: ['storefront', 'preorder'] },
+    },
+  },
+  ShopFindItem: {
+    type: 'object',
+    required: ['handle', 'name', 'mode', 'acceptingNow'],
+    additionalProperties: false,
+    properties: {
+      handle: { type: 'string' },
+      name: { type: 'string' },
+      mode: { type: 'string', enum: ['storefront', 'preorder'] },
+      acceptingNow: {
+        type: ['boolean', 'null'],
+        description:
+          'true: definitely accepting; false: a definite stop condition applies; null: live read failed or required legacy data is indeterminate.',
+      },
     },
   },
   ShopSearchItem: {
@@ -238,6 +290,21 @@ const SHOPS_OPENAPI_SCHEMAS = {
             type: 'array',
             maxItems: 3,
             items: { $ref: '#/components/schemas/ShopTeaser' },
+          },
+        },
+      },
+    ],
+  },
+  ShopsFindEnvelope: {
+    allOf: [
+      { $ref: '#/components/schemas/ShopsEnvelopeBase' },
+      {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            maxItems: 10,
+            items: { $ref: '#/components/schemas/ShopFindItem' },
           },
         },
       },

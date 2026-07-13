@@ -111,7 +111,7 @@ async function load(
     relay: string;
     agent: string;
   }> = {},
-): Promise<{ free: Route; paid: Route; openapi: StaticRoute }> {
+): Promise<{ free: Route; find: Route; paid: Route; openapi: StaticRoute }> {
   vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOPS_API', flags.shops ?? '1');
   vi.stubEnv(
     'NEXT_PUBLIC_ENABLE_X402_FACILITATOR',
@@ -131,6 +131,7 @@ async function load(
   vi.resetModules();
   return {
     free: (await import('@/app/api/shops/route')) as Route,
+    find: (await import('@/app/api/shops/find/route')) as Route,
     paid: (await import('@/app/api/paid/jpyc-shops/search/route')) as Route,
     openapi: (await import('@/app/api/openapi.json/route')) as StaticRoute,
   };
@@ -198,7 +199,7 @@ describe('GET /api/shops', () => {
     const first = await free.GET(req('/api/shops'));
     const second = await free.GET(req('/api/shops'));
     expect(first.status).toBe(200);
-    expect(first.headers.get('cache-control')).toContain('s-maxage=60');
+    expect(first.headers.get('cache-control')).toContain('s-maxage=30');
     const firstBody = (await first.json()) as {
       items: Array<Record<string, unknown>>;
       total: number;
@@ -225,6 +226,135 @@ describe('GET /api/shops', () => {
   ])('4 flag AND のどれか OFF は404: %o', async (flags) => {
     const { free } = await load(flags);
     expect((await free.GET(req('/api/shops'))).status).toBe(404);
+    expect(rate.check).not.toHaveBeenCalled();
+    expect(kvMocks.lrange).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/shops/find', () => {
+  it('店名 q の部分一致・limit を適用し、4 field と acceptingNow 三値だけを返す', async () => {
+    state.handles = ['alpha', 'bravo', 'charlie'];
+    state.summaries.set('alpha', summary('alpha', { name: 'Blue Cafe' }));
+    state.summaries.set('bravo', summary('bravo', { name: 'Blue Bakery' }));
+    state.summaries.set(
+      'charlie',
+      summary('charlie', { name: 'Blue Kitchen', acceptingOrders: false }),
+    );
+    state.lives.set('bravo', '{bad');
+    const { find } = await load();
+    const res = await find.GET(req('/api/shops/find?q=BLUE&limit=3'));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('s-maxage=30');
+    const body = (await res.json()) as {
+      query: { q: string; limit: number };
+      items: Array<Record<string, unknown>>;
+      total: number;
+    };
+    expect(body.query).toEqual({ q: 'BLUE', limit: 3 });
+    expect(body.total).toBe(3);
+    expect(body.items).toEqual([
+      {
+        handle: 'alpha',
+        name: 'Blue Cafe',
+        mode: 'storefront',
+        acceptingNow: true,
+      },
+      {
+        handle: 'bravo',
+        name: 'Blue Bakery',
+        mode: 'storefront',
+        acceptingNow: null,
+      },
+      {
+        handle: 'charlie',
+        name: 'Blue Kitchen',
+        mode: 'storefront',
+        acceptingNow: false,
+      },
+    ]);
+    for (const item of body.items) {
+      expect(Object.keys(item).sort()).toEqual([
+        'acceptingNow',
+        'handle',
+        'mode',
+        'name',
+      ]);
+    }
+    expect(rate.check).toHaveBeenCalledWith('shops', 'hashed-ip', 30, 60);
+    expect(kvMocks.mget).toHaveBeenCalledTimes(2);
+    expect(kvMocks.mget.mock.calls[1][0]).toEqual([
+      'shop:live:alpha',
+      'shop:live:bravo',
+      'shop:live:charlie',
+    ]);
+  });
+
+  it('limit 既定/上限は10で、live MGET は返却ページ分だけに限定する', async () => {
+    state.handles = Array.from({ length: 12 }, (_, index) => `shop${index}`);
+    state.summaries.clear();
+    state.lives.clear();
+    for (const handle of state.handles) {
+      state.summaries.set(handle, summary(handle));
+      state.lives.set(
+        handle,
+        JSON.stringify({ soldOut: [], paused: false, updatedAt: 10 }),
+      );
+    }
+    const { find } = await load();
+    const defaultRes = await find.GET(req('/api/shops/find'));
+    const defaultBody = (await defaultRes.json()) as {
+      query: { limit: number };
+      items: Array<{ handle: string }>;
+      total: number;
+    };
+    const cappedRes = await find.GET(req('/api/shops/find?limit=999'));
+    const cappedBody = (await cappedRes.json()) as {
+      query: { limit: number };
+      items: Array<{ handle: string }>;
+      total: number;
+    };
+
+    expect(defaultBody.query.limit).toBe(10);
+    expect(defaultBody.items).toHaveLength(10);
+    expect(defaultBody.total).toBe(12);
+    expect(cappedBody.query.limit).toBe(10);
+    expect(cappedBody.items).toHaveLength(10);
+    expect(cappedBody.total).toBe(12);
+    expect(kvMocks.mget.mock.calls[0][0]).toHaveLength(12);
+    expect(kvMocks.mget.mock.calls[1][0]).toEqual(
+      state.handles.slice(0, 10).map((handle) => `shop:live:${handle}`),
+    );
+    expect(kvMocks.mget.mock.calls[2][0]).toHaveLength(12);
+    expect(kvMocks.mget.mock.calls[3][0]).toEqual(
+      state.handles.slice(0, 10).map((handle) => `shop:live:${handle}`),
+    );
+  });
+
+  it('q/limit 以外の有料 filter は受け付けない', async () => {
+    const { find } = await load();
+    const res = await find.GET(req('/api/shops/find?mode=storefront'));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+    expect(kvMocks.lrange).not.toHaveBeenCalled();
+  });
+
+  it('q は tagline/address でなく店名だけを検索する', async () => {
+    const { find } = await load();
+    const res = await find.GET(req('/api/shops/find?q=東京都'));
+    const body = (await res.json()) as { items: unknown[]; total: number };
+    expect(body).toMatchObject({ items: [], total: 0 });
+    expect(kvMocks.mget).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { shops: '', facilitator: '1', relay: '1', agent: '1' },
+    { shops: '1', facilitator: '', relay: '1', agent: '1' },
+    { shops: '1', facilitator: '1', relay: '', agent: '1' },
+    { shops: '1', facilitator: '1', relay: '1', agent: '' },
+  ])('4 flag AND のどれか OFF は404: %o', async (flags) => {
+    const { find } = await load(flags);
+    expect((await find.GET(req('/api/shops/find'))).status).toBe(404);
     expect(rate.check).not.toHaveBeenCalled();
     expect(kvMocks.lrange).not.toHaveBeenCalled();
   });
@@ -329,7 +459,7 @@ describe('GET /api/paid/jpyc-shops/search', () => {
 });
 
 describe('Shops OpenAPI', () => {
-  it('無料/有料 route・2 JPYC・acceptingNow 三値を記述する', async () => {
+  it('teaser/find/有料 route・2 JPYC・acceptingNow 三値を記述する', async () => {
     const { openapi } = await load();
     const res = await openapi.GET();
     expect(res.status).toBe(200);
@@ -345,11 +475,23 @@ describe('Shops OpenAPI', () => {
               acceptingNow: { type: string[]; description: string };
             };
           };
+          ShopFindItem: {
+            required: string[];
+            additionalProperties: boolean;
+          };
         };
       };
     };
     expect(body.paths).toHaveProperty('/api/shops');
+    expect(body.paths).toHaveProperty('/api/shops/find');
     expect(body.paths).toHaveProperty('/api/paid/jpyc-shops/search');
+    expect(body.components.schemas.ShopFindItem.required).toEqual([
+      'handle',
+      'name',
+      'mode',
+      'acceptingNow',
+    ]);
+    expect(body.components.schemas.ShopFindItem.additionalProperties).toBe(false);
     expect(
       body.paths['/api/paid/jpyc-shops/search'].get['x-price-jpyc'],
     ).toBe(2);

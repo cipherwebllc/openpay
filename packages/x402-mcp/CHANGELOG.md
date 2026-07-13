@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0
+
+- Add keyless `find_shops` to both profiles. It calls the free
+  `/api/shops/find` endpoint and points agents to `order_menu(handle)` and
+  `createOrderLink` for the next steps.
+- Add x402-only `search_shops` for the paid 2 JPYC detailed Shops search. It
+  delegates to the existing `x402_pay` challenge, money-guard, signing, and
+  unlock flow; `maxTotalJpyc` remains mandatory.
+- Preserve each of the previous seven public tool definitions byte-for-byte and
+  append the two new tools. The order profile now exposes 4 tools and the x402
+  profile exposes 9.
+
 ## 0.8.0
 
 - Add an `openpay-order-mcp` binary for the keyless, human-pays order profile. It

@@ -5,6 +5,8 @@ export const SHOPS_DEFAULT_LIMIT = 20;
 export const SHOPS_MAX_LIMIT = 20;
 export const SHOPS_MAX_OFFSET = 1000;
 export const SHOPS_MAX_QUERY_LENGTH = 100;
+export const SHOPS_FIND_DEFAULT_LIMIT = 10;
+export const SHOPS_FIND_MAX_LIMIT = 10;
 
 export const SHOPS_LICENSE_NOTICE = {
   ja: '店舗が自ら掲載に同意した公開情報。利用範囲は検索/注文支援。最新情報は pageUrl で再確認。',
@@ -21,6 +23,7 @@ const QUERY_KEYS = new Set([
   'limit',
   'offset',
 ]);
+const FIND_QUERY_KEYS = new Set(['q', 'limit']);
 const HANDLE_RE = /^[a-z0-9_]{3,30}$/;
 const DECIMAL_RE = /^\d{1,12}(?:\.\d{1,18})?$/;
 const DATE_MAX_MS = 8_640_000_000_000_000;
@@ -63,6 +66,11 @@ export type ShopSearchQuery = {
   offset: number;
 };
 
+export type ShopFindQuery = {
+  q?: string;
+  limit: number;
+};
+
 export type ShopSearchItem = {
   handle: string;
   name: string;
@@ -101,6 +109,10 @@ export type ShopsEnvelope<TQuery, TItem> = {
 
 export type ShopQueryValidation =
   | { ok: true; value: ShopSearchQuery }
+  | { ok: false; error: 'invalid_query' };
+
+export type ShopFindQueryValidation =
+  | { ok: true; value: ShopFindQuery }
   | { ok: false; error: 'invalid_query' };
 
 function nonEmptyString(
@@ -327,6 +339,40 @@ export function validateShopQuery(
       offset,
     },
   };
+}
+
+export function validateShopFindQuery(
+  searchParams: URLSearchParams,
+): ShopFindQueryValidation {
+  for (const key of searchParams.keys()) {
+    if (!FIND_QUERY_KEYS.has(key)) return { ok: false, error: 'invalid_query' };
+  }
+  const qRaw = searchParams.get('q');
+  const q = qRaw?.trim() || undefined;
+  const limit = boundedInteger(
+    searchParams.get('limit'),
+    SHOPS_FIND_DEFAULT_LIMIT,
+    1,
+    SHOPS_FIND_MAX_LIMIT,
+  );
+  if ((q && q.length > SHOPS_MAX_QUERY_LENGTH) || limit === null) {
+    return { ok: false, error: 'invalid_query' };
+  }
+  return {
+    ok: true,
+    value: { ...(q ? { q } : {}), limit },
+  };
+}
+
+export function findShopSummaries(
+  summaries: readonly ShopSummary[],
+  query: ShopFindQuery,
+): { items: readonly ShopSummary[]; total: number } {
+  const keyword = query.q?.toLowerCase();
+  const matches = keyword
+    ? summaries.filter((summary) => summary.name.toLowerCase().includes(keyword))
+    : summaries;
+  return { items: matches.slice(0, query.limit), total: matches.length };
 }
 
 export function queryShops(
