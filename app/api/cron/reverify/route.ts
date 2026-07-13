@@ -56,7 +56,13 @@ type ReverifySummary = {
   hidden: number;
   restored: number;
   skippedDuplicate: number;
-  directory: { checked: number; ok: number; failed: number; ran: boolean };
+  directory: {
+    checked: number;
+    ok: number;
+    failed: number;
+    unknown: number;
+    ran: boolean;
+  };
 };
 
 const firstPartyByPath = new Map<string, FirstPartyResource>(
@@ -183,7 +189,7 @@ function alertMessage(
     `violations=${summary.violations} transient=${summary.transient}`,
     `hidden=${summary.hidden} restored=${summary.restored}`,
     `FIRST_PARTY_VIOLATIONS=${firstPartyViolations}`,
-    `directory_failed=${summary.directory.failed}`,
+    `directory_failed=${summary.directory.failed} directory_unknown=${summary.directory.unknown}`,
   ].join(' ');
 }
 
@@ -203,12 +209,16 @@ async function runDirectoryVerification(
     ]),
   );
   const saved = await writeDirectoryVerificationSnapshot(snapshot);
-  const ok = results.filter((result) => result.ok).length;
+  const ok = results.filter((result) => result.ok === true).length;
+  // failed=確定消滅 (404/410) のみ。判定不能 (null) を failed に混ぜると alert が常時鳴る +
+  // sourceOk:false の誤情報配信になる (2026-07-14 実害)。
+  const failed = results.filter((result) => result.ok === false).length;
   return {
     summary: {
       checked: results.length,
       ok,
-      failed: results.length - ok,
+      failed,
+      unknown: results.length - ok - failed,
       ran: true,
     },
     saved,
@@ -257,7 +267,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     const directoryResult =
       cursor.directoryDate === today
         ? {
-            summary: { checked: 0, ok: 0, failed: 0, ran: false },
+            summary: { checked: 0, ok: 0, failed: 0, unknown: 0, ran: false },
             saved: true,
           }
         : await runDirectoryVerification(checkedAt);

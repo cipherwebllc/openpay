@@ -36,6 +36,27 @@ const defaultLookup: LookupFn = async (hostname) => {
   return dns.lookup(hostname, { all: true });
 };
 
+// net.lookup 互換 callback の contract 準拠ブリッジ (テスト可能な純関数)。
+// ⚠️ Node 20+ の happy-eyeballs (autoSelectFamily 既定 ON) では、net が options.all=true で
+// lookup を呼び、callback に **LookupAddress の配列** を期待する。ここで単一 (address, family)
+// を返すと net 側が `Invalid IP address: undefined` で即失敗し、全 outbound が死ぬ
+// (2026-07-14 本番 cron 全滅の実バグ)。呼び手の options.all に従って配列/単一を返し分ける。
+export function bridgeLookupResult(
+  wantAll: boolean,
+  addrs: ReadonlyArray<{ address: string; family: number }>,
+  cb: (...args: unknown[]) => void,
+): void {
+  if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) {
+    cb(new Error('ssrf_blocked_private_address'));
+    return;
+  }
+  if (wantAll) {
+    cb(null, addrs as Array<{ address: string; family: number }>);
+  } else {
+    cb(null, addrs[0].address, addrs[0].family);
+  }
+}
+
 // connect 時に解決先 IP を検証する SSRF-safe な undici Agent。net の lookup として実 DNS を呼び、
 // 解決先のいずれかが private なら接続を拒否する → fetch 自身の再解決 (rebinding) を connect で塞ぐ。
 // node 依存 (undici / node:dns) を静的グラフに載せないよう lazy 生成 + memo (defaultLookup と同流儀)。
@@ -48,13 +69,12 @@ function getSsrfAgent(): Promise<unknown> {
       return new Agent({
         connect: {
           lookup: (hostname, options, cb) => {
+            // 検証のため常に全アドレスを解決するが、callback は呼び手の options.all 契約に従う。
+            const wantAll = Boolean((options as { all?: boolean } | undefined)?.all);
             lookup(hostname, { ...options, all: true, verbatim: true }, (err, addresses) => {
               if (err) return cb(err, '', 0);
               const addrs = addresses as unknown as Array<{ address: string; family: number }>;
-              if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) {
-                return cb(new Error('ssrf_blocked_private_address'), '', 0);
-              }
-              cb(null, addrs[0].address, addrs[0].family);
+              bridgeLookupResult(wantAll, addrs, cb as (...args: unknown[]) => void);
             });
           },
         },

@@ -26,7 +26,7 @@ function parseSnapshot(raw: string): DirectoryVerificationSnapshot | null {
     const record = value as Partial<DirectoryVerificationRecord>;
     if (
       typeof record.checkedAt !== 'string' ||
-      typeof record.ok !== 'boolean' ||
+      (typeof record.ok !== 'boolean' && record.ok !== null) ||
       typeof record.sourceUrl !== 'string'
     ) {
       return null;
@@ -62,14 +62,21 @@ export function directoryVerificationForEntry(
   return record?.sourceUrl === entry.sourceUrl ? record : null;
 }
 
+// 三値死活判定。true=到達 (2xx/3xx)・false=**確定消滅のみ** (404/410)・null=判定不能。
+// 401/403/429/5xx/network/timeout は「ソースが死んだ」証拠にならない (Cloudflare 等の bot 保護は
+// probe UA に 403 を返すが人間には生きている) — false に潰すと本番 API が誤情報を配信する
+// (2026-07-14 実害: 全 19 件 sourceOk:false)。
 export async function probeDirectorySource(
   url: string,
   opts: SsrfSafeFetchOptions = {},
-): Promise<boolean> {
+): Promise<boolean | null> {
   const response = await fetchSsrfSafe(url, {
     ...opts,
     timeoutMs: opts.timeoutMs ?? 2_000,
     userAgent: opts.userAgent ?? 'OpenPay-directory-reverify/1.0',
   });
-  return response !== null && response.status >= 200 && response.status < 400;
+  if (response === null) return null;
+  if (response.status >= 200 && response.status < 400) return true;
+  if (response.status === 404 || response.status === 410) return false;
+  return null;
 }

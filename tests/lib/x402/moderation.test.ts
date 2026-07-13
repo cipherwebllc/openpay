@@ -167,3 +167,56 @@ describe('lib/x402/moderation IPv6 リテラル / 末尾ドット正規化 (fail
     expect(r).toBe(false);
   });
 });
+
+describe('lib/x402/moderation bridgeLookupResult (undici connect.lookup 契約)', () => {
+  // ⚠️ Node 20+ happy-eyeballs: net は options.all=true で lookup を呼び、callback 第2引数に
+  // **LookupAddress の配列** を期待する。単一 (address, family) を返すと net が
+  // `Invalid IP address: undefined` で即死し、SSRF Agent 経由の全 outbound fetch が失敗する
+  // (2026-07-14 本番 reverify cron 全滅の実バグ)。この契約テストがその形を固定する。
+  const publicV6First = [
+    { address: '2606:4700:3036::ac43:cdad', family: 6 },
+    { address: '172.67.205.173', family: 4 },
+  ];
+
+  it('wantAll=true → callback(null, 配列) — 各要素が address/family を持つ', async () => {
+    const { bridgeLookupResult } = await import('@/lib/x402/moderation');
+    const args: unknown[] = [];
+    bridgeLookupResult(true, publicV6First, (...a: unknown[]) => args.push(...a));
+    expect(args[0]).toBe(null);
+    expect(Array.isArray(args[1])).toBe(true);
+    const addrs = args[1] as Array<{ address: string; family: number }>;
+    expect(addrs.map((a) => a.address)).toEqual(publicV6First.map((a) => a.address));
+    expect(addrs.every((a) => typeof a.address === 'string' && a.address.length > 0)).toBe(true);
+  });
+
+  it('wantAll=false → callback(null, address, family) の単一形', async () => {
+    const { bridgeLookupResult } = await import('@/lib/x402/moderation');
+    const args: unknown[] = [];
+    bridgeLookupResult(false, publicV6First, (...a: unknown[]) => args.push(...a));
+    expect(args).toEqual([null, '2606:4700:3036::ac43:cdad', 6]);
+  });
+
+  it('private を1つでも含む → error callback (SSRF block・両形共通)', async () => {
+    const { bridgeLookupResult } = await import('@/lib/x402/moderation');
+    for (const wantAll of [true, false]) {
+      const args: unknown[] = [];
+      bridgeLookupResult(
+        wantAll,
+        [
+          { address: '93.184.216.34', family: 4 },
+          { address: '169.254.169.254', family: 4 },
+        ],
+        (...a: unknown[]) => args.push(...a),
+      );
+      expect(args[0]).toBeInstanceOf(Error);
+      expect((args[0] as Error).message).toBe('ssrf_blocked_private_address');
+    }
+  });
+
+  it('解決結果が空 → error callback', async () => {
+    const { bridgeLookupResult } = await import('@/lib/x402/moderation');
+    const args: unknown[] = [];
+    bridgeLookupResult(true, [], (...a: unknown[]) => args.push(...a));
+    expect(args[0]).toBeInstanceOf(Error);
+  });
+});

@@ -14,7 +14,7 @@ const ENVELOPE_OUTPUT = {
           sourceOk: {
             type: ['boolean', 'null'],
             description:
-              'Source URL reachability only; it does not establish whether the information is true. null means not yet checked.',
+              'Source URL reachability only; it does not establish whether the information is true. true = reachable (2xx/3xx), false = confirmed gone (404/410), null = not yet checked or indeterminate.',
           },
         },
         required: ['sourceCheckedAt', 'sourceOk'],

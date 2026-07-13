@@ -667,7 +667,7 @@ const OPENAPI_DOCUMENT = {
           sourceOk: {
             type: ['boolean', 'null'],
             description:
-              'Source URL reachability only; it does not establish whether the directory information is true. null means no current result for this sourceUrl.',
+              'Source URL reachability only; it does not establish whether the directory information is true. true = reachable (2xx/3xx), false = confirmed gone (404/410), null = indeterminate (no current result, bot protection, or transient failure).',
           },
           attribution: { type: 'string' },
           facts: {
