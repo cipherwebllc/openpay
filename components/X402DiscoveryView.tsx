@@ -73,6 +73,8 @@ type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
 const FIRST_PARTY_RESOURCE_URLS = new Set([
   DEMO_RESOURCE_URL,
   'https://open-pay.jp/api/paid/stores',
+  'https://open-pay.jp/api/paid/japan-web3-directory',
+  'https://open-pay.jp/api/paid/japan-web3-directory/search',
 ]);
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
@@ -157,8 +159,10 @@ function PaywallSnippet({
 
 export function X402DiscoveryView({
   maxResourcesPerMerchant,
+  featured,
 }: {
   maxResourcesPerMerchant: number;
+  featured?: ReactNode;
 }) {
   const t = useTranslations('Facilitator');
   const { address, isConnected } = useAccount();
@@ -811,6 +815,8 @@ export function X402DiscoveryView({
           </ul>
         </section>
       )}
+
+      {featured}
 
       {/* 公開カタログ */}
       <section>

@@ -45,6 +45,18 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.networkEnv).toBe('testnet');
   });
 
+  it('Web3 Directory flag は既定 OFF で parseBoolFlag の 1/true だけを受理する', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY;
+    let mod = await import('@/lib/env');
+    expect(mod.env.enableWeb3Directory).toBe(false);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY = 'true';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableWeb3Directory).toBe(true);
+  });
+
   it('注文メモは自身の flag と ORDER_RELAY の両方が ON のときだけ有効', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_ENABLE_ORDER_MEMO = '1';
