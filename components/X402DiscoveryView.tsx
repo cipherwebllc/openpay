@@ -24,6 +24,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { ConnectButton } from '@/components/ConnectButton';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
 function categoryIcon(category: string) {
@@ -94,7 +95,52 @@ function feeAtomicOf(item: DiscoveryItem): bigint | null {
   }
 }
 
-export function X402DiscoveryView() {
+function PaywallSnippet({
+  snippet,
+  copyKey,
+  copied,
+  onCopy,
+  title,
+  copyLabel,
+  copiedLabel,
+}: {
+  snippet: string;
+  copyKey: string;
+  copied: boolean;
+  onCopy: (key: string, text: string) => void;
+  title: string;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  return (
+    <div className="mt-2">
+      <p className="text-xs text-slate-500">{title}</p>
+      <div className="relative mt-1">
+        <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 pr-28 text-xs leading-relaxed text-slate-100">
+          {snippet}
+        </pre>
+        <button
+          type="button"
+          onClick={() => onCopy(copyKey, snippet)}
+          className="absolute right-2 top-2 inline-flex items-center gap-1.5 rounded-md bg-slate-800 px-2 py-1.5 text-xs font-medium text-slate-100 transition hover:bg-slate-700"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+          ) : (
+            <Copy className="h-3.5 w-3.5" aria-hidden />
+          )}
+          <span>{copied ? copiedLabel : copyLabel}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function X402DiscoveryView({
+  maxResourcesPerMerchant,
+}: {
+  maxResourcesPerMerchant: number;
+}) {
   const t = useTranslations('Facilitator');
   const { address, isConnected } = useAccount();
   const { isSignedIn, signIn, isSigningIn } = useSiweSession();
@@ -107,6 +153,7 @@ export function X402DiscoveryView() {
   } | null>(null);
   const [notice, setNotice] = useState<'updated' | 'deleted' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorSnippet, setErrorSnippet] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // 登録時 1 回きりだったスニペット表示を owner 一覧から再表示するためのトグル。
   const [snippetOpenId, setSnippetOpenId] = useState<string | null>(null);
@@ -169,6 +216,7 @@ export function X402DiscoveryView() {
     setCreated(null);
     setNotice(null);
     setError(null);
+    setErrorSnippet('');
     setConfirmDeleteId(null);
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -177,6 +225,7 @@ export function X402DiscoveryView() {
     setEditId(null);
     setForm(EMPTY_FORM);
     setError(null);
+    setErrorSnippet('');
   }, []);
 
   // 登録 (editId 無し → POST) / 編集 (editId 有り → PATCH) を出し分ける。成功後は catalog / owned を
@@ -185,7 +234,7 @@ export function X402DiscoveryView() {
   const submitMutation = useMutation({
     mutationFn: async (): Promise<
       | { ok: true; wasEdit: boolean; resource: RegisteredResource; paywallSnippet: string }
-      | { ok: false; error: string }
+      | { ok: false; error: string; paywallSnippet: string }
     > => {
       const payload = {
         url: form.url,
@@ -214,7 +263,11 @@ export function X402DiscoveryView() {
           error?: string;
         };
         if (!res.ok || !body.resource) {
-          return { ok: false, error: body.error ?? 'error' };
+          return {
+            ok: false,
+            error: body.error ?? 'error',
+            paywallSnippet: body.paywallSnippet ?? '',
+          };
         }
         return {
           ok: true,
@@ -223,16 +276,18 @@ export function X402DiscoveryView() {
           paywallSnippet: body.paywallSnippet ?? '',
         };
       } catch {
-        return { ok: false, error: 'error' };
+        return { ok: false, error: 'error', paywallSnippet: '' };
       }
     },
     onMutate: () => {
       setError(null);
+      setErrorSnippet('');
       setNotice(null);
     },
     onSuccess: (result) => {
       if (!result.ok) {
         setError(result.error);
+        setErrorSnippet(result.paywallSnippet);
         return;
       }
       if (result.wasEdit) {
@@ -266,6 +321,7 @@ export function X402DiscoveryView() {
     },
     onMutate: () => {
       setError(null);
+      setErrorSnippet('');
       setNotice(null);
     },
     onSuccess: (result, id) => {
@@ -284,15 +340,20 @@ export function X402DiscoveryView() {
   const inputCls =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15';
 
-  // エラー key → 親切な文言 (モデレーション / 表明は専用文言、他は汎用)。
+  // エラー key → 親切な文言。resource_not_gated は 402 自体が返らない URL、gate_not_openpay は
+  // 402 は返るが OpenPay JPYC 方式でない URL、と原因と直し方を分ける。
   const errorMsg =
     error === 'resource_not_gated'
       ? t('errorNotGated')
-      : error === 'attestation_required'
-        ? t('errorAttestationRequired')
-        : error
-          ? t('errorGeneric', { reason: error })
-          : null;
+      : error === 'gate_not_openpay'
+        ? t('errorGateNotOpenPay')
+        : error === 'attestation_required'
+          ? t('errorAttestationRequired')
+          : error === 'too_many_resources'
+            ? t('errorTooManyResources', { limit: maxResourcesPerMerchant })
+            : error
+              ? t('errorGeneric', { reason: error })
+              : null;
 
   // コピーボタン (URL / スニペット)。key 単位でコピー済みフィードバック。component ではなく関数で
   // 返すことで no-unstable-nested-components を避ける。
@@ -378,9 +439,12 @@ export function X402DiscoveryView() {
         </div>
 
         {!isConnected ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-            <Wallet className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            <span>{t('connectPrompt')}</span>
+          <div className="mt-4 flex flex-col gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-center gap-2">
+              <Wallet className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <span>{t('connectPrompt')}</span>
+            </p>
+            <ConnectButton />
           </div>
         ) : !isSignedIn ? (
           <button
@@ -475,9 +539,25 @@ export function X402DiscoveryView() {
             {!editId && !attested && !submitting && (
               <p className="text-[11px] text-slate-400">{t('attestRequired')}</p>
             )}
-            {errorMsg && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{errorMsg}</p>
-            )}
+            {errorMsg &&
+              (error === 'gate_not_openpay' && errorSnippet ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                  <p className="text-sm leading-relaxed text-red-700">{errorMsg}</p>
+                  <PaywallSnippet
+                    snippet={errorSnippet}
+                    copyKey="error-snippet"
+                    copied={copiedKey === 'error-snippet'}
+                    onCopy={copyText}
+                    title={t('snippetTitle')}
+                    copyLabel={t('copy')}
+                    copiedLabel={t('copied')}
+                  />
+                </div>
+              ) : (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {errorMsg}
+                </p>
+              ))}
             {notice === 'updated' && (
               <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
                 <CheckCircle2 className="h-4 w-4" aria-hidden />
@@ -496,24 +576,15 @@ export function X402DiscoveryView() {
                   <CheckCircle2 className="h-4 w-4" aria-hidden />
                   {t('created')}
                 </p>
-                <p className="mt-2 text-xs text-slate-500">{t('snippetTitle')}</p>
-                <div className="relative mt-1">
-                  <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 pr-10 text-xs leading-relaxed text-slate-100">
-                    {created.paywallSnippet}
-                  </pre>
-                  <button
-                    type="button"
-                    onClick={() => copyText('snippet', created.paywallSnippet)}
-                    aria-label={copiedKey === 'snippet' ? t('copied') : t('copy')}
-                    className="absolute right-2 top-2 rounded-md bg-slate-800 p-1.5 text-slate-300 transition hover:bg-slate-700 hover:text-white"
-                  >
-                    {copiedKey === 'snippet' ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" aria-hidden />
-                    )}
-                  </button>
-                </div>
+                <PaywallSnippet
+                  snippet={created.paywallSnippet}
+                  copyKey="snippet"
+                  copied={copiedKey === 'snippet'}
+                  onCopy={copyText}
+                  title={t('snippetTitle')}
+                  copyLabel={t('copy')}
+                  copiedLabel={t('copied')}
+                />
               </div>
             )}
           </div>

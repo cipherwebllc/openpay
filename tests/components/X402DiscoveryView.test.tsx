@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -19,8 +19,12 @@ vi.mock('@/hooks/useSiweSession', () => ({
     isSigningIn: false,
   }),
 }));
+vi.mock('@/components/ConnectButton', () => ({
+  ConnectButton: () => <button type="button">ウォレットを接続</button>,
+}));
 
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
+import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
 
 const ITEM = {
   resource: 'https://api.example.jp/paid/translate',
@@ -90,7 +94,7 @@ function renderView(): ReturnType<typeof renderWithIntl> {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
     <QueryClientProvider client={qc}>
-      <X402DiscoveryView />
+      <X402DiscoveryView maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT} />
     </QueryClientProvider>,
   );
 }
@@ -114,9 +118,8 @@ describe('X402DiscoveryView', () => {
     // fee 注記 (手数料 10 JPYC)。
     expect(screen.getByText(/手数料 10 JPYC/)).toBeInTheDocument();
     // 未接続 → 登録には接続を促す。
-    expect(
-      screen.getByText('登録するにはウォレットを接続してください (画面上部)。'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('登録にはウォレット接続が必要です')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ウォレットを接続' })).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledWith('/api/discovery', { cache: 'no-store' });
   });
 
@@ -251,9 +254,12 @@ describe('X402DiscoveryView', () => {
   });
 
   it.each([
-    ['resource_not_gated', /この URL は無料で公開されているため登録できません/],
+    ['resource_not_gated', /HTTP 402 応答が返らないため登録できません/],
     ['attestation_required', /正当な権利があり、支払いゲートを実装している/],
-    ['too_many_resources', '操作に失敗しました (too_many_resources)。'],
+    [
+      'too_many_resources',
+      `登録上限（${MAX_RESOURCES_PER_MERCHANT} 件）に達しています。不要な登録を削除してから追加してください。`,
+    ],
   ])('登録エラー %s → 対応文言を表示', async (errCode, expected) => {
     state.connected = true;
     state.address = '0x2222222222222222222222222222222222222222';
@@ -271,6 +277,63 @@ describe('X402DiscoveryView', () => {
     fireEvent.click(await screen.findByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '登録する' }));
     expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+
+  it('gate_not_openpay 422 → 専用カードとスニペットを表示し、入力保持のまま再登録できる', async () => {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    const paywallSnippet =
+      "export async function GET() { return Response.json({ accepts: ['OpenPay'] }, { status: 402 }); }";
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      if (u === '/api/facilitator/resources' && method === 'POST') {
+        return {
+          ok: false,
+          status: 422,
+          json: async () => ({ error: 'gate_not_openpay', paywallSnippet }),
+        };
+      }
+      if (u === '/api/facilitator/resources') {
+        return { ok: true, json: async () => ({ resources: [] }) };
+      }
+      return { ok: true, json: async () => ({ items: [] }) };
+    });
+    global.fetch = fetchFn as unknown as typeof fetch;
+    renderView();
+
+    const urlInput = await screen.findByPlaceholderText(/リソース URL/);
+    fireEvent.change(urlInput, { target: { value: 'https://api.example.jp/paid/foreign' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+
+    expect(
+      await screen.findByText(
+        'この URL に OpenPay の JPYC ゲート（402 応答）が確認できませんでした。下のスニペットをサイトに設置してから、もう一度登録してください。',
+      ),
+    ).toBeInTheDocument();
+    const snippetCode = screen.getByText(paywallSnippet);
+    expect(snippetCode).toBeInTheDocument();
+    expect(urlInput).toHaveValue('https://api.example.jp/paid/foreign');
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    fireEvent.click(within(snippetCode.parentElement!).getByRole('button', { name: 'コピー' }));
+    expect(writeText).toHaveBeenCalledWith(paywallSnippet);
+
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    await waitFor(() => {
+      const posts = fetchFn.mock.calls.filter(
+        ([u, init]) =>
+          u === '/api/facilitator/resources' &&
+          (init as RequestInit | undefined)?.method === 'POST',
+      );
+      expect(posts).toHaveLength(2);
+    });
   });
 
   it('コピー: カタログ URL のコピーボタンで clipboard に書き込み「コピーしました」に変化', async () => {
@@ -293,7 +356,7 @@ describe('X402DiscoveryView', () => {
     expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
   });
 
-  it('3円 demo セクション: curl と buyer script コマンドをコピーできる', async () => {
+  it('2円 demo セクション: curl と buyer script コマンドをコピーできる', async () => {
     const writeText = vi.fn();
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
