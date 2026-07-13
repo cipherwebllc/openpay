@@ -799,6 +799,58 @@ describe('x402 /discovery', () => {
     expect(body.items).toEqual([]);
   });
 
+  it('first-party requirements 生成失敗は accepts:[] で掲載せず即時除外', async () => {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', '');
+    vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', FEE_RECEIVER);
+    vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY);
+    vi.stubEnv('X402_PAY_TO_ADDRESS', FIRST_PARTY_SELLER);
+    vi.resetModules();
+    const discovery = await import('@/app/api/discovery/route');
+    const body = (await (await discovery.GET()).json()) as {
+      items: Array<{ resource: string; accepts: unknown[] }>;
+    };
+    expect(body.items).toEqual([]);
+  });
+
+  it('first-party hidden state は公開 discovery だけから除外し、source URL 一致時だけ verifiedAt を出す', async () => {
+    const { discovery } = await load();
+    const demoUrl = 'https://open-pay.jp/api/paid/demo';
+    store.kv.set(
+      'x402:fpverify:/api/paid/demo',
+      JSON.stringify({
+        hidden: true,
+        verification: {
+          lastOkAt: '2026-07-14T00:00:00.000Z',
+          lastCheckedAt: '2026-07-14T02:00:00.000Z',
+          failures: 3,
+          lastRunId: '2026071402',
+          probedUrl: demoUrl,
+        },
+      }),
+    );
+    store.kv.set(
+      'x402:fpverify:/api/paid/stores',
+      JSON.stringify({
+        hidden: false,
+        verification: {
+          lastOkAt: '2026-07-14T01:00:00.000Z',
+          lastCheckedAt: '2026-07-14T01:00:00.000Z',
+          failures: 0,
+          lastRunId: '2026071401',
+          probedUrl: 'https://open-pay.jp/api/paid/stores',
+        },
+      }),
+    );
+    const body = (await (await discovery()).json()) as {
+      items: Array<{ resource: string; verifiedAt: string | null }>;
+    };
+    expect(body.items.map((item) => item.resource)).toEqual([
+      'https://open-pay.jp/api/paid/stores',
+    ]);
+    expect(body.items[0].verifiedAt).toBe('2026-07-14T01:00:00.000Z');
+  });
+
   it('複数登録は新しい順 (LPUSH) で列挙される', async () => {
     const { resources, discovery } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
@@ -817,6 +869,30 @@ describe('x402 /discovery', () => {
       'https://api.example.jp/paid/second',
       'https://api.example.jp/paid/first',
     ]);
+  });
+
+  it('外部 hidden resource は discovery から除外するが owner 一覧には残す', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    const saved = JSON.parse(store.kv.get(resourceKey(id))!) as Record<string, unknown>;
+    saved.hidden = true;
+    saved.verification = {
+      lastCheckedAt: '2026-07-14T02:00:00.000Z',
+      failures: 3,
+      lastRunId: '2026071402',
+      probedUrl: validBody.url,
+    };
+    store.kv.set(resourceKey(id), JSON.stringify(saved));
+
+    const publicBody = (await (await discovery()).json()) as {
+      items: Array<{ resource: string }>;
+    };
+    expect(publicBody.items.map((item) => item.resource)).not.toContain(validBody.url);
+    const ownerBody = (await (await resources.GET()).json()) as {
+      resources: Array<{ id: string; hidden?: boolean }>;
+    };
+    expect(ownerBody.resources).toContainEqual(expect.objectContaining({ id, hidden: true }));
   });
 
   it('多数登録 (>RESOLVE_CONCURRENCY) でもバッチ跨ぎで新しい順を完全維持', async () => {

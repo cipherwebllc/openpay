@@ -2234,6 +2234,8 @@
     "deleted": "Removed.",
     "yourResourcesTitle": "Your registrations",
     "yourResourcesSubtitle": "Edit or remove your registered listings. Removing one takes it off the public catalog.",
+    "requiresActionBadge": "Action required",
+    "requiresActionBody": "Reverification could not confirm an OpenPay JPYC gate, so this listing is temporarily hidden from the public catalog. Check the snippet below. It will return automatically after a successful check.",
     "editCta": "Edit",
     "deleteCta": "Remove",
     "deleteConfirm": "Remove this listing?",

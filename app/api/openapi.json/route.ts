@@ -110,11 +110,13 @@ const ERROR_RESPONSES = {
   '400': { $ref: '#/components/responses/InvalidQuery' },
   '404': { $ref: '#/components/responses/NotFound' },
   '429': { $ref: '#/components/responses/RateLimited' },
+  '503': { $ref: '#/components/responses/StorageUnavailable' },
 } as const;
 
 const PAID_RESPONSES = {
   '402': { $ref: '#/components/responses/PaymentRequired' },
   '404': { $ref: '#/components/responses/NotFound' },
+  '503': { $ref: '#/components/responses/StorageUnavailable' },
 } as const;
 
 const SHOPS_OPENAPI_PATHS = {
@@ -404,6 +406,8 @@ const OPENAPI_DOCUMENT = {
                         'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
                       sourceType: 'official',
                       verifiedAt: '2026-07-13',
+                      sourceCheckedAt: '2026-07-14T00:00:00.000Z',
+                      sourceOk: true,
                       updatedAt: '2026-07-13',
                       attribution: 'JPYC株式会社',
                       facts: {
@@ -429,9 +433,10 @@ const OPENAPI_DOCUMENT = {
                   dataFreshness: {
                     oldest: '2026-07-13',
                     newestVerifiedAt: '2026-07-13',
+                    oldestSourceCheckedAt: '2026-07-14T00:00:00.000Z',
                   },
                   licenseNotice:
-                    'Directory metadata is informational; verify cited sources before use.',
+                    'Directory metadata is informational; sourceOk is reachability only, not whether the information is true.',
                   attribution: ['JPYC株式会社'],
                 },
               },
@@ -579,6 +584,8 @@ const OPENAPI_DOCUMENT = {
           'attribution',
           'facts',
           'editorial',
+          'sourceCheckedAt',
+          'sourceOk',
         ],
         properties: {
           slug: { type: 'string' },
@@ -589,6 +596,12 @@ const OPENAPI_DOCUMENT = {
           sourceType: { type: 'string', enum: ['official', 'manual'] },
           verifiedAt: { type: 'string', format: 'date' },
           updatedAt: { type: 'string', format: 'date' },
+          sourceCheckedAt: { type: ['string', 'null'], format: 'date-time' },
+          sourceOk: {
+            type: ['boolean', 'null'],
+            description:
+              'Source URL reachability only; it does not establish whether the directory information is true. null means no current result for this sourceUrl.',
+          },
           attribution: { type: 'string' },
           facts: {
             type: 'object',
@@ -650,13 +663,21 @@ const OPENAPI_DOCUMENT = {
           generatedAt: { type: 'string', format: 'date-time' },
           dataFreshness: {
             type: 'object',
-            required: ['oldest', 'newestVerifiedAt'],
+            required: ['oldest', 'newestVerifiedAt', 'oldestSourceCheckedAt'],
             properties: {
               oldest: { type: ['string', 'null'], format: 'date' },
               newestVerifiedAt: { type: ['string', 'null'], format: 'date' },
+              oldestSourceCheckedAt: {
+                type: ['string', 'null'],
+                format: 'date-time',
+              },
             },
           },
-          licenseNotice: { type: 'string' },
+          licenseNotice: {
+            type: 'string',
+            description:
+              'sourceOk reports source URL reachability only, not whether the information is true.',
+          },
           attribution: {
             type: 'array',
             uniqueItems: true,
@@ -671,7 +692,12 @@ const OPENAPI_DOCUMENT = {
           ok: { type: 'boolean', const: false },
           error: {
             type: 'string',
-            enum: ['invalid_query', 'not_found', 'rate_limited'],
+            enum: [
+              'invalid_query',
+              'not_found',
+              'rate_limited',
+              'storage_unavailable',
+            ],
           },
         },
       },

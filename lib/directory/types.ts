@@ -75,6 +75,21 @@ export type DirectoryEntry = {
   editorial: DirectoryEditorial;
 };
 
+export type DirectoryVerificationRecord = {
+  checkedAt: string;
+  ok: boolean;
+  sourceUrl: string;
+};
+
+export type DirectoryVerificationSnapshot = Readonly<
+  Record<string, DirectoryVerificationRecord>
+>;
+
+export type DirectoryOutputEntry = DirectoryEntry & {
+  sourceCheckedAt: string | null;
+  sourceOk: boolean | null;
+};
+
 export type DirectoryQuery = {
   keyword?: string;
   category?: DirectoryCategory;
@@ -93,12 +108,13 @@ export type DirectoryQuery = {
 export type DirectoryEnvelope<TQuery = DirectoryQuery> = {
   schemaVersion: '1.0';
   query: TQuery;
-  items: readonly DirectoryEntry[];
+  items: readonly DirectoryOutputEntry[];
   total: number;
   generatedAt: string;
   dataFreshness: {
     oldest: string | null;
     newestVerifiedAt: string | null;
+    oldestSourceCheckedAt: string | null;
   };
   licenseNotice: string;
   attribution: readonly string[];

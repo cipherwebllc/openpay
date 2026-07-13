@@ -24,6 +24,7 @@ import {
   Trash2,
   Wallet,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
@@ -64,6 +65,7 @@ type OwnedResource = {
   category: string;
   payTo: string;
   paywallSnippet?: string;
+  hidden?: boolean;
 };
 
 const EMPTY_FORM = { url: '', description: '', priceJpyc: '', category: '', payTo: '' };
@@ -741,6 +743,26 @@ export function X402DiscoveryView({
                   url: r.url,
                   copyKey: `owned-${r.id}`,
                 })}
+                {r.hidden === true && r.paywallSnippet ? (
+                  <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+                    <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900">
+                      <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                      {t('requiresActionBadge')}
+                    </p>
+                    <p className="mt-2 text-sm leading-relaxed text-amber-900">
+                      {t('requiresActionBody')}
+                    </p>
+                    <PaywallSnippet
+                      snippet={r.paywallSnippet}
+                      copyKey={`repair-snippet-${r.id}`}
+                      copied={copiedKey === `repair-snippet-${r.id}`}
+                      onCopy={copyText}
+                      title={t('snippetTitle')}
+                      copyLabel={t('copy')}
+                      copiedLabel={t('copied')}
+                    />
+                  </div>
+                ) : null}
                 {snippetOpenId === r.id && r.paywallSnippet ? (
                   <div className="relative mt-3 border-t border-slate-100 pt-3">
                     <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 pr-24 text-xs leading-relaxed text-slate-100">
