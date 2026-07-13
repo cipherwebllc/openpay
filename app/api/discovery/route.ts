@@ -20,6 +20,13 @@ import { readFirstPartyVerification } from '@/lib/x402/reverify';
 export const runtime = 'nodejs';
 export const maxDuration = 15;
 
+function updatedAtIso(value: number | undefined): string | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const date = new Date(value);
+  // 旧 record の不正な付加値 1 件がカタログ全体の応答を巻き込まないため、変換不能なら省略する。
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 export async function GET(): Promise<NextResponse> {
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
@@ -99,6 +106,8 @@ export async function GET(): Promise<NextResponse> {
           description: r.description,
           category: r.category,
           priceJpyc: r.priceJpyc,
+          docsUrl: r.docsUrl,
+          license: r.license,
           network: caip2ForChainId(x402FacilitatorConfig.chainId),
           accepts,
           verifiedAt: currentVerification?.verification?.lastOkAt ?? null,
@@ -127,11 +136,15 @@ export async function GET(): Promise<NextResponse> {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+    const updatedAt = updatedAtIso(r.updatedAt);
     return {
       resource: r.url,
       description: r.description,
       category: r.category,
       priceJpyc: r.priceJpyc,
+      ...(r.docsUrl ? { docsUrl: r.docsUrl } : {}),
+      ...(r.license ? { license: r.license } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
       network: r.network,
       accepts,
       verifiedAt: r.verification?.lastOkAt ?? null,

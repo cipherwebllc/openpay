@@ -44,7 +44,12 @@ const OWNED = {
   category: 'api',
   payTo: '0x1111111111111111111111111111111111111111',
 };
-type OwnedFixture = typeof OWNED & { hidden?: boolean; paywallSnippet?: string };
+type OwnedFixture = typeof OWNED & {
+  docsUrl?: string;
+  license?: string;
+  hidden?: boolean;
+  paywallSnippet?: string;
+};
 
 // URL+method でルーティングする fetch モック (編集/削除の呼び出しを検証)。
 function installRoutingFetch(owned: OwnedFixture[]): ReturnType<typeof vi.fn> {
@@ -241,6 +246,38 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByText(insecure.resource)).toBeInTheDocument();
   });
 
+  it('カタログ比較メタ行に相対検証日・更新日・license・安全な Docs リンクを表示', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-14T12:00:00.000Z'));
+    const compared = {
+      ...ITEM,
+      verifiedAt: '2026-07-12T12:00:00.000Z',
+      updatedAt: '2026-07-13T01:02:03.000Z',
+      license: 'Commercial use with attribution.',
+      docsUrl: 'https://docs.example.jp/openapi.json',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [compared] }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    expect(await screen.findByText('検証: 2日前')).toHaveAttribute(
+      'datetime',
+      compared.verifiedAt,
+    );
+    expect(screen.getByText('更新: 2026-07-13')).toHaveAttribute(
+      'datetime',
+      compared.updatedAt,
+    );
+    expect(
+      screen.getByText('利用条件: Commercial use with attribution.'),
+    ).toBeInTheDocument();
+    const docs = screen.getByRole('link', { name: 'Docs' });
+    expect(docs).toHaveAttribute('href', compared.docsUrl);
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(docs).toHaveAttribute('rel', 'noreferrer noopener');
+  });
+
   it('サインイン済: 登録フォーム (URL/価格 入力) を表示', async () => {
     state.connected = true;
     state.address = '0x1111111111111111111111111111111111111111';
@@ -252,6 +289,13 @@ describe('X402DiscoveryView', () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByPlaceholderText('価格 (JPYC・整数)')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('OpenAPI またはドキュメントの HTTPS URL'),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('例: 商用利用可・要帰属')).toBeInTheDocument();
+    expect(
+      screen.getByText(/詳細は README の掲載ルールをご確認ください/),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '登録する' })).toBeInTheDocument();
     expect(screen.getByText(`登録済み 0 / ${MAX_RESOURCES_PER_MERCHANT} 件`)).toBeInTheDocument();
   });
@@ -302,11 +346,18 @@ describe('X402DiscoveryView', () => {
   });
 
   it('編集: 編集ボタンでフォームに値が入り PATCH /resources/:id を呼ぶ', async () => {
-    const fetchFn = renderAsOwner();
+    const ownedWithComparison = {
+      ...OWNED,
+      docsUrl: 'https://docs.example.jp/owned.json',
+      license: 'Attribution required.',
+    };
+    const fetchFn = renderAsOwner([ownedWithComparison]);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     // フォームが編集モードになり、対象の値が入る。
     await waitFor(() => expect(screen.getByDisplayValue(OWNED.url)).toBeInTheDocument());
     expect(screen.getByText('掲載を編集')).toBeInTheDocument();
+    expect(screen.getByDisplayValue(ownedWithComparison.docsUrl)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(ownedWithComparison.license)).toBeInTheDocument();
     // 価格を書き換えて更新。
     const price = screen.getByPlaceholderText('価格 (JPYC・整数)');
     fireEvent.change(price, { target: { value: '4000' } });
@@ -375,6 +426,13 @@ describe('X402DiscoveryView', () => {
     fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
       target: { value: '500' },
     });
+    fireEvent.change(
+      screen.getByPlaceholderText('OpenAPI またはドキュメントの HTTPS URL'),
+      { target: { value: 'https://docs.example.jp/openapi.json' } },
+    );
+    fireEvent.change(screen.getByPlaceholderText('例: 商用利用可・要帰属'), {
+      target: { value: '商用利用可・要帰属' },
+    });
 
     // 境界: 表明前は登録ボタン disabled・案内文を表示。
     const submit = screen.getByRole('button', { name: '登録する' });
@@ -402,6 +460,8 @@ describe('X402DiscoveryView', () => {
       url: 'https://api.example.jp/paid/new',
       description: '新しい有料 API',
       priceJpyc: '500',
+      docsUrl: 'https://docs.example.jp/openapi.json',
+      license: '商用利用可・要帰属',
       attested: true,
     });
     // 成功表示 + 402 スニペット。

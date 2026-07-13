@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+function expectComparisonMetadata(
+  resources: ReadonlyArray<{ docsUrl: string; license: string }>,
+): void {
+  expect(resources.every((resource) => resource.docsUrl === 'https://open-pay.jp/api/openapi.json')).toBe(true);
+  expect(resources.every((resource) => resource.license.length > 0 && resource.license.length <= 60)).toBe(true);
+}
+
 async function loadFirstPartyResources(flag: string) {
   vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', flag);
   vi.resetModules();
@@ -18,6 +25,7 @@ describe('x402 first-party directory resources', () => {
       '/api/paid/demo',
       '/api/paid/stores',
     ]);
+    expectComparisonMetadata(resources);
   });
 
   it('directory flag ON では固定 URL の一覧/検索だけを data として追加する', async () => {
@@ -28,6 +36,8 @@ describe('x402 first-party directory resources', () => {
       '/api/paid/japan-web3-directory',
       '/api/paid/japan-web3-directory/search',
     ]);
+    expectComparisonMetadata(resources);
+    expect(resources.slice(2).every((resource) => resource.license.includes('Attributed metadata'))).toBe(true);
     expect(resources.slice(2)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ priceJpyc: '2', category: 'data' }),
@@ -56,6 +66,8 @@ describe('x402 first-party directory resources', () => {
       '/api/paid/jpyc-shops/search',
     ]);
     expect(resources[2]).toMatchObject({ priceJpyc: '2', category: 'data' });
+    expectComparisonMetadata(resources);
+    expect(resources[2].license).toContain('Shop-consented data');
   });
 
   it('Shops flag ON でも relay/agent の片方 OFF なら従来件数のまま', async () => {

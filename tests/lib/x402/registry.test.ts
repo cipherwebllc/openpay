@@ -71,6 +71,11 @@ vi.mock('@/lib/kv', () => ({
       o.priceJpyc = args[3];
       o.category = args[4];
       o.payTo = args[5];
+      if (args[6]) o.docsUrl = args[6];
+      else delete o.docsUrl;
+      if (args[7]) o.license = args[7];
+      else delete o.license;
+      o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
       return { ok: true as const, value: enc };
@@ -171,6 +176,50 @@ describe('lib/x402/registry parseResourceInput', () => {
     if (r.ok) expect(r.input.payTo).toBe(getAddress(pt));
   });
 
+  it('docsUrl は HTTPS のみ受理し、license は制御文字除去後 60 文字に収める', () => {
+    const r = parseResourceInput(
+      {
+        url: 'https://a.jp/x',
+        description: 'd',
+        priceJpyc: '100',
+        category: 'api',
+        docsUrl: '  https://docs.example.jp/openapi.json  ',
+        license: `  reuse\u0000${'a'.repeat(80)}  `,
+      },
+      OWNER,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input.docsUrl).toBe('https://docs.example.jp/openapi.json');
+    expect(r.input.license).not.toContain('\u0000');
+    expect(r.input.license).toHaveLength(60);
+
+    expect(
+      parseResourceInput(
+        {
+          url: 'https://a.jp/x',
+          description: 'd',
+          priceJpyc: '100',
+          category: 'api',
+          docsUrl: 'http://docs.example.jp/openapi.json',
+        },
+        OWNER,
+      ),
+    ).toEqual({ ok: false, reason: 'invalid_docs_url' });
+    expect(
+      parseResourceInput(
+        {
+          url: 'https://a.jp/x',
+          description: 'd',
+          priceJpyc: '100',
+          category: 'api',
+          docsUrl: `https://docs.example.jp/${'a'.repeat(512)}`,
+        },
+        OWNER,
+      ),
+    ).toEqual({ ok: false, reason: 'invalid_docs_url' });
+  });
+
   it.each([
     ['invalid_url', { url: 'ftp://x', description: 'd', priceJpyc: '1', category: 'c' }],
     ['invalid_description', { url: 'https://a', description: '', priceJpyc: '1', category: 'c' }],
@@ -218,6 +267,7 @@ describe('lib/x402/registry store', () => {
     if (!res.ok) return;
     expect(res.resource.network).toBe('eip155:80002'); // testnet → Amoy CAIP-2
     expect(res.resource.active).toBe(true);
+    expect(res.resource.updatedAt).toBe(1000);
     expect(await getResource('id1')).toEqual(res.resource);
     expect((await listResourcesForMerchant(OWNER))!.map((r) => r.id)).toContain('id1');
     expect((await listActiveResources())!.map((r) => r.id)).toContain('id1');
@@ -309,7 +359,10 @@ describe('lib/x402/registry updateResource (owner 編集)', () => {
         priceJpyc: '200',
         category: 'data',
         payTo: newPayTo,
+        docsUrl: 'https://docs.example.jp/openapi.json',
+        license: 'Commercial reuse with attribution.',
       }),
+      2000,
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -318,6 +371,9 @@ describe('lib/x402/registry updateResource (owner 編集)', () => {
     expect(r.resource.priceJpyc).toBe('200');
     expect(r.resource.category).toBe('data');
     expect(r.resource.payTo).toBe(newPayTo);
+    expect(r.resource.docsUrl).toBe('https://docs.example.jp/openapi.json');
+    expect(r.resource.license).toBe('Commercial reuse with attribution.');
+    expect(r.resource.updatedAt).toBe(2000);
     // 不変フィールド
     expect(r.resource.id).toBe('id1');
     expect(r.resource.merchant).toBe(OWNER);
