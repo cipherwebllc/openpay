@@ -56,6 +56,7 @@ vi.mock('@/hooks/useOrigin', () => ({
 }));
 
 import { MobileOrderView } from '@/components/MobileOrderView';
+import { handleStorefrontConfig, type HandleRecord } from '@/lib/handle';
 import { buildPayerReceipt, type PayerReceipt } from '@/lib/payerReceipt';
 import { parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
@@ -938,6 +939,33 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
   it('flag ON: openFrom が未来なら時刻入り受付停止バナー + 支払い導線を出さない', () => {
     envHold.enablePreorderTime = true;
     renderWithIntl(<MobileOrderView config={preorder({ openFrom: '13:00' })} />);
+    expect(screen.getByText('本日の受付は 13:00 に開始します。')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('flag ON: @handle storefront 変換経由でも未来の openFrom で受付停止する', () => {
+    envHold.enablePreorderTime = true;
+    const record: HandleRecord = {
+      owner: config.receiver,
+      config: {
+        to: config.receiver,
+        name: config.shopName,
+        methods: [{ token: 'jpyc', chain: 'polygon' }],
+      },
+      storefront: {
+        chain: 'polygon',
+        mode: 'preorder',
+        feePayer: 'merchant',
+        openFrom: '13:00',
+        menu: config.menu,
+      },
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const handleConfig = handleStorefrontConfig(record, 'shop');
+    expect(handleConfig?.openFrom).toBe('13:00');
+    renderWithIntl(<MobileOrderView config={handleConfig!} handle="shop" />);
     expect(screen.getByText('本日の受付は 13:00 に開始します。')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
     expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();

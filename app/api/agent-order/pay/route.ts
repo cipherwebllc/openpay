@@ -21,7 +21,7 @@ import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { readShopLive } from '@/lib/shopLiveStore';
-import { isPastLastOrder } from '@/lib/shopTime';
+import { isBeforeOpen, isPastLastOrder } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
@@ -192,6 +192,12 @@ export async function GET(req: Request): Promise<NextResponse> {
       return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
     }
     soldOut = new Set(live.soldOut);
+  }
+  if (
+    env.enablePreorderTime &&
+    isBeforeOpen(Date.now(), record.storefront.openFrom)
+  ) {
+    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
   }
   if (
     env.enablePreorderTime &&

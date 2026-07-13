@@ -223,6 +223,10 @@ export function handleStorefrontConfig(
     phone: sf.phone,
     acceptingOrders: sf.acceptingOrders,
     dineIn: sf.dineIn, // 提供形態 (店内ならテーブル番号入力・validateOrderConfig が再検証)
+    // 時間系 (任意)。@handle 公開ページも self-contained 注文 URL と同じ受付制御を使う。
+    openFrom: sf.openFrom,
+    lastOrder: sf.lastOrder,
+    minLeadMinutes: sf.minLeadMinutes,
   });
 }
 
