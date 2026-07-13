@@ -632,6 +632,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_OFFLINE_QR',
     process.env.NEXT_PUBLIC_ENABLE_OFFLINE_QR,
   ),
+  // Japan Web3 Directory のデータ/API 公開フラグ。**既定 OFF で完全 inert** = 無料 API、
+  // 有料 API、OpenAPI は 404。有料 API はこの flag に加えて facilitator flag も必要。
+  // RUN-1 は API のみを dark ship し、UI は RUN-2 で同じ flag 配下に追加する。
+  enableWeb3Directory: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY',
+    process.env.NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY,
+  ),
   // x402 JPYC facilitator (managed facilitator + discovery: AI エージェント/開発者が
   // 日本事業者の有料 API/コンテンツに JPYC 建てで都度課金 = x402、settlement の 1% を
   // 手数料徴収) の有効化フラグ (client 露出: 登録/discovery UI のゲートに使う)。

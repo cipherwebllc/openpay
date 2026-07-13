@@ -235,6 +235,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `ALPHA_ENTITLEMENT_BYPASS` | Open all paid features during the beta (default on; `0`/`false` to require an entitlement) | optional |
 | `NEXT_PUBLIC_ENABLE_USAGE_FEE` | **(Shelved — kept for possible future reuse, NOT the current model.)** An alternative *monthly per-account* usage-fee design (meters JPYC gasless-relay volume + an overdue soft-gate on `/history`). The **live** monetization is the **per-transaction** fee in [Fees](#fees) (`max(2 JPYC, 1%)`, deducted at settlement) — not this. Default **off**; left in place for future features. | optional |
 | `NEXT_PUBLIC_ENABLE_CSV_PASS` / `NEXT_PUBLIC_ENABLE_PRO` | Optional **accounting-CSV-download paywall** (independent of the usage fee): a per-use **24-hour CSV pass (100 JPYC)** and/or the **¥500/mo OpenPay Pro** subscription (Pro ⊇ CSV pass), paid in JPYC to the receiver wallet and auto-granted after on-chain verification of the self-submitted txHash. Default **off** — CSV export stays free; go-live pairs with `ALPHA_ENTITLEMENT_BYPASS=0`. | optional |
+| `NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY` | Japan Web3 Directory free/paid APIs and OpenAPI schema. Default **off**; paid routes also require `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`. | optional |
 | `X402_*` | x402 paid-API config | x402 only |
 | `ENABLE_AGENT_ORDER` | Agent order — lets an MCP agent read a `@handle` shop's mobile-order menu (`GET /api/agent-order/menu`) and pay for a cart over x402 (`GET /api/agent-order/pay`), which then relays the server-priced order to the merchant via the existing `/api/order/notify`. **Server-only** (not `NEXT_PUBLIC_`, kept out of the client bundle). Gated by `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` **and** `NEXT_PUBLIC_ENABLE_ORDER_RELAY` **and** this flag — any one off ⇒ all routes 404. **Live on mainnet** (production sets it); code default **off**. | optional |
 
@@ -271,6 +272,61 @@ export const GET = withX402Payment(async () => NextResponse.json({ ok: true }));
 ```
 
 Configure via `X402_*` env vars (see `.env.local.example`).
+
+## Japan Web3 Directory API
+
+The Japan Web3 Directory is a flag-gated structured dataset for discovering services connected to Japan's JPYC, USDC, Web3, and AI-agent ecosystem. Human-readable cards are available at `/ja/directory` and `/en/directory`; agents can use the JSON APIs and the OpenAPI 3.1 document at `GET /api/openapi.json`. `NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY` is off by default, and paid routes additionally require the x402 facilitator flag.
+
+### Data policy
+
+Facts and OpenPay-written editorial summaries are kept separate. Unknown capabilities stay `false` or empty instead of being inferred, and only `published` records are returned. The five permitted source classes are:
+
+1. Official product or organization websites.
+2. Official documentation and help centers.
+3. Official announcements and press releases.
+4. Official source-code repositories.
+5. Operator-reviewed manual submissions from the service owner or maintainer.
+
+Do not add data through unauthorized scraping, access-control or paywall bypasses, copied third-party descriptions, personal data, rumors, or unsupported claims. A source URL, attribution, and verification date are required; current conditions must still be checked with the cited source.
+
+### Endpoints and prices
+
+| Access | Endpoint | Result | Price |
+|---|---|---|---:|
+| Free | `GET /api/directory?limit=5` | Published teaser list (maximum 5 records) | Free |
+| Free | `GET /api/directory/categories` | Published category counts | Free |
+| Free | `GET /api/directory/tags` | Published tag counts | Free |
+| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes | Free |
+| x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
+| x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
+| x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
+
+The managed facilitator adds its disclosed **1% fee (minimum 1 JPYC) on the buyer's side**; the listed dataset price is paid to the seller in full. Search accepts allowlisted filters such as `keyword`, `category`, `token`, `chain`, `language`, and the `supports*` capabilities. See the OpenAPI document for the complete query schema and response envelope.
+
+Inspect the payment challenge without paying:
+
+```bash
+curl -i https://open-pay.jp/api/paid/japan-web3-directory
+```
+
+The response is HTTP 402 and includes the payable `accepts` requirements. To sign, pay, and retry with Node.js, use the repository's self-contained [`scripts/x402-buyer-example.mjs`](./scripts/x402-buyer-example.mjs):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs -o x402-buyer-example.mjs
+BUYER_PRIVATE_KEY=0x... RESOURCE_URL=https://open-pay.jp/api/paid/japan-web3-directory node x402-buyer-example.mjs
+```
+
+Use a dedicated buyer wallet, start on testnet, and fund it only with the amount needed for the request.
+
+### MCP use
+
+The existing `openpay-x402-mcp` flow needs no package-specific directory tool: call `discovery_search` to find the list or search resource, then use `x402_pay` to inspect the quote and make the guarded JPYC payment. Dedicated names such as `search_japan_web3_directory` are a possible future convenience API, not currently exposed tools.
+
+### Adding or updating data
+
+Directory records live in [`lib/directory/data.ts`](./lib/directory/data.ts). Submit a code PR with the factual fields, an allowed primary source, attribution, and verification date. New records move through `draft` → `review` → `published`; use `rejected` when review fails and `archived` when a previously published service should no longer appear. API and UI publication is always limited to `published` records.
+
+Source names, trademarks, linked content, and third-party database rights remain with their respective owners. OpenPay's original code is MIT-licensed, but that does not grant a blanket license to reuse third-party source content; each API response includes its own attribution and license notice. The directory is informational, may be incomplete or stale, and is not an endorsement or financial, legal, tax, or investment advice. Verify availability, supported networks, token contracts, fees, and regulatory eligibility with the cited official source before acting.
 
 ## Pimlico balance alerts
 

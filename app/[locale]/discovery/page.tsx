@@ -7,7 +7,13 @@ import { notFound } from 'next/navigation';
 import { Bot, ReceiptText, LockOpen, ArrowRight } from 'lucide-react';
 import { LOCALES } from '@/i18n';
 import { AppShell } from '@/components/AppShell';
+import {
+  DirectoryFeaturedCard,
+  type DirectoryFeaturedCopy,
+} from '@/components/DirectoryFeaturedCard';
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
+import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
+import { directoryStats } from '@/lib/directory/query';
 import { env } from '@/lib/env';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
 
@@ -22,7 +28,25 @@ export default async function DiscoveryPage({
   if (!hasLocale(LOCALES, locale)) notFound();
   setRequestLocale(locale);
   if (!env.enableX402Facilitator) notFound();
-  const t = await getTranslations('Facilitator');
+  const [t, directoryT] = await Promise.all([
+    getTranslations('Facilitator'),
+    env.enableWeb3Directory
+      ? getTranslations('Directory')
+      : Promise.resolve(null),
+  ]);
+  const featuredCopy: DirectoryFeaturedCopy | null = directoryT
+    ? {
+        eyebrow: directoryT('featuredEyebrow'),
+        title: directoryT('title'),
+        description: directoryT('description'),
+        price: directoryT('featuredPrice'),
+        entriesLabel: directoryT('entriesLabel'),
+        categoriesLabel: directoryT('categoriesLabel'),
+        lastUpdatedLabel: directoryT('lastUpdatedLabel'),
+        detailsLabel: directoryT('featuredDetails'),
+        apiUrlCopyLabel: directoryT('apiUrlCopyLabel'),
+      }
+    : null;
 
   return (
     <AppShell>
@@ -53,7 +77,17 @@ export default async function DiscoveryPage({
             </span>
           </div>
         </div>
-        <X402DiscoveryView maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT} />
+        <X402DiscoveryView
+          maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
+          featured={
+            featuredCopy ? (
+              <DirectoryFeaturedCard
+                stats={directoryStats(DIRECTORY_ENTRIES)}
+                copy={featuredCopy}
+              />
+            ) : null
+          }
+        />
       </div>
     </AppShell>
   );

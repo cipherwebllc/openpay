@@ -1,0 +1,459 @@
+import { NextResponse } from 'next/server';
+import { env } from '@/lib/env';
+
+const DIRECTORY_QUERY_PARAMETERS = [
+  {
+    name: 'keyword',
+    in: 'query',
+    schema: { type: 'string', maxLength: 100 },
+  },
+  {
+    name: 'category',
+    in: 'query',
+    schema: {
+      type: 'string',
+      enum: [
+        'api',
+        'bridge',
+        'developer-tool',
+        'exchange',
+        'network',
+        'payment',
+        'stablecoin',
+        'wallet',
+      ],
+    },
+  },
+  { name: 'token', in: 'query', schema: { type: 'string', enum: ['jpyc', 'usdc'] } },
+  {
+    name: 'chain',
+    in: 'query',
+    schema: {
+      type: 'string',
+      enum: [
+        'arbitrum',
+        'avalanche',
+        'base',
+        'ethereum',
+        'kaia',
+        'optimism',
+        'polygon',
+      ],
+    },
+  },
+  { name: 'language', in: 'query', schema: { type: 'string', enum: ['en', 'ja'] } },
+  { name: 'supportsJpyc', in: 'query', schema: { type: 'boolean' } },
+  { name: 'supportsUsdc', in: 'query', schema: { type: 'boolean' } },
+  { name: 'supportsX402', in: 'query', schema: { type: 'boolean' } },
+  { name: 'supportsMcp', in: 'query', schema: { type: 'boolean' } },
+  {
+    name: 'status',
+    in: 'query',
+    description: 'Only published entries can be returned, regardless of this filter.',
+    schema: {
+      type: 'string',
+      enum: ['draft', 'review', 'published', 'rejected', 'archived'],
+    },
+  },
+  { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50 } },
+  { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 1000 } },
+] as const;
+
+const ERROR_RESPONSES = {
+  '400': { $ref: '#/components/responses/InvalidQuery' },
+  '404': { $ref: '#/components/responses/NotFound' },
+  '429': { $ref: '#/components/responses/RateLimited' },
+} as const;
+
+const PAID_RESPONSES = {
+  '402': { $ref: '#/components/responses/PaymentRequired' },
+  '404': { $ref: '#/components/responses/NotFound' },
+} as const;
+
+const OPENAPI_DOCUMENT = {
+  openapi: '3.1.0',
+  info: {
+    title: 'OpenPay Japan Web3 Directory API',
+    version: '1.0.0',
+    description:
+      'Published-only directory metadata with first-party attribution and source freshness. Paid routes use x402 with JPYC.',
+  },
+  servers: [{ url: 'https://open-pay.jp' }],
+  tags: [
+    { name: 'Directory Free' },
+    { name: 'Directory Paid' },
+  ],
+  paths: {
+    '/api/directory': {
+      get: {
+        tags: ['Directory Free'],
+        summary: 'Get a free directory teaser',
+        description: 'Returns full entry fields but forces limit to at most 5.',
+        parameters: DIRECTORY_QUERY_PARAMETERS,
+        responses: {
+          '200': {
+            description: 'Published directory entries',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+                example: {
+                  schemaVersion: '1.0',
+                  query: { limit: 5, offset: 0 },
+                  items: [
+                    {
+                      slug: 'jpyc',
+                      name: 'JPYC',
+                      nameJa: 'JPYC',
+                      status: 'published',
+                      sourceUrl:
+                        'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
+                      sourceType: 'official',
+                      verifiedAt: '2026-07-13',
+                      updatedAt: '2026-07-13',
+                      attribution: 'JPYC株式会社',
+                      facts: {
+                        description: 'A source-verified factual summary.',
+                        category: 'stablecoin',
+                        tags: ['Japan', 'JPY', 'stablecoin'],
+                        tokens: ['jpyc'],
+                        chains: ['avalanche', 'ethereum', 'polygon'],
+                        languages: ['ja'],
+                        supportsJpyc: true,
+                        supportsUsdc: false,
+                        supportsX402: false,
+                        supportsMcp: false,
+                      },
+                      editorial: {
+                        summaryJa: 'OpenPayが独自作成した紹介文です。',
+                        summaryEn: 'An original editorial summary written by OpenPay.',
+                      },
+                    },
+                  ],
+                  total: 19,
+                  generatedAt: '2026-07-13T00:00:00.000Z',
+                  dataFreshness: {
+                    oldest: '2026-07-13',
+                    newestVerifiedAt: '2026-07-13',
+                  },
+                  licenseNotice:
+                    'Directory metadata is informational; verify cited sources before use.',
+                  attribution: ['JPYC株式会社'],
+                },
+              },
+            },
+          },
+          ...ERROR_RESPONSES,
+        },
+      },
+    },
+    '/api/directory/categories': {
+      get: {
+        tags: ['Directory Free'],
+        summary: 'List published category counts',
+        responses: {
+          '200': {
+            description: 'Category counts',
+            content: {
+              'application/json': {
+                example: {
+                  schemaVersion: '1.0',
+                  items: [{ category: 'wallet', count: 3 }],
+                  total: 1,
+                  generatedAt: '2026-07-13T00:00:00.000Z',
+                },
+              },
+            },
+          },
+          '404': ERROR_RESPONSES['404'],
+          '429': ERROR_RESPONSES['429'],
+        },
+      },
+    },
+    '/api/directory/tags': {
+      get: {
+        tags: ['Directory Free'],
+        summary: 'List published tag counts',
+        responses: {
+          '200': {
+            description: 'Tag counts',
+            content: {
+              'application/json': {
+                example: {
+                  schemaVersion: '1.0',
+                  items: [{ tag: 'x402', count: 6 }],
+                  total: 1,
+                  generatedAt: '2026-07-13T00:00:00.000Z',
+                },
+              },
+            },
+          },
+          '404': ERROR_RESPONSES['404'],
+          '429': ERROR_RESPONSES['429'],
+        },
+      },
+    },
+    '/api/paid/japan-web3-directory': {
+      get: {
+        tags: ['Directory Paid'],
+        summary: 'Unlock the full published directory',
+        'x-price-jpyc': 2,
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'JPYC',
+        'x-payment-chains': ['Polygon', 'Polygon Amoy'],
+        responses: {
+          '200': {
+            description: 'Full published directory after settlement',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+              },
+            },
+          },
+          ...PAID_RESPONSES,
+        },
+      },
+    },
+    '/api/paid/japan-web3-directory/search': {
+      get: {
+        tags: ['Directory Paid'],
+        summary: 'Search and unlock published directory results',
+        parameters: DIRECTORY_QUERY_PARAMETERS,
+        'x-price-jpyc': 2,
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'JPYC',
+        'x-payment-chains': ['Polygon', 'Polygon Amoy'],
+        responses: {
+          '200': {
+            description: 'Filtered directory envelope after settlement',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+              },
+            },
+          },
+          '400': ERROR_RESPONSES['400'],
+          ...PAID_RESPONSES,
+        },
+      },
+    },
+    '/api/paid/japan-web3-directory/{slug}': {
+      get: {
+        tags: ['Directory Paid'],
+        summary: 'Unlock one published directory entry',
+        description:
+          'Unknown or non-published slugs return 404 before any payment challenge or settlement.',
+        parameters: [
+          {
+            name: 'slug',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        'x-price-jpyc': 1,
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'JPYC',
+        'x-payment-chains': ['Polygon', 'Polygon Amoy'],
+        responses: {
+          '200': {
+            description: 'One-entry directory envelope after settlement',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+              },
+            },
+          },
+          ...PAID_RESPONSES,
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      DirectoryEntry: {
+        type: 'object',
+        required: [
+          'slug',
+          'name',
+          'nameJa',
+          'status',
+          'sourceUrl',
+          'sourceType',
+          'verifiedAt',
+          'updatedAt',
+          'attribution',
+          'facts',
+          'editorial',
+        ],
+        properties: {
+          slug: { type: 'string' },
+          name: { type: 'string' },
+          nameJa: { type: 'string' },
+          status: { type: 'string', const: 'published' },
+          sourceUrl: { type: 'string', format: 'uri' },
+          sourceType: { type: 'string', enum: ['official', 'manual'] },
+          verifiedAt: { type: 'string', format: 'date' },
+          updatedAt: { type: 'string', format: 'date' },
+          attribution: { type: 'string' },
+          facts: {
+            type: 'object',
+            required: [
+              'description',
+              'category',
+              'tags',
+              'tokens',
+              'chains',
+              'languages',
+              'supportsJpyc',
+              'supportsUsdc',
+              'supportsX402',
+              'supportsMcp',
+            ],
+            properties: {
+              description: { type: 'string' },
+              category: { type: 'string' },
+              tags: { type: 'array', items: { type: 'string' } },
+              tokens: { type: 'array', items: { type: 'string' } },
+              chains: { type: 'array', items: { type: 'string' } },
+              languages: { type: 'array', items: { type: 'string' } },
+              supportsJpyc: { type: 'boolean' },
+              supportsUsdc: { type: 'boolean' },
+              supportsX402: { type: 'boolean' },
+              supportsMcp: { type: 'boolean' },
+            },
+          },
+          editorial: {
+            type: 'object',
+            required: ['summaryJa', 'summaryEn'],
+            properties: {
+              summaryJa: { type: 'string' },
+              summaryEn: { type: 'string' },
+            },
+          },
+        },
+      },
+      DirectoryEnvelope: {
+        type: 'object',
+        required: [
+          'schemaVersion',
+          'query',
+          'items',
+          'total',
+          'generatedAt',
+          'dataFreshness',
+          'licenseNotice',
+          'attribution',
+        ],
+        properties: {
+          schemaVersion: { type: 'string', const: '1.0' },
+          query: { type: 'object' },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DirectoryEntry' },
+          },
+          total: { type: 'integer', minimum: 0 },
+          generatedAt: { type: 'string', format: 'date-time' },
+          dataFreshness: {
+            type: 'object',
+            required: ['oldest', 'newestVerifiedAt'],
+            properties: {
+              oldest: { type: ['string', 'null'], format: 'date' },
+              newestVerifiedAt: { type: ['string', 'null'], format: 'date' },
+            },
+          },
+          licenseNotice: { type: 'string' },
+          attribution: {
+            type: 'array',
+            uniqueItems: true,
+            items: { type: 'string' },
+          },
+        },
+      },
+      Error: {
+        type: 'object',
+        required: ['ok', 'error'],
+        properties: {
+          ok: { type: 'boolean', const: false },
+          error: {
+            type: 'string',
+            enum: ['invalid_query', 'not_found', 'rate_limited'],
+          },
+        },
+      },
+    },
+    responses: {
+      InvalidQuery: {
+        description: 'A query value is outside the documented allowlist.',
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/Error' },
+            example: { ok: false, error: 'invalid_query' },
+          },
+        },
+      },
+      NotFound: {
+        description: 'Feature disabled, slug absent, or entry not published.',
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/Error' },
+            example: { ok: false, error: 'not_found' },
+          },
+        },
+      },
+      RateLimited: {
+        description: 'Best-effort per-IP request limit exceeded.',
+        headers: {
+          'Retry-After': { schema: { type: 'integer' }, description: 'Seconds' },
+        },
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/Error' },
+            example: { ok: false, error: 'rate_limited' },
+          },
+        },
+      },
+      PaymentRequired: {
+        description:
+          'x402 payment challenge. Amount is denominated in JPYC on Polygon or Polygon Amoy; the existing buyer-added facilitator fee is included in maxAmountRequired.',
+        headers: {
+          'PAYMENT-REQUIRED': {
+            schema: { type: 'string' },
+            description: 'Base64-encoded x402 v2 payment requirements.',
+          },
+        },
+        content: {
+          'application/json': {
+            example: {
+              x402Version: 1,
+              accepts: [
+                {
+                  scheme: 'exact',
+                  network: 'eip155:137',
+                  resource:
+                    'https://open-pay.jp/api/paid/japan-web3-directory',
+                  maxAmountRequired: '3000000000000000000',
+                  asset: 'JPYC',
+                },
+              ],
+              error: 'payment_required',
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export async function GET(): Promise<NextResponse> {
+  if (!env.enableWeb3Directory) {
+    return NextResponse.json(
+      { ok: false, error: 'not_found' },
+      { status: 404 },
+    );
+  }
+  return NextResponse.json(OPENAPI_DOCUMENT, {
+    headers: {
+      'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+    },
+  });
+}
