@@ -111,8 +111,11 @@ export const LEGAL_ENTITY = {
   //   DISCLOSED_X402_FEE (= 100bps / 1 JPYC。2026-07-05 改定で下限 2→1 JPYC) と一致。施行日は x402FacilitatorFeeEffectiveDate (2026-06-28)
   //   で別管理し、機能提供開始 (NEXT_PUBLIC_ENABLE_X402_FACILITATOR 点灯) まで実際の徴収は発生しない (新規・
   //   任意の付加機能ゆえ既存取引に遡及しない)。
-  termsEffectiveDate: '2026-06-13',
-  privacyEffectiveDate: '2026-06-08',
+  // 2026-07-14 改定案 (Shops API・merge 前 user 承認対象): Privacy に店舗の明示同意に基づく
+  //   AI/API 利用者への掲載情報提供・目的・項目・電話番号除外・解除/保持を追加。Terms に検索/注文支援
+  //   目的の利用許諾、データ自体の再販/一括再配布制限、店舗提供情報の正確性に関する条項を追加。
+  termsEffectiveDate: '2026-07-14',
+  privacyEffectiveDate: '2026-07-14',
   disclaimerEffectiveDate: '2026-06-13',
   tokuteiEffectiveDate: '2026-06-13',
   // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記

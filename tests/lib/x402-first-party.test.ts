@@ -40,4 +40,36 @@ describe('x402 first-party directory resources', () => {
       ),
     ).toBe(false);
   });
+
+  it('Shops の4 flag AND が ON のとき search 1 本だけを追加する', async () => {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', '');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOPS_API', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', '1');
+    vi.stubEnv('ENABLE_AGENT_ORDER', '1');
+    vi.resetModules();
+    const resources = (await import('@/lib/x402/firstParty'))
+      .FIRST_PARTY_RESOURCES;
+    expect(resources.map((resource) => resource.path)).toEqual([
+      '/api/paid/demo',
+      '/api/paid/stores',
+      '/api/paid/jpyc-shops/search',
+    ]);
+    expect(resources[2]).toMatchObject({ priceJpyc: '2', category: 'data' });
+  });
+
+  it('Shops flag ON でも relay/agent の片方 OFF なら従来件数のまま', async () => {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', '');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOPS_API', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', '');
+    vi.stubEnv('ENABLE_AGENT_ORDER', '1');
+    vi.resetModules();
+    const resources = (await import('@/lib/x402/firstParty'))
+      .FIRST_PARTY_RESOURCES;
+    expect(resources.map((resource) => resource.path)).toEqual([
+      '/api/paid/demo',
+      '/api/paid/stores',
+    ]);
+  });
 });

@@ -6,6 +6,9 @@ import ja from '@/messages/ja.json';
 const flags = vi.hoisted(() => ({
   enableWeb3Directory: true,
   enableX402Facilitator: true,
+  enableShopsApi: false,
+  enableOrderRelay: true,
+  enableAgentOrder: true,
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -19,6 +22,15 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableX402Facilitator() {
         return flags.enableX402Facilitator;
+      },
+      get enableShopsApi() {
+        return flags.enableShopsApi;
+      },
+      get enableOrderRelay() {
+        return flags.enableOrderRelay;
+      },
+      get enableAgentOrder() {
+        return flags.enableAgentOrder;
       },
     },
   };
@@ -71,6 +83,9 @@ import DiscoveryPage from '@/app/[locale]/discovery/page';
 beforeEach(() => {
   flags.enableWeb3Directory = true;
   flags.enableX402Facilitator = true;
+  flags.enableShopsApi = false;
+  flags.enableOrderRelay = true;
+  flags.enableAgentOrder = true;
   notFoundSpy.mockClear();
   setRequestLocaleSpy.mockClear();
 });
@@ -98,6 +113,18 @@ describe('/directory page', () => {
       DirectoryPage({ params: Promise.resolve({ locale: 'ja' }) }),
     ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFoundSpy).toHaveBeenCalledOnce();
+  });
+
+  it('Shops 4 flag AND が ON のとき価格表へ search endpoint を並記', async () => {
+    flags.enableShopsApi = true;
+    const ui = await DirectoryPage({
+      params: Promise.resolve({ locale: 'ja' }),
+    });
+    render(ui);
+    expect(
+      screen.getByText('店舗検索（/api/paid/jpyc-shops/search）'),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('2 JPYC')).toHaveLength(3);
   });
 });
 

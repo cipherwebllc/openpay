@@ -16,6 +16,7 @@ const ARTICLES = [
   'article9',
   'article10',
   'article11',
+  'article12',
 ] as const;
 
 export default function TermsPage() {

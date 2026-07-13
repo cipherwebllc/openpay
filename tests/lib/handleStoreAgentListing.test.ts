@@ -120,12 +120,19 @@ function syncAgentListing(
     ...(storefront.address ? { address: storefront.address } : {}),
     mode: storefront.mode,
     dineIn: storefront.dineIn === true,
+    acceptingOrders: storefront.acceptingOrders !== false,
+    chain: storefront.chain,
     ...(storefront.openFrom ? { openFrom: storefront.openFrom } : {}),
     ...(storefront.lastOrder ? { lastOrder: storefront.lastOrder } : {}),
     ...(storefront.minLeadMinutes
       ? { minLeadMinutes: storefront.minLeadMinutes }
       : {}),
-    menu: { itemCount: storefront.menu.length, minPrice, maxPrice },
+    menu: {
+      itemCount: storefront.menu.length,
+      minPrice,
+      maxPrice,
+      itemIds: storefront.menu.map((item) => item.id),
+    },
     chains: storefront.chains ?? [storefront.chain],
     updatedAt: value.updatedAt,
   };
@@ -232,6 +239,8 @@ describe('handleStore Shops API agent index/summary Lua', () => {
       address: '東京都千代田区1-2-3',
       mode: 'storefront',
       dineIn: true,
+      acceptingOrders: true,
+      chain: 'polygon',
       openFrom: '09:30',
       lastOrder: '21:30',
       minLeadMinutes: 20,
@@ -239,6 +248,7 @@ describe('handleStore Shops API agent index/summary Lua', () => {
         itemCount: 3,
         minPrice: '9.5',
         maxPrice: '1200.000000000000000001',
+        itemIds: ['a', 'b', 'c'],
       },
       chains: ['polygon', 'kaia'],
       updatedAt: 11,
@@ -248,7 +258,9 @@ describe('handleStore Shops API agent index/summary Lua', () => {
     expect(keys).toEqual(['handle:alice']);
     expect(args).toHaveLength(3);
     expect(script).toContain(AGENT_SHOP_INDEX_KEY);
-    expect(script).toContain("menu={itemCount=#sf.menu,minPrice=minp,maxPrice=maxp}");
+    expect(script).toContain(
+      'menu={itemCount=#sf.menu,minPrice=minp,maxPrice=maxp,itemIds=itemids}',
+    );
   });
 
   it('opt-in の再更新は index を重複させず summary timestamp を更新', async () => {

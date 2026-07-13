@@ -514,7 +514,8 @@ export const env = {
   ),
   // JPYC Shops API の店舗検索掲載 opt-in UI (client 露出)。**既定 OFF** = checkbox 非表示、
   // 新規 publish payload は従来バイト不変。agentListing の保存/index 同期 data 層は常時有効だが、
-  // 明示 true が来ない限り未掲載 cleanup 以外の副作用を持たない。API 本体は PR-2 の別スコープ。
+  // 明示 true が来ない限り未掲載 cleanup 以外の副作用を持たない。API は shops/flags.ts で
+  // facilitator + order relay + server-only agent-order と AND し、menuUrl の到達性を保証する。
   enableShopsApi: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_SHOPS_API',
     process.env.NEXT_PUBLIC_ENABLE_SHOPS_API,

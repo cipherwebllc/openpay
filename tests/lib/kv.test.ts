@@ -393,6 +393,25 @@ describe('lib/kv', () => {
     expect(await kvGet('x')).toEqual({ ok: true, value: null });
   });
 
+  it('kvMget は key 順を保つ MGET 1 command を送る', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: ['a-value', null, 'c-value'] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvMget } = await import('@/lib/kv');
+    expect(await kvMget(['a', 'b', 'c'])).toEqual({
+      ok: true,
+      value: ['a-value', null, 'c-value'],
+    });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual(['MGET', 'a', 'b', 'c']);
+    expect(await kvMget([])).toEqual({ ok: true, value: [] });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('kvExpire は EXPIRE key ttl を送る', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';

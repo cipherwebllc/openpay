@@ -58,10 +58,11 @@ const AGENT_LISTING_LUA =
   "redis.call( 'LREM',idx,0,h); redis.call( 'LPUSH',idx,h); " +
   "local name=sf.shopName; if type(name)~='string' or name=='' then name=r.config and r.config.name end; " +
   "if type(name)~='string' or name=='' then name='@'..h end; " +
+  'local itemids={}; for i=1,#sf.menu do itemids[i]=sf.menu[i].id end; ' +
   'local minp=sf.menu[1].price; local maxp=minp; for i=2,#sf.menu do local p=sf.menu[i].price; ' +
   'if declt(p,minp) then minp=p end; if declt(maxp,p) then maxp=p end end; ' +
-  'local s={handle=h,name=name,mode=sf.mode,dineIn=sf.dineIn==true,' +
-  'menu={itemCount=#sf.menu,minPrice=minp,maxPrice=maxp},' +
+  'local s={handle=h,name=name,mode=sf.mode,dineIn=sf.dineIn==true,acceptingOrders=sf.acceptingOrders~=false,chain=sf.chain,' +
+  'menu={itemCount=#sf.menu,minPrice=minp,maxPrice=maxp,itemIds=itemids},' +
   'chains=sf.chains or {sf.chain},updatedAt=r.updatedAt}; ' +
   'if sf.tagline then s.tagline=sf.tagline end; if sf.address then s.address=sf.address end; ' +
   'if sf.openFrom then s.openFrom=sf.openFrom end; if sf.lastOrder then s.lastOrder=sf.lastOrder end; ' +

@@ -20,7 +20,11 @@ vi.mock('@/lib/kv', () => ({
   },
 }));
 
-import { readShopLive, applyShopLive } from '@/lib/shopLiveStore';
+import {
+  readShopLive,
+  readShopLiveStrict,
+  applyShopLive,
+} from '@/lib/shopLiveStore';
 import { serializeShopLive, shopLiveKey } from '@/lib/shopLive';
 
 beforeEach(() => {
@@ -44,6 +48,35 @@ describe('readShopLive (fail-open)', () => {
     hold.get = { ok: true, value: serializeShopLive({ soldOut: ['x'], paused: true, updatedAt: 7 }) };
     expect(await readShopLive('Alice')).toEqual({ soldOut: ['x'], paused: true, updatedAt: 7 });
     expect(getSpy).toHaveBeenCalledWith(shopLiveKey('alice'));
+  });
+});
+
+describe('readShopLiveStrict (Shops API fail-closed)', () => {
+  it('未保存は EMPTY、KV 未設定/障害は null', async () => {
+    expect(await readShopLiveStrict('alice')).toEqual({
+      soldOut: [],
+      paused: false,
+      updatedAt: 0,
+    });
+    hold.configured = false;
+    expect(await readShopLiveStrict('alice')).toBeNull();
+    hold.configured = true;
+    hold.get = { ok: false, reason: 'network_error' };
+    expect(await readShopLiveStrict('alice')).toBeNull();
+  });
+
+  it('壊れた JSON / sanitize が必要な値は判定不能 null', async () => {
+    hold.get = { ok: true, value: '{bad' };
+    expect(await readShopLiveStrict('alice')).toBeNull();
+    hold.get = {
+      ok: true,
+      value: JSON.stringify({
+        soldOut: ['a', 'a'],
+        paused: false,
+        updatedAt: 1,
+      }),
+    };
+    expect(await readShopLiveStrict('alice')).toBeNull();
   });
 });
 

@@ -75,6 +75,7 @@ const FIRST_PARTY_RESOURCE_URLS = new Set([
   'https://open-pay.jp/api/paid/stores',
   'https://open-pay.jp/api/paid/japan-web3-directory',
   'https://open-pay.jp/api/paid/japan-web3-directory/search',
+  'https://open-pay.jp/api/paid/jpyc-shops/search',
 ]);
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
