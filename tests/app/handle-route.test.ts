@@ -191,6 +191,29 @@ describe('POST /api/handle', () => {
     });
   });
 
+  it('掲載 index 満杯でも publish は成功し listing:index_full を明示する', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'updated',
+      record: savedRecord(201),
+      listing: 'index_full',
+    });
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        storefront: { ...STORE, agentListing: true },
+        expectedUpdatedAt: 200,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      status: 'updated',
+      updatedAt: 201,
+      listing: 'index_full',
+    });
+  });
+
   it('既存更新の expectedUpdatedAt 欠落/不一致 → 409 conflict', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({ status: 'conflict' });
     const missing = await POST(postReq({ handle: 'alice', config: CFG }));

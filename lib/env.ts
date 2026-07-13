@@ -512,6 +512,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_MOBILE_ORDER',
     process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER,
   ),
+  // JPYC Shops API の店舗検索掲載 opt-in UI (client 露出)。**既定 OFF** = checkbox 非表示、
+  // 新規 publish payload は従来バイト不変。agentListing の保存/index 同期 data 層は常時有効だが、
+  // 明示 true が来ない限り未掲載 cleanup 以外の副作用を持たない。API 本体は PR-2 の別スコープ。
+  enableShopsApi: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_SHOPS_API',
+    process.env.NEXT_PUBLIC_ENABLE_SHOPS_API,
+  ),
   // モバイル注文の「受注リレー」(顧客の決済成功 → /api/order/notify が txHash を
   // on-chain 検証 → 店主の KV 受注リストへ → 店主が SIWE で受注画面に表示) の有効化フラグ
   // (client 露出)。**既定 OFF** = MobileOrderView は webhook を付けず・受注タブ非表示・

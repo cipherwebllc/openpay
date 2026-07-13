@@ -2000,6 +2000,8 @@
     "publishUpdateButton": "Update published shop",
     "publishReceiverShared": "The receive address is shared across this @handle (same as your profile/tips). Updating the shop syncs it to the builder's receive address.",
     "publishReceiverWillChange": "Publishing will update the receive address from {from} to {to} (the @handle-wide receive address changes).",
+    "agentListingLabel": "List in AI agent search (Shops API)",
+    "agentListingConsent": "When listed, your shop name, description, address, business hours, menu summary, and order-acceptance status will be provided to third-party AI agents and apps through OpenPay's paid API. Your phone number will not be provided. To delist, clear this checkbox and update the published shop (changes may take up to 60 seconds). If your shop address is also your home address, please review it before listing.",
     "editLoadButton": "Edit (load published content)",
     "editLoadConfirm": "This replaces this device's store settings and product catalog (shared with Register) with the published @handle content. Continue?",
     "editLoadConfirmYes": "Load",

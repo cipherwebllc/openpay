@@ -10,11 +10,22 @@ import type { Address } from 'viem';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
-const h = vi.hoisted(() => ({ isSignedIn: true }));
+const h = vi.hoisted(() => ({ isSignedIn: true, enableShopsApi: false }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
-  return { ...actual, env: { ...actual.env, get enableHandles() { return true; } } };
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableHandles() {
+        return true;
+      },
+      get enableShopsApi() {
+        return h.enableShopsApi;
+      },
+    },
+  };
 });
 vi.mock('@/hooks/useOrigin', () => ({ useOrigin: () => 'https://open-pay.jp' }));
 vi.mock('@/hooks/useSiweSession', () => ({
@@ -69,6 +80,7 @@ function renderPanel(
 
 beforeEach(() => {
   h.isSignedIn = true;
+  h.enableShopsApi = false;
   vi.unstubAllGlobals();
 });
 
@@ -137,6 +149,82 @@ describe('StorefrontPublishPanel', () => {
     );
     expect((post![1] as RequestInit).body).toBe(
       `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}]},"expectedUpdatedAt":100}`,
+    );
+  });
+
+  it('Shops API flag OFF は checkbox 非表示で従来 POST バイトを維持', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE });
+    const publishButton = await screen.findByRole('button', { name: 'この @handle に公開' });
+    expect(
+      screen.queryByRole('checkbox', {
+        name: 'AI エージェント検索に掲載する（Shops API）',
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(publishButton);
+    await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
+    const post = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect((post![1] as RequestInit).body).toBe(
+      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}]},"expectedUpdatedAt":100}`,
+    );
+  });
+
+  it('Shops API flag ON でも checkbox 既定 OFF は従来 POST バイト不変', async () => {
+    h.enableShopsApi = true;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE });
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'AI エージェント検索に掲載する（Shops API）',
+    });
+    expect(checkbox).not.toBeChecked();
+    expect(
+      screen.getByText(
+        '掲載すると、店名・紹介文・住所・営業時間・メニュー概要・受付状況が、OpenPay の有料 API を通じて第三者の AI エージェントやアプリに提供されます。電話番号は提供されません。解除はこのチェックを外して公開を更新（反映まで最大 60 秒）。住所が自宅を兼ねる場合は掲載前にご確認ください。',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'この @handle に公開' }));
+    await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
+    const post = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect((post![1] as RequestInit).body).toBe(
+      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}]},"expectedUpdatedAt":100}`,
+    );
+  });
+
+  it('Shops API checkbox を明示 ON にしたときだけ agentListing:true を POST 生バイトへ追加', async () => {
+    h.enableShopsApi = true;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE });
+    fireEvent.click(
+      await screen.findByRole('checkbox', {
+        name: 'AI エージェント検索に掲載する（Shops API）',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'この @handle に公開' }));
+    await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
+    const post = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect((post![1] as RequestInit).body).toBe(
+      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}],"agentListing":true},"expectedUpdatedAt":100}`,
     );
   });
 
@@ -237,6 +325,32 @@ describe('StorefrontPublishPanel', () => {
     });
     const status = await screen.findByTestId('storefront-publish-status');
     expect(within(status).getByText('公開中')).toBeInTheDocument();
+    expect(within(status).getByText('未公開の変更があります')).toBeInTheDocument();
+  });
+
+  it('公開済み agentListing の JSON round-trip を復元し、checkbox 差分を未公開変更にする', async () => {
+    h.enableShopsApi = true;
+    const published = JSON.parse(
+      JSON.stringify({ ...STORE, agentListing: true }),
+    ) as StorefrontParts;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [{ handle: 'shop', config: CFG, storefront: published, updatedAt: Date.now() }],
+        }),
+      }),
+    );
+    renderPanel({ storefront: STORE });
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'AI エージェント検索に掲載する（Shops API）',
+    });
+    expect(checkbox).toBeChecked();
+    const status = screen.getByTestId('storefront-publish-status');
+    expect(within(status).queryByText('未公開の変更があります')).not.toBeInTheDocument();
+    fireEvent.click(checkbox);
     expect(within(status).getByText('未公開の変更があります')).toBeInTheDocument();
   });
 

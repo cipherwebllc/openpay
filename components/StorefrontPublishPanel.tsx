@@ -74,6 +74,11 @@ export function StorefrontPublishPanel({
   const qc = useQueryClient();
   const [selected, setSelected] = useState('');
   const [showQr, setShowQr] = useState(false);
+  // 公開済み同意を handle ごとの既定値にし、ユーザーが変更した handle だけ上書きする。
+  // handle 切替を effect で state 同期すると 1 render 古い同意を送るため、派生値で決める。
+  const [agentListingOverrides, setAgentListingOverrides] = useState<
+    Record<string, boolean>
+  >({});
   // 公開中の @handle をビルダーへ読み込む前の確認 (下書き + 商品カタログを破壊的に上書きするため)。
   const [confirmLoad, setConfirmLoad] = useState(false);
 
@@ -107,6 +112,23 @@ export function StorefrontPublishPanel({
       ? selected
       : (handles.find((hh) => hh.storefront)?.handle ?? handles[0]?.handle ?? '');
   const selectedHandle = handles.find((hh) => hh.handle === effectiveSelected) ?? null;
+  const selectedAgentListing = selectedHandle?.storefront?.agentListing === true;
+  const agentListing = Object.prototype.hasOwnProperty.call(
+    agentListingOverrides,
+    effectiveSelected,
+  )
+    ? agentListingOverrides[effectiveSelected]
+    : selectedAgentListing;
+  const publishedStorefront = useMemo(() => {
+    if (!storefront) return null;
+    const next: StorefrontParts = { ...storefront };
+    delete next.agentListing;
+    // flag OFF は既存掲載状態を温存し、隠れた checkbox による opt-out を起こさない。
+    // 新規店には selectedAgentListing が無いため、従来 payload のまま完全 inert。
+    const shouldList = env.enableShopsApi ? agentListing : selectedAgentListing;
+    if (shouldList) next.agentListing = true;
+    return next;
+  }, [agentListing, selectedAgentListing, storefront]);
   const receiverWillChange =
     !!receiver &&
     !!selectedHandle &&
@@ -115,11 +137,11 @@ export function StorefrontPublishPanel({
   // 同条件の受取先差分を dirty とみなす。未公開 handle には比較 baseline が無いので付けない。
   const hasUnpublishedChanges = useMemo(
     () =>
-      storefront !== null &&
+      publishedStorefront !== null &&
       !!selectedHandle?.storefront &&
-      (!storefrontPartsEquivalent(storefront, selectedHandle.storefront) ||
+      (!storefrontPartsEquivalent(publishedStorefront, selectedHandle.storefront) ||
         receiverWillChange),
-    [receiverWillChange, selectedHandle?.storefront, storefront],
+    [publishedStorefront, receiverWillChange, selectedHandle?.storefront],
   );
   const statusNow = Date.now();
   const relativePublishedAt = formatPublishedRelativeTime(
@@ -136,7 +158,7 @@ export function StorefrontPublishPanel({
 
   const publish = useMutation({
     mutationFn: async () => {
-      if (!selectedHandle || !storefront) throw new Error('not_ready');
+      if (!selectedHandle || !publishedStorefront) throw new Error('not_ready');
       // 受取先の権威化: ビルダーの受取先 (receiver) が有効かつ現 @handle の受取先 (config.to) と
       // 異なれば config.to を上書きして送る (= ビルダーで変更 → 公開更新でそのまま反映)。無効/空/同一
       // なら既存 config をそのまま維持し config.to を消さない。config は @handle 共通の単一受取
@@ -152,7 +174,7 @@ export function StorefrontPublishPanel({
         body: JSON.stringify({
           handle: selectedHandle.handle,
           config: nextConfig,
-          storefront,
+          storefront: publishedStorefront,
           expectedUpdatedAt: selectedHandle.updatedAt,
         }),
       });
@@ -161,7 +183,7 @@ export function StorefrontPublishPanel({
         json,
         publishedHandle: selectedHandle.handle,
         publishedConfig: nextConfig,
-        publishedStorefront: storefront,
+        publishedStorefront,
       };
     },
     onSuccess: ({ json, publishedHandle, publishedConfig, publishedStorefront }) => {
@@ -344,6 +366,28 @@ export function StorefrontPublishPanel({
                 to: shortAddress(receiver),
               })}
             </p>
+          )}
+          {env.enableShopsApi && selectedHandle && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={agentListing}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setAgentListingOverrides((current) => ({
+                      ...current,
+                      [effectiveSelected]: checked,
+                    }));
+                  }}
+                  className="mt-0.5"
+                />
+                <span>{t('agentListingLabel')}</span>
+              </label>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                {t('agentListingConsent')}
+              </p>
+            </div>
           )}
           <button
             type="button"
