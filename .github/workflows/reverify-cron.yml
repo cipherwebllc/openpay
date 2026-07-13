@@ -1,0 +1,30 @@
+# 掲載リソース再検証の毎時トリガー (無料)。Vercel Hobby は cron が日次限定のため、
+# 毎時実行は GitHub Actions から HTTP で叩く (vercel.json の日次 cron はフォールバック)。
+# route 側は runId (UTC 時) + KV lock で重複配送に冪等 — 二重トリガーでも安全。
+# 必要 secret: CRON_SECRET (Vercel env と同じ値を GitHub リポ secret にも登録)。
+name: reverify-cron
+on:
+  schedule:
+    - cron: '5 * * * *' # 毎時 5 分 (Vercel 日次 cron の 0 分とずらす)
+  workflow_dispatch: {}
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger /api/cron/reverify
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret is not set — skipping (set it in repo secrets to enable hourly reverify)."
+            exit 0
+          fi
+          code=$(curl -s -o /tmp/out.json -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            --max-time 90 \
+            https://open-pay.jp/api/cron/reverify)
+          echo "HTTP $code"
+          cat /tmp/out.json || true
+          # 401 = secret 不一致 (設定ミスを赤で知らせる)。5xx も失敗扱い。
+          [ "$code" = "200" ]
