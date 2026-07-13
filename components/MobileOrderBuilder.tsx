@@ -145,6 +145,10 @@ export function MobileOrderBuilder({
         acceptingOrders: draft.acceptingOrders,
         dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
         openFrom: draft.openFrom.trim() || undefined,
+        ...(draft.lastOrder.trim() ? { lastOrder: draft.lastOrder.trim() } : {}),
+        ...(draft.minLeadMinutes.trim()
+          ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
+          : {}),
         menu: menuItems,
       }
     : null;

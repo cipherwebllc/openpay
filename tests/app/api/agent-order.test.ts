@@ -400,7 +400,7 @@ describe('agent-order pay route', () => {
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
-  it('受付中・在庫あり・lastOrder 前なら各 flag ON でも従来の 402 challenge', async () => {
+  it('preorder-time ON で開店前なら支払いヘッダがあっても plain 409 で settle しない', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
     store.record = record({
@@ -412,6 +412,34 @@ describe('agent-order pay route', () => {
           { id: 'karaage', name: '唐揚げ', price: '500' },
           { id: 'beer', name: 'ビール', price: '600' },
         ],
+        openFrom: '13:00',
+      },
+    } as Partial<HandleRecord>);
+    const { pay } = await load({ preorderTime: '1' });
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'store_not_accepting' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('受付中・在庫あり・openFrom 後かつ lastOrder 前なら各 flag ON でも従来の 402 challenge', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [
+          { id: 'karaage', name: '唐揚げ', price: '500' },
+          { id: 'beer', name: 'ビール', price: '600' },
+        ],
+        openFrom: '11:00',
         lastOrder: '23:00',
       },
     } as Partial<HandleRecord>);

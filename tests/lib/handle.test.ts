@@ -639,6 +639,28 @@ describe('handleStorefrontConfig', () => {
     // 未設定 (テイクアウト) は dineIn を持たない。
     expect('dineIn' in (handleStorefrontConfig(base, 'shop') ?? {})).toBe(false);
   });
+
+  it('storefront の時間系 3 項目を伝播し、欠落時は config に載せない', () => {
+    const withTime: HandleRecord = {
+      ...base,
+      storefront: {
+        ...base.storefront!,
+        openFrom: '09:30',
+        lastOrder: '21:30',
+        minLeadMinutes: 20,
+      },
+    };
+    expect(handleStorefrontConfig(withTime, 'shop')).toMatchObject({
+      openFrom: '09:30',
+      lastOrder: '21:30',
+      minLeadMinutes: 20,
+    });
+
+    const withoutTime = handleStorefrontConfig(base, 'shop') ?? {};
+    expect('openFrom' in withoutTime).toBe(false);
+    expect('lastOrder' in withoutTime).toBe(false);
+    expect('minLeadMinutes' in withoutTime).toBe(false);
+  });
 });
 
 describe('MAX_HANDLES_PER_WALLET', () => {

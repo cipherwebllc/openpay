@@ -6,7 +6,11 @@ import { screen, fireEvent } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
-const h = vi.hoisted(() => ({ enableMobileOrder: true }));
+const h = vi.hoisted(() => ({
+  enableMobileOrder: true,
+  enableHandles: false,
+  enablePreorderTime: false,
+}));
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -17,10 +21,21 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableMobileOrder() {
         return h.enableMobileOrder;
       },
+      get enableHandles() {
+        return h.enableHandles;
+      },
+      get enablePreorderTime() {
+        return h.enablePreorderTime;
+      },
     },
   };
 });
 vi.mock('wagmi', () => ({ useAccount: () => ({ address: undefined }) }));
+vi.mock('@/components/StorefrontPublishPanel', () => ({
+  StorefrontPublishPanel: ({ storefront }: { storefront: unknown }) => (
+    <output data-testid="storefront-publish-parts">{JSON.stringify(storefront)}</output>
+  ),
+}));
 // AddressInput: 入力時に onChange + onResolved(ADDR) を発火する軽量スタブ。
 vi.mock('@/components/AddressInput', () => ({
   AddressInput: ({
@@ -48,6 +63,8 @@ import { MobileOrderBuilder } from '@/components/MobileOrderBuilder';
 beforeEach(() => {
   window.localStorage.clear();
   h.enableMobileOrder = true;
+  h.enableHandles = false;
+  h.enablePreorderTime = false;
 });
 
 describe('MobileOrderBuilder', () => {
@@ -101,6 +118,49 @@ describe('MobileOrderBuilder', () => {
     expect(screen.getByPlaceholderText(/東京都渋谷区/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/水曜定休/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText('例: 03-1234-5678')).toBeInTheDocument();
+  });
+
+  it('@handle 公開 parts に lastOrder / minLeadMinutes を載せる', () => {
+    h.enableHandles = true;
+    h.enablePreorderTime = true;
+    const { container } = renderWithIntl(<MobileOrderBuilder />);
+
+    const timeInputs = container.querySelectorAll<HTMLInputElement>('input[type="time"]');
+    expect(timeInputs).toHaveLength(2);
+    fireEvent.change(timeInputs[0], {
+      target: { value: '09:30' },
+    });
+    fireEvent.change(timeInputs[1], {
+      target: { value: '21:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '事前モバイルオーダー' }));
+    const minLeadInput = container.querySelector<HTMLInputElement>('input[type="number"]');
+    expect(minLeadInput).not.toBeNull();
+    fireEvent.change(minLeadInput!, {
+      target: { value: '20' },
+    });
+
+    const parts = JSON.parse(
+      screen.getByTestId('storefront-publish-parts').textContent ?? '{}',
+    );
+    expect(parts).toMatchObject({
+      openFrom: '09:30',
+      lastOrder: '21:30',
+      minLeadMinutes: 20,
+    });
+  });
+
+  it('@handle 公開 parts は時間系の空値を省略する', () => {
+    h.enableHandles = true;
+    h.enablePreorderTime = true;
+    renderWithIntl(<MobileOrderBuilder />);
+
+    const parts = JSON.parse(
+      screen.getByTestId('storefront-publish-parts').textContent ?? '{}',
+    );
+    expect(parts).not.toHaveProperty('openFrom');
+    expect(parts).not.toHaveProperty('lastOrder');
+    expect(parts).not.toHaveProperty('minLeadMinutes');
   });
 
   it('受付トグルを切替えると aria-checked と表示が変わる (既定=受付中)', () => {

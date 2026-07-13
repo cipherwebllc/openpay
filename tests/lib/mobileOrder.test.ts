@@ -96,6 +96,40 @@ describe('mobileOrder: storefrontPartsEquivalent', () => {
       ),
     ).toBe(false);
   });
+
+  it('時間系を JSON round-trip し、lastOrder / minLeadMinutes の差分は not equal', () => {
+    const published = JSON.parse(
+      JSON.stringify({
+        ...STOREFRONT_PARTS,
+        openFrom: '09:00',
+        lastOrder: '21:00',
+        minLeadMinutes: 20,
+      }),
+    ) as unknown;
+    expect(
+      storefrontPartsEquivalent(
+        {
+          ...STOREFRONT_PARTS,
+          openFrom: '09:00',
+          lastOrder: '21:00',
+          minLeadMinutes: 20,
+        },
+        published,
+      ),
+    ).toBe(true);
+    expect(
+      storefrontPartsEquivalent(
+        { ...STOREFRONT_PARTS, lastOrder: '21:30', minLeadMinutes: 20 },
+        { ...STOREFRONT_PARTS, lastOrder: '21:00', minLeadMinutes: 20 },
+      ),
+    ).toBe(false);
+    expect(
+      storefrontPartsEquivalent(
+        { ...STOREFRONT_PARTS, lastOrder: '21:00', minLeadMinutes: 30 },
+        { ...STOREFRONT_PARTS, lastOrder: '21:00', minLeadMinutes: 20 },
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('mobileOrder: encode/decode round-trip', () => {

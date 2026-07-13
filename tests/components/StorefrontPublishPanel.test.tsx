@@ -38,6 +38,12 @@ const STORE: StorefrontParts = {
   feePayer: 'merchant',
   menu: [{ id: 'a', name: 'ブレンド', price: '500' }],
 };
+const STORE_WITH_TIME: StorefrontParts = {
+  ...STORE,
+  openFrom: '09:30',
+  lastOrder: '21:30',
+  minLeadMinutes: 20,
+};
 const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
 
 function renderPanel(
@@ -88,14 +94,14 @@ describe('StorefrontPublishPanel', () => {
     expect(onGetHandle).toHaveBeenCalled();
   });
 
-  it('handle を公開 → POST に config+storefront を送り固定URLを表示', async () => {
+  it('handle を公開 → 時間系を含む POST 生バイトを送り固定URLを表示', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
       init?.method === 'POST'
         ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
         : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
     );
     vi.stubGlobal('fetch', fetchMock);
-    renderPanel({ storefront: STORE });
+    renderPanel({ storefront: STORE_WITH_TIME });
     const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
     fireEvent.click(btn);
     await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
@@ -104,15 +110,34 @@ describe('StorefrontPublishPanel', () => {
     expect(post).toBeTruthy();
     const rawBody = (post![1] as RequestInit).body as string;
     expect(rawBody).toBe(
-      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}]},"expectedUpdatedAt":100}`,
+      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}],"openFrom":"09:30","lastOrder":"21:30","minLeadMinutes":20},"expectedUpdatedAt":100}`,
     );
     const body = JSON.parse(rawBody);
     expect(body.handle).toBe('shop');
     expect(body.config).toEqual(CFG);
-    expect(body.storefront).toEqual(STORE);
+    expect(body.storefront).toEqual(STORE_WITH_TIME);
     expect(body.expectedUpdatedAt).toBe(100);
     // 固定店舗 URL。
     expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
+  });
+
+  it('時間系未設定の店は従来の POST 生バイトから不変', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, status: 200, json: async () => ({ ok: true, status: 'updated' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel({ storefront: STORE });
+    fireEvent.click(await screen.findByRole('button', { name: 'この @handle に公開' }));
+    await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
+
+    const post = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect((post![1] as RequestInit).body).toBe(
+      `{"handle":"shop","config":{"to":"${ADDR}","methods":[{"token":"jpyc","chain":"polygon"}]},"storefront":{"chain":"polygon","mode":"storefront","feePayer":"merchant","menu":[{"id":"a","name":"ブレンド","price":"500"}]},"expectedUpdatedAt":100}`,
+    );
   });
 
   it('ビルダーの受取先が現 config.to と異なる → config.to を新受取先に更新して POST (他 config は保持) + 差分注記', async () => {
@@ -210,6 +235,24 @@ describe('StorefrontPublishPanel', () => {
     renderPanel({
       storefront: { ...STORE, menu: [{ ...STORE.menu[0], price: '550' }] },
     });
+    const status = await screen.findByTestId('storefront-publish-status');
+    expect(within(status).getByText('公開中')).toBeInTheDocument();
+    expect(within(status).getByText('未公開の変更があります')).toBeInTheDocument();
+  });
+
+  it('公開済み JSON round-trip から時間系だけ変わると未公開の変更として表示する', async () => {
+    const published = JSON.parse(JSON.stringify(STORE_WITH_TIME)) as StorefrontParts;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [{ handle: 'shop', config: CFG, storefront: published, updatedAt: Date.now() }],
+        }),
+      }),
+    );
+    renderPanel({ storefront: { ...STORE_WITH_TIME, minLeadMinutes: 30 } });
     const status = await screen.findByTestId('storefront-publish-status');
     expect(within(status).getByText('公開中')).toBeInTheDocument();
     expect(within(status).getByText('未公開の変更があります')).toBeInTheDocument();
