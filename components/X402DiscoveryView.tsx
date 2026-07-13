@@ -5,7 +5,7 @@
 // /api/facilitator/resources で管理する (GET=一覧 / POST=登録 / [id] PATCH=編集 / [id] DELETE=無効化)。
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { formatUnits } from 'viem';
@@ -15,10 +15,12 @@ import {
   Check,
   Code2,
   Copy,
+  ChevronDown,
   Database,
   FileText,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Wallet,
   CheckCircle2,
@@ -43,6 +45,8 @@ type DiscoveryItem = {
   accepts: Array<{ extra?: { openpay?: { feeValue?: string } } }>;
 };
 
+const EMPTY_DISCOVERY_ITEMS: DiscoveryItem[] = [];
+
 type RegisteredResource = {
   url: string;
   description: string;
@@ -63,6 +67,12 @@ type OwnedResource = {
 
 const EMPTY_FORM = { url: '', description: '', priceJpyc: '', category: '', payTo: '' };
 const DEMO_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
+const CATALOG_CATEGORIES = ['api', 'data', 'mcp', 'content'] as const;
+type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
+const FIRST_PARTY_RESOURCE_URLS = new Set([
+  DEMO_RESOURCE_URL,
+  'https://open-pay.jp/api/paid/stores',
+]);
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
 const DEMO_CURL = `curl -i ${DEMO_RESOURCE_URL}`;
@@ -84,6 +94,14 @@ const BUYER_SCRIPT_COMMAND = [
   `curl -fsSL ${BUYER_SCRIPT_URL} -o x402-buyer-example.mjs`,
   `BUYER_PRIVATE_KEY=0x... RESOURCE_URL=${DEMO_RESOURCE_URL} node x402-buyer-example.mjs`,
 ].join('\n');
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 function feeAtomicOf(item: DiscoveryItem): bigint | null {
   const fv = item.accepts[0]?.extra?.openpay?.feeValue;
@@ -161,6 +179,8 @@ export function X402DiscoveryView({
   const [attested, setAttested] = useState(false);
   // コピー済みフィードバック (key 単位・1.5s でリセット)。
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogCategory, setCatalogCategory] = useState<CatalogCategory | null>(null);
   const copyText = useCallback((key: string, text: string) => {
     try {
       void navigator.clipboard?.writeText(text);
@@ -200,9 +220,40 @@ export function X402DiscoveryView({
     retry: false,
   });
 
-  const items = catalogQuery.data ?? [];
+  const items = catalogQuery.data ?? EMPTY_DISCOVERY_ITEMS;
   const loading = catalogQuery.isFetching;
   const owned = ownedQuery.data ?? [];
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      const category = item.category.trim().toLowerCase();
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
+  const availableCategories = CATALOG_CATEGORIES.filter(
+    (category) => (categoryCounts.get(category) ?? 0) > 0,
+  );
+  const effectiveCatalogCategory =
+    catalogCategory && availableCategories.includes(catalogCategory)
+      ? catalogCategory
+      : null;
+  const visibleItems = useMemo(() => {
+    const search = catalogSearch.trim().toLowerCase();
+    return items.filter((item) => {
+      if (
+        effectiveCatalogCategory &&
+        item.category.trim().toLowerCase() !== effectiveCatalogCategory
+      ) {
+        return false;
+      }
+      return (
+        search === '' ||
+        item.description.toLowerCase().includes(search) ||
+        item.resource.toLowerCase().includes(search)
+      );
+    });
+  }, [catalogSearch, effectiveCatalogCategory, items]);
 
   const onEdit = useCallback((r: OwnedResource) => {
     setEditId(r.id);
@@ -396,26 +447,46 @@ export function X402DiscoveryView({
     description: string;
     url: string;
     copyKey: string;
+    official?: boolean;
   }) => {
     const Icon = categoryIcon(opts.category);
+    const urlIsHttps = isHttpsUrl(opts.url);
     return (
-      <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/5 text-brand">
-          <Icon className="h-5 w-5" aria-hidden />
-        </span>
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+              <Icon className="h-3 w-3 text-brand" aria-hidden />
               {opts.category}
             </span>
-            {opts.priceNode}
+            <p className="min-w-0 text-sm font-bold leading-snug text-slate-900">
+              {opts.description}
+            </p>
+            {opts.official && (
+              <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand-dark">
+                {t('officialBadge')}
+              </span>
+            )}
           </div>
-          <p className="mt-0.5 text-sm font-medium text-slate-800">{opts.description}</p>
           <div className="mt-1 flex items-center gap-1.5">
-            <span className="min-w-0 truncate font-mono text-xs text-slate-400">{opts.url}</span>
+            {urlIsHttps ? (
+              <a
+                href={opts.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="min-w-0 truncate font-mono text-xs text-slate-400 underline-offset-2 transition hover:text-brand hover:underline"
+              >
+                {opts.url}
+              </a>
+            ) : (
+              <span className="min-w-0 truncate font-mono text-xs text-slate-400">
+                {opts.url}
+              </span>
+            )}
             {copyBtn(opts.copyKey, opts.url)}
           </div>
         </div>
+        {opts.priceNode}
       </div>
     );
   };
@@ -690,8 +761,68 @@ export function X402DiscoveryView({
       <section>
         <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
         <p className="mt-1 text-sm text-slate-500">{t('catalogSubtitle')}</p>
+        {!loading && items.length > 0 && (
+          <div className="mt-4 space-y-3 rounded-2xl bg-white p-3 shadow-card ring-1 ring-slate-200/70 sm:p-4">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-slate-500">
+                {t('catalogSearchLabel')}
+              </span>
+              <span className="relative block">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  aria-hidden
+                />
+                <input
+                  type="search"
+                  value={catalogSearch}
+                  onChange={(event) => setCatalogSearch(event.target.value)}
+                  placeholder={t('catalogSearchPlaceholder')}
+                  className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
+                />
+              </span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCatalogCategory(null)}
+                aria-pressed={effectiveCatalogCategory === null}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                  effectiveCatalogCategory === null
+                    ? 'border-brand bg-brand text-white'
+                    : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
+                }`}
+              >
+                {t('catalogCategoryAll')}
+                <span className={effectiveCatalogCategory === null ? 'text-white/75' : 'text-slate-400'}>
+                  {items.length}
+                </span>
+              </button>
+              {availableCategories.map((category) => {
+                const active = effectiveCatalogCategory === category;
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setCatalogCategory(category)}
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                      active
+                        ? 'border-brand bg-brand text-white'
+                        : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
+                    }`}
+                  >
+                    {category}
+                    <span className={active ? 'text-white/75' : 'text-slate-400'}>
+                      {categoryCounts.get(category)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {loading ? (
-          <div className="mt-4 space-y-3" aria-hidden>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" aria-hidden>
             <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
             <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
           </div>
@@ -702,9 +833,16 @@ export function X402DiscoveryView({
             </span>
             <p className="mt-1 text-sm text-slate-500">{t('catalogEmpty')}</p>
           </div>
+        ) : visibleItems.length === 0 ? (
+          <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl bg-white px-6 py-10 text-center shadow-card ring-1 ring-slate-200/70">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/5 text-brand">
+              <Search className="h-6 w-6" aria-hidden />
+            </span>
+            <p className="mt-1 text-sm text-slate-500">{t('catalogNoResults')}</p>
+          </div>
         ) : (
-          <ul className="mt-4 space-y-3">
-            {items.map((item) => {
+          <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {visibleItems.map((item) => {
               const feeAtomic = feeAtomicOf(item);
               // atomic JPYC → 表示 (小数あり)。1% 手数料は price/100 で端数が出るため、整数除算だと
               // 切り捨てて誤表示する → formatUnits で小数を保つ。合計も atomic で加算してから整形する。
@@ -744,6 +882,7 @@ export function X402DiscoveryView({
                     description: item.description,
                     url: item.resource,
                     copyKey: `cat-${item.resource}`,
+                    official: FIRST_PARTY_RESOURCE_URLS.has(item.resource),
                   })}
                 </li>
               );
@@ -754,12 +893,12 @@ export function X402DiscoveryView({
 
       {/* 1 JPYC の first-party demo。長い buyer script は raw を参照し、ページには最小コマンドだけ載せる。 */}
       <section>
-        <details className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
-          <summary className="flex cursor-pointer list-none items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+        <details className="group overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+          <summary className="flex cursor-pointer list-none items-center gap-3 p-4 transition hover:bg-slate-50">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
               <Code2 className="h-5 w-5" aria-hidden />
             </span>
-            <span className="min-w-0">
+            <span className="min-w-0 flex-1">
               <span className="block text-base font-bold text-slate-900">
                 {t('tryTitle')}
               </span>
@@ -767,9 +906,13 @@ export function X402DiscoveryView({
                 {t('trySubtitle')}
               </span>
             </span>
+            <ChevronDown
+              className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180"
+              aria-hidden
+            />
           </summary>
 
-          <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+          <div className="space-y-4 border-t border-slate-100 p-4">
             <ol className="space-y-3">
               <li className="flex gap-3">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
@@ -829,12 +972,12 @@ export function X402DiscoveryView({
 
       {/* エージェント導線: npm 公開済みの買い手 MCP (openpay-x402-mcp)。設定 JSON を貼るだけ。 */}
       <section>
-        <details className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
-          <summary className="flex cursor-pointer list-none items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+        <details className="group overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+          <summary className="flex cursor-pointer list-none items-center gap-3 p-4 transition hover:bg-slate-50">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
               <Boxes className="h-5 w-5" aria-hidden />
             </span>
-            <span className="min-w-0">
+            <span className="min-w-0 flex-1">
               <span className="block text-base font-bold text-slate-900">
                 {t('mcpTitle')}
               </span>
@@ -842,9 +985,13 @@ export function X402DiscoveryView({
                 {t('mcpSubtitle')}
               </span>
             </span>
+            <ChevronDown
+              className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180"
+              aria-hidden
+            />
           </summary>
 
-          <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+          <div className="space-y-3 border-t border-slate-100 p-4">
             <div className="rounded-xl bg-slate-950 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <a

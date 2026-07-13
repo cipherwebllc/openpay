@@ -123,6 +123,123 @@ describe('X402DiscoveryView', () => {
     expect(global.fetch).toHaveBeenCalledWith('/api/discovery', { cache: 'no-store' });
   });
 
+  it('カタログ検索: 名前・URL の部分一致を大小文字を無視して絞り込む', async () => {
+    const weather = {
+      ...ITEM,
+      resource: 'https://data.example.jp/paid/Weather-Forecast',
+      description: 'Tokyo Weather Data',
+      category: 'data',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [ITEM, weather] }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    const search = await screen.findByPlaceholderText('名前・URL で検索');
+    fireEvent.change(search, { target: { value: 'WEATHER data' } });
+    expect(screen.getByText(weather.description)).toBeInTheDocument();
+    expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: 'EXAMPLE.JP/PAID/WEATHER' } });
+    expect(screen.getByText(weather.description)).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByText(ITEM.description)).toBeInTheDocument();
+    expect(screen.getByText(weather.description)).toBeInTheDocument();
+  });
+
+  it('カテゴリ chip: 実在カテゴリと件数だけを表示し、切替で絞り込む', async () => {
+    const dataItem = {
+      ...ITEM,
+      resource: 'https://data.example.jp/paid/directory',
+      description: '店舗データ',
+      category: 'data',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          ITEM,
+          {
+            ...ITEM,
+            resource: 'https://api.example.jp/two',
+            description: 'Second API',
+          },
+          dataItem,
+        ],
+      }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    expect(await screen.findByRole('button', { name: 'すべて 3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'api 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'data 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mcp/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /content/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'data 1' }));
+    expect(screen.getByText(dataItem.description)).toBeInTheDocument();
+    expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'すべて 3' }));
+    expect(screen.getByText(ITEM.description)).toBeInTheDocument();
+  });
+
+  it('検索・カテゴリで 0 件になると該当なしの空状態を表示', async () => {
+    renderView();
+    fireEvent.change(await screen.findByPlaceholderText('名前・URL で検索'), {
+      target: { value: '存在しないリソース' },
+    });
+    expect(screen.getByText('該当するリソースがありません')).toBeInTheDocument();
+    expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+  });
+
+  it('filter 後も first-party を先頭にした元の並び順を維持する', async () => {
+    const firstParty = {
+      ...ITEM,
+      resource: 'https://open-pay.jp/api/paid/demo',
+      description: 'OpenPay demo',
+    };
+    const merchant = {
+      ...ITEM,
+      resource: 'https://merchant.example.jp/paid/api',
+      description: 'Merchant API',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [firstParty, merchant, { ...ITEM, category: 'data' }] }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'api 2' }));
+    const firstCard = screen.getByText(firstParty.description).closest('li');
+    const merchantCard = screen.getByText(merchant.description).closest('li');
+    expect(firstCard?.nextElementSibling).toBe(merchantCard);
+    expect(within(firstCard!).getByText('公式')).toBeInTheDocument();
+  });
+
+  it('リソース URL は https のみ安全な外部リンクにする', async () => {
+    const insecure = {
+      ...ITEM,
+      resource: 'http://api.example.jp/paid/insecure',
+      description: 'HTTP resource',
+      category: 'data',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [ITEM, insecure] }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    const secureLink = await screen.findByRole('link', { name: ITEM.resource });
+    expect(secureLink).toHaveAttribute('href', ITEM.resource);
+    expect(secureLink).toHaveAttribute('target', '_blank');
+    expect(secureLink).toHaveAttribute('rel', 'noreferrer noopener');
+    expect(screen.queryByRole('link', { name: insecure.resource })).not.toBeInTheDocument();
+    expect(screen.getByText(insecure.resource)).toBeInTheDocument();
+  });
+
   it('サインイン済: 登録フォーム (URL/価格 入力) を表示', async () => {
     state.connected = true;
     state.address = '0x1111111111111111111111111111111111111111';
