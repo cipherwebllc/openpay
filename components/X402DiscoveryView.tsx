@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
+import { Field } from '@/components/Field';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
 function categoryIcon(category: string) {
@@ -223,6 +224,7 @@ export function X402DiscoveryView({
   const items = catalogQuery.data ?? EMPTY_DISCOVERY_ITEMS;
   const loading = catalogQuery.isFetching;
   const owned = ownedQuery.data ?? [];
+  const atResourceLimit = owned.length >= maxResourcesPerMerchant;
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of items) {
@@ -390,6 +392,8 @@ export function X402DiscoveryView({
 
   const inputCls =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15';
+  const resourceActionCls =
+    'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand-dark';
 
   // エラー key → 親切な文言。resource_not_gated は 402 自体が返らない URL、gate_not_openpay は
   // 402 は返るが OpenPay JPYC 方式でない URL、と原因と直し方を分ける。
@@ -529,63 +533,111 @@ export function X402DiscoveryView({
           </button>
         ) : (
           <div className="mt-4 space-y-3">
-            <p className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-500">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
-              {t('signedInAs', { address: address ?? '' })}
-            </p>
-            <input
-              className={inputCls}
-              placeholder={t('formUrl')}
-              value={form.url}
-              onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-            />
-            <input
-              className={inputCls}
-              placeholder={t('formDescription')}
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            />
-            <div className="flex gap-3">
-              <input
-                className={inputCls}
-                inputMode="numeric"
-                placeholder={t('formPrice')}
-                value={form.priceJpyc}
-                onChange={(e) => setForm((f) => ({ ...f, priceJpyc: e.target.value }))}
-              />
-              <input
-                className={inputCls}
-                placeholder={t('formCategory')}
-                value={form.category}
-                onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-              />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-500">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
+                {t('signedInAs', { address: address ?? '' })}
+              </p>
+              <p
+                className={`text-xs font-semibold ${
+                  atResourceLimit ? 'text-amber-700' : 'text-slate-500'
+                }`}
+              >
+                {t('registrationCount', {
+                  count: owned.length,
+                  limit: maxResourcesPerMerchant,
+                })}
+              </p>
             </div>
-            <input
-              className={inputCls}
-              placeholder={t('formPayTo')}
-              value={form.payTo}
-              onChange={(e) => setForm((f) => ({ ...f, payTo: e.target.value }))}
-            />
-            <p className="text-xs leading-relaxed text-slate-400">{t('formPayToHint')}</p>
+            {atResourceLimit && !editId && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {t('registrationLimitReached')}
+              </p>
+            )}
+            <Field label={t('formUrlLabel')}>
+              <input
+                className={inputCls}
+                placeholder={t('formUrl')}
+                value={form.url}
+                onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+              />
+            </Field>
+            <Field label={t('formDescriptionLabel')}>
+              <input
+                className={inputCls}
+                placeholder={t('formDescription')}
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={t('formPriceLabel')}>
+                <input
+                  className={inputCls}
+                  inputMode="numeric"
+                  placeholder={t('formPrice')}
+                  value={form.priceJpyc}
+                  onChange={(e) => setForm((f) => ({ ...f, priceJpyc: e.target.value }))}
+                />
+              </Field>
+              <Field label={t('formCategoryLabel')}>
+                <input
+                  className={inputCls}
+                  placeholder={t('formCategory')}
+                  value={form.category}
+                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                />
+              </Field>
+            </div>
+            <Field label={t('formPayToLabel')}>
+              <input
+                className={inputCls}
+                placeholder={t('formPayTo')}
+                value={form.payTo}
+                onChange={(e) => setForm((f) => ({ ...f, payTo: e.target.value }))}
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                {t('formPayToHint')}
+              </p>
+            </Field>
 
             {/* 出品の正当性表明 (新規登録のみ・必須)。サーバ側でも attested を強制する。 */}
             {!editId && (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2.5">
-                <input
-                  type="checkbox"
-                  checked={attested}
-                  onChange={(e) => setAttested(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30"
-                />
-                <span className="text-xs leading-relaxed text-slate-600">{t('attestLabel')}</span>
-              </label>
+              <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2.5">
+                <label className="flex cursor-pointer items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={attested}
+                    onChange={(e) => setAttested(e.target.checked)}
+                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30"
+                  />
+                  <span className="text-xs font-medium text-slate-700">
+                    {t('attestSummary')}
+                  </span>
+                </label>
+                <details className="group mt-1.5 pl-6">
+                  <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700">
+                    {t('detailsLabel')}
+                    <ChevronDown
+                      className="h-3.5 w-3.5 transition group-open:rotate-180"
+                      aria-hidden
+                    />
+                  </summary>
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                    {t('attestLabel')}
+                  </p>
+                </details>
+              </div>
             )}
 
             <div className="flex items-center gap-3 pt-1">
               <button
                 type="button"
                 onClick={() => submitMutation.mutate()}
-                disabled={submitting || (!editId && !attested)}
+                disabled={
+                  submitting ||
+                  (!editId && (ownedQuery.isPending || atResourceLimit || !attested))
+                }
                 className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               >
                 {submitting
@@ -607,7 +659,7 @@ export function X402DiscoveryView({
                 </button>
               )}
             </div>
-            {!editId && !attested && !submitting && (
+            {!editId && !atResourceLimit && !attested && !submitting && (
               <p className="text-[11px] text-slate-400">{t('attestRequired')}</p>
             )}
             {errorMsg &&
@@ -686,20 +738,22 @@ export function X402DiscoveryView({
                 })}
                 {snippetOpenId === r.id && r.paywallSnippet ? (
                   <div className="relative mt-3 border-t border-slate-100 pt-3">
-                    <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 pr-10 text-xs leading-relaxed text-slate-100">
+                    <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 pr-24 text-xs leading-relaxed text-slate-100">
                       {r.paywallSnippet}
                     </pre>
                     <button
                       type="button"
                       onClick={() => copyText(`owned-snippet-${r.id}`, r.paywallSnippet ?? '')}
-                      className="absolute right-2 top-5 rounded-md bg-slate-700 p-1.5 text-slate-200 hover:bg-slate-600"
-                      aria-label={copiedKey === `owned-snippet-${r.id}` ? t('copied') : t('copy')}
+                      className="absolute right-2 top-5 inline-flex items-center gap-1.5 rounded-md bg-slate-700 px-2 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-600"
                     >
                       {copiedKey === `owned-snippet-${r.id}` ? (
                         <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
                       ) : (
                         <Copy className="h-3.5 w-3.5" aria-hidden />
                       )}
+                      <span>
+                        {copiedKey === `owned-snippet-${r.id}` ? t('copied') : t('copy')}
+                      </span>
                     </button>
                   </div>
                 ) : null}
@@ -726,16 +780,17 @@ export function X402DiscoveryView({
                     <button
                       type="button"
                       onClick={() => setSnippetOpenId(snippetOpenId === r.id ? null : r.id)}
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      className={resourceActionCls}
                     >
+                      <Code2 className="h-3.5 w-3.5" aria-hidden />
                       {t('showSnippet')}
                     </button>
                     <button
                       type="button"
                       onClick={() => onEdit(r)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand-dark"
+                      className={resourceActionCls}
                     >
-                      <Pencil className="h-3 w-3" aria-hidden />
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
                       {t('editCta')}
                     </button>
                     <button
@@ -744,9 +799,9 @@ export function X402DiscoveryView({
                         setConfirmDeleteId(r.id);
                         setNotice(null);
                       }}
-                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:border-red-400"
+                      className={`${resourceActionCls} border-red-200 text-red-600 hover:border-red-400 hover:text-red-700`}
                     >
-                      <Trash2 className="h-3 w-3" aria-hidden />
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       {t('deleteCta')}
                     </button>
                   </div>
@@ -913,6 +968,7 @@ export function X402DiscoveryView({
           </summary>
 
           <div className="space-y-4 border-t border-slate-100 p-4">
+            <p className="text-sm leading-relaxed text-slate-600">{t('tryIntro')}</p>
             <ol className="space-y-3">
               <li className="flex gap-3">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
@@ -1008,7 +1064,19 @@ export function X402DiscoveryView({
                 {MCP_CONFIG_SNIPPET}
               </pre>
             </div>
-            <p className="text-xs leading-relaxed text-slate-500">{t('mcpNote')}</p>
+            <ul className="list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-slate-600">
+              <li>{t('mcpGuardPerCall')}</li>
+              <li>{t('mcpGuardCumulative')}</li>
+              <li>{t('mcpGuardDestinations')}</li>
+            </ul>
+            <a
+              href="https://www.npmjs.com/package/openpay-x402-mcp"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex text-xs font-medium text-brand hover:text-brand-dark hover:underline"
+            >
+              {t('mcpMore')}
+            </a>
           </div>
         </details>
       </section>

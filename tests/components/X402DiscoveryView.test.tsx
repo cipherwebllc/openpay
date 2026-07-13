@@ -252,14 +252,41 @@ describe('X402DiscoveryView', () => {
     );
     expect(screen.getByPlaceholderText('価格 (JPYC・整数)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '登録する' })).toBeInTheDocument();
+    expect(screen.getByText(`登録済み 0 / ${MAX_RESOURCES_PER_MERCHANT} 件`)).toBeInTheDocument();
   });
 
   it('owner: 自分の登録一覧 (あなたの登録) を編集/削除ボタン付きで表示', async () => {
     renderAsOwner();
     expect(await screen.findByText('あなたの登録')).toBeInTheDocument();
+    expect(
+      screen.getByText(`登録済み 1 / ${MAX_RESOURCES_PER_MERCHANT} 件`),
+    ).toBeInTheDocument();
     expect(screen.getByText('自分の有料 API')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'スニペット' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '編集' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '削除' })).toBeInTheDocument();
+  });
+
+  it('登録上限: N/100 を amber 表示し、警告とともに新規登録を事前 disable', async () => {
+    const ownedAtLimit = Array.from({ length: MAX_RESOURCES_PER_MERCHANT }, (_, index) => ({
+      ...OWNED,
+      id: `res-${index}`,
+      url: `${OWNED.url}/${index}`,
+      description: `${OWNED.description} ${index}`,
+    }));
+    renderAsOwner(ownedAtLimit);
+
+    const counter = await screen.findByText(
+      `登録済み ${MAX_RESOURCES_PER_MERCHANT} / ${MAX_RESOURCES_PER_MERCHANT} 件`,
+    );
+    expect(counter).toHaveClass('text-amber-700');
+    expect(
+      screen.getByText(
+        '登録上限に達しています。新しく登録するには、不要な登録を削除してください。',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('button', { name: '登録する' })).toBeDisabled();
   });
 
   it('編集: 編集ボタンでフォームに値が入り PATCH /resources/:id を呼ぶ', async () => {
@@ -368,6 +395,20 @@ describe('X402DiscoveryView', () => {
     // 成功表示 + 402 スニペット。
     expect(await screen.findByText('登録しました。')).toBeInTheDocument();
     expect(screen.getByText('あなたのサーバで 402 を返す例:')).toBeInTheDocument();
+  });
+
+  it('正当性表明: 法的文言を details に保持し「詳しく」で展開できる', async () => {
+    renderAsOwner([]);
+    const legalText =
+      '私は、このリソースを提供・課金する正当な権利を有し、支払いで制限 (HTTP 402 等でゲート) していることを表明します。';
+
+    expect(await screen.findByText(legalText)).toBeInTheDocument();
+    const detailsLabel = screen.getByText('詳しく');
+    const details = detailsLabel.closest('details');
+    expect(details).not.toHaveAttribute('open');
+    fireEvent.click(detailsLabel);
+    expect(details).toHaveAttribute('open');
+    expect(within(details!).getByText(legalText)).toBeInTheDocument();
   });
 
   it.each([
@@ -481,6 +522,11 @@ describe('X402DiscoveryView', () => {
     });
     renderView();
     fireEvent.click(await screen.findByText('2円で試す (5分)'));
+    expect(
+      screen.getByText(
+        'curl と Node.js があれば、5 分で 402→支払い→解錠の一往復を体験できます。',
+      ),
+    ).toBeInTheDocument();
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
     const copied = writeText.mock.calls.map((call) => String(call[0]));
@@ -494,13 +540,27 @@ describe('X402DiscoveryView', () => {
       configurable: true,
     });
     renderView();
-    fireEvent.click(await screen.findByText('エージェントから払う (MCP)'));
+    const title = await screen.findByText('エージェントから払う (MCP)');
+    fireEvent.click(title);
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
     const copied = writeText.mock.calls.map((call) => String(call[0]));
     expect(copied.some((text) => text.includes('openpay-x402-mcp'))).toBe(true);
-    // 既定ガードの注記が表示される。
-    expect(screen.getByText(/1 回 10 JPYC・累計 100 JPYC/)).toBeInTheDocument();
+    // 既定ガードは 3 点の箇条書き。金額・支払先の安全フェンスを固定する。
+    const details = title.closest('details')!;
+    const guardBullets = within(details)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(guardBullets).toEqual([
+      '1 回の上限 10 JPYC',
+      '累計上限 100 JPYC',
+      '支払い先はカタログ掲載 URL と open-pay.jp のみ',
+    ]);
+    expect(
+      within(details).getByRole('link', {
+        name: '詳しくは npm の openpay-x402-mcp',
+      }),
+    ).toHaveAttribute('href', 'https://www.npmjs.com/package/openpay-x402-mcp');
   });
 
   it('カタログ: 端数のある手数料を小数で表示 (整数除算で切り捨てない)', async () => {
