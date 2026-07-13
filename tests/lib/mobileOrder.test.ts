@@ -88,6 +88,13 @@ describe('mobileOrder: storefrontPartsEquivalent', () => {
     expect(storefrontPartsEquivalent(STOREFRONT_PARTS, publishedRecord)).toBe(true);
   });
 
+  it('agentListing は JSON round-trip で保持され、欠落との差分は not equal', () => {
+    const optedIn = { ...STOREFRONT_PARTS, agentListing: true as const };
+    const publishedRecord = JSON.parse(JSON.stringify(optedIn)) as unknown;
+    expect(storefrontPartsEquivalent(optedIn, publishedRecord)).toBe(true);
+    expect(storefrontPartsEquivalent(optedIn, STOREFRONT_PARTS)).toBe(false);
+  });
+
   it('openFrom の差分は not equal (validateStorefrontParts 経由)', () => {
     expect(
       storefrontPartsEquivalent(
@@ -330,6 +337,12 @@ describe('mobileOrder: validateOrderConfig は decode と検証を共有 (単一
     const c = baseConfig();
     expect(decodeOrderConfig(encodeOrderConfig(c))).toEqual(validateOrderConfig(c));
   });
+
+  it('StorefrontParts の agentListing 同意メタを顧客向け Config へ伝播しない', () => {
+    const config = validateOrderConfig({ ...baseConfig(), agentListing: true });
+    expect(config).not.toBeNull();
+    expect('agentListing' in (config ?? {})).toBe(false);
+  });
 });
 
 describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情報源)', () => {
@@ -421,6 +434,14 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     const r = validateStorefrontParts({ ...good, acceptingOrders: true });
     expect(r).not.toBeNull();
     expect('acceptingOrders' in (r ?? {})).toBe(false);
+  });
+  it('agentListing は true のみ保持し、false/欠落/他型は未掲載として除外', () => {
+    expect(validateStorefrontParts({ ...good, agentListing: true })?.agentListing).toBe(true);
+    for (const value of [false, undefined, 'true', 1]) {
+      const result = validateStorefrontParts({ ...good, agentListing: value });
+      expect(result).not.toBeNull();
+      expect('agentListing' in (result ?? {})).toBe(false);
+    }
   });
   it('空 / 長すぎる店舗情報は黙って除外 (注文は壊さない)', () => {
     const r = validateStorefrontParts({ ...good, address: '', phone: 'x'.repeat(200) });

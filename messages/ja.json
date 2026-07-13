@@ -2000,6 +2000,8 @@
     "publishUpdateButton": "公開を更新",
     "publishReceiverShared": "受取先は @handle 共通です（プロフィールのチップ等と同じアドレス）。公開の更新でビルダーの受取先に同期します。",
     "publishReceiverWillChange": "受取先を {from} → {to} に更新して公開します（@handle 共通の受取先が変わります）。",
+    "agentListingLabel": "AI エージェント検索に掲載する（Shops API）",
+    "agentListingConsent": "掲載すると、店名・紹介文・住所・営業時間・メニュー概要・受付状況が、OpenPay の有料 API を通じて第三者の AI エージェントやアプリに提供されます。電話番号は提供されません。解除はこのチェックを外して公開を更新（反映まで最大 60 秒）。住所が自宅を兼ねる場合は掲載前にご確認ください。",
     "editLoadButton": "編集（公開中の内容を読み込む）",
     "editLoadConfirm": "この端末の店舗設定と商品カタログ（レジと共有）を、公開中の @handle の内容で置き換えます。よろしいですか？",
     "editLoadConfirmYes": "読み込む",

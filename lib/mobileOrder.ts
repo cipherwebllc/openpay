@@ -102,6 +102,9 @@ export type StorefrontParts = {
   openFrom?: string; // 受付開始 "HH:mm" (Phase 4・Asia/Tokyo・開始前は受付停止)
   lastOrder?: string; // ラストオーダー "HH:mm" (Phase 4・Asia/Tokyo・超過で受付停止)
   minLeadMinutes?: number; // 最短受け渡し分 (Phase 4・preorder のスロット起点)
+  // Shops API の検索掲載に店主が明示同意したときだけ true。false/欠落は未掲載。
+  // 顧客向け MobileOrderConfig には写像しない (公開注文ページに同意メタは不要)。
+  agentListing?: true;
 };
 
 export const SHOP_NAME_MAX = 48;
@@ -371,6 +374,8 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (parseHHMM(o.lastOrder) !== null) parts.lastOrder = o.lastOrder as string;
   const minLead = sanitizeMinLead(o.minLeadMinutes);
   if (minLead !== null) parts.minLeadMinutes = minLead;
+  // 検索掲載は明示 opt-in の true だけを保持する。false/欠落/他型はすべて未掲載。
+  if (o.agentListing === true) parts.agentListing = true;
   return parts;
 }
 

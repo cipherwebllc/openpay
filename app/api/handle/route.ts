@@ -149,6 +149,7 @@ export async function POST(req: Request) {
           handle: validated.handle,
           status: 'created',
           updatedAt: result.record.updatedAt,
+          ...(result.listing ? { listing: result.listing } : {}),
         },
         { status: 201 },
       );
@@ -158,6 +159,7 @@ export async function POST(req: Request) {
         handle: validated.handle,
         status: 'updated',
         updatedAt: result.record.updatedAt,
+        ...(result.listing ? { listing: result.listing } : {}),
       });
     case 'conflict':
       return NextResponse.json({ ok: false, error: 'conflict' }, { status: 409 });
