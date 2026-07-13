@@ -5,6 +5,8 @@ import {
 } from '@/lib/directory/paidResources';
 import { env } from '@/lib/env';
 import { LEGAL_ENTITY } from '@/lib/legal';
+import { shopsApiEnabled } from '@/lib/shops/flags';
+import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 
 export const OPENPAY_CANONICAL_ORIGIN = new URL(LEGAL_ENTITY.siteUrl).origin;
@@ -22,6 +24,7 @@ export type FirstPartyResource = {
     | '/api/paid/stores'
     | '/api/paid/japan-web3-directory'
     | '/api/paid/japan-web3-directory/search'
+    | '/api/paid/jpyc-shops/search'
     | `/api/paid/japan-web3-directory/${string}`;
   priceJpyc: string;
   category: 'api' | 'data';
@@ -83,6 +86,7 @@ export const FIRST_PARTY_RESOURCES = [
   ...(env.enableWeb3Directory
     ? [DIRECTORY_LIST_RESOURCE, DIRECTORY_SEARCH_RESOURCE]
     : []),
+  ...(shopsApiEnabled() ? [JPYC_SHOPS_SEARCH_RESOURCE] : []),
 ] as const satisfies readonly FirstPartyResource[];
 
 export function firstPartyResourceUrl(resource: FirstPartyResource): string {

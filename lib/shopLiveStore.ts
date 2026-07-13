@@ -40,6 +40,58 @@ export async function readShopLive(handle: string): Promise<ShopLiveState> {
   return parseShopLive(res.value);
 }
 
+/**
+ * strict read 用の raw validator。未保存は「停止指定なし」の正常状態だが、壊れた保存値は
+ * 判定不能として null にする。公開ページ向け parseShopLive の fail-open 契約は変更しない。
+ */
+export function parseShopLiveStrictValue(
+  raw: string | null,
+): ShopLiveState | null {
+  if (raw === null) return { ...EMPTY_SHOP_LIVE };
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const rawSoldOut = record.soldOut;
+  if (
+    !Array.isArray(rawSoldOut) ||
+    rawSoldOut.some((item) => typeof item !== 'string') ||
+    typeof record.paused !== 'boolean' ||
+    typeof record.updatedAt !== 'number' ||
+    !Number.isSafeInteger(record.updatedAt) ||
+    record.updatedAt < 0
+  ) {
+    return null;
+  }
+  const parsed = parseShopLive(raw);
+  // sanitize で値が変わる保存データは、全品売切判定に使うには不確実なので fail-open しない。
+  if (
+    parsed.soldOut.length !== rawSoldOut.length ||
+    parsed.soldOut.some((item, index) => item !== rawSoldOut[index])
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+/** Shops API 向け strict read。KV 未設定/障害/保存値破損は判定不能の null。 */
+export async function readShopLiveStrict(
+  handle: string,
+): Promise<ShopLiveState | null> {
+  if (!isKvConfigured()) return null;
+  const res = await kvGet(shopLiveKey(handle));
+  if (!res.ok) {
+    // 検索 API で「受付中」と誤表示する波及を断つため、既存 readShopLive と異なり fail-open しない。
+    logger.warn('shop.live.strict_read_failed', { reason: res.reason });
+    return null;
+  }
+  return parseShopLiveStrictValue(res.value);
+}
+
 export type ApplyShopLiveResult =
   | { ok: true; state: ShopLiveState }
   | { ok: false; reason: 'kv_error' | 'conflict' };

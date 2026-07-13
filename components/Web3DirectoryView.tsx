@@ -38,6 +38,7 @@ export type DirectoryUiCopy = {
   listEndpoint: string;
   searchEndpoint: string;
   detailEndpoint: string;
+  shopsSearchEndpoint: string;
   feeNote: string;
   statsTitle: string;
   entriesLabel: string;
@@ -88,6 +89,7 @@ export function Web3DirectoryView({
   categoryCounts,
   stats,
   copy,
+  showShopsApi = false,
 }: {
   locale: Locale;
   entries: readonly DirectoryEntry[];
@@ -98,6 +100,7 @@ export function Web3DirectoryView({
     lastUpdated: string | null;
   };
   copy: DirectoryUiCopy;
+  showShopsApi?: boolean;
 }) {
   const grouped = new Map<DirectoryCategory, DirectoryEntry[]>();
   for (const entry of entries) {
@@ -304,6 +307,12 @@ export function Web3DirectoryView({
                     <PriceRow label={copy.listEndpoint} price="2 JPYC" />
                     <PriceRow label={copy.searchEndpoint} price="2 JPYC" />
                     <PriceRow label={copy.detailEndpoint} price="1 JPYC" />
+                    {showShopsApi ? (
+                      <PriceRow
+                        label={copy.shopsSearchEndpoint}
+                        price="2 JPYC"
+                      />
+                    ) : null}
                   </tbody>
                 </table>
               </div>

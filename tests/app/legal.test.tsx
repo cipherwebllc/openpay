@@ -605,7 +605,7 @@ describe('Legal pages', () => {
       }
     });
 
-    it('effectiveDate: 負担者固定化 (決済=店舗負担 / チップ=顧客ガス相当) の 3 文書 (Terms/Disclaimer/特商法) は 2026-06-13、Privacy は据置 2026-06-08', () => {
+    it('effectiveDate: Shops API 改定で Terms/Privacy は 2026-07-14、Disclaimer/特商法は据置', () => {
       // 2026-06-08: 外部レビュー精査に基づく開示拡充を 4 文書に反映。
       // 2026-06-09: OpenPay 利用料 (月額・ガスレス受領額1%・後払いの a1 モデル) の有料化開始を事前開示。
       // 2026-06-12: 無料化ピボットの絶対主張 (gas 全額負担・無徴収・100%着金) と a1 月次後払い
@@ -615,10 +615,10 @@ describe('Legal pages', () => {
       //   常に負担しお客様は表示額のみ (per-QR トグル撤去)、チップ (/tip・@handle) はガス相当額
       //   (約 2 JPYC・1% 非適用) をチッパーが負担。料金性質に直接関わる Terms/Disclaimer/特商法 を
       //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-06-13');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-07-14');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-13');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-06-08');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-07-14');
     });
   });
 

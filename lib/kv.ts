@@ -142,6 +142,18 @@ export function kvGet(key: string): Promise<KvResult<string | null>> {
   return call<string | null>(['GET', key]);
 }
 
+// 複数 key を 1 round-trip で読む。shops の materialized summary / live snapshot のように
+// 同一時点の公開データをまとめて確定し、N+1 の REST 呼出を避ける用途。入力順と返却順は Redis
+// MGET の契約で一致し、未存在 key は対応位置の null になる。
+export function kvMget(
+  keys: readonly string[],
+): Promise<KvResult<(string | null)[]>> {
+  if (keys.length === 0) {
+    return Promise.resolve({ ok: true, value: [] });
+  }
+  return call<(string | null)[]>(['MGET', ...keys]);
+}
+
 // SET key value [EX ttl] [NX]。nx 時、既存キーなら null (set されず)、新規なら 'OK'。
 // idempotency (SET NX) や seed 値の保存に使う。
 export function kvSet(

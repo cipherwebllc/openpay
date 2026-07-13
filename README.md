@@ -208,7 +208,7 @@ Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
 | `NEXT_PUBLIC_RECOVER_FEE_BPS` | Per-transaction OpenPay usage-fee rate in basis points, **shared** by `/pay`, `/checkout`, and the register's relay path. **`100` (1%) — live in production** as of the July 2026 usage period (code default `0`); the floor (`max(2 JPYC, …)`) applies on the relay path. Changing it changes a *disclosed* number — the legal-text fence (`DISCLOSED_RECOVER_FEE`) and the relay-route startup divergence guard flag any drift. | optional (fee) |
 | `NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE` | Adds **Avalanche C-Chain** (Fuji on testnet) as a JPYC receiving chain — **live on mainnet** (production sets `1`). Code default **off** keeps JPYC on Polygon + Kaia only. Avalanche is **recover-required**: gasless needs a forwarder (`NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE` + relayer AVAX) or it falls back to standard payment (so the relayer never spends AVAX in free mode). | optional |
 | `NEXT_PUBLIC_ENABLE_MOBILE_ORDER` | Mobile-order storefront feature (`@handle` shop page / `/order`) — **live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_SHOPS_API` | Shows the explicit shop-owner opt-in for future Shops API search listing and maintains its search index/summary. Default **off**; the search API itself is not part of PR-1. | optional |
+| `NEXT_PUBLIC_ENABLE_SHOPS_API` | JPYC Shops API and the explicit shop-owner opt-in that maintains its search index/summary. Default **off**; API routes additionally require the x402 facilitator, order relay, and server-only `ENABLE_AGENT_ORDER` flags so every returned `menuUrl` remains reachable. | optional |
 | `NEXT_PUBLIC_ENABLE_ORDER_RELAY` | Order relay — delivers the paid order (items + table + settled amount) to the merchant via KV + on-chain verification. Needed for mobile ordering to be usable; requires KV configured. **Live on mainnet** (production sets `1`); code default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_ORDER_MEMO` | Optional customer order memo (allergies / requests), passed through same-tab `sessionStorage` to the same-origin order notify only; it is never added to the checkout URL or payment history. Structurally gated by `…ENABLE_ORDER_RELAY`. **Live on mainnet** (production sets `1`); code default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_ORDER_CALL` | Dine-in staff call: shown only on an `@handle` page with a table number and this device's matching paid receipt from the last 2 hours. The server binds `orderId` + `txHash` + table to the merchant order list and atomically enforces per-order, per-handle, and table cooldown limits. Merchant boards poll it separately; it is deliberately excluded from Web Push. Structurally gated by `…ENABLE_ORDER_RELAY`; production light-up should also set `IP_HASH_SECRET`. **Live on mainnet** (production sets `1`); code default **off**. | optional |
@@ -328,6 +328,29 @@ The existing `openpay-x402-mcp` flow needs no package-specific directory tool: c
 Directory records live in [`lib/directory/data.ts`](./lib/directory/data.ts). Submit a code PR with the factual fields, an allowed primary source, attribution, and verification date. New records move through `draft` → `review` → `published`; use `rejected` when review fails and `archived` when a previously published service should no longer appear. API and UI publication is always limited to `published` records.
 
 Source names, trademarks, linked content, and third-party database rights remain with their respective owners. OpenPay's original code is MIT-licensed, but that does not grant a blanket license to reuse third-party source content; each API response includes its own attribution and license notice. The directory is informational, may be incomplete or stale, and is not an endorsement or financial, legal, tax, or investment advice. Verify availability, supported networks, token contracts, fees, and regulatory eligibility with the cited official source before acting.
+
+## JPYC Shops API
+
+The Shops API lets AI agents discover OpenPay mobile-order shops and continue into the existing free menu and ordering flow. Listings are strictly opt-in: a shop appears only after its owner selects the AI-agent listing option and republishes. Responses use only information the shop has already made public, exclude phone numbers, and include per-shop attribution plus a bilingual license notice. Shops can opt out by clearing the option and republishing; the index and materialized search summary are deleted, with shared-cache removal taking up to 60 seconds.
+
+The feature is default-off and requires all four guards: `NEXT_PUBLIC_ENABLE_SHOPS_API`, `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`, `NEXT_PUBLIC_ENABLE_ORDER_RELAY`, and server-only `ENABLE_AGENT_ORDER`.
+
+| Access | Endpoint | Result | Price |
+|---|---|---|---:|
+| Free | `GET /api/shops` | Listing count plus the fixed first three samples (`name` / `mode` only) | Free |
+| x402 | `GET /api/paid/jpyc-shops/search` | Filtered shop search with live ordering availability | 2 JPYC |
+| Free | `GET /api/agent-order/menu?h=<handle>` | Full public menu for a returned shop | Free |
+| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes | Free |
+
+The paid search accepts `q`, `mode`, `dineIn`, `acceptingNow`, `limit` (maximum 20), and `offset`. `acceptingNow` is intentionally three-valued: `true` means every required check definitely passes; `false` means a definite stop condition applies (static stop, pause, time boundary, no pickup slot, unavailable forwarder, or all menu items sold out); `null` means a live read failed or legacy summary data is insufficient to decide. Filtering with `acceptingNow=true` returns only `true` and never includes `null`.
+
+Inspect the 2 JPYC payment challenge without paying:
+
+```bash
+curl -i 'https://open-pay.jp/api/paid/jpyc-shops/search?q=cafe&acceptingNow=true&limit=10'
+```
+
+The managed facilitator adds its disclosed 1% fee (minimum 1 JPYC) on the buyer's side. After payment, use each result's `pageUrl` to recheck current shop details and `menuUrl` to retrieve the free public menu. Shops API data is licensed for search and ordering assistance; resale or bulk redistribution of the dataset itself is restricted.
 
 ## Pimlico balance alerts
 

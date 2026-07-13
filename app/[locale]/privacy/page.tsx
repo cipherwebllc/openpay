@@ -28,6 +28,10 @@ export default function PrivacyPage() {
       <LegalSection title={t('section1.title')} body={t('section1.body')} />
       <LegalSection title={t('section2.title')} body={t('section2.body')} />
       <LegalSection title={t('section3.title')} body={t('section3.body')} />
+      <LegalSection
+        title={t('sectionShops.title')}
+        body={t('sectionShops.body')}
+      />
       <LegalSection title={t('section4.title')} body={t('section4.body')} />
       {/* Web Push 通知 (任意): 保管期間 (4) と安全管理措置 (6) の間に配置。表示番号は「5.」。 */}
       <LegalSection

@@ -15,6 +15,7 @@ import {
   publishedDirectoryEntries,
 } from '@/lib/directory/query';
 import { env } from '@/lib/env';
+import { shopsApiEnabled } from '@/lib/shops/flags';
 
 export async function generateMetadata({
   params,
@@ -56,6 +57,7 @@ export default async function DirectoryPage({
     listEndpoint: t('listEndpoint'),
     searchEndpoint: t('searchEndpoint'),
     detailEndpoint: t('detailEndpoint'),
+    shopsSearchEndpoint: t('shopsSearchEndpoint'),
     feeNote: t('feeNote'),
     statsTitle: t('statsTitle'),
     entriesLabel: t('entriesLabel'),
@@ -88,8 +90,8 @@ export default async function DirectoryPage({
         categoryCounts={directoryCategoryCounts(DIRECTORY_ENTRIES)}
         stats={directoryStats(DIRECTORY_ENTRIES)}
         copy={copy}
+        showShopsApi={shopsApiEnabled()}
       />
     </AppShell>
   );
 }
-
