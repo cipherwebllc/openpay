@@ -2279,7 +2279,8 @@
     "mcpGuardPerCall": "Per-call limit: 10 JPYC",
     "mcpGuardCumulative": "Cumulative limit: 100 JPYC",
     "mcpGuardDestinations": "Payment destinations are limited to catalog-listed URLs and open-pay.jp",
-    "mcpMore": "Learn more on npm: openpay-x402-mcp"
+    "mcpMore": "Learn more on npm: openpay-x402-mcp",
+    "mcpSdkNote": "Building in Node.js? openpay-x402-sdk (npm) provides discovery, quotes, and guarded JPYC payments without MCP."
   },
   "OrderStatus": {
     "title": "Order status",

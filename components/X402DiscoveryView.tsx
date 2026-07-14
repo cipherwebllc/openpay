@@ -453,6 +453,9 @@ export function X402DiscoveryView({
             : error
               ? t('errorGeneric', { reason: error })
               : null;
+  const [mcpSdkNotePrefix, mcpSdkPackageName, mcpSdkNoteSuffix] = t(
+    'mcpSdkNote',
+  ).split(/(openpay-x402-sdk)/);
 
   // コピーボタン (URL / スニペット)。key 単位でコピー済みフィードバック。component ではなく関数で
   // 返すことで no-unstable-nested-components を避ける。
@@ -541,8 +544,9 @@ export function X402DiscoveryView({
     );
   };
 
-  return (
-    <div className="space-y-6">
+  // セクションの中身を変えず、閲覧者と売り手で並びだけを切り替える。
+  const registrationSection = (
+    <>
       {/* 出品: 加盟店登録 / 編集 */}
       <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
         <div className="flex items-start gap-3">
@@ -793,9 +797,13 @@ export function X402DiscoveryView({
           </div>
         )}
       </section>
+    </>
+  );
 
-      {/* あなたの登録 (owner のみ・編集/削除) */}
-      {isSignedIn && owned.length > 0 && (
+  const ownedResourcesSection =
+    isSignedIn && owned.length > 0 ? (
+      <>
+        {/* あなたの登録 (owner のみ・編集/削除) */}
         <section>
           <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
           <p className="mt-1 text-sm text-slate-500">{t('yourResourcesSubtitle')}</p>
@@ -929,10 +937,11 @@ export function X402DiscoveryView({
             ))}
           </ul>
         </section>
-      )}
+      </>
+    ) : null;
 
-      {featured}
-
+  const catalogSection = (
+    <>
       {/* 公開カタログ */}
       <section>
         <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
@@ -1104,6 +1113,27 @@ export function X402DiscoveryView({
           </ul>
         )}
       </section>
+    </>
+  );
+
+  const sellerMode = isConnected || isSignedIn;
+
+  return (
+    <div className="space-y-6">
+      {sellerMode ? (
+        <>
+          {registrationSection}
+          {ownedResourcesSection}
+          {featured}
+          {catalogSection}
+        </>
+      ) : (
+        <>
+          {featured}
+          {catalogSection}
+          {registrationSection}
+        </>
+      )}
 
       {/* 1 JPYC の first-party demo。長い buyer script は raw を参照し、ページには最小コマンドだけ載せる。 */}
       <section>
@@ -1236,6 +1266,18 @@ export function X402DiscoveryView({
             >
               {t('mcpMore')}
             </a>
+            <p className="text-xs leading-relaxed text-slate-600">
+              {mcpSdkNotePrefix}
+              <a
+                href="https://www.npmjs.com/package/openpay-x402-sdk"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-brand hover:text-brand-dark hover:underline"
+              >
+                {mcpSdkPackageName}
+              </a>
+              {mcpSdkNoteSuffix}
+            </p>
           </div>
         </details>
       </section>
