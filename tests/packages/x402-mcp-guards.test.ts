@@ -54,7 +54,7 @@ const RAW_SIGNATURE = `0x${'a'.repeat(130)}`;
 
 async function loadGuards(): Promise<Guards> {
   return (await import(
-    pathToFileURL(resolve(process.cwd(), 'packages/x402-mcp/src/guards.mjs')).href
+    pathToFileURL(resolve(process.cwd(), 'packages/x402-sdk/src/guards.mjs')).href
   )) as Guards;
 }
 

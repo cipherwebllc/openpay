@@ -90,7 +90,7 @@ const TYPED_DATA = {
 
 async function loadSigner(): Promise<SignerModule> {
   return (await import(
-    pathToFileURL(resolve(process.cwd(), 'packages/x402-mcp/src/signer.mjs')).href
+    pathToFileURL(resolve(process.cwd(), 'packages/x402-sdk/src/signer.mjs')).href
   )) as SignerModule;
 }
 
@@ -102,7 +102,7 @@ async function loadTools(): Promise<ToolsModule> {
 
 async function loadGuards(): Promise<GuardsModule> {
   return (await import(
-    pathToFileURL(resolve(process.cwd(), 'packages/x402-mcp/src/guards.mjs')).href
+    pathToFileURL(resolve(process.cwd(), 'packages/x402-sdk/src/guards.mjs')).href
   )) as GuardsModule;
 }
 

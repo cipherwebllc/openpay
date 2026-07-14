@@ -8,6 +8,8 @@ One package with two explicit MCP profiles:
 - `openpay-x402-mcp`: the backward-compatible full profile for x402 discovery,
   quotes, guarded autonomous payment, and mobile ordering.
 
+Internally, payment execution and catalog resolution use `openpay-x402-sdk`.
+
 ## Order profile (keyless, human pays)
 
 ### Install / run

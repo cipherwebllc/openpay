@@ -20,7 +20,7 @@ const transport = new StdioClientTransport({
 });
 
 const client = new Client(
-  { name: `openpay-${profile}-mcp-smoke`, version: '0.9.0' },
+  { name: `openpay-${profile}-mcp-smoke`, version: '0.10.0' },
   { capabilities: {} },
 );
 

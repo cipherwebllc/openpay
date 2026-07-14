@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0
+
+- Delegate payment execution, catalog resolution, guards, payment wire handling,
+  and signing to `openpay-x402-sdk` 0.1.x.
+- Preserve both profiles' tool names, descriptions, schemas, result shapes,
+  guard reasons, signer timing, and serialized payment behavior unchanged.
+
 ## 0.9.0
 
 - Add keyless `find_shops` to both profiles. It calls the free
