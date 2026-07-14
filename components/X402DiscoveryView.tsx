@@ -29,6 +29,7 @@ import {
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
 import { Field } from '@/components/Field';
+import { shortAddress } from '@/lib/format';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
 function categoryIcon(category: string) {
@@ -582,9 +583,12 @@ export function X402DiscoveryView({
         ) : (
           <div className="mt-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-500">
+              <p
+                title={address}
+                className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-500"
+              >
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
-                {t('signedInAs', { address: address ?? '' })}
+                {t('signedInAs', { address: shortAddress(address ?? '') })}
               </p>
               <p
                 className={`text-xs font-semibold ${
@@ -618,31 +622,6 @@ export function X402DiscoveryView({
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
             </Field>
-            <Field label={t('formDocsUrlLabel')}>
-              <input
-                type="url"
-                className={inputCls}
-                placeholder={t('formDocsUrl')}
-                maxLength={RESOURCE_DOCS_URL_MAX}
-                value={form.docsUrl}
-                onChange={(e) => setForm((f) => ({ ...f, docsUrl: e.target.value }))}
-              />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-                {t('formDocsUrlHint')}
-              </p>
-            </Field>
-            <Field label={t('formLicenseLabel')}>
-              <input
-                className={inputCls}
-                placeholder={t('formLicense')}
-                maxLength={RESOURCE_LICENSE_MAX}
-                value={form.license}
-                onChange={(e) => setForm((f) => ({ ...f, license: e.target.value }))}
-              />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-                {t('formLicenseHint')}
-              </p>
-            </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('formPriceLabel')}>
                 <input
@@ -671,6 +650,34 @@ export function X402DiscoveryView({
               />
               <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
                 {t('formPayToHint')}
+              </p>
+            </Field>
+            <h4 className="pt-1 text-sm font-semibold text-slate-700">
+              {t('formOptionalGroupTitle')}
+            </h4>
+            <Field label={t('formDocsUrlLabel')}>
+              <input
+                type="url"
+                className={inputCls}
+                placeholder={t('formDocsUrl')}
+                maxLength={RESOURCE_DOCS_URL_MAX}
+                value={form.docsUrl}
+                onChange={(e) => setForm((f) => ({ ...f, docsUrl: e.target.value }))}
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                {t('formDocsUrlHint')}
+              </p>
+            </Field>
+            <Field label={t('formLicenseLabel')}>
+              <input
+                className={inputCls}
+                placeholder={t('formLicense')}
+                maxLength={RESOURCE_LICENSE_MAX}
+                value={form.license}
+                onChange={(e) => setForm((f) => ({ ...f, license: e.target.value }))}
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                {t('formLicenseHint')}
               </p>
             </Field>
 
@@ -809,6 +816,25 @@ export function X402DiscoveryView({
                   url: r.url,
                   copyKey: `owned-${r.id}`,
                 })}
+                {(Boolean(r.license) || Boolean(r.docsUrl && isHttpsUrl(r.docsUrl))) && (
+                  <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
+                    {r.docsUrl && isHttpsUrl(r.docsUrl) && (
+                      <a
+                        href={r.docsUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="shrink-0 font-medium text-brand hover:text-brand-dark hover:underline"
+                      >
+                        {t('docsLink')}
+                      </a>
+                    )}
+                    {r.license && (
+                      <span className="min-w-0">
+                        {t('licenseMeta', { license: r.license })}
+                      </span>
+                    )}
+                  </div>
+                )}
                 {r.hidden === true && r.paywallSnippet ? (
                   <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
                     <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900">
