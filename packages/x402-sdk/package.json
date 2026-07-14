@@ -1,0 +1,26 @@
+{
+  "name": "openpay-x402-sdk",
+  "version": "0.1.0",
+  "description": "Guarded Node.js buyer SDK for OpenPay x402 JPYC resources",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "index.d.ts",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "viem": "^2.45.0"
+  }
+}
