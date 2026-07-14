@@ -2279,7 +2279,8 @@
     "mcpGuardPerCall": "1 回の上限 10 JPYC",
     "mcpGuardCumulative": "累計上限 100 JPYC",
     "mcpGuardDestinations": "支払い先はカタログ掲載 URL と open-pay.jp のみ",
-    "mcpMore": "詳しくは npm の openpay-x402-mcp"
+    "mcpMore": "詳しくは npm の openpay-x402-mcp",
+    "mcpSdkNote": "Node.js から直接使う場合は openpay-x402-sdk (npm) — MCP なしで発見→見積り→ガード付き JPYC 支払いができます。"
   },
   "OrderStatus": {
     "title": "注文状況",

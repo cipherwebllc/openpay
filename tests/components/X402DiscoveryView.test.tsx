@@ -129,6 +129,32 @@ describe('X402DiscoveryView', () => {
     expect(global.fetch).toHaveBeenCalledWith('/api/discovery', { cache: 'no-store' });
   });
 
+  it('未接続: 公開カタログを登録フォームより前に表示', async () => {
+    renderView();
+    const catalogHeading = await screen.findByRole('heading', { name: '公開カタログ' });
+    const registrationHeading = screen.getByRole('heading', {
+      name: 'リソースを登録する',
+    });
+    expect(
+      catalogHeading.compareDocumentPosition(registrationHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('接続済み: 登録フォームを公開カタログより前に表示', async () => {
+    state.connected = true;
+    state.address = OWNED.payTo;
+    renderView();
+    const catalogHeading = await screen.findByRole('heading', { name: '公開カタログ' });
+    const registrationHeading = screen.getByRole('heading', {
+      name: 'リソースを登録する',
+    });
+    expect(
+      registrationHeading.compareDocumentPosition(catalogHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('カタログ検索: 名前・URL の部分一致を大小文字を無視して絞り込む', async () => {
     const weather = {
       ...ITEM,
@@ -410,6 +436,7 @@ describe('X402DiscoveryView', () => {
     };
     const fetchFn = renderAsOwner([ownedWithComparison]);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
     // フォームが編集モードになり、対象の値が入る。
     await waitFor(() => expect(screen.getByDisplayValue(OWNED.url)).toBeInTheDocument());
     expect(screen.getByText('掲載を編集')).toBeInTheDocument();
@@ -690,6 +717,14 @@ describe('X402DiscoveryView', () => {
         name: '詳しくは npm の openpay-x402-mcp',
       }),
     ).toHaveAttribute('href', 'https://www.npmjs.com/package/openpay-x402-mcp');
+    const sdkLink = within(details).getByRole('link', { name: 'openpay-x402-sdk' });
+    expect(sdkLink).toHaveAttribute(
+      'href',
+      'https://www.npmjs.com/package/openpay-x402-sdk',
+    );
+    expect(sdkLink.parentElement).toHaveTextContent(
+      'Node.js から直接使う場合は openpay-x402-sdk (npm) — MCP なしで発見→見積り→ガード付き JPYC 支払いができます。',
+    );
   });
 
   it('カタログ: 端数のある手数料を小数で表示 (整数除算で切り捨てない)', async () => {
