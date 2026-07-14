@@ -679,18 +679,24 @@ export function MobileOrderBuilder({
 
         </div>
 
-        {/* 右カラム: @handle 公開 (上) + ④ プレビュー (desktop は sticky) */}
-        <aside className="mt-6 min-w-0 space-y-5 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        {/* 右カラム: @handle 公開 + ④ プレビュー (desktop は sticky)。
+            並びは画面幅で切替: モバイル単一カラムは「③ メニュー → ④ プレビュー → 公開」
+            (作る→確認→公開の自然順)、desktop は公開を上 (sticky 作業場で常に見える)。
+            DOM はモバイル順 (プレビュー先) にし、lg では order で公開を上へ。 */}
+        <aside className="mt-6 flex min-w-0 flex-col gap-5 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           {/* レジ商品を @handle に公開して固定店舗 URL にする (handles ON のときだけマウント:
-              react-query を使うため OFF 環境/テストで QueryClient を要求しない)。④ プレビューの上。 */}
+              react-query を使うため OFF 環境/テストで QueryClient を要求しない)。 */}
           {env.enableHandles && (
-            <StorefrontPublishPanel
-              storefront={storefrontParts}
-              receiver={effectiveReceiver}
-              onGetHandle={onGetHandle}
-              onLoadStorefront={loadFromStorefront}
-            />
+            <div className="order-2 min-w-0 lg:order-1">
+              <StorefrontPublishPanel
+                storefront={storefrontParts}
+                receiver={effectiveReceiver}
+                onGetHandle={onGetHandle}
+                onLoadStorefront={loadFromStorefront}
+              />
+            </div>
           )}
+          <div className="order-1 min-w-0 lg:order-2">
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {/* 客のスマホでの見え方を、実際の店舗ページ (MobileOrderView) を下書きで描いて
                 WYSIWYG 表示 (カバー/ヘッダー/メニュー/テーマ/カートバーまで実物どおり)。
@@ -707,6 +713,7 @@ export function MobileOrderBuilder({
 
             <p className="mt-3 text-xs text-slate-400">{t('previewOpenHint')}</p>
           </StepCard>
+          </div>
         </aside>
       </div>
     </div>
