@@ -15,6 +15,9 @@ import {
   ChevronUp,
   Clock,
   Eye,
+  Image as ImageIcon,
+  MapPin,
+  Share2,
   Store,
   UtensilsCrossed,
   Wallet,
@@ -312,6 +315,9 @@ export function MobileOrderBuilder({
           {/* ② 店舗設定 (店名・モード・SNS) */}
           <StepCard step={2} icon={Store} title={t('stepShopTitle')}>
             <div className="space-y-4">
+              <h3 className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                <Store className="h-4 w-4 text-slate-400" aria-hidden /> {t('groupBasic')}
+              </h3>
               <Field label={t('shopNameLabel')}>
                 <input
                   type="text"
@@ -335,6 +341,9 @@ export function MobileOrderBuilder({
                 />
               </Field>
 
+              <h3 className="flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700">
+                <ImageIcon className="h-4 w-4 text-slate-400" aria-hidden /> {t('groupImages')}
+              </h3>
               {/* 店舗アイコン (https URL・@handle のアバターと同型)。左に円形プレビュー。 */}
               <Field label={t('avatarLabel')} hint={t('avatarHint')}>
                 <div className="flex items-center gap-3">
@@ -377,6 +386,9 @@ export function MobileOrderBuilder({
                 </div>
               </Field>
 
+              <h3 className="flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700">
+                <MapPin className="h-4 w-4 text-slate-400" aria-hidden /> {t('groupShopInfo')}
+              </h3>
               {/* 店舗情報 (任意)。入力された項目だけ公開ページに表示される。 */}
               <Field label={t('addressLabel')} hint={t('addressHint')}>
                 <input
@@ -411,6 +423,10 @@ export function MobileOrderBuilder({
                 />
               </Field>
 
+              <h3 className="flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700">
+                <UtensilsCrossed className="h-4 w-4 text-slate-400" aria-hidden />{' '}
+                {t('groupHandoff')}
+              </h3>
               <fieldset>
                 <legend className="text-sm font-medium text-slate-700">{t('modeLabel')}</legend>
                 <div className="mt-1 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
@@ -549,7 +565,13 @@ export function MobileOrderBuilder({
                 </fieldset>
               )}
 
-              <Field label={t('socialsLabel')} hint={t('socialsHint')}>
+              <h3
+                id="mobile-order-group-sns"
+                className="flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700"
+              >
+                <Share2 className="h-4 w-4 text-slate-400" aria-hidden /> {t('groupSns')}
+              </h3>
+              <div role="group" aria-labelledby="mobile-order-group-sns">
                 <div className="space-y-2">
                   {draft.socials.map((s, i) => (
                     <ReorderableRow
@@ -593,7 +615,8 @@ export function MobileOrderBuilder({
                     </button>
                   )}
                 </div>
-              </Field>
+                <p className="mt-1 text-xs text-slate-400">{t('socialsHint')}</p>
+              </div>
             </div>
           </StepCard>
 
