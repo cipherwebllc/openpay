@@ -77,7 +77,9 @@ export type DirectoryEntry = {
 
 export type DirectoryVerificationRecord = {
   checkedAt: string;
-  ok: boolean;
+  // true=到達 (2xx/3xx)・false=確定消滅 (404/410)・null=判定不能 (bot 保護/一時障害/DNS 等)。
+  // 判定不能を false にすると生きているソースへ「死んでいる」誤情報を配信する (2026-07-14 実害)。
+  ok: boolean | null;
   sourceUrl: string;
 };
 
