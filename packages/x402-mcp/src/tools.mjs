@@ -1,19 +1,13 @@
 import {
-  buildTypedDataFromPaymentRequirements,
-  createAuthorization,
-  decodePaymentResponse,
-  encodePaymentPayload,
-  paymentPayloadFor,
-} from './payment.mjs';
-import {
+  createCatalogResolver,
+  createPaymentExecutor,
   createPaymentSession,
-  evaluatePaymentGuards,
+  createSigner,
   formatAtomicJpyc,
   readRuntimeConfig,
-  recordSuccessfulPayment,
   safeErrorMessage,
-} from './guards.mjs';
-import { createSigner, SIGNER_MODES } from './signer.mjs';
+  SIGNER_MODES,
+} from 'openpay-x402-sdk';
 
 const TOOL_DEFINITIONS = [
   {
@@ -264,13 +258,6 @@ async function readJson(res) {
   }
 }
 
-function firstAccept(body) {
-  if (!isObject(body) || !Array.isArray(body.accepts) || body.accepts.length === 0) {
-    return null;
-  }
-  return body.accepts[0];
-}
-
 function itemText(item) {
   return [item.resource, item.description, item.category]
     .filter((value) => typeof value === 'string')
@@ -302,21 +289,6 @@ function summarizeDiscoveryItem(item) {
     feeJpyc: feeAtomic === null ? null : formatAtomicJpyc(feeAtomic),
     totalJpyc: totalAtomic === null ? null : formatAtomicJpyc(totalAtomic),
     network: item.network ?? accept?.network,
-  };
-}
-
-function quoteShape(url, status, guard) {
-  return {
-    url,
-    status,
-    ok: guard.ok,
-    reasons: guard.reasons,
-    priceJpyc: guard.summary?.priceJpyc ?? null,
-    feeJpyc: guard.summary?.feeJpyc ?? null,
-    totalJpyc: guard.summary?.totalJpyc ?? null,
-    network: guard.summary?.network ?? null,
-    asset: guard.summary?.asset ?? null,
-    description: undefined,
   };
 }
 
@@ -379,51 +351,32 @@ export function createToolRuntime({
     config.signerMode === SIGNER_MODES.steward
       ? createSigner(env, { fetchImpl })
       : null;
-
-  function signerAvailable() {
-    if (config.signerMode === SIGNER_MODES.steward) return sessionSigner !== null;
-    return config.buyerPrivateKey !== null;
+  let envKeySigner = null;
+  function getEnvKeySigner() {
+    envKeySigner ??= createSigner(env, { fetchImpl });
+    return envKeySigner;
   }
-
-  function paymentSigner() {
-    return sessionSigner ?? createSigner(env, { fetchImpl });
-  }
-
-  // カタログ信頼: 掲載「URL → 掲載 accept[0] (OpenPay サーバー生成の権威値)」の Map を 5 分
-  // キャッシュで解決する。取得失敗は null (= 信頼拡張なし・ALLOWED_HOSTS のみ) に倒し、支払いを
-  // 誤って広げない。掲載 accept は guard がライブ accept と照合し、第三者ドメインの bait-and-switch
-  // (別 forwarder/asset で buyer に攻撃者宛署名を作らせる) を拒否するために使う。
-  let catalogUrlsCache = null;
-  let catalogUrlsCachedAt = 0;
-  async function resolveCatalogListings() {
-    if (!config.catalogTrust) return null;
-    if (catalogUrlsCache && Date.now() - catalogUrlsCachedAt < 5 * 60_000) return catalogUrlsCache;
-    try {
-      const res = await fetchImpl(config.discoveryUrl, { headers: { accept: 'application/json' } });
-      const body = await readJson(res);
-      if (!res.ok || !isObject(body) || !Array.isArray(body.items)) return null;
-      const listings = new Map();
-      for (const item of body.items) {
-        if (
-          isObject(item) &&
-          typeof item.resource === 'string' &&
-          Array.isArray(item.accepts) &&
-          item.accepts.length > 0
-        ) {
-          try {
-            listings.set(new URL(item.resource).toString(), item.accepts[0]);
-          } catch {
-            /* 不正 URL はスキップ */
-          }
+  const signer =
+    sessionSigner ??
+    (config.buyerPrivateKey !== null
+      ? {
+          get address() {
+            return getEnvKeySigner().address;
+          },
+          signTypedData(typedData) {
+            return getEnvKeySigner().signTypedData(typedData);
+          },
         }
-      }
-      catalogUrlsCache = listings;
-      catalogUrlsCachedAt = Date.now();
-      return listings;
-    } catch {
-      return null;
-    }
-  }
+      : null);
+  const resolveCatalogListings = createCatalogResolver({ config, fetchImpl });
+  const paymentExecutor = createPaymentExecutor({
+    config,
+    session,
+    signer,
+    fetchImpl,
+    nowSec,
+    resolveCatalogListings,
+  });
 
   // agent-order は discovery と同一 origin (config.discoveryUrl の origin) に対して menu/pay を叩く。
   function baseOrigin() {
@@ -637,105 +590,15 @@ export function createToolRuntime({
   async function x402Quote(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
-    const res = await fetchImpl(input.url, {
-      headers: { accept: 'application/json' },
-    });
-    const body = await readJson(res);
-    const accept = firstAccept(body);
-    if (res.status !== 402 || accept === null) {
-      return {
-        url: input.url,
-        status: res.status,
-        ok: false,
-        reasons: ['expected_402_with_accepts'],
-      };
-    }
-    const guard = evaluatePaymentGuards({
-      url: input.url,
-      accept,
-      config,
-      sessionSpentAtomic: session.spentAtomic,
-      catalogListings: await resolveCatalogListings(),
-    });
-    return quoteShape(input.url, res.status, guard);
+    return paymentExecutor.quote(input.url);
   }
 
-  // 並行 x402_pay の TOCTOU を塞ぐ: read(session.spentAtomic)→署名→fetch→record の間に await が
-  // 複数あり、複数の pay を同時発火すると各々が更新前の累計を見て MAX_SESSION_JPYC を超過できる。
-  // セッション単位で直列化し、各 pay が直前の pay の record 後に走る (常に最新の累計を見る) ようにする。
-  let payChain = Promise.resolve();
   async function x402Pay(args) {
-    const run = payChain.then(
-      () => x402PayImpl(args),
-      () => x402PayImpl(args),
-    );
-    // 直前の失敗を次の pay に波及させない (結果は run が保持・チェーンは順序保証のみ)。
-    payChain = run.then(
-      () => {},
-      () => {},
-    );
-    return run;
-  }
-
-  async function x402PayImpl(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
-    const res = await fetchImpl(input.url, {
-      headers: { accept: 'application/json' },
-    });
-    const body = await readJson(res);
-    const accept = firstAccept(body);
-    if (res.status !== 402 || accept === null) {
-      return {
-        url: input.url,
-        status: res.status,
-        ok: false,
-        reasons: ['expected_402_with_accepts'],
-      };
-    }
-    const guard = evaluatePaymentGuards({
-      url: input.url,
-      accept,
-      config,
-      sessionSpentAtomic: session.spentAtomic,
+    return paymentExecutor.pay(input.url, {
       maxTotalJpyc: input.maxTotalJpyc,
-      requireMaxTotal: true,
-      requireSigner: true,
-      signerAvailable: signerAvailable(),
-      catalogListings: await resolveCatalogListings(),
     });
-    if (!guard.ok) return quoteShape(input.url, res.status, guard);
-
-    const signer = paymentSigner();
-    const authorization = createAuthorization(
-      signer.address,
-      guard.accept.maxTimeoutSeconds,
-      nowSec(),
-    );
-    const { accept: normalizedAccept, typedData } =
-      buildTypedDataFromPaymentRequirements(accept, authorization);
-    const signature = await signer.signTypedData(typedData);
-    const paymentPayload = paymentPayloadFor(
-      normalizedAccept,
-      authorization,
-      signature,
-    );
-    const unlocked = await fetchImpl(input.url, {
-      headers: {
-        accept: 'application/json',
-        'X-PAYMENT': encodePaymentPayload(paymentPayload),
-      },
-    });
-    const unlockedBody = await readJson(unlocked);
-    if (unlocked.status >= 200 && unlocked.status < 300) {
-      recordSuccessfulPayment(session, guard.summary.totalAtomic);
-    }
-    const receipt = decodePaymentResponse(unlocked.headers.get('x-payment-response'));
-    return {
-      status: unlocked.status,
-      body: unlockedBody,
-      receipt,
-    };
   }
 
   async function callTool(name, args) {

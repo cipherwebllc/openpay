@@ -76,6 +76,7 @@
     "husky": "^9.1.7",
     "jsdom": "^25.0.1",
     "lint-staged": "^16.4.0",
+    "openpay-x402-sdk": "file:packages/x402-sdk",
     "postcss": "^8.5.15",
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5",

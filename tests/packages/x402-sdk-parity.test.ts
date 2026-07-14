@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -59,15 +59,14 @@ function outcome(operation: () => unknown):
   }
 }
 
-describe('openpay-x402-sdk copy and shared vectors', () => {
-  it('payment.mjs is byte-identical to the MCP implementation', () => {
-    expect(readFileSync(resolve(SDK_DIR, 'payment.mjs'))).toEqual(
-      readFileSync(resolve(MCP_DIR, 'payment.mjs')),
-    );
+describe('openpay-x402-sdk source ownership and vectors', () => {
+  it('does not duplicate SDK money-path modules in the MCP source', () => {
+    for (const name of ['payment.mjs', 'guards.mjs', 'signer.mjs']) {
+      expect(existsSync(resolve(MCP_DIR, name))).toBe(false);
+    }
   });
 
   describe.each([
-    ['MCP', MCP_DIR],
     ['SDK', SDK_DIR],
   ])('%s guards', (_label, directory) => {
     it.each([
@@ -141,7 +140,6 @@ describe('openpay-x402-sdk copy and shared vectors', () => {
   });
 
   describe.each([
-    ['MCP', MCP_DIR],
     ['SDK', SDK_DIR],
   ])('%s signer', (_label, directory) => {
     it.each([
@@ -221,10 +219,9 @@ describe('env to options characterization', () => {
     { CATALOG_TRUST: 'false' },
     { CATALOG_TRUST: 'TRUE' },
   ])('matches readRuntimeConfig for %#', async (env) => {
-    const mcp = await loadModule<GuardsModule>(MCP_DIR, 'guards.mjs');
     const sdk = await loadModule<GuardsModule>(SDK_DIR, 'guards.mjs');
     expect(sdk.parseClientOptions?.(equivalentOptions(env))).toEqual(
-      mcp.readRuntimeConfig(env),
+      sdk.readRuntimeConfig(env),
     );
   });
 
@@ -235,19 +232,17 @@ describe('env to options characterization', () => {
     { BUYER_PRIVATE_KEY: '0x1234' },
     { DISCOVERY_URL: 'ftp://open-pay.jp/catalog' },
   ])('throws at the same point with the same message for %#', async (env) => {
-    const mcp = await loadModule<GuardsModule>(MCP_DIR, 'guards.mjs');
     const sdk = await loadModule<GuardsModule>(SDK_DIR, 'guards.mjs');
     expect(
       outcome(() => sdk.parseClientOptions?.(equivalentOptions(env))),
-    ).toEqual(outcome(() => mcp.readRuntimeConfig(env)));
+    ).toEqual(outcome(() => sdk.readRuntimeConfig(env)));
   });
 
   it('creates the same valid local signer from env and options', async () => {
-    const mcp = await loadModule<SignerModule>(MCP_DIR, 'signer.mjs');
     const sdk = await loadModule<SignerModule>(SDK_DIR, 'signer.mjs');
     expect(sdk.createSignerFromOptions?.({ privateKey: PRIVATE_KEY })).toEqual(
       expect.objectContaining({
-        mode: mcp.createSigner({ BUYER_PRIVATE_KEY: PRIVATE_KEY }).mode,
+        mode: sdk.createSigner({ BUYER_PRIVATE_KEY: PRIVATE_KEY }).mode,
         address: ADDRESS,
       }),
     );

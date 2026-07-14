@@ -43,7 +43,7 @@ const SALT =
 async function loadMcpPayment(): Promise<McpPayment> {
   return (await import(
     pathToFileURL(
-      resolve(process.cwd(), 'packages/x402-mcp/src/payment.mjs'),
+      resolve(process.cwd(), 'packages/x402-sdk/src/payment.mjs'),
     ).href
   )) as McpPayment;
 }

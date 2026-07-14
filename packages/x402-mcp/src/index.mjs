@@ -9,8 +9,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { safeErrorMessage } from 'openpay-x402-sdk';
 import { createToolRuntime } from './tools.mjs';
-import { safeErrorMessage } from './guards.mjs';
 
 const pkg = createRequire(import.meta.url)('../package.json');
 
