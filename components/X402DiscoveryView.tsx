@@ -498,42 +498,44 @@ export function X402DiscoveryView({
   }) => {
     const Icon = categoryIcon(opts.category);
     const urlIsHttps = isHttpsUrl(opts.url);
+    // チップ行と価格を 1 行目に、説明はカード全幅の独立行に置く。説明を価格の隣の狭い列に
+    // 入れると英語の長文説明が 1 語ずつ折り返して読めなくなる (2 カラム時に実害)。
     return (
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
               <Icon className="h-3 w-3 text-brand" aria-hidden />
               {opts.category}
             </span>
-            <p className="min-w-0 text-sm font-bold leading-snug text-slate-900">
-              {opts.description}
-            </p>
             {opts.official && (
               <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand-dark">
                 {t('officialBadge')}
               </span>
             )}
           </div>
-          <div className="mt-1 flex items-center gap-1.5">
-            {urlIsHttps ? (
-              <a
-                href={opts.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="min-w-0 truncate font-mono text-xs text-slate-400 underline-offset-2 transition hover:text-brand hover:underline"
-              >
-                {opts.url}
-              </a>
-            ) : (
-              <span className="min-w-0 truncate font-mono text-xs text-slate-400">
-                {opts.url}
-              </span>
-            )}
-            {copyBtn(opts.copyKey, opts.url)}
-          </div>
+          {opts.priceNode}
         </div>
-        {opts.priceNode}
+        <p className="mt-2 text-sm font-bold leading-snug text-slate-900">
+          {opts.description}
+        </p>
+        <div className="mt-1 flex items-center gap-1.5">
+          {urlIsHttps ? (
+            <a
+              href={opts.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="min-w-0 truncate font-mono text-xs text-slate-400 underline-offset-2 transition hover:text-brand hover:underline"
+            >
+              {opts.url}
+            </a>
+          ) : (
+            <span className="min-w-0 truncate font-mono text-xs text-slate-400">
+              {opts.url}
+            </span>
+          )}
+          {copyBtn(opts.copyKey, opts.url)}
+        </div>
       </div>
     );
   };
@@ -1038,29 +1040,35 @@ export function X402DiscoveryView({
                     official: FIRST_PARTY_RESOURCE_URLS.has(item.resource),
                   })}
                   {hasComparisonMeta && (
-                    <div className="mt-2 flex items-center divide-x divide-slate-200 overflow-x-auto whitespace-nowrap text-[11px] text-slate-500">
+                    // 折り返し必須: nowrap+横スクロールだと利用条件の長文で Docs リンクが画面外に
+                    // 隠れて実質不到達になる (本番実害)。区切りは wrap に耐える中点で表現する。
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
                       {verifiedDays !== null && (
-                        <time dateTime={item.verifiedAt ?? undefined} className="pr-2">
-                          {t('verifiedMeta', { days: verifiedDays })}
+                        <time dateTime={item.verifiedAt ?? undefined} className="shrink-0">
+                          {verifiedDays === 0
+                            ? t('verifiedTodayMeta')
+                            : t('verifiedMeta', { days: verifiedDays })}
                         </time>
                       )}
                       {updatedDate !== null && (
-                        <time dateTime={item.updatedAt} className="px-2">
+                        <time dateTime={item.updatedAt} className="shrink-0">
                           {t('updatedMeta', { date: updatedDate })}
                         </time>
-                      )}
-                      {item.license && (
-                        <span className="px-2">{t('licenseMeta', { license: item.license })}</span>
                       )}
                       {docsUrl && (
                         <a
                           href={docsUrl}
                           target="_blank"
                           rel="noreferrer noopener"
-                          className="px-2 font-medium text-brand hover:text-brand-dark hover:underline"
+                          className="shrink-0 font-medium text-brand hover:text-brand-dark hover:underline"
                         >
                           {t('docsLink')}
                         </a>
+                      )}
+                      {item.license && (
+                        <span className="min-w-0">
+                          {t('licenseMeta', { license: item.license })}
+                        </span>
                       )}
                     </div>
                   )}
