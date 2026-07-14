@@ -2233,6 +2233,7 @@
     "catalogNoResults": "No matching resources",
     "officialBadge": "Official",
     "verifiedMeta": "Verified: {days}d ago",
+    "verifiedTodayMeta": "Verified: today",
     "updatedMeta": "Updated: {date}",
     "licenseMeta": "License: {license}",
     "docsLink": "Docs",

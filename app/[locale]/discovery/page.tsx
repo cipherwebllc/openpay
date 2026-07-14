@@ -65,15 +65,20 @@ export default async function DiscoveryPage({
               <Bot className="h-3.5 w-3.5 text-blue-600" aria-hidden />
               {t('flowStep1')}
             </span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 shadow-card ring-1 ring-slate-200/70">
-              <ReceiptText className="h-3.5 w-3.5 text-amber-600" aria-hidden />
-              {t('flowStep2')}
+            {/* 矢印は後続チップと同じ nowrap グループに入れ、折返し時に行末へ取り残さない。 */}
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 shadow-card ring-1 ring-slate-200/70">
+                <ReceiptText className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+                {t('flowStep2')}
+              </span>
             </span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-700">
-              <LockOpen className="h-3.5 w-3.5" aria-hidden />
-              {t('flowStep3')}
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-700">
+                <LockOpen className="h-3.5 w-3.5" aria-hidden />
+                {t('flowStep3')}
+              </span>
             </span>
           </div>
         </div>

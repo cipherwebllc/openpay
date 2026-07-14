@@ -2233,6 +2233,7 @@
     "catalogNoResults": "該当するリソースがありません",
     "officialBadge": "公式",
     "verifiedMeta": "検証: {days}日前",
+    "verifiedTodayMeta": "検証: 今日",
     "updatedMeta": "更新: {date}",
     "licenseMeta": "利用条件: {license}",
     "docsLink": "Docs",
