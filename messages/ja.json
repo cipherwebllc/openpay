@@ -2205,6 +2205,7 @@
     "formUrl": "リソース URL (例: https://api.example.jp/paid/…)",
     "formDescriptionLabel": "説明",
     "formDescription": "説明 (何を提供するか)",
+    "formOptionalGroupTitle": "掲載を充実させる（任意）",
     "formDocsUrlLabel": "Docs URL（任意）",
     "formDocsUrl": "OpenAPI またはドキュメントの HTTPS URL",
     "formDocsUrlHint": "エージェントが仕様を確認できる HTTPS リンクを 512 文字以内で入力します。",

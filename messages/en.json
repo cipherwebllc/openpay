@@ -2205,6 +2205,7 @@
     "formUrl": "Resource URL (e.g. https://api.example.jp/paid/…)",
     "formDescriptionLabel": "Description",
     "formDescription": "Description (what you provide)",
+    "formOptionalGroupTitle": "Enrich your listing (optional)",
     "formDocsUrlLabel": "Docs URL (optional)",
     "formDocsUrl": "HTTPS URL for OpenAPI or documentation",
     "formDocsUrlHint": "Add an HTTPS link where agents can inspect the specification (maximum 512 characters).",

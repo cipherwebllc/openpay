@@ -296,6 +296,29 @@ describe('X402DiscoveryView', () => {
     expect(
       screen.getByText(/詳細は README の掲載ルールをご確認ください/),
     ).toBeInTheDocument();
+    expect(screen.getByText('サインイン済: 0x1111…1111')).toHaveAttribute(
+      'title',
+      state.address,
+    );
+    const orderedFields = [
+      screen.getByText('リソース URL'),
+      screen.getByText('説明'),
+      screen.getByText('価格'),
+      screen.getByText('カテゴリー'),
+      screen.getByText('受取アドレス'),
+      screen.getByText('掲載を充実させる（任意）'),
+      screen.getByText('Docs URL（任意）'),
+      screen.getByText('利用条件（任意）'),
+    ];
+    for (let index = 0; index < orderedFields.length - 1; index += 1) {
+      expect(
+        orderedFields[index].compareDocumentPosition(orderedFields[index + 1]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    const priceAndCategoryRow = orderedFields[2].parentElement?.parentElement;
+    expect(priceAndCategoryRow).toBe(orderedFields[3].parentElement?.parentElement);
+    expect(priceAndCategoryRow).toHaveClass('grid-cols-2');
     expect(screen.getByRole('button', { name: '登録する' })).toBeInTheDocument();
     expect(screen.getByText(`登録済み 0 / ${MAX_RESOURCES_PER_MERCHANT} 件`)).toBeInTheDocument();
   });
@@ -310,6 +333,40 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByRole('button', { name: 'スニペット' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '編集' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '削除' })).toBeInTheDocument();
+  });
+
+  it('owner: Docs・利用条件をカード直下へ同じ meta 行で表示し、非 HTTPS Docs は出さない', async () => {
+    const ownedWithMeta = {
+      ...OWNED,
+      docsUrl: 'https://docs.example.jp/owned.json',
+      license: 'Attribution required.',
+    };
+    const ownedWithUnsafeDocs = {
+      ...OWNED,
+      id: 'res-2',
+      url: 'https://api.example.jp/paid/unsafe-docs',
+      description: '安全でない Docs の掲載',
+      docsUrl: 'http://docs.example.jp/unsafe',
+    };
+    renderAsOwner([ownedWithMeta, ownedWithUnsafeDocs]);
+
+    const description = await screen.findByText(ownedWithMeta.description);
+    const card = description.closest('li')!;
+    const docs = within(card).getByRole('link', { name: 'Docs' });
+    const license = within(card).getByText('利用条件: Attribution required.');
+    const metaRow = docs.parentElement!;
+    expect(metaRow.previousElementSibling).toBe(description.parentElement);
+    expect(metaRow).toHaveClass('flex-wrap', 'items-baseline', 'text-[11px]');
+    expect(
+      docs.compareDocumentPosition(license) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(docs).toHaveAttribute('href', ownedWithMeta.docsUrl);
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(docs).toHaveAttribute('rel', 'noreferrer noopener');
+
+    const unsafeCard = screen.getByText(ownedWithUnsafeDocs.description).closest('li')!;
+    expect(within(unsafeCard).queryByRole('link', { name: 'Docs' })).not.toBeInTheDocument();
+    expect(unsafeCard.querySelector('.items-baseline')).not.toBeInTheDocument();
   });
 
   it('owner: hidden の自リソースに要対応バッジとゲートスニペットを再掲', async () => {
