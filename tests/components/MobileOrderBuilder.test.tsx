@@ -120,6 +120,18 @@ describe('MobileOrderBuilder', () => {
     expect(screen.getByPlaceholderText('例: 03-1234-5678')).toBeInTheDocument();
   });
 
+  it('店舗設定を 5 つの小グループ見出しで順番どおりに区分する', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    const headings = ['基本', '画像（任意）', '店舗情報（任意）', '受け渡し', 'SNS（任意）'].map(
+      (name) => screen.getByRole('heading', { level: 3, name }),
+    );
+    headings.slice(0, -1).forEach((heading, index) => {
+      expect(
+        heading.compareDocumentPosition(headings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+  });
+
   it('@handle 公開 parts に lastOrder / minLeadMinutes を載せる', () => {
     h.enableHandles = true;
     h.enablePreorderTime = true;
