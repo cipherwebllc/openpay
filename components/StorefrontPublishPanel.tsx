@@ -384,9 +384,19 @@ export function StorefrontPublishPanel({
                 />
                 <span>{t('agentListingLabel')}</span>
               </label>
-              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                {t('agentListingConsent')}
-              </p>
+              {/* 同意の詳細 (提供項目/解除方法) は折りたたみに格納する。常時展開だと右カラムが
+                  縦長になり、サイド列とプレビューのスクロールバーが並走して見づらい (実報告)。
+                  法的文言は一字不変で DOM に常在させる (フェンステストあり)。 */}
+              <details className="mt-1 group">
+                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 hover:text-slate-700 [&::-webkit-details-marker]:hidden">
+                  <span className="underline decoration-dotted underline-offset-2">
+                    {t('agentListingConsentToggle')}
+                  </span>
+                </summary>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  {t('agentListingConsent')}
+                </p>
+              </details>
             </div>
           )}
           <button

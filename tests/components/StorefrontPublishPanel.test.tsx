@@ -573,4 +573,30 @@ describe('StorefrontPublishPanel', () => {
       screen.queryByRole('button', { name: '編集（公開中の内容を読み込む）' }),
     ).not.toBeInTheDocument();
   });
+
+  it('Shops API 同意の法的文言は details 格納でも一字不変で DOM に常在し、既定は折りたたみ', async () => {
+    h.enableShopsApi = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }),
+      })),
+    );
+    renderPanel({ storefront: STORE });
+    await screen.findByRole('checkbox', {
+      name: 'AI エージェント検索に掲載する（Shops API）',
+    });
+    // 法的同意文はトグル開閉に依存せず常に DOM に存在する (一字不変フェンス)
+    const consent = screen.getByText(
+      '掲載すると、店名・紹介文・住所・営業時間・メニュー概要・受付状況が、OpenPay の有料 API を通じて第三者の AI エージェントやアプリに提供されます。電話番号は提供されません。解除はこのチェックを外して公開を更新（反映まで最大 60 秒）。住所が自宅を兼ねる場合は掲載前にご確認ください。',
+    );
+    const details = consent.closest('details');
+    expect(details).not.toBeNull();
+    // 既定は折りたたみ (右カラム縦長化の実報告対策)。summary から展開できる。
+    expect(details!.open).toBe(false);
+    fireEvent.click(screen.getByText('提供項目と解除方法'));
+    await waitFor(() => expect(details!.open).toBe(true));
+  });
 });
