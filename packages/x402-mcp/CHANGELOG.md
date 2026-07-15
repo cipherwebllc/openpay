@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0
+
+- Trust query-string variants of a query-free catalog URL after the same live
+  money-field verification, via `openpay-x402-sdk` 0.2.x.
+- Preserve all MCP tool names, descriptions, and input schemas byte-for-byte.
+
 ## 0.10.0
 
 - Delegate payment execution, catalog resolution, guards, payment wire handling,
