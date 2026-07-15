@@ -28,6 +28,7 @@ const SDK_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/index.mjs');
 const JPYC = 10n ** 18n;
 const RESOURCE = 'https://open-pay.jp/api/paid/demo';
 const THIRD_PARTY_RESOURCE = 'https://catalog.example/api/data';
+const CATALOG_URL = 'https://catalog.test/api/discovery';
 const PRIVATE_KEY = `0x${'1'.repeat(64)}` as Hex;
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
 const FORWARDER = getAddress('0x4444444444444444444444444444444444444444');
@@ -42,10 +43,17 @@ async function loadSdk(): Promise<SdkModule> {
 
 function accept(
   resource = RESOURCE,
-  overrides: { forwarder?: string; asset?: string } = {},
+  overrides: {
+    forwarder?: string;
+    asset?: string;
+    merchant?: string;
+    merchantValue?: bigint;
+    feeReceiver?: string;
+    feeValue?: bigint;
+  } = {},
 ) {
-  const merchantValue = 5n * JPYC;
-  const feeValue = 2n * JPYC;
+  const merchantValue = overrides.merchantValue ?? 5n * JPYC;
+  const feeValue = overrides.feeValue ?? 2n * JPYC;
   const forwarder = overrides.forwarder ?? FORWARDER;
   return {
     scheme: 'exact',
@@ -65,9 +73,9 @@ function accept(
       openpay: {
         mode: 'forwarder-split',
         forwarder,
-        merchant: MERCHANT,
+        merchant: overrides.merchant ?? MERCHANT,
         merchantValue: merchantValue.toString(),
-        feeReceiver: FEE_RECEIVER,
+        feeReceiver: overrides.feeReceiver ?? FEE_RECEIVER,
         feeValue: feeValue.toString(),
         commitVersion: FORWARDER_COMMIT_VERSION,
       },
@@ -88,6 +96,35 @@ function jsonResponse(
 
 function requestHeaders(init?: RequestInit) {
   return new Headers(init?.headers);
+}
+
+async function quoteCatalogVariant(
+  requestUrl: string,
+  {
+    listedResource = THIRD_PARTY_RESOURCE,
+    listedAccept = accept(listedResource),
+    liveAccept = accept(requestUrl),
+  }: {
+    listedResource?: string;
+    listedAccept?: ReturnType<typeof accept>;
+    liveAccept?: ReturnType<typeof accept>;
+  } = {},
+) {
+  const sdk = await loadSdk();
+  const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === CATALOG_URL) {
+      return jsonResponse(
+        { items: [{ resource: listedResource, accepts: [listedAccept] }] },
+        200,
+      );
+    }
+    return jsonResponse({ accepts: [liveAccept] }, 402);
+  });
+  const client = sdk.createOpenPayClient({
+    discoveryUrl: CATALOG_URL,
+    fetchImpl,
+  });
+  return client.quote(requestUrl);
 }
 
 describe('openpay-x402-sdk executor', () => {
@@ -253,13 +290,127 @@ describe('openpay-x402-sdk executor', () => {
 });
 
 describe('openpay-x402-sdk catalog trust', () => {
+  it('trusts a query variant only after the live money fields match', async () => {
+    const requestUrl = `${THIRD_PARTY_RESOURCE}?q=hello`;
+
+    const result = await quoteCatalogVariant(requestUrl);
+
+    expect(result).toMatchObject({ ok: true, reasons: [] });
+  });
+
+  it.each([
+    ['feeValue', { feeValue: 3n * JPYC }],
+    ['merchant', { merchant: ATTACKER }],
+    ['forwarder', { forwarder: ATTACKER }],
+  ] as const)(
+    'rejects query-variant %s tampering as catalog_accept_mismatch',
+    async (_field, overrides) => {
+      const requestUrl = `${THIRD_PARTY_RESOURCE}?q=hello`;
+
+      const result = await quoteCatalogVariant(requestUrl, {
+        liveAccept: accept(requestUrl, overrides),
+      });
+
+      expect(result.reasons).toContain('catalog_accept_mismatch');
+      expect(result.reasons).not.toContain('host_not_allowed');
+    },
+  );
+
+  it.each([
+    `${THIRD_PARTY_RESOURCE}2?q=hello`,
+    `${THIRD_PARTY_RESOURCE}/x?q=hello`,
+  ])('does not extend catalog trust to path prefix %s', async (requestUrl) => {
+    const result = await quoteCatalogVariant(requestUrl);
+
+    expect(result.reasons).toContain('host_not_allowed');
+  });
+
+  it('keeps query-bearing catalog entries exact-only', async () => {
+    const listedResource = `${THIRD_PARTY_RESOURCE}?plan=basic`;
+    const requestUrl = `${THIRD_PARTY_RESOURCE}?plan=premium`;
+
+    const result = await quoteCatalogVariant(requestUrl, { listedResource });
+
+    expect(result.reasons).toContain('host_not_allowed');
+  });
+
+  it.each([
+    `${THIRD_PARTY_RESOURCE}?`,
+    `${THIRD_PARTY_RESOURCE}#details`,
+  ])('trusts the stripped empty-query/fragment variant %s', async (requestUrl) => {
+    const result = await quoteCatalogVariant(requestUrl);
+
+    expect(result).toMatchObject({ ok: true, reasons: [] });
+  });
+
+  it('still requires live accept.resource to equal the complete requested URL', async () => {
+    const requestUrl = `${THIRD_PARTY_RESOURCE}?q=hello`;
+
+    const result = await quoteCatalogVariant(requestUrl, {
+      liveAccept: accept(THIRD_PARTY_RESOURCE),
+    });
+
+    expect(result.reasons).toContain('resource_mismatch');
+    expect(result.reasons).not.toContain('host_not_allowed');
+    expect(result.reasons).not.toContain('catalog_accept_mismatch');
+  });
+
+  it.each([
+    ['uppercase host and default port', 'https://CATALOG.EXAMPLE:443/api/data?q=hello'],
+    ['dot segment', 'https://catalog.example/api/x/../data?q=hello'],
+    ['backslash path separator', 'https://catalog.example\\api\\data?q=hello'],
+  ])('uses WHATWG normalization for %s', async (_label, requestUrl) => {
+    const result = await quoteCatalogVariant(requestUrl);
+
+    expect(result).toMatchObject({ ok: true, reasons: [] });
+  });
+
+  it('normalizes an IDN host to the same punycode catalog origin', async () => {
+    const listedResource = 'https://xn--bcher-kva.example/api/data';
+    const requestUrl = 'https://bücher.example/api/data?q=hello';
+
+    const result = await quoteCatalogVariant(requestUrl, { listedResource });
+
+    expect(result).toMatchObject({ ok: true, reasons: [] });
+  });
+
+  it.each([
+    ['trailing slash', `${THIRD_PARTY_RESOURCE}/?q=hello`],
+    ['non-default port', 'https://catalog.example:444/api/data?q=hello'],
+    ['percent-encoded slash', 'https://catalog.example/api%2Fdata?q=hello'],
+    ['percent-encoded unreserved path byte', 'https://catalog.example/api/%64ata?q=hello'],
+    ['percent-encoded dot traversal', 'https://catalog.example/api/%2e%2e/data?q=hello'],
+    ['userinfo', 'https://user:pass@catalog.example/api/data?q=hello'],
+  ])('does not broaden trust across %s', async (_label, requestUrl) => {
+    const result = await quoteCatalogVariant(requestUrl);
+
+    expect(result.reasons).toContain('host_not_allowed');
+  });
+
+  it.each([
+    'javascript:https://catalog.example/api/data?q=hello',
+    'ftp://catalog.example/api/data?q=hello',
+  ])('rejects unsupported request scheme %s', async (requestUrl) => {
+    const result = await quoteCatalogVariant(requestUrl);
+
+    expect(result.reasons).toContain('invalid_url');
+  });
+
+  it('preserves exact catalog and explicit open-pay.jp host behavior', async () => {
+    const exact = await quoteCatalogVariant(THIRD_PARTY_RESOURCE);
+    const allowed = await quoteCatalogVariant(RESOURCE);
+
+    expect(exact).toMatchObject({ ok: true, reasons: [] });
+    expect(allowed).toMatchObject({ ok: true, reasons: [] });
+  });
+
   it('uses exact URL listings and rejects a mismatched live accept', async () => {
     const sdk = await loadSdk();
     const listed = accept(THIRD_PARTY_RESOURCE);
     const live = accept(THIRD_PARTY_RESOURCE, { forwarder: ATTACKER });
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === 'https://catalog.test/api/discovery') {
+      if (url === CATALOG_URL) {
         return jsonResponse(
           { items: [{ resource: THIRD_PARTY_RESOURCE, accepts: [listed] }] },
           200,
@@ -271,7 +422,7 @@ describe('openpay-x402-sdk catalog trust', () => {
       throw new Error(`unexpected URL: ${url}`);
     });
     const client = sdk.createOpenPayClient({
-      discoveryUrl: 'https://catalog.test/api/discovery',
+      discoveryUrl: CATALOG_URL,
       fetchImpl,
     });
 
@@ -290,7 +441,7 @@ describe('openpay-x402-sdk catalog trust', () => {
       throw new Error('catalog unavailable');
     });
     const client = sdk.createOpenPayClient({
-      discoveryUrl: 'https://catalog.test/api/discovery',
+      discoveryUrl: CATALOG_URL,
       fetchImpl,
     });
 
@@ -319,7 +470,7 @@ describe('openpay-x402-sdk catalog trust', () => {
     const options = {
       config: {
         catalogTrust: true,
-        discoveryUrl: 'https://catalog.test/api/discovery',
+        discoveryUrl: CATALOG_URL,
       },
       fetchImpl,
       now: () => now,

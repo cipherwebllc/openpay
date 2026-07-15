@@ -28,6 +28,7 @@ const MCP_ENTRY = resolve(process.cwd(), 'packages/x402-mcp/src/tools.mjs');
 const SDK_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/index.mjs');
 const RESOURCE = 'https://open-pay.jp/api/paid/demo';
 const LISTED_RESOURCE = 'https://catalog.example/api/data';
+const QUERY_RESOURCE = `${LISTED_RESOURCE}?q=hello`;
 const DISCOVERY_URL = 'https://open-pay.jp/api/discovery';
 const STEWARD_URL = 'https://steward.test';
 const PRIVATE_KEY = `0x${'1'.repeat(64)}` as Hex;
@@ -196,6 +197,65 @@ describe.each(['MCP', 'SDK'] as const)(
       expect(first.reasons).toContain('catalog_accept_mismatch');
       expect(second.reasons).toContain('catalog_accept_mismatch');
       expect(discoveryFetches).toBe(1);
+    });
+
+    it('pays a listed third-party query variant with the live resource URL', async () => {
+      const listed = paymentAccept(LISTED_RESOURCE);
+      const live = paymentAccept(QUERY_RESOURCE);
+      const fetchImpl = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === DISCOVERY_URL) {
+            return jsonResponse(
+              { items: [{ resource: LISTED_RESOURCE, accepts: [listed] }] },
+              200,
+            );
+          }
+          if (url === QUERY_RESOURCE) {
+            return new Headers(init?.headers).has('X-PAYMENT')
+              ? jsonResponse({ unlocked: true }, 200)
+              : jsonResponse({ accepts: [live] }, 402);
+          }
+          throw new Error(`unexpected URL: ${url}`);
+        },
+      );
+      const runtime = await runtimeFor(
+        implementation,
+        fetchImpl as unknown as typeof fetch,
+      );
+
+      const result = await runtime.pay(QUERY_RESOURCE, { maxTotalJpyc: '2' });
+
+      expect(result).toMatchObject({ status: 200, body: { unlocked: true } });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
+    it('rejects a query-variant money switch before the paid retry', async () => {
+      let paidFetches = 0;
+      const listed = paymentAccept(LISTED_RESOURCE);
+      const live = paymentAccept(QUERY_RESOURCE, ATTACKER);
+      const fetchImpl = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input) === DISCOVERY_URL) {
+            return jsonResponse(
+              { items: [{ resource: LISTED_RESOURCE, accepts: [listed] }] },
+              200,
+            );
+          }
+          if (new Headers(init?.headers).has('X-PAYMENT')) paidFetches += 1;
+          return jsonResponse({ accepts: [live] }, 402);
+        },
+      );
+      const runtime = await runtimeFor(
+        implementation,
+        fetchImpl as unknown as typeof fetch,
+      );
+
+      const result = await runtime.pay(QUERY_RESOURCE, { maxTotalJpyc: '2' });
+
+      expect(result.reasons).toContain('catalog_accept_mismatch');
+      expect(result.reasons).not.toContain('host_not_allowed');
+      expect(paidFetches).toBe(0);
     });
 
     it('continues the serialized queue after a signing failure', async () => {

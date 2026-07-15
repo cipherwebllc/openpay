@@ -39,8 +39,11 @@ concurrent calls so every call sees the latest session total.
 | `maxPerCallJpyc` | `10` | Upper bound for the caller-provided `maxTotalJpyc`. |
 | `maxSessionJpyc` | `100` | Cumulative cap for successful payments made by this client instance. |
 | `allowedHosts` | `open-pay.jp` | Comma-separated bare host allowlist. |
-| `catalogTrust` | `true` | Also allows exact URLs in the discovery catalog after the live challenge matches the catalog challenge. |
+| `catalogTrust` | `true` | Also allows catalog URLs after the live challenge matches the catalog challenge. |
 | `discoveryUrl` | `https://open-pay.jp/api/discovery` | Catalog and OpenPay origin used by the client. |
+
+Query string variants of a query-free listed URL are trusted after the same
+money-field verification. Exact query-bearing catalog entries remain exact-only.
 
 `pay(url, { maxTotalJpyc })` always requires `maxTotalJpyc`. It is the maximum
 total—including the resource price and x402 fee—that this individual call is
