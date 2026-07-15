@@ -366,11 +366,19 @@ export function evaluatePaymentGuards({
     reasons.push(REASONS.invalidUrl);
   } else {
     const hostAllowed = config.allowedHosts.includes(parsedUrl.hostname.toLowerCase());
-    // カタログ信頼はホストでなく **URL 完全一致** — allowlist より狭い単位で許可する。
-    const listedAccept =
-      config.catalogTrust && catalogListings instanceof Map
-        ? catalogListings.get(parsedUrl.toString())
-        : undefined;
+    // 完全一致を先に維持し、miss 時だけ query/hash を除いた同一 origin+pathname を引く。
+    // userinfo は origin に含まれないため、query variant ではない credential 付き URL へは緩和しない。
+    let listedAccept;
+    if (config.catalogTrust && catalogListings instanceof Map) {
+      listedAccept = catalogListings.get(parsedUrl.toString());
+      if (
+        listedAccept === undefined &&
+        parsedUrl.username === '' &&
+        parsedUrl.password === ''
+      ) {
+        listedAccept = catalogListings.get(`${parsedUrl.origin}${parsedUrl.pathname}`);
+      }
+    }
     const catalogListed = listedAccept !== undefined;
     if (!hostAllowed && !catalogListed) {
       reasons.push(REASONS.hostNotAllowed);
