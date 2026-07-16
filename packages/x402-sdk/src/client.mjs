@@ -7,6 +7,7 @@ import {
   safeErrorMessage,
 } from './guards.mjs';
 import { createSignerFromOptions } from './signer.mjs';
+import { createFileSpendStore } from './spendStore.mjs';
 
 function isObject(value) {
   return typeof value === 'object' && value !== null;
@@ -63,13 +64,20 @@ export function createOpenPayClient(options = {}) {
   }
   const signer = createSignerFromOptions(options, { fetchImpl });
   const session = createPaymentSession();
+  const spendStore =
+    config.maxDailyAtomic === null
+      ? null
+      : options.spendStore ?? createFileSpendStore();
   const resolveCatalogListings = createCatalogResolver({ config, fetchImpl });
   const executor = createPaymentExecutor({
     config,
     session,
     signer,
+    signerAddress: signer?.address ?? null,
+    spendStore,
     fetchImpl,
     nowSec: options.nowSec,
+    now: options.now,
     resolveCatalogListings,
   });
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Add an opt-in persistent daily buyer limit with UTC signer/date keys, file and
+  injectable spend stores, quote-time visibility, and fail-closed reads.
+- Record daily spend only after successful 2xx unlocks while isolating store
+  write failures from already completed payment responses.
+
 ## 0.3.0
 
 - Add `createJpycGate` for seller-side x402 gates backed by the OpenPay catalog,

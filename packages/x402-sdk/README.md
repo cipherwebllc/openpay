@@ -16,6 +16,7 @@ const client = createOpenPayClient({
   privateKey: process.env.BUYER_PRIVATE_KEY,
   maxPerCallJpyc: '10',
   maxSessionJpyc: '100',
+  maxDailyJpyc: '250',
   allowedHosts: 'open-pay.jp',
 });
 
@@ -99,6 +100,7 @@ gate; `createJpycGate` is its importable SDK counterpart with split settlement.
 |---|---:|---|
 | `maxPerCallJpyc` | `10` | Upper bound for the caller-provided `maxTotalJpyc`. |
 | `maxSessionJpyc` | `100` | Cumulative cap for successful payments made by this client instance. |
+| `maxDailyJpyc` | Not set | Persistent cumulative cap per signer and UTC calendar date. |
 | `allowedHosts` | `open-pay.jp` | Comma-separated bare host allowlist. |
 | `catalogTrust` | `true` | Also allows catalog URLs after the live challenge matches the catalog challenge. |
 | `discoveryUrl` | `https://open-pay.jp/api/discovery` | Catalog and OpenPay origin used by the client. |
@@ -109,7 +111,21 @@ money-field verification. Exact query-bearing catalog entries remain exact-only.
 `pay(url, { maxTotalJpyc })` always requires `maxTotalJpyc`. It is the maximum
 total—including the resource price and x402 fee—that this individual call is
 authorized to pay. It does not disable or raise `maxPerCallJpyc` or
-`maxSessionJpyc`; all three limits must allow the payment.
+`maxSessionJpyc`; every configured limit must allow the payment.
+
+`maxDailyJpyc` is opt-in. When set, the client stores successful 2xx unlocks in
+`~/.openpay-x402/spend.json`, keyed by the lower-cased signer address and UTC
+date. A missing entry starts at zero. A corrupt/unreadable store or a custom
+store returning `null` rejects quotes and payments with `daily_spend_unavailable`
+(fail-closed). Use `spendStore` to inject another implementation of
+`{ load(key), save(key, atomicString) }`; `MAX_DAILY_JPYC` is the equivalent
+optional setting for the exported environment config readers.
+
+The file store uses best-effort read-modify-write across processes: payments are
+serialized within one client process, but separate processes can race and lose
+an increment. Use an atomic shared store when multiple processes share a signer.
+Persistence runs only after a successful unlock; a save failure cannot change an
+already completed payment response.
 
 The client also rejects non-JPYC metadata, unsupported networks or schemes,
 non-OpenPay forwarder splits, amount inconsistencies, resource URL mismatches,

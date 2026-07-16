@@ -33,6 +33,8 @@ export const REASONS = {
   maxTotalAbovePerCallLimit: 'max_total_above_per_call_limit',
   perCallLimitExceeded: 'per_call_limit_exceeded',
   sessionLimitExceeded: 'session_limit_exceeded',
+  dailyLimitExceeded: 'daily_limit_exceeded',
+  dailySpendUnavailable: 'daily_spend_unavailable',
   buyerPrivateKeyMissing: 'buyer_private_key_missing',
   stewardSignerUnconfigured: 'steward_signer_unconfigured',
   // catalog trust 経由 (第三者ドメイン) の URL で、支払い時にライブ fetch した accept が
@@ -139,6 +141,10 @@ export function readMoneyConfig(env = process.env) {
       nonEmpty(env.MAX_SESSION_JPYC) ?? DEFAULT_MAX_SESSION_JPYC,
       'MAX_SESSION_JPYC',
     ),
+    maxDailyAtomic:
+      nonEmpty(env.MAX_DAILY_JPYC) === undefined
+        ? null
+        : parseJpycToAtomic(env.MAX_DAILY_JPYC, 'MAX_DAILY_JPYC'),
     allowedHosts: parseAllowedHosts(env.ALLOWED_HOSTS),
     catalogTrust:
       env.CATALOG_TRUST === undefined || env.CATALOG_TRUST === ''
@@ -198,6 +204,10 @@ export function parseClientOptions(options = {}) {
       optionAmount(options.maxSessionJpyc, DEFAULT_MAX_SESSION_JPYC),
       'MAX_SESSION_JPYC',
     ),
+    maxDailyAtomic:
+      options.maxDailyJpyc === undefined || options.maxDailyJpyc === ''
+        ? null
+        : parseJpycToAtomic(options.maxDailyJpyc, 'MAX_DAILY_JPYC'),
     allowedHosts: parseAllowedHosts(options.allowedHosts),
     catalogTrust: options.catalogTrust ?? DEFAULT_CATALOG_TRUST,
     discoveryUrl: requireHttpUrl(
@@ -368,6 +378,7 @@ export function evaluatePaymentGuards({
   accept,
   config,
   sessionSpentAtomic = 0n,
+  dailySpentAtomic = null,
   maxTotalJpyc,
   requireMaxTotal = false,
   requirePrivateKey = false,
@@ -378,6 +389,7 @@ export function evaluatePaymentGuards({
   catalogListings = null,
 }) {
   const reasons = [];
+  const maxDailyAtomic = config.maxDailyAtomic ?? null;
   const parsedUrl = parseHttpUrl(url, 'url');
   if (parsedUrl === null) {
     reasons.push(REASONS.invalidUrl);
@@ -430,6 +442,17 @@ export function evaluatePaymentGuards({
     if (sessionSpentAtomic + total > config.maxSessionAtomic) {
       reasons.push(REASONS.sessionLimitExceeded);
     }
+    if (
+      maxDailyAtomic !== null &&
+      dailySpentAtomic !== null &&
+      dailySpentAtomic + total > maxDailyAtomic
+    ) {
+      reasons.push(REASONS.dailyLimitExceeded);
+    }
+  }
+
+  if (maxDailyAtomic !== null && dailySpentAtomic === null) {
+    reasons.push(REASONS.dailySpendUnavailable);
   }
 
   if (requirePrivateKey || requireSigner) {

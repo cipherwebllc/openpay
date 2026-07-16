@@ -63,6 +63,7 @@ describe('openpay-x402-sdk tarball consumer', () => {
         'src/index.mjs',
         'src/payment.mjs',
         'src/signer.mjs',
+        'src/spendStore.mjs',
       ]),
     );
 
@@ -94,12 +95,13 @@ describe('openpay-x402-sdk tarball consumer', () => {
 
     writeFileSync(
       join(consumerDir, 'smoke.mjs'),
-      `import { createJpycGate, createOpenPayClient, JPYC_DECIMALS } from 'openpay-x402-sdk';
+      `import { createFileSpendStore, createJpycGate, createOpenPayClient, JPYC_DECIMALS } from 'openpay-x402-sdk';
 const client = createOpenPayClient({ catalogTrust: false });
 const gate = createJpycGate({ resourceUrl: 'https://seller.test/paid' });
 if (JPYC_DECIMALS !== 18 || client.session.spentJpyc !== '0') process.exit(1);
 if (JSON.stringify(client) !== '{}') process.exit(2);
 if (typeof gate.handle !== 'function' || typeof gate.verify !== 'function') process.exit(3);
+if (typeof createFileSpendStore !== 'function') process.exit(4);
 `,
     );
     const smoke = run(process.execPath, ['smoke.mjs'], { cwd: consumerDir });
@@ -125,6 +127,7 @@ if (typeof gate.handle !== 'function' || typeof gate.verify !== 'function') proc
   createAuthorization,
   createCatalogCache,
   createCatalogResolver,
+  createFileSpendStore,
   createJpycGate,
   createOpenPayClient,
   createPaymentExecutor,
@@ -151,15 +154,29 @@ if (typeof gate.handle !== 'function' || typeof gate.verify !== 'function') proc
   summarizeAccept,
   validateAcceptForPayment,
   type FreeApiResult,
+  type FileSpendStoreOptions,
   type JpycGate,
   type JpycGateOptions,
   type JpycGatePaymentResponse,
   type OpenPayClient,
   type QuoteResult,
+  type SpendStore,
   type VerifiedJpycPayment,
 } from 'openpay-x402-sdk';
 
 const client: OpenPayClient = createOpenPayClient({ catalogTrust: false });
+const spendStore: SpendStore = {
+  async load() { return '0'; },
+  async save() {},
+};
+const fileSpendStoreOptions: FileSpendStoreOptions = { path: './spend.json' };
+const fileSpendStore: SpendStore = createFileSpendStore(fileSpendStoreOptions);
+createOpenPayClient({
+  privateKey: '${`0x${'1'.repeat(64)}`}',
+  maxDailyJpyc: '25',
+  spendStore,
+  catalogTrust: false,
+});
 const gateOptions: JpycGateOptions = { resourceUrl: 'https://seller.test/paid' };
 const gate: JpycGate = createJpycGate(gateOptions);
 const quote: Promise<QuoteResult> = client.quote('https://open-pay.jp/api/paid/demo');
@@ -178,13 +195,14 @@ void quote;
 void discovery;
 void handled;
 void verified;
+void fileSpendStore;
 void [
   CATALOG_CACHE_MS, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST,
   DEFAULT_DISCOVERY_URL, DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC,
   JPYC_DECIMALS, REASONS, RECEIVE_WITH_AUTHORIZATION_TYPES, SIGNER_MODES,
   SUPPORTED_NETWORKS, buildForwarderNonce, buildTypedDataFromPaymentRequirements,
   chainIdFromNetwork, createAuthorization, createCatalogCache,
-  createCatalogResolver, createJpycGate, createPaymentExecutor,
+  createCatalogResolver, createFileSpendStore, createJpycGate, createPaymentExecutor,
   createPaymentSession, createSigner,
   createSignerFromOptions, decodePaymentResponse, encodePaymentPayload,
   evaluatePaymentGuards, formatAtomicJpyc, isHostAllowed,

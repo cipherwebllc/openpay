@@ -5,3 +5,4 @@ export * from './gate.mjs';
 export * from './guards.mjs';
 export * from './payment.mjs';
 export * from './signer.mjs';
+export * from './spendStore.mjs';

@@ -37,13 +37,41 @@ export interface PaymentSigner {
   signTypedData(typedData: PaymentTypedData): Hex | Promise<Hex>;
 }
 
+export interface SpendStore {
+  /**
+   * Return the atomic JPYC spent for the key, `'0'` when no record exists, or
+   * `null` only on read failure. `null` fails closed (payments are refused),
+   * so an absent entry must be reported as `'0'`, never `null`.
+   */
+  load(key: string): Promise<string | null>;
+  /** Persist the new cumulative atomic amount. Failures must not throw. */
+  save(key: string, atomicString: string): Promise<void>;
+}
+
+export interface FileSpendStoreOptions {
+  path?: string;
+  fsImpl?: {
+    readFile(path: string, encoding: 'utf8'): Promise<string>;
+    mkdir(path: string, options: { recursive: true }): Promise<unknown>;
+    writeFile(
+      path: string,
+      data: string,
+      encoding: 'utf8',
+    ): Promise<unknown>;
+  };
+}
+
 interface ClientCommonOptions {
   maxPerCallJpyc?: JpycAmount;
   maxSessionJpyc?: JpycAmount;
+  maxDailyJpyc?: JpycAmount;
+  spendStore?: SpendStore;
   allowedHosts?: string;
   catalogTrust?: boolean;
   discoveryUrl?: string;
   fetchImpl?: typeof globalThis.fetch;
+  nowSec?: () => number;
+  now?: () => Date | number;
 }
 
 type NoSignerOptions = {
@@ -85,6 +113,7 @@ export interface RuntimeConfig {
   stewardSignerSecret: string | null;
   maxPerCallAtomic: bigint;
   maxSessionAtomic: bigint;
+  maxDailyAtomic: bigint | null;
   allowedHosts: string[];
   catalogTrust: boolean;
   discoveryUrl: string;
@@ -321,6 +350,8 @@ export const REASONS: {
   maxTotalAbovePerCallLimit: 'max_total_above_per_call_limit';
   perCallLimitExceeded: 'per_call_limit_exceeded';
   sessionLimitExceeded: 'session_limit_exceeded';
+  dailyLimitExceeded: 'daily_limit_exceeded';
+  dailySpendUnavailable: 'daily_spend_unavailable';
   buyerPrivateKeyMissing: 'buyer_private_key_missing';
   stewardSignerUnconfigured: 'steward_signer_unconfigured';
   catalogAcceptMismatch: 'catalog_accept_mismatch';
@@ -358,6 +389,9 @@ export function parseClientOptions(
   options?: OpenPayClientOptions,
 ): RuntimeConfig;
 export function createPaymentSession(initialSpentAtomic?: bigint): PaymentSession;
+export function createFileSpendStore(
+  options?: FileSpendStoreOptions,
+): SpendStore;
 export function recordSuccessfulPayment(
   session: PaymentSession,
   amountAtomic: bigint,
@@ -375,6 +409,7 @@ export function evaluatePaymentGuards(options: {
   accept: unknown;
   config: Omit<RuntimeConfig, 'discoveryUrl'> | RuntimeConfig;
   sessionSpentAtomic?: bigint;
+  dailySpentAtomic?: bigint | null;
   maxTotalJpyc?: JpycAmount;
   requireMaxTotal?: boolean;
   requirePrivateKey?: boolean;
@@ -444,7 +479,10 @@ export function createPaymentExecutor(options: {
   config: RuntimeConfig;
   session: PaymentSession;
   signer?: PaymentSigner | null;
+  signerAddress?: Address | null;
+  spendStore?: SpendStore | null;
   fetchImpl?: typeof globalThis.fetch;
   nowSec?: () => number;
+  now?: () => Date | number;
   resolveCatalogListings?: () => Promise<Map<string, unknown> | null>;
 }): PaymentExecutor;
