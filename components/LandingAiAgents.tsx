@@ -81,7 +81,16 @@ export async function LandingAiAgents() {
         >
           {t('aiEraCtaGuide')}
         </Link>
+        <Link
+          href={`/${locale}/guide/sell`}
+          prefetch={false}
+          className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:w-auto"
+        >
+          {t('aiEraCtaSell')}
+        </Link>
       </div>
+      {/* 売り手側の一言: 「実売済み」の証拠は /guide/sell が持つ (LP は控えめに 1 行だけ)。 */}
+      <p className="mt-3 text-center text-xs text-slate-500">{t('aiEraSellNote')}</p>
     </section>
   );
 }
