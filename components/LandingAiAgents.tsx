@@ -75,11 +75,11 @@ export async function LandingAiAgents() {
           {t('aiEraCtaStore')}
         </Link>
         <Link
-          href={`/${locale}/guide/agent`}
+          href={`/${locale}/guide/ai-pay`}
           prefetch={false}
           className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:w-auto"
         >
-          {t('aiEraCtaGuide')}
+          {t('aiEraCtaPay')}
         </Link>
         <Link
           href={`/${locale}/guide/sell`}
