@@ -257,8 +257,8 @@ const ja: SellGuideContent = {
   ctaButtonHref: '/discovery',
   buyerGuideLead: '買う側の設定と安全な購入手順は、',
   buyerGuideLink: {
-    label: 'AI で注文するガイド',
-    href: '/guide/agent',
+    label: 'AI が支払うガイド',
+    href: '/guide/ai-pay',
   },
 };
 
@@ -383,8 +383,8 @@ const en: SellGuideContent = {
   ctaButtonHref: '/discovery',
   buyerGuideLead: 'For buyer setup and safe purchasing, see ',
   buyerGuideLink: {
-    label: 'the AI ordering guide',
-    href: '/guide/agent',
+    label: 'the AI payments guide',
+    href: '/guide/ai-pay',
   },
 };
 
