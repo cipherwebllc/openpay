@@ -6,7 +6,8 @@
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { formatUnits } from 'viem';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -201,6 +202,7 @@ export function X402DiscoveryView({
   featured?: ReactNode;
 }) {
   const t = useTranslations('Facilitator');
+  const locale = useLocale();
   const { address, isConnected } = useAccount();
   const { isSignedIn, signIn, isSigningIn } = useSiweSession();
 
@@ -563,6 +565,14 @@ export function X402DiscoveryView({
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
               {t('listingPolicySummary')}
             </p>
+            {/* 出品の詳細手順+実売事例は /guide/sell が持つ (フォームは要点のみ)。 */}
+            <Link
+              href={`/${locale}/guide/sell`}
+              prefetch={false}
+              className="mt-1.5 inline-flex text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+            >
+              {t('sellGuideCta')}
+            </Link>
           </div>
         </div>
 
@@ -1278,6 +1288,14 @@ export function X402DiscoveryView({
               </a>
               {mcpSdkNoteSuffix}
             </p>
+            {/* 初回セットアップ (ウォレット/Steward/ガード) の全手順は /guide/ai-pay へ。 */}
+            <Link
+              href={`/${locale}/guide/ai-pay`}
+              prefetch={false}
+              className="inline-flex text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+            >
+              {t('aiPayGuideCta')}
+            </Link>
           </div>
         </details>
       </section>

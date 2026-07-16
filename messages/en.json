@@ -2202,6 +2202,8 @@
     "registerTitle": "Register a resource",
     "registerSubtitle": "Register once — agents discover it and pay in JPYC, straight to you.",
     "listingPolicySummary": "Listings require a live 402 gate, the right to provide and charge for the resource, and the OpenPay method. See the listing policy in README for details.",
+    "sellGuideCta": "Seller guide (with a real sale case study)",
+    "aiPayGuideCta": "Setup guide: let your AI pay",
     "connectPrompt": "A wallet connection is required to register",
     "signInStatement": "Sign in to the OpenPay x402 Facilitator.",
     "signInCta": "Sign in with wallet",

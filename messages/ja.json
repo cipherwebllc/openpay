@@ -2202,6 +2202,8 @@
     "registerTitle": "リソースを登録する",
     "registerSubtitle": "登録すると、エージェントが発見して JPYC で支払えます。受取は直接着金。",
     "listingPolicySummary": "掲載には、実在する 402 ゲート、提供・課金する正当な権利、OpenPay 方式が必要です。詳細は README の掲載ルールをご確認ください。",
+    "sellGuideCta": "出品ガイドを見る（実売事例つき）",
+    "aiPayGuideCta": "セットアップ手順: AIが支払うガイド",
     "connectPrompt": "登録にはウォレット接続が必要です",
     "signInStatement": "OpenPay x402 ファシリテーターにサインインします。",
     "signInCta": "ウォレットでサインイン",

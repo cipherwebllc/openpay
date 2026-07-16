@@ -120,7 +120,7 @@ describe('SELL_GUIDE: 主要リンク', () => {
     expect(c.snippetLink.href).toBe('/discovery');
     expect(c.registrationLink.href).toBe('/discovery');
     expect(c.ctaButtonHref).toBe('/discovery');
-    expect(c.buyerGuideLink.href).toBe('/guide/agent');
+    expect(c.buyerGuideLink.href).toBe('/guide/ai-pay');
   });
 
   it('ja/en で tx・URL がすべて同一', () => {
