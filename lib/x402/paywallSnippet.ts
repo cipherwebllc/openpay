@@ -10,6 +10,7 @@ const ORIGIN = new URL(LEGAL_ENTITY.siteUrl).origin;
 
 export function buildPaywallSnippet(resourceUrl: string): string {
   return `// OpenPay JPYC x402 ゲート (自己完結・Node 18+/Next.js/Express どこでも)
+// npm: openpay-x402-sdk の createJpycGate でも同等のゲートを import できます。
 // 使い方: 課金したいハンドラの先頭で await jpycGate(req) を呼び、
 //   - 戻り値が Response ならそれをそのまま返す (未払い 402 / 検証失敗)
 //   - null なら支払い済み — 本来の処理を続行し、レスポンスに receipt ヘッダを付ける

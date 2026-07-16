@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Add `createJpycGate` for seller-side x402 gates backed by the OpenPay catalog,
+  including five-minute `accepts` caching and request-specific resource URLs.
+- Support both one-shot verify-to-settle handling and split verification followed
+  by settlement after an expensive upstream operation succeeds.
+- Use Edge-compatible UTF-8 base64 handling for payment and settlement headers.
+
 ## 0.2.1
 
 - Compare `accept.resource` against the requested URL using decoded query

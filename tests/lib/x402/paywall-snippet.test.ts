@@ -35,6 +35,12 @@ describe('lib/x402/paywallSnippet', () => {
     expect(snippet).toContain('X-PAYMENT-RESPONSE');
   });
 
+  it('同等の npm SDK ゲートを案内する', () => {
+    expect(snippet).toContain(
+      'openpay-x402-sdk の createJpycGate でも同等のゲートを import できます。',
+    );
+  });
+
   it('accepts は自分のカタログ掲載から取得する (手数料改定に自動追従する設計)', () => {
     expect(snippet).toContain('/api/discovery');
     expect(snippet).toContain('open-pay.jp');

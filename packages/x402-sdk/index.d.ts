@@ -194,6 +194,28 @@ export function createOpenPayClient(
   options?: OpenPayClientOptions,
 ): OpenPayClient;
 
+export interface JpycGateOptions {
+  resourceUrl: string;
+  openpayOrigin?: string;
+  fetchImpl?: typeof globalThis.fetch;
+  now?: () => number;
+}
+
+export interface JpycGatePaymentResponse {
+  paymentResponseHeader: string;
+}
+
+export interface VerifiedJpycPayment {
+  settle(): Promise<Response | JpycGatePaymentResponse>;
+}
+
+export interface JpycGate {
+  handle(request: Request): Promise<Response | JpycGatePaymentResponse>;
+  verify(request: Request): Promise<Response | VerifiedJpycPayment>;
+}
+
+export function createJpycGate(options: JpycGateOptions): JpycGate;
+
 export const RECEIVE_WITH_AUTHORIZATION_TYPES: {
   ReceiveWithAuthorization: Array<{ name: string; type: string }>;
 };
