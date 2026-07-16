@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Compare `accept.resource` against the requested URL using decoded query
+  canonicalization (ordered `URLSearchParams` pairs) instead of byte equality.
+  Hosts such as Vercel/Next.js normalize `%20` to `+` before the app sees the
+  request, which made honest sellers fail `resource_mismatch`. Distinct decoded
+  values (`%2B`, double encoding, reordered or extra params) still mismatch.
+
 ## 0.2.0
 
 - Trust query-string variants of a query-free catalog URL after the live

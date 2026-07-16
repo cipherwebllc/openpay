@@ -355,6 +355,41 @@ describe('openpay-x402-sdk catalog trust', () => {
     expect(result.reasons).not.toContain('catalog_accept_mismatch');
   });
 
+  // Vercel/Next 系は request.url の時点で %20 を + に正規化する (原文復元不可) ため、
+  // resource 照合は「デコード後の (key,value) 列一致」で同義エンコーディングを同一視する。
+  it.each([
+    [
+      'live resource uses + for the buyer %20',
+      `${THIRD_PARTY_RESOURCE}?q=What%20is%20it%3F`,
+      `${THIRD_PARTY_RESOURCE}?q=What+is+it%3F`,
+    ],
+    [
+      'live resource uses %20 for the buyer +',
+      `${THIRD_PARTY_RESOURCE}?q=a+b`,
+      `${THIRD_PARTY_RESOURCE}?q=a%20b`,
+    ],
+  ])('accepts equivalent query encodings (%s)', async (_label, requestUrl, liveResource) => {
+    const result = await quoteCatalogVariant(requestUrl, {
+      liveAccept: accept(liveResource),
+    });
+
+    expect(result).toMatchObject({ ok: true, reasons: [] });
+  });
+
+  it.each([
+    ['literal plus is not a space', `${THIRD_PARTY_RESOURCE}?q=a%2Bb`, `${THIRD_PARTY_RESOURCE}?q=a+b`],
+    ['double encoding differs', `${THIRD_PARTY_RESOURCE}?q=a%2520b`, `${THIRD_PARTY_RESOURCE}?q=a%20b`],
+    ['different value', `${THIRD_PARTY_RESOURCE}?q=hello`, `${THIRD_PARTY_RESOURCE}?q=world`],
+    ['extra param', `${THIRD_PARTY_RESOURCE}?q=hello`, `${THIRD_PARTY_RESOURCE}?q=hello&x=1`],
+    ['reordered params', `${THIRD_PARTY_RESOURCE}?a=1&b=2`, `${THIRD_PARTY_RESOURCE}?b=2&a=1`],
+  ])('rejects non-equivalent queries (%s)', async (_label, requestUrl, liveResource) => {
+    const result = await quoteCatalogVariant(requestUrl, {
+      liveAccept: accept(liveResource),
+    });
+
+    expect(result.reasons).toContain('resource_mismatch');
+  });
+
   it.each([
     ['uppercase host and default port', 'https://CATALOG.EXAMPLE:443/api/data?q=hello'],
     ['dot segment', 'https://catalog.example/api/x/../data?q=hello'],
