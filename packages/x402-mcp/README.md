@@ -233,7 +233,15 @@ Recommended typed-data policy shape for this MCP:
 - `to address_in`: OpenPay forwarder addresses you allow.
 - `value uint_max`: the largest per-signature amount you allow Steward to sign.
 
-Known upstream constraint: current Steward `develop` may reject typed-data policy registration through the API because of a validation bug. Until the upstream fix is available, local Steward deployments may need `STEWARD_ALLOW_UNSAFE_TYPED_DATA_SIGNING=true` and `STEWARD_ALLOW_VAULT_UNSAFE_TYPED_DATA_SIGNING=true`. Even then, this MCP still applies per-call, per-session, host allowlist, resource, JPYC, and forwarder-split guards before requesting a signature.
+Historical upstream constraint (resolved): Steward `develop` builds older than
+[Steward-Fi/steward#163](https://github.com/Steward-Fi/steward/pull/163) (merge commit
+`58e690d`, 2026-07-16) rejected typed-data policy registration through the API because of a
+validation bug ([#162](https://github.com/Steward-Fi/steward/issues/162)). On those older
+builds only, local deployments may need `STEWARD_ALLOW_UNSAFE_TYPED_DATA_SIGNING=true` and
+`STEWARD_ALLOW_VAULT_UNSAFE_TYPED_DATA_SIGNING=true` as a workaround; update Steward and
+register the typed-data policy properly instead. In either case, this MCP still applies
+per-call, per-session, host allowlist, resource, JPYC, and forwarder-split guards before
+requesting a signature.
 
 ## Money Safety
 
