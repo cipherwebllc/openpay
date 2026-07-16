@@ -251,6 +251,19 @@ function addAssetReasons(reasons, rawAccept) {
   }
 }
 
+// クエリの正準比較: URLSearchParams でデコードした (key, value) 列の順序付き一致。
+// Vercel/Next 系ホストは request.url の時点でスペースを `+` に正規化するため (`%20` の原文は
+// サーバー側で復元不可能)、accept.resource と要求 URL のバイト一致要求は正当な売り手を
+// 恒常的に落とす (gateway.open-pay.jp で実害)。`%20` と `+` は form-urlencoding で同一の
+// スペースにデコードされる一方、`%2B` (リテラル +) や二重エンコードは異なる値にデコード
+// されるので、この比較は同義エンコーディングだけを同一視し resource 束縛は緩めない。
+function sameQuery(a, b) {
+  const ap = [...a.searchParams];
+  const bp = [...b.searchParams];
+  if (ap.length !== bp.length) return false;
+  return ap.every(([k, v], i) => bp[i][0] === k && bp[i][1] === v);
+}
+
 function addResourceReason(reasons, rawAccept, requestUrl) {
   const requested = parseHttpUrl(requestUrl, 'url');
   const resource =
@@ -261,7 +274,11 @@ function addResourceReason(reasons, rawAccept, requestUrl) {
     requested === null ||
     resource === null ||
     resource.hostname.toLowerCase() !== requested.hostname.toLowerCase() ||
-    resource.toString() !== requested.toString()
+    resource.origin !== requested.origin ||
+    resource.pathname !== requested.pathname ||
+    resource.username !== requested.username ||
+    resource.password !== requested.password ||
+    !sameQuery(resource, requested)
   ) {
     reasons.push(REASONS.resourceMismatch);
   }
