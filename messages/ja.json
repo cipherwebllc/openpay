@@ -59,6 +59,8 @@
     "aiEraNow": "OpenPay はここ",
     "aiEraCtaStore": "AIストアを見る",
     "aiEraCtaGuide": "AIで注文するガイド",
+    "aiEraCtaSell": "APIを売るガイド",
+    "aiEraSellNote": "出品は無料。実売はオンチェーンで検証できます。",
     "howItWorksVisualAlt": "店舗が決済 QR を作り、顧客がスマホで読み取り、店舗ウォレットへ売上が届く流れの図",
     "howItWorksDemoCaption": "実際の操作（モバイル）",
     "howItWorksDemoCreate": "① 受取（決済QR）",

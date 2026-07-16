@@ -59,6 +59,8 @@
     "aiEraNow": "OpenPay is here",
     "aiEraCtaStore": "See the AI store",
     "aiEraCtaGuide": "Order-with-AI guide",
+    "aiEraCtaSell": "Sell your API",
+    "aiEraSellNote": "Listing is free. Real sales are verifiable on-chain.",
     "howItWorksVisualAlt": "Diagram showing a merchant creating a payment QR, a customer scanning it, and funds arriving in the merchant wallet",
     "howItWorksDemoCaption": "Real interactions (mobile)",
     "howItWorksDemoCreate": "1. Receive (payment QR)",
