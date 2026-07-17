@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0
+
+- Add optional `MAX_DAILY_JPYC`: a per-UTC-day cumulative spend cap that
+  survives restarts, persisted via `openpay-x402-sdk` 0.4.x's file spend store
+  (`~/.openpay-x402/spend.json`, keyed by signer address and UTC date).
+  Unreadable store fails closed; a write failure after a successful unlock
+  never alters the payment response. Unset keeps previous behavior.
+- Tool wire (names, schemas, descriptions) is unchanged.
+
 ## 0.11.0
 
 - Trust query-string variants of a query-free catalog URL after the same live

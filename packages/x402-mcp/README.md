@@ -173,6 +173,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `STEWARD_SIGNER_SECRET` | unset | Required when `SIGNER_MODE=steward`; scoped signer secret. Treated as a secret. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
 | `MAX_SESSION_JPYC` | `100` | Process-lifetime cumulative cap for successful `x402_pay` calls. Restarting the process resets it. |
+| `MAX_DAILY_JPYC` | unset | Optional per-UTC-day cumulative cap that **survives restarts**. Spend is persisted to `~/.openpay-x402/spend.json`, keyed by signer address and UTC date (older days are pruned). If the store cannot be read the payment is refused (fail-closed); a store write failure after a successful unlock never alters the payment response. Unset disables the daily cap (previous behavior). |
 | `CATALOG_TRUST` | `true` | When true, URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
@@ -245,7 +246,7 @@ requesting a signature.
 
 ## Money Safety
 
-`x402_pay` refuses to sign unless the endpoint host is allowed, the x402 `accepts[0]` entry is an OpenPay `forwarder-split` JPYC challenge, the resource URL matches the requested URL, the caller's `maxTotalJpyc` is high enough but not above `MAX_PER_CALL_JPYC`, and the process cumulative spend remains within `MAX_SESSION_JPYC`.
+`x402_pay` refuses to sign unless the endpoint host is allowed, the x402 `accepts[0]` entry is an OpenPay `forwarder-split` JPYC challenge, the resource URL matches the requested URL, the caller's `maxTotalJpyc` is high enough but not above `MAX_PER_CALL_JPYC`, and the process cumulative spend remains within `MAX_SESSION_JPYC`. With `MAX_DAILY_JPYC` set, the day's persisted spend must also stay within the daily cap.
 
 The server never logs or returns your private key, Steward API key, or Steward signer secret. It also does not return the payment authorization signature; the signature is only placed in the `X-PAYMENT` header required by the x402 retry.
 
