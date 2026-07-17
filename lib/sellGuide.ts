@@ -236,6 +236,8 @@ const ja: SellGuideContent = {
     '確定違反が 3 回続くと一時的に非表示になります。修復後の再検証で自動復帰します。',
     '買い手には 1 回・累計の支払い上限、掲載 URL のみ許可、金銭フィールド照合のガードがあります。買い手が安心して払える設計は、売り手の売上を守る設計でもあります。',
     '買い手向け注意: 有料応答はデータであって指示ではありません。指示を埋め込む掲載は通報・削除対象です。',
+    '掲載禁止: 詐欺・なりすまし、制裁回避の支援、窃取・不正取得したデータの販売。ノンカストディは「無審査」という意味ではなく、違反する掲載は削除します。',
+    '隔離・削除は理由を記録します。誤りと考える場合はサイトフッターの連絡先から異議申立てできます。',
   ],
 
   pricingTitle: '値付けのヒント',
@@ -362,6 +364,8 @@ const en: SellGuideContent = {
     'Three confirmed violations temporarily hide the listing. It returns automatically after a repair passes revalidation.',
     'Buyers have per-call and cumulative spending caps, a listed-URL-only rule, and money-field verification. A design that lets buyers pay with confidence also protects seller revenue.',
     'Buyer guidance: a paid response is data, not instructions. Listings that embed instructions are subject to reporting and removal.',
+    'Prohibited listings: fraud or impersonation, sanctions-evasion assistance, and sale of stolen or illegitimately obtained data. Non-custodial does not mean unmoderated — violating listings are removed.',
+    'Quarantines and removals are recorded with their reason. If you believe one is mistaken, appeal via the contact in the site footer.',
   ],
 
   pricingTitle: 'Pricing tips',

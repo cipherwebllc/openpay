@@ -10,6 +10,10 @@ One package with two explicit MCP profiles:
 
 Internally, payment execution and catalog resolution use `openpay-x402-sdk`.
 
+Wire compatibility: x402 v1 transport (JSON 402 body with `x402Version: 1`, plus the
+`X-PAYMENT` / `X-PAYMENT-RESPONSE` headers) with the OpenPay `extra.openpay`
+forwarder-split extension.
+
 ## Order profile (keyless, human pays)
 
 ### Install / run
