@@ -3,6 +3,11 @@
 Node.js 20+ SDK for discovering, quoting, and buying OpenPay x402 resources priced
 in JPYC. It ships as plain ESM and has no build step.
 
+Wire compatibility: x402 v1 transport (JSON 402 body with `x402Version: 1`, plus the
+`X-PAYMENT` / `X-PAYMENT-RESPONSE` headers) with the OpenPay `extra.openpay`
+forwarder-split extension. OpenPay's first-party resources also accept the v2 header
+transport; this SDK speaks v1.
+
 ## Quick start
 
 ```bash
