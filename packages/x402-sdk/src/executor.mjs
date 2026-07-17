@@ -55,10 +55,54 @@ export function createPaymentExecutor({
   config,
   session,
   signer = null,
+  signerAddress = signer?.address ?? null,
+  spendStore = null,
   fetchImpl = fetch,
   nowSec = () => Math.floor(Date.now() / 1000),
+  now = () => new Date(),
   resolveCatalogListings = async () => null,
 }) {
+  const dailyLimitEnabled =
+    config.maxDailyAtomic !== null &&
+    config.maxDailyAtomic !== undefined &&
+    spendStore !== null;
+  const guardConfig =
+    !dailyLimitEnabled && config.maxDailyAtomic != null
+      ? { ...config, maxDailyAtomic: null }
+      : config;
+
+  async function loadDailySpend() {
+    if (!dailyLimitEnabled || typeof signerAddress !== 'string') {
+      return { key: null, spentAtomic: null };
+    }
+    const current = now();
+    const date = (current instanceof Date ? current : new Date(current))
+      .toISOString()
+      .slice(0, 10);
+    const key = `${signerAddress.toLowerCase()}:${date}`;
+    try {
+      const stored = await spendStore.load(key);
+      if (typeof stored !== 'string' || !/^[0-9]+$/.test(stored)) {
+        return { key, spentAtomic: null };
+      }
+      return { key, spentAtomic: BigInt(stored) };
+    } catch {
+      return { key, spentAtomic: null };
+    }
+  }
+
+  async function saveDailySpend(dailySpend, amountAtomic) {
+    if (dailySpend.key === null || dailySpend.spentAtomic === null) return;
+    try {
+      await spendStore.save(
+        dailySpend.key,
+        (dailySpend.spentAtomic + amountAtomic).toString(),
+      );
+    } catch {
+      // The unlock already succeeded; store failure must not replace the payment response.
+    }
+  }
+
   async function quoteImpl(url) {
     if (typeof url !== 'string') throw new Error('url is required');
     const response = await fetchImpl(url, {
@@ -74,11 +118,13 @@ export function createPaymentExecutor({
         reasons: ['expected_402_with_accepts'],
       };
     }
+    const dailySpend = dailyLimitEnabled ? await loadDailySpend() : null;
     const guard = evaluatePaymentGuards({
       url,
       accept,
-      config,
+      config: guardConfig,
       sessionSpentAtomic: session.spentAtomic,
+      dailySpentAtomic: dailySpend?.spentAtomic ?? null,
       catalogListings: await resolveCatalogListings(),
     });
     return quoteShape(url, response.status, guard);
@@ -107,11 +153,13 @@ export function createPaymentExecutor({
         reasons: ['expected_402_with_accepts'],
       };
     }
+    const dailySpend = dailyLimitEnabled ? await loadDailySpend() : null;
     const guard = evaluatePaymentGuards({
       url,
       accept,
-      config,
+      config: guardConfig,
       sessionSpentAtomic: session.spentAtomic,
+      dailySpentAtomic: dailySpend?.spentAtomic ?? null,
       maxTotalJpyc,
       requireMaxTotal: true,
       requireSigner: true,
@@ -142,6 +190,9 @@ export function createPaymentExecutor({
     const unlockedBody = await readJson(unlocked);
     if (unlocked.status >= 200 && unlocked.status < 300) {
       recordSuccessfulPayment(session, guard.summary.totalAtomic);
+      if (dailySpend !== null) {
+        await saveDailySpend(dailySpend, guard.summary.totalAtomic);
+      }
     }
     const receipt = decodePaymentResponse(
       unlocked.headers.get('x-payment-response'),
