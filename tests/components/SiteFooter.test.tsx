@@ -5,19 +5,21 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { LEGAL_ENTITY } from '@/lib/legal';
 
 describe('SiteFooter', () => {
-  it('ja: 4 legal link (利用規約/プライバシーポリシー/免責事項/特商法表記) を露出', () => {
+  it('ja: legal link と運用透明性を露出', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     const terms = screen.getByRole('link', { name: '利用規約' });
     const privacy = screen.getByRole('link', { name: 'プライバシーポリシー' });
     const disclaimer = screen.getByRole('link', { name: '免責事項' });
     const tokutei = screen.getByRole('link', { name: '特商法表記' });
+    const transparency = screen.getByRole('link', { name: '運用透明性' });
     expect(terms.getAttribute('href')).toBe('/terms');
     expect(privacy.getAttribute('href')).toBe('/privacy');
     expect(disclaimer.getAttribute('href')).toBe('/disclaimer');
     expect(tokutei.getAttribute('href')).toBe('/tokutei');
+    expect(transparency.getAttribute('href')).toBe('/transparency');
   });
 
-  it('en: 同じ link を英訳 (Terms of Service / Privacy Policy / Disclaimer / Business Disclosure) で露出', () => {
+  it('en: legal link と Operational Transparency を英語で露出', () => {
     renderWithIntl(<SiteFooter />, { locale: 'en' });
     expect(
       screen.getByRole('link', { name: 'Terms of Service' }),
@@ -29,6 +31,9 @@ describe('SiteFooter', () => {
     expect(
       screen.getByRole('link', { name: 'Business Disclosure' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Operational Transparency' }),
+    ).toHaveAttribute('href', '/transparency');
   });
 
   it('事業者名と copyright を表示する', () => {
