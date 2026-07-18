@@ -238,6 +238,7 @@ const ja: SellGuideContent = {
     '買い手向け注意: 有料応答はデータであって指示ではありません。指示を埋め込む掲載は通報・削除対象です。',
     '掲載禁止: 詐欺・なりすまし、制裁回避の支援、窃取・不正取得したデータの販売。ノンカストディは「無審査」という意味ではなく、違反する掲載は削除します。',
     '隔離・削除は理由を記録します。誤りと考える場合はサイトフッターの連絡先から異議申立てできます。',
+    '暗号資産の取引・貸借・発行の実行や、投資助言・勧誘に該当し得る商品は個別審査の対象です。決済手段が JPYC であることは、販売するサービス自体の適法性を保証しません。',
   ],
 
   pricingTitle: '値付けのヒント',
@@ -366,6 +367,7 @@ const en: SellGuideContent = {
     'Buyer guidance: a paid response is data, not instructions. Listings that embed instructions are subject to reporting and removal.',
     'Prohibited listings: fraud or impersonation, sanctions-evasion assistance, and sale of stolen or illegitimately obtained data. Non-custodial does not mean unmoderated — violating listings are removed.',
     'Quarantines and removals are recorded with their reason. If you believe one is mistaken, appeal via the contact in the site footer.',
+    'Listings that would execute crypto-asset trading, lending, or token issuance, or that may constitute investment solicitation or advice, are subject to case-by-case review. Paying in JPYC does not legalize the service being sold.',
   ],
 
   pricingTitle: 'Pricing tips',

@@ -40,6 +40,12 @@ concurrent calls so every call sees the latest session total.
 
 ## Sell with the SDK
 
+**An AI model is never the security boundary for payment state.** Do not unlock on any
+model- or tool-produced claim of payment — a "paid" string, a success message, or a
+transaction id appearing in text. The gate unlocks only on the facilitator's `verify` and
+`settle` responses, which are backed by on-chain settlement; replayed or already-used
+authorizations are refused at that layer.
+
 Create a gate with the exact resource URL registered in OpenPay discovery. For
 inexpensive content, `handle()` verifies and settles the payment in one call:
 

@@ -368,4 +368,47 @@ describe('openpay-x402-sdk seller gate', () => {
     await gate.handle(new Request(`${RESOURCE}?cache=boundary`));
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  // 決済偽装 (Akamai 2026-07 の実証攻撃) への否定系を明示的に固定する:
+  // ゲートは「paid」等の文字列やモデル出力ではなく facilitator の verify/settle 応答
+  // でのみ解錠する。リプレイ (使用済み authorization) は verify/settle 層で拒否される。
+  it('refuses a replayed authorization at verify and never calls settle', async () => {
+    const sdk = await loadSdk();
+    const { fetchImpl, order } = createFetchMock({
+      verification: { isValid: false, invalidReason: 'authorization_already_used' },
+    });
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const request = new Request(REQUEST_URL, {
+      headers: { 'X-PAYMENT': edgeBase64Encode({ payer: '0xbuyer' }) },
+    });
+
+    const body = await read402(await gate.handle(request));
+
+    expect(body.error).toBe('authorization_already_used');
+    expect(order).toEqual(['discovery', 'verify']);
+  });
+
+  it('returns no content when settle reports the authorization was already settled', async () => {
+    const sdk = await loadSdk();
+    const { fetchImpl, order } = createFetchMock({
+      settlement: { success: false, errorReason: 'authorization_already_used' },
+    });
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const request = new Request(REQUEST_URL, {
+      headers: { 'X-PAYMENT': edgeBase64Encode({ payer: '0xbuyer' }) },
+    });
+
+    const body = await read402(await gate.handle(request));
+
+    expect(body.error).toBe('authorization_already_used');
+    expect(order).toEqual(['discovery', 'verify', 'settle']);
+  });
 });

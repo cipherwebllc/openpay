@@ -32,6 +32,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 12. **money-path（relay/settle/fee/order 検証）への変更は「追加のみ」を原則**とし、既存の制御フロー・応答・エラー処理を変えない。post-response 処理は `after()`（next/server）を使う（unawaited promise は serverless で凍結・応答内 await は latency 悪化）。
 13. **防御的プログラミングの基準**（2026-07-04 user 確定）: **意味のない防御は禁止・障害を隣に波及させないための意図的な防御は必須**。禁止 = 起こり得ない状態への保険、エラー握りつぶしによる偽成功（cookie は出すがセッション保存失敗、等）、仕様を曖昧にする fallback。必須 = 付帯処理が本体を巻き込まない隔離 — 例: push/通知/メーターは no-throw で決済本体に波及させない・localStorage/ブラウザ API は既存パターンの try-catch・rate limit ストレージ障害で本体機能を止めない fail-open。防御を書くときは**「何の波及を断つための防御か」をコメントで示す**（示せないならその防御は不要の疑い）。
 14. **手数料・チェーン対応・課金条件を変えたら「開示 3 点セット」を同期**（2026-07-07 user 確定）: ①LP（`messages/` の `Landing.benefitsFee*`/`supportFee*`/FAQ）②法務文書（`lib/legal.ts` の `DISCLOSED_*` 定数 + Terms/免責/特商法）③**`public/llms.txt`**。①②は `tests/app/legal.test.tsx` 等のフェンスが CI で検出するが、**③は静的ファイルでテストフェンスが無い**ため変更時に必ず目視/grep で同期する（放置すると AI 検索・AI エージェントが古い料率を引用し続ける）。
+15. **money-path / x402 wire / 秘密情報に触れる変更は「初期生成」と「正式採用」を分離**（2026-07-18 採用）: AI が実装しテストが green でも、merge 前に人間（user）の明示レビューを必須とし、決済状態の判定を LLM の出力に委ねる実装（"paid" 文字列や会話履歴を信じて解錠する等）を導入しない。決済状態の真実は facilitator の verify/settle とオンチェーンのみ。
 
 ## 自律運転の型（全モデル共通・Fable/Opus/Sonnet/Codex）
 
