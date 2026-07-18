@@ -15,6 +15,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 ## 主要ページ
 
 - [OpenPay トップ](https://open-pay.jp/ja): サービス概要・導入メリット・使い方・FAQ・利用料
+- [運用の透明性](https://open-pay.jp/ja/transparency): 資金を保管しない仕組み・対応コントラクト・決済検証と確定・手数料の決め方・返金不可・掲載審査と通報の 1 ページ集約
 - [モバイルオーダー / POS 併用ガイド](https://open-pay.jp/ja/guide/pos): 既存のPOSレジと併用する運用ガイド
 - [店頭キット](https://open-pay.jp/ja/kit): 決済QRポスター等の印刷キット
 - [受け取りを始める](https://open-pay.jp/ja/create): 決済QR・モバイルオーダーの作成

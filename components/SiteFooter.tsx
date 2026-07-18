@@ -50,6 +50,13 @@ export function SiteFooter() {
           {t('links.tokutei')}
         </Link>
         <Link
+          href="/transparency"
+          className="hover:text-slate-700 hover:underline"
+          prefetch={false}
+        >
+          {t('links.transparency')}
+        </Link>
+        <Link
           href="/discovery"
           className="hover:text-slate-700 hover:underline"
           prefetch={false}

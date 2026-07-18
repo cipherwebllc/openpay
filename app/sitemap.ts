@@ -15,6 +15,7 @@ const PUBLIC_ROUTES = [
   '/explore',
   '/kit',
   '/discovery',
+  '/transparency',
   '/guide/pos',
   '/guide/agent',
 ] as const;
