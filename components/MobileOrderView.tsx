@@ -72,7 +72,7 @@ const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
-// 受け渡し照合用の短い受注番号 (客の完了画面 + 店主の受注カードの双方に表示)。混同しやすい
+// 受け渡し照合用の短い受付番号 (客の完了画面 + 店主の受注カードの双方に表示)。混同しやすい
 // 0/1/O/I/L を除いた 31 文字 × 6 桁 ≈ 8.87 億通り。
 const ORDER_CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 function generateOrderCode(): string {
@@ -206,7 +206,7 @@ export function MobileOrderView({
     },
     [handle],
   );
-  // 受注リレー (flag ON) 用の短い受注番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
+  // 受注リレー (flag ON) 用の短い受付番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
   const [orderId, setOrderId] = useState<string | null>(null);
   const orderIdGenerated = useRef(false);
@@ -424,8 +424,8 @@ export function MobileOrderView({
             : {}),
           // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
           // orderId = webhook→店主の受注フィード + 完了画面の見出し。
-          // receiptNo = 同じ受注番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
-          //   → 完了画面を閉じても「レシート番号」として受注番号を再確認できる (受け渡し照合用)。
+          // receiptNo = 同じ受付番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
+          //   → 完了画面を閉じても「レシート番号」として受付番号を再確認できる (受け渡し照合用)。
           ...(orderRelayWebhook && orderId
             ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
             : {}),

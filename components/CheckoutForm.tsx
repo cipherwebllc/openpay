@@ -909,7 +909,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           blockNumber: gasless.data.blockNumber,
           explorerBase,
           merchantAddress: params.to,
-          orderNo: params.orderId, // 受注番号 (受け渡し照合用・order_id があるときのみ表示)
+          orderNo: params.orderId, // 受付番号 (受け渡し照合用・order_id があるときのみ表示)
         }
       : useRelay && relay.data?.success && relay.data.txHash
         ? {

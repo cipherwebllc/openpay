@@ -193,7 +193,7 @@ describe('OrderFeedPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('受注番号 (受け渡し照合用) を表示', async () => {
+  it('受付番号 (受け渡し照合用) を表示', async () => {
     h.orders = [order];
     render();
     expect(await screen.findByText(/7K3Q/)).toBeInTheDocument();

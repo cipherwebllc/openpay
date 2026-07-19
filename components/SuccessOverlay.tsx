@@ -40,7 +40,7 @@ export function SuccessOverlay({
    * 追加で描画し「他に何件着金しているか」を顧客 / 店主が即座に検証できるようにする。
    */
   merchantAddress?: string;
-  /** 受注番号 (受け渡し照合用)。checkout で order_id があるときのみ・無ければ表示しない。 */
+  /** 受付番号 (受け渡し照合用)。checkout で order_id があるときのみ・無ければ表示しない。 */
   orderNo?: string;
   onDismiss: () => void;
 }) {
@@ -136,7 +136,7 @@ export function SuccessOverlay({
         </p>
       </div>
 
-      {/* 受注番号 (受け渡し照合用)。店主が遠くから読める大きさ・受け渡し時に「この番号の方」で照合。
+      {/* 受付番号 (受け渡し照合用)。店主が遠くから読める大きさ・受け渡し時に「この番号の方」で照合。
           checkout で order_id があるときのみ (QR/チップ等の単発決済では出ない)。 */}
       {orderNo && (
         <div className="text-center">
