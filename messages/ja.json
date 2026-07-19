@@ -2142,8 +2142,15 @@
     "tableEdit": "訂正",
     "cancel": "キャンセル"
   },
+  "OrderPickupMonitor": {
+    "title": "呼出モニター",
+    "preparing": "準備中",
+    "calling": "呼出中",
+    "preparingEmpty": "準備中の受付番号はありません。",
+    "callingEmpty": "現在呼び出し中の受付番号はありません。"
+  },
   "OrderCall": {
-    "heading": "🔔 呼び出し",
+    "heading": "🔔 スタッフ呼び出し",
     "table": "テーブル {table}",
     "minutesAgo": "{m} 分前",
     "done": "対応した",
@@ -2184,6 +2191,8 @@
     "description": "店員端末をウォレットなしで厨房／ホールに繋ぐリンクです。閲覧と進捗操作のみ可能で、送金や受取先の変更はできません（資金は安全）。",
     "kitchen": "厨房",
     "hall": "ホール",
+    "pickup": "呼出モニター",
+    "pickupDescription": "お客様向けに受付番号の準備中／呼出中を表示します。",
     "copy": "コピー",
     "issue": "リンクを発行",
     "issuing": "発行中…",

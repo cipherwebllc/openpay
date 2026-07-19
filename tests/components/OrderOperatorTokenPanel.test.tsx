@@ -8,6 +8,30 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '../../messages/ja.json';
 import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
 
+const flags = vi.hoisted(() => ({
+  enableOrderFulfillment: true,
+  enableOrderRelay: true,
+  enableOrderPickup: true,
+}));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableOrderFulfillment() {
+        return flags.enableOrderFulfillment;
+      },
+      get enableOrderRelay() {
+        return flags.enableOrderRelay;
+      },
+      get enableOrderPickup() {
+        return flags.enableOrderPickup;
+      },
+    },
+  };
+});
+
 const TOKEN = 'a'.repeat(43);
 // getOk/postOk で GET(再表示)/POST(発行) の失敗を注入し、loadError/opError 分岐を実行させる。
 const fetchHold: { token: string | null; getOk: boolean; postOk: boolean } = {
@@ -47,6 +71,9 @@ beforeEach(() => {
   fetchHold.token = null;
   fetchHold.getOk = true;
   fetchHold.postOk = true;
+  flags.enableOrderFulfillment = true;
+  flags.enableOrderRelay = true;
+  flags.enableOrderPickup = true;
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -57,7 +84,7 @@ describe('OrderOperatorTokenPanel', () => {
     expect(screen.queryByText('厨房')).toBeNull();
   });
 
-  it('発行: POST → 厨房/ホールの ?t= リンクと再発行/取消を表示', async () => {
+  it('発行: POST → 厨房/ホール/呼出モニターの ?t= リンクと再発行/取消を表示', async () => {
     renderPanel();
     // 初期 GET 解決前は発行ボタンが disabled(=click が no-op)。enabled を待ってから押す。
     const issueBtn = await screen.findByRole('button', { name: /リンクを発行/ });
@@ -67,6 +94,10 @@ describe('OrderOperatorTokenPanel', () => {
     const kitchenInput = (await screen.findByLabelText('厨房')) as HTMLInputElement;
     expect(kitchenInput.value).toContain('/ja/orders/kitchen?t=' + 'b'.repeat(43));
     expect((screen.getByLabelText('ホール') as HTMLInputElement).value).toContain('/ja/orders/hall?t=');
+    expect((screen.getByLabelText('呼出モニター') as HTMLInputElement).value).toContain(
+      '/ja/orders/pickup?t=',
+    );
+    expect(screen.getByText('お客様向けに受付番号の準備中／呼出中を表示します。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /再発行/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /取り消し/ })).toBeInTheDocument();
     const posted = fetchSpy.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'POST');
@@ -78,6 +109,20 @@ describe('OrderOperatorTokenPanel', () => {
     renderPanel();
     const input = (await screen.findByLabelText('厨房')) as HTMLInputElement;
     expect(input.value).toContain(`?t=${TOKEN}`);
+  });
+
+  it.each([
+    ['fulfillment', false, true, true],
+    ['relay', true, false, true],
+    ['pickup', true, true, false],
+  ] as const)('%s flag が OFF なら呼出モニターリンクを出さない', async (_name, fulfillment, relay, pickup) => {
+    flags.enableOrderFulfillment = fulfillment;
+    flags.enableOrderRelay = relay;
+    flags.enableOrderPickup = pickup;
+    fetchHold.token = TOKEN;
+    renderPanel();
+    await screen.findByLabelText('厨房');
+    expect(screen.queryByLabelText('呼出モニター')).toBeNull();
   });
 
   it('取り消し: DELETE を送る', async () => {

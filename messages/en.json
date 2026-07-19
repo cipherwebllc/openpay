@@ -2142,8 +2142,15 @@
     "tableEdit": "Edit",
     "cancel": "Cancel"
   },
+  "OrderPickupMonitor": {
+    "title": "Pickup monitor",
+    "preparing": "Preparing",
+    "calling": "Now calling",
+    "preparingEmpty": "No order numbers are being prepared.",
+    "callingEmpty": "No order numbers are being called."
+  },
   "OrderCall": {
-    "heading": "🔔 Calls",
+    "heading": "🔔 Staff calls",
     "table": "Table {table}",
     "minutesAgo": "{m} min ago",
     "done": "Handled",
@@ -2184,6 +2191,8 @@
     "description": "Links that connect staff devices to the kitchen / hall without a wallet. They allow only viewing and status updates — no transfers or receiver changes (funds stay safe).",
     "kitchen": "Kitchen",
     "hall": "Hall",
+    "pickup": "Pickup monitor",
+    "pickupDescription": "Shows customers which order numbers are being prepared or called.",
     "copy": "Copy",
     "issue": "Create links",
     "issuing": "Creating…",

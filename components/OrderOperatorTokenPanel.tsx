@@ -1,7 +1,7 @@
 'use client';
 
 // オーナー (受取ウォレットで SIWE 済み) が「受注閲覧トークン」を発行/再発行/取消するパネル。
-// 発行したトークンを /orders/{kitchen,hall}?t=<token> リンクとして店員端末に配る。トークンは
+// 発行したトークンを /orders/{kitchen,hall,pickup}?t=<token> リンクとして店員端末に配る。トークンは
 // 閲覧+進捗操作のみで送金不可 (資金鍵なし) → 店員に売上を抜かれない。enableOrderToken 時のみ表示。
 // 設計: plans/restaurant-pos-roadmap.md Phase 5。
 
@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, KeyRound, RefreshCw, Trash2 } from 'lucide-react';
+import { env } from '@/lib/env';
 
 async function fetchToken(): Promise<string | null> {
   const res = await fetch('/api/order/token');
@@ -46,7 +47,12 @@ export function OrderOperatorTokenPanel({
 
   const token = tokenQ.data ?? null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const linkFor = (mode: 'kitchen' | 'hall') => `${origin}/${locale}/orders/${mode}?t=${token ?? ''}`;
+  const pickupEnabled =
+    env.enableOrderFulfillment && env.enableOrderRelay && env.enableOrderPickup;
+  const linkModes: Array<'kitchen' | 'hall' | 'pickup'> = ['kitchen', 'hall'];
+  if (pickupEnabled) linkModes.push('pickup');
+  const linkFor = (mode: 'kitchen' | 'hall' | 'pickup') =>
+    `${origin}/${locale}/orders/${mode}?t=${token ?? ''}`;
   const copy = async (id: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -69,24 +75,35 @@ export function OrderOperatorTokenPanel({
         {token ? (
           <>
             <div className="flex flex-col gap-1.5">
-              {(['kitchen', 'hall'] as const).map((m) => (
-                <div key={m} className="flex items-center gap-2">
-                  <span className="w-12 shrink-0 text-xs text-slate-500">{t(m)}</span>
-                  <input
-                    readOnly
-                    value={linkFor(m)}
-                    aria-label={t(m)}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => copy(m, linkFor(m))}
-                    className="flex shrink-0 items-center gap-1 rounded-lg bg-brand px-2 py-1 text-xs font-semibold text-white hover:bg-brand-dark"
-                  >
-                    {copied === m ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
-                    {t('copy')}
-                  </button>
+              {linkModes.map((m) => (
+                <div key={m}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-24 shrink-0 text-xs text-slate-500">{t(m)}</span>
+                    <input
+                      readOnly
+                      value={linkFor(m)}
+                      aria-label={t(m)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => copy(m, linkFor(m))}
+                      className="flex shrink-0 items-center gap-1 rounded-lg bg-brand px-2 py-1 text-xs font-semibold text-white hover:bg-brand-dark"
+                    >
+                      {copied === m ? (
+                        <Check className="h-3.5 w-3.5" aria-hidden />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" aria-hidden />
+                      )}
+                      {t('copy')}
+                    </button>
+                  </div>
+                  {m === 'pickup' ? (
+                    <p className="ml-24 mt-1 pl-2 text-[11px] text-slate-500">
+                      {t('pickupDescription')}
+                    </p>
+                  ) : null}
                 </div>
               ))}
             </div>
