@@ -174,13 +174,13 @@ describe('OrderFulfillmentBoard', () => {
     envHold.enableOrderCall = true;
     callHold.data = [{ id: 'call-1', handle: 'coffee', table: '12', ts: Date.now() - 60_000 }];
     const { unmount } = renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
-    expect(screen.getByText('🔔 呼び出し')).toBeInTheDocument();
+    expect(screen.getByText('🔔 スタッフ呼び出し')).toBeInTheDocument();
     expect(screen.getByText('🔔 テーブル 12')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '対応した' }));
     expect(resolveCallSpy).toHaveBeenCalledWith('call-1');
     unmount();
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
-    expect(screen.queryByText('🔔 呼び出し')).toBeNull();
+    expect(screen.queryByText('🔔 スタッフ呼び出し')).toBeNull();
   });
 
   it('呼び出しチャイムは初回 snapshot では鳴らさず、音ONの後続新規だけ鳴らす', () => {

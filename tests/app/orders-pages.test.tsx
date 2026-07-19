@@ -1,4 +1,5 @@
-// 厨房/ホール ルートページ (app/[locale]/orders/{kitchen,hall}/page.tsx) の **inert 境界**を検証。
+// 厨房/ホール/呼出モニターのルートページ (app/[locale]/orders/{kitchen,hall,pickup}/page.tsx) の
+// **inert 境界**を検証。
 // 本番安全性の核心: 両フラグ (enableOrderFulfillment かつ enableOrderRelay) が無いと notFound()
 // = ページ自体が存在しない。無効 locale も notFound。両 ON + 有効 locale でのみ board を描画。
 // 実 page 関数 (async server component) を直接呼び、env / next-intl/server / next/navigation を mock。
@@ -11,6 +12,7 @@ const flags = vi.hoisted(() => ({
   enableOrderFulfillment: true,
   enableOrderRelay: true,
   enableOrderToken: false,
+  enableOrderPickup: true,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -26,6 +28,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableOrderToken() {
         return flags.enableOrderToken;
+      },
+      get enableOrderPickup() {
+        return flags.enableOrderPickup;
       },
     },
   };
@@ -54,6 +59,13 @@ vi.mock('@/components/OrderFulfillmentBoard', () => ({
     </div>
   ),
 }));
+vi.mock('@/components/OrderPickupMonitor', () => ({
+  OrderPickupMonitor: ({ initialToken }: { initialToken?: string }) => (
+    <div data-testid="board" data-token={initialToken ?? ''}>
+      pickup
+    </div>
+  ),
+}));
 vi.mock('@/components/LocaleSwitcher', () => ({ LocaleSwitcher: () => <div data-testid="locale-switcher" /> }));
 vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
@@ -61,16 +73,19 @@ vi.mock('next/link', () => ({
 
 import KitchenPage from '@/app/[locale]/orders/kitchen/page';
 import HallPage from '@/app/[locale]/orders/hall/page';
+import PickupPage from '@/app/[locale]/orders/pickup/page';
 
 const PAGES = [
   { name: 'kitchen', Page: KitchenPage, mode: 'kitchen' },
   { name: 'hall', Page: HallPage, mode: 'hall' },
+  { name: 'pickup', Page: PickupPage, mode: 'pickup' },
 ] as const;
 
 beforeEach(() => {
   flags.enableOrderFulfillment = true;
   flags.enableOrderRelay = true;
   flags.enableOrderToken = false;
+  flags.enableOrderPickup = true;
   notFoundSpy.mockClear();
   setRequestLocaleSpy.mockClear();
 });
@@ -101,6 +116,22 @@ describe.each(PAGES)('orders/$name page (inert 境界)', ({ Page, mode }) => {
     flags.enableOrderRelay = false;
     await expect(Page({ params: Promise.resolve({ locale: 'ja' }), searchParams: Promise.resolve({}) })).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFoundSpy).toHaveBeenCalled();
+  });
+
+  it('enableOrderPickup OFF は pickup page だけ notFound', async () => {
+    flags.enableOrderPickup = false;
+    const result = Page({
+      params: Promise.resolve({ locale: 'ja' }),
+      searchParams: Promise.resolve({}),
+    });
+    if (mode === 'pickup') {
+      await expect(result).rejects.toThrow('NEXT_NOT_FOUND');
+      expect(notFoundSpy).toHaveBeenCalled();
+    } else {
+      render(await result);
+      expect(screen.getByTestId('board')).toHaveTextContent(mode);
+      expect(notFoundSpy).not.toHaveBeenCalled();
+    }
   });
 
   it('無効 locale → notFound (フラグ判定より前にロケール検証)', async () => {
