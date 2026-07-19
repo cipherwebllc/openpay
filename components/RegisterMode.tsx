@@ -911,6 +911,12 @@ function RegisterModeContent({
           amountText={`${totalHuman} ${symbol}`}
           note={settings.posterNote.trim() || undefined}
           chainText={`${symbol} · ${chainForSlug(settings.chain).name}`}
+          // 決済QR の全画面表示と同じトークン/チェーンロゴ行を出す (視認性)。
+          asset={{
+            tokenSymbol: settings.token,
+            chainSlug: settings.chain,
+            chainLabel: chainForSlug(settings.chain).name,
+          }}
           receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
           copied={copied}
           onCopy={() => copy(checkoutUrl)}

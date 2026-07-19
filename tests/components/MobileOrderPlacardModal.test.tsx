@@ -31,7 +31,7 @@ function setup(
       onClose={onClose}
       url="https://open-pay.jp/@yamada"
       shopName="山田カフェ"
-      chains={['Polygon', 'Kaia']}
+      chains={[{ slug: 'polygon', label: 'Polygon' }, { slug: 'kaia', label: 'Kaia' }]}
       labels={LABELS}
       copied={false}
       onCopy={onCopy}
@@ -71,8 +71,10 @@ describe('MobileOrderPlacardModal', () => {
     expect(screen.getByText('QR を読み取って注文')).toBeInTheDocument();
     // 支払い手段 (JPYC のみ) を明示。
     expect(screen.getByText('お支払いは JPYC のみ')).toBeInTheDocument();
-    // 対応ネットワークは label + 「・」結合で 1 行に。
-    expect(screen.getByText('対応ネットワーク：Polygon ・ Kaia')).toBeInTheDocument();
+    // 対応ネットワークはロゴ付き pill (chain ごとに分割表示)。
+    expect(screen.getByText('対応ネットワーク：')).toBeInTheDocument();
+    expect(screen.getByText('Polygon')).toBeInTheDocument();
+    expect(screen.getByText('Kaia')).toBeInTheDocument();
     // URL は本文表示。
     expect(screen.getByText('https://open-pay.jp/@yamada')).toBeInTheDocument();
     // QR は qrcode.react が size=240 の <svg> を描画する (アイコンの svg と区別して特定)。
@@ -99,7 +101,7 @@ describe('MobileOrderPlacardModal', () => {
 
   it('チェーンが空なら対応ネットワーク行を出さない', () => {
     setup({ chains: [] });
-    expect(screen.queryByText(/^対応ネットワーク：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('対応ネットワーク：')).not.toBeInTheDocument();
   });
 
   it('印刷ボタンは body にマーカーを付けて window.print を呼ぶ', () => {

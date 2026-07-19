@@ -225,7 +225,7 @@ export function StorefrontPublishPanel({
     (effectiveSelected ? `@${effectiveSelected}` : '');
   const placardChains = (
     placardParts?.chains ?? (placardParts?.chain ? [placardParts.chain] : [])
-  ).map((c) => JPYC_CHAIN_LABEL[c]);
+  ).map((c) => ({ slug: c, label: JPYC_CHAIN_LABEL[c] }));
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
