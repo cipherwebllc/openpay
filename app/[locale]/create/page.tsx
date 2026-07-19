@@ -179,6 +179,15 @@ export default function CreatePage() {
           })}
         </ul>
         <p className="mt-3 text-[11px] text-slate-400">{t('offramp.hint')}</p>
+        {/* JPYC の DeFi 運用ガイド (note・外部)。ウォレット準備〜換金・運用の参考導線。 */}
+        <a
+          href="https://note.com/masia02/n/ned04a4cdb00a"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+        >
+          {t('offramp.guideLink')} ↗
+        </a>
 
         <details className="group mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 open:pb-4">
           <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold">
