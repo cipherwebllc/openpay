@@ -324,6 +324,7 @@
       "subheading": "受取済みの JPYC / USDC を JPY に換金する場合の取引所リンクです。",
       "row": "{token} を換金",
       "hint": "対応チェーン・条件は各取引所のサイトでご確認ください。",
+      "guideLink": "JPYC 運用ガイド（ウォレット準備〜換金・運用の参考）",
       "jaResidentsOnlyNote": "(日本居住者のみ)",
       "japaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。",
       "gasHint": {

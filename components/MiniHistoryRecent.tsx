@@ -13,7 +13,7 @@
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
-import { History as HistoryIcon, ArrowRight } from 'lucide-react';
+import { History as HistoryIcon, ArrowDown, ArrowRight } from 'lucide-react';
 import {
   HISTORY_ASSET_DECIMALS,
   HISTORY_ASSET_DISPLAY,
@@ -21,6 +21,7 @@ import {
   type HistoryEntry,
 } from '@/lib/history';
 import { chainNameForId, txExplorerUrl } from '@/lib/chains';
+import { TokenLogo } from './AssetLogo';
 import { useHistory } from '@/hooks/useHistory';
 import type { Locale } from '@/i18n';
 
@@ -97,8 +98,22 @@ export function MiniHistoryRecent() {
                       aria-label={tHistory(STATUS_I18N_KEY[entry.status])}
                     />
                     <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-900">
-                        {formatAmount(entry.merchantAmount, entry.asset)}
+                      {/* 受取方向 ↓ + トークンロゴ (HistoryRow #190 と同じ意味論・この
+                          strip は受取のみを表示するため常に ↓)。 */}
+                      <p className="flex items-center gap-1.5 font-semibold text-slate-900">
+                        <ArrowDown
+                          className="h-3.5 w-3.5 shrink-0 text-emerald-600"
+                          strokeWidth={2.5}
+                          aria-hidden
+                        />
+                        <TokenLogo
+                          symbol={entry.asset}
+                          size={16}
+                          className="h-4 w-4 shrink-0"
+                        />
+                        <span className="truncate">
+                          {formatAmount(entry.merchantAmount, entry.asset)}
+                        </span>
                       </p>
                       <p className="truncate text-[11px] text-slate-500">
                         {formatHistoryTimestamp(entry.ts)}

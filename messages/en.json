@@ -324,6 +324,7 @@
       "subheading": "Exchanges to convert received JPYC / USDC into fiat.",
       "row": "Off-ramp {token}",
       "hint": "Check each exchange's site for supported chains and conditions.",
+      "guideLink": "JPYC guide — wallet setup to off-ramp & yield (Japanese)",
       "jaResidentsOnlyNote": "(Japan residents only)",
       "japaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
       "gasHint": {
