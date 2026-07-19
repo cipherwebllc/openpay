@@ -492,7 +492,8 @@ describe('StorefrontPublishPanel', () => {
     expect(screen.getByRole('heading', { name: 'ヤマダ珈琲' })).toBeInTheDocument();
     // 対応ネットワークは単一 chain='polygon' → ラベル 'Polygon'。お支払いは JPYC のみを明示。
     expect(screen.getByText('お支払いは JPYC のみ')).toBeInTheDocument();
-    expect(screen.getByText('対応ネットワーク：Polygon')).toBeInTheDocument();
+    expect(screen.getByText('対応ネットワーク：')).toBeInTheDocument();
+    expect(screen.getByText('Polygon')).toBeInTheDocument();
   });
 
   it('メニュー未充足 (storefront=null) は公開ボタンを無効化し注記', async () => {

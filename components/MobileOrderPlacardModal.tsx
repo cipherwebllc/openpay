@@ -21,6 +21,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
+import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
+import type { ChainSlug } from '@/lib/chains';
 import { Printer, X } from 'lucide-react';
 
 const PRINT_BODY_CLASS = 'openpay-printing-placard';
@@ -66,7 +68,7 @@ export function MobileOrderPlacardModal({
   /** 店舗アバター画像 URL (任意・https)。 */
   avatar?: string;
   /** 表示用チェーンラベル配列 (例: ['Polygon', 'Kaia'])。空なら受取行を出さない。 */
-  chains: string[];
+  chains: ReadonlyArray<{ slug: string; label: string }>;
   labels: MobileOrderPlacardLabels;
   copied: boolean;
   onCopy: () => void;
@@ -174,14 +176,37 @@ export function MobileOrderPlacardModal({
       <p className="mt-4 text-base font-semibold text-slate-800 print:mt-6 print:text-3xl">
         {labels.scanNote}
       </p>
-      <p className="mt-1 text-sm font-semibold text-brand-dark print:text-2xl">
+      <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-dark print:gap-2 print:text-2xl">
+        <TokenLogo
+          symbol="jpyc"
+          size={18}
+          alt=""
+          className="h-[18px] w-[18px] shrink-0 print:h-7 print:w-7"
+        />
         {labels.payNote}
       </p>
 
       {chains.length > 0 && (
-        <p className="mt-3 text-xs font-medium text-slate-500 print:mt-4 print:text-xl">
-          {labels.chainsLabel}：{chains.join(' ・ ')}
-        </p>
+        // チェーンはロゴ付き pill で表示 (テキスト羅列より一目で分かる・決済QR ポスターと同様式)。
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 print:mt-4">
+          <span className="text-xs font-medium text-slate-500 print:text-xl">
+            {labels.chainsLabel}：
+          </span>
+          {chains.map((c) => (
+            <span
+              key={c.slug}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700 print:px-3 print:py-1 print:text-lg"
+            >
+              <ChainLogo
+                slug={c.slug as ChainSlug}
+                size={14}
+                alt=""
+                className="h-3.5 w-3.5 shrink-0 print:h-5 print:w-5"
+              />
+              {c.label}
+            </span>
+          ))}
+        </div>
       )}
       <p className="mt-1 break-all font-mono text-[11px] text-slate-400 print:text-base">
         {url}
