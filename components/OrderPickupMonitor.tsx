@@ -117,9 +117,7 @@ export function OrderPickupMonitor({ initialToken }: { initialToken?: string }) 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
-          {t('title')}
-        </h1>
+        <h1 className="text-xl font-bold text-slate-900">{t('title')}</h1>
         <p className="mt-2 text-sm text-slate-400">{tFulfillment('autoRefresh')}</p>
       </header>
 
@@ -137,11 +135,11 @@ export function OrderPickupMonitor({ initialToken }: { initialToken?: string }) 
           {preparingOrders.length === 0 ? (
             <p className="mt-10 text-center text-base text-slate-400">{t('preparingEmpty')}</p>
           ) : (
-            <ul className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-1 xl:grid-cols-2">
+            <ul className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3">
               {preparingOrders.map((order) => (
                 <li
                   key={order.txHash}
-                  className="rounded-2xl border border-slate-200 bg-white px-3 py-5 text-center font-mono text-3xl font-bold tracking-wider text-slate-600 shadow-sm sm:text-4xl"
+                  className="rounded-2xl border border-slate-200 bg-white px-3 py-5 text-center font-mono text-3xl font-bold tracking-wider text-slate-600 shadow-sm"
                 >
                   {order.orderId}
                 </li>
@@ -163,14 +161,14 @@ export function OrderPickupMonitor({ initialToken }: { initialToken?: string }) 
           {callingOrders.length === 0 ? (
             <p className="mt-12 text-center text-lg text-emerald-700/60">{t('callingEmpty')}</p>
           ) : (
-            <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4">
               {callingOrders.map((order) => (
                 <li
                   key={order.txHash}
-                  // 番号は 6 桁固定・タイル幅は列数と画面幅で変わるため、固定段階サイズだと
-                  // 大画面 3 列時にはみ出して隣と重なる (実スクショで発覚)。clamp の vw 基準で
-                  // タイル幅に追従させ、常に収まる最大サイズを取る。
-                  className="flex min-h-32 items-center justify-center rounded-3xl bg-emerald-600 px-4 py-7 text-center font-mono text-[clamp(2.25rem,3.6vw,4.25rem)] font-black tracking-wide text-white shadow-lg shadow-emerald-900/10 sm:min-h-40"
+                  // 番号は 6 桁固定。vw 基準の clamp はタイル幅 (列数依存) と連動せず中間幅で
+                  // はみ出す (実機報告)。列側を auto-fill minmax(14rem) で下限保証し、フォントは
+                  // 14rem に必ず収まる固定サイズにする (幅が余れば列数が増える)。
+                  className="flex min-h-32 items-center justify-center rounded-3xl bg-emerald-600 px-4 py-7 text-center font-mono text-5xl font-black tracking-wide text-white shadow-lg shadow-emerald-900/10 sm:min-h-40"
                 >
                   {order.orderId}
                 </li>

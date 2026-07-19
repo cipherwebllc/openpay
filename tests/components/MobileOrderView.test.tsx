@@ -432,7 +432,7 @@ describe('MobileOrderView', () => {
     expect(webhook).toContain('h=alice');
     const orderId = u.searchParams.get('order_id');
     expect(orderId).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
-    // 受注番号は receiptNo (URL では rcpt) としても渡り、顧客の控え (/scan) に残る
+    // 受付番号は receiptNo (URL では rcpt) としても渡り、顧客の控え (/scan) に残る
     // (完了画面を閉じても「レシート番号」として再確認可)。
     expect(u.searchParams.get('rcpt')).toBe(orderId);
   });
@@ -464,7 +464,7 @@ describe('MobileOrderView', () => {
     expect(screen.queryByPlaceholderText('アレルギー・要望など（任意）')).toBeNull();
   });
 
-  it('受注番号は同一 mount の再描画・チェーン切替でも不変', () => {
+  it('受付番号は同一 mount の再描画・チェーン切替でも不変', () => {
     envHold.enableOrderRelay = true;
     const multiChain: MobileOrderConfig = {
       ...config,
@@ -513,7 +513,7 @@ describe('MobileOrderView', () => {
     }
   });
 
-  it('SSR は受注番号を初回 HTML に出さず、生成前は checkout link 無効・hydrate mismatch 無し', async () => {
+  it('SSR は受付番号を初回 HTML に出さず、生成前は checkout link 無効・hydrate mismatch 無し', async () => {
     envHold.enableOrderRelay = true;
     const ui = (
       <NextIntlClientProvider locale="ja" messages={messages}>

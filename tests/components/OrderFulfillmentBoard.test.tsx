@@ -353,7 +353,7 @@ describe('OrderFulfillmentBoard', () => {
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
     expect(screen.getByText('未完了の受注はありません。')).toBeInTheDocument(); // active 空
     expect(screen.getByText(/調理済み \(1\)/)).toBeInTheDocument(); // 折りたたみセクション
-    const doneCard = screen.getByText(/受注番号 #A1/).closest('li');
+    const doneCard = screen.getByText(/受付番号 #A1/).closest('li');
     expect(doneCard).toHaveClass('border-slate-200', 'bg-white', 'opacity-70');
     expect(doneCard).not.toHaveClass('bg-red-50/60', 'bg-amber-50/70');
     fireEvent.click(screen.getByRole('button', { name: '未調理に戻す' }));
@@ -476,7 +476,7 @@ describe('OrderFulfillmentBoard', () => {
       }),
     ];
     renderWithIntl(<OrderFulfillmentBoard mode="hall" />);
-    const cards = screen.getAllByText(/受注番号/);
+    const cards = screen.getAllByText(/受付番号/);
     expect(cards[0].textContent).toContain('READY1'); // 配膳準備OK が先頭
     expect(cards[1].textContent).toContain('PLAIN2');
   });
@@ -488,7 +488,7 @@ describe('OrderFulfillmentBoard', () => {
       order({ orderId: 'SECOND', txHash: TX2, pickupAt: 1_900_000_000_000 }),
     ];
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
-    const cards = screen.getAllByText(/受注番号/);
+    const cards = screen.getAllByText(/受付番号/);
     expect(cards[0]).toHaveTextContent('FIRST');
     expect(cards[1]).toHaveTextContent('SECOND');
     expect(screen.queryByText('受取時刻順に並んでいます')).toBeNull();
@@ -501,7 +501,7 @@ describe('OrderFulfillmentBoard', () => {
       order({ orderId: 'SECOND', txHash: TX2, ts: 1_900_000_000_000 }),
     ];
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
-    const cards = screen.getAllByText(/受注番号/);
+    const cards = screen.getAllByText(/受付番号/);
     expect(cards[0]).toHaveTextContent('FIRST');
     expect(cards[1]).toHaveTextContent('SECOND');
     expect(screen.queryByText('受取時刻順に並んでいます')).toBeNull();
@@ -531,7 +531,7 @@ describe('OrderFulfillmentBoard', () => {
       }),
     ];
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
-    const cards = screen.getAllByText(/受注番号/);
+    const cards = screen.getAllByText(/受付番号/);
     expect(cards[0]).toHaveTextContent('EARLIEST');
     expect(cards[1]).toHaveTextContent('SAME-EARLY-TS');
     expect(cards[2]).toHaveTextContent('SAME-LATE-TS');
@@ -580,7 +580,7 @@ describe('OrderFulfillmentBoard', () => {
       order({ orderId: 'A2', txHash: TX2, ts: oldTs }),
     ];
     rerender(<OrderFulfillmentBoard mode="kitchen" />);
-    const newCard = screen.getByText(/受注番号 #A2/).closest('li');
+    const newCard = screen.getByText(/受付番号 #A2/).closest('li');
     expect(newCard).toHaveClass('animate-pulse', 'border-amber-400', 'bg-white', 'ring-2');
     expect(newCard).not.toHaveClass('bg-red-50/60');
   });

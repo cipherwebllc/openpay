@@ -516,7 +516,7 @@ describe('CheckoutForm — レンダリング', () => {
   it('order_id / description / items / 合計が表示される', () => {
     setAccount({ connected: false });
     render(<CheckoutForm params={USDC_PARAMS} />);
-    expect(screen.getByText(/受注番号 #ord-42/)).toBeInTheDocument();
+    expect(screen.getByText(/受付番号 #ord-42/)).toBeInTheDocument();
     expect(screen.getByText('Summer sale')).toBeInTheDocument();
     expect(screen.getByText('Tシャツ')).toBeInTheDocument();
     expect(screen.getByText('マグ')).toBeInTheDocument();

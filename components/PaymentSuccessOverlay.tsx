@@ -37,7 +37,7 @@ export type PaymentSuccessOverlayPayload = {
   blockNumber?: bigint;
   explorerBase?: string;
   merchantAddress?: string;
-  /** 受注番号 (受け渡し照合用)。checkout で order_id があるときのみ。無ければ行を省く。 */
+  /** 受付番号 (受け渡し照合用)。checkout で order_id があるときのみ。無ければ行を省く。 */
   orderNo?: string;
 };
 

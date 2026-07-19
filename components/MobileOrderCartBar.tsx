@@ -60,7 +60,7 @@ export function MobileOrderCartBar({
   lastOrder?: string;
   /** 親が組み立てた /checkout への deep-link (byte-identical にそのまま href へ)。 */
   checkoutUrl: string;
-  /** 受注番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
+  /** 受付番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
   checkoutPending: boolean;
 }) {
   const t = useTranslations('MobileOrder');
@@ -194,7 +194,7 @@ export function MobileOrderCartBar({
             )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
             {needsTable || checkoutPending ? (
-              // テーブル番号 未入力、または受注番号の生成前は支払いを止める。
+              // テーブル番号 未入力、または受付番号の生成前は支払いを止める。
               <button
                 type="button"
                 disabled

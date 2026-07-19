@@ -1,8 +1,8 @@
 'use client';
 
-// 店主の受注画面: 受取ウォレットで SIWE サインインし、自分宛の着金済み注文 (受注番号 + テーブル番号 +
+// 店主の受注画面: 受取ウォレットで SIWE サインインし、自分宛の着金済み注文 (受付番号 + テーブル番号 +
 // 申告明細 + **実着金額**) を ~12s ポーリングで表示する。「対応済み」は削除でなく **フラグ化** し、
-// 「対応済み」セクション + 「未対応に戻す」で誤操作を復旧できる (txHash で対象指定・受注番号は人間向け表示)。
+// 「対応済み」セクション + 「未対応に戻す」で誤操作を復旧できる (txHash で対象指定・受付番号は人間向け表示)。
 // read authz は server 側で厳格に session.address === 受取アドレス (受取ウォレット本人のみ)。
 // react-query を使うため、親 (create ページ) は env.enableOrderRelay でこのパネルの**マウント自体**を
 // ゲートする (OFF の単体テストで QueryClient を要求しない)。設計: plans/swift-puzzling-sky.md。
@@ -91,7 +91,7 @@ export function OrderFeedPanel() {
   });
   const callFeed = useOrderCalls(sessionAddress, isSignedIn, 12_000);
 
-  // 対応済み = 削除でなくフラグ化。対象は txHash で指定 (受注番号は短縮で衝突しうるため)。
+  // 対応済み = 削除でなくフラグ化。対象は txHash で指定 (受付番号は短縮で衝突しうるため)。
   const fulfill = useMutation({
     mutationFn: async (vars: { txHash: string; fulfilled: boolean }) => {
       const res = await fetch('/api/order/feed', {
@@ -139,7 +139,7 @@ export function OrderFeedPanel() {
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            {/* 受注番号 (受け渡し照合用・客の完了画面と同じコード)。 */}
+            {/* 受付番号 (受け渡し照合用・客の完了画面と同じコード)。 */}
             <p className="text-xs font-medium text-slate-400">
               {t('orderNo')} #{o.orderId}
             </p>
