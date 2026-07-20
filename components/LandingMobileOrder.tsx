@@ -51,9 +51,16 @@ export async function LandingMobileOrder() {
                 <ExternalLink className="h-4 w-4" aria-hidden />
               </a>
             </div>
-            {/* お客様向けの副導線: 訪日客が自分の AI で注文するガイド (/guide/agent)。店側 CTA の下に
-                控えめなテキストリンクで置く (guide/pos を「使い方」に置くのと同じ体裁)。 */}
-            <p className="mt-4 text-sm">
+            {/* お客様向けの副導線: やり方ガイド (/guide/mobile-order) と AI 注文ガイド (/guide/agent)。
+                店側 CTA の下に控えめなテキストリンクで置く (guide/pos を「使い方」に置くのと同じ体裁)。 */}
+            <p className="mt-4 flex flex-col items-center gap-1.5 text-sm sm:flex-row sm:justify-center sm:gap-4 lg:justify-start">
+              <Link
+                href={`/${locale}/guide/mobile-order`}
+                prefetch={false}
+                className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+              >
+                {t('mobileOrderBannerHowToGuide')}
+              </Link>
               <Link
                 href={`/${locale}/guide/agent`}
                 prefetch={false}

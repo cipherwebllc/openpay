@@ -582,10 +582,14 @@ describe('MobileOrderView', () => {
       menu: [{ id: 'a', name: '罠', price: '1', visual: { kind: 'image', url: 'data:image/svg+xml,x' } }],
     };
     const { container } = renderWithIntl(<MobileOrderView config={hostile} />);
-    // SNS は https でないので 1 件も描画されない (残るのは poweredBy の OpenPay リンクのみ)。
+    // SNS は https でないので 1 件も描画されない (残るのは自前の固定リンク 2 件 =
+    // やり方ガイド + poweredBy の OpenPay のみ)。
     const anchors = Array.from(container.querySelectorAll('a'));
-    expect(anchors).toHaveLength(1);
-    expect(anchors[0]).toHaveAttribute('href', '/');
+    expect(anchors).toHaveLength(2);
+    expect(anchors.map((a) => a.getAttribute('href'))).toEqual([
+      '/guide/mobile-order',
+      '/',
+    ]);
     // 危険スキームを持つ要素は一切無い。商品名は残る (画像だけ落ちる)。
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('[href^="javascript:"]')).toBeNull();

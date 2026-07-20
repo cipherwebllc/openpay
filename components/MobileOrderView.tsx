@@ -735,6 +735,16 @@ export function MobileOrderView({
         />
       )}
 
+      {/* はじめてのお客様向け: やり方ガイド (/guide/mobile-order) への控えめな導線。 */}
+      <p className="text-center text-xs">
+        <Link
+          href="/guide/mobile-order"
+          prefetch={false}
+          className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+        >
+          {t('howToGuideLink')}
+        </Link>
+      </p>
       <p className="text-center text-xs text-slate-400">
         {t.rich('poweredBy', {
           link: (chunks) => (
