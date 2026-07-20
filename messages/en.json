@@ -2058,6 +2058,7 @@
     "feeIncludedNote": "Includes a {percent}% system fee ({fee} JPYC)",
     "tooManyItems": "Up to {max} items per order",
     "poweredBy": "This store receives payments with <link>OpenPay</link>",
+    "howToGuideLink": "First time? How mobile order works",
     "invalidTitle": "Invalid link",
     "invalidBody": "This order-page link is incorrect or corrupted. Please check with the store.",
     "chainLabel": "Receiving chain",

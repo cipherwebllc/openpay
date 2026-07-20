@@ -2058,6 +2058,7 @@
     "feeIncludedNote": "システム利用料 {fee} JPYC（{percent}%）を含みます",
     "tooManyItems": "一度に注文できるのは {max} 品までです",
     "poweredBy": "このお店は <link>OpenPay</link> で受け取っています",
+    "howToGuideLink": "はじめての方へ：モバイルオーダーのやり方",
     "invalidTitle": "リンクが無効です",
     "invalidBody": "この注文ページのリンクが正しくないか、内容が壊れています。お店にご確認ください。",
     "chainLabel": "受取チェーン",
