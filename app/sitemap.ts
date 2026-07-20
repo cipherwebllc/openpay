@@ -18,6 +18,7 @@ const PUBLIC_ROUTES = [
   '/transparency',
   '/guide/pos',
   '/guide/agent',
+  '/guide/mobile-order',
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
