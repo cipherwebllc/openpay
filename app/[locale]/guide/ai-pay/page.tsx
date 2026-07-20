@@ -144,6 +144,25 @@ export default async function GuideAiPayPage({
           </p>
         </Section>
 
+        {/* MCP 対応フレームワーク横展開 (AWS Strands Agents) — 実証 tx 付き */}
+        <Section title={c.strandsTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+            {c.strandsBody}
+          </p>
+          <CodeBlock label={c.strandsCodeLabel} code={c.strandsCode} />
+          <p className="mt-4 rounded-2xl bg-white p-5 text-sm leading-relaxed text-slate-700 shadow-card ring-1 ring-emerald-200/70">
+            {c.strandsProofIntro}{' '}
+            <a
+              href={c.strandsProofTransaction.href}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="break-all font-mono font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+            >
+              {c.strandsProofTransaction.label}
+            </a>
+          </p>
+        </Section>
+
         <Section title={c.jpycTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.jpycBody}

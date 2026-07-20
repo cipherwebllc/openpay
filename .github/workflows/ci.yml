@@ -63,3 +63,7 @@ jobs:
       # (旧: HIGH+ のみ gate、moderate は warning。2026-05-22 に moderate も
       # gating へ昇格させ、新規 moderate を必ず人が評価する policy に変更)
       - run: node scripts/audit-gate.mjs
+      # 依存の取得元 gate (2026-07-20 採用): 全 package-lock.json が公式 npm
+      # レジストリのみから解決されていることを検査。git URL / 独自レジストリ /
+      # http 取得の混入 (AI エージェント経由のサプライチェーン汚染含む) で fail。
+      - run: node scripts/lockfile-gate.mjs

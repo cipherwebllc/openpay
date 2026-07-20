@@ -108,6 +108,31 @@ node src/index.mjs       # x402 profile
 node src/order.mjs       # order profile
 ```
 
+### Strands Agents (AWS)
+
+Any MCP-capable agent framework works — not just Claude. With
+[Strands Agents](https://strandsagents.com/) (Python), hand this server to an
+`MCPClient` with the same env as above:
+
+```python
+from mcp import StdioServerParameters, stdio_client
+from strands import Agent
+from strands.tools.mcp import MCPClient
+
+openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
+    command="npx", args=["-y", "openpay-x402-mcp"],
+    env={...},  # same env as the Claude examples above
+)))
+
+with openpay:
+    agent = Agent(tools=openpay.list_tools_sync())
+    agent("Find the OpenPay demo on the AI store and buy it within 2 JPYC")
+```
+
+Proven end-to-end on 2026-07-20 (Strands `MCPClient` + Steward signer, no raw
+key): catalog search → quote → real 2 JPYC purchase on Polygon
+([tx](https://polygonscan.com/tx/0x9bfb4cb203f5aea1a52630977c6b4b7d818a0b2d7ba40ea617de6493766be5ca)).
+
 ## Quickstart: buy a JPYC resource
 
 With a funded buyer key configured (see the Claude Desktop block above), the agent finds and pays for a JPYC-priced x402 resource in three steps. Example: the catalog's `demo` resource (1 JPYC).
