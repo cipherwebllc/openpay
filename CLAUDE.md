@@ -12,6 +12,7 @@ npx vitest run           # unit/integration 全 suite (~35s)。summary は末尾
 npm run e2e:local        # Playwright (ローカル環境依存 → 下記「e2e は CI が権威」参照)
 npm run build            # next build (page export 検査を含む・下記参照)
 node scripts/audit-gate.mjs   # CI と同一の npm audit 判定
+node scripts/lockfile-gate.mjs # CI と同一の依存取得元判定 (公式 npm レジストリのみ)
 node scripts/dev-shot.mjs     # dev/prod サーバの実機スクショ (mobile/desktop・print 対応)
 node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--once/--timeout 分)
 ```
@@ -33,6 +34,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 13. **防御的プログラミングの基準**（2026-07-04 user 確定）: **意味のない防御は禁止・障害を隣に波及させないための意図的な防御は必須**。禁止 = 起こり得ない状態への保険、エラー握りつぶしによる偽成功（cookie は出すがセッション保存失敗、等）、仕様を曖昧にする fallback。必須 = 付帯処理が本体を巻き込まない隔離 — 例: push/通知/メーターは no-throw で決済本体に波及させない・localStorage/ブラウザ API は既存パターンの try-catch・rate limit ストレージ障害で本体機能を止めない fail-open。防御を書くときは**「何の波及を断つための防御か」をコメントで示す**（示せないならその防御は不要の疑い）。
 14. **手数料・チェーン対応・課金条件を変えたら「開示 3 点セット」を同期**（2026-07-07 user 確定）: ①LP（`messages/` の `Landing.benefitsFee*`/`supportFee*`/FAQ）②法務文書（`lib/legal.ts` の `DISCLOSED_*` 定数 + Terms/免責/特商法）③**`public/llms.txt`**。①②は `tests/app/legal.test.tsx` 等のフェンスが CI で検出するが、**③は静的ファイルでテストフェンスが無い**ため変更時に必ず目視/grep で同期する（放置すると AI 検索・AI エージェントが古い料率を引用し続ける）。
 15. **money-path / x402 wire / 秘密情報に触れる変更は「初期生成」と「正式採用」を分離**（2026-07-18 採用）: AI が実装しテストが green でも、merge 前に人間（user）の明示レビューを必須とし、決済状態の判定を LLM の出力に委ねる実装（"paid" 文字列や会話履歴を信じて解錠する等）を導入しない。決済状態の真実は facilitator の verify/settle とオンチェーンのみ。
+16. **依存の追加は公式 npm レジストリのみ**（2026-07-20 採用）: git URL・独自レジストリ・http 取得を lockfile に入れない（`scripts/lockfile-gate.mjs` が CI で全 package-lock.json を検査）。install スクリプトを持つ新規パッケージ・既存名と紛らわしい類似名は導入前に個別確認し、AI エージェントには依存追加の前に追加予定一覧を出させる。
 
 ## 自律運転の型（全モデル共通・Fable/Opus/Sonnet/Codex）
 
@@ -65,7 +67,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 
 ## エージェント委譲（Codex/Opus 等）に渡す規約前文
 
-委譲プロンプトには「**このリポの CLAUDE.md（掟 1〜14）に従うこと。最後に typecheck / eslint(変更ファイル) / full vitest、page 変更時は next build を実行して結果を報告**」を含める。個別規約の再列挙は不要（本ファイルが単一情報源）。
+委譲プロンプトには「**このリポの CLAUDE.md（掟 1〜16）に従うこと。最後に typecheck / eslint(変更ファイル) / full vitest、page 変更時は next build を実行して結果を報告**」を含める。個別規約の再列挙は不要（本ファイルが単一情報源）。
 
 ## 参照
 

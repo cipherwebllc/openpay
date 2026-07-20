@@ -60,6 +60,24 @@ const MCP_CONFIG_JSON = [
   '}',
 ].join('\n');
 
+const STRANDS_SAMPLE = [
+  'from mcp import StdioServerParameters, stdio_client',
+  'from strands import Agent',
+  'from strands.tools.mcp import MCPClient',
+  '',
+  'openpay = MCPClient(lambda: stdio_client(StdioServerParameters(',
+  '    command="npx", args=["-y", "openpay-x402-mcp"],',
+  '    env={...},  # セットアップ A/B と同じ環境変数',
+  ')))',
+  '',
+  'with openpay:',
+  '    agent = Agent(tools=openpay.list_tools_sync())',
+  '    agent("AI ストアで OpenPay のデモを見つけて、2 JPYC 以内で購入して")',
+].join('\n');
+
+const STRANDS_TX = '0x9bfb4cb203f5aea1a52630977c6b4b7d818a0b2d7ba40ea617de6493766be5ca';
+const STRANDS_TX_URL = `https://polygonscan.com/tx/${STRANDS_TX}`;
+
 const STEWARD_ENV = [
   'SIGNER_MODE=steward',
   'STEWARD_URL=http://localhost:3900',
@@ -113,6 +131,13 @@ export type AiPayGuideContent = JpycSectionContent & {
   readonly ctaBody: string;
   readonly ctaButton: string;
   readonly ctaButtonHref: string;
+  readonly strandsTitle: string;
+  readonly strandsBody: string;
+  readonly strandsCodeLabel: string;
+  readonly strandsCode: string;
+  readonly strandsProofIntro: string;
+  readonly strandsProofTransaction: AiPayGuideLink;
+
   readonly sdkLead: string;
   readonly sdkLink: AiPayGuideLink;
   readonly sdkTail: string;
@@ -227,6 +252,18 @@ const ja: AiPayGuideContent = {
     'セットアップができたら、AI ストアで購入できるデータ・API・AI エージェントを探してみてください。',
   ctaButton: 'AIストアを見る',
   ctaButtonHref: '/discovery',
+  strandsTitle: 'Strands Agents (AWS) からも使える',
+  strandsBody:
+    'Claude Desktop に限らず、MCP を話せるエージェントフレームワークなら同じ構成で JPYC 購入ができます。AWS の Strands Agents なら、MCPClient に openpay-x402-mcp を渡すだけです。環境変数（署名モード・支払い上限）はセットアップ A/B と共通です。',
+  strandsCodeLabel: 'Strands Agents (Python) の最小コード',
+  strandsCode: STRANDS_SAMPLE,
+  strandsProofIntro:
+    '実証済み：この構成（Strands MCPClient + Steward 署名・鍵レス）で、カタログ検索から 2 JPYC の実購入まで完走しています。Polygon tx:',
+  strandsProofTransaction: {
+    label: STRANDS_TX,
+    href: STRANDS_TX_URL,
+  },
+
   sdkLead: 'Node.js 開発者は MCP を使わず、',
   sdkLink: {
     label: 'openpay-x402-sdk',
@@ -331,6 +368,18 @@ const en: AiPayGuideContent = {
     'Once setup is complete, browse the AI Store for data, APIs, and AI agents your AI can buy from.',
   ctaButton: 'Open the AI Store',
   ctaButtonHref: '/discovery',
+  strandsTitle: 'Works from Strands Agents (AWS) too',
+  strandsBody:
+    'Any agent framework that speaks MCP can buy in JPYC with the same setup — not just Claude Desktop. With AWS Strands Agents, just hand openpay-x402-mcp to an MCPClient. The environment variables (signer mode, spend limits) are the same as Setup A/B.',
+  strandsCodeLabel: 'Minimal Strands Agents (Python) code',
+  strandsCode: STRANDS_SAMPLE,
+  strandsProofIntro:
+    'Proven: with this setup (Strands MCPClient + Steward signing, no raw key) we completed catalog search through an actual 2 JPYC purchase. Polygon tx:',
+  strandsProofTransaction: {
+    label: STRANDS_TX,
+    href: STRANDS_TX_URL,
+  },
+
   sdkLead: 'Node.js developers can skip MCP and use ',
   sdkLink: {
     label: 'openpay-x402-sdk',
