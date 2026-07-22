@@ -19,11 +19,7 @@ import { isValidTokenSymbol, type TokenSymbol } from '@/lib/tokens';
 import { isJpycChainSlug, type JpycChainSlug } from '@/lib/chains';
 import { COLOR_PATTERN } from '@/lib/url';
 import { stripControlChars } from '@/lib/sanitize';
-import {
-  handlePageTheme,
-  isHandleTheme,
-  type HandleTheme,
-} from '@/lib/handleTheme';
+import { isHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 
 export type TipOgLocale = 'ja' | 'en';
 
@@ -261,13 +257,15 @@ function tipOgThemeStyle(
   accent: string,
   theme: HandleTheme,
 ): OgCardThemeStyle {
-  const page = handlePageTheme(accent, theme);
   const defaultGlow = `radial-gradient(circle at 88% -12%, ${hexToRgba(accent, 0.45)} 0%, rgba(0,0,0,0) 52%), radial-gradient(circle at -8% 112%, ${hexToRgba(accent, 0.25)} 0%, rgba(0,0,0,0) 46%)`;
   switch (theme) {
     case 'gradient':
       return {
         backgroundColor: '#ffffff',
-        backgroundImage: page.background,
+        // page.background は Web ページ用の background ショートハンド (グラデ+末尾の色レイヤー)。
+        // satori の backgroundImage は色レイヤーを許さず throw するため (本番 500 実害)、
+        // グラデ層だけを明示し、ベース色は backgroundColor に持たせる。
+        backgroundImage: `linear-gradient(180deg, ${hexToRgba(accent, 0.2)} 0%, ${hexToRgba(accent, 0.05)} 46%, rgba(255,255,255,0) 76%)`,
         panelBackgroundColor: 'rgba(255,255,255,0.92)',
         headingColor: '#0f172a',
         secondaryTextColor: '#475569',
@@ -306,7 +304,8 @@ function tipOgThemeStyle(
     case 'night':
       return {
         backgroundColor: '#0f172a',
-        backgroundImage: page.background,
+        // gradient と同じ理由で色レイヤーを含む page.background は使わない (satori 非対応)。
+        backgroundImage: `radial-gradient(90% 55% at 50% -6%, ${hexToRgba(accent, 0.32)} 0%, rgba(15,23,42,0) 55%)`,
         panelBackgroundColor: 'rgba(15,23,42,0.94)',
         headingColor: '#f8fafc',
         secondaryTextColor: '#cbd5e1',
