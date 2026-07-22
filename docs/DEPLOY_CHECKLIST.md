@@ -323,7 +323,12 @@ data chunk を大量送信してメモリを枯渇させる DoS。
 - OpenPay が ws を server mode で利用する機能を追加 (webhook server 等)
 - GHSA-96hv-2xvq-fx4p に client-side exploit PoC 公開
 
-### 7.6 MODERATE: `@opentelemetry/core` (GHSA-8988-4f7v-96qf)
+### 7.6 ✅ RESOLVED: `@opentelemetry/core` (GHSA-8988-4f7v-96qf)
+
+**2026-07-22 解消**: `npm update @sentry/nextjs` (→10.53.2+) が patched
+`@opentelemetry/core >=2.8.0` を採用し `npm audit` で no longer detected。
+Reassess triggers の 1 項目目どおりの自然解消。`scripts/audit-gate.mjs` の
+allowlist からも削除済。以下は歴史的記録。
 
 **Root advisory**: [GHSA-8988-4f7v-96qf](https://github.com/advisories/GHSA-8988-4f7v-96qf)
 — "OpenTelemetry Core: Unbounded memory allocation in W3C Baggage propagation"
@@ -348,6 +353,35 @@ data chunk を大量送信してメモリを枯渇させる DoS。
 - OpenPay が外部 W3C Baggage ヘッダを計測/伝播する機能を追加
 - GHSA-8988-4f7v-96qf に高到達性の exploit PoC 公開
 
+### 7.8 HIGH: `sharp` (GHSA-f88m-g3jw-g9cj)
+
+**Root advisory**: [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj)
+— "sharp inherited vulnerabilities in libvips" (CVE-2026-33327 / 33328 / 35590 / 35591、
+sharp <0.35.0)
+
+**Propagation chain**:
+```
+next (optionalDependencies sharp ^0.34.3) → sharp → libvips
+```
+
+**Exploit mechanism**: libvips による**不正な画像ファイルの解析**時に trigger する
+メモリ安全性の脆弱性群。攻撃者が細工画像を sharp に処理させる経路が必要。
+
+**Reachability for OpenPay**:
+- sharp は next/image の画像最適化ランタイムとしてのみ動作
+- `next.config.mjs` に `images.remotePatterns` / `domains` が**無い**ため、next/image は
+  外部 URL 画像を最適化できない = sharp が処理するのは**リポ内静的アセット**
+  (トークン/チェーンロゴ・LP 画像) のみで、攻撃者制御の画像が libvips に到達する経路が無い
+- ユーザ提供のアバター等は素の `<img>` 直リンクで描画し sharp を通らない
+- 修正版 sharp 0.35 は next の `^0.34` range 外。native module の override は
+  到達性ゼロの脆弱性に対しリスク不相応 → next 側の bump 待ち accepted risk
+
+**Reassess triggers**:
+- next が sharp>=0.35 を含む版へ更新 → npm update で解消し allowlist 削除
+- `next.config.mjs` に `images.remotePatterns` / `domains` 等の remote 画像最適化を導入
+  (**到達性が変わるため導入 PR で即再評価**)
+- GHSA-f88m-g3jw-g9cj に next/image 経由の exploit PoC 公開
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -365,9 +399,10 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-qx2v-qp2m-jg93 | postcss | MODERATE | §7.2 |
 | GHSA-w5hq-g745-h8pq | uuid | MODERATE | §7.3 |
 | GHSA-96hv-2xvq-fx4p | ws | HIGH | §7.5 |
-| GHSA-8988-4f7v-96qf | @opentelemetry/core | MODERATE | §7.6 |
+| GHSA-f88m-g3jw-g9cj | sharp | HIGH | §7.8 |
 
-(§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕は upstream fix 済で allowlist から削除済 = 上表は現行の実体。)
+(§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.6 otel core〔GHSA-8988〕は upstream fix 済で
+allowlist から削除済 = 上表は現行の実体。)
 
 (2026-05-22 から moderate も gate 対象に昇格、warning-only count threshold は廃止)
 
