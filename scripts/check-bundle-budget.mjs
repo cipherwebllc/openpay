@@ -20,8 +20,12 @@ const BUDGETS_KB = {
   //   SuccessOverlay・PayerReceiptCompletion (決済成功後) を next/dynamic({ssr:false}) で
   //   First Load JS から外し、/pay 440→420kB・/tip 439→418kB (各 -20kB)。予算は新ベースライン
   //   +約10kB 余裕へ再設定。次に増えたら安易に上げず再び code-split を優先する。
-  '/[locale]/pay': 430,
-  '/[locale]/tip/[address]': 428,
+  // 2026-07-22: npm audit 対応の @sentry/nextjs 10.50→10.67 (otel core 脆弱性の修正版取り込み)
+  //   で Sentry クライアント初期化チャンクが +4〜5kB (/pay 434・/tip 433)。First Load から
+  //   外せない計測基盤の vendor 増分で code-split では削れないため +6kB 再調整。
+  //   自作コード起因の増分には引き続き上の code-split 優先方針を適用する。
+  '/[locale]/pay': 436,
+  '/[locale]/tip/[address]': 434,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   '__shared__': 250,

@@ -28,6 +28,7 @@ const ALLOWED_ADVISORIES = {
   // 解決済 advisory (upstream fix で no longer detected):
   // - GHSA-qjx8-664m-686j (js-cookie) — @segment/analytics-next が js-cookie>=3.0.6 採用 (2026-05 頃)
   // - GHSA-58qx-3vcg-4xpx (ws) — viem が ws>=8.20.1 に bump
+// - GHSA-8988-4f7v-96qf (@opentelemetry/core) — @sentry/nextjs 10.53.2+ が otel core>=2.8.0 を採用 (2026-07-22 npm update で解消)
   // 過去の受容理由は git log scripts/audit-gate.mjs で参照可。
   'GHSA-qx2v-qp2m-jg93': {
     pkg: 'postcss',
@@ -70,19 +71,18 @@ const ALLOWED_ADVISORIES = {
       'GHSA-96hv-2xvq-fx4p に client-side exploit PoC 公開',
     ],
   },
-  'GHSA-8988-4f7v-96qf': {
-    pkg: '@opentelemetry/core',
+  'GHSA-f88m-g3jw-g9cj': {
+    pkg: 'sharp',
     summary:
-      'OpenTelemetry Core: Unbounded memory allocation in W3C Baggage propagation (@opentelemetry/core<2.8.0)',
-    chain:
-      '@sentry/nextjs → @sentry/node → @opentelemetry/instrumentation-http → @opentelemetry/core',
+      'sharp inherited vulnerabilities in libvips: CVE-2026-33327/33328/35590/35591 (sharp<0.35.0)',
+    chain: 'next (optionalDependencies sharp ^0.34.3) → sharp → libvips',
     reason:
-      '@opentelemetry/core は @sentry/nextjs (サーバ側エラー/トレース計測) の transitive dep。脆弱性は信頼できない W3C Baggage ヘッダを大量処理した際の非有界メモリ確保。OpenPay は外部からの Baggage 伝播を計測対象にしておらず (Sentry 既定計装のみ)、攻撃者制御の Baggage が core に流れる経路は実運用上ない。clean な単独修正には @sentry/opentelemetry チェーンの広範な再解決 (≈90 package churn) が必要で、MODERATE・低到達性に対しリスク不相応のため accepted risk とする。',
-    docRef: 'docs/DEPLOY_CHECKLIST.md §7.6',
+      'libvips の脆弱性は不正な画像ファイルの解析経路で trigger。OpenPay の next/image は next.config.mjs に images.remotePatterns/domains が無く外部 URL 画像を最適化できないため、sharp が処理するのはリポ内静的アセット (トークン/チェーンロゴ・LP 画像) のみ = 攻撃者制御の画像が libvips に到達する経路が無い。ユーザ提供のアバター等は素の <img> 直リンクで sharp を通らない。修正版 sharp 0.35 は next の ^0.34 range 外で、native module の override は到達性ゼロの脆弱性に対しリスク不相応 → next 側の bump 待ち accepted risk とする。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.8',
     reviewTriggers: [
-      '@sentry/nextjs が patched @opentelemetry/core (>=2.8.0) を含む版へ更新 → 通常の npm update で解消',
-      'OpenPay が外部 W3C Baggage ヘッダを計測/伝播する機能を追加',
-      'GHSA-8988-4f7v-96qf に高到達性の exploit PoC 公開',
+      'next が sharp>=0.35 を含む版へ更新 → 通常の npm update で解消し allowlist 削除',
+      'next.config.mjs に images.remotePatterns / domains 等の remote 画像最適化を導入 (到達性が変わるため即再評価)',
+      'GHSA-f88m-g3jw-g9cj に next/image 経由の exploit PoC 公開',
     ],
   },
 };
