@@ -417,3 +417,55 @@ describe('buildStorefrontMeta', () => {
     );
   });
 });
+
+describe('themeStyle の backgroundImage は satori 安全 (色レイヤー禁止)', () => {
+  // 本番実害: gradient/night が Web ページ用 background ショートハンド (末尾に
+  // 裸の色レイヤー) を satori の backgroundImage に渡し、/api/og/tip が
+  // `Invalid background image: "#ffffff"` で 500 になった。satori の
+  // background-image はグラデーション関数のみ許容するため、全テーマの全
+  // トップレベルレイヤーが gradient 関数で始まることをフェンスする。
+  const topLevelLayers = (value: string): string[] => {
+    const layers: string[] = [];
+    let depth = 0;
+    let cur = '';
+    for (const ch of value) {
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) {
+        layers.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    layers.push(cur.trim());
+    return layers;
+  };
+
+  it('全テーマ×代表色で backgroundImage の全レイヤーが gradient 関数', async () => {
+    const { buildTipOgModel, tipModelToCard } = await import('@/lib/ogTipCard');
+    const { HANDLE_THEMES } = await import('@/lib/handleTheme');
+    for (const theme of HANDLE_THEMES) {
+      for (const color of ['#2563eb', '#ffffff', '#0f172a']) {
+        const card = tipModelToCard(
+          buildTipOgModel(
+            new URLSearchParams({
+              to: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+              token: 'jpyc',
+              theme,
+              color,
+            }),
+          ),
+        );
+        const style = card.themeStyle;
+        expect(style, `${theme} は themeStyle を持つ`).toBeDefined();
+        for (const layer of topLevelLayers(style!.backgroundImage)) {
+          expect(
+            /^(linear|radial)-gradient\(/.test(layer),
+            `${theme}/${color} の backgroundImage レイヤーが satori 非対応: ${layer}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
