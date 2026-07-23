@@ -29,7 +29,7 @@ const TONE: Record<Tone, { card: string; icon: string; title: string }> = {
   ready: { card: 'border-emerald-300 bg-emerald-50', icon: 'text-emerald-600', title: 'text-emerald-900' },
   done: { card: 'border-slate-200 bg-white', icon: 'text-emerald-600', title: 'text-slate-800' },
   error: { card: 'border-amber-300 bg-amber-50', icon: 'text-amber-500', title: 'text-amber-900' },
-  muted: { card: 'border-slate-200 bg-white', icon: 'text-slate-400', title: 'text-slate-500' },
+  muted: { card: 'border-slate-200 bg-white', icon: 'text-slate-500', title: 'text-slate-500' },
 };
 
 function StatusCard({
@@ -197,7 +197,7 @@ export function OrderStatusView({ token }: { token: string | null }) {
       <p className="mt-4 max-w-xs rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-800">
         {t('keepOpen')}
       </p>
-      {isError && <p className="mt-2 text-xs text-slate-400">{t('retrying')}</p>}
+      {isError && <p className="mt-2 text-xs text-slate-500">{t('retrying')}</p>}
     </StatusCard>
   );
 }
