@@ -264,7 +264,7 @@ const ja: SellGuideContent = {
   pricingTitle: '値付けのヒント',
   pricingIntro: 'AI ストアで実際に並んでいる価格の目安です。',
   pricingExamples: [
-    'Coo-ICP: 1 JPYC / 相談',
+    'Coo-ICP: 7 JPYC / 相談',
     'Japan Web3 Directory: 2 JPYC',
     'Shops 検索: 2 JPYC',
   ],
@@ -407,7 +407,7 @@ const en: SellGuideContent = {
   pricingTitle: 'Pricing tips',
   pricingIntro: 'These are prices already seen in the AI Store.',
   pricingExamples: [
-    'Coo-ICP: 1 JPYC / consultation',
+    'Coo-ICP: 7 JPYC / consultation',
     'Japan Web3 Directory: 2 JPYC',
     'Shops search: 2 JPYC',
   ],
