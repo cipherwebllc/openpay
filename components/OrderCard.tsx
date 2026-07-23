@@ -102,7 +102,7 @@ function OrderCardInner({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-slate-400">
+          <p className="text-xs font-medium text-slate-500">
             {t('orderNo')} #{o.orderId}
           </p>
           {/* テーブル表示/訂正は店内 (table あり) のみ。テイクアウト (table 空) は非表示。 */}
@@ -125,7 +125,7 @@ function OrderCardInner({
                 <button
                   type="button"
                   onClick={onCancelEditTable}
-                  className="text-xs text-slate-400 hover:underline"
+                  className="text-xs text-slate-500 hover:underline"
                 >
                   {t('cancel')}
                 </button>
@@ -137,7 +137,7 @@ function OrderCardInner({
                 className="mt-0.5 flex items-center gap-1 text-left"
               >
                 <span className="text-lg font-bold text-slate-900">{o.table}</span>
-                <span className="text-[10px] text-slate-400">{t('tableEdit')}</span>
+                <span className="text-[10px] text-slate-500">{t('tableEdit')}</span>
               </button>
             )
           ) : null}
@@ -180,7 +180,7 @@ function OrderCardInner({
               {t('readyToServe')}
             </span>
           ) : null}
-          <span className="text-xs text-slate-400">{chainLabel(o.chainId)}</span>
+          <span className="text-xs text-slate-500">{chainLabel(o.chainId)}</span>
           {/* 受取予定時刻 (Phase 4・preorder のみ・flag ON かつ あるとき)。Asia/Tokyo HH:mm。 */}
           {env.enablePreorderTime && o.pickupAt ? (
             <span
@@ -199,7 +199,7 @@ function OrderCardInner({
       </div>
 
       <ul className="mt-2 flex-1 space-y-1">
-        {o.items.length === 0 && <li className="text-sm text-slate-400">{t('noItems')}</li>}
+        {o.items.length === 0 && <li className="text-sm text-slate-500">{t('noItems')}</li>}
         {o.items.map((it, i) => {
           const cooked = it.cooked === true;
           const served = it.served === true;
@@ -211,7 +211,7 @@ function OrderCardInner({
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-700 line-through'
                 : cooked
                   ? 'border-sky-300 bg-sky-50 text-sky-700'
-                  : 'border-slate-200 text-slate-400'
+                  : 'border-slate-200 text-slate-500'
               : cooked
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-700 line-through'
                 : 'border-slate-300 text-slate-700';
@@ -248,7 +248,7 @@ function OrderCardInner({
           className={
             amountWarning
               ? 'rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-right'
-              : 'text-xs text-slate-400'
+              : 'text-xs text-slate-500'
           }
         >
           {amountWarning ? (

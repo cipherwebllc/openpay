@@ -295,7 +295,7 @@ export function OrderFulfillmentBoard({
             onClick={toggleSound}
             aria-pressed={soundOn}
             className={`flex items-center gap-1 text-xs font-medium ${
-              soundOn ? 'text-brand' : 'text-slate-400 hover:text-slate-600'
+              soundOn ? 'text-brand' : 'text-slate-500 hover:text-slate-600'
             }`}
           >
             {soundOn ? (
@@ -317,7 +317,7 @@ export function OrderFulfillmentBoard({
           </button>
         </div>
       </div>
-      <p className="text-xs text-slate-400">{t('autoRefresh')}</p>
+      <p className="text-xs text-slate-500">{t('autoRefresh')}</p>
       {env.enableOrderCall && mode === 'hall' ? (
         <OrderCallSection
           calls={callFeed.calls.data ?? []}
@@ -351,9 +351,9 @@ export function OrderFulfillmentBoard({
           {t('loadError')}
         </p>
       ) : feed.isLoading ? (
-        <p className="text-center text-sm text-slate-400">{t('loading')}</p>
+        <p className="text-center text-sm text-slate-500">{t('loading')}</p>
       ) : orders.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-400">
+        <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
           {t('empty')}
         </p>
       ) : (
@@ -381,7 +381,7 @@ export function OrderFulfillmentBoard({
             </div>
           ) : null}
           {activeOrders.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-400">
+            <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
               {t('allStationDone')}
             </p>
           ) : (
@@ -398,7 +398,7 @@ export function OrderFulfillmentBoard({
           )}
         </>
       )}
-      <p className="text-[11px] text-slate-400">{t('claimedNote')}</p>
+      <p className="text-[11px] text-slate-500">{t('claimedNote')}</p>
     </div>
   );
 }
