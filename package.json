@@ -38,7 +38,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "encoding-japanese": "^2.2.0",
     "lucide-react": "^1.16.0",
-    "next": "^15.5.18",
+    "next": "^15.5.21",
     "next-intl": "^4.9.1",
     "permissionless": "^0.2.30",
     "qr-scanner": "^1.4.2",
