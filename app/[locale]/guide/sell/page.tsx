@@ -176,6 +176,24 @@ export default async function GuideSellPage({
           </Link>
         </Section>
 
+        {/* 業務完了型の説明の書き方 (2026-07-23 朝刊裁定 P2: モデル紹介でなく完了する仕事を書く) */}
+        <Section title={c.jobDescTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+            {c.jobDescIntro}
+          </p>
+          <BulletList
+            items={c.jobDescItems}
+            marker="•"
+            markerClassName="text-emerald-600"
+          />
+          <p className="mt-4 rounded-2xl bg-white p-5 text-sm leading-relaxed text-slate-700 shadow-card ring-1 ring-emerald-200/70">
+            <span className="mb-1 block text-xs font-semibold text-emerald-700">
+              {c.jobDescExampleLabel}
+            </span>
+            {c.jobDescExample}
+          </p>
+        </Section>
+
         <Section title={c.qualityTitle}>
           <BulletList
             items={c.quality}
