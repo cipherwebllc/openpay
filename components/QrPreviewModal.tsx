@@ -254,14 +254,14 @@ export function QrPreviewModal({
               </ol>
             )}
             {receiverShort && (
-              <p className="mt-1 break-all font-mono text-[10px] text-slate-400 print:max-w-2xl print:text-sm">
+              <p className="mt-1 break-all font-mono text-[10px] text-slate-500 print:max-w-2xl print:text-sm">
                 {receiverShort}
               </p>
             )}
             {/* 圏外の現場向け安心表示。QR の生成・提示は端末内で完結し通信不要。
                 印刷ポスターには不要なので print:hidden。 */}
             {labels.localGenNote && (
-              <p className="mt-3 text-xs text-slate-400 print:hidden">
+              <p className="mt-3 text-xs text-slate-500 print:hidden">
                 {labels.localGenNote}
               </p>
             )}
@@ -281,7 +281,7 @@ export function QrPreviewModal({
                 <p
                   role="status"
                   aria-live="polite"
-                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 print:hidden"
+                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500 print:hidden"
                 >
                   <span
                     aria-hidden

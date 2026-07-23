@@ -452,13 +452,13 @@ function RegisterModeContent({
           確認用に 1 行のステータスバー (受取先・通貨/チェーン・決済設定 + 変更導線) へ圧縮し、
           上部の縦幅を削って商品プリセットを上に押し上げる。 */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-        <span className="font-medium text-slate-400">{t('statusReceiverLabel')}:</span>
+        <span className="font-medium text-slate-500">{t('statusReceiverLabel')}:</span>
         <span className="font-mono text-slate-600">
           {effectiveReceiver
             ? shortAddress(effectiveReceiver)
             : settings.receiver.trim() || '—'}
         </span>
-        <span className="inline-flex items-center gap-1 text-slate-400">
+        <span className="inline-flex items-center gap-1 text-slate-500">
           <TokenLogo symbol={settings.token} size={14} className="h-3.5 w-3.5" />
           <ChainLogo slug={settings.chain} size={14} className="h-3.5 w-3.5" />
           ({chainForSlug(settings.chain).name} / {symbol})
@@ -635,7 +635,7 @@ function RegisterModeContent({
 
           {/* カート (商品行カード) */}
           {cart.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-400">
+            <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
               {t('cartEmpty')}
             </p>
           ) : (
@@ -659,7 +659,7 @@ function RegisterModeContent({
                       type="button"
                       onClick={() => removeLine(l.id)}
                       aria-label={t('removeLine')}
-                      className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:border-red-300 hover:text-red-600"
+                      className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:border-red-300 hover:text-red-600"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden />
                     </button>
@@ -722,7 +722,7 @@ function RegisterModeContent({
                       />
                     </Field>
                     <div className="ml-auto text-right">
-                      <div className="text-[11px] text-slate-400">{t('lineAmount')}</div>
+                      <div className="text-[11px] text-slate-500">{t('lineAmount')}</div>
                       <div className="font-mono text-sm font-semibold text-slate-800">
                         {valid ? `${amountHuman} ${symbol}` : '—'}
                       </div>
@@ -773,7 +773,7 @@ function RegisterModeContent({
             >
               <span>{t('presetManagerTitle')}</span>
               <ChevronRight
-                className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"
+                className="h-4 w-4 text-slate-500 transition-transform group-open:rotate-90"
                 aria-hidden
               />
             </summary>
@@ -802,7 +802,7 @@ function RegisterModeContent({
             {/* 注文明細 (読み取り・確定行のみ。長いカートは内部スクロール) */}
             <div className="min-h-[3rem] flex-1 overflow-y-auto px-4 py-3">
               {summaryLines.length === 0 ? (
-                <p className="py-3 text-center text-xs text-slate-400">
+                <p className="py-3 text-center text-xs text-slate-500">
                   {t('previewPlaceholder')}
                 </p>
               ) : (
@@ -814,7 +814,7 @@ function RegisterModeContent({
                     >
                       <span className="min-w-0 truncate text-slate-700">
                         {l.name}
-                        <span className="ml-1 text-slate-400">×{l.quantity}</span>
+                        <span className="ml-1 text-slate-500">×{l.quantity}</span>
                       </span>
                       <span className="shrink-0 font-mono text-slate-800">
                         {amountHuman} {symbol}
@@ -849,7 +849,7 @@ function RegisterModeContent({
                   </dd>
                 </div>
               </dl>
-              <p className="mt-2 text-[11px] text-slate-400">{t('taxInclusiveNote')}</p>
+              <p className="mt-2 text-[11px] text-slate-500">{t('taxInclusiveNote')}</p>
             </div>
 
             {/* デスクトップ CTA (サイドバー最下部に固定表示)。モバイルは下部バー側を使う。 */}
@@ -876,7 +876,7 @@ function RegisterModeContent({
         className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_-6px_rgba(15,23,42,0.14)] backdrop-blur md:bottom-0 lg:hidden"
       >
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] text-slate-400">{t('total')}</div>
+          <div className="text-[11px] text-slate-500">{t('total')}</div>
           <div className="truncate font-mono text-lg font-bold text-slate-900">
             {totalHuman} {symbol}
           </div>

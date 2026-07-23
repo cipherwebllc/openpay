@@ -373,7 +373,7 @@ export function TipEmbedGenerator() {
                 <span className="truncate font-mono">
                   {shortAddress(effectiveReceiver)}
                 </span>
-                <span className="whitespace-nowrap text-slate-400">
+                <span className="whitespace-nowrap text-slate-500">
                   {deployment.displaySymbol} / {chainForSlug(settings.chain).name}
                 </span>
                 <span className="ml-auto whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-brand-dark shadow-sm">
@@ -451,7 +451,7 @@ export function TipEmbedGenerator() {
                 rows={2}
                 className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
-              <p className="mt-1 text-xs text-slate-400">
+              <p className="mt-1 text-xs text-slate-500">
                 {t('messageCounter', { count: settings.message.length })}
               </p>
             </Field>
@@ -513,7 +513,7 @@ export function TipEmbedGenerator() {
                         className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
                       />
                     </div>
-                    <span className="flex h-10 items-center px-1 text-xs text-slate-400">
+                    <span className="flex h-10 items-center px-1 text-xs text-slate-500">
                       {deployment.displaySymbol}
                     </span>
                     <button
@@ -536,7 +536,7 @@ export function TipEmbedGenerator() {
                   {t('presetAddButton')}
                 </button>
               )}
-              <p className="mt-1.5 text-xs text-slate-400">
+              <p className="mt-1.5 text-xs text-slate-500">
                 {t('presetsHint', { defaults: defaultPresetsList })}
               </p>
             </Field>
@@ -554,7 +554,7 @@ export function TipEmbedGenerator() {
             >
               <span>{t('advancedTitle')}</span>
               <ChevronDown
-                className={`h-4 w-4 flex-none text-slate-400 transition-transform ${
+                className={`h-4 w-4 flex-none text-slate-500 transition-transform ${
                   advancedOpen ? 'rotate-180' : ''
                 }`}
                 aria-hidden
@@ -773,7 +773,7 @@ export function TipEmbedGenerator() {
             </div>
           )}
 
-          <p className="mt-3 text-xs text-slate-400">{t('feeNote')}</p>
+          <p className="mt-3 text-xs text-slate-500">{t('feeNote')}</p>
         </StepCard>
 
         {/* @handle 恒久リンクは「プロフ」タブ (HandleProfileBuilder) へ移設。チップタブは
@@ -788,11 +788,11 @@ export function TipEmbedGenerator() {
             className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
           >
             <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Code2 className="h-4 w-4 text-slate-400" aria-hidden />
+              <Code2 className="h-4 w-4 text-slate-500" aria-hidden />
               {t('devSettingsToggle')}
             </span>
             <ChevronDown
-              className={`h-4 w-4 flex-none text-slate-400 transition-transform ${
+              className={`h-4 w-4 flex-none text-slate-500 transition-transform ${
                 devOpen ? 'rotate-180' : ''
               }`}
               aria-hidden
@@ -811,7 +811,7 @@ export function TipEmbedGenerator() {
                   rows={2}
                   className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
                 />
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   {t('messageCounter', { count: settings.thanks.length })}
                 </p>
               </Field>
