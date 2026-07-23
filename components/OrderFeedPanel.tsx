@@ -140,11 +140,11 @@ export function OrderFeedPanel() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             {/* 受付番号 (受け渡し照合用・客の完了画面と同じコード)。 */}
-            <p className="text-xs font-medium text-slate-400">
+            <p className="text-xs font-medium text-slate-500">
               {t('orderNo')} #{o.orderId}
             </p>
             {o.table && <p className="text-base font-bold text-slate-900">{o.table}</p>}
-            <p className="text-xs text-slate-400">{chainLabel(o.chainId)}</p>
+            <p className="text-xs text-slate-500">{chainLabel(o.chainId)}</p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">
             {ageMin !== null && ageMin >= 1 ? (
@@ -175,7 +175,7 @@ export function OrderFeedPanel() {
               <span className="text-base font-bold text-slate-900">
                 {formattedAmount}
               </span>{' '}
-              <span className="text-[10px] font-medium text-slate-400">JPYC</span>
+              <span className="text-[10px] font-medium text-slate-500">JPYC</span>
             </span>
           </div>
         </div>
@@ -209,7 +209,7 @@ export function OrderFeedPanel() {
           </div>
         ) : null}
         {/* 明細/テーブルは顧客申告・金額はオンチェーン検証済み (advisory 原則の明示)。 */}
-        <p className="mt-1 text-[11px] text-slate-400">{t('claimedNote')}</p>
+        <p className="mt-1 text-[11px] text-slate-500">{t('claimedNote')}</p>
         <div className="mt-3 flex items-center justify-between gap-2">
           {explorer ? (
             <a
@@ -315,7 +315,7 @@ export function OrderFeedPanel() {
             />
           ) : null}
           <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-400">{t('autoRefresh')}</p>
+            <p className="text-xs text-slate-500">{t('autoRefresh')}</p>
             <button
               type="button"
               onClick={() => {
@@ -333,11 +333,11 @@ export function OrderFeedPanel() {
               {t('loadError')}
             </p>
           ) : feed.isLoading ? (
-            <p className="text-center text-sm text-slate-400">{t('loading')}</p>
+            <p className="text-center text-sm text-slate-500">{t('loading')}</p>
           ) : (
             <>
               {active.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">
+                <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
                   {t('empty')}
                 </p>
               ) : (
@@ -390,7 +390,7 @@ export function OrderFeedPanel() {
       )}
 
       {env.enableOrderRelay && (
-        <p className="text-xs text-slate-400">{t('disclosure')}</p>
+        <p className="text-xs text-slate-500">{t('disclosure')}</p>
       )}
     </div>
   );
