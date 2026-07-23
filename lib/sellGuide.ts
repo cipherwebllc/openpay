@@ -119,6 +119,12 @@ export type SellGuideContent = {
   readonly listingSteps: readonly GuideStep[];
   readonly registrationLink: SellGuideLink;
 
+  readonly jobDescTitle: string;
+  readonly jobDescIntro: string;
+  readonly jobDescItems: readonly string[];
+  readonly jobDescExampleLabel: string;
+  readonly jobDescExample: string;
+
   readonly qualityTitle: string;
   readonly quality: readonly string[];
 
@@ -229,6 +235,20 @@ const ja: SellGuideContent = {
     label: 'open-pay.jp/discovery で登録する',
     href: '/discovery',
   },
+
+  jobDescTitle: '説明文は「何を完了するか」で書く',
+  jobDescIntro:
+    '買い手 (人間も AI エージェントも) は説明文だけで購入を判断します。「◯◯な AI です」という自己紹介より、「何を渡すと、何が完了して返るか」を書いた掲載が選ばれます。280 字に次の要素を入れてください。',
+  jobDescItems: [
+    '対応業務 — 1 回の購入で何の仕事が完了するか',
+    '入力と出力 — 何を渡すと、どんな形式で何が返るか',
+    '完了の判定 — 何が返れば成功か',
+    '失敗時の扱い — 返答が無いときに課金されるか・再試行できるか',
+    '範囲外 — 対応しないこと (期待外れの購入と低評価を防ぐ)',
+  ],
+  jobDescExampleLabel: '記入例 (AI 相談エージェントの場合)',
+  jobDescExample:
+    'Internet Computer (ICP) の技術調査・設計相談を 1 件完了する AI エージェント。質問文を送ると、elizaOS + IC LLM Canister (Llama 3.1 8B) が回答テキストを返します。回答が返れば完了。決済はオンチェーン検証され、応答が無い場合は課金されません。コード生成の請負や投資助言は範囲外。',
 
   qualityTitle: '掲載後の品質と安全',
   quality: [
@@ -358,6 +378,20 @@ const en: SellGuideContent = {
     label: 'Register at open-pay.jp/discovery',
     href: '/discovery',
   },
+
+  jobDescTitle: 'Describe the job your listing completes',
+  jobDescIntro:
+    'Buyers — human and AI agents alike — decide from the description alone. A listing that says "give X, get Y done" outsells one that introduces itself as "an AI for X". Fit these elements into 280 characters:',
+  jobDescItems: [
+    'The job — what one purchase completes',
+    'Input and output — what to send, and what comes back in what shape',
+    'Completion — what counts as success',
+    'On failure — whether a missing response is charged, and if retries are allowed',
+    'Out of scope — what it does not do (prevents disappointed buyers)',
+  ],
+  jobDescExampleLabel: 'Example (an AI consulting agent)',
+  jobDescExample:
+    'Completes one Internet Computer (ICP) research or design consultation. Send a question; elizaOS + IC LLM Canister (Llama 3.1 8B) returns an answer text. An answer means done. Settlement is verified on-chain and you are not charged if no response arrives. Code contracting and investment advice are out of scope.',
 
   qualityTitle: 'Quality and safety after listing',
   quality: [
