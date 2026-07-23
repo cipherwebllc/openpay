@@ -97,7 +97,7 @@ export function OrderPickupMonitor({ initialToken }: { initialToken?: string }) 
 
   if (feed.isLoading) {
     return (
-      <p className="py-16 text-center text-base text-slate-400">
+      <p className="py-16 text-center text-base text-slate-500">
         {tFulfillment('loading')}
       </p>
     );
@@ -118,7 +118,7 @@ export function OrderPickupMonitor({ initialToken }: { initialToken?: string }) 
     <div className="space-y-6">
       <header>
         <h1 className="text-xl font-bold text-slate-900">{t('title')}</h1>
-        <p className="mt-2 text-sm text-slate-400">{tFulfillment('autoRefresh')}</p>
+        <p className="mt-2 text-sm text-slate-500">{tFulfillment('autoRefresh')}</p>
       </header>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-3 md:gap-7">
@@ -133,7 +133,7 @@ export function OrderPickupMonitor({ initialToken }: { initialToken?: string }) 
             {t('preparing')}
           </h2>
           {preparingOrders.length === 0 ? (
-            <p className="mt-10 text-center text-base text-slate-400">{t('preparingEmpty')}</p>
+            <p className="mt-10 text-center text-base text-slate-500">{t('preparingEmpty')}</p>
           ) : (
             <ul className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3">
               {preparingOrders.map((order) => (

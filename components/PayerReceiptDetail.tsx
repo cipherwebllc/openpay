@@ -117,27 +117,27 @@ export function PayerReceiptDetail({
       <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
         {receipt.receiptNo && (
           <div>
-            <dt className="text-slate-400">{t('receiptNoLabel')}</dt>
+            <dt className="text-slate-500">{t('receiptNoLabel')}</dt>
             <dd className="font-mono break-all">{receipt.receiptNo}</dd>
           </div>
         )}
         <div>
-          <dt className="text-slate-400">{t('paidAtLabel')}</dt>
+          <dt className="text-slate-500">{t('paidAtLabel')}</dt>
           <dd>{formatReceiptDateTime(receipt.paidAt ?? receipt.createdAt, locale)}</dd>
         </div>
         {receipt.merchantName && (
           <div>
-            <dt className="text-slate-400">{t('merchantLabel')}</dt>
+            <dt className="text-slate-500">{t('merchantLabel')}</dt>
             <dd className="break-words">{receipt.merchantName}</dd>
           </div>
         )}
         <div>
-          <dt className="text-slate-400">{t('merchantWalletLabel')}</dt>
+          <dt className="text-slate-500">{t('merchantWalletLabel')}</dt>
           <dd className="font-mono">{shortAddress(receipt.merchantAddress)}</dd>
         </div>
         {receipt.payerAddress && (
           <div>
-            <dt className="text-slate-400">{t('payerWalletLabel')}</dt>
+            <dt className="text-slate-500">{t('payerWalletLabel')}</dt>
             <dd className="font-mono">
               {payerExplorerUrl ? (
                 <a
@@ -155,7 +155,7 @@ export function PayerReceiptDetail({
           </div>
         )}
         <div>
-          <dt className="text-slate-400">{t('currencyLabel')}</dt>
+          <dt className="text-slate-500">{t('currencyLabel')}</dt>
           <dd>
             {currency}
             {receipt.chainName ? ` / ${receipt.chainName}` : ''}
@@ -166,7 +166,7 @@ export function PayerReceiptDetail({
       {/* 商品明細 (lineItems)。builder の仮想 1 行で常に 1 行以上は出る。 */}
       {items.length > 0 && (
         <div className="mt-3">
-          <p className="text-xs text-slate-400">{t('lineItemsLabel')}</p>
+          <p className="text-xs text-slate-500">{t('lineItemsLabel')}</p>
           <ul className="mt-1 space-y-1">
             {items.map((li, i) => (
               <li
@@ -175,9 +175,9 @@ export function PayerReceiptDetail({
               >
                 <span className="break-words">
                   {li.name}{' '}
-                  <span className="text-slate-400">×{li.quantity}</span>
+                  <span className="text-slate-500">×{li.quantity}</span>
                   {li.taxRate != null && li.taxRate > 0 && (
-                    <span className="ml-1 text-slate-400">{li.taxRate}%</span>
+                    <span className="ml-1 text-slate-500">{li.taxRate}%</span>
                   )}
                 </span>
                 <span className="font-mono text-slate-700">
@@ -195,14 +195,14 @@ export function PayerReceiptDetail({
           <>
             {receipt.subtotalAmount && (
               <div className="flex justify-between">
-                <dt className="text-slate-400">{t('subtotalLabel')}</dt>
+                <dt className="text-slate-500">{t('subtotalLabel')}</dt>
                 <dd className="font-mono">
                   {receipt.subtotalAmount} {currency}
                 </dd>
               </div>
             )}
             <div className="flex justify-between">
-              <dt className="text-slate-400">{t('taxLabel')}</dt>
+              <dt className="text-slate-500">{t('taxLabel')}</dt>
               <dd className="font-mono">
                 {receipt.totalTaxAmount} {currency}
               </dd>
@@ -220,7 +220,7 @@ export function PayerReceiptDetail({
       {/* 異通貨建て: 顧客が QR で見た元価格 (請求建て) を併記。settled 金額が実支払額。 */}
       {receipt.anchorAmount && receipt.anchorSymbol && (
         <div className="mt-2 text-xs">
-          <p className="text-slate-400">{t('anchorLabel')}</p>
+          <p className="text-slate-500">{t('anchorLabel')}</p>
           <p className="break-words text-slate-600">
             {tp('fxAnchorLine', {
               refAmt: receipt.anchorAmount,
@@ -235,13 +235,13 @@ export function PayerReceiptDetail({
 
       {receipt.txHash && (
         <div className="mt-3 text-xs">
-          <p className="text-slate-400">{t('txHashLabel')}</p>
+          <p className="text-slate-500">{t('txHashLabel')}</p>
           <p className="break-all font-mono text-slate-600">{receipt.txHash}</p>
         </div>
       )}
       {receipt.memo && (
         <div className="mt-2 text-xs">
-          <p className="text-slate-400">{t('memoLabel')}</p>
+          <p className="text-slate-500">{t('memoLabel')}</p>
           <p className="break-words text-slate-600">{receipt.memo}</p>
         </div>
       )}
@@ -289,7 +289,7 @@ export function PayerReceiptDetail({
       </div>
 
       {/* 免責: 正式な領収書/税務証憑ではない。 */}
-      <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
         {t('disclaimer')}
       </p>
 
@@ -299,7 +299,7 @@ export function PayerReceiptDetail({
           完了画面 (onRemove なし) でのみ表示してノイズを最小化する。 */}
       {!onRemove && (
         <div className="mt-3 border-t border-slate-100 pt-3 print:hidden">
-          <p className="text-xs text-slate-400">{t('ctaText')}</p>
+          <p className="text-xs text-slate-500">{t('ctaText')}</p>
           <Link
             href={`/${locale}`}
             className="text-xs text-brand underline underline-offset-2 hover:opacity-80"

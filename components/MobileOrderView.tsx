@@ -599,13 +599,13 @@ export function MobileOrderView({
         <section className="space-y-1.5 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
           {config.hours && (
             <p className="flex items-start gap-2">
-              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewHoursLabel')} />
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-label={t('viewHoursLabel')} />
               <span>{config.hours}</span>
             </p>
           )}
           {config.address && (
             <p className="flex items-start gap-2">
-              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewAddressLabel')} />
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-label={t('viewAddressLabel')} />
               {mapHref ? (
                 <a
                   href={mapHref}
@@ -622,7 +622,7 @@ export function MobileOrderView({
           )}
           {config.phone && (
             <p className="flex items-start gap-2">
-              <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-label={t('viewPhoneLabel')} />
+              <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-label={t('viewPhoneLabel')} />
               {tel ? (
                 <a href={tel} className="text-[var(--mo-accent-text)] hover:underline">
                   {config.phone}
@@ -745,7 +745,7 @@ export function MobileOrderView({
           {t('howToGuideLink')}
         </Link>
       </p>
-      <p className="text-center text-xs text-slate-400">
+      <p className="text-center text-xs text-slate-500">
         {t.rich('poweredBy', {
           link: (chunks) => (
             <Link href="/" prefetch={false} className="underline hover:text-slate-600">

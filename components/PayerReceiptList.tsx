@@ -53,7 +53,7 @@ export function PayerReceiptList() {
           <button
             type="button"
             onClick={handleClearAll}
-            className="text-[11px] text-slate-400 underline underline-offset-2 hover:text-red-600"
+            className="text-[11px] text-slate-500 underline underline-offset-2 hover:text-red-600"
           >
             {t('clearAllButton')}
           </button>
@@ -65,7 +65,7 @@ export function PayerReceiptList() {
         <div className="mt-3 flex flex-col items-center rounded-xl bg-slate-50 px-3 py-6 text-center">
           <ReceiptText className="h-8 w-8 text-slate-300" aria-hidden />
           <p className="mt-2 text-sm text-slate-500">{t('empty')}</p>
-          <p className="mt-1 text-xs text-slate-400">{t('emptyHint')}</p>
+          <p className="mt-1 text-xs text-slate-500">{t('emptyHint')}</p>
         </div>
       ) : (
         <ul className="mt-3 space-y-2">
@@ -89,7 +89,7 @@ export function PayerReceiptList() {
                     <span className="text-base font-bold tabular-nums text-slate-900">
                       {r.totalAmount ?? r.amount} {r.currency}
                     </span>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px] text-slate-500">
                       {formatReceiptDateTime(r.paidAt ?? r.createdAt, locale)}
                     </span>
                   </span>
@@ -115,7 +115,7 @@ export function PayerReceiptList() {
       )}
 
       {/* 保存場所の注意 (空でも常時表示)。 */}
-      <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
         {t('storageNotice')}
       </p>
     </section>

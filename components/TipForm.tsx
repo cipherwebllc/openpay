@@ -1138,7 +1138,7 @@ export function TipForm({
         onDismiss={() => setOverlayDismissed(true)}
       />
 
-      <p className="pt-2 text-center text-[10px] text-slate-400">
+      <p className="pt-2 text-center text-[10px] text-slate-500">
         {t('poweredBy')}{' '}
         <a
           href="https://github.com/cipherwebllc/openpay"
