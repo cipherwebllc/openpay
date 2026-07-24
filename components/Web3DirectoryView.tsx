@@ -211,7 +211,7 @@ export function Web3DirectoryView({
                                   className="h-3.5 w-3.5 shrink-0 text-slate-300 transition-colors group-hover:text-brand"
                                 />
                               </h4>
-                              <span className="mt-1 block text-[10px] font-medium text-slate-400">
+                              <span className="mt-1 block text-[10px] font-medium text-slate-500">
                                 {copy.officialSite}
                               </span>
                             </div>

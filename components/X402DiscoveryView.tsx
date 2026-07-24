@@ -467,7 +467,7 @@ export function X402DiscoveryView({
       onClick={() => copyText(k, text)}
       aria-label={copiedKey === k ? t('copied') : t('copy')}
       title={copiedKey === k ? t('copied') : t('copy')}
-      className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+      className="shrink-0 rounded-md p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
     >
       {copiedKey === k ? (
         <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
@@ -531,12 +531,12 @@ export function X402DiscoveryView({
               href={opts.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="min-w-0 truncate font-mono text-xs text-slate-400 underline-offset-2 transition hover:text-brand hover:underline"
+              className="min-w-0 truncate font-mono text-xs text-slate-500 underline-offset-2 transition hover:text-brand hover:underline"
             >
               {opts.url}
             </a>
           ) : (
-            <span className="min-w-0 truncate font-mono text-xs text-slate-400">
+            <span className="min-w-0 truncate font-mono text-xs text-slate-500">
               {opts.url}
             </span>
           )}
@@ -662,7 +662,7 @@ export function X402DiscoveryView({
                 value={form.payTo}
                 onChange={(e) => setForm((f) => ({ ...f, payTo: e.target.value }))}
               />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
                 {t('formPayToHint')}
               </p>
             </Field>
@@ -678,7 +678,7 @@ export function X402DiscoveryView({
                 value={form.docsUrl}
                 onChange={(e) => setForm((f) => ({ ...f, docsUrl: e.target.value }))}
               />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
                 {t('formDocsUrlHint')}
               </p>
             </Field>
@@ -690,7 +690,7 @@ export function X402DiscoveryView({
                 value={form.license}
                 onChange={(e) => setForm((f) => ({ ...f, license: e.target.value }))}
               />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
                 {t('formLicenseHint')}
               </p>
             </Field>
@@ -754,7 +754,7 @@ export function X402DiscoveryView({
               )}
             </div>
             {!editId && !atResourceLimit && !attested && !submitting && (
-              <p className="text-[11px] text-slate-400">{t('attestRequired')}</p>
+              <p className="text-[11px] text-slate-500">{t('attestRequired')}</p>
             )}
             {errorMsg &&
               (error === 'gate_not_openpay' && errorSnippet ? (
@@ -964,7 +964,7 @@ export function X402DiscoveryView({
               </span>
               <span className="relative block">
                 <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
                   aria-hidden
                 />
                 <input
@@ -988,7 +988,7 @@ export function X402DiscoveryView({
                 }`}
               >
                 {t('catalogCategoryAll')}
-                <span className={effectiveCatalogCategory === null ? 'text-white/75' : 'text-slate-400'}>
+                <span className={effectiveCatalogCategory === null ? 'text-white/75' : 'text-slate-500'}>
                   {items.length}
                 </span>
               </button>
@@ -1007,7 +1007,7 @@ export function X402DiscoveryView({
                     }`}
                   >
                     {category}
-                    <span className={active ? 'text-white/75' : 'text-slate-400'}>
+                    <span className={active ? 'text-white/75' : 'text-slate-500'}>
                       {categoryCounts.get(category)}
                     </span>
                   </button>
@@ -1067,13 +1067,13 @@ export function X402DiscoveryView({
                         <div className="text-sm font-bold text-slate-900">
                           {item.priceJpyc} JPYC
                           {fee && (
-                            <span className="ml-1 text-[11px] font-normal text-slate-400">
+                            <span className="ml-1 text-[11px] font-normal text-slate-500">
                               {t('feeNote', { fee })}
                             </span>
                           )}
                         </div>
                         {total && (
-                          <div className="text-[11px] text-slate-400">
+                          <div className="text-[11px] text-slate-500">
                             {t('payTotal', { total })}
                           </div>
                         )}
@@ -1161,7 +1161,7 @@ export function X402DiscoveryView({
               </span>
             </span>
             <ChevronDown
-              className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180"
+              className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180"
               aria-hidden
             />
           </summary>
@@ -1241,7 +1241,7 @@ export function X402DiscoveryView({
               </span>
             </span>
             <ChevronDown
-              className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180"
+              className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180"
               aria-hidden
             />
           </summary>
