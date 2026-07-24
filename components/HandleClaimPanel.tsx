@@ -106,7 +106,7 @@ function ReleaseConfirmModal({
       >
         <p className="text-sm font-semibold text-slate-800">{title}</p>
         <p className="mt-2 text-xs leading-relaxed text-slate-500">{body}</p>
-        <p className="mt-2 break-all font-mono text-xs text-slate-400">{link}</p>
+        <p className="mt-2 break-all font-mono text-xs text-slate-500">{link}</p>
         <div className="mt-5 flex justify-end gap-2">
           <button
             ref={cancelRef}
@@ -498,7 +498,7 @@ export function HandleClaimPanel({
               </p>
             )}
             <div className="flex items-center gap-1.5">
-              <span className="text-sm text-slate-400">{origin || 'open-pay.jp'}/@</span>
+              <span className="text-sm text-slate-500">{origin || 'open-pay.jp'}/@</span>
               <input
                 type="text"
                 value={input}
@@ -511,7 +511,7 @@ export function HandleClaimPanel({
                 className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
             </div>
-            <p className="mt-1 text-xs text-slate-400">{t('formatHint')}</p>
+            <p className="mt-1 text-xs text-slate-500">{t('formatHint')}</p>
             {/* 入力検証 + 空き状態 */}
             {input.length > 0 && !validation.ok && (
               <p className="mt-1 text-xs text-red-600">
@@ -525,7 +525,7 @@ export function HandleClaimPanel({
               !ownedNames.includes(normalized) && (
                 <p className="mt-1 text-xs">
                   {availability.isFetching ? (
-                    <span className="text-slate-400">{t('checking')}</span>
+                    <span className="text-slate-500">{t('checking')}</span>
                   ) : availability.data?.available ? (
                     <span className="text-emerald-600">{t('available')}</span>
                   ) : availability.data?.reason === 'unavailable' ||

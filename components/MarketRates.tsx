@@ -74,7 +74,7 @@ export function MarketRates() {
             />
             <TokenChip slug="jpyc" label={t('jpycPeg')} />
             {!unavailable && (
-              <span className="ml-auto text-[10px] text-slate-400">
+              <span className="ml-auto text-[10px] text-slate-500">
                 {t('referenceNote')}
               </span>
             )}

@@ -35,7 +35,7 @@ export function PayStepStrip() {
           </li>
         ))}
       </ol>
-      <p className="mt-2 text-center text-[11px] text-slate-400">
+      <p className="mt-2 text-center text-[11px] text-slate-500">
         {t('stepNote')}
       </p>
     </div>

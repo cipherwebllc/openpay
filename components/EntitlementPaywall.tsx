@@ -282,7 +282,7 @@ export function EntitlementPaywall({
         </div>
       )}
 
-      <p className="mt-3 text-[10px] leading-relaxed text-slate-400">
+      <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
         {/* CSV パスは note の後に「当社負担/利用者負担」を付す。Pro は note のみ (gasless 文言なし)。 */}
         {config.supportsGasless ? (
           <>

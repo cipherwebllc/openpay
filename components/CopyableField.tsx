@@ -47,7 +47,7 @@ export function CopyableField({
         className={`shrink-0 text-xs font-sans transition ${
           copied
             ? 'text-emerald-600'
-            : 'text-slate-400 opacity-0 group-hover:opacity-100 group-focus:opacity-100'
+            : 'text-slate-500 opacity-0 group-hover:opacity-100 group-focus:opacity-100'
         }`}
       >
         {copied ? `✓ ${t('copied')}` : t('copy')}

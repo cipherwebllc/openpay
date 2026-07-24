@@ -50,7 +50,7 @@ export function FreeeSyncPanel({
       {!isSignedIn ? (
         <p className="mt-2 text-xs text-slate-500">{t('signInRequired')}</p>
       ) : status.isLoading ? (
-        <p className="mt-2 text-xs text-slate-400">…</p>
+        <p className="mt-2 text-xs text-slate-500">…</p>
       ) : status.isError || !status.data ? (
         <p className="mt-2 text-xs text-red-600">{t('loadError')}</p>
       ) : !status.data.connected ? (
@@ -104,7 +104,7 @@ export function FreeeSyncPanel({
               </button>
 
               {incomeEntries.length === 0 && (
-                <p className="text-[11px] text-slate-400">{t('noIncome')}</p>
+                <p className="text-[11px] text-slate-500">{t('noIncome')}</p>
               )}
               {sync.data && (
                 <p className="text-[11px] text-slate-600">
@@ -124,7 +124,7 @@ export function FreeeSyncPanel({
                     : t('syncError')}
                 </p>
               )}
-              <p className="text-[11px] text-slate-400">{t('draftNote')}</p>
+              <p className="text-[11px] text-slate-500">{t('draftNote')}</p>
             </div>
           )}
         </div>
@@ -152,7 +152,7 @@ function MappingEditor({
 
   const data = options.data;
   if (options.isLoading) {
-    return <p className="text-[11px] text-slate-400">…</p>;
+    return <p className="text-[11px] text-slate-500">…</p>;
   }
   if (options.isError || !data) {
     return <p className="text-[11px] text-red-600">{t('connectError')}</p>;

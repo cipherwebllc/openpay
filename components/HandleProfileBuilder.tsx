@@ -69,7 +69,7 @@ function Field({
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
       <div className="mt-1">{children}</div>
-      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </label>
   );
 }
@@ -466,7 +466,7 @@ export function HandleProfileBuilder() {
                       {...socialsReorder.rowProps(i, draft.socials.length)}
                       labels={reorderLabels}
                     >
-                      <span className="shrink-0 text-slate-400">
+                      <span className="shrink-0 text-slate-500">
                         <SocialIcon url={s.trim()} className="h-5 w-5" />
                       </span>
                       <input
@@ -485,7 +485,7 @@ export function HandleProfileBuilder() {
                         onClick={() =>
                           update({ socials: draft.socials.filter((_, j) => j !== i) })
                         }
-                        className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                        className="rounded-md border border-slate-200 px-2 text-sm text-slate-500 hover:text-red-600"
                         aria-label={t('removeSocial')}
                       >
                         ×
@@ -563,7 +563,7 @@ export function HandleProfileBuilder() {
                           <button
                             type="button"
                             onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
-                            className="shrink-0 rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                            className="shrink-0 rounded-md border border-slate-200 px-2 text-sm text-slate-500 hover:text-red-600"
                             aria-label={t('removeLink')}
                           >
                             ×

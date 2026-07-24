@@ -347,7 +347,7 @@ export function OpenPayFeePanel() {
         </>
       )}
 
-      <p className="mt-3 text-[10px] leading-relaxed text-slate-400">
+      <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
         {t('note')}
       </p>
     </div>

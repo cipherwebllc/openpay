@@ -306,7 +306,7 @@ export function PushNotifyPanel() {
           />
           <span>
             {t('includeAmountLabel')}
-            <span className="mt-0.5 block text-[11px] text-slate-400">
+            <span className="mt-0.5 block text-[11px] text-slate-500">
               {t('includeAmountNote')}
             </span>
           </span>
