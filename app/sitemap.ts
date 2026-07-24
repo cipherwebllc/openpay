@@ -25,12 +25,21 @@ const PUBLIC_ROUTES = [
   '/guide/sell',
 ] as const;
 
+// 法務ページ。検索価値は低いが「サービス名 + 特商法/利用規約」で調べる
+// 慎重な利用者に公式整備済みであることを示す信頼シグナルとして低 priority で載せる。
+const LEGAL_ROUTES = ['/terms', '/privacy', '/disclaimer', '/tokutei'] as const;
+
 export default function sitemap(): MetadataRoute.Sitemap {
-  return LOCALES.flatMap((locale) =>
-    PUBLIC_ROUTES.map((route) => ({
+  return LOCALES.flatMap((locale) => [
+    ...PUBLIC_ROUTES.map((route) => ({
       url: `${SITE_URL}/${locale}${route}`,
       changeFrequency: route === '' ? ('weekly' as const) : ('monthly' as const),
       priority: route === '' ? 1 : 0.6,
     })),
-  );
+    ...LEGAL_ROUTES.map((route) => ({
+      url: `${SITE_URL}/${locale}${route}`,
+      changeFrequency: 'monthly' as const,
+      priority: 0.3,
+    })),
+  ]);
 }
