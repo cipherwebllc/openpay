@@ -545,11 +545,16 @@ describe('CheckoutForm — レンダリング', () => {
 });
 
 describe('CheckoutForm — 接続フロー', () => {
-  it('未接続: 「ウォレットを接続」ボタン', () => {
+  it('未接続: 「ウォレットを接続」ボタンは押せて、ウォレット選択へスクロール誘導する', () => {
+    // jsdom は scrollIntoView 未実装なので spy を差し込んで呼び出しを検証。
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
     render(<CheckoutForm params={USDC_PARAMS} />);
-    expect(
-      screen.getByRole('button', { name: /ウォレットを接続/ }),
-    ).toBeDisabled();
+    const cta = screen.getByRole('button', { name: /ウォレットを接続/ });
+    // ラベルが行動喚起なのに disabled で反応しない矛盾を塞ぐ (押せる)。
+    expect(cta).toBeEnabled();
+    fireEvent.click(cta);
+    expect(scrollSpy).toHaveBeenCalled();
   });
 
   it('wrong chain: switch ボタン表示', () => {

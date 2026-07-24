@@ -370,6 +370,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     ? standard.feeTxHash
     : standard.merchantTxHash;
 
+  // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
+  const walletSectionRef = useRef<HTMLElement | null>(null);
+
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -1152,7 +1155,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       )}
 
       {!completed && (
-        <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+        <section
+          ref={walletSectionRef}
+          className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4"
+        >
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             {t('walletSection')}
           </p>
@@ -1220,8 +1226,19 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       {!completed && (
         <button
           type="button"
-          onClick={onSubmit}
-          disabled={!canSubmit}
+          // 未接続時: ラベルは「ウォレットを接続」なのに disabled で押せない矛盾を解消 —
+          // タップで上のウォレット選択セクションへスクロールする (送信は canSubmit ガードの
+          // まま・onSubmit へは接続後しか到達しない = 決済フロー不変)。
+          onClick={
+            !isConnected
+              ? () =>
+                  walletSectionRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                  })
+              : onSubmit
+          }
+          disabled={isConnected && !canSubmit}
           className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
         >
           {flowPending
