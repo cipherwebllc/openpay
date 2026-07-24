@@ -408,6 +408,33 @@ next (exact pin postcss 8.4.31) → postcss
 - 第三者由来の CSS を build/postcss で処理する機能を追加 (**導入 PR で即再評価**)
 - build-time 以外の exploit 経路の報告
 
+### 7.10 HIGH: `postcss` (GHSA-r28c-9q8g-f849)
+
+**Root advisory**: [GHSA-r28c-9q8g-f849](https://github.com/advisories/GHSA-r28c-9q8g-f849)
+— "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL)
+leads to Arbitrary .map File Disclosure" (postcss <=8.5.17)
+
+**Propagation chain**:
+```
+next (exact pin postcss 8.4.31) → postcss
+※ root の postcss は 8.5.23 へ更新済み (本 wave で 8.5.15→8.5.23)。next 内包 copy のみ該当。
+```
+
+**Exploit mechanism**: §7.9 (GHSA-6g55) と同族の sourceMappingURL 系。攻撃者が
+制御する CSS の `sourceMappingURL` にパストラバーサルを仕込むと、postcss の
+previous source map 自動読込が**ビルドマシン上の**任意 .map ファイルを開示する。
+
+**Reachability for OpenPay**: §7.2 / §7.9 と同一 —
+- postcss は build pipeline 内でビルド時にのみ動作し、入力は OpenPay 自身のソースのみ
+- 第三者由来の CSS が postcss に流れる経路が存在しない (テーマ入稿等の機能なし)
+- next 内包 copy は exact pin のため単独更新不可。override はビルド基盤への介入で
+  到達性ゼロの脆弱性にはリスク不相応 → next 側の bump 待ち accepted risk (user 裁定 2026-07-25)
+
+**Reassess triggers**:
+- next が postcss>=8.5.18 を内包する版へ更新 → npm update で解消し allowlist 削除
+- 第三者由来の CSS を build/postcss で処理する機能を追加 (**導入 PR で即再評価**)
+- build-time 以外の exploit 経路の報告
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -427,6 +454,7 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-96hv-2xvq-fx4p | ws | HIGH | §7.5 |
 | GHSA-f88m-g3jw-g9cj | sharp | HIGH | §7.8 |
 | GHSA-6g55-p6wh-862q | postcss | HIGH | §7.9 |
+| GHSA-r28c-9q8g-f849 | postcss | HIGH | §7.10 |
 
 (§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.6 otel core〔GHSA-8988〕は upstream fix 済で
 allowlist から削除済 = 上表は現行の実体。)
