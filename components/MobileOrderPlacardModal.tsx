@@ -208,7 +208,7 @@ export function MobileOrderPlacardModal({
           ))}
         </div>
       )}
-      <p className="mt-1 break-all font-mono text-[11px] text-slate-400 print:text-base">
+      <p className="mt-1 break-all font-mono text-[11px] text-slate-500 print:text-base">
         {url}
       </p>
     </div>

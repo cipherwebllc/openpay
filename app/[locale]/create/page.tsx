@@ -143,7 +143,7 @@ export default function CreatePage() {
           <ArrowRightLeft className="h-5 w-5 text-brand" aria-hidden />
           {t('offramp.heading')}
         </h2>
-        <p className="mt-1 text-[11px] text-slate-400">{t('offramp.subheading')}</p>
+        <p className="mt-1 text-[11px] text-slate-500">{t('offramp.subheading')}</p>
         <ul className="mt-3 space-y-2">
           {TOKEN_SYMBOLS.map((token) => {
             const link = getExchangeLink(token, locale);
@@ -178,7 +178,7 @@ export default function CreatePage() {
             );
           })}
         </ul>
-        <p className="mt-3 text-[11px] text-slate-400">{t('offramp.hint')}</p>
+        <p className="mt-3 text-[11px] text-slate-500">{t('offramp.hint')}</p>
         {/* JPYC の DeFi 運用ガイド (note・外部)。ウォレット準備〜換金・運用の参考導線。 */}
         <a
           href="https://note.com/masia02/n/ned04a4cdb00a"

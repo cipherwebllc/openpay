@@ -57,7 +57,7 @@ export function OfflineLastQr() {
         ) : null}
         <p className="text-sm text-slate-700">{record.amountLabel}</p>
         <p className="text-xs text-slate-500">{record.tokenChainLabel}</p>
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px] text-slate-500">
           {t('savedAt', { time: savedAt })}
         </p>
       </div>
