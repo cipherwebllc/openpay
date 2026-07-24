@@ -88,7 +88,7 @@ function MenuItemCardImpl({
                 type="button"
                 onClick={() => onQtyChange(item.id, 1)}
                 aria-label={t('qtyIncrease')}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--mo-accent)] text-lg leading-none text-[var(--mo-accent-ink)] shadow-sm transition hover:brightness-95 active:scale-90"
+                className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--mo-accent)] text-lg leading-none text-[var(--mo-accent-ink)] shadow-sm transition after:absolute after:-inset-1 after:content-[''] hover:brightness-95 active:scale-90"
               >
                 ＋
               </button>
@@ -99,7 +99,7 @@ function MenuItemCardImpl({
                   type="button"
                   onClick={() => onQtyChange(item.id, n - 1)}
                   aria-label={t('qtyDecrease')}
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm transition active:scale-90"
+                  className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm transition after:absolute after:-inset-1 after:content-[''] active:scale-90"
                 >
                   −
                 </button>
@@ -108,7 +108,7 @@ function MenuItemCardImpl({
                   type="button"
                   onClick={() => onQtyChange(item.id, n + 1)}
                   aria-label={t('qtyIncrease')}
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--mo-accent)] text-[var(--mo-accent-ink)] shadow-sm transition hover:brightness-95 active:scale-90"
+                  className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[var(--mo-accent)] text-[var(--mo-accent-ink)] shadow-sm transition after:absolute after:-inset-1 after:content-[''] hover:brightness-95 active:scale-90"
                 >
                   ＋
                 </button>

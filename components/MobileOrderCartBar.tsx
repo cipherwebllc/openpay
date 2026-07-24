@@ -132,7 +132,7 @@ export function MobileOrderCartBar({
                           type="button"
                           onClick={() => adjust(l.qty - 1)}
                           aria-label={t('qtyDecrease')}
-                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                          className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 after:absolute after:-inset-1.5 after:content-['']"
                         >
                           −
                         </button>
@@ -141,7 +141,7 @@ export function MobileOrderCartBar({
                           type="button"
                           onClick={() => adjust(l.qty + 1)}
                           aria-label={t('qtyIncrease')}
-                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-600"
+                          className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 after:absolute after:-inset-1.5 after:content-['']"
                         >
                           ＋
                         </button>
