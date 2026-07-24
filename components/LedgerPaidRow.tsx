@@ -52,7 +52,7 @@ export function LedgerPaidRow({ receipt }: { receipt: PayerReceipt }) {
                 aria-hidden
                 className={`inline-block h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_CLASS[receipt.status]}`}
               />
-              <time className="ml-auto shrink-0 font-mono text-[11px] text-slate-400">
+              <time className="ml-auto shrink-0 font-mono text-[11px] text-slate-500">
                 {formatReceiptDateTime(receipt.paidAt ?? receipt.createdAt, locale)}
               </time>
             </div>
@@ -83,7 +83,7 @@ export function LedgerPaidRow({ receipt }: { receipt: PayerReceipt }) {
             </p>
           </div>
           <ChevronDown
-            className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+            className="h-5 w-5 shrink-0 text-slate-500 transition-transform group-open:rotate-180"
             aria-hidden
           />
         </summary>

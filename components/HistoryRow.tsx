@@ -171,10 +171,10 @@ export function HistoryRow({
               >
                 {t(STATUS_I18N_KEY[entry.status])}
               </span>
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-slate-500">
                 {t(FLOW_KIND_I18N_KEY[entry.flow])}
               </span>
-              <time className="ml-auto shrink-0 font-mono text-[11px] text-slate-400">
+              <time className="ml-auto shrink-0 font-mono text-[11px] text-slate-500">
                 {formatHistoryTimestamp(entry.ts)}
               </time>
             </div>
@@ -213,10 +213,10 @@ export function HistoryRow({
               <p className="mt-1 break-words text-sm font-medium text-slate-600">
                 {repName}
                 {items.length === 1 && items[0].quantity > 1 && (
-                  <span className="text-slate-400"> ×{items[0].quantity}</span>
+                  <span className="text-slate-500"> ×{items[0].quantity}</span>
                 )}
                 {items.length > 1 && (
-                  <span className="text-slate-400">
+                  <span className="text-slate-500">
                     {' '}
                     {t('itemCountMore', { count: items.length - 1 })}
                   </span>
@@ -225,7 +225,7 @@ export function HistoryRow({
             )}
           </div>
           <ChevronDown
-            className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+            className="h-5 w-5 shrink-0 text-slate-500 transition-transform group-open:rotate-180"
             aria-hidden
           />
         </summary>
@@ -233,7 +233,7 @@ export function HistoryRow({
         <div className="border-t border-slate-100 px-4 pb-4 pt-3">
       <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-xs text-slate-600 sm:grid-cols-2">
         <div>
-          <dt className="text-slate-400">{t('columnMode')}</dt>
+          <dt className="text-slate-500">{t('columnMode')}</dt>
           <dd>
             {entry.payMode === 'gasless'
               ? t('modeGasless')
@@ -243,7 +243,7 @@ export function HistoryRow({
           </dd>
         </div>
         <div>
-          <dt className="text-slate-400">{t('columnMerchant')}</dt>
+          <dt className="text-slate-500">{t('columnMerchant')}</dt>
           <dd className="font-mono">
             {merchantUrl ? (
               <a
@@ -261,29 +261,29 @@ export function HistoryRow({
         </div>
         {entry.customer && (
           <div>
-            <dt className="text-slate-400">{t('columnCustomer')}</dt>
+            <dt className="text-slate-500">{t('columnCustomer')}</dt>
             <dd className="font-mono">{shortAddress(entry.customer)}</dd>
           </div>
         )}
         <div>
-          <dt className="text-slate-400">{t('columnNetwork')}</dt>
+          <dt className="text-slate-500">{t('columnNetwork')}</dt>
           <dd>{entry.chainSlug}</dd>
         </div>
         {showGrossSale && (
           <div>
-            <dt className="text-slate-400">{t('columnSaleAmount')}</dt>
+            <dt className="text-slate-500">{t('columnSaleAmount')}</dt>
             <dd>{fmt(entry.saleAmount, entry.asset)}</dd>
           </div>
         )}
         {showServiceFee && (
           <div>
-            <dt className="text-slate-400">{t('columnFee')}</dt>
+            <dt className="text-slate-500">{t('columnFee')}</dt>
             <dd>{fmt(entry.feeAmount, entry.asset)}</dd>
           </div>
         )}
         {showNetFee && (
           <div>
-            <dt className="text-slate-400">{t('columnNetworkFee')}</dt>
+            <dt className="text-slate-500">{t('columnNetworkFee')}</dt>
             <dd className="flex flex-wrap items-center gap-1.5">
               <span>{fmt(netFeeRaw, entry.asset)}</span>
               {isCircle && entry.circleVerification && (
@@ -299,7 +299,7 @@ export function HistoryRow({
         )}
         {entry.anchorAmount != null && entry.anchorSymbol && (
           <div className="sm:col-span-2">
-            <dt className="text-slate-400">{t('columnAnchor')}</dt>
+            <dt className="text-slate-500">{t('columnAnchor')}</dt>
             <dd className="break-words text-slate-700">
               {tp('fxAnchorLine', {
                 refAmt: entry.anchorAmount,
@@ -319,7 +319,7 @@ export function HistoryRow({
         )}
         {items.length > 0 && (
           <div className="sm:col-span-2">
-            <dt className="text-slate-400">{t('lineItemsLabel')}</dt>
+            <dt className="text-slate-500">{t('lineItemsLabel')}</dt>
             <dd>
               <ul className="mt-0.5 space-y-0.5">
                 {items.map((li) => (
@@ -329,9 +329,9 @@ export function HistoryRow({
                   >
                     <span className="break-words">
                       {li.name}{' '}
-                      <span className="text-slate-400">×{li.quantity}</span>
+                      <span className="text-slate-500">×{li.quantity}</span>
                       {li.taxRate != null && li.taxRate > 0 && (
-                        <span className="ml-1 text-slate-400">{li.taxRate}%</span>
+                        <span className="ml-1 text-slate-500">{li.taxRate}%</span>
                       )}
                     </span>
                     <span className="font-mono text-slate-700">
@@ -345,7 +345,7 @@ export function HistoryRow({
         )}
         {showTax && (
           <div>
-            <dt className="text-slate-400">{t('columnTaxAmount')}</dt>
+            <dt className="text-slate-500">{t('columnTaxAmount')}</dt>
             <dd>
               {totals.totalTax} {tokenSymbol}
             </dd>
@@ -353,25 +353,25 @@ export function HistoryRow({
         )}
         {entry.receiptNo && (
           <div>
-            <dt className="text-slate-400">{t('columnReceiptNo')}</dt>
+            <dt className="text-slate-500">{t('columnReceiptNo')}</dt>
             <dd className="font-mono break-all">{entry.receiptNo}</dd>
           </div>
         )}
         {entry.memo && (
           <div className="sm:col-span-2">
-            <dt className="text-slate-400">{t('columnMemo')}</dt>
+            <dt className="text-slate-500">{t('columnMemo')}</dt>
             <dd className="break-words">{entry.memo}</dd>
           </div>
         )}
         {entry.note && (
           <div className="sm:col-span-2">
-            <dt className="text-slate-400">{t('columnNote')}</dt>
+            <dt className="text-slate-500">{t('columnNote')}</dt>
             <dd className="break-words">{entry.note}</dd>
           </div>
         )}
         {entry.errorMessage && (
           <div className="sm:col-span-2">
-            <dt className="text-slate-400">{t('columnStatus')}</dt>
+            <dt className="text-slate-500">{t('columnStatus')}</dt>
             <dd className="text-red-700">
               {t('errorPrefix')}
               {entry.errorMessage}
@@ -398,7 +398,7 @@ export function HistoryRow({
         <button
           type="button"
           onClick={handleRemove}
-          className="text-[11px] text-slate-400 underline underline-offset-2 hover:text-red-600"
+          className="text-[11px] text-slate-500 underline underline-offset-2 hover:text-red-600"
           aria-label={t('removeRow')}
         >
           {t('removeRow')}

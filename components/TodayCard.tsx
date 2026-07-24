@@ -76,7 +76,7 @@ export function TodayCard() {
         <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
           <CalendarDays className="h-3.5 w-3.5 text-brand" aria-hidden />
           {t('title')}
-          <span className="text-slate-400">·</span>
+          <span className="text-slate-500">·</span>
           <span className="text-slate-500">{t('count', { count: today.count })}</span>
         </p>
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -89,7 +89,7 @@ export function TodayCard() {
             </span>
           )}
         </p>
-        <p className="mt-0.5 text-[11px] text-slate-400">
+        <p className="mt-0.5 text-[11px] text-slate-500">
           {t('lastReceived', { time: formatClock(today.lastTs) })}
         </p>
       </div>
