@@ -330,6 +330,9 @@ export function TipForm({
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
     useRelay && !!relay.data && !relay.data.success && !!relay.data.pending;
+  // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
+  const walletSectionRef = useRef<HTMLElement | null>(null);
+
   const canSubmit =
     !preview &&
     isConnected &&
@@ -884,7 +887,9 @@ export function TipForm({
         />
       )}
 
-      <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+      <section
+          ref={walletSectionRef}
+          className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {t('walletSection')}
         </p>
@@ -971,8 +976,18 @@ export function TipForm({
 
       <button
         type="button"
-        onClick={onSubmit}
-        disabled={!canSubmit}
+        // 未接続時 (builder プレビュー除く): 押せない「ウォレットを接続」を解消し、
+        // タップでウォレット選択へスクロール (#266 CheckoutForm と同型・送信不変)。
+        onClick={
+          !preview && !isConnected
+            ? () =>
+                  walletSectionRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                  })
+            : onSubmit
+        }
+        disabled={(preview || isConnected) && !canSubmit}
         className={
           themed
             ? `w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${themed.submitClassName}`

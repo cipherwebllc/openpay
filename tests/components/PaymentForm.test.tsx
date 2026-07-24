@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -488,7 +488,12 @@ describe('PaymentForm — 接続状態によるボタン', () => {
     const btn = screen.getByRole('button', {
       name: /ウォレットを接続/,
     });
-    expect(btn).toBeDisabled();
+    // 押せない行動喚起を塞いだ (#266 同型): タップでウォレット選択へスクロール誘導。
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(scrollSpy).toHaveBeenCalled();
     // 初回向け 3 ステップガイド + 「アプリ/登録不要」を表示
     expect(screen.getByText('署名で完了')).toBeInTheDocument();
     expect(screen.getByText(/アプリのDL・登録は不要/)).toBeInTheDocument();
