@@ -72,7 +72,7 @@ function Field({
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
       <div className="mt-1">{children}</div>
-      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </label>
   );
 }
@@ -247,7 +247,7 @@ export function MobileOrderBuilder({
                 {draft.acceptingOrders ? t('acceptingOn') : t('acceptingOff')}
               </button>
             </div>
-            <p className="mt-1 text-xs text-slate-400">{t('acceptingHint')}</p>
+            <p className="mt-1 text-xs text-slate-500">{t('acceptingHint')}</p>
             <p className="mt-1 text-xs text-amber-700">{t('acceptingRepublishNote')}</p>
           </div>
 
@@ -454,7 +454,7 @@ export function MobileOrderBuilder({
                     </button>
                   ))}
                 </div>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   {draft.mode === 'storefront' ? t('modeHintStorefront') : t('modeHintPreorder')}
                 </p>
               </fieldset>
@@ -487,12 +487,12 @@ export function MobileOrderBuilder({
                         </button>
                       ))}
                     </div>
-                    <p className="mt-1 text-xs text-slate-400">
+                    <p className="mt-1 text-xs text-slate-500">
                       {draft.dineIn ? t('serviceHintDineIn') : t('serviceHintTakeout')}
                     </p>
                   </>
                 ) : (
-                  <p className="mt-1 text-xs text-slate-400">{t('serviceTakeoutOnlyNote')}</p>
+                  <p className="mt-1 text-xs text-slate-500">{t('serviceTakeoutOnlyNote')}</p>
                 )}
               </fieldset>
 
@@ -561,7 +561,7 @@ export function MobileOrderBuilder({
                       </label>
                     ))}
                   </div>
-                  <p className="mt-1 text-xs text-slate-400">{t('feePayerHint')}</p>
+                  <p className="mt-1 text-xs text-slate-500">{t('feePayerHint')}</p>
                 </fieldset>
               )}
 
@@ -579,7 +579,7 @@ export function MobileOrderBuilder({
                       {...socialsReorder.rowProps(i, draft.socials.length)}
                       labels={reorderLabels}
                     >
-                      <span className="shrink-0 text-slate-400">
+                      <span className="shrink-0 text-slate-500">
                         <SocialIcon url={s.trim()} className="h-5 w-5" />
                       </span>
                       <input
@@ -598,7 +598,7 @@ export function MobileOrderBuilder({
                         onClick={() =>
                           update({ socials: draft.socials.filter((_, j) => j !== i) })
                         }
-                        className="rounded-md border border-slate-200 px-2 text-sm text-slate-400 hover:text-red-600"
+                        className="rounded-md border border-slate-200 px-2 text-sm text-slate-500 hover:text-red-600"
                         aria-label={t('removeSocial')}
                       >
                         ×
@@ -615,7 +615,7 @@ export function MobileOrderBuilder({
                     </button>
                   )}
                 </div>
-                <p className="mt-1 text-xs text-slate-400">{t('socialsHint')}</p>
+                <p className="mt-1 text-xs text-slate-500">{t('socialsHint')}</p>
               </div>
             </div>
           </StepCard>
@@ -711,7 +711,7 @@ export function MobileOrderBuilder({
               </div>
             )}
 
-            <p className="mt-3 text-xs text-slate-400">{t('previewOpenHint')}</p>
+            <p className="mt-3 text-xs text-slate-500">{t('previewOpenHint')}</p>
           </StepCard>
           </div>
         </aside>

@@ -30,7 +30,7 @@ export function ShopLivePanel({
       {!hideHeading && <h4 className="text-xs font-semibold text-slate-700">{t('heading')}</h4>}
       <p className="mt-0.5 text-[11px] text-slate-500">{t('intro')}</p>
       {live.isLoading ? (
-        <p className="mt-2 text-xs text-slate-400">{t('loading')}</p>
+        <p className="mt-2 text-xs text-slate-500">{t('loading')}</p>
       ) : live.isError ? (
         <p className="mt-2 text-xs text-red-600">{t('loadError')}</p>
       ) : (
@@ -75,7 +75,7 @@ export function ShopLivePanel({
                     <li key={m.id} className="flex items-center justify-between gap-2">
                       <span
                         className={`min-w-0 flex-1 truncate text-xs ${
-                          out ? 'text-slate-400 line-through' : 'text-slate-700'
+                          out ? 'text-slate-500 line-through' : 'text-slate-700'
                         }`}
                       >
                         {m.name}
