@@ -9,6 +9,7 @@
 
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { env } from '@/lib/env';
 import { LEGAL_ENTITY } from '@/lib/legal';
 
 export function SiteFooter() {
@@ -56,13 +57,16 @@ export function SiteFooter() {
         >
           {t('links.transparency')}
         </Link>
-        <Link
-          href="/discovery"
-          className="hover:text-slate-700 hover:underline"
-          prefetch={false}
-        >
-          {t('links.discovery')}
-        </Link>
+        {/* /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。 */}
+        {env.enableX402Facilitator && (
+          <Link
+            href="/discovery"
+            className="hover:text-slate-700 hover:underline"
+            prefetch={false}
+          >
+            {t('links.discovery')}
+          </Link>
+        )}
       </nav>
       <p className="mt-3 text-slate-500">
         {t('copyright', {

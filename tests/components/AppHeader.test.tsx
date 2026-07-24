@@ -23,6 +23,22 @@ vi.mock('@/hooks/useVisibleConnectors', () => ({
   useVisibleConnectors: () => [],
 }));
 
+// env は enableX402Facilitator だけ差し替え可能にする (他キーは実 env のまま —
+// env pill の networkEnv 等は実値前提)。Proxy 経由なのでテスト内の後書き変更が効く。
+const flagState = vi.hoisted(() => ({ enableX402Facilitator: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: new Proxy(actual.env, {
+      get: (target, key) =>
+        key === 'enableX402Facilitator'
+          ? flagState.enableX402Facilitator
+          : target[key as keyof typeof target],
+    }),
+  };
+});
+
 // SIWE セッション hook も boundary mock (WalletBadge 経由・未サインイン default)。
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
@@ -41,6 +57,7 @@ vi.mock('@/hooks/useSiweSession', () => ({
 import { AppHeader } from '@/components/AppHeader';
 
 beforeEach(() => {
+  flagState.enableX402Facilitator = false;
   mockHook(useAccount, { isConnected: false, address: undefined });
   mockHook(useConnect, {
     connectors: [],
@@ -78,7 +95,8 @@ describe('AppHeader: ブランド / ナビ / 右側コントロール', () => {
     ).toBeInTheDocument();
   });
 
-  it('TopNav に 5 link (スキャン / 受け取る / 履歴 / 探す / AIストア) が出る', () => {
+  it('TopNav: x402 flag ON で 5 link (スキャン / 受け取る / 履歴 / 探す / AIストア)', () => {
+    flagState.enableX402Facilitator = true;
     renderWithIntl(<AppHeader />);
     const nav = screen.getByRole('navigation', { name: 'primary navigation' });
     expect(nav.querySelectorAll('a').length).toBe(5);
@@ -93,6 +111,16 @@ describe('AppHeader: ブランド / ナビ / 右側コントロール', () => {
       '/ja/explore',
       '/ja/discovery',
     ]);
+  });
+
+  it('TopNav: x402 flag OFF では /discovery link を出さない (notFound になるため)', () => {
+    flagState.enableX402Facilitator = false;
+    renderWithIntl(<AppHeader />);
+    const nav = screen.getByRole('navigation', { name: 'primary navigation' });
+    const hrefs = Array.from(nav.querySelectorAll('a')).map((a) =>
+      a.getAttribute('href'),
+    );
+    expect(hrefs).toEqual(['/ja/scan', '/ja/create', '/ja/history', '/ja/explore']);
   });
 
   it('右側に LocaleSwitcher (ja/en) + env pill (testnet) が出る', () => {
