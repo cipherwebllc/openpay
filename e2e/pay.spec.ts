@@ -10,12 +10,15 @@ test.describe('/pay (URL parser smoke)', () => {
     await expect(page.getByText('Base Sepolia')).toBeVisible();
     // ヘッダの大文字金額表示
     await expect(page.getByText('10 USDC').first()).toBeVisible();
-    // 接続ボタンは disabled (未接続)。btnConnect は短縮済み (旧「ウォレットを接続してください」
-    // → 「ウォレットを接続」)。
+    // 接続ボタンは押せる (未接続時はウォレット選択へスクロール誘導・#267)。
+    // btnConnect は短縮済み (旧「ウォレットを接続してください」→「ウォレットを接続」)。
     const submit = page.getByRole('button', {
       name: /ウォレットを接続/,
     });
-    await expect(submit).toBeDisabled();
+    await expect(submit).toBeEnabled();
+    // タップでウォレット選択セクション (ConnectButton) が viewport に入る。
+    await submit.click();
+    await expect(page.getByText('ウォレット', { exact: true })).toBeInViewport();
   });
 
   test('to 欠落 → エラー表示', async ({ page }) => {
