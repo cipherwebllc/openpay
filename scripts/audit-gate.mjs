@@ -57,6 +57,20 @@ const ALLOWED_ADVISORIES = {
       'GHSA-6g55-p6wh-862q に build-time 以外の exploit 経路の報告',
     ],
   },
+  'GHSA-r28c-9q8g-f849': {
+    pkg: 'postcss',
+    summary:
+      'PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure (postcss<=8.5.17)',
+    chain: 'next (exact pin postcss 8.4.31) → postcss ※root の postcss は 8.5.23 で修正済み・next 内包 copy のみ該当',
+    reason:
+      '§7.9 (GHSA-6g55) と同族 (sourceMappingURL 系)・同一の到達性判断。postcss は Next.js build pipeline 内でビルド時にのみ動作し、処理する CSS は OpenPay 自身のソースのみ。本 advisory の任意 .map 開示は「攻撃者制御の CSS の sourceMappingURL パストラバーサル」を postcss が処理した時にビルドマシン上で起きるもので、第三者 CSS が postcss に流れる経路が存在しない。next 内包 copy は exact pin のため単独更新不可で、override はビルド基盤への介入となり到達性ゼロの脆弱性にはリスク不相応 → next 側の bump 待ち accepted risk とする (user 裁定 2026-07-25)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.10',
+    reviewTriggers: [
+      'next が postcss>=8.5.18 を内包する版へ更新 → 通常の npm update で解消し allowlist 削除',
+      'OpenPay が第三者由来の CSS (テーマ入稿等) を build/postcss で処理する機能を追加 (即再評価)',
+      'GHSA-r28c-9q8g-f849 に build-time 以外の exploit 経路の報告',
+    ],
+  },
   'GHSA-w5hq-g745-h8pq': {
     pkg: 'uuid',
     summary: 'uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided (uuid<11.1.1)',
