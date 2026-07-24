@@ -64,7 +64,7 @@ export function SiteFooter() {
           {t('links.discovery')}
         </Link>
       </nav>
-      <p className="mt-3 text-slate-400">
+      <p className="mt-3 text-slate-500">
         {t('copyright', {
           year: yearLabel,
           company: LEGAL_ENTITY.companyName,
@@ -73,7 +73,7 @@ export function SiteFooter() {
       {/* 一般店主には Web3 用語 (ERC-4337 等) は不要だが、開発者向け透明性は
           残したいので <details> で折り畳む。summary は soft な日本語/英語、
           展開時に技術ラベルを表示。review (2026-05-23) #15 対応。 */}
-      <details className="mt-1 inline-block text-slate-400 marker:hidden">
+      <details className="mt-1 inline-block text-slate-500 marker:hidden">
         {/* min-h + inline-flex で tap target 高さを 24px 以上に確保 (a11y target-size)。
             inline-flex のままなので <details> の inline-block レイアウトは不変。 */}
         <summary className="inline-flex min-h-[24px] cursor-pointer list-none items-center justify-center hover:text-slate-700">
@@ -84,7 +84,7 @@ export function SiteFooter() {
         </summary>
         <span className="ml-1">{t('poweredByTech')}</span>
       </details>
-      <p className="mt-1 flex items-center justify-center gap-3 text-slate-400">
+      <p className="mt-1 flex items-center justify-center gap-3 text-slate-500">
         <a
           href="https://github.com/cipherwebllc/openpay"
           target="_blank"

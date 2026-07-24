@@ -69,7 +69,7 @@ function MenuItemCardImpl({
         <div className="mt-auto flex items-center justify-between gap-1">
           <span className="min-w-0">
             <span className="text-base font-bold text-slate-900">{item.price}</span>{' '}
-            <span className="text-[10px] font-medium text-slate-400">JPYC</span>
+            <span className="text-[10px] font-medium text-slate-500">JPYC</span>
           </span>
           {!isSoldOut &&
             (hasOptions ? (

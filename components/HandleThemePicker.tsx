@@ -71,7 +71,7 @@ export function HandleThemePicker({
           );
         })}
       </div>
-      <p className="mt-1 text-xs text-slate-400">{hint}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   );
 }

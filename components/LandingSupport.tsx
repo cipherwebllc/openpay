@@ -107,7 +107,7 @@ export async function LandingSupport() {
               <span className="text-sm font-bold text-slate-900 sm:text-base">
                 OpenPay
               </span>
-              <span className="font-mono text-xs font-medium text-slate-400">
+              <span className="font-mono text-xs font-medium text-slate-500">
                 {PROFILE_HANDLE}
               </span>
               <ExternalLink

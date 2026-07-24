@@ -85,7 +85,7 @@ export async function LandingCashComparison() {
         </table>
       </div>
 
-      <p className="mx-auto mt-3 max-w-3xl text-[11px] leading-relaxed text-slate-400">
+      <p className="mx-auto mt-3 max-w-3xl text-[11px] leading-relaxed text-slate-500">
         {t('cashTableFootnote')}
       </p>
       <div className="mx-auto mt-4 flex max-w-3xl justify-center">
