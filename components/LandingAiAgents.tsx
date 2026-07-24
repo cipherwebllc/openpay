@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { Banknote, Bot, CreditCard, QrCode } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { env } from '@/lib/env';
 
 type EraStep = {
   Icon: LucideIcon;
@@ -67,13 +68,16 @@ export async function LandingAiAgents() {
       </ol>
 
       <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
-        <Link
-          href={`/${locale}/discovery`}
-          prefetch={false}
-          className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto"
-        >
-          {t('aiEraCtaStore')}
-        </Link>
+        {/* /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。 */}
+        {env.enableX402Facilitator && (
+          <Link
+            href={`/${locale}/discovery`}
+            prefetch={false}
+            className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto"
+          >
+            {t('aiEraCtaStore')}
+          </Link>
+        )}
         <Link
           href={`/${locale}/guide/ai-pay`}
           prefetch={false}

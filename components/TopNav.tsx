@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import type { Locale } from '@/i18n';
+import { env } from '@/lib/env';
 import { DESKTOP_NAV_ITEMS, pathMatches, pathRestForLocale } from './navItems';
 
 export function TopNav() {
@@ -14,13 +15,17 @@ export function TopNav() {
   const locale = useLocale() as Locale;
   const t = useTranslations('Nav');
   const rest = pathRestForLocale(pathname, locale);
+  // /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。
+  const items = DESKTOP_NAV_ITEMS.filter(
+    (item) => item.key !== 'discovery' || env.enableX402Facilitator,
+  );
 
   return (
     <nav
       aria-label="primary navigation"
       className="hidden items-center gap-1 text-sm font-medium md:flex"
     >
-      {DESKTOP_NAV_ITEMS.map((item) => {
+      {items.map((item) => {
         const active = pathMatches(rest, item.href);
         return (
           <Link
