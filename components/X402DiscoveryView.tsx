@@ -1177,7 +1177,7 @@ export function X402DiscoveryView({
                   <p className="text-sm font-semibold text-slate-800">{t('tryStep1')}</p>
                   <div className="mt-2 rounded-xl bg-slate-950 p-3">
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <span className="text-xs font-medium text-slate-500">
+                      <span className="text-xs font-medium text-slate-400">
                         {t('tryCurlLabel')}
                       </span>
                       {copyCodeBtn('try-curl', DEMO_CURL)}
