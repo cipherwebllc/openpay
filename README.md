@@ -196,7 +196,7 @@ npm run load-test -- --url <base-url>  # zero-dep load test (p50/p90/p99, RPS, e
 
 ## Environment variables
 
-Minimum to run dev (more in [`.env.local.example`](./.env.local.example)):
+The table below is a **curated subset** (core setup + production feature flags). The exhaustive reference is [`.env.local.example`](./.env.local.example) — every key (per-chain RPC overrides, token addresses, relay / x402 internals, gas ceilings) is documented there with inline comments; operational keys are also covered in `docs/runbooks/`.
 
 | Variable | Purpose | Required |
 |---|---|---|
