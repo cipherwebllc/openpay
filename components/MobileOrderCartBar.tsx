@@ -8,6 +8,7 @@
 // この分割は再描画スコープの整理のみで、money-path / URL 構築には一切触れない (checkoutUrl は
 // そのまま <a href> へ流すだけ)。アクセント色 (--mo-accent 系) は親ルートの CSS 変数を継承する。
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits, parseUnits } from 'viem';
 import { ChevronDown, ChevronUp, ShoppingCart } from 'lucide-react';
@@ -64,6 +65,10 @@ export function MobileOrderCartBar({
   checkoutPending: boolean;
 }) {
   const t = useTranslations('MobileOrder');
+  // テーブル番号入力に触れた (blur した) か。触れる前から警告色 (amber) で案内すると
+  // エラー前のエラー表示になり、直下の取消不可注意 (真の警告・同色) の目立ちも薄める —
+  // 触れる前はニュートラル色の案内、blur 後の未入力だけ警告色にする。
+  const [tableTouched, setTableTouched] = useState(false);
   return (
     <div className="sticky bottom-3 z-30">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_-1px_3px_rgba(15,23,42,0.04),0_18px_44px_-14px_rgba(15,23,42,0.35)] supports-[backdrop-filter]:bg-white/85 supports-[backdrop-filter]:backdrop-blur">
@@ -87,10 +92,17 @@ export function MobileOrderCartBar({
                   onChange={(e) => onTableNumberChange(e.target.value)}
                   placeholder={t('tablePlaceholder')}
                   aria-required="true"
-                  aria-invalid={needsTable}
+                  aria-invalid={needsTable && tableTouched}
+                  onBlur={() => setTableTouched(true)}
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
                 />
-                {needsTable && <p className="mt-1 text-xs text-amber-700">{t('tableRequired')}</p>}
+                {needsTable && (
+                  <p
+                    className={`mt-1 text-xs ${tableTouched ? 'text-amber-700' : 'text-slate-500'}`}
+                  >
+                    {t('tableRequired')}
+                  </p>
+                )}
               </div>
             )}
             {/* 受取時間 (Phase 4・preorder のみ・flag ON)。15分刻みのスロットから選ぶ (未選択=最短)。 */}
