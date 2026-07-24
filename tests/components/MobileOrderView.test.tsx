@@ -351,6 +351,22 @@ describe('MobileOrderView', () => {
     expect(window.sessionStorage.length).toBe(0); // handle 無しページでは永続化しない
   });
 
+  it('dineIn: テーブル番号案内は blur 前はニュートラル・blur 後の未入力で警告色 + aria-invalid', () => {
+    renderWithIntl(<MobileOrderView config={{ ...config, dineIn: true }} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const input = screen.getByLabelText('テーブル番号');
+    const hint = screen.getByText('テーブル番号を入力してください');
+    // 触れる前: エラー扱いにしない (案内はニュートラル色・aria-invalid なし)。
+    expect(hint.className).toContain('text-slate-500');
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    // blur 後の未入力: 警告色 + aria-invalid。
+    fireEvent.blur(input);
+    expect(screen.getByText('テーブル番号を入力してください').className).toContain(
+      'text-amber-700',
+    );
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('dineIn: テーブル番号を /checkout の description に載せる', () => {
     renderWithIntl(<MobileOrderView config={{ ...config, dineIn: true }} />);
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
