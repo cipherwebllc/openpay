@@ -434,6 +434,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
     ? standard.feeTxHash
     : standard.merchantTxHash;
   const settledNoRetry = directSettledNoRetry || !!crossChainResult;
+  // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
+  const walletSectionRef = useRef<HTMLElement | null>(null);
+
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -1084,7 +1087,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {/* 初回向け 3 ステップ視覚ガイド (未接続時のみ・「アプリ/登録不要」)。 */}
       {!isConnected && <PayStepStrip />}
 
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
+      <section
+          ref={walletSectionRef}
+          className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-slate-700">
           {t('walletSection')}
         </h2>
@@ -1164,8 +1169,18 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
       <button
         type="button"
-        onClick={onSubmit}
-        disabled={!canSubmit}
+        // 未接続時 (期限切れ除く): 押せない「ウォレットを接続」を解消し、タップで
+        // ウォレット選択へスクロール (#266 CheckoutForm と同型・決済フロー不変)。
+        onClick={
+          !expired && !isConnected
+            ? () =>
+                  walletSectionRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                  })
+            : onSubmit
+        }
+        disabled={(expired || isConnected) && !canSubmit}
         className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
       >
         {flowPending

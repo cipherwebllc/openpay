@@ -125,6 +125,9 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
 
   // 送信中・確定済 (成功) は再送金を禁止し二重チップを防ぐ。ただし revert (チェーン上で失敗)
   // 後は再送を許す: txHash が残るが結果は失敗なので、リロードせずに金額調整→再試行できる。
+  // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
+  const walletSectionRef = useRef<HTMLElement | null>(null);
+
   const canSubmit =
     isConnected &&
     !wrongChain &&
@@ -253,7 +256,9 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
         </p>
       </section>
 
-      <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+      <section
+          ref={walletSectionRef}
+          className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {t('walletSection')}
         </p>
@@ -294,8 +299,18 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
 
       <button
         type="button"
-        onClick={onSubmit}
-        disabled={!canSubmit}
+        // 未接続時: 押せない「ウォレットを接続」を解消し、タップでウォレット選択へ
+        // スクロール (#266 CheckoutForm と同型・送信不変)。
+        onClick={
+          !isConnected
+            ? () =>
+                  walletSectionRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                  })
+            : onSubmit
+        }
+        disabled={isConnected && !canSubmit}
         className="w-full rounded-xl px-4 py-3 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
         style={{ backgroundColor: themeColor }}
       >

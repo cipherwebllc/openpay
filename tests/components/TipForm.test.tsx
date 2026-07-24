@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { arbitrumSepolia, baseSepolia, polygonAmoy } from 'viem/chains';
@@ -455,12 +455,16 @@ describe('TipForm — 金額選択 (sponsorship gas=0 で計算)', () => {
 });
 
 describe('TipForm — 接続状態', () => {
-  it('未接続: 送信ボタンに接続を促すラベル / disabled', () => {
+  it('未接続: 送信ボタンは押せて、ウォレット選択へスクロール誘導する', () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
     render(<TipForm params={USDC_PARAMS} />);
     const btn = screen.getByRole('button', {
       name: /ウォレットを接続/,
     });
-    expect(btn).toBeDisabled();
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(scrollSpy).toHaveBeenCalled();
   });
 
   it('違うチェーン → 切替ボタン表示 / 送信は disabled', () => {
