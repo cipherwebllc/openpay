@@ -89,7 +89,7 @@ export function DirectoryFeaturedCard({
 function FeaturedStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] leading-tight text-slate-400">{label}</dt>
+      <dt className="text-[10px] leading-tight text-slate-500">{label}</dt>
       <dd className="mt-1 text-sm font-bold tabular-nums text-white">{value}</dd>
     </div>
   );

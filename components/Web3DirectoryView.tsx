@@ -211,7 +211,7 @@ export function Web3DirectoryView({
                                   className="h-3.5 w-3.5 shrink-0 text-slate-300 transition-colors group-hover:text-brand"
                                 />
                               </h4>
-                              <span className="mt-1 block text-[10px] font-medium text-slate-400">
+                              <span className="mt-1 block text-[10px] font-medium text-slate-500">
                                 {copy.officialSite}
                               </span>
                             </div>
@@ -293,7 +293,7 @@ export function Web3DirectoryView({
               </h3>
               <div className="mt-3 overflow-hidden rounded-xl border border-white/10">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-white/5 text-slate-400">
+                  <thead className="bg-white/5 text-slate-500">
                     <tr>
                       <th className="px-3 py-2 font-medium">
                         {copy.endpointLabel}
@@ -316,7 +316,7 @@ export function Web3DirectoryView({
                   </tbody>
                 </table>
               </div>
-              <p className="mt-2 text-xs leading-relaxed text-slate-400">
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">
                 {copy.feeNote}
               </p>
             </div>
@@ -327,7 +327,7 @@ export function Web3DirectoryView({
               <h3 className="text-sm font-semibold text-white">
                 {copy.apiUrlTitle}
               </h3>
-              <p className="mt-1 text-xs leading-relaxed text-slate-400">
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
                 {copy.apiUrlDescription}
               </p>
               <div className="mt-3 rounded-xl bg-white/5 p-3 ring-1 ring-inset ring-white/10">
@@ -344,7 +344,7 @@ export function Web3DirectoryView({
                 <Search className="h-4 w-4 text-brand" aria-hidden />
                 {copy.tryTitle}
               </h3>
-              <p className="mt-1 text-xs leading-relaxed text-slate-400">
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
                 {copy.tryDescription}
               </p>
               <div className="mt-3 rounded-xl bg-black/30 p-3 ring-1 ring-inset ring-white/10">
@@ -376,7 +376,7 @@ export function Web3DirectoryView({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-white/5 px-3 py-3 ring-1 ring-inset ring-white/10">
-      <dt className="text-[10px] leading-tight text-slate-400">{label}</dt>
+      <dt className="text-[10px] leading-tight text-slate-500">{label}</dt>
       <dd className="mt-1 break-words text-sm font-bold tabular-nums text-white">
         {value}
       </dd>
