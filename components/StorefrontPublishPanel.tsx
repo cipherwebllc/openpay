@@ -245,7 +245,7 @@ export function StorefrontPublishPanel({
           {signInError && <p className="mt-2 text-xs text-red-600">{t('publishSignInError')}</p>}
         </div>
       ) : mine.isLoading ? (
-        <p className="mt-3 text-xs text-slate-400">{t('publishLoading')}</p>
+        <p className="mt-3 text-xs text-slate-500">{t('publishLoading')}</p>
       ) : mine.isError ? (
         <p className="mt-3 text-xs text-red-600">{t('publishLoadError')}</p>
       ) : handles.length === 0 ? (

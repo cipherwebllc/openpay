@@ -151,7 +151,7 @@ export function ReceiverBlock(props: ReceiverBlockProps) {
           </div>
           {props.advancedSummary && <div className="mt-2">{props.advancedSummary}</div>}
           {props.labels.inheritedNote && (
-            <p className="mt-1 text-[11px] text-slate-400">
+            <p className="mt-1 text-[11px] text-slate-500">
               {props.labels.inheritedNote}
             </p>
           )}

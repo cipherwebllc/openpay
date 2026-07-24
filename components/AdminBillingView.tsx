@@ -209,7 +209,7 @@ export function AdminBillingView() {
                     {shortAddress(p.m)}
                   </span>
                   <span className="text-slate-600">{jpyc(p.v)} JPYC</span>
-                  <span className="text-slate-400">
+                  <span className="text-slate-500">
                     {chainNameForId(p.c) ?? p.c}
                   </span>
                   {url ? (
@@ -222,7 +222,7 @@ export function AdminBillingView() {
                       tx
                     </a>
                   ) : (
-                    <span className="font-mono text-slate-400">
+                    <span className="font-mono text-slate-500">
                       {shortAddress(p.h)}
                     </span>
                   )}

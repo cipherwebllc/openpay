@@ -85,7 +85,7 @@ export function HistorySummary({ summary }: { summary: Summary }) {
         </div>
       )}
 
-      <p className="mt-2 text-[10px] text-slate-400">{t('gmvReferenceNote')}</p>
+      <p className="mt-2 text-[10px] text-slate-500">{t('gmvReferenceNote')}</p>
     </section>
   );
 }

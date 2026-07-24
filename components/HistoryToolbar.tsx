@@ -360,7 +360,7 @@ export function HistoryToolbar({
           {t('csvPassValidUntil', { date: formatPassDate(csvPassExpiresAt) })}
         </p>
       )}
-      <p className="text-[11px] text-slate-400">{t('accountingIncomeOnlyNote')}</p>
+      <p className="text-[11px] text-slate-500">{t('accountingIncomeOnlyNote')}</p>
     </div>
   );
 }

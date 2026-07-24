@@ -77,7 +77,7 @@ export function LinkQrModal({
         <div className="mt-4 flex justify-center">
           <QRCodeSVG value={value} size={220} includeMargin level="M" />
         </div>
-        <p className="mt-3 break-all text-xs text-slate-400">{value}</p>
+        <p className="mt-3 break-all text-xs text-slate-500">{value}</p>
         <button
           ref={closeRef}
           type="button"

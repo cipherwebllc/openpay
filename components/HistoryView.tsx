@@ -142,7 +142,7 @@ export function HistoryView() {
     <>
       <HistorySummary summary={summary} />
       {directionCounts.out > 0 && (
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px] text-slate-500">
           {t('summaryReceivedOnlyNote')}
         </p>
       )}

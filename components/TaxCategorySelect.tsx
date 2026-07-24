@@ -67,7 +67,7 @@ export function TaxCategorySelect({
             }
             className="w-20 rounded-lg border border-slate-300 px-2 py-2 text-right text-sm focus:border-brand focus:outline-none"
           />
-          <span className="text-xs text-slate-400">%</span>
+          <span className="text-xs text-slate-500">%</span>
         </span>
       )}
     </div>

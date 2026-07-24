@@ -130,7 +130,7 @@ function BalanceRow({ row }: { row: TokenChainBalance }) {
         <span className="text-lg font-bold leading-none text-slate-900">
           {formatBalance(row.balance, decimals)}
         </span>{' '}
-        <span className="text-xs font-semibold text-slate-400">{displaySymbol}</span>
+        <span className="text-xs font-semibold text-slate-500">{displaySymbol}</span>
       </span>
     </li>
   );

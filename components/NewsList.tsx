@@ -74,7 +74,7 @@ export function NewsList() {
                 </span>
                 <time
                   dateTime={item.date}
-                  className="text-xs text-slate-400"
+                  className="text-xs text-slate-500"
                 >
                   {formatNewsDate(item.date, locale)}
                 </time>

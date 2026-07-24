@@ -75,7 +75,7 @@ export function ConvertPanel({
         </button>
       )}
       {canShowConvert && !rateOk && (
-        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           {t('convertRateUnavailable')}
         </p>
       )}
