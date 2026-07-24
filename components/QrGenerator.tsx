@@ -677,12 +677,12 @@ export function QrGenerator() {
                           className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
                           autoFocus
                         />
-                        <span className="shrink-0 text-xl font-semibold text-slate-400">
+                        <span className="shrink-0 text-xl font-semibold text-slate-500">
                           {deployment.displaySymbol}
                         </span>
                       </div>
                       {fiatHint && (
-                        <div className="mt-1 text-right text-sm font-medium text-slate-400">
+                        <div className="mt-1 text-right text-sm font-medium text-slate-500">
                           {fiatHint}
                         </div>
                       )}
@@ -904,7 +904,7 @@ export function QrGenerator() {
                         }}
                         className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
                           disabled
-                            ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                            ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-500'
                             : active
                             ? 'border-brand bg-brand/5 text-brand-dark'
                             : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
@@ -1068,7 +1068,7 @@ export function QrGenerator() {
             ) : receiverValid && amountValid ? (
               // receiver + amount valid だが payUrl 未確定の遷移状態 (origin 空 = SSR /
               // hydrate 直後の数フレーム間)。「生成中」で混乱を回避する。
-              <p className="rounded-lg bg-slate-50 px-4 py-6 text-sm text-slate-400">
+              <p className="rounded-lg bg-slate-50 px-4 py-6 text-sm text-slate-500">
                 {t('qrPlaceholderGenerating')}
               </p>
             ) : (
@@ -1197,7 +1197,7 @@ export function QrGenerator() {
           className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_-6px_rgba(15,23,42,0.14)] backdrop-blur md:bottom-0 lg:hidden print:hidden"
         >
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] text-slate-400">
+            <div className="text-[11px] text-slate-500">
               {t('bottomAmountLabel')}
             </div>
             <div className="flex items-baseline gap-2">
@@ -1205,7 +1205,7 @@ export function QrGenerator() {
                 {amountLabelText}
               </span>
               {fiatHint && (
-                <span className="shrink-0 text-xs font-medium text-slate-400">
+                <span className="shrink-0 text-xs font-medium text-slate-500">
                   {fiatHint}
                 </span>
               )}
@@ -1275,7 +1275,7 @@ function QrEmptyState({
                 className={`inline-flex h-4 w-4 flex-none items-center justify-center rounded-full text-[10px] font-bold ${
                   item.done
                     ? 'bg-emerald-500 text-white'
-                    : 'border border-slate-300 bg-white text-slate-400'
+                    : 'border border-slate-300 bg-white text-slate-500'
                 }`}
               >
                 {item.done ? '✓' : ''}
@@ -1330,7 +1330,7 @@ function SettingsAccordion({
           )}
         </div>
         <ChevronDown
-          className={`h-4 w-4 flex-none text-slate-400 transition-transform duration-200 ${
+          className={`h-4 w-4 flex-none text-slate-500 transition-transform duration-200 ${
             open ? 'rotate-180' : ''
           }`}
           aria-hidden
@@ -1387,7 +1387,7 @@ function AdvancedSection({
 }) {
   return (
     <div className="border-t border-dashed border-slate-200 pt-3">
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         {label}
       </p>
       {children}
