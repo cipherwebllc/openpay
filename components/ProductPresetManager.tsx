@@ -102,7 +102,7 @@ export function ProductPresetManager({
                 }
                 className="w-20 rounded-md border border-slate-200 px-2 py-1 text-right font-mono text-sm focus:border-brand focus:outline-none"
               />
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500">
                 {defaultDeploymentForSymbol(p.token).displaySymbol}
               </span>
               <select
@@ -131,7 +131,7 @@ export function ProductPresetManager({
                   onClick={() => movePreset(p.id, 'up')}
                   disabled={i === 0}
                   aria-label={t('moveUp')}
-                  className="rounded p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                  className="rounded p-1 text-slate-500 hover:text-slate-700 disabled:opacity-30"
                 >
                   <ChevronUp className="h-4 w-4" aria-hidden />
                 </button>
@@ -140,7 +140,7 @@ export function ProductPresetManager({
                   onClick={() => movePreset(p.id, 'down')}
                   disabled={i === presets.length - 1}
                   aria-label={t('moveDown')}
-                  className="rounded p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                  className="rounded p-1 text-slate-500 hover:text-slate-700 disabled:opacity-30"
                 >
                   <ChevronDown className="h-4 w-4" aria-hidden />
                 </button>
@@ -152,7 +152,7 @@ export function ProductPresetManager({
                     }
                   }}
                   aria-label={t('remove')}
-                  className="rounded p-1 text-slate-400 hover:text-red-600"
+                  className="rounded p-1 text-slate-500 hover:text-red-600"
                 >
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
@@ -208,7 +208,7 @@ export function ProductPresetManager({
                     {t('soldOutToggle')}
                   </label>
                 )}
-                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
                   {t('categoryLabel')}
                   <input
                     type="text"
@@ -327,7 +327,7 @@ export function ProductPresetManager({
             {t('addButton')}
           </button>
         </div>
-        <p className="mt-2 text-xs text-slate-400">{t('imageHint')}</p>
+        <p className="mt-2 text-xs text-slate-500">{t('imageHint')}</p>
       </div>
     </div>
   );

@@ -98,7 +98,7 @@ export function ProductOptionEditor({
               type="button"
               onClick={() => removeGroup(g.id)}
               aria-label={t('removeGroup')}
-              className="ml-auto rounded p-1 text-slate-400 hover:text-red-600"
+              className="ml-auto rounded p-1 text-slate-500 hover:text-red-600"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
             </button>
@@ -115,7 +115,7 @@ export function ProductOptionEditor({
                   onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })}
                   className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
                 />
-                <span className="text-xs text-slate-400">+</span>
+                <span className="text-xs text-slate-500">+</span>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -131,7 +131,7 @@ export function ProductOptionEditor({
                   type="button"
                   onClick={() => removeChoice(g.id, c.id)}
                   aria-label={t('removeChoice')}
-                  className="rounded p-1 text-slate-400 hover:text-red-600"
+                  className="rounded p-1 text-slate-500 hover:text-red-600"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 </button>
