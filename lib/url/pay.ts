@@ -71,11 +71,12 @@ export type PayParams = {
   // false 時のみ URL に `crossChain=false` として出力 (default の URL は不変、
   // 旧 QR との互換性維持)。USDC のみ意味があり、JPYC では PaymentForm が無視する。
   crossChain?: boolean;
-  // --- 動的 QR (FX 換算・有効期限付き) 用の付帯情報 ---
-  // 支払いの正本は token+amount。以下は「期限」と「顧客への文脈表示 (元の価格建て+レート)」
-  // のためだけに使い、既定 URL には出さない (在るときだけ serialize)。改竄しても顧客が
-  // 払うのは amount 固定額そのものなので不正インセンティブは無い (期限は advisory)。
-  // 有効期限 (unix 秒)。超過時に /pay が支払いをブロックする。
+  // --- 動的 QR (FX 換算・画面上の期限目安付き) 用の付帯情報 ---
+  // 支払いの正本は token+amount。以下は「画面上の期限目安」と「顧客への文脈表示
+  // (元の価格建て+レート)」のためだけに使い、既定 URL には出さない (在るときだけ
+  // serialize)。QR パラメータは未署名で支払者が改変できるため、exp は /pay UI 内で
+  // 陳腐なレートの利用を止めるだけの advisory であり、サーバ強制の有効期限ではない。
+  // UI 上の期限目安 (unix 秒)。超過時に正規の /pay 画面が支払いをブロックする。
   expiresAt?: number;
   // 元の価格建ての人間可読額 (例 "1000")。anchor token は token の counterpart として導出。
   priceRefAmount?: string;
@@ -393,6 +394,9 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   // 動的 QR 付帯情報を validate して degrade (壊れていても支払いは止めない)。
   // exp: 安全な正整数のみ採用。不正/欠落/桁あふれ (Number.MAX_SAFE_INTEGER 超 → Infinity 等)
   // は undefined (= 期限なし = 従来 QR と同じ挙動・壊れた exp で支払いを止めない)。
+  // 未署名パラメータなので、ここで値を parse しても支払者へのサーバ側強制にはならない。
+  // 実効的な期限には店舗が発行する QR パラメータ全体の署名とサーバ検証が必要であり、
+  // 本件では「検証したように見えるだけ」のガードを足さず /pay UI の目安としてのみ扱う。
   const expNum =
     expRaw && /^[0-9]+$/.test(expRaw) ? Number(expRaw) : Number.NaN;
   const expiresAt =

@@ -4,20 +4,42 @@
 // 実際の請求額で検証する。並行 settle の冪等性 (二重検証/二重付与なし) も実行する。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+
+const afterHarness = vi.hoisted(() => ({
+  after: vi.fn(),
+  callbacks: [] as Array<() => unknown>,
+}));
+
+vi.mock('next/server', () => ({
+  NextResponse: {
+    json: (body: unknown, init: ResponseInit = {}) =>
+      new Response(JSON.stringify(body), {
+        ...init,
+        headers: { 'content-type': 'application/json', ...init.headers },
+      }),
+  },
+  after: (callback: () => unknown) => {
+    afterHarness.after(callback);
+    afterHarness.callbacks.push(callback);
+  },
+}));
 
 // --- in-memory KV (nx / list / ttl-noop を実装。最下層境界のみ差し替え) ---
 const { kvMod, store } = vi.hoisted(() => {
   const vals = new Map<string, string>();
   const lists = new Map<string, string[]>();
-  // promote (ロック→結果昇格・value が 'r:' で始まる SET) だけを失敗させるフック。
+  // billing settle の promote (ロック→結果昇格・value が 'r:' で始まる SET) だけを失敗させるフック。
   // settle の「promote 失敗 → ロック失効 → 同 txHash 再提出」シナリオの再現に使う。
   const failPromote = { on: false };
   const kvMod = {
     isKvConfigured: () => true,
     kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
     kvSet: async (k: string, v: string, opts: { nx?: boolean; ttlSec?: number } = {}) => {
-      if (failPromote.on && v.startsWith('r:')) {
+      if (
+        failPromote.on &&
+        k.startsWith('billing:settled:') &&
+        v.startsWith('r:')
+      ) {
         return { ok: false as const, reason: 'unconfigured' as const };
       }
       if (opts.nx && vals.has(k)) return { ok: true as const, value: null };
@@ -106,6 +128,15 @@ function settleReq(body: unknown): Request {
   });
 }
 
+async function flushAfterTasks(): Promise<void> {
+  while (afterHarness.callbacks.length > 0) {
+    const callbacks = afterHarness.callbacks.splice(0);
+    await Promise.all(
+      callbacks.map((callback) => Promise.resolve().then(callback)),
+    );
+  }
+}
+
 // settle はサーバ側で previousPeriod(Date.now()) を使う。それに揃えて出来高を記録する。
 const now = Date.now();
 const duePeriod = previousPeriod(now);
@@ -114,6 +145,8 @@ const tsInDue = Date.UTC(dy, dm - 1, 15); // duePeriod 内のタイムスタン�
 const gateNow = Date.UTC(dy, dm, 15); // duePeriod の翌月 15 日 (previousPeriod=duePeriod・猶予超過)
 
 beforeEach(() => {
+  afterHarness.after.mockClear();
+  afterHarness.callbacks.splice(0);
   store.vals.clear();
   store.lists.clear();
   store.failPromote.on = false;
@@ -207,6 +240,8 @@ describe('a1 統合: meter → invoice → gate → settle → fee-current (全�
     // 2 回目は replay で同じ expiresAt (延長されない)。
     expect(b.replay).toBe(true);
     expect(b.expiresAt).toBe(a.expiresAt);
+    expect(afterHarness.after).toHaveBeenCalledTimes(1);
+    await flushAfterTasks();
   });
 
   it('settle 成功で収益台帳 (billing:revenue) に1件記録・replay で二重計上しない', async () => {
@@ -221,6 +256,8 @@ describe('a1 統合: meter → invoice → gate → settle → fee-current (全�
     expect(ev.m).toBe(MERCHANT.toLowerCase());
     // replay (同 txHash 再清算) → 台帳に二重計上しない (初回成功時のみ記録)。
     await settlePOST(settleReq({ txHash: TX, chainId: AMOY }));
+    expect(afterHarness.after).toHaveBeenCalledTimes(1);
+    await flushAfterTasks();
     expect(ledger()).toHaveLength(1);
   });
 

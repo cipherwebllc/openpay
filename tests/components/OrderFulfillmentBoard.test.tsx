@@ -241,6 +241,15 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.getByText('申告合計: 500 JPYC')).toBeInTheDocument();
   });
 
+  it('standard 手数料未収の受注に厨房/ホール共通バッジを表示', () => {
+    feedHold.data = [order({ feeUncollected: true })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('OpenPay 手数料未収')).toHaveClass(
+      'bg-amber-100',
+      'text-amber-800',
+    );
+  });
+
   it('厨房 + 準備完了通知 ON → 準備完了ボタンは出さない (ホール専用)', () => {
     envHold.enableOrderPickup = true;
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);

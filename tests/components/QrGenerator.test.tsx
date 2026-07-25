@@ -2330,7 +2330,7 @@ describe('QrGenerator', () => {
   });
 });
 
-describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効期限付き)', () => {
+describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期限目安付き)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     // convert ボタンは受取先確定が前提 (exp が QR 生成前に走らないようにするため)。
@@ -2522,6 +2522,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・有効�
       );
       // 期限内: 残り 3:00、期限切れ文言は無い
       expect(screen.getByText(/残り 3:00/)).toBeInTheDocument();
+      expect(screen.getByText(/サーバ強制ではありません/)).toBeInTheDocument();
       expect(screen.queryByText(/再計算してください/)).toBeNull();
       // 181s 経過 → interval が convertExpired を flip
       await act(async () => {

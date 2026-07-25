@@ -3,6 +3,7 @@
 // (app/api/relay/jpyc handleRecover) と x402 facilitator (/api/facilitator/settle) が共通で使う。
 // 呼び元が差し替えるのは:
 //   - expectedFeeValue : 料率モデル (recover=recoverFeeValue/mobileOrderFeeValue / x402=x402FeeValue)
+//   - callerFeeFloorValue : sub-floor 判定基準 (recover/mobile=relay gas floor / x402=x402 fee floor)
 //   - forwarderFor     : a1-aware (recover relay = jpycForwarderFor) か raw (facilitator =
 //                        configuredJpycForwarderFor) か
 //   - idemPrefix       : 冪等名前空間 ('relay:idem:' / 'x402fac:idem:')
@@ -28,6 +29,9 @@ import {
 import { submitSelfHost, pollSelfHost } from './selfHostRelayer';
 import {
   checkRateLimit,
+  checkSubfloorPayerRateLimit,
+  checkSubfloorBudget,
+  refundSubfloorBudget,
   checkGasBudget,
   refundGasBudget,
   makeIdempotency,
@@ -57,6 +61,8 @@ export type SettleViaForwarderInput = {
   rateLimitKeys: string[];
   // 料率モデルを呼び元が注入 (recoverViaForwarder が feeValue===expectedFeeValue を強制する)。
   expectedFeeValue: bigint;
+  // 呼び元の料金体系における正規 floor。recover/mobile は relay gas floor、x402 は x402 fee floor。
+  callerFeeFloorValue: bigint;
   // a1-aware (recover relay) か raw (facilitator) かを呼び元が選ぶ。
   forwarderFor: (chainId: number) => Address | null;
   // 冪等名前空間 ('relay:idem:' / 'x402fac:idem:')。rate-limit / 日次予算は relayGuards 内で共有キー。
@@ -72,6 +78,7 @@ export async function settleViaForwarder(
     signature,
     rateLimitKeys,
     expectedFeeValue,
+    callerFeeFloorValue,
     forwarderFor,
     idemPrefix,
   } = input;
@@ -94,6 +101,10 @@ export async function settleViaForwarder(
   const io = selfHostIoFor(chainId);
   const { claimIdempotency, recordRelayHash, releaseIdempotency } =
     makeIdempotency(idemPrefix);
+  // server 権威で算出済みの回収額を、同じ caller の料金体系に属する floor と比較する。recover 用
+  // gas floor を x402 に流用して正規小口 x402 が専用 cap を枯らし、他 payer の settle を止める
+  // 波及を断つ。mobile/recover 側は従来どおり relay gas floor を caller から渡す。
+  const isSubfloorSettle = expectedFeeValue < callerFeeFloorValue;
 
   // collision/fatal 時の authState 再確認用 (P0/P1)。recover の nonce は commitment nonce。
   const isAuthorizationUsed =
@@ -117,6 +128,14 @@ export async function settleViaForwarder(
     feeReceiverFor,
     getBalance,
     checkRateLimit,
+    // sub-floor でない既存 settle には依存自体を渡さず、従来の制御フローを保つ。
+    ...(isSubfloorSettle
+      ? {
+          checkSubfloorPayerRateLimit,
+          checkSubfloorBudget,
+          refundSubfloorBudget,
+        }
+      : {}),
     // refund (未 broadcast 失敗の予算返却) を配線。tx が 1 件も broadcast されなかったことが確実な
     // 失敗 (submit throw / poll 'error') でのみ DECR で 1 戻す (RPC 不安定日の誤 503 を防ぐ)。fail-quiet。
     checkGasBudget,

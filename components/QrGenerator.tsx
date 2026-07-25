@@ -166,7 +166,7 @@ export function QrGenerator() {
 
   // 「他トークン建てで受け取る」用の為替レート (USDC→JPY)。convert 押下時に参照。
   const { data: marketRates } = useMarketRates();
-  // FX 換算 (他トークン建て受取・有効期限付き) の状態とハンドラ。convert / カウントダウン /
+  // FX 換算 (他トークン建て受取・画面上の期限目安付き) の状態とハンドラ。convert / カウントダウン /
   // applyConvert・recalcConvert・revertConvert を hook 内に保持する (挙動は従来と同一)。
   const {
     convert,
@@ -537,14 +537,15 @@ export function QrGenerator() {
     }));
   }
 
-  // --- 「他トークン建てで受け取る」(FX 換算・有効期限付き) ---
+  // --- 「他トークン建てで受け取る」(FX 換算・画面上の期限目安付き) ---
   // 換算先トークン (現 token の反対)。FX 換算はチェーン非依存。
   const convertTargetSymbol = counterpartSymbol(settings.token);
   const convertTargetDisplay = displaySymbolFor(convertTargetSymbol);
   const rateOk = !!marketRates && rateIsSane(marketRates.usdcJpy);
   // convert ボタンを出す条件: 受取先確定・固定額モードで有効額・split 無し・レート取得済・未 convert。
   // receiverValid を要求するのは、exp(now+180s) を焼く時点で QR が即生成できる状態に限定するため
-  // (受取先未設定で convert すると入力が遅い間に「生成前に期限切れ」の QR を作れてしまう)。
+  // (受取先未設定で convert すると入力が遅い間に「生成前に画面上の期限超過」となる QR を
+  // 作れてしまう)。exp は未署名なのでサーバ強制の期限ではない。
   const canShowConvert =
     receiverValid && mode === 'amount' && amountValid && !splitsForUrl && !convert;
   const convertAnchorDisplay = convert

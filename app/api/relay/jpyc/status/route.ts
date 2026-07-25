@@ -147,6 +147,27 @@ async function readBody(req: Request): Promise<Record<string, unknown> | null> {
 }
 
 function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
+  if (raw.lookup === 'nonce') {
+    if (
+      typeof raw.chainId !== 'number' ||
+      !Number.isInteger(raw.chainId) ||
+      !(raw.chainId in SUPPORTED_CHAINS) ||
+      !isAddress(raw.from as string) ||
+      typeof raw.nonce !== 'string' ||
+      !/^0x[0-9a-fA-F]{64}$/.test(raw.nonce)
+    ) {
+      return null;
+    }
+    const from = getAddress(raw.from as string);
+    return {
+      chainId: raw.chainId,
+      from,
+      nonce: raw.nonce as Hex,
+      // nonce は 32-byte random/forwarder commitment で列挙不能、route は rate-limit 済みかつ
+      // read-only。リロード後に署名を再保存せず結果照会できるよう signer は from に固定する。
+      verifySignature: async () => from,
+    };
+  }
   if (
     typeof raw.chainId !== 'number' ||
     !Number.isInteger(raw.chainId) ||

@@ -36,6 +36,7 @@ import {
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
+import type { RelayIntentMetadata } from '@/lib/paymentIntentStorage';
 
 export type JpycEip3009Params = {
   merchant: Address;
@@ -60,10 +61,14 @@ export type JpycEip3009Result = {
 export type JpycRelayRecoveryState = 'auto' | 'exhausted' | null;
 
 type RetainedRelayPayload = {
-  payload: Record<string, unknown>;
+  // リロード復元時は署名を保持しないため payload=null。status は公開 intent metadata の nonce で照会する。
+  payload: Record<string, unknown> | null;
+  intent: RelayIntentMetadata;
   // false→true のみ許す単調 latch。on-chain success/revert が証明されたときだけ ref ごと破棄する。
   ambiguous: boolean;
 };
+
+type PaymentIntentStorage = typeof import('@/lib/paymentIntentStorage');
 
 type RelayResponse = {
   ok?: boolean;
@@ -74,15 +79,6 @@ type RelayResponse = {
   retryAfter?: number;
 };
 
-type RelayStatusResponse =
-  | { ok: true; state: 'settled'; txHash: Hex | null }
-  | { ok: true; state: 'unused' }
-  | { ok: true; state: 'indeterminate' };
-
-const RECOVERY_BACKOFF_MS = [3_000, 6_000, 12_000, 24_000, 45_000] as const;
-const RECOVERY_FETCH_TIMEOUT_MS = 10_000;
-const RECOVERY_DEADLINE_MS = 90_000;
-
 function isRelayResponse(value: unknown): value is RelayResponse {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -91,26 +87,22 @@ function isTxHash(value: unknown): value is Hex {
   return typeof value === 'string' && value.length > 0;
 }
 
-function isStrictTxHash(value: unknown): value is Hex {
-  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
-}
-
-function isRelayStatusResponse(value: unknown): value is RelayStatusResponse {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const body = value as Record<string, unknown>;
-  if (body.ok !== true) return false;
-  if (body.state === 'unused' || body.state === 'indeterminate') return true;
-  return (
-    body.state === 'settled' &&
-    (body.txHash === null || isStrictTxHash(body.txHash))
-  );
-}
-
 function retryAfterSeconds(res: Response, body: RelayResponse): number | null {
   const raw = body.retryAfter ?? res.headers.get('retry-after');
   if (raw === null || raw === undefined || raw === '') return null;
   const seconds = Number(raw);
   return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
+}
+
+function variablesFromIntent(
+  intent: RelayIntentMetadata,
+): JpycEip3009Params {
+  return {
+    merchant: intent.merchant,
+    // 復元後は current page の会計/表示へ帰属させず status 照会だけに使うため、
+    // 許可リスト外の gasMode/feeKind を保存して bill を再構成しない。
+    value: BigInt(intent.merchantValue),
+  };
 }
 
 async function postRelayPayload(
@@ -175,6 +167,16 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   // 単一 ref で保持する。一度 ambiguous になった payload は on-chain success/revert が証明されるまで
   // 破棄せず、通常 mutate の再呼出でも同じ payload だけを POST して新署名を構造的に封鎖する。
   const retainedPayloadRef = useRef<RetainedRelayPayload | null>(null);
+  const storageRef = useRef<PaymentIntentStorage | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
+  const [restoredResult, setRestoredResult] =
+    useState<JpycEip3009Result | null>(null);
+  const [restoredError, setRestoredError] = useState<Error | null>(null);
+  const [restoredVariables, setRestoredVariables] =
+    useState<JpycEip3009Params | null>(null);
+  const [restoredIntent, setRestoredIntent] =
+    useState<RelayIntentMetadata | null>(null);
+  const queuedMutationRef = useRef<JpycEip3009Params | null>(null);
   const [recoveryState, setRecoveryState] =
     useState<JpycRelayRecoveryState>(null);
   const mountedRef = useRef(true);
@@ -202,124 +204,201 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
     };
   }, []);
 
-  const setRecoveryStateIfMounted = (state: JpycRelayRecoveryState) => {
-    if (mountedRef.current) setRecoveryState(state);
-  };
+  const setRecoveryStateIfMounted = useCallback(
+    (state: JpycRelayRecoveryState) => {
+      if (mountedRef.current) setRecoveryState(state);
+    },
+    [],
+  );
 
-  const resolveAmbiguousPayload = (
-    retained: RetainedRelayPayload,
-  ): Promise<JpycEip3009Result> => {
-    const existing = recoveryPromiseRef.current;
-    if (existing) return existing;
+  const resolveAmbiguousPayload = useCallback(
+    (retained: RetainedRelayPayload): Promise<JpycEip3009Result> => {
+      const existing = recoveryPromiseRef.current;
+      if (existing) return existing;
 
-    const run = (async (): Promise<JpycEip3009Result> => {
-      setRecoveryStateIfMounted('auto');
-      const deadline = Date.now() + RECOVERY_DEADLINE_MS;
-      let consecutiveUnused = 0;
-
-      for (const delayMs of RECOVERY_BACKOFF_MS) {
-        await new Promise<void>((resolve, reject) => {
-          recoveryWakeRef.current = resolve;
-          recoverySleepRef.current = setTimeout(() => {
-            recoverySleepRef.current = null;
-            recoveryWakeRef.current = null;
-            if (mountedRef.current) resolve();
-            else reject(new RelayResponseUnknownError());
-          }, delayMs);
-        });
-        if (!mountedRef.current) throw new RelayResponseUnknownError();
-        if (Date.now() > deadline) break;
-
-        const controller = new AbortController();
-        recoveryAbortRef.current = controller;
-        const remainingMs = Math.max(1, deadline - Date.now());
-        recoveryFetchTimeoutRef.current = setTimeout(
-          () => controller.abort(),
-          Math.min(RECOVERY_FETCH_TIMEOUT_MS, remainingMs),
+      const run = (async (): Promise<JpycEip3009Result> => {
+        setRecoveryStateIfMounted('auto');
+        const { resolveRelayIntent } = await import(
+          '@/lib/relay/relayIntentRecovery'
         );
-
-        let status: RelayStatusResponse | null = null;
-        try {
-          const response = await fetch('/api/relay/jpyc/status', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(retained.payload),
-            signal: controller.signal,
-          });
-          const body: unknown = await response.json();
-          if (response.ok && isRelayStatusResponse(body)) status = body;
-        } catch {
-          // status の fetch/RPC/KV 障害は送金結果を変えない。deadline まで同じ intent の read を続ける。
-        } finally {
-          if (recoveryFetchTimeoutRef.current !== null) {
-            clearTimeout(recoveryFetchTimeoutRef.current);
-            recoveryFetchTimeoutRef.current = null;
-          }
-          recoveryAbortRef.current = null;
-        }
-
-        if (!mountedRef.current) throw new RelayResponseUnknownError();
-        if (!status || status.state === 'indeterminate') {
-          consecutiveUnused = 0;
-          continue;
-        }
-        if (status.state === 'unused') {
-          consecutiveUnused++;
-          const validBefore = Number(retained.payload.validBefore);
-          if (
-            consecutiveUnused >= 2 &&
-            Number.isFinite(validBefore) &&
-            Math.floor(Date.now() / 1000) >= validBefore
-          ) {
-            retainedPayloadRef.current = null;
-            setRecoveryStateIfMounted(null);
-            throw new Error('relay_unused');
-          }
-          continue;
-        }
-
-        consecutiveUnused = 0;
-        if (status.txHash === null || !publicClient) continue;
-        try {
-          const receipt = await publicClient.waitForTransactionReceipt({
-            hash: status.txHash,
-            confirmations: 1,
-            timeout: Math.max(1, Math.min(RECOVERY_FETCH_TIMEOUT_MS, deadline - Date.now())),
-          });
+        const outcome = await resolveRelayIntent({
+          intent: retained.intent,
+          isMounted: () => mountedRef.current,
+          registerSleep: (timer, wake) => {
+            recoverySleepRef.current = timer;
+            recoveryWakeRef.current = wake;
+          },
+          clearSleep: (timer) => {
+            if (recoverySleepRef.current === timer) {
+              recoverySleepRef.current = null;
+              recoveryWakeRef.current = null;
+            }
+          },
+          registerFetch: (timer, controller) => {
+            recoveryFetchTimeoutRef.current = timer;
+            recoveryAbortRef.current = controller;
+          },
+          clearFetch: (timer, controller) => {
+            if (recoveryFetchTimeoutRef.current === timer) {
+              recoveryFetchTimeoutRef.current = null;
+            }
+            if (recoveryAbortRef.current === controller) {
+              recoveryAbortRef.current = null;
+            }
+          },
+          waitForReceipt:
+            publicClient &&
+            retained.intent.chainId === deployment.chainId
+            ? async (hash, timeout) => {
+                const receipt =
+                  await publicClient.waitForTransactionReceipt({
+                    hash,
+                    confirmations: 1,
+                    timeout,
+                  });
+                return { status: receipt.status };
+              }
+            : async (hash, timeout) => {
+                const { waitForStoredRelayReceipt } = await import(
+                  '@/lib/relay/relayStoredReceipt'
+                );
+                return waitForStoredRelayReceipt(
+                  retained.intent.chainId,
+                  hash,
+                  timeout,
+                );
+              },
+        });
+        if (outcome.kind === 'expired') {
           retainedPayloadRef.current = null;
+          storageRef.current?.clearRelayIntent();
+          // 未使用・失効済み intent の復元分類が画面に残り、新規決済の完了処理を
+          // 抑止し続ける波及を断つ。呼出側 catch の有無に依存せず latch と同時に解除する。
+          setRestoredIntent(null);
+          setRestoredVariables(null);
           setRecoveryStateIfMounted(null);
-          return {
-            txHash: status.txHash,
-            success: receipt.status === 'success',
-          };
-        } catch {
-          // txHash は確定していても receipt RPC が一時的に読めない場合がある。deadline まで再照会する。
+          throw new Error('relay_unused');
         }
-      }
+        if (outcome.kind === 'settled') {
+          retainedPayloadRef.current = null;
+          storageRef.current?.clearRelayIntent();
+          setRecoveryStateIfMounted(null);
+          void Promise.all([
+            import('@/lib/history'),
+            import('@/lib/payerReceipt'),
+          ])
+            .then(([history, payerReceipt]) => {
+              // 元 pending record 自体の metadata を保ったまま終端状態だけを昇格し、
+              // current page の商品文脈が reload 復元へ混入する波及を断つ。
+              history.promotePendingHistoryByTxHash(
+                outcome.txHash,
+                outcome.success ? 'success' : 'reverted',
+              );
+              payerReceipt.promotePayerReceiptStatus(
+                outcome.txHash,
+                outcome.success ? 'confirmed' : 'failed',
+              );
+            })
+            .catch(() => {
+              // ローカル履歴 chunk/Storage 障害を on-chain 決済結果の復元へ波及させない。
+            });
+          return {
+            txHash: outcome.txHash,
+            success: outcome.success,
+          };
+        }
 
-      setRecoveryStateIfMounted('exhausted');
-      throw new RelayResponseUnknownError();
-    })();
+        setRecoveryStateIfMounted('exhausted');
+        throw new RelayResponseUnknownError();
+      })();
 
-    recoveryPromiseRef.current = run;
-    void run.finally(() => {
-      if (recoveryPromiseRef.current === run) recoveryPromiseRef.current = null;
-    }).catch(() => undefined);
-    return run;
-  };
+      recoveryPromiseRef.current = run;
+      void run
+        .finally(() => {
+          if (recoveryPromiseRef.current === run) {
+            recoveryPromiseRef.current = null;
+          }
+        })
+        .catch(() => undefined);
+      return run;
+    },
+    [deployment.chainId, publicClient, setRecoveryStateIfMounted],
+  );
+
+  useEffect(() => {
+    let active = true;
+    // /pay・/tip の First Load JS 予算へ storage parser を載せないため mount 後に遅延取得する。
+    void import('@/lib/paymentIntentStorage')
+      .then((storage) => {
+        if (!active) return;
+        storageRef.current = storage;
+        const intent = storage.loadRelayIntent();
+        setStorageReady(true);
+        if (!intent) return;
+        // 保存済み nonce の status 確認より前に届いた submit を、復元終了後の新規署名へ
+        // 波及させない。未解決 intent を優先し、storage 読込中に積まれた操作は破棄する。
+        queuedMutationRef.current = null;
+        const retained: RetainedRelayPayload = {
+          payload: null,
+          intent,
+          ambiguous: true,
+        };
+        retainedPayloadRef.current = retained;
+        setRestoredIntent(intent);
+        setRestoredVariables(variablesFromIntent(intent));
+        void resolveAmbiguousPayload(retained)
+          .then((result) => {
+            if (!active) return;
+            setRestoredResult(result);
+            setRestoredError(null);
+          })
+          .catch((error: unknown) => {
+            if (!active) return;
+            if (error instanceof Error && error.message === 'relay_unused') {
+              setRestoredIntent(null);
+              setRestoredVariables(null);
+              setRestoredError(null);
+              return;
+            }
+            setRestoredError(
+              error instanceof Error ? error : new RelayResponseUnknownError(),
+            );
+          });
+      })
+      .catch(() => {
+        if (!active) return;
+        // chunk 読込障害を通常の決済機能へ波及させない。保存不能時も現行の同一 mount latch は残る。
+        setStorageReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [deployment.chainId, resolveAmbiguousPayload]);
 
   const mutation = useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
-    mutationFn: async ({ merchant, value, gasMode = 'customer', feeKind }) => {
+    mutationFn: async ({
+      merchant,
+      value,
+      gasMode = 'customer',
+      feeKind,
+    }) => {
       // 専用 retry だけでなく、呼出側が誤って通常 mutate を再度呼んでも、未解決 payload が
       // ある間は必ず同一 payload を再 POST して再署名を構造的に封鎖する。
       const retained = retainedPayloadRef.current;
       if (retained) {
-        if (retained.ambiguous) return resolveAmbiguousPayload(retained);
+        if (retained.ambiguous || !retained.payload) {
+          return resolveAmbiguousPayload(retained);
+        }
         try {
           const result = await postRelayPayload(retained.payload);
           // txHash 付き success / reverted は on-chain の確定結果。非 ambiguous な D1 retry の
-          // pending も従来どおり保持を終える。
-          retainedPayloadRef.current = null;
+          // pending だけは broadcast 済みなので同一 mount でも intent latch を維持する。
+          retainedPayloadRef.current = result.pending
+            ? { ...retained, ambiguous: true }
+            : null;
+          if (!result.pending) {
+            storageRef.current?.clearRelayIntent();
+          }
           setRecoveryState(null);
           return result;
         } catch (error) {
@@ -328,16 +407,21 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
             // standard fallback / 新署名へ流れて二重払いになるため、同一 payload を保持し続ける。
             retainedPayloadRef.current = {
               payload: retained.payload,
+              intent: retained.intent,
               ambiguous: true,
             };
             setRecoveryState('exhausted');
           } else if (!isRelayIpRateLimitedError(error)) {
             retainedPayloadRef.current = null;
+            storageRef.current?.clearRelayIntent();
           }
           throw error;
         }
       }
 
+      // 復元済み revert/失効後の新規署名を古い intent の復元結果として扱い続け、
+      // 現在ページの完了処理が誤って抑止される波及を断つ。
+      setRestoredIntent(null);
       if (!walletClient || !address || chainId === undefined) {
         throw new Error('wallet_not_connected');
       }
@@ -382,6 +466,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       };
 
       let payload: Record<string, unknown>;
+      let intent: RelayIntentMetadata;
       if (forwarder) {
         // recover: per-tx 手数料を JPYC 回収。決済 (merchant) は店舗が受取から吸収、
         // チップ (customer) はチッパーが上乗せ。料金スケジュールは gasMode で選択される:
@@ -410,9 +495,10 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         };
         // recover 専用の intent 構築は lazy import (initial /pay バンドルに encodeAbiParameters
         // 等を載せない・予算節約)。recover 決済が実行された時のみ chunk を読み込む。
-        const { buildReceiveWithAuthorizationTypedData } = await import(
-          '@/lib/relay/forwarderIntent'
-        );
+        const {
+          buildForwarderNonce,
+          buildReceiveWithAuthorizationTypedData,
+        } = await import('@/lib/relay/forwarderIntent');
         const typed = buildReceiveWithAuthorizationTypedData(
           params,
           chainId,
@@ -444,6 +530,17 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           validBefore: validBefore.toString(),
           intentSalt: params.intentSalt,
           signature,
+        };
+        intent = {
+          chainId,
+          from,
+          merchant,
+          merchantValue: merchantValue.toString(),
+          feeValue: feeValue.toString(),
+          nonce: buildForwarderNonce(params, chainId, forwarder),
+          validBefore: validBefore.toString(),
+          routeKind: 'recover',
+          issuedAt: Date.now(),
         };
       } else {
         // free: 直接 transferWithAuthorization。OpenPay がガス負担 (回収しない)。
@@ -483,19 +580,42 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           nonce: auth.nonce,
           signature,
         };
+        intent = {
+          chainId,
+          from,
+          merchant,
+          merchantValue: value.toString(),
+          feeValue: '0',
+          nonce: auth.nonce,
+          validBefore: validBefore.toString(),
+          routeKind: 'free',
+          issuedAt: Date.now(),
+        };
       }
 
+      // 署名そのものは保存せず、POST 応答喪失後も read-only status を引ける公開メタデータだけを残す。
+      storageRef.current?.saveRelayIntent(intent);
       try {
-        return await postRelayPayload(payload);
+        const result = await postRelayPayload(payload);
+        if (result.pending) {
+          retainedPayloadRef.current = { payload, intent, ambiguous: true };
+        } else {
+          storageRef.current?.clearRelayIntent();
+        }
+        return result;
       } catch (error) {
         if (isRelayResponseUnknownError(error)) {
-          const retained = { payload, ambiguous: true };
+          const retained = { payload, intent, ambiguous: true };
           retainedPayloadRef.current = retained;
           return resolveAmbiguousPayload(retained);
         } else if (isRelayIpRateLimitedError(error)) {
-          retainedPayloadRef.current = { payload, ambiguous: false };
+          retainedPayloadRef.current = { payload, intent, ambiguous: false };
+          // IP limiter は relay 処理前の確定的拒否。署名 payload は同一 mount の retry 用に
+          // memory へ残すが、未 broadcast intent が reload 後の支払いを塞ぐ波及は断つ。
+          storageRef.current?.clearRelayIntent();
         } else {
           retainedPayloadRef.current = null;
+          storageRef.current?.clearRelayIntent();
         }
         throw error;
       }
@@ -503,12 +623,50 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   });
 
   const mutationIsPending = mutation.isPending;
-  const mutationVariables = mutation.variables;
-  const mutate = mutation.mutate;
+  const mutationData = mutation.data;
+  const mutationVariables = mutation.variables ?? restoredVariables ?? undefined;
+  const mutationMutate = mutation.mutate;
+
+  const mutate = useCallback(
+    (variables: JpycEip3009Params) => {
+      if (!storageReady) {
+        queuedMutationRef.current = variables;
+        return;
+      }
+      if (
+        mutationData?.success ||
+        mutationData?.pending ||
+        restoredResult?.success ||
+        restoredResult?.pending
+      ) {
+        return;
+      }
+      setRestoredResult(null);
+      setRestoredError(null);
+      setRestoredVariables(null);
+      mutationMutate(variables);
+    },
+    [mutationData, mutationMutate, restoredResult, storageReady],
+  );
+
+  useEffect(() => {
+    if (
+      !storageReady ||
+      retainedPayloadRef.current ||
+      restoredResult ||
+      mutationIsPending
+    ) {
+      return;
+    }
+    const queued = queuedMutationRef.current;
+    if (!queued) return;
+    queuedMutationRef.current = null;
+    mutationMutate(queued);
+  }, [mutationIsPending, mutationMutate, restoredResult, storageReady]);
 
   const retryRelay = useCallback(() => {
     if (
-      !retainedPayloadRef.current ||
+      !retainedPayloadRef.current?.payload ||
       retainedPayloadRef.current.ambiguous ||
       !mutationVariables ||
       mutationIsPending
@@ -519,15 +677,60 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   }, [mutate, mutationIsPending, mutationVariables]);
 
   const retrySamePayload = useCallback(() => {
-    if (
-      !retainedPayloadRef.current?.ambiguous ||
-      !mutationVariables ||
-      mutationIsPending
-    ) {
+    const retained = retainedPayloadRef.current;
+    if (!retained?.ambiguous || mutationIsPending) return;
+    if (retained.payload && mutationVariables) {
+      mutate(mutationVariables);
       return;
     }
-    mutate(mutationVariables);
-  }, [mutate, mutationIsPending, mutationVariables]);
+    void resolveAmbiguousPayload(retained)
+      .then((result) => {
+        if (!mountedRef.current) return;
+        setRestoredResult(result);
+        setRestoredError(null);
+      })
+      .catch((error: unknown) => {
+        if (!mountedRef.current) return;
+        if (error instanceof Error && error.message === 'relay_unused') {
+          // 未使用・失効済み intent の表示分類が残り、新規決済の完了処理を抑止する波及を断つ。
+          setRestoredIntent(null);
+          setRestoredVariables(null);
+          setRestoredError(null);
+          return;
+        }
+        setRestoredError(
+          error instanceof Error ? error : new RelayResponseUnknownError(),
+        );
+      });
+  }, [
+    mutate,
+    mutationIsPending,
+    mutationVariables,
+    resolveAmbiguousPayload,
+  ]);
 
-  return { ...mutation, recoveryState, retryRelay, retrySamePayload };
+  const data = mutation.data ?? restoredResult ?? undefined;
+  const error = mutation.error ?? restoredError;
+  const isPending =
+    !storageReady || mutation.isPending || recoveryState === 'auto';
+  const isSuccess = mutation.isSuccess || restoredResult !== null;
+  const isError = mutation.isError || restoredError !== null;
+
+  return {
+    ...mutation,
+    mutate,
+    data,
+    error,
+    variables: mutationVariables,
+    isPending,
+    isSuccess,
+    isError,
+    recoveryState,
+    retryRelay,
+    retrySamePayload,
+    hasStoredIntent: retainedPayloadRef.current?.payload === null,
+    isRestoring: !storageReady,
+    hasActiveIntent: retainedPayloadRef.current !== null,
+    restoredIntent,
+  };
 }

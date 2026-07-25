@@ -12,6 +12,10 @@ import {
   validateAuthorization,
   type Eip3009Authorization,
 } from '@/lib/jpycEip3009';
+import type {
+  BudgetCheckResult,
+  GasBudgetRefundToken,
+} from '@/lib/relay/relayGuards';
 
 export type RelayInput = {
   chainId: number;
@@ -50,16 +54,17 @@ export type RelayDeps = {
   // 枯渇させる griefing を、chain 日次の relay 件数上限で止める。返り値:
   //   allowed  = 予算内で relay を許可するか (fail-open: KV 障害でも true)。
   //   consumed = カウンタを実際に INCR して 1 枠を消費したか (KV INCR 失敗の fail-open allow では
-  //              false)。consumed=false の枠は後で refundGasBudget (DECR) してはならない — INCR して
-  //              いない枠を DECR するとカウンタが負に振れて余剰許容枠を与えてしまう (CDX-5)。
+  //              false)。consumed=true なら、INCR した UTC 日付込み refundToken も返す。
+  //              consumed=false の枠は後で refundGasBudget (DECR) してはならない — INCR していない
+  //              枠を DECR するとカウンタが負に振れて余剰許容枠を与えてしまう (CDX-5)。
   // 未提供ならスキップ。alpha は可用性優先、mainnet は fail-closed 寄りに要見直し。
   checkGasBudget?: (
     chainId: number,
-  ) => Promise<{ allowed: boolean; consumed: boolean }>;
+  ) => Promise<BudgetCheckResult<GasBudgetRefundToken>>;
   // (任意) checkGasBudget で実際に消費した (consumed=true) 日次枠を 1 戻す。tx が 1 件も broadcast
   // されなかったことが確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に
-  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。consumed=true のときのみ呼ぶ。
-  refundGasBudget?: (chainId: number) => Promise<void>;
+  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。check が返した token でのみ呼ぶ。
+  refundGasBudget?: (refundToken: GasBudgetRefundToken) => Promise<void>;
   // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
   // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
   // standard mode に fallback させない (二重支払い防止)。未提供ならスキップ。
@@ -206,21 +211,23 @@ export async function relayJpycAuthorization(
   // 5.7 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
   // (replay/duplicate が予算枠を消費して正当な決済を枯渇させる DoS を防ぐ・Codex P1)。超過は
   // submit せず reject (tx 未送信 → standard へ安全に fallback)。claim 済なら解放 (false tombstone 防止)。
-  let gasBudgetConsumed = false;
+  let gasBudgetRefundToken: GasBudgetRefundToken | null = null;
   if (deps.checkGasBudget) {
     const budget = await deps.checkGasBudget(chainId);
     if (!budget.allowed) {
       await releaseClaim();
       return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
     }
-    // 実際に INCR で枠を消費したときのみ refund 対象にする。KV INCR 失敗の fail-open allow
-    // (consumed=false) を消費扱いすると、後の DECR がカウンタを負に振り余剰枠を与える (CDX-5)。
-    gasBudgetConsumed = budget.consumed;
+    // 実際に INCR した UTC 日付込み token だけを refund 対象にする。fail-open (token=null) や
+    // 日跨ぎ後の再計算で別日の counter を DECR し、余剰枠を与える波及を断つ。
+    gasBudgetRefundToken = budget.refundToken;
   }
   // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
   // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。
   const refundBudget = async () => {
-    if (gasBudgetConsumed) await deps.refundGasBudget?.(chainId);
+    if (gasBudgetRefundToken) {
+      await deps.refundGasBudget?.(gasBudgetRefundToken);
+    }
   };
 
   // 6. submit + poll。submit が throw = broadcast 前のエラー → relay_error (fallback 可)。

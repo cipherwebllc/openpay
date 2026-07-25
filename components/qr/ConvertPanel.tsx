@@ -62,9 +62,10 @@ export function ConvertPanel({
           </button>
         </div>
       )}
-      {/* 他トークン建てで受け取る (FX 換算・有効期限付き動的 QR)。
+      {/* 他トークン建てで受け取る (FX 換算・画面上の期限目安付き動的 QR)。
           例: JPYC 1000 入力 → USDC 建てで受け取る → 現レートで USDC 額を確定し
-          3 分間有効な QR を生成。スワップ無し (顧客が払った USDC をそのまま受領)。 */}
+          3 分の UI カウントダウン付き QR を生成。未署名 URL なのでサーバ強制の期限ではない。
+          スワップ無し (顧客が払った USDC をそのまま受領)。 */}
       {canShowConvert && rateOk && (
         <button
           type="button"

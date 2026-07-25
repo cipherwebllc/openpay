@@ -16,9 +16,21 @@ const hold = vi.hoisted(() => ({
   grantOk: true,
   markOk: true,
   kvSetValue: 'OK' as 'OK' | null,
+  globalClaimSetValue: 'OK' as 'OK' | null,
+  globalClaimExisting: null as string | null,
   kvSetOk: true,
   kvGetValue: 'pending' as string | null,
 }));
+
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return {
+    ...actual,
+    after: (callback: () => unknown) => {
+      void callback();
+    },
+  };
+});
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -88,21 +100,34 @@ vi.mock('@/lib/feeCurrent', () => ({
 const kvSetSpy = vi.hoisted(() => vi.fn());
 const kvDelSpy = vi.hoisted(() => vi.fn());
 const kvGetSpy = vi.hoisted(() => vi.fn());
+const kvEvalSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   kvSet: (...args: unknown[]) => {
     kvSetSpy(...args);
+    const value = String(args[0]).startsWith('payment:claimed:')
+      ? hold.globalClaimSetValue
+      : hold.kvSetValue;
     return Promise.resolve(
       hold.kvSetOk
-        ? { ok: true, value: hold.kvSetValue }
+        ? { ok: true, value }
         : { ok: false, reason: 'unconfigured' },
     );
   },
   kvGet: (...args: unknown[]) => {
     kvGetSpy(...args);
-    return Promise.resolve({ ok: true, value: hold.kvGetValue });
+    return Promise.resolve({
+      ok: true,
+      value: String(args[0]).startsWith('payment:claimed:')
+        ? hold.globalClaimExisting
+        : hold.kvGetValue,
+    });
   },
   kvDel: (...args: unknown[]) => {
     kvDelSpy(...args);
+    return Promise.resolve({ ok: true, value: 1 });
+  },
+  kvEval: (...args: unknown[]) => {
+    kvEvalSpy(...args);
     return Promise.resolve({ ok: true, value: 1 });
   },
 }));
@@ -136,6 +161,8 @@ beforeEach(() => {
   hold.grantOk = true;
   hold.markOk = true;
   hold.kvSetValue = 'OK';
+  hold.globalClaimSetValue = 'OK';
+  hold.globalClaimExisting = null;
   hold.kvSetOk = true;
   hold.kvGetValue = 'pending';
   // lookback 内のどの期間も選べるよう、十分古い startPeriod を点灯する。
@@ -145,6 +172,7 @@ beforeEach(() => {
   kvSetSpy.mockClear();
   kvGetSpy.mockClear();
   kvDelSpy.mockClear();
+  kvEvalSpy.mockClear();
 });
 
 afterEach(() => {
@@ -194,6 +222,57 @@ describe('POST /api/billing/settle', () => {
       hold.session.ok ? hold.session.address : '',
       expect.objectContaining({ txHash: TXHASH, expiresAt: expect.any(Number) }),
     );
+    expect(kvSetSpy).toHaveBeenCalledWith(
+      `payment:claimed:${AMOY}:${TXHASH.toLowerCase()}`,
+      expect.stringMatching(
+        /^r:billing:0x52d4901142e2b5680027da5eb47c86cb02a3ca81:\d{4}-\d{2}$/,
+      ),
+      { nx: true },
+    );
+  });
+
+  it.each(['r:pro', 'r:csvpass', 'r:order'])(
+    '%s global claim 済みの tx は billing に二重利用できない',
+    async (claimedValue) => {
+      hold.globalClaimSetValue = null;
+      hold.globalClaimExisting = claimedValue;
+
+      const res = await POST(req({ txHash: TXHASH, chainId: AMOY }));
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        ok: false,
+        error: 'already_processed',
+      });
+      expect(grantSpy).not.toHaveBeenCalled();
+      expect(kvDelSpy).toHaveBeenCalledWith(
+        `billing:settled:${AMOY}:${TXHASH.toLowerCase()}`,
+      );
+    },
+  );
+
+  it('同じ wallet+period の billing global claim は crash retry として続行', async () => {
+    const period = previousPeriod(NOW);
+    hold.globalClaimSetValue = null;
+    hold.globalClaimExisting =
+      `r:billing:${hold.session.ok ? hold.session.address.toLowerCase() : ''}:${period}`;
+
+    const res = await POST(
+      req({ txHash: TXHASH, chainId: AMOY, period }),
+    );
+    expect(res.status).toBe(200);
+    expect(grantSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('同じ tx の billing claim でも別 period への再利用は拒否', async () => {
+    hold.globalClaimSetValue = null;
+    hold.globalClaimExisting =
+      `r:billing:${hold.session.ok ? hold.session.address.toLowerCase() : ''}:2026-05`;
+
+    const res = await POST(
+      req({ txHash: TXHASH, chainId: AMOY, period: '2026-06' }),
+    );
+    expect(res.status).toBe(409);
+    expect(grantSpy).not.toHaveBeenCalled();
   });
 
   it('請求ありで txHash 無し → 400', async () => {
@@ -218,13 +297,22 @@ describe('POST /api/billing/settle', () => {
     expect(kvDelSpy).toHaveBeenCalled();
   });
 
-  it('同 txHash 再提出 (確定済) → replay・再付与しない', async () => {
+  it('legacy 確定済 tx の replay は current session wallet へ誤帰属せず generic claim を backfill', async () => {
     hold.kvSetValue = null;
     hold.kvGetValue = `r:${JSON.stringify({ period: '2026-05', expiresAt: 777_000 })}`;
+    hold.session = {
+      ok: true,
+      address: '0x7777777777777777777777777777777777777777',
+    };
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY }));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, replay: true, expiresAt: 777_000 });
     expect(grantSpy).not.toHaveBeenCalled();
+    expect(kvSetSpy).toHaveBeenCalledWith(
+      `payment:claimed:${AMOY}:${TXHASH.toLowerCase()}`,
+      'r:billing:legacy:2026-05',
+      { nx: true },
+    );
   });
 
   it('処理中 (ロックのみ) → 409', async () => {
@@ -240,6 +328,15 @@ describe('POST /api/billing/settle', () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: 'grant_failed' });
     expect(kvDelSpy).toHaveBeenCalled();
+    expect(kvEvalSpy).toHaveBeenCalledWith(
+      expect.stringContaining('GET'),
+      [`payment:claimed:${AMOY}:${TXHASH.toLowerCase()}`],
+      [
+        expect.stringMatching(
+          /^r:billing:0x52d4901142e2b5680027da5eb47c86cb02a3ca81:/,
+        ),
+      ],
+    );
   });
 
   it('verify が想定外 throw → 503・ロック解放', async () => {
@@ -363,6 +460,7 @@ describe('POST /api/billing/settle', () => {
       expect(res.status).toBe(503);
       expect(await res.json()).toMatchObject({ error: 'grant_failed' });
       expect(kvDelSpy).toHaveBeenCalled(); // releaseClaim
+      expect(kvEvalSpy).not.toHaveBeenCalled(); // global claim は billing 用に恒久維持
     });
   });
 });

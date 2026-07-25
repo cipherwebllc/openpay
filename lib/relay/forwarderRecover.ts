@@ -23,6 +23,11 @@ import {
   recoverReceiveWithAuthorizationSigner,
 } from '@/lib/relay/forwarderSettle';
 import type { RelayResult, RelayTaskOutcome } from '@/lib/relay/jpycRelay';
+import type {
+  BudgetCheckResult,
+  GasBudgetRefundToken,
+  SubfloorBudgetRefundToken,
+} from '@/lib/relay/relayGuards';
 
 export type ForwarderRecoverInput = {
   chainId: number;
@@ -44,20 +49,35 @@ export type ForwarderRecoverDeps = {
   feeReceiverFor: (chainId: number) => Address | null;
   getBalance: (chainId: number, token: Address, owner: Address) => Promise<bigint>;
   checkRateLimit: (keys: string[]) => Promise<boolean>;
+  // (任意) ガスフロア未満 settle 専用の払い元日次 limiter。署名検証・冪等性・通常 rate-limit
+  // の後、共有日次予算より前で評価し、低回収 settle の濫用を通常 relay 枠へ波及させない。
+  checkSubfloorPayerRateLimit?: (
+    chainId: number,
+    payer: Address,
+  ) => Promise<boolean>;
+  // (任意) ガスフロア未満 settle 専用の日次予算。既存 checkGasBudget と同じ
+  // consumed/refundToken 契約だが counter は別名前空間。専用枠で止めた request は共有
+  // relay:budget: を消費しない。
+  checkSubfloorBudget?: (
+    chainId: number,
+  ) => Promise<BudgetCheckResult<SubfloorBudgetRefundToken>>;
+  // (任意) 専用日次枠の refund。check が返した token を、tx 未 broadcast が確実な失敗でのみ渡す。
+  refundSubfloorBudget?: (refundToken: SubfloorBudgetRefundToken) => Promise<void>;
   // (任意) 日次グローバル予算 (circuit breaker)。Sybil による relayer POL 枯渇 griefing を chain
   // 日次の relay 件数上限で止める。返り値:
   //   allowed  = 予算内で relay を許可するか (fail-open: KV 障害でも true)。
   //   consumed = カウンタを実際に INCR して 1 枠を消費したか (KV INCR 失敗の fail-open allow では
-  //              false)。consumed=false の枠は refundGasBudget (DECR) してはならない (INCR していない
-  //              枠を DECR するとカウンタが負に振れ余剰許容枠を与える・CDX-5)。fail-open (KV 障害は許可)。
+  //              false)。consumed=true なら、INCR した UTC 日付込み refundToken も返す。
+  //              consumed=false の枠は refundGasBudget (DECR) してはならない (INCR していない枠を
+  //              DECR するとカウンタが負に振れ余剰許容枠を与える・CDX-5)。fail-open (KV 障害は許可)。
   checkGasBudget?: (
     chainId: number,
-  ) => Promise<{ allowed: boolean; consumed: boolean }>;
+  ) => Promise<BudgetCheckResult<GasBudgetRefundToken>>;
   // (任意) checkGasBudget で実際に消費した (consumed=true) 日次枠を 1 戻す。tx が 1 件も broadcast
   // されなかったことが確実な失敗 ((a) submit throw / (b) poll 'error') でのみ呼び、RPC 不安定日に
-  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。consumed=true のときのみ呼ぶ。
+  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。check が返した token でのみ呼ぶ。
   // jpycRelay (free 経路) の refundGasBudget 契約とセマンティクス完全一致 (fail-quiet・自分でログ)。
-  refundGasBudget?: (chainId: number) => Promise<void>;
+  refundGasBudget?: (refundToken: GasBudgetRefundToken) => Promise<void>;
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
@@ -193,8 +213,17 @@ export async function verifyForwarderSettle(
     return { ok: false, result: rejected(400, 'signature_mismatch') };
   }
 
-  // 残高 ≥ total (revert する tx を relay しない)。
-  const balance = await deps.getBalance(chainId, jpyc, params.from);
+  // 残高照会は submit より前の read。RPC 例外を構造化して外側の redelivery owner が pending
+  // claim を解放できるようにし、署名の有効期限より長い false tombstone へ波及するのを断つ。
+  let balance: bigint;
+  try {
+    balance = await deps.getBalance(chainId, jpyc, params.from);
+  } catch {
+    return {
+      ok: false,
+      result: rejected(503, 'preflight_unavailable'),
+    };
+  }
   if (balance < total) {
     return { ok: false, result: rejected(400, 'insufficient_balance') };
   }
@@ -218,8 +247,14 @@ export async function recoverViaForwarder(
   // + 冪等性: 同一 authorization の重複 POST も pending (再 broadcast せず gas 浪費防止)。
   // nonce は両者共通 (forwarder commitment = EIP-3009 nonce)。
   if (deps.checkAuthorizationUsed) {
-    if (await deps.checkAuthorizationUsed(chainId, jpyc, params.from, nonce)) {
-      return { kind: 'pending' };
+    try {
+      if (await deps.checkAuthorizationUsed(chainId, jpyc, params.from, nonce)) {
+        return { kind: 'pending' };
+      }
+    } catch {
+      // idempotency claim / budget / submit のいずれよりも前の read だけを正規化する。ここで
+      // structured reject にすることで redelivery marker を安全に解放し、RPC 復旧後の再試行を許す。
+      return rejected(503, 'preflight_unavailable');
     }
   }
   let idemClaimed = false;
@@ -244,24 +279,56 @@ export async function recoverViaForwarder(
     return rejected(429, 'rate_limited');
   }
 
-  // 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
-  // (replay/duplicate が予算枠を消費する DoS を防ぐ・Codex P1)。超過は submit せず reject。
-  let gasBudgetConsumed = false;
-  if (deps.checkGasBudget) {
-    const budget = await deps.checkGasBudget(chainId);
+  // ガスフロア未満 settle だけに配線される専用 payer limiter。署名済み params.from を鍵にし、
+  // 同じ資金元からの低回収連打が専用日次枠と、その先の共有日次枠を枯らす波及を断つ。
+  if (
+    deps.checkSubfloorPayerRateLimit &&
+    !(await deps.checkSubfloorPayerRateLimit(chainId, params.from))
+  ) {
+    await releaseClaim();
+    return rejected(429, 'rate_limited');
+  }
+
+  // ガスフロア未満 settle 専用の日次予算。Sybil で payer limiter を迂回されても、この chain 単位
+  // counter が共有 relay:budget: より先に止め、通常決済 / CSV パス / x402 への枯渇波及を断つ。
+  let subfloorBudgetRefundToken: SubfloorBudgetRefundToken | null = null;
+  if (deps.checkSubfloorBudget) {
+    const budget = await deps.checkSubfloorBudget(chainId);
     if (!budget.allowed) {
       await releaseClaim();
       return rejected(503, 'daily_budget_exceeded');
     }
-    // 実際に INCR で枠を消費したときのみ refund 対象にする。KV INCR 失敗の fail-open allow
-    // (consumed=false) を消費扱いすると、後の DECR がカウンタを負に振り余剰枠を与える (CDX-5)。
-    gasBudgetConsumed = budget.consumed;
+    subfloorBudgetRefundToken = budget.refundToken;
+  }
+  const refundSubfloor = async () => {
+    if (subfloorBudgetRefundToken) {
+      await deps.refundSubfloorBudget?.(subfloorBudgetRefundToken);
+    }
+  };
+
+  // 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
+  // (replay/duplicate が予算枠を消費する DoS を防ぐ・Codex P1)。超過は submit せず reject。
+  let gasBudgetRefundToken: GasBudgetRefundToken | null = null;
+  if (deps.checkGasBudget) {
+    const budget = await deps.checkGasBudget(chainId);
+    if (!budget.allowed) {
+      await releaseClaim();
+      // 共有枠で止まり tx は未送信なので、先に消費した専用枠だけを戻す。
+      await refundSubfloor();
+      return rejected(503, 'daily_budget_exceeded');
+    }
+    // 実際に INCR した UTC 日付込み token だけを refund 対象にする。fail-open (token=null) や
+    // 日跨ぎ後の再計算で別日の counter を DECR し、余剰枠を与える波及を断つ。
+    gasBudgetRefundToken = budget.refundToken;
   }
   // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
   // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。
   // jpycRelay (free 経路) の refundBudget と同一セマンティクス。
   const refundBudget = async () => {
-    if (gasBudgetConsumed) await deps.refundGasBudget?.(chainId);
+    if (gasBudgetRefundToken) {
+      await deps.refundGasBudget?.(gasBudgetRefundToken);
+    }
+    await refundSubfloor();
   };
 
   // submit (relayer → forwarder.settle) + poll。submit が throw = broadcast 前 → relay_error。

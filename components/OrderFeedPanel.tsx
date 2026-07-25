@@ -147,6 +147,11 @@ export function OrderFeedPanel() {
             <p className="text-xs text-slate-500">{chainLabel(o.chainId)}</p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+            {o.feeUncollected ? (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-800">
+                {t('feeUncollectedBadge')}
+              </span>
+            ) : null}
             {ageMin !== null && ageMin >= 1 ? (
               <span
                 className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold ${

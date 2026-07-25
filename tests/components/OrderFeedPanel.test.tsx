@@ -178,6 +178,15 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByText('申告合計: 200 JPYC')).toBeInTheDocument();
   });
 
+  it('standard 手数料未収の受注に明示バッジを表示', async () => {
+    h.orders = [{ ...order, feeUncollected: true }];
+    render();
+    expect(await screen.findByText('OpenPay 手数料未収')).toHaveClass(
+      'bg-amber-100',
+      'text-amber-800',
+    );
+  });
+
   it('受注ゼロ → 空表示', async () => {
     h.orders = [];
     render();

@@ -10,6 +10,7 @@
 // (成功パネル + エクスプローラリンクで控えとする)。
 
 import { useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import {
@@ -21,11 +22,14 @@ import {
 } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { ResultRow } from './ResultRow';
-import { SignReassurance } from './SignReassurance';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { logger } from '@/lib/logger';
 import { type NativeTipParams } from '@/lib/url';
 import { useTipAmount } from '@/hooks/useTipAmount';
+
+const SignReassurance = dynamic(
+  () => import('./SignReassurance').then((m) => m.SignReassurance),
+);
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 // POL / KAIA とも 18 桁のネイティブトークン。

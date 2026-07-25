@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { Address, Hex } from 'viem';
+import {
+  STANDARD_INTENT_STORAGE_KEY,
+  type StandardIntentMetadata,
+} from '@/lib/paymentIntentStorage';
 
 // wagmi の useAccount / useWriteContract / useWaitForTransactionReceipt を境界モック。
 // useStandardPayment 本体のロジック (phase 遷移 / 2-tx 直列 / retry / log) は実コードを走らせる。
@@ -58,10 +62,16 @@ vi.mock('wagmi', () => ({
   },
   useWaitForTransactionReceipt: ({ hash }: { hash: Hex | undefined }) => {
     // hash の値で a / b を識別 (merchant tx と fee tx で別)
-    if (hash === useWriteContractMockState.a.data && hash !== undefined) {
+    if (
+      hash !== undefined &&
+      (hash === useWriteContractMockState.a.data || hash === MERCHANT_TX)
+    ) {
       return useWaitMockState.a;
     }
-    if (hash === useWriteContractMockState.b.data && hash !== undefined) {
+    if (
+      hash !== undefined &&
+      (hash === useWriteContractMockState.b.data || hash === FEE_TX)
+    ) {
       return useWaitMockState.b;
     }
     return {
@@ -87,8 +97,40 @@ const TOKEN: Address = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
 const FEE_RECEIVER: Address = '0xdead000000000000000000000000000000001234';
 const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
+const OTHER_CUSTOMER: Address =
+  '0x8888888888888888888888888888888888888888';
 const MERCHANT_TX: Hex = `0x${'a'.repeat(64)}`;
 const FEE_TX: Hex = `0x${'b'.repeat(64)}`;
+
+async function renderReadyStandardPayment() {
+  const hook = renderHook(() => useStandardPayment());
+  await waitFor(() => expect(hook.result.current.isRestoring).toBe(false));
+  return hook;
+}
+
+function seedStandardIntent(
+  overrides: Partial<StandardIntentMetadata> = {},
+): void {
+  const intent: StandardIntentMetadata = {
+    version: 1,
+    chainId: 84532,
+    from: CUSTOMER,
+    tokenAddress: TOKEN,
+    merchant: MERCHANT,
+    merchantValue: '9950000',
+    feeReceiver: FEE_RECEIVER,
+    feeValue: '50000',
+    saleValue: '10000000',
+    stage: 'merchant',
+    merchantTxHash: MERCHANT_TX,
+    issuedAt: Date.now(),
+    ...overrides,
+  };
+  window.sessionStorage.setItem(
+    STANDARD_INTENT_STORAGE_KEY,
+    JSON.stringify(intent),
+  );
+}
 
 function resetMocks() {
   writeCallCount = 0;
@@ -117,6 +159,7 @@ function resetMocks() {
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   resetMocks();
 });
 
@@ -140,8 +183,8 @@ describe('useStandardPayment', () => {
     ).toBe(2);
   });
 
-  it('idle 状態: phase=idle、isPending/isSuccess/isError 全 false、data=undefined', () => {
-    const { result } = renderHook(() => useStandardPayment());
+  it('idle 状態: phase=idle、isPending/isSuccess/isError 全 false、data=undefined', async () => {
+    const { result } = await renderReadyStandardPayment();
     expect(result.current.phase).toBe('idle');
     expect(result.current.isPending).toBe(false);
     expect(result.current.isSuccess).toBe(false);
@@ -149,8 +192,8 @@ describe('useStandardPayment', () => {
     expect(result.current.data).toBeUndefined();
   });
 
-  it('mutate(merchantAmount=0): pre-validation で reject、writeContract は呼ばれない', () => {
-    const { result } = renderHook(() => useStandardPayment());
+  it('mutate(merchantAmount=0): pre-validation で reject、writeContract は呼ばれない', async () => {
+    const { result } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -165,8 +208,8 @@ describe('useStandardPayment', () => {
     expect(result.current.error?.message).toMatch(/送金額が 0/);
   });
 
-  it('mutate(): merchant tx を発火、phase=merchant-sending', () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+  it('mutate(): merchant tx を発火、phase=merchant-sending', async () => {
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -189,7 +232,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant tx 成功 + feeAmount > 0: fee tx が自動発火、phase=fee-sending', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -220,7 +263,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant tx 成功 + feeAmount = 0: fee tx をスキップして success', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -247,7 +290,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant tx 失敗: phase=merchant-error、fee tx は発火しない', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -271,7 +314,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant tx revert: phase=merchant-error', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -296,7 +339,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant receipt RPC エラー: merchant-unknown で新規送金を封鎖し、receipt 再照会後の success でのみ fee を開始', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     const params = {
       tokenAddress: TOKEN,
       merchant: MERCHANT,
@@ -351,7 +394,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant-unknown の receipt 再照会が reverted に到達: merchant-error へ移り fee は送信しない', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -382,7 +425,7 @@ describe('useStandardPayment', () => {
   });
 
   it('fee tx 失敗 (wallet reject): phase=fee-error、merchant 確定済 = data には merchant hash あり', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -425,8 +468,43 @@ describe('useStandardPayment', () => {
     });
   });
 
+  it('merchant 確定前に wallet が別 payer へ切り替わったら fee を自動送信せず latch を維持する', async () => {
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    act(() => {
+      useAccountMock.mockReturnValue({ address: OTHER_CUSTOMER });
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = { status: 'success', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+
+    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+    expect(result.current.hasActiveIntent).toBe(true);
+    expect(
+      JSON.parse(
+        window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)!,
+      ),
+    ).toMatchObject({
+      from: CUSTOMER,
+      stage: 'fee-awaiting',
+      merchantTxHash: MERCHANT_TX,
+      merchantBlockNumber: '100',
+    });
+  });
+
   it('retryFee(): fee tx を再送信、merchant tx は再呼び出ししない', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -465,7 +543,7 @@ describe('useStandardPayment', () => {
   });
 
   it('全成功: phase=success、data に merchant + fee hash + block', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -499,7 +577,7 @@ describe('useStandardPayment', () => {
   });
 
   it('paymentLog: merchant tx 成功時に standard-merchant flow で 1 度発火', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -527,12 +605,138 @@ describe('useStandardPayment', () => {
     expect(merchantLog?.[0]?.txHash).toBe(MERCHANT_TX);
   });
 
+  it('レジ standard は plain transfer のまま送り、確定後に fee txHash を通知する (通知は phase 不変)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
+    global.fetch = fetchMock;
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        saleAmount: 10_000_000n,
+        registerFee: true,
+        chainId: 84532,
+      });
+    });
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = { status: 'success', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() =>
+      expect(useWriteContractMockB.writeContract).toHaveBeenCalled(),
+    );
+    // 顧客の署名対象は従来どおり ERC20.transfer (署名回数・ガス・フロー不変)。
+    const feeCall = useWriteContractMockB.writeContract.mock.calls[0][0];
+    expect(feeCall.functionName).toBe('transfer');
+    expect(feeCall.args).toEqual([FEE_RECEIVER, 50_000n]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    act(() => {
+      useWriteContractMockState.b.data = FEE_TX;
+      useWaitMockState.b.data = { status: 'success', blockNumber: 101n };
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/register/claim');
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)),
+    ).toEqual({
+      chainId: 84532,
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      saleAmount: '10000000',
+      merchantTxHash: MERCHANT_TX,
+      feeTxHash: FEE_TX,
+    });
+    expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('claim 通知の失敗は決済本体へ波及しない (success を維持・fail-open)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'));
+    global.fetch = fetchMock;
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        saleAmount: 10_000_000n,
+        registerFee: true,
+        chainId: 84532,
+      });
+    });
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = { status: 'success', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() =>
+      expect(useWriteContractMockB.writeContract).toHaveBeenCalled(),
+    );
+    act(() => {
+      useWriteContractMockState.b.data = FEE_TX;
+      useWaitMockState.b.data = { status: 'success', blockNumber: 101n };
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(result.current.phase).toBe('success');
+    expect(result.current.error).toBeNull();
+  });
+
+  it('registerFee 印の無い standard は通知しない (従来の /pay・/checkout 経路は不変)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
+    global.fetch = fetchMock;
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = { status: 'success', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() =>
+      expect(useWriteContractMockB.writeContract).toHaveBeenCalled(),
+    );
+    act(() => {
+      useWriteContractMockState.b.data = FEE_TX;
+      useWaitMockState.b.data = { status: 'success', blockNumber: 101n };
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   // -------------------------------------------------------------------------
   // 並行 / リトライ / edge state — happy path 外の遷移を全網羅
   // -------------------------------------------------------------------------
 
   it('fee tx revert (on-chain で reverted): phase=fee-error、merchant 確定は維持', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -568,7 +772,7 @@ describe('useStandardPayment', () => {
   });
 
   it('paymentLog: fee tx reverted で result=reverted が standard-fee flow で記録される', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -603,8 +807,8 @@ describe('useStandardPayment', () => {
     expect(feeLog?.[0]?.txHash).toBe(FEE_TX);
   });
 
-  it('mutate(amount<=0): wallet 連打防御で writeContract が呼ばれない (negative も同じ)', () => {
-    const { result } = renderHook(() => useStandardPayment());
+  it('mutate(amount<=0): wallet 連打防御で writeContract が呼ばれない (negative も同じ)', async () => {
+    const { result } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -620,7 +824,7 @@ describe('useStandardPayment', () => {
   });
 
   it('retryFee の冪等性: fee 失敗 → retry 成功で phase=success、merchant tx は再呼出されない', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -668,8 +872,8 @@ describe('useStandardPayment', () => {
     expect(useWriteContractMockA.writeContract).toHaveBeenCalledOnce();
   });
 
-  it('retryFee は feeAmount=0 のとき no-op (送信しない、状態変化なし)', () => {
-    const { result } = renderHook(() => useStandardPayment());
+  it('retryFee は feeAmount=0 のとき no-op (送信しない、状態変化なし)', async () => {
+    const { result } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -689,7 +893,7 @@ describe('useStandardPayment', () => {
   });
 
   it('mutate 連続呼出: 新規パラメタで loggedKey / feeStarted がリセットされ正しく再実行', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     // 1 回目
     act(() => {
       result.current.mutate({
@@ -722,7 +926,7 @@ describe('useStandardPayment', () => {
   });
 
   it('phase 派生: feeAmount=0 で merchant 成功時に data が正しく出る (feeTxHash=undefined)', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -746,7 +950,7 @@ describe('useStandardPayment', () => {
   });
 
   it('paymentLog: 同一 tx hash で再 render しても log は 1 回限り (dedup gate)', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -782,7 +986,7 @@ describe('useStandardPayment', () => {
   });
 
   it('fee tx broadcast 済 + receipt 待ち: phase が fee-sending → fee-mining に遷移する', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -813,7 +1017,7 @@ describe('useStandardPayment', () => {
   });
 
   it('fee receipt RPC エラー: fee-unknown で main Pay/retryFee を封鎖し、fee receipt 再照会で success へ移る', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -878,7 +1082,7 @@ describe('useStandardPayment', () => {
   });
 
   it('merchant 失敗時に paymentLog で result=error が記録される (errorMessage 含む)', async () => {
-    const { result, rerender } = renderHook(() => useStandardPayment());
+    const { result, rerender } = await renderReadyStandardPayment();
     act(() => {
       result.current.mutate({
         tokenAddress: TOKEN,
@@ -899,5 +1103,225 @@ describe('useStandardPayment', () => {
     );
     expect(errLog).toBeDefined();
     expect(errLog?.[0]?.errorMessage).toContain('AA-21');
+  });
+
+  // -------------------------------------------------------------------------
+  // reload 復元 — broadcast 済み hash を再利用し、新規 transfer を封鎖する
+  // -------------------------------------------------------------------------
+
+  it('merchant tx broadcast 時に公開 intent と txHash を sessionStorage へ保存する', async () => {
+    const { result } = await renderReadyStandardPayment();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        saleAmount: 10_000_000n,
+        chainId: 84532,
+      });
+    });
+
+    const onSuccess = useWriteContractMockA.writeContract.mock.calls[0]?.[1]
+      ?.onSuccess as ((hash: Hex) => void) | undefined;
+    expect(onSuccess).toBeTypeOf('function');
+    act(() => onSuccess?.(MERCHANT_TX));
+
+    await waitFor(() => {
+      expect(
+        window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY),
+      ).not.toBeNull();
+    });
+    const stored = JSON.parse(
+      window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)!,
+    ) as Record<string, unknown>;
+    expect(stored).toMatchObject({
+      version: 1,
+      chainId: 84532,
+      from: CUSTOMER,
+      tokenAddress: TOKEN,
+      merchant: MERCHANT,
+      merchantValue: '9950000',
+      feeReceiver: FEE_RECEIVER,
+      feeValue: '50000',
+      saleValue: '10000000',
+      stage: 'merchant',
+      merchantTxHash: MERCHANT_TX,
+    });
+    expect(stored.issuedAt).toEqual(expect.any(Number));
+  });
+
+  it('reload: fee retry は別 wallet/未接続で封鎖し、元 payer に戻った時だけ許可する', async () => {
+    seedStandardIntent();
+    const { result, rerender } = renderHook(() => useStandardPayment());
+
+    expect(result.current.isRestoring).toBe(true);
+    await waitFor(() => {
+      expect(result.current.isRestoring).toBe(false);
+      expect(result.current.phase).toBe('merchant-unknown');
+    });
+    expect(result.current.merchantTxHash).toBe(MERCHANT_TX);
+    expect(result.current.hasActiveIntent).toBe(true);
+    expect(result.current.lastSubmittedParams).toMatchObject({
+      merchantAmount: 9_950_000n,
+      feeAmount: 50_000n,
+      saleAmount: 10_000_000n,
+    });
+
+    // broadcast 済み merchant が成立済みかもしれないため、main Pay は再送しない。
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    expect(useWriteContractMockA.writeContract).not.toHaveBeenCalled();
+
+    act(() => result.current.retryReceipt());
+    expect(useWaitMockState.a.refetch).toHaveBeenCalledOnce();
+    act(() => {
+      useAccountMock.mockReturnValue({ address: OTHER_CUSTOMER });
+      useWaitMockState.a.data = { status: 'success', blockNumber: 100n };
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+
+    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
+    expect(result.current.merchantBlockNumber).toBe(100n);
+    expect(result.current.restoredFromStorage).toBe(true);
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)!,
+      ).from,
+    ).toBe(CUSTOMER);
+
+    // 別 wallet からは fee leg を開始できず、復元 latch も解除しない。
+    act(() => result.current.retryFee());
+    rerender();
+    expect(result.current.restoredFromStorage).toBe(true);
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+
+    // 未接続も同じく no-op。
+    act(() => {
+      useAccountMock.mockReturnValue({ address: undefined });
+    });
+    rerender();
+    act(() => result.current.retryFee());
+    expect(result.current.restoredFromStorage).toBe(true);
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+
+    // 元 payer が再接続した明示 retry だけ fee leg を開始する。
+    act(() => {
+      useAccountMock.mockReturnValue({ address: CUSTOMER });
+    });
+    rerender();
+    act(() => result.current.retryFee());
+    rerender();
+    expect(result.current.restoredFromStorage).toBe(false);
+    expect(useWriteContractMockA.writeContract).not.toHaveBeenCalled();
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
+    expect(useWriteContractMockB.writeContract.mock.calls[0][0].args).toEqual([
+      FEE_RECEIVER,
+      50_000n,
+    ]);
+  });
+
+  it('reload: fee txHash を unknown として復元し、receipt 成功まで全 transfer を封鎖する', async () => {
+    seedStandardIntent({
+      stage: 'fee',
+      feeTxHash: FEE_TX,
+      merchantBlockNumber: '100',
+    });
+    const { result, rerender } = renderHook(() => useStandardPayment());
+    // storage 読込完了前に届いた submit も、復元成功後に遅延送信してはならない。
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isRestoring).toBe(false);
+      expect(result.current.phase).toBe('fee-unknown');
+    });
+    expect(result.current.merchantTxHash).toBe(MERCHANT_TX);
+    expect(result.current.feeTxHash).toBe(FEE_TX);
+
+    act(() => result.current.retryFee());
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    expect(useWriteContractMockA.writeContract).not.toHaveBeenCalled();
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+
+    act(() => result.current.retryReceipt());
+    expect(useWaitMockState.b.refetch).toHaveBeenCalledOnce();
+    act(() => {
+      useWaitMockState.b.data = { status: 'success', blockNumber: 101n };
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    expect(result.current.data).toEqual({
+      merchantTxHash: MERCHANT_TX,
+      feeTxHash: FEE_TX,
+      blockNumber: 100n,
+    });
+    expect(
+      window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY),
+    ).toBeNull();
+    expect(useWriteContractMockA.writeContract).not.toHaveBeenCalled();
+    expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('reload: fee tx の reverted 確定後だけ fee retry を許可し、merchant は再送しない', async () => {
+    seedStandardIntent({
+      stage: 'fee',
+      feeTxHash: FEE_TX,
+      merchantBlockNumber: '100',
+    });
+    const { result, rerender } = renderHook(() => useStandardPayment());
+    await waitFor(() => expect(result.current.phase).toBe('fee-unknown'));
+
+    act(() => {
+      useWaitMockState.b.data = { status: 'reverted', blockNumber: 101n };
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
+    expect(result.current.feeTxHash).toBeUndefined();
+
+    const storedAfterRevert = JSON.parse(
+      window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)!,
+    ) as Record<string, unknown>;
+    expect(storedAfterRevert).toMatchObject({
+      stage: 'fee-awaiting',
+      merchantTxHash: MERCHANT_TX,
+      merchantBlockNumber: '100',
+    });
+    expect(storedAfterRevert.feeTxHash).toBeUndefined();
+
+    act(() => result.current.retryFee());
+    expect(useWriteContractMockA.writeContract).not.toHaveBeenCalled();
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
   });
 });

@@ -2,7 +2,7 @@
 //
 // 402 → X-PAYMENT / PAYMENT-SIGNATURE → facilitator verify/settle という既存 x402 レール
 // (app/api/paid/_shared.ts) を **踏襲** する。ただし amount / payTo / resource が注文ごとに動的なため
-// _shared の first-party helper は使えず、同形のフローをここに閉じて組む (_shared.ts は無改変・掟12)。
+// _shared の first-party 固定価格 helper は使えないため、同形のフローをこの route に閉じて組む。
 //   - amount   = computeAgentOrder が menu から確定した合計 (顧客申告額は信じない)
 //   - payTo    = record.config.to (@handle 権威・project_mobileorder_receiver_config_to)
 //   - resource = 正規順 (h, cart, table, pickupAt) で組んだ自 URL (MCP の accepts.resource 照合用)
@@ -24,8 +24,31 @@ import { readShopLive } from '@/lib/shopLiveStore';
 import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
+import { resolveFacilitatorPaymentStatus } from '@/lib/x402/facilitatorStatus';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
+import { caip2ForChainId } from '@/lib/x402/network';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
+import { sanitizeTable } from '@/lib/orderRelay';
+import {
+  createAgentOrderSnapshot,
+  parseAgentOrderSettlement,
+  parseBoundAgentOrderSnapshot,
+  pickupAtForAgentOrderSnapshot,
+  type AgentOrderSettlement,
+  type AgentOrderSnapshot,
+} from '@/lib/x402/agentOrderRecovery';
+import {
+  claimPaymentRedelivery,
+  isFacilitatorPreBroadcastRejection,
+  lookupPaymentRedelivery,
+  paymentRedeliveryIdentity,
+  promotePaymentRedelivery,
+  releasePaymentRedelivery,
+  type PaymentRedeliveryBinding,
+  type PaymentRedeliveryIdentity,
+  type PaymentRedeliveryRecord,
+} from '@/lib/x402/paymentRedelivery';
+import { checkFacilitatorStatusRateLimit } from '@/lib/x402/facilitatorStatusRateLimit';
 import {
   buildPaymentRequiredV2,
   decodePaymentSignatureHeaderValue,
@@ -49,8 +72,9 @@ type SettleBody = {
   success?: boolean;
   errorReason?: string;
   payer?: string;
-  transaction?: string;
-};
+  transaction?: string | null;
+  network?: string;
+} & Record<string, unknown>;
 
 function agentOrderEnabled(): boolean {
   return (
@@ -90,6 +114,145 @@ function canonicalResourceUrl(
   if (table !== null) params.set('table', table);
   if (pickupAt !== null) params.set('pickupAt', pickupAt);
   return `${OPENPAY_CANONICAL_ORIGIN}/api/agent-order/pay?${params.toString()}`;
+}
+
+function paymentInvalidResponse(): NextResponse {
+  return NextResponse.json(
+    { x402Version: 1, error: 'payment_invalid' },
+    { status: 402 },
+  );
+}
+
+function pendingRecoveryResponse(snapshot: AgentOrderSnapshot): NextResponse {
+  return NextResponse.json(
+    {
+      success: false,
+      errorReason: 'pending',
+      transaction: null,
+      network: caip2ForChainId(snapshot.chainId),
+      payer: snapshot.payer,
+    },
+    { status: 202 },
+  );
+}
+
+async function settledOrderResponse(input: {
+  req: Request;
+  snapshot: AgentOrderSnapshot;
+  settlement: AgentOrderSettlement;
+}): Promise<NextResponse> {
+  const { req, snapshot, settlement } = input;
+  const txHash = settlement.transaction;
+  const orderId = `agent-${txHash.slice(0, 18)}`;
+
+  // 受注登録 (付帯処理) を既存の受注リレーへ委譲する。掟13 の隔離: **受注登録の失敗 (KV 障害 /
+  // on-chain 検証遅延 / notify の想定外 throw) が「決済成功」という本体を巻き込まない** ための防御。
+  // 支払いは既に settle 済 (不可逆) なので、notify がこけても 200 + orderRegistered:false + txHash を
+  // 返し、店主は履歴/txHash から追える。ここで throw を握るのはこの波及を断つためであり、他意はない。
+  let orderRegistered = false;
+  try {
+    const notifyReq = new Request(
+      new URL(
+        `/api/order/notify?h=${encodeURIComponent(snapshot.handle)}`,
+        req.url,
+      ),
+      {
+        method: 'POST',
+        headers: cloneForwardHeaders(req),
+        body: JSON.stringify({
+          token: 'jpyc',
+          txHash,
+          chainId: snapshot.chainId,
+          merchant: snapshot.merchant,
+          orderId,
+          items: snapshot.items,
+          description: snapshot.table ?? undefined,
+          pickupAt: snapshot.pickupAt ?? undefined,
+          from: settlement.payer,
+        }),
+      },
+    );
+    const notifyRes = await notifyOrder(notifyReq);
+    const notifyBody = (await notifyRes.json()) as { ok?: boolean };
+    orderRegistered = notifyRes.status === 200 && notifyBody.ok === true;
+  } catch {
+    orderRegistered = false;
+  }
+
+  const res = NextResponse.json({
+    ok: true,
+    orderId,
+    txHash,
+    amountJpyc: formatUnits(
+      BigInt(snapshot.totalMinor),
+      snapshot.decimals,
+    ),
+    orderRegistered,
+  });
+  res.headers.set('X-PAYMENT-RESPONSE', encodeJsonBase64(settlement));
+  res.headers.set(
+    'PAYMENT-RESPONSE',
+    encodePaymentResponseHeaderValue(settlement),
+  );
+  return res;
+}
+
+async function recoverMatchedPayment(input: {
+  req: Request;
+  identity: PaymentRedeliveryIdentity;
+  binding: PaymentRedeliveryBinding;
+  record: PaymentRedeliveryRecord;
+}): Promise<NextResponse> {
+  const { req, identity, binding, record } = input;
+  const snapshot = parseBoundAgentOrderSnapshot({
+    context: record.context,
+    facilitatorBody: record.facilitatorBody,
+    resource: binding.resource,
+    identity,
+  });
+  if (snapshot === null) return paymentInvalidResponse();
+
+  if (record.state === 'settled') {
+    const settlement = parseAgentOrderSettlement(
+      record.settlement,
+      snapshot,
+    );
+    return settlement === null
+      ? paymentInvalidResponse()
+      : settledOrderResponse({ req, snapshot, settlement });
+  }
+
+  if (!(await checkFacilitatorStatusRateLimit(req))) {
+    return pendingRecoveryResponse(snapshot);
+  }
+  const status = await resolveFacilitatorPaymentStatus(
+    record.facilitatorBody,
+  );
+  if (
+    !status.ok ||
+    status.state !== 'settled' ||
+    status.txHash === null
+  ) {
+    return pendingRecoveryResponse(snapshot);
+  }
+  const settlement = parseAgentOrderSettlement(
+    {
+      success: true,
+      transaction: status.txHash,
+      network: caip2ForChainId(status.chainId),
+      payer: status.payer,
+    },
+    snapshot,
+  );
+  if (settlement === null) return paymentInvalidResponse();
+
+  const promotion = await promotePaymentRedelivery({
+    identity,
+    binding,
+    settlement,
+  });
+  if (promotion.kind === 'conflict') return paymentInvalidResponse();
+  return settledOrderResponse({ req, snapshot, settlement });
 }
 
 function paymentRequired(
@@ -142,6 +305,62 @@ export async function GET(req: Request): Promise<NextResponse> {
   const cartParam = url.searchParams.get('cart') ?? '';
   const tableParam = url.searchParams.get('table'); // 生値 (resource echo 用・notify が sanitize)
   const pickupAtParam = url.searchParams.get('pickupAt');
+  const resourceUrl = canonicalResourceUrl(
+    handle,
+    cartParam,
+    tableParam,
+    pickupAtParam,
+  );
+  const binding: PaymentRedeliveryBinding = {
+    scope: 'agent-order',
+    resource: resourceUrl,
+  };
+
+  const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
+  const paymentHeader = req.headers.get('x-payment');
+  let decodedPaymentPayload: unknown;
+  let decodedPaymentPayloadReady = false;
+  if (paymentSignatureHeader) {
+    try {
+      decodedPaymentPayload = decodePaymentSignatureHeaderValue(
+        paymentSignatureHeader,
+      );
+      decodedPaymentPayloadReady = true;
+    } catch {
+      // 既存 challenge 形を保つため、current requirements 生成後の payload error へ委ねる。
+    }
+  } else if (paymentHeader) {
+    try {
+      decodedPaymentPayload = decodePaymentHeader(paymentHeader);
+      decodedPaymentPayloadReady = true;
+    } catch {
+      // 既存 challenge 形を保つため、current requirements 生成後の payload error へ委ねる。
+    }
+  }
+
+  const paymentIdentity = decodedPaymentPayloadReady
+    ? paymentRedeliveryIdentity(decodedPaymentPayload)
+    : null;
+  let paymentScopeConflict = false;
+  if (paymentIdentity) {
+    const delivery = await lookupPaymentRedelivery(
+      paymentIdentity,
+      binding,
+    );
+    if (delivery.kind === 'match') {
+      // 支払い済み retry は current menu/live 状態を再評価せず、初回 verify 時の immutable
+      // server snapshot だけを使う。決済後の売切/閉店/価格変更が受注消失へ波及するのを断つ。
+      return recoverMatchedPayment({
+        req,
+        identity: paymentIdentity,
+        binding,
+        record: delivery.record,
+      });
+    }
+    // missing/unavailable では cache を解錠せず、従来の current verify/settle へ進む。
+    // 復旧 KV の障害が新規の正当な注文決済を停止する波及を断つ。
+    paymentScopeConflict = delivery.kind === 'conflict';
+  }
 
   const cartItems = decodeAgentCart(cartParam);
   if (cartItems === null) {
@@ -228,12 +447,6 @@ export async function GET(req: Request): Promise<NextResponse> {
   const shopName =
     record.storefront.shopName || record.config.name?.trim() || `@${handle}`;
   const description = `${shopName} — ${order.summary}`.slice(0, 240);
-  const resourceUrl = canonicalResourceUrl(
-    handle,
-    cartParam,
-    tableParam,
-    pickupAtParam,
-  );
 
   let accepts: Accepts;
   try {
@@ -257,18 +470,29 @@ export async function GET(req: Request): Promise<NextResponse> {
     );
   }
 
-  const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
-  const paymentHeader = req.headers.get('x-payment');
   if (!paymentSignatureHeader && !paymentHeader) {
     return challenge(resourceUrl, description, accepts, 'payment_required');
   }
+  if (paymentScopeConflict) {
+    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+  }
+  if (decodedPaymentPayloadReady && paymentIdentity === null) {
+    return challenge(
+      resourceUrl,
+      description,
+      accepts,
+      'invalid_payment_payload',
+    );
+  }
 
   // payload (v2 PAYMENT-SIGNATURE / v1 X-PAYMENT) → facilitator v1 body に正規化 (_shared と同形)。
-  let facilitatorBody: unknown;
+  let facilitatorBody: Record<string, unknown>;
   if (paymentSignatureHeader) {
     let payloadV2: unknown;
     try {
-      payloadV2 = decodePaymentSignatureHeaderValue(paymentSignatureHeader);
+      payloadV2 = decodedPaymentPayloadReady
+        ? decodedPaymentPayload
+        : decodePaymentSignatureHeaderValue(paymentSignatureHeader);
     } catch {
       return challenge(
         resourceUrl,
@@ -286,11 +510,13 @@ export async function GET(req: Request): Promise<NextResponse> {
         'invalid_payment_payload',
       );
     }
-    facilitatorBody = v1Body;
+    facilitatorBody = { ...v1Body };
   } else {
     let payload: unknown;
     try {
-      payload = decodePaymentHeader(paymentHeader!);
+      payload = decodedPaymentPayloadReady
+        ? decodedPaymentPayload
+        : decodePaymentHeader(paymentHeader!);
     } catch {
       return challenge(
         resourceUrl,
@@ -315,10 +541,12 @@ export async function GET(req: Request): Promise<NextResponse> {
     }),
   );
   const verifyBody = (await verifyRes.json()) as VerifyBody;
-  if (verifyRes.status !== 200) {
-    return NextResponse.json(verifyBody, { status: verifyRes.status });
-  }
-  if (verifyBody.isValid !== true) {
+  if (verifyRes.status !== 200 || verifyBody.isValid !== true) {
+    // status recovery は verify 前に exact payment→resource record が一致した経路だけで行う。
+    // 任意の expired/invalid payload を current cart の受注へ付け替える波及を断つ。
+    if (verifyRes.status !== 200) {
+      return NextResponse.json(verifyBody, { status: verifyRes.status });
+    }
     return challenge(
       resourceUrl,
       description,
@@ -326,6 +554,63 @@ export async function GET(req: Request): Promise<NextResponse> {
       verifyBody.invalidReason ?? 'payment_invalid',
     );
   }
+
+  if (paymentIdentity === null) {
+    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+  }
+  let payer: Address;
+  try {
+    payer = getAddress(verifyBody.payer ?? '');
+  } catch {
+    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+  }
+
+  const snapshot = createAgentOrderSnapshot({
+    handle,
+    merchant: configTo,
+    payer,
+    chainId,
+    decimals: deployment.decimals,
+    items: order.items,
+    totalMinor: order.totalMinor,
+    resource: resourceUrl,
+    table: sanitizeTable(tableParam),
+    pickupAt: pickupAtForAgentOrderSnapshot(pickupAtParam),
+  });
+  if (
+    snapshot === null ||
+    parseBoundAgentOrderSnapshot({
+      context: snapshot,
+      facilitatorBody,
+      resource: resourceUrl,
+      identity: paymentIdentity,
+    }) === null
+  ) {
+    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+  }
+
+  const claim = await claimPaymentRedelivery({
+    identity: paymentIdentity,
+    binding,
+    facilitatorBody,
+    context: snapshot,
+  });
+  if (claim.kind === 'conflict') {
+    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+  }
+  if (claim.kind === 'match') {
+    return recoverMatchedPayment({
+      req,
+      identity: paymentIdentity,
+      binding,
+      record: claim.record,
+    });
+  }
+  // unavailable は従来 settle を許す一方、record を確認できない request から status 回復は
+  // 行わない。補助 KV 障害を決済停止へ波及させず、未束縛 status の注文解錠も増やさない。
+  const recoveryClaimed = claim.kind === 'claimed';
+  const recoveryOwnerToken =
+    claim.kind === 'claimed' ? claim.record.ownerToken : null;
 
   const settleRes = await settlePayment(
     new Request(new URL('/api/facilitator/settle', req.url), {
@@ -335,7 +620,56 @@ export async function GET(req: Request): Promise<NextResponse> {
     }),
   );
   const settleBody = (await settleRes.json()) as SettleBody;
+  if (
+    recoveryOwnerToken !== null &&
+    isFacilitatorPreBroadcastRejection(settleRes.status, settleBody)
+  ) {
+    await releasePaymentRedelivery({
+      identity: paymentIdentity,
+      binding,
+      ownerToken: recoveryOwnerToken,
+    });
+  }
   if (settleRes.status !== 200 || settleBody.success !== true) {
+    if (
+      recoveryClaimed &&
+      settleBody.errorReason === 'pending' &&
+      (await checkFacilitatorStatusRateLimit(req))
+    ) {
+      const status = await resolveFacilitatorPaymentStatus(
+        facilitatorBody,
+      );
+      if (
+        status.ok &&
+        status.state === 'settled' &&
+        status.txHash !== null
+      ) {
+        const recovered = parseAgentOrderSettlement(
+          {
+            success: true,
+            transaction: status.txHash,
+            network: caip2ForChainId(status.chainId),
+            payer: status.payer,
+          },
+          snapshot,
+        );
+        if (recovered) {
+          const promotion = await promotePaymentRedelivery({
+            identity: paymentIdentity,
+            binding,
+            settlement: recovered,
+          });
+          if (promotion.kind === 'conflict') {
+            return paymentInvalidResponse();
+          }
+          return settledOrderResponse({
+            req,
+            snapshot,
+            settlement: recovered,
+          });
+        }
+      }
+    }
     if (settleRes.status === 200) {
       return challenge(
         resourceUrl,
@@ -347,52 +681,30 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json(settleBody, { status: settleRes.status });
   }
 
-  const txHash = settleBody.transaction ?? '';
-  const payer = settleBody.payer ?? verifyBody.payer;
-  const orderId = `agent-${txHash.slice(0, 18)}`;
-
-  // 受注登録 (付帯処理) を既存の受注リレーへ委譲する。掟13 の隔離: **受注登録の失敗 (KV 障害 /
-  // on-chain 検証遅延 / notify の想定外 throw) が「決済成功」という本体を巻き込まない** ための防御。
-  // 支払いは既に settle 済 (不可逆) なので、notify がこけても 200 + orderRegistered:false + txHash を
-  // 返し、店主は履歴/txHash から追える。ここで throw を握るのはこの波及を断つためであり、他意はない。
-  let orderRegistered = false;
-  try {
-    const notifyReq = new Request(
-      new URL(`/api/order/notify?h=${encodeURIComponent(handle)}`, req.url),
-      {
-        method: 'POST',
-        headers: cloneForwardHeaders(req),
-        body: JSON.stringify({
-          token: 'jpyc',
-          txHash,
-          chainId,
-          merchant: configTo,
-          orderId,
-          items: order.items, // サーバー検証済み StoredOrderItem[]
-          description: tableParam ?? undefined, // テーブル番号ラベル (notify が sanitize)
-          pickupAt:
-            pickupAtParam !== null && /^\d+$/.test(pickupAtParam)
-              ? Number(pickupAtParam)
-              : undefined,
-          from: payer,
-        }),
-      },
+  const settlement = parseAgentOrderSettlement(
+    {
+      ...settleBody,
+      success: true,
+      network: settleBody.network ?? caip2ForChainId(snapshot.chainId),
+      payer: settleBody.payer ?? snapshot.payer,
+    },
+    snapshot,
+  );
+  if (settlement === null) {
+    // malformed な内部 success が空 txHash の受注登録へ波及するのを断つ。facilitator の
+    // 正常 success 契約は transaction/network/payer を常に返すため、通常応答は不変。
+    return NextResponse.json(
+      { success: false, errorReason: 'settlement_invalid' },
+      { status: 502 },
     );
-    const notifyRes = await notifyOrder(notifyReq);
-    const notifyBody = (await notifyRes.json()) as { ok?: boolean };
-    orderRegistered = notifyRes.status === 200 && notifyBody.ok === true;
-  } catch {
-    orderRegistered = false;
   }
-
-  const res = NextResponse.json({
-    ok: true,
-    orderId,
-    txHash,
-    amountJpyc: formatUnits(order.totalMinor, deployment.decimals),
-    orderRegistered,
-  });
-  res.headers.set('X-PAYMENT-RESPONSE', encodeJsonBase64(settleBody));
-  res.headers.set('PAYMENT-RESPONSE', encodePaymentResponseHeaderValue(settleBody));
-  return res;
+  if (recoveryClaimed) {
+    const promotion = await promotePaymentRedelivery({
+      identity: paymentIdentity,
+      binding,
+      settlement,
+    });
+    if (promotion.kind === 'conflict') return paymentInvalidResponse();
+  }
+  return settledOrderResponse({ req, snapshot, settlement });
 }

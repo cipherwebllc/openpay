@@ -31,7 +31,7 @@ type PaidRoute = { GET: (req: Request) => Promise<Response> };
 
 function exactPayload() {
   return {
-    signature: `0x${'11'.repeat(65)}`,
+    signature: `0x${'0'.repeat(63)}1${'0'.repeat(63)}21b`,
     authorization: {
       from: PAYER,
       validAfter: '0',

@@ -4,7 +4,7 @@
 // インボイス額をメーター (S1) + 料率 (S2) から算出し、(2) on-chain で「セッション wallet → 受領アドレス・
 // JPYC・インボイス額以上」を照合し、成立すれば fee-current (S3) を延長する。二重付与は txHash
 // idempotency (KV nx・lock→result 昇格) で防止。billing flag OFF では無効。設計: docs/plans/merchant-gasless-fee-a1.md (S4)。
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createPublicClient, isHex, type Hex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
@@ -20,8 +20,14 @@ import { usageFeeConfig } from '@/lib/usageFee';
 import { verifyJpycFeeOnChain } from '@/lib/feeVerify';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
-import { kvSet, kvGet, kvDel } from '@/lib/kv';
+import { kvSet, kvGet, kvDel, kvEval } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import {
+  legacyBillingPaymentKey,
+  paymentClaimKey,
+  paymentClaimResultValue,
+  RELEASE_PAYMENT_CLAIM_IF_OWNED,
+} from '@/lib/paymentClaim';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +40,17 @@ const LOCK_MARKER = 'pending';
 const RESULT_PREFIX = 'r:';
 
 type SettleResult = { period: string; expiresAt: number };
+
+function billingPaymentClaimValue(
+  wallet: string,
+  period: string,
+): string {
+  return `${paymentClaimResultValue('billing')}:${wallet.toLowerCase()}:${period}`;
+}
+
+function legacyBillingPaymentClaimValue(period: string): string {
+  return `${paymentClaimResultValue('billing')}:legacy:${period}`;
+}
 
 function parseSettleResult(value: string | null): SettleResult | null {
   if (!value || !value.startsWith(RESULT_PREFIX)) return null;
@@ -159,7 +176,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   // 処理ロックを nx で取得 (txHash 単位)。取れなければ確定結果 (replay) か処理中 (409)。
-  const usedKey = `billing:settled:${chainId}:${txHash.toLowerCase()}`;
+  const usedKey = legacyBillingPaymentKey(chainId, txHash);
   const claim = await kvSet(usedKey, LOCK_MARKER, {
     nx: true,
     ttlSec: SETTLE_LOCK_TTL_SEC,
@@ -174,6 +191,35 @@ export async function POST(req: Request): Promise<NextResponse> {
     const existing = await kvGet(usedKey);
     const prior = existing.ok ? parseSettleResult(existing.value) : null;
     if (prior) {
+      after(async () => {
+        // 旧 result に存在しない payer を current session から補い、別 wallet の支払いとして
+        // global claim へ誤帰属させる波及を断つ。legacy replay は period だけの marker に固定する。
+        const claimValue = legacyBillingPaymentClaimValue(prior.period);
+        const backfill = await kvSet(
+          paymentClaimKey(chainId, txHash),
+          claimValue,
+          { nx: true },
+        );
+        // legacy settled tx の global backfill 障害を既存 replay 応答へ波及させず、移行漏れは observable にする。
+        if (!backfill.ok) {
+          logger.warn('billing.settle.global-claim-backfill-failed', {
+            chainId,
+            reason: backfill.reason,
+          });
+        } else if (backfill.value === null) {
+          const existingGlobal = await kvGet(
+            paymentClaimKey(chainId, txHash),
+          );
+          if (!existingGlobal.ok || existingGlobal.value !== claimValue) {
+            logger.warn('billing.settle.global-claim-backfill-failed', {
+              chainId,
+              reason: existingGlobal.ok
+                ? 'claim_conflict'
+                : existingGlobal.reason,
+            });
+          }
+        }
+      });
       return NextResponse.json({
         ok: true,
         period: prior.period,
@@ -185,6 +231,31 @@ export async function POST(req: Request): Promise<NextResponse> {
       { ok: false, error: 'already_processed' },
       { status: 409 },
     );
+  }
+
+  const globalClaimKey = paymentClaimKey(chainId, txHash);
+  const globalClaimValue = billingPaymentClaimValue(
+    session.address,
+    period,
+  );
+  let globalClaimedThisRequest = false;
+  let billingGrantMade = false;
+
+  async function releaseGlobalClaim(cause: string): Promise<void> {
+    if (!globalClaimedThisRequest || billingGrantMade) return;
+    const del = await kvEval<number>(
+      RELEASE_PAYMENT_CLAIM_IF_OWNED,
+      [globalClaimKey],
+      [globalClaimValue],
+    );
+    if (!del.ok) {
+      logger.error('billing.settle.global-claim-release-failed', {
+        globalClaimKey,
+        cause,
+        reason: del.reason,
+      });
+    }
+    globalClaimedThisRequest = false;
   }
 
   try {
@@ -228,6 +299,42 @@ export async function POST(req: Request): Promise<NextResponse> {
       );
     }
 
+    // on-chain 検証後、付与前に Pro/CSV/order と共有する恒久 claim を NX 取得する。
+    // 同じ billing wallet+period の値だけは crash/retry として続行し、他用途・他請求への二重利用を断つ。
+    const globalClaim = await kvSet(globalClaimKey, globalClaimValue, {
+      nx: true,
+    });
+    if (!globalClaim.ok) {
+      await releaseClaim(usedKey, 'global-claim-unavailable');
+      logger.error('billing.settle.global-claim-failed', {
+        globalClaimKey,
+        reason: globalClaim.reason,
+      });
+      return NextResponse.json(
+        { ok: false, error: 'kv_unavailable' },
+        { status: 503 },
+      );
+    }
+    if (globalClaim.value === null) {
+      const existing = await kvGet(globalClaimKey);
+      if (!existing.ok) {
+        await releaseClaim(usedKey, 'global-claim-read-failed');
+        return NextResponse.json(
+          { ok: false, error: 'kv_unavailable' },
+          { status: 503 },
+        );
+      }
+      if (existing.value !== globalClaimValue) {
+        await releaseClaim(usedKey, 'global-claim-conflict');
+        return NextResponse.json(
+          { ok: false, error: 'already_processed' },
+          { status: 409 },
+        );
+      }
+    } else {
+      globalClaimedThisRequest = true;
+    }
+
     const granted = await grantFeeCurrent(session.address, {
       period,
       txHash,
@@ -235,6 +342,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     });
     if (!granted.ok) {
       await releaseClaim(usedKey, 'grant-write-failed');
+      await releaseGlobalClaim('grant-write-failed');
       logger.error('billing.settle.grant-failed', {
         wallet: session.address,
         chainId,
@@ -246,6 +354,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         { status: 503 },
       );
     }
+    billingGrantMade = true;
 
     // 期間別「支払い済み」マーカーを記録する。古い期間の清算では expiresAt が過去で fee-current は
     // 付かない (= 現行カバレッジは買えない・これが正しい挙動) ため、関所ゲートが「この期間はもう
@@ -254,6 +363,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     const marked = await markPeriodPaid(session.address, period, txHash);
     if (!marked.ok) {
       await releaseClaim(usedKey, 'paid-marker-write-failed');
+      // fee-current は既に付与済みなので global claim は恒久維持する。同じ billing
+      // wallet+period の retry だけを許し、Pro/CSV/order への二重利用波及を断つ。
       logger.error('billing.settle.paid-marker-failed', {
         wallet: session.address,
         chainId,
@@ -302,6 +413,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     });
   } catch (e) {
     await releaseClaim(usedKey, 'unexpected-error');
+    await releaseGlobalClaim('unexpected-error');
     logger.error('billing.settle.unexpected', {
       wallet: session.address,
       chainId,

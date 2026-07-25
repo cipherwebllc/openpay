@@ -31,6 +31,7 @@ import {
   jpycForwarderFor,
   configuredJpycForwarderFor,
   isRecoverRequiredChain,
+  relayGasFeeValue,
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import {
@@ -400,8 +401,10 @@ async function handleRecover(
   // server 権威の per-tx 手数料。
   //   モバイル注文 (feeKind present + flag ON): 経路非依存のシステム利用料 = 一律 % を **定数表から
   //     再計算** する (mobileOrderFeeValue)。client 申告の率は信用せず server が定数から導くため率を
-  //     下げられない (残余は「安い feeKind を申告」=過少徴収のみ・資金毀損なし)。flag OFF では
-  //     feeKind を無視 (= 従来の gas-recovery に倒す)。
+  //     下げられない。ただし feeKind 自体は未署名 hint でモバイル注文との束縛が無いため、これを
+  //     別用途へ付けてガスフロア未満へ切り替える余地は残る。価格を変えずにその波及を断つため、
+  //     settleViaForwarder が実 expectedFee と chain 別フロアを比較し、sub-floor 専用の払い元制限 +
+  //     日次予算を共有予算より先に適用する。flag OFF では feeKind を無視 (= 従来の gas-recovery)。
   //   それ以外 (/pay・/checkout・チップ): 従来の gas-recovery (recoverFeeValue・gasMode 選択):
   //     merchant=max(ガスフロア, billAmount × bps/10000)・customer=フロアのみ。
   // いずれも client と **同式** で算出し、forwarderRecover が feeValue === expectedFeeValue を強制
@@ -416,7 +419,8 @@ async function handleRecover(
     : recoverFeeValue(billAmount, gasMode, chainId);
   // 検証 (server 権威 feeValue 照合 / 署名 recover / 残高 / nonce 未使用 / 冪等 / 日次予算) +
   // forwarder 健全性 + submit/poll は共有 settleViaForwarder に集約 (x402 facilitator と同一コア)。
-  // recover 固有値だけ渡す: expectedFeeValue = 上で算出した recover 料率 / forwarderFor = a1-aware /
+  // recover 固有値だけ渡す: expectedFeeValue = 上で算出した recover 料率 /
+  // callerFeeFloorValue = recover/mobile 共通の relay gas floor / forwarderFor = a1-aware /
   // idemPrefix = 'relay:idem:' (従来の冪等名前空間を維持)。
   const result = await settleViaForwarder({
     chainId,
@@ -424,6 +428,7 @@ async function handleRecover(
     signature: raw.signature as Hex,
     rateLimitKeys: [params.from],
     expectedFeeValue: expectedFee,
+    callerFeeFloorValue: relayGasFeeValue(chainId),
     forwarderFor,
     idemPrefix: 'relay:idem:',
   });

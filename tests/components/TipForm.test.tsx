@@ -183,7 +183,16 @@ function setRelay(
     | 'response-unknown'
     | 'ip-rate-limited',
   opts?: {
-    variables?: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
+    variables?: {
+      merchant: Address;
+      value: bigint;
+      gasMode?: 'customer' | 'merchant';
+    };
+    restoredIntent?: NonNullable<
+      ReturnType<typeof useJpycEip3009Payment>['restoredIntent']
+    >;
+    isRestoring?: boolean;
+    hasActiveIntent?: boolean;
   },
 ) {
   relayMutate = vi.fn();
@@ -215,6 +224,9 @@ function setRelay(
           ? 'exhausted'
           : null,
     variables: opts?.variables,
+    restoredIntent: opts?.restoredIntent,
+    isRestoring: opts?.isRestoring ?? false,
+    hasActiveIntent: opts?.hasActiveIntent ?? false,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -504,6 +516,21 @@ describe('TipForm — 接続状態', () => {
     expect(
       screen.getByRole('button', { name: /1 USDC を送る/ }),
     ).not.toBeDisabled();
+  });
+
+  it('relay intent の sessionStorage 読込中は非 relay 表示でも新規送信を封鎖する', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setRelay('idle', { isRestoring: true });
+
+    render(<TipForm params={USDC_PARAMS} />);
+
+    expect(
+      screen.getByRole('button', { name: /送信中/ }),
+    ).toBeDisabled();
+    expect(relayMutate).not.toHaveBeenCalled();
   });
 
   it('残高不足 → 警告 + 送信 disabled', () => {
@@ -1465,13 +1492,18 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(screen.queryByText('99')).toBeNull();
   });
 
-  it('auto recovery→成功で既存の成功描画/webhook/控えを各 1 回だけ確定する', async () => {
+  it('auto recovery→成功で同一 mount の thanks/overlay/webhook/控えを各 1 回だけ確定する', async () => {
     window.localStorage.clear();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
     const value = 100n * 10n ** 18n;
     const variables = { merchant: CREATOR, value, gasMode: 'customer' as const };
-    const params = { ...JPYC_PARAMS, webhook: 'https://creator.example/hook' };
+    const params = {
+      ...JPYC_PARAMS,
+      thanks: '同一 mount のお礼',
+      thanksUrl: 'https://creator.example/thanks',
+      webhook: 'https://creator.example/hook',
+    };
     const user = userEvent.setup();
     const rendered = render(<TipForm params={params} />);
 
@@ -1483,12 +1515,143 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     setRelay('success', { variables });
     rendered.rerender(<TipForm params={params} />);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('同一 mount のお礼')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /リンクを開く/ })).toHaveAttribute(
+      'href',
+      'https://creator.example/thanks',
+    );
     expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
     rendered.rerender(<TipForm params={params} />);
 
     const txHash = `0x${'c'.repeat(64)}`;
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
+  });
+
+  it('reload 復元した relay 成功は tx hash の汎用表示だけに留め、現在ページへ帰属させない', async () => {
+    window.localStorage.clear();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    const restoredCreator =
+      '0x3333333333333333333333333333333333333333' as Address;
+    const restoredFan =
+      '0x8888888888888888888888888888888888888888' as Address;
+    const currentCreator =
+      '0x4444444444444444444444444444444444444444' as Address;
+    const value = 250n * 10n ** 18n;
+    setRelay('success', {
+      variables: {
+        merchant: restoredCreator,
+        value,
+      },
+      restoredIntent: {
+        chainId: polygonAmoy.id,
+        from: restoredFan,
+        merchant: restoredCreator,
+        merchantValue: value.toString(),
+        feeValue: '0',
+        nonce: `0x${'4'.repeat(64)}`,
+        validBefore: '9999999999',
+        routeKind: 'free',
+        issuedAt: 1,
+      },
+    });
+    const currentName = '現在ページのクリエイター';
+    const currentMessage = '現在ページだけの案内';
+    const currentThanks = '現在ページだけのお礼';
+    render(
+      <TipForm
+        params={{
+          ...JPYC_PARAMS,
+          to: currentCreator,
+          name: currentName,
+          message: currentMessage,
+          thanks: currentThanks,
+          thanksUrl: 'https://current.example/thanks',
+          webhook: 'https://current.example/hook',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(`${currentName} さんへチップを送る`)).toBeInTheDocument();
+    expect(screen.getByText(currentMessage)).toBeInTheDocument();
+    const successTitle = await screen.findByText('チップを送信しました');
+    const successPanel = successTitle.parentElement;
+    expect(successPanel).not.toBeNull();
+    expect(
+      within(successPanel!).getAllByText(`0x${'c'.repeat(64)}`).length,
+    ).toBeGreaterThan(0);
+    expect(within(successPanel!).queryByText(currentName)).toBeNull();
+    expect(within(successPanel!).queryByText(currentMessage)).toBeNull();
+    expect(within(successPanel!).queryByText('250 JPYC')).toBeNull();
+    expect(screen.queryByText(currentThanks)).toBeNull();
+    expect(screen.queryByRole('link', { name: /リンクを開く/ })).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(loadPayerReceipts()).toEqual([]);
+  });
+
+  it('reload 復元結果の表示中に creator/name/message/webhook が変わっても副作用を発火しない', async () => {
+    window.localStorage.clear();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    const restoredCreator =
+      '0x3333333333333333333333333333333333333333' as Address;
+    const changedCreator =
+      '0x5555555555555555555555555555555555555555' as Address;
+    const value = 250n * 10n ** 18n;
+    setRelay('success', {
+      variables: {
+        merchant: restoredCreator,
+        value,
+      },
+      restoredIntent: {
+        chainId: polygonAmoy.id,
+        from: FAN,
+        merchant: restoredCreator,
+        merchantValue: value.toString(),
+        feeValue: '0',
+        nonce: `0x${'5'.repeat(64)}`,
+        validBefore: '9999999999',
+        routeKind: 'free',
+        issuedAt: 1,
+      },
+    });
+    const initialParams = {
+      ...JPYC_PARAMS,
+      webhook: 'https://restored-page.example/hook',
+      thanks: '復元時ページのお礼',
+      thanksUrl: 'https://restored-page.example/thanks',
+    };
+    const rendered = render(<TipForm params={initialParams} />);
+
+    expect(await screen.findByText('チップを送信しました')).toBeInTheDocument();
+    rendered.rerender(
+      <TipForm
+        params={{
+          ...JPYC_PARAMS,
+          to: changedCreator,
+          name: '変更後のクリエイター',
+          message: '変更後の案内',
+          thanks: '変更後のお礼',
+          thanksUrl: 'https://changed.example/thanks',
+          webhook: 'https://changed.example/hook',
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText('変更後のクリエイター さんへチップを送る'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('変更後の案内')).toBeInTheDocument();
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.queryByText('復元時ページのお礼')).toBeNull();
+    expect(screen.queryByText('変更後のお礼')).toBeNull();
+    expect(screen.queryByRole('link', { name: /リンクを開く/ })).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(loadPayerReceipts()).toEqual([]);
   });
 
   it('relay error → friendly な i18n メッセージ (rate_limited)', () => {

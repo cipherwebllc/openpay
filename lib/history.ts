@@ -502,8 +502,33 @@ function broadcastChange(): void {
 export function appendHistory(entry: HistoryEntry): void {
   if (typeof window === 'undefined') return;
   const current = loadHistory();
-  // 同一 id (= 同一 tx hash 等) は no-op で dedupe。
-  if (current.some((e) => e.id === entry.id)) return;
+  const existingIndex = current.findIndex((e) => e.id === entry.id);
+  if (existingIndex >= 0) {
+    // broadcast 後の pending を reload 復元で終端確認できたとき、単純 dedupe のままでは
+    // 履歴だけが永久に pending へ残る波及を断つ。pending→終端だけを同じ位置で昇格し、
+    // 終端同士や終端→pending は従来どおり no-op にして StrictMode の重複を吸収する。
+    if (
+      current[existingIndex].status !== 'pending' ||
+      entry.status === 'pending'
+    ) {
+      return;
+    }
+    const promoted = [...current];
+    // 復元結果の呼出元には元ページの商品・メモ等が無いことがある。後着 entry 全体で
+    // 置換すると、既存の正しい会計 metadata が現在ページ由来の値へ波及して上書きされる。
+    // tx 単位で確定した終端 field だけを昇格し、元の支払い文脈はそのまま保持する。
+    promoted[existingIndex] = {
+      ...current[existingIndex],
+      status: entry.status,
+      blockNumber:
+        entry.blockNumber ?? current[existingIndex].blockNumber,
+      errorMessage: entry.errorMessage,
+    };
+    safeSet(HISTORY_STORAGE_KEY, promoted);
+    updateTodaySummary(promoted, Date.now());
+    broadcastChange();
+    return;
+  }
   const next = [entry, ...current];
   const trimmed =
     next.length > HISTORY_MAX_ENTRIES
@@ -514,6 +539,42 @@ export function appendHistory(entry: HistoryEntry): void {
   // 過去の加算値を summary に残さない。
   updateTodaySummary(trimmed, Date.now());
   broadcastChange();
+}
+
+/**
+ * リロード復元で判明した tx の終端状態だけを、既存 pending 履歴へ反映する。
+ * 現在開いているページの商品・メモを再利用せず、元 entry の会計文脈を保持する。
+ */
+export function promotePendingHistoryByTxHash(
+  txHash: string,
+  status: 'success' | 'reverted',
+  blockNumber: bigint | null = null,
+): boolean {
+  if (typeof window === 'undefined') return false;
+  const normalized = txHash.toLowerCase();
+  const current = loadHistory();
+  let changed = false;
+  const next = current.map((entry) => {
+    if (
+      entry.status !== 'pending' ||
+      entry.txHash?.toLowerCase() !== normalized
+    ) {
+      return entry;
+    }
+    changed = true;
+    return {
+      ...entry,
+      status,
+      blockNumber:
+        blockNumber === null ? entry.blockNumber : blockNumber.toString(),
+      errorMessage: null,
+    };
+  });
+  if (!changed) return false;
+  safeSet(HISTORY_STORAGE_KEY, next);
+  updateTodaySummary(next, Date.now());
+  broadcastChange();
+  return true;
 }
 
 export function removeHistoryEntry(id: string): void {

@@ -22,7 +22,7 @@ import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
 } from './PaymentSuccessOverlay';
-import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
+import type { SignReassuranceProps } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -55,6 +55,7 @@ import {
   isRelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 import { generateStatusToken } from '@/lib/orderStatusToken';
+import { isOrderTokenLike } from '@/lib/orderToken';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
 import {
@@ -91,6 +92,7 @@ import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
+import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 // 送信後の pending / unknown と同一 payload の復旧時だけ必要な UI を First Load JS
@@ -100,9 +102,47 @@ const PaymentStatusPanel = dynamic(
     import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
   { ssr: false },
 );
+const SignReassurance = dynamic(
+  () => import('./SignReassurance').then((m) => m.SignReassurance),
+);
 
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
+const ORDER_STATUS_TOKEN_STORAGE_PREFIX = 'openpay:order-status-token:';
+const ORDER_NOTIFY_PROCESSING_RETRY_MS = [
+  250, 1_000, 4_000, 15_000, 60_000, 60_000,
+] as const;
+
+function orderStatusTokenForMerchantTx(merchantTxHash: string): string {
+  const key = `${ORDER_STATUS_TOKEN_STORAGE_PREFIX}${merchantTxHash.toLowerCase()}`;
+  try {
+    const stored = window.sessionStorage.getItem(key);
+    if (isOrderTokenLike(stored)) return stored;
+    const generated = generateStatusToken();
+    window.sessionStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    // status token の sessionStorage 障害を受注通知へ波及させない。同一 mount は呼出側の ref で固定する。
+    return generateStatusToken();
+  }
+}
+
+async function postCheckoutWebhook(
+  url: string,
+  init: RequestInit,
+  retryOrderProcessing: boolean,
+): Promise<Response> {
+  let response = await fetch(url, init);
+  if (!retryOrderProcessing) return response;
+  for (const delayMs of ORDER_NOTIFY_PROCESSING_RETRY_MS) {
+    if (response.status !== 409) return response;
+    // 直前 mount の order claim が処理中でも、fee 成功通知まで 409 で失われ受注/未収状態が
+    // 固着する波及を断つ。既存 route の 409 契約は変えず、同じ byte の notify だけを再試行する。
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    response = await fetch(url, init);
+  }
+  return response;
+}
 
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
@@ -111,6 +151,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 1 度だけ生成し、webhook payload (notify がポインタ保存) と完了画面の「注文状況を見る」リンクで
   // 使う。flag OFF では生成せず null = payload 無変化・リンク非表示 (byte-identical)。
   const [statusToken, setStatusToken] = useState<string | null>(null);
+  const statusTokenRef = useRef<string | null>(null);
   const router = useRouter();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
   const [orderAdmissionPending, setOrderAdmissionPending] = useState(false);
@@ -128,6 +169,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
+  // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
+  const standard = useStandardPayment();
 
   // F7: webhook / success_url / cancel_url のうち、現在の origin と host が異なる第三者ホスト。
   // これらは決済者データの POST 先 / 決済後の遷移先になり得るため、支払い前に payer へ明示開示する
@@ -157,7 +201,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
   const resolvedRoute = resolvePaymentRoute({
-    isStandard: params.mode === 'standard' || modeOverride === 'standard',
+    isStandard:
+      params.mode === 'standard' ||
+      modeOverride === 'standard' ||
+      standard.hasAttempt,
     jpycGaslessProvider: resolveJpycGaslessProvider(
       deployment,
       chainId ?? deployment.chainId,
@@ -224,7 +271,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     !isStandard && !useRelay,
   );
   const gasless = useBatchPayment(deployment, !isStandard && !useRelay);
-  const standard = useStandardPayment();
   const gasQuote = useGasQuote(deployment, !isStandard && !useRelay);
   // USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance (route 由来)。
   const isCircle = isCircleRoute(route);
@@ -349,7 +395,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const paymentFlowPending = relayAmbiguous || gaslessAmbiguous
+  const paymentFlowPending = standard.isRestoring || relay.isRestoring
+    ? true
+    : relayAmbiguous || gaslessAmbiguous
     ? true
     : isStandard
       ? standard.isPending
@@ -388,6 +436,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     (useRelay &&
       !!relay.data &&
       (relay.data.success || !!relay.data.pending)) ||
+    relay.hasActiveIntent ||
+    standard.hasActiveIntent ||
     (isStandard && (!!standard.data || standard.isFeeError || standard.isUnknown));
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
@@ -484,6 +534,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // R: gasQuote refetch (30s) で breakdown が再計算 → notification effect が再実行
   //    される。同一 tx hash の重複 webhook を防ぐため key 単位の dedup gate を使う。
   const notifiedKeyRef = useRef<string | null>(null);
+  const partialOrderNotifiedKeyRef = useRef<string | null>(null);
+  const partialOrderNotifyPromiseRef = useRef<{
+    key: string;
+    promise: Promise<void>;
+  } | null>(null);
 
   // webhook/記録は「送金した瞬間の額」を報告する (成功描画時の live breakdown は
   // gas quote 再取得等で動きうるため、submit 時点の snapshot を真実とする)。
@@ -494,6 +549,70 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     feeAmount: bigint;
     customerPays: bigint;
   } | null>(null);
+
+  // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。
+  const relayHistoryGasless = useRelayGaslessSnapshot(
+    relay,
+    useRecover,
+    deployment.chainId,
+  );
+  const checkoutContextKey = useMemo(
+    () =>
+      checkoutIntentContextFingerprint({
+        params,
+        chainId: deployment.chainId,
+        tokenAddress: deployment.address,
+        totalAtomic: totalWei.toString(),
+      }),
+    [
+      deployment.address,
+      deployment.chainId,
+      params,
+      totalWei,
+    ],
+  );
+  const restoredStandardOrderAttempt = useMemo(() => {
+    const submitted = standard.lastSubmittedParams;
+    const sameAddress = (left: string, right: string) =>
+      left.toLowerCase() === right.toLowerCase();
+    if (
+      !standard.restoredFromStorage ||
+      submitted?.contextKey !== checkoutContextKey ||
+      submitted.chainId !== deployment.chainId ||
+      !sameAddress(submitted.tokenAddress, deployment.address) ||
+      !sameAddress(submitted.merchant, params.to) ||
+      !sameAddress(submitted.feeReceiver, env.feeReceiver) ||
+      submitted.merchantAmount !== breakdown.merchantReceives ||
+      submitted.feeAmount !== breakdown.feeAmount ||
+      submitted.saleAmount !== totalWei
+    ) {
+      return null;
+    }
+    return {
+      snapshot: {
+        totalWei: submitted.saleAmount,
+        merchantReceives: submitted.merchantAmount,
+        feeAmount: submitted.feeAmount,
+        customerPays:
+          submitted.merchantAmount + submitted.feeAmount,
+      },
+      from: standard.lastSubmittedFrom,
+    };
+  }, [
+    breakdown.feeAmount,
+    breakdown.merchantReceives,
+    checkoutContextKey,
+    deployment.address,
+    deployment.chainId,
+    params.to,
+    standard.lastSubmittedFrom,
+    standard.lastSubmittedParams,
+    standard.restoredFromStorage,
+    totalWei,
+  ]);
+  const restoredCheckoutCompletion =
+    (isStandard && standard.restoredFromStorage) ||
+    (useRelay && relay.restoredIntent != null);
 
   useEffect(() => {
     if (gasless.error) logger.error('checkout.failed', { error: gasless.error });
@@ -576,11 +695,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   useEffect(() => {
     if (!completion) return;
-    // completion は同一セッションの submit 後 (mutation の in-memory data 由来) にのみ発火する
-    // ため snapshot は必ず存在する。両ガードで型を自然に絞る (live breakdown への silent
-    // fallback は乖離バグの再発口になるため書かない)。
     const snapshot = submitSnapshotRef.current;
-    if (!snapshot) return;
+    // 許可済みの on-chain intent metadata だけでは元の items/order/callback を再構成できない。
+    // reload 復元を現在 URL の受注通知・redirect へ誤帰属させる波及を断ち、same-mount だけを通知する。
+    if (!snapshot || restoredCheckoutCompletion) return;
     if (notifiedKeyRef.current === completion.key) return;
     notifiedKeyRef.current = completion.key;
 
@@ -612,8 +730,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         isOrderNotifyWebhook = false; // 不正 URL = notify ではない
       }
       const statusTokenForOrder =
-        env.enableOrderPickup && isOrderNotifyWebhook ? generateStatusToken() : null;
-      if (statusTokenForOrder) setStatusToken(statusTokenForOrder);
+        env.enableOrderPickup && isOrderNotifyWebhook
+          ? (statusTokenRef.current ??
+            (completion.mode === 'standard'
+              ? orderStatusTokenForMerchantTx(completion.key)
+              : generateStatusToken()))
+          : null;
+      if (statusTokenForOrder) {
+        statusTokenRef.current = statusTokenForOrder;
+        setStatusToken(statusTokenForOrder);
+      }
       let customerMemo: string | undefined;
       if (isOrderNotifyWebhook && params.orderId) {
         try {
@@ -659,32 +785,49 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           : {}),
         ts: Date.now(),
       };
-      fetch(params.webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        mode: 'cors',
-        keepalive: true,
-      })
-        .then(async (res) => {
-          if (!res.ok) {
+      const sendWebhook = () =>
+        postCheckoutWebhook(
+          params.webhook!,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            mode: 'cors',
+            keepalive: true,
+          },
+          isOrderNotifyWebhook,
+        )
+          .then(async (res) => {
+            if (!res.ok) {
+              const redacted = await webhookTelemetry;
+              logger.warn('checkout.webhook.non_ok', {
+                status: res.status,
+                statusText: res.statusText,
+                webhookOrigin: redacted.origin,
+                webhookHash: redacted.hash,
+              });
+            }
+          })
+          .catch(async (err) => {
             const redacted = await webhookTelemetry;
-            logger.warn('checkout.webhook.non_ok', {
-              status: res.status,
-              statusText: res.statusText,
+            logger.warn('checkout.webhook.failed', {
+              error: err,
               webhookOrigin: redacted.origin,
               webhookHash: redacted.hash,
             });
-          }
-        })
-        .catch(async (err) => {
-          const redacted = await webhookTelemetry;
-          logger.warn('checkout.webhook.failed', {
-            error: err,
-            webhookOrigin: redacted.origin,
-            webhookHash: redacted.hash,
           });
-        });
+      const partial =
+        completion.mode === 'standard' &&
+        partialOrderNotifyPromiseRef.current?.key === completion.key
+          ? partialOrderNotifyPromiseRef.current.promise
+          : null;
+      // merchant 確定通知の KV claim が処理中のまま通常成功通知と競合し、後者が 409 で失われる
+      // 波及を断つ。部分通知の成否にかかわらず完了後に従来 payload を同じ byte で送る。
+      if (partial) {
+        void partial.then(sendWebhook, sendWebhook);
+      } else {
+        void sendWebhook();
+      }
       if (customerMemo && params.orderId) {
         try {
           window.sessionStorage.removeItem(
@@ -715,6 +858,177 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     address,
     deployment.chainId,
     deployment.decimals,
+    restoredCheckoutCompletion,
+  ]);
+
+  // standard の merchant leg が確定した時点で、独立 fee leg の wallet 操作を待たず受注を届ける。
+  // 第三者 webhook の成功契約は広げず、OpenPay 自身の same-origin `/api/order/notify` だけを
+  // additive に発火し、後続 fee 成功は従来の通常成功 payload で未収状態を解消する。
+  useEffect(() => {
+    const submitted = standard.lastSubmittedParams;
+    const submittedFeeAmount =
+      submitted?.feeAmount ?? submitSnapshotRef.current?.feeAmount;
+    if (
+      !isStandard ||
+      submittedFeeAmount === undefined ||
+      submittedFeeAmount <= 0n ||
+      (!!standard.data && !standard.restoredFromStorage) ||
+      !standard.merchantTxHash ||
+      standard.merchantBlockNumber === undefined ||
+      !params.webhook
+    ) {
+      return;
+    }
+    const mountedSnapshot = submitSnapshotRef.current;
+    const attempt = mountedSnapshot
+      ? { snapshot: mountedSnapshot, from: address }
+      : restoredStandardOrderAttempt;
+    // fingerprint が一致しない復元 hash を現在 URL の items/orderId へ通知する波及を断つ。
+    if (!attempt) return;
+    const { snapshot } = attempt;
+
+    let isOrderNotifyWebhook = false;
+    try {
+      const webhook = new URL(params.webhook);
+      isOrderNotifyWebhook =
+        webhook.origin === window.location.origin &&
+        webhook.pathname === '/api/order/notify' &&
+        (mountedSnapshot !== null ||
+          (!!params.storeHandle &&
+            webhook.searchParams.getAll('h').length === 1 &&
+            webhook.searchParams.get('h')?.toLowerCase() ===
+              params.storeHandle.toLowerCase()));
+    } catch {
+      isOrderNotifyWebhook = false;
+    }
+    if (!isOrderNotifyWebhook) return;
+    const partialNotifyKey =
+      `${standard.merchantTxHash}:${standard.feeTxHash ?? 'awaiting'}`;
+    if (partialOrderNotifiedKeyRef.current === partialNotifyKey) return;
+    // fee hash の broadcast 後にも同じ受注を additive に通知し、直後の close/reload で
+    // server reconciliation が hash を知らないまま未収へ固着する波及を断つ。
+    partialOrderNotifiedKeyRef.current = partialNotifyKey;
+
+    const statusTokenForOrder = env.enableOrderPickup
+      ? (statusTokenRef.current ??
+        orderStatusTokenForMerchantTx(standard.merchantTxHash))
+      : null;
+    if (statusTokenForOrder) {
+      statusTokenRef.current = statusTokenForOrder;
+      setStatusToken(statusTokenForOrder);
+    }
+
+    let customerMemo: string | undefined;
+    if (params.orderId) {
+      try {
+        customerMemo =
+          window.sessionStorage.getItem(
+            `${ORDER_MEMO_STORAGE_PREFIX}${params.orderId}`,
+          ) || undefined;
+      } catch {
+        // sessionStorage 障害を受注通知へ波及させない (メモは advisory)。
+      }
+    }
+
+    logger.info('checkout.order.delivered_fee_uncollected', {
+      merchantTxHash: standard.merchantTxHash,
+      feeTxHash: standard.feeTxHash,
+      merchant: params.to,
+      orderId: params.orderId,
+      token: params.token,
+      chain: chainSlug,
+    });
+
+    const webhookTelemetry = redactUrlForTelemetry(params.webhook);
+    const payload = {
+      type: 'openpay.checkout.success',
+      mode: 'standard',
+      merchant: params.to,
+      from: attempt.from,
+      token: params.token,
+      chain: chainSlug,
+      chainId: deployment.chainId,
+      amount: formatUnits(snapshot.totalWei, deployment.decimals),
+      items: params.items,
+      merchantAmount: snapshot.merchantReceives.toString(),
+      feeAmount: snapshot.feeAmount.toString(),
+      customerPays: snapshot.customerPays.toString(),
+      orderId: params.orderId,
+      description: params.description,
+      ...(statusTokenForOrder ? { statusToken: statusTokenForOrder } : {}),
+      ...(params.pickupAt !== undefined ? { pickupAt: params.pickupAt } : {}),
+      ...(customerMemo ? { customerMemo } : {}),
+      merchantTxHash: standard.merchantTxHash,
+      ...(standard.feeTxHash ? { feeTxHash: standard.feeTxHash } : {}),
+      blockNumber: standard.merchantBlockNumber.toString(),
+      feeUncollected: true,
+      ts: Date.now(),
+    };
+    const request = postCheckoutWebhook(
+      params.webhook,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        mode: 'cors',
+        keepalive: true,
+      },
+      true,
+    )
+      .then(async (res) => {
+        if (!res.ok) {
+          const redacted = await webhookTelemetry;
+          logger.warn('checkout.webhook.non_ok', {
+            status: res.status,
+            statusText: res.statusText,
+            webhookOrigin: redacted.origin,
+            webhookHash: redacted.hash,
+          });
+        }
+      })
+      .catch(async (err) => {
+        const redacted = await webhookTelemetry;
+        logger.warn('checkout.webhook.failed', {
+          error: err,
+          webhookOrigin: redacted.origin,
+          webhookHash: redacted.hash,
+        });
+      });
+    partialOrderNotifyPromiseRef.current = {
+      key: standard.merchantTxHash,
+      promise: request,
+    };
+
+    if (customerMemo && params.orderId) {
+      try {
+        window.sessionStorage.removeItem(
+          `${ORDER_MEMO_STORAGE_PREFIX}${params.orderId}`,
+        );
+      } catch {
+        // 送信済みメモの後片付け失敗を受注通知へ波及させない。
+      }
+    }
+  }, [
+    address,
+    chainSlug,
+    deployment.chainId,
+    deployment.decimals,
+    isStandard,
+    params.description,
+    params.items,
+    params.orderId,
+    params.pickupAt,
+    params.storeHandle,
+    params.to,
+    params.token,
+    params.webhook,
+    restoredStandardOrderAttempt,
+    standard.feeTxHash,
+    standard.data,
+    standard.lastSubmittedParams,
+    standard.merchantBlockNumber,
+    standard.merchantTxHash,
+    standard.restoredFromStorage,
   ]);
 
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
@@ -798,20 +1112,22 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       locale,
     ],
   );
-  // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。relay は userOp/receipt
-  // block を持たないため両者 null。amount は mutate() の variables で固定し drift を避ける。
-  // recover は hook と同一式で split を再計算: feeAmount(=サービス料) は常に 0、ネットワーク手数料
-  // 相当額 = 回収した gas (feeValue)、merchantAmount は customer 上乗せなら満額・merchant 吸収なら
-  // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
-  const relayHistoryGasless = useRelayGaslessSnapshot(
-    relay,
-    useRecover,
-    deployment.chainId,
-  );
+  // 永続 metadata に items/order/callback を追加せず、reload 復元の結果は既存 pending 記録の
+  // status 昇格だけに限定する。現在 URL の会計 context から新しい履歴・控えを作る波及を断つ。
+  const gaslessForHistory =
+    restoredCheckoutCompletion && useRelay
+      ? { error: null }
+      : useRelay
+        ? relayHistoryGasless
+        : gasless;
+  const standardForHistory =
+    restoredCheckoutCompletion && isStandard
+      ? { phase: 'idle', error: null }
+      : standard;
   usePaymentHistory(
     historyCtx,
-    useRelay ? relayHistoryGasless : gasless,
-    standard,
+    gaslessForHistory,
+    standardForHistory,
   );
 
   useEffect(() => {
@@ -826,7 +1142,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [redirectIn]);
 
   function doRedirect() {
-    if (!params.successUrl || !completion) return;
+    if (!params.successUrl || !completion || restoredCheckoutCompletion) return;
     const u = new URL(params.successUrl);
     for (const [k, v] of Object.entries(completion.redirectQuery)) {
       u.searchParams.set(k, v);
@@ -912,6 +1228,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 売上総額 = 商品小計 (totalWei)。顧客上乗せ時に merchant+fee で gross を over しないよう、
         // 履歴 snapshot に正しい gross を運ぶ (非モバイルは fee=0 で merchantAmount に一致)。
         saleAmount: totalWei,
+        contextKey: checkoutContextKey,
+        // レジ standard fee であることの印。送金自体は従来どおり plain transfer のままで、
+        // 2 tx 確定後に fee txHash を server 通知して用途束縛 claim を作らせるだけ (付帯処理)。
+        ...(isRegisterStandardFee ? { registerFee: true as const } : {}),
       });
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
@@ -975,7 +1295,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 同じ。amountDisplay=fmt(totalCustomerOutflow)・merchantAddress=params.to・explorerBase は全経路
   // 共通で従来どおり。
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
-    !isStandard && !useRelay && gasless.data && gasless.data.success
+    restoredCheckoutCompletion
+      ? null
+      : !isStandard && !useRelay && gasless.data && gasless.data.success
       ? {
           amountDisplay: fmt(totalCustomerOutflow),
           txHash: gasless.data.txHash,
@@ -1512,7 +1834,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 />
               </>
             )}
-            {params.orderId && (
+            {!restoredCheckoutCompletion && params.orderId && (
               <ResultRow label={t('orderIdLabel')} value={params.orderId} />
             )}
           </dl>
@@ -1543,7 +1865,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             />
           </div>
 
-          {params.successUrl && (
+          {!restoredCheckoutCompletion && params.successUrl && (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs">
                 {redirectIn !== null && redirectIn > 0
@@ -1559,7 +1881,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               </button>
             </div>
           )}
-          {!params.successUrl && (
+          {(restoredCheckoutCompletion || !params.successUrl) && (
             <button
               type="button"
               onClick={() => router.push('/')}

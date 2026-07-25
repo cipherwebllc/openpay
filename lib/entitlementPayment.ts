@@ -16,14 +16,21 @@ import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { kvSet, kvGet, kvDel, kvEval } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import {
+  CLAIM_PAYMENT_UNLESS_LEGACY_BILLING,
+  legacyBillingPaymentKey,
+  paymentClaimKey,
+  paymentClaimPendingValue,
+  paymentClaimResultValue,
+  parsePaymentClaimKind,
+  RELEASE_PAYMENT_CLAIM_IF_OWNED,
+} from '@/lib/paymentClaim';
 
 // idempotency は billing/settle と同方針: 短い処理ロック (nx) → 付与確定後に結果へ昇格。
 const LOCK_TTL_SEC = 120;
 const RESULT_TTL_SEC = 400 * 86_400;
 const LOCK_MARKER = 'pending';
 const RESULT_PREFIX = 'r:';
-const CLAIMED_KEY_PREFIX = 'payment:claimed:';
-const CLAIM_PENDING_PREFIX = 'p:';
 
 type EntitlementResult = { wallet: string; expiresAt: number };
 export type EntitlementTier = 'pro' | 'csvpass';
@@ -81,27 +88,9 @@ function parseResult(value: string | null): EntitlementResult | null {
   return null;
 }
 
-function claimKey(chainId: number, txHash: string): string {
-  return `${CLAIMED_KEY_PREFIX}${chainId}:${txHash.toLowerCase()}`;
-}
-
-function claimPendingValue(tier: EntitlementTier, owner: string): string {
-  return `${CLAIM_PENDING_PREFIX}${JSON.stringify({ tier, owner })}`;
-}
-
 function parseClaimedTier(value: string | null): EntitlementTier | null {
-  if (!value) return null;
-  if (value === `${RESULT_PREFIX}pro`) return 'pro';
-  if (value === `${RESULT_PREFIX}csvpass`) return 'csvpass';
-  if (!value.startsWith(CLAIM_PENDING_PREFIX)) return null;
-  try {
-    const o = JSON.parse(value.slice(CLAIM_PENDING_PREFIX.length)) as {
-      tier?: unknown;
-    };
-    return o.tier === 'pro' || o.tier === 'csvpass' ? o.tier : null;
-  } catch {
-    return null;
-  }
+  const kind = parsePaymentClaimKind(value);
+  return kind === 'pro' || kind === 'csvpass' ? kind : null;
 }
 
 /**
@@ -145,7 +134,7 @@ export async function processEntitlementPayment(args: {
   async function releaseCrossTierClaim(cause: string): Promise<void> {
     if (!claimedThisRequest || grantMade) return;
     const del = await kvEval<number>(
-      'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end',
+      RELEASE_PAYMENT_CLAIM_IF_OWNED,
       [claimedKey],
       [claimedPending],
     );
@@ -291,13 +280,14 @@ export async function processEntitlementPayment(args: {
     }
     const targetExpiresAtMs = blockTimestampMs + config.grantMs;
 
-    claimedKey = claimKey(chainId, txHash);
+    claimedKey = paymentClaimKey(chainId, txHash);
     const owner = randomBytes(16).toString('base64url');
-    claimedPending = claimPendingValue(config.tier, owner);
-    const claimed = await kvSet(claimedKey, claimedPending, {
-      nx: true,
-      ttlSec: LOCK_TTL_SEC,
-    });
+    claimedPending = paymentClaimPendingValue(config.tier, owner);
+    const claimed = await kvEval<number>(
+      CLAIM_PAYMENT_UNLESS_LEGACY_BILLING,
+      [claimedKey, legacyBillingPaymentKey(chainId, txHash)],
+      [claimedPending],
+    );
     if (!claimed.ok) {
       await releaseClaim(usedKey, 'claimed-marker-unavailable');
       logger.error(`${config.logPrefix}.claim-failed`, {
@@ -309,7 +299,14 @@ export async function processEntitlementPayment(args: {
         { status: 503 },
       );
     }
-    if (claimed.value !== 'OK') {
+    if (claimed.value === -1) {
+      await releaseClaim(usedKey, 'used-by-legacy-billing');
+      return NextResponse.json(
+        { ok: false, error: 'already_processed' },
+        { status: 409 },
+      );
+    }
+    if (claimed.value === 0) {
       const existing = await kvGet(claimedKey);
       if (!existing.ok) {
         await releaseClaim(usedKey, 'claimed-marker-read-failed');
@@ -343,8 +340,14 @@ export async function processEntitlementPayment(args: {
           { status: 409 },
         );
       }
-    } else {
+    } else if (claimed.value === 1) {
       claimedThisRequest = true;
+    } else {
+      await releaseClaim(usedKey, 'claimed-marker-invalid-result');
+      return NextResponse.json(
+        { ok: false, error: 'already_processed' },
+        { status: 409 },
+      );
     }
 
     const granted = await config.grant(session.address, targetExpiresAtMs);
@@ -363,14 +366,17 @@ export async function processEntitlementPayment(args: {
     }
     grantMade = true;
 
-    if (claimedThisRequest) {
-      const claimPromote = await kvSet(claimedKey, `${RESULT_PREFIX}${config.tier}`);
-      if (!claimPromote.ok) {
-        logger.warn(`${config.logPrefix}.claim-promote-failed`, {
-          claimedKey,
-          reason: claimPromote.reason,
-        });
-      }
+    // 初回 request と crash 後 same-tier retry のどちらも恒久結果へ昇格する。初期 claim 自体も
+    // TTL 無しなので、昇格 KV 障害が entitlement 支払いを order/billing へ再利用可能にする波及を断つ。
+    const claimPromote = await kvSet(
+      claimedKey,
+      paymentClaimResultValue(config.tier),
+    );
+    if (!claimPromote.ok) {
+      logger.warn(`${config.logPrefix}.claim-promote-failed`, {
+        claimedKey,
+        reason: claimPromote.reason,
+      });
     }
 
     // 付与確定 → ロックを結果へ昇格 (恒久 TTL・grant 先 wallet を保持して cross-wallet replay を拒否)。

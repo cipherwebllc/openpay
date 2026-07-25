@@ -219,6 +219,29 @@ describe('usePaymentHistory', () => {
     expect(loaded[0].txHash).toBe('0xFTxFail');
   });
 
+  it('fee-awaiting の reload 復元は merchant 成功だけを保持し、hash 無し fee-error 行を増やさない', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: undefined,
+        phase: 'fee-error',
+        merchantTxHash: '0xMTxRestored',
+        feeTxHash: undefined,
+        merchantBlockNumber: 42n,
+        error: null,
+        restoredFromStorage: true,
+      }),
+    );
+
+    const loaded = loadHistory();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]).toMatchObject({
+      flow: 'standard-merchant',
+      status: 'success',
+      txHash: '0xMTxRestored',
+      blockNumber: '42',
+    });
+  });
+
   it('error.message は 500 文字に truncate される (DoS 対策)', () => {
     const longMsg = 'X'.repeat(2000);
     renderHook(() =>
