@@ -136,6 +136,9 @@ type StandardSnapshot = {
   // phase が 'success' 以外でも merchant receipt 単独で取得できる block number。
   // fee-error 時の merchant 着金記録に使う。
   merchantBlockNumber?: bigint;
+  // sessionStorage から receipt/fee retry 状態を復元した attempt。復元だけで新しい wallet
+  // fee 操作が失敗したわけではないため、hash 無し fee-error 履歴を再生成しない判定に使う。
+  restoredFromStorage?: boolean;
 };
 
 export function usePaymentHistory(
@@ -153,6 +156,8 @@ export function usePaymentHistory(
   const standardError = standard.error;
   const standardSubmittedParams = standard.lastSubmittedParams;
   const standardMerchantBlockNumber = standard.merchantBlockNumber;
+  const standardRestoredFromStorage =
+    standard.restoredFromStorage === true;
   // gasless/relay の throw 系エラーは txHash を持たないため id dedupe が効かず、ctx 変化で
   // effect が再実行されると重複 append される (Codex A2 P3)。Error オブジェクト identity で
   // 1 回に絞る (react-query は次の mutation まで同一 Error 参照を保持する)。
@@ -477,6 +482,9 @@ export function usePaymentHistory(
       // fee は失敗したが店舗着金は確定 = 顧客にとっては支払い成立。控えを残す。
       saveReceiptFor(entry, ctx);
     }
+    // fee-awaiting の reload は「merchant 確定・fee はまだ未送信」であり、新しい失敗ではない。
+    // mount ごとに hash 無し error 行を増殖させる波及を断ち、明示 retry 後の失敗だけを記録する。
+    if (standardRestoredFromStorage) return;
     appendHistory(
       buildHistoryEntry({
         flow: 'standard-fee',
@@ -511,6 +519,7 @@ export function usePaymentHistory(
     standardMerchantAmount,
     standardFeeAmount,
     standardSaleAmount,
+    standardRestoredFromStorage,
     ctx,
   ]);
 }

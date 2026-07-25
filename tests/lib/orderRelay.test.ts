@@ -5,8 +5,10 @@ import { describe, it, expect } from 'vitest';
 import {
   orderListKey,
   callListKey,
+  orderFeeUsedKey,
   orderUsedKey,
   isTxHashLike,
+  parseFeeExpectedAmount,
   sanitizeOrderItems,
   sanitizeOrderMemo,
   sanitizeTable,
@@ -55,6 +57,11 @@ describe('orderRelay: KV キー', () => {
   });
   it('orderUsedKey は chainId + txHash 小文字 (merchant/items は含めない=1決済1注文)', () => {
     expect(orderUsedKey(137, `0x${'A'.repeat(64)}`)).toBe(`order:used:137:0x${'a'.repeat(64)}`);
+  });
+  it('orderFeeUsedKey は用途横断 payment claim に収束 (1 fee tx 1 商品)', () => {
+    expect(orderFeeUsedKey(137, `0x${'A'.repeat(64)}`)).toBe(
+      `payment:claimed:137:0x${'a'.repeat(64)}`,
+    );
   });
   it('callListKey は受取アドレスを小文字化', () => {
     expect(callListKey('0xABCdef0000000000000000000000000000000000')).toBe(
@@ -156,6 +163,17 @@ describe('orderRelay: isTxHashLike', () => {
     expect(isTxHashLike(`${'a'.repeat(64)}`)).toBe(false); // 0x 無し
     expect(isTxHashLike(123)).toBe(false);
     expect(isTxHashLike(undefined)).toBe(false);
+  });
+});
+
+describe('orderRelay: parseFeeExpectedAmount', () => {
+  it('正の uint256 decimal を canonical 化し、不正・0・範囲外を拒否', () => {
+    expect(parseFeeExpectedAmount('00030')).toBe('30');
+    expect(parseFeeExpectedAmount('0')).toBeUndefined();
+    expect(parseFeeExpectedAmount('-1')).toBeUndefined();
+    expect(parseFeeExpectedAmount('1.0')).toBeUndefined();
+    expect(parseFeeExpectedAmount(30)).toBeUndefined();
+    expect(parseFeeExpectedAmount((1n << 256n).toString())).toBeUndefined();
   });
 });
 
@@ -337,6 +355,58 @@ describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', (
     expect(parseStoredOrder(JSON.stringify({ ...order(), amountUnchecked: 'yes' }))?.amountUnchecked).toBeUndefined();
     expect(parseStoredOrder(serializeOrder(order()))?.amountMismatch).toBeUndefined();
     expect(parseStoredOrder(serializeOrder(order()))?.amountUnchecked).toBeUndefined();
+  });
+
+  it('feeUncollected は true のときだけ復元し、期待額は未収レコードにだけ保持', () => {
+    const partial = parseStoredOrder(
+      serializeOrder(
+        order({
+          feeUncollected: true,
+          feeExpectedAmount: '030',
+          feeExpectedAmountAlt: '031',
+        }),
+      ),
+    );
+    expect(partial?.feeUncollected).toBe(true);
+    expect(partial?.feeExpectedAmount).toBe('30');
+    expect(partial?.feeExpectedAmountAlt).toBe('31');
+    expect(
+      parseStoredOrder(
+        JSON.stringify({
+          ...order(),
+          feeUncollected: false,
+          feeExpectedAmount: '30',
+        }),
+      )?.feeExpectedAmount,
+    ).toBeUndefined();
+    expect(
+      parseStoredOrder(JSON.stringify({ ...order(), feeUncollected: 'yes' }))?.feeUncollected,
+    ).toBeUndefined();
+    expect(
+      parseStoredOrder(
+        JSON.stringify({
+          ...order(),
+          feeUncollected: true,
+          feeExpectedAmount: 'invalid',
+        }),
+      )?.feeExpectedAmount,
+    ).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.feeUncollected).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.feeExpectedAmount).toBeUndefined();
+    expect(
+      parseStoredOrder(
+        serializeOrder(
+          order({
+            feeUncollected: true,
+            feeExpectedAmount: '30',
+            feeExpectedAmountAlt: '32',
+          }),
+        ),
+      )?.feeExpectedAmountAlt,
+    ).toBeUndefined();
+    expect(
+      parseStoredOrder(serializeOrder(order()))?.feeExpectedAmountAlt,
+    ).toBeUndefined();
   });
 });
 

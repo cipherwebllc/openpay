@@ -53,6 +53,31 @@ export function mobileOrderFeeValue(
 }
 
 /**
+ * standard の merchant leg 実着金から、独立 fee leg のサーバ権威下限を導く。
+ *
+ * customer 負担は merchant 実着金=注文額なので通常式の exact 値。merchant 負担は
+ * net=gross-floor(gross*bps/10000) を逆算する。床除算の境界では同じ net に gross が 2 個
+ * 対応し fee が 1 minor unit だけ衝突するため、その小さい方だけを許す実効下限を返す。
+ * それ以上の値引きを許す近似率にはせず、攻撃者が容易に不足額を作る余地を 1 unit に限定する。
+ */
+export function standardMobileOrderFeeMinimum(
+  merchantValue: bigint,
+  kind: MobileOrderFeeKind,
+  feePayer: FeePayer | undefined,
+): bigint {
+  if (merchantValue <= 0n) return 0n;
+  if (mobileOrderGasMode(kind, feePayer) === 'customer') {
+    return mobileOrderFeeValue(merchantValue, kind);
+  }
+
+  const bps = BigInt(mobileOrderFeeBps(kind));
+  const denominator = BPS_DENOM - bps;
+  const numerator = merchantValue * bps;
+  if (numerator < BPS_DENOM) return 0n;
+  return (numerator - BPS_DENOM) / denominator + 1n;
+}
+
+/**
  * 負担者 → gasMode。storefront は常に店舗負担 (merchant)。preorder は feePayer で分岐
  * (merchant=店舗負担 / customer=顧客上乗せ)。recover (forwarder.settle) / standard (2tx) 双方の
  * split を駆動する gasMode の単一情報源。既存 gasMode 意味論 (lib/fee 参照) と一致:

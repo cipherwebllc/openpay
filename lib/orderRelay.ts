@@ -57,8 +57,8 @@ export type StoredOrder = {
   amount: string; // **実着金 (オンチェーン検証済み・権威)** — JPYC minor units 文字列
   txHash: string;
   chainId: number;
-  from: string; // 顧客申告の支払元 (**未検証・表示専用**)。feeVerify は from を返さず route も照合しない
-                // (forwarder-split では merchant への Transfer の from は forwarder であり顧客ではない)。P1-D
+  from: string; // 顧客申告の支払元 (**未検証・表示専用**)。route は receipt.from をこの表示値へ流用しない
+                // (relay tx sender は relayer、forwarder-split の Transfer from も顧客ではない)。P1-D
   ts: number; // 受信時刻 (ms)
   fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
   // 受取予定時刻 (ms・Phase 4・preorder で顧客が選んだスロット)。未指定=即時/店頭。表示用 (advisory)。
@@ -79,6 +79,15 @@ export type StoredOrder = {
   // 金額突合の advisory フラグ。true のときだけ保存し、false/欠落は同一扱い。
   amountMismatch?: boolean;
   amountUnchecked?: boolean;
+  // standard 経路で店舗送金は確定したが、独立した OpenPay 手数料送金が未収の受注。true のみ保存する。
+  feeUncollected?: true;
+  // 公開 storefront 設定 + direct merchant 実着金から server が導いた手数料下限 (token minor units)。
+  // webhook body の feeAmount は使わず、後続 POST の申告額でも上書きしない。
+  // feeUncollected=true のレコードだけが持ち、徴収確認時に両フィールドを同じ CAS で除去する。
+  feeExpectedAmount?: string;
+  // 店舗負担の gross 逆算で同じ net に対応しうる第2候補。床除算境界の 1 minor unit だけを
+  // 許容し、顧客負担 (exact 1候補) や任意の過払いへ許容範囲が波及しないよう optional にする。
+  feeExpectedAmountAlt?: string;
 };
 
 /**
@@ -118,6 +127,11 @@ export function orderUsedKey(chainId: number, txHash: string): string {
   return `order:used:${chainId}:${txHash.toLowerCase()}`;
 }
 
+/** @deprecated paymentClaimKey を直接使う。旧 call site も用途横断の global claim へ収束させる。 */
+export function orderFeeUsedKey(chainId: number, txHash: string): string {
+  return `payment:claimed:${chainId}:${txHash.toLowerCase()}`;
+}
+
 /** 顧客向け「注文状況」の逆引きポインタ KV キー (status トークン → 受注の所在)。flag ENABLE_ORDER_PICKUP。
  *  token は顧客端末が生成する不可推測の秘密 (43 文字 base64url) = 列挙不可。値は {merchant, chainId, txHash}。
  *  これにより顧客は自分の token でのみ自分の 1 注文の状態を読める (受注リストは受取アドレスでスコープ)。 */
@@ -153,11 +167,27 @@ export function parseOrderStatusPointer(
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
 const POSITIVE_DECIMAL = /^\d+(\.\d+)?$/;
 const DECIMAL_INT = /^\d+$/;
+const UINT256_MAX = (1n << 256n) - 1n;
 const ORDER_ITEM_PRICE_MAX = 80;
 const ORDER_ITEM_DECIMALS_MAX = 36;
 
 export function isTxHashLike(v: unknown): v is string {
   return typeof v === 'string' && HEX64.test(v);
+}
+
+/** 未収手数料の on-chain 突合に使える正の uint256 decimal だけを canonical string で返す。 */
+export function parseFeeExpectedAmount(v: unknown): string | undefined {
+  if (
+    typeof v !== 'string' ||
+    v.length === 0 ||
+    v.length > 78 ||
+    !DECIMAL_INT.test(v)
+  ) {
+    return undefined;
+  }
+  const value = BigInt(v);
+  if (value <= 0n || value > UINT256_MAX) return undefined;
+  return value.toString();
 }
 
 /**
@@ -352,6 +382,22 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   }
   if (o.amountMismatch === true) order.amountMismatch = true;
   if (o.amountUnchecked === true) order.amountUnchecked = true;
+  if (o.feeUncollected === true) {
+    order.feeUncollected = true;
+    const feeExpectedAmount = parseFeeExpectedAmount(o.feeExpectedAmount);
+    if (feeExpectedAmount) {
+      order.feeExpectedAmount = feeExpectedAmount;
+      const feeExpectedAmountAlt = parseFeeExpectedAmount(
+        o.feeExpectedAmountAlt,
+      );
+      if (
+        feeExpectedAmountAlt &&
+        BigInt(feeExpectedAmountAlt) === BigInt(feeExpectedAmount) + 1n
+      ) {
+        order.feeExpectedAmountAlt = feeExpectedAmountAlt;
+      }
+    }
+  }
   return order;
 }
 

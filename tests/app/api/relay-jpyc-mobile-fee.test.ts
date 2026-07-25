@@ -20,6 +20,7 @@ vi.hoisted(() => {
   process.env.RELAYER_PRIVATE_KEY = '0x' + '1'.repeat(64);
   process.env.NEXT_PUBLIC_JPYC_FORWARDER_AMOY =
     '0x0F4560a777415580F0680F8B56a79B0022C6B848';
+  process.env.NEXT_PUBLIC_RELAY_GAS_FEE_JPYC = '2';
 });
 
 // flag をテスト毎に切替可能にする (getter)。既定は ON (本テストの主対象が flag ON 経路のため)。
@@ -56,12 +57,22 @@ const recoverFn = vi.hoisted(() =>
   ),
 );
 let capturedExpectedFee: bigint | undefined;
+let capturedSubfloorGuards: boolean | undefined;
 vi.mock('@/lib/relay/forwarderRecover', () => ({
   recoverViaForwarder: (
     _input: unknown,
-    deps: { expectedFeeValue: bigint },
+    deps: {
+      expectedFeeValue: bigint;
+      checkSubfloorPayerRateLimit?: unknown;
+      checkSubfloorBudget?: unknown;
+      refundSubfloorBudget?: unknown;
+    },
   ) => {
     capturedExpectedFee = deps.expectedFeeValue;
+    capturedSubfloorGuards =
+      typeof deps.checkSubfloorPayerRateLimit === 'function' &&
+      typeof deps.checkSubfloorBudget === 'function' &&
+      typeof deps.refundSubfloorBudget === 'function';
     return recoverFn();
   },
 }));
@@ -125,6 +136,7 @@ function payload(over: Record<string, unknown> = {}): Request {
 
 beforeEach(() => {
   capturedExpectedFee = undefined;
+  capturedSubfloorGuards = undefined;
   flags.enableMobileOrderFee = true;
   recoverFeeMock.mockClear();
   recoverFn.mockClear();
@@ -152,6 +164,7 @@ describe('relay route — モバイル注文 feeKind enforcement (server 権威�
     expect(res.status).toBe(200);
     // server は billAmount=mv+fv=1000 JPYC から mobileOrderFeeValue(storefront)=10 を再計算。
     expect(capturedExpectedFee).toBe(fee);
+    expect(capturedSubfloorGuards).toBe(false);
     // gas-recovery (recoverFeeValue) は呼ばれない (mobile 分岐に入った証明)。
     expect(recoverFeeMock).not.toHaveBeenCalled();
   });
@@ -169,6 +182,7 @@ describe('relay route — モバイル注文 feeKind enforcement (server 権威�
     );
     expect(res.status).toBe(200);
     expect(capturedExpectedFee).toBe(fee);
+    expect(capturedSubfloorGuards).toBe(false);
     expect(recoverFeeMock).not.toHaveBeenCalled();
   });
 
@@ -226,6 +240,8 @@ describe('relay route — モバイル注文 feeKind enforcement (server 権威�
     expect(res.status).toBe(200);
     // mobile は一律 % ゆえ floor に持ち上げない (= recoverFeeValue とは異なる挙動)。
     expect(capturedExpectedFee).toBe(fee);
+    // 価格/フロアは変更せず、実回収額 < chain ガスフロアのときだけ専用ガードを配線する。
+    expect(capturedSubfloorGuards).toBe(true);
     expect(recoverFeeMock).not.toHaveBeenCalled();
   });
 

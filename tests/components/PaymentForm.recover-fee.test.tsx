@@ -226,22 +226,22 @@ describe('PaymentForm sign reassurance panel (P4 recover)', () => {
 
   // 確定モデル (2026-06-13): /pay の JPYC recover は merchant 固定 (URL gas=customer を無視)。
   // merchant 吸収ではウォレット表示 = 表示価格 (1000) で、手数料は受取から内枠吸収される。
-  it('RECOVER (merchant 固定): 安心パネルはウォレット表示 = 表示額 1000 ちょうど (内訳上乗せ無し)', () => {
+  it('RECOVER (merchant 固定): 安心パネルはウォレット表示 = 表示額 1000 ちょうど (内訳上乗せ無し)', async () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     render(<PaymentForm />);
     // merchant モードのバッジ: 動かせるのは 1000 JPYC ちょうど (お支払い + 手数料 の上乗せ表記は出ない)。
     expect(
-      screen.getByText(/動かせるのは 1000 JPYC ちょうど/),
+      await screen.findByText(/動かせるのは 1000 JPYC ちょうど/),
     ).toBeInTheDocument();
     // customer 内訳 (お支払い X + 手数料 Y) は merchant では出ない。
     expect(screen.queryByText(/＋ 手数料|\+ 手数料 2）/)).toBeNull();
   });
 
-  it('FREE: 旧 free パネル (内訳なしの金額固定バッジ) のまま・recover 文言は出ない', () => {
+  it('FREE: 旧 free パネル (内訳なしの金額固定バッジ) のまま・recover 文言は出ない', async () => {
     // forwarder=null (testnet 等) は free 経路。recover の内訳バッジは出さない。
     render(<PaymentForm />);
     expect(
-      screen.getByText(/動かせるのは 1000 JPYC ちょうど/),
+      await screen.findByText(/動かせるのは 1000 JPYC ちょうど/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/お支払い 1000 \+ 手数料 2/)).toBeNull();
   });

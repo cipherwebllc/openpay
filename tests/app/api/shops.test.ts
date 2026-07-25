@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
 const kvMocks = vi.hoisted(() => ({
   lrange: vi.fn(),
   mget: vi.fn(),
+  get: vi.fn(),
+  set: vi.fn(),
 }));
 const rate = vi.hoisted(() => ({
   allowed: true,
@@ -25,8 +27,10 @@ const payment = vi.hoisted(() => ({
 vi.mock('@/lib/kv', () => ({
   kvLrange: kvMocks.lrange,
   kvMget: kvMocks.mget,
-  kvGet: vi.fn(),
-  kvEval: vi.fn(),
+  kvGet: kvMocks.get,
+  kvSet: kvMocks.set,
+  kvEval: vi.fn(async () => ({ ok: false, reason: 'unconfigured' })),
+  kvSetNxGet: vi.fn(async () => ({ ok: false, reason: 'unconfigured' })),
   isKvConfigured: vi.fn(() => true),
 }));
 vi.mock('@/lib/net/ipHash', () => ({
@@ -85,7 +89,7 @@ function paymentHeader(): string {
       scheme: 'exact',
       network: 'eip155:80002',
       payload: {
-        signature: `0x${'11'.repeat(65)}`,
+        signature: `0x${'0'.repeat(63)}1${'0'.repeat(63)}21b`,
         authorization: {
           from: PAYER,
           validAfter: '0',
@@ -145,6 +149,8 @@ beforeEach(() => {
   state.indexFails = false;
   state.summaryMgetFails = false;
   rate.allowed = true;
+  kvMocks.get.mockResolvedValue({ ok: true, value: null });
+  kvMocks.set.mockResolvedValue({ ok: true, value: 'OK' });
   for (const handle of state.handles) {
     state.summaries.set(handle, summary(handle));
     state.lives.set(
@@ -184,6 +190,7 @@ beforeEach(() => {
       success: true,
       payer: PAYER,
       transaction: `0x${'ab'.repeat(32)}`,
+      network: 'eip155:80002',
     }),
   );
 });

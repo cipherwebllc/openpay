@@ -7,16 +7,25 @@
 import { NextResponse, after } from 'next/server';
 import { createPublicClient, getAddress, isAddress, type Address, type Hex } from 'viem';
 import { env, isMainnet } from '@/lib/env';
-import { chainObjectForId, transportForChain } from '@/lib/chains';
+import {
+  chainObjectForId,
+  slugForChain,
+  transportForChain,
+} from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
-import { verifyJpycTransferToOnChain } from '@/lib/feeVerify';
+import {
+  verifyJpycStandardFeePairOnChain,
+  verifyJpycTransferToOnChain,
+} from '@/lib/feeVerify';
 import {
   kvSet,
   kvGet,
   kvDel,
   kvLpush,
+  kvLrange,
   kvLtrim,
   kvExpire,
+  kvEval,
   isKvConfigured,
 } from '@/lib/kv';
 import { checkRateLimit } from '@/lib/relay/relayGuards';
@@ -28,6 +37,7 @@ import {
   orderListKey,
   orderUsedKey,
   orderStatusPointerKey,
+  parseStoredOrder,
   serializeOrder,
   sanitizeOrderItems,
   sanitizeOrderMemo,
@@ -44,6 +54,17 @@ import {
   ORDER_ID_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
+import {
+  mobileOrderFeeValue,
+  standardMobileOrderFeeMinimum,
+  type FeePayer,
+  type MobileOrderFeeKind,
+} from '@/lib/mobileOrderFee';
+import {
+  legacyBillingPaymentKey,
+  paymentClaimKey,
+  paymentClaimResultValue,
+} from '@/lib/paymentClaim';
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { logger } from '@/lib/logger';
 import { notifyPaymentReceived } from '@/lib/push/notify';
@@ -53,9 +74,256 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
 
 const AMOUNT_ADVISORY_BPS_CAP = 300;
+const FEE_RECONCILE_RETRY_MS = [0, 1_000, 4_000, 10_000] as const;
+
+// 既存 raw が残っているときだけ同じ位置へ置換し、Pro/CSV/billing と共有する fee tx の恒久
+// claim も同一 Redis transaction 内で確定する。受注ボードの同時 fulfill 更新を失わず、1 本の
+// fee tx が別注文・別商品へ波及する replay を断つ。list の位置と TTL は LPOS + LSET なので不変。
+const RECONCILE_FEE =
+  "local idx=redis.call('LPOS',KEYS[1],ARGV[1]); " +
+  'if not idx then return 0 end; ' +
+  "if redis.call('EXISTS',KEYS[2])==1 or redis.call('EXISTS',KEYS[3])==1 then return -1 end; " +
+  "redis.call('SET',KEYS[2],ARGV[3]); " +
+  "redis.call('LSET',KEYS[1],idx,ARGV[2]); return 1";
+
+// 同一 receipt 内の fee を徴収済みとして保存する瞬間に、その txHash を用途横断 claim する。
+// claim 確認と注文 LPUSH の間へ別注文 reconciliation が割り込んで同じ fee を二重充当する波及を
+// Redis 1 transaction で断つ。既存 global/legacy claim があれば未収版を保存し badge を残す。
+// Lua の runtime error は先行 write を rollback しないため、未収版 LPUSH→SET claim→徴収済み版
+// LSET の順にする。どこで止まっても「未保存」または「未収表示が安全側に残る」だけにし、
+// claim 無しの徴収済み注文や、claim だけ残る受注喪失へ波及させない。
+const STORE_ORDER_WITH_INLINE_FEE_CLAIM =
+  'local claimed=0; ' +
+  "if redis.call('EXISTS',KEYS[2])==0 and redis.call('EXISTS',KEYS[3])==0 then " +
+  "redis.call('LPUSH',KEYS[1],ARGV[1]); redis.call('SET',KEYS[2],ARGV[3]); " +
+  "redis.call('LSET',KEYS[1],0,ARGV[2]); claimed=1; " +
+  "else redis.call('LPUSH',KEYS[1],ARGV[1]); end; return claimed";
 
 function fail(error: string, status: number) {
   return NextResponse.json({ ok: false, error }, { status });
+}
+
+type StandardFeeConfig = {
+  kind: MobileOrderFeeKind;
+  feePayer: FeePayer;
+};
+
+function resolveStandardFeeConfig(
+  storefront: {
+    chain: string;
+    chains?: string[];
+    mode: MobileOrderFeeKind;
+    feePayer: FeePayer;
+  } | undefined,
+  chainId: number,
+): StandardFeeConfig | null {
+  if (!env.enableMobileOrderFee || !storefront) return null;
+  const chainSlug = slugForChain(chainId);
+  const configuredChains = storefront.chains ?? [storefront.chain];
+  // 別 chain の storefront 設定を流用して fee obligation を作る波及を断つ。公開済み受取 chain のみ対象。
+  if (!chainSlug || !configuredChains.includes(chainSlug)) return null;
+  return { kind: storefront.mode, feePayer: storefront.feePayer };
+}
+
+type StandardFeeObligation = {
+  expected: bigint;
+  alternate?: bigint;
+  collectedInline: boolean;
+};
+
+function standardFeeObligationFromReceipt(args: {
+  receiptValue: bigint;
+  sameSourceFeeValue?: bigint;
+  config: StandardFeeConfig | null;
+}): StandardFeeObligation | null {
+  if (!args.config) return null;
+  const fee = standardMobileOrderFeeMinimum(
+    args.receiptValue,
+    args.config.kind,
+    args.config.feePayer,
+  );
+  if (fee <= 0n) return null;
+  const merchantBorne =
+    args.config.kind !== 'preorder' ||
+    args.config.feePayer !== 'customer';
+  const alternate = fee + 1n;
+  const alternateGross = args.receiptValue + alternate;
+  const hasAlternate =
+    merchantBorne &&
+    mobileOrderFeeValue(alternateGross, args.config.kind) === alternate &&
+    alternateGross - alternate === args.receiptValue;
+  // merchant 着金全額と同じ Transfer source が同一 receipt 内で feeReceiver に期待額以上を
+  // 払った atomic relay/batch だけを徴収済みとする。receipt.from 不一致の helper/4337 支払いで
+  // standard 判定を避け、fee 未払いを通常受注へ落とす迂回の波及を断つ。
+  return {
+    expected: fee,
+    ...(hasAlternate ? { alternate } : {}),
+    collectedInline: (args.sameSourceFeeValue ?? 0n) >= fee,
+  };
+}
+
+async function reconcileCollectedStandardFee(args: {
+  merchant: Address;
+  merchantTxHash: Hex;
+  feeTxHash: Hex;
+  chainId: number;
+  token: Address;
+  feeReceiver: Address;
+  waitForOrder: boolean;
+  publicClient: Parameters<
+    typeof verifyJpycStandardFeePairOnChain
+  >[0]['publicClient'];
+}): Promise<void> {
+  const listKey = orderListKey(args.merchant);
+  let verifiedObligation: {
+    merchantAmount: string;
+    feeAmount: string;
+    feeAlternateAmount?: string;
+  } | null = null;
+  let sawTarget = false;
+
+  for (let attempt = 0; attempt < FEE_RECONCILE_RETRY_MS.length; attempt++) {
+    const delayMs = FEE_RECONCILE_RETRY_MS[attempt];
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    const list = await kvLrange(listKey, 0, ORDER_LIST_MAX - 1);
+    if (!list.ok) {
+      logger.warn('order.notify.fee_reconcile_kv_error', {
+        reason: list.reason,
+        op: 'read',
+        chainId: args.chainId,
+        merchant: args.merchant,
+      });
+      continue;
+    }
+
+    let oldRaw: string | null = null;
+    let storedOrder: StoredOrder | null = null;
+    for (const raw of list.value ?? []) {
+      const parsed = parseStoredOrder(raw);
+      if (
+        parsed?.txHash.toLowerCase() === args.merchantTxHash.toLowerCase() &&
+        parsed.feeUncollected === true
+      ) {
+        oldRaw = raw;
+        storedOrder = parsed;
+        break;
+      }
+    }
+    // fresh/pending POST と保存処理の短い race は bounded retry し、既に解消済み・72h 失効は no-op。
+    if (!oldRaw || !storedOrder) {
+      if (!args.waitForOrder) return;
+      continue;
+    }
+    sawTarget = true;
+
+    // 保存時に server が storefront 設定 + on-chain merchant leg から確定した obligation を使う。
+    // 後日の mode/feePayer/flag 変更で既存未収が減額・回収不能へ波及するのを断つ。旧/壊れレコードで
+    // expected が無い場合は badge を消さず安全側 no-op（body や現在設定から推測して補完しない）。
+    if (!storedOrder.feeExpectedAmount) return;
+    const merchantValue = BigInt(storedOrder.amount);
+    const expectedFee = BigInt(storedOrder.feeExpectedAmount);
+    const alternateFee = storedOrder.feeExpectedAmountAlt
+      ? BigInt(storedOrder.feeExpectedAmountAlt)
+      : undefined;
+
+    if (
+      verifiedObligation === null ||
+      storedOrder.amount !== verifiedObligation.merchantAmount ||
+      storedOrder.feeExpectedAmount !== verifiedObligation.feeAmount ||
+      storedOrder.feeExpectedAmountAlt !==
+        verifiedObligation.feeAlternateAmount
+    ) {
+      const result = await verifyJpycStandardFeePairOnChain({
+        publicClient: args.publicClient,
+        merchantTxHash: args.merchantTxHash,
+        feeTxHash: args.feeTxHash,
+        expected: {
+          token: args.token,
+          merchant: args.merchant,
+          merchantValue,
+          feeReceiver: args.feeReceiver,
+          feeMinValue: expectedFee,
+          ...(alternateFee !== undefined
+            ? { feeAlternateValue: alternateFee }
+            : {}),
+        },
+      });
+      if (!result.ok) {
+        logger.warn('order.notify.fee_reconcile_verify_failed', {
+          reason: result.reason,
+          chainId: args.chainId,
+          merchant: args.merchant,
+        });
+        if (
+          (result.reason === 'rpc_error' ||
+            result.reason === 'tx_not_found') &&
+          attempt + 1 < FEE_RECONCILE_RETRY_MS.length
+        ) {
+          continue;
+        }
+        return;
+      }
+      verifiedObligation = {
+        merchantAmount: storedOrder.amount,
+        feeAmount: storedOrder.feeExpectedAmount,
+        ...(storedOrder.feeExpectedAmountAlt
+          ? { feeAlternateAmount: storedOrder.feeExpectedAmountAlt }
+          : {}),
+      };
+    }
+
+    const reconciled: StoredOrder = { ...storedOrder };
+    delete reconciled.feeUncollected;
+    delete reconciled.feeExpectedAmount;
+    delete reconciled.feeExpectedAmountAlt;
+    const cas = await kvEval<number>(
+      RECONCILE_FEE,
+      [
+        listKey,
+        paymentClaimKey(args.chainId, args.feeTxHash),
+        legacyBillingPaymentKey(args.chainId, args.feeTxHash),
+      ],
+      [
+        oldRaw,
+        serializeOrder(reconciled),
+        paymentClaimResultValue('order'),
+      ],
+    );
+    if (!cas.ok) {
+      logger.warn('order.notify.fee_reconcile_kv_error', {
+        reason: cas.reason,
+        op: 'cas',
+        chainId: args.chainId,
+        merchant: args.merchant,
+      });
+      continue;
+    }
+    if (cas.value === 1) {
+      logger.info('order.notify.fee_reconciled', {
+        chainId: args.chainId,
+        merchant: args.merchant,
+      });
+      return;
+    }
+    if (cas.value === -1) {
+      logger.warn('order.notify.fee_reconcile_replay', {
+        chainId: args.chainId,
+        merchant: args.merchant,
+      });
+      return;
+    }
+    // cas.value === 0: 受注ボードの同時更新で oldRaw が消えた。再読込して最新状態を位置維持で更新する。
+  }
+
+  if (sawTarget) {
+    logger.warn('order.notify.fee_reconcile_conflict', {
+      reason: 'retry_exhausted',
+      chainId: args.chainId,
+      merchant: args.merchant,
+    });
+  }
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -109,6 +377,40 @@ export async function POST(req: Request): Promise<NextResponse> {
   const chain = chainObjectForId(chainId);
   const deployment = resolveDeployment('jpyc', chainId);
   if (!chain || !deployment) return fail('unsupported_chain', 400);
+  const feeConfig = resolveStandardFeeConfig(record.storefront, chainId);
+  const feeTxHash = isTxHashLike(o.feeTxHash)
+    ? (o.feeTxHash as Hex)
+    : null;
+
+  const queueFeeReconciliation = (waitForOrder = false) => {
+    if (!feeTxHash || !env.feeReceiverConfigured) return;
+    after(async () => {
+      try {
+        const publicClient = createPublicClient({
+          chain,
+          transport: transportForChain(chainId),
+        });
+        await reconcileCollectedStandardFee({
+          merchant,
+          merchantTxHash: txHash,
+          feeTxHash,
+          chainId,
+          token: deployment.address,
+          feeReceiver: getAddress(env.feeReceiver),
+          waitForOrder,
+          publicClient,
+        });
+      } catch (e) {
+        // 手数料表示の付帯 reconciliation 障害を受注 webhook の既存応答へ波及させない。
+        // 未収フラグを残す安全側に倒し、偽成功にせず observable にする。
+        logger.warn('order.notify.fee_reconcile_unexpected', {
+          reason: e instanceof Error ? e.message : String(e),
+          chainId,
+          merchant,
+        });
+      }
+    });
+  };
 
   // mainnet は KV 必須 (fail-open で未検証/未保存のまま素通りさせない)。
   if (isMainnet && !isKvConfigured()) return fail('kv_required', 503);
@@ -129,10 +431,12 @@ export async function POST(req: Request): Promise<NextResponse> {
       if (!existing.ok) return fail('kv_error', 503);
       // done = 検証 + 保存済の恒久ブロック → 同一 txHash の無期限リプレイを永久拒否 (P1-E)。1 決済 1 注文。
       if (existing.value === ORDER_MARK_DONE) {
+        queueFeeReconciliation();
         return NextResponse.json({ ok: true, duplicate: true });
       }
       // pending 中 (または直前に失効/解放) = **まだ done でない** → 検証成功前の**偽 duplicate を返さない** (P2)。
       // 別 POST が検証中/リトライ可能な「処理中」を表す (client は pending 失効後に同一 txHash を再送可能)。
+      queueFeeReconciliation(true);
       return fail('processing', 409);
     }
   }
@@ -147,7 +451,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     const result = await verifyJpycTransferToOnChain({
       publicClient,
       txHash,
-      expected: { token: deployment.address, to: merchant, minValue: ORDER_DUST_FLOOR_WEI },
+      expected: {
+        token: deployment.address,
+        to: merchant,
+        minValue: ORDER_DUST_FLOOR_WEI,
+        ...(env.feeReceiverConfigured
+          ? { feeReceiver: getAddress(env.feeReceiver) }
+          : {}),
+      },
     });
 
     if (!result.ok) {
@@ -184,6 +495,20 @@ export async function POST(req: Request): Promise<NextResponse> {
     };
     if (amountAdvisory.mismatch) order.amountMismatch = true;
     if (amountAdvisory.unchecked) order.amountUnchecked = true;
+    const feeObligation = standardFeeObligationFromReceipt({
+      receiptValue: result.value,
+      sameSourceFeeValue: result.sameSourceFeeValue,
+      config: feeConfig,
+    });
+    // 店舗送金確定後の fee leg 失敗が受注欠落へ波及しないよう未収状態を additive に記録する。
+    // 判定/額は body でなく公開 storefront 設定 + on-chain direct merchant leg のみから導く。
+    if (feeObligation && !feeObligation.collectedInline) {
+      order.feeUncollected = true;
+      order.feeExpectedAmount = feeObligation.expected.toString();
+      if (feeObligation.alternate !== undefined) {
+        order.feeExpectedAmountAlt = feeObligation.alternate.toString();
+      }
+    }
     // 受取予定時刻 (任意・preorder・顧客申告=advisory 表示用・items/table と同じ寛容さ)。正の有限数かつ
     // **near-future 窓内** (now-1h 〜 now+14d) のみ保存。スロット/lastOrder との厳密照合はしない (advisory)
     // が、年 9999 等の極端値で受注ボードの表示を汚さないよう sane 窓外は drop する (clock skew に -1h)。
@@ -199,10 +524,42 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     if (isKvConfigured()) {
       const key = orderListKey(merchant);
-      const push = await kvLpush(key, serializeOrder(order));
-      if (!push.ok) {
+      const save = feeObligation?.collectedInline
+        ? await kvEval<number>(
+            STORE_ORDER_WITH_INLINE_FEE_CLAIM,
+            [
+              key,
+              paymentClaimKey(chainId, txHash),
+              legacyBillingPaymentKey(chainId, txHash),
+            ],
+            [
+              serializeOrder({
+                ...order,
+                feeUncollected: true,
+                feeExpectedAmount: feeObligation.expected.toString(),
+                ...(feeObligation.alternate !== undefined
+                  ? {
+                      feeExpectedAmountAlt:
+                        feeObligation.alternate.toString(),
+                    }
+                  : {}),
+              }),
+              serializeOrder(order),
+              paymentClaimResultValue('order'),
+            ],
+          )
+        : await kvLpush(key, serializeOrder(order));
+      if (!save.ok) {
         await kvDel(usedKey); // 保存できなければ pending クレームも戻す (リトライで再投入可能に)
         return fail('kv_error', 503);
+      }
+      if (feeObligation?.collectedInline && save.value !== 1) {
+        order.feeUncollected = true;
+        order.feeExpectedAmount = feeObligation.expected.toString();
+        if (feeObligation.alternate !== undefined) {
+          order.feeExpectedAmountAlt =
+            feeObligation.alternate.toString();
+        }
       }
       orderStored = true; // 受注は KV に確定。以降 pending クレームは消さない (下記 catch 参照)。
       // ステージ2 = pending → done 昇格 (恒久・TTL 上書きで EX を落とす)。**保存確定の後**に昇格するのが肝:
@@ -240,6 +597,16 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     if (orderStored && env.enablePushNotify) {
       after(() => notifyPaymentReceived(merchant, 'order'));
+    }
+    if (
+      orderStored &&
+      feeObligation &&
+      (!feeObligation.collectedInline ||
+        // inline claim が既存用途と衝突した場合は未収版を保存したため、同梱 feeTxHash があれば
+        // 通常 reconciliation を試す（同じ claim なら badge は安全側に残る）。
+        order.feeUncollected === true)
+    ) {
+      queueFeeReconciliation();
     }
 
     logger.info('order.notify.stored', { chainId, merchant, amount: order.amount });

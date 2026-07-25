@@ -47,7 +47,7 @@ function paymentPayload() {
     scheme: 'exact',
     network: 'eip155:80002',
     payload: {
-      signature: `0x${'11'.repeat(65)}`,
+      signature: `0x${'0'.repeat(63)}1${'0'.repeat(63)}21b`,
       authorization: {
         from: PAYER,
         validAfter: '0',
@@ -248,7 +248,12 @@ describe('paid Japan Web3 Directory APIs', () => {
       NextResponse.json({ isValid: true, payer: PAYER }),
     );
     routeMocks.settle.mockImplementation(async () =>
-      NextResponse.json({ success: true, transaction: TX_HASH }),
+      NextResponse.json({
+        success: true,
+        transaction: TX_HASH,
+        network: 'eip155:80002',
+        payer: PAYER,
+      }),
     );
     const { search, detail } = await load();
 

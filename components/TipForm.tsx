@@ -10,7 +10,7 @@ import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { Row } from './Row';
-import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
+import type { SignReassuranceProps } from './SignReassurance';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -32,6 +32,9 @@ const PaymentStatusPanel = dynamic(
   () =>
     import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
   { ssr: false },
+);
+const SignReassurance = dynamic(
+  () => import('./SignReassurance').then((m) => m.SignReassurance),
 );
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
@@ -298,9 +301,11 @@ export function TipForm({
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const directFlowPending = useRelay
-    ? relay.isPending || relayAmbiguous
-    : gasless.isPending || gaslessAmbiguous;
+  const directFlowPending = relay.isRestoring || relayAmbiguous
+    ? true
+    : useRelay
+      ? relay.isPending
+      : gasless.isPending || gaslessAmbiguous;
   const directFlowSuccess = useRelay
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
@@ -318,6 +323,7 @@ export function TipForm({
     : crossChainResult
       ? undefined
       : gasless.data?.blockNumber;
+  const restoredRelayPayment = relay.restoredIntent != null;
 
   // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
   // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。
@@ -326,6 +332,7 @@ export function TipForm({
   // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
   // (CheckoutForm/PaymentForm と同一防御。TipForm は standard 経路を持たないため gasless/relay のみ)。
   const directSettledNoRetry =
+    relay.hasActiveIntent ||
     (!useRelay && (gaslessAmbiguous || !!gasless.data?.success)) ||
     (useRelay &&
       (relayAmbiguous ||
@@ -451,6 +458,9 @@ export function TipForm({
   useEffect(() => {
     // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
     if (!flowSuccess || !flowTxHash) return;
+    // 元の name/message/webhook は許可済み intent metadata に保存しない。reload 復元 hash から
+    // 現在 URL の webhook・控えを生成して別 tip へ誤帰属させる波及を断ち、hash 表示だけ残す。
+    if (restoredRelayPayment) return;
     // dedup 鍵: gasless は userOpHash、relay は txHash。
     const dedupKey = flowUserOpHash ?? flowTxHash;
     if (notifiedUserOpHashRef.current === dedupKey) return;
@@ -549,6 +559,7 @@ export function TipForm({
     flowBlockNumber,
     useRelay,
     crossChainResult,
+    restoredRelayPayment,
     params.to,
     params.token,
     params.name,
@@ -562,6 +573,7 @@ export function TipForm({
     breakdown.customerPays,
     deployment.chainId,
     deployment.address,
+    deployment.decimals,
     locale,
   ]);
 
@@ -615,7 +627,7 @@ export function TipForm({
   // txHash/userOpHash/blockNumber は flow* (relay は userOpHash/blockNumber 無し)。tip は店舗アドレス
   // explorer link を出さないため merchantAddress は渡さない (= 従来どおり省略)。未成功は null。
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
-    flowSuccess && flowTxHash
+    !restoredRelayPayment && flowSuccess && flowTxHash
       ? {
           amountDisplay:
             submittedAmountDisplayRef.current ?? fmt(totalCustomerOutflow),
@@ -1107,8 +1119,8 @@ export function TipForm({
       {flowSuccess && flowTxHash && (
         <TipSuccessPanel
           title={t('successTitle')}
-          thanks={params.thanks}
-          thanksUrl={params.thanksUrl}
+          thanks={restoredRelayPayment ? undefined : params.thanks}
+          thanksUrl={restoredRelayPayment ? undefined : params.thanksUrl}
           openLinkLabel={t('openLink')}
           userOpHash={flowUserOpHash}
           txHash={flowTxHash}

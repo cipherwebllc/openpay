@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { baseSepolia } from 'viem/chains';
 import type { Address, Hex } from 'viem';
+import { STANDARD_INTENT_STORAGE_KEY } from '@/lib/paymentIntentStorage';
 
 // wagmi useWriteContract は引数を取らないため、call 順序 (merchant 先、fee 後) で
 // 識別する。hook 側で順序が入れ替わると silent に壊れる点に注意。
@@ -171,8 +172,15 @@ function setURL(query: string) {
   );
 }
 
+async function findReadyPayButton() {
+  return screen.findByRole('button', { name: /10 USDC を支払う/ });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // 他 test/file の broadcast 済み standard intent が mount 復元され、新規決済ケースを
+  // 「送信中」の latch へ誤って固定する波及を断つ。
+  window.sessionStorage.removeItem(STANDARD_INTENT_STORAGE_KEY);
   writeCallIdx = 0;
   writeMocks.merchant.writeContract = vi.fn();
   writeMocks.merchant.reset = vi.fn();
@@ -205,7 +213,7 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     const { rerender } = render(<PaymentForm />);
 
     // 初期: 「10 USDC を支払う」 button が活性 (standard mode は SA 不要)
-    const payBtn = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    const payBtn = await findReadyPayButton();
     expect(payBtn).not.toBeDisabled();
 
     // click → useStandardPayment.mutate → merchantWrite.writeContract 実呼出
@@ -261,7 +269,7 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     const { rerender } = render(<PaymentForm />);
 
     // 送信 → merchant broadcast → receipt 確定 (= phase success, standard.data 定義済)
-    await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
+    await user.click(await findReadyPayButton());
     expect(writeMocks.merchant.writeContract).toHaveBeenCalledOnce();
     act(() => {
       writeMocks.merchant.data = MERCHANT_TX;
@@ -297,7 +305,7 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     const { rerender } = render(<PaymentForm />);
 
-    await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
+    await user.click(await findReadyPayButton());
     expect(writeMocks.merchant.writeContract).toHaveBeenCalledOnce();
 
     act(() => {

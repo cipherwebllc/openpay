@@ -3,6 +3,7 @@ import type { Hex } from 'viem';
 import {
   verifyJpycFeeTransfer,
   verifyJpycFeeOnChain,
+  verifyJpycStandardFeePairOnChain,
   verifyJpycTransferTo,
   verifyJpycTransferToOnChain,
   type FeeReceiptLog,
@@ -176,7 +177,6 @@ describe('verifyJpycFeeTransfer', () => {
 
 describe('verifyJpycFeeOnChain', () => {
   const txHash = `0x${'1'.repeat(64)}` as Hex;
-
   it('status=success → 純関数へ委譲し ok', async () => {
     const publicClient = {
       getTransactionReceipt: vi.fn().mockResolvedValue({
@@ -342,6 +342,60 @@ describe('verifyJpycTransferToOnChain', () => {
     expect(r).toEqual({ ok: true, value: MIN, blockNumber: 7n });
   });
 
+  it('receipt.from から merchant への direct Transfer 額だけを additive に返す', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [
+          transferLog({ from: FROM, to: TO, value: MIN }),
+          transferLog({ from: FORWARDER, to: TO, value: 1n }),
+        ],
+        blockNumber: 7n,
+        transactionIndex: 4,
+        from: FROM,
+      }),
+    };
+    const r = await verifyJpycTransferToOnChain({
+      publicClient,
+      txHash,
+      expected: toExpected,
+    });
+    expect(r).toEqual({
+      ok: true,
+      value: MIN + 1n,
+      blockNumber: 7n,
+      transactionIndex: 4,
+      receiptFrom: FROM,
+      directValue: MIN,
+    });
+  });
+
+  it('同一 receipt の merchant Transfer source→feeReceiver 額を server-side 集計', async () => {
+    const feeValue = 9n;
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [
+          transferLog({ from: FORWARDER, to: TO, value: MIN }),
+          transferLog({ from: FORWARDER, to: OTHER, value: feeValue }),
+        ],
+        blockNumber: 7n,
+      }),
+    };
+    const r = await verifyJpycTransferToOnChain({
+      publicClient,
+      txHash,
+      expected: { ...toExpected, feeReceiver: OTHER },
+    });
+    expect(r).toEqual({
+      ok: true,
+      value: MIN,
+      blockNumber: 7n,
+      merchantSource: FORWARDER,
+      sameSourceFeeValue: feeValue,
+    });
+  });
+
   it('status=reverted → tx_reverted', async () => {
     const publicClient = {
       getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'reverted', logs: [] }),
@@ -349,5 +403,384 @@ describe('verifyJpycTransferToOnChain', () => {
     expect(
       await verifyJpycTransferToOnChain({ publicClient, txHash, expected: toExpected }),
     ).toEqual({ ok: false, reason: 'tx_reverted' });
+  });
+});
+
+describe('verifyJpycStandardFeePairOnChain', () => {
+  const merchantTxHash = `0x${'3'.repeat(64)}` as Hex;
+  const feeTxHash = `0x${'4'.repeat(64)}` as Hex;
+  const pairExpected = {
+    token: TOKEN,
+    merchant: TO,
+    merchantValue: MIN,
+    feeReceiver: OTHER,
+    feeMinValue: MIN,
+  } as const;
+  it('同一 on-chain payer の merchant 後 fee Transfer を receipt 各 1 回で検証', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: OTHER })],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: true, value: MIN, blockNumber: 101n });
+    expect(publicClient.getTransactionReceipt.mock.calls).toEqual([
+      [{ hash: merchantTxHash }],
+      [{ hash: feeTxHash }],
+    ]);
+  });
+
+  it('別 payer の無関係な fee tx は payer_mismatch', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: OTHER, to: OTHER })],
+          blockNumber: 101n,
+          from: OTHER,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: false, reason: 'payer_mismatch' });
+  });
+
+  it('merchant leg より古い履歴 fee tx は fee_before_merchant', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: OTHER })],
+          blockNumber: 99n,
+          from: FROM,
+          transactionIndex: 9,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: false, reason: 'fee_before_merchant' });
+  });
+
+  it.each([
+    [1, 1],
+    [0, 1],
+  ])(
+    'same block で fee transactionIndex=%i が merchant=%i 以前なら拒否',
+    async (feeIndex, merchantIndex) => {
+      const publicClient = {
+          getTransactionReceipt: vi
+          .fn()
+          .mockResolvedValueOnce({
+            status: 'success',
+            logs: [transferLog({ from: FROM, to: TO })],
+            blockNumber: 100n,
+            from: FROM,
+            transactionIndex: merchantIndex,
+          })
+          .mockResolvedValueOnce({
+            status: 'success',
+            logs: [transferLog({ from: FROM, to: OTHER })],
+            blockNumber: 100n,
+            from: FROM,
+            transactionIndex: feeIndex,
+          }),
+      };
+
+      expect(
+        await verifyJpycStandardFeePairOnChain({
+          publicClient,
+          merchantTxHash,
+          feeTxHash,
+          expected: pairExpected,
+        }),
+      ).toEqual({ ok: false, reason: 'fee_before_merchant' });
+    },
+  );
+
+  it('same block でも fee transactionIndex が merchant より後なら受理', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: OTHER })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 2,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: true, value: MIN, blockNumber: 100n });
+  });
+
+  it('tx sender が同じでも JPYC Transfer payer が別なら拒否', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: OTHER, to: OTHER })],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('merchant receipt の JPYC Transfer payer も tx sender と一致必須', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: OTHER, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: OTHER })],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: false, reason: 'no_matching_transfer' });
+  });
+
+  it('merchant leg の同 payer direct 額が保存注文額より多くても拒否', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO, value: MIN + 1n })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: OTHER })],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: false, reason: 'merchant_amount_mismatch' });
+  });
+
+  it('同 payer の別用途の大額送金を注文 fee として受理しない', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [
+            transferLog({
+              from: FROM,
+              to: OTHER,
+              value: pairExpected.feeMinValue + 1n,
+            }),
+          ],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: pairExpected,
+      }),
+    ).toEqual({ ok: false, reason: 'fee_amount_mismatch' });
+  });
+
+  it('店舗負担の保存済み第2候補 (minimum+1 minor unit) だけは exact fee として受理', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [
+            transferLog({
+              from: FROM,
+              to: OTHER,
+              value: pairExpected.feeMinValue + 1n,
+            }),
+          ],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: {
+          ...pairExpected,
+          feeAlternateValue: pairExpected.feeMinValue + 1n,
+        },
+      }),
+    ).toEqual({
+      ok: true,
+      value: pairExpected.feeMinValue + 1n,
+      blockNumber: 101n,
+    });
+  });
+
+  it('第2候補を持つ店舗負担でも minimum+2 minor units は拒否', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [transferLog({ from: FROM, to: TO })],
+          blockNumber: 100n,
+          from: FROM,
+          transactionIndex: 1,
+        })
+        .mockResolvedValueOnce({
+          status: 'success',
+          logs: [
+            transferLog({
+              from: FROM,
+              to: OTHER,
+              value: pairExpected.feeMinValue + 2n,
+            }),
+          ],
+          blockNumber: 101n,
+          from: FROM,
+          transactionIndex: 0,
+        }),
+    };
+
+    expect(
+      await verifyJpycStandardFeePairOnChain({
+        publicClient,
+        merchantTxHash,
+        feeTxHash,
+        expected: {
+          ...pairExpected,
+          feeAlternateValue: pairExpected.feeMinValue + 1n,
+        },
+      }),
+    ).toEqual({ ok: false, reason: 'fee_amount_mismatch' });
   });
 });

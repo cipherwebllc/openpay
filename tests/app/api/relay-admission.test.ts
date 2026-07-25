@@ -9,6 +9,7 @@ type RelayAuth = { from: string; to: string };
 type SettleInput = {
   params: { from: string };
   rateLimitKeys: string[];
+  callerFeeFloorValue: bigint;
 };
 
 const CUSTOMER_A = '0x0000000000000000000000000000000000000def';
@@ -71,6 +72,7 @@ vi.mock('@/lib/relay/forwarderConfig', () => ({
   jpycForwarderFor: () => hold.forwarder,
   configuredJpycForwarderFor: () => hold.forwarderAddress,
   isRecoverRequiredChain: () => false,
+  relayGasFeeValue: () => 2n,
 }));
 
 vi.mock('@/lib/relay/forwarderSettleService', () => ({
@@ -116,6 +118,7 @@ vi.mock('../../../app/api/auth/siwe/_session', () => ({
 }));
 
 vi.mock('@/lib/x402/facilitatorConfig', () => ({
+  x402FacilitatorConfig: { feeFloorWei: 1n },
   x402FacilitatorReady: () => ({ ready: true }),
 }));
 vi.mock('@/lib/x402/facilitatorSettle', () => ({
@@ -343,6 +346,8 @@ describe('post-verify wallet limiter keys', () => {
     ]);
     expect(hold.relay.mock.calls[1][3]).toEqual([getAddress(CUSTOMER_A)]);
     expect(hold.settle.mock.calls[1][0].rateLimitKeys).toEqual([CUSTOMER_A]);
+    expect(hold.settle.mock.calls[0][0].callerFeeFloorValue).toBe(2n);
+    expect(hold.settle.mock.calls[1][0].callerFeeFloorValue).toBe(1n);
   });
 
   it('同一 /24 の別 wallet は IP 120 上限内なら別 wallet key で通る', async () => {

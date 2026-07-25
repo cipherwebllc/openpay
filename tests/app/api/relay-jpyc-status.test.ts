@@ -69,12 +69,21 @@ vi.mock('@/lib/relay/forwarderSettle', async () => {
   };
 });
 
-import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import {
+  checkIpRateLimit,
+  readIdempotency,
+} from '@/lib/relay/relayGuards';
+import {
+  readAuthorizationUsed,
+  findAuthorizationUsedTransactionHash,
+} from '@/lib/relay/relayProvider';
+import { recoverTransferAuthorizationSigner } from '@/lib/jpycEip3009';
 import { POST } from '@/app/api/relay/jpyc/status/route';
 
 const FROM = '0x1111111111111111111111111111111111111111';
 const HASH = `0x${'a'.repeat(64)}` as Hex;
 const LOG_HASH = `0x${'b'.repeat(64)}` as Hex;
+const NONCE = `0x${'1'.repeat(64)}` as Hex;
 const intent = {
   chainId: 80002,
   from: FROM,
@@ -82,7 +91,7 @@ const intent = {
   value: '1000000000000000000',
   validAfter: '0',
   validBefore: '9999999999',
-  nonce: `0x${'1'.repeat(64)}`,
+  nonce: NONCE,
   signature: `0x${'2'.repeat(130)}`,
 };
 
@@ -145,6 +154,56 @@ describe('POST /api/relay/jpyc/status', () => {
   it('authorization unused を返す', async () => {
     const res = await POST(req());
     expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+  });
+
+  it('nonce lookup は署名なしで同じ read-only 状態を照会する', async () => {
+    h.used = true;
+    h.logHash = LOG_HASH;
+    const res = await POST(
+      req({
+        lookup: 'nonce',
+        chainId: 80002,
+        from: FROM,
+        nonce: NONCE,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      state: 'settled',
+      txHash: LOG_HASH,
+    });
+    expect(readIdempotency).toHaveBeenCalledWith(
+      'relay:idem:',
+      80002,
+      FROM,
+      NONCE,
+    );
+    expect(readAuthorizationUsed).toHaveBeenCalledWith(
+      80002,
+      expect.any(String),
+      FROM,
+      NONCE,
+    );
+    expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
+      80002,
+      expect.any(String),
+      FROM,
+      NONCE,
+    );
+    expect(recoverTransferAuthorizationSigner).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ lookup: 'nonce', chainId: 1, from: FROM, nonce: NONCE }],
+    [{ lookup: 'nonce', chainId: 80002, from: 'not-an-address', nonce: NONCE }],
+    [{ lookup: 'nonce', chainId: 80002, from: FROM, nonce: '0x1234' }],
+  ])('不正な nonce lookup は 400', async (body) => {
+    const res = await POST(req(body));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+    expect(readIdempotency).not.toHaveBeenCalled();
   });
 
   it('RPC 障害は HTTP 200 indeterminate', async () => {

@@ -26,12 +26,64 @@ import { logger } from '@/lib/logger';
 
 export const RL_MAX = 5; // window 内の最大 relay 回数 (per key)
 export const RL_WINDOW_MS = 60_000;
+const DEFAULT_RELAY_DAILY_TX_CAP = 500;
+const CAP_RATIO_DIVISOR = 5; // 20%
+
+// cap を巨大値/NaN 相当で事実上無効化すると、低回収 settle が共有予算を枯らす波及を再び許す。
+// env は非負の decimal safe integer だけを採用し、それ以外は呼出側の安全な既定値へ倒す。
+function nonNegativeSafeInteger(raw: string | undefined): number | null {
+  if (!raw || !/^[0-9]+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+const twentyPercent = (cap: number) => Math.floor(cap / CAP_RATIO_DIVISOR);
+
 // B4: chain 日次の relay 件数上限 (Sybil による POL 枯渇 griefing の circuit breaker)。
-export const RELAY_DAILY_TX_CAP = (() => {
-  const raw = process.env.RELAY_DAILY_TX_CAP;
-  return raw && /^[0-9]+$/.test(raw) ? Number(raw) : 500;
-})();
+export const RELAY_DAILY_TX_CAP =
+  nonNegativeSafeInteger(process.env.RELAY_DAILY_TX_CAP) ??
+  DEFAULT_RELAY_DAILY_TX_CAP;
+// ガスフロア未満しか回収しない settle の専用日次枠。共有 relay:budget: より先にこの小さい枠を
+// 消費させ、低回収 settle の連打が決済 / CSV パス / x402 共通の日次枠を枯らす波及を断つ。
+// 未指定/不正値は実効共有枠の 20%。明示値も共有枠が正なら 1 件以上小さく clamp し、専用枠が
+// 共有枠を丸ごと消費して通常 relay を止める波及を断つ。0 は sub-floor settle の停止設定として維持。
+const requestedSubfloorCap =
+  nonNegativeSafeInteger(process.env.RELAY_SUBFLOOR_DAILY_TX_CAP) ??
+  twentyPercent(RELAY_DAILY_TX_CAP);
+export const RELAY_SUBFLOOR_DAILY_TX_CAP =
+  RELAY_DAILY_TX_CAP > 0
+    ? Math.min(requestedSubfloorCap, RELAY_DAILY_TX_CAP - 1)
+    : requestedSubfloorCap;
+// 同じ払い元が専用日次枠を単独で枯らさないための UTC 日次 cap。未指定/不正値は実効専用枠の 20%。
+// fresh EOA への迂回は上の chain 単位 cap が止めるため、この limiter 単独を Sybil 防御とはしない。
+const requestedSubfloorPayerCap =
+  nonNegativeSafeInteger(process.env.RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP) ??
+  twentyPercent(RELAY_SUBFLOOR_DAILY_TX_CAP);
+export const RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP =
+  RELAY_SUBFLOOR_DAILY_TX_CAP === 0
+    ? 0
+    : RELAY_SUBFLOOR_DAILY_TX_CAP === 1
+      ? Math.min(requestedSubfloorPayerCap, 1)
+      : Math.min(
+          requestedSubfloorPayerCap,
+          RELAY_SUBFLOOR_DAILY_TX_CAP - 1,
+        );
 export const IDEM_TTL_SEC = 1800;
+
+declare const gasBudgetRefundTokenBrand: unique symbol;
+declare const subfloorBudgetRefundTokenBrand: unique symbol;
+
+// refund 対象は check 時に実際に INCR した UTC 日付込み key そのもの。opaque token として
+// 呼出側へ渡し、refund 時の再計算で翌日 counter を減らす波及を構造的に断つ。
+export type GasBudgetRefundToken = string & {
+  readonly [gasBudgetRefundTokenBrand]: true;
+};
+export type SubfloorBudgetRefundToken = string & {
+  readonly [subfloorBudgetRefundTokenBrand]: true;
+};
+export type BudgetCheckResult<TToken> =
+  | { allowed: boolean; consumed: true; refundToken: TToken }
+  | { allowed: boolean; consumed: false; refundToken: null };
 
 // KV sliding-window rate-limit (kv は list ops のみなので timestamp list で近似)。
 // KV 未設定時は通す (本番は KV 設定が前提)。**両 route 共有キー** relay:rl: (関所資源が同一 relayer)。
@@ -96,44 +148,123 @@ export async function checkIpRateLimit(
   }
 }
 
-// 日次予算カウンタのキー導出 (INCR で消費・DECR で refund する側でキーを完全一致させるため
-// 関数に括り出して共有する)。YYYYMMDD は UTC。**両 route 共有キー**。
+// 日次予算カウンタのキー導出。check が導出した UTC 日付込み key を refundToken として返し、
+// DECR 側は再計算しない。YYYYMMDD は UTC。**両 route 共有キー**。
 export const gasBudgetKey = (chainId: number) =>
   `relay:budget:${chainId}:${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+
+const utcDateKey = () =>
+  new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+// ガスフロア未満 settle 専用の chain 日次予算。通常 relay の gasBudgetKey と名前空間を分け、
+// 専用 cap 超過を共有 relay:budget: へ到達させない。
+export const subfloorBudgetKey = (chainId: number) =>
+  `relay:subfloor:budget:${chainId}:${utcDateKey()}`;
+
+// 署名検証済みの払い元ごとの UTC 日次 limiter。生 IP や未署名 hint ではなく EIP-3009 の from を
+// 鍵にするため、同じ資金元からの低回収 settle 連打を実際に制限できる。
+export const subfloorPayerRateLimitKey = (
+  chainId: number,
+  payer: string,
+) => `relay:subfloor:payer:${chainId}:${payer.toLowerCase()}:${utcDateKey()}`;
+
+export async function checkSubfloorPayerRateLimit(
+  chainId: number,
+  payer: string,
+): Promise<boolean> {
+  if (!isKvConfigured()) return true;
+  const key = subfloorPayerRateLimitKey(chainId, payer);
+  const r = await kvIncr(key);
+  if (!r.ok) {
+    // 専用 limiter のストレージ障害を、正規の小口決済本体へ波及させない (fail-open)。
+    logger.warn('relay subfloor payer limit INCR failed (fail-open)', {
+      chainId,
+    });
+    return true;
+  }
+  // EXPIRE 応答喪失で古い日次キーが永続しても UTC 日付で次日の判定は分離される。毎回の再設定で
+  // stale key 自体も回収し、付帯 limiter の障害が翌日の小口決済へ波及しないようにする。
+  await kvExpire(key, 2 * 24 * 3600);
+  return r.value <= RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP;
+}
+
+// ガスフロア未満 settle 専用の日次予算。checkGasBudget と同じ
+// { allowed, consumed, refundToken } 契約を独立の名前空間で持ち、未送信が確実な場合だけ
+// refundSubfloorBudget で戻す。
+export async function checkSubfloorBudget(
+  chainId: number,
+): Promise<BudgetCheckResult<SubfloorBudgetRefundToken>> {
+  if (!isKvConfigured()) {
+    return { allowed: true, consumed: false, refundToken: null };
+  }
+  const key = subfloorBudgetKey(chainId);
+  const r = await kvIncr(key);
+  if (!r.ok) {
+    // 専用 budget のストレージ障害を、正規の小口決済本体へ波及させない (fail-open)。
+    logger.warn('relay subfloor budget INCR failed (fail-open)', { chainId });
+    return { allowed: true, consumed: false, refundToken: null };
+  }
+  await kvExpire(key, 2 * 24 * 3600);
+  return {
+    allowed: r.value <= RELAY_SUBFLOOR_DAILY_TX_CAP,
+    consumed: true,
+    refundToken: key as SubfloorBudgetRefundToken,
+  };
+}
+
+export async function refundSubfloorBudget(
+  refundToken: SubfloorBudgetRefundToken,
+): Promise<void> {
+  if (!isKvConfigured()) return;
+  const r = await kvDecr(refundToken);
+  if (!r.ok) {
+    // 専用枠の返却失敗を、共有予算の返却や決済応答へ波及させない (fail-quiet)。
+    logger.warn('relay subfloor budget DECR failed (枠が 1 過消費のまま)');
+  }
+}
 
 // B4: 日次グローバル予算 (Sybil circuit breaker)。INCR relay:budget:{chainId}:{YYYYMMDD} し、
 // 初回のみ TTL 2 日。count が cap 以下なら許可。fail-open: KV 未設定/障害は許可 (rate-limit と
 // 同方針・alpha は可用性優先)。近似カウンタで足りる (応答喪失の二重カウントは早めに止まる=安全側)。
 //
-// 返り値 (CDX-5): { allowed, consumed }。
+// 返り値 (CDX-5): { allowed, consumed, refundToken }。
 //   allowed  = relay を許可するか。
 //   consumed = カウンタを実際に INCR したか。KV 未設定 / INCR 失敗の fail-open allow では INCR して
 //              いないので consumed=false。consumed=false の枠を後で DECR (refund) すると、INCR して
 //              いないカウンタを減らして負に振れ、cap を超える余剰枠を与えてしまう (= refund しない)。
+//   refundToken = INCR 対象の UTC 日付込み key。consumed=true のときだけ存在し、返却はこの key に限定。
 export async function checkGasBudget(
   chainId: number,
-): Promise<{ allowed: boolean; consumed: boolean }> {
-  if (!isKvConfigured()) return { allowed: true, consumed: false };
+): Promise<BudgetCheckResult<GasBudgetRefundToken>> {
+  if (!isKvConfigured()) {
+    return { allowed: true, consumed: false, refundToken: null };
+  }
   const key = gasBudgetKey(chainId);
   const r = await kvIncr(key);
   if (!r.ok) {
     logger.warn('relay gas budget INCR failed (fail-open)', { chainId });
-    return { allowed: true, consumed: false };
+    return { allowed: true, consumed: false, refundToken: null };
   }
   // EXPIRE は毎回設定する (初回 EXPIRE が応答喪失すると TTL 無しの stale key が永続化するため・
   // Codex P2)。EXPIRE は冪等なので再設定は無害。
   await kvExpire(key, 2 * 24 * 3600);
-  return { allowed: r.value <= RELAY_DAILY_TX_CAP, consumed: true };
+  return {
+    allowed: r.value <= RELAY_DAILY_TX_CAP,
+    consumed: true,
+    refundToken: key as GasBudgetRefundToken,
+  };
 }
 
 // checkGasBudget で INCR 消費した日次枠を DECR で 1 戻す。tx が 1 件も broadcast されなかった
-// ことが確実な失敗でのみ呼ぶ (jpycRelay の refundGasBudget 契約)。日付跨ぎ直後の refund は
-// 新しい日の枠を 1 減らすが、減る方向の歪みは安全側 (枠が厳しくなるだけ) で頻度も無視できる。
-export async function refundGasBudget(chainId: number): Promise<void> {
+// ことが確実な失敗でのみ呼ぶ (jpycRelay の refundGasBudget 契約)。check 時の opaque token を
+// そのまま使い、UTC 日跨ぎ後も新しい日の counter を減らさない。
+export async function refundGasBudget(
+  refundToken: GasBudgetRefundToken,
+): Promise<void> {
   if (!isKvConfigured()) return;
-  const r = await kvDecr(gasBudgetKey(chainId));
+  const r = await kvDecr(refundToken);
   if (!r.ok) {
-    logger.warn('relay gas budget DECR failed (枠が 1 過消費のまま)', { chainId });
+    logger.warn('relay gas budget DECR failed (枠が 1 過消費のまま)');
   }
 }
 

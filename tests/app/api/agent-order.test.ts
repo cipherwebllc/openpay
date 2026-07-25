@@ -42,10 +42,52 @@ const routeMocks = vi.hoisted(() => ({
   verify: vi.fn(),
   settle: vi.fn(),
   notify: vi.fn(),
+  status: vi.fn(),
+  statusAllowed: vi.fn(),
 }));
 vi.mock('@/app/api/facilitator/verify/route', () => ({ POST: routeMocks.verify }));
 vi.mock('@/app/api/facilitator/settle/route', () => ({ POST: routeMocks.settle }));
 vi.mock('@/app/api/order/notify/route', () => ({ POST: routeMocks.notify }));
+vi.mock('@/lib/x402/facilitatorStatus', () => ({
+  resolveFacilitatorPaymentStatus: routeMocks.status,
+}));
+vi.mock('@/lib/x402/facilitatorStatusRateLimit', () => ({
+  checkFacilitatorStatusRateLimit: routeMocks.statusAllowed,
+}));
+
+const redeliveryMocks = vi.hoisted(() => ({
+  identity: vi.fn(),
+  lookup: vi.fn(),
+  claim: vi.fn(),
+  promote: vi.fn(),
+  release: vi.fn(),
+  preBroadcast: vi.fn(),
+  record: null as Record<string, unknown> | null,
+}));
+vi.mock('@/lib/x402/paymentRedelivery', () => ({
+  paymentRedeliveryIdentity: redeliveryMocks.identity,
+  lookupPaymentRedelivery: redeliveryMocks.lookup,
+  claimPaymentRedelivery: redeliveryMocks.claim,
+  promotePaymentRedelivery: redeliveryMocks.promote,
+  releasePaymentRedelivery: redeliveryMocks.release,
+  isFacilitatorPreBroadcastRejection: redeliveryMocks.preBroadcast,
+}));
+
+const PAYMENT_IDENTITY = {
+  keyIdentity: `x402:redelivery:${'a'.repeat(64)}`,
+  credential: 'b'.repeat(64),
+};
+
+function bindingMatches(
+  record: Record<string, unknown>,
+  binding: { scope: string; resource: string },
+): boolean {
+  return (
+    record.scope === binding.scope &&
+    record.resource === binding.resource &&
+    record.credential === PAYMENT_IDENTITY.credential
+  );
+}
 
 function record(overrides: Partial<HandleRecord> = {}): HandleRecord {
   return {
@@ -135,7 +177,7 @@ function paymentHeader(): string {
     scheme: 'exact',
     network: 'eip155:80002',
     payload: {
-      signature: `0x${'11'.repeat(65)}`,
+      signature: `0x${'01'.repeat(32)}${'02'.repeat(32)}1b`,
       authorization: {
         from: PAYER,
         validAfter: '0',
@@ -156,6 +198,107 @@ beforeEach(() => {
   routeMocks.verify.mockReset();
   routeMocks.settle.mockReset();
   routeMocks.notify.mockReset();
+  routeMocks.status.mockReset();
+  routeMocks.statusAllowed.mockReset();
+  routeMocks.status.mockResolvedValue({
+    ok: true,
+    chainId: AMOY,
+    payer: PAYER,
+    state: 'unused',
+  });
+  routeMocks.statusAllowed.mockResolvedValue(true);
+
+  redeliveryMocks.record = null;
+  redeliveryMocks.identity.mockReset();
+  redeliveryMocks.lookup.mockReset();
+  redeliveryMocks.claim.mockReset();
+  redeliveryMocks.promote.mockReset();
+  redeliveryMocks.release.mockReset();
+  redeliveryMocks.preBroadcast.mockReset();
+  redeliveryMocks.identity.mockReturnValue(PAYMENT_IDENTITY);
+  redeliveryMocks.preBroadcast.mockImplementation(
+    (status: number, body: Record<string, unknown>) =>
+      status >= 400 &&
+      (body.errorReason === 'rate_limited' ||
+        body.error === 'ip_rate_limited'),
+  );
+  redeliveryMocks.lookup.mockImplementation(
+    async (
+      _identity: unknown,
+      binding: { scope: string; resource: string },
+    ) => {
+      const existing = redeliveryMocks.record;
+      if (existing === null) return { kind: 'missing' };
+      return bindingMatches(existing, binding)
+        ? { kind: 'match', record: existing }
+        : { kind: 'conflict' };
+    },
+  );
+  redeliveryMocks.claim.mockImplementation(
+    async (input: {
+      binding: { scope: string; resource: string };
+      facilitatorBody: Record<string, unknown>;
+      context: Record<string, unknown>;
+    }) => {
+      const existing = redeliveryMocks.record;
+      if (existing !== null) {
+        return bindingMatches(existing, input.binding)
+          ? { kind: 'match', record: existing }
+          : { kind: 'conflict' };
+      }
+      const pending = {
+        version: 1,
+        state: 'pending',
+        scope: input.binding.scope,
+        resource: input.binding.resource,
+        credential: PAYMENT_IDENTITY.credential,
+        ownerToken: 'c'.repeat(64),
+        facilitatorBody: input.facilitatorBody,
+        context: input.context,
+      };
+      redeliveryMocks.record = pending;
+      return { kind: 'claimed', record: pending };
+    },
+  );
+  redeliveryMocks.promote.mockImplementation(
+    async (input: {
+      binding: { scope: string; resource: string };
+      settlement: Record<string, unknown>;
+    }) => {
+      const existing = redeliveryMocks.record;
+      if (existing === null) return { kind: 'missing' };
+      if (!bindingMatches(existing, input.binding)) {
+        return { kind: 'conflict' };
+      }
+      if (existing.state === 'settled') {
+        return { kind: 'already-settled', record: existing };
+      }
+      const settled = {
+        ...existing,
+        state: 'settled',
+        settlement: input.settlement,
+      };
+      redeliveryMocks.record = settled;
+      return { kind: 'promoted', record: settled };
+    },
+  );
+  redeliveryMocks.release.mockImplementation(
+    async (input: {
+      binding: { scope: string; resource: string };
+      ownerToken: string;
+    }) => {
+      const existing = redeliveryMocks.record;
+      if (
+        existing === null ||
+        !bindingMatches(existing, input.binding) ||
+        existing.ownerToken !== input.ownerToken
+      ) {
+        return { kind: 'not-owner' };
+      }
+      redeliveryMocks.record = null;
+      return { kind: 'released' };
+    },
+  );
 });
 
 afterEach(() => {
@@ -634,6 +777,54 @@ describe('agent-order pay route', () => {
     expect(paymentResponse).toMatchObject({ success: true, transaction: TX_HASH });
   });
 
+  it('broadcast 前 rate limit は所有 claim を解放し、authorization 期限内の再試行を塞がない', async () => {
+    routeMocks.verify.mockImplementation(
+      async () => NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle
+      .mockResolvedValueOnce(
+        NextResponse.json(
+          {
+            success: false,
+            errorReason: 'rate_limited',
+            payer: PAYER,
+          },
+          { status: 429 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        NextResponse.json({
+          success: true,
+          transaction: TX_HASH,
+          payer: PAYER,
+        }),
+      );
+    routeMocks.notify.mockResolvedValue(NextResponse.json({ ok: true }));
+    const { pay } = await load();
+    const request = () =>
+      pay.GET(
+        payReq(`h=shop&cart=${CART}`, {
+          'X-PAYMENT': paymentHeader(),
+        }),
+      );
+
+    const limited = await request();
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).errorReason).toBe('rate_limited');
+    expect(redeliveryMocks.release).toHaveBeenCalledWith({
+      identity: PAYMENT_IDENTITY,
+      binding: expect.objectContaining({ scope: 'agent-order' }),
+      ownerToken: 'c'.repeat(64),
+    });
+    expect(redeliveryMocks.record).toBeNull();
+
+    const retried = await request();
+    expect(retried.status).toBe(200);
+    expect(routeMocks.verify).toHaveBeenCalledTimes(2);
+    expect(routeMocks.settle).toHaveBeenCalledTimes(2);
+    expect(routeMocks.notify).toHaveBeenCalledOnce();
+  });
+
   it('notify 失敗は決済成功を巻き込まない (200 + orderRegistered:false)', async () => {
     routeMocks.verify.mockResolvedValue(
       NextResponse.json({ isValid: true, payer: PAYER }),
@@ -669,6 +860,442 @@ describe('agent-order pay route', () => {
     );
     expect(res.status).toBe(200);
     expect((await res.json()).orderRegistered).toBe(false);
+  });
+
+  it('settle pending → 同一 payment/resource の retry で二重 settle せず受注を回復する', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(
+        {
+          success: false,
+          errorReason: 'pending',
+          transaction: TX_HASH,
+          payer: PAYER,
+        },
+        { status: 202 },
+      ),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'indeterminate',
+    });
+    routeMocks.notify.mockResolvedValue(
+      NextResponse.json({ ok: true, orderId: `agent-${TX_HASH.slice(0, 18)}` }),
+    );
+
+    const { pay } = await load();
+    const first = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+    expect(first.status).toBe(202);
+    expect(routeMocks.verify).toHaveBeenCalledOnce();
+    expect(routeMocks.settle).toHaveBeenCalledOnce();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'settled',
+      txHash: TX_HASH,
+    });
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      txHash: TX_HASH,
+      orderRegistered: true,
+    });
+    expect(routeMocks.verify).toHaveBeenCalledOnce();
+    expect(routeMocks.settle).toHaveBeenCalledOnce();
+    expect(routeMocks.status).toHaveBeenCalledTimes(2);
+    expect(routeMocks.notify).toHaveBeenCalledOnce();
+    const paymentResponse = JSON.parse(
+      Buffer.from(
+        res.headers.get('x-payment-response') ?? '',
+        'base64',
+      ).toString('utf8'),
+    );
+    expect(paymentResponse).toEqual({
+      success: true,
+      transaction: TX_HASH,
+      network: 'eip155:80002',
+      payer: PAYER,
+    });
+  });
+
+  it('settle pending が indeterminate の間は既存 202 を保ち受注しない', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    const pendingBody = {
+      success: false,
+      errorReason: 'pending',
+      transaction: TX_HASH,
+      payer: PAYER,
+    };
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(pendingBody, { status: 202 }),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'indeterminate',
+    });
+
+    const { pay } = await load();
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual(pendingBody);
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('初回 pending record があれば署名期限後の retry も verify を再実行せず回復する', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(
+        {
+          success: false,
+          errorReason: 'pending',
+          transaction: TX_HASH,
+          payer: PAYER,
+        },
+        { status: 202 },
+      ),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'indeterminate',
+    });
+    const { pay } = await load();
+    const first = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+    expect(first.status).toBe(202);
+
+    routeMocks.verify.mockClear();
+    routeMocks.settle.mockClear();
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: false, invalidReason: 'expired' }),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'settled',
+      txHash: TX_HASH,
+    });
+    routeMocks.notify.mockResolvedValue(
+      NextResponse.json({ ok: true, orderId: `agent-${TX_HASH.slice(0, 18)}` }),
+    );
+
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      txHash: TX_HASH,
+      orderRegistered: true,
+    });
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+    expect(routeMocks.notify).toHaveBeenCalledOnce();
+  });
+
+  it('同じ署名を同額の別 cart/table/pickupAt へ再提示しても受注へ付け替えない', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(
+        {
+          success: false,
+          errorReason: 'pending',
+          transaction: TX_HASH,
+          payer: PAYER,
+        },
+        { status: 202 },
+      ),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'indeterminate',
+    });
+    const { pay } = await load();
+    const pickupAt = '1800000000000';
+    const originalQuery =
+      `h=shop&cart=${CART}&table=A5&pickupAt=${pickupAt}`;
+    expect(
+      (
+        await pay.GET(
+          payReq(originalQuery, { 'X-PAYMENT': paymentHeader() }),
+        )
+      ).status,
+    ).toBe(202);
+
+    routeMocks.verify.mockClear();
+    routeMocks.settle.mockClear();
+    routeMocks.status.mockClear();
+    const sameAmountCart = encodeAgentCart([
+      { id: 'beer', qty: 1 },
+      { id: 'karaage', qty: 2 },
+    ]);
+    for (const query of [
+      `h=shop&cart=${sameAmountCart}&table=A5&pickupAt=${pickupAt}`,
+      `h=shop&cart=${CART}&table=B6&pickupAt=${pickupAt}`,
+      `h=shop&cart=${CART}&table=A5&pickupAt=1800000060000`,
+    ]) {
+      const res = await pay.GET(
+        payReq(query, { 'X-PAYMENT': paymentHeader() }),
+      );
+      expect(res.status).toBe(402);
+      expect((await res.json()).error).toBe('payment_invalid');
+    }
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+    expect(routeMocks.status).not.toHaveBeenCalled();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('pending 後に menu/price/live が変わっても初回 snapshot の注文だけを回復する', async () => {
+    shopLiveMocks.configured = true;
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(
+        {
+          success: false,
+          errorReason: 'pending',
+          transaction: TX_HASH,
+          payer: PAYER,
+        },
+        { status: 202 },
+      ),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'indeterminate',
+    });
+    routeMocks.notify.mockResolvedValue(NextResponse.json({ ok: true }));
+    const { pay } = await load({ shopLive: '1' });
+    const request = () =>
+      payReq(`h=shop&cart=${CART}&table=A5`, {
+        'X-PAYMENT': paymentHeader(),
+      });
+    expect((await pay.GET(request())).status).toBe(202);
+
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        acceptingOrders: false,
+        menu: [
+          { id: 'karaage', name: '値上げ後', price: '9999' },
+          { id: 'beer', name: '販売終了', price: '9999' },
+        ],
+      },
+    } as Partial<HandleRecord>);
+    shopLiveMocks.kvGet.mockResolvedValue({
+      ok: true,
+      value: JSON.stringify({ soldOut: ['beer'], paused: true, updatedAt: 2 }),
+    });
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'settled',
+      txHash: TX_HASH,
+    });
+
+    const recovered = await pay.GET(request());
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toMatchObject({ amountJpyc: '1600' });
+    expect(shopLiveMocks.kvGet).toHaveBeenCalledOnce();
+    const notifyReq = routeMocks.notify.mock.calls[0][0] as Request;
+    const notifyBody = (await notifyReq.json()) as {
+      items: Array<{ name: string; qty: number; price: string }>;
+      description?: string;
+    };
+    expect(notifyBody.items).toEqual([
+      { name: '唐揚げ', qty: 2, price: '500' },
+      { name: 'ビール', qty: 1, price: '600' },
+    ]);
+    expect(notifyBody.description).toBe('A5');
+    expect(routeMocks.verify).toHaveBeenCalledOnce();
+    expect(routeMocks.settle).toHaveBeenCalledOnce();
+  });
+
+  it('matching record の context が壊れていれば status/notify 前に拒否する', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(
+        { success: false, errorReason: 'pending', payer: PAYER },
+        { status: 202 },
+      ),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'indeterminate',
+    });
+    const { pay } = await load();
+    const request = () =>
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() });
+    expect((await pay.GET(request())).status).toBe(202);
+
+    const existing = redeliveryMocks.record!;
+    const context = existing.context as Record<string, unknown>;
+    const items = context.items as Array<Record<string, unknown>>;
+    redeliveryMocks.record = {
+      ...existing,
+      context: {
+        ...context,
+        items: [{ ...items[0], price: '0' }, items[1]],
+      },
+    };
+    routeMocks.status.mockClear();
+    const rejected = await pay.GET(request());
+    expect(rejected.status).toBe(402);
+    expect((await rejected.json()).error).toBe('payment_invalid');
+    expect(routeMocks.status).not.toHaveBeenCalled();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('内部 status recovery も共有 limiter 超過時は二重 settle せず pending を保つ', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json(
+        {
+          success: false,
+          errorReason: 'pending',
+          transaction: TX_HASH,
+          payer: PAYER,
+        },
+        { status: 202 },
+      ),
+    );
+    routeMocks.statusAllowed.mockResolvedValue(false);
+    const { pay } = await load();
+    const request = () =>
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() });
+
+    expect((await pay.GET(request())).status).toBe(202);
+    expect((await pay.GET(request())).status).toBe(202);
+    expect(routeMocks.statusAllowed).toHaveBeenCalledTimes(2);
+    expect(routeMocks.status).not.toHaveBeenCalled();
+    expect(routeMocks.verify).toHaveBeenCalledOnce();
+    expect(routeMocks.settle).toHaveBeenCalledOnce();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('redelivery KV unavailable は新規の従来 verify/settle 成功を止めない', async () => {
+    redeliveryMocks.lookup.mockResolvedValue({ kind: 'unavailable' });
+    redeliveryMocks.claim.mockResolvedValue({ kind: 'unavailable' });
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json({
+        success: true,
+        transaction: TX_HASH,
+        network: 'eip155:80002',
+        payer: PAYER,
+      }),
+    );
+    routeMocks.notify.mockResolvedValue(NextResponse.json({ ok: true }));
+    const { pay } = await load();
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+    expect(res.status).toBe(200);
+    expect(routeMocks.verify).toHaveBeenCalledOnce();
+    expect(routeMocks.settle).toHaveBeenCalledOnce();
+    expect(routeMocks.status).not.toHaveBeenCalled();
+  });
+
+  it('canonical payment identity を作れない payload は verify 前に拒否する', async () => {
+    redeliveryMocks.identity.mockReturnValue(null);
+    const { pay } = await load();
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toBe('invalid_payment_payload');
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it('settle 成功後でも promotion CAS の明示 conflict では別注文を notify しない', async () => {
+    redeliveryMocks.promote.mockResolvedValue({ kind: 'conflict' });
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockResolvedValue(
+      NextResponse.json({
+        success: true,
+        transaction: TX_HASH,
+        network: 'eip155:80002',
+        payer: PAYER,
+      }),
+    );
+    const { pay } = await load();
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toBe('payment_invalid');
+    expect(routeMocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('settled でも txHash 不明なら空 hash で受注せず既存エラーを保つ', async () => {
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: false, invalidReason: 'expired' }),
+    );
+    routeMocks.status.mockResolvedValue({
+      ok: true,
+      chainId: AMOY,
+      payer: PAYER,
+      state: 'settled',
+      txHash: null,
+    });
+
+    const { pay } = await load();
+    const res = await pay.GET(
+      payReq(`h=shop&cart=${CART}`, { 'X-PAYMENT': paymentHeader() }),
+    );
+
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toBe('expired');
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
   });
 
   it('verify が invalid → 402 で settle しない', async () => {

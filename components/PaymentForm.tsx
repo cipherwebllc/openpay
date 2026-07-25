@@ -15,7 +15,7 @@ import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { AlertCircle } from 'lucide-react';
-import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
+import type { SignReassuranceProps } from './SignReassurance';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -42,6 +42,9 @@ const PaymentResultPanel = dynamic(
   () =>
     import('./PaymentResultPanel').then((m) => m.PaymentResultPanel),
   { ssr: false },
+);
+const SignReassurance = dynamic(
+  () => import('./SignReassurance').then((m) => m.SignReassurance),
 );
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -165,6 +168,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
+  // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
+  const standard = useStandardPayment();
 
   // Phase 1 relay は単発 transfer のみ。split 指定時は従来の 7702 経路へ倒す (split 対応は Phase 2)。
   const hasSplit = !!params.split && params.split.length > 0;
@@ -182,7 +188,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
   const resolvedRoute = resolvePaymentRoute({
-    isStandard: params.mode === 'standard' || modeOverride === 'standard',
+    isStandard:
+      params.mode === 'standard' ||
+      modeOverride === 'standard' ||
+      standard.hasAttempt,
     jpycGaslessProvider: resolveJpycGaslessProvider(
       deployment,
       chainId ?? deployment.chainId,
@@ -229,7 +238,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 全フックを常に call し、mode で送信先を分岐 (条件付きフックは禁止)。relay 経路は
   // smart account / gas quote 不要なので enabled=false で skip する。
   const gasless = useBatchPayment(deployment, !isStandard && !useRelay);
-  const standard = useStandardPayment();
   const gasQuote = useGasQuote(deployment, !isStandard && !useRelay);
   // USDC ガスレスが Circle Paymaster に解決される場合は surcharge 込みの quote +
   // permit allowance を Circle 専用フックから取る (route 由来。provider は flag/allowlist/fee で決まる)。
@@ -252,7 +260,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const crossChainAttemptSnapshotRef =
     useRef<PaymentAttemptSnapshot | null>(null);
 
-  // 動的 QR の有効期限。exp 付き QR (FX 換算で生成) のみカウントダウン + 期限切れ block。
+  // 動的 QR の UI 上の期限目安。exp 付き QR (FX 換算で生成) のみカウントダウン +
+  // この正規 /pay 画面内で block する。exp は未署名なのでサーバ強制の有効期限ではない。
   // exp 無し (通常 QR) では nowMs=0 のまま・expired=false で従来挙動。
   const [nowMs, setNowMs] = useState(0);
   useEffect(() => {
@@ -271,7 +280,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 顧客への文脈表示 (元の円価格 + レート)。anchor token は QR token の counterpart。
   const anchorDisplay = displaySymbolFor(counterpartSymbol(params.token));
 
-  // 期限切れ QR に顧客が遭遇したことを 1 度だけ観測 (logger.warn → Sentry alertable)。
+  // 画面上の期限目安を過ぎた QR に顧客が遭遇したことを 1 度だけ観測
+  // (logger.warn → Sentry alertable)。
   // 3 分窓が摩擦を生んでいないか / 店主の再生成運用が回っているかの運用シグナル。
   const expiryLoggedRef = useRef(false);
   useEffect(() => {
@@ -443,7 +453,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const directFlowPending = relayAmbiguous || gaslessAmbiguous
+  const directFlowPending = standard.isRestoring || relay.isRestoring
+    ? true
+    : relayAmbiguous || gaslessAmbiguous
     ? true
     : isStandard
       ? standard.isPending
@@ -465,6 +477,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     (useRelay &&
       !!relay.data &&
       (relay.data.success || !!relay.data.pending)) ||
+    relay.hasActiveIntent ||
+    standard.hasActiveIntent ||
     (isStandard && (!!standard.data || standard.isFeeError || standard.isUnknown));
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
@@ -487,7 +501,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     gasQuoteReady &&
     !merchantUnderflow &&
     !settledNoRetry &&
-    // 動的 QR の有効期限切れは支払いをブロック (固定レートが陳腐化しているため)。
+    // 正規 /pay UI では期限目安超過後の支払いをブロック (固定レートが陳腐化しているため)。
+    // 未署名 exp のため、これは敵対的な支払者へサーバ強制できる防御ではない。
     !expired &&
     // exp 付き QR は now 計測 (effect 後) まで送信不可 = 計測前 (expired=false) の
     // 初回フレームで既期限切れ QR が送信される窓を塞ぐ。
@@ -696,13 +711,30 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 満額−fee、saleAmount は請求額 (value)。free は fee=0・netFee=0。pending は status='pending'。
   const relayHistoryGasless = useRelayGaslessSnapshot(
     relay,
-    useRecover,
-    deployment.chainId,
+    relay.restoredIntent
+      ? relay.restoredIntent.routeKind === 'recover'
+      : useRecover,
+    relay.restoredIntent?.chainId ?? deployment.chainId,
   );
+  const restoredRelayPayment =
+    useRelay && relay.restoredIntent != null;
+  const restoredStandardPayment =
+    isStandard && standard.restoredFromStorage;
+  // 永続化を許可された on-chain metadata だけでは元の product/memo/receipt 文脈を再構成できない。
+  // 復元済み hash を現在の /pay URL の履歴・控えへ誤帰属させる波及を断ち、hash の成功表示だけ残す。
+  const gaslessForHistory =
+    restoredRelayPayment
+      ? { error: null }
+      : useRelay
+        ? relayHistoryGasless
+        : gasless;
+  const standardForHistory = restoredStandardPayment
+    ? { phase: 'idle', error: null }
+    : standard;
   usePaymentHistory(
     directAttemptSnapshotRef.current?.historyCtx ?? historyCtx,
-    useRelay ? relayHistoryGasless : gasless,
-    standard,
+    gaslessForHistory,
+    standardForHistory,
   );
 
   const onCrossChainAttemptStart = useCallback(
@@ -806,7 +838,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。
       // fee=0・gas は OpenPay 肩代わりなので、全額 (amountWei) をそのまま merchant へ単発送金。
-      relay.mutate({ merchant: params.to, value: amountWei, gasMode: effectiveGas });
+      relay.mutate({
+        merchant: params.to,
+        value: amountWei,
+        gasMode: effectiveGas,
+      });
     } else if (splitBreakdown) {
       // recipients[0] は primary (params.to)、それ以降が split entries
       const [primary, ...extras] = splitBreakdown.recipients;
@@ -1054,7 +1090,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {/* 有効期限切れ: 固定レートが陳腐化しているため支払いをブロックし、再生成を促す。 */}
+      {/* UI 上の期限目安超過: この画面では支払いをブロックし、再生成を促す。
+          未署名 exp のためサーバ強制ではない旨は expiredBody で明示する。 */}
       {expired && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{t('expiredTitle')}</p>
@@ -1257,7 +1294,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         {params.token === 'usdc' && address && (
           <CrossChainHint
             token={params.token}
-            // 有効期限切れは代替 cross-chain 経路 (CrossChainHint 内の独自 Pay) も封じる。
+            // この UI の期限目安超過時は代替 cross-chain 経路 (CrossChainHint 内の独自 Pay) も封じる。
             // これがないと main ボタンを block しても cross-chain chooser から支払えてしまう。
             enabled={params.crossChain !== false && !expired}
             targetChainId={requiredChain.id}

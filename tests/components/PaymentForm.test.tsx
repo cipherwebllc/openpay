@@ -238,7 +238,13 @@ function setRelay(
       merchant: Address;
       value: bigint;
       gasMode?: 'customer' | 'merchant';
+      contextKey?: string;
     };
+    restoredIntent?: NonNullable<
+      ReturnType<typeof useJpycEip3009Payment>['restoredIntent']
+    >;
+    isRestoring?: boolean;
+    hasActiveIntent?: boolean;
   },
 ) {
   relayMutate = vi.fn();
@@ -269,6 +275,9 @@ function setRelay(
       opts?.recoveryState ??
       (state === 'response-unknown' ? 'exhausted' : null),
     variables: opts?.variables,
+    restoredIntent: opts?.restoredIntent,
+    isRestoring: opts?.isRestoring ?? false,
+    hasActiveIntent: opts?.hasActiveIntent ?? false,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -289,6 +298,13 @@ function setStandardPayment(
     | 'fee-error'
     | 'merchant-unknown'
     | 'fee-unknown',
+  opts?: {
+    lastSubmittedParams?: NonNullable<
+      ReturnType<typeof useStandardPayment>['lastSubmittedParams']
+    >;
+    lastSubmittedFrom?: Address;
+    hasAttempt?: boolean;
+  },
 ) {
   standardMutate = vi.fn();
   standardRetryFee = vi.fn();
@@ -336,10 +352,23 @@ function setStandardPayment(
             ? new Error('receipt rpc failed')
           : null,
     merchantTxHash:
-      state === 'merchant-unknown' || state === 'fee-unknown'
+      state === 'fee-error' ||
+      state === 'merchant-unknown' ||
+      state === 'fee-unknown'
         ? `0x${'c'.repeat(64)}`
         : undefined,
     feeTxHash: state === 'fee-unknown' ? `0x${'d'.repeat(64)}` : undefined,
+    merchantBlockNumber:
+      state === 'fee-error' || state === 'fee-unknown' ? 77n : undefined,
+    isRestoring: false,
+    hasActiveIntent:
+      state === 'merchant-unknown' ||
+      state === 'fee-error' ||
+      state === 'fee-unknown',
+    hasAttempt: opts?.hasAttempt ?? state !== 'idle',
+    lastSubmittedParams: opts?.lastSubmittedParams,
+    lastSubmittedFrom: opts?.lastSubmittedFrom,
+    restoredFromStorage: opts?.lastSubmittedParams !== undefined,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -988,6 +1017,20 @@ describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=s
     expect(arg.feeReceiver.toLowerCase()).toBe(
       '0xdead000000000000000000000000000000001234',
     );
+    expect(arg.contextKey).toBeUndefined();
+  });
+
+  it('可変額 standard でも URL 文脈を intent metadata に追加しない', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    render(<PaymentForm />);
+
+    await user.type(screen.getByPlaceholderText('10.00'), '7');
+    await user.click(screen.getByRole('button', { name: /7 USDC を支払う/ }));
+
+    expect(standardMutate.mock.calls[0][0].contextKey).toBeUndefined();
   });
 
   it('成功時: merchant Tx + fee Tx + ブロック が表示される (UserOp Hash は無い)', () => {
@@ -1111,6 +1154,52 @@ describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=s
       expect(standardRetryFee).not.toHaveBeenCalled();
     },
   );
+
+  it('reload で復元した standard intent は元 QR が gasless でも standard receipt 照会へ固定する', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('merchant-unknown');
+
+    render(<PaymentForm />);
+
+    expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
+    expect(useSmartAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'usdc' }),
+      false,
+    );
+    expect(
+      screen.getByRole('button', { name: /10 USDC を支払う/ }),
+    ).toBeDisabled();
+  });
+
+  it('reload 復元した standard 成功を同店同額の別商品履歴・控えへ帰属させない', async () => {
+    window.localStorage.clear();
+    const restoredCustomer =
+      '0x8888888888888888888888888888888888888888' as Address;
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&pname=別商品`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: {
+        tokenAddress: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+        merchant: MERCHANT,
+        merchantAmount: 10_000_000n,
+        feeReceiver: '0xdead000000000000000000000000000000001234',
+        feeAmount: 0n,
+        chainId: baseSepolia.id,
+        saleAmount: 10_000_000n,
+      },
+      lastSubmittedFrom: restoredCustomer,
+    });
+
+    render(<PaymentForm />);
+
+    const txHash = `0x${'c'.repeat(64)}`;
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+    await waitFor(() => expect(loadHistory()).toHaveLength(0));
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
 
   it.each([
     ['merchant-sending' as const, /店舗送金を承認してください/],
@@ -1766,7 +1855,7 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
 });
 
 describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
-  it('exp 過去: 期限切れバナー + 支払いボタンが無効 (btnExpired)', async () => {
+  it('exp 過去: UI 目安超過とサーバ非強制を開示 + 支払いボタンが無効', async () => {
     setURL(
       `to=${MERCHANT}&token=usdc&chain=polygon&amount=6.4&refAmt=1000&fxRate=150&exp=1000`,
     );
@@ -1775,11 +1864,12 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     setGasQuote('ready');
     render(<PaymentForm />);
 
-    // 期限切れバナー (effect で now 取得後に確定)
+    // UI 上の目安期限超過バナー (effect で now 取得後に確定)
     expect(
-      await screen.findByText(/この QR は有効期限切れです/),
+      await screen.findByText(/OpenPay 画面上の目安期限を過ぎています/),
     ).toBeInTheDocument();
-    const btn = screen.getByRole('button', { name: /有効期限切れ/ });
+    expect(screen.getByText(/期限はサーバ強制ではありません/)).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: /画面上の目安期限を超過/ });
     expect(btn).toBeDisabled();
   });
 
@@ -1793,7 +1883,7 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     render(<PaymentForm />);
 
     // 期限切れ確定後 (effect で now 計測) を待ってから props を検査
-    await screen.findByText(/この QR は有効期限切れです/);
+    await screen.findByText(/OpenPay 画面上の目安期限を過ぎています/);
     await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
     const props = crossChainHintSpy.mock.lastCall?.[0] as Record<string, unknown>;
     expect(props.enabled).toBe(false);
@@ -1817,13 +1907,15 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     // 残り時間カウントダウン (effect 後)
     expect(await screen.findByText(/残り \d+:\d{2}/)).toBeInTheDocument();
     // 期限切れ表示は出ない
-    expect(screen.queryByText(/この QR は有効期限切れです/)).toBeNull();
     expect(
-      screen.queryByRole('button', { name: /有効期限切れ/ }),
+      screen.queryByText(/OpenPay 画面上の目安期限を過ぎています/),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /画面上の目安期限を超過/ }),
     ).toBeNull();
   });
 
-  it('exp 未来→経過: interval が期限を enforce し submit が無効化される (fake timers)', async () => {
+  it('exp 未来→経過: UI の期限目安を適用し submit が無効化される (fake timers)', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       const t0 = new Date(2026, 5, 3, 12, 0, 0).getTime();
@@ -1839,7 +1931,9 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
       render(<PaymentForm />);
 
       // 初期: 期限内 (バナー無し)
-      expect(screen.queryByText(/この QR は有効期限切れです/)).toBeNull();
+      expect(
+        screen.queryByText(/OpenPay 画面上の目安期限を過ぎています/),
+      ).toBeNull();
 
       // 6 秒経過 → interval が expired を flip
       await act(async () => {
@@ -1847,10 +1941,10 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
       });
 
       expect(
-        screen.getByText(/この QR は有効期限切れです/),
+        screen.getByText(/OpenPay 画面上の目安期限を過ぎています/),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: /有効期限切れ/ }),
+        screen.getByRole('button', { name: /画面上の目安期限を超過/ }),
       ).toBeDisabled();
     } finally {
       vi.useRealTimers();
@@ -1866,7 +1960,7 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     setSmartAccount(true);
     setGasQuote('ready');
     render(<PaymentForm />);
-    await screen.findByText(/この QR は有効期限切れです/);
+    await screen.findByText(/OpenPay 画面上の目安期限を過ぎています/);
     await waitFor(() =>
       expect(warnSpy).toHaveBeenCalledWith(
         'pay.qr_expired',
@@ -1884,11 +1978,13 @@ describe('PaymentForm — 動的 QR (FX 換算・有効期限)', () => {
     setBalance(100_000_000n);
     render(<PaymentForm />);
 
-    expect(screen.queryByText(/この QR は有効期限切れです/)).toBeNull();
+    expect(
+      screen.queryByText(/OpenPay 画面上の目安期限を過ぎています/),
+    ).toBeNull();
     expect(screen.queryByText(/≈/)).toBeNull();
     // 通常の支払いボタンが出る (期限切れラベルではない)
     expect(
-      screen.queryByRole('button', { name: /有効期限切れ/ }),
+      screen.queryByRole('button', { name: /画面上の目安期限を超過/ }),
     ).toBeNull();
   });
 });
@@ -2027,6 +2123,46 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
 
     expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
     expect(loadHistory().filter((e) => e.txHash === txHash)).toHaveLength(1);
+  });
+
+  it('reload 復元した relay 成功は保存済み金額・送受信者で履歴と控えを作る', async () => {
+    window.localStorage.clear();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    const restoredMerchant =
+      '0x3333333333333333333333333333333333333333' as Address;
+    const restoredCustomer =
+      '0x8888888888888888888888888888888888888888' as Address;
+    const value = 777n * 10n ** 18n;
+    const txHash = `0x${'7'.repeat(64)}` as `0x${string}`;
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    setRelay('success', {
+      txHash,
+      variables: {
+        merchant: restoredMerchant,
+        value,
+        gasMode: 'customer',
+      },
+      restoredIntent: {
+        chainId: polygonAmoy.id,
+        from: restoredCustomer,
+        merchant: restoredMerchant,
+        merchantValue: value.toString(),
+        feeValue: '0',
+        nonce: `0x${'6'.repeat(64)}`,
+        validBefore: '9999999999',
+        routeKind: 'free',
+        issuedAt: 1,
+      },
+    });
+
+    render(<PaymentForm />);
+
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+    await waitFor(() => expect(loadHistory()).toHaveLength(0));
+    expect(loadPayerReceipts()).toHaveLength(0);
   });
 
   it('relay error (rate_limited): friendly 文言 + 通常決済へ切替 banner (生コードは非表示)', () => {

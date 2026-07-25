@@ -4,6 +4,7 @@ import {
   PREORDER_FEE_BPS,
   mobileOrderFeeBps,
   mobileOrderFeeValue,
+  standardMobileOrderFeeMinimum,
   mobileOrderGasMode,
   mobileOrderBreakdown,
   feeSplit,
@@ -55,6 +56,35 @@ describe('mobileOrderFeeValue (flat percent, no floor)', () => {
     expect(mobileOrderFeeValue(150n, 'storefront')).toBe(1n);
     // 3% of 33 wei = 0.99 → floor 0
     expect(mobileOrderFeeValue(33n, 'preorder')).toBe(0n);
+  });
+});
+
+describe('standardMobileOrderFeeMinimum', () => {
+  it('customer 負担は merchant 実着金を注文額として exact fee を返す', () => {
+    expect(
+      standardMobileOrderFeeMinimum(
+        1000n * ONE,
+        'preorder',
+        'customer',
+      ),
+    ).toBe(30n * ONE);
+  });
+
+  it('merchant 負担は net を逆算し、床除算衝突時だけ 1 minor unit 小さい実効下限を返す', () => {
+    // gross=999 (fee=9) と gross=1000 (fee=10) はどちらも storefront net=990。
+    expect(
+      standardMobileOrderFeeMinimum(990n, 'storefront', 'merchant'),
+    ).toBe(9n);
+    // 境界外は逆算 fee が一意。
+    expect(
+      standardMobileOrderFeeMinimum(991n, 'storefront', 'merchant'),
+    ).toBe(10n);
+  });
+
+  it('極小 net で fee が 0 に丸められる場合は obligation を作らない', () => {
+    expect(
+      standardMobileOrderFeeMinimum(99n, 'storefront', 'merchant'),
+    ).toBe(0n);
   });
 });
 

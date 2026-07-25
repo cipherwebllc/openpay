@@ -2,7 +2,7 @@
 // とりわけ **rate-limit (relay:rl:) と日次予算 (relay:budget:) は両 route で同一キー**、idempotency は
 // prefix 引数で名前空間が分離されることを、in-memory KV で検証する (実 route から独立)。
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 最下層境界 (KV) のみ in-memory モック。
 const { kvMod, store } = vi.hoisted(() => {
@@ -109,12 +109,19 @@ import {
   checkRateLimit,
   checkReadRateLimit,
   checkIpRateLimit,
+  checkSubfloorPayerRateLimit,
+  checkSubfloorBudget,
+  refundSubfloorBudget,
   checkGasBudget,
   refundGasBudget,
   makeIdempotency,
   readIdempotency,
   gasBudgetKey,
+  subfloorBudgetKey,
+  subfloorPayerRateLimitKey,
   RL_MAX,
+  RELAY_SUBFLOOR_DAILY_TX_CAP,
+  RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP,
   IDEM_TTL_SEC,
 } from '@/lib/relay/relayGuards';
 import type { Address, Hex } from 'viem';
@@ -134,6 +141,10 @@ beforeEach(() => {
   store.flags.incrOk = true;
   store.flags.lpushOk = true;
   store.flags.getOk = true;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
@@ -239,14 +250,253 @@ describe('relayGuards checkIpRateLimit (HMAC IP・scope 分離)', () => {
 describe('relayGuards 日次予算 (共有キー relay:budget:)', () => {
   it('INCR で consumed=true・キーは relay:budget:{chainId}:{date}・refund で DECR', async () => {
     const r = await checkGasBudget(137);
-    expect(r.allowed).toBe(true);
-    expect(r.consumed).toBe(true);
     const key = gasBudgetKey(137);
+    expect(r).toEqual({
+      allowed: true,
+      consumed: true,
+      refundToken: key,
+    });
     expect(key.startsWith('relay:budget:137:')).toBe(true);
     expect(store.counters.get(key)).toBe(1);
     expect(store.expireCalls).toContainEqual({ key, ttlSec: 2 * 24 * 3600 });
-    await refundGasBudget(137);
+    if (!r.consumed) throw new Error('expected consumed gas budget');
+    await refundGasBudget(r.refundToken);
     expect(store.counters.get(key)).toBe(0);
+  });
+
+  it('UTC 日跨ぎ後の refund も INCR した旧日 token だけを戻し、新日 counter を負数化しない', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-25T23:59:59.900Z'));
+    const oldKey = gasBudgetKey(137);
+    const checked = await checkGasBudget(137);
+
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.100Z'));
+    const newKey = gasBudgetKey(137);
+    expect(newKey).not.toBe(oldKey);
+    if (!checked.consumed) throw new Error('expected consumed gas budget');
+    await refundGasBudget(checked.refundToken);
+
+    expect(store.counters.get(oldKey)).toBe(0);
+    expect(store.counters.has(newKey)).toBe(false);
+  });
+});
+
+describe('relayGuards sub-floor settle 専用ガード', () => {
+  it('既定 payer cap は chain 日次 cap より小さく、1 payer だけでは専用枠を枯らせない', () => {
+    expect(RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP).toBeLessThan(
+      RELAY_SUBFLOOR_DAILY_TX_CAP,
+    );
+  });
+
+  it('payer 日次 cap を署名済み from + chain の専用キーで制限する', async () => {
+    const key = subfloorPayerRateLimitKey(137, FROM);
+    store.counters.set(key, RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP - 1);
+
+    expect(await checkSubfloorPayerRateLimit(137, FROM.toUpperCase())).toBe(true);
+    expect(await checkSubfloorPayerRateLimit(137, FROM)).toBe(false);
+    expect(store.counters.get(key)).toBe(
+      RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP + 1,
+    );
+    expect(key.startsWith(`relay:subfloor:payer:137:${FROM}:`)).toBe(true);
+    expect(
+      store.expireCalls.filter((call) => call.key === key),
+    ).toHaveLength(2);
+  });
+
+  it('専用日次 cap は共有 relay:budget: と別名前空間で、consumed/refund 契約を保つ', async () => {
+    const key = subfloorBudgetKey(137);
+    store.counters.set(key, RELAY_SUBFLOOR_DAILY_TX_CAP - 1);
+
+    const checked = await checkSubfloorBudget(137);
+    expect(checked).toEqual({
+      allowed: true,
+      consumed: true,
+      refundToken: key,
+    });
+    expect(store.counters.get(key)).toBe(RELAY_SUBFLOOR_DAILY_TX_CAP);
+    expect(store.counters.has(gasBudgetKey(137))).toBe(false);
+    expect(store.expireCalls).toContainEqual({
+      key,
+      ttlSec: 2 * 24 * 3600,
+    });
+
+    if (!checked.consumed) {
+      throw new Error('expected consumed sub-floor budget');
+    }
+    await refundSubfloorBudget(checked.refundToken);
+    expect(store.counters.get(key)).toBe(RELAY_SUBFLOOR_DAILY_TX_CAP - 1);
+  });
+
+  it('専用日次 cap 超過は consumed=true で拒否し、KV 障害だけ fail-open consumed=false', async () => {
+    const key = subfloorBudgetKey(137);
+    store.counters.set(key, RELAY_SUBFLOOR_DAILY_TX_CAP);
+    expect(await checkSubfloorBudget(137)).toEqual({
+      allowed: false,
+      consumed: true,
+      refundToken: key,
+    });
+
+    store.flags.incrOk = false;
+    expect(await checkSubfloorBudget(80002)).toEqual({
+      allowed: true,
+      consumed: false,
+      refundToken: null,
+    });
+    expect(await checkSubfloorPayerRateLimit(80002, FROM)).toBe(true);
+  });
+
+  it('UTC 日跨ぎ後の refund も INCR した旧日 token だけを戻し、新日 counter を負数化しない', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-25T23:59:59.900Z'));
+    const oldKey = subfloorBudgetKey(137);
+    const checked = await checkSubfloorBudget(137);
+
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.100Z'));
+    const newKey = subfloorBudgetKey(137);
+    expect(newKey).not.toBe(oldKey);
+    if (!checked.consumed) {
+      throw new Error('expected consumed sub-floor budget');
+    }
+    await refundSubfloorBudget(checked.refundToken);
+
+    expect(store.counters.get(oldKey)).toBe(0);
+    expect(store.counters.has(newKey)).toBe(false);
+  });
+});
+
+describe('relayGuards 日次 cap の env 解決', () => {
+  const capEnvKeys = [
+    'RELAY_DAILY_TX_CAP',
+    'RELAY_SUBFLOOR_DAILY_TX_CAP',
+    'RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP',
+  ] as const;
+
+  async function resolvedCaps(
+    values: Partial<Record<(typeof capEnvKeys)[number], string>>,
+  ) {
+    for (const key of capEnvKeys) {
+      vi.stubEnv(key, values[key] ?? '');
+    }
+    vi.resetModules();
+    const guards = await import('@/lib/relay/relayGuards');
+    return {
+      shared: guards.RELAY_DAILY_TX_CAP,
+      subfloor: guards.RELAY_SUBFLOOR_DAILY_TX_CAP,
+      payer: guards.RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP,
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('shared=50 + 専用 env 未指定なら実効 shared の 20% → 10 / 2', async () => {
+    await expect(
+      resolvedCaps({ RELAY_DAILY_TX_CAP: '50' }),
+    ).resolves.toEqual({
+      shared: 50,
+      subfloor: 10,
+      payer: 2,
+    });
+  });
+
+  it('subfloor=10 + payer 未指定なら実効 subfloor の 20% → 2', async () => {
+    await expect(
+      resolvedCaps({ RELAY_SUBFLOOR_DAILY_TX_CAP: '10' }),
+    ).resolves.toEqual({
+      shared: 500,
+      subfloor: 10,
+      payer: 2,
+    });
+  });
+
+  it.each(['9007199254740992', '-1', '1.5', 'Infinity'])(
+    '巨大/不正値 %s は safe default 500 / 100 / 20 へ倒す',
+    async (invalid) => {
+      await expect(
+        resolvedCaps({
+          RELAY_DAILY_TX_CAP: invalid,
+          RELAY_SUBFLOOR_DAILY_TX_CAP: invalid,
+          RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP: invalid,
+        }),
+      ).resolves.toEqual({
+        shared: 500,
+        subfloor: 100,
+        payer: 20,
+      });
+    },
+  );
+
+  it('subfloor=0 は明示 payer 値にも優先して停止を維持する', async () => {
+    await expect(
+      resolvedCaps({
+        RELAY_SUBFLOOR_DAILY_TX_CAP: '0',
+        RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP: '999',
+      }),
+    ).resolves.toEqual({
+      shared: 500,
+      subfloor: 0,
+      payer: 0,
+    });
+  });
+
+  it('shared=1 は subfloor=0、subfloor=1 は payer 最大 1 に clamp する', async () => {
+    await expect(
+      resolvedCaps({
+        RELAY_DAILY_TX_CAP: '1',
+        RELAY_SUBFLOOR_DAILY_TX_CAP: '999',
+        RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP: '999',
+      }),
+    ).resolves.toEqual({
+      shared: 1,
+      subfloor: 0,
+      payer: 0,
+    });
+    await expect(
+      resolvedCaps({
+        RELAY_SUBFLOOR_DAILY_TX_CAP: '1',
+        RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP: '999',
+      }),
+    ).resolves.toEqual({
+      shared: 500,
+      subfloor: 1,
+      payer: 1,
+    });
+  });
+
+  it('明示 cap も shared > subfloor > payer の防御不変条件へ clamp する', async () => {
+    await expect(
+      resolvedCaps({
+        RELAY_DAILY_TX_CAP: '50',
+        RELAY_SUBFLOOR_DAILY_TX_CAP: '500',
+        RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP: '500',
+      }),
+    ).resolves.toEqual({
+      shared: 50,
+      subfloor: 49,
+      payer: 48,
+    });
+  });
+
+  it('明示 payer=0 と shared=0 からの派生 0 は停止値として受理する', async () => {
+    await expect(
+      resolvedCaps({
+        RELAY_SUBFLOOR_DAILY_TX_CAP: '10',
+        RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP: '0',
+      }),
+    ).resolves.toEqual({
+      shared: 500,
+      subfloor: 10,
+      payer: 0,
+    });
+    await expect(
+      resolvedCaps({ RELAY_DAILY_TX_CAP: '0' }),
+    ).resolves.toEqual({
+      shared: 0,
+      subfloor: 0,
+      payer: 0,
+    });
   });
 });
 

@@ -154,8 +154,11 @@ import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import { MobileOrderCallButton } from '@/components/MobileOrderCallButton';
 import type { CheckoutParams } from '@/lib/url';
+import { deploymentForSlug } from '@/lib/tokens';
+import { env } from '@/lib/env';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
 import {
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
@@ -237,7 +240,12 @@ function setRelayPayment(
     errMsg?: string;
     retryAfterSeconds?: number | null;
     recoveryState?: 'auto' | 'exhausted' | null;
-    variables?: { merchant: Address; value: bigint; gasMode?: 'customer' | 'merchant' };
+    variables?: NonNullable<
+      ReturnType<typeof useJpycEip3009Payment>['variables']
+    >;
+    restoredIntent?: ReturnType<
+      typeof useJpycEip3009Payment
+    >['restoredIntent'];
   },
 ) {
   relayMutate = vi.fn();
@@ -270,6 +278,7 @@ function setRelayPayment(
       opts?.recoveryState ??
       (state === 'response-unknown' ? 'exhausted' : null),
     variables: opts?.variables,
+    restoredIntent: opts?.restoredIntent ?? null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -336,6 +345,10 @@ function setStandardPaymentDefault() {
     error: null,
     merchantTxHash: undefined,
     feeTxHash: undefined,
+    merchantBlockNumber: undefined,
+    isRestoring: false,
+    hasActiveIntent: false,
+    hasAttempt: false,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -353,6 +366,13 @@ function setStandardPayment(
     | 'fee-error'
     | 'merchant-unknown'
     | 'fee-unknown',
+  opts: {
+    lastSubmittedParams?: NonNullable<
+      ReturnType<typeof useStandardPayment>['lastSubmittedParams']
+    >;
+    lastSubmittedFrom?: Address;
+    restoredFromStorage?: boolean;
+  } = {},
 ) {
   standardMutate = vi.fn();
   standardRetryFee = vi.fn();
@@ -400,10 +420,32 @@ function setStandardPayment(
             ? new Error('receipt rpc failed')
           : null,
     merchantTxHash:
-      state === 'merchant-unknown' || state === 'fee-unknown'
+      state === 'fee-sending' ||
+      state === 'fee-mining' ||
+      state === 'fee-error' ||
+      state === 'merchant-unknown' ||
+      state === 'fee-unknown' ||
+      state === 'success'
         ? `0x${'c'.repeat(64)}`
         : undefined,
     feeTxHash: state === 'fee-unknown' ? `0x${'d'.repeat(64)}` : undefined,
+    merchantBlockNumber:
+      state === 'fee-sending' ||
+      state === 'fee-mining' ||
+      state === 'fee-error' ||
+      state === 'fee-unknown' ||
+      state === 'success'
+        ? 123n
+        : undefined,
+    isRestoring: false,
+    hasActiveIntent:
+      state === 'merchant-unknown' ||
+      state === 'fee-error' ||
+      state === 'fee-unknown',
+    hasAttempt: state !== 'idle',
+    lastSubmittedParams: opts.lastSubmittedParams,
+    lastSubmittedFrom: opts.lastSubmittedFrom,
+    restoredFromStorage: opts.restoredFromStorage ?? false,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -1769,6 +1811,23 @@ describe('CheckoutForm — mode=standard 統合', () => {
     },
   );
 
+  it('reload で復元した standard intent は元 checkout が gasless でも standard receipt 照会へ固定する', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setStandardPayment('merchant-unknown');
+
+    render(<CheckoutForm params={USDC_PARAMS} />);
+
+    expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
+    expect(useSmartAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'usdc' }),
+      false,
+    );
+    expect(
+      screen.getByRole('button', { name: /55 USDC を支払う/ }),
+    ).toBeDisabled();
+  });
+
   it.each([
     ['merchant-sending' as const, /店舗送金を承認してください/],
     ['merchant-mining' as const, /店舗送金を確定中/],
@@ -2525,6 +2584,16 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     setSmartAccount(false);
   }
 
+  function contextKeyFor(params: CheckoutParams) {
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    return checkoutIntentContextFingerprint({
+      params,
+      chainId: deployment.chainId,
+      tokenAddress: deployment.address,
+      totalAtomic: JPYC_TOTAL.toString(),
+    });
+  }
+
   it('モバイル storefront (relay): relayMutate に feeKind=storefront + gasMode=merchant (店舗負担固定)', async () => {
     const user = userEvent.setup();
     feeFlags.enableMobileOrderFee = true;
@@ -2570,6 +2639,513 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(screen.getByText('ウォレットで支払い')).toBeInTheDocument();
     // モバイル用「ガス不要・署名のみ」ヒントは出さない (standard はガスが必要)。
     expect(screen.queryByText(/ネイティブトークン \(ガス\) は不要/)).toBeNull();
+  });
+
+  it('モバイル注文 standard: merchant 確定時点で fee の結果を待たず受注 notify へ未収付きで届ける', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-fee-rejected',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    expect(standardMutate.mock.calls[0][0].contextKey).toBe(
+      contextKeyFor(params),
+    );
+    setStandardPayment('fee-sending');
+    rerender(makeUi());
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body).toEqual(
+      expect.objectContaining({
+        type: 'openpay.checkout.success',
+        mode: 'standard',
+        orderId: 'order-fee-rejected',
+        merchantTxHash: `0x${'c'.repeat(64)}`,
+        blockNumber: '123',
+        feeUncollected: true,
+      }),
+    );
+    expect(body.feeTxHash).toBeUndefined();
+    expect(body.merchantAmount).toBe(
+      (2_970n * 10n ** 18n).toString(),
+    );
+    expect(body.feeAmount).toBe((30n * 10n ** 18n).toString());
+    expect(body.customerPays).toBe((3_000n * 10n ** 18n).toString());
+
+    // 後から fee が拒否されても同じ merchant tx の注文を二重送信しない。
+    setStandardPayment('fee-error');
+    rerender(makeUi());
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('モバイル注文 standard: fee receipt 不明でも fee hash と未収を受注 notify へ届ける', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-fee-unknown',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    setStandardPayment('fee-unknown');
+    rerender(makeUi());
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.feeUncollected).toBe(true);
+    expect(body.merchantTxHash).toBe(`0x${'c'.repeat(64)}`);
+    expect(body.feeTxHash).toBe(`0x${'d'.repeat(64)}`);
+    fetchSpy.mockRestore();
+  });
+
+  it('モバイル注文 standard: merchant 通知後に fee hash が判明したら同じ受注へ追加通知する', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-fee-hash-late',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    setStandardPayment('fee-sending');
+    rerender(makeUi());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const awaitingBody = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(awaitingBody.feeTxHash).toBeUndefined();
+
+    setStandardPayment('fee-unknown');
+    rerender(makeUi());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const hashKnownBody = JSON.parse(
+      (fetchSpy.mock.calls[1][1] as RequestInit).body as string,
+    );
+    expect(hashKnownBody.feeTxHash).toBe(`0x${'d'.repeat(64)}`);
+    expect(hashKnownBody).toMatchObject({
+      orderId: awaitingBody.orderId,
+      merchantTxHash: awaitingBody.merchantTxHash,
+      feeUncollected: true,
+    });
+    fetchSpy.mockRestore();
+  });
+
+  it('部分通知の 409 processing は同じ payload で再試行し受注欠落を防ぐ', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-processing-retry',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    setStandardPayment('fee-sending');
+    rerender(makeUi());
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2), {
+      timeout: 2_000,
+    });
+    expect(
+      (fetchSpy.mock.calls[1][1] as RequestInit).body,
+    ).toBe((fetchSpy.mock.calls[0][1] as RequestInit).body);
+    fetchSpy.mockRestore();
+  });
+
+  it('部分通知後に reload しても同じ注文状況 token を通常成功通知と完了リンクへ復元する', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    feeFlags.enableOrderPickup = true;
+    setupJpycStandard();
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-status-reload',
+      storeHandle: 'alice',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const makeUi = () => <CheckoutForm params={params} />;
+    const first = render(makeUi());
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    setStandardPayment('fee-sending');
+    first.rerender(makeUi());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const partialBody = JSON.parse(
+      (fetchSpy.mock.calls[1][1] as RequestInit).body as string,
+    );
+    expect(isOrderTokenLike(partialBody.statusToken)).toBe(true);
+    first.unmount();
+
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    setStandardPayment('success', {
+      lastSubmittedFrom: CUSTOMER,
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: 2_970n * 10n ** 18n,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 30n * 10n ** 18n,
+        chainId: polygonAmoy.id,
+        saleAmount: JPYC_TOTAL,
+        contextKey: contextKeyFor(params),
+      },
+      restoredFromStorage: true,
+    });
+    render(makeUi());
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    const completedBody = JSON.parse(
+      (fetchSpy.mock.calls[2][1] as RequestInit).body as string,
+    );
+    expect(completedBody.statusToken).toBe(partialBody.statusToken);
+    expect(
+      screen.getByRole('link', { name: '注文状況を見る' }),
+    ).toHaveAttribute(
+      'href',
+      `/ja/order/status?t=${partialBody.statusToken}`,
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('standard reload: 保存 intent が注文文脈と一致すれば snapshot 無しでも受注を復元通知する', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-standard-reload',
+      storeHandle: 'alice',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    setStandardPayment('fee-error', {
+      lastSubmittedFrom: CUSTOMER,
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: 2_970n * 10n ** 18n,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 30n * 10n ** 18n,
+        chainId: polygonAmoy.id,
+        saleAmount: JPYC_TOTAL,
+        contextKey: contextKeyFor(params),
+      },
+      restoredFromStorage: true,
+    });
+
+    render(<CheckoutForm params={params} />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body).toMatchObject({
+      orderId: 'order-standard-reload',
+      from: CUSTOMER,
+      merchantTxHash: `0x${'c'.repeat(64)}`,
+      feeUncollected: true,
+    });
+    fetchSpy.mockRestore();
+  });
+
+  it('relay reload: 公開 nonce metadata だけの成功復元を現在の注文へ通知しない', async () => {
+    window.localStorage.clear();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycRelay();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      feeKind: 'storefront',
+      orderId: 'order-relay-reload',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    setRelayPayment('success', {
+      txHash: `0x${'f'.repeat(64)}`,
+      variables: {
+        merchant: MERCHANT,
+        value: JPYC_TOTAL,
+        gasMode: 'merchant',
+        feeKind: 'storefront',
+      },
+      restoredIntent: {
+        chainId: polygonAmoy.id,
+        from: CUSTOMER,
+        merchant: MERCHANT,
+        merchantValue: (2_970n * 10n ** 18n).toString(),
+        feeValue: (30n * 10n ** 18n).toString(),
+        nonce: `0x${'9'.repeat(64)}`,
+        validBefore: '9999999999',
+        routeKind: 'recover',
+        issuedAt: 1_700_000_000_000,
+      },
+    });
+
+    render(<CheckoutForm params={params} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(`0x${'f'.repeat(64)}`).length,
+      ).toBeGreaterThan(0),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+    fetchSpy.mockRestore();
+  });
+
+  it('reload: 同じ merchant/orderId/total でも items が違えば保存 hash を通知しない', async () => {
+    window.localStorage.clear();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    const oldParams: CheckoutParams = {
+      ...JPYC_PARAMS,
+      items: [{ name: '旧チケット', qty: 1, price: '3000' }],
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'same-order',
+      storeHandle: 'alice',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const currentParams: CheckoutParams = {
+      ...oldParams,
+      items: [{ name: '新チケット', qty: 1, price: '3000' }],
+    };
+    setStandardPayment('fee-error', {
+      lastSubmittedFrom: CUSTOMER,
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: 2_970n * 10n ** 18n,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 30n * 10n ** 18n,
+        chainId: polygonAmoy.id,
+        saleAmount: JPYC_TOTAL,
+        contextKey: contextKeyFor(oldParams),
+      },
+      restoredFromStorage: true,
+    });
+
+    render(<CheckoutForm params={currentParams} />);
+
+    await waitFor(() => expect(standardRetryFee).toBeDefined());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(loadHistory()).toHaveLength(0);
+    fetchSpy.mockRestore();
+  });
+
+  it('standard reload: fingerprint が一致しても webhook handle が店舗と違えば通知しない', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-handle-mismatch',
+      storeHandle: 'alice',
+      webhook: `${window.location.origin}/api/order/notify?h=bob`,
+    };
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    setStandardPayment('fee-error', {
+      lastSubmittedFrom: CUSTOMER,
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: 2_970n * 10n ** 18n,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 30n * 10n ** 18n,
+        chainId: polygonAmoy.id,
+        saleAmount: JPYC_TOTAL,
+        contextKey: contextKeyFor(params),
+      },
+      restoredFromStorage: true,
+    });
+
+    render(<CheckoutForm params={params} />);
+    await act(async () => Promise.resolve());
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('standard reload: 第三者 webhook/success_url へ復元結果を帰属せず新規履歴・控えも作らない', async () => {
+    window.localStorage.clear();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-third-party-reload',
+      storeHandle: 'alice',
+      webhook: 'https://shop.example.com/hook',
+      successUrl: 'https://shop.example.com/thanks',
+    };
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    setStandardPayment('success', {
+      lastSubmittedFrom: CUSTOMER,
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: 2_970n * 10n ** 18n,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 30n * 10n ** 18n,
+        chainId: polygonAmoy.id,
+        saleAmount: JPYC_TOTAL,
+        contextKey: contextKeyFor(params),
+      },
+      restoredFromStorage: true,
+    });
+
+    render(<CheckoutForm params={params} />);
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(`0x${'c'.repeat(64)}`).length,
+      ).toBeGreaterThan(0),
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: '今すぐ確認ページへ' }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /ホームへ戻る/ }),
+    ).toBeInTheDocument();
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+    fetchSpy.mockRestore();
+  });
+
+  it('standard reload: fee=0 の成功は注文 fingerprint が一致しても受注通知を再構成しない', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      orderId: 'order-zero-fee-reload',
+      storeHandle: 'alice',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    setStandardPayment('success', {
+      lastSubmittedFrom: CUSTOMER,
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: JPYC_TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: polygonAmoy.id,
+        saleAmount: JPYC_TOTAL,
+        contextKey: contextKeyFor(params),
+      },
+      restoredFromStorage: true,
+    });
+
+    render(<CheckoutForm params={params} />);
+    await act(async () => Promise.resolve());
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('standard fee 失敗の部分通知は第三者 webhook の成功契約を広げない', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      webhook: 'https://shop.example.com/hook',
+    };
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    setStandardPayment('fee-error');
+    rerender(makeUi());
+
+    await waitFor(() => expect(standardRetryFee).toBeDefined());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it('モバイル preorder + 顧客上乗せ: 利用料行は「(店舗負担)」を付けない (顧客負担)', () => {
@@ -2650,6 +3226,7 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(call.feeAmount).toBe(fee);
     expect(call.merchantAmount).toBe(JPYC_TOTAL - fee); // 店舗負担: 受取 = 総額 − 利用料
     expect(call.saleAmount).toBe(JPYC_TOTAL); // gross は商品小計 (顧客支払額)
+    expect(call.registerFee).toBe(true); // fee txHash の server 通知 → 用途束縛 claim 経路の印
     expect(relayMutate).not.toHaveBeenCalled(); // register は relay へ行かない (standard のみ)
   });
 

@@ -149,6 +149,11 @@ function OrderCardInner({
               {t('newBadge')}
             </span>
           ) : null}
+          {o.feeUncollected ? (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-800">
+              {t('feeUncollectedBadge')}
+            </span>
+          ) : null}
           {amountWarning ? (
             <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${amountWarningClass}`}>
               {amountWarning}

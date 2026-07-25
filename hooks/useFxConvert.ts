@@ -24,7 +24,7 @@ import type { MarketRates } from '@/hooks/useMarketRates';
 import type { QrSettings } from '@/hooks/useQrSettings';
 
 // 「他トークン建てで受け取る」(FX 換算) を適用した状態。生成時のレートで amount を
-// 確定済みなので、元の価格 (anchor) と適用レート・有効期限を保持し URL に焼き込む。
+// 確定済みなので、元の価格 (anchor) と適用レート・UI 上の期限目安を保持し URL に焼き込む。
 // localStorage には永続化しない (時限的なので、ページ再訪で期限切れ QR を復元しない)。
 export type ConvertState = {
   anchorAmount: string;
@@ -136,7 +136,8 @@ export function useFxConvert(params: {
     ? isExpired(convert.expiresAt, convertNowMs)
     : false;
 
-  // 店主の価格入力を現レートで換算し、token を換算先へ切替・amount を確定・期限を焼き込む。
+  // 店主の価格入力を現レートで換算し、token を換算先へ切替・amount を確定・UI 上の
+  // 期限目安を焼き込む。未署名 URL なのでサーバ側の認可条件にはならない。
   const applyConvert = useCallback(() => {
     if (!marketRates || !rateIsSane(marketRates.usdcJpy)) return;
     const target = counterpartSymbol(settings.token);
@@ -170,7 +171,7 @@ export function useFxConvert(params: {
     setAmount(res.amount);
   }, [marketRates, settings, amount, setSettings, setAmount]);
 
-  // 同じ anchor 価格を最新レートで再換算し、期限を 3 分リセット (token は据え置き)。
+  // 同じ anchor 価格を最新レートで再換算し、画面上の目安を 3 分リセット (token は据え置き)。
   const recalcConvert = useCallback(() => {
     if (!convert || !marketRates || !rateIsSane(marketRates.usdcJpy)) return;
     const res = convertAnchorAmount({

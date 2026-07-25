@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   addEntryToTodaySummary,
   appendHistory,
+  promotePendingHistoryByTxHash,
   buildHistoryEntry,
   buildTodaySummary,
   clearHistory,
@@ -170,6 +171,52 @@ describe('history (LocalStorage)', () => {
       expect(loaded[0].merchantAmount).toBe('1000');
     });
 
+    it('同一 tx の pending は reload 後の終端結果へ昇格し、重複行を作らない', () => {
+      appendHistory(entry({ id: 'tx-1', status: 'pending' }));
+      appendHistory(
+        entry({
+          id: 'tx-1',
+          status: 'success',
+          merchantAmount: '999',
+        }),
+      );
+
+      const loaded = loadHistory();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0]).toMatchObject({
+        id: 'tx-1',
+        status: 'success',
+        // 終端 status だけを昇格し、元の pending に保存済みの会計文脈は保持する。
+        merchantAmount: '1000',
+      });
+    });
+
+    it('終端結果を後着 pending や別の終端結果で上書きしない', () => {
+      appendHistory(entry({ id: 'tx-2', status: 'success' }));
+      appendHistory(
+        entry({
+          id: 'tx-2',
+          status: 'pending',
+          merchantAmount: '777',
+        }),
+      );
+      appendHistory(
+        entry({
+          id: 'tx-2',
+          status: 'reverted',
+          merchantAmount: '555',
+        }),
+      );
+
+      expect(loadHistory()).toEqual([
+        expect.objectContaining({
+          id: 'tx-2',
+          status: 'success',
+          merchantAmount: '1000',
+        }),
+      ]);
+    });
+
     it(`${HISTORY_MAX_ENTRIES} 件超過時は古いものから削除 (FIFO)`, () => {
       // appendHistory は newest-at-front の規約。seed 配列はそれを満たすよう
       // index 0 = newest、index 999 = oldest として直接 setItem する。
@@ -204,6 +251,62 @@ describe('history (LocalStorage)', () => {
       appendHistory(entry({ id: 'same' }));
       expect(handler).not.toHaveBeenCalled();
       window.removeEventListener(HISTORY_CHANGED_EVENT, handler);
+    });
+  });
+
+  describe('promotePendingHistoryByTxHash', () => {
+    it('同じ tx hash の pending だけを終端へ昇格し、元の会計文脈を保持する', () => {
+      appendHistory(
+        entry({
+          id: 'batch-0xabc',
+          txHash: '0xAbC',
+          status: 'pending',
+          merchantAmount: '123',
+          note: '元の商品',
+        }),
+      );
+      appendHistory(
+        entry({
+          id: 'other',
+          txHash: '0xdef',
+          status: 'pending',
+        }),
+      );
+
+      expect(
+        promotePendingHistoryByTxHash('0xabc', 'success', 42n),
+      ).toBe(true);
+      expect(loadHistory()).toEqual([
+        expect.objectContaining({
+          id: 'other',
+          status: 'pending',
+        }),
+        expect.objectContaining({
+          id: 'batch-0xabc',
+          status: 'success',
+          blockNumber: '42',
+          merchantAmount: '123',
+          note: '元の商品',
+        }),
+      ]);
+    });
+
+    it('対象不在・終端済みは no-op', () => {
+      appendHistory(
+        entry({
+          id: 'batch-0xabc',
+          txHash: '0xabc',
+          status: 'success',
+        }),
+      );
+
+      expect(
+        promotePendingHistoryByTxHash('0xabc', 'reverted'),
+      ).toBe(false);
+      expect(
+        promotePendingHistoryByTxHash('0xmissing', 'success'),
+      ).toBe(false);
+      expect(loadHistory()[0].status).toBe('success');
     });
   });
 

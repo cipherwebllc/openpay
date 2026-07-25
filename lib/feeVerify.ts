@@ -103,8 +103,35 @@ type ReceiptReader = {
     // viem の receipt は blockNumber: bigint を含む。Pro 加入の決定論的付与で使う
     // (block timestamp → targetExpiresAt)。billing/settle 経路はこの値を読まない (period 基準)。
     blockNumber?: bigint;
+    // 受注リレーだけが standard の「tx sender 自身から merchant への直接 Transfer」を識別する。
+    // 既存 fee/billing reader の mock と応答形を壊さないよう optional additive にする。
+    from?: Address;
+    transactionIndex?: number;
   }>;
 };
+type TransferReceiptReader = Pick<ReceiptReader, 'getTransactionReceipt'>;
+
+type StandardFeePairReceiptReader = {
+  getTransactionReceipt: (a: { hash: Hex }) => Promise<{
+    status: 'success' | 'reverted';
+    logs: readonly FeeReceiptLog[];
+    blockNumber: bigint;
+    from: Address;
+    transactionIndex: number;
+  }>;
+};
+
+export type StandardFeePairVerifyResult =
+  | { ok: true; value: bigint; blockNumber: bigint }
+  | {
+      ok: false;
+      reason:
+        | Extract<FeeVerifyResult, { ok: false }>['reason']
+        | 'payer_mismatch'
+        | 'fee_before_merchant'
+        | 'merchant_amount_mismatch'
+        | 'fee_amount_mismatch';
+    };
 
 /** on-chain: receipt 取得 → status 確認 → 純関数で照合。publicClient は chain ごとに呼出側が用意。
  *  成功時は receipt の blockNumber を結果に載せる (純関数の判定は不変・追加フィールドのみ)。 */
@@ -145,7 +172,74 @@ export type JpycTransferToExpected = {
   token: Address; // 該当 chain の JPYC
   to: Address; // 受取先 (merchant)。from は問わない。
   minValue: bigint; // 最低着金額 (JPYC minor units)。受注リレーは dust フロアを使う。
+  // 同一 receipt 内で merchant Transfer と同じ source から feeReceiver へ払われた額の検出用。
+  // 既存の merchant 着金検証には影響しない optional additive。
+  feeReceiver?: Address;
 };
+
+export type JpycTransferToOnChainResult =
+  | {
+      ok: true;
+      value: bigint;
+      blockNumber?: bigint;
+      // receipt.from と一致する payer から merchant への JPYC Transfer 合計。standard 判定専用。
+      // receipt.from 欠落/不正または直接 Transfer 無しなら両方 undefined (relay の既存結果と同形)。
+      receiptFrom?: Address;
+      directValue?: bigint;
+      transactionIndex?: number;
+      merchantSource?: Address;
+      sameSourceFeeValue?: bigint;
+    }
+  | Extract<FeeVerifyResult, { ok: false }>;
+
+function analyzeJpycReceiptTransfers(args: {
+  logs: readonly FeeReceiptLog[];
+  token: Address;
+  merchant: Address;
+  feeReceiver?: Address;
+}): { merchantSource?: Address; sameSourceFeeValue?: bigint } {
+  const token = getAddress(args.token);
+  const merchant = getAddress(args.merchant);
+  const transfers: { from: Address; to: Address; value: bigint }[] = [];
+
+  for (const log of args.logs) {
+    let logToken: Address;
+    try {
+      logToken = getAddress(log.address);
+    } catch {
+      continue;
+    }
+    if (
+      logToken !== token ||
+      log.topics.length < 3 ||
+      log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC
+    ) {
+      continue;
+    }
+    try {
+      transfers.push({
+        from: topicToAddress(log.topics[1]),
+        to: topicToAddress(log.topics[2]),
+        value: BigInt(log.data),
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  const merchantSources = new Set(
+    transfers.filter((t) => t.to === merchant).map((t) => t.from),
+  );
+  if (merchantSources.size !== 1) return {};
+  const merchantSource = [...merchantSources][0];
+  if (!args.feeReceiver) return {};
+
+  const feeReceiver = getAddress(args.feeReceiver);
+  const sameSourceFeeValue = transfers
+    .filter((t) => t.from === merchantSource && t.to === feeReceiver)
+    .reduce((sum, t) => sum + t.value, 0n);
+  return { merchantSource, sameSourceFeeValue };
+}
 
 /**
  * 純関数 (from 非依存): receipt logs から token の Transfer(* → to) を**全て合算**し minValue 以上か判定。
@@ -202,11 +296,13 @@ export function verifyJpycTransferTo(args: {
 /** on-chain (from 非依存): receipt 取得 → status 確認 → verifyJpycTransferTo で照合。
  *  成功時は **実着金合計 (value)** と blockNumber を返す (受注の権威額 + 決定論的 ts 用)。 */
 export async function verifyJpycTransferToOnChain(args: {
-  publicClient: ReceiptReader;
+  publicClient: TransferReceiptReader;
   txHash: Hex;
   expected: JpycTransferToExpected;
-}): Promise<FeeVerifyResult> {
-  let receipt: Awaited<ReturnType<ReceiptReader['getTransactionReceipt']>>;
+}): Promise<JpycTransferToOnChainResult> {
+  let receipt: Awaited<
+    ReturnType<TransferReceiptReader['getTransactionReceipt']>
+  >;
   try {
     receipt = await args.publicClient.getTransactionReceipt({ hash: args.txHash });
   } catch (e) {
@@ -218,8 +314,142 @@ export async function verifyJpycTransferToOnChain(args: {
   }
   if (receipt.status !== 'success') return { ok: false, reason: 'tx_reverted' };
   const result = verifyJpycTransferTo({ logs: receipt.logs, expected: args.expected });
-  if (result.ok && receipt.blockNumber !== undefined) {
-    return { ...result, blockNumber: receipt.blockNumber };
+  if (!result.ok) return result;
+
+  const receiptTransfers = analyzeJpycReceiptTransfers({
+    logs: receipt.logs,
+    token: args.expected.token,
+    merchant: args.expected.to,
+    feeReceiver: args.expected.feeReceiver,
+  });
+  let receiptFrom: Address | undefined;
+  let directValue: bigint | undefined;
+  if (receipt.from !== undefined) {
+    try {
+      receiptFrom = getAddress(receipt.from);
+      const direct = verifyJpycFeeTransfer({
+        logs: receipt.logs,
+        expected: {
+          token: args.expected.token,
+          from: receiptFrom,
+          to: args.expected.to,
+          minValue: 0n,
+        },
+      });
+      if (direct.ok) directValue = direct.value;
+    } catch {
+      // receipt.from が不正なら standard と判定しない。既存の merchant 着金検証結果には波及させない。
+      receiptFrom = undefined;
+    }
   }
-  return result;
+  return {
+    ...result,
+    ...(receipt.blockNumber !== undefined
+      ? { blockNumber: receipt.blockNumber }
+      : {}),
+    ...(receiptFrom !== undefined && directValue !== undefined
+      ? { receiptFrom, directValue }
+      : {}),
+    ...(receipt.transactionIndex !== undefined
+      ? { transactionIndex: receipt.transactionIndex }
+      : {}),
+    ...receiptTransfers,
+  };
+}
+
+/**
+ * standard の独立 fee leg 専用: merchant / fee の receipt を各 1 回だけ取得し、公開 body
+ * ではなく on-chain の tx sender と block 順で両 leg を束縛してから JPYC fee Transfer を検証する。
+ * 同じ fee tx の注文横断 replay 防止は呼出側の恒久 KV claim の責務。
+ */
+export async function verifyJpycStandardFeePairOnChain(args: {
+  publicClient: StandardFeePairReceiptReader;
+  merchantTxHash: Hex;
+  feeTxHash: Hex;
+  expected: {
+    token: Address;
+    merchant: Address;
+    merchantValue: bigint;
+    feeReceiver: Address;
+    feeMinValue: bigint;
+    // 店舗負担の gross 逆算でだけ保存された第2 exact 候補。顧客負担は undefined のまま。
+    feeAlternateValue?: bigint;
+  };
+}): Promise<StandardFeePairVerifyResult> {
+  let merchantReceipt: Awaited<
+    ReturnType<StandardFeePairReceiptReader['getTransactionReceipt']>
+  >;
+  let feeReceipt: Awaited<
+    ReturnType<StandardFeePairReceiptReader['getTransactionReceipt']>
+  >;
+  try {
+    [merchantReceipt, feeReceipt] = await Promise.all([
+      args.publicClient.getTransactionReceipt({ hash: args.merchantTxHash }),
+      args.publicClient.getTransactionReceipt({ hash: args.feeTxHash }),
+    ]);
+  } catch (e) {
+    // 一方の RPC 障害を on-chain 徴収済みへ誤変換して未収表示まで消す波及を断つ。
+    const name = (e as { name?: unknown })?.name;
+    return {
+      ok: false,
+      reason:
+        name === 'TransactionReceiptNotFoundError'
+          ? 'tx_not_found'
+          : 'rpc_error',
+    };
+  }
+  if (
+    merchantReceipt.status !== 'success' ||
+    feeReceipt.status !== 'success'
+  ) {
+    return { ok: false, reason: 'tx_reverted' };
+  }
+  if (getAddress(merchantReceipt.from) !== getAddress(feeReceipt.from)) {
+    return { ok: false, reason: 'payer_mismatch' };
+  }
+  if (
+    feeReceipt.blockNumber < merchantReceipt.blockNumber ||
+    (feeReceipt.blockNumber === merchantReceipt.blockNumber &&
+      feeReceipt.transactionIndex <= merchantReceipt.transactionIndex)
+  ) {
+    return { ok: false, reason: 'fee_before_merchant' };
+  }
+
+  const payer = getAddress(merchantReceipt.from);
+  const merchantResult = verifyJpycFeeTransfer({
+    logs: merchantReceipt.logs,
+    expected: {
+      token: args.expected.token,
+      from: payer,
+      to: args.expected.merchant,
+      minValue: args.expected.merchantValue,
+    },
+  });
+  if (!merchantResult.ok) return merchantResult;
+  if (merchantResult.value !== args.expected.merchantValue) {
+    return { ok: false, reason: 'merchant_amount_mismatch' };
+  }
+
+  const feeResult = verifyJpycFeeTransfer({
+    logs: feeReceipt.logs,
+    expected: {
+      token: args.expected.token,
+      from: payer,
+      to: args.expected.feeReceiver,
+      minValue: args.expected.feeMinValue,
+    },
+  });
+  if (!feeResult.ok) return feeResult;
+  // 別用途の大額送金を注文 fee として恒久 claim し、正規用途を塞ぐ波及を断つ。
+  // 店舗負担で server が保存した床除算境界の +1 minor unit だけを第2 exact 候補として許す。
+  const alternateFeeMatches =
+    args.expected.feeAlternateValue === args.expected.feeMinValue + 1n &&
+    feeResult.value === args.expected.feeAlternateValue;
+  if (
+    feeResult.value !== args.expected.feeMinValue &&
+    !alternateFeeMatches
+  ) {
+    return { ok: false, reason: 'fee_amount_mismatch' };
+  }
+  return { ...feeResult, blockNumber: feeReceipt.blockNumber };
 }

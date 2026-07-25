@@ -63,6 +63,12 @@ vi.mock('@/lib/kv', () => ({
   },
   kvEval: async (_script: string, keys: string[], args: string[]) => {
     h.eval(_script, keys, args);
+    if (keys.length === 2) {
+      if (h.store.has(keys[1]!)) return { ok: true, value: -1 };
+      if (h.store.has(keys[0]!)) return { ok: true, value: 0 };
+      h.store.set(keys[0]!, args[0]!);
+      return { ok: true, value: 1 };
+    }
     if (h.store.get(keys[0]!) === args[0]) {
       h.store.delete(keys[0]!);
       return { ok: true, value: 1 };
@@ -147,6 +153,47 @@ describe('processEntitlementPayment cross-tier claim', () => {
     expect(h.verify).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'r:order',
+    `r:billing:${WALLET.toLowerCase()}:2026-06`,
+  ])(
+    'order/billing が global claim 済み (%s) の tx は entitlement に二重利用できない',
+    async (claimedValue) => {
+      h.store.set(
+        `payment:claimed:${AMOY}:${TXHASH.toLowerCase()}`,
+        claimedValue,
+      );
+      const pro = config('pro');
+
+      const res = await pay(pro.cfg);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        ok: false,
+        error: 'already_processed',
+      });
+      expect(pro.grant).not.toHaveBeenCalled();
+    },
+  );
+
+  it('legacy billing:settled tx は global claim と同一 Lua で entitlement 流用拒否', async () => {
+    h.store.set(
+      `billing:settled:${AMOY}:${TXHASH.toLowerCase()}`,
+      `r:${JSON.stringify({ period: '2026-06', expiresAt: 1 })}`,
+    );
+    const pro = config('pro');
+
+    const res = await pay(pro.cfg);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'already_processed',
+    });
+    expect(pro.grant).not.toHaveBeenCalled();
+    expect(
+      h.store.has(`payment:claimed:${AMOY}:${TXHASH.toLowerCase()}`),
+    ).toBe(false);
+  });
+
   it('grant-then-failure never releases the cross-tier marker', async () => {
     const pro = config('pro', {
       recordRevenue: vi.fn(async () => {
@@ -157,6 +204,10 @@ describe('processEntitlementPayment cross-tier claim', () => {
     const res = await pay(pro.cfg);
     expect(res.status).toBe(503);
     expect(h.store.get(`payment:claimed:${AMOY}:${TXHASH.toLowerCase()}`)).toBe('r:pro');
-    expect(h.eval).not.toHaveBeenCalled();
+    expect(
+      h.eval.mock.calls.filter(
+        (call) => (call[1] as string[]).length === 1,
+      ),
+    ).toHaveLength(0);
   });
 });

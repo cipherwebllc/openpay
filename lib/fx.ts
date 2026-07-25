@@ -1,11 +1,12 @@
-// JPYC⇄USDC の FX 換算と動的 QR の有効期限を扱う純粋ユーティリティ。
+// JPYC⇄USDC の FX 換算と動的 QR の画面上の期限目安を扱う純粋ユーティリティ。
 //
 // 設計の肝:
 //   - **スワップ (交換業) ではない**。店主が「1000 JPYC (≈1000 円)」と価格を入力したら、
 //     その瞬間のレートで USDC 等価額を **算出して QR に焼き込む**だけ。顧客はその固定額の
 //     USDC を払い、店主はその USDC をそのまま受け取る (オンチェーン変換ゼロ)。
-//   - レートは生成時に固定されるため **オンチェーンのスリッページは発生しない**。唯一の
-//     リスクはレートの陳腐化で、短い有効期限 (QR_EXPIRY_SECONDS) で吸収する。
+//   - レートは生成時に固定されるため **オンチェーンのスリッページは発生しない**。レートの
+//     陳腐化は短い UI カウントダウン (QR_EXPIRY_SECONDS) で正規利用者へ再計算を促す。ただし
+//     QR パラメータは未署名なので、敵対的な支払者に対するサーバ強制の有効期限ではない。
 //   - **チェーン非依存**: 1 USDC = R 円 は受取チェーンに依らない。decimals は token symbol で
 //     決まる (JPYC=18, USDC=6)。
 //   - **前提: peg**。JPYC=¥1 / USDC=$1 を仮定し usdcJpy 1 本で両建てを換算する。どちらかが
@@ -23,7 +24,8 @@ import type { TokenSymbol } from './tokens';
 export const FX_RATE_MIN = 50;
 export const FX_RATE_MAX = 500;
 
-// 動的 QR の有効期限 (秒)。生成時刻 + これを exp に焼き込む。
+// 動的 QR を再計算する UI 上の目安 (秒)。生成時刻 + これを exp に焼き込むが、
+// 未署名 URL のためサーバ側の認可条件には使わない。
 export const QR_EXPIRY_SECONDS = 180;
 
 // token symbol → decimals。token の本質的属性で不変 (lib/tokens.ts の TokenDeployment.decimals

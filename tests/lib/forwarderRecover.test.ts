@@ -10,6 +10,11 @@ import {
   type ForwarderRecoverDeps,
   type ForwarderRecoverInput,
 } from '@/lib/relay/forwarderRecover';
+import type {
+  BudgetCheckResult,
+  GasBudgetRefundToken,
+  SubfloorBudgetRefundToken,
+} from '@/lib/relay/relayGuards';
 
 const PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const account = privateKeyToAccount(PK);
@@ -20,6 +25,28 @@ const MERCHANT: Address = '0x2222222222222222222222222222222222222222';
 const CHAIN = 80002;
 const NOW = 1_800_000_000;
 const FEE = 2n * 10n ** 18n;
+const GAS_BUDGET_TOKEN =
+  'relay:budget:80002:20260725' as GasBudgetRefundToken;
+const SUBFLOOR_BUDGET_TOKEN =
+  'relay:subfloor:budget:80002:20260725' as SubfloorBudgetRefundToken;
+
+function gasBudget(
+  allowed: boolean,
+  consumed: boolean,
+): BudgetCheckResult<GasBudgetRefundToken> {
+  return consumed
+    ? { allowed, consumed: true, refundToken: GAS_BUDGET_TOKEN }
+    : { allowed, consumed: false, refundToken: null };
+}
+
+function subfloorBudget(
+  allowed: boolean,
+  consumed: boolean,
+): BudgetCheckResult<SubfloorBudgetRefundToken> {
+  return consumed
+    ? { allowed, consumed: true, refundToken: SUBFLOOR_BUDGET_TOKEN }
+    : { allowed, consumed: false, refundToken: null };
+}
 
 function makeParams(
   over: Partial<ForwarderSettleParams> = {},
@@ -177,6 +204,21 @@ describe('recoverViaForwarder', () => {
     expect(deps.submit).not.toHaveBeenCalled();
   });
 
+  it('残高 RPC 例外は submit 前の preflight_unavailable に正規化する', async () => {
+    const deps = makeDeps({
+      getBalance: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'preflight_unavailable',
+      httpStatus: 503,
+    });
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
   it('期限切れ (validBefore <= now) → rejected expired', async () => {
     const deps = makeDeps();
     const res = await recoverViaForwarder(
@@ -198,7 +240,7 @@ describe('recoverViaForwarder', () => {
     const deps = makeDeps({
       claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
       checkRateLimit: vi.fn(async () => false),
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       releaseIdempotency,
       refundGasBudget,
     });
@@ -222,8 +264,25 @@ describe('recoverViaForwarder', () => {
     expect(deps.submit).not.toHaveBeenCalled();
   });
 
+  it('authorizationState RPC 例外は submit 前の preflight_unavailable に正規化する', async () => {
+    const deps = makeDeps({
+      checkAuthorizationUsed: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'preflight_unavailable',
+      httpStatus: 503,
+    });
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
   it('B4: 日次予算超過 (checkGasBudget false) → rejected daily_budget_exceeded (submit せず)', async () => {
-    const deps = makeDeps({ checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: false })) });
+    const deps = makeDeps({
+      checkGasBudget: vi.fn(async () => gasBudget(false, false)),
+    });
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res).toMatchObject({
       kind: 'rejected',
@@ -234,7 +293,9 @@ describe('recoverViaForwarder', () => {
   });
 
   it('B4: 予算内 (checkGasBudget true) → 通常どおり submit', async () => {
-    const deps = makeDeps({ checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })) });
+    const deps = makeDeps({
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
+    });
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res.kind).toBe('success');
     expect(deps.submit).toHaveBeenCalledOnce();
@@ -244,7 +305,7 @@ describe('recoverViaForwarder', () => {
     const releaseIdempotency = vi.fn(async () => {});
     const deps = makeDeps({
       claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
-      checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: false })),
+      checkGasBudget: vi.fn(async () => gasBudget(false, false)),
       releaseIdempotency,
     });
     const res = await recoverViaForwarder(await makeInput(), deps);
@@ -324,13 +385,178 @@ describe('recoverViaForwarder', () => {
   });
 });
 
+describe('recoverViaForwarder — sub-floor 専用ガード', () => {
+  it('payer cap 超過は専用/共有 budget より前に既存 rate_limited で止める', async () => {
+    const checkSubfloorBudget = vi.fn(async () =>
+      subfloorBudget(true, true),
+    );
+    const checkGasBudget = vi.fn(async () => gasBudget(true, true));
+    const releaseIdempotency = vi.fn(async () => {});
+    const deps = makeDeps({
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency,
+      checkSubfloorPayerRateLimit: vi.fn(async () => false),
+      checkSubfloorBudget,
+      checkGasBudget,
+    });
+
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'rate_limited',
+      httpStatus: 429,
+    });
+    expect(deps.checkSubfloorPayerRateLimit).toHaveBeenCalledWith(
+      CHAIN,
+      account.address,
+    );
+    expect(checkSubfloorBudget).not.toHaveBeenCalled();
+    expect(checkGasBudget).not.toHaveBeenCalled();
+    expect(releaseIdempotency).toHaveBeenCalledOnce();
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('専用日次 cap 超過は共有 budget を触らず既存 daily_budget_exceeded で止める', async () => {
+    const checkGasBudget = vi.fn(async () => gasBudget(true, true));
+    const refundSubfloorBudget = vi.fn(async () => {});
+    const deps = makeDeps({
+      checkSubfloorPayerRateLimit: vi.fn(async () => true),
+      checkSubfloorBudget: vi.fn(async () => subfloorBudget(false, true)),
+      refundSubfloorBudget,
+      checkGasBudget,
+    });
+
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'daily_budget_exceeded',
+      httpStatus: 503,
+    });
+    expect(checkGasBudget).not.toHaveBeenCalled();
+    // cap 超過を refund すると攻撃 request 自身が枠を再び開けるため、拒否時は戻さない。
+    expect(refundSubfloorBudget).not.toHaveBeenCalled();
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('専用枠通過後に共有 cap で止まったら、未 broadcast の専用枠だけを返す', async () => {
+    const refundSubfloorBudget = vi.fn(async () => {});
+    const refundGasBudget = vi.fn(async () => {});
+    const deps = makeDeps({
+      checkSubfloorPayerRateLimit: vi.fn(async () => true),
+      checkSubfloorBudget: vi.fn(async () => subfloorBudget(true, true)),
+      refundSubfloorBudget,
+      checkGasBudget: vi.fn(async () => gasBudget(false, true)),
+      refundGasBudget,
+    });
+
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toMatchObject({
+      kind: 'rejected',
+      reason: 'daily_budget_exceeded',
+    });
+    expect(refundSubfloorBudget).toHaveBeenCalledOnce();
+    expect(refundSubfloorBudget).toHaveBeenCalledWith(
+      SUBFLOOR_BUDGET_TOKEN,
+    );
+    // 共有 cap 超過の INCR は consumed=true でも refund しない既存契約を維持する。
+    expect(refundGasBudget).not.toHaveBeenCalled();
+    expect(deps.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['submit throw', undefined],
+    ['poll error', { state: 'error' as const, detail: 'not broadcast' }],
+  ])('%s は未 broadcast が確実なので専用/共有 budget を両方返す', async (_label, outcome) => {
+    const refundSubfloorBudget = vi.fn(async () => {});
+    const refundGasBudget = vi.fn(async () => {});
+    const deps = makeDeps({
+      checkSubfloorPayerRateLimit: vi.fn(async () => true),
+      checkSubfloorBudget: vi.fn(async () => subfloorBudget(true, true)),
+      refundSubfloorBudget,
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
+      refundGasBudget,
+      ...(outcome
+        ? { pollTask: vi.fn(async () => outcome) }
+        : {
+            submit: vi.fn(async () => {
+              throw new Error('rpc down');
+            }),
+          }),
+    });
+
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res.kind).toBe('relay_error');
+    expect(refundSubfloorBudget).toHaveBeenCalledOnce();
+    expect(refundGasBudget).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [
+      'success',
+      {
+        state: 'success' as const,
+        txHash: `0x${'ab'.repeat(32)}` as Hex,
+      },
+    ],
+    ['reverted', { state: 'reverted' as const }],
+    [
+      'pending',
+      {
+        state: 'pending' as const,
+        txHash: `0x${'cd'.repeat(32)}` as Hex,
+      },
+    ],
+  ])('%s は broadcast 済みなので専用/共有 budget を返さない', async (
+    expectedKind,
+    outcome,
+  ) => {
+    const refundSubfloorBudget = vi.fn(async () => {});
+    const refundGasBudget = vi.fn(async () => {});
+    const deps = makeDeps({
+      checkSubfloorPayerRateLimit: vi.fn(async () => true),
+      checkSubfloorBudget: vi.fn(async () => subfloorBudget(true, true)),
+      refundSubfloorBudget,
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
+      refundGasBudget,
+      pollTask: vi.fn(async () => outcome),
+    });
+
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res.kind).toBe(expectedKind);
+    expect(refundSubfloorBudget).not.toHaveBeenCalled();
+    expect(refundGasBudget).not.toHaveBeenCalled();
+  });
+
+  it('専用 INCR fail-open consumed=false は submit 失敗でも refund しない', async () => {
+    const refundSubfloorBudget = vi.fn(async () => {});
+    const deps = makeDeps({
+      checkSubfloorPayerRateLimit: vi.fn(async () => true),
+      checkSubfloorBudget: vi.fn(async () => subfloorBudget(true, false)),
+      refundSubfloorBudget,
+      submit: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res.kind).toBe('relay_error');
+    expect(refundSubfloorBudget).not.toHaveBeenCalled();
+  });
+});
+
 // L3: recover 経路の日次予算 refund 配線 (free 経路 jpycRelay と同一セマンティクス)。
 // refund は tx が 1 件も broadcast されなかったことが確実な失敗 ((a) submit throw → relay_error /
 // (b) poll 'error' terminal → relay_error) でのみ呼び、checkGasBudget を通過した場合に限る。
 // pending/reverted/success では呼ばない (broadcast 済の可能性があり枠を戻すのは不正)。
 describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('submit throw (予算消費後) → refundGasBudget が 1 回だけ呼ばれる', async () => {
-    const checkGasBudget = vi.fn(async () => ({ allowed: true, consumed: true }));
+    const checkGasBudget = vi.fn(async () => gasBudget(true, true));
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
       checkGasBudget,
@@ -343,13 +569,13 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
     expect(res.kind).toBe('relay_error');
     expect(checkGasBudget).toHaveBeenCalledOnce();
     expect(refundGasBudget).toHaveBeenCalledOnce();
-    expect(refundGasBudget).toHaveBeenCalledWith(CHAIN);
+    expect(refundGasBudget).toHaveBeenCalledWith(GAS_BUDGET_TOKEN);
   });
 
   it("poll 'error' terminal (予算消費後) → refundGasBudget が 1 回だけ呼ばれる", async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       refundGasBudget,
       pollTask: vi.fn(async () => ({ state: 'error' as const, detail: 'Cancelled' })),
     });
@@ -361,7 +587,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('success → refundGasBudget は呼ばれない (broadcast 済・枠は消費したまま)', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       refundGasBudget,
     });
     const res = await recoverViaForwarder(await makeInput(), deps);
@@ -372,7 +598,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('reverted (broadcast 済) → refundGasBudget は呼ばれない', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       refundGasBudget,
       pollTask: vi.fn(async () => ({ state: 'reverted' as const })),
     });
@@ -384,7 +610,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('pending (broadcast 後未確定) → refundGasBudget は呼ばれない (二重支払い防止)', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       refundGasBudget,
       pollTask: vi.fn(async () => ({
         state: 'pending' as const,
@@ -413,7 +639,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('予算超過 (checkGasBudget false・未消費) → refundGasBudget は呼ばれない (枠を取れていない)', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: false })),
+      checkGasBudget: vi.fn(async () => gasBudget(false, false)),
       refundGasBudget,
     });
     const res = await recoverViaForwarder(await makeInput(), deps);
@@ -427,7 +653,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('INCR 失敗の fail-open allow (consumed:false) → 許可されるが submit throw でも refund しない', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: false })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, false)),
       refundGasBudget,
       submit: vi.fn(async () => {
         throw new Error('rpc down');
@@ -443,7 +669,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('INCR 成功・cap 超過 (allowed:false, consumed:true) → daily_budget_exceeded・submit せず・refund しない', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: false, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(false, true)),
       refundGasBudget,
     });
     const res = await recoverViaForwarder(await makeInput(), deps);
@@ -456,7 +682,7 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
   it('INCR 成功・cap 内 (consumed:true) で submit throw → refundGasBudget 1 回', async () => {
     const refundGasBudget = vi.fn(async () => {});
     const deps = makeDeps({
-      checkGasBudget: vi.fn(async () => ({ allowed: true, consumed: true })),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       refundGasBudget,
       submit: vi.fn(async () => {
         throw new Error('rpc down');
