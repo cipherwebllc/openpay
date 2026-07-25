@@ -3,6 +3,7 @@ import {
   createFileSpendStore,
   createPaymentExecutor,
   createPaymentSession,
+  createReceiptSignerResolver,
   createSigner,
   formatAtomicJpyc,
   readRuntimeConfig,
@@ -337,7 +338,7 @@ export function createToolRuntime({
   fetchImpl = fetch,
   nowSec = () => Math.floor(Date.now() / 1000),
   // MAX_DAILY_JPYC 設定時の日次支出ストア (テスト注入用)。既定はホームディレクトリの
-  // ファイルストア (~/.openpay-x402/spend.json・SDK 0.4.0)。
+  // ファイルストア (~/.openpay-x402/spend.json・SDK 0.5.0)。
   spendStore,
 } = {}) {
   if (profile !== 'order' && profile !== 'x402') {
@@ -373,6 +374,10 @@ export function createToolRuntime({
         }
       : null);
   const resolveCatalogListings = createCatalogResolver({ config, fetchImpl });
+  const resolveReceiptSigner = createReceiptSignerResolver({
+    discoveryUrl: config.discoveryUrl,
+    fetchImpl,
+  });
   // 日次上限 (MAX_DAILY_JPYC) が設定されたときだけ永続ストアを用意する。未設定なら
   // spendStore ごと null = 従来経路 (SDK 側で load すら走らない)。
   const dailySpendStore =
@@ -386,6 +391,7 @@ export function createToolRuntime({
     fetchImpl,
     nowSec,
     resolveCatalogListings,
+    resolveReceiptSigner,
     spendStore: dailySpendStore,
   });
 

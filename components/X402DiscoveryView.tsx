@@ -50,6 +50,7 @@ type DiscoveryItem = {
   license?: string;
   updatedAt?: string;
   verifiedAt?: string | null;
+  official?: boolean;
   accepts: Array<{ extra?: { openpay?: { feeValue?: string } } }>;
 };
 
@@ -93,13 +94,6 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const DEMO_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
 const CATALOG_CATEGORIES = ['api', 'data', 'mcp', 'content'] as const;
 type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
-const FIRST_PARTY_RESOURCE_URLS = new Set([
-  DEMO_RESOURCE_URL,
-  'https://open-pay.jp/api/paid/stores',
-  'https://open-pay.jp/api/paid/japan-web3-directory',
-  'https://open-pay.jp/api/paid/japan-web3-directory/search',
-  'https://open-pay.jp/api/paid/jpyc-shops/search',
-]);
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
 const DEMO_CURL = `curl -i ${DEMO_RESOURCE_URL}`;
@@ -1082,7 +1076,7 @@ export function X402DiscoveryView({
                     description: item.description,
                     url: item.resource,
                     copyKey: `cat-${item.resource}`,
-                    official: FIRST_PARTY_RESOURCE_URLS.has(item.resource),
+                    official: item.official === true,
                   })}
                   {hasComparisonMeta && (
                     // 折り返し必須: nowrap+横スクロールだと利用条件の長文で Docs リンクが画面外に

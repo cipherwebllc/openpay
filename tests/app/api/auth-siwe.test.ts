@@ -6,6 +6,7 @@ const h = vi.hoisted(() => {
     cookieToken: undefined as string | undefined,
     kvConfigured: false,
     kvDel: vi.fn(),
+    kvGet: vi.fn(),
     kvSet: vi.fn(),
     ipRate,
     checkIpRateLimit: vi.fn(
@@ -19,7 +20,7 @@ const h = vi.hoisted(() => {
 // 署名検証フローの全分岐は lib/siwe (siwe.test) で担保。ここは route のアダプタ薄層を確認。
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => h.kvConfigured,
-  kvGet: vi.fn(async () => ({ ok: false, reason: 'unconfigured' })),
+  kvGet: h.kvGet,
   kvSet: h.kvSet,
   kvDel: h.kvDel,
 }));
@@ -40,6 +41,7 @@ import { POST as noncePOST } from '@/app/api/auth/siwe/nonce/route';
 import { POST as verifyPOST } from '@/app/api/auth/siwe/verify/route';
 import { GET as meGET } from '@/app/api/auth/siwe/me/route';
 import { POST as logoutPOST } from '@/app/api/auth/siwe/logout/route';
+import { requireSession } from '@/app/api/auth/siwe/_session';
 
 function nonceReq(ip?: string): Request {
   return new Request('http://localhost/api/auth/siwe/nonce', {
@@ -54,6 +56,8 @@ describe('SIWE routes', () => {
     h.kvConfigured = false;
     h.kvDel.mockReset();
     h.kvDel.mockResolvedValue({ ok: true, value: 0 });
+    h.kvGet.mockReset();
+    h.kvGet.mockResolvedValue({ ok: false, reason: 'unconfigured' });
     h.kvSet.mockReset();
     h.kvSet.mockResolvedValue({ ok: false, reason: 'unconfigured' });
     h.ipRate.allowed = true;
@@ -164,6 +168,46 @@ describe('SIWE routes', () => {
   it('me: Cache-Control: private, no-store を返す (CDN キャッシュ汚染防止)', async () => {
     const res = await meGET();
     expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('me: cookie 有りで KV 読取障害 → 503 (未ログイン成功に偽装しない)', async () => {
+    h.cookieToken = 'live-session';
+    h.kvGet.mockResolvedValue({ ok: false, reason: 'network_error' });
+
+    const res = await meGET();
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'session_storage_unavailable',
+    });
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    expect(h.kvGet).toHaveBeenCalledWith('siwe:sess:live-session');
+  });
+
+  it('requireSession: cookie 有りで KV 読取障害 → 503 (401 と区別)', async () => {
+    h.cookieToken = 'live-session';
+    h.kvGet.mockResolvedValue({ ok: false, reason: 'timeout' });
+
+    const session = await requireSession();
+
+    expect(session.ok).toBe(false);
+    if (session.ok) throw new Error('expected session read failure');
+    expect(session.response.status).toBe(503);
+    expect(await session.response.json()).toEqual({
+      ok: false,
+      error: 'session_storage_unavailable',
+    });
+  });
+
+  it('me: cookie の KV record が miss → 従来どおり 200 address:null', async () => {
+    h.cookieToken = 'expired-session';
+    h.kvGet.mockResolvedValue({ ok: true, value: null });
+
+    const res = await meGET();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, address: null });
   });
 
   it('logout: cookie 無しでも 200 (冪等) + op_sess を maxAge0 で失効', async () => {

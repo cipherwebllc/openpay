@@ -85,7 +85,7 @@ describe('useIncomingPaymentWatch', () => {
     expect(result.current.receivedWei).toBe(0n);
   });
 
-  it('残高が期待額の 98% 以上増えたら received + receivedWei = 増分', () => {
+  it('残高が期待純受取額の 98% 以上増えたら received + receivedWei = 増分', () => {
     const baseBal = 5000n * 10n ** 18n;
     setBalance(baseBal); // baseline = 5000
     const { result, rerender } = renderHook(() =>
@@ -114,6 +114,57 @@ describe('useIncomingPaymentWatch', () => {
     expect(result.current.status).toBe('watching');
     // 増分は表示用に出す (clamp ≥ 0)。
     expect(result.current.receivedWei).toBe(justUnder);
+  });
+
+  it('期待額 1 atomic unit は delta=0 で received にせず、1 着金で received', () => {
+    const oneAtomic = { ...BASE, expectedAmountWei: 1n };
+    const baseBal = 5000n * 10n ** 18n;
+    setBalance(baseBal);
+    const { result, rerender } = renderHook(() =>
+      useIncomingPaymentWatch(oneAtomic),
+    );
+    expect(result.current.status).toBe('watching');
+    expect(result.current.receivedWei).toBe(0n);
+
+    setBalance(baseBal + 1n);
+    rerender();
+    expect(result.current.status).toBe('received');
+    expect(result.current.receivedWei).toBe(1n);
+  });
+
+  it('98% 閾値は atomic unit 単位で切り上げる', () => {
+    const params = { ...BASE, expectedAmountWei: 101n };
+    setBalance(1000n);
+    const { result, rerender } = renderHook(() =>
+      useIncomingPaymentWatch(params),
+    );
+
+    // ceil(101 * 98 / 100) = 99。切り捨ての 98 ではまだ received にしない。
+    setBalance(1098n);
+    rerender();
+    expect(result.current.status).toBe('watching');
+    expect(result.current.receivedWei).toBe(98n);
+
+    setBalance(1099n);
+    rerender();
+    expect(result.current.status).toBe('received');
+    expect(result.current.receivedWei).toBe(99n);
+  });
+
+  it('50 JPYC recover の 2 JPYC floor 控除後、店舗純受取 48 JPYC を検知する', () => {
+    const one = 10n ** 18n;
+    const merchantNet = 48n * one;
+    const params = { ...BASE, expectedAmountWei: merchantNet };
+    const baseBal = 5000n * one;
+    setBalance(baseBal);
+    const { result, rerender } = renderHook(() =>
+      useIncomingPaymentWatch(params),
+    );
+
+    setBalance(baseBal + merchantNet);
+    rerender();
+    expect(result.current.status).toBe('received');
+    expect(result.current.receivedWei).toBe(merchantNet);
   });
 
   it('受取先が変わると baseline をリセット (新 QR = 新規 watch)', () => {

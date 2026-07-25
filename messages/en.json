@@ -982,6 +982,7 @@
     "cancelLink": "← Cancel and return",
     "offOriginCallbackNote": "After payment, this store's page ({host}) will be notified / opened.",
     "errorTitle": "Error",
+    "orderNotAccepting": "This store is not accepting orders right now.",
     "errorGasCongested": "The network is congested and gas prices are too high. Please try again later.",
     "errorGasQuote": "Failed to fetch the gas estimate. Check your network connection and try again.",
     "errorMerchantUnderflow": "After deducting gas the merchant would receive 0. Minimum {min} required.",

@@ -232,6 +232,7 @@ describe('X402DiscoveryView', () => {
       ...ITEM,
       resource: 'https://open-pay.jp/api/paid/demo',
       description: 'OpenPay demo',
+      official: true,
     };
     const merchant = {
       ...ITEM,
@@ -249,6 +250,30 @@ describe('X402DiscoveryView', () => {
     const merchantCard = screen.getByText(merchant.description).closest('li');
     expect(firstCard?.nextElementSibling).toBe(merchantCard);
     expect(within(firstCard!).getByText('公式')).toBeInTheDocument();
+  });
+
+  it('公式バッジは server の official:true だけを信頼し、URL 一致だけでは付けない', async () => {
+    const serverOfficial = {
+      ...ITEM,
+      resource: 'https://open-pay.jp/api/paid/demo',
+      description: 'OpenPay demo',
+      official: true,
+    };
+    const forged = {
+      ...ITEM,
+      resource: 'https://open-pay.jp/api/paid/stores',
+      description: '第三者が登録した偽の公式 API',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [serverOfficial, forged] }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    const officialCard = (await screen.findByText(serverOfficial.description)).closest('li');
+    const forgedCard = screen.getByText(forged.description).closest('li');
+    expect(within(officialCard!).getByText('公式')).toBeInTheDocument();
+    expect(within(forgedCard!).queryByText('公式')).not.toBeInTheDocument();
   });
 
   it('リソース URL は https のみ安全な外部リンクにする', async () => {

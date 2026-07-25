@@ -96,6 +96,7 @@ export type SsrfSafeFetchOptions = {
   lookup?: LookupFn;
   timeoutMs?: number;
   userAgent?: string;
+  redirect?: RequestRedirect;
 };
 
 // moderation / 定期再検証で共有する SSRF-safe GET。URL parse・DNS precheck・connect-time
@@ -124,7 +125,7 @@ export async function fetchSsrfSafe(
   try {
     return await fetchImpl(url, {
       method: 'GET',
-      redirect: 'manual',
+      redirect: opts.redirect ?? 'manual',
       signal: AbortSignal.timeout(opts.timeoutMs ?? PROBE_TIMEOUT_MS),
       headers: {
         'user-agent': opts.userAgent ?? 'OpenPay-x402-facilitator-moderation/1.0',

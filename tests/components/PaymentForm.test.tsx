@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
@@ -178,11 +184,20 @@ let mutate: ReturnType<typeof vi.fn>;
 let standardMutate: ReturnType<typeof vi.fn>;
 let standardRetryFee: ReturnType<typeof vi.fn>;
 let standardRetryReceipt: ReturnType<typeof vi.fn>;
-function setPayment(state: 'idle' | 'pending' | 'success' | 'error', err?: Error) {
+let gaslessRetryReceipt: ReturnType<typeof vi.fn>;
+function setPayment(
+  state: 'idle' | 'pending' | 'unknown' | 'success' | 'error',
+  err?: Error,
+) {
   mutate = vi.fn();
+  gaslessRetryReceipt = vi.fn();
   mockHook(useBatchPayment, {
     mutate,
     isPending: state === 'pending',
+    isUnknown: state === 'unknown',
+    pendingUserOpHash:
+      state === 'unknown' ? `0x${'c'.repeat(64)}` : undefined,
+    retryReceipt: gaslessRetryReceipt,
     isSuccess: state === 'success',
     isError: state === 'error',
     data:
@@ -667,6 +682,70 @@ describe('PaymentForm — 送信フロー', () => {
     expect(call.feeAmount).toBe(0n);
   });
 
+  it('可変額は送信時点で表示・履歴明細を固定し、成功後も live 入力へ追随しない', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setPayment('idle');
+    setGasQuote('ready', 0n);
+    const { rerender } = render(<PaymentForm />);
+
+    const input = screen.getByPlaceholderText('10.00');
+    await user.type(input, '10');
+    await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ saleAmount: 10_000_000n }),
+    );
+
+    // hook mock は idle のままなので、旧実装で起きた live drift を意図的に再現する。
+    // 新実装は click 時の attempt snapshot を成功表示・明細の単一情報源にする。
+    await user.clear(input);
+    await user.type(input, '20');
+    setPayment('success');
+    rerender(<PaymentForm />);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('10 USDC')).toBeInTheDocument();
+    expect(within(dialog).queryByText('20 USDC')).toBeNull();
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    const [receipt] = loadPayerReceipts();
+    expect(receipt.amount).toBe('10');
+    expect(receipt.lineItems?.[0]).toEqual(
+      expect.objectContaining({
+        name: 'Coffee',
+        unitPrice: '10',
+        amount: '10',
+      }),
+    );
+    const [history] = loadHistory();
+    expect(history.saleAmount).toBe('10000000');
+    expect(history.lineItems?.[0]).toEqual(
+      expect.objectContaining({
+        name: 'Coffee',
+        unitPrice: '10',
+        amount: '10',
+      }),
+    );
+  });
+
+  it('可変額入力は決済 pending と settled-no-retry の間ロックする', () => {
+    setURL(`to=${MERCHANT}&token=usdc`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setPayment('pending');
+    const { rerender } = render(<PaymentForm />);
+
+    expect(screen.getByPlaceholderText('10.00')).toBeDisabled();
+    setPayment('success');
+    rerender(<PaymentForm />);
+    expect(screen.getByPlaceholderText('10.00')).toBeDisabled();
+  });
+
   it('送信中 → ボタンが「送信中…」かつ disabled', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
@@ -675,6 +754,27 @@ describe('PaymentForm — 送信フロー', () => {
     setPayment('pending');
     render(<PaymentForm />);
     expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+  });
+
+  it('Pimlico receipt unknown → main Pay を封鎖し同じ userOpHash だけ再照会する', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setPayment('unknown');
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+
+    expect(await screen.findByText('送信結果を確認中')).toBeInTheDocument();
+    expect(screen.getByText(`0x${'c'.repeat(64)}`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+
+    await user.click(
+      screen.getByRole('button', { name: '同じ送信内容を再確認' }),
+    );
+    expect(gaslessRetryReceipt).toHaveBeenCalledOnce();
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it('送信成功 → tx hash と block 番号が表示される', () => {
@@ -1042,14 +1142,19 @@ describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=s
     expect(screen.getAllByText('77').length).toBeGreaterThan(0);
   });
 
-  it('SuccessOverlay (standard): merchant tx hash の truncate (0xcccccccccc…cccccc) が overlay に出る', () => {
+  it('SuccessOverlay (standard): submit snapshot と merchant tx hash の truncate が overlay に出る', async () => {
+    const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
+    setStandardPayment('idle');
+    const { rerender } = render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /10 USDC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
     setStandardPayment('success');
-    render(<PaymentForm />);
+    rerender(<PaymentForm />);
     // SuccessOverlay は「決済完了」を表示
-    expect(screen.getAllByText(/決済完了/).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/決済完了/)).length).toBeGreaterThan(0);
     // merchant tx hash の full は inline panel に 1 度出る
     expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThanOrEqual(1);
     // overlay の truncate 表示 (先頭 10 + … + 末尾 6) も検出
@@ -1592,6 +1697,7 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
   );
 
   it('cross-chain 実行中は親 Pay を止め、成功を親 panel/overlay に表示する', async () => {
+    window.localStorage.clear();
     const mintTxHash = `0x${'f'.repeat(64)}` as const;
     setURL(`to=${MERCHANT}&token=usdc&amount=10`);
     setAccount({ connected: true, chainId: baseSepolia.id });
@@ -1641,6 +1747,21 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
       screen.getAllByText(/決済が完了しました|決済完了/).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByText(mintTxHash).length).toBeGreaterThan(0);
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toEqual(
+      expect.objectContaining({
+        receiptId: mintTxHash,
+        amount: '10',
+        chainId: baseSepolia.id,
+        merchantAddress: MERCHANT,
+        payerAddress: CUSTOMER,
+        paymentMode: 'cross-chain',
+        sourceRoute: '/pay',
+      }),
+    );
+    expect(
+      await screen.findByText('OpenPay 電子レシート'),
+    ).toBeInTheDocument();
   });
 });
 

@@ -1,10 +1,20 @@
-import type { TransactionEvent } from '@sentry/core';
+import type { Event, TransactionEvent } from '@sentry/core';
 import type { Breadcrumb } from '@sentry/nextjs';
 
 const SHORT_SHA256_HEX_LENGTH = 16;
-const URL_BREADCRUMB_CATEGORIES = new Set(['fetch', 'xhr', 'navigation']);
+const URL_BREADCRUMB_CATEGORIES = new Set([
+  'fetch',
+  'http',
+  'xhr',
+  'navigation',
+]);
 const BREADCRUMB_URL_KEYS = ['url', 'from', 'to'] as const;
 const TRACE_URL_KEYS = ['http.url', 'url.full'] as const;
+const REFERER_HEADER_NAMES = new Set(['referer', 'referrer']);
+const REFERER_TRACE_KEYS = new Set([
+  'http.request.header.referer',
+  'http.request.header.referrer',
+]);
 
 function currentOrigin(): string | undefined {
   return typeof globalThis.location?.origin === 'string'
@@ -58,6 +68,45 @@ function scrubUrlFields(
   }
 }
 
+function withoutQueryOrFragment(raw: string): string {
+  const queryIndex = raw.indexOf('?');
+  const fragmentIndex = raw.indexOf('#');
+  const endIndexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
+  return endIndexes.length > 0 ? raw.slice(0, Math.min(...endIndexes)) : raw;
+}
+
+function scrubTraceUrlFields(event: Event): void {
+  if (typeof event.request?.url === 'string') {
+    event.request.url = urlOriginForTelemetry(event.request.url);
+  }
+  scrubUrlFields(event.contexts?.trace?.data, TRACE_URL_KEYS);
+  for (const span of event.spans ?? []) {
+    scrubUrlFields(span.data, TRACE_URL_KEYS);
+  }
+}
+
+function scrubRefererHeaders(headers: Record<string, string> | undefined): void {
+  if (!headers) return;
+  for (const [key, value] of Object.entries(headers)) {
+    if (REFERER_HEADER_NAMES.has(key.toLowerCase())) {
+      headers[key] = urlOriginForTelemetry(value);
+    }
+  }
+}
+
+function scrubServerTraceData(data: Record<string, unknown> | undefined): void {
+  if (!data) return;
+  delete data['url.query'];
+  if (typeof data['http.target'] === 'string') {
+    data['http.target'] = withoutQueryOrFragment(data['http.target']);
+  }
+  for (const [key, value] of Object.entries(data)) {
+    if (REFERER_TRACE_KEYS.has(key.toLowerCase()) && typeof value === 'string') {
+      data[key] = urlOriginForTelemetry(value);
+    }
+  }
+}
+
 export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
   if (!breadcrumb.category || !URL_BREADCRUMB_CATEGORIES.has(breadcrumb.category)) {
     return breadcrumb;
@@ -75,12 +124,37 @@ export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
 export function scrubSentryTransaction(
   event: TransactionEvent,
 ): TransactionEvent {
-  if (typeof event.request?.url === 'string') {
-    event.request.url = urlOriginForTelemetry(event.request.url);
+  scrubTraceUrlFields(event);
+  return event;
+}
+
+/**
+ * Server/edge event に Next.js / RequestData integration が付ける URL の別表現を
+ * まとめて落とす。1 つでも残ると order-status token が Sentry へ波及するため、
+ * transaction と error の両方で同じ scrubber を使う。
+ */
+export function scrubSentryServerEvent<T extends Event>(event: T): T {
+  scrubTraceUrlFields(event);
+  if (event.request) {
+    delete event.request.query_string;
+    scrubRefererHeaders(event.request.headers);
   }
-  scrubUrlFields(event.contexts?.trace?.data, TRACE_URL_KEYS);
+  scrubServerTraceData(event.contexts?.trace?.data);
   for (const span of event.spans ?? []) {
-    scrubUrlFields(span.data, TRACE_URL_KEYS);
+    scrubServerTraceData(span.data);
+  }
+  const nextjs = event.contexts?.nextjs;
+  if (nextjs && typeof nextjs.request_path === 'string') {
+    nextjs.request_path = withoutQueryOrFragment(nextjs.request_path);
+  }
+  for (const breadcrumb of event.breadcrumbs ?? []) {
+    scrubSentryBreadcrumb(breadcrumb);
   }
   return event;
+}
+
+export function scrubSentryServerTransaction(
+  event: TransactionEvent,
+): TransactionEvent {
+  return scrubSentryServerEvent(event);
 }

@@ -9,6 +9,7 @@
 // exit 0 = 全 active、1 = 1 件以上 inactive。
 
 import { spawnSync } from 'node:child_process';
+import { assessReverifyRun } from './verify-production-config-helpers.mjs';
 
 const BASE = process.argv[2] ?? 'https://open-pay.jp';
 
@@ -130,6 +131,61 @@ for (const [name, path] of [
             ? 'graceful skip — PIMLICO_PAYMASTER_POLYGON / BASE / ALERT_WEBHOOK_URL 未設定。balance 監視ゼロ'
             : 'run は実行されたが balance output 不在 (workflow 変更直後の build 失敗 / script error の可能性)',
       );
+    }
+  }
+}
+
+// --- (6) hourly reverify が直近3時間内に HTTP 200 で完走したか ---
+// secret 欠落・ローテーション不一致・schedule 停止が日次 fallback に隠れて波及する前に、
+// read-only の Actions 履歴と実 HTTP 出力から operator 設定不全を検出する。
+{
+  const r = spawnSync(
+    'gh',
+    [
+      'run',
+      'list',
+      '--workflow=reverify-cron.yml',
+      '--repo=cipherwebllc/openpay',
+      '--limit=5',
+      '--json',
+      'databaseId,conclusion,createdAt,status',
+    ],
+    { encoding: 'utf8' },
+  );
+  if (r.status !== 0 || !r.stdout) {
+    record(
+      'Hourly reverify cron freshness',
+      false,
+      'gh CLI 未認証 / repo access 不可',
+    );
+  } else {
+    let runs = [];
+    try {
+      runs = JSON.parse(r.stdout);
+    } catch {
+      runs = [];
+    }
+    const run = runs.find((candidate) => candidate.status === 'completed');
+    if (!run) {
+      const assessment = assessReverifyRun(undefined, '');
+      record('Hourly reverify cron freshness', assessment.ok, assessment.detail);
+    } else {
+      const log = spawnSync(
+        'gh',
+        [
+          'run',
+          'view',
+          String(run.databaseId),
+          '--repo=cipherwebllc/openpay',
+          '--log',
+        ],
+        { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
+      );
+      const assessment = assessReverifyRun(
+        run,
+        log.status === 0 ? (log.stdout ?? '') : '',
+      );
+      record('Hourly reverify cron freshness', assessment.ok, assessment.detail);
     }
   }
 }

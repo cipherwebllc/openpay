@@ -1,3 +1,16 @@
+import {
+  scrubSentryServerEvent,
+  scrubSentryServerTransaction,
+} from '@/lib/telemetryRedaction';
+
+const sentryPrivacyOptions = {
+  // SDK が query_string / url.query を生成する入口も止め、scrubber は既存 event
+  // や SDK 由来の別表現を落とす二段構えにする。
+  dataCollection: { urlQueryParams: false },
+  beforeSend: scrubSentryServerEvent,
+  beforeSendTransaction: scrubSentryServerTransaction,
+};
+
 // Next.js のサーバーサイド instrumentation エントリ。
 // runtime ごとに Sentry の SDK サブセットを動的読込する。
 export async function register(): Promise<void> {
@@ -20,6 +33,7 @@ export async function register(): Promise<void> {
       dsn,
       environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
       tracesSampleRate: 1.0,
+      ...sentryPrivacyOptions,
     });
   }
 
@@ -29,6 +43,7 @@ export async function register(): Promise<void> {
       dsn,
       environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
       tracesSampleRate: 1.0,
+      ...sentryPrivacyOptions,
     });
   }
 }

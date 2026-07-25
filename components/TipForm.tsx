@@ -5,12 +5,10 @@ import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
-import { Loader2 } from 'lucide-react';
 import { ConnectButton } from './ConnectButton';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
-import { ResultRow } from './ResultRow';
 import { Row } from './Row';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import {
@@ -19,15 +17,20 @@ import {
 } from './PaymentSuccessOverlay';
 
 // First Load JS から外すための遅延ロード (bundle 予算)。いずれも client 専用で
-// 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後)
-// のため SSR 不要。挙動は静的 import と同一。
+// 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後 /
+// payment status = 送信後の pending・unknown 時) のため SSR 不要。挙動は静的 import と同一。
 const CrossChainHint = dynamic(
   () => import('./CrossChainHint').then((m) => m.CrossChainHint),
   { ssr: false },
 );
-const PayerReceiptCompletion = dynamic(
+const TipSuccessPanel = dynamic(
   () =>
-    import('./PayerReceiptCompletion').then((m) => m.PayerReceiptCompletion),
+    import('./TipSuccessPanel').then((m) => m.TipSuccessPanel),
+  { ssr: false },
+);
+const PaymentStatusPanel = dynamic(
+  () =>
+    import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
   { ssr: false },
 );
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -84,7 +87,7 @@ import {
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
-import { tipFormTheme } from '@/lib/handleTheme';
+import { tipFormTheme } from '@/lib/tipFormTheme';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 
@@ -289,12 +292,15 @@ export function TipForm({
   // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
   const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
+  // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
+  // latch 中は新しい UserOperation ではなく、保持済み hash の receipt 再照会だけを許可する。
+  const gaslessAmbiguous = gasless.isUnknown;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
   const directFlowPending = useRelay
     ? relay.isPending || relayAmbiguous
-    : gasless.isPending;
+    : gasless.isPending || gaslessAmbiguous;
   const directFlowSuccess = useRelay
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
@@ -320,7 +326,7 @@ export function TipForm({
   // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
   // (CheckoutForm/PaymentForm と同一防御。TipForm は standard 経路を持たないため gasless/relay のみ)。
   const directSettledNoRetry =
-    (!useRelay && !!gasless.data?.success) ||
+    (!useRelay && (gaslessAmbiguous || !!gasless.data?.success)) ||
     (useRelay &&
       (relayAmbiguous ||
         !!relayIpRateLimited ||
@@ -358,7 +364,7 @@ export function TipForm({
     (!useRelay && !!gasless.data && !gasless.data.success) ||
     (useRelay && !!relay.data && !relay.data.success && !relay.data.pending);
   // relay の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
-  const flowError = relayAmbiguous
+  const flowError = relayAmbiguous || gaslessAmbiguous
     ? null
     : useRelay
       ? relay.error
@@ -1019,130 +1025,98 @@ export function TipForm({
         </div>
       )}
 
+      {/* Pimlico receipt RPC が不確定な間は新しい UserOperation を作らず、保持した
+          userOpHash の receipt 再照会だけを許可する。文言は relay unknown と共通。 */}
+      {gaslessAmbiguous && (
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={t('responseUnknownBody')}
+          titleWithIcon
+          showSpinner
+          identifier={gasless.pendingUserOpHash}
+          actionLabel={t('responseUnknownRetryButton')}
+          actionDisabled={gasless.isPending}
+          onAction={gasless.retryReceipt}
+        />
+      )}
+
       {/* Tip には standard fallback が無い。ambiguity latch 中は Pay を封鎖し、同一 payload の
           再確認だけを許可する。 */}
       {relayAmbiguous && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            {relay.recoveryState === 'auto' && (
-              <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            )}
-            {t('responseUnknownTitle')}
-          </p>
-          <p className="mt-1 break-words">
-            {relay.recoveryState === 'auto'
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={
+            relay.recoveryState === 'auto'
               ? t('responseUnknownAutoBody')
-              : t('responseUnknownBody')}
-          </p>
-          {relay.recoveryState !== 'auto' && (
-            <button
-              type="button"
-              disabled={relay.isPending}
-              onClick={relay.retrySamePayload}
-              className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t('responseUnknownRetryButton')}
-            </button>
-          )}
-        </div>
+              : t('responseUnknownBody')
+          }
+          titleWithIcon
+          showSpinner={relay.recoveryState === 'auto'}
+          actionLabel={
+            relay.recoveryState === 'auto'
+              ? undefined
+              : t('responseUnknownRetryButton')
+          }
+          actionDisabled={
+            relay.recoveryState === 'auto' ? undefined : relay.isPending
+          }
+          onAction={
+            relay.recoveryState === 'auto'
+              ? undefined
+              : relay.retrySamePayload
+          }
+        />
       )}
 
       {/* relay IP rate limit: idem 確認前の 429 なので main Pay / 再署名を封鎖し、保持済みの
           同一署名 payload の再 POST だけを許可する。 */}
       {relayIpRateLimited && !relayAmbiguous && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
-          <p className="mt-1 break-words">
-            {relayIpRateLimited.retryAfterSeconds === null
+        <PaymentStatusPanel
+          title={t('ipRateLimitedTitle')}
+          body={
+            relayIpRateLimited.retryAfterSeconds === null
               ? t('ipRateLimitedBody')
               : t('ipRateLimitedBodyWithRetryAfter', {
                   seconds: relayIpRateLimited.retryAfterSeconds,
-                })}
-          </p>
-          <button
-            type="button"
-            disabled={relay.isPending}
-            onClick={relay.retryRelay}
-            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {t('ipRateLimitedRetryButton')}
-          </button>
-        </div>
+                })
+          }
+          actionLabel={t('ipRateLimitedRetryButton')}
+          actionDisabled={relay.isPending}
+          onAction={relay.retryRelay}
+        />
       )}
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
           (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
       {useRelay && !relayAmbiguous && relay.data?.pending && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            {t('pendingTitle')}
-          </p>
-          <p className="mt-1 break-words">{t('pendingBody')}</p>
-          {relay.data.txHash && (
-            <p className="mt-2 break-all font-mono text-xs">
-              {relay.data.txHash}
-              {explorerBase && (
-                <>
-                  {' · '}
-                  <a
-                    href={`${explorerBase}/tx/${relay.data.txHash}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="font-sans underline hover:text-sky-900"
-                  >
-                    {t('pendingExplorerLink')} ↗
-                  </a>
-                </>
-              )}
-            </p>
-          )}
-        </div>
+        <PaymentStatusPanel
+          title={t('pendingTitle')}
+          body={t('pendingBody')}
+          titleWithIcon
+          showSpinner
+          identifier={relay.data.txHash ?? undefined}
+          explorerHref={
+            relay.data.txHash && explorerBase
+              ? `${explorerBase}/tx/${relay.data.txHash}`
+              : undefined
+          }
+          explorerLabel={t('pendingExplorerLink')}
+        />
       )}
 
       {flowSuccess && flowTxHash && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-          <p className="font-semibold">{t('successTitle')}</p>
-          {params.thanks && (
-            <p className="mt-2 whitespace-pre-wrap text-sm">{params.thanks}</p>
-          )}
-          {params.thanksUrl && (
-            <a
-              href={params.thanksUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="mt-2 inline-block rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-            >
-              {t('openLink')}
-            </a>
-          )}
-          <dl className="mt-3 space-y-1">
-            {/* relay は userOpHash / blockNumber を持たない (txHash のみ) → 該当行は省略。 */}
-            {flowUserOpHash && (
-              <ResultRow
-                label={t('successUserOp')}
-                value={flowUserOpHash}
-                copyable
-              />
-            )}
-            <ResultRow label={t('successTx')} value={flowTxHash} copyable />
-            {flowBlockNumber !== undefined && (
-              <ResultRow
-                label={t('successBlock')}
-                value={flowBlockNumber.toString()}
-              />
-            )}
-          </dl>
-
-          {/* 顧客 (支援者) 向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
-          <div className="mt-3">
-            <PayerReceiptCompletion
-              candidateIds={[flowTxHash, flowUserOpHash].filter(
-                (v): v is NonNullable<typeof v> => !!v,
-              )}
-            />
-          </div>
-        </div>
+        <TipSuccessPanel
+          title={t('successTitle')}
+          thanks={params.thanks}
+          thanksUrl={params.thanksUrl}
+          openLinkLabel={t('openLink')}
+          userOpHash={flowUserOpHash}
+          txHash={flowTxHash}
+          blockNumber={flowBlockNumber}
+          userOpLabel={t('successUserOp')}
+          txLabel={t('successTx')}
+          blockLabel={t('successBlock')}
+        />
       )}
 
       {/* PayPay 風 大型成功 overlay。dismiss 後は上記の従来 panel (thanks 含む) を表示。共通

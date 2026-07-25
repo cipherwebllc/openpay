@@ -88,6 +88,7 @@ async function load(
     agent?: string;
     shopLive?: string;
     preorderTime?: string;
+    kairosForwarder?: string;
   } = {},
 ): Promise<{ menu: MenuRoute; pay: PayRoute; summary: SummaryRoute }> {
   vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', flags.facilitator ?? '1');
@@ -96,6 +97,10 @@ async function load(
   vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOP_LIVE', flags.shopLive ?? '');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_PREORDER_TIME', flags.preorderTime ?? '');
   vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', FORWARDER);
+  vi.stubEnv(
+    'NEXT_PUBLIC_JPYC_FORWARDER_KAIROS',
+    flags.kairosForwarder ?? '',
+  );
   vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', FEE_RECEIVER);
   vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '');
   vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY);
@@ -186,6 +191,7 @@ describe('agent-order menu route', () => {
       shopName: string;
       mode: string;
       chain: string;
+      paymentSupported: boolean;
       items: Array<{ id: string; name: string; price: string; hasOptions: boolean }>;
     };
     expect(body).toMatchObject({
@@ -193,6 +199,7 @@ describe('agent-order menu route', () => {
       shopName: '居酒屋テスト',
       mode: 'storefront',
       chain: 'polygon',
+      paymentSupported: true,
     });
     expect(body.items).toEqual([
       { id: 'karaage', name: '唐揚げ', price: '500', hasOptions: false },
@@ -204,6 +211,24 @@ describe('agent-order menu route', () => {
     store.record = record({ storefront: undefined });
     const { menu } = await load();
     expect((await menu.GET(menuReq('h=shop'))).status).toBe(404);
+  });
+
+  it('facilitator 対応外チェーンは paymentSupported=false として事前開示する', async () => {
+    store.record = record({
+      storefront: {
+        chain: 'kaia',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [{ id: 'karaage', name: '唐揚げ', price: '500' }],
+      },
+    } as Partial<HandleRecord>);
+    const { menu } = await load({ kairosForwarder: FORWARDER });
+    const res = await menu.GET(menuReq('h=shop'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      chain: 'kaia',
+      paymentSupported: false,
+    });
   });
 });
 
@@ -400,6 +425,31 @@ describe('agent-order pay route', () => {
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
+  it('preorder-time ON で lead 後の受取スロットが 0 件なら challenge 前に 409', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
+    store.record = record({
+      storefront: {
+        chain: 'polygon',
+        mode: 'preorder',
+        feePayer: 'merchant',
+        menu: [
+          { id: 'karaage', name: '唐揚げ', price: '500' },
+          { id: 'beer', name: 'ビール', price: '600' },
+        ],
+        minLeadMinutes: 90,
+        lastOrder: '13:00',
+      },
+    } as Partial<HandleRecord>);
+    const { pay } = await load({ preorderTime: '1' });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'store_not_accepting' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
   it('preorder-time ON で開店前なら支払いヘッダがあっても plain 409 で settle しない', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
@@ -499,6 +549,24 @@ describe('agent-order pay route', () => {
     const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('unsupported_chain');
+  });
+
+  it('deployment/forwarder があっても facilitator 対応外なら challenge 前に 422', async () => {
+    store.record = record({
+      storefront: {
+        chain: 'kaia',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        menu: [{ id: 'karaage', name: '唐揚げ', price: '500' }],
+      },
+    } as Partial<HandleRecord>);
+    const { pay } = await load({ kairosForwarder: FORWARDER });
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'unsupported_chain' });
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
   it('X-PAYMENT → verify/settle 後に notify を合成 Request で内部呼び出しし 200', async () => {

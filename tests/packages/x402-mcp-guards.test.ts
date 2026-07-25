@@ -8,6 +8,7 @@ type GuardConfig = {
   buyerPrivateKey: string | null;
   maxPerCallAtomic: bigint;
   maxSessionAtomic: bigint;
+  maxTimeoutSeconds: number;
   allowedHosts: string[];
 };
 
@@ -26,6 +27,11 @@ type GuardResult = {
 
 type Guards = {
   REASONS: Record<string, string>;
+  SUPPORTED_JPYC_ASSETS: Record<
+    string,
+    { address: string; name: string; version: string; decimals: number }
+  >;
+  SUPPORTED_JPYC_FORWARDERS: Record<string, string>;
   readMoneyConfig: (env: Record<string, string | undefined>) => GuardConfig;
   evaluatePaymentGuards: (input: {
     url: string;
@@ -46,7 +52,7 @@ type Guards = {
 const RESOURCE = 'https://open-pay.jp/api/paid/demo';
 const JPYC = 10n ** 18n;
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
-const FORWARDER = getAddress('0x4444444444444444444444444444444444444444');
+const FORWARDER = getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4');
 const MERCHANT = getAddress('0x2222222222222222222222222222222222222222');
 const FEE_RECEIVER = getAddress('0x3333333333333333333333333333333333333333');
 const PRIVATE_KEY = `0x${'1'.repeat(64)}`;
@@ -311,6 +317,82 @@ describe('packages/x402-mcp guards', () => {
     expect(wrongHost.reasons).toContain(guards.REASONS.resourceMismatch);
   });
 
+  it('binds every supported network to the known JPYC v3 address and domain', async () => {
+    const guards = await loadGuards();
+    const config = guards.readMoneyConfig(baseEnv());
+    const attackerAsset = guards.evaluatePaymentGuards({
+      url: RESOURCE,
+      accept: accept({ asset: '0x1111111111111111111111111111111111111111' }),
+      config,
+    });
+    const wrongVersion = guards.evaluatePaymentGuards({
+      url: RESOURCE,
+      accept: withExtra({ version: '2' }),
+      config,
+    });
+
+    expect(attackerAsset.ok).toBe(false);
+    expect(attackerAsset.reasons).toContain(guards.REASONS.invalidJpycAsset);
+    expect(wrongVersion.reasons).toContain(guards.REASONS.invalidJpycAsset);
+    expect(Object.values(guards.SUPPORTED_JPYC_ASSETS)).toEqual(
+      Array.from({ length: 6 }, () => ({
+        address: TOKEN,
+        name: 'JPY Coin',
+        version: '1',
+        decimals: 18,
+      })),
+    );
+  });
+
+  it('rejects an allowlisted seller that replaces the reviewed forwarder with its EOA', async () => {
+    const guards = await loadGuards();
+    const attacker = '0x9999999999999999999999999999999999999999';
+    const attackerDestination = withExtra({}, { forwarder: attacker });
+    (attackerDestination as { payTo: string }).payTo = attacker;
+
+    const result = guards.evaluatePaymentGuards({
+      url: RESOURCE,
+      accept: attackerDestination,
+      config: guards.readMoneyConfig(baseEnv()),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reasons).toContain(
+      guards.REASONS.invalidOpenpayForwarder,
+    );
+    expect(guards.SUPPORTED_JPYC_FORWARDERS['eip155:80002']).toBe(
+      FORWARDER,
+    );
+  });
+
+  it('rejects seller timeouts above the configured authorization window', async () => {
+    const guards = await loadGuards();
+    const defaultConfig = guards.readMoneyConfig(baseEnv());
+    const tooLong = guards.evaluatePaymentGuards({
+      url: RESOURCE,
+      accept: accept({ maxTimeoutSeconds: 601 }),
+      config: defaultConfig,
+    });
+    const configured = guards.readMoneyConfig(
+      baseEnv({ MAX_TIMEOUT_SECONDS: '900' }),
+    );
+    const withinConfiguredLimit = guards.evaluatePaymentGuards({
+      url: RESOURCE,
+      accept: accept({ maxTimeoutSeconds: 900 }),
+      config: configured,
+    });
+
+    expect(defaultConfig.maxTimeoutSeconds).toBe(600);
+    expect(tooLong.ok).toBe(false);
+    expect(tooLong.reasons).toContain(guards.REASONS.timeoutTooLong);
+    expect(withinConfiguredLimit.reasons).not.toContain(
+      guards.REASONS.timeoutTooLong,
+    );
+    expect(() =>
+      guards.readMoneyConfig(baseEnv({ MAX_TIMEOUT_SECONDS: '1201' })),
+    ).toThrow('MAX_TIMEOUT_SECONDS must be an integer between 1 and 1200');
+  });
+
   it('denies pay when BUYER_PRIVATE_KEY is absent but quote guards can still pass', async () => {
     const guards = await loadGuards();
     const noKey = guards.readMoneyConfig(
@@ -395,6 +477,17 @@ describe('packages/x402-mcp guards', () => {
       const r = guards.evaluatePaymentGuards({
         url: LISTED,
         accept: liveEvil,
+        config: guards.readMoneyConfig(baseEnv()),
+        catalogListings: listings(),
+      });
+      expect(r.reasons).toContain(guards.REASONS.catalogAcceptMismatch);
+    });
+
+    it('bait-and-switch: ライブ accept の maxTimeoutSeconds が掲載と違う → catalog_accept_mismatch', async () => {
+      const guards = await loadGuards();
+      const r = guards.evaluatePaymentGuards({
+        url: LISTED,
+        accept: accept({ resource: LISTED, maxTimeoutSeconds: 599 }),
         config: guards.readMoneyConfig(baseEnv()),
         catalogListings: listings(),
       });

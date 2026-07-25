@@ -16,6 +16,7 @@ import {
 } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import { readBodyCapped } from '@/lib/httpBodyCap';
+import { fetchSsrfSafe } from '@/lib/x402/moderation';
 import { displaySymbolFor } from '@/lib/tokens';
 import {
   buildTipOgModel,
@@ -42,28 +43,19 @@ const SATORI_IMAGE_TYPES = new Set([
   'image/apng',
 ]);
 
-// アバター取得のホストガード。保存時に https は強制済みだが、サーバ側 fetch になるため
-// IP リテラル / localhost / 内部っぽいドメインは追加で弾く (SSRF 縮小。DNS が私設網を
-// 指すケースは https 証明書要件でほぼ実害がない)。
-function isBlockedHost(host: string): boolean {
-  const h = host.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) {
-    return true;
-  }
-  return /^[0-9.:[\]]+$/.test(h); // IPv4 / IPv6 リテラル
-}
-
 // 外部アバター → data URL。失敗は null (イニシャル円へフォールバック)。
 async function fetchAvatarDataUrl(url: string): Promise<string | null> {
   try {
     const u = new URL(url);
     if (u.protocol !== 'https:') return null;
-    if (isBlockedHost(u.hostname)) return null;
-    const res = await fetch(url, {
+    // DNS 名が private/link-local へ解決される SSRF と DNS rebinding の波及を、
+    // precheck + connect-time lookup 検査の共通 fetch で接続前に断つ。
+    const res = await fetchSsrfSafe(url, {
       redirect: 'error',
-      signal: AbortSignal.timeout(AVATAR_FETCH_TIMEOUT_MS),
+      timeoutMs: AVATAR_FETCH_TIMEOUT_MS,
+      userAgent: 'OpenPay-og-avatar/1.0',
     });
-    if (!res.ok) return null;
+    if (!res?.ok) return null;
     const ct = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
     // satori が decode できる種別のみ (webp/avif/x-icon 等は描画 throw → カード全滅)。
     if (!SATORI_IMAGE_TYPES.has(ct)) return null;

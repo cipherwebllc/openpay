@@ -8,6 +8,7 @@ import {
   merchantResourcesKey,
   resourceKey,
   MAX_RESOURCES_PER_MERCHANT,
+  RESOURCES_INDEX,
 } from '@/lib/x402/registry';
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
@@ -316,6 +317,23 @@ describe('x402 facilitator /resources', () => {
     expect(body.paywallSnippet).toContain(validBody.url);
   });
 
+  it('canonical OpenPay origin は probe 前に 400 invalid_url で登録拒否', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const res = await resources.POST(
+      postReq({
+        ...validBody,
+        url: 'https://open-pay.jp/api/paid/jpyc-shops/search',
+        payTo: STRANGER,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_url' });
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
+    expect(mockProbeGate).not.toHaveBeenCalled();
+    expect(store.kv.size).toBe(0);
+  });
+
   it('無料公開 URL (probe が 200) → 400 resource_not_gated', async () => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
@@ -590,6 +608,25 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     expect((await res.json()).error).toBe('resource_not_gated');
   });
 
+  it('編集でも canonical OpenPay origin への差し替えを probe 前に拒否する', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    mockFreelyAccessible.mockClear();
+    mockProbeGate.mockClear();
+
+    const res = await idRoute.PATCH(
+      patchReq({ ...validBody, url: 'https://open-pay.jp/api/paid/demo' }),
+      ctx(id),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_url' });
+    expect(mockFreelyAccessible).not.toHaveBeenCalled();
+    expect(mockProbeGate).not.toHaveBeenCalled();
+    expect(JSON.parse(store.kv.get(resourceKey(id))!).url).toBe(validBody.url);
+  });
+
   it('owner の PATCH wallet rate limit → probe 前に 429 + Retry-After', async () => {
     const { resources, idRoute } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
@@ -724,6 +761,7 @@ describe('x402 /discovery', () => {
         docsUrl?: string;
         license?: string;
         updatedAt?: string;
+        official?: boolean;
         accepts: Array<{
           scheme: string;
           network: string;
@@ -740,6 +778,7 @@ describe('x402 /discovery', () => {
     expect(item.docsUrl).toBe(validBody.docsUrl);
     expect(item.license).toBe(validBody.license);
     expect(item.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(item).not.toHaveProperty('official');
     expect(item.accepts).toHaveLength(1);
     const pr = item.accepts[0];
     expect(pr.scheme).toBe('exact');
@@ -809,6 +848,7 @@ describe('x402 /discovery', () => {
         priceJpyc: string;
         docsUrl: string;
         license: string;
+        official: true;
         accepts: Array<{ extra: { openpay: { merchant: string; merchantValue: string; feeValue: string } } }>;
       }>;
     };
@@ -818,6 +858,7 @@ describe('x402 /discovery', () => {
       'https://open-pay.jp/api/paid/stores',
     ]);
     expect(body.items[0].priceJpyc).toBe('1');
+    expect(body.items.every((item) => item.official === true)).toBe(true);
     expect(body.items.every((item) => item.docsUrl === 'https://open-pay.jp/api/openapi.json')).toBe(true);
     expect(body.items.every((item) => item.license.length > 0 && item.license.length <= 60)).toBe(true);
     expect(body.items[0].accepts[0].extra.openpay.merchant).toBe(FIRST_PARTY_SELLER);
@@ -826,6 +867,46 @@ describe('x402 /discovery', () => {
     );
     expect(body.items[0].accepts[0].extra.openpay.feeValue).toBe(
       (2n * 10n ** 18n).toString(),
+    );
+  });
+
+  it('予約 origin 拒否前の registry record は first-party item と重複掲載しない', async () => {
+    const { discovery } = await load();
+    const id = 'legacy-openpay-spoof';
+    store.kv.set(
+      resourceKey(id),
+      JSON.stringify({
+        id,
+        merchant: STRANGER,
+        url: 'https://open-pay.jp:443/api/paid/demo',
+        description: '偽の公式 API',
+        priceJpyc: '1',
+        category: 'api',
+        docsUrl: 'https://phish.example/openapi.json',
+        payTo: STRANGER,
+        network: 'eip155:80002',
+        active: true,
+        createdAt: 1,
+      }),
+    );
+    store.lists.set(RESOURCES_INDEX, [id]);
+
+    const body = (await (await discovery()).json()) as {
+      items: Array<{
+        resource: string;
+        description: string;
+        docsUrl?: string;
+        official?: boolean;
+      }>;
+    };
+    expect(body.items.map((item) => item.resource)).toEqual([
+      'https://open-pay.jp/api/paid/demo',
+      'https://open-pay.jp/api/paid/stores',
+    ]);
+    expect(body.items.every((item) => item.official === true)).toBe(true);
+    expect(body.items.map((item) => item.description)).not.toContain('偽の公式 API');
+    expect(body.items.map((item) => item.docsUrl)).not.toContain(
+      'https://phish.example/openapi.json',
     );
   });
 
@@ -998,8 +1079,11 @@ describe('x402 /discovery', () => {
       docsUrl: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 512 },
       license: { type: 'string', maxLength: 60 },
       updatedAt: { type: 'string', format: 'date-time' },
+      official: { type: 'boolean', const: true },
       verifiedAt: { type: ['string', 'null'], format: 'date-time' },
     });
-    expect(schema.required).not.toEqual(expect.arrayContaining(['docsUrl', 'license', 'updatedAt']));
+    expect(schema.required).not.toEqual(
+      expect.arrayContaining(['docsUrl', 'license', 'updatedAt', 'official']),
+    );
   });
 });

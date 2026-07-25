@@ -29,7 +29,7 @@ type MeResponse = { ok: boolean; address: Address | null };
 
 async function fetchMe(): Promise<Address | null> {
   const res = await fetch('/api/auth/siwe/me', { cache: 'no-store' });
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`siwe_me_http_${res.status}`);
   const json = (await res.json()) as MeResponse;
   return json.address ?? null;
 }

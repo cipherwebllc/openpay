@@ -5,6 +5,7 @@ import {
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
 import { AUTHORIZATION_VALIDITY_WINDOW_SEC } from '@/lib/jpycEip3009';
+import { buildReceiveWithAuthorizationTypedData } from '@/lib/relay/forwarderIntent';
 
 // recover プレビューは forwarder の有無 (jpycForwarderFor) と feeValue (recoverFeeValue) を
 // 引くので、両者を mock して chain/env に依存しない決定論テストにする。
@@ -27,6 +28,7 @@ vi.mock('@/lib/relay/recoverFee', async () => {
 });
 
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 
 const MERCHANT: Address = getAddress(
@@ -35,6 +37,38 @@ const MERCHANT: Address = getAddress(
 const FORWARDER: Address = getAddress(
   '0x0f4560A777415580f0680f8b56a79B0022c6b848',
 );
+const FROM: Address = getAddress(
+  '0x2222222222222222222222222222222222222222',
+);
+const FEE_RECEIVER: Address = getAddress(
+  '0x3333333333333333333333333333333333333333',
+);
+const TOKEN: Address = getAddress(
+  '0x4444444444444444444444444444444444444444',
+);
+
+function typedDataValue(
+  value: bigint,
+  feeValue: bigint,
+  gasMode: 'customer' | 'merchant',
+): bigint {
+  const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
+  return buildReceiveWithAuthorizationTypedData(
+    {
+      from: FROM,
+      merchant: MERCHANT,
+      merchantValue,
+      feeReceiver: FEE_RECEIVER,
+      feeValue,
+      validAfter: 0n,
+      validBefore: 1n,
+      intentSalt: `0x${'11'.repeat(32)}`,
+    },
+    137,
+    TOKEN,
+    FORWARDER,
+  ).message.value;
+}
 
 describe('buildJpycRelaySignPreview', () => {
   it('amountAtomic は署名する value の .toString() と完全一致 (乖離ゼロのフェンス)', () => {
@@ -140,6 +174,9 @@ describe('buildJpycRecoverSignPreview', () => {
     expect(p!.totalHuman).toBe('1007');
     // 照合表の生の数字 = (value + fee).toString()。
     expect(p!.totalAtomic).toBe((1007n * 10n ** 18n).toString());
+    expect(p!.totalAtomic).toBe(
+      typedDataValue(value, DISTINCT_FEE, 'customer').toString(),
+    );
     // recoverFeeValue が (value, gasMode, chainId) で実際に呼ばれたことを確認 (delegation の直接証明)。
     expect(recoverFeeValue).toHaveBeenCalledWith(value, 'customer', 137);
     expect(p!.gasMode).toBe('customer');
@@ -162,8 +199,58 @@ describe('buildJpycRecoverSignPreview', () => {
     expect(p!.feeHuman).toBe('7');
     expect(p!.totalHuman).toBe('1000');
     expect(p!.totalAtomic).toBe(value.toString());
+    expect(p!.totalAtomic).toBe(
+      typedDataValue(value, DISTINCT_FEE, 'merchant').toString(),
+    );
     expect(recoverFeeValue).toHaveBeenCalledWith(value, 'merchant', 137);
     expect(p!.gasMode).toBe('merchant');
+  });
+
+  it('モバイル注文 customer: feeKind の実利用料を上乗せし typed-data value と一致', () => {
+    const value = 10000n * 10n ** 18n;
+    const fee = mobileOrderFeeValue(value, 'preorder');
+    vi.mocked(recoverFeeValue).mockClear();
+
+    const p = buildJpycRecoverSignPreview({
+      value,
+      merchant: MERCHANT,
+      decimals: 18,
+      displaySymbol: 'JPYC',
+      chainId: 137,
+      gasMode: 'customer',
+      feeKind: 'preorder',
+    });
+
+    expect(p!.feeHuman).toBe('300');
+    expect(p!.totalHuman).toBe('10300');
+    expect(p!.totalAtomic).toBe(
+      typedDataValue(value, fee, 'customer').toString(),
+    );
+    expect(recoverFeeValue).not.toHaveBeenCalled();
+  });
+
+  it('モバイル注文 merchant: feeKind の実利用料を内枠吸収し typed-data value と一致', () => {
+    const value = 10000n * 10n ** 18n;
+    const fee = mobileOrderFeeValue(value, 'preorder');
+    vi.mocked(recoverFeeValue).mockClear();
+
+    const p = buildJpycRecoverSignPreview({
+      value,
+      merchant: MERCHANT,
+      decimals: 18,
+      displaySymbol: 'JPYC',
+      chainId: 137,
+      gasMode: 'merchant',
+      feeKind: 'preorder',
+    });
+
+    expect(p!.feeHuman).toBe('300');
+    expect(p!.totalHuman).toBe('10000');
+    expect(p!.totalAtomic).toBe(
+      typedDataValue(value, fee, 'merchant').toString(),
+    );
+    expect(fee).toBe(300n * 10n ** 18n);
+    expect(recoverFeeValue).not.toHaveBeenCalled();
   });
 
   it('fee がフロアを超える (bps>0 大口) 場合も customer/merchant の式が一致する', () => {

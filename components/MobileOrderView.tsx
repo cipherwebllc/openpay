@@ -288,7 +288,12 @@ export function MobileOrderView({
         : [],
     [timeEnabled, isPreorder, now, config.minLeadMinutes, config.lastOrder],
   );
+  // lead 後の最初の枠が lastOrder を越えた preorder は、本日の受付枠が無い。
+  const noPickupSlots =
+    timeEnabled && isPreorder && pickupSlotList.length === 0;
   const [pickupAt, setPickupAt] = useState<number | null>(null);
+  const [admissionPending, setAdmissionPending] = useState(false);
+  const [admissionRejected, setAdmissionRejected] = useState(false);
   // 時間経過で選択スロットが候補外 (過去) になったら解除 (過去の受取時刻を送らない)。スロットは
   // 15分グリッド固定ゆえ、まだ未来の選択は候補に残り続け、過去落ちしたときだけ false になる。
   useEffect(() => {
@@ -409,7 +414,11 @@ export function MobileOrderView({
       : undefined;
   const awaitsOrderId = env.enableOrderRelay && Boolean(handle) && orderId === null;
   const baseCheckoutUrl =
-    origin && cartItems.length > 0 && !tooMany && !awaitsOrderId
+    origin &&
+    cartItems.length > 0 &&
+    !tooMany &&
+    !awaitsOrderId &&
+    !noPickupSlots
       ? buildCheckoutUrl(origin, {
           to: config.receiver,
           token: 'jpyc',
@@ -417,11 +426,15 @@ export function MobileOrderView({
           gas: 'customer',
           items: cartItems,
           description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
-          // モバイル注文システム利用料 (flag ON のときだけ)。CheckoutForm/relay が feeKind/feePayer
-          // から経路非依存に 1%(店頭)/3%(事前) を分割する。flag OFF では付かず従来動作 (inert)。
-          ...(env.enableMobileOrderFee
-            ? { feeKind: config.mode, feePayer: config.feePayer }
-            : {}),
+          // モバイル注文システム利用料。CheckoutForm/relay が feeKind/feePayer から
+          // 経路非依存に 1%(店頭)/3%(事前) を分割するのは課金 flag ON のときだけ。
+          // mode は署名前 admission の店舗設定束縛にも使うため常に運ぶ。実際の課金は
+          // CheckoutForm の enableMobileOrderFee gate が従来どおり決め、flag OFF では発生しない。
+          feeKind: config.mode,
+          feePayer: config.feePayer,
+          // @handle 店舗は checkout submit の署名前 admission で最新 KV 設定へ再束縛する。
+          // self-contained ?s= 注文は server 権威の handle が無いため付けない。
+          ...(handle ? { storeHandle: handle } : {}),
           // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
           // orderId = webhook→店主の受注フィード + 完了画面の見出し。
           // receiptNo = 同じ受付番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
@@ -440,6 +453,47 @@ export function MobileOrderView({
       ? `${baseCheckoutUrl}&back=${encodeURIComponent(backHref)}` +
         (backLabel ? `&backName=${encodeURIComponent(backLabel)}` : '')
       : baseCheckoutUrl;
+  const checkOrderAdmission = useCallback(
+    async (event: React.MouseEvent<HTMLAnchorElement>) => {
+      // 時間 admission は @handle + flag ON だけ。flag OFF / self-contained token は従来の直リンク。
+      if (!handle || !timeEnabled) return;
+      event.preventDefault();
+      if (!checkoutUrl || admissionPending) return;
+      setAdmissionPending(true);
+      try {
+        const response = await fetch('/api/order/admission', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({
+            handle,
+            merchant: config.receiver,
+            mode: config.mode,
+            ...(pickupAt !== null ? { pickupAt } : {}),
+          }),
+        });
+        if (!response.ok) {
+          setAdmissionRejected(true);
+          return;
+        }
+        window.location.assign(checkoutUrl);
+      } catch {
+        // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed。
+        setAdmissionRejected(true);
+      } finally {
+        setAdmissionPending(false);
+      }
+    },
+    [
+      admissionPending,
+      checkoutUrl,
+      config.mode,
+      config.receiver,
+      handle,
+      pickupAt,
+      timeEnabled,
+    ],
+  );
 
   // メニューをカテゴリー別にグループ化 (出現順)。カテゴリーが1つも無ければ見出しを出さず単一グリッド。
   const menuGroups = useMemo(() => groupMenuByCategory(config.menu), [config.menu]);
@@ -473,10 +527,17 @@ export function MobileOrderView({
   );
 
   // 店舗情報 + 受付可否。静的 acceptingOrders===false / ライブ paused / 受付開始前 /
-  // ラストオーダー超過のとき支払いを止める。メッセージは 終了 > 一時停止 > 開始前 > LO の優先。
+  // ラストオーダー超過 / preorder の空スロット / server admission 拒否で支払いを止める。
+  // メッセージは 終了 > 一時停止 > 開始前 > LO > 汎用停止 の優先。
   const beforeOpen = timeEnabled && isBeforeOpen(now, config.openFrom);
   const pastLastOrder = timeEnabled && isPastLastOrder(now, config.lastOrder);
-  const accepting = config.acceptingOrders !== false && !paused && !beforeOpen && !pastLastOrder;
+  const accepting =
+    config.acceptingOrders !== false &&
+    !paused &&
+    !beforeOpen &&
+    !pastLastOrder &&
+    !noPickupSlots &&
+    !admissionRejected;
   const closedNoticeKey =
     config.acceptingOrders === false
       ? 'viewClosedNotice'
@@ -484,7 +545,9 @@ export function MobileOrderView({
         ? 'viewPausedNotice'
         : beforeOpen
           ? 'viewBeforeOpenNotice'
-          : 'viewLastOrderNotice';
+          : pastLastOrder
+            ? 'viewLastOrderNotice'
+            : 'viewClosedNotice';
   const tel = telHref(config.phone);
   const mapHref = mapSearchHref(config.address);
   const hasStoreInfo = !!(config.address || config.hours || config.phone);
@@ -585,7 +648,7 @@ export function MobileOrderView({
         </div>
       )}
 
-      {/* 受付停止中バナー (acceptingOrders===false)。客が払う前に最上部で告知。 */}
+      {/* 受付停止中バナー。客が払う前に最上部で告知。 */}
       {!accepting && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-800">
           {closedNoticeKey === 'viewBeforeOpenNotice'
@@ -731,7 +794,8 @@ export function MobileOrderView({
           }}
           lastOrder={timeEnabled ? config.lastOrder : undefined}
           checkoutUrl={checkoutUrl}
-          checkoutPending={awaitsOrderId}
+          checkoutPending={awaitsOrderId || admissionPending}
+          onCheckout={checkOrderAdmission}
         />
       )}
 

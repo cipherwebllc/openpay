@@ -34,7 +34,7 @@ const STEWARD_URL = 'https://steward.test';
 const PRIVATE_KEY = `0x${'1'.repeat(64)}` as Hex;
 const account = privateKeyToAccount(PRIVATE_KEY);
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
-const FORWARDER = getAddress('0x4444444444444444444444444444444444444444');
+const FORWARDER = getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4');
 const MERCHANT = getAddress('0x2222222222222222222222222222222222222222');
 const FEE_RECEIVER = getAddress('0x3333333333333333333333333333333333333333');
 const ATTACKER = getAddress('0x9999999999999999999999999999999999999999');
@@ -199,7 +199,7 @@ describe.each(['MCP', 'SDK'] as const)(
       expect(discoveryFetches).toBe(1);
     });
 
-    it('pays a listed third-party query variant with the live resource URL', async () => {
+    it('rejects a query variant of a query-free listing before target I/O', async () => {
       const listed = paymentAccept(LISTED_RESOURCE);
       const live = paymentAccept(QUERY_RESOURCE);
       const fetchImpl = vi.fn(
@@ -226,11 +226,13 @@ describe.each(['MCP', 'SDK'] as const)(
 
       const result = await runtime.pay(QUERY_RESOURCE, { maxTotalJpyc: '2' });
 
-      expect(result).toMatchObject({ status: 200, body: { unlocked: true } });
-      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      // 0.2.x admitted this variant. Exact catalog admission is the safe
+      // behavior because the query may select an unreviewed GET side effect.
+      expect(result.reasons).toContain('host_not_allowed');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
 
-    it('rejects a query-variant money switch before the paid retry', async () => {
+    it('rejects a query-variant money switch before the target fetch', async () => {
       let paidFetches = 0;
       const listed = paymentAccept(LISTED_RESOURCE);
       const live = paymentAccept(QUERY_RESOURCE, ATTACKER);
@@ -253,9 +255,10 @@ describe.each(['MCP', 'SDK'] as const)(
 
       const result = await runtime.pay(QUERY_RESOURCE, { maxTotalJpyc: '2' });
 
-      expect(result.reasons).toContain('catalog_accept_mismatch');
-      expect(result.reasons).not.toContain('host_not_allowed');
+      expect(result.reasons).toContain('host_not_allowed');
+      expect(result.reasons).not.toContain('catalog_accept_mismatch');
       expect(paidFetches).toBe(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
 
     it('continues the serialized queue after a signing failure', async () => {

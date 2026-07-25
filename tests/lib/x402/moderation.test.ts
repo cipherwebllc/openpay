@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { isFreelyAccessible, isPrivateHost } from '@/lib/x402/moderation';
+import {
+  fetchSsrfSafe,
+  isFreelyAccessible,
+  isPrivateHost,
+} from '@/lib/x402/moderation';
 
 const fetchWith = (status: number): typeof fetch =>
   (async () => ({ status }) as Response) as unknown as typeof fetch;
@@ -75,6 +79,28 @@ describe('lib/x402/moderation isFreelyAccessible', () => {
     }) as unknown as typeof fetch;
     expect(await isFreelyAccessible('http://localhost', { fetchImpl: fetchSpy })).toBe(false);
     expect(fetched).toBe(false); // 解決先 127.0.0.1 が private → fetch しない
+  });
+});
+
+describe('lib/x402/moderation fetchSsrfSafe options', () => {
+  it('redirect は既定 manual を維持し、明示した error を fetch sink へ渡す', async () => {
+    const redirects: RequestRedirect[] = [];
+    const fetchSpy = (async (_url: string, init?: RequestInit) => {
+      redirects.push(init?.redirect ?? 'follow');
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+
+    await fetchSsrfSafe('https://x.test/avatar.png', {
+      fetchImpl: fetchSpy,
+      lookup: lookupPublic,
+    });
+    await fetchSsrfSafe('https://x.test/avatar.png', {
+      fetchImpl: fetchSpy,
+      lookup: lookupPublic,
+      redirect: 'error',
+    });
+
+    expect(redirects).toEqual(['manual', 'error']);
   });
 });
 

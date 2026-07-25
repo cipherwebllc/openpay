@@ -176,6 +176,34 @@ describe('lib/x402/registry parseResourceInput', () => {
     if (r.ok) expect(r.input.payTo).toBe(getAddress(pt));
   });
 
+  it.each([
+    'https://open-pay.jp/api/paid/demo',
+    'https://OPEN-PAY.JP:443/api/paid/stores',
+    'https://open-pay.jp./api/paid/demo',
+    'https://open-pay.jp/api/another-resource',
+  ])('canonical OpenPay origin は first-party 専用のため拒否する: %s', (url) => {
+    expect(
+      parseResourceInput(
+        { url, description: 'd', priceJpyc: '100', category: 'api' },
+        OWNER,
+      ),
+    ).toEqual({ ok: false, reason: 'invalid_url' });
+  });
+
+  it('OpenPay の subdomain は canonical origin ではないため受理する', () => {
+    expect(
+      parseResourceInput(
+        {
+          url: 'https://merchant.open-pay.jp/paid',
+          description: 'd',
+          priceJpyc: '100',
+          category: 'api',
+        },
+        OWNER,
+      ).ok,
+    ).toBe(true);
+  });
+
   it('docsUrl は HTTPS のみ受理し、license は制御文字除去後 60 文字に収める', () => {
     const r = parseResourceInput(
       {
@@ -257,6 +285,17 @@ describe('lib/x402/registry parseResourceInput', () => {
 });
 
 describe('lib/x402/registry store', () => {
+  it('createResource は parseResourceInput を迂回しても canonical OpenPay origin を保存しない', async () => {
+    const res = await createResource(
+      input({ url: 'https://open-pay.jp/api/paid/demo' }),
+      'spoof',
+      1000,
+    );
+    expect(res).toEqual({ ok: false, reason: 'invalid_url' });
+    expect(store.kv.size).toBe(0);
+    expect(store.lists.size).toBe(0);
+  });
+
   it('createResource → getResource 往復 + 一覧 (owner / discovery) に出る', async () => {
     const res = await createResource(
       { merchant: OWNER, url: 'https://a.jp/x', description: 'd', priceJpyc: '100', category: 'api', payTo: OWNER },

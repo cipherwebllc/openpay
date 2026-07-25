@@ -14,7 +14,6 @@ import type { Address, Hex } from 'viem';
 import {
   kvLpush,
   kvLrange,
-  kvLtrim,
   kvSet,
   kvGet,
   kvIncr,
@@ -41,8 +40,13 @@ export async function checkRateLimit(keys: string[]): Promise<boolean> {
   const now = Date.now();
   for (const key of keys) {
     const k = `relay:rl:${key}`;
-    await kvLpush(k, String(now));
-    await kvLtrim(k, 0, RL_MAX * 4);
+    const updated = await kvLpush(k, String(now), {
+      trimStart: 0,
+      trimStop: RL_MAX * 4,
+      ttlSec: (RL_WINDOW_MS / 1000) * 2,
+    });
+    // rate-limit storage の障害で stale な既存履歴を採用し、relay 本体を止める波及を断つ。
+    if (!updated.ok) continue;
     const r = await kvLrange(k, 0, RL_MAX * 4);
     const recent = (r.ok ? r.value : []).filter(
       (ts) => now - Number(ts) < RL_WINDOW_MS,
@@ -83,9 +87,8 @@ export async function checkIpRateLimit(
   try {
     if (!isKvConfigured()) return true;
     const key = `iprl:v1:${scope}:${hashedIp}`;
-    const r = await kvIncr(key);
+    const r = await kvIncr(key, { initialTtlSec: windowSec });
     if (!r.ok) return true;
-    if (r.value === 1) await kvExpire(key, windowSec);
     return r.value <= max;
   } catch {
     // rate-limit storage の障害を auth/resource 管理本体へ波及させない (fail-open)。

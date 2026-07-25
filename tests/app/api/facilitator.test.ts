@@ -21,6 +21,20 @@ const FEE_RECEIVER = getAddress('0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e');
 const MERCHANT = getAddress('0x1234567890123456789012345678901234567890');
 const TX_HASH = `0x${'ab'.repeat(32)}` as Hex;
 const BIG_BALANCE = 1_000_000n * JPYC;
+const RESERVATION_TOKEN = `x402r1_${'cd'.repeat(32)}`;
+
+const authorizationState = vi.hoisted(() => ({ used: false, unavailable: false }));
+const reservationState = vi.hoisted(() => ({
+  reserved: false,
+  consumed: false,
+  reserve: vi.fn(),
+  consume: vi.fn(),
+}));
+
+vi.mock('@/lib/x402/facilitatorReservation', () => ({
+  reserveFacilitatorPayment: reservationState.reserve,
+  consumeFacilitatorPayment: reservationState.consume,
+}));
 
 // 残高/健全性/authState だけ stub: viem は importOriginal で実物を保ち (recoverTypedDataAddress は実物)、
 // createPublicClient のみ差し替える。createWalletClient は実物 (selfHostIoFor が組むが submit はモック)。
@@ -33,7 +47,10 @@ vi.mock('viem', async (importOriginal) => {
       readContract: async (args: { functionName?: string }) => {
         if (args.functionName === 'token') return JPYC_AMOY;
         if (args.functionName === 'feeReceiver') return FEE_RECEIVER;
-        if (args.functionName === 'authorizationState') return false;
+        if (args.functionName === 'authorizationState') {
+          if (authorizationState.unavailable) throw new Error('rpc unavailable');
+          return authorizationState.used;
+        }
         return BIG_BALANCE; // balanceOf → 残高十分 (success/verify を通す)
       },
       getBalance: async () => 10n ** 18n,
@@ -96,6 +113,36 @@ async function loadFacilitator(opts?: {
   relayerKey?: string;
   forwarder?: string; // '' で forwarder 未設定 (not-ready 枝の検証用)
 }): Promise<Handlers> {
+  authorizationState.used = false;
+  authorizationState.unavailable = false;
+  reservationState.reserved = false;
+  reservationState.consumed = false;
+  reservationState.reserve.mockReset();
+  reservationState.reserve.mockImplementation(async () => {
+    if (reservationState.reserved || reservationState.consumed) {
+      return { ok: false, reason: 'authorization_reserved' };
+    }
+    reservationState.reserved = true;
+    return { ok: true, token: RESERVATION_TOKEN };
+  });
+  reservationState.consume.mockReset();
+  reservationState.consume.mockImplementation(
+    async ({ reservationToken }: { reservationToken?: unknown }) => {
+      if (!reservationState.reserved) {
+        if (reservationState.consumed) return { status: 'replay' };
+        return { status: 'missing' };
+      }
+      if (
+        reservationToken !== undefined &&
+        reservationToken !== RESERVATION_TOKEN
+      ) {
+        return { status: 'invalid' };
+      }
+      reservationState.reserved = false;
+      reservationState.consumed = true;
+      return { status: 'consumed' };
+    },
+  );
   vi.stubEnv(
     'NEXT_PUBLIC_ENABLE_X402_FACILITATOR',
     opts?.flag === undefined ? '1' : opts.flag,
@@ -262,7 +309,101 @@ describe('x402 facilitator /verify', () => {
     const sig = await signReceive(params);
     const res = await verify(reqOf('http://x/verify', facilitatorBody(params, sig)));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ isValid: true, payer: CUSTOMER });
+    expect(await res.json()).toEqual({
+      isValid: true,
+      payer: CUSTOMER,
+      reservationToken: RESERVATION_TOKEN,
+    });
+  });
+
+  it('authorizationState を追加の verify 必須条件にしない', async () => {
+    const { verify } = await loadFacilitator();
+    authorizationState.used = true;
+    authorizationState.unavailable = true;
+    const params = goodParams();
+    const sig = await signReceive(params);
+
+    const res = await verify(reqOf('http://x/verify', facilitatorBody(params, sig)));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      isValid: true,
+      payer: CUSTOMER,
+      reservationToken: RESERVATION_TOKEN,
+    });
+    expect(reservationState.reserve).toHaveBeenCalledOnce();
+  });
+
+  it('同一 authorization の予約競合でも従来の verify 成功を保つ', async () => {
+    const { verify } = await loadFacilitator();
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+
+    const first = await verify(reqOf('http://x/verify', body));
+    const duplicate = await verify(reqOf('http://x/verify', body));
+
+    expect(await first.json()).toMatchObject({
+      isValid: true,
+      reservationToken: RESERVATION_TOKEN,
+    });
+    expect(await duplicate.json()).toEqual({
+      isValid: true,
+      payer: CUSTOMER,
+    });
+  });
+
+  it('予約 KV 障害でも従来の verify 成功を保つ', async () => {
+    const { verify } = await loadFacilitator();
+    reservationState.reserve.mockResolvedValueOnce({
+      ok: false,
+      reason: 'reservation_unavailable',
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+
+    const res = await verify(reqOf('http://x/verify', facilitatorBody(params, sig)));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      isValid: true,
+      payer: CUSTOMER,
+    });
+  });
+
+  it('予約処理が throw しても従来の verify 成功を保つ', async () => {
+    const { verify } = await loadFacilitator();
+    reservationState.reserve.mockRejectedValueOnce(new Error('KV offline'));
+    const params = goodParams();
+    const sig = await signReceive(params);
+
+    const res = await verify(reqOf('http://x/verify', facilitatorBody(params, sig)));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      isValid: true,
+      payer: CUSTOMER,
+    });
+  });
+
+  it('期限余裕は現在時刻の端数秒を切り上げて予約する', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_500);
+    try {
+      const { verify } = await loadFacilitator();
+      const params = goodParams();
+      const sig = await signReceive(params);
+
+      const res = await verify(
+        reqOf('http://x/verify', facilitatorBody(params, sig)),
+      );
+
+      expect(res.status).toBe(200);
+      expect(reservationState.reserve).toHaveBeenCalledWith(
+        expect.objectContaining({ nowSec: 1_700_000_001 }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('誤った fee (5 JPYC) → isValid:false fee_value_mismatch (server 権威)', async () => {
@@ -407,6 +548,139 @@ describe('x402 facilitator /settle', () => {
       }),
     );
     expect(await vr.json()).toEqual({ valid: true, signer: RECEIPT_SIGNER });
+  });
+
+  it('同じ token の consumed tombstone を既存 settle 冪等処理へ replay する', async () => {
+    const { verify, settle } = await loadFacilitator();
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+    const verified = (await (
+      await verify(reqOf('http://x/verify', body))
+    ).json()) as { reservationToken: string };
+    const reservedBody = {
+      ...body,
+      reservationToken: verified.reservationToken,
+    };
+
+    const first = await settle(reqOf('http://x/settle', reservedBody));
+    authorizationState.used = true;
+    const replay = await settle(reqOf('http://x/settle', reservedBody));
+
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ success: true });
+    expect(replay.status).toBe(202);
+    expect(await replay.json()).toMatchObject({
+      success: false,
+      errorReason: 'pending',
+    });
+    expect(reservationState.consume).toHaveBeenCalledTimes(2);
+  });
+
+  it('同じ token は確実な pre-broadcast 失敗後に再 settle できる', async () => {
+    const { verify, settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.submitSelfHost as unknown as Mock).mockRejectedValueOnce(
+      new Error('rpc down before broadcast'),
+    );
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+    const verified = (await (
+      await verify(reqOf('http://x/verify', body))
+    ).json()) as { reservationToken: string };
+    const reservedBody = {
+      ...body,
+      reservationToken: verified.reservationToken,
+    };
+
+    const failed = await settle(reqOf('http://x/settle', reservedBody));
+    const retried = await settle(reqOf('http://x/settle', reservedBody));
+
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toMatchObject({
+      success: false,
+      errorReason: 'relay_error',
+    });
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ success: true });
+  });
+
+  it('同じ payment でも別 token は reservation_invalid で拒否する', async () => {
+    const { verify, settle } = await loadFacilitator();
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+    await verify(reqOf('http://x/verify', body));
+
+    const res = await settle(
+      reqOf('http://x/settle', {
+        ...body,
+        reservationToken: `x402r1_${'ef'.repeat(32)}`,
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      success: false,
+      errorReason: 'reservation_invalid',
+    });
+  });
+
+  it('公開済み旧 client の token 無し settle も同一予約を consume できる', async () => {
+    const { verify, settle } = await loadFacilitator();
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+    const verified = await verify(reqOf('http://x/verify', body));
+    expect(verified.status).toBe(200);
+
+    const settled = await settle(reqOf('http://x/settle', body));
+
+    expect(settled.status).toBe(200);
+    expect(await settled.json()).toMatchObject({ success: true });
+    expect(reservationState.consume).toHaveBeenCalledWith(
+      expect.objectContaining({ reservationToken: undefined }),
+    );
+  });
+
+  it('予約のない token 無し直接 settle も従来の core へ進める', async () => {
+    const { settle } = await loadFacilitator();
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+
+    const res = await settle(reqOf('http://x/settle', body));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true });
+    expect(reservationState.consume).toHaveBeenCalledOnce();
+  });
+
+  it('予約 consume の KV 障害でも従来の core へ進める', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    const submit = relayer.submitSelfHost as unknown as Mock;
+    const callsBefore = submit.mock.calls.length;
+    reservationState.consume.mockResolvedValueOnce({ status: 'unavailable' });
+    const params = goodParams();
+    const body = {
+      ...facilitatorBody(params, await signReceive(params)),
+      reservationToken: RESERVATION_TOKEN,
+    };
+
+    const res = await settle(reqOf('http://x/settle', body));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true });
+    expect(submit).toHaveBeenCalledTimes(callsBefore + 1);
+  });
+
+  it('予約 consume が throw しても従来の core へ進める', async () => {
+    const { settle } = await loadFacilitator();
+    reservationState.consume.mockRejectedValueOnce(new Error('KV offline'));
+    const params = goodParams();
+    const body = facilitatorBody(params, await signReceive(params));
+
+    const res = await settle(reqOf('http://x/settle', body));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true });
   });
 
   it('誤った fee → 400 fee_value_mismatch (改竄 requirements は broadcast しない)', async () => {

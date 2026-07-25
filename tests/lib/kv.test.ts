@@ -48,6 +48,40 @@ describe('lib/kv', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('kvLpush atomic opts は LPUSH/LTRIM/EXPIRE を 1 EVAL に閉じる', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: 6 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvLpush } = await import('@/lib/kv');
+
+    const res = await kvLpush('relay:rl:0xabc', '123', {
+      trimStart: 0,
+      trimStop: 20,
+      ttlSec: 120,
+    });
+
+    expect(res).toEqual({ ok: true, value: 6 });
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body) as string[];
+    expect(body[0]).toBe('EVAL');
+    expect(body[1]).toContain("redis.call('LPUSH'");
+    expect(body[1]).toContain("redis.call('LTRIM'");
+    expect(body[1]).toContain("redis.call('EXPIRE'");
+    expect(body.slice(2)).toEqual([
+      '1',
+      'relay:rl:0xabc',
+      '123',
+      '0',
+      '20',
+      '120',
+    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('HTTP 非 2xx は http_error と status を返す', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
@@ -330,6 +364,35 @@ describe('lib/kv', () => {
     expect(res).toEqual({ ok: true, value: 3 });
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(init.body)).toEqual(['INCR', 'relay:budget:137:20260602']);
+  });
+
+  it('kvIncr atomic opts は INCR と初回/欠落時 EXPIRE を 1 EVAL に閉じる', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ result: 2 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvIncr } = await import('@/lib/kv');
+
+    const res = await kvIncr('iprl:v1:siwe-nonce:hash', {
+      initialTtlSec: 60,
+    });
+
+    expect(res).toEqual({ ok: true, value: 2 });
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body) as string[];
+    expect(body[0]).toBe('EVAL');
+    expect(body[1]).toContain("redis.call('INCR'");
+    expect(body[1]).toContain("redis.call('TTL'");
+    expect(body[1]).toContain('if count == 1 or ttl < 0');
+    expect(body[1]).toContain("redis.call('EXPIRE'");
+    expect(body.slice(2)).toEqual([
+      '1',
+      'iprl:v1:siwe-nonce:hash',
+      '60',
+    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('kvDecr は DECR を送り number を返す', async () => {

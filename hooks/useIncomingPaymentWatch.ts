@@ -19,9 +19,9 @@ import { erc20Abi } from 'viem';
 
 export type IncomingPaymentStatus = 'idle' | 'watching' | 'received';
 
-// 店舗の受取額は手数料控除後になりうる (recover が最大 max(2 JPYC, 1%) を吸収) ため、
-// 「請求額そのもの」ではなく 98%(= 2% 帯) を着金判定の閾値にする。これで ≤1% の
-// 手数料 + 端数を吸収しつつ、無関係に微小着金しただけでは発火しないようにする。
+// 呼び出し元が実決済経路の手数料控除後となる店舗期待純受取額を渡す。その 98% を
+// advisory な着金判定の閾値にし、RPC 更新タイミング等の微差を許容する。整数除算は
+// 切り上げるため、正の期待額に対する閾値は最低 1 atomic unit となり、0 着金では発火しない。
 const THRESHOLD_NUMERATOR = 98n;
 const THRESHOLD_DENOMINATOR = 100n;
 
@@ -29,7 +29,7 @@ export function useIncomingPaymentWatch(params: {
   receiver: `0x${string}` | null;
   tokenAddress: `0x${string}`;
   chainId: number;
-  expectedAmountWei: bigint; // QR が表す金額 (顧客の支払総額)
+  expectedAmountWei: bigint; // 実決済経路で店舗が受け取る期待純額
   enabled: boolean; // 固定額 QR のモーダル提示中だけ true
 }): { status: IncomingPaymentStatus; receivedWei: bigint } {
   const { receiver, tokenAddress, chainId, expectedAmountWei, enabled } =
@@ -94,9 +94,11 @@ export function useIncomingPaymentWatch(params: {
   const delta = currentBalance - baseline;
   const receivedWei = delta > 0n ? delta : 0n;
   const threshold =
-    (expectedAmountWei * THRESHOLD_NUMERATOR) / THRESHOLD_DENOMINATOR;
+    (expectedAmountWei * THRESHOLD_NUMERATOR +
+      (THRESHOLD_DENOMINATOR - 1n)) /
+    THRESHOLD_DENOMINATOR;
 
-  if (currentBalance >= baseline + threshold) {
+  if (delta > 0n && delta >= threshold) {
     return { status: 'received', receivedWei };
   }
   return { status: 'watching', receivedWei };

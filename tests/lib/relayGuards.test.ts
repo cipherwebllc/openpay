@@ -14,9 +14,15 @@ const { kvMod, store } = vi.hoisted(() => {
     value: string;
     opts: { nx?: boolean; ttlSec?: number };
   }> = [];
+  const lpushCalls: Array<{
+    key: string;
+    value: string;
+    opts?: { trimStart: number; trimStop: number; ttlSec: number };
+  }> = [];
+  const incrCalls: Array<{ key: string; opts?: { initialTtlSec: number } }> = [];
   const expireCalls: Array<{ key: string; ttlSec: number }> = [];
   // fail-open テスト用トグル (既定は健全・beforeEach でリセット)。既存テストは触らない。
-  const flags = { kvConfigured: true, incrOk: true, getOk: true };
+  const flags = { kvConfigured: true, incrOk: true, lpushOk: true, getOk: true };
   const kvMod = {
     isKvConfigured: () => flags.kvConfigured,
     kvGet: async (k: string) =>
@@ -34,10 +40,14 @@ const { kvMod, store } = vi.hoisted(() => {
       return { ok: true as const, value: 'OK' as const };
     },
     kvDel: async (k: string) => ({ ok: true as const, value: vals.delete(k) ? 1 : 0 }),
-    kvIncr: async (k: string) => {
+    kvIncr: async (k: string, opts?: { initialTtlSec: number }) => {
+      incrCalls.push({ key: k, opts });
       if (!flags.incrOk) return { ok: false as const, reason: 'network_error' as const };
       const n = (counters.get(k) ?? 0) + 1;
       counters.set(k, n);
+      if (n === 1 && opts) {
+        expireCalls.push({ key: k, ttlSec: opts.initialTtlSec });
+      }
       return { ok: true as const, value: n };
     },
     kvDecr: async (k: string) => {
@@ -45,10 +55,22 @@ const { kvMod, store } = vi.hoisted(() => {
       counters.set(k, n);
       return { ok: true as const, value: n };
     },
-    kvLpush: async (k: string, v: string) => {
+    kvLpush: async (
+      k: string,
+      v: string,
+      opts?: { trimStart: number; trimStop: number; ttlSec: number },
+    ) => {
+      lpushCalls.push({ key: k, value: v, opts });
+      if (!flags.lpushOk) {
+        return { ok: false as const, reason: 'network_error' as const };
+      }
       const l = lists.get(k) ?? [];
       l.unshift(v);
-      lists.set(k, l);
+      lists.set(
+        k,
+        opts ? l.slice(opts.trimStart, opts.trimStop + 1) : l,
+      );
+      if (opts) expireCalls.push({ key: k, ttlSec: opts.ttlSec });
       return { ok: true as const, value: l.length };
     },
     kvLrange: async (k: string, start: number, stop: number) => {
@@ -64,7 +86,19 @@ const { kvMod, store } = vi.hoisted(() => {
       return { ok: true as const, value: 1 };
     },
   };
-  return { kvMod, store: { vals, lists, counters, setCalls, expireCalls, flags } };
+  return {
+    kvMod,
+    store: {
+      vals,
+      lists,
+      counters,
+      setCalls,
+      lpushCalls,
+      incrCalls,
+      expireCalls,
+      flags,
+    },
+  };
 });
 vi.mock('@/lib/kv', () => kvMod);
 vi.mock('@/lib/logger', () => ({
@@ -93,9 +127,12 @@ beforeEach(() => {
   store.lists.clear();
   store.counters.clear();
   store.setCalls.length = 0;
+  store.lpushCalls.length = 0;
+  store.incrCalls.length = 0;
   store.expireCalls.length = 0;
   store.flags.kvConfigured = true;
   store.flags.incrOk = true;
+  store.flags.lpushOk = true;
   store.flags.getOk = true;
 });
 
@@ -109,6 +146,24 @@ describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
     expect(await checkRateLimit([FROM])).toBe(false);
     // KV キーが relay:rl: prefix (= 決済 relay と同一名前空間)。
     expect([...store.lists.keys()].some((k) => k === `relay:rl:${FROM}`)).toBe(true);
+    expect(store.lpushCalls).toHaveLength(RL_MAX + 1);
+    expect(store.lpushCalls[0]).toMatchObject({
+      key: `relay:rl:${FROM}`,
+      opts: { trimStart: 0, trimStop: RL_MAX * 4, ttlSec: 120 },
+    });
+    expect(
+      store.expireCalls.filter((c) => c.key === `relay:rl:${FROM}`),
+    ).toHaveLength(RL_MAX + 1);
+  });
+
+  it('原子 list 更新が失敗したら既存履歴を採用せず fail-open', async () => {
+    store.lists.set(
+      `relay:rl:${FROM}`,
+      Array.from({ length: RL_MAX + 1 }, () => String(Date.now())),
+    );
+    store.flags.lpushOk = false;
+    expect(await checkRateLimit([FROM])).toBe(true);
+    expect(store.lists.get(`relay:rl:${FROM}`)).toHaveLength(RL_MAX + 1);
   });
 });
 
@@ -144,7 +199,7 @@ describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
 describe('relayGuards checkIpRateLimit (HMAC IP・scope 分離)', () => {
   const HASHED_IP = 'a'.repeat(64);
 
-  it('scope ごとに bucket を分離し、各 key の初回だけ window TTL を設定する', async () => {
+  it('scope ごとに bucket を分離し、INCR と初回 window TTL を同じ原子操作で設定する', async () => {
     expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(true);
     expect(await checkIpRateLimit('siwe-verify', HASHED_IP, 1, 60)).toBe(true);
     expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(false);
@@ -153,8 +208,15 @@ describe('relayGuards checkIpRateLimit (HMAC IP・scope 分離)', () => {
     const verifyKey = `iprl:v1:siwe-verify:${HASHED_IP}`;
     expect(store.counters.get(nonceKey)).toBe(2);
     expect(store.counters.get(verifyKey)).toBe(1);
-    expect(store.expireCalls).toContainEqual({ key: nonceKey, ttlSec: 60 });
-    expect(store.expireCalls).toContainEqual({ key: verifyKey, ttlSec: 60 });
+    expect(store.expireCalls).toEqual([
+      { key: nonceKey, ttlSec: 60 },
+      { key: verifyKey, ttlSec: 60 },
+    ]);
+    expect(store.incrCalls).toEqual([
+      { key: nonceKey, opts: { initialTtlSec: 60 } },
+      { key: verifyKey, opts: { initialTtlSec: 60 } },
+      { key: nonceKey, opts: { initialTtlSec: 60 } },
+    ]);
   });
 
   it('hashedIp null は limiter を skip し KV に触らない', async () => {

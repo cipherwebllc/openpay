@@ -73,6 +73,7 @@ import {
 } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { isLikelyName } from '@/lib/nameDetection';
 import { pickEffectiveAddress, shortAddress, formatTokenAmount } from '@/lib/format';
@@ -391,11 +392,10 @@ export function QrGenerator() {
     saveLastQr,
   ]);
 
-  // 固定額 QR が表す金額 (wei)。着金検知ヒント (useIncomingPaymentWatch) と同じ
-  // parseUnits(deployment.decimals) で、QR が encode する amount と整合させる
-  // (RecoverFeeNotice と同じ解釈・新たな parse は導入しない)。amount 無効や
-  // static モードでは 0n (= watch しない)。
-  const expectedAmountWei = useMemo(() => {
+  // 固定額 QR が表す請求額 (wei)。parseUnits(deployment.decimals) で QR が encode
+  // する amount と整合させる (RecoverFeeNotice と同じ解釈・新たな parse は導入しない)。
+  // amount 無効や static モードでは 0n (= watch しない)。
+  const billAmountWei = useMemo(() => {
     if (mode !== 'amount' || !amountValid) return 0n;
     try {
       const wei = parseUnits(amount, deployment.decimals);
@@ -404,6 +404,25 @@ export function QrGenerator() {
       return 0n;
     }
   }, [mode, amountValid, amount, deployment.decimals]);
+
+  // 着金監視は受取先である店舗残高を見るため、顧客請求額ではなく実経路の店舗純受取額を渡す。
+  // JPYC recover は PaymentForm / useJpycEip3009Payment と同じ recoverFeeValue を使い、
+  // merchant 固定の控除額を反映する。これにより小口で 2 JPYC floor が 2% を超えても
+  // 正規着金を見逃さない。その他経路は従来どおり請求額を期待値とする。
+  const expectedAmountWei = useMemo(() => {
+    if (!isJpycRecover || billAmountWei <= 0n) return billAmountWei;
+    const feeValue = recoverFeeValue(
+      billAmountWei,
+      effectiveGasMode,
+      deployment.chainId,
+    );
+    return billAmountWei > feeValue ? billAmountWei - feeValue : 0n;
+  }, [
+    isJpycRecover,
+    billAmountWei,
+    effectiveGasMode,
+    deployment.chainId,
+  ]);
 
   // 店員が決済 QR を提示している間 (モーダル open + 固定額 + 受取先/金額 valid)、
   // 受取先残高をポーリングし「おおよその着金」を検知する advisory ヒント。

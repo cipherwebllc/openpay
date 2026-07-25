@@ -61,7 +61,9 @@ describe('openpay-x402-sdk tarball consumer', () => {
         'src/gate.mjs',
         'src/guards.mjs',
         'src/index.mjs',
+        'src/network.mjs',
         'src/payment.mjs',
+        'src/receipt.mjs',
         'src/signer.mjs',
         'src/spendStore.mjs',
       ]),
@@ -116,10 +118,16 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   DEFAULT_DISCOVERY_URL,
   DEFAULT_MAX_PER_CALL_JPYC,
   DEFAULT_MAX_SESSION_JPYC,
+  DEFAULT_MAX_TIMEOUT_SECONDS,
+  DEFAULT_PAYMENT_FETCH_TIMEOUT_MS,
   JPYC_DECIMALS,
+  MAX_AUTHORIZATION_TIMEOUT_SECONDS,
+  MAX_SUPPORTED_TIMEOUT_SECONDS,
   REASONS,
   RECEIVE_WITH_AUTHORIZATION_TYPES,
   SIGNER_MODES,
+  SUPPORTED_JPYC_ASSETS,
+  SUPPORTED_JPYC_FORWARDERS,
   SUPPORTED_NETWORKS,
   buildForwarderNonce,
   buildTypedDataFromPaymentRequirements,
@@ -132,16 +140,20 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   createOpenPayClient,
   createPaymentExecutor,
   createPaymentSession,
+  createReceiptSignerResolver,
   createSigner,
   createSignerFromOptions,
   decodePaymentResponse,
   encodePaymentPayload,
   evaluatePaymentGuards,
+  fetchPaymentTarget,
   formatAtomicJpyc,
   isHostAllowed,
+  isPrivatePaymentHost,
   normalizePaymentRequirements,
   parseClientOptions,
   parseJpycToAtomic,
+  parseSafePaymentUrl,
   parseSignerOptions,
   paymentPayloadFor,
   readMoneyConfig,
@@ -153,13 +165,18 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   safeErrorMessage,
   summarizeAccept,
   validateAcceptForPayment,
+  verifyBoundPaymentResponse,
   type FreeApiResult,
   type FileSpendStoreOptions,
   type JpycGate,
   type JpycGateOptions,
   type JpycGatePaymentResponse,
   type OpenPayClient,
+  type PaymentLookup,
   type QuoteResult,
+  type ReceiptSignerResolver,
+  type SpendReservation,
+  type SpendReservationResult,
   type SpendStore,
   type VerifiedJpycPayment,
 } from 'openpay-x402-sdk';
@@ -171,9 +188,25 @@ const spendStore: SpendStore = {
 };
 const fileSpendStoreOptions: FileSpendStoreOptions = { path: './spend.json' };
 const fileSpendStore: SpendStore = createFileSpendStore(fileSpendStoreOptions);
+const paymentLookup: PaymentLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+const spendReservation: SpendReservation = {
+  id: '0xnonce',
+  payer: '${'0x1111111111111111111111111111111111111111'}',
+  network: 'eip155:80002',
+  asset: '${'0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29'}',
+  validBefore: '2000000000',
+};
+const spendReservationResult: SpendReservationResult = {
+  ok: true,
+  totalAtomic: '1',
+};
+const receiptSignerResolver: ReceiptSignerResolver = createReceiptSignerResolver({
+  discoveryUrl: 'https://open-pay.jp/api/discovery',
+});
 createOpenPayClient({
   privateKey: '${`0x${'1'.repeat(64)}`}',
   maxDailyJpyc: '25',
+  maxTimeoutSeconds: 600,
   spendStore,
   catalogTrust: false,
 });
@@ -196,21 +229,30 @@ void discovery;
 void handled;
 void verified;
 void fileSpendStore;
+void paymentLookup;
+void spendReservation;
+void spendReservationResult;
+void receiptSignerResolver;
 void [
   CATALOG_CACHE_MS, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST,
   DEFAULT_DISCOVERY_URL, DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC,
-  JPYC_DECIMALS, REASONS, RECEIVE_WITH_AUTHORIZATION_TYPES, SIGNER_MODES,
-  SUPPORTED_NETWORKS, buildForwarderNonce, buildTypedDataFromPaymentRequirements,
+  DEFAULT_MAX_TIMEOUT_SECONDS, DEFAULT_PAYMENT_FETCH_TIMEOUT_MS, JPYC_DECIMALS,
+  MAX_AUTHORIZATION_TIMEOUT_SECONDS, MAX_SUPPORTED_TIMEOUT_SECONDS, REASONS,
+  RECEIVE_WITH_AUTHORIZATION_TYPES,
+  SIGNER_MODES, SUPPORTED_JPYC_ASSETS, SUPPORTED_JPYC_FORWARDERS,
+  SUPPORTED_NETWORKS, buildForwarderNonce,
+  buildTypedDataFromPaymentRequirements,
   chainIdFromNetwork, createAuthorization, createCatalogCache,
   createCatalogResolver, createFileSpendStore, createJpycGate, createPaymentExecutor,
-  createPaymentSession, createSigner,
+  createPaymentSession, createReceiptSignerResolver, createSigner,
   createSignerFromOptions, decodePaymentResponse, encodePaymentPayload,
-  evaluatePaymentGuards, formatAtomicJpyc, isHostAllowed,
+  evaluatePaymentGuards, fetchPaymentTarget, formatAtomicJpyc, isHostAllowed,
+  isPrivatePaymentHost,
   normalizePaymentRequirements, parseClientOptions, parseJpycToAtomic,
-  parseSignerOptions, paymentPayloadFor, readMoneyConfig, readRuntimeConfig,
+  parseSafePaymentUrl, parseSignerOptions, paymentPayloadFor, readMoneyConfig, readRuntimeConfig,
   readSignerMode, recordSuccessfulPayment, redactSensitiveText,
   resolveCatalogListings, safeErrorMessage, summarizeAccept,
-  validateAcceptForPayment,
+  validateAcceptForPayment, verifyBoundPaymentResponse,
 ];
 `,
     );

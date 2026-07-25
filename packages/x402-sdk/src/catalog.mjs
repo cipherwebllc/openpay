@@ -1,3 +1,8 @@
+import {
+  DEFAULT_PAYMENT_FETCH_TIMEOUT_MS,
+  fetchPaymentTarget,
+} from './network.mjs';
+
 export const CATALOG_CACHE_MS = 5 * 60_000;
 
 function isObject(value) {
@@ -21,6 +26,8 @@ export function createCatalogCache() {
 export async function resolveCatalogListings({
   config,
   fetchImpl = fetch,
+  lookup,
+  requestTimeoutMs = DEFAULT_PAYMENT_FETCH_TIMEOUT_MS,
   now = Date.now,
   cache = createCatalogCache(),
 }) {
@@ -33,7 +40,10 @@ export async function resolveCatalogListings({
   }
 
   try {
-    const response = await fetchImpl(config.discoveryUrl, {
+    const response = await fetchPaymentTarget(config.discoveryUrl, {
+      fetchImpl,
+      lookup,
+      timeoutMs: requestTimeoutMs,
       headers: { accept: 'application/json' },
     });
     const body = await readJson(response);
@@ -64,7 +74,21 @@ export async function resolveCatalogListings({
   }
 }
 
-export function createCatalogResolver({ config, fetchImpl = fetch, now = Date.now }) {
+export function createCatalogResolver({
+  config,
+  fetchImpl = fetch,
+  lookup,
+  requestTimeoutMs = DEFAULT_PAYMENT_FETCH_TIMEOUT_MS,
+  now = Date.now,
+}) {
   const cache = createCatalogCache();
-  return () => resolveCatalogListings({ config, fetchImpl, now, cache });
+  return () =>
+    resolveCatalogListings({
+      config,
+      fetchImpl,
+      lookup,
+      requestTimeoutMs,
+      now,
+      cache,
+    });
 }

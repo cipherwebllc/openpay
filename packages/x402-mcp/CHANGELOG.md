@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.0
+
+- Inherit SDK pre-send authorization reservations, cross-process atomic daily
+  caps, pre-fetch SSRF checks, canonical JPYC validation, and authorization TTL
+  limits.
+- Require exact catalog URL admission and bind signature destinations to a
+  deployed or catalog-reviewed OpenPay forwarder.
+- Require Steward typed-data policy PUT responses to be valid success JSON and
+  verify every effective policy field with a read-back before issuing signer
+  credentials.
+- Return facilitator receipts only after SDK signature and payment-binding
+  verification; forged seller headers no longer replace successful content.
+
 ## 0.12.0
 
 - Add optional `MAX_DAILY_JPYC`: a per-UTC-day cumulative spend cap that

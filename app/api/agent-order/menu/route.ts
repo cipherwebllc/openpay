@@ -9,6 +9,10 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { normalizeHandle, isValidHandleFormat } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
+import { chainForSlug } from '@/lib/chains';
+import { resolveDeployment } from '@/lib/tokens';
+import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,6 +43,11 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   const sf = record.storefront;
+  const chainId = chainForSlug(sf.chain).id;
+  const paymentSupported =
+    x402FacilitatorConfig.supportedChainIds.includes(chainId) &&
+    resolveDeployment('jpyc', chainId) !== undefined &&
+    configuredJpycForwarderFor(chainId) !== null;
   // 表示名は storefront (ビルダー由来) 優先で @handle の name → @handle にフォールバック
   // (handleStorefrontConfig と同じ導出)。
   const shopName = sf.shopName || record.config.name?.trim() || `@${handle}`;
@@ -73,6 +82,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     shopName,
     mode: sf.mode,
     chain: sf.chain,
+    paymentSupported,
     items,
   });
 }

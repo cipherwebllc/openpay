@@ -85,6 +85,7 @@ afterEach(() => {
   envHold.enableOrderMemo = false;
   envHold.enableOrderCall = false;
   originHold.value = 'https://test.local';
+  vi.unstubAllGlobals();
   window.sessionStorage.clear();
   window.localStorage.clear();
 });
@@ -572,6 +573,7 @@ describe('MobileOrderView', () => {
     );
     expect(u.searchParams.get('webhook')).toBeNull();
     expect(u.searchParams.get('order_id')).toBeNull();
+    expect(u.searchParams.get('store_handle')).toBe('alice');
   });
 
   it('受注リレー flag ON だが handle 無し (bare ?s=): webhook を付けない', () => {
@@ -657,7 +659,7 @@ describe('MobileOrderView — モバイル注文システム利用料 (feeUpchar
     expect(url.searchParams.get('fee_payer')).toBeNull();
   });
 
-  it('flag OFF (既定): preorder+customer でも上乗せ無し・note 無し・URL に fee_kind 無し (完全 inert)', () => {
+  it('flag OFF: 上乗せは inert のまま、fee_kind は署名前 admission の mode 束縛にだけ運ぶ', () => {
     // envHold.enableMobileOrderFee は afterEach で false (既定)。
     renderWithIntl(
       <MobileOrderView config={{ ...config, mode: 'preorder', feePayer: 'customer' }} />,
@@ -665,7 +667,10 @@ describe('MobileOrderView — モバイル注文システム利用料 (feeUpchar
     addBlend();
     expect(screen.getByText('500 JPYC')).toBeInTheDocument();
     expect(screen.queryByText(/システム利用料/)).toBeNull();
-    expect(payUrl().searchParams.get('fee_kind')).toBeNull();
+    // feeKind は課金 flag OFF では金額へ作用しない。最新 storefront の mode と
+    // checkout を admission API で束縛するための metadata としては常に必要。
+    expect(payUrl().searchParams.get('fee_kind')).toBe('preorder');
+    expect(payUrl().searchParams.get('fee_payer')).toBe('customer');
   });
 });
 
@@ -1004,6 +1009,66 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
     // バナーは上部 + 会計セクションの 2 箇所に出る (既存の停止表示と同じ)。
     expect(screen.getAllByText('本日のラストオーダーを過ぎました').length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('flag ON: lastOrder 前でも lead 後の受取スロットが 0 件なら汎用受付停止 + checkout 無効', () => {
+    envHold.enablePreorderTime = true;
+    renderWithIntl(
+      <MobileOrderView
+        config={preorder({ minLeadMinutes: 90, lastOrder: '13:00' })}
+      />,
+    );
+    expect(
+      screen.getByText('ただいま注文を受け付けていません'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+    expect(screen.queryByLabelText('受取時間')).toBeNull();
+  });
+
+  it('flag ON + @handle: CTA は同じ admission API で最新 storefront を確認し、拒否時は停止', async () => {
+    envHold.enablePreorderTime = true;
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ ok: false, error: 'pickup_slots_unavailable' }),
+        {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    renderWithIntl(
+      <MobileOrderView
+        config={preorder({ minLeadMinutes: 30, lastOrder: '14:00' })}
+        handle="coffee_shop"
+      />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('link', { name: '支払いへ進む' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/order/admission',
+      expect.objectContaining({
+        method: 'POST',
+        cache: 'no-store',
+      }),
+    );
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      handle: 'coffee_shop',
+      merchant: config.receiver,
+      mode: 'preorder',
+    });
+    expect(
+      screen.getByText('ただいま注文を受け付けていません'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
   });
 

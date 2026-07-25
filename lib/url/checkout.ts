@@ -15,6 +15,7 @@
 //   success_url     (任意, http(s) — 決済成功後 redirect 先)
 //   cancel_url      (任意, http(s) — 「中止して戻る」リンク)
 //   webhook         (任意, http(s) — 成功時 POST 先)
+//   store_handle    (任意, @ 無し handle — モバイル注文の署名前 admission 再検証用)
 //
 // items の encoding: name は encodeURIComponent で URI-encode してから ":" qty
 // ":" price で結合し、複数 items は "," で連結。decode 側は "," → ":" の順に
@@ -108,6 +109,10 @@ export type CheckoutParams = {
   // 課金する合図 (feePayer は無関係)。
   feeKind?: CheckoutFeeKind;
   feePayer?: FeePayer;
+  // --- @handle 店舗の署名前 admission 再検証 (任意・MobileOrderView のみが設定)。 ---
+  // URL 自体は attacker-controllable なので handle は識別ヒントに留め、admission API が最新 KV の
+  // receiver/mode と checkout の merchant/mode を再束縛する。不在 = 通常 checkout / 旧 URL。
+  storeHandle?: string;
   // --- 受取予定時刻 (任意・Phase 4・preorder のスロット選択・MobileOrderView のみが設定)。 ---
   // 絶対 ms。webhook payload へ素通しされ受注に保存・厨房/ホールが表示する (advisory・money-path 非該当)。
   pickupAt?: number;
@@ -120,6 +125,7 @@ const CHECKOUT_ITEM_MEMO_MAX = 80;
 const CHECKOUT_ORDER_ID_MAX = 64;
 const CHECKOUT_DESCRIPTION_MAX = 200;
 const CHECKOUT_EMAIL_MAX = 240;
+const CHECKOUT_STORE_HANDLE_MAX = 30;
 
 function encodeItem(it: CheckoutItem): string {
   const base = `${encodeURIComponent(it.name)}:${it.qty}:${it.price}`;
@@ -258,6 +264,10 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeUrl(params.webhook);
     if (v) sp.set('webhook', v);
   }
+  if (params.storeHandle) {
+    const v = sanitizeText(params.storeHandle, CHECKOUT_STORE_HANDLE_MAX);
+    if (v) sp.set('store_handle', v);
+  }
   // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。pay と共通の shared helper で追記。
   appendTaxReceiptParams(sp, params);
   // 受取予定時刻 (在るときだけ・正の安全整数 ms)。preorder のスロット選択。
@@ -296,6 +306,7 @@ export function parseCheckoutParams(
   const webhook = searchParams.get('webhook');
   const feeKindRaw = searchParams.get('fee_kind');
   const feePayerRaw = searchParams.get('fee_payer');
+  const storeHandle = searchParams.get('store_handle');
   const pickupAtRaw = searchParams.get('pickup_at');
 
   if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
@@ -376,6 +387,10 @@ export function parseCheckoutParams(
         (feePayerRaw === 'merchant' || feePayerRaw === 'customer')
           ? feePayerRaw
           : undefined,
+      // handle の形式・最新 storefront との束縛は署名前 admission API が権威的に検証する。
+      storeHandle: storeHandle
+        ? sanitizeText(storeHandle, CHECKOUT_STORE_HANDLE_MAX)
+        : undefined,
       // 受取予定時刻 (任意・正の安全整数 ms のみ・0/不正は undefined = serialize の > 0 と対称)。
       pickupAt:
         pickupAtRaw &&

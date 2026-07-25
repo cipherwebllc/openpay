@@ -14,6 +14,7 @@ import {
 import { verifyForwarderSettle } from '@/lib/relay/forwarderRecover';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
+import { reserveFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
 
 export const runtime = 'nodejs';
 export const maxDuration = 15;
@@ -86,5 +87,26 @@ export async function POST(req: Request): Promise<NextResponse> {
       verified.result.kind === 'rejected' ? verified.result.reason : 'invalid';
     return NextResponse.json({ isValid: false, invalidReason: reason, payer: params.from });
   }
-  return NextResponse.json({ isValid: true, payer: params.from });
+
+  let reservationToken: string | undefined;
+  try {
+    const reservation = await reserveFacilitatorPayment({
+      raw,
+      chainId,
+      from: params.from,
+      nonce: verified.nonce,
+      validBefore: params.validBefore,
+      // validBefore は整数秒の排他的境界。ceil で端数秒も消費済み扱いにする。
+      nowSec: Math.ceil(Date.now() / 1000),
+    });
+    if (reservation.ok) reservationToken = reservation.token;
+  } catch {
+    // 補助 reservation の KV 障害を、従来の署名検証と支払い可否へ波及させない。
+  }
+
+  return NextResponse.json({
+    isValid: true,
+    payer: params.from,
+    ...(reservationToken === undefined ? {} : { reservationToken }),
+  });
 }
