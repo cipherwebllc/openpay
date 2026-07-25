@@ -193,14 +193,30 @@ describe('x402-mcp entrypoints', () => {
     const manifest = JSON.parse(packed.stdout) as Array<{
       files: Array<{ path: string }>;
     }>;
-    expect(manifest[0].files.map((file) => file.path)).toContain('src/order.mjs');
+    const packedPaths = manifest[0].files.map((file) => file.path);
+    expect(packedPaths).toContain('src/order.mjs');
+    expect(packedPaths).toContain('scripts/steward-bootstrap.mjs');
+    expect(packedPaths).toContain('CHANGELOG.md');
 
     const pkg = JSON.parse(readFileSync(resolve(PACKAGE_DIR, 'package.json'), 'utf8')) as {
       bin: Record<string, string>;
+      dependencies: Record<string, string>;
     };
     expect(pkg.bin).toEqual({
       'openpay-x402-mcp': 'src/index.mjs',
       'openpay-order-mcp': 'src/order.mjs',
     });
+    const sdkPkg = JSON.parse(
+      readFileSync(resolve(PACKAGE_DIR, '../x402-sdk/package.json'), 'utf8'),
+    ) as { version: string };
+    const lock = JSON.parse(
+      readFileSync(resolve(PACKAGE_DIR, 'package-lock.json'), 'utf8'),
+    ) as {
+      packages: Record<string, { version?: string }>;
+    };
+    expect(pkg.dependencies['openpay-x402-sdk']).toBe(`^${sdkPkg.version}`);
+    expect(lock.packages['node_modules/openpay-x402-sdk']?.version).toBe(
+      sdkPkg.version,
+    );
   });
 });

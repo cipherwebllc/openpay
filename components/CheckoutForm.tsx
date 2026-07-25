@@ -5,6 +5,7 @@
 // on-chain で再検証してから注文を確定する責務を負う。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -23,7 +24,6 @@ import {
 } from './PaymentSuccessOverlay';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
-import { Loader2 } from 'lucide-react';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -93,6 +93,14 @@ import {
 } from '@/lib/signPreview';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
+// 送信後の pending / unknown と同一 payload の復旧時だけ必要な UI を First Load JS
+// から外す。状態判定・再送封鎖・retry handler の選択は親に残す。
+const PaymentStatusPanel = dynamic(
+  () =>
+    import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
+  { ssr: false },
+);
+
 const SUCCESS_REDIRECT_DELAY_MS = 3000;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -105,6 +113,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const [statusToken, setStatusToken] = useState<string | null>(null);
   const router = useRouter();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
+  const [orderAdmissionPending, setOrderAdmissionPending] = useState(false);
+  const [orderAdmissionRejected, setOrderAdmissionRejected] = useState(false);
+  const orderAdmissionInFlightRef = useRef(false);
   const attemptRouteRef = useRef<PaymentRoute | null>(null);
 
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
@@ -190,6 +201,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? params.feeKind
       : null;
   const isMobileFee = mobileFeeKind !== null;
+  // 課金 flag とは独立に、@handle 注文の元 storefront mode を署名前 admission へ渡す。
+  // feeKind は MobileOrderView が常に付与し、課金自体は上の mobileFeeKind gate が決める。
+  const orderAdmissionMode =
+    params.storeHandle &&
+    (params.feeKind === 'storefront' || params.feeKind === 'preorder')
+      ? params.feeKind
+      : null;
   const mobileGasMode: GasMode | undefined = mobileFeeKind
     ? mobileOrderGasMode(mobileFeeKind, params.feePayer)
     : undefined;
@@ -325,16 +343,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
   const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
+  // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
+  // current route が後から変わってもラッチを外さず、2 本目の UserOperation 送信を防ぐ。
+  const gaslessAmbiguous = gasless.isUnknown;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const flowPending = relayAmbiguous
+  const paymentFlowPending = relayAmbiguous || gaslessAmbiguous
     ? true
     : isStandard
       ? standard.isPending
       : useRelay
         ? relay.isPending
         : gasless.isPending;
+  const flowPending = orderAdmissionPending || paymentFlowPending;
   // relay は gas quote も smart account も不要なので readiness は常に満たす。
   const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
@@ -360,6 +382,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // (PaymentForm と同一防御)。
   const settledNoRetry =
     relayAmbiguous ||
+    gaslessAmbiguous ||
     !!relayIpRateLimited ||
     (!isStandard && !useRelay && !!gasless.data?.success) ||
     (useRelay &&
@@ -373,7 +396,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
   const walletSectionRef = useRef<HTMLElement | null>(null);
 
-  const canSubmit =
+  const paymentReady =
     isConnected &&
     !wrongChain &&
     (isStandard || useRelay || !!saData) &&
@@ -382,12 +405,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     breakdown.merchantReceives > 0n &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
-    !flowPending &&
+    !paymentFlowPending &&
     gasQuoteReady &&
     !merchantUnderflow &&
     !settledNoRetry;
+  const canSubmit = paymentReady && !orderAdmissionPending;
+  const paymentReadyRef = useRef(paymentReady);
+  paymentReadyRef.current = paymentReady;
 
-  const flowError = relayAmbiguous
+  const flowError = relayAmbiguous || gaslessAmbiguous
     ? null
     : isStandard
     ? standard.isUnknown
@@ -412,15 +438,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? t(relayErrorKey(flowError))
       : undefined
     : flowError?.message;
-  const error = isGasCongestedError(flowError)
-    ? t('errorGasCongested')
-    : (flowErrorMessage ??
-      (isStandard || useRelay || saFallback ? undefined : saError?.message) ??
-      (activeQuote.error ? t('errorGasQuote') : null) ??
-      (merchantUnderflow
-        ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
-        : null) ??
-      (revertedNoFeedback ? t('errorReverted') : null));
+  const error = orderAdmissionRejected
+    ? t('orderNotAccepting')
+    : isGasCongestedError(flowError)
+      ? t('errorGasCongested')
+      : (flowErrorMessage ??
+        (isStandard || useRelay || saFallback ? undefined : saError?.message) ??
+        (activeQuote.error ? t('errorGasQuote') : null) ??
+        (merchantUnderflow
+          ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
+          : null) ??
+        (revertedNoFeedback ? t('errorReverted') : null));
 
   // B1 graceful degradation: relay が API レベルで失敗 (rate_limited 等の error code) したとき、
   // ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
@@ -681,6 +709,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     params.items,
     params.orderId,
     params.description,
+    params.pickupAt,
     params.webhook,
     params.successUrl,
     address,
@@ -815,8 +844,50 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     window.location.assign(u.toString());
   }
 
-  function onSubmit() {
+  async function onSubmit() {
     if (!canSubmit) return;
+    if (params.storeHandle && orderAdmissionMode) {
+      // 同一 gesture の二重 click が React の再描画前に抜け、admission 後に二重署名へ
+      // 波及するのを ref で同期的に遮断する。
+      if (orderAdmissionInFlightRef.current) return;
+      orderAdmissionInFlightRef.current = true;
+      setOrderAdmissionPending(true);
+      setOrderAdmissionRejected(false);
+      // admission の await 後では iOS の user gesture が失われるため、音声だけ先に解錠する。
+      primeChimeAudio();
+      let admitted = false;
+      try {
+        const response = await fetch('/api/order/admission', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({
+            handle: params.storeHandle,
+            merchant: params.to,
+            mode: orderAdmissionMode,
+            ...(params.pickupAt === undefined
+              ? {}
+              : { pickupAt: params.pickupAt }),
+          }),
+        });
+        const body = (await response.json().catch(() => null)) as {
+          ok?: unknown;
+        } | null;
+        admitted = response.ok && body?.ok === true;
+      } catch {
+        admitted = false;
+      } finally {
+        orderAdmissionInFlightRef.current = false;
+        setOrderAdmissionPending(false);
+      }
+      if (!admitted) {
+        // 最新 storefront を確認できない状態から不可逆な wallet 署名へ進む波及を断つ。
+        setOrderAdmissionRejected(true);
+        return;
+      }
+      // admission 待機中に接続・chain・残高等が変わっていれば、stale な submit を止める。
+      if (!paymentReadyRef.current) return;
+    }
     attemptRouteRef.current = route;
     // webhook/記録は「送金した瞬間の額」を報告する (成功描画時の live breakdown は
     // gas quote 再取得等で動きうるため、submit 時点の snapshot を真実とする)。
@@ -829,7 +900,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       customerPays: breakdown.customerPays,
     };
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
-    primeChimeAudio();
+    if (!orderAdmissionMode) primeChimeAudio();
     if (isStandard) {
       standard.mutate({
         tokenAddress: deployment.address,
@@ -957,6 +1028,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           displaySymbol: deployment.displaySymbol,
           chainId: chainId ?? deployment.chainId,
           gasMode: effectiveGas,
+          ...(mobileFeeKind ? { feeKind: mobileFeeKind } : {}),
         })
       : null;
   const signReassurance: SignReassuranceProps | null = showRelayFree
@@ -1260,38 +1332,36 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       {/* standard receipt RPC が読めない間は broadcast 済み tx の成否が不明。
           main Pay / fee retry は出さず、同じ hash の receipt 再照会のみ許可する。 */}
       {!completed && isStandard && standard.isUnknown && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            {t('standardUnknownTitle')}
-          </p>
-          <p className="mt-1 break-words">{t('standardUnknownBody')}</p>
-          {standardUnknownTxHash && (
-            <p className="mt-2 break-all font-mono text-xs">
-              {standardUnknownTxHash}
-              {explorerBase && (
-                <>
-                  {' · '}
-                  <a
-                    href={`${explorerBase}/tx/${standardUnknownTxHash}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="font-sans underline hover:text-sky-900"
-                  >
-                    {t('pendingExplorerLink')} ↗
-                  </a>
-                </>
-              )}
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={() => standard.retryReceipt()}
-            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-          >
-            {t('standardReceiptRetryButton')}
-          </button>
-        </div>
+        <PaymentStatusPanel
+          title={t('standardUnknownTitle')}
+          body={t('standardUnknownBody')}
+          titleWithIcon
+          showSpinner
+          identifier={standardUnknownTxHash}
+          explorerHref={
+            standardUnknownTxHash && explorerBase
+              ? `${explorerBase}/tx/${standardUnknownTxHash}`
+              : undefined
+          }
+          explorerLabel={t('pendingExplorerLink')}
+          actionLabel={t('standardReceiptRetryButton')}
+          onAction={() => standard.retryReceipt()}
+        />
+      )}
+
+      {/* Pimlico receipt RPC が不確定な間は新しい UserOperation を作らず、保持した
+          userOpHash の receipt 再照会だけを許可する。文言は relay unknown と共通。 */}
+      {!completed && gaslessAmbiguous && (
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={t('responseUnknownBody')}
+          titleWithIcon
+          showSpinner
+          identifier={gasless.pendingUserOpHash}
+          actionLabel={t('responseUnknownRetryButton')}
+          actionDisabled={gasless.isPending}
+          onAction={gasless.retryReceipt}
+        />
       )}
 
       {/* standard モードで fee tx だけ失敗した場合の retry UI (merchant 確定済)。 */}
@@ -1348,52 +1418,47 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
       {/* ambiguity latch 中は同一 payload の再確認だけを許可し、standard fallback / 新署名を封鎖。 */}
       {!completed && relayAmbiguous && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            {relay.recoveryState === 'auto' && (
-              <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            )}
-            {t('responseUnknownTitle')}
-          </p>
-          <p className="mt-1 break-words">
-            {relay.recoveryState === 'auto'
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={
+            relay.recoveryState === 'auto'
               ? t('responseUnknownAutoBody')
-              : t('responseUnknownBody')}
-          </p>
-          {relay.recoveryState !== 'auto' && (
-            <button
-              type="button"
-              disabled={relay.isPending}
-              onClick={relay.retrySamePayload}
-              className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t('responseUnknownRetryButton')}
-            </button>
-          )}
-        </div>
+              : t('responseUnknownBody')
+          }
+          titleWithIcon
+          showSpinner={relay.recoveryState === 'auto'}
+          actionLabel={
+            relay.recoveryState === 'auto'
+              ? undefined
+              : t('responseUnknownRetryButton')
+          }
+          actionDisabled={
+            relay.recoveryState === 'auto' ? undefined : relay.isPending
+          }
+          onAction={
+            relay.recoveryState === 'auto'
+              ? undefined
+              : relay.retrySamePayload
+          }
+        />
       )}
 
       {/* relay IP rate limit: idem 確認前の 429 なので main Pay / standard fallback / 再署名を
           封鎖し、保持済みの同一署名 payload の再 POST だけを許可する。 */}
       {!completed && relayIpRateLimited && !relayAmbiguous && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
-          <p className="mt-1 break-words">
-            {relayIpRateLimited.retryAfterSeconds === null
+        <PaymentStatusPanel
+          title={t('ipRateLimitedTitle')}
+          body={
+            relayIpRateLimited.retryAfterSeconds === null
               ? t('ipRateLimitedBody')
               : t('ipRateLimitedBodyWithRetryAfter', {
                   seconds: relayIpRateLimited.retryAfterSeconds,
-                })}
-          </p>
-          <button
-            type="button"
-            disabled={relay.isPending}
-            onClick={relay.retryRelay}
-            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {t('ipRateLimitedRetryButton')}
-          </button>
-        </div>
+                })
+          }
+          actionLabel={t('ipRateLimitedRetryButton')}
+          actionDisabled={relay.isPending}
+          onAction={relay.retryRelay}
+        />
       )}
 
       {completed && (gasless.data || standard.data || relay.data) && (
@@ -1509,28 +1574,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
           (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
       {useRelay && !relayAmbiguous && relay.data?.pending && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="font-semibold">{t('pendingTitle')}</p>
-          <p className="mt-1 break-words">{t('pendingBody')}</p>
-          {relay.data.txHash && (
-            <p className="mt-2 break-all font-mono text-xs">
-              {relay.data.txHash}
-              {explorerBase && (
-                <>
-                  {' · '}
-                  <a
-                    href={`${explorerBase}/tx/${relay.data.txHash}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="font-sans underline hover:text-sky-900"
-                  >
-                    {t('pendingExplorerLink')} ↗
-                  </a>
-                </>
-              )}
-            </p>
-          )}
-        </div>
+        <PaymentStatusPanel
+          title={t('pendingTitle')}
+          body={t('pendingBody')}
+          identifier={relay.data.txHash ?? undefined}
+          explorerHref={
+            relay.data.txHash && explorerBase
+              ? `${explorerBase}/tx/${relay.data.txHash}`
+              : undefined
+          }
+          explorerLabel={t('pendingExplorerLink')}
+        />
       )}
 
       <p className="pt-2 text-center text-[10px] text-slate-500">

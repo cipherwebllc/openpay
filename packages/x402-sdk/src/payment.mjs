@@ -7,6 +7,8 @@ import {
   keccak256,
 } from 'viem';
 
+export const MAX_AUTHORIZATION_TIMEOUT_SECONDS = 1200;
+
 export const RECEIVE_WITH_AUTHORIZATION_TYPES = {
   ReceiveWithAuthorization: [
     { name: 'from', type: 'address' },
@@ -202,10 +204,27 @@ export function createAuthorization(
   maxTimeoutSeconds,
   nowSec = Math.floor(Date.now() / 1000),
 ) {
+  const timeoutSeconds = requirePositiveInteger(
+    maxTimeoutSeconds,
+    'maxTimeoutSeconds',
+  );
+  // 公開 low-level helper の直接利用が buyer guard を迂回しても、長期署名を
+  // 生成できないよう絶対上限を共有し、将来残高への引き落とし波及を断つ。
+  if (timeoutSeconds > MAX_AUTHORIZATION_TIMEOUT_SECONDS) {
+    throw new Error(
+      `maxTimeoutSeconds must be <= ${MAX_AUTHORIZATION_TIMEOUT_SECONDS}`,
+    );
+  }
+  if (!Number.isSafeInteger(nowSec) || nowSec < 0) {
+    throw new Error('nowSec must be a non-negative safe integer');
+  }
+  if (nowSec > Number.MAX_SAFE_INTEGER - timeoutSeconds) {
+    throw new Error('nowSec + maxTimeoutSeconds must be a safe integer');
+  }
   return {
     from: getAddress(from),
     validAfter: '0',
-    validBefore: String(nowSec + maxTimeoutSeconds),
+    validBefore: String(nowSec + timeoutSeconds),
     intentSalt: bytesToHex(randomBytes(32)),
   };
 }

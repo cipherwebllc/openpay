@@ -28,6 +28,8 @@
 //   MAX_SIGN_JPYC          3   (1 署名あたりの value 上限・整数 JPYC)
 
 import { createHmac, randomBytes } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 import { isHex } from 'viem';
@@ -86,11 +88,6 @@ function die(msg) {
   process.exit(1);
 }
 
-if (!PLATFORM_KEY) die('STEWARD_PLATFORM_KEY is required (one of the server STEWARD_PLATFORM_KEYS).');
-if (!OWNER_KEY || !isHex(OWNER_KEY) || OWNER_KEY.length !== 66) {
-  die('OWNER_PRIVATE_KEY must be a 32-byte 0x-prefixed hex string.');
-}
-
 const platformHeaders = () => ({
   'content-type': 'application/json',
   'X-Steward-Platform-Key': PLATFORM_KEY,
@@ -146,7 +143,112 @@ async function siweLogin(account) {
   return { token, userId, mfaChallengeId };
 }
 
+async function strictJson(res, label) {
+  try {
+    return await res.json();
+  } catch {
+    // プロキシの HTML fallback をポリシー登録成功と誤認する波及をここで断つ。
+    throw new Error(`${label} returned non-JSON (${res.status})`);
+  }
+}
+
+function createJpycPolicy({
+  jpycAddress,
+  forwarderAddress,
+  chainId,
+  maxValueAtomic,
+}) {
+  return {
+    id: 'jpyc-receive',
+    type: 'typed-data',
+    enabled: true,
+    config: {
+      verifyingContractAllowlist: [jpycAddress],
+      allowedChainIds: [chainId],
+      allowedPrimaryTypes: ['ReceiveWithAuthorization'],
+      messageConditions: [
+        { field: 'to', operator: 'address_in', values: [forwarderAddress] },
+        { field: 'value', operator: 'uint_max', value: maxValueAtomic },
+      ],
+    },
+  };
+}
+
+function policyFields(policy) {
+  return {
+    type: policy?.type,
+    enabled: policy?.enabled,
+    config: policy?.config,
+  };
+}
+
+export async function setAndVerifyJpycPolicy({
+  fetchImpl = fetch,
+  urlBase,
+  tenantId,
+  apiKey,
+  agentId,
+  jpycAddress,
+  forwarderAddress,
+  chainId,
+  maxValueAtomic,
+}) {
+  const expectedPolicy = createJpycPolicy({
+    jpycAddress,
+    forwarderAddress,
+    chainId,
+    maxValueAtomic,
+  });
+  const endpoint = `${urlBase}/agents/${agentId}/policies`;
+  const headers = {
+    'content-type': 'application/json',
+    'X-Steward-Tenant': tenantId,
+    'X-Steward-Key': apiKey,
+  };
+  const policyRes = await fetchImpl(endpoint, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify([expectedPolicy]),
+  });
+  const policyBody = await strictJson(policyRes, 'policy set');
+  if (!policyRes.ok || policyBody?.ok !== true) {
+    const detail = JSON.stringify(policyBody).slice(0, 200);
+    if (/Unknown policy type/i.test(detail)) {
+      throw new Error(
+        `policy set failed (${policyRes.status}): this Steward version does not support typed-data policies; update Steward before issuing signer credentials`,
+      );
+    }
+    throw new Error(`policy set failed (${policyRes.status}): ${detail}`);
+  }
+
+  const readBackRes = await fetchImpl(endpoint, { headers });
+  const readBackBody = await strictJson(readBackRes, 'policy read-back');
+  if (!readBackRes.ok || readBackBody?.ok !== true || !Array.isArray(readBackBody.data)) {
+    throw new Error(
+      `policy read-back failed (${readBackRes.status}): ${JSON.stringify(readBackBody).slice(0, 200)}`,
+    );
+  }
+
+  // Steward の置換 API は行 ID を再生成する版があるため、単一ポリシーの実効フィールドを
+  // PUT した値へ完全一致させ、保存欠落による無制限署名への波及をここで断つ。
+  const readBackMatches =
+    readBackBody.data.length === 1 &&
+    isDeepStrictEqual(policyFields(readBackBody.data[0]), policyFields(expectedPolicy));
+  if (!readBackMatches) {
+    throw new Error(
+      `policy read-back mismatch: ${JSON.stringify(readBackBody.data).slice(0, 500)}`,
+    );
+  }
+}
+
 async function main() {
+  if (!PLATFORM_KEY) {
+    die('STEWARD_PLATFORM_KEY is required (one of the server STEWARD_PLATFORM_KEYS).');
+  }
+  if (!OWNER_KEY || !isHex(OWNER_KEY) || OWNER_KEY.length !== 66) {
+    die('OWNER_PRIVATE_KEY must be a 32-byte 0x-prefixed hex string.');
+  }
+
   const owner = privateKeyToAccount(OWNER_KEY);
   console.log(`→ Steward: ${URL_BASE}`);
   console.log(`→ Owner wallet: ${owner.address}`);
@@ -225,39 +327,17 @@ async function main() {
 
   // 6. JPYC typed-data ポリシー (JPYC 宛・forwarder 宛・上限額)
   const maxValueAtomic = (BigInt(MAX_SIGN_JPYC) * 10n ** 18n).toString();
-  const policyRes = await fetch(`${URL_BASE}/agents/${agent.id}/policies`, {
-    method: 'PUT',
-    headers: tenantHeaders({ 'X-Steward-Key': apiKey }),
-    body: JSON.stringify([
-      {
-        id: 'jpyc-receive',
-        type: 'typed-data',
-        enabled: true,
-        config: {
-          verifyingContractAllowlist: [JPYC_ADDRESS],
-          allowedChainIds: [CHAIN_ID],
-          allowedPrimaryTypes: ['ReceiveWithAuthorization'],
-          messageConditions: [
-            { field: 'to', operator: 'address_in', values: [FORWARDER_ADDRESS] },
-            { field: 'value', operator: 'uint_max', value: maxValueAtomic },
-          ],
-        },
-      },
-    ]),
+  await setAndVerifyJpycPolicy({
+    urlBase: URL_BASE,
+    tenantId: TENANT_ID,
+    apiKey,
+    agentId: agent.id,
+    jpycAddress: JPYC_ADDRESS,
+    forwarderAddress: FORWARDER_ADDRESS,
+    chainId: CHAIN_ID,
+    maxValueAtomic,
   });
-  const policyBody = await policyRes.json().catch(() => ({}));
-  if (policyRes.ok && policyBody?.ok !== false) {
-    console.log(`✓ typed-data policy set (JPYC only, to=forwarder, value ≤ ${MAX_SIGN_JPYC} JPYC)`);
-  } else if (/Unknown policy type/i.test(JSON.stringify(policyBody))) {
-    console.log('⚠ typed-data policy を登録できませんでした (Steward の既知バグ)。');
-    console.log('  Steward-Fi/steward#162 / #163 の修正が入っていない版です。修正を当てるか、');
-    console.log('  暫定的に起動 env に次を足してください (宛先/金額ポリシーは効かなくなります。');
-    console.log('  MCP 側のガードは有効なままです):');
-    console.log('    STEWARD_ALLOW_UNSAFE_TYPED_DATA_SIGNING=true');
-    console.log('    STEWARD_ALLOW_VAULT_UNSAFE_TYPED_DATA_SIGNING=true');
-  } else {
-    throw new Error(`policy set failed (${policyRes.status}): ${JSON.stringify(policyBody).slice(0, 200)}`);
-  }
+  console.log(`✓ typed-data policy set (JPYC only, to=forwarder, value ≤ ${MAX_SIGN_JPYC} JPYC)`);
 
   // 7. owner の TOTP (MFA) を登録 — signer 発行の前提。シークレットは操作者に引き渡す。
   let sessionToken = (await siweLogin(owner)).token;
@@ -346,4 +426,6 @@ async function main() {
   console.log('確認: MCP から x402_quote → totalJpyc が返れば配線 OK。\n');
 }
 
-main().catch((err) => die(err instanceof Error ? err.message : String(err)));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => die(err instanceof Error ? err.message : String(err)));
+}

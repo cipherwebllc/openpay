@@ -13,8 +13,10 @@
 import { isAddress, getAddress } from 'viem';
 import { kvGet, kvSet, kvLpush, kvLrange, kvEval } from '@/lib/kv';
 import { stripControlChars, truncateSafe } from '@/lib/sanitize';
+import { normalizeHost } from '@/lib/net/privateHost';
 import { caip2ForChainId } from './network';
 import { x402FacilitatorConfig } from './facilitatorConfig';
+import { OPENPAY_CANONICAL_ORIGIN } from './firstParty';
 import { isPrivateHost } from './moderation';
 
 export const RESOURCES_INDEX = 'x402:resources:index';
@@ -93,6 +95,22 @@ export type ParseResourceResult =
   | { ok: true; input: X402ResourceInput }
   | { ok: false; reason: string };
 
+const OPENPAY_CANONICAL_URL = new URL(OPENPAY_CANONICAL_ORIGIN);
+
+export function isOpenPayCanonicalOriginUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === OPENPAY_CANONICAL_URL.protocol &&
+      normalizeHost(url.hostname.toLowerCase()) ===
+        normalizeHost(OPENPAY_CANONICAL_URL.hostname.toLowerCase()) &&
+      url.port === OPENPAY_CANONICAL_URL.port
+    );
+  } catch {
+    return false;
+  }
+}
+
 // 登録リクエストの検証 (純・route から呼ぶ)。owner = SIWE セッションのウォレット (checksum)。
 // payTo 未指定は owner を既定にする。reason は invalidReason にそのまま使う。
 export function parseResourceInput(
@@ -114,9 +132,12 @@ export function parseResourceInput(
     return { ok: false, reason: 'invalid_url' };
   }
   // SSRF ガード: private/loopback/link-local 宛は登録不可 (モデレーション probe 先を public host に
-  // 限定する + そもそも公開 API ではない)。URL パース不能も弾く。
+  // 限定する + そもそも公開 API ではない)。canonical OpenPay origin は運営生成の first-party
+  // カタログだけに予約し、第三者の payTo / Docs を公式リソースへ重ねる経路を断つ。
+  // URL パース不能も弾く。
   try {
-    if (isPrivateHost(new URL(url).hostname)) {
+    const parsedUrl = new URL(url);
+    if (isPrivateHost(parsedUrl.hostname) || isOpenPayCanonicalOriginUrl(url)) {
       return { ok: false, reason: 'invalid_url' };
     }
   } catch {
@@ -204,16 +225,20 @@ const CAS_CREATE =
 
 export type CreateResourceResult =
   | { ok: true; resource: X402Resource }
-  | { ok: false; reason: 'too_many' | 'storage' };
+  | { ok: false; reason: 'invalid_url' | 'too_many' | 'storage' };
 
 // resource を作成して KV に保存する。id は採番 (uuid)。network は facilitator の対象 chain。
 // cap 判定・保存・両 index 登録を CAS_CREATE で原子化する (cap race / orphan を防ぐ)。nowMs を引数化
-// して testable に。戻り: too_many=登録上限 (429) / storage=KV エラー (503) / ok=作成。
+// して testable に。parseResourceInput を経由しない内部呼び出しでも OpenPay origin の偽装 record を
+// 永続化させない。戻り: invalid_url=予約 origin / too_many=登録上限 / storage=KV エラー / ok=作成。
 export async function createResource(
   input: X402ResourceInput,
   id: string,
   nowMs: number,
 ): Promise<CreateResourceResult> {
+  if (isOpenPayCanonicalOriginUrl(input.url)) {
+    return { ok: false, reason: 'invalid_url' };
+  }
   const resource: X402Resource = {
     id,
     merchant: input.merchant,

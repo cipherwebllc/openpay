@@ -8,6 +8,7 @@ import {
 } from './guards.mjs';
 import { createSignerFromOptions } from './signer.mjs';
 import { createFileSpendStore } from './spendStore.mjs';
+import { createReceiptSignerResolver } from './receipt.mjs';
 
 function isObject(value) {
   return typeof value === 'object' && value !== null;
@@ -68,7 +69,18 @@ export function createOpenPayClient(options = {}) {
     config.maxDailyAtomic === null
       ? null
       : options.spendStore ?? createFileSpendStore();
-  const resolveCatalogListings = createCatalogResolver({ config, fetchImpl });
+  const resolveCatalogListings = createCatalogResolver({
+    config,
+    fetchImpl,
+    lookup: options.lookup,
+    requestTimeoutMs: options.requestTimeoutMs,
+  });
+  const resolveReceiptSigner = createReceiptSignerResolver({
+    discoveryUrl: config.discoveryUrl,
+    fetchImpl,
+    lookup: options.lookup,
+    requestTimeoutMs: options.requestTimeoutMs,
+  });
   const executor = createPaymentExecutor({
     config,
     session,
@@ -76,9 +88,12 @@ export function createOpenPayClient(options = {}) {
     signerAddress: signer?.address ?? null,
     spendStore,
     fetchImpl,
+    lookup: options.lookup,
+    requestTimeoutMs: options.requestTimeoutMs,
     nowSec: options.nowSec,
     now: options.now,
     resolveCatalogListings,
+    resolveReceiptSigner,
   });
 
   async function withSafeErrors(operation) {

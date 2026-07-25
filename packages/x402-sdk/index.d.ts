@@ -44,9 +44,42 @@ export interface SpendStore {
    * so an absent entry must be reported as `'0'`, never `null`.
    */
   load(key: string): Promise<string | null>;
+  /**
+   * Atomically check the limit and reserve an authorization before it is sent.
+   * Custom legacy stores may omit this method; new cross-process stores should
+   * implement it to avoid lost updates.
+   */
+  reserve?(
+    key: string,
+    amountAtomic: string,
+    limitAtomic: string,
+    reservation: SpendReservation,
+  ): Promise<SpendReservationResult>;
+  /** Mark reservation metadata confirmed without reducing the reserved total. */
+  confirm?(id: string): Promise<boolean>;
   /** Persist the new cumulative atomic amount. Failures must not throw. */
   save(key: string, atomicString: string): Promise<void>;
 }
+
+export interface SpendReservation {
+  id: string;
+  payer: Address;
+  network: string;
+  asset: Address;
+  validBefore: string;
+}
+
+export type SpendReservationResult =
+  | { ok: true; totalAtomic: string }
+  | {
+      ok: false;
+      reason: 'limit_exceeded' | 'unavailable';
+      totalAtomic?: string;
+    };
+
+export type PaymentLookup = (
+  hostname: string,
+) => Promise<Array<{ address: string; family?: number }>>;
 
 export interface FileSpendStoreOptions {
   path?: string;
@@ -58,6 +91,12 @@ export interface FileSpendStoreOptions {
       data: string,
       encoding: 'utf8',
     ): Promise<unknown>;
+    open?(
+      path: string,
+      flags: 'wx',
+    ): Promise<{ close(): Promise<unknown> }>;
+    rename?(from: string, to: string): Promise<unknown>;
+    unlink?(path: string): Promise<unknown>;
   };
 }
 
@@ -65,11 +104,14 @@ interface ClientCommonOptions {
   maxPerCallJpyc?: JpycAmount;
   maxSessionJpyc?: JpycAmount;
   maxDailyJpyc?: JpycAmount;
+  maxTimeoutSeconds?: number;
   spendStore?: SpendStore;
   allowedHosts?: string;
   catalogTrust?: boolean;
   discoveryUrl?: string;
   fetchImpl?: typeof globalThis.fetch;
+  lookup?: PaymentLookup;
+  requestTimeoutMs?: number;
   nowSec?: () => number;
   now?: () => Date | number;
 }
@@ -114,6 +156,11 @@ export interface RuntimeConfig {
   maxPerCallAtomic: bigint;
   maxSessionAtomic: bigint;
   maxDailyAtomic: bigint | null;
+  /**
+   * Maximum seller-declared authorization lifetime. Optional here so existing
+   * consumers that construct RuntimeConfig manually remain source-compatible.
+   */
+  maxTimeoutSeconds?: number;
   allowedHosts: string[];
   catalogTrust: boolean;
   discoveryUrl: string;
@@ -228,6 +275,10 @@ export interface JpycGateOptions {
   openpayOrigin?: string;
   fetchImpl?: typeof globalThis.fetch;
   now?: () => number;
+  /** Worst-case seller upstream duration protected by the local claim. Default: 60. */
+  maxUpstreamSeconds?: number;
+  /** Extra validity retained for settlement after upstream work. Default: 30. */
+  settlementGraceSeconds?: number;
 }
 
 export interface JpycGatePaymentResponse {
@@ -248,6 +299,7 @@ export function createJpycGate(options: JpycGateOptions): JpycGate;
 export const RECEIVE_WITH_AUTHORIZATION_TYPES: {
   ReceiveWithAuthorization: Array<{ name: string; type: string }>;
 };
+export const MAX_AUTHORIZATION_TIMEOUT_SECONDS: 1200;
 
 export interface NormalizedPaymentRequirements {
   scheme: 'exact';
@@ -331,6 +383,8 @@ export function paymentPayloadFor(
 export const JPYC_DECIMALS: 18;
 export const DEFAULT_MAX_PER_CALL_JPYC: '10';
 export const DEFAULT_MAX_SESSION_JPYC: '100';
+export const DEFAULT_MAX_TIMEOUT_SECONDS: 600;
+export const MAX_SUPPORTED_TIMEOUT_SECONDS: 1200;
 export const DEFAULT_ALLOWED_HOSTS: 'open-pay.jp';
 export const DEFAULT_CATALOG_TRUST: true;
 export const DEFAULT_DISCOVERY_URL: 'https://open-pay.jp/api/discovery';
@@ -340,8 +394,10 @@ export const REASONS: {
   unsupportedScheme: 'unsupported_scheme';
   unsupportedNetwork: 'unsupported_network';
   invalidOpenpayMode: 'invalid_openpay_mode';
+  invalidOpenpayForwarder: 'invalid_openpay_forwarder';
   amountMismatch: 'amount_mismatch';
   invalidJpycAsset: 'invalid_jpyc_asset';
+  timeoutTooLong: 'timeout_too_long';
   resourceMismatch: 'resource_mismatch';
   invalidAccept: 'invalid_accept';
   maxTotalRequired: 'max_total_required';
@@ -352,11 +408,61 @@ export const REASONS: {
   sessionLimitExceeded: 'session_limit_exceeded';
   dailyLimitExceeded: 'daily_limit_exceeded';
   dailySpendUnavailable: 'daily_spend_unavailable';
+  dailyAuthorizationCrossesUtcDay: 'daily_authorization_crosses_utc_day';
   buyerPrivateKeyMissing: 'buyer_private_key_missing';
   stewardSignerUnconfigured: 'steward_signer_unconfigured';
   catalogAcceptMismatch: 'catalog_accept_mismatch';
 };
+export const SUPPORTED_JPYC_ASSETS: Readonly<
+  Record<
+    string,
+    Readonly<{
+      address: Address;
+      name: 'JPY Coin';
+      version: '1';
+      decimals: 18;
+    }>
+  >
+>;
+export const SUPPORTED_JPYC_FORWARDERS: Readonly<
+  Partial<Record<string, Address>>
+>;
 export const SUPPORTED_NETWORKS: Set<string>;
+
+export const DEFAULT_PAYMENT_FETCH_TIMEOUT_MS: 15000;
+export function isPrivatePaymentHost(hostname: string): boolean;
+export function parseSafePaymentUrl(raw: unknown): URL | null;
+export function fetchPaymentTarget(
+  url: string,
+  options?: {
+    fetchImpl?: typeof globalThis.fetch;
+    headers?: HeadersInit;
+    lookup?: PaymentLookup;
+    timeoutMs?: number;
+  },
+): Promise<Response>;
+
+export type ReceiptSignerResolver = () => Promise<Address | null>;
+export function createReceiptSignerResolver(options: {
+  discoveryUrl: string;
+  fetchImpl?: typeof globalThis.fetch;
+  lookup?: PaymentLookup;
+  requestTimeoutMs?: number;
+}): ReceiptSignerResolver;
+export function verifyBoundPaymentResponse(
+  paymentResponse: unknown,
+  expected: {
+    expectedSigner: Address;
+    payer: Address;
+    network: string;
+    asset: Address;
+    chainId: number;
+    merchant: Address;
+    merchantValue: bigint;
+    feeValue: bigint;
+    nonce: Hex;
+  },
+): Promise<boolean>;
 
 export interface AcceptSummary {
   priceAtomic: bigint;
@@ -459,12 +565,16 @@ export function createCatalogCache(): CatalogCache;
 export function resolveCatalogListings(options: {
   config: Pick<RuntimeConfig, 'catalogTrust' | 'discoveryUrl'>;
   fetchImpl?: typeof globalThis.fetch;
+  lookup?: PaymentLookup;
+  requestTimeoutMs?: number;
   now?: () => number;
   cache?: CatalogCache;
 }): Promise<Map<string, unknown> | null>;
 export function createCatalogResolver(options: {
   config: Pick<RuntimeConfig, 'catalogTrust' | 'discoveryUrl'>;
   fetchImpl?: typeof globalThis.fetch;
+  lookup?: PaymentLookup;
+  requestTimeoutMs?: number;
   now?: () => number;
 }): () => Promise<Map<string, unknown> | null>;
 
@@ -482,7 +592,10 @@ export function createPaymentExecutor(options: {
   signerAddress?: Address | null;
   spendStore?: SpendStore | null;
   fetchImpl?: typeof globalThis.fetch;
+  lookup?: PaymentLookup;
+  requestTimeoutMs?: number;
   nowSec?: () => number;
   now?: () => Date | number;
   resolveCatalogListings?: () => Promise<Map<string, unknown> | null>;
+  resolveReceiptSigner?: ReceiptSignerResolver;
 }): PaymentExecutor;

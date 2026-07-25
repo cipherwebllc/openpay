@@ -5,7 +5,10 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
-import { listActiveResources } from '@/lib/x402/registry';
+import {
+  isOpenPayCanonicalOriginUrl,
+  listActiveResources,
+} from '@/lib/x402/registry';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { caip2ForChainId } from '@/lib/x402/network';
@@ -110,6 +113,7 @@ export async function GET(): Promise<NextResponse> {
           license: r.license,
           network: caip2ForChainId(x402FacilitatorConfig.chainId),
           accepts,
+          official: true,
           verifiedAt: currentVerification?.verification?.lastOkAt ?? null,
         },
       ];
@@ -117,7 +121,9 @@ export async function GET(): Promise<NextResponse> {
   const firstPartyItems =
     firstPartyPayToAddr === null ? [] : buildFirstPartyItems(firstPartyPayToAddr);
 
-  const items = resources.map((r) => {
+  // 予約 origin の登録拒否より前に作られた record も公開しない。first-party と同じ URL に
+  // 攻撃者の payTo / Docs を重ね、公式 item と並べる波及を discovery 境界で断つ。
+  const items = resources.filter((r) => !isOpenPayCanonicalOriginUrl(r.url)).map((r) => {
     // priceJpyc (human 整数) → atomic。accepts は facilitator 未準備 (forwarder/feeReceiver 欠落) や
     // 不正 price では生成不能なので per-item で握りつぶし [] にする (カタログ自体は出す)。
     let accepts: ReturnType<typeof createJpycPaymentRequirements> = [];

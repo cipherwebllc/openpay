@@ -9,13 +9,12 @@ import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { PayStepStrip } from './PayStepStrip';
 import { PayEmptyLanding } from './PayEmptyLanding';
-import { CopyableField } from './CopyableField';
 import { InfoTooltip } from './InfoTooltip';
 import { OnrampCta } from './OnrampCta';
 import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { SignReassurance, type SignReassuranceProps } from './SignReassurance';
 import {
   PaymentSuccessOverlay,
@@ -23,8 +22,8 @@ import {
 } from './PaymentSuccessOverlay';
 
 // First Load JS から外すための遅延ロード (bundle 予算)。いずれも client 専用で
-// 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後)
-// のため SSR 不要。挙動は静的 import と同一。
+// 条件付き表示 (cross-chain hint = USDC 接続時 / success overlay・受領控え = 決済成功後 /
+// payment status = 送信後の pending・unknown 時) のため SSR 不要。挙動は静的 import と同一。
 const CrossChainHint = dynamic(
   () => import('./CrossChainHint').then((m) => m.CrossChainHint),
   { ssr: false },
@@ -32,6 +31,16 @@ const CrossChainHint = dynamic(
 const PayerReceiptCompletion = dynamic(
   () =>
     import('./PayerReceiptCompletion').then((m) => m.PayerReceiptCompletion),
+  { ssr: false },
+);
+const PaymentStatusPanel = dynamic(
+  () =>
+    import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
+  { ssr: false },
+);
+const PaymentResultPanel = dynamic(
+  () =>
+    import('./PaymentResultPanel').then((m) => m.PaymentResultPanel),
   { ssr: false },
 );
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -77,7 +86,10 @@ import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
-import { usePaymentHistory } from '@/hooks/usePaymentHistory';
+import {
+  usePaymentHistory,
+  type AppendPaymentHistoryCtx,
+} from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
@@ -100,7 +112,25 @@ import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
+import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
+
+type PaymentAttemptSnapshot = {
+  amountDisplay: string;
+  amountHuman: string;
+  historyCtx: AppendPaymentHistoryCtx;
+};
+
+function snapshotHistoryCtx(
+  ctx: AppendPaymentHistoryCtx,
+): AppendPaymentHistoryCtx {
+  return {
+    ...ctx,
+    // 入力変更で再生成される明細参照が attempt の履歴・控えへ波及しないよう、
+    // line item も値として固定する。
+    lineItems: ctx.lineItems?.map((item) => ({ ...item })) ?? null,
+  };
+}
 
 export function PaymentForm() {
   const search = useSearchParams();
@@ -218,7 +248,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [crossChainLocked, setCrossChainLocked] = useState(false);
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
-  const crossChainAttemptAmountRef = useRef<bigint | null>(null);
+  const directAttemptSnapshotRef = useRef<PaymentAttemptSnapshot | null>(null);
+  const crossChainAttemptSnapshotRef =
+    useRef<PaymentAttemptSnapshot | null>(null);
 
   // 動的 QR の有効期限。exp 付き QR (FX 換算で生成) のみカウントダウン + 期限切れ block。
   // exp 無し (通常 QR) では nowMs=0 のまま・expired=false で従来挙動。
@@ -405,10 +437,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
   const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
   const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
+  // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
+  // current route が後から変わってもラッチを外さず、2 本目の UserOperation 送信を防ぐ。
+  const gaslessAmbiguous = gasless.isUnknown;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const directFlowPending = relayAmbiguous
+  const directFlowPending = relayAmbiguous || gaslessAmbiguous
     ? true
     : isStandard
       ? standard.isPending
@@ -424,6 +459,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する。
   const directSettledNoRetry =
     relayAmbiguous ||
+    gaslessAmbiguous ||
     !!relayIpRateLimited ||
     (!isStandard && !useRelay && !!gasless.data?.success) ||
     (useRelay &&
@@ -461,7 +497,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 差し替え (standard モードは paymaster を経由しないため対象外)。
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
   // 漏れるため、i18n 化した friendly メッセージに置き換える (詳細は logger 経由で Sentry へ)。
-  const flowError = relayAmbiguous
+  const flowError = relayAmbiguous || gaslessAmbiguous
     ? null
     : isStandard
     ? standard.isUnknown
@@ -664,26 +700,94 @@ function PaymentDetails({ params }: { params: PayParams }) {
     deployment.chainId,
   );
   usePaymentHistory(
-    historyCtx,
+    directAttemptSnapshotRef.current?.historyCtx ?? historyCtx,
     useRelay ? relayHistoryGasless : gasless,
     standard,
   );
 
-  const onCrossChainAttemptStart = useCallback((attemptAmount: bigint) => {
-    crossChainAttemptAmountRef.current = attemptAmount;
-    setCrossChainLocked(true);
-  }, []);
+  const onCrossChainAttemptStart = useCallback(
+    (attemptAmount: bigint) => {
+      const amountHuman = formatUnits(attemptAmount, deployment.decimals);
+      const attemptHistoryCtx = snapshotHistoryCtx({
+        ...historyCtx,
+        merchantAmount: attemptAmount,
+        feeAmount: 0n,
+        saleAmount: attemptAmount,
+        networkFeeEquivalent: null,
+        lineItems: historyCtx.lineItems?.map((item) => ({
+          ...item,
+          unitPrice: amountHuman,
+          amount: amountHuman,
+        })) ?? null,
+      });
+      crossChainAttemptSnapshotRef.current = {
+        amountDisplay: formatTokenAmount(attemptAmount, deployment),
+        amountHuman,
+        historyCtx: attemptHistoryCtx,
+      };
+      setCrossChainLocked(true);
+    },
+    [deployment, historyCtx],
+  );
   const onCrossChainExecutingChange = useCallback((executing: boolean) => {
     setCrossChainLocked(executing);
   }, []);
-  const onCrossChainSuccess = useCallback((result: ExecuteResult) => {
-    setCrossChainResult(result);
-    setCrossChainLocked(false);
-  }, []);
+  const onCrossChainSuccess = useCallback(
+    (result: ExecuteResult) => {
+      setCrossChainResult(result);
+      setCrossChainLocked(false);
+      const snapshot = crossChainAttemptSnapshotRef.current;
+      if (!snapshot) return;
+      const ctx = snapshot.historyCtx;
+      // localStorage 控えの失敗を成立済み cross-chain 決済へ波及させない処理は、
+      // appendPayerReceipt 内の既存 no-throw storage 境界に委ねる。
+      appendPayerReceipt(
+        buildPayerReceipt({
+          txHash: result.mintTxHash,
+          chainId: result.destChainId,
+          asset: params.token,
+          tokenAddress: deployment.address,
+          amount: snapshot.amountHuman,
+          merchantAddress: params.to,
+          merchantName: params.storeName ?? null,
+          payerAddress: address,
+          paymentMode: 'cross-chain',
+          gasMode: 'customer',
+          lineItems: ctx.lineItems,
+          subtotalAmount: snapshot.amountHuman,
+          totalAmount: snapshot.amountHuman,
+          memo: params.memo ?? null,
+          receiptNo: params.receiptNo ?? null,
+          anchorAmount: ctx.anchorAmount,
+          anchorSymbol: ctx.anchorSymbol
+            ? displaySymbolFor(ctx.anchorSymbol)
+            : null,
+          fxRate: ctx.fxRateUsdcJpy,
+          sourceRoute: '/pay',
+          locale,
+        }),
+      );
+    },
+    [
+      address,
+      deployment.address,
+      locale,
+      params.memo,
+      params.receiptNo,
+      params.storeName,
+      params.to,
+      params.token,
+    ],
+  );
 
   function onSubmit() {
     if (!canSubmit) return;
     attemptRouteRef.current = route;
+    directAttemptSnapshotRef.current = {
+      amountDisplay: fmt(totalCustomerOutflow),
+      amountHuman: formatUnits(amountWei, deployment.decimals),
+      historyCtx: snapshotHistoryCtx(historyCtx),
+    };
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     primeChimeAudio();
     if (isStandard) {
@@ -833,35 +937,47 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // PayPay 風 大型成功 overlay の payload (Phase 1.4)。従来は gasless / relay / standard 経路ごとに
   // 3 連で SuccessOverlay を出していたのを、各経路と byte 一致する payload 1 個に集約する。各ガードは
   // 従来の overlay 呼び出しと完全同一 (relay は userOpHash/blockNumber を省き、standard は userOpHash を
-  // 省く = undefined)。amountDisplay=fmt(totalCustomerOutflow)・merchantAddress=params.to・explorerBase
-  // は全経路共通で従来どおり。いずれの経路でもない (未成功) ときは null で overlay 非表示。
+  // 省く = undefined)。金額は submit gesture で固定した attempt snapshot だけを読む。未成功または
+  // snapshot 不在のときは null とし、成功時の live 入力を控えとして表示しない。
+  const directAttemptAmountDisplay =
+    directAttemptSnapshotRef.current?.amountDisplay;
+  const crossChainAttemptAmountDisplay =
+    crossChainAttemptSnapshotRef.current?.amountDisplay;
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
-    crossChainResult
+    crossChainResult && crossChainAttemptAmountDisplay
       ? {
-          amountDisplay: fmt(crossChainAttemptAmountRef.current ?? amountWei),
+          amountDisplay: crossChainAttemptAmountDisplay,
           txHash: crossChainResult.mintTxHash,
           explorerBase: blockExplorerUrl(crossChainResult.destChainId),
           merchantAddress: params.to,
         }
-      : !isStandard && !useRelay && gasless.data && gasless.data.success
+      : !isStandard &&
+          !useRelay &&
+          gasless.data &&
+          gasless.data.success &&
+          directAttemptAmountDisplay
       ? {
-          amountDisplay: fmt(totalCustomerOutflow),
+          amountDisplay: directAttemptAmountDisplay,
           txHash: gasless.data.txHash,
           userOpHash: gasless.data.userOpHash,
           blockNumber: gasless.data.blockNumber,
           explorerBase,
           merchantAddress: params.to,
         }
-      : useRelay && relay.data && relay.data.success && relay.data.txHash
+      : useRelay &&
+          relay.data &&
+          relay.data.success &&
+          relay.data.txHash &&
+          directAttemptAmountDisplay
         ? {
-            amountDisplay: fmt(totalCustomerOutflow),
+            amountDisplay: directAttemptAmountDisplay,
             txHash: relay.data.txHash,
             explorerBase,
             merchantAddress: params.to,
           }
-        : isStandard && standard.data
+        : isStandard && standard.data && directAttemptAmountDisplay
           ? {
-              amountDisplay: fmt(totalCustomerOutflow),
+              amountDisplay: directAttemptAmountDisplay,
               txHash: standard.data.merchantTxHash,
               blockNumber: standard.data.blockNumber,
               explorerBase,
@@ -888,11 +1004,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 type="text"
                 inputMode="decimal"
                 value={inputAmount}
+                disabled={flowPending || settledNoRetry}
                 onChange={(e) =>
                   setInputAmount(e.target.value.replace(/[^\d.]/g, ''))
                 }
                 placeholder={deployment.symbol === 'jpyc' ? '1000' : '10.00'}
-                className="w-full rounded-lg bg-white/15 px-3 py-2 text-2xl font-bold text-white placeholder:text-white/50 focus:bg-white/20 focus:outline-none"
+                className="w-full rounded-lg bg-white/15 px-3 py-2 text-2xl font-bold text-white placeholder:text-white/50 focus:bg-white/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
               />
               <p className="mt-1 text-xs opacity-70">
                 {t('amountInputHint', { symbol: deployment.displaySymbol })}
@@ -1205,38 +1322,36 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {/* standard receipt RPC が読めない間は broadcast 済み tx の成否が不明。
           main Pay / fee retry は出さず、同じ hash の receipt 再照会のみ許可する。 */}
       {isStandard && standard.isUnknown && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            {t('standardUnknownTitle')}
-          </p>
-          <p className="mt-1 break-words">{t('standardUnknownBody')}</p>
-          {standardUnknownTxHash && (
-            <p className="mt-2 break-all font-mono text-xs">
-              {standardUnknownTxHash}
-              {explorerBase && (
-                <>
-                  {' · '}
-                  <a
-                    href={`${explorerBase}/tx/${standardUnknownTxHash}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="font-sans underline hover:text-sky-900"
-                  >
-                    {t('pendingExplorerLink')} ↗
-                  </a>
-                </>
-              )}
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={() => standard.retryReceipt()}
-            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-          >
-            {t('standardReceiptRetryButton')}
-          </button>
-        </div>
+        <PaymentStatusPanel
+          title={t('standardUnknownTitle')}
+          body={t('standardUnknownBody')}
+          titleWithIcon
+          showSpinner
+          identifier={standardUnknownTxHash}
+          explorerHref={
+            standardUnknownTxHash && explorerBase
+              ? `${explorerBase}/tx/${standardUnknownTxHash}`
+              : undefined
+          }
+          explorerLabel={t('pendingExplorerLink')}
+          actionLabel={t('standardReceiptRetryButton')}
+          onAction={() => standard.retryReceipt()}
+        />
+      )}
+
+      {/* Pimlico receipt RPC が不確定な間は新しい UserOperation を作らず、保持した
+          userOpHash の receipt 再照会だけを許可する。文言は relay unknown と共通。 */}
+      {gaslessAmbiguous && (
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={t('responseUnknownBody')}
+          titleWithIcon
+          showSpinner
+          identifier={gasless.pendingUserOpHash}
+          actionLabel={t('responseUnknownRetryButton')}
+          actionDisabled={gasless.isPending}
+          onAction={gasless.retryReceipt}
+        />
       )}
 
       {/* standard mode: merchant 確定 + fee 失敗のときに retry 用 button を表示。
@@ -1289,70 +1404,70 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
       {/* ambiguity latch 中は同一 payload の再確認だけを許可し、standard fallback / 新署名を封鎖。 */}
       {relayAmbiguous && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            {relay.recoveryState === 'auto' && (
-              <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            )}
-            {t('responseUnknownTitle')}
-          </p>
-          <p className="mt-1 break-words">
-            {relay.recoveryState === 'auto'
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={
+            relay.recoveryState === 'auto'
               ? t('responseUnknownAutoBody')
-              : t('responseUnknownBody')}
-          </p>
-          {relay.recoveryState !== 'auto' && (
-            <button
-              type="button"
-              disabled={relay.isPending}
-              onClick={relay.retrySamePayload}
-              className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t('responseUnknownRetryButton')}
-            </button>
-          )}
-        </div>
+              : t('responseUnknownBody')
+          }
+          titleWithIcon
+          showSpinner={relay.recoveryState === 'auto'}
+          actionLabel={
+            relay.recoveryState === 'auto'
+              ? undefined
+              : t('responseUnknownRetryButton')
+          }
+          actionDisabled={
+            relay.recoveryState === 'auto' ? undefined : relay.isPending
+          }
+          onAction={
+            relay.recoveryState === 'auto'
+              ? undefined
+              : relay.retrySamePayload
+          }
+        />
       )}
 
       {/* relay IP rate limit: idem 確認前の 429 なので main Pay / standard fallback / 再署名を
           封鎖し、保持済みの同一署名 payload の再 POST だけを許可する。 */}
       {relayIpRateLimited && !relayAmbiguous && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="font-semibold">{t('ipRateLimitedTitle')}</p>
-          <p className="mt-1 break-words">
-            {relayIpRateLimited.retryAfterSeconds === null
+        <PaymentStatusPanel
+          title={t('ipRateLimitedTitle')}
+          body={
+            relayIpRateLimited.retryAfterSeconds === null
               ? t('ipRateLimitedBody')
               : t('ipRateLimitedBodyWithRetryAfter', {
                   seconds: relayIpRateLimited.retryAfterSeconds,
-                })}
-          </p>
-          <button
-            type="button"
-            disabled={relay.isPending}
-            onClick={relay.retryRelay}
-            className="mt-3 w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {t('ipRateLimitedRetryButton')}
-          </button>
-        </div>
+                })
+          }
+          actionLabel={t('ipRateLimitedRetryButton')}
+          actionDisabled={relay.isPending}
+          onAction={relay.retryRelay}
+        />
       )}
 
       {crossChainResult && (
-        <ResultPanel
-          title={t('successTitle')}
-          rows={[
-            {
-              label: t('successTx'),
-              value: crossChainResult.mintTxHash,
-              copyable: true,
-            },
-          ]}
-        />
+        <>
+          <PaymentResultPanel
+            title={t('successTitle')}
+            rows={[
+              {
+                label: t('successTx'),
+                value: crossChainResult.mintTxHash,
+                copyable: true,
+              },
+            ]}
+          />
+          <PayerReceiptCompletion
+            candidateIds={[crossChainResult.mintTxHash]}
+          />
+        </>
       )}
 
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (
         <>
-          <ResultPanel
+          <PaymentResultPanel
             title={t('successTitle')}
             rows={[
               { label: t('successUserOp'), value: gasless.data.userOpHash, copyable: true },
@@ -1369,7 +1484,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer link は overlay 側)。 */}
       {useRelay && relay.data && relay.data.success && relay.data.txHash && (
         <>
-          <ResultPanel
+          <PaymentResultPanel
             title={t('successTitle')}
             rows={[{ label: t('successTx'), value: relay.data.txHash, copyable: true }]}
           />
@@ -1380,36 +1495,24 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
           (再送信は canSubmit の settledNoRetry で禁止)。txHash があれば Explorer で追跡。 */}
       {useRelay && !relayAmbiguous && relay.data?.pending && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-          <p className="flex items-center gap-1.5 font-semibold">
-            <Loader2 className="h-4 w-4 flex-none animate-spin" aria-hidden />
-            {t('pendingTitle')}
-          </p>
-          <p className="mt-1 break-words">{t('pendingBody')}</p>
-          {relay.data.txHash && (
-            <p className="mt-2 break-all font-mono text-xs">
-              {relay.data.txHash}
-              {explorerBase && (
-                <>
-                  {' · '}
-                  <a
-                    href={`${explorerBase}/tx/${relay.data.txHash}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="font-sans underline hover:text-sky-900"
-                  >
-                    {t('pendingExplorerLink')} ↗
-                  </a>
-                </>
-              )}
-            </p>
-          )}
-        </div>
+        <PaymentStatusPanel
+          title={t('pendingTitle')}
+          body={t('pendingBody')}
+          titleWithIcon
+          showSpinner
+          identifier={relay.data.txHash ?? undefined}
+          explorerHref={
+            relay.data.txHash && explorerBase
+              ? `${explorerBase}/tx/${relay.data.txHash}`
+              : undefined
+          }
+          explorerLabel={t('pendingExplorerLink')}
+        />
       )}
 
       {isStandard && standard.data && (
         <>
-          <ResultPanel
+          <PaymentResultPanel
             title={t('successTitle')}
             rows={[
               {
@@ -1462,33 +1565,4 @@ function phaseLabel(
     default:
       return t('btnSending');
   }
-}
-
-function ResultPanel({
-  title,
-  rows,
-}: {
-  title: string;
-  // copyable=true の row はクリックで clipboard コピー可能 (tx hash 等の長い文字列向け)
-  rows: Array<{ label: string; value: string; copyable?: boolean }>;
-}) {
-  return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-      <p className="font-semibold">{title}</p>
-      <dl className="mt-2 space-y-1 text-xs">
-        {rows.map((r) => (
-          <div key={r.label} className="flex justify-between gap-2">
-            <dt className="opacity-70">{r.label}</dt>
-            <dd className="min-w-0 flex-1 text-right">
-              {r.copyable ? (
-                <CopyableField value={r.value} label={r.label} />
-              ) : (
-                <span className="break-all font-mono">{r.value}</span>
-              )}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
 }

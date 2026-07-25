@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0
+
+- Reserve session and daily capacity immediately before exposing a signed
+  authorization. Non-2xx responses, timeouts, and connection failures retain
+  the reservation; successful 2xx responses keep the existing confirmed-spend
+  accounting.
+- Make the file daily store cross-process atomic with an exclusive lock, reject
+  UTC-crossing authorizations, and fail closed when a configured store is
+  unavailable.
+- Enforce host/catalog admission before target I/O, block private and rebinding
+  destinations, require exact catalog URLs, stop redirects, and bound buyer
+  requests with a timeout.
+- Bind supported networks to the canonical JPYC v3 contract/domain, cap
+  seller-declared authorization lifetimes, bind signature destinations to a
+  known or catalog-reviewed forwarder, and locally reserve seller-gate
+  authorizations across verify and settle without requiring facilitator tokens.
+- Verify facilitator-signed payment receipts against the advertised signer and
+  bind every money field and authorization nonce before returning them.
+
 ## 0.4.0
 
 - Add an opt-in persistent daily buyer limit with UTC signer/date keys, file and

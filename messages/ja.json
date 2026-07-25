@@ -982,6 +982,7 @@
     "cancelLink": "← 注文を中止して戻る",
     "offOriginCallbackNote": "決済後、この店舗のページ（{host}）に通知・遷移します。",
     "errorTitle": "エラー",
+    "orderNotAccepting": "ただいま注文を受け付けていません",
     "errorGasCongested": "ネットワークが混雑しています。ガス代が高騰しているため、しばらく経ってから再度お試しください。",
     "errorGasQuote": "ガス代見積の取得に失敗しました。ネットワーク接続を確認してから再度お試しください。",
     "errorMerchantUnderflow": "この金額では gas を引くと店主受取が 0 になります。最低 {min} 必要です。",

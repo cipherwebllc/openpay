@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   record: null as unknown,
   resolveOk: true,
 }));
+const ssrf = vi.hoisted(() => ({
+  fetchSafe: vi.fn(),
+}));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -41,6 +44,9 @@ vi.mock('@/lib/handleStore', () => ({
   resolveHandle: vi.fn(async () =>
     h.resolveOk ? { ok: true, record: h.record } : { ok: false },
   ),
+}));
+vi.mock('@/lib/x402/moderation', () => ({
+  fetchSsrfSafe: ssrf.fetchSafe,
 }));
 
 import { GET } from '@/app/api/og/handle/route';
@@ -117,6 +123,11 @@ beforeEach(() => {
   h.enableMobileOrder = false;
   h.resolveOk = true;
   h.record = RECORD;
+  ssrf.fetchSafe.mockReset();
+  ssrf.fetchSafe.mockImplementation(async (url: string, opts: RequestInit) => {
+    if (new URL(url).hostname === 'localhost') return null;
+    return fetch(url, { redirect: opts.redirect });
+  });
 });
 
 afterEach(() => {
@@ -146,6 +157,11 @@ describe('GET /api/og/handle', () => {
     const srcs = collectImgSrcs(element);
     expect(srcs.some((s) => s.startsWith('data:image/png;base64,'))).toBe(true);
     expect(srcs).toHaveLength(2);
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith('https://cdn.example.com/a.png', {
+      redirect: 'error',
+      timeoutMs: 3000,
+      userAgent: 'OpenPay-og-avatar/1.0',
+    });
     expect(options.width).toBe(1200);
     expect(options.height).toBe(630);
     const headers = options.headers as Record<string, string>;
@@ -312,5 +328,25 @@ describe('GET /api/og/handle', () => {
     expect(fetchSpy).not.toHaveBeenCalled(); // ブロックホストは fetch せず弾く
     expect(collectImgSrcs(element)).toHaveLength(1); // ブランドアイコンのみ (店舗アバターは弾かれた)
     expect(collectText(element).join(' ')).toContain('山'); // 店名イニシャル fallback
+  });
+
+  it('DNS 名が private IP を指す場合は safe fetch が接続前に弾き、イニシャルへ', async () => {
+    h.record = {
+      ...RECORD,
+      profile: {
+        ...RECORD.profile,
+        avatar: 'https://private-dns.example/avatar.png',
+      },
+    };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    ssrf.fetchSafe.mockResolvedValueOnce(null);
+    const { element } = await callGet('h=masia&locale=ja');
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(
+      'https://private-dns.example/avatar.png',
+      expect.objectContaining({ redirect: 'error' }),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(collectImgSrcs(element)).toHaveLength(1);
   });
 });

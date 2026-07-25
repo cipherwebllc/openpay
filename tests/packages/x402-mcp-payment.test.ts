@@ -28,12 +28,22 @@ type McpPayment = {
     params: ForwarderSettleParams;
     typedData: ReturnType<typeof buildReceiveWithAuthorizationTypedData>;
   };
+  createAuthorization: (
+    from: Address,
+    maxTimeoutSeconds: number,
+    nowSec?: number,
+  ) => {
+    from: Address;
+    validAfter: string;
+    validBefore: string;
+    intentSalt: Hex;
+  };
 };
 
 const JPYC = 10n ** 18n;
 const CHAIN = 80002;
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
-const FORWARDER = getAddress('0x4444444444444444444444444444444444444444');
+const FORWARDER = getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4');
 const FROM = getAddress('0x1111111111111111111111111111111111111111');
 const MERCHANT = getAddress('0x2222222222222222222222222222222222222222');
 const FEE_RECEIVER = getAddress('0x3333333333333333333333333333333333333333');
@@ -117,5 +127,24 @@ describe('packages/x402-mcp payment copy', () => {
     );
     expect(out.params).toEqual(p);
     expect(out.typedData).toEqual(expected);
+  });
+
+  it('creates only safe-integer authorization timestamps', async () => {
+    const mcp = await loadMcpPayment();
+
+    expect(mcp.createAuthorization(FROM, 600, 1_000_000_000)).toMatchObject({
+      from: FROM,
+      validAfter: '0',
+      validBefore: '1000000600',
+    });
+    expect(() =>
+      mcp.createAuthorization(FROM, 600, Number.MAX_SAFE_INTEGER - 599),
+    ).toThrow('nowSec + maxTimeoutSeconds must be a safe integer');
+    expect(() => mcp.createAuthorization(FROM, 1201, 1_000_000_000)).toThrow(
+      'maxTimeoutSeconds must be <= 1200',
+    );
+    expect(() => mcp.createAuthorization(FROM, 600, 1.5)).toThrow(
+      'nowSec must be a non-negative safe integer',
+    );
   });
 });

@@ -16,6 +16,8 @@ type SdkModule = {
     openpayOrigin?: string;
     fetchImpl?: typeof globalThis.fetch;
     now?: () => number;
+    maxUpstreamSeconds?: number;
+    settlementGraceSeconds?: number;
   }) => Gate;
 };
 
@@ -59,6 +61,26 @@ function catalogAccept(resource = RESOURCE) {
         feeReceiver: '0x3333333333333333333333333333333333333333',
         feeValue: '250000000000000000',
         commitVersion: `0x${'a'.repeat(64)}`,
+      },
+    },
+  };
+}
+
+function paymentPayload(
+  intentSaltByte = '1',
+  validBefore = String(Math.floor(Date.now() / 1000) + 600),
+) {
+  return {
+    x402Version: 1,
+    scheme: 'exact',
+    network: 'eip155:137',
+    payload: {
+      signature: `0x${'b'.repeat(130)}`,
+      authorization: {
+        from: '0x5555555555555555555555555555555555555555',
+        validAfter: '0',
+        validBefore,
+        intentSalt: `0x${intentSaltByte.repeat(64)}`,
       },
     },
   };
@@ -305,6 +327,184 @@ describe('openpay-x402-sdk seller gate', () => {
     expect(body.error).toBe('expired');
     expect(verified).not.toHaveProperty('settle');
     expect(order).toEqual(['discovery', 'verify']);
+  });
+
+  it('settles on the established wire when facilitator omits its reservation token', async () => {
+    const { fetchImpl, facilitatorBodies, order } = createFetchMock({
+      verification: { isValid: true },
+    });
+    const sdk = await loadSdk();
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl,
+    });
+    const request = new Request(REQUEST_URL, {
+      headers: { 'X-PAYMENT': edgeBase64Encode({ payer: '0xbuyer' }) },
+    });
+
+    const verified = await gate.verify(request);
+    expect(verified).not.toBeInstanceOf(Response);
+
+    const settled = await (verified as VerifiedPayment).settle();
+
+    expect(settled).not.toBeInstanceOf(Response);
+    expect(facilitatorBodies[1]).not.toHaveProperty('reservationToken');
+    expect(order).toEqual(['discovery', 'verify', 'settle']);
+  });
+
+  it('forwards an optional token without changing the established verify body', async () => {
+    const { fetchImpl, facilitatorBodies } = createFetchMock({
+      verification: {
+        isValid: true,
+        reservationToken: 'x402r1_resource_payment_bound',
+      },
+    });
+    const sdk = await loadSdk();
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl,
+      maxUpstreamSeconds: 240,
+      settlementGraceSeconds: 45,
+    });
+    const request = new Request(REQUEST_URL, {
+      headers: { 'X-PAYMENT': edgeBase64Encode({ payer: '0xbuyer' }) },
+    });
+
+    const verified = (await gate.verify(request)) as VerifiedPayment;
+    await verified.settle();
+
+    expect(facilitatorBodies).toEqual([
+      {
+        x402Version: 1,
+        paymentPayload: { payer: '0xbuyer' },
+        paymentRequirements: { ...catalogAccept(), resource: REQUEST_URL },
+      },
+      {
+        x402Version: 1,
+        paymentPayload: { payer: '0xbuyer' },
+        paymentRequirements: { ...catalogAccept(), resource: REQUEST_URL },
+        reservationToken: 'x402r1_resource_payment_bound',
+      },
+    ]);
+  });
+
+  it.each([
+    [{ maxUpstreamSeconds: -1 }, 'maxUpstreamSeconds'],
+    [{ maxUpstreamSeconds: 1.5 }, 'maxUpstreamSeconds'],
+    [{ settlementGraceSeconds: 0 }, 'settlementGraceSeconds'],
+    [
+      {
+        maxUpstreamSeconds: Number.MAX_SAFE_INTEGER,
+        settlementGraceSeconds: 1,
+      },
+      'reservation validity window',
+    ],
+  ])('rejects an invalid reservation window %#', async (options, expected) => {
+    const sdk = await loadSdk();
+
+    expect(() =>
+      sdk.createJpycGate({
+        resourceUrl: RESOURCE,
+        ...options,
+      }),
+    ).toThrow(expected);
+  });
+
+  it('claims one authorization before facilitator verify across parallel resources', async () => {
+    const { fetchImpl, order } = createFetchMock();
+    const sdk = await loadSdk();
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl,
+    });
+    await gate.handle(new Request(`${RESOURCE}?warm=catalog`));
+    const header = edgeBase64Encode(paymentPayload());
+
+    const results = await Promise.all([
+      gate.verify(
+        new Request(`${RESOURCE}?report=first`, {
+          headers: { 'X-PAYMENT': header },
+        }),
+      ),
+      gate.verify(
+        new Request(`${RESOURCE}?report=second`, {
+          headers: { 'X-PAYMENT': header },
+        }),
+      ),
+    ]);
+    const verified = results.find(
+      (result): result is VerifiedPayment => !(result instanceof Response),
+    );
+    const rejected = results.find(
+      (result): result is Response => result instanceof Response,
+    );
+
+    expect(verified).toBeDefined();
+    expect(rejected).toBeDefined();
+    expect((await read402(rejected!)).error).toBe('authorization_reserved');
+    expect(order).toEqual(['discovery', 'verify']);
+
+    await verified!.settle();
+    const replay = await gate.verify(
+      new Request(`${RESOURCE}?report=replay`, {
+        headers: { 'X-PAYMENT': header },
+      }),
+    );
+
+    expect((await read402(replay)).error).toBe('authorization_reserved');
+    expect(order).toEqual(['discovery', 'verify', 'settle']);
+  });
+
+  it('releases a tentative local claim after facilitator rejection', async () => {
+    const verification = {
+      isValid: false,
+      invalidReason: 'temporary_rejection',
+    };
+    const { fetchImpl, order } = createFetchMock({ verification });
+    const sdk = await loadSdk();
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl,
+    });
+    const request = new Request(REQUEST_URL, {
+      headers: { 'X-PAYMENT': edgeBase64Encode(paymentPayload('2')) },
+    });
+
+    expect((await read402(await gate.verify(request))).error).toBe(
+      'temporary_rejection',
+    );
+    verification.isValid = true;
+    const retried = await gate.verify(request);
+
+    expect(retried).not.toBeInstanceOf(Response);
+    expect(order).toEqual(['discovery', 'verify', 'verify']);
+  });
+
+  it('rejects an authorization that cannot cover upstream plus settlement time', async () => {
+    const { fetchImpl, order } = createFetchMock();
+    const sdk = await loadSdk();
+    const gate = sdk.createJpycGate({
+      resourceUrl: RESOURCE,
+      openpayOrigin: OPENPAY_ORIGIN,
+      fetchImpl,
+      now: () => 1_700_000_000_500,
+    });
+    const request = new Request(REQUEST_URL, {
+      headers: {
+        'X-PAYMENT': edgeBase64Encode(
+          paymentPayload('3', '1700000090'),
+        ),
+      },
+    });
+
+    const body = await read402(await gate.verify(request));
+
+    expect(body.error).toBe('insufficient_validity_window');
+    expect(order).toEqual(['discovery']);
   });
 
   it('returns a Response when split settlement fails', async () => {

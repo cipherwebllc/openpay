@@ -12,6 +12,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 type SpendStore = {
   load: (key: string) => Promise<string | null>;
+  reserve: (
+    key: string,
+    amountAtomic: string,
+    limitAtomic: string,
+    reservation: Record<string, string>,
+  ) => Promise<
+    | { ok: true; totalAtomic: string }
+    | { ok: false; reason: string; totalAtomic?: string }
+  >;
+  confirm: (id: string) => Promise<boolean>;
   save: (key: string, atomicString: string) => Promise<void>;
 };
 
@@ -52,6 +62,60 @@ afterEach(async () => {
 });
 
 describe('openpay-x402-sdk file spend store', () => {
+  it('atomically admits only one cross-instance reservation at the limit', async () => {
+    const sdk = await loadSdk();
+    const path = await temporaryPath('spend.json');
+    const first = sdk.createFileSpendStore({ path });
+    const second = sdk.createFileSpendStore({ path });
+    const key = '0xabc:2026-07-17';
+    const reservation = (id: string) => ({
+      id,
+      payer: '0xabc',
+      network: 'eip155:80002',
+      asset: '0xdef',
+      validBefore: '2000000000',
+    });
+
+    const results = await Promise.all([
+      first.reserve(key, '7', '10', reservation('0x01')),
+      second.reserve(key, '7', '10', reservation('0x02')),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(
+      results.find((result) => !result.ok),
+    ).toMatchObject({ ok: false, reason: 'limit_exceeded' });
+    await expect(first.load(key)).resolves.toBe('7');
+  });
+
+  it('keeps a reservation counted when it is only marked confirmed', async () => {
+    const sdk = await loadSdk();
+    const path = await temporaryPath('spend.json');
+    const store = sdk.createFileSpendStore({ path });
+    const key = '0xabc:2026-07-17';
+
+    await expect(
+      store.reserve(key, '7', '10', {
+        id: '0xnonce',
+        payer: '0xabc',
+        network: 'eip155:80002',
+        asset: '0xdef',
+        validBefore: '2000000000',
+      }),
+    ).resolves.toMatchObject({ ok: true, totalAtomic: '7' });
+    await expect(store.confirm('0xnonce')).resolves.toBe(true);
+
+    await expect(store.load(key)).resolves.toBe('7');
+    await expect(
+      readFile(path, 'utf8').then(JSON.parse),
+    ).resolves.toMatchObject({
+      [key]: '7',
+      __openpayReservations: {
+        '0xnonce': { status: 'confirmed' },
+      },
+    });
+  });
+
   it('roundtrips an atomic string', async () => {
     const sdk = await loadSdk();
     const path = await temporaryPath('spend.json');
@@ -61,6 +125,39 @@ describe('openpay-x402-sdk file spend store', () => {
     await store.save(key, '123000000000000000000');
 
     await expect(store.load(key)).resolves.toBe('123000000000000000000');
+  });
+
+  it('keeps the published minimal fsImpl working for compatibility saves', async () => {
+    const sdk = await loadSdk();
+    let stored: string | null = null;
+    const store = sdk.createFileSpendStore({
+      path: '/virtual/spend.json',
+      fsImpl: {
+        async readFile() {
+          if (stored === null) {
+            throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          }
+          return stored;
+        },
+        async mkdir() {},
+        async writeFile(_path, data) {
+          stored = data;
+        },
+      },
+    });
+
+    await store.save('0xabc:2026-07-17', '9');
+
+    await expect(store.load('0xabc:2026-07-17')).resolves.toBe('9');
+    await expect(
+      store.reserve('0xabc:2026-07-17', '1', '10', {
+        id: '0xnonce',
+        payer: '0xabc',
+        network: 'eip155:80002',
+        asset: '0xdef',
+        validBefore: '2000000000',
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'unavailable' });
   });
 
   it('prunes keys outside the date being saved', async () => {

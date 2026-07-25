@@ -10,7 +10,10 @@ import {
 } from 'viem';
 import { base, baseSepolia, polygon } from 'viem/chains';
 import type { ReactNode } from 'react';
-import { useBatchPayment } from '@/hooks/useBatchPayment';
+import {
+  PIMLICO_PENDING_KEY_PREFIX,
+  useBatchPayment,
+} from '@/hooks/useBatchPayment';
 import { GasCongestedError } from '@/lib/gasCeiling';
 import { defaultDeploymentForSymbol, type PaymasterMode } from '@/lib/tokens';
 
@@ -89,6 +92,16 @@ const FEE_RECV: Address = getAddress(
   '0x2222222222222222222222222222222222222222',
 );
 
+function pimlicoPendingKeys(): string[] {
+  return Array.from(
+    { length: window.localStorage.length },
+    (_, index) => window.localStorage.key(index),
+  ).filter(
+    (key): key is string =>
+      key !== null && key.startsWith(PIMLICO_PENDING_KEY_PREFIX),
+  );
+}
+
 function makeWrapper() {
   const qc = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -150,6 +163,7 @@ function mountReady(opts?: {
 describe('useBatchPayment', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     // resolvePaymasterMode を毎テスト実装に戻す (mockReturnValue は clearAllMocks で
     // 消えず leak するため)。各テストは必要に応じ mockReturnValue で上書きする。
     const actual =
@@ -810,9 +824,10 @@ describe('useBatchPayment', () => {
       expect(result.current.data!.success).toBe(false);
       expect(result.current.data!.txHash).toBe(`0x${'f'.repeat(64)}`);
       expect(result.current.data!.blockNumber).toBe(999n);
+      expect(pimlicoPendingKeys()).toHaveLength(0);
     });
 
-    it('waitForUserOperationReceipt が reject → mutation エラー (sendUserOperation 後の失敗)', async () => {
+    it('receipt timeout は failure でなく unknown に固定し、通常 mutate も同じ hash の再照会だけを行う', async () => {
       mountReady();
       waitForUserOperationReceipt.mockRejectedValueOnce(
         new Error('UserOperationReceiptTimeoutError'),
@@ -821,18 +836,122 @@ describe('useBatchPayment', () => {
       const { result } = renderHook(() => useBatchPayment(usdcDep), {
         wrapper: makeWrapper(),
       });
-      result.current.mutate({
+      const params = {
         tokenAddress: TOKEN,
         merchant: MERCHANT,
         merchantAmount: 99_000_000n,
         feeReceiver: FEE_RECV,
         feeAmount: 1_000_000n,
-      });
+      };
+      result.current.mutate(params);
 
-      await waitFor(() => expect(result.current.isError).toBe(true));
-      // sendUserOperation は呼ばれた (実 broadcast 済)、wait で失敗
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      // 新挙動が正しい理由: hash 取得後の timeout は未送信を証明しない。通常 error として
+      // 再送可能にすると二重着金になるため、履歴/汎用 error へは流さず unknown に固定する。
+      expect(result.current.error).toBeNull();
+      expect(result.current.pendingUserOpHash).toBe(
+        `0x${'a'.repeat(64)}`,
+      );
       expect(sendUserOperation).toHaveBeenCalledOnce();
-      expect(result.current.error?.message).toContain('Timeout');
+      expect(waitForUserOperationReceipt).toHaveBeenCalledOnce();
+
+      const keys = pimlicoPendingKeys();
+      expect(keys).toHaveLength(1);
+      const stored = JSON.parse(
+        window.localStorage.getItem(keys[0]) ?? '{}',
+      ) as Record<string, unknown>;
+      expect(stored).toMatchObject({
+        provider: 'pimlico',
+        status: 'unknown',
+        userOpHash: `0x${'a'.repeat(64)}`,
+      });
+      expect(stored.callFingerprint).toMatch(/^0x[0-9a-f]{64}$/);
+
+      // 専用 retry でなく通常 mutate が再度呼ばれても、新しい UserOp は作らず
+      // durable record の同じ hash を receipt 再照会する。
+      result.current.mutate(params);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(sendUserOperation).toHaveBeenCalledOnce();
+      expect(waitForUserOperationReceipt).toHaveBeenCalledTimes(2);
+      expect(waitForUserOperationReceipt).toHaveBeenLastCalledWith({
+        hash: `0x${'a'.repeat(64)}`,
+      });
+      expect(result.current.isUnknown).toBe(false);
+      expect(pimlicoPendingKeys()).toHaveLength(0);
+    });
+
+    it('receipt RPC 例外も unknown として保持し、別 fingerprint の新規 UserOp を拒否する', async () => {
+      mountReady();
+      waitForUserOperationReceipt.mockRejectedValueOnce(
+        new Error('HTTP request failed'),
+      );
+
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 2n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() =>
+        expect(result.current.variables?.merchantAmount).toBe(2n),
+      );
+      expect(result.current.isUnknown).toBe(true);
+      expect(result.current.error).toBeNull();
+      expect(sendUserOperation).toHaveBeenCalledOnce();
+      expect(waitForUserOperationReceipt).toHaveBeenCalledOnce();
+    });
+
+    it('reload 後も durable unknown を復元し retryReceipt は保存済み hash だけを再照会する', async () => {
+      mountReady();
+      waitForUserOperationReceipt.mockRejectedValueOnce(
+        new Error('UserOperationReceiptTimeoutError'),
+      );
+      const firstSend = sendUserOperation;
+      const first = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      first.result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 25n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
+      expect(firstSend).toHaveBeenCalledOnce();
+      first.unmount();
+
+      // hook instance / QueryClient を作り直し、メモリ state が失われた reload を模擬する。
+      mountReady();
+      const restored = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+      expect(restored.result.current.pendingUserOpHash).toBe(
+        `0x${'a'.repeat(64)}`,
+      );
+
+      restored.result.current.retryReceipt();
+      await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+      expect(sendUserOperation).not.toHaveBeenCalled();
+      expect(waitForUserOperationReceipt).toHaveBeenCalledOnce();
+      expect(waitForUserOperationReceipt).toHaveBeenCalledWith({
+        hash: `0x${'a'.repeat(64)}`,
+      });
+      expect(pimlicoPendingKeys()).toHaveLength(0);
     });
   });
 

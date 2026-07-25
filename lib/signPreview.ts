@@ -14,6 +14,10 @@
 
 import { formatUnits, type Address } from 'viem';
 import { AUTHORIZATION_VALIDITY_WINDOW_SEC } from './jpycEip3009';
+import {
+  mobileOrderFeeValue,
+  type MobileOrderFeeKind,
+} from './mobileOrderFee';
 import { jpycForwarderFor } from './relay/forwarderConfig';
 import { recoverFeeValue } from './relay/recoverFee';
 import type { GasMode } from './fee';
@@ -64,7 +68,7 @@ export function buildJpycRelaySignPreview(args: {
 // 内訳を 照合表で説明することが本質 (恐怖除去の核)。
 //
 // 計算は hook (useJpycEip3009Payment の recover 分岐) と **同一ソース**:
-//   feeValue      = recoverFeeValue(value)
+//   feeValue      = feeKind ? mobileOrderFeeValue(value, feeKind) : recoverFeeValue(value)
 //   merchantValue = gasMode==='merchant' ? value - feeValue : value
 //   signedTotal   = merchantValue + feeValue
 //     → customer: value + fee (ウォレット表示が表示価格より大きい)
@@ -105,11 +109,14 @@ export function buildJpycRecoverSignPreview(args: {
   displaySymbol: string;
   chainId: number;
   gasMode: GasMode;
+  feeKind?: MobileOrderFeeKind;
 }): JpycRecoverSignPreview | null {
   const forwarder = jpycForwarderFor(args.chainId);
   if (forwarder === null) return null;
 
-  const feeValue = recoverFeeValue(args.value, args.gasMode, args.chainId);
+  const feeValue = args.feeKind
+    ? mobileOrderFeeValue(args.value, args.feeKind)
+    : recoverFeeValue(args.value, args.gasMode, args.chainId);
   const merchantValue =
     args.gasMode === 'merchant' ? args.value - feeValue : args.value;
   const signedTotal = merchantValue + feeValue;

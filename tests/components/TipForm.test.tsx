@@ -136,13 +136,21 @@ function setSmartAccount(ready: boolean, error?: Error) {
 }
 
 let mutate: ReturnType<typeof vi.fn>;
-function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
+let batchRetryReceipt: ReturnType<typeof vi.fn>;
+function setBatchPayment(
+  state: 'idle' | 'pending' | 'success' | 'error' | 'unknown',
+) {
   mutate = vi.fn();
+  batchRetryReceipt = vi.fn();
   mockHook(useBatchPayment, {
     mutate,
     isPending: state === 'pending',
     isSuccess: state === 'success',
-    isError: state === 'error',
+    isError: state === 'error' || state === 'unknown',
+    isUnknown: state === 'unknown',
+    pendingUserOpHash:
+      state === 'unknown' ? `0x${'e'.repeat(64)}` : undefined,
+    retryReceipt: batchRetryReceipt,
     data:
       state === 'success'
         ? {
@@ -152,7 +160,12 @@ function setBatchPayment(state: 'idle' | 'pending' | 'success' | 'error') {
             success: true,
           }
         : undefined,
-    error: state === 'error' ? new Error('AA21 fail') : null,
+    error:
+      state === 'error'
+        ? new Error('AA21 fail')
+        : state === 'unknown'
+          ? new Error('receipt RPC unavailable')
+          : null,
   } as Partial<ReturnType<typeof useBatchPayment>>);
 }
 
@@ -595,7 +608,7 @@ describe('TipForm — 送信', () => {
     expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
   });
 
-  it('成功 → tx hash と block 表示', () => {
+  it('成功 → tx hash と block 表示', async () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(true);
@@ -603,11 +616,15 @@ describe('TipForm — 送信', () => {
     render(<TipForm params={USDC_PARAMS} />);
     // SuccessOverlay (PayPay 風) + 既存 inline panel が両方 DOM に存在
     expect(
-      screen.getAllByText(/チップを送信しました|決済完了/).length,
+      (await screen.findAllByText(/チップを送信しました|決済完了/)).length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText(`0x${'a'.repeat(64)}`).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('99').length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText(`0x${'a'.repeat(64)}`)).length,
+    ).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText(`0x${'b'.repeat(64)}`)).length,
+    ).toBeGreaterThan(0);
+    expect((await screen.findAllByText('99')).length).toBeGreaterThan(0);
   });
 
   it('gasless 送信成功後: 送信ボタンが disabled・再クリックで mutate が再呼出されない (二重支払い防止)', async () => {
@@ -636,10 +653,38 @@ describe('TipForm — 送信', () => {
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/AA21 fail/)).toBeInTheDocument();
   });
+
+  it('Pimlico response-unknown → 再送封鎖・通常エラー抑止・同じ UserOp の receipt だけ再照会', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setBatchPayment('unknown');
+    render(<TipForm params={USDC_PARAMS} />);
+
+    expect(
+      await screen.findByText(/送信済みかを判定できません/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(`0x${'e'.repeat(64)}`)).toBeInTheDocument();
+    expect(screen.queryByText('receipt RPC unavailable')).toBeNull();
+    expect(screen.queryByText('エラー')).toBeNull();
+
+    const payButton = screen.getByRole('button', { name: /送信中/ });
+    expect(payButton).toBeDisabled();
+    await user.click(payButton);
+    expect(mutate).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole('button', { name: /同じ送信内容を再確認/ }),
+    );
+    expect(batchRetryReceipt).toHaveBeenCalledOnce();
+    expect(mutate).not.toHaveBeenCalled();
+  });
 });
 
 describe('TipForm — thanks / webhook (B2 + B3)', () => {
-  it('成功 + thanks あり → メッセージ表示', () => {
+  it('成功 + thanks あり → メッセージ表示', async () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(true);
@@ -653,7 +698,7 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
       />,
     );
     expect(
-      screen.getByText('ありがとう！Discord 招待リンクをどうぞ'),
+      await screen.findByText('ありがとう！Discord 招待リンクをどうぞ'),
     ).toBeInTheDocument();
   });
 

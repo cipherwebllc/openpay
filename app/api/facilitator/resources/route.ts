@@ -1,7 +1,7 @@
 // x402 facilitator: 加盟店 resource 登録 (SIWE 認証・owner=接続ウォレット)。
 //   POST → resource を登録し { resource, paywallSnippet } を返す。
 //   GET  → owner の resource 一覧 { resources } を返す。
-// flag OFF は 404。運営者 (OpenPay 自身) も同じ導線で自社 resource を seed 登録する (空 registry 回避)。
+// flag OFF は 404。OpenPay 自身の resource は registry を経由せず discovery が生成する。
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
@@ -133,7 +133,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   const created = await createResource(parsed.input, id, Date.now());
   if (!created.ok) {
     // 上の soft cap pre-check 通過後に並列 POST が cap に達したレースは createResource (原子的 cap) が
-    // too_many で弾く。それ以外は KV エラー。
+    // too_many で弾く。invalid_url は保存層でも予約 origin を守る invariant、それ以外は KV エラー。
+    if (created.reason === 'invalid_url') {
+      return NextResponse.json({ error: 'invalid_url' }, { status: 400 });
+    }
     if (created.reason === 'too_many') {
       return NextResponse.json({ error: 'too_many_resources' }, { status: 429 });
     }

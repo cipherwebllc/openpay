@@ -190,14 +190,20 @@ function setSmartAccount(ready: boolean, error?: Error) {
 }
 
 let mutate: ReturnType<typeof vi.fn>;
+let gaslessRetryReceipt: ReturnType<typeof vi.fn>;
 function setBatchPayment(
-  state: 'idle' | 'pending' | 'success' | 'error',
+  state: 'idle' | 'pending' | 'unknown' | 'success' | 'error',
   errMsg?: string,
 ) {
   mutate = vi.fn();
+  gaslessRetryReceipt = vi.fn();
   mockHook(useBatchPayment, {
     mutate,
     isPending: state === 'pending',
+    isUnknown: state === 'unknown',
+    pendingUserOpHash:
+      state === 'unknown' ? `0x${'c'.repeat(64)}` : undefined,
+    retryReceipt: gaslessRetryReceipt,
     isSuccess: state === 'success',
     isError: state === 'error',
     data:
@@ -659,6 +665,99 @@ describe('CheckoutForm — 送信', () => {
     expect(call.feeAmount).toBe(0n);
     expect(call.networkFeeEquivalent).toBe(100_000n);
     expect(call.gasReimbursement).toBe(100_000n);
+  });
+
+  it('Pimlico receipt unknown → Pay を封鎖し同じ userOpHash だけ再照会する', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    setBatchPayment('unknown');
+    render(<CheckoutForm params={USDC_PARAMS} />);
+
+    expect(await screen.findByText('送信結果を確認中')).toBeInTheDocument();
+    expect(screen.getByText(`0x${'c'.repeat(64)}`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+
+    await user.click(
+      screen.getByRole('button', { name: '同じ送信内容を再確認' }),
+    );
+    expect(gaslessRetryReceipt).toHaveBeenCalledOnce();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('@handle モバイル注文は最新 admission の拒否時に wallet 署名へ進まない', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ ok: false, error: 'pickup_slots_unavailable' }),
+        {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          storeHandle: 'coffee_shop',
+          feeKind: 'preorder',
+          pickupAt: 1_800_000_000_000,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1].body))).toEqual({
+      handle: 'coffee_shop',
+      merchant: MERCHANT,
+      mode: 'preorder',
+      pickupAt: 1_800_000_000_000,
+    });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText('ただいま注文を受け付けていません'),
+    ).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('@handle モバイル注文は admission の 200 ok 後だけ payment mutation を開始する', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          storeHandle: 'coffee_shop',
+          feeKind: 'preorder',
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(mutate).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 
   it('ERC20 mode (USDC mainnet 相当): feeAmount に gas を含めない', async () => {
@@ -2482,6 +2581,26 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     // 顧客上乗せ → 利用料は顧客負担 → 補足なしの「OpenPay 利用手数料」。
     expect(screen.getByText('OpenPay 利用手数料')).toBeInTheDocument();
     expect(screen.queryByText('OpenPay 利用手数料 (店舗負担)')).toBeNull();
+  });
+
+  it('モバイル preorder + 顧客上乗せ: 署名照合値も実 feeKind の 3% を含む', () => {
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycRelay();
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, feeKind: 'preorder', feePayer: 'customer' }}
+      />,
+    );
+
+    // 実 hook は value=3000 + mobileOrderFeeValue(preorder)=90 を署名する。
+    // recover floor の別式 (3002) ではなく、同じ 3090 の atomic 値を案内する。
+    expect(
+      screen.getAllByText(/お支払い 3000 \+ 手数料 90/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText((3090n * 10n ** 18n).toString())).toBeInTheDocument();
+    expect(
+      screen.queryByText((3002n * 10n ** 18n).toString()),
+    ).toBeNull();
   });
 
   it('モバイル preorder + 顧客上乗せ (relay): 顧客の表示総額=原価+3% (3090)・relayMutate に feeKind=preorder + gasMode=customer + value=gross', async () => {

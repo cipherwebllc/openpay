@@ -1282,7 +1282,7 @@ Polygon (mainnet) / Amoy (testnet)。
   X402DiscoveryView もマウントされない。
 - **この OFF が安全状態であり、ロールバック先**。
 
-### §14.2 go-live 手順 (順序厳守)
+### §14.2 go-live 手順 (server / SDK / MCP の wire rollout 順序は不問)
 1. **先に testnet 実機 E2E (必須・§14.4)**。通すまで mainnet 点灯しない。
 2. **開示の同梱**: `lib/news.ts` の x402 ファシリテーター手数料お知らせ (施行日 2026-06-28・
    `DISCLOSED_X402_FEE` bps=100 / floor=1 JPYC) がリリースに含まれること。env 料率を変えるなら起動時
@@ -1293,12 +1293,27 @@ Polygon (mainnet) / Amoy (testnet)。
 6. **専用 receipt 署名鍵**: `X402_RECEIPT_SIGNING_KEY` (server-only・relayer 鍵とは**別の専用鍵**) を投入。
    未設定でも settle は成立するが receipt は null (オフライン検証を提供しない)。公開 signer は
    `/api/facilitator/supported` の `receiptSigner` で配布。
-7. **mainnet hardening の前提** (settle は self-host relayer で broadcast するため):
-   - `RELAYER_PRIVATE_KEY` 設定済 (未設定は `PROVIDER!=self-host` → settle 503 `relay_not_configured`)。
-   - `RELAY_MAX_GAS_COST_WEI` (Polygon native gas 上限・wei) 設定済。未設定 (=0) は settle 503
-     `gas_ceiling_required` で**意図的に止まる** (赤字 broadcast 防止)。値は §9.5 同様の実測ベースで調整。
-   - KV (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) 設定済。未設定は settle 503 `kv_required`
-     (冪等が fail-open になると二重 submit しうるため mainnet は KV 必須)。
+7. **optional reservation / mainnet hardening の前提**:
+   - `/verify` の reservation は best-effort。KV が利用可能で記録に成功した場合だけ
+     `reservationToken` を追加する。KV 未設定・障害・予約競合でも、従来の verify 成功条件と応答を
+     変えず `reservation_unavailable` 等を返さない。
+   - `/settle` は予約不在・予約 KV 障害なら従来の冪等・nonce 使用済み検証へ進む。KV 上に既存予約が
+     あり、その resource または明示 token が食い違う場合だけ追加防御として拒否する。
+   - facilitator server/routes、SDK、MCP の **wire rollout 順序に制約はない**:
+     - 新 server + 旧 SDK/MCP: token 無し settle を従来経路で継続する。
+     - 旧 server + 新 SDK/MCP: token が返らなくても SDK は従来経路で継続する。
+     - 全 component 更新後: token が返った場合だけ facilitator の補助照合も有効になる。
+   - npm artifact 作成上は、SDK publish 後に公式 npm registry から
+     `packages/x402-mcp/package-lock.json` を再生成し、SDK 0.5.0 entry の `integrity` が入ったことを
+     確認して MCP smoke / test を再実行する。これは wire 互換性のための deploy 順序ではない。この
+     実装作業では publish しない。
+   - 以下は settle を self-host relayer で broadcast する mainnet 固有の従来前提:
+     - `RELAYER_PRIVATE_KEY` 設定済 (未設定は `PROVIDER!=self-host` → settle 503
+       `relay_not_configured`)。
+     - `RELAY_MAX_GAS_COST_WEI` (Polygon native gas 上限・wei) 設定済。未設定 (=0) は settle 503
+       `gas_ceiling_required` で**意図的に止まる** (赤字 broadcast 防止)。値は §9.5 同様の実測ベースで調整。
+     - KV (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) 設定済。mainnet settle の既存冪等 claim が
+       fail-open になると二重 submit しうるため、未設定は従来どおり 503 `kv_required`。
 8. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
    `NEXT_PUBLIC_ENABLE_X402_FACILITATOR=1`。必要なら運営自身の resource を SIWE で seed 登録 (空カタログ回避)。
 
@@ -1315,9 +1330,14 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 1. **登録**: SIWE サインイン → `/discovery` で resource 登録 (POST /api/facilitator/resources) → 201 +
    paywallSnippet。公開カタログ (`/api/discovery`) に accepts (fee 込み) 付きで現れる。
    first-party resource (`/api/paid/demo`, `/api/paid/stores`) が `/api/discovery` の先頭に並ぶことも確認。
-2. **verify**: 正しい署名 → `isValid:true`。改竄 feeValue → `fee_value_mismatch` (broadcast せず)。
-3. **settle**: 実 settle → 成功 tx を explorer で確認。merchant = 表示額・`FEE_RECEIVER` = 手数料
-   (max(2,1%)) が同一 tx で着金。`recordSettlement` が会計記録。
+2. **verify**: 正しい署名 → 常に従来どおり `isValid:true`。KV 正常時は `reservationToken` が追加され、
+   KV 未設定・障害時も reservation 系エラーにならないこと。改竄 feeValue →
+   `fee_value_mismatch` (broadcast せず)。SDK の同一 gate instance では同じ authorization の並列
+   verify が一件だけ settlement capability を得ること。
+3. **settle**: token あり・なしの両方が従来の settle core へ進み、既存予約との resource/token
+   不一致だけが 409 `reservation_invalid` になること。実 settle → 成功 tx を explorer で確認。
+   merchant = 表示額・`FEE_RECEIVER` = 手数料 (max(2,1%)) が同一 tx で着金。
+   `recordSettlement` が会計記録。
 4. **receipt**: settle 応答の receipt を `/api/facilitator/verify-receipt` で検証 → `valid:true`・
    signer = `/supported` の receiptSigner。
 5. **first-party demo**: `scripts/x402-buyer-example.mjs` を `BUYER_PRIVATE_KEY=... RESOURCE_URL=https://open-pay.jp/api/paid/demo node ...`

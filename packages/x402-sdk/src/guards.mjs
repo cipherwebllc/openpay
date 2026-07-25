@@ -1,5 +1,8 @@
 import { formatUnits, isHex } from 'viem';
-import { normalizePaymentRequirements } from './payment.mjs';
+import {
+  MAX_AUTHORIZATION_TIMEOUT_SECONDS,
+  normalizePaymentRequirements,
+} from './payment.mjs';
 import {
   parseSignerOptions,
   readSignerMode,
@@ -9,6 +12,10 @@ import {
 export const JPYC_DECIMALS = 18;
 export const DEFAULT_MAX_PER_CALL_JPYC = '10';
 export const DEFAULT_MAX_SESSION_JPYC = '100';
+export const DEFAULT_MAX_TIMEOUT_SECONDS = 600;
+// OpenPay facilitator の有効期限上限 (20分) より長い authorization を設定で
+// 許可すると、売り手が facilitator を迂回して後日直接 settle できる波及を残す。
+export const MAX_SUPPORTED_TIMEOUT_SECONDS = MAX_AUTHORIZATION_TIMEOUT_SECONDS;
 export const DEFAULT_ALLOWED_HOSTS = 'open-pay.jp';
 // カタログ信頼 (既定 ON): OpenPay の審査済みカタログ (/api/discovery) に載っている URL への
 // 支払いを、ALLOWED_HOSTS への手動追加なしで許可する。掲載は 402 ゲート実在 + OpenPay 方式
@@ -23,8 +30,10 @@ export const REASONS = {
   unsupportedScheme: 'unsupported_scheme',
   unsupportedNetwork: 'unsupported_network',
   invalidOpenpayMode: 'invalid_openpay_mode',
+  invalidOpenpayForwarder: 'invalid_openpay_forwarder',
   amountMismatch: 'amount_mismatch',
   invalidJpycAsset: 'invalid_jpyc_asset',
+  timeoutTooLong: 'timeout_too_long',
   resourceMismatch: 'resource_mismatch',
   invalidAccept: 'invalid_accept',
   maxTotalRequired: 'max_total_required',
@@ -35,6 +44,7 @@ export const REASONS = {
   sessionLimitExceeded: 'session_limit_exceeded',
   dailyLimitExceeded: 'daily_limit_exceeded',
   dailySpendUnavailable: 'daily_spend_unavailable',
+  dailyAuthorizationCrossesUtcDay: 'daily_authorization_crosses_utc_day',
   buyerPrivateKeyMissing: 'buyer_private_key_missing',
   stewardSignerUnconfigured: 'steward_signer_unconfigured',
   // catalog trust 経由 (第三者ドメイン) の URL で、支払い時にライブ fetch した accept が
@@ -42,14 +52,35 @@ export const REASONS = {
   catalogAcceptMismatch: 'catalog_accept_mismatch',
 };
 
-export const SUPPORTED_NETWORKS = new Set([
-  'eip155:137',
-  'eip155:80002',
-  'eip155:8217',
-  'eip155:1001',
-  'eip155:43114',
-  'eip155:43113',
-]);
+const JPYC_V3_ADDRESS = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
+const JPYC_V3_DEFINITION = Object.freeze({
+  address: JPYC_V3_ADDRESS,
+  name: 'JPY Coin',
+  version: '1',
+  decimals: JPYC_DECIMALS,
+});
+
+// Buyer が署名してよい JPYC v3 domain の単一情報源。asset と自己申告 metadata を
+// network ごとの既知値へ束縛し、allowlist 済み売り手が別 token の署名を得る波及を断つ。
+export const SUPPORTED_JPYC_ASSETS = Object.freeze({
+  'eip155:137': JPYC_V3_DEFINITION,
+  'eip155:80002': JPYC_V3_DEFINITION,
+  'eip155:8217': JPYC_V3_DEFINITION,
+  'eip155:1001': JPYC_V3_DEFINITION,
+  'eip155:43114': JPYC_V3_DEFINITION,
+  'eip155:43113': JPYC_V3_DEFINITION,
+});
+
+export const SUPPORTED_NETWORKS = new Set(Object.keys(SUPPORTED_JPYC_ASSETS));
+
+// OpenPay が deploy 済みとして公開している Eip3009Forwarder。未掲載 chain の
+// forwarder は審査済み catalog accept との完全一致が取れた場合だけ許可する。
+// ホスト allowlist だけで署名の `to` を攻撃者 EOA へ差し替え、表示した分配を
+// 迂回して総額を直接受領する波及を断つ。
+export const SUPPORTED_JPYC_FORWARDERS = Object.freeze({
+  'eip155:137': '0x0F4560a777415580F0680F8B56a79B0022C6B848',
+  'eip155:80002': '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4',
+});
 
 function nonEmpty(raw) {
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
@@ -61,6 +92,21 @@ function unique(values) {
 
 function isObject(value) {
   return typeof value === 'object' && value !== null;
+}
+
+function parseMaxTimeoutSeconds(value, label) {
+  const parsed =
+    typeof value === 'string' && /^[0-9]+$/.test(value) ? Number(value) : value;
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed <= 0 ||
+    parsed > MAX_SUPPORTED_TIMEOUT_SECONDS
+  ) {
+    throw new Error(
+      `${label} must be an integer between 1 and ${MAX_SUPPORTED_TIMEOUT_SECONDS}`,
+    );
+  }
+  return parsed;
 }
 
 export function parseJpycToAtomic(value, label) {
@@ -141,6 +187,10 @@ export function readMoneyConfig(env = process.env) {
       nonEmpty(env.MAX_SESSION_JPYC) ?? DEFAULT_MAX_SESSION_JPYC,
       'MAX_SESSION_JPYC',
     ),
+    maxTimeoutSeconds: parseMaxTimeoutSeconds(
+      nonEmpty(env.MAX_TIMEOUT_SECONDS) ?? DEFAULT_MAX_TIMEOUT_SECONDS,
+      'MAX_TIMEOUT_SECONDS',
+    ),
     maxDailyAtomic:
       nonEmpty(env.MAX_DAILY_JPYC) === undefined
         ? null
@@ -204,6 +254,10 @@ export function parseClientOptions(options = {}) {
       optionAmount(options.maxSessionJpyc, DEFAULT_MAX_SESSION_JPYC),
       'MAX_SESSION_JPYC',
     ),
+    maxTimeoutSeconds: parseMaxTimeoutSeconds(
+      optionAmount(options.maxTimeoutSeconds, DEFAULT_MAX_TIMEOUT_SECONDS),
+      'maxTimeoutSeconds',
+    ),
     maxDailyAtomic:
       options.maxDailyJpyc === undefined || options.maxDailyJpyc === ''
         ? null
@@ -250,12 +304,17 @@ function reasonFromNormalizeError(error) {
   return REASONS.invalidAccept;
 }
 
-function addAssetReasons(reasons, rawAccept) {
+function addAssetReasons(reasons, rawAccept, accept) {
   const extra = isObject(rawAccept) ? rawAccept.extra : undefined;
+  const expected =
+    accept === null ? undefined : SUPPORTED_JPYC_ASSETS[accept.network];
   if (
+    expected === undefined ||
+    accept.asset !== expected.address ||
     !isObject(extra) ||
-    extra.name !== 'JPY Coin' ||
-    extra.decimals !== JPYC_DECIMALS
+    extra.name !== expected.name ||
+    extra.version !== expected.version ||
+    extra.decimals !== expected.decimals
   ) {
     reasons.push(REASONS.invalidJpycAsset);
   }
@@ -326,7 +385,7 @@ export function validateAcceptForPayment(rawAccept, requestUrl) {
   if (accept !== null && !SUPPORTED_NETWORKS.has(accept.network)) {
     reasons.push(REASONS.unsupportedNetwork);
   }
-  addAssetReasons(reasons, rawAccept);
+  addAssetReasons(reasons, rawAccept, accept);
   addResourceReason(reasons, rawAccept, requestUrl);
 
   return {
@@ -338,7 +397,7 @@ export function validateAcceptForPayment(rawAccept, requestUrl) {
 }
 
 // catalog trust の掲載 accept (discovery = OpenPay サーバー権威) とライブ accept が、金銭に効く
-// 全フィールド (asset/forwarder/受取先/各金額/commit) まで一致するかを照合する。第三者ドメインが
+// 全フィールド (asset/有効期限/forwarder/受取先/各金額/commit) まで一致するかを照合する。第三者ドメインが
 // 掲載時と別の forwarder/asset を bait-and-switch して buyer に攻撃者宛の署名を作らせる P0 を塞ぐ。
 // どちらかが正規化不能なら不一致 (fail-close)。
 function catalogAcceptConsistent(liveRawAccept, listedRawAccept) {
@@ -348,6 +407,7 @@ function catalogAcceptConsistent(liveRawAccept, listedRawAccept) {
     return (
       a.network === b.network &&
       a.asset === b.asset &&
+      a.maxTimeoutSeconds === b.maxTimeoutSeconds &&
       a.extra.openpay.forwarder === b.extra.openpay.forwarder &&
       a.extra.openpay.merchant === b.extra.openpay.merchant &&
       a.extra.openpay.merchantValue === b.extra.openpay.merchantValue &&
@@ -390,31 +450,39 @@ export function evaluatePaymentGuards({
 }) {
   const reasons = [];
   const maxDailyAtomic = config.maxDailyAtomic ?? null;
+  const configuredMaxTimeoutSeconds =
+    config.maxTimeoutSeconds ?? DEFAULT_MAX_TIMEOUT_SECONDS;
+  // 公開 primitive では config を手組みできるため、parser を迂回した不正な上限値が
+  // authorization の絶対上限を広げる波及を断ち、無効値は 0 扱いで fail-close する。
+  const maxTimeoutSeconds =
+    Number.isSafeInteger(configuredMaxTimeoutSeconds) &&
+    configuredMaxTimeoutSeconds > 0
+      ? Math.min(
+          configuredMaxTimeoutSeconds,
+          MAX_SUPPORTED_TIMEOUT_SECONDS,
+        )
+      : 0;
   const parsedUrl = parseHttpUrl(url, 'url');
+  let catalogAcceptMatches = false;
   if (parsedUrl === null) {
     reasons.push(REASONS.invalidUrl);
   } else {
     const hostAllowed = config.allowedHosts.includes(parsedUrl.hostname.toLowerCase());
-    // 完全一致を先に維持し、miss 時だけ query/hash を除いた同一 origin+pathname を引く。
-    // userinfo は origin に含まれないため、query variant ではない credential 付き URL へは緩和しない。
+    // catalog admission は完全一致だけ。query-free 掲載を任意 query へ広げると、
+    // GET 副作用を持つ未審査 URL へ buyer を到達させる波及が残る。
     let listedAccept;
     if (config.catalogTrust && catalogListings instanceof Map) {
       listedAccept = catalogListings.get(parsedUrl.toString());
-      if (
-        listedAccept === undefined &&
-        parsedUrl.username === '' &&
-        parsedUrl.password === ''
-      ) {
-        listedAccept = catalogListings.get(`${parsedUrl.origin}${parsedUrl.pathname}`);
-      }
     }
     const catalogListed = listedAccept !== undefined;
+    catalogAcceptMatches =
+      catalogListed && catalogAcceptConsistent(accept, listedAccept);
     if (!hostAllowed && !catalogListed) {
       reasons.push(REASONS.hostNotAllowed);
     } else if (!hostAllowed && catalogListed) {
       // ALLOWED_HOSTS 直 (open-pay.jp) はサーバー権威ゆえ照合不要。catalog trust 経由 (第三者
       // ドメイン) でのみ、ライブ accept が掲載 accept と金銭フィールドまで一致するか照合する。
-      if (!catalogAcceptConsistent(accept, listedAccept)) {
+      if (!catalogAcceptMatches) {
         reasons.push(REASONS.catalogAcceptMismatch);
       }
     }
@@ -422,6 +490,16 @@ export function evaluatePaymentGuards({
 
   const acceptValidation = validateAcceptForPayment(accept, url);
   reasons.push(...acceptValidation.reasons);
+  if (acceptValidation.accept !== null) {
+    const knownForwarder =
+      SUPPORTED_JPYC_FORWARDERS[acceptValidation.accept.network];
+    if (
+      acceptValidation.accept.extra.openpay.forwarder !== knownForwarder &&
+      !catalogAcceptMatches
+    ) {
+      reasons.push(REASONS.invalidOpenpayForwarder);
+    }
+  }
 
   let maxTotalAtomic = null;
   if (requireMaxTotal) {
@@ -449,6 +527,13 @@ export function evaluatePaymentGuards({
     ) {
       reasons.push(REASONS.dailyLimitExceeded);
     }
+  }
+
+  if (
+    acceptValidation.accept !== null &&
+    acceptValidation.accept.maxTimeoutSeconds > maxTimeoutSeconds
+  ) {
+    reasons.push(REASONS.timeoutTooLong);
   }
 
   if (maxDailyAtomic !== null && dailySpentAtomic === null) {

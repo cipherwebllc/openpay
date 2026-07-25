@@ -482,6 +482,7 @@ describe('buildCheckoutPath / buildCheckoutUrl', () => {
       successUrl: 'https://shop.example.com/thanks',
       cancelUrl: 'https://shop.example.com/cart',
       webhook: 'https://shop.example.com/hook',
+      storeHandle: 'summer_shop',
     };
     const path = buildCheckoutPath(params);
     const sp = new URLSearchParams(path.split('?')[1]);
@@ -499,6 +500,7 @@ describe('buildCheckoutPath / buildCheckoutUrl', () => {
       expect(r.params.successUrl).toBe('https://shop.example.com/thanks');
       expect(r.params.cancelUrl).toBe('https://shop.example.com/cart');
       expect(r.params.webhook).toBe('https://shop.example.com/hook');
+      expect(r.params.storeHandle).toBe('summer_shop');
     }
   });
 });

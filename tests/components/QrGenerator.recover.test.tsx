@@ -3,8 +3,15 @@ import { screen } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
 
+const incomingWatchMock = vi.hoisted(() =>
+  vi.fn(() => ({ status: 'watching' as const, receivedWei: 0n })),
+);
+
 vi.mock('@/hooks/useResolveAddress', () => ({
   useResolveAddress: vi.fn(() => ({ data: null, isFetching: false, error: null })),
+}));
+vi.mock('@/hooks/useIncomingPaymentWatch', () => ({
+  useIncomingPaymentWatch: incomingWatchMock,
 }));
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
@@ -74,6 +81,7 @@ async function openStep2(user: ReturnType<typeof userEvent.setup>) {
 
 describe('QrGenerator recover fee disclosure', () => {
   beforeEach(() => {
+    incomingWatchMock.mockClear();
     vi.mocked(jpycForwarderFor).mockReturnValue(null);
     vi.mocked(recoverFeeValue).mockReturnValue(2n * 10n ** 18n);
     vi.mocked(recoverFeeBps).mockReturnValue(0);
@@ -103,6 +111,27 @@ describe('QrGenerator recover fee disclosure', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/決済手数料:\s*12 JPYC/)).toBeNull();
     expect(screen.queryByText(/決済手数料:\s*20 JPYC/)).toBeNull();
+  });
+
+  it('RECOVER mode の着金監視は 2 JPYC floor 控除後の店舗純受取額を使う', async () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await openStep2(user);
+    const receiverInput = screen.getByPlaceholderText(/0x/i);
+    await user.type(receiverInput, VALID_RECEIVER);
+    await fillAmount(user, '50');
+
+    expect(recoverFeeValue).toHaveBeenCalledWith(
+      50n * 10n ** 18n,
+      'merchant',
+      80002,
+    );
+    expect(incomingWatchMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedAmountWei: 48n * 10n ** 18n,
+      }),
+    );
   });
 
   it('RECOVER mode, bps=100: shows % form disclosure (merchant 固定)', async () => {

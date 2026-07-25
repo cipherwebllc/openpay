@@ -6,7 +6,7 @@
 //   - amount   = computeAgentOrder が menu から確定した合計 (顧客申告額は信じない)
 //   - payTo    = record.config.to (@handle 権威・project_mobileorder_receiver_config_to)
 //   - resource = 正規順 (h, cart, table, pickupAt) で組んだ自 URL (MCP の accepts.resource 照合用)
-//   - chain    = storefront.chain の deployment (forwarder 未設定チェーンは 422 unsupported_chain)
+//   - chain    = storefront.chain の deployment (facilitator/forwarder 未対応は 422 unsupported_chain)
 // settle 成功後、既存の受注リレー (/api/order/notify) の POST handler を import して内部呼び出しし、
 // サーバー検証済みの注文を店主の受注画面へ届ける。notify 失敗は **決済成功を巻き込まない** (掟13)。
 //
@@ -21,8 +21,9 @@ import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { readShopLive } from '@/lib/shopLiveStore';
-import { isBeforeOpen, isPastLastOrder } from '@/lib/shopTime';
+import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
+import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
 import {
@@ -162,11 +163,15 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'no_storefront' }, { status: 404 });
   }
 
-  // storefront.chain (JPYC slug) → network-aware chainId。forwarder / JPYC 未設定チェーンは
-  // 分割 settle 不可 = 422 unsupported_chain (誤設定を silent に成立させない)。
+  // storefront.chain (JPYC slug) → network-aware chainId。facilitator 対象外、forwarder / JPYC
+  // 未設定チェーンは分割 settle 不可 = 422 unsupported_chain (誤設定を silent に成立させない)。
   const chainId = chainForSlug(record.storefront.chain).id;
   const deployment = resolveDeployment('jpyc', chainId);
-  if (!deployment || configuredJpycForwarderFor(chainId) === null) {
+  if (
+    !x402FacilitatorConfig.supportedChainIds.includes(chainId) ||
+    !deployment ||
+    configuredJpycForwarderFor(chainId) === null
+  ) {
     return NextResponse.json({ error: 'unsupported_chain' }, { status: 422 });
   }
 
@@ -202,6 +207,17 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (
     env.enablePreorderTime &&
     isPastLastOrder(Date.now(), record.storefront.lastOrder)
+  ) {
+    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+  }
+  if (
+    env.enablePreorderTime &&
+    record.storefront.mode === 'preorder' &&
+    pickupSlots(
+      Date.now(),
+      record.storefront.minLeadMinutes,
+      record.storefront.lastOrder,
+    ).length === 0
   ) {
     return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
   }

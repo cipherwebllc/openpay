@@ -19,6 +19,7 @@ import {
 } from '@/lib/relay/relayProvider';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { settleViaForwarder } from '@/lib/relay/forwarderSettleService';
+import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
@@ -31,6 +32,7 @@ import {
   type SignedX402Receipt,
 } from '@/lib/x402/receipt';
 import { recordSettlement } from '@/lib/x402/registry';
+import { consumeFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -121,6 +123,37 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json(
       { success: false, errorReason: ready.reason },
       { status: 503 },
+    );
+  }
+
+  // verify が記録できた補助 reservation を broadcast 前に照合する。既存予約と resource/token
+  // が衝突する場合だけ拒否し、予約不在や KV 障害は従来の冪等・nonce 検証へ委ねる。
+  const rawRecord =
+    typeof raw === 'object' && raw !== null
+      ? (raw as Record<string, unknown>)
+      : {};
+  const reservationToken = rawRecord.reservationToken;
+  let reservation: Awaited<ReturnType<typeof consumeFacilitatorPayment>>;
+  try {
+    reservation = await consumeFacilitatorPayment({
+      raw,
+      chainId,
+      from: params.from,
+      nonce: buildForwarderNonce(
+        params,
+        chainId,
+        configuredJpycForwarderFor(chainId)!,
+      ),
+      reservationToken,
+    });
+  } catch {
+    // 補助 reservation の KV 障害を、既存 settle の冪等・nonce 防御へ波及させない。
+    reservation = { status: 'unavailable' };
+  }
+  if (reservation.status === 'invalid') {
+    return NextResponse.json(
+      { success: false, errorReason: 'reservation_invalid', network, payer },
+      { status: 409 },
     );
   }
 

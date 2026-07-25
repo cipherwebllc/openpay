@@ -7,25 +7,42 @@ import type { Address } from 'viem';
 import { kvGet } from '@/lib/kv';
 import { SESSION_COOKIE, sessionKey, parseSessionRecord } from '@/lib/siwe';
 
-/** cookie のセッショントークン → checksum アドレス。未ログイン/失効は null。 */
-export async function getSessionAddress(): Promise<Address | null> {
+export type SessionReadResult =
+  | { status: 'authenticated'; address: Address }
+  | { status: 'missing' }
+  | { status: 'storage-error' };
+
+/** cookie と KV record を読み、未認証とストレージ障害を区別する。 */
+export async function readSession(): Promise<SessionReadResult> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+  if (!token) return { status: 'missing' };
   const res = await kvGet(sessionKey(token));
-  if (!res.ok) return null;
-  return parseSessionRecord(res.value)?.address ?? null;
+  if (!res.ok) return { status: 'storage-error' };
+  const record = parseSessionRecord(res.value);
+  return record
+    ? { status: 'authenticated', address: record.address }
+    : { status: 'missing' };
 }
 
 export type RequireSessionResult =
   | { ok: true; address: Address }
   | { ok: false; response: NextResponse };
 
-/** 未ログインなら 401 の NextResponse を返す。caller は
+/** 未ログインなら 401、KV 読取障害なら 503 の NextResponse を返す。caller は
  *  `const s = await requireSession(); if (!s.ok) return s.response;` で使う。 */
 export async function requireSession(): Promise<RequireSessionResult> {
-  const address = await getSessionAddress();
-  if (!address) {
+  const session = await readSession();
+  if (session.status === 'storage-error') {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { ok: false, error: 'session_storage_unavailable' },
+        { status: 503 },
+      ),
+    };
+  }
+  if (session.status === 'missing') {
     return {
       ok: false,
       response: NextResponse.json(
@@ -34,5 +51,5 @@ export async function requireSession(): Promise<RequireSessionResult> {
       ),
     };
   }
-  return { ok: true, address };
+  return { ok: true, address: session.address };
 }

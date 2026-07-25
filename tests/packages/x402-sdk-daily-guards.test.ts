@@ -19,7 +19,7 @@ const SDK_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/index.mjs');
 const JPYC = 10n ** 18n;
 const RESOURCE = 'https://open-pay.jp/api/paid/demo';
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
-const FORWARDER = getAddress('0x4444444444444444444444444444444444444444');
+const FORWARDER = getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4');
 const MERCHANT = getAddress('0x2222222222222222222222222222222222222222');
 const FEE_RECEIVER = getAddress('0x3333333333333333333333333333333333333333');
 
@@ -137,11 +137,17 @@ describe('openpay-x402-sdk daily guards', () => {
     expect(
       sdk.parseClientOptions({ maxDailyJpyc: '12.5' }).maxDailyAtomic,
     ).toBe(125n * 10n ** 17n);
+    expect(
+      sdk.parseClientOptions({ maxTimeoutSeconds: 900 }).maxTimeoutSeconds,
+    ).toBe(900);
     expect(() => sdk.readMoneyConfig({ MAX_DAILY_JPYC: 'invalid' })).toThrow(
       'MAX_DAILY_JPYC must be a JPYC decimal with up to 18 decimals',
     );
     expect(() => sdk.parseClientOptions({ maxDailyJpyc: 'invalid' })).toThrow(
       'MAX_DAILY_JPYC must be a JPYC decimal with up to 18 decimals',
+    );
+    expect(() => sdk.parseClientOptions({ maxTimeoutSeconds: 1201 })).toThrow(
+      'maxTimeoutSeconds must be an integer between 1 and 1200',
     );
   });
 });

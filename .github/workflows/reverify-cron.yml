@@ -17,8 +17,8 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "CRON_SECRET secret is not set — skipping (set it in repo secrets to enable hourly reverify)."
-            exit 0
+            echo "::error::CRON_SECRET secret is not set. Hourly reverify cannot run."
+            exit 1
           fi
           code=$(curl -s -o /tmp/out.json -w "%{http_code}" \
             -H "Authorization: Bearer $CRON_SECRET" \

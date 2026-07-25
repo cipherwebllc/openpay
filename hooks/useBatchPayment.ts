@@ -14,9 +14,14 @@
 //   - erc20 mode: 顧客の USDC 出費上限の保護 (Base 1 gwei = 約 1.6 USDC、
 //     spike 時の高額決済を防ぐ)
 import { useMutation } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  encodeAbiParameters,
   encodeFunctionData,
   erc20Abi,
+  isAddress,
+  isHex,
+  keccak256,
   type Address,
   type Hex,
 } from 'viem';
@@ -88,6 +93,279 @@ type BatchPaymentResult = {
   circleVerification?: CircleVerificationStatus;
 };
 
+export const PIMLICO_PENDING_KEY_PREFIX = 'openpay.pimlico.pending.';
+const PIMLICO_PENDING_SCHEMA_VERSION = 1 as const;
+
+type StoredBatchPaymentParams = {
+  tokenAddress: Address;
+  merchant: Address;
+  merchantAmount: string;
+  feeReceiver: Address;
+  feeAmount: string;
+  gasReimbursement?: string;
+  saleAmount?: string;
+  networkFeeEquivalent?: string;
+  extraRecipients?: Array<{ to: Address; amount: string }>;
+};
+
+type PimlicoPendingRecord = {
+  schemaVersion: typeof PIMLICO_PENDING_SCHEMA_VERSION;
+  provider: 'pimlico';
+  status: 'pending' | 'unknown';
+  chainId: number;
+  customer: string;
+  tokenAddress: Address;
+  callFingerprint: Hex;
+  userOpHash: Hex;
+  params: StoredBatchPaymentParams;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type LatchedPimlicoPending = {
+  storageKey: string;
+  record: PimlicoPendingRecord;
+};
+
+/** bundler が UserOp を受理した後、receipt の応答だけを確認できない状態。
+ * relay の RelayResponseUnknownError と同じ `response-unknown` 語彙を使い、通常の
+ * payment error / 新規 UserOp retry と区別する。 */
+export class PimlicoResponseUnknownError extends Error {
+  readonly userOpHash: Hex;
+  readonly callFingerprint: Hex;
+  readonly reason: string;
+
+  constructor(args: {
+    userOpHash: Hex;
+    callFingerprint: Hex;
+    reason: string;
+  }) {
+    super('response-unknown');
+    this.name = 'PimlicoResponseUnknownError';
+    this.userOpHash = args.userOpHash;
+    this.callFingerprint = args.callFingerprint;
+    this.reason = args.reason;
+  }
+}
+
+export function isPimlicoResponseUnknownError(
+  error: unknown,
+): error is PimlicoResponseUnknownError {
+  return error instanceof PimlicoResponseUnknownError;
+}
+
+function pendingStorageKey(args: {
+  chainId: number;
+  customer: Address | undefined;
+  tokenAddress: Address;
+}): string {
+  return (
+    PIMLICO_PENDING_KEY_PREFIX +
+    [
+      args.chainId,
+      args.customer?.toLowerCase() ?? 'disconnected',
+      args.tokenAddress.toLowerCase(),
+    ].join(':')
+  );
+}
+
+function fingerprintTransferCalls(
+  calls: ReadonlyArray<{ to: Address; data: Hex }>,
+): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [
+        {
+          type: 'tuple[]',
+          components: [
+            { name: 'to', type: 'address' },
+            { name: 'data', type: 'bytes' },
+            { name: 'value', type: 'uint256' },
+          ],
+        },
+      ],
+      [
+        calls.map((call) => ({
+          to: call.to,
+          data: call.data,
+          value: 0n,
+        })),
+      ],
+    ),
+  );
+}
+
+function serializeBatchPaymentParams(
+  params: BatchPaymentParams,
+): StoredBatchPaymentParams {
+  return {
+    tokenAddress: params.tokenAddress,
+    merchant: params.merchant,
+    merchantAmount: params.merchantAmount.toString(),
+    feeReceiver: params.feeReceiver,
+    feeAmount: params.feeAmount.toString(),
+    ...(params.gasReimbursement === undefined
+      ? {}
+      : { gasReimbursement: params.gasReimbursement.toString() }),
+    ...(params.saleAmount === undefined
+      ? {}
+      : { saleAmount: params.saleAmount.toString() }),
+    ...(params.networkFeeEquivalent === undefined
+      ? {}
+      : { networkFeeEquivalent: params.networkFeeEquivalent.toString() }),
+    ...(params.extraRecipients === undefined
+      ? {}
+      : {
+          extraRecipients: params.extraRecipients.map((recipient) => ({
+            to: recipient.to,
+            amount: recipient.amount.toString(),
+          })),
+        }),
+  };
+}
+
+function deserializeBatchPaymentParams(
+  params: StoredBatchPaymentParams,
+): BatchPaymentParams {
+  return {
+    tokenAddress: params.tokenAddress,
+    merchant: params.merchant,
+    merchantAmount: BigInt(params.merchantAmount),
+    feeReceiver: params.feeReceiver,
+    feeAmount: BigInt(params.feeAmount),
+    ...(params.gasReimbursement === undefined
+      ? {}
+      : { gasReimbursement: BigInt(params.gasReimbursement) }),
+    ...(params.saleAmount === undefined
+      ? {}
+      : { saleAmount: BigInt(params.saleAmount) }),
+    ...(params.networkFeeEquivalent === undefined
+      ? {}
+      : { networkFeeEquivalent: BigInt(params.networkFeeEquivalent) }),
+    ...(params.extraRecipients === undefined
+      ? {}
+      : {
+          extraRecipients: params.extraRecipients.map((recipient) => ({
+            to: recipient.to,
+            amount: BigInt(recipient.amount),
+          })),
+        }),
+  };
+}
+
+function isDecimal(value: unknown): value is string {
+  return typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value);
+}
+
+function isStoredBatchPaymentParams(
+  value: unknown,
+): value is StoredBatchPaymentParams {
+  if (value === null || typeof value !== 'object') return false;
+  const params = value as Partial<StoredBatchPaymentParams>;
+  if (
+    !isAddress(params.tokenAddress ?? '') ||
+    !isAddress(params.merchant ?? '') ||
+    !isDecimal(params.merchantAmount) ||
+    !isAddress(params.feeReceiver ?? '') ||
+    !isDecimal(params.feeAmount) ||
+    (params.gasReimbursement !== undefined &&
+      !isDecimal(params.gasReimbursement)) ||
+    (params.saleAmount !== undefined && !isDecimal(params.saleAmount)) ||
+    (params.networkFeeEquivalent !== undefined &&
+      !isDecimal(params.networkFeeEquivalent))
+  ) {
+    return false;
+  }
+  return (
+    params.extraRecipients === undefined ||
+    (Array.isArray(params.extraRecipients) &&
+      params.extraRecipients.every(
+        (recipient) =>
+          recipient !== null &&
+          typeof recipient === 'object' &&
+          isAddress(recipient.to) &&
+          isDecimal(recipient.amount),
+      ))
+  );
+}
+
+function isPimlicoPendingRecord(
+  value: unknown,
+): value is PimlicoPendingRecord {
+  if (value === null || typeof value !== 'object') return false;
+  const record = value as Partial<PimlicoPendingRecord>;
+  return (
+    record.schemaVersion === PIMLICO_PENDING_SCHEMA_VERSION &&
+    record.provider === 'pimlico' &&
+    (record.status === 'pending' || record.status === 'unknown') &&
+    typeof record.chainId === 'number' &&
+    Number.isSafeInteger(record.chainId) &&
+    typeof record.customer === 'string' &&
+    isAddress(record.tokenAddress ?? '') &&
+    isHex(record.callFingerprint ?? '', { strict: true }) &&
+    isHex(record.userOpHash ?? '', { strict: true }) &&
+    isStoredBatchPaymentParams(record.params) &&
+    typeof record.createdAt === 'number' &&
+    Number.isFinite(record.createdAt) &&
+    typeof record.updatedAt === 'number' &&
+    Number.isFinite(record.updatedAt)
+  );
+}
+
+function loadPimlicoPending(storageKey: string): PimlicoPendingRecord | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isPimlicoPendingRecord(parsed)) return parsed;
+    logger.warn('pimlico.pending.corrupt-record', { storageKey });
+  } catch (error) {
+    logger.warn('pimlico.pending.load-failed', { storageKey, error });
+  }
+  return null;
+}
+
+function persistPimlicoPending(
+  storageKey: string,
+  record: PimlicoPendingRecord,
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const serialized = JSON.stringify(record);
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) {
+      throw new Error('read-back mismatch');
+    }
+  } catch (error) {
+    // storage 障害を broadcast 済み決済の通常 failure へ波及させず、呼出元 hook の
+    // memory latch は維持する (同一タブでの二重送金防止を失わない)。
+    logger.warn('pimlico.pending.persist-failed', {
+      storageKey,
+      userOpHash: record.userOpHash,
+      error,
+    });
+  }
+}
+
+function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = loadPimlicoPending(storageKey);
+    if (current?.userOpHash === userOpHash) {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch (error) {
+    // confirmed/reverted の本体結果へ localStorage housekeeping 障害を波及させない。
+    // record が残った場合は安全側の unknown latch として次回 receipt 再照会に収束する。
+    logger.warn('pimlico.pending.clear-failed', {
+      storageKey,
+      userOpHash,
+      error,
+    });
+  }
+}
+
 export function useBatchPayment(
   deployment: TokenDeployment,
   enabled: boolean = true,
@@ -101,12 +379,49 @@ export function useBatchPayment(
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
 
-  return useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
+  const pimlicoStorageKey = pendingStorageKey({
+    chainId: chainId ?? deployment.chainId,
+    customer,
+    tokenAddress: deployment.address,
+  });
+  const pendingRef = useRef<LatchedPimlicoPending | null>(null);
+  const [unknownPending, setUnknownPending] =
+    useState<LatchedPimlicoPending | null>(null);
+
+  useEffect(() => {
+    const restored = loadPimlicoPending(pimlicoStorageKey);
+    const latched = restored
+      ? { storageKey: pimlicoStorageKey, record: restored }
+      : null;
+    pendingRef.current = latched;
+    // reload 後は前回の receipt waiter が存在しないため、永続 record は pending/unknown
+    // どちらでも「結果不確定」として復元する。
+    setUnknownPending(latched);
+  }, [pimlicoStorageKey]);
+
+  const mutation = useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
     mutationFn: async (params) => {
       if (!clients) {
         throw new Error(
           'Smart Account がまだ初期化されていません。ウォレット接続とネットワーク選択を確認してください。',
         );
+      }
+
+      const retained =
+        pendingRef.current?.storageKey === pimlicoStorageKey
+          ? pendingRef.current.record
+          : loadPimlicoPending(pimlicoStorageKey);
+      if (retained && clients.provider === 'circle') {
+        // provider が切り替わっても、未解決の Pimlico UserOp から Circle の新規送信へ
+        // 波及させない。Pimlico client が再び利用可能になるまで hash を保持する。
+        const latched = { storageKey: pimlicoStorageKey, record: retained };
+        pendingRef.current = latched;
+        setUnknownPending(latched);
+        throw new PimlicoResponseUnknownError({
+          userOpHash: retained.userOpHash,
+          callFingerprint: retained.callFingerprint,
+          reason: 'pimlico-client-unavailable',
+        });
       }
 
       // provider で exhaustive 分岐 (計画 C6)。Circle は二重決済耐性 FSM
@@ -124,6 +439,84 @@ export function useBatchPayment(
 
       const { smartAccountClient, pimlicoClient } = clients;
 
+      const waitForRetainedReceipt = async (
+        record: PimlicoPendingRecord,
+      ): Promise<BatchPaymentResult> => {
+        let receipt: Awaited<
+          ReturnType<typeof pimlicoClient.waitForUserOperationReceipt>
+        >;
+        try {
+          receipt = await pimlicoClient.waitForUserOperationReceipt({
+            hash: record.userOpHash,
+          });
+        } catch (error) {
+          const unknownRecord: PimlicoPendingRecord = {
+            ...record,
+            status: 'unknown',
+            updatedAt: Date.now(),
+          };
+          const latched = {
+            storageKey: pimlicoStorageKey,
+            record: unknownRecord,
+          };
+          pendingRef.current = latched;
+          setUnknownPending(latched);
+          persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+          logger.warn('pimlico.receipt.response-unknown', {
+            userOpHash: record.userOpHash,
+            callFingerprint: record.callFingerprint,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw new PimlicoResponseUnknownError({
+            userOpHash: record.userOpHash,
+            callFingerprint: record.callFingerprint,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        // success / reverted の receipt 判定は従来どおり。どちらも on-chain 終端なので
+        // unknown latch を解除し、次回の正規決済だけを許可する。
+        clearPimlicoPending(pimlicoStorageKey, record.userOpHash);
+        if (
+          pendingRef.current?.storageKey === pimlicoStorageKey &&
+          pendingRef.current.record.userOpHash === record.userOpHash
+        ) {
+          pendingRef.current = null;
+        }
+        setUnknownPending((current) =>
+          current?.storageKey === pimlicoStorageKey &&
+          current.record.userOpHash === record.userOpHash
+            ? null
+            : current,
+        );
+        return {
+          userOpHash: record.userOpHash,
+          txHash: receipt.receipt.transactionHash,
+          blockNumber: receipt.receipt.blockNumber,
+          success: receipt.success,
+          actualGasCost: receipt.actualGasCost,
+          provider: 'pimlico' as const,
+        };
+      };
+
+      if (retained) {
+        const calls = buildTransferCalls(params);
+        const callFingerprint = fingerprintTransferCalls(calls);
+        const latched = { storageKey: pimlicoStorageKey, record: retained };
+        pendingRef.current = latched;
+        setUnknownPending(latched);
+        if (callFingerprint !== retained.callFingerprint) {
+          // 別 payment intent への再署名・broadcast を未解決 UserOp から遮断する。
+          // 許可する network action は retained.userOpHash の receipt read だけ。
+          throw new PimlicoResponseUnknownError({
+            userOpHash: retained.userOpHash,
+            callFingerprint: retained.callFingerprint,
+            reason: 'call-fingerprint-mismatch',
+          });
+        }
+        return waitForRetainedReceipt(retained);
+      }
+
       // JPYC ガス無料化 (2026-06-05): JPYC sponsorship のガス代立替回収を全廃したため、
       // 旧「feeReceiver 集約額 > 0 必須」の濫用防御ガードは撤去 (OpenPay が JPYC gas を
       // 全額負担する設計に変更)。paymaster の濫用対策は Pimlico policy 制限と relayer/
@@ -139,19 +532,30 @@ export function useBatchPayment(
       const calls = buildTransferCalls(params);
 
       const userOpHash = await smartAccountClient.sendUserOperation({ calls });
-
-      const receipt = await pimlicoClient.waitForUserOperationReceipt({
-        hash: userOpHash,
-      });
-
-      return {
+      const now = Date.now();
+      const pendingRecord: PimlicoPendingRecord = {
+        schemaVersion: PIMLICO_PENDING_SCHEMA_VERSION,
+        provider: 'pimlico',
+        status: 'pending',
+        chainId: chainId ?? deployment.chainId,
+        customer: customer?.toLowerCase() ?? 'disconnected',
+        tokenAddress: params.tokenAddress,
+        callFingerprint: fingerprintTransferCalls(calls),
         userOpHash,
-        txHash: receipt.receipt.transactionHash,
-        blockNumber: receipt.receipt.blockNumber,
-        success: receipt.success,
-        actualGasCost: receipt.actualGasCost,
-        provider: 'pimlico' as const,
+        params: serializeBatchPaymentParams(params),
+        createdAt: now,
+        updatedAt: now,
       };
+      // sendUserOperation が hash を返した時点で、receipt RPC とは独立に復旧 handle を
+      // 耐久化する。storage 障害は broadcast 済み決済を通常 error に変えず、同一タブの
+      // memory latch を残して二重送金への波及を止める。
+      pendingRef.current = {
+        storageKey: pimlicoStorageKey,
+        record: pendingRecord,
+      };
+      persistPimlicoPending(pimlicoStorageKey, pendingRecord);
+
+      return waitForRetainedReceipt(pendingRecord);
     },
     onSuccess: (data, params) => {
       void logPaymentEvent(
@@ -185,7 +589,8 @@ export function useBatchPayment(
       // userOpHash と provider を監査に残し、未 retry でも submitted op を追跡可能にする。
       // circleSend を静的 import しないよう (bundle budget) instanceof でなく name で判定。
       const pending =
-        error.name === 'CirclePendingError'
+        error.name === 'CirclePendingError' ||
+        error.name === 'PimlicoResponseUnknownError'
           ? (error as Error & { userOpHash?: Hex })
           : undefined;
       const ctx = toCtx(params, customer, chainId, deployment);
@@ -199,6 +604,30 @@ export function useBatchPayment(
       );
     },
   });
+
+  const retryReceipt = useCallback(() => {
+    const retained =
+      pendingRef.current?.storageKey === pimlicoStorageKey
+        ? pendingRef.current.record
+        : null;
+    if (!retained || mutation.isPending) return;
+    mutation.mutate(deserializeBatchPaymentParams(retained.params));
+  }, [mutation, pimlicoStorageKey]);
+
+  const activeUnknown =
+    unknownPending?.storageKey === pimlicoStorageKey
+      ? unknownPending.record
+      : null;
+
+  return {
+    ...mutation,
+    // response-unknown を通常 failure として履歴/汎用 error UI へ流さない。フォームは
+    // isUnknown を relayAmbiguous と同じ pending/unknown 表示へ束ねる。
+    error: activeUnknown ? null : mutation.error,
+    isUnknown: activeUnknown !== null,
+    pendingUserOpHash: activeUnknown?.userOpHash,
+    retryReceipt,
+  };
 }
 
 // merchant (+split +fee) への ERC20 transfer calls を組む。両 provider で共有。

@@ -27,6 +27,7 @@ export function MobileOrderCartBar({
   lastOrder,
   checkoutUrl,
   checkoutPending,
+  onCheckout,
 }: {
   /** /checkout の上限 (10 品) 超過。true で明細/支払いを止めて明示する。 */
   tooMany: boolean;
@@ -63,6 +64,8 @@ export function MobileOrderCartBar({
   checkoutUrl: string;
   /** 受付番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
   checkoutPending: boolean;
+  /** @handle 注文の server admission を通してから /checkout へ進む。 */
+  onCheckout?: React.MouseEventHandler<HTMLAnchorElement>;
 }) {
   const t = useTranslations('MobileOrder');
   // テーブル番号入力に触れた (blur した) か。触れる前から警告色 (amber) で案内すると
@@ -217,6 +220,7 @@ export function MobileOrderCartBar({
             ) : (
               <a
                 href={checkoutUrl}
+                onClick={onCheckout}
                 className="block rounded-xl bg-[var(--mo-accent)] px-4 py-3 text-center text-sm font-semibold text-[var(--mo-accent-ink)] hover:brightness-95"
               >
                 {t('payButton')}

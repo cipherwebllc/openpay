@@ -3,6 +3,8 @@ export * from './client.mjs';
 export * from './executor.mjs';
 export * from './gate.mjs';
 export * from './guards.mjs';
+export * from './network.mjs';
 export * from './payment.mjs';
+export * from './receipt.mjs';
 export * from './signer.mjs';
 export * from './spendStore.mjs';

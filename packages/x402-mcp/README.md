@@ -201,14 +201,15 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `STEWARD_SIGNER_ID` | unset | Required when `SIGNER_MODE=steward`; scoped signer id with typed-data signing permission. |
 | `STEWARD_SIGNER_SECRET` | unset | Required when `SIGNER_MODE=steward`; scoped signer secret. Treated as a secret. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
-| `MAX_SESSION_JPYC` | `100` | Process-lifetime cumulative cap for successful `x402_pay` calls. Restarting the process resets it. |
-| `MAX_DAILY_JPYC` | unset | Optional per-UTC-day cumulative cap that **survives restarts**. Spend is persisted to `~/.openpay-x402/spend.json`, keyed by signer address and UTC date (older days are pruned). If the store cannot be read the payment is refused (fail-closed); a store write failure after a successful unlock never alters the payment response. Unset disables the daily cap (previous behavior). |
-| `CATALOG_TRUST` | `true` | When true, URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
+| `MAX_SESSION_JPYC` | `100` | Process-lifetime cap for successful payments plus signed authorizations exposed to a seller. A non-2xx response or timeout keeps its reservation. Restarting the process resets this cap. |
+| `MAX_DAILY_JPYC` | unset | Optional per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json`. Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
+| `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
+| `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 
-Query string variants of a query-free listed URL are trusted after the same
-money-field verification; query-bearing catalog entries remain exact-only.
+Catalog admission is exact URL only, including the query string. A query
+variant needs its own reviewed listing or an explicitly allowlisted host.
 
 ## Signer Modes
 
@@ -275,7 +276,18 @@ requesting a signature.
 
 ## Money Safety
 
-`x402_pay` refuses to sign unless the endpoint host is allowed, the x402 `accepts[0]` entry is an OpenPay `forwarder-split` JPYC challenge, the resource URL matches the requested URL, the caller's `maxTotalJpyc` is high enough but not above `MAX_PER_CALL_JPYC`, and the process cumulative spend remains within `MAX_SESSION_JPYC`. With `MAX_DAILY_JPYC` set, the day's persisted spend must also stay within the daily cap.
+`x402_pay` refuses to sign unless the endpoint uses HTTPS, its host is allowed, the x402 `accepts[0]` entry is an OpenPay `forwarder-split` JPYC challenge, the resource URL matches the requested URL, the caller's `maxTotalJpyc` is high enough but not above `MAX_PER_CALL_JPYC`, and successful plus exposed authorizations remain within `MAX_SESSION_JPYC`. With `MAX_DAILY_JPYC` set, an atomic pre-send reservation must also fit the daily cap. Host/catalog admission and private-address checks happen before target fetches; the default Node transport checks DNS again when connecting, redirects are not followed, and buyer requests have a timeout.
+
+The built-in daily store fails closed if an abrupt stop leaves
+`~/.openpay-x402/spend.json.lock`. Stop every MCP process using that wallet
+before inspecting and manually removing a stale lock; never remove a lock that
+another process may still own.
+
+`x402_pay` returns a non-null receipt only after verifying the facilitator
+signature advertised by `/api/facilitator/supported` and binding the receipt to
+this payment's transaction, payer, network, asset, split amounts, chain, and
+nonce. Missing, forged, or mismatched seller headers become `receipt: null`
+without hiding the unlocked body.
 
 The server never logs or returns your private key, Steward API key, or Steward signer secret. It also does not return the payment authorization signature; the signature is only placed in the `X-PAYMENT` header required by the x402 retry.
 

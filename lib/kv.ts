@@ -84,7 +84,34 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
   }
 }
 
-export function kvLpush(key: string, value: string): Promise<KvResult<number>> {
+type KvLpushAtomicOptions = {
+  trimStart: number;
+  trimStop: number;
+  ttlSec: number;
+};
+
+const LPUSH_TRIM_EXPIRE = `
+local length = redis.call('LPUSH', KEYS[1], ARGV[1])
+redis.call('LTRIM', KEYS[1], ARGV[2], ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return length
+`;
+
+// opts 指定時は list 更新と TTL を同じ EVAL に閉じる。LPUSH だけ成功して TTL が欠落し、
+// 利用者ごとの一時キーが KV に永久残存する波及を断つ。
+export function kvLpush(
+  key: string,
+  value: string,
+  opts?: KvLpushAtomicOptions,
+): Promise<KvResult<number>> {
+  if (opts) {
+    return kvEval<number>(LPUSH_TRIM_EXPIRE, [key], [
+      value,
+      String(opts.trimStart),
+      String(opts.trimStop),
+      String(opts.ttlSec),
+    ]);
+  }
   return call<number>(['LPUSH', key, value]);
 }
 
@@ -127,8 +154,31 @@ export function kvEval<T = unknown>(
 
 // --- Phase B hardening 用の原子プリミティブ (nonce 採番 / idempotency / gas budget) ---
 
-// 原子インクリメント (採番カウンタ・gas budget)。初回は 1。
-export function kvIncr(key: string): Promise<KvResult<number>> {
+type KvIncrAtomicOptions = {
+  initialTtlSec: number;
+};
+
+const INCR_EXPIRE_ON_FIRST = `
+local count = redis.call('INCR', KEYS[1])
+local ttl = redis.call('TTL', KEYS[1])
+if count == 1 or ttl < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`;
+
+// 原子インクリメント (採番カウンタ・gas budget)。初回は 1。opts 指定時は初回 TTL も同じ
+// EVAL に閉じる。旧実装で既に TTL を失った counter も検知して期限を張り直し、後続リクエストを
+// 恒久拒否する波及を断つ。期限が在る通常キーは延長しないため、固定窓の意味論は維持する。
+export function kvIncr(
+  key: string,
+  opts?: KvIncrAtomicOptions,
+): Promise<KvResult<number>> {
+  if (opts) {
+    return kvEval<number>(INCR_EXPIRE_ON_FIRST, [key], [
+      String(opts.initialTtlSec),
+    ]);
+  }
   return call<number>(['INCR', key]);
 }
 
