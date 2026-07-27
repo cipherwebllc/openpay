@@ -84,7 +84,7 @@
     "faqQ2": "Can I receive both JPYC and USDC?",
     "faqA2": "Both are supported: JPYC for JPY-denominated receipts, USDC for Web3 or international customers. JPYC supports Polygon / Kaia / Avalanche / Ethereum (standard mode only on Ethereum); USDC supports Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche. Choose in the QR builder; Circle CCTP V2 handles other source chains.",
     "faqQ3": "What if the customer has no wallet?",
-    "faqA3": "Suggest MetaMask or Rabby, or MetaMask Mobile / Rainbow / Coinbase Wallet on mobile. EIP-6963 detects multiple wallets.",
+    "faqA3": "Suggest MetaMask or Rabby, or HashPort Wallet / Myna Wallet / MetaMask Mobile on mobile. EIP-6963 detects multiple wallets.",
     "faqQ4": "How do I convert JPYC / USDC to JPY?",
     "faqA4": "Redeem JPYC 1:1 at <jpycEx>JPYC EX</jpycEx>, or sell USDC via SBI VC Trade and other Japanese exchanges. Links are on the <create>Receive</create> page.",
     "faqQ5": "Where is transaction history stored?",
