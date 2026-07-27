@@ -107,6 +107,9 @@ export async function GET(): Promise<NextResponse> {
         {
           resource: firstPartyResourceUrl(r),
           description: r.description,
+          // エージェントが「いつ・何のために買うか」を仕様より先に判断できるようにする
+          // (未設定の商品では省く)。
+          ...(r.trigger ? { trigger: r.trigger } : {}),
           category: r.category,
           priceJpyc: r.priceJpyc,
           docsUrl: r.docsUrl,

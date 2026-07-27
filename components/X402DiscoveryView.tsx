@@ -26,6 +26,8 @@ import {
   Wallet,
   CheckCircle2,
   AlertTriangle,
+  Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
@@ -44,6 +46,8 @@ function categoryIcon(category: string) {
 type DiscoveryItem = {
   resource: string;
   description: string;
+  /** 「いつ・何のために買うか」(英語・任意)。未設定なら表示しない。 */
+  trigger?: string;
   category: string;
   priceJpyc: string;
   docsUrl?: string;
@@ -492,6 +496,8 @@ export function X402DiscoveryView({
     category: string;
     priceNode: ReactNode;
     description: string;
+    /** 購入トリガー (任意)。説明より前に出し、エージェントが仕様を読む前に判断できるようにする。 */
+    trigger?: string;
     url: string;
     copyKey: string;
     official?: boolean;
@@ -516,6 +522,12 @@ export function X402DiscoveryView({
           </div>
           {opts.priceNode}
         </div>
+        {opts.trigger && (
+          <p className="mt-2 flex items-start gap-1.5 text-sm font-semibold leading-snug text-brand-dark">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{opts.trigger}</span>
+          </p>
+        )}
         <p className="mt-2 text-sm font-bold leading-snug text-slate-900">
           {opts.description}
         </p>
@@ -950,6 +962,39 @@ export function X402DiscoveryView({
       <section>
         <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
         <p className="mt-1 text-sm text-slate-500">{t('catalogSubtitle')}</p>
+        {/* 自律購入で買い手が最初に知りたいのは「暴走しないか」。カタログを見る前に、
+            SDK 側が実施するガードを明示する。実装済みの事実だけを書き、売り手のあらゆる
+            挙動を防ぐ保証とは書かない (誇大な安全表現を作らない)。 */}
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
+            {t('guardsTitle')}
+          </p>
+          <p className="mt-1 text-xs text-slate-600">{t('guardsIntro')}</p>
+          <ul className="mt-2 space-y-1">
+            {[
+              t('guardsLimit'),
+              t('guardsMatch'),
+              t('guardsResource'),
+              t('guardsReceipt'),
+              t('guardsUnlock'),
+            ].map((line) => (
+              <li
+                key={line}
+                className="flex items-start gap-1.5 text-xs leading-relaxed text-slate-700"
+              >
+                <CheckCircle2
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600"
+                  aria-hidden
+                />
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+            {t('guardsNote')}
+          </p>
+        </div>
         {!loading && items.length > 0 && (
           <div className="mt-4 space-y-3 rounded-2xl bg-white p-3 shadow-card ring-1 ring-slate-200/70 sm:p-4">
             <label className="block">
@@ -1074,6 +1119,7 @@ export function X402DiscoveryView({
                       </div>
                     ),
                     description: item.description,
+                    trigger: item.trigger,
                     url: item.resource,
                     copyKey: `cat-${item.resource}`,
                     official: item.official === true,

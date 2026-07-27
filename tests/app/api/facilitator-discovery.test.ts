@@ -849,6 +849,7 @@ describe('x402 /discovery', () => {
         docsUrl: string;
         license: string;
         official: true;
+        trigger?: string;
         accepts: Array<{ extra: { openpay: { merchant: string; merchantValue: string; feeValue: string } } }>;
       }>;
     };
@@ -868,6 +869,10 @@ describe('x402 /discovery', () => {
     expect(body.items[0].accepts[0].extra.openpay.feeValue).toBe(
       (2n * 10n ** 18n).toString(),
     );
+    // 「いつ・何のために買うか」を仕様より先に判断できるよう、first-party は全件 trigger を持つ。
+    // description が「何であるか」なのに対し trigger は「どの状況で必要か」を書く欄で、
+    // 落とすとエージェントは仕様全文を読むまで購入可否を判断できない。
+    expect(body.items.every((item) => (item.trigger ?? '').length > 0)).toBe(true);
   });
 
   it('予約 origin 拒否前の registry record は first-party item と重複掲載しない', async () => {
