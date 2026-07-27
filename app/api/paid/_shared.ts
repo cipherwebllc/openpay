@@ -223,7 +223,35 @@ function paymentChallenge(
   }
 }
 
+/**
+ * x402 の有料エンドポイントは共有キャッシュに載せない。
+ *
+ * 402 チャレンジは支払い条件 (payTo / 金額 / forwarder / commitVersion) を、200 は購入者だけが
+ * 受け取るべき有料コンテンツを含む。Next.js 既定の `public, max-age=0, must-revalidate` は
+ * **共有キャッシュ (CDN / プロキシ) への保存を許可**してしまう (本番実測 2026-07-27)。
+ *
+ * 何の波及を断つ防御か (掟13): ①条件変更後も古い支払い条件が配布され、買い手が旧 payTo /
+ * 旧価格で払う ②URL だけを鍵にしたキャッシュが、未払いリクエストへ有料コンテンツを返す。
+ * `Vary` に X-PAYMENT が無い以上、no-store で塞ぐのが確実。
+ */
+function noStore(res: NextResponse): NextResponse {
+  res.headers.set('Cache-Control', 'no-store');
+  return res;
+}
+
+/**
+ * ハンドラの出口で一律 no-store を被せる。分岐が 20 以上あり、個々の return に付けると
+ * 新しい分岐を足したときに漏れるため、境界 1 箇所で保証する。
+ */
 export async function handleFirstPartyPaidGet(
+  req: Request,
+  resource: FirstPartyResource,
+  content: PaidContent,
+): Promise<NextResponse> {
+  return noStore(await handleFirstPartyPaidGetInner(req, resource, content));
+}
+
+async function handleFirstPartyPaidGetInner(
   req: Request,
   resource: FirstPartyResource,
   content: PaidContent,

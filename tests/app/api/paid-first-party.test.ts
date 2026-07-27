@@ -188,6 +188,31 @@ describe('first-party paid x402 routes', () => {
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
+  // 402 は支払い条件 (payTo/金額/forwarder)、200 は購入者だけが受け取る有料コンテンツを含む。
+  // Next.js 既定は `public, max-age=0, must-revalidate` で共有キャッシュへの保存を許可して
+  // しまうため、ハンドラ出口で no-store を被せている。分岐追加時の付け忘れをここで固定する。
+  it('402 / 200 とも Cache-Control: no-store (共有キャッシュへ載せない)', async () => {
+    const { demo } = await load();
+    const challenge = await demo.GET(req('/api/paid/demo'));
+    expect(challenge.status).toBe(402);
+    expect(challenge.headers.get('cache-control')).toBe('no-store');
+
+    routeMocks.verify.mockResolvedValue(
+      NextResponse.json({ isValid: true, payer: PAYER }),
+    );
+    routeMocks.settle.mockImplementation(async () =>
+      NextResponse.json({
+        success: true,
+        transaction: TX_HASH,
+        network: 'eip155:80002',
+        payer: PAYER,
+      }),
+    );
+    const paid = await demo.GET(req('/api/paid/demo', paymentHeader()));
+    expect(paid.status).toBe(200);
+    expect(paid.headers.get('cache-control')).toBe('no-store');
+  });
+
   it('不正 X-PAYMENT → 402', async () => {
     const { demo } = await load();
     const res = await demo.GET(req('/api/paid/demo', 'not-json'));
