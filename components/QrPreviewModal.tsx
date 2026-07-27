@@ -13,8 +13,13 @@ import { QRCodeSVG } from 'qrcode.react';
 import { CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
 import NextImage from 'next/image';
 import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
+import { QR_CENTER_MARK, QR_CENTER_MARK_RATIO } from '@/lib/qrCenterMark';
 import type { TokenSymbol } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
+
+// QR の描画サイズと、中央マークの一辺 (読取性のため比率は QR_CENTER_MARK_RATIO を上限)。
+const QR_SIZE = 260;
+const QR_MARK_SIZE = Math.round(QR_SIZE * QR_CENTER_MARK_RATIO);
 
 export type QrPreviewModalLabels = {
   title: string;
@@ -29,8 +34,6 @@ export type QrPreviewModalLabels = {
   /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
    *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
   localGenNote?: string;
-  /** JPYC の視覚アンカー pill 文言 (例: 「1 JPYC = ¥1」)。asset=jpyc 時のみ使用。 */
-  pegPill?: string;
   /** ポスター読者 (顧客) 向け 3 ステップ行の文言 (①スキャン ②確認 ③完了)。
    *  asset 指定 + 3 つ揃ったときのみポスターに描画 (印刷でも表示)。 */
   step1?: string;
@@ -163,67 +166,77 @@ export function QrPreviewModal({
             <h3 className="mt-2 break-keep text-2xl font-bold text-slate-900 print:text-4xl">
               {storeName}
             </h3>
-            <p className="mt-2 text-sm text-slate-500 print:text-xl">
-              {amountText}
-            </p>
-            {/* トークン識別行 (asset 指定時): 大きめの token ロゴ + トークン名。
-                JPYC は「1 JPYC = ¥1」pill を視覚アンカーとして添える。白黒印刷でも
-                高コントラストで成立させる (色に意味を依存させない)。 */}
-            {asset && (
-              <div className="mt-3 flex items-center justify-center gap-2">
+            {/* 金額ヒーロー: 顧客が最初に確認するのは「いくら払うか」なので、token ロゴ +
+                金額を最大の要素にする (従来は小さな灰色行 + 別行のトークン名で、金額が
+                埋もれていた)。amountText は symbol を含む (例「500 JPYC」) ため、
+                トークン名を別途重ねて出さない。 */}
+            <div className="mt-3 flex items-center justify-center gap-2.5 print:mt-4 print:gap-4">
+              {asset && (
                 <TokenLogo
                   symbol={asset.tokenSymbol}
-                  size={28}
+                  size={36}
                   alt=""
-                  className="h-7 w-7 shrink-0 print:h-10 print:w-10"
+                  className="h-9 w-9 shrink-0 print:h-14 print:w-14"
                 />
-                <span className="text-lg font-bold text-slate-900 print:text-3xl">
-                  {asset.tokenSymbol.toUpperCase()}
-                </span>
-                {asset.tokenSymbol === 'jpyc' && labels.pegPill && (
-                  <span className="rounded-full border border-slate-900 px-2 py-0.5 text-xs font-semibold text-slate-900 print:px-3 print:py-1 print:text-lg">
-                    {labels.pegPill}
-                  </span>
-                )}
-              </div>
-            )}
-            {payModeBadge && (
-              <p
-                className={`mt-3 inline-block rounded-full border px-3 py-1 text-xs font-semibold print:px-4 print:py-1.5 print:text-base ${
-                  payModeBadge.tone === 'gasless'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                }`}
-              >
-                {payModeBadge.text}
+              )}
+              <p className="break-keep text-3xl font-bold tracking-tight text-slate-900 print:text-5xl">
+                {amountText}
               </p>
-            )}
+            </div>
+            {/* チェーン + 決済モードを 1 行に束ねる (どちらも「どう払うか」の属性で、
+                別行に散らすと視線が余計に往復する)。asset 未指定の呼び出し元は従来どおり
+                mono テキストで chain を出す。 */}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 print:mt-4 print:gap-3">
+              {asset ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 print:px-4 print:py-1.5 print:text-lg">
+                  <ChainLogo
+                    slug={asset.chainSlug as ChainSlug}
+                    size={16}
+                    alt=""
+                    className="h-4 w-4 shrink-0 print:h-6 print:w-6"
+                  />
+                  {asset.chainLabel}
+                </span>
+              ) : (
+                <span className="font-mono text-xs text-slate-500 print:text-base">
+                  {chainText}
+                </span>
+              )}
+              {payModeBadge && (
+                <span
+                  className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold print:px-4 print:py-1.5 print:text-lg ${
+                    payModeBadge.tone === 'gasless'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-amber-200 bg-amber-50 text-amber-700'
+                  }`}
+                >
+                  {payModeBadge.text}
+                </span>
+              )}
+            </div>
             <div
               ref={qrRef}
               className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-6 print:p-6"
             >
-              <QRCodeSVG value={qrValue} size={260} includeMargin level="M" />
+              {/* 中央に OpenPay マークを置く (ブランド認知 + 「読んでよい QR か」の判断材料)。
+                  マークで欠ける分の冗長性を確保するため level は 'H' (30% 誤り訂正) 固定。
+                  マークは data URI (lib/qrCenterMark) — 外部参照だと PNG 保存で消える。 */}
+              <QRCodeSVG
+                value={qrValue}
+                size={QR_SIZE}
+                includeMargin
+                level="H"
+                imageSettings={{
+                  src: QR_CENTER_MARK,
+                  height: QR_MARK_SIZE,
+                  width: QR_MARK_SIZE,
+                  excavate: true,
+                }}
+              />
             </div>
             {note && (
               <p className="mt-4 text-sm font-medium text-slate-700 print:text-xl">
                 {note}
-              </p>
-            )}
-            {/* チェーン表示: asset 指定時は chain ロゴ + ラベルの pill (顧客が
-                一目で分かる)。asset 未指定は従来の mono テキストを維持 (レジ非破壊)。 */}
-            {asset ? (
-              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 print:px-4 print:py-1.5 print:text-lg">
-                <ChainLogo
-                  slug={asset.chainSlug as ChainSlug}
-                  size={16}
-                  alt=""
-                  className="h-4 w-4 shrink-0 print:h-6 print:w-6"
-                />
-                {asset.chainLabel}
-              </span>
-            ) : (
-              <p className="mt-3 font-mono text-xs text-slate-500 print:text-base">
-                {chainText}
               </p>
             )}
             {/* 3 ステップ行 (asset + step 文言が揃ったとき・印刷でも表示)。

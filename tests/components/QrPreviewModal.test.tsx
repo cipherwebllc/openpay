@@ -7,7 +7,7 @@ import { QrPreviewModal } from '@/components/QrPreviewModal';
 const LABELS = {
   title: '決済用 QR コード',
   close: '閉じる',
-  eyebrow: 'OpenPay 決済 QR',
+  eyebrow: 'OpenPay ステーブルコイン決済 QR',
   print: '印刷',
   copy: 'URLをコピー',
   copied: 'コピー済み',
@@ -181,20 +181,21 @@ describe('QrPreviewModal', () => {
 
   const ASSET_LABELS = {
     ...LABELS,
-    pegPill: '1 JPYC = ¥1',
     step1: 'スマホでスキャン',
     step2: '金額を確認',
     step3: 'お支払い完了',
   };
 
-  it('asset (jpyc) 指定でトークン識別行 / peg pill / chain バッジ / 3 ステップ / ロゴを描画し mono chainText は出さない', () => {
+  it('asset (jpyc) 指定で金額ヒーロー / chain バッジ / 3 ステップ / ロゴを描画し mono chainText・peg pill は出さない', () => {
     renderModal({
       labels: ASSET_LABELS,
       asset: { tokenSymbol: 'jpyc', chainSlug: 'polygon', chainLabel: 'Polygon' },
     });
-    // トークン識別行 (トークン名 + peg pill)
-    expect(screen.getByText('JPYC')).toBeInTheDocument();
-    expect(screen.getByText('1 JPYC = ¥1')).toBeInTheDocument();
+    // 金額ヒーローがトークン識別を兼ねる (amountText に symbol を含む)。
+    // 旧デザインのトークン名だけの独立行と peg pill は廃止 (JPYC で払う顧客には自明で、
+    // 金額から視線を逸らすため・user 裁定 2026-07-26)。
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    expect(screen.queryByText('1 JPYC = ¥1')).toBeNull();
     // chain バッジ (ラベル) — mono の "JPYC · Polygon" は出さない
     expect(screen.getByText('Polygon')).toBeInTheDocument();
     expect(screen.queryByText('JPYC · Polygon')).toBeNull();
@@ -206,13 +207,14 @@ describe('QrPreviewModal', () => {
     expect(screen.getByAltText('OpenPay')).toBeInTheDocument();
   });
 
-  it('asset (usdc) では peg pill を出さない (JPYC 限定) がトークン名 / chain バッジは出す', () => {
+  it('asset (usdc) でも金額 / chain バッジを出す (peg pill は全トークンで非表示)', () => {
     renderModal({
       labels: ASSET_LABELS,
       chainText: 'USDC · Base',
       asset: { tokenSymbol: 'usdc', chainSlug: 'base', chainLabel: 'Base' },
     });
-    expect(screen.getByText('USDC')).toBeInTheDocument();
+    // 金額ヒーローが symbol を含む (BASE_PROPS の amountText)。
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
     expect(screen.queryByText('1 JPYC = ¥1')).toBeNull();
     expect(screen.getByText('Base')).toBeInTheDocument();
     expect(screen.queryByText('USDC · Base')).toBeNull();

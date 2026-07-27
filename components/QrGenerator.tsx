@@ -1139,7 +1139,6 @@ export function QrGenerator() {
             downloadSvg: t('downloadSvg'),
             downloadPng: t('downloadPng'),
             localGenNote: t('localGenNote'),
-            pegPill: t('posterPegPill'),
             step1: t('posterStepScan'),
             step2: t('posterStepConfirm'),
             step3: t('posterStepDone'),

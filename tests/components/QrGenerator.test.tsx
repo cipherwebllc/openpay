@@ -2049,7 +2049,7 @@ describe('QrGenerator', () => {
       // 受取 chain (Arbitrum 系) が伝播していることを確認する。
       await waitFor(() => {
         const dialog = within(screen.getByRole('dialog'));
-        expect(dialog.getByText('USDC')).toBeInTheDocument();
+        expect(dialog.getByText(/USDC/)).toBeInTheDocument();
         expect(dialog.getByText(/Arbitrum/)).toBeInTheDocument();
       });
     });
@@ -2092,7 +2092,7 @@ describe('QrGenerator', () => {
       // JPYC は単一 chain バッジ (Polygon)・token 名 JPYC が伝播
       await waitFor(() => {
         const dialog = within(screen.getByRole('dialog'));
-        expect(dialog.getByText('JPYC')).toBeInTheDocument();
+        expect(dialog.getByText(/JPYC/)).toBeInTheDocument();
         expect(dialog.getByText(/Polygon/)).toBeInTheDocument();
       });
     });
@@ -2123,7 +2123,7 @@ describe('QrGenerator', () => {
       // (mainnet env)、どちらも Kai... で始まる。token 名 JPYC も伝播。
       await waitFor(() => {
         const dialog = within(screen.getByRole('dialog'));
-        expect(dialog.getByText('JPYC')).toBeInTheDocument();
+        expect(dialog.getByText(/JPYC/)).toBeInTheDocument();
         expect(dialog.getByText(/Kai/)).toBeInTheDocument();
       });
     });
@@ -2240,13 +2240,13 @@ describe('QrGenerator', () => {
       await openQrModal(user);
       await waitFor(() => {
         const dialog = within(screen.getByRole('dialog'));
-        expect(dialog.getByText('JPYC')).toBeInTheDocument();
+        expect(dialog.getByText(/JPYC/)).toBeInTheDocument();
         expect(dialog.getByText(/Polygon/)).toBeInTheDocument();
       });
       await user.click(screen.getByRole('button', { name: /^USDC$/ }));
       await waitFor(() => {
         const dialog = within(screen.getByRole('dialog'));
-        expect(dialog.getByText('USDC')).toBeInTheDocument();
+        expect(dialog.getByText(/USDC/)).toBeInTheDocument();
         expect(dialog.getByText(/Base/)).toBeInTheDocument();
       });
     });
