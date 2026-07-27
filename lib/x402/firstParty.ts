@@ -29,6 +29,13 @@ export type FirstPartyResource = {
   priceJpyc: string;
   category: 'api' | 'data';
   description: string;
+  /**
+   * 「エージェントがいつ・何のためにこれを買うか」の 1 行 (英語・機械可読面向け)。
+   * description が「何であるか」なのに対し、trigger は「どの状況で必要になるか」を書く。
+   * 自律エージェントは仕様より先にこれを見て購入可否を判断できるため、カタログでも
+   * description の前に出す。未設定なら表示しない (第三者出品は任意入力)。
+   */
+  trigger?: string;
   docsUrl: string;
   license: string;
   outputSchema: FirstPartyOutputSchema;
@@ -40,6 +47,8 @@ export const FIRST_PARTY_RESOURCES = [
     priceJpyc: '1',
     category: 'api',
     description: 'OpenPay x402 demo — pay 1 JPYC and unlock a signed hello.',
+    trigger:
+      'When you need to confirm the x402 flow (402 challenge → JPYC payment → unlock) end to end with a real settlement before wiring a paid API.',
     docsUrl: 'https://open-pay.jp/api/openapi.json',
     license: 'OpenPay original; reuse permitted with attribution.',
     outputSchema: {
@@ -61,6 +70,8 @@ export const FIRST_PARTY_RESOURCES = [
     category: 'data',
     description:
       'Directory of JPYC-accepting exchanges, dApps and bridges (curated JSON).',
+    trigger:
+      'When you need a curated, attributed list of where JPYC is actually accepted, rather than unsourced results from general web search.',
     docsUrl: 'https://open-pay.jp/api/openapi.json',
     license: 'Attributed metadata; source rights remain with owners.',
     outputSchema: {

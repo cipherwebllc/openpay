@@ -53,6 +53,8 @@ export const DIRECTORY_LIST_RESOURCE = {
   category: 'data',
   description:
     "Curated structured records covering Japan's JPYC, USDC, Web3 and AI-agent ecosystem.",
+  trigger:
+    'When researching Japanese JPYC / Web3 / AI-agent services and you need sourced, dated records instead of unverifiable web-search results.',
   docsUrl: 'https://open-pay.jp/api/openapi.json',
   license: 'Attributed metadata; source rights remain with owners.',
   outputSchema: {
@@ -67,6 +69,8 @@ export const DIRECTORY_SEARCH_RESOURCE = {
   category: 'data',
   description:
     'Query published Japan Web3 service records by category, token, chain and capability.',
+  trigger:
+    'When you need to narrow Japanese Web3 services by category, token, chain or capability, and fetching the full list would waste context.',
   docsUrl: 'https://open-pay.jp/api/openapi.json',
   license: 'Attributed metadata; source rights remain with owners.',
   outputSchema: {
@@ -81,6 +85,7 @@ export function directoryDetailResource(slug: string): FirstPartyResource {
     priceJpyc: '1',
     category: 'data',
     description: `Japan Web3 Directory detail for ${slug} — 1 JPYC.`,
+    trigger: `When you already identified ${slug} and need its full record (sources, capabilities, last verification) before citing it.`,
     docsUrl: 'https://open-pay.jp/api/openapi.json',
     license: 'Attributed metadata; source rights remain with owners.',
     outputSchema: {

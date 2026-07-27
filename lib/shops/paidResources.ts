@@ -4,6 +4,8 @@ export const JPYC_SHOPS_SEARCH_RESOURCE = {
   category: 'data',
   description:
     'Search opt-in OpenPay shops with live JPYC ordering availability.',
+  trigger:
+    'When a user asks where they can order and pay in JPYC right now, and you need shops filtered by area or current open status.',
   docsUrl: 'https://open-pay.jp/api/openapi.json',
   license: 'Shop-consented data; search and ordering assistance only.',
   outputSchema: {
