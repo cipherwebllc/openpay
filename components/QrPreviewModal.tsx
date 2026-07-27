@@ -18,7 +18,12 @@ import type { TokenSymbol } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
 
 // QR の描画サイズと、中央マークの一辺 (読取性のため比率は QR_CENTER_MARK_RATIO を上限)。
-const QR_SIZE = 260;
+//
+// **サイズは level と対で決めること**: 中央マークのため level を上げるとモジュール数が増え、
+// 同じ表示サイズなら 1 マスが細って実機カメラの読取余裕 (距離・角度・ぼけ) が落ちる。
+// level='Q' + 340px で 57 モジュール = 5.96px/マスとなり、従来 (level='M'・260px = 5.31px/マス)
+// より太い。ここを 260px に戻すと 4.56px/マスまで細るので、サイズと level は必ずセットで見直す。
+const QR_SIZE = 340;
 const QR_MARK_SIZE = Math.round(QR_SIZE * QR_CENTER_MARK_RATIO);
 
 export type QrPreviewModalLabels = {
@@ -219,13 +224,16 @@ export function QrPreviewModal({
               className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-6 print:p-6"
             >
               {/* 中央に OpenPay マークを置く (ブランド認知 + 「読んでよい QR か」の判断材料)。
-                  マークで欠ける分の冗長性を確保するため level は 'H' (30% 誤り訂正) 固定。
+                  level は **'Q' (25% 訂正)**。マークの被覆は面積の約 3% しかないので Q で十分余裕が
+                  あり、'H' にすると同じ URL でもモジュールが 57→65 に増えて 1 マスが細り、
+                  **実測で縮小+ぼけ条件のデコードに失敗する** (= 実機カメラで読みにくくなる)。
+                  訂正能力より 1 マスの大きさが効く、という QR の性質に従う。
                   マークは data URI (lib/qrCenterMark) — 外部参照だと PNG 保存で消える。 */}
               <QRCodeSVG
                 value={qrValue}
                 size={QR_SIZE}
                 includeMargin
-                level="H"
+                level="Q"
                 imageSettings={{
                   src: QR_CENTER_MARK,
                   height: QR_MARK_SIZE,

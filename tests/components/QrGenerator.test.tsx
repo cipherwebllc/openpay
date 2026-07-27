@@ -1992,12 +1992,13 @@ describe('QrGenerator', () => {
         screen.queryByText(/QR コードを作成する準備ができていません/),
       ).toBeNull();
       expect(screen.queryByText(/QR を生成中/)).toBeNull();
-      // QR 本体はモーダル内 (size=260)。
+      // QR 本体はモーダル内 (size=340)。サイズは読取性に直結するため固定値で見る
+      // (level と対で決めており、縮めるとモジュールが細って実機で読めなくなる)。
       await openQrModal(user);
       await waitFor(() => {
         const svgs = container.querySelectorAll('svg');
         const qrSvg = Array.from(svgs).find(
-          (s) => s.getAttribute('width') === '260',
+          (s) => s.getAttribute('width') === '340',
         );
         expect(qrSvg).toBeDefined();
       });
@@ -2218,7 +2219,7 @@ describe('QrGenerator', () => {
       await waitFor(() => {
         const svgs = container.querySelectorAll('svg');
         const qrSvg = Array.from(svgs).find(
-          (s) => s.getAttribute('width') === '260',
+          (s) => s.getAttribute('width') === '340',
         );
         expect(qrSvg).toBeDefined();
       });
