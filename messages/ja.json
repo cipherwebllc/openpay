@@ -84,7 +84,7 @@
     "faqQ2": "JPYC と USDC、どちらを受け取れますか?",
     "faqA2": "両方対応。円建てなら JPYC、Web3・海外向けなら USDC。JPYC は Polygon / Kaia / Avalanche / Ethereum（Ethereum は通常決済のみ）、USDC は Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche で受け取れます。チェーンは QR 作成時に選び、別チェーンからは Circle CCTP V2 で自動決済されます。",
     "faqQ3": "ウォレットを持っていない顧客はどうしますか?",
-    "faqA3": "MetaMask や Rabby、スマホでは MetaMask Mobile / Rainbow / Coinbase Wallet 等をご案内ください。EIP-6963 で複数ウォレットを自動検出します。",
+    "faqA3": "MetaMask や Rabby、スマホでは HashPort Wallet / マイナウォレット / MetaMask Mobile 等をご案内ください。EIP-6963 で複数ウォレットを自動検出します。",
     "faqQ4": "受け取った JPYC / USDC を日本円に換金するには?",
     "faqA4": "JPYC は <jpycEx>JPYC EX</jpycEx> で 1:1 換金、USDC は SBI VC トレード等で売却できます。取引所リンクは <create>受け取る</create> ページ下部にあります。",
     "faqQ5": "取引履歴はどこに保存されますか?",
