@@ -366,6 +366,20 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
 
   // ─── Resource (explorer / analytics / info) ─────────────────────────
   {
+    // 有志運営の非公式ダッシュボード。JPYC 社の公式サイトと誤認されないよう、
+    // 説明文の冒頭で「非公式」を明示する (掲載側の責任として原典の但し書きを引き継ぐ)。
+    id: 'mieru-jpyc',
+    name: 'みえるJPYC',
+    url: 'https://mieru-jpyc.com/',
+    category: 'resource',
+    description: {
+      ja: '有志運営の非公式ダッシュボード。JPYC の発行・償還・大口送金などのオンチェーン記録を 4 チェーン横断で可視化。',
+      en: 'An unofficial community dashboard visualizing JPYC on-chain records (issuance, redemption, large transfers) across four chains.',
+    },
+    badges: ['jp-only'],
+    tokens: ['jpyc'],
+  },
+  {
     id: 'jpyc-map',
     name: 'JPYC-MAP.com',
     url: 'https://jpyc-map.com/',
