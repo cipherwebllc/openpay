@@ -15,6 +15,7 @@ import {
   DIRECTORY_SEARCH_RESOURCE,
 } from '@/lib/directory/paidResources';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
+import { USDC_DIRECTORY_LIST } from '@/lib/directory/usdcResource';
 import { FIRST_PARTY_RESOURCES } from '@/lib/x402/firstParty';
 import { x402FeeBreakdown } from '@/lib/x402/fee';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
@@ -53,6 +54,17 @@ function paymentInfo(priceJpyc: string) {
           asset: 'JPYC',
         },
       },
+    ],
+  } as const;
+}
+
+// vanilla x402 (USDC/Base) 直接販売用。JPYC 版と違い OpenPay 手数料が乗らないため、
+// amount は表示価格そのもの。network は本番 (servers = open-pay.jp) の Base mainnet 固定。
+function usdcPaymentInfo(amountUsd: string) {
+  return {
+    price: { currency: 'USD', mode: 'fixed', amount: amountUsd },
+    protocols: [
+      { x402: { scheme: 'exact', network: 'eip155:8453', asset: 'USDC' } },
     ],
   } as const;
 }
@@ -711,6 +723,34 @@ const OPENAPI_DOCUMENT = {
           },
           '400': ERROR_RESPONSES['400'],
           ...PAID_RESPONSES,
+        },
+      },
+    },
+    [USDC_DIRECTORY_LIST.path]: {
+      get: {
+        tags: ['Directory Paid'],
+        summary: 'Unlock the full published directory (USDC on Base)',
+        description:
+          'Same data as /api/paid/japan-web3-directory, sold via standard x402 (exact scheme) in USDC on Base mainnet through an external facilitator. No OpenPay fee is added; the listed price is the full charge.',
+        'x-payment-info': usdcPaymentInfo(USDC_DIRECTORY_LIST.priceUsd),
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'USDC',
+        'x-payment-chains': ['Base'],
+        responses: {
+          '200': {
+            description: 'Full published directory after settlement',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+              },
+            },
+          },
+          '402': {
+            description:
+              'Standard x402 payment challenge (USDC on Base, exact scheme, single transferWithAuthorization).',
+          },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '503': { $ref: '#/components/responses/StorageUnavailable' },
         },
       },
     },

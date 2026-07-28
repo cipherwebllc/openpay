@@ -94,6 +94,22 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     }
   });
 
+  it('USDC 版 Directory (vanilla x402) は USD 建て x-payment-info を持つ', async () => {
+    const body = await doc();
+    const op = body.paths['/api/paid/usdc/japan-web3-directory']?.get;
+    expect(op).toBeDefined();
+    const info = op?.['x-payment-info'] as {
+      price: { currency: string; mode: string; amount: string };
+      protocols: { x402?: { network?: string; asset?: string } }[];
+    };
+    expect(info.price).toEqual({ currency: 'USD', mode: 'fixed', amount: '0.02' });
+    expect(info.protocols[0]?.x402?.network).toBe('eip155:8453');
+    expect(info.protocols[0]?.x402?.asset).toBe('USDC');
+    // route 実装と同じ価格か (SoT = USDC_DIRECTORY_LIST)
+    const { USDC_DIRECTORY_LIST } = await import('@/lib/directory/usdcResource');
+    expect(`$${info.price.amount}`).toBe(USDC_DIRECTORY_LIST.price);
+  });
+
   it('slug テンプレート path は有料登録しない (probe が必ず 404 になるため)', async () => {
     const body = await doc();
     const templated = body.paths['/api/paid/japan-web3-directory/{slug}']?.get;
