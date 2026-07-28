@@ -24,6 +24,8 @@ async function load(): Promise<{ root: () => Promise<Response>; api: () => Promi
   vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', '1');
   vi.stubEnv('ENABLE_AGENT_ORDER', '1');
   vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+  // hello (vanilla demo) の掲載価格を決定的にする
+  vi.stubEnv('X402_PRICE', '$0.01');
   vi.resetModules();
   const root = (await import('@/app/openapi.json/route')) as { GET: () => Promise<Response> };
   const api = (await import('@/app/api/openapi.json/route')) as { GET: () => Promise<Response> };
@@ -108,6 +110,26 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     // route 実装と同じ価格か (SoT = USDC_DIRECTORY_LIST)
     const { USDC_DIRECTORY_LIST } = await import('@/lib/directory/usdcResource');
     expect(`$${info.price.amount}`).toBe(USDC_DIRECTORY_LIST.price);
+  });
+
+  it('vanilla USDC 追加分 (search / stores / hello) も USD 建て x-payment-info を持つ', async () => {
+    const body = await doc();
+    const expected: [string, string][] = [
+      ['/api/paid/usdc/japan-web3-directory/search', '0.02'],
+      ['/api/paid/usdc/stores', '0.04'],
+      ['/api/paid/hello', '0.01'], // X402_PRICE stub に一致
+    ];
+    for (const [path, amount] of expected) {
+      const op = body.paths[path]?.get;
+      expect(op, `${path} が openapi.json に無い`).toBeDefined();
+      const info = op?.['x-payment-info'] as {
+        price: { currency: string; amount: string };
+        protocols: { x402?: { network?: string } }[];
+      };
+      expect(info.price.currency).toBe('USD');
+      expect(info.price.amount).toBe(amount);
+      expect(info.protocols[0]?.x402?.network).toBe('eip155:8453');
+    }
   });
 
   it('slug テンプレート path は有料登録しない (probe が必ず 404 になるため)', async () => {

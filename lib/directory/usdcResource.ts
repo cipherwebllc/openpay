@@ -18,3 +18,12 @@ export const USDC_DIRECTORY_LIST = {
   description:
     "Japan Web3 Directory (full list) — curated structured records covering Japan's JPYC, USDC, Web3 and AI-agent ecosystem. Standard x402, USDC on Base.",
 } as const;
+
+// 検索版。価格は一覧と同じ (JPYC 版も一覧/検索とも 2 JPYC で同額)。
+export const USDC_DIRECTORY_SEARCH = {
+  path: '/api/paid/usdc/japan-web3-directory/search',
+  price: '$0.02',
+  priceUsd: '0.02',
+  description:
+    "Japan Web3 Directory (filtered search) — query curated records covering Japan's JPYC, USDC, Web3 and AI-agent ecosystem. Standard x402, USDC on Base.",
+} as const;

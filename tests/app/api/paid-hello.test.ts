@@ -1,16 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// x402-next は vitest 環境で next/server を解決できないため境界 mock。
-// X402_TEST_MODE=true により withX402 は呼ばれないが、module import 時に
-// import 解決は走るので mock しておく。
-vi.mock('x402-next', () => ({
-  withX402: vi.fn(),
-}));
+// 2026-07-28: route は x402-next から lib/x402/vanillaGate (v2 dual-stack) へ移行済み。
+// test mode env を set してから動的 import (config.ts は import 時に env を焼き付ける)。
 
-// app/api/paid/hello/route.ts は server module で、import 時に withX402Payment
-// (= lib/x402/middleware) を経由する。test mode env を set してから動的 import。
-
-const X402_KEYS = ['X402_NETWORK', 'X402_PAY_TO_ADDRESS', 'X402_TEST_MODE'] as const;
+const X402_KEYS = [
+  'X402_NETWORK',
+  'X402_PAY_TO_ADDRESS',
+  'X402_TEST_MODE',
+  'X402_PRICE',
+] as const;
 const ORIG: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -101,5 +99,31 @@ describe('GET /api/paid/hello', () => {
     const { GET } = await import('@/app/api/paid/hello/route');
     const res = await GET(new NextRequest('http://localhost/api/paid/hello'));
     expect(res.status).toBe(200);
+  });
+
+  it('支払いなし (本番相当) → dual-stack 402: v1 body + v2 PAYMENT-REQUIRED (x402scan 掲載の前提)', async () => {
+    process.env.X402_TEST_MODE = '';
+    process.env.X402_NETWORK = 'base';
+    process.env.X402_PRICE = '$0.01';
+    vi.resetModules();
+    const { NextRequest } = await import('next/server');
+    const { GET } = await import('@/app/api/paid/hello/route');
+    const res = await GET(new NextRequest('http://localhost/api/paid/hello'));
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as {
+      accepts: { network: string; maxAmountRequired: string; extra?: Record<string, unknown> }[];
+    };
+    expect(body.accepts[0].network).toBe('base');
+    expect(body.accepts[0].maxAmountRequired).toBe('10000'); // $0.01
+    expect(body.accepts[0].extra?.openpay).toBeUndefined(); // vanilla
+    const pr = res.headers.get('PAYMENT-REQUIRED');
+    expect(pr).toBeTruthy();
+    const v2 = JSON.parse(Buffer.from(pr!, 'base64').toString()) as {
+      x402Version: number;
+      accepts: { network: string; amount: string }[];
+    };
+    expect(v2.x402Version).toBe(2);
+    expect(v2.accepts[0].network).toBe('eip155:8453');
+    expect(v2.accepts[0].amount).toBe('10000');
   });
 });
