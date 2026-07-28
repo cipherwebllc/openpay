@@ -314,6 +314,7 @@ Do not add data through unauthorized scraping, access-control or paywall bypasse
 | Free | `GET /api/directory/tags` | Published tag counts | Free |
 | Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes (also served at `GET /openapi.json` for x402 indexers) | Free |
 | x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
+| x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory` | Full published list — standard x402, USDC on Base mainnet, no OpenPay fee (listed price is the full charge) | 0.02 USDC |
 | x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
 | x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
 
