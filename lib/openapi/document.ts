@@ -15,7 +15,13 @@ import {
   DIRECTORY_SEARCH_RESOURCE,
 } from '@/lib/directory/paidResources';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
-import { USDC_DIRECTORY_LIST } from '@/lib/directory/usdcResource';
+import {
+  USDC_DIRECTORY_LIST,
+  USDC_DIRECTORY_SEARCH,
+} from '@/lib/directory/usdcResource';
+import { USDC_STORES } from '@/lib/x402/usdcStores';
+import { x402Config } from '@/lib/x402/config';
+import { usdPriceToAtomic } from '@/lib/x402/vanillaGate';
 import { FIRST_PARTY_RESOURCES } from '@/lib/x402/firstParty';
 import { x402FeeBreakdown } from '@/lib/x402/fee';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
@@ -67,6 +73,19 @@ function usdcPaymentInfo(amountUsd: string) {
       { x402: { scheme: 'exact', network: 'eip155:8453', asset: 'USDC' } },
     ],
   } as const;
+}
+
+// hello (vanilla demo) の価格は X402_PRICE env が権威。Money 文字列でない (polygon 配線) か
+// 変換不能なら openapi に載せない (route 側も 503 に縮退するため整合する)。
+function helloUsdAmountOrNull(): string | null {
+  const price = x402Config.defaultPrice;
+  if (typeof price !== 'string') return null;
+  try {
+    usdPriceToAtomic(price);
+  } catch {
+    return null;
+  }
+  return price.replace(/^\$/, '');
 }
 
 const SHOPS_QUERY_PARAMETERS = [
@@ -305,6 +324,80 @@ const DISCOVERY_OPENAPI_SCHEMAS = {
     },
   },
 } as const;
+
+// vanilla x402 (USDC/Base・外部 facilitator・OpenPay 手数料なし) の直接販売面。
+// JPYC facilitator の flag に依存しないため、doc が配信される限り常に載せる。
+const VANILLA_OPENAPI_PATHS = {
+  [USDC_STORES.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)'],
+      summary: 'Unlock the curated JPYC acceptance directory (USDC on Base)',
+      description:
+        'Same data as /api/paid/stores, sold via standard x402 (exact scheme) in USDC on Base mainnet through an external facilitator. No OpenPay fee is added; the listed price is the full charge.',
+      'x-payment-info': usdcPaymentInfo(USDC_STORES.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'Curated store list after settlement',
+          content: {
+            'application/json': {
+              example: {
+                items: [
+                  { name: 'JPYC EX', category: 'exchange', url: 'https://jpyc.jp/' },
+                ],
+              },
+            },
+          },
+        },
+        '402': {
+          description:
+            'Standard x402 payment challenge (USDC on Base, exact scheme, single transferWithAuthorization).',
+        },
+        '503': { $ref: '#/components/responses/StorageUnavailable' },
+      },
+    },
+  },
+} as const;
+
+// hello は価格が env (X402_PRICE) 由来のため、有効な USD 価格のときだけ載せる。
+function vanillaHelloPath(): Record<string, unknown> {
+  const amount = helloUsdAmountOrNull();
+  if (amount === null) return {};
+  return {
+    '/api/paid/hello': {
+      get: {
+        tags: ['x402 Vanilla (USDC)'],
+        summary: 'Paid hello demo (USDC on Base)',
+        description:
+          'Smallest standard-x402 payable resource: pay and unlock a hello + timestamp. Use it to confirm the 402 → pay → unlock flow end to end before wiring a real paid API.',
+        'x-payment-info': usdcPaymentInfo(amount),
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'USDC',
+        'x-payment-chains': ['Base'],
+        responses: {
+          '200': {
+            description: 'Hello + timestamp after settlement',
+            content: {
+              'application/json': {
+                example: {
+                  message: 'Hello, paid AI agent.',
+                  timestamp: '2026-07-28T00:00:00.000Z',
+                },
+              },
+            },
+          },
+          '402': {
+            description:
+              'Standard x402 payment challenge (USDC on Base, exact scheme, single transferWithAuthorization).',
+          },
+          '503': { $ref: '#/components/responses/StorageUnavailable' },
+        },
+      },
+    },
+  };
+}
 
 const SHOPS_OPENAPI_PATHS = {
   '/api/shops': {
@@ -754,6 +847,36 @@ const OPENAPI_DOCUMENT = {
         },
       },
     },
+    [USDC_DIRECTORY_SEARCH.path]: {
+      get: {
+        tags: ['Directory Paid'],
+        summary: 'Search the published directory (USDC on Base)',
+        description:
+          'Same filters as /api/paid/japan-web3-directory/search, sold via standard x402 (exact scheme) in USDC on Base mainnet through an external facilitator. No OpenPay fee is added; the listed price is the full charge.',
+        parameters: DIRECTORY_QUERY_PARAMETERS,
+        'x-payment-info': usdcPaymentInfo(USDC_DIRECTORY_SEARCH.priceUsd),
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'USDC',
+        'x-payment-chains': ['Base'],
+        responses: {
+          '200': {
+            description: 'Filtered directory envelope after settlement',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/InvalidQuery' },
+          '402': {
+            description:
+              'Standard x402 payment challenge (USDC on Base, exact scheme, single transferWithAuthorization).',
+          },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '503': { $ref: '#/components/responses/StorageUnavailable' },
+        },
+      },
+    },
     '/api/paid/japan-web3-directory/{slug}': {
       get: {
         tags: ['Directory Paid'],
@@ -1010,11 +1133,14 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
         ? [{ name: 'Shops Free' }, { name: 'Shops Paid' }]
         : []),
       ...(facilitatorEnabled ? [{ name: 'x402 Catalog' }] : []),
+      { name: 'x402 Vanilla (USDC)' },
     ],
     paths: {
       ...(env.enableWeb3Directory ? OPENAPI_DOCUMENT.paths : {}),
       ...(shopsEnabled ? SHOPS_OPENAPI_PATHS : {}),
       ...(facilitatorEnabled ? DISCOVERY_OPENAPI_PATHS : {}),
+      ...VANILLA_OPENAPI_PATHS,
+      ...vanillaHelloPath(),
     },
     components: {
       ...OPENAPI_DOCUMENT.components,

@@ -254,6 +254,109 @@ describe('GET /api/paid/usdc/japan-web3-directory', () => {
   });
 });
 
+describe('GET /api/paid/usdc/japan-web3-directory/search', () => {
+  const SEARCH = 'https://open-pay.jp/api/paid/usdc/japan-web3-directory/search';
+
+  async function loadSearch(
+    flags: { directory?: string; testMode?: string } = {},
+  ): Promise<Route> {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', flags.directory ?? '1');
+    vi.stubEnv('X402_NETWORK', 'base');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.stubEnv('X402_FACILITATOR_URL', FACILITATOR);
+    vi.stubEnv('X402_TEST_MODE', flags.testMode ?? '');
+    vi.resetModules();
+    return (await import(
+      '@/app/api/paid/usdc/japan-web3-directory/search/route'
+    )) as unknown as Route;
+  }
+
+  it('flag OFF → 404', async () => {
+    const route = await loadSearch({ directory: '' });
+    expect((await route.GET(new Request(SEARCH))).status).toBe(404);
+  });
+
+  it('不正 query → 400 (支払い要求より先・署名の無駄を断つ)', async () => {
+    const route = await loadSearch();
+    const res = await route.GET(new Request(`${SEARCH}?bogusKey=1`));
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('支払いなし → dual-stack 402 (resource は search の canonical URL)', async () => {
+    const route = await loadSearch();
+    const res = await route.GET(new Request(`${SEARCH}?category=stablecoin`));
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as {
+      accepts: { resource: string; maxAmountRequired: string }[];
+    };
+    expect(body.accepts[0].resource).toBe(SEARCH);
+    expect(body.accepts[0].maxAmountRequired).toBe('20000');
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeTruthy();
+  });
+
+  it('v1 payment + query → verify→content→settle で絞り込み封筒', async () => {
+    facilitatorOk();
+    const route = await loadSearch();
+    const res = await route.GET(
+      new Request(`${SEARCH}?category=stablecoin`, {
+        headers: { 'x-payment': b64(V1_PAYLOAD) },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const body = (await res.json()) as {
+      items: { facts: { category: string } }[];
+      total: number;
+    };
+    expect(body.total).toBeGreaterThan(0);
+    for (const item of body.items) {
+      expect(item.facts.category).toBe('stablecoin');
+    }
+  });
+});
+
+describe('GET /api/paid/usdc/stores', () => {
+  const STORES = 'https://open-pay.jp/api/paid/usdc/stores';
+
+  async function loadStores(testMode = ''): Promise<Route> {
+    vi.stubEnv('X402_NETWORK', 'base');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.stubEnv('X402_FACILITATOR_URL', FACILITATOR);
+    vi.stubEnv('X402_TEST_MODE', testMode);
+    vi.resetModules();
+    return (await import(
+      '@/app/api/paid/usdc/stores/route'
+    )) as unknown as Route;
+  }
+
+  it('支払いなし → dual-stack 402 ($0.04 = 40000 atomic)', async () => {
+    const route = await loadStores();
+    const res = await route.GET(new Request(STORES));
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as {
+      accepts: { resource: string; maxAmountRequired: string }[];
+    };
+    expect(body.accepts[0].maxAmountRequired).toBe('40000');
+    expect(body.accepts[0].resource).toBe(STORES);
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeTruthy();
+  });
+
+  it('v1 payment → 200 で JPYC 版と同じ items 形', async () => {
+    facilitatorOk();
+    const route = await loadStores();
+    const res = await route.GET(
+      new Request(STORES, { headers: { 'x-payment': b64(V1_PAYLOAD) } }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { name: string; category: string; url: string }[];
+    };
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items[0].name).toBeTruthy();
+  });
+});
+
 describe('usdPriceToAtomic (金額境界)', () => {
   it('厳密変換と設定ミス拒否', async () => {
     const { usdPriceToAtomic } = await import('@/lib/x402/vanillaGate');

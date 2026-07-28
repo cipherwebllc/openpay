@@ -247,7 +247,7 @@ The table below is a **curated subset** (core setup + production feature flags).
 
 ## x402 / API / agent payments
 
-OpenPay includes **experimental** x402 protocol support for per-request paid API endpoints (AI agent / API use cases — separate from the human checkout flow). `GET /api/paid/hello` returns HTTP 402; clients (e.g. `x402-fetch`) sign an EIP-3009 authorization and retry. OpenPay verifies + settles via the Coinbase facilitator before returning content. The client only signs — the facilitator submits the on-chain tx and pays gas, so agents need **no native gas** on the target chain.
+OpenPay includes **experimental** x402 protocol support for per-request paid API endpoints (AI agent / API use cases — separate from the human checkout flow). `GET /api/paid/hello` returns HTTP 402 (x402 v1 + v2 dual-stack); clients (e.g. `x402-fetch`) sign an EIP-3009 authorization and retry. OpenPay verifies + settles via an external facilitator (`X402_FACILITATOR_URL`; production uses payai — x402.org cannot settle Base mainnet) before returning content. The same vanilla path also sells `GET /api/paid/usdc/japan-web3-directory[/search]` and `GET /api/paid/usdc/stores` in USDC on Base (no OpenPay fee; listed on x402scan). The client only signs — the facilitator submits the on-chain tx and pays gas, so agents need **no native gas** on the target chain.
 
 **OpenPay's distinct angle — JPYC support.** The wider x402 ecosystem is largely USDC-only (Coinbase's reference and most public servers). OpenPay's x402 server also accepts **JPYC v3 on Polygon / Polygon Amoy**, making it usable for **JPY-denominated agent / API billing** without routing through a USD asset. USDC on Base / Base-Sepolia is also supported.
 
@@ -315,6 +315,7 @@ Do not add data through unauthorized scraping, access-control or paywall bypasse
 | Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes (also served at `GET /openapi.json` for x402 indexers) | Free |
 | x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
 | x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory` | Full published list — standard x402, USDC on Base mainnet, no OpenPay fee (listed price is the full charge) | 0.02 USDC |
+| x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory/search` | Filtered search — standard x402, USDC on Base mainnet, no OpenPay fee | 0.02 USDC |
 | x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
 | x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
 
