@@ -79,10 +79,13 @@ export const DIRECTORY_SEARCH_RESOURCE = {
   },
 } as const satisfies FirstPartyResource;
 
+/** 詳細 1 件の価格。OpenAPI スペックも同じ値を参照する (literal の二重管理を避ける)。 */
+export const DIRECTORY_DETAIL_PRICE_JPYC = '1';
+
 export function directoryDetailResource(slug: string): FirstPartyResource {
   return {
     path: `/api/paid/japan-web3-directory/${slug}`,
-    priceJpyc: '1',
+    priceJpyc: DIRECTORY_DETAIL_PRICE_JPYC,
     category: 'data',
     description: `Japan Web3 Directory detail for ${slug} — 1 JPYC.`,
     trigger: `When you already identified ${slug} and need its full record (sources, capabilities, last verification) before citing it.`,

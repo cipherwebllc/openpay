@@ -312,7 +312,7 @@ Do not add data through unauthorized scraping, access-control or paywall bypasse
 | Free | `GET /api/directory?limit=5` | Published teaser list (maximum 5 records) | Free |
 | Free | `GET /api/directory/categories` | Published category counts | Free |
 | Free | `GET /api/directory/tags` | Published tag counts | Free |
-| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes | Free |
+| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes (also served at `GET /openapi.json` for x402 indexers) | Free |
 | x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
 | x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
 | x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
@@ -360,7 +360,7 @@ The “verified” foundation differs by dataset: Shops are built from owner opt
 | Free | `GET /api/shops/find?q=&limit=10` | Name-only discovery with `handle` / `name` / `mode` / `acceptingNow` (maximum 10) | Free |
 | x402 | `GET /api/paid/jpyc-shops/search` | Filtered shop search with live ordering availability | 2 JPYC |
 | Free | `GET /api/agent-order/menu?h=<handle>` | Full public menu for a returned shop | Free |
-| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes | Free |
+| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes (also served at `GET /openapi.json` for x402 indexers) | Free |
 
 The free find endpoint accepts optional `q` (case-insensitive partial shop-name match) and `limit` (default and maximum 10). Its items contain exactly four fields: `handle`, `name`, `mode`, and `acceptingNow`. Address, opening-time fields, menu summary, `dineIn` / `mode` filtering, and live-state details are reserved for the paid search.
 
