@@ -866,7 +866,7 @@
   "HandleProfile": {
     "supportHeading": "応援する",
     "supportSubtext": "応援はそのまま全額、クリエイターに直接届きます。",
-    "supportQuestionHint": "JPYC の応援には、質問やメッセージを添えることもできます (読めるのは受け取った本人だけ)。",
+    "supportQuestionHint": "応援には、質問やメッセージを添えることもできます (読めるのは受け取った本人だけ)。",
     "crossChain": "cross-chain",
     "selectCurrencyChain": "通貨・チェーンを選ぶ",
     "share": "共有",
