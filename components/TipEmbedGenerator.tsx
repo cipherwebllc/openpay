@@ -755,6 +755,78 @@ export function TipEmbedGenerator() {
             )}
           </div>
         )}
+        {/* 開発者向け設定 (折りたたみ、default 閉): 成功画面 + webhook。
+            右カラム (sticky) から左へ移設 (2026-07-29): 右列の総高が視界を超えると
+            aside 自身のスクロールバーがプレビュー内側バーと隣接して二重に見えるため、
+            右列は「プレビュー + 公開する」だけに保つ (プロフタブと同じ収まり)。 */}
+        <div className="order-6 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+          <button
+            type="button"
+            onClick={() => setDevOpen((o) => !o)}
+            aria-expanded={devOpen}
+            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <Code2 className="h-4 w-4 text-slate-500" aria-hidden />
+              {t('devSettingsToggle')}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 flex-none text-slate-500 transition-transform ${
+                devOpen ? 'rotate-180' : ''
+              }`}
+              aria-hidden
+            />
+          </button>
+          {devOpen && (
+            <div className="space-y-4 border-t border-slate-100 px-4 py-4">
+              <Field label={t('thanksLabel')}>
+                <textarea
+                  value={settings.thanks}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, thanks: e.target.value }))
+                  }
+                  placeholder={t('thanksPlaceholder')}
+                  maxLength={200}
+                  rows={2}
+                  className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  {t('messageCounter', { count: settings.thanks.length })}
+                </p>
+              </Field>
+
+              <Field label={t('thanksUrlLabel')}>
+                <input
+                  type="text"
+                  value={settings.thanksUrl}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, thanksUrl: e.target.value }))
+                  }
+                  placeholder={t('thanksUrlPlaceholder')}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500">{t('thanksUrlHint')}</p>
+              </Field>
+
+              <Field label={t('webhookLabel')}>
+                <input
+                  type="text"
+                  value={settings.webhook}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, webhook: e.target.value }))
+                  }
+                  placeholder={t('webhookPlaceholder')}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  {t('webhookHint', {
+                    payload: '{ txHash, amount, token, from, message }',
+                  })}
+                </p>
+              </Field>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* mobile は contents + order で preview を高度な設定より前へ。desktop は従来の sticky 右カラム。 */}
@@ -768,9 +840,12 @@ export function TipEmbedGenerator() {
             data-testid="tip-preview-frame"
             className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5"
           >
+            {/* 高さは控えめにして (max-h-[46vh]・プロフ/モバイル注文と同じ契約)、
+                サイド列自身のスクロールバーと内側バーが隣り合って二重に見えるのを避ける
+                (2026-07-29 実機報告: 56vh では右カラムが視界を超え二重スクロール化)。 */}
             <div
               data-testid="tip-preview-scroll"
-              className="max-h-[56vh] overflow-y-auto bg-slate-50 p-3"
+              className="max-h-[46vh] overflow-y-auto bg-slate-50 p-3"
             >
               <TipFormPreview
                 key={`${settings.token}:${settings.chain}:${activePresets.join(',')}`}
@@ -944,75 +1019,6 @@ export function TipEmbedGenerator() {
         {/* @handle 恒久リンクは「プロフ」タブ (HandleProfileBuilder) へ移設。チップタブは
             単一チップの生成に専念する。 */}
 
-        {/* 開発者向け設定 (折りたたみ、default 閉): 成功画面 + webhook */}
-        <div className="order-6 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-          <button
-            type="button"
-            onClick={() => setDevOpen((o) => !o)}
-            aria-expanded={devOpen}
-            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-          >
-            <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Code2 className="h-4 w-4 text-slate-500" aria-hidden />
-              {t('devSettingsToggle')}
-            </span>
-            <ChevronDown
-              className={`h-4 w-4 flex-none text-slate-500 transition-transform ${
-                devOpen ? 'rotate-180' : ''
-              }`}
-              aria-hidden
-            />
-          </button>
-          {devOpen && (
-            <div className="space-y-4 border-t border-slate-100 px-4 py-4">
-              <Field label={t('thanksLabel')}>
-                <textarea
-                  value={settings.thanks}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, thanks: e.target.value }))
-                  }
-                  placeholder={t('thanksPlaceholder')}
-                  maxLength={200}
-                  rows={2}
-                  className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  {t('messageCounter', { count: settings.thanks.length })}
-                </p>
-              </Field>
-
-              <Field label={t('thanksUrlLabel')}>
-                <input
-                  type="text"
-                  value={settings.thanksUrl}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, thanksUrl: e.target.value }))
-                  }
-                  placeholder={t('thanksUrlPlaceholder')}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-500">{t('thanksUrlHint')}</p>
-              </Field>
-
-              <Field label={t('webhookLabel')}>
-                <input
-                  type="text"
-                  value={settings.webhook}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, webhook: e.target.value }))
-                  }
-                  placeholder={t('webhookPlaceholder')}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  {t('webhookHint', {
-                    payload: '{ txHash, amount, token, from, message }',
-                  })}
-                </p>
-              </Field>
-            </div>
-          )}
-        </div>
       </aside>
     </div>
 
