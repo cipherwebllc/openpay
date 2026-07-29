@@ -144,7 +144,7 @@ function TipMessageInbox() {
   return (
     <section
       data-testid="tip-message-inbox"
-      className="order-7 rounded-2xl border border-slate-200 bg-white p-5 shadow-card lg:col-span-2"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -521,6 +521,7 @@ export function TipEmbedGenerator() {
   const defaultPresetsList = DEFAULT_TIP_PRESETS[settings.token].join(', ');
 
   return (
+    <div className="space-y-5">
     <div className="grid grid-cols-1 gap-5 lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
       {/* 左カラム: 入力 (Step 1 受取先 / Step 2 カスタマイズ) */}
       <div className="contents min-w-0 lg:block lg:space-y-5 [&>section:first-child]:order-1 [&>section:nth-child(2)]:order-2">
@@ -1013,8 +1014,13 @@ export function TipEmbedGenerator() {
           )}
         </div>
       </aside>
+    </div>
 
-      {/* flag OFF では子を mount せず、SIWE / React Query / fetch を完全に不活性化する。 */}
+      {/* flag OFF では子を mount せず、SIWE / React Query / fetch を完全に不活性化する。
+          ⚠️ grid コンテナの「外」に置くこと: sticky なプレビュー列は containing block
+          (= grid コンテナ) の中でしか動けないため、外に出せば重なりが構造的に起きない。
+          grid 内 col-span-2 の 2 行目に置くと、スクロール追随した sticky 列が上に被さる
+          (2026-07-29 実機で再現・全desktop幅)。 */}
       {env.enableTipMessage ? <TipMessageInbox /> : null}
     </div>
   );
