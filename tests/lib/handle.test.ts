@@ -17,6 +17,7 @@ import {
   MAX_HANDLES_PER_WALLET,
   MAX_LINK_LABEL_LEN,
   MAX_PROFILE_LINKS,
+  MAX_SOCIAL_LINKS,
   DEFAULT_RECEIVE_METHODS,
   type HandleRecord,
   type HandleTipConfig,
@@ -415,7 +416,15 @@ describe('validateProfile', () => {
     expect(validateProfile({ socials: [123] }).ok).toBe(false);
     expect(validateProfile({ socials: ['   '] }).ok).toBe(false);
     expect(validateProfile({ socials: 'https://x.com/a' }).ok).toBe(false);
-    const many = Array.from({ length: 7 }, (_, i) => `https://x.com/u${i}`);
+    const atCap = Array.from(
+      { length: MAX_SOCIAL_LINKS },
+      (_, i) => `https://x.com/u${i}`,
+    );
+    expect(validateProfile({ socials: atCap }).ok).toBe(true);
+    const many = Array.from(
+      { length: MAX_SOCIAL_LINKS + 1 },
+      (_, i) => `https://x.com/u${i}`,
+    );
     expect(validateProfile({ socials: many }).ok).toBe(false);
     const longUrl = 'https://x.com/' + 'a'.repeat(520);
     expect(validateProfile({ socials: [longUrl] }).ok).toBe(false);
