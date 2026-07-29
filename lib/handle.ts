@@ -29,13 +29,18 @@ import { isHandleTheme, type HandleTheme } from '@/lib/handleThemeKey';
 export const MAX_HANDLES_PER_WALLET = 3;
 
 // @handle プロフィール (link-in-bio) の上限。乱用・肥大化抑制。
-export const MAX_PROFILE_LINKS = 6;
+// 20 = lit.link 級のリンク集を収める実用上限 (見出し行と共有)。技術制約ではなく体験の上限:
+// 最悪ケース (20 本 × label40+url512) でも record は ~13KB と KV の余裕内・描画/OG 影響なし。
+// 6 → 20 引き上げ (2026-07-29 user 要望・見出し行の導入でリスト長の整理が可能になったため)。
+export const MAX_PROFILE_LINKS = 20;
 export const MAX_BIO_LEN = 160;
 export const MAX_LINK_LABEL_LEN = 40;
 export const MAX_LINK_URL_LEN = 512;
 export const MAX_AVATAR_URL_LEN = 512;
 // SNS アイコンリンク (URL のみ保存・アイコンは lib/socialLinks がドメイン判定) の上限。
-export const MAX_SOCIAL_LINKS = 6;
+// SNS アイコン行の上限。対応 22 プラットフォームに対し 6 は窮屈 (user 指摘)。10 なら
+// モバイル幅でも 2 行以内に収まり、record サイズも +~5KB 上限で問題なし。
+export const MAX_SOCIAL_LINKS = 10;
 // 1 handle が公開できる受取方法の上限 (token 2 × chain 数の現実的な上限)。
 export const MAX_RECEIVE_METHODS = 6;
 
