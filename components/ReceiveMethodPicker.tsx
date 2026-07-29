@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { env } from '@/lib/env';
 import { Heart } from 'lucide-react';
 import { TipForm } from '@/components/TipForm';
 import {
@@ -147,6 +148,17 @@ export function ReceiveMethodPicker({
       >
         {t('supportSubtext')}
       </p>
+      {/* 質問箱 (flag 連動): JPYC 方法があるときだけ出す — composer は JPYC gasless 経路
+          でのみ現れるため、USDC 単独プロフで過剰約束しない。 */}
+      {env.enableTipMessage && methods.some((m) => m.token === 'jpyc') && (
+        <p
+          className={`mx-auto mt-1 max-w-xs text-center text-[11px] leading-relaxed ${
+            dark ? 'text-slate-400' : 'text-slate-400'
+          }`}
+        >
+          {t('supportQuestionHint')}
+        </p>
+      )}
       {multipleMethods && (
         <h3
           className={`mt-4 text-center text-xs font-semibold ${
