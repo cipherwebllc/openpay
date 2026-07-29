@@ -53,6 +53,11 @@ import { formatJpycYenLabel } from '@/lib/format';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import {
+  sanitizeTipMessage,
+  storeTipMessage,
+  TIP_MESSAGE_MIN_AMOUNT_WEI,
+} from '@/lib/tipMessages';
 
 export const runtime = 'nodejs';
 
@@ -135,6 +140,43 @@ if (env.enableUsageFee) {
 // 結果 → HTTP 応答 (free / recover 共通)。共有 makeRespond に prefix 'relay.jpyc' を束ねて、
 // 従来のイベント名 (relay.jpyc.reverted / .pending / .relay_error) と応答 body/status を完全再現する。
 const respond = makeRespond('relay.jpyc');
+
+function scheduleTipMessageStorage(input: {
+  rawTipMessage: unknown;
+  from: string;
+  to: string;
+  amountWei: bigint;
+  chainId: number;
+  txHash: Hex;
+}): void {
+  if (
+    !env.enableTipMessage ||
+    input.amountWei < TIP_MESSAGE_MIN_AMOUNT_WEI
+  ) {
+    return;
+  }
+  const message = sanitizeTipMessage(input.rawTipMessage);
+  if (!message) return;
+  const ts = Date.now();
+
+  // 脅威モデル: 署名済み支払いと同じ TLS POST で提出される bearer 付帯データであり、
+  // 署名自体へのコミットではない。成功 authorization の chainId+txHash を先着保存する。
+  after(async () => {
+    try {
+      await storeTipMessage({
+        from: input.from,
+        to: input.to,
+        amountWei: input.amountWei,
+        chainId: input.chainId,
+        txHash: input.txHash,
+        message,
+        ts,
+      });
+    } catch {
+      // メッセージ保存の失敗を決済成功へ波及させないための隔離。
+    }
+  });
+}
 
 export async function POST(req: Request): Promise<NextResponse> {
   // relay 未構成なら早期に signal (client が fallback 判定できるよう専用コード)。
@@ -346,6 +388,16 @@ async function handleFree(
       }
     }
   }
+  if (result.kind === 'success') {
+    scheduleTipMessageStorage({
+      rawTipMessage: raw.tipMessage,
+      from: auth.from,
+      to: auth.to,
+      amountWei: auth.value,
+      chainId,
+      txHash: result.txHash,
+    });
+  }
   return respond(result, chainId);
 }
 
@@ -438,6 +490,16 @@ async function handleRecover(
     // 送る額・署名対象で settleViaForwarder が照合済み)。gas 回収分 (feeValue) は含めない。
     const amountLabel = formatJpycYenLabel(params.merchantValue);
     after(() => notifyPaymentReceived(params.merchant, 'payment', amountLabel));
+  }
+  if (result.kind === 'success') {
+    scheduleTipMessageStorage({
+      rawTipMessage: raw.tipMessage,
+      from: params.from,
+      to: params.merchant,
+      amountWei: params.merchantValue,
+      chainId,
+      txHash: result.txHash,
+    });
   }
   return respond(result, chainId);
 }

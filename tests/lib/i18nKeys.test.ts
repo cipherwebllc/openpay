@@ -225,6 +225,82 @@ describe('i18n: Privacy policy が camera 利用を開示している (法的要
   });
 });
 
+describe('i18n: 非公開 tip message の namespace / privacy disclosure', () => {
+  const SEND_KEYS = [
+    'privateTipMessageLabel',
+    'privateTipMessagePlaceholder',
+    'privateTipMessagePrivacy',
+    'privateTipMessageMinimum',
+  ] as const;
+  const RECEIVE_KEYS = [
+    'tipInboxTitle',
+    'tipInboxDescription',
+    'tipInboxSignInRequired',
+    'tipInboxSignInCta',
+    'tipInboxSignInError',
+    'tipInboxLoading',
+    'tipInboxError',
+    'tipInboxRetry',
+    'tipInboxEmpty',
+    'tipInboxAmount',
+    'tipInboxFrom',
+    'tipInboxDeleteAll',
+    'tipInboxDeleting',
+    'tipInboxDeleteError',
+  ] as const;
+
+  it('送信文言は TipForm、受信文言は TipEmbedGenerator に ja/en 同じキーで入る', () => {
+    for (const messages of [ja, en]) {
+      for (const key of SEND_KEYS) {
+        expect(typeof messages.TipForm[key]).toBe('string');
+        expect(messages.TipForm[key]).not.toBe('');
+        expect(
+          (messages.TipEmbedGenerator as Record<string, unknown>)[key],
+        ).toBeUndefined();
+      }
+      for (const key of RECEIVE_KEYS) {
+        expect(typeof messages.TipEmbedGenerator[key]).toBe('string');
+        expect(messages.TipEmbedGenerator[key]).not.toBe('');
+        expect(
+          (messages.TipForm as Record<string, unknown>)[key],
+        ).toBeUndefined();
+      }
+    }
+    expect(ja.TipEmbedGenerator.tipInboxAmount).toContain('{amount}');
+    expect(en.TipEmbedGenerator.tipInboxAmount).toContain('{amount}');
+    expect(ja.TipEmbedGenerator.tipInboxFrom).toContain('{address}');
+    expect(en.TipEmbedGenerator.tipInboxFrom).toContain('{address}');
+  });
+
+  it('Privacy draft は取得項目・受取人表示目的・非公開・最長180日・全削除を ja/en で開示する', () => {
+    const jaBody = [
+      ja.Privacy.section1.body,
+      ja.Privacy.section2.body,
+      ja.Privacy.section4.body,
+    ].join(' ');
+    expect(jaBody).toMatch(/メッセージ本文/);
+    expect(jaBody).toMatch(/送信元・受取先ウォレットアドレス/);
+    expect(jaBody).toMatch(/金額.*チェーン ID.*トランザクションハッシュ.*送信日時/);
+    expect(jaBody).toMatch(/受取人本人.*表示/);
+    expect(jaBody).toMatch(/公開しません/);
+    expect(jaBody).toMatch(/最長 180 日/);
+    expect(jaBody).toMatch(/すべて削除/);
+
+    const enBody = [
+      en.Privacy.section1.body,
+      en.Privacy.section2.body,
+      en.Privacy.section4.body,
+    ].join(' ');
+    expect(enBody).toMatch(/message body/i);
+    expect(enBody).toMatch(/sender and recipient wallet addresses/i);
+    expect(enBody).toMatch(/amount.*chain ID.*transaction hash.*sent time/i);
+    expect(enBody).toMatch(/display the message to the tip recipient/i);
+    expect(enBody).toMatch(/not made public|do not make it public/i);
+    expect(enBody).toMatch(/up to 180 days/i);
+    expect(enBody).toMatch(/Delete all/i);
+  });
+});
+
 describe('i18n: Scan keys (ja/en parity)', () => {
   // /scan ページ + PwaInstallHint + QrScannerSurface + ScanResultBanner で使う
   // i18n key 集合。片方の locale だけ抜けて runtime に t() が key を表示する

@@ -26,7 +26,7 @@ vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => siweMock(),
 }));
 
-// SIWE ログイン UI は freee/利用権 が有効なときだけ出す。flag は holder で test 毎に切替
+// SIWE ログイン UI は SIWE 必須機能が有効なときだけ出す。flag は holder で test 毎に切替
 // (既定 = freee ON で SIWE UI を出す。両 OFF で隠れることは専用 test で検証)。
 const flags = vi.hoisted(() => ({
   enableFreeeSync: true,
@@ -34,6 +34,7 @@ const flags = vi.hoisted(() => ({
   enablePro: false,
   enableCsvPass: false,
   enablePushNotify: false,
+  enableTipMessage: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -55,6 +56,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enablePushNotify() {
         return flags.enablePushNotify;
+      },
+      get enableTipMessage() {
+        return flags.enableTipMessage;
       },
     },
   };
@@ -143,6 +147,8 @@ beforeEach(() => {
   flags.enableBilling = false;
   flags.enablePro = false;
   flags.enableCsvPass = false;
+  flags.enablePushNotify = false;
+  flags.enableTipMessage = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -272,12 +278,13 @@ describe('WalletBadge: SIWE サインイン', () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('SIWE 機能 (freee/利用権/Pro/CSVパス/push通知) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
+  it('SIWE 機能 (freee/利用権/Pro/CSVパス/push通知/tip質問) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
     flags.enableFreeeSync = false;
     flags.enableBilling = false;
     flags.enablePro = false;
     flags.enableCsvPass = false;
     flags.enablePushNotify = false;
+    flags.enableTipMessage = false;
     setConnected();
     setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
     renderWithIntl(<WalletBadge />);
@@ -301,6 +308,22 @@ describe('WalletBadge: SIWE サインイン', () => {
     flags.enablePro = false;
     flags.enableCsvPass = false;
     flags.enablePushNotify = true;
+    setConnected();
+    setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: 'ログイン (署名)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('チップ質問 inbox のみ ON → ログイン UI を出す (閲覧にサインインが要る)', () => {
+    flags.enableFreeeSync = false;
+    flags.enableBilling = false;
+    flags.enablePro = false;
+    flags.enableCsvPass = false;
+    flags.enablePushNotify = false;
+    flags.enableTipMessage = true;
     setConnected();
     setSiwe({ isSignedIn: false });
     renderWithIntl(<WalletBadge />);

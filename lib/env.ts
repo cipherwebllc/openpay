@@ -429,6 +429,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_JPYC_EIP3009',
     process.env.NEXT_PUBLIC_ENABLE_JPYC_EIP3009,
   ),
+  // JPYC gasless relay の成功 authorization に非公開メッセージを付帯し、受取ウォレット本人が
+  // SIWE で読む機能。**既定 OFF で完全 inert** = 送信欄なし・relay は tipMessage を無視・
+  // /api/tip-messages は 404。'1' / 'true' で ON。
+  enableTipMessage: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_TIP_MESSAGE',
+    process.env.NEXT_PUBLIC_ENABLE_TIP_MESSAGE,
+  ),
   // JPYC を Avalanche (本番) / Avalanche Fuji (testnet) でも提供するかのフラグ。**既定 OFF**。
   // OFF の間は JPYC_CHAINS=['polygon','kaia'] のままで挙動完全不変。ON にすると JPYC_CHAINS に
   // 'avalanche' が加わり、NETWORK_ENV=testnet では Fuji・mainnet では Avalanche が JPYC チェーンに
