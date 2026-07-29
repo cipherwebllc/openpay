@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // AddressInput の useResolveAddress (react-query で外 RPC) はテストでは
 // 通信を発生させないため hook 単位でモック。0x 直接入力は AddressInput 内で
@@ -17,6 +18,32 @@ vi.mock('@/hooks/useResolveAddress', () => ({
 // 既定は未接続 = 自動補完もチップも出ない (既存テストの挙動を維持)。
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
+}));
+
+const tipMessageFlags = vi.hoisted(() => ({
+  enableTipMessage: false,
+}));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get enableTipMessage() {
+        return tipMessageFlags.enableTipMessage;
+      },
+    },
+  };
+});
+
+const siwe = vi.hoisted(() => ({
+  isSignedIn: false,
+  isSigningIn: false,
+  signInError: null as Error | null,
+  signIn: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/hooks/useSiweSession', () => ({
+  useSiweSession: () => siwe,
 }));
 
 const tipFormPreviewSpy = vi.hoisted(() => vi.fn());
@@ -80,11 +107,40 @@ const KAIA_ID = chainForSlug('kaia').id;
 beforeEach(() => {
   window.localStorage.clear();
   tipFormPreviewSpy.mockClear();
+  tipMessageFlags.enableTipMessage = false;
+  siwe.isSignedIn = false;
+  siwe.isSigningIn = false;
+  siwe.signInError = null;
+  siwe.signIn.mockReset().mockResolvedValue(undefined);
   vi.mocked(useAccount).mockReturnValue({
     address: undefined,
     isConnected: false,
   } as ReturnType<typeof useAccount>);
 });
+
+function renderWithQueryClient() {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const rendered = render(
+    <QueryClientProvider client={client}>
+      <TipEmbedGenerator />
+    </QueryClientProvider>,
+  );
+  return { ...rendered, client };
+}
+
+function enableTipMessageInbox(signedIn: boolean) {
+  tipMessageFlags.enableTipMessage = true;
+  siwe.isSignedIn = signedIn;
+  vi.mocked(useAccount).mockReturnValue({
+    address: VALID,
+    isConnected: true,
+  } as unknown as ReturnType<typeof useAccount>);
+}
 
 // URL は share タブ (default) の URL 表示に出る。iframe snippet は embed タブ。
 function expectInUrl(pattern: RegExp) {
@@ -136,6 +192,162 @@ describe('TipEmbedGenerator — 初期表示', () => {
     expect(screen.getByText('受取先')).toBeInTheDocument();
     expect(screen.getByText('表示をカスタマイズ')).toBeInTheDocument();
     expect(screen.getByText('公開する')).toBeInTheDocument();
+  });
+});
+
+describe('TipEmbedGenerator — 受け取った質問 inbox', () => {
+  it('flag OFF は子を mount せず、QueryClient 無しでも API を呼ばない', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    siwe.isSignedIn = true;
+
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+
+    expect(screen.queryByTestId('tip-message-inbox')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('未サインイン + 接続済みはパネル内ボタンから共通 SIWE statement でサインイン', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const user = userEvent.setup();
+    enableTipMessageInbox(false);
+
+    renderWithQueryClient();
+    const inbox = await screen.findByTestId('tip-message-inbox');
+    await user.click(within(inbox).getByRole('button', { name: /サインイン/ }));
+
+    expect(siwe.signIn).toHaveBeenCalledWith(
+      'OpenPay にこのウォレットでログインします。',
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('GET no-store + address scoped query で金額・時刻・from・改行本文を text node 表示', async () => {
+    enableTipMessageInbox(true);
+    const privateMessage = '1 行目\n<script>alert("x")</script>';
+    const item = {
+      from: '0x9999999999999999999999999999999999999999',
+      amountWei: (300n * 10n ** 18n).toString(),
+      chainId: POLYGON_ID,
+      txHash: `0x${'a'.repeat(64)}`,
+      message: privateMessage,
+      ts: Date.UTC(2026, 6, 28, 3, 4, 0),
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ items: [item] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const { container, client } = renderWithQueryClient();
+    const inbox = await screen.findByTestId('tip-message-inbox');
+    await waitFor(() =>
+      expect(
+        Array.from(inbox.querySelectorAll('p')).some(
+          (node) => node.textContent === privateMessage,
+        ),
+      ).toBe(true),
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/tip-messages', {
+      cache: 'no-store',
+    });
+    expect(within(inbox).getByText(/300 JPYC/)).toBeInTheDocument();
+    expect(within(inbox).getByText(/0x9999…9999/)).toBeInTheDocument();
+    expect(inbox.querySelector('time')).not.toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(client.getQueryData(['tip-messages', VALID])).toEqual([item]);
+    expect(
+      client.getQueryData([
+        'tip-messages',
+        '0x1111111111111111111111111111111111111111',
+      ]),
+    ).toBeUndefined();
+    fetchSpy.mockRestore();
+  });
+
+  it('GET 失敗を空一覧に偽装せず、再試行で同じ endpoint を読む', async () => {
+    enableTipMessageInbox(true);
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    const user = userEvent.setup();
+
+    renderWithQueryClient();
+    const inbox = await screen.findByTestId('tip-message-inbox');
+    await user.click(
+      await within(inbox).findByRole('button', { name: /再読み込み/ }),
+    );
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+      '/api/tip-messages',
+      '/api/tip-messages',
+    ]);
+    fetchSpy.mockRestore();
+  });
+
+  it('「すべて削除」は DELETE no-store 後に同じ address query key を invalidate', async () => {
+    enableTipMessageInbox(true);
+    const item = {
+      from: '0x9999999999999999999999999999999999999999',
+      amountWei: (5n * 10n ** 18n).toString(),
+      chainId: POLYGON_ID,
+      txHash: `0x${'b'.repeat(64)}`,
+      message: '削除対象',
+      ts: Date.UTC(2026, 6, 28, 3, 4, 0),
+    };
+    let deleted = false;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (_url, init) => {
+        if (init?.method === 'DELETE') {
+          deleted = true;
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({ items: deleted ? [] : [item] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      });
+    const user = userEvent.setup();
+    const { client } = renderWithQueryClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const inbox = await screen.findByTestId('tip-message-inbox');
+
+    await user.click(
+      await within(inbox).findByRole('button', { name: /すべて削除/ }),
+    );
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['tip-messages', VALID],
+      }),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith('/api/tip-messages', {
+      method: 'DELETE',
+      cache: 'no-store',
+    });
+    await waitFor(() =>
+      expect(within(inbox).queryByText('削除対象')).toBeNull(),
+    );
+    fetchSpy.mockRestore();
   });
 });
 

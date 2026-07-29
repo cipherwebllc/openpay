@@ -56,7 +56,10 @@ import { logger } from '@/lib/logger';
 import { waitForStoredRelayReceipt } from '@/lib/relay/relayStoredReceipt';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
+import {
+  useJpycEip3009Payment,
+  type JpycEip3009Params,
+} from '@/hooks/useJpycEip3009Payment';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { env } from '@/lib/env';
 import {
@@ -141,10 +144,15 @@ function mount(opts?: { signImpl?: () => Promise<Hex> }) {
   waitForStoredRelayReceiptMock.mockResolvedValue({ status: 'success' });
 }
 
+function setTipMessageFlag(enabled: boolean): void {
+  (env as { enableTipMessage: boolean }).enableTipMessage = enabled;
+}
+
 beforeEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
   window.sessionStorage.clear();
+  setTipMessageFlag(false);
   // 成功 relay レスポンス (txHash 確定) を既定にする。
   fetchSpy = vi.fn().mockResolvedValue(
     new Response(
@@ -252,8 +260,90 @@ describe('useJpycEip3009Payment — 署名計測 (sign_requested / completed / r
   });
 });
 
+describe('useJpycEip3009Payment — tipMessage payload isolation', () => {
+  beforeEach(() => {
+    setTipMessageFlag(true);
+  });
+
+  it('free payload は mutation 開始時の非空 tipMessage を固定し、後続編集や logger へ波及させない', async () => {
+    let resolveSignature: ((signature: Hex) => void) | undefined;
+    mount({
+      signImpl: () =>
+        new Promise<Hex>((resolve) => {
+          resolveSignature = resolve;
+        }),
+    });
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    const privateMessage = 'private-tip-message-before-sign';
+    const variables: JpycEip3009Params = {
+      merchant: MERCHANT,
+      value: 300n * 10n ** 18n,
+      tipMessage: privateMessage,
+    };
+
+    result.current.mutate(variables);
+    await waitFor(() => expect(signTypedData).toHaveBeenCalledOnce());
+    variables.tipMessage = 'edited-while-wallet-open';
+    await act(async () => {
+      resolveSignature?.(`0x${'a'.repeat(130)}` as Hex);
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(body.tipMessage).toBe(privateMessage);
+    expect(JSON.stringify({
+      info: vi.mocked(logger.info).mock.calls,
+      warn: vi.mocked(logger.warn).mock.calls,
+      error: vi.mocked(logger.error).mock.calls,
+    })).not.toContain(privateMessage);
+  });
+
+  it('空文字の tipMessage は free payload へ追加しない', async () => {
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      merchant: MERCHANT,
+      value: 300n * 10n ** 18n,
+      tipMessage: '',
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('tipMessage');
+  });
+
+  it('flag OFF では tipMessage を relay payload に追加しない', async () => {
+    setTipMessageFlag(false);
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({
+      merchant: MERCHANT,
+      value: 300n * 10n ** 18n,
+      tipMessage: 'must-stay-inert',
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('tipMessage');
+  });
+});
+
 describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
-  async function submit() {
+  async function submit(overrides: Partial<JpycEip3009Params> = {}) {
     mount();
     const rendered = renderHook(() => useJpycEip3009Payment(jpycDep), {
       wrapper: makeWrapper(),
@@ -265,6 +355,7 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     rendered.result.current.mutate({
       merchant: MERCHANT,
       value: 300n * 10n ** 18n,
+      ...overrides,
     });
     return rendered.result;
   }
@@ -436,6 +527,8 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
   });
 
   it('429 ip_rate_limited → 専用エラー + 同一 payload 再 POST（再署名なし）', async () => {
+    setTipMessageFlag(true);
+    const privateMessage = 'private-tip-message-for-exact-retry';
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), {
         status: 429,
@@ -445,7 +538,7 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
         },
       }),
     );
-    const result = await submit();
+    const result = await submit({ tipMessage: privateMessage });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(isRelayIpRateLimitedError(result.current.error)).toBe(true);
@@ -460,6 +553,7 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
       window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
     ).toBeNull();
     const firstBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
+    expect(JSON.parse(firstBody as string).tipMessage).toBe(privateMessage);
 
     await act(async () => {
       result.current.retryRelay();
@@ -469,6 +563,11 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect((fetchSpy.mock.calls[1][1] as RequestInit).body).toEqual(firstBody);
+    expect(JSON.stringify({
+      info: vi.mocked(logger.info).mock.calls,
+      warn: vi.mocked(logger.warn).mock.calls,
+      error: vi.mocked(logger.error).mock.calls,
+    })).not.toContain(privateMessage);
   });
 
   it('正常 202 pending → 現行どおり pending result', async () => {
@@ -541,7 +640,9 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
 
 describe('useJpycEip3009Payment — reload intent 復元', () => {
   it('202 pending 中は公開 metadata だけを保存し EIP-3009 signature を永続化しない', async () => {
+    setTipMessageFlag(true);
     const txHash = `0x${'8'.repeat(64)}` as Hex;
+    const privateMessage = 'private-tip-message-not-for-session-storage';
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: false, pending: true, txHash }), {
         status: 202,
@@ -556,6 +657,7 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     result.current.mutate({
       merchant: MERCHANT,
       value: 300n * 10n ** 18n,
+      tipMessage: privateMessage,
     });
     await waitFor(() => expect(result.current.data?.pending).toBe(true));
 
@@ -565,6 +667,8 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     const raw = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
     expect(raw).not.toBeNull();
     expect(raw).not.toContain(postBody.signature as string);
+    expect(postBody.tipMessage).toBe(privateMessage);
+    expect(raw).not.toContain(privateMessage);
     expect(postBody.contextKey).toBeUndefined();
     expect(JSON.parse(raw!)).toEqual({
       chainId: jpycDep.chainId,
@@ -974,12 +1078,19 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
   });
 
   it('gasMode=customer (チップ): feeValue=フロア (1% 非適用)・merchantValue=value・payload に gasMode=customer', async () => {
+    setTipMessageFlag(true);
     mount();
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
       wrapper: makeWrapper(),
     });
     const value = 1_000n * 10n ** 18n; // 1000 JPYC: merchant なら 1% = 10 JPYC だが customer はフロア
-    result.current.mutate({ merchant: MERCHANT, value, gasMode: 'customer' });
+    const privateMessage = 'private-tip-message-recover';
+    result.current.mutate({
+      merchant: MERCHANT,
+      value,
+      gasMode: 'customer',
+      tipMessage: privateMessage,
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     // 確定モデル: client は payload の gasMode + 署名 chainId をそのまま recoverFeeValue へ渡す。
@@ -990,6 +1101,7 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     );
     const body = lastPostBody();
     expect(body.gasMode).toBe('customer');
+    expect(body.tipMessage).toBe(privateMessage);
     // customer: 店舗は満額受領 (merchantValue == value)。
     expect(body.merchantValue).toBe(value.toString());
     // チップは 1% を乗せずフロア (= 2 JPYC) のまま。merchant なら 10 JPYC になる額で対比。

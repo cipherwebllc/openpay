@@ -93,6 +93,7 @@ import { RecoverFeeNotice } from './RecoverFeeNotice';
 import { tipFormTheme } from '@/lib/tipFormTheme';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
+const TIP_MESSAGE_MIN_WEI = 10n ** 18n;
 
 export function TipForm({
   params,
@@ -184,6 +185,7 @@ export function TipForm({
     hasJpycForwarder: jpycForwarderFor(deployment.chainId) !== null,
   });
   const useRelay = isRelayRoute(route);
+  const showTipMessageComposer = env.enableTipMessage && isRelayRoute(route);
   const relay = useJpycEip3009Payment(deployment);
   // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収・tip は customer 上乗せ固定)。
   // 未設定は free (OpenPay 負担)。relayGasEquiv は amountWei 確定後に算出する (CDX-3: 実スケジュール
@@ -222,6 +224,8 @@ export function TipForm({
     selectCustom,
     changeCustomAmount,
   } = useTipAmount({ presets: presetAmounts, decimals: deployment.decimals });
+  const [privateTipMessage, setPrivateTipMessage] = useState('');
+  const canAttachPrivateTipMessage = amountWei >= TIP_MESSAGE_MIN_WEI;
   // PayPay 風 大型成功 overlay (dismiss するまで全画面)
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [crossChainLocked, setCrossChainLocked] = useState(false);
@@ -597,6 +601,11 @@ export function TipForm({
         merchant: params.to,
         value: amountWei,
         gasMode: 'customer',
+        ...(showTipMessageComposer &&
+          canAttachPrivateTipMessage &&
+          privateTipMessage.trim().length > 0
+          ? { tipMessage: privateTipMessage }
+          : {}),
       });
       return;
     }
@@ -815,6 +824,33 @@ export function TipForm({
           </label>
         </div>
       </section>
+
+      {showTipMessageComposer && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {t('privateTipMessageLabel')}
+            </span>
+            <textarea
+              value={privateTipMessage}
+              onChange={(event) => setPrivateTipMessage(event.target.value)}
+              placeholder={t('privateTipMessagePlaceholder')}
+              maxLength={300}
+              rows={3}
+              disabled={flowPending || !canAttachPrivateTipMessage}
+              className="mt-2 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+            />
+          </label>
+          {!canAttachPrivateTipMessage && (
+            <p className="mt-1 text-xs text-amber-700">
+              {t('privateTipMessageMinimum')}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-slate-500">
+            {t('privateTipMessagePrivacy')}
+          </p>
+        </section>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">

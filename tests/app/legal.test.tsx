@@ -618,7 +618,8 @@ describe('Legal pages', () => {
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-07-14');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-13');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-07-14');
+      // 2026-07-29: 非公開チップメッセージ追記 (取得/目的/保管) の実質的改定で更新
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-07-29');
     });
   });
 

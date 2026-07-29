@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSiweSession } from '@/hooks/useSiweSession';
@@ -52,6 +52,9 @@ describe('useSiweSession', () => {
 
   beforeEach(() => {
     fetchSpy.mockReset();
+    wallet.signMessageAsync
+      .mockReset()
+      .mockResolvedValue(`0x${'a'.repeat(130)}`);
     vi.stubGlobal('fetch', fetchSpy);
   });
 
@@ -79,5 +82,56 @@ describe('useSiweSession', () => {
       new Error('siwe_me_http_503'),
     );
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('サインイン成功時に接続 address 別 tip-messages cache を invalidate する', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(true, { ok: true, address: null }, 200))
+      .mockResolvedValueOnce(jsonResponse(true, { nonce: '12345678' }, 200))
+      .mockResolvedValueOnce(jsonResponse(true, { ok: true }, 200))
+      .mockResolvedValue(
+        jsonResponse(true, { ok: true, address: wallet.address }, 200),
+      );
+    const client = makeClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useSiweSession(), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() =>
+      expect(client.getQueryState(['siwe', 'me'])?.status).toBe('success'),
+    );
+
+    await act(async () => {
+      await result.current.signIn('OpenPay test sign-in');
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['tip-messages'],
+    });
+  });
+
+  it('サインアウト成功時にも tip-messages cache を invalidate する', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(true, { ok: true, address: wallet.address }, 200),
+      )
+      .mockResolvedValueOnce(jsonResponse(true, { ok: true }, 200))
+      .mockResolvedValue(
+        jsonResponse(true, { ok: true, address: null }, 200),
+      );
+    const client = makeClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useSiweSession(), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isSignedIn).toBe(true));
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['tip-messages'],
+    });
   });
 });

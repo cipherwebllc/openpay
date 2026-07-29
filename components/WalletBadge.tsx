@@ -29,8 +29,8 @@ export function WalletBadge() {
   const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut } =
     useSiweSession();
   // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料 / Pro 加入 / CSV パス購入 /
-  // 着金プッシュ通知) が有効なときだけログイン UI を出す。すべて OFF では「繋ぐ/切る」だけ表示し、
-  // 無意味なログイン導線を出さない。⚠️ SIWE を要する flag をここに足し忘れるとヘッダーから
+  // 着金プッシュ通知 / チップ質問 inbox) が有効なときだけログイン UI を出す。すべて OFF では
+  // 「繋ぐ/切る」だけ表示し、無意味なログイン導線を出さない。⚠️ SIWE を要する flag をここに足し忘れるとヘッダーから
   // サインインできず該当機能が不到達になる (CsvPassPaywall・PushNotifyPanel で実際に起きた教訓。
   // PushNotifyPanel は自前の sign-in ボタンも持つが、ヘッダ導線も一致させておく)。
   const siweEnabled =
@@ -39,6 +39,7 @@ export function WalletBadge() {
     env.enablePro ||
     env.enableCsvPass ||
     env.enablePushNotify ||
+    env.enableTipMessage ||
     env.enableHandles; // P2-M/掟7: /api/handle は SIWE 必須ゆえヘッダのサインイン導線に含める
 
   // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。

@@ -21,13 +21,16 @@ vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteUsdc', () => ({ useGasQuoteUsdc: vi.fn() }));
 vi.mock('@/hooks/useGasQuoteJpyc', () => ({ useGasQuoteJpyc: vi.fn() }));
+const loggerDebug = vi.hoisted(() => vi.fn());
+const loggerInfo = vi.hoisted(() => vi.fn());
 const loggerWarn = vi.hoisted(() => vi.fn());
+const loggerError = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/logger', () => ({
   logger: {
-    debug: vi.fn(),
-    info: vi.fn(),
+    debug: loggerDebug,
+    info: loggerInfo,
     warn: loggerWarn,
-    error: vi.fn(),
+    error: loggerError,
   },
 }));
 // Circle quote は default flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。
@@ -97,6 +100,7 @@ import { resolvePaymasterMode } from '@/lib/pimlico';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { env } from '@/lib/env';
 import { TipForm } from '@/components/TipForm';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
@@ -187,6 +191,7 @@ function setRelay(
       merchant: Address;
       value: bigint;
       gasMode?: 'customer' | 'merchant';
+      tipMessage?: string;
     };
     restoredIntent?: NonNullable<
       ReturnType<typeof useJpycEip3009Payment>['restoredIntent']
@@ -266,8 +271,13 @@ function setCircleQuote(
   } as Partial<ReturnType<typeof useGasQuoteCircle>>);
 }
 
+function setTipMessageFlag(enabled: boolean): void {
+  (env as { enableTipMessage: boolean }).enableTipMessage = enabled;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  setTipMessageFlag(false);
   setSwitchChain();
   setBalance(undefined);
   setSmartAccount(false);
@@ -1443,6 +1453,135 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
       gasMode: 'customer',
     });
     expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('flag ON + relay のときだけ composer を表示し、preview でも表示する', () => {
+    setTipMessageFlag(true);
+    const rendered = render(<TipForm params={JPYC_PARAMS} preview />);
+
+    const composer = screen.getByRole('textbox', {
+      name: '質問やメッセージ (任意)',
+    });
+    expect(composer).toHaveAttribute('maxlength', '300');
+    expect(composer).toHaveAttribute(
+      'placeholder',
+      '質問やメッセージ (任意・受け取った本人だけが読めます)',
+    );
+    expect(
+      screen.getByText(
+        '公開されません。受取ウォレットでサインインした画面にのみ表示されます。',
+      ),
+    ).toBeInTheDocument();
+
+    rendered.unmount();
+    setTipMessageFlag(false);
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(
+      screen.queryByRole('textbox', {
+        name: '質問やメッセージ (任意)',
+      }),
+    ).toBeNull();
+  });
+
+  it('flag ON でも非 relay JPYC / USDC 経路には composer を表示しない', () => {
+    setTipMessageFlag(true);
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+    const rendered = render(<TipForm params={JPYC_PARAMS} />);
+    expect(
+      screen.queryByRole('textbox', {
+        name: '質問やメッセージ (任意)',
+      }),
+    ).toBeNull();
+
+    rendered.rerender(<TipForm params={USDC_PARAMS} />);
+    expect(
+      screen.queryByRole('textbox', {
+        name: '質問やメッセージ (任意)',
+      }),
+    ).toBeNull();
+  });
+
+  it('1 JPYC 未満では composer を無効化して最低額を案内する', () => {
+    setTipMessageFlag(true);
+    render(
+      <TipForm
+        params={{ ...JPYC_PARAMS, presets: ['0.5'] }}
+      />,
+    );
+
+    expect(
+      screen.getByRole('textbox', {
+        name: '質問やメッセージ (任意)',
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText('1 JPYC 以上のチップで質問を添えられます'),
+    ).toBeInTheDocument();
+  });
+
+  it('privateTipMessage は snapshot として relay だけへ渡し、webhook/logger/控え/URL へ混入しない', async () => {
+    setTipMessageFlag(true);
+    window.localStorage.clear();
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok', { status: 200 }));
+    const privateMessage = 'private-only-recipient-質問';
+    const publicCreatorMessage = '公開クリエイターメッセージ';
+    const params = {
+      ...JPYC_PARAMS,
+      message: publicCreatorMessage,
+      webhook: 'https://creator.example/hook',
+    };
+    const user = userEvent.setup();
+    const rendered = render(<TipForm params={params} />);
+
+    await user.type(
+      screen.getByRole('textbox', {
+        name: '質問やメッセージ (任意)',
+      }),
+      privateMessage,
+    );
+    await user.click(
+      screen.getByRole('button', { name: /100 JPYC を送る/ }),
+    );
+    expect(relayMutate).toHaveBeenCalledWith({
+      merchant: CREATOR,
+      value: 100n * 10n ** 18n,
+      gasMode: 'customer',
+      tipMessage: privateMessage,
+    });
+
+    setRelay('success', {
+      variables: {
+        merchant: CREATOR,
+        value: 100n * 10n ** 18n,
+        gasMode: 'customer',
+        tipMessage: privateMessage,
+      },
+    });
+    rendered.rerender(<TipForm params={params} />);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+
+    const webhookBody = (fetchSpy.mock.calls[0][1] as RequestInit)
+      .body as string;
+    expect(JSON.parse(webhookBody).message).toBe(publicCreatorMessage);
+    expect(webhookBody).not.toContain(privateMessage);
+    const localStorageValues = Array.from(
+      { length: window.localStorage.length },
+      (_, index) =>
+        window.localStorage.getItem(window.localStorage.key(index) ?? '') ?? '',
+    ).join('\n');
+    expect(localStorageValues).not.toContain(privateMessage);
+    expect(window.location.href).not.toContain(privateMessage);
+    expect(
+      JSON.stringify({
+        debug: loggerDebug.mock.calls,
+        info: loggerInfo.mock.calls,
+        warn: loggerWarn.mock.calls,
+        error: loggerError.mock.calls,
+      }),
+    ).not.toContain(privateMessage);
+    fetchSpy.mockRestore();
   });
 
   it('relay recover (forwarder 設定) → gas 相当が customer 上乗せ (value は tip 額のまま)', async () => {

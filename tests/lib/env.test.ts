@@ -57,6 +57,18 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.enableWeb3Directory).toBe(true);
   });
 
+  it('非公開 tip message flag は既定 OFF で literal の 1/true だけを受理する', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_ENABLE_TIP_MESSAGE;
+    let mod = await import('@/lib/env');
+    expect(mod.env.enableTipMessage).toBe(false);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_TIP_MESSAGE = '1';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableTipMessage).toBe(true);
+  });
+
   it('注文メモは自身の flag と ORDER_RELAY の両方が ON のときだけ有効', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_ENABLE_ORDER_MEMO = '1';

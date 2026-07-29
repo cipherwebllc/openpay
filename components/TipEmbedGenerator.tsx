@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useTranslations } from 'next-intl';
-import { type Address } from 'viem';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatUnits, type Address } from 'viem';
+import { useAccount } from 'wagmi';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronDown,
   Code2,
@@ -25,6 +27,8 @@ import {
 } from '@/hooks/useReceiverAutofill';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useSiweSession } from '@/hooks/useSiweSession';
+import { env } from '@/lib/env';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   deploymentForSlug,
@@ -81,8 +85,168 @@ const RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter((slug) =>
 type PublishMode = 'share' | 'embed';
 type EmbedFormat = 'iframe' | 'button';
 
+type TipMessageItem = {
+  from: string;
+  amountWei: string;
+  chainId: number;
+  txHash: string;
+  message: string;
+  ts: number;
+};
+
+async function fetchTipMessages(): Promise<TipMessageItem[]> {
+  const res = await fetch('/api/tip-messages', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`tip_messages_http_${res.status}`);
+  const json = (await res.json()) as { items?: unknown };
+  if (!Array.isArray(json.items)) throw new Error('tip_messages_invalid_response');
+  return json.items as TipMessageItem[];
+}
+
+async function deleteTipMessages(): Promise<void> {
+  const res = await fetch('/api/tip-messages', {
+    method: 'DELETE',
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`tip_messages_delete_http_${res.status}`);
+}
+
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function TipMessageInbox() {
+  const t = useTranslations('TipEmbedGenerator');
+  const tNav = useTranslations('Nav');
+  const locale = useLocale();
+  const { address, isConnected } = useAccount();
+  const { isSignedIn, signIn, isSigningIn, signInError } = useSiweSession();
+  const queryClient = useQueryClient();
+  const queryKey = ['tip-messages', address] as const;
+  const inbox = useQuery({
+    queryKey,
+    enabled: isSignedIn && address !== undefined,
+    queryFn: fetchTipMessages,
+  });
+  const clearInbox = useMutation({
+    mutationFn: deleteTipMessages,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+  });
+  const dateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }),
+    [locale],
+  );
+  const items = inbox.data ?? [];
+
+  return (
+    <section
+      data-testid="tip-message-inbox"
+      className="order-7 rounded-2xl border border-slate-200 bg-white p-5 shadow-card lg:col-span-2"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">
+            {t('tipInboxTitle')}
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {t('tipInboxDescription')}
+          </p>
+        </div>
+        {isSignedIn && items.length > 0 ? (
+          <button
+            type="button"
+            disabled={clearInbox.isPending}
+            onClick={() => clearInbox.mutate()}
+            className="shrink-0 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {clearInbox.isPending
+              ? t('tipInboxDeleting')
+              : t('tipInboxDeleteAll')}
+          </button>
+        ) : null}
+      </div>
+
+      {!isSignedIn ? (
+        <div className="mt-3">
+          <p className="text-sm text-slate-600">
+            {t('tipInboxSignInRequired')}
+          </p>
+          {isConnected ? (
+            <button
+              type="button"
+              disabled={isSigningIn}
+              onClick={() =>
+                void signIn(tNav('siweStatement')).catch(() => undefined)
+              }
+              className="mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              {t('tipInboxSignInCta')}
+            </button>
+          ) : null}
+          {signInError ? (
+            <p className="mt-2 text-xs text-red-600">
+              {t('tipInboxSignInError')}
+            </p>
+          ) : null}
+        </div>
+      ) : inbox.isLoading ? (
+        <p className="mt-4 text-center text-sm text-slate-500">
+          {t('tipInboxLoading')}
+        </p>
+      ) : inbox.isError ? (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span>{t('tipInboxError')}</span>{' '}
+          <button
+            type="button"
+            onClick={() => void inbox.refetch()}
+            className="font-semibold underline hover:text-amber-950"
+          >
+            {t('tipInboxRetry')}
+          </button>
+        </div>
+      ) : items.length === 0 ? (
+        <p className="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+          {t('tipInboxEmpty')}
+        </p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {items.map((item) => (
+            <li
+              key={`${item.chainId}:${item.txHash}`}
+              className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span className="font-semibold text-slate-700">
+                  {t('tipInboxAmount', {
+                    amount: `${formatUnits(BigInt(item.amountWei), 18)} JPYC`,
+                  })}
+                </span>
+                <time dateTime={new Date(item.ts).toISOString()}>
+                  {dateFormatter.format(new Date(item.ts))}
+                </time>
+              </div>
+              <p className="mt-1 font-mono text-xs text-slate-500">
+                {t('tipInboxFrom', { address: shortAddress(item.from) })}
+              </p>
+              {/* 非公開本文は HTML として解釈せず、React text node のみで描画する。 */}
+              <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
+                {item.message}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {clearInbox.isError ? (
+        <p className="mt-3 text-xs text-red-600">
+          {t('tipInboxDeleteError')}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 export function TipEmbedGenerator() {
@@ -849,6 +1013,9 @@ export function TipEmbedGenerator() {
           )}
         </div>
       </aside>
+
+      {/* flag OFF では子を mount せず、SIWE / React Query / fetch を完全に不活性化する。 */}
+      {env.enableTipMessage ? <TipMessageInbox /> : null}
     </div>
   );
 }

@@ -41,6 +41,8 @@ import type { RelayIntentMetadata } from '@/lib/paymentIntentStorage';
 export type JpycEip3009Params = {
   merchant: Address;
   value: bigint; // 請求額 (bill amount)
+  // relay POST にだけ載せる受取人向け非公開メッセージ。署名・復旧 intent・ログには含めない。
+  tipMessage?: string;
   // recover モードで gas 相当額を顧客上乗せ(customer) / 店主吸収(merchant) のどちらにするか。
   gasMode?: GasMode;
   // モバイル注文システム利用料の種別 (present のとき feeValue は recoverFeeValue ではなく
@@ -381,7 +383,14 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       value,
       gasMode = 'customer',
       feeKind,
+      tipMessage,
     }) => {
+      // 署名待ち中に UI 入力が変わっても wire 値を drift させないため、mutation 開始時の
+      // primitive を固定する。復旧 intent には入れず、同一 mount の retained payload だけが保持する。
+      const tipMessageSnapshot =
+        env.enableTipMessage && tipMessage?.trim()
+          ? tipMessage
+          : undefined;
       // 専用 retry だけでなく、呼出側が誤って通常 mutate を再度呼んでも、未解決 payload が
       // ある間は必ず同一 payload を再 POST して再署名を構造的に封鎖する。
       const retained = retainedPayloadRef.current;
@@ -530,6 +539,9 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           validBefore: validBefore.toString(),
           intentSalt: params.intentSalt,
           signature,
+          ...(tipMessageSnapshot
+            ? { tipMessage: tipMessageSnapshot }
+            : {}),
         };
         intent = {
           chainId,
@@ -579,6 +591,9 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           validBefore: validBefore.toString(),
           nonce: auth.nonce,
           signature,
+          ...(tipMessageSnapshot
+            ? { tipMessage: tipMessageSnapshot }
+            : {}),
         };
         intent = {
           chainId,
